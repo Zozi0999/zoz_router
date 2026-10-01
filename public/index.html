@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>ZOZ ROUTER // Neural AI Multi-Engine Gateway</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <!-- Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- Highlight.js for code syntax styling -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="theme-dark">
+  <div class="app-container">
+    <!-- SIDEBAR -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <div class="brand-logo-wrap">
+            <img src="favicon.svg" alt="Zoz Router" class="brand-logo">
+            <span class="pulse-ring"></span>
+          </div>
+          <div class="brand-text">
+            <h2>ZOZ ROUTER</h2>
+            <span class="version-tag">ORBITAL v1.0</span>
+          </div>
+        </div>
+        <button class="icon-btn close-sidebar-btn" id="closeSidebarBtn" title="Tutup Sidebar">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- New Chat Button -->
+      <div class="sidebar-actions">
+        <button class="btn btn-primary new-chat-btn" id="newChatBtn">
+          <i class="fa-solid fa-plus"></i> Sesi Obrolan Baru
+        </button>
+      </div>
+
+      <!-- Engine Status Quick Card -->
+      <div class="engine-status-panel">
+        <div class="status-item" id="ollamaStatusItem">
+          <div class="status-indicator" id="ollamaIndicator"></div>
+          <div class="status-info">
+            <span class="status-label">OLLAMA LOCAL</span>
+            <span class="status-val" id="ollamaStatusVal">Memeriksa...</span>
+          </div>
+          <button class="status-refresh-btn" id="refreshOllamaBtn" title="Refresh Ollama">
+            <i class="fa-solid fa-rotate"></i>
+          </button>
+        </div>
+
+        <div class="status-item" id="openRouterStatusItem">
+          <div class="status-indicator" id="openRouterIndicator"></div>
+          <div class="status-info">
+            <span class="status-label">OPENROUTER</span>
+            <span class="status-val" id="openRouterStatusVal">Key Tersimpan</span>
+          </div>
+          <button class="status-refresh-btn" id="openSettingsKeyBtn" title="Edit API Key">
+            <i class="fa-solid fa-key"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Search History -->
+      <div class="search-history-box">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input type="text" id="searchHistoryInput" placeholder="Cari riwayat percakapan...">
+      </div>
+
+      <!-- Chat History List -->
+      <div class="history-section">
+        <div class="history-label">RIWAYAT SESI</div>
+        <div class="chat-history-list" id="chatHistoryList">
+          <!-- Populated by JavaScript -->
+        </div>
+      </div>
+
+      <!-- Sidebar Mini BGM Player HUD -->
+      <div class="sidebar-bgm-widget" id="sidebarBgmWidget">
+        <div class="bgm-widget-header">
+          <div class="bgm-widget-title-box">
+            <div class="bgm-anim-bars" id="bgmAnimBars">
+              <span></span><span></span><span></span><span></span>
+            </div>
+            <div class="bgm-track-marquee" id="bgmTrackMarquee">
+              <span id="bgmTrackTitle">Cyber BGM: Siap</span>
+            </div>
+          </div>
+          <button class="icon-btn btn-xs" id="openMusicModalFromWidget" title="Buka Cyber Music Deck">
+            <i class="fa-solid fa-up-right-from-square"></i>
+          </button>
+        </div>
+        <div class="bgm-widget-controls">
+          <button class="bgm-ctrl-btn" id="bgmPrevBtn" title="Lagu Sebelumnya"><i class="fa-solid fa-backward-step"></i></button>
+          <button class="bgm-ctrl-btn bgm-play-btn" id="bgmPlayPauseBtn" title="Play / Pause BGM"><i class="fa-solid fa-play"></i></button>
+          <button class="bgm-ctrl-btn" id="bgmNextBtn" title="Lagu Berikutnya"><i class="fa-solid fa-forward-step"></i></button>
+          <div class="bgm-vol-slider-wrap" title="Volume BGM">
+            <i class="fa-solid fa-volume-low" style="font-size: 0.68rem; color: var(--text-dim);"></i>
+            <input type="range" id="bgmMiniVolume" min="0" max="1" step="0.05" value="0.5">
+          </div>
+        </div>
+      </div>
+
+      <!-- Sidebar Footer -->
+      <div class="sidebar-footer">
+        <button class="sidebar-footer-btn" id="modelHubBtn">
+          <i class="fa-solid fa-cubes"></i> Model Hub
+        </button>
+        <button class="sidebar-footer-btn" id="settingsBtn">
+          <i class="fa-solid fa-sliders"></i> Pengaturan
+        </button>
+        <button class="sidebar-footer-btn" id="clearAllHistoryBtn" title="Hapus Semua Riwayat">
+          <i class="fa-solid fa-trash-can"></i>
+        </button>
+      </div>
+    </aside>
+
+    <!-- MAIN CHAT & WORKSPACE -->
+    <main class="main-content">
+      <!-- TOP NAVIGATION BAR -->
+      <header class="top-nav">
+        <div class="top-nav-left">
+          <button class="icon-btn toggle-sidebar-btn" id="toggleSidebarBtn" title="Toggle Sidebar">
+            <i class="fa-solid fa-bars-staggered"></i>
+          </button>
+          
+          <!-- Mode Tabs -->
+          <div class="mode-tabs">
+            <button class="mode-tab active" data-mode="ollama" id="modeOllama">
+              <span class="tab-icon">🦙</span> Ollama Local
+            </button>
+            <button class="mode-tab" data-mode="openrouter" id="modeOpenRouter">
+              <span class="tab-icon">⚡</span> OpenRouter
+            </button>
+            <button class="mode-tab" data-mode="arena" id="modeArena" title="Bandingkan respons Ollama vs OpenRouter bersamaan!">
+              <span class="tab-icon">⚔️</span> Dual Arena
+            </button>
+            <button class="mode-tab" data-mode="auto" id="modeAuto" title="Auto routing pintar: Local first + Cloud fallback">
+              <span class="tab-icon">🔀</span> Auto Router
+            </button>
+          </div>
+        </div>
+
+        <div class="top-nav-right">
+          <!-- Model Selection Dropdown (For Single Mode) -->
+          <div class="model-picker-container" id="singleModelPickerWrap">
+            <div class="model-picker-chip" id="modelPickerChip">
+              <i class="fa-solid fa-microchip chip-icon"></i>
+              <span class="current-model-name" id="currentModelLabel">Memuat Model...</span>
+              <i class="fa-solid fa-chevron-down chip-arrow"></i>
+            </div>
+
+            <!-- Model Dropdown Popup -->
+            <div class="model-dropdown-menu" id="modelDropdownMenu">
+              <div class="dropdown-header">
+                <input type="text" id="modelSearchInput" placeholder="Cari / Masukkan nama model...">
+              </div>
+              <div class="dropdown-model-list" id="dropdownModelList">
+                <!-- Dynamically populated -->
+              </div>
+              <div class="dropdown-custom-add">
+                <input type="text" id="customModelInput" placeholder="Ketik model kustom (e.g. qwen2.5:7b, gpt-4o)...">
+                <button class="btn btn-sm btn-outline" id="useCustomModelBtn">Gunakan</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Fast Quick Controls -->
+          <button class="icon-btn top-action-btn" id="systemPromptModalBtn" title="Preset Karakter / System Prompt">
+            <i class="fa-solid fa-user-gear"></i>
+          </button>
+          <button class="icon-btn top-action-btn" id="exportChatBtn" title="Ekspor Obrolan (Markdown / JSON)">
+            <i class="fa-solid fa-file-export"></i>
+          </button>
+          <button class="icon-btn top-action-btn" id="soundToggleBtn" title="Suara Cyberpunk UI (On/Off)">
+            <i class="fa-solid fa-volume-high"></i>
+          </button>
+          <button class="icon-btn top-action-btn" id="musicPlayerModalBtn" title="Cyber BGM & Latar Belakang Musik">
+            <i class="fa-solid fa-music"></i>
+            <span class="music-active-pulse" id="musicHeaderPulse" style="display:none;"></span>
+          </button>
+        </div>
+      </header>
+
+      <!-- DUAL SPLIT TOP INFO BAR -->
+      <div class="arena-config-bar" id="arenaConfigBar" style="display: none; justify-content: center; background: rgba(0,0,0,0.4);">
+        <span style="font-family: var(--font-display); font-size: 0.85rem; font-weight: 700; color: var(--neon-cyan); display: flex; align-items: center; gap: 8px;">
+          <i class="fa-solid fa-columns"></i> DUAL SPLIT WORKSPACE • JALANKAN PROMPT BERSAMAAN ATAU INDEPENDEN
+        </span>
+      </div>
+
+      <!-- CHAT VIEW CONTAINER -->
+      <div class="chat-viewport" id="chatViewport">
+        
+        <!-- SINGLE MODE CHAT WRAPPER -->
+        <div class="chat-messages-container" id="singleChatContainer">
+          <!-- WELCOME HERO (Shown when chat is empty) -->
+          <div class="welcome-hero" id="welcomeHero">
+            <div class="hero-logo-box">
+              <img src="favicon.svg" alt="Zoz Router Logo" class="hero-logo">
+            </div>
+            <h1 class="hero-title">ZOZ ROUTER</h1>
+            <p class="hero-subtitle">High-Velocity Neural Multi-Engine Gateway & AI Orchestrator</p>
+            <p class="hero-desc">Jalankan model lokal Anda secara offline via <strong>Ollama</strong> atau integrasikan ratusan model cloud flagship dunia via <strong>OpenRouter</strong> dalam satu antarmuka futuristik.</p>
+
+            <div class="hero-quick-prompts">
+              <div class="quick-prompt-card" data-prompt="Jelaskan arsitektur Transformer dan cara kerja self-attention mechanism dengan analogi yang mudah dipahami.">
+                <i class="fa-solid fa-brain"></i>
+                <div class="card-text">
+                  <strong>Deep Dive AI Architecture</strong>
+                  <span>Jelaskan cara kerja self-attention mechanism</span>
+                </div>
+              </div>
+              <div class="quick-prompt-card" data-prompt="Buatkan skrip Node.js lengkap untuk proxy streaming SSE dengan caching memori dan retry logic.">
+                <i class="fa-solid fa-code"></i>
+                <div class="card-text">
+                  <strong>Fullstack Code Generation</strong>
+                  <span>Node.js streaming SSE proxy & retry logic</span>
+                </div>
+              </div>
+              <div class="quick-prompt-card" data-prompt="Lakukan audit keamanan pada pola autentikasi JWT dan berikan solusi pencegahan XSS/CSRF terbaik.">
+                <i class="fa-solid fa-shield-halved"></i>
+                <div class="card-text">
+                  <strong>Cyber Security & Audit</strong>
+                  <span>Pola mitigasi JWT, XSS, dan CSRF attack</span>
+                </div>
+              </div>
+              <div class="quick-prompt-card" data-prompt="Bandingkan kelebihan dan kekurangan menjalankan LLM lokal (Ollama) vs Cloud API (OpenRouter) dari segi biaya, privasi, dan latensi.">
+                <i class="fa-solid fa-scale-balanced"></i>
+                <div class="card-text">
+                  <strong>Ollama vs OpenRouter</strong>
+                  <span>Analisis komparasi privasi, biaya & latensi</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Active Message Feed List -->
+          <div class="messages-list" id="messagesList"></div>
+        </div>
+
+        <!-- DUAL SPLIT WORKSPACE WRAPPER (Shown only in Dual Split / Arena mode) -->
+        <div class="arena-messages-container" id="arenaChatContainer" style="display: none;">
+          <!-- LEFT COLUMN: OLLAMA LOCAL WORKSPACE -->
+          <div class="arena-column arena-col-left">
+            <div class="arena-col-header">
+              <div class="arena-header-left">
+                <span class="arena-col-badge tag-ollama"><i class="fa-solid fa-server"></i> Ollama Local</span>
+                <select id="arenaModelOllama" class="arena-select" title="Pilih Model Ollama"></select>
+              </div>
+              <div class="arena-header-right">
+                <span class="arena-col-stats" id="arenaStatsA">Ready</span>
+                <button class="icon-btn btn-sm" id="clearArenaChatABtn" title="Bersihkan Chat Ollama"><i class="fa-solid fa-trash-can"></i></button>
+              </div>
+            </div>
+            
+            <div class="arena-col-messages" id="arenaMessagesA">
+              <div class="arena-empty-placeholder">
+                <i class="fa-solid fa-robot"></i>
+                <p>Slot Ollama Local siap. Ketik prompt di bawah untuk menjalankan model offline.</p>
+              </div>
+            </div>
+
+            <!-- Dedicated Input Bar for Ollama -->
+            <div class="arena-col-input-bar">
+              <textarea id="arenaInputA" placeholder="Prompt untuk Ollama Local... (Enter untuk kirim)" rows="1"></textarea>
+              <div class="arena-input-actions">
+                <button class="composer-btn stop-btn" id="arenaStopBtnA" style="display: none;" title="Hentikan Ollama">
+                  <i class="fa-solid fa-circle-stop"></i>
+                </button>
+                <button class="btn btn-sm btn-primary" id="arenaSendBtnA" title="Kirim ke Ollama">
+                  <i class="fa-solid fa-paper-plane"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- RIGHT COLUMN: OPENROUTER CLOUD WORKSPACE -->
+          <div class="arena-column arena-col-right">
+            <div class="arena-col-header">
+              <div class="arena-header-left">
+                <span class="arena-col-badge tag-openrouter"><i class="fa-solid fa-cloud"></i> OpenRouter Cloud</span>
+                <select id="arenaModelOpenRouter" class="arena-select" title="Pilih Model OpenRouter"></select>
+              </div>
+              <div class="arena-header-right">
+                <span class="arena-col-stats" id="arenaStatsB">Ready</span>
+                <button class="icon-btn btn-sm" id="clearArenaChatBBtn" title="Bersihkan Chat OpenRouter"><i class="fa-solid fa-trash-can"></i></button>
+              </div>
+            </div>
+
+            <div class="arena-col-messages" id="arenaMessagesB">
+              <div class="arena-empty-placeholder">
+                <i class="fa-solid fa-bolt"></i>
+                <p>Slot OpenRouter Cloud siap. Ketik prompt di bawah untuk model flagship.</p>
+              </div>
+            </div>
+
+            <!-- Dedicated Input Bar for OpenRouter -->
+            <div class="arena-col-input-bar">
+              <textarea id="arenaInputB" placeholder="Prompt untuk OpenRouter Cloud... (Enter untuk kirim)" rows="1"></textarea>
+              <div class="arena-input-actions">
+                <button class="composer-btn stop-btn" id="arenaStopBtnB" style="display: none;" title="Hentikan OpenRouter">
+                  <i class="fa-solid fa-circle-stop"></i>
+                </button>
+                <button class="btn btn-sm btn-primary" id="arenaSendBtnB" title="Kirim ke OpenRouter">
+                  <i class="fa-solid fa-paper-plane"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- BOTTOM COMPOSER / INPUT SECTION (For Single / Auto Mode) -->
+      <footer class="composer-container" id="mainComposerContainer">
+        <!-- Live Attachment Preview Area -->
+        <div class="attachment-preview-bar" id="attachmentPreviewBar" style="display: none;">
+          <div class="preview-card" id="imagePreviewCard">
+            <img id="imagePreviewImg" src="" alt="Lampiran Gambar">
+            <button class="remove-attachment-btn" id="removeImageBtn" title="Hapus Gambar">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- System Prompt Active Banner (if configured) -->
+        <div class="active-preset-banner" id="activePresetBanner" style="display: none;">
+          <i class="fa-solid fa-sparkles"></i>
+          <span id="activePresetName">Persona: Default</span>
+          <button class="clear-preset-btn" id="clearPresetBtn"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <div class="composer-box">
+          <!-- Action Buttons Left -->
+          <div class="composer-tools-left">
+            <input type="file" id="imageFileInput" accept="image/*" style="display: none;">
+            <button class="composer-btn" id="attachImageBtn" title="Lampirkan Gambar (Vision Multimodal)">
+              <i class="fa-solid fa-image"></i>
+            </button>
+            <button class="composer-btn" id="voiceInputBtn" title="Voice to Text (Mic)">
+              <i class="fa-solid fa-microphone"></i>
+            </button>
+          </div>
+
+          <!-- Textarea Input -->
+          <div class="input-field-wrap">
+            <textarea 
+              id="promptInput" 
+              placeholder="Ketik pesan atau instruksi untuk Zoz Router... (Shift + Enter untuk baris baru)" 
+              rows="1"
+            ></textarea>
+          </div>
+
+          <!-- Action Buttons Right -->
+          <div class="composer-tools-right">
+            <button class="composer-btn stop-btn" id="stopGenerationBtn" style="display: none;" title="Hentikan Generasi">
+              <i class="fa-solid fa-circle-stop"></i>
+            </button>
+            <button class="send-btn" id="sendPromptBtn" title="Kirim Prompt (Enter)">
+              <i class="fa-solid fa-paper-plane"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="composer-footnote">
+          <span>ZOZ ROUTER AI GATEWAY</span> • 
+          <span id="footerModelInfo">Engine: Ollama</span> • 
+          <span id="footerLatencyInfo">Ready</span>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <!-- ==================== MODALS ==================== -->
+
+  <!-- 1. SETTINGS MODAL -->
+  <div class="modal-backdrop" id="settingsModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title"><i class="fa-solid fa-sliders"></i> Konfigurasi Zoz Router</div>
+        <button class="modal-close-btn" data-close="settingsModal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <!-- Tab Navigation -->
+        <div class="settings-tabs">
+          <button class="settings-tab-btn active" data-target="tabProviders">Providers & API</button>
+          <button class="settings-tab-btn" data-target="tabParameters">Parameter LLM</button>
+          <button class="settings-tab-btn" data-target="tabSystem">System Persona</button>
+        </div>
+
+        <!-- Tab 1: Providers -->
+        <div class="settings-tab-pane active" id="tabProviders">
+          <div class="form-group">
+            <label><i class="fa-solid fa-server"></i> Ollama Endpoint URL</label>
+            <div class="input-with-action">
+              <input type="text" id="settingOllamaEndpoint" placeholder="http://127.0.0.1:11434" value="http://127.0.0.1:11434">
+              <button class="btn btn-sm btn-outline" id="testOllamaBtn">Tes Koneksi</button>
+            </div>
+            <small class="form-hint">Port default Ollama lokal adalah 11434.</small>
+          </div>
+
+          <div class="form-group">
+            <label><i class="fa-solid fa-key"></i> OpenRouter API Key</label>
+            <div class="input-with-action">
+              <input type="password" id="settingOpenRouterKey" placeholder="sk-or-v1-...">
+              <button class="btn btn-sm btn-outline" id="toggleShowKeyBtn"><i class="fa-solid fa-eye"></i></button>
+              <button class="btn btn-sm btn-outline" id="testOpenRouterBtn">Validasi Key</button>
+            </div>
+            <small class="form-hint">API Key disimpan aman di browser lokal Anda (localStorage). Dapatkan di <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a>.</small>
+          </div>
+
+          <div class="form-group">
+            <label><i class="fa-solid fa-shield-virus"></i> Auto-Router Policy</label>
+            <select id="settingAutoPolicy" class="custom-select">
+              <option value="local_first">Local First (Prioritas Ollama, fallback OpenRouter bila offline)</option>
+              <option value="cloud_heavy">Smart Task (Prompt panjang &gt; 500 kata / Coding sulit ke OpenRouter)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Tab 2: Parameters -->
+        <div class="settings-tab-pane" id="tabParameters">
+          <div class="form-group">
+            <div class="range-header">
+              <label>Temperature (Kreativitas):</label>
+              <span class="range-val" id="valTemperature">0.7</span>
+            </div>
+            <input type="range" id="paramTemperature" min="0" max="2.0" step="0.05" value="0.7">
+            <small class="form-hint">Nilai rendah (0.1 - 0.3) untuk coding/akurasi; nilai tinggi (0.7 - 1.0) untuk kreatif.</small>
+          </div>
+
+          <div class="form-group">
+            <div class="range-header">
+              <label>Top P (Nucleus Sampling):</label>
+              <span class="range-val" id="valTopP">0.9</span>
+            </div>
+            <input type="range" id="paramTopP" min="0" max="1.0" step="0.05" value="0.9">
+          </div>
+
+          <div class="form-group">
+            <label>Max Tokens / Context Length</label>
+            <input type="number" id="paramMaxTokens" placeholder="4096" value="4096" min="256" max="32768">
+          </div>
+        </div>
+
+        <!-- Tab 3: System Persona -->
+        <div class="settings-tab-pane" id="tabSystem">
+          <div class="preset-pills">
+            <button class="preset-pill" data-preset="kaisar">👑 Kaisar Zozi Assistant</button>
+            <button class="preset-pill" data-preset="coder">💻 Senior Architect Coder</button>
+            <button class="preset-pill" data-preset="cyber">🛡️ Cyber Security & Hacker</button>
+            <button class="preset-pill" data-preset="concise">⚡ Ultra Ringkas & Direct</button>
+            <button class="preset-pill" data-preset="uncensored">🔓 Deep Reasoning Raw</button>
+          </div>
+          <div class="form-group">
+            <label>Custom System Prompt:</label>
+            <textarea id="settingSystemPrompt" rows="6" placeholder="Ketik instruksi persona AI di sini..."></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close="settingsModal">Tutup</button>
+        <button class="btn btn-primary" id="saveSettingsBtn">Simpan Pengaturan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. MODEL HUB MODAL -->
+  <div class="modal-backdrop" id="modelHubModal">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title"><i class="fa-solid fa-cubes"></i> Model Hub & Catalog Explorer</div>
+        <button class="modal-close-btn" data-close="modelHubModal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="hub-search-filter">
+          <div class="search-box">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="hubSearchInput" placeholder="Cari ratusan model (Claude, GPT, Llama, DeepSeek, Qwen)...">
+          </div>
+          <div class="filter-pills">
+            <button class="filter-pill active" data-filter="all">Semua</button>
+            <button class="filter-pill" data-filter="free">🎁 Free (OpenRouter)</button>
+            <button class="filter-pill" data-filter="local">🦙 Ollama Local</button>
+            <button class="filter-pill" data-filter="flagship">🌟 Flagship</button>
+            <button class="filter-pill" data-filter="coding">💻 Coding</button>
+            <button class="filter-pill" data-filter="reasoning">🧠 Reasoning</button>
+          </div>
+        </div>
+
+        <div class="model-cards-grid" id="modelCardsGrid">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close="modelHubModal">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. CYBER BGM DECK & LOCAL AUDIO MODAL -->
+  <div class="modal-backdrop" id="musicDeckModal">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title"><i class="fa-solid fa-headphones"></i> Cyber BGM Deck • Musik Latar Belakang</div>
+        <button class="modal-close-btn" data-close="musicDeckModal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <!-- Settings / Deck Tabs -->
+      <div class="settings-tabs">
+        <button class="settings-tab-btn active" data-target="tabLocalMusic">
+          <i class="fa-solid fa-folder-open"></i> Playlist Lokal (<span id="playlistCountBadge">0</span>)
+        </button>
+        <button class="settings-tab-btn" data-target="tabAmbientGen">
+          <i class="fa-solid fa-wand-magic-sparkles"></i> Cyber Ambient (Offline)
+        </button>
+        <button class="settings-tab-btn" data-target="tabDeckControls">
+          <i class="fa-solid fa-sliders"></i> Master Deck & Spectrum
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding-top: 15px;">
+        <!-- Tab 1: Local Music Upload & Playlist -->
+        <div class="settings-tab-pane active" id="tabLocalMusic">
+          <div class="audio-upload-dropzone" id="audioDropzone">
+            <i class="fa-solid fa-cloud-arrow-up" style="font-size: 2.2rem; color: var(--neon-cyan); margin-bottom: 10px;"></i>
+            <h4 style="margin: 0 0 6px 0; font-family: var(--font-display); color: #FFF; font-size: 1.05rem;">Upload File Musik Lokal Anda</h4>
+            <p style="margin: 0 0 14px 0; font-size: 0.8rem; color: var(--text-dim);">Tarik & letakkan file musik ke sini atau pilih dari folder komputer (MP3, WAV, OGG, FLAC, M4A, AAC).</p>
+            <input type="file" id="localAudioFileInput" accept="audio/*" multiple style="display: none;">
+            <button class="btn btn-sm btn-primary" id="triggerAudioUploadBtn">
+              <i class="fa-solid fa-plus"></i> Pilih File Musik Lokal
+            </button>
+          </div>
+
+          <div class="playlist-container" style="margin-top: 18px;">
+            <div class="playlist-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <span style="font-weight: 700; font-size: 0.85rem; color: var(--text-main);"><i class="fa-solid fa-list-ol"></i> DAFTAR LAGU LOKAL</span>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-xs btn-outline" id="clearPlaylistBtn" style="font-size: 0.75rem;"><i class="fa-solid fa-trash-can"></i> Bersihkan Playlist</button>
+              </div>
+            </div>
+            <div class="playlist-items-list" id="playlistItemsList">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Generative Cyber Ambient -->
+        <div class="settings-tab-pane" id="tabAmbientGen">
+          <p style="font-size: 0.82rem; color: var(--text-dim); margin-bottom: 14px; line-height: 1.5;">
+            Generator audio ambient cyberpunk prosedural bawaan yang disintesis secara instan menggunakan Web Audio API tanpa perlu file eksternal atau internet.
+          </p>
+          <div class="ambient-cards-grid" id="ambientCardsGrid">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Tab 3: Deck Controls & Visualizer -->
+        <div class="settings-tab-pane" id="tabDeckControls">
+          <!-- Spectrum Canvas -->
+          <div class="visualizer-container">
+            <canvas id="audioVisualizerCanvas" height="110"></canvas>
+          </div>
+
+          <div class="deck-controls-row" style="margin-top: 16px; display: flex; flex-direction: column; gap: 14px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%;">
+                <strong id="deckCurrentTrackName" style="color: var(--neon-cyan); font-size: 0.95rem;">Tidak ada lagu aktif</strong>
+                <div id="deckCurrentTrackMeta" style="font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-code);">00:00 / 00:00</div>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-sm btn-outline" id="deckLoopBtn" title="Mode Loop"><i class="fa-solid fa-repeat"></i> Loop All</button>
+                <button class="btn btn-sm btn-outline" id="deckShuffleBtn" title="Mode Acak"><i class="fa-solid fa-shuffle"></i> Acak: Off</button>
+              </div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="deck-progress-container">
+              <input type="range" id="deckProgressSlider" min="0" max="100" value="0" step="0.1">
+            </div>
+
+            <!-- Main Big Controls -->
+            <div style="display: flex; justify-content: center; align-items: center; gap: 20px; margin: 4px 0;">
+              <button class="deck-big-btn" id="deckPrevBtn" title="Lagu Sebelumnya"><i class="fa-solid fa-backward-step"></i></button>
+              <button class="deck-big-btn deck-play-btn" id="deckPlayPauseBtn" title="Play / Pause"><i class="fa-solid fa-play"></i></button>
+              <button class="deck-big-btn" id="deckNextBtn" title="Lagu Berikutnya"><i class="fa-solid fa-forward-step"></i></button>
+            </div>
+
+            <div class="form-group" style="margin-top: 4px;">
+              <div class="range-header">
+                <label><i class="fa-solid fa-volume-high"></i> Master Volume BGM:</label>
+                <span class="range-val" id="valMasterVolume">50%</span>
+              </div>
+              <input type="range" id="deckMasterVolume" min="0" max="1" step="0.01" value="0.5">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close="musicDeckModal">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Dependencies -->
+  <!-- Marked.js for Markdown parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
+  <!-- Highlight.js for code syntax highlighting -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <!-- Application script -->
+  <script src="app.js"></script>
+</body>
+</html>

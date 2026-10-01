@@ -1,0 +1,3157 @@
+/**
+ * ZOZ ROUTER - Frontend Application Engine
+ * High-Speed Multi-Engine AI Orchestrator for Ollama & OpenRouter
+ */
+
+(() => {
+  'use strict';
+
+  // ==================== SYSTEM PRESETS ====================
+  const SYSTEM_PRESETS = {
+    kaisar: 'Kamu adalah AI Personal Kaisar Zozi. Berikan analisis tingkat tinggi, strategis, berorientasi eksekusi cepat, cerdas, berbobot, dan tanpa basa-basi atau sensor berlebihan.',
+    coder: 'You are an Elite Senior Software Architect & Fullstack Engineer. Provide clean, modular, scalable, production-ready code with clear explanations and industry best practices.',
+    cyber: 'You are a Cyber Security Specialist & Penetration Tester. Analyze vulnerabilities, protocols, and security architectures with deep technical insight and defense-in-depth mitigations.',
+    concise: 'Berikan jawaban langsung ke inti masalah (direct to point), sangat ringkas, terstruktur rapi dengan bullet points, dan tanpa kata-kata pengantar klise.',
+    uncensored: 'Provide raw, unfiltered technical and analytical reasoning with maximal precision, comprehensive depth, and logical rigor.'
+  };
+
+  // Curated Popular OpenRouter Models Catalog
+  const DEFAULT_OPENROUTER_MODELS = [
+    { id: 'deepseek/deepseek-r1:free', name: 'DeepSeek R1 (Reasoning)', tag: 'Free', cat: 'reasoning' },
+    { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B Instruct', tag: 'Free', cat: 'flagship' },
+    { id: 'google/gemini-2.0-flash-exp:free', name: 'Gemini 2.0 Flash Exp', tag: 'Free', cat: 'fast' },
+    { id: 'qwen/qwen-2.5-72b-instruct:free', name: 'Qwen 2.5 72B Instruct', tag: 'Free', cat: 'coding' },
+    { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', tag: 'Flagship', cat: 'coding' },
+    { id: 'openai/gpt-4o', name: 'GPT-4o Omnimodel', tag: 'Flagship', cat: 'flagship' },
+    { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3 (Chat)', tag: 'Flagship', cat: 'flagship' },
+    { id: 'mistralai/mistral-large-2411', name: 'Mistral Large 2', tag: 'Pro', cat: 'flagship' },
+    { id: 'meta-llama/llama-3.2-11b-vision-instruct:free', name: 'Llama 3.2 11B Vision', tag: 'Vision Free', cat: 'vision' }
+  ];
+
+  // ==================== STATE MANAGEMENT ====================
+  const STATE = {
+    mode: 'ollama', // 'ollama' | 'openrouter' | 'arena' | 'auto'
+    sessions: [],
+    currentSessionId: null,
+    activeSessionPerMode: {
+      ollama: null,
+      openrouter: null,
+      arena: null,
+      auto: null
+    },
+    attachedImage: null, // Base64 data URL
+    isGenerating: false,
+    abortController: null,
+    soundEnabled: true,
+    ollamaModels: [],
+    openRouterModels: [...DEFAULT_OPENROUTER_MODELS],
+    settings: {
+      ollamaEndpoint: 'http://127.0.0.1:11434',
+      openRouterKey: '',
+      ollamaModel: 'llama3:latest',
+      openRouterModel: 'deepseek/deepseek-r1:free',
+      arenaModelA: 'llama3:latest',
+      arenaModelB: 'deepseek/deepseek-r1:free',
+      temperature: 0.7,
+      topP: 0.9,
+      maxTokens: 4096,
+      systemPrompt: SYSTEM_PRESETS.kaisar,
+      activePreset: 'kaisar',
+      autoPolicy: 'local_first'
+    }
+  };
+
+  // ==================== AUDIO SYNTHESIZER (Sci-Fi Cyber Blips) ====================
+  const AudioEngine = {
+    ctx: null,
+    init() {
+      if (!this.ctx && (window.AudioContext || window.webkitAudioContext)) {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+    },
+    playBeep(freq = 440, type = 'sine', duration = 0.08, gain = 0.05) {
+      if (!STATE.soundEnabled) return;
+      try {
+        this.init();
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+        g.gain.setValueAtTime(gain, this.ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+        osc.connect(g);
+        g.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + duration);
+      } catch (e) {
+        // Ignore audio restrictions
+      }
+    },
+    click() { this.playBeep(880, 'triangle', 0.04, 0.03); },
+    send() { 
+      this.playBeep(520, 'sine', 0.06, 0.04);
+      setTimeout(() => this.playBeep(1040, 'sine', 0.08, 0.04), 40);
+    },
+    receive() { this.playBeep(780, 'sine', 0.06, 0.03); },
+    error() { this.playBeep(220, 'sawtooth', 0.15, 0.06); }
+  };
+
+  // ==================== DOM ELEMENTS ====================
+  const $ = (selector) => document.querySelector(selector);
+  const $$ = (selector) => document.querySelectorAll(selector);
+
+  const els = {
+    // Nav & Mode
+    modeTabs: $$('.mode-tab'),
+    currentModelLabel: $('#currentModelLabel'),
+    modelPickerChip: $('#modelPickerChip'),
+    modelDropdownMenu: $('#modelDropdownMenu'),
+    dropdownModelList: $('#dropdownModelList'),
+    modelSearchInput: $('#modelSearchInput'),
+    customModelInput: $('#customModelInput'),
+    useCustomModelBtn: $('#useCustomModelBtn'),
+    singleModelPickerWrap: $('#singleModelPickerWrap'),
+    arenaConfigBar: $('#arenaConfigBar'),
+    arenaModelOllama: $('#arenaModelOllama'),
+    arenaModelOpenRouter: $('#arenaModelOpenRouter'),
+    
+    // Status
+    ollamaStatusVal: $('#ollamaStatusVal'),
+    ollamaIndicator: $('#ollamaIndicator'),
+    refreshOllamaBtn: $('#refreshOllamaBtn'),
+    openRouterStatusVal: $('#openRouterStatusVal'),
+    openRouterIndicator: $('#openRouterIndicator'),
+    openSettingsKeyBtn: $('#openSettingsKeyBtn'),
+    
+    // Chat containers
+    chatViewport: $('#chatViewport'),
+    singleChatContainer: $('#singleChatContainer'),
+    mainComposerContainer: $('#mainComposerContainer'),
+    welcomeHero: $('#welcomeHero'),
+    messagesList: $('#messagesList'),
+    arenaChatContainer: $('#arenaChatContainer'),
+    arenaMessagesA: $('#arenaMessagesA'),
+    arenaMessagesB: $('#arenaMessagesB'),
+    arenaStatsA: $('#arenaStatsA'),
+    arenaStatsB: $('#arenaStatsB'),
+    arenaInputA: $('#arenaInputA'),
+    arenaSendBtnA: $('#arenaSendBtnA'),
+    arenaStopBtnA: $('#arenaStopBtnA'),
+    clearArenaChatABtn: $('#clearArenaChatABtn'),
+    arenaInputB: $('#arenaInputB'),
+    arenaSendBtnB: $('#arenaSendBtnB'),
+    arenaStopBtnB: $('#arenaStopBtnB'),
+    clearArenaChatBBtn: $('#clearArenaChatBBtn'),
+    
+    // History
+    newChatBtn: $('#newChatBtn'),
+    chatHistoryList: $('#chatHistoryList'),
+    searchHistoryInput: $('#searchHistoryInput'),
+    clearAllHistoryBtn: $('#clearAllHistoryBtn'),
+    toggleSidebarBtn: $('#toggleSidebarBtn'),
+    closeSidebarBtn: $('#closeSidebarBtn'),
+    sidebar: $('#sidebar'),
+    
+    // Input / Composer
+    promptInput: $('#promptInput'),
+    sendPromptBtn: $('#sendPromptBtn'),
+    stopGenerationBtn: $('#stopGenerationBtn'),
+    attachImageBtn: $('#attachImageBtn'),
+    imageFileInput: $('#imageFileInput'),
+    attachmentPreviewBar: $('#attachmentPreviewBar'),
+    imagePreviewImg: $('#imagePreviewImg'),
+    removeImageBtn: $('#removeImageBtn'),
+    voiceInputBtn: $('#voiceInputBtn'),
+    activePresetBanner: $('#activePresetBanner'),
+    activePresetName: $('#activePresetName'),
+    clearPresetBtn: $('#clearPresetBtn'),
+    footerModelInfo: $('#footerModelInfo'),
+    footerLatencyInfo: $('#footerLatencyInfo'),
+    
+    // Buttons & Modals
+    settingsBtn: $('#settingsBtn'),
+    settingsModal: $('#settingsModal'),
+    modelHubBtn: $('#modelHubBtn'),
+    modelHubModal: $('#modelHubModal'),
+    systemPromptModalBtn: $('#systemPromptModalBtn'),
+    exportChatBtn: $('#exportChatBtn'),
+    soundToggleBtn: $('#soundToggleBtn'),
+    toastContainer: $('#toastContainer'),
+    
+    // Settings fields
+    settingOllamaEndpoint: $('#settingOllamaEndpoint'),
+    testOllamaBtn: $('#testOllamaBtn'),
+    settingOpenRouterKey: $('#settingOpenRouterKey'),
+    toggleShowKeyBtn: $('#toggleShowKeyBtn'),
+    testOpenRouterBtn: $('#testOpenRouterBtn'),
+    settingAutoPolicy: $('#settingAutoPolicy'),
+    paramTemperature: $('#paramTemperature'),
+    valTemperature: $('#valTemperature'),
+    paramTopP: $('#paramTopP'),
+    valTopP: $('#valTopP'),
+    paramMaxTokens: $('#paramMaxTokens'),
+    settingSystemPrompt: $('#settingSystemPrompt'),
+    saveSettingsBtn: $('#saveSettingsBtn'),
+    
+    // Model Hub
+    hubSearchInput: $('#hubSearchInput'),
+    filterPills: $$('.filter-pill'),
+    modelCardsGrid: $('#modelCardsGrid'),
+
+    // Cyber BGM & Audio Deck
+    musicPlayerModalBtn: $('#musicPlayerModalBtn'),
+    musicHeaderPulse: $('#musicHeaderPulse'),
+    musicDeckModal: $('#musicDeckModal'),
+    sidebarBgmWidget: $('#sidebarBgmWidget'),
+    bgmAnimBars: $('#bgmAnimBars'),
+    bgmTrackTitle: $('#bgmTrackTitle'),
+    openMusicModalFromWidget: $('#openMusicModalFromWidget'),
+    bgmPrevBtn: $('#bgmPrevBtn'),
+    bgmPlayPauseBtn: $('#bgmPlayPauseBtn'),
+    bgmNextBtn: $('#bgmNextBtn'),
+    bgmMiniVolume: $('#bgmMiniVolume'),
+    audioDropzone: $('#audioDropzone'),
+    localAudioFileInput: $('#localAudioFileInput'),
+    triggerAudioUploadBtn: $('#triggerAudioUploadBtn'),
+    playlistCountBadge: $('#playlistCountBadge'),
+    playlistItemsList: $('#playlistItemsList'),
+    clearPlaylistBtn: $('#clearPlaylistBtn'),
+    ambientCardsGrid: $('#ambientCardsGrid'),
+    audioVisualizerCanvas: $('#audioVisualizerCanvas'),
+    deckCurrentTrackName: $('#deckCurrentTrackName'),
+    deckCurrentTrackMeta: $('#deckCurrentTrackMeta'),
+    deckLoopBtn: $('#deckLoopBtn'),
+    deckShuffleBtn: $('#deckShuffleBtn'),
+    deckProgressSlider: $('#deckProgressSlider'),
+    deckPrevBtn: $('#deckPrevBtn'),
+    deckPlayPauseBtn: $('#deckPlayPauseBtn'),
+    deckNextBtn: $('#deckNextBtn'),
+    deckMasterVolume: $('#deckMasterVolume'),
+    valMasterVolume: $('#valMasterVolume')
+  };
+
+  // ==================== STORAGE & PERSISTENCE ====================
+  function loadPersistedState() {
+    try {
+      const savedSettings = localStorage.getItem('zoz_router_settings_v1');
+      if (savedSettings) {
+        STATE.settings = { ...STATE.settings, ...JSON.parse(savedSettings) };
+      }
+      const savedSessions = localStorage.getItem('zoz_router_sessions_v1');
+      if (savedSessions) {
+        STATE.sessions = JSON.parse(savedSessions);
+      }
+      const savedSound = localStorage.getItem('zoz_router_sound_v1');
+      if (savedSound !== null) {
+        STATE.soundEnabled = savedSound === 'true';
+      }
+    } catch (err) {
+      console.error('Error loading localStorage:', err);
+    }
+  }
+
+  function savePersistedState() {
+    try {
+      localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings));
+      localStorage.setItem('zoz_router_sessions_v1', JSON.stringify(STATE.sessions));
+      localStorage.setItem('zoz_router_sound_v1', String(STATE.soundEnabled));
+    } catch (err) {
+      console.error('Error saving localStorage:', err);
+    }
+  }
+
+  // ==================== TOAST NOTIFICATIONS ====================
+  function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    const icon = type === 'error' ? 'fa-triangle-exclamation' : 'fa-circle-check';
+    toast.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${escapeHtml(message)}</span>`;
+    els.toastContainer.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateX(40px)';
+      setTimeout(() => toast.remove(), 300);
+    }, 3200);
+  }
+
+  // ==================== UTILS ====================
+  function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/[&<>'"]/g, tag => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;'
+    }[tag] || tag));
+  }
+
+  function generateId() {
+    return 'ses_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  }
+
+  function renderMarkdown(rawText) {
+    if (!rawText) return '';
+    if (window.marked) {
+      marked.setOptions({
+        breaks: true,
+        gfm: true
+      });
+      return marked.parse(rawText);
+    }
+    return escapeHtml(rawText).replace(/\n/g, '<br>');
+  }
+
+  // ==================== SESSIONS & CHAT MANAGEMENT ====================
+  function createNewSession(initialTitle = 'Obrolan Baru', targetMode = STATE.mode) {
+    const newSession = {
+      id: generateId(),
+      title: initialTitle,
+      mode: targetMode,
+      messages: [],
+      createdAt: new Date().toISOString()
+    };
+    STATE.sessions.unshift(newSession);
+    STATE.activeSessionPerMode[targetMode] = newSession.id;
+    STATE.currentSessionId = newSession.id;
+    savePersistedState();
+    renderChatHistory();
+    renderCurrentSession();
+    AudioEngine.click();
+    return newSession;
+  }
+
+  function getActiveSession(targetMode = STATE.mode) {
+    // Check if we have an active session for this specific mode
+    let session = null;
+    const modeActiveId = STATE.activeSessionPerMode[targetMode];
+    
+    if (modeActiveId) {
+      session = STATE.sessions.find(s => s.id === modeActiveId && s.mode === targetMode);
+    }
+
+    if (!session) {
+      // Find latest session belonging to this mode
+      session = STATE.sessions.find(s => s.mode === targetMode);
+    }
+
+    if (!session) {
+      session = createNewSession('Obrolan Baru', targetMode);
+    } else {
+      STATE.activeSessionPerMode[targetMode] = session.id;
+      STATE.currentSessionId = session.id;
+    }
+
+    return session;
+  }
+
+  function switchSession(sessionId) {
+    if (STATE.isGenerating) {
+      showToast('Harap tunggu atau hentikan generasi respons saat ini.', 'error');
+      return;
+    }
+    const targetSession = STATE.sessions.find(s => s.id === sessionId);
+    if (!targetSession) return;
+
+    // If session has different mode, switch tab without altering session's original mode
+    if (targetSession.mode && targetSession.mode !== STATE.mode) {
+      STATE.mode = targetSession.mode;
+      els.modeTabs.forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.mode === STATE.mode);
+      });
+      updateModeLayout(STATE.mode);
+    }
+
+    STATE.currentSessionId = sessionId;
+    STATE.activeSessionPerMode[STATE.mode] = sessionId;
+    savePersistedState();
+    renderChatHistory();
+    renderCurrentSession();
+    updateModelUI();
+    AudioEngine.click();
+  }
+
+  function deleteSession(sessionId, e) {
+    if (e) e.stopPropagation();
+    const target = STATE.sessions.find(s => s.id === sessionId);
+    const targetMode = target ? target.mode : STATE.mode;
+
+    STATE.sessions = STATE.sessions.filter(s => s.id !== sessionId);
+
+    if (STATE.currentSessionId === sessionId) {
+      const nextForMode = STATE.sessions.find(s => s.mode === targetMode);
+      if (nextForMode) {
+        STATE.currentSessionId = nextForMode.id;
+        STATE.activeSessionPerMode[targetMode] = nextForMode.id;
+      } else {
+        createNewSession('Obrolan Baru', targetMode);
+      }
+    }
+
+    savePersistedState();
+    renderChatHistory();
+    renderCurrentSession();
+    showToast('Sesi obrolan dihapus.');
+  }
+
+  function renderChatHistory(filterQuery = '') {
+    els.chatHistoryList.innerHTML = '';
+    const q = filterQuery.toLowerCase().trim();
+    
+    // Filter strictly by the current active engine mode so Ollama and OpenRouter never mix!
+    const modeSessions = STATE.sessions.filter(s => (s.mode || 'ollama') === STATE.mode);
+    const filtered = modeSessions.filter(s => !q || s.title.toLowerCase().includes(q));
+
+    // Update history header label
+    const historyHeader = $('.history-label');
+    if (historyHeader) {
+      const modeLabel = STATE.mode === 'ollama' ? 'OLLAMA LOCAL' : (STATE.mode === 'openrouter' ? 'OPENROUTER CLOUD' : (STATE.mode === 'arena' ? 'DUAL ARENA' : 'AUTO ROUTER'));
+      historyHeader.innerText = `RIWAYAT SESI (${modeLabel})`;
+    }
+
+    if (filtered.length === 0) {
+      els.chatHistoryList.innerHTML = `<div style="font-size:0.75rem; color:var(--text-dim); text-align:center; padding:16px 8px;">Belum ada riwayat ${STATE.mode.toUpperCase()}<br><span style="font-size:0.68rem; opacity:0.7;">Klik '+ Sesi Baru' untuk memulai.</span></div>`;
+      return;
+    }
+
+    filtered.forEach(session => {
+      const item = document.createElement('div');
+      item.className = `history-item ${session.id === STATE.currentSessionId ? 'active' : ''}`;
+      
+      let modeIcon = 'fa-server';
+      if (session.mode === 'openrouter') modeIcon = 'fa-bolt';
+      else if (session.mode === 'arena') modeIcon = 'fa-scale-balanced';
+      else if (session.mode === 'auto') modeIcon = 'fa-route';
+
+      item.innerHTML = `
+        <div class="history-title-wrap">
+          <i class="fa-solid ${modeIcon}"></i>
+          <span class="history-title" title="${escapeHtml(session.title)}">${escapeHtml(session.title)}</span>
+        </div>
+        <div class="history-item-actions">
+          <button class="history-item-btn delete-btn" title="Hapus"><i class="fa-solid fa-trash"></i></button>
+        </div>
+      `;
+
+      item.addEventListener('click', () => switchSession(session.id));
+      item.querySelector('.delete-btn').addEventListener('click', (e) => deleteSession(session.id, e));
+      els.chatHistoryList.appendChild(item);
+    });
+  }
+
+  function renderCurrentSession() {
+    const session = getActiveSession();
+    
+    if (STATE.mode === 'arena') {
+      els.welcomeHero.style.display = 'none';
+      els.arenaMessagesA.innerHTML = '';
+      els.arenaMessagesB.innerHTML = '';
+
+      const messagesA = (session.messages || []).filter(m => m.slot === 'A' || m.engine === 'ollama');
+      const messagesB = (session.messages || []).filter(m => m.slot === 'B' || m.engine === 'openrouter');
+
+      if (messagesA.length === 0) {
+        els.arenaMessagesA.innerHTML = `
+          <div class="arena-empty-placeholder">
+            <i class="fa-solid fa-robot"></i>
+            <p>Slot Ollama Local siap. Ketik prompt di bawah untuk menjalankan model offline.</p>
+          </div>
+        `;
+      } else {
+        messagesA.forEach((msg, idx) => {
+          appendArenaBubbleToColumn(els.arenaMessagesA, msg.role, msg.content, msg.model || 'Ollama', msg.stats, 'A', idx);
+        });
+      }
+
+      if (messagesB.length === 0) {
+        els.arenaMessagesB.innerHTML = `
+          <div class="arena-empty-placeholder">
+            <i class="fa-solid fa-bolt"></i>
+            <p>Slot OpenRouter Cloud siap. Ketik prompt di bawah untuk model flagship.</p>
+          </div>
+        `;
+      } else {
+        messagesB.forEach((msg, idx) => {
+          appendArenaBubbleToColumn(els.arenaMessagesB, msg.role, msg.content, msg.model || 'OpenRouter', msg.stats, 'B', idx);
+        });
+      }
+
+      scrollArenaToBottom();
+      return;
+    }
+
+    // Check if empty
+    if (!session.messages || session.messages.length === 0) {
+      els.welcomeHero.style.display = 'flex';
+      els.messagesList.innerHTML = '';
+      return;
+    }
+
+    els.welcomeHero.style.display = 'none';
+    els.messagesList.innerHTML = '';
+    session.messages.forEach((msg, idx) => {
+      appendMessageElement(msg.role, msg.content, msg.image, msg.model, msg.stats, idx);
+    });
+
+    scrollChatToBottom();
+  }
+
+  function scrollChatToBottom() {
+    setTimeout(() => {
+      els.chatViewport.scrollTo({ top: els.chatViewport.scrollHeight, behavior: 'smooth' });
+    }, 50);
+  }
+
+  function scrollArenaToBottom() {
+    setTimeout(() => {
+      if (els.arenaMessagesA) els.arenaMessagesA.scrollTop = els.arenaMessagesA.scrollHeight;
+      if (els.arenaMessagesB) els.arenaMessagesB.scrollTop = els.arenaMessagesB.scrollHeight;
+    }, 50);
+  }
+
+  function appendArenaBubbleToColumn(container, role, content, model = '', stats = null, slot = 'A', idx = -1) {
+    const bubble = document.createElement('div');
+    bubble.className = `message-row ${role}`;
+    bubble.style.marginBottom = '10px';
+    bubble.dataset.slot = slot;
+    bubble.dataset.index = idx;
+
+    const avatar = role === 'user' ? '<i class="fa-solid fa-user-ninja"></i>' : '<i class="fa-solid fa-microchip-ai"></i>';
+    const roleLabel = role === 'user' ? 'Anda' : (model || 'AI');
+    const renderedBody = role === 'assistant' ? renderMarkdown(content) : escapeHtml(content).replace(/\n/g, '<br>');
+    const statsHtml = stats ? `<span style="font-size:0.68rem; color:var(--neon-teal); font-family:var(--font-code);">⏱️ ${stats.duration}s • ⚡ ${stats.tps} tps</span>` : '';
+
+    bubble.innerHTML = `
+      <div class="message-avatar" style="width:28px; height:28px; font-size:0.75rem;">${avatar}</div>
+      <div class="message-content-box" style="max-width:88%;">
+        <div class="message-meta" style="font-size:0.68rem;">
+          <strong>${roleLabel}</strong>
+          ${statsHtml}
+        </div>
+        <div class="message-bubble" style="padding:8px 12px; font-size:0.85rem;">
+          <div class="msg-text-content">${renderedBody}</div>
+        </div>
+        <div class="message-actions-bar">
+          <button class="msg-action-btn copy-msg-btn" title="Salin Pesan"><i class="fa-solid fa-copy"></i> Salin</button>
+        </div>
+      </div>
+    `;
+
+    bubble.querySelectorAll('pre code').forEach(b => {
+      if (window.hljs) hljs.highlightElement(b);
+    });
+
+    bubble.querySelector('.copy-msg-btn')?.addEventListener('click', () => {
+      navigator.clipboard.writeText(content);
+      showToast('Pesan disalin!');
+      AudioEngine.click();
+    });
+
+    container.appendChild(bubble);
+    return bubble;
+  }
+
+  // ==================== MESSAGE DOM BUILDER ====================
+  function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1) {
+    const row = document.createElement('div');
+    row.className = `message-row ${role}`;
+    row.dataset.index = index;
+
+    const avatarIcon = role === 'user' ? '<i class="fa-solid fa-user-ninja"></i>' : '<i class="fa-solid fa-microchip-ai"></i>';
+    const roleLabel = role === 'user' ? 'Anda' : (model || 'Zoz AI');
+
+    let imageHtml = '';
+    if (image) {
+      imageHtml = `<img src="${image}" alt="Vision Attachment" class="attached-vision-img">`;
+    }
+
+    let statsHtml = '';
+    if (stats && role === 'assistant') {
+      statsHtml = `
+        <span class="meta-model-badge">${escapeHtml(model)}</span>
+        <span>⏱️ ${stats.duration}s</span>
+        <span>⚡ ${stats.tps} tps</span>
+      `;
+    } else if (model && role === 'assistant') {
+      statsHtml = `<span class="meta-model-badge">${escapeHtml(model)}</span>`;
+    }
+
+    const renderedBody = role === 'assistant' ? renderMarkdown(content) : escapeHtml(content).replace(/\n/g, '<br>');
+
+    row.innerHTML = `
+      <div class="message-avatar">${avatarIcon}</div>
+      <div class="message-content-box">
+        <div class="message-meta">
+          <strong>${roleLabel}</strong>
+          ${statsHtml}
+        </div>
+        <div class="message-bubble">
+          ${imageHtml}
+          <div class="msg-text-content">${renderedBody}</div>
+        </div>
+        <div class="message-actions-bar">
+          ${role === 'user' ? '<button class="msg-action-btn edit-msg-btn" title="Edit & Kirim Ulang Prompt"><i class="fa-solid fa-pen-to-square"></i> Edit</button>' : ''}
+          <button class="msg-action-btn copy-msg-btn" title="Salin Pesan"><i class="fa-solid fa-copy"></i> Salin</button>
+        </div>
+      </div>
+    `;
+
+    // Edit Prompt Button Handler (for User messages)
+    if (role === 'user') {
+      const editBtn = row.querySelector('.edit-msg-btn');
+      const bubble = row.querySelector('.message-bubble');
+      const textContainer = row.querySelector('.msg-text-content');
+      const actionsBar = row.querySelector('.message-actions-bar');
+
+      editBtn?.addEventListener('click', () => {
+        if (STATE.isGenerating) {
+          showToast('Harap tunggu atau hentikan generasi AI saat ini sebelum mengedit.', 'error');
+          return;
+        }
+
+        // Create inline editor
+        const originalContent = content;
+        textContainer.style.display = 'none';
+        actionsBar.style.display = 'none';
+
+        const editorBox = document.createElement('div');
+        editorBox.className = 'inline-edit-box';
+        editorBox.style.cssText = 'display:flex; flex-direction:column; gap:8px; width:100%; min-width:280px; margin-top:4px;';
+        editorBox.innerHTML = `
+          <textarea class="inline-edit-textarea" style="width:100%; min-height:75px; background:var(--bg-core); border:1px solid var(--neon-cyan); border-radius:6px; color:var(--text-main); padding:8px 10px; font-family:var(--font-main); font-size:0.9rem; line-height:1.5; resize:vertical; outline:none; box-shadow:0 0 12px rgba(0,240,255,0.25);">${escapeHtml(originalContent)}</textarea>
+          <div style="display:flex; justify-content:flex-end; gap:8px;">
+            <button class="btn btn-sm btn-secondary cancel-edit-btn" style="padding:4px 10px; font-size:0.75rem;">Batal</button>
+            <button class="btn btn-sm btn-primary save-edit-btn" style="padding:4px 12px; font-size:0.75rem;"><i class="fa-solid fa-paper-plane"></i> Simpan & Kirim Ulang</button>
+          </div>
+        `;
+
+        bubble.appendChild(editorBox);
+        const textarea = editorBox.querySelector('.inline-edit-textarea');
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+        // Cancel
+        editorBox.querySelector('.cancel-edit-btn').addEventListener('click', () => {
+          editorBox.remove();
+          textContainer.style.display = 'block';
+          actionsBar.style.display = 'flex';
+          AudioEngine.click();
+        });
+
+        // Save & Resend
+        const doSaveAndResend = () => {
+          const newText = textarea.value.trim();
+          if (!newText && !image) {
+            showToast('Prompt tidak boleh kosong.', 'error');
+            return;
+          }
+
+          const session = getActiveSession();
+          // Find index of this message in session
+          let msgIdx = index;
+          if (msgIdx < 0 || msgIdx >= session.messages.length) {
+            msgIdx = session.messages.findIndex(m => m.role === 'user' && m.content === originalContent);
+          }
+
+          if (msgIdx >= 0) {
+            // Truncate history from this message onward
+            session.messages = session.messages.slice(0, msgIdx);
+          }
+
+          editorBox.remove();
+          savePersistedState();
+          
+          // Re-render UI up to the truncated point
+          renderCurrentSession();
+
+          // Set prompt input and send
+          els.promptInput.value = newText;
+          if (image) STATE.attachedImage = image;
+          handleSendPrompt();
+          showToast('Prompt diperbarui & dikirim ulang!');
+        };
+
+        editorBox.querySelector('.save-edit-btn').addEventListener('click', doSaveAndResend);
+        textarea.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            doSaveAndResend();
+          }
+        });
+      });
+    }
+
+    // Code copy listener & syntax highlighting
+    row.querySelectorAll('pre code').forEach(block => {
+      if (window.hljs) hljs.highlightElement(block);
+      
+      const pre = block.parentElement;
+      const lang = block.className.match(/language-(\w+)/)?.[1] || 'CODE';
+      
+      const header = document.createElement('div');
+      header.className = 'code-header';
+      header.innerHTML = `
+        <span>${lang.toUpperCase()}</span>
+        <button class="code-copy-btn"><i class="fa-solid fa-clipboard"></i> Salin Kode</button>
+      `;
+      header.querySelector('.code-copy-btn').addEventListener('click', () => {
+        navigator.clipboard.writeText(block.innerText);
+        showToast('Kode berhasil disalin ke clipboard!');
+        AudioEngine.click();
+      });
+      pre.insertBefore(header, block);
+    });
+
+    // Message copy button
+    row.querySelector('.copy-msg-btn').addEventListener('click', () => {
+      navigator.clipboard.writeText(content);
+      showToast('Pesan disalin ke clipboard!');
+      AudioEngine.click();
+    });
+
+    els.messagesList.appendChild(row);
+    return row;
+  }
+
+  function appendMessageToArena(target, content, image = null, model = '', stats = null) {
+    const isUser = target === 'user';
+    const container = isUser ? null : (target === 'assistant-a' ? els.arenaMessagesA : els.arenaMessagesB);
+    
+    if (isUser) {
+      // Append to both arena columns
+      appendSingleArenaBubble(els.arenaMessagesA, 'user', content, image, 'User');
+      appendSingleArenaBubble(els.arenaMessagesB, 'user', content, image, 'User');
+    } else if (container) {
+      appendSingleArenaBubble(container, 'assistant', content, image, model, stats);
+    }
+  }
+
+  function appendSingleArenaBubble(container, role, content, image = null, model = '', stats = null) {
+    const bubble = document.createElement('div');
+    bubble.className = `message-bubble ${role === 'user' ? 'arena-user' : 'arena-bot'}`;
+    bubble.style.marginBottom = '10px';
+    bubble.style.fontSize = '0.85rem';
+    
+    let rendered = role === 'assistant' ? renderMarkdown(content) : escapeHtml(content).replace(/\n/g, '<br>');
+    let statsBadge = stats ? `<div style="font-size:0.7rem; color:var(--neon-teal); margin-bottom:4px;">[${model} • ${stats.duration}s • ${stats.tps} tps]</div>` : '';
+    
+    bubble.innerHTML = `${statsBadge}<div>${rendered}</div>`;
+    
+    bubble.querySelectorAll('pre code').forEach(block => {
+      if (window.hljs) hljs.highlightElement(block);
+    });
+
+    container.appendChild(bubble);
+  }
+
+  // ==================== STT (VOICE INPUT) ====================
+  function setupSpeechRecognition() {
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRec) {
+      els.voiceInputBtn.style.display = 'none';
+      return;
+    }
+
+    const recognition = new SpeechRec();
+    recognition.lang = 'id-ID';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    let isListening = false;
+
+    els.voiceInputBtn.addEventListener('click', () => {
+      if (!isListening) {
+        try {
+          recognition.start();
+          isListening = true;
+          els.voiceInputBtn.classList.add('recording');
+          showToast('Mendengarkan suara... Bicara sekarang.');
+          AudioEngine.send();
+        } catch (e) {
+          console.error(e);
+        }
+      } else {
+        recognition.stop();
+        isListening = false;
+        els.voiceInputBtn.classList.remove('recording');
+      }
+    });
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      els.promptInput.value += (els.promptInput.value ? ' ' : '') + transcript;
+      autoResizeTextarea(els.promptInput);
+    };
+
+    recognition.onend = () => {
+      isListening = false;
+      els.voiceInputBtn.classList.remove('recording');
+    };
+
+    recognition.onerror = () => {
+      isListening = false;
+      els.voiceInputBtn.classList.remove('recording');
+      showToast('Gagal mengenali suara.', 'error');
+    };
+  }
+
+  // ==================== MODEL DISCOVERY & HEALTH CHECKS ====================
+  async function checkOllamaHealth() {
+    els.ollamaStatusVal.innerText = 'Memeriksa...';
+    els.ollamaIndicator.className = 'status-indicator';
+    try {
+      const res = await fetch(`/api/ollama/models?endpoint=${encodeURIComponent(STATE.settings.ollamaEndpoint)}`);
+      const data = await res.json();
+      if (res.ok && data.models && data.models.length > 0) {
+        STATE.ollamaModels = data.models;
+        const isRunning = data.server_running !== false;
+        
+        els.ollamaStatusVal.innerText = isRunning ? `${data.models.length} Model Aktif` : `${data.models.length} Model Terpasang`;
+        els.ollamaIndicator.className = isRunning ? 'status-indicator online' : 'status-indicator online';
+
+        // Auto-select first real installed model if current model is invalid or default
+        const modelNames = data.models.map(m => m.name);
+        if (!modelNames.includes(STATE.settings.ollamaModel)) {
+          STATE.settings.ollamaModel = modelNames[0];
+          savePersistedState();
+        }
+        if (!modelNames.includes(STATE.settings.arenaModelA)) {
+          STATE.settings.arenaModelA = modelNames[0];
+          savePersistedState();
+        }
+
+        updateModelUI();
+        populateModelDropdown();
+        populateArenaDropdowns();
+        renderModelHubGrid();
+        return true;
+      } else {
+        els.ollamaStatusVal.innerText = 'Offline (Cek Ollama)';
+        els.ollamaIndicator.className = 'status-indicator error';
+        return false;
+      }
+    } catch (e) {
+      els.ollamaStatusVal.innerText = 'Tidak Terhubung';
+      els.ollamaIndicator.className = 'status-indicator error';
+      return false;
+    }
+  }
+
+  async function checkOpenRouterStatus() {
+    if (!STATE.settings.openRouterKey) {
+      els.openRouterStatusVal.innerText = 'Key Belum Diisi';
+      els.openRouterIndicator.className = 'status-indicator error';
+      return;
+    }
+    els.openRouterStatusVal.innerText = 'Key Tersimpan';
+    els.openRouterIndicator.className = 'status-indicator online';
+  }
+
+  async function fetchOpenRouterModelsList() {
+    try {
+      const headers = {};
+      if (STATE.settings.openRouterKey) {
+        headers['Authorization'] = `Bearer ${STATE.settings.openRouterKey}`;
+      }
+      const res = await fetch('/api/openrouter/models', { headers });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.data && Array.isArray(data.data)) {
+          // Merge models
+          const mapped = data.data.slice(0, 80).map(m => ({
+            id: m.id,
+            name: m.name || m.id,
+            tag: m.id.includes(':free') ? 'Free' : (m.pricing?.prompt === '0' ? 'Free' : 'Cloud'),
+            cat: m.id.includes(':free') ? 'free' : 'flagship'
+          }));
+          STATE.openRouterModels = mapped;
+          populateModelDropdown();
+          populateArenaDropdowns();
+          renderModelHubGrid();
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch dynamic OpenRouter model catalog:', e);
+    }
+  }
+
+  // ==================== VISION CAPABILITY DETECTOR ====================
+  function isModelVisionCapable(modelId, engine = STATE.mode) {
+    if (!modelId) return false;
+    const lower = modelId.toLowerCase();
+    
+    // Explicit Text-Only blacklist
+    const textOnlyKeywords = ['space-bunny', 'deepseek-chat', 'deepseek-r1', 'qwen2.5:1.5b', 'granite', 'llama3.2:3b', 'llama-3.3-70b', 'nemotron-3-nano:30b-cloud', 'nemotron-3-ultra'];
+    for (const tok of textOnlyKeywords) {
+      if (lower.includes(tok)) return false;
+    }
+
+    // Check Ollama models capability metadata
+    if (engine === 'ollama' && STATE.ollamaModels) {
+      const found = STATE.ollamaModels.find(m => m.name === modelId || m.model === modelId);
+      if (found?.capabilities && Array.isArray(found.capabilities) && found.capabilities.includes('vision')) return true;
+    }
+
+    // Check verified vision keywords
+    const visionKeywords = [
+      'vision', 'llava', 'moondream', 'bakllava', 'minicpm-v', 'qwen-vl', 'qwen2-vl', 
+      'qwen2.5-vl', 'pixtral', '4o', 'gemini-2', 'gemini-1.5', 'claude-3-5', 'claude-3-sonnet', 'claude-3-opus'
+    ];
+    for (const kw of visionKeywords) {
+      if (lower.includes(kw)) return true;
+    }
+    
+    // Check OpenRouter catalog
+    if (engine === 'openrouter' && STATE.openRouterModels) {
+      const found = STATE.openRouterModels.find(m => m.id === modelId);
+      if (found?.cat === 'vision' || found?.tag?.toLowerCase().includes('vision')) return true;
+    }
+    
+    return false;
+  }
+
+  function findBestVisionModel(engine = STATE.mode) {
+    if (engine === 'ollama' && STATE.ollamaModels) {
+      const installedVision = STATE.ollamaModels.find(m => isModelVisionCapable(m.name, 'ollama'));
+      if (installedVision) return { model: installedVision.name, engine: 'ollama' };
+    }
+    
+    // Fallback to Free OpenRouter Vision Models
+    const freeVision = STATE.openRouterModels.find(m => 
+      (m.id.includes('gemini-2') || m.id.includes('vision')) && (m.tag?.includes('Free') || m.id.includes(':free'))
+    );
+    if (freeVision) return { model: freeVision.id, engine: 'openrouter' };
+
+    return { model: 'google/gemini-2.0-flash-exp:free', engine: 'openrouter' };
+  }
+
+  function updateVisionCompatibilityBadge() {
+    let badge = document.getElementById('visionCompatBadge');
+    if (!badge && els.attachmentPreviewBar) {
+      badge = document.createElement('div');
+      badge.id = 'visionCompatBadge';
+      badge.style.cssText = 'display:flex; align-items:center; gap:8px; font-size:0.75rem; padding:4px 10px; border-radius:6px; margin-left:8px; flex-grow:1;';
+      els.attachmentPreviewBar.appendChild(badge);
+    }
+
+    if (!badge) return;
+
+    if (STATE.attachedImage) {
+      const current = getCurrentModel();
+      const isVision = isModelVisionCapable(current, STATE.mode);
+
+      if (isVision) {
+        badge.style.background = 'rgba(0, 255, 194, 0.1)';
+        badge.style.border = '1px solid rgba(0, 255, 194, 0.3)';
+        badge.style.color = 'var(--neon-teal)';
+        badge.innerHTML = `<i class="fa-solid fa-eye"></i> <span>Model Aktif (<strong>${escapeHtml(current)}</strong>) Mendukung Vision</span>`;
+      } else {
+        badge.style.background = 'rgba(255, 82, 0, 0.12)';
+        badge.style.border = '1px solid rgba(255, 82, 0, 0.4)';
+        badge.style.color = 'var(--neon-amber)';
+        badge.innerHTML = `
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          <span>Model (<strong>${escapeHtml(current)}</strong>) adalah Text-Only.</span>
+          <button class="btn btn-sm btn-outline auto-switch-vision-btn" style="margin-left:auto; padding:3px 8px; font-size:0.72rem; border-color:var(--neon-cyan); color:var(--neon-cyan);">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> Ganti ke Model Vision
+          </button>
+        `;
+        badge.querySelector('.auto-switch-vision-btn')?.addEventListener('click', () => {
+          const target = findBestVisionModel(STATE.mode);
+          if (target.engine !== STATE.mode) {
+            setEngineMode(target.engine);
+          }
+          selectModel(target.model);
+          updateVisionCompatibilityBadge();
+          showToast(`Beralih ke model vision: ${target.model}`);
+        });
+      }
+      badge.style.display = 'flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  // ==================== MODEL DROPDOWN & SELECTORS ====================
+  function populateModelDropdown(search = '') {
+    els.dropdownModelList.innerHTML = '';
+    const q = search.toLowerCase().trim();
+
+    let models = [];
+    if (STATE.mode === 'ollama') {
+      models = STATE.ollamaModels.map(m => ({ 
+        id: m.name, 
+        name: m.name, 
+        tag: isModelVisionCapable(m.name, 'ollama') ? 'Local • 👁️ Vision' : 'Local' 
+      }));
+      if (models.length === 0) {
+        models = [
+          { id: 'llama3.2:3b', name: 'llama3.2:3b', tag: 'Local' },
+          { id: 'qwen2.5:1.5b', name: 'qwen2.5:1.5b', tag: 'Local' }
+        ];
+      }
+    } else {
+      models = STATE.openRouterModels.map(m => ({
+        ...m,
+        tag: isModelVisionCapable(m.id, 'openrouter') ? `${m.tag} • 👁️ Vision` : m.tag
+      }));
+    }
+
+    const currentActive = getCurrentModel();
+    const filtered = models.filter(m => !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+
+    if (filtered.length === 0) {
+      els.dropdownModelList.innerHTML = `<div style="font-size:0.75rem; color:var(--text-dim); padding:10px; text-align:center;">Model tidak ditemukan</div>`;
+      return;
+    }
+
+    filtered.forEach(m => {
+      const item = document.createElement('div');
+      item.className = `model-option-item ${m.id === currentActive ? 'selected' : ''}`;
+      const isVision = m.tag.includes('👁️');
+      const badgeStyle = isVision 
+        ? 'background:rgba(0,255,194,0.15); color:var(--neon-teal); border:1px solid rgba(0,255,194,0.3);' 
+        : 'background:rgba(0,240,255,0.1); color:var(--neon-cyan);';
+
+      item.innerHTML = `
+        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px;">${escapeHtml(m.name || m.id)}</span>
+        <span style="font-size:0.65rem; padding:2px 5px; border-radius:3px; ${badgeStyle}">${escapeHtml(m.tag || 'AI')}</span>
+      `;
+      item.addEventListener('click', () => {
+        selectModel(m.id);
+        els.modelDropdownMenu.classList.remove('show');
+        AudioEngine.click();
+      });
+      els.dropdownModelList.appendChild(item);
+    });
+  }
+
+  function populateArenaDropdowns() {
+    // Left (Ollama)
+    els.arenaModelOllama.innerHTML = '';
+    const ollamaList = STATE.ollamaModels.length > 0 
+      ? STATE.ollamaModels.map(m => m.name)
+      : ['llama3:latest', 'deepseek-r1:latest', 'qwen2.5:latest', 'mistral:latest'];
+    
+    ollamaList.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.innerText = m;
+      if (m === STATE.settings.arenaModelA) opt.selected = true;
+      els.arenaModelOllama.appendChild(opt);
+    });
+
+    // Right (OpenRouter)
+    els.arenaModelOpenRouter.innerHTML = '';
+    STATE.openRouterModels.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.innerText = `${m.name} [${m.tag}]`;
+      if (m.id === STATE.settings.arenaModelB) opt.selected = true;
+      els.arenaModelOpenRouter.appendChild(opt);
+    });
+  }
+
+  function getCurrentModel() {
+    if (STATE.mode === 'ollama') return STATE.settings.ollamaModel;
+    if (STATE.mode === 'openrouter') return STATE.settings.openRouterModel;
+    if (STATE.mode === 'auto') return `Auto (${STATE.settings.ollamaModel} ➔ ${STATE.settings.openRouterModel})`;
+    return 'Dual Arena Active';
+  }
+
+  function selectModel(modelId) {
+    if (STATE.mode === 'ollama') {
+      STATE.settings.ollamaModel = modelId;
+    } else {
+      STATE.settings.openRouterModel = modelId;
+    }
+    updateModelUI();
+    updateVisionCompatibilityBadge();
+    savePersistedState();
+    showToast(`Model aktif: ${modelId}`);
+  }
+
+  function updateModelUI() {
+    const current = getCurrentModel();
+    els.currentModelLabel.innerText = current;
+    els.footerModelInfo.innerText = `Engine: ${STATE.mode.toUpperCase()} (${current})`;
+  }
+
+  function updateModeLayout(mode) {
+    if (mode === 'arena') {
+      els.singleModelPickerWrap.style.display = 'none';
+      els.arenaConfigBar.style.display = 'flex';
+      els.singleChatContainer.style.display = 'none';
+      els.arenaChatContainer.style.display = 'grid';
+    } else {
+      els.singleModelPickerWrap.style.display = 'block';
+      els.arenaConfigBar.style.display = 'none';
+      els.singleChatContainer.style.display = 'flex';
+      els.arenaChatContainer.style.display = 'none';
+    }
+  }
+
+  // ==================== MODE SWITCHING ====================
+  function setEngineMode(mode) {
+    if (STATE.isGenerating) {
+      showToast('Harap tunggu atau hentikan generasi respons saat ini.', 'error');
+      return;
+    }
+    STATE.mode = mode;
+    els.modeTabs.forEach(tab => {
+      tab.classList.toggle('active', tab.dataset.mode === mode);
+    });
+
+    updateModeLayout(mode);
+
+    // Get or activate session for this specific mode cleanly
+    const session = getActiveSession(mode);
+    STATE.currentSessionId = session.id;
+    STATE.activeSessionPerMode[mode] = session.id;
+    savePersistedState();
+    
+    updateModelUI();
+    updateVisionCompatibilityBadge();
+    populateModelDropdown();
+    renderChatHistory();
+    renderCurrentSession();
+    AudioEngine.click();
+  }
+
+  // ==================== DISPATCH / STREAMING ENGINE ====================
+  async function handleSendPrompt() {
+    const text = els.promptInput.value.trim();
+    const image = STATE.attachedImage;
+
+    if (!text && !image) return;
+    if (STATE.isGenerating) return;
+
+    // Check Vision Compatibility
+    if (image && !isModelVisionCapable(getCurrentModel(), STATE.mode)) {
+      const bestVision = findBestVisionModel(STATE.mode);
+      if (bestVision.engine !== STATE.mode) {
+        setEngineMode(bestVision.engine);
+      }
+      selectModel(bestVision.model);
+      showToast(`⚡ Auto-Switch: Beralih ke model vision (${bestVision.model}) untuk menganalisis gambar.`);
+    }
+
+    const session = getActiveSession();
+    els.welcomeHero.style.display = 'none';
+
+    // Build user message object
+    const userMsg = {
+      role: 'user',
+      content: text,
+      image: image,
+      timestamp: new Date().toISOString()
+    };
+
+    // Auto title session if first message
+    if (session.messages.length === 0) {
+      session.title = text.length > 30 ? text.substring(0, 30) + '...' : (text || 'Analisis Gambar');
+      renderChatHistory();
+    }
+
+    session.messages.push(userMsg);
+    savePersistedState();
+
+    // Immediately render user's message bubble in single mode
+    if (STATE.mode !== 'arena') {
+      appendMessageElement('user', text, image, 'Anda');
+      scrollChatToBottom();
+    }
+
+    // Reset input
+    els.promptInput.value = '';
+    autoResizeTextarea(els.promptInput);
+    clearAttachedImage();
+    AudioEngine.send();
+
+    if (STATE.mode === 'arena') {
+      await runArenaStreaming(session, text, image);
+    } else if (STATE.mode === 'auto') {
+      await runAutoRouterStreaming(session, text, image);
+    } else if (STATE.mode === 'openrouter') {
+      await runOpenRouterStreaming(session, text, image, STATE.settings.openRouterModel);
+    } else {
+      await runOllamaStreaming(session, text, image, STATE.settings.ollamaModel);
+    }
+  }
+
+  // --- OLLAMA STREAMING EXECUTION ---
+  async function runOllamaStreaming(session, promptText, image, modelName) {
+    setGeneratingState(true);
+    STATE.abortController = new AbortController();
+
+    const startTime = performance.now();
+    let firstTokenTime = null;
+    let tokenCount = 0;
+
+    // Append initial assistant placeholder bubble
+    const assistantRow = appendMessageElement('assistant', '', null, modelName);
+    const bubbleText = assistantRow.querySelector('.msg-text-content');
+    const metaBox = assistantRow.querySelector('.message-meta');
+    bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+    scrollChatToBottom();
+
+    let fullText = '';
+
+    try {
+      // Build message array for Ollama safely
+      const messagesPayload = [];
+      if (STATE.settings.systemPrompt) {
+        messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
+      }
+      
+      // History context - only attach image on the latest active user turn to prevent multi-turn schema rejections
+      const lastIndex = session.messages.length - 1;
+      session.messages.forEach((m, idx) => {
+        const item = { role: m.role, content: m.content || '' };
+        if (m.image && idx === lastIndex) {
+          const rawBase64 = m.image.includes(',') ? m.image.split(',')[1] : m.image;
+          if (rawBase64) item.images = [rawBase64.trim()];
+        }
+        messagesPayload.push(item);
+      });
+
+      const requestBody = {
+        model: modelName,
+        messages: messagesPayload,
+        stream: true,
+        options: {
+          temperature: parseFloat(STATE.settings.temperature),
+          top_p: parseFloat(STATE.settings.topP),
+          num_predict: parseInt(STATE.settings.maxTokens)
+        },
+        endpoint: STATE.settings.ollamaEndpoint
+      };
+
+      const response = await fetch('/api/ollama/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+        signal: STATE.abortController.signal
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep partial line
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.error) throw new Error(parsed.error);
+            if (parsed.message?.content) {
+              if (!firstTokenTime) firstTokenTime = performance.now();
+              tokenCount++;
+              fullText += parsed.message.content;
+              bubbleText.innerHTML = renderMarkdown(fullText) + '<span class="typing-cursor"></span>';
+              scrollChatToBottom();
+            }
+          } catch (pe) {
+            console.error('Error parsing Ollama line:', pe);
+          }
+        }
+      }
+
+      const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
+      const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
+      
+      bubbleText.innerHTML = renderMarkdown(fullText);
+      metaBox.innerHTML = `
+        <strong>${modelName}</strong>
+        <span class="meta-model-badge">Ollama</span>
+        <span>⏱️ ${totalTime}s</span>
+        <span>⚡ ${tps} tps</span>
+      `;
+
+      // Save to session
+      session.messages.push({
+        role: 'assistant',
+        content: fullText,
+        model: modelName,
+        engine: 'ollama',
+        stats: { duration: totalTime, tps: tps, tokens: tokenCount },
+        timestamp: new Date().toISOString()
+      });
+      savePersistedState();
+      AudioEngine.receive();
+
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        showToast('Generasi dihentikan oleh pengguna.');
+      } else {
+        bubbleText.innerHTML = `
+          <div style="color:var(--neon-amber); line-height:1.5;">
+            <strong>❌ Gagal pada model ${escapeHtml(modelName)}:</strong> ${escapeHtml(err.message)}
+          </div>
+          <div style="margin-top:10px; display:flex; gap:8px;">
+            <button class="btn btn-sm btn-outline retry-vision-btn" style="border-color:var(--neon-teal); color:var(--neon-teal); font-size:0.75rem;">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> Beralih ke Model Vision & Kirim Ulang
+            </button>
+          </div>
+        `;
+        
+        bubbleText.querySelector('.retry-vision-btn')?.addEventListener('click', () => {
+          assistantRow.remove();
+          const target = findBestVisionModel('openrouter');
+          setEngineMode(target.engine);
+          selectModel(target.model);
+          showToast(`Beralih ke model vision: ${target.model}`);
+          runOpenRouterStreaming(session, promptText, image, target.model);
+        });
+        
+        AudioEngine.error();
+      }
+    } finally {
+      setGeneratingState(false);
+    }
+  }
+
+  // --- OPENROUTER STREAMING EXECUTION ---
+  async function runOpenRouterStreaming(session, promptText, image, modelName) {
+    if (!STATE.settings.openRouterKey) {
+      showToast('OpenRouter API Key diperlukan! Buka Pengaturan untuk mengisi.', 'error');
+      openModal('settingsModal');
+      return;
+    }
+
+    setGeneratingState(true);
+    STATE.abortController = new AbortController();
+
+    const startTime = performance.now();
+    let firstTokenTime = null;
+    let tokenCount = 0;
+
+    const assistantRow = appendMessageElement('assistant', '', null, modelName);
+    const bubbleText = assistantRow.querySelector('.msg-text-content');
+    const metaBox = assistantRow.querySelector('.message-meta');
+    bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+    scrollChatToBottom();
+
+    let fullText = '';
+
+    try {
+      const messagesPayload = [];
+      if (STATE.settings.systemPrompt) {
+        messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
+      }
+
+      // History context - safely format images
+      const lastIndex = session.messages.length - 1;
+      session.messages.forEach((m, idx) => {
+        if (m.image && idx === lastIndex) {
+          messagesPayload.push({
+            role: m.role,
+            content: [
+              { type: 'text', text: m.content || 'Jelaskan dan analisis gambar ini secara detail.' },
+              { type: 'image_url', image_url: { url: m.image } }
+            ]
+          });
+        } else {
+          messagesPayload.push({ role: m.role, content: m.content || '' });
+        }
+      });
+
+      const requestBody = {
+        model: modelName,
+        messages: messagesPayload,
+        stream: true,
+        temperature: parseFloat(STATE.settings.temperature),
+        top_p: parseFloat(STATE.settings.topP),
+        max_tokens: parseInt(STATE.settings.maxTokens),
+        apiKey: STATE.settings.openRouterKey
+      };
+
+      const response = await fetch('/api/openrouter/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${STATE.settings.openRouterKey}`
+        },
+        body: JSON.stringify(requestBody),
+        signal: STATE.abortController.signal
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data:')) continue;
+          const jsonStr = trimmed.replace(/^data:\s*/, '');
+          if (jsonStr === '[DONE]') break;
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            if (parsed.error) throw new Error(typeof parsed.error === 'object' ? parsed.error.message : parsed.error);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) {
+              if (!firstTokenTime) firstTokenTime = performance.now();
+              tokenCount++;
+              fullText += delta;
+              bubbleText.innerHTML = renderMarkdown(fullText) + '<span class="typing-cursor"></span>';
+              scrollChatToBottom();
+            }
+          } catch (pe) {
+            // Ignore parse errors on partial chunks
+          }
+        }
+      }
+
+      const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
+      const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
+
+      bubbleText.innerHTML = renderMarkdown(fullText);
+      metaBox.innerHTML = `
+        <strong>${modelName}</strong>
+        <span class="meta-model-badge" style="background:rgba(255,82,0,0.15); color:var(--neon-amber);">OpenRouter</span>
+        <span>⏱️ ${totalTime}s</span>
+        <span>⚡ ${tps} tps</span>
+      `;
+
+      session.messages.push({
+        role: 'assistant',
+        content: fullText,
+        model: modelName,
+        engine: 'openrouter',
+        stats: { duration: totalTime, tps: tps, tokens: tokenCount },
+        timestamp: new Date().toISOString()
+      });
+      savePersistedState();
+      AudioEngine.receive();
+
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        showToast('Generasi dihentikan.');
+      } else {
+        bubbleText.innerHTML = `
+          <div style="color:var(--neon-amber); line-height:1.5;">
+            <strong>❌ Gagal OpenRouter (${escapeHtml(modelName)}):</strong> ${escapeHtml(err.message)}
+          </div>
+          <div style="margin-top:10px; display:flex; gap:8px;">
+            <button class="btn btn-sm btn-outline retry-vision-btn" style="border-color:var(--neon-teal); color:var(--neon-teal); font-size:0.75rem;">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> Beralih ke Gemini 2.0 Flash Vision & Coba Lagi
+            </button>
+          </div>
+        `;
+        
+        bubbleText.querySelector('.retry-vision-btn')?.addEventListener('click', () => {
+          assistantRow.remove();
+          const targetModel = 'google/gemini-2.0-flash-exp:free';
+          selectModel(targetModel);
+          showToast(`Beralih ke model vision: ${targetModel}`);
+          runOpenRouterStreaming(session, promptText, image, targetModel);
+        });
+        
+        AudioEngine.error();
+      }
+    } finally {
+      setGeneratingState(false);
+    }
+  }
+
+  // --- INDEPENDENT DUAL SPLIT WORKSPACE STREAMING ---
+  async function sendArenaPromptA(customText = null) {
+    const text = customText || (els.arenaInputA ? els.arenaInputA.value.trim() : '');
+    if (!text || STATE.isGeneratingA) return;
+
+    const session = getActiveSession('arena');
+    const modelA = (els.arenaModelOllama ? els.arenaModelOllama.value : null) || STATE.settings.arenaModelA;
+
+    // Clear empty placeholder
+    els.arenaMessagesA.querySelector('.arena-empty-placeholder')?.remove();
+
+    // Append user message to Slot A
+    appendArenaBubbleToColumn(els.arenaMessagesA, 'user', text, 'Anda', null, 'A');
+    session.messages.push({ role: 'user', content: text, slot: 'A', engine: 'ollama', timestamp: new Date().toISOString() });
+    savePersistedState();
+
+    if (els.arenaInputA) els.arenaInputA.value = '';
+    STATE.isGeneratingA = true;
+    if (els.arenaSendBtnA) els.arenaSendBtnA.style.display = 'none';
+    if (els.arenaStopBtnA) els.arenaStopBtnA.style.display = 'flex';
+    STATE.abortControllerA = new AbortController();
+
+    if (els.arenaStatsA) els.arenaStatsA.innerText = 'Menghasilkan...';
+    const assistantRow = appendArenaBubbleToColumn(els.arenaMessagesA, 'assistant', '', modelA, null, 'A');
+    const bubbleText = assistantRow.querySelector('.msg-text-content');
+    bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+    scrollArenaToBottom();
+
+    const start = performance.now();
+    let fullText = '';
+    let tokens = 0;
+
+    try {
+      const messagesPayload = [];
+      session.messages.filter(m => m.slot === 'A').forEach(m => {
+        messagesPayload.push({ role: m.role, content: m.content || '' });
+      });
+
+      const res = await fetch('/api/ollama/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: modelA,
+          messages: messagesPayload,
+          stream: true,
+          endpoint: STATE.settings.ollamaEndpoint
+        }),
+        signal: STATE.abortControllerA.signal
+      });
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const l of lines) {
+          if (!l.trim()) continue;
+          try {
+            const p = JSON.parse(l);
+            if (p.message?.content) {
+              tokens++;
+              fullText += p.message.content;
+              bubbleText.innerHTML = renderMarkdown(fullText) + '<span class="typing-cursor"></span>';
+              scrollArenaToBottom();
+            }
+          } catch (pe) {}
+        }
+      }
+
+      const totalTime = ((performance.now() - start) / 1000).toFixed(2);
+      const tps = totalTime > 0 ? (tokens / totalTime).toFixed(1) : '0';
+      bubbleText.innerHTML = renderMarkdown(fullText);
+      if (els.arenaStatsA) els.arenaStatsA.innerText = `⏱️ ${totalTime}s • ⚡ ${tps} tps`;
+
+      session.messages.push({
+        role: 'assistant',
+        content: fullText,
+        model: modelA,
+        slot: 'A',
+        engine: 'ollama',
+        stats: { duration: totalTime, tps, tokens },
+        timestamp: new Date().toISOString()
+      });
+      savePersistedState();
+      AudioEngine.receive();
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        showToast('Ollama Slot A dihentikan.');
+      } else {
+        bubbleText.innerHTML = `<span style="color:var(--neon-amber);">❌ Error: ${escapeHtml(e.message)}</span>`;
+        if (els.arenaStatsA) els.arenaStatsA.innerText = 'Error';
+      }
+    } finally {
+      STATE.isGeneratingA = false;
+      if (els.arenaSendBtnA) els.arenaSendBtnA.style.display = 'flex';
+      if (els.arenaStopBtnA) els.arenaStopBtnA.style.display = 'none';
+    }
+  }
+
+  async function sendArenaPromptB(customText = null) {
+    const text = customText || (els.arenaInputB ? els.arenaInputB.value.trim() : '');
+    if (!text || STATE.isGeneratingB) return;
+
+    if (!STATE.settings.openRouterKey) {
+      showToast('OpenRouter API Key diperlukan untuk Slot B! Buka Pengaturan.', 'error');
+      openModal('settingsModal');
+      return;
+    }
+
+    const session = getActiveSession('arena');
+    const modelB = (els.arenaModelOpenRouter ? els.arenaModelOpenRouter.value : null) || STATE.settings.arenaModelB;
+
+    // Clear empty placeholder
+    els.arenaMessagesB.querySelector('.arena-empty-placeholder')?.remove();
+
+    // Append user message to Slot B
+    appendArenaBubbleToColumn(els.arenaMessagesB, 'user', text, 'Anda', null, 'B');
+    session.messages.push({ role: 'user', content: text, slot: 'B', engine: 'openrouter', timestamp: new Date().toISOString() });
+    savePersistedState();
+
+    if (els.arenaInputB) els.arenaInputB.value = '';
+    STATE.isGeneratingB = true;
+    if (els.arenaSendBtnB) els.arenaSendBtnB.style.display = 'none';
+    if (els.arenaStopBtnB) els.arenaStopBtnB.style.display = 'flex';
+    STATE.abortControllerB = new AbortController();
+
+    if (els.arenaStatsB) els.arenaStatsB.innerText = 'Menghasilkan...';
+    const assistantRow = appendArenaBubbleToColumn(els.arenaMessagesB, 'assistant', '', modelB, null, 'B');
+    const bubbleText = assistantRow.querySelector('.msg-text-content');
+    bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+    scrollArenaToBottom();
+
+    const start = performance.now();
+    let fullText = '';
+    let tokens = 0;
+
+    try {
+      const messagesPayload = [];
+      session.messages.filter(m => m.slot === 'B').forEach(m => {
+        messagesPayload.push({ role: m.role, content: m.content || '' });
+      });
+
+      const res = await fetch('/api/openrouter/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${STATE.settings.openRouterKey}`
+        },
+        body: JSON.stringify({
+          model: modelB,
+          messages: messagesPayload,
+          stream: true,
+          apiKey: STATE.settings.openRouterKey
+        }),
+        signal: STATE.abortControllerB.signal
+      });
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const l of lines) {
+          if (!l.trim() || !l.startsWith('data:')) continue;
+          const jsonStr = l.replace(/^data:\s*/, '');
+          if (jsonStr === '[DONE]') break;
+          try {
+            const p = JSON.parse(jsonStr);
+            const delta = p.choices?.[0]?.delta?.content;
+            if (delta) {
+              tokens++;
+              fullText += delta;
+              bubbleText.innerHTML = renderMarkdown(fullText) + '<span class="typing-cursor"></span>';
+              scrollArenaToBottom();
+            }
+          } catch (pe) {}
+        }
+      }
+
+      const totalTime = ((performance.now() - start) / 1000).toFixed(2);
+      const tps = totalTime > 0 ? (tokens / totalTime).toFixed(1) : '0';
+      bubbleText.innerHTML = renderMarkdown(fullText);
+      if (els.arenaStatsB) els.arenaStatsB.innerText = `⏱️ ${totalTime}s • ⚡ ${tps} tps`;
+
+      session.messages.push({
+        role: 'assistant',
+        content: fullText,
+        model: modelB,
+        slot: 'B',
+        engine: 'openrouter',
+        stats: { duration: totalTime, tps, tokens },
+        timestamp: new Date().toISOString()
+      });
+      savePersistedState();
+      AudioEngine.receive();
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        showToast('OpenRouter Slot B dihentikan.');
+      } else {
+        bubbleText.innerHTML = `<span style="color:var(--neon-amber);">❌ Error: ${escapeHtml(e.message)}</span>`;
+        if (els.arenaStatsB) els.arenaStatsB.innerText = 'Error';
+      }
+    } finally {
+      STATE.isGeneratingB = false;
+      if (els.arenaSendBtnB) els.arenaSendBtnB.style.display = 'flex';
+      if (els.arenaStopBtnB) els.arenaStopBtnB.style.display = 'none';
+    }
+  }
+
+  // --- AUTO ROUTER (SMART ROUTING) ---
+  async function runAutoRouterStreaming(session, promptText, image) {
+    // Check if Ollama is online
+    const isOllamaOnline = await checkOllamaHealth();
+    
+    // Policy check
+    const isLongOrHeavy = (promptText.length > 800) || (promptText.toLowerCase().includes('buatkan sistem') || promptText.toLowerCase().includes('arsitektur kompleks'));
+
+    if (STATE.settings.autoPolicy === 'cloud_heavy' && isLongOrHeavy && STATE.settings.openRouterKey) {
+      showToast('🔀 Auto-Router: Mengarahkan tugas kompleks ke OpenRouter Cloud...', 'info');
+      await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
+    } else if (isOllamaOnline) {
+      showToast('🔀 Auto-Router: Mengeksekusi via Ollama Local Engine...', 'info');
+      await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel);
+    } else if (STATE.settings.openRouterKey) {
+      showToast('🔀 Auto-Router: Ollama offline, fallback ke OpenRouter...', 'info');
+      await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
+    } else {
+      showToast('Ollama offline dan OpenRouter Key belum disetting.', 'error');
+    }
+  }
+
+  function setGeneratingState(isGen) {
+    STATE.isGenerating = isGen;
+    els.sendPromptBtn.style.display = isGen ? 'none' : 'flex';
+    els.stopGenerationBtn.style.display = isGen ? 'flex' : 'none';
+  }
+
+  function stopGeneration() {
+    if (STATE.abortController) {
+      STATE.abortController.abort();
+      STATE.abortController = null;
+    }
+    setGeneratingState(false);
+  }
+
+  // ==================== IMAGE VISION HANDLER ====================
+  function handleImageUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      showToast('File harus berupa format gambar (PNG, JPG, WEBP).', 'error');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (loadEvt) => {
+      STATE.attachedImage = loadEvt.target.result;
+      els.imagePreviewImg.src = STATE.attachedImage;
+      els.attachmentPreviewBar.style.display = 'flex';
+      updateVisionCompatibilityBadge();
+      showToast('Gambar berhasil dilampirkan.');
+      AudioEngine.click();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function clearAttachedImage() {
+    STATE.attachedImage = null;
+    els.imageFileInput.value = '';
+    els.attachmentPreviewBar.style.display = 'none';
+    updateVisionCompatibilityBadge();
+  }
+
+  // ==================== SYSTEM PRESET HANDLER ====================
+  function applySystemPreset(presetKey) {
+    if (SYSTEM_PRESETS[presetKey]) {
+      STATE.settings.systemPrompt = SYSTEM_PRESETS[presetKey];
+      STATE.settings.activePreset = presetKey;
+      els.settingSystemPrompt.value = STATE.settings.systemPrompt;
+      updatePresetBanner();
+      savePersistedState();
+      showToast(`Persona aktif: ${presetKey.toUpperCase()}`);
+      AudioEngine.click();
+    }
+  }
+
+  function updatePresetBanner() {
+    if (STATE.settings.activePreset && SYSTEM_PRESETS[STATE.settings.activePreset]) {
+      els.activePresetBanner.style.display = 'flex';
+      els.activePresetName.innerText = `Persona: ${STATE.settings.activePreset.toUpperCase()}`;
+    } else {
+      els.activePresetBanner.style.display = 'none';
+    }
+  }
+
+  // ==================== MODEL HUB MODAL ====================
+  function renderModelHubGrid(filter = 'all', query = '') {
+    els.modelCardsGrid.innerHTML = '';
+    const q = query.toLowerCase().trim();
+
+    // Combine Ollama + OpenRouter
+    const combined = [
+      ...STATE.ollamaModels.map(m => ({
+        id: m.name,
+        name: m.name,
+        desc: `Model lokal tersimpan di mesin Anda (${(m.size / (1024*1024*1024)).toFixed(1)} GB).`,
+        tag: 'Ollama Local',
+        cat: 'local',
+        provider: 'ollama'
+      })),
+      ...STATE.openRouterModels.map(m => ({
+        ...m,
+        desc: m.tag === 'Free' ? 'Model gratis bertenaga cloud di OpenRouter.' : 'Model komputasi cloud flagship.',
+        provider: 'openrouter'
+      }))
+    ];
+
+    const filtered = combined.filter(m => {
+      const matchQ = !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q);
+      const matchFilter = filter === 'all' || 
+        (filter === 'free' && (m.tag === 'Free' || m.id.includes(':free'))) ||
+        (filter === 'local' && m.provider === 'ollama') ||
+        (filter === 'flagship' && (m.cat === 'flagship' || m.provider === 'openrouter')) ||
+        (filter === 'coding' && (m.cat === 'coding' || m.id.includes('code') || m.id.includes('qwen') || m.id.includes('claude'))) ||
+        (filter === 'reasoning' && (m.cat === 'reasoning' || m.id.includes('r1') || m.id.includes('o1')));
+      return matchQ && matchFilter;
+    });
+
+    if (filtered.length === 0) {
+      els.modelCardsGrid.innerHTML = `<div style="grid-column:1/-1; text-align:center; color:var(--text-dim); padding:20px;">Tidak ada model yang cocok dengan filter.</div>`;
+      return;
+    }
+
+    filtered.forEach(m => {
+      const card = document.createElement('div');
+      card.className = 'model-card-item';
+      card.innerHTML = `
+        <div>
+          <div class="model-card-badge">${escapeHtml(m.tag || 'AI')}</div>
+          <div class="model-card-title">${escapeHtml(m.name || m.id)}</div>
+          <div class="model-card-desc">${escapeHtml(m.desc || m.id)}</div>
+        </div>
+        <button class="btn btn-sm btn-outline choose-model-btn">Pilih Model</button>
+      `;
+
+      card.querySelector('.choose-model-btn').addEventListener('click', () => {
+        if (m.provider === 'ollama') {
+          setEngineMode('ollama');
+          selectModel(m.id);
+        } else {
+          setEngineMode('openrouter');
+          selectModel(m.id);
+        }
+        closeModal('modelHubModal');
+        AudioEngine.click();
+      });
+
+      els.modelCardsGrid.appendChild(card);
+    });
+  }
+
+  // ==================== EXPORT CHAT ====================
+  function exportChatHistory() {
+    const session = getActiveSession();
+    if (session.messages.length === 0) {
+      showToast('Obrolan masih kosong untuk diekspor.', 'error');
+      return;
+    }
+
+    let md = `# ${session.title}\n*Tanggal: ${new Date(session.createdAt).toLocaleString()}*\n*Engine: ${session.mode}*\n\n---\n\n`;
+    session.messages.forEach(m => {
+      const sender = m.role === 'user' ? '👤 User' : `🤖 ${m.model || 'Zoz AI'}`;
+      md += `### ${sender}\n\n${m.content}\n\n---\n\n`;
+    });
+
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `zoz-router-${session.title.replace(/[^a-zA-Z0-9]/g, '_')}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Obrolan berhasil diekspor sebagai Markdown!');
+    AudioEngine.click();
+  }
+
+  // ==================== MODAL HELPERS ====================
+  function openModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) modal.classList.add('show');
+  }
+
+  function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) modal.classList.remove('show');
+  }
+
+  function autoResizeTextarea(textarea) {
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`;
+  }
+
+  // ==================== INDEXEDDB AUDIO VAULT ====================
+  const MusicDB = {
+    db: null,
+    async init() {
+      return new Promise((resolve) => {
+        try {
+          const req = indexedDB.open('ZozRouterMusicDB_v1', 1);
+          req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('tracks')) {
+              db.createObjectStore('tracks', { keyPath: 'id' });
+            }
+          };
+          req.onsuccess = (e) => {
+            this.db = e.target.result;
+            resolve(this.db);
+          };
+          req.onerror = () => resolve(null);
+        } catch (e) {
+          resolve(null);
+        }
+      });
+    },
+    async saveTrack(track) {
+      if (!this.db) await this.init();
+      if (!this.db) return false;
+      return new Promise((resolve) => {
+        try {
+          const tx = this.db.transaction('tracks', 'readwrite');
+          tx.objectStore('tracks').put(track);
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+        } catch (e) {
+          resolve(false);
+        }
+      });
+    },
+    async getAllTracks() {
+      if (!this.db) await this.init();
+      if (!this.db) return [];
+      return new Promise((resolve) => {
+        try {
+          const tx = this.db.transaction('tracks', 'readonly');
+          const req = tx.objectStore('tracks').getAll();
+          req.onsuccess = () => resolve(req.result || []);
+          req.onerror = () => resolve([]);
+        } catch (e) {
+          resolve([]);
+        }
+      });
+    },
+    async deleteTrack(id) {
+      if (!this.db) await this.init();
+      if (!this.db) return false;
+      return new Promise((resolve) => {
+        try {
+          const tx = this.db.transaction('tracks', 'readwrite');
+          tx.objectStore('tracks').delete(id);
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+        } catch (e) {
+          resolve(false);
+        }
+      });
+    },
+    async clearAll() {
+      if (!this.db) await this.init();
+      if (!this.db) return false;
+      return new Promise((resolve) => {
+        try {
+          const tx = this.db.transaction('tracks', 'readwrite');
+          tx.objectStore('tracks').clear();
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+        } catch (e) {
+          resolve(false);
+        }
+      });
+    }
+  };
+
+  // ==================== PROCEDURAL AMBIENT SOUNDSCAPES ====================
+  const AMBIENT_PRESETS = [
+    {
+      id: 'ambient_space',
+      name: '🌌 Deep Space Neural Drone',
+      desc: 'Sintesis frekuensi 432Hz meditatif & resonansi sub-bass ruang hampa untuk ketenangan pikiran.',
+      icon: 'fa-brain'
+    },
+    {
+      id: 'ambient_synthwave',
+      name: '⚡ Cyberpunk Synthwave Pulse',
+      desc: 'Arpeggio neon 80s dengan filter cutoff analog dan modulasi binaural berenergi tinggi.',
+      icon: 'fa-bolt'
+    },
+    {
+      id: 'ambient_rain',
+      name: '🌧️ Neo-Tokyo Rain & Lo-Fi Vinyl',
+      desc: 'Deru hujan malam kota cyberpunk yang disaring dengan pad chord lo-fi bernuansa hangat.',
+      icon: 'fa-cloud-rain'
+    },
+    {
+      id: 'ambient_quantum',
+      name: '🧠 Quantum Focus Alpha Waves',
+      desc: 'Gelombang otak Alpha 10Hz binaural beats terkalibrasi khusus untuk deep coding & konsentrasi tajam.',
+      icon: 'fa-microchip'
+    }
+  ];
+
+  // ==================== CYBER BGM AUDIO ENGINE ====================
+  const BGMEngine = {
+    audio: null,
+    audioCtx: null,
+    analyser: null,
+    sourceNode: null,
+    masterGainNode: null,
+    ambientGainNode: null,
+    ambientNodes: [],
+    ambientTimer: null,
+    playlist: [],
+    currentIndex: -1,
+    isPlaying: false,
+    currentMode: null, // 'file' | 'ambient'
+    activeAmbientId: null,
+    volume: 0.5,
+    loopMode: 'all', // 'all' | 'one' | 'none'
+    isShuffle: false,
+    animFrameId: null,
+
+    async init() {
+      this.audio = new Audio();
+      this.audio.crossOrigin = 'anonymous';
+
+      // Load volume from storage
+      const savedVol = localStorage.getItem('zoz_bgm_volume');
+      if (savedVol !== null) {
+        this.volume = parseFloat(savedVol);
+      }
+      this.audio.volume = this.volume;
+      if (els.bgmMiniVolume) els.bgmMiniVolume.value = this.volume;
+      if (els.deckMasterVolume) els.deckMasterVolume.value = this.volume;
+      if (els.valMasterVolume) els.valMasterVolume.innerText = `${Math.round(this.volume * 100)}%`;
+
+      // Audio Event Handlers
+      this.audio.addEventListener('timeupdate', () => this.onTimeUpdate());
+      this.audio.addEventListener('ended', () => this.onTrackEnded());
+      this.audio.addEventListener('error', () => {
+        showToast('Gagal memutar file audio.', 'error');
+        this.setPlayingState(false);
+      });
+
+      // Load saved playlist from IndexedDB
+      await this.loadPlaylistFromDB();
+      this.renderPlaylistUI();
+      this.renderAmbientGridUI();
+
+      // Start Visualizer Canvas Loop
+      this.setupVisualizer();
+    },
+
+    initAudioContext() {
+      if (!this.audioCtx) {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass) {
+          this.audioCtx = new AudioContextClass();
+          this.analyser = this.audioCtx.createAnalyser();
+          this.analyser.fftSize = 64;
+
+          this.masterGainNode = this.audioCtx.createGain();
+          this.masterGainNode.gain.setValueAtTime(this.volume, this.audioCtx.currentTime);
+          this.masterGainNode.connect(this.audioCtx.destination);
+
+          // Connect HTML Audio source to Web Audio analyser
+          try {
+            this.sourceNode = this.audioCtx.createMediaElementSource(this.audio);
+            this.sourceNode.connect(this.analyser);
+            this.analyser.connect(this.masterGainNode);
+          } catch (e) {}
+        }
+      }
+      if (this.audioCtx && this.audioCtx.state === 'suspended') {
+        this.audioCtx.resume();
+      }
+    },
+
+    async loadPlaylistFromDB() {
+      const records = await MusicDB.getAllTracks();
+      this.playlist = records.map(r => ({
+        id: r.id,
+        name: r.name,
+        size: r.size,
+        type: r.type,
+        url: URL.createObjectURL(r.blob),
+        blob: r.blob
+      }));
+    },
+
+    async handleUploadFiles(fileList) {
+      if (!fileList || fileList.length === 0) return;
+      let addedCount = 0;
+
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        if (!file.type.startsWith('audio/') && !file.name.match(/\.(mp3|wav|ogg|flac|m4a|aac)$/i)) {
+          continue;
+        }
+
+        const id = `track_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const trackRecord = {
+          id,
+          name: file.name.replace(/\.[^/.]+$/, ''),
+          size: (file.size / (1024 * 1024)).toFixed(1),
+          type: file.type || 'audio/mpeg',
+          blob: file,
+          addedAt: new Date().toISOString()
+        };
+
+        await MusicDB.saveTrack(trackRecord);
+        this.playlist.push({
+          id,
+          name: trackRecord.name,
+          size: trackRecord.size,
+          type: trackRecord.type,
+          url: URL.createObjectURL(file),
+          blob: file
+        });
+        addedCount++;
+      }
+
+      if (addedCount > 0) {
+        showToast(`✅ ${addedCount} lagu berhasil diupload ke Playlist Lokal!`);
+        this.renderPlaylistUI();
+        AudioEngine.click();
+        
+        // Auto play the first uploaded track if idle
+        if (!this.isPlaying) {
+          this.playTrack(this.playlist.length - addedCount);
+        }
+      } else {
+        showToast('Format file tidak didukung. Pilih format audio (MP3, WAV, FLAC, OGG, M4A).', 'error');
+      }
+    },
+
+    async deleteTrack(id, e) {
+      if (e) e.stopPropagation();
+      await MusicDB.deleteTrack(id);
+      
+      const idx = this.playlist.findIndex(t => t.id === id);
+      if (idx !== -1) {
+        const wasCurrent = (this.currentIndex === idx && this.currentMode === 'file');
+        URL.revokeObjectURL(this.playlist[idx].url);
+        this.playlist.splice(idx, 1);
+        
+        if (wasCurrent) {
+          this.stop();
+          if (this.playlist.length > 0) {
+            this.playTrack(Math.min(idx, this.playlist.length - 1));
+          }
+        } else if (this.currentIndex > idx) {
+          this.currentIndex--;
+        }
+      }
+
+      this.renderPlaylistUI();
+      showToast('Lagu dihapus dari playlist.');
+      AudioEngine.click();
+    },
+
+    async clearAllTracks() {
+      if (this.playlist.length === 0) return;
+      if (!confirm('Hapus semua lagu dari playlist lokal?')) return;
+      
+      this.stop();
+      this.playlist.forEach(t => URL.revokeObjectURL(t.url));
+      this.playlist = [];
+      this.currentIndex = -1;
+      await MusicDB.clearAll();
+      this.renderPlaylistUI();
+      showToast('Playlist lokal telah dikosongkan.');
+      AudioEngine.click();
+    },
+
+    playTrack(index) {
+      if (index < 0 || index >= this.playlist.length) return;
+      this.initAudioContext();
+      this.stopAmbient();
+
+      this.currentIndex = index;
+      this.currentMode = 'file';
+      this.activeAmbientId = null;
+
+      const track = this.playlist[index];
+      this.audio.src = track.url;
+      this.audio.currentTime = 0;
+      
+      const playPromise = this.audio.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            this.setPlayingState(true);
+            this.updateUI();
+          })
+          .catch(() => {
+            this.setPlayingState(false);
+          });
+      }
+    },
+
+    togglePlayPause() {
+      this.initAudioContext();
+
+      if (this.isPlaying) {
+        if (this.currentMode === 'file') {
+          this.audio.pause();
+        } else if (this.currentMode === 'ambient') {
+          this.stopAmbient();
+        }
+        this.setPlayingState(false);
+      } else {
+        if (this.currentMode === 'file' && this.currentIndex >= 0 && this.currentIndex < this.playlist.length) {
+          this.audio.play();
+          this.setPlayingState(true);
+        } else if (this.currentMode === 'ambient' && this.activeAmbientId) {
+          this.startAmbient(this.activeAmbientId);
+        } else if (this.playlist.length > 0) {
+          this.playTrack(0);
+        } else {
+          this.startAmbient('ambient_space');
+        }
+      }
+      this.updateUI();
+      AudioEngine.click();
+    },
+
+    nextTrack() {
+      if (this.playlist.length === 0) return;
+      let nextIdx = this.currentIndex + 1;
+      if (this.isShuffle) {
+        nextIdx = Math.floor(Math.random() * this.playlist.length);
+      } else if (nextIdx >= this.playlist.length) {
+        nextIdx = 0;
+      }
+      this.playTrack(nextIdx);
+      AudioEngine.click();
+    },
+
+    prevTrack() {
+      if (this.playlist.length === 0) return;
+      if (this.audio && this.audio.currentTime > 3) {
+        this.audio.currentTime = 0;
+        return;
+      }
+      let prevIdx = this.currentIndex - 1;
+      if (prevIdx < 0) prevIdx = this.playlist.length - 1;
+      this.playTrack(prevIdx);
+      AudioEngine.click();
+    },
+
+    stop() {
+      if (this.audio) {
+        this.audio.pause();
+        this.audio.currentTime = 0;
+      }
+      this.stopAmbient();
+      this.setPlayingState(false);
+      this.updateUI();
+    },
+
+    setPlayingState(isPlaying) {
+      this.isPlaying = isPlaying;
+      this.updateUI();
+    },
+
+    onTrackEnded() {
+      if (this.loopMode === 'one') {
+        this.audio.currentTime = 0;
+        this.audio.play();
+      } else if (this.loopMode === 'all') {
+        this.nextTrack();
+      } else {
+        if (this.currentIndex < this.playlist.length - 1) {
+          this.nextTrack();
+        } else {
+          this.setPlayingState(false);
+        }
+      }
+    },
+
+    onTimeUpdate() {
+      if (!this.audio || this.currentMode !== 'file') return;
+      const cur = this.audio.currentTime || 0;
+      const dur = this.audio.duration || 0;
+      
+      if (dur > 0 && els.deckProgressSlider) {
+        els.deckProgressSlider.value = (cur / dur) * 100;
+      }
+
+      if (els.deckCurrentTrackMeta) {
+        const curStr = this.formatTime(cur);
+        const durStr = dur ? this.formatTime(dur) : '--:--';
+        els.deckCurrentTrackMeta.innerText = `${curStr} / ${durStr}`;
+      }
+    },
+
+    seek(percent) {
+      if (this.audio && this.audio.duration && this.currentMode === 'file') {
+        this.audio.currentTime = (percent / 100) * this.audio.duration;
+      }
+    },
+
+    setVolume(val) {
+      this.volume = Math.max(0, Math.min(1, parseFloat(val)));
+      localStorage.setItem('zoz_bgm_volume', this.volume.toString());
+
+      if (this.audio) this.audio.volume = this.volume;
+      if (this.masterGainNode && this.audioCtx) {
+        this.masterGainNode.gain.setValueAtTime(this.volume, this.audioCtx.currentTime);
+      }
+      if (this.ambientGainNode && this.audioCtx) {
+        this.ambientGainNode.gain.setValueAtTime(this.volume * 0.45, this.audioCtx.currentTime);
+      }
+
+      if (els.bgmMiniVolume) els.bgmMiniVolume.value = this.volume;
+      if (els.deckMasterVolume) els.deckMasterVolume.value = this.volume;
+      if (els.valMasterVolume) els.valMasterVolume.innerText = `${Math.round(this.volume * 100)}%`;
+    },
+
+    // --- PROCEDURAL SYNTHESIZER GENERATOR ---
+    startAmbient(presetId) {
+      this.initAudioContext();
+      if (this.audio) this.audio.pause();
+      this.stopAmbient();
+
+      this.currentMode = 'ambient';
+      this.activeAmbientId = presetId;
+      this.currentIndex = -1;
+
+      const ctx = this.audioCtx;
+      this.ambientGainNode = ctx.createGain();
+      this.ambientGainNode.gain.setValueAtTime(this.volume * 0.45, ctx.currentTime);
+      
+      // Route ambient synth to analyser and master destination
+      if (this.analyser) {
+        this.ambientGainNode.connect(this.analyser);
+      } else {
+        this.ambientGainNode.connect(ctx.destination);
+      }
+
+      if (presetId === 'ambient_space') {
+        // 🌌 Deep Space Neural Drone (432Hz sine + 108Hz sub-bass + slow LFO)
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const sub = ctx.createOscillator();
+        const filter = ctx.createBiquadFilter();
+        const lfo = ctx.createOscillator();
+        const lfoGain = ctx.createGain();
+
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(432, ctx.currentTime);
+        osc2.type = 'triangle';
+        osc2.frequency.setValueAtTime(216, ctx.currentTime);
+        sub.type = 'sine';
+        sub.frequency.setValueAtTime(108, ctx.currentTime);
+
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(320, ctx.currentTime);
+
+        lfo.type = 'sine';
+        lfo.frequency.setValueAtTime(0.08, ctx.currentTime);
+        lfoGain.gain.setValueAtTime(120, ctx.currentTime);
+        lfo.connect(lfoGain);
+        lfoGain.connect(filter.frequency);
+
+        osc1.connect(filter);
+        osc2.connect(filter);
+        sub.connect(filter);
+        filter.connect(this.ambientGainNode);
+
+        osc1.start();
+        osc2.start();
+        sub.start();
+        lfo.start();
+        this.ambientNodes.push(osc1, osc2, sub, lfo, filter, lfoGain);
+
+      } else if (presetId === 'ambient_synthwave') {
+        // ⚡ Cyberpunk Synthwave Pulse (Arp Chords + Resonant Lowpass)
+        const notes = [130.81, 164.81, 196.00, 261.63, 196.00, 164.81];
+        let noteIdx = 0;
+        
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(800, ctx.currentTime);
+        filter.Q.setValueAtTime(4, ctx.currentTime);
+        filter.connect(this.ambientGainNode);
+
+        const pad = ctx.createOscillator();
+        pad.type = 'sawtooth';
+        pad.frequency.setValueAtTime(65.41, ctx.currentTime);
+        pad.connect(filter);
+        pad.start();
+        this.ambientNodes.push(pad, filter);
+
+        this.ambientTimer = setInterval(() => {
+          if (!this.isPlaying || this.activeAmbientId !== 'ambient_synthwave') return;
+          try {
+            const arp = ctx.createOscillator();
+            const arpGain = ctx.createGain();
+            arp.type = 'sawtooth';
+            arp.frequency.setValueAtTime(notes[noteIdx % notes.length], ctx.currentTime);
+            arpGain.gain.setValueAtTime(0.08, ctx.currentTime);
+            arpGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+            arp.connect(arpGain);
+            arpGain.connect(filter);
+            arp.start();
+            arp.stop(ctx.currentTime + 0.35);
+            noteIdx++;
+          } catch (e) {}
+        }, 320);
+
+      } else if (presetId === 'ambient_rain') {
+        // 🌧️ Neo-Tokyo Rain & Lo-Fi Vinyl (Filtered White Noise + Warm Chords)
+        const bufferSize = ctx.sampleRate * 2;
+        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = Math.random() * 2 - 1;
+        }
+
+        const whiteNoise = ctx.createBufferSource();
+        whiteNoise.buffer = noiseBuffer;
+        whiteNoise.loop = true;
+
+        const rainFilter = ctx.createBiquadFilter();
+        rainFilter.type = 'bandpass';
+        rainFilter.frequency.setValueAtTime(1000, ctx.currentTime);
+        rainFilter.Q.setValueAtTime(0.5, ctx.currentTime);
+
+        const chord1 = ctx.createOscillator();
+        const chord2 = ctx.createOscillator();
+        chord1.type = 'sine';
+        chord1.frequency.setValueAtTime(220, ctx.currentTime);
+        chord2.type = 'sine';
+        chord2.frequency.setValueAtTime(277.18, ctx.currentTime);
+
+        const chordGain = ctx.createGain();
+        chordGain.gain.setValueAtTime(0.04, ctx.currentTime);
+
+        chord1.connect(chordGain);
+        chord2.connect(chordGain);
+        chordGain.connect(this.ambientGainNode);
+
+        whiteNoise.connect(rainFilter);
+        rainFilter.connect(this.ambientGainNode);
+
+        whiteNoise.start();
+        chord1.start();
+        chord2.start();
+        this.ambientNodes.push(whiteNoise, rainFilter, chord1, chord2, chordGain);
+
+      } else if (presetId === 'ambient_quantum') {
+        // 🧠 Quantum Focus Alpha Waves (10Hz Binaural Beats + Sub Pad)
+        const leftOsc = ctx.createOscillator();
+        const rightOsc = ctx.createOscillator();
+        const leftPanner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+        const rightPanner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+
+        leftOsc.type = 'sine';
+        leftOsc.frequency.setValueAtTime(200, ctx.currentTime);
+        rightOsc.type = 'sine';
+        rightOsc.frequency.setValueAtTime(210, ctx.currentTime); // 10Hz Alpha difference
+
+        if (leftPanner && rightPanner) {
+          leftPanner.pan.setValueAtTime(-1, ctx.currentTime);
+          rightPanner.pan.setValueAtTime(1, ctx.currentTime);
+          leftOsc.connect(leftPanner);
+          rightOsc.connect(rightPanner);
+          leftPanner.connect(this.ambientGainNode);
+          rightPanner.connect(this.ambientGainNode);
+          this.ambientNodes.push(leftPanner, rightPanner);
+        } else {
+          leftOsc.connect(this.ambientGainNode);
+          rightOsc.connect(this.ambientGainNode);
+        }
+
+        leftOsc.start();
+        rightOsc.start();
+        this.ambientNodes.push(leftOsc, rightOsc);
+      }
+
+      this.setPlayingState(true);
+      this.updateUI();
+    },
+
+    stopAmbient() {
+      if (this.ambientTimer) {
+        clearInterval(this.ambientTimer);
+        this.ambientTimer = null;
+      }
+      this.ambientNodes.forEach(node => {
+        try {
+          if (node.stop) node.stop();
+          if (node.disconnect) node.disconnect();
+        } catch (e) {}
+      });
+      this.ambientNodes = [];
+    },
+
+    // --- UI RENDERING & SYNCHRONIZATION ---
+    renderPlaylistUI() {
+      if (els.playlistCountBadge) els.playlistCountBadge.innerText = this.playlist.length;
+      if (!els.playlistItemsList) return;
+
+      if (this.playlist.length === 0) {
+        els.playlistItemsList.innerHTML = `
+          <div style="text-align: center; padding: 24px; color: var(--text-dim); font-size: 0.82rem;">
+            <i class="fa-solid fa-music" style="font-size: 1.8rem; color: rgba(0, 240, 255, 0.25); margin-bottom: 8px; display: block;"></i>
+            Belum ada file musik lokal. Tarik & letakkan file musik Anda ke dropzone di atas!
+          </div>
+        `;
+        return;
+      }
+
+      els.playlistItemsList.innerHTML = '';
+      this.playlist.forEach((track, idx) => {
+        const item = document.createElement('div');
+        item.className = `playlist-item ${this.currentMode === 'file' && this.currentIndex === idx ? 'active' : ''}`;
+        item.innerHTML = `
+          <div class="playlist-item-info">
+            <span style="font-family: var(--font-code); color: var(--neon-cyan); font-size: 0.72rem; min-width: 20px;">#${idx + 1}</span>
+            <span class="playlist-item-title">${escapeHtml(track.name)}</span>
+            <span class="playlist-item-size">${track.size} MB</span>
+          </div>
+          <div class="playlist-item-actions">
+            <button class="btn btn-xs btn-outline play-track-btn" title="Putar Lagu"><i class="fa-solid ${this.currentMode === 'file' && this.currentIndex === idx && this.isPlaying ? 'fa-pause' : 'fa-play'}"></i></button>
+            <button class="btn btn-xs btn-outline del-track-btn" style="border-color: rgba(255,82,0,0.4); color: var(--neon-amber);" title="Hapus Lagu"><i class="fa-solid fa-trash-can"></i></button>
+          </div>
+        `;
+
+        item.querySelector('.play-track-btn').addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (this.currentMode === 'file' && this.currentIndex === idx) {
+            this.togglePlayPause();
+          } else {
+            this.playTrack(idx);
+          }
+        });
+
+        item.querySelector('.del-track-btn').addEventListener('click', (e) => this.deleteTrack(track.id, e));
+
+        item.addEventListener('click', () => {
+          if (this.currentMode === 'file' && this.currentIndex === idx) {
+            this.togglePlayPause();
+          } else {
+            this.playTrack(idx);
+          }
+        });
+
+        els.playlistItemsList.appendChild(item);
+      });
+    },
+
+    renderAmbientGridUI() {
+      if (!els.ambientCardsGrid) return;
+      els.ambientCardsGrid.innerHTML = '';
+
+      AMBIENT_PRESETS.forEach(p => {
+        const card = document.createElement('div');
+        const isActive = this.currentMode === 'ambient' && this.activeAmbientId === p.id && this.isPlaying;
+        card.className = `ambient-card ${isActive ? 'active' : ''}`;
+        card.innerHTML = `
+          <div>
+            <div class="ambient-card-header">
+              <div class="ambient-card-icon"><i class="fa-solid ${p.icon}"></i></div>
+              <div class="ambient-card-title">${escapeHtml(p.name)}</div>
+            </div>
+            <div class="ambient-card-desc">${escapeHtml(p.desc)}</div>
+          </div>
+          <button class="btn btn-sm ${isActive ? 'btn-primary' : 'btn-outline'} toggle-ambient-btn">
+            <i class="fa-solid ${isActive ? 'fa-stop' : 'fa-play'}"></i> ${isActive ? 'Hentikan Soundscape' : 'Aktifkan Ambient'}
+          </button>
+        `;
+
+        card.querySelector('.toggle-ambient-btn').addEventListener('click', () => {
+          if (this.currentMode === 'ambient' && this.activeAmbientId === p.id && this.isPlaying) {
+            this.stop();
+          } else {
+            this.startAmbient(p.id);
+          }
+          this.renderAmbientGridUI();
+        });
+
+        els.ambientCardsGrid.appendChild(card);
+      });
+    },
+
+    updateUI() {
+      // Header Pulse Indicator
+      if (els.musicHeaderPulse) {
+        els.musicHeaderPulse.style.display = this.isPlaying ? 'block' : 'none';
+      }
+
+      // Sidebar Widget Equalizer Animation
+      if (els.bgmAnimBars) {
+        els.bgmAnimBars.classList.toggle('playing', this.isPlaying);
+      }
+
+      // Title String
+      let title = 'Cyber BGM: Siap';
+      if (this.currentMode === 'file' && this.currentIndex >= 0 && this.currentIndex < this.playlist.length) {
+        title = `🎵 ${this.playlist[this.currentIndex].name}`;
+      } else if (this.currentMode === 'ambient' && this.activeAmbientId) {
+        const preset = AMBIENT_PRESETS.find(p => p.id === this.activeAmbientId);
+        title = preset ? preset.name : 'Cyber Ambient';
+      }
+
+      if (els.bgmTrackTitle) els.bgmTrackTitle.innerText = title;
+      if (els.deckCurrentTrackName) els.deckCurrentTrackName.innerText = title;
+
+      // Play / Pause Icons
+      const playIcon = this.isPlaying ? '<i class="fa-solid fa-pause"></i>' : '<i class="fa-solid fa-play"></i>';
+      if (els.bgmPlayPauseBtn) els.bgmPlayPauseBtn.innerHTML = playIcon;
+      if (els.deckPlayPauseBtn) els.deckPlayPauseBtn.innerHTML = playIcon;
+
+      // Update active rows in playlist & ambient grid
+      this.renderPlaylistUI();
+      this.renderAmbientGridUI();
+    },
+
+    setupVisualizer() {
+      const canvas = els.audioVisualizerCanvas;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const bufferLength = 32;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const draw = () => {
+        this.animFrameId = requestAnimationFrame(draw);
+        const w = canvas.width = canvas.parentElement ? canvas.parentElement.clientWidth : 400;
+        const h = canvas.height = 110;
+
+        ctx.clearRect(0, 0, w, h);
+
+        if (this.analyser && this.isPlaying) {
+          this.analyser.getByteFrequencyData(dataArray);
+        } else {
+          dataArray.fill(0);
+        }
+
+        const barWidth = (w / bufferLength) * 0.75;
+        const barSpacing = (w / bufferLength) * 0.25;
+        let x = barSpacing / 2;
+
+        for (let i = 0; i < bufferLength; i++) {
+          const val = dataArray[i];
+          const percent = val / 255;
+          const barHeight = Math.max(4, percent * (h - 15));
+
+          const gradient = ctx.createLinearGradient(0, h, 0, h - barHeight);
+          gradient.addColorStop(0, 'rgba(0, 240, 255, 0.25)');
+          gradient.addColorStop(0.6, 'rgba(0, 255, 194, 0.8)');
+          gradient.addColorStop(1, '#00F0FF');
+
+          ctx.fillStyle = gradient;
+          ctx.shadowBlur = this.isPlaying ? 8 : 0;
+          ctx.shadowColor = '#00F0FF';
+          ctx.fillRect(x, h - barHeight, barWidth, barHeight);
+
+          // Neon top cap
+          ctx.fillStyle = '#FFF';
+          ctx.fillRect(x, h - barHeight - 2, barWidth, 2);
+
+          x += barWidth + barSpacing;
+        }
+      };
+
+      draw();
+    },
+
+    formatTime(sec) {
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+  };
+
+  // ==================== EVENT LISTENERS SETUP ====================
+  function setupEventListeners() {
+    // Mode Switchers
+    els.modeTabs.forEach(tab => {
+      tab.addEventListener('click', () => setEngineMode(tab.dataset.mode));
+    });
+
+    // Model Picker Dropdown
+    els.modelPickerChip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      els.modelDropdownMenu.classList.toggle('show');
+      populateModelDropdown(els.modelSearchInput.value);
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!els.modelPickerChip.contains(e.target) && !els.modelDropdownMenu.contains(e.target)) {
+        els.modelDropdownMenu.classList.remove('show');
+      }
+    });
+
+    els.modelSearchInput.addEventListener('input', (e) => {
+      populateModelDropdown(e.target.value);
+    });
+
+    els.useCustomModelBtn.addEventListener('click', () => {
+      const val = els.customModelInput.value.trim();
+      if (val) {
+        selectModel(val);
+        els.customModelInput.value = '';
+        els.modelDropdownMenu.classList.remove('show');
+      }
+    });
+
+    // Send Prompt & Keyboard Handlers
+    els.sendPromptBtn.addEventListener('click', handleSendPrompt);
+    els.stopGenerationBtn.addEventListener('click', stopGeneration);
+
+    els.promptInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSendPrompt();
+      }
+    });
+
+    els.promptInput.addEventListener('input', () => autoResizeTextarea(els.promptInput));
+
+    // Image Upload
+    els.attachImageBtn.addEventListener('click', () => els.imageFileInput.click());
+    els.imageFileInput.addEventListener('change', handleImageUpload);
+    els.removeImageBtn.addEventListener('click', clearAttachedImage);
+
+    // New Chat & History
+    els.newChatBtn.addEventListener('click', () => createNewSession());
+    els.searchHistoryInput.addEventListener('input', (e) => renderChatHistory(e.target.value));
+    
+    els.clearAllHistoryBtn.addEventListener('click', () => {
+      if (confirm('Apakah Anda yakin ingin menghapus semua riwayat sesi obrolan?')) {
+        STATE.sessions = [];
+        STATE.currentSessionId = null;
+        createNewSession();
+        showToast('Semua riwayat dibersihkan.');
+      }
+    });
+
+    // Sidebar Mobile Toggle
+    els.toggleSidebarBtn.addEventListener('click', () => els.sidebar.classList.add('open'));
+    els.closeSidebarBtn.addEventListener('click', () => els.sidebar.classList.remove('open'));
+
+    // Status Buttons
+    els.refreshOllamaBtn.addEventListener('click', () => {
+      checkOllamaHealth();
+      AudioEngine.click();
+    });
+
+    els.openSettingsKeyBtn.addEventListener('click', () => {
+      openModal('settingsModal');
+      AudioEngine.click();
+    });
+
+    // Top Action Buttons
+    els.systemPromptModalBtn.addEventListener('click', () => {
+      openModal('settingsModal');
+      $$('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.target === 'tabSystem'));
+      $$('.settings-tab-pane').forEach(pane => pane.classList.toggle('active', pane.id === 'tabSystem'));
+    });
+
+    els.exportChatBtn.addEventListener('click', exportChatHistory);
+
+    els.soundToggleBtn.addEventListener('click', () => {
+      STATE.soundEnabled = !STATE.soundEnabled;
+      savePersistedState();
+      els.soundToggleBtn.innerHTML = STATE.soundEnabled 
+        ? '<i class="fa-solid fa-volume-high"></i>' 
+        : '<i class="fa-solid fa-volume-xmark"></i>';
+      showToast(STATE.soundEnabled ? 'Suara UI diaktifkan.' : 'Suara UI dibisukan.');
+      if (STATE.soundEnabled) AudioEngine.click();
+    });
+
+    // Arena Select Changes & Split Workspace Listeners
+    els.arenaModelOllama?.addEventListener('change', (e) => {
+      STATE.settings.arenaModelA = e.target.value;
+      savePersistedState();
+    });
+    els.arenaModelOpenRouter?.addEventListener('change', (e) => {
+      STATE.settings.arenaModelB = e.target.value;
+      savePersistedState();
+    });
+
+    // Arena Slot A (Ollama Local) Listeners
+    els.arenaSendBtnA?.addEventListener('click', () => sendArenaPromptA());
+    els.arenaStopBtnA?.addEventListener('click', () => {
+      if (STATE.abortControllerA) {
+        STATE.abortControllerA.abort();
+        STATE.abortControllerA = null;
+      }
+    });
+    els.arenaInputA?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendArenaPromptA();
+      }
+    });
+    els.arenaInputA?.addEventListener('input', () => autoResizeTextarea(els.arenaInputA));
+    els.clearArenaChatABtn?.addEventListener('click', () => {
+      const session = getActiveSession('arena');
+      session.messages = session.messages.filter(m => m.slot !== 'A');
+      savePersistedState();
+      renderCurrentSession();
+      showToast('Chat Ollama (Slot A) dibersihkan.');
+      AudioEngine.click();
+    });
+
+    // Arena Slot B (OpenRouter Cloud) Listeners
+    els.arenaSendBtnB?.addEventListener('click', () => sendArenaPromptB());
+    els.arenaStopBtnB?.addEventListener('click', () => {
+      if (STATE.abortControllerB) {
+        STATE.abortControllerB.abort();
+        STATE.abortControllerB = null;
+      }
+    });
+    els.arenaInputB?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendArenaPromptB();
+      }
+    });
+    els.arenaInputB?.addEventListener('input', () => autoResizeTextarea(els.arenaInputB));
+    els.clearArenaChatBBtn?.addEventListener('click', () => {
+      const session = getActiveSession('arena');
+      session.messages = session.messages.filter(m => m.slot !== 'B');
+      savePersistedState();
+      renderCurrentSession();
+      showToast('Chat OpenRouter (Slot B) dibersihkan.');
+      AudioEngine.click();
+    });
+
+    // Quick Hero Prompts
+    $$('.quick-prompt-card').forEach(card => {
+      card.addEventListener('click', () => {
+        els.promptInput.value = card.dataset.prompt;
+        autoResizeTextarea(els.promptInput);
+        els.promptInput.focus();
+        AudioEngine.click();
+      });
+    });
+
+    // Modals Close handlers
+    $$('[data-close]').forEach(btn => {
+      btn.addEventListener('click', () => closeModal(btn.dataset.close));
+    });
+
+    // Settings Modal Tabs
+    $$('.settings-tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const modal = btn.closest('.modal-card');
+        if (modal) {
+          modal.querySelectorAll('.settings-tab-btn').forEach(b => b.classList.remove('active'));
+          modal.querySelectorAll('.settings-tab-pane').forEach(p => p.classList.remove('active'));
+          btn.classList.add('active');
+          const target = modal.querySelector(`#${btn.dataset.target}`);
+          if (target) target.classList.add('active');
+        }
+      });
+    });
+
+    // Sliders
+    els.paramTemperature.addEventListener('input', (e) => {
+      els.valTemperature.innerText = e.target.value;
+    });
+    els.paramTopP.addEventListener('input', (e) => {
+      els.valTopP.innerText = e.target.value;
+    });
+
+    // Presets in settings
+    $$('.preset-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        applySystemPreset(pill.dataset.preset);
+      });
+    });
+
+    els.clearPresetBtn.addEventListener('click', () => {
+      STATE.settings.activePreset = null;
+      STATE.settings.systemPrompt = '';
+      els.settingSystemPrompt.value = '';
+      updatePresetBanner();
+      savePersistedState();
+      showToast('Persona default aktif.');
+    });
+
+    // Settings Actions
+    els.settingsBtn.addEventListener('click', () => {
+      els.settingOllamaEndpoint.value = STATE.settings.ollamaEndpoint;
+      els.settingOpenRouterKey.value = STATE.settings.openRouterKey;
+      els.paramTemperature.value = STATE.settings.temperature;
+      els.valTemperature.innerText = STATE.settings.temperature;
+      els.paramTopP.value = STATE.settings.topP;
+      els.valTopP.innerText = STATE.settings.topP;
+      els.paramMaxTokens.value = STATE.settings.maxTokens;
+      els.settingSystemPrompt.value = STATE.settings.systemPrompt;
+      els.settingAutoPolicy.value = STATE.settings.autoPolicy;
+      openModal('settingsModal');
+    });
+
+    els.toggleShowKeyBtn.addEventListener('click', () => {
+      const isPass = els.settingOpenRouterKey.type === 'password';
+      els.settingOpenRouterKey.type = isPass ? 'text' : 'password';
+      els.toggleShowKeyBtn.innerHTML = isPass ? '<i class="fa-solid fa-eye-slash"></i>' : '<i class="fa-solid fa-eye"></i>';
+    });
+
+    els.testOllamaBtn.addEventListener('click', async () => {
+      const ep = els.settingOllamaEndpoint.value.trim() || 'http://127.0.0.1:11434';
+      try {
+        const res = await fetch(`/api/ollama/models?endpoint=${encodeURIComponent(ep)}`);
+        const data = await res.json();
+        if (res.ok && data.models) {
+          showToast(`✅ Koneksi sukses! Ditemukan ${data.models.length} model.`);
+        } else {
+          showToast(`❌ Gagal: ${data.error || 'Ollama tidak merespons'}`, 'error');
+        }
+      } catch (e) {
+        showToast('❌ Tidak dapat menghubungi server Ollama.', 'error');
+      }
+    });
+
+    els.testOpenRouterBtn.addEventListener('click', async () => {
+      const key = els.settingOpenRouterKey.value.trim();
+      if (!key) {
+        showToast('Masukkan API Key terlebih dahulu.', 'error');
+        return;
+      }
+      try {
+        const res = await fetch('/api/openrouter/auth-check', {
+          headers: { 'Authorization': `Bearer ${key}` }
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast('✅ OpenRouter API Key valid & aktif!');
+        } else {
+          showToast(`❌ Validasi gagal: ${data.error || 'Key tidak valid'}`, 'error');
+        }
+      } catch (e) {
+        showToast('❌ Gagal memeriksa API Key.', 'error');
+      }
+    });
+
+    els.saveSettingsBtn.addEventListener('click', () => {
+      STATE.settings.ollamaEndpoint = els.settingOllamaEndpoint.value.trim() || 'http://127.0.0.1:11434';
+      STATE.settings.openRouterKey = els.settingOpenRouterKey.value.trim();
+      STATE.settings.temperature = parseFloat(els.paramTemperature.value);
+      STATE.settings.topP = parseFloat(els.paramTopP.value);
+      STATE.settings.maxTokens = parseInt(els.paramMaxTokens.value) || 4096;
+      STATE.settings.systemPrompt = els.settingSystemPrompt.value.trim();
+      STATE.settings.autoPolicy = els.settingAutoPolicy.value;
+      
+      savePersistedState();
+      checkOllamaHealth();
+      checkOpenRouterStatus();
+      updatePresetBanner();
+      closeModal('settingsModal');
+      showToast('Pengaturan Zoz Router berhasil disimpan!');
+      AudioEngine.click();
+    });
+
+    // Model Hub Modal
+    els.modelHubBtn.addEventListener('click', () => {
+      openModal('modelHubModal');
+      renderModelHubGrid();
+    });
+
+    els.hubSearchInput.addEventListener('input', (e) => {
+      const activeFilter = $('.filter-pill.active')?.dataset.filter || 'all';
+      renderModelHubGrid(activeFilter, e.target.value);
+    });
+
+    els.filterPills.forEach(pill => {
+      pill.addEventListener('click', () => {
+        els.filterPills.forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        renderModelHubGrid(pill.dataset.filter, els.hubSearchInput.value);
+      });
+    });
+
+    // ==================== BGM & AUDIO LISTENERS ====================
+    els.musicPlayerModalBtn?.addEventListener('click', () => {
+      openModal('musicDeckModal');
+      AudioEngine.click();
+    });
+
+    els.openMusicModalFromWidget?.addEventListener('click', () => {
+      openModal('musicDeckModal');
+      AudioEngine.click();
+    });
+
+    els.bgmPlayPauseBtn?.addEventListener('click', () => BGMEngine.togglePlayPause());
+    els.deckPlayPauseBtn?.addEventListener('click', () => BGMEngine.togglePlayPause());
+
+    els.bgmNextBtn?.addEventListener('click', () => BGMEngine.nextTrack());
+    els.deckNextBtn?.addEventListener('click', () => BGMEngine.nextTrack());
+
+    els.bgmPrevBtn?.addEventListener('click', () => BGMEngine.prevTrack());
+    els.deckPrevBtn?.addEventListener('click', () => BGMEngine.prevTrack());
+
+    els.bgmMiniVolume?.addEventListener('input', (e) => BGMEngine.setVolume(e.target.value));
+    els.deckMasterVolume?.addEventListener('input', (e) => BGMEngine.setVolume(e.target.value));
+
+    els.deckProgressSlider?.addEventListener('input', (e) => BGMEngine.seek(e.target.value));
+
+    els.deckLoopBtn?.addEventListener('click', () => {
+      if (BGMEngine.loopMode === 'all') {
+        BGMEngine.loopMode = 'one';
+        els.deckLoopBtn.innerHTML = '<i class="fa-solid fa-repeat"></i> Loop 1';
+        showToast('Mode Loop: Ulang 1 Lagu');
+      } else if (BGMEngine.loopMode === 'one') {
+        BGMEngine.loopMode = 'none';
+        els.deckLoopBtn.innerHTML = '<i class="fa-solid fa-repeat"></i> Loop: Off';
+        showToast('Mode Loop: Nonaktif');
+      } else {
+        BGMEngine.loopMode = 'all';
+        els.deckLoopBtn.innerHTML = '<i class="fa-solid fa-repeat"></i> Loop All';
+        showToast('Mode Loop: Ulang Semua Playlist');
+      }
+      AudioEngine.click();
+    });
+
+    els.deckShuffleBtn?.addEventListener('click', () => {
+      BGMEngine.isShuffle = !BGMEngine.isShuffle;
+      els.deckShuffleBtn.innerHTML = `<i class="fa-solid fa-shuffle"></i> Acak: ${BGMEngine.isShuffle ? 'On' : 'Off'}`;
+      els.deckShuffleBtn.classList.toggle('active', BGMEngine.isShuffle);
+      showToast(BGMEngine.isShuffle ? 'Mode Acak: Aktif' : 'Mode Acak: Nonaktif');
+      AudioEngine.click();
+    });
+
+    // Audio Upload Handlers
+    els.triggerAudioUploadBtn?.addEventListener('click', () => els.localAudioFileInput.click());
+    els.localAudioFileInput?.addEventListener('change', (e) => {
+      BGMEngine.handleUploadFiles(e.target.files);
+    });
+
+    // Dropzone Drag & Drop
+    if (els.audioDropzone) {
+      els.audioDropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        els.audioDropzone.classList.add('dragover');
+      });
+      els.audioDropzone.addEventListener('dragleave', () => {
+        els.audioDropzone.classList.remove('dragover');
+      });
+      els.audioDropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        els.audioDropzone.classList.remove('dragover');
+        if (e.dataTransfer?.files) {
+          BGMEngine.handleUploadFiles(e.dataTransfer.files);
+        }
+      });
+    }
+
+    // Speech Recognition
+    setupSpeechRecognition();
+
+    // Mobile Keyboard & Visual Viewport Handler
+    setupMobileKeyboardHandler();
+  }
+
+  // ==================== MOBILE KEYBOARD & VIEWPORT RESIZE HANDLER ====================
+  function setupMobileKeyboardHandler() {
+    const appContainer = $('.app-container');
+    const chatViewport = els.chatViewport;
+
+    if (window.visualViewport) {
+      const handleResize = () => {
+        const vh = window.visualViewport.height;
+        if (appContainer) {
+          appContainer.style.height = `${vh}px`;
+        }
+
+        // If keyboard opened (visual viewport significantly smaller than innerHeight)
+        if (window.innerHeight - vh > 100) {
+          setTimeout(() => {
+            const active = document.activeElement;
+            if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) {
+              active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+            if (chatViewport) {
+              chatViewport.scrollTop = chatViewport.scrollHeight;
+            }
+          }, 60);
+        }
+      };
+
+      window.visualViewport.addEventListener('resize', handleResize);
+      window.visualViewport.addEventListener('scroll', () => {
+        if (window.visualViewport.offsetTop > 0) {
+          window.scrollTo(0, 0);
+        }
+      });
+    }
+
+    // Auto-scroll on textarea focus for all inputs
+    const inputs = [els.promptInput, els.arenaInputA, els.arenaInputB, els.modelSearchInput, els.customModelInput];
+    inputs.forEach(input => {
+      if (!input) return;
+      input.addEventListener('focus', () => {
+        setTimeout(() => {
+          if (window.visualViewport && appContainer) {
+            appContainer.style.height = `${window.visualViewport.height}px`;
+          }
+          if (STATE.mode === 'arena') {
+            scrollArenaToBottom();
+          } else {
+            scrollChatToBottom();
+          }
+        }, 120);
+      });
+      input.addEventListener('blur', () => {
+        setTimeout(() => {
+          if (window.visualViewport && appContainer) {
+            appContainer.style.height = `${window.visualViewport.height}px`;
+          }
+        }, 100);
+      });
+    });
+  }
+
+  // ==================== BOOTSTRAP INITIALIZATION ====================
+  async function init() {
+    loadPersistedState();
+    setupEventListeners();
+    
+    // Set sound toggle button icon
+    els.soundToggleBtn.innerHTML = STATE.soundEnabled 
+      ? '<i class="fa-solid fa-volume-high"></i>' 
+      : '<i class="fa-solid fa-volume-xmark"></i>';
+
+    // Load Sessions
+    if (STATE.sessions.length === 0) {
+      createNewSession();
+    } else {
+      renderChatHistory();
+      renderCurrentSession();
+    }
+
+    updatePresetBanner();
+    updateModelUI();
+
+    // Initialize Cyber BGM Engine
+    await BGMEngine.init();
+
+    // Async checks
+    await checkOllamaHealth();
+    await checkOpenRouterStatus();
+    fetchOpenRouterModelsList();
+
+    console.log('⚡ ZOZ ROUTER INITIALIZED // READY');
+  }
+
+  // Start on DOM loaded
+  document.addEventListener('DOMContentLoaded', init);
+})();
