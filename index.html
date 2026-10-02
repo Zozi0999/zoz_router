@@ -735,11 +735,11 @@
     </div>
   </div>
 
-  <!-- 7. LIVE CYBER CAMERA MODAL -->
+  <!-- 7. STANDARD CAMERA MODAL -->
   <div class="modal-backdrop" id="cameraModal">
     <div class="modal-card camera-modal-card">
       <div class="modal-header">
-        <div class="modal-title"><i class="fa-solid fa-camera"></i> Live Optical Camera</div>
+        <div class="modal-title"><i class="fa-solid fa-camera"></i> Kamera</div>
         <button class="modal-close-btn" data-close="cameraModal" id="closeCameraModalBtn"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="modal-body camera-modal-body">
@@ -747,16 +747,6 @@
           <video id="cameraVideo" autoplay playsinline muted></video>
           <img id="cameraCapturedImg" src="" alt="Hasil Foto" style="display: none;">
           <canvas id="cameraCanvas" style="display: none;"></canvas>
-
-          <!-- Cyber Viewfinder Overlay -->
-          <div class="camera-cyber-overlay" id="cameraOverlay">
-            <div class="camera-crosshair"></div>
-            <div class="camera-corner top-left"></div>
-            <div class="camera-corner top-right"></div>
-            <div class="camera-corner bottom-left"></div>
-            <div class="camera-corner bottom-right"></div>
-            <div class="camera-status-hud" id="cameraStatusHud">LIVE OPTICAL SENSOR • READY</div>
-          </div>
         </div>
 
         <!-- Camera Controls -->

@@ -2009,7 +2009,6 @@
       els.imagePreviewImg.src = STATE.attachedImage;
       els.attachmentPreviewBar.style.display = 'flex';
       updateVisionCompatibilityBadge();
-      showToast('Gambar berhasil dilampirkan.');
       AudioEngine.click();
     };
     reader.readAsDataURL(file);
@@ -2050,7 +2049,7 @@
     els.attachToggleBtn?.setAttribute('aria-expanded', 'false');
   }
 
-  // ==================== LIVE CYBER CAMERA CONTROLLER ====================
+  // ==================== STANDARD CAMERA CONTROLLER ====================
   let cameraStream = null;
   let currentFacingMode = 'environment';
   let capturedPhotoDataUrl = null;
@@ -2065,16 +2064,13 @@
       els.cameraCapturedImg.style.display = 'none';
       els.cameraCapturedImg.src = '';
     }
-    if (els.cameraOverlay) els.cameraOverlay.style.display = 'block';
     if (els.cameraPostControls) els.cameraPostControls.style.display = 'none';
     if (els.takePhotoBtn) els.takePhotoBtn.style.display = 'flex';
-    if (els.cameraStatusHud) els.cameraStatusHud.innerText = 'INITIALIZING OPTICAL SENSOR...';
 
     openModal('cameraModal');
     AudioEngine.click();
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      showToast('Kamera browser tidak didukung langsung. Membuka kamera bawaan...', 'info');
       if (els.cameraFileInput) els.cameraFileInput.click();
       closeModal('cameraModal');
       return;
@@ -2090,7 +2086,6 @@
     }
 
     try {
-      if (els.cameraStatusHud) els.cameraStatusHud.innerText = `CONNECTING [${facing.toUpperCase()}] SENSOR...`;
       const constraints = {
         video: {
           facingMode: { ideal: facing },
@@ -2104,22 +2099,16 @@
         els.cameraVideo.srcObject = cameraStream;
         await els.cameraVideo.play().catch(() => {});
       }
-      if (els.cameraStatusHud) {
-        els.cameraStatusHud.innerText = `OPTICAL SENSOR ACTIVE • [${facing.toUpperCase()}]`;
-      }
     } catch (err) {
-      console.warn('Camera standard stream error, trying basic video:', err);
       try {
         cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         if (els.cameraVideo) {
           els.cameraVideo.srcObject = cameraStream;
           await els.cameraVideo.play().catch(() => {});
         }
-        if (els.cameraStatusHud) els.cameraStatusHud.innerText = 'OPTICAL SENSOR ACTIVE (DEFAULT)';
       } catch (err2) {
         console.error('Fatal camera access error:', err2);
-        if (els.cameraStatusHud) els.cameraStatusHud.innerText = 'SENSOR ACCESS DENIED';
-        showToast('Izin kamera ditolak atau tidak tersedia. Buka via kamera sistem.', 'error');
+        showToast('Izin kamera tidak tersedia. Membuka kamera sistem...', 'error');
         if (els.cameraFileInput) els.cameraFileInput.click();
       }
     }
@@ -2165,11 +2154,10 @@
       els.cameraCapturedImg.style.display = 'block';
     }
     if (els.cameraVideo) els.cameraVideo.style.display = 'none';
-    if (els.cameraOverlay) els.cameraOverlay.style.display = 'none';
     if (els.takePhotoBtn) els.takePhotoBtn.style.display = 'none';
     if (els.cameraPostControls) els.cameraPostControls.style.display = 'flex';
 
-    AudioEngine.snap();
+    AudioEngine.click();
   }
 
   function retakePhoto() {
@@ -2179,7 +2167,6 @@
       els.cameraCapturedImg.src = '';
     }
     if (els.cameraVideo) els.cameraVideo.style.display = 'block';
-    if (els.cameraOverlay) els.cameraOverlay.style.display = 'block';
     if (els.takePhotoBtn) els.takePhotoBtn.style.display = 'flex';
     if (els.cameraPostControls) els.cameraPostControls.style.display = 'none';
     AudioEngine.click();
@@ -2194,7 +2181,6 @@
 
     closeModal('cameraModal');
     stopCameraStream();
-    showToast('📷 Foto dari kamera berhasil dilampirkan!');
     AudioEngine.click();
     if (els.promptInput) els.promptInput.focus();
   }
