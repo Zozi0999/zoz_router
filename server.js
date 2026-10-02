@@ -661,13 +661,17 @@ function performWebSearch(query) {
   });
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n======================================================`);
-  console.log(`⚡ ZOZ ROUTER - AI Multi-Engine Neural Gateway Active`);
-  console.log(`======================================================`);
-  console.log(`🌐 Local Web UI:    http://localhost:${PORT}`);
-  console.log(`🦙 Ollama Gateway:  http://127.0.0.1:11434 (Local)`);
-  console.log(`⚡ OpenRouter GW:   https://openrouter.ai/api/v1 (Cloud)`);
-  console.log(`⚔️ Dual Arena Mode: Active`);
-  console.log(`======================================================\n`);
-});
+if (require.main === module && !process.env.VERCEL) {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n======================================================`);
+    console.log(`⚡ ZOZ ROUTER - AI Multi-Engine Neural Gateway Active`);
+    console.log(`======================================================`);
+    console.log(`🌐 Local Web UI:    http://localhost:${PORT}`);
+    console.log(`🦙 Ollama Gateway:  http://127.0.0.1:11434 (Local)`);
+    console.log(`⚡ OpenRouter GW:   https://openrouter.ai/api/v1 (Cloud)`);
+    console.log(`⚔️ Dual Arena Mode: Active`);
+    console.log(`======================================================\n`);
+  });
+}
+
+module.exports = server;

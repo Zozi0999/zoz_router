@@ -2,11 +2,18 @@
   "name": "zoz-router",
   "version": "1.0.0",
   "description": "Zoz Router - High Performance AI Gateway & Playground for Ollama & OpenRouter",
-  "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
-  "keywords": ["ai", "ollama", "openrouter", "llm", "chat", "router", "cyberpunk"],
+  "keywords": [
+    "ai",
+    "ollama",
+    "openrouter",
+    "llm",
+    "chat",
+    "router",
+    "cyberpunk"
+  ],
   "author": "Kaisar Zozi",
   "license": "MIT"
 }
