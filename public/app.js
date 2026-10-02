@@ -32,9 +32,18 @@
 
   // Official Ollama Models Catalog (Exact Model IDs from Ollama)
   const DEFAULT_OLLAMA_CLOUD_MODELS = [
+    { id: 'llama3.2-vision:11b', name: 'llama3.2-vision:11b', tag: '👁️ Vision Flagship', cat: 'vision' },
+    { id: 'llama3.2-vision:latest', name: 'llama3.2-vision:latest', tag: '👁️ Vision', cat: 'vision' },
+    { id: 'llava:latest', name: 'llava:latest', tag: '👁️ Vision Standard', cat: 'vision' },
+    { id: 'llava:7b', name: 'llava:7b', tag: '👁️ Vision', cat: 'vision' },
+    { id: 'qwen2.5-vl:7b', name: 'qwen2.5-vl:7b', tag: '👁️ Vision SOTA', cat: 'vision' },
+    { id: 'moondream:1.8b', name: 'moondream:1.8b', tag: '👁️ Vision Fast', cat: 'vision' },
+    { id: 'granite3.2-vision:2b', name: 'granite3.2-vision:2b', tag: '👁️ Vision', cat: 'vision' },
+    { id: 'minicpm-v:8b', name: 'minicpm-v:8b', tag: '👁️ Vision', cat: 'vision' },
+    { id: 'pixtral:12b', name: 'pixtral:12b', tag: '👁️ Vision', cat: 'vision' },
     { id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash', tag: 'Fast', cat: 'fast' },
     { id: 'nemotron-3-ultra', name: 'nemotron-3-ultra', tag: 'Flagship', cat: 'flagship' },
-    { id: 'gemma4:31b', name: 'gemma4:31b', tag: '👁️ Vision', cat: 'flagship' },
+    { id: 'gemma4:31b', name: 'gemma4:31b', tag: 'Flagship', cat: 'flagship' },
     { id: 'nemotron-3-nano:30b', name: 'nemotron-3-nano:30b', tag: 'Fast', cat: 'fast' },
     { id: 'mistral-large-3:675b', name: 'mistral-large-3:675b', tag: 'Flagship', cat: 'flagship' },
     { id: 'glm-5.3-flash', name: 'glm-5.3-flash', tag: 'Fast', cat: 'fast' },
@@ -1077,51 +1086,78 @@
   // ==================== VISION CAPABILITY DETECTOR ====================
   function isModelVisionCapable(modelId, engine = STATE.mode) {
     if (!modelId) return false;
-    const lower = modelId.toLowerCase();
-    
-    // Explicit Text-Only blacklist
-    const textOnlyKeywords = ['space-bunny', 'deepseek-chat', 'deepseek-r1', 'qwen2.5:1.5b', 'granite', 'llama3.2:3b', 'llama-3.3-70b', 'nemotron-3-nano:30b-cloud', 'nemotron-3-ultra'];
-    for (const tok of textOnlyKeywords) {
-      if (lower.includes(tok)) return false;
-    }
+    const lower = modelId.toLowerCase().trim();
 
-    // Check Ollama models capability metadata
-    if (engine === 'ollama' && STATE.ollamaModels) {
-      const found = STATE.ollamaModels.find(m => m.name === modelId || m.model === modelId);
-      if (found?.capabilities && Array.isArray(found.capabilities) && found.capabilities.includes('vision')) return true;
-    }
-
-    // Check verified vision keywords
+    // 1. Comprehensive Vision & Multimodal Keywords (Highest Priority)
     const visionKeywords = [
-      'vision', 'llava', 'moondream', 'bakllava', 'minicpm-v', 'qwen-vl', 'qwen2-vl', 
-      'qwen2.5-vl', 'pixtral', '4o', 'gemini-2', 'gemini-1.5', 'claude-3-5', 'claude-3-sonnet', 'claude-3-opus'
+      'vision', 'llava', 'moondream', 'bakllava', 'minicpm-v', 'minicpmv', 
+      'qwen-vl', 'qwen2-vl', 'qwen2.5-vl', 'pixtral', 'paligemma', 'internvl', 
+      'cogvlm', 'glm-4v', 'glmv', 'deepseek-vl', 'firellava', 'multimodal', 
+      '4o', 'gpt-4-vision', 'gemini', 'claude-3', '-vl', '_vl', ':vl', '-v:'
     ];
     for (const kw of visionKeywords) {
       if (lower.includes(kw)) return true;
     }
-    
-    // Check OpenRouter catalog
-    if (engine === 'openrouter' && STATE.openRouterModels) {
-      const found = STATE.openRouterModels.find(m => m.id === modelId);
-      if (found?.cat === 'vision' || found?.tag?.toLowerCase().includes('vision')) return true;
+
+    // 2. Check Ollama native model metadata (families / projector / capabilities)
+    if (STATE.ollamaModels && Array.isArray(STATE.ollamaModels)) {
+      const found = STATE.ollamaModels.find(m => (m.name || m.model || m.id) === modelId || (m.name || m.model || m.id)?.toLowerCase() === lower);
+      if (found) {
+        // Ollama details.families (e.g. ['mllama', 'clip'], ['llava', 'clip'])
+        const families = found.details?.families || [];
+        if (Array.isArray(families) && (families.includes('clip') || families.includes('mllama') || families.includes('vision') || families.includes('llava') || families.includes('moondream'))) {
+          return true;
+        }
+        const family = (found.details?.family || '').toLowerCase();
+        if (family.includes('clip') || family.includes('mllama') || family.includes('llava') || family.includes('moondream') || family.includes('minicpm')) {
+          return true;
+        }
+        if (found.capabilities && Array.isArray(found.capabilities) && found.capabilities.includes('vision')) {
+          return true;
+        }
+        if (found.tag && (found.tag.toLowerCase().includes('vision') || found.tag.includes('👁️'))) {
+          return true;
+        }
+        if (found.cat === 'vision') {
+          return true;
+        }
+      }
     }
-    
+
+    // 3. Check OpenRouter catalog metadata
+    if (STATE.openRouterModels && Array.isArray(STATE.openRouterModels)) {
+      const found = STATE.openRouterModels.find(m => m.id === modelId || m.id?.toLowerCase() === lower);
+      if (found?.cat === 'vision' || found?.tag?.toLowerCase().includes('vision') || found?.tag?.includes('👁️')) {
+        return true;
+      }
+    }
+
     return false;
   }
 
   function findBestVisionModel(engine = STATE.mode) {
-    if (engine === 'ollama' && STATE.ollamaModels) {
-      const installedVision = STATE.ollamaModels.find(m => isModelVisionCapable(m.name, 'ollama'));
-      if (installedVision) return { model: installedVision.name, engine: 'ollama' };
+    if (engine === 'ollama') {
+      // Find installed vision model in Ollama
+      if (STATE.ollamaModels && STATE.ollamaModels.length > 0) {
+        const installedVision = STATE.ollamaModels.find(m => isModelVisionCapable(m.name || m.model || m.id, 'ollama'));
+        if (installedVision) return { model: installedVision.name || installedVision.model || installedVision.id, engine: 'ollama' };
+      }
+      // Default Ollama Vision model
+      return { model: 'llama3.2-vision:11b', engine: 'ollama' };
     }
     
-    // Fallback to Free OpenRouter Vision Models
-    const freeVision = STATE.openRouterModels.find(m => 
-      (m.id.includes('gemini-2') || m.id.includes('vision')) && (m.tag?.includes('Free') || m.id.includes(':free'))
-    );
-    if (freeVision) return { model: freeVision.id, engine: 'openrouter' };
+    // For OpenRouter mode
+    if (STATE.openRouterModels && STATE.openRouterModels.length > 0) {
+      const freeVision = STATE.openRouterModels.find(m => 
+        isModelVisionCapable(m.id, 'openrouter') && (m.tag?.includes('Free') || m.id.includes(':free'))
+      );
+      if (freeVision) return { model: freeVision.id, engine: 'openrouter' };
 
-    return { model: 'google/gemini-2.0-flash-exp:free', engine: 'openrouter' };
+      const anyVision = STATE.openRouterModels.find(m => isModelVisionCapable(m.id, 'openrouter'));
+      if (anyVision) return { model: anyVision.id, engine: 'openrouter' };
+    }
+
+    return { model: 'meta-llama/llama-3.2-11b-vision-instruct:free', engine: 'openrouter' };
   }
 
   function updateVisionCompatibilityBadge() {
@@ -1143,14 +1179,14 @@
         badge.style.background = 'rgba(0, 255, 194, 0.1)';
         badge.style.border = '1px solid rgba(0, 255, 194, 0.3)';
         badge.style.color = 'var(--neon-teal)';
-        badge.innerHTML = `<i class="fa-solid fa-eye"></i> <span>Model Aktif (<strong>${escapeHtml(current)}</strong>) Mendukung Vision</span>`;
+        badge.innerHTML = `<i class="fa-solid fa-eye"></i> <span>Model Aktif (<strong>${escapeHtml(current)}</strong>) Mendukung Vision & Pemrosesan Gambar</span>`;
       } else {
         badge.style.background = 'rgba(255, 82, 0, 0.12)';
         badge.style.border = '1px solid rgba(255, 82, 0, 0.4)';
         badge.style.color = 'var(--neon-amber)';
         badge.innerHTML = `
           <i class="fa-solid fa-triangle-exclamation"></i>
-          <span>Model (<strong>${escapeHtml(current)}</strong>) adalah Text-Only.</span>
+          <span>Model (${escapeHtml(current)}) adalah Text-Only.</span>
           <button class="btn btn-sm btn-outline auto-switch-vision-btn" style="margin-left:auto; padding:3px 8px; font-size:0.72rem; border-color:var(--neon-cyan); color:var(--neon-cyan);">
             <i class="fa-solid fa-wand-magic-sparkles"></i> Ganti ke Model Vision
           </button>
@@ -1438,8 +1474,8 @@
       session.messages.forEach((m, idx) => {
         const item = { role: m.role, content: m.content || '' };
         if (m.image && idx === lastIndex) {
-          const rawBase64 = m.image.includes(',') ? m.image.split(',')[1] : m.image;
-          if (rawBase64) item.images = [rawBase64.trim()];
+          const rawBase64 = m.image.replace(/^data:image\/[a-z0-9.+_-]+;base64,/i, '').replace(/[\r\n\s]/g, '');
+          if (rawBase64) item.images = [rawBase64];
         }
         messagesPayload.push(item);
       });
@@ -1594,11 +1630,14 @@
 
         bubbleText.querySelector('.retry-vision-btn')?.addEventListener('click', () => {
           assistantRow.remove();
-          const target = findBestVisionModel('openrouter');
-          setEngineMode(target.engine);
+          const target = findBestVisionModel(STATE.mode);
           selectModel(target.model);
           showToast(`Beralih ke model vision: ${target.model}`);
-          runOpenRouterStreaming(session, promptText, image, target.model);
+          if (STATE.mode === 'openrouter') {
+            runOpenRouterStreaming(session, promptText, image, target.model);
+          } else {
+            runOllamaStreaming(session, promptText, image, target.model);
+          }
         });
         
         AudioEngine.error();
@@ -2119,25 +2158,36 @@
 
     // Combine Ollama + OpenRouter
     const combined = [
-      ...STATE.ollamaModels.map(m => ({
-        id: m.name,
-        name: m.name,
-        desc: `Model lokal tersimpan di mesin Anda (${(m.size / (1024*1024*1024)).toFixed(1)} GB).`,
-        tag: 'Ollama Local',
-        cat: 'local',
-        provider: 'ollama'
-      })),
-      ...STATE.openRouterModels.map(m => ({
-        ...m,
-        desc: m.tag === 'Free' ? 'Model gratis bertenaga cloud di OpenRouter.' : 'Model komputasi cloud flagship.',
-        provider: 'openrouter'
-      }))
+      ...STATE.ollamaModels.map(m => {
+        const id = m.name || m.model || m.id;
+        const isVision = isModelVisionCapable(id, 'ollama');
+        const sizeStr = m.size ? ` (${(m.size / (1024*1024*1024)).toFixed(1)} GB)` : '';
+        return {
+          id: id,
+          name: id,
+          desc: isVision ? `Model Vision Multimodal Ollama${sizeStr}. Mampu menganalisis gambar, diagram, dan teks.` : `Model bahasa lokal Ollama${sizeStr}.`,
+          tag: isVision ? 'Ollama • 👁️ Vision' : 'Ollama Local',
+          cat: isVision ? 'vision' : 'local',
+          provider: 'ollama'
+        };
+      }),
+      ...STATE.openRouterModels.map(m => {
+        const isVision = isModelVisionCapable(m.id, 'openrouter');
+        return {
+          ...m,
+          tag: isVision ? `${m.tag || 'Cloud'} • 👁️ Vision` : (m.tag || 'Cloud'),
+          cat: isVision ? 'vision' : (m.cat || 'flagship'),
+          desc: isVision ? 'Model cloud multimodal dengan kemampuan vision tinggi.' : (m.tag === 'Free' ? 'Model gratis bertenaga cloud di OpenRouter.' : 'Model komputasi cloud flagship.'),
+          provider: 'openrouter'
+        };
+      })
     ];
 
     const filtered = combined.filter(m => {
       const matchQ = !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q);
       const matchFilter = filter === 'all' || 
-        (filter === 'free' && (m.tag === 'Free' || m.id.includes(':free'))) ||
+        (filter === 'vision' && isModelVisionCapable(m.id, m.provider)) ||
+        (filter === 'free' && (m.tag.includes('Free') || m.id.includes(':free'))) ||
         (filter === 'local' && m.provider === 'ollama') ||
         (filter === 'flagship' && (m.cat === 'flagship' || m.provider === 'openrouter')) ||
         (filter === 'coding' && (m.cat === 'coding' || m.id.includes('code') || m.id.includes('qwen') || m.id.includes('claude'))) ||
