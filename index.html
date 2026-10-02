@@ -344,14 +344,53 @@
         <div class="composer-box">
           <!-- Action Buttons Left -->
           <div class="composer-tools-left">
+            <!-- Hidden file inputs -->
             <input type="file" id="imageFileInput" accept="image/*" style="display: none;">
-            <button class="composer-btn" id="attachImageBtn" title="Lampirkan Gambar (Vision Multimodal)">
-              <i class="fa-solid fa-image"></i>
-            </button>
+            <input type="file" id="cameraFileInput" accept="image/*" capture="environment" style="display: none;">
             <input type="file" id="docFileInput" accept=".txt,.pdf,.csv,.json,.md,.js,.py,.html,.css,.ts,.java,.cpp,.c,.go,.rs,.sql,.sh,.yaml,.yml,.xml,.doc,.docx" multiple style="display: none;">
-            <button class="composer-btn" id="attachDocBtn" title="Lampirkan Dokumen / File Teks / Code (.txt, .md, .csv, .json, .py, .js, dll)">
-              <i class="fa-solid fa-paperclip"></i>
-            </button>
+
+            <!-- Unified Attachment Menu (ChatGPT & Gemini Style) -->
+            <div class="attachment-menu-wrapper" id="attachmentMenuWrapper">
+              <button class="composer-btn attach-toggle-btn" id="attachToggleBtn" type="button" title="Lampirkan File, Foto, atau Kamera" aria-expanded="false">
+                <i class="fa-solid fa-paperclip"></i>
+              </button>
+
+              <!-- Attachment Popup Menu -->
+              <div class="attachment-dropdown-popup" id="attachmentDropdown" style="display: none;">
+                <div class="attachment-dropdown-header">
+                  <span><i class="fa-solid fa-sparkles"></i> Lampiran Cerdas</span>
+                </div>
+                <button class="attachment-menu-item" id="attachOptionCamera" type="button">
+                  <div class="attach-item-icon-box camera-accent">
+                    <i class="fa-solid fa-camera"></i>
+                  </div>
+                  <div class="attach-item-info">
+                    <span class="attach-item-title">Ambil Foto / Kamera</span>
+                    <span class="attach-item-desc">Akses kamera perangkat langsung</span>
+                  </div>
+                </button>
+                <button class="attachment-menu-item" id="attachOptionImage" type="button">
+                  <div class="attach-item-icon-box image-accent">
+                    <i class="fa-solid fa-image"></i>
+                  </div>
+                  <div class="attach-item-info">
+                    <span class="attach-item-title">Foto & Galeri</span>
+                    <span class="attach-item-desc">Pilih visual dari penyimpanan</span>
+                  </div>
+                </button>
+                <button class="attachment-menu-item" id="attachOptionDoc" type="button">
+                  <div class="attach-item-icon-box doc-accent">
+                    <i class="fa-solid fa-file-lines"></i>
+                  </div>
+                  <div class="attach-item-info">
+                    <span class="attach-item-title">Dokumen & File</span>
+                    <span class="attach-item-desc">PDF, TXT, MD, Kode, CSV</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <!-- Web Search Toggle -->
             <button class="composer-btn web-search-toggle" id="webSearchToggleBtn" title="Mode Web Search & Live Internet Browsing (Aktifkan / Nonaktifkan)">
               <i class="fa-solid fa-globe"></i>
             </button>
@@ -692,6 +731,60 @@
 
       <div class="modal-footer">
         <button class="btn btn-secondary" data-close="musicDeckModal">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. LIVE CYBER CAMERA MODAL -->
+  <div class="modal-backdrop" id="cameraModal">
+    <div class="modal-card camera-modal-card">
+      <div class="modal-header">
+        <div class="modal-title"><i class="fa-solid fa-camera"></i> Live Optical Camera</div>
+        <button class="modal-close-btn" data-close="cameraModal" id="closeCameraModalBtn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body camera-modal-body">
+        <div class="camera-viewport-container" id="cameraViewportContainer">
+          <video id="cameraVideo" autoplay playsinline muted></video>
+          <img id="cameraCapturedImg" src="" alt="Hasil Foto" style="display: none;">
+          <canvas id="cameraCanvas" style="display: none;"></canvas>
+
+          <!-- Cyber Viewfinder Overlay -->
+          <div class="camera-cyber-overlay" id="cameraOverlay">
+            <div class="camera-crosshair"></div>
+            <div class="camera-corner top-left"></div>
+            <div class="camera-corner top-right"></div>
+            <div class="camera-corner bottom-left"></div>
+            <div class="camera-corner bottom-right"></div>
+            <div class="camera-status-hud" id="cameraStatusHud">LIVE OPTICAL SENSOR • READY</div>
+          </div>
+        </div>
+
+        <!-- Camera Controls -->
+        <div class="camera-controls-bar">
+          <div class="camera-aux-controls">
+            <button class="btn btn-sm btn-outline" id="switchCameraFacingBtn" title="Ganti Kamera Depan / Belakang">
+              <i class="fa-solid fa-camera-rotate"></i> Putar Kamera
+            </button>
+            <button class="btn btn-sm btn-outline" id="fallbackNativeCameraBtn" title="Gunakan Kamera Bawaan HP / Sistem">
+              <i class="fa-solid fa-mobile-screen"></i> Kamera HP
+            </button>
+          </div>
+
+          <div class="camera-main-action" id="cameraMainAction">
+            <button class="camera-shutter-btn" id="takePhotoBtn" title="Ambil Foto">
+              <div class="shutter-inner"></div>
+            </button>
+          </div>
+
+          <div class="camera-post-controls" id="cameraPostControls" style="display: none;">
+            <button class="btn btn-sm btn-outline" id="retakePhotoBtn">
+              <i class="fa-solid fa-rotate-left"></i> Foto Ulang
+            </button>
+            <button class="btn btn-sm btn-primary" id="useCapturedPhotoBtn">
+              <i class="fa-solid fa-check"></i> Gunakan Foto
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>

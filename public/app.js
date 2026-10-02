@@ -115,6 +115,10 @@
       }
     },
     click() { this.playBeep(880, 'triangle', 0.04, 0.03); },
+    snap() {
+      this.playBeep(1200, 'square', 0.03, 0.06);
+      setTimeout(() => this.playBeep(600, 'sine', 0.05, 0.04), 35);
+    },
     send() { 
       this.playBeep(520, 'sine', 0.06, 0.04);
       setTimeout(() => this.playBeep(1040, 'sine', 0.08, 0.04), 40);
@@ -181,13 +185,18 @@
     sidebarBackdrop: $('#sidebarBackdrop'),
     mainContent: $('#mainContent'),
     
-    // Input / Composer
+    // Input / Composer & Unified Attachments
     promptInput: $('#promptInput'),
     sendPromptBtn: $('#sendPromptBtn'),
     stopGenerationBtn: $('#stopGenerationBtn'),
-    attachImageBtn: $('#attachImageBtn'),
+    attachToggleBtn: $('#attachToggleBtn'),
+    attachmentDropdown: $('#attachmentDropdown'),
+    attachmentMenuWrapper: $('#attachmentMenuWrapper'),
+    attachOptionCamera: $('#attachOptionCamera'),
+    attachOptionImage: $('#attachOptionImage'),
+    attachOptionDoc: $('#attachOptionDoc'),
     imageFileInput: $('#imageFileInput'),
-    attachDocBtn: $('#attachDocBtn'),
+    cameraFileInput: $('#cameraFileInput'),
     docFileInput: $('#docFileInput'),
     webSearchToggleBtn: $('#webSearchToggleBtn'),
     attachmentPreviewBar: $('#attachmentPreviewBar'),
@@ -198,6 +207,21 @@
     clearPresetBtn: $('#clearPresetBtn'),
     footerModelInfo: $('#footerModelInfo'),
     footerLatencyInfo: $('#footerLatencyInfo'),
+    
+    // Live Cyber Camera Elements
+    cameraModal: $('#cameraModal'),
+    cameraVideo: $('#cameraVideo'),
+    cameraCapturedImg: $('#cameraCapturedImg'),
+    cameraCanvas: $('#cameraCanvas'),
+    cameraOverlay: $('#cameraOverlay'),
+    cameraStatusHud: $('#cameraStatusHud'),
+    switchCameraFacingBtn: $('#switchCameraFacingBtn'),
+    fallbackNativeCameraBtn: $('#fallbackNativeCameraBtn'),
+    takePhotoBtn: $('#takePhotoBtn'),
+    cameraPostControls: $('#cameraPostControls'),
+    retakePhotoBtn: $('#retakePhotoBtn'),
+    useCapturedPhotoBtn: $('#useCapturedPhotoBtn'),
+    closeCameraModalBtn: $('#closeCameraModalBtn'),
     
     // Buttons & Modals
     settingsBtn: $('#settingsBtn'),
@@ -1993,9 +2017,186 @@
 
   function clearAttachedImage() {
     STATE.attachedImage = null;
-    els.imageFileInput.value = '';
-    els.attachmentPreviewBar.style.display = 'none';
+    if (els.imageFileInput) els.imageFileInput.value = '';
+    if (els.cameraFileInput) els.cameraFileInput.value = '';
+    renderAttachmentPreviews();
     updateVisionCompatibilityBadge();
+  }
+
+  // ==================== ATTACHMENT MENU & POPUP CONTROLLER ====================
+  function toggleAttachmentDropdown(e) {
+    if (e) e.stopPropagation();
+    if (!els.attachmentDropdown) return;
+    const isHidden = els.attachmentDropdown.style.display === 'none' || !els.attachmentDropdown.style.display;
+    if (isHidden) {
+      openAttachmentDropdown();
+    } else {
+      closeAttachmentDropdown();
+    }
+  }
+
+  function openAttachmentDropdown() {
+    if (!els.attachmentDropdown) return;
+    els.attachmentDropdown.style.display = 'flex';
+    els.attachToggleBtn?.classList.add('active');
+    els.attachToggleBtn?.setAttribute('aria-expanded', 'true');
+    AudioEngine.click();
+  }
+
+  function closeAttachmentDropdown() {
+    if (!els.attachmentDropdown) return;
+    els.attachmentDropdown.style.display = 'none';
+    els.attachToggleBtn?.classList.remove('active');
+    els.attachToggleBtn?.setAttribute('aria-expanded', 'false');
+  }
+
+  // ==================== LIVE CYBER CAMERA CONTROLLER ====================
+  let cameraStream = null;
+  let currentFacingMode = 'environment';
+  let capturedPhotoDataUrl = null;
+
+  async function openLiveCamera(facing = 'environment') {
+    closeAttachmentDropdown();
+    currentFacingMode = facing;
+    capturedPhotoDataUrl = null;
+
+    if (els.cameraVideo) els.cameraVideo.style.display = 'block';
+    if (els.cameraCapturedImg) {
+      els.cameraCapturedImg.style.display = 'none';
+      els.cameraCapturedImg.src = '';
+    }
+    if (els.cameraOverlay) els.cameraOverlay.style.display = 'block';
+    if (els.cameraPostControls) els.cameraPostControls.style.display = 'none';
+    if (els.takePhotoBtn) els.takePhotoBtn.style.display = 'flex';
+    if (els.cameraStatusHud) els.cameraStatusHud.innerText = 'INITIALIZING OPTICAL SENSOR...';
+
+    openModal('cameraModal');
+    AudioEngine.click();
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showToast('Kamera browser tidak didukung langsung. Membuka kamera bawaan...', 'info');
+      if (els.cameraFileInput) els.cameraFileInput.click();
+      closeModal('cameraModal');
+      return;
+    }
+
+    await startCameraStream(currentFacingMode);
+  }
+
+  async function startCameraStream(facing) {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(t => t.stop());
+      cameraStream = null;
+    }
+
+    try {
+      if (els.cameraStatusHud) els.cameraStatusHud.innerText = `CONNECTING [${facing.toUpperCase()}] SENSOR...`;
+      const constraints = {
+        video: {
+          facingMode: { ideal: facing },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
+        audio: false
+      };
+      cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+      if (els.cameraVideo) {
+        els.cameraVideo.srcObject = cameraStream;
+        await els.cameraVideo.play().catch(() => {});
+      }
+      if (els.cameraStatusHud) {
+        els.cameraStatusHud.innerText = `OPTICAL SENSOR ACTIVE • [${facing.toUpperCase()}]`;
+      }
+    } catch (err) {
+      console.warn('Camera standard stream error, trying basic video:', err);
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        if (els.cameraVideo) {
+          els.cameraVideo.srcObject = cameraStream;
+          await els.cameraVideo.play().catch(() => {});
+        }
+        if (els.cameraStatusHud) els.cameraStatusHud.innerText = 'OPTICAL SENSOR ACTIVE (DEFAULT)';
+      } catch (err2) {
+        console.error('Fatal camera access error:', err2);
+        if (els.cameraStatusHud) els.cameraStatusHud.innerText = 'SENSOR ACCESS DENIED';
+        showToast('Izin kamera ditolak atau tidak tersedia. Buka via kamera sistem.', 'error');
+        if (els.cameraFileInput) els.cameraFileInput.click();
+      }
+    }
+  }
+
+  function stopCameraStream() {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(t => t.stop());
+      cameraStream = null;
+    }
+    if (els.cameraVideo) {
+      els.cameraVideo.srcObject = null;
+    }
+  }
+
+  async function toggleCameraFacing() {
+    currentFacingMode = (currentFacingMode === 'environment') ? 'user' : 'environment';
+    await startCameraStream(currentFacingMode);
+    AudioEngine.click();
+  }
+
+  function capturePhoto() {
+    if (!els.cameraVideo || !els.cameraCanvas) return;
+    const video = els.cameraVideo;
+    const canvas = els.cameraCanvas;
+    const width = video.videoWidth || 1280;
+    const height = video.videoHeight || 720;
+
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+
+    if (currentFacingMode === 'user') {
+      ctx.translate(width, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(video, 0, 0, width, height);
+
+    capturedPhotoDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+    if (els.cameraCapturedImg) {
+      els.cameraCapturedImg.src = capturedPhotoDataUrl;
+      els.cameraCapturedImg.style.display = 'block';
+    }
+    if (els.cameraVideo) els.cameraVideo.style.display = 'none';
+    if (els.cameraOverlay) els.cameraOverlay.style.display = 'none';
+    if (els.takePhotoBtn) els.takePhotoBtn.style.display = 'none';
+    if (els.cameraPostControls) els.cameraPostControls.style.display = 'flex';
+
+    AudioEngine.snap();
+  }
+
+  function retakePhoto() {
+    capturedPhotoDataUrl = null;
+    if (els.cameraCapturedImg) {
+      els.cameraCapturedImg.style.display = 'none';
+      els.cameraCapturedImg.src = '';
+    }
+    if (els.cameraVideo) els.cameraVideo.style.display = 'block';
+    if (els.cameraOverlay) els.cameraOverlay.style.display = 'block';
+    if (els.takePhotoBtn) els.takePhotoBtn.style.display = 'flex';
+    if (els.cameraPostControls) els.cameraPostControls.style.display = 'none';
+    AudioEngine.click();
+  }
+
+  function useCapturedPhoto() {
+    if (!capturedPhotoDataUrl) return;
+    STATE.attachedImage = capturedPhotoDataUrl;
+    if (els.imagePreviewImg) els.imagePreviewImg.src = capturedPhotoDataUrl;
+    renderAttachmentPreviews();
+    updateVisionCompatibilityBadge();
+
+    closeModal('cameraModal');
+    stopCameraStream();
+    showToast('📷 Foto dari kamera berhasil dilampirkan!');
+    AudioEngine.click();
+    if (els.promptInput) els.promptInput.focus();
   }
 
   // ==================== SYSTEM PRESET HANDLER ====================
@@ -2129,6 +2330,9 @@
   function closeModal(modalId) {
     const modal = document.getElementById(modalId);
     if (modal) modal.classList.remove('show');
+    if (modalId === 'cameraModal') {
+      stopCameraStream();
+    }
   }
 
   function autoResizeTextarea(textarea) {
@@ -3191,10 +3395,6 @@
 
     els.promptInput.addEventListener('input', () => autoResizeTextarea(els.promptInput));
 
-    // Image Upload
-    els.attachImageBtn.addEventListener('click', () => els.imageFileInput.click());
-    els.imageFileInput.addEventListener('change', handleImageUpload);
-    els.removeImageBtn.addEventListener('click', clearAttachedImage);
 
     // New Chat & History
     els.newChatBtn.addEventListener('click', () => createNewSession());
@@ -3336,13 +3536,56 @@
       if (STATE.soundEnabled) AudioEngine.click();
     });
 
-    // Composer Attachments & Web Search
-    els.attachImageBtn?.addEventListener('click', () => els.imageFileInput?.click());
-    els.imageFileInput?.addEventListener('change', handleImageUpload);
-    els.removeImageBtn?.addEventListener('click', clearAttachedImage);
+    // Unified Composer Attachments (ChatGPT & Gemini Style Plus Menu)
+    els.attachToggleBtn?.addEventListener('click', toggleAttachmentDropdown);
 
-    els.attachDocBtn?.addEventListener('click', () => els.docFileInput?.click());
+    els.attachOptionCamera?.addEventListener('click', () => openLiveCamera());
+    els.attachOptionImage?.addEventListener('click', () => {
+      closeAttachmentDropdown();
+      els.imageFileInput?.click();
+    });
+    els.attachOptionDoc?.addEventListener('click', () => {
+      closeAttachmentDropdown();
+      els.docFileInput?.click();
+    });
+
+    els.imageFileInput?.addEventListener('change', handleImageUpload);
+    els.cameraFileInput?.addEventListener('change', handleImageUpload);
+    els.removeImageBtn?.addEventListener('click', clearAttachedImage);
     els.docFileInput?.addEventListener('change', handleDocUpload);
+
+    // Live Cyber Camera Modal Action Handlers
+    els.takePhotoBtn?.addEventListener('click', capturePhoto);
+    els.retakePhotoBtn?.addEventListener('click', retakePhoto);
+    els.useCapturedPhotoBtn?.addEventListener('click', useCapturedPhoto);
+    els.switchCameraFacingBtn?.addEventListener('click', toggleCameraFacing);
+    els.fallbackNativeCameraBtn?.addEventListener('click', () => {
+      closeModal('cameraModal');
+      stopCameraStream();
+      els.cameraFileInput?.click();
+    });
+    els.closeCameraModalBtn?.addEventListener('click', () => {
+      closeModal('cameraModal');
+    });
+
+    // Dismiss attachment dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+      if (els.attachmentDropdown && els.attachmentDropdown.style.display !== 'none') {
+        if (!els.attachmentMenuWrapper?.contains(e.target)) {
+          closeAttachmentDropdown();
+        }
+      }
+    });
+
+    // Dismiss dropdown on Escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeAttachmentDropdown();
+        if (els.cameraModal?.classList.contains('show')) {
+          closeModal('cameraModal');
+        }
+      }
+    });
 
     els.webSearchToggleBtn?.addEventListener('click', () => {
       STATE.webSearchEnabled = !STATE.webSearchEnabled;
