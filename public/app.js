@@ -30,6 +30,27 @@
     { id: 'meta-llama/llama-3.2-11b-vision-instruct:free', name: 'Llama 3.2 11B Vision', tag: 'Vision Free', cat: 'vision' }
   ];
 
+  // Curated Official Ollama Cloud Models Catalog
+  const DEFAULT_OLLAMA_CLOUD_MODELS = [
+    { id: 'gemma4:31b', name: 'gemma4:31b (Google DeepMind)', tag: 'Cloud • 👁️ Vision', cat: 'flagship' },
+    { id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash', tag: 'Cloud • Fast', cat: 'fast' },
+    { id: 'deepseek-v4-pro:0813', name: 'deepseek-v4-pro:0813', tag: 'Cloud • Reasoning', cat: 'reasoning' },
+    { id: 'nemotron-3-super', name: 'nemotron-3-super (NVIDIA)', tag: 'Cloud • Flagship', cat: 'flagship' },
+    { id: 'nemotron-3-ultra', name: 'nemotron-3-ultra', tag: 'Cloud • Flagship', cat: 'flagship' },
+    { id: 'nemotron-3-nano:30b', name: 'nemotron-3-nano:30b', tag: 'Cloud • Fast', cat: 'fast' },
+    { id: 'kimi-k3', name: 'kimi-k3 (Moonshot)', tag: 'Cloud • Long Context', cat: 'flagship' },
+    { id: 'kimi-k2.6', name: 'kimi-k2.6', tag: 'Cloud', cat: 'flagship' },
+    { id: 'kimi-k2.7-code', name: 'kimi-k2.7-code', tag: 'Cloud • Coding', cat: 'coding' },
+    { id: 'minimax-m3', name: 'minimax-m3', tag: 'Cloud • Flagship', cat: 'flagship' },
+    { id: 'minimax-m2.7', name: 'minimax-m2.7', tag: 'Cloud', cat: 'flagship' },
+    { id: 'glm-5.3', name: 'glm-5.3 (Zhipu AI)', tag: 'Cloud • Flagship', cat: 'flagship' },
+    { id: 'glm-5.3-flash', name: 'glm-5.3-flash', tag: 'Cloud • Fast', cat: 'fast' },
+    { id: 'glm-5.2', name: 'glm-5.2', tag: 'Cloud', cat: 'flagship' },
+    { id: 'gpt-oss:20b', name: 'gpt-oss:20b', tag: 'Cloud', cat: 'fast' },
+    { id: 'gpt-oss:120b', name: 'gpt-oss:120b', tag: 'Cloud • Flagship', cat: 'flagship' },
+    { id: 'mistral-large-3:675b', name: 'mistral-large-3:675b', tag: 'Cloud • Flagship', cat: 'flagship' }
+  ];
+
   // ==================== STATE MANAGEMENT ====================
   const STATE = {
     mode: 'ollama', // 'ollama' | 'openrouter' | 'arena' | 'auto'
@@ -47,15 +68,15 @@
     isGenerating: false,
     abortController: null,
     soundEnabled: true,
-    ollamaModels: [],
+    ollamaModels: [...DEFAULT_OLLAMA_CLOUD_MODELS],
     openRouterModels: [...DEFAULT_OPENROUTER_MODELS],
     settings: {
       ollamaEndpoint: 'http://127.0.0.1:11434',
       ollamaApiKey: '',
       openRouterKey: '',
-      ollamaModel: 'llama3:latest',
+      ollamaModel: 'gemma4:31b',
       openRouterModel: 'deepseek/deepseek-r1:free',
-      arenaModelA: 'llama3:latest',
+      arenaModelA: 'gemma4:31b',
       arenaModelB: 'deepseek/deepseek-r1:free',
       temperature: 0.7,
       topP: 0.9,
@@ -1115,16 +1136,21 @@
 
     let models = [];
     if (STATE.mode === 'ollama') {
-      models = STATE.ollamaModels.map(m => ({ 
-        id: m.name, 
-        name: m.name, 
-        tag: isModelVisionCapable(m.name, 'ollama') ? 'Local • 👁️ Vision' : 'Local' 
-      }));
-      if (models.length === 0) {
-        models = [
-          { id: 'llama3.2:3b', name: 'llama3.2:3b', tag: 'Local' },
-          { id: 'qwen2.5:1.5b', name: 'qwen2.5:1.5b', tag: 'Local' }
-        ];
+      if (STATE.ollamaModels && STATE.ollamaModels.length > 0) {
+        models = STATE.ollamaModels.map(m => {
+          const modelId = m.name || m.model || m.id;
+          const isVision = isModelVisionCapable(modelId, 'ollama');
+          const isCloud = STATE.settings.ollamaApiKey || (STATE.settings.ollamaEndpoint && STATE.settings.ollamaEndpoint.includes('ollama.com'));
+          return { 
+            id: modelId, 
+            name: m.name || modelId, 
+            tag: isVision ? (isCloud ? 'Cloud • 👁️ Vision' : 'Local • 👁️ Vision') : (isCloud ? 'Ollama Cloud' : 'Local') 
+          };
+        });
+      } else if (STATE.settings.ollamaApiKey) {
+        models = DEFAULT_OLLAMA_CLOUD_MODELS;
+      } else {
+        models = DEFAULT_OLLAMA_CLOUD_MODELS;
       }
     } else {
       models = STATE.openRouterModels.map(m => ({
@@ -1165,9 +1191,14 @@
   function populateArenaDropdowns() {
     // Left (Ollama)
     els.arenaModelOllama.innerHTML = '';
-    const ollamaList = STATE.ollamaModels.length > 0 
-      ? STATE.ollamaModels.map(m => m.name)
-      : ['llama3:latest', 'deepseek-r1:latest', 'qwen2.5:latest', 'mistral:latest'];
+    let ollamaList = [];
+    if (STATE.ollamaModels && STATE.ollamaModels.length > 0) {
+      ollamaList = STATE.ollamaModels.map(m => m.name || m.model || m.id);
+    } else if (STATE.settings.ollamaApiKey) {
+      ollamaList = DEFAULT_OLLAMA_CLOUD_MODELS.map(m => m.id);
+    } else {
+      ollamaList = ['gemma4:31b', 'deepseek-v4.1-flash', 'nemotron-3-super', 'kimi-k3', 'glm-5.3'];
+    }
     
     ollamaList.forEach(m => {
       const opt = document.createElement('option');

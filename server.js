@@ -252,15 +252,20 @@ function performWebSearch(query) {
 // Ollama: Check status & get models (with multi-route fallback & disk manifests)
   if (pathname === '/api/ollama/models' && method === 'GET') {
     let rawEndpoint = reqUrl.searchParams.get('endpoint') || req.headers['x-ollama-endpoint'] || 'http://127.0.0.1:11434';
+    const authHeader = req.headers['authorization'] || (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null);
+
+    // If API key is provided and endpoint is default local or empty, route to official Ollama Cloud (https://ollama.com)
+    if (authHeader && (rawEndpoint.includes('127.0.0.1') || rawEndpoint.includes('localhost') || !rawEndpoint)) {
+      rawEndpoint = 'https://ollama.com';
+    }
+
     rawEndpoint = rawEndpoint.trim();
     if (!/^https?:\/\//i.test(rawEndpoint)) {
-      rawEndpoint = (rawEndpoint.includes(':443') || rawEndpoint.includes('.com') || rawEndpoint.includes('.io') || rawEndpoint.includes('.ai') || rawEndpoint.includes('.app')) 
+      rawEndpoint = (rawEndpoint.includes(':443') || rawEndpoint.includes('ollama.com') || rawEndpoint.includes('.com') || rawEndpoint.includes('.io') || rawEndpoint.includes('.ai') || rawEndpoint.includes('.app')) 
         ? `https://${rawEndpoint}` 
         : `http://${rawEndpoint}`;
     }
     rawEndpoint = rawEndpoint.replace(/\/+$/, '');
-
-    const authHeader = req.headers['authorization'] || (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null);
 
     const tryFetchTags = (endpointUrl) => {
       return new Promise((resolve) => {
@@ -270,7 +275,7 @@ function performWebSearch(query) {
           const reqHeaders = { 'User-Agent': 'ZozRouter/1.0' };
           if (authHeader) reqHeaders['Authorization'] = authHeader;
 
-          const proxyReq = client.get(ollamaUrl.toString(), { timeout: 4000, headers: reqHeaders }, (proxyRes) => {
+          const proxyReq = client.get(ollamaUrl.toString(), { timeout: 6000, headers: reqHeaders }, (proxyRes) => {
             let rawData = '';
             proxyRes.on('data', chunk => rawData += chunk);
             proxyRes.on('end', () => {
@@ -301,7 +306,7 @@ function performWebSearch(query) {
           const reqHeaders = { 'User-Agent': 'ZozRouter/1.0' };
           if (authHeader) reqHeaders['Authorization'] = authHeader;
 
-          const proxyReq = client.get(ollamaUrl.toString(), { timeout: 4000, headers: reqHeaders }, (proxyRes) => {
+          const proxyReq = client.get(ollamaUrl.toString(), { timeout: 6000, headers: reqHeaders }, (proxyRes) => {
             let rawData = '';
             proxyRes.on('data', chunk => rawData += chunk);
             proxyRes.on('end', () => {
@@ -345,17 +350,28 @@ function performWebSearch(query) {
         return sendJSON(res, 200, { models: diskModels, server_running: true, note: 'Loaded from local manifests' });
       }
 
-      // If user has API key provided, provide fallback cloud models catalog
-      if (authHeader) {
-        const cloudFallback = [
-          { name: 'llama3.3:70b', model: 'llama3.3:70b', details: { family: 'llama' } },
-          { name: 'deepseek-r1:latest', model: 'deepseek-r1:latest', details: { family: 'deepseek' } },
-          { name: 'qwen2.5:72b', model: 'qwen2.5:72b', details: { family: 'qwen' } },
-          { name: 'mistral:latest', model: 'mistral:latest', details: { family: 'mistral' } },
-          { name: 'phi4:latest', model: 'phi4:latest', details: { family: 'phi' } },
-          { name: 'llava:latest', model: 'llava:latest', details: { family: 'llava' } }
+      // Real Official Ollama Cloud Models List
+      if (authHeader || rawEndpoint.includes('ollama.com')) {
+        const cloudOfficial = [
+          { name: 'gemma4:31b', model: 'gemma4:31b', details: { family: 'gemma' } },
+          { name: 'deepseek-v4.1-flash', model: 'deepseek-v4.1-flash', details: { family: 'deepseek' } },
+          { name: 'deepseek-v4-pro:0813', model: 'deepseek-v4-pro:0813', details: { family: 'deepseek' } },
+          { name: 'nemotron-3-super', model: 'nemotron-3-super', details: { family: 'nemotron' } },
+          { name: 'nemotron-3-ultra', model: 'nemotron-3-ultra', details: { family: 'nemotron' } },
+          { name: 'nemotron-3-nano:30b', model: 'nemotron-3-nano:30b', details: { family: 'nemotron' } },
+          { name: 'kimi-k3', model: 'kimi-k3', details: { family: 'kimi' } },
+          { name: 'kimi-k2.6', model: 'kimi-k2.6', details: { family: 'kimi' } },
+          { name: 'kimi-k2.7-code', model: 'kimi-k2.7-code', details: { family: 'kimi' } },
+          { name: 'minimax-m3', model: 'minimax-m3', details: { family: 'minimax' } },
+          { name: 'minimax-m2.7', model: 'minimax-m2.7', details: { family: 'minimax' } },
+          { name: 'glm-5.3', model: 'glm-5.3', details: { family: 'glm' } },
+          { name: 'glm-5.3-flash', model: 'glm-5.3-flash', details: { family: 'glm' } },
+          { name: 'glm-5.2', model: 'glm-5.2', details: { family: 'glm' } },
+          { name: 'gpt-oss:20b', model: 'gpt-oss:20b', details: { family: 'gpt-oss' } },
+          { name: 'gpt-oss:120b', model: 'gpt-oss:120b', details: { family: 'gpt-oss' } },
+          { name: 'mistral-large-3:675b', model: 'mistral-large-3:675b', details: { family: 'mistral' } }
         ];
-        return sendJSON(res, 200, { models: cloudFallback, server_running: true, cloud_auth: true });
+        return sendJSON(res, 200, { models: cloudOfficial, server_running: true, cloud_auth: true });
       }
 
       return sendJSON(res, 200, { models: [], server_running: false, warning: 'Ollama service offline / unreachable' });
@@ -384,16 +400,21 @@ function performWebSearch(query) {
   if (pathname === '/api/ollama/chat' && method === 'POST') {
     try {
       const body = await parseBody(req);
+      const authHeader = req.headers['authorization'] || (body.apiKey ? `Bearer ${body.apiKey}` : (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null));
       let customEndpoint = req.headers['x-ollama-endpoint'] || body.endpoint || 'http://127.0.0.1:11434';
+
+      if (authHeader && (customEndpoint.includes('127.0.0.1') || customEndpoint.includes('localhost') || !customEndpoint)) {
+        customEndpoint = 'https://ollama.com';
+      }
+
       customEndpoint = customEndpoint.trim();
       if (!/^https?:\/\//i.test(customEndpoint)) {
-        customEndpoint = (customEndpoint.includes(':443') || customEndpoint.includes('.com') || customEndpoint.includes('.io') || customEndpoint.includes('.ai') || customEndpoint.includes('.app')) 
+        customEndpoint = (customEndpoint.includes(':443') || customEndpoint.includes('ollama.com') || customEndpoint.includes('.com') || customEndpoint.includes('.io') || customEndpoint.includes('.ai') || customEndpoint.includes('.app')) 
           ? `https://${customEndpoint}` 
           : `http://${customEndpoint}`;
       }
       customEndpoint = customEndpoint.replace(/\/+$/, '');
 
-      const authHeader = req.headers['authorization'] || (body.apiKey ? `Bearer ${body.apiKey}` : (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null));
       delete body.endpoint; // Don't send custom field to Ollama
       delete body.apiKey;
 
@@ -411,6 +432,7 @@ function performWebSearch(query) {
 
       const proxyHeaders = {
         'Content-Type': 'application/json',
+        'User-Agent': 'ZozRouter/1.0',
         'Content-Length': Buffer.byteLength(postData)
       };
       if (authHeader) {
