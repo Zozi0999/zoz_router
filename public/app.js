@@ -2025,7 +2025,7 @@
     const filtered = combined.filter(m => {
       const matchQ = !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q);
       const matchFilter = filter === 'all' || 
-        (filter === 'vision' && ((m.tag && m.tag.includes('Vision')) || (m.cat === 'vision') || m.id.toLowerCase().includes('vision') || m.id.toLowerCase().includes('vl') || m.id.toLowerCase().includes('llava') || m.id.toLowerCase().includes('moondream') || m.id.toLowerCase().includes('4o') || m.id.toLowerCase().includes('gemini') || m.id.toLowerCase().includes('claude-3') || m.id.toLowerCase().includes('luna'))) ||
+        (filter === 'vision' && ((m.tag && m.tag.toLowerCase().includes('vision')) || (m.cat === 'vision') || m.id.toLowerCase().includes('vision'))) ||
         (filter === 'free' && (m.tag.includes('Free') || m.id.includes(':free'))) ||
         (filter === 'local' && m.provider === 'ollama') ||
         (filter === 'flagship' && (m.cat === 'flagship' || m.provider === 'openrouter')) ||
