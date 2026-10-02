@@ -122,8 +122,11 @@
       </div>
     </aside>
 
+    <!-- Sidebar Backdrop for Mobile/Offcanvas Click-to-Dismiss -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
     <!-- MAIN CHAT & WORKSPACE -->
-    <main class="main-content">
+    <main class="main-content" id="mainContent">
       <!-- TOP NAVIGATION BAR -->
       <header class="top-nav">
         <div class="top-nav-left">
@@ -532,8 +535,11 @@
         <button class="settings-tab-btn active" data-target="tabLocalMusic">
           <i class="fa-solid fa-folder-open"></i> Playlist Lokal (<span id="playlistCountBadge">0</span>)
         </button>
+        <button class="settings-tab-btn" data-target="tabOnlineMusic">
+          <i class="fa-brands fa-youtube" style="color:#FF0033;"></i> Custom URL / YouTube
+        </button>
         <button class="settings-tab-btn" data-target="tabAmbientGen">
-          <i class="fa-solid fa-wand-magic-sparkles"></i> Cyber Ambient (Offline)
+          <i class="fa-solid fa-wand-magic-sparkles"></i> Cyber Ambient
         </button>
         <button class="settings-tab-btn" data-target="tabDeckControls">
           <i class="fa-solid fa-sliders"></i> Master Deck & Spectrum
@@ -566,7 +572,72 @@
           </div>
         </div>
 
-        <!-- Tab 2: Generative Cyber Ambient -->
+        <!-- Tab 2: Custom URL & YouTube Streaming -->
+        <div class="settings-tab-pane" id="tabOnlineMusic">
+          <div style="background: rgba(13, 16, 26, 0.7); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px; margin-bottom: 16px;">
+            <h4 style="margin: 0 0 8px 0; font-family: var(--font-display); color: #FFF; font-size: 0.95rem; display: flex; align-items: center; gap: 8px;">
+              <i class="fa-brands fa-youtube" style="color: #FF0033;"></i> Putar dari YouTube atau Link Audio Online
+            </h4>
+            <p style="font-size: 0.78rem; color: var(--text-dim); margin: 0 0 12px 0; line-height: 1.45;">
+              Tempelkan link video YouTube (misal: <code>https://www.youtube.com/watch?v=...</code> atau <code>https://youtu.be/...</code>) atau link audio streaming langsung (MP3/WAV/Live Stream).
+            </p>
+            
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label style="font-size: 0.78rem; color: var(--text-muted);">URL YouTube / Stream Audio:</label>
+                <input type="text" id="onlineAudioUrlInput" placeholder="https://www.youtube.com/watch?v=... atau https://domain.com/music.mp3">
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0;">
+                <label style="font-size: 0.78rem; color: var(--text-muted);">Judul Lagu (Opsional):</label>
+                <input type="text" id="onlineAudioTitleInput" placeholder="Beri nama lagu / radio stream...">
+              </div>
+
+              <div style="display: flex; gap: 10px; margin-top: 4px; flex-wrap: wrap;">
+                <button class="btn btn-sm btn-primary" id="playOnlineUrlBtn">
+                  <i class="fa-solid fa-play"></i> Putar Sekarang
+                </button>
+                <button class="btn btn-sm btn-outline" id="saveOnlineUrlBtn" style="border-color: var(--neon-teal); color: var(--neon-teal);">
+                  <i class="fa-solid fa-bookmark"></i> Simpan ke Playlist
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- YouTube Hidden / Embed Container -->
+          <div id="ytPlayerContainerWrap" style="margin-bottom: 16px; border-radius: var(--radius-sm); overflow: hidden; display: none; background: #000; border: 1px solid var(--border-subtle);">
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: rgba(0,0,0,0.6); font-size: 0.75rem;">
+              <span style="color: var(--neon-cyan);"><i class="fa-brands fa-youtube"></i> YouTube Player Aktif</span>
+              <button class="btn btn-xs btn-outline" id="toggleYtPlayerVisibilityBtn" style="font-size: 0.68rem; padding: 2px 6px;">Sembunyikan Video</button>
+            </div>
+            <div id="ytPlayerContainer" style="width: 100%; height: 200px;"></div>
+          </div>
+
+          <!-- Curated Cyber Streams -->
+          <div style="margin-top: 14px;">
+            <div style="font-weight: 700; font-size: 0.82rem; color: var(--text-main); margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+              <i class="fa-solid fa-satellite-dish" style="color: var(--neon-cyan);"></i> Cyberpunk Live Streams Pilihan
+            </div>
+            <div class="curated-streams-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px;">
+              <div class="curated-stream-card" data-url="https://www.youtube.com/watch?v=5qap5aO4i9A" data-title="Lofi Girl - Synthwave Radio 24/7" style="background: rgba(13,16,26,0.6); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 10px 12px; cursor: pointer; transition: all 0.2s;">
+                <div style="font-weight: 600; font-size: 0.82rem; color: #FFF; margin-bottom: 4px;"><i class="fa-solid fa-radio" style="color:var(--neon-magenta);"></i> Synthwave Chill Radio</div>
+                <div style="font-size: 0.72rem; color: var(--text-dim);">Lofi Girl • 24/7 Relax & Code</div>
+              </div>
+
+              <div class="curated-stream-card" data-url="https://www.youtube.com/watch?v=jfKfPfyJRdk" data-title="Lofi Girl - Beats to Relax/Study" style="background: rgba(13,16,26,0.6); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 10px 12px; cursor: pointer; transition: all 0.2s;">
+                <div style="font-weight: 600; font-size: 0.82rem; color: #FFF; margin-bottom: 4px;"><i class="fa-solid fa-mug-hot" style="color:var(--neon-teal);"></i> Lofi Hip Hop Beats</div>
+                <div style="font-size: 0.72rem; color: var(--text-dim);">Beats to Relax & Study 24/7</div>
+              </div>
+
+              <div class="curated-stream-card" data-url="https://www.youtube.com/watch?v=4xDzrJKXOOY" data-title="Synthwave / Cyberpunk 2077 Ambient" style="background: rgba(13,16,26,0.6); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 10px 12px; cursor: pointer; transition: all 0.2s;">
+                <div style="font-weight: 600; font-size: 0.82rem; color: #FFF; margin-bottom: 4px;"><i class="fa-solid fa-city" style="color:var(--neon-cyan);"></i> Cyberpunk City Ambient</div>
+                <div style="font-size: 0.72rem; color: var(--text-dim);">Deep Synth & Neon Night Vibe</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Generative Cyber Ambient -->
         <div class="settings-tab-pane" id="tabAmbientGen">
           <p style="font-size: 0.82rem; color: var(--text-dim); margin-bottom: 14px; line-height: 1.5;">
             Generator audio ambient cyberpunk prosedural bawaan yang disintesis secara instan menggunakan Web Audio API tanpa perlu file eksternal atau internet.
@@ -576,7 +647,7 @@
           </div>
         </div>
 
-        <!-- Tab 3: Deck Controls & Visualizer -->
+        <!-- Tab 4: Deck Controls & Visualizer -->
         <div class="settings-tab-pane" id="tabDeckControls">
           <!-- Spectrum Canvas -->
           <div class="visualizer-container">

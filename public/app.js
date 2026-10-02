@@ -174,7 +174,7 @@
     arenaStopBtnB: $('#arenaStopBtnB'),
     clearArenaChatBBtn: $('#clearArenaChatBBtn'),
     
-    // History
+    // History & Navigation
     newChatBtn: $('#newChatBtn'),
     chatHistoryList: $('#chatHistoryList'),
     searchHistoryInput: $('#searchHistoryInput'),
@@ -182,6 +182,8 @@
     toggleSidebarBtn: $('#toggleSidebarBtn'),
     closeSidebarBtn: $('#closeSidebarBtn'),
     sidebar: $('#sidebar'),
+    sidebarBackdrop: $('#sidebarBackdrop'),
+    mainContent: $('#mainContent'),
     
     // Input / Composer
     promptInput: $('#promptInput'),
@@ -262,7 +264,16 @@
     deckPlayPauseBtn: $('#deckPlayPauseBtn'),
     deckNextBtn: $('#deckNextBtn'),
     deckMasterVolume: $('#deckMasterVolume'),
-    valMasterVolume: $('#valMasterVolume')
+    valMasterVolume: $('#valMasterVolume'),
+    
+    // Online Audio & YouTube
+    onlineAudioUrlInput: $('#onlineAudioUrlInput'),
+    onlineAudioTitleInput: $('#onlineAudioTitleInput'),
+    playOnlineUrlBtn: $('#playOnlineUrlBtn'),
+    saveOnlineUrlBtn: $('#saveOnlineUrlBtn'),
+    ytPlayerContainerWrap: $('#ytPlayerContainerWrap'),
+    ytPlayerContainer: $('#ytPlayerContainer'),
+    toggleYtPlayerVisibilityBtn: $('#toggleYtPlayerVisibilityBtn')
   };
 
   // ==================== STORAGE & PERSISTENCE ====================
@@ -360,6 +371,10 @@
     renderChatHistory();
     renderCurrentSession();
     AudioEngine.click();
+    if (window.innerWidth <= 768 && els.sidebar?.classList.contains('open')) {
+      els.sidebar.classList.remove('open');
+      els.sidebarBackdrop?.classList.remove('show');
+    }
     return newSession;
   }
 
@@ -411,6 +426,11 @@
     renderCurrentSession();
     updateModelUI();
     AudioEngine.click();
+
+    if (window.innerWidth <= 768 && els.sidebar?.classList.contains('open')) {
+      els.sidebar.classList.remove('open');
+      els.sidebarBackdrop?.classList.remove('show');
+    }
   }
 
   function deleteSession(sessionId, e) {
@@ -2384,16 +2404,193 @@
       }
     },
 
+    ytPlayer: null,
+    ytReady: false,
+    currentOnlineTrack: null,
+
     async loadPlaylistFromDB() {
       const records = await MusicDB.getAllTracks();
       this.playlist = records.map(r => ({
         id: r.id,
         name: r.name,
-        size: r.size,
+        size: r.size || (r.isOnline ? 'Online' : 'Local'),
         type: r.type,
-        url: URL.createObjectURL(r.blob),
-        blob: r.blob
+        isOnline: r.isOnline || false,
+        youtubeId: r.youtubeId || null,
+        onlineUrl: r.onlineUrl || null,
+        url: r.blob ? URL.createObjectURL(r.blob) : (r.onlineUrl || ''),
+        blob: r.blob || null
       }));
+    },
+
+    initYouTube(callback) {
+      if (window.YT && window.YT.Player) {
+        this.ytReady = true;
+        if (callback) callback();
+        return;
+      }
+      const existing = document.getElementById('ytIframeApiScript');
+      if (!existing) {
+        window.onYouTubeIframeAPIReady = () => {
+          this.ytReady = true;
+          if (callback) callback();
+        };
+        const tag = document.createElement('script');
+        tag.id = 'ytIframeApiScript';
+        tag.src = 'https://www.youtube.com/iframe_api';
+        document.body.appendChild(tag);
+      } else {
+        const check = setInterval(() => {
+          if (window.YT && window.YT.Player) {
+            clearInterval(check);
+            this.ytReady = true;
+            if (callback) callback();
+          }
+        }, 100);
+      }
+    },
+
+    extractYouTubeId(url) {
+      if (!url) return null;
+      const reg = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/|youtube\.com\/live\/)([^"&?\/\s]{11})/i;
+      const match = url.match(reg);
+      return match ? match[1] : null;
+    },
+
+    playYouTube(videoId, customTitle = null) {
+      this.initAudioContext();
+      if (this.audio) this.audio.pause();
+      this.stopAmbient();
+
+      this.currentMode = 'youtube';
+      this.activeAmbientId = null;
+      this.currentOnlineTrack = {
+        type: 'youtube',
+        videoId,
+        title: customTitle || `YouTube Stream (${videoId})`
+      };
+
+      const containerWrap = els.ytPlayerContainerWrap;
+      if (containerWrap) containerWrap.style.display = 'block';
+
+      const createOrLoad = () => {
+        try {
+          if (!this.ytPlayer) {
+            this.ytPlayer = new YT.Player('ytPlayerContainer', {
+              videoId: videoId,
+              playerVars: {
+                autoplay: 1,
+                controls: 1,
+                modestbranding: 1,
+                playsinline: 1,
+                origin: window.location.origin
+              },
+              events: {
+                onReady: (e) => {
+                  e.target.setVolume(Math.round(this.volume * 100));
+                  e.target.playVideo();
+                  this.setPlayingState(true);
+                },
+                onStateChange: (e) => {
+                  if (e.data === YT.PlayerState.PLAYING) {
+                    this.setPlayingState(true);
+                    if (!customTitle && this.ytPlayer.getVideoData) {
+                      const d = this.ytPlayer.getVideoData();
+                      if (d && d.title) {
+                        this.currentOnlineTrack.title = d.title;
+                        this.updateUI();
+                      }
+                    }
+                  } else if (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.ENDED) {
+                    this.setPlayingState(false);
+                    if (e.data === YT.PlayerState.ENDED && this.loopMode === 'all') {
+                      this.nextTrack();
+                    }
+                  }
+                }
+              }
+            });
+          } else {
+            this.ytPlayer.loadVideoById(videoId);
+            this.ytPlayer.setVolume(Math.round(this.volume * 100));
+            this.ytPlayer.playVideo();
+            this.setPlayingState(true);
+          }
+          this.updateUI();
+          showToast(`▶️ Memutar YouTube: ${this.currentOnlineTrack.title}`);
+        } catch (err) {
+          console.error('Error starting YouTube Player:', err);
+        }
+      };
+
+      this.initYouTube(() => {
+        createOrLoad();
+      });
+    },
+
+    playDirectUrl(url, title = 'Online Stream') {
+      this.initAudioContext();
+      this.stopAmbient();
+      if (this.ytPlayer && this.ytPlayer.pauseVideo) {
+        this.ytPlayer.pauseVideo();
+      }
+      const containerWrap = els.ytPlayerContainerWrap;
+      if (containerWrap) containerWrap.style.display = 'none';
+
+      this.currentMode = 'file';
+      this.activeAmbientId = null;
+      this.currentOnlineTrack = { type: 'stream', url, title };
+
+      this.audio.src = url;
+      this.audio.currentTime = 0;
+      this.audio.play()
+        .then(() => {
+          this.setPlayingState(true);
+          this.updateUI();
+          showToast(`▶️ Memutar Stream: ${title}`);
+        })
+        .catch((e) => {
+          showToast('Gagal memutar stream audio: ' + e.message, 'error');
+          this.setPlayingState(false);
+        });
+    },
+
+    async saveOnlineToPlaylist(url, customTitle) {
+      if (!url || !url.trim()) {
+        showToast('Masukkan URL audio atau YouTube terlebih dahulu.', 'error');
+        return;
+      }
+      const trimmed = url.trim();
+      const ytId = this.extractYouTubeId(trimmed);
+      const title = (customTitle && customTitle.trim()) || (ytId ? `YouTube (${ytId})` : 'Online Audio Stream');
+      const id = `online_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+      const trackRecord = {
+        id,
+        name: title,
+        size: ytId ? 'YouTube' : 'Stream',
+        type: ytId ? 'youtube' : 'audio/stream',
+        isOnline: true,
+        youtubeId: ytId,
+        onlineUrl: trimmed,
+        addedAt: new Date().toISOString()
+      };
+
+      await MusicDB.saveTrack(trackRecord);
+      this.playlist.push({
+        id,
+        name: trackRecord.name,
+        size: trackRecord.size,
+        type: trackRecord.type,
+        isOnline: true,
+        youtubeId: ytId,
+        onlineUrl: trimmed,
+        url: trimmed
+      });
+
+      this.renderPlaylistUI();
+      showToast(`✅ "${title}" berhasil disimpan ke Playlist!`);
+      AudioEngine.click();
     },
 
     async handleUploadFiles(fileList) {
@@ -2448,8 +2645,10 @@
       
       const idx = this.playlist.findIndex(t => t.id === id);
       if (idx !== -1) {
-        const wasCurrent = (this.currentIndex === idx && this.currentMode === 'file');
-        URL.revokeObjectURL(this.playlist[idx].url);
+        const wasCurrent = (this.currentIndex === idx);
+        if (this.playlist[idx].blob) {
+          URL.revokeObjectURL(this.playlist[idx].url);
+        }
         this.playlist.splice(idx, 1);
         
         if (wasCurrent) {
@@ -2469,41 +2668,56 @@
 
     async clearAllTracks() {
       if (this.playlist.length === 0) return;
-      if (!confirm('Hapus semua lagu dari playlist lokal?')) return;
+      if (!confirm('Hapus semua lagu dari playlist?')) return;
       
       this.stop();
-      this.playlist.forEach(t => URL.revokeObjectURL(t.url));
+      this.playlist.forEach(t => {
+        if (t.blob) URL.revokeObjectURL(t.url);
+      });
       this.playlist = [];
       this.currentIndex = -1;
       await MusicDB.clearAll();
       this.renderPlaylistUI();
-      showToast('Playlist lokal telah dikosongkan.');
+      showToast('Playlist telah dikosongkan.');
       AudioEngine.click();
     },
 
     playTrack(index) {
       if (index < 0 || index >= this.playlist.length) return;
-      this.initAudioContext();
-      this.stopAmbient();
-
       this.currentIndex = index;
-      this.currentMode = 'file';
-      this.activeAmbientId = null;
-
       const track = this.playlist[index];
-      this.audio.src = track.url;
-      this.audio.currentTime = 0;
-      
-      const playPromise = this.audio.play();
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
-            this.setPlayingState(true);
-            this.updateUI();
-          })
-          .catch(() => {
-            this.setPlayingState(false);
-          });
+
+      if (track.isOnline && track.youtubeId) {
+        this.playYouTube(track.youtubeId, track.name);
+      } else if (track.isOnline && track.onlineUrl) {
+        this.playDirectUrl(track.onlineUrl, track.name);
+      } else {
+        if (this.ytPlayer && this.ytPlayer.pauseVideo) {
+          this.ytPlayer.pauseVideo();
+        }
+        const containerWrap = els.ytPlayerContainerWrap;
+        if (containerWrap) containerWrap.style.display = 'none';
+
+        this.initAudioContext();
+        this.stopAmbient();
+        this.currentMode = 'file';
+        this.activeAmbientId = null;
+        this.currentOnlineTrack = null;
+
+        this.audio.src = track.url;
+        this.audio.currentTime = 0;
+        
+        const playPromise = this.audio.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              this.setPlayingState(true);
+              this.updateUI();
+            })
+            .catch(() => {
+              this.setPlayingState(false);
+            });
+        }
       }
     },
 
@@ -2511,14 +2725,19 @@
       this.initAudioContext();
 
       if (this.isPlaying) {
-        if (this.currentMode === 'file') {
+        if (this.currentMode === 'youtube' && this.ytPlayer && this.ytPlayer.pauseVideo) {
+          this.ytPlayer.pauseVideo();
+        } else if (this.currentMode === 'file') {
           this.audio.pause();
         } else if (this.currentMode === 'ambient') {
           this.stopAmbient();
         }
         this.setPlayingState(false);
       } else {
-        if (this.currentMode === 'file' && this.currentIndex >= 0 && this.currentIndex < this.playlist.length) {
+        if (this.currentMode === 'youtube' && this.ytPlayer && this.ytPlayer.playVideo) {
+          this.ytPlayer.playVideo();
+          this.setPlayingState(true);
+        } else if (this.currentMode === 'file' && this.currentIndex >= 0 && this.currentIndex < this.playlist.length) {
           this.audio.play();
           this.setPlayingState(true);
         } else if (this.currentMode === 'ambient' && this.activeAmbientId) {
@@ -2561,6 +2780,9 @@
       if (this.audio) {
         this.audio.pause();
         this.audio.currentTime = 0;
+      }
+      if (this.ytPlayer && this.ytPlayer.pauseVideo) {
+        this.ytPlayer.pauseVideo();
       }
       this.stopAmbient();
       this.setPlayingState(false);
@@ -2815,7 +3037,7 @@
         els.playlistItemsList.innerHTML = `
           <div style="text-align: center; padding: 24px; color: var(--text-dim); font-size: 0.82rem;">
             <i class="fa-solid fa-music" style="font-size: 1.8rem; color: rgba(0, 240, 255, 0.25); margin-bottom: 8px; display: block;"></i>
-            Belum ada file musik lokal. Tarik & letakkan file musik Anda ke dropzone di atas!
+            Belum ada lagu. Upload file musik lokal atau masukkan link YouTube pada tab Custom URL!
           </div>
         `;
         return;
@@ -2823,23 +3045,28 @@
 
       els.playlistItemsList.innerHTML = '';
       this.playlist.forEach((track, idx) => {
+        const isCurrent = (this.currentMode === 'file' && this.currentIndex === idx) ||
+                          (this.currentMode === 'youtube' && this.currentOnlineTrack && this.currentOnlineTrack.videoId === track.youtubeId);
         const item = document.createElement('div');
-        item.className = `playlist-item ${this.currentMode === 'file' && this.currentIndex === idx ? 'active' : ''}`;
+        item.className = `playlist-item ${isCurrent ? 'active' : ''}`;
+        const icon = track.youtubeId ? '<i class="fa-brands fa-youtube" style="color:#FF0033;"></i>' : (track.isOnline ? '<i class="fa-solid fa-globe" style="color:var(--neon-teal);"></i>' : '<i class="fa-solid fa-music"></i>');
+        const sizeLabel = track.size ? (track.isOnline ? track.size : `${track.size} MB`) : '';
+
         item.innerHTML = `
           <div class="playlist-item-info">
-            <span style="font-family: var(--font-code); color: var(--neon-cyan); font-size: 0.72rem; min-width: 20px;">#${idx + 1}</span>
+            <span style="font-family: var(--font-code); color: var(--neon-cyan); font-size: 0.72rem; min-width: 20px;">${icon}</span>
             <span class="playlist-item-title">${escapeHtml(track.name)}</span>
-            <span class="playlist-item-size">${track.size} MB</span>
+            <span class="playlist-item-size">${sizeLabel}</span>
           </div>
           <div class="playlist-item-actions">
-            <button class="btn btn-xs btn-outline play-track-btn" title="Putar Lagu"><i class="fa-solid ${this.currentMode === 'file' && this.currentIndex === idx && this.isPlaying ? 'fa-pause' : 'fa-play'}"></i></button>
+            <button class="btn btn-xs btn-outline play-track-btn" title="Putar Lagu"><i class="fa-solid ${isCurrent && this.isPlaying ? 'fa-pause' : 'fa-play'}"></i></button>
             <button class="btn btn-xs btn-outline del-track-btn" style="border-color: rgba(255,82,0,0.4); color: var(--neon-amber);" title="Hapus Lagu"><i class="fa-solid fa-trash-can"></i></button>
           </div>
         `;
 
         item.querySelector('.play-track-btn').addEventListener('click', (e) => {
           e.stopPropagation();
-          if (this.currentMode === 'file' && this.currentIndex === idx) {
+          if (isCurrent) {
             this.togglePlayPause();
           } else {
             this.playTrack(idx);
@@ -2849,7 +3076,7 @@
         item.querySelector('.del-track-btn').addEventListener('click', (e) => this.deleteTrack(track.id, e));
 
         item.addEventListener('click', () => {
-          if (this.currentMode === 'file' && this.currentIndex === idx) {
+          if (isCurrent) {
             this.togglePlayPause();
           } else {
             this.playTrack(idx);
@@ -2907,8 +3134,11 @@
 
       // Title String
       let title = 'Cyber BGM: Siap';
-      if (this.currentMode === 'file' && this.currentIndex >= 0 && this.currentIndex < this.playlist.length) {
-        title = `🎵 ${this.playlist[this.currentIndex].name}`;
+      if (this.currentMode === 'youtube' && this.currentOnlineTrack) {
+        title = `🔴 ${this.currentOnlineTrack.title}`;
+      } else if (this.currentMode === 'file' && this.currentIndex >= 0 && this.currentIndex < this.playlist.length) {
+        const tr = this.playlist[this.currentIndex];
+        title = `${tr.isOnline ? (tr.youtubeId ? '🔴' : '🌐') : '🎵'} ${tr.name}`;
       } else if (this.currentMode === 'ambient' && this.activeAmbientId) {
         const preset = AMBIENT_PRESETS.find(p => p.id === this.activeAmbientId);
         title = preset ? preset.name : 'Cyber Ambient';
@@ -3062,9 +3292,91 @@
       }
     });
 
-    // Sidebar Mobile Toggle
-    els.toggleSidebarBtn.addEventListener('click', () => els.sidebar.classList.add('open'));
-    els.closeSidebarBtn.addEventListener('click', () => els.sidebar.classList.remove('open'));
+    // Sidebar Mobile Open/Close Helpers
+    function openSidebar() {
+      els.sidebar?.classList.add('open');
+      els.sidebarBackdrop?.classList.add('show');
+      AudioEngine.click();
+    }
+
+    function closeSidebar() {
+      els.sidebar?.classList.remove('open');
+      els.sidebarBackdrop?.classList.remove('show');
+    }
+
+    // Sidebar Mobile Toggle & Backdrop Dismiss
+    els.toggleSidebarBtn?.addEventListener('click', openSidebar);
+    els.closeSidebarBtn?.addEventListener('click', closeSidebar);
+    els.sidebarBackdrop?.addEventListener('click', closeSidebar);
+
+    // Auto-dismiss sidebar on mobile when clicking on main content / chat area
+    els.mainContent?.addEventListener('click', (e) => {
+      if (window.innerWidth <= 768 && els.sidebar?.classList.contains('open')) {
+        if (!els.sidebar.contains(e.target) && !els.toggleSidebarBtn?.contains(e.target)) {
+          closeSidebar();
+        }
+      }
+    });
+
+    els.chatViewport?.addEventListener('click', () => {
+      if (window.innerWidth <= 768 && els.sidebar?.classList.contains('open')) {
+        closeSidebar();
+      }
+    });
+
+    // Online & YouTube Music Handlers
+    els.playOnlineUrlBtn?.addEventListener('click', () => {
+      const url = els.onlineAudioUrlInput ? els.onlineAudioUrlInput.value.trim() : '';
+      const title = els.onlineAudioTitleInput ? els.onlineAudioTitleInput.value.trim() : '';
+      if (!url) {
+        showToast('Masukkan URL audio atau YouTube terlebih dahulu.', 'error');
+        return;
+      }
+      const ytId = BGMEngine.extractYouTubeId(url);
+      if (ytId) {
+        BGMEngine.playYouTube(ytId, title || null);
+      } else {
+        BGMEngine.playDirectUrl(url, title || 'Online Stream');
+      }
+      AudioEngine.click();
+    });
+
+    els.saveOnlineUrlBtn?.addEventListener('click', () => {
+      const url = els.onlineAudioUrlInput ? els.onlineAudioUrlInput.value.trim() : '';
+      const title = els.onlineAudioTitleInput ? els.onlineAudioTitleInput.value.trim() : '';
+      BGMEngine.saveOnlineToPlaylist(url, title);
+    });
+
+    els.toggleYtPlayerVisibilityBtn?.addEventListener('click', () => {
+      const wrap = els.ytPlayerContainerWrap;
+      if (wrap) {
+        const isHidden = wrap.style.display === 'none';
+        wrap.style.display = isHidden ? 'block' : 'none';
+        els.toggleYtPlayerVisibilityBtn.innerHTML = isHidden 
+          ? '<i class="fa-solid fa-eye-slash"></i> Sembunyikan' 
+          : '<i class="fa-solid fa-eye"></i> Tampilkan';
+      }
+      AudioEngine.click();
+    });
+
+    // Curated 1-Click Stream Cards
+    $$('.curated-stream-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const type = card.dataset.type;
+        const src = card.dataset.src;
+        const title = card.dataset.title;
+
+        if (type === 'youtube') {
+          const ytId = BGMEngine.extractYouTubeId(src);
+          if (ytId) BGMEngine.playYouTube(ytId, title);
+        } else {
+          BGMEngine.playDirectUrl(src, title);
+        }
+        if (els.onlineAudioUrlInput) els.onlineAudioUrlInput.value = src;
+        if (els.onlineAudioTitleInput) els.onlineAudioTitleInput.value = title;
+        AudioEngine.click();
+      });
+    });
 
     // Status Buttons
     els.refreshOllamaBtn.addEventListener('click', () => {

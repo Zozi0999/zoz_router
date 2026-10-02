@@ -1818,6 +1818,31 @@ html, body {
   to { opacity: 1; transform: translateX(0); }
 }
 
+/* Sidebar Backdrop Overlay */
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sidebar-backdrop.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.curated-stream-card:hover {
+  border-color: var(--neon-cyan) !important;
+  background: rgba(0, 240, 255, 0.1) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(0, 240, 255, 0.2);
+}
+
 /* ==================== RESPONSIVE (MOBILE & ANDROID CHROME) ==================== */
 @media (max-width: 768px) {
   /* Off-canvas mobile sidebar */
@@ -1831,6 +1856,7 @@ html, body {
     z-index: 1000;
     transform: translateX(-100%);
     box-shadow: 8px 0 32px rgba(0, 0, 0, 0.85);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
   
   .sidebar.open {
