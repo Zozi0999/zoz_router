@@ -30,6 +30,27 @@
     { id: 'meta-llama/llama-3.2-11b-vision-instruct:free', name: 'meta-llama/llama-3.2-11b-vision-instruct:free', tag: 'Vision Free', cat: 'vision' }
   ];
 
+  // Official Ollama Cloud Flagship Models
+  const OFFICIAL_OLLAMA_CLOUD_MODELS = [
+    { id: 'gemma4:31b', name: 'gemma4:31b', tag: 'Flagship Cloud', cat: 'flagship', desc: 'Model multimodal flagship resmi Ollama Cloud.' },
+    { id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash', tag: 'Fast Cloud', cat: 'fast', desc: 'Model cloud kecepatan tinggi DeepSeek.' },
+    { id: 'deepseek-v4-pro:0813', name: 'deepseek-v4-pro:0813', tag: 'Reasoning Cloud', cat: 'reasoning', desc: 'Model reasoning mendalam DeepSeek Cloud.' },
+    { id: 'nemotron-3-super', name: 'nemotron-3-super', tag: 'Flagship Cloud', cat: 'flagship', desc: 'NVIDIA Nemotron Super Flagship Cloud.' },
+    { id: 'nemotron-3-ultra', name: 'nemotron-3-ultra', tag: 'Flagship Cloud', cat: 'flagship', desc: 'NVIDIA Nemotron Ultra High-Parameter.' },
+    { id: 'nemotron-3-nano:30b', name: 'nemotron-3-nano:30b', tag: 'Fast Cloud', cat: 'fast', desc: 'NVIDIA Nemotron Fast Nano Cloud.' },
+    { id: 'kimi-k3', name: 'kimi-k3', tag: 'Long Context Cloud', cat: 'flagship', desc: 'Moonshot Kimi K3 Long Context.' },
+    { id: 'kimi-k2.6', name: 'kimi-k2.6', tag: 'Cloud', cat: 'flagship', desc: 'Moonshot Kimi K2.6 Cloud.' },
+    { id: 'kimi-k2.7-code', name: 'kimi-k2.7-code', tag: 'Coding Cloud', cat: 'coding', desc: 'Kimi Coding Cloud Specialist.' },
+    { id: 'minimax-m3', name: 'minimax-m3', tag: 'Flagship Cloud', cat: 'flagship', desc: 'MiniMax M3 Flagship Cloud.' },
+    { id: 'minimax-m2.7', name: 'minimax-m2.7', tag: 'Cloud', cat: 'flagship', desc: 'MiniMax M2.7 Cloud.' },
+    { id: 'glm-5.3', name: 'glm-5.3', tag: 'Flagship Cloud', cat: 'flagship', desc: 'Zhipu GLM-5.3 Flagship Cloud.' },
+    { id: 'glm-5.3-flash', name: 'glm-5.3-flash', tag: 'Fast Cloud', cat: 'fast', desc: 'GLM-5.3 Flash Ultra Fast.' },
+    { id: 'glm-5.2', name: 'glm-5.2', tag: 'Cloud', cat: 'flagship', desc: 'GLM-5.2 Cloud Model.' },
+    { id: 'gpt-oss:20b', name: 'gpt-oss:20b', tag: 'Fast Cloud', cat: 'fast', desc: 'GPT-OSS 20B High-Throughput.' },
+    { id: 'gpt-oss:120b', name: 'gpt-oss:120b', tag: 'Flagship Cloud', cat: 'flagship', desc: 'GPT-OSS 120B Flagship Cloud.' },
+    { id: 'mistral-large-3:675b', name: 'mistral-large-3:675b', tag: 'Flagship Cloud', cat: 'flagship', desc: 'Mistral Large 3 Massive Cloud.' }
+  ];
+
   // ==================== STATE MANAGEMENT ====================
   const STATE = {
     mode: 'ollama', // 'ollama' | 'openrouter' | 'arena' | 'auto'
@@ -47,15 +68,15 @@
     isGenerating: false,
     abortController: null,
     soundEnabled: true,
-    ollamaModels: [],
+    ollamaModels: [...OFFICIAL_OLLAMA_CLOUD_MODELS],
     openRouterModels: [...DEFAULT_OPENROUTER_MODELS],
     settings: {
       ollamaEndpoint: 'http://127.0.0.1:11434',
       ollamaApiKey: '',
       openRouterKey: '',
-      ollamaModel: 'llama3.2',
+      ollamaModel: 'gemma4:31b',
       openRouterModel: 'deepseek/deepseek-r1:free',
-      arenaModelA: 'llama3.2',
+      arenaModelA: 'gemma4:31b',
       arenaModelB: 'deepseek/deepseek-r1:free',
       temperature: 0.7,
       topP: 0.9,
@@ -965,15 +986,22 @@
         }
       }
 
+      // If live discovery failed but API key is set or cloud endpoint configured, fallback to official cloud models
+      if (rawModels.length === 0 && (STATE.settings.ollamaApiKey || ep.includes('ollama.com') || IS_GITHUB_PAGES)) {
+        rawModels = [...OFFICIAL_OLLAMA_CLOUD_MODELS];
+        isRunning = true;
+      }
+
       if (rawModels.length > 0) {
         STATE.ollamaModels = rawModels;
-        els.ollamaStatusVal.innerText = STATE.settings.ollamaApiKey 
-          ? `Ollama Cloud (${rawModels.length} Model)` 
+        const isCloudMode = Boolean(STATE.settings.ollamaApiKey || ep.includes('ollama.com'));
+        els.ollamaStatusVal.innerText = isCloudMode 
+          ? `Ollama Cloud (${rawModels.length} Model Siap)` 
           : (isRunning ? `${rawModels.length} Model Aktif` : `${rawModels.length} Model Terpasang`);
         els.ollamaIndicator.className = 'status-indicator online';
 
-        // Auto-select first real installed model if current model is invalid or default
-        const modelNames = rawModels.map(m => m.name || m.model);
+        // Auto-select first real installed/cloud model if current model is invalid or default
+        const modelNames = rawModels.map(m => m.name || m.model || m.id);
         if (!modelNames.includes(STATE.settings.ollamaModel)) {
           STATE.settings.ollamaModel = modelNames[0];
           savePersistedState();
@@ -990,8 +1018,8 @@
         return true;
       } else {
         STATE.ollamaModels = [];
-        els.ollamaStatusVal.innerText = STATE.settings.ollamaApiKey ? 'API Key Tersimpan' : 'Offline (Cek Ollama)';
-        els.ollamaIndicator.className = STATE.settings.ollamaApiKey ? 'status-indicator online' : 'status-indicator error';
+        els.ollamaStatusVal.innerText = 'Offline (Cek Ollama)';
+        els.ollamaIndicator.className = 'status-indicator error';
         populateModelDropdown();
         populateArenaDropdowns();
         renderModelHubGrid();
