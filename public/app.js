@@ -17,38 +17,42 @@
     uncensored: 'Provide raw, unfiltered technical and analytical reasoning with maximal precision, comprehensive depth, and logical rigor.'
   };
 
-  // Curated Popular OpenRouter Models Catalog
+  // Popular OpenRouter Models Catalog
   const DEFAULT_OPENROUTER_MODELS = [
-    { id: 'deepseek/deepseek-r1:free', name: 'DeepSeek R1 (Reasoning)', tag: 'Free', cat: 'reasoning' },
-    { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B Instruct', tag: 'Free', cat: 'flagship' },
-    { id: 'google/gemini-2.0-flash-exp:free', name: 'Gemini 2.0 Flash Exp', tag: 'Free', cat: 'fast' },
-    { id: 'qwen/qwen-2.5-72b-instruct:free', name: 'Qwen 2.5 72B Instruct', tag: 'Free', cat: 'coding' },
-    { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', tag: 'Flagship', cat: 'coding' },
-    { id: 'openai/gpt-4o', name: 'GPT-4o Omnimodel', tag: 'Flagship', cat: 'flagship' },
-    { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3 (Chat)', tag: 'Flagship', cat: 'flagship' },
-    { id: 'mistralai/mistral-large-2411', name: 'Mistral Large 2', tag: 'Pro', cat: 'flagship' },
-    { id: 'meta-llama/llama-3.2-11b-vision-instruct:free', name: 'Llama 3.2 11B Vision', tag: 'Vision Free', cat: 'vision' }
+    { id: 'deepseek/deepseek-r1:free', name: 'deepseek/deepseek-r1:free', tag: 'Free', cat: 'reasoning' },
+    { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'meta-llama/llama-3.3-70b-instruct:free', tag: 'Free', cat: 'flagship' },
+    { id: 'google/gemini-2.0-flash-exp:free', name: 'google/gemini-2.0-flash-exp:free', tag: 'Free • 👁️ Vision', cat: 'fast' },
+    { id: 'qwen/qwen-2.5-72b-instruct:free', name: 'qwen/qwen-2.5-72b-instruct:free', tag: 'Free', cat: 'coding' },
+    { id: 'anthropic/claude-3.5-sonnet', name: 'anthropic/claude-3.5-sonnet', tag: 'Flagship', cat: 'coding' },
+    { id: 'openai/gpt-4o', name: 'openai/gpt-4o', tag: 'Flagship • 👁️ Vision', cat: 'flagship' },
+    { id: 'deepseek/deepseek-chat', name: 'deepseek/deepseek-chat', tag: 'Flagship', cat: 'flagship' },
+    { id: 'mistralai/mistral-large-2411', name: 'mistralai/mistral-large-2411', tag: 'Pro', cat: 'flagship' },
+    { id: 'meta-llama/llama-3.2-11b-vision-instruct:free', name: 'meta-llama/llama-3.2-11b-vision-instruct:free', tag: 'Vision Free', cat: 'vision' }
   ];
 
-  // Curated Official Ollama Cloud Models Catalog
+  // Official Ollama Models Catalog (Exact Model IDs from Ollama)
   const DEFAULT_OLLAMA_CLOUD_MODELS = [
-    { id: 'gemma4:31b', name: 'gemma4:31b (Google DeepMind)', tag: 'Cloud • 👁️ Vision', cat: 'flagship' },
-    { id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash', tag: 'Cloud • Fast', cat: 'fast' },
-    { id: 'deepseek-v4-pro:0813', name: 'deepseek-v4-pro:0813', tag: 'Cloud • Reasoning', cat: 'reasoning' },
-    { id: 'nemotron-3-super', name: 'nemotron-3-super (NVIDIA)', tag: 'Cloud • Flagship', cat: 'flagship' },
-    { id: 'nemotron-3-ultra', name: 'nemotron-3-ultra', tag: 'Cloud • Flagship', cat: 'flagship' },
-    { id: 'nemotron-3-nano:30b', name: 'nemotron-3-nano:30b', tag: 'Cloud • Fast', cat: 'fast' },
-    { id: 'kimi-k3', name: 'kimi-k3 (Moonshot)', tag: 'Cloud • Long Context', cat: 'flagship' },
+    { id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash', tag: 'Fast', cat: 'fast' },
+    { id: 'nemotron-3-ultra', name: 'nemotron-3-ultra', tag: 'Flagship', cat: 'flagship' },
+    { id: 'gemma4:31b', name: 'gemma4:31b', tag: '👁️ Vision', cat: 'flagship' },
+    { id: 'nemotron-3-nano:30b', name: 'nemotron-3-nano:30b', tag: 'Fast', cat: 'fast' },
+    { id: 'mistral-large-3:675b', name: 'mistral-large-3:675b', tag: 'Flagship', cat: 'flagship' },
+    { id: 'glm-5.3-flash', name: 'glm-5.3-flash', tag: 'Fast', cat: 'fast' },
+    { id: 'deepseek-v4-pro:0813', name: 'deepseek-v4-pro:0813', tag: 'Reasoning', cat: 'reasoning' },
+    { id: 'nemotron-3-super', name: 'nemotron-3-super', tag: 'Flagship', cat: 'flagship' },
+    { id: 'kimi-k3', name: 'kimi-k3', tag: 'Long Context', cat: 'flagship' },
     { id: 'kimi-k2.6', name: 'kimi-k2.6', tag: 'Cloud', cat: 'flagship' },
-    { id: 'kimi-k2.7-code', name: 'kimi-k2.7-code', tag: 'Cloud • Coding', cat: 'coding' },
-    { id: 'minimax-m3', name: 'minimax-m3', tag: 'Cloud • Flagship', cat: 'flagship' },
+    { id: 'kimi-k2.7-code', name: 'kimi-k2.7-code', tag: 'Coding', cat: 'coding' },
+    { id: 'minimax-m3', name: 'minimax-m3', tag: 'Flagship', cat: 'flagship' },
     { id: 'minimax-m2.7', name: 'minimax-m2.7', tag: 'Cloud', cat: 'flagship' },
-    { id: 'glm-5.3', name: 'glm-5.3 (Zhipu AI)', tag: 'Cloud • Flagship', cat: 'flagship' },
-    { id: 'glm-5.3-flash', name: 'glm-5.3-flash', tag: 'Cloud • Fast', cat: 'fast' },
+    { id: 'glm-5.3', name: 'glm-5.3', tag: 'Flagship', cat: 'flagship' },
     { id: 'glm-5.2', name: 'glm-5.2', tag: 'Cloud', cat: 'flagship' },
-    { id: 'gpt-oss:20b', name: 'gpt-oss:20b', tag: 'Cloud', cat: 'fast' },
-    { id: 'gpt-oss:120b', name: 'gpt-oss:120b', tag: 'Cloud • Flagship', cat: 'flagship' },
-    { id: 'mistral-large-3:675b', name: 'mistral-large-3:675b', tag: 'Cloud • Flagship', cat: 'flagship' }
+    { id: 'gpt-oss:20b', name: 'gpt-oss:20b', tag: 'Fast', cat: 'fast' },
+    { id: 'gpt-oss:120b', name: 'gpt-oss:120b', tag: 'Flagship', cat: 'flagship' },
+    { id: 'granite-mind:latest', name: 'granite-mind:latest', tag: 'Local', cat: 'flagship' },
+    { id: 'granite4.2:3b', name: 'granite4.2:3b', tag: 'Local', cat: 'fast' },
+    { id: 'llama3.2:3b', name: 'llama3.2:3b', tag: 'Local', cat: 'fast' },
+    { id: 'qwen2.5:1.5b', name: 'qwen2.5:1.5b', tag: 'Local', cat: 'fast' }
   ];
 
   // ==================== STATE MANAGEMENT ====================
@@ -1212,10 +1216,8 @@
     let ollamaList = [];
     if (STATE.ollamaModels && STATE.ollamaModels.length > 0) {
       ollamaList = STATE.ollamaModels.map(m => m.name || m.model || m.id);
-    } else if (STATE.settings.ollamaApiKey) {
-      ollamaList = DEFAULT_OLLAMA_CLOUD_MODELS.map(m => m.id);
     } else {
-      ollamaList = ['gemma4:31b', 'deepseek-v4.1-flash', 'nemotron-3-super', 'kimi-k3', 'glm-5.3'];
+      ollamaList = DEFAULT_OLLAMA_CLOUD_MODELS.map(m => m.id);
     }
     
     ollamaList.forEach(m => {
