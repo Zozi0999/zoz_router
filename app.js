@@ -6,7 +6,7 @@
 (() => {
   'use strict';
 
-  const IS_GITHUB_PAGES = location.hostname.endsWith('github.io') || location.protocol === 'file:' || !location.port;
+  const IS_GITHUB_PAGES = location.hostname.endsWith('github.io') || location.protocol === 'file:';
 
   // ==================== SYSTEM PRESETS ====================
   const SYSTEM_PRESETS = {

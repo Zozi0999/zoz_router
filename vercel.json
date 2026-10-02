@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "rewrites": [
+    { "source": "/api/ollama/chat", "destination": "/api/ollama/chat.js" },
+    { "source": "/api/ollama/models", "destination": "/api/ollama/models.js" },
+    { "source": "/api/openrouter/chat", "destination": "/api/openrouter/chat.js" },
+    { "source": "/api/openrouter/models", "destination": "/api/openrouter/models.js" },
+    { "source": "/api/openrouter/auth-check", "destination": "/api/openrouter/auth-check.js" },
+    { "source": "/(.*)", "destination": "/public/$1" }
+  ]
+}
