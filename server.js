@@ -249,58 +249,117 @@ function performWebSearch(query) {
     }
   }
 
-// Ollama: Check status & get models (with disk manifest fallback)
+// Ollama: Check status & get models (with multi-route fallback & disk manifests)
   if (pathname === '/api/ollama/models' && method === 'GET') {
-    const customEndpoint = reqUrl.searchParams.get('endpoint') || req.headers['x-ollama-endpoint'] || 'http://127.0.0.1:11434';
-    const authHeader = req.headers['authorization'] || (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null);
-    try {
-      const ollamaUrl = new URL('/api/tags', customEndpoint);
-      const client = ollamaUrl.protocol === 'https:' ? https : http;
-
-      const reqHeaders = {};
-      if (authHeader) reqHeaders['Authorization'] = authHeader;
-
-      const proxyReq = client.get(ollamaUrl.toString(), { timeout: 3500, headers: reqHeaders }, (proxyRes) => {
-        let rawData = '';
-        proxyRes.on('data', chunk => rawData += chunk);
-        proxyRes.on('end', () => {
-          try {
-            const data = JSON.parse(rawData);
-            if (data.models && data.models.length > 0) {
-              return sendJSON(res, proxyRes.statusCode, { ...data, server_running: true });
-            }
-            // If Ollama returns empty, merge with disk manifests
-            const diskModels = getLocalOllamaManifests();
-            return sendJSON(res, 200, { models: diskModels.length > 0 ? diskModels : (data.models || []), server_running: true });
-          } catch (e) {
-            const diskModels = getLocalOllamaManifests();
-            return sendJSON(res, 200, { models: diskModels, server_running: true, warning: 'Parsed from local disk manifests' });
-          }
-        });
-      });
-
-      proxyReq.on('timeout', () => {
-        proxyReq.destroy();
-        const diskModels = getLocalOllamaManifests();
-        return sendJSON(res, 200, { 
-          models: diskModels, 
-          server_running: false, 
-          warning: 'Ollama service timed out, models loaded from local manifest storage' 
-        });
-      });
-
-      proxyReq.on('error', () => {
-        const diskModels = getLocalOllamaManifests();
-        return sendJSON(res, 200, { 
-          models: diskModels, 
-          server_running: false, 
-          warning: 'Ollama service offline, models loaded from local manifest storage' 
-        });
-      });
-    } catch (err) {
-      const diskModels = getLocalOllamaManifests();
-      return sendJSON(res, 200, { models: diskModels, server_running: false, error: err.message });
+    let rawEndpoint = reqUrl.searchParams.get('endpoint') || req.headers['x-ollama-endpoint'] || 'http://127.0.0.1:11434';
+    rawEndpoint = rawEndpoint.trim();
+    if (!/^https?:\/\//i.test(rawEndpoint)) {
+      rawEndpoint = (rawEndpoint.includes(':443') || rawEndpoint.includes('.com') || rawEndpoint.includes('.io') || rawEndpoint.includes('.ai') || rawEndpoint.includes('.app')) 
+        ? `https://${rawEndpoint}` 
+        : `http://${rawEndpoint}`;
     }
+    rawEndpoint = rawEndpoint.replace(/\/+$/, '');
+
+    const authHeader = req.headers['authorization'] || (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null);
+
+    const tryFetchTags = (endpointUrl) => {
+      return new Promise((resolve) => {
+        try {
+          const ollamaUrl = new URL('/api/tags', endpointUrl);
+          const client = ollamaUrl.protocol === 'https:' ? https : http;
+          const reqHeaders = { 'User-Agent': 'ZozRouter/1.0' };
+          if (authHeader) reqHeaders['Authorization'] = authHeader;
+
+          const proxyReq = client.get(ollamaUrl.toString(), { timeout: 4000, headers: reqHeaders }, (proxyRes) => {
+            let rawData = '';
+            proxyRes.on('data', chunk => rawData += chunk);
+            proxyRes.on('end', () => {
+              try {
+                const data = JSON.parse(rawData);
+                if (data.models && Array.isArray(data.models) && data.models.length > 0) {
+                  return resolve({ models: data.models, server_running: true });
+                }
+                resolve(null);
+              } catch (e) {
+                resolve(null);
+              }
+            });
+          });
+          proxyReq.on('timeout', () => { proxyReq.destroy(); resolve(null); });
+          proxyReq.on('error', () => resolve(null));
+        } catch (err) {
+          resolve(null);
+        }
+      });
+    };
+
+    const tryFetchV1Models = (endpointUrl) => {
+      return new Promise((resolve) => {
+        try {
+          const ollamaUrl = new URL('/v1/models', endpointUrl);
+          const client = ollamaUrl.protocol === 'https:' ? https : http;
+          const reqHeaders = { 'User-Agent': 'ZozRouter/1.0' };
+          if (authHeader) reqHeaders['Authorization'] = authHeader;
+
+          const proxyReq = client.get(ollamaUrl.toString(), { timeout: 4000, headers: reqHeaders }, (proxyRes) => {
+            let rawData = '';
+            proxyRes.on('data', chunk => rawData += chunk);
+            proxyRes.on('end', () => {
+              try {
+                const data = JSON.parse(rawData);
+                if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+                  const mapped = data.data.map(m => ({
+                    name: m.id,
+                    model: m.id,
+                    details: { family: m.id }
+                  }));
+                  return resolve({ models: mapped, server_running: true });
+                }
+                resolve(null);
+              } catch (e) {
+                resolve(null);
+              }
+            });
+          });
+          proxyReq.on('timeout', () => { proxyReq.destroy(); resolve(null); });
+          proxyReq.on('error', () => resolve(null));
+        } catch (e) {
+          resolve(null);
+        }
+      });
+    };
+
+    (async () => {
+      let result = await tryFetchTags(rawEndpoint);
+      if (!result) {
+        result = await tryFetchV1Models(rawEndpoint);
+      }
+
+      if (result && result.models && result.models.length > 0) {
+        return sendJSON(res, 200, result);
+      }
+
+      // If remote returned empty or failed, check disk manifests for local
+      const diskModels = getLocalOllamaManifests();
+      if (diskModels.length > 0) {
+        return sendJSON(res, 200, { models: diskModels, server_running: true, note: 'Loaded from local manifests' });
+      }
+
+      // If user has API key provided, provide fallback cloud models catalog
+      if (authHeader) {
+        const cloudFallback = [
+          { name: 'llama3.3:70b', model: 'llama3.3:70b', details: { family: 'llama' } },
+          { name: 'deepseek-r1:latest', model: 'deepseek-r1:latest', details: { family: 'deepseek' } },
+          { name: 'qwen2.5:72b', model: 'qwen2.5:72b', details: { family: 'qwen' } },
+          { name: 'mistral:latest', model: 'mistral:latest', details: { family: 'mistral' } },
+          { name: 'phi4:latest', model: 'phi4:latest', details: { family: 'phi' } },
+          { name: 'llava:latest', model: 'llava:latest', details: { family: 'llava' } }
+        ];
+        return sendJSON(res, 200, { models: cloudFallback, server_running: true, cloud_auth: true });
+      }
+
+      return sendJSON(res, 200, { models: [], server_running: false, warning: 'Ollama service offline / unreachable' });
+    })();
     return;
   }
 
@@ -325,7 +384,15 @@ function performWebSearch(query) {
   if (pathname === '/api/ollama/chat' && method === 'POST') {
     try {
       const body = await parseBody(req);
-      const customEndpoint = req.headers['x-ollama-endpoint'] || body.endpoint || 'http://127.0.0.1:11434';
+      let customEndpoint = req.headers['x-ollama-endpoint'] || body.endpoint || 'http://127.0.0.1:11434';
+      customEndpoint = customEndpoint.trim();
+      if (!/^https?:\/\//i.test(customEndpoint)) {
+        customEndpoint = (customEndpoint.includes(':443') || customEndpoint.includes('.com') || customEndpoint.includes('.io') || customEndpoint.includes('.ai') || customEndpoint.includes('.app')) 
+          ? `https://${customEndpoint}` 
+          : `http://${customEndpoint}`;
+      }
+      customEndpoint = customEndpoint.replace(/\/+$/, '');
+
       const authHeader = req.headers['authorization'] || (body.apiKey ? `Bearer ${body.apiKey}` : (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null));
       delete body.endpoint; // Don't send custom field to Ollama
       delete body.apiKey;

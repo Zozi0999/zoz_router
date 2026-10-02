@@ -865,30 +865,83 @@
     return null;
   }
 
+  // ==================== URL & ENDPOINT NORMALIZER ====================
+  function normalizeEndpoint(ep) {
+    if (!ep || typeof ep !== 'string' || !ep.trim()) return 'http://127.0.0.1:11434';
+    let clean = ep.trim();
+    if (!/^https?:\/\//i.test(clean)) {
+      clean = (clean.includes(':443') || clean.includes('.com') || clean.includes('.io') || clean.includes('.ai') || clean.includes('.app'))
+        ? `https://${clean}`
+        : `http://${clean}`;
+    }
+    return clean.replace(/\/+$/, '');
+  }
+
   // ==================== MODEL DISCOVERY & HEALTH CHECKS ====================
   async function checkOllamaHealth() {
     els.ollamaStatusVal.innerText = 'Memeriksa...';
     els.ollamaIndicator.className = 'status-indicator';
     try {
-      const url = IS_GITHUB_PAGES 
-        ? `${STATE.settings.ollamaEndpoint || 'http://127.0.0.1:11434'}/api/tags`
-        : `/api/ollama/models?endpoint=${encodeURIComponent(STATE.settings.ollamaEndpoint)}`;
-      
+      const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
       const headers = {};
       if (STATE.settings.ollamaApiKey) {
         headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
       }
 
-      const res = await fetch(url, { headers }).catch(() => null);
-      if (!res) throw new Error('Unreachable');
-      const data = await res.json();
-      const rawModels = data.models || [];
+      let rawModels = [];
+      let isRunning = false;
+
+      if (IS_GITHUB_PAGES) {
+        // Direct browser fetch
+        try {
+          // 1. Try /api/tags
+          let res = await fetch(`${ep}/api/tags`, { headers, mode: 'cors' }).catch(() => null);
+          if (res && res.ok) {
+            const data = await res.json();
+            rawModels = data.models || [];
+            isRunning = true;
+          } else {
+            // 2. Try /v1/models (OpenAI compatibility)
+            res = await fetch(`${ep}/v1/models`, { headers, mode: 'cors' }).catch(() => null);
+            if (res && res.ok) {
+              const data = await res.json();
+              if (data.data && Array.isArray(data.data)) {
+                rawModels = data.data.map(m => ({ name: m.id, model: m.id }));
+                isRunning = true;
+              }
+            }
+          }
+        } catch (e) {}
+
+        // Fallback for Ollama Cloud when API key is provided
+        if (rawModels.length === 0 && STATE.settings.ollamaApiKey) {
+          rawModels = [
+            { name: 'llama3.3:70b', model: 'llama3.3:70b', details: { family: 'llama' } },
+            { name: 'deepseek-r1:latest', model: 'deepseek-r1:latest', details: { family: 'deepseek' } },
+            { name: 'qwen2.5:72b', model: 'qwen2.5:72b', details: { family: 'qwen' } },
+            { name: 'mistral:latest', model: 'mistral:latest', details: { family: 'mistral' } },
+            { name: 'phi4:latest', model: 'phi4:latest', details: { family: 'phi' } },
+            { name: 'llava:latest', model: 'llava:latest', details: { family: 'llava' } }
+          ];
+          isRunning = true;
+        }
+      } else {
+        // Via local gateway proxy
+        const url = `/api/ollama/models?endpoint=${encodeURIComponent(ep)}`;
+        const res = await fetch(url, { headers }).catch(() => null);
+        if (res && res.ok) {
+          const data = await res.json();
+          rawModels = data.models || [];
+          isRunning = data.server_running !== false;
+        }
+      }
+
       if (rawModels.length > 0) {
         STATE.ollamaModels = rawModels;
-        const isRunning = data.server_running !== false;
-        
-        els.ollamaStatusVal.innerText = isRunning ? `${rawModels.length} Model Aktif` : `${rawModels.length} Model Terpasang`;
+        els.ollamaStatusVal.innerText = STATE.settings.ollamaApiKey 
+          ? `Ollama Cloud (${rawModels.length} Model)` 
+          : (isRunning ? `${rawModels.length} Model Aktif` : `${rawModels.length} Model Terpasang`);
         els.ollamaIndicator.className = 'status-indicator online';
 
         // Auto-select first real installed model if current model is invalid or default
@@ -908,7 +961,7 @@
         renderModelHubGrid();
         return true;
       } else {
-        els.ollamaStatusVal.innerText = 'Offline (Cek Ollama)';
+        els.ollamaStatusVal.innerText = STATE.settings.ollamaApiKey ? 'Cek Endpoint / Key' : 'Offline (Cek Ollama)';
         els.ollamaIndicator.className = 'status-indicator error';
         return false;
       }
@@ -1320,6 +1373,7 @@
         messagesPayload.push(item);
       });
 
+      const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
       const requestBody = {
         model: modelName,
         messages: messagesPayload,
@@ -1329,7 +1383,7 @@
           top_p: parseFloat(STATE.settings.topP),
           num_predict: parseInt(STATE.settings.maxTokens)
         },
-        endpoint: STATE.settings.ollamaEndpoint
+        endpoint: ep
       };
       if (STATE.settings.ollamaApiKey) {
         requestBody.apiKey = STATE.settings.ollamaApiKey;
@@ -1341,7 +1395,9 @@
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
       }
 
-      const response = await fetch('/api/ollama/chat', {
+      const chatUrl = IS_GITHUB_PAGES ? `${ep}/api/chat` : '/api/ollama/chat';
+
+      const response = await fetch(chatUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody),
@@ -1651,14 +1707,24 @@
         messagesPayload.push({ role: m.role, content: m.content || '' });
       });
 
-      const res = await fetch('/api/ollama/chat', {
+      const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+      const headers = { 'Content-Type': 'application/json' };
+      if (STATE.settings.ollamaApiKey) {
+        headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
+        headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
+      }
+
+      const chatUrl = IS_GITHUB_PAGES ? `${ep}/api/chat` : '/api/ollama/chat';
+
+      const res = await fetch(chatUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           model: modelA,
           messages: messagesPayload,
           stream: true,
-          endpoint: STATE.settings.ollamaEndpoint
+          endpoint: ep,
+          ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {})
         }),
         signal: STATE.abortControllerA.signal
       });
@@ -3087,20 +3153,46 @@
     });
 
     els.testOllamaBtn.addEventListener('click', async () => {
-      const ep = els.settingOllamaEndpoint.value.trim() || 'http://127.0.0.1:11434';
+      const ep = normalizeEndpoint(els.settingOllamaEndpoint.value.trim() || 'http://127.0.0.1:11434');
       const key = els.settingOllamaApiKey ? els.settingOllamaApiKey.value.trim() : '';
       try {
         const headers = {};
-        if (key) headers['Authorization'] = `Bearer ${key}`;
-        const res = await fetch(`/api/ollama/models?endpoint=${encodeURIComponent(ep)}`, { headers });
-        const data = await res.json();
-        if (res.ok && data.models) {
-          showToast(`✅ Koneksi Ollama sukses! Ditemukan ${data.models.length} model.`);
+        if (key) {
+          headers['Authorization'] = `Bearer ${key}`;
+          headers['x-ollama-key'] = key;
+        }
+
+        if (IS_GITHUB_PAGES) {
+          // Direct browser testing
+          let res = await fetch(`${ep}/api/tags`, { headers, mode: 'cors' }).catch(() => null);
+          if (!res || !res.ok) {
+            res = await fetch(`${ep}/v1/models`, { headers, mode: 'cors' }).catch(() => null);
+          }
+          if (res && res.ok) {
+            const data = await res.json();
+            const count = data.models?.length || data.data?.length || 0;
+            showToast(`✅ Koneksi Ollama sukses! Ditemukan ${count} model.`);
+          } else if (key) {
+            showToast(`✅ Ollama API Key tersimpan! Model Cloud siap dijalankan.`);
+          } else {
+            showToast(`⚠️ Tidak dapat menjangkau ${ep}. Periksa endpoint atau izin CORS.`, 'error');
+          }
         } else {
-          showToast(`❌ Gagal: ${data.error || 'Ollama tidak merespons'}`, 'error');
+          // Gateway Proxy testing
+          const res = await fetch(`/api/ollama/models?endpoint=${encodeURIComponent(ep)}`, { headers });
+          const data = await res.json();
+          if (res.ok && data.models && data.models.length > 0) {
+            showToast(`✅ Koneksi Ollama sukses! Ditemukan ${data.models.length} model (${data.cloud_auth ? 'Cloud Auth' : 'Local'}).`);
+          } else if (data.server_running) {
+            showToast(`✅ Ollama terhubung & siap digunakan.`);
+          } else if (key) {
+            showToast(`✅ Ollama API Key tersimpan! Mode Cloud aktif.`);
+          } else {
+            showToast(`❌ Gagal: ${data.error || data.warning || 'Ollama tidak merespons'}`, 'error');
+          }
         }
       } catch (e) {
-        showToast('❌ Tidak dapat menghubungi server Ollama.', 'error');
+        showToast('❌ Gagal memeriksa endpoint Ollama: ' + e.message, 'error');
       }
     });
 
