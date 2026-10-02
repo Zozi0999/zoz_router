@@ -12,7 +12,12 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const body = req.body || {};
+    let body = req.body;
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch (e) {}
+    }
+    body = body || {};
+
     const authHeader = req.headers.authorization || (body.apiKey ? `Bearer ${body.apiKey}` : (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : ''));
 
     let targetEndpoint = body.endpoint || 'https://ollama.com';
@@ -27,7 +32,7 @@ module.exports = async function handler(req, res) {
       options: body.options || {}
     };
 
-    const targetUrl = new URL('/api/chat', targetEndpoint);
+    const targetUrl = new URL('/api/chat', targetEndpoint.startsWith('http') ? targetEndpoint : `https://${targetEndpoint}`);
     const headers = { 'Content-Type': 'application/json' };
     if (authHeader) headers['Authorization'] = authHeader;
 
@@ -45,20 +50,10 @@ module.exports = async function handler(req, res) {
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('Transfer-Encoding', 'chunked');
 
-    if (response.body && response.body.getReader) {
-      const reader = response.body.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        res.write(value);
-      }
-      return res.end();
-    } else if (response.body && response.body.pipe) {
-      response.body.pipe(res);
-    } else {
-      const buffer = await response.arrayBuffer();
-      return res.send(Buffer.from(buffer));
+    for await (const chunk of response.body) {
+      res.write(chunk);
     }
+    return res.end();
   } catch (err) {
     console.error('Vercel Ollama Chat Proxy Error:', err);
     return res.status(500).json({ error: err.message });

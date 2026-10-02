@@ -7,7 +7,12 @@ module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
   try {
-    const body = req.body || {};
+    let body = req.body;
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch (e) {}
+    }
+    body = body || {};
+
     const apiKey = body.apiKey || (req.headers.authorization ? req.headers.authorization.replace('Bearer ', '').trim() : '');
     if (!apiKey) return res.status(400).json({ error: 'Missing OpenRouter API Key' });
 
@@ -42,20 +47,10 @@ module.exports = async function handler(req, res) {
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Transfer-Encoding', 'chunked');
 
-    if (response.body && response.body.getReader) {
-      const reader = response.body.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        res.write(value);
-      }
-      return res.end();
-    } else if (response.body && response.body.pipe) {
-      response.body.pipe(res);
-    } else {
-      const buffer = await response.arrayBuffer();
-      return res.send(Buffer.from(buffer));
+    for await (const chunk of response.body) {
+      res.write(chunk);
     }
+    return res.end();
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
