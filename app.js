@@ -30,40 +30,6 @@
     { id: 'meta-llama/llama-3.2-11b-vision-instruct:free', name: 'meta-llama/llama-3.2-11b-vision-instruct:free', tag: 'Vision Free', cat: 'vision' }
   ];
 
-  // Official Ollama Models Catalog (Exact Model IDs from Ollama)
-  const DEFAULT_OLLAMA_CLOUD_MODELS = [
-    { id: 'llama3.2-vision:11b', name: 'llama3.2-vision:11b', tag: '👁️ Vision Flagship', cat: 'vision' },
-    { id: 'llama3.2-vision:latest', name: 'llama3.2-vision:latest', tag: '👁️ Vision', cat: 'vision' },
-    { id: 'llava:latest', name: 'llava:latest', tag: '👁️ Vision Standard', cat: 'vision' },
-    { id: 'llava:7b', name: 'llava:7b', tag: '👁️ Vision', cat: 'vision' },
-    { id: 'qwen2.5-vl:7b', name: 'qwen2.5-vl:7b', tag: '👁️ Vision SOTA', cat: 'vision' },
-    { id: 'moondream:1.8b', name: 'moondream:1.8b', tag: '👁️ Vision Fast', cat: 'vision' },
-    { id: 'granite3.2-vision:2b', name: 'granite3.2-vision:2b', tag: '👁️ Vision', cat: 'vision' },
-    { id: 'minicpm-v:8b', name: 'minicpm-v:8b', tag: '👁️ Vision', cat: 'vision' },
-    { id: 'pixtral:12b', name: 'pixtral:12b', tag: '👁️ Vision', cat: 'vision' },
-    { id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash', tag: 'Fast', cat: 'fast' },
-    { id: 'nemotron-3-ultra', name: 'nemotron-3-ultra', tag: 'Flagship', cat: 'flagship' },
-    { id: 'gemma4:31b', name: 'gemma4:31b', tag: 'Flagship', cat: 'flagship' },
-    { id: 'nemotron-3-nano:30b', name: 'nemotron-3-nano:30b', tag: 'Fast', cat: 'fast' },
-    { id: 'mistral-large-3:675b', name: 'mistral-large-3:675b', tag: 'Flagship', cat: 'flagship' },
-    { id: 'glm-5.3-flash', name: 'glm-5.3-flash', tag: 'Fast', cat: 'fast' },
-    { id: 'deepseek-v4-pro:0813', name: 'deepseek-v4-pro:0813', tag: 'Reasoning', cat: 'reasoning' },
-    { id: 'nemotron-3-super', name: 'nemotron-3-super', tag: 'Flagship', cat: 'flagship' },
-    { id: 'kimi-k3', name: 'kimi-k3', tag: 'Long Context', cat: 'flagship' },
-    { id: 'kimi-k2.6', name: 'kimi-k2.6', tag: 'Cloud', cat: 'flagship' },
-    { id: 'kimi-k2.7-code', name: 'kimi-k2.7-code', tag: 'Coding', cat: 'coding' },
-    { id: 'minimax-m3', name: 'minimax-m3', tag: 'Flagship', cat: 'flagship' },
-    { id: 'minimax-m2.7', name: 'minimax-m2.7', tag: 'Cloud', cat: 'flagship' },
-    { id: 'glm-5.3', name: 'glm-5.3', tag: 'Flagship', cat: 'flagship' },
-    { id: 'glm-5.2', name: 'glm-5.2', tag: 'Cloud', cat: 'flagship' },
-    { id: 'gpt-oss:20b', name: 'gpt-oss:20b', tag: 'Fast', cat: 'fast' },
-    { id: 'gpt-oss:120b', name: 'gpt-oss:120b', tag: 'Flagship', cat: 'flagship' },
-    { id: 'granite-mind:latest', name: 'granite-mind:latest', tag: 'Local', cat: 'flagship' },
-    { id: 'granite4.2:3b', name: 'granite4.2:3b', tag: 'Local', cat: 'fast' },
-    { id: 'llama3.2:3b', name: 'llama3.2:3b', tag: 'Local', cat: 'fast' },
-    { id: 'qwen2.5:1.5b', name: 'qwen2.5:1.5b', tag: 'Local', cat: 'fast' }
-  ];
-
   // ==================== STATE MANAGEMENT ====================
   const STATE = {
     mode: 'ollama', // 'ollama' | 'openrouter' | 'arena' | 'auto'
@@ -81,15 +47,15 @@
     isGenerating: false,
     abortController: null,
     soundEnabled: true,
-    ollamaModels: [...DEFAULT_OLLAMA_CLOUD_MODELS],
+    ollamaModels: [],
     openRouterModels: [...DEFAULT_OPENROUTER_MODELS],
     settings: {
       ollamaEndpoint: 'http://127.0.0.1:11434',
       ollamaApiKey: '',
       openRouterKey: '',
-      ollamaModel: 'gemma4:31b',
+      ollamaModel: 'llama3.2',
       openRouterModel: 'deepseek/deepseek-r1:free',
-      arenaModelA: 'gemma4:31b',
+      arenaModelA: 'llama3.2',
       arenaModelB: 'deepseek/deepseek-r1:free',
       temperature: 0.7,
       topP: 0.9,
@@ -292,12 +258,11 @@
       if (savedSettings) {
         STATE.settings = { ...STATE.settings, ...JSON.parse(savedSettings) };
       }
-      // Auto-migrate legacy or invalid Ollama default models to official cloud flagship gemma4:31b
-      if (!STATE.settings.ollamaModel || STATE.settings.ollamaModel === 'mistral:latest' || STATE.settings.ollamaModel === 'llama3.2:latest' || STATE.settings.ollamaModel === 'llama3.3:70b') {
-        STATE.settings.ollamaModel = 'gemma4:31b';
+      if (!STATE.settings.ollamaModel) {
+        STATE.settings.ollamaModel = 'llama3.2';
       }
-      if (!STATE.settings.arenaModelA || STATE.settings.arenaModelA === 'mistral:latest' || STATE.settings.arenaModelA === 'llama3.2:latest' || STATE.settings.arenaModelA === 'llama3.3:70b') {
-        STATE.settings.arenaModelA = 'gemma4:31b';
+      if (!STATE.settings.arenaModelA) {
+        STATE.settings.arenaModelA = 'llama3.2';
       }
       const savedSessions = localStorage.getItem('zoz_router_sessions_v1');
       if (savedSessions) {
@@ -988,15 +953,6 @@
               }
             }
           } catch (pe) {}
-
-          if (rawModels.length === 0) {
-            rawModels = DEFAULT_OLLAMA_CLOUD_MODELS.map(m => ({
-              name: m.id,
-              model: m.id,
-              details: { family: 'ollama-cloud' }
-            }));
-            isRunning = true;
-          }
         }
       } else {
         // Via local gateway proxy
@@ -1033,8 +989,12 @@
         renderModelHubGrid();
         return true;
       } else {
-        els.ollamaStatusVal.innerText = STATE.settings.ollamaApiKey ? 'Cek Endpoint / Key' : 'Offline (Cek Ollama)';
-        els.ollamaIndicator.className = 'status-indicator error';
+        STATE.ollamaModels = [];
+        els.ollamaStatusVal.innerText = STATE.settings.ollamaApiKey ? 'API Key Tersimpan' : 'Offline (Cek Ollama)';
+        els.ollamaIndicator.className = STATE.settings.ollamaApiKey ? 'status-indicator online' : 'status-indicator error';
+        populateModelDropdown();
+        populateArenaDropdowns();
+        renderModelHubGrid();
         return false;
       }
     } catch (e) {
@@ -1125,7 +1085,7 @@
           };
         });
       } else {
-        models = DEFAULT_OLLAMA_CLOUD_MODELS;
+        models = [];
       }
     } else {
       models = STATE.openRouterModels.map(m => ({
@@ -1138,7 +1098,11 @@
     const filtered = models.filter(m => !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
 
     if (filtered.length === 0) {
-      els.dropdownModelList.innerHTML = `<div style="font-size:0.75rem; color:var(--text-dim); padding:10px; text-align:center;">Model tidak ditemukan</div>`;
+      els.dropdownModelList.innerHTML = `
+        <div style="font-size:0.75rem; color:var(--text-dim); padding:12px; text-align:center; line-height:1.4;">
+          ${STATE.mode === 'ollama' ? 'Belum ada model terdeteksi dari endpoint Ollama.<br><span style="font-size:0.68rem; opacity:0.8;">Gunakan input Model Kustom di bawah untuk memanggil model Anda.</span>' : 'Model tidak ditemukan'}
+        </div>
+      `;
       return;
     }
 
@@ -1169,8 +1133,8 @@
     let ollamaList = [];
     if (STATE.ollamaModels && STATE.ollamaModels.length > 0) {
       ollamaList = STATE.ollamaModels.map(m => m.name || m.model || m.id);
-    } else {
-      ollamaList = DEFAULT_OLLAMA_CLOUD_MODELS.map(m => m.id);
+    } else if (STATE.settings.arenaModelA) {
+      ollamaList = [STATE.settings.arenaModelA];
     }
     
     ollamaList.forEach(m => {
