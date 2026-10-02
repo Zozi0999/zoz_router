@@ -133,14 +133,134 @@ function getLocalOllamaManifests() {
   return models;
 }
 
+// Helper to perform quick web search via DuckDuckGo HTML scraping (zero dependencies)
+function performWebSearch(query) {
+  return new Promise((resolve) => {
+    if (!query || typeof query !== 'string' || !query.trim()) {
+      return resolve({ query: '', results: [] });
+    }
+    const cleanQuery = query.trim();
+    const encoded = encodeURIComponent(cleanQuery);
+    const postData = `q=${encoded}&b=`;
+
+    const options = {
+      hostname: 'html.duckduckgo.com',
+      port: 443,
+      path: '/html/',
+      method: 'POST',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9,id;q=0.8'
+      },
+      timeout: 8000
+    };
+
+    const req = https.request(options, (res) => {
+      let rawHtml = '';
+      res.on('data', chunk => rawHtml += chunk);
+      res.on('end', () => {
+        try {
+          const results = [];
+          // Match result blocks
+          const linkRegex = /<a[^>]+class="result__snippet[^"]*"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+          const titleRegex = /<a[^>]+class="result__url"[^>]*>([\s\S]*?)<\/a>/gi;
+          const headingRegex = /<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+
+          let match;
+          const cleanText = (str) => {
+            if (!str) return '';
+            return str
+              .replace(/<[^>]+>/g, '')
+              .replace(/&amp;/g, '&')
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'")
+              .replace(/&nbsp;/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+          };
+
+          // Find all heading matches
+          const headings = [];
+          while ((match = headingRegex.exec(rawHtml)) !== null && headings.length < 8) {
+            let url = match[1];
+            // Decode DDG uddg redirect if present
+            const uddgMatch = url.match(/uddg=([^&]+)/);
+            if (uddgMatch) {
+              try { url = decodeURIComponent(uddgMatch[1]); } catch(e){}
+            }
+            headings.push({ url, title: cleanText(match[2]) });
+          }
+
+          // Find all snippet matches
+          const snippets = [];
+          while ((match = linkRegex.exec(rawHtml)) !== null && snippets.length < 8) {
+            snippets.push(cleanText(match[2]));
+          }
+
+          for (let i = 0; i < headings.length; i++) {
+            results.push({
+              title: headings[i].title || `Hasil ${i+1}`,
+              url: headings[i].url,
+              snippet: snippets[i] || 'Tidak ada deskripsi tersedia.'
+            });
+          }
+
+          resolve({ query: cleanQuery, count: results.length, results });
+        } catch (e) {
+          resolve({ query: cleanQuery, count: 0, results: [], error: e.message });
+        }
+      });
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ query: cleanQuery, count: 0, results: [], error: 'Web search timed out' });
+    });
+
+    req.on('error', (err) => {
+      resolve({ query: cleanQuery, count: 0, results: [], error: err.message });
+    });
+
+    req.write(postData);
+    req.end();
+  });
+}
+
+// Web Search API Endpoint
+  if (pathname === '/api/web-search' && (method === 'GET' || method === 'POST')) {
+    try {
+      let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
+      if (!query && method === 'POST') {
+        const body = await parseBody(req);
+        query = body.query || body.q || '';
+      }
+      if (!query) {
+        return sendJSON(res, 400, { error: 'Parameter query `q` atau body `{ query }` diperlukan.' });
+      }
+      const data = await performWebSearch(query);
+      return sendJSON(res, 200, data);
+    } catch (e) {
+      return sendJSON(res, 500, { error: 'Gagal melakukan pencarian web: ' + e.message });
+    }
+  }
+
 // Ollama: Check status & get models (with disk manifest fallback)
   if (pathname === '/api/ollama/models' && method === 'GET') {
     const customEndpoint = reqUrl.searchParams.get('endpoint') || req.headers['x-ollama-endpoint'] || 'http://127.0.0.1:11434';
+    const authHeader = req.headers['authorization'] || (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null);
     try {
       const ollamaUrl = new URL('/api/tags', customEndpoint);
       const client = ollamaUrl.protocol === 'https:' ? https : http;
 
-      const proxyReq = client.get(ollamaUrl.toString(), { timeout: 3000 }, (proxyRes) => {
+      const reqHeaders = {};
+      if (authHeader) reqHeaders['Authorization'] = authHeader;
+
+      const proxyReq = client.get(ollamaUrl.toString(), { timeout: 3500, headers: reqHeaders }, (proxyRes) => {
         let rawData = '';
         proxyRes.on('data', chunk => rawData += chunk);
         proxyRes.on('end', () => {
@@ -206,7 +326,9 @@ function getLocalOllamaManifests() {
     try {
       const body = await parseBody(req);
       const customEndpoint = req.headers['x-ollama-endpoint'] || body.endpoint || 'http://127.0.0.1:11434';
+      const authHeader = req.headers['authorization'] || (body.apiKey ? `Bearer ${body.apiKey}` : (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null));
       delete body.endpoint; // Don't send custom field to Ollama
+      delete body.apiKey;
 
       const ollamaUrl = new URL('/api/chat', customEndpoint);
       const client = ollamaUrl.protocol === 'https:' ? https : http;
@@ -220,12 +342,17 @@ function getLocalOllamaManifests() {
         'Access-Control-Allow-Origin': '*'
       });
 
+      const proxyHeaders = {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      };
+      if (authHeader) {
+        proxyHeaders['Authorization'] = authHeader;
+      }
+
       const proxyReq = client.request(ollamaUrl.toString(), {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(postData)
-        }
+        headers: proxyHeaders
       }, (proxyRes) => {
         proxyRes.on('data', chunk => {
           res.write(chunk);

@@ -42,6 +42,8 @@
       auto: null
     },
     attachedImage: null, // Base64 data URL
+    attachedDocs: [], // Array of { name, size, content }
+    webSearchEnabled: false,
     isGenerating: false,
     abortController: null,
     soundEnabled: true,
@@ -49,6 +51,7 @@
     openRouterModels: [...DEFAULT_OPENROUTER_MODELS],
     settings: {
       ollamaEndpoint: 'http://127.0.0.1:11434',
+      ollamaApiKey: '',
       openRouterKey: '',
       ollamaModel: 'llama3:latest',
       openRouterModel: 'deepseek/deepseek-r1:free',
@@ -161,10 +164,12 @@
     stopGenerationBtn: $('#stopGenerationBtn'),
     attachImageBtn: $('#attachImageBtn'),
     imageFileInput: $('#imageFileInput'),
+    attachDocBtn: $('#attachDocBtn'),
+    docFileInput: $('#docFileInput'),
+    webSearchToggleBtn: $('#webSearchToggleBtn'),
     attachmentPreviewBar: $('#attachmentPreviewBar'),
     imagePreviewImg: $('#imagePreviewImg'),
     removeImageBtn: $('#removeImageBtn'),
-    voiceInputBtn: $('#voiceInputBtn'),
     activePresetBanner: $('#activePresetBanner'),
     activePresetName: $('#activePresetName'),
     clearPresetBtn: $('#clearPresetBtn'),
@@ -183,6 +188,8 @@
     
     // Settings fields
     settingOllamaEndpoint: $('#settingOllamaEndpoint'),
+    settingOllamaApiKey: $('#settingOllamaApiKey'),
+    toggleShowOllamaKeyBtn: $('#toggleShowOllamaKeyBtn'),
     testOllamaBtn: $('#testOllamaBtn'),
     settingOpenRouterKey: $('#settingOpenRouterKey'),
     toggleShowKeyBtn: $('#toggleShowKeyBtn'),
@@ -747,55 +754,115 @@
     container.appendChild(bubble);
   }
 
-  // ==================== STT (VOICE INPUT) ====================
-  function setupSpeechRecognition() {
-    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRec) {
-      els.voiceInputBtn.style.display = 'none';
+  // ==================== DOCUMENT & FILE ATTACHMENT HANDLER ====================
+  function handleDocUpload(e) {
+    const files = Array.from(e.target.files || []);
+    if (!files || files.length === 0) return;
+
+    let loaded = 0;
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const content = evt.target.result || '';
+        const sizeStr = (file.size < 1024) 
+          ? `${file.size} B` 
+          : (file.size < 1024 * 1024) 
+            ? `${(file.size / 1024).toFixed(1)} KB` 
+            : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+
+        STATE.attachedDocs.push({
+          name: file.name,
+          size: sizeStr,
+          content: content
+        });
+        loaded++;
+        if (loaded === files.length) {
+          renderAttachmentPreviews();
+          showToast(`📎 ${files.length} file dokumen berhasil dilampirkan.`);
+          AudioEngine.click();
+        }
+      };
+      reader.onerror = () => {
+        loaded++;
+        showToast(`Gagal membaca file: ${file.name}`, 'error');
+      };
+      reader.readAsText(file);
+    });
+
+    if (els.docFileInput) els.docFileInput.value = '';
+  }
+
+  function removeAttachedDoc(idx) {
+    STATE.attachedDocs.splice(idx, 1);
+    renderAttachmentPreviews();
+    AudioEngine.click();
+  }
+
+  function renderAttachmentPreviews() {
+    if (!els.attachmentPreviewBar) return;
+    const hasImage = !!STATE.attachedImage;
+    const hasDocs = STATE.attachedDocs && STATE.attachedDocs.length > 0;
+
+    if (!hasImage && !hasDocs) {
+      els.attachmentPreviewBar.style.display = 'none';
       return;
     }
 
-    const recognition = new SpeechRec();
-    recognition.lang = 'id-ID';
-    recognition.continuous = false;
-    recognition.interimResults = false;
+    els.attachmentPreviewBar.style.display = 'flex';
 
-    let isListening = false;
+    // Handle Image Preview Card
+    const imgCard = $('#imagePreviewCard');
+    if (imgCard) {
+      imgCard.style.display = hasImage ? 'block' : 'none';
+    }
 
-    els.voiceInputBtn.addEventListener('click', () => {
-      if (!isListening) {
-        try {
-          recognition.start();
-          isListening = true;
-          els.voiceInputBtn.classList.add('recording');
-          showToast('Mendengarkan suara... Bicara sekarang.');
-          AudioEngine.send();
-        } catch (e) {
-          console.error(e);
-        }
-      } else {
-        recognition.stop();
-        isListening = false;
-        els.voiceInputBtn.classList.remove('recording');
-      }
+    // Remove existing doc chips
+    els.attachmentPreviewBar.querySelectorAll('.doc-preview-chip').forEach(c => c.remove());
+
+    // Append new doc chips
+    STATE.attachedDocs.forEach((doc, idx) => {
+      const chip = document.createElement('div');
+      chip.className = 'doc-preview-chip';
+      chip.innerHTML = `
+        <i class="fa-solid fa-file-lines doc-icon"></i>
+        <span class="doc-name" title="${escapeHtml(doc.name)}">${escapeHtml(doc.name)}</span>
+        <span class="doc-size">(${escapeHtml(doc.size)})</span>
+        <button class="remove-doc-btn" data-idx="${idx}" title="Hapus file"><i class="fa-solid fa-xmark"></i></button>
+      `;
+      chip.querySelector('.remove-doc-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeAttachedDoc(idx);
+      });
+      els.attachmentPreviewBar.appendChild(chip);
     });
 
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      els.promptInput.value += (els.promptInput.value ? ' ' : '') + transcript;
-      autoResizeTextarea(els.promptInput);
-    };
+    updateVisionCompatibilityBadge();
+  }
 
-    recognition.onend = () => {
-      isListening = false;
-      els.voiceInputBtn.classList.remove('recording');
-    };
-
-    recognition.onerror = () => {
-      isListening = false;
-      els.voiceInputBtn.classList.remove('recording');
-      showToast('Gagal mengenali suara.', 'error');
-    };
+  // ==================== REAL-TIME WEB SEARCH CONTEXT ENGINE ====================
+  async function getWebSearchContext(query) {
+    if (!STATE.webSearchEnabled || !query || !query.trim()) return null;
+    const cleanQ = query.trim();
+    try {
+      const searchUrl = IS_GITHUB_PAGES 
+        ? `https://html.duckduckgo.com/html/?q=${encodeURIComponent(cleanQ)}`
+        : `/api/web-search?q=${encodeURIComponent(cleanQ)}`;
+      
+      const res = await fetch(searchUrl).catch(() => null);
+      if (!res || !res.ok) return null;
+      const data = await res.json();
+      if (data.results && data.results.length > 0) {
+        let ctx = `[INFORMASI HASIL PENCARIAN WEB REAL-TIME TERKINI UNTUK: "${cleanQ}"]\n`;
+        data.results.slice(0, 5).forEach((r, i) => {
+          ctx += `\n${i+1}. **${r.title}** (${r.url || 'Web'})\n   ${r.snippet}\n`;
+        });
+        ctx += `\n[Gunakan data web terbaru di atas sebagai referensi faktual dalam menjawab pertanyaan pengguna.]`;
+        return ctx;
+      }
+    } catch (e) {
+      console.warn('Web search lookup failed:', e);
+    }
+    return null;
   }
 
   // ==================== MODEL DISCOVERY & HEALTH CHECKS ====================
@@ -807,7 +874,13 @@
         ? `${STATE.settings.ollamaEndpoint || 'http://127.0.0.1:11434'}/api/tags`
         : `/api/ollama/models?endpoint=${encodeURIComponent(STATE.settings.ollamaEndpoint)}`;
       
-      const res = await fetch(url).catch(() => null);
+      const headers = {};
+      if (STATE.settings.ollamaApiKey) {
+        headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
+        headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
+      }
+
+      const res = await fetch(url, { headers }).catch(() => null);
       if (!res) throw new Error('Unreachable');
       const data = await res.json();
       const rawModels = data.models || [];
@@ -1130,11 +1203,19 @@
 
   // ==================== DISPATCH / STREAMING ENGINE ====================
   async function handleSendPrompt() {
-    const text = els.promptInput.value.trim();
+    const rawText = els.promptInput.value.trim();
     const image = STATE.attachedImage;
+    const docs = [...(STATE.attachedDocs || [])];
 
-    if (!text && !image) return;
+    if (!rawText && !image && docs.length === 0) return;
     if (STATE.isGenerating) return;
+
+    // Combine documents with text
+    let text = rawText;
+    if (docs.length > 0) {
+      const docsContext = docs.map(d => `--- [LAMPIRAN DOKUMEN: ${d.name} (${d.size})] ---\n${d.content}\n--- [AKHIR DOKUMEN: ${d.name}] ---`).join('\n\n');
+      text = text ? `${docsContext}\n\n${text}` : docsContext;
+    }
 
     // Check Vision Compatibility
     if (image && !isModelVisionCapable(getCurrentModel(), STATE.mode)) {
@@ -1150,16 +1231,18 @@
     els.welcomeHero.style.display = 'none';
 
     // Build user message object
+    const displayPrompt = rawText || (docs.length > 0 ? `📎 [${docs.length} File Lampiran: ${docs.map(d => d.name).join(', ')}]` : 'Analisis Gambar');
     const userMsg = {
       role: 'user',
       content: text,
+      displayContent: displayPrompt,
       image: image,
       timestamp: new Date().toISOString()
     };
 
     // Auto title session if first message
     if (session.messages.length === 0) {
-      session.title = text.length > 30 ? text.substring(0, 30) + '...' : (text || 'Analisis Gambar');
+      session.title = displayPrompt.length > 30 ? displayPrompt.substring(0, 30) + '...' : displayPrompt;
       renderChatHistory();
     }
 
@@ -1168,14 +1251,16 @@
 
     // Immediately render user's message bubble in single mode
     if (STATE.mode !== 'arena') {
-      appendMessageElement('user', text, image, 'Anda');
+      appendMessageElement('user', displayPrompt, image, 'Anda');
       scrollChatToBottom();
     }
 
-    // Reset input
+    // Reset input & attachments
     els.promptInput.value = '';
     autoResizeTextarea(els.promptInput);
+    STATE.attachedDocs = [];
     clearAttachedImage();
+    renderAttachmentPreviews();
     AudioEngine.send();
 
     if (STATE.mode === 'arena') {
@@ -1213,6 +1298,16 @@
       if (STATE.settings.systemPrompt) {
         messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
       }
+
+      // If Web Search is enabled, fetch real-time search context
+      if (STATE.webSearchEnabled) {
+        bubbleText.innerHTML = '<span style="color:var(--neon-cyan); font-size:0.8rem;"><i class="fa-solid fa-globe fa-spin"></i> Mencari informasi terkini di internet...</span>';
+        const webCtx = await getWebSearchContext(promptText);
+        if (webCtx) {
+          messagesPayload.unshift({ role: 'system', content: webCtx });
+        }
+        bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+      }
       
       // History context - only attach image on the latest active user turn to prevent multi-turn schema rejections
       const lastIndex = session.messages.length - 1;
@@ -1236,10 +1331,19 @@
         },
         endpoint: STATE.settings.ollamaEndpoint
       };
+      if (STATE.settings.ollamaApiKey) {
+        requestBody.apiKey = STATE.settings.ollamaApiKey;
+      }
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (STATE.settings.ollamaApiKey) {
+        headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
+        headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
+      }
 
       const response = await fetch('/api/ollama/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(requestBody),
         signal: STATE.abortController.signal
       });
@@ -1361,6 +1465,16 @@
         messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
       }
 
+      // If Web Search is enabled, fetch real-time search context
+      if (STATE.webSearchEnabled) {
+        bubbleText.innerHTML = '<span style="color:var(--neon-cyan); font-size:0.8rem;"><i class="fa-solid fa-globe fa-spin"></i> Menghubungkan Web Search & Browsing...</span>';
+        const webCtx = await getWebSearchContext(promptText);
+        if (webCtx) {
+          messagesPayload.unshift({ role: 'system', content: webCtx });
+        }
+        bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+      }
+
       // History context - safely format images
       const lastIndex = session.messages.length - 1;
       session.messages.forEach((m, idx) => {
@@ -1394,7 +1508,8 @@
         stream: true,
         temperature: parseFloat(STATE.settings.temperature),
         top_p: parseFloat(STATE.settings.topP),
-        max_tokens: parseInt(STATE.settings.maxTokens)
+        max_tokens: parseInt(STATE.settings.maxTokens),
+        ...(STATE.webSearchEnabled ? { plugins: [{ id: 'web' }] } : {})
       };
       if (!isOpenRouterDirect) {
         requestBody.apiKey = STATE.settings.openRouterKey;
@@ -2704,6 +2819,20 @@
     }
   };
 
+  // ==================== SETTINGS SYNC HELPER ====================
+  function syncSettingsModalFields() {
+    if (els.settingOllamaEndpoint) els.settingOllamaEndpoint.value = STATE.settings.ollamaEndpoint || 'http://127.0.0.1:11434';
+    if (els.settingOllamaApiKey) els.settingOllamaApiKey.value = STATE.settings.ollamaApiKey || '';
+    if (els.settingOpenRouterKey) els.settingOpenRouterKey.value = STATE.settings.openRouterKey || '';
+    if (els.paramTemperature) els.paramTemperature.value = STATE.settings.temperature ?? 0.7;
+    if (els.valTemperature) els.valTemperature.innerText = STATE.settings.temperature ?? 0.7;
+    if (els.paramTopP) els.paramTopP.value = STATE.settings.topP ?? 0.9;
+    if (els.valTopP) els.valTopP.innerText = STATE.settings.topP ?? 0.9;
+    if (els.paramMaxTokens) els.paramMaxTokens.value = STATE.settings.maxTokens ?? 4096;
+    if (els.settingSystemPrompt) els.settingSystemPrompt.value = STATE.settings.systemPrompt || '';
+    if (els.settingAutoPolicy) els.settingAutoPolicy.value = STATE.settings.autoPolicy || 'local_first';
+  }
+
   // ==================== EVENT LISTENERS SETUP ====================
   function setupEventListeners() {
     // Mode Switchers
@@ -2778,16 +2907,27 @@
       AudioEngine.click();
     });
 
-    els.openSettingsKeyBtn.addEventListener('click', () => {
+    // Top Action Buttons
+    els.systemPromptModalBtn?.addEventListener('click', () => {
+      syncSettingsModalFields();
+      const modal = els.settingsModal;
+      if (modal) {
+        modal.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.target === 'tabSystem'));
+        modal.querySelectorAll('.settings-tab-pane').forEach(pane => pane.classList.toggle('active', pane.id === 'tabSystem'));
+      }
       openModal('settingsModal');
       AudioEngine.click();
     });
 
-    // Top Action Buttons
-    els.systemPromptModalBtn.addEventListener('click', () => {
+    els.openSettingsKeyBtn?.addEventListener('click', () => {
+      syncSettingsModalFields();
+      const modal = els.settingsModal;
+      if (modal) {
+        modal.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.target === 'tabProviders'));
+        modal.querySelectorAll('.settings-tab-pane').forEach(pane => pane.classList.toggle('active', pane.id === 'tabProviders'));
+      }
       openModal('settingsModal');
-      $$('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.target === 'tabSystem'));
-      $$('.settings-tab-pane').forEach(pane => pane.classList.toggle('active', pane.id === 'tabSystem'));
+      AudioEngine.click();
     });
 
     els.exportChatBtn.addEventListener('click', exportChatHistory);
@@ -2800,6 +2940,21 @@
         : '<i class="fa-solid fa-volume-xmark"></i>';
       showToast(STATE.soundEnabled ? 'Suara UI diaktifkan.' : 'Suara UI dibisukan.');
       if (STATE.soundEnabled) AudioEngine.click();
+    });
+
+    // Composer Attachments & Web Search
+    els.attachImageBtn?.addEventListener('click', () => els.imageFileInput?.click());
+    els.imageFileInput?.addEventListener('change', handleImageUpload);
+    els.removeImageBtn?.addEventListener('click', clearAttachedImage);
+
+    els.attachDocBtn?.addEventListener('click', () => els.docFileInput?.click());
+    els.docFileInput?.addEventListener('change', handleDocUpload);
+
+    els.webSearchToggleBtn?.addEventListener('click', () => {
+      STATE.webSearchEnabled = !STATE.webSearchEnabled;
+      els.webSearchToggleBtn.classList.toggle('active', STATE.webSearchEnabled);
+      showToast(STATE.webSearchEnabled ? '🌐 Real-time Web Search: AKTIF' : '🌐 Real-time Web Search: NONAKTIF');
+      AudioEngine.click();
     });
 
     // Arena Select Changes & Split Workspace Listeners
@@ -2915,16 +3070,14 @@
 
     // Settings Actions
     els.settingsBtn.addEventListener('click', () => {
-      els.settingOllamaEndpoint.value = STATE.settings.ollamaEndpoint;
-      els.settingOpenRouterKey.value = STATE.settings.openRouterKey;
-      els.paramTemperature.value = STATE.settings.temperature;
-      els.valTemperature.innerText = STATE.settings.temperature;
-      els.paramTopP.value = STATE.settings.topP;
-      els.valTopP.innerText = STATE.settings.topP;
-      els.paramMaxTokens.value = STATE.settings.maxTokens;
-      els.settingSystemPrompt.value = STATE.settings.systemPrompt;
-      els.settingAutoPolicy.value = STATE.settings.autoPolicy;
+      syncSettingsModalFields();
       openModal('settingsModal');
+    });
+
+    els.toggleShowOllamaKeyBtn?.addEventListener('click', () => {
+      const isPass = els.settingOllamaApiKey.type === 'password';
+      els.settingOllamaApiKey.type = isPass ? 'text' : 'password';
+      els.toggleShowOllamaKeyBtn.innerHTML = isPass ? '<i class="fa-solid fa-eye-slash"></i>' : '<i class="fa-solid fa-eye"></i>';
     });
 
     els.toggleShowKeyBtn.addEventListener('click', () => {
@@ -2935,11 +3088,14 @@
 
     els.testOllamaBtn.addEventListener('click', async () => {
       const ep = els.settingOllamaEndpoint.value.trim() || 'http://127.0.0.1:11434';
+      const key = els.settingOllamaApiKey ? els.settingOllamaApiKey.value.trim() : '';
       try {
-        const res = await fetch(`/api/ollama/models?endpoint=${encodeURIComponent(ep)}`);
+        const headers = {};
+        if (key) headers['Authorization'] = `Bearer ${key}`;
+        const res = await fetch(`/api/ollama/models?endpoint=${encodeURIComponent(ep)}`, { headers });
         const data = await res.json();
         if (res.ok && data.models) {
-          showToast(`✅ Koneksi sukses! Ditemukan ${data.models.length} model.`);
+          showToast(`✅ Koneksi Ollama sukses! Ditemukan ${data.models.length} model.`);
         } else {
           showToast(`❌ Gagal: ${data.error || 'Ollama tidak merespons'}`, 'error');
         }
@@ -2970,13 +3126,22 @@
     });
 
     els.saveSettingsBtn.addEventListener('click', () => {
-      STATE.settings.ollamaEndpoint = els.settingOllamaEndpoint.value.trim() || 'http://127.0.0.1:11434';
-      STATE.settings.openRouterKey = els.settingOpenRouterKey.value.trim();
-      STATE.settings.temperature = parseFloat(els.paramTemperature.value);
-      STATE.settings.topP = parseFloat(els.paramTopP.value);
-      STATE.settings.maxTokens = parseInt(els.paramMaxTokens.value) || 4096;
-      STATE.settings.systemPrompt = els.settingSystemPrompt.value.trim();
-      STATE.settings.autoPolicy = els.settingAutoPolicy.value;
+      const epVal = els.settingOllamaEndpoint ? els.settingOllamaEndpoint.value.trim() : '';
+      if (epVal) STATE.settings.ollamaEndpoint = epVal;
+
+      if (els.settingOllamaApiKey) {
+        STATE.settings.ollamaApiKey = els.settingOllamaApiKey.value.trim();
+      }
+
+      if (els.settingOpenRouterKey) {
+        STATE.settings.openRouterKey = els.settingOpenRouterKey.value.trim();
+      }
+
+      if (els.paramTemperature) STATE.settings.temperature = parseFloat(els.paramTemperature.value);
+      if (els.paramTopP) STATE.settings.topP = parseFloat(els.paramTopP.value);
+      if (els.paramMaxTokens) STATE.settings.maxTokens = parseInt(els.paramMaxTokens.value) || 4096;
+      if (els.settingSystemPrompt) STATE.settings.systemPrompt = els.settingSystemPrompt.value.trim();
+      if (els.settingAutoPolicy) STATE.settings.autoPolicy = els.settingAutoPolicy.value;
       
       savePersistedState();
       checkOllamaHealth();
@@ -3079,9 +3244,6 @@
         }
       });
     }
-
-    // Speech Recognition
-    setupSpeechRecognition();
 
     // Mobile Keyboard & Visual Viewport Handler
     setupMobileKeyboardHandler();

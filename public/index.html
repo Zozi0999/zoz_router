@@ -345,8 +345,12 @@
             <button class="composer-btn" id="attachImageBtn" title="Lampirkan Gambar (Vision Multimodal)">
               <i class="fa-solid fa-image"></i>
             </button>
-            <button class="composer-btn" id="voiceInputBtn" title="Voice to Text (Mic)">
-              <i class="fa-solid fa-microphone"></i>
+            <input type="file" id="docFileInput" accept=".txt,.pdf,.csv,.json,.md,.js,.py,.html,.css,.ts,.java,.cpp,.c,.go,.rs,.sql,.sh,.yaml,.yml,.xml,.doc,.docx" multiple style="display: none;">
+            <button class="composer-btn" id="attachDocBtn" title="Lampirkan Dokumen / File Teks / Code (.txt, .md, .csv, .json, .py, .js, dll)">
+              <i class="fa-solid fa-paperclip"></i>
+            </button>
+            <button class="composer-btn web-search-toggle" id="webSearchToggleBtn" title="Mode Web Search & Live Internet Browsing (Aktifkan / Nonaktifkan)">
+              <i class="fa-solid fa-globe"></i>
             </button>
           </div>
 
@@ -405,6 +409,15 @@
               <button class="btn btn-sm btn-outline" id="testOllamaBtn">Tes Koneksi</button>
             </div>
             <small class="form-hint">Port default Ollama lokal adalah 11434.</small>
+          </div>
+
+          <div class="form-group">
+            <label><i class="fa-solid fa-shield-halved"></i> Ollama API Key (Opsional / Cloud Ollama)</label>
+            <div class="input-with-action">
+              <input type="password" id="settingOllamaApiKey" placeholder="Opsional: Masukkan API Key Ollama jika menggunakan auth...">
+              <button class="btn btn-sm btn-outline" id="toggleShowOllamaKeyBtn"><i class="fa-solid fa-eye"></i></button>
+            </div>
+            <small class="form-hint">Diperlukan jika instance Ollama Anda (lokal / remote / cloud) dilindungi autentikasi API Key.</small>
           </div>
 
           <div class="form-group">

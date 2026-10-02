@@ -1344,6 +1344,59 @@ html, body {
   background: var(--bg-card);
 }
 
+.composer-btn.web-search-toggle.active {
+  color: #08090D;
+  background: linear-gradient(135deg, var(--neon-cyan), #00b4d8);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.6);
+  font-weight: bold;
+}
+
+.doc-preview-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 240, 255, 0.12);
+  border: 1px solid var(--neon-cyan);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  color: var(--text-main);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  animation: fadeIn 0.2s ease;
+}
+
+.doc-preview-chip i.doc-icon {
+  color: var(--neon-cyan);
+  font-size: 0.85rem;
+}
+
+.doc-preview-chip .doc-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-code);
+}
+
+.doc-preview-chip .doc-size {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.doc-preview-chip .remove-doc-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 0.8rem;
+  transition: color 0.2s;
+}
+
+.doc-preview-chip .remove-doc-btn:hover {
+  color: var(--neon-amber);
+}
+
 .composer-btn.recording {
   color: var(--neon-magenta);
   animation: pulseMic 1s infinite alternate;
