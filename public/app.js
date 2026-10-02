@@ -268,6 +268,13 @@
       if (savedSettings) {
         STATE.settings = { ...STATE.settings, ...JSON.parse(savedSettings) };
       }
+      // Auto-migrate legacy or invalid Ollama default models to official cloud flagship gemma4:31b
+      if (!STATE.settings.ollamaModel || STATE.settings.ollamaModel === 'mistral:latest' || STATE.settings.ollamaModel === 'llama3.2:latest' || STATE.settings.ollamaModel === 'llama3.3:70b') {
+        STATE.settings.ollamaModel = 'gemma4:31b';
+      }
+      if (!STATE.settings.arenaModelA || STATE.settings.arenaModelA === 'mistral:latest' || STATE.settings.arenaModelA === 'llama3.2:latest' || STATE.settings.arenaModelA === 'llama3.3:70b') {
+        STATE.settings.arenaModelA = 'gemma4:31b';
+      }
       const savedSessions = localStorage.getItem('zoz_router_sessions_v1');
       if (savedSessions) {
         STATE.sessions = JSON.parse(savedSessions);
@@ -937,15 +944,26 @@
 
         // Fallback for Ollama Cloud when API key is provided
         if (rawModels.length === 0 && STATE.settings.ollamaApiKey) {
-          rawModels = [
-            { name: 'llama3.3:70b', model: 'llama3.3:70b', details: { family: 'llama' } },
-            { name: 'deepseek-r1:latest', model: 'deepseek-r1:latest', details: { family: 'deepseek' } },
-            { name: 'qwen2.5:72b', model: 'qwen2.5:72b', details: { family: 'qwen' } },
-            { name: 'mistral:latest', model: 'mistral:latest', details: { family: 'mistral' } },
-            { name: 'phi4:latest', model: 'phi4:latest', details: { family: 'phi' } },
-            { name: 'llava:latest', model: 'llava:latest', details: { family: 'llava' } }
-          ];
-          isRunning = true;
+          // Try fetching via allorigins CORS bridge for live discovery
+          try {
+            const proxyRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent('https://ollama.com/api/tags')}`, { headers }).catch(() => null);
+            if (proxyRes && proxyRes.ok) {
+              const pData = await proxyRes.json();
+              if (pData.models && Array.isArray(pData.models) && pData.models.length > 0) {
+                rawModels = pData.models;
+                isRunning = true;
+              }
+            }
+          } catch (pe) {}
+
+          if (rawModels.length === 0) {
+            rawModels = DEFAULT_OLLAMA_CLOUD_MODELS.map(m => ({
+              name: m.id,
+              model: m.id,
+              details: { family: 'ollama-cloud' }
+            }));
+            isRunning = true;
+          }
         }
       } else {
         // Via local gateway proxy
@@ -1496,17 +1514,62 @@
       if (err.name === 'AbortError') {
         showToast('Generasi dihentikan oleh pengguna.');
       } else {
-        bubbleText.innerHTML = `
-          <div style="color:var(--neon-amber); line-height:1.5;">
+        const isCorsOrNetwork = IS_GITHUB_PAGES && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError') || err.name === 'TypeError');
+        
+        let errorDetails = `
+          <div style="color:var(--neon-amber); line-height:1.5; margin-bottom:8px;">
             <strong>❌ Gagal pada model ${escapeHtml(modelName)}:</strong> ${escapeHtml(err.message)}
           </div>
-          <div style="margin-top:10px; display:flex; gap:8px;">
+        `;
+        let extraActionHtml = '';
+
+        if (isCorsOrNetwork) {
+          errorDetails = `
+            <div style="background:rgba(255,82,0,0.08); border:1px solid rgba(255,82,0,0.3); border-radius:8px; padding:12px; margin-bottom:10px;">
+              <div style="font-weight:700; color:var(--neon-amber); margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+                <i class="fa-solid fa-shield-halved"></i> Batasan Browser CORS di GitHub Pages
+              </div>
+              <p style="font-size:0.82rem; color:var(--text-secondary); margin:0 0 8px 0; line-height:1.45;">
+                Browser web melarang koneksi langsung dari <code>github.io</code> ke server <code>ollama.com</code> karena belum dibukanya header CORS oleh Ollama.
+              </p>
+              <div style="font-size:0.8rem; color:var(--text-main);">
+                <strong>💡 Rekomendasi Solusi:</strong>
+                <ul style="margin:4px 0 0 16px; padding:0; line-height:1.45;">
+                  <li><strong>Gunakan OpenRouter (Cloud):</strong> Didukung 100% langsung di web GitHub Pages tanpa batasan CORS (tersedia model DeepSeek R1, Llama 3.3, Claude 3.5, Gemini 2.0 Flash).</li>
+                  <li><strong>Gunakan Desktop Gateway:</strong> Jalankan <code>ZOZ_ROUTER.bat</code> di PC lalu buka <code>http://localhost:4040</code> untuk kecepatan penuh Ollama Cloud tanpa hambatan CORS.</li>
+                </ul>
+              </div>
+            </div>
+          `;
+          extraActionHtml = `
+            <button class="btn btn-sm btn-primary switch-openrouter-btn" style="font-size:0.75rem;">
+              <i class="fa-solid fa-bolt"></i> Beralih & Jalankan via OpenRouter
+            </button>
+          `;
+        }
+
+        bubbleText.innerHTML = `
+          ${errorDetails}
+          <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+            ${extraActionHtml}
             <button class="btn btn-sm btn-outline retry-vision-btn" style="border-color:var(--neon-teal); color:var(--neon-teal); font-size:0.75rem;">
-              <i class="fa-solid fa-wand-magic-sparkles"></i> Beralih ke Model Vision & Kirim Ulang
+              <i class="fa-solid fa-wand-magic-sparkles"></i> Beralih ke Vision & Kirim Ulang
             </button>
           </div>
         `;
         
+        bubbleText.querySelector('.switch-openrouter-btn')?.addEventListener('click', () => {
+          assistantRow.remove();
+          setEngineMode('openrouter');
+          if (!STATE.settings.openRouterKey) {
+            openModal('settingsModal');
+            showToast('Silakan masukkan OpenRouter API Key Anda di menu Pengaturan.', 'info');
+          } else {
+            showToast('Beralih ke OpenRouter. Mengirim prompt...', 'info');
+            runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
+          }
+        });
+
         bubbleText.querySelector('.retry-vision-btn')?.addEventListener('click', () => {
           assistantRow.remove();
           const target = findBestVisionModel('openrouter');
@@ -1804,7 +1867,10 @@
       if (e.name === 'AbortError') {
         showToast('Ollama Slot A dihentikan.');
       } else {
-        bubbleText.innerHTML = `<span style="color:var(--neon-amber);">❌ Error: ${escapeHtml(e.message)}</span>`;
+        const isCors = IS_GITHUB_PAGES && (e.message.includes('Failed to fetch') || e.name === 'TypeError');
+        bubbleText.innerHTML = isCors
+          ? `<div style="color:var(--neon-amber); font-size:0.8rem; line-height:1.4;">❌ <strong>Ollama Web CORS Blocked:</strong> Browser memblokir koneksi langsung GitHub Pages ke Ollama. Gunakan Slot B (OpenRouter) atau jalankan Desktop Gateway <code>http://localhost:4040</code>.</div>`
+          : `<span style="color:var(--neon-amber);">❌ Error: ${escapeHtml(e.message)}</span>`;
         if (els.arenaStatsA) els.arenaStatsA.innerText = 'Error';
       }
     } finally {
