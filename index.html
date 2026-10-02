@@ -735,50 +735,6 @@
     </div>
   </div>
 
-  <!-- 7. STANDARD CAMERA MODAL -->
-  <div class="modal-backdrop" id="cameraModal">
-    <div class="modal-card camera-modal-card">
-      <div class="modal-header">
-        <div class="modal-title"><i class="fa-solid fa-camera"></i> Kamera</div>
-        <button class="modal-close-btn" data-close="cameraModal" id="closeCameraModalBtn"><i class="fa-solid fa-xmark"></i></button>
-      </div>
-      <div class="modal-body camera-modal-body">
-        <div class="camera-viewport-container" id="cameraViewportContainer">
-          <video id="cameraVideo" autoplay playsinline muted></video>
-          <img id="cameraCapturedImg" src="" alt="Hasil Foto" style="display: none;">
-          <canvas id="cameraCanvas" style="display: none;"></canvas>
-        </div>
-
-        <!-- Camera Controls -->
-        <div class="camera-controls-bar">
-          <div class="camera-aux-controls">
-            <button class="btn btn-sm btn-outline" id="switchCameraFacingBtn" title="Ganti Kamera Depan / Belakang">
-              <i class="fa-solid fa-camera-rotate"></i> Putar Kamera
-            </button>
-            <button class="btn btn-sm btn-outline" id="fallbackNativeCameraBtn" title="Gunakan Kamera Bawaan HP / Sistem">
-              <i class="fa-solid fa-mobile-screen"></i> Kamera HP
-            </button>
-          </div>
-
-          <div class="camera-main-action" id="cameraMainAction">
-            <button class="camera-shutter-btn" id="takePhotoBtn" title="Ambil Foto">
-              <div class="shutter-inner"></div>
-            </button>
-          </div>
-
-          <div class="camera-post-controls" id="cameraPostControls" style="display: none;">
-            <button class="btn btn-sm btn-outline" id="retakePhotoBtn">
-              <i class="fa-solid fa-rotate-left"></i> Foto Ulang
-            </button>
-            <button class="btn btn-sm btn-primary" id="useCapturedPhotoBtn">
-              <i class="fa-solid fa-check"></i> Gunakan Foto
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
