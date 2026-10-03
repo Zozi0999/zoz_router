@@ -473,6 +473,16 @@
           </div>
 
           <div class="form-group">
+            <label><i class="fa-solid fa-magnifying-glass"></i> Serper.dev API Key (Google Web Search Real-Time)</label>
+            <div class="input-with-action">
+              <input type="password" id="settingSerperApiKey" placeholder="075538fed9c64990e1eb32a06726c1e55a933c1e" value="075538fed9c64990e1eb32a06726c1e55a933c1e">
+              <button class="btn btn-sm btn-outline" id="toggleShowSerperKeyBtn"><i class="fa-solid fa-eye"></i></button>
+              <button class="btn btn-sm btn-outline" id="testSerperBtn">Tes Web Search</button>
+            </div>
+            <small class="form-hint">Mesin pencari internet Google real-time untuk Ollama dan OpenRouter. Dapatkan API Key di <a href="https://serper.dev" target="_blank" rel="noopener">serper.dev</a>.</small>
+          </div>
+
+          <div class="form-group">
             <label><i class="fa-solid fa-shield-virus"></i> Auto-Router Policy</label>
             <select id="settingAutoPolicy" class="custom-select">
               <option value="local_first">Local First (Prioritas Ollama, fallback OpenRouter bila offline)</option>

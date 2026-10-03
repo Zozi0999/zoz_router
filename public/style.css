@@ -2661,6 +2661,109 @@ html, body {
   text-overflow: ellipsis;
 }
 
+/* ==================== WEB SEARCH HUD & REAL-TIME SOURCES ==================== */
+.web-search-hud {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  color: var(--neon-cyan);
+  font-size: 0.84rem;
+  font-weight: 500;
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.15);
+  animation: pulseCyan 1.5s infinite alternate;
+  margin-bottom: 8px;
+}
+
+@keyframes pulseCyan {
+  from { box-shadow: 0 0 8px rgba(0, 240, 255, 0.1); border-color: rgba(0, 240, 255, 0.25); }
+  to { box-shadow: 0 0 18px rgba(0, 240, 255, 0.4); border-color: rgba(0, 240, 255, 0.6); }
+}
+
+.msg-sources-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fadeIn 0.25s ease;
+}
+
+.msg-sources-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.msg-sources-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.msg-source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(13, 16, 26, 0.85);
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  border-radius: 6px;
+  padding: 5px 10px;
+  text-decoration: none;
+  color: var(--text-main);
+  font-size: 0.78rem;
+  transition: all 0.2s ease;
+  max-width: 240px;
+  cursor: pointer;
+}
+
+.msg-source-chip:hover {
+  background: rgba(0, 240, 255, 0.15);
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.35);
+  transform: translateY(-2px);
+  color: #FFF;
+}
+
+.source-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(0, 240, 255, 0.2);
+  color: var(--neon-cyan);
+  font-size: 0.68rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.source-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: #FFF;
+}
+
+.source-domain {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+
 
 
 

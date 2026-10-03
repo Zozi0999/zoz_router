@@ -133,84 +133,81 @@ function getLocalOllamaManifests() {
   return models;
 }
 
-// Helper to perform quick web search via DuckDuckGo HTML scraping (zero dependencies)
-function performWebSearch(query) {
+// Helper to perform quick web search via Serper Google Search API
+function performWebSearch(query, apiKey = null) {
   return new Promise((resolve) => {
     if (!query || typeof query !== 'string' || !query.trim()) {
-      return resolve({ query: '', results: [] });
+      return resolve({ query: '', count: 0, results: [] });
     }
     const cleanQuery = query.trim();
-    const encoded = encodeURIComponent(cleanQuery);
-    const postData = `q=${encoded}&b=`;
+    const serperKey = apiKey || process.env.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+
+    const postData = JSON.stringify({
+      q: cleanQuery,
+      num: 6,
+      gl: 'id',
+      hl: 'id'
+    });
 
     const options = {
-      hostname: 'html.duckduckgo.com',
+      hostname: 'google.serper.dev',
       port: 443,
-      path: '/html/',
+      path: '/search',
       method: 'POST',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(postData),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9,id;q=0.8'
+        'X-API-KEY': serperKey,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
       },
-      timeout: 8000
+      timeout: 10000
     };
 
     const req = https.request(options, (res) => {
-      let rawHtml = '';
-      res.on('data', chunk => rawHtml += chunk);
+      let rawData = '';
+      res.on('data', chunk => rawData += chunk);
       res.on('end', () => {
         try {
+          const parsed = JSON.parse(rawData);
           const results = [];
-          // Match result blocks
-          const linkRegex = /<a[^>]+class="result__snippet[^"]*"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
-          const titleRegex = /<a[^>]+class="result__url"[^>]*>([\s\S]*?)<\/a>/gi;
-          const headingRegex = /<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
-
-          let match;
-          const cleanText = (str) => {
-            if (!str) return '';
-            return str
-              .replace(/<[^>]+>/g, '')
-              .replace(/&amp;/g, '&')
-              .replace(/&lt;/g, '<')
-              .replace(/&gt;/g, '>')
-              .replace(/&quot;/g, '"')
-              .replace(/&#39;/g, "'")
-              .replace(/&nbsp;/g, ' ')
-              .replace(/\s+/g, ' ')
-              .trim();
-          };
-
-          // Find all heading matches
-          const headings = [];
-          while ((match = headingRegex.exec(rawHtml)) !== null && headings.length < 8) {
-            let url = match[1];
-            // Decode DDG uddg redirect if present
-            const uddgMatch = url.match(/uddg=([^&]+)/);
-            if (uddgMatch) {
-              try { url = decodeURIComponent(uddgMatch[1]); } catch(e){}
-            }
-            headings.push({ url, title: cleanText(match[2]) });
-          }
-
-          // Find all snippet matches
-          const snippets = [];
-          while ((match = linkRegex.exec(rawHtml)) !== null && snippets.length < 8) {
-            snippets.push(cleanText(match[2]));
-          }
-
-          for (let i = 0; i < headings.length; i++) {
+          
+          if (parsed.knowledgeGraph) {
             results.push({
-              title: headings[i].title || `Hasil ${i+1}`,
-              url: headings[i].url,
-              snippet: snippets[i] || 'Tidak ada deskripsi tersedia.'
+              title: parsed.knowledgeGraph.title || 'Knowledge Graph Fact',
+              url: parsed.knowledgeGraph.website || parsed.knowledgeGraph.descriptionUrl || 'https://google.com',
+              snippet: `${parsed.knowledgeGraph.type ? '[' + parsed.knowledgeGraph.type + '] ' : ''}${parsed.knowledgeGraph.description || ''}`,
+              type: 'knowledgeGraph'
             });
           }
 
-          resolve({ query: cleanQuery, count: results.length, results });
+          if (parsed.answerBox) {
+            results.push({
+              title: parsed.answerBox.title || 'Jawaban Teratas',
+              url: parsed.answerBox.link || 'https://google.com',
+              snippet: parsed.answerBox.answer || parsed.answerBox.snippet || '',
+              type: 'answerBox'
+            });
+          }
+
+          if (Array.isArray(parsed.organic)) {
+            parsed.organic.slice(0, 6).forEach((item, idx) => {
+              results.push({
+                title: item.title || `Hasil ${idx + 1}`,
+                url: item.link || '',
+                snippet: item.snippet || '',
+                date: item.date || null,
+                domain: item.link ? (new URL(item.link)).hostname.replace(/^www\./, '') : ''
+              });
+            });
+          }
+
+          resolve({
+            query: cleanQuery,
+            count: results.length,
+            knowledgeGraph: parsed.knowledgeGraph || null,
+            answerBox: parsed.answerBox || null,
+            organic: parsed.organic || [],
+            results: results
+          });
         } catch (e) {
           resolve({ query: cleanQuery, count: 0, results: [], error: e.message });
         }
@@ -219,7 +216,7 @@ function performWebSearch(query) {
 
     req.on('timeout', () => {
       req.destroy();
-      resolve({ query: cleanQuery, count: 0, results: [], error: 'Web search timed out' });
+      resolve({ query: cleanQuery, count: 0, results: [], error: 'Serper search timed out' });
     });
 
     req.on('error', (err) => {
@@ -231,21 +228,23 @@ function performWebSearch(query) {
   });
 }
 
-// Web Search API Endpoint
+// Web Search API Endpoint (Serper Google Search Engine)
   if (pathname === '/api/web-search' && (method === 'GET' || method === 'POST')) {
     try {
       let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
-      if (!query && method === 'POST') {
+      let apiKey = req.headers['x-serper-key'] || reqUrl.searchParams.get('apiKey') || '';
+      if (method === 'POST') {
         const body = await parseBody(req);
-        query = body.query || body.q || '';
+        query = body.query || body.q || query;
+        apiKey = body.apiKey || body.serperApiKey || apiKey;
       }
       if (!query) {
         return sendJSON(res, 400, { error: 'Parameter query `q` atau body `{ query }` diperlukan.' });
       }
-      const data = await performWebSearch(query);
+      const data = await performWebSearch(query, apiKey);
       return sendJSON(res, 200, data);
     } catch (e) {
-      return sendJSON(res, 500, { error: 'Gagal melakukan pencarian web: ' + e.message });
+      return sendJSON(res, 500, { error: 'Gagal melakukan pencarian web Serper: ' + e.message });
     }
   }
 

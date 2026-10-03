@@ -71,6 +71,38 @@ export default {
       }
     }
 
+    // Proxy Web Search (Serper Google API)
+    if (url.pathname === '/api/web-search') {
+      try {
+        let query = url.searchParams.get('q') || url.searchParams.get('query') || '';
+        let apiKey = request.headers.get('x-serper-key') || '';
+        if (request.method === 'POST') {
+          const body = await request.json().catch(() => ({}));
+          query = body.query || body.q || query;
+          apiKey = body.apiKey || body.serperApiKey || apiKey;
+        }
+        const serperKey = apiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+        const serperRes = await fetch('https://google.serper.dev/search', {
+          method: 'POST',
+          headers: {
+            'X-API-KEY': serperKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ q: query, num: 6, gl: 'id', hl: 'id' })
+        });
+        const serperData = await serperRes.text();
+        return new Response(serperData, {
+          status: serperRes.status,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: e.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
     // Default static assets
     return env.ASSETS.fetch(request);
   }

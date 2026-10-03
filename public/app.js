@@ -74,6 +74,7 @@
       ollamaEndpoint: 'http://127.0.0.1:11434',
       ollamaApiKey: '',
       openRouterKey: '',
+      serperApiKey: '075538fed9c64990e1eb32a06726c1e55a933c1e',
       ollamaModel: 'gemma4:31b',
       openRouterModel: 'deepseek/deepseek-r1:free',
       arenaModelA: 'gemma4:31b',
@@ -226,6 +227,9 @@
     settingOpenRouterKey: $('#settingOpenRouterKey'),
     toggleShowKeyBtn: $('#toggleShowKeyBtn'),
     testOpenRouterBtn: $('#testOpenRouterBtn'),
+    settingSerperApiKey: $('#settingSerperApiKey'),
+    toggleShowSerperKeyBtn: $('#toggleShowSerperKeyBtn'),
+    testSerperBtn: $('#testSerperBtn'),
     settingAutoPolicy: $('#settingAutoPolicy'),
     paramTemperature: $('#paramTemperature'),
     valTemperature: $('#valTemperature'),
@@ -291,8 +295,8 @@
       if (!STATE.settings.ollamaModel) {
         STATE.settings.ollamaModel = 'llama3.2';
       }
-      if (!STATE.settings.arenaModelA) {
-        STATE.settings.arenaModelA = 'llama3.2';
+      if (!STATE.settings.serperApiKey) {
+        STATE.settings.serperApiKey = '075538fed9c64990e1eb32a06726c1e55a933c1e';
       }
       const savedSessions = localStorage.getItem('zoz_router_sessions_v1');
       if (savedSessions) {
@@ -556,7 +560,7 @@
     els.welcomeHero.style.display = 'none';
     els.messagesList.innerHTML = '';
     session.messages.forEach((msg, idx) => {
-      appendMessageElement(msg.role, msg.content, msg.image, msg.model, msg.stats, idx);
+      appendMessageElement(msg.role, msg.content, msg.image, msg.model, msg.stats, idx, msg.sources);
     });
 
     scrollChatToBottom();
@@ -618,7 +622,7 @@
   }
 
   // ==================== MESSAGE DOM BUILDER ====================
-  function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1) {
+  function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1, sources = null) {
     const row = document.createElement('div');
     row.className = `message-row ${role}`;
     row.dataset.index = index;
@@ -644,6 +648,27 @@
 
     const renderedBody = role === 'assistant' ? renderMarkdown(content) : escapeHtml(content).replace(/\n/g, '<br>');
 
+    let sourcesHtml = '';
+    if (sources && Array.isArray(sources) && sources.length > 0 && role === 'assistant') {
+      sourcesHtml = `
+        <div class="msg-sources-section">
+          <div class="msg-sources-title">
+            <i class="fa-solid fa-earth-americas" style="color:var(--neon-cyan);"></i>
+            <span>Sumber Terverifikasi Google (${sources.length})</span>
+          </div>
+          <div class="msg-sources-grid">
+            ${sources.map((s, i) => `
+              <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" class="msg-source-chip" title="${escapeHtml(s.title + (s.snippet ? ' - ' + s.snippet : ''))}">
+                <span class="source-index">${i + 1}</span>
+                <span class="source-title">${escapeHtml(s.title || s.domain || 'Sumber Web')}</span>
+                <span class="source-domain">${escapeHtml(s.domain || '')}</span>
+              </a>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
     row.innerHTML = `
       <div class="message-avatar">${avatarIcon}</div>
       <div class="message-content-box">
@@ -654,6 +679,7 @@
         <div class="message-bubble">
           ${imageHtml}
           <div class="msg-text-content">${renderedBody}</div>
+          ${sourcesHtml}
         </div>
         <div class="message-actions-bar">
           ${role === 'user' ? '<button class="msg-action-btn edit-msg-btn" title="Edit & Kirim Ulang Prompt"><i class="fa-solid fa-pen-to-square"></i> Edit</button>' : ''}
@@ -895,30 +921,163 @@
     updateVisionCompatibilityBadge();
   }
 
-  // ==================== REAL-TIME WEB SEARCH CONTEXT ENGINE ====================
+  // ==================== REAL-TIME WEB SEARCH ENGINE (SERPER GOOGLE API) ====================
   async function getWebSearchContext(query) {
-    if (!STATE.webSearchEnabled || !query || !query.trim()) return null;
+    if (!query || !query.trim()) return null;
     const cleanQ = query.trim();
+    const serperKey = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+
     try {
-      const searchUrl = IS_GITHUB_PAGES 
-        ? `https://html.duckduckgo.com/html/?q=${encodeURIComponent(cleanQ)}`
-        : `/api/web-search?q=${encodeURIComponent(cleanQ)}`;
-      
-      const res = await fetch(searchUrl).catch(() => null);
-      if (!res || !res.ok) return null;
-      const data = await res.json();
-      if (data.results && data.results.length > 0) {
-        let ctx = `[INFORMASI HASIL PENCARIAN WEB REAL-TIME TERKINI UNTUK: "${cleanQ}"]\n`;
-        data.results.slice(0, 5).forEach((r, i) => {
-          ctx += `\n${i+1}. **${r.title}** (${r.url || 'Web'})\n   ${r.snippet}\n`;
+      let data = null;
+
+      // 1. Direct browser fetch to Serper API
+      try {
+        const directRes = await fetch('https://google.serper.dev/search', {
+          method: 'POST',
+          headers: {
+            'X-API-KEY': serperKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            q: cleanQ,
+            num: 6,
+            gl: 'id',
+            hl: 'id'
+          })
         });
-        ctx += `\n[Gunakan data web terbaru di atas sebagai referensi faktual dalam menjawab pertanyaan pengguna.]`;
-        return ctx;
+        if (directRes.ok) {
+          data = await directRes.json();
+        }
+      } catch (errDirect) {
+        console.warn('Direct Serper fetch failed, trying proxy...', errDirect);
       }
+
+      // 2. Fallback to proxy /api/web-search if direct fetch failed
+      if (!data) {
+        const proxyRes = await fetch('/api/web-search', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-serper-key': serperKey
+          },
+          body: JSON.stringify({ query: cleanQ, apiKey: serperKey })
+        }).catch(() => null);
+        if (proxyRes && proxyRes.ok) {
+          data = await proxyRes.json();
+        }
+      }
+
+      if (!data) return null;
+
+      const sources = [];
+      let factsBlock = '';
+
+      // Knowledge graph
+      if (data.knowledgeGraph) {
+        const kg = data.knowledgeGraph;
+        const kgText = `${kg.title || ''} (${kg.type || 'Fakta Ringkas'}): ${kg.description || ''}`;
+        factsBlock += `\n[KNOWLEDGE GRAPH]: ${kgText}\n`;
+        const kgUrl = kg.website || kg.descriptionUrl;
+        if (kgUrl) {
+          sources.push({
+            title: kg.title || 'Knowledge Graph Fact',
+            url: kgUrl,
+            snippet: kg.description || '',
+            domain: kgUrl.replace(/^https?:\/\//i, '').split('/')[0]
+          });
+        }
+      }
+
+      // Answer Box
+      if (data.answerBox) {
+        const ab = data.answerBox;
+        const abText = ab.answer || ab.snippet || ab.title || '';
+        factsBlock += `\n[JAWABAN UTAMA GOOGLE]: ${abText}\n`;
+        if (ab.link) {
+          sources.push({
+            title: ab.title || 'Jawaban Teratas',
+            url: ab.link,
+            snippet: abText,
+            domain: ab.link.replace(/^https?:\/\//i, '').split('/')[0]
+          });
+        }
+      }
+
+      // Organic search results
+      const organicList = data.organic || data.results || [];
+      let organicBlock = '';
+
+      if (Array.isArray(organicList) && organicList.length > 0) {
+        organicList.slice(0, 6).forEach((item, idx) => {
+          const title = item.title || `Sumber ${idx + 1}`;
+          const link = item.link || item.url || '';
+          const snippet = item.snippet || '';
+          const date = item.date ? ` (Dipublikasikan: ${item.date})` : '';
+          const domain = link ? link.replace(/^https?:\/\//i, '').split('/')[0] : 'google.com';
+
+          organicBlock += `\n${idx + 1}. **[${title}](${link})**${date}\n   ${snippet}\n`;
+          
+          if (link && !sources.some(s => s.url === link)) {
+            sources.push({
+              title,
+              url: link,
+              snippet,
+              date: item.date || null,
+              domain
+            });
+          }
+        });
+      }
+
+      if (!factsBlock && !organicBlock) return null;
+
+      const currentTime = new Date().toLocaleString('id-ID', { dateStyle: 'full', timeStyle: 'short' });
+      const systemPromptContext = `[DATA PENCARIAN GOOGLE REAL-TIME - SERPER ENGINE]
+Query Pencarian: "${cleanQ}"
+Waktu Pencarian: ${currentTime}
+${factsBlock}
+=== TEMUAN SITUS WEB TERATAS ===
+${organicBlock}
+[PANDUAN UNTUK ASISTEN AI]:
+- Anda adalah AI yang baru saja menjelajahi web Google secara real-time untuk topik ini.
+- Gunakan data, angka, dan fakta terkini di atas untuk menyusun jawaban yang akurat, komprehensif, dan relevan bagi pengguna.
+- Wajib gunakan referensi atau tautan sumber berformat markdown [Nama Sumber](URL) jika merujuk data spesifik.`;
+
+      return {
+        systemPromptContext,
+        sources,
+        query: cleanQ
+      };
     } catch (e) {
-      console.warn('Web search lookup failed:', e);
+      console.error('Serper Web Search Engine error:', e);
+      return null;
     }
-    return null;
+  }
+
+  function renderMessageSources(row, sources) {
+    if (!row || !sources || !Array.isArray(sources) || sources.length === 0) return;
+    const bubble = row.querySelector('.message-bubble');
+    if (!bubble) return;
+    if (bubble.querySelector('.msg-sources-section')) return;
+
+    const sourcesEl = document.createElement('div');
+    sourcesEl.className = 'msg-sources-section';
+    sourcesEl.innerHTML = `
+      <div class="msg-sources-title">
+        <i class="fa-solid fa-earth-americas" style="color:var(--neon-cyan);"></i>
+        <span>Sumber Terverifikasi Google (${sources.length})</span>
+      </div>
+      <div class="msg-sources-grid">
+        ${sources.map((s, i) => `
+          <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" class="msg-source-chip" title="${escapeHtml(s.title + (s.snippet ? ' - ' + s.snippet : ''))}">
+            <span class="source-index">${i + 1}</span>
+            <span class="source-title">${escapeHtml(s.title || s.domain || 'Sumber Web')}</span>
+            <span class="source-domain">${escapeHtml(s.domain || '')}</span>
+          </a>
+        `).join('')}
+      </div>
+    `;
+    bubble.appendChild(sourcesEl);
   }
 
   // ==================== URL & ENDPOINT NORMALIZER ====================
@@ -1339,6 +1498,7 @@
     scrollChatToBottom();
 
     let fullText = '';
+    let webSources = null;
 
     try {
       // Build message array for Ollama safely
@@ -1349,10 +1509,11 @@
 
       // If Web Search is enabled, fetch real-time search context
       if (STATE.webSearchEnabled) {
-        bubbleText.innerHTML = '<span style="color:var(--neon-cyan); font-size:0.8rem;"><i class="fa-solid fa-globe fa-spin"></i> Mencari informasi terkini di internet...</span>';
-        const webCtx = await getWebSearchContext(promptText);
-        if (webCtx) {
-          messagesPayload.unshift({ role: 'system', content: webCtx });
+        bubbleText.innerHTML = '<span style="color:var(--neon-cyan); font-size:0.8rem;"><i class="fa-solid fa-globe fa-spin"></i> Mencari informasi terkini di Google Serper...</span>';
+        const webRes = await getWebSearchContext(promptText);
+        if (webRes && webRes.systemPromptContext) {
+          messagesPayload.unshift({ role: 'system', content: webRes.systemPromptContext });
+          webSources = webRes.sources;
         }
         bubbleText.innerHTML = '<span class="typing-cursor"></span>';
       }
@@ -1437,6 +1598,9 @@
       const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
       
       bubbleText.innerHTML = renderMarkdown(fullText);
+      if (webSources && webSources.length > 0) {
+        renderMessageSources(assistantRow, webSources);
+      }
       metaBox.innerHTML = `
         <strong>${modelName}</strong>
         <span class="meta-model-badge">Ollama</span>
@@ -1450,6 +1614,7 @@
         content: fullText,
         model: modelName,
         engine: 'ollama',
+        sources: webSources,
         stats: { duration: totalTime, tps: tps, tokens: tokenCount },
         timestamp: new Date().toISOString()
       });
@@ -1550,6 +1715,7 @@
     scrollChatToBottom();
 
     let fullText = '';
+    let webSources = null;
 
     try {
       const messagesPayload = [];
@@ -1559,10 +1725,11 @@
 
       // If Web Search is enabled, fetch real-time search context
       if (STATE.webSearchEnabled) {
-        bubbleText.innerHTML = '<span style="color:var(--neon-cyan); font-size:0.8rem;"><i class="fa-solid fa-globe fa-spin"></i> Menghubungkan Web Search & Browsing...</span>';
-        const webCtx = await getWebSearchContext(promptText);
-        if (webCtx) {
-          messagesPayload.unshift({ role: 'system', content: webCtx });
+        bubbleText.innerHTML = '<span style="color:var(--neon-cyan); font-size:0.8rem;"><i class="fa-solid fa-globe fa-spin"></i> Menghubungkan Web Search Google Serper...</span>';
+        const webRes = await getWebSearchContext(promptText);
+        if (webRes && webRes.systemPromptContext) {
+          messagesPayload.unshift({ role: 'system', content: webRes.systemPromptContext });
+          webSources = webRes.sources;
         }
         bubbleText.innerHTML = '<span class="typing-cursor"></span>';
       }
@@ -1600,8 +1767,7 @@
         stream: true,
         temperature: parseFloat(STATE.settings.temperature),
         top_p: parseFloat(STATE.settings.topP),
-        max_tokens: parseInt(STATE.settings.maxTokens),
-        ...(STATE.webSearchEnabled ? { plugins: [{ id: 'web' }] } : {})
+        max_tokens: parseInt(STATE.settings.maxTokens)
       };
       if (!isOpenRouterDirect) {
         requestBody.apiKey = STATE.settings.openRouterKey;
@@ -1657,6 +1823,9 @@
       const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
 
       bubbleText.innerHTML = renderMarkdown(fullText);
+      if (webSources && webSources.length > 0) {
+        renderMessageSources(assistantRow, webSources);
+      }
       metaBox.innerHTML = `
         <strong>${modelName}</strong>
         <span class="meta-model-badge" style="background:rgba(255,82,0,0.15); color:var(--neon-amber);">OpenRouter</span>
@@ -1669,6 +1838,7 @@
         content: fullText,
         model: modelName,
         engine: 'openrouter',
+        sources: webSources,
         stats: { duration: totalTime, tps: tps, tokens: tokenCount },
         timestamp: new Date().toISOString()
       });
@@ -3173,6 +3343,7 @@
     if (els.settingOllamaEndpoint) els.settingOllamaEndpoint.value = STATE.settings.ollamaEndpoint || 'http://127.0.0.1:11434';
     if (els.settingOllamaApiKey) els.settingOllamaApiKey.value = STATE.settings.ollamaApiKey || '';
     if (els.settingOpenRouterKey) els.settingOpenRouterKey.value = STATE.settings.openRouterKey || '';
+    if (els.settingSerperApiKey) els.settingSerperApiKey.value = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
     if (els.paramTemperature) els.paramTemperature.value = STATE.settings.temperature ?? 0.7;
     if (els.valTemperature) els.valTemperature.innerText = STATE.settings.temperature ?? 0.7;
     if (els.paramTopP) els.paramTopP.value = STATE.settings.topP ?? 0.9;
@@ -3542,6 +3713,37 @@
       els.toggleShowKeyBtn.innerHTML = isPass ? '<i class="fa-solid fa-eye-slash"></i>' : '<i class="fa-solid fa-eye"></i>';
     });
 
+    els.toggleShowSerperKeyBtn?.addEventListener('click', () => {
+      const isPass = els.settingSerperApiKey.type === 'password';
+      els.settingSerperApiKey.type = isPass ? 'text' : 'password';
+      els.toggleShowSerperKeyBtn.innerHTML = isPass ? '<i class="fa-solid fa-eye-slash"></i>' : '<i class="fa-solid fa-eye"></i>';
+    });
+
+    els.testSerperBtn?.addEventListener('click', async () => {
+      const key = els.settingSerperApiKey ? els.settingSerperApiKey.value.trim() : '';
+      if (!key) {
+        showToast('Masukkan Serper API Key terlebih dahulu.', 'error');
+        return;
+      }
+      try {
+        const res = await fetch('https://google.serper.dev/search', {
+          method: 'POST',
+          headers: {
+            'X-API-KEY': key,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ q: 'test connection', gl: 'id', hl: 'id', num: 1 })
+        });
+        if (res.ok) {
+          showToast('✅ Serper API Key valid & Google Search terhubung aktif!');
+        } else {
+          showToast(`❌ Serper API Key tidak valid (Status HTTP ${res.status})`, 'error');
+        }
+      } catch (e) {
+        showToast('❌ Gagal memeriksa Serper Key: ' + e.message, 'error');
+      }
+    });
+
     els.testOllamaBtn.addEventListener('click', async () => {
       const ep = normalizeEndpoint(els.settingOllamaEndpoint.value.trim() || 'http://127.0.0.1:11434');
       const key = els.settingOllamaApiKey ? els.settingOllamaApiKey.value.trim() : '';
@@ -3617,6 +3819,10 @@
 
       if (els.settingOpenRouterKey) {
         STATE.settings.openRouterKey = els.settingOpenRouterKey.value.trim();
+      }
+
+      if (els.settingSerperApiKey) {
+        STATE.settings.serperApiKey = els.settingSerperApiKey.value.trim();
       }
 
       if (els.paramTemperature) STATE.settings.temperature = parseFloat(els.paramTemperature.value);
