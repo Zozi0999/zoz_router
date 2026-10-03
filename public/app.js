@@ -189,6 +189,7 @@
     sidebar: $('#sidebar'),
     sidebarBackdrop: $('#sidebarBackdrop'),
     mainContent: $('#mainContent'),
+    appContainer: $('.app-container'),
     
     // Input / Composer & Unified Attachments
     promptInput: $('#promptInput'),
@@ -388,6 +389,7 @@
       if (this.modal) {
         this.modal.style.display = 'flex';
         document.body.style.overflow = 'hidden';
+        history.pushState({ modal: 'lightbox' }, '');
       }
       AudioEngine.click();
     },
@@ -445,12 +447,16 @@
       AudioEngine.click();
     },
 
-    close() {
-      if (!this.modal) return;
+    close(triggerHistoryBack = true) {
+      if (!this.modal || this.modal.style.display === 'none') return;
       this.modal.style.display = 'none';
       document.body.style.overflow = '';
       this.toggleZoom(false);
       AudioEngine.click();
+
+      if (triggerHistoryBack && history.state?.modal === 'lightbox') {
+        history.back();
+      }
     }
   };
 
@@ -2427,28 +2433,8 @@ ${organicBlock}
 
   // ==================== ATTACHMENT BADGE & COMPATIBILITY ====================
   function updateVisionCompatibilityBadge() {
-    let badge = document.getElementById('visionCompatBadge');
-    if (!badge && els.attachmentPreviewBar) {
-      badge = document.createElement('div');
-      badge.id = 'visionCompatBadge';
-      badge.style.cssText = 'display:flex; align-items:center; gap:8px; font-size:0.75rem; padding:4px 10px; border-radius:6px; margin-left:8px; flex-grow:1;';
-      els.attachmentPreviewBar.appendChild(badge);
-    }
-
-    if (!badge) return;
-
-    const imgCount = STATE.attachedImages ? STATE.attachedImages.length : (STATE.attachedImage ? 1 : 0);
-    if (imgCount > 0) {
-      const current = getCurrentModel();
-      badge.style.background = 'rgba(0, 240, 255, 0.08)';
-      badge.style.border = '1px solid rgba(0, 240, 255, 0.3)';
-      badge.style.color = 'var(--neon-cyan)';
-      const label = imgCount === 1 ? '1 Foto lampiran' : `${imgCount} Foto lampiran`;
-      badge.innerHTML = `<i class="fa-solid fa-image"></i> <span>${label} siap diproses oleh model <strong>${escapeHtml(current)}</strong></span>`;
-      badge.style.display = 'flex';
-    } else {
-      badge.style.display = 'none';
-    }
+    const badge = document.getElementById('visionCompatBadge');
+    if (badge) badge.remove();
   }
 
   // ==================== MODEL DROPDOWN & SELECTORS ====================
@@ -3760,12 +3746,22 @@ ${organicBlock}
   // ==================== MODAL HELPERS ====================
   function openModal(modalId) {
     const modal = document.getElementById(modalId);
-    if (modal) modal.classList.add('show');
+    if (modal) {
+      modal.classList.add('show');
+      history.pushState({ modal: modalId }, '');
+      AudioEngine.click();
+    }
   }
 
-  function closeModal(modalId) {
+  function closeModal(modalId, triggerHistoryBack = true) {
     const modal = document.getElementById(modalId);
-    if (modal) modal.classList.remove('show');
+    if (modal) {
+      modal.classList.remove('show');
+      AudioEngine.click();
+      if (triggerHistoryBack && history.state?.modal === modalId) {
+        history.back();
+      }
+    }
   }
 
   function autoResizeTextarea(textarea) {
@@ -4842,35 +4838,79 @@ ${organicBlock}
       }
     });
 
-    // Sidebar Mobile Open/Close Helpers
-    function openSidebar() {
+    // ==================== SIDEBAR HELPERS (Desktop Collapse & Mobile Drawer) ====================
+    function isMobile() {
+      return window.innerWidth <= 768;
+    }
+
+    function openMobileSidebar() {
       els.sidebar?.classList.add('open');
       els.sidebarBackdrop?.classList.add('show');
+      history.pushState({ modal: 'sidebar' }, '');
       AudioEngine.click();
     }
 
-    function closeSidebar() {
+    function closeMobileSidebar(triggerHistoryBack = true) {
       els.sidebar?.classList.remove('open');
       els.sidebarBackdrop?.classList.remove('show');
+      if (triggerHistoryBack && history.state?.modal === 'sidebar') {
+        history.back();
+      }
     }
 
-    // Sidebar Mobile Toggle & Backdrop Dismiss
-    els.toggleSidebarBtn?.addEventListener('click', openSidebar);
+    function toggleDesktopSidebar() {
+      const isCollapsed = els.appContainer?.classList.toggle('sidebar-collapsed');
+      els.sidebar?.classList.toggle('collapsed', isCollapsed);
+      try {
+        localStorage.setItem('zoz_sidebar_collapsed', isCollapsed ? 'true' : 'false');
+      } catch (e) {}
+      AudioEngine.click();
+    }
+
+    function toggleSidebar() {
+      if (isMobile()) {
+        if (els.sidebar?.classList.contains('open')) {
+          closeMobileSidebar(true);
+        } else {
+          openMobileSidebar();
+        }
+      } else {
+        toggleDesktopSidebar();
+      }
+    }
+
+    function closeSidebar() {
+      if (isMobile()) {
+        closeMobileSidebar(true);
+      } else {
+        els.appContainer?.classList.add('sidebar-collapsed');
+        els.sidebar?.classList.add('collapsed');
+        try {
+          localStorage.setItem('zoz_sidebar_collapsed', 'true');
+        } catch (e) {}
+        AudioEngine.click();
+      }
+    }
+
+    // Sidebar Toggle & Close Handlers
+    els.toggleSidebarBtn?.addEventListener('click', toggleSidebar);
     els.closeSidebarBtn?.addEventListener('click', closeSidebar);
-    els.sidebarBackdrop?.addEventListener('click', closeSidebar);
+    els.sidebarBackdrop?.addEventListener('click', () => {
+      if (isMobile()) closeMobileSidebar(true);
+    });
 
     // Auto-dismiss sidebar on mobile when clicking on main content / chat area
     els.mainContent?.addEventListener('click', (e) => {
-      if (window.innerWidth <= 768 && els.sidebar?.classList.contains('open')) {
+      if (isMobile() && els.sidebar?.classList.contains('open')) {
         if (!els.sidebar.contains(e.target) && !els.toggleSidebarBtn?.contains(e.target)) {
-          closeSidebar();
+          closeMobileSidebar(true);
         }
       }
     });
 
     els.chatViewport?.addEventListener('click', () => {
-      if (window.innerWidth <= 768 && els.sidebar?.classList.contains('open')) {
-        closeSidebar();
+      if (isMobile() && els.sidebar?.classList.contains('open')) {
+        closeMobileSidebar(true);
       }
     });
 
@@ -5084,6 +5124,37 @@ ${organicBlock}
     // Modals Close handlers
     $$('[data-close]').forEach(btn => {
       btn.addEventListener('click', () => closeModal(btn.dataset.close));
+    });
+
+    // Modals Backdrop Click to Dismiss
+    $$('.modal-backdrop').forEach(modalEl => {
+      modalEl.addEventListener('click', (e) => {
+        if (e.target === modalEl) {
+          closeModal(modalEl.id, true);
+        }
+      });
+    });
+
+    // Global Hardware / Gesture Back Button Interceptor for Mobile (popstate)
+    window.addEventListener('popstate', (e) => {
+      // 1. Close Lightbox if open
+      if (ImageLightbox.isOpen()) {
+        ImageLightbox.close(false);
+        return;
+      }
+
+      // 2. Close any open modal dialogs
+      const openModals = document.querySelectorAll('.modal-backdrop.show');
+      if (openModals.length > 0) {
+        openModals.forEach(m => m.classList.remove('show'));
+        return;
+      }
+
+      // 3. Close mobile sidebar if open
+      if (els.sidebar?.classList.contains('open')) {
+        closeMobileSidebar(false);
+        return;
+      }
     });
 
     // Settings Modal Tabs
@@ -5458,6 +5529,15 @@ ${organicBlock}
 
     updatePresetBanner();
     updateModelUI();
+
+    // Restore desktop sidebar collapsed preference
+    if (window.innerWidth > 768) {
+      const isCollapsed = localStorage.getItem('zoz_sidebar_collapsed') === 'true';
+      if (isCollapsed) {
+        els.appContainer?.classList.add('sidebar-collapsed');
+        els.sidebar?.classList.add('collapsed');
+      }
+    }
 
     // Initialize Cyber BGM Engine
     await BGMEngine.init();
