@@ -827,6 +827,8 @@ html, body {
   display: flex;
   flex-direction: column;
   -webkit-overflow-scrolling: touch;
+}
+
 /* Floating Scroll-to-Bottom Button (ChatGPT & Gemini Style) */
 .scroll-bottom-btn {
   position: absolute;
@@ -2043,65 +2045,68 @@ html, body {
 
   /* Compact Top Nav on Mobile */
   .top-nav {
-    height: 50px;
-    padding: 0 8px;
-    gap: 6px;
+    height: 52px;
+    padding: 0 10px;
+    gap: 8px;
     width: 100%;
     max-width: 100vw;
   }
 
   .top-nav-left {
-    gap: 6px;
-    flex-shrink: 1;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
   }
 
   .mode-tabs {
     padding: 2px;
-    gap: 1px;
-    max-width: 180px;
+    gap: 2px;
+    flex-shrink: 1;
     overflow-x: auto;
+    scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+  }
+
+  .mode-tabs::-webkit-scrollbar {
+    display: none;
   }
 
   .mode-tab {
-    padding: 4px 6px;
-    font-size: 0.7rem;
-    gap: 3px;
+    padding: 4px 8px;
+    font-size: 0.72rem;
+    gap: 4px;
     white-space: nowrap;
-  }
-
-  .mode-tab span.tab-icon + span,
-  .mode-tab span.tab-icon + text {
-    display: inline;
+    flex-shrink: 0;
   }
 
   .top-nav-right {
-    gap: 4px;
+    gap: 6px;
     flex-shrink: 0;
   }
 
   .model-picker-chip {
-    padding: 4px 6px;
-    gap: 4px;
+    padding: 4px 8px;
+    gap: 5px;
   }
 
   .current-model-name {
-    max-width: 65px;
+    max-width: 80px;
     font-size: 0.72rem;
   }
 
   .top-action-btn {
-    width: 30px;
-    height: 30px;
-    font-size: 0.75rem;
+    width: 32px;
+    height: 32px;
+    font-size: 0.78rem;
     padding: 0;
   }
 
   .model-dropdown-menu {
-    width: 280px;
+    width: 290px;
     max-width: calc(100vw - 20px);
-    right: -40px;
+    right: 0;
   }
 
   /* Chat Viewport & Messages */
@@ -2112,75 +2117,75 @@ html, body {
   }
 
   .chat-messages-container {
-    padding: 10px 8px 75px;
+    padding: 12px 10px 80px;
     width: 100%;
     max-width: 100%;
   }
 
   /* Compact Hero on Mobile */
   .welcome-hero {
-    padding: 12px 6px;
+    padding: 16px 8px;
     margin-bottom: 12px;
   }
 
   .hero-logo-box {
-    width: 44px;
-    height: 44px;
+    width: 48px;
+    height: 48px;
     margin-bottom: 8px;
   }
 
   .hero-title {
-    font-size: 1.35rem;
+    font-size: 1.45rem;
     letter-spacing: 0.5px;
   }
 
   .hero-subtitle {
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     margin-bottom: 6px;
   }
 
   .hero-desc {
-    font-size: 0.72rem;
+    font-size: 0.76rem;
     line-height: 1.4;
-    margin-bottom: 14px;
+    margin-bottom: 16px;
   }
 
   .hero-quick-prompts {
     grid-template-columns: 1fr;
-    gap: 6px;
-  }
-
-  .quick-prompt-card {
-    padding: 8px 10px;
     gap: 8px;
   }
 
+  .quick-prompt-card {
+    padding: 10px 12px;
+    gap: 10px;
+  }
+
   .quick-prompt-card i {
-    font-size: 0.9rem;
+    font-size: 0.95rem;
   }
 
   .quick-prompt-card .card-text strong {
-    font-size: 0.75rem;
+    font-size: 0.78rem;
   }
 
   .quick-prompt-card .card-text span {
-    font-size: 0.68rem;
+    font-size: 0.7rem;
   }
 
   /* Chat Bubbles */
   .message-row {
-    margin-bottom: 10px;
-    gap: 6px;
+    margin-bottom: 12px;
+    gap: 8px;
   }
 
   .message-avatar {
-    width: 26px;
-    height: 26px;
-    font-size: 0.7rem;
+    width: 28px;
+    height: 28px;
+    font-size: 0.75rem;
   }
 
   .message-content-box {
-    max-width: calc(100% - 32px);
+    max-width: calc(100% - 36px);
   }
 
   .message-meta {
@@ -2189,10 +2194,10 @@ html, body {
   }
 
   .message-bubble {
-    padding: 8px 10px;
-    font-size: 0.84rem;
-    line-height: 1.45;
-    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 0.86rem;
+    line-height: 1.5;
+    border-radius: 10px;
     word-break: break-word;
     overflow-wrap: anywhere;
   }
@@ -2210,42 +2215,47 @@ html, body {
 
   /* Bottom Composer Section */
   .composer-container {
-    padding: 4px 8px 8px;
+    padding: 6px 10px 10px;
     width: 100%;
     max-width: 100vw;
   }
 
-  .composer-input-box {
-    padding: 4px 6px;
-    border-radius: 8px;
+  .composer-box {
+    padding: 6px 8px;
+    border-radius: var(--radius-md);
+    gap: 6px;
   }
 
-  .prompt-textarea {
+  .input-field-wrap textarea {
     font-size: 14px;
-    padding: 4px 6px;
-    min-height: 36px;
+    padding: 4px 4px;
+    min-height: 32px;
     line-height: 1.4;
   }
 
-  .composer-actions {
-    gap: 4px;
+  .composer-tools-left,
+  .composer-tools-right {
+    gap: 3px;
   }
 
   .composer-btn {
-    width: 30px;
-    height: 30px;
-    font-size: 0.75rem;
+    width: 32px;
+    height: 32px;
+    font-size: 0.85rem;
   }
 
   .send-btn {
-    padding: 0 10px;
-    height: 30px;
-    font-size: 0.75rem;
+    width: 34px;
+    height: 34px;
+    font-size: 0.85rem;
+    flex-shrink: 0;
   }
 
-  .composer-footer {
+  .composer-footnote {
     font-size: 0.62rem;
     padding: 2px 2px 0;
+    flex-wrap: wrap;
+    text-align: center;
   }
 
   /* Dual Split Workspace on Mobile */

@@ -2141,12 +2141,14 @@ ${organicBlock}
 
     updateModeLayout(mode);
 
-    // Get or activate session for this specific mode cleanly
-    const session = getActiveSession(mode);
-    STATE.currentSessionId = session.id;
-    STATE.activeSessionPerMode[mode] = session.id;
-    savePersistedState();
-    
+    if (STATE.currentSessionId) {
+      const session = STATE.sessions.find(s => s.id === STATE.currentSessionId);
+      if (session) {
+        session.mode = mode;
+        savePersistedState();
+      }
+    }
+
     updateModelUI();
     updateVisionCompatibilityBadge();
     populateModelDropdown();
