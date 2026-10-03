@@ -2187,7 +2187,6 @@
 
     if (els.docFileInput) els.docFileInput.value = '';
     renderAttachmentPreviews();
-    showToast(`📎 ${files.length} file dokumen berhasil dimuat.`);
     AudioEngine.click();
   }
 
@@ -3780,7 +3779,6 @@ ${organicBlock}
     updateVisionCompatibilityBadge();
 
     if (addedCount > 0) {
-      showToast(`📷 ${addedCount} foto berhasil ditambahkan.`);
       AudioEngine.click();
     }
   }
@@ -5262,7 +5260,6 @@ ${organicBlock}
     els.webSearchToggleBtn?.addEventListener('click', () => {
       STATE.webSearchEnabled = !STATE.webSearchEnabled;
       els.webSearchToggleBtn.classList.toggle('active', STATE.webSearchEnabled);
-      showToast(STATE.webSearchEnabled ? '🌐 Real-time Web Search: AKTIF' : '🌐 Real-time Web Search: NONAKTIF');
       AudioEngine.click();
     });
 
