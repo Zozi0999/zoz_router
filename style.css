@@ -1182,48 +1182,105 @@ html, body {
   display: block;
   padding: 12px 14px;
   font-family: var(--font-code);
-  font-size: 0.82rem;
+  font-size: 0.84rem;
   overflow-x: auto;
-  line-height: 1.5;
+  line-height: 1.55;
+  color: #E6EDF8;
 }
 
 .message-bubble :not(pre) > code {
-  background: rgba(0, 240, 255, 0.1);
-  color: var(--neon-cyan);
+  background: rgba(0, 240, 255, 0.12);
+  color: #64f3ff;
+  border: 1px solid rgba(0, 240, 255, 0.28);
   font-family: var(--font-code);
-  padding: 2px 5px;
+  padding: 2px 6px;
   border-radius: 4px;
-  font-size: 0.85em;
+  font-size: 0.88em;
+  font-weight: 500;
+}
+
+.message-bubble a {
+  color: #00FFC2;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 600;
+  transition: color 0.2s ease;
+}
+
+.message-bubble a:hover {
+  color: #64f3ff;
+}
+
+.message-bubble strong, .message-bubble b {
+  color: #FFFFFF;
+  font-weight: 700;
 }
 
 .message-bubble blockquote {
-  border-left: 3px solid var(--neon-cyan);
-  padding-left: 12px;
-  color: var(--text-muted);
+  border-left: 3px solid #00F0FF;
+  background: rgba(0, 240, 255, 0.06);
+  padding: 8px 14px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: #D1D8E6;
   margin: 10px 0;
 }
 
 .message-bubble ul, .message-bubble ol {
-  padding-left: 20px;
+  padding-left: 22px;
   margin-bottom: 10px;
+}
+
+.message-bubble li {
+  margin-bottom: 4px;
+  color: var(--text-main);
 }
 
 .message-bubble table {
   width: 100%;
   border-collapse: collapse;
   margin: 12px 0;
-  font-size: 0.82rem;
+  font-size: 0.84rem;
 }
 
 .message-bubble table th, .message-bubble table td {
   border: 1px solid var(--border-subtle);
-  padding: 6px 10px;
+  padding: 8px 12px;
   text-align: left;
 }
 
 .message-bubble table th {
   background: var(--bg-card);
-  color: var(--neon-teal);
+  color: #00FFC2;
+  font-weight: 600;
+}
+
+/* High-Contrast Code Syntax Highlight Overrides for Mobile & Dark OLED */
+.hljs {
+  background: transparent !important;
+  color: #E6EDF8 !important;
+}
+.hljs-keyword, .hljs-selector-tag, .hljs-subst {
+  color: #FF7B72 !important;
+  font-weight: 600;
+}
+.hljs-string, .hljs-title, .hljs-section, .hljs-attribute, .hljs-literal, .hljs-template-tag, .hljs-template-variable, .hljs-type, .hljs-addition {
+  color: #7EE787 !important;
+}
+.hljs-comment, .hljs-quote, .hljs-deletion, .hljs-meta {
+  color: #9AA4B5 !important;
+  font-style: italic;
+}
+.hljs-number, .hljs-regexp, .hljs-link {
+  color: #79C0FF !important;
+}
+.hljs-variable, .hljs-template-variable, .hljs-tag, .hljs-name, .hljs-selector-id, .hljs-selector-class {
+  color: #FFA657 !important;
+}
+.hljs-symbol, .hljs-bullet, .hljs-built_in, .hljs-builtin-name, .hljs-attr {
+  color: #56D364 !important;
+}
+.hljs-params {
+  color: #F0F6FC !important;
 }
 
 /* Typing cursor */
