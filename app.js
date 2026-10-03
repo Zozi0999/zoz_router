@@ -650,7 +650,7 @@
     render() {
       if (!this.el) return;
       this.el.innerHTML = renderMarkdown(this.text) + '<span class="typing-cursor"></span>';
-      if (this.onScroll) this.onScroll();
+      if (this.onScroll && !userScrolledUp) this.onScroll();
     }
 
     finish() {
@@ -662,7 +662,7 @@
       if (this.el) {
         this.el.innerHTML = renderMarkdown(this.text);
       }
-      if (this.onScroll) this.onScroll();
+      if (this.onScroll && !userScrolledUp) this.onScroll();
       return this.text;
     }
   }
@@ -671,7 +671,7 @@
   let userScrolledUp = false;
   let isAutoScrolling = false;
 
-  function isChatAtBottom(element = els.chatViewport, threshold = 80) {
+  function isChatAtBottom(element = els.chatViewport, threshold = 25) {
     if (!element) return true;
     return (element.scrollHeight - element.scrollTop - element.clientHeight) <= threshold;
   }
@@ -698,16 +698,24 @@
 
   function smartScrollArenaToBottom(container, force = false) {
     if (!container) return;
-    if (!isChatAtBottom(container, 60) && !force) return;
+    if (force) {
+      userScrolledUp = false;
+      toggleScrollBottomBtn(false);
+    }
+    if (userScrolledUp && !force) return;
+    if (!isChatAtBottom(container, 25) && !force) return;
     container.scrollTop = container.scrollHeight;
   }
 
   function setupSmartScrolling() {
     if (!els.chatViewport) return;
 
-    const checkUserScroll = (el = els.chatViewport) => {
+    let touchStartY = 0;
+
+    const handleScrollEvent = (el = els.chatViewport) => {
       if (isAutoScrolling) return;
-      if (!isChatAtBottom(el, 70)) {
+      const atBottom = isChatAtBottom(el, 25);
+      if (!atBottom) {
         userScrolledUp = true;
         toggleScrollBottomBtn(true);
       } else {
@@ -716,24 +724,59 @@
       }
     };
 
-    els.chatViewport.addEventListener('scroll', () => checkUserScroll(els.chatViewport), { passive: true });
-    els.chatViewport.addEventListener('touchmove', () => checkUserScroll(els.chatViewport), { passive: true });
+    els.chatViewport.addEventListener('scroll', () => handleScrollEvent(els.chatViewport), { passive: true });
+    
+    // User touch start and move on mobile devices
+    els.chatViewport.addEventListener('touchstart', (e) => {
+      if (e.touches && e.touches[0]) {
+        touchStartY = e.touches[0].clientY;
+      }
+    }, { passive: true });
+
+    els.chatViewport.addEventListener('touchmove', (e) => {
+      if (e.touches && e.touches[0]) {
+        const deltaY = touchStartY - e.touches[0].clientY;
+        if (deltaY < 0 || !isChatAtBottom(els.chatViewport, 25)) {
+          userScrolledUp = true;
+          toggleScrollBottomBtn(true);
+        }
+      }
+    }, { passive: true });
+
+    // Desktop wheel
     els.chatViewport.addEventListener('wheel', (e) => {
       if (e.deltaY < 0) {
         userScrolledUp = true;
         toggleScrollBottomBtn(true);
+      } else if (e.deltaY > 0 && isChatAtBottom(els.chatViewport, 25)) {
+        userScrolledUp = false;
+        toggleScrollBottomBtn(false);
       }
     }, { passive: true });
 
     // Arena columns scroll tracking
-    if (els.arenaMessagesA) {
-      els.arenaMessagesA.addEventListener('scroll', () => checkUserScroll(els.arenaMessagesA), { passive: true });
-      els.arenaMessagesA.addEventListener('touchmove', () => checkUserScroll(els.arenaMessagesA), { passive: true });
-    }
-    if (els.arenaMessagesB) {
-      els.arenaMessagesB.addEventListener('scroll', () => checkUserScroll(els.arenaMessagesB), { passive: true });
-      els.arenaMessagesB.addEventListener('touchmove', () => checkUserScroll(els.arenaMessagesB), { passive: true });
-    }
+    [els.arenaMessagesA, els.arenaMessagesB].forEach(col => {
+      if (!col) return;
+      col.addEventListener('scroll', () => handleScrollEvent(col), { passive: true });
+      col.addEventListener('touchstart', (e) => {
+        if (e.touches && e.touches[0]) touchStartY = e.touches[0].clientY;
+      }, { passive: true });
+      col.addEventListener('touchmove', (e) => {
+        if (e.touches && e.touches[0]) {
+          const deltaY = touchStartY - e.touches[0].clientY;
+          if (deltaY < 0 || !isChatAtBottom(col, 25)) {
+            userScrolledUp = true;
+            toggleScrollBottomBtn(true);
+          }
+        }
+      }, { passive: true });
+      col.addEventListener('wheel', (e) => {
+        if (e.deltaY < 0) {
+          userScrolledUp = true;
+          toggleScrollBottomBtn(true);
+        }
+      }, { passive: true });
+    });
 
     els.scrollBottomBtn?.addEventListener('click', () => {
       if (STATE.mode === 'arena') {
@@ -1652,11 +1695,75 @@
     updateVisionCompatibilityBadge();
   }
 
-  // ==================== REAL-TIME WEB SEARCH ENGINE (SERPER GOOGLE API) ====================
-  async function getWebSearchContext(query) {
+  // ==================== AUTONOMOUS AI WEB SEARCH SKILL ENGINE ====================
+  function synthesizeAutonomousSearchQuery(session, rawPrompt) {
+    if (!rawPrompt) return '';
+    const cleanPrompt = rawPrompt.trim();
+
+    // Indonesian & English filler / stop-words
+    const fillerWords = [
+      'bagaimana', 'apa', 'apakah', 'kenapa', 'mengapa', 'tolong', 'coba', 'carikan', 'cari', 'jelaskan',
+      'sebutkan', 'berikan', 'tampilkan', 'info', 'informasi', 'data', 'terbaru', 'terupdate', 'terkini',
+      'hari ini', 'saat ini', 'sekarang', 'menurutmu', 'menurut anda', 'tentang', 'mengenai', 'bisa', 'dong',
+      'kan', 'sih', 'ya', 'bro', 'min', 'how', 'what', 'why', 'tell', 'me', 'about', 'latest', 'news', 'update'
+    ];
+
+    const words = cleanPrompt.toLowerCase().replace(/[^a-z0-9\s]/gi, ' ').split(/\s+/).filter(Boolean);
+    const nonFillerWords = words.filter(w => !fillerWords.includes(w) && w.length > 1);
+
+    // Scan recent session history to extract subject context
+    let contextSubject = '';
+    if (session && Array.isArray(session.messages) && session.messages.length > 0) {
+      // Look at the last 4 messages in reverse
+      const recentMsgs = session.messages.slice(-4).reverse();
+      for (const msg of recentMsgs) {
+        const text = msg.content || '';
+        // Extract capitalized terms, quotes, code blocks, technology names, product names
+        const matches = text.match(/([A-Z][a-zA-Z0-9_\-\.\+]+(?:\s+[A-Z0-9][a-zA-Z0-9_\-\.\+]+)*)/g);
+        if (matches && matches.length > 0) {
+          const filteredMatches = matches.filter(m => !['Anda', 'AI', 'Zoz', 'Router', 'Ollama', 'OpenRouter', 'Google', 'HTTP', 'JSON'].includes(m) && m.length > 2);
+          if (filteredMatches.length > 0) {
+            contextSubject = filteredMatches[0];
+            break;
+          }
+        }
+        // If no capitalized match, check backticks or bold text
+        const codeMatch = text.match(/`([^`]+)`|\*\*([^*]+)\*\*/);
+        if (codeMatch) {
+          contextSubject = codeMatch[1] || codeMatch[2];
+          break;
+        }
+      }
+    }
+
+    // Formulate the optimal targeted query
+    let finalQuery = '';
+    if (nonFillerWords.length <= 2 && contextSubject) {
+      // Heavily context-dependent prompt (e.g. "bagaimana data terbarunya" -> "[Subject] spesifikasi data terbaru 2026")
+      const intentKeywords = nonFillerWords.length > 0 ? nonFillerWords.join(' ') : 'data spesifikasi update';
+      finalQuery = `${contextSubject} ${intentKeywords} terbaru 2026`;
+    } else if (contextSubject && !cleanPrompt.toLowerCase().includes(contextSubject.toLowerCase())) {
+      finalQuery = `${contextSubject} ${cleanPrompt} 2026`;
+    } else {
+      finalQuery = `${cleanPrompt} 2026`;
+    }
+
+    return finalQuery.replace(/\s+/g, ' ').trim();
+  }
+
+  async function getWebSearchContext(query, session = null, hudElement = null) {
     if (!query || !query.trim()) return null;
-    const cleanQ = query.trim();
+    const smartQuery = session ? synthesizeAutonomousSearchQuery(session, query) : query.trim();
     const serperKey = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+
+    if (hudElement) {
+      hudElement.innerHTML = `
+        <div class="web-search-hud">
+          <i class="fa-solid fa-satellite-dish fa-spin" style="color:var(--neon-cyan);"></i>
+          <span><strong>AI Search Skill:</strong> Menganalisis konteks & mencari <em>"${escapeHtml(smartQuery)}"</em>...</span>
+        </div>
+      `;
+    }
 
     try {
       let data = null;
@@ -1670,7 +1777,7 @@
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            q: cleanQ,
+            q: smartQuery,
             num: 6,
             gl: 'id',
             hl: 'id'
@@ -1691,7 +1798,7 @@
             'Content-Type': 'application/json',
             'x-serper-key': serperKey
           },
-          body: JSON.stringify({ query: cleanQ, apiKey: serperKey })
+          body: JSON.stringify({ query: smartQuery, apiKey: serperKey })
         }).catch(() => null);
         if (proxyRes && proxyRes.ok) {
           data = await proxyRes.json();
@@ -1763,21 +1870,22 @@
       if (!factsBlock && !organicBlock) return null;
 
       const currentTime = new Date().toLocaleString('id-ID', { dateStyle: 'full', timeStyle: 'short' });
-      const systemPromptContext = `[DATA PENCARIAN GOOGLE REAL-TIME - SERPER ENGINE]
-Query Pencarian: "${cleanQ}"
+      const systemPromptContext = `[DATA PENCARIAN GOOGLE REAL-TIME - SERPER ENGINE (AI SEARCH SKILL)]
+Query Kontekstual yang Dirumuskan AI: "${smartQuery}"
+Pertanyaan Pengguna: "${query}"
 Waktu Pencarian: ${currentTime}
 ${factsBlock}
 === TEMUAN SITUS WEB TERATAS ===
 ${organicBlock}
 [PANDUAN UNTUK ASISTEN AI]:
-- Anda adalah AI yang baru saja menjelajahi web Google secara real-time untuk topik ini.
-- Gunakan data, angka, dan fakta terkini di atas untuk menyusun jawaban yang akurat, komprehensif, dan relevan bagi pengguna.
-- Wajib gunakan referensi atau tautan sumber berformat markdown [Nama Sumber](URL) jika merujuk data spesifik.`;
+- Anda adalah AI yang telah mengaktifkan kemampuan Search Skill untuk mencari data Google secara otonom berdasarkan konteks obrolan.
+- Hubungkan data real-time di atas dengan konteks riwayat percakapan sebelumnya dan jawab dengan akurat, mutakhir (Tahun 2026), dan komprehensif.
+- Wajib sertakan referensi tautan markdown [Nama Sumber](URL) jika merujuk fakta spesifik.`;
 
       return {
         systemPromptContext,
         sources,
-        query: cleanQ
+        query: smartQuery
       };
     } catch (e) {
       console.error('Serper Web Search Engine error:', e);
@@ -2302,8 +2410,7 @@ ${organicBlock}
 
       // If Web Search is enabled, fetch real-time search context
       if (STATE.webSearchEnabled) {
-        bubbleText.innerHTML = '<span style="color:var(--neon-cyan); font-size:0.8rem;"><i class="fa-solid fa-globe fa-spin"></i> Mencari informasi terkini di Google Serper...</span>';
-        const webRes = await getWebSearchContext(promptText);
+        const webRes = await getWebSearchContext(promptText, session, bubbleText);
         if (webRes && webRes.systemPromptContext) {
           systemContent = systemContent ? `${systemContent}\n\n${webRes.systemPromptContext}` : webRes.systemPromptContext;
           webSources = webRes.sources;
@@ -2517,8 +2624,7 @@ ${organicBlock}
 
       // If Web Search is enabled, fetch real-time search context
       if (STATE.webSearchEnabled) {
-        bubbleText.innerHTML = '<span style="color:var(--neon-cyan); font-size:0.8rem;"><i class="fa-solid fa-globe fa-spin"></i> Menghubungkan Google Serper Web Search...</span>';
-        const webRes = await getWebSearchContext(promptText);
+        const webRes = await getWebSearchContext(promptText, session, bubbleText);
         if (webRes && webRes.systemPromptContext) {
           systemContent = systemContent ? `${systemContent}\n\n${webRes.systemPromptContext}` : webRes.systemPromptContext;
           webSources = webRes.sources;
@@ -2735,8 +2841,7 @@ ${organicBlock}
       let systemContent = STATE.settings.systemPrompt || '';
 
       if (STATE.webSearchEnabled) {
-        bubbleText.innerHTML = '<span style="color:var(--neon-cyan); font-size:0.8rem;"><i class="fa-solid fa-globe fa-spin"></i> Mencari info Google Serper...</span>';
-        const webRes = await getWebSearchContext(text);
+        const webRes = await getWebSearchContext(text, session, bubbleText);
         if (webRes && webRes.systemPromptContext) {
           systemContent = systemContent ? `${systemContent}\n\n${webRes.systemPromptContext}` : webRes.systemPromptContext;
           webSources = webRes.sources;
@@ -2893,8 +2998,7 @@ ${organicBlock}
       let systemContent = STATE.settings.systemPrompt || '';
 
       if (STATE.webSearchEnabled) {
-        bubbleText.innerHTML = '<span style="color:var(--neon-cyan); font-size:0.8rem;"><i class="fa-solid fa-globe fa-spin"></i> Menghubungkan Google Serper Web Search...</span>';
-        const webRes = await getWebSearchContext(text);
+        const webRes = await getWebSearchContext(text, session, bubbleText);
         if (webRes && webRes.systemPromptContext) {
           systemContent = systemContent ? `${systemContent}\n\n${webRes.systemPromptContext}` : webRes.systemPromptContext;
           webSources = webRes.sources;
