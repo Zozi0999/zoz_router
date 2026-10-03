@@ -345,6 +345,24 @@ html, body {
   color: var(--neon-cyan);
 }
 
+.history-item.is-pinned {
+  border-left: 2px solid var(--neon-cyan);
+  background: rgba(0, 240, 255, 0.04);
+}
+
+.history-item.is-pinned:hover {
+  background: rgba(0, 240, 255, 0.08);
+}
+
+.history-pin-icon {
+  font-size: 0.72rem;
+  color: var(--neon-cyan);
+  transform: rotate(45deg);
+  margin-right: 2px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 4px rgba(0, 240, 255, 0.5));
+}
+
 .history-item.active .history-title {
   color: var(--neon-cyan);
   font-weight: 600;

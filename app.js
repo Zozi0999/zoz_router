@@ -556,6 +556,7 @@
           id: s.id,
           title: s.title,
           mode: s.mode,
+          isPinned: !!s.isPinned,
           createdAt: s.createdAt,
           updatedAt: s.updatedAt,
           messages: (s.messages || []).map(m => ({
@@ -1159,6 +1160,41 @@
     AudioEngine.click();
   }
 
+  function getSessionTimestamp(s) {
+    if (!s) return 0;
+    if (s.updatedAt) {
+      const t = new Date(s.updatedAt).getTime();
+      if (!isNaN(t)) return t;
+    }
+    if (s.messages && s.messages.length > 0) {
+      const lastMsg = s.messages[s.messages.length - 1];
+      if (lastMsg && lastMsg.timestamp) {
+        const t = new Date(lastMsg.timestamp).getTime();
+        if (!isNaN(t)) return t;
+      }
+    }
+    if (s.createdAt) {
+      const t = new Date(s.createdAt).getTime();
+      if (!isNaN(t)) return t;
+    }
+    return 0;
+  }
+
+  async function togglePinSession(sessionId) {
+    const session = STATE.sessions.find(s => s.id === sessionId);
+    if (!session) return;
+    session.isPinned = !session.isPinned;
+    session.updatedAt = new Date().toISOString();
+    
+    if (DeviceStorage.isDeviceBackendAvailable) {
+      DeviceStorage.saveSession(session);
+    }
+    savePersistedState();
+    renderChatHistory();
+    showToast(session.isPinned ? '📌 Percakapan disematkan di paling atas' : 'Percakapan dilepas dari sematan');
+    AudioEngine.click();
+  }
+
   function renderChatHistory(filterQuery = '') {
     els.chatHistoryList.innerHTML = '';
     const q = filterQuery.toLowerCase().trim();
@@ -1166,6 +1202,15 @@
     // Unified list of all sessions across engines
     const validSessions = STATE.sessions.filter(s => s.messages && s.messages.length > 0);
     const filtered = validSessions.filter(s => !q || s.title.toLowerCase().includes(q) || (s.mode && s.mode.toLowerCase().includes(q)));
+
+    // Sort strictly: Pinned sessions first, then most recently active descending
+    filtered.sort((a, b) => {
+      const aPinned = !!a.isPinned;
+      const bPinned = !!b.isPinned;
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+      return getSessionTimestamp(b) - getSessionTimestamp(a);
+    });
 
     // Update history header label
     const historyHeader = $('.history-label');
@@ -1180,7 +1225,7 @@
 
     filtered.forEach(session => {
       const item = document.createElement('div');
-      item.className = `history-item ${session.id === STATE.currentSessionId ? 'active' : ''}`;
+      item.className = `history-item ${session.id === STATE.currentSessionId ? 'active' : ''} ${session.isPinned ? 'is-pinned' : ''}`;
       item.dataset.id = session.id;
       
       let modeIcon = 'fa-server';
@@ -1202,11 +1247,12 @@
 
       item.innerHTML = `
         <div class="history-title-wrap">
+          ${session.isPinned ? '<i class="fa-solid fa-thumbtack history-pin-icon" title="Disematkan di Atas"></i>' : ''}
           <i class="fa-solid ${modeIcon}" style="color:${modeColor}; font-size:0.8rem;" title="Engine: ${modeTag}"></i>
           <span class="history-title" title="${escapeHtml(session.title)}">${escapeHtml(session.title)}</span>
         </div>
         <div class="history-item-actions">
-          <button class="history-menu-btn" title="Opsi Percakapan (Ganti Nama / Hapus)" aria-label="Opsi Percakapan">
+          <button class="history-menu-btn" title="Opsi Percakapan (Sematkan / Ganti Nama / Hapus)" aria-label="Opsi Percakapan">
             <i class="fa-solid fa-ellipsis-vertical"></i>
           </button>
         </div>
@@ -1242,6 +1288,10 @@
         const dropdown = document.createElement('div');
         dropdown.className = 'history-dropdown-menu';
         dropdown.innerHTML = `
+          <button class="history-dropdown-item pin-opt">
+            <i class="fa-solid fa-thumbtack" style="${session.isPinned ? 'color:var(--neon-cyan); transform:rotate(45deg);' : ''}"></i>
+            <span>${session.isPinned ? 'Lepas Sematan' : 'Sematkan di Atas'}</span>
+          </button>
           <button class="history-dropdown-item rename-opt">
             <i class="fa-solid fa-pen-to-square"></i>
             <span>Ganti Nama</span>
@@ -1255,6 +1305,12 @@
             <span>Hapus Percakapan</span>
           </button>
         `;
+
+        dropdown.querySelector('.pin-opt').addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          closeAllHistoryDropdowns();
+          togglePinSession(session.id);
+        });
 
         dropdown.querySelector('.rename-opt').addEventListener('click', (ev) => {
           ev.stopPropagation();
