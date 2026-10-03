@@ -746,6 +746,51 @@ html, body {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Floating Scroll-to-Bottom Button */
+.scroll-bottom-btn {
+  position: absolute;
+  bottom: 20px;
+  right: 28px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  border: 1px solid var(--neon-cyan);
+  color: var(--neon-cyan);
+  box-shadow: 0 4px 18px rgba(0, 240, 255, 0.4), 0 0 12px rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 120;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  font-size: 0.95rem;
+  backdrop-filter: blur(8px);
+}
+
+.scroll-bottom-btn:hover {
+  background: var(--neon-cyan);
+  color: #000;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 22px rgba(0, 240, 255, 0.7);
+}
+
+.scroll-bottom-btn:active {
+  transform: scale(0.92);
+}
+
+.scroll-btn-pulse {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--neon-teal);
+  box-shadow: 0 0 6px var(--neon-teal);
+  animation: pulseNeon 1.5s infinite;
+}
+
 .chat-messages-container {
   max-width: 920px;
   width: 100%;

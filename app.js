@@ -282,42 +282,152 @@
     saveOnlineUrlBtn: $('#saveOnlineUrlBtn'),
     ytPlayerContainerWrap: $('#ytPlayerContainerWrap'),
     ytPlayerContainer: $('#ytPlayerContainer'),
-    toggleYtPlayerVisibilityBtn: $('#toggleYtPlayerVisibilityBtn')
+    toggleYtPlayerVisibilityBtn: $('#toggleYtPlayerVisibilityBtn'),
+
+    // Floating scroll to bottom button
+    scrollBottomBtn: $('#scrollBottomBtn')
+  };
+
+  // ==================== INDEXEDDB CHAT VAULT ====================
+  const ChatDB = {
+    db: null,
+    async init() {
+      return new Promise((resolve) => {
+        try {
+          const req = indexedDB.open('ZozRouterChatDB_v2', 1);
+          req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('sessions')) {
+              db.createObjectStore('sessions', { keyPath: 'id' });
+            }
+          };
+          req.onsuccess = (e) => {
+            this.db = e.target.result;
+            resolve(this.db);
+          };
+          req.onerror = () => resolve(null);
+        } catch (e) {
+          resolve(null);
+        }
+      });
+    },
+    async saveAllSessions(sessions) {
+      if (!this.db) await this.init();
+      if (!this.db || !Array.isArray(sessions)) return false;
+      return new Promise((resolve) => {
+        try {
+          const tx = this.db.transaction('sessions', 'readwrite');
+          const store = tx.objectStore('sessions');
+          store.clear();
+          sessions.forEach(s => store.put(s));
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+        } catch (e) {
+          resolve(false);
+        }
+      });
+    },
+    async getAllSessions() {
+      if (!this.db) await this.init();
+      if (!this.db) return [];
+      return new Promise((resolve) => {
+        try {
+          const tx = this.db.transaction('sessions', 'readonly');
+          const req = tx.objectStore('sessions').getAll();
+          req.onsuccess = () => resolve(req.result || []);
+          req.onerror = () => resolve([]);
+        } catch (e) {
+          resolve([]);
+        }
+      });
+    },
+    async deleteSession(id) {
+      if (!this.db) await this.init();
+      if (!this.db) return false;
+      return new Promise((resolve) => {
+        try {
+          const tx = this.db.transaction('sessions', 'readwrite');
+          tx.objectStore('sessions').delete(id);
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+        } catch (e) {
+          resolve(false);
+        }
+      });
+    }
   };
 
   // ==================== STORAGE & PERSISTENCE ====================
-  function loadPersistedState() {
+  async function loadPersistedState() {
     try {
       const savedSettings = localStorage.getItem('zoz_router_settings_v1');
       if (savedSettings) {
         STATE.settings = { ...STATE.settings, ...JSON.parse(savedSettings) };
       }
       if (!STATE.settings.ollamaModel) {
-        STATE.settings.ollamaModel = 'llama3.2';
+        STATE.settings.ollamaModel = 'gemma4:31b';
       }
       if (!STATE.settings.serperApiKey) {
         STATE.settings.serperApiKey = '075538fed9c64990e1eb32a06726c1e55a933c1e';
-      }
-      const savedSessions = localStorage.getItem('zoz_router_sessions_v1');
-      if (savedSessions) {
-        STATE.sessions = JSON.parse(savedSessions);
       }
       const savedSound = localStorage.getItem('zoz_router_sound_v1');
       if (savedSound !== null) {
         STATE.soundEnabled = savedSound === 'true';
       }
+
+      // Fast synchronous load from localStorage
+      const savedSessions = localStorage.getItem('zoz_router_sessions_v1');
+      if (savedSessions) {
+        try {
+          const parsed = JSON.parse(savedSessions);
+          if (Array.isArray(parsed)) STATE.sessions = parsed;
+        } catch (e) {}
+      }
+
+      // Deep async load & sync from IndexedDB Vault
+      const dbSessions = await ChatDB.getAllSessions();
+      if (Array.isArray(dbSessions) && dbSessions.length > 0) {
+        if (dbSessions.length >= STATE.sessions.length) {
+          STATE.sessions = dbSessions;
+        }
+      }
     } catch (err) {
-      console.error('Error loading localStorage:', err);
+      console.error('Error loading persisted state:', err);
     }
   }
 
   function savePersistedState() {
     try {
       localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings));
-      localStorage.setItem('zoz_router_sessions_v1', JSON.stringify(STATE.sessions));
       localStorage.setItem('zoz_router_sound_v1', String(STATE.soundEnabled));
+
+      // Save to IndexedDB (asynchronous & practically unlimited quota)
+      ChatDB.saveAllSessions(STATE.sessions);
+
+      // Also mirror to localStorage (safe with quota fallback)
+      try {
+        localStorage.setItem('zoz_router_sessions_v1', JSON.stringify(STATE.sessions));
+      } catch (quotaErr) {
+        try {
+          const lightweight = STATE.sessions.map(s => ({
+            ...s,
+            messages: (s.messages || []).map(m => ({
+              role: m.role,
+              content: m.content,
+              displayContent: m.displayContent,
+              model: m.model,
+              engine: m.engine,
+              slot: m.slot,
+              sources: m.sources,
+              stats: m.stats,
+              timestamp: m.timestamp
+            }))
+          }));
+          localStorage.setItem('zoz_router_sessions_v1', JSON.stringify(lightweight));
+        } catch (e) {}
+      }
     } catch (err) {
-      console.error('Error saving localStorage:', err);
+      console.error('Error saving persisted state:', err);
     }
   }
 
@@ -363,19 +473,74 @@
     return escapeHtml(rawText).replace(/\n/g, '<br>');
   }
 
+  // ==================== SMART SCROLL MANAGER ====================
+  let userScrolledUp = false;
+  let isAutoScrolling = false;
+
+  function isChatAtBottom(element = els.chatViewport, threshold = 80) {
+    if (!element) return true;
+    return (element.scrollHeight - element.scrollTop - element.clientHeight) <= threshold;
+  }
+
+  function toggleScrollBottomBtn(show) {
+    if (!els.scrollBottomBtn) return;
+    els.scrollBottomBtn.style.display = show ? 'flex' : 'none';
+  }
+
+  function smartScrollChatToBottom(force = false) {
+    if (!els.chatViewport) return;
+    if (force) {
+      userScrolledUp = false;
+      toggleScrollBottomBtn(false);
+    }
+    if (userScrolledUp && !force) return;
+
+    isAutoScrolling = true;
+    els.chatViewport.scrollTop = els.chatViewport.scrollHeight;
+    requestAnimationFrame(() => {
+      isAutoScrolling = false;
+    });
+  }
+
+  function smartScrollArenaToBottom(container, force = false) {
+    if (!container) return;
+    if (!isChatAtBottom(container, 60) && !force) return;
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function setupSmartScrolling() {
+    if (!els.chatViewport) return;
+
+    const checkUserScroll = () => {
+      if (isAutoScrolling) return;
+      if (!isChatAtBottom(els.chatViewport, 70)) {
+        userScrolledUp = true;
+        toggleScrollBottomBtn(true);
+      } else {
+        userScrolledUp = false;
+        toggleScrollBottomBtn(false);
+      }
+    };
+
+    els.chatViewport.addEventListener('scroll', checkUserScroll, { passive: true });
+    els.chatViewport.addEventListener('touchmove', checkUserScroll, { passive: true });
+    els.chatViewport.addEventListener('wheel', (e) => {
+      if (e.deltaY < 0) {
+        userScrolledUp = true;
+        toggleScrollBottomBtn(true);
+      }
+    }, { passive: true });
+
+    els.scrollBottomBtn?.addEventListener('click', () => {
+      smartScrollChatToBottom(true);
+      AudioEngine.click();
+    });
+  }
+
   // ==================== SESSIONS & CHAT MANAGEMENT ====================
   function createNewSession(initialTitle = 'Obrolan Baru', targetMode = STATE.mode) {
-    const newSession = {
-      id: generateId(),
-      title: initialTitle,
-      mode: targetMode,
-      messages: [],
-      createdAt: new Date().toISOString()
-    };
-    STATE.sessions.unshift(newSession);
-    STATE.activeSessionPerMode[targetMode] = newSession.id;
-    STATE.currentSessionId = newSession.id;
-    savePersistedState();
+    STATE.currentSessionId = null;
+    sessionStorage.removeItem('zoz_active_session_id');
     renderChatHistory();
     renderCurrentSession();
     AudioEngine.click();
@@ -383,31 +548,27 @@
       els.sidebar.classList.remove('open');
       els.sidebarBackdrop?.classList.remove('show');
     }
-    return newSession;
   }
 
   function getActiveSession(targetMode = STATE.mode) {
-    // Check if we have an active session for this specific mode
-    let session = null;
-    const modeActiveId = STATE.activeSessionPerMode[targetMode];
-    
-    if (modeActiveId) {
-      session = STATE.sessions.find(s => s.id === modeActiveId && s.mode === targetMode);
+    if (STATE.currentSessionId) {
+      const found = STATE.sessions.find(s => s.id === STATE.currentSessionId);
+      if (found) return found;
     }
 
-    if (!session) {
-      // Find latest session belonging to this mode
-      session = STATE.sessions.find(s => s.mode === targetMode);
-    }
-
-    if (!session) {
-      session = createNewSession('Obrolan Baru', targetMode);
-    } else {
-      STATE.activeSessionPerMode[targetMode] = session.id;
-      STATE.currentSessionId = session.id;
-    }
-
-    return session;
+    // Return or create active working session
+    const newSession = {
+      id: generateId(),
+      title: 'Obrolan Baru',
+      mode: targetMode,
+      messages: [],
+      createdAt: new Date().toISOString()
+    };
+    STATE.sessions.unshift(newSession);
+    STATE.currentSessionId = newSession.id;
+    sessionStorage.setItem('zoz_active_session_id', newSession.id);
+    savePersistedState();
+    return newSession;
   }
 
   function switchSession(sessionId) {
@@ -418,7 +579,7 @@
     const targetSession = STATE.sessions.find(s => s.id === sessionId);
     if (!targetSession) return;
 
-    // If session has different mode, switch tab without altering session's original mode
+    // If session has different mode, switch tab
     if (targetSession.mode && targetSession.mode !== STATE.mode) {
       STATE.mode = targetSession.mode;
       els.modeTabs.forEach(tab => {
@@ -428,7 +589,7 @@
     }
 
     STATE.currentSessionId = sessionId;
-    STATE.activeSessionPerMode[STATE.mode] = sessionId;
+    sessionStorage.setItem('zoz_active_session_id', sessionId);
     savePersistedState();
     renderChatHistory();
     renderCurrentSession();
@@ -447,15 +608,11 @@
     const targetMode = target ? target.mode : STATE.mode;
 
     STATE.sessions = STATE.sessions.filter(s => s.id !== sessionId);
+    ChatDB.deleteSession(sessionId);
 
     if (STATE.currentSessionId === sessionId) {
-      const nextForMode = STATE.sessions.find(s => s.mode === targetMode);
-      if (nextForMode) {
-        STATE.currentSessionId = nextForMode.id;
-        STATE.activeSessionPerMode[targetMode] = nextForMode.id;
-      } else {
-        createNewSession('Obrolan Baru', targetMode);
-      }
+      STATE.currentSessionId = null;
+      sessionStorage.removeItem('zoz_active_session_id');
     }
 
     savePersistedState();
@@ -468,8 +625,8 @@
     els.chatHistoryList.innerHTML = '';
     const q = filterQuery.toLowerCase().trim();
     
-    // Filter strictly by the current active engine mode so Ollama and OpenRouter never mix!
-    const modeSessions = STATE.sessions.filter(s => (s.mode || 'ollama') === STATE.mode);
+    // Filter strictly by the current active engine mode
+    const modeSessions = STATE.sessions.filter(s => (s.mode || 'ollama') === STATE.mode && (s.messages && s.messages.length > 0));
     const filtered = modeSessions.filter(s => !q || s.title.toLowerCase().includes(q));
 
     // Update history header label
@@ -480,7 +637,7 @@
     }
 
     if (filtered.length === 0) {
-      els.chatHistoryList.innerHTML = `<div style="font-size:0.75rem; color:var(--text-dim); text-align:center; padding:16px 8px;">Belum ada riwayat ${STATE.mode.toUpperCase()}<br><span style="font-size:0.68rem; opacity:0.7;">Klik '+ Sesi Baru' untuk memulai.</span></div>`;
+      els.chatHistoryList.innerHTML = `<div style="font-size:0.75rem; color:var(--text-dim); text-align:center; padding:16px 8px;">Belum ada riwayat ${STATE.mode.toUpperCase()}<br><span style="font-size:0.68rem; opacity:0.7;">Ketik prompt di bawah untuk memulai.</span></div>`;
       return;
     }
 
@@ -510,15 +667,18 @@
   }
 
   function renderCurrentSession() {
-    const session = getActiveSession();
-    
     if (STATE.mode === 'arena') {
       els.welcomeHero.style.display = 'none';
       els.arenaMessagesA.innerHTML = '';
       els.arenaMessagesB.innerHTML = '';
 
-      const messagesA = (session.messages || []).filter(m => m.slot === 'A' || m.engine === 'ollama');
-      const messagesB = (session.messages || []).filter(m => m.slot === 'B' || m.engine === 'openrouter');
+      let session = STATE.currentSessionId ? STATE.sessions.find(s => s.id === STATE.currentSessionId && s.mode === 'arena') : null;
+      if (!session) {
+        session = STATE.sessions.find(s => s.mode === 'arena');
+      }
+
+      const messagesA = (session?.messages || []).filter(m => m.slot === 'A' || m.engine === 'ollama');
+      const messagesB = (session?.messages || []).filter(m => m.slot === 'B' || m.engine === 'openrouter');
 
       if (messagesA.length === 0) {
         els.arenaMessagesA.innerHTML = `
@@ -546,14 +706,24 @@
         });
       }
 
-      scrollArenaToBottom();
+      smartScrollArenaToBottom(els.arenaMessagesA, true);
+      smartScrollArenaToBottom(els.arenaMessagesB, true);
       return;
     }
 
-    // Check if empty
-    if (!session.messages || session.messages.length === 0) {
+    // If no session is actively selected -> Land on TAMPILAN UTAMA (Welcome Hero)!
+    if (!STATE.currentSessionId) {
       els.welcomeHero.style.display = 'flex';
       els.messagesList.innerHTML = '';
+      smartScrollChatToBottom(true);
+      return;
+    }
+
+    const session = STATE.sessions.find(s => s.id === STATE.currentSessionId);
+    if (!session || !session.messages || session.messages.length === 0) {
+      els.welcomeHero.style.display = 'flex';
+      els.messagesList.innerHTML = '';
+      smartScrollChatToBottom(true);
       return;
     }
 
@@ -563,20 +733,7 @@
       appendMessageElement(msg.role, msg.content, msg.image, msg.model, msg.stats, idx, msg.sources);
     });
 
-    scrollChatToBottom();
-  }
-
-  function scrollChatToBottom() {
-    setTimeout(() => {
-      els.chatViewport.scrollTo({ top: els.chatViewport.scrollHeight, behavior: 'smooth' });
-    }, 50);
-  }
-
-  function scrollArenaToBottom() {
-    setTimeout(() => {
-      if (els.arenaMessagesA) els.arenaMessagesA.scrollTop = els.arenaMessagesA.scrollHeight;
-      if (els.arenaMessagesB) els.arenaMessagesB.scrollTop = els.arenaMessagesB.scrollHeight;
-    }, 50);
+    smartScrollChatToBottom(true);
   }
 
   function appendArenaBubbleToColumn(container, role, content, model = '', stats = null, slot = 'A', idx = -1) {
@@ -1459,7 +1616,7 @@ ${organicBlock}
     // Immediately render user's message bubble in single mode
     if (STATE.mode !== 'arena') {
       appendMessageElement('user', displayPrompt, image, 'Anda');
-      scrollChatToBottom();
+      smartScrollChatToBottom(true);
     }
 
     // Reset input & attachments
@@ -1558,7 +1715,7 @@ ${organicBlock}
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     const metaBox = assistantRow.querySelector('.message-meta');
     bubbleText.innerHTML = '<span class="typing-cursor"></span>';
-    scrollChatToBottom();
+    smartScrollChatToBottom(true);
 
     let fullText = '';
     let webSources = null;
@@ -1662,7 +1819,7 @@ ${organicBlock}
               tokenCount++;
               fullText += parsed.message.content;
               bubbleText.innerHTML = renderMarkdown(fullText) + '<span class="typing-cursor"></span>';
-              scrollChatToBottom();
+              smartScrollChatToBottom(false);
             }
           } catch (pe) {
             console.error('Error parsing Ollama line:', pe);
@@ -1766,7 +1923,7 @@ ${organicBlock}
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     const metaBox = assistantRow.querySelector('.message-meta');
     bubbleText.innerHTML = '<span class="typing-cursor"></span>';
-    scrollChatToBottom();
+    smartScrollChatToBottom(true);
 
     let fullText = '';
     let webSources = null;
@@ -1879,7 +2036,7 @@ ${organicBlock}
               tokenCount++;
               fullText += delta;
               bubbleText.innerHTML = renderMarkdown(fullText) + '<span class="typing-cursor"></span>';
-              scrollChatToBottom();
+              smartScrollChatToBottom(false);
             }
           } catch (pe) {
             // Ignore parse errors on partial chunks
@@ -1974,7 +2131,7 @@ ${organicBlock}
     const assistantRow = appendArenaBubbleToColumn(els.arenaMessagesA, 'assistant', '', modelA, null, 'A');
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     bubbleText.innerHTML = '<span class="typing-cursor"></span>';
-    scrollArenaToBottom();
+    smartScrollArenaToBottom(els.arenaMessagesA, true);
 
     const start = performance.now();
     let fullText = '';
@@ -2059,7 +2216,7 @@ ${organicBlock}
               tokens++;
               fullText += p.message.content;
               bubbleText.innerHTML = renderMarkdown(fullText) + '<span class="typing-cursor"></span>';
-              scrollArenaToBottom();
+              smartScrollArenaToBottom(els.arenaMessagesA, false);
             }
           } catch (pe) {}
         }
@@ -2132,7 +2289,7 @@ ${organicBlock}
     const assistantRow = appendArenaBubbleToColumn(els.arenaMessagesB, 'assistant', '', modelB, null, 'B');
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     bubbleText.innerHTML = '<span class="typing-cursor"></span>';
-    scrollArenaToBottom();
+    smartScrollArenaToBottom(els.arenaMessagesB, true);
 
     const start = performance.now();
     let fullText = '';
@@ -2221,7 +2378,7 @@ ${organicBlock}
               tokens++;
               fullText += delta;
               bubbleText.innerHTML = renderMarkdown(fullText) + '<span class="typing-cursor"></span>';
-              scrollArenaToBottom();
+              smartScrollArenaToBottom(els.arenaMessagesB, false);
             }
           } catch (pe) {}
         }
@@ -4132,9 +4289,10 @@ ${organicBlock}
             appContainer.style.height = `${window.visualViewport.height}px`;
           }
           if (STATE.mode === 'arena') {
-            scrollArenaToBottom();
+            smartScrollArenaToBottom(els.arenaMessagesA, true);
+            smartScrollArenaToBottom(els.arenaMessagesB, true);
           } else {
-            scrollChatToBottom();
+            smartScrollChatToBottom(true);
           }
         }, 120);
       });
@@ -4150,18 +4308,29 @@ ${organicBlock}
 
   // ==================== BOOTSTRAP INITIALIZATION ====================
   async function init() {
-    loadPersistedState();
+    await loadPersistedState();
     setupEventListeners();
+    setupSmartScrolling();
     
     // Set sound toggle button icon
     els.soundToggleBtn.innerHTML = STATE.soundEnabled 
       ? '<i class="fa-solid fa-volume-high"></i>' 
       : '<i class="fa-solid fa-volume-xmark"></i>';
 
-    // Load Sessions
-    if (STATE.sessions.length === 0) {
-      createNewSession();
+    // Distinguish Browser Refresh (same tab) vs Fresh App Entry
+    const isTabReload = sessionStorage.getItem('zoz_tab_initialized') === 'true';
+    const savedActiveId = sessionStorage.getItem('zoz_active_session_id');
+
+    if (isTabReload && savedActiveId && STATE.sessions.some(s => s.id === savedActiveId)) {
+      // Browser Refresh: Keep the user on their active conversation and refresh it
+      STATE.currentSessionId = savedActiveId;
+      renderChatHistory();
+      renderCurrentSession();
     } else {
+      // Fresh App Entry / Reopening: Land cleanly on TAMPILAN UTAMA (Welcome Hero / Beranda Bersih)
+      sessionStorage.setItem('zoz_tab_initialized', 'true');
+      sessionStorage.removeItem('zoz_active_session_id');
+      STATE.currentSessionId = null;
       renderChatHistory();
       renderCurrentSession();
     }
