@@ -181,6 +181,8 @@
     
     // History & Navigation
     newChatBtn: $('#newChatBtn'),
+    pullUpNewChatBtn: $('#pullUpNewChatBtn'),
+    pullUpNewChatWrapper: $('#pullUpNewChatWrapper'),
     chatHistoryList: $('#chatHistoryList'),
     searchHistoryInput: $('#searchHistoryInput'),
     clearAllHistoryBtn: $('#clearAllHistoryBtn'),
@@ -886,12 +888,39 @@
 
     let touchStartY = 0;
 
+    function updatePullUpNewChat(show) {
+      if (!els.pullUpNewChatWrapper) return;
+      const hasActiveMessages = STATE.currentSessionId && els.messagesList && els.messagesList.children.length > 0;
+      if (show && hasActiveMessages && !STATE.isGenerating) {
+        els.pullUpNewChatWrapper.style.display = 'flex';
+        requestAnimationFrame(() => {
+          els.pullUpNewChatWrapper.classList.add('visible');
+        });
+      } else {
+        els.pullUpNewChatWrapper.classList.remove('visible');
+        setTimeout(() => {
+          if (!els.pullUpNewChatWrapper.classList.contains('visible')) {
+            els.pullUpNewChatWrapper.style.display = 'none';
+          }
+        }, 280);
+      }
+    }
+
+    // Pull-up New Chat button click handler
+    els.pullUpNewChatBtn?.addEventListener('click', () => {
+      createNewSession();
+      updatePullUpNewChat(false);
+      showToast('Memulai sesi obrolan baru...');
+      AudioEngine.click();
+    });
+
     const handleScrollEvent = (el = els.chatViewport) => {
       if (isAutoScrolling) return;
-      const atBottom = isChatAtBottom(el, 25);
+      const atBottom = isChatAtBottom(el, 30);
       if (!atBottom) {
         userScrolledUp = true;
         toggleScrollBottomBtn(true);
+        updatePullUpNewChat(false);
       } else {
         userScrolledUp = false;
         toggleScrollBottomBtn(false);
@@ -909,10 +938,18 @@
 
     els.chatViewport.addEventListener('touchmove', (e) => {
       if (e.touches && e.touches[0]) {
-        const deltaY = touchStartY - e.touches[0].clientY;
-        if (deltaY < 0 || !isChatAtBottom(els.chatViewport, 25)) {
+        const deltaY = touchStartY - e.touches[0].clientY; // positive = swipe up / pulling past bottom
+        const atBottom = isChatAtBottom(els.chatViewport, 20);
+        if (deltaY < -10 || (!atBottom && deltaY < 0)) {
+          // Scrolling up into previous messages
           userScrolledUp = true;
           toggleScrollBottomBtn(true);
+          updatePullUpNewChat(false);
+        } else if (atBottom && deltaY > 30) {
+          // Swiping up when already at bottom -> Pull-Up Trigger!
+          userScrolledUp = false;
+          toggleScrollBottomBtn(false);
+          updatePullUpNewChat(true);
         }
       }
     }, { passive: true });
@@ -922,9 +959,15 @@
       if (e.deltaY < 0) {
         userScrolledUp = true;
         toggleScrollBottomBtn(true);
-      } else if (e.deltaY > 0 && isChatAtBottom(els.chatViewport, 25)) {
-        userScrolledUp = false;
-        toggleScrollBottomBtn(false);
+        updatePullUpNewChat(false);
+      } else if (e.deltaY > 0) {
+        const atBottom = isChatAtBottom(els.chatViewport, 20);
+        if (atBottom) {
+          userScrolledUp = false;
+          toggleScrollBottomBtn(false);
+          // Overscrolling down at bottom -> reveal New Chat button!
+          updatePullUpNewChat(true);
+        }
       }
     }, { passive: true });
 
@@ -1561,6 +1604,10 @@
     if (!STATE.currentSessionId) {
       els.welcomeHero.style.display = 'flex';
       els.messagesList.innerHTML = '';
+      if (els.pullUpNewChatWrapper) {
+        els.pullUpNewChatWrapper.classList.remove('visible');
+        els.pullUpNewChatWrapper.style.display = 'none';
+      }
       smartScrollChatToBottom(true);
       return;
     }
@@ -1569,12 +1616,20 @@
     if (!session || !session.messages || session.messages.length === 0) {
       els.welcomeHero.style.display = 'flex';
       els.messagesList.innerHTML = '';
+      if (els.pullUpNewChatWrapper) {
+        els.pullUpNewChatWrapper.classList.remove('visible');
+        els.pullUpNewChatWrapper.style.display = 'none';
+      }
       smartScrollChatToBottom(true);
       return;
     }
 
     els.welcomeHero.style.display = 'none';
     els.messagesList.innerHTML = '';
+    if (els.pullUpNewChatWrapper) {
+      els.pullUpNewChatWrapper.classList.remove('visible');
+      els.pullUpNewChatWrapper.style.display = 'none';
+    }
     session.messages.forEach((msg, idx) => {
       const textToDisplay = (msg.role === 'user' && msg.displayContent) ? msg.displayContent : msg.content;
       const imagesToDisplay = msg.images || (msg.image ? [msg.image] : null);
