@@ -828,9 +828,6 @@
     session.messages.forEach(m => messagesPayload.push({ role: m.role, content: m.content || '' }));
     messagesPayload.push({ role: 'user', content: promptInstruction });
 
-    const isNemotronOrLong = modelName.toLowerCase().includes('nemotron') || modelName.toLowerCase().includes('deepseek') || modelName.toLowerCase().includes('qwen') || modelName.toLowerCase().includes('llama-3.3');
-    const maxTokensVal = isNemotronOrLong ? 16384 : 8192;
-
     const res = await fetch(endpoint, {
       method: 'POST',
       headers,
@@ -839,7 +836,6 @@
         messages: messagesPayload,
         stream: true,
         temperature: parseFloat(STATE.settings.temperature),
-        max_tokens: maxTokensVal,
         apiKey: isOpenRouterDirect ? undefined : STATE.settings.openRouterKey
       }),
       signal: STATE.abortController.signal
@@ -902,9 +898,7 @@
         messages: messagesPayload,
         stream: true,
         options: {
-          temperature: parseFloat(STATE.settings.temperature),
-          num_predict: -1,
-          num_ctx: 16384
+          temperature: parseFloat(STATE.settings.temperature)
         },
         endpoint: ep,
         ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {})
@@ -2332,15 +2326,6 @@ ${organicBlock}
         messagesPayload.push(item);
       });
 
-      const isNemotronOrLong = modelName.toLowerCase().includes('nemotron') || 
-                               modelName.toLowerCase().includes('deepseek') || 
-                               modelName.toLowerCase().includes('qwen') || 
-                               modelName.toLowerCase().includes('llama-3.3') ||
-                               modelName.toLowerCase().includes('kimi') ||
-                               modelName.toLowerCase().includes('glm');
-
-      const numPredictVal = isNemotronOrLong ? -1 : Math.max(parseInt(STATE.settings.maxTokens) || 8192, 8192);
-
       const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
       const requestBody = {
         model: modelName,
@@ -2348,9 +2333,7 @@ ${organicBlock}
         stream: true,
         options: {
           temperature: parseFloat(STATE.settings.temperature),
-          top_p: parseFloat(STATE.settings.topP),
-          num_predict: numPredictVal,
-          num_ctx: 16384
+          top_p: parseFloat(STATE.settings.topP)
         },
         endpoint: ep
       };
@@ -2574,24 +2557,12 @@ ${organicBlock}
         headers['X-Title'] = 'ZOZ Router';
       }
 
-      const isNemotronOrLong = modelName.toLowerCase().includes('nemotron') || 
-                               modelName.toLowerCase().includes('deepseek') || 
-                               modelName.toLowerCase().includes('qwen') || 
-                               modelName.toLowerCase().includes('llama-3.3') ||
-                               modelName.toLowerCase().includes('kimi') ||
-                               modelName.toLowerCase().includes('glm');
-
-      const maxTokensVal = isNemotronOrLong 
-        ? Math.max(parseInt(STATE.settings.maxTokens) || 8192, 16384)
-        : Math.max(parseInt(STATE.settings.maxTokens) || 8192, 8192);
-
       const requestBody = {
         model: modelName,
         messages: messagesPayload,
         stream: true,
         temperature: parseFloat(STATE.settings.temperature),
-        top_p: parseFloat(STATE.settings.topP),
-        max_tokens: maxTokensVal
+        top_p: parseFloat(STATE.settings.topP)
       };
       if (!isOpenRouterDirect) {
         requestBody.apiKey = STATE.settings.openRouterKey;
@@ -4323,7 +4294,6 @@ ${organicBlock}
     if (els.valTemperature) els.valTemperature.innerText = STATE.settings.temperature ?? 0.7;
     if (els.paramTopP) els.paramTopP.value = STATE.settings.topP ?? 0.9;
     if (els.valTopP) els.valTopP.innerText = STATE.settings.topP ?? 0.9;
-    if (els.paramMaxTokens) els.paramMaxTokens.value = STATE.settings.maxTokens ?? 4096;
     if (els.settingSystemPrompt) els.settingSystemPrompt.value = STATE.settings.systemPrompt || '';
     if (els.settingAutoPolicy) els.settingAutoPolicy.value = STATE.settings.autoPolicy || 'local_first';
   }
@@ -4802,7 +4772,6 @@ ${organicBlock}
 
       if (els.paramTemperature) STATE.settings.temperature = parseFloat(els.paramTemperature.value);
       if (els.paramTopP) STATE.settings.topP = parseFloat(els.paramTopP.value);
-      if (els.paramMaxTokens) STATE.settings.maxTokens = parseInt(els.paramMaxTokens.value) || 4096;
       if (els.settingSystemPrompt) STATE.settings.systemPrompt = els.settingSystemPrompt.value.trim();
       if (els.settingAutoPolicy) STATE.settings.autoPolicy = els.settingAutoPolicy.value;
       
