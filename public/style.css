@@ -827,35 +827,34 @@ html, body {
   display: flex;
   flex-direction: column;
   -webkit-overflow-scrolling: touch;
-}
-
-/* Floating Scroll-to-Bottom Button */
+/* Floating Scroll-to-Bottom Button (ChatGPT & Gemini Style) */
 .scroll-bottom-btn {
   position: absolute;
-  bottom: 20px;
+  bottom: 84px;
   right: 28px;
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: var(--bg-surface);
+  background: rgba(14, 18, 28, 0.95);
   border: 1px solid var(--neon-cyan);
   color: var(--neon-cyan);
-  box-shadow: 0 4px 18px rgba(0, 240, 255, 0.4), 0 0 12px rgba(0, 0, 0, 0.9);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8), 0 0 14px rgba(0, 240, 255, 0.35);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  z-index: 120;
+  z-index: 200;
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   font-size: 0.95rem;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .scroll-bottom-btn:hover {
   background: var(--neon-cyan);
   color: #000;
-  transform: translateY(-2px);
-  box-shadow: 0 6px 22px rgba(0, 240, 255, 0.7);
+  transform: translateY(-3px) scale(1.05);
+  box-shadow: 0 6px 24px rgba(0, 240, 255, 0.65);
 }
 
 .scroll-bottom-btn:active {
@@ -866,12 +865,51 @@ html, body {
   position: absolute;
   top: -2px;
   right: -2px;
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: var(--neon-teal);
-  box-shadow: 0 0 6px var(--neon-teal);
+  box-shadow: 0 0 8px var(--neon-teal);
   animation: pulseNeon 1.5s infinite;
+}
+
+@media (max-width: 768px) {
+  .scroll-bottom-btn {
+    bottom: 76px;
+    right: 16px;
+    width: 36px;
+    height: 36px;
+    font-size: 0.85rem;
+  }
+}
+
+/* One-Click Continue Response Button (For Nemotron / Truncated AI Answers) */
+.continue-response-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid var(--neon-cyan);
+  color: var(--neon-cyan);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 10px;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 10px rgba(0, 240, 255, 0.15);
+}
+
+.continue-response-btn:hover {
+  background: var(--neon-cyan);
+  color: #000;
+  box-shadow: 0 4px 16px rgba(0, 240, 255, 0.4);
+  transform: translateY(-1px);
+}
+
+.continue-response-btn i {
+  font-size: 0.85rem;
 }
 
 .chat-messages-container {

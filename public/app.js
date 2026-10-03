@@ -81,7 +81,7 @@
       arenaModelB: 'deepseek/deepseek-r1:free',
       temperature: 0.7,
       topP: 0.9,
-      maxTokens: 4096,
+      maxTokens: 8192,
       systemPrompt: SYSTEM_PRESETS.kaisar,
       activePreset: 'kaisar',
       autoPolicy: 'local_first'
@@ -617,7 +617,7 @@
     return escapeHtml(rawText).replace(/\n/g, '<br>');
   }
 
-  // ==================== SMART SCROLL MANAGER ====================
+  // ==================== SMART SCROLL & CONTINUATION MANAGER ====================
   let userScrolledUp = false;
   let isAutoScrolling = false;
 
@@ -655,9 +655,9 @@
   function setupSmartScrolling() {
     if (!els.chatViewport) return;
 
-    const checkUserScroll = () => {
+    const checkUserScroll = (el = els.chatViewport) => {
       if (isAutoScrolling) return;
-      if (!isChatAtBottom(els.chatViewport, 70)) {
+      if (!isChatAtBottom(el, 70)) {
         userScrolledUp = true;
         toggleScrollBottomBtn(true);
       } else {
@@ -666,8 +666,8 @@
       }
     };
 
-    els.chatViewport.addEventListener('scroll', checkUserScroll, { passive: true });
-    els.chatViewport.addEventListener('touchmove', checkUserScroll, { passive: true });
+    els.chatViewport.addEventListener('scroll', () => checkUserScroll(els.chatViewport), { passive: true });
+    els.chatViewport.addEventListener('touchmove', () => checkUserScroll(els.chatViewport), { passive: true });
     els.chatViewport.addEventListener('wheel', (e) => {
       if (e.deltaY < 0) {
         userScrolledUp = true;
@@ -675,10 +675,220 @@
       }
     }, { passive: true });
 
+    // Arena columns scroll tracking
+    if (els.arenaMessagesA) {
+      els.arenaMessagesA.addEventListener('scroll', () => checkUserScroll(els.arenaMessagesA), { passive: true });
+      els.arenaMessagesA.addEventListener('touchmove', () => checkUserScroll(els.arenaMessagesA), { passive: true });
+    }
+    if (els.arenaMessagesB) {
+      els.arenaMessagesB.addEventListener('scroll', () => checkUserScroll(els.arenaMessagesB), { passive: true });
+      els.arenaMessagesB.addEventListener('touchmove', () => checkUserScroll(els.arenaMessagesB), { passive: true });
+    }
+
     els.scrollBottomBtn?.addEventListener('click', () => {
-      smartScrollChatToBottom(true);
+      if (STATE.mode === 'arena') {
+        if (els.arenaMessagesA) els.arenaMessagesA.scrollTo({ top: els.arenaMessagesA.scrollHeight, behavior: 'smooth' });
+        if (els.arenaMessagesB) els.arenaMessagesB.scrollTo({ top: els.arenaMessagesB.scrollHeight, behavior: 'smooth' });
+      } else {
+        if (els.chatViewport) els.chatViewport.scrollTo({ top: els.chatViewport.scrollHeight, behavior: 'smooth' });
+      }
+      userScrolledUp = false;
+      toggleScrollBottomBtn(false);
       AudioEngine.click();
     });
+  }
+
+  // ==================== TRUNCATED RESPONSE / NEMOTRON CONTINUATION HELPERS ====================
+  function isOutputTruncated(text, finishReason = null) {
+    if (finishReason === 'length') return true;
+    if (!text || text.length < 50) return false;
+    const trimmed = text.trim();
+    // Check for unclosed markdown code blocks (odd count of ```)
+    const backtickCount = (trimmed.match(/```/g) || []).length;
+    if (backtickCount % 2 !== 0) return true;
+    // Check for mid-sentence termination
+    const unfinishedEndings = [':', ',', ';', '-', '(', '[', '{', 'dan', 'atau', 'dengan', 'yang', 'untuk', 'pada', 'adalah'];
+    if (unfinishedEndings.some(end => trimmed.endsWith(end))) return true;
+    return false;
+  }
+
+  function attachContinuationButton(container, session, assistantRow, modelName, engine, previousText) {
+    if (!container) return;
+    container.querySelector('.continue-response-btn')?.remove();
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'continue-response-btn';
+    btn.innerHTML = '<i class="fa-solid fa-forward-step"></i> <span>⏩ Lanjutkan Jawaban (Output Terpotong)</span>';
+
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      btn.remove();
+      const bubbleText = assistantRow.querySelector('.msg-text-content');
+      const continuePrompt = "Lanjutkan penjelasan/kode secara persis mulai dari kata/kalimat terakhir yang terpotong. JANGAN mengulang teks dari awal, langsung teruskan kelanjutannya.";
+
+      bubbleText.innerHTML = renderMarkdown(previousText) + '<span class="typing-cursor"></span>';
+      setGeneratingState(true);
+      STATE.abortController = new AbortController();
+
+      try {
+        let appendedText = '';
+        if (engine === 'openrouter') {
+          appendedText = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, previousText);
+        } else {
+          appendedText = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, previousText);
+        }
+
+        const merged = (previousText + '\n' + appendedText).trim();
+        bubbleText.innerHTML = renderMarkdown(merged);
+        
+        const lastMsg = session.messages[session.messages.length - 1];
+        if (lastMsg) lastMsg.content = merged;
+        savePersistedState();
+
+        if (isOutputTruncated(merged)) {
+          attachContinuationButton(container, session, assistantRow, modelName, engine, merged);
+        }
+      } catch (err) {
+        showToast('Gagal melanjutkan output: ' + err.message, 'error');
+      } finally {
+        setGeneratingState(false);
+      }
+    });
+
+    container.appendChild(btn);
+  }
+
+  async function streamContinuationOpenRouter(session, modelName, promptInstruction, bubbleText, currentFullText) {
+    const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
+    const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${STATE.settings.openRouterKey}`
+    };
+    if (isOpenRouterDirect) {
+      headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
+      headers['X-Title'] = 'ZOZ Router';
+    }
+
+    const messagesPayload = [];
+    if (STATE.settings.systemPrompt) {
+      messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
+    }
+    session.messages.forEach(m => messagesPayload.push({ role: m.role, content: m.content || '' }));
+    messagesPayload.push({ role: 'user', content: promptInstruction });
+
+    const isNemotronOrLong = modelName.toLowerCase().includes('nemotron') || modelName.toLowerCase().includes('deepseek') || modelName.toLowerCase().includes('qwen') || modelName.toLowerCase().includes('llama-3.3');
+    const maxTokensVal = isNemotronOrLong ? 16384 : 8192;
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: modelName,
+        messages: messagesPayload,
+        stream: true,
+        temperature: parseFloat(STATE.settings.temperature),
+        max_tokens: maxTokensVal,
+        apiKey: isOpenRouterDirect ? undefined : STATE.settings.openRouterKey
+      }),
+      signal: STATE.abortController.signal
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let appended = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data:')) continue;
+        const jsonStr = trimmed.replace(/^data:\s*/, '');
+        if (jsonStr === '[DONE]') break;
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) {
+            appended += delta;
+            bubbleText.innerHTML = renderMarkdown(currentFullText + '\n' + appended) + '<span class="typing-cursor"></span>';
+            smartScrollChatToBottom(false);
+          }
+        } catch (e) {}
+      }
+    }
+    return appended;
+  }
+
+  async function streamContinuationOllama(session, modelName, promptInstruction, bubbleText, currentFullText) {
+    const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+    const headers = { 'Content-Type': 'application/json' };
+    if (STATE.settings.ollamaApiKey) {
+      headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
+      headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
+    }
+
+    const messagesPayload = [];
+    if (STATE.settings.systemPrompt) {
+      messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
+    }
+    session.messages.forEach(m => messagesPayload.push({ role: m.role, content: m.content || '' }));
+    messagesPayload.push({ role: 'user', content: promptInstruction });
+
+    const chatUrl = IS_GITHUB_PAGES ? `${ep}/api/chat` : '/api/ollama/chat';
+    const res = await fetch(chatUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: modelName,
+        messages: messagesPayload,
+        stream: true,
+        options: {
+          temperature: parseFloat(STATE.settings.temperature),
+          num_predict: -1,
+          num_ctx: 16384
+        },
+        endpoint: ep,
+        ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {})
+      }),
+      signal: STATE.abortController.signal
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let appended = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const parsed = JSON.parse(line);
+          if (parsed.message?.content) {
+            appended += parsed.message.content;
+            bubbleText.innerHTML = renderMarkdown(currentFullText + '\n' + appended) + '<span class="typing-cursor"></span>';
+            smartScrollChatToBottom(false);
+          }
+        } catch (e) {}
+      }
+    }
+    return appended;
   }
 
   // ==================== SESSIONS & CHAT MANAGEMENT ====================
@@ -2059,6 +2269,15 @@ ${organicBlock}
         messagesPayload.push(item);
       });
 
+      const isNemotronOrLong = modelName.toLowerCase().includes('nemotron') || 
+                               modelName.toLowerCase().includes('deepseek') || 
+                               modelName.toLowerCase().includes('qwen') || 
+                               modelName.toLowerCase().includes('llama-3.3') ||
+                               modelName.toLowerCase().includes('kimi') ||
+                               modelName.toLowerCase().includes('glm');
+
+      const numPredictVal = isNemotronOrLong ? -1 : Math.max(parseInt(STATE.settings.maxTokens) || 8192, 8192);
+
       const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
       const requestBody = {
         model: modelName,
@@ -2067,7 +2286,8 @@ ${organicBlock}
         options: {
           temperature: parseFloat(STATE.settings.temperature),
           top_p: parseFloat(STATE.settings.topP),
-          num_predict: parseInt(STATE.settings.maxTokens)
+          num_predict: numPredictVal,
+          num_ctx: 16384
         },
         endpoint: ep
       };
@@ -2109,6 +2329,7 @@ ${organicBlock}
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let doneReason = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -2123,6 +2344,7 @@ ${organicBlock}
           try {
             const parsed = JSON.parse(line);
             if (parsed.error) throw new Error(parsed.error);
+            if (parsed.done_reason) doneReason = parsed.done_reason;
             if (parsed.message?.content) {
               if (!firstTokenTime) firstTokenTime = performance.now();
               tokenCount++;
@@ -2149,6 +2371,11 @@ ${organicBlock}
         <span>⏱️ ${totalTime}s</span>
         <span>⚡ ${tps} tps</span>
       `;
+
+      // Check if output is cut in half and provide one-click continuation button
+      if (isOutputTruncated(fullText, doneReason === 'length' ? 'length' : null)) {
+        attachContinuationButton(assistantRow.querySelector('.message-content-box') || assistantRow, session, assistantRow, modelName, 'ollama', fullText);
+      }
 
       // Save to session
       session.messages.push({
@@ -2283,13 +2510,24 @@ ${organicBlock}
         headers['X-Title'] = 'ZOZ Router';
       }
 
+      const isNemotronOrLong = modelName.toLowerCase().includes('nemotron') || 
+                               modelName.toLowerCase().includes('deepseek') || 
+                               modelName.toLowerCase().includes('qwen') || 
+                               modelName.toLowerCase().includes('llama-3.3') ||
+                               modelName.toLowerCase().includes('kimi') ||
+                               modelName.toLowerCase().includes('glm');
+
+      const maxTokensVal = isNemotronOrLong 
+        ? Math.max(parseInt(STATE.settings.maxTokens) || 8192, 16384)
+        : Math.max(parseInt(STATE.settings.maxTokens) || 8192, 8192);
+
       const requestBody = {
         model: modelName,
         messages: messagesPayload,
         stream: true,
         temperature: parseFloat(STATE.settings.temperature),
         top_p: parseFloat(STATE.settings.topP),
-        max_tokens: parseInt(STATE.settings.maxTokens)
+        max_tokens: maxTokensVal
       };
       if (!isOpenRouterDirect) {
         requestBody.apiKey = STATE.settings.openRouterKey;
@@ -2321,6 +2559,7 @@ ${organicBlock}
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let finishReason = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -2339,6 +2578,9 @@ ${organicBlock}
           try {
             const parsed = JSON.parse(jsonStr);
             if (parsed.error) throw new Error(typeof parsed.error === 'object' ? parsed.error.message : parsed.error);
+            if (parsed.choices?.[0]?.finish_reason) {
+              finishReason = parsed.choices[0].finish_reason;
+            }
             const delta = parsed.choices?.[0]?.delta?.content;
             if (delta) {
               if (!firstTokenTime) firstTokenTime = performance.now();
@@ -2366,6 +2608,11 @@ ${organicBlock}
         <span>⏱️ ${totalTime}s</span>
         <span>⚡ ${tps} tps</span>
       `;
+
+      // Check if output is cut in half and provide one-click continuation button
+      if (isOutputTruncated(fullText, finishReason)) {
+        attachContinuationButton(assistantRow.querySelector('.message-content-box') || assistantRow, session, assistantRow, modelName, 'openrouter', fullText);
+      }
 
       session.messages.push({
         role: 'assistant',
