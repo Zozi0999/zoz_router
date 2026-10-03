@@ -29,67 +29,18 @@ const MIME_TYPES = {
   '.woff': 'font/woff'
 };
 
-// Helper to send JSON responses
-function sendJSON(res, statusCode, data) {
-  res.writeHead(statusCode, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint'
-  });
-  res.end(JSON.stringify(data));
+const DATA_DIR = path.join(__dirname, 'data');
+const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+
+// Ensure data directories exist on device storage
+try {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+  if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+} catch (e) {
+  console.warn('Warning creating data directories:', e.message);
 }
-
-// Helper to parse JSON request body
-function parseBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', chunk => {
-      body += chunk.toString();
-      if (body.length > 50 * 1024 * 1024) { // 50MB limit (for image inputs)
-        reject(new Error('Payload Too Large'));
-      }
-    });
-    req.on('end', () => {
-      if (!body) return resolve({});
-      try {
-        resolve(JSON.parse(body));
-      } catch (err) {
-        reject(new Error('Invalid JSON: ' + err.message));
-      }
-    });
-    req.on('error', reject);
-  });
-}
-
-// Main HTTP Server
-const server = http.createServer(async (req, res) => {
-  const reqUrl = new URL(req.url, `http://${req.headers.host || 'localhost:4040'}`);
-  const pathname = reqUrl.pathname;
-  const method = req.method;
-
-  // Handle CORS preflight
-  if (method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer'
-    });
-    return res.end();
-  }
-
-  // --- API ROUTES ---
-
-  // Health check
-  if (pathname === '/api/health' && method === 'GET') {
-    return sendJSON(res, 200, {
-      status: 'online',
-      name: 'Zoz Router',
-      version: '1.0.0',
-      uptime: process.uptime(),
-      timestamp: new Date().toISOString()
-    });
-  }
 
 // Helper to discover locally installed Ollama models from manifest files on disk
 function getLocalOllamaManifests() {
@@ -107,7 +58,6 @@ function getLocalOllamaManifests() {
         if (entry.isDirectory()) {
           scan(fullPath, subRel);
         } else if (entry.isFile()) {
-          // Path pattern: registry.ollama.ai/library/<modelName>/<tag>
           const parts = subRel.split(/[\/\\]/);
           if (parts.length >= 2) {
             const tag = parts[parts.length - 1];
@@ -227,6 +177,201 @@ function performWebSearch(query, apiKey = null) {
     req.end();
   });
 }
+
+// Main HTTP Server
+const server = http.createServer(async (req, res) => {
+  const reqUrl = new URL(req.url, `http://${req.headers.host || 'localhost:4040'}`);
+  const pathname = reqUrl.pathname;
+  const method = req.method;
+
+  // Handle CORS preflight
+  if (method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key'
+    });
+    return res.end();
+  }
+
+  // --- API ROUTES ---
+
+  // Health check
+  if (pathname === '/api/health' && method === 'GET') {
+    return sendJSON(res, 200, {
+      status: 'online',
+      name: 'Zoz Router',
+      version: '1.0.0',
+      storage: 'device-disk',
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  // --- DEVICE STORAGE: SESSIONS & CHAT HISTORY ---
+  const sessionMatch = pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)$/);
+
+  // 1. List all sessions (Lightweight summaries)
+  if (pathname === '/api/sessions' && method === 'GET') {
+    try {
+      if (!fs.existsSync(SESSIONS_DIR)) {
+        return sendJSON(res, 200, { sessions: [] });
+      }
+      const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'));
+      const sessions = [];
+      for (const file of files) {
+        try {
+          const fullPath = path.join(SESSIONS_DIR, file);
+          const content = fs.readFileSync(fullPath, 'utf8');
+          const sess = JSON.parse(content);
+          const lastMsg = (sess.messages && sess.messages.length > 0) ? sess.messages[sess.messages.length - 1].content : '';
+          sessions.push({
+            id: sess.id || path.basename(file, '.json'),
+            title: sess.title || 'Obrolan Baru',
+            mode: sess.mode || 'ollama',
+            createdAt: sess.createdAt || fs.statSync(fullPath).birthtime.toISOString(),
+            updatedAt: sess.updatedAt || fs.statSync(fullPath).mtime.toISOString(),
+            messageCount: Array.isArray(sess.messages) ? sess.messages.length : 0,
+            lastSnippet: (typeof lastMsg === 'string') ? lastMsg.substring(0, 80) : ''
+          });
+        } catch (fe) {}
+      }
+      sessions.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+      return sendJSON(res, 200, { sessions });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Gagal membaca riwayat sesi dari perangkat: ' + err.message });
+    }
+  }
+
+  // 2. Get specific session full data
+  if (sessionMatch && method === 'GET') {
+    const sessionId = sessionMatch[1];
+    const sessFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
+    if (!fs.existsSync(sessFile)) {
+      return sendJSON(res, 404, { error: 'Sesi tidak ditemukan di disk perangkat.' });
+    }
+    try {
+      const data = JSON.parse(fs.readFileSync(sessFile, 'utf8'));
+      return sendJSON(res, 200, data);
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Gagal memuat file sesi: ' + err.message });
+    }
+  }
+
+  // 3. Create or save session to disk
+  if (pathname === '/api/sessions' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      if (!body || !body.id) {
+        return sendJSON(res, 400, { error: 'ID sesi diperlukan' });
+      }
+      const sessionId = body.id;
+      const sessFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
+      body.updatedAt = new Date().toISOString();
+      fs.writeFileSync(sessFile, JSON.stringify(body, null, 2), 'utf8');
+      return sendJSON(res, 200, { success: true, session: body });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Gagal menyimpan sesi ke disk perangkat: ' + err.message });
+    }
+  }
+
+  // 4. Update session (Rename / Edit title / Merge update)
+  if (sessionMatch && (method === 'PUT' || method === 'PATCH')) {
+    const sessionId = sessionMatch[1];
+    const sessFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
+    try {
+      const body = await parseBody(req);
+      let existing = {};
+      if (fs.existsSync(sessFile)) {
+        try { existing = JSON.parse(fs.readFileSync(sessFile, 'utf8')); } catch (e) {}
+      }
+      const updated = {
+        ...existing,
+        ...body,
+        id: sessionId,
+        updatedAt: new Date().toISOString()
+      };
+      fs.writeFileSync(sessFile, JSON.stringify(updated, null, 2), 'utf8');
+      return sendJSON(res, 200, { success: true, session: updated });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Gagal memperbarui sesi di disk: ' + err.message });
+    }
+  }
+
+  // 5. Delete specific session file from disk
+  if (sessionMatch && method === 'DELETE') {
+    const sessionId = sessionMatch[1];
+    const sessFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
+    try {
+      if (fs.existsSync(sessFile)) {
+        fs.unlinkSync(sessFile);
+      }
+      return sendJSON(res, 200, { success: true, message: `Sesi ${sessionId} berhasil dihapus dari penyimpanan perangkat.` });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Gagal menghapus file sesi dari disk: ' + err.message });
+    }
+  }
+
+  // 6. Delete all sessions from disk
+  if (pathname === '/api/sessions' && method === 'DELETE') {
+    try {
+      if (fs.existsSync(SESSIONS_DIR)) {
+        const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'));
+        for (const file of files) {
+          try { fs.unlinkSync(path.join(SESSIONS_DIR, file)); } catch (e) {}
+        }
+      }
+      return sendJSON(res, 200, { success: true, message: 'Semua riwayat sesi berhasil dibersihkan dari penyimpanan perangkat.' });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Gagal membersihkan riwayat: ' + err.message });
+    }
+  }
+
+  // 7. Native Media Upload to Disk (Stores files in data/uploads/)
+  if (pathname === '/api/upload' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      if (!body || !body.data) {
+        return sendJSON(res, 400, { error: 'Data gambar atau file diperlukan.' });
+      }
+      let base64Data = body.data;
+      let ext = '.png';
+      const match = base64Data.match(/^data:image\/([a-zA-Z0-9+]+);base64,/);
+      if (match) {
+        ext = '.' + (match[1] === 'jpeg' ? 'jpg' : match[1]);
+        base64Data = base64Data.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '');
+      }
+      const buffer = Buffer.from(base64Data, 'base64');
+      const filename = `media_${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`;
+      const targetFile = path.join(UPLOADS_DIR, filename);
+      fs.writeFileSync(targetFile, buffer);
+      return sendJSON(res, 200, {
+        success: true,
+        url: `/uploads/${filename}`,
+        filename,
+        size: buffer.length
+      });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Gagal menyimpan file ke disk perangkat: ' + err.message });
+    }
+  }
+
+  // 8. Serve Uploaded Media from Disk
+  if (pathname.startsWith('/uploads/')) {
+    const uploadFilename = path.basename(pathname);
+    const uploadFilePath = path.join(UPLOADS_DIR, uploadFilename);
+    if (fs.existsSync(uploadFilePath) && fs.statSync(uploadFilePath).isFile()) {
+      const ext = path.extname(uploadFilePath).toLowerCase();
+      const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+      const content = fs.readFileSync(uploadFilePath);
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Content-Length': content.length,
+        'Cache-Control': 'public, max-age=86400'
+      });
+      return res.end(content);
+    }
+  }
 
 // Web Search API Endpoint (Serper Google Search Engine)
   if (pathname === '/api/web-search' && (method === 'GET' || method === 'POST')) {

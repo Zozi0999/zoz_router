@@ -357,7 +357,125 @@
     }
   };
 
-  // ==================== STORAGE & PERSISTENCE ====================
+  // ==================== DEVICE-FIRST NATIVE STORAGE & PERSISTENCE ====================
+  const DeviceStorage = {
+    isDeviceBackendAvailable: false,
+
+    async init() {
+      if (IS_GITHUB_PAGES) {
+        this.isDeviceBackendAvailable = false;
+        return;
+      }
+      try {
+        const res = await fetch('/api/health', { method: 'GET', signal: AbortSignal.timeout(2000) });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.storage === 'device-disk' || data.status === 'online') {
+            this.isDeviceBackendAvailable = true;
+          }
+        }
+      } catch (e) {
+        this.isDeviceBackendAvailable = false;
+      }
+    },
+
+    async getSessionsList() {
+      if (!this.isDeviceBackendAvailable) return null;
+      try {
+        const res = await fetch('/api/sessions');
+        if (res.ok) {
+          const data = await res.json();
+          return data.sessions || [];
+        }
+      } catch (e) {
+        console.warn('DeviceStorage getSessionsList failed:', e.message);
+      }
+      return null;
+    },
+
+    async getSession(id) {
+      if (!this.isDeviceBackendAvailable) return null;
+      try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`);
+        if (res.ok) {
+          return await res.json();
+        }
+      } catch (e) {
+        console.warn('DeviceStorage getSession failed:', e.message);
+      }
+      return null;
+    },
+
+    async saveSession(session) {
+      if (!session || !session.id) return;
+      if (this.isDeviceBackendAvailable) {
+        try {
+          await fetch('/api/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(session)
+          });
+        } catch (e) {
+          console.warn('DeviceStorage saveSession failed:', e.message);
+        }
+      }
+      // Also save in local ChatDB vault
+      ChatDB.saveSession(session);
+    },
+
+    async renameSession(id, newTitle) {
+      if (!id || !newTitle) return;
+      if (this.isDeviceBackendAvailable) {
+        try {
+          await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: newTitle })
+          });
+        } catch (e) {
+          console.warn('DeviceStorage renameSession failed:', e.message);
+        }
+      }
+      const sess = STATE.sessions.find(s => s.id === id);
+      if (sess) {
+        sess.title = newTitle;
+        ChatDB.saveSession(sess);
+      }
+    },
+
+    async deleteSession(id) {
+      if (!id) return;
+      if (this.isDeviceBackendAvailable) {
+        try {
+          await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+            method: 'DELETE'
+          });
+        } catch (e) {
+          console.warn('DeviceStorage deleteSession failed:', e.message);
+        }
+      }
+      ChatDB.deleteSession(id);
+    },
+
+    async uploadFile(base64Data) {
+      if (!this.isDeviceBackendAvailable || !base64Data) return null;
+      try {
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: base64Data })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          return data.url;
+        }
+      } catch (e) {
+        console.warn('DeviceStorage uploadFile failed:', e.message);
+      }
+      return null;
+    }
+  };
+
   async function loadPersistedState() {
     try {
       const savedSettings = localStorage.getItem('zoz_router_settings_v1');
@@ -375,7 +493,10 @@
         STATE.soundEnabled = savedSound === 'true';
       }
 
-      // Fast synchronous load from localStorage
+      // 1. Initialize Device-First Storage
+      await DeviceStorage.init();
+
+      // 2. Fast synchronous load from localStorage
       const savedSessions = localStorage.getItem('zoz_router_sessions_v1');
       if (savedSessions) {
         try {
@@ -384,11 +505,26 @@
         } catch (e) {}
       }
 
-      // Deep async load & sync from IndexedDB Vault
+      // 3. Sync from IndexedDB Vault
       const dbSessions = await ChatDB.getAllSessions();
       if (Array.isArray(dbSessions) && dbSessions.length > 0) {
         if (dbSessions.length >= STATE.sessions.length) {
           STATE.sessions = dbSessions;
+        }
+      }
+
+      // 4. Sync from Device Disk Storage if backend is online
+      if (DeviceStorage.isDeviceBackendAvailable) {
+        const diskList = await DeviceStorage.getSessionsList();
+        if (Array.isArray(diskList) && diskList.length > 0) {
+          // Merge disk sessions with local state
+          for (const diskItem of diskList) {
+            const existing = STATE.sessions.find(s => s.id === diskItem.id);
+            if (!existing) {
+              const fullSess = await DeviceStorage.getSession(diskItem.id);
+              if (fullSess) STATE.sessions.push(fullSess);
+            }
+          }
         }
       }
     } catch (err) {
@@ -401,31 +537,39 @@
       localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings));
       localStorage.setItem('zoz_router_sound_v1', String(STATE.soundEnabled));
 
+      // Save active session to Device Disk Storage
+      if (STATE.currentSessionId) {
+        const activeSess = STATE.sessions.find(s => s.id === STATE.currentSessionId);
+        if (activeSess) {
+          DeviceStorage.saveSession(activeSess);
+        }
+      }
+
       // Save to IndexedDB (asynchronous & practically unlimited quota)
       ChatDB.saveAllSessions(STATE.sessions);
 
-      // Also mirror to localStorage (safe with quota fallback)
+      // Mirror lightweight summaries to localStorage
       try {
-        localStorage.setItem('zoz_router_sessions_v1', JSON.stringify(STATE.sessions));
-      } catch (quotaErr) {
-        try {
-          const lightweight = STATE.sessions.map(s => ({
-            ...s,
-            messages: (s.messages || []).map(m => ({
-              role: m.role,
-              content: m.content,
-              displayContent: m.displayContent,
-              model: m.model,
-              engine: m.engine,
-              slot: m.slot,
-              sources: m.sources,
-              stats: m.stats,
-              timestamp: m.timestamp
-            }))
-          }));
-          localStorage.setItem('zoz_router_sessions_v1', JSON.stringify(lightweight));
-        } catch (e) {}
-      }
+        const lightweight = STATE.sessions.map(s => ({
+          id: s.id,
+          title: s.title,
+          mode: s.mode,
+          createdAt: s.createdAt,
+          updatedAt: s.updatedAt,
+          messages: (s.messages || []).map(m => ({
+            role: m.role,
+            content: m.content,
+            displayContent: m.displayContent,
+            model: m.model,
+            engine: m.engine,
+            slot: m.slot,
+            sources: m.sources,
+            stats: m.stats,
+            timestamp: m.timestamp
+          }))
+        }));
+        localStorage.setItem('zoz_router_sessions_v1', JSON.stringify(lightweight));
+      } catch (quotaErr) {}
     } catch (err) {
       console.error('Error saving persisted state:', err);
     }
@@ -602,13 +746,34 @@
     }
   }
 
-  function deleteSession(sessionId, e) {
+  let activeHistoryDropdown = null;
+
+  function closeAllHistoryDropdowns() {
+    if (activeHistoryDropdown) {
+      activeHistoryDropdown.remove();
+      activeHistoryDropdown = null;
+    }
+    document.querySelectorAll('.history-item.menu-open').forEach(el => el.classList.remove('menu-open'));
+  }
+
+  // Global listeners for dropdown dismissal
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.history-dropdown-menu') && !e.target.closest('.history-menu-btn')) {
+      closeAllHistoryDropdowns();
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAllHistoryDropdowns();
+  });
+
+  async function deleteSession(sessionId, e) {
     if (e) e.stopPropagation();
     const target = STATE.sessions.find(s => s.id === sessionId);
-    const targetMode = target ? target.mode : STATE.mode;
+    if (!target) return;
 
     STATE.sessions = STATE.sessions.filter(s => s.id !== sessionId);
-    ChatDB.deleteSession(sessionId);
+    await DeviceStorage.deleteSession(sessionId);
 
     if (STATE.currentSessionId === sessionId) {
       STATE.currentSessionId = null;
@@ -618,7 +783,83 @@
     savePersistedState();
     renderChatHistory();
     renderCurrentSession();
-    showToast('Sesi obrolan dihapus.');
+    showToast('Percakapan berhasil dihapus dari perangkat.');
+    AudioEngine.click();
+  }
+
+  function renameSessionPrompt(sessionId, titleSpanElement) {
+    const session = STATE.sessions.find(s => s.id === sessionId);
+    if (!session || !titleSpanElement) return;
+
+    const currentTitle = session.title || 'Obrolan Baru';
+    
+    // Create inline editor input
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'history-rename-input';
+    input.value = currentTitle;
+    
+    let isSaved = false;
+    const finishRename = async () => {
+      if (isSaved) return;
+      isSaved = true;
+      const newTitle = input.value.trim() || currentTitle;
+      session.title = newTitle;
+      if (titleSpanElement.parentNode) {
+        titleSpanElement.innerText = newTitle;
+        titleSpanElement.title = newTitle;
+        if (input.parentNode) input.replaceWith(titleSpanElement);
+      }
+      await DeviceStorage.renameSession(sessionId, newTitle);
+      savePersistedState();
+      showToast(`Nama percakapan diubah menjadi "${newTitle}"`);
+      AudioEngine.click();
+    };
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        input.blur();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        isSaved = true;
+        if (input.parentNode) input.replaceWith(titleSpanElement);
+      }
+    });
+
+    input.addEventListener('blur', finishRename, { once: true });
+    
+    titleSpanElement.replaceWith(input);
+    input.focus();
+    input.select();
+  }
+
+  function exportSessionData(sessionId) {
+    const session = STATE.sessions.find(s => s.id === sessionId);
+    if (!session) return;
+    
+    let md = `# ${session.title || 'Percakapan ZOZ Router'}\n`;
+    md += `*Tanggal: ${new Date(session.createdAt || Date.now()).toLocaleString('id-ID')}*  \n`;
+    md += `*Mode: ${(session.mode || 'ollama').toUpperCase()}*  \n\n---\n\n`;
+
+    (session.messages || []).forEach(m => {
+      const role = m.role === 'user' ? '👤 Pengguna' : `🤖 AI (${m.model || 'Model'})`;
+      md += `### ${role}\n${m.content || ''}\n\n`;
+    });
+
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(session.title || 'chat').replace(/[^a-zA-Z0-9_-]/g, '_')}.md`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 100);
+    showToast('Percakapan diekspor ke file Markdown (.md)');
+    AudioEngine.click();
   }
 
   function renderChatHistory(filterQuery = '') {
@@ -644,6 +885,7 @@
     filtered.forEach(session => {
       const item = document.createElement('div');
       item.className = `history-item ${session.id === STATE.currentSessionId ? 'active' : ''}`;
+      item.dataset.id = session.id;
       
       let modeIcon = 'fa-server';
       if (session.mode === 'openrouter') modeIcon = 'fa-bolt';
@@ -656,12 +898,79 @@
           <span class="history-title" title="${escapeHtml(session.title)}">${escapeHtml(session.title)}</span>
         </div>
         <div class="history-item-actions">
-          <button class="history-item-btn delete-btn" title="Hapus"><i class="fa-solid fa-trash"></i></button>
+          <button class="history-menu-btn" title="Opsi Percakapan (Ganti Nama / Hapus)" aria-label="Opsi Percakapan">
+            <i class="fa-solid fa-ellipsis-vertical"></i>
+          </button>
         </div>
       `;
 
-      item.addEventListener('click', () => switchSession(session.id));
-      item.querySelector('.delete-btn').addEventListener('click', (e) => deleteSession(session.id, e));
+      const titleSpan = item.querySelector('.history-title');
+      const menuBtn = item.querySelector('.history-menu-btn');
+
+      // Double-click on title to rename
+      titleSpan.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        renameSessionPrompt(session.id, titleSpan);
+      });
+
+      // Switch session on item click
+      item.addEventListener('click', (e) => {
+        if (e.target.closest('.history-menu-btn') || e.target.closest('.history-dropdown-menu') || e.target.closest('.history-rename-input')) {
+          return;
+        }
+        closeAllHistoryDropdowns();
+        switchSession(session.id);
+      });
+
+      // 3-Dots Menu Click Trigger
+      menuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = item.classList.contains('menu-open');
+        closeAllHistoryDropdowns();
+
+        if (isOpen) return;
+
+        item.classList.add('menu-open');
+        const dropdown = document.createElement('div');
+        dropdown.className = 'history-dropdown-menu';
+        dropdown.innerHTML = `
+          <button class="history-dropdown-item rename-opt">
+            <i class="fa-solid fa-pen-to-square"></i>
+            <span>Ganti Nama</span>
+          </button>
+          <button class="history-dropdown-item export-opt">
+            <i class="fa-solid fa-file-arrow-down"></i>
+            <span>Unduh Chat (.md)</span>
+          </button>
+          <button class="history-dropdown-item delete-item delete-opt">
+            <i class="fa-solid fa-trash-can"></i>
+            <span>Hapus Percakapan</span>
+          </button>
+        `;
+
+        dropdown.querySelector('.rename-opt').addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          closeAllHistoryDropdowns();
+          renameSessionPrompt(session.id, titleSpan);
+        });
+
+        dropdown.querySelector('.export-opt').addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          closeAllHistoryDropdowns();
+          exportSessionData(session.id);
+        });
+
+        dropdown.querySelector('.delete-opt').addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          closeAllHistoryDropdowns();
+          deleteSession(session.id);
+        });
+
+        item.querySelector('.history-item-actions').appendChild(dropdown);
+        activeHistoryDropdown = dropdown;
+        AudioEngine.click();
+      });
+
       els.chatHistoryList.appendChild(item);
     });
   }
@@ -2456,8 +2765,45 @@ ${organicBlock}
     setGeneratingState(false);
   }
 
-  // ==================== IMAGE VISION HANDLER ====================
-  function handleImageUpload(e) {
+  // ==================== IMAGE VISION & MEDIA HANDLER ====================
+  // Client-side instant image compressor (Reduces 10MB camera photo to ~80KB WebP)
+  function compressImageToWebP(file, maxDimension = 1024, quality = 0.8) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let { width, height } = img;
+          if (width > maxDimension || height > maxDimension) {
+            if (width > height) {
+              height = Math.round((height * maxDimension) / width);
+              width = maxDimension;
+            } else {
+              width = Math.round((width * maxDimension) / height);
+              height = maxDimension;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          try {
+            const dataUrl = canvas.toDataURL('image/webp', quality);
+            resolve(dataUrl);
+          } catch (err) {
+            resolve(e.target.result);
+          }
+        };
+        img.onerror = () => resolve(e.target.result);
+        img.src = e.target.result;
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleImageUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -2466,15 +2812,24 @@ ${organicBlock}
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (loadEvt) => {
-      STATE.attachedImage = loadEvt.target.result;
+    try {
+      const compressedDataUrl = await compressImageToWebP(file, 1024, 0.8) || (await new Promise(r => {
+        const reader = new FileReader();
+        reader.onload = ev => r(ev.target.result);
+        reader.readAsDataURL(file);
+      }));
+
+      STATE.attachedImage = compressedDataUrl;
       els.imagePreviewImg.src = STATE.attachedImage;
       els.attachmentPreviewBar.style.display = 'flex';
       updateVisionCompatibilityBadge();
       AudioEngine.click();
-    };
-    reader.readAsDataURL(file);
+
+      // If device backend is available, upload to data/uploads/ on disk in background
+      DeviceStorage.uploadFile(compressedDataUrl).catch(() => {});
+    } catch (err) {
+      console.warn('Image processing warning:', err.message);
+    }
   }
 
   function clearAttachedImage() {
