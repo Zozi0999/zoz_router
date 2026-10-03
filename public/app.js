@@ -795,7 +795,95 @@
     return escapeHtml(rawText).replace(/\n/g, '<br>');
   }
 
-  // ==================== HIGH-PERFORMANCE 60FPS STREAM BUFFER RENDERER ====================
+
+  // ==================== UNIVERSAL CODE BLOCK ENHANCER (Syntax & Copy Button) ====================
+  function enhanceCodeBlocks(container = document) {
+    if (!container) return;
+    
+    // Process all PRE elements within container
+    const preElements = container.querySelectorAll('pre');
+    preElements.forEach(pre => {
+      // Avoid duplicate headers
+      if (pre.querySelector('.code-header')) return;
+
+      const codeBlock = pre.querySelector('code');
+      let lang = 'CODE';
+
+      if (codeBlock) {
+        // Highlight syntax if hljs is present
+        if (window.hljs && !codeBlock.dataset.highlighted) {
+          try {
+            hljs.highlightElement(codeBlock);
+            codeBlock.dataset.highlighted = 'true';
+          } catch (e) {}
+        }
+        const langMatch = codeBlock.className.match(/language-([a-zA-Z0-9_\-#+]+)/);
+        if (langMatch && langMatch[1]) {
+          lang = langMatch[1].toUpperCase();
+        }
+      }
+
+      // Create code header bar with Copy Button
+      const header = document.createElement('div');
+      header.className = 'code-header';
+      header.innerHTML = `
+        <span class="code-lang-label"><i class="fa-solid fa-code"></i> ${escapeHtml(lang)}</span>
+        <button class="code-copy-btn" title="Salin seluruh kode">
+          <i class="fa-solid fa-clipboard"></i>
+          <span class="copy-text">Salin Kode</span>
+        </button>
+      `;
+
+      const copyBtn = header.querySelector('.code-copy-btn');
+      copyBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const codeText = (codeBlock ? (codeBlock.innerText || codeBlock.textContent) : (pre.innerText || pre.textContent)) || '';
+        
+        const setCopiedState = () => {
+          copyBtn.innerHTML = '<i class="fa-solid fa-check" style="color:var(--neon-teal);"></i> <span class="copy-text" style="color:var(--neon-teal);">Disalin!</span>';
+          copyBtn.classList.add('copied');
+          showToast(`Kode ${lang} berhasil disalin ke clipboard!`);
+          AudioEngine.snap();
+          setTimeout(() => {
+            copyBtn.innerHTML = '<i class="fa-solid fa-clipboard"></i> <span class="copy-text">Salin Kode</span>';
+            copyBtn.classList.remove('copied');
+          }, 2000);
+        };
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(codeText).then(setCopiedState).catch(() => {
+            // Fallback copy
+            fallbackCopyText(codeText, setCopiedState);
+          });
+        } else {
+          fallbackCopyText(codeText, setCopiedState);
+        }
+      });
+
+      pre.insertBefore(header, pre.firstChild);
+    });
+  }
+
+  function fallbackCopyText(text, onSuccess) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.top = '0';
+    textarea.style.left = '0';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    try {
+      document.execCommand('copy');
+      if (onSuccess) onSuccess();
+    } catch (err) {
+      showToast('Gagal menyalin teks ke clipboard.', 'error');
+    }
+    document.body.removeChild(textarea);
+  }
+
+    // ==================== HIGH-PERFORMANCE 60FPS STREAM BUFFER RENDERER ====================
   class StreamBufferRenderer {
     constructor(bubbleElement, onScrollCallback) {
       this.el = bubbleElement;
@@ -837,6 +925,7 @@
       }
       if (this.el) {
         this.el.innerHTML = renderMarkdown(this.text);
+        enhanceCodeBlocks(this.el);
       }
       if (this.onScroll && !userScrolledUp) this.onScroll();
       return this.text;
@@ -1130,6 +1219,7 @@
 
         const merged = (previousText + '\n' + appendedText).trim();
         bubbleText.innerHTML = renderMarkdown(merged);
+        enhanceCodeBlocks(bubbleText);
         
         const lastMsg = session.messages[session.messages.length - 1];
         if (lastMsg) lastMsg.content = merged;
@@ -1715,6 +1805,7 @@
       appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs);
     });
 
+    enhanceCodeBlocks(els.messagesList);
     smartScrollChatToBottom(true);
   }
 
@@ -1746,9 +1837,7 @@
       </div>
     `;
 
-    bubble.querySelectorAll('pre code').forEach(b => {
-      if (window.hljs) hljs.highlightElement(b);
-    });
+    enhanceCodeBlocks(bubble);
 
     bubble.querySelector('.copy-msg-btn')?.addEventListener('click', () => {
       navigator.clipboard.writeText(content);
@@ -1952,26 +2041,8 @@
       });
     }
 
-    // Code copy listener & syntax highlighting
-    row.querySelectorAll('pre code').forEach(block => {
-      if (window.hljs) hljs.highlightElement(block);
-      
-      const pre = block.parentElement;
-      const lang = block.className.match(/language-(\w+)/)?.[1] || 'CODE';
-      
-      const header = document.createElement('div');
-      header.className = 'code-header';
-      header.innerHTML = `
-        <span>${lang.toUpperCase()}</span>
-        <button class="code-copy-btn"><i class="fa-solid fa-clipboard"></i> Salin Kode</button>
-      `;
-      header.querySelector('.code-copy-btn').addEventListener('click', () => {
-        navigator.clipboard.writeText(block.innerText);
-        showToast('Kode berhasil disalin ke clipboard!');
-        AudioEngine.click();
-      });
-      pre.insertBefore(header, block);
-    });
+    // Universal Code block enhancement & Copy button
+    enhanceCodeBlocks(row);
 
     // Message copy button
     row.querySelector('.copy-msg-btn').addEventListener('click', () => {
@@ -2008,9 +2079,7 @@
     
     bubble.innerHTML = `${statsBadge}<div>${rendered}</div>`;
     
-    bubble.querySelectorAll('pre code').forEach(block => {
-      if (window.hljs) hljs.highlightElement(block);
-    });
+    enhanceCodeBlocks(bubble);
 
     container.appendChild(bubble);
   }
@@ -2994,6 +3063,7 @@ ${organicBlock}
       const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
       
       bubbleText.innerHTML = renderMarkdown(fullText);
+      enhanceCodeBlocks(bubbleText);
       if (webSources && webSources.length > 0) {
         renderMessageSources(assistantRow, webSources);
       }
@@ -3220,6 +3290,7 @@ ${organicBlock}
       const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
 
       bubbleText.innerHTML = renderMarkdown(fullText);
+      enhanceCodeBlocks(bubbleText);
       if (webSources && webSources.length > 0) {
         renderMessageSources(assistantRow, webSources);
       }
@@ -3398,6 +3469,7 @@ ${organicBlock}
       }
 
       const fullText = streamRenderer.finish();
+      enhanceCodeBlocks(bubbleText);
 
       const totalTime = ((performance.now() - start) / 1000).toFixed(2);
       const tps = totalTime > 0 ? (tokens / totalTime).toFixed(1) : '0';
@@ -3559,6 +3631,7 @@ ${organicBlock}
       }
 
       const fullText = streamRenderer.finish();
+      enhanceCodeBlocks(bubbleText);
 
       const totalTime = ((performance.now() - start) / 1000).toFixed(2);
       const tps = totalTime > 0 ? (tokens / totalTime).toFixed(1) : '0';
