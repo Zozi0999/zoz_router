@@ -888,8 +888,8 @@
 
     let touchStartY = 0;
     let touchStartTime = 0;
+    let pullHoldTimer = null;
     let pullFadeTimeout = null;
-    let wheelOverscrollCount = 0;
     let wheelTimer = null;
 
     function showPullLoading() {
@@ -925,8 +925,13 @@
       AudioEngine.snap();
     }
 
-    function hidePullWrapper(instant = false) {
+    function hidePullWrapper(instant = false, reboundToBottom = true) {
       if (!els.pullUpNewChatWrapper) return;
+      if (pullHoldTimer) {
+        clearTimeout(pullHoldTimer);
+        pullHoldTimer = null;
+      }
+
       if (instant) {
         els.pullUpNewChatWrapper.classList.remove('visible', 'revealed');
         els.pullUpNewChatWrapper.style.display = 'none';
@@ -939,14 +944,17 @@
         if (!els.pullUpNewChatWrapper.classList.contains('visible')) {
           els.pullUpNewChatWrapper.classList.remove('revealed');
           els.pullUpNewChatWrapper.style.display = 'none';
+          if (reboundToBottom && els.chatViewport && isChatAtBottom(els.chatViewport, 60)) {
+            els.chatViewport.scrollTo({ top: els.chatViewport.scrollHeight, behavior: 'smooth' });
+          }
         }
-      }, 300);
+      }, 250);
     }
 
     // Pull-up New Chat button click handler
     els.pullUpNewChatBtn?.addEventListener('click', () => {
       createNewSession();
-      hidePullWrapper(true);
+      hidePullWrapper(true, false);
       showToast('Memulai sesi obrolan baru...');
       AudioEngine.click();
     });
@@ -957,7 +965,7 @@
       if (!atBottom) {
         userScrolledUp = true;
         toggleScrollBottomBtn(true);
-        hidePullWrapper(true);
+        hidePullWrapper(true, false);
       } else {
         userScrolledUp = false;
         toggleScrollBottomBtn(false);
@@ -966,11 +974,15 @@
 
     els.chatViewport.addEventListener('scroll', () => handleScrollEvent(els.chatViewport), { passive: true });
     
-    // User touch start, move, and end on mobile devices
+    // User touch start, move, and end on mobile devices (ChatGPT Elastic Pull & Hold)
     els.chatViewport.addEventListener('touchstart', (e) => {
       if (e.touches && e.touches[0]) {
         touchStartY = e.touches[0].clientY;
         touchStartTime = Date.now();
+        if (pullHoldTimer) {
+          clearTimeout(pullHoldTimer);
+          pullHoldTimer = null;
+        }
       }
     }, { passive: true });
 
@@ -983,18 +995,20 @@
           // Scrolling up into previous messages
           userScrolledUp = true;
           toggleScrollBottomBtn(true);
-          hidePullWrapper(true);
+          hidePullWrapper(true, false);
         } else if (atBottom && deltaY > 15) {
           userScrolledUp = false;
           toggleScrollBottomBtn(false);
 
-          if (deltaY >= 50) {
-            // Pulled past threshold -> Reveal button!
-            revealPullNewChatBtn();
-          } else {
-            // Normal pull / hasn't reached threshold yet -> show loading spinner
-            if (!els.pullUpNewChatWrapper.classList.contains('revealed')) {
-              showPullLoading();
+          if (!els.pullUpNewChatWrapper.classList.contains('revealed')) {
+            showPullLoading();
+
+            // Must pull deep (>= 70px) AND hold continuously for >= 500ms
+            if (deltaY >= 70 && !pullHoldTimer) {
+              pullHoldTimer = setTimeout(() => {
+                revealPullNewChatBtn();
+                pullHoldTimer = null;
+              }, 450);
             }
           }
         }
@@ -1002,43 +1016,35 @@
     }, { passive: true });
 
     els.chatViewport.addEventListener('touchend', () => {
-      // If user released without reaching threshold / holding
+      if (pullHoldTimer) {
+        clearTimeout(pullHoldTimer);
+        pullHoldTimer = null;
+      }
+      // If user did not hold long enough to reveal button -> elastic rebound back to chat output
       if (!els.pullUpNewChatWrapper?.classList.contains('revealed')) {
-        if (pullFadeTimeout) clearTimeout(pullFadeTimeout);
-        pullFadeTimeout = setTimeout(() => {
-          hidePullWrapper(false);
-        }, 350);
+        hidePullWrapper(false, true);
       }
     }, { passive: true });
 
-    // Desktop wheel
+    // Desktop wheel: shows brief loading spinner momentum and rebounds smoothly to chat output
     els.chatViewport.addEventListener('wheel', (e) => {
       if (e.deltaY < 0) {
-        // Scrolling up
+        // Scrolling up into past messages
         userScrolledUp = true;
         toggleScrollBottomBtn(true);
-        hidePullWrapper(true);
-        wheelOverscrollCount = 0;
+        hidePullWrapper(true, false);
       } else if (e.deltaY > 0) {
         const atBottom = isChatAtBottom(els.chatViewport, 20);
         if (atBottom) {
           userScrolledUp = false;
           toggleScrollBottomBtn(false);
-          wheelOverscrollCount++;
 
-          if (wheelOverscrollCount >= 2) {
-            // Held/scrolled past threshold -> Reveal button
-            revealPullNewChatBtn();
-          } else {
-            // First scroll -> Show loading indicator
+          if (!els.pullUpNewChatWrapper?.classList.contains('revealed')) {
             showPullLoading();
             if (wheelTimer) clearTimeout(wheelTimer);
             wheelTimer = setTimeout(() => {
-              if (!els.pullUpNewChatWrapper?.classList.contains('revealed')) {
-                hidePullWrapper(false);
-              }
-              wheelOverscrollCount = 0;
-            }, 600);
+              hidePullWrapper(false, true);
+            }, 400);
           }
         }
       }

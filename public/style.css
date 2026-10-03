@@ -1082,31 +1082,30 @@ html, body {
   transform: translateY(0) scale(1);
 }
 
-/* Stage 1: Loading Indicator on Normal / Initial Pull */
+/* Stage 1: Minimalist Pure Circular Loading Spinner (ChatGPT Style) */
 .pull-up-loading-indicator {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 7px 16px;
-  background: rgba(10, 15, 29, 0.88);
-  border: 1px solid var(--border-subtle);
-  border-radius: 9999px;
-  color: var(--text-muted);
-  font-size: 0.78rem;
-  font-family: var(--font-code);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: rgba(10, 15, 29, 0.9);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  border-radius: 50%;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 4px 18px rgba(0, 240, 255, 0.2), 0 0 10px rgba(0, 0, 0, 0.6);
   transition: all 0.2s ease;
 }
 
 .pull-spinner {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border: 2px solid rgba(0, 240, 255, 0.2);
   border-top-color: var(--neon-cyan);
+  border-right-color: var(--neon-teal);
   border-radius: 50%;
-  animation: pullSpin 0.75s linear infinite;
+  animation: pullSpin 0.75s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 @keyframes pullSpin {
