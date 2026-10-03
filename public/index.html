@@ -351,7 +351,7 @@
           <!-- Action Buttons Left -->
           <div class="composer-tools-left">
             <!-- Hidden file inputs -->
-            <input type="file" id="imageFileInput" accept="image/*" style="display: none;">
+            <input type="file" id="imageFileInput" accept="image/*" multiple style="display: none;">
             <input type="file" id="cameraFileInput" accept="image/*" capture="environment" style="display: none;">
             <input type="file" id="docFileInput" accept=".txt,.pdf,.csv,.json,.md,.js,.py,.html,.css,.ts,.java,.cpp,.c,.go,.rs,.sql,.sh,.yaml,.yml,.xml,.doc,.docx" multiple style="display: none;">
 
@@ -733,6 +733,31 @@
 
       <div class="modal-footer">
         <button class="btn btn-secondary" data-close="musicDeckModal">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FULL-SCREEN IMAGE LIGHTBOX MODAL (ChatGPT & Gemini Style) -->
+  <div class="image-lightbox-modal" id="imageLightboxModal" style="display: none;">
+    <div class="lightbox-backdrop" id="lightboxBackdrop"></div>
+    <div class="lightbox-content-wrap">
+      <div class="lightbox-toolbar">
+        <div class="lightbox-meta">
+          <span class="lightbox-counter" id="lightboxCounter">1 / 1</span>
+        </div>
+        <div class="lightbox-actions">
+          <button class="lightbox-btn" id="lightboxZoomOutBtn" title="Perkecil (-)"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+          <button class="lightbox-btn" id="lightboxZoomInBtn" title="Perbesar (+)"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+          <button class="lightbox-btn" id="lightboxDownloadBtn" title="Unduh Foto"><i class="fa-solid fa-download"></i></button>
+          <button class="lightbox-btn close-btn" id="lightboxCloseBtn" title="Tutup (Esc)"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+      </div>
+      <div class="lightbox-image-stage" id="lightboxImageStage">
+        <button class="lightbox-nav-btn prev-btn" id="lightboxPrevBtn" title="Foto Sebelumnya (❮)"><i class="fa-solid fa-chevron-left"></i></button>
+        <div class="lightbox-img-wrapper" id="lightboxImgWrapper">
+          <img id="lightboxImg" src="" alt="Full Screen Preview">
+        </div>
+        <button class="lightbox-nav-btn next-btn" id="lightboxNextBtn" title="Foto Selanjutnya (❯)"><i class="fa-solid fa-chevron-right"></i></button>
       </div>
     </div>
   </div>

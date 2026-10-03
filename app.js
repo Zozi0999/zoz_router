@@ -64,7 +64,9 @@
       arena: null,
       auto: null
     },
-    attachedImage: null, // Base64 data URL
+    attachedImages: [], // Array of Base64 data URLs
+    get attachedImage() { return (this.attachedImages && this.attachedImages.length > 0) ? this.attachedImages[0] : null; },
+    set attachedImage(val) { this.attachedImages = val ? (Array.isArray(val) ? val : [val]) : []; },
     attachedDocs: [], // Array of { name, size, content }
     webSearchEnabled: false,
     isGenerating: false,
@@ -287,7 +289,169 @@
     toggleYtPlayerVisibilityBtn: $('#toggleYtPlayerVisibilityBtn'),
 
     // Floating scroll to bottom button
-    scrollBottomBtn: $('#scrollBottomBtn')
+    scrollBottomBtn: $('#scrollBottomBtn'),
+
+    // Full-Screen Image Lightbox Modal
+    imageLightboxModal: $('#imageLightboxModal'),
+    lightboxBackdrop: $('#lightboxBackdrop'),
+    lightboxImg: $('#lightboxImg'),
+    lightboxImgWrapper: $('#lightboxImgWrapper'),
+    lightboxCounter: $('#lightboxCounter'),
+    lightboxPrevBtn: $('#lightboxPrevBtn'),
+    lightboxNextBtn: $('#lightboxNextBtn'),
+    lightboxZoomInBtn: $('#lightboxZoomInBtn'),
+    lightboxZoomOutBtn: $('#lightboxZoomOutBtn'),
+    lightboxDownloadBtn: $('#lightboxDownloadBtn'),
+    lightboxCloseBtn: $('#lightboxCloseBtn')
+  };
+
+  // ==================== FULL-SCREEN IMAGE LIGHTBOX (ChatGPT & Gemini Style) ====================
+  const ImageLightbox = {
+    modal: null,
+    img: null,
+    imgWrapper: null,
+    counter: null,
+    prevBtn: null,
+    nextBtn: null,
+    images: [],
+    currentIndex: 0,
+    isZoomed: false,
+    touchStartX: 0,
+    touchEndX: 0,
+
+    init() {
+      this.modal = els.imageLightboxModal;
+      this.img = els.lightboxImg;
+      this.imgWrapper = els.lightboxImgWrapper;
+      this.counter = els.lightboxCounter;
+      this.prevBtn = els.lightboxPrevBtn;
+      this.nextBtn = els.lightboxNextBtn;
+
+      els.lightboxCloseBtn?.addEventListener('click', () => this.close());
+      els.lightboxBackdrop?.addEventListener('click', () => this.close());
+      this.prevBtn?.addEventListener('click', (e) => { e.stopPropagation(); this.prev(); });
+      this.nextBtn?.addEventListener('click', (e) => { e.stopPropagation(); this.next(); });
+      
+      els.lightboxZoomInBtn?.addEventListener('click', (e) => { e.stopPropagation(); this.toggleZoom(true); });
+      els.lightboxZoomOutBtn?.addEventListener('click', (e) => { e.stopPropagation(); this.toggleZoom(false); });
+      els.lightboxDownloadBtn?.addEventListener('click', (e) => { e.stopPropagation(); this.download(); });
+
+      // Double-click image to toggle zoom
+      this.img?.addEventListener('dblclick', () => this.toggleZoom());
+      this.img?.addEventListener('click', (e) => {
+        if (this.isZoomed) {
+          e.stopPropagation();
+          this.toggleZoom(false);
+        }
+      });
+
+      // Keyboard navigation
+      document.addEventListener('keydown', (e) => {
+        if (!this.isOpen()) return;
+        if (e.key === 'Escape') this.close();
+        if (e.key === 'ArrowLeft') this.prev();
+        if (e.key === 'ArrowRight') this.next();
+      });
+
+      // Mobile Touch Swipe support
+      const stage = $('#lightboxImageStage');
+      if (stage) {
+        stage.addEventListener('touchstart', (e) => {
+          if (e.touches && e.touches[0]) this.touchStartX = e.touches[0].clientX;
+        }, { passive: true });
+
+        stage.addEventListener('touchend', (e) => {
+          if (e.changedTouches && e.changedTouches[0]) {
+            this.touchEndX = e.changedTouches[0].clientX;
+            const diff = this.touchStartX - this.touchEndX;
+            if (Math.abs(diff) > 45) {
+              if (diff > 0) this.next();
+              else this.prev();
+            }
+          }
+        }, { passive: true });
+      }
+    },
+
+    isOpen() {
+      return this.modal && this.modal.style.display === 'flex';
+    },
+
+    open(imagesArray, index = 0) {
+      if (!Array.isArray(imagesArray) || imagesArray.length === 0) return;
+      this.images = imagesArray;
+      this.currentIndex = Math.max(0, Math.min(index, imagesArray.length - 1));
+      this.isZoomed = false;
+      this.imgWrapper?.classList.remove('is-zoomed');
+      
+      this.updateView();
+      if (this.modal) {
+        this.modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+      }
+      AudioEngine.click();
+    },
+
+    updateView() {
+      if (!this.img || this.images.length === 0) return;
+      const currentSrc = this.images[this.currentIndex];
+      this.img.src = currentSrc;
+
+      if (this.counter) {
+        this.counter.innerText = `${this.currentIndex + 1} / ${this.images.length}`;
+      }
+
+      if (this.prevBtn) {
+        this.prevBtn.style.display = this.images.length > 1 ? 'flex' : 'none';
+      }
+      if (this.nextBtn) {
+        this.nextBtn.style.display = this.images.length > 1 ? 'flex' : 'none';
+      }
+    },
+
+    next() {
+      if (this.images.length <= 1) return;
+      this.currentIndex = (this.currentIndex + 1) % this.images.length;
+      this.toggleZoom(false);
+      this.updateView();
+      AudioEngine.click();
+    },
+
+    prev() {
+      if (this.images.length <= 1) return;
+      this.currentIndex = (this.currentIndex - 1 + this.images.length) % this.images.length;
+      this.toggleZoom(false);
+      this.updateView();
+      AudioEngine.click();
+    },
+
+    toggleZoom(forceState = null) {
+      this.isZoomed = forceState !== null ? forceState : !this.isZoomed;
+      if (this.imgWrapper) {
+        this.imgWrapper.classList.toggle('is-zoomed', this.isZoomed);
+      }
+    },
+
+    download() {
+      if (!this.images[this.currentIndex]) return;
+      const src = this.images[this.currentIndex];
+      const a = document.createElement('a');
+      a.href = src;
+      a.download = `zoz_foto_${Date.now()}_${this.currentIndex + 1}.webp`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => document.body.removeChild(a), 100);
+      showToast('Foto berhasil diunduh.');
+      AudioEngine.click();
+    },
+
+    close() {
+      if (!this.modal) return;
+      this.modal.style.display = 'none';
+      document.body.style.overflow = '';
+      this.toggleZoom(false);
+      AudioEngine.click();
+    }
   };
 
   // ==================== INDEXEDDB CHAT VAULT ====================
@@ -564,6 +728,8 @@
             content: m.content,
             displayContent: m.displayContent,
             docs: m.docs,
+            images: m.images,
+            image: m.image,
             model: m.model,
             engine: m.engine,
             slot: m.slot,
@@ -1405,7 +1571,8 @@
     els.messagesList.innerHTML = '';
     session.messages.forEach((msg, idx) => {
       const textToDisplay = (msg.role === 'user' && msg.displayContent) ? msg.displayContent : msg.content;
-      appendMessageElement(msg.role, textToDisplay, msg.image, msg.model, msg.stats, idx, msg.sources, msg.docs);
+      const imagesToDisplay = msg.images || (msg.image ? [msg.image] : null);
+      appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs);
     });
 
     smartScrollChatToBottom(true);
@@ -1462,9 +1629,22 @@
     const avatarIcon = role === 'user' ? '<i class="fa-solid fa-user-ninja"></i>' : '<i class="fa-solid fa-microchip-ai"></i>';
     const roleLabel = role === 'user' ? 'Anda' : (model || 'Zoz AI');
 
-    let imageHtml = '';
-    if (image) {
-      imageHtml = `<img src="${image}" alt="Vision Attachment" class="attached-vision-img">`;
+    const imgList = Array.isArray(image) ? image.filter(Boolean) : (image ? [image] : []);
+    let imageGalleryHtml = '';
+    if (imgList.length > 0) {
+      const gridClass = imgList.length === 1 ? 'grid-1' : (imgList.length === 2 ? 'grid-2' : 'grid-multi');
+      imageGalleryHtml = `
+        <div class="attached-images-gallery ${gridClass}">
+          ${imgList.map((src, imgIdx) => `
+            <div class="chat-img-thumb-wrap" data-img-idx="${imgIdx}" title="Klik untuk melihat foto layar penuh">
+              <img src="${src}" alt="Foto ${imgIdx + 1}" class="chat-zoomable-img">
+              <div class="chat-img-overlay">
+                <i class="fa-solid fa-expand"></i>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
     }
 
     let docsHtml = '';
@@ -1524,7 +1704,7 @@
           ${statsHtml}
         </div>
         <div class="message-bubble">
-          ${imageHtml}
+          ${imageGalleryHtml}
           ${docsHtml}
           <div class="msg-text-content">${renderedBody}</div>
           ${sourcesHtml}
@@ -1535,6 +1715,17 @@
         </div>
       </div>
     `;
+
+    // Attach Lightbox click triggers to images in this bubble
+    if (imgList.length > 0) {
+      row.querySelectorAll('.chat-img-thumb-wrap').forEach((thumb) => {
+        thumb.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const clickedIdx = parseInt(thumb.dataset.imgIdx, 10) || 0;
+          ImageLightbox.open(imgList, clickedIdx);
+        });
+      });
+    }
 
     // Edit Prompt Button Handler (for User messages)
     if (role === 'user') {
@@ -1794,41 +1985,59 @@
 
   function renderAttachmentPreviews() {
     if (!els.attachmentPreviewBar) return;
-    const hasImage = !!STATE.attachedImage;
+    const hasImages = STATE.attachedImages && STATE.attachedImages.length > 0;
     const hasDocs = STATE.attachedDocs && STATE.attachedDocs.length > 0;
 
-    if (!hasImage && !hasDocs) {
+    if (!hasImages && !hasDocs) {
       els.attachmentPreviewBar.style.display = 'none';
       return;
     }
 
     els.attachmentPreviewBar.style.display = 'flex';
 
-    // Handle Image Preview Card
-    const imgCard = $('#imagePreviewCard');
-    if (imgCard) {
-      imgCard.style.display = hasImage ? 'block' : 'none';
+    // Clear existing preview cards & chips
+    els.attachmentPreviewBar.querySelectorAll('.preview-card, .doc-preview-chip').forEach(c => c.remove());
+
+    // Append Image Preview Cards
+    if (hasImages) {
+      STATE.attachedImages.forEach((imgSrc, idx) => {
+        const card = document.createElement('div');
+        card.className = 'preview-card';
+        card.title = 'Klik untuk melihat foto layar penuh';
+        card.innerHTML = `
+          <img src="${imgSrc}" alt="Lampiran Foto ${idx + 1}">
+          <button class="remove-attachment-btn" data-img-idx="${idx}" title="Hapus Foto"><i class="fa-solid fa-xmark"></i></button>
+        `;
+        card.querySelector('img').addEventListener('click', (e) => {
+          e.stopPropagation();
+          ImageLightbox.open(STATE.attachedImages, idx);
+        });
+        card.querySelector('.remove-attachment-btn').addEventListener('click', (e) => {
+          e.stopPropagation();
+          removeAttachedImage(idx);
+        });
+        els.attachmentPreviewBar.appendChild(card);
+      });
     }
 
-    // Remove existing doc chips
-    els.attachmentPreviewBar.querySelectorAll('.doc-preview-chip').forEach(c => c.remove());
-
-    // Append new doc chips
-    STATE.attachedDocs.forEach((doc, idx) => {
-      const chip = document.createElement('div');
-      chip.className = 'doc-preview-chip';
-      chip.innerHTML = `
-        <i class="fa-solid fa-file-lines doc-icon"></i>
-        <span class="doc-name" title="${escapeHtml(doc.name)}">${escapeHtml(doc.name)}</span>
-        <span class="doc-size">(${escapeHtml(doc.size)})</span>
-        <button class="remove-doc-btn" data-idx="${idx}" title="Hapus file"><i class="fa-solid fa-xmark"></i></button>
-      `;
-      chip.querySelector('.remove-doc-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        removeAttachedDoc(idx);
+    // Append Doc Chips
+    if (hasDocs) {
+      STATE.attachedDocs.forEach((doc, idx) => {
+        const chip = document.createElement('div');
+        chip.className = 'doc-preview-chip';
+        chip.innerHTML = `
+          <i class="fa-solid fa-file-lines doc-icon"></i>
+          <span class="doc-name" title="${escapeHtml(doc.name)}">${escapeHtml(doc.name)}</span>
+          <span class="doc-size">(${escapeHtml(doc.size)})</span>
+          <button class="remove-doc-btn" data-idx="${idx}" title="Hapus file"><i class="fa-solid fa-xmark"></i></button>
+        `;
+        chip.querySelector('.remove-doc-btn').addEventListener('click', (e) => {
+          e.stopPropagation();
+          removeAttachedDoc(idx);
+        });
+        els.attachmentPreviewBar.appendChild(chip);
       });
-      els.attachmentPreviewBar.appendChild(chip);
-    });
+    }
 
     updateVisionCompatibilityBadge();
   }
@@ -2228,12 +2437,14 @@ ${organicBlock}
 
     if (!badge) return;
 
-    if (STATE.attachedImage) {
+    const imgCount = STATE.attachedImages ? STATE.attachedImages.length : (STATE.attachedImage ? 1 : 0);
+    if (imgCount > 0) {
       const current = getCurrentModel();
       badge.style.background = 'rgba(0, 240, 255, 0.08)';
       badge.style.border = '1px solid rgba(0, 240, 255, 0.3)';
       badge.style.color = 'var(--neon-cyan)';
-      badge.innerHTML = `<i class="fa-solid fa-image"></i> <span>Lampiran visual siap diproses oleh model <strong>${escapeHtml(current)}</strong></span>`;
+      const label = imgCount === 1 ? '1 Foto lampiran' : `${imgCount} Foto lampiran`;
+      badge.innerHTML = `<i class="fa-solid fa-image"></i> <span>${label} siap diproses oleh model <strong>${escapeHtml(current)}</strong></span>`;
       badge.style.display = 'flex';
     } else {
       badge.style.display = 'none';
@@ -2400,10 +2611,11 @@ ${organicBlock}
   // ==================== DISPATCH / STREAMING ENGINE ====================
   async function handleSendPrompt() {
     const rawText = els.promptInput.value.trim();
-    const image = STATE.attachedImage;
+    const images = [...(STATE.attachedImages || [])];
+    const image = images.length > 0 ? images[0] : null;
     const docs = [...(STATE.attachedDocs || [])];
 
-    if (!rawText && !image && docs.length === 0) return;
+    if (!rawText && images.length === 0 && docs.length === 0) return;
     if (STATE.isGenerating) return;
 
     // Combine documents with text
@@ -2417,13 +2629,14 @@ ${organicBlock}
     els.welcomeHero.style.display = 'none';
 
     // Build user message object
-    const displayPrompt = rawText || (docs.length > 0 ? `📎 [${docs.length} File Lampiran: ${docs.map(d => d.name).join(', ')}]` : 'Analisis Gambar');
+    const displayPrompt = rawText || (docs.length > 0 ? `📎 [${docs.length} File Lampiran: ${docs.map(d => d.name).join(', ')}]` : (images.length > 0 ? `📷 [${images.length} Foto Lampiran]` : 'Analisis'));
     const docsMeta = docs.map(d => ({ name: d.name, size: d.size }));
     const userMsg = {
       role: 'user',
       content: text,
       displayContent: rawText || '',
       docs: docsMeta,
+      images: images,
       image: image,
       timestamp: new Date().toISOString()
     };
@@ -2439,7 +2652,7 @@ ${organicBlock}
 
     // Immediately render user's message bubble in single mode
     if (STATE.mode !== 'arena') {
-      appendMessageElement('user', userMsg.displayContent || displayPrompt, image, 'Anda', null, session.messages.length - 1, null, docsMeta);
+      appendMessageElement('user', userMsg.displayContent || displayPrompt, images, 'Anda', null, session.messages.length - 1, null, docsMeta);
       smartScrollChatToBottom(true);
     }
 
@@ -2447,18 +2660,18 @@ ${organicBlock}
     els.promptInput.value = '';
     autoResizeTextarea(els.promptInput);
     STATE.attachedDocs = [];
-    clearAttachedImage();
+    clearAttachedImages();
     renderAttachmentPreviews();
     AudioEngine.send();
 
     if (STATE.mode === 'arena') {
-      await runArenaStreaming(session, text, image);
+      await runArenaStreaming(session, text, images);
     } else if (STATE.mode === 'auto') {
-      await runAutoRouterStreaming(session, text, image);
+      await runAutoRouterStreaming(session, text, images);
     } else if (STATE.mode === 'openrouter') {
-      await runOpenRouterStreaming(session, text, image, STATE.settings.openRouterModel);
+      await runOpenRouterStreaming(session, text, images, STATE.settings.openRouterModel);
     } else {
-      await runOllamaStreaming(session, text, image, STATE.settings.ollamaModel);
+      await runOllamaStreaming(session, text, images, STATE.settings.ollamaModel);
     }
   }
 
@@ -2562,13 +2775,18 @@ ${organicBlock}
         messagesPayload.push({ role: 'system', content: systemContent });
       }
       
-      // History context - only attach image on the latest active user turn to prevent multi-turn schema rejections
+      // History context - only attach images on the latest active user turn to prevent multi-turn schema rejections
       const lastIndex = session.messages.length - 1;
       session.messages.forEach((m, idx) => {
         const item = { role: m.role, content: m.content || '' };
-        if (m.image && idx === lastIndex) {
-          const rawBase64 = m.image.replace(/^data:image\/[a-z0-9.+_-]+;base64,/i, '').replace(/[\r\n\s]/g, '');
-          if (rawBase64) item.images = [rawBase64];
+        if (idx === lastIndex) {
+          const rawImages = [];
+          const mImgs = Array.isArray(m.images) && m.images.length > 0 ? m.images : (m.image ? [m.image] : []);
+          mImgs.forEach(img => {
+            const raw = img.replace(/^data:image\/[a-z0-9.+_-]+;base64,/i, '').replace(/[\r\n\s]/g, '');
+            if (raw) rawImages.push(raw);
+          });
+          if (rawImages.length > 0) item.images = rawImages;
         }
         messagesPayload.push(item);
       });
@@ -2779,14 +2997,15 @@ ${organicBlock}
       // History context - safely format images
       const lastIndex = session.messages.length - 1;
       session.messages.forEach((m, idx) => {
-        if (m.image && idx === lastIndex) {
-          messagesPayload.push({
-            role: m.role,
-            content: [
-              { type: 'text', text: m.content || 'Jelaskan dan analisis gambar ini secara detail.' },
-              { type: 'image_url', image_url: { url: m.image } }
-            ]
+        const mImgs = Array.isArray(m.images) && m.images.length > 0 ? m.images : (m.image ? [m.image] : []);
+        if (mImgs.length > 0 && idx === lastIndex) {
+          const contentParts = [
+            { type: 'text', text: m.content || 'Jelaskan dan analisis gambar terlampir ini secara detail.' }
+          ];
+          mImgs.forEach(img => {
+            contentParts.push({ type: 'image_url', image_url: { url: img } });
           });
+          messagesPayload.push({ role: m.role, content: contentParts });
         } else {
           messagesPayload.push({ role: m.role, content: m.content || '' });
         }
@@ -3331,40 +3550,61 @@ ${organicBlock}
   }
 
   async function handleImageUpload(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (!files || files.length === 0) return;
 
-    if (!file.type.startsWith('image/')) {
-      showToast('File harus berupa format gambar (PNG, JPG, WEBP).', 'error');
-      return;
+    let addedCount = 0;
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue;
+
+      try {
+        const compressedDataUrl = await compressImageToWebP(file, 1024, 0.8) || (await new Promise(r => {
+          const reader = new FileReader();
+          reader.onload = ev => r(ev.target.result);
+          reader.readAsDataURL(file);
+        }));
+
+        if (compressedDataUrl) {
+          STATE.attachedImages.push(compressedDataUrl);
+          addedCount++;
+          // Upload to disk in background if backend is available
+          DeviceStorage.uploadFile(compressedDataUrl).catch(() => {});
+        }
+      } catch (err) {
+        console.warn('Image processing warning:', err.message);
+      }
     }
 
-    try {
-      const compressedDataUrl = await compressImageToWebP(file, 1024, 0.8) || (await new Promise(r => {
-        const reader = new FileReader();
-        reader.onload = ev => r(ev.target.result);
-        reader.readAsDataURL(file);
-      }));
-
-      STATE.attachedImage = compressedDataUrl;
-      els.imagePreviewImg.src = STATE.attachedImage;
-      els.attachmentPreviewBar.style.display = 'flex';
-      updateVisionCompatibilityBadge();
-      AudioEngine.click();
-
-      // If device backend is available, upload to data/uploads/ on disk in background
-      DeviceStorage.uploadFile(compressedDataUrl).catch(() => {});
-    } catch (err) {
-      console.warn('Image processing warning:', err.message);
-    }
-  }
-
-  function clearAttachedImage() {
-    STATE.attachedImage = null;
     if (els.imageFileInput) els.imageFileInput.value = '';
     if (els.cameraFileInput) els.cameraFileInput.value = '';
     renderAttachmentPreviews();
     updateVisionCompatibilityBadge();
+
+    if (addedCount > 0) {
+      showToast(`📷 ${addedCount} foto berhasil ditambahkan.`);
+      AudioEngine.click();
+    }
+  }
+
+  function removeAttachedImage(idx) {
+    if (idx >= 0 && idx < STATE.attachedImages.length) {
+      STATE.attachedImages.splice(idx, 1);
+      renderAttachmentPreviews();
+      updateVisionCompatibilityBadge();
+      AudioEngine.click();
+    }
+  }
+
+  function clearAttachedImages() {
+    STATE.attachedImages = [];
+    if (els.imageFileInput) els.imageFileInput.value = '';
+    if (els.cameraFileInput) els.cameraFileInput.value = '';
+    renderAttachmentPreviews();
+    updateVisionCompatibilityBadge();
+  }
+
+  function clearAttachedImage() {
+    clearAttachedImages();
   }
 
   // ==================== ATTACHMENT MENU & POPUP CONTROLLER ====================
@@ -5191,6 +5431,7 @@ ${organicBlock}
     await loadPersistedState();
     setupEventListeners();
     setupSmartScrolling();
+    ImageLightbox.init();
     
     // Set sound toggle button icon
     els.soundToggleBtn.innerHTML = STATE.soundEnabled 
