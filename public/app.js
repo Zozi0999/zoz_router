@@ -19,7 +19,9 @@
 
   // Popular OpenRouter Models Catalog
   const DEFAULT_OPENROUTER_MODELS = [
-    { id: 'deepseek/deepseek-r1:free', name: 'deepseek/deepseek-r1:free', tag: 'Free', cat: 'reasoning' },
+    { id: 'nvidia/llama-3.1-nemotron-70b-instruct:free', name: 'nvidia/llama-3.1-nemotron-70b-instruct:free', tag: 'Nemotron Free', cat: 'flagship' },
+    { id: 'nvidia/llama-3.1-nemotron-70b-instruct', name: 'nvidia/llama-3.1-nemotron-70b-instruct', tag: 'Nemotron 70B', cat: 'flagship' },
+    { id: 'deepseek/deepseek-r1:free', name: 'deepseek/deepseek-r1:free', tag: 'Free • Reasoning', cat: 'reasoning' },
     { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'meta-llama/llama-3.3-70b-instruct:free', tag: 'Free', cat: 'flagship' },
     { id: 'google/gemini-2.0-flash-exp:free', name: 'google/gemini-2.0-flash-exp:free', tag: 'Free • 👁️ Vision', cat: 'fast' },
     { id: 'qwen/qwen-2.5-72b-instruct:free', name: 'qwen/qwen-2.5-72b-instruct:free', tag: 'Free', cat: 'coding' },
@@ -617,6 +619,54 @@
     return escapeHtml(rawText).replace(/\n/g, '<br>');
   }
 
+  // ==================== HIGH-PERFORMANCE 60FPS STREAM BUFFER RENDERER ====================
+  class StreamBufferRenderer {
+    constructor(bubbleElement, onScrollCallback) {
+      this.el = bubbleElement;
+      this.onScroll = onScrollCallback;
+      this.text = '';
+      this.animId = null;
+      this.lastRenderTime = 0;
+      this.isDone = false;
+    }
+
+    append(delta) {
+      this.text += delta;
+      if (this.isDone) return;
+      const now = performance.now();
+      // Throttle Markdown regex parsing to every 40ms to keep UI 60fps and prevent CPU lag
+      if (now - this.lastRenderTime > 40) {
+        this.render();
+        this.lastRenderTime = now;
+      } else if (!this.animId) {
+        this.animId = requestAnimationFrame(() => {
+          this.animId = null;
+          this.render();
+          this.lastRenderTime = performance.now();
+        });
+      }
+    }
+
+    render() {
+      if (!this.el) return;
+      this.el.innerHTML = renderMarkdown(this.text) + '<span class="typing-cursor"></span>';
+      if (this.onScroll) this.onScroll();
+    }
+
+    finish() {
+      this.isDone = true;
+      if (this.animId) {
+        cancelAnimationFrame(this.animId);
+        this.animId = null;
+      }
+      if (this.el) {
+        this.el.innerHTML = renderMarkdown(this.text);
+      }
+      if (this.onScroll) this.onScroll();
+      return this.text;
+    }
+  }
+
   // ==================== SMART SCROLL & CONTINUATION MANAGER ====================
   let userScrolledUp = false;
   let isAutoScrolling = false;
@@ -1076,19 +1126,18 @@
     els.chatHistoryList.innerHTML = '';
     const q = filterQuery.toLowerCase().trim();
     
-    // Filter strictly by the current active engine mode
-    const modeSessions = STATE.sessions.filter(s => (s.mode || 'ollama') === STATE.mode && (s.messages && s.messages.length > 0));
-    const filtered = modeSessions.filter(s => !q || s.title.toLowerCase().includes(q));
+    // Unified list of all sessions across engines
+    const validSessions = STATE.sessions.filter(s => s.messages && s.messages.length > 0);
+    const filtered = validSessions.filter(s => !q || s.title.toLowerCase().includes(q) || (s.mode && s.mode.toLowerCase().includes(q)));
 
     // Update history header label
     const historyHeader = $('.history-label');
     if (historyHeader) {
-      const modeLabel = STATE.mode === 'ollama' ? 'OLLAMA LOCAL' : (STATE.mode === 'openrouter' ? 'OPENROUTER CLOUD' : (STATE.mode === 'arena' ? 'DUAL ARENA' : 'AUTO ROUTER'));
-      historyHeader.innerText = `RIWAYAT SESI (${modeLabel})`;
+      historyHeader.innerText = 'RIWAYAT PERCAKAPAN';
     }
 
     if (filtered.length === 0) {
-      els.chatHistoryList.innerHTML = `<div style="font-size:0.75rem; color:var(--text-dim); text-align:center; padding:16px 8px;">Belum ada riwayat ${STATE.mode.toUpperCase()}<br><span style="font-size:0.68rem; opacity:0.7;">Ketik prompt di bawah untuk memulai.</span></div>`;
+      els.chatHistoryList.innerHTML = `<div style="font-size:0.75rem; color:var(--text-dim); text-align:center; padding:16px 8px;">Belum ada riwayat percakapan<br><span style="font-size:0.68rem; opacity:0.7;">Ketik prompt di bawah untuk memulai.</span></div>`;
       return;
     }
 
@@ -1098,13 +1147,25 @@
       item.dataset.id = session.id;
       
       let modeIcon = 'fa-server';
-      if (session.mode === 'openrouter') modeIcon = 'fa-bolt';
-      else if (session.mode === 'arena') modeIcon = 'fa-scale-balanced';
-      else if (session.mode === 'auto') modeIcon = 'fa-route';
+      let modeColor = 'var(--neon-cyan)';
+      let modeTag = 'Ollama';
+      if (session.mode === 'openrouter') {
+        modeIcon = 'fa-bolt';
+        modeColor = 'var(--neon-amber)';
+        modeTag = 'OpenRouter';
+      } else if (session.mode === 'arena') {
+        modeIcon = 'fa-scale-balanced';
+        modeColor = 'var(--neon-pink, #ff0055)';
+        modeTag = 'Arena';
+      } else if (session.mode === 'auto') {
+        modeIcon = 'fa-route';
+        modeColor = 'var(--neon-teal)';
+        modeTag = 'Auto';
+      }
 
       item.innerHTML = `
         <div class="history-title-wrap">
-          <i class="fa-solid ${modeIcon}"></i>
+          <i class="fa-solid ${modeIcon}" style="color:${modeColor}; font-size:0.8rem;" title="Engine: ${modeTag}"></i>
           <span class="history-title" title="${escapeHtml(session.title)}">${escapeHtml(session.title)}</span>
         </div>
         <div class="history-item-actions">
@@ -2330,6 +2391,7 @@ ${organicBlock}
       const decoder = new TextDecoder();
       let buffer = '';
       let doneReason = null;
+      const streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
 
       while (true) {
         const { done, value } = await reader.read();
@@ -2348,15 +2410,15 @@ ${organicBlock}
             if (parsed.message?.content) {
               if (!firstTokenTime) firstTokenTime = performance.now();
               tokenCount++;
-              fullText += parsed.message.content;
-              bubbleText.innerHTML = renderMarkdown(fullText) + '<span class="typing-cursor"></span>';
-              smartScrollChatToBottom(false);
+              streamRenderer.append(parsed.message.content);
             }
           } catch (pe) {
             console.error('Error parsing Ollama line:', pe);
           }
         }
       }
+
+      const fullText = streamRenderer.finish();
 
       const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
       const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
@@ -2560,6 +2622,7 @@ ${organicBlock}
       const decoder = new TextDecoder();
       let buffer = '';
       let finishReason = null;
+      const streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
 
       while (true) {
         const { done, value } = await reader.read();
@@ -2585,15 +2648,15 @@ ${organicBlock}
             if (delta) {
               if (!firstTokenTime) firstTokenTime = performance.now();
               tokenCount++;
-              fullText += delta;
-              bubbleText.innerHTML = renderMarkdown(fullText) + '<span class="typing-cursor"></span>';
-              smartScrollChatToBottom(false);
+              streamRenderer.append(delta);
             }
           } catch (pe) {
             // Ignore parse errors on partial chunks
           }
         }
       }
+
+      const fullText = streamRenderer.finish();
 
       const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
       const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
@@ -2757,6 +2820,7 @@ ${organicBlock}
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = '';
+      const streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollArenaToBottom(els.arenaMessagesA, false));
 
       while (true) {
         const { done, value } = await reader.read();
@@ -2770,17 +2834,16 @@ ${organicBlock}
             const p = JSON.parse(l);
             if (p.message?.content) {
               tokens++;
-              fullText += p.message.content;
-              bubbleText.innerHTML = renderMarkdown(fullText) + '<span class="typing-cursor"></span>';
-              smartScrollArenaToBottom(els.arenaMessagesA, false);
+              streamRenderer.append(p.message.content);
             }
           } catch (pe) {}
         }
       }
 
+      const fullText = streamRenderer.finish();
+
       const totalTime = ((performance.now() - start) / 1000).toFixed(2);
       const tps = totalTime > 0 ? (tokens / totalTime).toFixed(1) : '0';
-      bubbleText.innerHTML = renderMarkdown(fullText);
       if (webSources && webSources.length > 0) {
         renderMessageSources(assistantRow, webSources);
       }
@@ -2916,6 +2979,7 @@ ${organicBlock}
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = '';
+      const streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollArenaToBottom(els.arenaMessagesB, false));
 
       while (true) {
         const { done, value } = await reader.read();
@@ -2932,17 +2996,16 @@ ${organicBlock}
             const delta = p.choices?.[0]?.delta?.content;
             if (delta) {
               tokens++;
-              fullText += delta;
-              bubbleText.innerHTML = renderMarkdown(fullText) + '<span class="typing-cursor"></span>';
-              smartScrollArenaToBottom(els.arenaMessagesB, false);
+              streamRenderer.append(delta);
             }
           } catch (pe) {}
         }
       }
 
+      const fullText = streamRenderer.finish();
+
       const totalTime = ((performance.now() - start) / 1000).toFixed(2);
       const tps = totalTime > 0 ? (tokens / totalTime).toFixed(1) : '0';
-      bubbleText.innerHTML = renderMarkdown(fullText);
       if (webSources && webSources.length > 0) {
         renderMessageSources(assistantRow, webSources);
       }
