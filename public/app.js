@@ -1481,6 +1481,69 @@ ${organicBlock}
     }
   }
 
+  // ==================== UNIVERSAL MODEL ERROR & WARNING HANDLER ====================
+  function formatModelErrorMessage(engine, modelName, err, hasImage = false, hasWebSearch = false) {
+    const rawMsg = (err && err.message) ? err.message : String(err || 'Unknown error');
+    const msg = rawMsg.toLowerCase();
+    const isCorsOrNetwork = IS_GITHUB_PAGES && (msg.includes('failed to fetch') || msg.includes('networkerror') || err.name === 'TypeError');
+    const isVisionUnsupported = hasImage && (
+      msg.includes('image') || 
+      msg.includes('vision') || 
+      msg.includes('multimodal') || 
+      msg.includes('does not support') ||
+      msg.includes('unsupported') ||
+      msg.includes('schema') ||
+      msg.includes('invalid format') ||
+      msg.includes('no endpoints found that support image')
+    );
+    const isAuthError = msg.includes('401') || msg.includes('unauthorized') || msg.includes('api key') || msg.includes('user not found');
+    const isModelNotFound = msg.includes('404') || msg.includes('not found') || msg.includes('no endpoints') || msg.includes('does not exist');
+    const isRateLimit = msg.includes('429') || msg.includes('rate limit') || msg.includes('quota') || msg.includes('credits') || msg.includes('free tier limit');
+    const isContextLength = msg.includes('context length') || msg.includes('token limit') || msg.includes('maximum context');
+
+    let title = `Peringatan Model: ${escapeHtml(modelName)}`;
+    let desc = escapeHtml(rawMsg);
+    let advice = '';
+
+    if (isVisionUnsupported) {
+      title = `Model ${escapeHtml(modelName)} Tidak Mendukung Input Gambar`;
+      desc = `Model ini menolak pemrosesan gambar multimodal karena beroperasi dalam mode teks murni (text-only).`;
+      advice = `💡 <strong>Saran:</strong> Semua model diizinkan mencoba memproses gambar. Jika model ini tidak mendukungnya, beralihlah ke model multimodal seperti <code>google/gemini-2.0-flash-exp:free</code>, <code>openai/gpt-4o</code>, <code>gemma4:31b</code>, atau kirim kembali prompt Anda tanpa lampiran gambar.`;
+    } else if (isCorsOrNetwork && engine === 'ollama') {
+      title = `Batasan Koneksi Browser CORS (GitHub Pages)`;
+      desc = `Browser memblokir koneksi langsung dari domain <code>github.io</code> ke server <code>ollama.com</code> karena pembatasan CORS server.`;
+      advice = `💡 <strong>Solusi Cepat:</strong> Gunakan <strong>OpenRouter (Cloud)</strong> yang didukung 100% di web GitHub Pages tanpa batasan CORS, atau jalankan Desktop Gateway <code>http://localhost:4040</code> di PC Anda.`;
+    } else if (isAuthError) {
+      title = `Autentikasi / API Key Diperlukan`;
+      desc = `API Key untuk provider <strong>${engine === 'ollama' ? 'Ollama Cloud' : 'OpenRouter'}</strong> tidak valid, belum diisi, atau kadaluarsa.`;
+      advice = `💡 <strong>Solusi:</strong> Buka menu <strong>Pengaturan (⚙️)</strong> dan periksa kembali API Key Anda.`;
+    } else if (isRateLimit) {
+      title = `Batas Kuota / Rate Limit Provider Tercapai`;
+      desc = `Permintaan ditolak oleh server provider karena batas kuota sementara atau beban server sedang tinggi.`;
+      advice = `💡 <strong>Solusi:</strong> Pilih model gratis lainnya dari katalog Model Hub atau tunggu beberapa detik sebelum mencoba kembali.`;
+    } else if (isModelNotFound) {
+      title = `Model Tidak Ditemukan di Provider`;
+      desc = `ID Model <code>${escapeHtml(modelName)}</code> tidak ditemukan atau belum aktif di server ${engine.toUpperCase()}.`;
+      advice = `💡 <strong>Solusi:</strong> Periksa ejaan nama model atau pilih model resmi dari katalog Model Hub.`;
+    } else if (isContextLength) {
+      title = `Batas Panjang Konteks Terlampaui`;
+      desc = `Jumlah teks prompt, dokumen, atau hasil pencarian web melebihi kapasitas context window model <code>${escapeHtml(modelName)}</code>.`;
+      advice = `💡 <strong>Solusi:</strong> Ringkas teks prompt Anda atau gunakan model dengan context window besar seperti <code>kimi-k3</code> atau <code>google/gemini-2.0-flash-exp:free</code>.`;
+    }
+
+    return `
+      <div style="background:rgba(255,170,0,0.08); border:1px solid rgba(255,170,0,0.35); border-radius:10px; padding:14px; margin-bottom:12px; line-height:1.5;">
+        <div style="font-weight:700; color:var(--neon-amber); margin-bottom:6px; display:flex; align-items:center; gap:8px; font-size:0.9rem;">
+          <i class="fa-solid fa-triangle-exclamation"></i> ${title}
+        </div>
+        <div style="font-size:0.83rem; color:var(--text-main); margin-bottom:8px;">
+          ${desc}
+        </div>
+        ${advice ? `<div style="font-size:0.8rem; color:var(--text-secondary); background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:6px; border-left:3px solid var(--neon-cyan);">${advice}</div>` : ''}
+      </div>
+    `;
+  }
+
   // --- OLLAMA STREAMING EXECUTION ---
   async function runOllamaStreaming(session, promptText, image, modelName) {
     setGeneratingState(true);
@@ -1501,21 +1564,22 @@ ${organicBlock}
     let webSources = null;
 
     try {
-      // Build message array for Ollama safely
       const messagesPayload = [];
-      if (STATE.settings.systemPrompt) {
-        messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
-      }
+      let systemContent = STATE.settings.systemPrompt || '';
 
       // If Web Search is enabled, fetch real-time search context
       if (STATE.webSearchEnabled) {
         bubbleText.innerHTML = '<span style="color:var(--neon-cyan); font-size:0.8rem;"><i class="fa-solid fa-globe fa-spin"></i> Mencari informasi terkini di Google Serper...</span>';
         const webRes = await getWebSearchContext(promptText);
         if (webRes && webRes.systemPromptContext) {
-          messagesPayload.unshift({ role: 'system', content: webRes.systemPromptContext });
+          systemContent = systemContent ? `${systemContent}\n\n${webRes.systemPromptContext}` : webRes.systemPromptContext;
           webSources = webRes.sources;
         }
         bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+      }
+
+      if (systemContent) {
+        messagesPayload.push({ role: 'system', content: systemContent });
       }
       
       // History context - only attach image on the latest active user turn to prevent multi-turn schema rejections
@@ -1561,7 +1625,19 @@ ${organicBlock}
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error ${response.status}`);
+        let errDetail = `HTTP ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData && errData.error) {
+            errDetail = typeof errData.error === 'object' ? (errData.error.message || JSON.stringify(errData.error)) : errData.error;
+          }
+        } catch (je) {
+          try {
+            const raw = await response.text();
+            if (raw) errDetail = raw.substring(0, 200);
+          } catch (te) {}
+        }
+        throw new Error(errDetail);
       }
 
       const reader = response.body.getReader();
@@ -1625,46 +1701,19 @@ ${organicBlock}
       if (err.name === 'AbortError') {
         showToast('Generasi dihentikan oleh pengguna.');
       } else {
-        const isCorsOrNetwork = IS_GITHUB_PAGES && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError') || err.name === 'TypeError');
-        
-        let errorDetails = `
-          <div style="color:var(--neon-amber); line-height:1.5; margin-bottom:8px;">
-            <strong>❌ Gagal pada model ${escapeHtml(modelName)}:</strong> ${escapeHtml(err.message)}
-          </div>
-        `;
-        let extraActionHtml = '';
+        const errorHtml = formatModelErrorMessage('ollama', modelName, err, Boolean(image), STATE.webSearchEnabled);
 
-        if (isCorsOrNetwork) {
-          errorDetails = `
-            <div style="background:rgba(255,82,0,0.08); border:1px solid rgba(255,82,0,0.3); border-radius:8px; padding:12px; margin-bottom:10px;">
-              <div style="font-weight:700; color:var(--neon-amber); margin-bottom:6px; display:flex; align-items:center; gap:6px;">
-                <i class="fa-solid fa-shield-halved"></i> Batasan Browser CORS di GitHub Pages
-              </div>
-              <p style="font-size:0.82rem; color:var(--text-secondary); margin:0 0 8px 0; line-height:1.45;">
-                Browser web melarang koneksi langsung dari <code>github.io</code> ke server <code>ollama.com</code> karena belum dibukanya header CORS oleh Ollama.
-              </p>
-              <div style="font-size:0.8rem; color:var(--text-main);">
-                <strong>💡 Rekomendasi Solusi:</strong>
-                <ul style="margin:4px 0 0 16px; padding:0; line-height:1.45;">
-                  <li><strong>Gunakan OpenRouter (Cloud):</strong> Didukung 100% langsung di web GitHub Pages tanpa batasan CORS (tersedia model DeepSeek R1, Llama 3.3, Claude 3.5, Gemini 2.0 Flash).</li>
-                  <li><strong>Gunakan Desktop Gateway:</strong> Jalankan <code>ZOZ_ROUTER.bat</code> di PC lalu buka <code>http://localhost:4040</code> untuk kecepatan penuh Ollama Cloud tanpa hambatan CORS.</li>
-                </ul>
-              </div>
-            </div>
-          `;
-          extraActionHtml = `
+        bubbleText.innerHTML = `
+          ${errorHtml}
+          <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
             <button class="btn btn-sm btn-primary switch-openrouter-btn" style="font-size:0.75rem;">
               <i class="fa-solid fa-bolt"></i> Beralih & Jalankan via OpenRouter
             </button>
-          `;
-        }
-
-        bubbleText.innerHTML = `
-          ${errorDetails}
-          <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-            ${extraActionHtml}
             <button class="btn btn-sm btn-outline retry-send-btn" style="border-color:var(--neon-cyan); color:var(--neon-cyan); font-size:0.75rem;">
               <i class="fa-solid fa-rotate-right"></i> Coba Kirim Ulang
+            </button>
+            <button class="btn btn-sm btn-outline open-settings-btn" style="border-color:var(--neon-amber); color:var(--neon-amber); font-size:0.75rem;">
+              <i class="fa-solid fa-gear"></i> Buka Pengaturan
             </button>
           </div>
         `;
@@ -1684,6 +1733,11 @@ ${organicBlock}
         bubbleText.querySelector('.retry-send-btn')?.addEventListener('click', () => {
           assistantRow.remove();
           runOllamaStreaming(session, promptText, image, modelName);
+        });
+
+        bubbleText.querySelector('.open-settings-btn')?.addEventListener('click', () => {
+          syncSettingsModalFields();
+          openModal('settingsModal');
         });
         
         AudioEngine.error();
@@ -1719,19 +1773,21 @@ ${organicBlock}
 
     try {
       const messagesPayload = [];
-      if (STATE.settings.systemPrompt) {
-        messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
-      }
+      let systemContent = STATE.settings.systemPrompt || '';
 
       // If Web Search is enabled, fetch real-time search context
       if (STATE.webSearchEnabled) {
-        bubbleText.innerHTML = '<span style="color:var(--neon-cyan); font-size:0.8rem;"><i class="fa-solid fa-globe fa-spin"></i> Menghubungkan Web Search Google Serper...</span>';
+        bubbleText.innerHTML = '<span style="color:var(--neon-cyan); font-size:0.8rem;"><i class="fa-solid fa-globe fa-spin"></i> Menghubungkan Google Serper Web Search...</span>';
         const webRes = await getWebSearchContext(promptText);
         if (webRes && webRes.systemPromptContext) {
-          messagesPayload.unshift({ role: 'system', content: webRes.systemPromptContext });
+          systemContent = systemContent ? `${systemContent}\n\n${webRes.systemPromptContext}` : webRes.systemPromptContext;
           webSources = webRes.sources;
         }
         bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+      }
+
+      if (systemContent) {
+        messagesPayload.push({ role: 'system', content: systemContent });
       }
 
       // History context - safely format images
@@ -1781,7 +1837,19 @@ ${organicBlock}
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error ${response.status}`);
+        let errDetail = `HTTP ${response.status}`;
+        try {
+          const errJson = await response.json();
+          if (errJson && errJson.error) {
+            errDetail = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
+          }
+        } catch (je) {
+          try {
+            const raw = await response.text();
+            if (raw) errDetail = raw.substring(0, 200);
+          } catch (te) {}
+        }
+        throw new Error(errDetail);
       }
 
       const reader = response.body.getReader();
@@ -1849,13 +1917,16 @@ ${organicBlock}
       if (err.name === 'AbortError') {
         showToast('Generasi dihentikan.');
       } else {
+        const errorHtml = formatModelErrorMessage('openrouter', modelName, err, Boolean(image), STATE.webSearchEnabled);
+
         bubbleText.innerHTML = `
-          <div style="color:var(--neon-amber); line-height:1.5;">
-            <strong>❌ Gagal OpenRouter (${escapeHtml(modelName)}):</strong> ${escapeHtml(err.message)}
-          </div>
-          <div style="margin-top:10px; display:flex; gap:8px;">
+          ${errorHtml}
+          <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
             <button class="btn btn-sm btn-outline retry-send-btn" style="border-color:var(--neon-cyan); color:var(--neon-cyan); font-size:0.75rem;">
               <i class="fa-solid fa-rotate-right"></i> Coba Kirim Ulang
+            </button>
+            <button class="btn btn-sm btn-outline open-settings-btn" style="border-color:var(--neon-amber); color:var(--neon-amber); font-size:0.75rem;">
+              <i class="fa-solid fa-gear"></i> Buka Pengaturan & Key
             </button>
           </div>
         `;
@@ -1863,6 +1934,11 @@ ${organicBlock}
         bubbleText.querySelector('.retry-send-btn')?.addEventListener('click', () => {
           assistantRow.remove();
           runOpenRouterStreaming(session, promptText, image, modelName);
+        });
+
+        bubbleText.querySelector('.open-settings-btn')?.addEventListener('click', () => {
+          syncSettingsModalFields();
+          openModal('settingsModal');
         });
         
         AudioEngine.error();
@@ -1903,9 +1979,26 @@ ${organicBlock}
     const start = performance.now();
     let fullText = '';
     let tokens = 0;
+    let webSources = null;
 
     try {
       const messagesPayload = [];
+      let systemContent = STATE.settings.systemPrompt || '';
+
+      if (STATE.webSearchEnabled) {
+        bubbleText.innerHTML = '<span style="color:var(--neon-cyan); font-size:0.8rem;"><i class="fa-solid fa-globe fa-spin"></i> Mencari info Google Serper...</span>';
+        const webRes = await getWebSearchContext(text);
+        if (webRes && webRes.systemPromptContext) {
+          systemContent = systemContent ? `${systemContent}\n\n${webRes.systemPromptContext}` : webRes.systemPromptContext;
+          webSources = webRes.sources;
+        }
+        bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+      }
+
+      if (systemContent) {
+        messagesPayload.push({ role: 'system', content: systemContent });
+      }
+
       session.messages.filter(m => m.slot === 'A').forEach(m => {
         messagesPayload.push({ role: m.role, content: m.content || '' });
       });
@@ -1931,6 +2024,22 @@ ${organicBlock}
         }),
         signal: STATE.abortControllerA.signal
       });
+
+      if (!res.ok) {
+        let errDetail = `HTTP ${res.status}`;
+        try {
+          const errData = await res.json();
+          if (errData && errData.error) {
+            errDetail = typeof errData.error === 'object' ? (errData.error.message || JSON.stringify(errData.error)) : errData.error;
+          }
+        } catch (je) {
+          try {
+            const raw = await res.text();
+            if (raw) errDetail = raw.substring(0, 200);
+          } catch (te) {}
+        }
+        throw new Error(errDetail);
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -1959,6 +2068,9 @@ ${organicBlock}
       const totalTime = ((performance.now() - start) / 1000).toFixed(2);
       const tps = totalTime > 0 ? (tokens / totalTime).toFixed(1) : '0';
       bubbleText.innerHTML = renderMarkdown(fullText);
+      if (webSources && webSources.length > 0) {
+        renderMessageSources(assistantRow, webSources);
+      }
       if (els.arenaStatsA) els.arenaStatsA.innerText = `⏱️ ${totalTime}s • ⚡ ${tps} tps`;
 
       session.messages.push({
@@ -1967,6 +2079,7 @@ ${organicBlock}
         model: modelA,
         slot: 'A',
         engine: 'ollama',
+        sources: webSources,
         stats: { duration: totalTime, tps, tokens },
         timestamp: new Date().toISOString()
       });
@@ -1976,11 +2089,10 @@ ${organicBlock}
       if (e.name === 'AbortError') {
         showToast('Ollama Slot A dihentikan.');
       } else {
-        const isCors = IS_GITHUB_PAGES && (e.message.includes('Failed to fetch') || e.name === 'TypeError');
-        bubbleText.innerHTML = isCors
-          ? `<div style="color:var(--neon-amber); font-size:0.8rem; line-height:1.4;">❌ <strong>Ollama Web CORS Blocked:</strong> Browser memblokir koneksi langsung GitHub Pages ke Ollama. Gunakan Slot B (OpenRouter) atau jalankan Desktop Gateway <code>http://localhost:4040</code>.</div>`
-          : `<span style="color:var(--neon-amber);">❌ Error: ${escapeHtml(e.message)}</span>`;
-        if (els.arenaStatsA) els.arenaStatsA.innerText = 'Error';
+        const errorHtml = formatModelErrorMessage('ollama', modelA, e, false, STATE.webSearchEnabled);
+        bubbleText.innerHTML = errorHtml;
+        if (els.arenaStatsA) els.arenaStatsA.innerText = 'Peringatan';
+        AudioEngine.error();
       }
     } finally {
       STATE.isGeneratingA = false;
@@ -2025,9 +2137,26 @@ ${organicBlock}
     const start = performance.now();
     let fullText = '';
     let tokens = 0;
+    let webSources = null;
 
     try {
       const messagesPayload = [];
+      let systemContent = STATE.settings.systemPrompt || '';
+
+      if (STATE.webSearchEnabled) {
+        bubbleText.innerHTML = '<span style="color:var(--neon-cyan); font-size:0.8rem;"><i class="fa-solid fa-globe fa-spin"></i> Menghubungkan Google Serper Web Search...</span>';
+        const webRes = await getWebSearchContext(text);
+        if (webRes && webRes.systemPromptContext) {
+          systemContent = systemContent ? `${systemContent}\n\n${webRes.systemPromptContext}` : webRes.systemPromptContext;
+          webSources = webRes.sources;
+        }
+        bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+      }
+
+      if (systemContent) {
+        messagesPayload.push({ role: 'system', content: systemContent });
+      }
+
       session.messages.filter(m => m.slot === 'B').forEach(m => {
         messagesPayload.push({ role: m.role, content: m.content || '' });
       });
@@ -2054,6 +2183,22 @@ ${organicBlock}
         }),
         signal: STATE.abortControllerB.signal
       });
+
+      if (!res.ok) {
+        let errDetail = `HTTP ${res.status}`;
+        try {
+          const errJson = await res.json();
+          if (errJson && errJson.error) {
+            errDetail = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
+          }
+        } catch (je) {
+          try {
+            const raw = await res.text();
+            if (raw) errDetail = raw.substring(0, 200);
+          } catch (te) {}
+        }
+        throw new Error(errDetail);
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -2085,6 +2230,9 @@ ${organicBlock}
       const totalTime = ((performance.now() - start) / 1000).toFixed(2);
       const tps = totalTime > 0 ? (tokens / totalTime).toFixed(1) : '0';
       bubbleText.innerHTML = renderMarkdown(fullText);
+      if (webSources && webSources.length > 0) {
+        renderMessageSources(assistantRow, webSources);
+      }
       if (els.arenaStatsB) els.arenaStatsB.innerText = `⏱️ ${totalTime}s • ⚡ ${tps} tps`;
 
       session.messages.push({
@@ -2093,6 +2241,7 @@ ${organicBlock}
         model: modelB,
         slot: 'B',
         engine: 'openrouter',
+        sources: webSources,
         stats: { duration: totalTime, tps, tokens },
         timestamp: new Date().toISOString()
       });
@@ -2102,8 +2251,10 @@ ${organicBlock}
       if (e.name === 'AbortError') {
         showToast('OpenRouter Slot B dihentikan.');
       } else {
-        bubbleText.innerHTML = `<span style="color:var(--neon-amber);">❌ Error: ${escapeHtml(e.message)}</span>`;
-        if (els.arenaStatsB) els.arenaStatsB.innerText = 'Error';
+        const errorHtml = formatModelErrorMessage('openrouter', modelB, e, false, STATE.webSearchEnabled);
+        bubbleText.innerHTML = errorHtml;
+        if (els.arenaStatsB) els.arenaStatsB.innerText = 'Peringatan';
+        AudioEngine.error();
       }
     } finally {
       STATE.isGeneratingB = false;
