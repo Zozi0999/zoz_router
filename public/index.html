@@ -215,55 +215,20 @@
             <h1 class="hero-title">ZOZ ROUTER</h1>
             <p class="hero-subtitle">High-Velocity Neural Multi-Engine Gateway & AI Orchestrator</p>
             <p class="hero-desc">Jalankan model lokal Anda secara offline via <strong>Ollama</strong> atau integrasikan ratusan model cloud flagship dunia via <strong>OpenRouter</strong> dalam satu antarmuka futuristik.</p>
-
-            <div class="hero-quick-prompts triangle-prompts-grid">
-              <!-- APEX TOP CENTER CARD (Segitiga Puncak / Sorotan Tengah) -->
-              <div class="quick-prompt-card prompt-card-apex" data-prompt="Jelaskan arsitektur Transformer dan cara kerja self-attention mechanism dengan analogi yang mudah dipahami.">
-                <div class="prompt-icon-wrap"><i class="fa-solid fa-brain"></i></div>
-                <div class="card-text">
-                  <strong>Deep Dive AI Architecture</strong>
-                  <span>Jelaskan cara kerja self-attention mechanism</span>
-                </div>
-                <div class="prompt-card-badge"><i class="fa-solid fa-bolt"></i></div>
-              </div>
-
-              <!-- MIDDLE LEFT CARD (Kiri) -->
-              <div class="quick-prompt-card prompt-card-left" data-prompt="Buatkan skrip Node.js lengkap untuk proxy streaming SSE dengan caching memori dan retry logic.">
-                <div class="prompt-icon-wrap"><i class="fa-solid fa-code"></i></div>
-                <div class="card-text">
-                  <strong>Fullstack Code Generation</strong>
-                  <span>Node.js streaming SSE proxy & retry logic</span>
-                </div>
-                <div class="prompt-card-badge"><i class="fa-solid fa-arrow-right"></i></div>
-              </div>
-
-              <!-- MIDDLE RIGHT CARD (Kanan) -->
-              <div class="quick-prompt-card prompt-card-right" data-prompt="Lakukan audit keamanan pada pola autentikasi JWT dan berikan solusi pencegahan XSS/CSRF terbaik.">
-                <div class="prompt-icon-wrap"><i class="fa-solid fa-shield-halved"></i></div>
-                <div class="card-text">
-                  <strong>Cyber Security & Audit</strong>
-                  <span>Pola mitigasi JWT, XSS, dan CSRF attack</span>
-                </div>
-                <div class="prompt-card-badge"><i class="fa-solid fa-arrow-right"></i></div>
-              </div>
-
-              <!-- BOTTOM CENTER CORE CARD (Pangkal Tengah Bawah) -->
-              <div class="quick-prompt-card prompt-card-bottom" data-prompt="Bandingkan kelebihan dan kekurangan menjalankan LLM lokal (Ollama) vs Cloud API (OpenRouter) dari segi biaya, privasi, dan latensi.">
-                <div class="prompt-icon-wrap"><i class="fa-solid fa-scale-balanced"></i></div>
-                <div class="card-text">
-                  <strong>Ollama vs OpenRouter</strong>
-                  <span>Analisis komparasi privasi, biaya & latensi</span>
-                </div>
-                <div class="prompt-card-badge"><i class="fa-solid fa-network-wired"></i></div>
-              </div>
-            </div>
           </div>
 
           <!-- Active Message Feed List -->
           <div class="messages-list" id="messagesList"></div>
 
-          <!-- PULL-UP TO TRIGGER NEW CHAT (Modern ChatGPT Style) -->
+          <!-- PULL-UP TO TRIGGER NEW CHAT (Modern ChatGPT Style with Pull & Hold Loading) -->
           <div class="pull-up-new-chat-wrapper" id="pullUpNewChatWrapper" style="display: none;">
+            <!-- Stage 1: Loading Indicator on normal scroll / pull -->
+            <div class="pull-up-loading-indicator" id="pullUpLoadingIndicator">
+              <span class="pull-spinner"></span>
+              <span class="pull-text">Tahan untuk obrolan baru...</span>
+            </div>
+
+            <!-- Stage 2: Action Button after holding / threshold reached -->
             <button class="pull-up-new-chat-btn" id="pullUpNewChatBtn" title="Klik untuk memulai obrolan baru">
               <i class="fa-solid fa-plus"></i>
               <span class="btn-text">Mulai Obrolan Baru</span>

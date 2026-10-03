@@ -983,14 +983,14 @@ html, body {
   flex-direction: column;
 }
 
-/* ==================== WELCOME HERO (Triangular Neural Gateway Layout) ==================== */
+/* ==================== WELCOME HERO (Clean Minimalist Cyberpunk Hub) ==================== */
 .welcome-hero {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 36px 20px 24px 20px;
+  padding: 50px 24px 30px 24px;
   margin: auto 0;
   position: relative;
 }
@@ -1000,30 +1000,30 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 16px;
+  margin-bottom: 22px;
 }
 
 .hero-triangle-glow {
   position: absolute;
-  width: 96px;
-  height: 96px;
-  background: radial-gradient(circle, rgba(0, 240, 255, 0.25) 0%, rgba(0, 255, 194, 0.1) 50%, transparent 75%);
-  filter: blur(12px);
+  width: 120px;
+  height: 120px;
+  background: radial-gradient(circle, rgba(0, 240, 255, 0.3) 0%, rgba(0, 255, 194, 0.12) 50%, transparent 75%);
+  filter: blur(16px);
   pointer-events: none;
   z-index: 0;
 }
 
 .hero-logo-box {
   position: relative;
-  width: 72px;
-  height: 72px;
-  filter: drop-shadow(0 0 18px rgba(0, 240, 255, 0.65));
+  width: 84px;
+  height: 84px;
+  filter: drop-shadow(0 0 22px rgba(0, 240, 255, 0.7));
   z-index: 1;
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .hero-logo-box:hover {
-  transform: scale(1.08) rotate(3deg);
+  transform: scale(1.1) rotate(4deg);
 }
 
 .hero-logo {
@@ -1034,168 +1034,32 @@ html, body {
 
 .hero-title {
   font-family: var(--font-display);
-  font-size: 2.2rem;
+  font-size: 2.4rem;
   font-weight: 800;
-  letter-spacing: 2px;
-  background: linear-gradient(135deg, #FFF 30%, var(--neon-cyan) 80%);
+  letter-spacing: 2.5px;
+  background: linear-gradient(135deg, #FFF 30%, var(--neon-cyan) 85%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  margin-bottom: 6px;
-}
-
-.hero-subtitle {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--neon-teal);
-  letter-spacing: 0.5px;
   margin-bottom: 8px;
 }
 
-.hero-desc {
-  max-width: 580px;
-  font-size: 0.9rem;
-  color: var(--text-muted);
-  line-height: 1.5;
-  margin-bottom: 28px;
-}
-
-/* Triangular Prompts Grid */
-.hero-quick-prompts.triangle-prompts-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-  width: 100%;
-  max-width: 700px;
-  margin: 0 auto;
-}
-
-/* Prompt Card Base */
-.quick-prompt-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: 13px 16px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  text-align: left;
-  cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  position: relative;
-  overflow: hidden;
-}
-
-.quick-prompt-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--neon-cyan), transparent);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.quick-prompt-card:hover {
-  background: var(--bg-card);
-  border-color: var(--neon-cyan);
-  box-shadow: 0 6px 20px rgba(0, 240, 255, 0.16);
-  transform: translateY(-2px);
-}
-
-.quick-prompt-card:hover::before {
-  opacity: 1;
-}
-
-/* APEX TOP CENTER CARD (Segitiga Puncak) */
-.prompt-card-apex {
-  grid-column: 1 / -1;
-  max-width: 480px;
-  width: 100%;
-  margin: 0 auto;
-  background: linear-gradient(145deg, rgba(0, 240, 255, 0.07) 0%, var(--bg-surface) 100%);
-  border-color: rgba(0, 240, 255, 0.3);
-  box-shadow: 0 4px 18px rgba(0, 240, 255, 0.08);
-}
-
-.prompt-card-apex:hover {
-  background: linear-gradient(145deg, rgba(0, 240, 255, 0.14) 0%, var(--bg-card) 100%);
-  box-shadow: 0 8px 26px rgba(0, 240, 255, 0.22);
-}
-
-/* BOTTOM CENTER CORE CARD (Pangkal Tengah Bawah) */
-.prompt-card-bottom {
-  grid-column: 1 / -1;
-  max-width: 480px;
-  width: 100%;
-  margin: 0 auto;
-  background: linear-gradient(145deg, rgba(0, 255, 194, 0.06) 0%, var(--bg-surface) 100%);
-  border-color: rgba(0, 255, 194, 0.28);
-}
-
-.prompt-card-bottom:hover {
-  background: linear-gradient(145deg, rgba(0, 255, 194, 0.12) 0%, var(--bg-card) 100%);
-  box-shadow: 0 8px 26px rgba(0, 255, 194, 0.2);
-}
-
-/* Prompt Card Icon */
-.prompt-icon-wrap {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-sm);
-  background: rgba(0, 240, 255, 0.08);
-  border: 1px solid rgba(0, 240, 255, 0.2);
-  flex-shrink: 0;
-}
-
-.prompt-icon-wrap i {
+.hero-subtitle {
   font-size: 1.05rem;
-  color: var(--neon-cyan);
-}
-
-.prompt-card-bottom .prompt-icon-wrap {
-  background: rgba(0, 255, 194, 0.08);
-  border-color: rgba(0, 255, 194, 0.2);
-}
-
-.prompt-card-bottom .prompt-icon-wrap i {
+  font-weight: 600;
   color: var(--neon-teal);
+  letter-spacing: 0.6px;
+  margin-bottom: 12px;
 }
 
-.card-text {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-}
-
-.card-text strong {
-  font-size: 0.86rem;
-  color: var(--text-main);
-  margin-bottom: 2px;
-}
-
-.card-text span {
-  font-size: 0.74rem;
+.hero-desc {
+  max-width: 620px;
+  font-size: 0.94rem;
   color: var(--text-muted);
-  line-height: 1.3;
+  line-height: 1.6;
+  margin-bottom: 0;
 }
 
-.prompt-card-badge {
-  color: var(--text-dim);
-  font-size: 0.75rem;
-  transition: all 0.2s ease;
-}
-
-.quick-prompt-card:hover .prompt-card-badge {
-  color: var(--neon-cyan);
-  transform: translateX(2px);
-}
-
-/* ==================== PULL-UP TO TRIGGER NEW CHAT (Modern ChatGPT Style) ==================== */
+/* ==================== PULL-UP TO TRIGGER NEW CHAT (Modern ChatGPT Style with Pull & Hold) ==================== */
 .pull-up-new-chat-wrapper {
   position: sticky;
   bottom: 14px;
@@ -1209,7 +1073,7 @@ html, body {
   pointer-events: none;
   opacity: 0;
   transform: translateY(18px) scale(0.96);
-  transition: opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1), transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .pull-up-new-chat-wrapper.visible {
@@ -1218,12 +1082,44 @@ html, body {
   transform: translateY(0) scale(1);
 }
 
+/* Stage 1: Loading Indicator on Normal / Initial Pull */
+.pull-up-loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 16px;
+  background: rgba(10, 15, 29, 0.88);
+  border: 1px solid var(--border-subtle);
+  border-radius: 9999px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-family: var(--font-code);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  transition: all 0.2s ease;
+}
+
+.pull-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(0, 240, 255, 0.2);
+  border-top-color: var(--neon-cyan);
+  border-radius: 50%;
+  animation: pullSpin 0.75s linear infinite;
+}
+
+@keyframes pullSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Stage 2: Action Button after Holding / Threshold Reached */
 .pull-up-new-chat-btn {
-  display: inline-flex;
+  display: none;
   align-items: center;
   gap: 10px;
   padding: 9px 20px;
-  background: rgba(10, 15, 29, 0.9);
+  background: rgba(10, 15, 29, 0.92);
   border: 1px solid var(--neon-cyan);
   border-radius: 9999px;
   color: var(--text-main);
@@ -1233,9 +1129,23 @@ html, body {
   cursor: pointer;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 4px 20px rgba(0, 240, 255, 0.28), 0 0 10px rgba(0, 240, 255, 0.15);
+  box-shadow: 0 4px 22px rgba(0, 240, 255, 0.3), 0 0 12px rgba(0, 240, 255, 0.18);
   transition: all 0.22s ease;
   user-select: none;
+  animation: popInBtn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes popInBtn {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.pull-up-new-chat-wrapper.revealed .pull-up-loading-indicator {
+  display: none;
+}
+
+.pull-up-new-chat-wrapper.revealed .pull-up-new-chat-btn {
+  display: inline-flex;
 }
 
 .pull-up-new-chat-btn i.fa-plus {
@@ -1248,6 +1158,27 @@ html, body {
   font-size: 0.7rem;
   padding: 2px 7px;
   border-radius: 9999px;
+  background: rgba(0, 240, 255, 0.14);
+  color: var(--neon-teal);
+  font-family: var(--font-code);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.pull-up-new-chat-btn:hover {
+  background: rgba(0, 240, 255, 0.18);
+  border-color: var(--neon-teal);
+  box-shadow: 0 6px 28px rgba(0, 240, 255, 0.45);
+  transform: translateY(-2px);
+}
+
+.pull-up-new-chat-btn:hover i.fa-plus {
+  transform: rotate(90deg);
+}
+
+.pull-up-new-chat-btn:active {
+  transform: translateY(1px);
+}
   background: rgba(0, 240, 255, 0.14);
   color: var(--neon-teal);
   font-family: var(--font-code);
