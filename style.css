@@ -1178,27 +1178,6 @@ html, body {
 .pull-up-new-chat-btn:active {
   transform: translateY(1px);
 }
-  background: rgba(0, 240, 255, 0.14);
-  color: var(--neon-teal);
-  font-family: var(--font-code);
-  font-weight: 700;
-  letter-spacing: 0.5px;
-}
-
-.pull-up-new-chat-btn:hover {
-  background: rgba(0, 240, 255, 0.18);
-  border-color: var(--neon-teal);
-  box-shadow: 0 6px 28px rgba(0, 240, 255, 0.45);
-  transform: translateY(-2px);
-}
-
-.pull-up-new-chat-btn:hover i.fa-plus {
-  transform: rotate(90deg);
-}
-
-.pull-up-new-chat-btn:active {
-  transform: translateY(1px);
-}
 
 /* Messages List */
 .messages-list {

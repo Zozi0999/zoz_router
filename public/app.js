@@ -1037,7 +1037,7 @@
             els.chatViewport.scrollTo({ top: els.chatViewport.scrollHeight, behavior: 'smooth' });
           }
         }
-      }, 250);
+      }, 160);
     }
 
     // Pull-up New Chat button click handler
@@ -1133,7 +1133,7 @@
             if (wheelTimer) clearTimeout(wheelTimer);
             wheelTimer = setTimeout(() => {
               hidePullWrapper(false, true);
-            }, 400);
+            }, 180);
           }
         }
       }
@@ -1800,8 +1800,11 @@
       els.pullUpNewChatWrapper.style.display = 'none';
     }
     session.messages.forEach((msg, idx) => {
-      const textToDisplay = (msg.role === 'user' && msg.displayContent) ? msg.displayContent : msg.content;
+      let textToDisplay = (msg.role === 'user' && typeof msg.displayContent === 'string') ? msg.displayContent : (msg.content || '');
       const imagesToDisplay = msg.images || (msg.image ? [msg.image] : null);
+      if (imagesToDisplay && imagesToDisplay.length > 0 && /^📷 \[\d+ Foto Lampiran\]$/.test(textToDisplay.trim())) {
+        textToDisplay = '';
+      }
       appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs);
     });
 
@@ -1902,7 +1905,9 @@
       statsHtml = `<span class="meta-model-badge">${escapeHtml(model)}</span>`;
     }
 
-    const renderedBody = role === 'assistant' ? renderMarkdown(content) : escapeHtml(content).replace(/\n/g, '<br>');
+    const hasText = Boolean(content && String(content).trim().length > 0);
+    const renderedBody = role === 'assistant' ? renderMarkdown(content || '') : escapeHtml(content || '').replace(/\n/g, '<br>');
+    const textDisplayStyle = (!hasText && role === 'user') ? 'style="display:none;"' : '';
 
     let sourcesHtml = '';
     if (sources && Array.isArray(sources) && sources.length > 0 && role === 'assistant') {
@@ -1935,7 +1940,7 @@
         <div class="message-bubble">
           ${imageGalleryHtml}
           ${docsHtml}
-          <div class="msg-text-content">${renderedBody}</div>
+          <div class="msg-text-content" ${textDisplayStyle}>${renderedBody}</div>
           ${sourcesHtml}
         </div>
         <div class="message-actions-bar">
@@ -2818,12 +2823,11 @@ ${organicBlock}
     els.welcomeHero.style.display = 'none';
 
     // Build user message object
-    const displayPrompt = rawText || (docs.length > 0 ? `📎 [${docs.length} File Lampiran: ${docs.map(d => d.name).join(', ')}]` : (images.length > 0 ? `📷 [${images.length} Foto Lampiran]` : 'Analisis'));
     const docsMeta = docs.map(d => ({ name: d.name, size: d.size }));
     const userMsg = {
       role: 'user',
       content: text,
-      displayContent: rawText || '',
+      displayContent: rawText,
       docs: docsMeta,
       images: images,
       image: image,
@@ -2832,7 +2836,9 @@ ${organicBlock}
 
     // Auto title session if first message
     if (session.messages.length === 0) {
-      session.title = displayPrompt.length > 30 ? displayPrompt.substring(0, 30) + '...' : displayPrompt;
+      const fallbackTitle = docs.length > 0 ? (docs[0].name || 'Dokumen Lampiran') : (images.length > 0 ? 'Analisis Gambar' : 'Percakapan Baru');
+      const titleCandidate = rawText || fallbackTitle;
+      session.title = titleCandidate.length > 30 ? titleCandidate.substring(0, 30) + '...' : titleCandidate;
       renderChatHistory();
     }
 
@@ -2841,7 +2847,7 @@ ${organicBlock}
 
     // Immediately render user's message bubble in single mode
     if (STATE.mode !== 'arena') {
-      appendMessageElement('user', userMsg.displayContent || displayPrompt, images, 'Anda', null, session.messages.length - 1, null, docsMeta);
+      appendMessageElement('user', rawText, images, 'Anda', null, session.messages.length - 1, null, docsMeta);
       smartScrollChatToBottom(true);
     }
 
