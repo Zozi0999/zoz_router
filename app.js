@@ -563,6 +563,7 @@
             role: m.role,
             content: m.content,
             displayContent: m.displayContent,
+            docs: m.docs,
             model: m.model,
             engine: m.engine,
             slot: m.slot,
@@ -1403,7 +1404,8 @@
     els.welcomeHero.style.display = 'none';
     els.messagesList.innerHTML = '';
     session.messages.forEach((msg, idx) => {
-      appendMessageElement(msg.role, msg.content, msg.image, msg.model, msg.stats, idx, msg.sources);
+      const textToDisplay = (msg.role === 'user' && msg.displayContent) ? msg.displayContent : msg.content;
+      appendMessageElement(msg.role, textToDisplay, msg.image, msg.model, msg.stats, idx, msg.sources, msg.docs);
     });
 
     smartScrollChatToBottom(true);
@@ -1452,7 +1454,7 @@
   }
 
   // ==================== MESSAGE DOM BUILDER ====================
-  function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1, sources = null) {
+  function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1, sources = null, docs = null) {
     const row = document.createElement('div');
     row.className = `message-row ${role}`;
     row.dataset.index = index;
@@ -1463,6 +1465,21 @@
     let imageHtml = '';
     if (image) {
       imageHtml = `<img src="${image}" alt="Vision Attachment" class="attached-vision-img">`;
+    }
+
+    let docsHtml = '';
+    if (docs && Array.isArray(docs) && docs.length > 0 && role === 'user') {
+      docsHtml = `
+        <div class="attached-docs-badge-row">
+          ${docs.map(d => `
+            <div class="msg-doc-badge">
+              <i class="fa-solid fa-file-lines"></i>
+              <span class="msg-doc-name" title="${escapeHtml(d.name)}">${escapeHtml(d.name)}</span>
+              <span class="msg-doc-size">${escapeHtml(d.size || '')}</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
     }
 
     let statsHtml = '';
@@ -1508,6 +1525,7 @@
         </div>
         <div class="message-bubble">
           ${imageHtml}
+          ${docsHtml}
           <div class="msg-text-content">${renderedBody}</div>
           ${sourcesHtml}
         </div>
@@ -1667,41 +1685,105 @@
   }
 
   // ==================== DOCUMENT & FILE ATTACHMENT HANDLER ====================
-  function handleDocUpload(e) {
+  async function extractFileContent(file) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    
+    // 1. PDF Documents (Extract text per page safely via PDF.js)
+    if (ext === 'pdf' || file.type === 'application/pdf') {
+      try {
+        if (window.pdfjsLib) {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          const arrayBuffer = await file.arrayBuffer();
+          const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+          const pdf = await loadingTask.promise;
+          let fullText = '';
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items.map(item => item.str).join(' ');
+            if (pageText.trim()) {
+              fullText += `[Halaman ${i}]\n${pageText.trim()}\n\n`;
+            }
+          }
+          if (!fullText.trim()) {
+            return `[Dokumen PDF "${file.name}" tidak berisi lapisan teks digital / merupakan pindaian gambar.]`;
+          }
+          return fullText.trim();
+        }
+      } catch (pdfErr) {
+        console.warn('PDF.js parse error:', pdfErr);
+        return `[Gagal mengekstrak teks dari PDF "${file.name}": ${pdfErr.message}]`;
+      }
+    }
+
+    // 2. DOCX Documents (Extract text safely via JSZip & DOMParser)
+    if (ext === 'docx' || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      try {
+        if (window.JSZip) {
+          const arrayBuffer = await file.arrayBuffer();
+          const zip = await JSZip.loadAsync(arrayBuffer);
+          const docXml = zip.file('word/document.xml');
+          if (docXml) {
+            const xmlText = await docXml.async('text');
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xmlText, 'application/xml');
+            const paragraphs = xmlDoc.getElementsByTagName('w:p');
+            const lines = [];
+            for (let i = 0; i < paragraphs.length; i++) {
+              const texts = paragraphs[i].getElementsByTagName('w:t');
+              let pText = '';
+              for (let j = 0; j < texts.length; j++) {
+                pText += texts[j].textContent;
+              }
+              if (pText.trim()) lines.push(pText.trim());
+            }
+            if (lines.length > 0) return lines.join('\n');
+          }
+        }
+      } catch (docxErr) {
+        console.warn('DOCX parse error:', docxErr);
+        return `[Gagal mengekstrak teks dari DOCX "${file.name}": ${docxErr.message}]`;
+      }
+    }
+
+    // 3. Plain Text, Code, CSV, Markdown, JSON, YAML, etc.
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        let text = e.target.result || '';
+        // Sanitize: strip dangerous unprintable ASCII binary characters while preserving text and newlines
+        text = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+        resolve(text);
+      };
+      reader.onerror = () => resolve(`[Gagal membaca isi file: ${file.name}]`);
+      reader.readAsText(file);
+    });
+  }
+
+  async function handleDocUpload(e) {
     const files = Array.from(e.target.files || []);
     if (!files || files.length === 0) return;
 
-    let loaded = 0;
-    files.forEach(file => {
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        const content = evt.target.result || '';
-        const sizeStr = (file.size < 1024) 
-          ? `${file.size} B` 
-          : (file.size < 1024 * 1024) 
-            ? `${(file.size / 1024).toFixed(1)} KB` 
-            : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+    for (const file of files) {
+      const sizeStr = (file.size < 1024) 
+        ? `${file.size} B` 
+        : (file.size < 1024 * 1024) 
+          ? `${(file.size / 1024).toFixed(1)} KB` 
+          : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
 
-        STATE.attachedDocs.push({
-          name: file.name,
-          size: sizeStr,
-          content: content
-        });
-        loaded++;
-        if (loaded === files.length) {
-          renderAttachmentPreviews();
-          showToast(`📎 ${files.length} file dokumen berhasil dilampirkan.`);
-          AudioEngine.click();
-        }
-      };
-      reader.onerror = () => {
-        loaded++;
-        showToast(`Gagal membaca file: ${file.name}`, 'error');
-      };
-      reader.readAsText(file);
-    });
+      const content = await extractFileContent(file);
+
+      STATE.attachedDocs.push({
+        name: file.name,
+        size: sizeStr,
+        content: content
+      });
+    }
 
     if (els.docFileInput) els.docFileInput.value = '';
+    renderAttachmentPreviews();
+    showToast(`📎 ${files.length} file dokumen berhasil dimuat.`);
+    AudioEngine.click();
   }
 
   function removeAttachedDoc(idx) {
@@ -2268,8 +2350,8 @@ ${organicBlock}
 
   function updateModelUI() {
     const current = getCurrentModel();
-    els.currentModelLabel.innerText = current;
-    els.footerModelInfo.innerText = `Engine: ${STATE.mode.toUpperCase()} (${current})`;
+    if (els.currentModelLabel) els.currentModelLabel.innerText = current;
+    if (els.footerModelInfo) els.footerModelInfo.innerText = `Engine: ${STATE.mode.toUpperCase()} (${current})`;
   }
 
   function updateModeLayout(mode) {
@@ -2336,10 +2418,12 @@ ${organicBlock}
 
     // Build user message object
     const displayPrompt = rawText || (docs.length > 0 ? `📎 [${docs.length} File Lampiran: ${docs.map(d => d.name).join(', ')}]` : 'Analisis Gambar');
+    const docsMeta = docs.map(d => ({ name: d.name, size: d.size }));
     const userMsg = {
       role: 'user',
       content: text,
-      displayContent: displayPrompt,
+      displayContent: rawText || '',
+      docs: docsMeta,
       image: image,
       timestamp: new Date().toISOString()
     };
@@ -2355,7 +2439,7 @@ ${organicBlock}
 
     // Immediately render user's message bubble in single mode
     if (STATE.mode !== 'arena') {
-      appendMessageElement('user', displayPrompt, image, 'Anda');
+      appendMessageElement('user', userMsg.displayContent || displayPrompt, image, 'Anda', null, session.messages.length - 1, null, docsMeta);
       smartScrollChatToBottom(true);
     }
 

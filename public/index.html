@@ -273,7 +273,7 @@
 
             <!-- Dedicated Input Bar for Ollama -->
             <div class="arena-col-input-bar">
-              <textarea id="arenaInputA" placeholder="Prompt untuk Ollama Local... (Enter untuk kirim)" rows="1"></textarea>
+              <textarea id="arenaInputA" placeholder="Ketik pesan..." rows="1"></textarea>
               <div class="arena-input-actions">
                 <button class="composer-btn stop-btn" id="arenaStopBtnA" style="display: none;" title="Hentikan Ollama">
                   <i class="fa-solid fa-circle-stop"></i>
@@ -307,7 +307,7 @@
 
             <!-- Dedicated Input Bar for OpenRouter -->
             <div class="arena-col-input-bar">
-              <textarea id="arenaInputB" placeholder="Prompt untuk OpenRouter Cloud... (Enter untuk kirim)" rows="1"></textarea>
+              <textarea id="arenaInputB" placeholder="Ketik pesan..." rows="1"></textarea>
               <div class="arena-input-actions">
                 <button class="composer-btn stop-btn" id="arenaStopBtnB" style="display: none;" title="Hentikan OpenRouter">
                   <i class="fa-solid fa-circle-stop"></i>
@@ -364,15 +364,14 @@
               <!-- Attachment Popup Menu -->
               <div class="attachment-dropdown-popup" id="attachmentDropdown" style="display: none;">
                 <div class="attachment-dropdown-header">
-                  <span><i class="fa-solid fa-sparkles"></i> Lampiran Cerdas</span>
+                  <span><i class="fa-solid fa-sparkles"></i> Lampiran</span>
                 </div>
                 <button class="attachment-menu-item" id="attachOptionCamera" type="button">
                   <div class="attach-item-icon-box camera-accent">
                     <i class="fa-solid fa-camera"></i>
                   </div>
                   <div class="attach-item-info">
-                    <span class="attach-item-title">Ambil Foto / Kamera</span>
-                    <span class="attach-item-desc">Akses kamera perangkat langsung</span>
+                    <span class="attach-item-title">Ambil Foto</span>
                   </div>
                 </button>
                 <button class="attachment-menu-item" id="attachOptionImage" type="button">
@@ -380,8 +379,7 @@
                     <i class="fa-solid fa-image"></i>
                   </div>
                   <div class="attach-item-info">
-                    <span class="attach-item-title">Foto & Galeri</span>
-                    <span class="attach-item-desc">Pilih visual dari penyimpanan</span>
+                    <span class="attach-item-title">Galeri Foto</span>
                   </div>
                 </button>
                 <button class="attachment-menu-item" id="attachOptionDoc" type="button">
@@ -390,7 +388,6 @@
                   </div>
                   <div class="attach-item-info">
                     <span class="attach-item-title">Dokumen & File</span>
-                    <span class="attach-item-desc">PDF, TXT, MD, Kode, CSV</span>
                   </div>
                 </button>
               </div>
@@ -406,7 +403,7 @@
           <div class="input-field-wrap">
             <textarea 
               id="promptInput" 
-              placeholder="Ketik pesan atau instruksi untuk Zoz Router... (Shift + Enter untuk baris baru)" 
+              placeholder="Ketik pesan..." 
               rows="1"
             ></textarea>
           </div>
@@ -420,12 +417,6 @@
               <i class="fa-solid fa-paper-plane"></i>
             </button>
           </div>
-        </div>
-
-        <div class="composer-footnote">
-          <span>ZOZ ROUTER AI GATEWAY</span> • 
-          <span id="footerModelInfo">Engine: Ollama</span> • 
-          <span id="footerLatencyInfo">Ready</span>
         </div>
       </footer>
     </main>
@@ -754,6 +745,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
   <!-- Highlight.js for code syntax highlighting -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <!-- PDF.js for Clean Document Extraction -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- JSZip for DOCX Document Extraction -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
   <script src="app.js"></script>
 </body>
