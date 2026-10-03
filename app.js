@@ -1044,7 +1044,6 @@
     els.pullUpNewChatBtn?.addEventListener('click', () => {
       createNewSession();
       hidePullWrapper(true, false);
-      showToast('Memulai sesi obrolan baru...');
       AudioEngine.click();
     });
 
@@ -2874,14 +2873,13 @@ ${organicBlock}
     const rawMsg = (err && err.message) ? err.message : String(err || 'Unknown error');
     const msg = rawMsg.toLowerCase();
     const isCorsOrNetwork = IS_GITHUB_PAGES && (msg.includes('failed to fetch') || msg.includes('networkerror') || err.name === 'TypeError');
-    const isVisionUnsupported = hasImage && (
+    const actualHasImage = Array.isArray(hasImage) ? hasImage.length > 0 : Boolean(hasImage);
+    const isVisionUnsupported = actualHasImage && (
       msg.includes('image') || 
       msg.includes('vision') || 
       msg.includes('multimodal') || 
-      msg.includes('does not support') ||
-      msg.includes('unsupported') ||
-      msg.includes('schema') ||
-      msg.includes('invalid format') ||
+      msg.includes('does not support image') ||
+      msg.includes('unsupported image') ||
       msg.includes('no endpoints found that support image')
     );
     const isAuthError = msg.includes('401') || msg.includes('unauthorized') || msg.includes('api key') || msg.includes('user not found');
@@ -2896,7 +2894,7 @@ ${organicBlock}
     if (isVisionUnsupported) {
       title = `Model ${escapeHtml(modelName)} Tidak Mendukung Input Gambar`;
       desc = `Model ini menolak pemrosesan gambar multimodal karena beroperasi dalam mode teks murni (text-only).`;
-      advice = `💡 <strong>Saran:</strong> Semua model diizinkan mencoba memproses gambar. Jika model ini tidak mendukungnya, beralihlah ke model multimodal seperti <code>google/gemini-2.0-flash-exp:free</code>, <code>openai/gpt-4o</code>, <code>gemma4:31b</code>, atau kirim kembali prompt Anda tanpa lampiran gambar.`;
+      advice = `💡 <strong>Saran:</strong> Beralihlah ke model multimodal seperti <code>google/gemini-2.0-flash-exp:free</code>, <code>openai/gpt-4o</code>, <code>gemma4:31b</code>, atau kirim prompt Anda tanpa lampiran gambar.`;
     } else if (isCorsOrNetwork && engine === 'ollama') {
       title = `Batasan Koneksi Browser CORS (GitHub Pages)`;
       desc = `Browser memblokir koneksi langsung dari domain <code>github.io</code> ke server <code>ollama.com</code> karena pembatasan CORS server.`;
@@ -2932,6 +2930,89 @@ ${organicBlock}
     `;
   }
 
+  // Universal Message Payload Normalizer & Alternating Role Enforcer
+  function buildSanitizedMessagesPayload(sessionOrMessages, currentImages = [], engine = 'openrouter', systemContent = '') {
+    const messagesPayload = [];
+    if (systemContent && systemContent.trim()) {
+      messagesPayload.push({ role: 'system', content: systemContent.trim() });
+    }
+
+    const rawList = Array.isArray(sessionOrMessages?.messages) ? sessionOrMessages.messages : (Array.isArray(sessionOrMessages) ? sessionOrMessages : []);
+    const validList = [];
+
+    rawList.forEach((m, idx) => {
+      const isLatestTurn = (idx === rawList.length - 1);
+      const mImgs = (isLatestTurn && Array.isArray(currentImages) && currentImages.length > 0)
+        ? currentImages
+        : (Array.isArray(m.images) && m.images.length > 0 ? m.images : (m.image ? [m.image] : []));
+
+      const textContent = (m.content || '').trim();
+      if (!textContent && mImgs.length === 0) {
+        return; // skip blank message turns
+      }
+
+      validList.push({
+        role: m.role || 'user',
+        content: textContent || (mImgs.length > 0 ? 'Analisis gambar terlampir ini.' : '...'),
+        images: mImgs
+      });
+    });
+
+    if (validList.length === 0) {
+      validList.push({ role: 'user', content: 'Halo', images: [] });
+    }
+
+    // Merge consecutive messages with the same role to strictly enforce alternating roles
+    const mergedList = [];
+    for (const msg of validList) {
+      if (mergedList.length > 0 && mergedList[mergedList.length - 1].role === msg.role) {
+        const prev = mergedList[mergedList.length - 1];
+        prev.content = `${prev.content}\n\n${msg.content}`.trim();
+        if (msg.images && msg.images.length > 0) {
+          prev.images = [...(prev.images || []), ...msg.images];
+        }
+      } else {
+        mergedList.push({ ...msg });
+      }
+    }
+
+    const lastIdx = mergedList.length - 1;
+    mergedList.forEach((m, idx) => {
+      const isLatestTurn = (idx === lastIdx);
+      const imgs = m.images || [];
+
+      if (engine === 'ollama') {
+        const item = { role: m.role, content: m.content || '...' };
+        if (imgs.length > 0 && isLatestTurn) {
+          const rawImages = [];
+          imgs.forEach(img => {
+            const raw = String(img).replace(/^data:image\/[a-z0-9.+_-]+;base64,/i, '').replace(/[\r\n\s]/g, '');
+            if (raw) rawImages.push(raw);
+          });
+          if (rawImages.length > 0) item.images = rawImages;
+        }
+        messagesPayload.push(item);
+      } else {
+        // OpenRouter / OpenAI format
+        if (imgs.length > 0 && m.role === 'user') {
+          const contentParts = [
+            { type: 'text', text: m.content || 'Jelaskan dan analisis gambar terlampir ini.' }
+          ];
+          imgs.forEach(img => {
+            if (typeof img === 'string' && img.startsWith('data:image')) {
+              contentParts.push({ type: 'image_url', image_url: { url: img } });
+            }
+          });
+          messagesPayload.push({ role: m.role, content: contentParts });
+        } else {
+          messagesPayload.push({ role: m.role, content: m.content || '...' });
+        }
+      }
+    });
+
+    return messagesPayload;
+  }
+
   // --- OLLAMA STREAMING EXECUTION ---
   async function runOllamaStreaming(session, promptText, image, modelName) {
     setGeneratingState(true);
@@ -2952,7 +3033,6 @@ ${organicBlock}
     let webSources = null;
 
     try {
-      const messagesPayload = [];
       let systemContent = STATE.settings.systemPrompt || '';
 
       // If Web Search is enabled, fetch real-time search context
@@ -2965,25 +3045,8 @@ ${organicBlock}
         bubbleText.innerHTML = '<span class="typing-cursor"></span>';
       }
 
-      if (systemContent) {
-        messagesPayload.push({ role: 'system', content: systemContent });
-      }
-      
-      // History context - only attach images on the latest active user turn to prevent multi-turn schema rejections
-      const lastIndex = session.messages.length - 1;
-      session.messages.forEach((m, idx) => {
-        const item = { role: m.role, content: m.content || '' };
-        if (idx === lastIndex) {
-          const rawImages = [];
-          const mImgs = Array.isArray(m.images) && m.images.length > 0 ? m.images : (m.image ? [m.image] : []);
-          mImgs.forEach(img => {
-            const raw = img.replace(/^data:image\/[a-z0-9.+_-]+;base64,/i, '').replace(/[\r\n\s]/g, '');
-            if (raw) rawImages.push(raw);
-          });
-          if (rawImages.length > 0) item.images = rawImages;
-        }
-        messagesPayload.push(item);
-      });
+      const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
+      const messagesPayload = buildSanitizedMessagesPayload(session, rawImgs, 'ollama', systemContent);
 
       const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
       const requestBody = {
@@ -3101,7 +3164,8 @@ ${organicBlock}
       if (err.name === 'AbortError') {
         showToast('Generasi dihentikan oleh pengguna.');
       } else {
-        const errorHtml = formatModelErrorMessage('ollama', modelName, err, Boolean(image), STATE.webSearchEnabled);
+        const actualHasImage = Array.isArray(image) ? image.length > 0 : Boolean(image);
+        const errorHtml = formatModelErrorMessage('ollama', modelName, err, actualHasImage, STATE.webSearchEnabled);
 
         bubbleText.innerHTML = `
           ${errorHtml}
@@ -3125,7 +3189,6 @@ ${organicBlock}
             openModal('settingsModal');
             showToast('Silakan masukkan OpenRouter API Key Anda di menu Pengaturan.', 'info');
           } else {
-            showToast('Beralih ke OpenRouter. Mengirim prompt...', 'info');
             runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
           }
         });
@@ -3172,7 +3235,6 @@ ${organicBlock}
     let webSources = null;
 
     try {
-      const messagesPayload = [];
       let systemContent = STATE.settings.systemPrompt || '';
 
       // If Web Search is enabled, fetch real-time search context
@@ -3185,26 +3247,8 @@ ${organicBlock}
         bubbleText.innerHTML = '<span class="typing-cursor"></span>';
       }
 
-      if (systemContent) {
-        messagesPayload.push({ role: 'system', content: systemContent });
-      }
-
-      // History context - safely format images
-      const lastIndex = session.messages.length - 1;
-      session.messages.forEach((m, idx) => {
-        const mImgs = Array.isArray(m.images) && m.images.length > 0 ? m.images : (m.image ? [m.image] : []);
-        if (mImgs.length > 0 && idx === lastIndex) {
-          const contentParts = [
-            { type: 'text', text: m.content || 'Jelaskan dan analisis gambar terlampir ini secara detail.' }
-          ];
-          mImgs.forEach(img => {
-            contentParts.push({ type: 'image_url', image_url: { url: img } });
-          });
-          messagesPayload.push({ role: m.role, content: contentParts });
-        } else {
-          messagesPayload.push({ role: m.role, content: m.content || '' });
-        }
-      });
+      const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
+      const messagesPayload = buildSanitizedMessagesPayload(session, rawImgs, 'openrouter', systemContent);
 
       const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
       const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
@@ -3327,7 +3371,8 @@ ${organicBlock}
       if (err.name === 'AbortError') {
         showToast('Generasi dihentikan.');
       } else {
-        const errorHtml = formatModelErrorMessage('openrouter', modelName, err, Boolean(image), STATE.webSearchEnabled);
+        const actualHasImage = Array.isArray(image) ? image.length > 0 : Boolean(image);
+        const errorHtml = formatModelErrorMessage('openrouter', modelName, err, actualHasImage, STATE.webSearchEnabled);
 
         bubbleText.innerHTML = `
           ${errorHtml}
@@ -3392,7 +3437,6 @@ ${organicBlock}
     let webSources = null;
 
     try {
-      const messagesPayload = [];
       let systemContent = STATE.settings.systemPrompt || '';
 
       if (STATE.webSearchEnabled) {
@@ -3404,13 +3448,8 @@ ${organicBlock}
         bubbleText.innerHTML = '<span class="typing-cursor"></span>';
       }
 
-      if (systemContent) {
-        messagesPayload.push({ role: 'system', content: systemContent });
-      }
-
-      session.messages.filter(m => m.slot === 'A').forEach(m => {
-        messagesPayload.push({ role: m.role, content: m.content || '' });
-      });
+      const messagesA = session.messages.filter(m => m.slot === 'A');
+      const messagesPayload = buildSanitizedMessagesPayload(messagesA, [], 'ollama', systemContent);
 
       const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
       const headers = { 'Content-Type': 'application/json' };
@@ -3550,7 +3589,6 @@ ${organicBlock}
     let webSources = null;
 
     try {
-      const messagesPayload = [];
       let systemContent = STATE.settings.systemPrompt || '';
 
       if (STATE.webSearchEnabled) {
@@ -3562,13 +3600,8 @@ ${organicBlock}
         bubbleText.innerHTML = '<span class="typing-cursor"></span>';
       }
 
-      if (systemContent) {
-        messagesPayload.push({ role: 'system', content: systemContent });
-      }
-
-      session.messages.filter(m => m.slot === 'B').forEach(m => {
-        messagesPayload.push({ role: m.role, content: m.content || '' });
-      });
+      const messagesB = session.messages.filter(m => m.slot === 'B');
+      const messagesPayload = buildSanitizedMessagesPayload(messagesB, [], 'openrouter', systemContent);
 
       const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
       const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
