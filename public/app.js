@@ -122,7 +122,9 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     catalogTargetInputId: null,
     catalogSearchQuery: '',
     activeInspectionTab: 'agent1', // 'agent1' | 'agent2' | 'scraper'
-    currentLiveInspection: null
+    currentLiveInspection: null,
+    openRouterBalance: null, // { totalCredits, totalUsage, remaining, isFreeTier, lastChecked }
+    ollamaStatus: { online: false, modelCount: 0, lastChecked: null }
   };
 
   // ==================== AUDIO SYNTHESIZER (Sci-Fi Cyber Blips) ====================
@@ -279,9 +281,22 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     settingOllamaApiKey: $('#settingOllamaApiKey'),
     toggleShowOllamaKeyBtn: $('#toggleShowOllamaKeyBtn'),
     testOllamaBtn: $('#testOllamaBtn'),
+    settingOllamaStatusCard: $('#settingOllamaStatusCard'),
+    settingOllamaStatusDot: $('#settingOllamaStatusDot'),
+    settingOllamaStatusVal: $('#settingOllamaStatusVal'),
+    settingOllamaModelCountText: $('#settingOllamaModelCountText'),
+    btnRefreshOllamaStatus: $('#btnRefreshOllamaStatus'),
+    btnAddOllamaModels: $('#btnAddOllamaModels'),
     settingOpenRouterKey: $('#settingOpenRouterKey'),
     toggleShowKeyBtn: $('#toggleShowKeyBtn'),
     testOpenRouterBtn: $('#testOpenRouterBtn'),
+    settingOpenRouterBalanceCard: $('#settingOpenRouterBalanceCard'),
+    settingOpenRouterStatusDot: $('#settingOpenRouterStatusDot'),
+    settingOpenRouterBalanceVal: $('#settingOpenRouterBalanceVal'),
+    settingOpenRouterUsageText: $('#settingOpenRouterUsageText'),
+    settingOpenRouterTierText: $('#settingOpenRouterTierText'),
+    btnRefreshOpenRouterBalance: $('#btnRefreshOpenRouterBalance'),
+    btnAddOpenRouterCredits: $('#btnAddOpenRouterCredits'),
     settingSerperApiKey: $('#settingSerperApiKey'),
     toggleShowSerperKeyBtn: $('#toggleShowSerperKeyBtn'),
     testSerperBtn: $('#testSerperBtn'),
@@ -376,6 +391,13 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     catalogListContainer: $('#catalogListContainer'),
     badgeOllamaCount: $('#badgeOllamaCount'),
     badgeOpenRouterCount: $('#badgeOpenRouterCount'),
+    catalogBalanceBanner: $('#catalogBalanceBanner'),
+    catalogBalanceIcon: $('#catalogBalanceIcon'),
+    catalogBalanceText: $('#catalogBalanceText'),
+    catalogBalanceValue: $('#catalogBalanceValue'),
+    catalogBalanceSub: $('#catalogBalanceSub'),
+    btnRefreshCatalogBalance: $('#btnRefreshCatalogBalance'),
+    btnCatalogAddCredits: $('#btnCatalogAddCredits'),
     catalogStatusInfo: $('#catalogStatusInfo'),
 
     // Live Research Inspector Modal
@@ -2898,6 +2920,7 @@ ${organicBlock}
         if (STATE.activeCatalogTab === 'ollama') {
           renderLiveModelCatalog();
         }
+        updateOllamaStatusUI();
         return true;
       } else {
         STATE.ollamaModels = [];
@@ -2910,24 +2933,265 @@ ${organicBlock}
         if (STATE.activeCatalogTab === 'ollama') {
           renderLiveModelCatalog();
         }
+        updateOllamaStatusUI();
         return false;
       }
     } catch (e) {
       els.ollamaStatusVal.innerText = 'Tidak Terhubung';
       els.ollamaIndicator.className = 'status-indicator error';
       if (els.badgeOllamaCount) els.badgeOllamaCount.innerText = '0';
+      updateOllamaStatusUI();
       return false;
+    }
+  }
+
+  // ==================== REAL-TIME PROVIDER BALANCE & CREDITS MONITOR ====================
+  async function fetchOpenRouterCredits(forceRefresh = false) {
+    const key = (els.settingOpenRouterKey ? els.settingOpenRouterKey.value.trim() : '') || STATE.settings.openRouterKey;
+    if (!key) {
+      updateOpenRouterBalanceUI({ error: 'Key Belum Diisi' });
+      return null;
+    }
+
+    // Set UI loading indicator
+    if (els.settingOpenRouterBalanceVal) {
+      els.settingOpenRouterBalanceVal.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Memeriksa...';
+    }
+    if (els.catalogBalanceValue && STATE.activeCatalogTab === 'openrouter') {
+      els.catalogBalanceValue.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i>';
+    }
+
+    try {
+      const isDirect = IS_GITHUB_PAGES || !location.port;
+      const endpoint = isDirect ? 'https://openrouter.ai/api/v1/credits' : '/api/openrouter/credits';
+      const headers = {
+        'Authorization': `Bearer ${key}`
+      };
+      if (isDirect) {
+        headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
+        headers['X-Title'] = 'ZOZ Router';
+      }
+
+      const res = await fetch(endpoint, { headers, cache: 'no-store' });
+      let creditsData = null;
+      if (res.ok) {
+        const json = await res.json();
+        creditsData = json.data || json;
+      }
+
+      // Ambil metadata key & tier via auth/key
+      let keyData = null;
+      try {
+        const authEndpoint = isDirect ? 'https://openrouter.ai/api/v1/auth/key' : '/api/openrouter/auth-check';
+        const authRes = await fetch(authEndpoint, { headers, cache: 'no-store' });
+        if (authRes.ok) {
+          const authJson = await authRes.json();
+          keyData = authJson.data || authJson;
+        }
+      } catch (authErr) {
+        console.warn('Auth check notice:', authErr);
+      }
+
+      let totalCredits = creditsData?.total_credits != null ? Number(creditsData.total_credits) : null;
+      let totalUsage = creditsData?.total_usage != null ? Number(creditsData.total_usage) : (keyData?.usage != null ? Number(keyData.usage) : 0);
+      let limit = keyData?.limit != null ? Number(keyData.limit) : null;
+      let isFreeTier = Boolean(keyData?.is_free_tier);
+      let label = keyData?.label || 'API Key Aktif';
+
+      let remaining = null;
+      if (totalCredits != null) {
+        remaining = Math.max(0, totalCredits - totalUsage);
+      } else if (limit != null) {
+        remaining = Math.max(0, limit - totalUsage);
+      }
+
+      STATE.openRouterBalance = {
+        totalCredits,
+        totalUsage,
+        remaining,
+        limit,
+        isFreeTier,
+        label,
+        lastChecked: new Date()
+      };
+
+      updateOpenRouterBalanceUI(STATE.openRouterBalance);
+      return STATE.openRouterBalance;
+    } catch (e) {
+      console.warn('Error fetching OpenRouter credits:', e);
+      const errInfo = { error: e.message || 'Gagal memuat saldo' };
+      updateOpenRouterBalanceUI(errInfo);
+      return null;
+    }
+  }
+
+  function updateOpenRouterBalanceUI(balance) {
+    if (!balance || balance.error) {
+      // Sidebar status
+      if (els.openRouterStatusVal) {
+        els.openRouterStatusVal.innerText = balance?.error || 'Key Belum Diisi';
+      }
+      if (els.openRouterIndicator) {
+        els.openRouterIndicator.className = 'status-indicator error';
+      }
+
+      // Settings modal card
+      if (els.settingOpenRouterStatusDot) {
+        els.settingOpenRouterStatusDot.className = 'pulse-dot error';
+      }
+      if (els.settingOpenRouterBalanceVal) {
+        els.settingOpenRouterBalanceVal.innerText = balance?.error || 'Tidak Terhubung';
+        els.settingOpenRouterBalanceVal.style.color = 'var(--neon-magenta)';
+      }
+      if (els.settingOpenRouterUsageText) {
+        els.settingOpenRouterUsageText.innerText = 'Terpakai: -';
+      }
+      if (els.settingOpenRouterTierText) {
+        els.settingOpenRouterTierText.innerText = 'Status: Periksa API Key';
+      }
+
+      // Catalog Banner
+      if (els.catalogBalanceValue && STATE.activeCatalogTab === 'openrouter') {
+        els.catalogBalanceValue.innerText = '-';
+        els.catalogBalanceValue.style.color = 'var(--text-dim)';
+      }
+      if (els.catalogBalanceSub && STATE.activeCatalogTab === 'openrouter') {
+        els.catalogBalanceSub.innerText = '(Key belum diisi / error)';
+      }
+      return;
+    }
+
+    const remainingStr = balance.remaining != null 
+      ? `$${balance.remaining.toFixed(2)} USD` 
+      : (balance.isFreeTier ? 'Free Tier (Gratis)' : 'Aktif (Pay-as-you-go)');
+    
+    const usageStr = `Terpakai: $${(balance.totalUsage || 0).toFixed(4)}`;
+
+    // Sidebar status: tampilkan saldo langsung!
+    if (els.openRouterStatusVal) {
+      els.openRouterStatusVal.innerText = balance.remaining != null ? `$${balance.remaining.toFixed(2)}` : (balance.isFreeTier ? 'Free' : 'Aktif');
+    }
+    if (els.openRouterIndicator) {
+      els.openRouterIndicator.className = 'status-indicator online';
+    }
+
+    // Settings modal card
+    if (els.settingOpenRouterStatusDot) {
+      if (balance.remaining != null && balance.remaining <= 0.05) {
+        els.settingOpenRouterStatusDot.className = 'pulse-dot warning';
+      } else {
+        els.settingOpenRouterStatusDot.className = 'pulse-dot active';
+      }
+    }
+
+    if (els.settingOpenRouterBalanceVal) {
+      els.settingOpenRouterBalanceVal.innerText = remainingStr;
+      if (balance.remaining != null && balance.remaining <= 0.05) {
+        els.settingOpenRouterBalanceVal.style.color = 'var(--neon-magenta)';
+      } else {
+        els.settingOpenRouterBalanceVal.style.color = 'var(--neon-amber)';
+      }
+    }
+
+    if (els.settingOpenRouterUsageText) {
+      els.settingOpenRouterUsageText.innerHTML = `<i class="fa-solid fa-receipt"></i> ${usageStr}`;
+    }
+
+    if (els.settingOpenRouterTierText) {
+      const tierBadge = balance.isFreeTier ? 'Akun Free' : (balance.label || 'Aktif');
+      els.settingOpenRouterTierText.innerHTML = `<i class="fa-solid fa-shield-check"></i> ${escapeHtml(tierBadge)}`;
+    }
+
+    // Banner di Live Model Catalog Modal
+    if (STATE.activeCatalogTab === 'openrouter') {
+      updateCatalogBalanceBannerUI('openrouter');
+    }
+  }
+
+  function updateOllamaStatusUI() {
+    const isOnline = (STATE.ollamaModels && STATE.ollamaModels.length > 0) && (STATE.ollamaModels[0]?.cat !== 'error');
+    const modelCount = STATE.ollamaModels ? STATE.ollamaModels.length : 0;
+
+    STATE.ollamaStatus = {
+      online: isOnline,
+      modelCount,
+      lastChecked: new Date()
+    };
+
+    if (els.settingOllamaStatusDot) {
+      els.settingOllamaStatusDot.className = isOnline ? 'pulse-dot active' : 'pulse-dot warning';
+    }
+
+    if (els.settingOllamaStatusVal) {
+      els.settingOllamaStatusVal.innerText = isOnline ? '100% Gratis & Lokal (Unlimited)' : 'Siaga / Belum Terkoneksi';
+      els.settingOllamaStatusVal.style.color = isOnline ? 'var(--neon-teal)' : 'var(--neon-amber)';
+    }
+
+    if (els.settingOllamaModelCountText) {
+      els.settingOllamaModelCountText.innerHTML = `<i class="fa-solid fa-microchip"></i> ${modelCount} Model Terpasang`;
+    }
+
+    // Banner di Live Model Catalog Modal
+    if (STATE.activeCatalogTab === 'ollama') {
+      updateCatalogBalanceBannerUI('ollama');
+    }
+  }
+
+  function updateCatalogBalanceBannerUI(tab = 'openrouter') {
+    if (!els.catalogBalanceBanner) return;
+
+    if (tab === 'openrouter') {
+      const bal = STATE.openRouterBalance;
+      const remainingStr = bal && bal.remaining != null 
+        ? `$${bal.remaining.toFixed(2)} USD` 
+        : (bal?.isFreeTier ? 'Free Tier' : (bal?.error ? 'Belum Terhubung' : 'Cek Saldo'));
+      
+      const usageStr = bal && bal.totalUsage != null ? `(Terpakai: $${bal.totalUsage.toFixed(3)})` : '';
+
+      if (els.catalogBalanceIcon) {
+        els.catalogBalanceIcon.innerHTML = '<i class="fa-solid fa-coins" style="color: var(--neon-amber); font-size: 0.95rem;"></i>';
+      }
+      if (els.catalogBalanceText) {
+        els.catalogBalanceText.innerHTML = `Saldo OpenRouter: <strong id="catalogBalanceValue" style="color: var(--neon-amber); font-family: var(--font-code);">${escapeHtml(remainingStr)}</strong>`;
+      }
+      if (els.catalogBalanceSub) {
+        els.catalogBalanceSub.innerText = usageStr;
+      }
+      if (els.btnCatalogAddCredits) {
+        els.btnCatalogAddCredits.href = 'https://openrouter.ai/credits';
+        els.btnCatalogAddCredits.innerHTML = '<i class="fa-solid fa-credit-card"></i> + Beli / Tambah Saldo';
+        els.btnCatalogAddCredits.className = 'btn btn-xs btn-primary-neon';
+        els.btnCatalogAddCredits.title = 'Buka halaman resmi top-up / pembelian kredit OpenRouter';
+      }
+    } else {
+      // Ollama tab
+      const isOnline = STATE.ollamaStatus?.online ?? ((STATE.ollamaModels || []).length > 0);
+      const count = STATE.ollamaModels ? STATE.ollamaModels.length : 0;
+
+      if (els.catalogBalanceIcon) {
+        els.catalogBalanceIcon.innerHTML = '<i class="fa-solid fa-server" style="color: var(--neon-teal); font-size: 0.95rem;"></i>';
+      }
+      if (els.catalogBalanceText) {
+        els.catalogBalanceText.innerHTML = `Status Ollama: <strong id="catalogBalanceValue" style="color: var(--neon-teal);">${isOnline ? '100% Gratis & Lokal (Unlimited)' : 'Siaga / Menghubungkan...'}</strong>`;
+      }
+      if (els.catalogBalanceSub) {
+        els.catalogBalanceSub.innerText = `(${count} Model di Disk Lokal)`;
+      }
+      if (els.btnCatalogAddCredits) {
+        els.btnCatalogAddCredits.href = 'https://ollama.com/library';
+        els.btnCatalogAddCredits.innerHTML = '<i class="fa-solid fa-box-open"></i> + Tambah Model Baru';
+        els.btnCatalogAddCredits.className = 'btn btn-xs btn-outline-teal';
+        els.btnCatalogAddCredits.title = 'Jelajahi & pasang ribuan model gratis dari Perpustakaan Resmi Ollama';
+      }
     }
   }
 
   async function checkOpenRouterStatus() {
     if (!STATE.settings.openRouterKey) {
-      els.openRouterStatusVal.innerText = 'Key Belum Diisi';
-      els.openRouterIndicator.className = 'status-indicator error';
+      updateOpenRouterBalanceUI({ error: 'Key Belum Diisi' });
       return;
     }
-    els.openRouterStatusVal.innerText = 'Key Tersimpan';
-    els.openRouterIndicator.className = 'status-indicator online';
+    await fetchOpenRouterCredits();
   }
 
   async function fetchOpenRouterModelsList() {
@@ -7412,6 +7676,14 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     
     updateCatalogTabsUI();
     renderLiveModelCatalog();
+    updateCatalogBalanceBannerUI(STATE.activeCatalogTab);
+
+    // Auto-sync status & balance on open
+    if (STATE.activeCatalogTab === 'openrouter') {
+      fetchOpenRouterCredits();
+    } else {
+      updateOllamaStatusUI();
+    }
 
     openModal('liveModelCatalogModal');
   }
@@ -7423,6 +7695,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     if (els.btnTabCatalogOpenRouter) {
       els.btnTabCatalogOpenRouter.classList.toggle('active', STATE.activeCatalogTab === 'openrouter');
     }
+    updateCatalogBalanceBannerUI(STATE.activeCatalogTab);
   }
 
   function renderLiveModelCatalog() {
@@ -8499,6 +8772,8 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     // Settings Actions
     els.settingsBtn.addEventListener('click', () => {
       syncSettingsModalFields();
+      fetchOpenRouterCredits();
+      updateOllamaStatusUI();
       openModal('settingsModal');
     });
 
@@ -8625,17 +8900,38 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
           const data = await res.json();
           if (res.ok && data.models && data.models.length > 0) {
             showToast(`✅ Koneksi Ollama sukses! Ditemukan ${data.models.length} model (${data.cloud_auth ? 'Cloud Auth' : 'Local'}).`);
+            await checkOllamaHealth();
+            updateOllamaStatusUI();
           } else if (data.server_running) {
             showToast(`✅ Ollama terhubung & siap digunakan.`);
+            await checkOllamaHealth();
+            updateOllamaStatusUI();
           } else if (key) {
             showToast(`✅ Ollama API Key tersimpan! Mode Cloud aktif.`);
+            await checkOllamaHealth();
+            updateOllamaStatusUI();
           } else {
             showToast(`❌ Gagal: ${data.error || data.warning || 'Ollama tidak merespons'}`, 'error');
+            updateOllamaStatusUI();
           }
         }
       } catch (e) {
         showToast('❌ Gagal memeriksa endpoint Ollama: ' + e.message, 'error');
+        updateOllamaStatusUI();
       }
+    });
+
+    els.btnRefreshOllamaStatus?.addEventListener('click', async () => {
+      if (els.btnRefreshOllamaStatus) {
+        els.btnRefreshOllamaStatus.innerHTML = '<i class="fa-solid fa-arrows-rotate fa-spin"></i> Cek...';
+      }
+      await checkOllamaHealth();
+      updateOllamaStatusUI();
+      if (els.btnRefreshOllamaStatus) {
+        els.btnRefreshOllamaStatus.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Cek Status';
+      }
+      showToast('🦙 Status Ollama diperbarui!');
+      AudioEngine.click();
     });
 
     els.testOpenRouterBtn.addEventListener('click', async () => {
@@ -8651,12 +8947,26 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         const data = await res.json();
         if (res.ok) {
           showToast('✅ OpenRouter API Key valid & aktif!');
+          await fetchOpenRouterCredits(true);
         } else {
           showToast(`❌ Validasi gagal: ${data.error || 'Key tidak valid'}`, 'error');
+          updateOpenRouterBalanceUI({ error: data.error || 'Key tidak valid' });
         }
       } catch (e) {
         showToast('❌ Gagal memeriksa API Key.', 'error');
       }
+    });
+
+    els.btnRefreshOpenRouterBalance?.addEventListener('click', async () => {
+      if (els.btnRefreshOpenRouterBalance) {
+        els.btnRefreshOpenRouterBalance.innerHTML = '<i class="fa-solid fa-arrows-rotate fa-spin"></i> Cek...';
+      }
+      await fetchOpenRouterCredits(true);
+      if (els.btnRefreshOpenRouterBalance) {
+        els.btnRefreshOpenRouterBalance.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Cek Saldo';
+      }
+      showToast('💰 Saldo OpenRouter disinkronkan!');
+      AudioEngine.click();
     });
 
     els.saveSettingsBtn.addEventListener('click', () => {
@@ -8752,12 +9062,36 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       if (els.btnRefreshLiveCatalog) {
         els.btnRefreshLiveCatalog.innerHTML = '<i class="fa-solid fa-arrows-rotate fa-spin"></i> Memuat...';
       }
-      await Promise.all([checkOllamaHealth(), fetchOpenRouterModelsList()]);
+      await Promise.all([
+        checkOllamaHealth(), 
+        fetchOpenRouterModelsList(),
+        fetchOpenRouterCredits(true)
+      ]);
       renderLiveModelCatalog();
+      updateCatalogBalanceBannerUI(STATE.activeCatalogTab);
       if (els.btnRefreshLiveCatalog) {
         els.btnRefreshLiveCatalog.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Refresh';
       }
-      showToast('🔄 Katalog model berhasil disinkronkan secara real-time!');
+      showToast('🔄 Katalog model & saldo berhasil disinkronkan secara real-time!');
+      AudioEngine.click();
+    });
+
+    els.btnRefreshCatalogBalance?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (els.btnRefreshCatalogBalance) {
+        els.btnRefreshCatalogBalance.innerHTML = '<i class="fa-solid fa-arrows-rotate fa-spin"></i>';
+      }
+      if (STATE.activeCatalogTab === 'openrouter') {
+        await fetchOpenRouterCredits(true);
+      } else {
+        await checkOllamaHealth();
+        updateOllamaStatusUI();
+      }
+      updateCatalogBalanceBannerUI(STATE.activeCatalogTab);
+      if (els.btnRefreshCatalogBalance) {
+        els.btnRefreshCatalogBalance.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i>';
+      }
+      showToast('🔄 Status & saldo provider diperbarui!');
       AudioEngine.click();
     });
 

@@ -431,6 +431,28 @@
             <small class="form-hint">Diperlukan jika instance Ollama Anda (lokal / remote / cloud) dilindungi autentikasi API Key.</small>
           </div>
 
+          <!-- Ollama Real-Time Status & Model Library Card -->
+          <div class="provider-status-card" id="settingOllamaStatusCard">
+            <div class="provider-status-header">
+              <div class="status-indicator">
+                <span class="pulse-dot active" id="settingOllamaStatusDot"></span>
+                <span class="status-title"><i class="fa-solid fa-server" style="color:var(--neon-teal);"></i> Status Ollama:</span>
+                <strong class="balance-value free-tier" id="settingOllamaStatusVal">100% Gratis &amp; Lokal (Unlimited)</strong>
+              </div>
+              <div class="status-actions">
+                <button type="button" class="btn btn-xs btn-outline" id="btnRefreshOllamaStatus" title="Perbarui Status &amp; Model Ollama">
+                  <i class="fa-solid fa-arrows-rotate"></i> Cek Status
+                </button>
+                <a href="https://ollama.com/library" target="_blank" rel="noopener noreferrer" class="btn btn-xs btn-outline-teal" id="btnAddOllamaModels" title="Jelajahi dan Pasang Model Baru di Perpustakaan Resmi Ollama">
+                  <i class="fa-solid fa-box-open"></i> + Tambah Model
+                </a>
+              </div>
+            </div>
+            <div class="provider-status-meta" id="settingOllamaStatusMeta">
+              <span id="settingOllamaModelCountText"><i class="fa-solid fa-microchip"></i> 0 Model Terpasang</span> • <span><i class="fa-solid fa-bolt"></i> Bebas Biaya Token &amp; Kuota</span>
+            </div>
+          </div>
+
           <div class="form-group">
             <label><i class="fa-solid fa-key"></i> OpenRouter API Key</label>
             <div class="input-with-action">
@@ -439,6 +461,28 @@
               <button class="btn btn-sm btn-outline" id="testOpenRouterBtn">Validasi Key</button>
             </div>
             <small class="form-hint">API Key disimpan aman di browser lokal Anda (localStorage). Dapatkan di <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a>.</small>
+          </div>
+
+          <!-- OpenRouter Real-Time Balance & Top-Up Card -->
+          <div class="provider-status-card" id="settingOpenRouterBalanceCard">
+            <div class="provider-status-header">
+              <div class="status-indicator">
+                <span class="pulse-dot" id="settingOpenRouterStatusDot"></span>
+                <span class="status-title"><i class="fa-solid fa-coins" style="color:var(--neon-amber);"></i> Saldo OpenRouter:</span>
+                <strong class="balance-value" id="settingOpenRouterBalanceVal">Belum diperiksa</strong>
+              </div>
+              <div class="status-actions">
+                <button type="button" class="btn btn-xs btn-outline" id="btnRefreshOpenRouterBalance" title="Perbarui Saldo Real-Time">
+                  <i class="fa-solid fa-arrows-rotate"></i> Cek Saldo
+                </button>
+                <a href="https://openrouter.ai/credits" target="_blank" rel="noopener noreferrer" class="btn btn-xs btn-primary-neon" id="btnAddOpenRouterCredits" title="Beli atau Tambah Saldo Langsung di OpenRouter">
+                  <i class="fa-solid fa-credit-card"></i> + Beli / Tambah Saldo
+                </a>
+              </div>
+            </div>
+            <div class="provider-status-meta" id="settingOpenRouterBalanceMeta">
+              <span id="settingOpenRouterUsageText"><i class="fa-solid fa-receipt"></i> Terpakai: $0.00</span> • <span id="settingOpenRouterTierText"><i class="fa-solid fa-shield-check"></i> Status: Siap</span>
+            </div>
           </div>
 
           <div class="form-group">
@@ -843,6 +887,23 @@
           <button class="btn btn-sm btn-outline" id="btnRefreshLiveCatalog" title="Perbarui model dari API secara langsung">
             <i class="fa-solid fa-arrows-rotate"></i> Refresh
           </button>
+        </div>
+
+        <!-- Live Provider Balance & Action Banner in Catalog -->
+        <div class="catalog-balance-banner" id="catalogBalanceBanner">
+          <div class="catalog-balance-info">
+            <span id="catalogBalanceIcon"><i class="fa-solid fa-coins" style="color: var(--neon-amber);"></i></span>
+            <span id="catalogBalanceText">Saldo OpenRouter: <strong id="catalogBalanceValue" style="color: var(--neon-amber);">Memuat...</strong></span>
+            <span id="catalogBalanceSub">(Terpakai: $0.00)</span>
+          </div>
+          <div class="catalog-balance-actions">
+            <button type="button" class="btn btn-xs btn-outline" id="btnRefreshCatalogBalance" title="Perbarui Saldo Real-Time">
+              <i class="fa-solid fa-arrows-rotate"></i>
+            </button>
+            <a href="https://openrouter.ai/credits" target="_blank" rel="noopener noreferrer" class="btn btn-xs btn-primary-neon" id="btnCatalogAddCredits" title="Beli atau Tambah Saldo di OpenRouter">
+              <i class="fa-solid fa-credit-card"></i> + Beli / Tambah Saldo
+            </a>
+          </div>
         </div>
 
         <!-- Target Hint -->

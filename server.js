@@ -2059,6 +2059,46 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // OpenRouter: Get Real-Time Credits & Balance
+  if (pathname === '/api/openrouter/credits' && method === 'GET') {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader) {
+      return sendJSON(res, 401, { error: 'Authorization header is required' });
+    }
+
+    const options = {
+      hostname: 'openrouter.ai',
+      port: 443,
+      path: '/api/v1/credits',
+      method: 'GET',
+      headers: {
+        'Authorization': authHeader,
+        'User-Agent': 'ZozRouter/1.0'
+      }
+    };
+
+    const proxyReq = https.request(options, (proxyRes) => {
+      let rawData = '';
+      proxyRes.on('data', chunk => rawData += chunk);
+      proxyRes.on('end', () => {
+        try {
+          const data = JSON.parse(rawData);
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          return sendJSON(res, proxyRes.statusCode, data);
+        } catch (e) {
+          return sendJSON(res, 502, { error: 'Failed to parse credits response' });
+        }
+      });
+    });
+
+    proxyReq.on('error', (err) => {
+      return sendJSON(res, 503, { error: 'Credits check failed: ' + err.message });
+    });
+
+    proxyReq.end();
+    return;
+  }
+
   // OpenRouter: Chat Completion (Streaming Proxy)
   if (pathname === '/api/openrouter/chat' && method === 'POST') {
     try {
