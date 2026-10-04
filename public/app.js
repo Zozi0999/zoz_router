@@ -4225,6 +4225,22 @@ ${organicBlock}
     }
   }
 
+  // Helper untuk menyeimbangkan artikel scraper antara Agen 1 (Primer) dan Agen 2 (Divergen)
+  function getBalancedScrapeList(sources, maxCount = 6) {
+    if (!Array.isArray(sources) || sources.length === 0) return [];
+    const primer = sources.filter(s => (s.sourceProvider || '').includes('Primer') || (!(s.sourceProvider || '').includes('Divergen')));
+    const divergen = sources.filter(s => (s.sourceProvider || '').includes('Divergen'));
+    if (primer.length === 0 || divergen.length === 0) return sources.slice(0, maxCount);
+    const balanced = [];
+    let p = 0;
+    let d = 0;
+    while (balanced.length < maxCount && (p < primer.length || d < divergen.length)) {
+      if (p < primer.length && balanced.length < maxCount) balanced.push(primer[p++]);
+      if (d < divergen.length && balanced.length < maxCount) balanced.push(divergen[d++]);
+    }
+    return balanced;
+  }
+
   async function streamLLMSynthesis(engine, modelName, systemPrompt, session, bubbleText) {
     const streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
     let fullText = '';
@@ -4561,6 +4577,7 @@ ${organicBlock}
         }
         dataTemuan.push(`### Temuan Multi-Sumber Iterasi 1 (Query: "${currentQuery}"):\n${iter1Summary || 'Pencarian selesai.'}`);
 
+        const balancedArticlesIter1 = getBalancedScrapeList(allSources, 6);
         updateLiveInspectionData({
           topik: contextualTopic,
           currentQuery: currentQuery,
@@ -4585,16 +4602,17 @@ ${organicBlock}
           },
           scraper: {
             status: 'siap',
-            totalScraped: Math.min(allSources.length, 5),
-            articles: allSources.slice(0, 5).map((s, idx) => ({
+            totalScraped: balancedArticlesIter1.length,
+            articles: balancedArticlesIter1.map((s, idx) => ({
               title: s.title,
               url: s.url,
               domain: s.domain || (s.url ? s.url.replace(/^https?:\/\//i, '').split('/')[0] : ''),
+              sourceProvider: s.sourceProvider || (s.isDivergent ? 'Serper Divergen' : 'Serper Primer'),
               length: (s.snippet || '').length * 6 + 320,
               sample: s.snippet || 'Menunggu pemindaian konten mendalam...'
             }))
           },
-          scrapedArticlesCount: Math.min(allSources.length, 5),
+          scrapedArticlesCount: balancedArticlesIter1.length,
           totalSourcesCount: allSources.length
         });
 
@@ -4626,6 +4644,7 @@ ${organicBlock}
         }
         dataTemuan.push(`### Temuan Multi-Sumber Iterasi 2 (Query: "${subQuery}"):\n${iter2Summary || 'Eksplorasi lanjutan selesai.'}`);
 
+        const balancedArticlesIter2 = getBalancedScrapeList(allSources, 6);
         updateLiveInspectionData({
           topik: contextualTopic,
           currentQuery: subQuery,
@@ -4650,16 +4669,17 @@ ${organicBlock}
           },
           scraper: {
             status: 'selesai',
-            totalScraped: Math.min(allSources.length, 5),
-            articles: allSources.slice(0, 5).map((s, idx) => ({
+            totalScraped: balancedArticlesIter2.length,
+            articles: balancedArticlesIter2.map((s, idx) => ({
               title: s.title,
               url: s.url,
               domain: s.domain || (s.url ? s.url.replace(/^https?:\/\//i, '').split('/')[0] : ''),
+              sourceProvider: s.sourceProvider || (s.isDivergent ? 'Serper Divergen' : 'Serper Primer'),
               length: (s.snippet || '').length * 8 + 450,
-              sample: `${s.snippet}\n[Konten artikel ${idx + 1} utuh telah dipindai dan dievaluasi untuk sintesis]`
+              sample: `${s.snippet}\n[Konten artikel ${idx + 1} utuh telah dipindai (${s.sourceProvider || (s.isDivergent ? 'Serper Divergen' : 'Serper Primer')}) dan dievaluasi untuk sintesis]`
             }))
           },
-          scrapedArticlesCount: Math.min(allSources.length, 5),
+          scrapedArticlesCount: balancedArticlesIter2.length,
           totalSourcesCount: allSources.length
         });
 
@@ -6839,15 +6859,22 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
             </div>
           ` : articles.map((art, idx) => `
             <div class="inspector-source-item" style="margin-bottom: 12px;">
-              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px; gap:8px;">
                 <div class="inspector-source-title" style="margin:0;">
                   <a href="${escapeHtml(art.url)}" target="_blank" rel="noopener noreferrer">
                     [${idx + 1}] ${escapeHtml(art.title)}
                   </a>
                 </div>
-                <span style="font-size:0.68rem; color:var(--neon-teal); font-family:var(--font-code); background:rgba(0,255,194,0.1); padding:2px 6px; border-radius:4px;">
-                  ${art.length ? (art.length > 999 ? `${(art.length / 1000).toFixed(1)}k karakter` : `${art.length} karakter`) : 'Teks Utuh'}
-                </span>
+                <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+                  ${art.sourceProvider ? `
+                    <span style="font-size:0.65rem; padding:2px 6px; border-radius:4px; font-weight:600; font-family:var(--font-code); ${art.sourceProvider.includes('Divergen') ? 'background:rgba(187,134,252,0.15); color:#BB86FC; border:1px solid rgba(187,134,252,0.3);' : 'background:rgba(0,180,216,0.15); color:#00B4D8; border:1px solid rgba(0,180,216,0.3);'}">
+                      ${escapeHtml(art.sourceProvider)}
+                    </span>
+                  ` : ''}
+                  <span style="font-size:0.68rem; color:var(--neon-teal); font-family:var(--font-code); background:rgba(0,255,194,0.1); padding:2px 6px; border-radius:4px;">
+                    ${art.length ? (art.length > 999 ? `${(art.length / 1000).toFixed(1)}k karakter` : `${art.length} karakter`) : 'Teks Utuh'}
+                  </span>
+                </div>
               </div>
               <div style="font-size:0.68rem; color:var(--text-dim); margin-bottom:6px; font-family:var(--font-code);">${escapeHtml(art.url)}</div>
               <div class="inspector-source-snippet" style="background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:4px; font-size:0.74rem;">

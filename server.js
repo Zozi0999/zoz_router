@@ -918,10 +918,29 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
       return;
     }
 
-    const targetScrapeUrls = allSources.slice(0, 5);
-    task.currentStep = `[Langkah 2/3] Menganalisis & memindai konten mendalam ${targetScrapeUrls.length} artikel web (Web Scraping)...`;
+    // Balanced Interleaved Scraping: Ambil secara seimbang antara Agen 1 (Primer) dan Agen 2 (Divergen)
+    const primerSources = allSources.filter(s => (s.sourceProvider || '').includes('Primer') || (!(s.sourceProvider || '').includes('Divergen')));
+    const divergenSources = allSources.filter(s => (s.sourceProvider || '').includes('Divergen'));
+    const targetScrapeUrls = [];
+    const maxScrapeTarget = 6;
+    let pIdx = 0;
+    let dIdx = 0;
+
+    while (targetScrapeUrls.length < maxScrapeTarget && (pIdx < primerSources.length || dIdx < divergenSources.length)) {
+      if (pIdx < primerSources.length && targetScrapeUrls.length < maxScrapeTarget) {
+        targetScrapeUrls.push(primerSources[pIdx++]);
+      }
+      if (dIdx < divergenSources.length && targetScrapeUrls.length < maxScrapeTarget) {
+        targetScrapeUrls.push(divergenSources[dIdx++]);
+      }
+    }
+    if (targetScrapeUrls.length === 0) {
+      targetScrapeUrls.push(...allSources.slice(0, maxScrapeTarget));
+    }
+
+    task.currentStep = `[Langkah 2/3] Menganalisis & memindai konten mendalam ${targetScrapeUrls.length} artikel web seimbang (Web Scraping)...`;
     task.progressPercent = 55;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 2/3] Memulai web scraping ke ${targetScrapeUrls.length} tautan primer (membaca isi artikel utuh).`);
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 2/3] Memulai web scraping ke ${targetScrapeUrls.length} tautan seimbang (Serper Primer & Serper Divergen).`);
     if (task.liveInspection) {
       task.liveInspection.scrapedArticlesCount = targetScrapeUrls.length;
       task.liveInspection.scraper = {
@@ -939,7 +958,8 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
 
     for (let idx = 0; idx < targetScrapeUrls.length; idx++) {
       const sourceItem = targetScrapeUrls[idx];
-      task.currentStep = `[Langkah 2/3] Membaca isi artikel (${idx + 1}/${targetScrapeUrls.length}): ${sourceItem.domain || sourceItem.title}...`;
+      const providerLabel = sourceItem.sourceProvider || 'Web';
+      task.currentStep = `[Langkah 2/3] Membaca isi artikel (${idx + 1}/${targetScrapeUrls.length}) [${providerLabel}]: ${sourceItem.domain || sourceItem.title}...`;
       task.progressPercent = 55 + Math.round(((idx + 1) / targetScrapeUrls.length) * 20);
 
       const scrapedText = await fetchPageContent(sourceItem.url, 3500);
@@ -948,15 +968,16 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
           title: sourceItem.title,
           url: sourceItem.url,
           domain: sourceItem.domain,
+          sourceProvider: providerLabel,
           content: scrapedText
         });
-        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Berhasil memindai konten: "${sourceItem.title.substring(0, 45)}..." (${scrapedText.length} karakter)`);
+        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Berhasil memindai konten [${providerLabel}]: "${sourceItem.title.substring(0, 40)}..." (${scrapedText.length} karakter)`);
       }
     }
 
     // Gabungkan konten hasil scraping ke dalam data temuan
     if (scrapedArticles.length > 0) {
-      const scrapedBlock = scrapedArticles.map((art, idx) => `--- [KONTEN UTUH ARTIKEL ${idx + 1}: ${art.title} (${art.url})] ---\n${art.content}\n--- [AKHIR ARTIKEL ${idx + 1}] ---`).join('\n\n');
+      const scrapedBlock = scrapedArticles.map((art, idx) => `--- [KONTEN UTUH ARTIKEL ${idx + 1}: ${art.title} (${art.url}) | ASAL: ${art.sourceProvider || 'Web'}] ---\n${art.content}\n--- [AKHIR ARTIKEL ${idx + 1}] ---`).join('\n\n');
       dataTemuan.push(`### Hasil Pemindaian Konten Mendalam (Full Web Scraping):\n${scrapedBlock}`);
 
       if (task.liveInspection) {
