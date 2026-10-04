@@ -287,7 +287,90 @@ async function callLLMBackend({ prompt, system, model, provider, endpoint, apiKe
   });
 }
 
-// Fungsi Logika Agen: Meneliti Berulang Secara Otonom dengan Serper & LLM
+// Helper untuk melakukan web scraping / pemindaian konten artikel mendalam dari URL
+function fetchPageContent(targetUrl, maxChars = 3500) {
+  return new Promise((resolve) => {
+    try {
+      if (!targetUrl || typeof targetUrl !== 'string' || !/^https?:\/\//i.test(targetUrl)) {
+        return resolve('');
+      }
+      const parsedUrl = new URL(targetUrl);
+      const client = parsedUrl.protocol === 'https:' ? https : http;
+
+      const options = {
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+        path: parsedUrl.pathname + parsedUrl.search,
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'id,en-US,en;q=0.9'
+        },
+        timeout: 6000
+      };
+
+      const req = client.request(options, (res) => {
+        if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+          try {
+            const redirectUrl = new URL(res.headers.location, targetUrl).toString();
+            return fetchPageContent(redirectUrl, maxChars).then(resolve);
+          } catch (e) {
+            return resolve('');
+          }
+        }
+
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return resolve('');
+        }
+
+        let rawHtml = '';
+        res.on('data', chunk => {
+          rawHtml += chunk;
+          if (rawHtml.length > 300000) req.destroy();
+        });
+
+        res.on('end', () => {
+          try {
+            let clean = rawHtml
+              .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
+              .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
+              .replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, ' ')
+              .replace(/<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>/gi, ' ')
+              .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, ' ')
+              .replace(/<aside\b[^<]*(?:(?!<\/aside>)<[^<]*)*<\/aside>/gi, ' ')
+              .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, ' ')
+              .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, ' ')
+              .replace(/<!--[\s\S]*?-->/g, ' ')
+              .replace(/<[^>]+>/g, ' ');
+
+            clean = clean
+              .replace(/&amp;/g, '&')
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'")
+              .replace(/&nbsp;/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+
+            resolve(clean.substring(0, maxChars));
+          } catch (e) {
+            resolve('');
+          }
+        });
+      });
+
+      req.on('timeout', () => { req.destroy(); resolve(''); });
+      req.on('error', () => resolve(''));
+      req.end();
+    } catch (err) {
+      resolve('');
+    }
+  });
+}
+
+// Fungsi Logika Agen: Meneliti Berulang Secara Otonom dengan 6 Pilar Deep Research Premium
 async function jalankanRisetOtonom(taskId, topik, config = {}) {
   const task = dbTugasRiset[taskId];
   if (!task) return;
@@ -296,19 +379,22 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
   const maxIterations = config.maxIterations || 3;
   let allSources = [];
   let dataTemuan = [];
+  let scrapedArticles = [];
 
   try {
-    // 1. Inisialisasi Analisis Topik
-    task.currentStep = 'Menganalisis topik & merumuskan strategi penelusuran...';
+    // ==========================================
+    // PILAR 1 & 6: PENCARIAN MULTI-TAHAP & ASYNCHRONOUS QUEUE
+    // ==========================================
+    task.currentStep = '[Langkah 1/3] Menelusuri Google untuk topik dasar & pemetaan tren...';
     task.progressPercent = 15;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Memulai perumusan query & strategi riset multi-sudut.`);
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 1/3] Menelusuri Google untuk topik dasar: "${topik}"`);
 
     let currentQuery = topik;
 
     for (let i = 1; i <= maxIterations; i++) {
-      task.currentStep = `Iterasi ${i}/${maxIterations}: Menjelajah web untuk "${currentQuery}"...`;
-      task.progressPercent = 15 + Math.round((i / (maxIterations + 1)) * 60);
-      task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Iterasi ${i}: Google Search Serper -> "${currentQuery}"`);
+      task.currentStep = `[Langkah 1/3] Iterasi ${i}/${maxIterations}: Menjelajah Google via Serper -> "${currentQuery}"`;
+      task.progressPercent = 15 + Math.round((i / (maxIterations + 1)) * 30);
+      task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Iterasi ${i}: Pencarian Google -> "${currentQuery}"`);
 
       // A. Panggil Serper API untuk mencari di Google
       const searchRes = await performWebSearch(currentQuery, serperKey);
@@ -337,10 +423,6 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
       dataTemuan.push(`### Temuan Iterasi ${i} (Query: "${currentQuery}"):\n${findingsText || 'Tidak ada hasil spesifik.'}`);
 
       if (i < maxIterations) {
-        // B. Evaluasi celah informasi & rumuskan kata kunci baru
-        task.currentStep = `Iterasi ${i}/${maxIterations}: Mengevaluasi temuan & merumuskan sub-topik lanjutan...`;
-        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Mengevaluasi temuan & mengidentifikasi celah informasi.`);
-
         try {
           const evalPrompt = `Anda adalah AI Deep Research Planner.
 Topik Utama: "${topik}"
@@ -348,10 +430,10 @@ Data Temuan Saat Ini:
 ${dataTemuan.join('\n\n')}
 
 Tugas Evaluasi:
-1. Apakah data di atas sudah cukup mendalam, lengkap, dan mencakup data terkini 2026 untuk laporan komprehensif?
-2. Jika SUDAH LENGKAP, jawab dalam JSON: {"sudahCukup": true}
-3. Jika BELUM LENGKAP, tentukan 1 query pencarian Google yang baru dan sangat spesifik (aspek teknis, implementasi, data 2026, atau benchmarking) dalam JSON: {"sudahCukup": false, "kataKunciBaru": "query spesifik baru"}
-Hanya keluarkan format JSON valid tanpa teks tambahan.`;
+1. Analisis apakah informasi di atas sudah memadai untuk laporan mendalam komprehensif tahun 2026?
+2. Jika sudah lengkap, jawab JSON: {"sudahCukup": true}
+3. Jika belum, rumuskan kata kunci pencarian Google yang baru dan sangat spesifik (misal: aspek teknis, data statistik terbaru 2026, opini pakar, regulasi, studi kasus) dalam format JSON: {"sudahCukup": false, "kataKunciBaru": "query spesifik baru"}
+Keluarkan hanya JSON valid tanpa teks tambahan.`;
 
           const evalResult = await callLLMBackend({
             prompt: evalPrompt,
@@ -366,74 +448,116 @@ Hanya keluarkan format JSON valid tanpa teks tambahan.`;
           } catch (pe) {}
 
           if (parsedEval && parsedEval.sudahCukup === true) {
-            task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Riset dinyatakan cukup pada iterasi ${i}. Melanjutkan ke sintesis laporan.`);
+            task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Penelusuran selesai pada iterasi ${i}. Melanjutkan ke pemindaian konten mendalam.`);
             break;
           } else if (parsedEval && parsedEval.kataKunciBaru) {
             currentQuery = parsedEval.kataKunciBaru;
             task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Menemukan sub-topik lanjutan: "${currentQuery}"`);
           } else {
             if (i === 1) currentQuery = `${topik} spesifikasi teknis arsitektur 2026`;
-            else if (i === 2) currentQuery = `${topik} benchmarking analisis komparasi studi kasus`;
+            else if (i === 2) currentQuery = `${topik} benchmarking analisis komparasi studi kasus regulasi`;
           }
         } catch (evalErr) {
           if (i === 1) currentQuery = `${topik} data teknis terbaru 2026`;
-          else if (i === 2) currentQuery = `${topik} perbandingan kelebihan kekurangan implementasi`;
+          else if (i === 2) currentQuery = `${topik} tantangan regulasi implementasi masa depan`;
         }
       }
     }
 
-    // C. Menyusun Laporan Akhir Komprehensif
-    task.currentStep = 'Menyusun Laporan Riset Komprehensif (Sintesis Multi-Iterasi)...';
-    task.progressPercent = 85;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Mengonsolidasikan ${allSources.length} sumber data terverifikasi.`);
+    // ==========================================
+    // PILAR 2: PEMINDAIAN KONTEN MENDALAM (AUTOMATED WEB SCRAPING)
+    // ==========================================
+    const targetScrapeUrls = allSources.slice(0, 5);
+    task.currentStep = `[Langkah 2/3] Menganalisis & memindai konten mendalam ${targetScrapeUrls.length} artikel web (Web Scraping)...`;
+    task.progressPercent = 55;
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 2/3] Memulai web scraping ke ${targetScrapeUrls.length} tautan primer (membaca isi artikel utuh).`);
 
-    const synthesisPrompt = `Anda adalah Deep Research Scientist & Senior Technical Analyst.
+    for (let idx = 0; idx < targetScrapeUrls.length; idx++) {
+      const sourceItem = targetScrapeUrls[idx];
+      task.currentStep = `[Langkah 2/3] Membaca isi artikel (${idx + 1}/${targetScrapeUrls.length}): ${sourceItem.domain || sourceItem.title}...`;
+      task.progressPercent = 55 + Math.round(((idx + 1) / targetScrapeUrls.length) * 20);
+
+      const scrapedText = await fetchPageContent(sourceItem.url, 3500);
+      if (scrapedText && scrapedText.length > 200) {
+        scrapedArticles.push({
+          title: sourceItem.title,
+          url: sourceItem.url,
+          domain: sourceItem.domain,
+          content: scrapedText
+        });
+        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Berhasil memindai konten: "${sourceItem.title.substring(0, 45)}..." (${scrapedText.length} karakter)`);
+      }
+    }
+
+    // Gabungkan konten hasil scraping ke dalam data temuan
+    if (scrapedArticles.length > 0) {
+      const scrapedBlock = scrapedArticles.map((art, idx) => `--- [KONTEN UTUH ARTIKEL ${idx + 1}: ${art.title} (${art.url})] ---\n${art.content}\n--- [AKHIR ARTIKEL ${idx + 1}] ---`).join('\n\n');
+      dataTemuan.push(`### Hasil Pemindaian Konten Mendalam (Full Web Scraping):\n${scrapedBlock}`);
+    }
+
+    // ==========================================
+    // PILAR 3, 4, & 5: VALIDASI SUMBER, KATEGORISASI TREN & LAPORAN TERSTRUKTUR
+    // ==========================================
+    task.currentStep = '[Langkah 3/3] Validasi silang fakta, penyaringan bias, kategorisasi tren, & menyusun laporan riset eksekutif...';
+    task.progressPercent = 85;
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 3/3] Validasi silang data, filter kontradiksi & sintesis laporan profesional.`);
+
+    const synthesisPrompt = `Anda adalah Lead Research Scientist, Senior Technical Analyst & Editor Ahli.
 Susunlah LAPORAN DEEP RESEARCH KOMPREHENSIF untuk topik:
 "${topik}"
 
-Data temuan hasil riset web otonom:
+Berikut adalah seluruh data temuan yang berhasil dikumpulkan melalui Pencarian Multi-Tahap dan Pemindaian Konten Mendalam (Web Scraping):
 ${dataTemuan.join('\n\n')}
 
-Daftar Sumber Web:
+Daftar Seluruh Sumber Terverifikasi (${allSources.length} Dokumen Web):
 ${allSources.map((s, idx) => `[${idx + 1}] ${s.title}: ${s.url}`).join('\n')}
 
 Format Laporan yang WAJIB dipatuhi:
 # 🔬 DEEP RESEARCH REPORT: ${topik.toUpperCase()}
-> **Status:** Riset Otonom Selesai (Multi-Iteration Deep Web Grounding)  
-> **Total Sumber Terverifikasi:** ${allSources.length} Dokumen Web  
+> **Status:** Riset Mendalam Multi-Iterasi & Scraping Konten Selesai  
+> **Sumber Terpindai:** ${scrapedArticles.length} Artikel Utuh & ${allSources.length} Dokumen Web  
 > **Tahun Rujukan:** 2026
 
 ---
 
-## 1. 📌 Ringkasan Eksekutif (Executive Summary)
-(Ringkasan tingkat tinggi mengenai esensi, signifikansi, dan poin-poin kunci utama dalam 2-3 paragraf tajam)
+## 1. 📌 Pendahuluan & Ringkasan Eksekutif (Executive Summary)
+(Uraikan ringkasan tingkat tinggi mengenai latar belakang, esensi topik, dan temuan inti dalam 2-3 paragraf berbobot tajam)
 
-## 2. 🔍 Temuan Kunci & Analisis Mendalam (Core Deep Findings)
-(Analisis teknis, fakta-fakta spesifik, data terkini 2026, dan mekanisme kerja mendalam)
+## 2. 🔍 Temuan Utama & Analisis Mendalam (Core Deep Findings)
+(Analisis teknis, fakta-fakta spesifik dari hasil pembacaan artikel utuh, mekanisme kerja, dan data riil 2026)
 
-## 3. 📊 Matriks Perbandingan / Data Teknis (Comparative Breakdown)
-(Tabel perbandingan atau detail parameter teknis)
+## 3. ⚖️ Penyaringan Fakta & Validasi Sumber (Fact-Checking & Bias Analysis)
+(Bandingkan fakta antar sumber: sebutkan poin konsensus, verifikasi klaim, dan catat bila ada kontradiksi/perbedaan pandangan antar pakar)
 
-## 4. 🛠️ Implementasi Praktis & Arsitektur / Rekomendasi
-(Langkah konkret, arsitektur sistem, contoh kode/penerapan nyata jika relevan)
+## 4. 📊 Matriks Data & Kategorisasi Tren (Trend & Synthesis Mapping)
+- **Data & Fakta Statistik:** (Statistik konkret, angka, atau persentase)
+- **Opini Tokoh & Pakar:** (Pandangan ahli di bidang terkait)
+- **Tantangan & Hambatan:** (Regulasi, teknis, biaya, atau etika)
+- **Peluang Industri & Dampak:** (Potensi nilai dan transformasi)
 
-## 5. 💡 Kesimpulan Strategis & Wawasan Masa Depan
-(Pandangan ke depan dan langkah tindak lanjut)
+## 5. ⚠️ Tantangan & Hambatan Saat Ini
+(Detail kendala implementasi, kepatuhan regulasi, atau keterbatasan saat ini)
+
+## 6. 🚀 Tren & Analisis Masa Depan (Future Trajectory)
+(Proyeksi perkembangan hingga akhir 2026 dan tahun-tahun berikutnya)
+
+## 7. 🛠️ Rekomendasi Strategis & Implementasi Praktis
+(Langkah konkret yang dapat diterapkan, arsitektur sistem, atau contoh kode/penerapan nyata jika relevan)
 
 ---
-### 📚 Sumber Referensi & Sitasi:
-Sertakan daftar tautan markdown [Nama Sumber](URL) yang dirujuk.`;
+### 📚 Daftar Pustaka / Sumber Referensi:
+Sajikan seluruh tautan asli markdown [Nama Sumber](URL) agar pengguna dapat langsung mengeklik rujukan aslinya.`;
 
     const laporanAkhir = await callLLMBackend({
       prompt: synthesisPrompt,
-      system: 'Anda adalah Deep Research Engine yang menghasilkan laporan analisis tingkat tinggi, terstruktur rapi dengan format Markdown, tabel, dan sitasi akurat.',
+      system: 'Anda adalah Deep Research Engine yang menghasilkan laporan riset tingkat tinggi, sangat komprehensif, berbasis data nyata dari pemindaian artikel utuh, terstruktur rapi, dan bebas bias.',
       ...config
     });
 
     task.status = 'selesai';
     task.progressPercent = 100;
-    task.currentStep = 'Laporan Deep Research Selesai.';
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Laporan berhasil disusun dan siap.`);
+    task.currentStep = 'Laporan Deep Research Berhasil Disusun.';
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Laporan Deep Research berhasil dibuat lengkap dengan sitasi & scraping konten.`);
     task.hasil = laporanAkhir;
     task.sources = allSources;
     task.completedAt = new Date().toISOString();

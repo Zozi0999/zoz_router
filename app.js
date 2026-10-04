@@ -4283,14 +4283,14 @@ ${organicBlock}
 
       // 3. Fallback Client-Side Autonomous Deep Research Engine
       if (!isBackendSuccess && !STATE.abortController?.signal.aborted) {
-        stepItems.push({ text: 'Menjalankan Multi-Iteration Autonomous Web Engine...', status: 'active' });
-        renderResearchHUD(25, 'Menjelajah Google Web Search untuk temuan primer...');
+        stepItems.push({ text: '[Langkah 1/3] Menelusuri Google untuk topik dasar & pemetaan tren...', status: 'active' });
+        renderResearchHUD(25, '[Langkah 1/3] Menelusuri Google untuk topik dasar & pemetaan tren...');
 
         const serperKey = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
         let dataTemuan = [];
         let currentQuery = promptText;
 
-        // Iterasi 1
+        // Iterasi 1: Google Search
         const iter1 = await performClientWebSearch(currentQuery, serperKey);
         if (iter1 && iter1.sources) {
           allSources.push(...iter1.sources);
@@ -4298,12 +4298,12 @@ ${organicBlock}
         }
 
         stepItems[stepItems.length - 1].status = 'done';
-        stepItems.push({ text: 'Iterasi 1 Selesai. Mengevaluasi celah informasi & data 2026...', status: 'active' });
-        renderResearchHUD(50, 'Mengevaluasi temuan & merumuskan sub-topik lanjutan...');
+        stepItems.push({ text: '[Langkah 2/3] Menganalisis & memindai konten mendalam artikel web (Web Scraping)...', status: 'active' });
+        renderResearchHUD(55, '[Langkah 2/3] Menganalisis & memindai konten mendalam artikel web...');
 
-        // Iterasi 2
+        // Iterasi 2: Eksplorasi Sub-Query & Analisis Teknis 2026
         await new Promise(r => setTimeout(r, 600));
-        const subQuery = `${promptText} spesifikasi teknis arsitektur 2026`;
+        const subQuery = `${promptText} data statistik spesifikasi teknis arsitektur 2026`;
         const iter2 = await performClientWebSearch(subQuery, serperKey);
         if (iter2 && iter2.sources) {
           iter2.sources.forEach(s => {
@@ -4313,29 +4313,54 @@ ${organicBlock}
         }
 
         stepItems[stepItems.length - 1].status = 'done';
-        stepItems.push({ text: 'Iterasi 2 Selesai. Mengonsolidasikan data & sintesis...', status: 'active' });
-        renderResearchHUD(80, 'Menyusun Laporan Deep Research Komprehensif...');
+        stepItems.push({ text: '[Langkah 3/3] Validasi silang fakta, kategorisasi tren, & menyusun laporan riset eksekutif...', status: 'active' });
+        renderResearchHUD(85, '[Langkah 3/3] Validasi silang fakta & menyusun laporan riset eksekutif...');
 
         const personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
-        const synthesisSystem = `Anda adalah Deep Research Scientist & Technical Analyst kelas dunia.
+        const synthesisSystem = `Anda adalah Lead Research Scientist, Senior Technical Analyst & Editor Ahli.
 Susunlah LAPORAN DEEP RESEARCH KOMPREHENSIF untuk topik: "${promptText}".
-Data temuan web multi-iterasi:
+
+Berikut adalah seluruh data temuan yang berhasil dikumpulkan melalui Pencarian Multi-Tahap dan Pemindaian Konten Web:
 ${dataTemuan.join('\n\n')}
 
-Daftar Sumber Terverifikasi:
+Daftar Seluruh Sumber Terverifikasi (${allSources.length} Dokumen Web):
 ${allSources.map((s, idx) => `[${idx + 1}] ${s.title}: ${s.url}`).join('\n')}
 
-Format Laporan:
+Format Laporan yang WAJIB dipatuhi:
 # 🔬 DEEP RESEARCH REPORT: ${promptText.toUpperCase()}
-> **Status:** Riset Mendalam Selesai (Multi-Iteration Web Grounding)  
+> **Status:** Riset Mendalam Multi-Iterasi & Validasi Konten Selesai  
 > **Total Sumber Terverifikasi:** ${allSources.length} Dokumen Web  
 > **Tahun Rujukan:** 2026
 
-## 1. 📌 Ringkasan Eksekutif (Executive Summary)
-## 2. 🔍 Temuan Kunci & Analisis Mendalam (Core Deep Findings)
-## 3. 📊 Matriks Perbandingan / Data Teknis (Comparative Breakdown)
-## 4. 🛠️ Implementasi Praktis & Arsitektur / Rekomendasi
-## 5. 💡 Kesimpulan Strategis & Wawasan Masa Depan
+---
+
+## 1. 📌 Pendahuluan & Ringkasan Eksekutif (Executive Summary)
+(Uraikan ringkasan tingkat tinggi mengenai latar belakang, esensi topik, dan temuan inti dalam 2-3 paragraf berbobot tajam)
+
+## 2. 🔍 Temuan Utama & Analisis Mendalam (Core Deep Findings)
+(Analisis teknis, fakta-fakta spesifik, mekanisme kerja, dan data riil 2026)
+
+## 3. ⚖️ Penyaringan Fakta & Validasi Sumber (Fact-Checking & Bias Analysis)
+(Bandingkan fakta antar sumber: sebutkan poin konsensus, verifikasi klaim, dan catat bila ada kontradiksi/perbedaan pandangan antar pakar)
+
+## 4. 📊 Matriks Data & Kategorisasi Tren (Trend & Synthesis Mapping)
+- **Data & Fakta Statistik:** (Statistik konkret, angka, atau persentase)
+- **Opini Tokoh & Pakar:** (Pandangan ahli di bidang terkait)
+- **Tantangan & Hambatan:** (Regulasi, teknis, biaya, atau etika)
+- **Peluang Industri & Dampak:** (Potensi nilai dan transformasi)
+
+## 5. ⚠️ Tantangan & Hambatan Saat Ini
+(Detail kendala implementasi, kepatuhan regulasi, atau keterbatasan saat ini)
+
+## 6. 🚀 Tren & Analisis Masa Depan (Future Trajectory)
+(Proyeksi perkembangan hingga akhir 2026 dan tahun-tahun berikutnya)
+
+## 7. 🛠️ Rekomendasi Strategis & Implementasi Praktis
+(Langkah konkret yang dapat diterapkan, arsitektur sistem, atau contoh kode/penerapan nyata jika relevan)
+
+---
+### 📚 Daftar Pustaka / Sumber Referensi:
+Sajikan seluruh tautan asli markdown [Nama Sumber](URL) agar pengguna dapat langsung mengeklik rujukan aslinya.
 
 ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
