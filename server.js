@@ -94,6 +94,46 @@ function extractDomainSafe(rawUrl) {
   }
 }
 
+// Helper untuk mengunduh buffer gambar dari URL eksternal dengan batas timeout
+function downloadImageBuffer(imageUrl, timeoutMs = 35000) {
+  return new Promise((resolve, reject) => {
+    try {
+      const parsed = new URL(imageUrl);
+      const client = parsed.protocol === 'https:' ? https : http;
+      const req = client.get(parsed.toString(), {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+        },
+        timeout: timeoutMs
+      }, (res) => {
+        if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+          try {
+            const redirectUrl = new URL(res.headers.location, imageUrl).toString();
+            return downloadImageBuffer(redirectUrl, timeoutMs).then(resolve).catch(reject);
+          } catch (e) {
+            return reject(new Error('Redirect URL gambar tidak valid'));
+          }
+        }
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return reject(new Error(`Gagal mengunduh gambar: HTTP ${res.statusCode}`));
+        }
+        const chunks = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => {
+          const buffer = Buffer.concat(chunks);
+          const contentType = res.headers['content-type'] || 'image/jpeg';
+          resolve({ buffer, contentType });
+        });
+      });
+      req.on('timeout', () => { req.destroy(); reject(new Error('Waktu pengunduhan gambar habis (timeout)')); });
+      req.on('error', err => reject(err));
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
 // Helper to discover locally installed Ollama models from manifest files on disk
 function getLocalOllamaManifests() {
   const userHome = process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\user';
@@ -1518,6 +1558,169 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { success: true, message: 'Tugas riset berhasil dibatalkan.' });
     }
     return sendJSON(res, 404, { error: 'Tugas riset tidak ditemukan.' });
+  }
+
+  // ----------------------------------------------------
+  // AI IMAGE STUDIO: GENERATE IMAGE SYNTHESIS (FLUX & OPENROUTER)
+  // ----------------------------------------------------
+  if ((pathname === '/api/generate-image' || pathname === '/api/image/generate') && (method === 'POST' || method === 'GET')) {
+    try {
+      let prompt = '';
+      let model = 'flux';
+      let width = 1024;
+      let height = 1024;
+      let seed = null;
+      let openRouterKey = null;
+
+      if (method === 'POST') {
+        const body = await parseBody(req);
+        prompt = body.prompt || body.q || '';
+        model = body.model || model;
+        width = parseInt(body.width, 10) || width;
+        height = parseInt(body.height, 10) || height;
+        seed = body.seed || null;
+        openRouterKey = body.openRouterKey || body.apiKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || process.env.OPENROUTER_API_KEY;
+      } else {
+        prompt = reqUrl.searchParams.get('prompt') || reqUrl.searchParams.get('q') || '';
+        model = reqUrl.searchParams.get('model') || model;
+        width = parseInt(reqUrl.searchParams.get('width'), 10) || width;
+        height = parseInt(reqUrl.searchParams.get('height'), 10) || height;
+        seed = reqUrl.searchParams.get('seed') || null;
+        openRouterKey = req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : process.env.OPENROUTER_API_KEY;
+      }
+
+      if (!prompt || !prompt.trim()) {
+        return sendJSON(res, 400, { error: 'Parameter `prompt` diperlukan untuk menghasilkan gambar.' });
+      }
+
+      const cleanPrompt = prompt.trim();
+      const actualSeed = seed || Math.floor(Math.random() * 100000000);
+      const startTime = Date.now();
+
+      // Sanitasi dimensi gambar (min 256, max 2048)
+      width = Math.min(Math.max(width, 256), 2048);
+      height = Math.min(Math.max(height, 256), 2048);
+
+      let effectiveModel = (model || 'flux').toLowerCase().trim();
+      let remoteImageUrl = '';
+      let imageBuffer = null;
+      let contentType = 'image/png';
+
+      // 1. Coba OpenRouter Image API jika key tersedia dan model namespace ditentukan
+      if (openRouterKey && effectiveModel.includes('/')) {
+        try {
+          const orRes = await new Promise((resolve, reject) => {
+            const postData = JSON.stringify({
+              model: effectiveModel,
+              prompt: cleanPrompt,
+              width: width,
+              height: height,
+              n: 1
+            });
+            const opt = {
+              hostname: 'openrouter.ai',
+              port: 443,
+              path: '/api/v1/images',
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${openRouterKey}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': 'https://github.com/Zozi0999/zoz_router',
+                'X-Title': 'Zoz Router Image Studio',
+                'Content-Length': Buffer.byteLength(postData)
+              },
+              timeout: 45000
+            };
+            const request = https.request(opt, (response) => {
+              let raw = '';
+              response.on('data', d => raw += d);
+              response.on('end', () => {
+                try {
+                  const parsed = JSON.parse(raw);
+                  if (response.statusCode >= 400 || parsed.error) {
+                    const errDetail = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
+                    return reject(new Error(errDetail || `OpenRouter HTTP ${response.statusCode}`));
+                  }
+                  const imgItem = parsed.data?.[0] || parsed.images?.[0] || parsed.choices?.[0];
+                  if (imgItem) {
+                    if (imgItem.b64_json) {
+                      return resolve({ buffer: Buffer.from(imgItem.b64_json, 'base64'), contentType: 'image/png' });
+                    }
+                    if (imgItem.url) {
+                      return resolve({ remoteUrl: imgItem.url });
+                    }
+                  }
+                  reject(new Error('OpenRouter tidak mengembalikan data gambar'));
+                } catch (e) {
+                  reject(e);
+                }
+              });
+            });
+            request.on('timeout', () => { request.destroy(); reject(new Error('OpenRouter image timed out')); });
+            request.on('error', err => reject(err));
+            request.write(postData);
+            request.end();
+          });
+
+          if (orRes.buffer) {
+            imageBuffer = orRes.buffer;
+            contentType = orRes.contentType || 'image/png';
+          } else if (orRes.remoteUrl) {
+            remoteImageUrl = orRes.remoteUrl;
+            const downloaded = await downloadImageBuffer(remoteImageUrl, 35000);
+            imageBuffer = downloaded.buffer;
+            contentType = downloaded.contentType;
+          }
+        } catch (orErr) {
+          console.warn('OpenRouter image API fallback ke Flux Pollinations:', orErr.message);
+          effectiveModel = 'flux';
+        }
+      }
+
+      // 2. Engine Default / Fallback: Flux.1 Neural Diffusion via Pollinations AI
+      if (!imageBuffer) {
+        effectiveModel = effectiveModel.includes('/') ? 'flux' : effectiveModel;
+        const encodedPrompt = encodeURIComponent(cleanPrompt);
+        remoteImageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=${encodeURIComponent(effectiveModel)}&seed=${actualSeed}&nologo=true&enhance=true`;
+        const downloaded = await downloadImageBuffer(remoteImageUrl, 40000);
+        imageBuffer = downloaded.buffer;
+        contentType = downloaded.contentType || 'image/png';
+      }
+
+      // 3. Simpan buffer gambar secara permanen ke UPLOADS_DIR perangkat
+      const ext = contentType.includes('webp') ? 'webp' : (contentType.includes('jpeg') || contentType.includes('jpg') ? 'jpg' : 'png');
+      const filename = `ai_gen_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
+      const localFilePath = path.join(UPLOADS_DIR, filename);
+
+      fs.writeFileSync(localFilePath, imageBuffer);
+
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+      const localUrl = `/uploads/${filename}`;
+
+      return sendJSON(res, 200, {
+        success: true,
+        url: localUrl,
+        localUrl: localUrl,
+        remoteUrl: remoteImageUrl || null,
+        filename: filename,
+        prompt: cleanPrompt,
+        model: effectiveModel,
+        width: width,
+        height: height,
+        seed: actualSeed,
+        duration: duration,
+        sizeBytes: imageBuffer.length,
+        createdAt: new Date().toISOString()
+      });
+
+    } catch (err) {
+      console.error('Image generation failed:', err);
+      return sendJSON(res, 500, {
+        success: false,
+        error: 'Gagal menghasilkan gambar AI: ' + (err.message || 'Terjadi kesalahan sistem.'),
+        prompt: reqUrl.searchParams.get('prompt') || ''
+      });
+    }
   }
 
 // Ollama: Check status & get models (with multi-route fallback & disk manifests)
