@@ -124,12 +124,18 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (!this.ctx && (window.AudioContext || window.webkitAudioContext)) {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       }
+      if (this.ctx && this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
+      }
     },
     playBeep(freq = 440, type = 'sine', duration = 0.08, gain = 0.05) {
       if (!STATE.soundEnabled) return;
       try {
         this.init();
         if (!this.ctx) return;
+        if (this.ctx.state === 'suspended') {
+          this.ctx.resume().catch(() => {});
+        }
         const osc = this.ctx.createOscillator();
         const g = this.ctx.createGain();
         osc.type = type;
