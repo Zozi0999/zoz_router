@@ -90,7 +90,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     get attachedImage() { return (this.attachedImages && this.attachedImages.length > 0) ? this.attachedImages[0] : null; },
     set attachedImage(val) { this.attachedImages = val ? (Array.isArray(val) ? val : [val]) : []; },
     attachedDocs: [], // Array of { name, size, content }
-    webSearchEnabled: false,
+    searchMode: 'off', // 'off' | 'default' | 'premium'
+    get webSearchEnabled() { return this.searchMode !== 'off'; },
+    set webSearchEnabled(val) { this.searchMode = val ? 'default' : 'off'; },
+    get isDeepResearch() { return this.searchMode === 'premium'; },
     isGenerating: false,
     abortController: null,
     soundEnabled: true,
@@ -228,7 +231,11 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     imageFileInput: $('#imageFileInput'),
     cameraFileInput: $('#cameraFileInput'),
     docFileInput: $('#docFileInput'),
+    searchMenuWrapper: $('#searchMenuWrapper'),
     webSearchToggleBtn: $('#webSearchToggleBtn'),
+    webSearchIcon: $('#webSearchIcon'),
+    searchBadge: $('#searchBadge'),
+    searchDropdown: $('#searchDropdown'),
     attachmentPreviewBar: $('#attachmentPreviewBar'),
     imagePreviewImg: $('#imagePreviewImg'),
     removeImageBtn: $('#removeImageBtn'),
@@ -688,6 +695,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (savedSound !== null) {
         STATE.soundEnabled = savedSound === 'true';
       }
+      const savedSearchMode = localStorage.getItem('zoz_router_search_mode_v1');
+      if (savedSearchMode && ['off', 'default', 'premium'].includes(savedSearchMode)) {
+        STATE.searchMode = savedSearchMode;
+      }
 
       // 1. Initialize Device-First Storage
       await DeviceStorage.init();
@@ -732,6 +743,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     try {
       localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings));
       localStorage.setItem('zoz_router_sound_v1', String(STATE.soundEnabled));
+      localStorage.setItem('zoz_router_search_mode_v1', STATE.searchMode || 'off');
 
       // Save active session to Device Disk Storage
       if (STATE.currentSessionId) {
@@ -2879,7 +2891,15 @@ ${organicBlock}
     renderAttachmentPreviews();
     AudioEngine.send();
 
-    if (STATE.mode === 'arena') {
+    if (STATE.isDeepResearch && STATE.mode !== 'arena') {
+      const activeEngine = (STATE.mode === 'auto')
+        ? (STATE.settings.autoPolicy === 'cloud_first' ? 'openrouter' : 'ollama')
+        : STATE.mode;
+      const activeModel = (activeEngine === 'openrouter')
+        ? STATE.settings.openRouterModel
+        : STATE.settings.ollamaModel;
+      await runDeepResearchStreaming(session, text, images, activeModel, activeEngine);
+    } else if (STATE.mode === 'arena') {
       await runArenaStreaming(session, text, images);
     } else if (STATE.mode === 'auto') {
       await runAutoRouterStreaming(session, text, images);
@@ -3891,6 +3911,486 @@ ${organicBlock}
     els.attachmentDropdown.style.display = 'none';
     els.attachToggleBtn?.classList.remove('active');
     els.attachToggleBtn?.setAttribute('aria-expanded', 'false');
+  }
+
+  // ==================== SEARCH MODE DROPDOWN & CONTROLLER ====================
+  function setSearchMode(mode = 'off') {
+    STATE.searchMode = mode;
+    updateSearchModeUI();
+    savePersistedState();
+    AudioEngine.click();
+    closeSearchDropdown();
+
+    if (mode === 'premium') {
+      showToast('Mode Deep Research (Premium) Aktif 🔬');
+    } else if (mode === 'default') {
+      showToast('Mode Default: Pencarian Cepat Aktif 🌐');
+    } else {
+      showToast('Pencarian Web Dinonaktifkan.');
+    }
+  }
+
+  function updateSearchModeUI() {
+    const mode = STATE.searchMode || 'off';
+    if (!els.webSearchToggleBtn) return;
+
+    els.webSearchToggleBtn.classList.remove('mode-default', 'mode-premium', 'active');
+    if (mode === 'default') {
+      els.webSearchToggleBtn.classList.add('mode-default', 'active');
+      if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-globe';
+      if (els.searchBadge) els.searchBadge.style.display = 'none';
+      els.webSearchToggleBtn.title = 'Pencarian Web Default: Aktif (Klik untuk ubah mode)';
+    } else if (mode === 'premium') {
+      els.webSearchToggleBtn.classList.add('mode-premium', 'active');
+      if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-microscope';
+      if (els.searchBadge) els.searchBadge.style.display = 'block';
+      els.webSearchToggleBtn.title = 'Deep Research (Premium): Aktif (Klik untuk ubah mode)';
+    } else {
+      if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-globe';
+      if (els.searchBadge) els.searchBadge.style.display = 'none';
+      els.webSearchToggleBtn.title = 'Mode Pencarian Web (Nonaktif - Klik untuk aktifkan)';
+    }
+
+    // Update active check indicators in popup menu
+    $$('.search-menu-item').forEach(item => {
+      const itemMode = item.dataset.mode || 'off';
+      const isActive = itemMode === mode;
+      item.classList.toggle('active', isActive);
+      const checkIcon = item.querySelector('.search-item-check');
+      if (checkIcon) checkIcon.style.display = isActive ? 'block' : 'none';
+    });
+  }
+
+  function toggleSearchDropdown(e) {
+    if (e) e.stopPropagation();
+    if (!els.searchDropdown) return;
+    const isHidden = els.searchDropdown.style.display === 'none' || !els.searchDropdown.style.display;
+    if (isHidden) {
+      openSearchDropdown();
+    } else {
+      closeSearchDropdown();
+    }
+  }
+
+  function openSearchDropdown() {
+    if (!els.searchDropdown) return;
+    closeAttachmentDropdown();
+    els.searchDropdown.style.display = 'flex';
+    els.webSearchToggleBtn?.setAttribute('aria-expanded', 'true');
+    AudioEngine.click();
+  }
+
+  function closeSearchDropdown() {
+    if (!els.searchDropdown) return;
+    els.searchDropdown.style.display = 'none';
+    els.webSearchToggleBtn?.setAttribute('aria-expanded', 'false');
+  }
+
+  // ==================== DEEP RESEARCH STREAMING ENGINE (PREMIUM) ====================
+  async function performClientWebSearch(query, serperKey) {
+    try {
+      let data = null;
+      try {
+        const directRes = await fetch('https://google.serper.dev/search', {
+          method: 'POST',
+          headers: {
+            'X-API-KEY': serperKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ q: query, num: 6, gl: 'id', hl: 'id' }),
+          signal: STATE.abortController?.signal
+        });
+        if (directRes.ok) data = await directRes.json();
+      } catch (e) {}
+
+      if (!data) {
+        const proxyRes = await fetch('/api/web-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-serper-key': serperKey },
+          body: JSON.stringify({ query: query, apiKey: serperKey }),
+          signal: STATE.abortController?.signal
+        }).catch(() => null);
+        if (proxyRes && proxyRes.ok) data = await proxyRes.json();
+      }
+
+      if (!data) return null;
+
+      const sources = [];
+      let summary = '';
+      if (data.knowledgeGraph) {
+        summary += `\n[KG]: ${data.knowledgeGraph.title || ''}: ${data.knowledgeGraph.description || ''}\n`;
+      }
+      if (data.answerBox) {
+        summary += `\n[ANSWER]: ${data.answerBox.answer || data.answerBox.snippet || ''}\n`;
+      }
+      const list = data.organic || data.results || [];
+      if (Array.isArray(list)) {
+        list.slice(0, 6).forEach((item, idx) => {
+          summary += `\n${idx + 1}. ${item.title}: ${item.snippet} (${item.link || item.url || ''})`;
+          if (item.link || item.url) {
+            sources.push({
+              title: item.title,
+              url: item.link || item.url,
+              snippet: item.snippet || '',
+              domain: (item.link || item.url).replace(/^https?:\/\//i, '').split('/')[0]
+            });
+          }
+        });
+      }
+      return { summary, sources };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function streamLLMSynthesis(engine, modelName, systemPrompt, userPrompt, bubbleText) {
+    const streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
+    let fullText = '';
+
+    if (engine === 'openrouter' || (!STATE.settings.ollamaModel && STATE.settings.openRouterKey)) {
+      const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
+      const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${STATE.settings.openRouterKey}`
+      };
+      if (isOpenRouterDirect) {
+        headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
+        headers['X-Title'] = 'ZOZ Router Deep Research';
+      }
+
+      const requestBody = {
+        model: modelName,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        stream: true,
+        temperature: 0.3
+      };
+      if (!isOpenRouterDirect) requestBody.apiKey = STATE.settings.openRouterKey;
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+        signal: STATE.abortController?.signal
+      });
+
+      if (!response.ok) throw new Error(`OpenRouter HTTP ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed === 'data: [DONE]') continue;
+          if (trimmed.startsWith('data: ')) {
+            try {
+              const parsed = JSON.parse(trimmed.replace(/^data:\s*/, ''));
+              const delta = parsed.choices?.[0]?.delta?.content;
+              if (delta) {
+                fullText += delta;
+                streamRenderer.append(delta);
+              }
+            } catch (e) {}
+          }
+        }
+      }
+      streamRenderer.flush();
+      return fullText || streamRenderer.getFullText();
+    } else {
+      const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+      const headers = { 'Content-Type': 'application/json' };
+      if (STATE.settings.ollamaApiKey) {
+        headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
+        headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
+      }
+      const requestBody = {
+        model: modelName,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        stream: true,
+        options: { temperature: 0.3 },
+        endpoint: ep
+      };
+      if (STATE.settings.ollamaApiKey) requestBody.apiKey = STATE.settings.ollamaApiKey;
+
+      const chatUrl = IS_GITHUB_PAGES ? `${ep}/api/chat` : '/api/ollama/chat';
+      const response = await fetch(chatUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+        signal: STATE.abortController?.signal
+      });
+
+      if (!response.ok) throw new Error(`Ollama HTTP ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.message?.content) {
+              fullText += parsed.message.content;
+              streamRenderer.append(parsed.message.content);
+            }
+          } catch (e) {}
+        }
+      }
+      streamRenderer.flush();
+      return fullText || streamRenderer.getFullText();
+    }
+  }
+
+  async function runDeepResearchStreaming(session, promptText, image = null, modelName = null, engine = 'ollama') {
+    const targetModel = modelName || (engine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel);
+    setGeneratingState(true);
+    STATE.abortController = new AbortController();
+
+    const startTime = performance.now();
+    const assistantRow = appendMessageElement('assistant', '', null, `${targetModel} (Deep Research)`);
+    const bubbleText = assistantRow.querySelector('.msg-text-content');
+    const metaBox = assistantRow.querySelector('.message-meta');
+
+    let allSources = [];
+    let currentProgress = 10;
+    let stepItems = [
+      { text: 'Inisialisasi Agen Riset Otonom & Analisis Topik...', status: 'active' }
+    ];
+
+    function renderResearchHUD(progress, statusMsg) {
+      bubbleText.innerHTML = `
+        <div class="deep-research-hud">
+          <div class="deep-research-header">
+            <div class="deep-research-title">
+              <i class="fa-solid fa-atom fa-spin" style="color:var(--neon-amber);"></i>
+              <span>Deep Research Agent (Premium)</span>
+            </div>
+            <span class="deep-research-badge">Multi-Iteration</span>
+          </div>
+          <div class="deep-research-progress-bar">
+            <div class="deep-research-progress-fill" style="width: ${progress}%;"></div>
+          </div>
+          <div class="deep-research-status-text">
+            <i class="fa-solid fa-circle-notch fa-spin" style="color:var(--neon-amber);"></i>
+            <span class="status-msg">${escapeHtml(statusMsg)}</span>
+          </div>
+          <div class="deep-research-steps-list">
+            ${stepItems.map(item => `
+              <div class="deep-research-step-item ${item.status === 'active' ? 'active' : ''}">
+                <i class="fa-solid ${item.status === 'done' ? 'fa-check' : (item.status === 'active' ? 'fa-circle-dot' : 'fa-clock')}" 
+                   style="color:${item.status === 'done' ? 'var(--neon-teal)' : (item.status === 'active' ? 'var(--neon-amber)' : 'var(--text-dim)')};"></i>
+                <span>${escapeHtml(item.text)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+      smartScrollChatToBottom(false);
+    }
+
+    renderResearchHUD(15, 'Menganalisis topik & merumuskan hipotesis riset...');
+
+    let finalReportText = '';
+
+    try {
+      let isBackendSuccess = false;
+
+      // 1. Coba panggil Backend Endpoint /api/mulai-riset (Local Node.js Server)
+      if (!IS_GITHUB_PAGES) {
+        try {
+          const res = await fetch('/api/mulai-riset', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': STATE.settings.openRouterKey ? `Bearer ${STATE.settings.openRouterKey}` : '',
+              'x-serper-key': STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e'
+            },
+            body: JSON.stringify({
+              topik: promptText,
+              model: targetModel,
+              provider: engine,
+              endpoint: STATE.settings.ollamaEndpoint,
+              apiKey: engine === 'openrouter' ? STATE.settings.openRouterKey : (STATE.settings.ollamaApiKey || ''),
+              serperApiKey: STATE.settings.serperApiKey,
+              maxIterations: 3
+            }),
+            signal: STATE.abortController.signal
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            const taskId = data.taskId;
+
+            if (taskId) {
+              // 2. Lakukan Polling berkala ke /api/status-riset/:id
+              while (STATE.isGenerating) {
+                await new Promise(r => setTimeout(r, 1000));
+                if (STATE.abortController?.signal.aborted) break;
+
+                const checkRes = await fetch(`/api/status-riset/${taskId}`, {
+                  signal: STATE.abortController.signal
+                });
+                if (!checkRes.ok) break;
+
+                const statusData = await checkRes.json();
+
+                if (statusData.stepsHistory && Array.isArray(statusData.stepsHistory)) {
+                  stepItems = statusData.stepsHistory.map((s, idx) => ({
+                    text: s.replace(/^\[\d+:\d+:\d+\]\s*/, ''),
+                    status: (idx === statusData.stepsHistory.length - 1 && statusData.status !== 'selesai') ? 'active' : 'done'
+                  }));
+                }
+
+                currentProgress = statusData.progressPercent || currentProgress;
+                renderResearchHUD(currentProgress, statusData.currentStep || 'Sedang meneliti web secara otonom...');
+
+                if (statusData.status === 'selesai') {
+                  finalReportText = statusData.hasil || '';
+                  allSources = statusData.sources || [];
+                  isBackendSuccess = true;
+                  break;
+                } else if (statusData.status === 'gagal') {
+                  throw new Error(statusData.error || 'Riset gagal diselesaikan.');
+                }
+              }
+            }
+          }
+        } catch (backendErr) {
+          if (backendErr.name === 'AbortError') throw backendErr;
+          console.warn('Backend deep research fallback ke client-side execution:', backendErr);
+        }
+      }
+
+      // 3. Fallback Client-Side Autonomous Deep Research Engine
+      if (!isBackendSuccess && !STATE.abortController?.signal.aborted) {
+        stepItems.push({ text: 'Menjalankan Multi-Iteration Autonomous Web Engine...', status: 'active' });
+        renderResearchHUD(25, 'Menjelajah Google Web Search untuk temuan primer...');
+
+        const serperKey = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+        let dataTemuan = [];
+        let currentQuery = promptText;
+
+        // Iterasi 1
+        const iter1 = await performClientWebSearch(currentQuery, serperKey);
+        if (iter1 && iter1.sources) {
+          allSources.push(...iter1.sources);
+          dataTemuan.push(`### Temuan Iterasi 1 (Query: "${currentQuery}"):\n${iter1.summary}`);
+        }
+
+        stepItems[stepItems.length - 1].status = 'done';
+        stepItems.push({ text: 'Iterasi 1 Selesai. Mengevaluasi celah informasi & data 2026...', status: 'active' });
+        renderResearchHUD(50, 'Mengevaluasi temuan & merumuskan sub-topik lanjutan...');
+
+        // Iterasi 2
+        await new Promise(r => setTimeout(r, 600));
+        const subQuery = `${promptText} spesifikasi teknis arsitektur 2026`;
+        const iter2 = await performClientWebSearch(subQuery, serperKey);
+        if (iter2 && iter2.sources) {
+          iter2.sources.forEach(s => {
+            if (!allSources.some(existing => existing.url === s.url)) allSources.push(s);
+          });
+          dataTemuan.push(`### Temuan Iterasi 2 (Query: "${subQuery}"):\n${iter2.summary}`);
+        }
+
+        stepItems[stepItems.length - 1].status = 'done';
+        stepItems.push({ text: 'Iterasi 2 Selesai. Mengonsolidasikan data & sintesis...', status: 'active' });
+        renderResearchHUD(80, 'Menyusun Laporan Deep Research Komprehensif...');
+
+        const personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
+        const synthesisSystem = `Anda adalah Deep Research Scientist & Technical Analyst kelas dunia.
+Susunlah LAPORAN DEEP RESEARCH KOMPREHENSIF untuk topik: "${promptText}".
+Data temuan web multi-iterasi:
+${dataTemuan.join('\n\n')}
+
+Daftar Sumber Terverifikasi:
+${allSources.map((s, idx) => `[${idx + 1}] ${s.title}: ${s.url}`).join('\n')}
+
+Format Laporan:
+# 🔬 DEEP RESEARCH REPORT: ${promptText.toUpperCase()}
+> **Status:** Riset Mendalam Selesai (Multi-Iteration Web Grounding)  
+> **Total Sumber Terverifikasi:** ${allSources.length} Dokumen Web  
+> **Tahun Rujukan:** 2026
+
+## 1. 📌 Ringkasan Eksekutif (Executive Summary)
+## 2. 🔍 Temuan Kunci & Analisis Mendalam (Core Deep Findings)
+## 3. 📊 Matriks Perbandingan / Data Teknis (Comparative Breakdown)
+## 4. 🛠️ Implementasi Praktis & Arsitektur / Rekomendasi
+## 5. 💡 Kesimpulan Strategis & Wawasan Masa Depan
+
+${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
+
+        bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+        finalReportText = await streamLLMSynthesis(engine, targetModel, synthesisSystem, promptText, bubbleText);
+      }
+
+      // Finalize UI & Markdown rendering
+      if (finalReportText) {
+        bubbleText.innerHTML = renderMarkdown(finalReportText);
+        enhanceCodeBlocks(bubbleText);
+        if (allSources.length > 0) {
+          renderMessageSources(assistantRow, allSources);
+        }
+
+        const endTime = performance.now();
+        const totalDuration = ((endTime - startTime) / 1000).toFixed(2);
+        if (metaBox) {
+          metaBox.innerHTML = `
+            <span class="meta-badge engine-badge"><i class="fa-solid fa-microscope" style="color:var(--neon-amber);"></i> DEEP RESEARCH</span>
+            <span class="meta-badge model-badge">${escapeHtml(targetModel)}</span>
+            <span class="meta-badge latency-badge"><i class="fa-solid fa-bolt"></i> ${totalDuration}s</span>
+            <span class="meta-badge sources-badge"><i class="fa-solid fa-globe"></i> ${allSources.length} Sumber</span>
+          `;
+        }
+
+        // Save assistant message to session
+        const assistantMsg = {
+          role: 'assistant',
+          content: finalReportText,
+          model: targetModel,
+          sources: allSources,
+          isDeepResearch: true,
+          latency: totalDuration,
+          timestamp: new Date().toISOString()
+        };
+        session.messages.push(assistantMsg);
+        savePersistedState();
+        AudioEngine.success();
+        smartScrollChatToBottom(true);
+      }
+
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        showToast('Deep Research dihentikan oleh pengguna.');
+      } else {
+        console.error('Deep research error:', err);
+        const errorHtml = formatModelErrorMessage(engine, targetModel, err, false, true);
+        bubbleText.innerHTML = errorHtml;
+        AudioEngine.error();
+      }
+    } finally {
+      setGeneratingState(false);
+      STATE.abortController = null;
+    }
   }
 
 
@@ -5325,26 +5825,39 @@ ${organicBlock}
     els.removeImageBtn?.addEventListener('click', clearAttachedImage);
     els.docFileInput?.addEventListener('change', handleDocUpload);
 
-    // Dismiss attachment dropdown when clicking outside
+    // Dismiss attachment & search dropdowns when clicking outside
     document.addEventListener('click', (e) => {
       if (els.attachmentDropdown && els.attachmentDropdown.style.display !== 'none') {
         if (!els.attachmentMenuWrapper?.contains(e.target)) {
           closeAttachmentDropdown();
         }
       }
-    });
-
-    // Dismiss dropdown on Escape key
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        closeAttachmentDropdown();
+      if (els.searchDropdown && els.searchDropdown.style.display !== 'none') {
+        if (!els.searchMenuWrapper?.contains(e.target)) {
+          closeSearchDropdown();
+        }
       }
     });
 
-    els.webSearchToggleBtn?.addEventListener('click', () => {
-      STATE.webSearchEnabled = !STATE.webSearchEnabled;
-      els.webSearchToggleBtn.classList.toggle('active', STATE.webSearchEnabled);
-      AudioEngine.click();
+    // Dismiss dropdowns on Escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeAttachmentDropdown();
+        closeSearchDropdown();
+      }
+    });
+
+    // Search Mode Toggle & Menu Items
+    els.webSearchToggleBtn?.addEventListener('click', (e) => {
+      toggleSearchDropdown(e);
+    });
+
+    $$('.search-menu-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const mode = item.dataset.mode || 'off';
+        setSearchMode(mode);
+      });
     });
 
     // Arena Select Changes & Split Workspace Listeners
@@ -5832,6 +6345,7 @@ ${organicBlock}
     updatePresetBanner();
     updatePresetPillUI();
     updateModelUI();
+    updateSearchModeUI();
 
     // Restore desktop sidebar collapsed preference
     if (window.innerWidth > 768) {

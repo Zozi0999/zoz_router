@@ -380,10 +380,50 @@
               </div>
             </div>
 
-            <!-- Web Search Toggle -->
-            <button class="composer-btn web-search-toggle" id="webSearchToggleBtn" title="Mode Web Search & Live Internet Browsing (Aktifkan / Nonaktifkan)">
-              <i class="fa-solid fa-globe"></i>
-            </button>
+            <!-- Web Search & Deep Research Mode Menu -->
+            <div class="search-menu-wrapper" id="searchMenuWrapper">
+              <button class="composer-btn web-search-toggle" id="webSearchToggleBtn" type="button" title="Pilih Mode Pencarian Web & Deep Research" aria-expanded="false">
+                <i class="fa-solid fa-globe" id="webSearchIcon"></i>
+                <span class="search-badge" id="searchBadge" style="display: none;">PRO</span>
+              </button>
+
+              <!-- Search Mode Dropdown Popup -->
+              <div class="search-dropdown-popup" id="searchDropdown" style="display: none;">
+                <div class="search-dropdown-header">
+                  <span><i class="fa-solid fa-satellite-dish"></i> Mode Penelusuran Web</span>
+                </div>
+                <button class="search-menu-item active" id="searchOptionOff" type="button" data-mode="off">
+                  <div class="search-item-icon-box off-accent">
+                    <i class="fa-solid fa-ban"></i>
+                  </div>
+                  <div class="search-item-info">
+                    <span class="search-item-title">Nonaktif</span>
+                    <span class="search-item-desc">Pengetahuan bawaan model AI</span>
+                  </div>
+                  <i class="fa-solid fa-check search-item-check"></i>
+                </button>
+                <button class="search-menu-item" id="searchOptionDefault" type="button" data-mode="default">
+                  <div class="search-item-icon-box default-accent">
+                    <i class="fa-solid fa-globe"></i>
+                  </div>
+                  <div class="search-item-info">
+                    <span class="search-item-title">Mode Default</span>
+                    <span class="search-item-desc">Pencarian kilat Google real-time</span>
+                  </div>
+                  <i class="fa-solid fa-check search-item-check" style="display: none;"></i>
+                </button>
+                <button class="search-menu-item" id="searchOptionPremium" type="button" data-mode="premium">
+                  <div class="search-item-icon-box premium-accent">
+                    <i class="fa-solid fa-microscope"></i>
+                  </div>
+                  <div class="search-item-info">
+                    <span class="search-item-title">Mode Premium (Deep Research)</span>
+                    <span class="search-item-desc">Riset mendalam multi-iterasi & sintesis otonom</span>
+                  </div>
+                  <i class="fa-solid fa-check search-item-check" style="display: none;"></i>
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- Textarea Input -->

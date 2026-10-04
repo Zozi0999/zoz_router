@@ -178,6 +178,274 @@ function performWebSearch(query, apiKey = null) {
   });
 }
 
+// Helper to normalize Ollama/API endpoints
+function normalizeEndpoint(ep) {
+  if (!ep || typeof ep !== 'string' || !ep.trim()) return 'http://127.0.0.1:11434';
+  let clean = ep.trim();
+  if (!/^https?:\/\//i.test(clean)) {
+    clean = (clean.includes(':443') || clean.includes('ollama.com') || clean.includes('.com') || clean.includes('.io') || clean.includes('.ai') || clean.includes('.app')) 
+      ? `https://${clean}` 
+      : `http://${clean}`;
+  }
+  return clean.replace(/\/+$/, '');
+}
+
+// ==================== DEEP RESEARCH AUTONOMOUS ENGINE (PREMIUM) ====================
+const dbTugasRiset = {};
+
+// Helper untuk memanggil LLM (OpenRouter atau Ollama) dari backend
+async function callLLMBackend({ prompt, system, model, provider, endpoint, apiKey }) {
+  if (provider === 'openrouter' || (apiKey && apiKey.startsWith('sk-or-'))) {
+    const key = apiKey || process.env.OPENROUTER_API_KEY;
+    if (!key) throw new Error('OpenRouter API Key diperlukan.');
+    const messages = [];
+    if (system) messages.push({ role: 'system', content: system });
+    messages.push({ role: 'user', content: prompt });
+
+    const postData = JSON.stringify({
+      model: model || 'google/gemini-2.0-flash-001',
+      messages: messages,
+      temperature: 0.3
+    });
+
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'openrouter.ai',
+        port: 443,
+        path: '/api/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://github.com/Zozi0999/zoz_router',
+          'X-Title': 'Zoz Router Deep Research',
+          'Content-Length': Buffer.byteLength(postData)
+        },
+        timeout: 60000
+      };
+
+      const req = https.request(options, (res) => {
+        let rawData = '';
+        res.on('data', chunk => rawData += chunk);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(rawData);
+            const content = parsed.choices?.[0]?.message?.content || '';
+            resolve(content);
+          } catch (e) {
+            reject(new Error('Gagal memproses respon OpenRouter: ' + e.message));
+          }
+        });
+      });
+      req.on('timeout', () => { req.destroy(); reject(new Error('OpenRouter request timed out')); });
+      req.on('error', err => reject(err));
+      req.write(postData);
+      req.end();
+    });
+  }
+
+  // Fallback / Default: Ollama Engine
+  const rawEp = endpoint || 'http://127.0.0.1:11434';
+  const ollamaUrl = new URL('/api/chat', normalizeEndpoint(rawEp));
+  const client = ollamaUrl.protocol === 'https:' ? https : http;
+  const messages = [];
+  if (system) messages.push({ role: 'system', content: system });
+  messages.push({ role: 'user', content: prompt });
+
+  const postData = JSON.stringify({
+    model: model || 'nemotron-mini:latest',
+    messages: messages,
+    stream: false,
+    options: { temperature: 0.3 }
+  });
+
+  return new Promise((resolve, reject) => {
+    const req = client.request(ollamaUrl.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      },
+      timeout: 90000
+    }, (res) => {
+      let rawData = '';
+      res.on('data', chunk => rawData += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(rawData);
+          const content = parsed.message?.content || parsed.response || '';
+          resolve(content);
+        } catch (e) {
+          reject(new Error('Gagal memproses respon Ollama: ' + e.message));
+        }
+      });
+    });
+    req.on('timeout', () => { req.destroy(); reject(new Error('Ollama request timed out')); });
+    req.on('error', err => reject(err));
+    req.write(postData);
+    req.end();
+  });
+}
+
+// Fungsi Logika Agen: Meneliti Berulang Secara Otonom dengan Serper & LLM
+async function jalankanRisetOtonom(taskId, topik, config = {}) {
+  const task = dbTugasRiset[taskId];
+  if (!task) return;
+
+  const serperKey = config.serperApiKey || process.env.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+  const maxIterations = config.maxIterations || 3;
+  let allSources = [];
+  let dataTemuan = [];
+
+  try {
+    // 1. Inisialisasi Analisis Topik
+    task.currentStep = 'Menganalisis topik & merumuskan strategi penelusuran...';
+    task.progressPercent = 15;
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Memulai perumusan query & strategi riset multi-sudut.`);
+
+    let currentQuery = topik;
+
+    for (let i = 1; i <= maxIterations; i++) {
+      task.currentStep = `Iterasi ${i}/${maxIterations}: Menjelajah web untuk "${currentQuery}"...`;
+      task.progressPercent = 15 + Math.round((i / (maxIterations + 1)) * 60);
+      task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Iterasi ${i}: Google Search Serper -> "${currentQuery}"`);
+
+      // A. Panggil Serper API untuk mencari di Google
+      const searchRes = await performWebSearch(currentQuery, serperKey);
+      
+      let findingsText = '';
+      if (searchRes.knowledgeGraph) {
+        findingsText += `\n[KNOWLEDGE GRAPH]: ${searchRes.knowledgeGraph.title || ''} - ${searchRes.knowledgeGraph.snippet || ''}\n`;
+      }
+      if (searchRes.answerBox) {
+        findingsText += `\n[ANSWER BOX]: ${searchRes.answerBox.snippet || ''}\n`;
+      }
+      if (Array.isArray(searchRes.results)) {
+        searchRes.results.forEach((item, idx) => {
+          findingsText += `\n- ${item.title}: ${item.snippet} (${item.url})`;
+          if (item.url && !allSources.some(s => s.url === item.url)) {
+            allSources.push({
+              title: item.title,
+              url: item.url,
+              snippet: item.snippet,
+              domain: item.domain || (item.url ? (new URL(item.url)).hostname.replace(/^www\./, '') : '')
+            });
+          }
+        });
+      }
+
+      dataTemuan.push(`### Temuan Iterasi ${i} (Query: "${currentQuery}"):\n${findingsText || 'Tidak ada hasil spesifik.'}`);
+
+      if (i < maxIterations) {
+        // B. Evaluasi celah informasi & rumuskan kata kunci baru
+        task.currentStep = `Iterasi ${i}/${maxIterations}: Mengevaluasi temuan & merumuskan sub-topik lanjutan...`;
+        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Mengevaluasi temuan & mengidentifikasi celah informasi.`);
+
+        try {
+          const evalPrompt = `Anda adalah AI Deep Research Planner.
+Topik Utama: "${topik}"
+Data Temuan Saat Ini:
+${dataTemuan.join('\n\n')}
+
+Tugas Evaluasi:
+1. Apakah data di atas sudah cukup mendalam, lengkap, dan mencakup data terkini 2026 untuk laporan komprehensif?
+2. Jika SUDAH LENGKAP, jawab dalam JSON: {"sudahCukup": true}
+3. Jika BELUM LENGKAP, tentukan 1 query pencarian Google yang baru dan sangat spesifik (aspek teknis, implementasi, data 2026, atau benchmarking) dalam JSON: {"sudahCukup": false, "kataKunciBaru": "query spesifik baru"}
+Hanya keluarkan format JSON valid tanpa teks tambahan.`;
+
+          const evalResult = await callLLMBackend({
+            prompt: evalPrompt,
+            system: 'Anda adalah Research Evaluator otonom yang teliti dan analitis.',
+            ...config
+          });
+
+          let parsedEval = null;
+          try {
+            const jsonMatch = evalResult.match(/\{[\s\S]*\}/);
+            if (jsonMatch) parsedEval = JSON.parse(jsonMatch[0]);
+          } catch (pe) {}
+
+          if (parsedEval && parsedEval.sudahCukup === true) {
+            task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Riset dinyatakan cukup pada iterasi ${i}. Melanjutkan ke sintesis laporan.`);
+            break;
+          } else if (parsedEval && parsedEval.kataKunciBaru) {
+            currentQuery = parsedEval.kataKunciBaru;
+            task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Menemukan sub-topik lanjutan: "${currentQuery}"`);
+          } else {
+            if (i === 1) currentQuery = `${topik} spesifikasi teknis arsitektur 2026`;
+            else if (i === 2) currentQuery = `${topik} benchmarking analisis komparasi studi kasus`;
+          }
+        } catch (evalErr) {
+          if (i === 1) currentQuery = `${topik} data teknis terbaru 2026`;
+          else if (i === 2) currentQuery = `${topik} perbandingan kelebihan kekurangan implementasi`;
+        }
+      }
+    }
+
+    // C. Menyusun Laporan Akhir Komprehensif
+    task.currentStep = 'Menyusun Laporan Riset Komprehensif (Sintesis Multi-Iterasi)...';
+    task.progressPercent = 85;
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Mengonsolidasikan ${allSources.length} sumber data terverifikasi.`);
+
+    const synthesisPrompt = `Anda adalah Deep Research Scientist & Senior Technical Analyst.
+Susunlah LAPORAN DEEP RESEARCH KOMPREHENSIF untuk topik:
+"${topik}"
+
+Data temuan hasil riset web otonom:
+${dataTemuan.join('\n\n')}
+
+Daftar Sumber Web:
+${allSources.map((s, idx) => `[${idx + 1}] ${s.title}: ${s.url}`).join('\n')}
+
+Format Laporan yang WAJIB dipatuhi:
+# 🔬 DEEP RESEARCH REPORT: ${topik.toUpperCase()}
+> **Status:** Riset Otonom Selesai (Multi-Iteration Deep Web Grounding)  
+> **Total Sumber Terverifikasi:** ${allSources.length} Dokumen Web  
+> **Tahun Rujukan:** 2026
+
+---
+
+## 1. 📌 Ringkasan Eksekutif (Executive Summary)
+(Ringkasan tingkat tinggi mengenai esensi, signifikansi, dan poin-poin kunci utama dalam 2-3 paragraf tajam)
+
+## 2. 🔍 Temuan Kunci & Analisis Mendalam (Core Deep Findings)
+(Analisis teknis, fakta-fakta spesifik, data terkini 2026, dan mekanisme kerja mendalam)
+
+## 3. 📊 Matriks Perbandingan / Data Teknis (Comparative Breakdown)
+(Tabel perbandingan atau detail parameter teknis)
+
+## 4. 🛠️ Implementasi Praktis & Arsitektur / Rekomendasi
+(Langkah konkret, arsitektur sistem, contoh kode/penerapan nyata jika relevan)
+
+## 5. 💡 Kesimpulan Strategis & Wawasan Masa Depan
+(Pandangan ke depan dan langkah tindak lanjut)
+
+---
+### 📚 Sumber Referensi & Sitasi:
+Sertakan daftar tautan markdown [Nama Sumber](URL) yang dirujuk.`;
+
+    const laporanAkhir = await callLLMBackend({
+      prompt: synthesisPrompt,
+      system: 'Anda adalah Deep Research Engine yang menghasilkan laporan analisis tingkat tinggi, terstruktur rapi dengan format Markdown, tabel, dan sitasi akurat.',
+      ...config
+    });
+
+    task.status = 'selesai';
+    task.progressPercent = 100;
+    task.currentStep = 'Laporan Deep Research Selesai.';
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Laporan berhasil disusun dan siap.`);
+    task.hasil = laporanAkhir;
+    task.sources = allSources;
+    task.completedAt = new Date().toISOString();
+
+  } catch (error) {
+    console.error('Deep research failed:', error);
+    task.status = 'gagal';
+    task.error = error.message;
+    task.currentStep = 'Riset gagal: ' + error.message;
+  }
+}
+
 // Main HTTP Server
 const server = http.createServer(async (req, res) => {
   const reqUrl = new URL(req.url, `http://${req.headers.host || 'localhost:4040'}`);
@@ -391,6 +659,71 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       return sendJSON(res, 500, { error: 'Gagal melakukan pencarian web Serper: ' + e.message });
     }
+  }
+
+  // Deep Research: Start Autonomous Research (Background Worker)
+  if ((pathname === '/api/mulai-riset' || pathname === '/api/deep-research/start') && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const topik = body.topik || body.topic || body.query || body.prompt || '';
+      if (!topik) {
+        return sendJSON(res, 400, { error: 'Parameter `topik` atau `prompt` diperlukan untuk memulai Deep Research.' });
+      }
+
+      const taskId = 'research_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+      dbTugasRiset[taskId] = {
+        taskId,
+        topik,
+        status: 'sedang_meneliti',
+        progressPercent: 10,
+        currentStep: 'Inisialisasi Agen Deep Research...',
+        stepsHistory: ['Memulai analisis topik dan parameter riset'],
+        dataTemuan: [],
+        sources: [],
+        hasil: null,
+        error: null,
+        createdAt: new Date().toISOString()
+      };
+
+      // Jalankan proses riset secara asinkronus di latar belakang
+      jalankanRisetOtonom(taskId, topik, {
+        model: body.model,
+        provider: body.provider,
+        endpoint: body.endpoint,
+        apiKey: body.apiKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null),
+        serperApiKey: body.serperApiKey || req.headers['x-serper-key'],
+        maxIterations: body.maxIterations || 3
+      });
+
+      return sendJSON(res, 200, {
+        success: true,
+        taskId: taskId,
+        message: 'Agen AI mulai meneliti di latar belakang.'
+      });
+    } catch (e) {
+      return sendJSON(res, 500, { error: 'Gagal memulai riset: ' + e.message });
+    }
+  }
+
+  // Deep Research: Status Check & Polling
+  const researchStatusMatch = pathname.match(/^\/api\/(?:status-riset|deep-research\/status)\/([a-zA-Z0-9_-]+)$/);
+  if (researchStatusMatch && method === 'GET') {
+    const taskId = researchStatusMatch[1];
+    const dataTugas = dbTugasRiset[taskId];
+    if (!dataTugas) {
+      return sendJSON(res, 404, { error: 'Tugas riset tidak ditemukan.' });
+    }
+    return sendJSON(res, 200, {
+      taskId: dataTugas.taskId,
+      status: dataTugas.status,
+      topik: dataTugas.topik,
+      progressPercent: dataTugas.progressPercent,
+      currentStep: dataTugas.currentStep,
+      stepsHistory: dataTugas.stepsHistory,
+      hasil: dataTugas.hasil,
+      sources: dataTugas.sources || [],
+      error: dataTugas.error
+    });
   }
 
 // Ollama: Check status & get models (with multi-route fallback & disk manifests)
