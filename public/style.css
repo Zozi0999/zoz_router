@@ -2128,6 +2128,35 @@ html, body {
   font-weight: 600;
 }
 
+.persona-primary-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.persona-primary-row .preset-pill {
+  flex: 1;
+  text-align: center;
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.persona-section-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
 .preset-pills {
   display: flex;
   flex-wrap: wrap;
@@ -2164,6 +2193,13 @@ html, body {
   border-color: var(--text-main);
   color: var(--text-main);
   box-shadow: none;
+}
+
+.preset-pill.custom-pill.active {
+  background: rgba(0, 255, 194, 0.16);
+  border-color: var(--neon-teal);
+  color: var(--neon-teal);
+  box-shadow: 0 0 10px rgba(0, 255, 194, 0.25);
 }
 
 /* Model Hub Modal */

@@ -497,17 +497,29 @@
 
         <!-- Tab 3: System Persona -->
         <div class="settings-tab-pane" id="tabSystem">
+          <!-- Primary Modes: Default & Custom on top -->
+          <div class="persona-primary-row">
+            <button class="preset-pill default-pill" data-preset="default">
+              <i class="fa-solid fa-ban"></i> Default
+            </button>
+            <button class="preset-pill custom-pill" data-preset="custom">
+              <i class="fa-solid fa-pen-ruler"></i> Custom
+            </button>
+          </div>
+
+          <!-- Preset Personas Below -->
+          <div class="persona-section-label">Preset Persona:</div>
           <div class="preset-pills">
-            <button class="preset-pill default-pill" data-preset="default"><i class="fa-solid fa-ban"></i> Default (Tanpa Persona)</button>
             <button class="preset-pill" data-preset="kaisar">👑 Kaisar Zozi Assistant</button>
             <button class="preset-pill" data-preset="coder">💻 Senior Architect Coder</button>
             <button class="preset-pill" data-preset="cyber">🛡️ Cyber Security & Hacker</button>
             <button class="preset-pill" data-preset="concise">⚡ Ultra Ringkas & Direct</button>
             <button class="preset-pill" data-preset="uncensored">🔓 Deep Reasoning Raw</button>
           </div>
-          <div class="form-group">
-            <label>Custom System Prompt:</label>
-            <textarea id="settingSystemPrompt" rows="6" placeholder="Ketik instruksi persona AI di sini..."></textarea>
+
+          <div class="form-group" style="margin-top: 14px;">
+            <label>Instruksi Prompt Sistem (System Prompt):</label>
+            <textarea id="settingSystemPrompt" rows="6" placeholder="Ketik instruksi persona AI kustom di sini..."></textarea>
           </div>
         </div>
       </div>

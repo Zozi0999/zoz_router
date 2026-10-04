@@ -3901,6 +3901,9 @@ ${organicBlock}
       STATE.settings.activePreset = 'default';
       els.settingSystemPrompt.value = '';
       showToast('Persona dinonaktifkan (Default).');
+    } else if (presetKey === 'custom') {
+      STATE.settings.activePreset = 'custom';
+      setTimeout(() => els.settingSystemPrompt?.focus(), 50);
     } else if (SYSTEM_PRESETS[presetKey] !== undefined) {
       STATE.settings.systemPrompt = SYSTEM_PRESETS[presetKey];
       STATE.settings.activePreset = presetKey;
@@ -3926,7 +3929,7 @@ ${organicBlock}
       const presetKey = STATE.settings.activePreset;
       const label = (presetKey && presetKey !== 'default' && presetKey !== 'custom' && SYSTEM_PRESETS[presetKey]) 
         ? presetKey.toUpperCase() 
-        : 'KUSTOM';
+        : 'CUSTOM';
       els.activePresetBanner.style.display = 'flex';
       els.activePresetName.innerText = `Persona: ${label}`;
     } else {
