@@ -925,6 +925,10 @@ const server = http.createServer(async (req, res) => {
   if (pathname.startsWith('/uploads/')) {
     const uploadFilename = path.basename(pathname);
     const uploadFilePath = path.join(UPLOADS_DIR, uploadFilename);
+    const relUpload = path.relative(UPLOADS_DIR, uploadFilePath);
+    if (relUpload.startsWith('..') || path.isAbsolute(relUpload)) {
+      return sendJSON(res, 403, { error: 'Forbidden' });
+    }
     if (fs.existsSync(uploadFilePath) && fs.statSync(uploadFilePath).isFile()) {
       const ext = path.extname(uploadFilePath).toLowerCase();
       const contentType = MIME_TYPES[ext] || 'application/octet-stream';
@@ -1377,8 +1381,9 @@ const server = http.createServer(async (req, res) => {
   const filePath = path.join(PUBLIC_DIR, safePath);
 
   // Security check: prevent path traversal outside public
-  if (!filePath.startsWith(PUBLIC_DIR)) {
-    return sendJSON(res, 403, { error: 'Forbidden' });
+  const relative = path.relative(PUBLIC_DIR, filePath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    return sendJSON(res, 403, { error: 'Forbidden: Path traversal detected' });
   }
 
   fs.stat(filePath, (err, stats) => {
