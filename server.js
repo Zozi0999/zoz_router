@@ -1450,6 +1450,32 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n❌ Error: Port ${PORT} sedang digunakan oleh proses lain.`);
+    console.error(`💡 Tip: Jalankan ZOZ ROUTER pada port lain dengan menentukan environment variable:`);
+    console.error(`   PORT=${Number(PORT) + 1} node server.js\n`);
+  } else {
+    console.error('\n❌ Server Error:', err.message);
+  }
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.warn('⚠️ Warning: Unhandled Promise Rejection ditangkap:', reason && (reason.stack || reason.message || reason));
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ Critical: Uncaught Exception ditangkap:', err && (err.stack || err.message || err));
+});
+
+process.on('SIGINT', () => {
+  console.log('\n🛑 Menghentikan server ZOZ ROUTER secara anggun...');
+  server.close(() => {
+    process.exit(0);
+  });
+});
+
 if (require.main === module && !process.env.VERCEL) {
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`\n======================================================`);
