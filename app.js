@@ -574,6 +574,20 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           resolve(false);
         }
       });
+    },
+    async clearAllSessions() {
+      if (!this.db) await this.init();
+      if (!this.db) return false;
+      return new Promise((resolve) => {
+        try {
+          const tx = this.db.transaction('sessions', 'readwrite');
+          tx.objectStore('sessions').clear();
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+        } catch (e) {
+          resolve(false);
+        }
+      });
     }
   };
 
@@ -701,6 +715,19 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         }
       }
       ChatDB.deleteSession(id);
+    },
+
+    async clearAllSessions() {
+      if (this.isDeviceBackendAvailable) {
+        try {
+          await fetch('/api/sessions', {
+            method: 'DELETE'
+          });
+        } catch (e) {
+          console.warn('DeviceStorage clearAllSessions failed:', e.message);
+        }
+      }
+      await ChatDB.clearAllSessions();
     },
 
     async uploadFile(base64Data) {
@@ -6039,12 +6066,16 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     els.newChatBtn.addEventListener('click', () => createNewSession());
     els.searchHistoryInput.addEventListener('input', (e) => renderChatHistory(e.target.value));
     
-    els.clearAllHistoryBtn.addEventListener('click', () => {
+    els.clearAllHistoryBtn.addEventListener('click', async () => {
       if (confirm('Apakah Anda yakin ingin menghapus semua riwayat sesi obrolan?')) {
         STATE.sessions = [];
         STATE.currentSessionId = null;
+        sessionStorage.removeItem('zoz_active_session_id');
+        await DeviceStorage.clearAllSessions();
+        savePersistedState();
         createNewSession();
-        showToast('Semua riwayat dibersihkan.');
+        showToast('Semua riwayat dibersihkan dari perangkat.');
+        AudioEngine.click();
       }
     });
 
