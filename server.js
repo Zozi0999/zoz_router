@@ -51,7 +51,7 @@ function sendJSON(res, statusCode, data) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-serpapi-key, x-ollama-key'
   });
   res.end(JSON.stringify(data));
 }
@@ -217,6 +217,108 @@ function performWebSearch(query, apiKey = null) {
     });
 
     req.write(postData);
+    req.end();
+  });
+}
+
+// Helper to perform web search via Google SerpAPI (Engine ke-2 / Multi-Source Deep Research)
+function performSerpApiSearch(query, apiKey = null) {
+  return new Promise((resolve) => {
+    if (!query || typeof query !== 'string' || !query.trim()) {
+      return resolve({ query: '', count: 0, results: [], provider: 'serpapi' });
+    }
+    const cleanQuery = query.trim();
+    const serpApiKey = apiKey || process.env.SERPAPI_API_KEY || '0e072bf542835eca933f9d1994524fae98b5a9dcd785dfcab3f6438102ed42e8';
+
+    const encodedQuery = encodeURIComponent(cleanQuery);
+    const encodedKey = encodeURIComponent(serpApiKey);
+    const searchPath = `/search.json?engine=google&q=${encodedQuery}&api_key=${encodedKey}&num=6&gl=id&hl=id`;
+
+    const options = {
+      hostname: 'serpapi.com',
+      port: 443,
+      path: searchPath,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Zoz-Router/2.0'
+      },
+      timeout: 12000
+    };
+
+    const req = https.request(options, (res) => {
+      let rawData = '';
+      res.on('data', chunk => rawData += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(rawData);
+
+          if (res.statusCode >= 400 || parsed.error) {
+            const errMsg = parsed.error || `SerpAPI HTTP ${res.statusCode} Error`;
+            return resolve({ query: cleanQuery, count: 0, results: [], error: errMsg, provider: 'serpapi' });
+          }
+
+          const results = [];
+
+          if (parsed.knowledge_graph) {
+            results.push({
+              title: parsed.knowledge_graph.title || 'Knowledge Graph Fact',
+              url: parsed.knowledge_graph.website || (parsed.knowledge_graph.source && parsed.knowledge_graph.source.link) || 'https://google.com',
+              snippet: `${parsed.knowledge_graph.type ? '[' + parsed.knowledge_graph.type + '] ' : ''}${parsed.knowledge_graph.description || ''}`,
+              type: 'knowledgeGraph',
+              sourceProvider: 'SerpAPI'
+            });
+          }
+
+          if (parsed.answer_box) {
+            results.push({
+              title: parsed.answer_box.title || 'Jawaban Teratas',
+              url: parsed.answer_box.link || 'https://google.com',
+              snippet: parsed.answer_box.answer || parsed.answer_box.snippet || '',
+              type: 'answerBox',
+              sourceProvider: 'SerpAPI'
+            });
+          }
+
+          if (Array.isArray(parsed.organic_results)) {
+            parsed.organic_results.slice(0, 6).forEach((item, idx) => {
+              if (item.link) {
+                let domain = '';
+                try { domain = (new URL(item.link)).hostname.replace(/^www\./, ''); } catch (e) {}
+                results.push({
+                  title: item.title || `Hasil SerpAPI ${idx + 1}`,
+                  url: item.link,
+                  snippet: item.snippet || '',
+                  date: item.date || null,
+                  domain: domain,
+                  sourceProvider: 'SerpAPI'
+                });
+              }
+            });
+          }
+
+          resolve({
+            query: cleanQuery,
+            count: results.length,
+            knowledgeGraph: parsed.knowledge_graph || null,
+            answerBox: parsed.answer_box || null,
+            results: results,
+            provider: 'serpapi'
+          });
+        } catch (e) {
+          resolve({ query: cleanQuery, count: 0, results: [], error: e.message, provider: 'serpapi' });
+        }
+      });
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ query: cleanQuery, count: 0, results: [], error: 'SerpAPI search timed out', provider: 'serpapi' });
+    });
+
+    req.on('error', (err) => {
+      resolve({ query: cleanQuery, count: 0, results: [], error: err.message, provider: 'serpapi' });
+    });
+
     req.end();
   });
 }
@@ -522,6 +624,7 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
   if (!task) return;
 
   const serperKey = config.serperApiKey || process.env.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+  const serpApiKey = config.serpApiKey || process.env.SERPAPI_API_KEY || '0e072bf542835eca933f9d1994524fae98b5a9dcd785dfcab3f6438102ed42e8';
   const maxIterations = config.maxIterations || 3;
   let allSources = [];
   let dataTemuan = [];
@@ -529,48 +632,86 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
 
   try {
     // ==========================================
-    // PILAR 1 & 6: PENCARIAN MULTI-TAHAP & ASYNCHRONOUS QUEUE
+    // PILAR 1 & 6: PENCARIAN MULTI-TAHAP & ASYNCHRONOUS QUEUE (MULTI-AGENT MULTI-SOURCE)
     // ==========================================
-    task.currentStep = '[Langkah 1/3] Menelusuri Google untuk topik dasar & pemetaan tren...';
+    task.currentStep = '[Langkah 1/3] Menelusuri Google via Multi-Agen (Serper + SerpAPI)...';
     task.progressPercent = 15;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 1/3] Menelusuri Google untuk topik dasar: "${topik}"`);
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 1/3] Memulai riset multi-sumber paralel untuk: "${topik}"`);
 
     let currentQuery = topik;
 
     for (let i = 1; i <= maxIterations; i++) {
-      task.currentStep = `[Langkah 1/3] Iterasi ${i}/${maxIterations}: Menjelajah Google via Serper -> "${currentQuery}"`;
+      task.currentStep = `[Langkah 1/3] Iterasi ${i}/${maxIterations}: Menjelajah Paralel (Agen 1: Serper & Agen 2: SerpAPI) -> "${currentQuery}"`;
       task.progressPercent = 15 + Math.round((i / (maxIterations + 1)) * 30);
-      task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Iterasi ${i}: Pencarian Google -> "${currentQuery}"`);
+      task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Iterasi ${i}: Menjalankan riset paralel multi-sumber -> "${currentQuery}"`);
 
-      // A. Panggil Serper API untuk mencari di Google
-      const searchRes = await performWebSearch(currentQuery, serperKey);
-      
-      if (searchRes.error) {
-        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Peringatan Serper Search: "${searchRes.error}". Pastikan API Key Serper valid.`);
+      // 1. Jalankan Agen 1 (Serper) dan Agen 2 (SerpAPI) secara BERSAMAAN (Paralel)
+      const [searchResSerper, searchResSerpApi] = await Promise.all([
+        performWebSearch(currentQuery, serperKey),
+        performSerpApiSearch(currentQuery, serpApiKey)
+      ]);
+
+      if (searchResSerper.error) {
+        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Agen 1 (Serper): "${searchResSerper.error}".`);
+      } else {
+        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Agen 1 (Serper) menemukan ${searchResSerper.results?.length || 0} sumber data web.`);
       }
 
-      let findingsText = '';
-      if (searchRes.knowledgeGraph) {
-        findingsText += `\n[KNOWLEDGE GRAPH]: ${searchRes.knowledgeGraph.title || ''} - ${searchRes.knowledgeGraph.snippet || ''}\n`;
+      if (searchResSerpApi.error) {
+        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Agen 2 (SerpAPI): "${searchResSerpApi.error}".`);
+      } else {
+        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Agen 2 (SerpAPI) menemukan ${searchResSerpApi.results?.length || 0} sumber data Google organik/knowledge.`);
       }
-      if (searchRes.answerBox) {
-        findingsText += `\n[ANSWER BOX]: ${searchRes.answerBox.snippet || ''}\n`;
+
+      // Format data Agen 1 (Google Serper)
+      let serperBlock = '';
+      if (searchResSerper.knowledgeGraph) {
+        serperBlock += `\n[KNOWLEDGE GRAPH - SERPER]: ${searchResSerper.knowledgeGraph.title || ''} - ${searchResSerper.knowledgeGraph.snippet || ''}\n`;
       }
-      if (Array.isArray(searchRes.results)) {
-        searchRes.results.forEach((item, idx) => {
-          findingsText += `\n- ${item.title}: ${item.snippet} (${item.url})`;
+      if (searchResSerper.answerBox) {
+        serperBlock += `\n[ANSWER BOX - SERPER]: ${searchResSerper.answerBox.snippet || ''}\n`;
+      }
+      if (Array.isArray(searchResSerper.results)) {
+        searchResSerper.results.forEach((item) => {
+          serperBlock += `\n- [Web Serper] ${item.title}: ${item.snippet} (${item.url})`;
           if (item.url && !allSources.some(s => s.url === item.url)) {
             allSources.push({
               title: item.title,
               url: item.url,
               snippet: item.snippet,
-              domain: item.domain || (item.url ? (new URL(item.url)).hostname.replace(/^www\./, '') : '')
+              domain: item.domain || (item.url ? (new URL(item.url)).hostname.replace(/^www\./, '') : ''),
+              sourceProvider: 'Serper'
             });
           }
         });
       }
 
-      dataTemuan.push(`### Temuan Iterasi ${i} (Query: "${currentQuery}"):\n${findingsText || 'Tidak ada hasil spesifik.'}`);
+      // Format data Agen 2 (Google SerpAPI)
+      let serpApiBlock = '';
+      if (searchResSerpApi.knowledgeGraph) {
+        serpApiBlock += `\n[KNOWLEDGE GRAPH - SERPAPI]: ${searchResSerpApi.knowledgeGraph.title || ''} - ${searchResSerpApi.knowledgeGraph.snippet || ''}\n`;
+      }
+      if (searchResSerpApi.answerBox) {
+        serpApiBlock += `\n[ANSWER BOX - SERPAPI]: ${searchResSerpApi.answerBox.snippet || ''}\n`;
+      }
+      if (Array.isArray(searchResSerpApi.results)) {
+        searchResSerpApi.results.forEach((item) => {
+          serpApiBlock += `\n- [Web SerpAPI] ${item.title}: ${item.snippet} (${item.url})`;
+          if (item.url && !allSources.some(s => s.url === item.url)) {
+            allSources.push({
+              title: item.title,
+              url: item.url,
+              snippet: item.snippet,
+              domain: item.domain || (item.url ? (new URL(item.url)).hostname.replace(/^www\./, '') : ''),
+              sourceProvider: 'SerpAPI'
+            });
+          }
+        });
+      }
+
+      const findingsText = `[DATA TEMUAN AGEN 1 - SERPER GOOGLE]:\n${serperBlock || 'Tidak ada temuan spesifik dari Serper.'}\n\n[DATA TEMUAN AGEN 2 - SERPAPI GOOGLE]:\n${serpApiBlock || 'Tidak ada temuan spesifik dari SerpAPI.'}`;
+
+      dataTemuan.push(`### Temuan Iterasi ${i} (Query: "${currentQuery}"):\n${findingsText}`);
 
       if (i < maxIterations) {
         try {
@@ -732,7 +873,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-serpapi-key, x-ollama-key'
     });
     return res.end();
   }
@@ -995,6 +1136,53 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // SerpAPI Google Search Engine Endpoint (Multi-Source Deep Research)
+  if (pathname === '/api/serpapi/search' && (method === 'GET' || method === 'POST')) {
+    try {
+      let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
+      let apiKey = req.headers['x-serpapi-key'] || reqUrl.searchParams.get('apiKey') || '';
+      if (method === 'POST') {
+        const body = await parseBody(req);
+        query = body.query || body.q || query;
+        apiKey = body.apiKey || body.serpApiKey || apiKey;
+      }
+      if (!query) {
+        return sendJSON(res, 400, { error: 'Parameter query `q` atau body `{ query }` diperlukan.' });
+      }
+      const data = await performSerpApiSearch(query, apiKey);
+      return sendJSON(res, 200, data);
+    } catch (e) {
+      return sendJSON(res, 500, { error: 'Gagal melakukan pencarian SerpAPI: ' + e.message });
+    }
+  }
+
+  // SerpAPI Connectivity Test Endpoint
+  if ((pathname === '/api/test-serpapi' || pathname === '/api/serpapi/test') && (method === 'GET' || method === 'POST')) {
+    try {
+      let apiKey = req.headers['x-serpapi-key'] || reqUrl.searchParams.get('apiKey') || '';
+      if (method === 'POST') {
+        const body = await parseBody(req);
+        apiKey = body.apiKey || body.serpApiKey || apiKey;
+      }
+      const testResult = await performSerpApiSearch('teknologi AI 2026', apiKey);
+      if (testResult.error) {
+        return sendJSON(res, 400, {
+          success: false,
+          error: testResult.error,
+          message: 'Koneksi ke SerpAPI gagal atau API Key tidak valid.'
+        });
+      }
+      return sendJSON(res, 200, {
+        success: true,
+        count: testResult.count,
+        message: 'Koneksi SerpAPI berhasil! Ditemukan ' + testResult.count + ' hasil pencarian.',
+        provider: 'serpapi'
+      });
+    } catch (e) {
+      return sendJSON(res, 500, { success: false, error: 'Uji koneksi SerpAPI error: ' + e.message });
+    }
+  }
+
   // Deep Research: Start Autonomous Research (Background Worker)
   if ((pathname === '/api/mulai-riset' || pathname === '/api/deep-research/start') && method === 'POST') {
     try {
@@ -1028,6 +1216,7 @@ const server = http.createServer(async (req, res) => {
         endpoint: body.endpoint,
         apiKey: body.apiKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null),
         serperApiKey: body.serperApiKey || req.headers['x-serper-key'],
+        serpApiKey: body.serpApiKey || req.headers['x-serpapi-key'],
         maxIterations: body.maxIterations || 3
       }).catch(err => {
         console.error(`Tugas riset [${taskId}] gagal secara asinkron:`, err.message);
