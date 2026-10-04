@@ -121,6 +121,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     dropdownModelTab: 'ollama', // 'ollama' | 'openrouter'
     catalogTargetInputId: null,
     catalogSearchQuery: '',
+    catalogCategoryFilter: 'all', // 'all' | 'free' | 'reasoning' | 'fast' | 'flagship' | 'coding'
     activeInspectionTab: 'agent1', // 'agent1' | 'agent2' | 'scraper'
     currentLiveInspection: null,
     openRouterBalance: null, // { totalCredits, totalUsage, remaining, isFreeTier, lastChecked }
@@ -7761,9 +7762,13 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       els.catalogTargetLabel.innerText = targetLabelName;
     }
     STATE.catalogSearchQuery = '';
+    STATE.catalogCategoryFilter = 'all';
     if (els.liveModelCatalogSearchInput) {
       els.liveModelCatalogSearchInput.value = '';
     }
+    document.querySelectorAll('.catalog-filter-pill').forEach(p => {
+      p.classList.toggle('active', p.dataset.catalogFilter === 'all');
+    });
     
     // Auto-detect tab aktif secara cerdas berdasarkan target input dan mode
     if (targetInputId) {
@@ -7904,6 +7909,27 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       });
     }
 
+    // Filter kategori cepat (Pills)
+    if (STATE.catalogCategoryFilter && STATE.catalogCategoryFilter !== 'all') {
+      const cat = STATE.catalogCategoryFilter.toLowerCase();
+      list = list.filter(item => {
+        const tagL = (item.tag || '').toLowerCase();
+        const idL = (item.id || '').toLowerCase();
+        if (cat === 'free') {
+          return item.isFree || tagL.includes('free') || idL.includes(':free');
+        } else if (cat === 'reasoning') {
+          return tagL.includes('reasoning') || idL.includes('reason') || idL.includes('r1') || idL.includes('o1') || idL.includes('o3') || idL.includes('qwq');
+        } else if (cat === 'fast') {
+          return tagL.includes('fast') || idL.includes('flash') || idL.includes('nano') || idL.includes('mini') || idL.includes(':20b') || idL.includes(':8b');
+        } else if (cat === 'flagship') {
+          return tagL.includes('flagship') || idL.includes('super') || idL.includes('ultra') || idL.includes('large') || idL.includes('gemma4') || idL.includes(':120b') || idL.includes(':675b') || idL.includes('sonnet') || idL.includes('opus') || idL.includes('pro');
+        } else if (cat === 'coding') {
+          return tagL.includes('coding') || idL.includes('code') || idL.includes('coder') || idL.includes('dev');
+        }
+        return true;
+      });
+    }
+
     // Filter pencarian live
     if (q) {
       list = list.filter(item => 
@@ -7914,11 +7940,14 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     }
 
     if (list.length === 0) {
+      const filterLabel = STATE.catalogCategoryFilter !== 'all' ? `kategori "${STATE.catalogCategoryFilter}"` : '';
+      const queryLabel = q ? `kata kunci "${escapeHtml(q)}"` : '';
+      const combinedLabel = [filterLabel, queryLabel].filter(Boolean).join(' dan ');
       container.innerHTML = `
         <div style="text-align:center; padding: 24px; color: var(--text-dim); font-size: 0.85rem;">
           <i class="fa-solid fa-filter-circle-xmark" style="font-size: 1.6rem; color: var(--neon-amber); margin-bottom: 8px; display:block;"></i>
-          Tidak ada model yang cocok dengan kata kunci "<strong>${escapeHtml(q)}</strong>".<br>
-          <span style="font-size: 0.74rem;">Klik tombol <strong>Refresh</strong> untuk menyinkronkan kembali dari server / API.</span>
+          Tidak ada model yang cocok dengan ${combinedLabel || 'filter yang dipilih'}.<br>
+          <span style="font-size: 0.74rem;">Klik filter <strong>Semua</strong> atau klik tombol <strong>Refresh</strong> untuk memuat ulang.</span>
         </div>
       `;
       return;
@@ -9220,6 +9249,16 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     els.liveModelCatalogSearchInput?.addEventListener('input', (e) => {
       STATE.catalogSearchQuery = e.target.value;
       renderLiveModelCatalog();
+    });
+
+    document.querySelectorAll('.catalog-filter-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        document.querySelectorAll('.catalog-filter-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        STATE.catalogCategoryFilter = pill.dataset.catalogFilter || 'all';
+        renderLiveModelCatalog();
+        AudioEngine.click();
+      });
     });
 
     els.btnRefreshLiveCatalog?.addEventListener('click', async () => {
