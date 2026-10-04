@@ -1891,26 +1891,56 @@ const server = http.createServer(async (req, res) => {
         proxyHeaders['Authorization'] = authHeader;
       }
 
-      const proxyReq = client.request(ollamaUrl.toString(), {
+      let clientDisconnected = false;
+      let proxyReq = null;
+
+      req.on('close', () => {
+        clientDisconnected = true;
+        if (proxyReq && !proxyReq.destroyed) {
+          proxyReq.destroy();
+        }
+      });
+
+      proxyReq = client.request(ollamaUrl.toString(), {
         method: 'POST',
         headers: proxyHeaders
       }, (proxyRes) => {
         proxyRes.on('data', chunk => {
-          res.write(chunk);
+          if (clientDisconnected || res.writableEnded || res.destroyed) {
+            if (proxyReq && !proxyReq.destroyed) proxyReq.destroy();
+            return;
+          }
+          try {
+            res.write(chunk);
+          } catch (e) {}
         });
 
         proxyRes.on('end', () => {
-          res.end();
+          if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+            try {
+              res.end();
+            } catch (e) {}
+          }
+        });
+
+        proxyRes.on('error', (err) => {
+          if (clientDisconnected || res.writableEnded || res.destroyed) return;
+          try {
+            res.write(JSON.stringify({ error: `Ollama Response Stream Error: ${err.message}` }) + '\n');
+            res.end();
+          } catch (e) {}
         });
       });
 
       proxyReq.on('error', (err) => {
-        res.write(JSON.stringify({ error: `Ollama Stream Error: ${err.message}` }) + '\n');
-        res.end();
-      });
-
-      req.on('close', () => {
-        proxyReq.destroy();
+        // If client closed or socket was destroyed on abort, suppress write-after-end errors
+        if (clientDisconnected || res.writableEnded || res.destroyed) {
+          return;
+        }
+        try {
+          res.write(JSON.stringify({ error: `Ollama Stream Error: ${err.message}` }) + '\n');
+          res.end();
+        } catch (e) {}
       });
 
       proxyReq.write(postData);
@@ -2031,35 +2061,71 @@ const server = http.createServer(async (req, res) => {
         }
       };
 
-      const proxyReq = https.request(options, (proxyRes) => {
+      let clientDisconnected = false;
+      let proxyReq = null;
+
+      req.on('close', () => {
+        clientDisconnected = true;
+        if (proxyReq && !proxyReq.destroyed) {
+          proxyReq.destroy();
+        }
+      });
+
+      proxyReq = https.request(options, (proxyRes) => {
         if (proxyRes.statusCode !== 200) {
           let errData = '';
-          proxyRes.on('data', chunk => errData += chunk);
+          proxyRes.on('data', chunk => {
+            if (!clientDisconnected) errData += chunk;
+          });
           proxyRes.on('end', () => {
-            res.write(`data: ${JSON.stringify({ error: `OpenRouter Error [${proxyRes.statusCode}]: ${errData}` })}\n\n`);
-            res.write('data: [DONE]\n\n');
-            res.end();
+            if (clientDisconnected || res.writableEnded || res.destroyed) return;
+            try {
+              res.write(`data: ${JSON.stringify({ error: `OpenRouter Error [${proxyRes.statusCode}]: ${errData}` })}\n\n`);
+              res.write('data: [DONE]\n\n');
+              res.end();
+            } catch (e) {}
           });
           return;
         }
 
         proxyRes.on('data', chunk => {
-          res.write(chunk);
+          if (clientDisconnected || res.writableEnded || res.destroyed) {
+            if (proxyReq && !proxyReq.destroyed) proxyReq.destroy();
+            return;
+          }
+          try {
+            res.write(chunk);
+          } catch (e) {}
         });
 
         proxyRes.on('end', () => {
-          res.end();
+          if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+            try {
+              res.end();
+            } catch (e) {}
+          }
+        });
+
+        proxyRes.on('error', (err) => {
+          if (clientDisconnected || res.writableEnded || res.destroyed) return;
+          try {
+            res.write(`data: ${JSON.stringify({ error: `OpenRouter Response Stream Error: ${err.message}` })}\n\n`);
+            res.write('data: [DONE]\n\n');
+            res.end();
+          } catch (e) {}
         });
       });
 
       proxyReq.on('error', (err) => {
-        res.write(`data: ${JSON.stringify({ error: `OpenRouter Network Error: ${err.message}` })}\n\n`);
-        res.write('data: [DONE]\n\n');
-        res.end();
-      });
-
-      req.on('close', () => {
-        proxyReq.destroy();
+        // If client disconnected or socket was intentionally aborted, suppress error write-after-end
+        if (clientDisconnected || res.writableEnded || res.destroyed) {
+          return;
+        }
+        try {
+          res.write(`data: ${JSON.stringify({ error: `OpenRouter Network Error: ${err.message}` })}\n\n`);
+          res.write('data: [DONE]\n\n');
+          res.end();
+        } catch (e) {}
       });
 
       proxyReq.write(postData);
