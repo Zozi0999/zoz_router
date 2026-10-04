@@ -4989,7 +4989,13 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       // Client-side Direct Pollinations Fallback (for GitHub Pages or server fallback)
       if (!finalImageUrl) {
         actualSeed = Math.floor(Math.random() * 100000000);
-        const encoded = encodeURIComponent(cleanPrompt);
+        let urlPrompt = cleanPrompt;
+        if (urlPrompt.length > 800) {
+          const cut = urlPrompt.slice(0, 800);
+          const lastSpace = cut.lastIndexOf(' ');
+          urlPrompt = (lastSpace > 600 ? cut.slice(0, lastSpace) : cut).trim();
+        }
+        const encoded = encodeURIComponent(urlPrompt);
         finalImageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&model=flux&seed=${actualSeed}&nologo=true&enhance=true`;
       }
 

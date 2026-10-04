@@ -1707,7 +1707,14 @@ const server = http.createServer(async (req, res) => {
       // 2. Engine Default / Fallback: Flux.1 Neural Diffusion via Pollinations AI
       if (!imageBuffer) {
         effectiveModel = effectiveModel.includes('/') ? 'flux' : effectiveModel;
-        const encodedPrompt = encodeURIComponent(cleanPrompt);
+        // Pemangkasan semantik aman (smart boundary truncation) untuk URL GET guna mencegah error HTTP 414 URI Too Long
+        let urlPrompt = cleanPrompt;
+        if (urlPrompt.length > 800) {
+          const cut = urlPrompt.slice(0, 800);
+          const lastSpace = cut.lastIndexOf(' ');
+          urlPrompt = (lastSpace > 600 ? cut.slice(0, lastSpace) : cut).trim();
+        }
+        const encodedPrompt = encodeURIComponent(urlPrompt);
         remoteImageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=${encodeURIComponent(effectiveModel)}&seed=${actualSeed}&nologo=true&enhance=true`;
         const downloaded = await downloadImageBuffer(remoteImageUrl, 40000);
         imageBuffer = downloaded.buffer;
