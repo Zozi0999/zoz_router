@@ -819,7 +819,19 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (savedSettings) {
         STATE.settings = { ...STATE.settings, ...JSON.parse(savedSettings) };
       }
-      if (!STATE.settings.ollamaModel) {
+
+      // Auto-Migration: Alihkan endpoint lokal lama ke Ollama Cloud resmi (https://ollama.com)
+      if (!STATE.settings.ollamaEndpoint || 
+          STATE.settings.ollamaEndpoint.includes('127.0.0.1') || 
+          STATE.settings.ollamaEndpoint.includes('localhost') || 
+          STATE.settings.ollamaEndpoint.includes('11434')) {
+        STATE.settings.ollamaEndpoint = 'https://ollama.com';
+      }
+
+      // Auto-Migration: Alihkan model lokal lama ke model flagship cloud default
+      if (!STATE.settings.ollamaModel || 
+          STATE.settings.ollamaModel === 'nemotron-mini:latest' || 
+          STATE.settings.ollamaModel === 'llama3:latest') {
         STATE.settings.ollamaModel = 'gemma4:31b';
       }
       if (!STATE.settings.serperApiKey) {
@@ -2803,10 +2815,13 @@ ${organicBlock}
 
   // ==================== URL & ENDPOINT NORMALIZER ====================
   function normalizeEndpoint(ep) {
-    if (!ep || typeof ep !== 'string' || !ep.trim()) return 'http://127.0.0.1:11434';
+    if (!ep || typeof ep !== 'string' || !ep.trim()) return 'https://ollama.com';
     let clean = ep.trim();
+    if (clean.includes('127.0.0.1') || clean.includes('localhost') || clean.includes('11434')) {
+      return 'https://ollama.com';
+    }
     if (!/^https?:\/\//i.test(clean)) {
-      clean = (clean.includes(':443') || clean.includes('.com') || clean.includes('.io') || clean.includes('.ai') || clean.includes('.app'))
+      clean = (clean.includes(':443') || clean.includes('ollama.com') || clean.includes('.com') || clean.includes('.io') || clean.includes('.ai') || clean.includes('.app'))
         ? `https://${clean}`
         : `http://${clean}`;
     }
@@ -8212,7 +8227,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
   // ==================== SETTINGS SYNC HELPER ====================
   function syncSettingsModalFields() {
-    if (els.settingOllamaEndpoint) els.settingOllamaEndpoint.value = STATE.settings.ollamaEndpoint || 'http://127.0.0.1:11434';
+    if (els.settingOllamaEndpoint) els.settingOllamaEndpoint.value = STATE.settings.ollamaEndpoint || 'https://ollama.com';
     if (els.settingOllamaApiKey) els.settingOllamaApiKey.value = STATE.settings.ollamaApiKey || '';
     if (els.settingOpenRouterKey) els.settingOpenRouterKey.value = STATE.settings.openRouterKey || '';
     if (els.settingSerperApiKey) els.settingSerperApiKey.value = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
@@ -8968,7 +8983,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     });
 
     els.testOllamaBtn.addEventListener('click', async () => {
-      const ep = normalizeEndpoint(els.settingOllamaEndpoint.value.trim() || 'http://127.0.0.1:11434');
+      const ep = normalizeEndpoint(els.settingOllamaEndpoint.value.trim() || 'https://ollama.com');
       const key = els.settingOllamaApiKey ? els.settingOllamaApiKey.value.trim() : '';
       try {
         const headers = {};
