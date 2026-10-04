@@ -4673,9 +4673,15 @@ ${organicBlock}
   async function streamLLMSynthesis(engine, modelName, systemPrompt, session, bubbleText) {
     const streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
     let fullText = '';
-    const messagesPayload = buildSanitizedMessagesPayload(session, [], engine, systemPrompt);
 
-    if (engine === 'openrouter' || (!STATE.settings.ollamaModel && STATE.settings.openRouterKey)) {
+    // Auto-resolve actual engine based on modelName pattern
+    const isModelOpenRouter = Boolean(modelName && modelName.includes('/'));
+    const isModelOllama = Boolean(modelName && (modelName.includes(':') || (!modelName.includes('/') && (STATE.ollamaModels || []).some(m => (m.name || m.model || m.id) === modelName))));
+    const resolvedEngine = isModelOpenRouter ? 'openrouter' : (isModelOllama ? 'ollama' : (engine || 'ollama'));
+
+    const messagesPayload = buildSanitizedMessagesPayload(session, [], resolvedEngine, systemPrompt);
+
+    if (resolvedEngine === 'openrouter' || (!STATE.settings.ollamaModel && STATE.settings.openRouterKey && !isModelOllama)) {
       const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
       const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
       const headers = {
@@ -5113,7 +5119,12 @@ Sajikan seluruh tautan asli markdown [Nama Sumber](URL) agar pengguna dapat lang
 ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
         bubbleText.innerHTML = '<span class="typing-cursor"></span>';
-        finalReportText = await streamLLMSynthesis(engine, targetModel, synthesisSystem, session, bubbleText);
+        
+        // Auto-detect finalModel & engine for executive synthesis
+        const finalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
+        const finalEngine = finalModel.includes('/') ? 'openrouter' : (finalModel.includes(':') ? 'ollama' : engine);
+        
+        finalReportText = await streamLLMSynthesis(finalEngine, finalModel, synthesisSystem, session, bubbleText);
       }
 
       // Finalize UI & Markdown rendering
@@ -5126,10 +5137,11 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
         const endTime = performance.now();
         const totalDuration = ((endTime - startTime) / 1000).toFixed(2);
+        const actualFinalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
         if (metaBox) {
           metaBox.innerHTML = `
             <span class="meta-badge engine-badge"><i class="fa-solid fa-microscope" style="color:var(--neon-amber);"></i> DEEP RESEARCH</span>
-            <span class="meta-badge model-badge">${escapeHtml(targetModel)}</span>
+            <span class="meta-badge model-badge">${escapeHtml(actualFinalModel)}</span>
             <span class="meta-badge latency-badge"><i class="fa-solid fa-bolt"></i> ${totalDuration}s</span>
             <span class="meta-badge sources-badge"><i class="fa-solid fa-globe"></i> ${allSources.length} Sumber</span>
           `;
@@ -5139,7 +5151,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         const assistantMsg = {
           role: 'assistant',
           content: finalReportText,
-          model: targetModel,
+          model: actualFinalModel,
           sources: allSources,
           isDeepResearch: true,
           latency: totalDuration,
@@ -6394,9 +6406,6 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
   function populateDeepResearchModelPickers() {
     const datalist = els.availableModelsDatalist;
-    const s1 = els.selectDeepResearchAgent1Model;
-    const s2 = els.selectDeepResearchAgent2Model;
-    const sF = els.selectDeepResearchFinalModel;
 
     const modelSet = new Set();
     const modelsList = [];
@@ -6421,14 +6430,6 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     if (datalist) {
       datalist.innerHTML = modelsList.map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)} [${m.source}]</option>`).join('');
     }
-
-    // Populate Dropdowns
-    const selectOptionsHtml = '<option value="">Pilih Model...</option>' + 
-      modelsList.map(m => `<option value="${escapeHtml(m.id)}">[${m.source}] ${escapeHtml(m.name)}</option>`).join('');
-
-    if (s1) s1.innerHTML = selectOptionsHtml;
-    if (s2) s2.innerHTML = selectOptionsHtml;
-    if (sF) sF.innerHTML = selectOptionsHtml;
   }
 
   function renderUserCustomPresetsUI() {
