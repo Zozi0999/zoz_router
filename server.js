@@ -79,6 +79,21 @@ function parseBody(req) {
   });
 }
 
+// Helper ekstraksi domain aman dengan proteksi try-catch & parsing URL fleksibel
+function extractDomainSafe(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return '';
+  try {
+    const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+    const parsed = new URL(candidate);
+    return parsed.hostname.replace(/^www\./i, '');
+  } catch (e) {
+    const match = trimmed.match(/^(?:https?:\/\/)?(?:www\.)?([^\/\?#:]+)/i);
+    return match ? match[1] : '';
+  }
+}
+
 // Helper to discover locally installed Ollama models from manifest files on disk
 function getLocalOllamaManifests() {
   const userHome = process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\user';
@@ -188,7 +203,7 @@ function performWebSearch(query, apiKey = null) {
                 url: item.link || '',
                 snippet: item.snippet || '',
                 date: item.date || null,
-                domain: item.link ? (new URL(item.link)).hostname.replace(/^www\./, '') : ''
+                domain: extractDomainSafe(item.link)
               });
             });
           }
@@ -314,8 +329,7 @@ function performSerpApiSearch(query, apiKey = null) {
           if (Array.isArray(parsed.organic_results)) {
             parsed.organic_results.slice(0, 6).forEach((item, idx) => {
               if (item.link) {
-                let domain = '';
-                try { domain = (new URL(item.link)).hostname.replace(/^www\./, ''); } catch (e) {}
+                const domain = extractDomainSafe(item.link);
                 results.push({
                   title: item.title || `Hasil SerpAPI ${idx + 1}`,
                   url: item.link,
@@ -572,16 +586,25 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
 }
 
 // Validasi host privat/lokal untuk proteksi SSRF
-function isPrivateHost(hostname) {
+function isPrivateHost(hostname, port) {
   if (!hostname || typeof hostname !== 'string') return true;
-  const host = hostname.toLowerCase().trim();
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return true;
+  let host = hostname.toLowerCase().trim();
+  if (host.startsWith('[') && host.endsWith(']')) {
+    host = host.slice(1, -1);
+  }
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0' || host === '::' || host === '0') return true;
   if (/^127\./.test(host)) return true;
   if (/^10\./.test(host)) return true;
   if (/^192\.168\./.test(host)) return true;
   if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)) return true;
   if (/^169\.254\./.test(host)) return true; // Link-local
-  if (host.endsWith('.local') || host.endsWith('.internal')) return true;
+  if (/^fc00:|^fe80:/i.test(host)) return true; // IPv6 Unique Local & Link-Local
+  if (host.startsWith('::ffff:127.') || host.startsWith('::ffff:192.168.') || host.startsWith('::ffff:10.')) return true;
+  if (host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.localhost')) return true;
+  const numPort = Number(port);
+  if (numPort === 11434 || numPort === 4040 || numPort === 8080) {
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true;
+  }
   return false;
 }
 
@@ -596,7 +619,7 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
         return resolve('');
       }
       const parsedUrl = new URL(targetUrl);
-      if (isPrivateHost(parsedUrl.hostname)) {
+      if (isPrivateHost(parsedUrl.hostname, parsedUrl.port)) {
         return resolve(''); // Cegah akses ke host lokal / intranet
       }
       const client = parsedUrl.protocol === 'https:' ? https : http;
@@ -742,7 +765,7 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
               title: item.title,
               url: item.url,
               snippet: item.snippet,
-              domain: item.domain || (item.url ? (new URL(item.url)).hostname.replace(/^www\./, '') : ''),
+              domain: item.domain || extractDomainSafe(item.url),
               sourceProvider: 'Serper'
             });
           }
@@ -765,7 +788,7 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
               title: item.title,
               url: item.url,
               snippet: item.snippet,
-              domain: item.domain || (item.url ? (new URL(item.url)).hostname.replace(/^www\./, '') : ''),
+              domain: item.domain || extractDomainSafe(item.url),
               sourceProvider: 'SerpAPI'
             });
           }
@@ -806,7 +829,7 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
           articles: allSources.slice(0, 5).map((s) => ({
             title: s.title,
             url: s.url,
-            domain: s.domain || (s.url ? (new URL(s.url)).hostname.replace(/^www\./, '') : ''),
+            domain: s.domain || extractDomainSafe(s.url),
             length: (s.snippet || '').length,
             sample: s.snippet || 'Menunggu giliran pemindaian mendalam...'
           }))
