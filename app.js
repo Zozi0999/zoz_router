@@ -4551,12 +4551,21 @@ ${organicBlock}
     return text.length > 600 ? text.slice(0, 600) + '...' : text;
   }
 
-  function downloadReportDOCX(title, markdownText) {
-    const renderedHtml = renderMarkdown(markdownText || '');
-    const cleanFilename = (title || 'Deep-Research-Report')
+  function sanitizeReportFilename(title) {
+    let clean = (title || 'Deep-Research-Report')
       .replace(/[^a-zA-Z0-9_\-\u00C0-\u024F\u1E00-\u1EFF ]/g, '')
       .replace(/\s+/g, '_')
-      .trim() || 'Deep-Research-Report';
+      .trim();
+
+    if (clean.length > 60) {
+      clean = clean.slice(0, 60).replace(/_[^_]*$/, '');
+    }
+    return clean || 'Deep-Research-Report';
+  }
+
+  function downloadReportDOCX(title, markdownText) {
+    const renderedHtml = renderMarkdown(markdownText || '');
+    const cleanFilename = sanitizeReportFilename(title);
     const currentDate = new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
 
     const wordContent = `<!DOCTYPE html>
@@ -4714,7 +4723,7 @@ ${organicBlock}
 <html>
 <head>
   <meta charset="utf-8">
-  <title>${escapeHtml(title || 'Deep Research Report')}</title>
+  <title>${escapeHtml(sanitizeReportFilename(title))}</title>
   <style>
     @page {
       size: A4;
@@ -4848,10 +4857,7 @@ ${organicBlock}
   }
 
   function downloadReportMD(title, markdownText) {
-    const cleanFilename = (title || 'Deep-Research-Report')
-      .replace(/[^a-zA-Z0-9_\-\u00C0-\u024F\u1E00-\u1EFF ]/g, '')
-      .replace(/\s+/g, '_')
-      .trim() || 'Deep-Research-Report';
+    const cleanFilename = sanitizeReportFilename(title);
     const blob = new Blob([markdownText || ''], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
