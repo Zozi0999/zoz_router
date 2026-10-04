@@ -1550,7 +1550,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     session.messages.forEach(m => messagesPayload.push({ role: m.role, content: m.content || '' }));
     messagesPayload.push({ role: 'user', content: promptInstruction });
 
-    const chatUrl = IS_GITHUB_PAGES ? `${ep}/api/chat` : '/api/ollama/chat';
+    const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
     const res = await fetch(chatUrl, {
       method: 'POST',
       headers,
@@ -4716,7 +4716,7 @@ ${organicBlock}
         endpoint: ep
       };
       if (STATE.settings.ollamaApiKey) requestBody.apiKey = STATE.settings.ollamaApiKey;
-      const chatUrl = IS_GITHUB_PAGES ? `${ep}/api/chat` : '/api/ollama/chat';
+      const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
 
       const res = await fetch(chatUrl, {
         method: 'POST',
@@ -4828,7 +4828,7 @@ ${organicBlock}
       };
       if (STATE.settings.ollamaApiKey) requestBody.apiKey = STATE.settings.ollamaApiKey;
 
-      const chatUrl = IS_GITHUB_PAGES ? `${ep}/api/chat` : '/api/ollama/chat';
+      const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
       const response = await fetch(chatUrl, {
         method: 'POST',
         headers,
@@ -6436,6 +6436,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
   // ==================== MODEL HUB MODAL ====================
   function renderModelHubGrid(filter = 'all', query = '') {
+    if (!els.modelCardsGrid) return;
     els.modelCardsGrid.innerHTML = '';
     const q = query.toLowerCase().trim();
 
@@ -6611,6 +6612,10 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
   // ==================== MODAL HELPERS ====================
   function openModal(modalId) {
+    if (modalId === 'modelHubModal') {
+      openLiveModelCatalog(null, 'Model Obrolan Utama');
+      return;
+    }
     const modal = document.getElementById(modalId);
     if (modal) {
       modal.classList.add('show');
@@ -6620,6 +6625,10 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
   }
 
   function closeModal(modalId, triggerHistoryBack = true) {
+    if (modalId === 'modelHubModal') {
+      closeModal('liveModelCatalogModal', triggerHistoryBack);
+      return;
+    }
     const modal = document.getElementById(modalId);
     if (modal) {
       modal.classList.remove('show');
@@ -9064,9 +9073,9 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
         if (IS_GITHUB_PAGES) {
           // Direct browser testing
-          let res = await fetch(`${ep}/api/tags`, { headers, mode: 'cors' }).catch(() => null);
+          let res = await fetch(resolveEndpointUrl(ep, 'api/tags'), { headers, mode: 'cors' }).catch(() => null);
           if (!res || !res.ok) {
-            res = await fetch(`${ep}/v1/models`, { headers, mode: 'cors' }).catch(() => null);
+            res = await fetch(resolveEndpointUrl(ep, 'v1/models'), { headers, mode: 'cors' }).catch(() => null);
           }
           if (res && res.ok) {
             const data = await res.json();
@@ -9231,24 +9240,31 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       AudioEngine.click();
     });
 
-    // Model Hub Modal
-    els.modelHubBtn.addEventListener('click', () => {
-      openModal('modelHubModal');
-      renderModelHubGrid();
-    });
-
-    els.hubSearchInput.addEventListener('input', (e) => {
-      const activeFilter = $('.filter-pill.active')?.dataset.filter || 'all';
-      renderModelHubGrid(activeFilter, e.target.value);
-    });
-
-    els.filterPills.forEach(pill => {
-      pill.addEventListener('click', () => {
-        els.filterPills.forEach(p => p.classList.remove('active'));
-        pill.classList.add('active');
-        renderModelHubGrid(pill.dataset.filter, els.hubSearchInput.value);
+    // Model Hub / Live Model Catalog Button
+    if (els.modelHubBtn) {
+      els.modelHubBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        AudioEngine.click();
+        openLiveModelCatalog(null, 'Model Obrolan Utama');
       });
-    });
+    }
+
+    if (els.hubSearchInput) {
+      els.hubSearchInput.addEventListener('input', (e) => {
+        const activeFilter = $('.filter-pill.active')?.dataset.filter || 'all';
+        renderModelHubGrid(activeFilter, e.target.value);
+      });
+    }
+
+    if (els.filterPills && els.filterPills.length > 0) {
+      els.filterPills.forEach(pill => {
+        pill.addEventListener('click', () => {
+          els.filterPills.forEach(p => p.classList.remove('active'));
+          pill.classList.add('active');
+          renderModelHubGrid(pill.dataset.filter, els.hubSearchInput?.value || '');
+        });
+      });
+    }
 
     // ==================== LIVE MODEL CATALOG LISTENERS ====================
     // Note: Click handling for .btn-open-model-catalog is handled via global delegation in document click listener

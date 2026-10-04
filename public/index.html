@@ -110,8 +110,8 @@
 
       <!-- Sidebar Footer -->
       <div class="sidebar-footer">
-        <button class="sidebar-footer-btn" id="modelHubBtn">
-          <i class="fa-solid fa-cubes"></i> Model Hub
+        <button class="sidebar-footer-btn" id="modelHubBtn" title="Buka Katalog Model Layar Lebar Real-Time">
+          <i class="fa-solid fa-shapes"></i> Katalog Model
         </button>
         <button class="sidebar-footer-btn" id="settingsBtn">
           <i class="fa-solid fa-sliders"></i> Pengaturan
@@ -626,39 +626,6 @@
     </div>
   </div>
 
-  <!-- 2. MODEL HUB MODAL -->
-  <div class="modal-backdrop" id="modelHubModal">
-    <div class="modal-card modal-lg">
-      <div class="modal-header">
-        <div class="modal-title"><i class="fa-solid fa-cubes"></i> Model Hub & Catalog Explorer</div>
-        <button class="modal-close-btn" data-close="modelHubModal"><i class="fa-solid fa-xmark"></i></button>
-      </div>
-      <div class="modal-body">
-        <div class="hub-search-filter">
-          <div class="search-box">
-            <i class="fa-solid fa-magnifying-glass"></i>
-            <input type="text" id="hubSearchInput" placeholder="Cari ratusan model (Claude, GPT, Llama, DeepSeek, Qwen)...">
-          </div>
-          <div class="filter-pills">
-            <button class="filter-pill active" data-filter="all">Semua</button>
-            <button class="filter-pill" data-filter="vision">👁️ Vision (Image AI)</button>
-            <button class="filter-pill" data-filter="free">🎁 Free (OpenRouter)</button>
-            <button class="filter-pill" data-filter="local">🦙 Ollama Local</button>
-            <button class="filter-pill" data-filter="flagship">🌟 Flagship</button>
-            <button class="filter-pill" data-filter="coding">💻 Coding</button>
-            <button class="filter-pill" data-filter="reasoning">🧠 Reasoning</button>
-          </div>
-        </div>
-
-        <div class="model-cards-grid" id="modelCardsGrid">
-          <!-- Populated by JS -->
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" data-close="modelHubModal">Tutup</button>
-      </div>
-    </div>
-  </div>
 
   <!-- 3. CYBER BGM DECK & LOCAL AUDIO MODAL -->
   <div class="modal-backdrop" id="musicDeckModal">
