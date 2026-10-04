@@ -248,6 +248,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     webSearchIcon: $('#webSearchIcon'),
     searchBadge: $('#searchBadge'),
     searchDropdown: $('#searchDropdown'),
+    imageGenToggleBtn: $('#imageGenToggleBtn'),
     attachmentPreviewBar: $('#attachmentPreviewBar'),
     imagePreviewImg: $('#imagePreviewImg'),
     removeImageBtn: $('#removeImageBtn'),
@@ -1978,6 +1979,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       els.pullUpNewChatWrapper.style.display = 'none';
     }
     session.messages.forEach((msg, idx) => {
+      if (msg.type === 'image_generation' || msg.isImageGen) {
+        renderSavedImageMessage(msg, idx);
+        return;
+      }
       let textToDisplay = (msg.role === 'user' && typeof msg.displayContent === 'string') ? msg.displayContent : (msg.content || '');
       const imagesToDisplay = msg.images || (msg.image ? [msg.image] : null);
       if (imagesToDisplay && imagesToDisplay.length > 0 && /^📷 \[\d+ Foto Lampiran\]$/.test(textToDisplay.trim())) {
@@ -1988,6 +1993,139 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
     enhanceCodeBlocks(els.messagesList);
     smartScrollChatToBottom(true);
+  }
+
+  function createGeneratedImageCardHtml(item) {
+    const imgUrl = item.url || item.imageUrl || item.localUrl || '';
+    const prompt = item.prompt || '';
+    const model = item.model || 'Flux.1 Schnell';
+    const duration = item.duration || item.stats?.duration || '3.5';
+    const width = item.width || 1024;
+    const height = item.height || 1024;
+    const seed = item.seed || '';
+
+    return `
+      <div class="image-result-card" data-prompt="${escapeHtml(prompt)}" data-img-url="${escapeHtml(imgUrl)}" data-model="${escapeHtml(model)}">
+        <div class="image-result-display-wrap" title="Klik untuk membuka layar penuh (Lightbox)">
+          <img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(prompt)}" class="image-result-img chat-zoomable-img">
+          <div class="image-result-overlay">
+            <button class="image-action-btn btn-open-lightbox" title="Buka Layar Penuh">
+              <i class="fa-solid fa-expand"></i>
+            </button>
+            <button class="image-action-btn btn-download-img" title="Unduh HD PNG">
+              <i class="fa-solid fa-download"></i>
+            </button>
+          </div>
+        </div>
+        <div class="image-result-footer">
+          <div class="image-meta-badges">
+            <span class="image-meta-badge model-badge"><i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(model)}</span>
+            <span class="image-meta-badge"><i class="fa-solid fa-vector-square"></i> ${width}×${height}</span>
+            <span class="image-meta-badge latency-badge"><i class="fa-solid fa-bolt"></i> ${duration}s</span>
+            ${seed ? `<span class="image-meta-badge"><i class="fa-solid fa-hashtag"></i> ${seed}</span>` : ''}
+          </div>
+          <div class="image-gen-prompt-quote" title="${escapeHtml(prompt)}">
+            "${escapeHtml(prompt)}"
+          </div>
+          <div class="image-actions-bar">
+            <button class="btn btn-xs btn-primary btn-image-action btn-regen-img">
+              <i class="fa-solid fa-rotate-right"></i> Buat Variasi Baru
+            </button>
+            <button class="btn btn-xs btn-outline btn-image-action btn-copy-prompt">
+              <i class="fa-solid fa-copy"></i> Salin Prompt
+            </button>
+            <button class="btn btn-xs btn-outline btn-image-action btn-download-direct">
+              <i class="fa-solid fa-download"></i> Unduh Gambar
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function triggerImageDownload(url, promptText) {
+    const a = document.createElement('a');
+    a.href = url;
+    const cleanName = (promptText || 'ai_image').toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 30);
+    a.download = `zoz_${cleanName}_${Date.now()}.png`;
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 1000);
+    showToast('Mengunduh gambar HD...', 'info');
+  }
+
+  function attachImageCardListeners(row, promptText, imageUrl) {
+    const card = row.querySelector('.image-result-card');
+    if (!card) return;
+
+    // Lightbox on image click or fullscreen button
+    const imgWrap = card.querySelector('.image-result-display-wrap');
+    const openLbBtn = card.querySelector('.btn-open-lightbox');
+    const triggerLightbox = (e) => {
+      e.stopPropagation();
+      ImageLightbox.open([imageUrl], 0);
+    };
+    imgWrap?.addEventListener('click', triggerLightbox);
+    openLbBtn?.addEventListener('click', triggerLightbox);
+
+    // Download HD Image
+    const dlBtns = card.querySelectorAll('.btn-download-img, .btn-download-direct');
+    dlBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        triggerImageDownload(imageUrl, promptText);
+      });
+    });
+
+    // Copy Prompt
+    const copyBtns = [card.querySelector('.btn-copy-prompt'), row.querySelector('.copy-prompt-btn')].filter(Boolean);
+    copyBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        copyTextToClipboard(promptText || '');
+        showToast('Prompt gambar berhasil disalin!', 'success');
+      });
+    });
+
+    // Regenerate variation
+    const regenBtn = card.querySelector('.btn-regen-img');
+    regenBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const currentSession = getActiveSession();
+      if (currentSession) {
+        runImageGeneration(currentSession, promptText);
+      }
+    });
+  }
+
+  function renderSavedImageMessage(msg, idx = -1) {
+    const row = document.createElement('div');
+    row.className = 'message-row assistant';
+    row.dataset.index = idx;
+
+    const avatarIcon = '<i class="fa-solid fa-microchip-ai"></i>';
+    const cardHtml = createGeneratedImageCardHtml(msg);
+
+    row.innerHTML = `
+      <div class="message-avatar">${avatarIcon}</div>
+      <div class="message-content-box">
+        <div class="message-meta">
+          <strong>AI Image Studio</strong>
+          <span class="meta-model-badge">${escapeHtml(msg.model || 'Flux.1')}</span>
+          ${msg.stats?.duration ? `<span>⏱️ ${msg.stats.duration}s</span>` : ''}
+        </div>
+        <div class="message-bubble" style="background:transparent; border:none; padding:0;">
+          ${cardHtml}
+        </div>
+        <div class="message-actions-bar">
+          <button class="msg-action-btn copy-prompt-btn" title="Salin Prompt"><i class="fa-solid fa-copy"></i> Salin Prompt</button>
+        </div>
+      </div>
+    `;
+
+    attachImageCardListeners(row, msg.prompt, msg.imageUrl || msg.url);
+    els.messagesList.appendChild(row);
   }
 
   function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1, sources = null, docs = null, isDeepResearch = false, latency = null) {
@@ -3037,7 +3175,10 @@ ${organicBlock}
     renderAttachmentPreviews();
     AudioEngine.send();
 
-    if (STATE.isDeepResearch) {
+    if (isImageGenerationTrigger(text)) {
+      const cleanImgPrompt = extractImagePrompt(text);
+      await runImageGeneration(session, cleanImgPrompt);
+    } else if (STATE.isDeepResearch) {
       const activeEngine = (STATE.mode === 'auto')
         ? (STATE.settings.autoPolicy === 'cloud_first' ? 'openrouter' : 'ollama')
         : STATE.mode;
@@ -4706,6 +4847,245 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       }
     } finally {
       STATE.currentDeepResearchTaskId = null;
+      setGeneratingState(false);
+      STATE.abortController = null;
+    }
+  }
+
+  // ==================== AI IMAGE STUDIO ENGINE ====================
+  function isImageGenerationTrigger(promptText) {
+    if (!promptText || typeof promptText !== 'string') return false;
+    const t = promptText.trim().toLowerCase();
+    if (t.startsWith('/image') || t.startsWith('/img') || t.startsWith('/gambar')) return true;
+    if (/^(?:tolong\s+)?(?:buatkan|buat|bikin|generate|render|lukiskan|gambarkan)\s+gambar\b/i.test(t)) return true;
+    if (/^(?:generate|create|render|draw|paint)\s+(?:an?\s+)?(?:image|picture|photo|illustration|art)\b/i.test(t)) return true;
+    if (t.startsWith('gambar:') || t.startsWith('image:')) return true;
+    return false;
+  }
+
+  function extractImagePrompt(promptText) {
+    if (!promptText || typeof promptText !== 'string') return '';
+    let p = promptText.trim();
+    p = p.replace(/^\/(?:image|img|gambar)\s*/i, '');
+    p = p.replace(/^(?:tolong\s+)?(?:buatkan|buat|bikin|generate|render|lukiskan|gambarkan)\s+gambar\s+(?:tentang\s+|dari\s+|sebuah\s+)?/i, '');
+    p = p.replace(/^(?:generate|create|render|draw|paint)\s+(?:an?\s+)?(?:image|picture|photo|illustration|art)\s+(?:of\s+)?/i, '');
+    p = p.replace(/^(?:gambar|image):\s*/i, '');
+    return p.trim() || promptText.trim();
+  }
+
+  async function runImageGeneration(session, promptText, customModel = 'flux') {
+    if (!promptText || !promptText.trim()) return;
+    const cleanPrompt = promptText.trim();
+    
+    setGeneratingState(true);
+    STATE.abortController = new AbortController();
+
+    const startTime = performance.now();
+    const assistantRow = appendMessageElement('assistant', '', null, 'AI Image Studio');
+    const bubbleText = assistantRow.querySelector('.msg-text-content');
+    const metaBox = assistantRow.querySelector('.message-meta');
+
+    // Render Creation Animation HUD
+    bubbleText.innerHTML = `
+      <div class="image-gen-hud">
+        <div class="image-gen-header">
+          <div class="image-gen-title-box">
+            <i class="fa-solid fa-atom fa-spin" style="color:#FF007F;"></i>
+            <span>AI Image Studio (Neural Synthesis)</span>
+          </div>
+          <span class="image-gen-badge">Flux.1 Diffusion</span>
+        </div>
+        <div class="image-gen-canvas-wrapper">
+          <div class="image-gen-canvas-grid"></div>
+          <div class="image-gen-laser-beam"></div>
+          <div class="image-gen-holo-center">
+            <div class="image-gen-holo-icon-wrap">
+              <div class="image-gen-holo-ring"></div>
+              <i class="fa-solid fa-wand-magic-sparkles image-gen-holo-core"></i>
+            </div>
+            <div class="image-gen-holo-label">Sintesis Kuantum Aktif</div>
+          </div>
+        </div>
+        <div class="image-gen-telemetry">
+          <div class="image-gen-status-row">
+            <span class="image-gen-status-text">
+              <i class="fa-solid fa-circle-notch fa-spin" style="color:#FF007F;"></i>
+              <span class="image-gen-step-msg">[Langkah 1/3] Mengonversi semantik prompt ke ruang laten...</span>
+            </span>
+            <span class="image-gen-percent-text">15%</span>
+          </div>
+          <div class="image-gen-progress-track">
+            <div class="image-gen-progress-fill" style="width: 15%;"></div>
+          </div>
+          <div class="image-gen-prompt-quote" title="${escapeHtml(cleanPrompt)}">
+            "${escapeHtml(cleanPrompt)}"
+          </div>
+        </div>
+      </div>
+    `;
+    smartScrollChatToBottom(true);
+
+    const stepMsgEl = bubbleText.querySelector('.image-gen-step-msg');
+    const percentEl = bubbleText.querySelector('.image-gen-percent-text');
+    const progressFillEl = bubbleText.querySelector('.image-gen-progress-fill');
+
+    function updateHudStep(stepText, percent) {
+      if (stepMsgEl) stepMsgEl.innerText = stepText;
+      if (percentEl) percentEl.innerText = `${percent}%`;
+      if (progressFillEl) progressFillEl.style.width = `${percent}%`;
+      smartScrollChatToBottom(false);
+    }
+
+    // Step 2 & Step 3 timed progression
+    const timerStep2 = setTimeout(() => {
+      updateHudStep('[Langkah 2/3] Denoising matriks difusi resolusi tinggi Flux...', 50);
+    }, 700);
+
+    const timerStep3 = setTimeout(() => {
+      updateHudStep('[Langkah 3/3] Materialisasi kuantum, upscaling & render final...', 85);
+    }, 2200);
+
+    try {
+      let finalImageUrl = '';
+      let resultModel = 'Flux.1 Schnell';
+      let actualSeed = Math.floor(Math.random() * 100000000);
+
+      if (!IS_GITHUB_PAGES) {
+        try {
+          const res = await fetch('/api/generate-image', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': STATE.settings.openRouterKey ? `Bearer ${STATE.settings.openRouterKey}` : ''
+            },
+            body: JSON.stringify({
+              prompt: cleanPrompt,
+              model: customModel || 'flux',
+              width: 1024,
+              height: 1024,
+              openRouterKey: STATE.settings.openRouterKey || ''
+            }),
+            signal: STATE.abortController.signal
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && (data.url || data.localUrl)) {
+              finalImageUrl = data.url || data.localUrl;
+              resultModel = data.model || resultModel;
+              actualSeed = data.seed || actualSeed;
+            } else {
+              throw new Error(data.error || 'Server tidak mengembalikan data gambar');
+            }
+          } else {
+            throw new Error(`Server HTTP ${res.status}`);
+          }
+        } catch (serverErr) {
+          if (serverErr.name === 'AbortError') throw serverErr;
+          console.warn('Backend image gen fallback ke direct Pollinations AI:', serverErr);
+        }
+      }
+
+      // Client-side Direct Pollinations Fallback (for GitHub Pages or server fallback)
+      if (!finalImageUrl) {
+        actualSeed = Math.floor(Math.random() * 100000000);
+        const encoded = encodeURIComponent(cleanPrompt);
+        finalImageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&model=flux&seed=${actualSeed}&nologo=true&enhance=true`;
+      }
+
+      // Preload image to ensure 100% materialization animation
+      await new Promise((resolve, reject) => {
+        const testImg = new Image();
+        testImg.onload = () => resolve();
+        testImg.onerror = () => reject(new Error('Gagal memuat visual gambar yang digenerasi.'));
+        if (STATE.abortController?.signal) {
+          STATE.abortController.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+        }
+        testImg.src = finalImageUrl;
+      });
+
+      clearTimeout(timerStep2);
+      clearTimeout(timerStep3);
+      updateHudStep('[Langkah 3/3] Selesai! Menampilkan karya visual...', 100);
+
+      const endTime = performance.now();
+      const totalDuration = ((endTime - startTime) / 1000).toFixed(2);
+
+      // Render Result Card with Materialization Animation
+      const cardItem = {
+        url: finalImageUrl,
+        imageUrl: finalImageUrl,
+        prompt: cleanPrompt,
+        model: resultModel,
+        width: 1024,
+        height: 1024,
+        seed: actualSeed,
+        duration: totalDuration
+      };
+
+      bubbleText.innerHTML = createGeneratedImageCardHtml(cardItem);
+      attachImageCardListeners(assistantRow, cleanPrompt, finalImageUrl);
+
+      if (metaBox) {
+        metaBox.innerHTML = `
+          <strong>AI Image Studio</strong>
+          <span class="meta-model-badge" style="background:rgba(255,0,127,0.18); border-color:#FF007F; color:#FF66B2;"><i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(resultModel)}</span>
+          <span>⏱️ ${totalDuration}s</span>
+        `;
+      }
+
+      // Save to Session
+      session.messages.push({
+        role: 'assistant',
+        content: `[Gambar AI Hasil Generasi: "${cleanPrompt}"]`,
+        type: 'image_generation',
+        isImageGen: true,
+        imageUrl: finalImageUrl,
+        url: finalImageUrl,
+        prompt: cleanPrompt,
+        model: resultModel,
+        width: 1024,
+        height: 1024,
+        seed: actualSeed,
+        stats: { duration: totalDuration },
+        timestamp: new Date().toISOString()
+      });
+      savePersistedState();
+
+      AudioEngine.success();
+      smartScrollChatToBottom(true);
+
+    } catch (err) {
+      clearTimeout(timerStep2);
+      clearTimeout(timerStep3);
+
+      if (err.name === 'AbortError') {
+        assistantRow.remove();
+        showToast('Generasi gambar dibatalkan oleh pengguna.');
+      } else {
+        console.error('Image gen error:', err);
+        bubbleText.innerHTML = `
+          <div style="background:rgba(255,0,127,0.08); border:1px solid rgba(255,0,127,0.4); border-radius:10px; padding:14px; line-height:1.5;">
+            <div style="font-weight:700; color:#FF2E93; margin-bottom:6px; display:flex; align-items:center; gap:8px;">
+              <i class="fa-solid fa-triangle-exclamation"></i> Gagal Menghasilkan Gambar AI
+            </div>
+            <div style="font-size:0.83rem; color:var(--text-main); margin-bottom:8px;">
+              ${escapeHtml(err.message || 'Terjadi gangguan saat memproses rendering difusi.')}
+            </div>
+            <div style="margin-top:10px; display:flex; gap:8px;">
+              <button class="btn btn-sm btn-primary retry-img-btn" style="font-size:0.75rem;">
+                <i class="fa-solid fa-rotate-right"></i> Coba Generate Ulang
+              </button>
+            </div>
+          </div>
+        `;
+        bubbleText.querySelector('.retry-img-btn')?.addEventListener('click', () => {
+          assistantRow.remove();
+          runImageGeneration(session, cleanPrompt, customModel);
+        });
+        AudioEngine.error();
+      }
+    } finally {
       setGeneratingState(false);
       STATE.abortController = null;
     }
