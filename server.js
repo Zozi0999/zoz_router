@@ -717,6 +717,7 @@ Sajikan seluruh tautan asli markdown [Nama Sumber](URL) agar pengguna dapat lang
     task.status = 'gagal';
     task.error = error.message;
     task.currentStep = 'Riset gagal: ' + error.message;
+    task.completedAt = new Date().toISOString();
   }
 }
 
@@ -1028,6 +1029,14 @@ const server = http.createServer(async (req, res) => {
         apiKey: body.apiKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null),
         serperApiKey: body.serperApiKey || req.headers['x-serper-key'],
         maxIterations: body.maxIterations || 3
+      }).catch(err => {
+        console.error(`Tugas riset [${taskId}] gagal secara asinkron:`, err.message);
+        if (dbTugasRiset[taskId]) {
+          dbTugasRiset[taskId].status = 'gagal';
+          dbTugasRiset[taskId].error = err.message;
+          dbTugasRiset[taskId].currentStep = 'Riset gagal: ' + err.message;
+          dbTugasRiset[taskId].completedAt = new Date().toISOString();
+        }
       });
 
       return sendJSON(res, 200, {
