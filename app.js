@@ -3049,15 +3049,21 @@ ${organicBlock}
       } else {
         // OpenRouter / OpenAI format
         if (imgs.length > 0 && m.role === 'user') {
-          const contentParts = [
-            { type: 'text', text: m.content || 'Jelaskan dan analisis gambar terlampir ini.' }
-          ];
-          imgs.forEach(img => {
-            if (typeof img === 'string' && img.startsWith('data:image')) {
-              contentParts.push({ type: 'image_url', image_url: { url: img } });
-            }
-          });
-          messagesPayload.push({ role: m.role, content: contentParts });
+          if (isLatestTurn) {
+            const contentParts = [
+              { type: 'text', text: m.content || 'Jelaskan dan analisis gambar terlampir ini.' }
+            ];
+            imgs.forEach(img => {
+              if (typeof img === 'string' && img.startsWith('data:image')) {
+                contentParts.push({ type: 'image_url', image_url: { url: img } });
+              }
+            });
+            messagesPayload.push({ role: m.role, content: contentParts });
+          } else {
+            // Pada riwayat pesan lama, hindari pengiriman ulang data Base64 gambar agar payload tetap ringan (<100KB)
+            const textSummary = m.content || '[Pengguna melampirkan gambar untuk dianalisis]';
+            messagesPayload.push({ role: m.role, content: textSummary });
+          }
         } else {
           messagesPayload.push({ role: m.role, content: m.content || '...' });
         }
