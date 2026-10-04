@@ -1873,14 +1873,8 @@ const server = http.createServer(async (req, res) => {
       const ollamaUrl = resolveEndpointUrl(customEndpoint, 'api/chat');
       const client = ollamaUrl.protocol === 'https:' ? https : http;
 
+      const isStream = body.stream !== false;
       const postData = JSON.stringify(body);
-
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*'
-      });
 
       const proxyHeaders = {
         'Content-Type': 'application/json',
@@ -1905,9 +1899,43 @@ const server = http.createServer(async (req, res) => {
         method: 'POST',
         headers: proxyHeaders
       }, (proxyRes) => {
+        if (clientDisconnected || res.writableEnded || res.destroyed) {
+          if (!proxyReq.destroyed) proxyReq.destroy();
+          return;
+        }
+
+        const statusCode = proxyRes.statusCode || 200;
+
+        // If upstream returned error (HTTP >= 400)
+        if (statusCode >= 400) {
+          let errData = '';
+          proxyRes.on('data', chunk => {
+            if (!clientDisconnected) errData += chunk;
+          });
+          proxyRes.on('end', () => {
+            if (clientDisconnected || res.writableEnded || res.destroyed) return;
+            try {
+              let parsedErr = null;
+              try { parsedErr = JSON.parse(errData); } catch (e) {}
+              const errMsg = parsedErr?.error?.message || parsedErr?.error || errData || `Ollama error [${statusCode}]`;
+              return sendJSON(res, statusCode, { error: errMsg, details: parsedErr || errData });
+            } catch (e) {}
+          });
+          return;
+        }
+
+        // Upstream returned 200 OK -> Send headers matching client stream mode!
+        const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'Access-Control-Allow-Origin': '*'
+        });
+
         proxyRes.on('data', chunk => {
           if (clientDisconnected || res.writableEnded || res.destroyed) {
-            if (proxyReq && !proxyReq.destroyed) proxyReq.destroy();
+            if (!proxyReq.destroyed) proxyReq.destroy();
             return;
           }
           try {
@@ -1926,6 +1954,9 @@ const server = http.createServer(async (req, res) => {
         proxyRes.on('error', (err) => {
           if (clientDisconnected || res.writableEnded || res.destroyed) return;
           try {
+            if (!res.headersSent) {
+              return sendJSON(res, 502, { error: `Ollama Response Stream Error: ${err.message}` });
+            }
             res.write(JSON.stringify({ error: `Ollama Response Stream Error: ${err.message}` }) + '\n');
             res.end();
           } catch (e) {}
@@ -1938,6 +1969,9 @@ const server = http.createServer(async (req, res) => {
           return;
         }
         try {
+          if (!res.headersSent) {
+            return sendJSON(res, 503, { error: `Ollama Stream Error (offline/unreachable): ${err.message}` });
+          }
           res.write(JSON.stringify({ error: `Ollama Stream Error: ${err.message}` }) + '\n');
           res.end();
         } catch (e) {}
@@ -2038,14 +2072,8 @@ const server = http.createServer(async (req, res) => {
       const apiKey = authHeader || `Bearer ${body.apiKey}`;
       delete body.apiKey;
 
+      const isStream = body.stream !== false;
       const postData = JSON.stringify(body);
-
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*'
-      });
 
       const options = {
         hostname: 'openrouter.ai',
@@ -2072,7 +2100,15 @@ const server = http.createServer(async (req, res) => {
       });
 
       proxyReq = https.request(options, (proxyRes) => {
-        if (proxyRes.statusCode !== 200) {
+        if (clientDisconnected || res.writableEnded || res.destroyed) {
+          if (!proxyReq.destroyed) proxyReq.destroy();
+          return;
+        }
+
+        const statusCode = proxyRes.statusCode || 200;
+
+        // If OpenRouter returned non-200 (e.g. 401 Unauthorized, 402 Payment Required, 429 Rate Limit)
+        if (statusCode !== 200) {
           let errData = '';
           proxyRes.on('data', chunk => {
             if (!clientDisconnected) errData += chunk;
@@ -2080,13 +2116,23 @@ const server = http.createServer(async (req, res) => {
           proxyRes.on('end', () => {
             if (clientDisconnected || res.writableEnded || res.destroyed) return;
             try {
-              res.write(`data: ${JSON.stringify({ error: `OpenRouter Error [${proxyRes.statusCode}]: ${errData}` })}\n\n`);
-              res.write('data: [DONE]\n\n');
-              res.end();
+              let parsedErr = null;
+              try { parsedErr = JSON.parse(errData); } catch (e) {}
+              const errMsg = parsedErr?.error?.message || parsedErr?.error || errData || `OpenRouter Error [${statusCode}]`;
+              return sendJSON(res, statusCode, { error: errMsg, details: parsedErr || errData });
             } catch (e) {}
           });
           return;
         }
+
+        // OpenRouter returned 200 OK -> Send headers matching client stream mode!
+        const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'Access-Control-Allow-Origin': '*'
+        });
 
         proxyRes.on('data', chunk => {
           if (clientDisconnected || res.writableEnded || res.destroyed) {
@@ -2109,8 +2155,13 @@ const server = http.createServer(async (req, res) => {
         proxyRes.on('error', (err) => {
           if (clientDisconnected || res.writableEnded || res.destroyed) return;
           try {
-            res.write(`data: ${JSON.stringify({ error: `OpenRouter Response Stream Error: ${err.message}` })}\n\n`);
-            res.write('data: [DONE]\n\n');
+            if (!res.headersSent) {
+              return sendJSON(res, 502, { error: `OpenRouter Response Stream Error: ${err.message}` });
+            }
+            if (isStream) {
+              res.write(`data: ${JSON.stringify({ error: `OpenRouter Response Stream Error: ${err.message}` })}\n\n`);
+              res.write('data: [DONE]\n\n');
+            }
             res.end();
           } catch (e) {}
         });
@@ -2122,8 +2173,13 @@ const server = http.createServer(async (req, res) => {
           return;
         }
         try {
-          res.write(`data: ${JSON.stringify({ error: `OpenRouter Network Error: ${err.message}` })}\n\n`);
-          res.write('data: [DONE]\n\n');
+          if (!res.headersSent) {
+            return sendJSON(res, 503, { error: `OpenRouter Network Error: ${err.message}` });
+          }
+          if (isStream) {
+            res.write(`data: ${JSON.stringify({ error: `OpenRouter Network Error: ${err.message}` })}\n\n`);
+            res.write('data: [DONE]\n\n');
+          }
           res.end();
         } catch (e) {}
       });
