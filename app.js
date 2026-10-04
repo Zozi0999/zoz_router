@@ -4959,6 +4959,16 @@ ${organicBlock}
         ? '<i class="fa-solid fa-eye"></i> <span>Tampilkan Referensi</span>'
         : '<i class="fa-solid fa-eye-slash"></i> <span>Sembunyikan Referensi</span>';
     }
+
+    // Jika link TOC yang sedang aktif kini tersembunyi, pindahkan status active ke link terakhir yang tampak
+    const activeToc = modal.querySelector('#fullReportTOCList .toc-link.active');
+    if (activeToc && activeToc.offsetParent === null) {
+      const visibleLinks = Array.from(modal.querySelectorAll('#fullReportTOCList .toc-link')).filter(el => el.offsetParent !== null);
+      if (visibleLinks.length > 0) {
+        activeToc.classList.remove('active');
+        visibleLinks[visibleLinks.length - 1].classList.add('active');
+      }
+    }
   }
 
   function toggleReportReferences() {
@@ -4980,8 +4990,14 @@ ${organicBlock}
 
     const dateEl = document.getElementById('fullReportDate');
     if (dateEl) {
-      const d = meta.date ? new Date(meta.date) : new Date();
-      dateEl.textContent = d.toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      let dateText = '-';
+      try {
+        const d = meta.date ? new Date(meta.date) : new Date();
+        if (!isNaN(d.getTime())) {
+          dateText = d.toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        }
+      } catch (e) {}
+      dateEl.textContent = dateText;
     }
 
     const sourcesCountEl = document.getElementById('fullReportSourcesCount');
@@ -5053,6 +5069,7 @@ ${organicBlock}
               let currentActiveIdx = 0;
 
               headings.forEach((heading, idx) => {
+                if (heading.offsetParent === null) return; // Lewati heading yang disembunyikan (misal: references-hidden)
                 const rect = heading.getBoundingClientRect();
                 if (rect.top - stageTop <= 130) {
                   currentActiveIdx = idx;
@@ -8197,11 +8214,22 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       }
     });
 
-    // Dismiss dropdowns on Escape key
+    // Dismiss dropdowns & open modals on Escape key
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         closeAttachmentDropdown();
         closeSearchDropdown();
+
+        if (ImageLightbox.isOpen()) {
+          return;
+        }
+
+        // Close top-most active modal if open
+        const openModals = Array.from(document.querySelectorAll('.modal-backdrop.show'));
+        if (openModals.length > 0) {
+          const topModal = openModals[openModals.length - 1];
+          closeModal(topModal.id, true);
+        }
       }
     });
 
