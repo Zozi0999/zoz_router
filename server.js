@@ -94,11 +94,47 @@ function extractDomainSafe(rawUrl) {
   }
 }
 
-// Helper untuk mengunduh buffer gambar dari URL eksternal dengan batas timeout
-function downloadImageBuffer(imageUrl, timeoutMs = 35000) {
+// Validasi host privat/lokal untuk proteksi SSRF
+function isPrivateHost(hostname, port) {
+  if (!hostname || typeof hostname !== 'string') return true;
+  let host = hostname.toLowerCase().trim();
+  if (host.startsWith('[') && host.endsWith(']')) {
+    host = host.slice(1, -1);
+  }
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0' || host === '::' || host === '0') return true;
+  if (/^127\./.test(host)) return true;
+  if (/^10\./.test(host)) return true;
+  if (/^192\.168\./.test(host)) return true;
+  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)) return true;
+  if (/^169\.254\./.test(host)) return true; // Link-local
+  if (/^fc00:|^fe80:/i.test(host)) return true; // IPv6 Unique Local & Link-Local
+  if (host.startsWith('::ffff:127.') || host.startsWith('::ffff:192.168.') || host.startsWith('::ffff:10.')) return true;
+  if (host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.localhost')) return true;
+  const numPort = Number(port);
+  if (numPort === 11434 || numPort === 4040 || numPort === 8080) {
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true;
+  }
+  return false;
+}
+
+// Helper untuk mengunduh buffer gambar dari URL eksternal dengan proteksi SSRF, batas redirect loop, dan memory buffer cap
+function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
   return new Promise((resolve, reject) => {
     try {
+      if (redirectCount > 3) {
+        return reject(new Error('Terlalu banyak redirect saat mengunduh gambar (maksimal 3 redirect)'));
+      }
+      if (!imageUrl || typeof imageUrl !== 'string' || !imageUrl.trim()) {
+        return reject(new Error('URL gambar kosong atau tidak valid'));
+      }
       const parsed = new URL(imageUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        return reject(new Error(`Protokol tidak didukung: ${parsed.protocol}`));
+      }
+      if (isPrivateHost(parsed.hostname, parsed.port)) {
+        return reject(new Error(`Akses ke host lokal/privat diblokir untuk keamanan (SSRF Protection): ${parsed.hostname}`));
+      }
+
       const client = parsed.protocol === 'https:' ? https : http;
       const req = client.get(parsed.toString(), {
         headers: {
@@ -110,7 +146,7 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000) {
         if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
           try {
             const redirectUrl = new URL(res.headers.location, imageUrl).toString();
-            return downloadImageBuffer(redirectUrl, timeoutMs).then(resolve).catch(reject);
+            return downloadImageBuffer(redirectUrl, timeoutMs, redirectCount + 1).then(resolve).catch(reject);
           } catch (e) {
             return reject(new Error('Redirect URL gambar tidak valid'));
           }
@@ -118,14 +154,27 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000) {
         if (res.statusCode < 200 || res.statusCode >= 300) {
           return reject(new Error(`Gagal mengunduh gambar: HTTP ${res.statusCode}`));
         }
+
+        const MAX_IMAGE_BYTES = 25 * 1024 * 1024; // Maksimal 25MB untuk mencegah Memory Exhaustion (OOM)
+        let downloadedBytes = 0;
         const chunks = [];
-        res.on('data', chunk => chunks.push(chunk));
+
+        res.on('data', chunk => {
+          downloadedBytes += chunk.length;
+          if (downloadedBytes > MAX_IMAGE_BYTES) {
+            req.destroy();
+            return reject(new Error('Ukuran gambar melebihi batas maksimum keamanan 25MB'));
+          }
+          chunks.push(chunk);
+        });
+
         res.on('end', () => {
           const buffer = Buffer.concat(chunks);
           const contentType = res.headers['content-type'] || 'image/jpeg';
           resolve({ buffer, contentType });
         });
       });
+
       req.on('timeout', () => { req.destroy(); reject(new Error('Waktu pengunduhan gambar habis (timeout)')); });
       req.on('error', err => reject(err));
     } catch (e) {
@@ -625,28 +674,6 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   });
 }
 
-// Validasi host privat/lokal untuk proteksi SSRF
-function isPrivateHost(hostname, port) {
-  if (!hostname || typeof hostname !== 'string') return true;
-  let host = hostname.toLowerCase().trim();
-  if (host.startsWith('[') && host.endsWith(']')) {
-    host = host.slice(1, -1);
-  }
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0' || host === '::' || host === '0') return true;
-  if (/^127\./.test(host)) return true;
-  if (/^10\./.test(host)) return true;
-  if (/^192\.168\./.test(host)) return true;
-  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)) return true;
-  if (/^169\.254\./.test(host)) return true; // Link-local
-  if (/^fc00:|^fe80:/i.test(host)) return true; // IPv6 Unique Local & Link-Local
-  if (host.startsWith('::ffff:127.') || host.startsWith('::ffff:192.168.') || host.startsWith('::ffff:10.')) return true;
-  if (host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.localhost')) return true;
-  const numPort = Number(port);
-  if (numPort === 11434 || numPort === 4040 || numPort === 8080) {
-    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true;
-  }
-  return false;
-}
 
 // Helper untuk melakukan web scraping / pemindaian konten artikel mendalam dari URL dengan proteksi redirect loop & SSRF
 function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
