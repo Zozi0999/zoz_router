@@ -755,6 +755,35 @@ Analisis data di atas secara mendalam. Ekstrak entitas kunci, data statistik ter
 
       dataTemuan.push(`### Temuan Terverifikasi Iterasi ${i} (Query: "${currentQuery}"):\n${findingsText}`);
 
+      // Snapshot Live Inspection untuk pertinjau proses nyata di UI
+      task.liveInspection = {
+        topik,
+        currentQuery,
+        iteration: i,
+        maxIterations,
+        timestamp: new Date().toLocaleTimeString('id-ID'),
+        agent1: {
+          name: 'Agen 1 (Pakar Web Google)',
+          provider: 'Google Serper API',
+          model: agent1Model || 'Model Obrolan',
+          resultsCount: searchResSerper.results?.length || 0,
+          results: (searchResSerper.results || []).slice(0, 6),
+          analysis: analisisAgen1 || ''
+        },
+        agent2: {
+          name: 'Agen 2 (Pakar Data Spesifik)',
+          provider: 'Google SerpAPI',
+          model: agent2Model || 'Model Obrolan',
+          resultsCount: searchResSerpApi.results?.length || 0,
+          knowledgeGraph: searchResSerpApi.knowledgeGraph || null,
+          answerBox: searchResSerpApi.answerBox || null,
+          results: (searchResSerpApi.results || []).slice(0, 6),
+          analysis: analisisAgen2 || ''
+        },
+        scrapedArticlesCount: scrapedArticles.length,
+        totalSourcesCount: allSources.length
+      };
+
       if (i < maxIterations) {
         try {
           const evalPrompt = `Anda adalah AI Deep Research Planner.
@@ -826,6 +855,21 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
     if (scrapedArticles.length > 0) {
       const scrapedBlock = scrapedArticles.map((art, idx) => `--- [KONTEN UTUH ARTIKEL ${idx + 1}: ${art.title} (${art.url})] ---\n${art.content}\n--- [AKHIR ARTIKEL ${idx + 1}] ---`).join('\n\n');
       dataTemuan.push(`### Hasil Pemindaian Konten Mendalam (Full Web Scraping):\n${scrapedBlock}`);
+
+      if (task.liveInspection) {
+        task.liveInspection.scrapedArticlesCount = scrapedArticles.length;
+        task.liveInspection.scraper = {
+          status: 'selesai',
+          totalScraped: scrapedArticles.length,
+          articles: scrapedArticles.map(a => ({
+            title: a.title,
+            url: a.url,
+            domain: a.domain,
+            length: a.content.length,
+            sample: a.content.substring(0, 240) + '...'
+          }))
+        };
+      }
     }
 
     // ==========================================
@@ -1308,6 +1352,7 @@ const server = http.createServer(async (req, res) => {
       stepsHistory: dataTugas.stepsHistory,
       hasil: dataTugas.hasil,
       sources: dataTugas.sources || [],
+      liveInspection: dataTugas.liveInspection || null,
       error: dataTugas.error
     });
   }
