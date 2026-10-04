@@ -484,13 +484,27 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     });
   }
 
-  // Fallback / Default: Ollama Engine
-  const rawEp = endpoint || 'http://127.0.0.1:11434';
+  // Fallback / Default: Ollama Cloud Engine
+  const activeOllamaKey = ollamaApiKey || (apiKey && !apiKey.startsWith('sk-or-') ? apiKey : null) || process.env.OLLAMA_API_KEY;
+  let rawEp = (endpoint || '').trim();
+
+  // Jika endpoint kosong atau mengarah ke localhost / port 11434, atau jika activeOllamaKey ada, arahkan otomatis ke Ollama Cloud
+  if (!rawEp || activeOllamaKey || rawEp.includes('127.0.0.1') || rawEp.includes('localhost') || rawEp.includes('11434')) {
+    rawEp = 'https://ollama.com';
+  }
+
+  if (!/^https?:\/\//i.test(rawEp)) {
+    rawEp = (rawEp.includes(':443') || rawEp.includes('ollama.com') || rawEp.includes('.com') || rawEp.includes('.io') || rawEp.includes('.ai') || rawEp.includes('.app')) 
+      ? `https://${rawEp}` 
+      : `http://${rawEp}`;
+  }
+  rawEp = rawEp.replace(/\/+$/, '');
+
   const ollamaUrl = resolveEndpointUrl(rawEp, 'api/chat');
   const client = ollamaUrl.protocol === 'https:' ? https : http;
 
   const postData = JSON.stringify({
-    model: rawModel || 'nemotron-mini:latest',
+    model: rawModel || 'gemma4:31b',
     messages: finalMessages,
     stream: false,
     options: { temperature: 0.3 }
@@ -498,11 +512,12 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
 
   const headers = {
     'Content-Type': 'application/json',
+    'User-Agent': 'ZozRouter/1.0',
     'Content-Length': Buffer.byteLength(postData)
   };
-  const activeOllamaKey = ollamaApiKey || (apiKey && !apiKey.startsWith('sk-or-') ? apiKey : null);
   if (activeOllamaKey) {
     headers['Authorization'] = `Bearer ${activeOllamaKey}`;
+    headers['x-ollama-key'] = activeOllamaKey;
   }
 
   return new Promise((resolve, reject) => {
