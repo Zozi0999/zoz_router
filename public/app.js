@@ -2614,6 +2614,23 @@ ${organicBlock}
     return clean.replace(/\/+$/, '');
   }
 
+  function resolveEndpointUrl(baseEndpoint, targetPath) {
+    const norm = normalizeEndpoint(baseEndpoint);
+    try {
+      const parsed = new URL(norm);
+      let curPath = parsed.pathname.replace(/\/+$/, '');
+      const cleanTarget = targetPath.replace(/^\/+/, '');
+      if (curPath.endsWith('/' + cleanTarget) || curPath === '/' + cleanTarget) return parsed.toString().replace(/\/+$/, '');
+      if (curPath.endsWith('/api') && cleanTarget.startsWith('api/')) curPath = curPath.slice(0, -4);
+      if (curPath.endsWith('/v1') && cleanTarget.startsWith('v1/')) curPath = curPath.slice(0, -3);
+      const joined = (curPath ? curPath : '') + '/' + cleanTarget;
+      parsed.pathname = joined.replace(/\/+/g, '/');
+      return parsed.toString().replace(/\/+$/, '');
+    } catch (e) {
+      return `${norm.replace(/\/+$/, '')}/${targetPath.replace(/^\/+/, '')}`;
+    }
+  }
+
   // ==================== MODEL DISCOVERY & HEALTH CHECKS ====================
   async function checkOllamaHealth() {
     els.ollamaStatusVal.innerText = 'Memeriksa...';
@@ -2633,14 +2650,14 @@ ${organicBlock}
         // Direct browser fetch
         try {
           // 1. Try /api/tags
-          let res = await fetch(`${ep}/api/tags`, { headers, mode: 'cors' }).catch(() => null);
+          let res = await fetch(resolveEndpointUrl(ep, 'api/tags'), { headers, mode: 'cors' }).catch(() => null);
           if (res && res.ok) {
             const data = await res.json();
             rawModels = data.models || [];
             isRunning = true;
           } else {
             // 2. Try /v1/models (OpenAI compatibility)
-            res = await fetch(`${ep}/v1/models`, { headers, mode: 'cors' }).catch(() => null);
+            res = await fetch(resolveEndpointUrl(ep, 'v1/models'), { headers, mode: 'cors' }).catch(() => null);
             if (res && res.ok) {
               const data = await res.json();
               if (data.data && Array.isArray(data.data)) {
@@ -3212,7 +3229,7 @@ ${organicBlock}
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
       }
 
-      const chatUrl = IS_GITHUB_PAGES ? `${ep}/api/chat` : '/api/ollama/chat';
+      const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
 
       const response = await fetch(chatUrl, {
         method: 'POST',
@@ -3674,7 +3691,7 @@ ${organicBlock}
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
       }
 
-      const chatUrl = IS_GITHUB_PAGES ? `${ep}/api/chat` : '/api/ollama/chat';
+      const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
 
       const res = await fetch(chatUrl, {
         method: 'POST',

@@ -233,6 +233,19 @@ function normalizeEndpoint(ep) {
   return clean.replace(/\/+$/, '');
 }
 
+// Helper to resolve Ollama target paths while preserving reverse proxy / sub-paths
+function resolveEndpointUrl(baseEndpoint, targetPath) {
+  const norm = normalizeEndpoint(baseEndpoint);
+  const parsed = new URL(norm);
+  let curPath = parsed.pathname.replace(/\/+$/, '');
+  const cleanTarget = targetPath.replace(/^\/+/, '');
+  if (curPath.endsWith('/' + cleanTarget) || curPath === '/' + cleanTarget) return parsed;
+  if (curPath.endsWith('/api') && cleanTarget.startsWith('api/')) curPath = curPath.slice(0, -4);
+  if (curPath.endsWith('/v1') && cleanTarget.startsWith('v1/')) curPath = curPath.slice(0, -3);
+  parsed.pathname = path.posix.join(curPath || '/', cleanTarget);
+  return parsed;
+}
+
 // ==================== DEEP RESEARCH AUTONOMOUS ENGINE (PREMIUM) ====================
 const dbTugasRiset = {};
 
@@ -355,7 +368,7 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
 
   // Fallback / Default: Ollama Engine
   const rawEp = endpoint || 'http://127.0.0.1:11434';
-  const ollamaUrl = new URL('/api/chat', normalizeEndpoint(rawEp));
+  const ollamaUrl = resolveEndpointUrl(rawEp, 'api/chat');
   const client = ollamaUrl.protocol === 'https:' ? https : http;
 
   const postData = JSON.stringify({
@@ -1050,7 +1063,7 @@ const server = http.createServer(async (req, res) => {
     const tryFetchTags = (endpointUrl) => {
       return new Promise((resolve) => {
         try {
-          const ollamaUrl = new URL('/api/tags', endpointUrl);
+          const ollamaUrl = resolveEndpointUrl(endpointUrl, 'api/tags');
           const client = ollamaUrl.protocol === 'https:' ? https : http;
           const reqHeaders = { 'User-Agent': 'ZozRouter/1.0' };
           if (authHeader) reqHeaders['Authorization'] = authHeader;
@@ -1081,7 +1094,7 @@ const server = http.createServer(async (req, res) => {
     const tryFetchV1Models = (endpointUrl) => {
       return new Promise((resolve) => {
         try {
-          const ollamaUrl = new URL('/v1/models', endpointUrl);
+          const ollamaUrl = resolveEndpointUrl(endpointUrl, 'v1/models');
           const client = ollamaUrl.protocol === 'https:' ? https : http;
           const reqHeaders = { 'User-Agent': 'ZozRouter/1.0' };
           if (authHeader) reqHeaders['Authorization'] = authHeader;
@@ -1174,7 +1187,7 @@ const server = http.createServer(async (req, res) => {
       delete body.endpoint; // Don't send custom field to Ollama
       delete body.apiKey;
 
-      const ollamaUrl = new URL('/api/chat', customEndpoint);
+      const ollamaUrl = resolveEndpointUrl(customEndpoint, 'api/chat');
       const client = ollamaUrl.protocol === 'https:' ? https : http;
 
       const postData = JSON.stringify(body);
