@@ -964,6 +964,14 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (this.onScroll && !userScrolledUp) this.onScroll();
       return this.text;
     }
+
+    flush() {
+      return this.finish();
+    }
+
+    getFullText() {
+      return this.text;
+    }
   }
 
   // ==================== SMART SCROLL & CONTINUATION MANAGER ====================
@@ -4104,8 +4112,8 @@ ${organicBlock}
           }
         }
       }
-      streamRenderer.flush();
-      return fullText || streamRenderer.getFullText();
+      const renderedText = streamRenderer.finish();
+      return fullText || renderedText;
     } else {
       const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
       const headers = { 'Content-Type': 'application/json' };
@@ -4156,8 +4164,8 @@ ${organicBlock}
           } catch (e) {}
         }
       }
-      streamRenderer.flush();
-      return fullText || streamRenderer.getFullText();
+      const renderedText = streamRenderer.finish();
+      return fullText || renderedText;
     }
   }
 
