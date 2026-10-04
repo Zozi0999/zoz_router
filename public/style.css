@@ -4011,3 +4011,25 @@ html, body {
   font-weight: 600;
 }
 
+/* Inspector Tabs Mobile Responsiveness */
+.inspector-tabs {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.inspector-tabs::-webkit-scrollbar {
+  display: none;
+}
+.inspector-tabs .settings-tab-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+@media (max-width: 600px) {
+  .inspector-summary-bar {
+    padding: 8px 12px !important;
+    gap: 8px !important;
+  }
+  .inspector-summary-bar > div {
+    font-size: 0.72rem !important;
+  }
+}
+
