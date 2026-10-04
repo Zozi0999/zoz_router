@@ -815,7 +815,7 @@
 
   <!-- 4. LIVE MODEL CATALOG MODAL (Real-Time Ollama & OpenRouter) -->
   <div class="modal-backdrop" id="liveModelCatalogModal">
-    <div class="modal-card modal-lg" style="max-width: 900px; max-height: 88vh; display: flex; flex-direction: column;">
+    <div class="modal-card modal-catalog-card">
       <div class="modal-header">
         <div class="modal-title">
           <i class="fa-solid fa-layer-group" style="color: var(--neon-cyan);"></i> Katalog Model Real-Time (Live)
@@ -853,6 +853,15 @@
         <!-- Scrollable List of Models -->
         <div class="catalog-list-container" id="catalogListContainer" style="flex: 1; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: rgba(8, 9, 13, 0.6); padding: 8px;">
           <!-- Items dynamically populated as clean list rows -->
+        </div>
+
+        <!-- Custom Model Direct Input Row -->
+        <div class="catalog-custom-input-row" style="display: flex; gap: 8px; margin-top: 10px; align-items: center; background: rgba(0,0,0,0.35); padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+          <i class="fa-solid fa-terminal" style="color: var(--neon-cyan); font-size: 0.82rem;"></i>
+          <input type="text" id="catalogCustomModelInput" placeholder="Ketik model kustom (misal: qwen2.5:7b, anthropic/claude-3.5-sonnet, gpt-4o)..." style="flex: 1; background: transparent; border: none; outline: none; color: #FFF; font-family: var(--font-code); font-size: 0.82rem;">
+          <button class="btn btn-sm btn-outline" id="btnUseCatalogCustomModel" type="button" style="padding: 4px 14px; font-size: 0.78rem;">
+            <i class="fa-solid fa-check"></i> Gunakan
+          </button>
         </div>
       </div>
 

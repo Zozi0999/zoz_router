@@ -7451,11 +7451,28 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     } else {
       list = (STATE.openRouterModels || []).map(m => {
+        const idLower = (m.id || '').toLowerCase();
         const isFree = Boolean(m.id && m.id.includes(':free'));
+        
+        let tag = 'Cloud';
+        if (isFree) {
+          tag = 'Free';
+        } else if (idLower.includes('reason') || idLower.includes('r1') || idLower.includes('deepseek-r') || idLower.includes('o1') || idLower.includes('o3') || idLower.includes('qwq')) {
+          tag = 'Reasoning Cloud';
+        } else if (idLower.includes('flash') || idLower.includes('mini') || idLower.includes('turbo') || idLower.includes('lite') || idLower.includes('haiku') || idLower.includes(':20b') || idLower.includes(':8b')) {
+          tag = 'Fast Cloud';
+        } else if (idLower.includes('code') || idLower.includes('coder') || idLower.includes('dev')) {
+          tag = 'Coding Cloud';
+        } else if (idLower.includes('pro') || idLower.includes('plus') || idLower.includes('flagship') || idLower.includes('opus') || idLower.includes('max') || idLower.includes(':120b') || idLower.includes(':70b') || idLower.includes('sonnet') || idLower.includes('glm-5.3') || idLower.includes('minimax-m3') || idLower.includes('gemma4:31b')) {
+          tag = 'Flagship Cloud';
+        } else if (m.context_length && m.context_length >= 128000) {
+          tag = 'Long Context Cloud';
+        }
+
         return {
           id: m.id,
           name: m.name || m.id,
-          tag: m.tag || (isFree ? 'Free' : 'Cloud'),
+          tag: m.tag || tag,
           isFree: isFree,
           context_length: m.context_length ? `${Math.round(m.context_length / 1024)}k konteks` : null
         };
@@ -7506,9 +7523,16 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       const row = document.createElement('div');
       row.className = 'catalog-model-row';
 
-      const isFree = m.tag && m.tag.toLowerCase().includes('free');
-      const isLocal = m.tag && m.tag.toLowerCase().includes('lokal');
-      const badgeClass = isFree ? 'free' : (isLocal ? 'local' : '');
+      const tagLower = (m.tag || '').toLowerCase();
+      let badgeClass = '';
+      if (tagLower.includes('free')) badgeClass = 'free';
+      else if (tagLower.includes('reasoning')) badgeClass = 'reasoning';
+      else if (tagLower.includes('flagship')) badgeClass = 'flagship';
+      else if (tagLower.includes('fast')) badgeClass = 'fast';
+      else if (tagLower.includes('coding')) badgeClass = 'coding';
+      else if (tagLower.includes('long context')) badgeClass = 'context';
+      else if (tagLower.includes('lokal')) badgeClass = 'local';
+      else badgeClass = '';
 
       row.innerHTML = `
         <div class="catalog-model-info">
@@ -7843,15 +7867,41 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       tab.addEventListener('click', () => setEngineMode(tab.dataset.mode));
     });
 
-    // Model Picker Dropdown
+    // Model Picker: Buka Katalog Model Layar Lebar & Besar Real-Time (Live Catalog)
     els.modelPickerChip.addEventListener('click', (e) => {
       e.stopPropagation();
-      STATE.dropdownModelTab = STATE.mode === 'openrouter' ? 'openrouter' : 'ollama';
-      els.modelDropdownMenu.classList.toggle('show');
-      populateModelDropdown(els.modelSearchInput.value);
+      AudioEngine.click();
+      if (els.modelDropdownMenu) {
+        els.modelDropdownMenu.classList.remove('show');
+      }
+      openLiveModelCatalog(null, 'Model Obrolan Utama');
     });
 
-    // Model Dropdown Tabs di Header (Ollama vs OpenRouter)
+    // Custom Model Direct Input pada Katalog Layar Lebar
+    const catalogCustomInput = document.getElementById('catalogCustomModelInput');
+    const btnUseCatalogCustom = document.getElementById('btnUseCatalogCustomModel');
+
+    const handleUseCustomModel = () => {
+      const val = catalogCustomInput?.value.trim();
+      if (!val) return;
+      const provider = val.includes('/') ? 'openrouter' : (STATE.activeCatalogTab || 'ollama');
+      applySelectedModelFromCatalog(val, provider);
+      if (catalogCustomInput) catalogCustomInput.value = '';
+    };
+
+    btnUseCatalogCustom?.addEventListener('click', (e) => {
+      e.preventDefault();
+      handleUseCustomModel();
+    });
+
+    catalogCustomInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleUseCustomModel();
+      }
+    });
+
+    // Fallback Dropdown Tabs di Header (jika diakses)
     els.dropdownTabOllama?.addEventListener('click', (e) => {
       e.stopPropagation();
       STATE.dropdownModelTab = 'ollama';
