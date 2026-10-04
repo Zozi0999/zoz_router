@@ -1742,11 +1742,11 @@ const server = http.createServer(async (req, res) => {
 
 // Ollama: Check status & get models (with multi-route fallback & disk manifests)
   if (pathname === '/api/ollama/models' && method === 'GET') {
-    let rawEndpoint = reqUrl.searchParams.get('endpoint') || req.headers['x-ollama-endpoint'] || 'http://127.0.0.1:11434';
+    let rawEndpoint = reqUrl.searchParams.get('endpoint') || req.headers['x-ollama-endpoint'] || 'https://ollama.com';
     const authHeader = req.headers['authorization'] || (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null);
 
-    // If API key is provided and endpoint is default local or empty, route to official Ollama Cloud (https://ollama.com)
-    if (authHeader && (rawEndpoint.includes('127.0.0.1') || rawEndpoint.includes('localhost') || !rawEndpoint)) {
+    // Jika endpoint mengarah ke localhost/127.0.0.1/11434 atau kosong, alihkan otomatis ke Ollama Cloud resmi (https://ollama.com)
+    if (!rawEndpoint || rawEndpoint.includes('127.0.0.1') || rawEndpoint.includes('localhost') || rawEndpoint.includes('11434')) {
       rawEndpoint = 'https://ollama.com';
     }
 

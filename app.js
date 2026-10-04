@@ -54,25 +54,25 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     { id: 'meta-llama/llama-3.2-11b-vision-instruct:free', name: 'meta-llama/llama-3.2-11b-vision-instruct:free', tag: 'Vision Free', cat: 'vision' }
   ];
 
-  // Official Ollama Cloud Flagship Models
+  // Official Ollama Cloud Flagship Models (Free Included Usage vs Usage Credits)
   const OFFICIAL_OLLAMA_CLOUD_MODELS = [
-    { id: 'gemma4:31b', name: 'gemma4:31b', tag: 'Flagship Cloud', cat: 'flagship', desc: 'Model multimodal flagship resmi Ollama Cloud.' },
-    { id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash', tag: 'Fast Cloud', cat: 'fast', desc: 'Model cloud kecepatan tinggi DeepSeek.' },
-    { id: 'deepseek-v4-pro:0813', name: 'deepseek-v4-pro:0813', tag: 'Reasoning Cloud', cat: 'reasoning', desc: 'Model reasoning mendalam DeepSeek Cloud.' },
-    { id: 'nemotron-3-super', name: 'nemotron-3-super', tag: 'Flagship Cloud', cat: 'flagship', desc: 'NVIDIA Nemotron Super Flagship Cloud.' },
-    { id: 'nemotron-3-ultra', name: 'nemotron-3-ultra', tag: 'Flagship Cloud', cat: 'flagship', desc: 'NVIDIA Nemotron Ultra High-Parameter.' },
-    { id: 'nemotron-3-nano:30b', name: 'nemotron-3-nano:30b', tag: 'Fast Cloud', cat: 'fast', desc: 'NVIDIA Nemotron Fast Nano Cloud.' },
-    { id: 'kimi-k3', name: 'kimi-k3', tag: 'Long Context Cloud', cat: 'flagship', desc: 'Moonshot Kimi K3 Long Context.' },
-    { id: 'kimi-k2.6', name: 'kimi-k2.6', tag: 'Cloud', cat: 'flagship', desc: 'Moonshot Kimi K2.6 Cloud.' },
-    { id: 'kimi-k2.7-code', name: 'kimi-k2.7-code', tag: 'Coding Cloud', cat: 'coding', desc: 'Kimi Coding Cloud Specialist.' },
-    { id: 'minimax-m3', name: 'minimax-m3', tag: 'Flagship Cloud', cat: 'flagship', desc: 'MiniMax M3 Flagship Cloud.' },
-    { id: 'minimax-m2.7', name: 'minimax-m2.7', tag: 'Cloud', cat: 'flagship', desc: 'MiniMax M2.7 Cloud.' },
-    { id: 'glm-5.3', name: 'glm-5.3', tag: 'Flagship Cloud', cat: 'flagship', desc: 'Zhipu GLM-5.3 Flagship Cloud.' },
-    { id: 'glm-5.3-flash', name: 'glm-5.3-flash', tag: 'Fast Cloud', cat: 'fast', desc: 'GLM-5.3 Flash Ultra Fast.' },
-    { id: 'glm-5.2', name: 'glm-5.2', tag: 'Cloud', cat: 'flagship', desc: 'GLM-5.2 Cloud Model.' },
-    { id: 'gpt-oss:20b', name: 'gpt-oss:20b', tag: 'Fast Cloud', cat: 'fast', desc: 'GPT-OSS 20B High-Throughput.' },
-    { id: 'gpt-oss:120b', name: 'gpt-oss:120b', tag: 'Flagship Cloud', cat: 'flagship', desc: 'GPT-OSS 120B Flagship Cloud.' },
-    { id: 'mistral-large-3:675b', name: 'mistral-large-3:675b', tag: 'Flagship Cloud', cat: 'flagship', desc: 'Mistral Large 3 Massive Cloud.' }
+    { id: 'gemma4:31b', name: 'gemma4:31b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', desc: 'Model multimodal flagship resmi Ollama Cloud (Included Free Usage).' },
+    { id: 'gpt-oss:120b', name: 'gpt-oss:120b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', desc: 'GPT-OSS 120B Flagship Cloud (Included Free Usage).' },
+    { id: 'gpt-oss:20b', name: 'gpt-oss:20b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', desc: 'GPT-OSS 20B High-Throughput (Included Free Usage).' },
+    { id: 'nemotron-3-super', name: 'nemotron-3-super', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', desc: 'NVIDIA Nemotron Super Flagship Cloud (Included Free Usage).' },
+    { id: 'nemotron-3-ultra', name: 'nemotron-3-ultra', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', desc: 'NVIDIA Nemotron Ultra High-Parameter (Included Free Usage).' },
+    { id: 'nemotron-3-nano:30b', name: 'nemotron-3-nano:30b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', desc: 'NVIDIA Nemotron Fast Nano Cloud (Included Free Usage).' },
+    { id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', desc: 'Model cloud kecepatan tinggi DeepSeek (Usage Credits).' },
+    { id: 'deepseek-v4-pro:0813', name: 'deepseek-v4-pro:0813', tag: 'Reasoning Cloud', isFree: false, cat: 'reasoning', desc: 'Model reasoning mendalam DeepSeek Cloud (Usage Credits).' },
+    { id: 'mistral-large-3:675b', name: 'mistral-large-3:675b', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', desc: 'Mistral Large 3 Massive Cloud (Usage Credits).' },
+    { id: 'kimi-k3', name: 'kimi-k3', tag: 'Long Context Cloud', isFree: false, cat: 'flagship', desc: 'Moonshot Kimi K3 Long Context (Usage Credits).' },
+    { id: 'kimi-k2.6', name: 'kimi-k2.6', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', desc: 'Moonshot Kimi K2.6 Cloud (Usage Credits).' },
+    { id: 'kimi-k2.7-code', name: 'kimi-k2.7-code', tag: 'Coding Cloud', isFree: false, cat: 'coding', desc: 'Kimi Coding Cloud Specialist (Usage Credits).' },
+    { id: 'minimax-m3', name: 'minimax-m3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', desc: 'MiniMax M3 Flagship Cloud (Usage Credits).' },
+    { id: 'minimax-m2.7', name: 'minimax-m2.7', tag: 'Cloud', isFree: false, cat: 'flagship', desc: 'MiniMax M2.7 Cloud (Usage Credits).' },
+    { id: 'glm-5.3', name: 'glm-5.3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', desc: 'Zhipu GLM-5.3 Flagship Cloud (Usage Credits).' },
+    { id: 'glm-5.3-flash', name: 'glm-5.3-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', desc: 'GLM-5.3 Flash Ultra Fast (Usage Credits).' },
+    { id: 'glm-5.2', name: 'glm-5.2', tag: 'Cloud', isFree: false, cat: 'flagship', desc: 'GLM-5.2 Cloud Model (Usage Credits).' }
   ];
 
   // ==================== STATE MANAGEMENT ====================
@@ -7827,24 +7827,27 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
     let list = [];
     if (isOllama) {
+      const FREE_OLLAMA_CLOUD_PREFIXES = ['gemma4', 'gpt-oss', 'nemotron-3-nano', 'nemotron-3-super', 'nemotron-3-ultra'];
       list = (STATE.ollamaModels || []).map(m => {
         const id = m.name || m.model || m.id;
         const idLower = (id || '').toLowerCase();
         let tag = m.tag || 'Ollama Cloud';
         if (tag === 'Lokal') tag = 'Ollama Cloud';
 
+        const isFree = Boolean(m.isFree || FREE_OLLAMA_CLOUD_PREFIXES.some(pre => idLower.includes(pre)));
+
         // Auto-assign smart badge kategori cloud jika tag masih bawaan umum
         if (tag === 'Ollama Cloud') {
           if (idLower.includes('reason') || idLower.includes('pro') || idLower.includes('deepseek-r') || idLower.includes('deepseek-v4-pro')) {
             tag = 'Reasoning Cloud';
           } else if (idLower.includes('flash') || idLower.includes('nano') || idLower.includes(':20b') || idLower.includes('fast') || idLower.includes('mini')) {
-            tag = 'Fast Cloud';
+            tag = isFree ? 'Free Fast Cloud' : 'Fast Cloud';
           } else if (idLower.includes('code') || idLower.includes('coder') || idLower.includes('dev')) {
             tag = 'Coding Cloud';
           } else if (idLower.includes('kimi-k3') || idLower.includes('long') || idLower.includes('128k') || idLower.includes('1m')) {
             tag = 'Long Context Cloud';
           } else if (idLower.includes('super') || idLower.includes('ultra') || idLower.includes('large') || idLower.includes('gemma4') || idLower.includes(':120b') || idLower.includes(':675b') || idLower.includes('m3') || idLower.includes('glm-5.3') || idLower.includes('flagship')) {
-            tag = 'Flagship Cloud';
+            tag = isFree ? 'Free Flagship Cloud' : 'Flagship Cloud';
           }
         }
 
@@ -7852,13 +7855,31 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
           id: id,
           name: m.name || id,
           tag: tag,
+          isFree: isFree,
           size: m.size ? `${(m.size / (1024 * 1024 * 1024)).toFixed(1)} GB` : null,
           details: m.details || null
         };
       });
 
-      // Urutkan model Ollama alfabetis A-Z
-      list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      // Urutkan model Ollama Cloud secara cerdas:
+      // 1. Model Included Free Usage diprioritaskan di paling atas
+      // 2. Model unggulan/frontier populer (DeepSeek, Kimi, Mistral, GLM, MiniMax)
+      // 3. Sisanya diurutkan secara alfabetis A-Z
+      const featuredKeywords = ['deepseek', 'mistral', 'kimi', 'glm', 'minimax'];
+      list.sort((a, b) => {
+        if (a.isFree && !b.isFree) return -1;
+        if (!a.isFree && b.isFree) return 1;
+
+        const aId = a.id.toLowerCase();
+        const bId = b.id.toLowerCase();
+        const aFeatured = featuredKeywords.some(k => aId.includes(k));
+        const bFeatured = featuredKeywords.some(k => bId.includes(k));
+
+        if (aFeatured && !bFeatured) return -1;
+        if (!aFeatured && bFeatured) return 1;
+
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      });
     } else {
       list = (STATE.openRouterModels || []).map(m => {
         const idLower = (m.id || '').toLowerCase();
