@@ -221,7 +221,7 @@ function performWebSearch(query, apiKey = null) {
   });
 }
 
-// Helper to perform web search via Google SerpAPI (Engine ke-2 / Multi-Source Deep Research)
+// Helper to perform web search via Google SerpAPI (Engine ke-2 / Multi-Source Deep Research) dengan Multi-Tier Resilient Fallback
 function performSerpApiSearch(query, apiKey = null) {
   return new Promise((resolve) => {
     if (!query || typeof query !== 'string' || !query.trim()) {
@@ -229,6 +229,34 @@ function performSerpApiSearch(query, apiKey = null) {
     }
     const cleanQuery = query.trim();
     const serpApiKey = apiKey || process.env.SERPAPI_API_KEY || '0e072bf542835eca933f9d1994524fae98b5a9dcd785dfcab3f6438102ed42e8';
+
+    // Helper fallback ke Serper Deep Fact jika SerpAPI offline/kuota habis agar Agen 2 tidak pernah 0 sumber
+    const triggerSerperFactFallback = async (reason) => {
+      try {
+        const factQuery = `${cleanQuery} data fakta spesifik statistik 2026`;
+        const fbRes = await performWebSearch(factQuery);
+        if (fbRes && Array.isArray(fbRes.results) && fbRes.results.length > 0) {
+          const adaptedResults = fbRes.results.map(r => ({
+            title: r.title,
+            link: r.url,
+            url: r.url,
+            snippet: r.snippet,
+            domain: r.domain,
+            sourceProvider: 'SerpAPI (Deep Fact Fallback)'
+          }));
+          return resolve({
+            query: cleanQuery,
+            count: adaptedResults.length,
+            knowledgeGraph: fbRes.knowledgeGraph || null,
+            answerBox: fbRes.answerBox || null,
+            results: adaptedResults,
+            provider: 'serpapi-fallback',
+            fallbackReason: reason
+          });
+        }
+      } catch (fbErr) {}
+      return resolve({ query: cleanQuery, count: 0, results: [], error: reason, provider: 'serpapi' });
+    };
 
     const encodedQuery = encodeURIComponent(cleanQuery);
     const encodedKey = encodeURIComponent(serpApiKey);
@@ -242,27 +270,29 @@ function performSerpApiSearch(query, apiKey = null) {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Zoz-Router/2.0'
       },
-      timeout: 12000
+      timeout: 10000
     };
 
     const req = https.request(options, (res) => {
       let rawData = '';
       res.on('data', chunk => rawData += chunk);
-      res.on('end', () => {
+      res.on('end', async () => {
         try {
           const parsed = JSON.parse(rawData);
 
           if (res.statusCode >= 400 || parsed.error) {
             const errMsg = parsed.error || `SerpAPI HTTP ${res.statusCode} Error`;
-            return resolve({ query: cleanQuery, count: 0, results: [], error: errMsg, provider: 'serpapi' });
+            return await triggerSerperFactFallback(errMsg);
           }
 
           const results = [];
 
           if (parsed.knowledge_graph) {
+            const kgUrl = parsed.knowledge_graph.website || (parsed.knowledge_graph.source && parsed.knowledge_graph.source.link) || 'https://google.com';
             results.push({
               title: parsed.knowledge_graph.title || 'Knowledge Graph Fact',
-              url: parsed.knowledge_graph.website || (parsed.knowledge_graph.source && parsed.knowledge_graph.source.link) || 'https://google.com',
+              url: kgUrl,
+              link: kgUrl,
               snippet: `${parsed.knowledge_graph.type ? '[' + parsed.knowledge_graph.type + '] ' : ''}${parsed.knowledge_graph.description || ''}`,
               type: 'knowledgeGraph',
               sourceProvider: 'SerpAPI'
@@ -270,9 +300,11 @@ function performSerpApiSearch(query, apiKey = null) {
           }
 
           if (parsed.answer_box) {
+            const abUrl = parsed.answer_box.link || 'https://google.com';
             results.push({
               title: parsed.answer_box.title || 'Jawaban Teratas',
-              url: parsed.answer_box.link || 'https://google.com',
+              url: abUrl,
+              link: abUrl,
               snippet: parsed.answer_box.answer || parsed.answer_box.snippet || '',
               type: 'answerBox',
               sourceProvider: 'SerpAPI'
@@ -287,6 +319,7 @@ function performSerpApiSearch(query, apiKey = null) {
                 results.push({
                   title: item.title || `Hasil SerpAPI ${idx + 1}`,
                   url: item.link,
+                  link: item.link,
                   snippet: item.snippet || '',
                   date: item.date || null,
                   domain: domain,
@@ -294,6 +327,10 @@ function performSerpApiSearch(query, apiKey = null) {
                 });
               }
             });
+          }
+
+          if (results.length === 0) {
+            return await triggerSerperFactFallback('SerpAPI returned 0 results');
           }
 
           resolve({
@@ -305,18 +342,18 @@ function performSerpApiSearch(query, apiKey = null) {
             provider: 'serpapi'
           });
         } catch (e) {
-          resolve({ query: cleanQuery, count: 0, results: [], error: e.message, provider: 'serpapi' });
+          await triggerSerperFactFallback(e.message);
         }
       });
     });
 
-    req.on('timeout', () => {
+    req.on('timeout', async () => {
       req.destroy();
-      resolve({ query: cleanQuery, count: 0, results: [], error: 'SerpAPI search timed out', provider: 'serpapi' });
+      await triggerSerperFactFallback('SerpAPI search timed out');
     });
 
-    req.on('error', (err) => {
-      resolve({ query: cleanQuery, count: 0, results: [], error: err.message, provider: 'serpapi' });
+    req.on('error', async (err) => {
+      await triggerSerperFactFallback(err.message);
     });
 
     req.end();
@@ -731,6 +768,46 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
       const agent1Model = config.agent1Model || config.model;
       const agent2Model = config.agent2Model || config.model;
 
+      // Publikasikan Snapshot Live Inspection SEGERA (agar sumber langsung terlihat di UI tanpa menunggu LLM)
+      task.liveInspection = {
+        topik,
+        currentQuery,
+        iteration: i,
+        maxIterations,
+        timestamp: new Date().toLocaleTimeString('id-ID'),
+        agent1: {
+          name: 'Agen 1 (Pakar Web Google)',
+          provider: 'Google Serper API',
+          model: agent1Model || 'Model Obrolan',
+          resultsCount: searchResSerper.results?.length || 0,
+          results: (searchResSerper.results || []).slice(0, 6).map(r => ({ title: r.title, url: r.url, link: r.url, snippet: r.snippet })),
+          analysis: 'Sedang menganalisis temuan web dan mengekstrak poin penting...'
+        },
+        agent2: {
+          name: 'Agen 2 (Pakar Data Spesifik)',
+          provider: searchResSerpApi.provider === 'serpapi-fallback' ? 'SerpAPI (Deep Fact Fallback)' : 'Google SerpAPI',
+          model: agent2Model || 'Model Obrolan',
+          resultsCount: searchResSerpApi.results?.length || 0,
+          knowledgeGraph: searchResSerpApi.knowledgeGraph || null,
+          answerBox: searchResSerpApi.answerBox || null,
+          results: (searchResSerpApi.results || []).slice(0, 6).map(r => ({ title: r.title, url: r.url, link: r.url, snippet: r.snippet })),
+          analysis: 'Sedang mengekstrak entitas spesifik dan data statistik terverifikasi...'
+        },
+        scraper: {
+          status: 'siap',
+          totalScraped: allSources.slice(0, 5).length,
+          articles: allSources.slice(0, 5).map((s) => ({
+            title: s.title,
+            url: s.url,
+            domain: s.domain || (s.url ? (new URL(s.url)).hostname.replace(/^www\./, '') : ''),
+            length: (s.snippet || '').length,
+            sample: s.snippet || 'Menunggu giliran pemindaian mendalam...'
+          }))
+        },
+        scrapedArticlesCount: Math.min(allSources.length, 5),
+        totalSourcesCount: allSources.length
+      };
+
       // 2. Jalankan Analisis Spesialis Paralel oleh LLM Agen 1 dan LLM Agen 2
       task.currentStep = `[Langkah 1/3] Iterasi ${i}/${maxIterations}: Agen 1 (${agent1Model || 'Pakar Web'}) & Agen 2 (${agent2Model || 'Pakar Data'}) menganalisis data temuan...`;
 
@@ -770,49 +847,15 @@ Analisis data di atas secara mendalam. Ekstrak entitas kunci, data statistik ter
 
       task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Analisis spesialis selesai: Agen 1 (${agent1Model || 'Pakar Web'}) & Agen 2 (${agent2Model || 'Pakar Data'}).`);
 
+      // Update hasil analisis teks LLM ke snapshot Live Inspection
+      if (task.liveInspection) {
+        if (task.liveInspection.agent1) task.liveInspection.agent1.analysis = analisisAgen1 || '';
+        if (task.liveInspection.agent2) task.liveInspection.agent2.analysis = analisisAgen2 || '';
+      }
+
       const findingsText = `[HASIL ANALISIS AGEN 1 - PAKAR WEB (${agent1Model || 'Model Bawaan'})]:\n${analisisAgen1}\n\n[HASIL ANALISIS AGEN 2 - PAKAR DATA SPESIFIK (${agent2Model || 'Model Bawaan'})]:\n${analisisAgen2}`;
 
       dataTemuan.push(`### Temuan Terverifikasi Iterasi ${i} (Query: "${currentQuery}"):\n${findingsText}`);
-
-      // Snapshot Live Inspection untuk pertinjau proses nyata di UI
-      task.liveInspection = {
-        topik,
-        currentQuery,
-        iteration: i,
-        maxIterations,
-        timestamp: new Date().toLocaleTimeString('id-ID'),
-        agent1: {
-          name: 'Agen 1 (Pakar Web Google)',
-          provider: 'Google Serper API',
-          model: agent1Model || 'Model Obrolan',
-          resultsCount: searchResSerper.results?.length || 0,
-          results: (searchResSerper.results || []).slice(0, 6),
-          analysis: analisisAgen1 || ''
-        },
-        agent2: {
-          name: 'Agen 2 (Pakar Data Spesifik)',
-          provider: 'Google SerpAPI',
-          model: agent2Model || 'Model Obrolan',
-          resultsCount: searchResSerpApi.results?.length || 0,
-          knowledgeGraph: searchResSerpApi.knowledgeGraph || null,
-          answerBox: searchResSerpApi.answerBox || null,
-          results: (searchResSerpApi.results || []).slice(0, 6),
-          analysis: analisisAgen2 || ''
-        },
-        scraper: {
-          status: 'siap',
-          totalScraped: allSources.slice(0, 5).length,
-          articles: allSources.slice(0, 5).map((s, sIdx) => ({
-            title: s.title,
-            url: s.url,
-            domain: s.domain || (s.url ? (new URL(s.url)).hostname.replace(/^www\./, '') : ''),
-            length: (s.snippet || '').length,
-            sample: s.snippet || 'Menunggu giliran pemindaian mendalam...'
-          }))
-        },
-        scrapedArticlesCount: Math.min(allSources.length, 5),
-        totalSourcesCount: allSources.length
-      };
 
       if (i < maxIterations) {
         try {
