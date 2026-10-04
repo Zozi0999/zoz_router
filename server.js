@@ -709,9 +709,51 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
         });
       }
 
-      const findingsText = `[DATA TEMUAN AGEN 1 - SERPER GOOGLE]:\n${serperBlock || 'Tidak ada temuan spesifik dari Serper.'}\n\n[DATA TEMUAN AGEN 2 - SERPAPI GOOGLE]:\n${serpApiBlock || 'Tidak ada temuan spesifik dari SerpAPI.'}`;
+      const agent1Model = config.agent1Model || config.model;
+      const agent2Model = config.agent2Model || config.model;
 
-      dataTemuan.push(`### Temuan Iterasi ${i} (Query: "${currentQuery}"):\n${findingsText}`);
+      // 2. Jalankan Analisis Spesialis Paralel oleh LLM Agen 1 dan LLM Agen 2
+      task.currentStep = `[Langkah 1/3] Iterasi ${i}/${maxIterations}: Agen 1 (${agent1Model || 'Pakar Web'}) & Agen 2 (${agent2Model || 'Pakar Data'}) menganalisis data temuan...`;
+
+      const promptAgen1 = `Anda adalah Agen 1 (Pakar Analis Web Google).
+Topik Riset: "${topik}"
+Sub-Query: "${currentQuery}"
+Data Mentah Web Serper:
+${serperBlock || 'Tidak ada data Serper.'}
+
+Tugas Anda:
+Analisis temuan web di atas secara objektif. Rangkum fakta utama, tren industri terbaru tahun 2026, dan poin-poin penting yang ditemukan dalam 2-3 paragraf padat.`;
+
+      const promptAgen2 = `Anda adalah Agen 2 (Pakar Analis Data Spesifik & Knowledge Graph).
+Topik Riset: "${topik}"
+Sub-Query: "${currentQuery}"
+Data Mentah Google SerpAPI:
+${serpApiBlock || 'Tidak ada data SerpAPI.'}
+
+Tugas Anda:
+Analisis data di atas secara mendalam. Ekstrak entitas kunci, data statistik terverifikasi tahun 2026, relasi knowledge graph, dan aspek perbandingan spesifik dalam 2-3 paragraf padat.`;
+
+      const [analisisAgen1, analisisAgen2] = await Promise.all([
+        (serperBlock.trim()) ? callLLMBackend({
+          ...config,
+          model: agent1Model,
+          prompt: promptAgen1,
+          system: 'Anda adalah Agen 1: Analis Web Google yang fokus mengekstrak tren utama dan informasi relevan dari web.'
+        }).catch(() => `[Ringkasan Ekstraksi Data Serper]:\n${serperBlock}`) : Promise.resolve('Tidak ada data dari Agen 1.'),
+
+        (serpApiBlock.trim()) ? callLLMBackend({
+          ...config,
+          model: agent2Model,
+          prompt: promptAgen2,
+          system: 'Anda adalah Agen 2: Analis Data Teknis & Knowledge Graph yang fokus mengekstrak fakta terverifikasi dan entitas spesifik.'
+        }).catch(() => `[Ringkasan Ekstraksi Data SerpAPI]:\n${serpApiBlock}`) : Promise.resolve('Tidak ada data dari Agen 2.')
+      ]);
+
+      task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Analisis spesialis selesai: Agen 1 (${agent1Model || 'Pakar Web'}) & Agen 2 (${agent2Model || 'Pakar Data'}).`);
+
+      const findingsText = `[HASIL ANALISIS AGEN 1 - PAKAR WEB (${agent1Model || 'Model Bawaan'})]:\n${analisisAgen1}\n\n[HASIL ANALISIS AGEN 2 - PAKAR DATA SPESIFIK (${agent2Model || 'Model Bawaan'})]:\n${analisisAgen2}`;
+
+      dataTemuan.push(`### Temuan Terverifikasi Iterasi ${i} (Query: "${currentQuery}"):\n${findingsText}`);
 
       if (i < maxIterations) {
         try {
