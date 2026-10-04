@@ -988,7 +988,12 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         gfm: true
       });
       const parsed = marked.parse(rawText);
-      return sanitizeHtmlSafe(parsed);
+      const sanitized = sanitizeHtmlSafe(parsed);
+      // Pastikan seluruh tautan eksternal (http/https) membuka di tab baru agar tidak memutus sesi obrolan
+      return sanitized.replace(/<a\b([^>]*?href=["']https?:\/\/[^"']+["'][^>]*)>/gi, (match, attrs) => {
+        const cleanAttrs = attrs.replace(/\s*(?:target|rel)=["'][^"']*["']/gi, '');
+        return `<a${cleanAttrs} target="_blank" rel="noopener noreferrer">`;
+      });
     }
     return escapeHtml(rawText).replace(/\n/g, '<br>');
   }
@@ -6060,14 +6065,23 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         });
       }
 
+      // Preserve verified web sources in Markdown for Deep Research and Web Search
+      if (m.sources && Array.isArray(m.sources) && m.sources.length > 0) {
+        content += `\n\n**Sumber Terverifikasi Google (${m.sources.length} Dokumen Web):**\n`;
+        m.sources.forEach((s, i) => {
+          content += `${i + 1}. [${s.title || s.domain || 'Sumber Web'}](${s.url})\n`;
+        });
+      }
+
       md += `### ${sender}\n\n${content}\n\n---\n\n`;
     });
 
+    const cleanTitle = (session.title || 'chat').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `zoz-router-${(session.title || 'chat').replace(/[^a-zA-Z0-9_-]/g, '_')}.md`;
+    a.download = `zoz-router-${cleanTitle || 'chat'}.md`;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => {
