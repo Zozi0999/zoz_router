@@ -4495,30 +4495,52 @@ ${organicBlock}
     if (!fullText || typeof fullText !== 'string') return '';
     const text = fullText.trim();
 
-    // 1. Ekstraksi Bab 1: Pendahuluan & Ringkasan Eksekutif
-    const regexExecSummary = /(?:##\s*1\.\s*.*?Ringkasan\s*Eksekutif.*?|##\s*Ringkasan\s*Eksekutif|##\s*Executive\s*Summary)([\s\S]*?)(?=(?:##\s*2\.|##\s*[A-Z0-9]|\n---\n|$))/i;
-    const match = text.match(regexExecSummary);
-    if (match && match[1] && match[1].trim().length > 60) {
-      return match[1].trim();
-    }
-
-    // 2. Ekstraksi Bagian Heading 2 pertama setelah judul
-    const h2Parts = text.split(/\n(?=##\s+)/);
-    if (h2Parts.length > 1) {
-      const candidate = h2Parts[1].replace(/^##\s+.*?\n+/, '').trim();
-      if (candidate.length > 60) {
-        return candidate.length > 1500 ? candidate.slice(0, 1500) + '...' : candidate;
+    // 1. Ekstraksi Bab 1 / Ringkasan Eksekutif: buang seluruh baris heading-nya secara tuntas
+    const regexHeading = /^##\s*(?:1\.\s*)?.*?(?:Ringkasan\s*Eksekutif|Executive\s*Summary)[^\n]*\n([\s\S]*?)(?=(?:\n##\s*2\.|\n##\s+[A-Za-z0-9]|\n---\n|$))/im;
+    const match = text.match(regexHeading);
+    if (match && match[1] && match[1].trim().length > 40) {
+      // Bersihkan instruksi template dalam kurung seperti "(Uraikan ringkasan...)" jika ada
+      let clean = match[1].replace(/^\s*\([^)]*\)\s*\n*/, '').trim();
+      if (clean.length > 40) {
+        return clean.length > 1600 ? clean.slice(0, 1600) + '...' : clean;
       }
     }
 
-    // 3. Fallback: 2-3 paragraf pertama non-heading
-    const paragraphs = text.split(/\n\s*\n/).filter(p => !p.trim().startsWith('#'));
+    // 2. Jika dokumen memiliki pengantar sebelum heading H2 pertama
+    const h2Parts = text.split(/\n(?=##\s+)/);
+    if (h2Parts.length > 0) {
+      const introParagraphs = h2Parts[0]
+        .split(/\n\s*\n/)
+        .map(p => p.trim())
+        .filter(p => !p.startsWith('#') && !p.startsWith('>') && !p.startsWith('---') && p.length > 30);
+      
+      if (introParagraphs.length > 0) {
+        const combined = introParagraphs.slice(0, 3).join('\n\n');
+        return combined.length > 1400 ? combined.slice(0, 1400) + '...' : combined;
+      }
+    }
+
+    // 3. Jika pendahuluan ada di dalam section H2 pertama (h2Parts[1])
+    if (h2Parts.length > 1) {
+      const candidate = h2Parts[1].replace(/^##\s+[^\n]*\n+/, '').trim();
+      let clean = candidate.replace(/^\s*\([^)]*\)\s*\n*/, '').trim();
+      if (clean.length > 40) {
+        return clean.length > 1400 ? clean.slice(0, 1400) + '...' : clean;
+      }
+    }
+
+    // 4. Fallback umum non-heading
+    const paragraphs = text
+      .split(/\n\s*\n/)
+      .map(p => p.trim())
+      .filter(p => !p.startsWith('#') && !p.startsWith('>') && !p.startsWith('---') && p.length > 20);
+
     if (paragraphs.length > 0) {
       const combined = paragraphs.slice(0, 3).join('\n\n');
       return combined.length > 1200 ? combined.slice(0, 1200) + '...' : combined;
     }
 
-    return text.length > 800 ? text.slice(0, 800) + '...' : text;
+    return text.length > 600 ? text.slice(0, 600) + '...' : text;
   }
 
   function downloadReportDOCX(title, markdownText) {
@@ -4869,6 +4891,12 @@ ${organicBlock}
       date: meta.date || new Date().toISOString()
     };
 
+    // Reset scroll posisi dokumen ke paling atas
+    const stageEl = document.getElementById('fullReportArticleStage');
+    if (stageEl) {
+      stageEl.scrollTop = 0;
+    }
+
     // Render markdown dokumen utuh ke reading stage
     const contentEl = document.getElementById('fullReportContent');
     if (contentEl) {
@@ -4886,8 +4914,9 @@ ${organicBlock}
             heading.id = anchorId;
 
             const level = heading.tagName.toLowerCase();
+            const levelClass = (level === 'h1') ? 'toc-h1' : (level === 'h2' ? 'toc-h2' : 'toc-h3');
             const tocItem = document.createElement('a');
-            tocItem.className = `toc-link toc-${level}`;
+            tocItem.className = `toc-link ${levelClass}`;
             tocItem.href = `#${anchorId}`;
             tocItem.textContent = heading.textContent.trim();
             tocItem.addEventListener('click', (e) => {
