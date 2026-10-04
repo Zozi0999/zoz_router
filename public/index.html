@@ -544,8 +544,11 @@
             <label><i class="fa-solid fa-robot"></i> Model Agen 1 (Pakar Web Google / Serper)</label>
             <div class="input-with-action">
               <input type="text" id="settingDeepResearchAgent1Model" list="availableModelsDatalist" placeholder="Bawaan (Model Obrolan Aktif) atau pilih model..." class="form-control">
+              <button type="button" class="btn btn-sm btn-outline btn-open-model-catalog" data-target-input="settingDeepResearchAgent1Model" title="Buka Katalog Model Real-Time">
+                <i class="fa-solid fa-magnifying-glass"></i> Cari Model
+              </button>
               <select id="selectDeepResearchAgent1Model" class="btn btn-sm btn-outline select-model-dropdown" style="max-width: 140px;" title="Pilih dari model yang terdeteksi">
-                <option value="">Pilih Model...</option>
+                <option value="">Pilih Cepat...</option>
               </select>
             </div>
             <small class="form-hint">Model cerdas yang menganalisis temuan Google Serper. Kosongkan untuk menggunakan model obrolan aktif.</small>
@@ -555,8 +558,11 @@
             <label><i class="fa-solid fa-robot"></i> Model Agen 2 (Pakar Data Spesifik / SerpAPI)</label>
             <div class="input-with-action">
               <input type="text" id="settingDeepResearchAgent2Model" list="availableModelsDatalist" placeholder="Bawaan (Model Obrolan Aktif) atau pilih model..." class="form-control">
+              <button type="button" class="btn btn-sm btn-outline btn-open-model-catalog" data-target-input="settingDeepResearchAgent2Model" title="Buka Katalog Model Real-Time">
+                <i class="fa-solid fa-magnifying-glass"></i> Cari Model
+              </button>
               <select id="selectDeepResearchAgent2Model" class="btn btn-sm btn-outline select-model-dropdown" style="max-width: 140px;" title="Pilih dari model yang terdeteksi">
-                <option value="">Pilih Model...</option>
+                <option value="">Pilih Cepat...</option>
               </select>
             </div>
             <small class="form-hint">Model cerdas yang menganalisis temuan Google SerpAPI. Kosongkan untuk menggunakan model obrolan aktif.</small>
@@ -566,8 +572,11 @@
             <label><i class="fa-solid fa-brain"></i> Model Agen Akhir (Analis Senior & Penulis Sintesis)</label>
             <div class="input-with-action">
               <input type="text" id="settingDeepResearchFinalModel" list="availableModelsDatalist" placeholder="Bawaan (Model Obrolan Aktif) atau pilih model..." class="form-control">
+              <button type="button" class="btn btn-sm btn-outline btn-open-model-catalog" data-target-input="settingDeepResearchFinalModel" title="Buka Katalog Model Real-Time">
+                <i class="fa-solid fa-magnifying-glass"></i> Cari Model
+              </button>
               <select id="selectDeepResearchFinalModel" class="btn btn-sm btn-outline select-model-dropdown" style="max-width: 140px;" title="Pilih dari model yang terdeteksi">
-                <option value="">Pilih Model...</option>
+                <option value="">Pilih Cepat...</option>
               </select>
             </div>
             <small class="form-hint">Otak utama yang mencerna hasil kedua agen, memverifikasi kontradiksi, dan menyusun laporan riset eksekutif.</small>
@@ -878,6 +887,107 @@
           <img id="lightboxImg" src="" alt="Full Screen Preview">
         </div>
         <button class="lightbox-nav-btn next-btn" id="lightboxNextBtn" title="Foto Selanjutnya (❯)"><i class="fa-solid fa-chevron-right"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. LIVE MODEL CATALOG MODAL (Real-Time Ollama & OpenRouter) -->
+  <div class="modal-backdrop" id="liveModelCatalogModal">
+    <div class="modal-card modal-lg" style="max-width: 900px; max-height: 88vh; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="fa-solid fa-layer-group" style="color: var(--neon-cyan);"></i> Katalog Model Real-Time (Live)
+        </div>
+        <button class="modal-close-btn" data-close="liveModelCatalogModal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <!-- Tab Navigation: Ollama vs OpenRouter -->
+      <div class="settings-tabs" style="padding: 0 20px; margin-bottom: 12px;">
+        <button class="settings-tab-btn active" id="btnTabCatalogOllama" data-catalog-tab="ollama">
+          <i class="fa-solid fa-server"></i> Model Ollama (<span id="badgeOllamaCount">0</span>)
+        </button>
+        <button class="settings-tab-btn" id="btnTabCatalogOpenRouter" data-catalog-tab="openrouter">
+          <i class="fa-solid fa-cloud"></i> Model OpenRouter (<span id="badgeOpenRouterCount">0</span>)
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding-top: 0; display: flex; flex-direction: column; overflow: hidden; flex: 1;">
+        <!-- Filter & Search Controls -->
+        <div class="catalog-search-row" style="display: flex; gap: 10px; margin-bottom: 12px; align-items: center;">
+          <div class="search-box" style="flex: 1; position: relative;">
+            <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-dim);"></i>
+            <input type="text" id="liveModelCatalogSearchInput" placeholder="Ketik nama model untuk filter instan (misal: deepseek, llama, gpt, claude, qwen, kimi, mistral)..." style="width: 100%; padding-left: 36px; background: rgba(0,0,0,0.4); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: #fff; height: 38px; font-size: 0.85rem;">
+          </div>
+          <button class="btn btn-sm btn-outline" id="btnRefreshLiveCatalog" title="Perbarui model dari API secara langsung">
+            <i class="fa-solid fa-arrows-rotate"></i> Refresh
+          </button>
+        </div>
+
+        <!-- Target Hint -->
+        <div id="catalogTargetHint" style="font-size: 0.76rem; color: var(--neon-teal); margin-bottom: 8px; font-family: var(--font-code);">
+          🎯 Memilih model untuk: <span id="catalogTargetLabel" style="font-weight: 700; color: #FFF;">Model Obrolan Utama</span>
+        </div>
+
+        <!-- Scrollable List of Models -->
+        <div class="catalog-list-container" id="catalogListContainer" style="flex: 1; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: rgba(8, 9, 13, 0.6); padding: 8px;">
+          <!-- Items dynamically populated as clean list rows -->
+        </div>
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 0.74rem; color: var(--text-dim);" id="catalogStatusInfo">Data ditarik secara real-time dari API.</span>
+        <button class="btn btn-secondary" data-close="liveModelCatalogModal">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. LIVE RESEARCH INSPECTION MODAL (Pertinjau Nyata Deep Research) -->
+  <div class="modal-backdrop" id="liveResearchInspectionModal">
+    <div class="modal-card modal-lg" style="max-width: 1050px; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <div class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+          <i class="fa-solid fa-satellite-dish" style="color: var(--neon-cyan);"></i>
+          <span>Live Deep Research Inspector</span>
+          <span class="badge" style="font-size: 0.68rem; background: rgba(0, 240, 255, 0.15); color: var(--neon-cyan); border: 1px solid rgba(0, 240, 255, 0.3); padding: 2px 8px; border-radius: 999px;">Transparansi Multi-Agen Nyata</span>
+        </div>
+        <button class="modal-close-btn" data-close="liveResearchInspectionModal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <!-- Live Inspector Header / Summary Bar -->
+      <div class="inspector-summary-bar" style="background: rgba(0, 0, 0, 0.35); border-bottom: 1px solid var(--border-subtle); padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between; font-size: 0.8rem;">
+        <div>
+          <span style="color: var(--text-dim);">Topik Riset:</span> <strong id="inspectTopik" style="color: #FFF;">-</strong>
+        </div>
+        <div style="display: flex; gap: 16px; align-items: center;">
+          <span><i class="fa-solid fa-magnifying-glass" style="color: var(--neon-cyan);"></i> Query Aktif: <code id="inspectCurrentQuery" style="color: var(--neon-teal);">-</code></span>
+          <span><i class="fa-solid fa-repeat" style="color: var(--neon-amber);"></i> Iterasi: <strong id="inspectIteration" style="color: #FFF;">-</strong></span>
+          <span><i class="fa-solid fa-clock" style="color: var(--text-dim);"></i> <span id="inspectTimestamp">-</span></span>
+        </div>
+      </div>
+
+      <!-- Inspector Tabs -->
+      <div class="settings-tabs" style="padding: 0 20px; margin-bottom: 0;">
+        <button class="settings-tab-btn active" id="btnTabInspectAgent1" data-inspect-tab="agent1">
+          <i class="fa-solid fa-robot" style="color: #00F0FF;"></i> Agen 1: Serper Web (<span id="inspectCountAgent1">0</span> temuan)
+        </button>
+        <button class="settings-tab-btn" id="btnTabInspectAgent2" data-inspect-tab="agent2">
+          <i class="fa-solid fa-microchip" style="color: #00FFC2;"></i> Agen 2: SerpAPI Data (<span id="inspectCountAgent2">0</span> temuan)
+        </button>
+        <button class="settings-tab-btn" id="btnTabInspectScraper" data-inspect-tab="scraper">
+          <i class="fa-solid fa-file-lines" style="color: #FFB703;"></i> Pemindaian Konten Utuh (<span id="inspectCountScraper">0</span> artikel)
+        </button>
+      </div>
+
+      <!-- Inspector Body -->
+      <div class="modal-body" id="inspectTabContent" style="padding: 16px 20px; overflow-y: auto; flex: 1;">
+        <!-- Dynamically rendered based on active inspection tab -->
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 0.74rem; color: var(--text-dim);">
+          <i class="fa-solid fa-circle-check" style="color: var(--neon-teal);"></i> Data streaming langsung dari proses pencarian & inferensi AI nyata.
+        </span>
+        <button class="btn btn-secondary" data-close="liveResearchInspectionModal">Tutup</button>
       </div>
     </div>
   </div>

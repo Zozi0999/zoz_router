@@ -118,7 +118,12 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       systemPrompt: SYSTEM_PRESETS.kaisar,
       activePreset: 'kaisar',
       autoPolicy: 'local_first'
-    }
+    },
+    activeCatalogTab: 'ollama', // 'ollama' | 'openrouter'
+    catalogTargetInputId: null,
+    catalogSearchQuery: '',
+    activeInspectionTab: 'agent1', // 'agent1' | 'agent2' | 'scraper'
+    currentLiveInspection: null
   };
 
   // ==================== AUDIO SYNTHESIZER (Sci-Fi Cyber Blips) ====================
@@ -368,7 +373,34 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     lightboxZoomInBtn: $('#lightboxZoomInBtn'),
     lightboxZoomOutBtn: $('#lightboxZoomOutBtn'),
     lightboxDownloadBtn: $('#lightboxDownloadBtn'),
-    lightboxCloseBtn: $('#lightboxCloseBtn')
+    lightboxCloseBtn: $('#lightboxCloseBtn'),
+
+    // Live Model Catalog Modal
+    liveModelCatalogModal: $('#liveModelCatalogModal'),
+    btnTabCatalogOllama: $('#btnTabCatalogOllama'),
+    btnTabCatalogOpenRouter: $('#btnTabCatalogOpenRouter'),
+    liveModelCatalogSearchInput: $('#liveModelCatalogSearchInput'),
+    btnRefreshLiveCatalog: $('#btnRefreshLiveCatalog'),
+    catalogTargetHint: $('#catalogTargetHint'),
+    catalogTargetLabel: $('#catalogTargetLabel'),
+    catalogListContainer: $('#catalogListContainer'),
+    badgeOllamaCount: $('#badgeOllamaCount'),
+    badgeOpenRouterCount: $('#badgeOpenRouterCount'),
+    catalogStatusInfo: $('#catalogStatusInfo'),
+
+    // Live Research Inspector Modal
+    liveResearchInspectionModal: $('#liveResearchInspectionModal'),
+    inspectTopik: $('#inspectTopik'),
+    inspectCurrentQuery: $('#inspectCurrentQuery'),
+    inspectIteration: $('#inspectIteration'),
+    inspectTimestamp: $('#inspectTimestamp'),
+    btnTabInspectAgent1: $('#btnTabInspectAgent1'),
+    btnTabInspectAgent2: $('#btnTabInspectAgent2'),
+    btnTabInspectScraper: $('#btnTabInspectScraper'),
+    inspectCountAgent1: $('#inspectCountAgent1'),
+    inspectCountAgent2: $('#inspectCountAgent2'),
+    inspectCountScraper: $('#inspectCountScraper'),
+    inspectTabContent: $('#inspectTabContent')
   };
 
   // ==================== FULL-SCREEN IMAGE LIGHTBOX (ChatGPT & Gemini Style) ====================
@@ -2881,23 +2913,36 @@ ${organicBlock}
           savePersistedState();
         }
 
+        if (els.badgeOllamaCount) {
+          els.badgeOllamaCount.innerText = rawModels.length;
+        }
         updateModelUI();
         populateModelDropdown();
         populateArenaDropdowns();
+        populateDeepResearchModelPickers();
         renderModelHubGrid();
+        if (STATE.activeCatalogTab === 'ollama') {
+          renderLiveModelCatalog();
+        }
         return true;
       } else {
         STATE.ollamaModels = [];
+        if (els.badgeOllamaCount) els.badgeOllamaCount.innerText = '0';
         els.ollamaStatusVal.innerText = 'Offline (Cek Ollama)';
         els.ollamaIndicator.className = 'status-indicator error';
         populateModelDropdown();
         populateArenaDropdowns();
+        populateDeepResearchModelPickers();
         renderModelHubGrid();
+        if (STATE.activeCatalogTab === 'ollama') {
+          renderLiveModelCatalog();
+        }
         return false;
       }
     } catch (e) {
       els.ollamaStatusVal.innerText = 'Tidak Terhubung';
       els.ollamaIndicator.className = 'status-indicator error';
+      if (els.badgeOllamaCount) els.badgeOllamaCount.innerText = '0';
       return false;
     }
   }
@@ -2923,17 +2968,25 @@ ${organicBlock}
       if (res && res.ok) {
         const data = await res.json();
         if (data.data && Array.isArray(data.data)) {
-          // Merge models
-          const mapped = data.data.slice(0, 80).map(m => ({
+          // Ambil seluruh model secara live tanpa pemotongan buatan slice(0, 80)
+          const mapped = data.data.map(m => ({
             id: m.id,
             name: m.name || m.id,
+            context_length: m.context_length || null,
             tag: m.id.includes(':free') ? 'Free' : (m.pricing?.prompt === '0' ? 'Free' : 'Cloud'),
             cat: m.id.includes(':free') ? 'free' : 'flagship'
           }));
           STATE.openRouterModels = mapped;
+          if (els.badgeOpenRouterCount) {
+            els.badgeOpenRouterCount.innerText = mapped.length;
+          }
           populateModelDropdown();
           populateArenaDropdowns();
+          populateDeepResearchModelPickers();
           renderModelHubGrid();
+          if (STATE.activeCatalogTab === 'openrouter') {
+            renderLiveModelCatalog();
+          }
         }
       }
     } catch (e) {
@@ -4705,8 +4758,21 @@ ${organicBlock}
               </div>
             `).join('')}
           </div>
+          <div class="deep-research-actions" style="margin-top: 10px; display: flex; gap: 8px;">
+            <button type="button" class="btn btn-xs btn-outline btn-live-inspection-trigger" style="font-size: 0.76rem; border-color: rgba(0, 240, 255, 0.4); color: var(--neon-cyan); background: rgba(0, 240, 255, 0.08); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 5px 12px; border-radius: var(--radius-sm); font-weight: 600;">
+              <i class="fa-solid fa-eye"></i> Pertinjau Proses Nyata (Live Inspection)
+            </button>
+          </div>
         </div>
       `;
+
+      const triggerBtn = bubbleText.querySelector('.btn-live-inspection-trigger');
+      if (triggerBtn) {
+        triggerBtn.addEventListener('click', () => {
+          openLiveResearchInspection();
+        });
+      }
+
       smartScrollChatToBottom(false);
     }
 
@@ -4771,6 +4837,10 @@ ${organicBlock}
                   }));
                 }
 
+                if (statusData.liveInspection) {
+                  updateLiveInspectionData(statusData.liveInspection);
+                }
+
                 currentProgress = statusData.progressPercent || currentProgress;
                 renderResearchHUD(currentProgress, statusData.currentStep || 'Sedang meneliti web secara otonom...');
 
@@ -4820,6 +4890,32 @@ ${organicBlock}
         }
         dataTemuan.push(`### Temuan Multi-Sumber Iterasi 1 (Query: "${currentQuery}"):\n${iter1Summary || 'Pencarian selesai.'}`);
 
+        updateLiveInspectionData({
+          topik: contextualTopic,
+          currentQuery: currentQuery,
+          iteration: 1,
+          maxIterations: 2,
+          timestamp: new Date().toLocaleTimeString('id-ID'),
+          agent1: {
+            name: 'Agen 1 (Pakar Web Google)',
+            provider: 'Google Serper API',
+            model: STATE.settings.deepResearchAgent1Model || targetModel,
+            resultsCount: iter1Serper?.sources?.length || 0,
+            results: (iter1Serper?.sources || []).map(s => ({ title: s.title, link: s.url, snippet: s.snippet })),
+            analysis: iter1Serper?.summary || ''
+          },
+          agent2: {
+            name: 'Agen 2 (Pakar Data Spesifik)',
+            provider: 'Google SerpAPI',
+            model: STATE.settings.deepResearchAgent2Model || targetModel,
+            resultsCount: iter1SerpApi?.sources?.length || 0,
+            results: (iter1SerpApi?.sources || []).map(s => ({ title: s.title, link: s.url, snippet: s.snippet })),
+            analysis: iter1SerpApi?.summary || ''
+          },
+          scrapedArticlesCount: 0,
+          totalSourcesCount: allSources.length
+        });
+
         stepItems[stepItems.length - 1].status = 'done';
         stepItems.push({ text: '[Langkah 2/3] Menganalisis & memindai konten mendalam artikel web...', status: 'active' });
         renderResearchHUD(55, '[Langkah 2/3] Menganalisis & memindai konten mendalam artikel web...');
@@ -4846,6 +4942,32 @@ ${organicBlock}
           iter2Summary += `\n[AGEN 2 - SERPAPI]:\n${iter2SerpApi.summary}\n`;
         }
         dataTemuan.push(`### Temuan Multi-Sumber Iterasi 2 (Query: "${subQuery}"):\n${iter2Summary || 'Eksplorasi lanjutan selesai.'}`);
+
+        updateLiveInspectionData({
+          topik: contextualTopic,
+          currentQuery: subQuery,
+          iteration: 2,
+          maxIterations: 2,
+          timestamp: new Date().toLocaleTimeString('id-ID'),
+          agent1: {
+            name: 'Agen 1 (Pakar Web Google)',
+            provider: 'Google Serper API',
+            model: STATE.settings.deepResearchAgent1Model || targetModel,
+            resultsCount: iter2Serper?.sources?.length || 0,
+            results: (iter2Serper?.sources || []).map(s => ({ title: s.title, link: s.url, snippet: s.snippet })),
+            analysis: iter2Summary || ''
+          },
+          agent2: {
+            name: 'Agen 2 (Pakar Data Spesifik)',
+            provider: 'Google SerpAPI',
+            model: STATE.settings.deepResearchAgent2Model || targetModel,
+            resultsCount: iter2SerpApi?.sources?.length || 0,
+            results: (iter2SerpApi?.sources || []).map(s => ({ title: s.title, link: s.url, snippet: s.snippet })),
+            analysis: iter2Summary || ''
+          },
+          scrapedArticlesCount: 0,
+          totalSourcesCount: allSources.length
+        });
 
         stepItems[stepItems.length - 1].status = 'done';
         stepItems.push({ text: '[Langkah 3/3] Validasi silang fakta, kategorisasi tren, & menyusun laporan riset eksekutif...', status: 'active' });
@@ -6265,6 +6387,365 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     });
   }
 
+  // ==================== LIVE REAL-TIME MODEL CATALOG ====================
+  function openLiveModelCatalog(targetInputId = null, targetLabelName = 'Model Obrolan') {
+    STATE.catalogTargetInputId = targetInputId;
+    if (els.catalogTargetLabel) {
+      els.catalogTargetLabel.innerText = targetLabelName;
+    }
+    STATE.catalogSearchQuery = '';
+    if (els.liveModelCatalogSearchInput) {
+      els.liveModelCatalogSearchInput.value = '';
+    }
+    
+    // Default tab mengikuti mode jika obrolan
+    if (!targetInputId) {
+      STATE.activeCatalogTab = STATE.mode === 'openrouter' ? 'openrouter' : 'ollama';
+    }
+    
+    updateCatalogTabsUI();
+    renderLiveModelCatalog();
+
+    if (els.liveModelCatalogModal) {
+      els.liveModelCatalogModal.classList.add('active');
+    }
+    AudioEngine.click();
+  }
+
+  function updateCatalogTabsUI() {
+    if (els.btnTabCatalogOllama) {
+      els.btnTabCatalogOllama.classList.toggle('active', STATE.activeCatalogTab === 'ollama');
+    }
+    if (els.btnTabCatalogOpenRouter) {
+      els.btnTabCatalogOpenRouter.classList.toggle('active', STATE.activeCatalogTab === 'openrouter');
+    }
+  }
+
+  function renderLiveModelCatalog() {
+    const container = els.catalogListContainer;
+    if (!container) return;
+    container.innerHTML = '';
+
+    const q = (STATE.catalogSearchQuery || '').toLowerCase().trim();
+    const isOllama = STATE.activeCatalogTab === 'ollama';
+
+    let list = [];
+    if (isOllama) {
+      list = (STATE.ollamaModels || []).map(m => {
+        const id = m.name || m.model || m.id;
+        const isCloud = STATE.settings.ollamaApiKey || (STATE.settings.ollamaEndpoint && STATE.settings.ollamaEndpoint.includes('ollama.com'));
+        return {
+          id: id,
+          name: m.name || id,
+          tag: m.tag || (isCloud ? 'Ollama Cloud' : 'Lokal'),
+          size: m.size ? `${(m.size / (1024 * 1024 * 1024)).toFixed(1)} GB` : null,
+          details: m.details || null
+        };
+      });
+    } else {
+      list = (STATE.openRouterModels || []).map(m => {
+        return {
+          id: m.id,
+          name: m.name || m.id,
+          tag: m.tag || (m.id.includes(':free') ? 'Free' : 'Cloud'),
+          context_length: m.context_length ? `${Math.round(m.context_length / 1024)}k konteks` : null
+        };
+      });
+    }
+
+    // Filter pencarian live
+    if (q) {
+      list = list.filter(item => 
+        (item.name && item.name.toLowerCase().includes(q)) || 
+        (item.id && item.id.toLowerCase().includes(q)) ||
+        (item.tag && item.tag.toLowerCase().includes(q))
+      );
+    }
+
+    if (list.length === 0) {
+      container.innerHTML = `
+        <div style="text-align:center; padding: 24px; color: var(--text-dim); font-size: 0.85rem;">
+          <i class="fa-solid fa-filter-circle-xmark" style="font-size: 1.6rem; color: var(--neon-amber); margin-bottom: 8px; display:block;"></i>
+          Tidak ada model yang cocok dengan kata kunci "<strong>${escapeHtml(q)}</strong>".<br>
+          <span style="font-size: 0.74rem;">Klik tombol <strong>Refresh</strong> untuk menyinkronkan kembali dari server / API.</span>
+        </div>
+      `;
+      return;
+    }
+
+    list.forEach(m => {
+      const row = document.createElement('div');
+      row.className = 'catalog-model-row';
+
+      const isFree = m.tag && m.tag.toLowerCase().includes('free');
+      const isLocal = m.tag && m.tag.toLowerCase().includes('lokal');
+      const badgeClass = isFree ? 'free' : (isLocal ? 'local' : '');
+
+      row.innerHTML = `
+        <div class="catalog-model-info">
+          <div class="catalog-model-name">${escapeHtml(m.name)}</div>
+          <div class="catalog-model-meta">
+            <span class="catalog-badge ${badgeClass}">${escapeHtml(m.tag || 'Model')}</span>
+            ${m.size ? `<span style="color:var(--text-dim); font-family:var(--font-code); font-size:0.7rem;"><i class="fa-solid fa-hard-drive"></i> ${escapeHtml(m.size)}</span>` : ''}
+            ${m.context_length ? `<span style="color:var(--neon-teal); font-family:var(--font-code); font-size:0.7rem;"><i class="fa-solid fa-brain"></i> ${escapeHtml(m.context_length)}</span>` : ''}
+            <span style="color:var(--text-muted); font-size:0.68rem; font-family:var(--font-code);">${escapeHtml(m.id)}</span>
+          </div>
+        </div>
+        <button class="catalog-select-btn" type="button">
+          <i class="fa-solid fa-check"></i> Gunakan Model
+        </button>
+      `;
+
+      row.querySelector('.catalog-select-btn').addEventListener('click', () => {
+        applySelectedModelFromCatalog(m.id, isOllama ? 'ollama' : 'openrouter');
+      });
+
+      container.appendChild(row);
+    });
+  }
+
+  function applySelectedModelFromCatalog(modelId, provider) {
+    const targetId = STATE.catalogTargetInputId;
+
+    if (targetId) {
+      const targetInput = document.getElementById(targetId);
+      if (targetInput) {
+        targetInput.value = modelId;
+      }
+      if (targetId === 'settingDeepResearchAgent1Model') {
+        STATE.settings.deepResearchAgent1Model = modelId;
+        if (els.selectDeepResearchAgent1Model) els.selectDeepResearchAgent1Model.value = modelId;
+      } else if (targetId === 'settingDeepResearchAgent2Model') {
+        STATE.settings.deepResearchAgent2Model = modelId;
+        if (els.selectDeepResearchAgent2Model) els.selectDeepResearchAgent2Model.value = modelId;
+      } else if (targetId === 'settingDeepResearchFinalModel') {
+        STATE.settings.deepResearchFinalModel = modelId;
+        if (els.selectDeepResearchFinalModel) els.selectDeepResearchFinalModel.value = modelId;
+      }
+      savePersistedState();
+      showToast(`🎯 Model ditetapkan: ${modelId}`);
+    } else {
+      // Model Obrolan Utama
+      if (provider === 'ollama') {
+        setEngineMode('ollama');
+        STATE.settings.ollamaModel = modelId;
+      } else {
+        setEngineMode('openrouter');
+        STATE.settings.openRouterModel = modelId;
+      }
+      savePersistedState();
+      updateModelUI();
+      showToast(`⚡ Model obrolan diubah: ${modelId}`);
+    }
+
+    if (els.liveModelCatalogModal) {
+      els.liveModelCatalogModal.classList.remove('active');
+    }
+    AudioEngine.click();
+  }
+
+  // ==================== LIVE RESEARCH INSPECTOR ====================
+  function openLiveResearchInspection() {
+    if (els.liveResearchInspectionModal) {
+      els.liveResearchInspectionModal.classList.add('active');
+      renderLiveInspectionContent();
+    }
+    AudioEngine.click();
+  }
+
+  function updateLiveInspectionData(inspectionData) {
+    if (!inspectionData) return;
+    STATE.currentLiveInspection = inspectionData;
+
+    if (els.inspectTopik) els.inspectTopik.innerText = inspectionData.topik || '-';
+    if (els.inspectCurrentQuery) els.inspectCurrentQuery.innerText = inspectionData.currentQuery || '-';
+    if (els.inspectIteration) els.inspectIteration.innerText = `${inspectionData.iteration || 1} / ${inspectionData.maxIterations || 3}`;
+    if (els.inspectTimestamp) els.inspectTimestamp.innerText = inspectionData.timestamp || new Date().toLocaleTimeString('id-ID');
+
+    if (els.inspectCountAgent1) {
+      els.inspectCountAgent1.innerText = inspectionData.agent1?.resultsCount || (inspectionData.agent1?.results?.length || 0);
+    }
+    if (els.inspectCountAgent2) {
+      els.inspectCountAgent2.innerText = inspectionData.agent2?.resultsCount || (inspectionData.agent2?.results?.length || 0);
+    }
+    if (els.inspectCountScraper) {
+      els.inspectCountScraper.innerText = inspectionData.scrapedArticlesCount || (inspectionData.scraper?.totalScraped || 0);
+    }
+
+    // Jika modal terbuka, langsung live update view secara dinamis
+    if (els.liveResearchInspectionModal && els.liveResearchInspectionModal.classList.contains('active')) {
+      renderLiveInspectionContent();
+    }
+  }
+
+  function renderLiveInspectionContent() {
+    const container = els.inspectTabContent;
+    if (!container) return;
+    const insp = STATE.currentLiveInspection;
+
+    if (!insp) {
+      container.innerHTML = `
+        <div style="text-align:center; padding: 40px 20px; color: var(--text-dim);">
+          <i class="fa-solid fa-satellite fa-spin" style="font-size: 2.4rem; color: var(--neon-cyan); margin-bottom: 12px; display:block;"></i>
+          <h4 style="color:#FFF; margin:0 0 6px 0;">Menunggu Data Live Dari Agen Riset...</h4>
+          <p style="font-size:0.82rem; margin:0;">Mulai Deep Research dari composer untuk melihat streaming data proses pencarian Agen 1 dan Agen 2 secara real-time.</p>
+        </div>
+      `;
+      return;
+    }
+
+    const tab = STATE.activeInspectionTab || 'agent1';
+
+    if (tab === 'agent1') {
+      const ag1 = insp.agent1 || {};
+      const results = ag1.results || [];
+      container.innerHTML = `
+        <div class="inspector-card">
+          <div class="inspector-card-header">
+            <div class="inspector-card-title">
+              <i class="fa-solid fa-robot" style="color: #00F0FF;"></i>
+              <span>${escapeHtml(ag1.name || 'Agen 1 (Pakar Web Google)')}</span>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <span class="catalog-badge">${escapeHtml(ag1.provider || 'Serper API')}</span>
+              <span class="catalog-badge" style="background:rgba(0,240,255,0.08); color:#00F0FF;">Model: ${escapeHtml(ag1.model || 'Default')}</span>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 14px;">
+            <div style="font-size: 0.78rem; font-weight: 700; color: #64F3FF; margin-bottom: 8px;">
+              <i class="fa-solid fa-magnifying-glass"></i> Hasil Penelusuran Organik Google Serper (${results.length} Sumber):
+            </div>
+            ${results.length === 0 ? '<div style="font-size:0.78rem; color:var(--text-dim); font-style:italic;">Belum ada hasil pencarian.</div>' : ''}
+            ${results.map((r, idx) => `
+              <div class="inspector-source-item">
+                <div class="inspector-source-title">
+                  <a href="${escapeHtml(r.link || r.url || '#')}" target="_blank" rel="noopener noreferrer">
+                    [${idx + 1}] ${escapeHtml(r.title || 'Tanpa Judul')}
+                  </a>
+                </div>
+                <div class="inspector-source-snippet">${escapeHtml(r.snippet || r.content || '')}</div>
+                <div style="font-size:0.68rem; color:var(--text-dim); margin-top:3px; font-family:var(--font-code);">${escapeHtml(r.link || r.url || '')}</div>
+              </div>
+            `).join('')}
+          </div>
+
+          <div>
+            <div style="font-size: 0.78rem; font-weight: 700; color: var(--neon-teal); margin-bottom: 8px;">
+              <i class="fa-solid fa-brain"></i> Output Analisis Teks Spesialis Agen 1 (LLM Asli):
+            </div>
+            <div class="inspector-analysis-box">${escapeHtml(ag1.analysis || 'Sedang memproses analisis...')}</div>
+          </div>
+        </div>
+      `;
+    } else if (tab === 'agent2') {
+      const ag2 = insp.agent2 || {};
+      const results = ag2.results || [];
+      container.innerHTML = `
+        <div class="inspector-card">
+          <div class="inspector-card-header">
+            <div class="inspector-card-title">
+              <i class="fa-solid fa-microchip" style="color: #00FFC2;"></i>
+              <span>${escapeHtml(ag2.name || 'Agen 2 (Pakar Data Spesifik & SerpAPI)')}</span>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <span class="catalog-badge" style="border-color:rgba(0,255,194,0.4); color:#00FFC2;">${escapeHtml(ag2.provider || 'SerpAPI')}</span>
+              <span class="catalog-badge" style="background:rgba(0,255,194,0.08); color:#00FFC2;">Model: ${escapeHtml(ag2.model || 'Default')}</span>
+            </div>
+          </div>
+
+          ${ag2.answerBox ? `
+            <div class="inspector-source-item" style="border-color: rgba(255, 183, 3, 0.4); background: rgba(255, 183, 3, 0.05); margin-bottom: 12px;">
+              <div style="color: #FFB703; font-weight: 700; font-size: 0.78rem; margin-bottom: 4px;">
+                <i class="fa-solid fa-bolt"></i> Google SerpAPI Answer Box:
+              </div>
+              <div style="font-size: 0.8rem; color: #FFF;">${escapeHtml(ag2.answerBox.answer || ag2.answerBox.snippet || JSON.stringify(ag2.answerBox))}</div>
+            </div>
+          ` : ''}
+
+          ${ag2.knowledgeGraph ? `
+            <div class="inspector-source-item" style="border-color: rgba(0, 240, 255, 0.4); background: rgba(0, 240, 255, 0.05); margin-bottom: 12px;">
+              <div style="color: #00F0FF; font-weight: 700; font-size: 0.78rem; margin-bottom: 4px;">
+                <i class="fa-solid fa-circle-nodes"></i> Google SerpAPI Knowledge Graph:
+              </div>
+              <div style="font-weight: 600; font-size: 0.84rem; color: #FFF;">${escapeHtml(ag2.knowledgeGraph.title || '')} (${escapeHtml(ag2.knowledgeGraph.type || '')})</div>
+              <div style="font-size: 0.78rem; color: var(--text-dim); margin-top: 2px;">${escapeHtml(ag2.knowledgeGraph.description || '')}</div>
+            </div>
+          ` : ''}
+
+          <div style="margin-bottom: 14px;">
+            <div style="font-size: 0.78rem; font-weight: 700; color: #64F3FF; margin-bottom: 8px;">
+              <i class="fa-solid fa-list-check"></i> Hasil Penelusuran SerpAPI (${results.length} Sumber):
+            </div>
+            ${results.length === 0 ? '<div style="font-size:0.78rem; color:var(--text-dim); font-style:italic;">Belum ada hasil pencarian.</div>' : ''}
+            ${results.map((r, idx) => `
+              <div class="inspector-source-item">
+                <div class="inspector-source-title">
+                  <a href="${escapeHtml(r.link || r.url || '#')}" target="_blank" rel="noopener noreferrer">
+                    [${idx + 1}] ${escapeHtml(r.title || 'Tanpa Judul')}
+                  </a>
+                </div>
+                <div class="inspector-source-snippet">${escapeHtml(r.snippet || '')}</div>
+                <div style="font-size:0.68rem; color:var(--text-dim); margin-top:3px; font-family:var(--font-code);">${escapeHtml(r.link || r.url || '')}</div>
+              </div>
+            `).join('')}
+          </div>
+
+          <div>
+            <div style="font-size: 0.78rem; font-weight: 700; color: var(--neon-teal); margin-bottom: 8px;">
+              <i class="fa-solid fa-brain"></i> Output Analisis Teks Spesialis Agen 2 (LLM Asli):
+            </div>
+            <div class="inspector-analysis-box">${escapeHtml(ag2.analysis || 'Sedang memproses analisis...')}</div>
+          </div>
+        </div>
+      `;
+    } else if (tab === 'scraper') {
+      const scraper = insp.scraper || {};
+      const articles = scraper.articles || [];
+      container.innerHTML = `
+        <div class="inspector-card">
+          <div class="inspector-card-header">
+            <div class="inspector-card-title">
+              <i class="fa-solid fa-file-lines" style="color: #FFB703;"></i>
+              <span>Pemindaian Konten Mendalam (Automated Web Scraper)</span>
+            </div>
+            <span class="catalog-badge" style="background:rgba(255,183,3,0.12); color:#FFB703; border-color:rgba(255,183,3,0.3);">
+              Total: ${articles.length} Dokumen Web Utuh
+            </span>
+          </div>
+
+          <p style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 12px; line-height: 1.45;">
+            Engine scraper membuka langsung halaman web target dan mengekstrak seluruh teks artikel utuh (bukan sekadar cuplikan snippet Google) untuk validasi silang fakta mendalam.
+          </p>
+
+          ${articles.length === 0 ? `
+            <div style="text-align:center; padding: 24px; color: var(--text-dim); font-size: 0.8rem; font-style:italic;">
+              Belum ada artikel yang dipindai secara utuh pada langkah ini.
+            </div>
+          ` : articles.map((art, idx) => `
+            <div class="inspector-source-item" style="margin-bottom: 12px;">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
+                <div class="inspector-source-title" style="margin:0;">
+                  <a href="${escapeHtml(art.url)}" target="_blank" rel="noopener noreferrer">
+                    [${idx + 1}] ${escapeHtml(art.title)}
+                  </a>
+                </div>
+                <span style="font-size:0.68rem; color:var(--neon-teal); font-family:var(--font-code); background:rgba(0,255,194,0.1); padding:2px 6px; border-radius:4px;">
+                  ${art.length ? `${Math.round(art.length / 1000)}k karakter` : ''}
+                </span>
+              </div>
+              <div style="font-size:0.68rem; color:var(--text-dim); margin-bottom:6px; font-family:var(--font-code);">${escapeHtml(art.url)}</div>
+              <div class="inspector-source-snippet" style="background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:4px; font-size:0.74rem;">
+                <strong style="color:var(--text-muted); display:block; margin-bottom:2px; font-size:0.68rem;">Cuplikan Isi Teks Artikel Asli:</strong>
+                ${escapeHtml(art.sample || '')}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+  }
+
   // ==================== SETTINGS SYNC HELPER ====================
   function syncSettingsModalFields() {
     if (els.settingOllamaEndpoint) els.settingOllamaEndpoint.value = STATE.settings.ollamaEndpoint || 'http://127.0.0.1:11434';
@@ -7007,6 +7488,79 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         pill.classList.add('active');
         renderModelHubGrid(pill.dataset.filter, els.hubSearchInput.value);
       });
+    });
+
+    // ==================== LIVE MODEL CATALOG LISTENERS ====================
+    $$('.btn-open-model-catalog').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const targetInputId = btn.dataset.targetInput;
+        let labelName = 'Model';
+        if (targetInputId === 'settingDeepResearchAgent1Model') labelName = 'Agen 1 (Pakar Web Google)';
+        else if (targetInputId === 'settingDeepResearchAgent2Model') labelName = 'Agen 2 (Pakar Data Spesifik)';
+        else if (targetInputId === 'settingDeepResearchFinalModel') labelName = 'Agen Akhir (Analis Senior)';
+        openLiveModelCatalog(targetInputId, labelName);
+      });
+    });
+
+    els.btnTabCatalogOllama?.addEventListener('click', () => {
+      STATE.activeCatalogTab = 'ollama';
+      updateCatalogTabsUI();
+      renderLiveModelCatalog();
+      AudioEngine.click();
+    });
+
+    els.btnTabCatalogOpenRouter?.addEventListener('click', () => {
+      STATE.activeCatalogTab = 'openrouter';
+      updateCatalogTabsUI();
+      renderLiveModelCatalog();
+      AudioEngine.click();
+    });
+
+    els.liveModelCatalogSearchInput?.addEventListener('input', (e) => {
+      STATE.catalogSearchQuery = e.target.value;
+      renderLiveModelCatalog();
+    });
+
+    els.btnRefreshLiveCatalog?.addEventListener('click', async () => {
+      if (els.btnRefreshLiveCatalog) {
+        els.btnRefreshLiveCatalog.innerHTML = '<i class="fa-solid fa-arrows-rotate fa-spin"></i> Memuat...';
+      }
+      await Promise.all([checkOllamaHealth(), fetchOpenRouterModelsList()]);
+      renderLiveModelCatalog();
+      if (els.btnRefreshLiveCatalog) {
+        els.btnRefreshLiveCatalog.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Refresh';
+      }
+      showToast('🔄 Katalog model berhasil disinkronkan secara real-time!');
+      AudioEngine.click();
+    });
+
+    // ==================== LIVE RESEARCH INSPECTOR LISTENERS ====================
+    els.btnTabInspectAgent1?.addEventListener('click', () => {
+      STATE.activeInspectionTab = 'agent1';
+      els.btnTabInspectAgent1.classList.add('active');
+      els.btnTabInspectAgent2?.classList.remove('active');
+      els.btnTabInspectScraper?.classList.remove('active');
+      renderLiveInspectionContent();
+      AudioEngine.click();
+    });
+
+    els.btnTabInspectAgent2?.addEventListener('click', () => {
+      STATE.activeInspectionTab = 'agent2';
+      els.btnTabInspectAgent2.classList.add('active');
+      els.btnTabInspectAgent1?.classList.remove('active');
+      els.btnTabInspectScraper?.classList.remove('active');
+      renderLiveInspectionContent();
+      AudioEngine.click();
+    });
+
+    els.btnTabInspectScraper?.addEventListener('click', () => {
+      STATE.activeInspectionTab = 'scraper';
+      els.btnTabInspectScraper.classList.add('active');
+      els.btnTabInspectAgent1?.classList.remove('active');
+      els.btnTabInspectAgent2?.classList.remove('active');
+      renderLiveInspectionContent();
+      AudioEngine.click();
     });
 
     // ==================== BGM & AUDIO LISTENERS ====================
