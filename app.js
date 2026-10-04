@@ -4941,6 +4941,7 @@ ${organicBlock}
             const levelClass = (level === 'h1') ? 'toc-h1' : (level === 'h2' ? 'toc-h2' : 'toc-h3');
             const tocItem = document.createElement('a');
             tocItem.className = `toc-link ${levelClass}`;
+            tocItem.dataset.headingId = anchorId;
             tocItem.href = `#${anchorId}`;
             tocItem.textContent = heading.textContent.trim();
             tocItem.addEventListener('click', (e) => {
@@ -4951,6 +4952,51 @@ ${organicBlock}
             });
             tocList.appendChild(tocItem);
           });
+
+          // Set heading pertama sebagai default aktif
+          tocList.querySelector('.toc-link')?.classList.add('active');
+
+          // Pasang Scrollspy dinamis saat pengguna men-scroll canvas artikel
+          if (stageEl) {
+            let isTicking = false;
+            const updateTOCScrollspy = () => {
+              const stageTop = stageEl.getBoundingClientRect().top;
+              let currentActiveIdx = 0;
+
+              headings.forEach((heading, idx) => {
+                const rect = heading.getBoundingClientRect();
+                if (rect.top - stageTop <= 130) {
+                  currentActiveIdx = idx;
+                }
+              });
+
+              const activeAnchorId = `report-heading-${currentActiveIdx}`;
+              const currentActiveLink = tocList.querySelector(`.toc-link[data-heading-id="${activeAnchorId}"]`);
+              if (currentActiveLink && !currentActiveLink.classList.contains('active')) {
+                tocList.querySelectorAll('.toc-link').forEach(el => el.classList.remove('active'));
+                currentActiveLink.classList.add('active');
+
+                // Auto-scroll halus sidebar TOC jika link berada di luar area pandang
+                const tocNavRect = tocList.getBoundingClientRect();
+                const linkRect = currentActiveLink.getBoundingClientRect();
+                if (linkRect.bottom > tocNavRect.bottom || linkRect.top < tocNavRect.top) {
+                  currentActiveLink.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+              }
+              isTicking = false;
+            };
+
+            if (stageEl._tocScrollHandler) {
+              stageEl.removeEventListener('scroll', stageEl._tocScrollHandler);
+            }
+            stageEl._tocScrollHandler = () => {
+              if (!isTicking) {
+                window.requestAnimationFrame(updateTOCScrollspy);
+                isTicking = true;
+              }
+            };
+            stageEl.addEventListener('scroll', stageEl._tocScrollHandler, { passive: true });
+          }
         } else {
           tocList.innerHTML = '<span style="font-size:0.75rem; color:var(--text-muted); padding:8px 12px; display:block;">Tidak ada outline dokumen</span>';
         }
