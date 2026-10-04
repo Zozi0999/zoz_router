@@ -1955,7 +1955,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (imagesToDisplay && imagesToDisplay.length > 0 && /^📷 \[\d+ Foto Lampiran\]$/.test(textToDisplay.trim())) {
         textToDisplay = '';
       }
-      appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs, msg.isDeepResearch, msg.latency, msg.timestamp);
+      appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs, msg.isDeepResearch, msg.latency, msg.timestamp || session.updatedAt || session.createdAt);
     });
 
     enhanceCodeBlocks(els.messagesList);
@@ -2099,8 +2099,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     const row = document.createElement('div');
     row.className = `message-row ${role}`;
     row.dataset.index = index;
-    if (timestamp) {
-      row.dataset.reportDate = timestamp;
+    const currentSess = STATE.sessions.find(s => s.id === STATE.currentSessionId);
+    const resolvedTimestamp = timestamp || (typeof index === 'number' && index >= 0 && currentSess?.messages?.[index]?.timestamp) || currentSess?.updatedAt || currentSess?.createdAt || null;
+    if (resolvedTimestamp) {
+      row.dataset.reportDate = resolvedTimestamp;
     }
     if (content) {
       row.dataset.fullContent = content;
@@ -2171,7 +2173,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     const hasText = Boolean(content && String(content).trim().length > 0);
     let renderedBody = '';
     if (isActuallyDeepResearch && role === 'assistant' && hasText) {
-      renderedBody = buildDeepResearchSummaryCardHtml(content, model, sources, timestamp);
+      renderedBody = buildDeepResearchSummaryCardHtml(content, model, sources, resolvedTimestamp || timestamp);
     } else {
       renderedBody = role === 'assistant' ? renderMarkdown(content || '') : escapeHtml(content || '').replace(/\n/g, '<br>');
     }
@@ -4723,7 +4725,15 @@ ${organicBlock}
 
   function downloadReportPDF(title, markdownText) {
     const renderedHtml = renderMarkdown(markdownText || '');
-    const currentDate = new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
+    let currentDate = '';
+    try {
+      const reportDateObj = (currentActiveReport && currentActiveReport.date) ? new Date(currentActiveReport.date) : new Date();
+      currentDate = !isNaN(reportDateObj.getTime())
+        ? reportDateObj.toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' })
+        : new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
+    } catch (e) {
+      currentDate = new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
+    }
 
     let printFrame = document.getElementById('reportPrintFrame');
     if (printFrame) printFrame.remove();
@@ -6235,6 +6245,13 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     if (modal) {
       modal.classList.remove('show');
       AudioEngine.click();
+      if (modalId === 'deepResearchReportModal') {
+        const stageEl = document.getElementById('fullReportArticleStage');
+        if (stageEl && stageEl._tocScrollHandler) {
+          stageEl.removeEventListener('scroll', stageEl._tocScrollHandler);
+          stageEl._tocScrollHandler = null;
+        }
+      }
       if (triggerHistoryBack && history.state?.modal === modalId) {
         history.back();
       }
