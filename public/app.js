@@ -4870,6 +4870,8 @@ ${organicBlock}
               provider: engine,
               endpoint: STATE.settings.ollamaEndpoint,
               apiKey: engine === 'openrouter' ? STATE.settings.openRouterKey : (STATE.settings.ollamaApiKey || ''),
+              openRouterKey: STATE.settings.openRouterKey || '',
+              ollamaApiKey: STATE.settings.ollamaApiKey || '',
               serperApiKey: STATE.settings.serperApiKey,
               serpApiKey: STATE.settings.serpApiKey,
               agent1Model: STATE.settings.deepResearchAgent1Model || targetModel,

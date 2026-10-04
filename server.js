@@ -391,8 +391,8 @@ function pruneResearchTasks() {
 // Timer pembersihan berkala setiap 15 menit
 setInterval(pruneResearchTasks, 15 * 60 * 1000).unref();
 
-// Helper untuk memanggil LLM (OpenRouter atau Ollama) dari backend dengan dukungan riwayat pesan
-async function callLLMBackend({ prompt, system, messages, model, provider, endpoint, apiKey }) {
+// Helper untuk memanggil LLM (OpenRouter atau Ollama) dari backend dengan dukungan riwayat pesan & auto-detect provider per model
+async function callLLMBackend({ prompt, system, messages, model, provider, endpoint, apiKey, openRouterKey, ollamaApiKey }) {
   let finalMessages = [];
 
   if (Array.isArray(messages) && messages.length > 0) {
@@ -415,12 +415,25 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     if (prompt && prompt.trim()) finalMessages.push({ role: 'user', content: prompt.trim() });
   }
 
-  if (provider === 'openrouter' || (apiKey && apiKey.startsWith('sk-or-'))) {
-    const key = apiKey || process.env.OPENROUTER_API_KEY;
-    if (!key) throw new Error('OpenRouter API Key diperlukan.');
+  const rawModel = (model || '').trim();
+  // Auto-detect Provider per Model secara cerdas
+  let effectiveProvider = provider || 'ollama';
+  if (rawModel.includes('/')) {
+    // Model dengan namespace vendor (contoh: deepseek/..., google/..., anthropic/...) adalah OpenRouter
+    effectiveProvider = 'openrouter';
+  } else if (rawModel.includes(':') || rawModel.startsWith('nemotron') || rawModel.startsWith('gemma') || rawModel.startsWith('llama') || rawModel.startsWith('qwen') || rawModel.startsWith('mistral') || rawModel.startsWith('phi')) {
+    // Model dengan tag versi atau nama model lokal khas Ollama
+    effectiveProvider = 'ollama';
+  }
+
+  const isOpenRouter = effectiveProvider === 'openrouter' || (rawModel.includes('/') && effectiveProvider !== 'ollama');
+
+  if (isOpenRouter) {
+    const key = openRouterKey || (apiKey && apiKey.startsWith('sk-or-') ? apiKey : null) || process.env.OPENROUTER_API_KEY;
+    if (!key) throw new Error('OpenRouter API Key diperlukan untuk model cloud: ' + (rawModel || 'default'));
 
     const postData = JSON.stringify({
-      model: model || 'google/gemini-2.0-flash-001',
+      model: rawModel || 'google/gemini-2.0-flash-001',
       messages: finalMessages,
       temperature: 0.3
     });
@@ -453,7 +466,7 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
             }
             const content = parsed.choices?.[0]?.message?.content || '';
             if (!content.trim()) {
-              return reject(new Error(`OpenRouter tidak mengembalikan konten respons untuk model: ${model || 'default'}`));
+              return reject(new Error(`OpenRouter tidak mengembalikan konten respons untuk model: ${rawModel || 'default'}`));
             }
             resolve(content);
           } catch (e) {
@@ -474,19 +487,25 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   const client = ollamaUrl.protocol === 'https:' ? https : http;
 
   const postData = JSON.stringify({
-    model: model || 'nemotron-mini:latest',
+    model: rawModel || 'nemotron-mini:latest',
     messages: finalMessages,
     stream: false,
     options: { temperature: 0.3 }
   });
 
+  const headers = {
+    'Content-Type': 'application/json',
+    'Content-Length': Buffer.byteLength(postData)
+  };
+  const activeOllamaKey = ollamaApiKey || (apiKey && !apiKey.startsWith('sk-or-') ? apiKey : null);
+  if (activeOllamaKey) {
+    headers['Authorization'] = `Bearer ${activeOllamaKey}`;
+  }
+
   return new Promise((resolve, reject) => {
     const req = client.request(ollamaUrl.toString(), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
-      },
+      headers,
       timeout: 90000
     }, (res) => {
       let rawData = '';
@@ -500,7 +519,7 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
           }
           const content = parsed.message?.content || parsed.response || '';
           if (!content.trim()) {
-            return reject(new Error(`Ollama tidak mengembalikan konten respons untuk model: ${model || 'default'}`));
+            return reject(new Error(`Ollama tidak mengembalikan respons teks untuk model: ${rawModel || 'default'}`));
           }
           resolve(content);
         } catch (e) {
@@ -1347,6 +1366,8 @@ const server = http.createServer(async (req, res) => {
         provider: body.provider,
         endpoint: body.endpoint,
         apiKey: body.apiKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null),
+        openRouterKey: body.openRouterKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || process.env.OPENROUTER_API_KEY,
+        ollamaApiKey: body.ollamaApiKey || body.apiKey || '',
         serperApiKey: body.serperApiKey || req.headers['x-serper-key'],
         serpApiKey: body.serpApiKey || req.headers['x-serpapi-key'],
         agent1Model: body.agent1Model || null,
