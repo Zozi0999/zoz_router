@@ -870,10 +870,12 @@ Tugas Evaluasi:
 3. Jika belum, rumuskan kata kunci pencarian Google yang baru dan sangat spesifik (misal: aspek teknis, data statistik terbaru 2026, opini pakar, regulasi, studi kasus) dalam format JSON: {"sudahCukup": false, "kataKunciBaru": "query spesifik baru"}
 Keluarkan hanya JSON valid tanpa teks tambahan.`;
 
+          const evalModel = config.finalModel || config.agent1Model || config.model;
           const evalResult = await callLLMBackend({
+            ...config,
+            model: evalModel,
             prompt: evalPrompt,
-            system: 'Anda adalah Research Evaluator otonom yang teliti dan analitis.',
-            ...config
+            system: 'Anda adalah Research Evaluator otonom yang teliti dan analitis.'
           });
 
           let parsedEval = null;
