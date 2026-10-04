@@ -290,9 +290,16 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     settingSerpApiKey: $('#settingSerpApiKey'),
     toggleShowSerpApiKeyBtn: $('#toggleShowSerpApiKeyBtn'),
     testSerpApiBtn: $('#testSerpApiBtn'),
+    availableModelsDatalist: $('#availableModelsDatalist'),
     settingDeepResearchAgent1Model: $('#settingDeepResearchAgent1Model'),
+    selectDeepResearchAgent1Model: $('#selectDeepResearchAgent1Model'),
     settingDeepResearchAgent2Model: $('#settingDeepResearchAgent2Model'),
+    selectDeepResearchAgent2Model: $('#selectDeepResearchAgent2Model'),
     settingDeepResearchFinalModel: $('#settingDeepResearchFinalModel'),
+    selectDeepResearchFinalModel: $('#selectDeepResearchFinalModel'),
+    inputNewPresetName: $('#inputNewPresetName'),
+    saveCustomPresetBtn: $('#saveCustomPresetBtn'),
+    customPresetsList: $('#customPresetsList'),
     settingAutoPolicy: $('#settingAutoPolicy'),
     paramTemperature: $('#paramTemperature'),
     valTemperature: $('#valTemperature'),
@@ -771,6 +778,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (!STATE.settings.serperApiKey) {
         STATE.settings.serperApiKey = '075538fed9c64990e1eb32a06726c1e55a933c1e';
       }
+      if (!STATE.settings.serpApiKey) {
+        STATE.settings.serpApiKey = '0e072bf542835eca933f9d1994524fae98b5a9dcd785dfcab3f6438102ed42e8';
+      }
+      loadUserCustomResearchPresets();
       const savedSound = localStorage.getItem('zoz_router_sound_v1');
       if (savedSound !== null) {
         STATE.soundEnabled = savedSound === 'true';
@@ -6147,6 +6158,113 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     }
   };
 
+  // ==================== USER CUSTOM PRESETS & MODEL PICKER HELPERS ====================
+  let userCustomResearchPresets = [];
+
+  function loadUserCustomResearchPresets() {
+    try {
+      const raw = localStorage.getItem('zoz_custom_deep_research_presets_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) userCustomResearchPresets = parsed;
+      }
+    } catch (e) {
+      userCustomResearchPresets = [];
+    }
+  }
+
+  function saveUserCustomResearchPresets() {
+    try {
+      localStorage.setItem('zoz_custom_deep_research_presets_v1', JSON.stringify(userCustomResearchPresets));
+    } catch (e) {}
+  }
+
+  function populateDeepResearchModelPickers() {
+    const datalist = els.availableModelsDatalist;
+    const s1 = els.selectDeepResearchAgent1Model;
+    const s2 = els.selectDeepResearchAgent2Model;
+    const sF = els.selectDeepResearchFinalModel;
+
+    const modelSet = new Set();
+    const modelsList = [];
+
+    (STATE.ollamaModels || []).forEach(m => {
+      const id = m.name || m.model || m.id;
+      if (id && !modelSet.has(id)) {
+        modelSet.add(id);
+        modelsList.push({ id, name: id, source: 'Ollama' });
+      }
+    });
+
+    (STATE.openRouterModels || []).forEach(m => {
+      const id = m.id || m.name;
+      if (id && !modelSet.has(id)) {
+        modelSet.add(id);
+        modelsList.push({ id, name: m.name || id, source: 'OpenRouter' });
+      }
+    });
+
+    // Populate Datalist for autocomplete
+    if (datalist) {
+      datalist.innerHTML = modelsList.map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)} [${m.source}]</option>`).join('');
+    }
+
+    // Populate Dropdowns
+    const selectOptionsHtml = '<option value="">Pilih Model...</option>' + 
+      modelsList.map(m => `<option value="${escapeHtml(m.id)}">[${m.source}] ${escapeHtml(m.name)}</option>`).join('');
+
+    if (s1) s1.innerHTML = selectOptionsHtml;
+    if (s2) s2.innerHTML = selectOptionsHtml;
+    if (sF) sF.innerHTML = selectOptionsHtml;
+  }
+
+  function renderUserCustomPresetsUI() {
+    const container = els.customPresetsList;
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!userCustomResearchPresets || userCustomResearchPresets.length === 0) {
+      container.innerHTML = '<span class="no-presets-hint" style="font-size:0.75rem; color:#718096; font-style:italic;">Belum ada preset kustom yang dibuat.</span>';
+      return;
+    }
+
+    userCustomResearchPresets.forEach((p, idx) => {
+      const pill = document.createElement('div');
+      pill.className = 'custom-preset-pill';
+      pill.style.cssText = 'display:inline-flex; align-items:center; gap:6px; background:rgba(0,240,255,0.08); border:1px solid rgba(0,240,255,0.25); border-radius:6px; padding:4px 9px; font-size:0.78rem; color:#E2E8F0; cursor:pointer; transition:all 0.2s ease;';
+      pill.title = `Klik untuk mengaktifkan preset:\nAgen 1: ${p.agent1 || 'Default'}\nAgen 2: ${p.agent2 || 'Default'}\nAgen Akhir: ${p.final || 'Default'}`;
+      
+      pill.innerHTML = `
+        <i class="fa-solid fa-layer-group" style="color:#00F0FF; font-size:0.72rem;"></i>
+        <span style="font-weight:600;">${escapeHtml(p.name)}</span>
+        <button class="btn-del-preset" data-idx="${idx}" style="background:none; border:none; color:#FF0055; cursor:pointer; padding:0 2px; margin-left:4px; font-size:0.85rem;" title="Hapus preset ini">&times;</button>
+      `;
+
+      // Klik pill untuk menerapkan preset ke ketiga input model
+      pill.addEventListener('click', (e) => {
+        if (e.target.closest('.btn-del-preset')) return;
+        if (els.settingDeepResearchAgent1Model) els.settingDeepResearchAgent1Model.value = p.agent1 || '';
+        if (els.settingDeepResearchAgent2Model) els.settingDeepResearchAgent2Model.value = p.agent2 || '';
+        if (els.settingDeepResearchFinalModel) els.settingDeepResearchFinalModel.value = p.final || '';
+        showToast(`✅ Preset Kustom "${p.name}" diterapkan!`);
+        AudioEngine.click();
+      });
+
+      // Tombol hapus preset
+      pill.querySelector('.btn-del-preset').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const removedName = p.name;
+        userCustomResearchPresets.splice(idx, 1);
+        saveUserCustomResearchPresets();
+        renderUserCustomPresetsUI();
+        showToast(`🗑️ Preset "${removedName}" dihapus.`);
+        AudioEngine.click();
+      });
+
+      container.appendChild(pill);
+    });
+  }
+
   // ==================== SETTINGS SYNC HELPER ====================
   function syncSettingsModalFields() {
     if (els.settingOllamaEndpoint) els.settingOllamaEndpoint.value = STATE.settings.ollamaEndpoint || 'http://127.0.0.1:11434';
@@ -6163,6 +6281,9 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     if (els.valTopP) els.valTopP.innerText = STATE.settings.topP ?? 0.9;
     if (els.settingSystemPrompt) els.settingSystemPrompt.value = STATE.settings.systemPrompt || '';
     if (els.settingAutoPolicy) els.settingAutoPolicy.value = STATE.settings.autoPolicy || 'local_first';
+    
+    populateDeepResearchModelPickers();
+    renderUserCustomPresetsUI();
     updatePresetPillUI();
   }
 
@@ -6701,6 +6822,55 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
           els.testSerpApiBtn.innerText = 'Tes SerpAPI';
         }
       }
+    });
+
+    // Event Listeners: Quick Select Model Dropdowns -> Sync to Input
+    els.selectDeepResearchAgent1Model?.addEventListener('change', (e) => {
+      if (e.target.value && els.settingDeepResearchAgent1Model) {
+        els.settingDeepResearchAgent1Model.value = e.target.value;
+        AudioEngine.click();
+      }
+    });
+
+    els.selectDeepResearchAgent2Model?.addEventListener('change', (e) => {
+      if (e.target.value && els.settingDeepResearchAgent2Model) {
+        els.settingDeepResearchAgent2Model.value = e.target.value;
+        AudioEngine.click();
+      }
+    });
+
+    els.selectDeepResearchFinalModel?.addEventListener('change', (e) => {
+      if (e.target.value && els.settingDeepResearchFinalModel) {
+        els.settingDeepResearchFinalModel.value = e.target.value;
+        AudioEngine.click();
+      }
+    });
+
+    // Event Listener: Simpan Custom Preset Buatan Pengguna
+    els.saveCustomPresetBtn?.addEventListener('click', () => {
+      const name = els.inputNewPresetName ? els.inputNewPresetName.value.trim() : '';
+      if (!name) {
+        showToast('Ketik nama preset kustom terlebih dahulu.', 'error');
+        return;
+      }
+
+      const p1 = els.settingDeepResearchAgent1Model ? els.settingDeepResearchAgent1Model.value.trim() : '';
+      const p2 = els.settingDeepResearchAgent2Model ? els.settingDeepResearchAgent2Model.value.trim() : '';
+      const pF = els.settingDeepResearchFinalModel ? els.settingDeepResearchFinalModel.value.trim() : '';
+
+      userCustomResearchPresets.push({
+        id: 'preset_' + Date.now(),
+        name: name,
+        agent1: p1,
+        agent2: p2,
+        final: pF
+      });
+
+      saveUserCustomResearchPresets();
+      renderUserCustomPresetsUI();
+      if (els.inputNewPresetName) els.inputNewPresetName.value = '';
+      showToast(`✨ Preset Kustom "${name}" berhasil disimpan!`);
+      AudioEngine.click();
     });
 
     els.testOllamaBtn.addEventListener('click', async () => {
