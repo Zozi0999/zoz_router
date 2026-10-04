@@ -3823,3 +3823,427 @@ html, body {
   }
 }
 
+/* ==========================================================================
+   AI IMAGE STUDIO: CREATION ANIMATION & HOLOMETRIC SYNTHESIS HUD
+   ========================================================================== */
+
+/* Keyframe Animations */
+@keyframes laserScan {
+  0% {
+    top: 0%;
+    opacity: 0.6;
+    box-shadow: 0 0 10px #FF007F, 0 0 20px #FF007F;
+  }
+  50% {
+    top: 96%;
+    opacity: 1;
+    box-shadow: 0 0 16px #00F0FF, 0 0 30px #00F0FF;
+  }
+  100% {
+    top: 0%;
+    opacity: 0.6;
+    box-shadow: 0 0 10px #FF007F, 0 0 20px #FF007F;
+  }
+}
+
+@keyframes rotateBorderConic {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes quantumHoloPulse {
+  0% {
+    transform: scale(0.92) rotate(0deg);
+    opacity: 0.7;
+    filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.4));
+  }
+  50% {
+    transform: scale(1.08) rotate(180deg);
+    opacity: 1;
+    filter: drop-shadow(0 0 24px rgba(255, 0, 127, 0.85));
+  }
+  100% {
+    transform: scale(0.92) rotate(360deg);
+    opacity: 0.7;
+    filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.4));
+  }
+}
+
+@keyframes materializationGlow {
+  0% {
+    opacity: 0;
+    filter: brightness(2.6) contrast(1.4) blur(16px);
+    transform: scale(0.97);
+  }
+  60% {
+    opacity: 0.92;
+    filter: brightness(1.25) contrast(1.1) blur(4px);
+  }
+  100% {
+    opacity: 1;
+    filter: brightness(1) contrast(1) blur(0);
+    transform: scale(1);
+  }
+}
+
+@keyframes cyberShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Image Generation HUD Container */
+.image-gen-hud {
+  background: rgba(10, 12, 22, 0.94);
+  border: 1px solid rgba(255, 0, 127, 0.45);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 24px rgba(255, 0, 127, 0.15);
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 540px;
+  width: 100%;
+  animation: fadeIn 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.image-gen-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 0, 127, 0.2);
+  padding-bottom: 8px;
+}
+
+.image-gen-title-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-code);
+  font-weight: 700;
+  font-size: 0.86rem;
+  color: #FF2E93;
+  text-shadow: 0 0 10px rgba(255, 0, 127, 0.5);
+}
+
+.image-gen-badge {
+  font-family: var(--font-code);
+  font-size: 0.68rem;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(255, 0, 127, 0.15);
+  border: 1px solid rgba(255, 0, 127, 0.4);
+  color: #FF66B2;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* The Animated Holographic Canvas */
+.image-gen-canvas-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  max-height: 420px;
+  background: #06080F;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.8);
+}
+
+/* Cyber Matrix Grid Backdrop */
+.image-gen-canvas-grid {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    linear-gradient(rgba(255, 0, 127, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 240, 255, 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-position: center center;
+  opacity: 0.85;
+}
+
+/* Laser Scanning Beam */
+.image-gen-laser-beam {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, #FF007F 20%, #00F0FF 50%, #FF007F 80%, transparent);
+  box-shadow: 0 0 12px #FF007F, 0 0 24px #00F0FF;
+  animation: laserScan 2.4s ease-in-out infinite;
+  z-index: 2;
+}
+
+/* Central Quantum Hologram Indicator */
+.image-gen-holo-center {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.image-gen-holo-icon-wrap {
+  width: 72px;
+  height: 72px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-gen-holo-ring {
+  position: absolute;
+  inset: 0;
+  border: 2px dashed rgba(0, 240, 255, 0.5);
+  border-radius: 50%;
+  animation: quantumHoloPulse 4s linear infinite;
+}
+
+.image-gen-holo-core {
+  font-size: 1.8rem;
+  color: #FF007F;
+  text-shadow: 0 0 16px rgba(255, 0, 127, 0.9);
+  animation: pulseCyan 1.5s infinite alternate;
+}
+
+.image-gen-holo-label {
+  font-family: var(--font-code);
+  font-size: 0.72rem;
+  color: var(--neon-cyan);
+  background: rgba(0, 0, 0, 0.6);
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Telemetry & Progress Indicator */
+.image-gen-telemetry {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.image-gen-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.78rem;
+}
+
+.image-gen-status-text {
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.image-gen-percent-text {
+  font-family: var(--font-code);
+  font-weight: 700;
+  color: #FF2E93;
+}
+
+.image-gen-progress-track {
+  width: 100%;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.image-gen-progress-fill {
+  height: 100%;
+  width: 25%;
+  background: linear-gradient(90deg, #FF007F, #9D00FF, #00F0FF);
+  background-size: 200% 100%;
+  animation: cyberShimmer 2s linear infinite;
+  box-shadow: 0 0 10px #FF007F;
+  transition: width 0.35s ease;
+}
+
+.image-gen-prompt-quote {
+  font-size: 0.74rem;
+  color: var(--text-dim);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border-left: 2px solid #FF007F;
+}
+
+/* ==========================================================================
+   AI IMAGE RESULT CARD & CONTROLS
+   ========================================================================== */
+.image-result-card {
+  max-width: 540px;
+  width: 100%;
+  border-radius: var(--radius-md);
+  background: rgba(13, 17, 28, 0.95);
+  border: 1px solid rgba(255, 0, 127, 0.4);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(255, 0, 127, 0.12);
+  overflow: hidden;
+  margin-bottom: 12px;
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.image-result-card:hover {
+  border-color: rgba(255, 0, 127, 0.7);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7), 0 0 28px rgba(255, 0, 127, 0.25);
+}
+
+.image-result-display-wrap {
+  position: relative;
+  width: 100%;
+  background: #05060A;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.image-result-img {
+  width: 100%;
+  height: auto;
+  max-height: 520px;
+  object-fit: cover;
+  display: block;
+  animation: materializationGlow 0.9s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: transform 0.4s ease;
+}
+
+.image-result-card:hover .image-result-img {
+  transform: scale(1.02);
+}
+
+/* Hover Action Overlay */
+.image-result-overlay {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: all 0.25s ease;
+  z-index: 5;
+}
+
+.image-result-card:hover .image-result-overlay {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.image-action-btn {
+  background: rgba(10, 14, 25, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #FFF;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
+  font-size: 0.85rem;
+}
+
+.image-action-btn:hover {
+  background: rgba(255, 0, 127, 0.85);
+  border-color: #FF007F;
+  box-shadow: 0 0 12px #FF007F;
+  transform: scale(1.08);
+}
+
+/* Image Meta & Controls Footer */
+.image-result-footer {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(10, 13, 22, 0.8);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.image-meta-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.image-meta-badge {
+  font-family: var(--font-code);
+  font-size: 0.68rem;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.image-meta-badge.model-badge {
+  background: rgba(255, 0, 127, 0.12);
+  border-color: rgba(255, 0, 127, 0.35);
+  color: #FF66B2;
+  font-weight: 600;
+}
+
+.image-meta-badge.latency-badge {
+  background: rgba(0, 240, 255, 0.08);
+  border-color: rgba(0, 240, 255, 0.3);
+  color: var(--neon-cyan);
+}
+
+.image-actions-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn-image-action {
+  font-size: 0.74rem;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+@media (max-width: 600px) {
+  .image-result-overlay {
+    opacity: 1;
+    transform: translateY(0);
+    top: 8px;
+    right: 8px;
+  }
+  .image-action-btn {
+    width: 32px;
+    height: 32px;
+    font-size: 0.8rem;
+  }
+}
