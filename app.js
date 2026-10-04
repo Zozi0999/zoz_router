@@ -2171,16 +2171,15 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     const hasText = Boolean(content && String(content).trim().length > 0);
     let renderedBody = '';
     if (isActuallyDeepResearch && role === 'assistant' && hasText) {
-      renderedBody = buildDeepResearchSummaryCardHtml(content, model, sources);
+      renderedBody = buildDeepResearchSummaryCardHtml(content, model, sources, timestamp);
     } else {
       renderedBody = role === 'assistant' ? renderMarkdown(content || '') : escapeHtml(content || '').replace(/\n/g, '<br>');
     }
     const textDisplayStyle = (!hasText && role === 'user') ? 'style="display:none;"' : '';
 
     let sourcesHtml = '';
-    if (sources && Array.isArray(sources) && sources.length > 0 && role === 'assistant') {
-      // Deep Research: daftar sumber ditutup default agar chat tetap ringkas; bisa dibuka lewat tombol
-      sourcesHtml = buildSourcesSectionHtml(sources, Boolean(isActuallyDeepResearch));
+    if (sources && Array.isArray(sources) && sources.length > 0 && role === 'assistant' && !isActuallyDeepResearch) {
+      sourcesHtml = buildSourcesSectionHtml(sources, false);
     }
 
     const metaContent = (isActuallyDeepResearch && role === 'assistant')
@@ -5113,35 +5112,41 @@ ${organicBlock}
     openModal('deepResearchReportModal');
   }
 
-  function buildDeepResearchSummaryCardHtml(fullText, model = '', sources = []) {
+  function buildDeepResearchSummaryCardHtml(fullText, model = '', sources = [], date = null) {
     const reportTitle = extractReportTitle(fullText);
-    const summaryMarkdown = extractReportSummary(fullText);
-    const renderedSummary = renderMarkdown(summaryMarkdown);
+    const sourcesCount = (sources && Array.isArray(sources)) ? sources.length : 0;
+
+    let dateStr = '';
+    try {
+      const d = date ? new Date(date) : new Date();
+      if (!isNaN(d.getTime())) {
+        dateStr = d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) + ', ' + d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+      }
+    } catch (e) {}
+
+    const metaParts = [];
+    if (dateStr) metaParts.push(dateStr);
+    if (sourcesCount > 0) metaParts.push(`${sourcesCount} Sumber`);
+    if (model) metaParts.push(escapeHtml(model));
+    const metaString = metaParts.join(' &bull; ');
 
     return `
-      <div class="deep-research-summary-card">
-        <div class="summary-card-header">
-          <span class="summary-card-badge"><i class="fa-solid fa-microscope"></i> RANGKUMAN EKSEKUTIF</span>
-          <span class="meta-badge model-badge">${escapeHtml(model || 'Pipeline 3-Model')}</span>
+      <div class="gemini-research-intro">
+        Riset mendalam telah selesai. Anda dapat meninjau dokumen laporan riset lengkap di bawah ini atau mengajukan pertanyaan lanjutan.
+      </div>
+      <div class="gemini-research-card" data-action="open-full-report" role="button" tabindex="0" title="Klik untuk membuka laporan riset lengkap">
+        <div class="gemini-card-left">
+          <div class="gemini-card-icon-box">
+            <i class="fa-solid fa-atom"></i>
+          </div>
+          <div class="gemini-card-content">
+            <h4 class="gemini-card-title">${escapeHtml(reportTitle)}</h4>
+            <div class="gemini-card-meta">${metaString}</div>
+          </div>
         </div>
-        <h4 class="summary-card-title">${escapeHtml(reportTitle)}</h4>
-        <div class="summary-card-text">
-          ${renderedSummary}
-        </div>
-        <div class="summary-card-actions">
-          <button class="btn-open-full-report" data-action="open-full-report" title="Buka Dokumen Lengkap di Antarmuka Full Report">
-            <i class="fa-solid fa-book-open-reader"></i> Buka Laporan Riset Lengkap (Full Report) ↗
-          </button>
-          <button class="btn-quick-export" data-action="export-pdf" title="Unduh Laporan sebagai Dokumen PDF">
-            <i class="fa-solid fa-file-pdf" style="color:#FF4D4D;"></i> PDF
-          </button>
-          <button class="btn-quick-export" data-action="export-docx" title="Unduh Laporan sebagai Dokumen Word (.docx)">
-            <i class="fa-solid fa-file-word" style="color:#2B579A;"></i> DOCX
-          </button>
-          <button class="btn-quick-export" data-action="export-md" title="Unduh File Markdown Asli (.md)">
-            <i class="fa-solid fa-file-lines" style="color:var(--neon-cyan);"></i> MD
-          </button>
-        </div>
+        <button type="button" class="gemini-card-open-btn" data-action="open-full-report" title="Buka Dokumen Laporan Lengkap">
+          <span>Buka</span>
+        </button>
       </div>
     `;
   }
@@ -5157,30 +5162,33 @@ ${organicBlock}
       });
     };
 
-    container.querySelector('[data-action="open-full-report"]')?.addEventListener('click', openReport);
+    container.querySelectorAll('[data-action="open-full-report"]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openReport();
+      });
+    });
 
-    // Tombol "Baca Laporan" permanen di bilah aksi pesan (selalu terlihat di sebelah Salin)
-    const actionsBar = container.querySelector('.message-actions-bar');
-    if (actionsBar) {
-      actionsBar.querySelector('.read-report-btn')?.remove();
-      const readBtn = document.createElement('button');
-      readBtn.type = 'button';
-      readBtn.className = 'msg-action-btn read-report-btn';
-      readBtn.title = 'Buka laporan riset lengkap di layar baca';
-      readBtn.innerHTML = '<i class="fa-solid fa-book-open-reader"></i> Baca Laporan';
-      readBtn.addEventListener('click', openReport);
-      actionsBar.insertBefore(readBtn, actionsBar.firstChild);
-    }
+    const cardEl = container.querySelector('.gemini-research-card');
+    cardEl?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openReport();
+      }
+    });
 
-    container.querySelector('[data-action="export-pdf"]')?.addEventListener('click', () => {
+    container.querySelector('[data-action="export-pdf"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
       downloadReportPDF(reportTitle, fullText);
     });
 
-    container.querySelector('[data-action="export-docx"]')?.addEventListener('click', () => {
+    container.querySelector('[data-action="export-docx"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
       downloadReportDOCX(reportTitle, fullText);
     });
 
-    container.querySelector('[data-action="export-md"]')?.addEventListener('click', () => {
+    container.querySelector('[data-action="export-md"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
       downloadReportMD(reportTitle, fullText);
     });
   }
@@ -5628,15 +5636,12 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         const totalDuration = ((endTime - startTime) / 1000).toFixed(2);
         const actualFinalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
 
-        // Render Summary Card in chat bubble (Executive summary only)
-        bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(finalReportText, actualFinalModel, allSources);
+        const nowIso = new Date().toISOString();
+        // Render Gemini-Style Research Card in chat bubble
+        bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(finalReportText, actualFinalModel, allSources, nowIso);
         enhanceCodeBlocks(bubbleText);
-        attachDeepResearchCardEvents(assistantRow, finalReportText, actualFinalModel, allSources, new Date().toISOString());
+        attachDeepResearchCardEvents(assistantRow, finalReportText, actualFinalModel, allSources, nowIso);
         assistantRow.dataset.fullContent = finalReportText;
-
-        if (allSources.length > 0) {
-          renderMessageSources(assistantRow, allSources, true);
-        }
 
         if (metaBox) {
           metaBox.innerHTML = `
@@ -5671,9 +5676,10 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         if (finalReportText && finalReportText.trim()) {
           const stoppedText = `${finalReportText.trim()}\n\n*[Riset dihentikan oleh pengguna]*`;
           const actualFinalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
-          bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(stoppedText, actualFinalModel, allSources);
+          const nowIso = new Date().toISOString();
+          bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(stoppedText, actualFinalModel, allSources, nowIso);
           enhanceCodeBlocks(bubbleText);
-          attachDeepResearchCardEvents(assistantRow, stoppedText, actualFinalModel, allSources, new Date().toISOString());
+          attachDeepResearchCardEvents(assistantRow, stoppedText, actualFinalModel, allSources, nowIso);
           assistantRow.dataset.fullContent = stoppedText;
           session.messages.push({
             role: 'assistant',
