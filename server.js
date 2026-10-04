@@ -227,6 +227,46 @@ function normalizeEndpoint(ep) {
 // ==================== DEEP RESEARCH AUTONOMOUS ENGINE (PREMIUM) ====================
 const dbTugasRiset = {};
 
+// Cleanup & Memory Management for Deep Research Tasks (LRU + TTL 1 hour)
+function pruneResearchTasks() {
+  try {
+    const MAX_TASKS = 40;
+    const ONE_HOUR_MS = 60 * 60 * 1000;
+    const now = Date.now();
+    const taskIds = Object.keys(dbTugasRiset);
+
+    // 1. Bersihkan tugas yang sudah lebih dari 1 jam
+    for (const id of taskIds) {
+      const task = dbTugasRiset[id];
+      if (task && task.createdAt) {
+        const age = now - new Date(task.createdAt).getTime();
+        if (age > ONE_HOUR_MS) {
+          delete dbTugasRiset[id];
+        }
+      }
+    }
+
+    // 2. Jika masih melebihi batas MAX_TASKS, buang tugas tertua
+    const remainingKeys = Object.keys(dbTugasRiset);
+    if (remainingKeys.length > MAX_TASKS) {
+      const sorted = remainingKeys
+        .map(id => dbTugasRiset[id])
+        .filter(Boolean)
+        .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+
+      const toRemove = sorted.slice(0, remainingKeys.length - MAX_TASKS);
+      for (const t of toRemove) {
+        delete dbTugasRiset[t.taskId];
+      }
+    }
+  } catch (e) {
+    console.warn('Warning pruning research tasks:', e.message);
+  }
+}
+
+// Timer pembersihan berkala setiap 15 menit
+setInterval(pruneResearchTasks, 15 * 60 * 1000).unref();
+
 // Helper untuk memanggil LLM (OpenRouter atau Ollama) dari backend dengan dukungan riwayat pesan
 async function callLLMBackend({ prompt, system, messages, model, provider, endpoint, apiKey }) {
   let finalMessages = [];
@@ -337,14 +377,34 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   });
 }
 
-// Helper untuk melakukan web scraping / pemindaian konten artikel mendalam dari URL
-function fetchPageContent(targetUrl, maxChars = 3500) {
+// Validasi host privat/lokal untuk proteksi SSRF
+function isPrivateHost(hostname) {
+  if (!hostname || typeof hostname !== 'string') return true;
+  const host = hostname.toLowerCase().trim();
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return true;
+  if (/^127\./.test(host)) return true;
+  if (/^10\./.test(host)) return true;
+  if (/^192\.168\./.test(host)) return true;
+  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)) return true;
+  if (/^169\.254\./.test(host)) return true; // Link-local
+  if (host.endsWith('.local') || host.endsWith('.internal')) return true;
+  return false;
+}
+
+// Helper untuk melakukan web scraping / pemindaian konten artikel mendalam dari URL dengan proteksi redirect loop & SSRF
+function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
   return new Promise((resolve) => {
     try {
+      if (redirectCount > 3) {
+        return resolve(''); // Batas maksimal 3 hop redirect
+      }
       if (!targetUrl || typeof targetUrl !== 'string' || !/^https?:\/\//i.test(targetUrl)) {
         return resolve('');
       }
       const parsedUrl = new URL(targetUrl);
+      if (isPrivateHost(parsedUrl.hostname)) {
+        return resolve(''); // Cegah akses ke host lokal / intranet
+      }
       const client = parsedUrl.protocol === 'https:' ? https : http;
 
       const options = {
@@ -364,7 +424,7 @@ function fetchPageContent(targetUrl, maxChars = 3500) {
         if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
           try {
             const redirectUrl = new URL(res.headers.location, targetUrl).toString();
-            return fetchPageContent(redirectUrl, maxChars).then(resolve);
+            return fetchPageContent(redirectUrl, maxChars, redirectCount + 1).then(resolve);
           } catch (e) {
             return resolve('');
           }
@@ -844,6 +904,7 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 400, { error: 'Parameter `topik` atau `prompt` diperlukan untuk memulai Deep Research.' });
       }
 
+      pruneResearchTasks();
       const taskId = 'research_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
       dbTugasRiset[taskId] = {
         taskId,
