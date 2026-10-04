@@ -4867,11 +4867,20 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       els.imageGenToggleBtn.classList.toggle('active', Boolean(STATE.isImageGenMode));
       els.imageGenToggleBtn.setAttribute('aria-pressed', String(Boolean(STATE.isImageGenMode)));
     }
+    if (els.sendPromptBtn) {
+      if (STATE.isImageGenMode) {
+        els.sendPromptBtn.setAttribute('title', 'Generate Gambar (Enter) | Tahan 450ms untuk Mode Percakapan');
+        els.sendPromptBtn.setAttribute('aria-label', 'Generate Gambar (Enter)');
+      } else {
+        els.sendPromptBtn.setAttribute('title', 'Kirim Prompt (Enter) | Tahan 450ms untuk Mode Gambar');
+        els.sendPromptBtn.setAttribute('aria-label', 'Kirim Prompt (Enter)');
+      }
+    }
     if (els.promptInput) {
       if (STATE.isImageGenMode) {
-        els.promptInput.placeholder = '🎨 Mode AI Image Studio Aktif — Ketik deskripsi visual untuk digenerasi...';
+        els.promptInput.placeholder = '🎨 Mode AI Image Studio Aktif — Ketik visual prompt (Ketik /chat untuk kembali)...';
       } else {
-        els.promptInput.placeholder = 'Ketik pesan...';
+        els.promptInput.placeholder = 'Ketik pesan... (Ketik /img untuk Mode Gambar)';
       }
     }
   }
@@ -6987,8 +6996,59 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       }
     });
 
-    // Send Prompt & Keyboard Handlers
-    els.sendPromptBtn.addEventListener('click', handleSendPrompt);
+    // ==================== SEND PROMPT & QUICK-GESTURE HANDLERS ====================
+    let sendPressTimer = null;
+    let isSendLongPressed = false;
+
+    const startSendPress = () => {
+      if (STATE.isGenerating) return;
+      isSendLongPressed = false;
+      clearTimeout(sendPressTimer);
+      sendPressTimer = setTimeout(() => {
+        isSendLongPressed = true;
+        STATE.isImageGenMode = !STATE.isImageGenMode;
+        updateImageGenModeUI();
+        if (navigator.vibrate) {
+          try { navigator.vibrate([40, 40, 40]); } catch (_) {}
+        }
+        if (STATE.isImageGenMode) {
+          showToast('🎨 Quick Toggle: Mode AI Image Studio Aktif!');
+          AudioEngine.success();
+          els.promptInput?.focus();
+        } else {
+          showToast('💬 Quick Toggle: Mode Percakapan Standar.');
+          AudioEngine.click();
+          els.promptInput?.focus();
+        }
+      }, 450);
+    };
+
+    const cancelSendPress = () => {
+      clearTimeout(sendPressTimer);
+    };
+
+    if (window.PointerEvent) {
+      els.sendPromptBtn.addEventListener('pointerdown', startSendPress);
+      els.sendPromptBtn.addEventListener('pointerup', cancelSendPress);
+      els.sendPromptBtn.addEventListener('pointercancel', cancelSendPress);
+    } else {
+      els.sendPromptBtn.addEventListener('touchstart', startSendPress, { passive: true });
+      els.sendPromptBtn.addEventListener('touchend', cancelSendPress);
+      els.sendPromptBtn.addEventListener('touchcancel', cancelSendPress);
+      els.sendPromptBtn.addEventListener('mousedown', startSendPress);
+      els.sendPromptBtn.addEventListener('mouseup', cancelSendPress);
+    }
+
+    els.sendPromptBtn.addEventListener('click', (e) => {
+      if (isSendLongPressed) {
+        e.preventDefault();
+        e.stopPropagation();
+        isSendLongPressed = false;
+        return;
+      }
+      handleSendPrompt();
+    });
+
     els.stopGenerationBtn.addEventListener('click', stopGeneration);
 
     els.promptInput.addEventListener('keydown', (e) => {
@@ -6998,7 +7058,33 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       }
     });
 
-    els.promptInput.addEventListener('input', () => autoResizeTextarea(els.promptInput));
+    els.promptInput.addEventListener('input', () => {
+      autoResizeTextarea(els.promptInput);
+
+      // Auto-detect prefix /img, /gambar, /image untuk mengaktifkan AI Image Studio seketika
+      const val = els.promptInput.value;
+      if (!STATE.isImageGenMode && /^\/(?:img|gambar|image)\s+/i.test(val)) {
+        STATE.isImageGenMode = true;
+        els.promptInput.value = val.replace(/^\/(?:img|gambar|image)\s+/i, '');
+        updateImageGenModeUI();
+        autoResizeTextarea(els.promptInput);
+        if (navigator.vibrate) {
+          try { navigator.vibrate(30); } catch (_) {}
+        }
+        showToast('🎨 Mode AI Image Studio Aktif!');
+        AudioEngine.success();
+      } else if (STATE.isImageGenMode && /^\/(?:chat|teks|text)\s+/i.test(val)) {
+        STATE.isImageGenMode = false;
+        els.promptInput.value = val.replace(/^\/(?:chat|teks|text)\s+/i, '');
+        updateImageGenModeUI();
+        autoResizeTextarea(els.promptInput);
+        if (navigator.vibrate) {
+          try { navigator.vibrate(20); } catch (_) {}
+        }
+        showToast('💬 Mode Percakapan Standar.');
+        AudioEngine.click();
+      }
+    });
 
 
     // New Chat & History

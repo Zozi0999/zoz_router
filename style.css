@@ -1558,6 +1558,18 @@ html, body {
   }
 }
 
+.composer-box.image-mode-active .send-btn {
+  background: linear-gradient(135deg, #FF007F, #9D4EDD);
+  color: #ffffff;
+  border-color: rgba(255, 0, 127, 0.5);
+  box-shadow: 0 0 16px rgba(255, 0, 127, 0.4);
+}
+
+.composer-box.image-mode-active .send-btn:hover {
+  background: linear-gradient(135deg, #FF2E93, #B5179E);
+  box-shadow: 0 0 22px rgba(255, 0, 127, 0.65);
+}
+
 .composer-tools-left, .composer-tools-right {
   display: flex;
   align-items: center;
