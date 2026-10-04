@@ -323,7 +323,14 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
         res.on('end', () => {
           try {
             const parsed = JSON.parse(rawData);
+            if (res.statusCode >= 400 || parsed.error) {
+              const errMsg = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : (parsed.error || `HTTP ${res.statusCode}: Permintaan OpenRouter gagal`);
+              return reject(new Error(`OpenRouter Error [${res.statusCode}]: ${errMsg}`));
+            }
             const content = parsed.choices?.[0]?.message?.content || '';
+            if (!content.trim()) {
+              return reject(new Error(`OpenRouter tidak mengembalikan konten respons untuk model: ${model || 'default'}`));
+            }
             resolve(content);
           } catch (e) {
             reject(new Error('Gagal memproses respon OpenRouter: ' + e.message));
@@ -363,7 +370,14 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
       res.on('end', () => {
         try {
           const parsed = JSON.parse(rawData);
+          if (res.statusCode >= 400 || parsed.error) {
+            const errMsg = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : (parsed.error || `HTTP ${res.statusCode}: Permintaan Ollama gagal`);
+            return reject(new Error(`Ollama Error [${res.statusCode}]: ${errMsg}`));
+          }
           const content = parsed.message?.content || parsed.response || '';
+          if (!content.trim()) {
+            return reject(new Error(`Ollama tidak mengembalikan konten respons untuk model: ${model || 'default'}`));
+          }
           resolve(content);
         } catch (e) {
           reject(new Error('Gagal memproses respon Ollama: ' + e.message));
