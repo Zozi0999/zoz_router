@@ -789,6 +789,10 @@ const server = http.createServer(async (req, res) => {
   if (sessionMatch && method === 'GET') {
     const sessionId = sessionMatch[1];
     const sessFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
+    const relSess = path.relative(SESSIONS_DIR, sessFile);
+    if (relSess.startsWith('..') || path.isAbsolute(relSess)) {
+      return sendJSON(res, 403, { error: 'Forbidden: Path traversal terdeteksi.' });
+    }
     if (!fs.existsSync(sessFile)) {
       return sendJSON(res, 404, { error: 'Sesi tidak ditemukan di disk perangkat.' });
     }
@@ -805,10 +809,17 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await parseBody(req);
       if (!body || !body.id) {
-        return sendJSON(res, 400, { error: 'ID sesi diperlukan' });
+        return sendJSON(res, 400, { error: 'ID sesi diperlukan.' });
       }
-      const sessionId = body.id;
+      const sessionId = String(body.id).trim();
+      if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
+        return sendJSON(res, 400, { error: 'Format ID sesi tidak valid. Hanya alphanumeric, garis bawah, dan tanda hubung yang diperbolehkan.' });
+      }
       const sessFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
+      const relSess = path.relative(SESSIONS_DIR, sessFile);
+      if (relSess.startsWith('..') || path.isAbsolute(relSess)) {
+        return sendJSON(res, 403, { error: 'Forbidden: Path traversal terdeteksi.' });
+      }
       body.updatedAt = new Date().toISOString();
       fs.writeFileSync(sessFile, JSON.stringify(body, null, 2), 'utf8');
       return sendJSON(res, 200, { success: true, session: body });
@@ -821,6 +832,10 @@ const server = http.createServer(async (req, res) => {
   if (sessionMatch && (method === 'PUT' || method === 'PATCH')) {
     const sessionId = sessionMatch[1];
     const sessFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
+    const relSess = path.relative(SESSIONS_DIR, sessFile);
+    if (relSess.startsWith('..') || path.isAbsolute(relSess)) {
+      return sendJSON(res, 403, { error: 'Forbidden: Path traversal terdeteksi.' });
+    }
     try {
       const body = await parseBody(req);
       let existing = {};
@@ -844,6 +859,10 @@ const server = http.createServer(async (req, res) => {
   if (sessionMatch && method === 'DELETE') {
     const sessionId = sessionMatch[1];
     const sessFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
+    const relSess = path.relative(SESSIONS_DIR, sessFile);
+    if (relSess.startsWith('..') || path.isAbsolute(relSess)) {
+      return sendJSON(res, 403, { error: 'Forbidden: Path traversal terdeteksi.' });
+    }
     try {
       if (fs.existsSync(sessFile)) {
         fs.unlinkSync(sessFile);
