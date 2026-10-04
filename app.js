@@ -3169,6 +3169,7 @@ ${organicBlock}
 
     let fullText = '';
     let webSources = null;
+    let streamRenderer = null;
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -3240,7 +3241,7 @@ ${organicBlock}
       const decoder = new TextDecoder();
       let buffer = '';
       let doneReason = null;
-      const streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
+      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
 
       while (true) {
         const { done, value } = await reader.read();
@@ -3271,7 +3272,7 @@ ${organicBlock}
         }
       }
 
-      const fullText = streamRenderer.finish();
+      fullText = streamRenderer.finish();
       if (!fullText.trim() && !STATE.abortController?.signal.aborted) {
         throw new Error('Model Ollama menyelesaikan koneksi tanpa menghasilkan respon teks.');
       }
@@ -3311,6 +3312,33 @@ ${organicBlock}
 
     } catch (err) {
       if (err.name === 'AbortError') {
+        const partialText = streamRenderer ? streamRenderer.finish() : '';
+        if (partialText && partialText.trim()) {
+          const stoppedText = `${partialText.trim()}\n\n*[Respons dihentikan oleh pengguna]*`;
+          bubbleText.innerHTML = renderMarkdown(stoppedText);
+          enhanceCodeBlocks(bubbleText);
+          if (webSources && webSources.length > 0) {
+            renderMessageSources(assistantRow, webSources);
+          }
+          const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
+          metaBox.innerHTML = `
+            <strong>${modelName}</strong>
+            <span class="meta-model-badge">Ollama</span>
+            <span>⏱️ ${totalTime}s (Dihentikan)</span>
+          `;
+          session.messages.push({
+            role: 'assistant',
+            content: stoppedText,
+            model: modelName,
+            engine: 'ollama',
+            sources: webSources,
+            stats: { duration: totalTime, tokens: tokenCount, stopped: true },
+            timestamp: new Date().toISOString()
+          });
+          savePersistedState();
+        } else {
+          assistantRow.remove();
+        }
         showToast('Generasi dihentikan oleh pengguna.');
       } else {
         const actualHasImage = Array.isArray(image) ? image.length > 0 : Boolean(image);
@@ -3382,6 +3410,7 @@ ${organicBlock}
 
     let fullText = '';
     let webSources = null;
+    let streamRenderer = null;
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -3451,7 +3480,7 @@ ${organicBlock}
       const decoder = new TextDecoder();
       let buffer = '';
       let finishReason = null;
-      const streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
+      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
 
       while (true) {
         const { done, value } = await reader.read();
@@ -3489,7 +3518,7 @@ ${organicBlock}
         }
       }
 
-      const fullText = streamRenderer.finish();
+      fullText = streamRenderer.finish();
       if (!fullText.trim() && !STATE.abortController?.signal.aborted) {
         throw new Error('Model OpenRouter menyelesaikan koneksi tanpa menghasilkan respon teks.');
       }
@@ -3528,6 +3557,33 @@ ${organicBlock}
 
     } catch (err) {
       if (err.name === 'AbortError') {
+        const partialText = streamRenderer ? streamRenderer.finish() : '';
+        if (partialText && partialText.trim()) {
+          const stoppedText = `${partialText.trim()}\n\n*[Respons dihentikan oleh pengguna]*`;
+          bubbleText.innerHTML = renderMarkdown(stoppedText);
+          enhanceCodeBlocks(bubbleText);
+          if (webSources && webSources.length > 0) {
+            renderMessageSources(assistantRow, webSources);
+          }
+          const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
+          metaBox.innerHTML = `
+            <strong>${modelName}</strong>
+            <span class="meta-model-badge" style="background:rgba(255,82,0,0.15); color:var(--neon-amber);">OpenRouter</span>
+            <span>⏱️ ${totalTime}s (Dihentikan)</span>
+          `;
+          session.messages.push({
+            role: 'assistant',
+            content: stoppedText,
+            model: modelName,
+            engine: 'openrouter',
+            sources: webSources,
+            stats: { duration: totalTime, tokens: tokenCount, stopped: true },
+            timestamp: new Date().toISOString()
+          });
+          savePersistedState();
+        } else {
+          assistantRow.remove();
+        }
         showToast('Generasi dihentikan.');
       } else {
         const actualHasImage = Array.isArray(image) ? image.length > 0 : Boolean(image);
@@ -3594,6 +3650,7 @@ ${organicBlock}
     let fullText = '';
     let tokens = 0;
     let webSources = null;
+    let streamRenderer = null;
 
     try {
       let systemContent = STATE.settings.systemPrompt || '';
@@ -3651,7 +3708,7 @@ ${organicBlock}
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = '';
-      const streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollArenaToBottom(els.arenaMessagesA, false));
+      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollArenaToBottom(els.arenaMessagesA, false));
 
       while (true) {
         const { done, value } = await reader.read();
@@ -3678,7 +3735,7 @@ ${organicBlock}
         }
       }
 
-      const fullText = streamRenderer.finish();
+      fullText = streamRenderer.finish();
       if (!fullText.trim() && !STATE.abortControllerA?.signal.aborted) {
         throw new Error('Slot A (Ollama) menyelesaikan koneksi tanpa respon teks.');
       }
@@ -3705,6 +3762,30 @@ ${organicBlock}
       AudioEngine.receive();
     } catch (e) {
       if (e.name === 'AbortError') {
+        const partialText = streamRenderer ? streamRenderer.finish() : '';
+        if (partialText && partialText.trim()) {
+          const stoppedText = `${partialText.trim()}\n\n*[Respons dihentikan oleh pengguna]*`;
+          bubbleText.innerHTML = renderMarkdown(stoppedText);
+          enhanceCodeBlocks(bubbleText);
+          if (webSources && webSources.length > 0) {
+            renderMessageSources(assistantRow, webSources);
+          }
+          const totalTime = ((performance.now() - start) / 1000).toFixed(2);
+          if (els.arenaStatsA) els.arenaStatsA.innerText = `⏱️ ${totalTime}s (Dihentikan)`;
+          session.messages.push({
+            role: 'assistant',
+            content: stoppedText,
+            model: modelA,
+            slot: 'A',
+            engine: 'ollama',
+            sources: webSources,
+            stats: { duration: totalTime, tokens, stopped: true },
+            timestamp: new Date().toISOString()
+          });
+          savePersistedState();
+        } else {
+          assistantRow.remove();
+        }
         showToast('Ollama Slot A dihentikan.');
       } else {
         const errorHtml = formatModelErrorMessage('ollama', modelA, e, false, STATE.webSearchEnabled);
@@ -3756,6 +3837,7 @@ ${organicBlock}
     let fullText = '';
     let tokens = 0;
     let webSources = null;
+    let streamRenderer = null;
 
     try {
       let systemContent = STATE.settings.systemPrompt || '';
@@ -3814,7 +3896,7 @@ ${organicBlock}
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = '';
-      const streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollArenaToBottom(els.arenaMessagesB, false));
+      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollArenaToBottom(els.arenaMessagesB, false));
 
       while (true) {
         const { done, value } = await reader.read();
@@ -3844,7 +3926,7 @@ ${organicBlock}
         }
       }
 
-      const fullText = streamRenderer.finish();
+      fullText = streamRenderer.finish();
       if (!fullText.trim() && !STATE.abortControllerB?.signal.aborted) {
         throw new Error('Slot B (OpenRouter) menyelesaikan koneksi tanpa respon teks.');
       }
@@ -3871,6 +3953,30 @@ ${organicBlock}
       AudioEngine.receive();
     } catch (e) {
       if (e.name === 'AbortError') {
+        const partialText = streamRenderer ? streamRenderer.finish() : '';
+        if (partialText && partialText.trim()) {
+          const stoppedText = `${partialText.trim()}\n\n*[Respons dihentikan oleh pengguna]*`;
+          bubbleText.innerHTML = renderMarkdown(stoppedText);
+          enhanceCodeBlocks(bubbleText);
+          if (webSources && webSources.length > 0) {
+            renderMessageSources(assistantRow, webSources);
+          }
+          const totalTime = ((performance.now() - start) / 1000).toFixed(2);
+          if (els.arenaStatsB) els.arenaStatsB.innerText = `⏱️ ${totalTime}s (Dihentikan)`;
+          session.messages.push({
+            role: 'assistant',
+            content: stoppedText,
+            model: modelB,
+            slot: 'B',
+            engine: 'openrouter',
+            sources: webSources,
+            stats: { duration: totalTime, tokens, stopped: true },
+            timestamp: new Date().toISOString()
+          });
+          savePersistedState();
+        } else {
+          assistantRow.remove();
+        }
         showToast('OpenRouter Slot B dihentikan.');
       } else {
         const errorHtml = formatModelErrorMessage('openrouter', modelB, e, false, STATE.webSearchEnabled);
@@ -4557,6 +4663,22 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
     } catch (err) {
       if (err.name === 'AbortError') {
+        if (finalReportText && finalReportText.trim()) {
+          const stoppedText = `${finalReportText.trim()}\n\n*[Riset dihentikan oleh pengguna]*`;
+          bubbleText.innerHTML = renderMarkdown(stoppedText);
+          enhanceCodeBlocks(bubbleText);
+          session.messages.push({
+            role: 'assistant',
+            content: stoppedText,
+            model: targetModel,
+            sources: allSources,
+            isDeepResearch: true,
+            timestamp: new Date().toISOString()
+          });
+          savePersistedState();
+        } else {
+          assistantRow.remove();
+        }
         showToast('Deep Research dihentikan oleh pengguna.');
       } else {
         console.error('Deep research error:', err);
