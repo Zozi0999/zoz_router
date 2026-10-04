@@ -787,26 +787,33 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
     }
 
     // ==========================================
-    // PILAR 3, 4, & 5: VALIDASI SUMBER, KATEGORISASI TREN & LAPORAN TERSTRUKTUR
+    // PILAR 3, 4, & 5: VALIDASI SUMBER, KATEGORISASI TREN & LAPORAN TERSTRUKTUR (MULTI-AGENT SYNTHESIS)
     // ==========================================
-    task.currentStep = '[Langkah 3/3] Validasi silang fakta, penyaringan bias, kategorisasi tren, & menyusun laporan riset eksekutif...';
+    const finalModel = config.finalModel || config.model;
+    task.currentStep = `[Langkah 3/3] Konsolidasi Multi-Agen, validasi silang fakta & sintesis laporan eksekutif via ${finalModel || 'Model Utama'}...`;
     task.progressPercent = 85;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 3/3] Validasi silang data, filter kontradiksi & sintesis laporan profesional.`);
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 3/3] Konsolidasi data temuan Agen 1 & Agen 2 ke Agen Akhir (${finalModel || 'Model Utama'}).`);
 
-    const synthesisPrompt = `Anda adalah Lead Research Scientist, Senior Technical Analyst & Editor Ahli.
-Susunlah LAPORAN DEEP RESEARCH KOMPREHENSIF untuk topik:
-"${topik}"
+    const synthesisPrompt = `Anda adalah Analis Riset Senior, Lead Technical Scientist & Editor Eksekutif Utama.
+Tugas Anda adalah mencerna, memverifikasi, menghilangkan duplikasi, mendeteksi kontradiksi, dan menggabungkan data dari dua agen pencari spesialis yang berbeda mengenai topik: "${topik}".
 
-Berikut adalah seluruh data temuan yang berhasil dikumpulkan melalui Pencarian Multi-Tahap dan Pemindaian Konten Mendalam (Web Scraping):
+=== DATA MASUKAN DARI AGEN MULTI-SUMBER ===
+
+Berikut adalah data temuan yang berhasil dikumpulkan:
 ${dataTemuan.join('\n\n')}
 
-Daftar Seluruh Sumber Terverifikasi (${allSources.length} Dokumen Web):
-${allSources.map((s, idx) => `[${idx + 1}] ${s.title}: ${s.url}`).join('\n')}
+Daftar Seluruh Sumber Rujukan Terverifikasi (${allSources.length} Dokumen Web):
+${allSources.map((s, idx) => `[${idx + 1}] [${s.sourceProvider || 'Web'}] ${s.title}: ${s.url}`).join('\n')}
+
+=== TUGAS & PROTOKOL SINTESIS AGEN AKHIR ===
+1. Analisis Kritis & Eliminasi Redundansi: Baca seluruh data dari Agen 1 (Google Serper) dan Agen 2 (Google SerpAPI). Buang informasi tumpang tindih (duplikat) dan satukan data pelengkap.
+2. Deteksi Kontradiksi & Cross-Validation: Jika terdapat kontradiksi atau perbedaan angka/fakta antara temuan Agen 1 dan Agen 2, sebutkan secara transparan di dalam laporan pada bagian validasi sumber.
+3. Kualitas Output Eksekutif: Susun menjadi laporan riset final yang sangat mendalam, objektif, berbasis data nyata, dan terstruktur rapi dalam format Markdown tahun rujukan 2026.
 
 Format Laporan yang WAJIB dipatuhi:
 # 🔬 DEEP RESEARCH REPORT: ${topik.toUpperCase()}
-> **Status:** Riset Mendalam Multi-Iterasi & Scraping Konten Selesai  
-> **Sumber Terpindai:** ${scrapedArticles.length} Artikel Utuh & ${allSources.length} Dokumen Web  
+> **Status:** Riset Kolaboratif Multi-Agen Selesai (Agen 1: Serper & Agen 2: SerpAPI)  
+> **Sumber Terpindai:** ${scrapedArticles.length} Artikel Utuh Scraping & ${allSources.length} Dokumen Web Terverifikasi  
 > **Tahun Rujukan:** 2026
 
 ---
@@ -815,40 +822,41 @@ Format Laporan yang WAJIB dipatuhi:
 (Uraikan ringkasan tingkat tinggi mengenai latar belakang, esensi topik, dan temuan inti dalam 2-3 paragraf berbobot tajam)
 
 ## 2. 🔍 Temuan Utama & Analisis Mendalam (Core Deep Findings)
-(Analisis teknis, fakta-fakta spesifik dari hasil pembacaan artikel utuh, mekanisme kerja, dan data riil 2026)
+(Analisis teknis, fakta-fakta spesifik dari hasil penelusuran multi-sumber dan pemindaian artikel utuh, mekanisme kerja, dan data riil 2026)
 
-## 3. ⚖️ Penyaringan Fakta & Validasi Sumber (Fact-Checking & Bias Analysis)
-(Bandingkan fakta antar sumber: sebutkan poin konsensus, verifikasi klaim, dan catat bila ada kontradiksi/perbedaan pandangan antar pakar)
+## 3. ⚖️ Validasi Silang Multi-Agen & Penyaringan Kontradiksi (Cross-Verification & Fact-Checking)
+(Analisis perbandingan antara data Agen 1 Serper dan Agen 2 SerpAPI: sebutkan konsensus data, klarifikasi informasi yang berbeda/kontradiktif, dan verifikasi klaim utama)
 
 ## 4. 📊 Matriks Data & Kategorisasi Tren (Trend & Synthesis Mapping)
 - **Data & Fakta Statistik:** (Statistik konkret, angka, atau persentase)
 - **Opini Tokoh & Pakar:** (Pandangan ahli di bidang terkait)
 - **Tantangan & Hambatan:** (Regulasi, teknis, biaya, atau etika)
-- **Peluang Industri & Dampak:** (Potensi nilai dan transformasi)
+- **Peluang Industri & Dampak:** (Potensi nilai dan transformasi pasar)
 
 ## 5. ⚠️ Tantangan & Hambatan Saat Ini
-(Detail kendala implementasi, kepatuhan regulasi, atau keterbatasan saat ini)
+(Detail kendala implementasi, kepatuhan regulasi, keamanan, atau keterbatasan infrastruktur saat ini)
 
 ## 6. 🚀 Tren & Analisis Masa Depan (Future Trajectory)
 (Proyeksi perkembangan hingga akhir 2026 dan tahun-tahun berikutnya)
 
 ## 7. 🛠️ Rekomendasi Strategis & Implementasi Praktis
-(Langkah konkret yang dapat diterapkan, arsitektur sistem, atau contoh kode/penerapan nyata jika relevan)
+(Langkah konkret yang dapat diterapkan, arsitektur sistem, atau contoh solusi teknis/kode nyata jika relevan)
 
 ---
 ### 📚 Daftar Pustaka / Sumber Referensi:
-Sajikan seluruh tautan asli markdown [Nama Sumber](URL) agar pengguna dapat langsung mengeklik rujukan aslinya.`;
+Sajikan seluruh tautan asli markdown [Nama Sumber](URL) lengkap dengan keterangan sumber asal (Serper / SerpAPI) agar pengguna dapat langsung mengeklik rujukan aslinya.`;
 
     const laporanAkhir = await callLLMBackend({
+      ...config,
       prompt: synthesisPrompt,
-      system: 'Anda adalah Deep Research Engine yang menghasilkan laporan riset tingkat tinggi, sangat komprehensif, berbasis data nyata dari pemindaian artikel utuh, terstruktur rapi, dan bebas bias.',
-      ...config
+      system: 'Anda adalah Deep Research Engine & Senior Synthesizer yang menghasilkan laporan riset komprehensif, berbasis konsolidasi data multi-agen, bebas bias, mendalam, dan terstruktur rapi.',
+      model: finalModel
     });
 
     task.status = 'selesai';
     task.progressPercent = 100;
-    task.currentStep = 'Laporan Deep Research Berhasil Disusun.';
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Laporan Deep Research berhasil dibuat lengkap dengan sitasi & scraping konten.`);
+    task.currentStep = 'Laporan Deep Research Multi-Agen Berhasil Disusun.';
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Laporan Deep Research berhasil dibuat lengkap oleh Agen Akhir (${finalModel || 'Model Utama'}).`);
     task.hasil = laporanAkhir;
     task.sources = allSources;
     task.completedAt = new Date().toISOString();
@@ -1217,6 +1225,9 @@ const server = http.createServer(async (req, res) => {
         apiKey: body.apiKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null),
         serperApiKey: body.serperApiKey || req.headers['x-serper-key'],
         serpApiKey: body.serpApiKey || req.headers['x-serpapi-key'],
+        agent1Model: body.agent1Model || null,
+        agent2Model: body.agent2Model || null,
+        finalModel: body.finalModel || null,
         maxIterations: body.maxIterations || 3
       }).catch(err => {
         console.error(`Tugas riset [${taskId}] gagal secara asinkron:`, err.message);
