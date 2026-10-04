@@ -6552,6 +6552,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         STATE.settings.deepResearchFinalModel = modelId;
         if (els.selectDeepResearchFinalModel) els.selectDeepResearchFinalModel.value = modelId;
       }
+      STATE.catalogTargetInputId = null;
       savePersistedState();
       showToast(`🎯 Model ditetapkan: ${modelId}`);
     } else {
@@ -7218,10 +7219,26 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         return;
       }
 
-      // 2. Close any open modal dialogs
-      const openModals = document.querySelectorAll('.modal-backdrop.show');
+      // 2. Close any open modal dialogs (Stack-aware for nested modals)
+      const openModals = Array.from(document.querySelectorAll('.modal-backdrop.show'));
       if (openModals.length > 0) {
-        openModals.forEach(m => m.classList.remove('show'));
+        const activeModalId = e.state?.modal;
+        if (activeModalId) {
+          // If popped back into an existing parent modal (e.g. settingsModal),
+          // close all child modals and keep the parent modal active.
+          openModals.forEach(m => {
+            if (m.id !== activeModalId) {
+              m.classList.remove('show');
+            }
+          });
+          const targetEl = document.getElementById(activeModalId);
+          if (targetEl) {
+            targetEl.classList.add('show');
+          }
+        } else {
+          // No modal in current history state -> return to main chat by closing all open modals
+          openModals.forEach(m => m.classList.remove('show'));
+        }
         return;
       }
 
