@@ -42,6 +42,40 @@ try {
   console.warn('Warning creating data directories:', e.message);
 }
 
+// Helper to send JSON responses
+function sendJSON(res, statusCode, data) {
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key'
+  });
+  res.end(JSON.stringify(data));
+}
+
+// Helper to parse JSON request body
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 50 * 1024 * 1024) { // 50MB limit
+        req.destroy();
+        reject(new Error('Payload too large'));
+      }
+    });
+    req.on('end', () => {
+      if (!body) return resolve({});
+      try {
+        resolve(JSON.parse(body));
+      } catch (e) {
+        resolve({});
+      }
+    });
+    req.on('error', err => reject(err));
+  });
+}
+
 // Helper to discover locally installed Ollama models from manifest files on disk
 function getLocalOllamaManifests() {
   const userHome = process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\user';
