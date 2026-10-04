@@ -193,18 +193,37 @@ function normalizeEndpoint(ep) {
 // ==================== DEEP RESEARCH AUTONOMOUS ENGINE (PREMIUM) ====================
 const dbTugasRiset = {};
 
-// Helper untuk memanggil LLM (OpenRouter atau Ollama) dari backend
-async function callLLMBackend({ prompt, system, model, provider, endpoint, apiKey }) {
+// Helper untuk memanggil LLM (OpenRouter atau Ollama) dari backend dengan dukungan riwayat pesan
+async function callLLMBackend({ prompt, system, messages, model, provider, endpoint, apiKey }) {
+  let finalMessages = [];
+
+  if (Array.isArray(messages) && messages.length > 0) {
+    if (system && system.trim()) {
+      finalMessages.push({ role: 'system', content: system.trim() });
+    }
+    messages.forEach(m => {
+      if (m.role !== 'system') {
+        finalMessages.push({
+          role: m.role || 'user',
+          content: typeof m.content === 'string' ? m.content : ''
+        });
+      }
+    });
+    if (prompt && (!finalMessages.length || finalMessages[finalMessages.length - 1].content !== prompt)) {
+      finalMessages.push({ role: 'user', content: prompt });
+    }
+  } else {
+    if (system && system.trim()) finalMessages.push({ role: 'system', content: system.trim() });
+    if (prompt && prompt.trim()) finalMessages.push({ role: 'user', content: prompt.trim() });
+  }
+
   if (provider === 'openrouter' || (apiKey && apiKey.startsWith('sk-or-'))) {
     const key = apiKey || process.env.OPENROUTER_API_KEY;
     if (!key) throw new Error('OpenRouter API Key diperlukan.');
-    const messages = [];
-    if (system) messages.push({ role: 'system', content: system });
-    messages.push({ role: 'user', content: prompt });
 
     const postData = JSON.stringify({
       model: model || 'google/gemini-2.0-flash-001',
-      messages: messages,
+      messages: finalMessages,
       temperature: 0.3
     });
 
@@ -248,13 +267,10 @@ async function callLLMBackend({ prompt, system, model, provider, endpoint, apiKe
   const rawEp = endpoint || 'http://127.0.0.1:11434';
   const ollamaUrl = new URL('/api/chat', normalizeEndpoint(rawEp));
   const client = ollamaUrl.protocol === 'https:' ? https : http;
-  const messages = [];
-  if (system) messages.push({ role: 'system', content: system });
-  messages.push({ role: 'user', content: prompt });
 
   const postData = JSON.stringify({
     model: model || 'nemotron-mini:latest',
-    messages: messages,
+    messages: finalMessages,
     stream: false,
     options: { temperature: 0.3 }
   });
@@ -811,6 +827,7 @@ const server = http.createServer(async (req, res) => {
 
       // Jalankan proses riset secara asinkronus di latar belakang
       jalankanRisetOtonom(taskId, topik, {
+        messages: body.messages || [],
         model: body.model,
         provider: body.provider,
         endpoint: body.endpoint,

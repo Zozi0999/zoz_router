@@ -154,6 +154,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       setTimeout(() => this.playBeep(1040, 'sine', 0.08, 0.04), 40);
     },
     receive() { this.playBeep(780, 'sine', 0.06, 0.03); },
+    success() { 
+      this.playBeep(587.33, 'sine', 0.08, 0.05); 
+      setTimeout(() => this.playBeep(880, 'triangle', 0.12, 0.05), 60); 
+    },
     error() { this.playBeep(220, 'sawtooth', 0.15, 0.06); }
   };
 
@@ -4051,9 +4055,10 @@ ${organicBlock}
     }
   }
 
-  async function streamLLMSynthesis(engine, modelName, systemPrompt, userPrompt, bubbleText) {
+  async function streamLLMSynthesis(engine, modelName, systemPrompt, session, bubbleText) {
     const streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
     let fullText = '';
+    const messagesPayload = buildSanitizedMessagesPayload(session, [], engine, systemPrompt);
 
     if (engine === 'openrouter' || (!STATE.settings.ollamaModel && STATE.settings.openRouterKey)) {
       const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
@@ -4069,10 +4074,7 @@ ${organicBlock}
 
       const requestBody = {
         model: modelName,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
+        messages: messagesPayload,
         stream: true,
         temperature: 0.3
       };
@@ -4123,10 +4125,7 @@ ${organicBlock}
       }
       const requestBody = {
         model: modelName,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
+        messages: messagesPayload,
         stream: true,
         options: { temperature: 0.3 },
         endpoint: ep
@@ -4182,7 +4181,7 @@ ${organicBlock}
     let allSources = [];
     let currentProgress = 10;
     let stepItems = [
-      { text: 'Inisialisasi Agen Riset Otonom & Analisis Topik...', status: 'active' }
+      { text: 'Inisialisasi Agen Riset Otonom & Analisis Konteks Percakapan...', status: 'active' }
     ];
 
     function renderResearchHUD(progress, statusMsg) {
@@ -4216,12 +4215,13 @@ ${organicBlock}
       smartScrollChatToBottom(false);
     }
 
-    renderResearchHUD(15, 'Menganalisis topik & merumuskan hipotesis riset...');
+    renderResearchHUD(15, 'Menganalisis topik & konteks percakapan...');
 
     let finalReportText = '';
 
     try {
       let isBackendSuccess = false;
+      const contextualTopic = session ? synthesizeAutonomousSearchQuery(session, promptText) : promptText;
 
       // 1. Coba panggil Backend Endpoint /api/mulai-riset (Local Node.js Server)
       if (!IS_GITHUB_PAGES) {
@@ -4234,7 +4234,9 @@ ${organicBlock}
               'x-serper-key': STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e'
             },
             body: JSON.stringify({
-              topik: promptText,
+              topik: contextualTopic,
+              prompt: promptText,
+              messages: session ? session.messages : [],
               model: targetModel,
               provider: engine,
               endpoint: STATE.settings.ollamaEndpoint,
@@ -4373,7 +4375,7 @@ Sajikan seluruh tautan asli markdown [Nama Sumber](URL) agar pengguna dapat lang
 ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
         bubbleText.innerHTML = '<span class="typing-cursor"></span>';
-        finalReportText = await streamLLMSynthesis(engine, targetModel, synthesisSystem, promptText, bubbleText);
+        finalReportText = await streamLLMSynthesis(engine, targetModel, synthesisSystem, session, bubbleText);
       }
 
       // Finalize UI & Markdown rendering
