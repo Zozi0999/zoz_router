@@ -2088,7 +2088,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (imagesToDisplay && imagesToDisplay.length > 0 && /^📷 \[\d+ Foto Lampiran\]$/.test(textToDisplay.trim())) {
         textToDisplay = '';
       }
-      appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs);
+      appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs, msg.isDeepResearch, msg.latency);
     });
 
     enhanceCodeBlocks(els.messagesList);
@@ -2133,8 +2133,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     return bubble;
   }
 
-  // ==================== MESSAGE DOM BUILDER ====================
-  function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1, sources = null, docs = null) {
+  function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1, sources = null, docs = null, isDeepResearch = false, latency = null) {
     const row = document.createElement('div');
     row.className = `message-row ${role}`;
     row.dataset.index = index;
@@ -2176,7 +2175,14 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     }
 
     let statsHtml = '';
-    if (stats && role === 'assistant') {
+    if (isDeepResearch && role === 'assistant') {
+      statsHtml = `
+        <span class="meta-badge engine-badge"><i class="fa-solid fa-microscope" style="color:var(--neon-amber);"></i> DEEP RESEARCH</span>
+        <span class="meta-badge model-badge">${escapeHtml(model || 'Zoz AI')}</span>
+        ${latency ? `<span class="meta-badge latency-badge"><i class="fa-solid fa-bolt"></i> ${escapeHtml(latency)}s</span>` : ''}
+        ${sources && sources.length > 0 ? `<span class="meta-badge sources-badge"><i class="fa-solid fa-globe"></i> ${sources.length} Sumber</span>` : ''}
+      `;
+    } else if (stats && role === 'assistant') {
       statsHtml = `
         <span class="meta-model-badge">${escapeHtml(model)}</span>
         <span>⏱️ ${stats.duration}s</span>
@@ -2211,12 +2217,15 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       `;
     }
 
+    const metaContent = (isDeepResearch && role === 'assistant')
+      ? statsHtml
+      : `<strong>${roleLabel}</strong> ${statsHtml}`;
+
     row.innerHTML = `
       <div class="message-avatar">${avatarIcon}</div>
       <div class="message-content-box">
         <div class="message-meta">
-          <strong>${roleLabel}</strong>
-          ${statsHtml}
+          ${metaContent}
         </div>
         <div class="message-bubble">
           ${imageGalleryHtml}
