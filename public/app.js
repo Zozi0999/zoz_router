@@ -6454,13 +6454,30 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         <button class="btn-del-preset" data-idx="${idx}" style="background:none; border:none; color:#FF0055; cursor:pointer; padding:0 2px; margin-left:4px; font-size:0.85rem;" title="Hapus preset ini">&times;</button>
       `;
 
-      // Klik pill untuk menerapkan preset ke ketiga input model
+      // Klik pill untuk menerapkan preset ke ketiga input model & simpan instan
       pill.addEventListener('click', (e) => {
         if (e.target.closest('.btn-del-preset')) return;
         if (els.settingDeepResearchAgent1Model) els.settingDeepResearchAgent1Model.value = p.agent1 || '';
         if (els.settingDeepResearchAgent2Model) els.settingDeepResearchAgent2Model.value = p.agent2 || '';
         if (els.settingDeepResearchFinalModel) els.settingDeepResearchFinalModel.value = p.final || '';
-        showToast(`✅ Preset Kustom "${p.name}" diterapkan!`);
+        
+        // Auto-save langsung ke STATE.settings & storage disk
+        STATE.settings.deepResearchAgent1Model = p.agent1 || '';
+        STATE.settings.deepResearchAgent2Model = p.agent2 || '';
+        STATE.settings.deepResearchFinalModel = p.final || '';
+        savePersistedState();
+
+        // Update visual active state pada pill
+        container.querySelectorAll('.custom-preset-pill').forEach(el => {
+          el.style.borderColor = 'rgba(0, 240, 255, 0.25)';
+          el.style.background = 'rgba(0, 240, 255, 0.08)';
+          el.classList.remove('active');
+        });
+        pill.style.borderColor = 'var(--neon-teal)';
+        pill.style.background = 'rgba(0, 255, 194, 0.18)';
+        pill.classList.add('active');
+
+        showToast(`✅ Preset Kustom "${p.name}" diterapkan & disimpan!`);
         AudioEngine.click();
       });
 
