@@ -3194,22 +3194,29 @@ ${organicBlock}
 
         for (const line of lines) {
           if (!line.trim()) continue;
+          let parsed;
           try {
-            const parsed = JSON.parse(line);
-            if (parsed.error) throw new Error(parsed.error);
-            if (parsed.done_reason) doneReason = parsed.done_reason;
-            if (parsed.message?.content) {
-              if (!firstTokenTime) firstTokenTime = performance.now();
-              tokenCount++;
-              streamRenderer.append(parsed.message.content);
-            }
+            parsed = JSON.parse(line);
           } catch (pe) {
-            console.error('Error parsing Ollama line:', pe);
+            continue;
+          }
+          if (parsed.error) {
+            const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
+            throw new Error(errStr);
+          }
+          if (parsed.done_reason) doneReason = parsed.done_reason;
+          if (parsed.message?.content) {
+            if (!firstTokenTime) firstTokenTime = performance.now();
+            tokenCount++;
+            streamRenderer.append(parsed.message.content);
           }
         }
       }
 
       const fullText = streamRenderer.finish();
+      if (!fullText.trim() && !STATE.abortController?.signal.aborted) {
+        throw new Error('Model Ollama menyelesaikan koneksi tanpa menghasilkan respon teks.');
+      }
 
       const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
       const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
@@ -3402,25 +3409,32 @@ ${organicBlock}
           const jsonStr = trimmed.replace(/^data:\s*/, '');
           if (jsonStr === '[DONE]') break;
 
+          let parsed;
           try {
-            const parsed = JSON.parse(jsonStr);
-            if (parsed.error) throw new Error(typeof parsed.error === 'object' ? parsed.error.message : parsed.error);
-            if (parsed.choices?.[0]?.finish_reason) {
-              finishReason = parsed.choices[0].finish_reason;
-            }
-            const delta = parsed.choices?.[0]?.delta?.content;
-            if (delta) {
-              if (!firstTokenTime) firstTokenTime = performance.now();
-              tokenCount++;
-              streamRenderer.append(delta);
-            }
+            parsed = JSON.parse(jsonStr);
           } catch (pe) {
-            // Ignore parse errors on partial chunks
+            continue;
+          }
+          if (parsed.error) {
+            const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
+            throw new Error(errStr);
+          }
+          if (parsed.choices?.[0]?.finish_reason) {
+            finishReason = parsed.choices[0].finish_reason;
+          }
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) {
+            if (!firstTokenTime) firstTokenTime = performance.now();
+            tokenCount++;
+            streamRenderer.append(delta);
           }
         }
       }
 
       const fullText = streamRenderer.finish();
+      if (!fullText.trim() && !STATE.abortController?.signal.aborted) {
+        throw new Error('Model OpenRouter menyelesaikan koneksi tanpa menghasilkan respon teks.');
+      }
 
       const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
       const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
@@ -3589,17 +3603,27 @@ ${organicBlock}
         buf = lines.pop();
         for (const l of lines) {
           if (!l.trim()) continue;
+          let p;
           try {
-            const p = JSON.parse(l);
-            if (p.message?.content) {
-              tokens++;
-              streamRenderer.append(p.message.content);
-            }
-          } catch (pe) {}
+            p = JSON.parse(l);
+          } catch (pe) {
+            continue;
+          }
+          if (p.error) {
+            const errStr = typeof p.error === 'object' ? (p.error.message || JSON.stringify(p.error)) : p.error;
+            throw new Error(errStr);
+          }
+          if (p.message?.content) {
+            tokens++;
+            streamRenderer.append(p.message.content);
+          }
         }
       }
 
       const fullText = streamRenderer.finish();
+      if (!fullText.trim() && !STATE.abortControllerA?.signal.aborted) {
+        throw new Error('Slot A (Ollama) menyelesaikan koneksi tanpa respon teks.');
+      }
       enhanceCodeBlocks(bubbleText);
 
       const totalTime = ((performance.now() - start) / 1000).toFixed(2);
@@ -3744,18 +3768,28 @@ ${organicBlock}
           if (!l.trim() || !l.startsWith('data:')) continue;
           const jsonStr = l.replace(/^data:\s*/, '');
           if (jsonStr === '[DONE]') break;
+          let p;
           try {
-            const p = JSON.parse(jsonStr);
-            const delta = p.choices?.[0]?.delta?.content;
-            if (delta) {
-              tokens++;
-              streamRenderer.append(delta);
-            }
-          } catch (pe) {}
+            p = JSON.parse(jsonStr);
+          } catch (pe) {
+            continue;
+          }
+          if (p.error) {
+            const errStr = typeof p.error === 'object' ? (p.error.message || JSON.stringify(p.error)) : p.error;
+            throw new Error(errStr);
+          }
+          const delta = p.choices?.[0]?.delta?.content;
+          if (delta) {
+            tokens++;
+            streamRenderer.append(delta);
+          }
         }
       }
 
       const fullText = streamRenderer.finish();
+      if (!fullText.trim() && !STATE.abortControllerB?.signal.aborted) {
+        throw new Error('Slot B (OpenRouter) menyelesaikan koneksi tanpa respon teks.');
+      }
       enhanceCodeBlocks(bubbleText);
 
       const totalTime = ((performance.now() - start) / 1000).toFixed(2);
