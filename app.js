@@ -1668,10 +1668,30 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     input.select();
   }
 
-  function exportSessionData(sessionId) {
+  async function exportSessionData(sessionId) {
     const session = STATE.sessions.find(s => s.id === sessionId);
     if (!session) return;
     
+    // Lazy load messages from device disk if needed before exporting
+    if (session._isLazyDisk && (!session.messages || session.messages.length === 0)) {
+      if (DeviceStorage.isDeviceBackendAvailable) {
+        try {
+          const fullSess = await DeviceStorage.getSession(sessionId);
+          if (fullSess && Array.isArray(fullSess.messages)) {
+            session.messages = fullSess.messages;
+            delete session._isLazyDisk;
+          }
+        } catch (e) {
+          console.warn('Gagal memuat detail sesi dari disk untuk ekspor:', e);
+        }
+      }
+    }
+
+    if (!session.messages || session.messages.length === 0) {
+      showToast('Obrolan masih kosong untuk diekspor.', 'error');
+      return;
+    }
+
     let md = `# ${session.title || 'Percakapan ZOZ Router'}\n`;
     md += `*Tanggal: ${new Date(session.createdAt || Date.now()).toLocaleString('id-ID')}*  \n`;
     md += `*Mode: ${(session.mode || 'ollama').toUpperCase()}*  \n\n---\n\n`;
