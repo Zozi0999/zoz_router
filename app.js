@@ -2150,11 +2150,16 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     }
 
     const hasText = Boolean(content && String(content).trim().length > 0);
-    const renderedBody = role === 'assistant' ? renderMarkdown(content || '') : escapeHtml(content || '').replace(/\n/g, '<br>');
+    let renderedBody = '';
+    if (isDeepResearch && role === 'assistant' && hasText) {
+      renderedBody = buildDeepResearchSummaryCardHtml(content, model, sources);
+    } else {
+      renderedBody = role === 'assistant' ? renderMarkdown(content || '') : escapeHtml(content || '').replace(/\n/g, '<br>');
+    }
     const textDisplayStyle = (!hasText && role === 'user') ? 'style="display:none;"' : '';
 
     let sourcesHtml = '';
-    if (sources && Array.isArray(sources) && sources.length > 0 && role === 'assistant') {
+    if (sources && Array.isArray(sources) && sources.length > 0 && role === 'assistant' && !isDeepResearch) {
       sourcesHtml = `
         <div class="msg-sources-section">
           <div class="msg-sources-title">
@@ -2197,6 +2202,11 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       </div>
     `;
 
+    // Attach Deep Research Card Actions (Full Report Modal & Quick Exports)
+    if (isDeepResearch && role === 'assistant' && hasText) {
+      attachDeepResearchCardEvents(row, content, model, sources, null);
+    }
+
     // Attach Lightbox click triggers to images in this bubble
     if (imgList.length > 0) {
       row.querySelectorAll('.chat-img-thumb-wrap').forEach((thumb) => {
@@ -2207,6 +2217,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         });
       });
     }
+
 
     // Edit Prompt Button Handler (for User messages)
     if (role === 'user') {
@@ -4458,13 +4469,510 @@ ${organicBlock}
     }
   }
 
+  // ==================== DEEP RESEARCH REPORT & EXPORT SUITE ====================
+  let currentActiveReport = {
+    title: '',
+    fullText: '',
+    sources: [],
+    model: '',
+    date: ''
+  };
+
+  function extractReportTitle(fullText) {
+    if (!fullText || typeof fullText !== 'string') return 'Laporan Riset Mendalam (Deep Research)';
+    const match = fullText.match(/^#\s+(?:🔬\s*)?(?:DEEP\s*RESEARCH\s*REPORT:\s*)?([^\n]+)/im);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+    const lines = fullText.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length > 0) {
+      return lines[0].replace(/^#+\s*/, '').trim();
+    }
+    return 'Laporan Riset Mendalam (Deep Research)';
+  }
+
+  function extractReportSummary(fullText) {
+    if (!fullText || typeof fullText !== 'string') return '';
+    const text = fullText.trim();
+
+    // 1. Ekstraksi Bab 1: Pendahuluan & Ringkasan Eksekutif
+    const regexExecSummary = /(?:##\s*1\.\s*.*?Ringkasan\s*Eksekutif.*?|##\s*Ringkasan\s*Eksekutif|##\s*Executive\s*Summary)([\s\S]*?)(?=(?:##\s*2\.|##\s*[A-Z0-9]|\n---\n|$))/i;
+    const match = text.match(regexExecSummary);
+    if (match && match[1] && match[1].trim().length > 60) {
+      return match[1].trim();
+    }
+
+    // 2. Ekstraksi Bagian Heading 2 pertama setelah judul
+    const h2Parts = text.split(/\n(?=##\s+)/);
+    if (h2Parts.length > 1) {
+      const candidate = h2Parts[1].replace(/^##\s+.*?\n+/, '').trim();
+      if (candidate.length > 60) {
+        return candidate.length > 1500 ? candidate.slice(0, 1500) + '...' : candidate;
+      }
+    }
+
+    // 3. Fallback: 2-3 paragraf pertama non-heading
+    const paragraphs = text.split(/\n\s*\n/).filter(p => !p.trim().startsWith('#'));
+    if (paragraphs.length > 0) {
+      const combined = paragraphs.slice(0, 3).join('\n\n');
+      return combined.length > 1200 ? combined.slice(0, 1200) + '...' : combined;
+    }
+
+    return text.length > 800 ? text.slice(0, 800) + '...' : text;
+  }
+
+  function downloadReportDOCX(title, markdownText) {
+    const renderedHtml = renderMarkdown(markdownText || '');
+    const cleanFilename = (title || 'Deep-Research-Report')
+      .replace(/[^a-zA-Z0-9_\-\u00C0-\u024F\u1E00-\u1EFF ]/g, '')
+      .replace(/\s+/g, '_')
+      .trim() || 'Deep-Research-Report';
+    const currentDate = new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    const wordContent = `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(title)}</title>
+  <!--[if gte mso 9]>
+  <xml>
+    <w:WordDocument>
+      <w:View>Print</w:View>
+      <w:Zoom>100</w:Zoom>
+      <w:DoNotOptimizeForBrowser/>
+    </w:WordDocument>
+  </xml>
+  <![endif]-->
+  <style>
+    body {
+      font-family: 'Calibri', 'Segoe UI', Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.6;
+      color: #111827;
+      margin: 1in;
+    }
+    h1 {
+      font-size: 20pt;
+      font-weight: bold;
+      color: #0F172A;
+      border-bottom: 2pt solid #0284C7;
+      padding-bottom: 6pt;
+      margin-top: 0;
+      margin-bottom: 12pt;
+    }
+    h2 {
+      font-size: 14pt;
+      font-weight: bold;
+      color: #0369A1;
+      margin-top: 18pt;
+      margin-bottom: 8pt;
+      border-bottom: 1pt solid #E2E8F0;
+      padding-bottom: 3pt;
+    }
+    h3 {
+      font-size: 12pt;
+      font-weight: bold;
+      color: #334155;
+      margin-top: 12pt;
+      margin-bottom: 6pt;
+    }
+    p {
+      margin-top: 0;
+      margin-bottom: 8pt;
+    }
+    ul, ol {
+      margin-top: 0;
+      margin-bottom: 8pt;
+      padding-left: 20pt;
+    }
+    li {
+      margin-bottom: 4pt;
+    }
+    blockquote {
+      margin: 10pt 0;
+      padding: 6pt 14pt;
+      background: #F8FAFC;
+      border-left: 3pt solid #38BDF8;
+      font-style: italic;
+      color: #475569;
+    }
+    code {
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 10pt;
+      background: #F1F5F9;
+      padding: 2pt 4pt;
+      border-radius: 3pt;
+    }
+    pre {
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 9.5pt;
+      background: #F8FAFC;
+      border: 1pt solid #E2E8F0;
+      padding: 10pt;
+      margin-bottom: 10pt;
+      white-space: pre-wrap;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 12pt 0;
+    }
+    th, td {
+      border: 1pt solid #CBD5E1;
+      padding: 6pt 8pt;
+      text-align: left;
+    }
+    th {
+      background-color: #F1F5F9;
+      font-weight: bold;
+    }
+    .doc-meta {
+      font-size: 9.5pt;
+      color: #64748B;
+      margin-bottom: 24pt;
+      padding-bottom: 8pt;
+      border-bottom: 1pt solid #CBD5E1;
+    }
+    a {
+      color: #0284C7;
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="doc-meta">
+    ZOZ ROUTER &bull; DEEP RESEARCH INTELLIGENCE ENGINE &bull; Diterbitkan: ${currentDate}
+  </div>
+  ${renderedHtml}
+</body>
+</html>`;
+
+    const blob = new Blob(['\ufeff', wordContent], { type: 'application/msword;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${cleanFilename}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 300);
+    showToast('Laporan berhasil diunduh dalam format Word (.docx)', 'success');
+  }
+
+  function downloadReportPDF(title, markdownText) {
+    const renderedHtml = renderMarkdown(markdownText || '');
+    const currentDate = new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    let printFrame = document.getElementById('reportPrintFrame');
+    if (printFrame) printFrame.remove();
+
+    printFrame = document.createElement('iframe');
+    printFrame.id = 'reportPrintFrame';
+    printFrame.style.position = 'fixed';
+    printFrame.style.right = '0';
+    printFrame.style.bottom = '0';
+    printFrame.style.width = '0';
+    printFrame.style.height = '0';
+    printFrame.style.border = '0';
+    document.body.appendChild(printFrame);
+
+    const doc = printFrame.contentWindow.document;
+    doc.open();
+    doc.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(title || 'Deep Research Report')}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 20mm 15mm 20mm 15mm;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-size: 10.5pt;
+      line-height: 1.6;
+      color: #111827;
+      margin: 0;
+      padding: 0;
+      background: #FFFFFF;
+    }
+    .print-header {
+      border-bottom: 2px solid #00F0FF;
+      padding-bottom: 12px;
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+    .print-header .logo-text {
+      font-size: 13pt;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: #0F172A;
+    }
+    .print-header .meta-text {
+      font-size: 9pt;
+      color: #64748B;
+    }
+    h1 {
+      font-size: 18pt;
+      font-weight: 800;
+      color: #0F172A;
+      margin-top: 0;
+      margin-bottom: 12pt;
+      line-height: 1.3;
+    }
+    h2 {
+      font-size: 13pt;
+      font-weight: 700;
+      color: #0284C7;
+      margin-top: 20pt;
+      margin-bottom: 8pt;
+      border-bottom: 1px solid #E2E8F0;
+      padding-bottom: 4pt;
+      page-break-after: avoid;
+    }
+    h3 {
+      font-size: 11pt;
+      font-weight: 700;
+      color: #334155;
+      margin-top: 14pt;
+      margin-bottom: 6pt;
+      page-break-after: avoid;
+    }
+    p {
+      margin-top: 0;
+      margin-bottom: 8pt;
+    }
+    ul, ol {
+      margin-top: 0;
+      margin-bottom: 8pt;
+      padding-left: 20pt;
+    }
+    li {
+      margin-bottom: 4pt;
+    }
+    blockquote {
+      margin: 10pt 0;
+      padding: 6pt 12pt;
+      background: #F8FAFC;
+      border-left: 3.5px solid #0284C7;
+      font-style: italic;
+      color: #475569;
+    }
+    code {
+      font-family: Consolas, Monaco, monospace;
+      font-size: 9pt;
+      background: #F1F5F9;
+      padding: 2pt 4pt;
+      border-radius: 3pt;
+    }
+    pre {
+      font-family: Consolas, Monaco, monospace;
+      font-size: 8.5pt;
+      background: #F8FAFC;
+      border: 1px solid #E2E8F0;
+      padding: 10pt;
+      border-radius: 4pt;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12pt 0;
+      font-size: 9.5pt;
+    }
+    th, td {
+      border: 1px solid #CBD5E1;
+      padding: 6pt 8pt;
+      text-align: left;
+    }
+    th {
+      background: #F1F5F9;
+      font-weight: 700;
+    }
+    a {
+      color: #0284C7;
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="print-header">
+    <div class="logo-text">🔬 ZOZ ROUTER &bull; DEEP RESEARCH REPORT</div>
+    <div class="meta-text">Diterbitkan: ${currentDate}</div>
+  </div>
+  ${renderedHtml}
+</body>
+</html>`);
+    doc.close();
+
+    setTimeout(() => {
+      printFrame.contentWindow.focus();
+      printFrame.contentWindow.print();
+    }, 400);
+  }
+
+  function downloadReportMD(title, markdownText) {
+    const cleanFilename = (title || 'Deep-Research-Report')
+      .replace(/[^a-zA-Z0-9_\-\u00C0-\u024F\u1E00-\u1EFF ]/g, '')
+      .replace(/\s+/g, '_')
+      .trim() || 'Deep-Research-Report';
+    const blob = new Blob([markdownText || ''], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${cleanFilename}.md`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 300);
+    showToast('Laporan berhasil diunduh dalam format Markdown (.md)', 'success');
+  }
+
+  function openDeepResearchReportModal(fullText, title, meta = {}) {
+    const modal = document.getElementById('deepResearchReportModal');
+    if (!modal) return;
+
+    const resolvedTitle = title || extractReportTitle(fullText);
+    const modalTitleEl = document.getElementById('fullReportModalTitle');
+    if (modalTitleEl) modalTitleEl.textContent = resolvedTitle;
+
+    const dateEl = document.getElementById('fullReportDate');
+    if (dateEl) {
+      const d = meta.date ? new Date(meta.date) : new Date();
+      dateEl.textContent = d.toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    const sourcesCountEl = document.getElementById('fullReportSourcesCount');
+    if (sourcesCountEl) {
+      sourcesCountEl.textContent = (meta.sources && Array.isArray(meta.sources)) ? meta.sources.length : '0';
+    }
+
+    const modelsUsedEl = document.getElementById('fullReportModelsUsed');
+    if (modelsUsedEl) {
+      modelsUsedEl.textContent = meta.model || 'Pipeline 3-Model Hierarkis';
+    }
+
+    // Simpan ke state pelacak laporan aktif
+    currentActiveReport = {
+      title: resolvedTitle,
+      fullText: fullText || '',
+      sources: meta.sources || [],
+      model: meta.model || '',
+      date: meta.date || new Date().toISOString()
+    };
+
+    // Render markdown dokumen utuh ke reading stage
+    const contentEl = document.getElementById('fullReportContent');
+    if (contentEl) {
+      contentEl.innerHTML = renderMarkdown(fullText || '');
+      enhanceCodeBlocks(contentEl);
+
+      // Bangun Dynamic Outline / Table of Contents
+      const tocList = document.getElementById('fullReportTOCList');
+      if (tocList) {
+        tocList.innerHTML = '';
+        const headings = contentEl.querySelectorAll('h1, h2, h3');
+        if (headings.length > 0) {
+          headings.forEach((heading, idx) => {
+            const anchorId = `report-heading-${idx}`;
+            heading.id = anchorId;
+
+            const level = heading.tagName.toLowerCase();
+            const tocItem = document.createElement('a');
+            tocItem.className = `toc-link toc-${level}`;
+            tocItem.href = `#${anchorId}`;
+            tocItem.textContent = heading.textContent.trim();
+            tocItem.addEventListener('click', (e) => {
+              e.preventDefault();
+              heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              tocList.querySelectorAll('.toc-link').forEach(el => el.classList.remove('active'));
+              tocItem.classList.add('active');
+            });
+            tocList.appendChild(tocItem);
+          });
+        } else {
+          tocList.innerHTML = '<span style="font-size:0.75rem; color:var(--text-muted); padding:8px 12px; display:block;">Tidak ada outline dokumen</span>';
+        }
+      }
+    }
+
+    openModal('deepResearchReportModal');
+  }
+
+  function buildDeepResearchSummaryCardHtml(fullText, model = '', sources = []) {
+    const reportTitle = extractReportTitle(fullText);
+    const summaryMarkdown = extractReportSummary(fullText);
+    const renderedSummary = renderMarkdown(summaryMarkdown);
+
+    return `
+      <div class="deep-research-summary-card">
+        <div class="summary-card-header">
+          <span class="summary-card-badge"><i class="fa-solid fa-microscope"></i> RANGKUMAN EKSEKUTIF</span>
+          <span class="meta-badge model-badge">${escapeHtml(model || 'Pipeline 3-Model')}</span>
+        </div>
+        <h4 class="summary-card-title">${escapeHtml(reportTitle)}</h4>
+        <div class="summary-card-text">
+          ${renderedSummary}
+        </div>
+        <div class="summary-card-actions">
+          <button class="btn-open-full-report" data-action="open-full-report" title="Buka Dokumen Lengkap di Antarmuka Full Report">
+            <i class="fa-solid fa-book-open-reader"></i> Buka Laporan Riset Lengkap (Full Report) ↗
+          </button>
+          <button class="btn-quick-export" data-action="export-pdf" title="Unduh Laporan sebagai Dokumen PDF">
+            <i class="fa-solid fa-file-pdf" style="color:#FF4D4D;"></i> PDF
+          </button>
+          <button class="btn-quick-export" data-action="export-docx" title="Unduh Laporan sebagai Dokumen Word (.docx)">
+            <i class="fa-solid fa-file-word" style="color:#2B579A;"></i> DOCX
+          </button>
+          <button class="btn-quick-export" data-action="export-md" title="Unduh File Markdown Asli (.md)">
+            <i class="fa-solid fa-file-lines" style="color:var(--neon-cyan);"></i> MD
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  function attachDeepResearchCardEvents(container, fullText, model, sources, date) {
+    if (!container) return;
+    const reportTitle = extractReportTitle(fullText);
+
+    container.querySelector('[data-action="open-full-report"]')?.addEventListener('click', () => {
+      openDeepResearchReportModal(fullText, reportTitle, {
+        sources,
+        model,
+        date: date || new Date().toISOString()
+      });
+    });
+
+    container.querySelector('[data-action="export-pdf"]')?.addEventListener('click', () => {
+      downloadReportPDF(reportTitle, fullText);
+    });
+
+    container.querySelector('[data-action="export-docx"]')?.addEventListener('click', () => {
+      downloadReportDOCX(reportTitle, fullText);
+    });
+
+    container.querySelector('[data-action="export-md"]')?.addEventListener('click', () => {
+      downloadReportMD(reportTitle, fullText);
+    });
+  }
+
   async function runDeepResearchStreaming(session, promptText, image = null, modelName = null, engine = 'ollama') {
+
     const targetModel = modelName || (engine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel);
     setGeneratingState(true);
     STATE.abortController = new AbortController();
 
     const startTime = performance.now();
-    const assistantRow = appendMessageElement('assistant', '', null, `${targetModel} (Deep Research)`);
+    const assistantRow = appendMessageElement('assistant', '', null, `${targetModel} (Deep Research)`, null, -1, null, null, true);
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     const metaBox = assistantRow.querySelector('.message-meta');
 
@@ -4896,15 +5404,19 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
       // Finalize UI & Markdown rendering
       if (finalReportText && finalReportText.trim()) {
-        bubbleText.innerHTML = renderMarkdown(finalReportText);
+        const endTime = performance.now();
+        const totalDuration = ((endTime - startTime) / 1000).toFixed(2);
+        const actualFinalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
+
+        // Render Summary Card in chat bubble (Executive summary only)
+        bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(finalReportText, actualFinalModel, allSources);
         enhanceCodeBlocks(bubbleText);
+        attachDeepResearchCardEvents(assistantRow, finalReportText, actualFinalModel, allSources, new Date().toISOString());
+
         if (allSources.length > 0) {
           renderMessageSources(assistantRow, allSources);
         }
 
-        const endTime = performance.now();
-        const totalDuration = ((endTime - startTime) / 1000).toFixed(2);
-        const actualFinalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
         if (metaBox) {
           metaBox.innerHTML = `
             <span class="meta-badge engine-badge"><i class="fa-solid fa-microscope" style="color:var(--neon-amber);"></i> DEEP RESEARCH</span>
@@ -4937,12 +5449,14 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       if (err.name === 'AbortError') {
         if (finalReportText && finalReportText.trim()) {
           const stoppedText = `${finalReportText.trim()}\n\n*[Riset dihentikan oleh pengguna]*`;
-          bubbleText.innerHTML = renderMarkdown(stoppedText);
+          const actualFinalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
+          bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(stoppedText, actualFinalModel, allSources);
           enhanceCodeBlocks(bubbleText);
+          attachDeepResearchCardEvents(assistantRow, stoppedText, actualFinalModel, allSources, new Date().toISOString());
           session.messages.push({
             role: 'assistant',
             content: stoppedText,
-            model: targetModel,
+            model: actualFinalModel,
             sources: allSources,
             isDeepResearch: true,
             timestamp: new Date().toISOString()
@@ -7547,6 +8061,27 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
           closeModal(modalEl.id, true);
         }
       });
+    });
+
+    // ==================== DEEP RESEARCH FULL REPORT MODAL LISTENERS ====================
+    document.getElementById('btnExportReportPDF')?.addEventListener('click', () => {
+      if (!currentActiveReport.fullText) return;
+      downloadReportPDF(currentActiveReport.title, currentActiveReport.fullText);
+    });
+
+    document.getElementById('btnExportReportDOCX')?.addEventListener('click', () => {
+      if (!currentActiveReport.fullText) return;
+      downloadReportDOCX(currentActiveReport.title, currentActiveReport.fullText);
+    });
+
+    document.getElementById('btnExportReportMD')?.addEventListener('click', () => {
+      if (!currentActiveReport.fullText) return;
+      downloadReportMD(currentActiveReport.title, currentActiveReport.fullText);
+    });
+
+    document.getElementById('btnCopyFullReport')?.addEventListener('click', () => {
+      if (!currentActiveReport.fullText) return;
+      copyTextToClipboard(currentActiveReport.fullText, null, 'Seluruh teks laporan riset disalin ke clipboard!');
     });
 
     // Global Hardware / Gesture Back Button Interceptor for Mobile (popstate)
