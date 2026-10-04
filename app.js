@@ -3767,6 +3767,22 @@ ${organicBlock}
     }
   }
 
+  // --- DUAL ARENA SIMULTANEOUS STREAMING ---
+  async function runArenaStreaming(session, promptText, images = []) {
+    setGeneratingState(true);
+    STATE.abortController = new AbortController();
+    try {
+      await Promise.allSettled([
+        sendArenaPromptA(promptText),
+        sendArenaPromptB(promptText)
+      ]);
+    } catch (err) {
+      console.warn('Dual Arena streaming error:', err);
+    } finally {
+      setGeneratingState(false);
+    }
+  }
+
   // --- AUTO ROUTER (SMART ROUTING) ---
   async function runAutoRouterStreaming(session, promptText, image) {
     // Check if Ollama is online
@@ -3799,6 +3815,14 @@ ${organicBlock}
     if (STATE.abortController) {
       STATE.abortController.abort();
       STATE.abortController = null;
+    }
+    if (STATE.abortControllerA) {
+      STATE.abortControllerA.abort();
+      STATE.abortControllerA = null;
+    }
+    if (STATE.abortControllerB) {
+      STATE.abortControllerB.abort();
+      STATE.abortControllerB = null;
     }
     setGeneratingState(false);
   }
