@@ -1920,7 +1920,6 @@ if (require.main === module && !process.env.VERCEL) {
     console.log(`🌐 Local Web UI:    http://localhost:${PORT}`);
     console.log(`🦙 Ollama Gateway:  http://127.0.0.1:11434 (Local)`);
     console.log(`⚡ OpenRouter GW:   https://openrouter.ai/api/v1 (Cloud)`);
-    console.log(`⚔️ Dual Arena Mode: Active`);
     console.log(`======================================================\n`);
   });
 }

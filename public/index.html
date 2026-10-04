@@ -142,9 +142,6 @@
             <button class="mode-tab" data-mode="openrouter" id="modeOpenRouter">
               <span class="tab-icon">⚡</span> OpenRouter
             </button>
-            <button class="mode-tab" data-mode="arena" id="modeArena" title="Bandingkan respons Ollama vs OpenRouter bersamaan!">
-              <span class="tab-icon">⚔️</span> Dual Arena
-            </button>
             <button class="mode-tab" data-mode="auto" id="modeAuto" title="Auto routing pintar: Local first + Cloud fallback">
               <span class="tab-icon">🔀</span> Auto Router
             </button>
@@ -214,13 +211,6 @@
         </div>
       </header>
 
-      <!-- DUAL SPLIT TOP INFO BAR -->
-      <div class="arena-config-bar" id="arenaConfigBar" style="display: none; justify-content: center; background: rgba(0,0,0,0.4);">
-        <span style="font-family: var(--font-display); font-size: 0.85rem; font-weight: 700; color: var(--neon-cyan); display: flex; align-items: center; gap: 8px;">
-          <i class="fa-solid fa-columns"></i> DUAL SPLIT WORKSPACE • JALANKAN PROMPT BERSAMAAN ATAU INDEPENDEN
-        </span>
-      </div>
-
       <!-- CHAT VIEW CONTAINER -->
       <div class="chat-viewport" id="chatViewport">
         
@@ -255,77 +245,6 @@
               <span class="btn-text">Mulai Obrolan Baru</span>
               <span class="btn-badge"><i class="fa-solid fa-sparkles"></i> New Chat</span>
             </button>
-          </div>
-        </div>
-
-        <!-- DUAL SPLIT WORKSPACE WRAPPER (Shown only in Dual Split / Arena mode) -->
-        <div class="arena-messages-container" id="arenaChatContainer" style="display: none;">
-          <!-- LEFT COLUMN: OLLAMA LOCAL WORKSPACE -->
-          <div class="arena-column arena-col-left">
-            <div class="arena-col-header">
-              <div class="arena-header-left">
-                <span class="arena-col-badge tag-ollama"><i class="fa-solid fa-server"></i> Ollama Local</span>
-                <select id="arenaModelOllama" class="arena-select" title="Pilih Model Ollama"></select>
-              </div>
-              <div class="arena-header-right">
-                <span class="arena-col-stats" id="arenaStatsA">Ready</span>
-                <button class="icon-btn btn-sm" id="clearArenaChatABtn" title="Bersihkan Chat Ollama"><i class="fa-solid fa-trash-can"></i></button>
-              </div>
-            </div>
-            
-            <div class="arena-col-messages" id="arenaMessagesA">
-              <div class="arena-empty-placeholder">
-                <i class="fa-solid fa-robot"></i>
-                <p>Slot Ollama Local siap. Ketik prompt di bawah untuk menjalankan model offline.</p>
-              </div>
-            </div>
-
-            <!-- Dedicated Input Bar for Ollama -->
-            <div class="arena-col-input-bar">
-              <textarea id="arenaInputA" placeholder="Ketik pesan..." rows="1"></textarea>
-              <div class="arena-input-actions">
-                <button class="composer-btn stop-btn" id="arenaStopBtnA" style="display: none;" title="Hentikan Ollama">
-                  <i class="fa-solid fa-circle-stop"></i>
-                </button>
-                <button class="btn btn-sm btn-primary" id="arenaSendBtnA" title="Kirim ke Ollama">
-                  <i class="fa-solid fa-paper-plane"></i>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- RIGHT COLUMN: OPENROUTER CLOUD WORKSPACE -->
-          <div class="arena-column arena-col-right">
-            <div class="arena-col-header">
-              <div class="arena-header-left">
-                <span class="arena-col-badge tag-openrouter"><i class="fa-solid fa-cloud"></i> OpenRouter Cloud</span>
-                <select id="arenaModelOpenRouter" class="arena-select" title="Pilih Model OpenRouter"></select>
-              </div>
-              <div class="arena-header-right">
-                <span class="arena-col-stats" id="arenaStatsB">Ready</span>
-                <button class="icon-btn btn-sm" id="clearArenaChatBBtn" title="Bersihkan Chat OpenRouter"><i class="fa-solid fa-trash-can"></i></button>
-              </div>
-            </div>
-
-            <div class="arena-col-messages" id="arenaMessagesB">
-              <div class="arena-empty-placeholder">
-                <i class="fa-solid fa-bolt"></i>
-                <p>Slot OpenRouter Cloud siap. Ketik prompt di bawah untuk model flagship.</p>
-              </div>
-            </div>
-
-            <!-- Dedicated Input Bar for OpenRouter -->
-            <div class="arena-col-input-bar">
-              <textarea id="arenaInputB" placeholder="Ketik pesan..." rows="1"></textarea>
-              <div class="arena-input-actions">
-                <button class="composer-btn stop-btn" id="arenaStopBtnB" style="display: none;" title="Hentikan OpenRouter">
-                  <i class="fa-solid fa-circle-stop"></i>
-                </button>
-                <button class="btn btn-sm btn-primary" id="arenaSendBtnB" title="Kirim ke OpenRouter">
-                  <i class="fa-solid fa-paper-plane"></i>
-                </button>
-              </div>
-            </div>
           </div>
         </div>
 

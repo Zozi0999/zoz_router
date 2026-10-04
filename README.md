@@ -10,8 +10,8 @@
 
 - **🦙 Ollama Local Engine Gateway**: Deteksi otomatis seluruh model yang terpasang di Ollama dengan 1-klik refresh, penyesuaian endpoint custom, dan streaming chunked respons super cepat tanpa CORS issue.
 - **⚡ OpenRouter Cloud Gateway**: Akses ratusan model LLM terbaik dunia (termasuk model gratis / Free tier) dengan penyimpanan API Key lokal yang aman.
-- **⚔️ Dual Arena Comparison Mode**: Uji coba dan bandingkan jawaban Ollama Lokal vs OpenRouter Cloud secara **side-by-side (2-kolom)** dalam satu prompt bersamaan, lengkap dengan timer TTFT (*Time to First Token*) dan speedometer *Tokens Per Second (TPS)*!
 - **🔀 Smart Auto-Router**: Logika perutean cerdas (*Local-First* untuk privasi dan gratis, otomatis failover ke *OpenRouter Cloud* bila Ollama offline atau untuk tugas komputasi berat).
+- **🌐 Deep Web Research Engine**: Agen pencarian web mendalam dengan DuckDuckGo live scraping, parsing halaman, dan sintesis ringkasan multi-sumber otomatis.
 - **👁️ Multimodal Vision Support**: Unggah dan analisis gambar secara langsung untuk model vision seperti LLaVA, GPT-4o, dan Claude 3.5 Sonnet.
 - **🎙️ Voice Speech-to-Text & TTS Reader**: Input prompt menggunakan suara (Mic) dan dengarkan respons AI dengan tombol audio speaker.
 - **🎧 Cyber BGM Deck & Local Music Player**: Aktifkan musik latar belakang saat coding/chatting dengan fitur **Upload File Audio Lokal** (MP3, WAV, FLAC, OGG, M4A) yang tersimpan permanen di IndexedDB browser, visualizer spektrum audio neon real-time, kontrol pemutar musik mini di sidebar & full deck modal, serta 4 generator suara prosedural **Cyber Ambient Offline** (Deep Space 432Hz Drone, Synthwave Pulse, Neo-Tokyo Rain, & 10Hz Alpha Waves).
@@ -46,7 +46,7 @@ C:\Users\user\zoz-router\
 └── public\
     ├── index.html     # Struktur Antarmuka Cyberpunk UI
     ├── style.css      # Desain Visual Neural Void & Responsive Styling
-    ├── app.js         # Logika Client, Stream Parser, Arena, & Audio Synthesizer
+    ├── app.js         # Logika Client, Stream Parser, & Audio Synthesizer
     └── favicon.svg    # Icon Glowing Hexagon Zoz Router
 ```
 

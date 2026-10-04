@@ -77,13 +77,12 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
   // ==================== STATE MANAGEMENT ====================
   const STATE = {
-    mode: 'ollama', // 'ollama' | 'openrouter' | 'arena' | 'auto'
+    mode: 'ollama', // 'ollama' | 'openrouter' | 'auto'
     sessions: [],
     currentSessionId: null,
     activeSessionPerMode: {
       ollama: null,
       openrouter: null,
-      arena: null,
       auto: null
     },
     attachedImages: [], // Array of Base64 data URLs
@@ -111,8 +110,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       deepResearchFinalModel: '',
       ollamaModel: 'gemma4:31b',
       openRouterModel: 'deepseek/deepseek-r1:free',
-      arenaModelA: 'gemma4:31b',
-      arenaModelB: 'deepseek/deepseek-r1:free',
       temperature: 0.7,
       topP: 0.9,
       maxTokens: 8192,
@@ -203,9 +200,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     customModelInput: $('#customModelInput'),
     useCustomModelBtn: $('#useCustomModelBtn'),
     singleModelPickerWrap: $('#singleModelPickerWrap'),
-    arenaConfigBar: $('#arenaConfigBar'),
-    arenaModelOllama: $('#arenaModelOllama'),
-    arenaModelOpenRouter: $('#arenaModelOpenRouter'),
     
     // Status
     ollamaStatusVal: $('#ollamaStatusVal'),
@@ -221,19 +215,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     mainComposerContainer: $('#mainComposerContainer'),
     welcomeHero: $('#welcomeHero'),
     messagesList: $('#messagesList'),
-    arenaChatContainer: $('#arenaChatContainer'),
-    arenaMessagesA: $('#arenaMessagesA'),
-    arenaMessagesB: $('#arenaMessagesB'),
-    arenaStatsA: $('#arenaStatsA'),
-    arenaStatsB: $('#arenaStatsB'),
-    arenaInputA: $('#arenaInputA'),
-    arenaSendBtnA: $('#arenaSendBtnA'),
-    arenaStopBtnA: $('#arenaStopBtnA'),
-    clearArenaChatABtn: $('#clearArenaChatABtn'),
-    arenaInputB: $('#arenaInputB'),
-    arenaSendBtnB: $('#arenaSendBtnB'),
-    arenaStopBtnB: $('#arenaStopBtnB'),
-    clearArenaChatBBtn: $('#clearArenaChatBBtn'),
     
     // History & Navigation
     newChatBtn: $('#newChatBtn'),
@@ -1209,17 +1190,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     });
   }
 
-  function smartScrollArenaToBottom(container, force = false) {
-    if (!container) return;
-    if (force) {
-      userScrolledUp = false;
-      toggleScrollBottomBtn(false);
-    }
-    if (userScrolledUp && !force) return;
-    if (!isChatAtBottom(container, 25) && !force) return;
-    container.scrollTop = container.scrollHeight;
-  }
-
   function setupSmartScrolling() {
     if (!els.chatViewport) return;
 
@@ -1386,37 +1356,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       }
     }, { passive: true });
 
-    // Arena columns scroll tracking
-    [els.arenaMessagesA, els.arenaMessagesB].forEach(col => {
-      if (!col) return;
-      col.addEventListener('scroll', () => handleScrollEvent(col), { passive: true });
-      col.addEventListener('touchstart', (e) => {
-        if (e.touches && e.touches[0]) touchStartY = e.touches[0].clientY;
-      }, { passive: true });
-      col.addEventListener('touchmove', (e) => {
-        if (e.touches && e.touches[0]) {
-          const deltaY = touchStartY - e.touches[0].clientY;
-          if (deltaY < 0 || !isChatAtBottom(col, 25)) {
-            userScrolledUp = true;
-            toggleScrollBottomBtn(true);
-          }
-        }
-      }, { passive: true });
-      col.addEventListener('wheel', (e) => {
-        if (e.deltaY < 0) {
-          userScrolledUp = true;
-          toggleScrollBottomBtn(true);
-        }
-      }, { passive: true });
-    });
-
     els.scrollBottomBtn?.addEventListener('click', () => {
-      if (STATE.mode === 'arena') {
-        if (els.arenaMessagesA) els.arenaMessagesA.scrollTo({ top: els.arenaMessagesA.scrollHeight, behavior: 'smooth' });
-        if (els.arenaMessagesB) els.arenaMessagesB.scrollTo({ top: els.arenaMessagesB.scrollHeight, behavior: 'smooth' });
-      } else {
-        if (els.chatViewport) els.chatViewport.scrollTo({ top: els.chatViewport.scrollHeight, behavior: 'smooth' });
-      }
+      if (els.chatViewport) els.chatViewport.scrollTo({ top: els.chatViewport.scrollHeight, behavior: 'smooth' });
       userScrolledUp = false;
       toggleScrollBottomBtn(false);
       AudioEngine.click();
@@ -1670,7 +1611,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
     // If session has different mode, switch tab
     if (targetSession.mode && targetSession.mode !== STATE.mode) {
-      STATE.mode = targetSession.mode;
+      const safeMode = ['ollama', 'openrouter', 'auto'].includes(targetSession.mode) ? targetSession.mode : 'ollama';
+      STATE.mode = safeMode;
       els.modeTabs.forEach(tab => {
         tab.classList.toggle('active', tab.dataset.mode === STATE.mode);
       });
@@ -1904,10 +1846,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         modeIcon = 'fa-bolt';
         modeColor = 'var(--neon-amber)';
         modeTag = 'OpenRouter';
-      } else if (session.mode === 'arena') {
-        modeIcon = 'fa-scale-balanced';
-        modeColor = 'var(--neon-pink, #ff0055)';
-        modeTag = 'Arena';
       } else if (session.mode === 'auto') {
         modeIcon = 'fa-route';
         modeColor = 'var(--neon-teal)';
@@ -2009,50 +1947,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
   }
 
   function renderCurrentSession() {
-    if (STATE.mode === 'arena') {
-      els.welcomeHero.style.display = 'none';
-      els.arenaMessagesA.innerHTML = '';
-      els.arenaMessagesB.innerHTML = '';
-
-      let session = STATE.currentSessionId ? STATE.sessions.find(s => s.id === STATE.currentSessionId && s.mode === 'arena') : null;
-      if (!session) {
-        session = STATE.sessions.find(s => s.mode === 'arena');
-      }
-
-      const messagesA = (session?.messages || []).filter(m => m.slot === 'A' || m.engine === 'ollama');
-      const messagesB = (session?.messages || []).filter(m => m.slot === 'B' || m.engine === 'openrouter');
-
-      if (messagesA.length === 0) {
-        els.arenaMessagesA.innerHTML = `
-          <div class="arena-empty-placeholder">
-            <i class="fa-solid fa-robot"></i>
-            <p>Slot Ollama Local siap. Ketik prompt di bawah untuk menjalankan model offline.</p>
-          </div>
-        `;
-      } else {
-        messagesA.forEach((msg, idx) => {
-          appendArenaBubbleToColumn(els.arenaMessagesA, msg.role, msg.content, msg.model || 'Ollama', msg.stats, 'A', idx);
-        });
-      }
-
-      if (messagesB.length === 0) {
-        els.arenaMessagesB.innerHTML = `
-          <div class="arena-empty-placeholder">
-            <i class="fa-solid fa-bolt"></i>
-            <p>Slot OpenRouter Cloud siap. Ketik prompt di bawah untuk model flagship.</p>
-          </div>
-        `;
-      } else {
-        messagesB.forEach((msg, idx) => {
-          appendArenaBubbleToColumn(els.arenaMessagesB, msg.role, msg.content, msg.model || 'OpenRouter', msg.stats, 'B', idx);
-        });
-      }
-
-      smartScrollArenaToBottom(els.arenaMessagesA, true);
-      smartScrollArenaToBottom(els.arenaMessagesB, true);
-      return;
-    }
-
     // If no session is actively selected -> Land on TAMPILAN UTAMA (Welcome Hero)!
     if (!STATE.currentSessionId) {
       els.welcomeHero.style.display = 'flex';
@@ -2094,44 +1988,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
     enhanceCodeBlocks(els.messagesList);
     smartScrollChatToBottom(true);
-  }
-
-  function appendArenaBubbleToColumn(container, role, content, model = '', stats = null, slot = 'A', idx = -1) {
-    const bubble = document.createElement('div');
-    bubble.className = `message-row ${role}`;
-    bubble.style.marginBottom = '10px';
-    bubble.dataset.slot = slot;
-    bubble.dataset.index = idx;
-
-    const avatar = role === 'user' ? '<i class="fa-solid fa-user-ninja"></i>' : '<i class="fa-solid fa-microchip-ai"></i>';
-    const roleLabel = role === 'user' ? 'Anda' : (model || 'AI');
-    const renderedBody = role === 'assistant' ? renderMarkdown(content) : escapeHtml(content).replace(/\n/g, '<br>');
-    const statsHtml = stats ? `<span style="font-size:0.68rem; color:var(--neon-teal); font-family:var(--font-code);">⏱️ ${stats.duration}s • ⚡ ${stats.tps} tps</span>` : '';
-
-    bubble.innerHTML = `
-      <div class="message-avatar" style="width:28px; height:28px; font-size:0.75rem;">${avatar}</div>
-      <div class="message-content-box" style="max-width:88%;">
-        <div class="message-meta" style="font-size:0.68rem;">
-          <strong>${roleLabel}</strong>
-          ${statsHtml}
-        </div>
-        <div class="message-bubble" style="padding:8px 12px; font-size:0.85rem;">
-          <div class="msg-text-content">${renderedBody}</div>
-        </div>
-        <div class="message-actions-bar">
-          <button class="msg-action-btn copy-msg-btn" title="Salin Pesan"><i class="fa-solid fa-copy"></i> Salin</button>
-        </div>
-      </div>
-    `;
-
-    enhanceCodeBlocks(bubble);
-
-    bubble.querySelector('.copy-msg-btn')?.addEventListener('click', () => {
-      copyTextToClipboard(content, null, 'Pesan disalin!');
-    });
-
-    container.appendChild(bubble);
-    return bubble;
   }
 
   function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1, sources = null, docs = null, isDeepResearch = false, latency = null) {
@@ -2347,35 +2203,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
     els.messagesList.appendChild(row);
     return row;
-  }
-
-  function appendMessageToArena(target, content, image = null, model = '', stats = null) {
-    const isUser = target === 'user';
-    const container = isUser ? null : (target === 'assistant-a' ? els.arenaMessagesA : els.arenaMessagesB);
-    
-    if (isUser) {
-      // Append to both arena columns
-      appendSingleArenaBubble(els.arenaMessagesA, 'user', content, image, 'User');
-      appendSingleArenaBubble(els.arenaMessagesB, 'user', content, image, 'User');
-    } else if (container) {
-      appendSingleArenaBubble(container, 'assistant', content, image, model, stats);
-    }
-  }
-
-  function appendSingleArenaBubble(container, role, content, image = null, model = '', stats = null) {
-    const bubble = document.createElement('div');
-    bubble.className = `message-bubble ${role === 'user' ? 'arena-user' : 'arena-bot'}`;
-    bubble.style.marginBottom = '10px';
-    bubble.style.fontSize = '0.85rem';
-    
-    let rendered = role === 'assistant' ? renderMarkdown(content) : escapeHtml(content).replace(/\n/g, '<br>');
-    let statsBadge = stats ? `<div style="font-size:0.7rem; color:var(--neon-teal); margin-bottom:4px;">[${model} • ${stats.duration}s • ${stats.tps} tps]</div>` : '';
-    
-    bubble.innerHTML = `${statsBadge}<div>${rendered}</div>`;
-    
-    enhanceCodeBlocks(bubble);
-
-    container.appendChild(bubble);
   }
 
   // ==================== DOCUMENT & FILE ATTACHMENT HANDLER ====================
@@ -2922,17 +2749,12 @@ ${organicBlock}
           STATE.settings.ollamaModel = modelNames[0];
           savePersistedState();
         }
-        if (!modelNames.includes(STATE.settings.arenaModelA)) {
-          STATE.settings.arenaModelA = modelNames[0];
-          savePersistedState();
-        }
 
         if (els.badgeOllamaCount) {
           els.badgeOllamaCount.innerText = rawModels.length;
         }
         updateModelUI();
         populateModelDropdown();
-        populateArenaDropdowns();
         populateDeepResearchModelPickers();
         renderModelHubGrid();
         if (STATE.activeCatalogTab === 'ollama') {
@@ -2945,7 +2767,6 @@ ${organicBlock}
         els.ollamaStatusVal.innerText = 'Offline (Cek Ollama)';
         els.ollamaIndicator.className = 'status-indicator error';
         populateModelDropdown();
-        populateArenaDropdowns();
         populateDeepResearchModelPickers();
         renderModelHubGrid();
         if (STATE.activeCatalogTab === 'ollama') {
@@ -2995,7 +2816,6 @@ ${organicBlock}
             els.badgeOpenRouterCount.innerText = mapped.length;
           }
           populateModelDropdown();
-          populateArenaDropdowns();
           populateDeepResearchModelPickers();
           renderModelHubGrid();
           if (STATE.activeCatalogTab === 'openrouter') {
@@ -3103,40 +2923,11 @@ ${organicBlock}
     });
   }
 
-  function populateArenaDropdowns() {
-    // Left (Ollama)
-    els.arenaModelOllama.innerHTML = '';
-    let ollamaList = [];
-    if (STATE.ollamaModels && STATE.ollamaModels.length > 0) {
-      ollamaList = STATE.ollamaModels.map(m => m.name || m.model || m.id);
-    } else if (STATE.settings.arenaModelA) {
-      ollamaList = [STATE.settings.arenaModelA];
-    }
-    
-    ollamaList.forEach(m => {
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.innerText = m;
-      if (m === STATE.settings.arenaModelA) opt.selected = true;
-      els.arenaModelOllama.appendChild(opt);
-    });
-
-    // Right (OpenRouter)
-    els.arenaModelOpenRouter.innerHTML = '';
-    STATE.openRouterModels.forEach(m => {
-      const opt = document.createElement('option');
-      opt.value = m.id;
-      opt.innerText = `${m.name} [${m.tag}]`;
-      if (m.id === STATE.settings.arenaModelB) opt.selected = true;
-      els.arenaModelOpenRouter.appendChild(opt);
-    });
-  }
-
   function getCurrentModel() {
     if (STATE.mode === 'ollama') return STATE.settings.ollamaModel;
     if (STATE.mode === 'openrouter') return STATE.settings.openRouterModel;
     if (STATE.mode === 'auto') return `Auto (${STATE.settings.ollamaModel} ➔ ${STATE.settings.openRouterModel})`;
-    return 'Dual Arena Active';
+    return STATE.settings.ollamaModel || 'Default';
   }
 
   function selectModel(modelId) {
@@ -3158,17 +2949,8 @@ ${organicBlock}
   }
 
   function updateModeLayout(mode) {
-    if (mode === 'arena') {
-      els.singleModelPickerWrap.style.display = 'none';
-      els.arenaConfigBar.style.display = 'flex';
-      els.singleChatContainer.style.display = 'none';
-      els.arenaChatContainer.style.display = 'grid';
-    } else {
-      els.singleModelPickerWrap.style.display = 'block';
-      els.arenaConfigBar.style.display = 'none';
-      els.singleChatContainer.style.display = 'flex';
-      els.arenaChatContainer.style.display = 'none';
-    }
+    if (els.singleModelPickerWrap) els.singleModelPickerWrap.style.display = 'block';
+    if (els.singleChatContainer) els.singleChatContainer.style.display = 'flex';
   }
 
   // ==================== MODE SWITCHING ====================
@@ -3243,11 +3025,9 @@ ${organicBlock}
     session.messages.push(userMsg);
     savePersistedState();
 
-    // Immediately render user's message bubble in single mode
-    if (STATE.mode !== 'arena') {
-      appendMessageElement('user', rawText, images, 'Anda', null, session.messages.length - 1, null, docsMeta);
-      smartScrollChatToBottom(true);
-    }
+    // Immediately render user's message bubble
+    appendMessageElement('user', rawText, images, 'Anda', null, session.messages.length - 1, null, docsMeta);
+    smartScrollChatToBottom(true);
 
     // Reset input & attachments
     els.promptInput.value = '';
@@ -3257,7 +3037,7 @@ ${organicBlock}
     renderAttachmentPreviews();
     AudioEngine.send();
 
-    if (STATE.isDeepResearch && STATE.mode !== 'arena') {
+    if (STATE.isDeepResearch) {
       const activeEngine = (STATE.mode === 'auto')
         ? (STATE.settings.autoPolicy === 'cloud_first' ? 'openrouter' : 'ollama')
         : STATE.mode;
@@ -3265,8 +3045,6 @@ ${organicBlock}
         ? STATE.settings.openRouterModel
         : STATE.settings.ollamaModel;
       await runDeepResearchStreaming(session, text, images, activeModel, activeEngine);
-    } else if (STATE.mode === 'arena') {
-      await runArenaStreaming(session, text, images);
     } else if (STATE.mode === 'auto') {
       await runAutoRouterStreaming(session, text, images);
     } else if (STATE.mode === 'openrouter') {
@@ -3894,395 +3672,6 @@ ${organicBlock}
     }
   }
 
-  // --- INDEPENDENT DUAL SPLIT WORKSPACE STREAMING ---
-  async function sendArenaPromptA(customText = null) {
-    const text = customText || (els.arenaInputA ? els.arenaInputA.value.trim() : '');
-    if (!text || STATE.isGeneratingA) return;
-
-    const session = getActiveSession('arena');
-    const modelA = (els.arenaModelOllama ? els.arenaModelOllama.value : null) || STATE.settings.arenaModelA;
-
-    // Clear empty placeholder
-    els.arenaMessagesA.querySelector('.arena-empty-placeholder')?.remove();
-
-    // Append user message to Slot A
-    appendArenaBubbleToColumn(els.arenaMessagesA, 'user', text, 'Anda', null, 'A');
-    session.messages.push({ role: 'user', content: text, slot: 'A', engine: 'ollama', timestamp: new Date().toISOString() });
-    savePersistedState();
-
-    if (els.arenaInputA) els.arenaInputA.value = '';
-    STATE.isGeneratingA = true;
-    if (els.arenaSendBtnA) els.arenaSendBtnA.style.display = 'none';
-    if (els.arenaStopBtnA) els.arenaStopBtnA.style.display = 'flex';
-    STATE.abortControllerA = new AbortController();
-
-    if (els.arenaStatsA) els.arenaStatsA.innerText = 'Menghasilkan...';
-    const assistantRow = appendArenaBubbleToColumn(els.arenaMessagesA, 'assistant', '', modelA, null, 'A');
-    const bubbleText = assistantRow.querySelector('.msg-text-content');
-    bubbleText.innerHTML = '<span class="typing-cursor"></span>';
-    smartScrollArenaToBottom(els.arenaMessagesA, true);
-
-    const start = performance.now();
-    let fullText = '';
-    let tokens = 0;
-    let webSources = null;
-    let streamRenderer = null;
-
-    try {
-      let systemContent = STATE.settings.systemPrompt || '';
-
-      if (STATE.webSearchEnabled) {
-        const webRes = await getWebSearchContext(text, session, bubbleText);
-        if (webRes && webRes.systemPromptContext) {
-          systemContent = systemContent ? `${systemContent}\n\n${webRes.systemPromptContext}` : webRes.systemPromptContext;
-          webSources = webRes.sources;
-        }
-        bubbleText.innerHTML = '<span class="typing-cursor"></span>';
-      }
-
-      const messagesA = session.messages.filter(m => m.slot === 'A');
-      const messagesPayload = buildSanitizedMessagesPayload(messagesA, [], 'ollama', systemContent);
-
-      const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
-      const headers = { 'Content-Type': 'application/json' };
-      if (STATE.settings.ollamaApiKey) {
-        headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
-        headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
-      }
-
-      const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
-
-      const res = await fetch(chatUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: modelA,
-          messages: messagesPayload,
-          stream: true,
-          endpoint: ep,
-          ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {})
-        }),
-        signal: STATE.abortControllerA.signal
-      });
-
-      if (!res.ok) {
-        let errDetail = `HTTP ${res.status}`;
-        try {
-          const errData = await res.json();
-          if (errData && errData.error) {
-            errDetail = typeof errData.error === 'object' ? (errData.error.message || JSON.stringify(errData.error)) : errData.error;
-          }
-        } catch (je) {
-          try {
-            const raw = await res.text();
-            if (raw) errDetail = raw.substring(0, 200);
-          } catch (te) {}
-        }
-        throw new Error(errDetail);
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollArenaToBottom(els.arenaMessagesA, false));
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop();
-        for (const l of lines) {
-          if (!l.trim()) continue;
-          let p;
-          try {
-            p = JSON.parse(l);
-          } catch (pe) {
-            continue;
-          }
-          if (p.error) {
-            const errStr = typeof p.error === 'object' ? (p.error.message || JSON.stringify(p.error)) : p.error;
-            throw new Error(errStr);
-          }
-          if (p.message?.content) {
-            tokens++;
-            streamRenderer.append(p.message.content);
-          }
-        }
-      }
-
-      fullText = streamRenderer.finish();
-      if (!fullText.trim() && !STATE.abortControllerA?.signal.aborted) {
-        throw new Error('Slot A (Ollama) menyelesaikan koneksi tanpa respon teks.');
-      }
-      enhanceCodeBlocks(bubbleText);
-
-      const totalTime = ((performance.now() - start) / 1000).toFixed(2);
-      const tps = totalTime > 0 ? (tokens / totalTime).toFixed(1) : '0';
-      if (webSources && webSources.length > 0) {
-        renderMessageSources(assistantRow, webSources);
-      }
-      if (els.arenaStatsA) els.arenaStatsA.innerText = `⏱️ ${totalTime}s • ⚡ ${tps} tps`;
-
-      session.messages.push({
-        role: 'assistant',
-        content: fullText,
-        model: modelA,
-        slot: 'A',
-        engine: 'ollama',
-        sources: webSources,
-        stats: { duration: totalTime, tps, tokens },
-        timestamp: new Date().toISOString()
-      });
-      savePersistedState();
-      AudioEngine.receive();
-    } catch (e) {
-      if (e.name === 'AbortError') {
-        const partialText = streamRenderer ? streamRenderer.finish() : '';
-        if (partialText && partialText.trim()) {
-          const stoppedText = `${partialText.trim()}\n\n*[Respons dihentikan oleh pengguna]*`;
-          bubbleText.innerHTML = renderMarkdown(stoppedText);
-          enhanceCodeBlocks(bubbleText);
-          if (webSources && webSources.length > 0) {
-            renderMessageSources(assistantRow, webSources);
-          }
-          const totalTime = ((performance.now() - start) / 1000).toFixed(2);
-          if (els.arenaStatsA) els.arenaStatsA.innerText = `⏱️ ${totalTime}s (Dihentikan)`;
-          session.messages.push({
-            role: 'assistant',
-            content: stoppedText,
-            model: modelA,
-            slot: 'A',
-            engine: 'ollama',
-            sources: webSources,
-            stats: { duration: totalTime, tokens, stopped: true },
-            timestamp: new Date().toISOString()
-          });
-          savePersistedState();
-        } else {
-          assistantRow.remove();
-        }
-        showToast('Ollama Slot A dihentikan.');
-      } else {
-        const errorHtml = formatModelErrorMessage('ollama', modelA, e, false, STATE.webSearchEnabled);
-        bubbleText.innerHTML = errorHtml;
-        if (els.arenaStatsA) els.arenaStatsA.innerText = 'Peringatan';
-        AudioEngine.error();
-      }
-    } finally {
-      STATE.isGeneratingA = false;
-      if (els.arenaSendBtnA) els.arenaSendBtnA.style.display = 'flex';
-      if (els.arenaStopBtnA) els.arenaStopBtnA.style.display = 'none';
-    }
-  }
-
-  async function sendArenaPromptB(customText = null) {
-    const text = customText || (els.arenaInputB ? els.arenaInputB.value.trim() : '');
-    if (!text || STATE.isGeneratingB) return;
-
-    if (!STATE.settings.openRouterKey) {
-      showToast('OpenRouter API Key diperlukan untuk Slot B! Buka Pengaturan.', 'error');
-      openModal('settingsModal');
-      return;
-    }
-
-    const session = getActiveSession('arena');
-    const modelB = (els.arenaModelOpenRouter ? els.arenaModelOpenRouter.value : null) || STATE.settings.arenaModelB;
-
-    // Clear empty placeholder
-    els.arenaMessagesB.querySelector('.arena-empty-placeholder')?.remove();
-
-    // Append user message to Slot B
-    appendArenaBubbleToColumn(els.arenaMessagesB, 'user', text, 'Anda', null, 'B');
-    session.messages.push({ role: 'user', content: text, slot: 'B', engine: 'openrouter', timestamp: new Date().toISOString() });
-    savePersistedState();
-
-    if (els.arenaInputB) els.arenaInputB.value = '';
-    STATE.isGeneratingB = true;
-    if (els.arenaSendBtnB) els.arenaSendBtnB.style.display = 'none';
-    if (els.arenaStopBtnB) els.arenaStopBtnB.style.display = 'flex';
-    STATE.abortControllerB = new AbortController();
-
-    if (els.arenaStatsB) els.arenaStatsB.innerText = 'Menghasilkan...';
-    const assistantRow = appendArenaBubbleToColumn(els.arenaMessagesB, 'assistant', '', modelB, null, 'B');
-    const bubbleText = assistantRow.querySelector('.msg-text-content');
-    bubbleText.innerHTML = '<span class="typing-cursor"></span>';
-    smartScrollArenaToBottom(els.arenaMessagesB, true);
-
-    const start = performance.now();
-    let fullText = '';
-    let tokens = 0;
-    let webSources = null;
-    let streamRenderer = null;
-
-    try {
-      let systemContent = STATE.settings.systemPrompt || '';
-
-      if (STATE.webSearchEnabled) {
-        const webRes = await getWebSearchContext(text, session, bubbleText);
-        if (webRes && webRes.systemPromptContext) {
-          systemContent = systemContent ? `${systemContent}\n\n${webRes.systemPromptContext}` : webRes.systemPromptContext;
-          webSources = webRes.sources;
-        }
-        bubbleText.innerHTML = '<span class="typing-cursor"></span>';
-      }
-
-      const messagesB = session.messages.filter(m => m.slot === 'B');
-      const messagesPayload = buildSanitizedMessagesPayload(messagesB, [], 'openrouter', systemContent);
-
-      const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
-      const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
-      const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${STATE.settings.openRouterKey}`
-      };
-      if (isOpenRouterDirect) {
-        headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
-        headers['X-Title'] = 'ZOZ Router';
-      }
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: modelB,
-          messages: messagesPayload,
-          stream: true,
-          apiKey: isOpenRouterDirect ? undefined : STATE.settings.openRouterKey
-        }),
-        signal: STATE.abortControllerB.signal
-      });
-
-      if (!res.ok) {
-        let errDetail = `HTTP ${res.status}`;
-        try {
-          const errJson = await res.json();
-          if (errJson && errJson.error) {
-            errDetail = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
-          }
-        } catch (je) {
-          try {
-            const raw = await res.text();
-            if (raw) errDetail = raw.substring(0, 200);
-          } catch (te) {}
-        }
-        throw new Error(errDetail);
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollArenaToBottom(els.arenaMessagesB, false));
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop();
-        for (const l of lines) {
-          if (!l.trim() || !l.startsWith('data:')) continue;
-          const jsonStr = l.replace(/^data:\s*/, '');
-          if (jsonStr === '[DONE]') break;
-          let p;
-          try {
-            p = JSON.parse(jsonStr);
-          } catch (pe) {
-            continue;
-          }
-          if (p.error) {
-            const errStr = typeof p.error === 'object' ? (p.error.message || JSON.stringify(p.error)) : p.error;
-            throw new Error(errStr);
-          }
-          const delta = p.choices?.[0]?.delta?.content;
-          if (delta) {
-            tokens++;
-            streamRenderer.append(delta);
-          }
-        }
-      }
-
-      fullText = streamRenderer.finish();
-      if (!fullText.trim() && !STATE.abortControllerB?.signal.aborted) {
-        throw new Error('Slot B (OpenRouter) menyelesaikan koneksi tanpa respon teks.');
-      }
-      enhanceCodeBlocks(bubbleText);
-
-      const totalTime = ((performance.now() - start) / 1000).toFixed(2);
-      const tps = totalTime > 0 ? (tokens / totalTime).toFixed(1) : '0';
-      if (webSources && webSources.length > 0) {
-        renderMessageSources(assistantRow, webSources);
-      }
-      if (els.arenaStatsB) els.arenaStatsB.innerText = `⏱️ ${totalTime}s • ⚡ ${tps} tps`;
-
-      session.messages.push({
-        role: 'assistant',
-        content: fullText,
-        model: modelB,
-        slot: 'B',
-        engine: 'openrouter',
-        sources: webSources,
-        stats: { duration: totalTime, tps, tokens },
-        timestamp: new Date().toISOString()
-      });
-      savePersistedState();
-      AudioEngine.receive();
-    } catch (e) {
-      if (e.name === 'AbortError') {
-        const partialText = streamRenderer ? streamRenderer.finish() : '';
-        if (partialText && partialText.trim()) {
-          const stoppedText = `${partialText.trim()}\n\n*[Respons dihentikan oleh pengguna]*`;
-          bubbleText.innerHTML = renderMarkdown(stoppedText);
-          enhanceCodeBlocks(bubbleText);
-          if (webSources && webSources.length > 0) {
-            renderMessageSources(assistantRow, webSources);
-          }
-          const totalTime = ((performance.now() - start) / 1000).toFixed(2);
-          if (els.arenaStatsB) els.arenaStatsB.innerText = `⏱️ ${totalTime}s (Dihentikan)`;
-          session.messages.push({
-            role: 'assistant',
-            content: stoppedText,
-            model: modelB,
-            slot: 'B',
-            engine: 'openrouter',
-            sources: webSources,
-            stats: { duration: totalTime, tokens, stopped: true },
-            timestamp: new Date().toISOString()
-          });
-          savePersistedState();
-        } else {
-          assistantRow.remove();
-        }
-        showToast('OpenRouter Slot B dihentikan.');
-      } else {
-        const errorHtml = formatModelErrorMessage('openrouter', modelB, e, false, STATE.webSearchEnabled);
-        bubbleText.innerHTML = errorHtml;
-        if (els.arenaStatsB) els.arenaStatsB.innerText = 'Peringatan';
-        AudioEngine.error();
-      }
-    } finally {
-      STATE.isGeneratingB = false;
-      if (els.arenaSendBtnB) els.arenaSendBtnB.style.display = 'flex';
-      if (els.arenaStopBtnB) els.arenaStopBtnB.style.display = 'none';
-    }
-  }
-
-  // --- DUAL ARENA SIMULTANEOUS STREAMING ---
-  async function runArenaStreaming(session, promptText, images = []) {
-    setGeneratingState(true);
-    STATE.abortController = new AbortController();
-    try {
-      await Promise.allSettled([
-        sendArenaPromptA(promptText),
-        sendArenaPromptB(promptText)
-      ]);
-    } catch (err) {
-      console.warn('Dual Arena streaming error:', err);
-    } finally {
-      setGeneratingState(false);
-    }
-  }
-
   // --- AUTO ROUTER (SMART ROUTING) ---
   async function runAutoRouterStreaming(session, promptText, image) {
     // Check if Ollama is online
@@ -4320,14 +3709,6 @@ ${organicBlock}
     if (STATE.abortController) {
       STATE.abortController.abort();
       STATE.abortController = null;
-    }
-    if (STATE.abortControllerA) {
-      STATE.abortControllerA.abort();
-      STATE.abortControllerA = null;
-    }
-    if (STATE.abortControllerB) {
-      STATE.abortControllerB.abort();
-      STATE.abortControllerB = null;
     }
     setGeneratingState(false);
   }
@@ -7320,64 +6701,6 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       });
     });
 
-    // Arena Select Changes & Split Workspace Listeners
-    els.arenaModelOllama?.addEventListener('change', (e) => {
-      STATE.settings.arenaModelA = e.target.value;
-      savePersistedState();
-    });
-    els.arenaModelOpenRouter?.addEventListener('change', (e) => {
-      STATE.settings.arenaModelB = e.target.value;
-      savePersistedState();
-    });
-
-    // Arena Slot A (Ollama Local) Listeners
-    els.arenaSendBtnA?.addEventListener('click', () => sendArenaPromptA());
-    els.arenaStopBtnA?.addEventListener('click', () => {
-      if (STATE.abortControllerA) {
-        STATE.abortControllerA.abort();
-        STATE.abortControllerA = null;
-      }
-    });
-    els.arenaInputA?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendArenaPromptA();
-      }
-    });
-    els.arenaInputA?.addEventListener('input', () => autoResizeTextarea(els.arenaInputA));
-    els.clearArenaChatABtn?.addEventListener('click', () => {
-      const session = getActiveSession('arena');
-      session.messages = session.messages.filter(m => m.slot !== 'A');
-      savePersistedState();
-      renderCurrentSession();
-      showToast('Chat Ollama (Slot A) dibersihkan.');
-      AudioEngine.click();
-    });
-
-    // Arena Slot B (OpenRouter Cloud) Listeners
-    els.arenaSendBtnB?.addEventListener('click', () => sendArenaPromptB());
-    els.arenaStopBtnB?.addEventListener('click', () => {
-      if (STATE.abortControllerB) {
-        STATE.abortControllerB.abort();
-        STATE.abortControllerB = null;
-      }
-    });
-    els.arenaInputB?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendArenaPromptB();
-      }
-    });
-    els.arenaInputB?.addEventListener('input', () => autoResizeTextarea(els.arenaInputB));
-    els.clearArenaChatBBtn?.addEventListener('click', () => {
-      const session = getActiveSession('arena');
-      session.messages = session.messages.filter(m => m.slot !== 'B');
-      savePersistedState();
-      renderCurrentSession();
-      showToast('Chat OpenRouter (Slot B) dibersihkan.');
-      AudioEngine.click();
-    });
-
     // Quick Hero Prompts
     $$('.quick-prompt-card').forEach(card => {
       card.addEventListener('click', () => {
@@ -7958,7 +7281,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     }
 
     // Auto-scroll on textarea focus for all inputs
-    const inputs = [els.promptInput, els.arenaInputA, els.arenaInputB, els.modelSearchInput, els.customModelInput];
+    const inputs = [els.promptInput, els.modelSearchInput, els.customModelInput];
     inputs.forEach(input => {
       if (!input) return;
       input.addEventListener('focus', () => {
@@ -7966,12 +7289,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
           if (window.visualViewport && appContainer) {
             appContainer.style.height = `${window.visualViewport.height}px`;
           }
-          if (STATE.mode === 'arena') {
-            smartScrollArenaToBottom(els.arenaMessagesA, true);
-            smartScrollArenaToBottom(els.arenaMessagesB, true);
-          } else {
-            smartScrollChatToBottom(true);
-          }
+          smartScrollChatToBottom(true);
         }, 120);
       });
       input.addEventListener('blur', () => {
