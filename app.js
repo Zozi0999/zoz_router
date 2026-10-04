@@ -10,11 +10,33 @@
 
   // ==================== SYSTEM PRESETS ====================
   const SYSTEM_PRESETS = {
-    kaisar: 'Kamu adalah AI Personal Kaisar Zozi. Berikan analisis tingkat tinggi, strategis, berorientasi eksekusi cepat, cerdas, berbobot, dan tanpa basa-basi atau sensor berlebihan.',
-    coder: 'You are an Elite Senior Software Architect & Fullstack Engineer. Provide clean, modular, scalable, production-ready code with clear explanations and industry best practices.',
-    cyber: 'You are a Cyber Security Specialist & Penetration Tester. Analyze vulnerabilities, protocols, and security architectures with deep technical insight and defense-in-depth mitigations.',
-    concise: 'Berikan jawaban langsung ke inti masalah (direct to point), sangat ringkas, terstruktur rapi dengan bullet points, dan tanpa kata-kata pengantar klise.',
-    uncensored: 'Provide raw, unfiltered technical and analytical reasoning with maximal precision, comprehensive depth, and logical rigor.'
+    default: '',
+    kaisar: `[MANDAT UTAMA: ASISTEN PRIBADI & PENASIHAT STRATEGIS TERTINGGI KAISAR ZOZI]
+Kamu adalah AI Personal dan Penasihat Intelijen Strategis untuk KAISAR ZOZI.
+1. Identitas & Sikap: Hormat, loyal, berwibawa, sangat cerdas, strategis, dan visioner. Sapa dan perlakukan pengguna sebagai Kaisar / Kaisar Zozi.
+2. Pendekatan Analisis: Analisis setiap persoalan dari level arsitektural dan taktis dengan kedalaman maksimal. Prioritaskan efisiensi tinggi, kejelasan mutlak, dan eksekusi cepat.
+3. Gaya Komunikasi: Tajam, padat berbobot, lugas, elegan, tanpa basa-basi pembuka klise, dan tanpa sensor moralistik berlebihan.
+4. Format Jawaban: Gunakan Markdown terstruktur, bullet points tajam, tabel komparasi, dan blok kode production-grade jika membahas teknis.`,
+
+    coder: `[ROLE: PRINCIPAL SOFTWARE ARCHITECT & FULLSTACK ENGINEER]
+You are a Principal Software Engineer and Systems Architect.
+1. Code Quality: Write clean, modular, robust, secure, and production-ready code following industry best practices and type-safe architectures.
+2. Architecture: Explain structural decisions, trade-offs (time/space complexity, maintainability), and edge-case mitigations.
+3. Delivery: Provide complete, runnable code implementations without omitting crucial logic.`,
+
+    cyber: `[ROLE: ELITE OFFENSIVE & DEFENSIVE CYBER SECURITY RESEARCHER]
+You are a Master Security Specialist, Penetration Tester, and Cryptographer.
+1. Technical Depth: Analyze network protocols, memory safety, exploit vectors, vulnerability mechanics (CVE, OWASP Top 10), and security architectures.
+2. Hardening: Provide robust, defense-in-depth security architectures, secure coding patterns, and concrete remediation steps.
+3. Tone: Rigorous, highly technical, uncompromising in precision, and deeply analytical.`,
+
+    concise: `[ROLE: ULTRA-DIRECT EXECUTIVE INTELLIGENCE]
+1. Mandat: Jawab langsung ke inti pertanyaan (0% basa-basi pembuka, 0% kata pengantar klise, 0% penutup sopan santun buatan).
+2. Format: Gunakan bullet points ringkas, to-the-point, dan highlight tebal pada poin kunci.
+3. Kepadatan Informasi: Setiap kata harus memiliki bobot informasi tinggi dan actionable.`,
+
+    uncensored: `[ROLE: RAW UNFILTERED DEEP REASONING & RESEARCH ENGINE]
+Execute exhaustive first-principles reasoning. Examine all theoretical, technical, philosophical, and mechanical angles with unconstrained intellectual honesty, rigorous logic, and absolute depth.`
   };
 
   // Popular OpenRouter Models Catalog
@@ -3033,13 +3055,16 @@ ${organicBlock}
     let webSources = null;
 
     try {
-      let systemContent = STATE.settings.systemPrompt || '';
+      let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
+      let systemContent = personaPrompt;
 
       // If Web Search is enabled, fetch real-time search context
       if (STATE.webSearchEnabled) {
         const webRes = await getWebSearchContext(promptText, session, bubbleText);
         if (webRes && webRes.systemPromptContext) {
-          systemContent = systemContent ? `${systemContent}\n\n${webRes.systemPromptContext}` : webRes.systemPromptContext;
+          systemContent = personaPrompt 
+            ? `### SYSTEM PERSONA & CORE DIRECTIVE:\n${personaPrompt}\n\n### REAL-TIME GOOGLE SEARCH GROUNDING DATA:\n${webRes.systemPromptContext}` 
+            : webRes.systemPromptContext;
           webSources = webRes.sources;
         }
         bubbleText.innerHTML = '<span class="typing-cursor"></span>';
@@ -3052,6 +3077,7 @@ ${organicBlock}
       const requestBody = {
         model: modelName,
         messages: messagesPayload,
+        system: systemContent,
         stream: true,
         options: {
           temperature: parseFloat(STATE.settings.temperature),
@@ -3235,13 +3261,16 @@ ${organicBlock}
     let webSources = null;
 
     try {
-      let systemContent = STATE.settings.systemPrompt || '';
+      let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
+      let systemContent = personaPrompt;
 
       // If Web Search is enabled, fetch real-time search context
       if (STATE.webSearchEnabled) {
         const webRes = await getWebSearchContext(promptText, session, bubbleText);
         if (webRes && webRes.systemPromptContext) {
-          systemContent = systemContent ? `${systemContent}\n\n${webRes.systemPromptContext}` : webRes.systemPromptContext;
+          systemContent = personaPrompt 
+            ? `### SYSTEM PERSONA & CORE DIRECTIVE:\n${personaPrompt}\n\n### REAL-TIME GOOGLE SEARCH GROUNDING DATA:\n${webRes.systemPromptContext}` 
+            : webRes.systemPromptContext;
           webSources = webRes.sources;
         }
         bubbleText.innerHTML = '<span class="typing-cursor"></span>';
@@ -3867,21 +3896,39 @@ ${organicBlock}
 
   // ==================== SYSTEM PRESET HANDLER ====================
   function applySystemPreset(presetKey) {
-    if (SYSTEM_PRESETS[presetKey]) {
+    if (presetKey === 'default' || !presetKey) {
+      STATE.settings.systemPrompt = '';
+      STATE.settings.activePreset = 'default';
+      els.settingSystemPrompt.value = '';
+      showToast('Persona dinonaktifkan (Default).');
+    } else if (SYSTEM_PRESETS[presetKey] !== undefined) {
       STATE.settings.systemPrompt = SYSTEM_PRESETS[presetKey];
       STATE.settings.activePreset = presetKey;
       els.settingSystemPrompt.value = STATE.settings.systemPrompt;
-      updatePresetBanner();
-      savePersistedState();
       showToast(`Persona aktif: ${presetKey.toUpperCase()}`);
-      AudioEngine.click();
     }
+    updatePresetBanner();
+    updatePresetPillUI();
+    savePersistedState();
+    AudioEngine.click();
+  }
+
+  function updatePresetPillUI() {
+    const active = STATE.settings.activePreset || (STATE.settings.systemPrompt ? 'custom' : 'default');
+    $$('.preset-pill').forEach(pill => {
+      pill.classList.toggle('active', pill.dataset.preset === active);
+    });
   }
 
   function updatePresetBanner() {
-    if (STATE.settings.activePreset && SYSTEM_PRESETS[STATE.settings.activePreset]) {
+    const hasPrompt = Boolean(STATE.settings.systemPrompt && STATE.settings.systemPrompt.trim());
+    if (hasPrompt) {
+      const presetKey = STATE.settings.activePreset;
+      const label = (presetKey && presetKey !== 'default' && presetKey !== 'custom' && SYSTEM_PRESETS[presetKey]) 
+        ? presetKey.toUpperCase() 
+        : 'KUSTOM';
       els.activePresetBanner.style.display = 'flex';
-      els.activePresetName.innerText = `Persona: ${STATE.settings.activePreset.toUpperCase()}`;
+      els.activePresetName.innerText = `Persona: ${label}`;
     } else {
       els.activePresetBanner.style.display = 'none';
     }
@@ -5020,6 +5067,7 @@ ${organicBlock}
     if (els.valTopP) els.valTopP.innerText = STATE.settings.topP ?? 0.9;
     if (els.settingSystemPrompt) els.settingSystemPrompt.value = STATE.settings.systemPrompt || '';
     if (els.settingAutoPolicy) els.settingAutoPolicy.value = STATE.settings.autoPolicy || 'local_first';
+    updatePresetPillUI();
   }
 
   // ==================== EVENT LISTENERS SETUP ====================
@@ -5429,13 +5477,15 @@ ${organicBlock}
       });
     });
 
-    els.clearPresetBtn.addEventListener('click', () => {
-      STATE.settings.activePreset = null;
-      STATE.settings.systemPrompt = '';
-      els.settingSystemPrompt.value = '';
-      updatePresetBanner();
-      savePersistedState();
-      showToast('Persona default aktif.');
+    els.settingSystemPrompt?.addEventListener('input', () => {
+      const currentVal = els.settingSystemPrompt.value.trim();
+      const matchedKey = Object.keys(SYSTEM_PRESETS).find(k => k !== 'default' && SYSTEM_PRESETS[k].trim() === currentVal);
+      STATE.settings.activePreset = matchedKey || (currentVal ? 'custom' : 'default');
+      updatePresetPillUI();
+    });
+
+    els.clearPresetBtn?.addEventListener('click', () => {
+      applySystemPreset('default');
     });
 
     // Settings Actions
@@ -5570,13 +5620,19 @@ ${organicBlock}
 
       if (els.paramTemperature) STATE.settings.temperature = parseFloat(els.paramTemperature.value);
       if (els.paramTopP) STATE.settings.topP = parseFloat(els.paramTopP.value);
-      if (els.settingSystemPrompt) STATE.settings.systemPrompt = els.settingSystemPrompt.value.trim();
+      if (els.settingSystemPrompt) {
+        const pVal = els.settingSystemPrompt.value.trim();
+        STATE.settings.systemPrompt = pVal;
+        const matchedKey = Object.keys(SYSTEM_PRESETS).find(k => k !== 'default' && SYSTEM_PRESETS[k].trim() === pVal);
+        STATE.settings.activePreset = matchedKey || (pVal ? 'custom' : 'default');
+      }
       if (els.settingAutoPolicy) STATE.settings.autoPolicy = els.settingAutoPolicy.value;
       
       savePersistedState();
       checkOllamaHealth();
       checkOpenRouterStatus();
       updatePresetBanner();
+      updatePresetPillUI();
       closeModal('settingsModal');
       showToast('Pengaturan Zoz Router berhasil disimpan!');
       AudioEngine.click();
@@ -5771,6 +5827,7 @@ ${organicBlock}
     }
 
     updatePresetBanner();
+    updatePresetPillUI();
     updateModelUI();
 
     // Restore desktop sidebar collapsed preference

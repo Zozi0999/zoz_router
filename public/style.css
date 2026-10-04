@@ -2151,6 +2151,21 @@ html, body {
   color: var(--neon-cyan);
 }
 
+.preset-pill.active {
+  background: rgba(0, 240, 255, 0.16);
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
+  font-weight: 600;
+}
+
+.preset-pill.default-pill.active {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--text-main);
+  color: var(--text-main);
+  box-shadow: none;
+}
+
 /* Model Hub Modal */
 .hub-search-filter {
   margin-bottom: 16px;
