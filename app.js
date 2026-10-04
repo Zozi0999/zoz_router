@@ -2142,8 +2142,16 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       `;
     }
 
+    const isActuallyDeepResearch = Boolean(
+      isDeepResearch ||
+      (role === 'assistant' && typeof content === 'string' && (
+        /#\s*(?:📑\s*)?laporan\s*deep\s*research/i.test(content) ||
+        (content.includes('DEEP RESEARCH') && /##\s*1\.\s*.*rangkuman\s*eksekutif/i.test(content))
+      ))
+    );
+
     let statsHtml = '';
-    if (isDeepResearch && role === 'assistant') {
+    if (isActuallyDeepResearch && role === 'assistant') {
       statsHtml = `
         <span class="meta-badge engine-badge"><i class="fa-solid fa-microscope" style="color:var(--neon-amber);"></i> DEEP RESEARCH</span>
         <span class="meta-badge model-badge">${escapeHtml(model || 'Zoz AI')}</span>
@@ -2162,7 +2170,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
     const hasText = Boolean(content && String(content).trim().length > 0);
     let renderedBody = '';
-    if (isDeepResearch && role === 'assistant' && hasText) {
+    if (isActuallyDeepResearch && role === 'assistant' && hasText) {
       renderedBody = buildDeepResearchSummaryCardHtml(content, model, sources);
     } else {
       renderedBody = role === 'assistant' ? renderMarkdown(content || '') : escapeHtml(content || '').replace(/\n/g, '<br>');
@@ -2172,10 +2180,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     let sourcesHtml = '';
     if (sources && Array.isArray(sources) && sources.length > 0 && role === 'assistant') {
       // Deep Research: daftar sumber ditutup default agar chat tetap ringkas; bisa dibuka lewat tombol
-      sourcesHtml = buildSourcesSectionHtml(sources, Boolean(isDeepResearch));
+      sourcesHtml = buildSourcesSectionHtml(sources, Boolean(isActuallyDeepResearch));
     }
 
-    const metaContent = (isDeepResearch && role === 'assistant')
+    const metaContent = (isActuallyDeepResearch && role === 'assistant')
       ? statsHtml
       : `<strong>${roleLabel}</strong> ${statsHtml}`;
 
@@ -2199,7 +2207,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     `;
 
     // Attach Deep Research Card Actions (Full Report Modal & Quick Exports)
-    if (isDeepResearch && role === 'assistant' && hasText) {
+    if (isActuallyDeepResearch && role === 'assistant' && hasText) {
       attachDeepResearchCardEvents(row, content, model, sources, null);
     }
 
