@@ -4588,21 +4588,55 @@ ${organicBlock}
     }
   }
 
-  // Client-Side Helper for SerpAPI Search
+  // Client-Side Helper for SerpAPI Search (with resilient multi-tier fallback)
   async function performClientSerpApiSearch(query, serpApiKey) {
     try {
       const key = serpApiKey || STATE.settings.serpApiKey || '0e072bf542835eca933f9d1994524fae98b5a9dcd785dfcab3f6438102ed42e8';
       let data = null;
 
-      // Coba panggil proxy server lokal /api/serpapi/search
+      // 1. Coba panggil proxy server lokal /api/serpapi/search jika bukan di GitHub Pages
       if (!IS_GITHUB_PAGES) {
-        const proxyRes = await fetch('/api/serpapi/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-serpapi-key': key },
-          body: JSON.stringify({ query: query, apiKey: key }),
-          signal: STATE.abortController?.signal
-        }).catch(() => null);
-        if (proxyRes && proxyRes.ok) data = await proxyRes.json();
+        try {
+          const proxyRes = await fetch('/api/serpapi/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-serpapi-key': key },
+            body: JSON.stringify({ query: query, apiKey: key }),
+            signal: STATE.abortController?.signal
+          }).catch(() => null);
+          if (proxyRes && proxyRes.ok) data = await proxyRes.json();
+        } catch (e) {}
+      }
+
+      // 2. Fallback jika proxy lokal tidak merespons atau running di GitHub Pages:
+      // Gunakan Engine Data Faktual Spesifik (Serper Deep Fact Engine) agar Agen 2 tidak pernah 0 sumber!
+      if (!data || !data.results || data.results.length === 0) {
+        const serperKey = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+        const specificQuery = `${query} data fakta statistik spesifikasi`;
+        try {
+          const directRes = await fetch('https://google.serper.dev/search', {
+            method: 'POST',
+            headers: {
+              'X-API-KEY': serperKey,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ q: specificQuery, num: 6, gl: 'id', hl: 'id' }),
+            signal: STATE.abortController?.signal
+          }).catch(() => null);
+          if (directRes && directRes.ok) {
+            const serperData = await directRes.json();
+            data = {
+              results: (serperData.organic || []).map((item, idx) => ({
+                title: item.title,
+                url: item.link,
+                snippet: item.snippet || '',
+                domain: item.link ? item.link.replace(/^https?:\/\//i, '').split('/')[0] : '',
+                sourceProvider: 'SerpAPI Fallback'
+              })),
+              knowledgeGraph: serperData.knowledgeGraph || null,
+              answerBox: serperData.answerBox || null
+            };
+          }
+        } catch (errFallback) {}
       }
 
       if (!data) return null;
@@ -4618,13 +4652,13 @@ ${organicBlock}
       const list = data.results || [];
       if (Array.isArray(list)) {
         list.slice(0, 6).forEach((item, idx) => {
-          summary += `\n${idx + 1}. [SerpAPI] ${item.title}: ${item.snippet} (${item.url})`;
-          if (item.url) {
+          summary += `\n${idx + 1}. [SerpAPI Data] ${item.title}: ${item.snippet} (${item.url || item.link})`;
+          if (item.url || item.link) {
             sources.push({
               title: item.title,
-              url: item.url,
+              url: item.url || item.link,
               snippet: item.snippet || '',
-              domain: item.domain || item.url.replace(/^https?:\/\//i, '').split('/')[0],
+              domain: item.domain || (item.url || item.link).replace(/^https?:\/\//i, '').split('/')[0],
               sourceProvider: 'SerpAPI'
             });
           }
@@ -6445,6 +6479,11 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
   // ==================== LIVE REAL-TIME MODEL CATALOG ====================
   function openLiveModelCatalog(targetInputId = null, targetLabelName = 'Model Obrolan') {
     STATE.catalogTargetInputId = targetInputId;
+    const catModal = document.getElementById('liveModelCatalogModal');
+    if (catModal) {
+      catModal.dataset.targetInputId = targetInputId || '';
+      catModal.dataset.targetLabelName = targetLabelName || 'Model Obrolan';
+    }
     if (els.catalogTargetLabel) {
       els.catalogTargetLabel.innerText = targetLabelName;
     }
@@ -6548,7 +6587,9 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         </button>
       `;
 
-      row.querySelector('.catalog-select-btn').addEventListener('click', () => {
+      row.querySelector('.catalog-select-btn').addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         applySelectedModelFromCatalog(m.id, isOllama ? 'ollama' : 'openrouter');
       });
 
@@ -6556,8 +6597,15 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     });
   }
 
+  let isApplyingModelCatalog = false;
+
   function applySelectedModelFromCatalog(modelId, provider) {
-    const targetId = STATE.catalogTargetInputId;
+    if (isApplyingModelCatalog) return;
+    isApplyingModelCatalog = true;
+    setTimeout(() => { isApplyingModelCatalog = false; }, 800);
+
+    const catModal = document.getElementById('liveModelCatalogModal');
+    const targetId = (catModal && catModal.dataset.targetInputId) || STATE.catalogTargetInputId;
 
     if (targetId) {
       const targetInput = document.getElementById(targetId);
@@ -6574,22 +6622,47 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         STATE.settings.deepResearchFinalModel = modelId;
         if (els.selectDeepResearchFinalModel) els.selectDeepResearchFinalModel.value = modelId;
       }
+      
+      if (catModal) catModal.dataset.targetInputId = '';
       STATE.catalogTargetInputId = null;
       savePersistedState();
       showToast(`🎯 Model ditetapkan: ${modelId}`);
-    } else {
-      // Model Obrolan Utama
-      if (provider === 'ollama') {
-        setEngineMode('ollama');
-        STATE.settings.ollamaModel = modelId;
-      } else {
-        setEngineMode('openrouter');
-        STATE.settings.openRouterModel = modelId;
+
+      // Tutup katalog langsung
+      if (catModal) catModal.classList.remove('show');
+
+      // Pastikan modal Pengaturan TETAP AKTIF DAN TERLIHAT di tab Deep Research!
+      const settingsModal = document.getElementById('settingsModal');
+      if (settingsModal) {
+        settingsModal.classList.add('show');
+        const tabBtn = settingsModal.querySelector('[data-target="tabDeepResearch"]');
+        const tabPane = settingsModal.querySelector('#tabDeepResearch');
+        if (tabBtn && tabPane) {
+          settingsModal.querySelectorAll('.settings-tab-btn').forEach(b => b.classList.remove('active'));
+          settingsModal.querySelectorAll('.settings-tab-pane').forEach(p => p.classList.remove('active'));
+          tabBtn.classList.add('active');
+          tabPane.classList.add('active');
+        }
       }
-      savePersistedState();
-      updateModelUI();
-      showToast(`⚡ Model obrolan diubah: ${modelId}`);
+
+      if (history.state?.modal === 'liveModelCatalogModal') {
+        history.back();
+      }
+      AudioEngine.click();
+      return;
     }
+
+    // Model Obrolan Utama
+    if (provider === 'ollama') {
+      setEngineMode('ollama');
+      STATE.settings.ollamaModel = modelId;
+    } else {
+      setEngineMode('openrouter');
+      STATE.settings.openRouterModel = modelId;
+    }
+    savePersistedState();
+    updateModelUI();
+    showToast(`⚡ Model obrolan diubah: ${modelId}`);
 
     closeModal('liveModelCatalogModal');
   }
