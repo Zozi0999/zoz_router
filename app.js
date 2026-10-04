@@ -776,23 +776,50 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           isPinned: !!s.isPinned,
           createdAt: s.createdAt,
           updatedAt: s.updatedAt,
-          messages: (s.messages || []).map(m => ({
-            role: m.role,
-            content: m.content,
-            displayContent: m.displayContent,
-            docs: m.docs,
-            images: m.images,
-            image: m.image,
-            model: m.model,
-            engine: m.engine,
-            slot: m.slot,
-            sources: m.sources,
-            stats: m.stats,
-            timestamp: m.timestamp
-          }))
+          messages: (s.messages || []).map(m => {
+            let safeImages = undefined;
+            if (Array.isArray(m.images)) {
+              safeImages = m.images.map(img => (typeof img === 'string' && img.startsWith('data:')) ? '[data:image]' : img);
+            }
+            let safeImage = (typeof m.image === 'string' && m.image.startsWith('data:')) ? '[data:image]' : m.image;
+            let safeDocs = undefined;
+            if (Array.isArray(m.docs)) {
+              safeDocs = m.docs.map(d => ({ name: d.name, size: d.size }));
+            }
+            return {
+              role: m.role,
+              content: m.content,
+              displayContent: m.displayContent,
+              docs: safeDocs,
+              images: safeImages,
+              image: safeImage,
+              model: m.model,
+              engine: m.engine,
+              slot: m.slot,
+              sources: m.sources,
+              stats: m.stats,
+              timestamp: m.timestamp
+            };
+          })
         }));
         localStorage.setItem('zoz_router_sessions_v1', JSON.stringify(lightweight));
-      } catch (quotaErr) {}
+      } catch (quotaErr) {
+        console.warn('localStorage quota exceeded, saving headers only:', quotaErr.message);
+        try {
+          const headersOnly = STATE.sessions.map(s => ({
+            id: s.id,
+            title: s.title,
+            mode: s.mode,
+            isPinned: !!s.isPinned,
+            createdAt: s.createdAt,
+            updatedAt: s.updatedAt,
+            messages: []
+          }));
+          localStorage.setItem('zoz_router_sessions_v1', JSON.stringify(headersOnly));
+        } catch (innerErr) {
+          console.warn('localStorage completely full, skipping sessions mirroring:', innerErr.message);
+        }
+      }
     } catch (err) {
       console.error('Error saving persisted state:', err);
     }
