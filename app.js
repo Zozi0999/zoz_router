@@ -267,6 +267,11 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     modelHubModal: $('#modelHubModal'),
     systemPromptModalBtn: $('#systemPromptModalBtn'),
     exportChatBtn: $('#exportChatBtn'),
+    exportConfirmModal: $('#exportConfirmModal'),
+    exportConfirmTitle: $('#exportConfirmTitle'),
+    exportConfirmMsgCount: $('#exportConfirmMsgCount'),
+    exportConfirmImgCount: $('#exportConfirmImgCount'),
+    btnExecuteExportChat: $('#btnExecuteExportChat'),
     soundToggleBtn: $('#soundToggleBtn'),
     toastContainer: $('#toastContainer'),
     
@@ -1731,49 +1736,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
   async function exportSessionData(sessionId) {
     const session = STATE.sessions.find(s => s.id === sessionId);
     if (!session) return;
-    
-    // Lazy load messages from device disk if needed before exporting
-    if (session._isLazyDisk && (!session.messages || session.messages.length === 0)) {
-      if (DeviceStorage.isDeviceBackendAvailable) {
-        try {
-          const fullSess = await DeviceStorage.getSession(sessionId);
-          if (fullSess && Array.isArray(fullSess.messages)) {
-            session.messages = fullSess.messages;
-            delete session._isLazyDisk;
-          }
-        } catch (e) {
-          console.warn('Gagal memuat detail sesi dari disk untuk ekspor:', e);
-        }
-      }
-    }
-
-    if (!session.messages || session.messages.length === 0) {
-      showToast('Obrolan masih kosong untuk diekspor.', 'error');
-      return;
-    }
-
-    let md = `# ${session.title || 'Percakapan ZOZ Router'}\n`;
-    md += `*Tanggal: ${new Date(session.createdAt || Date.now()).toLocaleString('id-ID')}*  \n`;
-    md += `*Mode: ${(session.mode || 'ollama').toUpperCase()}*  \n\n---\n\n`;
-
-    (session.messages || []).forEach(m => {
-      const role = m.role === 'user' ? '👤 Pengguna' : `🤖 AI (${m.model || 'Model'})`;
-      md += `### ${role}\n${m.content || ''}\n\n`;
-    });
-
-    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${(session.title || 'chat').replace(/[^a-zA-Z0-9_-]/g, '_')}.md`;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 100);
-    showToast('Percakapan diekspor ke file Markdown (.md)');
-    AudioEngine.click();
+    await promptExportConfirmation(session);
   }
 
   function getSessionTimestamp(s) {
@@ -5239,9 +5202,10 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     });
   }
 
-  // ==================== EXPORT CHAT ====================
-  async function exportChatHistory() {
-    const session = getActiveSession();
+  // ==================== EXPORT CHAT WITH CONFIRMATION & IMAGE RENDERING ====================
+  let pendingExportSession = null;
+
+  async function promptExportConfirmation(session) {
     if (!session) {
       showToast('Obrolan masih kosong untuk diekspor.', 'error');
       return;
@@ -5267,10 +5231,45 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       return;
     }
 
-    let md = `# ${session.title || 'Percakapan ZOZ Router'}\n*Tanggal: ${new Date(session.createdAt || Date.now()).toLocaleString('id-ID')}*\n*Engine: ${(session.mode || 'ollama').toUpperCase()}*\n\n---\n\n`;
+    pendingExportSession = session;
+
+    const msgCount = session.messages.length;
+    const imgCount = session.messages.filter(m => m.type === 'image_generation' || m.isImageGen || m.imageUrl).length;
+
+    if (els.exportConfirmTitle) els.exportConfirmTitle.innerText = `"${session.title || 'Percakapan ZOZ Router'}"`;
+    if (els.exportConfirmMsgCount) els.exportConfirmMsgCount.innerText = String(msgCount);
+    if (els.exportConfirmImgCount) els.exportConfirmImgCount.innerText = String(imgCount);
+
+    openModal('exportConfirmModal');
+    AudioEngine.click();
+  }
+
+  function executeExportDownload(session) {
+    if (!session || !session.messages || session.messages.length === 0) return;
+
+    let md = `# ${session.title || 'Percakapan ZOZ Router'}\n`;
+    md += `*Tanggal: ${new Date(session.createdAt || Date.now()).toLocaleString('id-ID')}*  \n`;
+    md += `*Engine: ${(session.mode || 'ollama').toUpperCase()}*  \n\n---\n\n`;
+
     session.messages.forEach(m => {
       const sender = m.role === 'user' ? '👤 Pengguna' : `🤖 AI (${m.model || 'Model'})`;
-      md += `### ${sender}\n\n${m.content || ''}\n\n---\n\n`;
+      let content = m.content || '';
+
+      // Visual Markdown Image Rendering for AI Image Studio results
+      if (m.type === 'image_generation' || m.isImageGen || m.imageUrl) {
+        const imgUrl = m.imageUrl || m.url || '';
+        const promptDesc = m.prompt ? m.prompt.replace(/[\[\]]/g, '') : 'Karya Seni AI';
+        content += `\n\n![${promptDesc}](${imgUrl})\n\n`;
+      }
+
+      // Preserve user image attachments in Markdown
+      if (m.images && Array.isArray(m.images) && m.images.length > 0) {
+        m.images.forEach((img, i) => {
+          content += `\n\n![Lampiran Foto ${i + 1}](${img})\n\n`;
+        });
+      }
+
+      md += `### ${sender}\n\n${content}\n\n---\n\n`;
     });
 
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
@@ -5284,8 +5283,14 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     }, 100);
+
     showToast('Obrolan berhasil diekspor sebagai Markdown!');
-    AudioEngine.click();
+    AudioEngine.success();
+  }
+
+  async function exportChatHistory() {
+    const session = getActiveSession();
+    await promptExportConfirmation(session);
   }
 
   // ==================== MODAL HELPERS ====================
@@ -7150,6 +7155,15 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     });
 
     els.exportChatBtn.addEventListener('click', exportChatHistory);
+
+    els.btnExecuteExportChat?.addEventListener('click', () => {
+      if (pendingExportSession) {
+        const sess = pendingExportSession;
+        pendingExportSession = null;
+        closeModal('exportConfirmModal');
+        executeExportDownload(sess);
+      }
+    });
 
     els.soundToggleBtn.addEventListener('click', () => {
       STATE.soundEnabled = !STATE.soundEnabled;
