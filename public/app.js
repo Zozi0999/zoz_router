@@ -3674,23 +3674,74 @@ ${organicBlock}
 
   // --- AUTO ROUTER (SMART ROUTING) ---
   async function runAutoRouterStreaming(session, promptText, image) {
-    // Check if Ollama is online
-    const isOllamaOnline = await checkOllamaHealth();
-    
-    // Policy check
-    const isLongOrHeavy = (promptText.length > 800) || (promptText.toLowerCase().includes('buatkan sistem') || promptText.toLowerCase().includes('arsitektur kompleks'));
+    try {
+      setGeneratingState(true);
+      // Check if Ollama is online
+      const isOllamaOnline = await checkOllamaHealth();
+      
+      // Policy check
+      const isLongOrHeavy = (promptText.length > 800) || (promptText.toLowerCase().includes('buatkan sistem') || promptText.toLowerCase().includes('arsitektur kompleks'));
 
-    if (STATE.settings.autoPolicy === 'cloud_heavy' && isLongOrHeavy && STATE.settings.openRouterKey) {
-      showToast('🔀 Auto-Router: Mengarahkan tugas kompleks ke OpenRouter Cloud...', 'info');
-      await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
-    } else if (isOllamaOnline) {
-      showToast('🔀 Auto-Router: Mengeksekusi via Ollama Local Engine...', 'info');
-      await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel);
-    } else if (STATE.settings.openRouterKey) {
-      showToast('🔀 Auto-Router: Ollama offline, fallback ke OpenRouter...', 'info');
-      await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
-    } else {
-      showToast('Ollama offline dan OpenRouter Key belum disetting.', 'error');
+      if (STATE.settings.autoPolicy === 'cloud_heavy' && isLongOrHeavy && STATE.settings.openRouterKey) {
+        showToast('🔀 Auto-Router: Mengarahkan tugas kompleks ke OpenRouter Cloud...', 'info');
+        await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
+      } else if (isOllamaOnline) {
+        showToast('🔀 Auto-Router: Mengeksekusi via Ollama Local Engine...', 'info');
+        await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel);
+      } else if (STATE.settings.openRouterKey) {
+        showToast('🔀 Auto-Router: Ollama offline, fallback ke OpenRouter Cloud...', 'info');
+        await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
+      } else {
+        // Kedua engine tidak siap: tampilkan kartu bantuan interaktif dan pulihkan composer
+        const assistantRow = appendMessageElement('assistant', '', null, 'Auto-Router Engine');
+        const bubbleText = assistantRow.querySelector('.msg-text-content');
+        const metaBox = assistantRow.querySelector('.message-meta');
+        
+        bubbleText.innerHTML = `
+          <div style="background:rgba(255,170,0,0.08); border:1px solid rgba(255,170,0,0.35); border-radius:10px; padding:14px; margin-bottom:12px; line-height:1.5;">
+            <div style="font-weight:700; color:var(--neon-amber); margin-bottom:6px; display:flex; align-items:center; gap:8px; font-size:0.9rem;">
+              <i class="fa-solid fa-triangle-exclamation"></i> Auto-Router: Tidak Ada Engine AI yang Siap
+            </div>
+            <div style="font-size:0.83rem; color:var(--text-main); margin-bottom:8px;">
+              Ollama Local Engine tidak aktif pada <code>${escapeHtml(STATE.settings.ollamaEndpoint)}</code> dan <strong>OpenRouter API Key</strong> belum dikonfigurasi di Pengaturan.
+            </div>
+            <div style="font-size:0.8rem; color:var(--text-secondary); background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:6px; border-left:3px solid var(--neon-cyan);">
+              💡 <strong>Solusi:</strong> Jalankan aplikasi Ollama di komputer Anda atau masukkan OpenRouter API Key Anda di menu Pengaturan agar Auto-Router dapat melakukan failover otomatis ke Cloud.
+            </div>
+          </div>
+          <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-sm btn-primary open-settings-btn" style="font-size:0.75rem;">
+              <i class="fa-solid fa-sliders"></i> Buka Pengaturan & Masukkan API Key
+            </button>
+            <button class="btn btn-sm btn-outline retry-router-btn" style="border-color:var(--neon-cyan); color:var(--neon-cyan); font-size:0.75rem;">
+              <i class="fa-solid fa-rotate-right"></i> Cek Ulang Status Ollama
+            </button>
+          </div>
+        `;
+
+        bubbleText.querySelector('.open-settings-btn')?.addEventListener('click', () => {
+          syncSettingsModalFields();
+          openModal('settingsModal');
+        });
+
+        bubbleText.querySelector('.retry-router-btn')?.addEventListener('click', async () => {
+          assistantRow.remove();
+          await runAutoRouterStreaming(session, promptText, image);
+        });
+
+        if (metaBox) {
+          metaBox.innerHTML = `
+            <strong>Auto-Router</strong>
+            <span class="meta-model-badge" style="background:rgba(255,50,50,0.2); color:#ff6b6b;">Offline</span>
+          `;
+        }
+
+        AudioEngine.error();
+        showToast('Ollama offline dan OpenRouter Key belum disetting.', 'error');
+        smartScrollChatToBottom(true);
+      }
+    } finally {
+      setGeneratingState(false);
     }
   }
 
