@@ -537,22 +537,61 @@
             </p>
           </div>
 
+          <!-- Datalist untuk pilihan model aktif -->
+          <datalist id="availableModelsDatalist"></datalist>
+
           <div class="form-group">
             <label><i class="fa-solid fa-robot"></i> Model Agen 1 (Pakar Web Google / Serper)</label>
-            <input type="text" id="settingDeepResearchAgent1Model" placeholder="Bawaan (Model Obrolan Aktif) atau misal: mistralai/mistral-small-3" class="form-control">
+            <div class="input-with-action">
+              <input type="text" id="settingDeepResearchAgent1Model" list="availableModelsDatalist" placeholder="Bawaan (Model Obrolan Aktif) atau pilih model..." class="form-control">
+              <select id="selectDeepResearchAgent1Model" class="btn btn-sm btn-outline select-model-dropdown" style="max-width: 140px;" title="Pilih dari model yang terdeteksi">
+                <option value="">Pilih Model...</option>
+              </select>
+            </div>
             <small class="form-hint">Model cerdas yang menganalisis temuan Google Serper. Kosongkan untuk menggunakan model obrolan aktif.</small>
           </div>
 
           <div class="form-group">
             <label><i class="fa-solid fa-robot"></i> Model Agen 2 (Pakar Data Spesifik / SerpAPI)</label>
-            <input type="text" id="settingDeepResearchAgent2Model" placeholder="Bawaan (Model Obrolan Aktif) atau misal: google/gemini-2.0-flash-001" class="form-control">
+            <div class="input-with-action">
+              <input type="text" id="settingDeepResearchAgent2Model" list="availableModelsDatalist" placeholder="Bawaan (Model Obrolan Aktif) atau pilih model..." class="form-control">
+              <select id="selectDeepResearchAgent2Model" class="btn btn-sm btn-outline select-model-dropdown" style="max-width: 140px;" title="Pilih dari model yang terdeteksi">
+                <option value="">Pilih Model...</option>
+              </select>
+            </div>
             <small class="form-hint">Model cerdas yang menganalisis temuan Google SerpAPI. Kosongkan untuk menggunakan model obrolan aktif.</small>
           </div>
 
           <div class="form-group">
             <label><i class="fa-solid fa-brain"></i> Model Agen Akhir (Analis Senior & Penulis Sintesis)</label>
-            <input type="text" id="settingDeepResearchFinalModel" placeholder="Bawaan (Model Obrolan Aktif) atau misal: deepseek/deepseek-r1 / meta-llama/llama-3.3-70b-instruct" class="form-control">
+            <div class="input-with-action">
+              <input type="text" id="settingDeepResearchFinalModel" list="availableModelsDatalist" placeholder="Bawaan (Model Obrolan Aktif) atau pilih model..." class="form-control">
+              <select id="selectDeepResearchFinalModel" class="btn btn-sm btn-outline select-model-dropdown" style="max-width: 140px;" title="Pilih dari model yang terdeteksi">
+                <option value="">Pilih Model...</option>
+              </select>
+            </div>
             <small class="form-hint">Otak utama yang mencerna hasil kedua agen, memverifikasi kontradiksi, dan menyusun laporan riset eksekutif.</small>
+          </div>
+
+          <!-- Section: Custom Presets Buatan Pengguna -->
+          <div class="user-custom-presets-section" style="margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+              <label style="font-weight: 600; color: #64F3FF; font-size: 0.85rem; margin: 0;">
+                <i class="fa-solid fa-bookmark"></i> Preset Kustom Saya
+              </label>
+              <span style="font-size: 0.72rem; color: #a0aec0;">Buat & simpan kombinasi model riset Anda</span>
+            </div>
+            
+            <div class="input-with-action" style="margin-bottom: 8px;">
+              <input type="text" id="inputNewPresetName" placeholder="Ketik nama preset kustom Anda (misal: Riset Skripsi AI)..." class="form-control" style="font-size: 0.8rem;">
+              <button class="btn btn-sm btn-outline" id="saveCustomPresetBtn" type="button" title="Simpan konfigurasi 3 model di atas sebagai preset baru">
+                <i class="fa-solid fa-plus"></i> Simpan Preset
+              </button>
+            </div>
+
+            <div class="custom-presets-container" id="customPresetsList" style="display: flex; flex-wrap: wrap; gap: 6px; min-height: 28px;">
+              <span class="no-presets-hint" style="font-size: 0.75rem; color: #718096; font-style: italic;">Belum ada preset kustom yang dibuat.</span>
+            </div>
           </div>
         </div>
 
