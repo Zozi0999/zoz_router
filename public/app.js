@@ -3369,11 +3369,12 @@ ${organicBlock}
       if (STATE.ollamaModels && STATE.ollamaModels.length > 0) {
         models = STATE.ollamaModels.map(m => {
           const modelId = m.name || m.model || m.id;
-          const isCloud = STATE.settings.ollamaApiKey || (STATE.settings.ollamaEndpoint && STATE.settings.ollamaEndpoint.includes('ollama.com'));
+          let tag = m.tag || 'Ollama Cloud';
+          if (tag === 'Lokal') tag = 'Ollama Cloud';
           return { 
             id: modelId, 
             name: m.name || modelId, 
-            tag: m.tag || (isCloud ? 'Ollama Cloud' : 'Lokal') 
+            tag: tag 
           };
         });
       } else {
@@ -3412,10 +3413,10 @@ ${organicBlock}
       const item = document.createElement('div');
       item.className = `model-option-item ${m.id === currentActive ? 'selected' : ''}`;
       const isFree = m.tag.toLowerCase().includes('free');
-      const isLocal = m.tag.toLowerCase().includes('lokal');
+      const isCloud = m.tag.toLowerCase().includes('cloud');
       const badgeStyle = isFree 
         ? 'background:rgba(0,255,194,0.15); color:var(--neon-teal); border:1px solid rgba(0,255,194,0.3);' 
-        : (isLocal ? 'background:rgba(255,183,3,0.15); color:var(--neon-amber); border:1px solid rgba(255,183,3,0.3);' : 'background:rgba(0,240,255,0.1); color:var(--neon-cyan);');
+        : (isCloud ? 'background:rgba(0,240,255,0.12); color:var(--neon-cyan); border:1px solid rgba(0,240,255,0.3);' : 'background:rgba(255,183,3,0.15); color:var(--neon-amber); border:1px solid rgba(255,183,3,0.3);');
 
       item.innerHTML = `
         <div style="display:flex; flex-direction:column; overflow:hidden; flex:1; padding-right:8px;">
@@ -7823,11 +7824,29 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     if (isOllama) {
       list = (STATE.ollamaModels || []).map(m => {
         const id = m.name || m.model || m.id;
-        const isCloud = STATE.settings.ollamaApiKey || (STATE.settings.ollamaEndpoint && STATE.settings.ollamaEndpoint.includes('ollama.com'));
+        const idLower = (id || '').toLowerCase();
+        let tag = m.tag || 'Ollama Cloud';
+        if (tag === 'Lokal') tag = 'Ollama Cloud';
+
+        // Auto-assign smart badge kategori cloud jika tag masih bawaan umum
+        if (tag === 'Ollama Cloud') {
+          if (idLower.includes('reason') || idLower.includes('pro') || idLower.includes('deepseek-r') || idLower.includes('deepseek-v4-pro')) {
+            tag = 'Reasoning Cloud';
+          } else if (idLower.includes('flash') || idLower.includes('nano') || idLower.includes(':20b') || idLower.includes('fast') || idLower.includes('mini')) {
+            tag = 'Fast Cloud';
+          } else if (idLower.includes('code') || idLower.includes('coder') || idLower.includes('dev')) {
+            tag = 'Coding Cloud';
+          } else if (idLower.includes('kimi-k3') || idLower.includes('long') || idLower.includes('128k') || idLower.includes('1m')) {
+            tag = 'Long Context Cloud';
+          } else if (idLower.includes('super') || idLower.includes('ultra') || idLower.includes('large') || idLower.includes('gemma4') || idLower.includes(':120b') || idLower.includes(':675b') || idLower.includes('m3') || idLower.includes('glm-5.3') || idLower.includes('flagship')) {
+            tag = 'Flagship Cloud';
+          }
+        }
+
         return {
           id: id,
           name: m.name || id,
-          tag: m.tag || (isCloud ? 'Ollama Cloud' : 'Lokal'),
+          tag: tag,
           size: m.size ? `${(m.size / (1024 * 1024 * 1024)).toFixed(1)} GB` : null,
           details: m.details || null
         };
@@ -7917,6 +7936,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       else if (tagLower.includes('fast')) badgeClass = 'fast';
       else if (tagLower.includes('coding')) badgeClass = 'coding';
       else if (tagLower.includes('long context')) badgeClass = 'context';
+      else if (tagLower.includes('cloud')) badgeClass = 'cloud';
       else if (tagLower.includes('lokal')) badgeClass = 'local';
       else badgeClass = '';
 

@@ -3829,6 +3829,12 @@ html, body {
   border-color: rgba(244, 63, 94, 0.35);
 }
 
+.catalog-badge.cloud {
+  background: rgba(0, 240, 255, 0.15);
+  color: var(--neon-cyan);
+  border-color: rgba(0, 240, 255, 0.35);
+}
+
 .catalog-badge.local {
   background: rgba(255, 183, 3, 0.15);
   color: var(--neon-amber);
