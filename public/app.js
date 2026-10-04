@@ -2313,8 +2313,23 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
   // ==================== DOCUMENT & FILE ATTACHMENT HANDLER ====================
   async function extractFileContent(file) {
+    if (!file) return '';
     const ext = (file.name.split('.').pop() || '').toLowerCase();
     
+    // Safety guard: Jika berkas gambar lolos ke fungsi ini, cegah pembacaan teks mentah
+    if (isImageFile(file)) {
+      return `[File gambar "${file.name}" dialihkan secara visual ke galeri foto.]`;
+    }
+
+    // Safety guard: Berkas biner non-dokumen yang tidak boleh dibaca sebagai teks
+    const binaryExtensions = [
+      'exe', 'dll', 'so', 'bin', 'iso', 'img', 'dmg', 'apk', 'zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz',
+      'mp3', 'wav', 'ogg', 'm4a', 'flac', 'mp4', 'mkv', 'avi', 'mov', 'webm', 'wmv', 'flv'
+    ];
+    if (binaryExtensions.includes(ext)) {
+      return `[File biner "${file.name}" tidak dapat dibaca sebagai dokumen teks. Harap gunakan format teks (PDF, DOCX, TXT, MD, JSON, CSV, Kode).]`;
+    }
+
     // 1. PDF Documents (Extract text per page safely via PDF.js)
     if (ext === 'pdf' || file.type === 'application/pdf') {
       try {
@@ -2381,6 +2396,15 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       const reader = new FileReader();
       reader.onload = (e) => {
         let text = e.target.result || '';
+        // Check for binary character density: if text contains excessive null bytes, it's an unsupported binary file
+        let nullByteCount = 0;
+        const sampleLimit = Math.min(text.length, 1000);
+        for (let i = 0; i < sampleLimit; i++) {
+          if (text.charCodeAt(i) === 0) nullByteCount++;
+        }
+        if (nullByteCount > 5) {
+          return resolve(`[File "${file.name}" terdeteksi sebagai berkas biner mentah dan tidak dapat diekstrak sebagai teks.]`);
+        }
         // Sanitize: strip dangerous unprintable ASCII binary characters while preserving text and newlines
         text = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '');
         resolve(text);
@@ -2394,7 +2418,17 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     const files = Array.from(e.target.files || []);
     if (!files || files.length === 0) return;
 
+    let addedDocsCount = 0;
+    let addedImagesCount = 0;
+
     for (const file of files) {
+      // 1. Cek cerdas: Jika user memilih foto/gambar melalui menu Dokumen, alihkan otomatis ke Galeri Foto/Vision
+      if (isImageFile(file)) {
+        const ok = await processSingleImageFile(file);
+        if (ok) addedImagesCount++;
+        continue;
+      }
+
       const sizeStr = (file.size < 1024) 
         ? `${file.size} B` 
         : (file.size < 1024 * 1024) 
@@ -2408,11 +2442,17 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         size: sizeStr,
         content: content
       });
+      addedDocsCount++;
     }
 
     if (els.docFileInput) els.docFileInput.value = '';
     renderAttachmentPreviews();
-    AudioEngine.click();
+    if (addedImagesCount > 0) {
+      updateVisionCompatibilityBadge();
+    }
+    if (addedDocsCount > 0 || addedImagesCount > 0) {
+      AudioEngine.click();
+    }
   }
 
   function removeAttachedDoc(idx) {
@@ -4171,6 +4211,15 @@ ${organicBlock}
   }
 
   // ==================== IMAGE VISION & MEDIA HANDLER ====================
+  function isImageFile(file) {
+    if (!file) return false;
+    if (file.type && typeof file.type === 'string' && file.type.startsWith('image/')) return true;
+    const name = file.name || '';
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    const imageExtensions = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'ico', 'heic', 'heif', 'tiff', 'jfif', 'avif'];
+    return imageExtensions.includes(ext);
+  }
+
   // Client-side instant image compressor (Reduces 10MB camera photo to ~80KB WebP)
   function compressImageToWebP(file, maxDimension = 1024, quality = 0.8) {
     return new Promise((resolve) => {
@@ -4208,30 +4257,40 @@ ${organicBlock}
     });
   }
 
+  async function processSingleImageFile(file) {
+    if (!file) return false;
+    try {
+      const compressedDataUrl = await compressImageToWebP(file, 1024, 0.8) || (await new Promise(r => {
+        const reader = new FileReader();
+        reader.onload = ev => r(ev.target.result);
+        reader.onerror = () => r(null);
+        reader.readAsDataURL(file);
+      }));
+
+      if (compressedDataUrl) {
+        if (!Array.isArray(STATE.attachedImages)) STATE.attachedImages = [];
+        STATE.attachedImages.push(compressedDataUrl);
+        // Upload to disk in background if backend is available
+        if (DeviceStorage.isDeviceBackendAvailable) {
+          DeviceStorage.uploadFile(compressedDataUrl).catch(() => {});
+        }
+        return true;
+      }
+    } catch (err) {
+      console.warn('Image processing warning:', err.message);
+    }
+    return false;
+  }
+
   async function handleImageUpload(e) {
     const files = Array.from(e.target.files || []);
     if (!files || files.length === 0) return;
 
     let addedCount = 0;
     for (const file of files) {
-      if (!file.type.startsWith('image/')) continue;
-
-      try {
-        const compressedDataUrl = await compressImageToWebP(file, 1024, 0.8) || (await new Promise(r => {
-          const reader = new FileReader();
-          reader.onload = ev => r(ev.target.result);
-          reader.readAsDataURL(file);
-        }));
-
-        if (compressedDataUrl) {
-          STATE.attachedImages.push(compressedDataUrl);
-          addedCount++;
-          // Upload to disk in background if backend is available
-          DeviceStorage.uploadFile(compressedDataUrl).catch(() => {});
-        }
-      } catch (err) {
-        console.warn('Image processing warning:', err.message);
-      }
+      if (!isImageFile(file)) continue;
+      const ok = await processSingleImageFile(file);
+      if (ok) addedCount++;
     }
 
     if (els.imageFileInput) els.imageFileInput.value = '';
