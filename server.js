@@ -152,6 +152,12 @@ function performWebSearch(query, apiKey = null) {
       res.on('end', () => {
         try {
           const parsed = JSON.parse(rawData);
+
+          if (res.statusCode >= 400 || (parsed.message && !Array.isArray(parsed.organic))) {
+            const errMsg = parsed.message || (parsed.error ? (typeof parsed.error === 'object' ? parsed.error.message : parsed.error) : `Serper HTTP ${res.statusCode} Error`);
+            return resolve({ query: cleanQuery, count: 0, results: [], error: errMsg });
+          }
+
           const results = [];
           
           if (parsed.knowledgeGraph) {
@@ -523,6 +529,10 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
       // A. Panggil Serper API untuk mencari di Google
       const searchRes = await performWebSearch(currentQuery, serperKey);
       
+      if (searchRes.error) {
+        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Peringatan Serper Search: "${searchRes.error}". Pastikan API Key Serper valid.`);
+      }
+
       let findingsText = '';
       if (searchRes.knowledgeGraph) {
         findingsText += `\n[KNOWLEDGE GRAPH]: ${searchRes.knowledgeGraph.title || ''} - ${searchRes.knowledgeGraph.snippet || ''}\n`;
