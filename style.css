@@ -1446,6 +1446,21 @@ html, body {
   background: var(--bg-card);
 }
 
+.msg-action-btn.read-report-btn {
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  color: var(--neon-cyan);
+  font-weight: 600;
+  padding: 3px 8px;
+}
+
+.msg-action-btn.read-report-btn:hover {
+  background: rgba(0, 240, 255, 0.2);
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.35);
+  color: #FFF;
+}
+
 /* ==================== COMPOSER (INPUT) ==================== */
 .composer-container {
   flex-shrink: 0;
@@ -3342,6 +3357,55 @@ html, body {
   color: var(--text-dim);
 }
 
+.msg-sources-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.msg-sources-toggle:hover {
+  color: var(--text-main);
+}
+
+.sources-toggle-label {
+  margin-left: auto;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-dim);
+  text-transform: none;
+  letter-spacing: normal;
+  transition: all 0.2s ease;
+}
+
+.msg-sources-toggle:hover .sources-toggle-label {
+  background: rgba(0, 240, 255, 0.1);
+  border-color: rgba(0, 240, 255, 0.3);
+  color: var(--neon-cyan);
+}
+
+.sources-toggle-chevron {
+  font-size: 0.68rem;
+  transition: transform 0.2s ease;
+  color: var(--text-dim);
+}
+
+.msg-sources-section.collapsed .sources-toggle-chevron {
+  transform: rotate(-90deg);
+}
+
+.msg-sources-section.collapsed .msg-sources-grid {
+  display: none;
+}
+
 .msg-sources-grid {
   display: flex;
   flex-wrap: wrap;
@@ -4667,6 +4731,67 @@ html, body {
 
 .full-report-markdown-content a:hover {
   color: #64F3FF;
+}
+
+/* Deep Research Report References & Panel */
+.report-references-section.report-sources-panel {
+  margin-top: 36px;
+  padding: 20px 22px;
+  background: rgba(13, 16, 26, 0.65);
+  border: 1px solid rgba(0, 240, 255, 0.22);
+  border-radius: var(--radius-md, 8px);
+}
+
+.report-sources-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--neon-cyan);
+  margin-bottom: 12px;
+  letter-spacing: 0.03em;
+}
+
+.report-sources-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.report-sources-list li {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.report-sources-list a {
+  color: var(--text-main);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  word-break: break-all;
+}
+
+.report-sources-list a:hover {
+  color: var(--neon-cyan);
+}
+
+.report-source-domain {
+  font-size: 0.74rem;
+  color: var(--text-dim);
+  margin-left: 6px;
+  font-family: var(--font-mono, monospace);
+}
+
+/* Toggle Hide/Show References State */
+#deepResearchReportModal.references-hidden .report-references-section {
+  display: none !important;
+}
+
+#deepResearchReportModal.references-hidden .toc-link.toc-ref {
+  display: none !important;
 }
 
 @media (max-width: 900px) {

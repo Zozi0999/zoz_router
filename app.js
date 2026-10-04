@@ -1955,7 +1955,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (imagesToDisplay && imagesToDisplay.length > 0 && /^📷 \[\d+ Foto Lampiran\]$/.test(textToDisplay.trim())) {
         textToDisplay = '';
       }
-      appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs, msg.isDeepResearch, msg.latency);
+      appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs, msg.isDeepResearch, msg.latency, msg.timestamp);
     });
 
     enhanceCodeBlocks(els.messagesList);
@@ -2095,10 +2095,13 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     els.messagesList.appendChild(row);
   }
 
-  function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1, sources = null, docs = null, isDeepResearch = false, latency = null) {
+  function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1, sources = null, docs = null, isDeepResearch = false, latency = null, timestamp = null) {
     const row = document.createElement('div');
     row.className = `message-row ${role}`;
     row.dataset.index = index;
+    if (timestamp) {
+      row.dataset.reportDate = timestamp;
+    }
     if (content) {
       row.dataset.fullContent = content;
     }
@@ -2167,24 +2170,9 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     const textDisplayStyle = (!hasText && role === 'user') ? 'style="display:none;"' : '';
 
     let sourcesHtml = '';
-    if (sources && Array.isArray(sources) && sources.length > 0 && role === 'assistant' && !isDeepResearch) {
-      sourcesHtml = `
-        <div class="msg-sources-section">
-          <div class="msg-sources-title">
-            <i class="fa-solid fa-earth-americas" style="color:var(--neon-cyan);"></i>
-            <span>Sumber Terverifikasi Google (${sources.length})</span>
-          </div>
-          <div class="msg-sources-grid">
-            ${sources.map((s, i) => `
-              <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" class="msg-source-chip" title="${escapeHtml(s.title + (s.snippet ? ' - ' + s.snippet : ''))}">
-                <span class="source-index">${i + 1}</span>
-                <span class="source-title">${escapeHtml(s.title || s.domain || 'Sumber Web')}</span>
-                <span class="source-domain">${escapeHtml(s.domain || '')}</span>
-              </a>
-            `).join('')}
-          </div>
-        </div>
-      `;
+    if (sources && Array.isArray(sources) && sources.length > 0 && role === 'assistant') {
+      // Deep Research: daftar sumber ditutup default agar chat tetap ringkas; bisa dibuka lewat tombol
+      sourcesHtml = buildSourcesSectionHtml(sources, Boolean(isDeepResearch));
     }
 
     const metaContent = (isDeepResearch && role === 'assistant')
@@ -2732,30 +2720,51 @@ ${organicBlock}
     }
   }
 
-  function renderMessageSources(row, sources) {
+  function buildSourcesSectionHtml(sources, collapsed = false) {
+    return `
+      <div class="msg-sources-section${collapsed ? ' collapsed' : ''}">
+        <button type="button" class="msg-sources-title msg-sources-toggle" aria-expanded="${collapsed ? 'false' : 'true'}" title="Buka / tutup daftar referensi web">
+          <i class="fa-solid fa-earth-americas" style="color:var(--neon-cyan);"></i>
+          <span>Sumber Terverifikasi Google (${sources.length})</span>
+          <span class="sources-toggle-label">${collapsed ? 'Tampilkan' : 'Sembunyikan'}</span>
+          <i class="fa-solid fa-chevron-down sources-toggle-chevron"></i>
+        </button>
+        <div class="msg-sources-grid">
+          ${sources.map((s, i) => `
+            <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" class="msg-source-chip" title="${escapeHtml((s.title || '') + (s.snippet ? ' - ' + s.snippet : ''))}">
+              <span class="source-index">${i + 1}</span>
+              <span class="source-title">${escapeHtml(s.title || s.domain || 'Sumber Web')}</span>
+              <span class="source-domain">${escapeHtml(s.domain || '')}</span>
+            </a>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  // Delegasi klik: buka / tutup daftar referensi web di bubble chat
+  document.addEventListener('click', (e) => {
+    const toggle = e.target.closest ? e.target.closest('.msg-sources-toggle') : null;
+    if (!toggle) return;
+    const section = toggle.closest('.msg-sources-section');
+    if (!section) return;
+    const isCollapsed = section.classList.toggle('collapsed');
+    toggle.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+    const label = toggle.querySelector('.sources-toggle-label');
+    if (label) label.textContent = isCollapsed ? 'Tampilkan' : 'Sembunyikan';
+    AudioEngine.click();
+  });
+
+  function renderMessageSources(row, sources, collapsed = false) {
     if (!row || !sources || !Array.isArray(sources) || sources.length === 0) return;
     const bubble = row.querySelector('.message-bubble');
     if (!bubble) return;
     if (bubble.querySelector('.msg-sources-section')) return;
 
-    const sourcesEl = document.createElement('div');
-    sourcesEl.className = 'msg-sources-section';
-    sourcesEl.innerHTML = `
-      <div class="msg-sources-title">
-        <i class="fa-solid fa-earth-americas" style="color:var(--neon-cyan);"></i>
-        <span>Sumber Terverifikasi Google (${sources.length})</span>
-      </div>
-      <div class="msg-sources-grid">
-        ${sources.map((s, i) => `
-          <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" class="msg-source-chip" title="${escapeHtml(s.title + (s.snippet ? ' - ' + s.snippet : ''))}">
-            <span class="source-index">${i + 1}</span>
-            <span class="source-title">${escapeHtml(s.title || s.domain || 'Sumber Web')}</span>
-            <span class="source-domain">${escapeHtml(s.domain || '')}</span>
-          </a>
-        `).join('')}
-      </div>
-    `;
-    bubble.appendChild(sourcesEl);
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = buildSourcesSectionHtml(sources, collapsed);
+    const sourcesEl = wrapper.firstElementChild;
+    if (sourcesEl) bubble.appendChild(sourcesEl);
   }
 
   // ==================== URL & ENDPOINT NORMALIZER ====================
@@ -4887,6 +4896,72 @@ ${organicBlock}
     showToast('Laporan berhasil diunduh dalam format Markdown (.md)', 'success');
   }
 
+  // Membungkus bagian "Daftar Pustaka" bawaan laporan + panel Sumber Web agar bisa disembunyikan sekaligus
+  function markReportReferences(contentEl, sources) {
+    if (!contentEl) return;
+    const refRegex = /daftar\s*pustaka|sumber\s*referensi|referensi|references|bibliograf/i;
+    const headingEls = Array.from(contentEl.querySelectorAll('h1, h2, h3, h4'));
+    let refHeading = null;
+    headingEls.forEach(h => { if (refRegex.test(h.textContent || '')) refHeading = h; });
+
+    if (refHeading && refHeading.parentElement === contentEl) {
+      const section = document.createElement('section');
+      section.className = 'report-references-section';
+      let startNode = refHeading;
+      const prev = refHeading.previousElementSibling;
+      if (prev && prev.tagName === 'HR') startNode = prev;
+      contentEl.insertBefore(section, startNode);
+      let node = startNode;
+      while (node) {
+        const next = node.nextSibling;
+        section.appendChild(node);
+        node = next;
+      }
+    }
+
+    if (sources && Array.isArray(sources) && sources.length > 0) {
+      const panel = document.createElement('section');
+      panel.className = 'report-references-section report-sources-panel';
+      panel.innerHTML = `
+        <div class="report-sources-title"><i class="fa-solid fa-earth-americas"></i> Sumber Web Terverifikasi (${sources.length})</div>
+        <ol class="report-sources-list">
+          ${sources.map(s => `
+            <li>
+              <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.title || s.domain || s.url)}</a>
+              <span class="report-source-domain">${escapeHtml(s.domain || '')}</span>
+            </li>
+          `).join('')}
+        </ol>
+      `;
+      contentEl.appendChild(panel);
+    }
+  }
+
+  function applyReportReferencesState() {
+    const modal = document.getElementById('deepResearchReportModal');
+    const btn = document.getElementById('btnToggleReportSources');
+    if (!modal) return;
+    let hidden = false;
+    try { hidden = localStorage.getItem('zoz_report_refs_hidden') === '1'; } catch (e) {}
+    modal.classList.toggle('references-hidden', hidden);
+    if (btn) {
+      btn.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+      btn.title = hidden ? 'Tampilkan referensi web' : 'Sembunyikan referensi web';
+      btn.innerHTML = hidden
+        ? '<i class="fa-solid fa-eye"></i> <span>Tampilkan Referensi</span>'
+        : '<i class="fa-solid fa-eye-slash"></i> <span>Sembunyikan Referensi</span>';
+    }
+  }
+
+  function toggleReportReferences() {
+    const modal = document.getElementById('deepResearchReportModal');
+    if (!modal) return;
+    const willHide = !modal.classList.contains('references-hidden');
+    try { localStorage.setItem('zoz_report_refs_hidden', willHide ? '1' : '0'); } catch (e) {}
+    applyReportReferencesState();
+    AudioEngine.click();
+  }
+
   function openDeepResearchReportModal(fullText, title, meta = {}) {
     const modal = document.getElementById('deepResearchReportModal');
     if (!modal) return;
@@ -4931,6 +5006,7 @@ ${organicBlock}
     if (contentEl) {
       contentEl.innerHTML = renderMarkdown(fullText || '');
       enhanceCodeBlocks(contentEl);
+      markReportReferences(contentEl, meta.sources);
 
       // Bangun Dynamic Outline / Table of Contents
       const tocList = document.getElementById('fullReportTOCList');
@@ -4945,7 +5021,7 @@ ${organicBlock}
             const level = heading.tagName.toLowerCase();
             const levelClass = (level === 'h1') ? 'toc-h1' : (level === 'h2' ? 'toc-h2' : 'toc-h3');
             const tocItem = document.createElement('a');
-            tocItem.className = `toc-link ${levelClass}`;
+            tocItem.className = `toc-link ${levelClass}${heading.closest('.report-references-section') ? ' toc-ref' : ''}`;
             tocItem.dataset.headingId = anchorId;
             tocItem.href = `#${anchorId}`;
             tocItem.textContent = heading.textContent.trim();
@@ -5008,6 +5084,7 @@ ${organicBlock}
       }
     }
 
+    applyReportReferencesState();
     openModal('deepResearchReportModal');
   }
 
@@ -5047,14 +5124,28 @@ ${organicBlock}
   function attachDeepResearchCardEvents(container, fullText, model, sources, date) {
     if (!container) return;
     const reportTitle = extractReportTitle(fullText);
-
-    container.querySelector('[data-action="open-full-report"]')?.addEventListener('click', () => {
+    const openReport = () => {
       openDeepResearchReportModal(fullText, reportTitle, {
         sources,
         model,
-        date: date || new Date().toISOString()
+        date: date || container.dataset.reportDate || new Date().toISOString()
       });
-    });
+    };
+
+    container.querySelector('[data-action="open-full-report"]')?.addEventListener('click', openReport);
+
+    // Tombol "Baca Laporan" permanen di bilah aksi pesan (selalu terlihat di sebelah Salin)
+    const actionsBar = container.querySelector('.message-actions-bar');
+    if (actionsBar) {
+      actionsBar.querySelector('.read-report-btn')?.remove();
+      const readBtn = document.createElement('button');
+      readBtn.type = 'button';
+      readBtn.className = 'msg-action-btn read-report-btn';
+      readBtn.title = 'Buka laporan riset lengkap di layar baca';
+      readBtn.innerHTML = '<i class="fa-solid fa-book-open-reader"></i> Baca Laporan';
+      readBtn.addEventListener('click', openReport);
+      actionsBar.insertBefore(readBtn, actionsBar.firstChild);
+    }
 
     container.querySelector('[data-action="export-pdf"]')?.addEventListener('click', () => {
       downloadReportPDF(reportTitle, fullText);
@@ -5519,7 +5610,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         assistantRow.dataset.fullContent = finalReportText;
 
         if (allSources.length > 0) {
-          renderMessageSources(assistantRow, allSources);
+          renderMessageSources(assistantRow, allSources, true);
         }
 
         if (metaBox) {
@@ -8197,6 +8288,10 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     document.getElementById('btnCopyFullReport')?.addEventListener('click', () => {
       if (!currentActiveReport.fullText) return;
       copyTextToClipboard(currentActiveReport.fullText, null, 'Seluruh teks laporan riset disalin ke clipboard!');
+    });
+
+    document.getElementById('btnToggleReportSources')?.addEventListener('click', () => {
+      toggleReportReferences();
     });
 
     // Global Hardware / Gesture Back Button Interceptor for Mobile (popstate)
