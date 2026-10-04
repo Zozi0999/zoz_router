@@ -6631,8 +6631,15 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       savePersistedState();
       showToast(`🎯 Model ditetapkan: ${modelId}`);
 
-      // Tutup katalog langsung
+      // Tutup katalog langsung tanpa memicu event popstate liar
       if (catModal) catModal.classList.remove('show');
+
+      // Update state history agar kembali merujuk ke settingsModal tanpa navigasi mundur browser
+      try {
+        if (window.history && history.replaceState) {
+          history.replaceState({ modal: 'settingsModal' }, '');
+        }
+      } catch (e) {}
 
       // Pastikan modal Pengaturan TETAP AKTIF DAN TERLIHAT di tab Deep Research!
       const settingsModal = document.getElementById('settingsModal');
@@ -6648,9 +6655,6 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         }
       }
 
-      if (history.state?.modal === 'liveModelCatalogModal') {
-        history.back();
-      }
       AudioEngine.click();
       return;
     }
@@ -7334,8 +7338,23 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
             targetEl.classList.add('show');
           }
         } else {
-          // No modal in current history state -> return to main chat by closing all open modals
-          openModals.forEach(m => m.classList.remove('show'));
+          // Check if child modal (e.g. liveModelCatalogModal) was open on top of settingsModal
+          const settingsModal = document.getElementById('settingsModal');
+          const isSettingsOpen = settingsModal && settingsModal.classList.contains('show');
+          const isChildOpen = openModals.some(m => m.id === 'liveModelCatalogModal' || m.id === 'liveResearchInspectionModal');
+
+          if (isSettingsOpen && isChildOpen) {
+            // Dismiss child modal only, keep settingsModal alive
+            openModals.forEach(m => {
+              if (m.id !== 'settingsModal') m.classList.remove('show');
+            });
+            try {
+              history.replaceState({ modal: 'settingsModal' }, '');
+            } catch (err) {}
+          } else {
+            // No modal in current history state -> return to main chat by closing all open modals
+            openModals.forEach(m => m.classList.remove('show'));
+          }
         }
         return;
       }
@@ -7675,17 +7694,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     });
 
     // ==================== LIVE MODEL CATALOG LISTENERS ====================
-    $$('.btn-open-model-catalog').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        const targetInputId = btn.dataset.targetInput;
-        let labelName = 'Model';
-        if (targetInputId === 'settingDeepResearchAgent1Model') labelName = 'Agen 1 (Pakar Web Google)';
-        else if (targetInputId === 'settingDeepResearchAgent2Model') labelName = 'Agen 2 (Pakar Data Spesifik)';
-        else if (targetInputId === 'settingDeepResearchFinalModel') labelName = 'Agen Akhir (Analis Senior)';
-        openLiveModelCatalog(targetInputId, labelName);
-      });
-    });
+    // Note: Click handling for .btn-open-model-catalog is handled via global delegation in document click listener
 
     els.btnTabCatalogOllama?.addEventListener('click', () => {
       STATE.activeCatalogTab = 'ollama';
