@@ -628,6 +628,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
     async saveSession(session) {
       if (!session || !session.id) return;
+      // Safety guard: Never overwrite disk storage with an empty lazy-loaded session
+      if (session._isLazyDisk && (!session.messages || session.messages.length === 0)) {
+        return;
+      }
       if (this.isDeviceBackendAvailable) {
         try {
           await fetch('/api/sessions', {
@@ -641,6 +645,28 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       }
       // Also save in local ChatDB vault
       ChatDB.saveSession(session);
+    },
+
+    async updateSessionMetadata(id, patch) {
+      if (!id || !patch) return;
+      if (this.isDeviceBackendAvailable) {
+        try {
+          await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch)
+          });
+        } catch (e) {
+          console.warn('DeviceStorage updateSessionMetadata failed:', e.message);
+        }
+      }
+      const sess = STATE.sessions.find(s => s.id === id);
+      if (sess) {
+        Object.assign(sess, patch);
+        if (!sess._isLazyDisk || (sess.messages && sess.messages.length > 0)) {
+          ChatDB.saveSession(sess);
+        }
+      }
     },
 
     async renameSession(id, newTitle) {
@@ -1742,8 +1768,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     session.isPinned = !session.isPinned;
     session.updatedAt = new Date().toISOString();
     
-    if (DeviceStorage.isDeviceBackendAvailable) {
-      DeviceStorage.saveSession(session);
+    if (session._isLazyDisk && (!session.messages || session.messages.length === 0)) {
+      await DeviceStorage.updateSessionMetadata(sessionId, { isPinned: session.isPinned, updatedAt: session.updatedAt });
+    } else {
+      await DeviceStorage.saveSession(session);
     }
     savePersistedState();
     renderChatHistory();
