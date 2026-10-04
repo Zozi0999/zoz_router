@@ -2183,25 +2183,26 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     // 1. PDF Documents (Extract text per page safely via PDF.js)
     if (ext === 'pdf' || file.type === 'application/pdf') {
       try {
-        if (window.pdfjsLib) {
-          pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-          const arrayBuffer = await file.arrayBuffer();
-          const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
-          const pdf = await loadingTask.promise;
-          let fullText = '';
-          for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            const pageText = textContent.items.map(item => item.str).join(' ');
-            if (pageText.trim()) {
-              fullText += `[Halaman ${i}]\n${pageText.trim()}\n\n`;
-            }
-          }
-          if (!fullText.trim()) {
-            return `[Dokumen PDF "${file.name}" tidak berisi lapisan teks digital / merupakan pindaian gambar.]`;
-          }
-          return fullText.trim();
+        if (!window.pdfjsLib) {
+          return `[Pustaka pembaca PDF (pdf.js) belum termuat atau diblokir peramban. Tidak dapat membaca file "${file.name}".]`;
         }
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        const arrayBuffer = await file.arrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+        const pdf = await loadingTask.promise;
+        let fullText = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map(item => item.str).join(' ');
+          if (pageText.trim()) {
+            fullText += `[Halaman ${i}]\n${pageText.trim()}\n\n`;
+          }
+        }
+        if (!fullText.trim()) {
+          return `[Dokumen PDF "${file.name}" tidak berisi lapisan teks digital / merupakan pindaian gambar.]`;
+        }
+        return fullText.trim();
       } catch (pdfErr) {
         console.warn('PDF.js parse error:', pdfErr);
         return `[Gagal mengekstrak teks dari PDF "${file.name}": ${pdfErr.message}]`;
@@ -2211,27 +2212,29 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     // 2. DOCX Documents (Extract text safely via JSZip & DOMParser)
     if (ext === 'docx' || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
       try {
-        if (window.JSZip) {
-          const arrayBuffer = await file.arrayBuffer();
-          const zip = await JSZip.loadAsync(arrayBuffer);
-          const docXml = zip.file('word/document.xml');
-          if (docXml) {
-            const xmlText = await docXml.async('text');
-            const parser = new DOMParser();
-            const xmlDoc = parser.parseFromString(xmlText, 'application/xml');
-            const paragraphs = xmlDoc.getElementsByTagName('w:p');
-            const lines = [];
-            for (let i = 0; i < paragraphs.length; i++) {
-              const texts = paragraphs[i].getElementsByTagName('w:t');
-              let pText = '';
-              for (let j = 0; j < texts.length; j++) {
-                pText += texts[j].textContent;
-              }
-              if (pText.trim()) lines.push(pText.trim());
-            }
-            if (lines.length > 0) return lines.join('\n');
-          }
+        if (!window.JSZip) {
+          return `[Pustaka pembaca DOCX (JSZip) belum termuat atau diblokir peramban. Tidak dapat membaca file "${file.name}".]`;
         }
+        const arrayBuffer = await file.arrayBuffer();
+        const zip = await JSZip.loadAsync(arrayBuffer);
+        const docXml = zip.file('word/document.xml');
+        if (docXml) {
+          const xmlText = await docXml.async('text');
+          const parser = new DOMParser();
+          const xmlDoc = parser.parseFromString(xmlText, 'application/xml');
+          const paragraphs = xmlDoc.getElementsByTagName('w:p');
+          const lines = [];
+          for (let i = 0; i < paragraphs.length; i++) {
+            const texts = paragraphs[i].getElementsByTagName('w:t');
+            let pText = '';
+            for (let j = 0; j < texts.length; j++) {
+              pText += texts[j].textContent;
+            }
+            if (pText.trim()) lines.push(pText.trim());
+          }
+          if (lines.length > 0) return lines.join('\n');
+        }
+        return `[Dokumen DOCX "${file.name}" kosong atau tidak memiliki teks yang terbaca.]`;
       } catch (docxErr) {
         console.warn('DOCX parse error:', docxErr);
         return `[Gagal mengekstrak teks dari DOCX "${file.name}": ${docxErr.message}]`;
