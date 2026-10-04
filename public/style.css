@@ -1538,6 +1538,26 @@ html, body {
   box-shadow: 0 8px 28px rgba(0, 240, 255, 0.15);
 }
 
+.composer-box.image-mode-active {
+  border-color: #FF007F;
+  box-shadow: 0 8px 30px rgba(255, 0, 127, 0.22), inset 0 0 12px rgba(255, 0, 127, 0.08);
+  animation: cyberImagePulse 3s infinite ease-in-out;
+}
+
+.composer-box.image-mode-active:focus-within {
+  border-color: #FF2E93;
+  box-shadow: 0 8px 36px rgba(255, 0, 127, 0.32), inset 0 0 16px rgba(255, 0, 127, 0.12);
+}
+
+@keyframes cyberImagePulse {
+  0%, 100% {
+    box-shadow: 0 8px 26px rgba(255, 0, 127, 0.18), inset 0 0 10px rgba(255, 0, 127, 0.05);
+  }
+  50% {
+    box-shadow: 0 8px 36px rgba(255, 0, 127, 0.35), inset 0 0 18px rgba(255, 0, 127, 0.15);
+  }
+}
+
 .composer-tools-left, .composer-tools-right {
   display: flex;
   align-items: center;

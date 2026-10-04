@@ -93,6 +93,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     get webSearchEnabled() { return this.searchMode !== 'off'; },
     set webSearchEnabled(val) { this.searchMode = val ? 'default' : 'off'; },
     get isDeepResearch() { return this.searchMode === 'premium'; },
+    isImageGenMode: false,
     isGenerating: false,
     abortController: null,
     currentDeepResearchTaskId: null,
@@ -249,6 +250,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     searchBadge: $('#searchBadge'),
     searchDropdown: $('#searchDropdown'),
     imageGenToggleBtn: $('#imageGenToggleBtn'),
+    composerBox: $('.composer-box'),
     attachmentPreviewBar: $('#attachmentPreviewBar'),
     imagePreviewImg: $('#imagePreviewImg'),
     removeImageBtn: $('#removeImageBtn'),
@@ -1557,6 +1559,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
   function createNewSession(initialTitle = 'Obrolan Baru', targetMode = STATE.mode) {
     STATE.currentSessionId = null;
     sessionStorage.removeItem('zoz_active_session_id');
+    STATE.isImageGenMode = false;
+    updateImageGenModeUI();
     renderChatHistory();
     renderCurrentSession();
     AudioEngine.click();
@@ -1622,6 +1626,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
     STATE.currentSessionId = sessionId;
     sessionStorage.setItem('zoz_active_session_id', sessionId);
+    STATE.isImageGenMode = false;
+    updateImageGenModeUI();
     savePersistedState();
     renderChatHistory();
     renderCurrentSession();
@@ -3175,7 +3181,7 @@ ${organicBlock}
     renderAttachmentPreviews();
     AudioEngine.send();
 
-    if (isImageGenerationTrigger(text)) {
+    if (STATE.isImageGenMode || isImageGenerationTrigger(text)) {
       const cleanImgPrompt = extractImagePrompt(text);
       await runImageGeneration(session, cleanImgPrompt);
     } else if (STATE.isDeepResearch) {
@@ -4871,6 +4877,23 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     p = p.replace(/^(?:generate|create|render|draw|paint)\s+(?:an?\s+)?(?:image|picture|photo|illustration|art)\s+(?:of\s+)?/i, '');
     p = p.replace(/^(?:gambar|image):\s*/i, '');
     return p.trim() || promptText.trim();
+  }
+
+  function updateImageGenModeUI() {
+    if (els.composerBox) {
+      els.composerBox.classList.toggle('image-mode-active', Boolean(STATE.isImageGenMode));
+    }
+    if (els.imageGenToggleBtn) {
+      els.imageGenToggleBtn.classList.toggle('active', Boolean(STATE.isImageGenMode));
+      els.imageGenToggleBtn.setAttribute('aria-pressed', String(Boolean(STATE.isImageGenMode)));
+    }
+    if (els.promptInput) {
+      if (STATE.isImageGenMode) {
+        els.promptInput.placeholder = '🎨 Mode AI Image Studio Aktif — Ketik deskripsi visual untuk digenerasi...';
+      } else {
+        els.promptInput.placeholder = 'Ketik pesan...';
+      }
+    }
   }
 
   async function runImageGeneration(session, promptText, customModel = 'flux') {
@@ -7194,6 +7217,41 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       });
     });
 
+    // Embedded AI Image Studio Toggle Listener
+    els.imageGenToggleBtn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      STATE.isImageGenMode = !STATE.isImageGenMode;
+      updateImageGenModeUI();
+      if (STATE.isImageGenMode) {
+        showToast('🎨 Mode AI Image Studio Aktif! Ketik deskripsi untuk digenerasi.');
+        AudioEngine.success();
+      } else {
+        showToast('💬 Mode Percakapan Standar.');
+        AudioEngine.click();
+      }
+    });
+
+    // Keyboard shortcut: Alt+I to toggle Image Studio mode
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && (e.key === 'i' || e.key === 'I')) {
+        e.preventDefault();
+        STATE.isImageGenMode = !STATE.isImageGenMode;
+        updateImageGenModeUI();
+        if (STATE.isImageGenMode) {
+          showToast('🎨 Mode AI Image Studio Aktif (Alt+I)!');
+          AudioEngine.success();
+          els.promptInput?.focus();
+        } else {
+          showToast('💬 Mode Percakapan Standar (Alt+I).');
+          AudioEngine.click();
+        }
+      } else if (e.key === 'Escape' && STATE.isImageGenMode && !els.promptInput.value.trim()) {
+        STATE.isImageGenMode = false;
+        updateImageGenModeUI();
+        showToast('💬 Mode Percakapan Standar.');
+      }
+    });
+
     // Quick Hero Prompts
     $$('.quick-prompt-card').forEach(card => {
       card.addEventListener('click', () => {
@@ -7841,6 +7899,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     updatePresetPillUI();
     updateModelUI();
     updateSearchModeUI();
+    updateImageGenModeUI();
 
     // Restore desktop sidebar collapsed preference
     if (window.innerWidth > 768) {
