@@ -3980,3 +3980,34 @@ html, body {
   white-space: pre-wrap;
   font-family: var(--font-main);
 }
+
+/* Penegasan Z-Index Lapisan Terdepan untuk Modal Katalog & Live Inspector */
+#liveModelCatalogModal,
+#liveResearchInspectionModal {
+  z-index: 10050 !important;
+}
+
+#liveModelCatalogModal.show,
+#liveResearchInspectionModal.show {
+  display: flex !important;
+}
+
+/* Model Dropdown Tabs di Header */
+.dropdown-mode-tabs .dropdown-tab-btn {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.dropdown-mode-tabs .dropdown-tab-btn.active {
+  background: rgba(0, 240, 255, 0.15);
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+  font-weight: 600;
+}
+

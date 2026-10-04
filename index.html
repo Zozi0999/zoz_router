@@ -162,12 +162,34 @@
 
             <!-- Model Dropdown Popup -->
             <div class="model-dropdown-menu" id="modelDropdownMenu">
-              <div class="dropdown-header">
-                <input type="text" id="modelSearchInput" placeholder="Cari / Masukkan nama model...">
+              <!-- Mode Tabs: Ollama vs OpenRouter -->
+              <div class="dropdown-mode-tabs" style="display: flex; gap: 4px; padding: 6px 10px; background: rgba(0,0,0,0.3); border-bottom: 1px solid var(--border-subtle);">
+                <button type="button" class="dropdown-tab-btn active" id="dropdownTabOllama" style="flex: 1;">
+                  <i class="fa-solid fa-server"></i> Ollama
+                </button>
+                <button type="button" class="dropdown-tab-btn" id="dropdownTabOpenRouter" style="flex: 1;">
+                  <i class="fa-solid fa-cloud"></i> OpenRouter
+                </button>
               </div>
+
+              <!-- Instant Search Bar -->
+              <div class="dropdown-header" style="padding: 8px 10px;">
+                <input type="text" id="modelSearchInput" placeholder="Cari nama model...">
+              </div>
+
+              <!-- Tombol Buka Katalog Lengkap Real-Time -->
+              <div style="padding: 0 10px 6px 10px;">
+                <button type="button" class="btn btn-xs btn-outline" id="btnOpenFullCatalogFromDropdown" style="width: 100%; border-color: rgba(0,240,255,0.4); color: var(--neon-cyan); background: rgba(0,240,255,0.08); display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600;">
+                  <i class="fa-solid fa-layer-group"></i> Buka Katalog Lengkap (Real-Time)
+                </button>
+              </div>
+
+              <!-- Model List (Filtered & Ordered) -->
               <div class="dropdown-model-list" id="dropdownModelList">
                 <!-- Dynamically populated -->
               </div>
+
+              <!-- Custom Model Input -->
               <div class="dropdown-custom-add">
                 <input type="text" id="customModelInput" placeholder="Ketik model kustom (e.g. qwen2.5:7b, gpt-4o)...">
                 <button class="btn btn-sm btn-outline" id="useCustomModelBtn">Gunakan</button>

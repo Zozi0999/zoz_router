@@ -120,6 +120,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       autoPolicy: 'local_first'
     },
     activeCatalogTab: 'ollama', // 'ollama' | 'openrouter'
+    dropdownModelTab: 'ollama', // 'ollama' | 'openrouter'
     catalogTargetInputId: null,
     catalogSearchQuery: '',
     activeInspectionTab: 'agent1', // 'agent1' | 'agent2' | 'scraper'
@@ -193,6 +194,9 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     currentModelLabel: $('#currentModelLabel'),
     modelPickerChip: $('#modelPickerChip'),
     modelDropdownMenu: $('#modelDropdownMenu'),
+    dropdownTabOllama: $('#dropdownTabOllama'),
+    dropdownTabOpenRouter: $('#dropdownTabOpenRouter'),
+    btnOpenFullCatalogFromDropdown: $('#btnOpenFullCatalogFromDropdown'),
     dropdownModelList: $('#dropdownModelList'),
     modelSearchInput: $('#modelSearchInput'),
     customModelInput: $('#customModelInput'),
@@ -3005,8 +3009,18 @@ ${organicBlock}
     els.dropdownModelList.innerHTML = '';
     const q = search.toLowerCase().trim();
 
+    // Sinkronisasi status visual tab dropdown
+    if (els.dropdownTabOllama) {
+      els.dropdownTabOllama.classList.toggle('active', STATE.dropdownModelTab === 'ollama');
+    }
+    if (els.dropdownTabOpenRouter) {
+      els.dropdownTabOpenRouter.classList.toggle('active', STATE.dropdownModelTab === 'openrouter');
+    }
+
     let models = [];
-    if (STATE.mode === 'ollama') {
+    const isOllamaTab = STATE.dropdownModelTab === 'ollama';
+
+    if (isOllamaTab) {
       if (STATE.ollamaModels && STATE.ollamaModels.length > 0) {
         models = STATE.ollamaModels.map(m => {
           const modelId = m.name || m.model || m.id;
@@ -3014,26 +3028,36 @@ ${organicBlock}
           return { 
             id: modelId, 
             name: m.name || modelId, 
-            tag: m.tag || (isCloud ? 'Ollama Cloud' : 'Local') 
+            tag: m.tag || (isCloud ? 'Ollama Cloud' : 'Lokal') 
           };
         });
       } else {
         models = [];
       }
     } else {
-      models = STATE.openRouterModels.map(m => ({
-        ...m,
-        tag: m.tag || 'Cloud'
+      models = (STATE.openRouterModels || []).map(m => ({
+        id: m.id,
+        name: m.name || m.id,
+        tag: m.tag || (m.id.includes(':free') ? 'Free' : 'Cloud')
       }));
     }
 
     const currentActive = getCurrentModel();
-    const filtered = models.filter(m => !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+
+    // Filter pencarian
+    let filtered = models.filter(m => !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+
+    // Urutkan model dengan rapi: Model aktif di paling atas, sisanya diurutkan secara alfabetis
+    filtered.sort((a, b) => {
+      if (a.id === currentActive) return -1;
+      if (b.id === currentActive) return 1;
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    });
 
     if (filtered.length === 0) {
       els.dropdownModelList.innerHTML = `
-        <div style="font-size:0.75rem; color:var(--text-dim); padding:12px; text-align:center; line-height:1.4;">
-          ${STATE.mode === 'ollama' ? 'Belum ada model terdeteksi dari endpoint Ollama.<br><span style="font-size:0.68rem; opacity:0.8;">Gunakan input Model Kustom di bawah untuk memanggil model Anda.</span>' : 'Model tidak ditemukan'}
+        <div style="font-size:0.75rem; color:var(--text-dim); padding:14px; text-align:center; line-height:1.4;">
+          ${isOllamaTab ? 'Belum ada model terdeteksi dari Ollama.<br><span style="font-size:0.68rem; opacity:0.8;">Buka Katalog Lengkap atau ketik Model Kustom di bawah.</span>' : 'Model OpenRouter tidak ditemukan.<br><span style="font-size:0.68rem; opacity:0.8;">Buka Katalog Lengkap untuk pencarian real-time.</span>'}
         </div>
       `;
       return;
@@ -3042,16 +3066,25 @@ ${organicBlock}
     filtered.forEach(m => {
       const item = document.createElement('div');
       item.className = `model-option-item ${m.id === currentActive ? 'selected' : ''}`;
-      const isVision = m.tag.includes('👁️');
-      const badgeStyle = isVision 
+      const isFree = m.tag.toLowerCase().includes('free');
+      const isLocal = m.tag.toLowerCase().includes('lokal');
+      const badgeStyle = isFree 
         ? 'background:rgba(0,255,194,0.15); color:var(--neon-teal); border:1px solid rgba(0,255,194,0.3);' 
-        : 'background:rgba(0,240,255,0.1); color:var(--neon-cyan);';
+        : (isLocal ? 'background:rgba(255,183,3,0.15); color:var(--neon-amber); border:1px solid rgba(255,183,3,0.3);' : 'background:rgba(0,240,255,0.1); color:var(--neon-cyan);');
 
       item.innerHTML = `
-        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px;">${escapeHtml(m.name || m.id)}</span>
-        <span style="font-size:0.65rem; padding:2px 5px; border-radius:3px; ${badgeStyle}">${escapeHtml(m.tag || 'AI')}</span>
+        <div style="display:flex; flex-direction:column; overflow:hidden; flex:1; padding-right:8px;">
+          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; font-size:0.82rem;">${escapeHtml(m.name || m.id)}</span>
+          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.68rem; color:var(--text-dim); font-family:var(--font-code);">${escapeHtml(m.id)}</span>
+        </div>
+        <span style="font-size:0.65rem; padding:2px 6px; border-radius:3px; font-weight:600; flex-shrink:0; ${badgeStyle}">${escapeHtml(m.tag || 'AI')}</span>
       `;
       item.addEventListener('click', () => {
+        if (isOllamaTab && STATE.mode !== 'ollama') {
+          setEngineMode('ollama');
+        } else if (!isOllamaTab && STATE.mode !== 'openrouter') {
+          setEngineMode('openrouter');
+        }
         selectModel(m.id);
         els.modelDropdownMenu.classList.remove('show');
         AudioEngine.click();
@@ -6406,10 +6439,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     updateCatalogTabsUI();
     renderLiveModelCatalog();
 
-    if (els.liveModelCatalogModal) {
-      els.liveModelCatalogModal.classList.add('active');
-    }
-    AudioEngine.click();
+    openModal('liveModelCatalogModal');
   }
 
   function updateCatalogTabsUI() {
@@ -6538,19 +6568,13 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       showToast(`⚡ Model obrolan diubah: ${modelId}`);
     }
 
-    if (els.liveModelCatalogModal) {
-      els.liveModelCatalogModal.classList.remove('active');
-    }
-    AudioEngine.click();
+    closeModal('liveModelCatalogModal');
   }
 
   // ==================== LIVE RESEARCH INSPECTOR ====================
   function openLiveResearchInspection() {
-    if (els.liveResearchInspectionModal) {
-      els.liveResearchInspectionModal.classList.add('active');
-      renderLiveInspectionContent();
-    }
-    AudioEngine.click();
+    renderLiveInspectionContent();
+    openModal('liveResearchInspectionModal');
   }
 
   function updateLiveInspectionData(inspectionData) {
@@ -6573,7 +6597,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     }
 
     // Jika modal terbuka, langsung live update view secara dinamis
-    if (els.liveResearchInspectionModal && els.liveResearchInspectionModal.classList.contains('active')) {
+    if (els.liveResearchInspectionModal && els.liveResearchInspectionModal.classList.contains('show')) {
       renderLiveInspectionContent();
     }
   }
@@ -6778,13 +6802,58 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     // Model Picker Dropdown
     els.modelPickerChip.addEventListener('click', (e) => {
       e.stopPropagation();
+      STATE.dropdownModelTab = STATE.mode === 'openrouter' ? 'openrouter' : 'ollama';
       els.modelDropdownMenu.classList.toggle('show');
       populateModelDropdown(els.modelSearchInput.value);
+    });
+
+    // Model Dropdown Tabs di Header (Ollama vs OpenRouter)
+    els.dropdownTabOllama?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      STATE.dropdownModelTab = 'ollama';
+      populateModelDropdown(els.modelSearchInput?.value || '');
+      AudioEngine.click();
+    });
+
+    els.dropdownTabOpenRouter?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      STATE.dropdownModelTab = 'openrouter';
+      populateModelDropdown(els.modelSearchInput?.value || '');
+      AudioEngine.click();
+    });
+
+    els.btnOpenFullCatalogFromDropdown?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      els.modelDropdownMenu?.classList.remove('show');
+      openLiveModelCatalog(null, 'Model Obrolan Utama');
     });
 
     document.addEventListener('click', (e) => {
       if (!els.modelPickerChip.contains(e.target) && !els.modelDropdownMenu.contains(e.target)) {
         els.modelDropdownMenu.classList.remove('show');
+      }
+
+      // Global delegation untuk tombol Cari Model
+      const catalogBtn = e.target.closest('.btn-open-model-catalog');
+      if (catalogBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const targetInputId = catalogBtn.dataset.targetInput;
+        let labelName = 'Model';
+        if (targetInputId === 'settingDeepResearchAgent1Model') labelName = 'Agen 1 (Pakar Web Google)';
+        else if (targetInputId === 'settingDeepResearchAgent2Model') labelName = 'Agen 2 (Pakar Data Spesifik)';
+        else if (targetInputId === 'settingDeepResearchFinalModel') labelName = 'Agen Akhir (Analis Senior)';
+        openLiveModelCatalog(targetInputId, labelName);
+        return;
+      }
+
+      // Global delegation untuk tombol Pertinjau Proses Nyata (Live Inspection)
+      const inspectBtn = e.target.closest('.btn-live-inspection-trigger');
+      if (inspectBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        openLiveResearchInspection();
+        return;
       }
     });
 
