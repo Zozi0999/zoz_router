@@ -23,8 +23,11 @@ const MIME_TYPES = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.pdf': 'application/pdf',
   '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8',
+  '.bin': 'application/octet-stream',
   '.woff2': 'font/woff2',
   '.woff': 'font/woff'
 };
@@ -860,14 +863,50 @@ const server = http.createServer(async (req, res) => {
       if (!body || !body.data) {
         return sendJSON(res, 400, { error: 'Data gambar atau file diperlukan.' });
       }
-      let base64Data = body.data;
+      let rawData = String(body.data).trim();
       let ext = '.png';
-      const match = base64Data.match(/^data:image\/([a-zA-Z0-9+]+);base64,/);
-      if (match) {
-        ext = '.' + (match[1] === 'jpeg' ? 'jpg' : match[1]);
-        base64Data = base64Data.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '');
+      let base64Content = rawData;
+
+      // Match standard Data URL format: data:<mediatype>[;charset=utf-8][;base64],<data>
+      const dataUrlMatch = rawData.match(/^data:([a-zA-Z0-9.+_-]+\/[a-zA-Z0-9.+_-]+)(?:;[^,]+)*;base64,(.*)$/s);
+      if (dataUrlMatch) {
+        const mime = dataUrlMatch[1].toLowerCase();
+        base64Content = dataUrlMatch[2];
+        
+        const MIME_MAP = {
+          'image/png': '.png',
+          'image/jpeg': '.jpg',
+          'image/jpg': '.jpg',
+          'image/webp': '.webp',
+          'image/gif': '.gif',
+          'image/svg+xml': '.svg',
+          'image/x-icon': '.ico',
+          'image/vnd.microsoft.icon': '.ico',
+          'application/pdf': '.pdf',
+          'text/plain': '.txt'
+        };
+
+        if (MIME_MAP[mime]) {
+          ext = MIME_MAP[mime];
+        } else {
+          const sub = mime.split('/')[1] || '';
+          if (sub.includes('svg')) ext = '.svg';
+          else if (sub.includes('jpeg') || sub.includes('jpg')) ext = '.jpg';
+          else if (sub.includes('png')) ext = '.png';
+          else if (sub.includes('webp')) ext = '.webp';
+          else if (sub.includes('gif')) ext = '.gif';
+          else if (sub.includes('pdf')) ext = '.pdf';
+          else ext = '.bin';
+        }
+      } else {
+        base64Content = rawData.replace(/^data:[^;]+;base64,/, '');
       }
-      const buffer = Buffer.from(base64Data, 'base64');
+
+      const buffer = Buffer.from(base64Content, 'base64');
+      if (!buffer || buffer.length === 0) {
+        return sendJSON(res, 400, { error: 'Data base64 tidak valid atau kosong.' });
+      }
+
       const filename = `media_${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`;
       const targetFile = path.join(UPLOADS_DIR, filename);
       fs.writeFileSync(targetFile, buffer);
