@@ -4851,8 +4851,18 @@ ${organicBlock}
     doc.close();
 
     setTimeout(() => {
-      printFrame.contentWindow.focus();
-      printFrame.contentWindow.print();
+      try {
+        printFrame.contentWindow.focus();
+        printFrame.contentWindow.print();
+      } catch (e) {
+        console.warn('Gagal memanggil print frame:', e);
+      }
+      // Pembersihan otomatis elemen iframe dari DOM setelah dialog cetak selesai
+      setTimeout(() => {
+        if (printFrame && printFrame.parentNode) {
+          printFrame.parentNode.removeChild(printFrame);
+        }
+      }, 60000);
     }, 400);
   }
 
