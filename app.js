@@ -4876,26 +4876,50 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
   }
 
   // ==================== EXPORT CHAT ====================
-  function exportChatHistory() {
+  async function exportChatHistory() {
     const session = getActiveSession();
-    if (session.messages.length === 0) {
+    if (!session) {
       showToast('Obrolan masih kosong untuk diekspor.', 'error');
       return;
     }
 
-    let md = `# ${session.title}\n*Tanggal: ${new Date(session.createdAt).toLocaleString()}*\n*Engine: ${session.mode}*\n\n---\n\n`;
+    // Lazy load messages from device disk if needed before exporting
+    if (session._isLazyDisk && (!session.messages || session.messages.length === 0)) {
+      if (DeviceStorage.isDeviceBackendAvailable) {
+        try {
+          const fullSess = await DeviceStorage.getSession(session.id);
+          if (fullSess && Array.isArray(fullSess.messages)) {
+            session.messages = fullSess.messages;
+            delete session._isLazyDisk;
+          }
+        } catch (e) {
+          console.warn('Gagal memuat detail sesi aktif dari disk untuk ekspor:', e);
+        }
+      }
+    }
+
+    if (!session.messages || session.messages.length === 0) {
+      showToast('Obrolan masih kosong untuk diekspor.', 'error');
+      return;
+    }
+
+    let md = `# ${session.title || 'Percakapan ZOZ Router'}\n*Tanggal: ${new Date(session.createdAt || Date.now()).toLocaleString('id-ID')}*\n*Engine: ${(session.mode || 'ollama').toUpperCase()}*\n\n---\n\n`;
     session.messages.forEach(m => {
-      const sender = m.role === 'user' ? '👤 User' : `🤖 ${m.model || 'Zoz AI'}`;
-      md += `### ${sender}\n\n${m.content}\n\n---\n\n`;
+      const sender = m.role === 'user' ? '👤 Pengguna' : `🤖 AI (${m.model || 'Model'})`;
+      md += `### ${sender}\n\n${m.content || ''}\n\n---\n\n`;
     });
 
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `zoz-router-${session.title.replace(/[^a-zA-Z0-9]/g, '_')}.md`;
+    a.download = `zoz-router-${(session.title || 'chat').replace(/[^a-zA-Z0-9_-]/g, '_')}.md`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 100);
     showToast('Obrolan berhasil diekspor sebagai Markdown!');
     AudioEngine.click();
   }
