@@ -955,14 +955,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           }, 2000);
         };
 
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(codeText).then(setCopiedState).catch(() => {
-            // Fallback copy
-            fallbackCopyText(codeText, setCopiedState);
-          });
-        } else {
-          fallbackCopyText(codeText, setCopiedState);
-        }
+        copyTextToClipboard(codeText, setCopiedState);
       });
 
       pre.insertBefore(header, pre.firstChild);
@@ -975,17 +968,48 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     textarea.style.position = 'fixed';
     textarea.style.top = '0';
     textarea.style.left = '0';
-    textarea.style.opacity = '0';
+    textarea.style.width = '2em';
+    textarea.style.height = '2em';
+    textarea.style.padding = '0';
+    textarea.style.border = 'none';
+    textarea.style.outline = 'none';
+    textarea.style.boxShadow = 'none';
+    textarea.style.background = 'transparent';
+    textarea.setAttribute('readonly', '');
     document.body.appendChild(textarea);
     textarea.focus();
     textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
     try {
-      document.execCommand('copy');
-      if (onSuccess) onSuccess();
+      const successful = document.execCommand('copy');
+      if (successful && onSuccess) {
+        onSuccess();
+      } else if (!successful) {
+        showToast('Gagal menyalin teks ke clipboard.', 'error');
+      }
     } catch (err) {
       showToast('Gagal menyalin teks ke clipboard.', 'error');
     }
     document.body.removeChild(textarea);
+  }
+
+  function copyTextToClipboard(text, onSuccess, successMsg = 'Teks disalin ke clipboard!') {
+    const handleSuccess = () => {
+      if (typeof onSuccess === 'function') {
+        onSuccess();
+      } else if (successMsg) {
+        showToast(successMsg);
+        AudioEngine.click();
+      }
+    };
+
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      navigator.clipboard.writeText(text).then(handleSuccess).catch(() => {
+        fallbackCopyText(text, handleSuccess);
+      });
+    } else {
+      fallbackCopyText(text, handleSuccess);
+    }
   }
 
     // ==================== HIGH-PERFORMANCE 60FPS STREAM BUFFER RENDERER ====================
@@ -1970,9 +1994,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     enhanceCodeBlocks(bubble);
 
     bubble.querySelector('.copy-msg-btn')?.addEventListener('click', () => {
-      navigator.clipboard.writeText(content);
-      showToast('Pesan disalin!');
-      AudioEngine.click();
+      copyTextToClipboard(content, null, 'Pesan disalin!');
     });
 
     container.appendChild(bubble);
@@ -2177,10 +2199,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     enhanceCodeBlocks(row);
 
     // Message copy button
-    row.querySelector('.copy-msg-btn').addEventListener('click', () => {
-      navigator.clipboard.writeText(content);
-      showToast('Pesan disalin ke clipboard!');
-      AudioEngine.click();
+    row.querySelector('.copy-msg-btn')?.addEventListener('click', () => {
+      copyTextToClipboard(content, null, 'Pesan disalin ke clipboard!');
     });
 
     els.messagesList.appendChild(row);
