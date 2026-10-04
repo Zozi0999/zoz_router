@@ -96,6 +96,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     get isDeepResearch() { return this.searchMode === 'premium'; },
     isGenerating: false,
     abortController: null,
+    currentDeepResearchTaskId: null,
     soundEnabled: true,
     ollamaModels: [...OFFICIAL_OLLAMA_CLOUD_MODELS],
     openRouterModels: [...DEFAULT_OPENROUTER_MODELS],
@@ -4311,6 +4312,11 @@ ${organicBlock}
   }
 
   function stopGeneration() {
+    if (STATE.currentDeepResearchTaskId && !IS_GITHUB_PAGES) {
+      const abortTaskId = STATE.currentDeepResearchTaskId;
+      STATE.currentDeepResearchTaskId = null;
+      fetch('/api/batal-riset/' + abortTaskId, { method: 'POST' }).catch(() => {});
+    }
     if (STATE.abortController) {
       STATE.abortController.abort();
       STATE.abortController = null;
@@ -4902,10 +4908,16 @@ ${organicBlock}
             const taskId = data.taskId;
 
             if (taskId) {
+              STATE.currentDeepResearchTaskId = taskId;
               // 2. Lakukan Polling berkala ke /api/status-riset/:id
               while (STATE.isGenerating) {
                 await new Promise(r => setTimeout(r, 1000));
-                if (STATE.abortController?.signal.aborted) break;
+                if (STATE.abortController?.signal.aborted) {
+                  if (!IS_GITHUB_PAGES) {
+                    fetch('/api/batal-riset/' + taskId, { method: 'POST' }).catch(() => {});
+                  }
+                  break;
+                }
 
                 const checkRes = await fetch(`/api/status-riset/${taskId}`, {
                   signal: STATE.abortController.signal
@@ -4932,15 +4944,22 @@ ${organicBlock}
                   finalReportText = statusData.hasil || '';
                   allSources = statusData.sources || [];
                   isBackendSuccess = true;
+                  STATE.currentDeepResearchTaskId = null;
                   break;
-                } else if (statusData.status === 'gagal') {
-                  throw new Error(statusData.error || 'Riset gagal diselesaikan.');
+                } else if (statusData.status === 'gagal' || statusData.status === 'dibatalkan') {
+                  STATE.currentDeepResearchTaskId = null;
+                  throw new Error(statusData.error || (statusData.status === 'dibatalkan' ? 'Riset dibatalkan oleh pengguna.' : 'Riset gagal diselesaikan.'));
                 }
               }
             }
           }
         } catch (backendErr) {
-          if (backendErr.name === 'AbortError') throw backendErr;
+          if (backendErr.name === 'AbortError') {
+            if (STATE.currentDeepResearchTaskId && !IS_GITHUB_PAGES) {
+              fetch('/api/batal-riset/' + STATE.currentDeepResearchTaskId, { method: 'POST' }).catch(() => {});
+            }
+            throw backendErr;
+          }
           console.warn('Backend deep research fallback ke client-side execution:', backendErr);
         }
       }
@@ -5198,6 +5217,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         AudioEngine.error();
       }
     } finally {
+      STATE.currentDeepResearchTaskId = null;
       setGeneratingState(false);
       STATE.abortController = null;
     }

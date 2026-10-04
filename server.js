@@ -697,6 +697,13 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
     let currentQuery = topik;
 
     for (let i = 1; i <= maxIterations; i++) {
+      if (task.aborted) {
+        task.status = 'dibatalkan';
+        task.currentStep = 'Riset dihentikan oleh pengguna.';
+        task.completedAt = new Date().toISOString();
+        return;
+      }
+
       task.currentStep = `[Langkah 1/3] Iterasi ${i}/${maxIterations}: Menjelajah Paralel (Agen 1: Serper & Agen 2: SerpAPI) -> "${currentQuery}"`;
       task.progressPercent = 15 + Math.round((i / (maxIterations + 1)) * 30);
       task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Iterasi ${i}: Menjalankan riset paralel multi-sumber -> "${currentQuery}"`);
@@ -904,6 +911,13 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
     // ==========================================
     // PILAR 2: PEMINDAIAN KONTEN MENDALAM (AUTOMATED WEB SCRAPING)
     // ==========================================
+    if (task.aborted) {
+      task.status = 'dibatalkan';
+      task.currentStep = 'Riset dihentikan oleh pengguna.';
+      task.completedAt = new Date().toISOString();
+      return;
+    }
+
     const targetScrapeUrls = allSources.slice(0, 5);
     task.currentStep = `[Langkah 2/3] Menganalisis & memindai konten mendalam ${targetScrapeUrls.length} artikel web (Web Scraping)...`;
     task.progressPercent = 55;
@@ -977,6 +991,13 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
     // ==========================================
     // PILAR 3, 4, & 5: VALIDASI SUMBER, KATEGORISASI TREN & LAPORAN TERSTRUKTUR (MULTI-AGENT SYNTHESIS)
     // ==========================================
+    if (task.aborted) {
+      task.status = 'dibatalkan';
+      task.currentStep = 'Riset dihentikan oleh pengguna.';
+      task.completedAt = new Date().toISOString();
+      return;
+    }
+
     const finalModel = config.finalModel || config.model;
     task.currentStep = `[Langkah 3/3] Konsolidasi Multi-Agen, validasi silang fakta & sintesis laporan eksekutif via ${finalModel || 'Model Utama'}...`;
     task.progressPercent = 85;
@@ -1459,6 +1480,21 @@ const server = http.createServer(async (req, res) => {
       liveInspection: dataTugas.liveInspection || null,
       error: dataTugas.error
     });
+  }
+
+  // Deep Research: Cancel / Abort Background Task
+  const cancelResearchMatch = pathname.match(/^\/api\/(?:batal-riset|deep-research\/stop)\/([a-zA-Z0-9_-]+)$/);
+  if (cancelResearchMatch && (method === 'POST' || method === 'GET')) {
+    const taskId = cancelResearchMatch[1];
+    const dataTugas = dbTugasRiset[taskId];
+    if (dataTugas) {
+      dataTugas.aborted = true;
+      dataTugas.status = 'dibatalkan';
+      dataTugas.currentStep = 'Riset dihentikan oleh pengguna.';
+      dataTugas.completedAt = new Date().toISOString();
+      return sendJSON(res, 200, { success: true, message: 'Tugas riset berhasil dibatalkan.' });
+    }
+    return sendJSON(res, 404, { error: 'Tugas riset tidak ditemukan.' });
   }
 
 // Ollama: Check status & get models (with multi-route fallback & disk manifests)
