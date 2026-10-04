@@ -452,16 +452,6 @@
           </div>
 
           <div class="form-group">
-            <label><i class="fa-solid fa-network-wired"></i> SerpAPI Key (Google Search - Multi-Source Deep Research)</label>
-            <div class="input-with-action">
-              <input type="password" id="settingSerpApiKey" placeholder="0e072bf542835eca933f9d1994524fae98b5a9dcd785dfcab3f6438102ed42e8" value="0e072bf542835eca933f9d1994524fae98b5a9dcd785dfcab3f6438102ed42e8">
-              <button class="btn btn-sm btn-outline" id="toggleShowSerpApiKeyBtn"><i class="fa-solid fa-eye"></i></button>
-              <button class="btn btn-sm btn-outline" id="testSerpApiBtn">Tes SerpAPI</button>
-            </div>
-            <small class="form-hint">Mesin pencari sekunder untuk kolaborasi multi-sumber paralel Deep Research. Dapatkan di <a href="https://serpapi.com" target="_blank" rel="noopener">serpapi.com</a>.</small>
-          </div>
-
-          <div class="form-group">
             <label><i class="fa-solid fa-shield-virus"></i> Auto-Router Policy</label>
             <select id="settingAutoPolicy" class="custom-select">
               <option value="local_first">Local First (Prioritas Ollama, fallback OpenRouter bila offline)</option>
@@ -474,10 +464,10 @@
         <div class="settings-tab-pane" id="tabDeepResearch">
           <div class="multi-agent-banner" style="background: rgba(0, 240, 255, 0.06); border: 1px solid rgba(0, 240, 255, 0.2); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px;">
             <div style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #00F0FF; font-size: 0.92rem; margin-bottom: 4px;">
-              <i class="fa-solid fa-diagram-project"></i> Arsitektur Kolaborasi Multi-Agen (Parallel Multi-Source)
+              <i class="fa-solid fa-diagram-project"></i> Arsitektur Kolaborasi Multi-Agen (Dual-Agent Google Serper Divergen)
             </div>
             <p style="font-size: 0.8rem; color: #a0aec0; margin: 0; line-height: 1.45;">
-              Agen 1 & Agen 2 menjelajah internet secara paralel (Google Serper & SerpAPI). Hasil dikonsolidasi ke Agen Akhir untuk analisis komparasi, eliminasi redundansi, dan sintesis laporan final 2026.
+              Agen 1 &amp; Agen 2 menjelajah internet secara paralel via Google Serper dengan domain &amp; URL berbeda 100% (Zero Collision). Hasil dikonsolidasi ke Agen Akhir untuk eliminasi redundansi, cross-checking, dan sintesis laporan final 2026.
             </p>
           </div>
 
@@ -493,14 +483,14 @@
           </div>
 
           <div class="form-group">
-            <label><i class="fa-solid fa-robot"></i> Model Agen 2 (Pakar Data Spesifik / SerpAPI)</label>
+            <label><i class="fa-solid fa-robot"></i> Model Agen 2 (Pakar Data Mendalam / Serper Divergen)</label>
             <div class="input-with-action">
               <input type="text" id="settingDeepResearchAgent2Model" placeholder="Bawaan (Model Obrolan Aktif) atau ketik nama model..." class="form-control" autocomplete="off">
               <button type="button" class="btn btn-sm btn-outline btn-open-model-catalog" data-target-input="settingDeepResearchAgent2Model" title="Buka Katalog Model Real-Time">
                 <i class="fa-solid fa-magnifying-glass"></i> Cari Model
               </button>
             </div>
-            <small class="form-hint">Model cerdas yang menganalisis temuan Google SerpAPI. Kosongkan untuk menggunakan model obrolan aktif.</small>
+            <small class="form-hint">Model cerdas yang menganalisis temuan Google Serper sudut pandang kedua (domain mandiri). Kosongkan untuk menggunakan model obrolan aktif.</small>
           </div>
 
           <div class="form-group">
@@ -903,7 +893,7 @@
           <i class="fa-solid fa-robot" style="color: #00F0FF;"></i> Agen 1: Serper (<span id="inspectCountAgent1">0</span>)
         </button>
         <button class="settings-tab-btn" id="btnTabInspectAgent2" data-inspect-tab="agent2" style="white-space: nowrap; flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px;">
-          <i class="fa-solid fa-microchip" style="color: #00FFC2;"></i> Agen 2: SerpAPI (<span id="inspectCountAgent2">0</span>)
+          <i class="fa-solid fa-microchip" style="color: #00FFC2;"></i> Agen 2: Serper Divergen (<span id="inspectCountAgent2">0</span>)
         </button>
         <button class="settings-tab-btn" id="btnTabInspectScraper" data-inspect-tab="scraper" style="white-space: nowrap; flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px;">
           <i class="fa-solid fa-file-lines" style="color: #FFB703;"></i> Web Scraper (<span id="inspectCountScraper">0</span>)

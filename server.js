@@ -51,7 +51,7 @@ function sendJSON(res, statusCode, data) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-serpapi-key, x-ollama-key'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key'
   });
   res.end(JSON.stringify(data));
 }
@@ -325,143 +325,6 @@ function performWebSearch(query, apiKey = null) {
   });
 }
 
-// Helper to perform web search via Google SerpAPI (Engine ke-2 / Multi-Source Deep Research) dengan Multi-Tier Resilient Fallback
-function performSerpApiSearch(query, apiKey = null) {
-  return new Promise((resolve) => {
-    if (!query || typeof query !== 'string' || !query.trim()) {
-      return resolve({ query: '', count: 0, results: [], provider: 'serpapi' });
-    }
-    const cleanQuery = query.trim();
-    const serpApiKey = apiKey || process.env.SERPAPI_API_KEY || '0e072bf542835eca933f9d1994524fae98b5a9dcd785dfcab3f6438102ed42e8';
-
-    // Helper fallback ke Serper Deep Fact jika SerpAPI offline/kuota habis agar Agen 2 tidak pernah 0 sumber
-    const triggerSerperFactFallback = async (reason) => {
-      try {
-        const factQuery = `${cleanQuery} data fakta spesifik statistik 2026`;
-        const fbRes = await performWebSearch(factQuery);
-        if (fbRes && Array.isArray(fbRes.results) && fbRes.results.length > 0) {
-          const adaptedResults = fbRes.results.map(r => ({
-            title: r.title,
-            link: r.url,
-            url: r.url,
-            snippet: r.snippet,
-            domain: r.domain,
-            sourceProvider: 'SerpAPI (Deep Fact Fallback)'
-          }));
-          return resolve({
-            query: cleanQuery,
-            count: adaptedResults.length,
-            knowledgeGraph: fbRes.knowledgeGraph || null,
-            answerBox: fbRes.answerBox || null,
-            results: adaptedResults,
-            provider: 'serpapi-fallback',
-            fallbackReason: reason
-          });
-        }
-      } catch (fbErr) {}
-      return resolve({ query: cleanQuery, count: 0, results: [], error: reason, provider: 'serpapi' });
-    };
-
-    const encodedQuery = encodeURIComponent(cleanQuery);
-    const encodedKey = encodeURIComponent(serpApiKey);
-    const searchPath = `/search.json?engine=google&q=${encodedQuery}&api_key=${encodedKey}&num=6&gl=id&hl=id`;
-
-    const options = {
-      hostname: 'serpapi.com',
-      port: 443,
-      path: searchPath,
-      method: 'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Zoz-Router/2.0'
-      },
-      timeout: 10000
-    };
-
-    const req = https.request(options, (res) => {
-      let rawData = '';
-      res.on('data', chunk => rawData += chunk);
-      res.on('end', async () => {
-        try {
-          const parsed = JSON.parse(rawData);
-
-          if (res.statusCode >= 400 || parsed.error) {
-            const errMsg = parsed.error || `SerpAPI HTTP ${res.statusCode} Error`;
-            return await triggerSerperFactFallback(errMsg);
-          }
-
-          const results = [];
-
-          if (parsed.knowledge_graph) {
-            const kgUrl = parsed.knowledge_graph.website || (parsed.knowledge_graph.source && parsed.knowledge_graph.source.link) || 'https://google.com';
-            results.push({
-              title: parsed.knowledge_graph.title || 'Knowledge Graph Fact',
-              url: kgUrl,
-              link: kgUrl,
-              snippet: `${parsed.knowledge_graph.type ? '[' + parsed.knowledge_graph.type + '] ' : ''}${parsed.knowledge_graph.description || ''}`,
-              type: 'knowledgeGraph',
-              sourceProvider: 'SerpAPI'
-            });
-          }
-
-          if (parsed.answer_box) {
-            const abUrl = parsed.answer_box.link || 'https://google.com';
-            results.push({
-              title: parsed.answer_box.title || 'Jawaban Teratas',
-              url: abUrl,
-              link: abUrl,
-              snippet: parsed.answer_box.answer || parsed.answer_box.snippet || '',
-              type: 'answerBox',
-              sourceProvider: 'SerpAPI'
-            });
-          }
-
-          if (Array.isArray(parsed.organic_results)) {
-            parsed.organic_results.slice(0, 6).forEach((item, idx) => {
-              if (item.link) {
-                const domain = extractDomainSafe(item.link);
-                results.push({
-                  title: item.title || `Hasil SerpAPI ${idx + 1}`,
-                  url: item.link,
-                  link: item.link,
-                  snippet: item.snippet || '',
-                  date: item.date || null,
-                  domain: domain,
-                  sourceProvider: 'SerpAPI'
-                });
-              }
-            });
-          }
-
-          if (results.length === 0) {
-            return await triggerSerperFactFallback('SerpAPI returned 0 results');
-          }
-
-          resolve({
-            query: cleanQuery,
-            count: results.length,
-            knowledgeGraph: parsed.knowledge_graph || null,
-            answerBox: parsed.answer_box || null,
-            results: results,
-            provider: 'serpapi'
-          });
-        } catch (e) {
-          await triggerSerperFactFallback(e.message);
-        }
-      });
-    });
-
-    req.on('timeout', async () => {
-      req.destroy();
-      await triggerSerperFactFallback('SerpAPI search timed out');
-    });
-
-    req.on('error', async (err) => {
-      await triggerSerperFactFallback(err.message);
-    });
-
-    req.end();
-  });
-}
 
 // Helper to normalize Ollama/API endpoints
 function normalizeEndpoint(ep) {
@@ -770,7 +633,6 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
   if (!task) return;
 
   const serperKey = config.serperApiKey || process.env.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
-  const serpApiKey = config.serpApiKey || process.env.SERPAPI_API_KEY || '0e072bf542835eca933f9d1994524fae98b5a9dcd785dfcab3f6438102ed42e8';
   const maxIterations = config.maxIterations || 3;
   let allSources = [];
   let dataTemuan = [];
@@ -778,11 +640,11 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
 
   try {
     // ==========================================
-    // PILAR 1 & 6: PENCARIAN MULTI-TAHAP & ASYNCHRONOUS QUEUE (MULTI-AGENT MULTI-SOURCE)
+    // PILAR 1 & 6: PENCARIAN MULTI-TAHAP & ASYNCHRONOUS QUEUE (DUAL-AGENT SERPER DIVERGEN)
     // ==========================================
-    task.currentStep = '[Langkah 1/3] Menelusuri Google via Multi-Agen (Serper + SerpAPI)...';
+    task.currentStep = '[Langkah 1/3] Menelusuri Google via Multi-Agen (Dual-Agent Serper Divergen)...';
     task.progressPercent = 15;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 1/3] Memulai riset multi-sumber paralel untuk: "${topik}"`);
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 1/3] Memulai riset dual-agen Google Serper divergen untuk: "${topik}"`);
 
     let currentQuery = topik;
 
@@ -794,69 +656,117 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
         return;
       }
 
-      task.currentStep = `[Langkah 1/3] Iterasi ${i}/${maxIterations}: Menjelajah Paralel (Agen 1: Serper & Agen 2: SerpAPI) -> "${currentQuery}"`;
+      task.currentStep = `[Langkah 1/3] Iterasi ${i}/${maxIterations}: Menjelajah Paralel (Agen 1: Serper Primer & Agen 2: Serper Divergen) -> "${currentQuery}"`;
       task.progressPercent = 15 + Math.round((i / (maxIterations + 1)) * 30);
-      task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Iterasi ${i}: Menjalankan riset paralel multi-sumber -> "${currentQuery}"`);
+      task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Iterasi ${i}: Menjalankan riset paralel Serper divergen -> "${currentQuery}"`);
 
-      // 1. Jalankan Agen 1 (Serper) dan Agen 2 (SerpAPI) secara BERSAMAAN (Paralel)
-      const [searchResSerper, searchResSerpApi] = await Promise.all([
-        performWebSearch(currentQuery, serperKey),
-        performSerpApiSearch(currentQuery, serpApiKey)
-      ]);
+      // 1. Eksekusi Agen 1 (Perspektif Primer)
+      const searchResSerper = await performWebSearch(currentQuery, serperKey);
+
+      // Kumpulkan URL dan domain unik dari Agen 1 serta riwayat sumber sebelumnya
+      const agent1Urls = new Set();
+      const agent1Domains = new Set();
+      (searchResSerper.results || []).forEach(r => {
+        if (r.url) agent1Urls.add(r.url);
+        const d = (r.domain || extractDomainSafe(r.url) || '').toLowerCase().replace(/^www\./, '');
+        if (d) agent1Domains.add(d);
+      });
+      allSources.forEach(s => {
+        if (s.url) agent1Urls.add(s.url);
+        const d = (s.domain || extractDomainSafe(s.url) || '').toLowerCase().replace(/^www\./, '');
+        if (d) agent1Domains.add(d);
+      });
+
+      // 2. Eksekusi Agen 2 (Perspektif Divergen / Analitis Mendalam dengan Eksklusi Domain)
+      let divergentQuery = `${currentQuery} analisis mendalam data statistik riset teknis 2026`;
+      const topExclude = Array.from(agent1Domains).slice(0, 3);
+      if (topExclude.length > 0) {
+        divergentQuery += topExclude.map(d => ` -site:${d}`).join('');
+      }
+      const searchResDivergentRaw = await performWebSearch(divergentQuery, serperKey);
+
+      // Filter ketat Agen 2: Zero-Collision (100% domain & URL berbeda)
+      const filteredDivergentResults = [];
+      if (Array.isArray(searchResDivergentRaw.results)) {
+        for (const item of searchResDivergentRaw.results) {
+          if (!item.url) continue;
+          const itemDomain = (item.domain || extractDomainSafe(item.url) || '').toLowerCase().replace(/^www\./, '');
+          if (agent1Urls.has(item.url) || (itemDomain && agent1Domains.has(itemDomain))) {
+            continue; // Eliminasi mutlak: tidak boleh sama domain atau URL!
+          }
+          filteredDivergentResults.push({
+            ...item,
+            domain: itemDomain || item.domain,
+            sourceProvider: 'Serper (Divergen)'
+          });
+          agent1Urls.add(item.url);
+          if (itemDomain) agent1Domains.add(itemDomain);
+          if (filteredDivergentResults.length >= 6) break;
+        }
+      }
+
+      const searchResDivergent = {
+        query: divergentQuery,
+        error: searchResDivergentRaw.error,
+        count: filteredDivergentResults.length,
+        knowledgeGraph: searchResDivergentRaw.knowledgeGraph || null,
+        answerBox: searchResDivergentRaw.answerBox || null,
+        results: filteredDivergentResults
+      };
 
       if (searchResSerper.error) {
-        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Agen 1 (Serper): "${searchResSerper.error}".`);
+        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Agen 1 (Serper Primer): "${searchResSerper.error}".`);
       } else {
-        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Agen 1 (Serper) menemukan ${searchResSerper.results?.length || 0} sumber data web.`);
+        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Agen 1 (Serper Primer) menemukan ${searchResSerper.results?.length || 0} sumber data web.`);
       }
 
-      if (searchResSerpApi.error) {
-        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Agen 2 (SerpAPI): "${searchResSerpApi.error}".`);
+      if (searchResDivergent.error) {
+        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Agen 2 (Serper Divergen): "${searchResDivergent.error}".`);
       } else {
-        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Agen 2 (SerpAPI) menemukan ${searchResSerpApi.results?.length || 0} sumber data Google organik/knowledge.`);
+        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Agen 2 (Serper Divergen) menemukan ${searchResDivergent.results.length} sumber unik (100% domain berbeda).`);
       }
 
-      // Format data Agen 1 (Google Serper)
+      // Format data Agen 1 (Google Serper Primer)
       let serperBlock = '';
       if (searchResSerper.knowledgeGraph) {
-        serperBlock += `\n[KNOWLEDGE GRAPH - SERPER]: ${searchResSerper.knowledgeGraph.title || ''} - ${searchResSerper.knowledgeGraph.snippet || ''}\n`;
+        serperBlock += `\n[KNOWLEDGE GRAPH - SERPER PRIMER]: ${searchResSerper.knowledgeGraph.title || ''} - ${searchResSerper.knowledgeGraph.snippet || ''}\n`;
       }
       if (searchResSerper.answerBox) {
-        serperBlock += `\n[ANSWER BOX - SERPER]: ${searchResSerper.answerBox.snippet || ''}\n`;
+        serperBlock += `\n[ANSWER BOX - SERPER PRIMER]: ${searchResSerper.answerBox.snippet || ''}\n`;
       }
       if (Array.isArray(searchResSerper.results)) {
         searchResSerper.results.forEach((item) => {
-          serperBlock += `\n- [Web Serper] ${item.title}: ${item.snippet} (${item.url})`;
+          serperBlock += `\n- [Web Serper Primer] ${item.title}: ${item.snippet} (${item.url})`;
           if (item.url && !allSources.some(s => s.url === item.url)) {
             allSources.push({
               title: item.title,
               url: item.url,
               snippet: item.snippet,
               domain: item.domain || extractDomainSafe(item.url),
-              sourceProvider: 'Serper'
+              sourceProvider: 'Serper (Primer)'
             });
           }
         });
       }
 
-      // Format data Agen 2 (Google SerpAPI)
-      let serpApiBlock = '';
-      if (searchResSerpApi.knowledgeGraph) {
-        serpApiBlock += `\n[KNOWLEDGE GRAPH - SERPAPI]: ${searchResSerpApi.knowledgeGraph.title || ''} - ${searchResSerpApi.knowledgeGraph.snippet || ''}\n`;
+      // Format data Agen 2 (Google Serper Divergen - Domain Mandiri)
+      let divergentBlock = '';
+      if (searchResDivergent.knowledgeGraph) {
+        divergentBlock += `\n[KNOWLEDGE GRAPH - SERPER DIVERGEN]: ${searchResDivergent.knowledgeGraph.title || ''} - ${searchResDivergent.knowledgeGraph.snippet || ''}\n`;
       }
-      if (searchResSerpApi.answerBox) {
-        serpApiBlock += `\n[ANSWER BOX - SERPAPI]: ${searchResSerpApi.answerBox.snippet || ''}\n`;
+      if (searchResDivergent.answerBox) {
+        divergentBlock += `\n[ANSWER BOX - SERPER DIVERGEN]: ${searchResDivergent.answerBox.snippet || ''}\n`;
       }
-      if (Array.isArray(searchResSerpApi.results)) {
-        searchResSerpApi.results.forEach((item) => {
-          serpApiBlock += `\n- [Web SerpAPI] ${item.title}: ${item.snippet} (${item.url})`;
+      if (Array.isArray(searchResDivergent.results)) {
+        searchResDivergent.results.forEach((item) => {
+          divergentBlock += `\n- [Web Serper Divergen] ${item.title}: ${item.snippet} (${item.url})`;
           if (item.url && !allSources.some(s => s.url === item.url)) {
             allSources.push({
               title: item.title,
               url: item.url,
               snippet: item.snippet,
               domain: item.domain || extractDomainSafe(item.url),
-              sourceProvider: 'SerpAPI'
+              sourceProvider: 'Serper (Divergen)'
             });
           }
         });
@@ -874,21 +784,21 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
         timestamp: new Date().toLocaleTimeString('id-ID'),
         agent1: {
           name: 'Agen 1 (Pakar Web Google)',
-          provider: 'Google Serper API',
+          provider: 'Google Serper API (Primer)',
           model: agent1Model || 'Model Obrolan',
           resultsCount: searchResSerper.results?.length || 0,
           results: (searchResSerper.results || []).slice(0, 6).map(r => ({ title: r.title, url: r.url, link: r.url, snippet: r.snippet })),
           analysis: 'Sedang menganalisis temuan web dan mengekstrak poin penting...'
         },
         agent2: {
-          name: 'Agen 2 (Pakar Data Spesifik)',
-          provider: searchResSerpApi.provider === 'serpapi-fallback' ? 'SerpAPI (Deep Fact Fallback)' : 'Google SerpAPI',
+          name: 'Agen 2 (Pakar Analisis Divergen)',
+          provider: 'Google Serper API (Divergen)',
           model: agent2Model || 'Model Obrolan',
-          resultsCount: searchResSerpApi.results?.length || 0,
-          knowledgeGraph: searchResSerpApi.knowledgeGraph || null,
-          answerBox: searchResSerpApi.answerBox || null,
-          results: (searchResSerpApi.results || []).slice(0, 6).map(r => ({ title: r.title, url: r.url, link: r.url, snippet: r.snippet })),
-          analysis: 'Sedang mengekstrak entitas spesifik dan data statistik terverifikasi...'
+          resultsCount: searchResDivergent.results?.length || 0,
+          knowledgeGraph: searchResDivergent.knowledgeGraph || null,
+          answerBox: searchResDivergent.answerBox || null,
+          results: (searchResDivergent.results || []).slice(0, 6).map(r => ({ title: r.title, url: r.url, link: r.url, snippet: r.snippet })),
+          analysis: 'Sedang mengekstrak data analitis mendalam dari domain independen 100% berbeda...'
         },
         scraper: {
           status: 'siap',
@@ -906,25 +816,25 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
       };
 
       // 2. Jalankan Analisis Spesialis Paralel oleh LLM Agen 1 dan LLM Agen 2
-      task.currentStep = `[Langkah 1/3] Iterasi ${i}/${maxIterations}: Agen 1 (${agent1Model || 'Pakar Web'}) & Agen 2 (${agent2Model || 'Pakar Data'}) menganalisis data temuan...`;
+      task.currentStep = `[Langkah 1/3] Iterasi ${i}/${maxIterations}: Agen 1 (${agent1Model || 'Pakar Web'}) & Agen 2 (${agent2Model || 'Pakar Divergen'}) menganalisis data temuan...`;
 
       const promptAgen1 = `Anda adalah Agen 1 (Pakar Analis Web Google).
 Topik Riset: "${topik}"
 Sub-Query: "${currentQuery}"
-Data Mentah Web Serper:
+Data Mentah Web Serper Primer:
 ${serperBlock || 'Tidak ada data Serper.'}
 
 Tugas Anda:
 Analisis temuan web di atas secara objektif. Rangkum fakta utama, tren industri terbaru tahun 2026, dan poin-poin penting yang ditemukan dalam 2-3 paragraf padat.`;
 
-      const promptAgen2 = `Anda adalah Agen 2 (Pakar Analis Data Spesifik & Knowledge Graph).
+      const promptAgen2 = `Anda adalah Agen 2 (Pakar Analisis Data Mendalam & Divergen).
 Topik Riset: "${topik}"
 Sub-Query: "${currentQuery}"
-Data Mentah Google SerpAPI:
-${serpApiBlock || 'Tidak ada data SerpAPI.'}
+Data Mentah Web Serper Divergen (Sumber Domain Mandiri):
+${divergentBlock || 'Tidak ada data Serper Divergen.'}
 
 Tugas Anda:
-Analisis data di atas secara mendalam. Ekstrak entitas kunci, data statistik terverifikasi tahun 2026, relasi knowledge graph, dan aspek perbandingan spesifik dalam 2-3 paragraf padat.`;
+Analisis data di atas secara mendalam. Ekstrak entitas kunci, data statistik terverifikasi tahun 2026, aspek teknis spesifik, dan perspektif pelengkap dalam 2-3 paragraf padat.`;
 
       const [analisisAgen1, analisisAgen2] = await Promise.all([
         (serperBlock.trim()) ? callLLMBackend({
@@ -934,15 +844,15 @@ Analisis data di atas secara mendalam. Ekstrak entitas kunci, data statistik ter
           system: 'Anda adalah Agen 1: Analis Web Google yang fokus mengekstrak tren utama dan informasi relevan dari web.'
         }).catch(() => `[Ringkasan Ekstraksi Data Serper]:\n${serperBlock}`) : Promise.resolve('Tidak ada data dari Agen 1.'),
 
-        (serpApiBlock.trim()) ? callLLMBackend({
+        (divergentBlock.trim()) ? callLLMBackend({
           ...config,
           model: agent2Model,
           prompt: promptAgen2,
-          system: 'Anda adalah Agen 2: Analis Data Teknis & Knowledge Graph yang fokus mengekstrak fakta terverifikasi dan entitas spesifik.'
-        }).catch(() => `[Ringkasan Ekstraksi Data SerpAPI]:\n${serpApiBlock}`) : Promise.resolve('Tidak ada data dari Agen 2.')
+          system: 'Anda adalah Agen 2: Analis Data Divergen & Teknis yang fokus mengekstrak fakta terverifikasi dan sudut pandang spesifik dari domain mandiri.'
+        }).catch(() => `[Ringkasan Ekstraksi Data Serper Divergen]:\n${divergentBlock}`) : Promise.resolve('Tidak ada data dari Agen 2.')
       ]);
 
-      task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Analisis spesialis selesai: Agen 1 (${agent1Model || 'Pakar Web'}) & Agen 2 (${agent2Model || 'Pakar Data'}).`);
+      task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Analisis spesialis selesai: Agen 1 (${agent1Model || 'Pakar Web'}) & Agen 2 (${agent2Model || 'Pakar Divergen'}).`);
 
       // Update hasil analisis teks LLM ke snapshot Live Inspection
       if (task.liveInspection) {
@@ -950,7 +860,7 @@ Analisis data di atas secara mendalam. Ekstrak entitas kunci, data statistik ter
         if (task.liveInspection.agent2) task.liveInspection.agent2.analysis = analisisAgen2 || '';
       }
 
-      const findingsText = `[HASIL ANALISIS AGEN 1 - PAKAR WEB (${agent1Model || 'Model Bawaan'})]:\n${analisisAgen1}\n\n[HASIL ANALISIS AGEN 2 - PAKAR DATA SPESIFIK (${agent2Model || 'Model Bawaan'})]:\n${analisisAgen2}`;
+      const findingsText = `[HASIL ANALISIS AGEN 1 - PAKAR WEB (${agent1Model || 'Model Bawaan'})]:\n${analisisAgen1}\n\n[HASIL ANALISIS AGEN 2 - PAKAR ANALISIS DIVERGEN (${agent2Model || 'Model Bawaan'})]:\n${analisisAgen2}`;
 
       dataTemuan.push(`### Temuan Terverifikasi Iterasi ${i} (Query: "${currentQuery}"):\n${findingsText}`);
 
@@ -1105,14 +1015,14 @@ Daftar Seluruh Sumber Rujukan Terverifikasi (${allSources.length} Dokumen Web):
 ${allSources.map((s, idx) => `[${idx + 1}] [${s.sourceProvider || 'Web'}] ${s.title}: ${s.url}`).join('\n')}
 
 === TUGAS & PROTOKOL SINTESIS AGEN AKHIR ===
-1. Analisis Kritis & Eliminasi Redundansi: Baca seluruh data dari Agen 1 (Google Serper) dan Agen 2 (Google SerpAPI). Buang informasi tumpang tindih (duplikat) dan satukan data pelengkap.
+1. Analisis Kritis & Eliminasi Redundansi: Baca seluruh data dari Agen 1 (Google Serper Primer) dan Agen 2 (Google Serper Divergen). Buang informasi tumpang tindih dan konsolidasi data pelengkap dari domain independen 100% berbeda.
 2. Deteksi Kontradiksi & Cross-Validation: Jika terdapat kontradiksi atau perbedaan angka/fakta antara temuan Agen 1 dan Agen 2, sebutkan secara transparan di dalam laporan pada bagian validasi sumber.
 3. Kualitas Output Eksekutif: Susun menjadi laporan riset final yang sangat mendalam, objektif, berbasis data nyata, dan terstruktur rapi dalam format Markdown tahun rujukan 2026.
 
 Format Laporan yang WAJIB dipatuhi:
 # 🔬 DEEP RESEARCH REPORT: ${topik.toUpperCase()}
-> **Status:** Riset Kolaboratif Multi-Agen Selesai (Agen 1: Serper & Agen 2: SerpAPI)  
-> **Sumber Terpindai:** ${scrapedArticles.length} Artikel Utuh Scraping & ${allSources.length} Dokumen Web Terverifikasi  
+> **Status:** Riset Kolaboratif Dual-Agen Selesai (Agen 1: Serper Primer & Agen 2: Serper Divergen Zero-Overlap)  
+> **Sumber Terpindai:** ${scrapedArticles.length} Artikel Utuh Scraping & ${allSources.length} Dokumen Web Terverifikasi (Domain Mandiri)  
 > **Tahun Rujukan:** 2026
 
 ---
@@ -1124,7 +1034,7 @@ Format Laporan yang WAJIB dipatuhi:
 (Analisis teknis, fakta-fakta spesifik dari hasil penelusuran multi-sumber dan pemindaian artikel utuh, mekanisme kerja, dan data riil 2026)
 
 ## 3. ⚖️ Validasi Silang Multi-Agen & Penyaringan Kontradiksi (Cross-Verification & Fact-Checking)
-(Analisis perbandingan antara data Agen 1 Serper dan Agen 2 SerpAPI: sebutkan konsensus data, klarifikasi informasi yang berbeda/kontradiktif, dan verifikasi klaim utama)
+(Analisis perbandingan antara data Agen 1 Serper Primer dan Agen 2 Serper Divergen: sebutkan konsensus data, klarifikasi informasi yang berbeda/kontradiktif, dan verifikasi klaim utama)
 
 ## 4. 📊 Matriks Data & Kategorisasi Tren (Trend & Synthesis Mapping)
 - **Data & Fakta Statistik:** (Statistik konkret, angka, atau persentase)
@@ -1143,7 +1053,7 @@ Format Laporan yang WAJIB dipatuhi:
 
 ---
 ### 📚 Daftar Pustaka / Sumber Referensi:
-Sajikan seluruh tautan asli markdown [Nama Sumber](URL) lengkap dengan keterangan sumber asal (Serper / SerpAPI) agar pengguna dapat langsung mengeklik rujukan aslinya.`;
+Sajikan seluruh tautan asli markdown [Nama Sumber](URL) lengkap dengan keterangan sumber asal (Serper Primer / Serper Divergen) agar pengguna dapat langsung mengeklik rujukan aslinya.`;
 
     const laporanAkhir = await callLLMBackend({
       ...config,
@@ -1180,7 +1090,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-serpapi-key, x-ollama-key'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key'
     });
     return res.end();
   }
@@ -1443,53 +1353,6 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // SerpAPI Google Search Engine Endpoint (Multi-Source Deep Research)
-  if (pathname === '/api/serpapi/search' && (method === 'GET' || method === 'POST')) {
-    try {
-      let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
-      let apiKey = req.headers['x-serpapi-key'] || reqUrl.searchParams.get('apiKey') || '';
-      if (method === 'POST') {
-        const body = await parseBody(req);
-        query = body.query || body.q || query;
-        apiKey = body.apiKey || body.serpApiKey || apiKey;
-      }
-      if (!query) {
-        return sendJSON(res, 400, { error: 'Parameter query `q` atau body `{ query }` diperlukan.' });
-      }
-      const data = await performSerpApiSearch(query, apiKey);
-      return sendJSON(res, 200, data);
-    } catch (e) {
-      return sendJSON(res, 500, { error: 'Gagal melakukan pencarian SerpAPI: ' + e.message });
-    }
-  }
-
-  // SerpAPI Connectivity Test Endpoint
-  if ((pathname === '/api/test-serpapi' || pathname === '/api/serpapi/test') && (method === 'GET' || method === 'POST')) {
-    try {
-      let apiKey = req.headers['x-serpapi-key'] || reqUrl.searchParams.get('apiKey') || '';
-      if (method === 'POST') {
-        const body = await parseBody(req);
-        apiKey = body.apiKey || body.serpApiKey || apiKey;
-      }
-      const testResult = await performSerpApiSearch('teknologi AI 2026', apiKey);
-      if (testResult.error) {
-        return sendJSON(res, 400, {
-          success: false,
-          error: testResult.error,
-          message: 'Koneksi ke SerpAPI gagal atau API Key tidak valid.'
-        });
-      }
-      return sendJSON(res, 200, {
-        success: true,
-        count: testResult.count,
-        message: 'Koneksi SerpAPI berhasil! Ditemukan ' + testResult.count + ' hasil pencarian.',
-        provider: 'serpapi'
-      });
-    } catch (e) {
-      return sendJSON(res, 500, { success: false, error: 'Uji koneksi SerpAPI error: ' + e.message });
-    }
-  }
-
   // Deep Research: Start Autonomous Research (Background Worker)
   if ((pathname === '/api/mulai-riset' || pathname === '/api/deep-research/start') && method === 'POST') {
     try {
@@ -1525,7 +1388,6 @@ const server = http.createServer(async (req, res) => {
         openRouterKey: body.openRouterKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || process.env.OPENROUTER_API_KEY,
         ollamaApiKey: body.ollamaApiKey || body.apiKey || '',
         serperApiKey: body.serperApiKey || req.headers['x-serper-key'],
-        serpApiKey: body.serpApiKey || req.headers['x-serpapi-key'],
         agent1Model: body.agent1Model || null,
         agent2Model: body.agent2Model || null,
         finalModel: body.finalModel || null,
