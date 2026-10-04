@@ -104,6 +104,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       ollamaApiKey: '',
       openRouterKey: '',
       serperApiKey: '075538fed9c64990e1eb32a06726c1e55a933c1e',
+      serpApiKey: '0e072bf542835eca933f9d1994524fae98b5a9dcd785dfcab3f6438102ed42e8',
+      deepResearchAgent1Model: '',
+      deepResearchAgent2Model: '',
+      deepResearchFinalModel: '',
       ollamaModel: 'gemma4:31b',
       openRouterModel: 'deepseek/deepseek-r1:free',
       arenaModelA: 'gemma4:31b',
@@ -283,6 +287,12 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     settingSerperApiKey: $('#settingSerperApiKey'),
     toggleShowSerperKeyBtn: $('#toggleShowSerperKeyBtn'),
     testSerperBtn: $('#testSerperBtn'),
+    settingSerpApiKey: $('#settingSerpApiKey'),
+    toggleShowSerpApiKeyBtn: $('#toggleShowSerpApiKeyBtn'),
+    testSerpApiBtn: $('#testSerpApiBtn'),
+    settingDeepResearchAgent1Model: $('#settingDeepResearchAgent1Model'),
+    settingDeepResearchAgent2Model: $('#settingDeepResearchAgent2Model'),
+    settingDeepResearchFinalModel: $('#settingDeepResearchFinalModel'),
     settingAutoPolicy: $('#settingAutoPolicy'),
     paramTemperature: $('#paramTemperature'),
     valTemperature: $('#valTemperature'),
@@ -4481,6 +4491,54 @@ ${organicBlock}
     }
   }
 
+  // Client-Side Helper for SerpAPI Search
+  async function performClientSerpApiSearch(query, serpApiKey) {
+    try {
+      const key = serpApiKey || STATE.settings.serpApiKey || '0e072bf542835eca933f9d1994524fae98b5a9dcd785dfcab3f6438102ed42e8';
+      let data = null;
+
+      // Coba panggil proxy server lokal /api/serpapi/search
+      if (!IS_GITHUB_PAGES) {
+        const proxyRes = await fetch('/api/serpapi/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-serpapi-key': key },
+          body: JSON.stringify({ query: query, apiKey: key }),
+          signal: STATE.abortController?.signal
+        }).catch(() => null);
+        if (proxyRes && proxyRes.ok) data = await proxyRes.json();
+      }
+
+      if (!data) return null;
+
+      const sources = [];
+      let summary = '';
+      if (data.knowledgeGraph) {
+        summary += `\n[KG SERPAPI]: ${data.knowledgeGraph.title || ''}: ${data.knowledgeGraph.description || ''}\n`;
+      }
+      if (data.answerBox) {
+        summary += `\n[ANSWER SERPAPI]: ${data.answerBox.answer || data.answerBox.snippet || ''}\n`;
+      }
+      const list = data.results || [];
+      if (Array.isArray(list)) {
+        list.slice(0, 6).forEach((item, idx) => {
+          summary += `\n${idx + 1}. [SerpAPI] ${item.title}: ${item.snippet} (${item.url})`;
+          if (item.url) {
+            sources.push({
+              title: item.title,
+              url: item.url,
+              snippet: item.snippet || '',
+              domain: item.domain || item.url.replace(/^https?:\/\//i, '').split('/')[0],
+              sourceProvider: 'SerpAPI'
+            });
+          }
+        });
+      }
+      return { summary, sources };
+    } catch (e) {
+      return null;
+    }
+  }
+
   async function streamLLMSynthesis(engine, modelName, systemPrompt, session, bubbleText) {
     const streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
     let fullText = '';
@@ -4657,7 +4715,8 @@ ${organicBlock}
             headers: {
               'Content-Type': 'application/json',
               'Authorization': STATE.settings.openRouterKey ? `Bearer ${STATE.settings.openRouterKey}` : '',
-              'x-serper-key': STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e'
+              'x-serper-key': STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e',
+              'x-serpapi-key': STATE.settings.serpApiKey || '0e072bf542835eca933f9d1994524fae98b5a9dcd785dfcab3f6438102ed42e8'
             },
             body: JSON.stringify({
               topik: contextualTopic,
@@ -4668,6 +4727,10 @@ ${organicBlock}
               endpoint: STATE.settings.ollamaEndpoint,
               apiKey: engine === 'openrouter' ? STATE.settings.openRouterKey : (STATE.settings.ollamaApiKey || ''),
               serperApiKey: STATE.settings.serperApiKey,
+              serpApiKey: STATE.settings.serpApiKey,
+              agent1Model: STATE.settings.deepResearchAgent1Model || targetModel,
+              agent2Model: STATE.settings.deepResearchAgent2Model || targetModel,
+              finalModel: STATE.settings.deepResearchFinalModel || targetModel,
               maxIterations: 3
             }),
             signal: STATE.abortController.signal
@@ -4717,36 +4780,61 @@ ${organicBlock}
         }
       }
 
-      // 3. Fallback Client-Side Autonomous Deep Research Engine
+      // 3. Fallback Client-Side Autonomous Deep Research Engine (Multi-Source Parallel)
       if (!isBackendSuccess && !STATE.abortController?.signal.aborted) {
-        stepItems.push({ text: '[Langkah 1/3] Menelusuri Google untuk topik dasar & pemetaan tren...', status: 'active' });
-        renderResearchHUD(25, '[Langkah 1/3] Menelusuri Google untuk topik dasar & pemetaan tren...');
+        stepItems.push({ text: '[Langkah 1/3] Menelusuri Google via Multi-Agen (Serper + SerpAPI)...', status: 'active' });
+        renderResearchHUD(25, '[Langkah 1/3] Menelusuri Google via Multi-Agen (Serper + SerpAPI)...');
 
         const serperKey = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+        const serpKey = STATE.settings.serpApiKey || '0e072bf542835eca933f9d1994524fae98b5a9dcd785dfcab3f6438102ed42e8';
         let dataTemuan = [];
         let currentQuery = promptText;
 
-        // Iterasi 1: Google Search
-        const iter1 = await performClientWebSearch(currentQuery, serperKey);
-        if (iter1 && iter1.sources) {
-          allSources.push(...iter1.sources);
-          dataTemuan.push(`### Temuan Iterasi 1 (Query: "${currentQuery}"):\n${iter1.summary}`);
+        // Iterasi 1: Multi-Agent Parallel Search (Serper + SerpAPI)
+        const [iter1Serper, iter1SerpApi] = await Promise.all([
+          performClientWebSearch(currentQuery, serperKey),
+          performClientSerpApiSearch(currentQuery, serpKey)
+        ]);
+
+        let iter1Summary = '';
+        if (iter1Serper && iter1Serper.sources) {
+          allSources.push(...iter1Serper.sources);
+          iter1Summary += `\n[AGEN 1 - SERPER]:\n${iter1Serper.summary}\n`;
         }
+        if (iter1SerpApi && iter1SerpApi.sources) {
+          iter1SerpApi.sources.forEach(s => {
+            if (!allSources.some(existing => existing.url === s.url)) allSources.push(s);
+          });
+          iter1Summary += `\n[AGEN 2 - SERPAPI]:\n${iter1SerpApi.summary}\n`;
+        }
+        dataTemuan.push(`### Temuan Multi-Sumber Iterasi 1 (Query: "${currentQuery}"):\n${iter1Summary || 'Pencarian selesai.'}`);
 
         stepItems[stepItems.length - 1].status = 'done';
-        stepItems.push({ text: '[Langkah 2/3] Menganalisis & memindai konten mendalam artikel web (Web Scraping)...', status: 'active' });
+        stepItems.push({ text: '[Langkah 2/3] Menganalisis & memindai konten mendalam artikel web...', status: 'active' });
         renderResearchHUD(55, '[Langkah 2/3] Menganalisis & memindai konten mendalam artikel web...');
 
         // Iterasi 2: Eksplorasi Sub-Query & Analisis Teknis 2026
         await new Promise(r => setTimeout(r, 600));
         const subQuery = `${promptText} data statistik spesifikasi teknis arsitektur 2026`;
-        const iter2 = await performClientWebSearch(subQuery, serperKey);
-        if (iter2 && iter2.sources) {
-          iter2.sources.forEach(s => {
+        const [iter2Serper, iter2SerpApi] = await Promise.all([
+          performClientWebSearch(subQuery, serperKey),
+          performClientSerpApiSearch(subQuery, serpKey)
+        ]);
+
+        let iter2Summary = '';
+        if (iter2Serper && iter2Serper.sources) {
+          iter2Serper.sources.forEach(s => {
             if (!allSources.some(existing => existing.url === s.url)) allSources.push(s);
           });
-          dataTemuan.push(`### Temuan Iterasi 2 (Query: "${subQuery}"):\n${iter2.summary}`);
+          iter2Summary += `\n[AGEN 1 - SERPER]:\n${iter2Serper.summary}\n`;
         }
+        if (iter2SerpApi && iter2SerpApi.sources) {
+          iter2SerpApi.sources.forEach(s => {
+            if (!allSources.some(existing => existing.url === s.url)) allSources.push(s);
+          });
+          iter2Summary += `\n[AGEN 2 - SERPAPI]:\n${iter2SerpApi.summary}\n`;
+        }
+        dataTemuan.push(`### Temuan Multi-Sumber Iterasi 2 (Query: "${subQuery}"):\n${iter2Summary || 'Eksplorasi lanjutan selesai.'}`);
 
         stepItems[stepItems.length - 1].status = 'done';
         stepItems.push({ text: '[Langkah 3/3] Validasi silang fakta, kategorisasi tren, & menyusun laporan riset eksekutif...', status: 'active' });
@@ -6065,6 +6153,10 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     if (els.settingOllamaApiKey) els.settingOllamaApiKey.value = STATE.settings.ollamaApiKey || '';
     if (els.settingOpenRouterKey) els.settingOpenRouterKey.value = STATE.settings.openRouterKey || '';
     if (els.settingSerperApiKey) els.settingSerperApiKey.value = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+    if (els.settingSerpApiKey) els.settingSerpApiKey.value = STATE.settings.serpApiKey || '0e072bf542835eca933f9d1994524fae98b5a9dcd785dfcab3f6438102ed42e8';
+    if (els.settingDeepResearchAgent1Model) els.settingDeepResearchAgent1Model.value = STATE.settings.deepResearchAgent1Model || '';
+    if (els.settingDeepResearchAgent2Model) els.settingDeepResearchAgent2Model.value = STATE.settings.deepResearchAgent2Model || '';
+    if (els.settingDeepResearchFinalModel) els.settingDeepResearchFinalModel.value = STATE.settings.deepResearchFinalModel || '';
     if (els.paramTemperature) els.paramTemperature.value = STATE.settings.temperature ?? 0.7;
     if (els.valTemperature) els.valTemperature.innerText = STATE.settings.temperature ?? 0.7;
     if (els.paramTopP) els.paramTopP.value = STATE.settings.topP ?? 0.9;
@@ -6558,6 +6650,59 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       }
     });
 
+    els.toggleShowSerpApiKeyBtn?.addEventListener('click', () => {
+      if (!els.settingSerpApiKey) return;
+      const isPass = els.settingSerpApiKey.type === 'password';
+      els.settingSerpApiKey.type = isPass ? 'text' : 'password';
+      els.toggleShowSerpApiKeyBtn.innerHTML = isPass ? '<i class="fa-solid fa-eye-slash"></i>' : '<i class="fa-solid fa-eye"></i>';
+    });
+
+    els.testSerpApiBtn?.addEventListener('click', async () => {
+      const key = els.settingSerpApiKey ? els.settingSerpApiKey.value.trim() : '';
+      if (!key) {
+        showToast('Masukkan SerpAPI Key terlebih dahulu.', 'error');
+        return;
+      }
+      try {
+        els.testSerpApiBtn.disabled = true;
+        els.testSerpApiBtn.innerText = 'Menguji...';
+        
+        let testOk = false;
+        let testMsg = '';
+
+        if (!IS_GITHUB_PAGES) {
+          const res = await fetch('/api/test-serpapi', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiKey: key })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            testOk = true;
+            testMsg = data.message || `Koneksi SerpAPI sukses! Ditemukan ${data.count} hasil.`;
+          } else {
+            testMsg = data.error || data.message || 'Key SerpAPI tidak valid';
+          }
+        } else {
+          testOk = Boolean(key.length >= 32);
+          testMsg = testOk ? 'Format SerpAPI Key terverifikasi valid!' : 'Panjang SerpAPI Key tidak sesuai standar.';
+        }
+
+        if (testOk) {
+          showToast(`✅ ${testMsg}`);
+        } else {
+          showToast(`❌ SerpAPI Error: ${testMsg}`, 'error');
+        }
+      } catch (e) {
+        showToast('❌ Gagal memeriksa SerpAPI Key: ' + e.message, 'error');
+      } finally {
+        if (els.testSerpApiBtn) {
+          els.testSerpApiBtn.disabled = false;
+          els.testSerpApiBtn.innerText = 'Tes SerpAPI';
+        }
+      }
+    });
+
     els.testOllamaBtn.addEventListener('click', async () => {
       const ep = normalizeEndpoint(els.settingOllamaEndpoint.value.trim() || 'http://127.0.0.1:11434');
       const key = els.settingOllamaApiKey ? els.settingOllamaApiKey.value.trim() : '';
@@ -6637,6 +6782,22 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
       if (els.settingSerperApiKey) {
         STATE.settings.serperApiKey = els.settingSerperApiKey.value.trim();
+      }
+
+      if (els.settingSerpApiKey) {
+        STATE.settings.serpApiKey = els.settingSerpApiKey.value.trim();
+      }
+
+      if (els.settingDeepResearchAgent1Model) {
+        STATE.settings.deepResearchAgent1Model = els.settingDeepResearchAgent1Model.value.trim();
+      }
+
+      if (els.settingDeepResearchAgent2Model) {
+        STATE.settings.deepResearchAgent2Model = els.settingDeepResearchAgent2Model.value.trim();
+      }
+
+      if (els.settingDeepResearchFinalModel) {
+        STATE.settings.deepResearchFinalModel = els.settingDeepResearchFinalModel.value.trim();
       }
 
       if (els.paramTemperature) STATE.settings.temperature = parseFloat(els.paramTemperature.value);
