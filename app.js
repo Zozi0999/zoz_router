@@ -4155,7 +4155,16 @@ ${organicBlock}
         signal: STATE.abortController?.signal
       });
 
-      if (!response.ok) throw new Error(`OpenRouter HTTP ${response.status}`);
+      if (!response.ok) {
+        let errDetail = `OpenRouter HTTP ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData && errData.error) {
+            errDetail = typeof errData.error === 'object' ? (errData.error.message || JSON.stringify(errData.error)) : errData.error;
+          }
+        } catch (je) {}
+        throw new Error(errDetail);
+      }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -4173,12 +4182,18 @@ ${organicBlock}
           if (trimmed.startsWith('data: ')) {
             try {
               const parsed = JSON.parse(trimmed.replace(/^data:\s*/, ''));
+              if (parsed.error) {
+                const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
+                throw new Error(errStr);
+              }
               const delta = parsed.choices?.[0]?.delta?.content;
               if (delta) {
                 fullText += delta;
                 streamRenderer.append(delta);
               }
-            } catch (e) {}
+            } catch (e) {
+              if (e.message && !e.message.includes('JSON')) throw e;
+            }
           }
         }
       }
@@ -4208,7 +4223,16 @@ ${organicBlock}
         signal: STATE.abortController?.signal
       });
 
-      if (!response.ok) throw new Error(`Ollama HTTP ${response.status}`);
+      if (!response.ok) {
+        let errDetail = `Ollama HTTP ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData && errData.error) {
+            errDetail = typeof errData.error === 'object' ? (errData.error.message || JSON.stringify(errData.error)) : errData.error;
+          }
+        } catch (je) {}
+        throw new Error(errDetail);
+      }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -4224,11 +4248,17 @@ ${organicBlock}
           if (!line.trim()) continue;
           try {
             const parsed = JSON.parse(line);
+            if (parsed.error) {
+              const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
+              throw new Error(errStr);
+            }
             if (parsed.message?.content) {
               fullText += parsed.message.content;
               streamRenderer.append(parsed.message.content);
             }
-          } catch (e) {}
+          } catch (e) {
+            if (e.message && !e.message.includes('JSON')) throw e;
+          }
         }
       }
       const renderedText = streamRenderer.finish();
@@ -4588,7 +4618,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       }
 
       // Finalize UI & Markdown rendering
-      if (finalReportText) {
+      if (finalReportText && finalReportText.trim()) {
         bubbleText.innerHTML = renderMarkdown(finalReportText);
         enhanceCodeBlocks(bubbleText);
         if (allSources.length > 0) {
@@ -4621,6 +4651,9 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         savePersistedState();
         AudioEngine.success();
         smartScrollChatToBottom(true);
+      } else if (!STATE.abortController?.signal.aborted) {
+        const actualFinalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
+        throw new Error(`Sintesis laporan Deep Research tidak menghasilkan konten teks dari model: ${actualFinalModel}`);
       }
 
     } catch (err) {
@@ -4645,7 +4678,30 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       } else {
         console.error('Deep research error:', err);
         const errorHtml = formatModelErrorMessage(engine, targetModel, err, false, true);
-        bubbleText.innerHTML = errorHtml;
+        bubbleText.innerHTML = `
+          ${errorHtml}
+          <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-sm btn-primary retry-research-btn" style="font-size:0.75rem;">
+              <i class="fa-solid fa-rotate-right"></i> Coba Riset Ulang
+            </button>
+            <button class="btn btn-sm btn-outline open-settings-btn" style="border-color:var(--neon-amber); color:var(--neon-amber); font-size:0.75rem;">
+              <i class="fa-solid fa-gear"></i> Buka Pengaturan Model Riset
+            </button>
+          </div>
+        `;
+
+        bubbleText.querySelector('.retry-research-btn')?.addEventListener('click', () => {
+          assistantRow.remove();
+          runDeepResearchStreaming(session, promptText, image, modelName, engine);
+        });
+
+        bubbleText.querySelector('.open-settings-btn')?.addEventListener('click', () => {
+          syncSettingsModalFields();
+          openModal('settingsModal');
+          const tabBtn = document.querySelector('.settings-tab-btn[data-tab="deepResearchTab"]');
+          if (tabBtn) tabBtn.click();
+        });
+
         AudioEngine.error();
       }
     } finally {
