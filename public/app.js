@@ -821,6 +821,25 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     return 'ses_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
   }
 
+  function sanitizeHtmlSafe(dirtyHtml) {
+    if (!dirtyHtml || typeof dirtyHtml !== 'string') return '';
+    if (window.DOMPurify) {
+      return DOMPurify.sanitize(dirtyHtml, {
+        ADD_ATTR: ['target', 'rel'],
+        FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form'],
+        FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover']
+      });
+    }
+    // Fallback native sanitizer jika DOMPurify belum termuat atau offline
+    return dirtyHtml
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+      .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+      .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
+      .replace(/<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi, '')
+      .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, '')
+      .replace(/\bon\w+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '');
+  }
+
   function renderMarkdown(rawText) {
     if (!rawText) return '';
     if (window.marked) {
@@ -828,7 +847,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         breaks: true,
         gfm: true
       });
-      return marked.parse(rawText);
+      const parsed = marked.parse(rawText);
+      return sanitizeHtmlSafe(parsed);
     }
     return escapeHtml(rawText).replace(/\n/g, '<br>');
   }
