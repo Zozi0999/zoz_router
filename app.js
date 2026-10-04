@@ -2094,6 +2094,9 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     const row = document.createElement('div');
     row.className = `message-row ${role}`;
     row.dataset.index = index;
+    if (content) {
+      row.dataset.fullContent = content;
+    }
 
     const avatarIcon = role === 'user' ? '<i class="fa-solid fa-user-ninja"></i>' : '<i class="fa-solid fa-microchip-ai"></i>';
     const roleLabel = role === 'user' ? 'Anda' : (model || 'Zoz AI');
@@ -2309,7 +2312,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
     // Message copy button
     row.querySelector('.copy-msg-btn')?.addEventListener('click', () => {
-      copyTextToClipboard(content, null, 'Pesan disalin ke clipboard!');
+      const textToCopy = row.dataset.fullContent || content || row.querySelector('.msg-text-content')?.innerText || '';
+      copyTextToClipboard(textToCopy, null, 'Pesan disalin ke clipboard!');
     });
 
     els.messagesList.appendChild(row);
@@ -3460,6 +3464,8 @@ ${organicBlock}
         <span>⚡ ${tps} tps</span>
       `;
 
+      assistantRow.dataset.fullContent = fullText;
+
       // Check if output is cut in half and provide one-click continuation button
       if (isOutputTruncated(fullText, doneReason === 'length' ? 'length' : null)) {
         attachContinuationButton(assistantRow.querySelector('.message-content-box') || assistantRow, session, assistantRow, modelName, 'ollama', fullText);
@@ -3705,6 +3711,8 @@ ${organicBlock}
         <span>⏱️ ${totalTime}s</span>
         <span>⚡ ${tps} tps</span>
       `;
+
+      assistantRow.dataset.fullContent = fullText;
 
       // Check if output is cut in half and provide one-click continuation button
       if (isOutputTruncated(fullText, finishReason)) {
@@ -5441,6 +5449,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(finalReportText, actualFinalModel, allSources);
         enhanceCodeBlocks(bubbleText);
         attachDeepResearchCardEvents(assistantRow, finalReportText, actualFinalModel, allSources, new Date().toISOString());
+        assistantRow.dataset.fullContent = finalReportText;
 
         if (allSources.length > 0) {
           renderMessageSources(assistantRow, allSources);
@@ -5482,6 +5491,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
           bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(stoppedText, actualFinalModel, allSources);
           enhanceCodeBlocks(bubbleText);
           attachDeepResearchCardEvents(assistantRow, stoppedText, actualFinalModel, allSources, new Date().toISOString());
+          assistantRow.dataset.fullContent = stoppedText;
           session.messages.push({
             role: 'assistant',
             content: stoppedText,
