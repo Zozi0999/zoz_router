@@ -1831,6 +1831,46 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Ollama Cloud: Get Real-Time Usage & Credits
+  if (pathname === '/api/ollama/usage' && method === 'GET') {
+    const authHeader = req.headers['authorization'] || (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null);
+    if (!authHeader) {
+      return sendJSON(res, 401, { error: 'Ollama API key is required' });
+    }
+
+    const options = {
+      hostname: 'ollama.com',
+      port: 443,
+      path: '/api/usage',
+      method: 'GET',
+      headers: {
+        'Authorization': authHeader,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    };
+
+    const proxyReq = https.request(options, (proxyRes) => {
+      let rawData = '';
+      proxyRes.on('data', chunk => rawData += chunk);
+      proxyRes.on('end', () => {
+        try {
+          const data = JSON.parse(rawData);
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          return sendJSON(res, proxyRes.statusCode, data);
+        } catch (e) {
+          return sendJSON(res, 502, { error: 'Failed to parse Ollama usage response' });
+        }
+      });
+    });
+
+    proxyReq.on('error', (err) => {
+      return sendJSON(res, 503, { error: 'Ollama usage check failed: ' + err.message });
+    });
+
+    proxyReq.end();
+    return;
+  }
+
   // Ollama: Start Background Service
   if (pathname === '/api/ollama/start' && method === 'POST') {
     const { spawn } = require('child_process');

@@ -48,10 +48,10 @@
         <div class="status-item" id="ollamaStatusItem">
           <div class="status-indicator" id="ollamaIndicator"></div>
           <div class="status-info">
-            <span class="status-label">OLLAMA LOCAL</span>
+            <span class="status-label">OLLAMA CLOUD</span>
             <span class="status-val" id="ollamaStatusVal">Memeriksa...</span>
           </div>
-          <button class="status-refresh-btn" id="refreshOllamaBtn" title="Refresh Ollama">
+          <button class="status-refresh-btn" id="refreshOllamaBtn" title="Refresh Ollama Cloud">
             <i class="fa-solid fa-rotate"></i>
           </button>
         </div>
@@ -137,7 +137,7 @@
           <!-- Mode Tabs -->
           <div class="mode-tabs">
             <button class="mode-tab active" data-mode="ollama" id="modeOllama">
-              <span class="tab-icon">🦙</span> Ollama Local
+              <span class="tab-icon">🦙</span> Ollama Cloud
             </button>
             <button class="mode-tab" data-mode="openrouter" id="modeOpenRouter">
               <span class="tab-icon">⚡</span> OpenRouter
@@ -414,42 +414,43 @@
         <!-- Tab 1: Providers -->
         <div class="settings-tab-pane active" id="tabProviders">
           <div class="form-group">
-            <label><i class="fa-solid fa-server"></i> Ollama Endpoint URL</label>
+            <label><i class="fa-solid fa-cloud"></i> Ollama Cloud Endpoint</label>
             <div class="input-with-action">
-              <input type="text" id="settingOllamaEndpoint" placeholder="http://127.0.0.1:11434" value="http://127.0.0.1:11434">
-              <button class="btn btn-sm btn-outline" id="testOllamaBtn">Tes Koneksi</button>
+              <input type="text" id="settingOllamaEndpoint" placeholder="https://ollama.com" value="https://ollama.com">
+              <button class="btn btn-sm btn-outline" id="testOllamaBtn">Tes Endpoint</button>
             </div>
-            <small class="form-hint">Port default Ollama lokal adalah 11434.</small>
+            <small class="form-hint">Server Cloud AI Ollama resmi: <code>https://ollama.com</code>.</small>
           </div>
 
           <div class="form-group">
-            <label><i class="fa-solid fa-shield-halved"></i> Ollama API Key (Opsional / Cloud Ollama)</label>
+            <label><i class="fa-solid fa-key"></i> Ollama Cloud API Key</label>
             <div class="input-with-action">
-              <input type="password" id="settingOllamaApiKey" placeholder="Opsional: Masukkan API Key Ollama jika menggunakan auth...">
+              <input type="password" id="settingOllamaApiKey" placeholder="Masukkan Ollama API Key dari ollama.com/settings...">
               <button class="btn btn-sm btn-outline" id="toggleShowOllamaKeyBtn"><i class="fa-solid fa-eye"></i></button>
+              <button class="btn btn-sm btn-outline" id="testOllamaKeyBtn">Validasi Key</button>
             </div>
-            <small class="form-hint">Diperlukan jika instance Ollama Anda (lokal / remote / cloud) dilindungi autentikasi API Key.</small>
+            <small class="form-hint">Dapatkan API Key dan kelola kredit di <a href="https://ollama.com/settings" target="_blank" rel="noopener">ollama.com/settings</a>.</small>
           </div>
 
-          <!-- Ollama Real-Time Status & Model Library Card -->
+          <!-- Ollama Cloud Real-Time Balance & Credits Card -->
           <div class="provider-status-card" id="settingOllamaStatusCard">
             <div class="provider-status-header">
               <div class="status-indicator">
                 <span class="pulse-dot active" id="settingOllamaStatusDot"></span>
-                <span class="status-title"><i class="fa-solid fa-server" style="color:var(--neon-teal);"></i> Status Ollama:</span>
-                <strong class="balance-value free-tier" id="settingOllamaStatusVal">100% Gratis &amp; Lokal (Unlimited)</strong>
+                <span class="status-title"><i class="fa-solid fa-coins" style="color:var(--neon-teal);"></i> Saldo Ollama Cloud:</span>
+                <strong class="balance-value" id="settingOllamaStatusVal">Memeriksa...</strong>
               </div>
               <div class="status-actions">
-                <button type="button" class="btn btn-xs btn-outline" id="btnRefreshOllamaStatus" title="Perbarui Status &amp; Model Ollama">
-                  <i class="fa-solid fa-arrows-rotate"></i> Cek Status
+                <button type="button" class="btn btn-xs btn-outline" id="btnRefreshOllamaStatus" title="Perbarui Status &amp; Saldo Ollama Cloud">
+                  <i class="fa-solid fa-arrows-rotate"></i> Cek Saldo
                 </button>
-                <a href="https://ollama.com/library" target="_blank" rel="noopener noreferrer" class="btn btn-xs btn-outline-teal" id="btnAddOllamaModels" title="Jelajahi dan Pasang Model Baru di Perpustakaan Resmi Ollama">
-                  <i class="fa-solid fa-box-open"></i> + Tambah Model
+                <a href="https://ollama.com/settings" target="_blank" rel="noopener noreferrer" class="btn btn-xs btn-primary-neon" id="btnAddOllamaModels" title="Beli atau Tambah Usage Credits Langsung di Ollama.com">
+                  <i class="fa-solid fa-credit-card"></i> + Beli / Tambah Saldo
                 </a>
               </div>
             </div>
             <div class="provider-status-meta" id="settingOllamaStatusMeta">
-              <span id="settingOllamaModelCountText"><i class="fa-solid fa-microchip"></i> 0 Model Terpasang</span> • <span><i class="fa-solid fa-bolt"></i> Bebas Biaya Token &amp; Kuota</span>
+              <span id="settingOllamaModelCountText"><i class="fa-solid fa-chart-pie"></i> Free Usage: Siap</span> • <span id="settingOllamaCreditsText"><i class="fa-solid fa-coins"></i> Usage Credits: $0.00</span>
             </div>
           </div>
 
@@ -870,7 +871,7 @@
       <!-- Tab Navigation: Ollama vs OpenRouter -->
       <div class="settings-tabs" style="padding: 0 20px; margin-bottom: 12px;">
         <button class="settings-tab-btn active" id="btnTabCatalogOllama" data-catalog-tab="ollama">
-          <i class="fa-solid fa-server"></i> Model Ollama (<span id="badgeOllamaCount">0</span>)
+          <i class="fa-solid fa-cloud"></i> Model Ollama Cloud (<span id="badgeOllamaCount">0</span>)
         </button>
         <button class="settings-tab-btn" id="btnTabCatalogOpenRouter" data-catalog-tab="openrouter">
           <i class="fa-solid fa-cloud"></i> Model OpenRouter (<span id="badgeOpenRouterCount">0</span>)

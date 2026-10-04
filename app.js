@@ -101,7 +101,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     ollamaModels: [...OFFICIAL_OLLAMA_CLOUD_MODELS],
     openRouterModels: [...DEFAULT_OPENROUTER_MODELS],
     settings: {
-      ollamaEndpoint: 'http://127.0.0.1:11434',
+      ollamaEndpoint: 'https://ollama.com',
       ollamaApiKey: '',
       openRouterKey: '',
       serperApiKey: '075538fed9c64990e1eb32a06726c1e55a933c1e',
@@ -124,7 +124,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     activeInspectionTab: 'agent1', // 'agent1' | 'agent2' | 'scraper'
     currentLiveInspection: null,
     openRouterBalance: null, // { totalCredits, totalUsage, remaining, isFreeTier, lastChecked }
-    ollamaStatus: { online: false, modelCount: 0, lastChecked: null }
+    ollamaBalance: null, // { currentBalance, freeUsage, lastChecked }
+    ollamaStatus: { online: true, modelCount: 0, lastChecked: null }
   };
 
   // ==================== AUDIO SYNTHESIZER (Sci-Fi Cyber Blips) ====================
@@ -281,10 +282,12 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     settingOllamaApiKey: $('#settingOllamaApiKey'),
     toggleShowOllamaKeyBtn: $('#toggleShowOllamaKeyBtn'),
     testOllamaBtn: $('#testOllamaBtn'),
+    testOllamaKeyBtn: $('#testOllamaKeyBtn'),
     settingOllamaStatusCard: $('#settingOllamaStatusCard'),
     settingOllamaStatusDot: $('#settingOllamaStatusDot'),
     settingOllamaStatusVal: $('#settingOllamaStatusVal'),
     settingOllamaModelCountText: $('#settingOllamaModelCountText'),
+    settingOllamaCreditsText: $('#settingOllamaCreditsText'),
     btnRefreshOllamaStatus: $('#btnRefreshOllamaStatus'),
     btnAddOllamaModels: $('#btnAddOllamaModels'),
     settingOpenRouterKey: $('#settingOpenRouterKey'),
@@ -3108,27 +3111,116 @@ ${organicBlock}
     }
   }
 
+  // ==================== OLLAMA CLOUD REAL-TIME BALANCE & USAGE ====================
+  async function fetchOllamaCloudUsage(forceRefresh = false) {
+    const key = (els.settingOllamaApiKey ? els.settingOllamaApiKey.value.trim() : '') || STATE.settings.ollamaApiKey;
+
+    // Set UI loading indicator
+    if (els.settingOllamaStatusVal) {
+      els.settingOllamaStatusVal.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Memeriksa...';
+    }
+    if (els.catalogBalanceValue && STATE.activeCatalogTab === 'ollama') {
+      els.catalogBalanceValue.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i>';
+    }
+
+    try {
+      const isDirect = IS_GITHUB_PAGES || !location.port;
+      const endpoint = isDirect ? 'https://ollama.com/api/usage' : '/api/ollama/usage';
+      const headers = {};
+      if (key) {
+        headers['Authorization'] = `Bearer ${key}`;
+        headers['x-ollama-key'] = key;
+      }
+
+      let usageData = null;
+      let res = await fetch(endpoint, { headers, cache: 'no-store' }).catch(() => null);
+      if (res && res.ok) {
+        const json = await res.json();
+        usageData = json.data || json;
+      }
+
+      let currentBalance = null;
+      if (usageData?.balance != null) {
+        currentBalance = Number(usageData.balance);
+      } else if (usageData?.usage_credits?.balance != null) {
+        currentBalance = Number(usageData.usage_credits.balance);
+      } else if (usageData?.current_balance != null) {
+        currentBalance = Number(usageData.current_balance);
+      }
+
+      let freeUsagePercent = null;
+      if (usageData?.free_usage?.percent != null) {
+        freeUsagePercent = usageData.free_usage.percent;
+      } else if (usageData?.free_usage_percent != null) {
+        freeUsagePercent = usageData.free_usage_percent;
+      }
+
+      STATE.ollamaBalance = {
+        currentBalance,
+        freeUsagePercent,
+        hasKey: Boolean(key),
+        raw: usageData,
+        lastChecked: new Date()
+      };
+
+      updateOllamaStatusUI();
+      return STATE.ollamaBalance;
+    } catch (e) {
+      console.warn('Ollama Cloud usage check note:', e);
+      STATE.ollamaBalance = {
+        currentBalance: null,
+        freeUsagePercent: null,
+        hasKey: Boolean(key),
+        error: e.message,
+        lastChecked: new Date()
+      };
+      updateOllamaStatusUI();
+      return null;
+    }
+  }
+
   function updateOllamaStatusUI() {
-    const isOnline = (STATE.ollamaModels && STATE.ollamaModels.length > 0) && (STATE.ollamaModels[0]?.cat !== 'error');
-    const modelCount = STATE.ollamaModels ? STATE.ollamaModels.length : 0;
+    const bal = STATE.ollamaBalance;
+    const hasKey = Boolean(STATE.settings.ollamaApiKey || (els.settingOllamaApiKey && els.settingOllamaApiKey.value.trim()));
 
-    STATE.ollamaStatus = {
-      online: isOnline,
-      modelCount,
-      lastChecked: new Date()
-    };
+    // Saldo teks
+    let balanceDisplay = '';
+    if (bal && bal.currentBalance != null) {
+      balanceDisplay = `$${bal.currentBalance.toFixed(2)} USD`;
+    } else if (hasKey) {
+      balanceDisplay = 'Aktif (Cloud Usage)';
+    } else {
+      balanceDisplay = 'Free Cloud Tier';
+    }
 
+    // Sidebar status: langsung tampilkan saldo atau status cloud
+    if (els.ollamaStatusVal) {
+      els.ollamaStatusVal.innerText = (bal && bal.currentBalance != null)
+        ? `$${bal.currentBalance.toFixed(2)}` 
+        : (hasKey ? 'Cloud Aktif' : 'Free Cloud');
+    }
+    if (els.ollamaIndicator) {
+      els.ollamaIndicator.className = 'status-indicator online';
+    }
+
+    // Settings modal card
     if (els.settingOllamaStatusDot) {
-      els.settingOllamaStatusDot.className = isOnline ? 'pulse-dot active' : 'pulse-dot warning';
+      els.settingOllamaStatusDot.className = 'pulse-dot active';
     }
 
     if (els.settingOllamaStatusVal) {
-      els.settingOllamaStatusVal.innerText = isOnline ? '100% Gratis & Lokal (Unlimited)' : 'Siaga / Belum Terkoneksi';
-      els.settingOllamaStatusVal.style.color = isOnline ? 'var(--neon-teal)' : 'var(--neon-amber)';
+      els.settingOllamaStatusVal.innerText = balanceDisplay;
+      els.settingOllamaStatusVal.style.color = 'var(--neon-teal)';
     }
 
     if (els.settingOllamaModelCountText) {
-      els.settingOllamaModelCountText.innerHTML = `<i class="fa-solid fa-microchip"></i> ${modelCount} Model Terpasang`;
+      const freeStr = bal?.freeUsagePercent != null ? `${bal.freeUsagePercent}% Terpakai` : 'Tersedia';
+      els.settingOllamaModelCountText.innerHTML = `<i class="fa-solid fa-chart-pie"></i> Free Usage: ${freeStr}`;
+    }
+
+    if (els.settingOllamaCreditsText) {
+      const credStr = bal?.currentBalance != null ? `$${bal.currentBalance.toFixed(2)}` : (hasKey ? 'Pay-as-you-go' : 'Siap Diisi');
+      els.settingOllamaCreditsText.innerHTML = `<i class="fa-solid fa-coins"></i> Usage Credits: ${credStr}`;
     }
 
     // Banner di Live Model Catalog Modal
@@ -3164,24 +3256,30 @@ ${organicBlock}
         els.btnCatalogAddCredits.title = 'Buka halaman resmi top-up / pembelian kredit OpenRouter';
       }
     } else {
-      // Ollama tab
-      const isOnline = STATE.ollamaStatus?.online ?? ((STATE.ollamaModels || []).length > 0);
-      const count = STATE.ollamaModels ? STATE.ollamaModels.length : 0;
+      // Ollama Cloud tab
+      const bal = STATE.ollamaBalance;
+      const hasKey = Boolean(STATE.settings.ollamaApiKey || (els.settingOllamaApiKey && els.settingOllamaApiKey.value.trim()));
+      
+      const balanceStr = bal && bal.currentBalance != null 
+        ? `$${bal.currentBalance.toFixed(2)} USD` 
+        : (hasKey ? 'Usage Credits Aktif' : 'Free Cloud Tier');
+
+      const freeStr = bal?.freeUsagePercent != null ? `Free Usage: ${bal.freeUsagePercent}% • Pay-as-you-go` : 'Free Cloud (Gemma, Nemotron, GPT-OSS) + Pay-as-you-go';
 
       if (els.catalogBalanceIcon) {
-        els.catalogBalanceIcon.innerHTML = '<i class="fa-solid fa-server" style="color: var(--neon-teal); font-size: 0.95rem;"></i>';
+        els.catalogBalanceIcon.innerHTML = '<i class="fa-solid fa-coins" style="color: var(--neon-teal); font-size: 0.95rem;"></i>';
       }
       if (els.catalogBalanceText) {
-        els.catalogBalanceText.innerHTML = `Status Ollama: <strong id="catalogBalanceValue" style="color: var(--neon-teal);">${isOnline ? '100% Gratis & Lokal (Unlimited)' : 'Siaga / Menghubungkan...'}</strong>`;
+        els.catalogBalanceText.innerHTML = `Saldo Ollama Cloud: <strong id="catalogBalanceValue" style="color: var(--neon-teal); font-family: var(--font-code);">${escapeHtml(balanceStr)}</strong>`;
       }
       if (els.catalogBalanceSub) {
-        els.catalogBalanceSub.innerText = `(${count} Model di Disk Lokal)`;
+        els.catalogBalanceSub.innerText = `(${freeStr})`;
       }
       if (els.btnCatalogAddCredits) {
-        els.btnCatalogAddCredits.href = 'https://ollama.com/library';
-        els.btnCatalogAddCredits.innerHTML = '<i class="fa-solid fa-box-open"></i> + Tambah Model Baru';
-        els.btnCatalogAddCredits.className = 'btn btn-xs btn-outline-teal';
-        els.btnCatalogAddCredits.title = 'Jelajahi & pasang ribuan model gratis dari Perpustakaan Resmi Ollama';
+        els.btnCatalogAddCredits.href = 'https://ollama.com/settings';
+        els.btnCatalogAddCredits.innerHTML = '<i class="fa-solid fa-credit-card"></i> + Beli / Tambah Saldo';
+        els.btnCatalogAddCredits.className = 'btn btn-xs btn-primary-neon';
+        els.btnCatalogAddCredits.title = 'Buka halaman resmi settings & usage credits di Ollama.com untuk menambah saldo';
       }
     }
   }
@@ -7682,7 +7780,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     if (STATE.activeCatalogTab === 'openrouter') {
       fetchOpenRouterCredits();
     } else {
-      updateOllamaStatusUI();
+      fetchOllamaCloudUsage();
     }
 
     openModal('liveModelCatalogModal');
@@ -8921,16 +9019,47 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       }
     });
 
+    els.testOllamaKeyBtn?.addEventListener('click', async () => {
+      const key = els.settingOllamaApiKey ? els.settingOllamaApiKey.value.trim() : '';
+      if (!key) {
+        showToast('Masukkan Ollama Cloud API Key terlebih dahulu.', 'error');
+        return;
+      }
+      STATE.settings.ollamaApiKey = key;
+      savePersistedState();
+
+      const origHtml = els.testOllamaKeyBtn.innerHTML;
+      els.testOllamaKeyBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate fa-spin"></i> Validasi...';
+      try {
+        const usage = await fetchOllamaCloudUsage(true);
+        if (usage && !usage.error) {
+          showToast('✅ Ollama Cloud API Key valid & saldo tersambung!');
+          updateOllamaStatusUI();
+          AudioEngine.click();
+        } else if (usage && usage.error) {
+          showToast(`❌ Validasi gagal: ${usage.error}`, 'error');
+          updateOllamaStatusUI();
+        } else {
+          showToast('⚠️ Endpoint merespons, namun data kredit belum terbaca.', 'warning');
+          updateOllamaStatusUI();
+        }
+      } catch (err) {
+        showToast('❌ Gagal memeriksa API Key Ollama Cloud: ' + err.message, 'error');
+      } finally {
+        els.testOllamaKeyBtn.innerHTML = origHtml;
+      }
+    });
+
     els.btnRefreshOllamaStatus?.addEventListener('click', async () => {
       if (els.btnRefreshOllamaStatus) {
         els.btnRefreshOllamaStatus.innerHTML = '<i class="fa-solid fa-arrows-rotate fa-spin"></i> Cek...';
       }
-      await checkOllamaHealth();
+      await Promise.all([checkOllamaHealth(), fetchOllamaCloudUsage(true)]);
       updateOllamaStatusUI();
       if (els.btnRefreshOllamaStatus) {
-        els.btnRefreshOllamaStatus.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Cek Status';
+        els.btnRefreshOllamaStatus.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Cek Status & Saldo';
       }
-      showToast('🦙 Status Ollama diperbarui!');
+      showToast('🦙 Status & Saldo Ollama Cloud diperbarui!');
       AudioEngine.click();
     });
 
@@ -9064,6 +9193,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       }
       await Promise.all([
         checkOllamaHealth(), 
+        fetchOllamaCloudUsage(true),
         fetchOpenRouterModelsList(),
         fetchOpenRouterCredits(true)
       ]);
@@ -9084,7 +9214,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       if (STATE.activeCatalogTab === 'openrouter') {
         await fetchOpenRouterCredits(true);
       } else {
-        await checkOllamaHealth();
+        await Promise.all([checkOllamaHealth(), fetchOllamaCloudUsage(true)]);
         updateOllamaStatusUI();
       }
       updateCatalogBalanceBannerUI(STATE.activeCatalogTab);
@@ -9321,6 +9451,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     await checkOllamaHealth();
     await checkOpenRouterStatus();
     fetchOpenRouterModelsList();
+    fetchOllamaCloudUsage();
 
     console.log('⚡ ZOZ ROUTER INITIALIZED // READY');
   }
