@@ -122,10 +122,17 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     ctx: null,
     init() {
       if (!this.ctx && (window.AudioContext || window.webkitAudioContext)) {
-        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        try {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          this.ctx = new AudioContextClass();
+        } catch (e) {
+          this.ctx = null;
+        }
       }
       if (this.ctx && this.ctx.state === 'suspended') {
-        this.ctx.resume().catch(() => {});
+        try {
+          this.ctx.resume().catch(() => {});
+        } catch (e) {}
       }
     },
     playBeep(freq = 440, type = 'sine', duration = 0.08, gain = 0.05) {
