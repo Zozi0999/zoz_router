@@ -724,16 +724,23 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         }
       }
 
-      // 4. Sync from Device Disk Storage if backend is online
+      // 4. Sync lightweight session headers from Device Disk Storage if backend is online
       if (DeviceStorage.isDeviceBackendAvailable) {
         const diskList = await DeviceStorage.getSessionsList();
         if (Array.isArray(diskList) && diskList.length > 0) {
-          // Merge disk sessions with local state
           for (const diskItem of diskList) {
             const existing = STATE.sessions.find(s => s.id === diskItem.id);
             if (!existing) {
-              const fullSess = await DeviceStorage.getSession(diskItem.id);
-              if (fullSess) STATE.sessions.push(fullSess);
+              STATE.sessions.push({
+                id: diskItem.id,
+                title: diskItem.title || 'Obrolan Baru',
+                mode: diskItem.mode || 'ollama',
+                createdAt: diskItem.createdAt,
+                updatedAt: diskItem.updatedAt,
+                messages: [],
+                messageCount: diskItem.messageCount || 0,
+                _isLazyDisk: true
+              });
             }
           }
         }
@@ -1463,13 +1470,28 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     return newSession;
   }
 
-  function switchSession(sessionId) {
+  async function switchSession(sessionId) {
     if (STATE.isGenerating) {
       showToast('Harap tunggu atau hentikan generasi respons saat ini.', 'error');
       return;
     }
     const targetSession = STATE.sessions.find(s => s.id === sessionId);
     if (!targetSession) return;
+
+    // Lazy load messages from device disk if needed
+    if (targetSession._isLazyDisk && (!targetSession.messages || targetSession.messages.length === 0)) {
+      if (DeviceStorage.isDeviceBackendAvailable) {
+        try {
+          const fullSess = await DeviceStorage.getSession(sessionId);
+          if (fullSess && Array.isArray(fullSess.messages)) {
+            targetSession.messages = fullSess.messages;
+            delete targetSession._isLazyDisk;
+          }
+        } catch (e) {
+          console.warn('Gagal memuat detail sesi dari disk:', e);
+        }
+      }
+    }
 
     // If session has different mode, switch tab
     if (targetSession.mode && targetSession.mode !== STATE.mode) {
@@ -1649,8 +1671,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     els.chatHistoryList.innerHTML = '';
     const q = filterQuery.toLowerCase().trim();
     
-    // Unified list of all sessions across engines
-    const validSessions = STATE.sessions.filter(s => s.messages && s.messages.length > 0);
+    // Unified list of all sessions across engines (including lazy-loaded disk sessions)
+    const validSessions = STATE.sessions.filter(s => (s.messages && s.messages.length > 0) || (s._isLazyDisk && (s.messageCount > 0 || s.messages)));
     const filtered = validSessions.filter(s => !q || s.title.toLowerCase().includes(q) || (s.mode && s.mode.toLowerCase().includes(q)));
 
     // Sort strictly: Pinned sessions first, then most recently active descending
@@ -6450,6 +6472,18 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     if (isTabReload && savedActiveId && STATE.sessions.some(s => s.id === savedActiveId)) {
       // Browser Refresh: Keep the user on their active conversation and refresh it
       STATE.currentSessionId = savedActiveId;
+      const activeSess = STATE.sessions.find(s => s.id === savedActiveId);
+      if (activeSess && activeSess._isLazyDisk && (!activeSess.messages || activeSess.messages.length === 0)) {
+        if (DeviceStorage.isDeviceBackendAvailable) {
+          try {
+            const full = await DeviceStorage.getSession(savedActiveId);
+            if (full && Array.isArray(full.messages)) {
+              activeSess.messages = full.messages;
+              delete activeSess._isLazyDisk;
+            }
+          } catch (e) {}
+        }
+      }
       renderChatHistory();
       renderCurrentSession();
     } else {
