@@ -4241,6 +4241,74 @@ ${organicBlock}
     return balanced;
   }
 
+  // Helper non-streaming untuk eksekusi telaah mandiri Model Agen 1 & Agen 2 di browser
+  async function callClientLLMDirect(modelName, prompt, system = '', engine = '') {
+    if (!prompt || !modelName) return '';
+    const isModelOpenRouter = Boolean(modelName && modelName.includes('/'));
+    const isModelOllama = Boolean(modelName && (modelName.includes(':') || (!modelName.includes('/') && (STATE.ollamaModels || []).some(m => (m.name || m.model || m.id) === modelName))));
+    const resolvedEngine = isModelOpenRouter ? 'openrouter' : (isModelOllama ? 'ollama' : (engine || (STATE.settings.openRouterKey ? 'openrouter' : 'ollama')));
+
+    const messages = [];
+    if (system && system.trim()) messages.push({ role: 'system', content: system.trim() });
+    messages.push({ role: 'user', content: prompt.trim() });
+
+    if (resolvedEngine === 'openrouter' || (STATE.settings.openRouterKey && !isModelOllama)) {
+      const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
+      const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${STATE.settings.openRouterKey}`
+      };
+      if (isOpenRouterDirect) {
+        headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
+        headers['X-Title'] = 'ZOZ Router Multi-Agent';
+      }
+      const requestBody = {
+        model: modelName,
+        messages,
+        stream: false,
+        temperature: 0.3
+      };
+      if (!isOpenRouterDirect) requestBody.apiKey = STATE.settings.openRouterKey;
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+        signal: STATE.abortController?.signal
+      });
+      if (!res.ok) throw new Error(`OpenRouter HTTP ${res.status}`);
+      const data = await res.json();
+      return data.choices?.[0]?.message?.content || '';
+    } else {
+      const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+      const headers = { 'Content-Type': 'application/json' };
+      if (STATE.settings.ollamaApiKey) {
+        headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
+        headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
+      }
+      const requestBody = {
+        model: modelName,
+        messages,
+        stream: false,
+        options: { temperature: 0.3 },
+        endpoint: ep
+      };
+      if (STATE.settings.ollamaApiKey) requestBody.apiKey = STATE.settings.ollamaApiKey;
+      const chatUrl = IS_GITHUB_PAGES ? `${ep}/api/chat` : '/api/ollama/chat';
+
+      const res = await fetch(chatUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+        signal: STATE.abortController?.signal
+      });
+      if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
+      const data = await res.json();
+      return data.message?.content || '';
+    }
+  }
+
   async function streamLLMSynthesis(engine, modelName, systemPrompt, session, bubbleText) {
     const streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
     let fullText = '';
@@ -4564,18 +4632,37 @@ ${organicBlock}
 
         const iter1Divergent = await performClientDivergentSearch(currentQuery, serperKey, agent1DomainsIter1, agent1UrlsIter1);
 
-        let iter1Summary = '';
-        if (iter1Serper && iter1Serper.sources) {
-          allSources.push(...iter1Serper.sources);
-          iter1Summary += `\n[AGEN 1 - SERPER PRIMER]:\n${iter1Serper.summary}\n`;
+        const agent1Model = (STATE.settings.deepResearchAgent1Model && STATE.settings.deepResearchAgent1Model.trim()) ? STATE.settings.deepResearchAgent1Model.trim() : targetModel;
+        const agent2Model = (STATE.settings.deepResearchAgent2Model && STATE.settings.deepResearchAgent2Model.trim()) ? STATE.settings.deepResearchAgent2Model.trim() : targetModel;
+        const finalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
+
+        const serperBlockIter1 = (iter1Serper?.sources || []).map(s => `- [Web Primer] ${s.title}: ${s.snippet} (${s.url})`).join('\n');
+        const divergentBlockIter1 = (iter1Divergent?.sources || []).map(s => `- [Web Divergen] ${s.title}: ${s.snippet} (${s.url})`).join('\n');
+
+        let analisisAgen1Iter1 = '';
+        let analisisAgen2Iter1 = '';
+
+        try {
+          const [res1, res2] = await Promise.all([
+            serperBlockIter1 ? callClientLLMDirect(agent1Model, `Analisis temuan web primer untuk topik "${promptText}":\n${serperBlockIter1}`, 'Anda adalah Agen 1: Analis Web Primer Google. Rangkum fakta utama dan tren 2026 dalam 2 paragraf padat.') : Promise.resolve(''),
+            divergentBlockIter1 ? callClientLLMDirect(agent2Model, `Analisis data domain mandiri/teknis untuk topik "${promptText}":\n${divergentBlockIter1}`, 'Anda adalah Agen 2: Analis Data Divergen. Rangkum fakta teknis spesifik dan perspektif independen dalam 2 paragraf padat.') : Promise.resolve('')
+          ]);
+          analisisAgen1Iter1 = res1 || iter1Serper?.summary || '';
+          analisisAgen2Iter1 = res2 || iter1Divergent?.summary || '';
+        } catch (e) {
+          analisisAgen1Iter1 = iter1Serper?.summary || '';
+          analisisAgen2Iter1 = iter1Divergent?.summary || '';
         }
-        if (iter1Divergent && iter1Divergent.sources) {
+
+        if (iter1Serper?.sources) allSources.push(...iter1Serper.sources);
+        if (iter1Divergent?.sources) {
           iter1Divergent.sources.forEach(s => {
             if (!allSources.some(existing => existing.url === s.url)) allSources.push(s);
           });
-          iter1Summary += `\n[AGEN 2 - SERPER DIVERGEN]:\n${iter1Divergent.summary}\n`;
         }
-        dataTemuan.push(`### Temuan Multi-Sumber Iterasi 1 (Query: "${currentQuery}"):\n${iter1Summary || 'Pencarian selesai.'}`);
+
+        let iter1Summary = `[ANALISIS MODEL 1 - PAKAR WEB (${agent1Model})]:\n${analisisAgen1Iter1}\n\n[ANALISIS MODEL 2 - PAKAR DIVERGEN (${agent2Model})]:\n${analisisAgen2Iter1}`;
+        dataTemuan.push(`### Temuan Multi-Sumber Iterasi 1 (Query: "${currentQuery}"):\n${iter1Summary}`);
 
         const balancedArticlesIter1 = getBalancedScrapeList(allSources, 6);
         updateLiveInspectionData({
@@ -4586,19 +4673,19 @@ ${organicBlock}
           timestamp: new Date().toLocaleTimeString('id-ID'),
           agent1: {
             name: 'Agen 1 (Pakar Web Google)',
-            provider: 'Google Serper API',
-            model: STATE.settings.deepResearchAgent1Model || targetModel,
+            provider: 'Google Serper API (Primer)',
+            model: agent1Model,
             resultsCount: iter1Serper?.sources?.length || 0,
             results: (iter1Serper?.sources || []).map(s => ({ title: s.title, link: s.url, snippet: s.snippet })),
-            analysis: iter1Serper?.summary || (iter1Serper?.sources?.length ? 'Pencarian Agen 1 selesai.' : 'Menunggu hasil penelusuran...')
+            analysis: analisisAgen1Iter1 || (iter1Serper?.sources?.length ? 'Analisis Model 1 selesai.' : 'Menunggu hasil penelusuran...')
           },
           agent2: {
             name: 'Agen 2 (Pakar Analisis Divergen)',
-            provider: 'Google Serper (Divergen)',
-            model: STATE.settings.deepResearchAgent2Model || targetModel,
+            provider: 'Google Serper API (Divergen)',
+            model: agent2Model,
             resultsCount: iter1Divergent?.sources?.length || 0,
             results: (iter1Divergent?.sources || []).map(s => ({ title: s.title, link: s.url, snippet: s.snippet })),
-            analysis: iter1Divergent?.summary || (iter1Divergent?.sources?.length ? 'Pencarian divergen Serper selesai tanpa duplikasi domain.' : 'Pencarian selesai.')
+            analysis: analisisAgen2Iter1 || (iter1Divergent?.sources?.length ? 'Analisis Model 2 selesai tanpa duplikasi domain.' : 'Pencarian selesai.')
           },
           scraper: {
             status: 'siap',
@@ -4629,20 +4716,37 @@ ${organicBlock}
 
         const iter2Divergent = await performClientDivergentSearch(subQuery, serperKey, knownDomains, knownUrls);
 
-        let iter2Summary = '';
-        if (iter2Serper && iter2Serper.sources) {
+        const serperBlockIter2 = (iter2Serper?.sources || []).map(s => `- [Web Primer] ${s.title}: ${s.snippet} (${s.url})`).join('\n');
+        const divergentBlockIter2 = (iter2Divergent?.sources || []).map(s => `- [Web Divergen] ${s.title}: ${s.snippet} (${s.url})`).join('\n');
+
+        let analisisAgen1Iter2 = '';
+        let analisisAgen2Iter2 = '';
+
+        try {
+          const [res2A, res2B] = await Promise.all([
+            serperBlockIter2 ? callClientLLMDirect(agent1Model, `Sub-Query: "${subQuery}"\nData Web:\n${serperBlockIter2}`, 'Anda adalah Agen 1: Analis Web Primer. Ekstrak data dan perkembangan terkini 2026.') : Promise.resolve(''),
+            divergentBlockIter2 ? callClientLLMDirect(agent2Model, `Sub-Query: "${subQuery}"\nData Domain Mandiri:\n${divergentBlockIter2}`, 'Anda adalah Agen 2: Analis Data Divergen. Ekstrak spesifikasi teknis dan tantangan 2026.') : Promise.resolve('')
+          ]);
+          analisisAgen1Iter2 = res2A || iter2Serper?.summary || '';
+          analisisAgen2Iter2 = res2B || iter2Divergent?.summary || '';
+        } catch (e) {
+          analisisAgen1Iter2 = iter2Serper?.summary || '';
+          analisisAgen2Iter2 = iter2Divergent?.summary || '';
+        }
+
+        if (iter2Serper?.sources) {
           iter2Serper.sources.forEach(s => {
             if (!allSources.some(existing => existing.url === s.url)) allSources.push(s);
           });
-          iter2Summary += `\n[AGEN 1 - SERPER]:\n${iter2Serper.summary}\n`;
         }
-        if (iter2Divergent && iter2Divergent.sources) {
+        if (iter2Divergent?.sources) {
           iter2Divergent.sources.forEach(s => {
             if (!allSources.some(existing => existing.url === s.url)) allSources.push(s);
           });
-          iter2Summary += `\n[AGEN 2 - SERPER DIVERGEN]:\n${iter2Divergent.summary}\n`;
         }
-        dataTemuan.push(`### Temuan Multi-Sumber Iterasi 2 (Query: "${subQuery}"):\n${iter2Summary || 'Eksplorasi lanjutan selesai.'}`);
+
+        let iter2Summary = `[ANALISIS MODEL 1 - SERPER PRIMER (${agent1Model})]:\n${analisisAgen1Iter2}\n\n[ANALISIS MODEL 2 - SERPER DIVERGEN (${agent2Model})]:\n${analisisAgen2Iter2}`;
+        dataTemuan.push(`### Temuan Multi-Sumber Iterasi 2 (Query: "${subQuery}"):\n${iter2Summary}`);
 
         const balancedArticlesIter2 = getBalancedScrapeList(allSources, 6);
         updateLiveInspectionData({
@@ -4653,19 +4757,19 @@ ${organicBlock}
           timestamp: new Date().toLocaleTimeString('id-ID'),
           agent1: {
             name: 'Agen 1 (Pakar Web Google)',
-            provider: 'Google Serper API',
-            model: STATE.settings.deepResearchAgent1Model || targetModel,
+            provider: 'Google Serper API (Primer)',
+            model: agent1Model,
             resultsCount: iter2Serper?.sources?.length || 0,
             results: (iter2Serper?.sources || []).map(s => ({ title: s.title, link: s.url, snippet: s.snippet })),
-            analysis: iter2Serper?.summary || (iter2Serper?.sources?.length ? 'Analisis spesifik Agen 1 selesai.' : 'Tidak ada temuan tambahan.')
+            analysis: analisisAgen1Iter2 || (iter2Serper?.sources?.length ? 'Analisis spesifik Model 1 selesai.' : 'Tidak ada temuan tambahan.')
           },
           agent2: {
             name: 'Agen 2 (Pakar Analisis Divergen)',
-            provider: 'Google Serper (Divergen)',
-            model: STATE.settings.deepResearchAgent2Model || targetModel,
+            provider: 'Google Serper API (Divergen)',
+            model: agent2Model,
             resultsCount: iter2Divergent?.sources?.length || 0,
             results: (iter2Divergent?.sources || []).map(s => ({ title: s.title, link: s.url, snippet: s.snippet })),
-            analysis: iter2Divergent?.summary || (iter2Divergent?.sources?.length ? 'Analisis mandiri Agen 2 selesai tanpa tabrakan domain.' : 'Pencarian Agen 2 selesai.')
+            analysis: analisisAgen2Iter2 || (iter2Divergent?.sources?.length ? 'Analisis mandiri Model 2 selesai tanpa tabrakan domain.' : 'Pencarian selesai.')
           },
           scraper: {
             status: 'selesai',
@@ -4683,19 +4787,66 @@ ${organicBlock}
           totalSourcesCount: allSources.length
         });
 
+        // ==========================================
+        // PILAR 2.5: PENCERNAAN KONTEN UTUH WEB OLEH MODEL 1 & MODEL 2 (CLIENT)
+        // ==========================================
         stepItems[stepItems.length - 1].status = 'done';
-        stepItems.push({ text: '[Langkah 3/3] Validasi silang fakta, kategorisasi tren, & menyusun laporan riset eksekutif...', status: 'active' });
-        renderResearchHUD(85, '[Langkah 3/3] Validasi silang fakta & menyusun laporan riset eksekutif...');
+        stepItems.push({ text: `[Langkah 2/3] Model 1 (${agent1Model}) & Model 2 (${agent2Model}) mencerna dokumen web...`, status: 'active' });
+        renderResearchHUD(70, `Model 1 & Model 2 mencerna dokumen web...`);
+
+        const primerArticles = balancedArticlesIter2.filter(s => (s.sourceProvider || '').includes('Primer') || (!(s.sourceProvider || '').includes('Divergen')));
+        const divergenArticles = balancedArticlesIter2.filter(s => (s.sourceProvider || '').includes('Divergen'));
+
+        const primerDocText = primerArticles.map((s, idx) => `[Dokumen Primer ${idx + 1}: ${s.title} (${s.url})]\n${s.snippet}\n${s.sample || ''}`).join('\n\n');
+        const divergenDocText = divergenArticles.map((s, idx) => `[Dokumen Divergen ${idx + 1}: ${s.title} (${s.url})]\n${s.snippet}\n${s.sample || ''}`).join('\n\n');
+
+        let laporanPakarClient1 = '';
+        let laporanPakarClient2 = '';
+        try {
+          const [cerna1, cerna2] = await Promise.all([
+            primerDocText ? callClientLLMDirect(agent1Model, `Topik: "${promptText}"\nBerikut adalah data dokumen web primer:\n${primerDocText}\n\nTugas: Cerna dan sajikan telaah mendalam temuan utama dan tren 2026 dalam 3 paragraf.`, 'Anda adalah Agen 1: Analis Web Primer.') : Promise.resolve(''),
+            divergenDocText ? callClientLLMDirect(agent2Model, `Topik: "${promptText}"\nBerikut adalah data dokumen domain divergen/teknis:\n${divergenDocText}\n\nTugas: Cerna dan sajikan telaah kritis, data teknis spesifik, dan tantangan riil dalam 3 paragraf.`, 'Anda adalah Agen 2: Analis Data Divergen.') : Promise.resolve('')
+          ]);
+          laporanPakarClient1 = cerna1;
+          laporanPakarClient2 = cerna2;
+        } catch (e) {
+          console.warn('Gagal mencerna dokumen di client fallback:', e);
+        }
+
+        if (laporanPakarClient1) {
+          updateLiveInspectionData({
+            agent1: { analysis: laporanPakarClient1 }
+          });
+        }
+        if (laporanPakarClient2) {
+          updateLiveInspectionData({
+            agent2: { analysis: laporanPakarClient2 }
+          });
+        }
+
+        // ==========================================
+        // PILAR 3: SINTESIS EKSEKUTIF OLEH MODEL 3
+        // ==========================================
+        stepItems[stepItems.length - 1].status = 'done';
+        stepItems.push({ text: `[Langkah 3/3] Model 3 (${finalModel}) mencerna output Model 1 & 2 serta menyusun laporan eksekutif...`, status: 'active' });
+        renderResearchHUD(85, `[Langkah 3/3] Model 3 (${finalModel}) menyusun laporan riset eksekutif...`);
 
         const personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
-        const synthesisSystem = `Anda adalah Lead Research Scientist, Senior Technical Analyst & Editor Ahli.
-Susunlah LAPORAN DEEP RESEARCH KOMPREHENSIF untuk topik: "${promptText}".
+        const synthesisSystem = `Anda adalah Analis Riset Senior, Lead Technical Scientist & Editor Eksekutif Utama (Model 3).
+Topik Riset: "${promptText}".
+Tugas utama Anda adalah mencerna, memvalidasi silang, membandingkan konsensus, dan menggabungkan DUA OUTPUT ANALISIS INDEPENDEN yang telah dihasilkan oleh Model 1 dan Model 2:
 
-Berikut adalah seluruh data temuan yang berhasil dikumpulkan melalui Pencarian Multi-Tahap dan Pemindaian Konten Web:
+=== OUTPUT ANALISIS DARI MODEL 1 (PAKAR WEB GOOGLE PRIMER: ${agent1Model}) ===
+${laporanPakarClient1 || analisisAgen1Iter2 || analisisAgen1Iter1 || 'Telaah Model 1 selesai.'}
+
+=== OUTPUT ANALISIS DARI MODEL 2 (PAKAR ANALISIS DIVERGEN & DOMAIN MANDIRI: ${agent2Model}) ===
+${laporanPakarClient2 || analisisAgen2Iter2 || analisisAgen2Iter1 || 'Telaah Model 2 selesai.'}
+
+=== RIWAYAT TEMUAN MULTI-TAHAP ===
 ${dataTemuan.join('\n\n')}
 
 Daftar Seluruh Sumber Terverifikasi (${allSources.length} Dokumen Web):
-${allSources.map((s, idx) => `[${idx + 1}] ${s.title}: ${s.url}`).join('\n')}
+${allSources.map((s, idx) => `[${idx + 1}] [${s.sourceProvider || 'Web'}] ${s.title}: ${s.url}`).join('\n')}
 
 Format Laporan yang WAJIB dipatuhi:
 # 🔬 DEEP RESEARCH REPORT: ${promptText.toUpperCase()}
@@ -4737,8 +4888,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
         bubbleText.innerHTML = '<span class="typing-cursor"></span>';
         
-        // Auto-detect finalModel & engine for executive synthesis
-        const finalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
+        // Auto-detect finalModel engine for executive synthesis
         const finalEngine = finalModel.includes('/') ? 'openrouter' : (finalModel.includes(':') ? 'ollama' : engine);
         
         finalReportText = await streamLLMSynthesis(finalEngine, finalModel, synthesisSystem, session, bubbleText);

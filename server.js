@@ -839,17 +839,25 @@ Analisis data di atas secara mendalam. Ekstrak entitas kunci, data statistik ter
       const [analisisAgen1, analisisAgen2] = await Promise.all([
         (serperBlock.trim()) ? callLLMBackend({
           ...config,
+          messages: [],
           model: agent1Model,
           prompt: promptAgen1,
           system: 'Anda adalah Agen 1: Analis Web Google yang fokus mengekstrak tren utama dan informasi relevan dari web.'
-        }).catch(() => `[Ringkasan Ekstraksi Data Serper]:\n${serperBlock}`) : Promise.resolve('Tidak ada data dari Agen 1.'),
+        }).catch((err) => {
+          console.warn('Gagal memanggil Model Agen 1 di backend:', err?.message || err);
+          return `[Ringkasan Ekstraksi Data Serper]:\n${serperBlock}`;
+        }) : Promise.resolve('Tidak ada data dari Agen 1.'),
 
         (divergentBlock.trim()) ? callLLMBackend({
           ...config,
+          messages: [],
           model: agent2Model,
           prompt: promptAgen2,
           system: 'Anda adalah Agen 2: Analis Data Divergen & Teknis yang fokus mengekstrak fakta terverifikasi dan sudut pandang spesifik dari domain mandiri.'
-        }).catch(() => `[Ringkasan Ekstraksi Data Serper Divergen]:\n${divergentBlock}`) : Promise.resolve('Tidak ada data dari Agen 2.')
+        }).catch((err) => {
+          console.warn('Gagal memanggil Model Agen 2 di backend:', err?.message || err);
+          return `[Ringkasan Ekstraksi Data Serper Divergen]:\n${divergentBlock}`;
+        }) : Promise.resolve('Tidak ada data dari Agen 2.')
       ]);
 
       task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Analisis spesialis selesai: Agen 1 (${agent1Model || 'Pakar Web'}) & Agen 2 (${agent2Model || 'Pakar Divergen'}).`);
@@ -1010,6 +1018,78 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
     }
 
     // ==========================================
+    // PILAR 2.5: PENCERNAAN KONTEN UTUH WEB OLEH MODEL 1 & MODEL 2
+    // ==========================================
+    task.currentStep = `[Langkah 2/3] Model 1 (${agent1Model || 'Pakar Web'}) & Model 2 (${agent2Model || 'Pakar Divergen'}) mencerna isi teks artikel web...`;
+    task.progressPercent = 75;
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 2/3] Model 1 & Model 2 mulai mencerna teks artikel web secara independen.`);
+
+    const primerArticles = scrapedArticles.filter(a => (a.sourceProvider || '').includes('Primer') || (!(a.sourceProvider || '').includes('Divergen')));
+    const divergenArticles = scrapedArticles.filter(a => (a.sourceProvider || '').includes('Divergen'));
+
+    const primerScrapedText = primerArticles.map((a, idx) => `[Dokumen Primer ${idx + 1}: ${a.title} (${a.url})]\n${a.content}`).join('\n\n');
+    const divergenScrapedText = divergenArticles.map((a, idx) => `[Dokumen Divergen ${idx + 1}: ${a.title} (${a.url})]\n${a.content}`).join('\n\n');
+
+    const promptCernaPrimer = `Anda adalah Agen 1 (Pakar Web Google & Riset Primer).
+Topik Riset: "${topik}"
+
+Berikut adalah isi teks utuh dokumen web primer hasil pemindaian langsung:
+${primerScrapedText || 'Tidak ada teks artikel primer utuh.'}
+
+Tugas Anda:
+Cerna dan analisis secara mendalam seluruh teks web primer di atas. Rangkum temuan kunci, tren utama tahun 2026, data penting, dan fakta konkret dalam 3-4 paragraf berbobot padat.`;
+
+    const promptCernaDivergen = `Anda adalah Agen 2 (Pakar Analisis Divergen & Domain Mandiri).
+Topik Riset: "${topik}"
+
+Berikut adalah isi teks utuh dokumen web dari domain independen/teknis hasil pemindaian langsung:
+${divergenScrapedText || 'Tidak ada teks artikel divergen utuh.'}
+
+Tugas Anda:
+Cerna dan analisis secara kritis seluruh teks web divergen di atas. Ekstrak perspektif alternatif, data statistik spesifik, arsitektur teknis, dan tantangan riil dalam 3-4 paragraf berbobot padat.`;
+
+    let laporanPakarAgen1 = '';
+    let laporanPakarAgen2 = '';
+
+    try {
+      const [hasil1, hasil2] = await Promise.all([
+        (primerScrapedText.trim()) ? callLLMBackend({
+          ...config,
+          messages: [],
+          model: agent1Model,
+          prompt: promptCernaPrimer,
+          system: 'Anda adalah Agen 1: Analis Web Primer yang bertugas membedah dan menyaring konten artikel web.'
+        }).catch(err => {
+          console.warn('Gagal pencernaan artikel Agen 1:', err?.message || err);
+          return `[Analisis Temuan Agen 1]:\n${dataTemuan.filter(t => t.includes('AGEN 1')).join('\n') || 'Analisis artikel selesai.'}`;
+        }) : Promise.resolve('Tidak ada artikel web primer yang dicerna.'),
+
+        (divergenScrapedText.trim()) ? callLLMBackend({
+          ...config,
+          messages: [],
+          model: agent2Model,
+          prompt: promptCernaDivergen,
+          system: 'Anda adalah Agen 2: Analis Data Divergen yang bertugas membedah konten teknis dan independen.'
+        }).catch(err => {
+          console.warn('Gagal pencernaan artikel Agen 2:', err?.message || err);
+          return `[Analisis Temuan Agen 2]:\n${dataTemuan.filter(t => t.includes('AGEN 2')).join('\n') || 'Analisis artikel divergen selesai.'}`;
+        }) : Promise.resolve('Tidak ada artikel web divergen yang dicerna.')
+      ]);
+      laporanPakarAgen1 = hasil1;
+      laporanPakarAgen2 = hasil2;
+    } catch (digestErr) {
+      console.warn('Pencernaan artikel oleh Model 1 & 2 mengalami kendala:', digestErr?.message || digestErr);
+    }
+
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Pencernaan selesai: Model 1 (${agent1Model || 'Pakar Web'}) & Model 2 (${agent2Model || 'Pakar Divergen'}) telah memproduksi output telaah.`);
+
+    // Publikasikan hasil telaah mendalam ke snapshot live inspection
+    if (task.liveInspection) {
+      if (task.liveInspection.agent1 && laporanPakarAgen1) task.liveInspection.agent1.analysis = laporanPakarAgen1;
+      if (task.liveInspection.agent2 && laporanPakarAgen2) task.liveInspection.agent2.analysis = laporanPakarAgen2;
+    }
+
+    // ==========================================
     // PILAR 3, 4, & 5: VALIDASI SUMBER, KATEGORISASI TREN & LAPORAN TERSTRUKTUR (MULTI-AGENT SYNTHESIS)
     // ==========================================
     if (task.aborted) {
@@ -1024,21 +1104,26 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
     task.progressPercent = 85;
     task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 3/3] Konsolidasi data temuan Agen 1 & Agen 2 ke Agen Akhir (${finalModel || 'Model Utama'}).`);
 
-    const synthesisPrompt = `Anda adalah Analis Riset Senior, Lead Technical Scientist & Editor Eksekutif Utama.
-Tugas Anda adalah mencerna, memverifikasi, menghilangkan duplikasi, mendeteksi kontradiksi, dan menggabungkan data dari dua agen pencari spesialis yang berbeda mengenai topik: "${topik}".
+    const synthesisPrompt = `Anda adalah Analis Riset Senior, Lead Technical Scientist & Editor Eksekutif Utama (Model 3).
+Tugas utama Anda adalah mencerna, memvalidasi silang, membandingkan konsensus, dan menggabungkan DUA OUTPUT ANALISIS INDEPENDEN yang telah dihasilkan oleh Model 1 dan Model 2 mengenai topik: "${topik}".
 
-=== DATA MASUKAN DARI AGEN MULTI-SUMBER ===
+=== OUTPUT ANALISIS DARI MODEL 1 (PAKAR WEB GOOGLE PRIMER: ${agent1Model || 'Model 1'}) ===
+${laporanPakarAgen1 || 'Laporan analisis Agen 1 selesai.'}
 
-Berikut adalah data temuan yang berhasil dikumpulkan:
+=== OUTPUT ANALISIS DARI MODEL 2 (PAKAR ANALISIS DIVERGEN & DOMAIN MANDIRI: ${agent2Model || 'Model 2'}) ===
+${laporanPakarAgen2 || 'Laporan analisis Agen 2 selesai.'}
+
+=== RIWAYAT TEMUAN MULTI-TAHAP ===
 ${dataTemuan.join('\n\n')}
 
 Daftar Seluruh Sumber Rujukan Terverifikasi (${allSources.length} Dokumen Web):
 ${allSources.map((s, idx) => `[${idx + 1}] [${s.sourceProvider || 'Web'}] ${s.title}: ${s.url}`).join('\n')}
 
-=== TUGAS & PROTOKOL SINTESIS AGEN AKHIR ===
-1. Analisis Kritis & Eliminasi Redundansi: Baca seluruh data dari Agen 1 (Google Serper Primer) dan Agen 2 (Google Serper Divergen). Buang informasi tumpang tindih dan konsolidasi data pelengkap dari domain independen 100% berbeda.
-2. Deteksi Kontradiksi & Cross-Validation: Jika terdapat kontradiksi atau perbedaan angka/fakta antara temuan Agen 1 dan Agen 2, sebutkan secara transparan di dalam laporan pada bagian validasi sumber.
+=== TUGAS & PROTOKOL SINTESIS MODEL 3 ===
+1. Cerna Output Model 1 & Model 2: Anda bertindak sebagai Chief Synthesizer. Baca dan bandingkan hasil telaah kedua model spesialis di atas.
+2. Validasi Silang (Cross-Verification): Identifikasi titik temu (konsensus) dan kontradiksi antara Model 1 dan Model 2. Laporkan secara transparan pada bagian Validasi Sumber.
 3. Kualitas Output Eksekutif: Susun menjadi laporan riset final yang sangat mendalam, objektif, berbasis data nyata, dan terstruktur rapi dalam format Markdown tahun rujukan 2026.
+4. Cantumkan sitasi nomor sumber rujukan [1], [2], dst. pada setiap klaim data penting.
 
 Format Laporan yang WAJIB dipatuhi:
 # 🔬 DEEP RESEARCH REPORT: ${topik.toUpperCase()}
