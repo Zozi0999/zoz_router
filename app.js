@@ -6495,8 +6495,26 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       els.liveModelCatalogSearchInput.value = '';
     }
     
-    // Default tab mengikuti mode jika obrolan
-    if (!targetInputId) {
+    // Auto-detect tab aktif secara cerdas berdasarkan target input dan mode
+    if (targetInputId) {
+      const targetEl = document.getElementById(targetInputId);
+      const currentVal = targetEl ? targetEl.value.trim() : '';
+      if (currentVal) {
+        if (currentVal.includes('/')) {
+          STATE.activeCatalogTab = 'openrouter';
+        } else if (currentVal.includes(':') || (STATE.ollamaModels || []).some(m => (m.name || m.model || m.id) === currentVal)) {
+          STATE.activeCatalogTab = 'ollama';
+        } else {
+          STATE.activeCatalogTab = STATE.mode === 'openrouter' ? 'openrouter' : 'ollama';
+        }
+      } else {
+        if (STATE.settings.openRouterKey && (!STATE.ollamaModels || STATE.ollamaModels.length === 0)) {
+          STATE.activeCatalogTab = 'openrouter';
+        } else {
+          STATE.activeCatalogTab = STATE.mode === 'openrouter' ? 'openrouter' : 'ollama';
+        }
+      }
+    } else {
       STATE.activeCatalogTab = STATE.mode === 'openrouter' ? 'openrouter' : 'ollama';
     }
     
@@ -6536,14 +6554,39 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
           details: m.details || null
         };
       });
+
+      // Urutkan model Ollama alfabetis A-Z
+      list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     } else {
       list = (STATE.openRouterModels || []).map(m => {
+        const isFree = Boolean(m.id && m.id.includes(':free'));
         return {
           id: m.id,
           name: m.name || m.id,
-          tag: m.tag || (m.id.includes(':free') ? 'Free' : 'Cloud'),
+          tag: m.tag || (isFree ? 'Free' : 'Cloud'),
+          isFree: isFree,
           context_length: m.context_length ? `${Math.round(m.context_length / 1024)}k konteks` : null
         };
+      });
+
+      // Urutkan OpenRouter secara cerdas:
+      // 1. Model gratis (:free) diprioritaskan di paling atas
+      // 2. Model unggulan/frontier populer (DeepSeek, Llama, Gemini, Claude, GPT, Qwen)
+      // 3. Sisanya diurutkan secara alfabetis A-Z
+      const featuredKeywords = ['deepseek', 'meta-llama', 'llama-3', 'gemini', 'claude', 'gpt-4', 'qwen', 'mistral'];
+      list.sort((a, b) => {
+        if (a.isFree && !b.isFree) return -1;
+        if (!a.isFree && b.isFree) return 1;
+
+        const aId = a.id.toLowerCase();
+        const bId = b.id.toLowerCase();
+        const aFeatured = featuredKeywords.some(k => aId.includes(k));
+        const bFeatured = featuredKeywords.some(k => bId.includes(k));
+
+        if (aFeatured && !bFeatured) return -1;
+        if (!aFeatured && bFeatured) return 1;
+
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
       });
     }
 
