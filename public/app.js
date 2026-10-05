@@ -103,6 +103,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     settings: {
       ollamaEndpoint: 'https://ollama.com',
       ollamaApiKey: '',
+      ollamaCustomBalance: '',
       openRouterKey: '',
       serperApiKey: '075538fed9c64990e1eb32a06726c1e55a933c1e',
       deepResearchAgent1Model: '',
@@ -290,6 +291,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     settingOllamaStatusVal: $('#settingOllamaStatusVal'),
     settingOllamaModelCountText: $('#settingOllamaModelCountText'),
     settingOllamaCreditsText: $('#settingOllamaCreditsText'),
+    settingOllamaCustomBalance: $('#settingOllamaCustomBalance'),
+    btnSaveOllamaCustomBalance: $('#btnSaveOllamaCustomBalance'),
     btnRefreshOllamaStatus: $('#btnRefreshOllamaStatus'),
     btnAddOllamaModels: $('#btnAddOllamaModels'),
     settingOpenRouterKey: $('#settingOpenRouterKey'),
@@ -3369,6 +3372,16 @@ ${organicBlock}
         currentBalance = Number(usageData.balance);
       } else if (usageData?.usage_credits?.balance != null) {
         currentBalance = Number(usageData.usage_credits.balance);
+      } else if (usageData?.credits != null) {
+        currentBalance = Number(usageData.credits);
+      } else if (usageData?.credit_balance != null) {
+        currentBalance = Number(usageData.credit_balance);
+      } else if (usageData?.remaining_credits != null) {
+        currentBalance = Number(usageData.remaining_credits);
+      } else if (usageData?.remaining != null) {
+        currentBalance = Number(usageData.remaining);
+      } else if (usageData?.available_credits != null) {
+        currentBalance = Number(usageData.available_credits);
       } else if (usageData?.current_balance != null) {
         currentBalance = Number(usageData.current_balance);
       }
@@ -3407,21 +3420,27 @@ ${organicBlock}
   function updateOllamaStatusUI() {
     const bal = STATE.ollamaBalance;
     const hasKey = Boolean(STATE.settings.ollamaApiKey || (els.settingOllamaApiKey && els.settingOllamaApiKey.value.trim()));
+    const customBalRaw = STATE.settings.ollamaCustomBalance != null && String(STATE.settings.ollamaCustomBalance).trim() !== ''
+      ? parseFloat(STATE.settings.ollamaCustomBalance)
+      : null;
+    const resolvedBalance = (customBalRaw != null && !isNaN(customBalRaw)) 
+      ? customBalRaw 
+      : (bal && bal.currentBalance != null ? bal.currentBalance : null);
 
     // Saldo teks
     let balanceDisplay = '';
-    if (bal && bal.currentBalance != null) {
-      balanceDisplay = `$${bal.currentBalance.toFixed(2)} USD`;
+    if (resolvedBalance != null) {
+      balanceDisplay = `$${resolvedBalance.toFixed(2)} USD`;
     } else if (hasKey) {
-      balanceDisplay = 'Aktif (Cloud Usage)';
+      balanceDisplay = 'Tersambung (Usage Credits)';
     } else {
       balanceDisplay = 'Free Cloud Tier';
     }
 
     // Sidebar status: langsung tampilkan saldo atau status cloud
     if (els.ollamaStatusVal) {
-      els.ollamaStatusVal.innerText = (bal && bal.currentBalance != null)
-        ? `$${bal.currentBalance.toFixed(2)}` 
+      els.ollamaStatusVal.innerText = (resolvedBalance != null)
+        ? `$${resolvedBalance.toFixed(2)}` 
         : (hasKey ? 'Cloud Aktif' : 'Free Cloud');
     }
     if (els.ollamaIndicator) {
@@ -3444,7 +3463,9 @@ ${organicBlock}
     }
 
     if (els.settingOllamaCreditsText) {
-      const credStr = bal?.currentBalance != null ? `$${bal.currentBalance.toFixed(2)}` : (hasKey ? 'Pay-as-you-go' : 'Siap Diisi');
+      const credStr = resolvedBalance != null 
+        ? `$${resolvedBalance.toFixed(2)}` 
+        : (hasKey ? 'Pay-as-you-go' : 'Siap Diisi');
       els.settingOllamaCreditsText.innerHTML = `<i class="fa-solid fa-coins"></i> Usage Credits: ${credStr}`;
     }
 
@@ -3484,12 +3505,20 @@ ${organicBlock}
       // Ollama Cloud tab
       const bal = STATE.ollamaBalance;
       const hasKey = Boolean(STATE.settings.ollamaApiKey || (els.settingOllamaApiKey && els.settingOllamaApiKey.value.trim()));
+      const customBalRaw = STATE.settings.ollamaCustomBalance != null && String(STATE.settings.ollamaCustomBalance).trim() !== ''
+        ? parseFloat(STATE.settings.ollamaCustomBalance)
+        : null;
+      const resolvedBalance = (customBalRaw != null && !isNaN(customBalRaw)) 
+        ? customBalRaw 
+        : (bal && bal.currentBalance != null ? bal.currentBalance : null);
       
-      const balanceStr = bal && bal.currentBalance != null 
-        ? `$${bal.currentBalance.toFixed(2)} USD` 
-        : (hasKey ? 'Usage Credits Aktif' : 'Free Cloud Tier');
+      const balanceStr = (resolvedBalance != null) 
+        ? `$${resolvedBalance.toFixed(2)} USD` 
+        : (hasKey ? 'Tersambung (Usage Credits)' : 'Free Cloud Tier');
 
-      const freeStr = bal?.freeUsagePercent != null ? `Free Usage: ${bal.freeUsagePercent}% • Pay-as-you-go` : 'Free Cloud (Gemma, Nemotron, GPT-OSS) + Pay-as-you-go';
+      const freeStr = (resolvedBalance != null)
+        ? `Saldo Tersedia: $${resolvedBalance.toFixed(2)} • Pay-as-you-go`
+        : (bal?.freeUsagePercent != null ? `Free Usage: ${bal.freeUsagePercent}% • Pay-as-you-go` : 'Free Cloud (Gemma, Nemotron, GPT-OSS) + Pay-as-you-go');
 
       if (els.catalogBalanceIcon) {
         els.catalogBalanceIcon.innerHTML = '<i class="fa-solid fa-coins" style="color: var(--neon-teal); font-size: 0.95rem;"></i>';
@@ -3801,6 +3830,7 @@ ${organicBlock}
     const isModelNotFound = msg.includes('404') || msg.includes('not found') || msg.includes('no endpoints') || msg.includes('does not exist');
     const isRateLimit = msg.includes('429') || msg.includes('rate limit') || msg.includes('quota') || msg.includes('credits') || msg.includes('free tier limit');
     const isContextLength = msg.includes('context length') || msg.includes('token limit') || msg.includes('maximum context');
+    const isProviderReturnedError = msg.includes('provider returned error') || msg.includes('upstream error') || msg.includes('provider error') || msg.includes('provider rejected');
 
     let title = `Peringatan Model: ${escapeHtml(modelName)}`;
     let desc = escapeHtml(rawMsg);
@@ -3810,6 +3840,10 @@ ${organicBlock}
       title = `Model ${escapeHtml(modelName)} Tidak Mendukung Input Gambar`;
       desc = `Model ini menolak pemrosesan gambar multimodal karena beroperasi dalam mode teks murni (text-only).`;
       advice = `💡 <strong>Saran:</strong> Beralihlah ke model multimodal seperti <code>google/gemini-2.0-flash-exp:free</code>, <code>openai/gpt-4o</code>, <code>gemma4:31b</code>, atau kirim prompt Anda tanpa lampiran gambar.`;
+    } else if (isProviderReturnedError) {
+      title = `Penyedia Model OpenRouter Sedang Sibuk (Upstream Provider Error)`;
+      desc = `Server penyedia pihak ketiga (upstream) untuk model <code>${escapeHtml(modelName)}</code> sedang mengalami antrean penuh atau gangguan sementara di OpenRouter.`;
+      advice = `💡 <strong>Solusi Cepat:</strong> Coba beralih ke model free lain yang sedang aktif stabil seperti <code>meta-llama/llama-3.3-70b-instruct:free</code> atau <code>deepseek/deepseek-chat:free</code>, atau klik <strong>Coba Kirim Ulang</strong>.`;
     } else if (isCorsOrNetwork && engine === 'ollama') {
       title = `Batasan Koneksi Browser CORS (GitHub Pages)`;
       desc = `Browser memblokir koneksi langsung dari domain <code>github.io</code> ke server <code>ollama.com</code> karena pembatasan CORS server.`;
@@ -3846,11 +3880,19 @@ ${organicBlock}
   }
 
   // Universal Message Payload Normalizer & Alternating Role Enforcer
-  function buildSanitizedMessagesPayload(sessionOrMessages, currentImages = [], engine = 'openrouter', systemContent = '') {
-    const messagesPayload = [];
-    if (systemContent && systemContent.trim()) {
-      messagesPayload.push({ role: 'system', content: systemContent.trim() });
+  function doesModelSupportSystemRole(modelName) {
+    if (!modelName || typeof modelName !== 'string') return true;
+    const lower = modelName.toLowerCase();
+    // Model Gemma (seperti google/gemma-4-31b-it:free) dan model tertentu tidak mendukung role "system" di banyak provider OpenRouter
+    if (lower.includes('gemma') || lower.includes('mistral-tiny')) {
+      return false;
     }
+    return true;
+  }
+
+  function buildSanitizedMessagesPayload(sessionOrMessages, currentImages = [], engine = 'openrouter', systemContent = '', modelName = '') {
+    const messagesPayload = [];
+    const supportsSystem = doesModelSupportSystemRole(modelName);
 
     const rawList = Array.isArray(sessionOrMessages?.messages) ? sessionOrMessages.messages : (Array.isArray(sessionOrMessages) ? sessionOrMessages : []);
     const validList = [];
@@ -3875,6 +3917,20 @@ ${organicBlock}
 
     if (validList.length === 0) {
       validList.push({ role: 'user', content: 'Halo', images: [] });
+    }
+
+    if (systemContent && systemContent.trim()) {
+      if (supportsSystem) {
+        messagesPayload.push({ role: 'system', content: systemContent.trim() });
+      } else {
+        // Untuk model yang tidak mendukung role system (misal: Gemma), lebur konteks sistem ke turn user pertama
+        const firstUserMsg = validList.find(m => m.role === 'user');
+        if (firstUserMsg) {
+          firstUserMsg.content = `[Instruksi Sistem & Konteks:\n${systemContent.trim()}]\n\n${firstUserMsg.content}`;
+        } else {
+          validList.unshift({ role: 'user', content: `[Instruksi Sistem & Konteks:\n${systemContent.trim()}]`, images: [] });
+        }
+      }
     }
 
     // Merge consecutive messages with the same role to strictly enforce alternating roles
@@ -3984,7 +4040,7 @@ ${organicBlock}
       }
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
-      const messagesPayload = buildSanitizedMessagesPayload(session, rawImgs, 'ollama', systemContent);
+      const messagesPayload = buildSanitizedMessagesPayload(session, rawImgs, 'ollama', systemContent, modelName);
 
       const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
       const requestBody = {
@@ -4210,6 +4266,7 @@ ${organicBlock}
     let fullText = '';
     let webSources = null;
     let streamRenderer = null;
+    let actualModelUsed = null;
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -4241,7 +4298,7 @@ ${organicBlock}
       }
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
-      const messagesPayload = buildSanitizedMessagesPayload(session, rawImgs, 'openrouter', systemContent);
+      const messagesPayload = buildSanitizedMessagesPayload(session, rawImgs, 'openrouter', systemContent, modelName);
 
       const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
       const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
@@ -4254,13 +4311,29 @@ ${organicBlock}
         headers['X-Title'] = 'ZOZ Router';
       }
 
+      // Daftar fallback cadangan jika model free mengalami antrean/downtime di provider upstream OpenRouter
+      const freeFallbacks = [
+        'meta-llama/llama-3.3-70b-instruct:free',
+        'google/gemma-4-26b-a4b-it:free',
+        'deepseek/deepseek-chat:free',
+        'mistralai/mistral-small-3.2:free'
+      ].filter(m => m !== modelName);
+
       const requestBody = {
         model: modelName,
         messages: messagesPayload,
         stream: true,
         temperature: parseFloat(STATE.settings.temperature),
-        top_p: parseFloat(STATE.settings.topP)
+        top_p: parseFloat(STATE.settings.topP),
+        provider: {
+          allow_fallbacks: true
+        }
       };
+
+      if (modelName.includes(':free')) {
+        requestBody.models = [modelName, ...freeFallbacks];
+      }
+
       if (!isOpenRouterDirect) {
         requestBody.apiKey = STATE.settings.openRouterKey;
       }
@@ -4277,7 +4350,9 @@ ${organicBlock}
         try {
           const errJson = await response.json();
           if (errJson && errJson.error) {
-            errDetail = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
+            const baseErr = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
+            const rawUpstream = errJson.details?.error?.metadata?.raw || errJson.error?.metadata?.raw;
+            errDetail = rawUpstream ? `${baseErr} (${rawUpstream})` : baseErr;
           }
         } catch (je) {
           try {
@@ -4316,7 +4391,11 @@ ${organicBlock}
           }
           if (parsed.error) {
             const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
-            throw new Error(errStr);
+            const rawUpstream = parsed.error?.metadata?.raw;
+            throw new Error(rawUpstream ? `${errStr} (${rawUpstream})` : errStr);
+          }
+          if (parsed.model && parsed.model !== modelName && !actualModelUsed) {
+            actualModelUsed = parsed.model;
           }
           if (parsed.choices?.[0]?.finish_reason) {
             finishReason = parsed.choices[0].finish_reason;
@@ -4344,8 +4423,9 @@ ${organicBlock}
         renderMessageSources(assistantRow, webSources);
       }
       renderYouTubeCardsForMessage(assistantRow, fullText);
+      const effectiveDisplay = actualModelUsed ? `${actualModelUsed} (Failover)` : modelName;
       metaBox.innerHTML = `
-        <strong>${modelName}</strong>
+        <strong title="${actualModelUsed ? 'Model dialihkan oleh OpenRouter ke ' + actualModelUsed : modelName}">${escapeHtml(effectiveDisplay)}</strong>
         <span class="meta-model-badge" style="background:rgba(255,82,0,0.15); color:var(--neon-amber);">OpenRouter</span>
         <span>⏱️ ${totalTime}s</span>
         <span>⚡ ${tps} tps</span>
@@ -4361,7 +4441,7 @@ ${organicBlock}
       session.messages.push({
         role: 'assistant',
         content: fullText,
-        model: modelName,
+        model: actualModelUsed || modelName,
         engine: 'openrouter',
         sources: webSources,
         stats: { duration: totalTime, tps: tps, tokens: tokenCount },
@@ -4404,12 +4484,21 @@ ${organicBlock}
         const actualHasImage = Array.isArray(image) ? image.length > 0 : Boolean(image);
         const errorHtml = formatModelErrorMessage('openrouter', modelName, err, actualHasImage, STATE.webSearchEnabled);
 
+        const isFreeModel = modelName.includes(':free');
+        const fallbackModelCandidate = modelName.includes('llama') ? 'google/gemma-4-26b-a4b-it:free' : 'meta-llama/llama-3.3-70b-instruct:free';
+        const fallbackLabel = modelName.includes('llama') ? 'Gemma 4 26B (Free)' : 'Llama 3.3 70B (Free)';
+
         bubbleText.innerHTML = `
           ${errorHtml}
           <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
             <button class="btn btn-sm btn-outline retry-send-btn" style="border-color:var(--neon-cyan); color:var(--neon-cyan); font-size:0.75rem;">
               <i class="fa-solid fa-rotate-right"></i> Coba Kirim Ulang
             </button>
+            ${isFreeModel ? `
+              <button class="btn btn-sm btn-outline switch-free-model-btn" data-fallback="${fallbackModelCandidate}" style="border-color:var(--neon-teal); color:var(--neon-teal); font-size:0.75rem;">
+                <i class="fa-solid fa-bolt"></i> Ganti ke ${fallbackLabel} &amp; Kirim Ulang
+              </button>
+            ` : ''}
             <button class="btn btn-sm btn-outline open-settings-btn" style="border-color:var(--neon-amber); color:var(--neon-amber); font-size:0.75rem;">
               <i class="fa-solid fa-gear"></i> Buka Pengaturan & Key
             </button>
@@ -4419,6 +4508,14 @@ ${organicBlock}
         bubbleText.querySelector('.retry-send-btn')?.addEventListener('click', () => {
           assistantRow.remove();
           runOpenRouterStreaming(session, promptText, image, modelName);
+        });
+
+        bubbleText.querySelector('.switch-free-model-btn')?.addEventListener('click', (e) => {
+          const targetFallback = e.currentTarget.dataset.fallback || 'meta-llama/llama-3.3-70b-instruct:free';
+          selectModel(targetFallback);
+          showToast(`⚡ Model ditukar ke ${targetFallback}`);
+          assistantRow.remove();
+          runOpenRouterStreaming(session, promptText, image, targetFallback);
         });
 
         bubbleText.querySelector('.open-settings-btn')?.addEventListener('click', () => {
@@ -4976,7 +5073,7 @@ ${organicBlock}
     const isModelOllama = Boolean(modelName && (modelName.includes(':') || (!modelName.includes('/') && (STATE.ollamaModels || []).some(m => (m.name || m.model || m.id) === modelName))));
     const resolvedEngine = isModelOpenRouter ? 'openrouter' : (isModelOllama ? 'ollama' : (engine || 'ollama'));
 
-    const messagesPayload = buildSanitizedMessagesPayload(session, [], resolvedEngine, systemPrompt);
+    const messagesPayload = buildSanitizedMessagesPayload(session, [], resolvedEngine, systemPrompt, modelName);
 
     if (resolvedEngine === 'openrouter' || (!STATE.settings.ollamaModel && STATE.settings.openRouterKey && !isModelOllama)) {
       const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
@@ -4994,8 +5091,14 @@ ${organicBlock}
         model: modelName,
         messages: messagesPayload,
         stream: true,
-        temperature: 0.3
+        temperature: 0.3,
+        provider: {
+          allow_fallbacks: true
+        }
       };
+      if (modelName.includes(':free')) {
+        requestBody.models = [modelName, 'meta-llama/llama-3.3-70b-instruct:free', 'deepseek/deepseek-chat:free'];
+      }
       if (!isOpenRouterDirect) requestBody.apiKey = STATE.settings.openRouterKey;
 
       const response = await fetch(endpoint, {
@@ -8813,6 +8916,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
   function syncSettingsModalFields() {
     if (els.settingOllamaEndpoint) els.settingOllamaEndpoint.value = STATE.settings.ollamaEndpoint || 'https://ollama.com';
     if (els.settingOllamaApiKey) els.settingOllamaApiKey.value = STATE.settings.ollamaApiKey || '';
+    if (els.settingOllamaCustomBalance) els.settingOllamaCustomBalance.value = STATE.settings.ollamaCustomBalance || '';
     if (els.settingOpenRouterKey) els.settingOpenRouterKey.value = STATE.settings.openRouterKey || '';
     if (els.settingSerperApiKey) els.settingSerperApiKey.value = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
     if (els.settingDeepResearchAgent1Model) els.settingDeepResearchAgent1Model.value = STATE.settings.deepResearchAgent1Model || '';
@@ -9667,6 +9771,26 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       AudioEngine.click();
     });
 
+    els.btnSaveOllamaCustomBalance?.addEventListener('click', () => {
+      const rawVal = els.settingOllamaCustomBalance ? els.settingOllamaCustomBalance.value.trim() : '';
+      STATE.settings.ollamaCustomBalance = rawVal;
+      savePersistedState();
+      updateOllamaStatusUI();
+      updateCatalogBalanceBannerUI(STATE.activeCatalogTab);
+      const parsedNum = parseFloat(rawVal);
+      showToast(rawVal && !isNaN(parsedNum) 
+        ? `✅ Saldo Ollama Cloud dicatat: $${parsedNum.toFixed(2)} USD` 
+        : (rawVal ? '✅ Saldo Ollama Cloud disimpan.' : 'ℹ️ Saldo Ollama Cloud dikosongkan.'));
+      AudioEngine.click();
+    });
+
+    els.settingOllamaCustomBalance?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        els.btnSaveOllamaCustomBalance?.click();
+      }
+    });
+
     els.testOpenRouterBtn.addEventListener('click', async () => {
       const key = els.settingOpenRouterKey.value.trim();
       if (!key) {
@@ -9708,6 +9832,10 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
       if (els.settingOllamaApiKey) {
         STATE.settings.ollamaApiKey = els.settingOllamaApiKey.value.trim();
+      }
+
+      if (els.settingOllamaCustomBalance) {
+        STATE.settings.ollamaCustomBalance = els.settingOllamaCustomBalance.value.trim();
       }
 
       if (els.settingOpenRouterKey) {
