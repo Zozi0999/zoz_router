@@ -310,6 +310,14 @@
                     <span class="attach-item-title">Galeri Foto</span>
                   </div>
                 </button>
+                <button class="attachment-menu-item" id="attachOptionGenImage" type="button">
+                  <div class="attach-item-icon-box image-gen-accent" style="background: rgba(255, 0, 127, 0.15); border-color: rgba(255, 0, 127, 0.4); color: #FF007F;">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                  </div>
+                  <div class="attach-item-info">
+                    <span class="attach-item-title">Buat Gambar AI</span>
+                  </div>
+                </button>
                 <button class="attachment-menu-item" id="attachOptionDoc" type="button">
                   <div class="attach-item-icon-box doc-accent">
                     <i class="fa-solid fa-file-lines"></i>
@@ -366,15 +374,17 @@
               </div>
             </div>
 
-            <!-- Embedded / Invisible AI Image Studio Toggle Element (Tertanam untuk kontrol DOM) -->
-            <button class="composer-btn image-gen-toggle" id="imageGenToggleBtn" type="button" title="Mode AI Image Studio" style="display: none;" aria-hidden="true"></button>
+            <!-- AI Image Studio Mode Toggle Button (Ala Gemini AI UI) -->
+            <button class="composer-btn image-gen-toggle" id="imageGenToggleBtn" type="button" title="Mode AI Image Studio (Buat Gambar)" aria-label="Mode Buat Gambar AI" aria-pressed="false">
+              <i class="fa-solid fa-wand-magic-sparkles"></i>
+            </button>
           </div>
 
           <!-- Textarea Input -->
           <div class="input-field-wrap">
             <textarea 
               id="promptInput" 
-              placeholder="Ketik pesan..." 
+              placeholder="Ketik pesan atau minta gambar (Ketik /img untuk Mode Gambar)..." 
               rows="1"
             ></textarea>
           </div>
