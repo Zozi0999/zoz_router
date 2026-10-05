@@ -539,14 +539,25 @@
           </div>
 
           <div class="form-group">
-            <label><i class="fa-solid fa-brain"></i> Model Agen Akhir (Analis Senior & Penulis Sintesis)</label>
+            <label><i class="fa-solid fa-feather-pointed" style="color: #FF007F;"></i> Model 3: Pengoreksi & Penyempurna Laporan (Lead Corrector & Enhancer)</label>
             <div class="input-with-action">
               <input type="text" id="settingDeepResearchFinalModel" placeholder="Bawaan (Model Obrolan Aktif) atau ketik nama model..." class="form-control" autocomplete="off">
               <button type="button" class="btn btn-sm btn-outline btn-open-model-catalog" data-target-input="settingDeepResearchFinalModel" title="Buka Katalog Model Real-Time">
                 <i class="fa-solid fa-magnifying-glass"></i> Cari Model
               </button>
             </div>
-            <small class="form-hint">Otak utama yang mencerna hasil kedua agen, memverifikasi kontradiksi, dan menyusun laporan riset eksekutif.</small>
+            <small class="form-hint">Model cerdas yang mengoreksi klaim awal, menghubungkan output Agen 1 & 2 secara mendalam, serta mengelaborasi dokumen laporan riset komprehensif.</small>
+          </div>
+
+          <div class="form-group">
+            <label><i class="fa-solid fa-sparkles" style="color: var(--neon-cyan);"></i> Model 4: Perangkum Chat (Executive Summarizer)</label>
+            <div class="input-with-action">
+              <input type="text" id="settingDeepResearchModel4" placeholder="Bawaan (Model Obrolan Aktif) atau ketik nama model..." class="form-control" autocomplete="off">
+              <button type="button" class="btn btn-sm btn-outline btn-open-model-catalog" data-target-input="settingDeepResearchModel4" title="Buka Katalog Model Real-Time">
+                <i class="fa-solid fa-magnifying-glass"></i> Cari Model
+              </button>
+            </div>
+            <small class="form-hint">Model cerdas yang merumuskan intisari eksekutif tajam untuk ditampilkan langsung di gelembung obrolan antarmuka chat.</small>
           </div>
 
           <!-- Section: Custom Presets Buatan Pengguna -->
@@ -959,7 +970,10 @@
           <i class="fa-solid fa-file-lines" style="color: #FFB703;"></i> Web Scraper (<span id="inspectCountScraper">0</span>)
         </button>
         <button class="settings-tab-btn" id="btnTabInspectSynthesizer" data-inspect-tab="synthesizer" style="white-space: nowrap; flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px;">
-          <i class="fa-solid fa-feather-pointed" style="color: #FF007F;"></i> Chief Synthesizer (<span id="inspectCountSynthesizer">Laporan</span>)
+          <i class="fa-solid fa-feather-pointed" style="color: #FF007F;"></i> Model 3: Pengoreksi (<span id="inspectCountSynthesizer">Laporan</span>)
+        </button>
+        <button class="settings-tab-btn" id="btnTabInspectModel4" data-inspect-tab="model4" style="white-space: nowrap; flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px;">
+          <i class="fa-solid fa-sparkles" style="color: var(--neon-cyan);"></i> Model 4: Rangkuman Chat (<span id="inspectCountModel4">Siap</span>)
         </button>
       </div>
 

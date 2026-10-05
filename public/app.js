@@ -108,6 +108,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       deepResearchAgent1Model: '',
       deepResearchAgent2Model: '',
       deepResearchFinalModel: '',
+      deepResearchModel4: '',
       ollamaModel: 'gemma4:31b',
       openRouterModel: 'deepseek/deepseek-r1:free',
       temperature: 0.7,
@@ -122,7 +123,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     catalogTargetInputId: null,
     catalogSearchQuery: '',
     catalogCategoryFilter: 'all', // 'all' | 'free' | 'reasoning' | 'fast' | 'flagship' | 'coding'
-    activeInspectionTab: 'agent1', // 'agent1' | 'agent2' | 'scraper' | 'synthesizer'
+    activeInspectionTab: 'agent1', // 'agent1' | 'agent2' | 'scraper' | 'synthesizer' | 'model4'
     currentLiveInspection: null,
     openRouterBalance: null, // { totalCredits, totalUsage, remaining, isFreeTier, lastChecked }
     ollamaBalance: null, // { currentBalance, freeUsage, lastChecked }
@@ -310,6 +311,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     settingDeepResearchAgent2Model: $('#settingDeepResearchAgent2Model'),
     selectDeepResearchAgent2Model: $('#selectDeepResearchAgent2Model'),
     settingDeepResearchFinalModel: $('#settingDeepResearchFinalModel'),
+    settingDeepResearchModel4: $('#settingDeepResearchModel4'),
     selectDeepResearchFinalModel: $('#selectDeepResearchFinalModel'),
     inputNewPresetName: $('#inputNewPresetName'),
     saveCustomPresetBtn: $('#saveCustomPresetBtn'),
@@ -414,10 +416,12 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     btnTabInspectAgent2: $('#btnTabInspectAgent2'),
     btnTabInspectScraper: $('#btnTabInspectScraper'),
     btnTabInspectSynthesizer: $('#btnTabInspectSynthesizer'),
+    btnTabInspectModel4: $('#btnTabInspectModel4'),
     inspectCountAgent1: $('#inspectCountAgent1'),
     inspectCountAgent2: $('#inspectCountAgent2'),
     inspectCountScraper: $('#inspectCountScraper'),
     inspectCountSynthesizer: $('#inspectCountSynthesizer'),
+    inspectCountModel4: $('#inspectCountModel4'),
     inspectTabContent: $('#inspectTabContent')
   };
 
@@ -2213,7 +2217,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     const hasText = Boolean(content && String(content).trim().length > 0);
     let renderedBody = '';
     if (isActuallyDeepResearch && role === 'assistant' && hasText) {
-      renderedBody = buildDeepResearchSummaryCardHtml(content, model, sources, resolvedTimestamp || timestamp);
+      renderedBody = buildDeepResearchSummaryCardHtml(content, model, sources, resolvedTimestamp || timestamp, msg.chatSummary || '');
     } else {
       renderedBody = role === 'assistant' ? renderMarkdown(content || '') : escapeHtml(content || '').replace(/\n/g, '<br>');
     }
@@ -5510,7 +5514,7 @@ ${organicBlock}
     openModal('deepResearchReportModal');
   }
 
-  function buildDeepResearchSummaryCardHtml(fullText, model = '', sources = [], date = null) {
+  function buildDeepResearchSummaryCardHtml(fullText, model = '', sources = [], date = null, chatSummary = '') {
     const reportTitle = extractReportTitle(fullText);
     const sourcesCount = (sources && Array.isArray(sources)) ? sources.length : 0;
 
@@ -5524,27 +5528,51 @@ ${organicBlock}
 
     const metaParts = [];
     if (dateStr) metaParts.push(dateStr);
-    if (sourcesCount > 0) metaParts.push(`${sourcesCount} Sumber`);
+    if (sourcesCount > 0) metaParts.push(`${sourcesCount} Sumber Terverifikasi`);
     if (model) metaParts.push(escapeHtml(model));
     const metaString = metaParts.join(' &bull; ');
 
+    const summaryHtml = (chatSummary && chatSummary.trim())
+      ? renderMarkdown(chatSummary.trim())
+      : '';
+
     return `
-      <div class="gemini-research-intro">
-        Riset mendalam telah selesai. Anda dapat meninjau dokumen laporan riset lengkap di bawah ini atau mengajukan pertanyaan lanjutan.
-      </div>
-      <div class="gemini-research-card" data-action="open-full-report" role="button" tabindex="0" title="Klik untuk membuka laporan riset lengkap">
-        <div class="gemini-card-left">
-          <div class="gemini-card-icon-box">
-            <i class="fa-solid fa-atom"></i>
+      <div class="gemini-research-card-wrapper" style="display:flex; flex-direction:column; gap:12px; width:100%;">
+        ${summaryHtml ? `
+          <div class="gemini-research-chat-summary" style="background:rgba(0, 240, 255, 0.04); border:1px solid rgba(0, 240, 255, 0.22); border-radius:10px; padding:14px 16px; font-size:0.86rem; line-height:1.6; color:var(--text-main); box-shadow:0 4px 16px rgba(0,0,0,0.25);">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.08);">
+              <div style="display:flex; align-items:center; gap:8px; font-size:0.8rem; font-weight:700; color:var(--neon-cyan);">
+                <i class="fa-solid fa-sparkles"></i>
+                <span>RANGKUMAN EKSEKUTIF CHAT (MODEL 4)</span>
+              </div>
+              <span class="badge" style="font-size:0.65rem; background:rgba(0, 255, 194, 0.12); color:var(--neon-teal); border:1px solid rgba(0,255,194,0.3); border-radius:4px; padding:2px 8px;">
+                Terkoreksi Model 3
+              </span>
+            </div>
+            <div class="chat-summary-markdown" style="font-size:0.85rem;">
+              ${summaryHtml}
+            </div>
           </div>
-          <div class="gemini-card-content">
-            <h4 class="gemini-card-title">${escapeHtml(reportTitle)}</h4>
-            <div class="gemini-card-meta">${metaString}</div>
+        ` : `
+          <div class="gemini-research-intro">
+            Riset mendalam telah selesai dan divalidasi silang. Anda dapat membuka dokumen laporan lengkap hasil audit dan koreksi Model 3 di bawah ini:
           </div>
+        `}
+        <div class="gemini-research-card" data-action="open-full-report" role="button" tabindex="0" title="Klik untuk membuka dokumen riset mendalam lengkap (Hasil Audit & Koreksi Model 3)">
+          <div class="gemini-card-left">
+            <div class="gemini-card-icon-box" style="background:rgba(255, 0, 127, 0.12); border-color:rgba(255, 0, 127, 0.35); color:#FF007F;">
+              <i class="fa-solid fa-book-open-reader"></i>
+            </div>
+            <div class="gemini-card-content">
+              <h4 class="gemini-card-title">${escapeHtml(reportTitle)}</h4>
+              <div class="gemini-card-meta">${metaString}</div>
+            </div>
+          </div>
+          <button type="button" class="gemini-card-open-btn" data-action="open-full-report" title="Buka Dokumen Riset Komprehensif">
+            <i class="fa-solid fa-book-bookmark" style="margin-right:4px;"></i>
+            <span>Buka Laporan (${sourcesCount} Sumber)</span>
+          </button>
         </div>
-        <button type="button" class="gemini-card-open-btn" data-action="open-full-report" title="Buka Dokumen Laporan Lengkap">
-          <span>Buka</span>
-        </button>
       </div>
     `;
   }
@@ -5655,6 +5683,7 @@ ${organicBlock}
     renderResearchHUD(15, 'Menganalisis topik & konteks percakapan...');
 
     let finalReportText = '';
+    let chatSummary = '';
 
     try {
       let isBackendSuccess = false;
@@ -5684,6 +5713,8 @@ ${organicBlock}
               agent1Model: STATE.settings.deepResearchAgent1Model || targetModel,
               agent2Model: STATE.settings.deepResearchAgent2Model || targetModel,
               finalModel: STATE.settings.deepResearchFinalModel || targetModel,
+              model3: STATE.settings.deepResearchFinalModel || targetModel,
+              model4: STATE.settings.deepResearchModel4 || STATE.settings.deepResearchFinalModel || targetModel,
               maxIterations: 3
             }),
             signal: STATE.abortController.signal
@@ -5728,6 +5759,7 @@ ${organicBlock}
 
                 if (statusData.status === 'selesai') {
                   finalReportText = statusData.hasil || '';
+                  chatSummary = statusData.chatSummary || '';
                   allSources = statusData.sources || [];
                   isBackendSuccess = true;
                   STATE.currentDeepResearchTaskId = null;
@@ -5736,10 +5768,23 @@ ${organicBlock}
                   } else {
                     updateLiveInspectionData({
                       synthesizer: {
+                        name: 'Model 3 (Lead Corrector & Enhancer)',
                         model: STATE.settings.deepResearchFinalModel || targetModel,
                         status: 'selesai',
                         text: finalReportText,
                         length: (finalReportText || '').length
+                      }
+                    });
+                  }
+                  if (statusData.liveInspection?.model4) {
+                    updateLiveInspectionData({ model4: statusData.liveInspection.model4 });
+                  } else if (chatSummary) {
+                    updateLiveInspectionData({
+                      model4: {
+                        name: 'Model 4 (Executive Chat Summarizer)',
+                        model: STATE.settings.deepResearchModel4 || STATE.settings.deepResearchFinalModel || targetModel,
+                        status: 'selesai',
+                        text: chatSummary
                       }
                     });
                   }
@@ -5971,16 +6016,23 @@ ${organicBlock}
         }
 
         // ==========================================
-        // PILAR 3: SINTESIS EKSEKUTIF OLEH MODEL 3
+        // PILAR 3: AUDIT, KOREKSI & PENYEMPURNAAN OLEH MODEL 3 (LEAD REVIEWER & CORRECTOR)
+        // Sesuai Mandat Kaisar Zozi: Model 3 mengoreksi, menghubungkan output Model 1 & 2,
+        // serta mengelaborasi dokumen laporan riset secara sangat mendalam dan luas (output banyak 8 bab).
         // ==========================================
+        const model3 = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
+        const model4 = (STATE.settings.deepResearchModel4 && STATE.settings.deepResearchModel4.trim()) ? STATE.settings.deepResearchModel4.trim() : model3;
+
         stepItems[stepItems.length - 1].status = 'done';
-        stepItems.push({ text: `[Langkah 3/3] Model 3 (${finalModel}) mencerna output Model 1 & 2 serta menyusun laporan eksekutif...`, status: 'active' });
-        renderResearchHUD(85, `[Langkah 3/3] Model 3 (${finalModel}) menyusun laporan riset eksekutif...`);
+        stepItems.push({ text: `[Langkah 3/4] Model 3 (${model3}) mengoreksi, menghubungkan temuan Model 1 & 2, serta menyempurnakan dokumen riset...`, status: 'active' });
+        renderResearchHUD(85, `[Langkah 3/4] Model 3 (${model3}) mengoreksi & menyempurnakan laporan...`);
 
         const personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
-        const synthesisSystem = `Anda adalah Analis Riset Senior, Lead Technical Scientist & Editor Eksekutif Utama (Model 3).
-Topik Riset: "${promptText}".
-Tugas utama Anda adalah mencerna, memvalidasi silang, membandingkan konsensus, dan menggabungkan DUA OUTPUT ANALISIS INDEPENDEN yang telah dihasilkan oleh Model 1 dan Model 2:
+        const correctorSystem = `Anda adalah Model 3: Lead Scientific Reviewer, Fact-Corrector & Master Enhancer.
+Tugas utama Anda BUKAN sekadar merangkum atau menulis ulang secara dangkal, melainkan:
+1. MENGOREKSI & MEMVALIDASI: Periksa fakta, deteksi klaim tanpa dasar, koreksi kesalahan teknis atau bias dari output Model 1 dan Model 2.
+2. MENGHUBUNGKAN SECARA LOGIS (INTERCONNECTIVITY): Buat output Model 1 (Pakar Web Google) dan Model 2 (Pakar Analisis Divergen) SALING TERHUBUNG dan bersinergi, menjelaskan bagaimana fakta primer berhubungan dengan sudut pandang teknis independen.
+3. MENYEMPURNAKAN & MENGELABORASI SECARA MENDALAM: Elaborasikan temuan menjadi laporan riset ilmiah yang SANGAT MENDALAM, KAYA DATA, KOMPREHENSIF, DAN PANJANG/BANYAK (Deep Comprehensive Report) tahun rujukan 2026.
 
 === OUTPUT ANALISIS DARI MODEL 1 (PAKAR WEB GOOGLE PRIMER: ${agent1Model}) ===
 ${laporanPakarClient1 || analisisAgen1Iter2 || analisisAgen1Iter1 || 'Telaah Model 1 selesai.'}
@@ -5988,61 +6040,66 @@ ${laporanPakarClient1 || analisisAgen1Iter2 || analisisAgen1Iter1 || 'Telaah Mod
 === OUTPUT ANALISIS DARI MODEL 2 (PAKAR ANALISIS DIVERGEN & DOMAIN MANDIRI: ${agent2Model}) ===
 ${laporanPakarClient2 || analisisAgen2Iter2 || analisisAgen2Iter1 || 'Telaah Model 2 selesai.'}
 
-=== RIWAYAT TEMUAN MULTI-TAHAP ===
+=== DATA PEMINDAIAN WEB UTUH & TEMUAN MULTI-TAHAP ===
 ${dataTemuan.join('\n\n')}
 
-Daftar Seluruh Sumber Terverifikasi (${allSources.length} Dokumen Web):
+Daftar Seluruh Sumber Rujukan Terverifikasi (${allSources.length} Dokumen Web):
 ${allSources.map((s, idx) => `[${idx + 1}] [${s.sourceProvider || 'Web'}] ${s.title}: ${s.url}`).join('\n')}
 
-Format Laporan yang WAJIB dipatuhi:
+Format Laporan Komprehensif yang WAJIB dipatuhi:
 # 🔬 DEEP RESEARCH REPORT: ${promptText.toUpperCase()}
-> **Status:** Riset Mendalam Multi-Iterasi & Validasi Konten Selesai  
+> **Status:** Riset Mendalam Multi-Agen Terkoreksi & Tervalidasi Silang  
+> **Lead Auditor & Corrector:** Model 3 (${model3})  
 > **Total Sumber Terverifikasi:** ${allSources.length} Dokumen Web  
 > **Tahun Rujukan:** 2026
 
 ---
 
-## 1. 📌 Pendahuluan & Ringkasan Eksekutif (Executive Summary)
-(Uraikan ringkasan tingkat tinggi mengenai latar belakang, esensi topik, dan temuan inti dalam 2-3 paragraf berbobot tajam)
+## 1. 📌 Pendahuluan & Ringkasan Komprehensif (Comprehensive Overview)
+(Uraikan secara mendalam esensi topik, konteks global, latar belakang historis, dan urgensi temuan dalam 3-4 paragraf berbobot analitis)
 
-## 2. 🔍 Temuan Utama & Analisis Mendalam (Core Deep Findings)
-(Analisis teknis, fakta-fakta spesifik, mekanisme kerja, dan data riil 2026)
+## 2. 🔍 Temuan Utama & Elaborasi Teknis Mendalam (In-Depth Technical Analysis)
+(Analisis teknis mendalam dan panjang mengenai fakta spesifik, arsitektur, mekanisme kerja, data riil, dan dinamika industri 2026)
 
-## 3. ⚖️ Penyaringan Fakta & Validasi Sumber (Fact-Checking & Bias Analysis)
-(Bandingkan fakta antar sumber: sebutkan poin konsensus, verifikasi klaim, dan catat bila ada kontradiksi/perbedaan pandangan antar pakar)
+## 3. ⚖️ Koreksi Faktual, Konsensus & Validasi Silang Multi-Model (Fact-Correction & Cross-Verification)
+(Bagian koreksi Model 3: Jelaskan secara transparan bagian mana dari klaim awal yang telah dikoreksi, diverifikasi, atau diselaraskan antara Model 1 dan Model 2. Hubungkan secara jelas titik temu konsensus dan perbedaan pandangannya)
 
-## 4. 📊 Matriks Data & Kategorisasi Tren (Trend & Synthesis Mapping)
-- **Data & Fakta Statistik:** (Statistik konkret, angka, atau persentase)
-- **Opini Tokoh & Pakar:** (Pandangan ahli di bidang terkait)
-- **Tantangan & Hambatan:** (Regulasi, teknis, biaya, atau etika)
-- **Peluang Industri & Dampak:** (Potensi nilai dan transformasi)
+## 4. 🔗 Sinergi & Konektivitas Temuan (Interconnected Synthesis Model 1 & Model 2)
+(Jelaskan bagaimana temuan fakta primer dari Model 1 dan telaah teknis divergen dari Model 2 saling melengkapi, membentuk pemahaman holistik yang tidak bisa didapat dari satu sumber saja)
 
-## 5. ⚠️ Tantangan & Hambatan Saat Ini
-(Detail kendala implementasi, kepatuhan regulasi, atau keterbatasan saat ini)
+## 5. 📊 Matriks Data Komparatif, Statistik & Tren Pasar 2026
+- **Data Statistik & Angka Konkret:** (Sajikan angka statistik riil, persentase, estimasi nilai pasar 2026)
+- **Perspektif Pakar & Industri:** (Opini tokoh, pakar independen, dan konsensus lembaga riset)
+- **Tantangan Teknis, Keamanan & Etika:** (Analisis hambatan mendalam)
+- **Transformasi & Potensi Pasar:** (Dampak ekonomi dan teknologis)
 
-## 6. 🚀 Tren & Analisis Masa Depan (Future Trajectory)
-(Proyeksi perkembangan hingga akhir 2026 dan tahun-tahun berikutnya)
+## 6. ⚠️ Analisis Risiko, Regulasi & Hambatan Implementasi
+(Uraian komprehensif mengenai kepatuhan hukum, regulasi, kendala teknis, dan langkah mitigasi risiko)
 
-## 7. 🛠️ Rekomendasi Strategis & Implementasi Praktis
-(Langkah konkret yang dapat diterapkan, arsitektur sistem, atau contoh kode/penerapan nyata jika relevan)
+## 7. 🚀 Proyeksi Masa Depan & Trajektori Tren (Future Roadmap 2026-2030)
+(Analisis mendalam mengenai arah perkembangan tren teknologi, riset masa depan, dan evolusi ekosistem hingga tahun-tahun mendatang)
+
+## 8. 🛠️ Rekomendasi Strategis & Kerangka Implementasi Praktis
+(Langkah konkret teknis, panduan arsitektur sistem, blueprint implementasi, atau contoh penerapan nyata yang aplikatif)
 
 ---
-### 📚 Daftar Pustaka / Sumber Referensi:
-Sajikan seluruh tautan asli markdown [Nama Sumber](URL) agar pengguna dapat langsung mengeklik rujukan aslinya.
+### 📚 Daftar Pustaka / Sumber Referensi Terverifikasi:
+Sajikan seluruh tautan asli markdown [Nama Sumber](URL) lengkap dengan keterangan sumber asal (Serper Primer / Serper Divergen) agar pembaca dapat langsung merujuk ke dokumen aslinya.
 
 ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
         // Pertahankan HUD Progres di gelembung obrolan agar chat bubble tidak dibanjiri teks laporan
-        renderResearchHUD(90, `[Langkah 3/3] Chief Synthesizer (${finalModel}) menyusun laporan riset eksekutif...`);
+        renderResearchHUD(90, `[Langkah 3/4] Model 3 (${model3}) mengoreksi & menyempurnakan dokumen riset...`);
         
-        // Auto-detect finalModel engine for executive synthesis
-        const finalEngine = finalModel.includes('/') ? 'openrouter' : (finalModel.includes(':') ? 'ollama' : engine);
+        // Auto-detect model3 engine for executive synthesis
+        const model3Engine = model3.includes('/') ? 'openrouter' : (model3.includes(':') ? 'ollama' : engine);
         
-        // Alirkan laporan langsung ke Live Deep Research Inspector (Tab Chief Synthesizer)
-        finalReportText = await streamLLMSynthesis(finalEngine, finalModel, synthesisSystem, session, null, (chunk, accumulated) => {
+        // Alirkan laporan langsung ke Live Deep Research Inspector (Tab Chief Synthesizer / Model 3)
+        finalReportText = await streamLLMSynthesis(model3Engine, model3, correctorSystem, session, null, (chunk, accumulated) => {
           updateLiveInspectionData({
             synthesizer: {
-              model: finalModel,
+              name: 'Model 3 (Lead Corrector & Enhancer)',
+              model: model3,
               status: 'menyusun',
               text: accumulated,
               length: accumulated.length
@@ -6052,10 +6109,72 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
         updateLiveInspectionData({
           synthesizer: {
-            model: finalModel,
+            name: 'Model 3 (Lead Corrector & Enhancer)',
+            model: model3,
             status: 'selesai',
             text: finalReportText,
             length: (finalReportText || '').length
+          }
+        });
+
+        // ==========================================
+        // PILAR 4: PENYUSUNAN RANGKUMAN EKSEKUTIF ANTARMUKA CHAT OLEH MODEL 4 (CLIENT)
+        // Sesuai Mandat Kaisar Zozi: Model 4 merumuskan rangkuman khusus untuk tampil di gelembung obrolan chat.
+        // ==========================================
+        stepItems[stepItems.length - 1].status = 'done';
+        stepItems.push({ text: `[Langkah 4/4] Model 4 (${model4}) menyusun rangkuman eksekutif untuk antarmuka chat...`, status: 'active' });
+        renderResearchHUD(95, `[Langkah 4/4] Model 4 (${model4}) menyusun rangkuman chat...`);
+
+        updateLiveInspectionData({
+          model4: {
+            name: 'Model 4 (Executive Chat Summarizer)',
+            model: model4,
+            status: 'menyusun',
+            text: 'Model 4 sedang merumuskan rangkuman eksekutif untuk antarmuka chat...',
+            timestamp: new Date().toLocaleTimeString('id-ID')
+          }
+        });
+
+        const summaryPrompt = `Anda adalah Model 4: Lead Executive Communicator & Chat Summarizer.
+Tugas Anda adalah membaca Laporan Riset Komprehensif yang telah dikoreksi dan disempurnakan oleh Model 3 mengenai topik: "${promptText}".
+
+=== LAPORAN RISET LENGKAP TERKOREKSI (HASIL MODEL 3) ===
+${finalReportText}
+
+=== TUGAS ANDA ===
+Susun RANGKUMAN EKSEKUTIF (Executive Summary) padat, tajam, dan elegan yang akan ditampilkan LANGSUNG DI ANTARMUKA CHAT (di dalam gelembung obrolan pengguna).
+Rangkuman ini BUKAN laporan lengkap (karena laporan lengkap ${allSources.length} sumber akan dibaca lewat modal tombol).
+Rangkuman ini harus menyajikan intisari paling berharga agar pengguna langsung paham dalam 30 detik!
+
+Format Rangkuman Chat yang WAJIB dipatuhi:
+### 💡 Rangkuman Eksekutif Riset
+(Uraikan 1-2 paragraf padat mengenai esensi topik dan kesimpulan utama yang telah divalidasi)
+
+#### ⚡ Poin Kunci & Temuan Terkoreksi:
+- **Inti Temuan:** (Poin krusial dari hasil penelusuran 2026)
+- **Konsensus & Koreksi Model:** (Bagaimana Model 1 & 2 dihubungkan dan diselaraskan oleh Model 3)
+- **Data & Fakta Utama:** (Statistik konkret, metrik, atau data spesifik terverifikasi)
+- **Tantangan Utama:** (Hambatan kritis atau risiko regulasi yang perlu diwaspadai)
+
+#### 🚀 Implikasi Strategis & Rekomendasi:
+(2-3 butir rekomendasi taktis atau langkah strategis yang dapat langsung diambil)
+
+*Catatan: Rangkuman ringkas ini disiapkan khusus untuk antarmuka chat. Dokumen analisis riset mendalam utuh (${allSources.length} sumber) dapat dibuka melalui tombol di bawah.*`;
+
+        try {
+          chatSummary = await callClientLLMDirect(model4, summaryPrompt, 'Anda adalah Model 4: Executive Summarizer yang menyajikan intisari riset secara padat, tajam, profesional, dan siap saji di antarmuka chat.');
+        } catch (sumErr) {
+          console.warn('Gagal menyusun rangkuman chat di client fallback:', sumErr);
+          chatSummary = `### 💡 Rangkuman Eksekutif Riset\nRiset mendalam multi-agen mengenai **${promptText}** telah berhasil diselesaikan dan divalidasi silang melalui ${allSources.length} sumber rujukan terverifikasi.\n\nSilakan klik tombol **[📖 Buka Laporan]** di bawah untuk membaca dokumen analisis lengkap hasil telaah Model 1, 2, dan 3.`;
+        }
+
+        updateLiveInspectionData({
+          model4: {
+            name: 'Model 4 (Executive Chat Summarizer)',
+            model: model4,
+            status: 'selesai',
+            text: chatSummary,
+            timestamp: new Date().toLocaleTimeString('id-ID')
           }
         });
       }
@@ -6067,8 +6186,8 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         const actualFinalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
 
         const nowIso = new Date().toISOString();
-        // Render Gemini-Style Research Card in chat bubble
-        bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(finalReportText, actualFinalModel, allSources, nowIso);
+        // Render Gemini-Style Research Card in chat bubble (dengan rangkuman Model 4 di antarmuka chat)
+        bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(finalReportText, actualFinalModel, allSources, nowIso, chatSummary);
         enhanceCodeBlocks(bubbleText);
         attachDeepResearchCardEvents(assistantRow, finalReportText, actualFinalModel, allSources, nowIso);
         assistantRow.dataset.fullContent = finalReportText;
@@ -6086,6 +6205,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         const assistantMsg = {
           role: 'assistant',
           content: finalReportText,
+          chatSummary: chatSummary,
           model: actualFinalModel,
           sources: allSources,
           isDeepResearch: true,
@@ -6107,13 +6227,14 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
           const stoppedText = `${finalReportText.trim()}\n\n*[Riset dihentikan oleh pengguna]*`;
           const actualFinalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
           const nowIso = new Date().toISOString();
-          bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(stoppedText, actualFinalModel, allSources, nowIso);
+          bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(stoppedText, actualFinalModel, allSources, nowIso, chatSummary);
           enhanceCodeBlocks(bubbleText);
           attachDeepResearchCardEvents(assistantRow, stoppedText, actualFinalModel, allSources, nowIso);
           assistantRow.dataset.fullContent = stoppedText;
           session.messages.push({
             role: 'assistant',
             content: stoppedText,
+            chatSummary: chatSummary,
             model: actualFinalModel,
             sources: allSources,
             isDeepResearch: true,
@@ -8089,6 +8210,8 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       } else if (targetId === 'settingDeepResearchFinalModel') {
         STATE.settings.deepResearchFinalModel = modelId;
         if (els.selectDeepResearchFinalModel) els.selectDeepResearchFinalModel.value = modelId;
+      } else if (targetId === 'settingDeepResearchModel4') {
+        STATE.settings.deepResearchModel4 = modelId;
       }
       
       if (catModal) catModal.dataset.targetInputId = '';
@@ -8153,7 +8276,8 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       agent1: { ...(STATE.currentLiveInspection?.agent1 || {}), ...(inspectionData.agent1 || {}) },
       agent2: { ...(STATE.currentLiveInspection?.agent2 || {}), ...(inspectionData.agent2 || {}) },
       scraper: { ...(STATE.currentLiveInspection?.scraper || {}), ...(inspectionData.scraper || {}) },
-      synthesizer: { ...(STATE.currentLiveInspection?.synthesizer || {}), ...(inspectionData.synthesizer || {}) }
+      synthesizer: { ...(STATE.currentLiveInspection?.synthesizer || {}), ...(inspectionData.synthesizer || {}) },
+      model4: { ...(STATE.currentLiveInspection?.model4 || {}), ...(inspectionData.model4 || {}) }
     };
     const currentInsp = STATE.currentLiveInspection;
 
@@ -8174,6 +8298,10 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     if (els.inspectCountSynthesizer) {
       const synLen = currentInsp.synthesizer?.text ? currentInsp.synthesizer.text.length : (currentInsp.synthesizer?.length || 0);
       els.inspectCountSynthesizer.innerText = synLen > 0 ? (synLen > 999 ? `${(synLen / 1000).toFixed(1)}k` : `${synLen}`) : (currentInsp.synthesizer?.status === 'selesai' ? 'Selesai' : 'Siap');
+    }
+    if (els.inspectCountModel4) {
+      const m4Len = currentInsp.model4?.text ? currentInsp.model4.text.length : (currentInsp.model4?.length || 0);
+      els.inspectCountModel4.innerText = m4Len > 0 ? (m4Len > 999 ? `${(m4Len / 1000).toFixed(1)}k` : `${m4Len}`) : (currentInsp.model4?.status === 'selesai' ? 'Selesai' : 'Siap');
     }
 
     // Jika modal terbuka, langsung live update view secara dinamis
@@ -8362,28 +8490,61 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
           <div class="inspector-card-header">
             <div class="inspector-card-title">
               <i class="fa-solid fa-feather-pointed" style="color: #FF007F;"></i>
-              <span>Chief Research Synthesizer (Model 3)</span>
+              <span>${escapeHtml(syn.name || 'Model 3: Pengoreksi & Penyempurna Laporan (Lead Corrector)')}</span>
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
               <span class="catalog-badge" style="background:rgba(255,0,127,0.1); color:#FF007F; border-color:rgba(255,0,127,0.3);">
-                Model: ${escapeHtml(syn.model || STATE.settings.deepResearchFinalModel || 'Lead Synthesizer')}
+                Model: ${escapeHtml(syn.model || STATE.settings.deepResearchFinalModel || 'Lead Corrector')}
               </span>
               <span class="catalog-badge" style="background:rgba(0,255,194,0.1); color:var(--neon-teal);">
-                ${syn.status === 'selesai' ? '<i class="fa-solid fa-check"></i> Selesai' : (synText ? '<i class="fa-solid fa-spinner fa-spin"></i> Menyusun...' : 'Menunggu')}
+                ${syn.status === 'selesai' ? '<i class="fa-solid fa-check"></i> Selesai' : (synText ? '<i class="fa-solid fa-spinner fa-spin"></i> Mengoreksi...' : 'Menunggu')}
               </span>
             </div>
           </div>
 
           <p style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 12px; line-height: 1.45;">
-            Chief Synthesizer merajut dan memvalidasi silang seluruh telaah dari Agen 1 (Pakar Web Google) dan Agen 2 (Pakar Analisis Divergen) ke dalam format laporan eksekutif berstandar 2026.
+            Model 3 bertindak sebagai Lead Reviewer & Fact-Corrector yang mengoreksi klaim/bias, merajut konektivitas logis antara Model 1 dan Model 2, serta menyempurnakan dokumen riset komprehensif 8 bab tahun rujukan 2026.
           </p>
 
           <div>
             <div style="font-size: 0.78rem; font-weight: 700; color: #FF007F; margin-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
-              <span><i class="fa-solid fa-terminal"></i> Draft Live Penyusunan Laporan Eksekutif:</span>
+              <span><i class="fa-solid fa-terminal"></i> Draft Live Laporan Riset Komprehensif Terkoreksi:</span>
               <span style="font-size:0.7rem; color:var(--text-dim); font-family:var(--font-code);">${synText ? `${synText.length} karakter` : '0 karakter'}</span>
             </div>
-            <div class="inspector-analysis-box" style="max-height: 480px; overflow-y: auto; white-space: pre-wrap; font-family: var(--font-code); font-size: 0.8rem; line-height: 1.5; border-color: rgba(255,0,127,0.3); background: rgba(20, 8, 16, 0.6);">${escapeHtml(synText || 'Chief Synthesizer sedang menunggu hasil akhir pemindaian dokumen web sebelum mulai merajut laporan eksekutif...')}</div>
+            <div class="inspector-analysis-box" style="max-height: 480px; overflow-y: auto; white-space: pre-wrap; font-family: var(--font-code); font-size: 0.8rem; line-height: 1.5; border-color: rgba(255,0,127,0.3); background: rgba(20, 8, 16, 0.6);">${escapeHtml(synText || 'Model 3 sedang menunggu hasil telaah Model 1 & Model 2 sebelum mulai mengoreksi dan menyempurnakan laporan...')}</div>
+          </div>
+        </div>
+      `;
+    } else if (tab === 'model4') {
+      const m4 = insp.model4 || {};
+      const m4Text = m4.text || '';
+      container.innerHTML = `
+        <div class="inspector-card">
+          <div class="inspector-card-header">
+            <div class="inspector-card-title">
+              <i class="fa-solid fa-sparkles" style="color: var(--neon-cyan);"></i>
+              <span>${escapeHtml(m4.name || 'Model 4: Perangkum Chat Eksekutif (Executive Summarizer)')}</span>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <span class="catalog-badge" style="background:rgba(0,240,255,0.08); color:var(--neon-cyan); border-color:rgba(0,240,255,0.3);">
+                Model: ${escapeHtml(m4.model || STATE.settings.deepResearchModel4 || 'Executive Summarizer')}
+              </span>
+              <span class="catalog-badge" style="background:rgba(0,255,194,0.1); color:var(--neon-teal);">
+                ${m4.status === 'selesai' ? '<i class="fa-solid fa-check"></i> Selesai' : (m4Text ? '<i class="fa-solid fa-spinner fa-spin"></i> Merumuskan...' : 'Menunggu')}
+              </span>
+            </div>
+          </div>
+
+          <p style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 12px; line-height: 1.45;">
+            Model 4 membaca dokumen komprehensif hasil koreksi Model 3 dan merumuskan intisari eksekutif padat untuk disajikan langsung di gelembung obrolan chat pengguna.
+          </p>
+
+          <div>
+            <div style="font-size: 0.78rem; font-weight: 700; color: var(--neon-cyan); margin-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
+              <span><i class="fa-solid fa-comment-dots"></i> Draft Live Rangkuman Eksekutif Chat:</span>
+              <span style="font-size:0.7rem; color:var(--text-dim); font-family:var(--font-code);">${m4Text ? `${m4Text.length} karakter` : '0 karakter'}</span>
+            </div>
+            <div class="inspector-analysis-box" style="max-height: 480px; overflow-y: auto; white-space: pre-wrap; font-family: var(--font-code); font-size: 0.8rem; line-height: 1.5; border-color: rgba(0,240,255,0.3); background: rgba(8, 20, 24, 0.6);">${escapeHtml(m4Text || 'Model 4 sedang menunggu penyelesaian laporan terkoreksi dari Model 3...')}</div>
           </div>
         </div>
       `;
@@ -8399,6 +8560,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
     if (els.settingDeepResearchAgent1Model) els.settingDeepResearchAgent1Model.value = STATE.settings.deepResearchAgent1Model || '';
     if (els.settingDeepResearchAgent2Model) els.settingDeepResearchAgent2Model.value = STATE.settings.deepResearchAgent2Model || '';
     if (els.settingDeepResearchFinalModel) els.settingDeepResearchFinalModel.value = STATE.settings.deepResearchFinalModel || '';
+    if (els.settingDeepResearchModel4) els.settingDeepResearchModel4.value = STATE.settings.deepResearchModel4 || '';
     if (els.paramTemperature) els.paramTemperature.value = STATE.settings.temperature ?? 0.7;
     if (els.valTemperature) els.valTemperature.innerText = STATE.settings.temperature ?? 0.7;
     if (els.paramTopP) els.paramTopP.value = STATE.settings.topP ?? 0.9;
@@ -8487,7 +8649,8 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         let labelName = 'Model';
         if (targetInputId === 'settingDeepResearchAgent1Model') labelName = 'Agen 1 (Pakar Web Google)';
         else if (targetInputId === 'settingDeepResearchAgent2Model') labelName = 'Agen 2 (Pakar Data Spesifik)';
-        else if (targetInputId === 'settingDeepResearchFinalModel') labelName = 'Agen Akhir (Analis Senior)';
+        else if (targetInputId === 'settingDeepResearchFinalModel') labelName = 'Model 3 (Pengoreksi & Penyempurna Laporan)';
+        else if (targetInputId === 'settingDeepResearchModel4') labelName = 'Model 4 (Perangkum Chat Eksekutif)';
         openLiveModelCatalog(targetInputId, labelName);
         return;
       }
@@ -9306,6 +9469,10 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         STATE.settings.deepResearchFinalModel = els.settingDeepResearchFinalModel.value.trim();
       }
 
+      if (els.settingDeepResearchModel4) {
+        STATE.settings.deepResearchModel4 = els.settingDeepResearchModel4.value.trim();
+      }
+
       if (els.paramTemperature) STATE.settings.temperature = parseFloat(els.paramTemperature.value);
       if (els.paramTopP) STATE.settings.topP = parseFloat(els.paramTopP.value);
       if (els.settingSystemPrompt) {
@@ -9429,6 +9596,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       els.btnTabInspectAgent2?.classList.remove('active');
       els.btnTabInspectScraper?.classList.remove('active');
       els.btnTabInspectSynthesizer?.classList.remove('active');
+      els.btnTabInspectModel4?.classList.remove('active');
       renderLiveInspectionContent();
       AudioEngine.click();
     });
@@ -9439,6 +9607,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       els.btnTabInspectAgent1?.classList.remove('active');
       els.btnTabInspectScraper?.classList.remove('active');
       els.btnTabInspectSynthesizer?.classList.remove('active');
+      els.btnTabInspectModel4?.classList.remove('active');
       renderLiveInspectionContent();
       AudioEngine.click();
     });
@@ -9449,6 +9618,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       els.btnTabInspectAgent1?.classList.remove('active');
       els.btnTabInspectAgent2?.classList.remove('active');
       els.btnTabInspectSynthesizer?.classList.remove('active');
+      els.btnTabInspectModel4?.classList.remove('active');
       renderLiveInspectionContent();
       AudioEngine.click();
     });
@@ -9459,6 +9629,18 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       els.btnTabInspectAgent1?.classList.remove('active');
       els.btnTabInspectAgent2?.classList.remove('active');
       els.btnTabInspectScraper?.classList.remove('active');
+      els.btnTabInspectModel4?.classList.remove('active');
+      renderLiveInspectionContent();
+      AudioEngine.click();
+    });
+
+    els.btnTabInspectModel4?.addEventListener('click', () => {
+      STATE.activeInspectionTab = 'model4';
+      els.btnTabInspectModel4.classList.add('active');
+      els.btnTabInspectAgent1?.classList.remove('active');
+      els.btnTabInspectAgent2?.classList.remove('active');
+      els.btnTabInspectScraper?.classList.remove('active');
+      els.btnTabInspectSynthesizer?.classList.remove('active');
       renderLiveInspectionContent();
       AudioEngine.click();
     });
