@@ -1618,6 +1618,35 @@ html, body {
   font-weight: bold;
 }
 
+.composer-btn.image-gen-toggle {
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.composer-btn.image-gen-toggle:hover {
+  color: #FF007F;
+  background: rgba(255, 0, 127, 0.12);
+  box-shadow: 0 0 10px rgba(255, 0, 127, 0.35);
+}
+
+.composer-btn.image-gen-toggle.active {
+  color: #ffffff;
+  background: linear-gradient(135deg, #FF007F, #9D4EDD);
+  border-color: #FF007F;
+  box-shadow: 0 0 16px rgba(255, 0, 127, 0.6);
+  animation: cyberWandPulse 2s infinite alternate;
+}
+
+@keyframes cyberWandPulse {
+  from {
+    box-shadow: 0 0 10px rgba(255, 0, 127, 0.4);
+    transform: scale(1);
+  }
+  to {
+    box-shadow: 0 0 20px rgba(255, 0, 127, 0.8), 0 0 8px rgba(157, 78, 221, 0.6);
+    transform: scale(1.05);
+  }
+}
+
 .doc-preview-chip {
   display: inline-flex;
   align-items: center;
@@ -2990,6 +3019,18 @@ html, body {
 .attachment-menu-item:hover .attach-item-icon-box.image-accent {
   background: rgba(0, 240, 255, 0.28);
   box-shadow: 0 0 12px rgba(0, 240, 255, 0.5);
+}
+
+.attach-item-icon-box.image-gen-accent {
+  background: rgba(255, 0, 127, 0.15);
+  color: #FF007F;
+  border: 1px solid rgba(255, 0, 127, 0.35);
+}
+
+.attachment-menu-item:hover .attach-item-icon-box.image-gen-accent {
+  background: rgba(255, 0, 127, 0.28);
+  border-color: #FF007F;
+  box-shadow: 0 0 14px rgba(255, 0, 127, 0.6);
 }
 
 .attach-item-icon-box.doc-accent {
