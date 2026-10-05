@@ -246,7 +246,7 @@ function getLocalOllamaManifests() {
 }
 
 // Helper to perform quick web search via Serper Google Search API
-function performWebSearch(query, apiKey = null) {
+function performWebSearch(query, apiKey = null, num = 15) {
   return new Promise((resolve) => {
     if (!query || typeof query !== 'string' || !query.trim()) {
       return resolve({ query: '', count: 0, results: [] });
@@ -256,7 +256,7 @@ function performWebSearch(query, apiKey = null) {
 
     const postData = JSON.stringify({
       q: cleanQuery,
-      num: 6,
+      num: Math.max(num || 15, 10),
       gl: 'id',
       hl: 'id'
     });
@@ -737,7 +737,7 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
           });
           agent1Urls.add(item.url);
           if (itemDomain) agent1Domains.add(itemDomain);
-          if (filteredDivergentResults.length >= 6) break;
+          if (filteredDivergentResults.length >= 15) break;
         }
       }
 
@@ -966,7 +966,7 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
     const primerSources = allSources.filter(s => (s.sourceProvider || '').includes('Primer') || (!(s.sourceProvider || '').includes('Divergen')));
     const divergenSources = allSources.filter(s => (s.sourceProvider || '').includes('Divergen'));
     const targetScrapeUrls = [];
-    const maxScrapeTarget = 6;
+    const maxScrapeTarget = 25; // Minimal 20 - 30 website sesuai mandat Kaisar Zozi
     let pIdx = 0;
     let dIdx = 0;
 
@@ -994,28 +994,63 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
           title: u.title,
           url: u.url,
           domain: u.domain,
+          sourceProvider: u.sourceProvider,
           length: (u.snippet || '').length,
           sample: u.snippet || 'Sedang mengekstrak teks artikel utuh...'
         }))
       };
     }
 
-    for (let idx = 0; idx < targetScrapeUrls.length; idx++) {
-      const sourceItem = targetScrapeUrls[idx];
-      const providerLabel = sourceItem.sourceProvider || 'Web';
-      task.currentStep = `[Langkah 2/3] Membaca isi artikel (${idx + 1}/${targetScrapeUrls.length}) [${providerLabel}]: ${sourceItem.domain || sourceItem.title}...`;
-      task.progressPercent = 55 + Math.round(((idx + 1) / targetScrapeUrls.length) * 20);
+    // Eksekusi Web Scraping secara Batch Concurrency (5 request simultan per batch) untuk kecepatan tinggi
+    const SCRAPE_BATCH_SIZE = 5;
+    for (let idx = 0; idx < targetScrapeUrls.length; idx += SCRAPE_BATCH_SIZE) {
+      if (task.aborted) break;
+      const currentBatch = targetScrapeUrls.slice(idx, idx + SCRAPE_BATCH_SIZE);
+      const batchNum = Math.floor(idx / SCRAPE_BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(targetScrapeUrls.length / SCRAPE_BATCH_SIZE);
 
-      const scrapedText = await fetchPageContent(sourceItem.url, 3500);
-      if (scrapedText && scrapedText.length > 200) {
-        scrapedArticles.push({
-          title: sourceItem.title,
-          url: sourceItem.url,
-          domain: sourceItem.domain,
-          sourceProvider: providerLabel,
-          content: scrapedText
-        });
-        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Berhasil memindai konten [${providerLabel}]: "${sourceItem.title.substring(0, 40)}..." (${scrapedText.length} karakter)`);
+      task.currentStep = `[Langkah 2/3] Memindai serentak batch ${batchNum}/${totalBatches} (${Math.min(idx + SCRAPE_BATCH_SIZE, targetScrapeUrls.length)}/${targetScrapeUrls.length} artikel)...`;
+      task.progressPercent = 55 + Math.round((Math.min(idx + SCRAPE_BATCH_SIZE, targetScrapeUrls.length) / targetScrapeUrls.length) * 20);
+
+      const batchPromises = currentBatch.map(async (sourceItem) => {
+        const providerLabel = sourceItem.sourceProvider || 'Web';
+        try {
+          const scrapedText = await fetchPageContent(sourceItem.url, 3500);
+          if (scrapedText && scrapedText.length > 200) {
+            return {
+              title: sourceItem.title,
+              url: sourceItem.url,
+              domain: sourceItem.domain,
+              sourceProvider: providerLabel,
+              content: scrapedText
+            };
+          }
+        } catch (e) {}
+        return null;
+      });
+
+      const batchResults = await Promise.allSettled(batchPromises);
+      batchResults.forEach(res => {
+        if (res.status === 'fulfilled' && res.value) {
+          scrapedArticles.push(res.value);
+          task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Berhasil memindai konten [${res.value.sourceProvider}]: "${res.value.title.substring(0, 40)}..." (${res.value.content.length} karakter)`);
+        }
+      });
+
+      if (task.liveInspection) {
+        task.liveInspection.scrapedArticlesCount = scrapedArticles.length;
+        task.liveInspection.scraper = {
+          status: idx + SCRAPE_BATCH_SIZE >= targetScrapeUrls.length ? 'selesai' : 'memindai',
+          totalScraped: scrapedArticles.length,
+          articles: scrapedArticles.map(a => ({
+            title: a.title,
+            url: a.url,
+            domain: a.domain,
+            sourceProvider: a.sourceProvider,
+            length: a.content.length,
+            sample: a.content.substring(0, 240) + '...'
+          }))
+        };
       }
     }
 
@@ -1197,12 +1232,32 @@ Format Laporan yang WAJIB dipatuhi:
 ### 📚 Daftar Pustaka / Sumber Referensi:
 Sajikan seluruh tautan asli markdown [Nama Sumber](URL) lengkap dengan keterangan sumber asal (Serper Primer / Serper Divergen) agar pengguna dapat langsung mengeklik rujukan aslinya.`;
 
+    if (task.liveInspection) {
+      task.liveInspection.synthesizer = {
+        name: 'Chief Synthesizer (Agen Akhir)',
+        model: finalModel || 'Model Utama',
+        status: 'menyusun',
+        text: 'Chief Synthesizer sedang merumuskan dokumen laporan riset eksekutif lengkap berdasarkan telaah mendalam multi-sumber...',
+        timestamp: new Date().toLocaleTimeString('id-ID')
+      };
+    }
+
     const laporanAkhir = await callLLMBackend({
       ...config,
       prompt: synthesisPrompt,
       system: 'Anda adalah Deep Research Engine & Senior Synthesizer yang menghasilkan laporan riset komprehensif, berbasis konsolidasi data multi-agen, bebas bias, mendalam, dan terstruktur rapi.',
       model: finalModel
     });
+
+    if (task.liveInspection) {
+      task.liveInspection.synthesizer = {
+        name: 'Chief Synthesizer (Agen Akhir)',
+        model: finalModel || 'Model Utama',
+        status: 'selesai',
+        text: laporanAkhir,
+        timestamp: new Date().toLocaleTimeString('id-ID')
+      };
+    }
 
     task.status = 'selesai';
     task.progressPercent = 100;

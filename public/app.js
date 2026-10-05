@@ -122,7 +122,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     catalogTargetInputId: null,
     catalogSearchQuery: '',
     catalogCategoryFilter: 'all', // 'all' | 'free' | 'reasoning' | 'fast' | 'flagship' | 'coding'
-    activeInspectionTab: 'agent1', // 'agent1' | 'agent2' | 'scraper'
+    activeInspectionTab: 'agent1', // 'agent1' | 'agent2' | 'scraper' | 'synthesizer'
     currentLiveInspection: null,
     openRouterBalance: null, // { totalCredits, totalUsage, remaining, isFreeTier, lastChecked }
     ollamaBalance: null, // { currentBalance, freeUsage, lastChecked }
@@ -413,9 +413,11 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     btnTabInspectAgent1: $('#btnTabInspectAgent1'),
     btnTabInspectAgent2: $('#btnTabInspectAgent2'),
     btnTabInspectScraper: $('#btnTabInspectScraper'),
+    btnTabInspectSynthesizer: $('#btnTabInspectSynthesizer'),
     inspectCountAgent1: $('#inspectCountAgent1'),
     inspectCountAgent2: $('#inspectCountAgent2'),
     inspectCountScraper: $('#inspectCountScraper'),
+    inspectCountSynthesizer: $('#inspectCountSynthesizer'),
     inspectTabContent: $('#inspectTabContent')
   };
 
@@ -4513,7 +4515,7 @@ ${organicBlock}
             'X-API-KEY': serperKey,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ q: query, num: 6, gl: 'id', hl: 'id' }),
+          body: JSON.stringify({ q: query, num: 15, gl: 'id', hl: 'id' }),
           signal: STATE.abortController?.signal
         });
         if (directRes.ok) data = await directRes.json();
@@ -4523,7 +4525,7 @@ ${organicBlock}
         const proxyRes = await fetch('/api/web-search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-serper-key': serperKey },
-          body: JSON.stringify({ query: query, apiKey: serperKey }),
+          body: JSON.stringify({ query: query, apiKey: serperKey, num: 15 }),
           signal: STATE.abortController?.signal
         }).catch(() => null);
         if (proxyRes && proxyRes.ok) data = await proxyRes.json();
@@ -4541,7 +4543,7 @@ ${organicBlock}
       }
       const list = data.organic || data.results || [];
       if (Array.isArray(list)) {
-        list.slice(0, 6).forEach((item, idx) => {
+        list.slice(0, 15).forEach((item, idx) => {
           summary += `\n${idx + 1}. ${item.title}: ${item.snippet} (${item.link || item.url || ''})`;
           if (item.link || item.url) {
             sources.push({
@@ -4583,7 +4585,7 @@ ${organicBlock}
             'X-API-KEY': serperKey,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ q: divergentQuery, num: 10, gl: 'id', hl: 'id' }),
+          body: JSON.stringify({ q: divergentQuery, num: 20, gl: 'id', hl: 'id' }),
           signal: STATE.abortController?.signal
         });
         if (directRes.ok) data = await directRes.json();
@@ -4593,7 +4595,7 @@ ${organicBlock}
         const proxyRes = await fetch('/api/web-search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-serper-key': serperKey },
-          body: JSON.stringify({ query: divergentQuery, apiKey: serperKey }),
+          body: JSON.stringify({ query: divergentQuery, apiKey: serperKey, num: 20 }),
           signal: STATE.abortController?.signal
         }).catch(() => null);
         if (proxyRes && proxyRes.ok) data = await proxyRes.json();
@@ -4636,7 +4638,7 @@ ${organicBlock}
           excludeUrlSet.add(itemUrl);
           excludeDomainSet.add(cleanDomain);
 
-          if (addedCount >= 6) break;
+          if (addedCount >= 15) break;
         }
       }
 
@@ -4647,7 +4649,7 @@ ${organicBlock}
   }
 
   // Helper untuk menyeimbangkan artikel scraper antara Agen 1 (Primer) dan Agen 2 (Divergen)
-  function getBalancedScrapeList(sources, maxCount = 6) {
+  function getBalancedScrapeList(sources, maxCount = 25) {
     if (!Array.isArray(sources) || sources.length === 0) return [];
     const primer = sources.filter(s => (s.sourceProvider || '').includes('Primer') || (!(s.sourceProvider || '').includes('Divergen')));
     const divergen = sources.filter(s => (s.sourceProvider || '').includes('Divergen'));
@@ -4730,8 +4732,8 @@ ${organicBlock}
     }
   }
 
-  async function streamLLMSynthesis(engine, modelName, systemPrompt, session, bubbleText) {
-    const streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
+  async function streamLLMSynthesis(engine, modelName, systemPrompt, session, bubbleText = null, onChunk = null) {
+    const streamRenderer = bubbleText ? new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false)) : null;
     let fullText = '';
 
     // Auto-resolve actual engine based on modelName pattern
@@ -4802,7 +4804,10 @@ ${organicBlock}
               const delta = parsed.choices?.[0]?.delta?.content;
               if (delta) {
                 fullText += delta;
-                streamRenderer.append(delta);
+                if (streamRenderer) streamRenderer.append(delta);
+                if (typeof onChunk === 'function') {
+                  try { onChunk(delta, fullText); } catch (e) {}
+                }
               }
             } catch (e) {
               if (e.message && !e.message.includes('JSON')) throw e;
@@ -4810,7 +4815,7 @@ ${organicBlock}
           }
         }
       }
-      const renderedText = streamRenderer.finish();
+      const renderedText = streamRenderer ? streamRenderer.finish() : fullText;
       return fullText || renderedText;
     } else {
       const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
@@ -4866,15 +4871,19 @@ ${organicBlock}
               throw new Error(errStr);
             }
             if (parsed.message?.content) {
-              fullText += parsed.message.content;
-              streamRenderer.append(parsed.message.content);
+              const chunk = parsed.message.content;
+              fullText += chunk;
+              if (streamRenderer) streamRenderer.append(chunk);
+              if (typeof onChunk === 'function') {
+                try { onChunk(chunk, fullText); } catch (e) {}
+              }
             }
           } catch (e) {
             if (e.message && !e.message.includes('JSON')) throw e;
           }
         }
       }
-      const renderedText = streamRenderer.finish();
+      const renderedText = streamRenderer ? streamRenderer.finish() : fullText;
       return fullText || renderedText;
     }
   }
@@ -5722,6 +5731,18 @@ ${organicBlock}
                   allSources = statusData.sources || [];
                   isBackendSuccess = true;
                   STATE.currentDeepResearchTaskId = null;
+                  if (statusData.liveInspection?.synthesizer) {
+                    updateLiveInspectionData({ synthesizer: statusData.liveInspection.synthesizer });
+                  } else {
+                    updateLiveInspectionData({
+                      synthesizer: {
+                        model: STATE.settings.deepResearchFinalModel || targetModel,
+                        status: 'selesai',
+                        text: finalReportText,
+                        length: (finalReportText || '').length
+                      }
+                    });
+                  }
                   break;
                 } else if (statusData.status === 'gagal' || statusData.status === 'dibatalkan') {
                   STATE.currentDeepResearchTaskId = null;
@@ -5789,7 +5810,7 @@ ${organicBlock}
         let iter1Summary = `[ANALISIS MODEL 1 - PAKAR WEB (${agent1Model})]:\n${analisisAgen1Iter1}\n\n[ANALISIS MODEL 2 - PAKAR DIVERGEN (${agent2Model})]:\n${analisisAgen2Iter1}`;
         dataTemuan.push(`### Temuan Multi-Sumber Iterasi 1 (Query: "${currentQuery}"):\n${iter1Summary}`);
 
-        const balancedArticlesIter1 = getBalancedScrapeList(allSources, 6);
+        const balancedArticlesIter1 = getBalancedScrapeList(allSources, 25);
         updateLiveInspectionData({
           topik: contextualTopic,
           currentQuery: currentQuery,
@@ -5873,7 +5894,7 @@ ${organicBlock}
         let iter2Summary = `[ANALISIS MODEL 1 - SERPER PRIMER (${agent1Model})]:\n${analisisAgen1Iter2}\n\n[ANALISIS MODEL 2 - SERPER DIVERGEN (${agent2Model})]:\n${analisisAgen2Iter2}`;
         dataTemuan.push(`### Temuan Multi-Sumber Iterasi 2 (Query: "${subQuery}"):\n${iter2Summary}`);
 
-        const balancedArticlesIter2 = getBalancedScrapeList(allSources, 6);
+        const balancedArticlesIter2 = getBalancedScrapeList(allSources, 25);
         updateLiveInspectionData({
           topik: contextualTopic,
           currentQuery: subQuery,
@@ -6011,12 +6032,32 @@ Sajikan seluruh tautan asli markdown [Nama Sumber](URL) agar pengguna dapat lang
 
 ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
-        bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+        // Pertahankan HUD Progres di gelembung obrolan agar chat bubble tidak dibanjiri teks laporan
+        renderResearchHUD(90, `[Langkah 3/3] Chief Synthesizer (${finalModel}) menyusun laporan riset eksekutif...`);
         
         // Auto-detect finalModel engine for executive synthesis
         const finalEngine = finalModel.includes('/') ? 'openrouter' : (finalModel.includes(':') ? 'ollama' : engine);
         
-        finalReportText = await streamLLMSynthesis(finalEngine, finalModel, synthesisSystem, session, bubbleText);
+        // Alirkan laporan langsung ke Live Deep Research Inspector (Tab Chief Synthesizer)
+        finalReportText = await streamLLMSynthesis(finalEngine, finalModel, synthesisSystem, session, null, (chunk, accumulated) => {
+          updateLiveInspectionData({
+            synthesizer: {
+              model: finalModel,
+              status: 'menyusun',
+              text: accumulated,
+              length: accumulated.length
+            }
+          });
+        });
+
+        updateLiveInspectionData({
+          synthesizer: {
+            model: finalModel,
+            status: 'selesai',
+            text: finalReportText,
+            length: (finalReportText || '').length
+          }
+        });
       }
 
       // Finalize UI & Markdown rendering
@@ -8106,21 +8147,33 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
   function updateLiveInspectionData(inspectionData) {
     if (!inspectionData) return;
-    STATE.currentLiveInspection = inspectionData;
+    STATE.currentLiveInspection = {
+      ...(STATE.currentLiveInspection || {}),
+      ...inspectionData,
+      agent1: { ...(STATE.currentLiveInspection?.agent1 || {}), ...(inspectionData.agent1 || {}) },
+      agent2: { ...(STATE.currentLiveInspection?.agent2 || {}), ...(inspectionData.agent2 || {}) },
+      scraper: { ...(STATE.currentLiveInspection?.scraper || {}), ...(inspectionData.scraper || {}) },
+      synthesizer: { ...(STATE.currentLiveInspection?.synthesizer || {}), ...(inspectionData.synthesizer || {}) }
+    };
+    const currentInsp = STATE.currentLiveInspection;
 
-    if (els.inspectTopik) els.inspectTopik.innerText = inspectionData.topik || '-';
-    if (els.inspectCurrentQuery) els.inspectCurrentQuery.innerText = inspectionData.currentQuery || '-';
-    if (els.inspectIteration) els.inspectIteration.innerText = `${inspectionData.iteration || 1} / ${inspectionData.maxIterations || 3}`;
-    if (els.inspectTimestamp) els.inspectTimestamp.innerText = inspectionData.timestamp || new Date().toLocaleTimeString('id-ID');
+    if (els.inspectTopik) els.inspectTopik.innerText = currentInsp.topik || '-';
+    if (els.inspectCurrentQuery) els.inspectCurrentQuery.innerText = currentInsp.currentQuery || '-';
+    if (els.inspectIteration) els.inspectIteration.innerText = `${currentInsp.iteration || 1} / ${currentInsp.maxIterations || 3}`;
+    if (els.inspectTimestamp) els.inspectTimestamp.innerText = currentInsp.timestamp || new Date().toLocaleTimeString('id-ID');
 
     if (els.inspectCountAgent1) {
-      els.inspectCountAgent1.innerText = inspectionData.agent1?.resultsCount || (inspectionData.agent1?.results?.length || 0);
+      els.inspectCountAgent1.innerText = currentInsp.agent1?.resultsCount || (currentInsp.agent1?.results?.length || 0);
     }
     if (els.inspectCountAgent2) {
-      els.inspectCountAgent2.innerText = inspectionData.agent2?.resultsCount || (inspectionData.agent2?.results?.length || 0);
+      els.inspectCountAgent2.innerText = currentInsp.agent2?.resultsCount || (currentInsp.agent2?.results?.length || 0);
     }
     if (els.inspectCountScraper) {
-      els.inspectCountScraper.innerText = inspectionData.scrapedArticlesCount ?? (inspectionData.scraper?.totalScraped ?? (inspectionData.scraper?.articles?.length || 0));
+      els.inspectCountScraper.innerText = currentInsp.scrapedArticlesCount ?? (currentInsp.scraper?.totalScraped ?? (currentInsp.scraper?.articles?.length || 0));
+    }
+    if (els.inspectCountSynthesizer) {
+      const synLen = currentInsp.synthesizer?.text ? currentInsp.synthesizer.text.length : (currentInsp.synthesizer?.length || 0);
+      els.inspectCountSynthesizer.innerText = synLen > 0 ? (synLen > 999 ? `${(synLen / 1000).toFixed(1)}k` : `${synLen}`) : (currentInsp.synthesizer?.status === 'selesai' ? 'Selesai' : 'Siap');
     }
 
     // Jika modal terbuka, langsung live update view secara dinamis
@@ -8299,6 +8352,39 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
               </div>
             </div>
           `).join('')}
+        </div>
+      `;
+    } else if (tab === 'synthesizer') {
+      const syn = insp.synthesizer || {};
+      const synText = syn.text || insp.hasil || '';
+      container.innerHTML = `
+        <div class="inspector-card">
+          <div class="inspector-card-header">
+            <div class="inspector-card-title">
+              <i class="fa-solid fa-feather-pointed" style="color: #FF007F;"></i>
+              <span>Chief Research Synthesizer (Model 3)</span>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <span class="catalog-badge" style="background:rgba(255,0,127,0.1); color:#FF007F; border-color:rgba(255,0,127,0.3);">
+                Model: ${escapeHtml(syn.model || STATE.settings.deepResearchFinalModel || 'Lead Synthesizer')}
+              </span>
+              <span class="catalog-badge" style="background:rgba(0,255,194,0.1); color:var(--neon-teal);">
+                ${syn.status === 'selesai' ? '<i class="fa-solid fa-check"></i> Selesai' : (synText ? '<i class="fa-solid fa-spinner fa-spin"></i> Menyusun...' : 'Menunggu')}
+              </span>
+            </div>
+          </div>
+
+          <p style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 12px; line-height: 1.45;">
+            Chief Synthesizer merajut dan memvalidasi silang seluruh telaah dari Agen 1 (Pakar Web Google) dan Agen 2 (Pakar Analisis Divergen) ke dalam format laporan eksekutif berstandar 2026.
+          </p>
+
+          <div>
+            <div style="font-size: 0.78rem; font-weight: 700; color: #FF007F; margin-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
+              <span><i class="fa-solid fa-terminal"></i> Draft Live Penyusunan Laporan Eksekutif:</span>
+              <span style="font-size:0.7rem; color:var(--text-dim); font-family:var(--font-code);">${synText ? `${synText.length} karakter` : '0 karakter'}</span>
+            </div>
+            <div class="inspector-analysis-box" style="max-height: 480px; overflow-y: auto; white-space: pre-wrap; font-family: var(--font-code); font-size: 0.8rem; line-height: 1.5; border-color: rgba(255,0,127,0.3); background: rgba(20, 8, 16, 0.6);">${escapeHtml(synText || 'Chief Synthesizer sedang menunggu hasil akhir pemindaian dokumen web sebelum mulai merajut laporan eksekutif...')}</div>
+          </div>
         </div>
       `;
     }
@@ -9342,6 +9428,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       els.btnTabInspectAgent1.classList.add('active');
       els.btnTabInspectAgent2?.classList.remove('active');
       els.btnTabInspectScraper?.classList.remove('active');
+      els.btnTabInspectSynthesizer?.classList.remove('active');
       renderLiveInspectionContent();
       AudioEngine.click();
     });
@@ -9351,6 +9438,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       els.btnTabInspectAgent2.classList.add('active');
       els.btnTabInspectAgent1?.classList.remove('active');
       els.btnTabInspectScraper?.classList.remove('active');
+      els.btnTabInspectSynthesizer?.classList.remove('active');
       renderLiveInspectionContent();
       AudioEngine.click();
     });
@@ -9360,6 +9448,17 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
       els.btnTabInspectScraper.classList.add('active');
       els.btnTabInspectAgent1?.classList.remove('active');
       els.btnTabInspectAgent2?.classList.remove('active');
+      els.btnTabInspectSynthesizer?.classList.remove('active');
+      renderLiveInspectionContent();
+      AudioEngine.click();
+    });
+
+    els.btnTabInspectSynthesizer?.addEventListener('click', () => {
+      STATE.activeInspectionTab = 'synthesizer';
+      els.btnTabInspectSynthesizer.classList.add('active');
+      els.btnTabInspectAgent1?.classList.remove('active');
+      els.btnTabInspectAgent2?.classList.remove('active');
+      els.btnTabInspectScraper?.classList.remove('active');
       renderLiveInspectionContent();
       AudioEngine.click();
     });
