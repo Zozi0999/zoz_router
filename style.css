@@ -5197,11 +5197,20 @@ html, body {
   gap: 10px;
 }
 
-.status-indicator {
+.provider-status-indicator-box,
+.provider-status-header .status-indicator {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 0.82rem;
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .pulse-dot {
@@ -5343,6 +5352,57 @@ html, body {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+@media (max-width: 600px) {
+  .provider-status-card {
+    padding: 10px 12px;
+  }
+  .provider-status-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .provider-status-indicator-box,
+  .provider-status-header .status-indicator {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 6px;
+  }
+  .provider-status-card .status-actions {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+  }
+  .provider-status-card .status-actions .btn {
+    flex: 1;
+    justify-content: center;
+    text-align: center;
+    padding: 6px 8px;
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+  .provider-status-meta {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+  }
+  .catalog-balance-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .catalog-balance-actions {
+    width: 100%;
+  }
+  .catalog-balance-actions .btn {
+    flex: 1;
+    justify-content: center;
+    text-align: center;
+    white-space: nowrap;
+  }
 }
 
 /* ==================== YOUTUBE OEMBED PREVIEW CARDS ==================== */
