@@ -48,6 +48,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
   // Popular OpenRouter Models Catalog (Live Active Free & Flagship Models)
   const DEFAULT_OPENROUTER_MODELS = [
+    { id: 'openrouter/free', name: 'OpenRouter Free Router (Auto)', tag: 'Free • Auto-Route', cat: 'free', desc: 'Rute otomatis cerdas ke model gratis OpenRouter yang paling sehat dan tidak antre.' },
     { id: 'qwen/qwen3.8-27b:free', name: 'qwen/qwen3.8-27b:free', tag: 'Free • Flagship', cat: 'flagship' },
     { id: 'google/gemma-4-26b-a4b-it:free', name: 'google/gemma-4-26b-a4b-it:free', tag: 'Free • Fast', cat: 'fast' },
     { id: 'google/gemma-4-31b-it:free', name: 'google/gemma-4-31b-it:free', tag: 'Free • Multimodal', cat: 'flagship' },
@@ -4044,8 +4045,17 @@ ${organicBlock}
   function doesModelSupportSystemRole(modelName) {
     if (!modelName || typeof modelName !== 'string') return true;
     const lower = modelName.toLowerCase();
-    // Model Gemma (seperti google/gemma-4-31b-it:free) dan model tertentu tidak mendukung role "system" di banyak provider OpenRouter
-    if (lower.includes('gemma') || lower.includes('mistral-tiny')) {
+    // Model Gemma, Liquid LFM, Inkling, Dots, Ling, dll. menolak role "system" di sebagian besar provider OpenRouter
+    if (
+      lower.includes('gemma') || 
+      lower.includes('mistral-tiny') ||
+      lower.includes('lfm') ||
+      lower.includes('liquid') ||
+      lower.includes('inkling') ||
+      lower.includes('dots-') ||
+      lower.includes('ling-') ||
+      lower.includes('apodex')
+    ) {
       return false;
     }
     return true;
@@ -4474,76 +4484,122 @@ ${organicBlock}
         headers['X-Title'] = 'ZOZ Router';
       }
 
-      // Daftar fallback cadangan jika model free mengalami antrean/downtime di provider upstream OpenRouter
-      const freeFallbacks = [
-        'qwen/qwen3.8-27b:free',
-        'google/gemma-4-26b-a4b-it:free',
-        'nvidia/nemotron-3.5-lightning:free',
-        'liquid/lfm-2.5-2.6b:free'
-      ].filter(m => m !== modelName);
+      // Deteksi model gratis dan siapkan pool kandidat failover cerdas
+      const isFreeModel = modelName.includes(':free') || modelName === 'openrouter/free';
+      const candidateModels = isFreeModel
+        ? [
+            modelName,
+            'openrouter/free',
+            'qwen/qwen3.8-27b:free',
+            'google/gemma-4-26b-a4b-it:free',
+            'nvidia/nemotron-3.5-lightning:free',
+            'liquid/lfm-2.5-2.6b:free',
+            'google/gemma-4-31b-it:free'
+          ].filter((m, idx, arr) => arr.indexOf(m) === idx)
+        : [modelName];
 
-      const isImageCapable = isModelCapableOfImageGeneration(modelName);
+      let response = null;
+      let lastErrDetail = '';
 
-      const requestBody = {
-        model: modelName,
-        messages: messagesPayload,
-        stream: true,
-        temperature: parseFloat(STATE.settings.temperature),
-        top_p: parseFloat(STATE.settings.topP),
-        provider: {
-          allow_fallbacks: true
-        }
-      };
+      for (let i = 0; i < candidateModels.length; i++) {
+        const currentModel = candidateModels[i];
+        const currentIsFree = currentModel.includes(':free') || currentModel === 'openrouter/free';
+        const currentIsImageCapable = isModelCapableOfImageGeneration(currentModel);
+        const currentMessagesPayload = buildSanitizedMessagesPayload(session, rawImgs, 'openrouter', systemContent, currentModel);
 
-      // Untuk model multimodal gambar (seperti gemini-2.5-flash-image / nano-banana), kirimkan modalities text dan image
-      if (isImageCapable) {
-        requestBody.modalities = ['text', 'image'];
-      }
-
-      // Pasang server tool openrouter:image_generation jika API key tersedia dan model mendukung tools
-      const canUseTools = doesModelSupportTools(modelName);
-      if (canUseTools && STATE.settings.openRouterKey) {
-        const imageGenTool = {
-          type: 'openrouter:image_generation'
-        };
-        const activeImgModel = STATE.settings.imageModel || 'black-forest-labs/flux-1-schnell';
-        if (activeImgModel && activeImgModel.includes('/')) {
-          imageGenTool.parameters = { model: activeImgModel };
-        }
-        requestBody.tools = [imageGenTool];
-      }
-
-      if (modelName.includes(':free')) {
-        requestBody.models = [modelName, ...freeFallbacks];
-      }
-
-      if (!isOpenRouterDirect) {
-        requestBody.apiKey = STATE.settings.openRouterKey;
-      }
-
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-        signal: STATE.abortController.signal
-      });
-
-      if (!response.ok) {
-        let errDetail = `HTTP ${response.status}`;
-        try {
-          const errJson = await response.json();
-          if (errJson && errJson.error) {
-            const baseErr = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
-            const rawUpstream = errJson.details?.error?.metadata?.raw || errJson.error?.metadata?.raw;
-            errDetail = rawUpstream ? `${baseErr} (${rawUpstream})` : baseErr;
+        const requestBody = {
+          model: currentModel,
+          messages: currentMessagesPayload,
+          stream: true,
+          temperature: parseFloat(STATE.settings.temperature),
+          top_p: parseFloat(STATE.settings.topP),
+          provider: {
+            allow_fallbacks: true
           }
-        } catch (je) {
-          try {
-            const raw = await response.text();
-            if (raw) errDetail = raw.substring(0, 200);
-          } catch (te) {}
+        };
+
+        if (currentIsImageCapable) {
+          requestBody.modalities = ['text', 'image'];
         }
-        throw new Error(errDetail);
+
+        // Pasang server tool openrouter:image_generation HANYA jika bukan model gratis, API key ada, dan model mendukung tools
+        const canUseTools = doesModelSupportTools(currentModel);
+        if (!currentIsFree && canUseTools && STATE.settings.openRouterKey) {
+          const imageGenTool = {
+            type: 'openrouter:image_generation'
+          };
+          const activeImgModel = STATE.settings.imageModel || 'black-forest-labs/flux-1-schnell';
+          if (activeImgModel && activeImgModel.includes('/')) {
+            imageGenTool.parameters = { model: activeImgModel };
+          }
+          requestBody.tools = [imageGenTool];
+        }
+
+        if (!isOpenRouterDirect) {
+          requestBody.apiKey = STATE.settings.openRouterKey;
+        }
+
+        try {
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(requestBody),
+            signal: STATE.abortController.signal
+          });
+
+          if (res.ok) {
+            response = res;
+            if (currentModel !== modelName) {
+              actualModelUsed = currentModel;
+            }
+            break;
+          }
+
+          let errDetail = `HTTP ${res.status}`;
+          try {
+            const errJson = await res.json();
+            if (errJson && errJson.error) {
+              const baseErr = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
+              const rawUpstream = errJson.details?.error?.metadata?.raw || errJson.error?.metadata?.raw;
+              errDetail = rawUpstream ? `${baseErr} (${rawUpstream})` : baseErr;
+            }
+          } catch (je) {
+            try {
+              const raw = await res.text();
+              if (raw) errDetail = raw.substring(0, 200);
+            } catch (te) {}
+          }
+          lastErrDetail = errDetail;
+
+          // Jika model gratis dan masih ada model kandidat berikutnya, coba otomatis
+          if (isFreeModel && i < candidateModels.length - 1) {
+            const nextCandidate = candidateModels[i + 1];
+            console.warn(`[OpenRouter Free Failover] Model ${currentModel} gagal (${errDetail}). Mengalihkan ke ${nextCandidate}...`);
+            bubbleText.innerHTML = `<span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.8; font-style:italic;">Model <b>${escapeHtml(currentModel)}</b> sibuk (${res.status}). Mengalihkan otomatis ke <b>${escapeHtml(nextCandidate)}</b>...</span>`;
+            await new Promise(r => setTimeout(r, 600));
+            continue;
+          } else {
+            throw new Error(errDetail);
+          }
+        } catch (fetchErr) {
+          if (STATE.abortController?.signal?.aborted) {
+            throw fetchErr;
+          }
+          lastErrDetail = fetchErr.message || String(fetchErr);
+          if (isFreeModel && i < candidateModels.length - 1) {
+            const nextCandidate = candidateModels[i + 1];
+            console.warn(`[OpenRouter Free Failover] Fetch error pada ${currentModel}:`, fetchErr.message);
+            bubbleText.innerHTML = `<span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.8; font-style:italic;">Koneksi ke <b>${escapeHtml(currentModel)}</b> terputus. Mencoba <b>${escapeHtml(nextCandidate)}</b>...</span>`;
+            await new Promise(r => setTimeout(r, 600));
+            continue;
+          } else {
+            throw fetchErr;
+          }
+        }
+      }
+
+      if (!response || !response.ok) {
+        throw new Error(lastErrDetail || 'Gagal memanggil model OpenRouter.');
       }
 
       const reader = response.body.getReader();
@@ -5318,9 +5374,6 @@ ${organicBlock}
           allow_fallbacks: true
         }
       };
-      if (modelName.includes(':free')) {
-        requestBody.models = [modelName, 'qwen/qwen3.8-27b:free', 'google/gemma-4-26b-a4b-it:free', 'nvidia/nemotron-3.5-lightning:free'];
-      }
       if (!isOpenRouterDirect) requestBody.apiKey = STATE.settings.openRouterKey;
 
       const response = await fetch(endpoint, {
