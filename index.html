@@ -142,7 +142,7 @@
             <button class="mode-tab" data-mode="openrouter" id="modeOpenRouter">
               <span class="tab-icon">⚡</span> OpenRouter
             </button>
-            <button class="mode-tab" data-mode="auto" id="modeAuto" title="Auto routing pintar: Local first + Cloud fallback">
+            <button class="mode-tab" data-mode="auto" id="modeAuto" title="Auto routing pintar: Ollama Cloud first + OpenRouter fallback">
               <span class="tab-icon">🔀</span> Auto Router
             </button>
           </div>
@@ -226,7 +226,7 @@
             </div>
             <h1 class="hero-title">ZOZ ROUTER</h1>
             <p class="hero-subtitle">High-Velocity Neural Multi-Engine Gateway & AI Orchestrator</p>
-            <p class="hero-desc">Jalankan model lokal Anda secara offline via <strong>Ollama</strong> atau integrasikan ratusan model cloud flagship dunia via <strong>OpenRouter</strong> dalam satu antarmuka futuristik.</p>
+            <p class="hero-desc">Orkestrasi model AI komputasi tinggi via <strong>Ollama Cloud</strong> dan ratusan model cloud flagship dunia via <strong>OpenRouter</strong> dalam satu antarmuka neural futuristik.</p>
           </div>
 
           <!-- Active Message Feed List -->
@@ -499,7 +499,7 @@
           <div class="form-group">
             <label><i class="fa-solid fa-shield-virus"></i> Auto-Router Policy</label>
             <select id="settingAutoPolicy" class="custom-select">
-              <option value="local_first">Local First (Prioritas Ollama, fallback OpenRouter bila offline)</option>
+              <option value="local_first">Ollama Cloud First (Prioritas Ollama Cloud, fallback OpenRouter bila offline)</option>
               <option value="cloud_heavy">Smart Task (Prompt panjang &gt; 500 kata / Coding sulit ke OpenRouter)</option>
             </select>
           </div>

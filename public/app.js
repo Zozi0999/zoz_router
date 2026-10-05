@@ -4210,10 +4210,10 @@ ${organicBlock}
         showToast('🔀 Auto-Router: Mengarahkan tugas kompleks ke OpenRouter Cloud...', 'info');
         await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
       } else if (isOllamaOnline) {
-        showToast('🔀 Auto-Router: Mengeksekusi via Ollama Local Engine...', 'info');
+        showToast('🔀 Auto-Router: Mengeksekusi via Ollama Cloud Engine...', 'info');
         await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel);
       } else if (STATE.settings.openRouterKey) {
-        showToast('🔀 Auto-Router: Ollama offline, fallback ke OpenRouter Cloud...', 'info');
+        showToast('🔀 Auto-Router: Ollama Cloud offline, fallback ke OpenRouter Cloud...', 'info');
         await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
       } else {
         // Kedua engine tidak siap: tampilkan kartu bantuan interaktif dan pulihkan composer
@@ -4227,10 +4227,10 @@ ${organicBlock}
               <i class="fa-solid fa-triangle-exclamation"></i> Auto-Router: Tidak Ada Engine AI yang Siap
             </div>
             <div style="font-size:0.83rem; color:var(--text-main); margin-bottom:8px;">
-              Ollama Local Engine tidak aktif pada <code>${escapeHtml(STATE.settings.ollamaEndpoint)}</code> dan <strong>OpenRouter API Key</strong> belum dikonfigurasi di Pengaturan.
+              Ollama Cloud Engine tidak dapat dihubungi pada <code>${escapeHtml(STATE.settings.ollamaEndpoint)}</code> dan <strong>OpenRouter API Key</strong> belum dikonfigurasi di Pengaturan.
             </div>
             <div style="font-size:0.8rem; color:var(--text-secondary); background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:6px; border-left:3px solid var(--neon-cyan);">
-              💡 <strong>Solusi:</strong> Jalankan aplikasi Ollama di komputer Anda atau masukkan OpenRouter API Key Anda di menu Pengaturan agar Auto-Router dapat melakukan failover otomatis ke Cloud.
+              💡 <strong>Solusi:</strong> Masukkan Ollama API Key atau OpenRouter API Key di menu Pengaturan agar Auto-Router dapat mengeksekusi model Cloud secara lancar.
             </div>
           </div>
           <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
@@ -4238,7 +4238,7 @@ ${organicBlock}
               <i class="fa-solid fa-sliders"></i> Buka Pengaturan & Masukkan API Key
             </button>
             <button class="btn btn-sm btn-outline retry-router-btn" style="border-color:var(--neon-cyan); color:var(--neon-cyan); font-size:0.75rem;">
-              <i class="fa-solid fa-rotate-right"></i> Cek Ulang Status Ollama
+              <i class="fa-solid fa-rotate-right"></i> Cek Ulang Status Ollama Cloud
             </button>
           </div>
         `;
