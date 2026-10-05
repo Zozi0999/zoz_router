@@ -4880,7 +4880,7 @@ ${organicBlock}
   }
 
   // Helper untuk menyeimbangkan artikel scraper antara Agen 1 (Primer) dan Agen 2 (Divergen)
-  function getBalancedScrapeList(sources, maxCount = 25) {
+  function getBalancedScrapeList(sources, maxCount = 30) {
     if (!Array.isArray(sources) || sources.length === 0) return [];
     const primer = sources.filter(s => (s.sourceProvider || '').includes('Primer') || (!(s.sourceProvider || '').includes('Divergen')));
     const divergen = sources.filter(s => (s.sourceProvider || '').includes('Divergen'));
@@ -5759,9 +5759,18 @@ ${organicBlock}
     if (model) metaParts.push(escapeHtml(model));
     const metaString = metaParts.join(' &bull; ');
 
-    const summaryHtml = (chatSummary && chatSummary.trim())
-      ? renderMarkdown(chatSummary.trim())
-      : '';
+    let effectiveSummary = (chatSummary && chatSummary.trim()) ? chatSummary.trim() : '';
+
+    // Backward compatibility: Jika chatSummary kosong (riwayat sesi lama), ekstrak Bab 1 / Pendahuluan dari fullText
+    if (!effectiveSummary && fullText && typeof fullText === 'string') {
+      const bab1Match = fullText.match(/##\s*1\.\s*.*?\n([\s\S]*?)(?=\n##\s*2\.|\n---|$)/i);
+      if (bab1Match && bab1Match[1] && bab1Match[1].trim()) {
+        const cleanBab1 = bab1Match[1].trim();
+        effectiveSummary = `### 💡 Rangkuman Eksekutif Riset\n${cleanBab1.substring(0, 700)}${cleanBab1.length > 700 ? '...' : ''}\n\n*Catatan: Dokumen analisis komprehensif lengkap dapat dibuka melalui tombol di bawah.*`;
+      }
+    }
+
+    const summaryHtml = effectiveSummary ? renderMarkdown(effectiveSummary) : '';
 
     return `
       <div class="gemini-research-card-wrapper" style="display:flex; flex-direction:column; gap:12px; width:100%;">
@@ -6166,7 +6175,7 @@ ${organicBlock}
         let iter2Summary = `[ANALISIS MODEL 1 - SERPER PRIMER (${agent1Model})]:\n${analisisAgen1Iter2}\n\n[ANALISIS MODEL 2 - SERPER DIVERGEN (${agent2Model})]:\n${analisisAgen2Iter2}`;
         dataTemuan.push(`### Temuan Multi-Sumber Iterasi 2 (Query: "${subQuery}"):\n${iter2Summary}`);
 
-        const balancedArticlesIter2 = getBalancedScrapeList(allSources, 25);
+        const balancedArticlesIter2 = getBalancedScrapeList(allSources, 30);
         updateLiveInspectionData({
           topik: contextualTopic,
           currentQuery: subQuery,

@@ -1024,8 +1024,8 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
         },
         scraper: {
           status: 'siap',
-          totalScraped: allSources.slice(0, 25).length,
-          articles: allSources.slice(0, 25).map((s) => ({
+          totalScraped: allSources.slice(0, 30).length,
+          articles: allSources.slice(0, 30).map((s) => ({
             title: s.title,
             url: s.url,
             domain: s.domain || extractDomainSafe(s.url),
@@ -1033,7 +1033,7 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
             sample: s.snippet || 'Menunggu giliran pemindaian mendalam...'
           }))
         },
-        scrapedArticlesCount: Math.min(allSources.length, 25),
+        scrapedArticlesCount: Math.min(allSources.length, 30),
         totalSourcesCount: allSources.length
       };
 
@@ -1152,7 +1152,7 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
     const primerSources = allSources.filter(s => (s.sourceProvider || '').includes('Primer') || (!(s.sourceProvider || '').includes('Divergen')));
     const divergenSources = allSources.filter(s => (s.sourceProvider || '').includes('Divergen'));
     const targetScrapeUrls = [];
-    const maxScrapeTarget = 25; // Minimal 20 - 30 website sesuai mandat Kaisar Zozi
+    const maxScrapeTarget = 30; // Minimal 20 - 30 website sesuai mandat Kaisar Zozi
     let pIdx = 0;
     let dIdx = 0;
 
