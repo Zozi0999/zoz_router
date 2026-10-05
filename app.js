@@ -6117,6 +6117,10 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
           }
         });
 
+        if (STATE.abortController?.signal.aborted) {
+          throw new DOMException('Riset dihentikan oleh pengguna.', 'AbortError');
+        }
+
         // ==========================================
         // PILAR 4: PENYUSUNAN RANGKUMAN EKSEKUTIF ANTARMUKA CHAT OLEH MODEL 4 (CLIENT)
         // Sesuai Mandat Kaisar Zozi: Model 4 merumuskan rangkuman khusus untuk tampil di gelembung obrolan chat.
@@ -7871,7 +7875,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       const pill = document.createElement('div');
       pill.className = 'custom-preset-pill';
       pill.style.cssText = 'display:inline-flex; align-items:center; gap:6px; background:rgba(0,240,255,0.08); border:1px solid rgba(0,240,255,0.25); border-radius:6px; padding:4px 9px; font-size:0.78rem; color:#E2E8F0; cursor:pointer; transition:all 0.2s ease;';
-      pill.title = `Klik untuk mengaktifkan preset:\nAgen 1: ${p.agent1 || 'Default'}\nAgen 2: ${p.agent2 || 'Default'}\nAgen Akhir: ${p.final || 'Default'}`;
+      const m3Val = p.model3 || p.final || 'Default';
+      const m4Val = p.model4 || 'Default';
+      pill.title = `Klik untuk mengaktifkan preset:\nAgen 1: ${p.agent1 || 'Default'}\nAgen 2: ${p.agent2 || 'Default'}\nModel 3: ${m3Val}\nModel 4: ${m4Val}`;
       
       pill.innerHTML = `
         <i class="fa-solid fa-layer-group" style="color:#00F0FF; font-size:0.72rem;"></i>
@@ -7879,17 +7885,19 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         <button class="btn-del-preset" data-idx="${idx}" style="background:none; border:none; color:#FF0055; cursor:pointer; padding:0 2px; margin-left:4px; font-size:0.85rem;" title="Hapus preset ini">&times;</button>
       `;
 
-      // Klik pill untuk menerapkan preset ke ketiga input model & simpan instan
+      // Klik pill untuk menerapkan preset ke seluruh 4 input model & simpan instan
       pill.addEventListener('click', (e) => {
         if (e.target.closest('.btn-del-preset')) return;
         if (els.settingDeepResearchAgent1Model) els.settingDeepResearchAgent1Model.value = p.agent1 || '';
         if (els.settingDeepResearchAgent2Model) els.settingDeepResearchAgent2Model.value = p.agent2 || '';
-        if (els.settingDeepResearchFinalModel) els.settingDeepResearchFinalModel.value = p.final || '';
+        if (els.settingDeepResearchFinalModel) els.settingDeepResearchFinalModel.value = p.model3 || p.final || '';
+        if (els.settingDeepResearchModel4) els.settingDeepResearchModel4.value = p.model4 || '';
         
         // Auto-save langsung ke STATE.settings & storage disk
         STATE.settings.deepResearchAgent1Model = p.agent1 || '';
         STATE.settings.deepResearchAgent2Model = p.agent2 || '';
-        STATE.settings.deepResearchFinalModel = p.final || '';
+        STATE.settings.deepResearchFinalModel = p.model3 || p.final || '';
+        STATE.settings.deepResearchModel4 = p.model4 || '';
         savePersistedState();
 
         // Update visual active state pada pill
@@ -9294,13 +9302,16 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       const p1 = els.settingDeepResearchAgent1Model ? els.settingDeepResearchAgent1Model.value.trim() : '';
       const p2 = els.settingDeepResearchAgent2Model ? els.settingDeepResearchAgent2Model.value.trim() : '';
       const pF = els.settingDeepResearchFinalModel ? els.settingDeepResearchFinalModel.value.trim() : '';
+      const p4 = els.settingDeepResearchModel4 ? els.settingDeepResearchModel4.value.trim() : '';
 
       userCustomResearchPresets.push({
         id: 'preset_' + Date.now(),
         name: name,
         agent1: p1,
         agent2: p2,
-        final: pF
+        final: pF,
+        model3: pF,
+        model4: p4
       });
 
       saveUserCustomResearchPresets();

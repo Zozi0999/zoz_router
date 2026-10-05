@@ -1267,6 +1267,13 @@ Sajikan seluruh tautan asli markdown [Nama Sumber](URL) lengkap dengan keteranga
       };
     }
 
+    if (task.aborted) {
+      task.status = 'dibatalkan';
+      task.currentStep = 'Riset dihentikan oleh pengguna.';
+      task.completedAt = new Date().toISOString();
+      return;
+    }
+
     // ==========================================
     // PILAR 4: PENYUSUNAN RANGKUMAN EKSEKUTIF ANTARMUKA CHAT OLEH MODEL 4
     // Sesuai Mandat Kaisar: Model 4 merumuskan rangkuman khusus untuk tampil di gelembung obrolan chat.
