@@ -1118,6 +1118,28 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     });
   }
 
+  // ==================== UNIVERSAL CHAT IMAGE ENHANCER (Lightbox & Zoom) ====================
+  function enhanceChatImages(container = document) {
+    if (!container) return;
+    const images = container.querySelectorAll('.msg-text-content img, .message-bubble img');
+    images.forEach(img => {
+      if (img.classList.contains('chat-zoomable-img') || img.classList.contains('image-result-img')) return;
+      img.classList.add('chat-zoomable-img');
+      img.style.cursor = 'zoom-in';
+      img.style.maxWidth = '100%';
+      img.style.borderRadius = 'var(--radius-md, 8px)';
+      img.style.display = 'block';
+      img.style.marginTop = '8px';
+      img.style.marginBottom = '8px';
+      img.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (ImageLightbox && typeof ImageLightbox.open === 'function') {
+          ImageLightbox.open([img.src], 0);
+        }
+      });
+    });
+  }
+
   function fallbackCopyText(text, onSuccess) {
     const textarea = document.createElement('textarea');
     textarea.value = text;
@@ -2240,6 +2262,21 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     }
     const textDisplayStyle = (!hasText && role === 'user') ? 'style="display:none;"' : '';
 
+    let assistantGeneratedImagesHtml = '';
+    if (role === 'assistant' && imgList.length > 0) {
+      assistantGeneratedImagesHtml = `
+        <div class="chat-generated-images-grid" style="margin-top: 10px; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px;">
+          ${imgList.map(src => createGeneratedImageCardHtml({
+            url: src,
+            imageUrl: src,
+            prompt: content || 'Karya Visual AI',
+            model: model || 'Zoz AI',
+            duration: stats?.duration || '1.5'
+          })).join('')}
+        </div>
+      `;
+    }
+
     let sourcesHtml = '';
     if (sources && Array.isArray(sources) && sources.length > 0 && role === 'assistant' && !isActuallyDeepResearch) {
       sourcesHtml = buildSourcesSectionHtml(sources, false);
@@ -2256,9 +2293,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           ${metaContent}
         </div>
         <div class="message-bubble">
-          ${imageGalleryHtml}
+          ${role === 'user' ? imageGalleryHtml : ''}
           ${docsHtml}
           <div class="msg-text-content" ${textDisplayStyle}>${renderedBody}</div>
+          ${role === 'assistant' ? assistantGeneratedImagesHtml : ''}
           ${sourcesHtml}
         </div>
         <div class="message-actions-bar">
@@ -2273,8 +2311,13 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       attachDeepResearchCardEvents(row, content, model, sources, null);
     }
 
-    // Attach Lightbox click triggers to images in this bubble
-    if (imgList.length > 0) {
+    // Attach image card listeners for assistant generated visual cards
+    if (role === 'assistant' && imgList.length > 0) {
+      attachImageCardListeners(row, content || '', imgList[0]);
+    }
+
+    // Attach Lightbox click triggers to images in user attachment bubble
+    if (imgList.length > 0 && role === 'user') {
       row.querySelectorAll('.chat-img-thumb-wrap').forEach((thumb) => {
         thumb.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -2283,6 +2326,9 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         });
       });
     }
+
+    // Enhance any inline markdown images
+    enhanceChatImages(row);
 
 
     // Edit Prompt Button Handler (for User messages)
@@ -3699,7 +3745,18 @@ ${organicBlock}
     renderAttachmentPreviews();
     AudioEngine.send();
 
-    if (STATE.isImageGenMode || isImageGenerationTrigger(text)) {
+    let targetModel = '';
+    if (STATE.mode === 'openrouter') {
+      targetModel = STATE.settings.openRouterModel || 'qwen/qwen3.8-27b:free';
+    } else {
+      targetModel = STATE.settings.ollamaModel || 'gemma4:31b';
+    }
+
+    const isDirectImageCapable = isModelCapableOfImageGeneration(targetModel);
+
+    // Jika pengguna meminta gambar dan model aktif memang mampu membuat gambar (misal gemini-2.5-flash-image),
+    // jangan dibajak ke Flux eksternal, biarkan model aktif memprosesnya secara langsung ala Gemini AI!
+    if (STATE.isImageGenMode || (isImageGenerationTrigger(text) && !isDirectImageCapable)) {
       const cleanImgPrompt = extractImagePrompt(text);
       await runImageGeneration(session, cleanImgPrompt);
     } else if (STATE.isDeepResearch) {
@@ -3713,20 +3770,35 @@ ${organicBlock}
     } else if (STATE.mode === 'auto') {
       await runAutoRouterStreaming(session, text, images);
     } else if (STATE.mode === 'openrouter') {
-      const targetModel = STATE.settings.openRouterModel || 'qwen/qwen3.8-27b:free';
       if (!targetModel.includes('/')) {
         await runOllamaStreaming(session, text, images, targetModel);
       } else {
         await runOpenRouterStreaming(session, text, images, targetModel);
       }
     } else {
-      const targetModel = STATE.settings.ollamaModel || 'gemma4:31b';
       if (targetModel.includes('/')) {
         await runOpenRouterStreaming(session, text, images, targetModel);
       } else {
         await runOllamaStreaming(session, text, images, targetModel);
       }
     }
+  }
+
+  // ==================== IMAGE GENERATION MODEL CAPABILITY DETECTOR ====================
+  function isModelCapableOfImageGeneration(modelName) {
+    if (!modelName || typeof modelName !== 'string') return false;
+    const lower = modelName.toLowerCase();
+    return (
+      lower.includes('image') ||
+      lower.includes('imagen') ||
+      lower.includes('nano-banana') ||
+      lower.includes('flux') ||
+      lower.includes('dall-e') ||
+      lower.includes('diffusion') ||
+      lower.includes('midjourney') ||
+      lower.includes('recraft') ||
+      lower.includes('stable-diffusion')
+    );
   }
 
   // ==================== UNIVERSAL MODEL ERROR & WARNING HANDLER ====================
@@ -4236,6 +4308,8 @@ ${organicBlock}
         'liquid/lfm-2.5-2.6b:free'
       ].filter(m => m !== modelName);
 
+      const isImageCapable = isModelCapableOfImageGeneration(modelName);
+
       const requestBody = {
         model: modelName,
         messages: messagesPayload,
@@ -4246,6 +4320,11 @@ ${organicBlock}
           allow_fallbacks: true
         }
       };
+
+      // Untuk model multimodal gambar (seperti gemini-2.5-flash-image / nano-banana), kirimkan modalities text dan image
+      if (isImageCapable) {
+        requestBody.modalities = ['text', 'image'];
+      }
 
       if (modelName.includes(':free')) {
         requestBody.models = [modelName, ...freeFallbacks];
@@ -4284,6 +4363,7 @@ ${organicBlock}
       const decoder = new TextDecoder();
       let buffer = '';
       let finishReason = null;
+      const collectedImages = [];
       streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
 
       while (true) {
@@ -4317,6 +4397,21 @@ ${organicBlock}
           if (parsed.choices?.[0]?.finish_reason) {
             finishReason = parsed.choices[0].finish_reason;
           }
+
+          // Tangkap gambar yang dihasilkan model (seperti Gemini Flash Image / Nano Banana di OpenRouter)
+          const rawImgs = parsed.choices?.[0]?.delta?.images 
+            || parsed.choices?.[0]?.message?.images 
+            || parsed.choices?.[0]?.images
+            || (parsed.data && Array.isArray(parsed.data) ? parsed.data : null);
+          if (Array.isArray(rawImgs) && rawImgs.length > 0) {
+            rawImgs.forEach(img => {
+              const url = img?.image_url?.url || img?.url || (img?.b64_json ? `data:${img.media_type || 'image/png'};base64,${img.b64_json}` : (typeof img === 'string' ? img : null));
+              if (url && !collectedImages.includes(url)) {
+                collectedImages.push(url);
+              }
+            });
+          }
+
           const delta = parsed.choices?.[0]?.delta?.content;
           if (delta) {
             if (!firstTokenTime) firstTokenTime = performance.now();
@@ -4327,15 +4422,35 @@ ${organicBlock}
       }
 
       fullText = streamRenderer.finish();
-      if (!fullText.trim() && !STATE.abortController?.signal.aborted) {
+      if (!fullText.trim() && collectedImages.length === 0 && !STATE.abortController?.signal.aborted) {
         throw new Error('Model OpenRouter menyelesaikan koneksi tanpa menghasilkan respon teks.');
       }
 
       const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
       const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
 
-      bubbleText.innerHTML = renderMarkdown(fullText);
+      let renderedMarkdown = renderMarkdown(fullText);
+      let imagesHtml = '';
+      if (collectedImages.length > 0) {
+        imagesHtml = `
+          <div class="chat-generated-images-grid" style="margin-top: 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px;">
+            ${collectedImages.map(url => createGeneratedImageCardHtml({
+              url: url,
+              imageUrl: url,
+              prompt: promptText,
+              model: modelName,
+              duration: totalTime
+            })).join('')}
+          </div>
+        `;
+      }
+
+      bubbleText.innerHTML = (renderedMarkdown + imagesHtml).trim();
       enhanceCodeBlocks(bubbleText);
+      enhanceChatImages(bubbleText);
+      if (collectedImages.length > 0) {
+        attachImageCardListeners(assistantRow, promptText, collectedImages[0]);
+      }
       if (webSources && webSources.length > 0) {
         renderMessageSources(assistantRow, webSources);
       }
@@ -4344,6 +4459,7 @@ ${organicBlock}
       metaBox.innerHTML = `
         <strong title="${actualModelUsed ? 'Model dialihkan oleh OpenRouter ke ' + actualModelUsed : modelName}">${escapeHtml(effectiveDisplay)}</strong>
         <span class="meta-model-badge" style="background:rgba(255,82,0,0.15); color:var(--neon-amber);">OpenRouter</span>
+        ${collectedImages.length > 0 ? '<span class="meta-model-badge" style="background:rgba(255,0,127,0.18); border-color:#FF007F; color:#FF66B2;"><i class="fa-solid fa-wand-magic-sparkles"></i> Gambar Dibuat</span>' : ''}
         <span>⏱️ ${totalTime}s</span>
         <span>⚡ ${tps} tps</span>
       `;
@@ -4360,6 +4476,8 @@ ${organicBlock}
         content: fullText,
         model: actualModelUsed || modelName,
         engine: 'openrouter',
+        images: collectedImages.length > 0 ? collectedImages : undefined,
+        imageUrl: collectedImages[0] || undefined,
         sources: webSources,
         stats: { duration: totalTime, tps: tps, tokens: tokenCount },
         timestamp: new Date().toISOString()
