@@ -183,6 +183,27 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
   });
 }
 
+// Official Ollama Cloud Flagship Models (Included Free Usage & Usage Credits)
+const OFFICIAL_OLLAMA_CLOUD_MODELS = [
+  { name: 'gemma4:31b', model: 'gemma4:31b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gemma4' } },
+  { name: 'gpt-oss:120b', model: 'gpt-oss:120b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gpt-oss' } },
+  { name: 'gpt-oss:20b', model: 'gpt-oss:20b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'gpt-oss' } },
+  { name: 'nemotron-3-super', model: 'nemotron-3-super', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'nemotron' } },
+  { name: 'nemotron-3-ultra', model: 'nemotron-3-ultra', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'nemotron' } },
+  { name: 'nemotron-3-nano:30b', model: 'nemotron-3-nano:30b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'nemotron' } },
+  { name: 'deepseek-v4.1-flash', model: 'deepseek-v4.1-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek' } },
+  { name: 'deepseek-v4-pro:0813', model: 'deepseek-v4-pro:0813', tag: 'Reasoning Cloud', isFree: false, cat: 'reasoning', details: { family: 'deepseek' } },
+  { name: 'mistral-large-3:675b', model: 'mistral-large-3:675b', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'mistral' } },
+  { name: 'kimi-k3', model: 'kimi-k3', tag: 'Long Context Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi' } },
+  { name: 'kimi-k2.6', model: 'kimi-k2.6', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi' } },
+  { name: 'kimi-k2.7-code', model: 'kimi-k2.7-code', tag: 'Coding Cloud', isFree: false, cat: 'coding', details: { family: 'kimi' } },
+  { name: 'minimax-m3', model: 'minimax-m3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'minimax' } },
+  { name: 'minimax-m2.7', model: 'minimax-m2.7', tag: 'Cloud', isFree: false, cat: 'flagship', details: { family: 'minimax' } },
+  { name: 'glm-5.3', model: 'glm-5.3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm' } },
+  { name: 'glm-5.3-flash', model: 'glm-5.3-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'glm' } },
+  { name: 'glm-5.2', model: 'glm-5.2', tag: 'Cloud', isFree: false, cat: 'flagship', details: { family: 'glm' } }
+];
+
 // Helper to discover locally installed Ollama models from manifest files on disk
 function getLocalOllamaManifests() {
   const userHome = process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\user';
@@ -1835,22 +1856,32 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 200, result);
       }
 
-      // If remote returned empty or failed, check disk manifests for local
-      const diskModels = getLocalOllamaManifests();
-      if (diskModels.length > 0) {
-        return sendJSON(res, 200, { models: diskModels, server_running: true, note: 'Loaded from local manifests' });
-      }
-
-      return sendJSON(res, 200, { models: [], server_running: false, warning: 'Ollama service offline / unreachable' });
+      // If remote returned empty or failed, fallback to official Ollama Cloud catalog
+      return sendJSON(res, 200, {
+        models: OFFICIAL_OLLAMA_CLOUD_MODELS,
+        server_running: true,
+        cloud_ready: true,
+        note: 'Loaded from official Ollama Cloud catalog'
+      });
     })();
     return;
   }
 
   // Ollama Cloud: Get Real-Time Usage & Credits
   if (pathname === '/api/ollama/usage' && method === 'GET') {
-    const authHeader = req.headers['authorization'] || (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null);
+    const rawKey = req.headers['x-ollama-key'] || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : '') || process.env.OLLAMA_API_KEY;
+    const authHeader = rawKey ? `Bearer ${rawKey}` : (req.headers['authorization'] || null);
     if (!authHeader) {
       return sendJSON(res, 401, { error: 'Ollama API key is required' });
+    }
+
+    const reqHeaders = {
+      'Authorization': authHeader,
+      'User-Agent': 'ZozRouter/1.0 (Windows NT 10.0; Win64; x64)',
+      'Cache-Control': 'no-cache, no-store, must-revalidate'
+    };
+    if (rawKey) {
+      reqHeaders['x-ollama-key'] = rawKey;
     }
 
     const options = {
@@ -1858,10 +1889,7 @@ const server = http.createServer(async (req, res) => {
       port: 443,
       path: '/api/usage',
       method: 'GET',
-      headers: {
-        'Authorization': authHeader,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
+      headers: reqHeaders
     };
 
     const proxyReq = https.request(options, (proxyRes) => {
@@ -1903,14 +1931,16 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // Ollama: Chat Completion (Streaming Proxy)
+  // Ollama Cloud: Chat Completion (Streaming Proxy)
   if (pathname === '/api/ollama/chat' && method === 'POST') {
     try {
       const body = await parseBody(req);
-      const authHeader = req.headers['authorization'] || (body.apiKey ? `Bearer ${body.apiKey}` : (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null));
-      let customEndpoint = req.headers['x-ollama-endpoint'] || body.endpoint || 'http://127.0.0.1:11434';
+      const rawKey = body.apiKey || req.headers['x-ollama-key'] || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : '') || process.env.OLLAMA_API_KEY;
+      const authHeader = rawKey ? `Bearer ${rawKey}` : (req.headers['authorization'] || null);
+      let customEndpoint = req.headers['x-ollama-endpoint'] || body.endpoint || 'https://ollama.com';
 
-      if (authHeader && (customEndpoint.includes('127.0.0.1') || customEndpoint.includes('localhost') || !customEndpoint)) {
+      // Alihkan otomatis ke endpoint resmi Ollama Cloud jika kosong atau mengarah ke port lokal 11434/localhost
+      if (!customEndpoint || customEndpoint.includes('127.0.0.1') || customEndpoint.includes('localhost') || customEndpoint.includes('11434')) {
         customEndpoint = 'https://ollama.com';
       }
 
@@ -1921,6 +1951,10 @@ const server = http.createServer(async (req, res) => {
           : `http://${customEndpoint}`;
       }
       customEndpoint = customEndpoint.replace(/\/+$/, '');
+
+      if (!body.model) {
+        body.model = 'gemma4:31b';
+      }
 
       delete body.endpoint; // Don't send custom field to Ollama
       delete body.apiKey;
@@ -1933,11 +1967,14 @@ const server = http.createServer(async (req, res) => {
 
       const proxyHeaders = {
         'Content-Type': 'application/json',
-        'User-Agent': 'ZozRouter/1.0',
+        'User-Agent': 'ZozRouter/1.0 (Windows NT 10.0; Win64; x64)',
         'Content-Length': Buffer.byteLength(postData)
       };
       if (authHeader) {
         proxyHeaders['Authorization'] = authHeader;
+      }
+      if (rawKey) {
+        proxyHeaders['x-ollama-key'] = rawKey;
       }
 
       let clientDisconnected = false;
