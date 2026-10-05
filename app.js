@@ -405,6 +405,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     catalogBalanceText: $('#catalogBalanceText'),
     catalogBalanceValue: $('#catalogBalanceValue'),
     catalogBalanceSub: $('#catalogBalanceSub'),
+    btnCatalogSetBalance: $('#btnCatalogSetBalance'),
     btnRefreshCatalogBalance: $('#btnRefreshCatalogBalance'),
     btnCatalogAddCredits: $('#btnCatalogAddCredits'),
     catalogStatusInfo: $('#catalogStatusInfo'),
@@ -3486,10 +3487,15 @@ ${organicBlock}
       
       const usageStr = bal && bal.totalUsage != null ? `(Terpakai: $${bal.totalUsage.toFixed(3)})` : '';
 
+      if (els.btnCatalogSetBalance) {
+        els.btnCatalogSetBalance.style.display = 'none';
+      }
       if (els.catalogBalanceIcon) {
         els.catalogBalanceIcon.innerHTML = '<i class="fa-solid fa-coins" style="color: var(--neon-amber); font-size: 0.95rem;"></i>';
       }
       if (els.catalogBalanceText) {
+        els.catalogBalanceText.style.cursor = 'default';
+        els.catalogBalanceText.title = '';
         els.catalogBalanceText.innerHTML = `Saldo OpenRouter: <strong id="catalogBalanceValue" style="color: var(--neon-amber); font-family: var(--font-code);">${escapeHtml(remainingStr)}</strong>`;
       }
       if (els.catalogBalanceSub) {
@@ -3514,17 +3520,25 @@ ${organicBlock}
       
       const balanceStr = (resolvedBalance != null) 
         ? `$${resolvedBalance.toFixed(2)} USD` 
-        : (hasKey ? 'Tersambung (Usage Credits)' : 'Free Cloud Tier');
+        : (hasKey ? 'Usage Credits Aktif' : 'Free Cloud Tier');
 
       const freeStr = (resolvedBalance != null)
         ? `Saldo Tersedia: $${resolvedBalance.toFixed(2)} • Pay-as-you-go`
         : (bal?.freeUsagePercent != null ? `Free Usage: ${bal.freeUsagePercent}% • Pay-as-you-go` : 'Free Cloud (Gemma, Nemotron, GPT-OSS) + Pay-as-you-go');
 
+      if (els.btnCatalogSetBalance) {
+        els.btnCatalogSetBalance.style.display = 'inline-flex';
+        els.btnCatalogSetBalance.innerHTML = (resolvedBalance != null)
+          ? '<i class="fa-solid fa-pen-to-square"></i> Ubah Saldo ($)'
+          : '<i class="fa-solid fa-pen-to-square"></i> Input Saldo ($)';
+      }
       if (els.catalogBalanceIcon) {
         els.catalogBalanceIcon.innerHTML = '<i class="fa-solid fa-coins" style="color: var(--neon-teal); font-size: 0.95rem;"></i>';
       }
       if (els.catalogBalanceText) {
-        els.catalogBalanceText.innerHTML = `Saldo Ollama Cloud: <strong id="catalogBalanceValue" style="color: var(--neon-teal); font-family: var(--font-code);">${escapeHtml(balanceStr)}</strong>`;
+        els.catalogBalanceText.style.cursor = 'pointer';
+        els.catalogBalanceText.title = 'Klik untuk mengatur nominal saldo Ollama Cloud Anda ($ USD)';
+        els.catalogBalanceText.innerHTML = `Saldo Ollama Cloud: <strong id="catalogBalanceValue" style="color: var(--neon-teal); font-family: var(--font-code);">${escapeHtml(balanceStr)}</strong> <i class="fa-solid fa-pen-to-square" style="font-size: 0.72rem; color: var(--neon-teal); margin-left: 4px; opacity: 0.8;" title="Ubah Saldo"></i>`;
       }
       if (els.catalogBalanceSub) {
         els.catalogBalanceSub.innerText = `(${freeStr})`;
@@ -3843,7 +3857,7 @@ ${organicBlock}
     } else if (isProviderReturnedError) {
       title = `Penyedia Model OpenRouter Sedang Sibuk (Upstream Provider Error)`;
       desc = `Server penyedia pihak ketiga (upstream) untuk model <code>${escapeHtml(modelName)}</code> sedang mengalami antrean penuh atau gangguan sementara di OpenRouter.`;
-      advice = `💡 <strong>Solusi Cepat:</strong> Coba beralih ke model free lain yang sedang aktif stabil seperti <code>meta-llama/llama-3.3-70b-instruct:free</code> atau <code>deepseek/deepseek-chat:free</code>, atau klik <strong>Coba Kirim Ulang</strong>.`;
+      advice = `💡 <strong>Solusi Cepat:</strong> Coba beralih ke model free lain yang sedang aktif stabil seperti <code>qwen/qwen3.8-27b:free</code> atau <code>google/gemma-4-26b-a4b-it:free</code>, atau klik <strong>Ganti ke Qwen 3.8 27B &amp; Kirim Ulang</strong>.`;
     } else if (isCorsOrNetwork && engine === 'ollama') {
       title = `Batasan Koneksi Browser CORS (GitHub Pages)`;
       desc = `Browser memblokir koneksi langsung dari domain <code>github.io</code> ke server <code>ollama.com</code> karena pembatasan CORS server.`;
@@ -4313,10 +4327,10 @@ ${organicBlock}
 
       // Daftar fallback cadangan jika model free mengalami antrean/downtime di provider upstream OpenRouter
       const freeFallbacks = [
-        'meta-llama/llama-3.3-70b-instruct:free',
+        'qwen/qwen3.8-27b:free',
         'google/gemma-4-26b-a4b-it:free',
-        'deepseek/deepseek-chat:free',
-        'mistralai/mistral-small-3.2:free'
+        'nvidia/nemotron-3.5-lightning:free',
+        'liquid/lfm-2.5-2.6b:free'
       ].filter(m => m !== modelName);
 
       const requestBody = {
@@ -4485,14 +4499,14 @@ ${organicBlock}
         const errorHtml = formatModelErrorMessage('openrouter', modelName, err, actualHasImage, STATE.webSearchEnabled);
 
         const isFreeModel = modelName.includes(':free');
-        const fallbackModelCandidate = modelName.includes('llama') ? 'google/gemma-4-26b-a4b-it:free' : 'meta-llama/llama-3.3-70b-instruct:free';
-        const fallbackLabel = modelName.includes('llama') ? 'Gemma 4 26B (Free)' : 'Llama 3.3 70B (Free)';
+        const fallbackModelCandidate = modelName.includes('qwen') ? 'google/gemma-4-26b-a4b-it:free' : 'qwen/qwen3.8-27b:free';
+        const fallbackLabel = modelName.includes('qwen') ? 'Gemma 4 26B (Free)' : 'Qwen 3.8 27B (Free)';
 
         bubbleText.innerHTML = `
           ${errorHtml}
           <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
             <button class="btn btn-sm btn-outline retry-send-btn" style="border-color:var(--neon-cyan); color:var(--neon-cyan); font-size:0.75rem;">
-              <i class="fa-solid fa-rotate-right"></i> Coba Kirim Ulang
+               <i class="fa-solid fa-rotate-right"></i> Coba Kirim Ulang
             </button>
             ${isFreeModel ? `
               <button class="btn btn-sm btn-outline switch-free-model-btn" data-fallback="${fallbackModelCandidate}" style="border-color:var(--neon-teal); color:var(--neon-teal); font-size:0.75rem;">
@@ -4511,7 +4525,7 @@ ${organicBlock}
         });
 
         bubbleText.querySelector('.switch-free-model-btn')?.addEventListener('click', (e) => {
-          const targetFallback = e.currentTarget.dataset.fallback || 'meta-llama/llama-3.3-70b-instruct:free';
+          const targetFallback = e.currentTarget.dataset.fallback || 'qwen/qwen3.8-27b:free';
           selectModel(targetFallback);
           showToast(`⚡ Model ditukar ke ${targetFallback}`);
           assistantRow.remove();
@@ -5097,7 +5111,7 @@ ${organicBlock}
         }
       };
       if (modelName.includes(':free')) {
-        requestBody.models = [modelName, 'meta-llama/llama-3.3-70b-instruct:free', 'deepseek/deepseek-chat:free'];
+        requestBody.models = [modelName, 'qwen/qwen3.8-27b:free', 'google/gemma-4-26b-a4b-it:free', 'nvidia/nemotron-3.5-lightning:free'];
       }
       if (!isOpenRouterDirect) requestBody.apiKey = STATE.settings.openRouterKey;
 
@@ -9788,6 +9802,33 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (e.key === 'Enter') {
         e.preventDefault();
         els.btnSaveOllamaCustomBalance?.click();
+      }
+    });
+
+    els.btnCatalogSetBalance?.addEventListener('click', () => {
+      const currentVal = STATE.settings.ollamaCustomBalance || '';
+      const inputVal = prompt(
+        '💰 Masukkan nominal saldo Ollama Cloud Anda ($ USD):\n(Contoh: 10.00 atau 25.50)\n\nNominal ini akan dipantau live di Sidebar, Pengaturan, dan Katalog Model.',
+        currentVal
+      );
+      if (inputVal !== null) {
+        const cleanVal = inputVal.trim();
+        STATE.settings.ollamaCustomBalance = cleanVal;
+        if (els.settingOllamaCustomBalance) els.settingOllamaCustomBalance.value = cleanVal;
+        savePersistedState();
+        updateOllamaStatusUI();
+        updateCatalogBalanceBannerUI('ollama');
+        const num = parseFloat(cleanVal);
+        showToast(cleanVal && !isNaN(num)
+          ? `✅ Saldo Ollama Cloud dicatat: $${num.toFixed(2)} USD`
+          : (cleanVal ? '✅ Saldo Ollama Cloud disimpan.' : 'ℹ️ Saldo Ollama Cloud dikosongkan.'));
+        AudioEngine.click();
+      }
+    });
+
+    els.catalogBalanceText?.addEventListener('click', () => {
+      if (STATE.activeCatalogTab === 'ollama') {
+        els.btnCatalogSetBalance?.click();
       }
     });
 

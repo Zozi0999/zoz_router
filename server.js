@@ -638,15 +638,39 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
 
   const isOpenRouter = effectiveProvider === 'openrouter' || (rawModel.includes('/') && effectiveProvider !== 'ollama');
 
+  // Normalisasi role "system" jika model tidak mendukungnya (misal: Gemma & Mistral-Tiny)
+  const isGemmaOrNoSystem = rawModel.toLowerCase().includes('gemma') || rawModel.toLowerCase().includes('mistral-tiny');
+  if (isGemmaOrNoSystem) {
+    const sysIdx = finalMessages.findIndex(m => m.role === 'system');
+    if (sysIdx !== -1) {
+      const sysMsg = finalMessages.splice(sysIdx, 1)[0];
+      const firstUser = finalMessages.find(m => m.role === 'user');
+      if (firstUser) {
+        firstUser.content = `[Instruksi Sistem & Konteks:\n${sysMsg.content}]\n\n${firstUser.content}`;
+      } else {
+        finalMessages.unshift({ role: 'user', content: `[Instruksi Sistem & Konteks:\n${sysMsg.content}]` });
+      }
+    }
+  }
+
   if (isOpenRouter) {
     const key = openRouterKey || (apiKey && apiKey.startsWith('sk-or-') ? apiKey : null) || process.env.OPENROUTER_API_KEY;
     if (!key) throw new Error('OpenRouter API Key diperlukan untuk model cloud: ' + (rawModel || 'default'));
 
-    const postData = JSON.stringify({
+    const payload = {
       model: rawModel || 'google/gemini-2.0-flash-001',
       messages: finalMessages,
-      temperature: 0.3
-    });
+      temperature: 0.3,
+      provider: {
+        allow_fallbacks: true
+      }
+    };
+
+    if (rawModel.includes(':free')) {
+      payload.models = [rawModel, 'qwen/qwen3.8-27b:free', 'google/gemma-4-26b-a4b-it:free', 'nvidia/nemotron-3.5-lightning:free'];
+    }
+
+    const postData = JSON.stringify(payload);
 
     return new Promise((resolve, reject) => {
       const options = {
