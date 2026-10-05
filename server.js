@@ -372,6 +372,176 @@ function resolveEndpointUrl(baseEndpoint, targetPath) {
   return parsed;
 }
 
+// ==================== YOUTUBE OEMBED METADATA GROUNDING ENGINE ====================
+const YOUTUBE_ALLOWED_HOSTS = new Set([
+  'youtu.be',
+  'www.youtu.be',
+  'youtube.com',
+  'www.youtube.com',
+  'm.youtube.com',
+  'music.youtube.com'
+]);
+
+const YOUTUBE_URL_REGEX = /(?:https?:\/\/)?(?:www\.|m\.|music\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:[^\s]*)?/gi;
+
+const youtubeInfoCache = new Map();
+
+function extractYouTubeVideoIds(text) {
+  if (!text || typeof text !== 'string') return [];
+  const ids = [];
+  let match;
+  const re = new RegExp(YOUTUBE_URL_REGEX);
+  while ((match = re.exec(text)) !== null) {
+    if (match[1] && !ids.includes(match[1])) {
+      ids.push(match[1]);
+    }
+  }
+  return ids;
+}
+
+async function fetchYouTubeInfo(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') {
+    throw new Error('URL video YouTube tidak valid');
+  }
+
+  let clean = rawUrl.trim();
+  let parsedUrl;
+  try {
+    if (!/^https?:\/\//i.test(clean)) clean = `https://${clean}`;
+    parsedUrl = new URL(clean);
+  } catch (e) {
+    throw new Error('Format URL tidak valid: ' + e.message);
+  }
+
+  const hostname = parsedUrl.hostname.toLowerCase();
+  if (!YOUTUBE_ALLOWED_HOSTS.has(hostname)) {
+    throw new Error(`Host '${hostname}' tidak diizinkan. Hanya URL YouTube resmi yang diizinkan (youtu.be, youtube.com).`);
+  }
+
+  if (isPrivateHost(hostname, parsedUrl.port)) {
+    throw new Error('Akses ke alamat IP lokal/privat diblokir.');
+  }
+
+  // Canonicalize to standard watch URL
+  let videoId = null;
+  const match = parsedUrl.href.match(/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+  if (match && match[1]) {
+    videoId = match[1];
+  }
+
+  const canonicalUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : parsedUrl.href;
+  if (youtubeInfoCache.has(canonicalUrl)) {
+    return youtubeInfoCache.get(canonicalUrl);
+  }
+
+  const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`;
+
+  return new Promise((resolve) => {
+    const req = https.get(oembedUrl, {
+      timeout: 8000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+      }
+    }, (res) => {
+      if (res.statusCode === 404) {
+        return resolve({
+          success: false,
+          error: 'Video YouTube tidak ditemukan atau berstatus privat/dihapus (HTTP 404).',
+          url: canonicalUrl,
+          videoId: videoId
+        });
+      }
+      if (res.statusCode !== 200) {
+        return resolve({
+          success: false,
+          error: `Gagal mengambil data dari YouTube oEmbed (HTTP ${res.statusCode})`,
+          url: canonicalUrl,
+          videoId: videoId
+        });
+      }
+
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          const result = {
+            success: true,
+            url: canonicalUrl,
+            videoId: videoId,
+            title: parsed.title || 'Tanpa Judul',
+            channel: parsed.author_name || 'Kreator YouTube',
+            channel_url: parsed.author_url || '',
+            thumbnail: parsed.thumbnail_url || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ''),
+            type: parsed.type || 'video',
+            html: parsed.html || ''
+          };
+          if (youtubeInfoCache.size > 200) {
+            const firstKey = youtubeInfoCache.keys().next().value;
+            youtubeInfoCache.delete(firstKey);
+          }
+          youtubeInfoCache.set(canonicalUrl, result);
+          resolve(result);
+        } catch (e) {
+          resolve({
+            success: false,
+            error: 'Gagal mengurai respons JSON YouTube oEmbed: ' + e.message,
+            url: canonicalUrl,
+            videoId: videoId
+          });
+        }
+      });
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({
+        success: false,
+        error: 'Timeout saat menghubungi YouTube oEmbed (8s).',
+        url: canonicalUrl,
+        videoId: videoId
+      });
+    });
+
+    req.on('error', (err) => {
+      resolve({
+        success: false,
+        error: 'Network error YouTube oEmbed: ' + err.message,
+        url: canonicalUrl,
+        videoId: videoId
+      });
+    });
+  });
+}
+
+// Universal Grounding Enricher: injects real-time YouTube metadata for 100% of LLM models
+async function enrichTextWithYouTubeContext(text) {
+  if (!text || typeof text !== 'string') return { text, youtubeVideos: [] };
+  const ids = extractYouTubeVideoIds(text);
+  if (ids.length === 0) return { text, youtubeVideos: [] };
+
+  const results = await Promise.all(ids.map(id => fetchYouTubeInfo(`https://www.youtube.com/watch?v=${id}`)));
+  const validVideos = results.filter(r => r && r.success);
+  if (validVideos.length === 0) return { text, youtubeVideos: [] };
+
+  const contextBlocks = validVideos.map((v, idx) => {
+    return `[DATA TERVERIFIKASI VIDEO YOUTUBE #${idx + 1}]
+- URL: ${v.url}
+- Judul Video: "${v.title}"
+- Nama Channel / Pembuat: "${v.channel}" (${v.channel_url || 'N/A'})
+- Thumbnail: ${v.thumbnail}
+(Informasi resmi ini diambil secara real-time via endpoint YouTube oEmbed)`;
+  }).join('\n\n');
+
+  const groundingPrompt = `\n\n### REAL-TIME YOUTUBE VIDEO GROUNDING DATA:\n${contextBlocks}\n\nInstruksi untuk AI: Gunakan informasi metadata resmi di atas untuk menjawab dan menganalisis video YouTube yang ditanyakan pengguna secara tepat, akurat, dan tanpa halusinasi.`;
+
+  return {
+    text: text + groundingPrompt,
+    youtubeVideos: validVideos,
+    groundingContext: groundingPrompt
+  };
+}
+
 // ==================== DEEP RESEARCH AUTONOMOUS ENGINE (PREMIUM) ====================
 const dbTugasRiset = {};
 
@@ -437,6 +607,22 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   } else {
     if (system && system.trim()) finalMessages.push({ role: 'system', content: system.trim() });
     if (prompt && prompt.trim()) finalMessages.push({ role: 'user', content: prompt.trim() });
+  }
+
+  // Auto-enrich YouTube links in user turns with real-time oEmbed metadata
+  try {
+    for (let i = finalMessages.length - 1; i >= 0; i--) {
+      const msg = finalMessages[i];
+      if (msg.role === 'user' && typeof msg.content === 'string' && extractYouTubeVideoIds(msg.content).length > 0) {
+        const enriched = await enrichTextWithYouTubeContext(msg.content);
+        if (enriched.youtubeVideos && enriched.youtubeVideos.length > 0) {
+          msg.content = enriched.text;
+          break;
+        }
+      }
+    }
+  } catch (ytErr) {
+    console.warn('YouTube auto-enrichment warning in callLLMBackend:', ytErr.message);
   }
 
   const rawModel = (model || '').trim();
@@ -1720,6 +1906,30 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { success: true, message: 'Tugas riset berhasil dibatalkan.' });
     }
     return sendJSON(res, 404, { error: 'Tugas riset tidak ditemukan.' });
+  }
+
+  // ----------------------------------------------------
+  // YOUTUBE OEMBED METADATA GROUNDING API
+  // ----------------------------------------------------
+  if (pathname === '/api/youtube-info' && (method === 'GET' || method === 'POST')) {
+    let targetUrl = '';
+    if (method === 'GET') {
+      targetUrl = queryParams.url || '';
+    } else {
+      const body = await parseBody(req);
+      targetUrl = body.url || body.link || '';
+    }
+
+    if (!targetUrl || !targetUrl.trim()) {
+      return sendJSON(res, 400, { success: false, error: 'Parameter url diperlukan.' });
+    }
+
+    try {
+      const info = await fetchYouTubeInfo(targetUrl.trim());
+      return sendJSON(res, info.success ? 200 : 400, info);
+    } catch (err) {
+      return sendJSON(res, 400, { success: false, error: err.message });
+    }
   }
 
   // ----------------------------------------------------

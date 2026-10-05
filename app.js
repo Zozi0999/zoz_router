@@ -2217,7 +2217,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     const hasText = Boolean(content && String(content).trim().length > 0);
     let renderedBody = '';
     if (isActuallyDeepResearch && role === 'assistant' && hasText) {
-      renderedBody = buildDeepResearchSummaryCardHtml(content, model, sources, resolvedTimestamp || timestamp, msg.chatSummary || '');
+      const msgObj = (typeof index === 'number' && index >= 0 && currentSess?.messages?.[index]) ? currentSess.messages[index] : null;
+      renderedBody = buildDeepResearchSummaryCardHtml(content, model, sources, resolvedTimestamp || timestamp, msgObj?.chatSummary || '');
     } else {
       renderedBody = role === 'assistant' ? renderMarkdown(content || '') : escapeHtml(content || '').replace(/\n/g, '<br>');
     }
@@ -2363,6 +2364,9 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     });
 
     els.messagesList.appendChild(row);
+    if (hasText) {
+      renderYouTubeCardsForMessage(row, content);
+    }
     return row;
   }
 
@@ -2819,6 +2823,203 @@ ${organicBlock}
     const sourcesEl = wrapper.firstElementChild;
     if (sourcesEl) bubble.appendChild(sourcesEl);
   }
+
+  // ==================== UNIVERSAL YOUTUBE OEMBED ENGINE (CLIENT) ====================
+  const YOUTUBE_URL_REGEX_CLIENT = /(?:https?:\/\/)?(?:www\.|m\.|music\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:[^\s]*)?/gi;
+  const clientYouTubeCache = new Map();
+
+  function extractYouTubeVideoIdsClient(text) {
+    if (!text || typeof text !== 'string') return [];
+    const ids = [];
+    const re = new RegExp(YOUTUBE_URL_REGEX_CLIENT.source, 'gi');
+    let match;
+    while ((match = re.exec(text)) !== null) {
+      if (match[1] && !ids.includes(match[1])) {
+        ids.push(match[1]);
+      }
+    }
+    return ids;
+  }
+
+  async function fetchYouTubeInfoClient(rawUrlOrId) {
+    if (!rawUrlOrId || typeof rawUrlOrId !== 'string') return null;
+    const clean = rawUrlOrId.trim();
+    let videoId = null;
+    let canonicalUrl = '';
+
+    if (/^[a-zA-Z0-9_-]{11}$/.test(clean)) {
+      videoId = clean;
+      canonicalUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    } else {
+      const match = clean.match(/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+      if (match && match[1]) {
+        videoId = match[1];
+        canonicalUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      } else {
+        canonicalUrl = clean;
+      }
+    }
+
+    const cacheKey = videoId || canonicalUrl;
+    if (clientYouTubeCache.has(cacheKey)) {
+      return clientYouTubeCache.get(cacheKey);
+    }
+
+    let result = null;
+
+    // 1. Try local server endpoint first if not github pages
+    if (!IS_GITHUB_PAGES) {
+      try {
+        const resp = await fetch(`/api/youtube-info?url=${encodeURIComponent(canonicalUrl)}`);
+        if (resp.ok) {
+          result = await resp.json();
+        }
+      } catch (err) {
+        console.warn('Backend YouTube info fetch failed, trying direct oEmbed fallback:', err);
+      }
+    }
+
+    // 2. Fallback to direct YouTube oEmbed API
+    if (!result || !result.success) {
+      try {
+        const directUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`;
+        const resp = await fetch(directUrl);
+        if (resp.ok) {
+          const parsed = await resp.json();
+          result = {
+            success: true,
+            videoId,
+            url: canonicalUrl,
+            title: parsed.title || 'Tanpa Judul',
+            channel: parsed.author_name || 'Kreator YouTube',
+            channel_url: parsed.author_url || '',
+            thumbnail: parsed.thumbnail_url || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ''),
+            type: parsed.type || 'video',
+            provider: parsed.provider_name || 'YouTube'
+          };
+        }
+      } catch (directErr) {
+        console.warn('Direct YouTube oEmbed fetch error:', directErr);
+      }
+    }
+
+    // Fallback default info if fetch blocked
+    if (!result || !result.success) {
+      result = {
+        success: false,
+        videoId,
+        url: canonicalUrl,
+        title: videoId ? `Video YouTube (${videoId})` : 'Video YouTube',
+        channel: 'YouTube',
+        channel_url: '',
+        thumbnail: videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : '',
+        type: 'video'
+      };
+    }
+
+    clientYouTubeCache.set(cacheKey, result);
+    return result;
+  }
+
+  async function getYouTubeGroundingContext(promptText, hudElement = null) {
+    if (!promptText || typeof promptText !== 'string') return null;
+    const ids = extractYouTubeVideoIdsClient(promptText);
+    if (ids.length === 0) return null;
+
+    if (hudElement) {
+      hudElement.innerHTML = `
+        <div class="web-search-hud">
+          <i class="fa-brands fa-youtube" style="color:#ff0033; font-size:1.1rem;"></i>
+          <span><strong>YouTube Grounding:</strong> Mengambil metadata ${ids.length} video via oEmbed...</span>
+        </div>
+      `;
+    }
+
+    const videoInfos = await Promise.all(ids.map(id => fetchYouTubeInfoClient(id)));
+    const validVideos = videoInfos.filter(v => v && v.title);
+
+    if (validVideos.length === 0) return null;
+
+    const blocks = validVideos.map((v, idx) => {
+      return `[DATA TERVERIFIKASI VIDEO YOUTUBE #${idx + 1}]
+- URL: ${v.url}
+- Judul Video: "${v.title}"
+- Nama Channel / Pembuat: "${v.channel}" (${v.channel_url || 'N/A'})
+- Thumbnail: ${v.thumbnail}
+(Informasi resmi ini diambil secara real-time via YouTube oEmbed)`;
+    }).join('\n\n');
+
+    const groundingContext = `### REAL-TIME YOUTUBE VIDEO GROUNDING DATA:\n${blocks}\n\nInstruksi untuk AI: Gunakan informasi metadata resmi di atas untuk menjawab dan menganalisis video YouTube yang ditanyakan pengguna secara tepat, akurat, dan tanpa halusinasi.`;
+
+    return {
+      groundingContext,
+      videos: validVideos
+    };
+  }
+
+  function buildYouTubePreviewCardHtml(video) {
+    if (!video) return '';
+    const safeTitle = escapeHtml(video.title || 'Video YouTube');
+    const safeChannel = escapeHtml(video.channel || 'YouTube');
+    const safeThumb = escapeHtml(video.thumbnail || (video.videoId ? `https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg` : ''));
+    const safeUrl = escapeHtml(video.url || (video.videoId ? `https://www.youtube.com/watch?v=${video.videoId}` : '#'));
+    const vidId = escapeHtml(video.videoId || '');
+
+    return `
+      <div class="youtube-preview-card" data-video-id="${vidId}">
+        <div class="yt-card-thumb-wrap">
+          <img src="${safeThumb}" alt="${safeTitle}" class="yt-card-thumb" loading="lazy">
+          <div class="yt-card-badge"><i class="fa-brands fa-youtube"></i> YouTube</div>
+        </div>
+        <div class="yt-card-info">
+          <h4 class="yt-card-title" title="${safeTitle}">${safeTitle}</h4>
+          <div class="yt-card-channel"><i class="fa-solid fa-circle-user"></i> ${safeChannel}</div>
+          <div class="yt-card-actions">
+            ${vidId ? `<button type="button" class="yt-card-btn play-yt-btn" data-video-id="${vidId}" data-title="${safeTitle}"><i class="fa-solid fa-play"></i> Putar di BGM</button>` : ''}
+            <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="yt-card-btn open-yt-btn"><i class="fa-solid fa-arrow-up-right-from-square"></i> Buka Video</a>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  async function renderYouTubeCardsForMessage(row, text) {
+    if (!row || !text || typeof text !== 'string') return;
+    const ids = extractYouTubeVideoIdsClient(text);
+    if (ids.length === 0) return;
+    const bubble = row.querySelector('.message-bubble');
+    if (!bubble) return;
+    if (bubble.querySelector('.msg-youtube-cards-wrap')) return;
+
+    const cardsContainer = document.createElement('div');
+    cardsContainer.className = 'msg-youtube-cards-wrap';
+    bubble.insertBefore(cardsContainer, bubble.firstChild);
+
+    for (const vidId of ids) {
+      const info = await fetchYouTubeInfoClient(vidId);
+      if (info) {
+        const cardWrapper = document.createElement('div');
+        cardWrapper.innerHTML = buildYouTubePreviewCardHtml(info);
+        if (cardWrapper.firstElementChild) {
+          cardsContainer.appendChild(cardWrapper.firstElementChild);
+        }
+      }
+    }
+  }
+
+  // Delegasi klik tombol putar YouTube di bubble chat
+  document.addEventListener('click', (e) => {
+    const playBtn = e.target.closest ? e.target.closest('.play-yt-btn') : null;
+    if (playBtn) {
+      const vidId = playBtn.dataset.videoId;
+      const title = playBtn.dataset.title || 'Video YouTube';
+      if (vidId && typeof BGMEngine !== 'undefined' && BGMEngine.playYouTube) {
+        BGMEngine.playYouTube(vidId, title);
+        showToast(`🎵 Memutar "${title}" di Cyber Deck...`);
+        AudioEngine.click();
+      }
+    }
+  });
 
   // ==================== URL & ENDPOINT NORMALIZER ====================
   function normalizeEndpoint(ep) {
@@ -3767,6 +3968,19 @@ ${organicBlock}
         bubbleText.innerHTML = '<span class="typing-cursor"></span>';
       }
 
+      // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
+      try {
+        const ytRes = await getYouTubeGroundingContext(promptText, bubbleText);
+        if (ytRes && ytRes.groundingContext) {
+          systemContent = systemContent 
+            ? `${systemContent}\n\n${ytRes.groundingContext}`
+            : ytRes.groundingContext;
+          bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+        }
+      } catch (ytErr) {
+        console.warn('YouTube client grounding error:', ytErr);
+      }
+
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
       const messagesPayload = buildSanitizedMessagesPayload(session, rawImgs, 'ollama', systemContent);
 
@@ -4008,6 +4222,19 @@ ${organicBlock}
           webSources = webRes.sources;
         }
         bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+      }
+
+      // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
+      try {
+        const ytRes = await getYouTubeGroundingContext(promptText, bubbleText);
+        if (ytRes && ytRes.groundingContext) {
+          systemContent = systemContent 
+            ? `${systemContent}\n\n${ytRes.groundingContext}`
+            : ytRes.groundingContext;
+          bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+        }
+      } catch (ytErr) {
+        console.warn('YouTube client grounding error:', ytErr);
       }
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
