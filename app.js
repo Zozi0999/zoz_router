@@ -2191,8 +2191,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     const isActuallyDeepResearch = Boolean(
       isDeepResearch ||
       (role === 'assistant' && typeof content === 'string' && (
-        /#\s*(?:📑\s*)?laporan\s*deep\s*research/i.test(content) ||
-        (content.includes('DEEP RESEARCH') && /##\s*1\.\s*.*rangkuman\s*eksekutif/i.test(content))
+        /#\s*(?:📑|🔬)?\s*(?:laporan\s*)?deep\s*research/i.test(content) ||
+        content.includes('Lead Auditor & Corrector') ||
+        (content.includes('DEEP RESEARCH') && /##\s*1\.\s*.*(?:rangkuman|pendahuluan|ringkasan|komprehensif)/i.test(content)) ||
+        /##\s*1\.\s*.*(?:pendahuluan\s*&\s*ringkasan\s*komprehensif|ringkasan\s*eksekutif)/i.test(content)
       ))
     );
 
@@ -4079,6 +4081,7 @@ ${organicBlock}
       if (webSources && webSources.length > 0) {
         renderMessageSources(assistantRow, webSources);
       }
+      renderYouTubeCardsForMessage(assistantRow, fullText);
       metaBox.innerHTML = `
         <strong>${modelName}</strong>
         <span class="meta-model-badge">Ollama</span>
@@ -4340,6 +4343,7 @@ ${organicBlock}
       if (webSources && webSources.length > 0) {
         renderMessageSources(assistantRow, webSources);
       }
+      renderYouTubeCardsForMessage(assistantRow, fullText);
       metaBox.innerHTML = `
         <strong>${modelName}</strong>
         <span class="meta-model-badge" style="background:rgba(255,82,0,0.15); color:var(--neon-amber);">OpenRouter</span>
@@ -5146,7 +5150,7 @@ ${organicBlock}
     const text = fullText.trim();
 
     // 1. Ekstraksi Bab 1 / Ringkasan Eksekutif: buang seluruh baris heading-nya secara tuntas
-    const regexHeading = /^##\s*(?:1\.\s*)?.*?(?:Ringkasan\s*Eksekutif|Executive\s*Summary)[^\n]*\n([\s\S]*?)(?=(?:\n##\s*2\.|\n##\s+[A-Za-z0-9]|\n---\n|$))/im;
+    const regexHeading = /^##\s*(?:1\.\s*)?.*?(?:Ringkasan\s*Eksekutif|Executive\s*Summary|Pendahuluan|Ringkasan\s*Komprehensif|Comprehensive\s*Overview)[^\n]*\n([\s\S]*?)(?=(?:\n##\s*2\.|\n##\s+[A-Za-z0-9]|\n---\n|$))/im;
     const match = text.match(regexHeading);
     if (match && match[1] && match[1].trim().length > 40) {
       // Bersihkan instruksi template dalam kurung seperti "(Uraikan ringkasan...)" jika ada
@@ -8554,7 +8558,17 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     }
   }
 
+  function syncLiveInspectionTabButtons() {
+    const activeTab = STATE.activeInspectionTab || 'agent1';
+    els.btnTabInspectAgent1?.classList.toggle('active', activeTab === 'agent1');
+    els.btnTabInspectAgent2?.classList.toggle('active', activeTab === 'agent2');
+    els.btnTabInspectScraper?.classList.toggle('active', activeTab === 'scraper');
+    els.btnTabInspectSynthesizer?.classList.toggle('active', activeTab === 'synthesizer');
+    els.btnTabInspectModel4?.classList.toggle('active', activeTab === 'model4');
+  }
+
   function renderLiveInspectionContent() {
+    syncLiveInspectionTabButtons();
     const container = els.inspectTabContent;
     if (!container) return;
     const insp = STATE.currentLiveInspection;
