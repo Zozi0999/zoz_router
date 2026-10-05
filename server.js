@@ -638,9 +638,19 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
 
   const isOpenRouter = effectiveProvider === 'openrouter' || (rawModel.includes('/') && effectiveProvider !== 'ollama');
 
-  // Normalisasi role "system" jika model tidak mendukungnya (misal: Gemma & Mistral-Tiny)
-  const isGemmaOrNoSystem = rawModel.toLowerCase().includes('gemma') || rawModel.toLowerCase().includes('mistral-tiny');
-  if (isGemmaOrNoSystem) {
+  // Normalisasi role "system" jika model tidak mendukungnya (misal: Gemma, Liquid LFM, Inkling, Dots, Ling, Apodex)
+  const rawModelLower = (rawModel || '').toLowerCase();
+  const doesSupportSystem = !(
+    rawModelLower.includes('gemma') ||
+    rawModelLower.includes('mistral-tiny') ||
+    rawModelLower.includes('lfm') ||
+    rawModelLower.includes('liquid') ||
+    rawModelLower.includes('inkling') ||
+    rawModelLower.includes('dots-') ||
+    rawModelLower.includes('ling-') ||
+    rawModelLower.includes('apodex')
+  );
+  if (!doesSupportSystem) {
     const sysIdx = finalMessages.findIndex(m => m.role === 'system');
     if (sysIdx !== -1) {
       const sysMsg = finalMessages.splice(sysIdx, 1)[0];
@@ -657,62 +667,115 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     const key = openRouterKey || (apiKey && apiKey.startsWith('sk-or-') ? apiKey : null) || process.env.OPENROUTER_API_KEY;
     if (!key) throw new Error('OpenRouter API Key diperlukan untuk model cloud: ' + (rawModel || 'default'));
 
-    const payload = {
-      model: rawModel || 'google/gemini-2.0-flash-001',
-      messages: finalMessages,
-      temperature: 0.3,
-      provider: {
-        allow_fallbacks: true
+    const isFreeModel = (rawModel || '').includes(':free') || rawModel === 'openrouter/free';
+    const candidateModels = isFreeModel
+      ? [
+          rawModel,
+          'openrouter/free',
+          'qwen/qwen3.8-27b:free',
+          'google/gemma-4-26b-a4b-it:free',
+          'nvidia/nemotron-3.5-lightning:free',
+          'liquid/lfm-2.5-2.6b:free',
+          'google/gemma-4-31b-it:free'
+        ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx)
+      : [rawModel || 'google/gemini-2.0-flash-001'];
+
+    const tryCallOpenRouter = (targetModel) => {
+      // Pastikan pesan disesuaikan dengan kapabilitas system role model target
+      const targetLower = (targetModel || '').toLowerCase();
+      let targetMessages = JSON.parse(JSON.stringify(finalMessages));
+      const targetNoSystem = (
+        targetLower.includes('gemma') ||
+        targetLower.includes('mistral-tiny') ||
+        targetLower.includes('lfm') ||
+        targetLower.includes('liquid') ||
+        targetLower.includes('inkling') ||
+        targetLower.includes('dots-') ||
+        targetLower.includes('ling-') ||
+        targetLower.includes('apodex')
+      );
+      if (targetNoSystem) {
+        const sIdx = targetMessages.findIndex(m => m.role === 'system');
+        if (sIdx !== -1) {
+          const sMsg = targetMessages.splice(sIdx, 1)[0];
+          const fUser = targetMessages.find(m => m.role === 'user');
+          if (fUser) {
+            fUser.content = `[Instruksi Sistem & Konteks:\n${sMsg.content}]\n\n${fUser.content}`;
+          } else {
+            targetMessages.unshift({ role: 'user', content: `[Instruksi Sistem & Konteks:\n${sMsg.content}]` });
+          }
+        }
       }
-    };
 
-    if (rawModel.includes(':free')) {
-      payload.models = [rawModel, 'qwen/qwen3.8-27b:free', 'google/gemma-4-26b-a4b-it:free', 'nvidia/nemotron-3.5-lightning:free'];
-    }
-
-    const postData = JSON.stringify(payload);
-
-    return new Promise((resolve, reject) => {
-      const options = {
-        hostname: 'openrouter.ai',
-        port: 443,
-        path: '/api/v1/chat/completions',
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${key}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://github.com/Zozi0999/zoz_router',
-          'X-Title': 'Zoz Router Deep Research',
-          'Content-Length': Buffer.byteLength(postData)
-        },
-        timeout: 60000
+      const payload = {
+        model: targetModel,
+        messages: targetMessages,
+        temperature: 0.3,
+        provider: {
+          allow_fallbacks: true
+        }
       };
 
-      const req = https.request(options, (res) => {
-        let rawData = '';
-        res.on('data', chunk => rawData += chunk);
-        res.on('end', () => {
-          try {
-            const parsed = JSON.parse(rawData);
-            if (res.statusCode >= 400 || parsed.error) {
-              const errMsg = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : (parsed.error || `HTTP ${res.statusCode}: Permintaan OpenRouter gagal`);
-              return reject(new Error(`OpenRouter Error [${res.statusCode}]: ${errMsg}`));
+      const postData = JSON.stringify(payload);
+
+      return new Promise((resolve, reject) => {
+        const options = {
+          hostname: 'openrouter.ai',
+          port: 443,
+          path: '/api/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${key}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://github.com/Zozi0999/zoz_router',
+            'X-Title': 'Zoz Router Deep Research',
+            'Content-Length': Buffer.byteLength(postData)
+          },
+          timeout: 60000
+        };
+
+        const req = https.request(options, (res) => {
+          let rawData = '';
+          res.on('data', chunk => rawData += chunk);
+          res.on('end', () => {
+            try {
+              const parsed = JSON.parse(rawData);
+              if (res.statusCode >= 400 || parsed.error) {
+                const errMsg = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : (parsed.error || `HTTP ${res.statusCode}: Permintaan OpenRouter gagal`);
+                return reject(new Error(`OpenRouter Error [${res.statusCode}]: ${errMsg}`));
+              }
+              const content = parsed.choices?.[0]?.message?.content || '';
+              if (!content.trim()) {
+                return reject(new Error(`OpenRouter tidak mengembalikan konten respons untuk model: ${targetModel}`));
+              }
+              resolve(content);
+            } catch (e) {
+              reject(new Error('Gagal memproses respon OpenRouter: ' + e.message));
             }
-            const content = parsed.choices?.[0]?.message?.content || '';
-            if (!content.trim()) {
-              return reject(new Error(`OpenRouter tidak mengembalikan konten respons untuk model: ${rawModel || 'default'}`));
-            }
-            resolve(content);
-          } catch (e) {
-            reject(new Error('Gagal memproses respon OpenRouter: ' + e.message));
-          }
+          });
         });
+        req.on('timeout', () => { req.destroy(); reject(new Error('OpenRouter request timed out')); });
+        req.on('error', err => reject(err));
+        req.write(postData);
+        req.end();
       });
-      req.on('timeout', () => { req.destroy(); reject(new Error('OpenRouter request timed out')); });
-      req.on('error', err => reject(err));
-      req.write(postData);
-      req.end();
-    });
+    };
+
+    let lastError = null;
+    for (let i = 0; i < candidateModels.length; i++) {
+      const candidate = candidateModels[i];
+      try {
+        const res = await tryCallOpenRouter(candidate);
+        return res;
+      } catch (err) {
+        lastError = err;
+        if (candidateModels.length > 1 && i < candidateModels.length - 1) {
+          console.warn(`[OpenRouter Backend Free Failover] Model ${candidate} gagal: ${err.message}. Mencoba ${candidateModels[i + 1]}...`);
+          continue;
+        }
+      }
+    }
+    throw lastError || new Error(`Gagal memanggil model OpenRouter: ${rawModel}`);
   }
 
   // Fallback / Default: Ollama Cloud Engine
@@ -2568,6 +2631,17 @@ const server = http.createServer(async (req, res) => {
 
       const apiKey = authHeader || `Bearer ${body.apiKey}`;
       delete body.apiKey;
+
+      // Defense-in-depth: Cegah konflik mutlak parameter model dan models pada OpenRouter
+      if (body.model && body.models) {
+        delete body.models;
+      }
+
+      // Defense-in-depth: Hapus tool gambar jika model adalah model gratis
+      const isFree = body.model && (body.model.includes(':free') || body.model === 'openrouter/free');
+      if (isFree && Array.isArray(body.tools)) {
+        delete body.tools;
+      }
 
       const isStream = body.stream !== false;
       const postData = JSON.stringify(body);
