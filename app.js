@@ -20,8 +20,9 @@ Kamu adalah AI Personal dan Penasihat Intelijen Strategis untuk KAISAR ZOZI.
 5. Kapabilitas Visual & Pembuatan Gambar (Gemini-Style Universal Image Synthesis):
 Jika Kaisar meminta Anda untuk membuat, menggambar, melukis, mendesain, mengilustrasikan, atau menampilkan visual/gambar apa pun:
 JANGAN PERNAH menolak dengan dalih Anda adalah model berbasis teks. Anda memiliki kapabilitas visual penuh.
-Sintesis deskripsi visual dalam bahasa Inggris berkualitas tinggi (detail subjek, pencahayaan dramatis, gaya seni), lalu sematkan gambar langsung di dalam pesan percakapan menggunakan format Markdown:
-![Deskripsi Gambar](https://image.pollinations.ai/prompt/{url_encoded_english_detailed_prompt}?width=1024&height=1024&nologo=true&enhance=true)
+Jika Anda memiliki server tool 'openrouter:image_generation', panggil tool tersebut untuk menghasilkan gambar visual secara otonom.
+Jika Anda menghasilkan visual melalui Markdown, sintesis deskripsi visual dalam bahasa Inggris berkualitas tinggi (detail subjek, pencahayaan dramatis, gaya seni) dengan pilihan model gambar sesuai gaya yang diinginkan (misal: model=flux, model=flux-realism, model=flux-anime, model=flux-3d, model=turbo), lalu sematkan gambar langsung di dalam pesan percakapan menggunakan format Markdown:
+![Deskripsi Gambar](https://image.pollinations.ai/prompt/{url_encoded_english_detailed_prompt}?width=1024&height=1024&model={model_choice}&nologo=true&enhance=true)
 Sertakan penjelasan singkat yang elegan sebelum atau sesudah gambar.`,
 
     coder: `[ROLE: PRINCIPAL SOFTWARE ARCHITECT & FULLSTACK ENGINEER]
@@ -81,6 +82,22 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     { id: 'glm-5.2', name: 'glm-5.2', tag: 'Cloud', isFree: false, cat: 'flagship', desc: 'GLM-5.2 Cloud Model (Usage Credits).' }
   ];
 
+  // Dedicated Image Synthesis Models (Pollinations Multi-Style & OpenRouter Image Engines)
+  const DEFAULT_IMAGE_MODELS = [
+    { id: 'flux', name: 'Flux.1 Schnell (Pollinations / Gratis & Cepat)', provider: 'pollinations', cat: 'free', tag: 'Gratis • Schnell' },
+    { id: 'flux-realism', name: 'Flux Realism (Foto Realistis Sinematik)', provider: 'pollinations', cat: 'realistic', tag: 'Realism • HD' },
+    { id: 'flux-anime', name: 'Flux Anime (Gaya Ilustrasi Anime & Manga)', provider: 'pollinations', cat: 'anime', tag: 'Anime • 2D' },
+    { id: 'flux-3d', name: 'Flux 3D (Render 3D CGI & Sci-Fi)', provider: 'pollinations', cat: '3d', tag: '3D • CGI' },
+    { id: 'turbo', name: 'SDXL Turbo (Ultra Fast Generation)', provider: 'pollinations', cat: 'fast', tag: 'Fast • Turbo' },
+    { id: 'black-forest-labs/flux-1-schnell', name: 'FLUX.1 Schnell (OpenRouter Dedicated)', provider: 'openrouter', cat: 'flagship', tag: 'OpenRouter • Schnell' },
+    { id: 'black-forest-labs/flux-1-dev', name: 'FLUX.1 Dev (OpenRouter Kualitas Tinggi)', provider: 'openrouter', cat: 'flagship', tag: 'OpenRouter • Dev' },
+    { id: 'black-forest-labs/flux-3-image', name: 'FLUX.3 Image (OpenRouter Next-Gen)', provider: 'openrouter', cat: 'flagship', tag: 'OpenRouter • FLUX-3' },
+    { id: 'recraft/recraft-v4.1-flash', name: 'Recraft v4.1 Flash (Vektor & Grafis)', provider: 'openrouter', cat: 'vector', tag: 'OpenRouter • Vector' },
+    { id: 'openai/gpt-image-2.5-sunburst', name: 'GPT Image Sunburst (OpenAI)', provider: 'openrouter', cat: 'flagship', tag: 'OpenRouter • DALL-E' },
+    { id: 'google/imagen-3', name: 'Google Imagen 3 (Photorealistic Ultra)', provider: 'openrouter', cat: 'flagship', tag: 'OpenRouter • Imagen' },
+    { id: 'bytedance-seed/seedream-5-0-flash', name: 'ByteDance SeeDream 5.0 Flash', provider: 'openrouter', cat: 'fast', tag: 'OpenRouter • Flash' }
+  ];
+
   // ==================== STATE MANAGEMENT ====================
   const STATE = {
     mode: 'ollama', // 'ollama' | 'openrouter' | 'auto'
@@ -106,6 +123,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     soundEnabled: true,
     ollamaModels: [...OFFICIAL_OLLAMA_CLOUD_MODELS],
     openRouterModels: [...DEFAULT_OPENROUTER_MODELS],
+    availableImageModels: [...DEFAULT_IMAGE_MODELS],
     settings: {
       ollamaEndpoint: 'https://ollama.com',
       ollamaApiKey: '',
@@ -117,6 +135,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       deepResearchModel4: '',
       ollamaModel: 'gemma4:31b',
       openRouterModel: 'qwen/qwen3.8-27b:free',
+      imageModel: 'flux',
       temperature: 0.7,
       topP: 0.9,
       maxTokens: 8192,
@@ -322,6 +341,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     inputNewPresetName: $('#inputNewPresetName'),
     saveCustomPresetBtn: $('#saveCustomPresetBtn'),
     customPresetsList: $('#customPresetsList'),
+    settingImageModel: $('#settingImageModel'),
     settingAutoPolicy: $('#settingAutoPolicy'),
     paramTemperature: $('#paramTemperature'),
     valTemperature: $('#valTemperature'),
@@ -559,15 +579,42 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       }
     },
 
-    download() {
+    async download() {
       if (!this.images[this.currentIndex]) return;
       const src = this.images[this.currentIndex];
-      const a = document.createElement('a');
-      a.href = src;
-      a.download = `zoz_foto_${Date.now()}_${this.currentIndex + 1}.webp`;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => document.body.removeChild(a), 100);
+      showToast('Mengunduh foto resolusi tinggi...', 'info');
+      const fileName = `zoz_foto_${Date.now()}_${this.currentIndex + 1}.png`;
+      try {
+        if (src.startsWith('data:')) {
+          const a = document.createElement('a');
+          a.href = src;
+          a.download = fileName;
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => a.remove(), 500);
+          return;
+        }
+        const resp = await fetch(src, { mode: 'cors' });
+        const blob = await resp.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          a.remove();
+          URL.revokeObjectURL(blobUrl);
+        }, 3000);
+      } catch (err) {
+        const a = document.createElement('a');
+        a.href = src;
+        a.download = fileName;
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => a.remove(), 500);
+      }
       showToast('Foto berhasil diunduh.');
       AudioEngine.click();
     },
@@ -860,6 +907,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       ];
       if (!STATE.settings.openRouterModel || DEAD_OPENROUTER_MODELS.includes(STATE.settings.openRouterModel)) {
         STATE.settings.openRouterModel = 'qwen/qwen3.8-27b:free';
+      }
+
+      if (!STATE.settings.imageModel) {
+        STATE.settings.imageModel = 'flux';
       }
 
       if (!STATE.settings.serperApiKey) {
@@ -2097,19 +2148,44 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     `;
   }
 
-  function triggerImageDownload(url, promptText) {
-    const a = document.createElement('a');
-    a.href = url;
-    const cleanName = (promptText || 'ai_image').toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 30);
-    a.download = `zoz_${cleanName}_${Date.now()}.png`;
-    a.target = '_blank';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => a.remove(), 1000);
+  async function triggerImageDownload(url, promptText) {
     showToast('Mengunduh gambar HD...', 'info');
+    const cleanName = (promptText || 'ai_image').toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 30);
+    const fileName = `zoz_${cleanName}_${Date.now()}.png`;
+    try {
+      if (url.startsWith('data:')) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => a.remove(), 500);
+        return;
+      }
+      const resp = await fetch(url, { mode: 'cors' });
+      const blob = await resp.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        a.remove();
+        URL.revokeObjectURL(blobUrl);
+      }, 3000);
+    } catch (err) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => a.remove(), 500);
+    }
   }
 
-  function attachImageCardListeners(row, promptText, imageUrl) {
+  function attachImageCardListeners(row, promptText, imageUrl, cardModel = null) {
     const card = row.querySelector('.image-result-card');
     if (!card) return;
 
@@ -2148,7 +2224,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       e.stopPropagation();
       const currentSession = getActiveSession();
       if (currentSession) {
-        runImageGeneration(currentSession, promptText);
+        runImageGeneration(currentSession, promptText, cardModel || STATE.settings.imageModel);
       }
     });
   }
@@ -2178,7 +2254,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       </div>
     `;
 
-    attachImageCardListeners(row, msg.prompt, msg.imageUrl || msg.url);
+    attachImageCardListeners(row, msg.prompt, msg.imageUrl || msg.url, msg.model);
     els.messagesList.appendChild(row);
   }
 
@@ -3515,11 +3591,14 @@ ${organicBlock}
             const outMods = arch.output_modalities || [];
             const modalityStr = String(arch.modality || '');
             const hasImageOutput = outMods.includes('image') || modalityStr.includes('->image') || modalityStr.endsWith('image');
+            const supportedParams = Array.isArray(m.supported_parameters) ? m.supported_parameters : [];
+            const supportsTools = supportedParams.includes('tools');
             return {
               id: m.id,
               name: m.name || m.id,
               context_length: m.context_length || null,
               hasImageOutput: hasImageOutput,
+              supportsTools: supportsTools,
               tag: m.id.includes(':free') ? 'Free' : (m.pricing?.prompt === '0' ? 'Free' : 'Cloud'),
               cat: m.id.includes(':free') ? 'free' : 'flagship'
             };
@@ -3535,6 +3614,28 @@ ${organicBlock}
             renderLiveModelCatalog();
           }
         }
+      }
+
+      // Ambil katalog model khusus Image Generation OpenRouter secara live
+      try {
+        const imgRes = await fetch('https://openrouter.ai/api/v1/images/models', { headers }).catch(() => null);
+        if (imgRes && imgRes.ok) {
+          const imgData = await imgRes.json();
+          if (imgData && Array.isArray(imgData.data)) {
+            const mappedImgModels = imgData.data.map(im => ({
+              id: im.id,
+              name: im.name || im.id,
+              provider: 'openrouter',
+              cat: 'flagship',
+              tag: 'OpenRouter • Image',
+              desc: im.description || 'OpenRouter Dedicated Image Synthesis Model'
+            }));
+            const pollinationsOnly = DEFAULT_IMAGE_MODELS.filter(dm => dm.provider === 'pollinations');
+            STATE.availableImageModels = [...pollinationsOnly, ...mappedImgModels];
+          }
+        }
+      } catch (imgErr) {
+        console.warn('Could not fetch dynamic OpenRouter image models:', imgErr);
       }
     } catch (e) {
       console.warn('Could not fetch dynamic OpenRouter model catalog:', e);
@@ -3714,6 +3815,27 @@ ${organicBlock}
     if (!rawText && images.length === 0 && docs.length === 0) return;
     if (STATE.isGenerating) return;
 
+    // Intersepsi perintah keluar / beralih mode cepat
+    const trimmedLow = rawText.toLowerCase();
+    if (trimmedLow === '/chat' || trimmedLow === '/teks' || trimmedLow === '/text') {
+      STATE.isImageGenMode = false;
+      updateImageGenModeUI();
+      els.promptInput.value = '';
+      autoResizeTextarea(els.promptInput);
+      showToast('Mode percakapan standar aktif.');
+      AudioEngine.click();
+      return;
+    }
+    if (trimmedLow === '/img' || trimmedLow === '/image' || trimmedLow === '/gambar') {
+      STATE.isImageGenMode = true;
+      updateImageGenModeUI();
+      els.promptInput.value = '';
+      autoResizeTextarea(els.promptInput);
+      showToast('Mode AI Image Studio aktif. Silakan ketik deskripsi visual!');
+      AudioEngine.click();
+      return;
+    }
+
     // Combine documents with text
     let text = rawText;
     if (docs.length > 0) {
@@ -3766,13 +3888,21 @@ ${organicBlock}
       targetModel = STATE.settings.ollamaModel || 'gemma4:31b';
     }
 
+    const isExplicitImageCommand = /^\/(?:image|img|gambar)\s+/i.test(text.trim());
     const isDirectImageCapable = isModelCapableOfImageGeneration(targetModel);
+    const isToolImageCapable = (STATE.mode === 'openrouter' || targetModel.includes('/')) && Boolean(STATE.settings.openRouterKey) && doesModelSupportTools(targetModel);
+    const canModelHandleImage = isDirectImageCapable || isToolImageCapable;
 
-    // Jika pengguna meminta gambar dan model aktif memang mampu membuat gambar (misal gemini-2.5-flash-image),
-    // jangan dibajak ke Flux eksternal, biarkan model aktif memprosesnya secara langsung ala Gemini AI!
-    if (STATE.isImageGenMode || (isImageGenerationTrigger(text) && !isDirectImageCapable)) {
+    // Jika pengguna berada dalam Mode Image Studio atau mengetik slash command eksplisit (/img, /gambar):
+    // Jalankan engine AI Image Studio dengan model yang dipilih
+    if (STATE.isImageGenMode || isExplicitImageCommand) {
       const cleanImgPrompt = extractImagePrompt(text);
-      await runImageGeneration(session, cleanImgPrompt);
+      await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel);
+    } else if (isImageGenerationTrigger(text) && !canModelHandleImage && !STATE.settings.openRouterKey && (STATE.mode === 'openrouter' || targetModel.includes('/'))) {
+      // Jika model OpenRouter dipilih tapi tanpa API Key untuk tool calling dan tidak mampu gambar langsung,
+      // fallback ke AI Image Studio
+      const cleanImgPrompt = extractImagePrompt(text);
+      await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel);
     } else if (STATE.isDeepResearch) {
       const activeEngine = (STATE.mode === 'auto')
         ? (STATE.settings.autoPolicy === 'cloud_first' ? 'openrouter' : 'ollama')
@@ -3818,7 +3948,29 @@ ${organicBlock}
     const liveModel = (STATE.openRouterModels || []).find(m => m.id === modelName);
     if (liveModel && liveModel.hasImageOutput) return true;
 
+    // Deteksi jika model terdaftar di katalog model gambar khusus
+    const imgModel = (STATE.availableImageModels || []).find(m => m.id === modelName);
+    if (imgModel) return true;
+
     return false;
+  }
+
+  function doesModelSupportTools(modelName) {
+    if (!modelName || typeof modelName !== 'string') return false;
+    const liveModel = (STATE.openRouterModels || []).find(m => m.id === modelName);
+    if (liveModel && typeof liveModel.supportsTools === 'boolean') {
+      return liveModel.supportsTools;
+    }
+    const lower = modelName.toLowerCase();
+    return (
+      lower.includes('gpt-') ||
+      lower.includes('claude-') ||
+      lower.includes('gemini-') ||
+      lower.includes('qwen') ||
+      lower.includes('mistral') ||
+      lower.includes('llama-3') ||
+      lower.includes('deepseek')
+    );
   }
 
   // ==================== UNIVERSAL MODEL ERROR & WARNING HANDLER ====================
@@ -4143,6 +4295,7 @@ ${organicBlock}
       
       bubbleText.innerHTML = renderMarkdown(fullText);
       enhanceCodeBlocks(bubbleText);
+      enhanceChatImages(bubbleText);
       if (webSources && webSources.length > 0) {
         renderMessageSources(assistantRow, webSources);
       }
@@ -4181,6 +4334,7 @@ ${organicBlock}
           const stoppedText = `${partialText.trim()}\n\n*[Respons dihentikan oleh pengguna]*`;
           bubbleText.innerHTML = renderMarkdown(stoppedText);
           enhanceCodeBlocks(bubbleText);
+          enhanceChatImages(bubbleText);
           if (webSources && webSources.length > 0) {
             renderMessageSources(assistantRow, webSources);
           }
@@ -4344,6 +4498,19 @@ ${organicBlock}
       // Untuk model multimodal gambar (seperti gemini-2.5-flash-image / nano-banana), kirimkan modalities text dan image
       if (isImageCapable) {
         requestBody.modalities = ['text', 'image'];
+      }
+
+      // Pasang server tool openrouter:image_generation jika API key tersedia dan model mendukung tools
+      const canUseTools = doesModelSupportTools(modelName);
+      if (canUseTools && STATE.settings.openRouterKey) {
+        const imageGenTool = {
+          type: 'openrouter:image_generation'
+        };
+        const activeImgModel = STATE.settings.imageModel || 'black-forest-labs/flux-1-schnell';
+        if (activeImgModel && activeImgModel.includes('/')) {
+          imageGenTool.parameters = { model: activeImgModel };
+        }
+        requestBody.tools = [imageGenTool];
       }
 
       if (modelName.includes(':free')) {
@@ -6743,9 +6910,10 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     }
   }
 
-  async function runImageGeneration(session, promptText, customModel = 'flux') {
+  async function runImageGeneration(session, promptText, customModel = null) {
     if (!promptText || !promptText.trim()) return;
     const cleanPrompt = promptText.trim();
+    const activeImageModel = (customModel && typeof customModel === 'string') ? customModel : (STATE.settings.imageModel || 'flux');
     
     setGeneratingState(true);
     STATE.abortController = new AbortController();
@@ -6763,7 +6931,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
             <i class="fa-solid fa-atom fa-spin" style="color:#FF007F;"></i>
             <span>AI Image Studio (Neural Synthesis)</span>
           </div>
-          <span class="image-gen-badge">Flux.1 Diffusion</span>
+          <span class="image-gen-badge">${escapeHtml(activeImageModel)}</span>
         </div>
         <div class="image-gen-canvas-wrapper">
           <div class="image-gen-canvas-grid"></div>
@@ -6808,7 +6976,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
     // Step 2 & Step 3 timed progression
     const timerStep2 = setTimeout(() => {
-      updateHudStep('[Langkah 2/3] Denoising matriks difusi resolusi tinggi Flux...', 50);
+      updateHudStep(`[Langkah 2/3] Denoising matriks difusi ${escapeHtml(activeImageModel)}...`, 50);
     }, 700);
 
     const timerStep3 = setTimeout(() => {
@@ -6817,7 +6985,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
     try {
       let finalImageUrl = '';
-      let resultModel = 'Flux.1 Schnell';
+      let resultModel = activeImageModel;
       let actualSeed = Math.floor(Math.random() * 100000000);
 
       if (!IS_GITHUB_PAGES) {
@@ -6830,7 +6998,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
             },
             body: JSON.stringify({
               prompt: cleanPrompt,
-              model: customModel || 'flux',
+              model: activeImageModel,
               width: 1024,
               height: 1024,
               openRouterKey: STATE.settings.openRouterKey || ''
@@ -6866,7 +7034,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           urlPrompt = (lastSpace > 600 ? cut.slice(0, lastSpace) : cut).trim();
         }
         const encoded = encodeURIComponent(urlPrompt);
-        finalImageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&model=flux&seed=${actualSeed}&nologo=true&enhance=true`;
+        const pollinationsModel = activeImageModel.includes('/') ? 'flux' : activeImageModel;
+        finalImageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&model=${encodeURIComponent(pollinationsModel)}&seed=${actualSeed}&nologo=true&enhance=true`;
       }
 
       // Preload image to ensure 100% materialization animation
@@ -6957,7 +7126,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         `;
         bubbleText.querySelector('.retry-img-btn')?.addEventListener('click', () => {
           assistantRow.remove();
-          runImageGeneration(session, cleanPrompt, customModel);
+          runImageGeneration(session, cleanPrompt, activeImageModel);
         });
         AudioEngine.error();
       }
@@ -8990,6 +9159,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (els.settingDeepResearchAgent2Model) els.settingDeepResearchAgent2Model.value = STATE.settings.deepResearchAgent2Model || '';
     if (els.settingDeepResearchFinalModel) els.settingDeepResearchFinalModel.value = STATE.settings.deepResearchFinalModel || '';
     if (els.settingDeepResearchModel4) els.settingDeepResearchModel4.value = STATE.settings.deepResearchModel4 || '';
+    if (els.settingImageModel) els.settingImageModel.value = STATE.settings.imageModel || 'flux';
     if (els.paramTemperature) els.paramTemperature.value = STATE.settings.temperature ?? 0.7;
     if (els.valTemperature) els.valTemperature.innerText = STATE.settings.temperature ?? 0.7;
     if (els.paramTopP) els.paramTopP.value = STATE.settings.topP ?? 0.9;
@@ -9908,6 +10078,10 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
       if (els.settingDeepResearchModel4) {
         STATE.settings.deepResearchModel4 = els.settingDeepResearchModel4.value.trim();
+      }
+
+      if (els.settingImageModel) {
+        STATE.settings.imageModel = els.settingImageModel.value.trim() || 'flux';
       }
 
       if (els.paramTemperature) STATE.settings.temperature = parseFloat(els.paramTemperature.value);
