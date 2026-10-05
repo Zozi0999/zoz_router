@@ -3463,13 +3463,14 @@ ${organicBlock}
         : 'Klik untuk mencatat nominal saldo Ollama Cloud Anda ($ USD)';
       els.ollamaStatusVal.style.cursor = 'pointer';
     }
+    const isCurrentlyOffline = Boolean(els.ollamaStatusVal && els.ollamaStatusVal.innerText.includes('Offline'));
     if (els.ollamaIndicator) {
-      els.ollamaIndicator.className = 'status-indicator online';
+      els.ollamaIndicator.className = isCurrentlyOffline ? 'status-indicator error' : 'status-indicator online';
     }
 
     // Settings modal card
     if (els.settingOllamaStatusDot) {
-      els.settingOllamaStatusDot.className = 'pulse-dot active';
+      els.settingOllamaStatusDot.className = isCurrentlyOffline ? 'pulse-dot error' : 'pulse-dot active';
     }
 
     if (els.settingOllamaStatusVal) {
@@ -9963,6 +9964,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       
       savePersistedState();
       checkOllamaHealth();
+      fetchOllamaCloudUsage(true);
       checkOpenRouterStatus();
       updatePresetBanner();
       updatePresetPillUI();
