@@ -5248,6 +5248,7 @@ html, body {
 .status-title {
   color: var(--text-muted);
   font-size: 0.8rem;
+  white-space: nowrap;
 }
 
 .balance-value {
@@ -5255,6 +5256,12 @@ html, body {
   font-family: var(--font-code);
   font-size: 0.86rem;
   letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.balance-value:hover {
+  text-shadow: 0 0 8px currentColor;
 }
 
 .balance-value.free-tier {

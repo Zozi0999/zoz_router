@@ -39,19 +39,19 @@ You are a Master Security Specialist, Penetration Tester, and Cryptographer.
 Execute exhaustive first-principles reasoning. Examine all theoretical, technical, philosophical, and mechanical angles with unconstrained intellectual honesty, rigorous logic, and absolute depth.`
   };
 
-  // Popular OpenRouter Models Catalog
+  // Popular OpenRouter Models Catalog (Live Active Free & Flagship Models)
   const DEFAULT_OPENROUTER_MODELS = [
-    { id: 'nvidia/llama-3.1-nemotron-70b-instruct:free', name: 'nvidia/llama-3.1-nemotron-70b-instruct:free', tag: 'Nemotron Free', cat: 'flagship' },
-    { id: 'nvidia/llama-3.1-nemotron-70b-instruct', name: 'nvidia/llama-3.1-nemotron-70b-instruct', tag: 'Nemotron 70B', cat: 'flagship' },
-    { id: 'deepseek/deepseek-r1:free', name: 'deepseek/deepseek-r1:free', tag: 'Free • Reasoning', cat: 'reasoning' },
-    { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'meta-llama/llama-3.3-70b-instruct:free', tag: 'Free', cat: 'flagship' },
-    { id: 'google/gemini-2.0-flash-exp:free', name: 'google/gemini-2.0-flash-exp:free', tag: 'Free • 👁️ Vision', cat: 'fast' },
-    { id: 'qwen/qwen-2.5-72b-instruct:free', name: 'qwen/qwen-2.5-72b-instruct:free', tag: 'Free', cat: 'coding' },
-    { id: 'anthropic/claude-3.5-sonnet', name: 'anthropic/claude-3.5-sonnet', tag: 'Flagship', cat: 'coding' },
+    { id: 'qwen/qwen3.8-27b:free', name: 'qwen/qwen3.8-27b:free', tag: 'Free • Flagship', cat: 'flagship' },
+    { id: 'google/gemma-4-26b-a4b-it:free', name: 'google/gemma-4-26b-a4b-it:free', tag: 'Free • Fast', cat: 'fast' },
+    { id: 'google/gemma-4-31b-it:free', name: 'google/gemma-4-31b-it:free', tag: 'Free • Multimodal', cat: 'flagship' },
+    { id: 'nvidia/nemotron-3.5-lightning:free', name: 'nvidia/nemotron-3.5-lightning:free', tag: 'Free • Lightning', cat: 'fast' },
+    { id: 'liquid/lfm-2.5-2.6b:free', name: 'liquid/lfm-2.5-2.6b:free', tag: 'Free • Compact', cat: 'fast' },
+    { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', name: 'nvidia/nemotron-3-ultra-550b-a55b:free', tag: 'Free • Massive', cat: 'flagship' },
+    { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', name: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', tag: 'Free • Reasoning', cat: 'reasoning' },
     { id: 'openai/gpt-4o', name: 'openai/gpt-4o', tag: 'Flagship • 👁️ Vision', cat: 'flagship' },
-    { id: 'deepseek/deepseek-chat', name: 'deepseek/deepseek-chat', tag: 'Flagship', cat: 'flagship' },
-    { id: 'mistralai/mistral-large-2411', name: 'mistralai/mistral-large-2411', tag: 'Pro', cat: 'flagship' },
-    { id: 'meta-llama/llama-3.2-11b-vision-instruct:free', name: 'meta-llama/llama-3.2-11b-vision-instruct:free', tag: 'Vision Free', cat: 'vision' }
+    { id: 'anthropic/claude-3.5-sonnet', name: 'anthropic/claude-3.5-sonnet', tag: 'Flagship • Coding', cat: 'coding' },
+    { id: 'deepseek/deepseek-chat', name: 'deepseek/deepseek-chat', tag: 'Flagship • V3', cat: 'flagship' },
+    { id: 'mistralai/mistral-large-2411', name: 'mistralai/mistral-large-2411', tag: 'Pro • Flagship', cat: 'flagship' }
   ];
 
   // Official Ollama Cloud Flagship Models (Free Included Usage vs Usage Credits)
@@ -111,7 +111,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       deepResearchFinalModel: '',
       deepResearchModel4: '',
       ollamaModel: 'gemma4:31b',
-      openRouterModel: 'deepseek/deepseek-r1:free',
+      openRouterModel: 'qwen/qwen3.8-27b:free',
       temperature: 0.7,
       topP: 0.9,
       maxTokens: 8192,
@@ -845,6 +845,21 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           STATE.settings.ollamaModel === 'llama3:latest') {
         STATE.settings.ollamaModel = 'gemma4:31b';
       }
+
+      // Auto-Migration: Alihkan model OpenRouter lama / mati ke model free yang aktif live (qwen/qwen3.8-27b:free)
+      const DEAD_OPENROUTER_MODELS = [
+        'deepseek/deepseek-r1:free',
+        'meta-llama/llama-3.3-70b-instruct:free',
+        'deepseek/deepseek-chat:free',
+        'nvidia/llama-3.1-nemotron-70b-instruct:free',
+        'google/gemini-2.0-flash-exp:free',
+        'qwen/qwen-2.5-72b-instruct:free',
+        'meta-llama/llama-3.2-11b-vision-instruct:free'
+      ];
+      if (!STATE.settings.openRouterModel || DEAD_OPENROUTER_MODELS.includes(STATE.settings.openRouterModel)) {
+        STATE.settings.openRouterModel = 'qwen/qwen3.8-27b:free';
+      }
+
       if (!STATE.settings.serperApiKey) {
         STATE.settings.serperApiKey = '075538fed9c64990e1eb32a06726c1e55a933c1e';
       }
@@ -2157,7 +2172,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     }
 
     const avatarIcon = role === 'user' ? '<i class="fa-solid fa-user-ninja"></i>' : '<i class="fa-solid fa-microchip-ai"></i>';
-    const roleLabel = role === 'user' ? 'Anda' : (model || 'Zoz AI');
+    const roleLabel = role === 'user' ? 'Anda' : 'Zoz AI';
 
     const imgList = Array.isArray(image) ? image.filter(Boolean) : (image ? [image] : []);
     let imageGalleryHtml = '';
@@ -3433,7 +3448,7 @@ ${organicBlock}
     if (resolvedBalance != null) {
       balanceDisplay = `$${resolvedBalance.toFixed(2)} USD`;
     } else if (hasKey) {
-      balanceDisplay = 'Tersambung (Usage Credits)';
+      balanceDisplay = 'Belum Disetel (Klik untuk Set Saldo)';
     } else {
       balanceDisplay = 'Free Cloud Tier';
     }
@@ -3442,7 +3457,11 @@ ${organicBlock}
     if (els.ollamaStatusVal) {
       els.ollamaStatusVal.innerText = (resolvedBalance != null)
         ? `$${resolvedBalance.toFixed(2)}` 
-        : (hasKey ? 'Cloud Aktif' : 'Free Cloud');
+        : (hasKey ? 'Set Saldo ($)' : 'Free Cloud');
+      els.ollamaStatusVal.title = (resolvedBalance != null)
+        ? `Saldo Ollama Cloud: $${resolvedBalance.toFixed(2)} USD (Klik untuk ubah)`
+        : 'Klik untuk mencatat nominal saldo Ollama Cloud Anda ($ USD)';
+      els.ollamaStatusVal.style.cursor = 'pointer';
     }
     if (els.ollamaIndicator) {
       els.ollamaIndicator.className = 'status-indicator online';
@@ -3520,7 +3539,7 @@ ${organicBlock}
       
       const balanceStr = (resolvedBalance != null) 
         ? `$${resolvedBalance.toFixed(2)} USD` 
-        : (hasKey ? 'Usage Credits Aktif' : 'Free Cloud Tier');
+        : (hasKey ? 'Belum Disetel (Klik untuk Set Saldo)' : 'Free Cloud Tier');
 
       const freeStr = (resolvedBalance != null)
         ? `Saldo Tersedia: $${resolvedBalance.toFixed(2)} • Pay-as-you-go`
@@ -3700,10 +3719,18 @@ ${organicBlock}
   }
 
   function selectModel(modelId) {
-    if (STATE.mode === 'ollama') {
-      STATE.settings.ollamaModel = modelId;
-    } else {
+    if (!modelId) return;
+    const isOR = modelId.includes('/');
+    if (isOR) {
       STATE.settings.openRouterModel = modelId;
+      if (STATE.mode !== 'openrouter' && STATE.mode !== 'auto') {
+        setEngineMode('openrouter');
+      }
+    } else {
+      STATE.settings.ollamaModel = modelId;
+      if (STATE.mode !== 'ollama' && STATE.mode !== 'auto') {
+        setEngineMode('ollama');
+      }
     }
     updateModelUI();
     updateVisionCompatibilityBadge();
@@ -3820,9 +3847,19 @@ ${organicBlock}
     } else if (STATE.mode === 'auto') {
       await runAutoRouterStreaming(session, text, images);
     } else if (STATE.mode === 'openrouter') {
-      await runOpenRouterStreaming(session, text, images, STATE.settings.openRouterModel);
+      const targetModel = STATE.settings.openRouterModel || 'qwen/qwen3.8-27b:free';
+      if (!targetModel.includes('/')) {
+        await runOllamaStreaming(session, text, images, targetModel);
+      } else {
+        await runOpenRouterStreaming(session, text, images, targetModel);
+      }
     } else {
-      await runOllamaStreaming(session, text, images, STATE.settings.ollamaModel);
+      const targetModel = STATE.settings.ollamaModel || 'gemma4:31b';
+      if (targetModel.includes('/')) {
+        await runOpenRouterStreaming(session, text, images, targetModel);
+      } else {
+        await runOllamaStreaming(session, text, images, targetModel);
+      }
     }
   }
 
@@ -9829,6 +9866,17 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     els.catalogBalanceText?.addEventListener('click', () => {
       if (STATE.activeCatalogTab === 'ollama') {
         els.btnCatalogSetBalance?.click();
+      }
+    });
+
+    els.ollamaStatusVal?.addEventListener('click', () => {
+      els.btnCatalogSetBalance?.click();
+    });
+
+    els.settingOllamaStatusVal?.addEventListener('click', () => {
+      if (els.settingOllamaCustomBalance) {
+        els.settingOllamaCustomBalance.focus();
+        els.settingOllamaCustomBalance.select();
       }
     });
 
