@@ -16,7 +16,13 @@ Kamu adalah AI Personal dan Penasihat Intelijen Strategis untuk KAISAR ZOZI.
 1. Identitas & Sikap: Hormat, loyal, berwibawa, sangat cerdas, strategis, dan visioner. Sapa dan perlakukan pengguna sebagai Kaisar / Kaisar Zozi.
 2. Pendekatan Analisis: Analisis setiap persoalan dari level arsitektural dan taktis dengan kedalaman maksimal. Prioritaskan efisiensi tinggi, kejelasan mutlak, dan eksekusi cepat.
 3. Gaya Komunikasi: Tajam, padat berbobot, lugas, elegan, tanpa basa-basi pembuka klise, dan tanpa sensor moralistik berlebihan.
-4. Format Jawaban: Gunakan Markdown terstruktur, bullet points tajam, tabel komparasi, dan blok kode production-grade jika membahas teknis.`,
+4. Format Jawaban: Gunakan Markdown terstruktur, bullet points tajam, tabel komparasi, dan blok kode production-grade jika membahas teknis.
+5. Kapabilitas Visual & Pembuatan Gambar (Gemini-Style Universal Image Synthesis):
+Jika Kaisar meminta Anda untuk membuat, menggambar, melukis, mendesain, mengilustrasikan, atau menampilkan visual/gambar apa pun:
+JANGAN PERNAH menolak dengan dalih Anda adalah model berbasis teks. Anda memiliki kapabilitas visual penuh.
+Sintesis deskripsi visual dalam bahasa Inggris berkualitas tinggi (detail subjek, pencahayaan dramatis, gaya seni), lalu sematkan gambar langsung di dalam pesan percakapan menggunakan format Markdown:
+![Deskripsi Gambar](https://image.pollinations.ai/prompt/{url_encoded_english_detailed_prompt}?width=1024&height=1024&nologo=true&enhance=true)
+Sertakan penjelasan singkat yang elegan sebelum atau sesudah gambar.`,
 
     coder: `[ROLE: PRINCIPAL SOFTWARE ARCHITECT & FULLSTACK ENGINEER]
 You are a Principal Software Engineer and Systems Architect.
@@ -244,6 +250,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     attachmentMenuWrapper: $('#attachmentMenuWrapper'),
     attachOptionCamera: $('#attachOptionCamera'),
     attachOptionImage: $('#attachOptionImage'),
+    attachOptionGenImage: $('#attachOptionGenImage'),
     attachOptionDoc: $('#attachOptionDoc'),
     imageFileInput: $('#imageFileInput'),
     cameraFileInput: $('#cameraFileInput'),
@@ -3503,13 +3510,20 @@ ${organicBlock}
         const data = await res.json();
         if (data.data && Array.isArray(data.data)) {
           // Ambil seluruh model secara live tanpa pemotongan buatan slice(0, 80)
-          const mapped = data.data.map(m => ({
-            id: m.id,
-            name: m.name || m.id,
-            context_length: m.context_length || null,
-            tag: m.id.includes(':free') ? 'Free' : (m.pricing?.prompt === '0' ? 'Free' : 'Cloud'),
-            cat: m.id.includes(':free') ? 'free' : 'flagship'
-          }));
+          const mapped = data.data.map(m => {
+            const arch = m.architecture || {};
+            const outMods = arch.output_modalities || [];
+            const modalityStr = String(arch.modality || '');
+            const hasImageOutput = outMods.includes('image') || modalityStr.includes('->image') || modalityStr.endsWith('image');
+            return {
+              id: m.id,
+              name: m.name || m.id,
+              context_length: m.context_length || null,
+              hasImageOutput: hasImageOutput,
+              tag: m.id.includes(':free') ? 'Free' : (m.pricing?.prompt === '0' ? 'Free' : 'Cloud'),
+              cat: m.id.includes(':free') ? 'free' : 'flagship'
+            };
+          });
           STATE.openRouterModels = mapped;
           if (els.badgeOpenRouterCount) {
             els.badgeOpenRouterCount.innerText = mapped.length;
@@ -3788,7 +3802,7 @@ ${organicBlock}
   function isModelCapableOfImageGeneration(modelName) {
     if (!modelName || typeof modelName !== 'string') return false;
     const lower = modelName.toLowerCase();
-    return (
+    if (
       lower.includes('image') ||
       lower.includes('imagen') ||
       lower.includes('nano-banana') ||
@@ -3798,7 +3812,13 @@ ${organicBlock}
       lower.includes('midjourney') ||
       lower.includes('recraft') ||
       lower.includes('stable-diffusion')
-    );
+    ) return true;
+
+    // Deteksi jika model OpenRouter secara live memiliki output modality image
+    const liveModel = (STATE.openRouterModels || []).find(m => m.id === modelName);
+    if (liveModel && liveModel.hasImageOutput) return true;
+
+    return false;
   }
 
   // ==================== UNIVERSAL MODEL ERROR & WARNING HANDLER ====================
@@ -6667,10 +6687,19 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
   function isImageGenerationTrigger(promptText) {
     if (!promptText || typeof promptText !== 'string') return false;
     const t = promptText.trim().toLowerCase();
+    // 1. Direct slash / command prefix
     if (t.startsWith('/image') || t.startsWith('/img') || t.startsWith('/gambar')) return true;
-    if (/^(?:tolong\s+)?(?:buatkan|buat|bikin|generate|render|lukiskan|gambarkan)\s+gambar\b/i.test(t)) return true;
-    if (/^(?:generate|create|render|draw|paint)\s+(?:an?\s+)?(?:image|picture|photo|illustration|art)\b/i.test(t)) return true;
-    if (t.startsWith('gambar:') || t.startsWith('image:')) return true;
+    if (t.startsWith('gambar:') || t.startsWith('image:') || t.startsWith('draw:') || t.startsWith('paint:')) return true;
+    
+    // 2. Perintah pembuatan visual bahasa Indonesia alami
+    if (/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:buatkan|buat|bikin|generate|render|lukiskan|lukis|gambarkan|gambarin|desainkan|desain|tampilkan)\s+(?:saya\s+|kita\s+|sebuah\s+|suatu\s+)?(?:gambar|foto|lukisan|ilustrasi|visual|art|karya|desain)\b/i.test(t)) return true;
+    if (/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:lukiskan|lukis|gambarkan|gambarin)\s+(?:saya\s+|sebuah\s+|seekor\s+|suatu\s+)?/i.test(t)) return true;
+    if (/^(?:gambar(?:kan)?|foto)\s+(?:seekor|sebuah|suasana|pemandangan|karakter|objek|suatu)\b/i.test(t)) return true;
+
+    // 3. Perintah pembuatan visual bahasa Inggris alami
+    if (/^(?:(?:please|can you|could you)\s+)?(?:generate|create|render|draw|paint|design|illustrate|make)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|illustration|art|painting|drawing|visual|graphic)\b/i.test(t)) return true;
+    if (/^(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?/i.test(t)) return true;
+
     return false;
   }
 
@@ -6678,9 +6707,12 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (!promptText || typeof promptText !== 'string') return '';
     let p = promptText.trim();
     p = p.replace(/^\/(?:image|img|gambar)\s*/i, '');
-    p = p.replace(/^(?:tolong\s+)?(?:buatkan|buat|bikin|generate|render|lukiskan|gambarkan)\s+gambar\s+(?:tentang\s+|dari\s+|sebuah\s+)?/i, '');
-    p = p.replace(/^(?:generate|create|render|draw|paint)\s+(?:an?\s+)?(?:image|picture|photo|illustration|art)\s+(?:of\s+)?/i, '');
-    p = p.replace(/^(?:gambar|image):\s*/i, '');
+    p = p.replace(/^(?:gambar|image|draw|paint):\s*/i, '');
+    p = p.replace(/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:buatkan|buat|bikin|generate|render|lukiskan|lukis|gambarkan|gambarin|desainkan|desain|tampilkan)\s+(?:saya\s+|kita\s+|sebuah\s+|suatu\s+)?(?:gambar|foto|lukisan|ilustrasi|visual|art|karya|desain)\s+(?:tentang\s+|dari\s+|sebuah\s+|seekor\s+|suatu\s+)?/i, '');
+    p = p.replace(/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:lukiskan|lukis|gambarkan|gambarin)\s+(?:saya\s+|sebuah\s+|seekor\s+|suatu\s+)?/i, '');
+    p = p.replace(/^(?:gambar(?:kan)?|foto)\s+(?:seekor|sebuah|suasana|pemandangan|karakter|objek|suatu)\s+/i, '');
+    p = p.replace(/^(?:(?:please|can you|could you)\s+)?(?:generate|create|render|draw|paint|design|illustrate|make)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|illustration|art|painting|drawing|visual|graphic)\s+(?:of\s+)?/i, '');
+    p = p.replace(/^(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:of\s+)?/i, '');
     return p.trim() || promptText.trim();
   }
 
@@ -6691,6 +6723,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (els.imageGenToggleBtn) {
       els.imageGenToggleBtn.classList.toggle('active', Boolean(STATE.isImageGenMode));
       els.imageGenToggleBtn.setAttribute('aria-pressed', String(Boolean(STATE.isImageGenMode)));
+      els.imageGenToggleBtn.setAttribute('title', STATE.isImageGenMode ? 'Matikan Mode Gambar (Kembali ke Obrolan)' : 'Mode AI Image Studio (Buat Gambar)');
     }
     if (els.sendPromptBtn) {
       if (STATE.isImageGenMode) {
@@ -6703,9 +6736,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     }
     if (els.promptInput) {
       if (STATE.isImageGenMode) {
-        els.promptInput.placeholder = '🎨 Mode AI Image Studio Aktif — Ketik visual prompt (Ketik /chat untuk kembali)...';
+        els.promptInput.placeholder = '🎨 Mode Buat Gambar Aktif — Jelaskan visual yang ingin dibuat (Ketik /chat untuk kembali)...';
       } else {
-        els.promptInput.placeholder = 'Ketik pesan... (Ketik /img untuk Mode Gambar)';
+        els.promptInput.placeholder = 'Ketik pesan atau minta gambar (Ketik /img untuk Mode Gambar)...';
       }
     }
   }
@@ -9372,6 +9405,14 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     els.attachOptionImage?.addEventListener('click', () => {
       closeAttachmentDropdown();
       els.imageFileInput?.click();
+    });
+    els.attachOptionGenImage?.addEventListener('click', () => {
+      closeAttachmentDropdown();
+      STATE.isImageGenMode = true;
+      updateImageGenModeUI();
+      els.promptInput?.focus();
+      showToast('🎨 Mode AI Image Studio aktif. Ketik deskripsi visual yang ingin dibuat...');
+      AudioEngine.click();
     });
     els.attachOptionDoc?.addEventListener('click', () => {
       closeAttachmentDropdown();
