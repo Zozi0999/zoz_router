@@ -429,43 +429,26 @@
               <button class="btn btn-sm btn-outline" id="toggleShowOllamaKeyBtn"><i class="fa-solid fa-eye"></i></button>
               <button class="btn btn-sm btn-outline" id="testOllamaKeyBtn">Validasi Key</button>
             </div>
-            <small class="form-hint">Dapatkan API Key dan kelola kredit di <a href="https://ollama.com/settings" target="_blank" rel="noopener">ollama.com/settings</a>.</small>
+            <small class="form-hint">Dapatkan API Key di <a href="https://ollama.com/settings" target="_blank" rel="noopener">ollama.com/settings</a>.</small>
           </div>
 
-          <!-- Ollama Cloud Real-Time Balance & Credits Card -->
+          <!-- Ollama Engine Status Card -->
           <div class="provider-status-card" id="settingOllamaStatusCard">
             <div class="provider-status-header">
               <div class="provider-status-indicator-box">
                 <span class="pulse-dot active" id="settingOllamaStatusDot"></span>
-                <span class="status-title"><i class="fa-solid fa-coins" style="color:var(--neon-teal);"></i> Saldo Ollama Cloud:</span>
+                <span class="status-title"><i class="fa-solid fa-server" style="color:var(--neon-teal);"></i> Status Engine Ollama:</span>
                 <strong class="balance-value" id="settingOllamaStatusVal">Memeriksa...</strong>
               </div>
               <div class="status-actions">
-                <button type="button" class="btn btn-xs btn-outline" id="btnRefreshOllamaStatus" title="Perbarui Status &amp; Saldo Ollama Cloud">
-                  <i class="fa-solid fa-arrows-rotate"></i> Cek Saldo
+                <button type="button" class="btn btn-xs btn-outline" id="btnRefreshOllamaStatus" title="Perbarui Status Koneksi Ollama">
+                  <i class="fa-solid fa-arrows-rotate"></i> Cek Status
                 </button>
-                <a href="https://ollama.com/settings" target="_blank" rel="noopener noreferrer" class="btn btn-xs btn-primary-neon" id="btnAddOllamaModels" title="Beli atau Tambah Usage Credits Langsung di Ollama.com">
-                  <i class="fa-solid fa-credit-card"></i> + Beli / Tambah Saldo
-                </a>
               </div>
             </div>
             <div class="provider-status-meta" id="settingOllamaStatusMeta">
-              <span id="settingOllamaModelCountText"><i class="fa-solid fa-chart-pie"></i> Free Usage: Siap</span> • <span id="settingOllamaCreditsText"><i class="fa-solid fa-coins"></i> Usage Credits: Terhubung (Cloud)</span>
+              <span id="settingOllamaModelCountText"><i class="fa-solid fa-shapes"></i> Model Tersedia: Memuat...</span>
             </div>
-            <!-- Custom Balance Tracker (Karena Ollama Cloud mengelola saldo di dashboard ollama.com/settings) -->
-            <div class="ollama-custom-balance-row" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
-              <div style="font-size: 0.74rem; color: var(--text-muted); display: flex; align-items: center; gap: 5px;">
-                <i class="fa-solid fa-wallet" style="color: var(--neon-teal);"></i>
-                <span>Nominal Saldo Anda ($):</span>
-              </div>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <input type="number" id="settingOllamaCustomBalance" step="0.01" min="0" placeholder="0.00" style="width: 90px; padding: 4px 8px; background: rgba(0,0,0,0.4); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--neon-teal); font-family: var(--font-code); font-size: 0.8rem; text-align: right;">
-                <button type="button" class="btn btn-xs btn-outline" id="btnSaveOllamaCustomBalance" title="Simpan Saldo Ollama Cloud">Simpan</button>
-              </div>
-            </div>
-            <small class="form-hint" style="font-size: 0.7rem; color: var(--text-dim); margin-top: 4px; display: block;">
-              💡 <em>Ollama Cloud tidak menyediakan API publik untuk saldo otomatis. Masukkan nominal kredit yang Anda miliki di <a href="https://ollama.com/settings" target="_blank" rel="noopener">ollama.com/settings</a> agar terpantau live di Zoz Router.</em>
-            </small>
           </div>
 
           <div class="form-group">
@@ -890,9 +873,6 @@
             <span id="catalogBalanceSub">(Terpakai: $0.00)</span>
           </div>
           <div class="catalog-balance-actions">
-            <button type="button" class="btn btn-xs btn-outline" id="btnCatalogSetBalance" style="border-color: var(--neon-teal); color: var(--neon-teal); display: none;" title="Atur / Catat Nominal Saldo Ollama Cloud ($)">
-              <i class="fa-solid fa-pen-to-square"></i> Atur Saldo ($)
-            </button>
             <button type="button" class="btn btn-xs btn-outline" id="btnRefreshCatalogBalance" title="Perbarui Saldo Real-Time">
               <i class="fa-solid fa-arrows-rotate"></i>
             </button>
