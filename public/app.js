@@ -7426,8 +7426,20 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
   }
 
   function autoResizeTextarea(textarea) {
+    if (!textarea) return;
     textarea.style.height = 'auto';
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`;
+    const scrollH = textarea.scrollHeight;
+    const maxHeight = 180;
+    if (scrollH > maxHeight) {
+      textarea.style.height = `${maxHeight}px`;
+      textarea.style.overflowY = 'auto';
+    } else {
+      textarea.style.height = `${scrollH}px`;
+      textarea.style.overflowY = 'hidden';
+      if (!textarea.value) {
+        textarea.scrollTop = 0;
+      }
+    }
   }
 
   // ==================== INDEXEDDB AUDIO VAULT ====================
@@ -10174,6 +10186,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         if (appContainer) {
           appContainer.style.height = `${vh}px`;
         }
+        autoResizeTextarea(els.promptInput);
 
         // If keyboard opened (visual viewport significantly smaller than innerHeight)
         if (window.innerHeight - vh > 100) {
@@ -10196,6 +10209,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         }
       });
     }
+
+    // Adapt textarea sizing on window resize
+    window.addEventListener('resize', () => {
+      autoResizeTextarea(els.promptInput);
+    });
 
     // Auto-scroll on textarea focus for all inputs
     const inputs = [els.promptInput, els.modelSearchInput, els.customModelInput];
@@ -10269,6 +10287,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     });
     updateSearchModeUI();
     updateImageGenModeUI();
+    autoResizeTextarea(els.promptInput);
 
     // Restore desktop sidebar collapsed preference
     if (window.innerWidth > 768) {

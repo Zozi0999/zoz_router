@@ -1596,6 +1596,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .composer-btn {
@@ -1752,11 +1753,13 @@ html, body {
 
 .input-field-wrap {
   flex-grow: 1;
+  min-width: 0;
   display: flex;
 }
 
 .input-field-wrap textarea {
   width: 100%;
+  min-width: 0;
   background: transparent;
   border: none;
   outline: none;
@@ -1765,8 +1768,32 @@ html, body {
   font-size: 0.92rem;
   line-height: 1.5;
   resize: none;
+  min-height: 24px;
   max-height: 180px;
   padding: 5px 0;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  box-sizing: border-box;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 240, 255, 0.35) transparent;
+}
+
+.input-field-wrap textarea::-webkit-scrollbar {
+  width: 5px;
+}
+
+.input-field-wrap textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.input-field-wrap textarea::-webkit-scrollbar-thumb {
+  background: rgba(0, 240, 255, 0.35);
+  border-radius: 4px;
+}
+
+.input-field-wrap textarea::-webkit-scrollbar-thumb:hover {
+  background: var(--neon-cyan);
 }
 
 .send-btn {
@@ -2484,6 +2511,7 @@ html, body {
   .composer-tools-left,
   .composer-tools-right {
     gap: 3px;
+    flex-shrink: 0;
   }
 
   .composer-btn {
