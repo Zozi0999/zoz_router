@@ -865,14 +865,14 @@
 
   <!-- 5. LIVE RESEARCH INSPECTION MODAL (Pertinjau Nyata Deep Research) -->
   <div class="modal-backdrop" id="liveResearchInspectionModal">
-    <div class="modal-card modal-lg" style="max-width: 1050px; max-height: 90vh; display: flex; flex-direction: column;">
+    <div class="modal-card modal-lg inspector-modal-card">
       <div class="modal-header">
         <div class="modal-title" style="display: flex; align-items: center; gap: 8px;">
           <i class="fa-solid fa-satellite-dish" style="color: var(--neon-cyan);"></i>
           <span>Live Deep Research Inspector</span>
           <span class="badge" style="font-size: 0.68rem; background: rgba(0, 240, 255, 0.15); color: var(--neon-cyan); border: 1px solid rgba(0, 240, 255, 0.3); padding: 2px 8px; border-radius: 999px;">Transparansi Multi-Agen Nyata</span>
         </div>
-        <button class="modal-close-btn" data-close="liveResearchInspectionModal"><i class="fa-solid fa-xmark"></i></button>
+        <button class="modal-close-btn inspector-close-x-btn" data-close="liveResearchInspectionModal" title="Tutup Pertinjau"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
       <!-- Live Inspector Header / Summary Bar -->
@@ -888,7 +888,7 @@
       </div>
 
       <!-- Inspector Tabs -->
-      <div class="settings-tabs inspector-tabs" style="padding: 0 16px; margin-bottom: 0; display: flex; overflow-x: auto; gap: 8px; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none;">
+      <div class="settings-tabs inspector-tabs">
         <button class="settings-tab-btn active" id="btnTabInspectAgent1" data-inspect-tab="agent1" style="white-space: nowrap; flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px;">
           <i class="fa-solid fa-robot" style="color: #00F0FF;"></i> Agen 1: Serper (<span id="inspectCountAgent1">0</span>)
         </button>
@@ -907,15 +907,15 @@
       </div>
 
       <!-- Inspector Body -->
-      <div class="modal-body" id="inspectTabContent" style="padding: 16px 20px; overflow-y: auto; flex: 1;">
+      <div class="modal-body inspector-modal-body" id="inspectTabContent">
         <!-- Dynamically rendered based on active inspection tab -->
       </div>
 
-      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+      <div class="modal-footer inspector-modal-footer">
         <span style="font-size: 0.74rem; color: var(--text-dim);">
           <i class="fa-solid fa-circle-check" style="color: var(--neon-teal);"></i> Data streaming langsung dari proses pencarian & inferensi AI nyata.
         </span>
-        <button class="btn btn-secondary" data-close="liveResearchInspectionModal">Tutup</button>
+        <button class="btn btn-secondary btn-close-inspector" data-close="liveResearchInspectionModal"><i class="fa-solid fa-xmark"></i> Tutup Pertinjau</button>
       </div>
     </div>
   </div>
