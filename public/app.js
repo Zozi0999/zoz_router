@@ -284,14 +284,11 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     activePresetBanner: $('#activePresetBanner'),
     activePresetName: $('#activePresetName'),
     clearPresetBtn: $('#clearPresetBtn'),
-    footerModelInfo: $('#footerModelInfo'),
-    footerLatencyInfo: $('#footerLatencyInfo'),
     
     // Buttons & Modals
     settingsBtn: $('#settingsBtn'),
     settingsModal: $('#settingsModal'),
     modelHubBtn: $('#modelHubBtn'),
-    modelHubModal: $('#modelHubModal'),
     systemPromptModalBtn: $('#systemPromptModalBtn'),
     exportChatBtn: $('#exportChatBtn'),
     exportConfirmModal: $('#exportConfirmModal'),
@@ -313,7 +310,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     settingOllamaStatusVal: $('#settingOllamaStatusVal'),
     settingOllamaModelCountText: $('#settingOllamaModelCountText'),
     btnRefreshOllamaStatus: $('#btnRefreshOllamaStatus'),
-    btnAddOllamaModels: $('#btnAddOllamaModels'),
     settingOpenRouterKey: $('#settingOpenRouterKey'),
     toggleShowKeyBtn: $('#toggleShowKeyBtn'),
     testOpenRouterBtn: $('#testOpenRouterBtn'),
@@ -327,20 +323,13 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     settingSerperApiKey: $('#settingSerperApiKey'),
     toggleShowSerperKeyBtn: $('#toggleShowSerperKeyBtn'),
     testSerperBtn: $('#testSerperBtn'),
-    settingImageModel: $('#settingImageModel'),
     settingAutoPolicy: $('#settingAutoPolicy'),
     paramTemperature: $('#paramTemperature'),
     valTemperature: $('#valTemperature'),
     paramTopP: $('#paramTopP'),
     valTopP: $('#valTopP'),
-    paramMaxTokens: $('#paramMaxTokens'),
     settingSystemPrompt: $('#settingSystemPrompt'),
     saveSettingsBtn: $('#saveSettingsBtn'),
-    
-    // Model Hub
-    hubSearchInput: $('#hubSearchInput'),
-    filterPills: $$('.filter-pill'),
-    modelCardsGrid: $('#modelCardsGrid'),
 
     // Cyber BGM & Audio Deck
     musicPlayerModalBtn: $('#musicPlayerModalBtn'),
@@ -3266,7 +3255,6 @@ ${organicBlock}
         }
         updateModelUI();
         populateModelDropdown();
-        renderModelHubGrid();
         if (STATE.activeCatalogTab === 'ollama') {
           renderLiveModelCatalog();
         }
@@ -3278,7 +3266,6 @@ ${organicBlock}
         els.ollamaStatusVal.innerText = 'Offline (Cek Ollama)';
         els.ollamaIndicator.className = 'status-indicator error';
         populateModelDropdown();
-        renderModelHubGrid();
         if (STATE.activeCatalogTab === 'ollama') {
           renderLiveModelCatalog();
         }
@@ -3586,7 +3573,6 @@ ${organicBlock}
             els.badgeOpenRouterCount.innerText = mapped.length;
           }
           populateModelDropdown();
-          renderModelHubGrid();
           if (STATE.activeCatalogTab === 'openrouter') {
             renderLiveModelCatalog();
           }
@@ -3739,7 +3725,6 @@ ${organicBlock}
   function updateModelUI() {
     const current = getCurrentModel();
     if (els.currentModelLabel) els.currentModelLabel.innerText = current;
-    if (els.footerModelInfo) els.footerModelInfo.innerText = `Engine: ${STATE.mode.toUpperCase()} (${current})`;
   }
 
   function updateModeLayout(mode) {
@@ -7304,82 +7289,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     }
   }
 
-  // ==================== MODEL HUB MODAL ====================
-  function renderModelHubGrid(filter = 'all', query = '') {
-    if (!els.modelCardsGrid) return;
-    els.modelCardsGrid.innerHTML = '';
-    const q = query.toLowerCase().trim();
-
-    // Combine Ollama + OpenRouter
-    const combined = [
-      ...STATE.ollamaModels.map(m => {
-        const id = m.name || m.model || m.id;
-        const sizeStr = m.size ? ` (${(m.size / (1024*1024*1024)).toFixed(1)} GB)` : '';
-        return {
-          id: id,
-          name: id,
-          desc: m.desc || `Model AI tersimpan di mesin Ollama${sizeStr}.`,
-          tag: m.tag || 'Ollama Model',
-          cat: m.cat || 'local',
-          provider: 'ollama'
-        };
-      }),
-      ...STATE.openRouterModels.map(m => {
-        return {
-          ...m,
-          tag: m.tag || 'Cloud',
-          cat: m.cat || 'flagship',
-          desc: m.desc || (m.tag === 'Free' ? 'Model gratis bertenaga cloud di OpenRouter.' : 'Model komputasi cloud flagship.'),
-          provider: 'openrouter'
-        };
-      })
-    ];
-
-    const filtered = combined.filter(m => {
-      const matchQ = !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q);
-      const matchFilter = filter === 'all' || 
-        (filter === 'vision' && ((m.tag && m.tag.toLowerCase().includes('vision')) || (m.cat === 'vision') || m.id.toLowerCase().includes('vision'))) ||
-        (filter === 'free' && (m.tag.includes('Free') || m.id.includes(':free'))) ||
-        (filter === 'local' && m.provider === 'ollama') ||
-        (filter === 'flagship' && (m.cat === 'flagship' || m.provider === 'openrouter')) ||
-        (filter === 'coding' && (m.cat === 'coding' || m.id.includes('code') || m.id.includes('qwen') || m.id.includes('claude'))) ||
-        (filter === 'reasoning' && (m.cat === 'reasoning' || m.id.includes('r1') || m.id.includes('o1')));
-      return matchQ && matchFilter;
-    });
-
-    if (filtered.length === 0) {
-      els.modelCardsGrid.innerHTML = `<div style="grid-column:1/-1; text-align:center; color:var(--text-dim); padding:20px;">Tidak ada model yang cocok dengan filter.</div>`;
-      return;
-    }
-
-    filtered.forEach(m => {
-      const card = document.createElement('div');
-      card.className = 'model-card-item';
-      card.innerHTML = `
-        <div>
-          <div class="model-card-badge">${escapeHtml(m.tag || 'AI')}</div>
-          <div class="model-card-title">${escapeHtml(m.name || m.id)}</div>
-          <div class="model-card-desc">${escapeHtml(m.desc || m.id)}</div>
-        </div>
-        <button class="btn btn-sm btn-outline choose-model-btn">Pilih Model</button>
-      `;
-
-      card.querySelector('.choose-model-btn').addEventListener('click', () => {
-        if (m.provider === 'ollama') {
-          setEngineMode('ollama');
-          selectModel(m.id);
-        } else {
-          setEngineMode('openrouter');
-          selectModel(m.id);
-        }
-        closeModal('modelHubModal');
-        AudioEngine.click();
-      });
-
-      els.modelCardsGrid.appendChild(card);
-    });
-  }
-
   // ==================== EXPORT CHAT WITH CONFIRMATION & IMAGE RENDERING ====================
   let pendingExportSession = null;
 
@@ -10047,23 +9956,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         e.stopPropagation();
         AudioEngine.click();
         openLiveModelCatalog(null, 'Model Obrolan Utama');
-      });
-    }
-
-    if (els.hubSearchInput) {
-      els.hubSearchInput.addEventListener('input', (e) => {
-        const activeFilter = $('.filter-pill.active')?.dataset.filter || 'all';
-        renderModelHubGrid(activeFilter, e.target.value);
-      });
-    }
-
-    if (els.filterPills && els.filterPills.length > 0) {
-      els.filterPills.forEach(pill => {
-        pill.addEventListener('click', () => {
-          els.filterPills.forEach(p => p.classList.remove('active'));
-          pill.classList.add('active');
-          renderModelHubGrid(pill.dataset.filter, els.hubSearchInput?.value || '');
-        });
       });
     }
 
