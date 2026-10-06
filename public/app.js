@@ -5577,6 +5577,7 @@ ${organicBlock}
         headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
       }
+      const messagesPayload = buildSanitizedMessagesPayload(session, [], 'ollama', systemPrompt, modelName);
       const requestBody = {
         model: modelName,
         messages: messagesPayload,
@@ -7021,6 +7022,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
             <button class="btn btn-sm btn-primary retry-research-btn" style="font-size:0.75rem;">
               <i class="fa-solid fa-rotate-right"></i> Coba Riset Ulang
             </button>
+            <button class="btn btn-sm btn-outline inspect-research-err-btn" style="border-color:rgba(0, 240, 255, 0.4); color:var(--neon-cyan); font-size:0.75rem;">
+              <i class="fa-solid fa-eye"></i> Pertinjau Log Riset
+            </button>
             <button class="btn btn-sm btn-outline open-settings-btn" style="border-color:var(--neon-amber); color:var(--neon-amber); font-size:0.75rem;">
               <i class="fa-solid fa-gear"></i> Buka Pengaturan
             </button>
@@ -7030,6 +7034,10 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         bubbleText.querySelector('.retry-research-btn')?.addEventListener('click', () => {
           assistantRow.remove();
           runDeepResearchStreaming(session, promptText, image, modelName, engine);
+        });
+
+        bubbleText.querySelector('.inspect-research-err-btn')?.addEventListener('click', () => {
+          openLiveResearchInspection();
         });
 
         bubbleText.querySelector('.open-settings-btn')?.addEventListener('click', () => {
