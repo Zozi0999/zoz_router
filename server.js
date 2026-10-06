@@ -9,6 +9,7 @@ const https = require('https');
 const url = require('url');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 
 const PORT = process.env.PORT || 4040;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -998,13 +999,13 @@ function performAutonomousSearch(query, maxResults = 8) {
       }, (res) => {
         let html = '';
         res.on('data', chunk => html += chunk);
-        res.on('end', () => {
+        res.on('end', async () => {
           const results = [];
           const titleRegex = /<h2\s+class="result__title">[\s\S]*?<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
           let match;
           while ((match = titleRegex.exec(html)) !== null && results.length < maxResults) {
             let rawUrl = match[1];
-            const title = match[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+            const title = cleanHtmlText(match[2]);
             if (rawUrl.includes('uddg=')) {
               try {
                 const u = new URL('https://duckduckgo.com' + rawUrl);
@@ -1013,7 +1014,7 @@ function performAutonomousSearch(query, maxResults = 8) {
             }
             const afterTitle = html.substring(match.index, match.index + 2000);
             const snipMatch = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i.exec(afterTitle);
-            const snippet = snipMatch ? snipMatch[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '';
+            const snippet = snipMatch ? cleanHtmlText(snipMatch[1]) : '';
 
             if (rawUrl.startsWith('http') && !rawUrl.includes('duckduckgo.com/y.js')) {
               let domain = '';
@@ -1027,17 +1028,26 @@ function performAutonomousSearch(query, maxResults = 8) {
             }
           }
 
-          // Fallback ke Wikipedia Search jika DuckDuckGo 0 hasil
+          // Fallback Tier 1: DuckDuckGo Lite jika endpoint HTML 0 hasil
           if (results.length === 0) {
-            fallbackWikipediaSearch(cleanQuery, maxResults).then(wikiResults => {
-              resolve({
+            const liteResults = await fallbackDuckDuckGoLiteSearch(cleanQuery, maxResults);
+            if (liteResults.length > 0) {
+              return resolve({
                 query: cleanQuery,
-                engine: 'autonomous_wiki_fallback',
-                count: wikiResults.length,
-                results: wikiResults
+                engine: 'autonomous_ddg_lite',
+                count: liteResults.length,
+                results: liteResults
               });
+            }
+
+            // Fallback Tier 2: Wikipedia Search
+            const wikiResults = await fallbackWikipediaSearch(cleanQuery, maxResults);
+            return resolve({
+              query: cleanQuery,
+              engine: 'autonomous_wiki_fallback',
+              count: wikiResults.length,
+              results: wikiResults
             });
-            return;
           }
 
           resolve({
@@ -1048,66 +1058,161 @@ function performAutonomousSearch(query, maxResults = 8) {
           });
         });
 
-        res.on('error', () => {
-          fallbackWikipediaSearch(cleanQuery, maxResults).then(wikiResults => {
-            resolve({ query: cleanQuery, engine: 'autonomous_wiki_fallback', count: wikiResults.length, results: wikiResults });
-          });
+        res.on('error', async () => {
+          const fallbackResults = await runZeroApiFallbacks(cleanQuery, maxResults);
+          resolve(fallbackResults);
         });
       });
 
-      req.on('timeout', () => {
+      req.on('timeout', async () => {
         req.destroy();
-        fallbackWikipediaSearch(cleanQuery, maxResults).then(wikiResults => {
-          resolve({ query: cleanQuery, engine: 'autonomous_wiki_fallback', count: wikiResults.length, results: wikiResults });
-        });
+        const fallbackResults = await runZeroApiFallbacks(cleanQuery, maxResults);
+        resolve(fallbackResults);
       });
-      req.on('error', () => {
-        fallbackWikipediaSearch(cleanQuery, maxResults).then(wikiResults => {
-          resolve({ query: cleanQuery, engine: 'autonomous_wiki_fallback', count: wikiResults.length, results: wikiResults });
-        });
+      req.on('error', async () => {
+        const fallbackResults = await runZeroApiFallbacks(cleanQuery, maxResults);
+        resolve(fallbackResults);
       });
       req.write(postData);
       req.end();
     } catch (e) {
-      fallbackWikipediaSearch(cleanQuery, maxResults).then(wikiResults => {
-        resolve({ query: cleanQuery, engine: 'autonomous_wiki_fallback', count: wikiResults.length, results: wikiResults });
+      runZeroApiFallbacks(cleanQuery, maxResults).then(resolve);
+    }
+  });
+}
+
+function cleanHtmlText(str) {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&mdash;/g, '—')
+    .replace(/&ndash;/g, '–')
+    .replace(/&#8216;/g, "‘")
+    .replace(/&#8217;/g, "’")
+    .replace(/&#8220;/g, "“")
+    .replace(/&#8221;/g, "”")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function runZeroApiFallbacks(query, maxResults = 6) {
+  const lite = await fallbackDuckDuckGoLiteSearch(query, maxResults);
+  if (lite.length > 0) {
+    return { query, engine: 'autonomous_ddg_lite', count: lite.length, results: lite };
+  }
+  const wiki = await fallbackWikipediaSearch(query, maxResults);
+  return { query, engine: 'autonomous_wiki_fallback', count: wiki.length, results: wiki };
+}
+
+// Fallback Tier 1: DuckDuckGo Lite static HTML parser
+function fallbackDuckDuckGoLiteSearch(query, maxResults = 6) {
+  return new Promise((resolve) => {
+    try {
+      const postData = 'q=' + encodeURIComponent(query);
+      const req = https.request({
+        hostname: 'lite.duckduckgo.com',
+        port: 443,
+        path: '/lite/',
+        method: 'POST',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(postData)
+        },
+        timeout: 7000
+      }, (res) => {
+        let html = '';
+        res.on('data', chunk => html += chunk);
+        res.on('end', () => {
+          const results = [];
+          const linkRegex = /<a[^>]+class=["']result-link["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+          let m;
+          while ((m = linkRegex.exec(html)) !== null && results.length < maxResults) {
+            let rawUrl = m[1];
+            const title = cleanHtmlText(m[2]);
+            if (rawUrl.includes('uddg=')) {
+              try {
+                const u = new URL('https://duckduckgo.com' + rawUrl);
+                rawUrl = decodeURIComponent(u.searchParams.get('uddg') || rawUrl);
+              } catch (_) {}
+            }
+            const afterLink = html.substring(m.index, m.index + 2500);
+            const snipMatch = /<td[^>]+class=["']result-snippet["'][^>]*>([\s\S]*?)<\/td>/i.exec(afterLink);
+            const snippet = snipMatch ? cleanHtmlText(snipMatch[1]) : '';
+            if (rawUrl.startsWith('http') && !rawUrl.includes('duckduckgo.com/')) {
+              let domain = '';
+              try { domain = new URL(rawUrl).hostname; } catch (_) {}
+              results.push({ title, url: rawUrl, domain: domain || 'web', snippet });
+            }
+          }
+          resolve(results);
+        });
+        res.on('error', () => resolve([]));
       });
+      req.on('error', () => resolve([]));
+      req.on('timeout', () => { req.destroy(); resolve([]); });
+      req.write(postData);
+      req.end();
+    } catch (_) {
+      resolve([]);
     }
   });
 }
 
 // Fallback multi-bahasa Wikipedia search (zero-API)
 function fallbackWikipediaSearch(query, maxResults = 5) {
-  return new Promise((resolve) => {
-    try {
-      const wikiUrl = `https://id.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=${maxResults}&format=json`;
-      https.get(wikiUrl, { timeout: 6000, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } }, (res) => {
-        let raw = '';
-        res.on('data', chunk => raw += chunk);
-        res.on('end', () => {
-          try {
-            const data = JSON.parse(raw);
-            const titles = data[1] || [];
-            const snippets = data[2] || [];
-            const urls = data[3] || [];
-            const results = [];
-            for (let i = 0; i < titles.length; i++) {
-              if (urls[i]) {
-                results.push({
-                  title: titles[i],
-                  url: urls[i],
-                  domain: 'wikipedia.org',
-                  snippet: snippets[i] || `Artikel ensiklopedia tentang ${titles[i]}`
-                });
+  function queryWikiApi(lang, q) {
+    return new Promise((resApi) => {
+      try {
+        const wikiUrl = `https://${lang}.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(q)}&limit=${maxResults}&format=json`;
+        https.get(wikiUrl, { timeout: 6000, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } }, (res) => {
+          let raw = '';
+          res.on('data', chunk => raw += chunk);
+          res.on('end', () => {
+            try {
+              const data = JSON.parse(raw);
+              const titles = data[1] || [];
+              const snippets = data[2] || [];
+              const urls = data[3] || [];
+              const results = [];
+              for (let i = 0; i < titles.length; i++) {
+                if (urls[i]) {
+                  results.push({
+                    title: cleanHtmlText(titles[i]),
+                    url: urls[i],
+                    domain: `${lang}.wikipedia.org`,
+                    snippet: cleanHtmlText(snippets[i] || `Artikel ensiklopedia tentang ${titles[i]}`)
+                  });
+                }
               }
+              resApi(results);
+            } catch (_) {
+              resApi([]);
             }
-            resolve(results);
-          } catch (_) {
-            resolve([]);
-          }
-        });
-        res.on('error', () => resolve([]));
-      }).on('error', () => resolve([]));
+          });
+          res.on('error', () => resApi([]));
+        }).on('error', () => resApi([]));
+      } catch (_) {
+        resApi([]);
+      }
+    });
+  }
+
+  return new Promise(async (resolve) => {
+    try {
+      let results = await queryWikiApi('id', query);
+      if (results.length === 0) {
+        results = await queryWikiApi('en', query);
+      }
+      resolve(results);
     } catch (_) {
       resolve([]);
     }
@@ -1119,12 +1224,16 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
   return new Promise((resolve) => {
     try {
       if (redirectCount > 3) return resolve({ url: targetUrl, error: 'Too many redirects', text: '' });
-      if (!targetUrl || typeof targetUrl !== 'string' || !/^https?:\/\//i.test(targetUrl)) {
+      if (!targetUrl || typeof targetUrl !== 'string') {
         return resolve({ url: targetUrl, error: 'Invalid URL format', text: '' });
       }
-      const parsedUrl = new URL(targetUrl);
+      let cleanTarget = targetUrl.trim();
+      if (!/^https?:\/\//i.test(cleanTarget)) {
+        cleanTarget = 'https://' + cleanTarget;
+      }
+      const parsedUrl = new URL(cleanTarget);
       if (isPrivateHost(parsedUrl.hostname, parsedUrl.port)) {
-        return resolve({ url: targetUrl, error: 'Access to private host restricted', text: '' });
+        return resolve({ url: cleanTarget, error: 'Access to private host restricted', text: '' });
       }
       const client = parsedUrl.protocol === 'https:' ? https : http;
       const options = {
@@ -1135,83 +1244,117 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'id,en-US,en;q=0.9'
+          'Accept-Language': 'id,en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br'
         },
-        timeout: 8000
+        timeout: 10000
       };
+
+      let resolved = false;
+      let rawHtml = '';
+
+      function finishParsing(html) {
+        if (resolved) return;
+        resolved = true;
+        try {
+          const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+          const title = titleMatch ? cleanHtmlText(titleMatch[1]) : '';
+
+          // Ekstrak tautan referensi penting dalam halaman
+          const links = [];
+          const linkRegex = /<a\s+[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+          let lm;
+          while ((lm = linkRegex.exec(html)) !== null && links.length < 8) {
+            let href = lm[1].trim();
+            const text = cleanHtmlText(lm[2]);
+            if (href.startsWith('/') && !href.startsWith('//')) {
+              href = parsedUrl.origin + href;
+            }
+            if (href.startsWith('http') && text && text.length > 3 && text.length < 90 && !href.includes(parsedUrl.hostname + '/#')) {
+              links.push({ title: text, url: href });
+            }
+          }
+
+          let clean = html
+            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
+            .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
+            .replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, ' ')
+            .replace(/<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>/gi, ' ')
+            .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, ' ')
+            .replace(/<aside\b[^<]*(?:(?!<\/aside>)<[^<]*)*<\/aside>/gi, ' ')
+            .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, ' ')
+            .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, ' ')
+            .replace(/<!--[\s\S]*?-->/g, ' ');
+
+          clean = cleanHtmlText(clean);
+
+          resolve({
+            url: cleanTarget,
+            title: title || parsedUrl.hostname,
+            text: clean.substring(0, maxChars),
+            totalLength: clean.length,
+            links
+          });
+        } catch (e) {
+          resolve({ url: cleanTarget, error: e.message, text: '' });
+        }
+      }
 
       const req = client.request(options, (res) => {
         if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
           try {
-            const redirectUrl = new URL(res.headers.location, targetUrl).toString();
+            const redirectUrl = new URL(res.headers.location, cleanTarget).toString();
+            resolved = true;
             return browseWebPageContent(redirectUrl, maxChars, redirectCount + 1).then(resolve);
           } catch (_) {
-            return resolve({ url: targetUrl, error: 'Invalid redirect target', text: '' });
+            resolved = true;
+            return resolve({ url: cleanTarget, error: 'Invalid redirect target', text: '' });
           }
         }
 
-        let rawHtml = '';
-        res.on('data', chunk => {
+        // Decompress stream if server sent gzip, deflate, or brotli
+        const enc = (res.headers['content-encoding'] || '').toLowerCase();
+        let stream = res;
+        try {
+          if (enc === 'gzip') {
+            stream = res.pipe(zlib.createGunzip());
+          } else if (enc === 'deflate') {
+            stream = res.pipe(zlib.createInflate());
+          } else if (enc === 'br') {
+            stream = res.pipe(zlib.createBrotliDecompress());
+          }
+        } catch (_) {
+          stream = res;
+        }
+
+        stream.on('data', chunk => {
           rawHtml += chunk;
-          if (rawHtml.length > 500000) req.destroy();
-        });
-
-        res.on('end', () => {
-          try {
-            const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(rawHtml);
-            const title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '';
-
-            // Ekstrak tautan referensi penting dalam halaman
-            const links = [];
-            const linkRegex = /<a\s+[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-            let lm;
-            while ((lm = linkRegex.exec(rawHtml)) !== null && links.length < 8) {
-              let href = lm[1].trim();
-              const text = lm[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-              if (href.startsWith('/') && !href.startsWith('//')) {
-                href = parsedUrl.origin + href;
-              }
-              if (href.startsWith('http') && text && text.length > 3 && text.length < 90 && !href.includes(parsedUrl.hostname + '/#')) {
-                links.push({ title: text, url: href });
-              }
-            }
-
-            let clean = rawHtml
-              .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
-              .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
-              .replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, ' ')
-              .replace(/<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>/gi, ' ')
-              .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, ' ')
-              .replace(/<aside\b[^<]*(?:(?!<\/aside>)<[^<]*)*<\/aside>/gi, ' ')
-              .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, ' ')
-              .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, ' ')
-              .replace(/<!--[\s\S]*?-->/g, ' ')
-              .replace(/<[^>]+>/g, ' ')
-              .replace(/&amp;/g, '&')
-              .replace(/&lt;/g, '<')
-              .replace(/&gt;/g, '>')
-              .replace(/&quot;/g, '"')
-              .replace(/&#39;/g, "'")
-              .replace(/&nbsp;/g, ' ')
-              .replace(/\s+/g, ' ')
-              .trim();
-
-            resolve({
-              url: targetUrl,
-              title: title || parsedUrl.hostname,
-              text: clean.substring(0, maxChars),
-              totalLength: clean.length,
-              links
-            });
-          } catch (e) {
-            resolve({ url: targetUrl, error: e.message, text: '' });
+          if (rawHtml.length >= 600000 && !resolved) {
+            req.destroy();
+            finishParsing(rawHtml);
           }
         });
-        res.on('error', (err) => resolve({ url: targetUrl, error: err.message, text: '' }));
+
+        stream.on('end', () => finishParsing(rawHtml));
+        stream.on('error', (err) => {
+          if (rawHtml.length > 0) finishParsing(rawHtml);
+          else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: err.message, text: '' }); }
+        });
+        res.on('error', (err) => {
+          if (rawHtml.length > 0) finishParsing(rawHtml);
+          else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: err.message, text: '' }); }
+        });
       });
 
-      req.on('timeout', () => { req.destroy(); resolve({ url: targetUrl, error: 'Connection timeout', text: '' }); });
-      req.on('error', (err) => resolve({ url: targetUrl, error: err.message, text: '' }));
+      req.on('timeout', () => {
+        req.destroy();
+        if (rawHtml.length > 0) finishParsing(rawHtml);
+        else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: 'Connection timeout', text: '' }); }
+      });
+      req.on('error', (err) => {
+        if (rawHtml.length > 0) finishParsing(rawHtml);
+        else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: err.message, text: '' }); }
+      });
       req.end();
     } catch (err) {
       resolve({ url: targetUrl, error: err.message, text: '' });

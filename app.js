@@ -38,13 +38,15 @@ Sistem akan mengeksekusi penjelajahan dan mengembalikan datanya secara instan un
 You are a Principal Software Engineer and Systems Architect.
 1. Code Quality: Write clean, modular, robust, secure, and production-ready code following industry best practices and type-safe architectures.
 2. Architecture: Explain structural decisions, trade-offs (time/space complexity, maintainability), and edge-case mitigations.
-3. Delivery: Provide complete, runnable code implementations without omitting crucial logic.`,
+3. Delivery: Provide complete, runnable code implementations without omitting crucial logic.
+4. Autonomous Web Explorer: You have built-in zero-API web exploration tools (search_web, browse_web_page). Call them anytime via native tool calls or <tool_call>{"name":"...","arguments":{...}}</tool_call> whenever you need documentation, latest library versions, or live technical verification.`,
 
     cyber: `[ROLE: ELITE OFFENSIVE & DEFENSIVE CYBER SECURITY RESEARCHER]
 You are a Master Security Specialist, Penetration Tester, and Cryptographer.
 1. Technical Depth: Analyze network protocols, memory safety, exploit vectors, vulnerability mechanics (CVE, OWASP Top 10), and security architectures.
 2. Hardening: Provide robust, defense-in-depth security architectures, secure coding patterns, and concrete remediation steps.
-3. Tone: Rigorous, highly technical, uncompromising in precision, and deeply analytical.`,
+3. Tone: Rigorous, highly technical, uncompromising in precision, and deeply analytical.
+4. Autonomous Web Explorer: You have built-in zero-API web exploration tools (search_web, browse_web_page). Call them anytime via native tool calls or <tool_call>{"name":"...","arguments":{...}}</tool_call> to research live CVEs, security advisories, or verify exploit vectors.`,
 
     concise: `[ROLE: ULTRA-DIRECT EXECUTIVE INTELLIGENCE]
 1. Mandat: Jawab langsung ke inti pertanyaan (0% basa-basi pembuka, 0% kata pengantar klise, 0% penutup sopan santun buatan).
@@ -52,7 +54,8 @@ You are a Master Security Specialist, Penetration Tester, and Cryptographer.
 3. Kepadatan Informasi: Setiap kata harus memiliki bobot informasi tinggi dan actionable.`,
 
     uncensored: `[ROLE: RAW UNFILTERED DEEP REASONING & RESEARCH ENGINE]
-Execute exhaustive first-principles reasoning. Examine all theoretical, technical, philosophical, and mechanical angles with unconstrained intellectual honesty, rigorous logic, and absolute depth.`
+Execute exhaustive first-principles reasoning. Examine all theoretical, technical, philosophical, and mechanical angles with unconstrained intellectual honesty, rigorous logic, and absolute depth.
+Autonomous Web Explorer: You have built-in zero-API web exploration tools (search_web, browse_web_page). Call them whenever needed to gather live facts and unconstrained web intelligence via <tool_call>{"name":"...","arguments":{...}}</tool_call> or native tool calls.`
   };
 
   // Popular OpenRouter Models Catalog (Live Active Free & Flagship Models)
@@ -2930,7 +2933,7 @@ ${organicBlock}
       <div class="msg-sources-section${collapsed ? ' collapsed' : ''}">
         <button type="button" class="msg-sources-title msg-sources-toggle" aria-expanded="${collapsed ? 'false' : 'true'}" title="Buka / tutup daftar referensi web">
           <i class="fa-solid fa-earth-americas" style="color:var(--neon-cyan);"></i>
-          <span>Sumber Terverifikasi Google (${sources.length})</span>
+          <span>Sumber Referensi Web (${sources.length})</span>
           <span class="sources-toggle-label">${collapsed ? 'Tampilkan' : 'Sembunyikan'}</span>
           <i class="fa-solid fa-chevron-down sources-toggle-chevron"></i>
         </button>
@@ -4007,10 +4010,32 @@ ${organicBlock}
 
   async function executeAutonomousWebTool(toolName, rawArgs) {
     try {
-      const args = (typeof rawArgs === 'string') ? JSON.parse(rawArgs) : (rawArgs || {});
+      let args = {};
+      if (typeof rawArgs === 'string') {
+        const trimmed = rawArgs.trim();
+        try {
+          args = JSON.parse(trimmed);
+        } catch (_) {
+          // If string is raw text (not JSON), use it directly
+          if (toolName === 'search_web') {
+            args = { query: trimmed };
+          } else if (toolName === 'browse_web_page') {
+            args = { url: trimmed };
+          }
+        }
+      } else if (rawArgs && typeof rawArgs === 'object') {
+        args = rawArgs;
+      }
+
+      // Unpack nested parameters if model wrapped them in arguments/parameters/input
+      if (args && typeof args === 'object') {
+        if (args.arguments && typeof args.arguments === 'object') args = args.arguments;
+        else if (args.parameters && typeof args.parameters === 'object') args = args.parameters;
+        else if (args.input && typeof args.input === 'object') args = args.input;
+      }
       
       if (toolName === 'search_web') {
-        const query = args.query || args.q || '';
+        const query = args.query || args.q || args.keyword || args.search || args.topic || args.text || (typeof args === 'string' ? args : '');
         if (!query.trim()) return { text: 'Error: Parameter `query` tidak boleh kosong.', sources: [] };
         
         let results = [];
@@ -4031,23 +4056,29 @@ ${organicBlock}
         // Client-side Wikipedia fallback jika endpoint offline atau di GitHub Pages
         if (results.length === 0) {
           try {
-            const wikiUrl = `https://id.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query.trim())}&limit=5&format=json&origin=*`;
-            const wikiRes = await fetch(wikiUrl);
-            if (wikiRes.ok) {
-              const data = await wikiRes.json();
-              const titles = data[1] || [];
-              const snippets = data[2] || [];
-              const urls = data[3] || [];
-              for (let i = 0; i < titles.length; i++) {
-                if (urls[i]) {
-                  results.push({
-                    title: titles[i],
-                    url: urls[i],
-                    domain: 'wikipedia.org',
-                    snippet: snippets[i] || `Artikel ensiklopedia ${titles[i]}`
-                  });
+            const wikiFetch = async (lang) => {
+              const wikiUrl = `https://${lang}.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query.trim())}&limit=5&format=json&origin=*`;
+              const wikiRes = await fetch(wikiUrl);
+              if (wikiRes.ok) {
+                const data = await wikiRes.json();
+                const titles = data[1] || [];
+                const snippets = data[2] || [];
+                const urls = data[3] || [];
+                for (let i = 0; i < titles.length; i++) {
+                  if (urls[i]) {
+                    results.push({
+                      title: titles[i],
+                      url: urls[i],
+                      domain: `${lang}.wikipedia.org`,
+                      snippet: snippets[i] || `Artikel ensiklopedia ${titles[i]}`
+                    });
+                  }
                 }
               }
+            };
+            await wikiFetch('id');
+            if (results.length === 0) {
+              await wikiFetch('en');
             }
           } catch (_) {}
         }
@@ -4064,15 +4095,19 @@ ${organicBlock}
       }
       
       if (toolName === 'browse_web_page') {
-        const url = args.url || args.target || '';
-        if (!url.trim()) return { text: 'Error: Parameter `url` tidak boleh kosong.', sources: [] };
+        let url = args.url || args.target || args.link || args.href || args.targetUrl || (typeof args === 'string' ? args : '');
+        if (!url || !url.trim()) return { text: 'Error: Parameter `url` tidak boleh kosong.', sources: [] };
+        url = url.trim();
+        if (!/^https?:\/\//i.test(url)) {
+          url = 'https://' + url;
+        }
         
         if (!IS_GITHUB_PAGES) {
           try {
             const res = await fetch('/api/tools/browse-page', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ url: url.trim(), maxChars: 5000 })
+              body: JSON.stringify({ url: url, maxChars: 5000 })
             });
             if (res.ok) {
               const data = await res.json();
@@ -4092,6 +4127,29 @@ ${organicBlock}
             }
           } catch (_) {}
         }
+
+        // Client-side fallback for Wikipedia URLs on GitHub Pages
+        if (/wikipedia\.org\/wiki\//i.test(url)) {
+          try {
+            const pageTitleMatch = url.match(/\/wiki\/([^#\?]+)/);
+            if (pageTitleMatch && pageTitleMatch[1]) {
+              const pageTitle = decodeURIComponent(pageTitleMatch[1]);
+              const langMatch = url.match(/https?:\/\/([a-z]+)\.wikipedia\.org/i);
+              const lang = langMatch ? langMatch[1] : 'id';
+              const restApiUrl = `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle)}`;
+              const wikiRes = await fetch(restApiUrl);
+              if (wikiRes.ok) {
+                const wData = await wikiRes.json();
+                const extract = wData.extract || wData.description || 'Halaman Wikipedia';
+                return {
+                  text: `KONTEN ARTIKEL WIKIPEDIA "${wData.title || pageTitle}" (${url}):\n\n${extract}`,
+                  sources: [{ title: wData.title || pageTitle, url: url, domain: `${lang}.wikipedia.org`, snippet: extract.substring(0, 160) }]
+                };
+              }
+            }
+          } catch (_) {}
+        }
+
         return { text: `Error: Tidak dapat membaca URL ${url} saat offline atau di GitHub Pages tanpa backend server.`, sources: [] };
       }
       
@@ -4104,38 +4162,62 @@ ${organicBlock}
   function extractInlineToolCalls(text) {
     if (!text || typeof text !== 'string') return [];
     const calls = [];
-    const regex = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi;
-    let match;
-    while ((match = regex.exec(text)) !== null) {
-      try {
-        const parsed = JSON.parse(match[1]);
-        if (parsed && parsed.name) {
-          calls.push({
-            id: `call_inline_${Date.now()}_${calls.length}`,
-            type: 'function',
-            rawTag: match[0],
-            function: {
-              name: parsed.name,
-              arguments: typeof parsed.arguments === 'object' ? JSON.stringify(parsed.arguments) : String(parsed.arguments || '{}')
+    
+    // Support <tool_call>...</tool_call>, ```tool_call...```, and json codeblocks
+    const regexList = [
+      /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi,
+      /```tool_call\s*([\s\S]*?)\s*```/gi,
+      /```(?:json)?\s*(\{\s*"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page)"[\s\S]*?\})\s*```/gi
+    ];
+
+    const seenIds = new Set();
+
+    for (const regex of regexList) {
+      let match;
+      while ((match = regex.exec(text)) !== null) {
+        let rawContent = match[1].trim();
+        // Strip markdown code fences if wrapped inside <tool_call>```json...```</tool_call>
+        rawContent = rawContent.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        
+        try {
+          const parsed = JSON.parse(rawContent);
+          const toolName = parsed.name || parsed.function || parsed.tool;
+          if (toolName && (toolName === 'search_web' || toolName === 'browse_web_page')) {
+            const rawArgs = parsed.arguments !== undefined ? parsed.arguments : (parsed.parameters !== undefined ? parsed.parameters : (parsed.args !== undefined ? parsed.args : (parsed.input !== undefined ? parsed.input : {})));
+            const serializedArgs = (typeof rawArgs === 'object') ? JSON.stringify(rawArgs) : String(rawArgs);
+            const callKey = `${toolName}:${serializedArgs}`;
+            if (!seenIds.has(callKey)) {
+              seenIds.add(callKey);
+              calls.push({
+                id: `call_inline_${Date.now()}_${calls.length}`,
+                type: 'function',
+                rawTag: match[0],
+                function: {
+                  name: toolName,
+                  arguments: serializedArgs
+                }
+              });
             }
-          });
-        }
-      } catch (_) {}
+          }
+        } catch (_) {}
+      }
     }
     return calls;
   }
 
   const AUTONOMOUS_SYSTEM_DIRECTIVE = `### INSTRUMEN PENJELAJAHAN WEB OTONOM (AUTONOMOUS WEB EXPLORER - ZERO API):
-Anda dibekali instrumen penjelajahan internet mandiri yang dibangun khusus dari nol (Zero-API DuckDuckGo & Web Scraper tanpa batasan API):
-- search_web(query): Cari fakta terkini, riset, berita, atau data apa pun di web secara live.
-- browse_web_page(url): Buka URL spesifik dan baca teks bersih dokumen web hingga 5.000 karakter untuk Anda cerna secara mendalam.
+Anda memiliki instrumen penjelajahan internet mandiri yang dibangun khusus dari nol (Zero-API DuckDuckGo & Web Scraper tanpa batasan API):
+1. search_web(query): Cari fakta terkini, riset, berita, atau data apa pun di web secara live.
+2. browse_web_page(url): Buka URL spesifik dan baca teks bersih dokumen web hingga 5.000 karakter untuk Anda cerna secara mendalam.
 
-KAPANPUN Anda membutuhkan verifikasi fakta, data real-time, atau informasi di luar data pelatihan, PANGGIL TOOL INI SECARA MANDIRI!
-Panggil menggunakan function calling standar, atau melalui tag semantik:
+PANDUAN PEMANGGILAN OTONOM:
+- Kapan pun Anda butuh data terkini, verifikasi fakta, atau penelusuran web, PANGGIL TOOL INI SECARA MANDIRI sebelum menjawab!
+- Format pemanggilan: Gunakan function calling standar, atau tuliskan tag semantik:
 <tool_call>{"name":"search_web","arguments":{"query":"kata kunci spesifik"}}</tool_call>
 atau
 <tool_call>{"name":"browse_web_page","arguments":{"url":"https://example.com/artikel"}}</tool_call>
-Sistem akan mengeksekusi penjelajahan dan mengembalikan data lengkap untuk Anda telaah dan cerna sebelum memberikan respon final yang akurat, komprehensif, dan mutakhir.`;
+- Anda dapat mencari topik terlebih dahulu dengan 'search_web', lalu jika ada URL menarik dalam hasil pencarian, Anda dapat memanggil 'browse_web_page' untuk membacanya mendalam.
+- Sistem akan mengeksekusi penjelajahan dan menyuapkan datanya kembali untuk Anda cerna sebelum merumuskan respon akhir yang komprehensif.`;
 
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
     const isSearch = toolName === 'search_web';
@@ -4401,20 +4483,21 @@ Sistem akan mengeksekusi penjelajahan dan mengembalikan data lengkap untuk Anda 
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
       let systemContent = personaPrompt;
 
-      // If Web Search is enabled, fetch real-time search context
-      if (STATE.webSearchEnabled) {
-        if (STATE.searchMode === 'autonomous') {
-          systemContent = systemContent ? `${systemContent}\n\n${AUTONOMOUS_SYSTEM_DIRECTIVE}` : AUTONOMOUS_SYSTEM_DIRECTIVE;
-        } else {
-          const webRes = await getWebSearchContext(promptText, session, bubbleText);
-          if (webRes && webRes.systemPromptContext) {
-            systemContent = personaPrompt 
-              ? `### SYSTEM PERSONA & CORE DIRECTIVE:\n${personaPrompt}\n\n### REAL-TIME GOOGLE SEARCH GROUNDING DATA:\n${webRes.systemPromptContext}` 
-              : webRes.systemPromptContext;
-            webSources = webRes.sources;
-          }
-          bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+      // If Web Search is enabled or autonomous search intent detected
+      const hasAutonomousIntent = STATE.searchMode === 'autonomous' ||
+        /\b(cari|search|brows|jelajah|googl|duckduckgo|berita|info terkini|update|link|url|buka web|baca web|rangkum web|artikel|situs|https?:\/\/)\b/i.test(promptText);
+
+      if (STATE.searchMode === 'autonomous' || hasAutonomousIntent) {
+        systemContent = systemContent ? `${systemContent}\n\n${AUTONOMOUS_SYSTEM_DIRECTIVE}` : AUTONOMOUS_SYSTEM_DIRECTIVE;
+      } else if (STATE.webSearchEnabled) {
+        const webRes = await getWebSearchContext(promptText, session, bubbleText);
+        if (webRes && webRes.systemPromptContext) {
+          systemContent = personaPrompt 
+            ? `### SYSTEM PERSONA & CORE DIRECTIVE:\n${personaPrompt}\n\n### REAL-TIME GOOGLE SEARCH GROUNDING DATA:\n${webRes.systemPromptContext}` 
+            : webRes.systemPromptContext;
+          webSources = webRes.sources;
         }
+        bubbleText.innerHTML = '<span class="typing-cursor"></span>';
       }
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
@@ -4523,15 +4606,31 @@ Sistem akan mengeksekusi penjelajahan dan mengembalikan data lengkap untuk Anda 
 
       fullText = streamRenderer.finish();
 
-      // ==================== OLLAMA AUTONOMOUS MULTI-TURN DIGESTION ENGINE ====================
-      const validNativeCalls = accumulatedToolCalls.filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
-      const inlineCalls = extractInlineToolCalls(fullText).filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
-      const detectedAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
-
+      // ==================== OLLAMA AUTONOMOUS MULTI-ROUND DIGESTION ENGINE ====================
+      const maxAutonomousRounds = 4;
+      let autonomousRound = 0;
       let executedHudHtml = '';
-      if (detectedAutonomousCalls.length > 0) {
-        let toolResponsesText = '';
+      const conversationChain = [...messagesPayload];
+      let currentRoundText = fullText;
+      let currentRoundNativeCalls = accumulatedToolCalls;
+
+      while (autonomousRound < maxAutonomousRounds) {
+        if (STATE.abortController?.signal?.aborted) break;
+
+        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
+        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
+        const detectedAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
+
+        if (detectedAutonomousCalls.length === 0) {
+          break; // Model selesai merumuskan respon final tanpa pemanggilan tool tambahan
+        }
+
+        autonomousRound++;
+        let roundToolResponsesText = '';
+        const toolSummaryList = [];
+
         for (const call of detectedAutonomousCalls) {
+          if (STATE.abortController?.signal?.aborted) break;
           const toolName = call.function.name;
           let previewArg = '';
           try {
@@ -4540,6 +4639,7 @@ Sistem akan mengeksekusi penjelajahan dan mengembalikan data lengkap untuk Anda 
           } catch (_) {
             previewArg = String(call.function.arguments || '');
           }
+          toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
 
           // Visual status loading di gelembung obrolan
           bubbleText.innerHTML = executedHudHtml + createAutonomousToolHudHtml(toolName, previewArg, 'loading');
@@ -4551,33 +4651,45 @@ Sistem akan mengeksekusi penjelajahan dan mengembalikan data lengkap untuk Anda 
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
           }
-          toolResponsesText += `\n[HASIL PENGUMPULAN DATA OTONOM: ${toolName}]\n${toolExecRes.text}\n`;
+          roundToolResponsesText += `\n[HASIL PENGUMPULAN DATA OTONOM (${toolName})]:\n${toolExecRes.text}\n`;
           executedHudHtml += createAutonomousToolHudHtml(toolName, previewArg, 'done');
         }
 
+        if (STATE.abortController?.signal?.aborted) break;
+
         // Tampilkan HUD bahwa data sedang dicerna oleh AI
-        bubbleText.innerHTML = executedHudHtml + '<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);">Mencerna informasi web untuk merumuskan respon final...</span></div>';
+        bubbleText.innerHTML = executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);">Putaran ${autonomousRound}: Mencerna informasi web untuk merumuskan respon...</span></div>`;
         smartScrollChatToBottom(true);
 
-        const cleanAssistant = fullText.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').trim();
-        const digestionMessages = [...messagesPayload];
+        const cleanAssistant = currentRoundText.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').replace(/```tool_call[\s\S]*?```/gi, '').trim();
         if (cleanAssistant) {
-          digestionMessages.push({ role: 'assistant', content: cleanAssistant });
+          conversationChain.push({ role: 'assistant', content: cleanAssistant });
+        } else {
+          conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
         }
-        digestionMessages.push({
+
+        const isLastPossibleRound = autonomousRound >= maxAutonomousRounds;
+        const roundInstruction = isLastPossibleRound
+          ? `[INSTRUKSI FINAL]: Cerna seluruh data di atas dan rangkum respon akhir yang komprehensif, mutakhir, dan detail untuk pengguna TANPA memanggil tool lagi.`
+          : `[INSTRUKSI]: Cerna seluruh data di atas secara mendalam. Jika Anda sudah memiliki cukup data untuk menjawab pengguna secara komprehensif, sajikan respon akhir Anda tanpa tag tool. Jika masih ada fakta tambahan atau URL spesifik yang perlu dibaca mendalam, Anda boleh memanggil 'browse_web_page' atau 'search_web' lagi.`;
+
+        conversationChain.push({
           role: 'user',
-          content: `[DATA HASIL PENJELAJAHAN WEB OTONOM (ZERO-API)]:\n${toolResponsesText}\n\n[INSTRUKSI]: Cerna seluruh data di atas secara mendalam. Sintesiskan fakta-faktanya dan berikan jawaban yang komprehensif, mutakhir, dan akurat kepada pengguna.`
+          content: `[DATA HASIL PENJELAJAHAN WEB OTONOM (ZERO-API - PUTARAN ${autonomousRound})]:\n${roundToolResponsesText}\n\n${roundInstruction}`
         });
 
         const digestionBody = {
           model: modelName,
-          messages: digestionMessages,
+          messages: conversationChain,
           system: systemContent,
           stream: true,
           options: requestBody.options,
           endpoint: ep
         };
         if (STATE.settings.ollamaApiKey) digestionBody.apiKey = STATE.settings.ollamaApiKey;
+
+        currentRoundText = '';
+        currentRoundNativeCalls = [];
 
         try {
           const digestionRes = await fetch(chatUrl, {
@@ -4587,39 +4699,53 @@ Sistem akan mengeksekusi penjelajahan dan mengembalikan data lengkap untuk Anda 
             signal: STATE.abortController.signal
           });
 
-          if (digestionRes.ok) {
-            const digestionReader = digestionRes.body.getReader();
-            let digestionBuffer = '';
-            const digestionContentBox = document.createElement('div');
-            digestionContentBox.className = 'autonomous-digested-output';
-            bubbleText.innerHTML = executedHudHtml;
-            bubbleText.appendChild(digestionContentBox);
-
-            const digestionRenderer = new StreamBufferRenderer(digestionContentBox, () => smartScrollChatToBottom(false));
-
-            while (true) {
-              const { done, value } = await digestionReader.read();
-              if (done) break;
-              digestionBuffer += decoder.decode(value, { stream: true });
-              const dLines = digestionBuffer.split('\n');
-              digestionBuffer = dLines.pop();
-
-              for (const dLine of dLines) {
-                if (!dLine.trim()) continue;
-                try {
-                  const dParsed = JSON.parse(dLine);
-                  if (dParsed.message?.content) {
-                    tokenCount++;
-                    digestionRenderer.append(dParsed.message.content);
-                  }
-                } catch (_) {}
-              }
-            }
-            fullText = digestionRenderer.finish();
+          if (!digestionRes.ok) {
+            console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Error: HTTP ${digestionRes.status}`);
+            break;
           }
+
+          const digestionReader = digestionRes.body.getReader();
+          let digestionBuffer = '';
+          const digestionContentBox = document.createElement('div');
+          digestionContentBox.className = 'autonomous-digested-output';
+          bubbleText.innerHTML = executedHudHtml;
+          bubbleText.appendChild(digestionContentBox);
+
+          const digestionRenderer = new StreamBufferRenderer(digestionContentBox, () => smartScrollChatToBottom(false));
+
+          while (true) {
+            const { done, value } = await digestionReader.read();
+            if (done) break;
+            digestionBuffer += decoder.decode(value, { stream: true });
+            const dLines = digestionBuffer.split('\n');
+            digestionBuffer = dLines.pop();
+
+            for (const dLine of dLines) {
+              if (!dLine.trim()) continue;
+              try {
+                const dParsed = JSON.parse(dLine);
+                if (dParsed.message?.content) {
+                  tokenCount++;
+                  digestionRenderer.append(dParsed.message.content);
+                }
+                if (dParsed.message?.tool_calls && Array.isArray(dParsed.message.tool_calls)) {
+                  dParsed.message.tool_calls.forEach(tc => currentRoundNativeCalls.push(tc));
+                }
+              } catch (_) {}
+            }
+          }
+          currentRoundText = digestionRenderer.finish();
+          fullText = currentRoundText;
         } catch (digestionErr) {
-          console.warn('[Ollama Autonomous Digestion] Turn 2 error:', digestionErr);
+          console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Fetch error:`, digestionErr);
+          break;
         }
+      }
+
+      // Bersihkan sisa tag tool_call jika ada sebelum render markdown final
+      const cleanFinalText = fullText.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').replace(/```tool_call[\s\S]*?```/gi, '').trim();
+      if (cleanFinalText) {
+        fullText = cleanFinalText;
       }
 
       if (!fullText.trim() && !STATE.abortController?.signal.aborted) {
@@ -4821,20 +4947,21 @@ Sistem akan mengeksekusi penjelajahan dan mengembalikan data lengkap untuk Anda 
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
       let systemContent = personaPrompt;
 
-      // If Web Search is enabled, fetch real-time search context
-      if (STATE.webSearchEnabled) {
-        if (STATE.searchMode === 'autonomous') {
-          systemContent = systemContent ? `${systemContent}\n\n${AUTONOMOUS_SYSTEM_DIRECTIVE}` : AUTONOMOUS_SYSTEM_DIRECTIVE;
-        } else {
-          const webRes = await getWebSearchContext(promptText, session, bubbleText);
-          if (webRes && webRes.systemPromptContext) {
-            systemContent = personaPrompt 
-              ? `### SYSTEM PERSONA & CORE DIRECTIVE:\n${personaPrompt}\n\n### REAL-TIME GOOGLE SEARCH GROUNDING DATA:\n${webRes.systemPromptContext}` 
-              : webRes.systemPromptContext;
-            webSources = webRes.sources;
-          }
-          bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+      // If Web Search is enabled or autonomous search intent detected
+      const hasAutonomousIntent = STATE.searchMode === 'autonomous' ||
+        /\b(cari|search|brows|jelajah|googl|duckduckgo|berita|info terkini|update|link|url|buka web|baca web|rangkum web|artikel|situs|https?:\/\/)\b/i.test(promptText);
+
+      if (STATE.searchMode === 'autonomous' || hasAutonomousIntent) {
+        systemContent = systemContent ? `${systemContent}\n\n${AUTONOMOUS_SYSTEM_DIRECTIVE}` : AUTONOMOUS_SYSTEM_DIRECTIVE;
+      } else if (STATE.webSearchEnabled) {
+        const webRes = await getWebSearchContext(promptText, session, bubbleText);
+        if (webRes && webRes.systemPromptContext) {
+          systemContent = personaPrompt 
+            ? `### SYSTEM PERSONA & CORE DIRECTIVE:\n${personaPrompt}\n\n### REAL-TIME GOOGLE SEARCH GROUNDING DATA:\n${webRes.systemPromptContext}` 
+            : webRes.systemPromptContext;
+          webSources = webRes.sources;
         }
+        bubbleText.innerHTML = '<span class="typing-cursor"></span>';
       }
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
@@ -5076,15 +5203,31 @@ Sistem akan mengeksekusi penjelajahan dan mengembalikan data lengkap untuk Anda 
 
       fullText = streamRenderer.finish();
 
-      // ==================== AUTONOMOUS MULTI-TURN DIGESTION ENGINE ====================
-      const validNativeCalls = accumulatedToolCalls.filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
-      const inlineCalls = extractInlineToolCalls(fullText).filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
-      const detectedAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
-
+      // ==================== UNIVERSAL AUTONOMOUS MULTI-ROUND DIGESTION ENGINE ====================
+      const maxAutonomousRounds = 4;
+      let autonomousRound = 0;
       let executedHudHtml = '';
-      if (detectedAutonomousCalls.length > 0) {
-        let toolResponsesText = '';
+      const conversationChain = [...(activeMessagesPayload || messagesPayload)];
+      let currentRoundText = fullText;
+      let currentRoundNativeCalls = accumulatedToolCalls;
+
+      while (autonomousRound < maxAutonomousRounds) {
+        if (STATE.abortController?.signal?.aborted) break;
+
+        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
+        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
+        const detectedAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
+
+        if (detectedAutonomousCalls.length === 0) {
+          break; // Model selesai merumuskan respon final tanpa pemanggilan tool tambahan
+        }
+
+        autonomousRound++;
+        let roundToolResponsesText = '';
+        const toolSummaryList = [];
+
         for (const call of detectedAutonomousCalls) {
+          if (STATE.abortController?.signal?.aborted) break;
           const toolName = call.function.name;
           let previewArg = '';
           try {
@@ -5093,6 +5236,7 @@ Sistem akan mengeksekusi penjelajahan dan mengembalikan data lengkap untuk Anda 
           } catch (_) {
             previewArg = String(call.function.arguments || '');
           }
+          toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
 
           // Visual status loading di gelembung obrolan
           bubbleText.innerHTML = executedHudHtml + createAutonomousToolHudHtml(toolName, previewArg, 'loading');
@@ -5104,49 +5248,46 @@ Sistem akan mengeksekusi penjelajahan dan mengembalikan data lengkap untuk Anda 
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
           }
-          toolResponsesText += `\n[HASIL PENGUMPULAN DATA OTONOM: ${toolName}]\n${toolExecRes.text}\n`;
+          roundToolResponsesText += `\n[HASIL PENGUMPULAN DATA OTONOM (${toolName})]:\n${toolExecRes.text}\n`;
           executedHudHtml += createAutonomousToolHudHtml(toolName, previewArg, 'done');
         }
 
+        if (STATE.abortController?.signal?.aborted) break;
+
         // Tampilkan HUD bahwa data sedang dicerna oleh AI
-        bubbleText.innerHTML = executedHudHtml + '<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);">Mencerna informasi web untuk merumuskan respon final...</span></div>';
+        bubbleText.innerHTML = executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);">Putaran ${autonomousRound}: Mencerna informasi web untuk merumuskan respon...</span></div>`;
         smartScrollChatToBottom(true);
 
-        // Siapkan pesan sintesis pencernaan (Turn 2)
-        const digestionPayload = [...(activeMessagesPayload || messagesPayload)];
-        if (validNativeCalls.length > 0) {
-          digestionPayload.push({
-            role: 'assistant',
-            content: fullText || null,
-            tool_calls: validNativeCalls
-          });
-          validNativeCalls.forEach(vc => {
-            digestionPayload.push({
-              role: 'tool',
-              tool_call_id: vc.id,
-              content: toolResponsesText
-            });
-          });
+        // Siapkan pesan sintesis pencernaan dengan format UNIVERSAL (Bebas error 400 'role: tool' di OpenRouter)
+        const cleanAssistant = currentRoundText.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').replace(/```tool_call[\s\S]*?```/gi, '').trim();
+        if (cleanAssistant) {
+          conversationChain.push({ role: 'assistant', content: cleanAssistant });
         } else {
-          const cleanAssistant = fullText.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').trim();
-          if (cleanAssistant) {
-            digestionPayload.push({ role: 'assistant', content: cleanAssistant });
-          }
-          digestionPayload.push({
-            role: 'user',
-            content: `[DATA HASIL PENJELAJAHAN WEB OTONOM (ZERO-API)]:\n${toolResponsesText}\n\n[INSTRUKSI]: Cerna seluruh data di atas secara mendalam. Sintesiskan fakta-faktanya dan berikan jawaban yang komprehensif, mutakhir, dan akurat kepada pengguna.`
-          });
+          conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
         }
 
-        // Jalankan panggilan streaming Turn 2 ke model untuk mencerna informasi
+        const isLastPossibleRound = autonomousRound >= maxAutonomousRounds;
+        const roundInstruction = isLastPossibleRound
+          ? `[INSTRUKSI FINAL]: Cerna seluruh data di atas dan rangkum respon akhir yang komprehensif, mutakhir, dan detail untuk pengguna TANPA memanggil tool lagi.`
+          : `[INSTRUKSI]: Cerna seluruh data di atas secara mendalam. Jika Anda sudah memiliki cukup data untuk menjawab pengguna secara komprehensif, sajikan respon akhir Anda tanpa tag tool. Jika masih ada fakta tambahan atau URL spesifik yang perlu dibaca mendalam, Anda boleh memanggil 'browse_web_page' atau 'search_web' lagi.`;
+
+        conversationChain.push({
+          role: 'user',
+          content: `[DATA HASIL PENJELAJAHAN WEB OTONOM (ZERO-API - PUTARAN ${autonomousRound})]:\n${roundToolResponsesText}\n\n${roundInstruction}`
+        });
+
+        // Jalankan panggilan streaming ke model untuk putaran berikutnya
         const digestionRequestBody = {
           model: actualModelUsed || modelName,
-          messages: digestionPayload,
+          messages: conversationChain,
           stream: true,
           temperature: parseFloat(STATE.settings.temperature),
           top_p: parseFloat(STATE.settings.topP)
         };
         if (!isOpenRouterDirect) digestionRequestBody.apiKey = STATE.settings.openRouterKey;
+
+        currentRoundText = '';
+        currentRoundNativeCalls = [];
 
         try {
           const digestionRes = await fetch(endpoint, {
@@ -5156,43 +5297,81 @@ Sistem akan mengeksekusi penjelajahan dan mengembalikan data lengkap untuk Anda 
             signal: STATE.abortController.signal
           });
 
-          if (digestionRes.ok) {
-            const digestionReader = digestionRes.body.getReader();
-            let digestionBuffer = '';
-            const digestionContentBox = document.createElement('div');
-            digestionContentBox.className = 'autonomous-digested-output';
-            bubbleText.innerHTML = executedHudHtml;
-            bubbleText.appendChild(digestionContentBox);
-
-            const digestionRenderer = new StreamBufferRenderer(digestionContentBox, () => smartScrollChatToBottom(false));
-
-            while (true) {
-              const { done, value } = await digestionReader.read();
-              if (done) break;
-              digestionBuffer += decoder.decode(value, { stream: true });
-              const dLines = digestionBuffer.split('\n');
-              digestionBuffer = dLines.pop();
-
-              for (const dLine of dLines) {
-                const dTrimmed = dLine.trim();
-                if (!dTrimmed || !dTrimmed.startsWith('data:')) continue;
-                const dJson = dTrimmed.replace(/^data:\s*/, '');
-                if (dJson === '[DONE]') break;
-                try {
-                  const dParsed = JSON.parse(dJson);
-                  const dDelta = dParsed.choices?.[0]?.delta?.content;
-                  if (dDelta) {
-                    tokenCount++;
-                    digestionRenderer.append(dDelta);
-                  }
-                } catch (_) {}
+          if (!digestionRes.ok) {
+            let errDetail = `HTTP ${digestionRes.status}`;
+            try {
+              const errJson = await digestionRes.json();
+              if (errJson && errJson.error) {
+                errDetail = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
               }
-            }
-            fullText = digestionRenderer.finish();
+            } catch (_) {}
+            console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Error:`, errDetail);
+            break;
           }
+
+          const digestionReader = digestionRes.body.getReader();
+          let digestionBuffer = '';
+          const digestionContentBox = document.createElement('div');
+          digestionContentBox.className = 'autonomous-digested-output';
+          bubbleText.innerHTML = executedHudHtml;
+          bubbleText.appendChild(digestionContentBox);
+
+          const digestionRenderer = new StreamBufferRenderer(digestionContentBox, () => smartScrollChatToBottom(false));
+
+          while (true) {
+            const { done, value } = await digestionReader.read();
+            if (done) break;
+            digestionBuffer += decoder.decode(value, { stream: true });
+            const dLines = digestionBuffer.split('\n');
+            digestionBuffer = dLines.pop();
+
+            for (const dLine of dLines) {
+              const dTrimmed = dLine.trim();
+              if (!dTrimmed || !dTrimmed.startsWith('data:')) continue;
+              const dJson = dTrimmed.replace(/^data:\s*/, '');
+              if (dJson === '[DONE]') break;
+              try {
+                const dParsed = JSON.parse(dJson);
+                const dDelta = dParsed.choices?.[0]?.delta?.content;
+                if (dDelta) {
+                  tokenCount++;
+                  digestionRenderer.append(dDelta);
+                }
+                const deltaTc = dParsed.choices?.[0]?.delta?.tool_calls;
+                if (Array.isArray(deltaTc)) {
+                  deltaTc.forEach(tc => {
+                    const idx = tc.index ?? 0;
+                    if (!currentRoundNativeCalls[idx]) {
+                      currentRoundNativeCalls[idx] = {
+                        id: tc.id || `call_${Date.now()}_${idx}`,
+                        type: tc.type || 'function',
+                        function: {
+                          name: tc.function?.name || '',
+                          arguments: tc.function?.arguments || ''
+                        }
+                      };
+                    } else {
+                      if (tc.id) currentRoundNativeCalls[idx].id = tc.id;
+                      if (tc.function?.name) currentRoundNativeCalls[idx].function.name += tc.function.name;
+                      if (tc.function?.arguments) currentRoundNativeCalls[idx].function.arguments += tc.function.arguments;
+                    }
+                  });
+                }
+              } catch (_) {}
+            }
+          }
+          currentRoundText = digestionRenderer.finish();
+          fullText = currentRoundText;
         } catch (digestionErr) {
-          console.warn('[Autonomous Digestion] Streaming turn 2 error:', digestionErr);
+          console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Fetch error:`, digestionErr);
+          break;
         }
+      }
+
+      // Bersihkan sisa tag tool_call jika ada sebelum render markdown final
+      const cleanFinalText = fullText.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').replace(/```tool_call[\s\S]*?```/gi, '').trim();
+      if (cleanFinalText) {
+        fullText = cleanFinalText;
       }
 
       if (!fullText.trim() && collectedImages.length === 0 && !STATE.abortController?.signal.aborted) {
