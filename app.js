@@ -2613,12 +2613,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     for (const file of files) {
       // 1. Cek cerdas: Jika user memilih foto/gambar melalui menu Dokumen
       if (isImageFile(file)) {
-        const currentModel = getCurrentModel();
-        if (!doesModelSupportVision(currentModel)) {
-          showToast(`⚠️ Model "${currentModel}" beroperasi dalam mode teks murni (text-only) dan tidak mendukung input gambar. Gambar tidak diunggah.`, 'warning');
-          if (window.AudioEngine && AudioEngine.error) AudioEngine.error();
-          continue;
-        }
         const ok = await processSingleImageFile(file);
         if (ok) addedImagesCount++;
         continue;
@@ -2642,9 +2636,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
     if (els.docFileInput) els.docFileInput.value = '';
     renderAttachmentPreviews();
-    if (addedImagesCount > 0) {
-      updateVisionCompatibilityBadge();
-    }
     if (addedDocsCount > 0 || addedImagesCount > 0) {
       AudioEngine.click();
     }
@@ -2711,8 +2702,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         els.attachmentPreviewBar.appendChild(chip);
       });
     }
-
-    updateVisionCompatibilityBadge();
   }
 
   // ==================== AUTONOMOUS AI WEB SEARCH SKILL ENGINE ====================
@@ -3630,12 +3619,6 @@ ${organicBlock}
     }
   }
 
-  // ==================== ATTACHMENT BADGE & COMPATIBILITY ====================
-  function updateVisionCompatibilityBadge() {
-    const badge = document.getElementById('visionCompatBadge');
-    if (badge) badge.remove();
-  }
-
   // ==================== MODEL DROPDOWN & SELECTORS ====================
   function populateModelDropdown(search = '') {
     els.dropdownModelList.innerHTML = '';
@@ -3748,14 +3731,7 @@ ${organicBlock}
       }
     }
 
-    // Jika model yang baru dipilih adalah model teks murni dan saat ini ada gambar terlampir, lepas gambar
-    if (Array.isArray(STATE.attachedImages) && STATE.attachedImages.length > 0 && !doesModelSupportVision(modelId)) {
-      clearAttachedImages();
-      showToast(`⚠️ Lampiran gambar dilepas karena model "${modelId}" adalah model teks murni.`, 'warning');
-    }
-
     updateModelUI();
-    updateVisionCompatibilityBadge();
     savePersistedState();
     showToast(`Model aktif: ${modelId}`);
   }
@@ -3793,7 +3769,6 @@ ${organicBlock}
     }
 
     updateModelUI();
-    updateVisionCompatibilityBadge();
     populateModelDropdown();
     renderChatHistory();
     renderCurrentSession();
@@ -3883,14 +3858,7 @@ ${organicBlock}
       targetModel = STATE.settings.ollamaModel || 'gemma4:31b';
     }
 
-    // Safety guard: Jika ada gambar terlampir tetapi model target adalah model teks murni (non-vision),
-    // JANGAN PERNAH mengalihkan model secara otomatis sesuai mandat mutlak Kaisar Zozi!
-    // Abaikan lampiran gambar dan eksekusi model pilihan pengguna secara murni.
     let effectiveImages = images;
-    if (effectiveImages.length > 0 && !doesModelSupportVision(targetModel)) {
-      showToast(`⚠️ Lampiran gambar diabaikan karena model "${targetModel}" tidak mendukung vision.`, 'warning');
-      effectiveImages = [];
-    }
 
     const isExplicitImageCommand = /^\/(?:image|img|gambar)\s+/i.test(text.trim());
     const isDirectImageCapable = isModelCapableOfImageGeneration(targetModel);
@@ -3975,38 +3943,6 @@ ${organicBlock}
       lower.includes('llama-3') ||
       lower.includes('deepseek')
     );
-  }
-
-  function doesModelSupportVision(modelName) {
-    if (!modelName || typeof modelName !== 'string') return false;
-    const lower = modelName.toLowerCase();
-
-    // 1. Periksa metadata live OpenRouter jika model terdaftar
-    const liveModel = (STATE.openRouterModels || []).find(m => m.id === modelName);
-    if (liveModel) {
-      if (liveModel.hasImageInput || liveModel.supportsVision) return true;
-    }
-
-    // 2. Model multimodal yang dipastikan mendukung vision/gambar
-    if (
-      lower.includes('vision') ||
-      lower.includes('-vl') ||
-      lower.includes('omni') ||
-      lower.includes('gpt-4o') ||
-      lower.includes('gpt-4-turbo') ||
-      lower.includes('claude-3') ||
-      lower.includes('gemini') ||
-      lower.includes('gemma-4') ||
-      lower.includes('pixtral') ||
-      lower.includes('llava') ||
-      lower.includes('moondream') ||
-      lower.includes('bakllava')
-    ) {
-      return true;
-    }
-
-    // 3. Model teks murni (text-only)
-    return false;
   }
 
   // ==================== UNIVERSAL MODEL ERROR & WARNING HANDLER ====================
@@ -5011,15 +4947,6 @@ ${organicBlock}
     const files = Array.from(e.target.files || []);
     if (!files || files.length === 0) return;
 
-    const currentModel = getCurrentModel();
-    if (!doesModelSupportVision(currentModel)) {
-      if (els.imageFileInput) els.imageFileInput.value = '';
-      if (els.cameraFileInput) els.cameraFileInput.value = '';
-      showToast(`⚠️ Model "${currentModel}" beroperasi dalam mode teks murni (text-only) dan tidak mendukung input gambar. Gambar tidak diunggah.`, 'warning');
-      if (window.AudioEngine && AudioEngine.error) AudioEngine.error();
-      return;
-    }
-
     let addedCount = 0;
     for (const file of files) {
       if (!isImageFile(file)) continue;
@@ -5030,7 +4957,6 @@ ${organicBlock}
     if (els.imageFileInput) els.imageFileInput.value = '';
     if (els.cameraFileInput) els.cameraFileInput.value = '';
     renderAttachmentPreviews();
-    updateVisionCompatibilityBadge();
 
     if (addedCount > 0) {
       AudioEngine.click();
@@ -5041,7 +4967,6 @@ ${organicBlock}
     if (idx >= 0 && idx < STATE.attachedImages.length) {
       STATE.attachedImages.splice(idx, 1);
       renderAttachmentPreviews();
-      updateVisionCompatibilityBadge();
       AudioEngine.click();
     }
   }
@@ -5051,7 +4976,6 @@ ${organicBlock}
     if (els.imageFileInput) els.imageFileInput.value = '';
     if (els.cameraFileInput) els.cameraFileInput.value = '';
     renderAttachmentPreviews();
-    updateVisionCompatibilityBadge();
   }
 
   function clearAttachedImage() {
@@ -9406,18 +9330,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       for (const item of items) {
         if (item.type && item.type.startsWith('image/')) {
           e.preventDefault();
-          const currentModel = getCurrentModel();
-          if (!doesModelSupportVision(currentModel)) {
-            showToast(`⚠️ Model "${currentModel}" adalah model teks murni (text-only) dan tidak mendukung input gambar. Gambar tidak diunggah.`, 'warning');
-            if (window.AudioEngine && AudioEngine.error) AudioEngine.error();
-            return;
-          }
           const file = item.getAsFile();
           if (file) {
             const ok = await processSingleImageFile(file);
             if (ok) {
               renderAttachmentPreviews();
-              updateVisionCompatibilityBadge();
               AudioEngine.click();
               showToast('📷 Gambar dari clipboard berhasil dilampirkan!');
             }
