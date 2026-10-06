@@ -56,21 +56,25 @@ function sendJSON(res, statusCode, data) {
   res.end(JSON.stringify(data));
 }
 
-// Helper to parse JSON request body
+// Helper to parse JSON request body safely with Buffer chunks
 function parseBody(req) {
   return new Promise((resolve, reject) => {
-    let body = '';
+    const chunks = [];
+    let totalLength = 0;
     req.on('data', chunk => {
-      body += chunk;
-      if (body.length > 50 * 1024 * 1024) { // 50MB limit
+      chunks.push(chunk);
+      totalLength += chunk.length;
+      if (totalLength > 50 * 1024 * 1024) { // 50MB limit
         req.destroy();
         reject(new Error('Payload too large'));
       }
     });
     req.on('end', () => {
-      if (!body) return resolve({});
+      if (chunks.length === 0 || totalLength === 0) return resolve({});
       try {
-        resolve(JSON.parse(body));
+        const bodyStr = Buffer.concat(chunks, totalLength).toString('utf8');
+        if (!bodyStr.trim()) return resolve({});
+        resolve(JSON.parse(bodyStr));
       } catch (e) {
         resolve({});
       }
