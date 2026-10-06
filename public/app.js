@@ -1523,9 +1523,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // Check for unclosed markdown code blocks (odd count of ```)
     const backtickCount = (trimmed.match(/```/g) || []).length;
     if (backtickCount % 2 !== 0) return true;
-    // Check for mid-sentence termination
-    const unfinishedEndings = [':', ',', ';', '-', '(', '[', '{', 'dan', 'atau', 'dengan', 'yang', 'untuk', 'pada', 'adalah'];
-    if (unfinishedEndings.some(end => trimmed.endsWith(end))) return true;
+    // Check for trailing unfinished punctuation
+    const unfinishedPunctuation = [':', ',', ';', '-', '(', '[', '{'];
+    if (unfinishedPunctuation.some(p => trimmed.endsWith(p))) return true;
+    // Check for mid-sentence trailing conjunction words (using word boundary to avoid false positives like Medan, Sudan, wayang, waspada)
+    const unfinishedWords = ['dan', 'atau', 'dengan', 'yang', 'untuk', 'pada', 'adalah', 'karena', 'namun', 'tetapi', 'serta'];
+    if (unfinishedWords.some(w => new RegExp(`\\b${w}$`, 'i').test(trimmed))) return true;
     return false;
   }
 
@@ -1578,7 +1581,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   }
 
   async function streamContinuationOpenRouter(session, modelName, promptInstruction, bubbleText, currentFullText) {
-    const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
+    const isOpenRouterDirect = IS_GITHUB_PAGES;
     const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
     const headers = {
       'Content-Type': 'application/json',
@@ -4141,7 +4144,7 @@ ${organicBlock}
         // Coba endpoint backend lokal/tunnel terlebih dahulu (Multi-source live aggregator)
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 6500);
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
           const res = await fetch('/api/tools/search-web', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4196,6 +4199,9 @@ ${organicBlock}
             const r2jWeeklyUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsWeeklyUrl)}`;
             const gnewsPrimaryUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQ)}&hl=en-US&gl=US&ceid=US:en`;
             const r2jPrimaryUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsPrimaryUrl)}`;
+            const isIndoQ = /\b(terbaru|terkini|berita|apa|siapa|bagaimana|mengapa|kapan|di|ke|dari|hari ini|minggu ini|bulan ini|tahun ini|presiden|indonesia|jakarta|pemerintah|bbm|gempa|harga|bansos|pilkada)\b/i.test((cleanQ + ' ' + effectiveContext).toLowerCase());
+            const gnewsIndoUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQ)}&hl=id&gl=ID&ceid=ID:id`;
+            const r2jIndoUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsIndoUrl)}`;
             const minHnTimestamp = Math.floor((Date.now() - 120 * 86400 * 1000) / 1000);
             const hnUrlTech = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(techQ)}&tags=story&hitsPerPage=8&numericFilters=created_at_i%3E${minHnTimestamp}`;
             const hnUrlCore = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(coreQ)}&tags=story&hitsPerPage=6&numericFilters=created_at_i%3E${minHnTimestamp}`;
@@ -4334,6 +4340,39 @@ ${organicBlock}
                   });
                 }
               }).catch(() => {}),
+
+              // 5. Google News RSS Indonesia via RSS2JSON (jika kueri berkonteks bahasa Indonesia)
+              (isIndoQ ? fetch(r2jIndoUrl).then(r => r.ok ? r.json() : null).then(d => {
+                if (d && Array.isArray(d.items)) {
+                  d.items.slice(0, 8).forEach(it => {
+                    let domain = 'news.google.com';
+                    let cleanTitle = (it.title || '').trim();
+                    const titleParts = cleanTitle.split(' - ');
+                    let publisher = '';
+                    if (titleParts.length > 1) {
+                      publisher = titleParts.pop().trim();
+                      cleanTitle = titleParts.join(' - ');
+                    }
+                    if (publisher) domain = publisher.toLowerCase().replace(/[\s\.\:\/]+/g, '') + '.com';
+                    try {
+                      if (it.link && it.link.startsWith('http') && !it.link.includes('google.com/rss')) {
+                        domain = new URL(it.link).hostname.replace(/^www\./, '');
+                      }
+                    } catch (_) {}
+                    const timestamp = Date.parse(it.pubDate) || 0;
+                    const cleanSnippet = (it.description || cleanTitle).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                    addCandidate({
+                      title: cleanTitle,
+                      url: it.link,
+                      domain: domain || 'news.google.com',
+                      snippet: `[${publisher || 'Google News'} | ${it.pubDate || 'Terkini'}] ${cleanSnippet.slice(0, 180)}`,
+                      sourceProvider: publisher ? `Google News (${publisher})` : 'Google News Indonesia',
+                      timestamp,
+                      pubDate: it.pubDate || ''
+                    });
+                  });
+                }
+              }).catch(() => {}) : Promise.resolve()),
 
               // 5. HackerNews Algolia Realtime Tech API (techQ & coreQ)
               fetch(hnUrlTech).then(r => r.ok ? r.json() : null).then(d => {
@@ -5254,7 +5293,7 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
         bubbleText.innerHTML = executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);"><i class="fa-solid fa-bolt"></i> Menyintesis data berita web terbaru...</span></div>`;
         smartScrollChatToBottom(true);
 
-        const cleanAssistant = currentRoundText.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').replace(/```tool_call[\s\S]*?```/gi, '').trim();
+        const cleanAssistant = scrubRawToolCallArtifacts(currentRoundText).trim();
         if (cleanAssistant) {
           conversationChain.push({ role: 'assistant', content: cleanAssistant });
         } else {
@@ -5910,7 +5949,7 @@ ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
         smartScrollChatToBottom(true);
 
         // Siapkan pesan sintesis pencernaan dengan format UNIVERSAL (Bebas error 400 'role: tool' di OpenRouter)
-        const cleanAssistant = currentRoundText.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').replace(/```tool_call[\s\S]*?```/gi, '').trim();
+        const cleanAssistant = scrubRawToolCallArtifacts(currentRoundText).trim();
         if (cleanAssistant) {
           conversationChain.push({ role: 'assistant', content: cleanAssistant });
         } else {

@@ -1069,7 +1069,7 @@ function cleanHtmlText(str) {
 function fetchGoogleNewsRss(query, lang = 'en', maxCount = 8) {
   return new Promise((resolve) => {
     try {
-      const hl = lang === 'id' ? 'id-ID' : 'en-US';
+      const hl = lang === 'id' ? 'id' : 'en-US';
       const gl = lang === 'id' ? 'ID' : 'US';
       const ceid = lang === 'id' ? 'ID:id' : 'US:en';
       const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=${hl}&gl=${gl}&ceid=${ceid}`;
@@ -1258,13 +1258,18 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   const weeklyQuery = qPlan.weeklyNews;
   const coreQuery = qPlan.core;
 
+  // Deteksi apakah kueri relevan dengan konteks bahasa Indonesia / nasional
+  const combinedLower = (cleanQuery + ' ' + (contextText || '')).toLowerCase();
+  const isIndoQuery = /\b(terbaru|terkini|berita|apa|siapa|bagaimana|mengapa|kapan|di|ke|dari|hari ini|minggu ini|bulan ini|tahun ini|presiden|indonesia|jakarta|pemerintah|bbm|gempa|harga|bansos|pilkada)\b/i.test(combinedLower);
+
   // Eksekusi seluruh provider berita & teknologi live secara paralel (Bebas Wikipedia agar data 100% terbaru)
   // Menghimpun berita bulan aktif (when:30d), berita rilis terkini, dan breaking wire 14 hari terakhir
-  const [gnewsRecent, gnewsTech, gnewsWeekly, gnewsPrimary, hnTech, hnCore, ddgInstant] = await Promise.allSettled([
+  const [gnewsRecent, gnewsTech, gnewsWeekly, gnewsPrimary, gnewsIndo, hnTech, hnCore, ddgInstant] = await Promise.allSettled([
     fetchGoogleNewsRss(recentQuery, 'en', 8),
     fetchGoogleNewsRss(techQuery, 'en', 8),
     fetchGoogleNewsRss(weeklyQuery, 'en', 6),
     fetchGoogleNewsRss(cleanQuery, 'en', 6),
+    isIndoQuery ? fetchGoogleNewsRss(cleanQuery, 'id', 8) : Promise.resolve([]),
     fetchHackerNewsTech(techQuery, 8),
     fetchHackerNewsTech(coreQuery, 6),
     fetchDuckDuckGoInstant(coreQuery)
@@ -1275,6 +1280,7 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   if (gnewsTech.status === 'fulfilled') candidatePool.push(...gnewsTech.value);
   if (gnewsWeekly.status === 'fulfilled') candidatePool.push(...gnewsWeekly.value);
   if (gnewsPrimary.status === 'fulfilled') candidatePool.push(...gnewsPrimary.value);
+  if (gnewsIndo.status === 'fulfilled' && Array.isArray(gnewsIndo.value)) candidatePool.push(...gnewsIndo.value);
   if (hnTech.status === 'fulfilled') candidatePool.push(...hnTech.value);
   if (hnCore.status === 'fulfilled') candidatePool.push(...hnCore.value);
   if (ddgInstant.status === 'fulfilled') candidatePool.push(...ddgInstant.value);
