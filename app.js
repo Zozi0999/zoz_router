@@ -4017,6 +4017,49 @@ ${organicBlock}
     }
   ];
 
+  function deriveBroadSearchQueries(rawQuery) {
+    if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', wiki: '', core: '' };
+    const lower = rawQuery.toLowerCase();
+
+    let entity = '';
+    if (lower.includes('gemini')) entity = 'Google Gemini';
+    else if (lower.includes('claude') || lower.includes('antropic') || lower.includes('anthropich')) entity = 'Anthropic Claude';
+    else if (lower.includes('chatgpt') || lower.includes('gpt') || lower.includes('openai') || lower.includes('o1') || lower.includes('o3')) entity = 'OpenAI ChatGPT';
+    else if (lower.includes('deepseek') || lower.includes('r1') || lower.includes('v3')) entity = 'DeepSeek AI';
+    else if (lower.includes('llama') || lower.includes('meta ai')) entity = 'Meta Llama';
+    else if (lower.includes('qwen') || lower.includes('tongyi')) entity = 'Alibaba Qwen';
+    else if (lower.includes('mistral') || lower.includes('le chat')) entity = 'Mistral AI';
+    else if (lower.includes('gemma')) entity = 'Google Gemma';
+    else if ((lower.includes('apple') && lower.includes('ai')) || lower.includes('apple intelligence')) entity = 'Apple Intelligence';
+    else if (lower.includes('copilot')) entity = 'Microsoft Copilot';
+    else if (lower.includes('perplexity')) entity = 'Perplexity AI';
+    else if (lower.includes('midjourney')) entity = 'Midjourney AI';
+    else if (lower.includes('sora')) entity = 'OpenAI Sora';
+    else if (lower.includes('flux')) entity = 'FLUX AI';
+
+    const stopWords = [
+      'update', 'updates', 'terbaru', 'terkini', 'apa', 'itu', 'bagaimana', 'perkembangan',
+      'berita', 'tentang', 'fitur', 'baru', 'informasi', 'info', 'roadmap', 'bocoran',
+      'release', 'changelog', 'saat', 'ini', 'sekarang', 'apakah', 'ada', 'model',
+      'tahun', 'di', 'ke', 'dari', 'yang', 'dan', 'atau', 'pada', 'untuk'
+    ];
+
+    let cleaned = rawQuery;
+    stopWords.forEach(w => {
+      cleaned = cleaned.replace(new RegExp(`\\b${w}\\b`, 'gi'), ' ');
+    });
+    cleaned = cleaned.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    const coreSubject = entity || (cleaned.length >= 3 ? cleaned : rawQuery.trim());
+
+    return {
+      primary: rawQuery.trim(),
+      tech: `${coreSubject} AI update`,
+      wiki: `${coreSubject} AI`,
+      core: coreSubject
+    };
+  }
+
   async function executeAutonomousWebTool(toolName, rawArgs) {
     try {
       let args = {};
@@ -4074,27 +4117,37 @@ ${organicBlock}
             const seenUrls = new Set(clientPool.map(r => (r.url || '').trim().toLowerCase().replace(/\/$/, '')));
             const seenTitles = new Set(clientPool.map(r => (r.title || '').trim().toLowerCase().replace(/[^\w\s]/g, '')));
 
+            const qPlan = deriveBroadSearchQueries(query.trim());
+            const cleanQ = qPlan.primary;
+            const techQ = qPlan.tech;
+            const wikiQ = qPlan.wiki;
+            const coreQ = qPlan.core;
+
             const addCandidate = (item) => {
               if (!item || !item.url || !item.title) return;
               const normUrl = item.url.trim().toLowerCase().replace(/\/$/, '');
               const normTitle = item.title.trim().toLowerCase().replace(/[^\w\s]/g, '');
+
+              // Filter out irrelevant codename or disambiguation entries (e.g. List of Apple codenames)
+              if (normTitle.includes('listofapplecodenames') && !cleanQ.toLowerCase().includes('apple')) return;
+
               if (seenUrls.has(normUrl) || seenTitles.has(normTitle)) return;
               seenUrls.add(normUrl);
               seenTitles.add(normTitle);
               clientPool.push(item);
             };
 
-            const cleanQ = query.trim();
-            const gnewsRssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQ)}&hl=en-US&gl=US&ceid=US:en`;
+            const gnewsRssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(techQ)}&hl=en-US&gl=US&ceid=US:en`;
             const r2jUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsRssUrl)}`;
-            const hnUrl = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(cleanQ)}&tags=story&hitsPerPage=12`;
-            const wikiEnUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanQ)}&utf8=1&format=json&origin=*`;
-            const wikiIdUrl = `https://id.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanQ)}&utf8=1&format=json&origin=*`;
-            const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(cleanQ)}&format=json&no_html=1&skip_disambig=1`;
+            const hnUrlTech = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(techQ)}&tags=story&hitsPerPage=8`;
+            const hnUrlCore = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(coreQ)}&tags=story&hitsPerPage=6`;
+            const wikiEnUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(wikiQ)}&utf8=1&format=json&origin=*`;
+            const wikiIdUrl = `https://id.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(coreQ)}&utf8=1&format=json&origin=*`;
+            const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(coreQ)}&format=json&no_html=1&skip_disambig=1`;
 
             // Eksekusi seluruh provider secara paralel (Semua bebas API key & CORS friendly)
             await Promise.allSettled([
-              // 1. Google News RSS via RSS2JSON (10 berita live terkini)
+              // 1. Google News RSS via RSS2JSON (8 berita live terkini)
               fetch(r2jUrl).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.items)) {
                   d.items.slice(0, 8).forEach(it => {
@@ -4124,8 +4177,8 @@ ${organicBlock}
                 }
               }).catch(() => {}),
 
-              // 2. HackerNews Algolia Realtime Tech API (Berita teknologi, rilis model AI, blog engineering)
-              fetch(hnUrl).then(r => r.ok ? r.json() : null).then(d => {
+              // 2. HackerNews Algolia Realtime Tech API (techQ & coreQ)
+              fetch(hnUrlTech).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.hits)) {
                   d.hits.slice(0, 8).forEach(h => {
                     const u = h.url || `https://news.ycombinator.com/item?id=${h.objectID}`;
@@ -4142,10 +4195,27 @@ ${organicBlock}
                 }
               }).catch(() => {}),
 
-              // 3. Wikipedia English Full-Text Search (Ensiklopedia global terlengkap)
+              fetch(hnUrlCore).then(r => r.ok ? r.json() : null).then(d => {
+                if (d && Array.isArray(d.hits)) {
+                  d.hits.slice(0, 6).forEach(h => {
+                    const u = h.url || `https://news.ycombinator.com/item?id=${h.objectID}`;
+                    let dName = 'news.ycombinator.com';
+                    try { dName = new URL(u).hostname.replace(/^www\./, ''); } catch (_) {}
+                    addCandidate({
+                      title: h.title,
+                      url: u,
+                      domain: dName,
+                      snippet: `[Tech Wire | Poin: ${h.points || 0} | Komentar: ${h.num_comments || 0}] ${h.title}`,
+                      sourceProvider: 'Tech Wire / HackerNews'
+                    });
+                  });
+                }
+              }).catch(() => {}),
+
+              // 3. Wikipedia English Full-Text Search (Maksimal 2 artikel teratas)
               fetch(wikiEnUrl).then(r => r.ok ? r.json() : null).then(d => {
                 if (d?.query?.search) {
-                  d.query.search.slice(0, 4).forEach(w => {
+                  d.query.search.slice(0, 2).forEach(w => {
                     const u = `https://en.wikipedia.org/wiki/${encodeURIComponent(w.title.replace(/ /g, '_'))}`;
                     const snip = (w.snippet || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
                     addCandidate({
@@ -4159,10 +4229,10 @@ ${organicBlock}
                 }
               }).catch(() => {}),
 
-              // 4. Wikipedia Indonesian Full-Text Search
+              // 4. Wikipedia Indonesian Full-Text Search (Maksimal 2 artikel teratas)
               fetch(wikiIdUrl).then(r => r.ok ? r.json() : null).then(d => {
                 if (d?.query?.search) {
-                  d.query.search.slice(0, 3).forEach(w => {
+                  d.query.search.slice(0, 2).forEach(w => {
                     const u = `https://id.wikipedia.org/wiki/${encodeURIComponent(w.title.replace(/ /g, '_'))}`;
                     const snip = (w.snippet || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
                     addCandidate({
@@ -4519,19 +4589,20 @@ ${organicBlock}
 
   const AUTONOMOUS_SYSTEM_DIRECTIVE = `### KEMAMPUAN OTONOM PENJELAJAHAN WEB MULTI-SUMBER (BUILT-IN ZERO-API):
 Anda memiliki instrumen penjelajah web mandiri berkecepatan tinggi tanpa batasan API (Multi-Source Live Web & Scraper):
-1. search_web(query): Melakukan penelusuran fakta terkini, riset, berita, atau data apa pun di web secara langsung. Sistem secara otomatis menghimpun 10-15+ artikel dari Google News, Tech Wire / HackerNews, portal media, blog resmi teknologi, dan basis pengetahuan global.
+1. search_web(query): Melakukan penelusuran fakta terkini, riset, berita, atau data apa pun di web secara langsung. Sistem secara otomatis menghimpun 10-18+ artikel dari Google News, Tech Wire / HackerNews, portal media, blog resmi teknologi, dan basis pengetahuan global.
 2. browse_web_page(url): Membaca dan menelaah seluruh isi teks artikel atau dokumen web secara mendalam.
 
 INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
 - ANDA SENDIRI YANG MENENTUKAN apakah Anda membutuhkan penelusuran web atau tidak.
 - Jika pengguna menanyakan fakta terkini, perkembangan tahun 2024-2026, berita, produk baru, rilis model AI, atau hal di luar batas pengetahuan dasar Anda:
-  RANCANG DAN RUMUSKAN KUERI PENCARIAN YANG EFEKTIF DAN SPESIFIK SESUAI KEBUTUHAN ANDA (misal: "Anthropic Claude latest updates 2026 features", "Gemini 2.0 release date benchmark", dll.), lalu panggil alat:
+  RANCANG DAN RUMUSKAN KUERI PENCARIAN YANG EFEKTIF, SPESIFIK, DAN RINGKAS DALAM BAHASA INGGRIS AGAR MENJANGKAU PORTAL BERITA GLOBAL RESMI (misal: "Google Gemini AI update", "Anthropic Claude new features", "DeepSeek AI benchmark", dll.), lalu panggil alat:
   search_web("kueri pencarian yang Anda rancang")
   atau
   <tool_call>{"name":"search_web","arguments":{"query":"kueri pencarian yang Anda rancang"}}</tool_call>
 - JIKA Anda TIDAK memerlukan penelusuran web (misal: percakapan biasa, penulisan kode, matematika, penjelasan konsep umum), LANGSUNG jawab pertanyaan pengguna secara alami tanpa memanggil alat.
 - DILARANG KERAS menolak dengan alasan "batas pengetahuan training" atau "cutoff Mei 2024", karena Anda memiliki instrumen penelusuran web ini.
-- Setelah sistem mengeksekusi penelusuran dan menyajikan daftar sumber berita aktual, SINTESISKAN jawaban secara komprehensif, kaya fakta, dan objektif berdasarkan multi-sumber tersebut.
+- DILARANG KERAS MENGARANG ROADMAP, FITUR FIKSI, ATAU PROYEKSI PALSU: Jika data mengenai masa depan (misal: akhir 2026 atau versi model yang belum rilis) tidak terdapat dalam sumber data web yang diberikan, nyatakan secara jujur dan faktual berdasarkan rilis resmi yang ada. Jangan pernah menciptakan rumor fiktif, versi chip/hardware buatan, atau klaim tanpa dasar.
+- Setelah sistem mengeksekusi penelusuran dan menyajikan daftar multi-sumber berita aktual, SINTESISKAN jawaban secara komprehensif, kaya fakta, dan 100% berlandaskan pada multi-sumber tersebut.
 - DILARANG KERAS mencetak JSON mentah atau teks seperti "We will call search_web..." ke dalam jawaban akhir pengguna. Sistem akan mengeksekusi penelusuran Anda di latar belakang dan memberikan datanya kepada Anda untuk Anda cerna sebelum merumuskan jawaban akhir yang komprehensif.`;
 
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
@@ -4904,18 +4975,39 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
       fullText = streamRenderer.finish();
 
       // ==================== OLLAMA AUTONOMOUS MULTI-ROUND DIGESTION ENGINE ====================
-      const maxAutonomousRounds = 4;
+      const maxAutonomousRounds = 2;
       let autonomousRound = 0;
       const conversationChain = [...messagesPayload];
       let currentRoundText = fullText;
       let currentRoundNativeCalls = accumulatedToolCalls;
+      const executedToolSignatures = new Set();
 
       while (autonomousRound < maxAutonomousRounds) {
         if (STATE.abortController?.signal?.aborted) break;
 
         const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
         const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
-        const detectedAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
+        const rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
+
+        // Filter out duplicate or loop tool calls
+        const detectedAutonomousCalls = rawAutonomousCalls.filter(call => {
+          const toolName = call.function.name;
+          if (toolName === 'search_web') {
+            if (executedToolSignatures.has('search_web')) return false; // Prevent repeated search loop
+            return true;
+          }
+          if (toolName === 'browse_web_page') {
+            let targetUrl = '';
+            try {
+              const parsedArgs = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : (call.function.arguments || {});
+              targetUrl = parsedArgs.url || parsedArgs.target || '';
+            } catch (_) {}
+            const sig = `browse:${targetUrl}`;
+            if (executedToolSignatures.has(sig)) return false;
+            return true;
+          }
+          return false;
+        });
 
         if (detectedAutonomousCalls.length === 0) {
           break; // Model selesai merumuskan respon final tanpa pemanggilan tool tambahan
@@ -4935,6 +5027,13 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
           } catch (_) {
             previewArg = String(call.function.arguments || '');
           }
+
+          if (toolName === 'search_web') {
+            executedToolSignatures.add('search_web');
+          } else if (toolName === 'browse_web_page') {
+            executedToolSignatures.add(`browse:${previewArg}`);
+          }
+
           toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
 
           // Visual status loading di gelembung obrolan
@@ -4964,10 +5063,12 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
           conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
         }
 
-        const isLastPossibleRound = autonomousRound >= maxAutonomousRounds;
-        const roundInstruction = isLastPossibleRound
-          ? `[INSTRUKSI FINAL]: Cerna seluruh data di atas dan rangkum respon akhir yang komprehensif, mutakhir, dan detail untuk pengguna TANPA memanggil tool lagi.`
-          : `[INSTRUKSI]: Cerna seluruh data di atas secara mendalam. Jika Anda sudah memiliki cukup data untuk menjawab pengguna secara komprehensif, sajikan respon akhir Anda tanpa tag tool. Jika masih ada fakta tambahan atau URL spesifik yang perlu dibaca mendalam, Anda boleh memanggil 'browse_web_page' atau 'search_web' lagi.`;
+        const roundInstruction = `[INSTRUKSI FINAL]: Seluruh data multi-sumber resmi (Berita Terkini, Tech Wire, Riset, Ensiklopedia) telah lengkap dan disajikan di atas.
+WAJIB: Sajikan jawaban komprehensif, faktual, dan terperinci Anda kepada pengguna SEKARANG JUGA secara langsung TANPA memanggil 'search_web' lagi!
+ATURAN ANTI-HALUSINASI MUTLAK:
+- Dilarang keras mengarang roadmap fiksi, rumor spekulatif, versi chip buatan, atau hal yang tidak ada dalam sumber di atas.
+- Jika ada hal yang belum diumumkan secara resmi atau belum terjadi di sumber data, sampaikan secara jujur dan objektif berdasarkan fakta resmi yang ada.
+- Jangan cetak tag tool atau raw JSON apa pun.`;
 
         conversationChain.push({
           role: 'user',
@@ -5482,18 +5583,39 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
       fullText = streamRenderer.finish();
 
       // ==================== UNIVERSAL AUTONOMOUS MULTI-ROUND DIGESTION ENGINE ====================
-      const maxAutonomousRounds = 4;
+      const maxAutonomousRounds = 2;
       let autonomousRound = 0;
       const conversationChain = [...(activeMessagesPayload || messagesPayload)];
       let currentRoundText = fullText;
       let currentRoundNativeCalls = accumulatedToolCalls;
+      const executedToolSignatures = new Set();
 
       while (autonomousRound < maxAutonomousRounds) {
         if (STATE.abortController?.signal?.aborted) break;
 
         const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
         const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
-        const detectedAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
+        const rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
+
+        // Filter out duplicate or loop tool calls
+        const detectedAutonomousCalls = rawAutonomousCalls.filter(call => {
+          const toolName = call.function.name;
+          if (toolName === 'search_web') {
+            if (executedToolSignatures.has('search_web')) return false; // Prevent repeated search loop
+            return true;
+          }
+          if (toolName === 'browse_web_page') {
+            let targetUrl = '';
+            try {
+              const parsedArgs = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : (call.function.arguments || {});
+              targetUrl = parsedArgs.url || parsedArgs.target || '';
+            } catch (_) {}
+            const sig = `browse:${targetUrl}`;
+            if (executedToolSignatures.has(sig)) return false;
+            return true;
+          }
+          return false;
+        });
 
         if (detectedAutonomousCalls.length === 0) {
           break; // Model selesai merumuskan respon final tanpa pemanggilan tool tambahan
@@ -5513,6 +5635,13 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
           } catch (_) {
             previewArg = String(call.function.arguments || '');
           }
+
+          if (toolName === 'search_web') {
+            executedToolSignatures.add('search_web');
+          } else if (toolName === 'browse_web_page') {
+            executedToolSignatures.add(`browse:${previewArg}`);
+          }
+
           toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
 
           // Visual status loading di gelembung obrolan
@@ -5543,10 +5672,12 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
           conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
         }
 
-        const isLastPossibleRound = autonomousRound >= maxAutonomousRounds;
-        const roundInstruction = isLastPossibleRound
-          ? `[INSTRUKSI FINAL]: Cerna seluruh data di atas dan rangkum respon akhir yang komprehensif, mutakhir, dan detail untuk pengguna TANPA memanggil tool lagi.`
-          : `[INSTRUKSI]: Cerna seluruh data di atas secara mendalam. Jika Anda sudah memiliki cukup data untuk menjawab pengguna secara komprehensif, sajikan respon akhir Anda tanpa tag tool. Jika masih ada fakta tambahan atau URL spesifik yang perlu dibaca mendalam, Anda boleh memanggil 'browse_web_page' atau 'search_web' lagi.`;
+        const roundInstruction = `[INSTRUKSI FINAL]: Seluruh data multi-sumber resmi (Berita Terkini, Tech Wire, Riset, Ensiklopedia) telah lengkap dan disajikan di atas.
+WAJIB: Sajikan jawaban komprehensif, faktual, dan terperinci Anda kepada pengguna SEKARANG JUGA secara langsung TANPA memanggil 'search_web' lagi!
+ATURAN ANTI-HALUSINASI MUTLAK:
+- Dilarang keras mengarang roadmap fiksi, rumor spekulatif, versi chip buatan, atau hal yang tidak ada dalam sumber di atas.
+- Jika ada hal yang belum diumumkan secara resmi atau belum terjadi di sumber data, sampaikan secara jujur dan objektif berdasarkan fakta resmi yang ada.
+- Jangan cetak tag tool atau raw JSON apa pun.`;
 
         conversationChain.push({
           role: 'user',

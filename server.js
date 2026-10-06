@@ -976,6 +976,49 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
 // Engine pencarian multi-sumber mandiri tanpa API berbayar (Zero-API / No Serper Key required)
 // Menghimpun 10-18 sumber simultan: Google News RSS, Tech Wire / HackerNews, Wikipedia Global, Wikipedia ID, & DuckDuckGo Instant
 
+function deriveBroadSearchQueries(rawQuery) {
+  if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', wiki: '', core: '' };
+  const lower = rawQuery.toLowerCase();
+
+  let entity = '';
+  if (lower.includes('gemini')) entity = 'Google Gemini';
+  else if (lower.includes('claude') || lower.includes('antropic') || lower.includes('anthropich')) entity = 'Anthropic Claude';
+  else if (lower.includes('chatgpt') || lower.includes('gpt') || lower.includes('openai') || lower.includes('o1') || lower.includes('o3')) entity = 'OpenAI ChatGPT';
+  else if (lower.includes('deepseek') || lower.includes('r1') || lower.includes('v3')) entity = 'DeepSeek AI';
+  else if (lower.includes('llama') || lower.includes('meta ai')) entity = 'Meta Llama';
+  else if (lower.includes('qwen') || lower.includes('tongyi')) entity = 'Alibaba Qwen';
+  else if (lower.includes('mistral') || lower.includes('le chat')) entity = 'Mistral AI';
+  else if (lower.includes('gemma')) entity = 'Google Gemma';
+  else if ((lower.includes('apple') && lower.includes('ai')) || lower.includes('apple intelligence')) entity = 'Apple Intelligence';
+  else if (lower.includes('copilot')) entity = 'Microsoft Copilot';
+  else if (lower.includes('perplexity')) entity = 'Perplexity AI';
+  else if (lower.includes('midjourney')) entity = 'Midjourney AI';
+  else if (lower.includes('sora')) entity = 'OpenAI Sora';
+  else if (lower.includes('flux')) entity = 'FLUX AI';
+
+  const stopWords = [
+    'update', 'updates', 'terbaru', 'terkini', 'apa', 'itu', 'bagaimana', 'perkembangan',
+    'berita', 'tentang', 'fitur', 'baru', 'informasi', 'info', 'roadmap', 'bocoran',
+    'release', 'changelog', 'saat', 'ini', 'sekarang', 'apakah', 'ada', 'model',
+    'tahun', 'di', 'ke', 'dari', 'yang', 'dan', 'atau', 'pada', 'untuk'
+  ];
+
+  let cleaned = rawQuery;
+  stopWords.forEach(w => {
+    cleaned = cleaned.replace(new RegExp(`\\b${w}\\b`, 'gi'), ' ');
+  });
+  cleaned = cleaned.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  const coreSubject = entity || (cleaned.length >= 3 ? cleaned : rawQuery.trim());
+
+  return {
+    primary: rawQuery.trim(),
+    tech: `${coreSubject} AI update`,
+    wiki: `${coreSubject} AI`,
+    core: coreSubject
+  };
+}
+
 function cleanHtmlText(str) {
   if (!str || typeof str !== 'string') return '';
   return str
@@ -1174,22 +1217,28 @@ async function performAutonomousSearch(query, maxResults = 15) {
   if (!query || typeof query !== 'string' || !query.trim()) {
     return { query: '', count: 0, results: [] };
   }
-  const cleanQuery = query.trim();
+  const qPlan = deriveBroadSearchQueries(query.trim());
+  const cleanQuery = qPlan.primary;
+  const techQuery = qPlan.tech;
+  const wikiQuery = qPlan.wiki;
+  const coreQuery = qPlan.core;
 
-  // Eksekusi seluruh provider secara paralel (Zero-API / No Key required)
-  const [gnewsEn, gnewsId, hnTech, wikiEn, wikiId, ddgInstant] = await Promise.allSettled([
-    fetchGoogleNewsRss(cleanQuery, 'en', 8),
-    fetchGoogleNewsRss(cleanQuery, 'id', 4),
-    fetchHackerNewsTech(cleanQuery, 8),
-    fetchWikipediaFullText(cleanQuery, 'en', 4),
-    fetchWikipediaFullText(cleanQuery, 'id', 3),
-    fetchDuckDuckGoInstant(cleanQuery)
+  // Eksekusi seluruh provider secara paralel dengan query yang dinormalisasi cerdas
+  const [gnewsTech, gnewsPrimary, hnTech, hnCore, wikiEn, wikiId, ddgInstant] = await Promise.allSettled([
+    fetchGoogleNewsRss(techQuery, 'en', 8),
+    fetchGoogleNewsRss(cleanQuery, 'en', 6),
+    fetchHackerNewsTech(techQuery, 8),
+    fetchHackerNewsTech(coreQuery, 6),
+    fetchWikipediaFullText(wikiQuery, 'en', 4),
+    fetchWikipediaFullText(coreQuery, 'id', 3),
+    fetchDuckDuckGoInstant(coreQuery)
   ]);
 
   const candidatePool = [];
-  if (gnewsEn.status === 'fulfilled') candidatePool.push(...gnewsEn.value);
-  if (gnewsId.status === 'fulfilled') candidatePool.push(...gnewsId.value);
+  if (gnewsTech.status === 'fulfilled') candidatePool.push(...gnewsTech.value);
+  if (gnewsPrimary.status === 'fulfilled') candidatePool.push(...gnewsPrimary.value);
   if (hnTech.status === 'fulfilled') candidatePool.push(...hnTech.value);
+  if (hnCore.status === 'fulfilled') candidatePool.push(...hnCore.value);
   if (wikiEn.status === 'fulfilled') candidatePool.push(...wikiEn.value);
   if (wikiId.status === 'fulfilled') candidatePool.push(...wikiId.value);
   if (ddgInstant.status === 'fulfilled') candidatePool.push(...ddgInstant.value);
@@ -1203,6 +1252,9 @@ async function performAutonomousSearch(query, maxResults = 15) {
     if (!item.url || !item.title) continue;
     const normUrl = item.url.trim().toLowerCase().replace(/\/$/, '');
     const normTitle = item.title.trim().toLowerCase().replace(/[^\w\s]/g, '');
+
+    // Filter out irrelevant disambiguation or unrelated codenames
+    if (normTitle.includes('listofapplecodenames') && !cleanQuery.toLowerCase().includes('apple')) continue;
 
     if (seenUrls.has(normUrl) || seenTitles.has(normTitle)) continue;
     seenUrls.add(normUrl);
