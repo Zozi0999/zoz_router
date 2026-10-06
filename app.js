@@ -2469,7 +2469,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           els.promptInput.value = newText;
           if (image) STATE.attachedImage = image;
           handleSendPrompt();
-          showToast('Prompt diperbarui & dikirim ulang!');
         };
 
         editorBox.querySelector('.save-edit-btn').addEventListener('click', doSaveAndResend);
