@@ -149,7 +149,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     currentLiveInspection: null,
     openRouterBalance: null, // { totalCredits, totalUsage, remaining, isFreeTier, lastChecked }
     ollamaBalance: null, // { currentBalance, freeUsage, lastChecked }
-    ollamaStatus: { online: true, modelCount: 0, lastChecked: null }
+    ollamaStatus: { online: true, modelCount: 0, lastChecked: null },
+    isPromptHidden: false
   };
 
   // ==================== AUDIO SYNTHESIZER (Sci-Fi Cyber Blips) ====================
@@ -258,6 +259,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     appContainer: $('.app-container'),
     
     // Input / Composer & Unified Attachments
+    mainComposerContainer: $('#mainComposerContainer'),
+    composerCrownRow: $('#composerCrownRow'),
+    neutronCrownBtn: $('#neutronCrownBtn'),
+    neutronCrownTooltip: $('#neutronCrownTooltip'),
     promptInput: $('#promptInput'),
     sendPromptBtn: $('#sendPromptBtn'),
     stopGenerationBtn: $('#stopGenerationBtn'),
@@ -898,6 +903,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       const savedSearchMode = localStorage.getItem('zoz_router_search_mode_v1');
       if (savedSearchMode && ['off', 'default', 'premium'].includes(savedSearchMode)) {
         STATE.searchMode = savedSearchMode;
+      }
+      const savedPromptHidden = localStorage.getItem('zoz_prompt_hidden');
+      if (savedPromptHidden !== null) {
+        STATE.isPromptHidden = savedPromptHidden === 'true';
       }
 
       // 1. Initialize Device-First Storage
@@ -7019,6 +7028,56 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     }
   }
 
+  function togglePromptVisibility(forceState) {
+    if (typeof forceState === 'boolean') {
+      STATE.isPromptHidden = forceState;
+    } else {
+      STATE.isPromptHidden = !STATE.isPromptHidden;
+    }
+
+    updatePromptVisibilityUI(false);
+
+    try {
+      localStorage.setItem('zoz_prompt_hidden', STATE.isPromptHidden ? 'true' : 'false');
+    } catch (_) {}
+
+    AudioEngine.click();
+    if (navigator.vibrate) {
+      try { navigator.vibrate(25); } catch (_) {}
+    }
+  }
+
+  function updatePromptVisibilityUI(silent = false) {
+    const isHidden = Boolean(STATE.isPromptHidden);
+    if (els.mainComposerContainer) {
+      els.mainComposerContainer.classList.toggle('composer-collapsed', isHidden);
+    }
+
+    if (els.neutronCrownBtn) {
+      els.neutronCrownBtn.classList.toggle('state-blue', isHidden);
+      els.neutronCrownBtn.classList.toggle('state-red', !isHidden);
+      const titleText = isHidden ? 'Tampilkan Prompt (Alt+H)' : 'Sembunyikan Prompt (Alt+H)';
+      els.neutronCrownBtn.setAttribute('title', titleText);
+      els.neutronCrownBtn.setAttribute('aria-label', titleText);
+    }
+
+    if (els.neutronCrownTooltip) {
+      els.neutronCrownTooltip.textContent = isHidden ? 'Tampilkan Prompt' : 'Sembunyikan Prompt';
+    }
+
+    if (!silent) {
+      if (isHidden) {
+        showToast('🔒 Tampilan Prompt Disembunyikan (Klik bola neutron untuk menampilkan)');
+      } else {
+        showToast('🔓 Tampilan Prompt Ditampilkan');
+        setTimeout(() => {
+          els.promptInput?.focus();
+          autoResizeTextarea(els.promptInput);
+        }, 60);
+      }
+    }
+  }
+
   async function runImageGeneration(session, promptText, customModel = null) {
     if (!promptText || !promptText.trim()) return;
     const cleanPrompt = promptText.trim();
@@ -9237,6 +9296,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     });
 
     els.stopGenerationBtn.addEventListener('click', stopGeneration);
+    els.neutronCrownBtn?.addEventListener('click', () => togglePromptVisibility());
 
     els.promptInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -9579,8 +9639,14 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
     });
 
-    // Keyboard shortcut: Alt+I to toggle Image Studio mode
+    // Keyboard shortcuts: Alt+I (Image Mode) & Alt+H (Toggle Prompt Visibility)
     document.addEventListener('keydown', (e) => {
+      if (e.altKey && (e.key === 'h' || e.key === 'H')) {
+        e.preventDefault();
+        togglePromptVisibility();
+        return;
+      }
+
       if (e.altKey && (e.key === 'i' || e.key === 'I')) {
         e.preventDefault();
         STATE.isImageGenMode = !STATE.isImageGenMode;
@@ -9603,6 +9669,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     // Quick Hero Prompts
     $$('.quick-prompt-card').forEach(card => {
       card.addEventListener('click', () => {
+        if (STATE.isPromptHidden) {
+          togglePromptVisibility(false);
+        }
         els.promptInput.value = card.dataset.prompt;
         autoResizeTextarea(els.promptInput);
         els.promptInput.focus();
@@ -10288,6 +10357,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     updateSearchModeUI();
     updateImageGenModeUI();
     autoResizeTextarea(els.promptInput);
+    updatePromptVisibilityUI(true);
 
     // Restore desktop sidebar collapsed preference
     if (window.innerWidth > 768) {
