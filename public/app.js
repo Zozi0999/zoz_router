@@ -4362,12 +4362,7 @@ ${organicBlock}
         bubbleText.querySelector('.switch-openrouter-btn')?.addEventListener('click', () => {
           assistantRow.remove();
           setEngineMode('openrouter');
-          if (!STATE.settings.openRouterKey) {
-            openModal('settingsModal');
-            showToast('Silakan masukkan OpenRouter API Key Anda di menu Pengaturan.', 'info');
-          } else {
-            runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
-          }
+          runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
         });
 
         bubbleText.querySelector('.retry-send-btn')?.addEventListener('click', () => {
@@ -4390,8 +4385,62 @@ ${organicBlock}
   // --- OPENROUTER STREAMING EXECUTION ---
   async function runOpenRouterStreaming(session, promptText, image, modelName) {
     if (!STATE.settings.openRouterKey) {
-      showToast('OpenRouter API Key diperlukan! Buka Pengaturan untuk mengisi.', 'error');
-      openModal('settingsModal');
+      const assistantRow = appendMessageElement('assistant', '', null, modelName || 'OpenRouter Gateway');
+      const bubbleText = assistantRow.querySelector('.msg-text-content');
+      
+      bubbleText.innerHTML = `
+        <div style="background:rgba(255,82,0,0.08); border:1px solid rgba(255,82,0,0.3); border-radius:10px; padding:14px 16px; margin:4px 0;">
+          <div style="display:flex; align-items:center; gap:8px; color:var(--neon-amber); font-weight:700; margin-bottom:8px; font-size:0.95rem;">
+            <i class="fa-solid fa-key"></i> OpenRouter API Key Belum Terpasang
+          </div>
+          <p style="margin:0 0 12px 0; font-size:0.85rem; color:var(--text-muted); line-height:1.5;">
+            Untuk menjalankan model cloud OpenRouter (<strong>${escapeHtml(modelName || 'Model Cloud')}</strong>), masukkan API Key OpenRouter Anda di menu Pengaturan. Kunci tersimpan aman di perangkat lokal Anda.
+          </p>
+          <div style="display:flex; flex-wrap:wrap; gap:8px;">
+            <button class="btn btn-sm btn-primary open-settings-key-btn" style="font-size:0.78rem;">
+              <i class="fa-solid fa-gear"></i> Buka Pengaturan & Masukkan API Key
+            </button>
+            <button class="btn btn-sm btn-outline retry-openrouter-btn" style="border-color:var(--neon-amber); color:var(--neon-amber); font-size:0.78rem;">
+              <i class="fa-solid fa-rotate-right"></i> Coba Kirim Ulang
+            </button>
+            <button class="btn btn-sm btn-outline switch-ollama-btn" style="border-color:var(--neon-cyan); color:var(--neon-cyan); font-size:0.78rem;">
+              <i class="fa-solid fa-microchip"></i> Beralih ke Ollama (Lokal)
+            </button>
+            <button class="btn btn-sm btn-outline cancel-turn-btn" style="border-color:var(--text-dim); color:var(--text-muted); font-size:0.78rem;">
+              <i class="fa-solid fa-trash-can"></i> Hapus Pesan Ini
+            </button>
+          </div>
+        </div>
+      `;
+
+      bubbleText.querySelector('.open-settings-key-btn')?.addEventListener('click', () => {
+        syncSettingsModalFields();
+        openModal('settingsModal');
+      });
+
+      bubbleText.querySelector('.retry-openrouter-btn')?.addEventListener('click', () => {
+        assistantRow.remove();
+        runOpenRouterStreaming(session, promptText, image, modelName);
+      });
+
+      bubbleText.querySelector('.switch-ollama-btn')?.addEventListener('click', () => {
+        assistantRow.remove();
+        setEngineMode('ollama');
+        runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel);
+      });
+
+      bubbleText.querySelector('.cancel-turn-btn')?.addEventListener('click', () => {
+        assistantRow.remove();
+        const lastMsgIdx = session.messages.length - 1;
+        if (lastMsgIdx >= 0 && session.messages[lastMsgIdx].role === 'user') {
+          session.messages.splice(lastMsgIdx, 1);
+          savePersistedState();
+          renderCurrentSession();
+        }
+      });
+
+      AudioEngine.error();
+      smartScrollChatToBottom(true);
       return;
     }
 
