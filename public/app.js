@@ -1804,7 +1804,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     savePersistedState();
     renderChatHistory();
     renderCurrentSession();
-    showToast('Percakapan berhasil dihapus dari perangkat.');
     AudioEngine.click();
   }
 
@@ -7063,13 +7062,12 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (els.neutronCrownBtn) {
       els.neutronCrownBtn.classList.toggle('state-blue', isHidden);
       els.neutronCrownBtn.classList.toggle('state-red', !isHidden);
-      const titleText = isHidden ? 'Tampilkan Prompt (Alt+H)' : 'Sembunyikan Prompt (Alt+H)';
-      els.neutronCrownBtn.setAttribute('title', titleText);
-      els.neutronCrownBtn.setAttribute('aria-label', titleText);
+      els.neutronCrownBtn.removeAttribute('title');
+      els.neutronCrownBtn.removeAttribute('aria-label');
     }
 
     if (els.neutronCrownTooltip) {
-      els.neutronCrownTooltip.textContent = isHidden ? 'Tampilkan Prompt' : 'Sembunyikan Prompt';
+      els.neutronCrownTooltip.remove();
     }
 
     if (!silent && !isHidden) {
@@ -9364,7 +9362,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         await DeviceStorage.clearAllSessions();
         savePersistedState();
         createNewSession();
-        showToast('Semua riwayat dibersihkan dari perangkat.');
         AudioEngine.click();
       }
     });
