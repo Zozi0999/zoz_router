@@ -4404,21 +4404,21 @@ ${organicBlock}
     return calls;
   }
 
-  const AUTONOMOUS_SYSTEM_DIRECTIVE = `### INSTRUMEN PENJELAJAHAN WEB OTONOM (AUTONOMOUS WEB EXPLORER - ZERO API):
-Anda memiliki instrumen penjelajahan internet mandiri yang dibangun khusus dari nol (Zero-API DuckDuckGo & Web Scraper tanpa batasan API):
-1. search_web(query): Cari fakta terkini, riset, berita, atau data apa pun di web secara live.
-2. browse_web_page(url): Buka URL spesifik dan baca teks bersih dokumen web hingga 5.000 karakter untuk Anda cerna secara mendalam.
+  const AUTONOMOUS_SYSTEM_DIRECTIVE = `### KEMAMPUAN OTONOM PENJELAJAHAN WEB (BUILT-IN ZERO-API):
+Anda memiliki instrumen penjelajah web mandiri tanpa batasan API (DuckDuckGo Live & Web Scraper):
+1. search_web(query): Melakukan penelusuran fakta terkini, riset, berita, atau data apa pun di web secara langsung.
+2. browse_web_page(url): Membaca dan menelaah isi teks bersih dokumen web secara mendalam.
 
-PANDUAN EKSEKUSI OTONOM & ATURAN MUTLAK ANTI-HALUSINASI:
-- JIKA ANDA DITANYA MENGENAI PERISTIWA, PRODUK, VERSI, DOKUMENTASI, ATAU PERKEMBANGAN TAHUN 2025/2026:
-  DILARANG KERAS MENOLAK DENGAN ALASAN "BATAS PENGETAHUAN TRAINING" ATAU "KUTIPAN CUTOFF MEI 2024"!
-- DILARANG KERAS MENCETAK JSON MENTAH, FORMAT TEKNIS ALAT, ATAU TEKS SEPERTI "We will call search_web..." KE DALAM RESPON PENGGUNA!
-- Jika Anda butuh mencari info atau membaca URL spesifik, PANGGIL ALAT MENGGUNAKAN SALAH SATU FORMAT BERIKUT (sistem akan mengeksekusinya secara otomatis di latar belakang):
-  search_web("kata kunci spesifik")
+INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
+- ANDA SENDIRI YANG MENENTUKAN apakah Anda membutuhkan penelusuran web atau tidak.
+- Jika pengguna menanyakan fakta terkini, peristiwa 2025/2026, berita, produk baru, atau hal di luar batas pengetahuan dasar Anda:
+  RANCANG DAN RUMUSKAN KUERI PENCARIAN YANG EFEKTIF DAN SPESIFIK SESUAI KEBUTUHAN ANDA, lalu panggil alat:
+  search_web("kueri pencarian yang Anda rancang")
   atau
-  <tool_call>{"name":"search_web","arguments":{"query":"kata kunci spesifik"}}</tool_call>
-- Jawab pertanyaan HANYA berdasarkan data faktual yang didapat dari penelusuran web. DILARANG MENGARANG fakta, tanggal, atau nomor versi yang tidak tercantum dalam sumber data!
-- Setelah data web diterima, cerna dan berikan jawaban yang ramah, komprehensif, dan rapi dalam bahasa Indonesia tanpa membocorkan kode pemanggilan alat internal.`;
+  <tool_call>{"name":"search_web","arguments":{"query":"kueri pencarian yang Anda rancang"}}</tool_call>
+- JIKA Anda TIDAK memerlukan penelusuran web (misal: percakapan biasa, penulisan kode, matematika, penjelasan konsep umum), LANGSUNG jawab pertanyaan pengguna secara alami tanpa memanggil alat.
+- DILARANG KERAS menolak dengan alasan "batas pengetahuan training" atau "cutoff Mei 2024", karena Anda memiliki instrumen penelusuran web ini.
+- DILARANG KERAS mencetak JSON mentah atau teks seperti "We will call search_web..." ke dalam jawaban akhir pengguna. Sistem akan mengeksekusi penelusuran Anda di latar belakang dan memberikan datanya kepada Anda untuk Anda cerna sebelum merumuskan jawaban akhir yang komprehensif.`;
 
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
     const isSearch = toolName === 'search_web';
@@ -4683,57 +4683,13 @@ PANDUAN EKSEKUSI OTONOM & ATURAN MUTLAK ANTI-HALUSINASI:
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
-      let systemContent = personaPrompt;
-
-      // If Web Search is enabled or autonomous search intent detected
-      const hasAutonomousIntent = STATE.searchMode === 'autonomous' ||
-        /\b(cari|search|brows|jelajah|googl|duckduckgo|berita|info terkini|update|link|url|buka web|baca web|rangkum web|artikel|situs|https?:\/\/)\b/i.test(promptText);
-
-      if (STATE.searchMode === 'autonomous' || hasAutonomousIntent) {
-        systemContent = systemContent ? `${systemContent}\n\n${AUTONOMOUS_SYSTEM_DIRECTIVE}` : AUTONOMOUS_SYSTEM_DIRECTIVE;
-
-        // Proactive Upfront Web Search in Autonomous Mode (Zero-API DuckDuckGo / Scraper)
-        try {
-          const derived = deriveAutonomousTarget(promptText, session);
-          const autoToolName = derived.toolName;
-          const autoTarget = derived.target;
-
-          bubbleText.innerHTML = createAutonomousToolHudHtml(autoToolName, autoTarget, 'loading');
-          smartScrollChatToBottom(true);
-
-          const autoToolRes = await executeAutonomousWebTool(autoToolName, autoTarget);
-          if (autoToolRes && autoToolRes.text) {
-            if (autoToolRes.sources && Array.isArray(autoToolRes.sources)) {
-              if (!webSources) webSources = [];
-              webSources.push(...autoToolRes.sources);
-            }
-            executedHudHtml += createAutonomousToolHudHtml(autoToolName, autoTarget, 'done');
-            bubbleText.innerHTML = executedHudHtml + '<span class="typing-cursor"></span>';
-            smartScrollChatToBottom(true);
-
-            systemContent += `\n\n### HASIL PENJELAJAHAN WEB OTONOM (ZERO-API REAL-TIME):\n${autoToolRes.text}\n\n[INSTRUKSI MUTLAK]: Anda TELAH diberikan data pencarian web real-time aktual di atas. Jawab pertanyaan pengguna secara komprehensif, faktual, dan mendalam berdasarkan data di atas. DILARANG KERAS menolak atau menyatakan cutoff pengetahuan training! Jika Anda masih membutuhkan data pelengkap atau URL spesifik lain, Anda bebas memanggil 'search_web' atau 'browse_web_page' lagi.`;
-          }
-        } catch (autoErr) {
-          console.warn('[Autonomous Pre-Search Error]', autoErr);
-        }
-      } else if (STATE.webSearchEnabled) {
-        const webRes = await getWebSearchContext(promptText, session, bubbleText);
-        if (webRes && webRes.systemPromptContext) {
-          systemContent = personaPrompt 
-            ? `### SYSTEM PERSONA & CORE DIRECTIVE:\n${personaPrompt}\n\n### REAL-TIME GOOGLE SEARCH GROUNDING DATA:\n${webRes.systemPromptContext}` 
-            : webRes.systemPromptContext;
-          webSources = webRes.sources;
-        }
-        bubbleText.innerHTML = '<span class="typing-cursor"></span>';
-      }
+      let systemContent = personaPrompt ? `${personaPrompt}\n\n${AUTONOMOUS_SYSTEM_DIRECTIVE}` : AUTONOMOUS_SYSTEM_DIRECTIVE;
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
       try {
         const ytRes = await getYouTubeGroundingContext(promptText, bubbleText);
         if (ytRes && ytRes.groundingContext) {
-          systemContent = systemContent 
-            ? `${systemContent}\n\n${ytRes.groundingContext}`
-            : ytRes.groundingContext;
+          systemContent = `${systemContent}\n\n${ytRes.groundingContext}`;
           bubbleText.innerHTML = '<span class="typing-cursor"></span>';
         }
       } catch (ytErr) {
@@ -5172,57 +5128,13 @@ PANDUAN EKSEKUSI OTONOM & ATURAN MUTLAK ANTI-HALUSINASI:
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
-      let systemContent = personaPrompt;
-
-      // If Web Search is enabled or autonomous search intent detected
-      const hasAutonomousIntent = STATE.searchMode === 'autonomous' ||
-        /\b(cari|search|brows|jelajah|googl|duckduckgo|berita|info terkini|update|link|url|buka web|baca web|rangkum web|artikel|situs|https?:\/\/)\b/i.test(promptText);
-
-      if (STATE.searchMode === 'autonomous' || hasAutonomousIntent) {
-        systemContent = systemContent ? `${systemContent}\n\n${AUTONOMOUS_SYSTEM_DIRECTIVE}` : AUTONOMOUS_SYSTEM_DIRECTIVE;
-
-        // Proactive Upfront Web Search in Autonomous Mode (Zero-API DuckDuckGo / Scraper)
-        try {
-          const derived = deriveAutonomousTarget(promptText, session);
-          const autoToolName = derived.toolName;
-          const autoTarget = derived.target;
-
-          bubbleText.innerHTML = createAutonomousToolHudHtml(autoToolName, autoTarget, 'loading');
-          smartScrollChatToBottom(true);
-
-          const autoToolRes = await executeAutonomousWebTool(autoToolName, autoTarget);
-          if (autoToolRes && autoToolRes.text) {
-            if (autoToolRes.sources && Array.isArray(autoToolRes.sources)) {
-              if (!webSources) webSources = [];
-              webSources.push(...autoToolRes.sources);
-            }
-            executedHudHtml += createAutonomousToolHudHtml(autoToolName, autoTarget, 'done');
-            bubbleText.innerHTML = executedHudHtml + '<span class="typing-cursor"></span>';
-            smartScrollChatToBottom(true);
-
-            systemContent += `\n\n### HASIL PENJELAJAHAN WEB OTONOM (ZERO-API REAL-TIME):\n${autoToolRes.text}\n\n[INSTRUKSI MUTLAK]: Anda TELAH diberikan data pencarian web real-time aktual di atas. Jawab pertanyaan pengguna secara komprehensif, faktual, dan mendalam berdasarkan data di atas. DILARANG KERAS menolak atau menyatakan cutoff pengetahuan training! Jika Anda masih membutuhkan data pelengkap atau URL spesifik lain, Anda bebas memanggil 'search_web' atau 'browse_web_page' lagi.`;
-          }
-        } catch (autoErr) {
-          console.warn('[Autonomous Pre-Search Error]', autoErr);
-        }
-      } else if (STATE.webSearchEnabled) {
-        const webRes = await getWebSearchContext(promptText, session, bubbleText);
-        if (webRes && webRes.systemPromptContext) {
-          systemContent = personaPrompt 
-            ? `### SYSTEM PERSONA & CORE DIRECTIVE:\n${personaPrompt}\n\n### REAL-TIME GOOGLE SEARCH GROUNDING DATA:\n${webRes.systemPromptContext}` 
-            : webRes.systemPromptContext;
-          webSources = webRes.sources;
-        }
-        bubbleText.innerHTML = '<span class="typing-cursor"></span>';
-      }
+      let systemContent = personaPrompt ? `${personaPrompt}\n\n${AUTONOMOUS_SYSTEM_DIRECTIVE}` : AUTONOMOUS_SYSTEM_DIRECTIVE;
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
       try {
         const ytRes = await getYouTubeGroundingContext(promptText, bubbleText);
         if (ytRes && ytRes.groundingContext) {
-          systemContent = systemContent 
-            ? `${systemContent}\n\n${ytRes.groundingContext}`
-            : ytRes.groundingContext;
+          systemContent = `${systemContent}\n\n${ytRes.groundingContext}`;
           bubbleText.innerHTML = '<span class="typing-cursor"></span>';
         }
       } catch (ytErr) {
