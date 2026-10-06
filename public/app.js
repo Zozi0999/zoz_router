@@ -4032,14 +4032,20 @@ ${organicBlock}
     }
   ];
 
-  function deriveBroadSearchQueries(rawQuery) {
-    if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', wiki: '', core: '' };
-    const lower = rawQuery.toLowerCase();
+  function deriveBroadSearchQueries(rawQuery, contextText = '') {
+    if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', news: '', recentNews: '', core: '' };
+    const combined = (rawQuery + ' ' + (contextText || '')).trim();
+    const lower = combined.toLowerCase();
+
+    // Deteksi nomor versi spesifik jika ada (misal: 4.7, 3.5, 4o, v3, 2.0)
+    const versionMatch = combined.match(/\b(?:v|version)?\s*([0-9]+(?:\.[0-9]+)+[a-z]?|[0-9]+[a-z]?)\b/i);
+    const version = versionMatch ? versionMatch[1] : '';
 
     let entity = '';
-    if (lower.includes('gemini')) entity = 'Google Gemini';
-    else if (lower.includes('claude') || lower.includes('antropic') || lower.includes('anthropich')) entity = 'Anthropic Claude';
-    else if (lower.includes('chatgpt') || lower.includes('gpt') || lower.includes('openai') || lower.includes('o1') || lower.includes('o3')) entity = 'OpenAI ChatGPT';
+    if (lower.includes('grok') || lower.includes('xai') || lower.includes('x.ai') || lower.includes('supergrok')) entity = 'xAI Grok';
+    else if (lower.includes('gemini')) entity = 'Google Gemini';
+    else if (lower.includes('claude') || lower.includes('antropic') || lower.includes('anthropic')) entity = 'Anthropic Claude';
+    else if (lower.includes('chatgpt') || lower.includes('gpt') || lower.includes('openai') || lower.includes('o1') || lower.includes('o3') || lower.includes('o4')) entity = 'OpenAI ChatGPT';
     else if (lower.includes('deepseek') || lower.includes('r1') || lower.includes('v3')) entity = 'DeepSeek AI';
     else if (lower.includes('llama') || lower.includes('meta ai')) entity = 'Meta Llama';
     else if (lower.includes('qwen') || lower.includes('tongyi')) entity = 'Alibaba Qwen';
@@ -4052,30 +4058,39 @@ ${organicBlock}
     else if (lower.includes('sora')) entity = 'OpenAI Sora';
     else if (lower.includes('flux')) entity = 'FLUX AI';
 
+    // Gabungkan entitas dengan versi jika ada (misal: xAI Grok 4.7)
+    if (entity && version && !entity.toLowerCase().includes(version.toLowerCase())) {
+      entity = `${entity} ${version}`;
+    }
+
     const stopWords = [
       'update', 'updates', 'terbaru', 'terkini', 'apa', 'itu', 'bagaimana', 'perkembangan',
       'berita', 'tentang', 'fitur', 'baru', 'informasi', 'info', 'roadmap', 'bocoran',
       'release', 'changelog', 'saat', 'ini', 'sekarang', 'apakah', 'ada', 'model',
-      'tahun', 'di', 'ke', 'dari', 'yang', 'dan', 'atau', 'pada', 'untuk'
+      'tahun', 'di', 'ke', 'dari', 'yang', 'dan', 'atau', 'pada', 'untuk',
+      'cari', 'carikan', 'sumber', 'sumbernya', 'lagi', 'coba', 'bukti', 'buktinya', 'resmi',
+      'web', 'internet', 'google', 'tolong', 'bantu', 'mana', 'dong', 'search', 'find', 'sources',
+      'proof', 'official'
     ];
 
     let cleaned = rawQuery;
     stopWords.forEach(w => {
       cleaned = cleaned.replace(new RegExp(`\\b${w}\\b`, 'gi'), ' ');
     });
-    cleaned = cleaned.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    cleaned = cleaned.replace(/[^\w\s\.]/g, ' ').replace(/\s+/g, ' ').trim();
 
-    const coreSubject = entity || (cleaned.length >= 3 ? cleaned : rawQuery.trim());
+    const coreSubject = entity || (cleaned.length >= 2 ? cleaned : rawQuery.trim());
 
     return {
       primary: rawQuery.trim(),
       tech: `${coreSubject} AI update`,
       news: `${coreSubject} latest news`,
+      recentNews: `${coreSubject} when:30d`,
       core: coreSubject
     };
   }
 
-  async function executeAutonomousWebTool(toolName, rawArgs) {
+  async function executeAutonomousWebTool(toolName, rawArgs, promptContext = '', session = null) {
     try {
       let args = {};
       if (typeof rawArgs === 'string') {
@@ -4102,9 +4117,16 @@ ${organicBlock}
       }
       
       if (toolName === 'search_web') {
-        const query = args.query || args.q || args.keyword || args.search || args.topic || args.text || (typeof args === 'string' ? args : '');
-        if (!query.trim()) return { text: 'Error: Parameter `query` tidak boleh kosong.', sources: [] };
+        let query = args.query || args.q || args.keyword || args.search || args.topic || args.text || (typeof args === 'string' ? args : '');
+        if (!query || !query.trim()) {
+          query = promptContext || 'AI updates';
+        }
         
+        let effectiveContext = promptContext || '';
+        if (!effectiveContext && session?.messages?.length > 0) {
+          effectiveContext = session.messages.slice(-3).map(m => m.content || '').join(' ');
+        }
+
         let results = [];
         // Coba endpoint backend lokal/tunnel terlebih dahulu (Multi-source live aggregator)
         try {
@@ -4113,29 +4135,29 @@ ${organicBlock}
           const res = await fetch('/api/tools/search-web', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: query.trim(), maxResults: 15 }),
+            body: JSON.stringify({ query: query.trim(), context: effectiveContext, maxResults: 15 }),
             signal: controller.signal
           });
           clearTimeout(timeoutId);
           if (res.ok) {
             const data = await res.json();
-            if (Array.isArray(data.results) && data.results.length >= 4) {
+            if (Array.isArray(data.results) && data.results.length >= 3) {
               results = data.results;
             }
           }
         } catch (_) {}
         
-        // Multi-Source Client-Side Aggregator (Aktif jika backend offline, GitHub Pages, atau hasil backend < 4)
-        if (results.length < 4) {
+        // Multi-Source Client-Side Aggregator (Aktif jika backend offline, GitHub Pages, atau hasil backend < 3)
+        if (results.length < 3) {
           try {
             const clientPool = [...results];
             const seenUrls = new Set(clientPool.map(r => (r.url || '').trim().toLowerCase().replace(/\/$/, '')));
             const seenTitles = new Set(clientPool.map(r => (r.title || '').trim().toLowerCase().replace(/[^\w\s]/g, '')));
 
-            const qPlan = deriveBroadSearchQueries(query.trim());
+            const qPlan = deriveBroadSearchQueries(query.trim(), effectiveContext);
             const cleanQ = qPlan.primary;
             const techQ = qPlan.tech;
-            const newsQ = qPlan.news;
+            const recentQ = qPlan.recentNews;
             const coreQ = qPlan.core;
 
             const addCandidate = (item) => {
@@ -4155,19 +4177,53 @@ ${organicBlock}
               clientPool.push(item);
             };
 
+            const gnewsRecentUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(recentQ)}&hl=en-US&gl=US&ceid=US:en`;
+            const r2jRecentUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsRecentUrl)}`;
             const gnewsTechUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(techQ)}&hl=en-US&gl=US&ceid=US:en`;
             const r2jTechUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsTechUrl)}`;
             const gnewsPrimaryUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQ)}&hl=en-US&gl=US&ceid=US:en`;
             const r2jPrimaryUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsPrimaryUrl)}`;
-            const gnewsNewsUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(newsQ)}&hl=en-US&gl=US&ceid=US:en`;
-            const r2jNewsUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsNewsUrl)}`;
-            const hnUrlTech = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(techQ)}&tags=story&hitsPerPage=8`;
-            const hnUrlCore = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(coreQ)}&tags=story&hitsPerPage=6`;
+            const minHnTimestamp = Math.floor((Date.now() - 120 * 86400 * 1000) / 1000);
+            const hnUrlTech = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(techQ)}&tags=story&hitsPerPage=8&numericFilters=created_at_i%3E${minHnTimestamp}`;
+            const hnUrlCore = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(coreQ)}&tags=story&hitsPerPage=6&numericFilters=created_at_i%3E${minHnTimestamp}`;
             const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(coreQ)}&format=json&no_html=1&skip_disambig=1`;
 
             // Eksekusi seluruh provider live secara paralel (Bebas Wikipedia & 100% berita aktual)
             await Promise.allSettled([
-              // 1. Google News RSS Tech via RSS2JSON (8 berita live)
+              // 1. Google News RSS Recent (when:30d) via RSS2JSON (8 berita live)
+              fetch(r2jRecentUrl).then(r => r.ok ? r.json() : null).then(d => {
+                if (d && Array.isArray(d.items)) {
+                  d.items.slice(0, 8).forEach(it => {
+                    let domain = 'news.google.com';
+                    let cleanTitle = (it.title || '').trim();
+                    const titleParts = cleanTitle.split(' - ');
+                    let publisher = '';
+                    if (titleParts.length > 1) {
+                      publisher = titleParts.pop().trim();
+                      cleanTitle = titleParts.join(' - ');
+                    }
+                    if (publisher) domain = publisher.toLowerCase().replace(/[\s\.\:\/]+/g, '') + '.com';
+                    try {
+                      if (it.link && it.link.startsWith('http') && !it.link.includes('google.com/rss')) {
+                        domain = new URL(it.link).hostname.replace(/^www\./, '');
+                      }
+                    } catch (_) {}
+                    const timestamp = Date.parse(it.pubDate) || 0;
+                    const cleanSnippet = (it.description || cleanTitle).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                    addCandidate({
+                      title: cleanTitle,
+                      url: it.link,
+                      domain: domain || 'news.google.com',
+                      snippet: `[${publisher || 'Google News'} | ${it.pubDate || 'Terkini'}] ${cleanSnippet.slice(0, 180)}`,
+                      sourceProvider: publisher ? `Google News (${publisher})` : 'Google News',
+                      timestamp,
+                      pubDate: it.pubDate || ''
+                    });
+                  });
+                }
+              }).catch(() => {}),
+
+              // 2. Google News RSS Tech via RSS2JSON (8 berita live)
               fetch(r2jTechUrl).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.items)) {
                   d.items.slice(0, 8).forEach(it => {
@@ -4185,50 +4241,23 @@ ${organicBlock}
                         domain = new URL(it.link).hostname.replace(/^www\./, '');
                       }
                     } catch (_) {}
+                    const timestamp = Date.parse(it.pubDate) || 0;
                     const cleanSnippet = (it.description || cleanTitle).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
                     addCandidate({
                       title: cleanTitle,
                       url: it.link,
                       domain: domain || 'news.google.com',
                       snippet: `[${publisher || 'Google News'} | ${it.pubDate || 'Terkini'}] ${cleanSnippet.slice(0, 180)}`,
-                      sourceProvider: publisher ? `Google News (${publisher})` : 'Google News'
+                      sourceProvider: publisher ? `Google News (${publisher})` : 'Google News',
+                      timestamp,
+                      pubDate: it.pubDate || ''
                     });
                   });
                 }
               }).catch(() => {}),
 
-              // 2. Google News RSS Primary/Clean via RSS2JSON (8 berita live)
+              // 3. Google News RSS Primary/Clean via RSS2JSON (6 berita live)
               fetch(r2jPrimaryUrl).then(r => r.ok ? r.json() : null).then(d => {
-                if (d && Array.isArray(d.items)) {
-                  d.items.slice(0, 8).forEach(it => {
-                    let domain = 'news.google.com';
-                    let cleanTitle = (it.title || '').trim();
-                    const titleParts = cleanTitle.split(' - ');
-                    let publisher = '';
-                    if (titleParts.length > 1) {
-                      publisher = titleParts.pop().trim();
-                      cleanTitle = titleParts.join(' - ');
-                    }
-                    if (publisher) domain = publisher.toLowerCase().replace(/[\s\.\:\/]+/g, '') + '.com';
-                    try {
-                      if (it.link && it.link.startsWith('http') && !it.link.includes('google.com/rss')) {
-                        domain = new URL(it.link).hostname.replace(/^www\./, '');
-                      }
-                    } catch (_) {}
-                    const cleanSnippet = (it.description || cleanTitle).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-                    addCandidate({
-                      title: cleanTitle,
-                      url: it.link,
-                      domain: domain || 'news.google.com',
-                      snippet: `[${publisher || 'Google News'} | ${it.pubDate || 'Terkini'}] ${cleanSnippet.slice(0, 180)}`,
-                      sourceProvider: publisher ? `Google News (${publisher})` : 'Google News'
-                    });
-                  });
-                }
-              }).catch(() => {}),
-
-              // 3. Google News RSS News via RSS2JSON (6 berita live)
-              fetch(r2jNewsUrl).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.items)) {
                   d.items.slice(0, 6).forEach(it => {
                     let domain = 'news.google.com';
@@ -4245,13 +4274,16 @@ ${organicBlock}
                         domain = new URL(it.link).hostname.replace(/^www\./, '');
                       }
                     } catch (_) {}
+                    const timestamp = Date.parse(it.pubDate) || 0;
                     const cleanSnippet = (it.description || cleanTitle).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
                     addCandidate({
                       title: cleanTitle,
                       url: it.link,
                       domain: domain || 'news.google.com',
                       snippet: `[${publisher || 'Google News'} | ${it.pubDate || 'Terkini'}] ${cleanSnippet.slice(0, 180)}`,
-                      sourceProvider: publisher ? `Google News (${publisher})` : 'Google News'
+                      sourceProvider: publisher ? `Google News (${publisher})` : 'Google News',
+                      timestamp,
+                      pubDate: it.pubDate || ''
                     });
                   });
                 }
@@ -4264,12 +4296,16 @@ ${organicBlock}
                     const u = h.url || `https://news.ycombinator.com/item?id=${h.objectID}`;
                     let dName = 'news.ycombinator.com';
                     try { dName = new URL(u).hostname.replace(/^www\./, ''); } catch (_) {}
+                    const timestamp = h.created_at_i ? h.created_at_i * 1000 : (Date.parse(h.created_at) || 0);
+                    const dateLabel = h.created_at ? new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Terkini';
                     addCandidate({
                       title: h.title,
                       url: u,
                       domain: dName,
-                      snippet: `[Tech Wire | Poin: ${h.points || 0} | Komentar: ${h.num_comments || 0}] ${h.title}`,
-                      sourceProvider: 'Tech Wire / HackerNews'
+                      snippet: `[Tech Wire | ${dateLabel} | Poin: ${h.points || 0} | Komentar: ${h.num_comments || 0}] ${h.title}`,
+                      sourceProvider: 'Tech Wire / HackerNews',
+                      timestamp,
+                      pubDate: h.created_at || ''
                     });
                   });
                 }
@@ -4281,12 +4317,16 @@ ${organicBlock}
                     const u = h.url || `https://news.ycombinator.com/item?id=${h.objectID}`;
                     let dName = 'news.ycombinator.com';
                     try { dName = new URL(u).hostname.replace(/^www\./, ''); } catch (_) {}
+                    const timestamp = h.created_at_i ? h.created_at_i * 1000 : (Date.parse(h.created_at) || 0);
+                    const dateLabel = h.created_at ? new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Terkini';
                     addCandidate({
                       title: h.title,
                       url: u,
                       domain: dName,
-                      snippet: `[Tech Wire | Poin: ${h.points || 0} | Komentar: ${h.num_comments || 0}] ${h.title}`,
-                      sourceProvider: 'Tech Wire / HackerNews'
+                      snippet: `[Tech Wire | ${dateLabel} | Poin: ${h.points || 0} | Komentar: ${h.num_comments || 0}] ${h.title}`,
+                      sourceProvider: 'Tech Wire / HackerNews',
+                      timestamp,
+                      pubDate: h.created_at || ''
                     });
                   });
                 }
@@ -4303,7 +4343,9 @@ ${organicBlock}
                       url: d.AbstractURL,
                       domain: dName,
                       snippet: (d.Abstract || d.Heading).replace(/<[^>]+>/g, ' ').slice(0, 180),
-                      sourceProvider: 'DuckDuckGo Instant'
+                      sourceProvider: 'DuckDuckGo Instant',
+                      timestamp: 0,
+                      pubDate: ''
                     });
                   }
                   if (Array.isArray(d.RelatedTopics)) {
@@ -4316,7 +4358,9 @@ ${organicBlock}
                           url: rt.FirstURL,
                           domain: dName,
                           snippet: rt.Text.replace(/<[^>]+>/g, ' ').slice(0, 180),
-                          sourceProvider: 'DuckDuckGo Related'
+                          sourceProvider: 'DuckDuckGo Related',
+                          timestamp: 0,
+                          pubDate: ''
                         });
                       }
                     });
@@ -4325,7 +4369,16 @@ ${organicBlock}
               }).catch(() => {})
             ]);
 
-            results = clientPool;
+            // Urutkan kandidat berdasarkan tanggal publikasi terbaru (Descending)
+            clientPool.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+            // Filter artikel usang jika ada artikel baru dalam 60 hari terakhir
+            const now = Date.now();
+            const hasRecent = clientPool.some(it => it.timestamp && (now - it.timestamp) < (60 * 86400 * 1000));
+            results = clientPool.filter(it => {
+              if (hasRecent && it.timestamp && (now - it.timestamp) > (180 * 86400 * 1000)) return false;
+              return true;
+            });
           } catch (_) {}
         }
         
@@ -4334,7 +4387,7 @@ ${organicBlock}
         }
         
         let output = `HASIL PENCARIAN WEB MULTI-SUMBER UNTUK "${query}":\n`;
-        output += `Ditemukan ${results.length} sumber informasi terverifikasi (Berita Terkini, Tech Wire, Riset, & Ensiklopedia):\n`;
+        output += `Ditemukan ${results.length} sumber informasi terverifikasi (Diurutkan dari publikasi paling mutakhir & aktual):\n`;
         results.forEach((item, idx) => {
           output += `\n[${idx + 1}] [${item.sourceProvider || 'Web'}] ${item.title}\nURL: ${item.url}\nSumber/Domain: ${item.domain}\nRingkasan: ${item.snippet}\n`;
         });
@@ -4639,15 +4692,16 @@ Anda memiliki instrumen pencarian web live berkecepatan tinggi tanpa batasan API
 - SUMBER WIKIPEDIA TELAH DIHAPUS: Seluruh hasil penelusuran 100% merupakan berita dan publikasi aktual (BUKAN ensiklopedia atau artikel sejarah lama).
 
 INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
-- ANDA SENDIRI YANG MENENTUKAN apakah Anda membutuhkan penelusuran web atau tidak.
-- Jika pengguna menanyakan fakta terkini, perkembangan tahun 2024-2026, berita, rilis model AI, atau hal di luar batas cutoff training Anda:
-  RANCANG DAN RUMUSKAN KUERI PENCARIAN YANG EFEKTIF, SPESIFIK, DAN RINGKAS DALAM BAHASA INGGRIS AGAR MENJANGKAU PORTAL BERITA RESMI GLOBAL (misal: "Google Gemini AI update", "Anthropic Claude new features", "DeepSeek AI benchmark", dll.), lalu panggil alat:
+- WAJIB PROAKTIF PADA TURN PERTAMA: Kapan pun pengguna menanyakan versi baru, model AI (seperti Grok, ChatGPT, Claude, Gemini, DeepSeek, Llama, Qwen, dll.), perkembangan terkini, update terbaru, tanggal rilis, atau menyertakan gambar/screenshot antarmuka, Anda WAJIB LANGSUNG MEMANGGIL search_web("...") pada giliran pertama sebelum menarik kesimpulan apa pun.
+- DILARANG KERAS MENOLAK, MEMBANTAH, ATAU MENCERAMAHI PENGGUNA: Jangan pernah menyatakan "model/versi itu tidak ada", "hanya rumor", "belum ada rilis resmi", atau "meminta pengguna memberikan bukti rilis resmi" berdasarkan ingatan cutoff lama training Anda. Carilah faktanya di web live terlebih dahulu!
+- RANCANG DAN RUMUSKAN KUERI PENCARIAN YANG EFEKTIF, SPESIFIK, DAN RINGKAS DALAM BAHASA INGGRIS AGAR MENJANGKAU PORTAL BERITA RESMI GLOBAL (misal: "xAI Grok 4.7 AI update", "Google Gemini AI update", "Anthropic Claude new features", "DeepSeek AI benchmark", dll.), lalu panggil alat:
   search_web("kueri pencarian yang Anda rancang")
   atau
   <tool_call>{"name":"search_web","arguments":{"query":"kueri pencarian yang Anda rancang"}}</tool_call>
-- JIKA Anda TIDAK memerlukan penelusuran web (percakapan biasa, penulisan kode, matematika, penjelasan konsep umum), LANGSUNG jawab pertanyaan pengguna secara alami tanpa memanggil alat.
-- DILARANG KERAS menolak dengan alasan "batas pengetahuan training" atau "cutoff Mei 2024", karena Anda memiliki instrumen live search_web ini.
-- DILARANG KERAS MENGARANG ROADMAP, FITUR FIKSI, ATAU PROYEKSI PALSU: Jika data mengenai rilis resmi belum diumumkan dalam sumber berita web yang diberikan, nyatakan secara jujur dan faktual. Jangan pernah menciptakan rumor fiktif, versi chip/hardware buatan, atau klaim tanpa dasar.
+- STEMPEL WAKTU RECENT (2026): Hasil penelusuran diurutkan dari yang paling mutakhir (tahun 2026). Perhatikan stempel tanggal publikasi pada setiap sumber (misal: "21 Sep 2026", "28 Sep 2026"). Gunakan data terbaru tersebut sebagai kebenaran mutlak.
+- JIKA Anda TIDAK memerlukan penelusuran web (percakapan kasual biasa, penulisan kode murni, matematika, penjelasan konsep umum), LANGSUNG jawab pertanyaan pengguna secara alami tanpa memanggil alat.
+- DILARANG KERAS menolak dengan alasan "batas pengetahuan training" atau "cutoff", karena Anda memiliki instrumen live search_web ini.
+- DILARANG KERAS MENGARANG ROADMAP ATAU PROYEKSI PALSU: Jangan pernah menciptakan rumor fiktif atau tanggal rilis buatan sendiri. Berbicaralah 100% berdasarkan sumber berita aktual yang disajikan.
 - Setelah sistem mengeksekusi penelusuran dan menyajikan daftar multi-sumber berita aktual, SINTESISKAN jawaban secara komprehensif, padat, kaya fakta, dan 100% berlandaskan pada multi-sumber tersebut TANPA melakukan browsing/scraping berlapis (ini adalah mode pencarian biasa yang cepat & mutakhir).
 - DILARANG KERAS mencetak JSON mentah atau teks seperti "We will call search_web..." ke dalam jawaban akhir pengguna. Sistem akan mengeksekusi penelusuran di latar belakang dan memberikan datanya kepada Anda untuk langsung dirumuskan menjadi jawaban final yang komprehensif.`;
 
@@ -5031,7 +5085,53 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
 
         const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && tc.function.name === 'search_web');
         const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && tc.function.name === 'search_web');
-        const rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
+        let rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
+
+        // PROACTIVE TURN-1 TRIGGER (Anti-Refusal & Zero-Hallucination):
+        // Jika model tidak memanggil search_web sendiri pada putaran 1, namun:
+        // 1. Teks jawaban model menyangkal/meragukan rilis ("belum ada rilis resmi", "hanya rumor", "tidak masuk akal", "terakhir adalah Grok 2", "batas pengetahuan", dll.)
+        // ATAU 2. Pengguna meminta bukti/sumber ("cari sumbernya", "cari di web", "update terbaru", "versi", "rilis", dll.)
+        // ATAU 3. Pengguna melampirkan screenshot gambar tentang model/UI/berita
+        if (rawAutonomousCalls.length === 0 && !executedToolSignatures.has('search_web')) {
+          const lowerRoundText = (currentRoundText || '').toLowerCase();
+          const lowerPrompt = (promptText || '').toLowerCase();
+          
+          const isDenyingOrDoubtful = 
+            lowerRoundText.includes('belum ada rilis resmi') ||
+            lowerRoundText.includes('tidak ditemukan informasi resmi') ||
+            lowerRoundText.includes('tidak resmi') ||
+            lowerRoundText.includes('belum diumumkan') ||
+            lowerRoundText.includes('hanya rumor') ||
+            lowerRoundText.includes('tidak masuk akal') ||
+            lowerRoundText.includes('batas pengetahuan') ||
+            lowerRoundText.includes('cutoff') ||
+            lowerRoundText.includes('terakhir merilis grok') ||
+            lowerRoundText.includes('terakhir adalah grok') ||
+            lowerRoundText.includes('belum pernah merilis');
+
+          const isExplicitSearchRequest = 
+            lowerPrompt.includes('cari sumber') ||
+            lowerPrompt.includes('sumbernya') ||
+            lowerPrompt.includes('cari di web') ||
+            lowerPrompt.includes('berita terbaru') ||
+            lowerPrompt.includes('update terbaru') ||
+            lowerPrompt.includes('rilis terbaru') ||
+            lowerPrompt.includes('apakah ada') ||
+            /\bgrok\s*4\b/i.test(lowerPrompt) ||
+            /\b[a-z]+\s*[0-9]+(?:\.[0-9]+)+\b/i.test(lowerPrompt);
+
+          const hasImage = Array.isArray(rawImgs) ? rawImgs.length > 0 : Boolean(rawImgs);
+
+          if (isDenyingOrDoubtful || isExplicitSearchRequest || (hasImage && (lowerPrompt.includes('grok') || lowerPrompt.includes('model') || lowerPrompt.includes('fitur') || lowerPrompt.includes('apa')))) {
+            const derivedQuery = deriveBroadSearchQueries(promptText || 'AI model update', currentRoundText).core;
+            rawAutonomousCalls = [{
+              function: {
+                name: 'search_web',
+                arguments: { query: derivedQuery }
+              }
+            }];
+          }
+        }
 
         // Filter out duplicate or loop tool calls
         const detectedAutonomousCalls = rawAutonomousCalls.filter(call => {
@@ -5070,7 +5170,7 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
           smartScrollChatToBottom(true);
 
           // Eksekusi tool Zero-API Live News & Tech Wire (Bebas Wikipedia)
-          const toolExecRes = await executeAutonomousWebTool(toolName, call.function.arguments);
+          const toolExecRes = await executeAutonomousWebTool(toolName, call.function.arguments, promptText, session);
           if (toolExecRes.sources && Array.isArray(toolExecRes.sources)) {
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
@@ -5094,8 +5194,9 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
 
         const roundInstruction = `[INSTRUKSI FINAL]: Seluruh data multi-sumber berita terkini & resmi telah lengkap dan disajikan di atas (Bebas Wikipedia agar data 100% mutakhir).
 WAJIB: Sajikan jawaban komprehensif, faktual, dan terperinci Anda kepada pengguna SEKARANG JUGA secara langsung TANPA memanggil 'search_web' lagi!
-ATURAN ANTI-HALUSINASI MUTLAK:
+ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
 - Dilarang keras mengarang roadmap fiksi, rumor spekulatif, versi chip buatan, atau hal yang tidak ada dalam sumber di atas.
+- Berikan informasi berlandaskan tanggal publikasi terbaru pada artikel di atas (perhatikan stempel tanggal 2026). Jika sebuah model (misal Grok 4.7) terbukti rilis pada September 2026 di sumber resmi/berita di atas, jelaskan rincian resminya (rilis Sept 2026, ketersediaan di Amazon Bedrock / xAI, fitur, dll.) secara tegas dan jangan pernah menyangkal eksistensinya!
 - Jika ada hal yang belum diumumkan secara resmi atau belum terjadi di sumber data, sampaikan secara jujur dan objektif berdasarkan fakta resmi yang ada.
 - Jangan cetak tag tool atau raw JSON apa pun.`;
 
@@ -5624,7 +5725,53 @@ ATURAN ANTI-HALUSINASI MUTLAK:
 
         const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && tc.function.name === 'search_web');
         const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && tc.function.name === 'search_web');
-        const rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
+        let rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
+
+        // PROACTIVE TURN-1 TRIGGER (Anti-Refusal & Zero-Hallucination):
+        // Jika model tidak memanggil search_web sendiri pada putaran 1, namun:
+        // 1. Teks jawaban model menyangkal/meragukan rilis ("belum ada rilis resmi", "hanya rumor", "tidak masuk akal", "terakhir adalah Grok 2", "batas pengetahuan", dll.)
+        // ATAU 2. Pengguna meminta bukti/sumber ("cari sumbernya", "cari di web", "update terbaru", "versi", "rilis", dll.)
+        // ATAU 3. Pengguna melampirkan screenshot gambar tentang model/UI/berita
+        if (rawAutonomousCalls.length === 0 && !executedToolSignatures.has('search_web')) {
+          const lowerRoundText = (currentRoundText || '').toLowerCase();
+          const lowerPrompt = (promptText || '').toLowerCase();
+          
+          const isDenyingOrDoubtful = 
+            lowerRoundText.includes('belum ada rilis resmi') ||
+            lowerRoundText.includes('tidak ditemukan informasi resmi') ||
+            lowerRoundText.includes('tidak resmi') ||
+            lowerRoundText.includes('belum diumumkan') ||
+            lowerRoundText.includes('hanya rumor') ||
+            lowerRoundText.includes('tidak masuk akal') ||
+            lowerRoundText.includes('batas pengetahuan') ||
+            lowerRoundText.includes('cutoff') ||
+            lowerRoundText.includes('terakhir merilis grok') ||
+            lowerRoundText.includes('terakhir adalah grok') ||
+            lowerRoundText.includes('belum pernah merilis');
+
+          const isExplicitSearchRequest = 
+            lowerPrompt.includes('cari sumber') ||
+            lowerPrompt.includes('sumbernya') ||
+            lowerPrompt.includes('cari di web') ||
+            lowerPrompt.includes('berita terbaru') ||
+            lowerPrompt.includes('update terbaru') ||
+            lowerPrompt.includes('rilis terbaru') ||
+            lowerPrompt.includes('apakah ada') ||
+            /\bgrok\s*4\b/i.test(lowerPrompt) ||
+            /\b[a-z]+\s*[0-9]+(?:\.[0-9]+)+\b/i.test(lowerPrompt);
+
+          const hasImage = Array.isArray(rawImgs) ? rawImgs.length > 0 : Boolean(rawImgs);
+
+          if (isDenyingOrDoubtful || isExplicitSearchRequest || (hasImage && (lowerPrompt.includes('grok') || lowerPrompt.includes('model') || lowerPrompt.includes('fitur') || lowerPrompt.includes('apa')))) {
+            const derivedQuery = deriveBroadSearchQueries(promptText || 'AI model update', currentRoundText).core;
+            rawAutonomousCalls = [{
+              function: {
+                name: 'search_web',
+                arguments: { query: derivedQuery }
+              }
+            }];
+          }
+        }
 
         // Filter out duplicate or loop tool calls
         const detectedAutonomousCalls = rawAutonomousCalls.filter(call => {
@@ -5663,7 +5810,7 @@ ATURAN ANTI-HALUSINASI MUTLAK:
           smartScrollChatToBottom(true);
 
           // Eksekusi tool Zero-API Live News & Tech Wire (Bebas Wikipedia)
-          const toolExecRes = await executeAutonomousWebTool(toolName, call.function.arguments);
+          const toolExecRes = await executeAutonomousWebTool(toolName, call.function.arguments, promptText, session);
           if (toolExecRes.sources && Array.isArray(toolExecRes.sources)) {
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
@@ -5688,8 +5835,9 @@ ATURAN ANTI-HALUSINASI MUTLAK:
 
         const roundInstruction = `[INSTRUKSI FINAL]: Seluruh data multi-sumber berita terkini & resmi telah lengkap dan disajikan di atas (Bebas Wikipedia agar data 100% mutakhir).
 WAJIB: Sajikan jawaban komprehensif, faktual, dan terperinci Anda kepada pengguna SEKARANG JUGA secara langsung TANPA memanggil 'search_web' lagi!
-ATURAN ANTI-HALUSINASI MUTLAK:
+ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
 - Dilarang keras mengarang roadmap fiksi, rumor spekulatif, versi chip buatan, atau hal yang tidak ada dalam sumber di atas.
+- Berikan informasi berlandaskan tanggal publikasi terbaru pada artikel di atas (perhatikan stempel tanggal 2026). Jika sebuah model (misal Grok 4.7) terbukti rilis pada September 2026 di sumber resmi/berita di atas, jelaskan rincian resminya (rilis Sept 2026, ketersediaan di Amazon Bedrock / xAI, fitur, dll.) secara tegas dan jangan pernah menyangkal eksistensinya!
 - Jika ada hal yang belum diumumkan secara resmi atau belum terjadi di sumber data, sampaikan secara jujur dan objektif berdasarkan fakta resmi yang ada.
 - Jangan cetak tag tool atau raw JSON apa pun.`;
 

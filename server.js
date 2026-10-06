@@ -976,14 +976,20 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
 // Engine pencarian multi-sumber mandiri tanpa API berbayar (Zero-API / No Serper Key required)
 // Menghimpun 10-18 sumber simultan: Google News RSS, Tech Wire / HackerNews, Wikipedia Global, Wikipedia ID, & DuckDuckGo Instant
 
-function deriveBroadSearchQueries(rawQuery) {
-  if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', wiki: '', core: '' };
-  const lower = rawQuery.toLowerCase();
+function deriveBroadSearchQueries(rawQuery, contextText = '') {
+  if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', news: '', recentNews: '', core: '' };
+  const combined = (rawQuery + ' ' + (contextText || '')).trim();
+  const lower = combined.toLowerCase();
+
+  // Deteksi nomor versi spesifik jika ada (misal: 4.7, 3.5, 4o, v3, 2.0)
+  const versionMatch = combined.match(/\b(?:v|version)?\s*([0-9]+(?:\.[0-9]+)+[a-z]?|[0-9]+[a-z]?)\b/i);
+  const version = versionMatch ? versionMatch[1] : '';
 
   let entity = '';
-  if (lower.includes('gemini')) entity = 'Google Gemini';
-  else if (lower.includes('claude') || lower.includes('antropic') || lower.includes('anthropich')) entity = 'Anthropic Claude';
-  else if (lower.includes('chatgpt') || lower.includes('gpt') || lower.includes('openai') || lower.includes('o1') || lower.includes('o3')) entity = 'OpenAI ChatGPT';
+  if (lower.includes('grok') || lower.includes('xai') || lower.includes('x.ai') || lower.includes('supergrok')) entity = 'xAI Grok';
+  else if (lower.includes('gemini')) entity = 'Google Gemini';
+  else if (lower.includes('claude') || lower.includes('antropic') || lower.includes('anthropic')) entity = 'Anthropic Claude';
+  else if (lower.includes('chatgpt') || lower.includes('gpt') || lower.includes('openai') || lower.includes('o1') || lower.includes('o3') || lower.includes('o4')) entity = 'OpenAI ChatGPT';
   else if (lower.includes('deepseek') || lower.includes('r1') || lower.includes('v3')) entity = 'DeepSeek AI';
   else if (lower.includes('llama') || lower.includes('meta ai')) entity = 'Meta Llama';
   else if (lower.includes('qwen') || lower.includes('tongyi')) entity = 'Alibaba Qwen';
@@ -996,25 +1002,34 @@ function deriveBroadSearchQueries(rawQuery) {
   else if (lower.includes('sora')) entity = 'OpenAI Sora';
   else if (lower.includes('flux')) entity = 'FLUX AI';
 
+  // Gabungkan entitas dengan versi jika ada (misal: xAI Grok 4.7)
+  if (entity && version && !entity.toLowerCase().includes(version.toLowerCase())) {
+    entity = `${entity} ${version}`;
+  }
+
   const stopWords = [
     'update', 'updates', 'terbaru', 'terkini', 'apa', 'itu', 'bagaimana', 'perkembangan',
     'berita', 'tentang', 'fitur', 'baru', 'informasi', 'info', 'roadmap', 'bocoran',
     'release', 'changelog', 'saat', 'ini', 'sekarang', 'apakah', 'ada', 'model',
-    'tahun', 'di', 'ke', 'dari', 'yang', 'dan', 'atau', 'pada', 'untuk'
+    'tahun', 'di', 'ke', 'dari', 'yang', 'dan', 'atau', 'pada', 'untuk',
+    'cari', 'carikan', 'sumber', 'sumbernya', 'lagi', 'coba', 'bukti', 'buktinya', 'resmi',
+    'web', 'internet', 'google', 'tolong', 'bantu', 'mana', 'dong', 'search', 'find', 'sources',
+    'proof', 'official'
   ];
 
   let cleaned = rawQuery;
   stopWords.forEach(w => {
     cleaned = cleaned.replace(new RegExp(`\\b${w}\\b`, 'gi'), ' ');
   });
-  cleaned = cleaned.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  cleaned = cleaned.replace(/[^\w\s\.]/g, ' ').replace(/\s+/g, ' ').trim();
 
-  const coreSubject = entity || (cleaned.length >= 3 ? cleaned : rawQuery.trim());
+  const coreSubject = entity || (cleaned.length >= 2 ? cleaned : rawQuery.trim());
 
   return {
     primary: rawQuery.trim(),
     tech: `${coreSubject} AI update`,
     news: `${coreSubject} latest news`,
+    recentNews: `${coreSubject} when:30d`,
     core: coreSubject
   };
 }
@@ -1071,6 +1086,7 @@ function fetchGoogleNewsRss(query, lang = 'en', maxCount = 8) {
               let title = cleanHtmlText(rawTitle);
               let rawUrl = linkMatch[1].trim();
               const pubDate = pubDateMatch ? pubDateMatch[1].trim() : '';
+              const timestamp = Date.parse(pubDate) || 0;
               let sourceName = sourceMatch ? cleanHtmlText(sourceMatch[2].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1')) : '';
 
               // Ekstrak nama penerbit jika judul mengandung " - Publisher"
@@ -1090,7 +1106,9 @@ function fetchGoogleNewsRss(query, lang = 'en', maxCount = 8) {
                 url: rawUrl,
                 domain,
                 snippet: `[${sourceName || 'Berita'} | ${pubDate || 'Terkini'}] ${title}`,
-                sourceProvider: sourceName ? `Google News (${sourceName})` : 'Google News'
+                sourceProvider: sourceName ? `Google News (${sourceName})` : 'Google News',
+                timestamp,
+                pubDate
               });
             }
           }
@@ -1105,7 +1123,8 @@ function fetchGoogleNewsRss(query, lang = 'en', maxCount = 8) {
 function fetchHackerNewsTech(query, maxCount = 8) {
   return new Promise((resolve) => {
     try {
-      const url = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(query)}&tags=story&hitsPerPage=12`;
+      const minTimestamp = Math.floor((Date.now() - 120 * 86400 * 1000) / 1000);
+      const url = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(query)}&tags=story&hitsPerPage=12&numericFilters=created_at_i%3E${minTimestamp}`;
       https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }, timeout: 5000 }, (res) => {
         let raw = '';
         res.on('data', c => raw += c);
@@ -1118,13 +1137,17 @@ function fetchHackerNewsTech(query, maxCount = 8) {
                 if (results.length >= maxCount) break;
                 const title = cleanHtmlText(h.title);
                 const targetUrl = h.url || `https://news.ycombinator.com/item?id=${h.objectID}`;
+                const timestamp = h.created_at_i ? h.created_at_i * 1000 : (Date.parse(h.created_at) || 0);
+                const dateLabel = h.created_at ? new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Terkini';
                 if (title && targetUrl) {
                   results.push({
                     title,
                     url: targetUrl,
                     domain: extractDomainSafe(targetUrl),
-                    snippet: `[Tech Wire | Skor: ${h.points || 0} | Komentar: ${h.num_comments || 0}] ${title}`,
-                    sourceProvider: 'Tech Wire / HackerNews'
+                    snippet: `[Tech Wire | ${dateLabel} | Skor: ${h.points || 0} | Komentar: ${h.num_comments || 0}] ${title}`,
+                    sourceProvider: 'Tech Wire / HackerNews',
+                    timestamp,
+                    pubDate: h.created_at || ''
                   });
                 }
               }
@@ -1213,33 +1236,42 @@ function fetchDuckDuckGoInstant(query) {
   });
 }
 
-async function performAutonomousSearch(query, maxResults = 15) {
+async function performAutonomousSearch(query, maxResults = 15, contextText = '') {
   if (!query || typeof query !== 'string' || !query.trim()) {
     return { query: '', count: 0, results: [] };
   }
-  const qPlan = deriveBroadSearchQueries(query.trim());
+  const qPlan = deriveBroadSearchQueries(query.trim(), contextText);
   const cleanQuery = qPlan.primary;
   const techQuery = qPlan.tech;
   const newsQuery = qPlan.news;
+  const recentQuery = qPlan.recentNews;
   const coreQuery = qPlan.core;
 
   // Eksekusi seluruh provider berita & teknologi live secara paralel (Bebas Wikipedia agar data 100% terbaru)
-  const [gnewsTech, gnewsPrimary, gnewsNews, hnTech, hnCore, ddgInstant] = await Promise.allSettled([
-    fetchGoogleNewsRss(techQuery, 'en', 8),
-    fetchGoogleNewsRss(cleanQuery, 'en', 8),
-    fetchGoogleNewsRss(newsQuery, 'en', 6),
+  // Menghimpun berita 30 hari terakhir (when:30d), berita rilis terkini, dan tech wire
+  const [gnewsRecent, gnewsTech, gnewsPrimary, hnTech, hnCore, ddgInstant] = await Promise.allSettled([
+    fetchGoogleNewsRss(recentQuery, 'en', 8),
+    fetchGoogleNewsRss(techQuery, 'en', 6),
+    fetchGoogleNewsRss(cleanQuery, 'en', 6),
     fetchHackerNewsTech(techQuery, 8),
     fetchHackerNewsTech(coreQuery, 6),
     fetchDuckDuckGoInstant(coreQuery)
   ]);
 
   const candidatePool = [];
+  if (gnewsRecent.status === 'fulfilled') candidatePool.push(...gnewsRecent.value);
   if (gnewsTech.status === 'fulfilled') candidatePool.push(...gnewsTech.value);
   if (gnewsPrimary.status === 'fulfilled') candidatePool.push(...gnewsPrimary.value);
-  if (gnewsNews.status === 'fulfilled') candidatePool.push(...gnewsNews.value);
   if (hnTech.status === 'fulfilled') candidatePool.push(...hnTech.value);
   if (hnCore.status === 'fulfilled') candidatePool.push(...hnCore.value);
   if (ddgInstant.status === 'fulfilled') candidatePool.push(...ddgInstant.value);
+
+  // Urutkan kandidat berdasarkan tanggal publikasi terbaru (Descending: yang paling baru di paling atas)
+  candidatePool.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+  // Filter keusangan data: Jika ada artikel dalam 60 hari terakhir, singkirkan artikel usang (> 180 hari)
+  const now = Date.now();
+  const hasVeryRecent = candidatePool.some(it => it.timestamp && (now - it.timestamp) < (60 * 86400 * 1000));
 
   // Deduplikasi ketat berdasarkan URL kanonikal dan normalisasi Judul
   const results = [];
@@ -1256,6 +1288,9 @@ async function performAutonomousSearch(query, maxResults = 15) {
 
     // Filter out irrelevant disambiguation or unrelated codenames
     if (normTitle.includes('listofapplecodenames') && !cleanQuery.toLowerCase().includes('apple')) continue;
+
+    // Jika ada artikel mutakhir (dalam 60 hari terakhir), buang artikel lama yang usang (> 180 hari)
+    if (hasVeryRecent && item.timestamp && (now - item.timestamp) > (180 * 86400 * 1000)) continue;
 
     if (seenUrls.has(normUrl) || seenTitles.has(normTitle)) continue;
     seenUrls.add(normUrl);
@@ -2488,16 +2523,18 @@ const server = http.createServer(async (req, res) => {
   if ((pathname === '/api/tools/search-web' || pathname === '/api/autonomous/search') && (method === 'GET' || method === 'POST')) {
     try {
       let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
+      let context = reqUrl.searchParams.get('context') || '';
       let maxResults = parseInt(reqUrl.searchParams.get('maxResults') || '8', 10);
       if (method === 'POST') {
         const body = await parseBody(req);
         query = body.query || body.q || query;
+        context = body.context || body.conversationContext || context;
         if (body.maxResults) maxResults = parseInt(body.maxResults, 10);
       }
       if (!query || !query.trim()) {
         return sendJSON(res, 400, { error: 'Parameter query `query` atau `q` diperlukan.' });
       }
-      const data = await performAutonomousSearch(query, maxResults);
+      const data = await performAutonomousSearch(query, maxResults, context);
       return sendJSON(res, 200, { success: true, ...data });
     } catch (e) {
       return sendJSON(res, 500, { error: 'Gagal menjalankan tool pencarian web otonom: ' + e.message });
