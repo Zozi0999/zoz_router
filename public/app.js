@@ -4202,71 +4202,202 @@ ${organicBlock}
     }
   }
 
-  function extractInlineToolCalls(text) {
+  function extractBalancedJsonObjects(text) {
     if (!text || typeof text !== 'string') return [];
-    const calls = [];
-    
-    // Support <tool_call>...</tool_call>, ```tool_call...```, and json codeblocks
-    const regexList = [
-      /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi,
-      /```tool_call\s*([\s\S]*?)\s*```/gi,
-      /```(?:json)?\s*(\{\s*"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page)"[\s\S]*?\})\s*```/gi
-    ];
+    const results = [];
+    let startIndex = 0;
+    while (startIndex < text.length) {
+      const start = text.indexOf('{', startIndex);
+      if (start === -1) break;
 
-    const seenIds = new Set();
+      let depth = 0;
+      let inString = false;
+      let escape = false;
+      let end = -1;
 
-    for (const regex of regexList) {
-      let match;
-      while ((match = regex.exec(text)) !== null) {
-        let rawContent = match[1].trim();
-        // Strip markdown code fences if wrapped inside <tool_call>```json...```</tool_call>
-        rawContent = rawContent.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-        
-        try {
-          const parsed = JSON.parse(rawContent);
-          const toolName = parsed.name || parsed.function || parsed.tool;
-          if (toolName && (toolName === 'search_web' || toolName === 'browse_web_page')) {
-            const rawArgs = parsed.arguments !== undefined ? parsed.arguments : (parsed.parameters !== undefined ? parsed.parameters : (parsed.args !== undefined ? parsed.args : (parsed.input !== undefined ? parsed.input : {})));
-            const serializedArgs = (typeof rawArgs === 'object') ? JSON.stringify(rawArgs) : String(rawArgs);
-            const callKey = `${toolName}:${serializedArgs}`;
-            if (!seenIds.has(callKey)) {
-              seenIds.add(callKey);
-              calls.push({
-                id: `call_inline_${Date.now()}_${calls.length}`,
-                type: 'function',
-                rawTag: match[0],
-                function: {
-                  name: toolName,
-                  arguments: serializedArgs
-                }
-              });
+      for (let i = start; i < text.length; i++) {
+        const char = text[i];
+        if (escape) {
+          escape = false;
+          continue;
+        }
+        if (char === '\\') {
+          escape = true;
+          continue;
+        }
+        if (char === '"') {
+          inString = !inString;
+          continue;
+        }
+        if (!inString) {
+          if (char === '{') {
+            depth++;
+          } else if (char === '}') {
+            depth--;
+            if (depth === 0) {
+              end = i;
+              break;
             }
           }
-        } catch (_) {}
+        }
+      }
+
+      if (end !== -1) {
+        const candidate = text.substring(start, end + 1);
+        results.push({ json: candidate, start, end });
+        startIndex = end + 1;
+      } else {
+        startIndex = start + 1;
+      }
+    }
+    return results;
+  }
+
+  function scrubRawToolCallArtifacts(text) {
+    if (!text || typeof text !== 'string') return '';
+    let cleaned = text
+      .replace(/<(?:tool_call|function_call)>[\s\S]*?<\/(?:tool_call|function_call)>/gi, '')
+      .replace(/```(?:tool_call|json)?\s*\{[\s\S]*?"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page)"[\s\S]*?\}\s*```/gi, '');
+
+    // Hapus blok JSON seimbang yang merepresentasikan pemanggilan tool mentah
+    const jsonBlocks = extractBalancedJsonObjects(cleaned);
+    for (const block of jsonBlocks) {
+      try {
+        const p = JSON.parse(block.json);
+        const name = p.name || p.function || p.tool;
+        if (name === 'search_web' || name === 'browse_web_page') {
+          cleaned = cleaned.replace(block.json, '');
+        }
+      } catch (_) {}
+    }
+
+    // Bersihkan residu teks bocor seperti "We will call search_web for ..."
+    cleaned = cleaned
+      .replace(/(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(?:search_web|browse_web_page)[\s\S]*?(?:\.|\n|$)/gi, '')
+      .replace(/(?:search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*=\s*)?["'`](?:[^"'`]+)["'`]\s*\)/gi, '')
+      .trim();
+
+    return cleaned;
+  }
+
+  function deriveAutonomousTarget(promptText, session) {
+    if (!promptText) return { toolName: 'search_web', target: '' };
+    let target = promptText.trim();
+    const urlMatch = promptText.match(/https?:\/\/[^\s]+/i);
+    if (urlMatch) {
+      return { toolName: 'browse_web_page', target: urlMatch[0] };
+    }
+
+    let cleaned = promptText
+      .replace(/^(tolong|coba|bisakah kamu|bisa tolong|mohon|silakan)\s+/i, '')
+      .replace(/^(cari|carikan|search|jelajahi|browsing|brows)\s+(tentang|mengenai|info|informasi|data)?\s*/i, '')
+      .replace(/[?.,!]+$/g, '')
+      .trim();
+
+    // Koreksi typo umum pengguna (misal: "Updat" -> "Update")
+    cleaned = cleaned.replace(/\bupdat\b/i, 'update');
+
+    // Ekspansi cerdas konteks obrolan jika query pengguna terlalu pendek atau ambigu (misal "2026")
+    const isShortOrYear = cleaned.length < 8 || /^(20\d\d|update|terbaru|roadmap|kapan|rilis|fitur|berita)$/i.test(cleaned);
+    if (isShortOrYear && session && Array.isArray(session.messages) && session.messages.length > 0) {
+      for (let i = session.messages.length - 1; i >= 0; i--) {
+        const prevMsg = session.messages[i];
+        if (prevMsg && prevMsg.content && prevMsg.role !== 'system') {
+          const prevClean = prevMsg.content.replace(/<[^>]+>/g, '').replace(/https?:\/\/[^\s]+/g, '').substring(0, 120);
+          const words = prevClean.match(/\b([A-Za-z0-9_-]{3,})\b/g) || [];
+          const filtered = words.filter(w => !/^(yang|dan|dari|untuk|pada|adalah|akan|bisa|saya|kamu|anda|dengan|dalam|tidak|ini|itu|the|and|for|with|this|that|have)$/i.test(w));
+          const subject = filtered.slice(0, 3).join(' ');
+          if (subject) {
+            cleaned = `${subject} ${cleaned}`.trim();
+            break;
+          }
+        }
       }
     }
 
-    // Support direct function call syntax: search_web("query") or browse_web_page("url")
+    return { toolName: 'search_web', target: cleaned || promptText.trim() };
+  }
+
+  function extractInlineToolCalls(text) {
+    if (!text || typeof text !== 'string') return [];
+    const calls = [];
+    const seenIds = new Set();
+
+    function addCall(toolName, rawArgs, rawTag) {
+      if (!toolName || (toolName !== 'search_web' && toolName !== 'browse_web_page')) return;
+      const serializedArgs = (typeof rawArgs === 'object') ? JSON.stringify(rawArgs) : String(rawArgs);
+      const callKey = `${toolName}:${serializedArgs}`;
+      if (!seenIds.has(callKey)) {
+        seenIds.add(callKey);
+        calls.push({
+          id: `call_${Date.now()}_${calls.length}`,
+          type: 'function',
+          rawTag: rawTag || '',
+          function: {
+            name: toolName,
+            arguments: serializedArgs
+          }
+        });
+      }
+    }
+
+    // 1. Tag <tool_call>...</tool_call> and <function_call>...</function_call>
+    const tagRegex = /<(?:tool_call|function_call)>\s*([\s\S]*?)\s*<\/(?:tool_call|function_call)>/gi;
+    let tm;
+    while ((tm = tagRegex.exec(text)) !== null) {
+      try {
+        const clean = tm[1].replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        const p = JSON.parse(clean);
+        const name = p.name || p.function || p.tool;
+        const args = p.arguments ?? p.parameters ?? p.args ?? p.input ?? {};
+        addCall(name, args, tm[0]);
+      } catch (_) {}
+    }
+
+    // 2. Fenced codeblock ```json ... ``` or ```tool_call ... ```
+    const codeBlockRegex = /```(?:json|tool_call)?\s*(\{\s*"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page)"[\s\S]*?\})\s*```/gi;
+    let cm;
+    while ((cm = codeBlockRegex.exec(text)) !== null) {
+      try {
+        const p = JSON.parse(cm[1]);
+        const name = p.name || p.function || p.tool;
+        const args = p.arguments ?? p.parameters ?? p.args ?? p.input ?? {};
+        addCall(name, args, cm[0]);
+      } catch (_) {}
+    }
+
+    // 3. Raw balanced JSON objects anywhere in text (e.g. {"name":"search_web","arguments":{...}})
+    const jsonBlocks = extractBalancedJsonObjects(text);
+    for (const block of jsonBlocks) {
+      try {
+        const p = JSON.parse(block.json);
+        const name = p.name || p.function || p.tool;
+        if (name === 'search_web' || name === 'browse_web_page') {
+          const args = p.arguments ?? p.parameters ?? p.args ?? p.input ?? {};
+          addCall(name, args, block.json);
+        }
+      } catch (_) {}
+    }
+
+    // 4. Function call syntax: search_web("query") or browse_web_page("url")
     const funcRegex = /(search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*=\s*)?["'`]([^"'`]+)["'`]\s*\)/gi;
     let fm;
     while ((fm = funcRegex.exec(text)) !== null) {
-      const toolName = fm[1];
-      const paramVal = fm[2].trim();
-      if (paramVal) {
-        const serializedArgs = JSON.stringify(toolName === 'search_web' ? { query: paramVal } : { url: paramVal });
-        const callKey = `${toolName}:${serializedArgs}`;
-        if (!seenIds.has(callKey)) {
-          seenIds.add(callKey);
-          calls.push({
-            id: `call_fn_${Date.now()}_${calls.length}`,
-            type: 'function',
-            rawTag: fm[0],
-            function: {
-              name: toolName,
-              arguments: serializedArgs
-            }
-          });
-        }
+      const name = fm[1];
+      const val = fm[2].trim();
+      if (val) {
+        addCall(name, name === 'search_web' ? { query: val } : { url: val }, fm[0]);
+      }
+    }
+
+    // 5. Conversational triggers: "We will call search_web for <query>"
+    const convRegex = /(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(search_web|browse_web_page)(?:\s+(?:for|with|tentang|query|:))?\s*["'`]([^"'`\n]+)["'`]/gi;
+    let cvm;
+    while ((cvm = convRegex.exec(text)) !== null) {
+      const name = cvm[1];
+      const val = cvm[2].trim();
+      if (val) {
+        addCall(name, name === 'search_web' ? { query: val } : { url: val }, cvm[0]);
       }
     }
 
@@ -4278,15 +4409,16 @@ Anda memiliki instrumen penjelajahan internet mandiri yang dibangun khusus dari 
 1. search_web(query): Cari fakta terkini, riset, berita, atau data apa pun di web secara live.
 2. browse_web_page(url): Buka URL spesifik dan baca teks bersih dokumen web hingga 5.000 karakter untuk Anda cerna secara mendalam.
 
-PANDUAN EKSEKUSI OTONOM:
+PANDUAN EKSEKUSI OTONOM & ATURAN MUTLAK ANTI-HALUSINASI:
 - JIKA ANDA DITANYA MENGENAI PERISTIWA, PRODUK, VERSI, DOKUMENTASI, ATAU PERKEMBANGAN TAHUN 2025/2026:
   DILARANG KERAS MENOLAK DENGAN ALASAN "BATAS PENGETAHUAN TRAINING" ATAU "KUTIPAN CUTOFF MEI 2024"!
-- Anda memiliki akses langsung ke web. Jika data live telah diberikan, cerna dan jawab langsung. Jika masih butuh info tambahan atau ingin membaca URL spesifik, PANGGIL TOOL SECARA MANDIRI:
-<tool_call>{"name":"search_web","arguments":{"query":"kata kunci spesifik"}}</tool_call>
-atau
-<tool_call>{"name":"browse_web_page","arguments":{"url":"https://example.com/artikel"}}</tool_call>
-- Anda dapat mencari topik terlebih dahulu dengan 'search_web', lalu jika ada URL menarik dalam hasil pencarian, Anda dapat memanggil 'browse_web_page' untuk membacanya mendalam.
-- Sistem akan mengeksekusi penjelajahan dan menyuapkan datanya kembali untuk Anda cerna sebelum merumuskan respon akhir yang komprehensif.`;
+- DILARANG KERAS MENCETAK JSON MENTAH, FORMAT TEKNIS ALAT, ATAU TEKS SEPERTI "We will call search_web..." KE DALAM RESPON PENGGUNA!
+- Jika Anda butuh mencari info atau membaca URL spesifik, PANGGIL ALAT MENGGUNAKAN SALAH SATU FORMAT BERIKUT (sistem akan mengeksekusinya secara otomatis di latar belakang):
+  search_web("kata kunci spesifik")
+  atau
+  <tool_call>{"name":"search_web","arguments":{"query":"kata kunci spesifik"}}</tool_call>
+- Jawab pertanyaan HANYA berdasarkan data faktual yang didapat dari penelusuran web. DILARANG MENGARANG fakta, tanggal, atau nomor versi yang tidak tercantum dalam sumber data!
+- Setelah data web diterima, cerna dan berikan jawaban yang ramah, komprehensif, dan rapi dalam bahasa Indonesia tanpa membocorkan kode pemanggilan alat internal.`;
 
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
     const isSearch = toolName === 'search_web';
@@ -4562,22 +4694,9 @@ atau
 
         // Proactive Upfront Web Search in Autonomous Mode (Zero-API DuckDuckGo / Scraper)
         try {
-          let autoTarget = promptText.trim();
-          let autoToolName = 'search_web';
-          const urlMatch = promptText.match(/https?:\/\/[^\s]+/i);
-          if (urlMatch) {
-            autoToolName = 'browse_web_page';
-            autoTarget = urlMatch[0];
-          } else {
-            const cleanedQuery = promptText
-              .replace(/^(tolong|coba|bisakah kamu|bisa tolong|mohon|silakan)\s+/i, '')
-              .replace(/^(cari|carikan|search|jelajahi|browsing|brows)\s+(tentang|mengenai|info|informasi|data)?\s*/i, '')
-              .replace(/[?.,!]+$/g, '')
-              .trim();
-            if (cleanedQuery.length >= 3) {
-              autoTarget = cleanedQuery;
-            }
-          }
+          const derived = deriveAutonomousTarget(promptText, session);
+          const autoToolName = derived.toolName;
+          const autoTarget = derived.target;
 
           bubbleText.innerHTML = createAutonomousToolHudHtml(autoToolName, autoTarget, 'loading');
           smartScrollChatToBottom(true);
@@ -4849,8 +4968,8 @@ atau
         }
       }
 
-      // Bersihkan sisa tag tool_call jika ada sebelum render markdown final
-      const cleanFinalText = fullText.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').replace(/```tool_call[\s\S]*?```/gi, '').trim();
+      // Bersihkan sisa tag tool_call dan residu raw JSON jika ada sebelum render markdown final
+      const cleanFinalText = scrubRawToolCallArtifacts(fullText);
       if (cleanFinalText) {
         fullText = cleanFinalText;
       }
@@ -5064,22 +5183,9 @@ atau
 
         // Proactive Upfront Web Search in Autonomous Mode (Zero-API DuckDuckGo / Scraper)
         try {
-          let autoTarget = promptText.trim();
-          let autoToolName = 'search_web';
-          const urlMatch = promptText.match(/https?:\/\/[^\s]+/i);
-          if (urlMatch) {
-            autoToolName = 'browse_web_page';
-            autoTarget = urlMatch[0];
-          } else {
-            const cleanedQuery = promptText
-              .replace(/^(tolong|coba|bisakah kamu|bisa tolong|mohon|silakan)\s+/i, '')
-              .replace(/^(cari|carikan|search|jelajahi|browsing|brows)\s+(tentang|mengenai|info|informasi|data)?\s*/i, '')
-              .replace(/[?.,!]+$/g, '')
-              .trim();
-            if (cleanedQuery.length >= 3) {
-              autoTarget = cleanedQuery;
-            }
-          }
+          const derived = deriveAutonomousTarget(promptText, session);
+          const autoToolName = derived.toolName;
+          const autoTarget = derived.target;
 
           bubbleText.innerHTML = createAutonomousToolHudHtml(autoToolName, autoTarget, 'loading');
           smartScrollChatToBottom(true);
@@ -5513,8 +5619,8 @@ atau
         }
       }
 
-      // Bersihkan sisa tag tool_call jika ada sebelum render markdown final
-      const cleanFinalText = fullText.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').replace(/```tool_call[\s\S]*?```/gi, '').trim();
+      // Bersihkan sisa tag tool_call dan residu raw JSON jika ada sebelum render markdown final
+      const cleanFinalText = scrubRawToolCallArtifacts(fullText);
       if (cleanFinalText) {
         fullText = cleanFinalText;
       }
