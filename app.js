@@ -1559,7 +1559,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           appendedText = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, previousText);
         }
 
-        const merged = (previousText + '\n' + appendedText).trim();
+        const needsNewline = previousText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(previousText) || /```\w*$/.test(previousText);
+        const needsSpace = !needsNewline && !previousText.endsWith(' ') && !appendedText.startsWith(' ') && !appendedText.startsWith('\n');
+        const separator = needsNewline ? '\n' : (needsSpace ? ' ' : '');
+        const merged = (previousText + separator + appendedText).trim();
         bubbleText.innerHTML = renderMarkdown(merged);
         enhanceCodeBlocks(bubbleText);
         
@@ -1636,7 +1639,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           const delta = parsed.choices?.[0]?.delta?.content;
           if (delta) {
             appended += delta;
-            bubbleText.innerHTML = renderMarkdown(currentFullText + '\n' + appended) + '<span class="typing-cursor"></span>';
+            const needsNl = currentFullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(currentFullText) || /```\w*$/.test(currentFullText);
+            const needsSp = !needsNl && !currentFullText.endsWith(' ') && !appended.startsWith(' ') && !appended.startsWith('\n');
+            const sep = needsNl ? '\n' : (needsSp ? ' ' : '');
+            bubbleText.innerHTML = renderMarkdown(currentFullText + sep + appended) + '<span class="typing-cursor"></span>';
             smartScrollChatToBottom(false);
           }
         } catch (e) {}
@@ -1697,7 +1703,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           const parsed = JSON.parse(line);
           if (parsed.message?.content) {
             appended += parsed.message.content;
-            bubbleText.innerHTML = renderMarkdown(currentFullText + '\n' + appended) + '<span class="typing-cursor"></span>';
+            const needsNl = currentFullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(currentFullText) || /```\w*$/.test(currentFullText);
+            const needsSp = !needsNl && !currentFullText.endsWith(' ') && !appended.startsWith(' ') && !appended.startsWith('\n');
+            const sep = needsNl ? '\n' : (needsSp ? ' ' : '');
+            bubbleText.innerHTML = renderMarkdown(currentFullText + sep + appended) + '<span class="typing-cursor"></span>';
             smartScrollChatToBottom(false);
           }
         } catch (e) {}
@@ -4036,16 +4045,24 @@ ${organicBlock}
   ];
 
   function deriveBroadSearchQueries(rawQuery, contextText = '') {
-    if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', news: '', recentNews: '', weeklyNews: '', core: '' };
+    if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', news: '', recentNews: '', recentNewsId: '', weeklyNews: '', core: '' };
     const combined = (rawQuery + ' ' + (contextText || '')).trim();
     const lower = combined.toLowerCase();
 
-    // Deteksi nomor versi spesifik jika ada (misal: 4.7, 3.5, 4o, 5.5, v3, 2.0)
-    const versionMatch = combined.match(/\b(?:v|version)?\s*([0-9]+(?:\.[0-9]+)+[a-z]?|[0-9]+[a-z]?)\b/i);
-    let version = versionMatch ? versionMatch[1] : '';
-    // Cegah tahun 4-digit (seperti 2024, 2025, 2026) diperlakukan sebagai nomor versi model
-    if (/^20[2-3][0-9]$/.test(version)) {
-      version = '';
+    // Deteksi nomor versi spesifik jika ada (misal: 4.7, 3.5, 4o, 5.5, v3, 2.0, o1, r1)
+    // Cegah angka tanggal kalender (misal: "6 Oktober", "15 September") atau integer polos tanpa desimal/awalan 'v' tertangkap sebagai versi
+    let version = '';
+    // 1. Cek desimal versi: 3.5, 4.7, 5.5, 1.5-pro, dll. (Prioritaskan rawQuery terlebih dahulu)
+    const decimalMatch = rawQuery.match(/\b([0-9]+\.[0-9]+(?:[\.\-][0-9a-z]+)*)\b/i) || combined.match(/\b([0-9]+\.[0-9]+(?:[\.\-][0-9a-z]+)*)\b/i);
+    if (decimalMatch && !/^20[2-3][0-9]/.test(decimalMatch[1])) {
+      version = decimalMatch[1];
+    } else {
+      // 2. Cek versi berawalan 'v' atau 'ver' atau kode model khusus seperti '4o', 'o1', 'o3', 'r1', 'v3'
+      const codeMatch = rawQuery.match(/\b(?:v|ver|version)\s*([0-9]+(?:[\.\-][0-9a-z]+)*)\b/i) ||
+                        rawQuery.match(/\b([0-9]+o|o[1-4]|r[1-3])\b/i);
+      if (codeMatch) {
+        version = codeMatch[1];
+      }
     }
 
     let entity = '';
@@ -4092,12 +4109,14 @@ ${organicBlock}
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonthEn = now.toLocaleString('en-US', { month: 'long' });
+    const currentMonthId = now.toLocaleString('id-ID', { month: 'long' });
 
     return {
       primary: rawQuery.trim(),
       tech: `${coreSubject} ${currentMonthEn} ${currentYear} update`,
       news: `${coreSubject} latest ${currentMonthEn} ${currentYear} news`,
       recentNews: `${coreSubject} ${currentMonthEn} ${currentYear} when:30d`,
+      recentNewsId: `${coreSubject} ${currentMonthId} ${currentYear} when:30d`,
       weeklyNews: `${coreSubject} when:14d`,
       core: coreSubject
     };
@@ -4171,6 +4190,7 @@ ${organicBlock}
             const cleanQ = qPlan.primary;
             const techQ = qPlan.tech;
             const recentQ = qPlan.recentNews;
+            const recentQId = qPlan.recentNewsId || `${cleanQ} when:30d`;
             const weeklyQ = qPlan.weeklyNews;
             const coreQ = qPlan.core;
 
@@ -4200,7 +4220,7 @@ ${organicBlock}
             const gnewsPrimaryUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQ)}&hl=en-US&gl=US&ceid=US:en`;
             const r2jPrimaryUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsPrimaryUrl)}`;
             const isIndoQ = /\b(terbaru|terkini|berita|apa|siapa|bagaimana|mengapa|kapan|di|ke|dari|hari ini|minggu ini|bulan ini|tahun ini|presiden|indonesia|jakarta|pemerintah|bbm|gempa|harga|bansos|pilkada)\b/i.test((cleanQ + ' ' + effectiveContext).toLowerCase());
-            const gnewsIndoUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQ)}&hl=id&gl=ID&ceid=ID:id`;
+            const gnewsIndoUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(recentQId)}&hl=id&gl=ID&ceid=ID:id`;
             const r2jIndoUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsIndoUrl)}`;
             const minHnTimestamp = Math.floor((Date.now() - 120 * 86400 * 1000) / 1000);
             const hnUrlTech = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(techQ)}&tags=story&hitsPerPage=8&numericFilters=created_at_i%3E${minHnTimestamp}`;
@@ -4641,7 +4661,7 @@ ${organicBlock}
     // Bersihkan residu teks bocor seperti "We will call search_web for ..."
     cleaned = cleaned
       .replace(/(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(?:search_web|browse_web_page)[\s\S]*?(?:\.|\n|$)/gi, '')
-      .replace(/(?:search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?["'`](?:[^"'`]+)["'`]\s*\)/gi, '')
+      .replace(/(?:search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?(["'`])[\s\S]*?\1\s*\)/gi, '')
       .trim();
 
     return cleaned;
@@ -4746,23 +4766,23 @@ ${organicBlock}
       } catch (_) {}
     }
 
-    // 4. Function call syntax: search_web("query") or browse_web_page("url")
-    const funcRegex = /(search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?["'`]([^"'`]+)["'`]\s*\)/gi;
+    // 4. Function call syntax: search_web("query") or browse_web_page("url") - Mendukung apostrof dalam string
+    const funcRegex = /(search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?(["'`])([\s\S]*?)\2\s*\)/gi;
     let fm;
     while ((fm = funcRegex.exec(text)) !== null) {
       const name = fm[1];
-      const val = fm[2].trim();
+      const val = fm[3].trim();
       if (val) {
         addCall(name, name === 'search_web' ? { query: val } : { url: val }, fm[0]);
       }
     }
 
-    // 5. Conversational triggers: "We will call search_web for <query>"
-    const convRegex = /(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(search_web|browse_web_page)(?:\s+(?:for|with|tentang|query|:))?\s*["'`]([^"'`\n]+)["'`]/gi;
+    // 5. Conversational triggers: "We will call search_web for <query>" - Mendukung apostrof dalam string
+    const convRegex = /(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(search_web|browse_web_page)(?:\s+(?:for|with|tentang|query|:))?\s*(["'`])([^\n]+?)\2/gi;
     let cvm;
     while ((cvm = convRegex.exec(text)) !== null) {
       const name = cvm[1];
-      const val = cvm[2].trim();
+      const val = cvm[3].trim();
       if (val) {
         addCall(name, name === 'search_web' ? { query: val } : { url: val }, cvm[0]);
       }
@@ -5206,24 +5226,27 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
             lowerRoundText.includes('cutoff') ||
             lowerRoundText.includes('terakhir merilis grok') ||
             lowerRoundText.includes('terakhir adalah grok') ||
-            lowerRoundText.includes('belum pernah merilis');
+            lowerRoundText.includes('belum pernah merilis') ||
+            lowerRoundText.includes('belum dirilis') ||
+            lowerRoundText.includes('belum ada kabar') ||
+            lowerRoundText.includes('tidak ada informasi mengenai') ||
+            lowerRoundText.includes('belum tersedia') ||
+            lowerRoundText.includes('knowledge cutoff') ||
+            lowerRoundText.includes('last update') ||
+            lowerRoundText.includes('not have real-time') ||
+            lowerRoundText.includes('no real-time') ||
+            lowerRoundText.includes('cannot access the internet') ||
+            lowerRoundText.includes('no official announcement') ||
+            lowerRoundText.includes('has not been officially released') ||
+            lowerRoundText.includes('has not released') ||
+            lowerRoundText.includes('not yet released') ||
+            lowerRoundText.includes('has not announced');
 
           const isExplicitSearchRequest = 
-            lowerPrompt.includes('cari sumber') ||
-            lowerPrompt.includes('sumbernya') ||
-            lowerPrompt.includes('cari di web') ||
-            lowerPrompt.includes('berita terbaru') ||
-            lowerPrompt.includes('update terbaru') ||
-            lowerPrompt.includes('rilis terbaru') ||
-            lowerPrompt.includes('kabar terbaru') ||
-            lowerPrompt.includes('kabar terkini') ||
-            lowerPrompt.includes('info terbaru') ||
-            lowerPrompt.includes('informasi terbaru') ||
-            lowerPrompt.includes('model terbaru') ||
-            lowerPrompt.includes('fitur terbaru') ||
-            lowerPrompt.includes('versi terbaru') ||
-            lowerPrompt.includes('terbaru dari') ||
-            lowerPrompt.includes('apakah ada') ||
+            /\b(cari|carikan|search|browsing|brows|jelajahi|cek|check|find)\b/i.test(lowerPrompt) ||
+            /\b(update|rilis|release|kabar|berita|info|informasi|fitur|model|versi|version|roadmap)\b/i.test(lowerPrompt) ||
+            /\b(apakah|sudahkah|kapan)\b.*\b(ada|rilis|keluar|release|update)\b/i.test(lowerPrompt) ||
+            /\b(what(?:'s|\s+is)\s+new|latest\s+(?:update|news|model|version))\b/i.test(lowerPrompt) ||
             /\bgrok\s*4\b/i.test(lowerPrompt) ||
             /\b[a-z]+\s*[0-9]+(?:\.[0-9]+)+\b/i.test(lowerPrompt);
 
@@ -5861,24 +5884,27 @@ ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
             lowerRoundText.includes('cutoff') ||
             lowerRoundText.includes('terakhir merilis grok') ||
             lowerRoundText.includes('terakhir adalah grok') ||
-            lowerRoundText.includes('belum pernah merilis');
+            lowerRoundText.includes('belum pernah merilis') ||
+            lowerRoundText.includes('belum dirilis') ||
+            lowerRoundText.includes('belum ada kabar') ||
+            lowerRoundText.includes('tidak ada informasi mengenai') ||
+            lowerRoundText.includes('belum tersedia') ||
+            lowerRoundText.includes('knowledge cutoff') ||
+            lowerRoundText.includes('last update') ||
+            lowerRoundText.includes('not have real-time') ||
+            lowerRoundText.includes('no real-time') ||
+            lowerRoundText.includes('cannot access the internet') ||
+            lowerRoundText.includes('no official announcement') ||
+            lowerRoundText.includes('has not been officially released') ||
+            lowerRoundText.includes('has not released') ||
+            lowerRoundText.includes('not yet released') ||
+            lowerRoundText.includes('has not announced');
 
           const isExplicitSearchRequest = 
-            lowerPrompt.includes('cari sumber') ||
-            lowerPrompt.includes('sumbernya') ||
-            lowerPrompt.includes('cari di web') ||
-            lowerPrompt.includes('berita terbaru') ||
-            lowerPrompt.includes('update terbaru') ||
-            lowerPrompt.includes('rilis terbaru') ||
-            lowerPrompt.includes('kabar terbaru') ||
-            lowerPrompt.includes('kabar terkini') ||
-            lowerPrompt.includes('info terbaru') ||
-            lowerPrompt.includes('informasi terbaru') ||
-            lowerPrompt.includes('model terbaru') ||
-            lowerPrompt.includes('fitur terbaru') ||
-            lowerPrompt.includes('versi terbaru') ||
-            lowerPrompt.includes('terbaru dari') ||
-            lowerPrompt.includes('apakah ada') ||
+            /\b(cari|carikan|search|browsing|brows|jelajahi|cek|check|find)\b/i.test(lowerPrompt) ||
+            /\b(update|rilis|release|kabar|berita|info|informasi|fitur|model|versi|version|roadmap)\b/i.test(lowerPrompt) ||
+            /\b(apakah|sudahkah|kapan)\b.*\b(ada|rilis|keluar|release|update)\b/i.test(lowerPrompt) ||
+            /\b(what(?:'s|\s+is)\s+new|latest\s+(?:update|news|model|version))\b/i.test(lowerPrompt) ||
             /\bgrok\s*4\b/i.test(lowerPrompt) ||
             /\b[a-z]+\s*[0-9]+(?:\.[0-9]+)+\b/i.test(lowerPrompt);
 

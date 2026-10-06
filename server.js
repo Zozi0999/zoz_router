@@ -977,16 +977,24 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
 // Menghimpun 10-18 sumber simultan: Google News RSS, Tech Wire / HackerNews, Wikipedia Global, Wikipedia ID, & DuckDuckGo Instant
 
 function deriveBroadSearchQueries(rawQuery, contextText = '') {
-  if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', news: '', recentNews: '', weeklyNews: '', core: '' };
+  if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', news: '', recentNews: '', recentNewsId: '', weeklyNews: '', core: '' };
   const combined = (rawQuery + ' ' + (contextText || '')).trim();
   const lower = combined.toLowerCase();
 
-  // Deteksi nomor versi spesifik jika ada (misal: 4.7, 3.5, 4o, 5.5, v3, 2.0)
-  const versionMatch = combined.match(/\b(?:v|version)?\s*([0-9]+(?:\.[0-9]+)+[a-z]?|[0-9]+[a-z]?)\b/i);
-  let version = versionMatch ? versionMatch[1] : '';
-  // Cegah tahun 4-digit (seperti 2024, 2025, 2026) diperlakukan sebagai nomor versi model
-  if (/^20[2-3][0-9]$/.test(version)) {
-    version = '';
+  // Deteksi nomor versi spesifik jika ada (misal: 4.7, 3.5, 4o, 5.5, v3, 2.0, o1, r1)
+  // Cegah angka tanggal kalender (misal: "6 Oktober", "15 September") atau integer polos tanpa desimal/awalan 'v' tertangkap sebagai versi
+  let version = '';
+  // 1. Cek desimal versi: 3.5, 4.7, 5.5, 1.5-pro, dll. (Prioritaskan rawQuery terlebih dahulu)
+  const decimalMatch = rawQuery.match(/\b([0-9]+\.[0-9]+(?:[\.\-][0-9a-z]+)*)\b/i) || combined.match(/\b([0-9]+\.[0-9]+(?:[\.\-][0-9a-z]+)*)\b/i);
+  if (decimalMatch && !/^20[2-3][0-9]/.test(decimalMatch[1])) {
+    version = decimalMatch[1];
+  } else {
+    // 2. Cek versi berawalan 'v' atau 'ver' atau kode model khusus seperti '4o', 'o1', 'o3', 'r1', 'v3'
+    const codeMatch = rawQuery.match(/\b(?:v|ver|version)\s*([0-9]+(?:[\.\-][0-9a-z]+)*)\b/i) ||
+                      rawQuery.match(/\b([0-9]+o|o[1-4]|r[1-3])\b/i);
+    if (codeMatch) {
+      version = codeMatch[1];
+    }
   }
 
   let entity = '';
@@ -1033,12 +1041,14 @@ function deriveBroadSearchQueries(rawQuery, contextText = '') {
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonthEn = now.toLocaleString('en-US', { month: 'long' });
+  const currentMonthId = now.toLocaleString('id-ID', { month: 'long' });
 
   return {
     primary: rawQuery.trim(),
     tech: `${coreSubject} ${currentMonthEn} ${currentYear} update`,
     news: `${coreSubject} latest ${currentMonthEn} ${currentYear} news`,
     recentNews: `${coreSubject} ${currentMonthEn} ${currentYear} when:30d`,
+    recentNewsId: `${coreSubject} ${currentMonthId} ${currentYear} when:30d`,
     weeklyNews: `${coreSubject} when:14d`,
     core: coreSubject
   };
@@ -1074,12 +1084,15 @@ function fetchGoogleNewsRss(query, lang = 'en', maxCount = 8) {
       const ceid = lang === 'id' ? 'ID:id' : 'US:en';
       const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=${hl}&gl=${gl}&ceid=${ceid}`;
 
-      https.get(url, {
+      const req = https.get(url, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' },
         timeout: 6000
       }, (res) => {
         let xml = '';
-        res.on('data', c => xml += c);
+        res.on('data', c => {
+          xml += c;
+          if (xml.length > 500000) req.destroy();
+        });
         res.on('end', () => {
           const results = [];
           const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
@@ -1094,7 +1107,7 @@ function fetchGoogleNewsRss(query, lang = 'en', maxCount = 8) {
             if (titleMatch && linkMatch) {
               const rawTitle = titleMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1');
               let title = cleanHtmlText(rawTitle);
-              let rawUrl = linkMatch[1].trim();
+              let rawUrl = linkMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim();
               const pubDate = pubDateMatch ? pubDateMatch[1].trim() : '';
               const timestamp = Date.parse(pubDate) || 0;
               let sourceName = sourceMatch ? cleanHtmlText(sourceMatch[2].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1')) : '';
@@ -1125,7 +1138,9 @@ function fetchGoogleNewsRss(query, lang = 'en', maxCount = 8) {
           resolve(results);
         });
         res.on('error', () => resolve([]));
-      }).on('error', () => resolve([]));
+      });
+      req.on('timeout', () => { req.destroy(); resolve([]); });
+      req.on('error', () => resolve([]));
     } catch (_) { resolve([]); }
   });
 }
@@ -1135,7 +1150,7 @@ function fetchHackerNewsTech(query, maxCount = 8) {
     try {
       const minTimestamp = Math.floor((Date.now() - 120 * 86400 * 1000) / 1000);
       const url = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(query)}&tags=story&hitsPerPage=12&numericFilters=created_at_i%3E${minTimestamp}`;
-      https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }, timeout: 5000 }, (res) => {
+      const req = https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }, timeout: 5000 }, (res) => {
         let raw = '';
         res.on('data', c => raw += c);
         res.on('end', () => {
@@ -1166,7 +1181,9 @@ function fetchHackerNewsTech(query, maxCount = 8) {
           } catch (_) { resolve([]); }
         });
         res.on('error', () => resolve([]));
-      }).on('error', () => resolve([]));
+      });
+      req.on('timeout', () => { req.destroy(); resolve([]); });
+      req.on('error', () => resolve([]));
     } catch (_) { resolve([]); }
   });
 }
@@ -1175,7 +1192,7 @@ function fetchWikipediaFullText(query, lang = 'en', maxCount = 4) {
   return new Promise((resolve) => {
     try {
       const wikiUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=1&format=json&origin=*`;
-      https.get(wikiUrl, { headers: { 'User-Agent': 'ZozRouter/2.0 (AI Multi-Engine Gateway)' }, timeout: 5000 }, (res) => {
+      const req = https.get(wikiUrl, { headers: { 'User-Agent': 'ZozRouter/2.0 (AI Multi-Engine Gateway)' }, timeout: 5000 }, (res) => {
         let raw = '';
         res.on('data', c => raw += c);
         res.on('end', () => {
@@ -1199,7 +1216,9 @@ function fetchWikipediaFullText(query, lang = 'en', maxCount = 4) {
           } catch (_) { resolve([]); }
         });
         res.on('error', () => resolve([]));
-      }).on('error', () => resolve([]));
+      });
+      req.on('timeout', () => { req.destroy(); resolve([]); });
+      req.on('error', () => resolve([]));
     } catch (_) { resolve([]); }
   });
 }
@@ -1208,7 +1227,7 @@ function fetchDuckDuckGoInstant(query) {
   return new Promise((resolve) => {
     try {
       const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-      https.get(ddgUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 5000 }, (res) => {
+      const req = https.get(ddgUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 5000 }, (res) => {
         let raw = '';
         res.on('data', c => raw += c);
         res.on('end', () => {
@@ -1241,7 +1260,9 @@ function fetchDuckDuckGoInstant(query) {
           } catch (_) { resolve([]); }
         });
         res.on('error', () => resolve([]));
-      }).on('error', () => resolve([]));
+      });
+      req.on('timeout', () => { req.destroy(); resolve([]); });
+      req.on('error', () => resolve([]));
     } catch (_) { resolve([]); }
   });
 }
@@ -1255,6 +1276,7 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   const techQuery = qPlan.tech;
   const newsQuery = qPlan.news;
   const recentQuery = qPlan.recentNews;
+  const recentQueryId = qPlan.recentNewsId || `${cleanQuery} when:30d`;
   const weeklyQuery = qPlan.weeklyNews;
   const coreQuery = qPlan.core;
 
@@ -1269,7 +1291,7 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
     fetchGoogleNewsRss(techQuery, 'en', 8),
     fetchGoogleNewsRss(weeklyQuery, 'en', 6),
     fetchGoogleNewsRss(cleanQuery, 'en', 6),
-    isIndoQuery ? fetchGoogleNewsRss(cleanQuery, 'id', 8) : Promise.resolve([]),
+    isIndoQuery ? fetchGoogleNewsRss(recentQueryId, 'id', 8) : Promise.resolve([]),
     fetchHackerNewsTech(techQuery, 8),
     fetchHackerNewsTech(coreQuery, 6),
     fetchDuckDuckGoInstant(coreQuery)
@@ -1478,7 +1500,7 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
 function fallbackJinaReader(targetUrl, maxChars = 5000) {
   return new Promise((resolve) => {
     try {
-      https.get(`https://r.jina.ai/${targetUrl}`, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 8000 }, (res) => {
+      const req = https.get(`https://r.jina.ai/${targetUrl}`, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 8000 }, (res) => {
         let md = '';
         res.on('data', c => md += c);
         res.on('end', () => {
@@ -1497,7 +1519,9 @@ function fallbackJinaReader(targetUrl, maxChars = 5000) {
           }
         });
         res.on('error', () => resolve({ url: targetUrl, error: 'Jina error', text: '' }));
-      }).on('error', () => resolve({ url: targetUrl, error: 'Jina request error', text: '' }));
+      });
+      req.on('timeout', () => { req.destroy(); resolve({ url: targetUrl, error: 'Jina timeout', text: '' }); });
+      req.on('error', () => resolve({ url: targetUrl, error: 'Jina request error', text: '' }));
     } catch (_) { resolve({ url: targetUrl, error: 'Jina exception', text: '' }); }
   });
 }
