@@ -585,6 +585,15 @@ function pruneResearchTasks() {
 // Timer pembersihan berkala setiap 15 menit
 setInterval(pruneResearchTasks, 15 * 60 * 1000).unref();
 
+// Helper jeda asinkronus untuk mencegah lonjakan rate-limit (RPM)
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+function isFreeTierModel(modelName) {
+  if (!modelName || typeof modelName !== 'string') return false;
+  const lower = modelName.toLowerCase();
+  return lower.includes(':free') || lower.endsWith('/free') || lower === 'openrouter/free';
+}
+
 // Helper untuk memanggil LLM (OpenRouter atau Ollama) dari backend dengan dukungan riwayat pesan & auto-detect provider per model
 async function callLLMBackend({ prompt, system, messages, model, provider, endpoint, apiKey, openRouterKey, ollamaApiKey }) {
   let finalMessages = [];
@@ -771,6 +780,9 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
         lastError = err;
         if (candidateModels.length > 1 && i < candidateModels.length - 1) {
           console.warn(`[OpenRouter Backend Free Failover] Model ${candidate} gagal: ${err.message}. Mencoba ${candidateModels[i + 1]}...`);
+          // Berikan jeda adaptif (backoff) jika rate-limited (HTTP 429) sebelum mencoba model berikutnya
+          const is429 = err.message && (err.message.includes('429') || err.message.toLowerCase().includes('rate limit'));
+          await sleep(is429 ? 2000 : 600);
           continue;
         }
       }
@@ -1151,29 +1163,63 @@ ${divergentBlock || 'Tidak ada data Serper Divergen.'}
 Tugas Anda:
 Analisis data di atas secara mendalam. Ekstrak entitas kunci, data statistik terverifikasi tahun 2026, aspek teknis spesifik, dan perspektif pelengkap dalam 2-3 paragraf padat.`;
 
-      const [analisisAgen1, analisisAgen2] = await Promise.all([
-        (serperBlock.trim()) ? callLLMBackend({
-          ...config,
-          messages: [],
-          model: masterResearchModel,
-          prompt: promptAgen1,
-          system: 'Anda adalah Agen 1: Analis Web Google yang fokus mengekstrak tren utama dan informasi relevan dari web.'
-        }).catch((err) => {
-          console.warn('Gagal memanggil Model Agen 1 di backend:', err?.message || err);
-          return `[Ringkasan Ekstraksi Data Serper]:\n${serperBlock}`;
-        }) : Promise.resolve('Tidak ada data dari Agen 1.'),
+      let analisisAgen1 = 'Tidak ada data dari Agen 1.';
+      let analisisAgen2 = 'Tidak ada data dari Agen 2.';
 
-        (divergentBlock.trim()) ? callLLMBackend({
-          ...config,
-          messages: [],
-          model: masterResearchModel,
-          prompt: promptAgen2,
-          system: 'Anda adalah Agen 2: Analis Data Divergen & Teknis yang fokus mengekstrak fakta terverifikasi dan sudut pandang spesifik dari domain mandiri.'
-        }).catch((err) => {
-          console.warn('Gagal memanggil Model Agen 2 di backend:', err?.message || err);
-          return `[Ringkasan Ekstraksi Data Serper Divergen]:\n${divergentBlock}`;
-        }) : Promise.resolve('Tidak ada data dari Agen 2.')
-      ]);
+      if (isFreeTierModel(masterResearchModel)) {
+        // Eksekusi sekuensial dengan jeda adaptif pada model free untuk mencegah HTTP 429 concurrency limit
+        if (serperBlock.trim()) {
+          analisisAgen1 = await callLLMBackend({
+            ...config,
+            messages: [],
+            model: masterResearchModel,
+            prompt: promptAgen1,
+            system: 'Anda adalah Agen 1: Analis Web Google yang fokus mengekstrak tren utama dan informasi relevan dari web.'
+          }).catch((err) => {
+            console.warn('Gagal memanggil Model Agen 1 di backend:', err?.message || err);
+            return `[Ringkasan Ekstraksi Data Serper]:\n${serperBlock}`;
+          });
+        }
+        await sleep(1200);
+        if (divergentBlock.trim()) {
+          analisisAgen2 = await callLLMBackend({
+            ...config,
+            messages: [],
+            model: masterResearchModel,
+            prompt: promptAgen2,
+            system: 'Anda adalah Agen 2: Analis Data Divergen & Teknis yang fokus mengekstrak fakta terverifikasi dan sudut pandang spesifik dari domain mandiri.'
+          }).catch((err) => {
+            console.warn('Gagal memanggil Model Agen 2 di backend:', err?.message || err);
+            return `[Ringkasan Ekstraksi Data Serper Divergen]:\n${divergentBlock}`;
+          });
+        }
+      } else {
+        const [res1, res2] = await Promise.all([
+          (serperBlock.trim()) ? callLLMBackend({
+            ...config,
+            messages: [],
+            model: masterResearchModel,
+            prompt: promptAgen1,
+            system: 'Anda adalah Agen 1: Analis Web Google yang fokus mengekstrak tren utama dan informasi relevan dari web.'
+          }).catch((err) => {
+            console.warn('Gagal memanggil Model Agen 1 di backend:', err?.message || err);
+            return `[Ringkasan Ekstraksi Data Serper]:\n${serperBlock}`;
+          }) : Promise.resolve('Tidak ada data dari Agen 1.'),
+
+          (divergentBlock.trim()) ? callLLMBackend({
+            ...config,
+            messages: [],
+            model: masterResearchModel,
+            prompt: promptAgen2,
+            system: 'Anda adalah Agen 2: Analis Data Divergen & Teknis yang fokus mengekstrak fakta terverifikasi dan sudut pandang spesifik dari domain mandiri.'
+          }).catch((err) => {
+            console.warn('Gagal memanggil Model Agen 2 di backend:', err?.message || err);
+            return `[Ringkasan Ekstraksi Data Serper Divergen]:\n${divergentBlock}`;
+          }) : Promise.resolve('Tidak ada data dari Agen 2.')
+        ]);
+        analisisAgen1 = res1;
+        analisisAgen2 = res2;
+      }
 
       task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Analisis spesialis selesai: Model Riset (${masterResearchModel}) menganalisis temuan Primer & Divergen.`);
 
@@ -1189,6 +1235,9 @@ Analisis data di atas secara mendalam. Ekstrak entitas kunci, data statistik ter
 
       if (i < maxIterations) {
         try {
+          if (isFreeTierModel(masterResearchModel)) {
+            await sleep(1500); // Jeda pelindung rate-limit sebelum planner evaluator
+          }
           const evalPrompt = `Anda adalah AI Deep Research Planner.
 Topik Utama: "${topik}"
 Data Temuan Saat Ini:
@@ -1402,31 +1451,59 @@ Cerna dan analisis secara kritis seluruh teks web divergen di atas. Ekstrak pers
     let laporanPakarAgen2 = '';
 
     try {
-      const [hasil1, hasil2] = await Promise.all([
-        (primerScrapedText.trim()) ? callLLMBackend({
-          ...config,
-          messages: [],
-          model: masterResearchModel,
-          prompt: promptCernaPrimer,
-          system: 'Anda adalah Agen 1: Analis Web Primer yang bertugas membedah dan menyaring konten artikel web.'
-        }).catch(err => {
-          console.warn('Gagal pencernaan artikel Agen 1:', err?.message || err);
-          return `[Analisis Temuan Agen 1]:\n${dataTemuan.filter(t => t.includes('AGEN 1')).join('\n') || 'Analisis artikel selesai.'}`;
-        }) : Promise.resolve('Tidak ada artikel web primer yang dicerna.'),
+      if (isFreeTierModel(masterResearchModel)) {
+        if (primerScrapedText.trim()) {
+          laporanPakarAgen1 = await callLLMBackend({
+            ...config,
+            messages: [],
+            model: masterResearchModel,
+            prompt: promptCernaPrimer,
+            system: 'Anda adalah Agen 1: Analis Web Primer yang bertugas membedah dan menyaring konten artikel web.'
+          }).catch(err => {
+            console.warn('Gagal pencernaan artikel Agen 1:', err?.message || err);
+            return `[Analisis Temuan Agen 1]:\n${dataTemuan.filter(t => t.includes('AGEN 1')).join('\n') || 'Analisis artikel selesai.'}`;
+          });
+        }
+        await sleep(1500); // Jeda adaptif sebelum dokumen divergen
+        if (divergenScrapedText.trim()) {
+          laporanPakarAgen2 = await callLLMBackend({
+            ...config,
+            messages: [],
+            model: masterResearchModel,
+            prompt: promptCernaDivergen,
+            system: 'Anda adalah Agen 2: Analis Data Divergen yang bertugas membedah konten teknis dan independen.'
+          }).catch(err => {
+            console.warn('Gagal pencernaan artikel Agen 2:', err?.message || err);
+            return `[Analisis Temuan Agen 2]:\n${dataTemuan.filter(t => t.includes('AGEN 2')).join('\n') || 'Analisis artikel divergen selesai.'}`;
+          });
+        }
+      } else {
+        const [hasil1, hasil2] = await Promise.all([
+          (primerScrapedText.trim()) ? callLLMBackend({
+            ...config,
+            messages: [],
+            model: masterResearchModel,
+            prompt: promptCernaPrimer,
+            system: 'Anda adalah Agen 1: Analis Web Primer yang bertugas membedah dan menyaring konten artikel web.'
+          }).catch(err => {
+            console.warn('Gagal pencernaan artikel Agen 1:', err?.message || err);
+            return `[Analisis Temuan Agen 1]:\n${dataTemuan.filter(t => t.includes('AGEN 1')).join('\n') || 'Analisis artikel selesai.'}`;
+          }) : Promise.resolve('Tidak ada artikel web primer yang dicerna.'),
 
-        (divergenScrapedText.trim()) ? callLLMBackend({
-          ...config,
-          messages: [],
-          model: masterResearchModel,
-          prompt: promptCernaDivergen,
-          system: 'Anda adalah Agen 2: Analis Data Divergen yang bertugas membedah konten teknis dan independen.'
-        }).catch(err => {
-          console.warn('Gagal pencernaan artikel Agen 2:', err?.message || err);
-          return `[Analisis Temuan Agen 2]:\n${dataTemuan.filter(t => t.includes('AGEN 2')).join('\n') || 'Analisis artikel divergen selesai.'}`;
-        }) : Promise.resolve('Tidak ada artikel web divergen yang dicerna.')
-      ]);
-      laporanPakarAgen1 = hasil1;
-      laporanPakarAgen2 = hasil2;
+          (divergenScrapedText.trim()) ? callLLMBackend({
+            ...config,
+            messages: [],
+            model: masterResearchModel,
+            prompt: promptCernaDivergen,
+            system: 'Anda adalah Agen 2: Analis Data Divergen yang bertugas membedah konten teknis dan independen.'
+          }).catch(err => {
+            console.warn('Gagal pencernaan artikel Agen 2:', err?.message || err);
+            return `[Analisis Temuan Agen 2]:\n${dataTemuan.filter(t => t.includes('AGEN 2')).join('\n') || 'Analisis artikel divergen selesai.'}`;
+          }) : Promise.resolve('Tidak ada artikel web divergen yang dicerna.')
+        ]);
+        laporanPakarAgen1 = hasil1;
+        laporanPakarAgen2 = hasil2;
+      }
     } catch (digestErr) {
       console.warn('Pencernaan artikel oleh Model Riset mengalami kendala:', digestErr?.message || digestErr);
     }
@@ -1526,6 +1603,10 @@ Sajikan seluruh tautan asli markdown [Nama Sumber](URL) lengkap dengan keteranga
       };
     }
 
+    if (isFreeTierModel(masterResearchModel)) {
+      await sleep(1500); // Jeda adaptif sebelum model pengoreksi/penyusun laporan akhir
+    }
+
     const laporanAkhir = await callLLMBackend({
       ...config,
       prompt: correctorPrompt,
@@ -1586,6 +1667,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
     let chatSummary = '';
     try {
+      if (isFreeTierModel(masterResearchModel)) {
+        await sleep(1500); // Jeda adaptif sebelum rangkuman chat
+      }
       chatSummary = await callLLMBackend({
         ...config,
         prompt: summaryPrompt,
