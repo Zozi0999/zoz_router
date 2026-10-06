@@ -1045,16 +1045,20 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
   // ==================== TOAST NOTIFICATIONS ====================
   function showToast(message, type = 'info') {
+    if (!els.toastContainer) return;
+    // Bersihkan notifikasi lama agar tidak menumpuk memenuhi layar
+    els.toastContainer.innerHTML = '';
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     const icon = type === 'error' ? 'fa-triangle-exclamation' : 'fa-circle-check';
     toast.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${escapeHtml(message)}</span>`;
+    toast.onclick = () => toast.remove();
     els.toastContainer.appendChild(toast);
     setTimeout(() => {
       toast.style.opacity = '0';
-      toast.style.transform = 'translateX(40px)';
-      setTimeout(() => toast.remove(), 300);
-    }, 3200);
+      toast.style.transform = 'translateY(-10px)';
+      setTimeout(() => toast.remove(), 250);
+    }, 1500);
   }
 
   // ==================== UTILS ====================
@@ -1246,13 +1250,18 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     // ==================== HIGH-PERFORMANCE 60FPS STREAM BUFFER RENDERER ====================
   class StreamBufferRenderer {
-    constructor(bubbleElement, onScrollCallback) {
+    constructor(bubbleElement, onScrollCallback, prefixHtml = '') {
       this.el = bubbleElement;
       this.onScroll = onScrollCallback;
+      this.prefixHtml = prefixHtml;
       this.text = '';
       this.animId = null;
       this.lastRenderTime = 0;
       this.isDone = false;
+    }
+
+    setPrefixHtml(prefix) {
+      this.prefixHtml = prefix || '';
     }
 
     append(delta) {
@@ -1274,7 +1283,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     render() {
       if (!this.el) return;
-      this.el.innerHTML = renderMarkdown(this.text) + '<span class="typing-cursor"></span>';
+      this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(this.text) + '<span class="typing-cursor"></span>';
       if (this.onScroll && !userScrolledUp) this.onScroll();
     }
 
@@ -1285,7 +1294,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         this.animId = null;
       }
       if (this.el) {
-        this.el.innerHTML = renderMarkdown(this.text);
+        this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(this.text);
         enhanceCodeBlocks(this.el);
       }
       if (this.onScroll && !userScrolledUp) this.onScroll();
@@ -4039,21 +4048,55 @@ ${organicBlock}
         if (!query.trim()) return { text: 'Error: Parameter `query` tidak boleh kosong.', sources: [] };
         
         let results = [];
-        if (!IS_GITHUB_PAGES) {
+        // Coba endpoint backend lokal/tunnel terlebih dahulu (Zero-API DuckDuckGo live scraper)
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 6500);
+          const res = await fetch('/api/tools/search-web', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: query.trim(), maxResults: 6 }),
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data.results) && data.results.length > 0) {
+              results = data.results;
+            }
+          }
+        } catch (_) {}
+        
+        // Client-side Wikipedia Full-Text Search fallback (CORS origin=* aktif, bebas API key)
+        if (results.length === 0) {
           try {
-            const res = await fetch('/api/tools/search-web', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ query: query.trim(), maxResults: 6 })
-            });
-            if (res.ok) {
-              const data = await res.json();
-              results = data.results || [];
+            const wikiFullTextSearch = async (lang) => {
+              const wikiUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query.trim())}&utf8=1&format=json&origin=*`;
+              const wikiRes = await fetch(wikiUrl);
+              if (wikiRes.ok) {
+                const wData = await wikiRes.json();
+                const items = wData.query?.search || [];
+                for (const item of items.slice(0, 5)) {
+                  const cleanSnip = (item.snippet || '').replace(/<[^>]+>/g, '').trim();
+                  const pTitle = item.title;
+                  const pUrl = `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(pTitle.replace(/ /g, '_'))}`;
+                  results.push({
+                    title: pTitle,
+                    url: pUrl,
+                    domain: `${lang}.wikipedia.org`,
+                    snippet: cleanSnip || `Artikel ensiklopedia: ${pTitle}`
+                  });
+                }
+              }
+            };
+            await wikiFullTextSearch('id');
+            if (results.length === 0) {
+              await wikiFullTextSearch('en');
             }
           } catch (_) {}
         }
-        
-        // Client-side Wikipedia fallback jika endpoint offline atau di GitHub Pages
+
+        // Client-side Wikipedia Opensearch fallback jika full-text kosong
         if (results.length === 0) {
           try {
             const wikiFetch = async (lang) => {
@@ -4202,6 +4245,31 @@ ${organicBlock}
         } catch (_) {}
       }
     }
+
+    // Support direct function call syntax: search_web("query") or browse_web_page("url")
+    const funcRegex = /(search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*=\s*)?["'`]([^"'`]+)["'`]\s*\)/gi;
+    let fm;
+    while ((fm = funcRegex.exec(text)) !== null) {
+      const toolName = fm[1];
+      const paramVal = fm[2].trim();
+      if (paramVal) {
+        const serializedArgs = JSON.stringify(toolName === 'search_web' ? { query: paramVal } : { url: paramVal });
+        const callKey = `${toolName}:${serializedArgs}`;
+        if (!seenIds.has(callKey)) {
+          seenIds.add(callKey);
+          calls.push({
+            id: `call_fn_${Date.now()}_${calls.length}`,
+            type: 'function',
+            rawTag: fm[0],
+            function: {
+              name: toolName,
+              arguments: serializedArgs
+            }
+          });
+        }
+      }
+    }
+
     return calls;
   }
 
@@ -4210,9 +4278,10 @@ Anda memiliki instrumen penjelajahan internet mandiri yang dibangun khusus dari 
 1. search_web(query): Cari fakta terkini, riset, berita, atau data apa pun di web secara live.
 2. browse_web_page(url): Buka URL spesifik dan baca teks bersih dokumen web hingga 5.000 karakter untuk Anda cerna secara mendalam.
 
-PANDUAN PEMANGGILAN OTONOM:
-- Kapan pun Anda butuh data terkini, verifikasi fakta, atau penelusuran web, PANGGIL TOOL INI SECARA MANDIRI sebelum menjawab!
-- Format pemanggilan: Gunakan function calling standar, atau tuliskan tag semantik:
+PANDUAN EKSEKUSI OTONOM:
+- JIKA ANDA DITANYA MENGENAI PERISTIWA, PRODUK, VERSI, DOKUMENTASI, ATAU PERKEMBANGAN TAHUN 2025/2026:
+  DILARANG KERAS MENOLAK DENGAN ALASAN "BATAS PENGETAHUAN TRAINING" ATAU "KUTIPAN CUTOFF MEI 2024"!
+- Anda memiliki akses langsung ke web. Jika data live telah diberikan, cerna dan jawab langsung. Jika masih butuh info tambahan atau ingin membaca URL spesifik, PANGGIL TOOL SECARA MANDIRI:
 <tool_call>{"name":"search_web","arguments":{"query":"kata kunci spesifik"}}</tool_call>
 atau
 <tool_call>{"name":"browse_web_page","arguments":{"url":"https://example.com/artikel"}}</tool_call>
@@ -4478,6 +4547,7 @@ atau
     let fullText = '';
     let webSources = null;
     let streamRenderer = null;
+    let executedHudHtml = '';
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -4489,6 +4559,44 @@ atau
 
       if (STATE.searchMode === 'autonomous' || hasAutonomousIntent) {
         systemContent = systemContent ? `${systemContent}\n\n${AUTONOMOUS_SYSTEM_DIRECTIVE}` : AUTONOMOUS_SYSTEM_DIRECTIVE;
+
+        // Proactive Upfront Web Search in Autonomous Mode (Zero-API DuckDuckGo / Scraper)
+        try {
+          let autoTarget = promptText.trim();
+          let autoToolName = 'search_web';
+          const urlMatch = promptText.match(/https?:\/\/[^\s]+/i);
+          if (urlMatch) {
+            autoToolName = 'browse_web_page';
+            autoTarget = urlMatch[0];
+          } else {
+            const cleanedQuery = promptText
+              .replace(/^(tolong|coba|bisakah kamu|bisa tolong|mohon|silakan)\s+/i, '')
+              .replace(/^(cari|carikan|search|jelajahi|browsing|brows)\s+(tentang|mengenai|info|informasi|data)?\s*/i, '')
+              .replace(/[?.,!]+$/g, '')
+              .trim();
+            if (cleanedQuery.length >= 3) {
+              autoTarget = cleanedQuery;
+            }
+          }
+
+          bubbleText.innerHTML = createAutonomousToolHudHtml(autoToolName, autoTarget, 'loading');
+          smartScrollChatToBottom(true);
+
+          const autoToolRes = await executeAutonomousWebTool(autoToolName, autoTarget);
+          if (autoToolRes && autoToolRes.text) {
+            if (autoToolRes.sources && Array.isArray(autoToolRes.sources)) {
+              if (!webSources) webSources = [];
+              webSources.push(...autoToolRes.sources);
+            }
+            executedHudHtml += createAutonomousToolHudHtml(autoToolName, autoTarget, 'done');
+            bubbleText.innerHTML = executedHudHtml + '<span class="typing-cursor"></span>';
+            smartScrollChatToBottom(true);
+
+            systemContent += `\n\n### HASIL PENJELAJAHAN WEB OTONOM (ZERO-API REAL-TIME):\n${autoToolRes.text}\n\n[INSTRUKSI MUTLAK]: Anda TELAH diberikan data pencarian web real-time aktual di atas. Jawab pertanyaan pengguna secara komprehensif, faktual, dan mendalam berdasarkan data di atas. DILARANG KERAS menolak atau menyatakan cutoff pengetahuan training! Jika Anda masih membutuhkan data pelengkap atau URL spesifik lain, Anda bebas memanggil 'search_web' atau 'browse_web_page' lagi.`;
+          }
+        } catch (autoErr) {
+          console.warn('[Autonomous Pre-Search Error]', autoErr);
+        }
       } else if (STATE.webSearchEnabled) {
         const webRes = await getWebSearchContext(promptText, session, bubbleText);
         if (webRes && webRes.systemPromptContext) {
@@ -4568,7 +4676,7 @@ atau
       let buffer = '';
       let doneReason = null;
       const accumulatedToolCalls = [];
-      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
+      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml);
 
       while (true) {
         const { done, value } = await reader.read();
@@ -4609,7 +4717,6 @@ atau
       // ==================== OLLAMA AUTONOMOUS MULTI-ROUND DIGESTION ENGINE ====================
       const maxAutonomousRounds = 4;
       let autonomousRound = 0;
-      let executedHudHtml = '';
       const conversationChain = [...messagesPayload];
       let currentRoundText = fullText;
       let currentRoundNativeCalls = accumulatedToolCalls;
@@ -4942,6 +5049,7 @@ atau
     let webSources = null;
     let streamRenderer = null;
     let actualModelUsed = null;
+    let executedHudHtml = '';
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -4953,6 +5061,44 @@ atau
 
       if (STATE.searchMode === 'autonomous' || hasAutonomousIntent) {
         systemContent = systemContent ? `${systemContent}\n\n${AUTONOMOUS_SYSTEM_DIRECTIVE}` : AUTONOMOUS_SYSTEM_DIRECTIVE;
+
+        // Proactive Upfront Web Search in Autonomous Mode (Zero-API DuckDuckGo / Scraper)
+        try {
+          let autoTarget = promptText.trim();
+          let autoToolName = 'search_web';
+          const urlMatch = promptText.match(/https?:\/\/[^\s]+/i);
+          if (urlMatch) {
+            autoToolName = 'browse_web_page';
+            autoTarget = urlMatch[0];
+          } else {
+            const cleanedQuery = promptText
+              .replace(/^(tolong|coba|bisakah kamu|bisa tolong|mohon|silakan)\s+/i, '')
+              .replace(/^(cari|carikan|search|jelajahi|browsing|brows)\s+(tentang|mengenai|info|informasi|data)?\s*/i, '')
+              .replace(/[?.,!]+$/g, '')
+              .trim();
+            if (cleanedQuery.length >= 3) {
+              autoTarget = cleanedQuery;
+            }
+          }
+
+          bubbleText.innerHTML = createAutonomousToolHudHtml(autoToolName, autoTarget, 'loading');
+          smartScrollChatToBottom(true);
+
+          const autoToolRes = await executeAutonomousWebTool(autoToolName, autoTarget);
+          if (autoToolRes && autoToolRes.text) {
+            if (autoToolRes.sources && Array.isArray(autoToolRes.sources)) {
+              if (!webSources) webSources = [];
+              webSources.push(...autoToolRes.sources);
+            }
+            executedHudHtml += createAutonomousToolHudHtml(autoToolName, autoTarget, 'done');
+            bubbleText.innerHTML = executedHudHtml + '<span class="typing-cursor"></span>';
+            smartScrollChatToBottom(true);
+
+            systemContent += `\n\n### HASIL PENJELAJAHAN WEB OTONOM (ZERO-API REAL-TIME):\n${autoToolRes.text}\n\n[INSTRUKSI MUTLAK]: Anda TELAH diberikan data pencarian web real-time aktual di atas. Jawab pertanyaan pengguna secara komprehensif, faktual, dan mendalam berdasarkan data di atas. DILARANG KERAS menolak atau menyatakan cutoff pengetahuan training! Jika Anda masih membutuhkan data pelengkap atau URL spesifik lain, Anda bebas memanggil 'search_web' atau 'browse_web_page' lagi.`;
+          }
+        } catch (autoErr) {
+          console.warn('[Autonomous Pre-Search Error]', autoErr);
+        }
       } else if (STATE.webSearchEnabled) {
         const webRes = await getWebSearchContext(promptText, session, bubbleText);
         if (webRes && webRes.systemPromptContext) {
@@ -5122,7 +5268,7 @@ atau
       let finishReason = null;
       const collectedImages = [];
       const accumulatedToolCalls = [];
-      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
+      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml);
 
       while (true) {
         const { done, value } = await reader.read();
@@ -5206,7 +5352,6 @@ atau
       // ==================== UNIVERSAL AUTONOMOUS MULTI-ROUND DIGESTION ENGINE ====================
       const maxAutonomousRounds = 4;
       let autonomousRound = 0;
-      let executedHudHtml = '';
       const conversationChain = [...(activeMessagesPayload || messagesPayload)];
       let currentRoundText = fullText;
       let currentRoundNativeCalls = accumulatedToolCalls;
@@ -5754,16 +5899,6 @@ atau
     savePersistedState();
     AudioEngine.click();
     closeSearchDropdown();
-
-    if (mode === 'autonomous') {
-      showToast('Mode Autonomous Web Explorer Aktif (Built from 0) 🧭');
-    } else if (mode === 'premium') {
-      showToast('Mode Deep Research (Premium) Aktif 🔬');
-    } else if (mode === 'default') {
-      showToast('Mode Default: Pencarian Cepat Aktif 🌐');
-    } else {
-      showToast('Pencarian Web Dinonaktifkan.');
-    }
   }
 
   function updateSearchModeUI() {
@@ -10372,10 +10507,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       STATE.isImageGenMode = !STATE.isImageGenMode;
       updateImageGenModeUI();
       if (STATE.isImageGenMode) {
-        showToast('🎨 Mode AI Image Studio Aktif! Ketik deskripsi untuk digenerasi.');
         AudioEngine.success();
       } else {
-        showToast('💬 Mode Percakapan Standar.');
         AudioEngine.click();
       }
     });
@@ -10393,17 +10526,14 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         STATE.isImageGenMode = !STATE.isImageGenMode;
         updateImageGenModeUI();
         if (STATE.isImageGenMode) {
-          showToast('🎨 Mode AI Image Studio Aktif (Alt+I)!');
           AudioEngine.success();
           els.promptInput?.focus();
         } else {
-          showToast('💬 Mode Percakapan Standar (Alt+I).');
           AudioEngine.click();
         }
       } else if (e.key === 'Escape' && STATE.isImageGenMode && !els.promptInput.value.trim()) {
         STATE.isImageGenMode = false;
         updateImageGenModeUI();
-        showToast('💬 Mode Percakapan Standar.');
       }
     });
 
