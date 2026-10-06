@@ -971,6 +971,254 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
   });
 }
 
+// ==================== AUTONOMOUS ZERO-API WEB EXPLORER ENGINES ====================
+// Engine pencarian web mandiri tanpa API pihak ketiga (No Serper API)
+function performAutonomousSearch(query, maxResults = 8) {
+  return new Promise((resolve) => {
+    if (!query || typeof query !== 'string' || !query.trim()) {
+      return resolve({ query: '', count: 0, results: [] });
+    }
+    const cleanQuery = query.trim();
+    const postData = 'q=' + encodeURIComponent(cleanQuery);
+    
+    try {
+      const req = https.request({
+        hostname: 'html.duckduckgo.com',
+        port: 443,
+        path: '/html/',
+        method: 'POST',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'id,en-US,en;q=0.9',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(postData)
+        },
+        timeout: 9000
+      }, (res) => {
+        let html = '';
+        res.on('data', chunk => html += chunk);
+        res.on('end', () => {
+          const results = [];
+          const titleRegex = /<h2\s+class="result__title">[\s\S]*?<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+          let match;
+          while ((match = titleRegex.exec(html)) !== null && results.length < maxResults) {
+            let rawUrl = match[1];
+            const title = match[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+            if (rawUrl.includes('uddg=')) {
+              try {
+                const u = new URL('https://duckduckgo.com' + rawUrl);
+                rawUrl = decodeURIComponent(u.searchParams.get('uddg') || rawUrl);
+              } catch (_) {}
+            }
+            const afterTitle = html.substring(match.index, match.index + 2000);
+            const snipMatch = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i.exec(afterTitle);
+            const snippet = snipMatch ? snipMatch[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '';
+
+            if (rawUrl.startsWith('http') && !rawUrl.includes('duckduckgo.com/y.js')) {
+              let domain = '';
+              try { domain = new URL(rawUrl).hostname; } catch (_) {}
+              results.push({
+                title,
+                url: rawUrl,
+                domain: domain || 'web',
+                snippet
+              });
+            }
+          }
+
+          // Fallback ke Wikipedia Search jika DuckDuckGo 0 hasil
+          if (results.length === 0) {
+            fallbackWikipediaSearch(cleanQuery, maxResults).then(wikiResults => {
+              resolve({
+                query: cleanQuery,
+                engine: 'autonomous_wiki_fallback',
+                count: wikiResults.length,
+                results: wikiResults
+              });
+            });
+            return;
+          }
+
+          resolve({
+            query: cleanQuery,
+            engine: 'autonomous_zero_api',
+            count: results.length,
+            results
+          });
+        });
+
+        res.on('error', () => {
+          fallbackWikipediaSearch(cleanQuery, maxResults).then(wikiResults => {
+            resolve({ query: cleanQuery, engine: 'autonomous_wiki_fallback', count: wikiResults.length, results: wikiResults });
+          });
+        });
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        fallbackWikipediaSearch(cleanQuery, maxResults).then(wikiResults => {
+          resolve({ query: cleanQuery, engine: 'autonomous_wiki_fallback', count: wikiResults.length, results: wikiResults });
+        });
+      });
+      req.on('error', () => {
+        fallbackWikipediaSearch(cleanQuery, maxResults).then(wikiResults => {
+          resolve({ query: cleanQuery, engine: 'autonomous_wiki_fallback', count: wikiResults.length, results: wikiResults });
+        });
+      });
+      req.write(postData);
+      req.end();
+    } catch (e) {
+      fallbackWikipediaSearch(cleanQuery, maxResults).then(wikiResults => {
+        resolve({ query: cleanQuery, engine: 'autonomous_wiki_fallback', count: wikiResults.length, results: wikiResults });
+      });
+    }
+  });
+}
+
+// Fallback multi-bahasa Wikipedia search (zero-API)
+function fallbackWikipediaSearch(query, maxResults = 5) {
+  return new Promise((resolve) => {
+    try {
+      const wikiUrl = `https://id.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=${maxResults}&format=json`;
+      https.get(wikiUrl, { timeout: 6000, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } }, (res) => {
+        let raw = '';
+        res.on('data', chunk => raw += chunk);
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(raw);
+            const titles = data[1] || [];
+            const snippets = data[2] || [];
+            const urls = data[3] || [];
+            const results = [];
+            for (let i = 0; i < titles.length; i++) {
+              if (urls[i]) {
+                results.push({
+                  title: titles[i],
+                  url: urls[i],
+                  domain: 'wikipedia.org',
+                  snippet: snippets[i] || `Artikel ensiklopedia tentang ${titles[i]}`
+                });
+              }
+            }
+            resolve(results);
+          } catch (_) {
+            resolve([]);
+          }
+        });
+        res.on('error', () => resolve([]));
+      }).on('error', () => resolve([]));
+    } catch (_) {
+      resolve([]);
+    }
+  });
+}
+
+// Engine pembaca dan penjelajah halaman web mandiri (Deep Page Browser)
+function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
+  return new Promise((resolve) => {
+    try {
+      if (redirectCount > 3) return resolve({ url: targetUrl, error: 'Too many redirects', text: '' });
+      if (!targetUrl || typeof targetUrl !== 'string' || !/^https?:\/\//i.test(targetUrl)) {
+        return resolve({ url: targetUrl, error: 'Invalid URL format', text: '' });
+      }
+      const parsedUrl = new URL(targetUrl);
+      if (isPrivateHost(parsedUrl.hostname, parsedUrl.port)) {
+        return resolve({ url: targetUrl, error: 'Access to private host restricted', text: '' });
+      }
+      const client = parsedUrl.protocol === 'https:' ? https : http;
+      const options = {
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+        path: parsedUrl.pathname + parsedUrl.search,
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'id,en-US,en;q=0.9'
+        },
+        timeout: 8000
+      };
+
+      const req = client.request(options, (res) => {
+        if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+          try {
+            const redirectUrl = new URL(res.headers.location, targetUrl).toString();
+            return browseWebPageContent(redirectUrl, maxChars, redirectCount + 1).then(resolve);
+          } catch (_) {
+            return resolve({ url: targetUrl, error: 'Invalid redirect target', text: '' });
+          }
+        }
+
+        let rawHtml = '';
+        res.on('data', chunk => {
+          rawHtml += chunk;
+          if (rawHtml.length > 500000) req.destroy();
+        });
+
+        res.on('end', () => {
+          try {
+            const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(rawHtml);
+            const title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '';
+
+            // Ekstrak tautan referensi penting dalam halaman
+            const links = [];
+            const linkRegex = /<a\s+[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+            let lm;
+            while ((lm = linkRegex.exec(rawHtml)) !== null && links.length < 8) {
+              let href = lm[1].trim();
+              const text = lm[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+              if (href.startsWith('/') && !href.startsWith('//')) {
+                href = parsedUrl.origin + href;
+              }
+              if (href.startsWith('http') && text && text.length > 3 && text.length < 90 && !href.includes(parsedUrl.hostname + '/#')) {
+                links.push({ title: text, url: href });
+              }
+            }
+
+            let clean = rawHtml
+              .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
+              .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
+              .replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, ' ')
+              .replace(/<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>/gi, ' ')
+              .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, ' ')
+              .replace(/<aside\b[^<]*(?:(?!<\/aside>)<[^<]*)*<\/aside>/gi, ' ')
+              .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, ' ')
+              .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, ' ')
+              .replace(/<!--[\s\S]*?-->/g, ' ')
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/&amp;/g, '&')
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'")
+              .replace(/&nbsp;/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+
+            resolve({
+              url: targetUrl,
+              title: title || parsedUrl.hostname,
+              text: clean.substring(0, maxChars),
+              totalLength: clean.length,
+              links
+            });
+          } catch (e) {
+            resolve({ url: targetUrl, error: e.message, text: '' });
+          }
+        });
+        res.on('error', (err) => resolve({ url: targetUrl, error: err.message, text: '' }));
+      });
+
+      req.on('timeout', () => { req.destroy(); resolve({ url: targetUrl, error: 'Connection timeout', text: '' }); });
+      req.on('error', (err) => resolve({ url: targetUrl, error: err.message, text: '' }));
+      req.end();
+    } catch (err) {
+      resolve({ url: targetUrl, error: err.message, text: '' });
+    }
+  });
+}
+
 // Fungsi Logika Agen: Meneliti Berulang Secara Otonom dengan 6 Pilar Deep Research Premium
 async function jalankanRisetOtonom(taskId, topik, config = {}) {
   const task = dbTugasRiset[taskId];
@@ -2004,6 +2252,46 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, data);
     } catch (e) {
       return sendJSON(res, 500, { error: 'Gagal melakukan pencarian web Serper: ' + e.message });
+    }
+  }
+
+  // Autonomous Web Search Tool Endpoint (Built from 0, Zero-API, No Serper API)
+  if ((pathname === '/api/tools/search-web' || pathname === '/api/autonomous/search') && (method === 'GET' || method === 'POST')) {
+    try {
+      let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
+      let maxResults = parseInt(reqUrl.searchParams.get('maxResults') || '8', 10);
+      if (method === 'POST') {
+        const body = await parseBody(req);
+        query = body.query || body.q || query;
+        if (body.maxResults) maxResults = parseInt(body.maxResults, 10);
+      }
+      if (!query || !query.trim()) {
+        return sendJSON(res, 400, { error: 'Parameter query `query` atau `q` diperlukan.' });
+      }
+      const data = await performAutonomousSearch(query, maxResults);
+      return sendJSON(res, 200, { success: true, ...data });
+    } catch (e) {
+      return sendJSON(res, 500, { error: 'Gagal menjalankan tool pencarian web otonom: ' + e.message });
+    }
+  }
+
+  // Autonomous Web Browse & Page Reading Tool Endpoint (Built from 0)
+  if ((pathname === '/api/tools/browse-page' || pathname === '/api/autonomous/browse') && (method === 'GET' || method === 'POST')) {
+    try {
+      let targetUrl = reqUrl.searchParams.get('url') || reqUrl.searchParams.get('target') || '';
+      let maxChars = parseInt(reqUrl.searchParams.get('maxChars') || '5000', 10);
+      if (method === 'POST') {
+        const body = await parseBody(req);
+        targetUrl = body.url || body.targetUrl || targetUrl;
+        if (body.maxChars) maxChars = parseInt(body.maxChars, 10);
+      }
+      if (!targetUrl || !targetUrl.trim()) {
+        return sendJSON(res, 400, { error: 'Parameter `url` diperlukan untuk membaca konten halaman.' });
+      }
+      const data = await browseWebPageContent(targetUrl, maxChars);
+      return sendJSON(res, 200, { success: true, ...data });
+    } catch (e) {
+      return sendJSON(res, 500, { error: 'Gagal membaca halaman web: ' + e.message });
     }
   }
 
