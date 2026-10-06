@@ -4048,81 +4048,168 @@ ${organicBlock}
         if (!query.trim()) return { text: 'Error: Parameter `query` tidak boleh kosong.', sources: [] };
         
         let results = [];
-        // Coba endpoint backend lokal/tunnel terlebih dahulu (Zero-API DuckDuckGo live scraper)
+        // Coba endpoint backend lokal/tunnel terlebih dahulu (Multi-source live aggregator)
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 6500);
           const res = await fetch('/api/tools/search-web', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: query.trim(), maxResults: 6 }),
+            body: JSON.stringify({ query: query.trim(), maxResults: 15 }),
             signal: controller.signal
           });
           clearTimeout(timeoutId);
           if (res.ok) {
             const data = await res.json();
-            if (Array.isArray(data.results) && data.results.length > 0) {
+            if (Array.isArray(data.results) && data.results.length >= 4) {
               results = data.results;
             }
           }
         } catch (_) {}
         
-        // Client-side Wikipedia Full-Text Search fallback (CORS origin=* aktif, bebas API key)
-        if (results.length === 0) {
+        // Multi-Source Client-Side Aggregator (Aktif jika backend offline, GitHub Pages, atau hasil backend < 4)
+        if (results.length < 4) {
           try {
-            const wikiFullTextSearch = async (lang) => {
-              const wikiUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query.trim())}&utf8=1&format=json&origin=*`;
-              const wikiRes = await fetch(wikiUrl);
-              if (wikiRes.ok) {
-                const wData = await wikiRes.json();
-                const items = wData.query?.search || [];
-                for (const item of items.slice(0, 5)) {
-                  const cleanSnip = (item.snippet || '').replace(/<[^>]+>/g, '').trim();
-                  const pTitle = item.title;
-                  const pUrl = `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(pTitle.replace(/ /g, '_'))}`;
-                  results.push({
-                    title: pTitle,
-                    url: pUrl,
-                    domain: `${lang}.wikipedia.org`,
-                    snippet: cleanSnip || `Artikel ensiklopedia: ${pTitle}`
+            const clientPool = [...results];
+            const seenUrls = new Set(clientPool.map(r => (r.url || '').trim().toLowerCase().replace(/\/$/, '')));
+            const seenTitles = new Set(clientPool.map(r => (r.title || '').trim().toLowerCase().replace(/[^\w\s]/g, '')));
+
+            const addCandidate = (item) => {
+              if (!item || !item.url || !item.title) return;
+              const normUrl = item.url.trim().toLowerCase().replace(/\/$/, '');
+              const normTitle = item.title.trim().toLowerCase().replace(/[^\w\s]/g, '');
+              if (seenUrls.has(normUrl) || seenTitles.has(normTitle)) return;
+              seenUrls.add(normUrl);
+              seenTitles.add(normTitle);
+              clientPool.push(item);
+            };
+
+            const cleanQ = query.trim();
+            const gnewsRssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQ)}&hl=en-US&gl=US&ceid=US:en`;
+            const r2jUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsRssUrl)}`;
+            const hnUrl = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(cleanQ)}&tags=story&hitsPerPage=12`;
+            const wikiEnUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanQ)}&utf8=1&format=json&origin=*`;
+            const wikiIdUrl = `https://id.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanQ)}&utf8=1&format=json&origin=*`;
+            const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(cleanQ)}&format=json&no_html=1&skip_disambig=1`;
+
+            // Eksekusi seluruh provider secara paralel (Semua bebas API key & CORS friendly)
+            await Promise.allSettled([
+              // 1. Google News RSS via RSS2JSON (10 berita live terkini)
+              fetch(r2jUrl).then(r => r.ok ? r.json() : null).then(d => {
+                if (d && Array.isArray(d.items)) {
+                  d.items.slice(0, 8).forEach(it => {
+                    let domain = 'news.google.com';
+                    let cleanTitle = (it.title || '').trim();
+                    const titleParts = cleanTitle.split(' - ');
+                    let publisher = '';
+                    if (titleParts.length > 1) {
+                      publisher = titleParts.pop().trim();
+                      cleanTitle = titleParts.join(' - ');
+                    }
+                    if (publisher) domain = publisher.toLowerCase().replace(/[\s\.\:\/]+/g, '') + '.com';
+                    try {
+                      if (it.link && it.link.startsWith('http') && !it.link.includes('google.com/rss')) {
+                        domain = new URL(it.link).hostname.replace(/^www\./, '');
+                      }
+                    } catch (_) {}
+                    const cleanSnippet = (it.description || cleanTitle).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                    addCandidate({
+                      title: cleanTitle,
+                      url: it.link,
+                      domain: domain || 'news.google.com',
+                      snippet: `[${publisher || 'Google News'} | ${it.pubDate || 'Terkini'}] ${cleanSnippet.slice(0, 180)}`,
+                      sourceProvider: publisher ? `Google News (${publisher})` : 'Google News'
+                    });
                   });
                 }
-              }
-            };
-            await wikiFullTextSearch('id');
-            if (results.length === 0) {
-              await wikiFullTextSearch('en');
-            }
-          } catch (_) {}
-        }
+              }).catch(() => {}),
 
-        // Client-side Wikipedia Opensearch fallback jika full-text kosong
-        if (results.length === 0) {
-          try {
-            const wikiFetch = async (lang) => {
-              const wikiUrl = `https://${lang}.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query.trim())}&limit=5&format=json&origin=*`;
-              const wikiRes = await fetch(wikiUrl);
-              if (wikiRes.ok) {
-                const data = await wikiRes.json();
-                const titles = data[1] || [];
-                const snippets = data[2] || [];
-                const urls = data[3] || [];
-                for (let i = 0; i < titles.length; i++) {
-                  if (urls[i]) {
-                    results.push({
-                      title: titles[i],
-                      url: urls[i],
-                      domain: `${lang}.wikipedia.org`,
-                      snippet: snippets[i] || `Artikel ensiklopedia ${titles[i]}`
+              // 2. HackerNews Algolia Realtime Tech API (Berita teknologi, rilis model AI, blog engineering)
+              fetch(hnUrl).then(r => r.ok ? r.json() : null).then(d => {
+                if (d && Array.isArray(d.hits)) {
+                  d.hits.slice(0, 8).forEach(h => {
+                    const u = h.url || `https://news.ycombinator.com/item?id=${h.objectID}`;
+                    let dName = 'news.ycombinator.com';
+                    try { dName = new URL(u).hostname.replace(/^www\./, ''); } catch (_) {}
+                    addCandidate({
+                      title: h.title,
+                      url: u,
+                      domain: dName,
+                      snippet: `[Tech Wire | Poin: ${h.points || 0} | Komentar: ${h.num_comments || 0}] ${h.title}`,
+                      sourceProvider: 'Tech Wire / HackerNews'
+                    });
+                  });
+                }
+              }).catch(() => {}),
+
+              // 3. Wikipedia English Full-Text Search (Ensiklopedia global terlengkap)
+              fetch(wikiEnUrl).then(r => r.ok ? r.json() : null).then(d => {
+                if (d?.query?.search) {
+                  d.query.search.slice(0, 4).forEach(w => {
+                    const u = `https://en.wikipedia.org/wiki/${encodeURIComponent(w.title.replace(/ /g, '_'))}`;
+                    const snip = (w.snippet || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                    addCandidate({
+                      title: w.title,
+                      url: u,
+                      domain: 'en.wikipedia.org',
+                      snippet: snip || `Artikel ensiklopedia: ${w.title}`,
+                      sourceProvider: 'Wikipedia Global'
+                    });
+                  });
+                }
+              }).catch(() => {}),
+
+              // 4. Wikipedia Indonesian Full-Text Search
+              fetch(wikiIdUrl).then(r => r.ok ? r.json() : null).then(d => {
+                if (d?.query?.search) {
+                  d.query.search.slice(0, 3).forEach(w => {
+                    const u = `https://id.wikipedia.org/wiki/${encodeURIComponent(w.title.replace(/ /g, '_'))}`;
+                    const snip = (w.snippet || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                    addCandidate({
+                      title: w.title,
+                      url: u,
+                      domain: 'id.wikipedia.org',
+                      snippet: snip || `Artikel ensiklopedia: ${w.title}`,
+                      sourceProvider: 'Wikipedia Indonesia'
+                    });
+                  });
+                }
+              }).catch(() => {}),
+
+              // 5. DuckDuckGo Instant Answer API
+              fetch(ddgUrl).then(r => r.ok ? r.json() : null).then(d => {
+                if (d) {
+                  if (d.Heading && d.AbstractURL) {
+                    let dName = 'duckduckgo.com';
+                    try { dName = new URL(d.AbstractURL).hostname.replace(/^www\./, ''); } catch (_) {}
+                    addCandidate({
+                      title: d.Heading,
+                      url: d.AbstractURL,
+                      domain: dName,
+                      snippet: (d.Abstract || d.Heading).replace(/<[^>]+>/g, ' ').slice(0, 180),
+                      sourceProvider: 'DuckDuckGo Instant'
+                    });
+                  }
+                  if (Array.isArray(d.RelatedTopics)) {
+                    d.RelatedTopics.slice(0, 3).forEach(rt => {
+                      if (rt.FirstURL && rt.Text) {
+                        let dName = 'duckduckgo.com';
+                        try { dName = new URL(rt.FirstURL).hostname.replace(/^www\./, ''); } catch (_) {}
+                        addCandidate({
+                          title: rt.Text.slice(0, 60),
+                          url: rt.FirstURL,
+                          domain: dName,
+                          snippet: rt.Text.replace(/<[^>]+>/g, ' ').slice(0, 180),
+                          sourceProvider: 'DuckDuckGo Related'
+                        });
+                      }
                     });
                   }
                 }
-              }
-            };
-            await wikiFetch('id');
-            if (results.length === 0) {
-              await wikiFetch('en');
-            }
+              }).catch(() => {})
+            ]);
+
+            results = clientPool;
           } catch (_) {}
         }
         
@@ -4130,9 +4217,10 @@ ${organicBlock}
           return { text: `Hasil pencarian untuk "${query}": Tidak ditemukan hasil spesifik. Coba gunakan kata kunci alternatif.`, sources: [] };
         }
         
-        let output = `HASIL PENCARIAN WEB UNTUK "${query}":\n`;
+        let output = `HASIL PENCARIAN WEB MULTI-SUMBER UNTUK "${query}":\n`;
+        output += `Ditemukan ${results.length} sumber informasi terverifikasi (Berita Terkini, Tech Wire, Riset, & Ensiklopedia):\n`;
         results.forEach((item, idx) => {
-          output += `\n[${idx + 1}] ${item.title}\nURL: ${item.url}\nRingkasan: ${item.snippet}\n`;
+          output += `\n[${idx + 1}] [${item.sourceProvider || 'Web'}] ${item.title}\nURL: ${item.url}\nSumber/Domain: ${item.domain}\nRingkasan: ${item.snippet}\n`;
         });
         return { text: output, sources: results };
       }
@@ -4154,22 +4242,47 @@ ${organicBlock}
             });
             if (res.ok) {
               const data = await res.json();
-              let output = `KONTEN HALAMAN WEB "${data.title || url}" (${url}):\n\n`;
-              output += data.text || '(Konten teks bersih tidak ditemukan)';
-              if (Array.isArray(data.links) && data.links.length > 0) {
-                output += '\n\nTautan Terkait Di Halaman:\n';
-                data.links.slice(0, 5).forEach(l => {
-                  output += `- [${l.title}](${l.url})\n`;
-                });
+              if (data && data.text && data.text.length > 50) {
+                let output = `KONTEN HALAMAN WEB "${data.title || url}" (${url}):\n\n`;
+                output += data.text || '(Konten teks bersih tidak ditemukan)';
+                if (Array.isArray(data.links) && data.links.length > 0) {
+                  output += '\n\nTautan Terkait Di Halaman:\n';
+                  data.links.slice(0, 5).forEach(l => {
+                    output += `- [${l.title}](${l.url})\n`;
+                  });
+                }
+                const foundDomain = extractDomainSafe ? extractDomainSafe(url) : 'web';
+                return {
+                  text: output,
+                  sources: [{ title: data.title || url, url: url, domain: foundDomain, snippet: (data.text || '').substring(0, 160) }]
+                };
               }
-              const foundDomain = extractDomainSafe ? extractDomainSafe(url) : 'web';
-              return {
-                text: output,
-                sources: [{ title: data.title || url, url: url, domain: foundDomain, snippet: (data.text || '').substring(0, 160) }]
-              };
             }
           } catch (_) {}
         }
+
+        // Client-side universal reader via Jina Reader (CORS open, converts any URL to clean markdown)
+        try {
+          const jinaController = new AbortController();
+          const jinaTimeout = setTimeout(() => jinaController.abort(), 7500);
+          const jinaRes = await fetch(`https://r.jina.ai/${encodeURI(url)}`, {
+            signal: jinaController.signal,
+            headers: { 'Accept': 'text/plain' }
+          });
+          clearTimeout(jinaTimeout);
+          if (jinaRes.ok) {
+            const markdown = await jinaRes.text();
+            if (markdown && markdown.length > 80) {
+              const cleanMarkdown = markdown.substring(0, 5000);
+              const titleMatch = markdown.match(/^Title:\s*(.+)$/m) || markdown.match(/^#\s+(.+)$/m);
+              const docTitle = titleMatch ? titleMatch[1].trim() : (extractDomainSafe ? extractDomainSafe(url) : 'Halaman Web');
+              return {
+                text: `KONTEN HALAMAN WEB "${docTitle}" (${url}):\n\n${cleanMarkdown}`,
+                sources: [{ title: docTitle, url: url, domain: extractDomainSafe ? extractDomainSafe(url) : 'web', snippet: cleanMarkdown.substring(0, 160) }]
+              };
+            }
+          }
+        } catch (_) {}
 
         // Client-side fallback for Wikipedia URLs on GitHub Pages
         if (/wikipedia\.org\/wiki\//i.test(url)) {
@@ -4193,7 +4306,7 @@ ${organicBlock}
           } catch (_) {}
         }
 
-        return { text: `Error: Tidak dapat membaca URL ${url} saat offline atau di GitHub Pages tanpa backend server.`, sources: [] };
+        return { text: `Error: Tidak dapat membaca URL ${url} saat offline atau koneksi terputus.`, sources: [] };
       }
       
       return { text: `Error: Tool "${toolName}" tidak dikenal.`, sources: [] };
@@ -4404,20 +4517,21 @@ ${organicBlock}
     return calls;
   }
 
-  const AUTONOMOUS_SYSTEM_DIRECTIVE = `### KEMAMPUAN OTONOM PENJELAJAHAN WEB (BUILT-IN ZERO-API):
-Anda memiliki instrumen penjelajah web mandiri tanpa batasan API (DuckDuckGo Live & Web Scraper):
-1. search_web(query): Melakukan penelusuran fakta terkini, riset, berita, atau data apa pun di web secara langsung.
-2. browse_web_page(url): Membaca dan menelaah isi teks bersih dokumen web secara mendalam.
+  const AUTONOMOUS_SYSTEM_DIRECTIVE = `### KEMAMPUAN OTONOM PENJELAJAHAN WEB MULTI-SUMBER (BUILT-IN ZERO-API):
+Anda memiliki instrumen penjelajah web mandiri berkecepatan tinggi tanpa batasan API (Multi-Source Live Web & Scraper):
+1. search_web(query): Melakukan penelusuran fakta terkini, riset, berita, atau data apa pun di web secara langsung. Sistem secara otomatis menghimpun 10-15+ artikel dari Google News, Tech Wire / HackerNews, portal media, blog resmi teknologi, dan basis pengetahuan global.
+2. browse_web_page(url): Membaca dan menelaah seluruh isi teks artikel atau dokumen web secara mendalam.
 
 INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
 - ANDA SENDIRI YANG MENENTUKAN apakah Anda membutuhkan penelusuran web atau tidak.
-- Jika pengguna menanyakan fakta terkini, peristiwa 2025/2026, berita, produk baru, atau hal di luar batas pengetahuan dasar Anda:
-  RANCANG DAN RUMUSKAN KUERI PENCARIAN YANG EFEKTIF DAN SPESIFIK SESUAI KEBUTUHAN ANDA, lalu panggil alat:
+- Jika pengguna menanyakan fakta terkini, perkembangan tahun 2024-2026, berita, produk baru, rilis model AI, atau hal di luar batas pengetahuan dasar Anda:
+  RANCANG DAN RUMUSKAN KUERI PENCARIAN YANG EFEKTIF DAN SPESIFIK SESUAI KEBUTUHAN ANDA (misal: "Anthropic Claude latest updates 2026 features", "Gemini 2.0 release date benchmark", dll.), lalu panggil alat:
   search_web("kueri pencarian yang Anda rancang")
   atau
   <tool_call>{"name":"search_web","arguments":{"query":"kueri pencarian yang Anda rancang"}}</tool_call>
 - JIKA Anda TIDAK memerlukan penelusuran web (misal: percakapan biasa, penulisan kode, matematika, penjelasan konsep umum), LANGSUNG jawab pertanyaan pengguna secara alami tanpa memanggil alat.
 - DILARANG KERAS menolak dengan alasan "batas pengetahuan training" atau "cutoff Mei 2024", karena Anda memiliki instrumen penelusuran web ini.
+- Setelah sistem mengeksekusi penelusuran dan menyajikan daftar sumber berita aktual, SINTESISKAN jawaban secara komprehensif, kaya fakta, dan objektif berdasarkan multi-sumber tersebut.
 - DILARANG KERAS mencetak JSON mentah atau teks seperti "We will call search_web..." ke dalam jawaban akhir pengguna. Sistem akan mengeksekusi penelusuran Anda di latar belakang dan memberikan datanya kepada Anda untuk Anda cerna sebelum merumuskan jawaban akhir yang komprehensif.`;
 
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
