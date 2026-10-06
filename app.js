@@ -4033,13 +4033,17 @@ ${organicBlock}
   ];
 
   function deriveBroadSearchQueries(rawQuery, contextText = '') {
-    if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', news: '', recentNews: '', core: '' };
+    if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', news: '', recentNews: '', weeklyNews: '', core: '' };
     const combined = (rawQuery + ' ' + (contextText || '')).trim();
     const lower = combined.toLowerCase();
 
-    // Deteksi nomor versi spesifik jika ada (misal: 4.7, 3.5, 4o, v3, 2.0)
+    // Deteksi nomor versi spesifik jika ada (misal: 4.7, 3.5, 4o, 5.5, v3, 2.0)
     const versionMatch = combined.match(/\b(?:v|version)?\s*([0-9]+(?:\.[0-9]+)+[a-z]?|[0-9]+[a-z]?)\b/i);
-    const version = versionMatch ? versionMatch[1] : '';
+    let version = versionMatch ? versionMatch[1] : '';
+    // Cegah tahun 4-digit (seperti 2024, 2025, 2026) diperlakukan sebagai nomor versi model
+    if (/^20[2-3][0-9]$/.test(version)) {
+      version = '';
+    }
 
     let entity = '';
     if (lower.includes('grok') || lower.includes('xai') || lower.includes('x.ai') || lower.includes('supergrok')) entity = 'xAI Grok';
@@ -4081,11 +4085,17 @@ ${organicBlock}
 
     const coreSubject = entity || (cleaned.length >= 2 ? cleaned : rawQuery.trim());
 
+    // Angker Temporal Dinamis: Masukkan Bulan & Tahun aktif saat ini agar pencarian tidak mengembalikan artikel usang
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonthEn = now.toLocaleString('en-US', { month: 'long' });
+
     return {
       primary: rawQuery.trim(),
-      tech: `${coreSubject} AI update`,
-      news: `${coreSubject} latest news`,
-      recentNews: `${coreSubject} when:30d`,
+      tech: `${coreSubject} ${currentMonthEn} ${currentYear} update`,
+      news: `${coreSubject} latest ${currentMonthEn} ${currentYear} news`,
+      recentNews: `${coreSubject} ${currentMonthEn} ${currentYear} when:30d`,
+      weeklyNews: `${coreSubject} when:14d`,
       core: coreSubject
     };
   }
@@ -4158,6 +4168,7 @@ ${organicBlock}
             const cleanQ = qPlan.primary;
             const techQ = qPlan.tech;
             const recentQ = qPlan.recentNews;
+            const weeklyQ = qPlan.weeklyNews;
             const coreQ = qPlan.core;
 
             const addCandidate = (item) => {
@@ -4181,6 +4192,8 @@ ${organicBlock}
             const r2jRecentUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsRecentUrl)}`;
             const gnewsTechUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(techQ)}&hl=en-US&gl=US&ceid=US:en`;
             const r2jTechUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsTechUrl)}`;
+            const gnewsWeeklyUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(weeklyQ)}&hl=en-US&gl=US&ceid=US:en`;
+            const r2jWeeklyUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsWeeklyUrl)}`;
             const gnewsPrimaryUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQ)}&hl=en-US&gl=US&ceid=US:en`;
             const r2jPrimaryUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsPrimaryUrl)}`;
             const minHnTimestamp = Math.floor((Date.now() - 120 * 86400 * 1000) / 1000);
@@ -4256,7 +4269,40 @@ ${organicBlock}
                 }
               }).catch(() => {}),
 
-              // 3. Google News RSS Primary/Clean via RSS2JSON (6 berita live)
+              // 3. Google News RSS Weekly (when:14d) via RSS2JSON (6 berita breaking live)
+              fetch(r2jWeeklyUrl).then(r => r.ok ? r.json() : null).then(d => {
+                if (d && Array.isArray(d.items)) {
+                  d.items.slice(0, 6).forEach(it => {
+                    let domain = 'news.google.com';
+                    let cleanTitle = (it.title || '').trim();
+                    const titleParts = cleanTitle.split(' - ');
+                    let publisher = '';
+                    if (titleParts.length > 1) {
+                      publisher = titleParts.pop().trim();
+                      cleanTitle = titleParts.join(' - ');
+                    }
+                    if (publisher) domain = publisher.toLowerCase().replace(/[\s\.\:\/]+/g, '') + '.com';
+                    try {
+                      if (it.link && it.link.startsWith('http') && !it.link.includes('google.com/rss')) {
+                        domain = new URL(it.link).hostname.replace(/^www\./, '');
+                      }
+                    } catch (_) {}
+                    const timestamp = Date.parse(it.pubDate) || 0;
+                    const cleanSnippet = (it.description || cleanTitle).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                    addCandidate({
+                      title: cleanTitle,
+                      url: it.link,
+                      domain: domain || 'news.google.com',
+                      snippet: `[${publisher || 'Google News'} | ${it.pubDate || 'Terkini'}] ${cleanSnippet.slice(0, 180)}`,
+                      sourceProvider: publisher ? `Google News (${publisher})` : 'Google News',
+                      timestamp,
+                      pubDate: it.pubDate || ''
+                    });
+                  });
+                }
+              }).catch(() => {}),
+
+              // 4. Google News RSS Primary/Clean via RSS2JSON (6 berita live)
               fetch(r2jPrimaryUrl).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.items)) {
                   d.items.slice(0, 6).forEach(it => {
@@ -4289,7 +4335,7 @@ ${organicBlock}
                 }
               }).catch(() => {}),
 
-              // 4. HackerNews Algolia Realtime Tech API (techQ & coreQ)
+              // 5. HackerNews Algolia Realtime Tech API (techQ & coreQ)
               fetch(hnUrlTech).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.hits)) {
                   d.hits.slice(0, 8).forEach(h => {
@@ -4332,7 +4378,7 @@ ${organicBlock}
                 }
               }).catch(() => {}),
 
-              // 5. DuckDuckGo Instant Answer API (Bebas Wikipedia)
+              // 6. DuckDuckGo Instant Answer API (Bebas Wikipedia)
               fetch(ddgUrl).then(r => r.ok ? r.json() : null).then(d => {
                 if (d) {
                   if (d.Heading && d.AbstractURL && !d.AbstractURL.includes('wikipedia.org')) {
@@ -4372,11 +4418,11 @@ ${organicBlock}
             // Urutkan kandidat berdasarkan tanggal publikasi terbaru (Descending)
             clientPool.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
-            // Filter artikel usang jika ada artikel baru dalam 60 hari terakhir
+            // Filter artikel usang ketat jika ada artikel baru dalam 30 hari terakhir (bulan ini)
             const now = Date.now();
-            const hasRecent = clientPool.some(it => it.timestamp && (now - it.timestamp) < (60 * 86400 * 1000));
+            const hasVeryRecent30d = clientPool.some(it => it.timestamp && (now - it.timestamp) < (30 * 86400 * 1000));
             results = clientPool.filter(it => {
-              if (hasRecent && it.timestamp && (now - it.timestamp) > (180 * 86400 * 1000)) return false;
+              if (hasVeryRecent30d && it.timestamp && (now - it.timestamp) > (45 * 86400 * 1000)) return false;
               return true;
             });
           } catch (_) {}
@@ -4686,24 +4732,38 @@ ${organicBlock}
     return calls;
   }
 
-  const AUTONOMOUS_SYSTEM_DIRECTIVE = `### KEMAMPUAN OTONOM PENCARIAN WEB LIVE (BUILT-IN ZERO-API):
+  function getAutonomousSystemDirective() {
+    const now = new Date();
+    const curDateStr = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const curMonthEn = now.toLocaleString('en-US', { month: 'long' });
+    const curYear = now.getFullYear();
+
+    return `### KEMAMPUAN OTONOM PENCARIAN WEB LIVE (BUILT-IN ZERO-API):
 Anda memiliki instrumen pencarian web live berkecepatan tinggi tanpa batasan API:
 - search_web(query): Melakukan penelusuran fakta terkini, perkembangan tahun 2024-2026, berita, atau rilis teknologi di web secara langsung. Sistem secara otomatis menghimpun belasan artikel berita live dari Google News RSS, Tech Wire / HackerNews, blog teknologi resmi, dan portal media aktual.
 - SUMBER WIKIPEDIA TELAH DIHAPUS: Seluruh hasil penelusuran 100% merupakan berita dan publikasi aktual (BUKAN ensiklopedia atau artikel sejarah lama).
 
+KONTEKS TEMPORAL AKTIF SAAT INI:
+- Hari ini adalah: ${curDateStr} (${curMonthEn} ${curYear}).
+- Definisi "Update Terbaru" / "Kabar Terkini" / "Model Terbaru": Pengguna merujuk pada perkembangan mutakhir saat ini (${curMonthEn} ${curYear}) atau beberapa minggu terakhir. Pengguna TIDAK HARUS menyebutkan nama bulan "${curMonthEn}" secara manual! Anda dan sistem wajib otomatis memahami bahwa pengguna menginginkan data paling segar di ${curMonthEn} ${curYear}.
+- Rumuskan kueri pencarian yang menyertakan bulan dan tahun aktif agar hasil yang didapat 100% segar (misal: "Anthropic Claude ${curMonthEn} ${curYear} update", "OpenAI ${curMonthEn} ${curYear} news", "Grok ${curMonthEn} ${curYear} update").
+
 INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
 - WAJIB PROAKTIF PADA TURN PERTAMA: Kapan pun pengguna menanyakan versi baru, model AI (seperti Grok, ChatGPT, Claude, Gemini, DeepSeek, Llama, Qwen, dll.), perkembangan terkini, update terbaru, tanggal rilis, atau menyertakan gambar/screenshot antarmuka, Anda WAJIB LANGSUNG MEMANGGIL search_web("...") pada giliran pertama sebelum menarik kesimpulan apa pun.
 - DILARANG KERAS MENOLAK, MEMBANTAH, ATAU MENCERAMAHI PENGGUNA: Jangan pernah menyatakan "model/versi itu tidak ada", "hanya rumor", "belum ada rilis resmi", atau "meminta pengguna memberikan bukti rilis resmi" berdasarkan ingatan cutoff lama training Anda. Carilah faktanya di web live terlebih dahulu!
-- RANCANG DAN RUMUSKAN KUERI PENCARIAN YANG EFEKTIF, SPESIFIK, DAN RINGKAS DALAM BAHASA INGGRIS AGAR MENJANGKAU PORTAL BERITA RESMI GLOBAL (misal: "xAI Grok 4.7 AI update", "Google Gemini AI update", "Anthropic Claude new features", "DeepSeek AI benchmark", dll.), lalu panggil alat:
+- RANCANG DAN RUMUSKAN KUERI PENCARIAN YANG EFEKTIF, SPESIFIK, DAN MENYERTAKAN ${curMonthEn} ${curYear} (misal: "Anthropic Claude ${curMonthEn} ${curYear} update", "xAI Grok ${curMonthEn} ${curYear} update", dll.), lalu panggil alat:
   search_web("kueri pencarian yang Anda rancang")
   atau
   <tool_call>{"name":"search_web","arguments":{"query":"kueri pencarian yang Anda rancang"}}</tool_call>
-- STEMPEL WAKTU RECENT (2026): Hasil penelusuran diurutkan dari yang paling mutakhir (tahun 2026). Perhatikan stempel tanggal publikasi pada setiap sumber (misal: "21 Sep 2026", "28 Sep 2026"). Gunakan data terbaru tersebut sebagai kebenaran mutlak.
+- STEMPEL WAKTU RECENT (${curMonthEn} ${curYear}): Hasil penelusuran diurutkan dari yang paling mutakhir. Perhatikan stempel tanggal publikasi pada setiap sumber. Gunakan data terbaru tersebut sebagai kebenaran mutlak.
+- DILARANG KERAS MENGANGGAP BERITA DARI 3-6 BULAN LALU SEBAGAI "UPDATE TERBARU" jika ada berita dari bulan aktif (${curMonthEn} ${curYear}).
 - JIKA Anda TIDAK memerlukan penelusuran web (percakapan kasual biasa, penulisan kode murni, matematika, penjelasan konsep umum), LANGSUNG jawab pertanyaan pengguna secara alami tanpa memanggil alat.
 - DILARANG KERAS menolak dengan alasan "batas pengetahuan training" atau "cutoff", karena Anda memiliki instrumen live search_web ini.
 - DILARANG KERAS MENGARANG ROADMAP ATAU PROYEKSI PALSU: Jangan pernah menciptakan rumor fiktif atau tanggal rilis buatan sendiri. Berbicaralah 100% berdasarkan sumber berita aktual yang disajikan.
 - Setelah sistem mengeksekusi penelusuran dan menyajikan daftar multi-sumber berita aktual, SINTESISKAN jawaban secara komprehensif, padat, kaya fakta, dan 100% berlandaskan pada multi-sumber tersebut TANPA melakukan browsing/scraping berlapis (ini adalah mode pencarian biasa yang cepat & mutakhir).
 - DILARANG KERAS mencetak JSON mentah atau teks seperti "We will call search_web..." ke dalam jawaban akhir pengguna. Sistem akan mengeksekusi penelusuran di latar belakang dan memberikan datanya kepada Anda untuk langsung dirumuskan menjadi jawaban final yang komprehensif.`;
+  }
+  const AUTONOMOUS_SYSTEM_DIRECTIVE = getAutonomousSystemDirective();
 
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
     let iconClass = 'fa-magnifying-glass';
@@ -4966,7 +5026,7 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
-      let systemContent = personaPrompt ? `${personaPrompt}\n\n${AUTONOMOUS_SYSTEM_DIRECTIVE}` : AUTONOMOUS_SYSTEM_DIRECTIVE;
+      let systemContent = personaPrompt ? `${personaPrompt}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
       try {
@@ -5116,6 +5176,14 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
             lowerPrompt.includes('berita terbaru') ||
             lowerPrompt.includes('update terbaru') ||
             lowerPrompt.includes('rilis terbaru') ||
+            lowerPrompt.includes('kabar terbaru') ||
+            lowerPrompt.includes('kabar terkini') ||
+            lowerPrompt.includes('info terbaru') ||
+            lowerPrompt.includes('informasi terbaru') ||
+            lowerPrompt.includes('model terbaru') ||
+            lowerPrompt.includes('fitur terbaru') ||
+            lowerPrompt.includes('versi terbaru') ||
+            lowerPrompt.includes('terbaru dari') ||
             lowerPrompt.includes('apakah ada') ||
             /\bgrok\s*4\b/i.test(lowerPrompt) ||
             /\b[a-z]+\s*[0-9]+(?:\.[0-9]+)+\b/i.test(lowerPrompt);
@@ -5123,7 +5191,8 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
           const hasImage = Array.isArray(rawImgs) ? rawImgs.length > 0 : Boolean(rawImgs);
 
           if (isDenyingOrDoubtful || isExplicitSearchRequest || (hasImage && (lowerPrompt.includes('grok') || lowerPrompt.includes('model') || lowerPrompt.includes('fitur') || lowerPrompt.includes('apa')))) {
-            const derivedQuery = deriveBroadSearchQueries(promptText || 'AI model update', currentRoundText).core;
+            const qPlan = deriveBroadSearchQueries(promptText || 'AI model update', currentRoundText);
+            const derivedQuery = qPlan.tech || qPlan.core;
             rawAutonomousCalls = [{
               function: {
                 name: 'search_web',
@@ -5192,11 +5261,17 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
           conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
         }
 
-        const roundInstruction = `[INSTRUKSI FINAL]: Seluruh data multi-sumber berita terkini & resmi telah lengkap dan disajikan di atas (Bebas Wikipedia agar data 100% mutakhir).
+        const nowObj = new Date();
+        const curDateStr = nowObj.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        const curMonthStr = nowObj.toLocaleString('en-US', { month: 'long' }) + ' ' + nowObj.getFullYear();
+        const roundInstruction = `[INSTRUKSI FINAL - KALENDER AKTIF HARI INI: ${curDateStr}]:
+Seluruh data multi-sumber berita terkini & resmi telah lengkap dan disajikan di atas (Bebas Wikipedia agar data 100% mutakhir).
 WAJIB: Sajikan jawaban komprehensif, faktual, dan terperinci Anda kepada pengguna SEKARANG JUGA secara langsung TANPA memanggil 'search_web' lagi!
 ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
+- HARI INI ADALAH ${curDateStr} (${curMonthStr}). Definisi "update terbaru" atau "kabar terkini" adalah perkembangan di bulan ${curMonthStr} atau beberapa minggu terakhir.
+- DILARANG KERAS mengambil berita usang dari 3-6 bulan lalu (seperti awal/pertengahan tahun) dan menyebutnya sebagai "rilis terbaru", jika di dalam data di atas sudah ada berita mutakhir dari ${curMonthStr} (atau akhir September).
 - Dilarang keras mengarang roadmap fiksi, rumor spekulatif, versi chip buatan, atau hal yang tidak ada dalam sumber di atas.
-- Berikan informasi berlandaskan tanggal publikasi terbaru pada artikel di atas (perhatikan stempel tanggal 2026). Jika sebuah model (misal Grok 4.7) terbukti rilis pada September 2026 di sumber resmi/berita di atas, jelaskan rincian resminya (rilis Sept 2026, ketersediaan di Amazon Bedrock / xAI, fitur, dll.) secara tegas dan jangan pernah menyangkal eksistensinya!
+- Berikan informasi berlandaskan tanggal publikasi terbaru pada artikel di atas. Jika sebuah model terbukti rilis atau diperbarui di sumber resmi/berita di atas, jelaskan rincian resminya secara objektif dan jangan pernah menyangkal eksistensinya!
 - Jika ada hal yang belum diumumkan secara resmi atau belum terjadi di sumber data, sampaikan secara jujur dan objektif berdasarkan fakta resmi yang ada.
 - Jangan cetak tag tool atau raw JSON apa pun.`;
 
@@ -5473,7 +5548,7 @@ ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
-      let systemContent = personaPrompt ? `${personaPrompt}\n\n${AUTONOMOUS_SYSTEM_DIRECTIVE}` : AUTONOMOUS_SYSTEM_DIRECTIVE;
+      let systemContent = personaPrompt ? `${personaPrompt}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
       try {
@@ -5756,6 +5831,14 @@ ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
             lowerPrompt.includes('berita terbaru') ||
             lowerPrompt.includes('update terbaru') ||
             lowerPrompt.includes('rilis terbaru') ||
+            lowerPrompt.includes('kabar terbaru') ||
+            lowerPrompt.includes('kabar terkini') ||
+            lowerPrompt.includes('info terbaru') ||
+            lowerPrompt.includes('informasi terbaru') ||
+            lowerPrompt.includes('model terbaru') ||
+            lowerPrompt.includes('fitur terbaru') ||
+            lowerPrompt.includes('versi terbaru') ||
+            lowerPrompt.includes('terbaru dari') ||
             lowerPrompt.includes('apakah ada') ||
             /\bgrok\s*4\b/i.test(lowerPrompt) ||
             /\b[a-z]+\s*[0-9]+(?:\.[0-9]+)+\b/i.test(lowerPrompt);
@@ -5763,7 +5846,8 @@ ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
           const hasImage = Array.isArray(rawImgs) ? rawImgs.length > 0 : Boolean(rawImgs);
 
           if (isDenyingOrDoubtful || isExplicitSearchRequest || (hasImage && (lowerPrompt.includes('grok') || lowerPrompt.includes('model') || lowerPrompt.includes('fitur') || lowerPrompt.includes('apa')))) {
-            const derivedQuery = deriveBroadSearchQueries(promptText || 'AI model update', currentRoundText).core;
+            const qPlan = deriveBroadSearchQueries(promptText || 'AI model update', currentRoundText);
+            const derivedQuery = qPlan.tech || qPlan.core;
             rawAutonomousCalls = [{
               function: {
                 name: 'search_web',
@@ -5833,11 +5917,17 @@ ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
           conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
         }
 
-        const roundInstruction = `[INSTRUKSI FINAL]: Seluruh data multi-sumber berita terkini & resmi telah lengkap dan disajikan di atas (Bebas Wikipedia agar data 100% mutakhir).
+        const nowObj = new Date();
+        const curDateStr = nowObj.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        const curMonthStr = nowObj.toLocaleString('en-US', { month: 'long' }) + ' ' + nowObj.getFullYear();
+        const roundInstruction = `[INSTRUKSI FINAL - KALENDER AKTIF HARI INI: ${curDateStr}]:
+Seluruh data multi-sumber berita terkini & resmi telah lengkap dan disajikan di atas (Bebas Wikipedia agar data 100% mutakhir).
 WAJIB: Sajikan jawaban komprehensif, faktual, dan terperinci Anda kepada pengguna SEKARANG JUGA secara langsung TANPA memanggil 'search_web' lagi!
 ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
+- HARI INI ADALAH ${curDateStr} (${curMonthStr}). Definisi "update terbaru" atau "kabar terkini" adalah perkembangan di bulan ${curMonthStr} atau beberapa minggu terakhir.
+- DILARANG KERAS mengambil berita usang dari 3-6 bulan lalu (seperti awal/pertengahan tahun) dan menyebutnya sebagai "rilis terbaru", jika di dalam data di atas sudah ada berita mutakhir dari ${curMonthStr} (atau akhir September).
 - Dilarang keras mengarang roadmap fiksi, rumor spekulatif, versi chip buatan, atau hal yang tidak ada dalam sumber di atas.
-- Berikan informasi berlandaskan tanggal publikasi terbaru pada artikel di atas (perhatikan stempel tanggal 2026). Jika sebuah model (misal Grok 4.7) terbukti rilis pada September 2026 di sumber resmi/berita di atas, jelaskan rincian resminya (rilis Sept 2026, ketersediaan di Amazon Bedrock / xAI, fitur, dll.) secara tegas dan jangan pernah menyangkal eksistensinya!
+- Berikan informasi berlandaskan tanggal publikasi terbaru pada artikel di atas. Jika sebuah model terbukti rilis atau diperbarui di sumber resmi/berita di atas, jelaskan rincian resminya secara objektif dan jangan pernah menyangkal eksistensinya!
 - Jika ada hal yang belum diumumkan secara resmi atau belum terjadi di sumber data, sampaikan secara jujur dan objektif berdasarkan fakta resmi yang ada.
 - Jangan cetak tag tool atau raw JSON apa pun.`;
 

@@ -977,13 +977,17 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
 // Menghimpun 10-18 sumber simultan: Google News RSS, Tech Wire / HackerNews, Wikipedia Global, Wikipedia ID, & DuckDuckGo Instant
 
 function deriveBroadSearchQueries(rawQuery, contextText = '') {
-  if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', news: '', recentNews: '', core: '' };
+  if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', news: '', recentNews: '', weeklyNews: '', core: '' };
   const combined = (rawQuery + ' ' + (contextText || '')).trim();
   const lower = combined.toLowerCase();
 
-  // Deteksi nomor versi spesifik jika ada (misal: 4.7, 3.5, 4o, v3, 2.0)
+  // Deteksi nomor versi spesifik jika ada (misal: 4.7, 3.5, 4o, 5.5, v3, 2.0)
   const versionMatch = combined.match(/\b(?:v|version)?\s*([0-9]+(?:\.[0-9]+)+[a-z]?|[0-9]+[a-z]?)\b/i);
-  const version = versionMatch ? versionMatch[1] : '';
+  let version = versionMatch ? versionMatch[1] : '';
+  // Cegah tahun 4-digit (seperti 2024, 2025, 2026) diperlakukan sebagai nomor versi model
+  if (/^20[2-3][0-9]$/.test(version)) {
+    version = '';
+  }
 
   let entity = '';
   if (lower.includes('grok') || lower.includes('xai') || lower.includes('x.ai') || lower.includes('supergrok')) entity = 'xAI Grok';
@@ -1025,11 +1029,17 @@ function deriveBroadSearchQueries(rawQuery, contextText = '') {
 
   const coreSubject = entity || (cleaned.length >= 2 ? cleaned : rawQuery.trim());
 
+  // Angker Temporal Dinamis: Masukkan Bulan & Tahun aktif saat ini agar pencarian tidak mengembalikan artikel usang
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonthEn = now.toLocaleString('en-US', { month: 'long' });
+
   return {
     primary: rawQuery.trim(),
-    tech: `${coreSubject} AI update`,
-    news: `${coreSubject} latest news`,
-    recentNews: `${coreSubject} when:30d`,
+    tech: `${coreSubject} ${currentMonthEn} ${currentYear} update`,
+    news: `${coreSubject} latest ${currentMonthEn} ${currentYear} news`,
+    recentNews: `${coreSubject} ${currentMonthEn} ${currentYear} when:30d`,
+    weeklyNews: `${coreSubject} when:14d`,
     core: coreSubject
   };
 }
@@ -1245,13 +1255,15 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   const techQuery = qPlan.tech;
   const newsQuery = qPlan.news;
   const recentQuery = qPlan.recentNews;
+  const weeklyQuery = qPlan.weeklyNews;
   const coreQuery = qPlan.core;
 
   // Eksekusi seluruh provider berita & teknologi live secara paralel (Bebas Wikipedia agar data 100% terbaru)
-  // Menghimpun berita 30 hari terakhir (when:30d), berita rilis terkini, dan tech wire
-  const [gnewsRecent, gnewsTech, gnewsPrimary, hnTech, hnCore, ddgInstant] = await Promise.allSettled([
+  // Menghimpun berita bulan aktif (when:30d), berita rilis terkini, dan breaking wire 14 hari terakhir
+  const [gnewsRecent, gnewsTech, gnewsWeekly, gnewsPrimary, hnTech, hnCore, ddgInstant] = await Promise.allSettled([
     fetchGoogleNewsRss(recentQuery, 'en', 8),
-    fetchGoogleNewsRss(techQuery, 'en', 6),
+    fetchGoogleNewsRss(techQuery, 'en', 8),
+    fetchGoogleNewsRss(weeklyQuery, 'en', 6),
     fetchGoogleNewsRss(cleanQuery, 'en', 6),
     fetchHackerNewsTech(techQuery, 8),
     fetchHackerNewsTech(coreQuery, 6),
@@ -1261,6 +1273,7 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   const candidatePool = [];
   if (gnewsRecent.status === 'fulfilled') candidatePool.push(...gnewsRecent.value);
   if (gnewsTech.status === 'fulfilled') candidatePool.push(...gnewsTech.value);
+  if (gnewsWeekly.status === 'fulfilled') candidatePool.push(...gnewsWeekly.value);
   if (gnewsPrimary.status === 'fulfilled') candidatePool.push(...gnewsPrimary.value);
   if (hnTech.status === 'fulfilled') candidatePool.push(...hnTech.value);
   if (hnCore.status === 'fulfilled') candidatePool.push(...hnCore.value);
@@ -1269,9 +1282,9 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   // Urutkan kandidat berdasarkan tanggal publikasi terbaru (Descending: yang paling baru di paling atas)
   candidatePool.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
-  // Filter keusangan data: Jika ada artikel dalam 60 hari terakhir, singkirkan artikel usang (> 180 hari)
+  // Filter keusangan data ketat: Jika ada artikel dalam 30 hari terakhir (bulan ini), buang seluruh artikel > 45 hari
   const now = Date.now();
-  const hasVeryRecent = candidatePool.some(it => it.timestamp && (now - it.timestamp) < (60 * 86400 * 1000));
+  const hasVeryRecent30d = candidatePool.some(it => it.timestamp && (now - it.timestamp) < (30 * 86400 * 1000));
 
   // Deduplikasi ketat berdasarkan URL kanonikal dan normalisasi Judul
   const results = [];
@@ -1289,8 +1302,8 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
     // Filter out irrelevant disambiguation or unrelated codenames
     if (normTitle.includes('listofapplecodenames') && !cleanQuery.toLowerCase().includes('apple')) continue;
 
-    // Jika ada artikel mutakhir (dalam 60 hari terakhir), buang artikel lama yang usang (> 180 hari)
-    if (hasVeryRecent && item.timestamp && (now - item.timestamp) > (180 * 86400 * 1000)) continue;
+    // Jika ada artikel mutakhir dalam 30 hari terakhir, singkirkan berita lampau (> 45 hari) agar tidak ada halusinasi berita usang
+    if (hasVeryRecent30d && item.timestamp && (now - item.timestamp) > (45 * 86400 * 1000)) continue;
 
     if (seenUrls.has(normUrl) || seenTitles.has(normTitle)) continue;
     seenUrls.add(normUrl);
