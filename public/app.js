@@ -3728,7 +3728,6 @@ ${organicBlock}
 
     updateModelUI();
     savePersistedState();
-    showToast(`Model aktif: ${modelId}`);
   }
 
   function updateModelUI() {
@@ -4756,7 +4755,6 @@ ${organicBlock}
         bubbleText.querySelector('.switch-free-model-btn')?.addEventListener('click', (e) => {
           const targetFallback = e.currentTarget.dataset.fallback || 'qwen/qwen3.8-27b:free';
           selectModel(targetFallback);
-          showToast(`⚡ Model ditukar ke ${targetFallback}`);
           assistantRow.remove();
           runOpenRouterStreaming(session, promptText, image, targetFallback);
         });
@@ -7065,16 +7063,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       els.neutronCrownTooltip.textContent = isHidden ? 'Tampilkan Prompt' : 'Sembunyikan Prompt';
     }
 
-    if (!silent) {
-      if (isHidden) {
-        showToast('🔒 Tampilan Prompt Disembunyikan (Klik bola neutron untuk menampilkan)');
-      } else {
-        showToast('🔓 Tampilan Prompt Ditampilkan');
-        setTimeout(() => {
-          els.promptInput?.focus();
-          autoResizeTextarea(els.promptInput);
-        }, 60);
-      }
+    if (!silent && !isHidden) {
+      setTimeout(() => {
+        els.promptInput?.focus();
+        autoResizeTextarea(els.promptInput);
+      }, 60);
     }
   }
 
@@ -8780,7 +8773,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (catModal) catModal.dataset.targetInputId = '';
       STATE.catalogTargetInputId = null;
       savePersistedState();
-      showToast(`🎯 Model ditetapkan: ${modelId}`);
 
       // Tutup katalog langsung tanpa memicu event popstate liar
       if (catModal) catModal.classList.remove('show');
@@ -8805,7 +8797,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     }
     savePersistedState();
     updateModelUI();
-    showToast(`⚡ Model obrolan diubah: ${modelId}`);
 
     closeModal('liveModelCatalogModal');
   }
@@ -9317,7 +9308,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
             if (ok) {
               renderAttachmentPreviews();
               AudioEngine.click();
-              showToast('📷 Gambar dari clipboard berhasil dilampirkan!');
             }
           }
         }
