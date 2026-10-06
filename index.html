@@ -416,7 +416,6 @@
         <!-- Tab Navigation -->
         <div class="settings-tabs">
           <button class="settings-tab-btn active" data-target="tabProviders">Providers & API</button>
-          <button class="settings-tab-btn" data-target="tabDeepResearch"><i class="fa-solid fa-microscope"></i> Multi-Agent Research</button>
           <button class="settings-tab-btn" data-target="tabParameters">Parameter LLM</button>
           <button class="settings-tab-btn" data-target="tabSystem">System Persona</button>
         </div>
@@ -509,83 +508,6 @@
               <option value="local_first">Ollama Cloud First (Prioritas Ollama Cloud, fallback OpenRouter bila offline)</option>
               <option value="cloud_heavy">Smart Task (Prompt panjang &gt; 500 kata / Coding sulit ke OpenRouter)</option>
             </select>
-          </div>
-        </div>
-
-        <!-- Tab: Multi-Agent Deep Research Settings -->
-        <div class="settings-tab-pane" id="tabDeepResearch">
-          <div class="multi-agent-banner" style="background: rgba(0, 240, 255, 0.06); border: 1px solid rgba(0, 240, 255, 0.2); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px;">
-            <div style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #00F0FF; font-size: 0.92rem; margin-bottom: 4px;">
-              <i class="fa-solid fa-diagram-project"></i> Pipeline 4-Model Hierarkis Otonom (Explorer, Divergent, Corrector, Summarizer)
-            </div>
-            <p style="font-size: 0.8rem; color: #a0aec0; margin: 0; line-height: 1.45;">
-              Model 1 mencerna web primer Google, Model 2 mencerna domain divergen (Zero Collision), Model 3 (Lead Corrector) mengoreksi, menghubungkan, &amp; menyempurnakan Laporan Riset Komprehensif (8 Bab), dan Model 4 menyusun Rangkuman Eksekutif ringkas untuk antarmuka chat tanpa memenuhi percakapan.
-            </p>
-          </div>
-
-          <div class="form-group">
-            <label><i class="fa-solid fa-robot"></i> Model Agen 1 (Pakar Web Google / Serper)</label>
-            <div class="input-with-action">
-              <input type="text" id="settingDeepResearchAgent1Model" placeholder="Bawaan (Model Obrolan Aktif) atau ketik nama model..." class="form-control" autocomplete="off">
-              <button type="button" class="btn btn-sm btn-outline btn-open-model-catalog" data-target-input="settingDeepResearchAgent1Model" title="Buka Katalog Model Real-Time">
-                <i class="fa-solid fa-magnifying-glass"></i> Cari Model
-              </button>
-            </div>
-            <small class="form-hint">Model cerdas yang menganalisis temuan Google Serper. Kosongkan untuk menggunakan model obrolan aktif.</small>
-          </div>
-
-          <div class="form-group">
-            <label><i class="fa-solid fa-robot"></i> Model Agen 2 (Pakar Data Mendalam / Serper Divergen)</label>
-            <div class="input-with-action">
-              <input type="text" id="settingDeepResearchAgent2Model" placeholder="Bawaan (Model Obrolan Aktif) atau ketik nama model..." class="form-control" autocomplete="off">
-              <button type="button" class="btn btn-sm btn-outline btn-open-model-catalog" data-target-input="settingDeepResearchAgent2Model" title="Buka Katalog Model Real-Time">
-                <i class="fa-solid fa-magnifying-glass"></i> Cari Model
-              </button>
-            </div>
-            <small class="form-hint">Model cerdas yang menganalisis temuan Google Serper sudut pandang kedua (domain mandiri). Kosongkan untuk menggunakan model obrolan aktif.</small>
-          </div>
-
-          <div class="form-group">
-            <label><i class="fa-solid fa-feather-pointed" style="color: #FF007F;"></i> Model 3: Pengoreksi & Penyempurna Laporan (Lead Corrector & Enhancer)</label>
-            <div class="input-with-action">
-              <input type="text" id="settingDeepResearchFinalModel" placeholder="Bawaan (Model Obrolan Aktif) atau ketik nama model..." class="form-control" autocomplete="off">
-              <button type="button" class="btn btn-sm btn-outline btn-open-model-catalog" data-target-input="settingDeepResearchFinalModel" title="Buka Katalog Model Real-Time">
-                <i class="fa-solid fa-magnifying-glass"></i> Cari Model
-              </button>
-            </div>
-            <small class="form-hint">Model cerdas yang mengoreksi klaim awal, menghubungkan output Agen 1 & 2 secara mendalam, serta mengelaborasi dokumen laporan riset komprehensif.</small>
-          </div>
-
-          <div class="form-group">
-            <label><i class="fa-solid fa-sparkles" style="color: var(--neon-cyan);"></i> Model 4: Perangkum Chat (Executive Summarizer)</label>
-            <div class="input-with-action">
-              <input type="text" id="settingDeepResearchModel4" placeholder="Bawaan (Model Obrolan Aktif) atau ketik nama model..." class="form-control" autocomplete="off">
-              <button type="button" class="btn btn-sm btn-outline btn-open-model-catalog" data-target-input="settingDeepResearchModel4" title="Buka Katalog Model Real-Time">
-                <i class="fa-solid fa-magnifying-glass"></i> Cari Model
-              </button>
-            </div>
-            <small class="form-hint">Model cerdas yang merumuskan intisari eksekutif tajam untuk ditampilkan langsung di gelembung obrolan antarmuka chat.</small>
-          </div>
-
-          <!-- Section: Custom Presets Buatan Pengguna -->
-          <div class="user-custom-presets-section" style="margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-              <label style="font-weight: 600; color: #64F3FF; font-size: 0.85rem; margin: 0;">
-                <i class="fa-solid fa-bookmark"></i> Preset Kustom Saya
-              </label>
-              <span style="font-size: 0.72rem; color: #a0aec0;">Buat & simpan kombinasi model riset Anda</span>
-            </div>
-            
-            <div class="input-with-action" style="margin-bottom: 8px;">
-              <input type="text" id="inputNewPresetName" placeholder="Ketik nama preset kustom Anda (misal: Riset Skripsi AI)..." class="form-control" style="font-size: 0.8rem;">
-              <button class="btn btn-sm btn-outline" id="saveCustomPresetBtn" type="button" title="Simpan konfigurasi 4 model di atas sebagai preset baru">
-                <i class="fa-solid fa-plus"></i> Simpan Preset
-              </button>
-            </div>
-
-            <div class="custom-presets-container" id="customPresetsList" style="display: flex; flex-wrap: wrap; gap: 6px; min-height: 28px;">
-              <span class="no-presets-hint" style="font-size: 0.75rem; color: #718096; font-style: italic;">Belum ada preset kustom yang dibuat.</span>
-            </div>
           </div>
         </div>
 
