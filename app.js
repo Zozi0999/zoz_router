@@ -6,7 +6,7 @@
 (() => {
   'use strict';
 
-  const IS_GITHUB_PAGES = location.hostname.endsWith('github.io') || location.protocol === 'file:';
+  const IS_GITHUB_PAGES = Boolean(location.hostname && location.hostname.endsWith('github.io')) || location.protocol === 'file:';
 
   // ==================== SYSTEM PRESETS ====================
   const SYSTEM_PRESETS = {
@@ -275,7 +275,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     mainComposerContainer: $('#mainComposerContainer'),
     composerCrownRow: $('#composerCrownRow'),
     neutronCrownBtn: $('#neutronCrownBtn'),
-    neutronCrownTooltip: $('#neutronCrownTooltip'),
     promptInput: $('#promptInput'),
     sendPromptBtn: $('#sendPromptBtn'),
     stopGenerationBtn: $('#stopGenerationBtn'),
@@ -1534,7 +1533,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'continue-response-btn';
-    btn.innerHTML = '<i class="fa-solid fa-forward-step"></i> <span>⏩ Lanjutkan Jawaban (Output Terpotong)</span>';
+    btn.innerHTML = '<i class="fa-solid fa-forward-step"></i> <span>Lanjutkan Jawaban (Output Terpotong)</span>';
 
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -4457,7 +4456,7 @@ ${organicBlock}
     // Bersihkan residu teks bocor seperti "We will call search_web for ..."
     cleaned = cleaned
       .replace(/(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(?:search_web|browse_web_page)[\s\S]*?(?:\.|\n|$)/gi, '')
-      .replace(/(?:search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*=\s*)?["'`](?:[^"'`]+)["'`]\s*\)/gi, '')
+      .replace(/(?:search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?["'`](?:[^"'`]+)["'`]\s*\)/gi, '')
       .trim();
 
     return cleaned;
@@ -4563,7 +4562,7 @@ ${organicBlock}
     }
 
     // 4. Function call syntax: search_web("query") or browse_web_page("url")
-    const funcRegex = /(search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*=\s*)?["'`]([^"'`]+)["'`]\s*\)/gi;
+    const funcRegex = /(search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?["'`]([^"'`]+)["'`]\s*\)/gi;
     let fm;
     while ((fm = funcRegex.exec(text)) !== null) {
       const name = fm[1];
@@ -8209,10 +8208,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       els.neutronCrownBtn.removeAttribute('aria-label');
     }
 
-    if (els.neutronCrownTooltip) {
-      els.neutronCrownTooltip.remove();
-    }
-
     if (!silent && !isHidden) {
       setTimeout(() => {
         els.promptInput?.focus();
@@ -8349,13 +8344,26 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         finalImageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&model=${encodeURIComponent(pollinationsModel)}&seed=${actualSeed}&nologo=true&enhance=true`;
       }
 
-      // Preload image to ensure 100% materialization animation
+      // Preload image to ensure 100% materialization animation (with 25s safety timeout to prevent infinite UI hang)
       await new Promise((resolve, reject) => {
         const testImg = new Image();
-        testImg.onload = () => resolve();
-        testImg.onerror = () => reject(new Error('Gagal memuat visual gambar yang digenerasi.'));
+        const timeout = setTimeout(() => {
+          // If preloading takes > 25s, proceed so UI doesn't hang indefinitely
+          resolve();
+        }, 25000);
+        testImg.onload = () => {
+          clearTimeout(timeout);
+          resolve();
+        };
+        testImg.onerror = () => {
+          clearTimeout(timeout);
+          reject(new Error('Gagal memuat visual gambar yang digenerasi.'));
+        };
         if (STATE.abortController?.signal) {
-          STATE.abortController.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+          STATE.abortController.signal.addEventListener('abort', () => {
+            clearTimeout(timeout);
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
         }
         testImg.src = finalImageUrl;
       });
