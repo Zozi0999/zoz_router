@@ -7106,11 +7106,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
     }
     if (els.promptInput) {
-      if (STATE.isImageGenMode) {
-        els.promptInput.placeholder = '🎨 Mode Buat Gambar Aktif — Jelaskan visual yang ingin dibuat (Ketik /chat untuk kembali)...';
-      } else {
-        els.promptInput.placeholder = 'Ketik pesan atau minta gambar (Ketik /img untuk Mode Gambar)...';
-      }
+      els.promptInput.placeholder = '';
     }
   }
 
@@ -9228,9 +9224,25 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
   // ==================== EVENT LISTENERS SETUP ====================
   function setupEventListeners() {
-    // Mode Switchers
+    // Mode Switchers (Auto Router Toggle & Switch)
     els.modeTabs.forEach(tab => {
-      tab.addEventListener('click', () => setEngineMode(tab.dataset.mode));
+      tab.addEventListener('click', () => {
+        const targetMode = tab.dataset.mode;
+        if (targetMode === 'auto') {
+          if (STATE.mode === 'auto') {
+            // Toggle kembali ke provider model yang saat ini sedang aktif
+            const currentModel = getCurrentModel();
+            const fallbackMode = (currentModel && currentModel.includes('/')) ? 'openrouter' : 'ollama';
+            setEngineMode(fallbackMode);
+            showToast(`Auto Router dinonaktifkan. Mode: ${fallbackMode.toUpperCase()}`);
+          } else {
+            setEngineMode('auto');
+            showToast('Auto Router aktif: Ollama Cloud first + OpenRouter fallback');
+          }
+        } else {
+          setEngineMode(targetMode);
+        }
+      });
     });
 
     // Model Picker: Buka Katalog Model Layar Lebar & Besar Real-Time (Live Catalog)
@@ -10443,6 +10455,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     updatePresetBanner();
     updatePresetPillUI();
     updateModelUI();
+    els.modeTabs.forEach(tab => {
+      tab.classList.toggle('active', tab.dataset.mode === STATE.mode);
+    });
     updateSearchModeUI();
     updateImageGenModeUI();
 

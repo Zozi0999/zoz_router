@@ -645,6 +645,13 @@ html, body {
   border: 1px solid rgba(0, 240, 255, 0.2);
 }
 
+.mode-tab#modeAuto.active {
+  background: rgba(0, 240, 255, 0.12);
+  border: 1px solid rgba(0, 240, 255, 0.45);
+  color: var(--neon-cyan);
+  box-shadow: 0 0 14px rgba(0, 240, 255, 0.25);
+}
+
 /* Top Nav Right */
 .top-nav-right {
   display: flex;

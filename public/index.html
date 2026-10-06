@@ -134,15 +134,9 @@
             <i class="fa-solid fa-bars-staggered"></i>
           </button>
           
-          <!-- Mode Tabs -->
+          <!-- Mode Tabs (Auto Router) -->
           <div class="mode-tabs">
-            <button class="mode-tab active" data-mode="ollama" id="modeOllama">
-              <span class="tab-icon">🦙</span> Ollama Cloud
-            </button>
-            <button class="mode-tab" data-mode="openrouter" id="modeOpenRouter">
-              <span class="tab-icon">⚡</span> OpenRouter
-            </button>
-            <button class="mode-tab" data-mode="auto" id="modeAuto" title="Auto routing pintar: Ollama Cloud first + OpenRouter fallback">
+            <button class="mode-tab" data-mode="auto" id="modeAuto" title="Auto routing pintar: Ollama Cloud first + OpenRouter fallback (Klik untuk beralih mode)">
               <span class="tab-icon">🔀</span> Auto Router
             </button>
           </div>
@@ -384,7 +378,7 @@
           <div class="input-field-wrap">
             <textarea 
               id="promptInput" 
-              placeholder="Ketik pesan atau minta gambar (Ketik /img untuk Mode Gambar)..." 
+              placeholder="" 
               rows="1"
             ></textarea>
           </div>
