@@ -1980,6 +1980,7 @@ const server = http.createServer(async (req, res) => {
       });
       return res.end(content);
     }
+    return sendJSON(res, 404, { error: 'Media file tidak ditemukan di penyimpanan perangkat.' });
   }
 
 // Web Search API Endpoint (Serper Google Search Engine)
