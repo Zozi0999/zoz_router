@@ -2477,6 +2477,9 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
             STATE.attachedDocs = [...docs];
             renderAttachmentPreviews();
           }
+          if (STATE.isPromptHidden) {
+            togglePromptVisibility(false);
+          }
           handleSendPrompt();
         };
 
@@ -3843,6 +3846,10 @@ ${organicBlock}
     // Immediately render user's message bubble
     appendMessageElement('user', rawText, images, 'Anda', null, session.messages.length - 1, null, docsMeta);
     smartScrollChatToBottom(true);
+
+    if (STATE.isPromptHidden) {
+      togglePromptVisibility(false);
+    }
 
     // Reset input & attachments
     els.promptInput.value = '';
