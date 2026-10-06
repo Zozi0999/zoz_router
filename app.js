@@ -2627,8 +2627,14 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     let addedImagesCount = 0;
 
     for (const file of files) {
-      // 1. Cek cerdas: Jika user memilih foto/gambar melalui menu Dokumen, alihkan otomatis ke Galeri Foto/Vision
+      // 1. Cek cerdas: Jika user memilih foto/gambar melalui menu Dokumen
       if (isImageFile(file)) {
+        const currentModel = getCurrentModel();
+        if (!doesModelSupportVision(currentModel)) {
+          showToast(`⚠️ Model "${currentModel}" beroperasi dalam mode teks murni (text-only) dan tidak mendukung input gambar. Gambar tidak diunggah.`, 'warning');
+          if (window.AudioEngine && AudioEngine.error) AudioEngine.error();
+          continue;
+        }
         const ok = await processSingleImageFile(file);
         if (ok) addedImagesCount++;
         continue;
@@ -3600,8 +3606,8 @@ ${organicBlock}
               context_length: m.context_length || null,
               hasImageOutput: hasImageOutput,
               supportsTools: supportsTools,
-              tag: m.id.includes(':free') ? 'Free' : (m.pricing?.prompt === '0' ? 'Free' : 'Cloud'),
-              cat: m.id.includes(':free') ? 'free' : 'flagship'
+              tag: (m.id.includes(':free') || m.id.endsWith('/free') || m.id === 'openrouter/free' || m.pricing?.prompt === '0') ? 'Free' : 'Cloud',
+              cat: (m.id.includes(':free') || m.id.endsWith('/free') || m.id === 'openrouter/free' || m.pricing?.prompt === '0') ? 'free' : 'flagship'
             };
           });
           STATE.openRouterModels = mapped;
@@ -3760,6 +3766,13 @@ ${organicBlock}
         setEngineMode('ollama');
       }
     }
+
+    // Jika model yang baru dipilih adalah model teks murni dan saat ini ada gambar terlampir, lepas gambar
+    if (Array.isArray(STATE.attachedImages) && STATE.attachedImages.length > 0 && !doesModelSupportVision(modelId)) {
+      clearAttachedImages();
+      showToast(`⚠️ Lampiran gambar dilepas karena model "${modelId}" adalah model teks murni.`, 'warning');
+    }
+
     updateModelUI();
     updateVisionCompatibilityBadge();
     savePersistedState();
@@ -3889,6 +3902,15 @@ ${organicBlock}
       targetModel = STATE.settings.ollamaModel || 'gemma4:31b';
     }
 
+    // Safety guard: Jika ada gambar terlampir tetapi model target adalah model teks murni (non-vision),
+    // JANGAN PERNAH mengalihkan model secara otomatis sesuai mandat mutlak Kaisar Zozi!
+    // Abaikan lampiran gambar dan eksekusi model pilihan pengguna secara murni.
+    let effectiveImages = images;
+    if (effectiveImages.length > 0 && !doesModelSupportVision(targetModel)) {
+      showToast(`⚠️ Lampiran gambar diabaikan karena model "${targetModel}" tidak mendukung vision.`, 'warning');
+      effectiveImages = [];
+    }
+
     const isExplicitImageCommand = /^\/(?:image|img|gambar)\s+/i.test(text.trim());
     const isDirectImageCapable = isModelCapableOfImageGeneration(targetModel);
     const isToolImageCapable = (STATE.mode === 'openrouter' || targetModel.includes('/')) && Boolean(STATE.settings.openRouterKey) && doesModelSupportTools(targetModel);
@@ -3911,20 +3933,20 @@ ${organicBlock}
       const activeModel = (activeEngine === 'openrouter')
         ? STATE.settings.openRouterModel
         : STATE.settings.ollamaModel;
-      await runDeepResearchStreaming(session, text, images, activeModel, activeEngine);
+      await runDeepResearchStreaming(session, text, effectiveImages, activeModel, activeEngine);
     } else if (STATE.mode === 'auto') {
-      await runAutoRouterStreaming(session, text, images);
+      await runAutoRouterStreaming(session, text, effectiveImages);
     } else if (STATE.mode === 'openrouter') {
       if (!targetModel.includes('/')) {
-        await runOllamaStreaming(session, text, images, targetModel);
+        await runOllamaStreaming(session, text, effectiveImages, targetModel);
       } else {
-        await runOpenRouterStreaming(session, text, images, targetModel);
+        await runOpenRouterStreaming(session, text, effectiveImages, targetModel);
       }
     } else {
       if (targetModel.includes('/')) {
-        await runOpenRouterStreaming(session, text, images, targetModel);
+        await runOpenRouterStreaming(session, text, effectiveImages, targetModel);
       } else {
-        await runOllamaStreaming(session, text, images, targetModel);
+        await runOllamaStreaming(session, text, effectiveImages, targetModel);
       }
     }
   }
@@ -3972,6 +3994,38 @@ ${organicBlock}
       lower.includes('llama-3') ||
       lower.includes('deepseek')
     );
+  }
+
+  function doesModelSupportVision(modelName) {
+    if (!modelName || typeof modelName !== 'string') return false;
+    const lower = modelName.toLowerCase();
+
+    // 1. Periksa metadata live OpenRouter jika model terdaftar
+    const liveModel = (STATE.openRouterModels || []).find(m => m.id === modelName);
+    if (liveModel) {
+      if (liveModel.hasImageInput || liveModel.supportsVision) return true;
+    }
+
+    // 2. Model multimodal yang dipastikan mendukung vision/gambar
+    if (
+      lower.includes('vision') ||
+      lower.includes('-vl') ||
+      lower.includes('omni') ||
+      lower.includes('gpt-4o') ||
+      lower.includes('gpt-4-turbo') ||
+      lower.includes('claude-3') ||
+      lower.includes('gemini') ||
+      lower.includes('gemma-4') ||
+      lower.includes('pixtral') ||
+      lower.includes('llava') ||
+      lower.includes('moondream') ||
+      lower.includes('bakllava')
+    ) {
+      return true;
+    }
+
+    // 3. Model teks murni (text-only)
+    return false;
   }
 
   // ==================== UNIVERSAL MODEL ERROR & WARNING HANDLER ====================
@@ -4976,6 +5030,15 @@ ${organicBlock}
     const files = Array.from(e.target.files || []);
     if (!files || files.length === 0) return;
 
+    const currentModel = getCurrentModel();
+    if (!doesModelSupportVision(currentModel)) {
+      if (els.imageFileInput) els.imageFileInput.value = '';
+      if (els.cameraFileInput) els.cameraFileInput.value = '';
+      showToast(`⚠️ Model "${currentModel}" beroperasi dalam mode teks murni (text-only) dan tidak mendukung input gambar. Gambar tidak diunggah.`, 'warning');
+      if (window.AudioEngine && AudioEngine.error) AudioEngine.error();
+      return;
+    }
+
     let addedCount = 0;
     for (const file of files) {
       if (!isImageFile(file)) continue;
@@ -5281,11 +5344,20 @@ ${organicBlock}
     const isModelOllama = Boolean(modelName && (modelName.includes(':') || (!modelName.includes('/') && (STATE.ollamaModels || []).some(m => (m.name || m.model || m.id) === modelName))));
     const resolvedEngine = isModelOpenRouter ? 'openrouter' : (isModelOllama ? 'ollama' : (engine || (STATE.settings.openRouterKey ? 'openrouter' : 'ollama')));
 
-    const messages = [];
-    if (system && system.trim()) messages.push({ role: 'system', content: system.trim() });
-    messages.push({ role: 'user', content: prompt.trim() });
-
     if (resolvedEngine === 'openrouter' || (STATE.settings.openRouterKey && !isModelOllama)) {
+      const isFreeModel = Boolean(modelName && (modelName.includes(':free') || modelName === 'openrouter/free' || modelName.endsWith('/free')));
+      const candidateModels = isFreeModel
+        ? [
+            modelName,
+            'openrouter/free',
+            'qwen/qwen3.8-27b:free',
+            'google/gemma-4-26b-a4b-it:free',
+            'nvidia/nemotron-3.5-lightning:free',
+            'liquid/lfm-2.5-2.6b:free',
+            'google/gemma-4-31b-it:free'
+          ].filter((m, idx, arr) => arr.indexOf(m) === idx)
+        : [modelName];
+
       const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
       const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
       const headers = {
@@ -5296,23 +5368,64 @@ ${organicBlock}
         headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
         headers['X-Title'] = 'ZOZ Router Multi-Agent';
       }
-      const requestBody = {
-        model: modelName,
-        messages,
-        stream: false,
-        temperature: 0.3
-      };
-      if (!isOpenRouterDirect) requestBody.apiKey = STATE.settings.openRouterKey;
 
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-        signal: STATE.abortController?.signal
-      });
-      if (!res.ok) throw new Error(`OpenRouter HTTP ${res.status}`);
-      const data = await res.json();
-      return data.choices?.[0]?.message?.content || '';
+      let lastErr = null;
+      for (let i = 0; i < candidateModels.length; i++) {
+        const curModel = candidateModels[i];
+        const supportsSystem = doesModelSupportSystemRole(curModel);
+        const messages = [];
+        if (system && system.trim()) {
+          if (supportsSystem) {
+            messages.push({ role: 'system', content: system.trim() });
+            messages.push({ role: 'user', content: prompt.trim() });
+          } else {
+            messages.push({ role: 'user', content: `[Instruksi Sistem & Konteks:\n${system.trim()}]\n\n${prompt.trim()}` });
+          }
+        } else {
+          messages.push({ role: 'user', content: prompt.trim() });
+        }
+
+        const requestBody = {
+          model: curModel,
+          messages,
+          stream: false,
+          temperature: 0.3,
+          provider: {
+            allow_fallbacks: true
+          }
+        };
+        if (!isOpenRouterDirect) requestBody.apiKey = STATE.settings.openRouterKey;
+
+        try {
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(requestBody),
+            signal: STATE.abortController?.signal
+          });
+          if (!res.ok) {
+            let errDetail = `OpenRouter HTTP ${res.status}`;
+            try {
+              const errJson = await res.json();
+              if (errJson && errJson.error) {
+                errDetail = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
+              }
+            } catch (e) {}
+            throw new Error(errDetail);
+          }
+          const data = await res.json();
+          return data.choices?.[0]?.message?.content || '';
+        } catch (callErr) {
+          if (STATE.abortController?.signal?.aborted) throw callErr;
+          lastErr = callErr;
+          if (isFreeModel && i < candidateModels.length - 1) {
+            console.warn(`[callClientLLMDirect] Failover dari ${curModel} ke ${candidateModels[i + 1]}:`, callErr.message);
+            continue;
+          }
+          throw callErr;
+        }
+      }
+      throw lastErr || new Error('Gagal memanggil model OpenRouter');
     } else {
       const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
       const headers = { 'Content-Type': 'application/json' };
@@ -5320,6 +5433,10 @@ ${organicBlock}
         headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
       }
+      const messages = [];
+      if (system && system.trim()) messages.push({ role: 'system', content: system.trim() });
+      messages.push({ role: 'user', content: prompt.trim() });
+
       const requestBody = {
         model: modelName,
         messages,
@@ -5351,9 +5468,20 @@ ${organicBlock}
     const isModelOllama = Boolean(modelName && (modelName.includes(':') || (!modelName.includes('/') && (STATE.ollamaModels || []).some(m => (m.name || m.model || m.id) === modelName))));
     const resolvedEngine = isModelOpenRouter ? 'openrouter' : (isModelOllama ? 'ollama' : (engine || 'ollama'));
 
-    const messagesPayload = buildSanitizedMessagesPayload(session, [], resolvedEngine, systemPrompt, modelName);
-
     if (resolvedEngine === 'openrouter' || (!STATE.settings.ollamaModel && STATE.settings.openRouterKey && !isModelOllama)) {
+      const isFreeModel = Boolean(modelName && (modelName.includes(':free') || modelName === 'openrouter/free' || modelName.endsWith('/free')));
+      const candidateModels = isFreeModel
+        ? [
+            modelName,
+            'openrouter/free',
+            'qwen/qwen3.8-27b:free',
+            'google/gemma-4-26b-a4b-it:free',
+            'nvidia/nemotron-3.5-lightning:free',
+            'liquid/lfm-2.5-2.6b:free',
+            'google/gemma-4-31b-it:free'
+          ].filter((m, idx, arr) => arr.indexOf(m) === idx)
+        : [modelName];
+
       const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
       const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
       const headers = {
@@ -5365,33 +5493,64 @@ ${organicBlock}
         headers['X-Title'] = 'ZOZ Router Deep Research';
       }
 
-      const requestBody = {
-        model: modelName,
-        messages: messagesPayload,
-        stream: true,
-        temperature: 0.3,
-        provider: {
-          allow_fallbacks: true
-        }
-      };
-      if (!isOpenRouterDirect) requestBody.apiKey = STATE.settings.openRouterKey;
-
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-        signal: STATE.abortController?.signal
-      });
-
-      if (!response.ok) {
-        let errDetail = `OpenRouter HTTP ${response.status}`;
-        try {
-          const errData = await response.json();
-          if (errData && errData.error) {
-            errDetail = typeof errData.error === 'object' ? (errData.error.message || JSON.stringify(errData.error)) : errData.error;
+      let response = null;
+      let lastErrDetail = '';
+      for (let i = 0; i < candidateModels.length; i++) {
+        const curModel = candidateModels[i];
+        const curMessagesPayload = buildSanitizedMessagesPayload(session, [], 'openrouter', systemPrompt, curModel);
+        const requestBody = {
+          model: curModel,
+          messages: curMessagesPayload,
+          stream: true,
+          temperature: 0.3,
+          provider: {
+            allow_fallbacks: true
           }
-        } catch (je) {}
-        throw new Error(errDetail);
+        };
+        if (!isOpenRouterDirect) requestBody.apiKey = STATE.settings.openRouterKey;
+
+        try {
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(requestBody),
+            signal: STATE.abortController?.signal
+          });
+
+          if (res.ok) {
+            response = res;
+            break;
+          }
+
+          let errDetail = `OpenRouter HTTP ${res.status}`;
+          try {
+            const errData = await res.json();
+            if (errData && errData.error) {
+              errDetail = typeof errData.error === 'object' ? (errData.error.message || JSON.stringify(errData.error)) : errData.error;
+            }
+          } catch (je) {}
+          lastErrDetail = errDetail;
+
+          if (isFreeModel && i < candidateModels.length - 1) {
+            console.warn(`[streamLLMSynthesis] Failover dari ${curModel} ke ${candidateModels[i + 1]} (${errDetail})`);
+            continue;
+          } else {
+            throw new Error(errDetail);
+          }
+        } catch (fetchErr) {
+          if (STATE.abortController?.signal?.aborted) throw fetchErr;
+          lastErrDetail = fetchErr.message || String(fetchErr);
+          if (isFreeModel && i < candidateModels.length - 1) {
+            console.warn(`[streamLLMSynthesis] Fetch error pada ${curModel}:`, fetchErr.message);
+            continue;
+          } else {
+            throw fetchErr;
+          }
+        }
+      }
+
+      if (!response || !response.ok) {
+        throw new Error(lastErrDetail || 'Gagal memulai streaming sintesis OpenRouter');
       }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -6240,11 +6399,18 @@ ${organicBlock}
   async function runDeepResearchStreaming(session, promptText, image = null, modelName = null, engine = 'ollama') {
 
     const targetModel = modelName || (engine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel);
+    // Mandat Mutlak Kaisar Zozi: Arsitektur 1-Model Deep Research Super Efisien.
+    // Gunakan 1 model master tunggal untuk mencerna data Agen 1, mencerna data Agen 2, mengoreksi di Model 3, dan merangkum di Model 4.
+    // Hemat kuota kredit RPD tanpa memanggil multi-model berbeda, namun output tetap divergen karena bahan web Primer & Divergen 100% berbeda domain.
+    const masterResearchModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim())
+      ? STATE.settings.deepResearchFinalModel.trim()
+      : (targetModel || (engine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel));
+
     setGeneratingState(true);
     STATE.abortController = new AbortController();
 
     const startTime = performance.now();
-    const assistantRow = appendMessageElement('assistant', '', null, `${targetModel} (Deep Research)`, null, -1, null, null, true);
+    const assistantRow = appendMessageElement('assistant', '', null, `${masterResearchModel} (Deep Research)`, null, -1, null, null, true);
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     const metaBox = assistantRow.querySelector('.message-meta');
 
@@ -6321,18 +6487,18 @@ ${organicBlock}
               topik: contextualTopic,
               prompt: promptText,
               messages: session ? session.messages : [],
-              model: targetModel,
-              provider: engine,
+              model: masterResearchModel,
+              provider: masterResearchModel.includes('/') ? 'openrouter' : (masterResearchModel.includes(':') ? 'ollama' : engine),
               endpoint: STATE.settings.ollamaEndpoint,
-              apiKey: engine === 'openrouter' ? STATE.settings.openRouterKey : (STATE.settings.ollamaApiKey || ''),
+              apiKey: (masterResearchModel.includes('/') || engine === 'openrouter') ? STATE.settings.openRouterKey : (STATE.settings.ollamaApiKey || ''),
               openRouterKey: STATE.settings.openRouterKey || '',
               ollamaApiKey: STATE.settings.ollamaApiKey || '',
               serperApiKey: STATE.settings.serperApiKey,
-              agent1Model: STATE.settings.deepResearchAgent1Model || targetModel,
-              agent2Model: STATE.settings.deepResearchAgent2Model || targetModel,
-              finalModel: STATE.settings.deepResearchFinalModel || targetModel,
-              model3: STATE.settings.deepResearchFinalModel || targetModel,
-              model4: STATE.settings.deepResearchModel4 || STATE.settings.deepResearchFinalModel || targetModel,
+              agent1Model: masterResearchModel,
+              agent2Model: masterResearchModel,
+              finalModel: masterResearchModel,
+              model3: masterResearchModel,
+              model4: masterResearchModel,
               maxIterations: 3
             }),
             signal: STATE.abortController.signal
@@ -6387,7 +6553,7 @@ ${organicBlock}
                     updateLiveInspectionData({
                       synthesizer: {
                         name: 'Model 3 (Lead Corrector & Enhancer)',
-                        model: STATE.settings.deepResearchFinalModel || targetModel,
+                        model: masterResearchModel,
                         status: 'selesai',
                         text: finalReportText,
                         length: (finalReportText || '').length
@@ -6400,7 +6566,7 @@ ${organicBlock}
                     updateLiveInspectionData({
                       model4: {
                         name: 'Model 4 (Executive Chat Summarizer)',
-                        model: STATE.settings.deepResearchModel4 || STATE.settings.deepResearchFinalModel || targetModel,
+                        model: masterResearchModel,
                         status: 'selesai',
                         text: chatSummary
                       }
@@ -6441,9 +6607,11 @@ ${organicBlock}
 
         const iter1Divergent = await performClientDivergentSearch(currentQuery, serperKey, agent1DomainsIter1, agent1UrlsIter1);
 
-        const agent1Model = (STATE.settings.deepResearchAgent1Model && STATE.settings.deepResearchAgent1Model.trim()) ? STATE.settings.deepResearchAgent1Model.trim() : targetModel;
-        const agent2Model = (STATE.settings.deepResearchAgent2Model && STATE.settings.deepResearchAgent2Model.trim()) ? STATE.settings.deepResearchAgent2Model.trim() : targetModel;
-        const finalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
+        const agent1Model = masterResearchModel;
+        const agent2Model = masterResearchModel;
+        const finalModel = masterResearchModel;
+        const model3 = masterResearchModel;
+        const model4 = masterResearchModel;
 
         const serperBlockIter1 = (iter1Serper?.sources || []).map(s => `- [Web Primer] ${s.title}: ${s.snippet} (${s.url})`).join('\n');
         const divergentBlockIter1 = (iter1Divergent?.sources || []).map(s => `- [Web Divergen] ${s.title}: ${s.snippet} (${s.url})`).join('\n');
@@ -6597,11 +6765,11 @@ ${organicBlock}
         });
 
         // ==========================================
-        // PILAR 2.5: PENCERNAAN KONTEN UTUH WEB OLEH MODEL 1 & MODEL 2 (CLIENT)
+        // PILAR 2.5: PENCERNAAN KONTEN UTUH WEB OLEH MODEL RISET (CLIENT)
         // ==========================================
         stepItems[stepItems.length - 1].status = 'done';
-        stepItems.push({ text: `[Langkah 2/3] Model 1 (${agent1Model}) & Model 2 (${agent2Model}) mencerna dokumen web...`, status: 'active' });
-        renderResearchHUD(70, `Model 1 & Model 2 mencerna dokumen web...`);
+        stepItems.push({ text: `[Langkah 2/3] Model Riset (${masterResearchModel}) mencerna dokumen web Primer & Divergen...`, status: 'active' });
+        renderResearchHUD(70, `Model Riset (${masterResearchModel}) mencerna dokumen web...`);
 
         const primerArticles = balancedArticlesIter2.filter(s => (s.sourceProvider || '').includes('Primer') || (!(s.sourceProvider || '').includes('Divergen')));
         const divergenArticles = balancedArticlesIter2.filter(s => (s.sourceProvider || '').includes('Divergen'));
@@ -6634,28 +6802,25 @@ ${organicBlock}
         }
 
         // ==========================================
-        // PILAR 3: AUDIT, KOREKSI & PENYEMPURNAAN OLEH MODEL 3 (LEAD REVIEWER & CORRECTOR)
-        // Sesuai Mandat Kaisar Zozi: Model 3 mengoreksi, menghubungkan output Model 1 & 2,
+        // PILAR 3: AUDIT, KOREKSI & PENYEMPURNAAN OLEH MODEL RISET (LEAD REVIEWER & CORRECTOR)
+        // Sesuai Mandat Kaisar Zozi: Model riset tunggal mengoreksi, menghubungkan output telaah Primer & Divergen,
         // serta mengelaborasi dokumen laporan riset secara sangat mendalam dan luas (output banyak 8 bab).
         // ==========================================
-        const model3 = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
-        const model4 = (STATE.settings.deepResearchModel4 && STATE.settings.deepResearchModel4.trim()) ? STATE.settings.deepResearchModel4.trim() : model3;
-
         stepItems[stepItems.length - 1].status = 'done';
-        stepItems.push({ text: `[Langkah 3/4] Model 3 (${model3}) mengoreksi, menghubungkan temuan Model 1 & 2, serta menyempurnakan dokumen riset...`, status: 'active' });
-        renderResearchHUD(85, `[Langkah 3/4] Model 3 (${model3}) mengoreksi & menyempurnakan laporan...`);
+        stepItems.push({ text: `[Langkah 3/4] Model Riset (${masterResearchModel}) mengoreksi, menghubungkan temuan Agen 1 & 2, serta menyempurnakan dokumen riset...`, status: 'active' });
+        renderResearchHUD(85, `[Langkah 3/4] Model Riset (${masterResearchModel}) mengoreksi & menyempurnakan laporan...`);
 
         const personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
-        const correctorSystem = `Anda adalah Model 3: Lead Scientific Reviewer, Fact-Corrector & Master Enhancer.
+        const correctorSystem = `Anda adalah Lead Scientific Reviewer, Fact-Corrector & Master Enhancer.
 Tugas utama Anda BUKAN sekadar merangkum atau menulis ulang secara dangkal, melainkan:
-1. MENGOREKSI & MEMVALIDASI: Periksa fakta, deteksi klaim tanpa dasar, koreksi kesalahan teknis atau bias dari output Model 1 dan Model 2.
-2. MENGHUBUNGKAN SECARA LOGIS (INTERCONNECTIVITY): Buat output Model 1 (Pakar Web Google) dan Model 2 (Pakar Analisis Divergen) SALING TERHUBUNG dan bersinergi, menjelaskan bagaimana fakta primer berhubungan dengan sudut pandang teknis independen.
+1. MENGOREKSI & MEMVALIDASI: Periksa fakta, deteksi klaim tanpa dasar, koreksi kesalahan teknis atau bias dari output telaah Agen 1 dan Agen 2.
+2. MENGHUBUNGKAN SECARA LOGIS (INTERCONNECTIVITY): Buat output telaah Agen 1 (Pakar Web Google) dan Agen 2 (Pakar Analisis Divergen) SALING TERHUBUNG dan bersinergi, menjelaskan bagaimana fakta primer berhubungan dengan sudut pandang teknis independen.
 3. MENYEMPURNAKAN & MENGELABORASI SECARA MENDALAM: Elaborasikan temuan menjadi laporan riset ilmiah yang SANGAT MENDALAM, KAYA DATA, KOMPREHENSIF, DAN PANJANG/BANYAK (Deep Comprehensive Report) tahun rujukan 2026.
 
-=== OUTPUT ANALISIS DARI MODEL 1 (PAKAR WEB GOOGLE PRIMER: ${agent1Model}) ===
+=== OUTPUT ANALISIS DARI AGIS 1 (PAKAR WEB GOOGLE PRIMER: ${masterResearchModel}) ===
 ${laporanPakarClient1 || analisisAgen1Iter2 || analisisAgen1Iter1 || 'Telaah Model 1 selesai.'}
 
-=== OUTPUT ANALISIS DARI MODEL 2 (PAKAR ANALISIS DIVERGEN & DOMAIN MANDIRI: ${agent2Model}) ===
+=== OUTPUT ANALISIS DARI AGEN 2 (PAKAR ANALISIS DIVERGEN & DOMAIN MANDIRI: ${masterResearchModel}) ===
 ${laporanPakarClient2 || analisisAgen2Iter2 || analisisAgen2Iter1 || 'Telaah Model 2 selesai.'}
 
 === DATA PEMINDAIAN WEB UTUH & TEMUAN MULTI-TAHAP ===
@@ -6667,7 +6832,7 @@ ${allSources.map((s, idx) => `[${idx + 1}] [${s.sourceProvider || 'Web'}] ${s.ti
 Format Laporan Komprehensif yang WAJIB dipatuhi:
 # 🔬 DEEP RESEARCH REPORT: ${promptText.toUpperCase()}
 > **Status:** Riset Mendalam Multi-Agen Terkoreksi & Tervalidasi Silang  
-> **Lead Auditor & Corrector:** Model 3 (${model3})  
+> **Lead Auditor & Corrector:** Model Riset (${masterResearchModel})  
 > **Total Sumber Terverifikasi:** ${allSources.length} Dokumen Web  
 > **Tahun Rujukan:** 2026
 
@@ -6680,10 +6845,10 @@ Format Laporan Komprehensif yang WAJIB dipatuhi:
 (Analisis teknis mendalam dan panjang mengenai fakta spesifik, arsitektur, mekanisme kerja, data riil, dan dinamika industri 2026)
 
 ## 3. ⚖️ Koreksi Faktual, Konsensus & Validasi Silang Multi-Model (Fact-Correction & Cross-Verification)
-(Bagian koreksi Model 3: Jelaskan secara transparan bagian mana dari klaim awal yang telah dikoreksi, diverifikasi, atau diselaraskan antara Model 1 dan Model 2. Hubungkan secara jelas titik temu konsensus dan perbedaan pandangannya)
+(Bagian koreksi: Jelaskan secara transparan bagian mana dari klaim awal yang telah dikoreksi, diverifikasi, atau diselaraskan antara data Agen 1 dan Agen 2. Hubungkan secara jelas titik temu konsensus dan perbedaan pandangannya)
 
-## 4. 🔗 Sinergi & Konektivitas Temuan (Interconnected Synthesis Model 1 & Model 2)
-(Jelaskan bagaimana temuan fakta primer dari Model 1 dan telaah teknis divergen dari Model 2 saling melengkapi, membentuk pemahaman holistik yang tidak bisa didapat dari satu sumber saja)
+## 4. 🔗 Sinergi & Konektivitas Temuan (Interconnected Synthesis Agen 1 & Agen 2)
+(Jelaskan bagaimana temuan fakta primer dari Agen 1 dan telaah teknis divergen dari Agen 2 saling melengkapi, membentuk pemahaman holistik yang tidak bisa didapat dari satu sumber saja)
 
 ## 5. 📊 Matriks Data Komparatif, Statistik & Tren Pasar 2026
 - **Data Statistik & Angka Konkret:** (Sajikan angka statistik riil, persentase, estimasi nilai pasar 2026)
@@ -6707,17 +6872,17 @@ Sajikan seluruh tautan asli markdown [Nama Sumber](URL) lengkap dengan keteranga
 ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
 
         // Pertahankan HUD Progres di gelembung obrolan agar chat bubble tidak dibanjiri teks laporan
-        renderResearchHUD(90, `[Langkah 3/4] Model 3 (${model3}) mengoreksi & menyempurnakan dokumen riset...`);
+        renderResearchHUD(90, `[Langkah 3/4] Model Riset (${masterResearchModel}) mengoreksi & menyempurnakan dokumen riset...`);
         
-        // Auto-detect model3 engine for executive synthesis
-        const model3Engine = model3.includes('/') ? 'openrouter' : (model3.includes(':') ? 'ollama' : engine);
+        // Auto-detect engine for executive synthesis
+        const model3Engine = masterResearchModel.includes('/') ? 'openrouter' : (masterResearchModel.includes(':') ? 'ollama' : engine);
         
         // Alirkan laporan langsung ke Live Deep Research Inspector (Tab Chief Synthesizer / Model 3)
-        finalReportText = await streamLLMSynthesis(model3Engine, model3, correctorSystem, session, null, (chunk, accumulated) => {
+        finalReportText = await streamLLMSynthesis(model3Engine, masterResearchModel, correctorSystem, session, null, (chunk, accumulated) => {
           updateLiveInspectionData({
             synthesizer: {
               name: 'Model 3 (Lead Corrector & Enhancer)',
-              model: model3,
+              model: masterResearchModel,
               status: 'menyusun',
               text: accumulated,
               length: accumulated.length
@@ -6728,7 +6893,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         updateLiveInspectionData({
           synthesizer: {
             name: 'Model 3 (Lead Corrector & Enhancer)',
-            model: model3,
+            model: masterResearchModel,
             status: 'selesai',
             text: finalReportText,
             length: (finalReportText || '').length
@@ -6740,27 +6905,27 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
         }
 
         // ==========================================
-        // PILAR 4: PENYUSUNAN RANGKUMAN EKSEKUTIF ANTARMUKA CHAT OLEH MODEL 4 (CLIENT)
-        // Sesuai Mandat Kaisar Zozi: Model 4 merumuskan rangkuman khusus untuk tampil di gelembung obrolan chat.
+        // PILAR 4: PENYUSUNAN RANGKUMAN EKSEKUTIF ANTARMUKA CHAT OLEH MODEL RISET (CLIENT)
+        // Sesuai Mandat Kaisar Zozi: Model riset merumuskan rangkuman khusus untuk tampil di gelembung obrolan chat.
         // ==========================================
         stepItems[stepItems.length - 1].status = 'done';
-        stepItems.push({ text: `[Langkah 4/4] Model 4 (${model4}) menyusun rangkuman eksekutif untuk antarmuka chat...`, status: 'active' });
-        renderResearchHUD(95, `[Langkah 4/4] Model 4 (${model4}) menyusun rangkuman chat...`);
+        stepItems.push({ text: `[Langkah 4/4] Model Riset (${masterResearchModel}) menyusun rangkuman eksekutif untuk antarmuka chat...`, status: 'active' });
+        renderResearchHUD(95, `[Langkah 4/4] Model Riset (${masterResearchModel}) menyusun rangkuman chat...`);
 
         updateLiveInspectionData({
           model4: {
             name: 'Model 4 (Executive Chat Summarizer)',
-            model: model4,
+            model: masterResearchModel,
             status: 'menyusun',
-            text: 'Model 4 sedang merumuskan rangkuman eksekutif untuk antarmuka chat...',
+            text: 'Model Riset sedang merumuskan rangkuman eksekutif untuk antarmuka chat...',
             timestamp: new Date().toLocaleTimeString('id-ID')
           }
         });
 
-        const summaryPrompt = `Anda adalah Model 4: Lead Executive Communicator & Chat Summarizer.
-Tugas Anda adalah membaca Laporan Riset Komprehensif yang telah dikoreksi dan disempurnakan oleh Model 3 mengenai topik: "${promptText}".
+        const summaryPrompt = `Anda adalah Lead Executive Communicator & Chat Summarizer.
+Tugas Anda adalah membaca Laporan Riset Komprehensif yang telah dikoreksi dan disempurnakan mengenai topik: "${promptText}".
 
-=== LAPORAN RISET LENGKAP TERKOREKSI (HASIL MODEL 3) ===
+=== LAPORAN RISET LENGKAP TERKOREKSI ===
 ${finalReportText}
 
 === TUGAS ANDA ===
@@ -6774,7 +6939,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
 #### ⚡ Poin Kunci & Temuan Terkoreksi:
 - **Inti Temuan:** (Poin krusial dari hasil penelusuran 2026)
-- **Konsensus & Koreksi Model:** (Bagaimana Model 1 & 2 dihubungkan dan diselaraskan oleh Model 3)
+- **Konsensus & Koreksi:** (Bagaimana temuan divalidasi dan diselaraskan)
 - **Data & Fakta Utama:** (Statistik konkret, metrik, atau data spesifik terverifikasi)
 - **Tantangan Utama:** (Hambatan kritis atau risiko regulasi yang perlu diwaspadai)
 
@@ -6784,16 +6949,16 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 *Catatan: Rangkuman ringkas ini disiapkan khusus untuk antarmuka chat. Dokumen analisis riset mendalam utuh (${allSources.length} sumber) dapat dibuka melalui tombol di bawah.*`;
 
         try {
-          chatSummary = await callClientLLMDirect(model4, summaryPrompt, 'Anda adalah Model 4: Executive Summarizer yang menyajikan intisari riset secara padat, tajam, profesional, dan siap saji di antarmuka chat.');
+          chatSummary = await callClientLLMDirect(masterResearchModel, summaryPrompt, 'Anda adalah Model 4: Executive Summarizer yang menyajikan intisari riset secara padat, tajam, profesional, dan siap saji di antarmuka chat.');
         } catch (sumErr) {
           console.warn('Gagal menyusun rangkuman chat di client fallback:', sumErr);
-          chatSummary = `### 💡 Rangkuman Eksekutif Riset\nRiset mendalam multi-agen mengenai **${promptText}** telah berhasil diselesaikan dan divalidasi silang melalui ${allSources.length} sumber rujukan terverifikasi.\n\nSilakan klik tombol **[📖 Buka Laporan]** di bawah untuk membaca dokumen analisis lengkap hasil telaah Model 1, 2, dan 3.`;
+          chatSummary = `### 💡 Rangkuman Eksekutif Riset\nRiset mendalam mengenai **${promptText}** telah berhasil diselesaikan dan divalidasi silang melalui ${allSources.length} sumber rujukan terverifikasi.\n\nSilakan klik tombol **[📖 Buka Laporan]** di bawah untuk membaca dokumen analisis lengkap hasil riset.`;
         }
 
         updateLiveInspectionData({
           model4: {
             name: 'Model 4 (Executive Chat Summarizer)',
-            model: model4,
+            model: masterResearchModel,
             status: 'selesai',
             text: chatSummary,
             timestamp: new Date().toLocaleTimeString('id-ID')
@@ -6805,7 +6970,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (finalReportText && finalReportText.trim()) {
         const endTime = performance.now();
         const totalDuration = ((endTime - startTime) / 1000).toFixed(2);
-        const actualFinalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
+        const actualFinalModel = masterResearchModel;
 
         const nowIso = new Date().toISOString();
         // Render Gemini-Style Research Card in chat bubble (dengan rangkuman Model 4 di antarmuka chat)
@@ -8695,7 +8860,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     } else {
       list = (STATE.openRouterModels || []).map(m => {
         const idLower = (m.id || '').toLowerCase();
-        const isFree = Boolean(m.id && m.id.includes(':free'));
+        const isFree = Boolean(m.id && (m.id.includes(':free') || m.id.endsWith('/free') || m.id === 'openrouter/free' || m.tag === 'Free' || m.cat === 'free'));
         
         let tag = 'Cloud';
         if (isFree) {
@@ -8749,7 +8914,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         const tagL = (item.tag || '').toLowerCase();
         const idL = (item.id || '').toLowerCase();
         if (cat === 'free') {
-          return item.isFree || tagL.includes('free') || idL.includes(':free');
+          return item.isFree || tagL.includes('free') || idL.includes(':free') || idL.endsWith('/free') || idL === 'openrouter/free';
         } else if (cat === 'reasoning') {
           return tagL.includes('reasoning') || idL.includes('reason') || idL.includes('r1') || idL.includes('o1') || idL.includes('o3') || idL.includes('qwq');
         } else if (cat === 'fast') {
@@ -9389,6 +9554,32 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         handleSendPrompt();
+      }
+    });
+
+    els.promptInput.addEventListener('paste', async (e) => {
+      const items = (e.clipboardData || window.clipboardData)?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type && item.type.startsWith('image/')) {
+          e.preventDefault();
+          const currentModel = getCurrentModel();
+          if (!doesModelSupportVision(currentModel)) {
+            showToast(`⚠️ Model "${currentModel}" adalah model teks murni (text-only) dan tidak mendukung input gambar. Gambar tidak diunggah.`, 'warning');
+            if (window.AudioEngine && AudioEngine.error) AudioEngine.error();
+            return;
+          }
+          const file = item.getAsFile();
+          if (file) {
+            const ok = await processSingleImageFile(file);
+            if (ok) {
+              renderAttachmentPreviews();
+              updateVisionCompatibilityBadge();
+              AudioEngine.click();
+              showToast('📷 Gambar dari clipboard berhasil dilampirkan!');
+            }
+          }
+        }
       }
     });
 
