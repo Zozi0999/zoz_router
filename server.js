@@ -1014,7 +1014,7 @@ function deriveBroadSearchQueries(rawQuery) {
   return {
     primary: rawQuery.trim(),
     tech: `${coreSubject} AI update`,
-    wiki: `${coreSubject} AI`,
+    news: `${coreSubject} latest news`,
     core: coreSubject
   };
 }
@@ -1182,7 +1182,7 @@ function fetchDuckDuckGoInstant(query) {
           try {
             const data = JSON.parse(raw);
             const results = [];
-            if (data.Heading && data.AbstractURL) {
+            if (data.Heading && data.AbstractURL && !data.AbstractURL.includes('wikipedia.org')) {
               results.push({
                 title: data.Heading,
                 url: data.AbstractURL,
@@ -1193,7 +1193,7 @@ function fetchDuckDuckGoInstant(query) {
             }
             if (Array.isArray(data.RelatedTopics)) {
               for (const rt of data.RelatedTopics.slice(0, 3)) {
-                if (rt.FirstURL && rt.Text) {
+                if (rt.FirstURL && rt.Text && !rt.FirstURL.includes('wikipedia.org')) {
                   results.push({
                     title: cleanHtmlText(rt.Text.slice(0, 60)),
                     url: rt.FirstURL,
@@ -1220,27 +1220,25 @@ async function performAutonomousSearch(query, maxResults = 15) {
   const qPlan = deriveBroadSearchQueries(query.trim());
   const cleanQuery = qPlan.primary;
   const techQuery = qPlan.tech;
-  const wikiQuery = qPlan.wiki;
+  const newsQuery = qPlan.news;
   const coreQuery = qPlan.core;
 
-  // Eksekusi seluruh provider secara paralel dengan query yang dinormalisasi cerdas
-  const [gnewsTech, gnewsPrimary, hnTech, hnCore, wikiEn, wikiId, ddgInstant] = await Promise.allSettled([
+  // Eksekusi seluruh provider berita & teknologi live secara paralel (Bebas Wikipedia agar data 100% terbaru)
+  const [gnewsTech, gnewsPrimary, gnewsNews, hnTech, hnCore, ddgInstant] = await Promise.allSettled([
     fetchGoogleNewsRss(techQuery, 'en', 8),
-    fetchGoogleNewsRss(cleanQuery, 'en', 6),
+    fetchGoogleNewsRss(cleanQuery, 'en', 8),
+    fetchGoogleNewsRss(newsQuery, 'en', 6),
     fetchHackerNewsTech(techQuery, 8),
     fetchHackerNewsTech(coreQuery, 6),
-    fetchWikipediaFullText(wikiQuery, 'en', 4),
-    fetchWikipediaFullText(coreQuery, 'id', 3),
     fetchDuckDuckGoInstant(coreQuery)
   ]);
 
   const candidatePool = [];
   if (gnewsTech.status === 'fulfilled') candidatePool.push(...gnewsTech.value);
   if (gnewsPrimary.status === 'fulfilled') candidatePool.push(...gnewsPrimary.value);
+  if (gnewsNews.status === 'fulfilled') candidatePool.push(...gnewsNews.value);
   if (hnTech.status === 'fulfilled') candidatePool.push(...hnTech.value);
   if (hnCore.status === 'fulfilled') candidatePool.push(...hnCore.value);
-  if (wikiEn.status === 'fulfilled') candidatePool.push(...wikiEn.value);
-  if (wikiId.status === 'fulfilled') candidatePool.push(...wikiId.value);
   if (ddgInstant.status === 'fulfilled') candidatePool.push(...ddgInstant.value);
 
   // Deduplikasi ketat berdasarkan URL kanonikal dan normalisasi Judul
@@ -1252,6 +1250,9 @@ async function performAutonomousSearch(query, maxResults = 15) {
     if (!item.url || !item.title) continue;
     const normUrl = item.url.trim().toLowerCase().replace(/\/$/, '');
     const normTitle = item.title.trim().toLowerCase().replace(/[^\w\s]/g, '');
+
+    // Filter ketat: Hapus seluruh sumber Wikipedia untuk mode biasa agar data yang didapat tetap mutakhir & terkini
+    if (normUrl.includes('wikipedia.org') || (item.domain && item.domain.includes('wikipedia.org')) || normTitle.includes('wikipedia')) continue;
 
     // Filter out irrelevant disambiguation or unrelated codenames
     if (normTitle.includes('listofapplecodenames') && !cleanQuery.toLowerCase().includes('apple')) continue;

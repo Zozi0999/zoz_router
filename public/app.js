@@ -913,8 +913,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         STATE.soundEnabled = savedSound === 'true';
       }
       const savedSearchMode = localStorage.getItem('zoz_router_search_mode_v1');
-      if (savedSearchMode && ['off', 'default', 'premium', 'autonomous'].includes(savedSearchMode)) {
+      if (savedSearchMode && ['off', 'default', 'autonomous'].includes(savedSearchMode)) {
         STATE.searchMode = savedSearchMode;
+      } else {
+        STATE.searchMode = 'off';
+        localStorage.setItem('zoz_router_search_mode_v1', 'off');
       }
       const savedPromptHidden = localStorage.getItem('zoz_prompt_hidden');
       if (savedPromptHidden !== null) {
@@ -3898,37 +3901,50 @@ ${organicBlock}
     const isToolImageCapable = (STATE.mode === 'openrouter' || targetModel.includes('/')) && Boolean(STATE.settings.openRouterKey) && doesModelSupportTools(targetModel);
     const canModelHandleImage = isDirectImageCapable || isToolImageCapable;
 
+    const isExplicitDeepResearch = /^\/(?:deep|research|riset)\s+/i.test(text.trim());
+
     // Jika pengguna berada dalam Mode Image Studio atau mengetik slash command eksplisit (/img, /gambar):
     // Jalankan engine AI Image Studio dengan model yang dipilih
     if (STATE.isImageGenMode || isExplicitImageCommand) {
       const cleanImgPrompt = extractImagePrompt(text);
       await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel);
-    } else if (isImageGenerationTrigger(text) && !canModelHandleImage && !STATE.settings.openRouterKey && (STATE.mode === 'openrouter' || targetModel.includes('/'))) {
-      // Jika model OpenRouter dipilih tapi tanpa API Key untuk tool calling dan tidak mampu gambar langsung,
-      // fallback ke AI Image Studio
-      const cleanImgPrompt = extractImagePrompt(text);
-      await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel);
-    } else if (STATE.isDeepResearch) {
+    } else if (isExplicitDeepResearch) {
+      // Deep Research HANYA dieksekusi jika pengguna secara eksplisit mengetik slash command /deep atau /research
+      const cleanResearchPrompt = text.replace(/^\/(?:deep|research|riset)\s+/i, '').trim();
       const activeEngine = (STATE.mode === 'auto')
         ? (STATE.settings.autoPolicy === 'cloud_first' ? 'openrouter' : 'ollama')
         : STATE.mode;
       const activeModel = (activeEngine === 'openrouter')
         ? STATE.settings.openRouterModel
         : STATE.settings.ollamaModel;
-      await runDeepResearchStreaming(session, text, effectiveImages, activeModel, activeEngine);
-    } else if (STATE.mode === 'auto') {
-      await runAutoRouterStreaming(session, text, effectiveImages);
-    } else if (STATE.mode === 'openrouter') {
-      if (!targetModel.includes('/')) {
-        await runOllamaStreaming(session, text, effectiveImages, targetModel);
-      } else {
-        await runOpenRouterStreaming(session, text, effectiveImages, targetModel);
-      }
+      await runDeepResearchStreaming(session, cleanResearchPrompt || text, effectiveImages, activeModel, activeEngine);
+    } else if (isImageGenerationTrigger(text) && !canModelHandleImage && !STATE.settings.openRouterKey && (STATE.mode === 'openrouter' || targetModel.includes('/'))) {
+      // Jika model OpenRouter dipilih tapi tanpa API Key untuk tool calling dan tidak mampu gambar langsung,
+      // fallback ke AI Image Studio
+      const cleanImgPrompt = extractImagePrompt(text);
+      await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel);
     } else {
-      if (targetModel.includes('/')) {
-        await runOpenRouterStreaming(session, text, effectiveImages, targetModel);
+      // MODE BIASA: Selalu jalankan streaming chat normal dengan pencarian web biasa otonom (BUKAN Deep Research)
+      if (STATE.isDeepResearch) {
+        // Pulihkan searchMode agar status premium lama tidak membajak obrolan biasa
+        STATE.searchMode = 'off';
+        localStorage.setItem('zoz_router_search_mode_v1', 'off');
+        updateSearchModeUI();
+      }
+      if (STATE.mode === 'auto') {
+        await runAutoRouterStreaming(session, text, effectiveImages);
+      } else if (STATE.mode === 'openrouter') {
+        if (!targetModel.includes('/')) {
+          await runOllamaStreaming(session, text, effectiveImages, targetModel);
+        } else {
+          await runOpenRouterStreaming(session, text, effectiveImages, targetModel);
+        }
       } else {
-        await runOllamaStreaming(session, text, effectiveImages, targetModel);
+        if (targetModel.includes('/')) {
+          await runOpenRouterStreaming(session, text, effectiveImages, targetModel);
+        } else {
+          await runOllamaStreaming(session, text, effectiveImages, targetModel);
+        }
       }
     }
   }
@@ -4054,7 +4070,7 @@ ${organicBlock}
     return {
       primary: rawQuery.trim(),
       tech: `${coreSubject} AI update`,
-      wiki: `${coreSubject} AI`,
+      news: `${coreSubject} latest news`,
       core: coreSubject
     };
   }
@@ -4119,13 +4135,16 @@ ${organicBlock}
             const qPlan = deriveBroadSearchQueries(query.trim());
             const cleanQ = qPlan.primary;
             const techQ = qPlan.tech;
-            const wikiQ = qPlan.wiki;
+            const newsQ = qPlan.news;
             const coreQ = qPlan.core;
 
             const addCandidate = (item) => {
               if (!item || !item.url || !item.title) return;
               const normUrl = item.url.trim().toLowerCase().replace(/\/$/, '');
               const normTitle = item.title.trim().toLowerCase().replace(/[^\w\s]/g, '');
+
+              // Filter ketat: Hapus seluruh sumber Wikipedia untuk mode biasa agar data tetap terbaru
+              if (normUrl.includes('wikipedia.org') || normTitle.includes('wikipedia') || (item.domain && item.domain.includes('wikipedia.org'))) return;
 
               // Filter out irrelevant codename or disambiguation entries (e.g. List of Apple codenames)
               if (normTitle.includes('listofapplecodenames') && !cleanQ.toLowerCase().includes('apple')) return;
@@ -4136,18 +4155,20 @@ ${organicBlock}
               clientPool.push(item);
             };
 
-            const gnewsRssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(techQ)}&hl=en-US&gl=US&ceid=US:en`;
-            const r2jUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsRssUrl)}`;
+            const gnewsTechUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(techQ)}&hl=en-US&gl=US&ceid=US:en`;
+            const r2jTechUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsTechUrl)}`;
+            const gnewsPrimaryUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQ)}&hl=en-US&gl=US&ceid=US:en`;
+            const r2jPrimaryUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsPrimaryUrl)}`;
+            const gnewsNewsUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(newsQ)}&hl=en-US&gl=US&ceid=US:en`;
+            const r2jNewsUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(gnewsNewsUrl)}`;
             const hnUrlTech = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(techQ)}&tags=story&hitsPerPage=8`;
             const hnUrlCore = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(coreQ)}&tags=story&hitsPerPage=6`;
-            const wikiEnUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(wikiQ)}&utf8=1&format=json&origin=*`;
-            const wikiIdUrl = `https://id.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(coreQ)}&utf8=1&format=json&origin=*`;
             const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(coreQ)}&format=json&no_html=1&skip_disambig=1`;
 
-            // Eksekusi seluruh provider secara paralel (Semua bebas API key & CORS friendly)
+            // Eksekusi seluruh provider live secara paralel (Bebas Wikipedia & 100% berita aktual)
             await Promise.allSettled([
-              // 1. Google News RSS via RSS2JSON (8 berita live terkini)
-              fetch(r2jUrl).then(r => r.ok ? r.json() : null).then(d => {
+              // 1. Google News RSS Tech via RSS2JSON (8 berita live)
+              fetch(r2jTechUrl).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.items)) {
                   d.items.slice(0, 8).forEach(it => {
                     let domain = 'news.google.com';
@@ -4176,7 +4197,67 @@ ${organicBlock}
                 }
               }).catch(() => {}),
 
-              // 2. HackerNews Algolia Realtime Tech API (techQ & coreQ)
+              // 2. Google News RSS Primary/Clean via RSS2JSON (8 berita live)
+              fetch(r2jPrimaryUrl).then(r => r.ok ? r.json() : null).then(d => {
+                if (d && Array.isArray(d.items)) {
+                  d.items.slice(0, 8).forEach(it => {
+                    let domain = 'news.google.com';
+                    let cleanTitle = (it.title || '').trim();
+                    const titleParts = cleanTitle.split(' - ');
+                    let publisher = '';
+                    if (titleParts.length > 1) {
+                      publisher = titleParts.pop().trim();
+                      cleanTitle = titleParts.join(' - ');
+                    }
+                    if (publisher) domain = publisher.toLowerCase().replace(/[\s\.\:\/]+/g, '') + '.com';
+                    try {
+                      if (it.link && it.link.startsWith('http') && !it.link.includes('google.com/rss')) {
+                        domain = new URL(it.link).hostname.replace(/^www\./, '');
+                      }
+                    } catch (_) {}
+                    const cleanSnippet = (it.description || cleanTitle).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                    addCandidate({
+                      title: cleanTitle,
+                      url: it.link,
+                      domain: domain || 'news.google.com',
+                      snippet: `[${publisher || 'Google News'} | ${it.pubDate || 'Terkini'}] ${cleanSnippet.slice(0, 180)}`,
+                      sourceProvider: publisher ? `Google News (${publisher})` : 'Google News'
+                    });
+                  });
+                }
+              }).catch(() => {}),
+
+              // 3. Google News RSS News via RSS2JSON (6 berita live)
+              fetch(r2jNewsUrl).then(r => r.ok ? r.json() : null).then(d => {
+                if (d && Array.isArray(d.items)) {
+                  d.items.slice(0, 6).forEach(it => {
+                    let domain = 'news.google.com';
+                    let cleanTitle = (it.title || '').trim();
+                    const titleParts = cleanTitle.split(' - ');
+                    let publisher = '';
+                    if (titleParts.length > 1) {
+                      publisher = titleParts.pop().trim();
+                      cleanTitle = titleParts.join(' - ');
+                    }
+                    if (publisher) domain = publisher.toLowerCase().replace(/[\s\.\:\/]+/g, '') + '.com';
+                    try {
+                      if (it.link && it.link.startsWith('http') && !it.link.includes('google.com/rss')) {
+                        domain = new URL(it.link).hostname.replace(/^www\./, '');
+                      }
+                    } catch (_) {}
+                    const cleanSnippet = (it.description || cleanTitle).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                    addCandidate({
+                      title: cleanTitle,
+                      url: it.link,
+                      domain: domain || 'news.google.com',
+                      snippet: `[${publisher || 'Google News'} | ${it.pubDate || 'Terkini'}] ${cleanSnippet.slice(0, 180)}`,
+                      sourceProvider: publisher ? `Google News (${publisher})` : 'Google News'
+                    });
+                  });
+                }
+              }).catch(() => {}),
+
+              // 4. HackerNews Algolia Realtime Tech API (techQ & coreQ)
               fetch(hnUrlTech).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.hits)) {
                   d.hits.slice(0, 8).forEach(h => {
@@ -4211,44 +4292,10 @@ ${organicBlock}
                 }
               }).catch(() => {}),
 
-              // 3. Wikipedia English Full-Text Search (Maksimal 2 artikel teratas)
-              fetch(wikiEnUrl).then(r => r.ok ? r.json() : null).then(d => {
-                if (d?.query?.search) {
-                  d.query.search.slice(0, 2).forEach(w => {
-                    const u = `https://en.wikipedia.org/wiki/${encodeURIComponent(w.title.replace(/ /g, '_'))}`;
-                    const snip = (w.snippet || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-                    addCandidate({
-                      title: w.title,
-                      url: u,
-                      domain: 'en.wikipedia.org',
-                      snippet: snip || `Artikel ensiklopedia: ${w.title}`,
-                      sourceProvider: 'Wikipedia Global'
-                    });
-                  });
-                }
-              }).catch(() => {}),
-
-              // 4. Wikipedia Indonesian Full-Text Search (Maksimal 2 artikel teratas)
-              fetch(wikiIdUrl).then(r => r.ok ? r.json() : null).then(d => {
-                if (d?.query?.search) {
-                  d.query.search.slice(0, 2).forEach(w => {
-                    const u = `https://id.wikipedia.org/wiki/${encodeURIComponent(w.title.replace(/ /g, '_'))}`;
-                    const snip = (w.snippet || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-                    addCandidate({
-                      title: w.title,
-                      url: u,
-                      domain: 'id.wikipedia.org',
-                      snippet: snip || `Artikel ensiklopedia: ${w.title}`,
-                      sourceProvider: 'Wikipedia Indonesia'
-                    });
-                  });
-                }
-              }).catch(() => {}),
-
-              // 5. DuckDuckGo Instant Answer API
+              // 5. DuckDuckGo Instant Answer API (Bebas Wikipedia)
               fetch(ddgUrl).then(r => r.ok ? r.json() : null).then(d => {
                 if (d) {
-                  if (d.Heading && d.AbstractURL) {
+                  if (d.Heading && d.AbstractURL && !d.AbstractURL.includes('wikipedia.org')) {
                     let dName = 'duckduckgo.com';
                     try { dName = new URL(d.AbstractURL).hostname.replace(/^www\./, ''); } catch (_) {}
                     addCandidate({
@@ -4261,7 +4308,7 @@ ${organicBlock}
                   }
                   if (Array.isArray(d.RelatedTopics)) {
                     d.RelatedTopics.slice(0, 3).forEach(rt => {
-                      if (rt.FirstURL && rt.Text) {
+                      if (rt.FirstURL && rt.Text && !rt.FirstURL.includes('wikipedia.org')) {
                         let dName = 'duckduckgo.com';
                         try { dName = new URL(rt.FirstURL).hostname.replace(/^www\./, ''); } catch (_) {}
                         addCandidate({
@@ -4586,43 +4633,41 @@ ${organicBlock}
     return calls;
   }
 
-  const AUTONOMOUS_SYSTEM_DIRECTIVE = `### KEMAMPUAN OTONOM PENJELAJAHAN WEB MULTI-SUMBER (BUILT-IN ZERO-API):
-Anda memiliki instrumen penjelajah web mandiri berkecepatan tinggi tanpa batasan API (Multi-Source Live Web & Scraper):
-1. search_web(query): Melakukan penelusuran fakta terkini, riset, berita, atau data apa pun di web secara langsung. Sistem secara otomatis menghimpun 10-18+ artikel dari Google News, Tech Wire / HackerNews, portal media, blog resmi teknologi, dan basis pengetahuan global.
-2. browse_web_page(url): Membaca dan menelaah seluruh isi teks artikel atau dokumen web secara mendalam.
+  const AUTONOMOUS_SYSTEM_DIRECTIVE = `### KEMAMPUAN OTONOM PENCARIAN WEB LIVE (BUILT-IN ZERO-API):
+Anda memiliki instrumen pencarian web live berkecepatan tinggi tanpa batasan API:
+- search_web(query): Melakukan penelusuran fakta terkini, perkembangan tahun 2024-2026, berita, atau rilis teknologi di web secara langsung. Sistem secara otomatis menghimpun belasan artikel berita live dari Google News RSS, Tech Wire / HackerNews, blog teknologi resmi, dan portal media aktual.
+- SUMBER WIKIPEDIA TELAH DIHAPUS: Seluruh hasil penelusuran 100% merupakan berita dan publikasi aktual (BUKAN ensiklopedia atau artikel sejarah lama).
 
 INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
 - ANDA SENDIRI YANG MENENTUKAN apakah Anda membutuhkan penelusuran web atau tidak.
-- Jika pengguna menanyakan fakta terkini, perkembangan tahun 2024-2026, berita, produk baru, rilis model AI, atau hal di luar batas pengetahuan dasar Anda:
-  RANCANG DAN RUMUSKAN KUERI PENCARIAN YANG EFEKTIF, SPESIFIK, DAN RINGKAS DALAM BAHASA INGGRIS AGAR MENJANGKAU PORTAL BERITA GLOBAL RESMI (misal: "Google Gemini AI update", "Anthropic Claude new features", "DeepSeek AI benchmark", dll.), lalu panggil alat:
+- Jika pengguna menanyakan fakta terkini, perkembangan tahun 2024-2026, berita, rilis model AI, atau hal di luar batas cutoff training Anda:
+  RANCANG DAN RUMUSKAN KUERI PENCARIAN YANG EFEKTIF, SPESIFIK, DAN RINGKAS DALAM BAHASA INGGRIS AGAR MENJANGKAU PORTAL BERITA RESMI GLOBAL (misal: "Google Gemini AI update", "Anthropic Claude new features", "DeepSeek AI benchmark", dll.), lalu panggil alat:
   search_web("kueri pencarian yang Anda rancang")
   atau
   <tool_call>{"name":"search_web","arguments":{"query":"kueri pencarian yang Anda rancang"}}</tool_call>
-- JIKA Anda TIDAK memerlukan penelusuran web (misal: percakapan biasa, penulisan kode, matematika, penjelasan konsep umum), LANGSUNG jawab pertanyaan pengguna secara alami tanpa memanggil alat.
-- DILARANG KERAS menolak dengan alasan "batas pengetahuan training" atau "cutoff Mei 2024", karena Anda memiliki instrumen penelusuran web ini.
-- DILARANG KERAS MENGARANG ROADMAP, FITUR FIKSI, ATAU PROYEKSI PALSU: Jika data mengenai masa depan (misal: akhir 2026 atau versi model yang belum rilis) tidak terdapat dalam sumber data web yang diberikan, nyatakan secara jujur dan faktual berdasarkan rilis resmi yang ada. Jangan pernah menciptakan rumor fiktif, versi chip/hardware buatan, atau klaim tanpa dasar.
-- Setelah sistem mengeksekusi penelusuran dan menyajikan daftar multi-sumber berita aktual, SINTESISKAN jawaban secara komprehensif, kaya fakta, dan 100% berlandaskan pada multi-sumber tersebut.
-- DILARANG KERAS mencetak JSON mentah atau teks seperti "We will call search_web..." ke dalam jawaban akhir pengguna. Sistem akan mengeksekusi penelusuran Anda di latar belakang dan memberikan datanya kepada Anda untuk Anda cerna sebelum merumuskan jawaban akhir yang komprehensif.`;
+- JIKA Anda TIDAK memerlukan penelusuran web (percakapan biasa, penulisan kode, matematika, penjelasan konsep umum), LANGSUNG jawab pertanyaan pengguna secara alami tanpa memanggil alat.
+- DILARANG KERAS menolak dengan alasan "batas pengetahuan training" atau "cutoff Mei 2024", karena Anda memiliki instrumen live search_web ini.
+- DILARANG KERAS MENGARANG ROADMAP, FITUR FIKSI, ATAU PROYEKSI PALSU: Jika data mengenai rilis resmi belum diumumkan dalam sumber berita web yang diberikan, nyatakan secara jujur dan faktual. Jangan pernah menciptakan rumor fiktif, versi chip/hardware buatan, atau klaim tanpa dasar.
+- Setelah sistem mengeksekusi penelusuran dan menyajikan daftar multi-sumber berita aktual, SINTESISKAN jawaban secara komprehensif, padat, kaya fakta, dan 100% berlandaskan pada multi-sumber tersebut TANPA melakukan browsing/scraping berlapis (ini adalah mode pencarian biasa yang cepat & mutakhir).
+- DILARANG KERAS mencetak JSON mentah atau teks seperti "We will call search_web..." ke dalam jawaban akhir pengguna. Sistem akan mengeksekusi penelusuran di latar belakang dan memberikan datanya kepada Anda untuk langsung dirumuskan menjadi jawaban final yang komprehensif.`;
 
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
-    const isSearch = toolName === 'search_web';
-    const isBrowse = toolName === 'browse_web_page';
-    let iconClass = 'fa-compass';
-    const title = 'AUTONOMOUS WEB EXPLORER (ZERO-API)';
+    let iconClass = 'fa-magnifying-glass';
+    const title = 'PENCARIAN WEB LIVE (ZERO-API)';
     
     if (status === 'loading') {
-      iconClass = isSearch ? 'fa-magnifying-glass fa-spin' : (isBrowse ? 'fa-globe fa-spin' : 'fa-compass fa-spin');
+      iconClass = 'fa-magnifying-glass fa-spin';
     } else {
       iconClass = 'fa-circle-check';
     }
 
     const actionText = status === 'loading'
-      ? (isSearch ? `Menjelajahi web untuk: "${escapeHtml(targetText)}"` : `Membaca halaman: "${escapeHtml(targetText)}"`)
-      : (isSearch ? `Pencarian selesai: "${escapeHtml(targetText)}"` : `Halaman berhasil dibaca: "${escapeHtml(targetText)}"`);
+      ? `Mencari web: "${escapeHtml(targetText)}"`
+      : `Pencarian selesai: "${escapeHtml(targetText)}"`;
 
     const subText = status === 'loading'
-      ? 'AI memanggil tool secara mandiri & sedang mengumpulkan data live...'
-      : 'Data berhasil diserap & sedang dicerna AI untuk merumuskan respon...';
+      ? 'Mengumpulkan berita live & multi-sumber terkini...'
+      : 'Data berita aktual diserap & disintesis oleh AI...';
 
     return `
       <div class="autonomous-tool-hud${status === 'done' ? ' done' : ''}">
@@ -4973,8 +5018,8 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
 
       fullText = streamRenderer.finish();
 
-      // ==================== OLLAMA AUTONOMOUS MULTI-ROUND DIGESTION ENGINE ====================
-      const maxAutonomousRounds = 2;
+      // ==================== OLLAMA AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
+      const maxAutonomousRounds = 1;
       let autonomousRound = 0;
       const conversationChain = [...messagesPayload];
       let currentRoundText = fullText;
@@ -4984,8 +5029,8 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
       while (autonomousRound < maxAutonomousRounds) {
         if (STATE.abortController?.signal?.aborted) break;
 
-        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
-        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
+        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && tc.function.name === 'search_web');
+        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && tc.function.name === 'search_web');
         const rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
 
         // Filter out duplicate or loop tool calls
@@ -4993,16 +5038,6 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
           const toolName = call.function.name;
           if (toolName === 'search_web') {
             if (executedToolSignatures.has('search_web')) return false; // Prevent repeated search loop
-            return true;
-          }
-          if (toolName === 'browse_web_page') {
-            let targetUrl = '';
-            try {
-              const parsedArgs = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : (call.function.arguments || {});
-              targetUrl = parsedArgs.url || parsedArgs.target || '';
-            } catch (_) {}
-            const sig = `browse:${targetUrl}`;
-            if (executedToolSignatures.has(sig)) return false;
             return true;
           }
           return false;
@@ -5027,19 +5062,14 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
             previewArg = String(call.function.arguments || '');
           }
 
-          if (toolName === 'search_web') {
-            executedToolSignatures.add('search_web');
-          } else if (toolName === 'browse_web_page') {
-            executedToolSignatures.add(`browse:${previewArg}`);
-          }
-
+          executedToolSignatures.add('search_web');
           toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
 
           // Visual status loading di gelembung obrolan
           bubbleText.innerHTML = executedHudHtml + createAutonomousToolHudHtml(toolName, previewArg, 'loading');
           smartScrollChatToBottom(true);
 
-          // Eksekusi tool Zero-API DuckDuckGo / Wikipedia / Web Scraper
+          // Eksekusi tool Zero-API Live News & Tech Wire (Bebas Wikipedia)
           const toolExecRes = await executeAutonomousWebTool(toolName, call.function.arguments);
           if (toolExecRes.sources && Array.isArray(toolExecRes.sources)) {
             if (!webSources) webSources = [];
@@ -5051,8 +5081,8 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
 
         if (STATE.abortController?.signal?.aborted) break;
 
-        // Tampilkan HUD bahwa data sedang dicerna oleh AI
-        bubbleText.innerHTML = executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);">Putaran ${autonomousRound}: Mencerna informasi web untuk merumuskan respon...</span></div>`;
+        // Tampilkan HUD bahwa data berita live sedang disintesis oleh AI
+        bubbleText.innerHTML = executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);"><i class="fa-solid fa-bolt"></i> Menyintesis data berita web terbaru...</span></div>`;
         smartScrollChatToBottom(true);
 
         const cleanAssistant = currentRoundText.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').replace(/```tool_call[\s\S]*?```/gi, '').trim();
@@ -5062,7 +5092,7 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
           conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
         }
 
-        const roundInstruction = `[INSTRUKSI FINAL]: Seluruh data multi-sumber resmi (Berita Terkini, Tech Wire, Riset, Ensiklopedia) telah lengkap dan disajikan di atas.
+        const roundInstruction = `[INSTRUKSI FINAL]: Seluruh data multi-sumber berita terkini & resmi telah lengkap dan disajikan di atas (Bebas Wikipedia agar data 100% mutakhir).
 WAJIB: Sajikan jawaban komprehensif, faktual, dan terperinci Anda kepada pengguna SEKARANG JUGA secara langsung TANPA memanggil 'search_web' lagi!
 ATURAN ANTI-HALUSINASI MUTLAK:
 - Dilarang keras mengarang roadmap fiksi, rumor spekulatif, versi chip buatan, atau hal yang tidak ada dalam sumber di atas.
@@ -5071,7 +5101,7 @@ ATURAN ANTI-HALUSINASI MUTLAK:
 
         conversationChain.push({
           role: 'user',
-          content: `[DATA HASIL PENJELAJAHAN WEB OTONOM (ZERO-API - PUTARAN ${autonomousRound})]:\n${roundToolResponsesText}\n\n${roundInstruction}`
+          content: `[DATA HASIL PENCARIAN BERITA WEB TERBARU (LIVE MULTI-SOURCE)]:\n${roundToolResponsesText}\n\n${roundInstruction}`
         });
 
         const digestionBody = {
@@ -5581,8 +5611,8 @@ ATURAN ANTI-HALUSINASI MUTLAK:
 
       fullText = streamRenderer.finish();
 
-      // ==================== UNIVERSAL AUTONOMOUS MULTI-ROUND DIGESTION ENGINE ====================
-      const maxAutonomousRounds = 2;
+      // ==================== UNIVERSAL AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
+      const maxAutonomousRounds = 1;
       let autonomousRound = 0;
       const conversationChain = [...(activeMessagesPayload || messagesPayload)];
       let currentRoundText = fullText;
@@ -5592,8 +5622,8 @@ ATURAN ANTI-HALUSINASI MUTLAK:
       while (autonomousRound < maxAutonomousRounds) {
         if (STATE.abortController?.signal?.aborted) break;
 
-        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
-        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && tc.function.name && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
+        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && tc.function.name === 'search_web');
+        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && tc.function.name === 'search_web');
         const rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
 
         // Filter out duplicate or loop tool calls
@@ -5601,16 +5631,6 @@ ATURAN ANTI-HALUSINASI MUTLAK:
           const toolName = call.function.name;
           if (toolName === 'search_web') {
             if (executedToolSignatures.has('search_web')) return false; // Prevent repeated search loop
-            return true;
-          }
-          if (toolName === 'browse_web_page') {
-            let targetUrl = '';
-            try {
-              const parsedArgs = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : (call.function.arguments || {});
-              targetUrl = parsedArgs.url || parsedArgs.target || '';
-            } catch (_) {}
-            const sig = `browse:${targetUrl}`;
-            if (executedToolSignatures.has(sig)) return false;
             return true;
           }
           return false;
@@ -5635,19 +5655,14 @@ ATURAN ANTI-HALUSINASI MUTLAK:
             previewArg = String(call.function.arguments || '');
           }
 
-          if (toolName === 'search_web') {
-            executedToolSignatures.add('search_web');
-          } else if (toolName === 'browse_web_page') {
-            executedToolSignatures.add(`browse:${previewArg}`);
-          }
-
+          executedToolSignatures.add('search_web');
           toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
 
           // Visual status loading di gelembung obrolan
           bubbleText.innerHTML = executedHudHtml + createAutonomousToolHudHtml(toolName, previewArg, 'loading');
           smartScrollChatToBottom(true);
 
-          // Eksekusi tool Zero-API DuckDuckGo / Wikipedia / Scraper
+          // Eksekusi tool Zero-API Live News & Tech Wire (Bebas Wikipedia)
           const toolExecRes = await executeAutonomousWebTool(toolName, call.function.arguments);
           if (toolExecRes.sources && Array.isArray(toolExecRes.sources)) {
             if (!webSources) webSources = [];
@@ -5659,8 +5674,8 @@ ATURAN ANTI-HALUSINASI MUTLAK:
 
         if (STATE.abortController?.signal?.aborted) break;
 
-        // Tampilkan HUD bahwa data sedang dicerna oleh AI
-        bubbleText.innerHTML = executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);">Putaran ${autonomousRound}: Mencerna informasi web untuk merumuskan respon...</span></div>`;
+        // Tampilkan HUD bahwa data berita live sedang disintesis oleh AI
+        bubbleText.innerHTML = executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);"><i class="fa-solid fa-bolt"></i> Menyintesis data berita web terbaru...</span></div>`;
         smartScrollChatToBottom(true);
 
         // Siapkan pesan sintesis pencernaan dengan format UNIVERSAL (Bebas error 400 'role: tool' di OpenRouter)
@@ -5671,7 +5686,7 @@ ATURAN ANTI-HALUSINASI MUTLAK:
           conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
         }
 
-        const roundInstruction = `[INSTRUKSI FINAL]: Seluruh data multi-sumber resmi (Berita Terkini, Tech Wire, Riset, Ensiklopedia) telah lengkap dan disajikan di atas.
+        const roundInstruction = `[INSTRUKSI FINAL]: Seluruh data multi-sumber berita terkini & resmi telah lengkap dan disajikan di atas (Bebas Wikipedia agar data 100% mutakhir).
 WAJIB: Sajikan jawaban komprehensif, faktual, dan terperinci Anda kepada pengguna SEKARANG JUGA secara langsung TANPA memanggil 'search_web' lagi!
 ATURAN ANTI-HALUSINASI MUTLAK:
 - Dilarang keras mengarang roadmap fiksi, rumor spekulatif, versi chip buatan, atau hal yang tidak ada dalam sumber di atas.
@@ -5680,7 +5695,7 @@ ATURAN ANTI-HALUSINASI MUTLAK:
 
         conversationChain.push({
           role: 'user',
-          content: `[DATA HASIL PENJELAJAHAN WEB OTONOM (ZERO-API - PUTARAN ${autonomousRound})]:\n${roundToolResponsesText}\n\n${roundInstruction}`
+          content: `[DATA HASIL PENCARIAN BERITA WEB TERBARU (LIVE MULTI-SOURCE)]:\n${roundToolResponsesText}\n\n${roundInstruction}`
         });
 
         // Jalankan panggilan streaming ke model untuk putaran berikutnya
