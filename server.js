@@ -947,6 +947,15 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
   let dataTemuan = [];
   let scrapedArticles = [];
 
+  // Mandat Mutlak Kaisar Zozi: Arsitektur 1-Model Deep Research Super Efisien.
+  // Gunakan 1 model master tunggal untuk mencerna data Agen 1, mencerna data Agen 2, mengoreksi di Model 3, dan merangkum di Model 4.
+  // Hemat kuota kredit RPD tanpa memanggil multi-model berbeda, namun output tetap divergen karena bahan web Primer & Divergen 100% berbeda domain.
+  const masterResearchModel = config.finalModel || config.model || config.agent1Model || 'qwen/qwen3.8-27b:free';
+  const agent1Model = masterResearchModel;
+  const agent2Model = masterResearchModel;
+  const model3 = masterResearchModel;
+  const model4 = masterResearchModel;
+
   try {
     // ==========================================
     // PILAR 1 & 6: PENCARIAN MULTI-TAHAP & ASYNCHRONOUS QUEUE (DUAL-AGENT SERPER DIVERGEN)
@@ -1081,9 +1090,6 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
         });
       }
 
-      const agent1Model = config.agent1Model || config.model;
-      const agent2Model = config.agent2Model || config.model;
-
       // Publikasikan Snapshot Live Inspection SEGERA (agar sumber langsung terlihat di UI tanpa menunggu LLM)
       task.liveInspection = {
         topik,
@@ -1094,7 +1100,7 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
         agent1: {
           name: 'Agen 1 (Pakar Web Google)',
           provider: 'Google Serper API (Primer)',
-          model: agent1Model || 'Model Obrolan',
+          model: masterResearchModel,
           resultsCount: searchResSerper.results?.length || 0,
           results: (searchResSerper.results || []).map(r => ({ title: r.title, url: r.url, link: r.url, snippet: r.snippet })),
           analysis: 'Sedang menganalisis temuan web dan mengekstrak poin penting...'
@@ -1102,7 +1108,7 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
         agent2: {
           name: 'Agen 2 (Pakar Analisis Divergen)',
           provider: 'Google Serper API (Divergen)',
-          model: agent2Model || 'Model Obrolan',
+          model: masterResearchModel,
           resultsCount: searchResDivergent.results?.length || 0,
           knowledgeGraph: searchResDivergent.knowledgeGraph || null,
           answerBox: searchResDivergent.answerBox || null,
@@ -1124,8 +1130,8 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
         totalSourcesCount: allSources.length
       };
 
-      // 2. Jalankan Analisis Spesialis Paralel oleh LLM Agen 1 dan LLM Agen 2
-      task.currentStep = `[Langkah 1/3] Iterasi ${i}/${maxIterations}: Agen 1 (${agent1Model || 'Pakar Web'}) & Agen 2 (${agent2Model || 'Pakar Divergen'}) menganalisis data temuan...`;
+      // 2. Jalankan Analisis Spesialis Paralel oleh LLM Agen 1 dan LLM Agen 2 (Model Riset Tunggal)
+      task.currentStep = `[Langkah 1/3] Iterasi ${i}/${maxIterations}: Model Riset (${masterResearchModel}) menganalisis temuan Primer & Divergen...`;
 
       const promptAgen1 = `Anda adalah Agen 1 (Pakar Analis Web Google).
 Topik Riset: "${topik}"
@@ -1149,7 +1155,7 @@ Analisis data di atas secara mendalam. Ekstrak entitas kunci, data statistik ter
         (serperBlock.trim()) ? callLLMBackend({
           ...config,
           messages: [],
-          model: agent1Model,
+          model: masterResearchModel,
           prompt: promptAgen1,
           system: 'Anda adalah Agen 1: Analis Web Google yang fokus mengekstrak tren utama dan informasi relevan dari web.'
         }).catch((err) => {
@@ -1160,7 +1166,7 @@ Analisis data di atas secara mendalam. Ekstrak entitas kunci, data statistik ter
         (divergentBlock.trim()) ? callLLMBackend({
           ...config,
           messages: [],
-          model: agent2Model,
+          model: masterResearchModel,
           prompt: promptAgen2,
           system: 'Anda adalah Agen 2: Analis Data Divergen & Teknis yang fokus mengekstrak fakta terverifikasi dan sudut pandang spesifik dari domain mandiri.'
         }).catch((err) => {
@@ -1169,7 +1175,7 @@ Analisis data di atas secara mendalam. Ekstrak entitas kunci, data statistik ter
         }) : Promise.resolve('Tidak ada data dari Agen 2.')
       ]);
 
-      task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Analisis spesialis selesai: Agen 1 (${agent1Model || 'Pakar Web'}) & Agen 2 (${agent2Model || 'Pakar Divergen'}).`);
+      task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Analisis spesialis selesai: Model Riset (${masterResearchModel}) menganalisis temuan Primer & Divergen.`);
 
       // Update hasil analisis teks LLM ke snapshot Live Inspection
       if (task.liveInspection) {
@@ -1177,7 +1183,7 @@ Analisis data di atas secara mendalam. Ekstrak entitas kunci, data statistik ter
         if (task.liveInspection.agent2) task.liveInspection.agent2.analysis = analisisAgen2 || '';
       }
 
-      const findingsText = `[HASIL ANALISIS AGEN 1 - PAKAR WEB (${agent1Model || 'Model Bawaan'})]:\n${analisisAgen1}\n\n[HASIL ANALISIS AGEN 2 - PAKAR ANALISIS DIVERGEN (${agent2Model || 'Model Bawaan'})]:\n${analisisAgen2}`;
+      const findingsText = `[HASIL ANALISIS AGEN 1 - PAKAR WEB (${masterResearchModel})]:\n${analisisAgen1}\n\n[HASIL ANALISIS AGEN 2 - PAKAR ANALISIS DIVERGEN (${masterResearchModel})]:\n${analisisAgen2}`;
 
       dataTemuan.push(`### Temuan Terverifikasi Iterasi ${i} (Query: "${currentQuery}"):\n${findingsText}`);
 
@@ -1194,7 +1200,7 @@ Tugas Evaluasi:
 3. Jika belum, rumuskan kata kunci pencarian Google yang baru dan sangat spesifik (misal: aspek teknis, data statistik terbaru 2026, opini pakar, regulasi, studi kasus) dalam format JSON: {"sudahCukup": false, "kataKunciBaru": "query spesifik baru"}
 Keluarkan hanya JSON valid tanpa teks tambahan.`;
 
-          const evalModel = config.finalModel || config.agent1Model || config.model;
+          const evalModel = masterResearchModel;
           const evalResult = await callLLMBackend({
             ...config,
             model: evalModel,
@@ -1362,11 +1368,11 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
     }
 
     // ==========================================
-    // PILAR 2.5: PENCERNAAN KONTEN UTUH WEB OLEH MODEL 1 & MODEL 2
+    // PILAR 2.5: PENCERNAAN KONTEN UTUH WEB OLEH MODEL RISET TUNGGAL
     // ==========================================
-    task.currentStep = `[Langkah 2/3] Model 1 (${agent1Model || 'Pakar Web'}) & Model 2 (${agent2Model || 'Pakar Divergen'}) mencerna isi teks artikel web...`;
+    task.currentStep = `[Langkah 2/3] Model Riset (${masterResearchModel}) mencerna isi teks artikel web Primer & Divergen...`;
     task.progressPercent = 75;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 2/3] Model 1 & Model 2 mulai mencerna teks artikel web secara independen.`);
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 2/3] Model Riset (${masterResearchModel}) mulai mencerna teks artikel web Primer & Divergen secara mendalam.`);
 
     const primerArticles = scrapedArticles.filter(a => (a.sourceProvider || '').includes('Primer') || (!(a.sourceProvider || '').includes('Divergen')));
     const divergenArticles = scrapedArticles.filter(a => (a.sourceProvider || '').includes('Divergen'));
@@ -1400,7 +1406,7 @@ Cerna dan analisis secara kritis seluruh teks web divergen di atas. Ekstrak pers
         (primerScrapedText.trim()) ? callLLMBackend({
           ...config,
           messages: [],
-          model: agent1Model,
+          model: masterResearchModel,
           prompt: promptCernaPrimer,
           system: 'Anda adalah Agen 1: Analis Web Primer yang bertugas membedah dan menyaring konten artikel web.'
         }).catch(err => {
@@ -1411,7 +1417,7 @@ Cerna dan analisis secara kritis seluruh teks web divergen di atas. Ekstrak pers
         (divergenScrapedText.trim()) ? callLLMBackend({
           ...config,
           messages: [],
-          model: agent2Model,
+          model: masterResearchModel,
           prompt: promptCernaDivergen,
           system: 'Anda adalah Agen 2: Analis Data Divergen yang bertugas membedah konten teknis dan independen.'
         }).catch(err => {
@@ -1422,10 +1428,10 @@ Cerna dan analisis secara kritis seluruh teks web divergen di atas. Ekstrak pers
       laporanPakarAgen1 = hasil1;
       laporanPakarAgen2 = hasil2;
     } catch (digestErr) {
-      console.warn('Pencernaan artikel oleh Model 1 & 2 mengalami kendala:', digestErr?.message || digestErr);
+      console.warn('Pencernaan artikel oleh Model Riset mengalami kendala:', digestErr?.message || digestErr);
     }
 
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Pencernaan selesai: Model 1 (${agent1Model || 'Pakar Web'}) & Model 2 (${agent2Model || 'Pakar Divergen'}) telah memproduksi output telaah.`);
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Pencernaan selesai: Model Riset (${masterResearchModel}) telah memproduksi output telaah Primer & Divergen.`);
 
     // Publikasikan hasil telaah mendalam ke snapshot live inspection
     if (task.liveInspection) {
@@ -1444,28 +1450,25 @@ Cerna dan analisis secara kritis seluruh teks web divergen di atas. Ekstrak pers
     }
 
     // ==========================================
-    // PILAR 3: AUDIT, KOREKSI & PENYEMPURNAAN OLEH MODEL 3 (LEAD REVIEWER & CORRECTOR)
-    // Sesuai Mandat Kaisar: Model 3 bertindak sebagai pengoreksi yang menyempurnakan,
-    // menghubungkan output Model 1 & 2, serta mengelaborasi dokumen laporan riset secara sangat mendalam dan luas (output banyak).
+    // PILAR 3: AUDIT, KOREKSI & PENYEMPURNAAN OLEH MODEL RISET (LEAD REVIEWER & CORRECTOR)
+    // Sesuai Mandat Kaisar: Model riset tunggal bertindak sebagai pengoreksi yang menyempurnakan,
+    // menghubungkan output telaah Primer & Divergen, serta mengelaborasi dokumen laporan riset secara sangat mendalam dan luas.
     // ==========================================
-    const model3 = config.model3 || config.finalModel || config.model;
-    const model4 = config.model4 || config.finalModel || config.model;
-
-    task.currentStep = `[Langkah 3/4] Model 3 (${model3 || 'Model Pengoreksi'}) mengoreksi, menghubungkan temuan Model 1 & 2, serta menyempurnakan laporan komprehensif...`;
+    task.currentStep = `[Langkah 3/4] Model Riset (${masterResearchModel}) mengoreksi, menghubungkan temuan Primer & Divergen, serta menyempurnakan laporan komprehensif...`;
     task.progressPercent = 85;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 3/4] Model 3 (${model3 || 'Model Pengoreksi'}) mulai mengoreksi dan merajut konektivitas temuan Model 1 & Agen 2.`);
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 3/4] Model Riset (${masterResearchModel}) mulai mengoreksi dan merajut konektivitas temuan Primer & Divergen.`);
 
-    const correctorPrompt = `Anda adalah Model 3: Lead Scientific Reviewer, Fact-Corrector & Master Enhancer.
+    const correctorPrompt = `Anda adalah Lead Scientific Reviewer, Fact-Corrector & Master Enhancer.
 Tugas utama Anda BUKAN sekadar merangkum atau menulis ulang secara dangkal, melainkan:
-1. MENGOREKSI & MEMVALIDASI: Periksa fakta, deteksi klaim tanpa dasar, koreksi kesalahan teknis atau bias dari output Model 1 dan Model 2.
-2. MENGHUBUNGKAN SECARA LOGIS (INTERCONNECTIVITY): Buat output Model 1 (Pakar Web Google) dan Model 2 (Pakar Analisis Divergen) SALING TERHUBUNG dan bersinergi, menjelaskan bagaimana fakta primer berhubungan dengan sudut pandang teknis independen.
+1. MENGOREKSI & MEMVALIDASI: Periksa fakta, deteksi klaim tanpa dasar, koreksi kesalahan teknis atau bias dari output telaah Agen 1 dan Agen 2.
+2. MENGHUBUNGKAN SECARA LOGIS (INTERCONNECTIVITY): Buat output telaah Agen 1 (Pakar Web Google) dan Agen 2 (Pakar Analisis Divergen) SALING TERHUBUNG dan bersinergi, menjelaskan bagaimana fakta primer berhubungan dengan sudut pandang teknis independen.
 3. MENYEMPURNAKAN & MENGELABORASI SECARA MENDALAM: Elaborasikan temuan menjadi laporan riset ilmiah yang SANGAT MENDALAM, KAYA DATA, KOMPREHENSIF, DAN PANJANG/BANYAK (Deep Comprehensive Report) tahun rujukan 2026.
 
-=== OUTPUT ANALISIS DARI MODEL 1 (PAKAR WEB GOOGLE PRIMER: ${agent1Model || 'Model 1'}) ===
-${laporanPakarAgen1 || 'Telaah Model 1 selesai.'}
+=== OUTPUT ANALISIS DARI AGIS 1 (PAKAR WEB GOOGLE PRIMER: ${masterResearchModel}) ===
+${laporanPakarAgen1 || 'Telaah Agen 1 selesai.'}
 
-=== OUTPUT ANALISIS DARI MODEL 2 (PAKAR ANALISIS DIVERGEN & DOMAIN MANDIRI: ${agent2Model || 'Model 2'}) ===
-${laporanPakarAgen2 || 'Telaah Model 2 selesai.'}
+=== OUTPUT ANALISIS DARI AGEN 2 (PAKAR ANALISIS DIVERGEN & DOMAIN MANDIRI: ${masterResearchModel}) ===
+${laporanPakarAgen2 || 'Telaah Agen 2 selesai.'}
 
 === DATA PEMINDAIAN WEB UTUH & TEMUAN MULTI-TAHAP ===
 ${dataTemuan.join('\n\n')}
@@ -1476,7 +1479,7 @@ ${allSources.map((s, idx) => `[${idx + 1}] [${s.sourceProvider || 'Web'}] ${s.ti
 Format Laporan Komprehensif yang WAJIB dipatuhi:
 # 🔬 DEEP RESEARCH REPORT: ${topik.toUpperCase()}
 > **Status:** Riset Mendalam Multi-Agen Terkoreksi & Tervalidasi Silang  
-> **Lead Auditor & Corrector:** Model 3 (${model3 || 'Lead Corrector'})  
+> **Lead Auditor & Corrector:** Model Riset (${masterResearchModel})  
 > **Sumber Terverifikasi:** ${scrapedArticles.length} Dokumen Scraping Utuh & ${allSources.length} Referensi Web  
 > **Tahun Rujukan:** 2026
 
@@ -1489,10 +1492,10 @@ Format Laporan Komprehensif yang WAJIB dipatuhi:
 (Analisis teknis mendalam dan panjang mengenai fakta spesifik, arsitektur, mekanisme kerja, data riil, dan dinamika industri 2026)
 
 ## 3. ⚖️ Koreksi Faktual, Konsensus & Validasi Silang Multi-Model (Fact-Correction & Cross-Verification)
-(Bagian koreksi Model 3: Jelaskan secara transparan bagian mana dari klaim awal yang telah dikoreksi, diverifikasi, atau diselaraskan antara Model 1 dan Model 2. Hubungkan secara jelas titik temu konsensus dan perbedaan pandangannya)
+(Bagian koreksi: Jelaskan secara transparan bagian mana dari klaim awal yang telah dikoreksi, diverifikasi, atau diselaraskan antara data Agen 1 dan Agen 2. Hubungkan secara jelas titik temu konsensus dan perbedaan pandangannya)
 
-## 4. 🔗 Sinergi & Konektivitas Temuan (Interconnected Synthesis Model 1 & Model 2)
-(Jelaskan bagaimana temuan fakta primer dari Model 1 dan telaah teknis divergen dari Model 2 saling melengkapi, membentuk pemahaman holistik yang tidak bisa didapat dari satu sumber saja)
+## 4. 🔗 Sinergi & Konektivitas Temuan (Interconnected Synthesis Agen 1 & Agen 2)
+(Jelaskan bagaimana temuan fakta primer dari Agen 1 dan telaah teknis divergen dari Agen 2 saling melengkapi, membentuk pemahaman holistik yang tidak bisa didapat dari satu sumber saja)
 
 ## 5. 📊 Matriks Data Komparatif, Statistik & Tren Pasar 2026
 - **Data Statistik & Angka Konkret:** (Sajikan angka statistik riil, persentase, estimasi nilai pasar 2026)
@@ -1516,9 +1519,9 @@ Sajikan seluruh tautan asli markdown [Nama Sumber](URL) lengkap dengan keteranga
     if (task.liveInspection) {
       task.liveInspection.synthesizer = {
         name: 'Model 3 (Lead Corrector & Enhancer)',
-        model: model3 || 'Model 3',
+        model: masterResearchModel,
         status: 'menyusun',
-        text: 'Model 3 sedang mengoreksi, menghubungkan temuan Model 1 & Model 2, serta menyempurnakan dokumen riset komprehensif...',
+        text: 'Model Riset sedang mengoreksi, menghubungkan temuan Agen 1 & Agen 2, serta menyempurnakan dokumen riset komprehensif...',
         timestamp: new Date().toLocaleTimeString('id-ID')
       };
     }
@@ -1527,13 +1530,13 @@ Sajikan seluruh tautan asli markdown [Nama Sumber](URL) lengkap dengan keteranga
       ...config,
       prompt: correctorPrompt,
       system: 'Anda adalah Lead Scientific Reviewer, Fact-Corrector & Master Enhancer yang mengoreksi, menghubungkan, menyempurnakan, dan mengelaborasi laporan riset komprehensif secara mendalam dan berbobot tinggi.',
-      model: model3
+      model: masterResearchModel
     });
 
     if (task.liveInspection) {
       task.liveInspection.synthesizer = {
         name: 'Model 3 (Lead Corrector & Enhancer)',
-        model: model3 || 'Model 3',
+        model: masterResearchModel,
         status: 'selesai',
         text: laporanAkhir,
         timestamp: new Date().toLocaleTimeString('id-ID')
@@ -1548,17 +1551,17 @@ Sajikan seluruh tautan asli markdown [Nama Sumber](URL) lengkap dengan keteranga
     }
 
     // ==========================================
-    // PILAR 4: PENYUSUNAN RANGKUMAN EKSEKUTIF ANTARMUKA CHAT OLEH MODEL 4
-    // Sesuai Mandat Kaisar: Model 4 merumuskan rangkuman khusus untuk tampil di gelembung obrolan chat.
+    // PILAR 4: PENYUSUNAN RANGKUMAN EKSEKUTIF ANTARMUKA CHAT OLEH MODEL RISET
+    // Sesuai Mandat Kaisar: Model riset merumuskan rangkuman khusus untuk tampil di gelembung obrolan chat.
     // ==========================================
-    task.currentStep = `[Langkah 4/4] Model 4 (${model4 || 'Executive Summarizer'}) merumuskan rangkuman eksekutif untuk antarmuka chat...`;
+    task.currentStep = `[Langkah 4/4] Model Riset (${masterResearchModel}) merumuskan rangkuman eksekutif untuk antarmuka chat...`;
     task.progressPercent = 95;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 4/4] Model 4 (${model4 || 'Executive Summarizer'}) merumuskan rangkuman eksekutif antarmuka chat.`);
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 4/4] Model Riset (${masterResearchModel}) merumuskan rangkuman eksekutif antarmuka chat.`);
 
-    const summaryPrompt = `Anda adalah Model 4: Lead Executive Communicator & Chat Summarizer.
-Tugas Anda adalah membaca Laporan Riset Komprehensif yang telah dikoreksi dan disempurnakan oleh Model 3 mengenai topik: "${topik}".
+    const summaryPrompt = `Anda adalah Lead Executive Communicator & Chat Summarizer.
+Tugas Anda adalah membaca Laporan Riset Komprehensif yang telah dikoreksi dan disempurnakan mengenai topik: "${topik}".
 
-=== LAPORAN RISET LENGKAP TERKOREKSI (HASIL MODEL 3) ===
+=== LAPORAN RISET LENGKAP TERKOREKSI ===
 ${laporanAkhir}
 
 === TUGAS ANDA ===
@@ -1572,7 +1575,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
 #### ⚡ Poin Kunci & Temuan Terkoreksi:
 - **Inti Temuan:** (Poin krusial dari hasil penelusuran 2026)
-- **Konsensus & Koreksi Model:** (Bagaimana Model 1 & 2 dihubungkan dan diselaraskan oleh Model 3)
+- **Konsensus & Koreksi:** (Bagaimana temuan divalidasi dan diselaraskan)
 - **Data & Fakta Utama:** (Statistik konkret, metrik, atau data spesifik terverifikasi)
 - **Tantangan Utama:** (Hambatan kritis atau risiko regulasi yang perlu diwaspadai)
 
@@ -1587,17 +1590,17 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         ...config,
         prompt: summaryPrompt,
         system: 'Anda adalah Model 4: Executive Summarizer yang menyajikan intisari riset secara padat, tajam, profesional, dan siap saji di antarmuka chat.',
-        model: model4
+        model: masterResearchModel
       });
     } catch (sumErr) {
-      console.warn('Penyusunan rangkuman chat oleh Model 4 mengalami kendala:', sumErr?.message || sumErr);
-      chatSummary = `### 💡 Rangkuman Eksekutif Riset\nRiset mendalam multi-agen mengenai **${topik}** telah berhasil diselesaikan dan divalidasi silang melalui ${allSources.length} sumber rujukan terverifikasi.\n\nSilakan klik tombol **[📖 Buka Laporan]** di bawah untuk membaca dokumen analisis lengkap hasil telaah Model 1, 2, dan 3.`;
+      console.warn('Penyusunan rangkuman chat oleh Model Riset mengalami kendala:', sumErr?.message || sumErr);
+      chatSummary = `### 💡 Rangkuman Eksekutif Riset\nRiset mendalam mengenai **${topik}** telah berhasil diselesaikan dan divalidasi silang melalui ${allSources.length} sumber rujukan terverifikasi.\n\nSilakan klik tombol **[📖 Buka Laporan]** di bawah untuk membaca dokumen analisis lengkap hasil riset.`;
     }
 
     if (task.liveInspection) {
       task.liveInspection.model4 = {
         name: 'Model 4 (Executive Chat Summarizer)',
-        model: model4 || 'Model 4',
+        model: masterResearchModel,
         status: 'selesai',
         text: chatSummary,
         timestamp: new Date().toLocaleTimeString('id-ID')
@@ -1921,21 +1924,22 @@ const server = http.createServer(async (req, res) => {
         createdAt: new Date().toISOString()
       };
 
-      // Jalankan proses riset secara asinkronus di latar belakang
+      const masterModel = body.finalModel || body.model || body.agent1Model || 'qwen/qwen3.8-27b:free';
+      // Jalankan proses riset secara asinkronus di latar belakang dengan arsitektur 1-Model super efisien
       jalankanRisetOtonom(taskId, topik, {
         messages: body.messages || [],
-        model: body.model,
-        provider: body.provider,
+        model: masterModel,
+        provider: body.provider || (masterModel.includes('/') ? 'openrouter' : (masterModel.includes(':') ? 'ollama' : 'openrouter')),
         endpoint: body.endpoint,
         apiKey: body.apiKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null),
         openRouterKey: body.openRouterKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || process.env.OPENROUTER_API_KEY,
         ollamaApiKey: body.ollamaApiKey || body.apiKey || '',
         serperApiKey: body.serperApiKey || req.headers['x-serper-key'],
-        agent1Model: body.agent1Model || null,
-        agent2Model: body.agent2Model || null,
-        finalModel: body.finalModel || null,
-        model3: body.model3 || body.agent3Model || body.finalModel || null,
-        model4: body.model4 || body.agent4Model || body.summaryModel || body.finalModel || null,
+        agent1Model: masterModel,
+        agent2Model: masterModel,
+        finalModel: masterModel,
+        model3: masterModel,
+        model4: masterModel,
         maxIterations: body.maxIterations || 3
       }).catch(err => {
         console.error(`Tugas riset [${taskId}] gagal secara asinkron:`, err.message);
