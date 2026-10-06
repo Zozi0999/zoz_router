@@ -130,10 +130,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       ollamaApiKey: '',
       openRouterKey: '',
       serperApiKey: '075538fed9c64990e1eb32a06726c1e55a933c1e',
-      deepResearchAgent1Model: '',
-      deepResearchAgent2Model: '',
-      deepResearchFinalModel: '',
-      deepResearchModel4: '',
       ollamaModel: 'gemma4:31b',
       openRouterModel: 'qwen/qwen3.8-27b:free',
       imageModel: 'flux',
@@ -331,17 +327,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     settingSerperApiKey: $('#settingSerperApiKey'),
     toggleShowSerperKeyBtn: $('#toggleShowSerperKeyBtn'),
     testSerperBtn: $('#testSerperBtn'),
-    availableModelsDatalist: $('#availableModelsDatalist'),
-    settingDeepResearchAgent1Model: $('#settingDeepResearchAgent1Model'),
-    selectDeepResearchAgent1Model: $('#selectDeepResearchAgent1Model'),
-    settingDeepResearchAgent2Model: $('#settingDeepResearchAgent2Model'),
-    selectDeepResearchAgent2Model: $('#selectDeepResearchAgent2Model'),
-    settingDeepResearchFinalModel: $('#settingDeepResearchFinalModel'),
-    settingDeepResearchModel4: $('#settingDeepResearchModel4'),
-    selectDeepResearchFinalModel: $('#selectDeepResearchFinalModel'),
-    inputNewPresetName: $('#inputNewPresetName'),
-    saveCustomPresetBtn: $('#saveCustomPresetBtn'),
-    customPresetsList: $('#customPresetsList'),
     settingImageModel: $('#settingImageModel'),
     settingAutoPolicy: $('#settingAutoPolicy'),
     paramTemperature: $('#paramTemperature'),
@@ -917,7 +902,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (!STATE.settings.serperApiKey) {
         STATE.settings.serperApiKey = '075538fed9c64990e1eb32a06726c1e55a933c1e';
       }
-      loadUserCustomResearchPresets();
       const savedSound = localStorage.getItem('zoz_router_sound_v1');
       if (savedSound !== null) {
         STATE.soundEnabled = savedSound === 'true';
@@ -3293,7 +3277,6 @@ ${organicBlock}
         }
         updateModelUI();
         populateModelDropdown();
-        populateDeepResearchModelPickers();
         renderModelHubGrid();
         if (STATE.activeCatalogTab === 'ollama') {
           renderLiveModelCatalog();
@@ -3306,7 +3289,6 @@ ${organicBlock}
         els.ollamaStatusVal.innerText = 'Offline (Cek Ollama)';
         els.ollamaIndicator.className = 'status-indicator error';
         populateModelDropdown();
-        populateDeepResearchModelPickers();
         renderModelHubGrid();
         if (STATE.activeCatalogTab === 'ollama') {
           renderLiveModelCatalog();
@@ -3615,7 +3597,6 @@ ${organicBlock}
             els.badgeOpenRouterCount.innerText = mapped.length;
           }
           populateModelDropdown();
-          populateDeepResearchModelPickers();
           renderModelHubGrid();
           if (STATE.activeCatalogTab === 'openrouter') {
             renderLiveModelCatalog();
@@ -6399,12 +6380,11 @@ ${organicBlock}
   async function runDeepResearchStreaming(session, promptText, image = null, modelName = null, engine = 'ollama') {
 
     const targetModel = modelName || (engine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel);
-    // Mandat Mutlak Kaisar Zozi: Arsitektur 1-Model Deep Research Super Efisien.
-    // Gunakan 1 model master tunggal untuk mencerna data Agen 1, mencerna data Agen 2, mengoreksi di Model 3, dan merangkum di Model 4.
-    // Hemat kuota kredit RPD tanpa memanggil multi-model berbeda, namun output tetap divergen karena bahan web Primer & Divergen 100% berbeda domain.
-    const masterResearchModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim())
-      ? STATE.settings.deepResearchFinalModel.trim()
-      : (targetModel || (engine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel));
+    // Mandat Mutlak Kaisar Zozi: Deep Research 100% Mengadopsi Model Percakapan Aktif Saat Itu.
+    // Seluruh konfigurasi model riset di settings telah dihapus. Pipeline Deep Research (Explorer Agen 1,
+    // Divergent Agen 2, Lead Corrector Model 3, dan Executive Summarizer Model 4) berjalan super efisien
+    // menggunakan 1 model master tunggal yang sedang aktif di percakapan pengguna.
+    const masterResearchModel = targetModel;
 
     setGeneratingState(true);
     STATE.abortController = new AbortController();
@@ -7004,7 +6984,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         AudioEngine.success();
         smartScrollChatToBottom(true);
       } else if (!STATE.abortController?.signal.aborted) {
-        const actualFinalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
+        const actualFinalModel = masterResearchModel;
         throw new Error(`Sintesis laporan Deep Research tidak menghasilkan konten teks dari model: ${actualFinalModel}`);
       }
 
@@ -7012,7 +6992,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (err.name === 'AbortError') {
         if (finalReportText && finalReportText.trim()) {
           const stoppedText = `${finalReportText.trim()}\n\n*[Riset dihentikan oleh pengguna]*`;
-          const actualFinalModel = (STATE.settings.deepResearchFinalModel && STATE.settings.deepResearchFinalModel.trim()) ? STATE.settings.deepResearchFinalModel.trim() : targetModel;
+          const actualFinalModel = masterResearchModel;
           const nowIso = new Date().toISOString();
           bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(stoppedText, actualFinalModel, allSources, nowIso, chatSummary);
           enhanceCodeBlocks(bubbleText);
@@ -7042,7 +7022,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
               <i class="fa-solid fa-rotate-right"></i> Coba Riset Ulang
             </button>
             <button class="btn btn-sm btn-outline open-settings-btn" style="border-color:var(--neon-amber); color:var(--neon-amber); font-size:0.75rem;">
-              <i class="fa-solid fa-gear"></i> Buka Pengaturan Model Riset
+              <i class="fa-solid fa-gear"></i> Buka Pengaturan
             </button>
           </div>
         `;
@@ -7055,8 +7035,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         bubbleText.querySelector('.open-settings-btn')?.addEventListener('click', () => {
           syncSettingsModalFields();
           openModal('settingsModal');
-          const tabBtn = document.querySelector('.settings-tab-btn[data-tab="deepResearchTab"]');
-          if (tabBtn) tabBtn.click();
         });
 
         AudioEngine.error();
@@ -8610,123 +8588,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     }
   };
 
-  // ==================== USER CUSTOM PRESETS & MODEL PICKER HELPERS ====================
-  let userCustomResearchPresets = [];
-
-  function loadUserCustomResearchPresets() {
-    try {
-      const raw = localStorage.getItem('zoz_custom_deep_research_presets_v1');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) userCustomResearchPresets = parsed;
-      }
-    } catch (e) {
-      userCustomResearchPresets = [];
-    }
-  }
-
-  function saveUserCustomResearchPresets() {
-    try {
-      localStorage.setItem('zoz_custom_deep_research_presets_v1', JSON.stringify(userCustomResearchPresets));
-    } catch (e) {}
-  }
-
-  function populateDeepResearchModelPickers() {
-    const datalist = els.availableModelsDatalist;
-
-    const modelSet = new Set();
-    const modelsList = [];
-
-    (STATE.ollamaModels || []).forEach(m => {
-      const id = m.name || m.model || m.id;
-      if (id && !modelSet.has(id)) {
-        modelSet.add(id);
-        modelsList.push({ id, name: id, source: 'Ollama' });
-      }
-    });
-
-    (STATE.openRouterModels || []).forEach(m => {
-      const id = m.id || m.name;
-      if (id && !modelSet.has(id)) {
-        modelSet.add(id);
-        modelsList.push({ id, name: m.name || id, source: 'OpenRouter' });
-      }
-    });
-
-    // Populate Datalist for autocomplete
-    if (datalist) {
-      datalist.innerHTML = modelsList.map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)} [${m.source}]</option>`).join('');
-    }
-  }
-
-  function renderUserCustomPresetsUI() {
-    const container = els.customPresetsList;
-    if (!container) return;
-    container.innerHTML = '';
-
-    if (!userCustomResearchPresets || userCustomResearchPresets.length === 0) {
-      container.innerHTML = '<span class="no-presets-hint" style="font-size:0.75rem; color:#718096; font-style:italic;">Belum ada preset kustom yang dibuat.</span>';
-      return;
-    }
-
-    userCustomResearchPresets.forEach((p, idx) => {
-      const pill = document.createElement('div');
-      pill.className = 'custom-preset-pill';
-      pill.style.cssText = 'display:inline-flex; align-items:center; gap:6px; background:rgba(0,240,255,0.08); border:1px solid rgba(0,240,255,0.25); border-radius:6px; padding:4px 9px; font-size:0.78rem; color:#E2E8F0; cursor:pointer; transition:all 0.2s ease;';
-      const m3Val = p.model3 || p.final || 'Default';
-      const m4Val = p.model4 || 'Default';
-      pill.title = `Klik untuk mengaktifkan preset:\nAgen 1: ${p.agent1 || 'Default'}\nAgen 2: ${p.agent2 || 'Default'}\nModel 3: ${m3Val}\nModel 4: ${m4Val}`;
-      
-      pill.innerHTML = `
-        <i class="fa-solid fa-layer-group" style="color:#00F0FF; font-size:0.72rem;"></i>
-        <span style="font-weight:600;">${escapeHtml(p.name)}</span>
-        <button class="btn-del-preset" data-idx="${idx}" style="background:none; border:none; color:#FF0055; cursor:pointer; padding:0 2px; margin-left:4px; font-size:0.85rem;" title="Hapus preset ini">&times;</button>
-      `;
-
-      // Klik pill untuk menerapkan preset ke seluruh 4 input model & simpan instan
-      pill.addEventListener('click', (e) => {
-        if (e.target.closest('.btn-del-preset')) return;
-        if (els.settingDeepResearchAgent1Model) els.settingDeepResearchAgent1Model.value = p.agent1 || '';
-        if (els.settingDeepResearchAgent2Model) els.settingDeepResearchAgent2Model.value = p.agent2 || '';
-        if (els.settingDeepResearchFinalModel) els.settingDeepResearchFinalModel.value = p.model3 || p.final || '';
-        if (els.settingDeepResearchModel4) els.settingDeepResearchModel4.value = p.model4 || '';
-        
-        // Auto-save langsung ke STATE.settings & storage disk
-        STATE.settings.deepResearchAgent1Model = p.agent1 || '';
-        STATE.settings.deepResearchAgent2Model = p.agent2 || '';
-        STATE.settings.deepResearchFinalModel = p.model3 || p.final || '';
-        STATE.settings.deepResearchModel4 = p.model4 || '';
-        savePersistedState();
-
-        // Update visual active state pada pill
-        container.querySelectorAll('.custom-preset-pill').forEach(el => {
-          el.style.borderColor = 'rgba(0, 240, 255, 0.25)';
-          el.style.background = 'rgba(0, 240, 255, 0.08)';
-          el.classList.remove('active');
-        });
-        pill.style.borderColor = 'var(--neon-teal)';
-        pill.style.background = 'rgba(0, 255, 194, 0.18)';
-        pill.classList.add('active');
-
-        showToast(`✅ Preset Kustom "${p.name}" diterapkan & disimpan!`);
-        AudioEngine.click();
-      });
-
-      // Tombol hapus preset
-      pill.querySelector('.btn-del-preset').addEventListener('click', (e) => {
-        e.stopPropagation();
-        const removedName = p.name;
-        userCustomResearchPresets.splice(idx, 1);
-        saveUserCustomResearchPresets();
-        renderUserCustomPresetsUI();
-        showToast(`🗑️ Preset "${removedName}" dihapus.`);
-        AudioEngine.click();
-      });
-
-      container.appendChild(pill);
-    });
-  }
-
   // ==================== LIVE REAL-TIME MODEL CATALOG ====================
   function openLiveModelCatalog(targetInputId = null, targetLabelName = 'Model Obrolan') {
     STATE.catalogTargetInputId = targetInputId;
@@ -9007,18 +8868,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (targetInput) {
         targetInput.value = modelId;
       }
-      if (targetId === 'settingDeepResearchAgent1Model') {
-        STATE.settings.deepResearchAgent1Model = modelId;
-        if (els.selectDeepResearchAgent1Model) els.selectDeepResearchAgent1Model.value = modelId;
-      } else if (targetId === 'settingDeepResearchAgent2Model') {
-        STATE.settings.deepResearchAgent2Model = modelId;
-        if (els.selectDeepResearchAgent2Model) els.selectDeepResearchAgent2Model.value = modelId;
-      } else if (targetId === 'settingDeepResearchFinalModel') {
-        STATE.settings.deepResearchFinalModel = modelId;
-        if (els.selectDeepResearchFinalModel) els.selectDeepResearchFinalModel.value = modelId;
-      } else if (targetId === 'settingDeepResearchModel4') {
-        STATE.settings.deepResearchModel4 = modelId;
-      }
       
       if (catModal) catModal.dataset.targetInputId = '';
       STATE.catalogTargetInputId = null;
@@ -9028,26 +8877,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       // Tutup katalog langsung tanpa memicu event popstate liar
       if (catModal) catModal.classList.remove('show');
 
-      // Update state history agar kembali merujuk ke settingsModal tanpa navigasi mundur browser
       try {
         if (window.history && history.replaceState) {
           history.replaceState({ modal: 'settingsModal' }, '');
         }
       } catch (e) {}
-
-      // Pastikan modal Pengaturan TETAP AKTIF DAN TERLIHAT di tab Deep Research!
-      const settingsModal = document.getElementById('settingsModal');
-      if (settingsModal) {
-        settingsModal.classList.add('show');
-        const tabBtn = settingsModal.querySelector('[data-target="tabDeepResearch"]');
-        const tabPane = settingsModal.querySelector('#tabDeepResearch');
-        if (tabBtn && tabPane) {
-          settingsModal.querySelectorAll('.settings-tab-btn').forEach(b => b.classList.remove('active'));
-          settingsModal.querySelectorAll('.settings-tab-pane').forEach(p => p.classList.remove('active'));
-          tabBtn.classList.add('active');
-          tabPane.classList.add('active');
-        }
-      }
 
       AudioEngine.click();
       return;
@@ -9310,7 +9144,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
               <span class="catalog-badge" style="background:rgba(255,0,127,0.1); color:#FF007F; border-color:rgba(255,0,127,0.3);">
-                Model: ${escapeHtml(syn.model || STATE.settings.deepResearchFinalModel || 'Lead Corrector')}
+                Model: ${escapeHtml(syn.model || STATE.activeModel || (STATE.currentEngine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel) || 'Lead Corrector')}
               </span>
               <span class="catalog-badge" style="background:rgba(0,255,194,0.1); color:var(--neon-teal);">
                 ${syn.status === 'selesai' ? '<i class="fa-solid fa-check"></i> Selesai' : (synText ? '<i class="fa-solid fa-spinner fa-spin"></i> Mengoreksi...' : 'Menunggu')}
@@ -9343,7 +9177,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
               <span class="catalog-badge" style="background:rgba(0,240,255,0.08); color:var(--neon-cyan); border-color:rgba(0,240,255,0.3);">
-                Model: ${escapeHtml(m4.model || STATE.settings.deepResearchModel4 || 'Executive Summarizer')}
+                Model: ${escapeHtml(m4.model || STATE.activeModel || (STATE.currentEngine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel) || 'Executive Summarizer')}
               </span>
               <span class="catalog-badge" style="background:rgba(0,255,194,0.1); color:var(--neon-teal);">
                 ${m4.status === 'selesai' ? '<i class="fa-solid fa-check"></i> Selesai' : (m4Text ? '<i class="fa-solid fa-spinner fa-spin"></i> Merumuskan...' : 'Menunggu')}
@@ -9373,10 +9207,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (els.settingOllamaApiKey) els.settingOllamaApiKey.value = STATE.settings.ollamaApiKey || '';
     if (els.settingOpenRouterKey) els.settingOpenRouterKey.value = STATE.settings.openRouterKey || '';
     if (els.settingSerperApiKey) els.settingSerperApiKey.value = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
-    if (els.settingDeepResearchAgent1Model) els.settingDeepResearchAgent1Model.value = STATE.settings.deepResearchAgent1Model || '';
-    if (els.settingDeepResearchAgent2Model) els.settingDeepResearchAgent2Model.value = STATE.settings.deepResearchAgent2Model || '';
-    if (els.settingDeepResearchFinalModel) els.settingDeepResearchFinalModel.value = STATE.settings.deepResearchFinalModel || '';
-    if (els.settingDeepResearchModel4) els.settingDeepResearchModel4.value = STATE.settings.deepResearchModel4 || '';
     if (els.settingImageModel) els.settingImageModel.value = STATE.settings.imageModel || 'flux';
     if (els.paramTemperature) els.paramTemperature.value = STATE.settings.temperature ?? 0.7;
     if (els.valTemperature) els.valTemperature.innerText = STATE.settings.temperature ?? 0.7;
@@ -9385,8 +9215,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (els.settingSystemPrompt) els.settingSystemPrompt.value = STATE.settings.systemPrompt || '';
     if (els.settingAutoPolicy) els.settingAutoPolicy.value = STATE.settings.autoPolicy || 'local_first';
     
-    populateDeepResearchModelPickers();
-    renderUserCustomPresetsUI();
     updatePresetPillUI();
   }
 
@@ -9462,13 +9290,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (catalogBtn) {
         e.preventDefault();
         e.stopPropagation();
-        const targetInputId = catalogBtn.dataset.targetInput;
-        let labelName = 'Model';
-        if (targetInputId === 'settingDeepResearchAgent1Model') labelName = 'Agen 1 (Pakar Web Google)';
-        else if (targetInputId === 'settingDeepResearchAgent2Model') labelName = 'Agen 2 (Pakar Data Spesifik)';
-        else if (targetInputId === 'settingDeepResearchFinalModel') labelName = 'Model 3 (Pengoreksi & Penyempurna Laporan)';
-        else if (targetInputId === 'settingDeepResearchModel4') labelName = 'Model 4 (Perangkum Chat Eksekutif)';
-        openLiveModelCatalog(targetInputId, labelName);
+        const targetInputId = catalogBtn.dataset.targetInput || null;
+        openLiveModelCatalog(targetInputId, 'Model Obrolan Utama');
         return;
       }
 
@@ -10112,58 +9935,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
     });
 
-    // Event Listeners: Quick Select Model Dropdowns -> Sync to Input
-    els.selectDeepResearchAgent1Model?.addEventListener('change', (e) => {
-      if (e.target.value && els.settingDeepResearchAgent1Model) {
-        els.settingDeepResearchAgent1Model.value = e.target.value;
-        AudioEngine.click();
-      }
-    });
-
-    els.selectDeepResearchAgent2Model?.addEventListener('change', (e) => {
-      if (e.target.value && els.settingDeepResearchAgent2Model) {
-        els.settingDeepResearchAgent2Model.value = e.target.value;
-        AudioEngine.click();
-      }
-    });
-
-    els.selectDeepResearchFinalModel?.addEventListener('change', (e) => {
-      if (e.target.value && els.settingDeepResearchFinalModel) {
-        els.settingDeepResearchFinalModel.value = e.target.value;
-        AudioEngine.click();
-      }
-    });
-
-    // Event Listener: Simpan Custom Preset Buatan Pengguna
-    els.saveCustomPresetBtn?.addEventListener('click', () => {
-      const name = els.inputNewPresetName ? els.inputNewPresetName.value.trim() : '';
-      if (!name) {
-        showToast('Ketik nama preset kustom terlebih dahulu.', 'error');
-        return;
-      }
-
-      const p1 = els.settingDeepResearchAgent1Model ? els.settingDeepResearchAgent1Model.value.trim() : '';
-      const p2 = els.settingDeepResearchAgent2Model ? els.settingDeepResearchAgent2Model.value.trim() : '';
-      const pF = els.settingDeepResearchFinalModel ? els.settingDeepResearchFinalModel.value.trim() : '';
-      const p4 = els.settingDeepResearchModel4 ? els.settingDeepResearchModel4.value.trim() : '';
-
-      userCustomResearchPresets.push({
-        id: 'preset_' + Date.now(),
-        name: name,
-        agent1: p1,
-        agent2: p2,
-        final: pF,
-        model3: pF,
-        model4: p4
-      });
-
-      saveUserCustomResearchPresets();
-      renderUserCustomPresetsUI();
-      if (els.inputNewPresetName) els.inputNewPresetName.value = '';
-      showToast(`✨ Preset Kustom "${name}" berhasil disimpan!`);
-      AudioEngine.click();
-    });
-
     els.testOllamaBtn.addEventListener('click', async () => {
       const ep = normalizeEndpoint(els.settingOllamaEndpoint.value.trim() || 'https://ollama.com');
       const key = els.settingOllamaApiKey ? els.settingOllamaApiKey.value.trim() : '';
@@ -10306,22 +10077,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
       if (els.settingSerperApiKey) {
         STATE.settings.serperApiKey = els.settingSerperApiKey.value.trim();
-      }
-
-      if (els.settingDeepResearchAgent1Model) {
-        STATE.settings.deepResearchAgent1Model = els.settingDeepResearchAgent1Model.value.trim();
-      }
-
-      if (els.settingDeepResearchAgent2Model) {
-        STATE.settings.deepResearchAgent2Model = els.settingDeepResearchAgent2Model.value.trim();
-      }
-
-      if (els.settingDeepResearchFinalModel) {
-        STATE.settings.deepResearchFinalModel = els.settingDeepResearchFinalModel.value.trim();
-      }
-
-      if (els.settingDeepResearchModel4) {
-        STATE.settings.deepResearchModel4 = els.settingDeepResearchModel4.value.trim();
       }
 
       if (els.settingImageModel) {
