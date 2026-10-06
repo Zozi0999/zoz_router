@@ -173,6 +173,8 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
           const contentType = res.headers['content-type'] || 'image/jpeg';
           resolve({ buffer, contentType });
         });
+
+        res.on('error', err => reject(err));
       });
 
       req.on('timeout', () => { req.destroy(); reject(new Error('Waktu pengunduhan gambar habis (timeout)')); });
@@ -329,6 +331,10 @@ function performWebSearch(query, apiKey = null, num = 15) {
         } catch (e) {
           resolve({ query: cleanQuery, count: 0, results: [], error: e.message });
         }
+      });
+
+      res.on('error', (err) => {
+        resolve({ query: cleanQuery, count: 0, results: [], error: err.message });
       });
     });
 
@@ -490,6 +496,15 @@ async function fetchYouTubeInfo(rawUrl) {
             videoId: videoId
           });
         }
+      });
+
+      res.on('error', (err) => {
+        resolve({
+          success: false,
+          error: 'Network error YouTube oEmbed stream: ' + err.message,
+          url: canonicalUrl,
+          videoId: videoId
+        });
       });
     });
 
@@ -762,6 +777,7 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
               reject(new Error('Gagal memproses respon OpenRouter: ' + e.message));
             }
           });
+          res.on('error', err => reject(err));
         });
         req.on('timeout', () => { req.destroy(); reject(new Error('OpenRouter request timed out')); });
         req.on('error', err => reject(err));
@@ -850,6 +866,7 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
           reject(new Error('Gagal memproses respon Ollama: ' + e.message));
         }
       });
+      res.on('error', err => reject(err));
     });
     req.on('timeout', () => { req.destroy(); reject(new Error('Ollama request timed out')); });
     req.on('error', err => reject(err));
@@ -937,6 +954,8 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
             resolve('');
           }
         });
+
+        res.on('error', () => resolve(''));
       });
 
       req.on('timeout', () => { req.destroy(); resolve(''); });
@@ -2202,6 +2221,8 @@ const server = http.createServer(async (req, res) => {
                   reject(e);
                 }
               });
+
+              response.on('error', err => reject(err));
             });
             request.on('timeout', () => { request.destroy(); reject(new Error('OpenRouter image timed out')); });
             request.on('error', err => reject(err));
@@ -2420,6 +2441,9 @@ const server = http.createServer(async (req, res) => {
           return sendJSON(res, 502, { error: 'Failed to parse Ollama usage response' });
         }
       });
+      proxyRes.on('error', (err) => {
+        if (!res.headersSent) sendJSON(res, 502, { error: 'Failed to stream Ollama usage: ' + err.message });
+      });
     });
 
     proxyReq.on('error', (err) => {
@@ -2618,6 +2642,9 @@ const server = http.createServer(async (req, res) => {
           return sendJSON(res, 502, { error: 'Failed to parse OpenRouter response' });
         }
       });
+      proxyRes.on('error', (err) => {
+        if (!res.headersSent) sendJSON(res, 502, { error: 'OpenRouter models stream error: ' + err.message });
+      });
     });
 
     proxyReq.on('error', (err) => {
@@ -2656,6 +2683,9 @@ const server = http.createServer(async (req, res) => {
         } catch (e) {
           return sendJSON(res, 502, { error: 'Failed to parse auth response' });
         }
+      });
+      proxyRes.on('error', (err) => {
+        if (!res.headersSent) sendJSON(res, 502, { error: 'Auth check stream error: ' + err.message });
       });
     });
 
@@ -2696,6 +2726,9 @@ const server = http.createServer(async (req, res) => {
         } catch (e) {
           return sendJSON(res, 502, { error: 'Failed to parse credits response' });
         }
+      });
+      proxyRes.on('error', (err) => {
+        if (!res.headersSent) sendJSON(res, 502, { error: 'Credits check stream error: ' + err.message });
       });
     });
 

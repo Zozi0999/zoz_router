@@ -1681,6 +1681,9 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
   // ==================== SESSIONS & CHAT MANAGEMENT ====================
   function createNewSession(initialTitle = 'Obrolan Baru', targetMode = STATE.mode) {
+    if (STATE.isGenerating) {
+      stopGeneration();
+    }
     STATE.currentSessionId = null;
     sessionStorage.removeItem('zoz_active_session_id');
     STATE.isImageGenMode = false;
@@ -2442,7 +2445,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         // Save & Resend
         const doSaveAndResend = () => {
           const newText = textarea.value.trim();
-          if (!newText && !image) {
+          if (!newText && (!imgList || imgList.length === 0) && (!docs || docs.length === 0)) {
             showToast('Prompt tidak boleh kosong.', 'error');
             return;
           }
@@ -2467,7 +2470,14 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
           // Set prompt input and send
           els.promptInput.value = newText;
-          if (image) STATE.attachedImage = image;
+          if (imgList && imgList.length > 0) {
+            STATE.attachedImages = [...imgList];
+            renderAttachmentPreviews();
+          }
+          if (docs && Array.isArray(docs) && docs.length > 0) {
+            STATE.attachedDocs = [...docs];
+            renderAttachmentPreviews();
+          }
           handleSendPrompt();
         };
 
