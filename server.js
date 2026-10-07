@@ -946,14 +946,13 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
         }
 
         let rawHtml = '';
-        res.on('data', chunk => {
-          rawHtml += chunk;
-          if (rawHtml.length > 300000) req.destroy();
-        });
+        let resolved = false;
 
-        res.on('end', () => {
+        function finishExtract(html) {
+          if (resolved) return;
+          resolved = true;
           try {
-            let clean = rawHtml
+            let clean = html
               .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
               .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
               .replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, ' ')
@@ -979,13 +978,32 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
           } catch (e) {
             resolve('');
           }
+        }
+
+        res.on('data', chunk => {
+          rawHtml += chunk;
+          if (rawHtml.length >= 300000 && !resolved) {
+            req.destroy();
+            finishExtract(rawHtml);
+          }
         });
 
-        res.on('error', () => resolve(''));
+        res.on('end', () => finishExtract(rawHtml));
+        res.on('error', () => {
+          if (rawHtml.length > 0) finishExtract(rawHtml);
+          else if (!resolved) { resolved = true; resolve(''); }
+        });
       });
 
-      req.on('timeout', () => { req.destroy(); resolve(''); });
-      req.on('error', () => resolve(''));
+      req.on('timeout', () => {
+        req.destroy();
+        if (rawHtml.length > 0) finishExtract(rawHtml);
+        else if (!resolved) { resolved = true; resolve(''); }
+      });
+      req.on('error', () => {
+        if (rawHtml.length > 0) finishExtract(rawHtml);
+        else if (!resolved) { resolved = true; resolve(''); }
+      });
       req.end();
     } catch (err) {
       resolve('');
@@ -3039,7 +3057,11 @@ const server = http.createServer(async (req, res) => {
         cloud_ready: true,
         note: 'Loaded from official Ollama Cloud catalog'
       });
-    })();
+    })().catch(err => {
+      if (!res.headersSent) {
+        sendJSON(res, 500, { error: 'Gagal memuat daftar model Ollama: ' + err.message });
+      }
+    });
     return;
   }
 
@@ -3578,6 +3600,13 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 500, { error: err.message });
     }
     return;
+  }
+
+  // --- GUARD UNMATCHED API ROUTES (Prevent SPA HTML fallback for missing API endpoints) ---
+  if (pathname.startsWith('/api/')) {
+    return sendJSON(res, 404, {
+      error: `Endpoint API '${pathname}' [${method}] tidak ditemukan atau metode tidak didukung.`
+    });
   }
 
   // --- STATIC FILE SERVING ---

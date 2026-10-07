@@ -1607,6 +1607,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         else if (session.messages && session.messages.length > 0 && session.messages[session.messages.length - 1].role === 'assistant') {
           session.messages[session.messages.length - 1].content = merged;
         }
+        assistantRow.dataset.fullContent = merged;
         session.updatedAt = new Date().toISOString();
         savePersistedState();
         renderChatHistory(els.searchHistoryInput?.value || '');
@@ -6348,7 +6349,6 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     }
     if (STATE.abortController) {
       STATE.abortController.abort();
-      STATE.abortController = null;
     }
     setGeneratingState(false);
   }
@@ -7791,7 +7791,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     const masterResearchModel = targetModel;
 
     setGeneratingState(true);
-    STATE.abortController = new AbortController();
+    const currentAbortController = new AbortController();
+    STATE.abortController = currentAbortController;
 
     const startTime = performance.now();
     const assistantRow = appendMessageElement('assistant', '', null, `${masterResearchModel} (Deep Research)`, null, -1, null, null, true);
@@ -7885,7 +7886,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
               model4: masterResearchModel,
               maxIterations: 3
             }),
-            signal: STATE.abortController.signal
+            signal: currentAbortController.signal
           });
 
           if (res.ok) {
@@ -7895,9 +7896,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             if (taskId) {
               STATE.currentDeepResearchTaskId = taskId;
               // 2. Lakukan Polling berkala ke /api/status-riset/:id
-              while (STATE.isGenerating) {
+              while (STATE.isGenerating && !currentAbortController.signal.aborted) {
                 await new Promise(r => setTimeout(r, 1000));
-                if (STATE.abortController?.signal.aborted) {
+                if (currentAbortController.signal.aborted || !STATE.isGenerating) {
                   if (!IS_GITHUB_PAGES) {
                     fetch('/api/batal-riset/' + taskId, { method: 'POST' }).catch(() => {});
                   }
@@ -7905,7 +7906,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
                 }
 
                 const checkRes = await fetch(`/api/status-riset/${taskId}`, {
-                  signal: STATE.abortController.signal
+                  signal: currentAbortController.signal
                 });
                 if (!checkRes.ok) break;
 
@@ -7965,18 +7966,20 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             }
           }
         } catch (backendErr) {
-          if (backendErr.name === 'AbortError') {
+          if (backendErr.name === 'AbortError' || currentAbortController.signal.aborted || !STATE.isGenerating) {
             if (STATE.currentDeepResearchTaskId && !IS_GITHUB_PAGES) {
               fetch('/api/batal-riset/' + STATE.currentDeepResearchTaskId, { method: 'POST' }).catch(() => {});
             }
-            throw backendErr;
+            const abortErr = new Error('Deep Research dihentikan oleh pengguna.');
+            abortErr.name = 'AbortError';
+            throw abortErr;
           }
           console.warn('Backend deep research fallback ke client-side execution:', backendErr);
         }
       }
 
       // 3. Fallback Client-Side Autonomous Deep Research Engine (Multi-Agent Serper Divergent)
-      if (!isBackendSuccess && !STATE.abortController?.signal.aborted) {
+      if (!isBackendSuccess && !currentAbortController.signal.aborted && STATE.isGenerating) {
         stepItems.push({ text: '[Langkah 1/3] Menelusuri Google via Multi-Agen (Dual-Agent Serper Divergen)...', status: 'active' });
         renderResearchHUD(25, '[Langkah 1/3] Menelusuri Google via Multi-Agen (Dual-Agent Serper Divergen)...');
 
@@ -8284,7 +8287,7 @@ ${personaPrompt ? `\n\nInstruksi Persona Tambahan:\n${personaPrompt}` : ''}`;
           }
         });
 
-        if (STATE.abortController?.signal.aborted) {
+        if (currentAbortController.signal.aborted || !STATE.isGenerating) {
           throw new DOMException('Riset dihentikan oleh pengguna.', 'AbortError');
         }
 
@@ -8391,13 +8394,13 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         }
         AudioEngine.success();
         smartScrollChatToBottom(true);
-      } else if (!STATE.abortController?.signal.aborted) {
+      } else if (!currentAbortController.signal.aborted && STATE.isGenerating) {
         const actualFinalModel = masterResearchModel;
         throw new Error(`Sintesis laporan Deep Research tidak menghasilkan konten teks dari model: ${actualFinalModel}`);
       }
 
     } catch (err) {
-      if (err.name === 'AbortError') {
+      if (err.name === 'AbortError' || currentAbortController.signal.aborted || !STATE.isGenerating) {
         if (finalReportText && finalReportText.trim() && STATE.sessions.some(s => s.id === session.id)) {
           const stoppedText = `${finalReportText.trim()}\n\n*[Riset dihentikan oleh pengguna]*`;
           const actualFinalModel = masterResearchModel;
