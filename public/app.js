@@ -1159,17 +1159,22 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   function renderMarkdown(rawText) {
     if (!rawText) return '';
     if (window.marked) {
-      marked.setOptions({
-        breaks: true,
-        gfm: true
-      });
-      const parsed = marked.parse(rawText);
-      const sanitized = sanitizeHtmlSafe(parsed);
-      // Pastikan seluruh tautan eksternal (http/https) membuka di tab baru agar tidak memutus sesi obrolan
-      return sanitized.replace(/<a\b([^>]*?href=["']https?:\/\/[^"']+["'][^>]*)>/gi, (match, attrs) => {
-        const cleanAttrs = attrs.replace(/\s*(?:target|rel)=["'][^"']*["']/gi, '');
-        return `<a${cleanAttrs} target="_blank" rel="noopener noreferrer">`;
-      });
+      try {
+        marked.setOptions({
+          breaks: true,
+          gfm: true
+        });
+        const parsed = marked.parse(rawText);
+        const sanitized = sanitizeHtmlSafe(parsed);
+        // Pastikan seluruh tautan eksternal (http/https) membuka di tab baru agar tidak memutus sesi obrolan
+        return sanitized.replace(/<a\b([^>]*?href=["']https?:\/\/[^"']+["'][^>]*)>/gi, (match, attrs) => {
+          const cleanAttrs = attrs.replace(/\s*(?:target|rel)=["'][^"']*["']/gi, '');
+          return `<a${cleanAttrs} target="_blank" rel="noopener noreferrer">`;
+        });
+      } catch (err) {
+        console.warn('[renderMarkdown] Error parsing markdown, fallback to escaped text:', err);
+        return escapeHtml(rawText).replace(/\n/g, '<br>');
+      }
     }
     return escapeHtml(rawText).replace(/\n/g, '<br>');
   }
@@ -1695,7 +1700,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         temperature: parseFloat(STATE.settings.temperature),
         apiKey: isOpenRouterDirect ? undefined : STATE.settings.openRouterKey
       }),
-      signal: STATE.abortController.signal
+      signal: STATE.abortController?.signal
     });
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1763,7 +1768,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         endpoint: ep,
         ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {})
       }),
-      signal: STATE.abortController.signal
+      signal: STATE.abortController?.signal
     });
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -4520,7 +4525,7 @@ ${organicBlock}
         if (ytIds && ytIds.length > 0) {
           try {
             const ytInfo = await fetchYouTubeInfoClient(ytIds[0]);
-            if (ytInfo && ytInfo.title) {
+            if (ytInfo && ytInfo.success && ytInfo.title) {
               return {
                 text: `[INFORMASI TERVERIFIKASI VIDEO YOUTUBE]:\n- Judul: "${ytInfo.title}"\n- Channel / Pembuat: "${ytInfo.channel}" (${ytInfo.channel_url || 'N/A'})\n- URL: ${ytInfo.url}\n- Thumbnail: ${ytInfo.thumbnail}\n(Diambil secara real-time via YouTube oEmbed)`,
                 sources: [{ title: ytInfo.title, url: ytInfo.url, domain: 'youtube.com', snippet: `Video YouTube oleh ${ytInfo.channel}: ${ytInfo.title}` }]
@@ -5220,7 +5225,7 @@ ${organicBlock}
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody),
-        signal: STATE.abortController.signal
+        signal: STATE.abortController?.signal
       });
 
       // Auto-retry fallback: jika model lokal Ollama menolak parameter tools (HTTP 400/422/500 "model does not support tools")
@@ -5231,7 +5236,7 @@ ${organicBlock}
           method: 'POST',
           headers,
           body: JSON.stringify(requestBody),
-          signal: STATE.abortController.signal
+          signal: STATE.abortController?.signal
         });
       }
 
@@ -5427,7 +5432,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             method: 'POST',
             headers,
             body: JSON.stringify(digestionBody),
-            signal: STATE.abortController.signal
+            signal: STATE.abortController?.signal
           });
 
           if (!digestionRes.ok) {
@@ -5488,7 +5493,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         fullText = cleanFinalText;
       }
 
-      if (!fullText.trim() && !preambleHtml && !STATE.abortController?.signal.aborted) {
+      if (!fullText.trim() && !preambleHtml && !STATE.abortController?.signal?.aborted) {
         throw new Error('Model Ollama menyelesaikan koneksi tanpa menghasilkan respon teks.');
       }
 
@@ -5786,7 +5791,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             method: 'POST',
             headers,
             body: JSON.stringify(requestBody),
-            signal: STATE.abortController.signal
+            signal: STATE.abortController?.signal
           });
 
           if (res.ok) {
@@ -6066,7 +6071,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             method: 'POST',
             headers,
             body: JSON.stringify(digestionRequestBody),
-            signal: STATE.abortController.signal
+            signal: STATE.abortController?.signal
           });
 
           if (!digestionRes.ok) {
@@ -6150,7 +6155,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         fullText = cleanFinalText;
       }
 
-      if (!fullText.trim() && !preambleHtml && collectedImages.length === 0 && !STATE.abortController?.signal.aborted) {
+      if (!fullText.trim() && !preambleHtml && collectedImages.length === 0 && !STATE.abortController?.signal?.aborted) {
         throw new Error('Model OpenRouter menyelesaikan koneksi tanpa menghasilkan respon teks.');
       }
 
@@ -8694,7 +8699,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
               height: 1024,
               openRouterKey: STATE.settings.openRouterKey || ''
             }),
-            signal: STATE.abortController.signal
+            signal: STATE.abortController?.signal
           });
 
           if (res.ok) {
@@ -8744,12 +8749,13 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           clearTimeout(timeout);
           reject(new Error('Gagal memuat visual gambar yang digenerasi.'));
         };
-        if (STATE.abortController?.signal) {
-          if (STATE.abortController.signal.aborted) {
+        const abortSig = STATE.abortController?.signal;
+        if (abortSig) {
+          if (abortSig.aborted) {
             clearTimeout(timeout);
             return reject(new DOMException('Aborted', 'AbortError'));
           }
-          STATE.abortController.signal.addEventListener('abort', () => {
+          abortSig.addEventListener('abort', () => {
             clearTimeout(timeout);
             reject(new DOMException('Aborted', 'AbortError'));
           }, { once: true });
@@ -11391,7 +11397,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       } else {
         STATE.settings.activePreset = 'default';
         STATE.settings.systemPrompt = '';
-        STATE.settings.customSystemPrompt = '';
+        // Pertahankan STATE.settings.customSystemPrompt agar persona kustom tidak terhapus saat textarea dikosongkan sementara
       }
       updatePresetPillUI();
     });

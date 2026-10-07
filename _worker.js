@@ -88,7 +88,7 @@ export default {
             'X-API-KEY': serperKey,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ q: query, num: 6, gl: 'id', hl: 'id' })
+          body: JSON.stringify({ q: query, num: 6, gl: 'us', hl: 'en' })
         });
         const serperData = await serperRes.text();
         return new Response(serperData, {

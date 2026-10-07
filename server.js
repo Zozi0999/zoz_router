@@ -80,6 +80,11 @@ function parseBody(req) {
         resolve({});
       }
     });
+    req.on('close', () => {
+      if (!req.complete) {
+        reject(new Error('Request aborted by client'));
+      }
+    });
     req.on('error', err => reject(err));
   });
 }
@@ -3112,6 +3117,7 @@ const server = http.createServer(async (req, res) => {
     });
 
     proxyReq.on('error', (err) => {
+      if (res.headersSent) return;
       return sendJSON(res, 503, { error: 'Ollama usage check failed: ' + err.message });
     });
 
@@ -3335,6 +3341,7 @@ const server = http.createServer(async (req, res) => {
     });
 
     proxyReq.on('error', (err) => {
+      if (res.headersSent) return;
       return sendJSON(res, 503, { error: 'OpenRouter connection error: ' + err.message });
     });
 
@@ -3383,6 +3390,7 @@ const server = http.createServer(async (req, res) => {
     });
 
     proxyReq.on('error', (err) => {
+      if (res.headersSent) return;
       return sendJSON(res, 503, { error: 'Auth check failed: ' + err.message });
     });
 
@@ -3432,6 +3440,7 @@ const server = http.createServer(async (req, res) => {
     });
 
     proxyReq.on('error', (err) => {
+      if (res.headersSent) return;
       return sendJSON(res, 503, { error: 'Credits check failed: ' + err.message });
     });
 

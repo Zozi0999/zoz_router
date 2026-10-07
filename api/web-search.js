@@ -29,7 +29,7 @@ export default async function handler(req, res) {
         'X-API-KEY': serperKey,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ q: query, num: 6, gl: 'id', hl: 'id' })
+      body: JSON.stringify({ q: query, num: 6, gl: 'us', hl: 'en' })
     });
 
     if (!response.ok) {
