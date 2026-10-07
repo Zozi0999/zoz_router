@@ -20,7 +20,20 @@ export default {
         const body = await request.json();
         const authHeader = request.headers.get('Authorization') || (body.apiKey ? `Bearer ${body.apiKey}` : (request.headers.get('x-ollama-key') ? `Bearer ${request.headers.get('x-ollama-key')}` : ''));
         const targetEndpoint = body.endpoint || 'https://ollama.com';
-        const targetUrl = new URL('/api/chat', targetEndpoint.startsWith('http') ? targetEndpoint : `https://${targetEndpoint}`);
+        let cleanEndpoint = (targetEndpoint || 'https://ollama.com').trim();
+        if (!cleanEndpoint.startsWith('http://') && !cleanEndpoint.startsWith('https://')) {
+          cleanEndpoint = (authHeader ? 'https://' : 'http://') + cleanEndpoint;
+        }
+        const parsedBase = new URL(cleanEndpoint);
+        let curPath = parsedBase.pathname.replace(/\/+$/, '');
+        if (curPath.endsWith('/api/chat')) {
+          // already ends with /api/chat
+        } else if (curPath.endsWith('/api')) {
+          parsedBase.pathname = curPath + '/chat';
+        } else {
+          parsedBase.pathname = (curPath ? curPath : '') + '/api/chat';
+        }
+        const targetUrl = parsedBase;
 
         const headers = { 'Content-Type': 'application/json' };
         if (authHeader) headers['Authorization'] = authHeader;
@@ -51,13 +64,29 @@ export default {
     }
 
     // Proxy Ollama Models
-    if (url.pathname === '/api/ollama/models') {
+    if (url.pathname === '/api/ollama/models' && request.method === 'GET') {
       try {
         const authHeader = request.headers.get('Authorization') || (request.headers.get('x-ollama-key') ? `Bearer ${request.headers.get('x-ollama-key')}` : '');
+        const endpoint = url.searchParams.get('endpoint') || (authHeader ? 'https://ollama.com' : 'http://127.0.0.1:11434');
         const headers = {};
         if (authHeader) headers['Authorization'] = authHeader;
 
-        const res = await fetch('https://ollama.com/api/tags', { headers });
+        let cleanEndpoint = (endpoint || '').trim();
+        if (!cleanEndpoint.startsWith('http://') && !cleanEndpoint.startsWith('https://')) {
+          cleanEndpoint = (authHeader ? 'https://' : 'http://') + cleanEndpoint;
+        }
+        const parsedBase = new URL(cleanEndpoint);
+        let curPath = parsedBase.pathname.replace(/\/+$/, '');
+        if (curPath.endsWith('/api/tags')) {
+          // already ends with /api/tags
+        } else if (curPath.endsWith('/api')) {
+          parsedBase.pathname = curPath + '/tags';
+        } else {
+          parsedBase.pathname = (curPath ? curPath : '') + '/api/tags';
+        }
+        const targetUrl = parsedBase;
+
+        const res = await fetch(targetUrl.toString(), { headers });
         const data = await res.text();
         return new Response(data, {
           status: res.status,

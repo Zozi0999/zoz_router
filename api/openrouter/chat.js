@@ -13,7 +13,7 @@ module.exports = async function handler(req, res) {
     }
     body = body || {};
 
-    const apiKey = body.apiKey || (req.headers.authorization ? req.headers.authorization.replace('Bearer ', '').trim() : '');
+    const apiKey = body.apiKey || (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, '').trim() : '');
     if (!apiKey) return res.status(400).json({ error: 'Missing OpenRouter API Key' });
 
     const headers = {

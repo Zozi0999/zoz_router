@@ -14,7 +14,20 @@ module.exports = async function handler(req, res) {
     const headers = {};
     if (authHeader) headers['Authorization'] = authHeader;
 
-    const targetUrl = new URL('/api/tags', endpoint.startsWith('http') ? endpoint : `http://${endpoint}`);
+    let cleanEndpoint = (endpoint || '').trim();
+    if (!cleanEndpoint.startsWith('http://') && !cleanEndpoint.startsWith('https://')) {
+      cleanEndpoint = (authHeader ? 'https://' : 'http://') + cleanEndpoint;
+    }
+    const parsedBase = new URL(cleanEndpoint);
+    let curPath = parsedBase.pathname.replace(/\/+$/, '');
+    if (curPath.endsWith('/api/tags')) {
+      // already ends with /api/tags
+    } else if (curPath.endsWith('/api')) {
+      parsedBase.pathname = curPath + '/tags';
+    } else {
+      parsedBase.pathname = (curPath ? curPath : '') + '/api/tags';
+    }
+    const targetUrl = parsedBase;
     const response = await fetch(targetUrl.toString(), { headers });
 
     if (response.ok) {

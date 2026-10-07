@@ -1,4 +1,4 @@
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-KEY, x-serper-key');
@@ -8,11 +8,15 @@ export default async function handler(req, res) {
   }
 
   try {
-    let query = req.query.q || req.query.query || '';
-    let apiKey = req.headers['x-serper-key'] || req.headers['x-api-key'] || req.query.apiKey || '';
+    let query = req.query?.q || req.query?.query || '';
+    let apiKey = req.headers['x-serper-key'] || req.headers['x-api-key'] || req.query?.apiKey || '';
 
     if (req.method === 'POST' && req.body) {
-      const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+      let body = req.body;
+      if (typeof body === 'string') {
+        try { body = JSON.parse(body); } catch (_) {}
+      }
+      body = body || {};
       query = body.query || body.q || query;
       apiKey = body.apiKey || body.serperApiKey || apiKey;
     }

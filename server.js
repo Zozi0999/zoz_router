@@ -48,6 +48,7 @@ try {
 
 // Helper to send JSON responses
 function sendJSON(res, statusCode, data) {
+  if (res.headersSent || res.writableEnded || res.destroyed) return;
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
@@ -2940,6 +2941,9 @@ const server = http.createServer(async (req, res) => {
       }
 
       // 3. Simpan buffer gambar secara permanen ke UPLOADS_DIR perangkat
+      if (!imageBuffer || imageBuffer.length === 0) {
+        throw new Error('Buffer gambar kosong atau gagal diunduh dari engine.');
+      }
       const ext = contentType.includes('webp') ? 'webp' : (contentType.includes('jpeg') || contentType.includes('jpg') ? 'jpg' : 'png');
       const filename = `ai_gen_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
       const localFilePath = path.join(UPLOADS_DIR, filename);
@@ -3634,6 +3638,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   // --- STATIC FILE SERVING ---
+  if (method !== 'GET' && method !== 'HEAD') {
+    return sendJSON(res, 405, { error: 'Method Not Allowed' });
+  }
+
   let safePath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
   if (safePath === '/' || safePath === '\\') safePath = '/index.html';
 
@@ -3649,13 +3657,21 @@ const server = http.createServer(async (req, res) => {
     if (err || !stats.isFile()) {
       // Fallback for SPA routing to index.html if file doesn't exist
       const indexPath = path.join(PUBLIC_DIR, 'index.html');
-      fs.readFile(indexPath, (idxErr, content) => {
-        if (idxErr) {
+      fs.stat(indexPath, (idxStatErr, idxStats) => {
+        if (idxStatErr || !idxStats.isFile()) {
           res.writeHead(404, { 'Content-Type': 'text/plain' });
           return res.end('404 Not Found');
         }
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(content);
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Length': idxStats.size,
+          'Cache-Control': 'no-cache'
+        });
+        if (method === 'HEAD') return res.end();
+        fs.readFile(indexPath, (idxErr, content) => {
+          if (idxErr) return res.end();
+          res.end(content);
+        });
       });
       return;
     }
@@ -3663,15 +3679,17 @@ const server = http.createServer(async (req, res) => {
     const ext = path.extname(filePath).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
 
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Content-Length': stats.size,
+      'Cache-Control': 'no-cache'
+    });
+    if (method === 'HEAD') return res.end();
+
     fs.readFile(filePath, (readErr, content) => {
       if (readErr) {
         return sendJSON(res, 500, { error: 'File read error' });
       }
-      res.writeHead(200, {
-        'Content-Type': contentType,
-        'Content-Length': content.length,
-        'Cache-Control': 'no-cache'
-      });
       res.end(content);
     });
   });

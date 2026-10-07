@@ -32,7 +32,20 @@ module.exports = async function handler(req, res) {
       options: body.options || {}
     };
 
-    const targetUrl = new URL('/api/chat', targetEndpoint.startsWith('http') ? targetEndpoint : `https://${targetEndpoint}`);
+    let cleanEndpoint = (targetEndpoint || 'https://ollama.com').trim();
+    if (!cleanEndpoint.startsWith('http://') && !cleanEndpoint.startsWith('https://')) {
+      cleanEndpoint = (authHeader ? 'https://' : 'http://') + cleanEndpoint;
+    }
+    const parsedBase = new URL(cleanEndpoint);
+    let curPath = parsedBase.pathname.replace(/\/+$/, '');
+    if (curPath.endsWith('/api/chat')) {
+      // already ends with /api/chat
+    } else if (curPath.endsWith('/api')) {
+      parsedBase.pathname = curPath + '/chat';
+    } else {
+      parsedBase.pathname = (curPath ? curPath : '') + '/api/chat';
+    }
+    const targetUrl = parsedBase;
     const headers = { 'Content-Type': 'application/json' };
     if (authHeader) headers['Authorization'] = authHeader;
 

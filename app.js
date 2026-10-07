@@ -254,7 +254,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // Chat containers
     chatViewport: $('#chatViewport'),
     singleChatContainer: $('#singleChatContainer'),
-    mainComposerContainer: $('#mainComposerContainer'),
     welcomeHero: $('#welcomeHero'),
     messagesList: $('#messagesList'),
     
@@ -1344,7 +1343,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
 
     append(delta) {
-      this.text += delta;
+      if (delta === null || delta === undefined) return;
+      const str = String(delta);
+      if (!str) return;
+      this.text += str;
       if (this.isDone) return;
       const now = performance.now();
       // Throttle Markdown regex parsing to every 40ms to keep UI 60fps and prevent CPU lag
@@ -10819,16 +10821,16 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
     });
 
-    els.modelSearchInput.addEventListener('input', (e) => {
+    els.modelSearchInput?.addEventListener('input', (e) => {
       populateModelDropdown(e.target.value);
     });
 
-    els.useCustomModelBtn.addEventListener('click', () => {
-      const val = els.customModelInput.value.trim();
+    els.useCustomModelBtn?.addEventListener('click', () => {
+      const val = els.customModelInput ? els.customModelInput.value.trim() : '';
       if (val) {
         selectModel(val);
-        els.customModelInput.value = '';
-        els.modelDropdownMenu.classList.remove('show');
+        if (els.customModelInput) els.customModelInput.value = '';
+        els.modelDropdownMenu?.classList.remove('show');
       }
     });
 
