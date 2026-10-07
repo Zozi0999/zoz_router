@@ -736,7 +736,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     async getSessionsList() {
       if (!this.isDeviceBackendAvailable) return null;
       try {
-        const res = await fetch('/api/sessions');
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2500);
+        const res = await fetch('/api/sessions', { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();
           return data.sessions || [];
@@ -750,7 +753,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     async getSession(id) {
       if (!this.isDeviceBackendAvailable) return null;
       try {
-        const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (res.ok) {
           return await res.json();
         }
@@ -869,7 +875,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
   };
 
-  async function loadPersistedState() {
+  function loadPersistedStateSync() {
     try {
       const savedSettings = localStorage.getItem('zoz_router_settings_v1');
       if (savedSettings) {
@@ -938,30 +944,41 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         STATE.isPromptHidden = savedPromptHidden === 'true';
       }
 
-      // 1. Initialize Device-First Storage
-      await DeviceStorage.init();
-
-      // 2. Fast synchronous load from localStorage
+      // Fast synchronous load from localStorage (0ms startup)
       const savedSessions = localStorage.getItem('zoz_router_sessions_v1');
       if (savedSessions) {
         try {
           const parsed = JSON.parse(savedSessions);
-          if (Array.isArray(parsed)) STATE.sessions = parsed;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            STATE.sessions = parsed;
+          }
         } catch (e) {}
       }
+    } catch (err) {
+      console.error('Error loading persisted state sync:', err);
+    }
+  }
 
-      // 3. Sync from IndexedDB Vault
+  async function syncPersistedStorageBackground(isTabReload = false, savedActiveId = null) {
+    try {
+      // 1. Initialize Device-First Storage
+      await DeviceStorage.init();
+
+      // 2. Sync from IndexedDB Vault
       const dbSessions = await ChatDB.getAllSessions();
       if (Array.isArray(dbSessions) && dbSessions.length > 0) {
         if (dbSessions.length >= STATE.sessions.length) {
           STATE.sessions = dbSessions;
+          renderChatHistory();
+          if (STATE.currentSessionId) renderCurrentSession();
         }
       }
 
-      // 4. Sync lightweight session headers from Device Disk Storage if backend is online
+      // 3. Sync lightweight session headers from Device Disk Storage if backend is online
       if (DeviceStorage.isDeviceBackendAvailable) {
         const diskList = await DeviceStorage.getSessionsList();
         if (Array.isArray(diskList) && diskList.length > 0) {
+          let hasNewSessions = false;
           for (const diskItem of diskList) {
             const existing = STATE.sessions.find(s => s.id === diskItem.id);
             if (!existing) {
@@ -976,15 +993,39 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
                 isPinned: !!diskItem.isPinned,
                 _isLazyDisk: true
               });
+              hasNewSessions = true;
             } else if (diskItem.isPinned !== undefined && existing.isPinned === undefined) {
               existing.isPinned = !!diskItem.isPinned;
             }
           }
+          if (hasNewSessions) {
+            renderChatHistory();
+          }
+        }
+
+        // Hydrate active session if tab was refreshed with a lazy disk session
+        if (isTabReload && savedActiveId) {
+          const activeSess = STATE.sessions.find(s => s.id === savedActiveId);
+          if (activeSess && activeSess._isLazyDisk && (!activeSess.messages || activeSess.messages.length === 0)) {
+            try {
+              const full = await DeviceStorage.getSession(savedActiveId);
+              if (full && Array.isArray(full.messages)) {
+                activeSess.messages = full.messages;
+                delete activeSess._isLazyDisk;
+                renderCurrentSession();
+              }
+            } catch (e) {}
+          }
         }
       }
     } catch (err) {
-      console.error('Error loading persisted state:', err);
+      console.warn('Background storage sync notice:', err);
     }
+  }
+
+  async function loadPersistedState() {
+    loadPersistedStateSync();
+    await syncPersistedStorageBackground();
   }
 
   function savePersistedState() {
@@ -11878,16 +11919,21 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
   }
 
   // ==================== BOOTSTRAP INITIALIZATION ====================
-  async function init() {
-    await loadPersistedState();
+  function init() {
+    // 1. FAST SYNCHRONOUS BOOTSTRAP (0ms - Instant UI & Interactivity)
+    loadPersistedStateSync();
+
+    // 2. ATTACH ALL EVENT LISTENERS IMMEDIATELY (Millisecond 0 responsiveness)
     setupEventListeners();
     setupSmartScrolling();
     ImageLightbox.init();
     
     // Set sound toggle button icon
-    els.soundToggleBtn.innerHTML = STATE.soundEnabled 
-      ? '<i class="fa-solid fa-volume-high"></i>' 
-      : '<i class="fa-solid fa-volume-xmark"></i>';
+    if (els.soundToggleBtn) {
+      els.soundToggleBtn.innerHTML = STATE.soundEnabled 
+        ? '<i class="fa-solid fa-volume-high"></i>' 
+        : '<i class="fa-solid fa-volume-xmark"></i>';
+    }
 
     // Distinguish Browser Refresh (same tab) vs Fresh App Entry
     const isTabReload = sessionStorage.getItem('zoz_tab_initialized') === 'true';
@@ -11896,18 +11942,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (isTabReload && savedActiveId && STATE.sessions.some(s => s.id === savedActiveId)) {
       // Browser Refresh: Keep the user on their active conversation and refresh it
       STATE.currentSessionId = savedActiveId;
-      const activeSess = STATE.sessions.find(s => s.id === savedActiveId);
-      if (activeSess && activeSess._isLazyDisk && (!activeSess.messages || activeSess.messages.length === 0)) {
-        if (DeviceStorage.isDeviceBackendAvailable) {
-          try {
-            const full = await DeviceStorage.getSession(savedActiveId);
-            if (full && Array.isArray(full.messages)) {
-              activeSess.messages = full.messages;
-              delete activeSess._isLazyDisk;
-            }
-          } catch (e) {}
-        }
-      }
       renderChatHistory();
       renderCurrentSession();
     } else {
@@ -11919,9 +11953,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       renderCurrentSession();
     }
 
+    // 3. RENDER ALL UI CONTROLS INSTANTLY (Synchronous, 0ms, Zero Lag)
     updatePresetBanner();
     updatePresetPillUI();
     updateModelUI();
+    populateModelDropdown();
     els.modeTabs.forEach(tab => {
       tab.classList.toggle('active', tab.dataset.mode === STATE.mode);
     });
@@ -11939,16 +11975,28 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
     }
 
-    // Initialize Cyber BGM Engine
-    await BGMEngine.init();
+    console.log('⚡ ZOZ ROUTER INITIALIZED // READY IN 0MS');
 
-    // Async checks
-    await checkOllamaHealth();
-    await checkOpenRouterStatus();
-    fetchOpenRouterModelsList();
-    fetchOllamaCloudUsage();
+    // 4. NON-BLOCKING ASYNCHRONOUS BACKGROUND TASKS (Storage sync, BGM engine & health checks)
+    initBackgroundTasks(isTabReload, savedActiveId);
+  }
 
-    console.log('⚡ ZOZ ROUTER INITIALIZED // READY');
+  async function initBackgroundTasks(isTabReload, savedActiveId) {
+    // A. Sync storage in background (IndexedDB & Device Disk Storage)
+    syncPersistedStorageBackground(isTabReload, savedActiveId).catch(err => {
+      console.warn('Background storage sync notice:', err);
+    });
+
+    // B. Initialize Cyber BGM Engine in background
+    BGMEngine.init().catch(bgmErr => {
+      console.warn('BGM Engine background init notice:', bgmErr);
+    });
+
+    // C. Non-blocking Network Health Checks
+    checkOllamaHealth().catch(() => {});
+    checkOpenRouterStatus().catch(() => {});
+    fetchOpenRouterModelsList().catch(() => {});
+    fetchOllamaCloudUsage().catch(() => {});
   }
 
   // Start on DOM loaded
