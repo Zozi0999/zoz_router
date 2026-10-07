@@ -1,15 +1,15 @@
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-ollama-endpoint, x-ollama-key');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-ollama-endpoint, x-ollama-key, x-api-key, x-title, X-Title, http-referer, HTTP-Referer');
 
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
 
   try {
-    const authHeader = req.headers.authorization || (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : '');
-    const endpoint = req.query.endpoint || (authHeader ? 'https://ollama.com' : 'http://127.0.0.1:11434');
+    const authHeader = req.headers.authorization || (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : '') || (req.headers['x-api-key'] ? `Bearer ${req.headers['x-api-key']}` : '') || (req.query?.key ? `Bearer ${req.query.key}` : '') || (req.query?.apiKey ? `Bearer ${req.query.apiKey}` : '');
+    const endpoint = req.query?.endpoint || (authHeader ? 'https://ollama.com' : 'http://127.0.0.1:11434');
 
     const headers = {};
     if (authHeader) headers['Authorization'] = authHeader;

@@ -24,8 +24,13 @@ module.exports = async function handler(req, res) {
 
     let clean = targetUrl.trim();
     if (!/^https?:\/\//i.test(clean)) clean = `https://${clean}`;
-    const parsedUrl = new URL(clean);
-    const hostname = parsedUrl.hostname.toLowerCase();
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(clean);
+    } catch (e) {
+      return res.status(400).json({ success: false, error: 'Format URL tidak valid: ' + e.message });
+    }
+    const hostname = parsedUrl.hostname ? parsedUrl.hostname.toLowerCase() : '';
     const allowedHosts = ['youtu.be', 'www.youtu.be', 'youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'];
     if (!allowedHosts.includes(hostname)) {
       return res.status(400).json({ success: false, error: 'Hanya URL YouTube resmi yang diizinkan.' });

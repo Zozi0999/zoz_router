@@ -1870,8 +1870,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         if (!line.trim()) continue;
         try {
           const parsed = JSON.parse(line);
-          if (parsed.message?.content) {
-            appended += parsed.message.content;
+          const chunk = parsed.message?.content || parsed.response || '';
+          if (chunk) {
+            appended += chunk;
             const needsNl = currentFullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(currentFullText) || /```\w*$/.test(currentFullText);
             const needsSp = !needsNl && !currentFullText.endsWith(' ') && !appended.startsWith(' ') && !appended.startsWith('\n');
             const sep = needsNl ? '\n' : (needsSp ? ' ' : '');
@@ -1885,8 +1886,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (buf && buf.trim()) {
       try {
         const parsed = JSON.parse(buf.trim());
-        if (parsed.message?.content) {
-          appended += parsed.message.content;
+        const chunk = parsed.message?.content || parsed.response || '';
+        if (chunk) {
+          appended += chunk;
           const needsNl = currentFullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(currentFullText) || /```\w*$/.test(currentFullText);
           const needsSp = !needsNl && !currentFullText.endsWith(' ') && !appended.startsWith(' ') && !appended.startsWith('\n');
           const sep = needsNl ? '\n' : (needsSp ? ' ' : '');
@@ -5452,10 +5454,11 @@ ${organicBlock}
             throw new Error(errStr);
           }
           if (parsed.done_reason) doneReason = parsed.done_reason;
-          if (parsed.message?.content) {
+          const chunk = parsed.message?.content || parsed.response || '';
+          if (chunk) {
             if (!firstTokenTime) firstTokenTime = performance.now();
             tokenCount++;
-            streamRenderer.append(parsed.message.content);
+            streamRenderer.append(chunk);
           }
           if (parsed.message?.tool_calls && Array.isArray(parsed.message.tool_calls)) {
             parsed.message.tool_calls.forEach(tc => {
@@ -5473,10 +5476,11 @@ ${organicBlock}
             throw new Error(errStr);
           }
           if (parsed.done_reason) doneReason = parsed.done_reason;
-          if (parsed.message?.content) {
+          const chunk = parsed.message?.content || parsed.response || '';
+          if (chunk) {
             if (!firstTokenTime) firstTokenTime = performance.now();
             tokenCount++;
-            streamRenderer.append(parsed.message.content);
+            streamRenderer.append(chunk);
           }
           if (parsed.message?.tool_calls && Array.isArray(parsed.message.tool_calls)) {
             parsed.message.tool_calls.forEach(tc => {
@@ -7188,7 +7192,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       });
       if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
       const data = await res.json();
-      return data.message?.content || '';
+      return data.message?.content || data.response || data.choices?.[0]?.message?.content || '';
     }
   }
 
@@ -7406,8 +7410,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
               const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
               throw new Error(errStr);
             }
-            if (parsed.message?.content) {
-              const chunk = parsed.message.content;
+            const chunk = parsed.message?.content || parsed.response || parsed.choices?.[0]?.delta?.content || '';
+            if (chunk) {
               fullText += chunk;
               if (streamRenderer) streamRenderer.append(chunk);
               if (typeof onChunk === 'function') {
@@ -7427,8 +7431,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
             throw new Error(errStr);
           }
-          if (parsed.message?.content) {
-            const chunk = parsed.message.content;
+          const chunk = parsed.message?.content || parsed.response || parsed.choices?.[0]?.delta?.content || '';
+          if (chunk) {
             fullText += chunk;
             if (streamRenderer) streamRenderer.append(chunk);
             if (typeof onChunk === 'function') {
@@ -9324,7 +9328,16 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (!session || !session.messages || session.messages.length === 0) return;
 
     let md = `# ${session.title || 'Percakapan ZOZ Router'}\n`;
-    md += `*Tanggal: ${new Date(session.createdAt || Date.now()).toLocaleString('id-ID')}*  \n`;
+    let formattedDate = '';
+    try {
+      const createdAtDate = session.createdAt ? new Date(session.createdAt) : new Date();
+      formattedDate = !isNaN(createdAtDate.getTime())
+        ? createdAtDate.toLocaleString('id-ID')
+        : new Date().toLocaleString('id-ID');
+    } catch (_) {
+      formattedDate = new Date().toLocaleString('id-ID');
+    }
+    md += `*Tanggal: ${formattedDate}*  \n`;
     md += `*Engine: ${(session.mode || 'ollama').toUpperCase()}*  \n\n---\n\n`;
 
     session.messages.forEach(m => {
@@ -9365,9 +9378,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     document.body.appendChild(a);
     a.click();
     setTimeout(() => {
-      document.body.removeChild(a);
+      if (document.body.contains(a)) {
+        document.body.removeChild(a);
+      }
       URL.revokeObjectURL(url);
-    }, 100);
+    }, 800);
 
     showToast('Obrolan berhasil diekspor sebagai Markdown!');
     AudioEngine.success();
@@ -9719,8 +9734,10 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
               },
               events: {
                 onReady: (e) => {
-                  e.target.setVolume(Math.round(this.volume * 100));
-                  e.target.playVideo();
+                  try {
+                    e.target.setVolume(Math.round(this.volume * 100));
+                    e.target.playVideo();
+                  } catch (_) {}
                   this.setPlayingState(true);
                 },
                 onStateChange: (e) => {
@@ -9735,17 +9752,38 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
                     }
                   } else if (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.ENDED) {
                     this.setPlayingState(false);
-                    if (e.data === YT.PlayerState.ENDED && this.loopMode === 'all') {
-                      this.nextTrack();
+                    if (e.data === YT.PlayerState.ENDED) {
+                      if (this.loopMode === 'one') {
+                        if (e.target && typeof e.target.seekTo === 'function' && typeof e.target.playVideo === 'function') {
+                          e.target.seekTo(0);
+                          e.target.playVideo();
+                          this.setPlayingState(true);
+                        }
+                      } else if (this.loopMode === 'all') {
+                        this.nextTrack();
+                      }
                     }
                   }
+                },
+                onError: (e) => {
+                  console.warn('YouTube Player error code:', e.data);
+                  showToast('Video YouTube tidak dapat diputar atau dibatasi oleh pemilik video.', 'error');
+                  this.setPlayingState(false);
                 }
               }
             });
           } else {
             this.ytPlayer.loadVideoById(videoId);
-            this.ytPlayer.setVolume(Math.round(this.volume * 100));
-            this.ytPlayer.playVideo();
+            if (typeof this.ytPlayer.setVolume === 'function') {
+              try {
+                this.ytPlayer.setVolume(Math.round(this.volume * 100));
+              } catch (_) {}
+            }
+            if (typeof this.ytPlayer.playVideo === 'function') {
+              try {
+                this.ytPlayer.playVideo();
+              } catch (_) {}
+            }
             this.setPlayingState(true);
           }
           this.updateUI();
@@ -10008,7 +10046,37 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       AudioEngine.click();
     },
 
+    ytProgressTimer: null,
+
+    startYouTubeProgressTimer() {
+      this.stopYouTubeProgressTimer();
+      this.ytProgressTimer = setInterval(() => {
+        if (this.currentMode === 'youtube' && this.ytPlayer && typeof this.ytPlayer.getCurrentTime === 'function' && typeof this.ytPlayer.getDuration === 'function') {
+          try {
+            const cur = this.ytPlayer.getCurrentTime() || 0;
+            const dur = this.ytPlayer.getDuration() || 0;
+            if (dur > 0 && els.deckProgressSlider) {
+              els.deckProgressSlider.value = (cur / dur) * 100;
+            }
+            if (els.deckCurrentTrackMeta) {
+              const curStr = this.formatTime(cur);
+              const durStr = dur ? this.formatTime(dur) : '--:--';
+              els.deckCurrentTrackMeta.innerText = `${curStr} / ${durStr}`;
+            }
+          } catch (_) {}
+        }
+      }, 500);
+    },
+
+    stopYouTubeProgressTimer() {
+      if (this.ytProgressTimer) {
+        clearInterval(this.ytProgressTimer);
+        this.ytProgressTimer = null;
+      }
+    },
+
     stop() {
+      this.stopYouTubeProgressTimer();
       if (this.audio) {
         this.audio.pause();
         this.audio.currentTime = 0;
@@ -10023,6 +10091,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
     setPlayingState(isPlaying) {
       this.isPlaying = isPlaying;
+      if (this.isPlaying && this.currentMode === 'youtube') {
+        this.startYouTubeProgressTimer();
+      } else {
+        this.stopYouTubeProgressTimer();
+      }
       this.updateUI();
     },
 
@@ -10058,8 +10131,15 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     },
 
     seek(percent) {
-      if (this.audio && this.audio.duration && this.currentMode === 'file') {
+      if (this.currentMode === 'file' && this.audio && this.audio.duration) {
         this.audio.currentTime = (percent / 100) * this.audio.duration;
+      } else if (this.currentMode === 'youtube' && this.ytPlayer && typeof this.ytPlayer.getDuration === 'function' && typeof this.ytPlayer.seekTo === 'function') {
+        try {
+          const dur = this.ytPlayer.getDuration() || 0;
+          if (dur > 0) {
+            this.ytPlayer.seekTo((percent / 100) * dur, true);
+          }
+        } catch (_) {}
       }
     },
 
@@ -10071,6 +10151,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       } catch (_) {}
 
       if (this.audio) this.audio.volume = this.volume;
+      if (this.ytPlayer && typeof this.ytPlayer.setVolume === 'function') {
+        try {
+          this.ytPlayer.setVolume(Math.round(this.volume * 100));
+        } catch (_) {}
+      }
       if (this.masterGainNode && this.audioCtx) {
         this.masterGainNode.gain.setValueAtTime(this.volume, this.audioCtx.currentTime);
       }

@@ -2890,14 +2890,14 @@ const server = http.createServer(async (req, res) => {
         width = parseInt(body.width, 10) || width;
         height = parseInt(body.height, 10) || height;
         seed = body.seed || null;
-        openRouterKey = body.openRouterKey || body.apiKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || process.env.OPENROUTER_API_KEY;
+        openRouterKey = body.openRouterKey || body.apiKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       } else {
         prompt = reqUrl.searchParams.get('prompt') || reqUrl.searchParams.get('q') || '';
         model = reqUrl.searchParams.get('model') || model;
         width = parseInt(reqUrl.searchParams.get('width'), 10) || width;
         height = parseInt(reqUrl.searchParams.get('height'), 10) || height;
         seed = reqUrl.searchParams.get('seed') || null;
-        openRouterKey = reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || process.env.OPENROUTER_API_KEY;
+        openRouterKey = reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       }
 
       if (openRouterKey) {
@@ -3260,7 +3260,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/ollama/chat' && method === 'POST') {
     try {
       const body = await parseBody(req);
-      const rawKey = body.apiKey || req.headers['x-ollama-key'] || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : '') || process.env.OLLAMA_API_KEY;
+      const rawKey = body.apiKey || body.ollamaApiKey || req.headers['x-ollama-key'] || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : '') || process.env.OLLAMA_API_KEY;
       const authHeader = rawKey ? `Bearer ${rawKey}` : (req.headers['authorization'] || null);
       let customEndpoint = req.headers['x-ollama-endpoint'] || body.endpoint || 'https://ollama.com';
 
@@ -3283,6 +3283,7 @@ const server = http.createServer(async (req, res) => {
 
       delete body.endpoint; // Don't send custom field to Ollama
       delete body.apiKey;
+      delete body.ollamaApiKey;
 
       const ollamaUrl = resolveEndpointUrl(customEndpoint, 'api/chat');
       const client = ollamaUrl.protocol === 'https:' ? https : http;
@@ -3422,8 +3423,8 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/openrouter/models' && method === 'GET') {
     let authHeader = req.headers['authorization'];
     if (!authHeader) {
-      const qKey = reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey');
-      if (qKey) authHeader = `Bearer ${qKey}`;
+      const qKey = req.headers['x-api-key'] || reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || process.env.OPENROUTER_API_KEY;
+      if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
     }
     const options = {
       hostname: 'openrouter.ai',
@@ -3471,8 +3472,8 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/openrouter/auth-check' && method === 'GET') {
     let authHeader = req.headers['authorization'];
     if (!authHeader) {
-      const qKey = reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey');
-      if (qKey) authHeader = `Bearer ${qKey}`;
+      const qKey = req.headers['x-api-key'] || reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || process.env.OPENROUTER_API_KEY;
+      if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
     }
     if (!authHeader) {
       return sendJSON(res, 401, { error: 'Authorization header is required' });
@@ -3524,8 +3525,8 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/openrouter/credits' && method === 'GET') {
     let authHeader = req.headers['authorization'];
     if (!authHeader) {
-      const qKey = reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey');
-      if (qKey) authHeader = `Bearer ${qKey}`;
+      const qKey = req.headers['x-api-key'] || reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || process.env.OPENROUTER_API_KEY;
+      if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
     }
     if (!authHeader) {
       return sendJSON(res, 401, { error: 'Authorization header is required' });
@@ -3579,13 +3580,15 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await parseBody(req);
       const authHeader = req.headers['authorization'];
+      const rawKey = body.apiKey || body.openRouterKey || req.headers['x-api-key'] || (authHeader ? authHeader.replace(/^Bearer\s+/i, '') : '') || process.env.OPENROUTER_API_KEY;
 
-      if (!authHeader && !body.apiKey) {
+      if (!rawKey) {
         return sendJSON(res, 401, { error: 'OpenRouter API Key diperlukan. Masukkan API Key di Pengaturan Zoz Router.' });
       }
 
-      const apiKey = authHeader || `Bearer ${body.apiKey}`;
+      const apiKey = `Bearer ${String(rawKey).replace(/^Bearer\s+/i, '').trim()}`;
       delete body.apiKey;
+      delete body.openRouterKey;
 
       // Defense-in-depth: Cegah konflik mutlak parameter model dan models pada OpenRouter
       if (body.model && body.models) {

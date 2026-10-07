@@ -9,7 +9,7 @@ export default {
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-ollama-key, x-serper-key, x-api-key, x-title, HTTP-Referer'
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-ollama-key, x-serper-key, x-api-key, x-title, X-Title, HTTP-Referer, http-referer'
         }
       });
     }
@@ -35,7 +35,7 @@ export default {
     if (url.pathname === '/api/ollama/chat' && request.method === 'POST') {
       try {
         const body = await request.json();
-        const authHeader = request.headers.get('Authorization') || (body.apiKey ? `Bearer ${body.apiKey}` : (request.headers.get('x-ollama-key') ? `Bearer ${request.headers.get('x-ollama-key')}` : ''));
+        const authHeader = request.headers.get('Authorization') || (body.apiKey ? `Bearer ${body.apiKey}` : (body.ollamaApiKey ? `Bearer ${body.ollamaApiKey}` : (request.headers.get('x-ollama-key') ? `Bearer ${request.headers.get('x-ollama-key')}` : '')));
         const targetEndpoint = body.endpoint || 'https://ollama.com';
         let cleanEndpoint = (targetEndpoint || 'https://ollama.com').trim();
         if (!cleanEndpoint.startsWith('http://') && !cleanEndpoint.startsWith('https://')) {
@@ -83,7 +83,7 @@ export default {
     // Proxy Ollama Models
     if (url.pathname === '/api/ollama/models' && request.method === 'GET') {
       try {
-        const authHeader = request.headers.get('Authorization') || (request.headers.get('x-ollama-key') ? `Bearer ${request.headers.get('x-ollama-key')}` : '');
+        const authHeader = request.headers.get('Authorization') || (request.headers.get('x-ollama-key') ? `Bearer ${request.headers.get('x-ollama-key')}` : '') || (request.headers.get('x-api-key') ? `Bearer ${request.headers.get('x-api-key')}` : '') || (url.searchParams.get('key') ? `Bearer ${url.searchParams.get('key')}` : '') || (url.searchParams.get('apiKey') ? `Bearer ${url.searchParams.get('apiKey')}` : '');
         const endpoint = url.searchParams.get('endpoint') || (authHeader ? 'https://ollama.com' : 'http://127.0.0.1:11434');
         const headers = {};
         if (authHeader) headers['Authorization'] = authHeader;
@@ -252,7 +252,7 @@ export default {
     }
 
     // Proxy Generate Image
-    if (url.pathname === '/api/generate-image') {
+    if (url.pathname === '/api/generate-image' || url.pathname === '/api/image/generate') {
       try {
         let prompt = '';
         let model = 'flux';
@@ -275,7 +275,7 @@ export default {
           width = parseInt(url.searchParams.get('width'), 10) || width;
           height = parseInt(url.searchParams.get('height'), 10) || height;
           seed = url.searchParams.get('seed') || null;
-          openRouterKey = url.searchParams.get('key') || url.searchParams.get('apiKey') || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-api-key') || env?.OPENROUTER_API_KEY;
+          openRouterKey = url.searchParams.get('openRouterKey') || url.searchParams.get('key') || url.searchParams.get('apiKey') || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-api-key') || env?.OPENROUTER_API_KEY;
         }
 
         if (openRouterKey) {
@@ -417,8 +417,16 @@ export default {
 
         let clean = targetUrl.trim();
         if (!/^https?:\/\//i.test(clean)) clean = `https://${clean}`;
-        const parsedUrl = new URL(clean);
-        const hostname = parsedUrl.hostname.toLowerCase();
+        let parsedUrl;
+        try {
+          parsedUrl = new URL(clean);
+        } catch (e) {
+          return new Response(JSON.stringify({ success: false, error: 'Format URL tidak valid: ' + e.message }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+        const hostname = parsedUrl.hostname ? parsedUrl.hostname.toLowerCase() : '';
         const allowedHosts = ['youtu.be', 'www.youtu.be', 'youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'];
         if (!allowedHosts.includes(hostname)) {
           return new Response(JSON.stringify({ success: false, error: 'Hanya URL YouTube resmi yang diizinkan.' }), {
