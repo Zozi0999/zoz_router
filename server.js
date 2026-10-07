@@ -2830,7 +2830,11 @@ const server = http.createServer(async (req, res) => {
         width = parseInt(reqUrl.searchParams.get('width'), 10) || width;
         height = parseInt(reqUrl.searchParams.get('height'), 10) || height;
         seed = reqUrl.searchParams.get('seed') || null;
-        openRouterKey = req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : process.env.OPENROUTER_API_KEY;
+        openRouterKey = reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || process.env.OPENROUTER_API_KEY;
+      }
+
+      if (openRouterKey) {
+        openRouterKey = String(openRouterKey).replace(/^Bearer\s+/i, '').trim();
       }
 
       if (!prompt || !prompt.trim()) {

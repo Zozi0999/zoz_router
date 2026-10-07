@@ -647,6 +647,36 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
       });
     },
+    async saveSession(session) {
+      if (!session || !session.id) return false;
+      if (!this.db) await this.init();
+      if (!this.db) return false;
+      return new Promise((resolve) => {
+        try {
+          const tx = this.db.transaction('sessions', 'readwrite');
+          tx.objectStore('sessions').put(session);
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+        } catch (e) {
+          resolve(false);
+        }
+      });
+    },
+    async getSession(id) {
+      if (!id) return null;
+      if (!this.db) await this.init();
+      if (!this.db) return null;
+      return new Promise((resolve) => {
+        try {
+          const tx = this.db.transaction('sessions', 'readonly');
+          const req = tx.objectStore('sessions').get(id);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => resolve(null);
+        } catch (e) {
+          resolve(null);
+        }
+      });
+    },
     async saveAllSessions(sessions) {
       if (!this.db) await this.init();
       if (!this.db || !Array.isArray(sessions)) return false;
@@ -783,7 +813,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
       }
       // Also save in local ChatDB vault
-      ChatDB.saveSession(session);
+      await ChatDB.saveSession(session);
     },
 
     async updateSessionMetadata(id, patch) {
@@ -803,7 +833,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       if (sess) {
         Object.assign(sess, patch);
         if (!sess._isLazyDisk || (sess.messages && sess.messages.length > 0)) {
-          ChatDB.saveSession(sess);
+          await ChatDB.saveSession(sess);
         }
       }
     },
@@ -824,7 +854,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const sess = STATE.sessions.find(s => s.id === id);
       if (sess) {
         sess.title = newTitle;
-        ChatDB.saveSession(sess);
+        await ChatDB.saveSession(sess);
       }
     },
 
@@ -1075,6 +1105,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
               slot: m.slot,
               sources: m.sources,
               stats: m.stats,
+              isDeepResearch: !!m.isDeepResearch,
+              latency: m.latency,
               timestamp: m.timestamp
             };
           })
@@ -2177,8 +2209,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   function renderCurrentSession() {
     // If no session is actively selected -> Land on TAMPILAN UTAMA (Welcome Hero)!
     if (!STATE.currentSessionId) {
-      els.welcomeHero.style.display = 'flex';
-      els.messagesList.innerHTML = '';
+      if (els.welcomeHero) els.welcomeHero.style.display = 'flex';
+      if (els.messagesList) els.messagesList.innerHTML = '';
       if (els.pullUpNewChatWrapper) {
         els.pullUpNewChatWrapper.classList.remove('visible');
         els.pullUpNewChatWrapper.style.display = 'none';
@@ -2189,8 +2221,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     const session = STATE.sessions.find(s => s.id === STATE.currentSessionId);
     if (!session || !session.messages || session.messages.length === 0) {
-      els.welcomeHero.style.display = 'flex';
-      els.messagesList.innerHTML = '';
+      if (els.welcomeHero) els.welcomeHero.style.display = 'flex';
+      if (els.messagesList) els.messagesList.innerHTML = '';
       if (els.pullUpNewChatWrapper) {
         els.pullUpNewChatWrapper.classList.remove('visible');
         els.pullUpNewChatWrapper.style.display = 'none';
@@ -2199,8 +2231,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       return;
     }
 
-    els.welcomeHero.style.display = 'none';
-    els.messagesList.innerHTML = '';
+    if (els.welcomeHero) els.welcomeHero.style.display = 'none';
+    if (els.messagesList) els.messagesList.innerHTML = '';
     if (els.pullUpNewChatWrapper) {
       els.pullUpNewChatWrapper.classList.remove('visible');
       els.pullUpNewChatWrapper.style.display = 'none';
@@ -9838,7 +9870,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     },
 
     setVolume(val) {
-      this.volume = Math.max(0, Math.min(1, parseFloat(val)));
+      const num = parseFloat(val);
+      this.volume = isNaN(num) ? 0.7 : Math.max(0, Math.min(1, num));
       localStorage.setItem('zoz_bgm_volume', this.volume.toString());
 
       if (this.audio) this.audio.volume = this.volume;

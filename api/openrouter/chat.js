@@ -24,7 +24,7 @@ module.exports = async function handler(req, res) {
     };
 
     const payload = {
-      model: body.model || 'deepseek/deepseek-r1:free',
+      model: body.model || 'qwen/qwen3.8-27b:free',
       messages: body.messages || [],
       stream: body.stream !== false,
       temperature: body.temperature ?? 0.7,
