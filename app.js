@@ -4061,149 +4061,41 @@ ${organicBlock}
   ];
 
   function deriveBroadSearchQueries(rawQuery, contextText = '') {
-    if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', news: '', recentNews: '', recentNewsId: '', weeklyNews: '', core: '' };
-    const rawLower = rawQuery.toLowerCase();
-    const contextLower = (contextText || '').toLowerCase();
-    const combined = (rawQuery + ' ' + (contextText || '')).trim();
-    const lower = combined.toLowerCase();
-
-    // 1. Ekstraksi nomor versi SPESIFIK HANYA dari rawQuery (Cegah keracunan angka/halusinasi dari riwayat/respons asisten)
-    let version = '';
-    const decimalMatch = rawQuery.match(/\b([0-9]+\.[0-9]+(?:[\.\-][0-9a-z]+)*)\b/i);
-    if (decimalMatch && !/^20[2-3][0-9]/.test(decimalMatch[1])) {
-      version = decimalMatch[1];
-    } else {
-      const codeMatch = rawQuery.match(/\b(?:v|ver|version)\s*([0-9]+(?:[\.\-][0-9a-z]+)*)\b/i) ||
-                        rawQuery.match(/\b([0-9]+o|o[1-4]|r[1-3])\b/i);
-      if (codeMatch) {
-        version = codeMatch[1];
-      }
+    if (!rawQuery || typeof rawQuery !== 'string') {
+      return { primary: '', tech: '', news: '', recentNews: '', recentNewsId: '', weeklyNews: '', core: '' };
     }
 
-    // 2. Deteksi Entitas Lab / Produk AI (Prioritaskan rawQuery terlebih dahulu, lalu fallback ke contextText)
-    let entity = '';
-    const checkEntity = (targetStr) => {
-      if (targetStr.includes('grok') || targetStr.includes('xai') || targetStr.includes('x.ai') || targetStr.includes('supergrok')) return 'xAI Grok';
-      if (targetStr.includes('gemini')) return 'Google Gemini';
-      if (targetStr.includes('claude') || targetStr.includes('antropic') || targetStr.includes('anthropic')) return 'Anthropic Claude';
-      if (targetStr.includes('chatgpt') || targetStr.includes('gpt') || targetStr.includes('openai') || targetStr.includes('o1') || targetStr.includes('o3') || targetStr.includes('o4')) return 'OpenAI ChatGPT';
-      if (targetStr.includes('deepseek') || targetStr.includes('r1') || targetStr.includes('v3')) return 'DeepSeek AI';
-      if (targetStr.includes('llama') || targetStr.includes('meta ai')) return 'Meta Llama';
-      if (targetStr.includes('qwen') || targetStr.includes('tongyi')) return 'Alibaba Qwen';
-      if (targetStr.includes('mistral') || targetStr.includes('le chat')) return 'Mistral AI';
-      if (targetStr.includes('gemma')) return 'Google Gemma';
-      if ((targetStr.includes('apple') && targetStr.includes('ai')) || targetStr.includes('apple intelligence')) return 'Apple Intelligence';
-      if (targetStr.includes('copilot')) return 'Microsoft Copilot';
-      if (targetStr.includes('perplexity')) return 'Perplexity AI';
-      if (targetStr.includes('midjourney')) return 'Midjourney AI';
-      if (targetStr.includes('sora')) return 'OpenAI Sora';
-      if (targetStr.includes('flux')) return 'FLUX AI';
-      return '';
-    };
+    // Bersihkan karakter berlebih / HTML
+    let cleanQuery = rawQuery
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/[^\w\s\.\-]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-    entity = checkEntity(rawLower);
-    if (!entity && contextText) {
-      entity = checkEntity(contextLower);
-    }
-
-    // Gabungkan entitas dengan versi jika ada pada rawQuery (misal: xAI Grok 4.7)
-    if (entity && version && !entity.toLowerCase().includes(version.toLowerCase())) {
-      entity = `${entity} ${version}`;
-    }
-
-    // 3. Deteksi Intent Spesifik Pengguna (Capability/Benchmark vs Price vs Release vs Comparison)
-    const isCapability = /\b(terkuat\w*|terhebat\w*|terpintar\w*|terbaik\w*|tercanggih\w*|canggih\w*|paling\w*|ranking|peringkat|leaderboard|benchmark\w*|mme|swe-bench|math|reasoning|kemampuan\w*|performa\w*|akurasi|kelebihan\w*|spesifikasi\w*|specs|kekuatan\w*|keunggulan\w*|power\w*|powerful|strongest|best|smartest|highest|flagship|top\s*model|leading\s*model)\b/i.test(lower);
-    const isPrice = /\b(harga\w*|biaya\w*|tarif\w*|langganan\w*|gratis|free|cost|price|pricing|tier|token|per\s*token|subscription|plus|pro)\b/i.test(lower);
-    const isRelease = /\b(kapan|rilis\w*|keluar|luncur\w*|peluncuran\w*|release\w*|launch\w*|launched|roadmap|schedule|tanggal|jadwal|resmi|announcement|announced)\b/i.test(lower);
-    const isComparison = /\b(vs|versus|banding\w*|perbandingan\w*|dibandingkan|compare|comparison|bedanya|perbedaan\w*)\b/i.test(lower);
-
-    const stopWords = [
-      'update', 'updates', 'terbaru', 'terkini', 'apa', 'itu', 'bagaimana', 'perkembangan',
-      'berita', 'tentang', 'fitur', 'baru', 'informasi', 'info', 'roadmap', 'bocoran',
-      'release', 'changelog', 'saat', 'ini', 'sekarang', 'apakah', 'ada',
-      'tahun', 'di', 'ke', 'dari', 'yang', 'dan', 'atau', 'pada', 'untuk',
-      'cari', 'carikan', 'sumber', 'sumbernya', 'lagi', 'coba', 'bukti', 'buktinya', 'resmi',
-      'web', 'internet', 'google', 'tolong', 'bantu', 'mana', 'dong', 'search', 'find', 'sources',
-      'proof', 'official'
+    // Bersihkan kata pengisi percakapan umum tanpa merusak topik inti
+    const fillerWords = [
+      'tolong', 'carikan', 'cari', 'bantu', 'apakah', 'bisakah', 'coba',
+      'search', 'find', 'please'
     ];
-
-    let cleaned = rawQuery;
-    stopWords.forEach(w => {
-      cleaned = cleaned.replace(new RegExp(`\\b${w}\\b`, 'gi'), ' ');
+    let coreQuery = cleanQuery;
+    fillerWords.forEach(w => {
+      coreQuery = coreQuery.replace(new RegExp(`\\b${w}\\b`, 'gi'), ' ');
     });
-    cleaned = cleaned.replace(/[^\w\s\.]/g, ' ').replace(/\s+/g, ' ').trim();
+    coreQuery = coreQuery.replace(/\s+/g, ' ').trim();
+    if (coreQuery.length < 2) coreQuery = cleanQuery;
 
-    const coreSubject = entity || (cleaned.length >= 2 ? cleaned : rawQuery.trim());
-
-    // Angker Temporal Dinamis: Masukkan Bulan & Tahun aktif saat ini
     const now = new Date();
     const currentYear = now.getFullYear();
-    const currentMonthEn = now.toLocaleString('en-US', { month: 'long' });
     const currentMonthId = now.toLocaleString('id-ID', { month: 'long' });
 
-    if (isCapability) {
-      const subject = entity || coreSubject;
-      return {
-        primary: rawQuery.trim(),
-        tech: `${subject} most powerful model strongest frontier benchmark`,
-        news: `${subject} flagship model leaderboard reasoning o1 GPT-4o Claude Gemini`,
-        recentNews: `${subject} strongest model benchmark when:90d`,
-        recentNewsId: `${subject} model terkuat kemampuan benchmark`,
-        weeklyNews: `${subject} reasoning benchmark when:30d`,
-        core: `${subject} most powerful model benchmark`,
-        isCapability: true
-      };
-    }
-
-    if (isPrice) {
-      const subject = entity || coreSubject;
-      return {
-        primary: rawQuery.trim(),
-        tech: `${subject} api pricing token cost subscription`,
-        news: `${subject} pricing plan api tier cost`,
-        recentNews: `${subject} price cost when:60d`,
-        recentNewsId: `${subject} harga langganan biaya api`,
-        weeklyNews: `${subject} pricing when:30d`,
-        core: `${subject} pricing cost`,
-        isPrice: true
-      };
-    }
-
-    if (isRelease) {
-      const subject = entity || coreSubject;
-      return {
-        primary: rawQuery.trim(),
-        tech: `${subject} release date roadmap announcement launch`,
-        news: `${subject} latest release announcement ${currentYear}`,
-        recentNews: `${subject} release date when:60d`,
-        recentNewsId: `${subject} rilis peluncuran jadwal`,
-        weeklyNews: `${subject} launch announcement when:14d`,
-        core: `${subject} release date roadmap`,
-        isRelease: true
-      };
-    }
-
-    if (isComparison) {
-      return {
-        primary: rawQuery.trim(),
-        tech: `${coreSubject} comparison benchmark vs`,
-        news: `${coreSubject} compared head to head benchmark`,
-        recentNews: `${coreSubject} vs comparison when:60d`,
-        recentNewsId: `${coreSubject} perbandingan kelebihan`,
-        weeklyNews: `${coreSubject} vs when:30d`,
-        core: `${coreSubject} comparison`,
-        isComparison: true
-      };
-    }
-
     return {
-      primary: rawQuery.trim(),
-      tech: `${coreSubject} ${currentMonthEn} ${currentYear} update`,
-      news: `${coreSubject} latest ${currentMonthEn} ${currentYear} news`,
-      recentNews: `${coreSubject} ${currentMonthEn} ${currentYear} when:30d`,
-      recentNewsId: `${coreSubject} ${currentMonthId} ${currentYear} when:30d`,
-      weeklyNews: `${coreSubject} when:14d`,
-      core: coreSubject
+      primary: cleanQuery,
+      tech: coreQuery,
+      news: `${coreQuery} news`,
+      recentNews: `${coreQuery} when:30d`,
+      recentNewsId: `${coreQuery} ${currentMonthId} ${currentYear}`,
+      weeklyNews: `${coreQuery} when:14d`,
+      core: coreQuery
     };
   }
 
@@ -4570,9 +4462,8 @@ ${organicBlock}
             // Filter artikel usang ketat jika ada artikel baru dalam 30 hari terakhir (bulan ini)
             const now = Date.now();
             const hasVeryRecent30d = clientPool.some(it => it.timestamp && (now - it.timestamp) < (30 * 86400 * 1000));
-            const maxAgeDays = (qPlan.isCapability || qPlan.isPrice || qPlan.isRelease || qPlan.isComparison) ? 180 : 45;
             results = clientPool.filter(it => {
-              if (hasVeryRecent30d && it.timestamp && (now - it.timestamp) > (maxAgeDays * 86400 * 1000)) return false;
+              if (hasVeryRecent30d && it.timestamp && (now - it.timestamp) > (180 * 86400 * 1000)) return false;
               return true;
             });
           } catch (_) {}
@@ -4921,32 +4812,33 @@ ${organicBlock}
     const curMonthEn = now.toLocaleString('en-US', { month: 'long' });
     const curYear = now.getFullYear();
 
-    return `### KEMAMPUAN OTONOM PENCARIAN WEB LIVE (BUILT-IN ZERO-API):
-Anda memiliki instrumen pencarian web live berkecepatan tinggi tanpa batasan API:
-- search_web(query): Melakukan penelusuran fakta terkini, perkembangan tahun 2024-2026, berita, benchmark, atau rilis teknologi di web secara langsung. Sistem secara otomatis menghimpun belasan artikel berita live dari Google News RSS, Tech Wire / HackerNews, blog teknologi resmi, dan portal media aktual.
-- browse_web_page(url): Membaca dan mengekstrak isi teks bersih dari sebuah tautan atau halaman web spesifik. Gunakan saat pengguna menyertakan URL atau saat ingin mendalami rincian dari suatu link web.
-- SUMBER WIKIPEDIA TELAH DIHAPUS: Seluruh hasil penelusuran 100% merupakan berita dan publikasi aktual (BUKAN ensiklopedia atau artikel sejarah lama).
+    return `### INSTRUKSI SISTEM: KESADARAN PENGETAHUAN & PENGGUNAAN ALAT PENCARIAN WEB LIVE
 
-KONTEKS TEMPORAL & GROUNDING MODEL FRONTIER AKTIF:
-- Hari ini adalah: ${curDateStr} (${curMonthEn} ${curYear}).
-- PRINSIP MODEL UNGGULAN RESMI (FRONTIER AI):
-  * OpenAI: Model reasoning terkuat adalah OpenAI o1 (dan o1-mini), serta model serbaguna multimodal terkuat adalah GPT-4o. (Catatan penting: Seri GPT-4.5, GPT-5, atau GPT-6 BELUM dirilis secara publik oleh OpenAI!).
-  * Anthropic: Model terkuat & terpintar adalah Claude 3.5 Sonnet dan Claude 3 Opus.
-  * Google: Model terkuat adalah Gemini 1.5 Pro dan Gemini 2.0 Flash / Pro.
-  * xAI: Model terkuat adalah Grok 2 dan Grok 3.
-  * DeepSeek: Model reasoning terkuat adalah DeepSeek-R1 dan model serbaguna DeepSeek-V3.
-  * Meta: Model open-weight terkuat adalah Llama 3.1 (405B) dan Llama 3.3 (70B).
-- Model-model unggulan di atas tetap sah memegang tahta sebagai model terkuat saat ini meskipun diumumkan beberapa bulan lalu, SELAMA belum ada suksesor resmi yang diluncurkan oleh lab pembuatnya.
+1. KESADARAN BATASAN PENGETAHUAN MUTLAK (KNOWLEDGE CUTOFF):
+- Kalender aktif hari ini: ${curDateStr} (${curMonthEn} ${curYear}).
+- Anda adalah asisten AI yang MENYADARI SEPENUHNYA bahwa pengetahuan internal bawaan Anda MEMILIKI BATASAN KETAT (KNOWLEDGE CUTOFF).
+- Anda TIDAK MEMILIKI pengetahuan internal mengenai peristiwa dunia nyata terkini, berita mutakhir, data real-time, statistik, harga, update, rilis terbaru, atau fakta spesifik dunia nyata saat ini DALAM TOPIK APA PUN (politik, teknologi, sains, olahraga, ekonomi, hiburan, hukum, peristiwa global maupun lokal).
+- DILARANG KERAS MENEBAK, BERSPEKULASI, ATAU BERHALUSINASI! Anda tidak boleh mengarang fakta atau berpura-pura mengetahui data yang belum Anda ketahui dari internet.
 
-INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
-- WAJIB PROAKTIF PADA TURN PERTAMA: Kapan pun pengguna menanyakan versi baru, model AI (seperti Grok, ChatGPT, Claude, Gemini, DeepSeek, Llama, Qwen, dll.), perkembangan terkini, update terbaru, benchmark, tanggal rilis, atau menyertakan gambar/screenshot antarmuka, Anda WAJIB LANGSUNG MEMANGGIL search_web("...") pada giliran pertama sebelum menarik kesimpulan apa pun.
-- DILARANG KERAS MENOLAK, MEMBANTAH, ATAU MENCERAMAHI PENGGUNA: Jangan pernah menyatakan "model/versi itu tidak ada", "hanya rumor", "belum ada rilis resmi", atau "meminta pengguna memberikan bukti rilis resmi" berdasarkan ingatan cutoff lama training Anda. Carilah faktanya di web live terlebih dahulu!
-- RANCANG DAN RUMUSKAN KUERI PENCARIAN YANG EFEKTIF & SESUAI INTENT: Jika pengguna bertanya tentang model terkuat/benchmark, cari benchmark dan model terkuat (misal: "OpenAI most powerful model strongest benchmark", "Anthropic Claude strongest model benchmark").
-- DILARANG KERAS MENGARANG NAMA MODEL FIKTIF ATAU SERI KHAYALAN: Jangan pernah menciptakan nama model buatan (seperti "GPT-6 Seri Sol dan Luna", "GPT-5.5 Pensiun", dll.)! Jika tidak ada model baru yang dirilis minggu ini, jelaskan fakta model resmi terkuat yang saat ini beroperasi.
-- BEDAKAN ANTARA FITUR PRODUK DAN KEKUATAN MODEL: Jika pengguna menanyakan model terkuat atau kapabilitas AI, jawablah dengan performa model (reasoning, benchmark MMLU, coding, matematika). JANGAN menjawab dengan berita fitur sampingan seperti iklan di ChatGPT, integrasi Word/Office, atau watermark Uni Eropa!
-- JIKA Anda TIDAK memerlukan penelusuran web (percakapan kasual biasa, penulisan kode murni, matematika, penjelasan konsep umum), LANGSUNG jawab pertanyaan pengguna secara alami tanpa memanggil alat.
-- Setelah sistem mengeksekusi penelusuran dan menyajikan daftar multi-sumber berita aktual, SINTESISKAN jawaban secara komprehensif, padat, kaya fakta, dan 100% berlandaskan pada fakta resmi TANPA melakukan browsing/scraping berulang-ulang.
-- DILARANG KERAS mencetak JSON mentah atau teks seperti "We will call search_web..." ke dalam jawaban akhir pengguna.`;
+2. INSTRUMEN PENCARIAN WEB LIVE TERSEDIA:
+- search_web(query): Mencari data faktual, berita live, artikel terbaru, atau informasi apa pun di internet secara langsung.
+- browse_web_page(url): Membaca dan mengekstrak isi teks bersih dari sebuah halaman web jika pengguna menyertakan URL tautan.
+
+3. KEWAJIBAN PEMANGGILAN ALAT SEBELUM MENJAWAB:
+- Kapan pun pengguna menanyakan fakta dunia nyata, informasi terkini, berita, rilis, harga, atau topik apa pun yang membutuhkan kebenaran data mutakhir: ANDA HARUS MENYADARI KETIDAKTAHUAN ANDA DAN WAJIB LANGSUNG MEMANGGIL TOOL \`search_web\` PADA AWAL RESPON PERTAMA!
+- DILARANG LANGSUNG MENJAWAB DENGAN TEKS PENJELASAN SEBELUM MELAKUKAN PENCARIAN WEB.
+- CARA MEMANGGIL ALAT:
+  Panggil tool secara langsung:
+  search_web("kata kunci pencarian yang relevan")
+  atau
+  <tool_call>{"name":"search_web","arguments":{"query":"kata kunci pencarian yang relevan"}}</tool_call>
+  Keluarkan pemanggilan tool ini SEGERA pada awal jawaban tanpa teks pembuka bertele-tele.
+- Rumuskan kueri pencarian yang langsung pada topik inti yang ditanyakan pengguna di internet.
+- HANYA jika pertanyaan pengguna berupa penjelasan konsep dasar teori, logika matematika murni, penulisan kode pemrograman standar, atau percakapan kasual yang sama sekali tidak membutuhkan fakta dunia nyata: Anda boleh langsung menjawab secara alami tanpa memanggil alat.
+
+4. SINTESIS PASCA-PENCARIAN:
+- Setelah sistem mengeksekusi pencarian web dan menyajikan data multi-sumber kepada Anda, rumuskanlah jawaban akhir yang komprehensif, faktual, akurat, dan 100% berlandaskan pada data web tersebut tanpa memanggil tool lagi.
+- Dilarang mencetak tag tool atau format JSON apa pun ke dalam jawaban akhir pengguna.`;
   }
   const AUTONOMOUS_SYSTEM_DIRECTIVE = getAutonomousSystemDirective();
 
@@ -5233,6 +5125,7 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
         model: modelName,
         messages: messagesPayload,
         system: systemContent,
+        tools: AUTONOMOUS_WEB_TOOLS,
         stream: true,
         options: {
           temperature: parseFloat(STATE.settings.temperature),
@@ -5333,74 +5226,8 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
         const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
         let rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
 
-        // PROACTIVE TURN-1 TRIGGER (Anti-Refusal & Zero-Hallucination):
-        // Jika model tidak memanggil tool sendiri pada putaran 1, namun:
-        // 0. Pengguna memberikan URL langsung -> picu browse_web_page
-        // ATAU 1. Teks jawaban model menyangkal/meragukan rilis ("belum ada rilis resmi", "hanya rumor", "tidak masuk akal", dll.)
-        // ATAU 2. Pengguna meminta bukti/sumber ("cari sumbernya", "cari di web", "update terbaru", "versi", "rilis", dll.)
-        // ATAU 3. Pengguna melampirkan screenshot gambar tentang model/UI/berita
         if (rawAutonomousCalls.length === 0) {
-          const lowerRoundText = (currentRoundText || '').toLowerCase();
-          const lowerPrompt = (promptText || '').toLowerCase();
-          const derived = deriveAutonomousTarget(promptText, session);
-
-          if (derived.toolName === 'browse_web_page' && !executedToolSignatures.has(`browse:${(derived.target || '').trim().toLowerCase()}`)) {
-            rawAutonomousCalls = [{
-              function: {
-                name: 'browse_web_page',
-                arguments: { url: derived.target }
-              }
-            }];
-          } else if (!executedToolSignatures.has('search_web')) {
-            const isDenyingOrDoubtful = 
-              lowerRoundText.includes('belum ada rilis resmi') ||
-              lowerRoundText.includes('tidak ditemukan informasi resmi') ||
-              lowerRoundText.includes('tidak resmi') ||
-              lowerRoundText.includes('belum diumumkan') ||
-              lowerRoundText.includes('hanya rumor') ||
-              lowerRoundText.includes('tidak masuk akal') ||
-              lowerRoundText.includes('batas pengetahuan') ||
-              lowerRoundText.includes('cutoff') ||
-              lowerRoundText.includes('terakhir merilis grok') ||
-              lowerRoundText.includes('terakhir adalah grok') ||
-              lowerRoundText.includes('belum pernah merilis') ||
-              lowerRoundText.includes('belum dirilis') ||
-              lowerRoundText.includes('belum ada kabar') ||
-              lowerRoundText.includes('tidak ada informasi mengenai') ||
-              lowerRoundText.includes('belum tersedia') ||
-              lowerRoundText.includes('knowledge cutoff') ||
-              lowerRoundText.includes('last update') ||
-              lowerRoundText.includes('not have real-time') ||
-              lowerRoundText.includes('no real-time') ||
-              lowerRoundText.includes('cannot access the internet') ||
-              lowerRoundText.includes('no official announcement') ||
-              lowerRoundText.includes('has not been officially released') ||
-              lowerRoundText.includes('has not released') ||
-              lowerRoundText.includes('not yet released') ||
-              lowerRoundText.includes('has not announced');
-
-            const isExplicitSearchRequest = 
-              /\b(cari|carikan|search|browsing|brows|jelajahi|cek|check|find)\b/i.test(lowerPrompt) ||
-              /\b(update|rilis|release|kabar|berita|info|informasi|fitur|model|versi|version|roadmap)\b/i.test(lowerPrompt) ||
-              /\b(apakah|sudahkah|kapan)\b.*\b(ada|rilis|keluar|release|update)\b/i.test(lowerPrompt) ||
-              /\b(what(?:'s|\s+is)\s+new|latest\s+(?:update|news|model|version))\b/i.test(lowerPrompt) ||
-              /\bgrok\s*4\b/i.test(lowerPrompt) ||
-              /\b[a-z]+\s*[0-9]+(?:\.[0-9]+)+\b/i.test(lowerPrompt);
-
-            const hasImage = Array.isArray(rawImgs) ? rawImgs.length > 0 : Boolean(rawImgs);
-
-            if (isDenyingOrDoubtful || isExplicitSearchRequest || (hasImage && (lowerPrompt.includes('grok') || lowerPrompt.includes('model') || lowerPrompt.includes('fitur') || lowerPrompt.includes('apa')))) {
-              const searchSubject = (derived && derived.target) ? derived.target : (promptText || 'AI model update');
-              const qPlan = deriveBroadSearchQueries(searchSubject, currentRoundText);
-              const derivedQuery = qPlan.tech || qPlan.core;
-              rawAutonomousCalls = [{
-                function: {
-                  name: 'search_web',
-                  arguments: { query: derivedQuery }
-                }
-              }];
-            }
-          }
+          break; // Model selesai merumuskan respon tanpa pemanggilan tool tambahan
         }
 
         // Filter out duplicate or loop tool calls
@@ -5488,23 +5315,13 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
         const nowObj = new Date();
         const curDateStr = nowObj.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
         const curMonthStr = nowObj.toLocaleString('en-US', { month: 'long' }) + ' ' + nowObj.getFullYear();
-        const roundInstruction = `[INSTRUKSI FINAL - KALENDER AKTIF HARI INI: ${curDateStr}]:
-Seluruh data multi-sumber berita terkini & resmi telah lengkap dan disajikan di atas (Bebas Wikipedia agar data 100% mutakhir).
-WAJIB: Sajikan jawaban komprehensif, faktual, dan terperinci Anda kepada pengguna SEKARANG JUGA secara langsung TANPA memanggil 'search_web' atau 'browse_web_page' lagi!
-ATURAN ANTI-HALUSINASI, MODEL FRONTIER, & FAKTA RESMI MUTLAK:
-- HARI INI ADALAH ${curDateStr} (${curMonthStr}).
-- PRINSIP MODEL UNGGULAN (FRONTIER AI):
-  * OpenAI: Model reasoning terkuat adalah OpenAI o1 (dan o1-mini), serta model serbaguna multimodal terkuat adalah GPT-4o. (Catatan penting: Seri GPT-4.5, GPT-5, atau GPT-6 BELUM dirilis secara publik oleh OpenAI!).
-  * Anthropic: Model terkuat & terpintar adalah Claude 3.5 Sonnet dan Claude 3 Opus.
-  * Google: Model terkuat adalah Gemini 1.5 Pro dan Gemini 2.0 Flash / Pro.
-  * xAI: Model terkuat adalah Grok 2 dan Grok 3.
-  * DeepSeek: Model reasoning terkuat adalah DeepSeek-R1 dan model serbaguna DeepSeek-V3.
-  * Meta: Model open-weight terkuat adalah Llama 3.1 (405B) dan Llama 3.3 (70B).
-- Model-model unggulan di atas tetap sah memegang tahta sebagai model terkuat saat ini meskipun diumumkan beberapa bulan lalu, SELAMA belum ada suksesor resmi yang diluncurkan oleh lab pembuatnya.
-- DILARANG KERAS MENGARANG NAMA MODEL FIKTIF ATAU SERI KHAYALAN (seperti "GPT-6 Seri Sol dan Luna", "GPT-5.5 Pensiun", dll.)! Jika tidak ada model baru yang dirilis minggu ini, jelaskan fakta model resmi terkuat yang saat ini beroperasi.
-- BEDAKAN ANTARA FITUR PRODUK DAN KEKUATAN MODEL: Jika pengguna menanyakan model terkuat atau kapabilitas AI, jelaskan performa model (reasoning, benchmark MMLU, coding, matematika). JANGAN menjawab dengan berita fitur sampingan seperti iklan di ChatGPT, integrasi Word/Office, atau watermark Uni Eropa!
-- Berikan informasi berlandaskan fakta resmi. Jika ada hal yang belum diumumkan atau belum rilis, sampaikan secara jujur dan transparan bahwa versi tersebut belum ada.
-- Jangan cetak tag tool atau raw JSON apa pun.`;
+        const roundInstruction = `[INSTRUKSI SINTESIS FINAL - KALENDER AKTIF: ${curDateStr}]:
+Berikut adalah data hasil pencarian web terkini yang telah dihimpun untuk menjawab pertanyaan pengguna.
+WAJIB:
+1. Berikan jawaban yang komprehensif, faktual, akurat, dan terperinci berlandaskan 100% pada data hasil pencarian web di atas.
+2. DILARANG KERAS MENEBAK, BERSPEKULASI, ATAU BERHALUSINASI di luar fakta yang terverifikasi dari sumber web.
+3. Jawab langsung pertanyaan pengguna secara tuntas sekarang tanpa memanggil tool lagi.
+4. Dilarang mencetak tag tool atau format JSON mentah ke dalam jawaban.`;
 
         conversationChain.push({
           role: 'user',
@@ -6033,74 +5850,8 @@ ATURAN ANTI-HALUSINASI, MODEL FRONTIER, & FAKTA RESMI MUTLAK:
         const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
         let rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
 
-        // PROACTIVE TURN-1 TRIGGER (Anti-Refusal & Zero-Hallucination):
-        // Jika model tidak memanggil tool sendiri pada putaran 1, namun:
-        // 0. Pengguna memberikan URL langsung -> picu browse_web_page
-        // ATAU 1. Teks jawaban model menyangkal/meragukan rilis ("belum ada rilis resmi", "hanya rumor", "tidak masuk akal", dll.)
-        // ATAU 2. Pengguna meminta bukti/sumber ("cari sumbernya", "cari di web", "update terbaru", "versi", "rilis", dll.)
-        // ATAU 3. Pengguna melampirkan screenshot gambar tentang model/UI/berita
         if (rawAutonomousCalls.length === 0) {
-          const lowerRoundText = (currentRoundText || '').toLowerCase();
-          const lowerPrompt = (promptText || '').toLowerCase();
-          const derived = deriveAutonomousTarget(promptText, session);
-
-          if (derived.toolName === 'browse_web_page' && !executedToolSignatures.has(`browse:${(derived.target || '').trim().toLowerCase()}`)) {
-            rawAutonomousCalls = [{
-              function: {
-                name: 'browse_web_page',
-                arguments: { url: derived.target }
-              }
-            }];
-          } else if (!executedToolSignatures.has('search_web')) {
-            const isDenyingOrDoubtful = 
-              lowerRoundText.includes('belum ada rilis resmi') ||
-              lowerRoundText.includes('tidak ditemukan informasi resmi') ||
-              lowerRoundText.includes('tidak resmi') ||
-              lowerRoundText.includes('belum diumumkan') ||
-              lowerRoundText.includes('hanya rumor') ||
-              lowerRoundText.includes('tidak masuk akal') ||
-              lowerRoundText.includes('batas pengetahuan') ||
-              lowerRoundText.includes('cutoff') ||
-              lowerRoundText.includes('terakhir merilis grok') ||
-              lowerRoundText.includes('terakhir adalah grok') ||
-              lowerRoundText.includes('belum pernah merilis') ||
-              lowerRoundText.includes('belum dirilis') ||
-              lowerRoundText.includes('belum ada kabar') ||
-              lowerRoundText.includes('tidak ada informasi mengenai') ||
-              lowerRoundText.includes('belum tersedia') ||
-              lowerRoundText.includes('knowledge cutoff') ||
-              lowerRoundText.includes('last update') ||
-              lowerRoundText.includes('not have real-time') ||
-              lowerRoundText.includes('no real-time') ||
-              lowerRoundText.includes('cannot access the internet') ||
-              lowerRoundText.includes('no official announcement') ||
-              lowerRoundText.includes('has not been officially released') ||
-              lowerRoundText.includes('has not released') ||
-              lowerRoundText.includes('not yet released') ||
-              lowerRoundText.includes('has not announced');
-
-            const isExplicitSearchRequest = 
-              /\b(cari|carikan|search|browsing|brows|jelajahi|cek|check|find)\b/i.test(lowerPrompt) ||
-              /\b(update|rilis|release|kabar|berita|info|informasi|fitur|model|versi|version|roadmap)\b/i.test(lowerPrompt) ||
-              /\b(apakah|sudahkah|kapan)\b.*\b(ada|rilis|keluar|release|update)\b/i.test(lowerPrompt) ||
-              /\b(what(?:'s|\s+is)\s+new|latest\s+(?:update|news|model|version))\b/i.test(lowerPrompt) ||
-              /\bgrok\s*4\b/i.test(lowerPrompt) ||
-              /\b[a-z]+\s*[0-9]+(?:\.[0-9]+)+\b/i.test(lowerPrompt);
-
-            const hasImage = Array.isArray(rawImgs) ? rawImgs.length > 0 : Boolean(rawImgs);
-
-            if (isDenyingOrDoubtful || isExplicitSearchRequest || (hasImage && (lowerPrompt.includes('grok') || lowerPrompt.includes('model') || lowerPrompt.includes('fitur') || lowerPrompt.includes('apa')))) {
-              const searchSubject = (derived && derived.target) ? derived.target : (promptText || 'AI model update');
-              const qPlan = deriveBroadSearchQueries(searchSubject, currentRoundText);
-              const derivedQuery = qPlan.tech || qPlan.core;
-              rawAutonomousCalls = [{
-                function: {
-                  name: 'search_web',
-                  arguments: { query: derivedQuery }
-                }
-              }];
-            }
-          }
+          break; // Model selesai merumuskan respon tanpa pemanggilan tool tambahan
         }
 
         // Filter out duplicate or loop tool calls
@@ -6189,23 +5940,13 @@ ATURAN ANTI-HALUSINASI, MODEL FRONTIER, & FAKTA RESMI MUTLAK:
         const nowObj = new Date();
         const curDateStr = nowObj.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
         const curMonthStr = nowObj.toLocaleString('en-US', { month: 'long' }) + ' ' + nowObj.getFullYear();
-        const roundInstruction = `[INSTRUKSI FINAL - KALENDER AKTIF HARI INI: ${curDateStr}]:
-Seluruh data multi-sumber berita terkini & resmi telah lengkap dan disajikan di atas (Bebas Wikipedia agar data 100% mutakhir).
-WAJIB: Sajikan jawaban komprehensif, faktual, dan terperinci Anda kepada pengguna SEKARANG JUGA secara langsung TANPA memanggil 'search_web' atau 'browse_web_page' lagi!
-ATURAN ANTI-HALUSINASI, MODEL FRONTIER, & FAKTA RESMI MUTLAK:
-- HARI INI ADALAH ${curDateStr} (${curMonthStr}).
-- PRINSIP MODEL UNGGULAN (FRONTIER AI):
-  * OpenAI: Model reasoning terkuat adalah OpenAI o1 (dan o1-mini), serta model serbaguna multimodal terkuat adalah GPT-4o. (Catatan penting: Seri GPT-4.5, GPT-5, atau GPT-6 BELUM dirilis secara publik oleh OpenAI!).
-  * Anthropic: Model terkuat & terpintar adalah Claude 3.5 Sonnet dan Claude 3 Opus.
-  * Google: Model terkuat adalah Gemini 1.5 Pro dan Gemini 2.0 Flash / Pro.
-  * xAI: Model terkuat adalah Grok 2 dan Grok 3.
-  * DeepSeek: Model reasoning terkuat adalah DeepSeek-R1 dan model serbaguna DeepSeek-V3.
-  * Meta: Model open-weight terkuat adalah Llama 3.1 (405B) dan Llama 3.3 (70B).
-- Model-model unggulan di atas tetap sah memegang tahta sebagai model terkuat saat ini meskipun diumumkan beberapa bulan lalu, SELAMA belum ada suksesor resmi yang diluncurkan oleh lab pembuatnya.
-- DILARANG KERAS MENGARANG NAMA MODEL FIKTIF ATAU SERI KHAYALAN (seperti "GPT-6 Seri Sol dan Luna", "GPT-5.5 Pensiun", dll.)! Jika tidak ada model baru yang dirilis minggu ini, jelaskan fakta model resmi terkuat yang saat ini beroperasi.
-- BEDAKAN ANTARA FITUR PRODUK DAN KEKUATAN MODEL: Jika pengguna menanyakan model terkuat atau kapabilitas AI, jelaskan performa model (reasoning, benchmark MMLU, coding, matematika). JANGAN menjawab dengan berita fitur sampingan seperti iklan di ChatGPT, integrasi Word/Office, atau watermark Uni Eropa!
-- Berikan informasi berlandaskan fakta resmi. Jika ada hal yang belum diumumkan atau belum rilis, sampaikan secara jujur dan transparan bahwa versi tersebut belum ada.
-- Jangan cetak tag tool atau raw JSON apa pun.`;
+        const roundInstruction = `[INSTRUKSI SINTESIS FINAL - KALENDER AKTIF: ${curDateStr}]:
+Berikut adalah data hasil pencarian web terkini yang telah dihimpun untuk menjawab pertanyaan pengguna.
+WAJIB:
+1. Berikan jawaban yang komprehensif, faktual, akurat, dan terperinci berlandaskan 100% pada data hasil pencarian web di atas.
+2. DILARANG KERAS MENEBAK, BERSPEKULASI, ATAU BERHALUSINASI di luar fakta yang terverifikasi dari sumber web.
+3. Jawab langsung pertanyaan pengguna secara tuntas sekarang tanpa memanggil tool lagi.
+4. Dilarang mencetak tag tool atau format JSON mentah ke dalam jawaban.`;
 
         conversationChain.push({
           role: 'user',
