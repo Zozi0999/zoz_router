@@ -150,6 +150,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       topP: 0.9,
       maxTokens: 8192,
       systemPrompt: SYSTEM_PRESETS.kaisar,
+      customSystemPrompt: '',
       activePreset: 'kaisar',
       autoPolicy: 'local_first'
     },
@@ -873,6 +874,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const savedSettings = localStorage.getItem('zoz_router_settings_v1');
       if (savedSettings) {
         STATE.settings = { ...STATE.settings, ...JSON.parse(savedSettings) };
+      }
+
+      // Pastikan customSystemPrompt terinisialisasi jika user sebelumnya sudah punya persona kustom
+      if (typeof STATE.settings.customSystemPrompt !== 'string') {
+        const isStandardPreset = Object.keys(SYSTEM_PRESETS).some(k => k !== 'default' && SYSTEM_PRESETS[k] === STATE.settings.systemPrompt);
+        if (!isStandardPreset && STATE.settings.systemPrompt) {
+          STATE.settings.customSystemPrompt = STATE.settings.systemPrompt;
+        } else {
+          STATE.settings.customSystemPrompt = '';
+        }
       }
 
       // Auto-Migration: Alihkan endpoint lokal lama ke Ollama Cloud resmi (https://ollama.com)
@@ -8798,18 +8809,42 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
   // ==================== SYSTEM PRESET HANDLER ====================
   function applySystemPreset(presetKey) {
+    const currentVal = els.settingSystemPrompt ? els.settingSystemPrompt.value : '';
+    const isPresetText = Object.keys(SYSTEM_PRESETS).some(k => k !== 'default' && SYSTEM_PRESETS[k].trim() === currentVal.trim());
+
     if (presetKey === 'default' || !presetKey) {
+      // Simpan backup prompt kustom jika ada teks kustom di textarea yang belum disimpan
+      if (currentVal.trim() && !isPresetText) {
+        STATE.settings.customSystemPrompt = currentVal;
+      }
       STATE.settings.systemPrompt = '';
       STATE.settings.activePreset = 'default';
-      els.settingSystemPrompt.value = '';
-      showToast('Persona dinonaktifkan (Default).');
+      // JANGAN HAPUS persona kustom! Tetap pertahankan teks custom yang tersimpan di textarea
+      if (els.settingSystemPrompt) {
+        els.settingSystemPrompt.value = STATE.settings.customSystemPrompt || '';
+      }
+      showToast('Persona dinonaktifkan (Default). Prompt kustom tetap disimpan.');
     } else if (presetKey === 'custom') {
       STATE.settings.activePreset = 'custom';
+      // Pulihkan prompt kustom yang tersimpan, atau ambil dari textarea
+      const restored = STATE.settings.customSystemPrompt || currentVal.trim() || '';
+      STATE.settings.systemPrompt = restored;
+      STATE.settings.customSystemPrompt = restored;
+      if (els.settingSystemPrompt) {
+        els.settingSystemPrompt.value = restored;
+      }
+      showToast(restored ? 'Persona Kustom diaktifkan kembali.' : 'Mode Persona Kustom aktif.');
       setTimeout(() => els.settingSystemPrompt?.focus(), 50);
     } else if (SYSTEM_PRESETS[presetKey] !== undefined) {
+      // Simpan backup prompt kustom jika berpindah dari custom/teks kustom
+      if (currentVal.trim() && !isPresetText) {
+        STATE.settings.customSystemPrompt = currentVal;
+      }
       STATE.settings.systemPrompt = SYSTEM_PRESETS[presetKey];
       STATE.settings.activePreset = presetKey;
-      els.settingSystemPrompt.value = STATE.settings.systemPrompt;
+      if (els.settingSystemPrompt) {
+        els.settingSystemPrompt.value = STATE.settings.systemPrompt;
+      }
       showToast(`Persona aktif: ${presetKey.toUpperCase()}`);
     }
     updatePresetBanner();
@@ -10609,7 +10644,17 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (els.valTemperature) els.valTemperature.innerText = STATE.settings.temperature ?? 0.7;
     if (els.paramTopP) els.paramTopP.value = STATE.settings.topP ?? 0.9;
     if (els.valTopP) els.valTopP.innerText = STATE.settings.topP ?? 0.9;
-    if (els.settingSystemPrompt) els.settingSystemPrompt.value = STATE.settings.systemPrompt || '';
+    if (els.settingSystemPrompt) {
+      if (STATE.settings.activePreset === 'default') {
+        els.settingSystemPrompt.value = STATE.settings.customSystemPrompt || '';
+      } else if (STATE.settings.activePreset === 'custom') {
+        els.settingSystemPrompt.value = STATE.settings.customSystemPrompt || STATE.settings.systemPrompt || '';
+      } else if (STATE.settings.activePreset && SYSTEM_PRESETS[STATE.settings.activePreset]) {
+        els.settingSystemPrompt.value = SYSTEM_PRESETS[STATE.settings.activePreset];
+      } else {
+        els.settingSystemPrompt.value = STATE.settings.systemPrompt || '';
+      }
+    }
     if (els.settingAutoPolicy) els.settingAutoPolicy.value = STATE.settings.autoPolicy || 'local_first';
     
     updatePresetPillUI();
@@ -11290,9 +11335,22 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     });
 
     els.settingSystemPrompt?.addEventListener('input', () => {
-      const currentVal = els.settingSystemPrompt.value.trim();
-      const matchedKey = Object.keys(SYSTEM_PRESETS).find(k => k !== 'default' && SYSTEM_PRESETS[k].trim() === currentVal);
-      STATE.settings.activePreset = matchedKey || (currentVal ? 'custom' : 'default');
+      const currentVal = els.settingSystemPrompt.value;
+      const trimmed = currentVal.trim();
+      const matchedKey = Object.keys(SYSTEM_PRESETS).find(k => k !== 'default' && SYSTEM_PRESETS[k].trim() === trimmed);
+
+      if (matchedKey) {
+        STATE.settings.activePreset = matchedKey;
+        STATE.settings.systemPrompt = SYSTEM_PRESETS[matchedKey];
+      } else if (trimmed) {
+        STATE.settings.activePreset = 'custom';
+        STATE.settings.systemPrompt = currentVal;
+        STATE.settings.customSystemPrompt = currentVal;
+      } else {
+        STATE.settings.activePreset = 'default';
+        STATE.settings.systemPrompt = '';
+        STATE.settings.customSystemPrompt = '';
+      }
       updatePresetPillUI();
     });
 
@@ -11502,10 +11560,31 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (els.paramTemperature) STATE.settings.temperature = parseFloat(els.paramTemperature.value);
       if (els.paramTopP) STATE.settings.topP = parseFloat(els.paramTopP.value);
       if (els.settingSystemPrompt) {
-        const pVal = els.settingSystemPrompt.value.trim();
-        STATE.settings.systemPrompt = pVal;
+        const rawVal = els.settingSystemPrompt.value;
+        const pVal = rawVal.trim();
         const matchedKey = Object.keys(SYSTEM_PRESETS).find(k => k !== 'default' && SYSTEM_PRESETS[k].trim() === pVal);
-        STATE.settings.activePreset = matchedKey || (pVal ? 'custom' : 'default');
+
+        if (!matchedKey && pVal) {
+          STATE.settings.customSystemPrompt = rawVal;
+        }
+
+        if (STATE.settings.activePreset === 'default') {
+          // Mode Default dipertahankan (tanpa persona aktif ke AI), prompt kustom tetap aman di memori
+          STATE.settings.systemPrompt = '';
+        } else if (STATE.settings.activePreset === 'custom') {
+          STATE.settings.systemPrompt = rawVal;
+          STATE.settings.customSystemPrompt = rawVal;
+        } else if (matchedKey) {
+          STATE.settings.activePreset = matchedKey;
+          STATE.settings.systemPrompt = SYSTEM_PRESETS[matchedKey];
+        } else if (pVal) {
+          STATE.settings.activePreset = 'custom';
+          STATE.settings.systemPrompt = rawVal;
+          STATE.settings.customSystemPrompt = rawVal;
+        } else {
+          STATE.settings.activePreset = 'default';
+          STATE.settings.systemPrompt = '';
+        }
       }
       if (els.settingAutoPolicy) STATE.settings.autoPolicy = els.settingAutoPolicy.value;
       
