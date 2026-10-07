@@ -3327,7 +3327,11 @@ const server = http.createServer(async (req, res) => {
 
   // OpenRouter: Get Model List
   if (pathname === '/api/openrouter/models' && method === 'GET') {
-    const authHeader = req.headers['authorization'];
+    let authHeader = req.headers['authorization'];
+    if (!authHeader) {
+      const qKey = reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey');
+      if (qKey) authHeader = `Bearer ${qKey}`;
+    }
     const options = {
       hostname: 'openrouter.ai',
       port: 443,
@@ -3372,7 +3376,11 @@ const server = http.createServer(async (req, res) => {
 
   // OpenRouter: Validate API Key / Check Auth Status
   if (pathname === '/api/openrouter/auth-check' && method === 'GET') {
-    const authHeader = req.headers['authorization'];
+    let authHeader = req.headers['authorization'];
+    if (!authHeader) {
+      const qKey = reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey');
+      if (qKey) authHeader = `Bearer ${qKey}`;
+    }
     if (!authHeader) {
       return sendJSON(res, 401, { error: 'Authorization header is required' });
     }
@@ -3421,7 +3429,11 @@ const server = http.createServer(async (req, res) => {
 
   // OpenRouter: Get Real-Time Credits & Balance
   if (pathname === '/api/openrouter/credits' && method === 'GET') {
-    const authHeader = req.headers['authorization'];
+    let authHeader = req.headers['authorization'];
+    if (!authHeader) {
+      const qKey = reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey');
+      if (qKey) authHeader = `Bearer ${qKey}`;
+    }
     if (!authHeader) {
       return sendJSON(res, 401, { error: 'Authorization header is required' });
     }
@@ -3654,10 +3666,12 @@ const server = http.createServer(async (req, res) => {
   }
 
   fs.stat(filePath, (err, stats) => {
+    if (res.headersSent || res.writableEnded || res.destroyed) return;
     if (err || !stats.isFile()) {
       // Fallback for SPA routing to index.html if file doesn't exist
       const indexPath = path.join(PUBLIC_DIR, 'index.html');
       fs.stat(indexPath, (idxStatErr, idxStats) => {
+        if (res.headersSent || res.writableEnded || res.destroyed) return;
         if (idxStatErr || !idxStats.isFile()) {
           res.writeHead(404, { 'Content-Type': 'text/plain' });
           return res.end('404 Not Found');
@@ -3669,6 +3683,7 @@ const server = http.createServer(async (req, res) => {
         });
         if (method === 'HEAD') return res.end();
         fs.readFile(indexPath, (idxErr, content) => {
+          if (res.headersSent || res.writableEnded || res.destroyed) return;
           if (idxErr) return res.end();
           res.end(content);
         });
@@ -3687,6 +3702,7 @@ const server = http.createServer(async (req, res) => {
     if (method === 'HEAD') return res.end();
 
     fs.readFile(filePath, (readErr, content) => {
+      if (res.headersSent || res.writableEnded || res.destroyed) return;
       if (readErr) {
         return sendJSON(res, 500, { error: 'File read error' });
       }

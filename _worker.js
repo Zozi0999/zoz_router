@@ -104,7 +104,7 @@ export default {
     if (url.pathname === '/api/web-search') {
       try {
         let query = url.searchParams.get('q') || url.searchParams.get('query') || '';
-        let apiKey = request.headers.get('x-serper-key') || '';
+        let apiKey = request.headers.get('x-serper-key') || request.headers.get('x-api-key') || url.searchParams.get('apiKey') || url.searchParams.get('key') || '';
         if (request.method === 'POST') {
           const body = await request.json().catch(() => ({}));
           query = body.query || body.q || query;

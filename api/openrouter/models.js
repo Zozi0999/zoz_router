@@ -6,8 +6,13 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
   try {
+    let authHeader = req.headers.authorization;
+    if (!authHeader) {
+      const qKey = req.query?.key || req.query?.apiKey;
+      if (qKey) authHeader = `Bearer ${qKey}`;
+    }
     const headers = {};
-    if (req.headers.authorization) headers['Authorization'] = req.headers.authorization;
+    if (authHeader) headers['Authorization'] = authHeader;
 
     const response = await fetch('https://openrouter.ai/api/v1/models', { headers });
     const data = await response.json();

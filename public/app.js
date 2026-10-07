@@ -3926,7 +3926,7 @@ ${organicBlock}
 
   // ==================== DISPATCH / STREAMING ENGINE ====================
   async function handleSendPrompt() {
-    const rawText = els.promptInput.value.trim();
+    const rawText = els.promptInput ? els.promptInput.value.trim() : '';
     const images = [...(STATE.attachedImages || [])];
     const image = images.length > 0 ? images[0] : null;
     const docs = [...(STATE.attachedDocs || [])];
@@ -3939,8 +3939,10 @@ ${organicBlock}
     if (trimmedLow === '/chat' || trimmedLow === '/teks' || trimmedLow === '/text') {
       STATE.isImageGenMode = false;
       updateImageGenModeUI();
-      els.promptInput.value = '';
-      autoResizeTextarea(els.promptInput);
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+      }
       showToast('Mode percakapan standar aktif.');
       AudioEngine.click();
       return;
@@ -3948,8 +3950,10 @@ ${organicBlock}
     if (trimmedLow === '/img' || trimmedLow === '/image' || trimmedLow === '/gambar') {
       STATE.isImageGenMode = true;
       updateImageGenModeUI();
-      els.promptInput.value = '';
-      autoResizeTextarea(els.promptInput);
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+      }
       showToast('Mode AI Image Studio aktif. Silakan ketik deskripsi visual!');
       AudioEngine.click();
       return;
@@ -3963,7 +3967,9 @@ ${organicBlock}
     }
 
     const session = getActiveSession();
-    els.welcomeHero.style.display = 'none';
+    if (els.welcomeHero) {
+      els.welcomeHero.style.display = 'none';
+    }
 
     // Build user message object
     const docsMeta = docs.map(d => ({ name: d.name, size: d.size }));
@@ -3999,8 +4005,10 @@ ${organicBlock}
     }
 
     // Reset input & attachments
-    els.promptInput.value = '';
-    autoResizeTextarea(els.promptInput);
+    if (els.promptInput) {
+      els.promptInput.value = '';
+      autoResizeTextarea(els.promptInput);
+    }
     STATE.attachedDocs = [];
     clearAttachedImages();
     renderAttachmentPreviews();
@@ -5273,7 +5281,10 @@ ${organicBlock}
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          buffer += decoder.decode();
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -5303,6 +5314,27 @@ ${organicBlock}
             });
           }
         }
+      }
+
+      if (buffer && buffer.trim()) {
+        try {
+          const parsed = JSON.parse(buffer.trim());
+          if (parsed.error) {
+            const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
+            throw new Error(errStr);
+          }
+          if (parsed.done_reason) doneReason = parsed.done_reason;
+          if (parsed.message?.content) {
+            if (!firstTokenTime) firstTokenTime = performance.now();
+            tokenCount++;
+            streamRenderer.append(parsed.message.content);
+          }
+          if (parsed.message?.tool_calls && Array.isArray(parsed.message.tool_calls)) {
+            parsed.message.tool_calls.forEach(tc => {
+              accumulatedToolCalls.push(tc);
+            });
+          }
+        } catch (_) {}
       }
 
       fullText = streamRenderer.finish();
@@ -5337,8 +5369,12 @@ ${organicBlock}
           if (toolName === 'browse_web_page') {
             let tUrl = '';
             try {
-              const p = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : (call.function.arguments || {});
-              tUrl = p.url || p.target || p.link || (typeof p === 'string' ? p : '');
+              const raw = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : call.function.arguments;
+              if (raw && typeof raw === 'object') {
+                tUrl = raw.url || raw.target || raw.link || '';
+              } else if (typeof raw === 'string') {
+                tUrl = raw;
+              }
             } catch (_) {
               tUrl = String(call.function.arguments || '');
             }
@@ -5368,7 +5404,13 @@ ${organicBlock}
           const toolName = call.function.name;
           let previewArg = '';
           try {
-            const parsedArgs = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : (call.function.arguments || {});
+            const raw = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : call.function.arguments;
+            let parsedArgs = {};
+            if (raw && typeof raw === 'object') {
+              parsedArgs = raw;
+            } else if (raw !== null && raw !== undefined) {
+              parsedArgs = { query: String(raw), url: String(raw) };
+            }
             previewArg = parsedArgs.query || parsedArgs.url || JSON.stringify(parsedArgs);
           } catch (_) {
             previewArg = String(call.function.arguments || '');
@@ -5379,8 +5421,12 @@ ${organicBlock}
           } else if (toolName === 'browse_web_page') {
             let tUrl = '';
             try {
-              const p = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : (call.function.arguments || {});
-              tUrl = p.url || p.target || p.link || (typeof p === 'string' ? p : '');
+              const raw = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : call.function.arguments;
+              if (raw && typeof raw === 'object') {
+                tUrl = raw.url || raw.target || raw.link || '';
+              } else if (typeof raw === 'string') {
+                tUrl = raw;
+              }
             } catch (_) {
               tUrl = String(call.function.arguments || '');
             }
@@ -5868,7 +5914,10 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          buffer += decoder.decode();
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -5943,6 +5992,32 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         }
       }
 
+      if (buffer && buffer.trim()) {
+        const trimmed = buffer.trim();
+        if (trimmed && trimmed.startsWith('data:')) {
+          const jsonStr = trimmed.replace(/^data:\s*/, '');
+          if (jsonStr !== '[DONE]') {
+            try {
+              const parsed = JSON.parse(jsonStr);
+              if (parsed.error) {
+                const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
+                const rawUpstream = parsed.error?.metadata?.raw;
+                throw new Error(rawUpstream ? `${errStr} (${rawUpstream})` : errStr);
+              }
+              if (parsed.choices?.[0]?.finish_reason) {
+                finishReason = parsed.choices[0].finish_reason;
+              }
+              const delta = parsed.choices?.[0]?.delta?.content;
+              if (delta) {
+                if (!firstTokenTime) firstTokenTime = performance.now();
+                tokenCount++;
+                streamRenderer.append(delta);
+              }
+            } catch (_) {}
+          }
+        }
+      }
+
       fullText = streamRenderer.finish();
 
       // ==================== UNIVERSAL AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
@@ -5975,8 +6050,12 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           if (toolName === 'browse_web_page') {
             let tUrl = '';
             try {
-              const p = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : (call.function.arguments || {});
-              tUrl = p.url || p.target || p.link || (typeof p === 'string' ? p : '');
+              const raw = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : call.function.arguments;
+              if (raw && typeof raw === 'object') {
+                tUrl = raw.url || raw.target || raw.link || '';
+              } else if (typeof raw === 'string') {
+                tUrl = raw;
+              }
             } catch (_) {
               tUrl = String(call.function.arguments || '');
             }
@@ -6006,7 +6085,13 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           const toolName = call.function.name;
           let previewArg = '';
           try {
-            const parsedArgs = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : (call.function.arguments || {});
+            const raw = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : call.function.arguments;
+            let parsedArgs = {};
+            if (raw && typeof raw === 'object') {
+              parsedArgs = raw;
+            } else if (raw !== null && raw !== undefined) {
+              parsedArgs = { query: String(raw), url: String(raw) };
+            }
             previewArg = parsedArgs.query || parsedArgs.url || JSON.stringify(parsedArgs);
           } catch (_) {
             previewArg = String(call.function.arguments || '');
@@ -6017,8 +6102,12 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           } else if (toolName === 'browse_web_page') {
             let tUrl = '';
             try {
-              const p = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : (call.function.arguments || {});
-              tUrl = p.url || p.target || p.link || (typeof p === 'string' ? p : '');
+              const raw = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : call.function.arguments;
+              if (raw && typeof raw === 'object') {
+                tUrl = raw.url || raw.target || raw.link || '';
+              } else if (typeof raw === 'string') {
+                tUrl = raw;
+              }
             } catch (_) {
               tUrl = String(call.function.arguments || '');
             }
@@ -6994,7 +7083,10 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          buffer += decoder.decode();
+          break;
+        }
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop();
@@ -7023,6 +7115,30 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           }
         }
       }
+
+      if (buffer && buffer.trim()) {
+        const trimmed = buffer.trim();
+        if (trimmed && trimmed !== 'data: [DONE]' && trimmed.startsWith('data: ')) {
+          try {
+            const parsed = JSON.parse(trimmed.replace(/^data:\s*/, ''));
+            if (parsed.error) {
+              const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
+              throw new Error(errStr);
+            }
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) {
+              fullText += delta;
+              if (streamRenderer) streamRenderer.append(delta);
+              if (typeof onChunk === 'function') {
+                try { onChunk(delta, fullText); } catch (e) {}
+              }
+            }
+          } catch (e) {
+            if (e.message && !e.message.includes('JSON')) throw e;
+          }
+        }
+      }
+
       const renderedText = streamRenderer ? streamRenderer.finish() : fullText;
       return fullText || renderedText;
     } else {
@@ -7066,7 +7182,10 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          buffer += decoder.decode();
+          break;
+        }
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop();
@@ -7092,6 +7211,27 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           }
         }
       }
+
+      if (buffer && buffer.trim()) {
+        try {
+          const parsed = JSON.parse(buffer.trim());
+          if (parsed.error) {
+            const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
+            throw new Error(errStr);
+          }
+          if (parsed.message?.content) {
+            const chunk = parsed.message.content;
+            fullText += chunk;
+            if (streamRenderer) streamRenderer.append(chunk);
+            if (typeof onChunk === 'function') {
+              try { onChunk(chunk, fullText); } catch (e) {}
+            }
+          }
+        } catch (e) {
+          if (e.message && !e.message.includes('JSON')) throw e;
+        }
+      }
+
       const renderedText = streamRenderer ? streamRenderer.finish() : fullText;
       return fullText || renderedText;
     }
@@ -10890,8 +11030,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     els.stopGenerationBtn.addEventListener('click', stopGeneration);
     els.neutronCrownBtn?.addEventListener('click', () => togglePromptVisibility());
 
-    els.promptInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
+    els.promptInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
         e.preventDefault();
         handleSendPrompt();
       }
