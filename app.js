@@ -955,7 +955,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     try {
       const savedSettings = localStorage.getItem('zoz_router_settings_v1');
       if (savedSettings) {
-        STATE.settings = { ...STATE.settings, ...JSON.parse(savedSettings) };
+        try {
+          const parsedSettings = JSON.parse(savedSettings);
+          if (parsedSettings && typeof parsedSettings === 'object') {
+            STATE.settings = { ...STATE.settings, ...parsedSettings };
+          }
+        } catch (parseErr) {
+          console.warn('Gagal mengurai zoz_router_settings_v1 dari localStorage:', parseErr.message);
+        }
       }
 
       // Pastikan customSystemPrompt terinisialisasi jika user sebelumnya sudah punya persona kustom
@@ -9157,7 +9164,14 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
               throw new Error(data.error || 'Server tidak mengembalikan data gambar');
             }
           } else {
-            throw new Error(`Server HTTP ${res.status}`);
+            let errorMsg = `Server HTTP ${res.status}`;
+            try {
+              const errData = await res.json();
+              if (errData && errData.error) {
+                errorMsg = typeof errData.error === 'object' ? (errData.error.message || JSON.stringify(errData.error)) : errData.error;
+              }
+            } catch (_) {}
+            throw new Error(errorMsg);
           }
         } catch (serverErr) {
           if (serverErr.name === 'AbortError') throw serverErr;
@@ -9803,10 +9817,14 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     },
 
     extractYouTubeId(url) {
-      if (!url) return null;
-      const reg = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/|youtube\.com\/live\/)([^"&?\/\s]{11})/i;
-      const match = url.match(reg);
-      return match ? match[1] : null;
+      if (!url || typeof url !== 'string') return null;
+      const trimmed = url.trim();
+      if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return trimmed;
+      const match = trimmed.match(/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+      if (match && match[1]) return match[1];
+      const fallbackReg = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/|youtube\.com\/live\/)([^"&?\/\s]{11})/i;
+      const fallbackMatch = trimmed.match(fallbackReg);
+      return fallbackMatch ? fallbackMatch[1] : null;
     },
 
     playYouTube(videoId, customTitle = null) {

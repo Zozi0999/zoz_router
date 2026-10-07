@@ -306,7 +306,7 @@ export default {
         }
 
         if (!prompt || !prompt.trim()) {
-          return new Response(JSON.stringify({ error: 'Parameter `prompt` diperlukan untuk menghasilkan gambar.' }), {
+          return new Response(JSON.stringify({ success: false, error: 'Parameter `prompt` diperlukan untuk menghasilkan gambar.' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
           });
@@ -378,7 +378,7 @@ export default {
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
       } catch (e) {
-        return new Response(JSON.stringify({ error: e.message }), {
+        return new Response(JSON.stringify({ success: false, error: e.message }), {
           status: 500,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
@@ -398,7 +398,7 @@ export default {
           if (body.num || body.limit) num = parseInt(body.num || body.limit, 10);
         }
         if (!query || !query.trim()) {
-          return new Response(JSON.stringify({ error: 'Parameter query `q` atau body `{ query }` diperlukan.' }), {
+          return new Response(JSON.stringify({ success: false, error: 'Parameter query `q` atau body `{ query }` diperlukan.' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
           });
@@ -419,7 +419,7 @@ export default {
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
       } catch (e) {
-        return new Response(JSON.stringify({ error: e.message }), {
+        return new Response(JSON.stringify({ success: false, error: e.message }), {
           status: 500,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });

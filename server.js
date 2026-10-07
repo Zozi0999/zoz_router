@@ -500,6 +500,14 @@ async function fetchYouTubeInfo(rawUrl) {
   const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`;
 
   return new Promise((resolve) => {
+    let settled = false;
+    const safeResolve = (data) => {
+      if (!settled) {
+        settled = true;
+        resolve(data);
+      }
+    };
+
     const req = https.get(oembedUrl, {
       timeout: 8000,
       headers: {
@@ -508,7 +516,7 @@ async function fetchYouTubeInfo(rawUrl) {
     }, (res) => {
       if (res.statusCode === 404) {
         res.resume();
-        return resolve({
+        return safeResolve({
           success: false,
           error: 'Video YouTube tidak ditemukan atau berstatus privat/dihapus (HTTP 404).',
           url: canonicalUrl,
@@ -517,7 +525,7 @@ async function fetchYouTubeInfo(rawUrl) {
       }
       if (res.statusCode !== 200) {
         res.resume();
-        return resolve({
+        return safeResolve({
           success: false,
           error: `Gagal mengambil data dari YouTube oEmbed (HTTP ${res.statusCode})`,
           url: canonicalUrl,
@@ -546,9 +554,9 @@ async function fetchYouTubeInfo(rawUrl) {
             youtubeInfoCache.delete(firstKey);
           }
           youtubeInfoCache.set(canonicalUrl, result);
-          resolve(result);
+          safeResolve(result);
         } catch (e) {
-          resolve({
+          safeResolve({
             success: false,
             error: 'Gagal mengurai respons JSON YouTube oEmbed: ' + e.message,
             url: canonicalUrl,
@@ -558,7 +566,7 @@ async function fetchYouTubeInfo(rawUrl) {
       });
 
       res.on('error', (err) => {
-        resolve({
+        safeResolve({
           success: false,
           error: 'Network error YouTube oEmbed stream: ' + err.message,
           url: canonicalUrl,
@@ -569,7 +577,7 @@ async function fetchYouTubeInfo(rawUrl) {
 
     req.on('timeout', () => {
       req.destroy();
-      resolve({
+      safeResolve({
         success: false,
         error: 'Timeout saat menghubungi YouTube oEmbed (8s).',
         url: canonicalUrl,
@@ -578,7 +586,7 @@ async function fetchYouTubeInfo(rawUrl) {
     });
 
     req.on('error', (err) => {
-      resolve({
+      safeResolve({
         success: false,
         error: 'Network error YouTube oEmbed: ' + err.message,
         url: canonicalUrl,
@@ -1611,6 +1619,14 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
 
 function fallbackJinaReader(targetUrl, maxChars = 5000) {
   return new Promise((resolve) => {
+    let settled = false;
+    const safeResolve = (data) => {
+      if (!settled) {
+        settled = true;
+        resolve(data);
+      }
+    };
+
     try {
       const req = https.get(`https://r.jina.ai/${targetUrl}`, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 8000 }, (res) => {
         let md = '';
@@ -1619,7 +1635,7 @@ function fallbackJinaReader(targetUrl, maxChars = 5000) {
           if (res.statusCode === 200 && md.length > 50) {
             const titleMatch = md.match(/^Title:\s*(.+)$/m) || md.match(/^#\s+(.+)$/m);
             const title = titleMatch ? cleanHtmlText(titleMatch[1].trim()) : extractDomainSafe(targetUrl);
-            resolve({
+            safeResolve({
               url: targetUrl,
               title,
               text: md.substring(0, maxChars),
@@ -1627,14 +1643,14 @@ function fallbackJinaReader(targetUrl, maxChars = 5000) {
               links: []
             });
           } else {
-            resolve({ url: targetUrl, error: 'Empty content', text: '' });
+            safeResolve({ url: targetUrl, error: 'Empty content', text: '' });
           }
         });
-        res.on('error', () => resolve({ url: targetUrl, error: 'Jina error', text: '' }));
+        res.on('error', () => safeResolve({ url: targetUrl, error: 'Jina error', text: '' }));
       });
-      req.on('timeout', () => { req.destroy(); resolve({ url: targetUrl, error: 'Jina timeout', text: '' }); });
-      req.on('error', () => resolve({ url: targetUrl, error: 'Jina request error', text: '' }));
-    } catch (_) { resolve({ url: targetUrl, error: 'Jina exception', text: '' }); }
+      req.on('timeout', () => { req.destroy(); safeResolve({ url: targetUrl, error: 'Jina timeout', text: '' }); });
+      req.on('error', () => safeResolve({ url: targetUrl, error: 'Jina request error', text: '' }));
+    } catch (_) { safeResolve({ url: targetUrl, error: 'Jina exception', text: '' }); }
   });
 }
 
@@ -2996,7 +3012,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (!prompt || !prompt.trim()) {
-        return sendJSON(res, 400, { error: 'Parameter `prompt` diperlukan untuk menghasilkan gambar.' });
+        return sendJSON(res, 400, { success: false, error: 'Parameter `prompt` diperlukan untuk menghasilkan gambar.' });
       }
 
       const cleanPrompt = prompt.trim();

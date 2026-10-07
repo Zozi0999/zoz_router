@@ -39,7 +39,7 @@ module.exports = async function handler(req, res) {
     }
 
     if (!prompt || !prompt.trim()) {
-      return res.status(400).json({ error: 'Parameter `prompt` diperlukan untuk menghasilkan gambar.' });
+      return res.status(400).json({ success: false, error: 'Parameter `prompt` diperlukan untuk menghasilkan gambar.' });
     }
 
     const cleanPrompt = prompt.trim();
@@ -116,6 +116,6 @@ module.exports = async function handler(req, res) {
       duration: `${duration}s`
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 };
