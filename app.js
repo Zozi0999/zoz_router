@@ -2399,7 +2399,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     let sourcesHtml = '';
     if (sources && Array.isArray(sources) && sources.length > 0 && role === 'assistant' && !isActuallyDeepResearch) {
-      sourcesHtml = buildSourcesSectionHtml(sources, false);
+      sourcesHtml = buildSourcesSectionHtml(sources, true);
     }
 
     const metaContent = (isActuallyDeepResearch && role === 'assistant')
@@ -2967,20 +2967,20 @@ ${organicBlock}
     }
   }
 
-  function buildSourcesSectionHtml(sources, collapsed = false) {
+  function buildSourcesSectionHtml(sources, collapsed = true) {
     return `
       <div class="msg-sources-section${collapsed ? ' collapsed' : ''}">
-        <button type="button" class="msg-sources-title msg-sources-toggle" aria-expanded="${collapsed ? 'false' : 'true'}" title="Buka / tutup daftar referensi web">
+        <button type="button" class="msg-sources-title msg-sources-toggle" aria-expanded="${collapsed ? 'false' : 'true'}" title="Πηγαὶ Ἀναφορᾶς Δικτύου (Ἀποκάλυψις / Ἀπόκρυψις)">
           <i class="fa-solid fa-earth-americas" style="color:var(--neon-cyan);"></i>
-          <span>Sumber Referensi Web (${sources.length})</span>
-          <span class="sources-toggle-label">${collapsed ? 'Tampilkan' : 'Sembunyikan'}</span>
+          <span>Πηγαὶ Ἀναφορᾶς Δικτύου (${sources.length})</span>
+          <span class="sources-toggle-label">${collapsed ? 'Ἀποκάλυψις' : 'Ἀπόκρυψις'}</span>
           <i class="fa-solid fa-chevron-down sources-toggle-chevron"></i>
         </button>
         <div class="msg-sources-grid">
           ${sources.map((s, i) => `
             <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" class="msg-source-chip" title="${escapeHtml((s.title || '') + (s.snippet ? ' - ' + s.snippet : ''))}">
               <span class="source-index">${i + 1}</span>
-              <span class="source-title">${escapeHtml(s.title || s.domain || 'Sumber Web')}</span>
+              <span class="source-title">${escapeHtml(s.title || s.domain || 'Πηγὴ Δικτύου')}</span>
               <span class="source-domain">${escapeHtml(s.domain || '')}</span>
             </a>
           `).join('')}
@@ -2989,7 +2989,7 @@ ${organicBlock}
     `;
   }
 
-  // Delegasi klik: buka / tutup daftar referensi web di bubble chat
+  // Delegasi klik: buka / tutup daftar referensi web di bubble chat (Ancient Greek)
   document.addEventListener('click', (e) => {
     const toggle = e.target.closest ? e.target.closest('.msg-sources-toggle') : null;
     if (!toggle) return;
@@ -2998,11 +2998,11 @@ ${organicBlock}
     const isCollapsed = section.classList.toggle('collapsed');
     toggle.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
     const label = toggle.querySelector('.sources-toggle-label');
-    if (label) label.textContent = isCollapsed ? 'Tampilkan' : 'Sembunyikan';
+    if (label) label.textContent = isCollapsed ? 'Ἀποκάλυψις' : 'Ἀπόκρυψις';
     AudioEngine.click();
   });
 
-  function renderMessageSources(row, sources, collapsed = false) {
+  function renderMessageSources(row, sources, collapsed = true) {
     if (!row || !sources || !Array.isArray(sources) || sources.length === 0) return;
     const bubble = row.querySelector('.message-bubble');
     if (!bubble) return;
@@ -5488,7 +5488,7 @@ ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
       enhanceChatImages(bubbleText);
       if (webSources && webSources.length > 0) {
         webSources = deduplicateSources(webSources);
-        renderMessageSources(assistantRow, webSources);
+        renderMessageSources(assistantRow, webSources, true);
       }
       renderYouTubeCardsForMessage(assistantRow, fullText);
       metaBox.innerHTML = `
@@ -5527,7 +5527,7 @@ ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
           enhanceCodeBlocks(bubbleText);
           enhanceChatImages(bubbleText);
           if (webSources && webSources.length > 0) {
-            renderMessageSources(assistantRow, webSources);
+            renderMessageSources(assistantRow, webSources, true);
           }
           const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
           metaBox.innerHTML = `
@@ -6228,7 +6228,7 @@ ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
       }
       if (webSources && webSources.length > 0) {
         webSources = deduplicateSources(webSources);
-        renderMessageSources(assistantRow, webSources);
+        renderMessageSources(assistantRow, webSources, true);
       }
       renderYouTubeCardsForMessage(assistantRow, fullText);
       const effectiveDisplay = actualModelUsed ? `${actualModelUsed} (Failover)` : modelName;
@@ -6269,7 +6269,7 @@ ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
           bubbleText.innerHTML = renderMarkdown(stoppedText);
           enhanceCodeBlocks(bubbleText);
           if (webSources && webSources.length > 0) {
-            renderMessageSources(assistantRow, webSources);
+            renderMessageSources(assistantRow, webSources, true);
           }
           const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
           metaBox.innerHTML = `
