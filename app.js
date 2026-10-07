@@ -8858,9 +8858,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
     }
     if (els.promptInput) {
-      els.promptInput.placeholder = STATE.isImageGenMode
-        ? '🎨 Mode AI Image Studio Aktif — Ketik deskripsi visual untuk digenerasi...'
-        : 'Ketik pesan atau minta gambar (Ketik /img untuk Mode Gambar)...';
+      els.promptInput.placeholder = '';
     }
   }
 
