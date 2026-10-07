@@ -4105,12 +4105,12 @@ ${organicBlock}
 
     return {
       primary: cleanQuery,
-      tech: coreQuery,
+      core: coreQuery,
       news: `${coreQuery} news`,
-      recentNews: `${coreQuery} when:30d`,
-      recentNewsId: `${coreQuery} ${currentMonthId} ${currentYear}`,
-      weeklyNews: `${coreQuery} when:14d`,
-      core: coreQuery
+      recentNews: `${coreQuery} berita`,
+      recentNewsId: `${coreQuery} berita terbaru`,
+      weeklyNews: `${coreQuery} update`,
+      tech: coreQuery
     };
   }
 
@@ -4167,15 +4167,16 @@ ${organicBlock}
           const normUrl = item.url.trim().toLowerCase().replace(/\/$/, '');
           const normTitle = item.title.trim().toLowerCase().replace(/[^\w\s]/g, '');
 
-          // Filter ketat: Hapus seluruh sumber Wikipedia untuk mode biasa agar data tetap terbaru
-          if (normUrl.includes('wikipedia.org') || normTitle.includes('wikipedia') || (item.domain && item.domain.includes('wikipedia.org'))) return;
+          // Filter Wikipedia HANYA jika sudah ada cukup sumber web/berita non-Wikipedia (>= 3)
+          if (normUrl.includes('wikipedia.org') || normTitle.includes('wikipedia') || (item.domain && item.domain.includes('wikipedia.org'))) {
+            if (results.length >= 3) return;
+          }
 
           // Filter out irrelevant codename or disambiguation entries
           if (normTitle.includes('listofapplecodenames') && !query.toLowerCase().includes('apple')) return;
 
-          if (seenUrls.has(normUrl) || (normTitle && seenTitles.has(normTitle))) return;
+          if (seenUrls.has(normUrl)) return;
           seenUrls.add(normUrl);
-          if (normTitle) seenTitles.add(normTitle);
           results.push(item);
         };
 
@@ -4321,12 +4322,14 @@ ${organicBlock}
             const qPlan = deriveBroadSearchQueries(cleanDateQuery || query.trim(), effectiveContext);
             const techQ = qPlan.tech;
             const coreQ = qPlan.core;
+            const combinedQueryStr = (query + ' ' + effectiveContext).toLowerCase();
+            const isTechQuery = /\b(ai|llm|software|github|code|linux|python|developer|api|tech|crypto|bitcoin|model|chip|gpu|nvidia|programming|framework)\b/i.test(combinedQueryStr);
             const minHnTimestamp = Math.floor((Date.now() - 120 * 86400 * 1000) / 1000);
             const hnUrlTech = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(techQ)}&tags=story&hitsPerPage=8&numericFilters=created_at_i%3E${minHnTimestamp}`;
             const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(coreQ)}&format=json&no_html=1&skip_disambig=1`;
 
             await Promise.allSettled([
-              fetch(hnUrlTech, { signal: clientSignal }).then(r => r.ok ? r.json() : null).then(d => {
+              isTechQuery ? fetch(hnUrlTech, { signal: clientSignal }).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.hits)) {
                   d.hits.slice(0, 6).forEach(h => {
                     const u = h.url || `https://news.ycombinator.com/item?id=${h.objectID}`;
@@ -4343,7 +4346,7 @@ ${organicBlock}
                     });
                   });
                 }
-              }).catch(() => {}),
+              }).catch(() => {}) : Promise.resolve(),
 
               fetch(ddgUrl, { signal: clientSignal }).then(r => r.ok ? r.json() : null).then(d => {
                 if (d) {
@@ -4378,7 +4381,34 @@ ${organicBlock}
                     });
                   }
                 }
-              }).catch(() => {})
+              }).catch(() => {}),
+
+              // Wikipedia Open CORS API Fallback (origin=* diizinkan di seluruh peramban)
+              (async () => {
+                const isIndo = /\b(terbaru|terkini|berita|apa|siapa|bagaimana|mengapa|kapan|di|ke|dari|hari ini|minggu ini|bulan ini|tahun ini|presiden|indonesia|jakarta|pemerintah|bbm|gempa|harga|bansos|pilkada|narkoba|polisi|pasar saham)\b/i.test((query + ' ' + effectiveContext).toLowerCase());
+                const lang = isIndo ? 'id' : 'en';
+                const wikiUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanDateQuery || query.trim())}&utf8=1&format=json&origin=*`;
+                const wRes = await fetch(wikiUrl, { signal: clientSignal }).catch(() => null);
+                if (wRes && wRes.ok) {
+                  const wData = await wRes.json().catch(() => null);
+                  if (wData?.query?.search && Array.isArray(wData.query.search)) {
+                    wData.query.search.slice(0, 3).forEach(item => {
+                      const pTitle = item.title || '';
+                      const pUrl = `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(pTitle.replace(/ /g, '_'))}`;
+                      const cleanSnippet = (item.snippet || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                      addCandidate({
+                        title: pTitle,
+                        url: pUrl,
+                        domain: `${lang}.wikipedia.org`,
+                        snippet: cleanSnippet || `Artikel ensiklopedia: ${pTitle}`,
+                        sourceProvider: isIndo ? 'Wikipedia Indonesia' : 'Wikipedia Global',
+                        timestamp: Date.now(),
+                        pubDate: 'Ensiklopedia'
+                      });
+                    });
+                  }
+                }
+              })().catch(() => {})
             ]);
             clearTimeout(clientTimeout);
           } catch (_) {}
@@ -4402,6 +4432,20 @@ ${organicBlock}
         url = url.trim();
         if (!/^https?:\/\//i.test(url)) {
           url = 'https://' + url;
+        }
+
+        // Intersep khusus untuk URL YouTube agar mengembalikan metadata resmi video via oEmbed
+        const ytIds = extractYouTubeVideoIdsClient(url);
+        if (ytIds && ytIds.length > 0) {
+          try {
+            const ytInfo = await fetchYouTubeInfoClient(ytIds[0]);
+            if (ytInfo && ytInfo.title) {
+              return {
+                text: `[INFORMASI TERVERIFIKASI VIDEO YOUTUBE]:\n- Judul: "${ytInfo.title}"\n- Channel / Pembuat: "${ytInfo.channel}" (${ytInfo.channel_url || 'N/A'})\n- URL: ${ytInfo.url}\n- Thumbnail: ${ytInfo.thumbnail}\n(Diambil secara real-time via YouTube oEmbed)`,
+                sources: [{ title: ytInfo.title, url: ytInfo.url, domain: 'youtube.com', snippet: `Video YouTube oleh ${ytInfo.channel}: ${ytInfo.title}` }]
+              };
+            }
+          } catch (_) {}
         }
         
         if (!IS_GITHUB_PAGES) {
@@ -4599,37 +4643,16 @@ ${organicBlock}
     const isShortOrYear = cleaned.length < 8 || /^(20\d\d|update|terbaru|roadmap|kapan|rilis|fitur|berita)$/i.test(cleaned);
 
     if ((isShortOrYear || hasFollowUpIndicator) && session && Array.isArray(session.messages) && session.messages.length > 0) {
-      // Cari entitas aktif (AI lab / model) dari riwayat percakapan sebelumnya
-      let resolvedEntity = '';
       for (let i = session.messages.length - 1; i >= 0; i--) {
-        const msg = session.messages[i];
-        if (!msg || !msg.content || msg.role === 'system') continue;
-        const lower = msg.content.toLowerCase();
-        if (lower.includes('openai') || lower.includes('chatgpt') || lower.includes('gpt')) { resolvedEntity = 'OpenAI'; break; }
-        if (lower.includes('claude') || lower.includes('anthropic')) { resolvedEntity = 'Anthropic Claude'; break; }
-        if (lower.includes('gemini') || lower.includes('google')) { resolvedEntity = 'Google Gemini'; break; }
-        if (lower.includes('grok') || lower.includes('xai')) { resolvedEntity = 'xAI Grok'; break; }
-        if (lower.includes('deepseek')) { resolvedEntity = 'DeepSeek'; break; }
-        if (lower.includes('llama') || lower.includes('meta')) { resolvedEntity = 'Meta Llama'; break; }
-        if (lower.includes('qwen')) { resolvedEntity = 'Qwen'; break; }
-        if (lower.includes('mistral')) { resolvedEntity = 'Mistral'; break; }
-        if (lower.includes('apple')) { resolvedEntity = 'Apple'; break; }
-      }
-
-      if (resolvedEntity && !cleaned.toLowerCase().includes(resolvedEntity.toLowerCase())) {
-        cleaned = `${resolvedEntity} ${cleaned}`.trim();
-      } else if (isShortOrYear) {
-        for (let i = session.messages.length - 1; i >= 0; i--) {
-          const prevMsg = session.messages[i];
-          if (prevMsg && prevMsg.content && prevMsg.role !== 'system') {
-            const prevClean = prevMsg.content.replace(/<[^>]+>/g, '').replace(/https?:\/\/[^\s]+/g, '').substring(0, 120);
-            const words = prevClean.match(/\b([A-Za-z0-9_-]{3,})\b/g) || [];
-            const filtered = words.filter(w => !/^(yang|dan|dari|untuk|pada|adalah|akan|bisa|saya|kamu|anda|dengan|dalam|tidak|ini|itu|the|and|for|with|this|that|have)$/i.test(w));
-            const subject = filtered.slice(0, 3).join(' ');
-            if (subject) {
-              cleaned = `${subject} ${cleaned}`.trim();
-              break;
-            }
+        const prevMsg = session.messages[i];
+        if (prevMsg && prevMsg.content && prevMsg.role !== 'system') {
+          const prevClean = prevMsg.content.replace(/<[^>]+>/g, '').replace(/https?:\/\/[^\s]+/g, '').substring(0, 120);
+          const words = prevClean.match(/\b([A-Za-z0-9_-]{3,})\b/g) || [];
+          const filtered = words.filter(w => !/^(yang|dan|dari|untuk|pada|adalah|akan|bisa|saya|kamu|anda|dengan|dalam|tidak|ini|itu|the|and|for|with|this|that|have)$/i.test(w));
+          const subject = filtered.slice(0, 3).join(' ');
+          if (subject && !cleaned.toLowerCase().includes(subject.toLowerCase())) {
+            cleaned = `${subject} ${cleaned}`.trim();
+            break;
           }
         }
       }
@@ -4715,8 +4738,14 @@ ${organicBlock}
       } catch (_) {}
     }
 
-    // 5. Raw balanced JSON objects anywhere in text (e.g. {"name":"search_web","arguments":{...}})
-    const jsonBlocks = extractBalancedJsonObjects(text);
+    // Strip fenced code blocks dan inline code sebelum menjalankan regex teks biasa (5, 6, 7, 8)
+    // agar kode pemrograman / tutorial yang menyebut search_web TIDAK PERNAH terintersepsi keliru sebagai tool hidup
+    const textWithoutCode = text
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/`[^`\n]+`/g, ' ');
+
+    // 5. Raw balanced JSON objects anywhere in text (di luar blok kode)
+    const jsonBlocks = extractBalancedJsonObjects(textWithoutCode);
     for (const block of jsonBlocks) {
       try {
         const p = JSON.parse(block.json);
@@ -4729,9 +4758,11 @@ ${organicBlock}
     }
 
     // 6. Function call with JSON argument: search_web({"query": "..."}) or browse_web_page({"url": "..."})
+    const isLongCompleteText = textWithoutCode.trim().length > 350;
     const funcJsonRegex = /(search_web|browse_web_page)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
     let fjm;
-    while ((fjm = funcJsonRegex.exec(text)) !== null) {
+    while ((fjm = funcJsonRegex.exec(textWithoutCode)) !== null) {
+      if (isLongCompleteText && fjm.index > 220) continue;
       const name = fjm[1];
       try {
         let cleanJson = fjm[2].replace(/'/g, '"');
@@ -4745,10 +4776,12 @@ ${organicBlock}
       }
     }
 
-    // 7. Function call syntax: search_web("query") or browse_web_page("url") - Mendukung apostrof dalam string
+    // 7. Function call syntax: search_web("query") or browse_web_page("url")
+    // Jika teks sangat panjang (> 300 kata), hanya izinkan jika pemanggilan ada di awal teks (< 200 karakter)
     const funcRegex = /(search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?(["'`])([\s\S]*?)\2\s*\)/gi;
     let fm;
-    while ((fm = funcRegex.exec(text)) !== null) {
+    while ((fm = funcRegex.exec(textWithoutCode)) !== null) {
+      if (isLongCompleteText && fm.index > 220) continue;
       const name = fm[1];
       const val = fm[3].trim();
       if (val) {
@@ -4756,10 +4789,12 @@ ${organicBlock}
       }
     }
 
-    // 8. Conversational triggers: "We will call search_web for <query>" - Mendukung apostrof dalam string
+    // 8. Conversational triggers: "We will call search_web for <query>"
+    // Hanya picu jika berada di awal generasi (bukan teks penutup di akhir pesan panjang)
     const convRegex = /(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(search_web|browse_web_page)(?:\s+(?:for|with|tentang|query|:))?\s*(["'`])([^\n]+?)\2/gi;
     let cvm;
-    while ((cvm = convRegex.exec(text)) !== null) {
+    while ((cvm = convRegex.exec(textWithoutCode)) !== null) {
+      if (isLongCompleteText && cvm.index > 220) continue;
       const name = cvm[1];
       const val = cvm[3].trim();
       if (val) {
@@ -4771,40 +4806,28 @@ ${organicBlock}
   }
 
   function getAutonomousSystemDirective() {
-    const now = new Date();
-    const curDateStr = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    const curMonthEn = now.toLocaleString('en-US', { month: 'long' });
-    const curYear = now.getFullYear();
-
     return `### INSTRUKSI SISTEM: KESADARAN PENGETAHUAN & PENGGUNAAN ALAT PENCARIAN WEB LIVE
 
-1. KESADARAN BATASAN PENGETAHUAN MUTLAK (KNOWLEDGE CUTOFF):
-- Kalender aktif hari ini: ${curDateStr} (${curMonthEn} ${curYear}).
-- Anda adalah asisten AI yang MENYADARI SEPENUHNYA bahwa pengetahuan internal bawaan Anda MEMILIKI BATASAN KETAT (KNOWLEDGE CUTOFF).
-- Anda TIDAK MEMILIKI pengetahuan internal mengenai peristiwa dunia nyata terkini, berita mutakhir, data real-time, statistik, harga, update, rilis terbaru, atau fakta spesifik dunia nyata saat ini DALAM TOPIK APA PUN (politik, teknologi, sains, olahraga, ekonomi, hiburan, hukum, peristiwa global maupun lokal).
-- DILARANG KERAS MENEBAK, BERSPEKULASI, ATAU BERHALUSINASI! Anda tidak boleh mengarang fakta atau berpura-pura mengetahui data yang belum Anda ketahui dari internet.
+1. KESADARAN BATASAN PENGETAHUAN (KNOWLEDGE CUTOFF):
+- Anda adalah asisten AI yang sepenuhnya menyadari bahwa pengetahuan internal bawaan Anda memiliki batasan waktu (knowledge cutoff).
+- Anda TIDAK MEMILIKI pengetahuan bawaan mengenai data real-time, berita mutakhir, peristiwa terkini, atau informasi spesifik dunia nyata saat ini dalam topik APA PUN (politik, ekonomi, pasar saham, olahraga, sains, hiburan, hukum, peristiwa global maupun lokal).
+- Dilarang menebak atau mengarang spekulasi tentang peristiwa dunia nyata terkini tanpa mencari fakta aktual melalui alat pencarian web.
 
-2. INSTRUMEN PENCARIAN WEB LIVE TERSEDIA:
-- search_web(query): Mencari data faktual, berita live, artikel terbaru, atau informasi apa pun di internet secara langsung.
-- browse_web_page(url): Membaca dan mengekstrak isi teks bersih dari sebuah halaman web jika pengguna menyertakan URL tautan.
-
-3. KEWAJIBAN PEMANGGILAN ALAT SEBELUM MENJAWAB:
-- Kapan pun pengguna menanyakan fakta dunia nyata, informasi terkini, berita, rilis, harga, atau topik apa pun yang membutuhkan kebenaran data mutakhir: ANDA HARUS MENYADARI KETIDAKTAHUAN ANDA DAN WAJIB LANGSUNG MEMANGGIL TOOL \`search_web\` PADA AWAL RESPON PERTAMA!
-- DILARANG LANGSUNG MENJAWAB DENGAN TEKS PENJELASAN SEBELUM MELAKUKAN PENCARIAN WEB.
-- CARA MEMANGGIL ALAT:
-  Panggil tool secara langsung:
+2. KEWAJIBAN MENGGUNAKAN TOOL search_web:
+- Kapan pun pengguna menanyakan fakta dunia nyata, berita terkini, perkembangan mutakhir, data pasar, harga, atau topik apa pun yang memerlukan verifikasi data aktual: ANDA HARUS MENYADARI KETIDAKTAHUAN ANDA DAN WAJIB MEMANGGIL TOOL \`search_web\`!
+- Panggil tool secara langsung:
   search_web("kata kunci pencarian yang relevan")
   atau
   <tool_call>{"name":"search_web","arguments":{"query":"kata kunci pencarian yang relevan"}}</tool_call>
-  Keluarkan pemanggilan tool ini SEGERA pada awal jawaban tanpa teks pembuka bertele-tele.
-- ATURAN KUERI PENCARIAN (UNIVERSAL & BERSIH):
-  * Rumuskan kata kunci pencarian yang ringkas, efektif, dan alami pada inti topik yang dicari (misal: "kondisi pasar saham hari ini", "Donald Trump meeting tech CEOs", "penangkapan narkoba terbaru").
-  * DILARANG menambahkan nama hari atau tanggal kalender seperti "${curDateStr}" atau "${curMonthEn} ${curYear}" ke dalam argumen kueri search_web kecuali jika pengguna secara eksplisit menyebut tanggal tersebut! Mesin pencari web live akan secara otomatis menyaring hasil paling mutakhir.
-- HANYA jika pertanyaan pengguna berupa penjelasan konsep dasar teori, logika matematika murni, penulisan kode pemrograman standar, atau percakapan kasual yang sama sekali tidak membutuhkan fakta dunia nyata: Anda boleh langsung menjawab secara alami tanpa memanggil alat.
+  Keluarkan pemanggilan tool ini pada awal jawaban tanpa bertele-tele.
+- Rumuskan kueri pencarian yang ringkas, efektif, dan alami pada inti topik yang dicari (misal: "pasar saham global hari ini", "Donald Trump meeting CEOs", "penangkapan narkoba terbaru").
+- Dilarang menambahkan tanggal kalender fiktif atau operator kustom ke dalam argumen kueri search_web.
+- Anda dapat menjawab topik APA PUN di dunia nyata (bukan hanya tentang AI atau teknologi). Gunakan pencarian web untuk mendapatkan fakta terpercaya.
+- HANYA jika pertanyaan pengguna berupa penjelasan konsep dasar teori, logika matematika murni, penulisan kode pemrograman standar, atau percakapan kasual yang sama sekali tidak membutuhkan fakta dunia nyata: Anda boleh langsung menjawab tanpa memanggil alat.
 
-4. SINTESIS PASCA-PENCARIAN:
-- Setelah sistem mengeksekusi pencarian web dan menyajikan data multi-sumber kepada Anda, rumuskanlah jawaban akhir yang komprehensif, faktual, akurat, dan 100% berlandaskan pada data web tersebut tanpa memanggil tool lagi.
-- Dilarang mencetak tag tool atau format JSON apa pun ke dalam jawaban akhir pengguna.`;
+3. SINTESIS SETELAH PENCARIAN WEB:
+- Setelah sistem mengeksekusi pencarian web dan menyediakan data kepada Anda, berikan jawaban akhir yang komprehensif, jelas, akurat, dan informatif berdasarkan informasi yang dihimpun.
+- Jawab secara langsung tanpa penolakan kaku, tanpa basa-basi robotik, dan tanpa mencetak format pemanggilan tool lagi.`;
   }
   const AUTONOMOUS_SYSTEM_DIRECTIVE = getAutonomousSystemDirective();
 
@@ -5090,7 +5113,6 @@ ${organicBlock}
       const requestBody = {
         model: modelName,
         messages: messagesPayload,
-        system: systemContent,
         tools: AUTONOMOUS_WEB_TOOLS,
         stream: true,
         options: {
@@ -5111,12 +5133,24 @@ ${organicBlock}
 
       const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
 
-      const response = await fetch(chatUrl, {
+      let response = await fetch(chatUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody),
         signal: STATE.abortController.signal
       });
+
+      // Auto-retry fallback: jika model lokal Ollama menolak parameter tools (HTTP 400/422/500 "model does not support tools")
+      if (!response.ok && requestBody.tools && (response.status === 400 || response.status === 422 || response.status === 500)) {
+        console.warn(`[Ollama] Model ${modelName} returned HTTP ${response.status} with tools enabled. Retrying without tools parameter...`);
+        delete requestBody.tools;
+        response = await fetch(chatUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(requestBody),
+          signal: STATE.abortController.signal
+        });
+      }
 
       if (!response.ok) {
         let errDetail = `HTTP ${response.status}`;
@@ -5180,6 +5214,7 @@ ${organicBlock}
       // ==================== OLLAMA AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const maxAutonomousRounds = 1;
       let autonomousRound = 0;
+      let preambleHtml = '';
       const conversationChain = [...messagesPayload];
       let currentRoundText = fullText;
       let currentRoundNativeCalls = accumulatedToolCalls;
@@ -5226,6 +5261,12 @@ ${organicBlock}
         let roundToolResponsesText = '';
         const toolSummaryList = [];
 
+        // Amankan teks pembuka yang telah digenerasi model sebelum pemanggilan tool agar tidak terhapus
+        const cleanAssistant = scrubRawToolCallArtifacts(currentRoundText).trim();
+        if (!preambleHtml && cleanAssistant && cleanAssistant.length > 20) {
+          preambleHtml = `<div class="autonomous-preamble-text" style="margin-bottom:8px;">${renderMarkdown(cleanAssistant)}</div>`;
+        }
+
         for (const call of detectedAutonomousCalls) {
           if (STATE.abortController?.signal?.aborted) break;
           const toolName = call.function.name;
@@ -5251,11 +5292,11 @@ ${organicBlock}
           }
           toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
 
-          // Visual status loading di gelembung obrolan
-          bubbleText.innerHTML = executedHudHtml + createAutonomousToolHudHtml(toolName, previewArg, 'loading');
+          // Visual status loading di gelembung obrolan (Preamble teks dipertahankan)
+          bubbleText.innerHTML = preambleHtml + executedHudHtml + createAutonomousToolHudHtml(toolName, previewArg, 'loading');
           smartScrollChatToBottom(true);
 
-          // Eksekusi tool Zero-API Live News & Tech Wire (Bebas Wikipedia)
+          // Eksekusi tool Zero-API Live News & Tech Wire
           const toolExecRes = await executeAutonomousWebTool(toolName, call.function.arguments, promptText, session);
           if (toolExecRes.sources && Array.isArray(toolExecRes.sources)) {
             if (!webSources) webSources = [];
@@ -5268,26 +5309,18 @@ ${organicBlock}
         if (STATE.abortController?.signal?.aborted) break;
 
         // Tampilkan HUD bahwa data berita live sedang disintesis oleh AI
-        bubbleText.innerHTML = executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);"><i class="fa-solid fa-bolt"></i> Menyintesis data berita web terbaru...</span></div>`;
+        bubbleText.innerHTML = preambleHtml + executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);"><i class="fa-solid fa-bolt"></i> Menyintesis data berita web terbaru...</span></div>`;
         smartScrollChatToBottom(true);
 
-        const cleanAssistant = scrubRawToolCallArtifacts(currentRoundText).trim();
         if (cleanAssistant) {
           conversationChain.push({ role: 'assistant', content: cleanAssistant });
         } else {
           conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
         }
 
-        const nowObj = new Date();
-        const curDateStr = nowObj.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        const curMonthStr = nowObj.toLocaleString('en-US', { month: 'long' }) + ' ' + nowObj.getFullYear();
-        const roundInstruction = `[INSTRUKSI SINTESIS FINAL - KALENDER AKTIF: ${curDateStr}]:
-Berikut adalah data hasil pencarian web terkini yang telah dihimpun untuk menjawab pertanyaan pengguna.
-WAJIB:
-1. Berikan jawaban yang komprehensif, faktual, akurat, dan terperinci berlandaskan 100% pada data hasil pencarian web di atas.
-2. DILARANG KERAS MENEBAK, BERSPEKULASI, ATAU BERHALUSINASI di luar fakta yang terverifikasi dari sumber web.
-3. Jawab langsung pertanyaan pengguna secara tuntas sekarang tanpa memanggil tool lagi.
-4. Dilarang mencetak tag tool atau format JSON mentah ke dalam jawaban.`;
+        const roundInstruction = `[INFORMASI HASIL PENCARIAN WEB TERBARU TELAH TERSEDIA]:
+Gunakan data hasil pencarian di atas untuk menjawab pertanyaan pengguna secara komprehensif, jelas, faktual, dan akurat.
+Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi robotik, dan tanpa format pemanggilan tool lagi.`;
 
         conversationChain.push({
           role: 'user',
@@ -5297,7 +5330,6 @@ WAJIB:
         const digestionBody = {
           model: modelName,
           messages: conversationChain,
-          system: systemContent,
           stream: true,
           options: requestBody.options,
           endpoint: ep
@@ -5316,7 +5348,15 @@ WAJIB:
           });
 
           if (!digestionRes.ok) {
-            console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Error: HTTP ${digestionRes.status}`);
+            let errDetail = `HTTP ${digestionRes.status}`;
+            try {
+              const errJson = await digestionRes.json();
+              if (errJson?.error) errDetail = typeof errJson.error === 'object' ? errJson.error.message : errJson.error;
+            } catch (_) {}
+            console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Error: ${errDetail}`);
+            if (!fullText.trim()) {
+              fullText = cleanAssistant || `[Pencarian selesai: ${toolSummaryList.join(', ')}. Sistem menyelesaikan penelusuran].`;
+            }
             break;
           }
 
@@ -5324,7 +5364,7 @@ WAJIB:
           let digestionBuffer = '';
           const digestionContentBox = document.createElement('div');
           digestionContentBox.className = 'autonomous-digested-output';
-          bubbleText.innerHTML = executedHudHtml;
+          bubbleText.innerHTML = preambleHtml + executedHudHtml;
           bubbleText.appendChild(digestionContentBox);
 
           const digestionRenderer = new StreamBufferRenderer(digestionContentBox, () => smartScrollChatToBottom(false));
@@ -5354,6 +5394,7 @@ WAJIB:
           fullText = currentRoundText;
         } catch (digestionErr) {
           console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Fetch error:`, digestionErr);
+          if (!fullText.trim()) fullText = cleanAssistant || '';
           break;
         }
       }
@@ -5364,14 +5405,15 @@ WAJIB:
         fullText = cleanFinalText;
       }
 
-      if (!fullText.trim() && !STATE.abortController?.signal.aborted) {
+      if (!fullText.trim() && !preambleHtml && !STATE.abortController?.signal.aborted) {
         throw new Error('Model Ollama menyelesaikan koneksi tanpa menghasilkan respon teks.');
       }
 
       const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
       const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
       
-      bubbleText.innerHTML = (executedHudHtml ? executedHudHtml + renderMarkdown(fullText) : renderMarkdown(fullText)).trim();
+      const finalRenderedContent = (preambleHtml ? preambleHtml : '') + (executedHudHtml ? executedHudHtml + renderMarkdown(fullText) : renderMarkdown(fullText)).trim();
+      bubbleText.innerHTML = finalRenderedContent.trim();
       enhanceCodeBlocks(bubbleText);
       enhanceChatImages(bubbleText);
       if (webSources && webSources.length > 0) {
@@ -5804,6 +5846,7 @@ WAJIB:
       // ==================== UNIVERSAL AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const maxAutonomousRounds = 1;
       let autonomousRound = 0;
+      let preambleHtml = '';
       const conversationChain = [...(activeMessagesPayload || messagesPayload)];
       let currentRoundText = fullText;
       let currentRoundNativeCalls = accumulatedToolCalls;
@@ -5850,6 +5893,12 @@ WAJIB:
         let roundToolResponsesText = '';
         const toolSummaryList = [];
 
+        // Amankan teks pembuka yang telah digenerasi model sebelum pemanggilan tool agar tidak terhapus
+        const cleanAssistant = scrubRawToolCallArtifacts(currentRoundText).trim();
+        if (!preambleHtml && cleanAssistant && cleanAssistant.length > 20) {
+          preambleHtml = `<div class="autonomous-preamble-text" style="margin-bottom:8px;">${renderMarkdown(cleanAssistant)}</div>`;
+        }
+
         for (const call of detectedAutonomousCalls) {
           if (STATE.abortController?.signal?.aborted) break;
           const toolName = call.function.name;
@@ -5875,8 +5924,8 @@ WAJIB:
           }
           toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
 
-          // Visual status loading di gelembung obrolan
-          bubbleText.innerHTML = executedHudHtml + createAutonomousToolHudHtml(toolName, previewArg, 'loading');
+          // Visual status loading di gelembung obrolan (Preamble teks dipertahankan)
+          bubbleText.innerHTML = preambleHtml + executedHudHtml + createAutonomousToolHudHtml(toolName, previewArg, 'loading');
           smartScrollChatToBottom(true);
 
           // Eksekusi tool Zero-API Live News & Tech Wire (Bebas Wikipedia)
@@ -5892,27 +5941,18 @@ WAJIB:
         if (STATE.abortController?.signal?.aborted) break;
 
         // Tampilkan HUD bahwa data berita live sedang disintesis oleh AI
-        bubbleText.innerHTML = executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);"><i class="fa-solid fa-bolt"></i> Menyintesis data berita web terbaru...</span></div>`;
+        bubbleText.innerHTML = preambleHtml + executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);"><i class="fa-solid fa-bolt"></i> Menyintesis data berita web terbaru...</span></div>`;
         smartScrollChatToBottom(true);
 
-        // Siapkan pesan sintesis pencernaan dengan format UNIVERSAL (Bebas error 400 'role: tool' di OpenRouter)
-        const cleanAssistant = scrubRawToolCallArtifacts(currentRoundText).trim();
         if (cleanAssistant) {
           conversationChain.push({ role: 'assistant', content: cleanAssistant });
         } else {
           conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
         }
 
-        const nowObj = new Date();
-        const curDateStr = nowObj.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        const curMonthStr = nowObj.toLocaleString('en-US', { month: 'long' }) + ' ' + nowObj.getFullYear();
-        const roundInstruction = `[INSTRUKSI SINTESIS FINAL - KALENDER AKTIF: ${curDateStr}]:
-Berikut adalah data hasil pencarian web terkini yang telah dihimpun untuk menjawab pertanyaan pengguna.
-WAJIB:
-1. Berikan jawaban yang komprehensif, faktual, akurat, dan terperinci berlandaskan 100% pada data hasil pencarian web di atas.
-2. DILARANG KERAS MENEBAK, BERSPEKULASI, ATAU BERHALUSINASI di luar fakta yang terverifikasi dari sumber web.
-3. Jawab langsung pertanyaan pengguna secara tuntas sekarang tanpa memanggil tool lagi.
-4. Dilarang mencetak tag tool atau format JSON mentah ke dalam jawaban.`;
+        const roundInstruction = `[INFORMASI HASIL PENCARIAN WEB TERBARU TELAH TERSEDIA]:
+Gunakan data hasil pencarian di atas untuk menjawab pertanyaan pengguna secara komprehensif, jelas, faktual, dan akurat.
+Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi robotik, dan tanpa format pemanggilan tool lagi.`;
 
         conversationChain.push({
           role: 'user',
@@ -5949,6 +5989,9 @@ WAJIB:
               }
             } catch (_) {}
             console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Error:`, errDetail);
+            if (!fullText.trim()) {
+              fullText = cleanAssistant || `[Pencarian selesai: ${toolSummaryList.join(', ')}. Sistem menyelesaikan penelusuran].`;
+            }
             break;
           }
 
@@ -5956,7 +5999,7 @@ WAJIB:
           let digestionBuffer = '';
           const digestionContentBox = document.createElement('div');
           digestionContentBox.className = 'autonomous-digested-output';
-          bubbleText.innerHTML = executedHudHtml;
+          bubbleText.innerHTML = preambleHtml + executedHudHtml;
           bubbleText.appendChild(digestionContentBox);
 
           const digestionRenderer = new StreamBufferRenderer(digestionContentBox, () => smartScrollChatToBottom(false));
@@ -6007,6 +6050,7 @@ WAJIB:
           fullText = currentRoundText;
         } catch (digestionErr) {
           console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Fetch error:`, digestionErr);
+          if (!fullText.trim()) fullText = cleanAssistant || '';
           break;
         }
       }
@@ -6017,7 +6061,7 @@ WAJIB:
         fullText = cleanFinalText;
       }
 
-      if (!fullText.trim() && collectedImages.length === 0 && !STATE.abortController?.signal.aborted) {
+      if (!fullText.trim() && !preambleHtml && collectedImages.length === 0 && !STATE.abortController?.signal.aborted) {
         throw new Error('Model OpenRouter menyelesaikan koneksi tanpa menghasilkan respon teks.');
       }
 
@@ -6040,7 +6084,8 @@ WAJIB:
         `;
       }
 
-      bubbleText.innerHTML = (executedHudHtml ? executedHudHtml + renderedMarkdown + imagesHtml : renderedMarkdown + imagesHtml).trim();
+      const finalRenderedContent = (preambleHtml ? preambleHtml : '') + (executedHudHtml ? executedHudHtml + renderedMarkdown + imagesHtml : renderedMarkdown + imagesHtml);
+      bubbleText.innerHTML = finalRenderedContent.trim();
       enhanceCodeBlocks(bubbleText);
       enhanceChatImages(bubbleText);
       if (collectedImages.length > 0) {

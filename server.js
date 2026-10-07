@@ -260,12 +260,13 @@ function performWebSearch(query, apiKey = null, num = 15) {
     }
     const cleanQuery = query.trim();
     const serperKey = apiKey || process.env.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+    const isIndo = /\b(terbaru|terkini|berita|apa|siapa|bagaimana|mengapa|kapan|di|ke|dari|hari ini|minggu ini|bulan ini|tahun ini|presiden|indonesia|jakarta|pemerintah|bbm|gempa|harga|bansos|pilkada|narkoba|polisi|pasar saham)\b/i.test(cleanQuery.toLowerCase());
 
     const postData = JSON.stringify({
       q: cleanQuery,
       num: Math.max(num || 15, 10),
-      gl: 'id',
-      hl: 'id'
+      gl: isIndo ? 'id' : 'us',
+      hl: isIndo ? 'id' : 'en'
     });
 
     const options = {
@@ -1034,12 +1035,12 @@ function deriveBroadSearchQueries(rawQuery, contextText = '') {
 
   return {
     primary: cleanQuery,
-    tech: coreQuery,
+    core: coreQuery,
     news: `${coreQuery} news`,
-    recentNews: `${coreQuery} when:30d`,
-    recentNewsId: `${coreQuery} ${currentMonthId} ${currentYear}`,
-    weeklyNews: `${coreQuery} when:14d`,
-    core: coreQuery
+    recentNews: `${coreQuery} berita`,
+    recentNewsId: `${coreQuery} berita terbaru`,
+    weeklyNews: `${coreQuery} update`,
+    tech: coreQuery
   };
 }
 
@@ -1281,18 +1282,20 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
     serperCalls.push(performWebSearch(cleanDateQuery, null, maxResults));
   }
 
-  // Eksekusi seluruh provider: Google Serper, Google News RSS, Tech Wire / HackerNews, & DuckDuckGo Instant
-  const [serperRes1, serperRes2, gnewsRecent, gnewsTech, gnewsWeekly, gnewsPrimary, gnewsIndo, hnTech, hnCore, ddgInstant] = await Promise.allSettled([
+  const isTechQuery = /\b(ai|llm|software|github|code|linux|python|developer|api|tech|crypto|bitcoin|model|chip|gpu|nvidia|programming|framework)\b/i.test(combinedLower);
+
+  // Eksekusi seluruh provider: Google Serper, Google News RSS, Tech Wire / HackerNews (jika tech), DuckDuckGo Instant, & Wikipedia Fallback
+  const [serperRes1, serperRes2, gnewsPrimary, gnewsCore, gnewsIndo, gnewsNews, hnTech, hnCore, ddgInstant, wikiRes] = await Promise.allSettled([
     serperCalls[0],
     serperCalls[1] || Promise.resolve({ results: [] }),
-    fetchGoogleNewsRss(recentQuery, 'en', 8),
-    fetchGoogleNewsRss(techQuery, 'en', 8),
-    fetchGoogleNewsRss(weeklyQuery, 'en', 6),
-    fetchGoogleNewsRss(cleanQuery, 'en', 6),
-    isIndoQuery ? fetchGoogleNewsRss(recentQueryId, 'id', 8) : Promise.resolve([]),
-    fetchHackerNewsTech(techQuery, 8),
-    fetchHackerNewsTech(coreQuery, 6),
-    fetchDuckDuckGoInstant(coreQuery)
+    fetchGoogleNewsRss(cleanQuery, isIndoQuery ? 'id' : 'en', 10),
+    fetchGoogleNewsRss(coreQuery, isIndoQuery ? 'id' : 'en', 8),
+    isIndoQuery ? fetchGoogleNewsRss(`${coreQuery} berita terbaru`, 'id', 8) : Promise.resolve([]),
+    fetchGoogleNewsRss(newsQuery, 'en', 6),
+    isTechQuery ? fetchHackerNewsTech(techQuery, 8) : Promise.resolve([]),
+    isTechQuery ? fetchHackerNewsTech(coreQuery, 6) : Promise.resolve([]),
+    fetchDuckDuckGoInstant(coreQuery),
+    fetchWikipediaFullText(coreQuery, isIndoQuery ? 'id' : 'en', 4)
   ]);
 
   const candidatePool = [];
@@ -1302,44 +1305,40 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   if (serperRes2.status === 'fulfilled' && Array.isArray(serperRes2.value?.results)) {
     candidatePool.push(...serperRes2.value.results);
   }
-  if (gnewsRecent.status === 'fulfilled') candidatePool.push(...gnewsRecent.value);
-  if (gnewsTech.status === 'fulfilled') candidatePool.push(...gnewsTech.value);
-  if (gnewsWeekly.status === 'fulfilled') candidatePool.push(...gnewsWeekly.value);
-  if (gnewsPrimary.status === 'fulfilled') candidatePool.push(...gnewsPrimary.value);
+  if (gnewsPrimary.status === 'fulfilled' && Array.isArray(gnewsPrimary.value)) candidatePool.push(...gnewsPrimary.value);
+  if (gnewsCore.status === 'fulfilled' && Array.isArray(gnewsCore.value)) candidatePool.push(...gnewsCore.value);
   if (gnewsIndo.status === 'fulfilled' && Array.isArray(gnewsIndo.value)) candidatePool.push(...gnewsIndo.value);
-  if (hnTech.status === 'fulfilled') candidatePool.push(...hnTech.value);
-  if (hnCore.status === 'fulfilled') candidatePool.push(...hnCore.value);
-  if (ddgInstant.status === 'fulfilled') candidatePool.push(...ddgInstant.value);
+  if (gnewsNews.status === 'fulfilled' && Array.isArray(gnewsNews.value)) candidatePool.push(...gnewsNews.value);
+  if (hnTech.status === 'fulfilled' && Array.isArray(hnTech.value)) candidatePool.push(...hnTech.value);
+  if (hnCore.status === 'fulfilled' && Array.isArray(hnCore.value)) candidatePool.push(...hnCore.value);
+  if (ddgInstant.status === 'fulfilled' && Array.isArray(ddgInstant.value)) candidatePool.push(...ddgInstant.value);
+  // Tambahkan Wikipedia hanya jika candidatePool dari berita/serper masih sedikit (< 3)
+  if (candidatePool.length < 3 && wikiRes.status === 'fulfilled' && Array.isArray(wikiRes.value)) {
+    candidatePool.push(...wikiRes.value);
+  }
 
   // Urutkan kandidat berdasarkan tanggal publikasi terbaru (Descending: yang paling baru di paling atas)
   candidatePool.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
-  // Filter keusangan data ketat: Jika ada artikel dalam 30 hari terakhir (bulan ini), buang seluruh artikel > 45 hari
-  const now = Date.now();
-  const hasVeryRecent30d = candidatePool.some(it => it.timestamp && (now - it.timestamp) < (30 * 86400 * 1000));
-
-  // Deduplikasi ketat berdasarkan URL kanonikal dan normalisasi Judul
+  // Deduplikasi ketat berdasarkan URL kanonikal
   const results = [];
   const seenUrls = new Set();
-  const seenTitles = new Set();
 
   for (const item of candidatePool) {
     if (!item.url || !item.title) continue;
     const normUrl = item.url.trim().toLowerCase().replace(/\/$/, '');
     const normTitle = item.title.trim().toLowerCase().replace(/[^\w\s]/g, '');
 
-    // Filter ketat: Hapus seluruh sumber Wikipedia untuk mode biasa agar data yang didapat tetap mutakhir & terkini
-    if (normUrl.includes('wikipedia.org') || (item.domain && item.domain.includes('wikipedia.org')) || normTitle.includes('wikipedia')) continue;
+    // Filter Wikipedia HANYA jika sudah ada cukup sumber web/berita non-Wikipedia (>= 3)
+    if (normUrl.includes('wikipedia.org') || (item.domain && item.domain.includes('wikipedia.org')) || normTitle.includes('wikipedia')) {
+      if (results.length >= 3) continue;
+    }
 
     // Filter out irrelevant disambiguation or unrelated codenames
     if (normTitle.includes('listofapplecodenames') && !cleanQuery.toLowerCase().includes('apple')) continue;
 
-    // Jika ada artikel mutakhir dalam 30 hari terakhir, singkirkan berita lampau (> 180 hari) agar data tetap segar dalam topik apa pun
-    if (hasVeryRecent30d && item.timestamp && (now - item.timestamp) > (180 * 86400 * 1000)) continue;
-
-    if (seenUrls.has(normUrl) || seenTitles.has(normTitle)) continue;
+    if (seenUrls.has(normUrl)) continue;
     seenUrls.add(normUrl);
-    seenTitles.add(normTitle);
 
     results.push(item);
     if (results.length >= maxResults) break;
@@ -1369,6 +1368,22 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
       if (isPrivateHost(parsedUrl.hostname, parsedUrl.port)) {
         return resolve({ url: cleanTarget, error: 'Access to private host restricted', text: '' });
       }
+
+      // Intersep khusus untuk URL YouTube agar mengembalikan data judul & channel resmi via oEmbed
+      if (YOUTUBE_ALLOWED_HOSTS.has(parsedUrl.hostname.toLowerCase())) {
+        fetchYouTubeInfo(cleanTarget).then(ytInfo => {
+          if (ytInfo && ytInfo.success) {
+            return resolve({
+              url: ytInfo.url || cleanTarget,
+              title: ytInfo.title,
+              text: `[INFORMASI TERVERIFIKASI VIDEO YOUTUBE]\n- Judul: "${ytInfo.title}"\n- Channel / Pembuat: "${ytInfo.channel}" (${ytInfo.channel_url || 'N/A'})\n- URL: ${ytInfo.url}\n- Thumbnail: ${ytInfo.thumbnail}\n(Diambil secara real-time via YouTube oEmbed)`,
+              links: ytInfo.channel_url ? [{ title: ytInfo.channel, url: ytInfo.channel_url }] : []
+            });
+          }
+          // Jika oEmbed gagal, lanjutkan ke fetch biasa
+        }).catch(() => {});
+      }
+
       const client = parsedUrl.protocol === 'https:' ? https : http;
       const options = {
         hostname: parsedUrl.hostname,
