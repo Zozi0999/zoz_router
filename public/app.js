@@ -1506,7 +1506,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     let touchStartTime = 0;
     let pullHoldTimer = null;
     let pullFadeTimeout = null;
+    let autoHideRevealedTimer = null;
     let wheelTimer = null;
+    let wheelHoldTimer = null;
+    let wheelAccumDelta = 0;
 
     function showPullLoading() {
       if (!els.pullUpNewChatWrapper) return;
@@ -1534,11 +1537,28 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         clearTimeout(pullFadeTimeout);
         pullFadeTimeout = null;
       }
+      if (pullHoldTimer) {
+        clearTimeout(pullHoldTimer);
+        pullHoldTimer = null;
+      }
+      if (wheelHoldTimer) {
+        clearTimeout(wheelHoldTimer);
+        wheelHoldTimer = null;
+      }
+      wheelAccumDelta = 0;
 
       els.pullUpNewChatWrapper.style.display = 'flex';
       els.pullUpNewChatWrapper.classList.add('visible');
       els.pullUpNewChatWrapper.classList.add('revealed');
       AudioEngine.snap();
+
+      // Auto dismiss after 8s if user leaves button untouched without clicking or scrolling
+      if (autoHideRevealedTimer) clearTimeout(autoHideRevealedTimer);
+      autoHideRevealedTimer = setTimeout(() => {
+        if (els.pullUpNewChatWrapper?.classList.contains('revealed')) {
+          hidePullWrapper(false, true);
+        }
+      }, 8000);
     }
 
     function hidePullWrapper(instant = false, reboundToBottom = true) {
@@ -1547,6 +1567,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         clearTimeout(pullHoldTimer);
         pullHoldTimer = null;
       }
+      if (wheelHoldTimer) {
+        clearTimeout(wheelHoldTimer);
+        wheelHoldTimer = null;
+      }
+      if (autoHideRevealedTimer) {
+        clearTimeout(autoHideRevealedTimer);
+        autoHideRevealedTimer = null;
+      }
+      wheelAccumDelta = 0;
 
       if (instant) {
         els.pullUpNewChatWrapper.classList.remove('visible', 'revealed');
@@ -1568,7 +1597,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
 
     // Pull-up New Chat button click handler
-    els.pullUpNewChatBtn?.addEventListener('click', () => {
+    els.pullUpNewChatBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
       createNewSession();
       hidePullWrapper(true, false);
       AudioEngine.click();
@@ -1576,7 +1606,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     const handleScrollEvent = (el = els.chatViewport) => {
       if (isAutoScrolling) return;
-      const atBottom = isChatAtBottom(el, 30);
+      const atBottom = isChatAtBottom(el, 45);
       if (!atBottom) {
         userScrolledUp = true;
         toggleScrollBottomBtn(true);
@@ -1604,26 +1634,27 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     els.chatViewport?.addEventListener('touchmove', (e) => {
       if (e.touches && e.touches[0]) {
         const deltaY = touchStartY - e.touches[0].clientY; // positive = pulling past bottom
-        const atBottom = isChatAtBottom(els.chatViewport, 20);
+        const atBottom = isChatAtBottom(els.chatViewport, 45);
 
         if (deltaY < -10 || (!atBottom && deltaY < 0)) {
           // Scrolling up into previous messages
           userScrolledUp = true;
           toggleScrollBottomBtn(true);
           hidePullWrapper(true, false);
-        } else if (atBottom && deltaY > 15) {
+        } else if (atBottom && deltaY > 12) {
           userScrolledUp = false;
           toggleScrollBottomBtn(false);
 
           if (!els.pullUpNewChatWrapper?.classList.contains('revealed')) {
             showPullLoading();
 
-            // Must pull deep (>= 70px) AND hold continuously for >= 500ms
-            if (deltaY >= 70 && !pullHoldTimer) {
+            // Arm hold timer as soon as user pulls past bottom
+            if (!pullHoldTimer) {
+              const holdDuration = deltaY >= 40 ? 200 : 320;
               pullHoldTimer = setTimeout(() => {
                 revealPullNewChatBtn();
                 pullHoldTimer = null;
-              }, 450);
+              }, holdDuration);
             }
           }
         }
@@ -1635,13 +1666,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         clearTimeout(pullHoldTimer);
         pullHoldTimer = null;
       }
+      // If user revealed button -> keep it visible for interaction
       // If user did not hold long enough to reveal button -> elastic rebound back to chat output
       if (!els.pullUpNewChatWrapper?.classList.contains('revealed')) {
         hidePullWrapper(false, true);
       }
     }, { passive: true });
 
-    // Desktop wheel: shows brief loading spinner momentum and rebounds smoothly to chat output
+    // Desktop wheel: track scroll-and-hold at bottom to reveal New Chat button
     els.chatViewport?.addEventListener('wheel', (e) => {
       if (e.deltaY < 0) {
         // Scrolling up into past messages
@@ -1649,17 +1681,37 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         toggleScrollBottomBtn(true);
         hidePullWrapper(true, false);
       } else if (e.deltaY > 0) {
-        const atBottom = isChatAtBottom(els.chatViewport, 20);
+        const atBottom = isChatAtBottom(els.chatViewport, 45);
         if (atBottom) {
           userScrolledUp = false;
           toggleScrollBottomBtn(false);
 
           if (!els.pullUpNewChatWrapper?.classList.contains('revealed')) {
             showPullLoading();
+            wheelAccumDelta += Math.abs(e.deltaY);
+
+            // User scrolling down at bottom and holding or repeated wheeling
+            if (!wheelHoldTimer) {
+              wheelHoldTimer = setTimeout(() => {
+                revealPullNewChatBtn();
+                wheelHoldTimer = null;
+              }, 260);
+            }
+
+            // Quick energetic wheel gesture threshold
+            if (wheelAccumDelta >= 70) {
+              if (wheelHoldTimer) clearTimeout(wheelHoldTimer);
+              wheelHoldTimer = null;
+              revealPullNewChatBtn();
+            }
+
+            // If user only gave a tiny accidental wheel tick and stopped, rebound after 300ms
             if (wheelTimer) clearTimeout(wheelTimer);
             wheelTimer = setTimeout(() => {
-              hidePullWrapper(false, true);
-            }, 180);
+              if (!els.pullUpNewChatWrapper?.classList.contains('revealed')) {
+                hidePullWrapper(false, true);
+              }
+            }, 300);
           }
         }
       }
