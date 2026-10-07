@@ -216,6 +216,44 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       this.playBeep(520, 'sine', 0.06, 0.04);
       setTimeout(() => this.playBeep(1040, 'sine', 0.08, 0.04), 40);
     },
+    neutronLaunch() {
+      if (!STATE.soundEnabled) return;
+      try {
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(260, now);
+        osc.frequency.exponentialRampToValueAtTime(1280, now + 0.22);
+        g.gain.setValueAtTime(0.05, now);
+        g.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+        osc.connect(g);
+        g.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.24);
+      } catch (e) {}
+    },
+    neutronImpact() {
+      if (!STATE.soundEnabled) return;
+      try {
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(840, now);
+        osc.frequency.exponentialRampToValueAtTime(220, now + 0.18);
+        g.gain.setValueAtTime(0.06, now);
+        g.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        osc.connect(g);
+        g.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.2);
+      } catch (e) {}
+    },
     receive() { this.playBeep(780, 'sine', 0.06, 0.03); },
     success() { 
       this.playBeep(587.33, 'sine', 0.08, 0.05); 
@@ -4004,6 +4042,146 @@ ${organicBlock}
     AudioEngine.click();
   }
 
+  // ==================== NEUTRON SINGULARITY SLINGSHOT PROMPT ANIMATION ====================
+  function playNeutronSendAnimation(text, targetRow) {
+    if (!targetRow) return;
+    const isReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (isReducedMotion || !els.promptInput) {
+      smartScrollChatToBottom(true);
+      AudioEngine.send();
+      return;
+    }
+
+    try {
+      const inputEl = els.promptInput;
+      const inputRect = inputEl.getBoundingClientRect();
+      const sendBtnRect = els.sendPromptBtn?.getBoundingClientRect();
+
+      // Set target row as pending (hidden until orb impacts)
+      targetRow.classList.add('neutron-pending');
+
+      const stage = document.createElement('div');
+      stage.className = 'neutron-singularity-stage';
+      document.body.appendChild(stage);
+
+      // Trigger high-velocity launch sound effect
+      AudioEngine.neutronLaunch();
+
+      // 1. Text Vortex Proxy (renders suction of the prompt characters into the singularity)
+      if (text && text.trim().length > 0 && inputRect.width > 0 && inputRect.height > 0) {
+        const textProxy = document.createElement('div');
+        textProxy.className = 'neutron-text-proxy';
+        const computed = window.getComputedStyle(inputEl);
+        textProxy.style.left = `${inputRect.left}px`;
+        textProxy.style.top = `${inputRect.top}px`;
+        textProxy.style.width = `${inputRect.width}px`;
+        textProxy.style.maxHeight = `${inputRect.height}px`;
+        textProxy.style.fontSize = computed.fontSize;
+        textProxy.style.fontFamily = computed.fontFamily;
+        textProxy.style.lineHeight = computed.lineHeight;
+        textProxy.style.padding = computed.padding;
+        textProxy.style.letterSpacing = computed.letterSpacing;
+        textProxy.textContent = text.length > 240 ? text.substring(0, 240) + '...' : text;
+        stage.appendChild(textProxy);
+      }
+
+      // 2. Gravitational Neutron Singularity Orb Core
+      const orbOriginX = sendBtnRect && sendBtnRect.width > 0
+        ? (sendBtnRect.left + sendBtnRect.width / 2)
+        : (inputRect.right - 24);
+      const orbOriginY = sendBtnRect && sendBtnRect.height > 0
+        ? (sendBtnRect.top + sendBtnRect.height / 2)
+        : (inputRect.top + Math.min(inputRect.height / 2, 28));
+
+      const orb = document.createElement('div');
+      orb.className = 'neutron-singularity-orb';
+      orb.style.left = `${orbOriginX}px`;
+      orb.style.top = `${orbOriginY}px`;
+      orb.style.animation = 'neutronOrbBirth 240ms cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards';
+      stage.appendChild(orb);
+
+      // Scroll smoothly so the target row is positioned in viewport
+      smartScrollChatToBottom(false);
+
+      // 3. Launch towards target bubble after suction completes (~220ms)
+      setTimeout(() => {
+        try {
+          const bubble = targetRow.querySelector('.message-bubble') || targetRow;
+          const targetRect = bubble.getBoundingClientRect();
+          const targetX = targetRect.left + Math.min(targetRect.width * 0.75, targetRect.width - 24);
+          const targetY = targetRect.top + (targetRect.height / 2);
+
+          const deltaX = targetX - orbOriginX;
+          const deltaY = targetY - orbOriginY;
+
+          // Motion trail streak
+          const trail = document.createElement('div');
+          trail.className = 'neutron-motion-trail';
+          stage.appendChild(trail);
+
+          const flyAnim = orb.animate([
+            {
+              transform: 'translate(-50%, -50%) scale(1.1) rotate(0deg)',
+              boxShadow: '0 0 20px #00F0FF, 0 0 35px #FF007F'
+            },
+            {
+              transform: `translate(calc(-50% + ${deltaX * 0.45}px), calc(-50% + ${deltaY * 0.45 - 35}px)) scale(1.35) rotate(360deg)`,
+              boxShadow: '0 0 32px #00F0FF, 0 0 60px #FF007F, inset 0 0 10px #FFFFFF',
+              offset: 0.5
+            },
+            {
+              transform: `translate(calc(-50% + ${deltaX}px), calc(-50% + ${deltaY}px)) scale(0.85) rotate(720deg)`,
+              boxShadow: '0 0 20px #00F0FF, 0 0 40px #FF007F'
+            }
+          ], {
+            duration: 270,
+            easing: 'cubic-bezier(0.2, 0.95, 0.35, 1)',
+            fill: 'forwards'
+          });
+
+          flyAnim.onfinish = () => {
+            try {
+              // Impact Shockwave at destination
+              const shockwave = document.createElement('div');
+              shockwave.className = 'neutron-impact-shockwave';
+              shockwave.style.left = `${targetX}px`;
+              shockwave.style.top = `${targetY}px`;
+              stage.appendChild(shockwave);
+
+              // Sound impact
+              AudioEngine.neutronImpact();
+
+              // Materialize bubble
+              targetRow.classList.remove('neutron-pending');
+              targetRow.classList.add('neutron-materialized');
+              smartScrollChatToBottom(false);
+
+              // Remove orb & trail
+              orb.remove();
+              trail.remove();
+
+              // Cleanup stage
+              setTimeout(() => {
+                stage.remove();
+                targetRow.classList.remove('neutron-materialized');
+              }, 380);
+            } catch (err) {
+              targetRow.classList.remove('neutron-pending');
+              stage.remove();
+            }
+          };
+        } catch (flyErr) {
+          targetRow.classList.remove('neutron-pending');
+          stage.remove();
+        }
+      }, 220);
+    } catch (e) {
+      targetRow.classList.remove('neutron-pending');
+      smartScrollChatToBottom(true);
+      AudioEngine.send();
+    }
+  }
+
   // ==================== DISPATCH / STREAMING ENGINE ====================
   async function handleSendPrompt() {
     const rawText = els.promptInput ? els.promptInput.value.trim() : '';
@@ -4089,12 +4267,15 @@ ${organicBlock}
     renderChatHistory(els.searchHistoryInput?.value || '');
 
     // Immediately render user's message bubble
-    appendMessageElement('user', rawText, images, 'Anda', null, session.messages.length - 1, null, docsMeta);
+    const userRow = appendMessageElement('user', rawText, images, 'Anda', null, session.messages.length - 1, null, docsMeta);
     smartScrollChatToBottom(true);
 
     if (STATE.isPromptHidden) {
       togglePromptVisibility(false);
     }
+
+    // Trigger Gravitational Neutron Singularity Absorption & Slingshot Animation
+    playNeutronSendAnimation(rawText, userRow);
 
     // Reset input & attachments
     if (els.promptInput) {
@@ -4104,7 +4285,6 @@ ${organicBlock}
     STATE.attachedDocs = [];
     clearAttachedImages();
     renderAttachmentPreviews();
-    AudioEngine.send();
 
     let targetModel = '';
     if (STATE.mode === 'openrouter') {

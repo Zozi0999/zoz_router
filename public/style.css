@@ -2034,6 +2034,186 @@ html, body {
   font-family: var(--font-code);
 }
 
+/* ==================== NEUTRON SINGULARITY SLINGSHOT PROMPT ANIMATION ==================== */
+.neutron-singularity-stage {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10000;
+  overflow: hidden;
+}
+
+.neutron-text-proxy {
+  position: absolute;
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  box-sizing: border-box;
+  font-family: var(--font-main);
+  color: var(--text-main);
+  line-height: 1.5;
+  transform-origin: center right;
+  will-change: transform, opacity, filter;
+  animation: neutronTextSuction 250ms cubic-bezier(0.5, 0, 0.9, 0.3) forwards;
+}
+
+@keyframes neutronTextSuction {
+  0% {
+    transform: scale(1) translate(0, 0) rotate(0deg);
+    opacity: 1;
+    filter: blur(0);
+  }
+  35% {
+    transform: scale(0.8) translate(15px, -4px) rotate(4deg) skewX(-12deg);
+    opacity: 0.95;
+    color: var(--neon-cyan);
+    text-shadow: 0 0 10px rgba(0, 240, 255, 0.8);
+    filter: blur(0.5px);
+  }
+  70% {
+    transform: scale(0.35) translate(45px, -8px) rotate(25deg) skewX(-20deg);
+    opacity: 0.7;
+    color: #FFF;
+    text-shadow: 0 0 18px var(--neon-cyan), 0 0 30px var(--neon-magenta);
+    filter: blur(2px) brightness(2.2);
+  }
+  100% {
+    transform: scale(0.01) translate(65px, -10px) rotate(90deg);
+    opacity: 0;
+    filter: blur(4px) brightness(3.5);
+  }
+}
+
+.neutron-singularity-orb {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #FFFFFF 0%, #00F0FF 40%, #7B2CBF 75%, #050510 100%);
+  box-shadow: 0 0 14px #00F0FF, 0 0 28px rgba(0, 240, 255, 0.7), 0 0 45px rgba(255, 0, 127, 0.5), inset 0 0 8px #FFFFFF;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0);
+  will-change: transform, box-shadow;
+  z-index: 10001;
+}
+
+.neutron-singularity-orb::before,
+.neutron-singularity-orb::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  pointer-events: none;
+}
+
+.neutron-singularity-orb::before {
+  border-top-color: #00F0FF;
+  border-bottom-color: rgba(0, 255, 194, 0.8);
+  animation: neutronSpinRing 400ms linear infinite;
+}
+
+.neutron-singularity-orb::after {
+  inset: -10px;
+  border-left-color: #FF007F;
+  border-right-color: rgba(123, 44, 191, 0.7);
+  animation: neutronSpinRingReverse 500ms linear infinite;
+}
+
+@keyframes neutronSpinRing {
+  from { transform: rotate(0deg) rotateX(45deg); }
+  to { transform: rotate(360deg) rotateX(45deg); }
+}
+
+@keyframes neutronSpinRingReverse {
+  from { transform: rotate(360deg) rotateY(55deg); }
+  to { transform: rotate(0deg) rotateY(55deg); }
+}
+
+@keyframes neutronOrbBirth {
+  0% {
+    transform: translate(-50%, -50%) scale(0.2);
+    box-shadow: 0 0 5px #00F0FF;
+  }
+  60% {
+    transform: translate(-50%, -50%) scale(1.35);
+    box-shadow: 0 0 24px #00F0FF, 0 0 45px #FF007F, inset 0 0 12px #FFF;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    box-shadow: 0 0 16px #00F0FF, 0 0 32px rgba(0, 240, 255, 0.8), 0 0 50px rgba(255, 0, 127, 0.6);
+  }
+}
+
+.neutron-motion-trail {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(0, 240, 255, 0.8) 0%, rgba(255, 0, 127, 0.4) 60%, transparent 100%);
+  filter: blur(2px);
+  will-change: transform, opacity;
+}
+
+.neutron-impact-shockwave {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--neon-cyan);
+  box-shadow: 0 0 16px var(--neon-cyan), 0 0 35px var(--neon-magenta);
+  transform: translate(-50%, -50%) scale(0.2);
+  pointer-events: none;
+  animation: neutronShockwaveBurst 360ms cubic-bezier(0.1, 0.85, 0.25, 1) forwards;
+  z-index: 10002;
+}
+
+@keyframes neutronShockwaveBurst {
+  0% {
+    transform: translate(-50%, -50%) scale(0.3);
+    opacity: 1;
+    border-width: 3px;
+  }
+  60% {
+    opacity: 0.85;
+    border-color: #FF007F;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(4.5);
+    opacity: 0;
+    border-width: 1px;
+  }
+}
+
+/* User Message Bubble Materialization */
+.message-row.user.neutron-pending {
+  opacity: 0 !important;
+  pointer-events: none;
+  transform: translateY(16px) scale(0.85);
+}
+
+.message-row.user.neutron-materialized {
+  animation: neutronBubbleMaterialize 420ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes neutronBubbleMaterialize {
+  0% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.85);
+    filter: brightness(2.4) drop-shadow(0 0 25px rgba(0, 240, 255, 0.9));
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.02);
+    filter: brightness(1.35) drop-shadow(0 0 12px rgba(0, 240, 255, 0.5));
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: none;
+  }
+}
+
 /* ==================== BUTTONS & UTILITIES ==================== */
 .btn {
   padding: 8px 16px;
