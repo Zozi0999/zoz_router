@@ -2880,6 +2880,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     let addedImagesCount = 0;
 
     for (const file of files) {
+      if (!file || typeof file.size !== 'number' || file.size <= 0) continue;
       // 1. Cek cerdas: Jika user memilih foto/gambar melalui menu Dokumen
       if (isImageFile(file)) {
         const ok = await processSingleImageFile(file);
@@ -6781,7 +6782,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
   }
 
   async function processSingleImageFile(file) {
-    if (!file) return false;
+    if (!file || typeof file.size !== 'number' || file.size <= 0) return false;
     try {
       const compressedDataUrl = await compressImageToWebP(file, 1024, 0.8) || (await new Promise(r => {
         const reader = new FileReader();
@@ -6811,7 +6812,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
     let addedCount = 0;
     for (const file of files) {
-      if (!isImageFile(file)) continue;
+      if (!file || typeof file.size !== 'number' || file.size <= 0 || !isImageFile(file)) continue;
       const ok = await processSingleImageFile(file);
       if (ok) addedCount++;
     }
@@ -9903,6 +9904,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
       for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
+        if (!file || typeof file.size !== 'number' || file.size <= 0) continue;
         if (!file.type.startsWith('audio/') && !file.name.match(/\.(mp3|wav|ogg|flac|m4a|aac)$/i)) {
           continue;
         }

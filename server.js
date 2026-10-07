@@ -139,19 +139,33 @@ function isPrivateHost(hostname, port) {
 // Helper untuk mengunduh buffer gambar dari URL eksternal dengan proteksi SSRF, batas redirect loop, dan memory buffer cap
 function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const safeResolve = (val) => {
+      if (!settled) {
+        settled = true;
+        resolve(val);
+      }
+    };
+    const safeReject = (err) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    };
+
     try {
       if (redirectCount > 3) {
-        return reject(new Error('Terlalu banyak redirect saat mengunduh gambar (maksimal 3 redirect)'));
+        return safeReject(new Error('Terlalu banyak redirect saat mengunduh gambar (maksimal 3 redirect)'));
       }
       if (!imageUrl || typeof imageUrl !== 'string' || !imageUrl.trim()) {
-        return reject(new Error('URL gambar kosong atau tidak valid'));
+        return safeReject(new Error('URL gambar kosong atau tidak valid'));
       }
       const parsed = new URL(imageUrl);
       if (!['http:', 'https:'].includes(parsed.protocol)) {
-        return reject(new Error(`Protokol tidak didukung: ${parsed.protocol}`));
+        return safeReject(new Error(`Protokol tidak didukung: ${parsed.protocol}`));
       }
       if (isPrivateHost(parsed.hostname, parsed.port)) {
-        return reject(new Error(`Akses ke host lokal/privat diblokir untuk keamanan (SSRF Protection): ${parsed.hostname}`));
+        return safeReject(new Error(`Akses ke host lokal/privat diblokir untuk keamanan (SSRF Protection): ${parsed.hostname}`));
       }
 
       const client = parsed.protocol === 'https:' ? https : http;
@@ -166,14 +180,14 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
           try {
             res.resume();
             const redirectUrl = new URL(res.headers.location, imageUrl).toString();
-            return downloadImageBuffer(redirectUrl, timeoutMs, redirectCount + 1).then(resolve).catch(reject);
+            return downloadImageBuffer(redirectUrl, timeoutMs, redirectCount + 1).then(safeResolve).catch(safeReject);
           } catch (e) {
-            return reject(new Error('Redirect URL gambar tidak valid'));
+            return safeReject(new Error('Redirect URL gambar tidak valid'));
           }
         }
         if (res.statusCode < 200 || res.statusCode >= 300) {
           res.resume();
-          return reject(new Error(`Gagal mengunduh gambar: HTTP ${res.statusCode}`));
+          return safeReject(new Error(`Gagal mengunduh gambar: HTTP ${res.statusCode}`));
         }
 
         const MAX_IMAGE_BYTES = 25 * 1024 * 1024; // Maksimal 25MB untuk mencegah Memory Exhaustion (OOM)
@@ -184,7 +198,7 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
           downloadedBytes += chunk.length;
           if (downloadedBytes > MAX_IMAGE_BYTES) {
             req.destroy();
-            return reject(new Error('Ukuran gambar melebihi batas maksimum keamanan 25MB'));
+            return safeReject(new Error('Ukuran gambar melebihi batas maksimum keamanan 25MB'));
           }
           chunks.push(chunk);
         });
@@ -192,16 +206,16 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
         res.on('end', () => {
           const buffer = Buffer.concat(chunks);
           const contentType = res.headers['content-type'] || 'image/jpeg';
-          resolve({ buffer, contentType });
+          safeResolve({ buffer, contentType });
         });
 
-        res.on('error', err => reject(err));
+        res.on('error', err => safeReject(err));
       });
 
-      req.on('timeout', () => { req.destroy(); reject(new Error('Waktu pengunduhan gambar habis (timeout)')); });
-      req.on('error', err => reject(err));
+      req.on('timeout', () => { req.destroy(); safeReject(new Error('Waktu pengunduhan gambar habis (timeout)')); });
+      req.on('error', err => safeReject(err));
     } catch (e) {
-      reject(e);
+      safeReject(e);
     }
   });
 }
@@ -2092,11 +2106,31 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
     task.progressPercent = 75;
     task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 2/3] Model Riset (${masterResearchModel}) mulai mencerna teks artikel web Primer & Divergen secara mendalam.`);
 
+    function buildBudgetedScrapedText(articles, maxTotalChars = 12000, perArticleCap = 2500) {
+      if (!articles || articles.length === 0) return '';
+      let remaining = maxTotalChars;
+      const chunks = [];
+      for (let idx = 0; idx < articles.length; idx++) {
+        if (remaining <= 250) break;
+        const a = articles[idx];
+        const rawContent = (a.content || '').trim();
+        if (!rawContent) continue;
+        const allowed = Math.min(perArticleCap, remaining);
+        const snippet = rawContent.length > allowed
+          ? (rawContent.substring(0, allowed) + '\n... [konten artikel dipadatkan untuk batas konteks]')
+          : rawContent;
+        const block = `[Dokumen ${idx + 1}: ${a.title || 'Artikel'} (${a.url || ''})]\n${snippet}`;
+        chunks.push(block);
+        remaining -= block.length;
+      }
+      return chunks.join('\n\n');
+    }
+
     const primerArticles = scrapedArticles.filter(a => (a.sourceProvider || '').includes('Primer') || (!(a.sourceProvider || '').includes('Divergen')));
     const divergenArticles = scrapedArticles.filter(a => (a.sourceProvider || '').includes('Divergen'));
 
-    const primerScrapedText = primerArticles.map((a, idx) => `[Dokumen Primer ${idx + 1}: ${a.title} (${a.url})]\n${a.content}`).join('\n\n');
-    const divergenScrapedText = divergenArticles.map((a, idx) => `[Dokumen Divergen ${idx + 1}: ${a.title} (${a.url})]\n${a.content}`).join('\n\n');
+    const primerScrapedText = buildBudgetedScrapedText(primerArticles, 12000, 2500);
+    const divergenScrapedText = buildBudgetedScrapedText(divergenArticles, 12000, 2500);
 
     const promptCernaPrimer = `Anda adalah Agen 1 (Pakar Web Google & Riset Primer).
 Topik Riset: "${topik}"
@@ -2204,6 +2238,12 @@ Cerna dan analisis secara kritis seluruh teks web divergen di atas. Ekstrak pers
     task.progressPercent = 85;
     task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 3/4] Model Riset (${masterResearchModel}) mulai mengoreksi dan merajut konektivitas temuan Primer & Divergen.`);
 
+    // Batasi muatan data temuan di corrector prompt agar tidak melampaui context window limit LLM (maksimal 16.000 karakter)
+    let rawTemuanBlock = dataTemuan.join('\n\n');
+    if (rawTemuanBlock.length > 16000) {
+      rawTemuanBlock = rawTemuanBlock.substring(0, 16000) + '\n\n... [Data temuan lanjutan dipadatkan untuk batas efisiensi context window model]';
+    }
+
     const correctorPrompt = `Anda adalah Lead Scientific Reviewer, Fact-Corrector & Master Enhancer.
 Tugas utama Anda BUKAN sekadar merangkum atau menulis ulang secara dangkal, melainkan:
 1. MENGOREKSI & MEMVALIDASI: Periksa fakta, deteksi klaim tanpa dasar, koreksi kesalahan teknis atau bias dari output telaah Agen 1 dan Agen 2.
@@ -2217,7 +2257,7 @@ ${laporanPakarAgen1 || 'Telaah Agen 1 selesai.'}
 ${laporanPakarAgen2 || 'Telaah Agen 2 selesai.'}
 
 === DATA PEMINDAIAN WEB UTUH & TEMUAN MULTI-TAHAP ===
-${dataTemuan.join('\n\n')}
+${rawTemuanBlock}
 
 Daftar Seluruh Sumber Rujukan Terverifikasi (${allSources.length} Dokumen Web):
 ${allSources.map((s, idx) => `[${idx + 1}] [${s.sourceProvider || 'Web'}] ${s.title}: ${s.url}`).join('\n')}
@@ -2308,11 +2348,16 @@ Sajikan seluruh tautan asli markdown [Nama Sumber](URL) lengkap dengan keteranga
     task.progressPercent = 95;
     task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 4/4] Model Riset (${masterResearchModel}) merumuskan rangkuman eksekutif antarmuka chat.`);
 
+    let summaryInput = (laporanAkhir || '').trim();
+    if (summaryInput.length > 18000) {
+      summaryInput = summaryInput.substring(0, 18000) + '\n\n... [Laporan lengkap dipadatkan untuk penyusunan rangkuman eksekutif]';
+    }
+
     const summaryPrompt = `Anda adalah Lead Executive Communicator & Chat Summarizer.
 Tugas Anda adalah membaca Laporan Riset Komprehensif yang telah dikoreksi dan disempurnakan mengenai topik: "${topik}".
 
 === LAPORAN RISET LENGKAP TERKOREKSI ===
-${laporanAkhir}
+${summaryInput}
 
 === TUGAS ANDA ===
 Susun RANGKUMAN EKSEKUTIF (Executive Summary) padat, tajam, dan elegan yang akan ditampilkan LANGSUNG DI ANTARMUKA CHAT (di dalam gelembung obrolan pengguna).
@@ -2784,16 +2829,21 @@ const server = http.createServer(async (req, res) => {
       };
 
       const masterModel = body.finalModel || body.model || body.agent1Model || 'qwen/qwen3.8-27b:free';
+      const rawAuth = req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '').trim() : null;
+      const rawApiKey = req.headers['x-api-key'] ? String(req.headers['x-api-key']).replace(/^Bearer\s+/i, '').trim() : null;
+      const rawSerperKey = req.headers['x-serper-key'] ? String(req.headers['x-serper-key']).trim() : null;
+      const rawOllamaKey = req.headers['x-ollama-key'] ? String(req.headers['x-ollama-key']).replace(/^Bearer\s+/i, '').trim() : null;
+
       // Jalankan proses riset secara asinkronus di latar belakang dengan arsitektur 1-Model super efisien
       jalankanRisetOtonom(taskId, topik, {
         messages: body.messages || [],
         model: masterModel,
         provider: body.provider || (masterModel.includes('/') ? 'openrouter' : (masterModel.includes(':') ? 'ollama' : 'openrouter')),
         endpoint: body.endpoint,
-        apiKey: body.apiKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null),
-        openRouterKey: body.openRouterKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || process.env.OPENROUTER_API_KEY,
-        ollamaApiKey: body.ollamaApiKey || body.apiKey || '',
-        serperApiKey: body.serperApiKey || req.headers['x-serper-key'],
+        apiKey: body.apiKey || rawAuth || rawApiKey || null,
+        openRouterKey: body.openRouterKey || body.apiKey || rawAuth || rawApiKey || process.env.OPENROUTER_API_KEY,
+        ollamaApiKey: body.ollamaApiKey || body.apiKey || rawOllamaKey || '',
+        serperApiKey: body.serperApiKey || rawSerperKey || rawApiKey || process.env.SERPER_API_KEY,
         agent1Model: masterModel,
         agent2Model: masterModel,
         finalModel: masterModel,
