@@ -8,7 +8,7 @@ module.exports = async function handler(req, res) {
   try {
     let authHeader = req.headers.authorization;
     if (!authHeader) {
-      const qKey = req.headers['x-api-key'] || req.query?.key || req.query?.apiKey || process.env.OPENROUTER_API_KEY;
+      const qKey = req.headers['x-api-key'] || req.query?.key || req.query?.apiKey || req.query?.openRouterKey || process.env.OPENROUTER_API_KEY;
       if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
     }
     if (!authHeader) return res.status(401).json({ error: 'Authorization header is required' });
@@ -19,10 +19,17 @@ module.exports = async function handler(req, res) {
         'User-Agent': 'ZozRouter/1.0'
       }
     });
-    const data = await response.json();
+    const rawText = await response.text();
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    return res.status(response.status).json(data);
+    try {
+      const data = JSON.parse(rawText);
+      return res.status(response.status).json(data);
+    } catch (_) {
+      return res.status(response.status).send(rawText);
+    }
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    if (!res.headersSent) {
+      return res.status(500).json({ error: err.message });
+    }
   }
 };

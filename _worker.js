@@ -121,7 +121,7 @@ export default {
     if (url.pathname === '/api/openrouter/chat' && request.method === 'POST') {
       try {
         const body = await request.json().catch(() => ({}));
-        let apiKey = body.apiKey || request.headers.get('x-api-key') || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '').trim() : '') || url.searchParams.get('key') || url.searchParams.get('apiKey') || env?.OPENROUTER_API_KEY;
+        let apiKey = body.apiKey || body.openRouterKey || request.headers.get('x-api-key') || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '').trim() : '') || url.searchParams.get('key') || url.searchParams.get('apiKey') || url.searchParams.get('openRouterKey') || env?.OPENROUTER_API_KEY;
         if (apiKey) apiKey = String(apiKey).replace(/^Bearer\s+/i, '').trim();
         if (!apiKey) {
           return new Response(JSON.stringify({ error: 'Missing OpenRouter API Key' }), {
@@ -169,7 +169,7 @@ export default {
       try {
         let authHeader = request.headers.get('Authorization');
         if (!authHeader) {
-          const qKey = request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || env?.OPENROUTER_API_KEY;
+          const qKey = request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || url.searchParams.get('openRouterKey') || env?.OPENROUTER_API_KEY;
           if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
         }
         const headers = {};
@@ -194,7 +194,7 @@ export default {
       try {
         let authHeader = request.headers.get('Authorization');
         if (!authHeader) {
-          const qKey = request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || env?.OPENROUTER_API_KEY;
+          const qKey = request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || url.searchParams.get('openRouterKey') || env?.OPENROUTER_API_KEY;
           if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
         }
         if (!authHeader) {
@@ -225,7 +225,7 @@ export default {
       try {
         let authHeader = request.headers.get('Authorization');
         if (!authHeader) {
-          const qKey = request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || env?.OPENROUTER_API_KEY;
+          const qKey = request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || url.searchParams.get('openRouterKey') || env?.OPENROUTER_API_KEY;
           if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
         }
         if (!authHeader) {
@@ -474,7 +474,20 @@ export default {
       }
     }
 
-    // Default static assets
-    return env.ASSETS.fetch(request);
+    // Default static assets (Cloudflare Pages) atau 404 response (Standalone Worker)
+    if (env && env.ASSETS && typeof env.ASSETS.fetch === 'function') {
+      return env.ASSETS.fetch(request);
+    }
+    return new Response(JSON.stringify({
+      status: 404,
+      error: 'Not Found',
+      message: 'Rute tidak ditemukan pada Cloudflare Gateway.'
+    }), {
+      status: 404,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
   }
 };

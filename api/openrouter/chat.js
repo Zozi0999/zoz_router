@@ -13,7 +13,7 @@ module.exports = async function handler(req, res) {
     }
     body = body || {};
 
-    let apiKey = body.apiKey || req.headers['x-api-key'] || (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, '').trim() : '') || req.query?.key || req.query?.apiKey || process.env.OPENROUTER_API_KEY;
+    let apiKey = body.apiKey || body.openRouterKey || req.headers['x-api-key'] || (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, '').trim() : '') || req.query?.key || req.query?.apiKey || req.query?.openRouterKey || process.env.OPENROUTER_API_KEY;
     if (apiKey) {
       apiKey = String(apiKey).replace(/^Bearer\s+/i, '').trim();
     }
@@ -57,8 +57,14 @@ module.exports = async function handler(req, res) {
       return res.status(response.status).send(errText);
     }
 
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Transfer-Encoding', 'chunked');
+    if (payload.stream === false) {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    } else {
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('Transfer-Encoding', 'chunked');
+    }
 
     for await (const chunk of response.body) {
       if (clientDisconnected || res.writableEnded || res.destroyed) {

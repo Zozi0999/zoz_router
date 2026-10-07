@@ -69,8 +69,14 @@ module.exports = async function handler(req, res) {
       return res.status(response.status).send(errText);
     }
 
-    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-    res.setHeader('Transfer-Encoding', 'chunked');
+    if (payload.stream === false) {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    } else {
+      res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('Transfer-Encoding', 'chunked');
+    }
 
     for await (const chunk of response.body) {
       if (clientDisconnected || res.writableEnded || res.destroyed) {

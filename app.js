@@ -3557,7 +3557,7 @@ ${organicBlock}
     }
 
     try {
-      const isDirect = IS_GITHUB_PAGES || !location.port;
+      const isDirect = IS_GITHUB_PAGES;
       const endpoint = isDirect ? 'https://openrouter.ai/api/v1/credits' : '/api/openrouter/credits';
       const headers = {
         'Authorization': `Bearer ${key}`
@@ -5934,7 +5934,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       const resolvedImgs = await Promise.all(rawImgs.map(resolveImageToDataUrlSafe));
       const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, modelName);
 
-      const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
+      const isOpenRouterDirect = IS_GITHUB_PAGES;
       const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
       const headers = {
         'Content-Type': 'application/json',
@@ -7091,7 +7091,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           ].filter((m, idx, arr) => arr.indexOf(m) === idx)
         : [modelName];
 
-      const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
+      const isOpenRouterDirect = IS_GITHUB_PAGES;
       const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
       const headers = {
         'Content-Type': 'application/json',
@@ -7215,7 +7215,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           ].filter((m, idx, arr) => arr.indexOf(m) === idx)
         : [modelName];
 
-      const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
+      const isOpenRouterDirect = IS_GITHUB_PAGES;
       const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
       const headers = {
         'Content-Type': 'application/json',

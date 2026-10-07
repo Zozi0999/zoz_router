@@ -2984,9 +2984,13 @@ const server = http.createServer(async (req, res) => {
             contentType = orRes.contentType || 'image/png';
           } else if (orRes.remoteUrl) {
             remoteImageUrl = orRes.remoteUrl;
-            const downloaded = await downloadImageBuffer(remoteImageUrl, 35000);
-            imageBuffer = downloaded.buffer;
-            contentType = downloaded.contentType;
+            try {
+              const downloaded = await downloadImageBuffer(remoteImageUrl, 35000);
+              imageBuffer = downloaded.buffer;
+              contentType = downloaded.contentType || 'image/png';
+            } catch (dlErr) {
+              console.warn('Gagal mengunduh buffer gambar OpenRouter ke disk:', dlErr.message);
+            }
           }
         } catch (orErr) {
           console.warn('OpenRouter image API fallback ke Flux Pollinations:', orErr.message);
@@ -3006,28 +3010,46 @@ const server = http.createServer(async (req, res) => {
         }
         const encodedPrompt = encodeURIComponent(urlPrompt);
         remoteImageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=${encodeURIComponent(effectiveModel)}&seed=${actualSeed}&nologo=true&enhance=true`;
-        const downloaded = await downloadImageBuffer(remoteImageUrl, 40000);
-        imageBuffer = downloaded.buffer;
-        contentType = downloaded.contentType || 'image/png';
+        try {
+          const downloaded = await downloadImageBuffer(remoteImageUrl, 40000);
+          imageBuffer = downloaded.buffer;
+          contentType = downloaded.contentType || 'image/png';
+        } catch (dlErr) {
+          console.warn('Gagal mengunduh buffer gambar Pollinations ke disk lokal:', dlErr.message);
+        }
       }
 
-      // 3. Simpan buffer gambar secara permanen ke UPLOADS_DIR perangkat
-      if (!imageBuffer || imageBuffer.length === 0) {
+      // 3. Simpan buffer gambar secara permanen ke UPLOADS_DIR perangkat jika tersedia
+      let localUrl = '';
+      let filename = null;
+      let sizeBytes = 0;
+
+      if (imageBuffer && imageBuffer.length > 0) {
+        const ext = contentType.includes('webp') ? 'webp' : (contentType.includes('jpeg') || contentType.includes('jpg') ? 'jpg' : 'png');
+        filename = `ai_gen_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
+        const localFilePath = path.join(UPLOADS_DIR, filename);
+
+        try {
+          fs.writeFileSync(localFilePath, imageBuffer);
+          localUrl = `/uploads/${filename}`;
+          sizeBytes = imageBuffer.length;
+        } catch (fsErr) {
+          console.warn('Gagal menulis gambar ke disk:', fsErr.message);
+        }
+      }
+
+      // Fallback: Jika unduhan ke disk gagal tapi remoteImageUrl ada, gunakan remoteImageUrl langsung
+      const finalUrl = localUrl || remoteImageUrl;
+      if (!finalUrl) {
         throw new Error('Buffer gambar kosong atau gagal diunduh dari engine.');
       }
-      const ext = contentType.includes('webp') ? 'webp' : (contentType.includes('jpeg') || contentType.includes('jpg') ? 'jpg' : 'png');
-      const filename = `ai_gen_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
-      const localFilePath = path.join(UPLOADS_DIR, filename);
-
-      fs.writeFileSync(localFilePath, imageBuffer);
 
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-      const localUrl = `/uploads/${filename}`;
 
       return sendJSON(res, 200, {
         success: true,
-        url: localUrl,
-        localUrl: localUrl,
+        url: finalUrl,
+        localUrl: localUrl || finalUrl,
         remoteUrl: remoteImageUrl || null,
         filename: filename,
         prompt: cleanPrompt,
@@ -3036,7 +3058,7 @@ const server = http.createServer(async (req, res) => {
         height: height,
         seed: actualSeed,
         duration: duration,
-        sizeBytes: imageBuffer.length,
+        sizeBytes: sizeBytes,
         createdAt: new Date().toISOString()
       });
 
