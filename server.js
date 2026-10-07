@@ -1960,7 +1960,8 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
       batchResults.forEach(res => {
         if (res.status === 'fulfilled' && res.value) {
           scrapedArticles.push(res.value);
-          task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Berhasil memindai konten [${res.value.sourceProvider}]: "${res.value.title.substring(0, 40)}..." (${res.value.content.length} karakter)`);
+          const safeTitle = res.value.title || 'Artikel Web';
+          task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Berhasil memindai konten [${res.value.sourceProvider}]: "${safeTitle.substring(0, 40)}..." (${(res.value.content || '').length} karakter)`);
         }
       });
 
@@ -1970,12 +1971,12 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
           status: idx + SCRAPE_BATCH_SIZE >= targetScrapeUrls.length ? 'selesai' : 'memindai',
           totalScraped: scrapedArticles.length,
           articles: scrapedArticles.map(a => ({
-            title: a.title,
+            title: a.title || 'Artikel Web',
             url: a.url,
             domain: a.domain,
             sourceProvider: a.sourceProvider,
-            length: a.content.length,
-            sample: a.content.substring(0, 240) + '...'
+            length: (a.content || '').length,
+            sample: (a.content || '').substring(0, 240) + '...'
           }))
         };
       }
@@ -1992,11 +1993,11 @@ Keluarkan hanya JSON valid tanpa teks tambahan.`;
           status: 'selesai',
           totalScraped: scrapedArticles.length,
           articles: scrapedArticles.map(a => ({
-            title: a.title,
+            title: a.title || 'Artikel Web',
             url: a.url,
             domain: a.domain,
-            length: a.content.length,
-            sample: a.content.substring(0, 240) + '...'
+            length: (a.content || '').length,
+            sample: (a.content || '').substring(0, 240) + '...'
           }))
         };
       }
@@ -3159,7 +3160,8 @@ const server = http.createServer(async (req, res) => {
 
       proxyReq = client.request(ollamaUrl.toString(), {
         method: 'POST',
-        headers: proxyHeaders
+        headers: proxyHeaders,
+        timeout: 120000
       }, (proxyRes) => {
         if (clientDisconnected || res.writableEnded || res.destroyed) {
           if (!proxyReq.destroyed) proxyReq.destroy();
@@ -3223,6 +3225,21 @@ const server = http.createServer(async (req, res) => {
             res.end();
           } catch (e) {}
         });
+      });
+
+      proxyReq.on('timeout', () => {
+        if (!proxyReq.destroyed) proxyReq.destroy();
+        if (clientDisconnected || res.writableEnded || res.destroyed) return;
+        try {
+          if (!res.headersSent) {
+            sendJSON(res, 504, { error: 'Ollama stream timed out (120s)' });
+          } else {
+            if (isStream) {
+              res.write(JSON.stringify({ error: 'Ollama stream timed out (120s)' }) + '\n');
+            }
+            res.end();
+          }
+        } catch (_) {}
       });
 
       proxyReq.on('error', (err) => {

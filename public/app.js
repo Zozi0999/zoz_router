@@ -1858,6 +1858,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     const target = STATE.sessions.find(s => s.id === sessionId);
     if (!target) return;
 
+    // Abort active in-flight generation if deleting the current generating session
+    if (STATE.isGenerating && STATE.currentSessionId === sessionId) {
+      stopGeneration();
+    }
+
     STATE.sessions = STATE.sessions.filter(s => s.id !== sessionId);
     await DeviceStorage.deleteSession(sessionId);
 
@@ -3144,7 +3149,7 @@ ${organicBlock}
     }
 
     const videoInfos = await Promise.all(ids.map(id => fetchYouTubeInfoClient(id)));
-    const validVideos = videoInfos.filter(v => v && v.title);
+    const validVideos = videoInfos.filter(v => v && v.success && v.title);
 
     if (validVideos.length === 0) return null;
 
@@ -3205,7 +3210,7 @@ ${organicBlock}
 
     for (const vidId of ids) {
       const info = await fetchYouTubeInfoClient(vidId);
-      if (info) {
+      if (info && info.success) {
         const cardWrapper = document.createElement('div');
         cardWrapper.innerHTML = buildYouTubePreviewCardHtml(info);
         if (cardWrapper.firstElementChild) {
@@ -10828,6 +10833,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     
     els.clearAllHistoryBtn.addEventListener('click', async () => {
       if (confirm('Apakah Anda yakin ingin menghapus semua riwayat sesi obrolan?')) {
+        if (STATE.isGenerating) {
+          stopGeneration();
+        }
         STATE.sessions = [];
         STATE.currentSessionId = null;
         sessionStorage.removeItem('zoz_active_session_id');
