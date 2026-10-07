@@ -978,18 +978,17 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
 
 function deriveBroadSearchQueries(rawQuery, contextText = '') {
   if (!rawQuery || typeof rawQuery !== 'string') return { primary: '', tech: '', news: '', recentNews: '', recentNewsId: '', weeklyNews: '', core: '' };
+  const rawLower = rawQuery.toLowerCase();
+  const contextLower = (contextText || '').toLowerCase();
   const combined = (rawQuery + ' ' + (contextText || '')).trim();
   const lower = combined.toLowerCase();
 
-  // Deteksi nomor versi spesifik jika ada (misal: 4.7, 3.5, 4o, 5.5, v3, 2.0, o1, r1)
-  // Cegah angka tanggal kalender (misal: "6 Oktober", "15 September") atau integer polos tanpa desimal/awalan 'v' tertangkap sebagai versi
+  // 1. Ekstraksi nomor versi SPESIFIK HANYA dari rawQuery (Cegah keracunan angka/halusinasi dari riwayat/respons asisten)
   let version = '';
-  // 1. Cek desimal versi: 3.5, 4.7, 5.5, 1.5-pro, dll. (Prioritaskan rawQuery terlebih dahulu)
-  const decimalMatch = rawQuery.match(/\b([0-9]+\.[0-9]+(?:[\.\-][0-9a-z]+)*)\b/i) || combined.match(/\b([0-9]+\.[0-9]+(?:[\.\-][0-9a-z]+)*)\b/i);
+  const decimalMatch = rawQuery.match(/\b([0-9]+\.[0-9]+(?:[\.\-][0-9a-z]+)*)\b/i);
   if (decimalMatch && !/^20[2-3][0-9]/.test(decimalMatch[1])) {
     version = decimalMatch[1];
   } else {
-    // 2. Cek versi berawalan 'v' atau 'ver' atau kode model khusus seperti '4o', 'o1', 'o3', 'r1', 'v3'
     const codeMatch = rawQuery.match(/\b(?:v|ver|version)\s*([0-9]+(?:[\.\-][0-9a-z]+)*)\b/i) ||
                       rawQuery.match(/\b([0-9]+o|o[1-4]|r[1-3])\b/i);
     if (codeMatch) {
@@ -997,32 +996,47 @@ function deriveBroadSearchQueries(rawQuery, contextText = '') {
     }
   }
 
+  // 2. Deteksi Entitas Lab / Produk AI (Prioritaskan rawQuery terlebih dahulu, lalu fallback ke contextText)
   let entity = '';
-  if (lower.includes('grok') || lower.includes('xai') || lower.includes('x.ai') || lower.includes('supergrok')) entity = 'xAI Grok';
-  else if (lower.includes('gemini')) entity = 'Google Gemini';
-  else if (lower.includes('claude') || lower.includes('antropic') || lower.includes('anthropic')) entity = 'Anthropic Claude';
-  else if (lower.includes('chatgpt') || lower.includes('gpt') || lower.includes('openai') || lower.includes('o1') || lower.includes('o3') || lower.includes('o4')) entity = 'OpenAI ChatGPT';
-  else if (lower.includes('deepseek') || lower.includes('r1') || lower.includes('v3')) entity = 'DeepSeek AI';
-  else if (lower.includes('llama') || lower.includes('meta ai')) entity = 'Meta Llama';
-  else if (lower.includes('qwen') || lower.includes('tongyi')) entity = 'Alibaba Qwen';
-  else if (lower.includes('mistral') || lower.includes('le chat')) entity = 'Mistral AI';
-  else if (lower.includes('gemma')) entity = 'Google Gemma';
-  else if ((lower.includes('apple') && lower.includes('ai')) || lower.includes('apple intelligence')) entity = 'Apple Intelligence';
-  else if (lower.includes('copilot')) entity = 'Microsoft Copilot';
-  else if (lower.includes('perplexity')) entity = 'Perplexity AI';
-  else if (lower.includes('midjourney')) entity = 'Midjourney AI';
-  else if (lower.includes('sora')) entity = 'OpenAI Sora';
-  else if (lower.includes('flux')) entity = 'FLUX AI';
+  const checkEntity = (targetStr) => {
+    if (targetStr.includes('grok') || targetStr.includes('xai') || targetStr.includes('x.ai') || targetStr.includes('supergrok')) return 'xAI Grok';
+    if (targetStr.includes('gemini')) return 'Google Gemini';
+    if (targetStr.includes('claude') || targetStr.includes('antropic') || targetStr.includes('anthropic')) return 'Anthropic Claude';
+    if (targetStr.includes('chatgpt') || targetStr.includes('gpt') || targetStr.includes('openai') || targetStr.includes('o1') || targetStr.includes('o3') || targetStr.includes('o4')) return 'OpenAI ChatGPT';
+    if (targetStr.includes('deepseek') || targetStr.includes('r1') || targetStr.includes('v3')) return 'DeepSeek AI';
+    if (targetStr.includes('llama') || targetStr.includes('meta ai')) return 'Meta Llama';
+    if (targetStr.includes('qwen') || targetStr.includes('tongyi')) return 'Alibaba Qwen';
+    if (targetStr.includes('mistral') || targetStr.includes('le chat')) return 'Mistral AI';
+    if (targetStr.includes('gemma')) return 'Google Gemma';
+    if ((targetStr.includes('apple') && targetStr.includes('ai')) || targetStr.includes('apple intelligence')) return 'Apple Intelligence';
+    if (targetStr.includes('copilot')) return 'Microsoft Copilot';
+    if (targetStr.includes('perplexity')) return 'Perplexity AI';
+    if (targetStr.includes('midjourney')) return 'Midjourney AI';
+    if (targetStr.includes('sora')) return 'OpenAI Sora';
+    if (targetStr.includes('flux')) return 'FLUX AI';
+    return '';
+  };
 
-  // Gabungkan entitas dengan versi jika ada (misal: xAI Grok 4.7)
+  entity = checkEntity(rawLower);
+  if (!entity && contextText) {
+    entity = checkEntity(contextLower);
+  }
+
+  // Gabungkan entitas dengan versi jika ada pada rawQuery (misal: xAI Grok 4.7)
   if (entity && version && !entity.toLowerCase().includes(version.toLowerCase())) {
     entity = `${entity} ${version}`;
   }
 
+  // 3. Deteksi Intent Spesifik Pengguna (Capability/Benchmark vs Price vs Release vs Comparison)
+  const isCapability = /\b(terkuat\w*|terhebat\w*|terpintar\w*|terbaik\w*|tercanggih\w*|canggih\w*|paling\w*|ranking|peringkat|leaderboard|benchmark\w*|mme|swe-bench|math|reasoning|kemampuan\w*|performa\w*|akurasi|kelebihan\w*|spesifikasi\w*|specs|kekuatan\w*|keunggulan\w*|power\w*|powerful|strongest|best|smartest|highest|flagship|top\s*model|leading\s*model)\b/i.test(lower);
+  const isPrice = /\b(harga\w*|biaya\w*|tarif\w*|langganan\w*|gratis|free|cost|price|pricing|tier|token|per\s*token|subscription|plus|pro)\b/i.test(lower);
+  const isRelease = /\b(kapan|rilis\w*|keluar|luncur\w*|peluncuran\w*|release\w*|launch\w*|launched|roadmap|schedule|tanggal|jadwal|resmi|announcement|announced)\b/i.test(lower);
+  const isComparison = /\b(vs|versus|banding\w*|perbandingan\w*|dibandingkan|compare|comparison|bedanya|perbedaan\w*)\b/i.test(lower);
+
   const stopWords = [
     'update', 'updates', 'terbaru', 'terkini', 'apa', 'itu', 'bagaimana', 'perkembangan',
     'berita', 'tentang', 'fitur', 'baru', 'informasi', 'info', 'roadmap', 'bocoran',
-    'release', 'changelog', 'saat', 'ini', 'sekarang', 'apakah', 'ada', 'model',
+    'release', 'changelog', 'saat', 'ini', 'sekarang', 'apakah', 'ada',
     'tahun', 'di', 'ke', 'dari', 'yang', 'dan', 'atau', 'pada', 'untuk',
     'cari', 'carikan', 'sumber', 'sumbernya', 'lagi', 'coba', 'bukti', 'buktinya', 'resmi',
     'web', 'internet', 'google', 'tolong', 'bantu', 'mana', 'dong', 'search', 'find', 'sources',
@@ -1037,11 +1051,66 @@ function deriveBroadSearchQueries(rawQuery, contextText = '') {
 
   const coreSubject = entity || (cleaned.length >= 2 ? cleaned : rawQuery.trim());
 
-  // Angker Temporal Dinamis: Masukkan Bulan & Tahun aktif saat ini agar pencarian tidak mengembalikan artikel usang
+  // Angker Temporal Dinamis: Masukkan Bulan & Tahun aktif saat ini
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonthEn = now.toLocaleString('en-US', { month: 'long' });
   const currentMonthId = now.toLocaleString('id-ID', { month: 'long' });
+
+  if (isCapability) {
+    const subject = entity || coreSubject;
+    return {
+      primary: rawQuery.trim(),
+      tech: `${subject} most powerful model strongest frontier benchmark`,
+      news: `${subject} flagship model leaderboard reasoning o1 GPT-4o Claude Gemini`,
+      recentNews: `${subject} strongest model benchmark when:90d`,
+      recentNewsId: `${subject} model terkuat kemampuan benchmark`,
+      weeklyNews: `${subject} reasoning benchmark when:30d`,
+      core: `${subject} most powerful model benchmark`,
+      isCapability: true
+    };
+  }
+
+  if (isPrice) {
+    const subject = entity || coreSubject;
+    return {
+      primary: rawQuery.trim(),
+      tech: `${subject} api pricing token cost subscription`,
+      news: `${subject} pricing plan api tier cost`,
+      recentNews: `${subject} price cost when:60d`,
+      recentNewsId: `${subject} harga langganan biaya api`,
+      weeklyNews: `${subject} pricing when:30d`,
+      core: `${subject} pricing cost`,
+      isPrice: true
+    };
+  }
+
+  if (isRelease) {
+    const subject = entity || coreSubject;
+    return {
+      primary: rawQuery.trim(),
+      tech: `${subject} release date roadmap announcement launch`,
+      news: `${subject} latest release announcement ${currentYear}`,
+      recentNews: `${subject} release date when:60d`,
+      recentNewsId: `${subject} rilis peluncuran jadwal`,
+      weeklyNews: `${subject} launch announcement when:14d`,
+      core: `${subject} release date roadmap`,
+      isRelease: true
+    };
+  }
+
+  if (isComparison) {
+    return {
+      primary: rawQuery.trim(),
+      tech: `${coreSubject} comparison benchmark vs`,
+      news: `${coreSubject} compared head to head benchmark`,
+      recentNews: `${coreSubject} vs comparison when:60d`,
+      recentNewsId: `${coreSubject} perbandingan kelebihan`,
+      weeklyNews: `${coreSubject} vs when:30d`,
+      core: `${coreSubject} comparison`,
+      isComparison: true
+    };
+  }
 
   return {
     primary: rawQuery.trim(),
@@ -1330,8 +1399,9 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
     // Filter out irrelevant disambiguation or unrelated codenames
     if (normTitle.includes('listofapplecodenames') && !cleanQuery.toLowerCase().includes('apple')) continue;
 
-    // Jika ada artikel mutakhir dalam 30 hari terakhir, singkirkan berita lampau (> 45 hari) agar tidak ada halusinasi berita usang
-    if (hasVeryRecent30d && item.timestamp && (now - item.timestamp) > (45 * 86400 * 1000)) continue;
+    // Jika ada artikel mutakhir dalam 30 hari terakhir, singkirkan berita lampau agar tidak ada halusinasi berita usang (180 hari untuk kapabilitas/harga/rilis/komparasi, 45 hari untuk berita umum)
+    const maxAgeDays = (qPlan.isCapability || qPlan.isPrice || qPlan.isRelease || qPlan.isComparison) ? 180 : 45;
+    if (hasVeryRecent30d && item.timestamp && (now - item.timestamp) > (maxAgeDays * 86400 * 1000)) continue;
 
     if (seenUrls.has(normUrl) || seenTitles.has(normTitle)) continue;
     seenUrls.add(normUrl);
