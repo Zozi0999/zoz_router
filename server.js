@@ -2708,19 +2708,19 @@ const server = http.createServer(async (req, res) => {
   // YOUTUBE OEMBED METADATA GROUNDING API
   // ----------------------------------------------------
   if (pathname === '/api/youtube-info' && (method === 'GET' || method === 'POST')) {
-    let targetUrl = '';
-    if (method === 'GET') {
-      targetUrl = queryParams.url || '';
-    } else {
-      const body = await parseBody(req);
-      targetUrl = body.url || body.link || '';
-    }
-
-    if (!targetUrl || !targetUrl.trim()) {
-      return sendJSON(res, 400, { success: false, error: 'Parameter url diperlukan.' });
-    }
-
     try {
+      let targetUrl = '';
+      if (method === 'GET') {
+        targetUrl = reqUrl.searchParams.get('url') || reqUrl.searchParams.get('link') || '';
+      } else {
+        const body = await parseBody(req);
+        targetUrl = body.url || body.link || '';
+      }
+
+      if (!targetUrl || !targetUrl.trim()) {
+        return sendJSON(res, 400, { success: false, error: 'Parameter url diperlukan.' });
+      }
+
       const info = await fetchYouTubeInfo(targetUrl.trim());
       return sendJSON(res, info.success ? 200 : 400, info);
     } catch (err) {
@@ -3028,7 +3028,8 @@ const server = http.createServer(async (req, res) => {
       port: 443,
       path: '/api/usage',
       method: 'GET',
-      headers: reqHeaders
+      headers: reqHeaders,
+      timeout: 15000
     };
 
     const proxyReq = https.request(options, (proxyRes) => {
@@ -3046,6 +3047,11 @@ const server = http.createServer(async (req, res) => {
       proxyRes.on('error', (err) => {
         if (!res.headersSent) sendJSON(res, 502, { error: 'Failed to stream Ollama usage: ' + err.message });
       });
+    });
+
+    proxyReq.on('timeout', () => {
+      proxyReq.destroy();
+      if (!res.headersSent) sendJSON(res, 504, { error: 'Ollama usage check timed out (15s)' });
     });
 
     proxyReq.on('error', (err) => {
@@ -3230,7 +3236,8 @@ const server = http.createServer(async (req, res) => {
       headers: {
         'User-Agent': 'ZozRouter/1.0',
         ...(authHeader ? { 'Authorization': authHeader } : {})
-      }
+      },
+      timeout: 15000
     };
 
     const proxyReq = https.request(options, (proxyRes) => {
@@ -3247,6 +3254,11 @@ const server = http.createServer(async (req, res) => {
       proxyRes.on('error', (err) => {
         if (!res.headersSent) sendJSON(res, 502, { error: 'OpenRouter models stream error: ' + err.message });
       });
+    });
+
+    proxyReq.on('timeout', () => {
+      proxyReq.destroy();
+      if (!res.headersSent) sendJSON(res, 504, { error: 'OpenRouter models request timed out (15s)' });
     });
 
     proxyReq.on('error', (err) => {
@@ -3272,7 +3284,8 @@ const server = http.createServer(async (req, res) => {
       headers: {
         'Authorization': authHeader,
         'User-Agent': 'ZozRouter/1.0'
-      }
+      },
+      timeout: 15000
     };
 
     const proxyReq = https.request(options, (proxyRes) => {
@@ -3289,6 +3302,11 @@ const server = http.createServer(async (req, res) => {
       proxyRes.on('error', (err) => {
         if (!res.headersSent) sendJSON(res, 502, { error: 'Auth check stream error: ' + err.message });
       });
+    });
+
+    proxyReq.on('timeout', () => {
+      proxyReq.destroy();
+      if (!res.headersSent) sendJSON(res, 504, { error: 'OpenRouter auth check timed out (15s)' });
     });
 
     proxyReq.on('error', (err) => {
@@ -3314,7 +3332,8 @@ const server = http.createServer(async (req, res) => {
       headers: {
         'Authorization': authHeader,
         'User-Agent': 'ZozRouter/1.0'
-      }
+      },
+      timeout: 15000
     };
 
     const proxyReq = https.request(options, (proxyRes) => {
@@ -3332,6 +3351,11 @@ const server = http.createServer(async (req, res) => {
       proxyRes.on('error', (err) => {
         if (!res.headersSent) sendJSON(res, 502, { error: 'Credits check stream error: ' + err.message });
       });
+    });
+
+    proxyReq.on('timeout', () => {
+      proxyReq.destroy();
+      if (!res.headersSent) sendJSON(res, 504, { error: 'OpenRouter credits request timed out (15s)' });
     });
 
     proxyReq.on('error', (err) => {
@@ -3380,7 +3404,8 @@ const server = http.createServer(async (req, res) => {
           'HTTP-Referer': 'http://localhost:4040',
           'X-Title': 'ZOZ ROUTER Neural AI Gateway',
           'Content-Length': Buffer.byteLength(postData)
-        }
+        },
+        timeout: 120000
       };
 
       let clientDisconnected = false;
@@ -3459,6 +3484,22 @@ const server = http.createServer(async (req, res) => {
             res.end();
           } catch (e) {}
         });
+      });
+
+      proxyReq.on('timeout', () => {
+        if (!proxyReq.destroyed) proxyReq.destroy();
+        if (clientDisconnected || res.writableEnded || res.destroyed) return;
+        try {
+          if (!res.headersSent) {
+            sendJSON(res, 504, { error: 'OpenRouter stream timed out (120s)' });
+          } else {
+            if (isStream) {
+              res.write(`data: ${JSON.stringify({ error: 'OpenRouter stream timed out (120s)' })}\n\n`);
+              res.write('data: [DONE]\n\n');
+            }
+            res.end();
+          }
+        } catch (_) {}
       });
 
       proxyReq.on('error', (err) => {

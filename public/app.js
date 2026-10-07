@@ -717,7 +717,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         return;
       }
       try {
-        const res = await fetch('/api/health', { method: 'GET', signal: AbortSignal.timeout(2000) });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const res = await fetch('/api/health', { method: 'GET', signal: controller.signal });
+        clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();
           if (data.storage === 'device-disk' || data.status === 'online') {
@@ -1250,6 +1253,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
   }
 
+    // ==================== SMART SCROLL STATE ====================
+    let userScrolledUp = false;
+    let isAutoScrolling = false;
+
     // ==================== HIGH-PERFORMANCE 60FPS STREAM BUFFER RENDERER ====================
   class StreamBufferRenderer {
     constructor(bubbleElement, onScrollCallback, prefixHtml = '') {
@@ -1313,8 +1320,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   }
 
   // ==================== SMART SCROLL & CONTINUATION MANAGER ====================
-  let userScrolledUp = false;
-  let isAutoScrolling = false;
 
   function isChatAtBottom(element = els.chatViewport, threshold = 25) {
     if (!element) return true;
@@ -1566,8 +1571,19 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         bubbleText.innerHTML = renderMarkdown(merged);
         enhanceCodeBlocks(bubbleText);
         
-        const lastMsg = session.messages[session.messages.length - 1];
-        if (lastMsg) lastMsg.content = merged;
+        let targetMsg = null;
+        if (Array.isArray(session.messages)) {
+          for (let i = session.messages.length - 1; i >= 0; i--) {
+            if (session.messages[i].role === 'assistant' && (session.messages[i].content === previousText || session.messages[i].content.startsWith(previousText.substring(0, 50)))) {
+              targetMsg = session.messages[i];
+              break;
+            }
+          }
+        }
+        if (targetMsg) targetMsg.content = merged;
+        else if (session.messages && session.messages.length > 0 && session.messages[session.messages.length - 1].role === 'assistant') {
+          session.messages[session.messages.length - 1].content = merged;
+        }
         savePersistedState();
 
         if (isOutputTruncated(merged)) {
@@ -4182,6 +4198,10 @@ ${organicBlock}
         // Multi-Source Client-Side Aggregator (Aktif jika backend offline, GitHub Pages, atau hasil backend < 3)
         if (results.length < 3) {
           try {
+            const clientController = new AbortController();
+            const clientTimeout = setTimeout(() => clientController.abort(), 6000);
+            const clientSignal = clientController.signal;
+
             const clientPool = [...results];
             const seenUrls = new Set(clientPool.map(r => (r.url || '').trim().toLowerCase().replace(/\/$/, '')));
             const seenTitles = new Set(clientPool.map(r => (r.title || '').trim().toLowerCase().replace(/[^\w\s]/g, '')));
@@ -4230,7 +4250,7 @@ ${organicBlock}
             // Eksekusi seluruh provider live secara paralel (Bebas Wikipedia & 100% berita aktual)
             await Promise.allSettled([
               // 1. Google News RSS Recent (when:30d) via RSS2JSON (8 berita live)
-              fetch(r2jRecentUrl).then(r => r.ok ? r.json() : null).then(d => {
+              fetch(r2jRecentUrl, { signal: clientSignal }).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.items)) {
                   d.items.slice(0, 8).forEach(it => {
                     let domain = 'news.google.com';
@@ -4263,7 +4283,7 @@ ${organicBlock}
               }).catch(() => {}),
 
               // 2. Google News RSS Tech via RSS2JSON (8 berita live)
-              fetch(r2jTechUrl).then(r => r.ok ? r.json() : null).then(d => {
+              fetch(r2jTechUrl, { signal: clientSignal }).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.items)) {
                   d.items.slice(0, 8).forEach(it => {
                     let domain = 'news.google.com';
@@ -4296,7 +4316,7 @@ ${organicBlock}
               }).catch(() => {}),
 
               // 3. Google News RSS Weekly (when:14d) via RSS2JSON (6 berita breaking live)
-              fetch(r2jWeeklyUrl).then(r => r.ok ? r.json() : null).then(d => {
+              fetch(r2jWeeklyUrl, { signal: clientSignal }).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.items)) {
                   d.items.slice(0, 6).forEach(it => {
                     let domain = 'news.google.com';
@@ -4329,7 +4349,7 @@ ${organicBlock}
               }).catch(() => {}),
 
               // 4. Google News RSS Primary/Clean via RSS2JSON (6 berita live)
-              fetch(r2jPrimaryUrl).then(r => r.ok ? r.json() : null).then(d => {
+              fetch(r2jPrimaryUrl, { signal: clientSignal }).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.items)) {
                   d.items.slice(0, 6).forEach(it => {
                     let domain = 'news.google.com';
@@ -4362,7 +4382,7 @@ ${organicBlock}
               }).catch(() => {}),
 
               // 5. Google News RSS Indonesia via RSS2JSON (jika kueri berkonteks bahasa Indonesia)
-              (isIndoQ ? fetch(r2jIndoUrl).then(r => r.ok ? r.json() : null).then(d => {
+              (isIndoQ ? fetch(r2jIndoUrl, { signal: clientSignal }).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.items)) {
                   d.items.slice(0, 8).forEach(it => {
                     let domain = 'news.google.com';
@@ -4395,7 +4415,7 @@ ${organicBlock}
               }).catch(() => {}) : Promise.resolve()),
 
               // 5. HackerNews Algolia Realtime Tech API (techQ & coreQ)
-              fetch(hnUrlTech).then(r => r.ok ? r.json() : null).then(d => {
+              fetch(hnUrlTech, { signal: clientSignal }).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.hits)) {
                   d.hits.slice(0, 8).forEach(h => {
                     const u = h.url || `https://news.ycombinator.com/item?id=${h.objectID}`;
@@ -4416,7 +4436,7 @@ ${organicBlock}
                 }
               }).catch(() => {}),
 
-              fetch(hnUrlCore).then(r => r.ok ? r.json() : null).then(d => {
+              fetch(hnUrlCore, { signal: clientSignal }).then(r => r.ok ? r.json() : null).then(d => {
                 if (d && Array.isArray(d.hits)) {
                   d.hits.slice(0, 6).forEach(h => {
                     const u = h.url || `https://news.ycombinator.com/item?id=${h.objectID}`;
@@ -4438,7 +4458,7 @@ ${organicBlock}
               }).catch(() => {}),
 
               // 6. DuckDuckGo Instant Answer API (Bebas Wikipedia)
-              fetch(ddgUrl).then(r => r.ok ? r.json() : null).then(d => {
+              fetch(ddgUrl, { signal: clientSignal }).then(r => r.ok ? r.json() : null).then(d => {
                 if (d) {
                   if (d.Heading && d.AbstractURL && !d.AbstractURL.includes('wikipedia.org')) {
                     let dName = 'duckduckgo.com';
@@ -4473,6 +4493,7 @@ ${organicBlock}
                 }
               }).catch(() => {})
             ]);
+            clearTimeout(clientTimeout);
 
             // Urutkan kandidat berdasarkan tanggal publikasi terbaru (Descending)
             clientPool.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -4509,11 +4530,15 @@ ${organicBlock}
         
         if (!IS_GITHUB_PAGES) {
           try {
+            const browseController = new AbortController();
+            const browseTimeout = setTimeout(() => browseController.abort(), 12000);
             const res = await fetch('/api/tools/browse-page', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ url: url, maxChars: 5000 })
+              body: JSON.stringify({ url: url, maxChars: 5000 }),
+              signal: browseController.signal
             });
+            clearTimeout(browseTimeout);
             if (res.ok) {
               const data = await res.json();
               if (data && data.text && data.text.length > 50) {
@@ -4567,7 +4592,10 @@ ${organicBlock}
               const langMatch = url.match(/https?:\/\/([a-z]+)\.wikipedia\.org/i);
               const lang = langMatch ? langMatch[1] : 'id';
               const restApiUrl = `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle)}`;
-              const wikiRes = await fetch(restApiUrl);
+              const wikiController = new AbortController();
+              const wikiTimeout = setTimeout(() => wikiController.abort(), 6000);
+              const wikiRes = await fetch(restApiUrl, { signal: wikiController.signal });
+              clearTimeout(wikiTimeout);
               if (wikiRes.ok) {
                 const wData = await wikiRes.json();
                 const extract = wData.extract || wData.description || 'Halaman Wikipedia';
@@ -4800,6 +4828,7 @@ ${organicBlock}
     return `### KEMAMPUAN OTONOM PENCARIAN WEB LIVE (BUILT-IN ZERO-API):
 Anda memiliki instrumen pencarian web live berkecepatan tinggi tanpa batasan API:
 - search_web(query): Melakukan penelusuran fakta terkini, perkembangan tahun 2024-2026, berita, atau rilis teknologi di web secara langsung. Sistem secara otomatis menghimpun belasan artikel berita live dari Google News RSS, Tech Wire / HackerNews, blog teknologi resmi, dan portal media aktual.
+- browse_web_page(url): Membaca dan mengekstrak isi teks bersih dari sebuah tautan atau halaman web spesifik. Gunakan saat pengguna menyertakan URL atau saat ingin mendalami rincian dari suatu link web.
 - SUMBER WIKIPEDIA TELAH DIHAPUS: Seluruh hasil penelusuran 100% merupakan berita dan publikasi aktual (BUKAN ensiklopedia atau artikel sejarah lama).
 
 KONTEKS TEMPORAL AKTIF SAAT INI:
@@ -4826,21 +4855,22 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
 
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
     let iconClass = 'fa-magnifying-glass';
-    const title = 'PENCARIAN WEB LIVE (ZERO-API)';
+    let title = 'PENCARIAN WEB LIVE (ZERO-API)';
     
-    if (status === 'loading') {
-      iconClass = 'fa-magnifying-glass fa-spin';
+    if (toolName === 'browse_web_page') {
+      title = 'PENJELAJAHAN HALAMAN WEB';
+      iconClass = status === 'loading' ? 'fa-compass fa-spin' : 'fa-circle-check';
     } else {
-      iconClass = 'fa-circle-check';
+      iconClass = status === 'loading' ? 'fa-magnifying-glass fa-spin' : 'fa-circle-check';
     }
 
     const actionText = status === 'loading'
-      ? `Mencari web: "${escapeHtml(targetText)}"`
-      : `Pencarian selesai: "${escapeHtml(targetText)}"`;
+      ? (toolName === 'browse_web_page' ? `Membaca URL: "${escapeHtml(targetText)}"` : `Mencari web: "${escapeHtml(targetText)}"`)
+      : (toolName === 'browse_web_page' ? `Halaman selesai dibaca: "${escapeHtml(targetText)}"` : `Pencarian selesai: "${escapeHtml(targetText)}"`);
 
     const subText = status === 'loading'
-      ? 'Mengumpulkan berita live & multi-sumber terkini...'
-      : 'Data berita aktual diserap & disintesis oleh AI...';
+      ? (toolName === 'browse_web_page' ? 'Mengekstrak teks & konten halaman secara langsung...' : 'Mengumpulkan berita live & multi-sumber terkini...')
+      : (toolName === 'browse_web_page' ? 'Konten halaman diserap & disintesis oleh AI...' : 'Data berita aktual diserap & disintesis oleh AI...');
 
     return `
       <div class="autonomous-tool-hud${status === 'done' ? ' done' : ''}">
@@ -5202,65 +5232,76 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
       while (autonomousRound < maxAutonomousRounds) {
         if (STATE.abortController?.signal?.aborted) break;
 
-        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && tc.function.name === 'search_web');
-        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && tc.function.name === 'search_web');
+        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
+        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
         let rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
 
         // PROACTIVE TURN-1 TRIGGER (Anti-Refusal & Zero-Hallucination):
-        // Jika model tidak memanggil search_web sendiri pada putaran 1, namun:
-        // 1. Teks jawaban model menyangkal/meragukan rilis ("belum ada rilis resmi", "hanya rumor", "tidak masuk akal", "terakhir adalah Grok 2", "batas pengetahuan", dll.)
+        // Jika model tidak memanggil tool sendiri pada putaran 1, namun:
+        // 0. Pengguna memberikan URL langsung -> picu browse_web_page
+        // ATAU 1. Teks jawaban model menyangkal/meragukan rilis ("belum ada rilis resmi", "hanya rumor", "tidak masuk akal", dll.)
         // ATAU 2. Pengguna meminta bukti/sumber ("cari sumbernya", "cari di web", "update terbaru", "versi", "rilis", dll.)
         // ATAU 3. Pengguna melampirkan screenshot gambar tentang model/UI/berita
-        if (rawAutonomousCalls.length === 0 && !executedToolSignatures.has('search_web')) {
+        if (rawAutonomousCalls.length === 0) {
           const lowerRoundText = (currentRoundText || '').toLowerCase();
           const lowerPrompt = (promptText || '').toLowerCase();
-          
-          const isDenyingOrDoubtful = 
-            lowerRoundText.includes('belum ada rilis resmi') ||
-            lowerRoundText.includes('tidak ditemukan informasi resmi') ||
-            lowerRoundText.includes('tidak resmi') ||
-            lowerRoundText.includes('belum diumumkan') ||
-            lowerRoundText.includes('hanya rumor') ||
-            lowerRoundText.includes('tidak masuk akal') ||
-            lowerRoundText.includes('batas pengetahuan') ||
-            lowerRoundText.includes('cutoff') ||
-            lowerRoundText.includes('terakhir merilis grok') ||
-            lowerRoundText.includes('terakhir adalah grok') ||
-            lowerRoundText.includes('belum pernah merilis') ||
-            lowerRoundText.includes('belum dirilis') ||
-            lowerRoundText.includes('belum ada kabar') ||
-            lowerRoundText.includes('tidak ada informasi mengenai') ||
-            lowerRoundText.includes('belum tersedia') ||
-            lowerRoundText.includes('knowledge cutoff') ||
-            lowerRoundText.includes('last update') ||
-            lowerRoundText.includes('not have real-time') ||
-            lowerRoundText.includes('no real-time') ||
-            lowerRoundText.includes('cannot access the internet') ||
-            lowerRoundText.includes('no official announcement') ||
-            lowerRoundText.includes('has not been officially released') ||
-            lowerRoundText.includes('has not released') ||
-            lowerRoundText.includes('not yet released') ||
-            lowerRoundText.includes('has not announced');
+          const derived = deriveAutonomousTarget(promptText, session);
 
-          const isExplicitSearchRequest = 
-            /\b(cari|carikan|search|browsing|brows|jelajahi|cek|check|find)\b/i.test(lowerPrompt) ||
-            /\b(update|rilis|release|kabar|berita|info|informasi|fitur|model|versi|version|roadmap)\b/i.test(lowerPrompt) ||
-            /\b(apakah|sudahkah|kapan)\b.*\b(ada|rilis|keluar|release|update)\b/i.test(lowerPrompt) ||
-            /\b(what(?:'s|\s+is)\s+new|latest\s+(?:update|news|model|version))\b/i.test(lowerPrompt) ||
-            /\bgrok\s*4\b/i.test(lowerPrompt) ||
-            /\b[a-z]+\s*[0-9]+(?:\.[0-9]+)+\b/i.test(lowerPrompt);
-
-          const hasImage = Array.isArray(rawImgs) ? rawImgs.length > 0 : Boolean(rawImgs);
-
-          if (isDenyingOrDoubtful || isExplicitSearchRequest || (hasImage && (lowerPrompt.includes('grok') || lowerPrompt.includes('model') || lowerPrompt.includes('fitur') || lowerPrompt.includes('apa')))) {
-            const qPlan = deriveBroadSearchQueries(promptText || 'AI model update', currentRoundText);
-            const derivedQuery = qPlan.tech || qPlan.core;
+          if (derived.toolName === 'browse_web_page' && !executedToolSignatures.has(`browse:${(derived.target || '').trim().toLowerCase()}`)) {
             rawAutonomousCalls = [{
               function: {
-                name: 'search_web',
-                arguments: { query: derivedQuery }
+                name: 'browse_web_page',
+                arguments: { url: derived.target }
               }
             }];
+          } else if (!executedToolSignatures.has('search_web')) {
+            const isDenyingOrDoubtful = 
+              lowerRoundText.includes('belum ada rilis resmi') ||
+              lowerRoundText.includes('tidak ditemukan informasi resmi') ||
+              lowerRoundText.includes('tidak resmi') ||
+              lowerRoundText.includes('belum diumumkan') ||
+              lowerRoundText.includes('hanya rumor') ||
+              lowerRoundText.includes('tidak masuk akal') ||
+              lowerRoundText.includes('batas pengetahuan') ||
+              lowerRoundText.includes('cutoff') ||
+              lowerRoundText.includes('terakhir merilis grok') ||
+              lowerRoundText.includes('terakhir adalah grok') ||
+              lowerRoundText.includes('belum pernah merilis') ||
+              lowerRoundText.includes('belum dirilis') ||
+              lowerRoundText.includes('belum ada kabar') ||
+              lowerRoundText.includes('tidak ada informasi mengenai') ||
+              lowerRoundText.includes('belum tersedia') ||
+              lowerRoundText.includes('knowledge cutoff') ||
+              lowerRoundText.includes('last update') ||
+              lowerRoundText.includes('not have real-time') ||
+              lowerRoundText.includes('no real-time') ||
+              lowerRoundText.includes('cannot access the internet') ||
+              lowerRoundText.includes('no official announcement') ||
+              lowerRoundText.includes('has not been officially released') ||
+              lowerRoundText.includes('has not released') ||
+              lowerRoundText.includes('not yet released') ||
+              lowerRoundText.includes('has not announced');
+
+            const isExplicitSearchRequest = 
+              /\b(cari|carikan|search|browsing|brows|jelajahi|cek|check|find)\b/i.test(lowerPrompt) ||
+              /\b(update|rilis|release|kabar|berita|info|informasi|fitur|model|versi|version|roadmap)\b/i.test(lowerPrompt) ||
+              /\b(apakah|sudahkah|kapan)\b.*\b(ada|rilis|keluar|release|update)\b/i.test(lowerPrompt) ||
+              /\b(what(?:'s|\s+is)\s+new|latest\s+(?:update|news|model|version))\b/i.test(lowerPrompt) ||
+              /\bgrok\s*4\b/i.test(lowerPrompt) ||
+              /\b[a-z]+\s*[0-9]+(?:\.[0-9]+)+\b/i.test(lowerPrompt);
+
+            const hasImage = Array.isArray(rawImgs) ? rawImgs.length > 0 : Boolean(rawImgs);
+
+            if (isDenyingOrDoubtful || isExplicitSearchRequest || (hasImage && (lowerPrompt.includes('grok') || lowerPrompt.includes('model') || lowerPrompt.includes('fitur') || lowerPrompt.includes('apa')))) {
+              const qPlan = deriveBroadSearchQueries(promptText || 'AI model update', currentRoundText);
+              const derivedQuery = qPlan.tech || qPlan.core;
+              rawAutonomousCalls = [{
+                function: {
+                  name: 'search_web',
+                  arguments: { query: derivedQuery }
+                }
+              }];
+            }
           }
         }
 
@@ -5269,6 +5310,18 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
           const toolName = call.function.name;
           if (toolName === 'search_web') {
             if (executedToolSignatures.has('search_web')) return false; // Prevent repeated search loop
+            return true;
+          }
+          if (toolName === 'browse_web_page') {
+            let tUrl = '';
+            try {
+              const p = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : (call.function.arguments || {});
+              tUrl = p.url || p.target || p.link || (typeof p === 'string' ? p : '');
+            } catch (_) {
+              tUrl = String(call.function.arguments || '');
+            }
+            const sig = `browse:${(tUrl || '').trim().toLowerCase()}`;
+            if (executedToolSignatures.has(sig)) return false;
             return true;
           }
           return false;
@@ -5293,7 +5346,18 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
             previewArg = String(call.function.arguments || '');
           }
 
-          executedToolSignatures.add('search_web');
+          if (toolName === 'search_web') {
+            executedToolSignatures.add('search_web');
+          } else if (toolName === 'browse_web_page') {
+            let tUrl = '';
+            try {
+              const p = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : (call.function.arguments || {});
+              tUrl = p.url || p.target || p.link || (typeof p === 'string' ? p : '');
+            } catch (_) {
+              tUrl = String(call.function.arguments || '');
+            }
+            executedToolSignatures.add(`browse:${(tUrl || '').trim().toLowerCase()}`);
+          }
           toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
 
           // Visual status loading di gelembung obrolan
@@ -5328,7 +5392,7 @@ INSTRUKSI MANDIRI & ATURAN MUTLAK ANTI-HALUSINASI:
         const curMonthStr = nowObj.toLocaleString('en-US', { month: 'long' }) + ' ' + nowObj.getFullYear();
         const roundInstruction = `[INSTRUKSI FINAL - KALENDER AKTIF HARI INI: ${curDateStr}]:
 Seluruh data multi-sumber berita terkini & resmi telah lengkap dan disajikan di atas (Bebas Wikipedia agar data 100% mutakhir).
-WAJIB: Sajikan jawaban komprehensif, faktual, dan terperinci Anda kepada pengguna SEKARANG JUGA secara langsung TANPA memanggil 'search_web' lagi!
+WAJIB: Sajikan jawaban komprehensif, faktual, dan terperinci Anda kepada pengguna SEKARANG JUGA secara langsung TANPA memanggil 'search_web' atau 'browse_web_page' lagi!
 ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
 - HARI INI ADALAH ${curDateStr} (${curMonthStr}). Definisi "update terbaru" atau "kabar terkini" adalah perkembangan di bulan ${curMonthStr} atau beberapa minggu terakhir.
 - DILARANG KERAS mengambil berita usang dari 3-6 bulan lalu (seperti awal/pertengahan tahun) dan menyebutnya sebagai "rilis terbaru", jika di dalam data di atas sudah ada berita mutakhir dari ${curMonthStr} (atau akhir September).
@@ -5860,65 +5924,76 @@ ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
       while (autonomousRound < maxAutonomousRounds) {
         if (STATE.abortController?.signal?.aborted) break;
 
-        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && tc.function.name === 'search_web');
-        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && tc.function.name === 'search_web');
+        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
+        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
         let rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
 
         // PROACTIVE TURN-1 TRIGGER (Anti-Refusal & Zero-Hallucination):
-        // Jika model tidak memanggil search_web sendiri pada putaran 1, namun:
-        // 1. Teks jawaban model menyangkal/meragukan rilis ("belum ada rilis resmi", "hanya rumor", "tidak masuk akal", "terakhir adalah Grok 2", "batas pengetahuan", dll.)
+        // Jika model tidak memanggil tool sendiri pada putaran 1, namun:
+        // 0. Pengguna memberikan URL langsung -> picu browse_web_page
+        // ATAU 1. Teks jawaban model menyangkal/meragukan rilis ("belum ada rilis resmi", "hanya rumor", "tidak masuk akal", dll.)
         // ATAU 2. Pengguna meminta bukti/sumber ("cari sumbernya", "cari di web", "update terbaru", "versi", "rilis", dll.)
         // ATAU 3. Pengguna melampirkan screenshot gambar tentang model/UI/berita
-        if (rawAutonomousCalls.length === 0 && !executedToolSignatures.has('search_web')) {
+        if (rawAutonomousCalls.length === 0) {
           const lowerRoundText = (currentRoundText || '').toLowerCase();
           const lowerPrompt = (promptText || '').toLowerCase();
-          
-          const isDenyingOrDoubtful = 
-            lowerRoundText.includes('belum ada rilis resmi') ||
-            lowerRoundText.includes('tidak ditemukan informasi resmi') ||
-            lowerRoundText.includes('tidak resmi') ||
-            lowerRoundText.includes('belum diumumkan') ||
-            lowerRoundText.includes('hanya rumor') ||
-            lowerRoundText.includes('tidak masuk akal') ||
-            lowerRoundText.includes('batas pengetahuan') ||
-            lowerRoundText.includes('cutoff') ||
-            lowerRoundText.includes('terakhir merilis grok') ||
-            lowerRoundText.includes('terakhir adalah grok') ||
-            lowerRoundText.includes('belum pernah merilis') ||
-            lowerRoundText.includes('belum dirilis') ||
-            lowerRoundText.includes('belum ada kabar') ||
-            lowerRoundText.includes('tidak ada informasi mengenai') ||
-            lowerRoundText.includes('belum tersedia') ||
-            lowerRoundText.includes('knowledge cutoff') ||
-            lowerRoundText.includes('last update') ||
-            lowerRoundText.includes('not have real-time') ||
-            lowerRoundText.includes('no real-time') ||
-            lowerRoundText.includes('cannot access the internet') ||
-            lowerRoundText.includes('no official announcement') ||
-            lowerRoundText.includes('has not been officially released') ||
-            lowerRoundText.includes('has not released') ||
-            lowerRoundText.includes('not yet released') ||
-            lowerRoundText.includes('has not announced');
+          const derived = deriveAutonomousTarget(promptText, session);
 
-          const isExplicitSearchRequest = 
-            /\b(cari|carikan|search|browsing|brows|jelajahi|cek|check|find)\b/i.test(lowerPrompt) ||
-            /\b(update|rilis|release|kabar|berita|info|informasi|fitur|model|versi|version|roadmap)\b/i.test(lowerPrompt) ||
-            /\b(apakah|sudahkah|kapan)\b.*\b(ada|rilis|keluar|release|update)\b/i.test(lowerPrompt) ||
-            /\b(what(?:'s|\s+is)\s+new|latest\s+(?:update|news|model|version))\b/i.test(lowerPrompt) ||
-            /\bgrok\s*4\b/i.test(lowerPrompt) ||
-            /\b[a-z]+\s*[0-9]+(?:\.[0-9]+)+\b/i.test(lowerPrompt);
-
-          const hasImage = Array.isArray(rawImgs) ? rawImgs.length > 0 : Boolean(rawImgs);
-
-          if (isDenyingOrDoubtful || isExplicitSearchRequest || (hasImage && (lowerPrompt.includes('grok') || lowerPrompt.includes('model') || lowerPrompt.includes('fitur') || lowerPrompt.includes('apa')))) {
-            const qPlan = deriveBroadSearchQueries(promptText || 'AI model update', currentRoundText);
-            const derivedQuery = qPlan.tech || qPlan.core;
+          if (derived.toolName === 'browse_web_page' && !executedToolSignatures.has(`browse:${(derived.target || '').trim().toLowerCase()}`)) {
             rawAutonomousCalls = [{
               function: {
-                name: 'search_web',
-                arguments: { query: derivedQuery }
+                name: 'browse_web_page',
+                arguments: { url: derived.target }
               }
             }];
+          } else if (!executedToolSignatures.has('search_web')) {
+            const isDenyingOrDoubtful = 
+              lowerRoundText.includes('belum ada rilis resmi') ||
+              lowerRoundText.includes('tidak ditemukan informasi resmi') ||
+              lowerRoundText.includes('tidak resmi') ||
+              lowerRoundText.includes('belum diumumkan') ||
+              lowerRoundText.includes('hanya rumor') ||
+              lowerRoundText.includes('tidak masuk akal') ||
+              lowerRoundText.includes('batas pengetahuan') ||
+              lowerRoundText.includes('cutoff') ||
+              lowerRoundText.includes('terakhir merilis grok') ||
+              lowerRoundText.includes('terakhir adalah grok') ||
+              lowerRoundText.includes('belum pernah merilis') ||
+              lowerRoundText.includes('belum dirilis') ||
+              lowerRoundText.includes('belum ada kabar') ||
+              lowerRoundText.includes('tidak ada informasi mengenai') ||
+              lowerRoundText.includes('belum tersedia') ||
+              lowerRoundText.includes('knowledge cutoff') ||
+              lowerRoundText.includes('last update') ||
+              lowerRoundText.includes('not have real-time') ||
+              lowerRoundText.includes('no real-time') ||
+              lowerRoundText.includes('cannot access the internet') ||
+              lowerRoundText.includes('no official announcement') ||
+              lowerRoundText.includes('has not been officially released') ||
+              lowerRoundText.includes('has not released') ||
+              lowerRoundText.includes('not yet released') ||
+              lowerRoundText.includes('has not announced');
+
+            const isExplicitSearchRequest = 
+              /\b(cari|carikan|search|browsing|brows|jelajahi|cek|check|find)\b/i.test(lowerPrompt) ||
+              /\b(update|rilis|release|kabar|berita|info|informasi|fitur|model|versi|version|roadmap)\b/i.test(lowerPrompt) ||
+              /\b(apakah|sudahkah|kapan)\b.*\b(ada|rilis|keluar|release|update)\b/i.test(lowerPrompt) ||
+              /\b(what(?:'s|\s+is)\s+new|latest\s+(?:update|news|model|version))\b/i.test(lowerPrompt) ||
+              /\bgrok\s*4\b/i.test(lowerPrompt) ||
+              /\b[a-z]+\s*[0-9]+(?:\.[0-9]+)+\b/i.test(lowerPrompt);
+
+            const hasImage = Array.isArray(rawImgs) ? rawImgs.length > 0 : Boolean(rawImgs);
+
+            if (isDenyingOrDoubtful || isExplicitSearchRequest || (hasImage && (lowerPrompt.includes('grok') || lowerPrompt.includes('model') || lowerPrompt.includes('fitur') || lowerPrompt.includes('apa')))) {
+              const qPlan = deriveBroadSearchQueries(promptText || 'AI model update', currentRoundText);
+              const derivedQuery = qPlan.tech || qPlan.core;
+              rawAutonomousCalls = [{
+                function: {
+                  name: 'search_web',
+                  arguments: { query: derivedQuery }
+                }
+              }];
+            }
           }
         }
 
@@ -5927,6 +6002,18 @@ ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
           const toolName = call.function.name;
           if (toolName === 'search_web') {
             if (executedToolSignatures.has('search_web')) return false; // Prevent repeated search loop
+            return true;
+          }
+          if (toolName === 'browse_web_page') {
+            let tUrl = '';
+            try {
+              const p = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : (call.function.arguments || {});
+              tUrl = p.url || p.target || p.link || (typeof p === 'string' ? p : '');
+            } catch (_) {
+              tUrl = String(call.function.arguments || '');
+            }
+            const sig = `browse:${(tUrl || '').trim().toLowerCase()}`;
+            if (executedToolSignatures.has(sig)) return false;
             return true;
           }
           return false;
@@ -5951,7 +6038,18 @@ ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
             previewArg = String(call.function.arguments || '');
           }
 
-          executedToolSignatures.add('search_web');
+          if (toolName === 'search_web') {
+            executedToolSignatures.add('search_web');
+          } else if (toolName === 'browse_web_page') {
+            let tUrl = '';
+            try {
+              const p = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : (call.function.arguments || {});
+              tUrl = p.url || p.target || p.link || (typeof p === 'string' ? p : '');
+            } catch (_) {
+              tUrl = String(call.function.arguments || '');
+            }
+            executedToolSignatures.add(`browse:${(tUrl || '').trim().toLowerCase()}`);
+          }
           toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
 
           // Visual status loading di gelembung obrolan
@@ -5987,7 +6085,7 @@ ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
         const curMonthStr = nowObj.toLocaleString('en-US', { month: 'long' }) + ' ' + nowObj.getFullYear();
         const roundInstruction = `[INSTRUKSI FINAL - KALENDER AKTIF HARI INI: ${curDateStr}]:
 Seluruh data multi-sumber berita terkini & resmi telah lengkap dan disajikan di atas (Bebas Wikipedia agar data 100% mutakhir).
-WAJIB: Sajikan jawaban komprehensif, faktual, dan terperinci Anda kepada pengguna SEKARANG JUGA secara langsung TANPA memanggil 'search_web' lagi!
+WAJIB: Sajikan jawaban komprehensif, faktual, dan terperinci Anda kepada pengguna SEKARANG JUGA secara langsung TANPA memanggil 'search_web' atau 'browse_web_page' lagi!
 ATURAN ANTI-HALUSINASI & RECENCY GROUNDING MUTLAK:
 - HARI INI ADALAH ${curDateStr} (${curMonthStr}). Definisi "update terbaru" atau "kabar terkini" adalah perkembangan di bulan ${curMonthStr} atau beberapa minggu terakhir.
 - DILARANG KERAS mengambil berita usang dari 3-6 bulan lalu (seperti awal/pertengahan tahun) dan menyebutnya sebagai "rilis terbaru", jika di dalam data di atas sudah ada berita mutakhir dari ${curMonthStr} (atau akhir September).
