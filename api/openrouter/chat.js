@@ -1,7 +1,7 @@
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-title, HTTP-Referer');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-title, HTTP-Referer, x-api-key, X-Title, HTTP-Referer');
 
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
@@ -13,7 +13,10 @@ module.exports = async function handler(req, res) {
     }
     body = body || {};
 
-    const apiKey = body.apiKey || (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, '').trim() : '');
+    let apiKey = body.apiKey || req.headers['x-api-key'] || (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, '').trim() : '') || req.query?.key || req.query?.apiKey;
+    if (apiKey) {
+      apiKey = String(apiKey).replace(/^Bearer\s+/i, '').trim();
+    }
     if (!apiKey) return res.status(400).json({ error: 'Missing OpenRouter API Key' });
 
     const headers = {

@@ -780,17 +780,24 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     },
 
     async getSession(id) {
-      if (!this.isDeviceBackendAvailable) return null;
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
-        const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        if (res.ok) {
-          return await res.json();
+      if (this.isDeviceBackendAvailable) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3000);
+          const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          if (res.ok) {
+            return await res.json();
+          }
+        } catch (e) {
+          console.warn('DeviceStorage getSession failed, falling back to ChatDB:', e.message);
         }
-      } catch (e) {
-        console.warn('DeviceStorage getSession failed:', e.message);
+      }
+      try {
+        const localSess = await ChatDB.getSession(id);
+        if (localSess) return localSess;
+      } catch (dbErr) {
+        console.warn('ChatDB getSession fallback error:', dbErr.message);
       }
       return null;
     },
@@ -1538,10 +1545,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
     };
 
-    els.chatViewport.addEventListener('scroll', () => handleScrollEvent(els.chatViewport), { passive: true });
+    els.chatViewport?.addEventListener('scroll', () => handleScrollEvent(els.chatViewport), { passive: true });
     
     // User touch start, move, and end on mobile devices (ChatGPT Elastic Pull & Hold)
-    els.chatViewport.addEventListener('touchstart', (e) => {
+    els.chatViewport?.addEventListener('touchstart', (e) => {
       if (e.touches && e.touches[0]) {
         touchStartY = e.touches[0].clientY;
         touchStartTime = Date.now();
@@ -1552,7 +1559,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
     }, { passive: true });
 
-    els.chatViewport.addEventListener('touchmove', (e) => {
+    els.chatViewport?.addEventListener('touchmove', (e) => {
       if (e.touches && e.touches[0]) {
         const deltaY = touchStartY - e.touches[0].clientY; // positive = pulling past bottom
         const atBottom = isChatAtBottom(els.chatViewport, 20);
@@ -1566,7 +1573,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           userScrolledUp = false;
           toggleScrollBottomBtn(false);
 
-          if (!els.pullUpNewChatWrapper.classList.contains('revealed')) {
+          if (!els.pullUpNewChatWrapper?.classList.contains('revealed')) {
             showPullLoading();
 
             // Must pull deep (>= 70px) AND hold continuously for >= 500ms
@@ -1581,7 +1588,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
     }, { passive: true });
 
-    els.chatViewport.addEventListener('touchend', () => {
+    els.chatViewport?.addEventListener('touchend', () => {
       if (pullHoldTimer) {
         clearTimeout(pullHoldTimer);
         pullHoldTimer = null;
@@ -1593,7 +1600,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }, { passive: true });
 
     // Desktop wheel: shows brief loading spinner momentum and rebounds smoothly to chat output
-    els.chatViewport.addEventListener('wheel', (e) => {
+    els.chatViewport?.addEventListener('wheel', (e) => {
       if (e.deltaY < 0) {
         // Scrolling up into past messages
         userScrolledUp = true;
@@ -1885,18 +1892,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     const targetSession = STATE.sessions.find(s => s.id === sessionId);
     if (!targetSession) return;
 
-    // Lazy load messages from device disk if needed
+    // Lazy load messages from device disk or IndexedDB vault if needed
     if (targetSession._isLazyDisk && (!targetSession.messages || targetSession.messages.length === 0)) {
-      if (DeviceStorage.isDeviceBackendAvailable) {
-        try {
-          const fullSess = await DeviceStorage.getSession(sessionId);
-          if (fullSess && Array.isArray(fullSess.messages)) {
-            targetSession.messages = fullSess.messages;
-            delete targetSession._isLazyDisk;
-          }
-        } catch (e) {
-          console.warn('Gagal memuat detail sesi dari disk:', e);
+      try {
+        const fullSess = await DeviceStorage.getSession(sessionId);
+        if (fullSess && Array.isArray(fullSess.messages)) {
+          targetSession.messages = fullSess.messages;
+          delete targetSession._isLazyDisk;
         }
+      } catch (e) {
+        console.warn('Gagal memuat detail sesi dari storage:', e);
       }
     }
 
@@ -2062,6 +2067,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   }
 
   function renderChatHistory(filterQuery = '') {
+    if (!els.chatHistoryList) return;
     els.chatHistoryList.innerHTML = '';
     const q = filterQuery.toLowerCase().trim();
     
@@ -3804,6 +3810,7 @@ ${organicBlock}
 
   // ==================== MODEL DROPDOWN & SELECTORS ====================
   function populateModelDropdown(search = '') {
+    if (!els.dropdownModelList) return;
     els.dropdownModelList.innerHTML = '';
     const q = search.toLowerCase().trim();
 
@@ -4087,7 +4094,9 @@ ${organicBlock}
       if (STATE.isDeepResearch) {
         // Pulihkan searchMode agar status premium lama tidak membajak obrolan biasa
         STATE.searchMode = 'off';
-        localStorage.setItem('zoz_router_search_mode_v1', 'off');
+        try {
+          localStorage.setItem('zoz_router_search_mode_v1', 'off');
+        } catch (_) {}
         updateSearchModeUI();
       }
       if (STATE.mode === 'auto') {
@@ -9391,10 +9400,15 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       this.audio.crossOrigin = 'anonymous';
 
       // Load volume from storage
-      const savedVol = localStorage.getItem('zoz_bgm_volume');
-      if (savedVol !== null) {
-        this.volume = parseFloat(savedVol);
-      }
+      try {
+        const savedVol = localStorage.getItem('zoz_bgm_volume');
+        if (savedVol !== null) {
+          const parsedVol = parseFloat(savedVol);
+          if (!isNaN(parsedVol) && isFinite(parsedVol)) {
+            this.volume = Math.max(0, Math.min(1, parsedVol));
+          }
+        }
+      } catch (_) {}
       this.audio.volume = this.volume;
       if (els.bgmMiniVolume) els.bgmMiniVolume.value = this.volume;
       if (els.deckMasterVolume) els.deckMasterVolume.value = this.volume;
@@ -9872,7 +9886,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     setVolume(val) {
       const num = parseFloat(val);
       this.volume = isNaN(num) ? 0.7 : Math.max(0, Math.min(1, num));
-      localStorage.setItem('zoz_bgm_volume', this.volume.toString());
+      try {
+        localStorage.setItem('zoz_bgm_volume', this.volume.toString());
+      } catch (_) {}
 
       if (this.audio) this.audio.volume = this.volume;
       if (this.masterGainNode && this.audioCtx) {
@@ -10915,7 +10931,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     });
 
     // Model Picker: Buka Katalog Model Layar Lebar & Besar Real-Time (Live Catalog)
-    els.modelPickerChip.addEventListener('click', (e) => {
+    els.modelPickerChip?.addEventListener('click', (e) => {
       e.stopPropagation();
       AudioEngine.click();
       if (els.modelDropdownMenu) {
@@ -11039,18 +11055,18 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     };
 
     if (window.PointerEvent) {
-      els.sendPromptBtn.addEventListener('pointerdown', startSendPress);
-      els.sendPromptBtn.addEventListener('pointerup', cancelSendPress);
-      els.sendPromptBtn.addEventListener('pointercancel', cancelSendPress);
+      els.sendPromptBtn?.addEventListener('pointerdown', startSendPress);
+      els.sendPromptBtn?.addEventListener('pointerup', cancelSendPress);
+      els.sendPromptBtn?.addEventListener('pointercancel', cancelSendPress);
     } else {
-      els.sendPromptBtn.addEventListener('touchstart', startSendPress, { passive: true });
-      els.sendPromptBtn.addEventListener('touchend', cancelSendPress);
-      els.sendPromptBtn.addEventListener('touchcancel', cancelSendPress);
-      els.sendPromptBtn.addEventListener('mousedown', startSendPress);
-      els.sendPromptBtn.addEventListener('mouseup', cancelSendPress);
+      els.sendPromptBtn?.addEventListener('touchstart', startSendPress, { passive: true });
+      els.sendPromptBtn?.addEventListener('touchend', cancelSendPress);
+      els.sendPromptBtn?.addEventListener('touchcancel', cancelSendPress);
+      els.sendPromptBtn?.addEventListener('mousedown', startSendPress);
+      els.sendPromptBtn?.addEventListener('mouseup', cancelSendPress);
     }
 
-    els.sendPromptBtn.addEventListener('click', (e) => {
+    els.sendPromptBtn?.addEventListener('click', (e) => {
       if (isSendLongPressed) {
         e.preventDefault();
         e.stopPropagation();
@@ -11060,7 +11076,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       handleSendPrompt();
     });
 
-    els.stopGenerationBtn.addEventListener('click', stopGeneration);
+    els.stopGenerationBtn?.addEventListener('click', stopGeneration);
     els.neutronCrownBtn?.addEventListener('click', () => togglePromptVisibility());
 
     els.promptInput?.addEventListener('keydown', (e) => {
@@ -11070,7 +11086,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
     });
 
-    els.promptInput.addEventListener('paste', async (e) => {
+    els.promptInput?.addEventListener('paste', async (e) => {
       const items = (e.clipboardData || window.clipboardData)?.items;
       if (!items) return;
       for (const item of items) {
@@ -11118,10 +11134,10 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
 
     // New Chat & History
-    els.newChatBtn.addEventListener('click', () => createNewSession());
-    els.searchHistoryInput.addEventListener('input', (e) => renderChatHistory(e.target.value));
+    els.newChatBtn?.addEventListener('click', () => createNewSession());
+    els.searchHistoryInput?.addEventListener('input', (e) => renderChatHistory(e.target.value));
     
-    els.clearAllHistoryBtn.addEventListener('click', async () => {
+    els.clearAllHistoryBtn?.addEventListener('click', async () => {
       if (confirm('Apakah Anda yakin ingin menghapus semua riwayat sesi obrolan?')) {
         if (STATE.isGenerating) {
           stopGeneration();
@@ -11271,7 +11287,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     });
 
     // Status Buttons
-    els.refreshOllamaBtn.addEventListener('click', () => {
+    els.refreshOllamaBtn?.addEventListener('click', () => {
       checkOllamaHealth();
       AudioEngine.click();
     });
@@ -11299,7 +11315,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       AudioEngine.click();
     });
 
-    els.exportChatBtn.addEventListener('click', exportChatHistory);
+    els.exportChatBtn?.addEventListener('click', exportChatHistory);
 
     els.btnExecuteExportChat?.addEventListener('click', () => {
       if (pendingExportSession) {
@@ -11310,12 +11326,14 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
     });
 
-    els.soundToggleBtn.addEventListener('click', () => {
+    els.soundToggleBtn?.addEventListener('click', () => {
       STATE.soundEnabled = !STATE.soundEnabled;
       savePersistedState();
-      els.soundToggleBtn.innerHTML = STATE.soundEnabled 
-        ? '<i class="fa-solid fa-volume-high"></i>' 
-        : '<i class="fa-solid fa-volume-xmark"></i>';
+      if (els.soundToggleBtn) {
+        els.soundToggleBtn.innerHTML = STATE.soundEnabled 
+          ? '<i class="fa-solid fa-volume-high"></i>' 
+          : '<i class="fa-solid fa-volume-xmark"></i>';
+      }
       showToast(STATE.soundEnabled ? 'Suara UI diaktifkan.' : 'Suara UI dibisukan.');
       if (STATE.soundEnabled) AudioEngine.click();
     });
@@ -11551,11 +11569,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     });
 
     // Sliders
-    els.paramTemperature.addEventListener('input', (e) => {
-      els.valTemperature.innerText = e.target.value;
+    els.paramTemperature?.addEventListener('input', (e) => {
+      if (els.valTemperature) els.valTemperature.innerText = e.target.value;
     });
-    els.paramTopP.addEventListener('input', (e) => {
-      els.valTopP.innerText = e.target.value;
+    els.paramTopP?.addEventListener('input', (e) => {
+      if (els.valTopP) els.valTopP.innerText = e.target.value;
     });
 
     // Presets in settings
@@ -11590,7 +11608,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     });
 
     // Settings Actions
-    els.settingsBtn.addEventListener('click', () => {
+    els.settingsBtn?.addEventListener('click', () => {
       syncSettingsModalFields();
       fetchOpenRouterCredits();
       updateOllamaStatusUI();
@@ -11603,10 +11621,12 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       els.toggleShowOllamaKeyBtn.innerHTML = isPass ? '<i class="fa-solid fa-eye-slash"></i>' : '<i class="fa-solid fa-eye"></i>';
     });
 
-    els.toggleShowKeyBtn.addEventListener('click', () => {
-      const isPass = els.settingOpenRouterKey.type === 'password';
-      els.settingOpenRouterKey.type = isPass ? 'text' : 'password';
-      els.toggleShowKeyBtn.innerHTML = isPass ? '<i class="fa-solid fa-eye-slash"></i>' : '<i class="fa-solid fa-eye"></i>';
+    els.toggleShowKeyBtn?.addEventListener('click', () => {
+      if (els.settingOpenRouterKey && els.toggleShowKeyBtn) {
+        const isPass = els.settingOpenRouterKey.type === 'password';
+        els.settingOpenRouterKey.type = isPass ? 'text' : 'password';
+        els.toggleShowKeyBtn.innerHTML = isPass ? '<i class="fa-solid fa-eye-slash"></i>' : '<i class="fa-solid fa-eye"></i>';
+      }
     });
 
     els.toggleShowSerperKeyBtn?.addEventListener('click', () => {
@@ -11640,8 +11660,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
     });
 
-    els.testOllamaBtn.addEventListener('click', async () => {
-      const ep = normalizeEndpoint(els.settingOllamaEndpoint.value.trim() || 'https://ollama.com');
+    els.testOllamaBtn?.addEventListener('click', async () => {
+      const ep = normalizeEndpoint(els.settingOllamaEndpoint?.value.trim() || 'https://ollama.com');
       const key = els.settingOllamaApiKey ? els.settingOllamaApiKey.value.trim() : '';
       try {
         const headers = {};
@@ -11733,8 +11753,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       AudioEngine.click();
     });
 
-    els.testOpenRouterBtn.addEventListener('click', async () => {
-      const key = els.settingOpenRouterKey.value.trim();
+    els.testOpenRouterBtn?.addEventListener('click', async () => {
+      const key = els.settingOpenRouterKey ? els.settingOpenRouterKey.value.trim() : '';
       if (!key) {
         showToast('Masukkan API Key terlebih dahulu.', 'error');
         return;
@@ -11768,7 +11788,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       AudioEngine.click();
     });
 
-    els.saveSettingsBtn.addEventListener('click', () => {
+    els.saveSettingsBtn?.addEventListener('click', () => {
       const epVal = els.settingOllamaEndpoint ? els.settingOllamaEndpoint.value.trim() : '';
       if (epVal) STATE.settings.ollamaEndpoint = epVal;
 
@@ -12155,11 +12175,13 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
     // Restore desktop sidebar collapsed preference
     if (window.innerWidth > 768) {
-      const isCollapsed = localStorage.getItem('zoz_sidebar_collapsed') === 'true';
-      if (isCollapsed) {
-        els.appContainer?.classList.add('sidebar-collapsed');
-        els.sidebar?.classList.add('collapsed');
-      }
+      try {
+        const isCollapsed = localStorage.getItem('zoz_sidebar_collapsed') === 'true';
+        if (isCollapsed) {
+          els.appContainer?.classList.add('sidebar-collapsed');
+          els.sidebar?.classList.add('collapsed');
+        }
+      } catch (_) {}
     }
 
     console.log('⚡ ZOZ ROUTER INITIALIZED // READY IN 0MS');
