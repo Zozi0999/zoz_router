@@ -262,13 +262,11 @@ function performWebSearch(query, apiKey = null, num = 15) {
     }
     const cleanQuery = query.trim();
     const serperKey = apiKey || process.env.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
-    const isIndo = /\b(terbaru|terkini|berita|apa|siapa|bagaimana|mengapa|kapan|di|ke|dari|hari ini|minggu ini|bulan ini|tahun ini|presiden|indonesia|jakarta|pemerintah|bbm|gempa|harga|bansos|pilkada|narkoba|polisi|pasar saham)\b/i.test(cleanQuery.toLowerCase());
-
     const postData = JSON.stringify({
       q: cleanQuery,
       num: Math.max(num || 15, 10),
-      gl: isIndo ? 'id' : 'us',
-      hl: isIndo ? 'id' : 'en'
+      gl: 'us', // Global Worldwide Search (Universal - Tidak terisolasi di satu negara)
+      hl: 'en'  // Global Language Ranking
     });
 
     const options = {
@@ -924,7 +922,7 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'id,en-US,en;q=0.9'
+          'Accept-Language': 'en-US,en;q=0.9,id;q=0.8'
         },
         timeout: 6000
       };
@@ -1308,18 +1306,18 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
 
   const isTechQuery = /\b(ai|llm|software|github|code|linux|python|developer|api|tech|crypto|bitcoin|model|chip|gpu|nvidia|programming|framework)\b/i.test(combinedLower);
 
-  // Eksekusi seluruh provider: Google Serper, Google News RSS, Tech Wire / HackerNews (jika tech), DuckDuckGo Instant, & Wikipedia Fallback
+  // Eksekusi seluruh provider: Google Serper Global, Google News RSS Global, Tech Wire / HackerNews (jika tech), DuckDuckGo Instant, & Wikipedia Global
   const [serperRes1, serperRes2, gnewsPrimary, gnewsCore, gnewsIndo, gnewsNews, hnTech, hnCore, ddgInstant, wikiRes] = await Promise.allSettled([
     serperCalls[0],
     serperCalls[1] || Promise.resolve({ results: [] }),
-    fetchGoogleNewsRss(cleanQuery, isIndoQuery ? 'id' : 'en', 10),
-    fetchGoogleNewsRss(coreQuery, isIndoQuery ? 'id' : 'en', 8),
-    isIndoQuery ? fetchGoogleNewsRss(`${coreQuery} berita terbaru`, 'id', 8) : Promise.resolve([]),
+    fetchGoogleNewsRss(cleanQuery, 'en', 10),
+    fetchGoogleNewsRss(coreQuery, 'en', 8),
+    isIndoQuery ? fetchGoogleNewsRss(`${coreQuery} berita terbaru`, 'id', 6) : Promise.resolve([]),
     fetchGoogleNewsRss(newsQuery, 'en', 6),
     isTechQuery ? fetchHackerNewsTech(techQuery, 8) : Promise.resolve([]),
     isTechQuery ? fetchHackerNewsTech(coreQuery, 6) : Promise.resolve([]),
     fetchDuckDuckGoInstant(coreQuery),
-    fetchWikipediaFullText(coreQuery, isIndoQuery ? 'id' : 'en', 4)
+    fetchWikipediaFullText(coreQuery, 'en', 4)
   ]);
 
   const candidatePool = [];
@@ -1419,7 +1417,7 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'id,en-US,en;q=0.9',
+          'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
           'Accept-Encoding': 'gzip, deflate, br'
         },
         timeout: 10000

@@ -2930,8 +2930,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           body: JSON.stringify({
             q: smartQuery,
             num: 6,
-            gl: 'id',
-            hl: 'id'
+            gl: 'us', // Global Worldwide Search (Tidak terisolasi di satu negara)
+            hl: 'en'
           })
         });
         if (directRes.ok) {
@@ -4268,7 +4268,6 @@ ${organicBlock}
           try {
             for (const q of queriesToSearch) {
               if (results.length >= 10) break;
-              const isIndo = /\b(terbaru|terkini|berita|apa|siapa|bagaimana|mengapa|kapan|di|ke|dari|hari ini|minggu ini|bulan ini|tahun ini|presiden|indonesia|jakarta|pemerintah|bbm|gempa|harga|bansos|pilkada|narkoba|polisi|pasar saham)\b/i.test((q + ' ' + effectiveContext).toLowerCase());
               const serperCtrl = new AbortController();
               const serperTimeout = setTimeout(() => serperCtrl.abort(), 6500);
               const sRes = await fetch('https://google.serper.dev/search', {
@@ -4280,8 +4279,8 @@ ${organicBlock}
                 body: JSON.stringify({
                   q: q,
                   num: 15,
-                  gl: isIndo ? 'id' : 'us',
-                  hl: isIndo ? 'id' : 'en'
+                  gl: 'us', // Global Worldwide Search (Tidak terisolasi di satu negara)
+                  hl: 'en'  // Global Language Ranking
                 }),
                 signal: serperCtrl.signal
               });
@@ -4369,7 +4368,7 @@ ${organicBlock}
               const sRes = await fetch('https://google.serper.dev/search', {
                 method: 'POST',
                 headers: { 'X-API-KEY': serperApiKey, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ q: enrichedQ, num: 8, gl: 'id', hl: 'id' })
+                body: JSON.stringify({ q: enrichedQ, num: 8, gl: 'us', hl: 'en' })
               });
               if (sRes.ok) {
                 const sData = await sRes.json();
@@ -4468,8 +4467,7 @@ ${organicBlock}
 
               // Wikipedia Open CORS API Fallback (origin=* diizinkan di seluruh peramban)
               (async () => {
-                const isIndo = /\b(terbaru|terkini|berita|apa|siapa|bagaimana|mengapa|kapan|di|ke|dari|hari ini|minggu ini|bulan ini|tahun ini|presiden|indonesia|jakarta|pemerintah|bbm|gempa|harga|bansos|pilkada|narkoba|polisi|pasar saham)\b/i.test((query + ' ' + effectiveContext).toLowerCase());
-                const lang = isIndo ? 'id' : 'en';
+                const lang = 'en'; // Global Wikipedia (Ensiklopedia Komprehensif Dunia)
                 const wikiUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanDateQuery || query.trim())}&utf8=1&format=json&origin=*`;
                 const wRes = await fetch(wikiUrl, { signal: clientSignal }).catch(() => null);
                 if (wRes && wRes.ok) {
@@ -4484,7 +4482,7 @@ ${organicBlock}
                         url: pUrl,
                         domain: `${lang}.wikipedia.org`,
                         snippet: cleanSnippet || `Artikel ensiklopedia: ${pTitle}`,
-                        sourceProvider: isIndo ? 'Wikipedia Indonesia' : 'Wikipedia Global',
+                        sourceProvider: 'Wikipedia Global',
                         timestamp: Date.now(),
                         pubDate: 'Ensiklopedia'
                       });
@@ -6613,7 +6611,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             'X-API-KEY': serperKey,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ q: query, num: 15, gl: 'id', hl: 'id' }),
+          body: JSON.stringify({ q: query, num: 15, gl: 'us', hl: 'en' }),
           signal: STATE.abortController?.signal
         });
         if (directRes.ok) data = await directRes.json();
@@ -6683,7 +6681,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             'X-API-KEY': serperKey,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ q: divergentQuery, num: 20, gl: 'id', hl: 'id' }),
+          body: JSON.stringify({ q: divergentQuery, num: 20, gl: 'us', hl: 'en' }),
           signal: STATE.abortController?.signal
         });
         if (directRes.ok) data = await directRes.json();
@@ -11441,7 +11439,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
             'X-API-KEY': key,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ q: 'test connection', gl: 'id', hl: 'id', num: 1 })
+          body: JSON.stringify({ q: 'test connection', gl: 'us', hl: 'en', num: 1 })
         });
         if (res.ok) {
           showToast('✅ Serper API Key valid & Google Search terhubung aktif!');
