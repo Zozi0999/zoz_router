@@ -18,13 +18,25 @@ module.exports = async function handler(req, res) {
     const rawText = await response.text();
     try {
       const data = JSON.parse(rawText);
-      return res.status(response.status).json(data);
+      if (!response.ok) {
+        return res.status(response.status).json({
+          success: false,
+          data: [],
+          error: data?.error?.message || data?.message || `HTTP ${response.status} from OpenRouter`,
+          ...data
+        });
+      }
+      return res.status(200).json(data);
     } catch (_) {
-      return res.status(response.status).send(rawText);
+      return res.status(response.ok ? 200 : response.status).json({
+        success: false,
+        data: [],
+        error: `HTTP ${response.status}: Respon non-JSON dari OpenRouter (${rawText.slice(0, 150)})`
+      });
     }
   } catch (err) {
     if (!res.headersSent) {
-      return res.status(500).json({ error: err.message });
+      return res.status(500).json({ success: false, data: [], error: err.message });
     }
   }
 };

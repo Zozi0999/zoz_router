@@ -8,7 +8,7 @@ export default {
         status: 204,
         headers: {
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-ollama-key, x-serper-key, x-api-key, x-title, X-Title, HTTP-Referer, http-referer'
         }
       });
@@ -176,13 +176,36 @@ export default {
         if (authHeader) headers['Authorization'] = authHeader;
 
         const res = await fetch('https://openrouter.ai/api/v1/models', { headers });
-        const data = await res.text();
-        return new Response(data, {
-          status: res.status,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-        });
+        const rawText = await res.text();
+        try {
+          const parsed = JSON.parse(rawText);
+          if (!res.ok) {
+            return new Response(JSON.stringify({
+              success: false,
+              data: [],
+              error: parsed?.error?.message || parsed?.message || `HTTP ${res.status} from OpenRouter`,
+              ...parsed
+            }), {
+              status: res.status,
+              headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            });
+          }
+          return new Response(rawText, {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        } catch (_) {
+          return new Response(JSON.stringify({
+            success: false,
+            data: [],
+            error: `HTTP ${res.status}: Respon non-JSON dari OpenRouter (${rawText.slice(0, 150)})`
+          }), {
+            status: res.ok ? 200 : res.status,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
       } catch (e) {
-        return new Response(JSON.stringify({ error: e.message }), {
+        return new Response(JSON.stringify({ success: false, data: [], error: e.message }), {
           status: 500,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
@@ -486,6 +509,31 @@ export default {
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
       }
+    }
+
+    // Stateless Session Route for Cloudflare Gateway
+    if (url.pathname === '/api/sessions' || url.pathname.startsWith('/api/sessions/')) {
+      if (request.method === 'GET') {
+        const isSingle = url.pathname !== '/api/sessions';
+        return new Response(JSON.stringify(isSingle ? { session: null, stateless: true } : { sessions: [], stateless: true }), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Access-Control-Allow-Origin': '*'
+          }
+        });
+      }
+      return new Response(JSON.stringify({
+        success: true,
+        stateless: true,
+        message: 'Stateless cloud gateway mode — riwayat sesi dikelola via IndexedDB peramban.'
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
     }
 
     // Default static assets (Cloudflare Pages) atau 404 response (Standalone Worker)

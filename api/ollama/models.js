@@ -35,8 +35,8 @@ module.exports = async function handler(req, res) {
       return res.status(200).json(data);
     }
 
-    return res.status(200).json({ models: [] });
+    return res.status(200).json({ success: false, models: [], data: [], error: `HTTP ${response.status} from Ollama upstream` });
   } catch (err) {
-    return res.status(200).json({ models: [], error: err.message });
+    return res.status(200).json({ success: false, models: [], data: [], error: err.message });
   }
 };

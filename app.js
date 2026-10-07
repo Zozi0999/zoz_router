@@ -9422,6 +9422,15 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
   }
 
   // ==================== MODAL HELPERS ====================
+  function syncBodyModalState() {
+    const hasOpenModal = !!document.querySelector('.modal-backdrop.show');
+    if (hasOpenModal) {
+      document.body.classList.add('modal-open');
+    } else {
+      document.body.classList.remove('modal-open');
+    }
+  }
+
   function openModal(modalId) {
     if (modalId === 'modelHubModal') {
       openLiveModelCatalog(null, 'Model Obrolan Utama');
@@ -9430,6 +9439,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     const modal = document.getElementById(modalId);
     if (modal) {
       modal.classList.add('show');
+      syncBodyModalState();
       history.pushState({ modal: modalId }, '');
       AudioEngine.click();
     }
@@ -9443,6 +9453,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     const modal = document.getElementById(modalId);
     if (modal) {
       modal.classList.remove('show');
+      syncBodyModalState();
       AudioEngine.click();
       if (modalId === 'deepResearchReportModal') {
         const stageEl = document.getElementById('fullReportArticleStage');
@@ -11690,6 +11701,17 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
     // Dismiss attachment & search dropdowns when clicking outside
     document.addEventListener('click', (e) => {
+      // If clicking inside an active modal, cleanly close dropdowns without interfering with modal interaction
+      if (e.target && e.target.closest && e.target.closest('.modal-backdrop.show')) {
+        if (els.attachmentDropdown && els.attachmentDropdown.style.display !== 'none') {
+          closeAttachmentDropdown();
+        }
+        if (els.searchDropdown && els.searchDropdown.style.display !== 'none') {
+          closeSearchDropdown();
+        }
+        return;
+      }
+
       if (els.attachmentDropdown && els.attachmentDropdown.style.display !== 'none') {
         if (!els.attachmentMenuWrapper?.contains(e.target)) {
           closeAttachmentDropdown();
@@ -11864,6 +11886,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
             // No modal in current history state -> return to main chat by closing all open modals
             openModals.forEach(m => m.classList.remove('show'));
           }
+          syncBodyModalState();
         }
         return;
       }

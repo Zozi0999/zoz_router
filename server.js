@@ -2718,6 +2718,17 @@ const server = http.createServer(async (req, res) => {
         }
 
         const stream = fs.createReadStream(uploadFilePath, { start, end });
+        stream.on('error', (err) => {
+          console.error('[Upload Range Stream Error]:', err?.message || err);
+          if (!res.headersSent) {
+            sendJSON(res, 500, { error: 'Gagal membaca segmen media' });
+          } else {
+            try { res.destroy(); } catch (_) {}
+          }
+        });
+        req.on('close', () => {
+          try { stream.destroy(); } catch (_) {}
+        });
         stream.pipe(res);
         return;
       }
@@ -2732,6 +2743,17 @@ const server = http.createServer(async (req, res) => {
         return res.end();
       }
       const stream = fs.createReadStream(uploadFilePath);
+      stream.on('error', (err) => {
+        console.error('[Upload Stream Error]:', err?.message || err);
+        if (!res.headersSent) {
+          sendJSON(res, 500, { error: 'Gagal membaca berkas media' });
+        } else {
+          try { res.destroy(); } catch (_) {}
+        }
+      });
+      req.on('close', () => {
+        try { stream.destroy(); } catch (_) {}
+      });
       stream.pipe(res);
       return;
     }
@@ -3505,13 +3527,21 @@ const server = http.createServer(async (req, res) => {
       proxyRes.on('end', () => {
         try {
           const data = JSON.parse(rawData);
+          if (proxyRes.statusCode < 200 || proxyRes.statusCode >= 300) {
+            return sendJSON(res, proxyRes.statusCode, {
+              success: false,
+              data: [],
+              error: data?.error?.message || data?.message || `HTTP ${proxyRes.statusCode} from OpenRouter`,
+              ...data
+            });
+          }
           return sendJSON(res, proxyRes.statusCode, data);
         } catch (e) {
-          return sendJSON(res, 502, { error: 'Failed to parse OpenRouter response' });
+          return sendJSON(res, 502, { success: false, data: [], error: 'Failed to parse OpenRouter response' });
         }
       });
       proxyRes.on('error', (err) => {
-        if (!res.headersSent) sendJSON(res, 502, { error: 'OpenRouter models stream error: ' + err.message });
+        if (!res.headersSent) sendJSON(res, 502, { success: false, data: [], error: 'OpenRouter models stream error: ' + err.message });
       });
     });
 
