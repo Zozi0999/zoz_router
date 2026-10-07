@@ -2360,6 +2360,7 @@ const server = http.createServer(async (req, res) => {
             createdAt: sess.createdAt || fs.statSync(fullPath).birthtime.toISOString(),
             updatedAt: sess.updatedAt || fs.statSync(fullPath).mtime.toISOString(),
             messageCount: Array.isArray(sess.messages) ? sess.messages.length : 0,
+            isPinned: !!sess.isPinned,
             lastSnippet: (typeof lastMsg === 'string') ? lastMsg.substring(0, 80) : ''
           });
         } catch (fe) {}

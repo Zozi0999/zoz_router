@@ -962,8 +962,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
                 updatedAt: diskItem.updatedAt,
                 messages: [],
                 messageCount: diskItem.messageCount || 0,
+                isPinned: !!diskItem.isPinned,
                 _isLazyDisk: true
               });
+            } else if (diskItem.isPinned !== undefined && existing.isPinned === undefined) {
+              existing.isPinned = !!diskItem.isPinned;
             }
           }
         }
@@ -1954,7 +1957,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     const q = filterQuery.toLowerCase().trim();
     
     // Unified list of all sessions across engines (including lazy-loaded disk sessions)
-    const validSessions = STATE.sessions.filter(s => (s.messages && s.messages.length > 0) || (s._isLazyDisk && (s.messageCount > 0 || s.messages)));
+    const validSessions = STATE.sessions.filter(s => {
+      if (s._isLazyDisk) {
+        return (typeof s.messageCount === 'number' && s.messageCount > 0) || (Array.isArray(s.messages) && s.messages.length > 0);
+      }
+      return Array.isArray(s.messages) && s.messages.length > 0;
+    });
     const filtered = validSessions.filter(s => !q || s.title.toLowerCase().includes(q) || (s.mode && s.mode.toLowerCase().includes(q)));
 
     // Sort strictly: Pinned sessions first, then most recently active descending
@@ -3891,13 +3899,15 @@ ${organicBlock}
     // Auto title session if first message
     if (session.messages.length === 0) {
       const fallbackTitle = docs.length > 0 ? (docs[0].name || 'Dokumen Lampiran') : (images.length > 0 ? 'Analisis Gambar' : 'Percakapan Baru');
-      const titleCandidate = rawText || fallbackTitle;
+      let cleanCandidate = (rawText || '').replace(/^\/(?:image|img|gambar|deep|research|riset|web|search|canvas)\s+/i, '').trim();
+      const titleCandidate = cleanCandidate || fallbackTitle;
       session.title = titleCandidate.length > 30 ? titleCandidate.substring(0, 30) + '...' : titleCandidate;
-      renderChatHistory();
     }
 
+    session.updatedAt = new Date().toISOString();
     session.messages.push(userMsg);
     savePersistedState();
+    renderChatHistory(els.searchHistoryInput?.value || '');
 
     // Immediately render user's message bubble
     appendMessageElement('user', rawText, images, 'Anda', null, session.messages.length - 1, null, docsMeta);
@@ -5445,7 +5455,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         stats: { duration: totalTime, tps: tps, tokens: tokenCount },
         timestamp: new Date().toISOString()
       });
+      session.updatedAt = new Date().toISOString();
       savePersistedState();
+      renderChatHistory(els.searchHistoryInput?.value || '');
       AudioEngine.receive();
 
     } catch (err) {
@@ -5474,7 +5486,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             stats: { duration: totalTime, tokens: tokenCount, stopped: true },
             timestamp: new Date().toISOString()
           });
+          session.updatedAt = new Date().toISOString();
           savePersistedState();
+          renderChatHistory(els.searchHistoryInput?.value || '');
         } else {
           assistantRow.remove();
         }
@@ -6123,7 +6137,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         stats: { duration: totalTime, tps: tps, tokens: tokenCount },
         timestamp: new Date().toISOString()
       });
+      session.updatedAt = new Date().toISOString();
       savePersistedState();
+      renderChatHistory(els.searchHistoryInput?.value || '');
       AudioEngine.receive();
 
     } catch (err) {
@@ -6151,7 +6167,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             stats: { duration: totalTime, tokens: tokenCount, stopped: true },
             timestamp: new Date().toISOString()
           });
+          session.updatedAt = new Date().toISOString();
           savePersistedState();
+          renderChatHistory(els.searchHistoryInput?.value || '');
         } else {
           assistantRow.remove();
         }
@@ -8328,7 +8346,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           timestamp: new Date().toISOString()
         };
         session.messages.push(assistantMsg);
+        session.updatedAt = new Date().toISOString();
         savePersistedState();
+        renderChatHistory(els.searchHistoryInput?.value || '');
         AudioEngine.success();
         smartScrollChatToBottom(true);
       } else if (!STATE.abortController?.signal.aborted) {
@@ -8355,7 +8375,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
             isDeepResearch: true,
             timestamp: new Date().toISOString()
           });
+          session.updatedAt = new Date().toISOString();
           savePersistedState();
+          renderChatHistory(els.searchHistoryInput?.value || '');
         } else {
           assistantRow.remove();
         }
@@ -8695,7 +8717,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         stats: { duration: totalDuration },
         timestamp: new Date().toISOString()
       });
+      session.updatedAt = new Date().toISOString();
       savePersistedState();
+      renderChatHistory(els.searchHistoryInput?.value || '');
 
       AudioEngine.success();
       smartScrollChatToBottom(true);
@@ -10807,6 +10831,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       els.sidebar?.classList.add('open');
       els.sidebarBackdrop?.classList.add('show');
       history.pushState({ modal: 'sidebar' }, '');
+      renderChatHistory(els.searchHistoryInput?.value || '');
       AudioEngine.click();
     }
 
@@ -10821,6 +10846,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     function toggleDesktopSidebar() {
       const isCollapsed = els.appContainer?.classList.toggle('sidebar-collapsed');
       els.sidebar?.classList.toggle('collapsed', isCollapsed);
+      if (!isCollapsed) {
+        renderChatHistory(els.searchHistoryInput?.value || '');
+      }
       try {
         localStorage.setItem('zoz_sidebar_collapsed', isCollapsed ? 'true' : 'false');
       } catch (e) {}
