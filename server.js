@@ -296,31 +296,45 @@ function performWebSearch(query, apiKey = null, num = 15) {
           const results = [];
           
           if (parsed.knowledgeGraph) {
+            const kgDom = extractDomainSafe(parsed.knowledgeGraph.website || parsed.knowledgeGraph.descriptionUrl || 'https://google.com');
             results.push({
               title: parsed.knowledgeGraph.title || 'Knowledge Graph Fact',
               url: parsed.knowledgeGraph.website || parsed.knowledgeGraph.descriptionUrl || 'https://google.com',
               snippet: `${parsed.knowledgeGraph.type ? '[' + parsed.knowledgeGraph.type + '] ' : ''}${parsed.knowledgeGraph.description || ''}`,
+              domain: kgDom,
+              sourceProvider: `Google KG (${kgDom})`,
+              timestamp: Date.now(),
+              pubDate: 'Terkini',
               type: 'knowledgeGraph'
             });
           }
 
           if (parsed.answerBox) {
+            const abDom = extractDomainSafe(parsed.answerBox.link || 'https://google.com');
             results.push({
               title: parsed.answerBox.title || 'Jawaban Teratas',
               url: parsed.answerBox.link || 'https://google.com',
               snippet: parsed.answerBox.answer || parsed.answerBox.snippet || '',
+              domain: abDom,
+              sourceProvider: `Google AnswerBox (${abDom})`,
+              timestamp: Date.now(),
+              pubDate: 'Terkini',
               type: 'answerBox'
             });
           }
 
           if (Array.isArray(parsed.organic)) {
             parsed.organic.slice(0, 15).forEach((item, idx) => {
+              const dom = extractDomainSafe(item.link);
               results.push({
                 title: item.title || `Hasil ${idx + 1}`,
                 url: item.link || '',
                 snippet: item.snippet || '',
                 date: item.date || null,
-                domain: extractDomainSafe(item.link)
+                pubDate: item.date || 'Terkini',
+                domain: dom,
+                sourceProvider: `Google (${dom})`,
+                timestamp: item.date ? (Date.parse(item.date) || Date.now()) : Date.now()
               });
             });
           }
@@ -972,9 +986,23 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
   });
 }
 
-// ==================== AUTONOMOUS ZERO-API MULTI-SOURCE WEB EXPLORER ENGINES ====================
-// Engine pencarian multi-sumber mandiri tanpa API berbayar (Zero-API / No Serper Key required)
-// Menghimpun 10-18 sumber simultan: Google News RSS, Tech Wire / HackerNews, Wikipedia Global, Wikipedia ID, & DuckDuckGo Instant
+// ==================== AUTONOMOUS MULTI-SOURCE WEB EXPLORER ENGINES ====================
+// Engine pencarian multi-sumber: Google Serper, Google News RSS, Tech Wire / HackerNews, & DuckDuckGo Instant
+
+function stripDateNoise(q) {
+  if (!q || typeof q !== 'string') return '';
+  const months = 'januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember|january|february|march|april|may|june|july|august|september|october|november|december';
+  const days = 'senin|selasa|rabu|kamis|jumat|sabtu|minggu|monday|tuesday|wednesday|thursday|friday|saturday|sunday';
+  return q
+    .replace(new RegExp(`\\b(${days})\\b`, 'gi'), ' ')
+    .replace(new RegExp(`\\b\\d{1,2}\\s+(${months})(?:\\s*,?\\s*\\d{2,4})?\\b`, 'gi'), ' ')
+    .replace(new RegExp(`\\b(${months})\\s+\\d{1,2}(?:\\s*,?\\s*\\d{2,4})?\\b`, 'gi'), ' ')
+    .replace(new RegExp(`\\b(${months})(?:\\s+\\d{2,4})?\\b`, 'gi'), ' ')
+    .replace(/\b(202[0-9])\b/g, ' ')
+    .replace(/[,;]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 function deriveBroadSearchQueries(rawQuery, contextText = '') {
   if (!rawQuery || typeof rawQuery !== 'string') {
@@ -1232,6 +1260,7 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   if (!query || typeof query !== 'string' || !query.trim()) {
     return { query: '', count: 0, results: [] };
   }
+  const cleanDateQuery = stripDateNoise(query.trim());
   const qPlan = deriveBroadSearchQueries(query.trim(), contextText);
   const cleanQuery = qPlan.primary;
   const techQuery = qPlan.tech;
@@ -1243,11 +1272,19 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
 
   // Deteksi apakah kueri relevan dengan konteks bahasa Indonesia / nasional
   const combinedLower = (cleanQuery + ' ' + (contextText || '')).toLowerCase();
-  const isIndoQuery = /\b(terbaru|terkini|berita|apa|siapa|bagaimana|mengapa|kapan|di|ke|dari|hari ini|minggu ini|bulan ini|tahun ini|presiden|indonesia|jakarta|pemerintah|bbm|gempa|harga|bansos|pilkada)\b/i.test(combinedLower);
+  const isIndoQuery = /\b(terbaru|terkini|berita|apa|siapa|bagaimana|mengapa|kapan|di|ke|dari|hari ini|minggu ini|bulan ini|tahun ini|presiden|indonesia|jakarta|pemerintah|bbm|gempa|harga|bansos|pilkada|narkoba|polisi|pasar saham)\b/i.test(combinedLower);
 
-  // Eksekusi seluruh provider berita & teknologi live secara paralel (Bebas Wikipedia agar data 100% terbaru)
-  // Menghimpun berita bulan aktif (when:30d), berita rilis terkini, dan breaking wire 14 hari terakhir
-  const [gnewsRecent, gnewsTech, gnewsWeekly, gnewsPrimary, gnewsIndo, hnTech, hnCore, ddgInstant] = await Promise.allSettled([
+  const serperCalls = [
+    performWebSearch(cleanQuery, null, maxResults)
+  ];
+  if (cleanDateQuery && cleanDateQuery.length >= 3 && cleanDateQuery.toLowerCase() !== cleanQuery.toLowerCase()) {
+    serperCalls.push(performWebSearch(cleanDateQuery, null, maxResults));
+  }
+
+  // Eksekusi seluruh provider: Google Serper, Google News RSS, Tech Wire / HackerNews, & DuckDuckGo Instant
+  const [serperRes1, serperRes2, gnewsRecent, gnewsTech, gnewsWeekly, gnewsPrimary, gnewsIndo, hnTech, hnCore, ddgInstant] = await Promise.allSettled([
+    serperCalls[0],
+    serperCalls[1] || Promise.resolve({ results: [] }),
     fetchGoogleNewsRss(recentQuery, 'en', 8),
     fetchGoogleNewsRss(techQuery, 'en', 8),
     fetchGoogleNewsRss(weeklyQuery, 'en', 6),
@@ -1259,6 +1296,12 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   ]);
 
   const candidatePool = [];
+  if (serperRes1.status === 'fulfilled' && Array.isArray(serperRes1.value?.results)) {
+    candidatePool.push(...serperRes1.value.results);
+  }
+  if (serperRes2.status === 'fulfilled' && Array.isArray(serperRes2.value?.results)) {
+    candidatePool.push(...serperRes2.value.results);
+  }
   if (gnewsRecent.status === 'fulfilled') candidatePool.push(...gnewsRecent.value);
   if (gnewsTech.status === 'fulfilled') candidatePool.push(...gnewsTech.value);
   if (gnewsWeekly.status === 'fulfilled') candidatePool.push(...gnewsWeekly.value);
