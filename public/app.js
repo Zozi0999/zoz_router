@@ -1236,11 +1236,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
     // Fallback native sanitizer jika DOMPurify belum termuat atau offline
     return dirtyHtml
-      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-      .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
-      .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
-      .replace(/<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi, '')
-      .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, '')
+      .replace(/<script\b[\s\S]*?<\/script>/gi, '')
+      .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, '')
+      .replace(/<object\b[\s\S]*?<\/object>/gi, '')
+      .replace(/<embed\b[\s\S]*?<\/embed>/gi, '')
+      .replace(/<form\b[\s\S]*?<\/form>/gi, '')
       .replace(/\bon\w+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '');
   }
 
@@ -8362,6 +8362,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             headers: {
               'Content-Type': 'application/json',
               'Authorization': STATE.settings.openRouterKey ? `Bearer ${STATE.settings.openRouterKey}` : '',
+              'x-openrouter-key': STATE.settings.openRouterKey || '',
               'x-serper-key': STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e'
             },
             body: JSON.stringify({

@@ -1023,14 +1023,14 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
         resolved = true;
         try {
           let clean = html
-            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
-            .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
-            .replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, ' ')
-            .replace(/<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>/gi, ' ')
-            .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, ' ')
-            .replace(/<aside\b[^<]*(?:(?!<\/aside>)<[^<]*)*<\/aside>/gi, ' ')
-            .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, ' ')
-            .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, ' ')
+            .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<nav\b[\s\S]*?<\/nav>/gi, ' ')
+            .replace(/<header\b[\s\S]*?<\/header>/gi, ' ')
+            .replace(/<footer\b[\s\S]*?<\/footer>/gi, ' ')
+            .replace(/<aside\b[\s\S]*?<\/aside>/gi, ' ')
+            .replace(/<form\b[\s\S]*?<\/form>/gi, ' ')
+            .replace(/<svg\b[\s\S]*?<\/svg>/gi, ' ')
             .replace(/<!--[\s\S]*?-->/g, ' ')
             .replace(/<[^>]+>/g, ' ');
 
@@ -1563,14 +1563,14 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
           }
 
           let clean = html
-            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
-            .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
-            .replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, ' ')
-            .replace(/<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>/gi, ' ')
-            .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, ' ')
-            .replace(/<aside\b[^<]*(?:(?!<\/aside>)<[^<]*)*<\/aside>/gi, ' ')
-            .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, ' ')
-            .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, ' ')
+            .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<nav\b[\s\S]*?<\/nav>/gi, ' ')
+            .replace(/<header\b[\s\S]*?<\/header>/gi, ' ')
+            .replace(/<footer\b[\s\S]*?<\/footer>/gi, ' ')
+            .replace(/<aside\b[\s\S]*?<\/aside>/gi, ' ')
+            .replace(/<form\b[\s\S]*?<\/form>/gi, ' ')
+            .replace(/<svg\b[\s\S]*?<\/svg>/gi, ' ')
             .replace(/<!--[\s\S]*?-->/g, ' ');
 
           clean = cleanHtmlText(clean);
@@ -2765,7 +2765,8 @@ const server = http.createServer(async (req, res) => {
 
         if (isNaN(start) || start >= totalSize || end < start || end >= totalSize) {
           res.writeHead(416, {
-            'Content-Range': `bytes */${totalSize}`
+            'Content-Range': `bytes */${totalSize}`,
+            'Access-Control-Allow-Origin': '*'
           });
           return res.end();
         }
@@ -2776,7 +2777,8 @@ const server = http.createServer(async (req, res) => {
           'Accept-Ranges': 'bytes',
           'Content-Length': chunkSize,
           'Content-Type': contentType,
-          'Cache-Control': 'public, max-age=86400'
+          'Cache-Control': 'public, max-age=86400',
+          'Access-Control-Allow-Origin': '*'
         });
 
         if (method === 'HEAD') {
@@ -2803,7 +2805,8 @@ const server = http.createServer(async (req, res) => {
         'Content-Type': contentType,
         'Content-Length': totalSize,
         'Accept-Ranges': 'bytes',
-        'Cache-Control': 'public, max-age=86400'
+        'Cache-Control': 'public, max-age=86400',
+        'Access-Control-Allow-Origin': '*'
       });
       if (method === 'HEAD') {
         return res.end();
@@ -2921,6 +2924,7 @@ const server = http.createServer(async (req, res) => {
       const rawApiKey = req.headers['x-api-key'] ? String(req.headers['x-api-key']).replace(/^Bearer\s+/i, '').trim() : null;
       const rawSerperKey = req.headers['x-serper-key'] ? String(req.headers['x-serper-key']).trim() : null;
       const rawOllamaKey = req.headers['x-ollama-key'] ? String(req.headers['x-ollama-key']).replace(/^Bearer\s+/i, '').trim() : null;
+      const rawOpenRouterKey = req.headers['x-openrouter-key'] ? String(req.headers['x-openrouter-key']).replace(/^Bearer\s+/i, '').trim() : null;
 
       // Jalankan proses riset secara asinkronus di latar belakang dengan arsitektur 1-Model super efisien
       jalankanRisetOtonom(taskId, topik, {
@@ -2928,8 +2932,8 @@ const server = http.createServer(async (req, res) => {
         model: masterModel,
         provider: body.provider || (masterModel.includes('/') ? 'openrouter' : (masterModel.includes(':') ? 'ollama' : 'openrouter')),
         endpoint: body.endpoint,
-        apiKey: body.apiKey || rawAuth || rawApiKey || null,
-        openRouterKey: body.openRouterKey || body.apiKey || rawAuth || rawApiKey || process.env.OPENROUTER_API_KEY,
+        apiKey: body.apiKey || rawOpenRouterKey || rawAuth || rawApiKey || null,
+        openRouterKey: body.openRouterKey || body.apiKey || rawOpenRouterKey || rawAuth || rawApiKey || process.env.OPENROUTER_API_KEY,
         ollamaApiKey: body.ollamaApiKey || body.apiKey || rawOllamaKey || '',
         serperApiKey: body.serperApiKey || rawSerperKey || rawApiKey || process.env.SERPER_API_KEY,
         agent1Model: masterModel,
@@ -3014,9 +3018,9 @@ const server = http.createServer(async (req, res) => {
       }
 
       const info = await fetchYouTubeInfo(targetUrl.trim());
-      return sendJSON(res, info.success ? 200 : 400, info);
+      return sendJSON(res, 200, info);
     } catch (err) {
-      return sendJSON(res, 400, { success: false, error: err.message });
+      return sendJSON(res, 200, { success: false, error: err.message, url: targetUrl ? targetUrl.trim() : '' });
     }
   }
 
@@ -3503,6 +3507,12 @@ const server = http.createServer(async (req, res) => {
               return sendJSON(res, statusCode, { error: errMsg, details: parsedErr || errData });
             } catch (e) {}
           });
+          proxyRes.on('error', (err) => {
+            if (clientDisconnected || res.writableEnded || res.destroyed) return;
+            if (!res.headersSent) {
+              sendJSON(res, 502, { error: `Ollama upstream error stream interrupted: ${err.message}` });
+            }
+          });
           return;
         }
 
@@ -3848,6 +3858,12 @@ const server = http.createServer(async (req, res) => {
               const errMsg = parsedErr?.error?.message || parsedErr?.error || errData || `OpenRouter Error [${statusCode}]`;
               return sendJSON(res, statusCode, { error: errMsg, details: parsedErr || errData });
             } catch (e) {}
+          });
+          proxyRes.on('error', (err) => {
+            if (clientDisconnected || res.writableEnded || res.destroyed) return;
+            if (!res.headersSent) {
+              sendJSON(res, 502, { error: `OpenRouter error stream interrupted: ${err.message}` });
+            }
           });
           return;
         }
