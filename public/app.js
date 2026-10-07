@@ -11684,13 +11684,15 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     // Curated 1-Click Stream Cards
     $$('.curated-stream-card').forEach(card => {
       card.addEventListener('click', () => {
-        const type = card.dataset.type;
-        const src = card.dataset.src;
-        const title = card.dataset.title;
+        const src = card.dataset.url || card.dataset.src || '';
+        const title = card.dataset.title || 'Online Stream';
+        if (!src) return;
 
-        if (type === 'youtube') {
-          const ytId = BGMEngine.extractYouTubeId(src);
-          if (ytId) BGMEngine.playYouTube(ytId, title);
+        const ytId = BGMEngine.extractYouTubeId(src);
+        const type = card.dataset.type || (ytId ? 'youtube' : 'stream');
+
+        if (type === 'youtube' && ytId) {
+          BGMEngine.playYouTube(ytId, title);
         } else {
           BGMEngine.playDirectUrl(src, title);
         }

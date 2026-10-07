@@ -24,14 +24,14 @@ module.exports = async function handler(req, res) {
       width = parseInt(body.width, 10) || width;
       height = parseInt(body.height, 10) || height;
       seed = body.seed || null;
-      openRouterKey = body.openRouterKey || body.apiKey || (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, '') : null) || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
+      openRouterKey = body.openRouterKey || body.apiKey || (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, '') : null) || req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
     } else {
       prompt = req.query?.prompt || req.query?.q || '';
       model = req.query?.model || model;
       width = parseInt(req.query?.width, 10) || width;
       height = parseInt(req.query?.height, 10) || height;
       seed = req.query?.seed || null;
-      openRouterKey = req.query?.key || req.query?.apiKey || (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, '') : null) || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
+      openRouterKey = req.query?.key || req.query?.apiKey || (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, '') : null) || req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
     }
 
     if (openRouterKey) {

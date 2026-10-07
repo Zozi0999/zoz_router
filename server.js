@@ -61,7 +61,7 @@ function sendJSON(res, statusCode, data) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key'
   });
   res.end(JSON.stringify(data));
 }
@@ -69,6 +69,20 @@ function sendJSON(res, statusCode, data) {
 // Helper to parse JSON request body safely with Buffer chunks
 function parseBody(req) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const safeResolve = (val) => {
+      if (!settled) {
+        settled = true;
+        resolve(val);
+      }
+    };
+    const safeReject = (err) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    };
+
     const chunks = [];
     let totalLength = 0;
     req.on('data', chunk => {
@@ -76,25 +90,25 @@ function parseBody(req) {
       totalLength += chunk.length;
       if (totalLength > 50 * 1024 * 1024) { // 50MB limit
         req.destroy();
-        reject(new Error('Payload too large'));
+        safeReject(new Error('Payload too large'));
       }
     });
     req.on('end', () => {
-      if (chunks.length === 0 || totalLength === 0) return resolve({});
+      if (chunks.length === 0 || totalLength === 0) return safeResolve({});
       try {
         const bodyStr = Buffer.concat(chunks, totalLength).toString('utf8');
-        if (!bodyStr.trim()) return resolve({});
-        resolve(JSON.parse(bodyStr));
+        if (!bodyStr.trim()) return safeResolve({});
+        safeResolve(JSON.parse(bodyStr));
       } catch (e) {
-        resolve({});
+        safeResolve({});
       }
     });
     req.on('close', () => {
       if (!req.complete) {
-        reject(new Error('Request aborted by client'));
+        safeReject(new Error('Request aborted by client'));
       }
     });
-    req.on('error', err => reject(err));
+    req.on('error', err => safeReject(err));
   });
 }
 
@@ -810,6 +824,20 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
       const postData = JSON.stringify(payload);
 
       return new Promise((resolve, reject) => {
+        let settled = false;
+        const safeResolve = (data) => {
+          if (!settled) {
+            settled = true;
+            resolve(data);
+          }
+        };
+        const safeReject = (err) => {
+          if (!settled) {
+            settled = true;
+            reject(err);
+          }
+        };
+
         const options = {
           hostname: 'openrouter.ai',
           port: 443,
@@ -833,21 +861,21 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
               const parsed = JSON.parse(rawData);
               if (res.statusCode >= 400 || parsed.error) {
                 const errMsg = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : (parsed.error || `HTTP ${res.statusCode}: Permintaan OpenRouter gagal`);
-                return reject(new Error(`OpenRouter Error [${res.statusCode}]: ${errMsg}`));
+                return safeReject(new Error(`OpenRouter Error [${res.statusCode}]: ${errMsg}`));
               }
               const content = parsed.choices?.[0]?.message?.content || '';
               if (!content.trim()) {
-                return reject(new Error(`OpenRouter tidak mengembalikan konten respons untuk model: ${targetModel}`));
+                return safeReject(new Error(`OpenRouter tidak mengembalikan konten respons untuk model: ${targetModel}`));
               }
-              resolve(content);
+              safeResolve(content);
             } catch (e) {
-              reject(new Error('Gagal memproses respon OpenRouter: ' + e.message));
+              safeReject(new Error('Gagal memproses respon OpenRouter: ' + e.message));
             }
           });
-          res.on('error', err => reject(err));
+          res.on('error', err => safeReject(err));
         });
-        req.on('timeout', () => { req.destroy(); reject(new Error('OpenRouter request timed out')); });
-        req.on('error', err => reject(err));
+        req.on('timeout', () => { req.destroy(); safeReject(new Error('OpenRouter request timed out')); });
+        req.on('error', err => safeReject(err));
         req.write(postData);
         req.end();
       });
@@ -910,6 +938,20 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   }
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const safeResolve = (data) => {
+      if (!settled) {
+        settled = true;
+        resolve(data);
+      }
+    };
+    const safeReject = (err) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    };
+
     const req = client.request(ollamaUrl.toString(), {
       method: 'POST',
       headers,
@@ -922,21 +964,21 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
           const parsed = JSON.parse(rawData);
           if (res.statusCode >= 400 || parsed.error) {
             const errMsg = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : (parsed.error || `HTTP ${res.statusCode}: Permintaan Ollama gagal`);
-            return reject(new Error(`Ollama Error [${res.statusCode}]: ${errMsg}`));
+            return safeReject(new Error(`Ollama Error [${res.statusCode}]: ${errMsg}`));
           }
           const content = parsed.message?.content || parsed.response || '';
           if (!content.trim()) {
-            return reject(new Error(`Ollama tidak mengembalikan respons teks untuk model: ${rawModel || 'default'}`));
+            return safeReject(new Error(`Ollama tidak mengembalikan respons teks untuk model: ${rawModel || 'default'}`));
           }
-          resolve(content);
+          safeResolve(content);
         } catch (e) {
-          reject(new Error('Gagal memproses respon Ollama: ' + e.message));
+          safeReject(new Error('Gagal memproses respon Ollama: ' + e.message));
         }
       });
-      res.on('error', err => reject(err));
+      res.on('error', err => safeReject(err));
     });
-    req.on('timeout', () => { req.destroy(); reject(new Error('Ollama request timed out')); });
-    req.on('error', err => reject(err));
+    req.on('timeout', () => { req.destroy(); safeReject(new Error('Ollama request timed out')); });
+    req.on('error', err => safeReject(err));
     req.write(postData);
     req.end();
   });
@@ -2475,7 +2517,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key'
     });
     return res.end();
   }
@@ -2997,14 +3039,14 @@ const server = http.createServer(async (req, res) => {
         width = parseInt(body.width, 10) || width;
         height = parseInt(body.height, 10) || height;
         seed = body.seed || null;
-        openRouterKey = body.openRouterKey || body.apiKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
+        openRouterKey = body.openRouterKey || body.apiKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       } else {
         prompt = reqUrl.searchParams.get('prompt') || reqUrl.searchParams.get('q') || '';
         model = reqUrl.searchParams.get('model') || model;
         width = parseInt(reqUrl.searchParams.get('width'), 10) || width;
         height = parseInt(reqUrl.searchParams.get('height'), 10) || height;
         seed = reqUrl.searchParams.get('seed') || null;
-        openRouterKey = reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
+        openRouterKey = reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       }
 
       if (openRouterKey) {
@@ -3032,6 +3074,20 @@ const server = http.createServer(async (req, res) => {
       if (openRouterKey && effectiveModel.includes('/')) {
         try {
           const orRes = await new Promise((resolve, reject) => {
+            let settled = false;
+            const safeResolve = (data) => {
+              if (!settled) {
+                settled = true;
+                resolve(data);
+              }
+            };
+            const safeReject = (err) => {
+              if (!settled) {
+                settled = true;
+                reject(err);
+              }
+            };
+
             const postData = JSON.stringify({
               model: effectiveModel,
               prompt: cleanPrompt,
@@ -3061,27 +3117,27 @@ const server = http.createServer(async (req, res) => {
                   const parsed = JSON.parse(raw);
                   if (response.statusCode >= 400 || parsed.error) {
                     const errDetail = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
-                    return reject(new Error(errDetail || `OpenRouter HTTP ${response.statusCode}`));
+                    return safeReject(new Error(errDetail || `OpenRouter HTTP ${response.statusCode}`));
                   }
                   const imgItem = parsed.data?.[0] || parsed.images?.[0] || parsed.choices?.[0];
                   if (imgItem) {
                     if (imgItem.b64_json) {
-                      return resolve({ buffer: Buffer.from(imgItem.b64_json, 'base64'), contentType: 'image/png' });
+                      return safeResolve({ buffer: Buffer.from(imgItem.b64_json, 'base64'), contentType: 'image/png' });
                     }
                     if (imgItem.url) {
-                      return resolve({ remoteUrl: imgItem.url });
+                      return safeResolve({ remoteUrl: imgItem.url });
                     }
                   }
-                  reject(new Error('OpenRouter tidak mengembalikan data gambar'));
+                  safeReject(new Error('OpenRouter tidak mengembalikan data gambar'));
                 } catch (e) {
-                  reject(e);
+                  safeReject(e);
                 }
               });
 
-              response.on('error', err => reject(err));
+              response.on('error', err => safeReject(err));
             });
-            request.on('timeout', () => { request.destroy(); reject(new Error('OpenRouter image timed out')); });
-            request.on('error', err => reject(err));
+            request.on('timeout', () => { request.destroy(); safeReject(new Error('OpenRouter image timed out')); });
+            request.on('error', err => safeReject(err));
             request.write(postData);
             request.end();
           });
@@ -3530,7 +3586,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/openrouter/models' && method === 'GET') {
     let authHeader = req.headers['authorization'];
     if (!authHeader) {
-      const qKey = req.headers['x-api-key'] || reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || process.env.OPENROUTER_API_KEY;
+      const qKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || process.env.OPENROUTER_API_KEY;
       if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
     }
     const options = {
@@ -3587,7 +3643,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/openrouter/auth-check' && method === 'GET') {
     let authHeader = req.headers['authorization'];
     if (!authHeader) {
-      const qKey = req.headers['x-api-key'] || reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || process.env.OPENROUTER_API_KEY;
+      const qKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || process.env.OPENROUTER_API_KEY;
       if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
     }
     if (!authHeader) {
@@ -3640,7 +3696,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/openrouter/credits' && method === 'GET') {
     let authHeader = req.headers['authorization'];
     if (!authHeader) {
-      const qKey = req.headers['x-api-key'] || reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || process.env.OPENROUTER_API_KEY;
+      const qKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || process.env.OPENROUTER_API_KEY;
       if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
     }
     if (!authHeader) {
@@ -3695,7 +3751,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await parseBody(req);
       const authHeader = req.headers['authorization'];
-      const rawKey = body.apiKey || body.openRouterKey || req.headers['x-api-key'] || (authHeader ? authHeader.replace(/^Bearer\s+/i, '') : '') || process.env.OPENROUTER_API_KEY;
+      const rawKey = body.apiKey || body.openRouterKey || req.headers['x-openrouter-key'] || req.headers['x-api-key'] || (authHeader ? authHeader.replace(/^Bearer\s+/i, '') : '') || process.env.OPENROUTER_API_KEY;
 
       if (!rawKey) {
         return sendJSON(res, 401, { error: 'OpenRouter API Key diperlukan. Masukkan API Key di Pengaturan Zoz Router.' });
@@ -3920,8 +3976,11 @@ const server = http.createServer(async (req, res) => {
         });
         if (method === 'HEAD') return res.end();
         fs.readFile(indexPath, (idxErr, content) => {
-          if (res.headersSent || res.writableEnded || res.destroyed) return;
-          if (idxErr) return res.end();
+          if (res.writableEnded || res.destroyed) return;
+          if (idxErr) {
+            try { res.destroy(); } catch (_) {}
+            return;
+          }
           res.end(content);
         });
       });
@@ -3939,9 +3998,10 @@ const server = http.createServer(async (req, res) => {
     if (method === 'HEAD') return res.end();
 
     fs.readFile(filePath, (readErr, content) => {
-      if (res.headersSent || res.writableEnded || res.destroyed) return;
+      if (res.writableEnded || res.destroyed) return;
       if (readErr) {
-        return sendJSON(res, 500, { error: 'File read error' });
+        try { res.destroy(); } catch (_) {}
+        return;
       }
       res.end(content);
     });
