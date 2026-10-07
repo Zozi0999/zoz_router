@@ -30,7 +30,15 @@ const MIME_TYPES = {
   '.txt': 'text/plain; charset=utf-8',
   '.bin': 'application/octet-stream',
   '.woff2': 'font/woff2',
-  '.woff': 'font/woff'
+  '.woff': 'font/woff',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.m4a': 'audio/mp4',
+  '.flac': 'audio/flac',
+  '.aac': 'audio/aac',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm'
 };
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -2604,16 +2612,51 @@ const server = http.createServer(async (req, res) => {
       const ext = path.extname(uploadFilePath).toLowerCase();
       const contentType = MIME_TYPES[ext] || 'application/octet-stream';
       const stat = fs.statSync(uploadFilePath);
+      const totalSize = stat.size;
+      const range = req.headers.range;
+
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+
+        if (isNaN(start) || start >= totalSize || end < start || end >= totalSize) {
+          res.writeHead(416, {
+            'Content-Range': `bytes */${totalSize}`
+          });
+          return res.end();
+        }
+
+        const chunkSize = (end - start) + 1;
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${totalSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunkSize,
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=86400'
+        });
+
+        if (method === 'HEAD') {
+          return res.end();
+        }
+
+        const stream = fs.createReadStream(uploadFilePath, { start, end });
+        stream.pipe(res);
+        return;
+      }
+
       res.writeHead(200, {
         'Content-Type': contentType,
-        'Content-Length': stat.size,
+        'Content-Length': totalSize,
+        'Accept-Ranges': 'bytes',
         'Cache-Control': 'public, max-age=86400'
       });
       if (method === 'HEAD') {
         return res.end();
       }
-      const content = fs.readFileSync(uploadFilePath);
-      return res.end(content);
+      const stream = fs.createReadStream(uploadFilePath);
+      stream.pipe(res);
+      return;
     }
     return sendJSON(res, 404, { error: 'Media file tidak ditemukan di penyimpanan perangkat.' });
   }

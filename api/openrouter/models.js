@@ -8,7 +8,7 @@ module.exports = async function handler(req, res) {
   try {
     let authHeader = req.headers.authorization;
     if (!authHeader) {
-      const qKey = req.headers['x-api-key'] || req.query?.key || req.query?.apiKey;
+      const qKey = req.headers['x-api-key'] || req.query?.key || req.query?.apiKey || process.env.OPENROUTER_API_KEY;
       if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
     }
     const headers = {};

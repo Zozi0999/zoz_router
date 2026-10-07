@@ -804,8 +804,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     async saveSession(session) {
       if (!session || !session.id) return;
-      // Safety guard: Never overwrite disk storage with an empty lazy-loaded session
-      if (session._isLazyDisk && (!session.messages || session.messages.length === 0)) {
+      // Safety guard: Never overwrite disk storage with an unhydrated lazy-loaded session
+      if (session._isLazyDisk) {
         return;
       }
       if (this.isDeviceBackendAvailable) {
@@ -876,7 +876,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           console.warn('DeviceStorage deleteSession failed:', e.message);
         }
       }
-      ChatDB.deleteSession(id);
+      await ChatDB.deleteSession(id);
     },
 
     async clearAllSessions() {
@@ -1754,7 +1754,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        buf += decoder.decode();
+        break;
+      }
       buf += decoder.decode(value, { stream: true });
       const lines = buf.split('\n');
       buf = lines.pop();
@@ -1764,6 +1767,24 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         if (!trimmed || !trimmed.startsWith('data:')) continue;
         const jsonStr = trimmed.replace(/^data:\s*/, '');
         if (jsonStr === '[DONE]') break;
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) {
+            appended += delta;
+            const needsNl = currentFullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(currentFullText) || /```\w*$/.test(currentFullText);
+            const needsSp = !needsNl && !currentFullText.endsWith(' ') && !appended.startsWith(' ') && !appended.startsWith('\n');
+            const sep = needsNl ? '\n' : (needsSp ? ' ' : '');
+            bubbleText.innerHTML = renderMarkdown(currentFullText + sep + appended) + '<span class="typing-cursor"></span>';
+            smartScrollChatToBottom(false);
+          }
+        } catch (e) {}
+      }
+    }
+
+    if (buf && buf.trim() && buf.trim().startsWith('data:')) {
+      const jsonStr = buf.trim().replace(/^data:\s*/, '');
+      if (jsonStr !== '[DONE]') {
         try {
           const parsed = JSON.parse(jsonStr);
           const delta = parsed.choices?.[0]?.delta?.content;
@@ -1822,7 +1843,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        buf += decoder.decode();
+        break;
+      }
       buf += decoder.decode(value, { stream: true });
       const lines = buf.split('\n');
       buf = lines.pop();
@@ -1841,6 +1865,20 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           }
         } catch (e) {}
       }
+    }
+
+    if (buf && buf.trim()) {
+      try {
+        const parsed = JSON.parse(buf.trim());
+        if (parsed.message?.content) {
+          appended += parsed.message.content;
+          const needsNl = currentFullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(currentFullText) || /```\w*$/.test(currentFullText);
+          const needsSp = !needsNl && !currentFullText.endsWith(' ') && !appended.startsWith(' ') && !appended.startsWith('\n');
+          const sep = needsNl ? '\n' : (needsSp ? ' ' : '');
+          bubbleText.innerHTML = renderMarkdown(currentFullText + sep + appended) + '<span class="typing-cursor"></span>';
+          smartScrollChatToBottom(false);
+        }
+      } catch (e) {}
     }
     return appended;
   }
@@ -2586,11 +2624,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           showToast('Harap tunggu atau hentikan generasi AI saat ini sebelum mengedit.', 'error');
           return;
         }
+        if (!bubble || !textContainer) return;
 
         // Create inline editor
         const originalContent = content;
         textContainer.style.display = 'none';
-        actionsBar.style.display = 'none';
+        if (actionsBar) actionsBar.style.display = 'none';
 
         const editorBox = document.createElement('div');
         editorBox.className = 'inline-edit-box';
@@ -2605,20 +2644,22 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
         bubble.appendChild(editorBox);
         const textarea = editorBox.querySelector('.inline-edit-textarea');
-        textarea.focus();
-        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        if (textarea) {
+          textarea.focus();
+          textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        }
 
         // Cancel
-        editorBox.querySelector('.cancel-edit-btn').addEventListener('click', () => {
+        editorBox.querySelector('.cancel-edit-btn')?.addEventListener('click', () => {
           editorBox.remove();
-          textContainer.style.display = 'block';
-          actionsBar.style.display = 'flex';
+          if (textContainer) textContainer.style.display = 'block';
+          if (actionsBar) actionsBar.style.display = 'flex';
           AudioEngine.click();
         });
 
         // Save & Resend
         const doSaveAndResend = () => {
-          const newText = textarea.value.trim();
+          const newText = textarea ? textarea.value.trim() : '';
           if (!newText && (!imgList || imgList.length === 0) && (!docs || docs.length === 0)) {
             showToast('Prompt tidak boleh kosong.', 'error');
             return;
@@ -2643,7 +2684,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           renderCurrentSession();
 
           // Set prompt input and send
-          els.promptInput.value = newText;
+          if (els.promptInput) els.promptInput.value = newText;
           if (imgList && imgList.length > 0) {
             STATE.attachedImages = [...imgList];
             renderAttachmentPreviews();
@@ -2658,8 +2699,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           handleSendPrompt();
         };
 
-        editorBox.querySelector('.save-edit-btn').addEventListener('click', doSaveAndResend);
-        textarea.addEventListener('keydown', (e) => {
+        editorBox.querySelector('.save-edit-btn')?.addEventListener('click', doSaveAndResend);
+        textarea?.addEventListener('keydown', (e) => {
           if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             doSaveAndResend();
@@ -2677,7 +2718,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       copyTextToClipboard(textToCopy, null, 'Pesan disalin ke clipboard!');
     });
 
-    els.messagesList.appendChild(row);
+    els.messagesList?.appendChild(row);
     if (hasText) {
       renderYouTubeCardsForMessage(row, content);
     }
@@ -4006,6 +4047,18 @@ ${organicBlock}
     }
 
     const session = getActiveSession();
+    // Safety guard: Hydrate full conversation history from storage if session was lazy-loaded
+    if (session._isLazyDisk && (!session.messages || session.messages.length === 0)) {
+      try {
+        const fullSess = await DeviceStorage.getSession(session.id);
+        if (fullSess && Array.isArray(fullSess.messages)) {
+          session.messages = fullSess.messages;
+          delete session._isLazyDisk;
+        }
+      } catch (e) {
+        console.warn('Pre-send session hydration notice:', e);
+      }
+    }
     if (els.welcomeHero) {
       els.welcomeHero.style.display = 'none';
     }
@@ -5554,7 +5607,10 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
           while (true) {
             const { done, value } = await digestionReader.read();
-            if (done) break;
+            if (done) {
+              digestionBuffer += decoder.decode();
+              break;
+            }
             digestionBuffer += decoder.decode(value, { stream: true });
             const dLines = digestionBuffer.split('\n');
             digestionBuffer = dLines.pop();
@@ -5572,6 +5628,19 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
                 }
               } catch (_) {}
             }
+          }
+
+          if (digestionBuffer && digestionBuffer.trim()) {
+            try {
+              const dParsed = JSON.parse(digestionBuffer.trim());
+              if (dParsed.message?.content) {
+                tokenCount++;
+                digestionRenderer.append(dParsed.message.content);
+              }
+              if (dParsed.message?.tool_calls && Array.isArray(dParsed.message.tool_calls)) {
+                dParsed.message.tool_calls.forEach(tc => currentRoundNativeCalls.push(tc));
+              }
+            } catch (_) {}
           }
           currentRoundText = digestionRenderer.finish();
           fullText = currentRoundText;
@@ -6238,7 +6307,10 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
           while (true) {
             const { done, value } = await digestionReader.read();
-            if (done) break;
+            if (done) {
+              digestionBuffer += decoder.decode();
+              break;
+            }
             digestionBuffer += decoder.decode(value, { stream: true });
             const dLines = digestionBuffer.split('\n');
             digestionBuffer = dLines.pop();
@@ -6248,6 +6320,40 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
               if (!dTrimmed || !dTrimmed.startsWith('data:')) continue;
               const dJson = dTrimmed.replace(/^data:\s*/, '');
               if (dJson === '[DONE]') break;
+              try {
+                const dParsed = JSON.parse(dJson);
+                const dDelta = dParsed.choices?.[0]?.delta?.content;
+                if (dDelta) {
+                  tokenCount++;
+                  digestionRenderer.append(dDelta);
+                }
+                const deltaTc = dParsed.choices?.[0]?.delta?.tool_calls;
+                if (Array.isArray(deltaTc)) {
+                  deltaTc.forEach(tc => {
+                    const idx = tc.index ?? 0;
+                    if (!currentRoundNativeCalls[idx]) {
+                      currentRoundNativeCalls[idx] = {
+                        id: tc.id || `call_${Date.now()}_${idx}`,
+                        type: tc.type || 'function',
+                        function: {
+                          name: tc.function?.name || '',
+                          arguments: tc.function?.arguments || ''
+                        }
+                      };
+                    } else {
+                      if (tc.id) currentRoundNativeCalls[idx].id = tc.id;
+                      if (tc.function?.name) currentRoundNativeCalls[idx].function.name += tc.function.name;
+                      if (tc.function?.arguments) currentRoundNativeCalls[idx].function.arguments += tc.function.arguments;
+                    }
+                  });
+                }
+              } catch (_) {}
+            }
+          }
+
+          if (digestionBuffer && digestionBuffer.trim() && digestionBuffer.trim().startsWith('data:')) {
+            const dJson = digestionBuffer.trim().replace(/^data:\s*/, '');
+            if (dJson !== '[DONE]') {
               try {
                 const dParsed = JSON.parse(dJson);
                 const dDelta = dParsed.choices?.[0]?.delta?.content;
@@ -6566,6 +6672,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
+          if (!ctx) return resolve(e.target.result);
           ctx.drawImage(img, 0, 0, width, height);
           try {
             const dataUrl = canvas.toDataURL('image/webp', quality);

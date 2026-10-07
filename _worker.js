@@ -104,7 +104,7 @@ export default {
     if (url.pathname === '/api/openrouter/chat' && request.method === 'POST') {
       try {
         const body = await request.json().catch(() => ({}));
-        let apiKey = body.apiKey || request.headers.get('x-api-key') || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '').trim() : '') || url.searchParams.get('key') || url.searchParams.get('apiKey');
+        let apiKey = body.apiKey || request.headers.get('x-api-key') || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '').trim() : '') || url.searchParams.get('key') || url.searchParams.get('apiKey') || env?.OPENROUTER_API_KEY;
         if (apiKey) apiKey = String(apiKey).replace(/^Bearer\s+/i, '').trim();
         if (!apiKey) {
           return new Response(JSON.stringify({ error: 'Missing OpenRouter API Key' }), {
@@ -151,7 +151,7 @@ export default {
       try {
         let authHeader = request.headers.get('Authorization');
         if (!authHeader) {
-          const qKey = request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey');
+          const qKey = request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || env?.OPENROUTER_API_KEY;
           if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
         }
         const headers = {};
@@ -176,7 +176,7 @@ export default {
       try {
         let authHeader = request.headers.get('Authorization');
         if (!authHeader) {
-          const qKey = request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey');
+          const qKey = request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || env?.OPENROUTER_API_KEY;
           if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
         }
         if (!authHeader) {
@@ -207,7 +207,7 @@ export default {
       try {
         let authHeader = request.headers.get('Authorization');
         if (!authHeader) {
-          const qKey = request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey');
+          const qKey = request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || env?.OPENROUTER_API_KEY;
           if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
         }
         if (!authHeader) {
@@ -250,14 +250,14 @@ export default {
           width = parseInt(body.width, 10) || width;
           height = parseInt(body.height, 10) || height;
           seed = body.seed || null;
-          openRouterKey = body.openRouterKey || body.apiKey || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-api-key');
+          openRouterKey = body.openRouterKey || body.apiKey || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-api-key') || env?.OPENROUTER_API_KEY;
         } else {
           prompt = url.searchParams.get('prompt') || url.searchParams.get('q') || '';
           model = url.searchParams.get('model') || model;
           width = parseInt(url.searchParams.get('width'), 10) || width;
           height = parseInt(url.searchParams.get('height'), 10) || height;
           seed = url.searchParams.get('seed') || null;
-          openRouterKey = url.searchParams.get('key') || url.searchParams.get('apiKey') || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-api-key');
+          openRouterKey = url.searchParams.get('key') || url.searchParams.get('apiKey') || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-api-key') || env?.OPENROUTER_API_KEY;
         }
 
         if (openRouterKey) {
@@ -348,13 +348,13 @@ export default {
     if (url.pathname === '/api/web-search') {
       try {
         let query = url.searchParams.get('q') || url.searchParams.get('query') || '';
-        let apiKey = request.headers.get('x-serper-key') || request.headers.get('x-api-key') || url.searchParams.get('apiKey') || url.searchParams.get('key') || '';
+        let apiKey = request.headers.get('x-serper-key') || request.headers.get('x-api-key') || url.searchParams.get('apiKey') || url.searchParams.get('key') || '' || env?.SERPER_API_KEY;
         if (request.method === 'POST') {
           const body = await request.json().catch(() => ({}));
           query = body.query || body.q || query;
-          apiKey = body.apiKey || body.serperApiKey || apiKey;
+          apiKey = body.apiKey || body.serperApiKey || apiKey || env?.SERPER_API_KEY;
         }
-        const serperKey = apiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+        const serperKey = apiKey || env?.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
         const serperRes = await fetch('https://google.serper.dev/search', {
           method: 'POST',
           headers: {
