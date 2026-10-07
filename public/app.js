@@ -1587,7 +1587,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         else if (session.messages && session.messages.length > 0 && session.messages[session.messages.length - 1].role === 'assistant') {
           session.messages[session.messages.length - 1].content = merged;
         }
+        session.updatedAt = new Date().toISOString();
         savePersistedState();
+        renderChatHistory(els.searchHistoryInput?.value || '');
 
         if (isOutputTruncated(merged)) {
           attachContinuationButton(container, session, assistantRow, modelName, engine, merged);
@@ -4754,9 +4756,12 @@ ${organicBlock}
       .replace(/```[\s\S]*?```/g, ' ')
       .replace(/`[^`\n]+`/g, ' ');
 
+    const isLongCompleteText = textWithoutCode.trim().length > 350;
+
     // 5. Raw balanced JSON objects anywhere in text (di luar blok kode)
     const jsonBlocks = extractBalancedJsonObjects(textWithoutCode);
     for (const block of jsonBlocks) {
+      if (isLongCompleteText && block.start > 220) continue;
       try {
         const p = JSON.parse(block.json);
         const name = p.name || p.function || p.tool;
@@ -4768,7 +4773,6 @@ ${organicBlock}
     }
 
     // 6. Function call with JSON argument: search_web({"query": "..."}) or browse_web_page({"url": "..."})
-    const isLongCompleteText = textWithoutCode.trim().length > 350;
     const funcJsonRegex = /(search_web|browse_web_page)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
     let fjm;
     while ((fjm = funcJsonRegex.exec(textWithoutCode)) !== null) {

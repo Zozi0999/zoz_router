@@ -1267,7 +1267,7 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   const techQuery = qPlan.tech;
   const newsQuery = qPlan.news;
   const recentQuery = qPlan.recentNews;
-  const recentQueryId = qPlan.recentNewsId || `${cleanQuery} when:30d`;
+  const recentQueryId = qPlan.recentNewsId || `${cleanQuery} berita terbaru`;
   const weeklyQuery = qPlan.weeklyNews;
   const coreQuery = qPlan.core;
 
@@ -1371,7 +1371,7 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
 
       // Intersep khusus untuk URL YouTube agar mengembalikan data judul & channel resmi via oEmbed
       if (YOUTUBE_ALLOWED_HOSTS.has(parsedUrl.hostname.toLowerCase())) {
-        fetchYouTubeInfo(cleanTarget).then(ytInfo => {
+        return fetchYouTubeInfo(cleanTarget).then(ytInfo => {
           if (ytInfo && ytInfo.success) {
             return resolve({
               url: ytInfo.url || cleanTarget,
@@ -1380,8 +1380,10 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
               links: ytInfo.channel_url ? [{ title: ytInfo.channel, url: ytInfo.channel_url }] : []
             });
           }
-          // Jika oEmbed gagal, lanjutkan ke fetch biasa
-        }).catch(() => {});
+          return fallbackJinaReader(cleanTarget, maxChars).then(resolve);
+        }).catch(() => {
+          return fallbackJinaReader(cleanTarget, maxChars).then(resolve);
+        });
       }
 
       const client = parsedUrl.protocol === 'https:' ? https : http;
