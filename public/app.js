@@ -152,7 +152,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       systemPrompt: SYSTEM_PRESETS.kaisar,
       customSystemPrompt: '',
       activePreset: 'kaisar',
-      autoPolicy: 'local_first'
+      autoPolicy: 'local_first',
+      neutronAnimEnabled: true
     },
     activeCatalogTab: 'ollama', // 'ollama' | 'openrouter'
     dropdownModelTab: 'ollama', // 'ollama' | 'openrouter'
@@ -384,6 +385,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     paramTopP: $('#paramTopP'),
     valTopP: $('#valTopP'),
     settingSystemPrompt: $('#settingSystemPrompt'),
+    settingNeutronAnimBtn: $('#settingNeutronAnimBtn'),
     saveSettingsBtn: $('#saveSettingsBtn'),
 
     // Cyber BGM & Audio Deck
@@ -4045,8 +4047,10 @@ ${organicBlock}
   // ==================== NEUTRON SINGULARITY SLINGSHOT PROMPT ANIMATION ====================
   function playNeutronSendAnimation(text, targetRow) {
     if (!targetRow) return;
+    const isAnimEnabled = STATE.settings.neutronAnimEnabled !== false;
     const isReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (isReducedMotion || !els.promptInput) {
+    if (!isAnimEnabled || isReducedMotion || !els.promptInput) {
+      targetRow.classList.remove('neutron-pending');
       smartScrollChatToBottom(true);
       AudioEngine.send();
       return;
@@ -4108,29 +4112,30 @@ ${organicBlock}
         try {
           const bubble = targetRow.querySelector('.message-bubble') || targetRow;
           const targetRect = bubble.getBoundingClientRect();
-          const targetX = targetRect.left + Math.min(targetRect.width * 0.75, targetRect.width - 24);
-          const targetY = targetRect.top + (targetRect.height / 2);
+          const targetX = targetRect.width > 0 ? (targetRect.left + Math.min(targetRect.width * 0.75, targetRect.width - 24)) : (window.innerWidth / 2);
+          const targetY = targetRect.height > 0 ? (targetRect.top + targetRect.height / 2) : (window.innerHeight - 150);
 
-          const deltaX = targetX - orbOriginX;
-          const deltaY = targetY - orbOriginY;
+          const deltaX = Math.round(targetX - orbOriginX);
+          const deltaY = Math.round(targetY - orbOriginY);
 
           // Motion trail streak
           const trail = document.createElement('div');
           trail.className = 'neutron-motion-trail';
           stage.appendChild(trail);
 
+          // Pixel-safe Web Animations API keyframes (No calc() to avoid browser DOMExceptions)
           const flyAnim = orb.animate([
             {
-              transform: 'translate(-50%, -50%) scale(1.1) rotate(0deg)',
+              transform: 'translate3d(-50%, -50%, 0) scale(1.1) rotate(0deg)',
               boxShadow: '0 0 20px #00F0FF, 0 0 35px #FF007F'
             },
             {
-              transform: `translate(calc(-50% + ${deltaX * 0.45}px), calc(-50% + ${deltaY * 0.45 - 35}px)) scale(1.35) rotate(360deg)`,
+              transform: `translate3d(${-14 + Math.round(deltaX * 0.45)}px, ${-14 + Math.round(deltaY * 0.45 - 35)}px, 0) scale(1.35) rotate(360deg)`,
               boxShadow: '0 0 32px #00F0FF, 0 0 60px #FF007F, inset 0 0 10px #FFFFFF',
               offset: 0.5
             },
             {
-              transform: `translate(calc(-50% + ${deltaX}px), calc(-50% + ${deltaY}px)) scale(0.85) rotate(720deg)`,
+              transform: `translate3d(${-14 + deltaX}px, ${-14 + deltaY}px, 0) scale(0.85) rotate(720deg)`,
               boxShadow: '0 0 20px #00F0FF, 0 0 40px #FF007F'
             }
           ], {
@@ -11190,6 +11195,17 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (els.settingAutoPolicy) els.settingAutoPolicy.value = STATE.settings.autoPolicy || 'local_first';
     
     updatePresetPillUI();
+    updateNeutronAnimBtnUI();
+  }
+
+  function updateNeutronAnimBtnUI() {
+    if (!els.settingNeutronAnimBtn) return;
+    const isEnabled = STATE.settings.neutronAnimEnabled !== false;
+    els.settingNeutronAnimBtn.classList.toggle('active', isEnabled);
+    els.settingNeutronAnimBtn.classList.toggle('inactive', !isEnabled);
+    els.settingNeutronAnimBtn.innerHTML = isEnabled
+      ? '<i class="fa-solid fa-toggle-on"></i> <span>Aktif</span>'
+      : '<i class="fa-solid fa-toggle-off"></i> <span>Nonaktif</span>';
   }
 
   // ==================== EVENT LISTENERS SETUP ====================
@@ -12071,6 +12087,14 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
       showToast('💰 Saldo OpenRouter disinkronkan!');
       AudioEngine.click();
+    });
+
+    els.settingNeutronAnimBtn?.addEventListener('click', () => {
+      STATE.settings.neutronAnimEnabled = !(STATE.settings.neutronAnimEnabled !== false);
+      updateNeutronAnimBtnUI();
+      savePersistedState();
+      AudioEngine.click();
+      showToast(STATE.settings.neutronAnimEnabled ? '⚡ Animasi Bola Neutron diaktifkan.' : 'Animasi Bola Neutron dinonaktifkan.');
     });
 
     els.saveSettingsBtn?.addEventListener('click', () => {
