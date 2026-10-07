@@ -52,6 +52,11 @@ module.exports = async function handler(req, res) {
     }
     return res.end();
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    if (!res.headersSent) {
+      return res.status(500).json({ error: err.message });
+    }
+    try {
+      res.end();
+    } catch (_) {}
   }
 };

@@ -1123,8 +1123,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
   // ==================== UTILS ====================
   function escapeHtml(str) {
-    if (!str) return '';
-    return str.replace(/[&<>'"]/g, tag => ({
+    if (str === null || str === undefined) return '';
+    const s = String(str);
+    return s.replace(/[&<>'"]/g, tag => ({
       '&': '&amp;',
       '<': '&lt;',
       '>': '&gt;',
@@ -5139,8 +5140,13 @@ ${organicBlock}
               { type: 'text', text: m.content || 'Jelaskan dan analisis gambar terlampir ini.' }
             ];
             imgs.forEach(img => {
-              if (typeof img === 'string' && img.startsWith('data:image')) {
-                contentParts.push({ type: 'image_url', image_url: { url: img } });
+              if (typeof img === 'string') {
+                if (img.startsWith('data:image') || img.startsWith('http://') || img.startsWith('https://')) {
+                  contentParts.push({ type: 'image_url', image_url: { url: img } });
+                } else if (img.startsWith('/uploads/')) {
+                  const fullUrl = `${window.location.origin}${img}`;
+                  contentParts.push({ type: 'image_url', image_url: { url: fullUrl } });
+                }
               }
             });
             messagesPayload.push({ role: m.role, content: contentParts });
@@ -8562,7 +8568,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
     }
     if (els.promptInput) {
-      els.promptInput.placeholder = '';
+      els.promptInput.placeholder = STATE.isImageGenMode
+        ? '🎨 Mode AI Image Studio Aktif — Ketik deskripsi visual untuk digenerasi...'
+        : 'Ketik pesan atau minta gambar (Ketik /img untuk Mode Gambar)...';
     }
   }
 
@@ -10787,7 +10795,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     });
 
     document.addEventListener('click', (e) => {
-      if (!els.modelPickerChip.contains(e.target) && !els.modelDropdownMenu.contains(e.target)) {
+      if (els.modelPickerChip && els.modelDropdownMenu && !els.modelPickerChip.contains(e.target) && !els.modelDropdownMenu.contains(e.target)) {
         els.modelDropdownMenu.classList.remove('show');
       }
 

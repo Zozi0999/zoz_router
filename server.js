@@ -2346,7 +2346,17 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
 // Main HTTP Server
 const server = http.createServer(async (req, res) => {
-  const reqUrl = new URL(req.url, `http://${req.headers.host || 'localhost:4040'}`);
+  let reqUrl;
+  try {
+    reqUrl = new URL(req.url, `http://${req.headers.host || 'localhost:4040'}`);
+  } catch (_) {
+    try {
+      reqUrl = new URL(req.url, 'http://localhost:4040');
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('Bad Request: Invalid URL');
+    }
+  }
   const pathname = reqUrl.pathname;
   const method = req.method;
 
@@ -2580,6 +2590,9 @@ const server = http.createServer(async (req, res) => {
 
   // 8. Serve Uploaded Media from Disk
   if (pathname.startsWith('/uploads/')) {
+    if (method !== 'GET' && method !== 'HEAD') {
+      return sendJSON(res, 405, { error: 'Method Not Allowed' });
+    }
     const uploadFilename = path.basename(pathname);
     const uploadFilePath = path.join(UPLOADS_DIR, uploadFilename);
     const relUpload = path.relative(UPLOADS_DIR, uploadFilePath);
@@ -2589,12 +2602,16 @@ const server = http.createServer(async (req, res) => {
     if (fs.existsSync(uploadFilePath) && fs.statSync(uploadFilePath).isFile()) {
       const ext = path.extname(uploadFilePath).toLowerCase();
       const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-      const content = fs.readFileSync(uploadFilePath);
+      const stat = fs.statSync(uploadFilePath);
       res.writeHead(200, {
         'Content-Type': contentType,
-        'Content-Length': content.length,
+        'Content-Length': stat.size,
         'Cache-Control': 'public, max-age=86400'
       });
+      if (method === 'HEAD') {
+        return res.end();
+      }
+      const content = fs.readFileSync(uploadFilePath);
       return res.end(content);
     }
     return sendJSON(res, 404, { error: 'Media file tidak ditemukan di penyimpanan perangkat.' });
