@@ -4151,7 +4151,7 @@ ${organicBlock}
           effectiveContext = session.messages.slice(-3).map(m => m.content || '').join(' ');
         }
 
-        const serperApiKey = STATE.settings?.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+        const serperApiKey = (STATE.settings?.serperApiKey || '').trim() || '075538fed9c64990e1eb32a06726c1e55a933c1e';
         const cleanDateQuery = stripDateNoise(query.trim());
         const queriesToSearch = [query.trim()];
         if (cleanDateQuery && cleanDateQuery.length >= 3 && cleanDateQuery.toLowerCase() !== query.trim().toLowerCase()) {
@@ -4173,9 +4173,9 @@ ${organicBlock}
           // Filter out irrelevant codename or disambiguation entries
           if (normTitle.includes('listofapplecodenames') && !query.toLowerCase().includes('apple')) return;
 
-          if (seenUrls.has(normUrl) || seenTitles.has(normTitle)) return;
+          if (seenUrls.has(normUrl) || (normTitle && seenTitles.has(normTitle))) return;
           seenUrls.add(normUrl);
-          seenTitles.add(normTitle);
+          if (normTitle) seenTitles.add(normTitle);
           results.push(item);
         };
 
@@ -4548,6 +4548,8 @@ ${organicBlock}
     if (!text || typeof text !== 'string') return '';
     let cleaned = text
       .replace(/<(?:tool_call|function_call)>[\s\S]*?<\/(?:tool_call|function_call)>/gi, '')
+      .replace(/<invoke\s+name=["'](?:search_web|browse_web_page)["']>[\s\S]*?<\/invoke>/gi, '')
+      .replace(/\[TOOL_CALLS\][\s\S]*?(?:\[\/TOOL_CALLS\]|(?=\n\n)|$)/gi, '')
       .replace(/```(?:tool_call|json)?\s*\{[\s\S]*?"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page)"[\s\S]*?\}\s*```/gi, '');
 
     // Hapus blok JSON seimbang yang merepresentasikan pemanggilan tool mentah
@@ -4565,6 +4567,7 @@ ${organicBlock}
     // Bersihkan residu teks bocor seperti "We will call search_web for ..."
     cleaned = cleaned
       .replace(/(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(?:search_web|browse_web_page)[\s\S]*?(?:\.|\n|$)/gi, '')
+      .replace(/(?:search_web|browse_web_page)\s*\(\s*\{[\s\S]*?\}\s*\)/gi, '')
       .replace(/(?:search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?(["'`])[\s\S]*?\1\s*\)/gi, '')
       .trim();
 
@@ -4671,7 +4674,36 @@ ${organicBlock}
       } catch (_) {}
     }
 
-    // 2. Fenced codeblock ```json ... ``` or ```tool_call ... ```
+    // 2. Mistral format: [TOOL_CALLS] [{"name": "search_web", "arguments": ...}]
+    const mistralRegex = /\[TOOL_CALLS\]\s*([\s\S]*?)(?:\[\/TOOL_CALLS\]|$)/gi;
+    let mtm;
+    while ((mtm = mistralRegex.exec(text)) !== null) {
+      try {
+        const block = mtm[1].trim();
+        const parsed = JSON.parse(block);
+        const items = Array.isArray(parsed) ? parsed : [parsed];
+        items.forEach(it => {
+          if (it && (it.name || it.function)) {
+            addCall(it.name || it.function, it.arguments ?? it.parameters ?? it.args ?? {}, mtm[0]);
+          }
+        });
+      } catch (_) {}
+    }
+
+    // 3. Anthropic XML format: <invoke name="search_web"><parameter name="query">...</parameter></invoke>
+    const invokeRegex = /<invoke\s+name=["'](search_web|browse_web_page)["']>([\s\S]*?)<\/invoke>/gi;
+    let ivm;
+    while ((ivm = invokeRegex.exec(text)) !== null) {
+      const name = ivm[1];
+      const inner = ivm[2];
+      const paramMatch = inner.match(/<parameter\s+name=["'](?:query|q|url|target)["']>([\s\S]*?)<\/parameter>/i);
+      const val = paramMatch ? paramMatch[1].trim() : inner.replace(/<[^>]+>/g, '').trim();
+      if (val) {
+        addCall(name, name === 'search_web' ? { query: val } : { url: val }, ivm[0]);
+      }
+    }
+
+    // 4. Fenced codeblock ```json ... ``` or ```tool_call ... ```
     const codeBlockRegex = /```(?:json|tool_call)?\s*(\{\s*"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page)"[\s\S]*?\})\s*```/gi;
     let cm;
     while ((cm = codeBlockRegex.exec(text)) !== null) {
@@ -4683,7 +4715,7 @@ ${organicBlock}
       } catch (_) {}
     }
 
-    // 3. Raw balanced JSON objects anywhere in text (e.g. {"name":"search_web","arguments":{...}})
+    // 5. Raw balanced JSON objects anywhere in text (e.g. {"name":"search_web","arguments":{...}})
     const jsonBlocks = extractBalancedJsonObjects(text);
     for (const block of jsonBlocks) {
       try {
@@ -4696,7 +4728,24 @@ ${organicBlock}
       } catch (_) {}
     }
 
-    // 4. Function call syntax: search_web("query") or browse_web_page("url") - Mendukung apostrof dalam string
+    // 6. Function call with JSON argument: search_web({"query": "..."}) or browse_web_page({"url": "..."})
+    const funcJsonRegex = /(search_web|browse_web_page)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
+    let fjm;
+    while ((fjm = funcJsonRegex.exec(text)) !== null) {
+      const name = fjm[1];
+      try {
+        let cleanJson = fjm[2].replace(/'/g, '"');
+        const p = JSON.parse(cleanJson);
+        addCall(name, p, fjm[0]);
+      } catch (_) {
+        const qMatch = fjm[2].match(/["'](?:query|q|keyword|search|url|link)["']\s*:\s*["']([^"']+)["']/i);
+        if (qMatch) {
+          addCall(name, name === 'search_web' ? { query: qMatch[1] } : { url: qMatch[1] }, fjm[0]);
+        }
+      }
+    }
+
+    // 7. Function call syntax: search_web("query") or browse_web_page("url") - Mendukung apostrof dalam string
     const funcRegex = /(search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?(["'`])([\s\S]*?)\2\s*\)/gi;
     let fm;
     while ((fm = funcRegex.exec(text)) !== null) {
@@ -4707,7 +4756,7 @@ ${organicBlock}
       }
     }
 
-    // 5. Conversational triggers: "We will call search_web for <query>" - Mendukung apostrof dalam string
+    // 8. Conversational triggers: "We will call search_web for <query>" - Mendukung apostrof dalam string
     const convRegex = /(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(search_web|browse_web_page)(?:\s+(?:for|with|tentang|query|:))?\s*(["'`])([^\n]+?)\2/gi;
     let cvm;
     while ((cvm = convRegex.exec(text)) !== null) {
