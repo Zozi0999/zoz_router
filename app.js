@@ -2669,6 +2669,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           return;
         }
         if (!bubble || !textContainer) return;
+        if (bubble.querySelector('.inline-edit-box')) return;
 
         // Create inline editor
         const originalContent = content;
@@ -7694,9 +7695,11 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     document.body.appendChild(a);
     a.click();
     setTimeout(() => {
-      document.body.removeChild(a);
+      if (document.body.contains(a)) {
+        document.body.removeChild(a);
+      }
       URL.revokeObjectURL(url);
-    }, 300);
+    }, 800);
     showToast('Laporan berhasil diunduh dalam format Word (.docx)', 'success');
   }
 
@@ -7884,9 +7887,11 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     document.body.appendChild(a);
     a.click();
     setTimeout(() => {
-      document.body.removeChild(a);
+      if (document.body.contains(a)) {
+        document.body.removeChild(a);
+      }
       URL.revokeObjectURL(url);
-    }, 300);
+    }, 800);
     showToast('Laporan berhasil diunduh dalam format Markdown (.md)', 'success');
   }
 
@@ -9688,6 +9693,13 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     currentOnlineTrack: null,
 
     async loadPlaylistFromDB() {
+      if (Array.isArray(this.playlist)) {
+        this.playlist.forEach(t => {
+          if (t && t.blob && t.url) {
+            try { URL.revokeObjectURL(t.url); } catch (_) {}
+          }
+        });
+      }
       const records = await MusicDB.getAllTracks();
       this.playlist = records.map(r => ({
         id: r.id,

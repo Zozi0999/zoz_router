@@ -285,8 +285,16 @@ function getLocalOllamaManifests() {
 // Helper to perform quick web search via Serper Google Search API
 function performWebSearch(query, apiKey = null, num = 15) {
   return new Promise((resolve) => {
+    let settled = false;
+    const safeResolve = (data) => {
+      if (!settled) {
+        settled = true;
+        resolve(data);
+      }
+    };
+
     if (!query || typeof query !== 'string' || !query.trim()) {
-      return resolve({ query: '', count: 0, results: [] });
+      return safeResolve({ query: '', count: 0, results: [] });
     }
     const cleanQuery = query.trim();
     const targetNum = Math.min(Math.max(parseInt(num, 10) || 15, 1), 30);
@@ -320,7 +328,7 @@ function performWebSearch(query, apiKey = null, num = 15) {
 
           if (res.statusCode >= 400 || (parsed.message && !Array.isArray(parsed.organic))) {
             const errMsg = parsed.message || (parsed.error ? (typeof parsed.error === 'object' ? parsed.error.message : parsed.error) : `Serper HTTP ${res.statusCode} Error`);
-            return resolve({ query: cleanQuery, count: 0, results: [], error: errMsg });
+            return safeResolve({ query: cleanQuery, count: 0, results: [], error: errMsg });
           }
 
           const results = [];
@@ -369,7 +377,7 @@ function performWebSearch(query, apiKey = null, num = 15) {
             });
           }
 
-          resolve({
+          safeResolve({
             query: cleanQuery,
             count: results.length,
             knowledgeGraph: parsed.knowledgeGraph || null,
@@ -378,22 +386,22 @@ function performWebSearch(query, apiKey = null, num = 15) {
             results: results
           });
         } catch (e) {
-          resolve({ query: cleanQuery, count: 0, results: [], error: e.message });
+          safeResolve({ query: cleanQuery, count: 0, results: [], error: e.message });
         }
       });
 
       res.on('error', (err) => {
-        resolve({ query: cleanQuery, count: 0, results: [], error: err.message });
+        safeResolve({ query: cleanQuery, count: 0, results: [], error: err.message });
       });
     });
 
     req.on('timeout', () => {
       req.destroy();
-      resolve({ query: cleanQuery, count: 0, results: [], error: 'Serper search timed out' });
+      safeResolve({ query: cleanQuery, count: 0, results: [], error: 'Serper search timed out' });
     });
 
     req.on('error', (err) => {
-      resolve({ query: cleanQuery, count: 0, results: [], error: err.message });
+      safeResolve({ query: cleanQuery, count: 0, results: [], error: err.message });
     });
 
     req.write(postData);
