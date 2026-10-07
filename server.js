@@ -150,6 +150,7 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
       }, (res) => {
         if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
           try {
+            res.resume();
             const redirectUrl = new URL(res.headers.location, imageUrl).toString();
             return downloadImageBuffer(redirectUrl, timeoutMs, redirectCount + 1).then(resolve).catch(reject);
           } catch (e) {
@@ -157,6 +158,7 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
           }
         }
         if (res.statusCode < 200 || res.statusCode >= 300) {
+          res.resume();
           return reject(new Error(`Gagal mengunduh gambar: HTTP ${res.statusCode}`));
         }
 
@@ -470,6 +472,7 @@ async function fetchYouTubeInfo(rawUrl) {
       }
     }, (res) => {
       if (res.statusCode === 404) {
+        res.resume();
         return resolve({
           success: false,
           error: 'Video YouTube tidak ditemukan atau berstatus privat/dihapus (HTTP 404).',
@@ -478,6 +481,7 @@ async function fetchYouTubeInfo(rawUrl) {
         });
       }
       if (res.statusCode !== 200) {
+        res.resume();
         return resolve({
           success: false,
           error: `Gagal mengambil data dari YouTube oEmbed (HTTP ${res.statusCode})`,
@@ -928,6 +932,7 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
       const req = client.request(options, (res) => {
         if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
           try {
+            res.resume();
             const redirectUrl = new URL(res.headers.location, targetUrl).toString();
             return fetchPageContent(redirectUrl, maxChars, redirectCount + 1).then(resolve);
           } catch (e) {
@@ -936,6 +941,7 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
         }
 
         if (res.statusCode < 200 || res.statusCode >= 300) {
+          res.resume();
           return resolve('');
         }
 
@@ -1459,6 +1465,7 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
       const req = client.request(options, (res) => {
         if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
           try {
+            res.resume();
             const redirectUrl = new URL(res.headers.location, cleanTarget).toString();
             resolved = true;
             return browseWebPageContent(redirectUrl, maxChars, redirectCount + 1).then(resolve);
@@ -2289,6 +2296,13 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         text: chatSummary,
         timestamp: new Date().toLocaleTimeString('id-ID')
       };
+    }
+
+    if (task.aborted) {
+      task.status = 'dibatalkan';
+      task.currentStep = 'Riset dihentikan oleh pengguna.';
+      task.completedAt = new Date().toISOString();
+      return;
     }
 
     task.status = 'selesai';

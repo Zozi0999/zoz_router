@@ -1229,10 +1229,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     textarea.style.background = 'transparent';
     textarea.setAttribute('readonly', '');
     document.body.appendChild(textarea);
-    textarea.focus();
-    textarea.select();
-    textarea.setSelectionRange(0, textarea.value.length);
     try {
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
       const successful = document.execCommand('copy');
       if (successful && onSuccess) {
         onSuccess();
@@ -1241,8 +1241,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
     } catch (err) {
       showToast('Gagal menyalin teks ke clipboard.', 'error');
+    } finally {
+      textarea.remove();
     }
-    document.body.removeChild(textarea);
   }
 
   function copyTextToClipboard(text, onSuccess, successMsg = 'Teks disalin ke clipboard!') {
@@ -5466,25 +5467,27 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         attachContinuationButton(assistantRow.querySelector('.message-content-box') || assistantRow, session, assistantRow, modelName, 'ollama', fullText);
       }
 
-      // Save to session
-      session.messages.push({
-        role: 'assistant',
-        content: fullText,
-        model: modelName,
-        engine: 'ollama',
-        sources: webSources,
-        stats: { duration: totalTime, tps: tps, tokens: tokenCount },
-        timestamp: new Date().toISOString()
-      });
-      session.updatedAt = new Date().toISOString();
-      savePersistedState();
-      renderChatHistory(els.searchHistoryInput?.value || '');
+      // Save to session if session is still alive
+      if (STATE.sessions.some(s => s.id === session.id)) {
+        session.messages.push({
+          role: 'assistant',
+          content: fullText,
+          model: modelName,
+          engine: 'ollama',
+          sources: webSources,
+          stats: { duration: totalTime, tps: tps, tokens: tokenCount },
+          timestamp: new Date().toISOString()
+        });
+        session.updatedAt = new Date().toISOString();
+        savePersistedState();
+        renderChatHistory(els.searchHistoryInput?.value || '');
+      }
       AudioEngine.receive();
 
     } catch (err) {
       if (err.name === 'AbortError') {
         const partialText = streamRenderer ? streamRenderer.finish() : '';
-        if (partialText && partialText.trim()) {
+        if (partialText && partialText.trim() && STATE.sessions.some(s => s.id === session.id)) {
           const stoppedText = `${partialText.trim()}\n\n*[Respons dihentikan oleh pengguna]*`;
           bubbleText.innerHTML = renderMarkdown(stoppedText);
           enhanceCodeBlocks(bubbleText);
@@ -6147,26 +6150,29 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         attachContinuationButton(assistantRow.querySelector('.message-content-box') || assistantRow, session, assistantRow, modelName, 'openrouter', fullText);
       }
 
-      session.messages.push({
-        role: 'assistant',
-        content: fullText,
-        model: actualModelUsed || modelName,
-        engine: 'openrouter',
-        images: collectedImages.length > 0 ? collectedImages : undefined,
-        imageUrl: collectedImages[0] || undefined,
-        sources: webSources,
-        stats: { duration: totalTime, tps: tps, tokens: tokenCount },
-        timestamp: new Date().toISOString()
-      });
-      session.updatedAt = new Date().toISOString();
-      savePersistedState();
-      renderChatHistory(els.searchHistoryInput?.value || '');
+      // Save to session if session is still alive
+      if (STATE.sessions.some(s => s.id === session.id)) {
+        session.messages.push({
+          role: 'assistant',
+          content: fullText,
+          model: actualModelUsed || modelName,
+          engine: 'openrouter',
+          images: collectedImages.length > 0 ? collectedImages : undefined,
+          imageUrl: collectedImages[0] || undefined,
+          sources: webSources,
+          stats: { duration: totalTime, tps: tps, tokens: tokenCount },
+          timestamp: new Date().toISOString()
+        });
+        session.updatedAt = new Date().toISOString();
+        savePersistedState();
+        renderChatHistory(els.searchHistoryInput?.value || '');
+      }
       AudioEngine.receive();
 
     } catch (err) {
       if (err.name === 'AbortError') {
         const partialText = streamRenderer ? streamRenderer.finish() : '';
-        if (partialText && partialText.trim()) {
+        if (partialText && partialText.trim() && STATE.sessions.some(s => s.id === session.id)) {
           const stoppedText = `${partialText.trim()}\n\n*[Respons dihentikan oleh pengguna]*`;
           bubbleText.innerHTML = renderMarkdown(stoppedText);
           enhanceCodeBlocks(bubbleText);
@@ -8356,20 +8362,22 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         }
 
         // Save assistant message to session
-        const assistantMsg = {
-          role: 'assistant',
-          content: finalReportText,
-          chatSummary: chatSummary,
-          model: actualFinalModel,
-          sources: allSources,
-          isDeepResearch: true,
-          latency: totalDuration,
-          timestamp: new Date().toISOString()
-        };
-        session.messages.push(assistantMsg);
-        session.updatedAt = new Date().toISOString();
-        savePersistedState();
-        renderChatHistory(els.searchHistoryInput?.value || '');
+        if (STATE.sessions.some(s => s.id === session.id)) {
+          const assistantMsg = {
+            role: 'assistant',
+            content: finalReportText,
+            chatSummary: chatSummary,
+            model: actualFinalModel,
+            sources: allSources,
+            isDeepResearch: true,
+            latency: totalDuration,
+            timestamp: new Date().toISOString()
+          };
+          session.messages.push(assistantMsg);
+          session.updatedAt = new Date().toISOString();
+          savePersistedState();
+          renderChatHistory(els.searchHistoryInput?.value || '');
+        }
         AudioEngine.success();
         smartScrollChatToBottom(true);
       } else if (!STATE.abortController?.signal.aborted) {
@@ -8379,7 +8387,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
     } catch (err) {
       if (err.name === 'AbortError') {
-        if (finalReportText && finalReportText.trim()) {
+        if (finalReportText && finalReportText.trim() && STATE.sessions.some(s => s.id === session.id)) {
           const stoppedText = `${finalReportText.trim()}\n\n*[Riset dihentikan oleh pengguna]*`;
           const actualFinalModel = masterResearchModel;
           const nowIso = new Date().toISOString();
@@ -8684,10 +8692,14 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           reject(new Error('Gagal memuat visual gambar yang digenerasi.'));
         };
         if (STATE.abortController?.signal) {
+          if (STATE.abortController.signal.aborted) {
+            clearTimeout(timeout);
+            return reject(new DOMException('Aborted', 'AbortError'));
+          }
           STATE.abortController.signal.addEventListener('abort', () => {
             clearTimeout(timeout);
             reject(new DOMException('Aborted', 'AbortError'));
-          });
+          }, { once: true });
         }
         testImg.src = finalImageUrl;
       });
@@ -8722,25 +8734,27 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         `;
       }
 
-      // Save to Session
-      session.messages.push({
-        role: 'assistant',
-        content: `[Gambar AI Hasil Generasi: "${cleanPrompt}"]`,
-        type: 'image_generation',
-        isImageGen: true,
-        imageUrl: finalImageUrl,
-        url: finalImageUrl,
-        prompt: cleanPrompt,
-        model: resultModel,
-        width: 1024,
-        height: 1024,
-        seed: actualSeed,
-        stats: { duration: totalDuration },
-        timestamp: new Date().toISOString()
-      });
-      session.updatedAt = new Date().toISOString();
-      savePersistedState();
-      renderChatHistory(els.searchHistoryInput?.value || '');
+      // Save to Session if session is still alive
+      if (STATE.sessions.some(s => s.id === session.id)) {
+        session.messages.push({
+          role: 'assistant',
+          content: `[Gambar AI Hasil Generasi: "${cleanPrompt}"]`,
+          type: 'image_generation',
+          isImageGen: true,
+          imageUrl: finalImageUrl,
+          url: finalImageUrl,
+          prompt: cleanPrompt,
+          model: resultModel,
+          width: 1024,
+          height: 1024,
+          seed: actualSeed,
+          stats: { duration: totalDuration },
+          timestamp: new Date().toISOString()
+        });
+        session.updatedAt = new Date().toISOString();
+        savePersistedState();
+        renderChatHistory(els.searchHistoryInput?.value || '');
+      }
 
       AudioEngine.success();
       smartScrollChatToBottom(true);
