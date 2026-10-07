@@ -943,19 +943,57 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
         timeout: 6000
       };
 
+      let rawHtml = '';
+      let resolved = false;
+
+      function finishExtract(html) {
+        if (resolved) return;
+        resolved = true;
+        try {
+          let clean = html
+            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
+            .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
+            .replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, ' ')
+            .replace(/<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>/gi, ' ')
+            .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, ' ')
+            .replace(/<aside\b[^<]*(?:(?!<\/aside>)<[^<]*)*<\/aside>/gi, ' ')
+            .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, ' ')
+            .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, ' ')
+            .replace(/<!--[\s\S]*?-->/g, ' ')
+            .replace(/<[^>]+>/g, ' ');
+
+          clean = clean
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/&nbsp;/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          resolve(clean.substring(0, maxChars));
+        } catch (e) {
+          resolve('');
+        }
+      }
+
       const req = client.request(options, (res) => {
         if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
           try {
             res.resume();
+            resolved = true;
             const redirectUrl = new URL(res.headers.location, targetUrl).toString();
             return fetchPageContent(redirectUrl, maxChars, redirectCount + 1).then(resolve);
           } catch (e) {
+            resolved = true;
             return resolve('');
           }
         }
 
         if (res.statusCode < 200 || res.statusCode >= 300) {
           res.resume();
+          resolved = true;
           return resolve('');
         }
 
@@ -974,41 +1012,6 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
           stream = res;
         }
 
-        let rawHtml = '';
-        let resolved = false;
-
-        function finishExtract(html) {
-          if (resolved) return;
-          resolved = true;
-          try {
-            let clean = html
-              .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
-              .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
-              .replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, ' ')
-              .replace(/<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>/gi, ' ')
-              .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, ' ')
-              .replace(/<aside\b[^<]*(?:(?!<\/aside>)<[^<]*)*<\/aside>/gi, ' ')
-              .replace(/<form\b[^<]*(?:(?!<\/form>)<[^<]*)*<\/form>/gi, ' ')
-              .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, ' ')
-              .replace(/<!--[\s\S]*?-->/g, ' ')
-              .replace(/<[^>]+>/g, ' ');
-
-            clean = clean
-              .replace(/&amp;/g, '&')
-              .replace(/&lt;/g, '<')
-              .replace(/&gt;/g, '>')
-              .replace(/&quot;/g, '"')
-              .replace(/&#39;/g, "'")
-              .replace(/&nbsp;/g, ' ')
-              .replace(/\s+/g, ' ')
-              .trim();
-
-            resolve(clean.substring(0, maxChars));
-          } catch (e) {
-            resolve('');
-          }
-        }
-
         stream.on('data', chunk => {
           rawHtml += chunk;
           if (rawHtml.length >= 300000 && !resolved) {
@@ -1019,10 +1022,14 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
 
         stream.on('end', () => finishExtract(rawHtml));
         stream.on('error', () => {
+          try { res.unpipe(); } catch (_) {}
+          try { if (stream !== res) stream.destroy(); } catch (_) {}
           if (rawHtml.length > 0) finishExtract(rawHtml);
           else if (!resolved) { resolved = true; resolve(''); }
         });
         res.on('error', () => {
+          try { res.unpipe(); } catch (_) {}
+          try { if (stream !== res) stream.destroy(); } catch (_) {}
           if (rawHtml.length > 0) finishExtract(rawHtml);
           else if (!resolved) { resolved = true; resolve(''); }
         });
@@ -1551,10 +1558,14 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
 
         stream.on('end', () => finishParsing(rawHtml));
         stream.on('error', (err) => {
+          try { res.unpipe(); } catch (_) {}
+          try { if (stream !== res) stream.destroy(); } catch (_) {}
           if (rawHtml.length > 0) finishParsing(rawHtml);
           else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: err.message, text: '' }); }
         });
         res.on('error', (err) => {
+          try { res.unpipe(); } catch (_) {}
+          try { if (stream !== res) stream.destroy(); } catch (_) {}
           if (rawHtml.length > 0) finishParsing(rawHtml);
           else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: err.message, text: '' }); }
         });

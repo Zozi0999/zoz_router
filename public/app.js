@@ -170,6 +170,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   // ==================== AUDIO SYNTHESIZER (Sci-Fi Cyber Blips) ====================
   const AudioEngine = {
     ctx: null,
+    unlockPromise: null,
     init() {
       if (!this.ctx && (window.AudioContext || window.webkitAudioContext)) {
         try {
@@ -181,28 +182,53 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
       if (this.ctx && this.ctx.state === 'suspended') {
         try {
-          this.ctx.resume().catch(() => {});
+          this.unlockPromise = this.ctx.resume().catch(() => {});
         } catch (e) {}
       }
+      return this.ctx;
+    },
+    setupUnlock() {
+      const unlock = () => {
+        this.init();
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume().catch(() => {});
+        }
+      };
+      window.addEventListener('pointerdown', unlock, { once: true, passive: true });
+      window.addEventListener('keydown', unlock, { once: true, passive: true });
+      window.addEventListener('touchstart', unlock, { once: true, passive: true });
     },
     playBeep(freq = 440, type = 'sine', duration = 0.08, gain = 0.05) {
       if (!STATE.soundEnabled) return;
       try {
         this.init();
         if (!this.ctx) return;
+
+        const emitSound = () => {
+          try {
+            if (!this.ctx || this.ctx.state !== 'running') return;
+            const osc = this.ctx.createOscillator();
+            const g = this.ctx.createGain();
+            osc.type = type;
+            const now = this.ctx.currentTime;
+            osc.frequency.setValueAtTime(freq, now);
+            g.gain.setValueAtTime(gain, now);
+            g.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+            osc.connect(g);
+            g.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + duration);
+          } catch (_) {}
+        };
+
         if (this.ctx.state === 'suspended') {
-          this.ctx.resume().catch(() => {});
+          const p = this.unlockPromise || this.ctx.resume().catch(() => {});
+          p.then(() => {
+            emitSound();
+          }).catch(() => {});
+        } else {
+          emitSound();
         }
-        const osc = this.ctx.createOscillator();
-        const g = this.ctx.createGain();
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
-        g.gain.setValueAtTime(gain, this.ctx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
-        osc.connect(g);
-        g.connect(this.ctx.destination);
-        osc.start();
-        osc.stop(this.ctx.currentTime + duration);
       } catch (e) {
         // Ignore audio restrictions
       }
@@ -223,6 +249,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     },
     error() { this.playBeep(220, 'sawtooth', 0.15, 0.06); }
   };
+  AudioEngine.setupUnlock();
 
   // ==================== DOM ELEMENTS ====================
   const $ = (selector) => document.querySelector(selector);
@@ -9475,9 +9502,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       return new Promise((resolve) => {
         try {
           const tx = this.db.transaction('tracks', 'readwrite');
-          tx.objectStore('tracks').put(track);
+          const req = tx.objectStore('tracks').put(track);
+          req.onerror = () => resolve(false);
           tx.oncomplete = () => resolve(true);
           tx.onerror = () => resolve(false);
+          tx.onabort = () => resolve(false);
         } catch (e) {
           resolve(false);
         }
@@ -9846,7 +9875,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         addedAt: new Date().toISOString()
       };
 
-      await MusicDB.saveTrack(trackRecord);
+      const saved = await MusicDB.saveTrack(trackRecord);
       this.playlist.push({
         id,
         name: trackRecord.name,
@@ -9859,13 +9888,18 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       });
 
       this.renderPlaylistUI();
-      showToast(`✅ "${title}" berhasil disimpan ke Playlist!`);
+      if (!saved) {
+        showToast(`⚠️ "${title}" ditambahkan, namun penyimpanan offline dibatasi (hanya aktif di sesi ini).`, 'warning');
+      } else {
+        showToast(`✅ "${title}" berhasil disimpan ke Playlist!`);
+      }
       AudioEngine.click();
     },
 
     async handleUploadFiles(fileList) {
       if (!fileList || fileList.length === 0) return;
       let addedCount = 0;
+      let quotaWarning = false;
 
       for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
@@ -9883,7 +9917,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           addedAt: new Date().toISOString()
         };
 
-        await MusicDB.saveTrack(trackRecord);
+        const saved = await MusicDB.saveTrack(trackRecord);
+        if (!saved) {
+          quotaWarning = true;
+        }
+
         this.playlist.push({
           id,
           name: trackRecord.name,
@@ -9896,7 +9934,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
 
       if (addedCount > 0) {
-        showToast(`✅ ${addedCount} lagu berhasil diupload ke Playlist Lokal!`);
+        if (quotaWarning) {
+          showToast(`⚠️ ${addedCount} lagu ditambahkan ke sesi, namun penyimpanan offline browser penuh/dibatasi (hanya aktif di sesi ini).`, 'warning');
+        } else {
+          showToast(`✅ ${addedCount} lagu berhasil diupload ke Playlist Lokal!`);
+        }
         this.renderPlaylistUI();
         AudioEngine.click();
         

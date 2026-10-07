@@ -374,6 +374,12 @@ export default {
           apiKey = body.apiKey || body.serperApiKey || apiKey || env?.SERPER_API_KEY;
           if (body.num || body.limit) num = parseInt(body.num || body.limit, 10);
         }
+        if (!query || !query.trim()) {
+          return new Response(JSON.stringify({ error: 'Parameter query `q` atau body `{ query }` diperlukan.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
         const targetNum = Math.min(Math.max(isNaN(num) ? 15 : num, 1), 30);
         const serperKey = apiKey || env?.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
         const serperRes = await fetch('https://google.serper.dev/search', {
