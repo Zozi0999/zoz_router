@@ -275,10 +275,11 @@ function performWebSearch(query, apiKey = null, num = 15) {
       return resolve({ query: '', count: 0, results: [] });
     }
     const cleanQuery = query.trim();
+    const targetNum = Math.min(Math.max(parseInt(num, 10) || 15, 1), 30);
     const serperKey = apiKey || process.env.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
     const postData = JSON.stringify({
       q: cleanQuery,
-      num: Math.max(num || 15, 10),
+      num: targetNum,
       gl: 'us', // Global Worldwide Search (Universal - Tidak terisolasi di satu negara)
       hl: 'en'  // Global Language Ranking
     });
@@ -339,7 +340,7 @@ function performWebSearch(query, apiKey = null, num = 15) {
           }
 
           if (Array.isArray(parsed.organic)) {
-            parsed.organic.slice(0, 15).forEach((item, idx) => {
+            parsed.organic.slice(0, targetNum).forEach((item, idx) => {
               const dom = extractDomainSafe(item.link);
               results.push({
                 title: item.title || `Hasil ${idx + 1}`,
@@ -936,7 +937,8 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9,id;q=0.8'
+          'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
+          'Accept-Encoding': 'gzip, deflate, br'
         },
         timeout: 6000
       };
@@ -955,6 +957,21 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
         if (res.statusCode < 200 || res.statusCode >= 300) {
           res.resume();
           return resolve('');
+        }
+
+        // Dekompresi stream jika server web mengembalikan format gzip, deflate, atau brotli
+        const enc = (res.headers['content-encoding'] || '').toLowerCase();
+        let stream = res;
+        try {
+          if (enc === 'gzip') {
+            stream = res.pipe(zlib.createGunzip());
+          } else if (enc === 'deflate') {
+            stream = res.pipe(zlib.createInflate());
+          } else if (enc === 'br') {
+            stream = res.pipe(zlib.createBrotliDecompress());
+          }
+        } catch (_) {
+          stream = res;
         }
 
         let rawHtml = '';
@@ -992,7 +1009,7 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
           }
         }
 
-        res.on('data', chunk => {
+        stream.on('data', chunk => {
           rawHtml += chunk;
           if (rawHtml.length >= 300000 && !resolved) {
             req.destroy();
@@ -1000,7 +1017,11 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
           }
         });
 
-        res.on('end', () => finishExtract(rawHtml));
+        stream.on('end', () => finishExtract(rawHtml));
+        stream.on('error', () => {
+          if (rawHtml.length > 0) finishExtract(rawHtml);
+          else if (!resolved) { resolved = true; resolve(''); }
+        });
         res.on('error', () => {
           if (rawHtml.length > 0) finishExtract(rawHtml);
           else if (!resolved) { resolved = true; resolve(''); }
@@ -2666,15 +2687,18 @@ const server = http.createServer(async (req, res) => {
     try {
       let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
       let apiKey = req.headers['x-serper-key'] || reqUrl.searchParams.get('apiKey') || '';
+      let num = parseInt(reqUrl.searchParams.get('num') || reqUrl.searchParams.get('limit') || '15', 10);
       if (method === 'POST') {
         const body = await parseBody(req);
         query = body.query || body.q || query;
         apiKey = body.apiKey || body.serperApiKey || apiKey;
+        if (body.num || body.limit) num = parseInt(body.num || body.limit, 10);
       }
       if (!query) {
         return sendJSON(res, 400, { error: 'Parameter query `q` atau body `{ query }` diperlukan.' });
       }
-      const data = await performWebSearch(query, apiKey);
+      const targetNum = Math.min(Math.max(isNaN(num) ? 15 : num, 1), 30);
+      const data = await performWebSearch(query, apiKey, targetNum);
       return sendJSON(res, 200, data);
     } catch (e) {
       return sendJSON(res, 500, { error: 'Gagal melakukan pencarian web Serper: ' + e.message });
@@ -3550,6 +3574,32 @@ const server = http.createServer(async (req, res) => {
       const isFree = body.model && (body.model.includes(':free') || body.model === 'openrouter/free');
       if (isFree && Array.isArray(body.tools)) {
         delete body.tools;
+      }
+
+      // Defense-in-depth: Resolusi gambar lokal (/uploads/) menjadi Base64 data URL agar OpenRouter tidak merejeksi private IP
+      if (Array.isArray(body.messages)) {
+        for (const msg of body.messages) {
+          if (Array.isArray(msg.content)) {
+            for (const part of msg.content) {
+              if (part && part.type === 'image_url' && part.image_url && typeof part.image_url.url === 'string') {
+                const imgUrl = part.image_url.url;
+                const uploadMatch = imgUrl.match(/(?:\/uploads\/|^uploads\/)([a-zA-Z0-9_.-]+)$/);
+                if (uploadMatch) {
+                  const filename = uploadMatch[1];
+                  const localPath = path.join(UPLOADS_DIR, filename);
+                  if (fs.existsSync(localPath)) {
+                    try {
+                      const ext = path.extname(filename).toLowerCase().replace('.', '') || 'png';
+                      const mime = (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg' : (ext === 'webp' ? 'image/webp' : 'image/png');
+                      const b64 = fs.readFileSync(localPath).toString('base64');
+                      part.image_url.url = `data:${mime};base64,${b64}`;
+                    } catch (_) {}
+                  }
+                }
+              }
+            }
+          }
+        }
       }
 
       const isStream = body.stream !== false;

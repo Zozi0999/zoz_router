@@ -14,6 +14,23 @@ export default {
       });
     }
 
+    // Health Check Endpoint
+    if (url.pathname === '/api/health' && request.method === 'GET') {
+      return new Response(JSON.stringify({
+        status: 'online',
+        name: 'Zoz Router Cloud Gateway',
+        version: '1.0.0',
+        storage: 'cloud-stateless',
+        timestamp: new Date().toISOString()
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+
     // Proxy Ollama Chat
     if (url.pathname === '/api/ollama/chat' && request.method === 'POST') {
       try {
@@ -128,7 +145,8 @@ export default {
             temperature: body.temperature ?? 0.7,
             top_p: body.top_p ?? 0.9,
             max_tokens: body.max_tokens ?? 4096,
-            ...(body.plugins ? { plugins: body.plugins } : {})
+            ...(body.plugins ? { plugins: body.plugins } : {}),
+            ...(body.tools && Array.isArray(body.tools) && (!body.model || (!body.model.includes(':free') && body.model !== 'openrouter/free')) ? { tools: body.tools } : {})
           })
         });
 
@@ -349,11 +367,14 @@ export default {
       try {
         let query = url.searchParams.get('q') || url.searchParams.get('query') || '';
         let apiKey = request.headers.get('x-serper-key') || request.headers.get('x-api-key') || url.searchParams.get('apiKey') || url.searchParams.get('key') || '' || env?.SERPER_API_KEY;
+        let num = parseInt(url.searchParams.get('num') || url.searchParams.get('limit') || '15', 10);
         if (request.method === 'POST') {
           const body = await request.json().catch(() => ({}));
           query = body.query || body.q || query;
           apiKey = body.apiKey || body.serperApiKey || apiKey || env?.SERPER_API_KEY;
+          if (body.num || body.limit) num = parseInt(body.num || body.limit, 10);
         }
+        const targetNum = Math.min(Math.max(isNaN(num) ? 15 : num, 1), 30);
         const serperKey = apiKey || env?.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
         const serperRes = await fetch('https://google.serper.dev/search', {
           method: 'POST',
@@ -361,7 +382,7 @@ export default {
             'X-API-KEY': serperKey,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ q: query, num: 6, gl: 'us', hl: 'en' })
+          body: JSON.stringify({ q: query, num: targetNum, gl: 'us', hl: 'en' })
         });
         const serperData = await serperRes.text();
         return new Response(serperData, {
@@ -370,6 +391,83 @@ export default {
         });
       } catch (e) {
         return new Response(JSON.stringify({ error: e.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
+    // Proxy YouTube oEmbed Metadata Grounding
+    if (url.pathname === '/api/youtube-info' && (request.method === 'GET' || request.method === 'POST')) {
+      try {
+        let targetUrl = '';
+        if (request.method === 'GET') {
+          targetUrl = url.searchParams.get('url') || url.searchParams.get('link') || '';
+        } else {
+          const body = await request.json().catch(() => ({}));
+          targetUrl = body.url || body.link || '';
+        }
+
+        if (!targetUrl || !targetUrl.trim()) {
+          return new Response(JSON.stringify({ success: false, error: 'Parameter url diperlukan.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        let clean = targetUrl.trim();
+        if (!/^https?:\/\//i.test(clean)) clean = `https://${clean}`;
+        const parsedUrl = new URL(clean);
+        const hostname = parsedUrl.hostname.toLowerCase();
+        const allowedHosts = ['youtu.be', 'www.youtu.be', 'youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'];
+        if (!allowedHosts.includes(hostname)) {
+          return new Response(JSON.stringify({ success: false, error: 'Hanya URL YouTube resmi yang diizinkan.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        let videoId = null;
+        const match = parsedUrl.href.match(/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+        if (match && match[1]) videoId = match[1];
+        const canonicalUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : parsedUrl.href;
+
+        const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`;
+        const ytRes = await fetch(oembedUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+          }
+        });
+
+        if (!ytRes.ok) {
+          return new Response(JSON.stringify({
+            success: false,
+            videoId,
+            url: canonicalUrl,
+            error: `YouTube oEmbed HTTP ${ytRes.status}`
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        const data = await ytRes.json();
+        return new Response(JSON.stringify({
+          success: true,
+          url: canonicalUrl,
+          videoId,
+          title: data.title || 'Tanpa Judul',
+          channel: data.author_name || 'Kreator YouTube',
+          channel_url: data.author_url || '',
+          thumbnail: data.thumbnail_url || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ''),
+          type: data.type || 'video',
+          html: data.html || ''
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ success: false, error: e.message }), {
           status: 500,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });

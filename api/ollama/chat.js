@@ -49,10 +49,19 @@ module.exports = async function handler(req, res) {
     const headers = { 'Content-Type': 'application/json' };
     if (authHeader) headers['Authorization'] = authHeader;
 
+    const abortController = new AbortController();
+    let clientDisconnected = false;
+
+    req.on('close', () => {
+      clientDisconnected = true;
+      abortController.abort();
+    });
+
     const response = await fetch(targetUrl.toString(), {
       method: 'POST',
       headers,
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: abortController.signal
     });
 
     if (!response.ok) {
@@ -64,10 +73,20 @@ module.exports = async function handler(req, res) {
     res.setHeader('Transfer-Encoding', 'chunked');
 
     for await (const chunk of response.body) {
+      if (clientDisconnected || res.writableEnded || res.destroyed) {
+        abortController.abort();
+        break;
+      }
       res.write(chunk);
     }
-    return res.end();
+    if (!res.writableEnded && !res.destroyed) {
+      return res.end();
+    }
   } catch (err) {
+    if (err.name === 'AbortError') {
+      try { res.end(); } catch (_) {}
+      return;
+    }
     console.error('Vercel Ollama Chat Proxy Error:', err);
     if (!res.headersSent) {
       return res.status(500).json({ error: err.message });

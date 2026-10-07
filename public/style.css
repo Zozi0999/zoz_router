@@ -22,6 +22,7 @@
   
   --text-main: #F0F4FC;
   --text-muted: #8E99B0;
+  --text-secondary: #8E99B0;
   --text-dim: #5C657A;
   
   --font-main: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -3855,6 +3856,20 @@ html, body {
   opacity: 1;
 }
 
+/* Universal Zoomable Image in Chat (Lightbox preview) */
+.chat-zoomable-img {
+  cursor: zoom-in;
+  max-width: 100%;
+  border-radius: var(--radius-md, 8px);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease, filter 0.25s ease;
+}
+
+.chat-zoomable-img:not(.image-result-img):not(.chat-img-thumb-wrap img):hover {
+  transform: scale(1.015);
+  box-shadow: 0 4px 18px rgba(0, 240, 255, 0.25);
+  filter: brightness(1.04);
+}
+
 /* ==================== FULL-SCREEN IMAGE LIGHTBOX MODAL ==================== */
 .image-lightbox-modal {
   position: fixed;
@@ -4899,7 +4914,7 @@ html, body {
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  color: var(--text-secondary);
+  color: var(--text-secondary, #8E99B0);
   display: inline-flex;
   align-items: center;
   gap: 4px;

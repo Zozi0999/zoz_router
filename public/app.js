@@ -753,7 +753,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();
-          if (data.storage === 'device-disk' || data.status === 'online') {
+          if (data && data.storage === 'device-disk') {
             this.isDeviceBackendAvailable = true;
           }
         }
@@ -911,6 +911,19 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
   };
 
+  // Safe Session Storage Helper (absorbs Safari Private Browsing QuotaExceededError & SecurityError)
+  const safeSessionStorage = {
+    getItem(key) {
+      try { return sessionStorage.getItem(key); } catch (_) { return null; }
+    },
+    setItem(key, val) {
+      try { sessionStorage.setItem(key, String(val)); } catch (_) {}
+    },
+    removeItem(key) {
+      try { sessionStorage.removeItem(key); } catch (_) {}
+    }
+  };
+
   function loadPersistedStateSync() {
     try {
       const savedSettings = localStorage.getItem('zoz_router_settings_v1');
@@ -973,7 +986,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         STATE.searchMode = savedSearchMode;
       } else {
         STATE.searchMode = 'off';
-        localStorage.setItem('zoz_router_search_mode_v1', 'off');
+        try {
+          localStorage.setItem('zoz_router_search_mode_v1', 'off');
+        } catch (_) {}
       }
       const savedPromptHidden = localStorage.getItem('zoz_prompt_hidden');
       if (savedPromptHidden !== null) {
@@ -1889,7 +1904,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       stopGeneration();
     }
     STATE.currentSessionId = null;
-    sessionStorage.removeItem('zoz_active_session_id');
+    safeSessionStorage.removeItem('zoz_active_session_id');
     STATE.isImageGenMode = false;
     updateImageGenModeUI();
     renderChatHistory();
@@ -1917,7 +1932,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     };
     STATE.sessions.unshift(newSession);
     STATE.currentSessionId = newSession.id;
-    sessionStorage.setItem('zoz_active_session_id', newSession.id);
+    safeSessionStorage.setItem('zoz_active_session_id', newSession.id);
     savePersistedState();
     return newSession;
   }
@@ -1954,7 +1969,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
 
     STATE.currentSessionId = sessionId;
-    sessionStorage.setItem('zoz_active_session_id', sessionId);
+    safeSessionStorage.setItem('zoz_active_session_id', sessionId);
     STATE.isImageGenMode = false;
     updateImageGenModeUI();
     savePersistedState();
@@ -2005,7 +2020,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     if (STATE.currentSessionId === sessionId) {
       STATE.currentSessionId = null;
-      sessionStorage.removeItem('zoz_active_session_id');
+      safeSessionStorage.removeItem('zoz_active_session_id');
     }
 
     savePersistedState();
@@ -5164,6 +5179,27 @@ ${organicBlock}
     return true;
   }
 
+  // Helper cerdas: Mengonversi path gambar lokal (/uploads/) menjadi Base64 Data URL di browser
+  async function resolveImageToDataUrlSafe(img) {
+    if (!img || typeof img !== 'string') return img;
+    if (img.startsWith('data:image')) return img;
+    if (img.startsWith('/uploads/') || img.includes('/uploads/')) {
+      try {
+        const resp = await fetch(img);
+        if (resp.ok) {
+          const blob = await resp.blob();
+          return await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = () => resolve(img);
+            reader.readAsDataURL(blob);
+          });
+        }
+      } catch (_) {}
+    }
+    return img;
+  }
+
   function buildSanitizedMessagesPayload(sessionOrMessages, currentImages = [], engine = 'openrouter', systemContent = '', modelName = '') {
     const messagesPayload = [];
     const supportsSystem = doesModelSupportSystemRole(modelName);
@@ -5246,11 +5282,29 @@ ${organicBlock}
             ];
             imgs.forEach(img => {
               if (typeof img === 'string') {
-                if (img.startsWith('data:image') || img.startsWith('http://') || img.startsWith('https://')) {
+                if (img.startsWith('data:image')) {
                   contentParts.push({ type: 'image_url', image_url: { url: img } });
+                } else if (img.startsWith('http://') || img.startsWith('https://')) {
+                  try {
+                    const parsed = new URL(img);
+                    const host = parsed.hostname.toLowerCase();
+                    const isPrivate = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.startsWith('192.168.') || host.startsWith('10.') || host.endsWith('.local');
+                    if (!isPrivate) {
+                      contentParts.push({ type: 'image_url', image_url: { url: img } });
+                    }
+                  } catch (_) {
+                    contentParts.push({ type: 'image_url', image_url: { url: img } });
+                  }
                 } else if (img.startsWith('/uploads/')) {
-                  const fullUrl = `${window.location.origin}${img}`;
-                  contentParts.push({ type: 'image_url', image_url: { url: fullUrl } });
+                  const host = window.location.hostname.toLowerCase();
+                  const isPrivate = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.startsWith('192.168.') || host.startsWith('10.') || host.endsWith('.local');
+                  if (!isPrivate && window.location.protocol === 'https:') {
+                    const fullUrl = `${window.location.origin}${img}`;
+                    contentParts.push({ type: 'image_url', image_url: { url: fullUrl } });
+                  } else {
+                    // Di localhost/intranet, biarkan path /uploads/ relatif agar proxy backend server.js mengonversinya ke Base64
+                    contentParts.push({ type: 'image_url', image_url: { url: img } });
+                  }
                 }
               }
             });
@@ -5877,7 +5931,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       }
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
-      const messagesPayload = buildSanitizedMessagesPayload(session, rawImgs, 'openrouter', systemContent, modelName);
+      const resolvedImgs = await Promise.all(rawImgs.map(resolveImageToDataUrlSafe));
+      const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, modelName);
 
       const isOpenRouterDirect = IS_GITHUB_PAGES || !location.port;
       const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
@@ -5912,7 +5967,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         const currentModel = candidateModels[i];
         const currentIsFree = currentModel.includes(':free') || currentModel === 'openrouter/free';
         const currentIsImageCapable = isModelCapableOfImageGeneration(currentModel);
-        const currentMessagesPayload = buildSanitizedMessagesPayload(session, rawImgs, 'openrouter', systemContent, currentModel);
+        const currentMessagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, currentModel);
 
         const requestBody = {
           model: currentModel,
@@ -6626,8 +6681,12 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
   function setGeneratingState(isGen) {
     STATE.isGenerating = isGen;
-    els.sendPromptBtn.style.display = isGen ? 'none' : 'flex';
-    els.stopGenerationBtn.style.display = isGen ? 'flex' : 'none';
+    if (els.sendPromptBtn) {
+      els.sendPromptBtn.style.display = isGen ? 'none' : 'flex';
+    }
+    if (els.stopGenerationBtn) {
+      els.stopGenerationBtn.style.display = isGen ? 'flex' : 'none';
+    }
   }
 
   function stopGeneration() {
@@ -9541,24 +9600,30 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (!this.audioCtx) {
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         if (AudioContextClass) {
-          this.audioCtx = new AudioContextClass();
-          this.analyser = this.audioCtx.createAnalyser();
-          this.analyser.fftSize = 64;
-
-          this.masterGainNode = this.audioCtx.createGain();
-          this.masterGainNode.gain.setValueAtTime(this.volume, this.audioCtx.currentTime);
-          this.masterGainNode.connect(this.audioCtx.destination);
-
-          // Connect HTML Audio source to Web Audio analyser
           try {
-            this.sourceNode = this.audioCtx.createMediaElementSource(this.audio);
-            this.sourceNode.connect(this.analyser);
-            this.analyser.connect(this.masterGainNode);
-          } catch (e) {}
+            this.audioCtx = new AudioContextClass();
+            this.analyser = this.audioCtx.createAnalyser();
+            this.analyser.fftSize = 64;
+
+            this.masterGainNode = this.audioCtx.createGain();
+            this.masterGainNode.gain.setValueAtTime(this.volume, this.audioCtx.currentTime);
+            this.masterGainNode.connect(this.audioCtx.destination);
+
+            // Connect HTML Audio source to Web Audio analyser
+            try {
+              this.sourceNode = this.audioCtx.createMediaElementSource(this.audio);
+              this.sourceNode.connect(this.analyser);
+              this.analyser.connect(this.masterGainNode);
+            } catch (e) {}
+          } catch (e) {
+            this.audioCtx = null;
+          }
         }
       }
       if (this.audioCtx && this.audioCtx.state === 'suspended') {
-        this.audioCtx.resume();
+        try {
+          this.audioCtx.resume().catch(() => {});
+        } catch (e) {}
       }
     },
 
@@ -9596,13 +9661,22 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         const tag = document.createElement('script');
         tag.id = 'ytIframeApiScript';
         tag.src = 'https://www.youtube.com/iframe_api';
+        tag.onerror = () => {
+          console.warn('Gagal memuat skrip YouTube Iframe API (kemungkinan terblokir oleh peramban/adblocker).');
+        };
         document.body.appendChild(tag);
       } else {
+        let attempts = 0;
+        const maxAttempts = 60; // Maksimal 6 detik batas timeout
         const check = setInterval(() => {
+          attempts++;
           if (window.YT && window.YT.Player) {
             clearInterval(check);
             this.ytReady = true;
             if (callback) callback();
+          } else if (attempts >= maxAttempts) {
+            clearInterval(check);
+            console.warn('YouTube Iframe API load timed out.');
           }
         }, 100);
       }
@@ -10322,13 +10396,25 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       const canvas = els.audioVisualizerCanvas;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
+      if (!ctx) return;
       const bufferLength = 32;
       const dataArray = new Uint8Array(bufferLength);
 
       const draw = () => {
         this.animFrameId = requestAnimationFrame(draw);
-        const w = canvas.width = canvas.parentElement ? canvas.parentElement.clientWidth : 400;
-        const h = canvas.height = 110;
+
+        // Hanya render jika canvas sedang terlihat di layar atau audio sedang diputar
+        const isCanvasVisible = Boolean(canvas.offsetParent);
+        if (!isCanvasVisible && !this.isPlaying) {
+          return;
+        }
+
+        const targetW = canvas.parentElement ? canvas.parentElement.clientWidth : 400;
+        const targetH = 110;
+        if (canvas.width !== targetW) canvas.width = targetW;
+        if (canvas.height !== targetH) canvas.height = targetH;
+        const w = canvas.width;
+        const h = canvas.height;
 
         ctx.clearRect(0, 0, w, h);
 
@@ -11210,7 +11296,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
     });
 
-    els.promptInput.addEventListener('input', () => {
+    els.promptInput?.addEventListener('input', () => {
       autoResizeTextarea(els.promptInput);
 
       // Auto-detect prefix /img, /gambar, /image untuk mengaktifkan AI Image Studio seketika
@@ -11250,7 +11336,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         }
         STATE.sessions = [];
         STATE.currentSessionId = null;
-        sessionStorage.removeItem('zoz_active_session_id');
+        safeSessionStorage.removeItem('zoz_active_session_id');
         await DeviceStorage.clearAllSessions();
         savePersistedState();
         createNewSession();
@@ -12142,7 +12228,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     });
 
     // Audio Upload Handlers
-    els.triggerAudioUploadBtn?.addEventListener('click', () => els.localAudioFileInput.click());
+    els.triggerAudioUploadBtn?.addEventListener('click', () => els.localAudioFileInput?.click());
     els.localAudioFileInput?.addEventListener('change', (e) => {
       BGMEngine.handleUploadFiles(e.target.files);
     });
@@ -12249,8 +12335,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     }
 
     // Distinguish Browser Refresh (same tab) vs Fresh App Entry
-    const isTabReload = sessionStorage.getItem('zoz_tab_initialized') === 'true';
-    const savedActiveId = sessionStorage.getItem('zoz_active_session_id');
+    const isTabReload = safeSessionStorage.getItem('zoz_tab_initialized') === 'true';
+    const savedActiveId = safeSessionStorage.getItem('zoz_active_session_id');
 
     if (isTabReload && savedActiveId && STATE.sessions.some(s => s.id === savedActiveId)) {
       // Browser Refresh: Keep the user on their active conversation and refresh it
@@ -12259,8 +12345,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       renderCurrentSession();
     } else {
       // Fresh App Entry / Reopening: Land cleanly on TAMPILAN UTAMA (Welcome Hero / Beranda Bersih)
-      sessionStorage.setItem('zoz_tab_initialized', 'true');
-      sessionStorage.removeItem('zoz_active_session_id');
+      safeSessionStorage.setItem('zoz_tab_initialized', 'true');
+      safeSessionStorage.removeItem('zoz_active_session_id');
       STATE.currentSessionId = null;
       renderChatHistory();
       renderCurrentSession();

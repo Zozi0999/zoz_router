@@ -10,6 +10,7 @@ module.exports = async function handler(req, res) {
   try {
     let query = req.query?.q || req.query?.query || '';
     let apiKey = req.headers['x-serper-key'] || req.headers['x-api-key'] || req.query?.apiKey || req.query?.key || req.query?.serperApiKey || '';
+    let num = parseInt(req.query?.num || req.query?.limit || '15', 10);
 
     if (req.method === 'POST' && req.body) {
       let body = req.body;
@@ -19,12 +20,14 @@ module.exports = async function handler(req, res) {
       body = body || {};
       query = body.query || body.q || query;
       apiKey = body.apiKey || body.serperApiKey || apiKey;
+      if (body.num || body.limit) num = parseInt(body.num || body.limit, 10);
     }
 
     if (!query) {
       return res.status(400).json({ error: 'Parameter query `q` atau body `{ query }` diperlukan.' });
     }
 
+    const targetNum = Math.min(Math.max(isNaN(num) ? 15 : num, 1), 30);
     const serperKey = apiKey || process.env.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
 
     const response = await fetch('https://google.serper.dev/search', {
@@ -33,7 +36,7 @@ module.exports = async function handler(req, res) {
         'X-API-KEY': serperKey,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ q: query, num: 6, gl: 'us', hl: 'en' })
+      body: JSON.stringify({ q: query, num: targetNum, gl: 'us', hl: 'en' })
     });
 
     if (!response.ok) {

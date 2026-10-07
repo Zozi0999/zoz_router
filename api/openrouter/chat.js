@@ -1,7 +1,7 @@
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-title, HTTP-Referer, x-api-key, X-Title, HTTP-Referer');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-title, X-Title, http-referer, HTTP-Referer, x-api-key');
 
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
@@ -33,13 +33,23 @@ module.exports = async function handler(req, res) {
       temperature: body.temperature ?? 0.7,
       top_p: body.top_p ?? 0.9,
       max_tokens: body.max_tokens ?? 4096,
-      ...(body.plugins ? { plugins: body.plugins } : {})
+      ...(body.plugins ? { plugins: body.plugins } : {}),
+      ...(body.tools && Array.isArray(body.tools) && (!body.model || (!body.model.includes(':free') && body.model !== 'openrouter/free')) ? { tools: body.tools } : {})
     };
+
+    const abortController = new AbortController();
+    let clientDisconnected = false;
+
+    req.on('close', () => {
+      clientDisconnected = true;
+      abortController.abort();
+    });
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers,
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: abortController.signal
     });
 
     if (!response.ok) {
@@ -51,10 +61,20 @@ module.exports = async function handler(req, res) {
     res.setHeader('Transfer-Encoding', 'chunked');
 
     for await (const chunk of response.body) {
+      if (clientDisconnected || res.writableEnded || res.destroyed) {
+        abortController.abort();
+        break;
+      }
       res.write(chunk);
     }
-    return res.end();
+    if (!res.writableEnded && !res.destroyed) {
+      return res.end();
+    }
   } catch (err) {
+    if (err.name === 'AbortError') {
+      try { res.end(); } catch (_) {}
+      return;
+    }
     if (!res.headersSent) {
       return res.status(500).json({ error: err.message });
     }
