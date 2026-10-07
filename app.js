@@ -152,8 +152,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       systemPrompt: SYSTEM_PRESETS.kaisar,
       customSystemPrompt: '',
       activePreset: 'kaisar',
-      autoPolicy: 'local_first',
-      neutronAnimEnabled: true
+      autoPolicy: 'local_first'
     },
     activeCatalogTab: 'ollama', // 'ollama' | 'openrouter'
     dropdownModelTab: 'ollama', // 'ollama' | 'openrouter'
@@ -216,70 +215,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     send() { 
       this.playBeep(520, 'sine', 0.06, 0.04);
       setTimeout(() => this.playBeep(1040, 'sine', 0.08, 0.04), 40);
-    },
-    neutronLaunch() {
-      if (!STATE.soundEnabled) return;
-      try {
-        this.init();
-        if (!this.ctx) return;
-        const now = this.ctx.currentTime;
-        const osc = this.ctx.createOscillator();
-        const g = this.ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(260, now);
-        osc.frequency.exponentialRampToValueAtTime(1280, now + 0.22);
-        g.gain.setValueAtTime(0.05, now);
-        g.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
-        osc.connect(g);
-        g.connect(this.ctx.destination);
-        osc.start(now);
-        osc.stop(now + 0.24);
-      } catch (e) {}
-    },
-    neutronImpact() {
-      if (!STATE.soundEnabled) return;
-      try {
-        this.init();
-        if (!this.ctx) return;
-        const now = this.ctx.currentTime;
-        const osc = this.ctx.createOscillator();
-        const g = this.ctx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(840, now);
-        osc.frequency.exponentialRampToValueAtTime(220, now + 0.18);
-        g.gain.setValueAtTime(0.06, now);
-        g.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-        osc.connect(g);
-        g.connect(this.ctx.destination);
-        osc.start(now);
-        osc.stop(now + 0.2);
-      } catch (e) {}
-    },
-    neutronWhitePeak() {
-      if (!STATE.soundEnabled) return;
-      try {
-        this.init();
-        if (!this.ctx) return;
-        const now = this.ctx.currentTime;
-        const osc1 = this.ctx.createOscillator();
-        const osc2 = this.ctx.createOscillator();
-        const g = this.ctx.createGain();
-        osc1.type = 'sine';
-        osc1.frequency.setValueAtTime(440, now);
-        osc1.frequency.exponentialRampToValueAtTime(1520, now + 0.22);
-        osc2.type = 'triangle';
-        osc2.frequency.setValueAtTime(880, now);
-        osc2.frequency.exponentialRampToValueAtTime(1840, now + 0.26);
-        g.gain.setValueAtTime(0.08, now);
-        g.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
-        osc1.connect(g);
-        osc2.connect(g);
-        g.connect(this.ctx.destination);
-        osc1.start(now);
-        osc2.start(now);
-        osc1.stop(now + 0.38);
-        osc2.stop(now + 0.38);
-      } catch (e) {}
     },
     receive() { this.playBeep(780, 'sine', 0.06, 0.03); },
     success() { 
@@ -411,7 +346,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     paramTopP: $('#paramTopP'),
     valTopP: $('#valTopP'),
     settingSystemPrompt: $('#settingSystemPrompt'),
-    settingNeutronAnimBtn: $('#settingNeutronAnimBtn'),
     saveSettingsBtn: $('#saveSettingsBtn'),
 
     // Cyber BGM & Audio Deck
@@ -1445,9 +1379,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     setPrefixHtml(prefix) {
       this.prefixHtml = prefix || '';
-      if (prefix && typeof NeutronOrbManager !== 'undefined' && NeutronOrbManager.isActive()) {
-        NeutronOrbManager.triggerPeak();
-      }
     }
 
     append(delta) {
@@ -1455,9 +1386,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const str = String(delta);
       if (!str) return;
       this.text += str;
-      if (typeof NeutronOrbManager !== 'undefined' && NeutronOrbManager.isActive()) {
-        NeutronOrbManager.triggerPeak();
-      }
       if (this.isDone) return;
       const now = performance.now();
       // Throttle Markdown regex parsing to every 40ms to keep UI 60fps and prevent CPU lag
@@ -4076,203 +4004,6 @@ ${organicBlock}
     AudioEngine.click();
   }
 
-  // ==================== QUANTUM NEUTRON SINGULARITY MATRIX ====================
-  const PURE_MATH_FORMULAS = [
-    'E = mc²',
-    '∮ E·dA = q/ε₀',
-    'e^(iπ) + 1 = 0',
-    'ĤΨ = EΨ',
-    '∇×B = μ₀J + μ₀ε₀∂E/∂t',
-    '∫ e^(-x²)dx = √π',
-    'ζ(s) = Σ 1/nˢ',
-    'R_μν - ½Rg_μν = κT_μν',
-    'iℏ(∂Ψ/∂t) = ĤΨ',
-    'Δx·Δp ≥ ℏ/2',
-    'ℒ = -¼F_μνF^μν',
-    'Σ xⁿ/n! = eˣ',
-    '∇·B = 0',
-    'ds² = g_μνdx^μdx^ν',
-    'det(A - λI) = 0',
-    'lim(sin x / x) = 1',
-    '∇²V = -ρ/ε₀',
-    'S = k ln Ω',
-    'Γ(z) = ∫₀^∞ t^(z-1)e^(-t)dt',
-    'Tr(ρ²) ≤ 1'
-  ];
-
-  const NeutronOrbManager = {
-    active: false,
-    peaked: false,
-    stage: null,
-    orb: null,
-    pendingRows: [],
-    timerSafety: null,
-
-    start(targetUserRow) {
-      if (this.active) this.cleanup(true);
-      const isAnimEnabled = STATE.settings.neutronAnimEnabled !== false;
-      const isReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      if (!isAnimEnabled || isReducedMotion) {
-        if (targetUserRow) {
-          targetUserRow.classList.remove('neutron-turn-hidden');
-          targetUserRow.classList.remove('neutron-pending');
-        }
-        smartScrollChatToBottom(true);
-        AudioEngine.send();
-        return;
-      }
-
-      this.active = true;
-      this.peaked = false;
-      this.pendingRows = targetUserRow ? [targetUserRow] : [];
-
-      if (targetUserRow) {
-        targetUserRow.classList.add('neutron-turn-hidden');
-      }
-
-      // Stage overlay in fixed viewport
-      const stage = document.createElement('div');
-      stage.className = 'neutron-singularity-stage';
-
-      const centerWrap = document.createElement('div');
-      centerWrap.className = 'neutron-orb-center-wrap';
-
-      // Quantum Neutron Orb
-      const orb = document.createElement('div');
-      orb.className = 'neutron-quantum-orb';
-
-      // Internal glowing core
-      const coreGlow = document.createElement('div');
-      coreGlow.className = 'neutron-core-glow';
-      orb.appendChild(coreGlow);
-
-      // Mathematical formulas chamber
-      const chamber = document.createElement('div');
-      chamber.className = 'neutron-math-chamber';
-
-      // Shuffle & pick 14 formulas
-      const selectedFormulas = [...PURE_MATH_FORMULAS].sort(() => 0.5 - Math.random()).slice(0, 14);
-      selectedFormulas.forEach((formula, idx) => {
-        const item = document.createElement('span');
-        item.className = `neutron-math-formula nmf-item-${(idx % 6) + 1}`;
-        item.textContent = formula;
-        item.style.setProperty('--mf-delay', `${(idx * 0.28).toFixed(2)}s`);
-        item.style.setProperty('--mf-top', `${10 + (idx * 6.2) % 78}%`);
-        item.style.setProperty('--mf-left', `${8 + ((idx * 16.5) % 80)}%`);
-        chamber.appendChild(item);
-      });
-      orb.appendChild(chamber);
-
-      // Accretion Rings (Red & Blue)
-      const ringRed = document.createElement('div');
-      ringRed.className = 'neutron-ring-red';
-      orb.appendChild(ringRed);
-
-      const ringBlue = document.createElement('div');
-      ringBlue.className = 'neutron-ring-blue';
-      orb.appendChild(ringBlue);
-
-      centerWrap.appendChild(orb);
-      stage.appendChild(centerWrap);
-      document.body.appendChild(stage);
-
-      this.stage = stage;
-      this.orb = orb;
-
-      // Audio cue: rising quantum launch
-      AudioEngine.neutronLaunch();
-
-      // Watchdog Safety Timer (auto-peak after 9s if AI takes long time so UI is never stuck)
-      this.timerSafety = setTimeout(() => {
-        if (this.active && !this.peaked) {
-          this.triggerPeak();
-        }
-      }, 9000);
-    },
-
-    registerAssistantRow(row) {
-      if (!this.active || this.peaked || !row) return;
-      this.pendingRows.push(row);
-      row.classList.add('neutron-turn-hidden');
-    },
-
-    triggerPeak() {
-      if (!this.active || this.peaked) return;
-      this.peaked = true;
-      if (this.timerSafety) {
-        clearTimeout(this.timerSafety);
-        this.timerSafety = null;
-      }
-
-      // Audio cue: Supernova White Peak Sound
-      AudioEngine.neutronWhitePeak();
-
-      if (this.orb) {
-        this.orb.classList.add('neutron-apex-white');
-      }
-
-      if (this.stage) {
-        const shock = document.createElement('div');
-        shock.className = 'neutron-white-shockwave';
-        this.stage.appendChild(shock);
-      }
-
-      // Reveal hidden messages immediately (chat langsung terlihat)
-      this.revealPendingRows();
-
-      // Dissolve stage cleanly and return to normal
-      setTimeout(() => {
-        this.cleanup(false);
-      }, 450);
-    },
-
-    revealPendingRows() {
-      const rows = [...this.pendingRows];
-      this.pendingRows = [];
-      rows.forEach(row => {
-        if (row) {
-          row.classList.remove('neutron-turn-hidden');
-          row.classList.remove('neutron-pending');
-          row.classList.add('neutron-revealed');
-          setTimeout(() => row.classList.remove('neutron-revealed'), 600);
-        }
-      });
-      smartScrollChatToBottom(true);
-    },
-
-    cleanup(forceImmediate = false) {
-      if (this.timerSafety) {
-        clearTimeout(this.timerSafety);
-        this.timerSafety = null;
-      }
-      this.revealPendingRows();
-      this.active = false;
-      this.peaked = false;
-
-      if (this.stage) {
-        const s = this.stage;
-        this.stage = null;
-        this.orb = null;
-        if (forceImmediate) {
-          s.remove();
-        } else {
-          s.style.opacity = '0';
-          s.style.transition = 'opacity 0.25s ease';
-          setTimeout(() => s.remove(), 260);
-        }
-      }
-    },
-
-    isActive() {
-      return this.active && !this.peaked;
-    }
-  };
-
-  // Backwards-compatible alias for any callers
-  function playNeutronSendAnimation(text, targetRow) {
-    NeutronOrbManager.start(targetRow);
-  }
-
   // ==================== DISPATCH / STREAMING ENGINE ====================
   async function handleSendPrompt() {
     const rawText = els.promptInput ? els.promptInput.value.trim() : '';
@@ -4365,8 +4096,7 @@ ${organicBlock}
       togglePromptVisibility(false);
     }
 
-    // Trigger Quantum Neutron Singularity Animation (Mathematical Chamber & Supernova Apex)
-    NeutronOrbManager.start(userRow);
+    AudioEngine.send();
 
     // Reset input & attachments
     if (els.promptInput) {
@@ -5550,7 +5280,6 @@ ${organicBlock}
 
     // Append initial assistant placeholder bubble
     const assistantRow = appendMessageElement('assistant', '', null, modelName);
-    NeutronOrbManager.registerAssistantRow(assistantRow);
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     const metaBox = assistantRow.querySelector('.message-meta');
     bubbleText.innerHTML = '<span class="typing-cursor"></span>';
@@ -6121,7 +5850,6 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     let tokenCount = 0;
 
     const assistantRow = appendMessageElement('assistant', '', null, modelName);
-    NeutronOrbManager.registerAssistantRow(assistantRow);
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     const metaBox = assistantRow.querySelector('.message-meta');
     bubbleText.innerHTML = '<span class="typing-cursor"></span>';
@@ -6900,9 +6628,6 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     STATE.isGenerating = isGen;
     els.sendPromptBtn.style.display = isGen ? 'none' : 'flex';
     els.stopGenerationBtn.style.display = isGen ? 'flex' : 'none';
-    if (!isGen && typeof NeutronOrbManager !== 'undefined') {
-      NeutronOrbManager.cleanup(true);
-    }
   }
 
   function stopGeneration() {
@@ -8412,9 +8137,6 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
     const startTime = performance.now();
     const assistantRow = appendMessageElement('assistant', '', null, `${masterResearchModel} (Deep Research)`, null, -1, null, null, true);
-    if (typeof NeutronOrbManager !== 'undefined') {
-      NeutronOrbManager.triggerPeak();
-    }
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     const metaBox = assistantRow.querySelector('.message-meta');
 
@@ -9191,9 +8913,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
     const startTime = performance.now();
     const assistantRow = appendMessageElement('assistant', '', null, 'AI Image Studio');
-    if (typeof NeutronOrbManager !== 'undefined') {
-      NeutronOrbManager.triggerPeak();
-    }
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     const metaBox = assistantRow.querySelector('.message-meta');
 
@@ -11292,17 +11011,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (els.settingAutoPolicy) els.settingAutoPolicy.value = STATE.settings.autoPolicy || 'local_first';
     
     updatePresetPillUI();
-    updateNeutronAnimBtnUI();
-  }
-
-  function updateNeutronAnimBtnUI() {
-    if (!els.settingNeutronAnimBtn) return;
-    const isEnabled = STATE.settings.neutronAnimEnabled !== false;
-    els.settingNeutronAnimBtn.classList.toggle('active', isEnabled);
-    els.settingNeutronAnimBtn.classList.toggle('inactive', !isEnabled);
-    els.settingNeutronAnimBtn.innerHTML = isEnabled
-      ? '<i class="fa-solid fa-toggle-on"></i> <span>Aktif</span>'
-      : '<i class="fa-solid fa-toggle-off"></i> <span>Nonaktif</span>';
   }
 
   // ==================== EVENT LISTENERS SETUP ====================
@@ -12184,14 +11892,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
       showToast('💰 Saldo OpenRouter disinkronkan!');
       AudioEngine.click();
-    });
-
-    els.settingNeutronAnimBtn?.addEventListener('click', () => {
-      STATE.settings.neutronAnimEnabled = !(STATE.settings.neutronAnimEnabled !== false);
-      updateNeutronAnimBtnUI();
-      savePersistedState();
-      AudioEngine.click();
-      showToast(STATE.settings.neutronAnimEnabled ? '⚡ Animasi Bola Neutron diaktifkan.' : 'Animasi Bola Neutron dinonaktifkan.');
     });
 
     els.saveSettingsBtn?.addEventListener('click', () => {
