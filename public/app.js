@@ -1164,7 +1164,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const copyBtn = header.querySelector('.code-copy-btn');
       copyBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const codeText = (codeBlock ? (codeBlock.innerText || codeBlock.textContent) : (pre.innerText || pre.textContent)) || '';
+        let codeText = '';
+        if (codeBlock) {
+          codeText = codeBlock.innerText || codeBlock.textContent || '';
+        } else {
+          const clone = pre.cloneNode(true);
+          const oldHeader = clone.querySelector('.code-header');
+          if (oldHeader) oldHeader.remove();
+          codeText = clone.innerText || clone.textContent || '';
+        }
         
         const setCopiedState = () => {
           copyBtn.innerHTML = '<i class="fa-solid fa-check" style="color:var(--neon-teal);"></i> <span class="copy-text" style="color:var(--neon-teal);">Disalin!</span>';
@@ -1965,7 +1973,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
       return Array.isArray(s.messages) && s.messages.length > 0;
     });
-    const filtered = validSessions.filter(s => !q || s.title.toLowerCase().includes(q) || (s.mode && s.mode.toLowerCase().includes(q)));
+    const filtered = validSessions.filter(s => !q || (s.title || '').toLowerCase().includes(q) || (s.mode && s.mode.toLowerCase().includes(q)));
 
     // Sort strictly: Pinned sessions first, then most recently active descending
     filtered.sort((a, b) => {
@@ -3204,6 +3212,10 @@ ${organicBlock}
           cardsContainer.appendChild(cardWrapper.firstElementChild);
         }
       }
+    }
+
+    if (cardsContainer.children.length === 0) {
+      cardsContainer.remove();
     }
   }
 
