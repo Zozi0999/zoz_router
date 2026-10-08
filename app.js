@@ -15492,9 +15492,13 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     
     // Set sound toggle button icon
     if (els.soundToggleBtn) {
-      els.soundToggleBtn.innerHTML = STATE.soundEnabled 
-        ? '<i class="fa-solid fa-volume-high"></i>' 
+      els.soundToggleBtn.innerHTML = STATE.soundEnabled
+        ? '<i class="fa-solid fa-volume-high"></i>'
         : '<i class="fa-solid fa-volume-xmark"></i>';
+    }
+    // Hide music generation button in composer toolbar (move to attachment menu)
+    if (els.musicGenToggleBtn) {
+      els.musicGenToggleBtn.style.display = 'none';
     }
 
     // Distinguish Browser Refresh (same tab) vs Fresh App Entry
