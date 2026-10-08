@@ -3129,33 +3129,36 @@ const server = http.createServer(async (req, res) => {
       let imageBuffer = null;
       let contentType = 'image/png';
 
-      // 1. Coba OpenRouter Image API jika key tersedia dan model namespace ditentukan
-      if (openRouterKey && effectiveModel.includes('/')) {
+      const isCloudModel = effectiveModel.includes('/');
+
+      // 1. OpenRouter Cloud Dedicated Image Generation (POST /api/v1/images)
+      if (isCloudModel) {
+        if (!openRouterKey) {
+          return sendJSON(res, 400, { 
+            success: false, 
+            error: `OpenRouter API Key diperlukan untuk model cloud "${effectiveModel}". Silakan masukkan API Key Anda di menu Pengaturan > Provider Cloud.` 
+          });
+        }
+
+        let lastOrError = null;
+
+        // 1A. Primary: Dedicated OpenRouter Image Generation API (POST /api/v1/images)
         try {
-          const orRes = await new Promise((resolve, reject) => {
+          const orImageRes = await new Promise((resolve, reject) => {
             let settled = false;
-            const safeResolve = (data) => {
-              if (!settled) {
-                settled = true;
-                resolve(data);
-              }
-            };
-            const safeReject = (err) => {
-              if (!settled) {
-                settled = true;
-                reject(err);
-              }
-            };
+            const safeResolve = (d) => { if (!settled) { settled = true; resolve(d); } };
+            const safeReject = (e) => { if (!settled) { settled = true; reject(e); } };
 
             const postData = JSON.stringify({
               model: effectiveModel,
-              messages: [{ role: 'user', content: `Please generate an image: ${cleanPrompt}` }],
-              modalities: ['image', 'text']
+              prompt: cleanPrompt,
+              aspect_ratio: '1:1'
             });
+
             const opt = {
               hostname: 'openrouter.ai',
               port: 443,
-              path: '/api/v1/chat/completions',
+              path: '/api/v1/images',
               method: 'POST',
               headers: {
                 'Authorization': `Bearer ${openRouterKey}`,
@@ -3166,6 +3169,7 @@ const server = http.createServer(async (req, res) => {
               },
               timeout: 45000
             };
+
             const request = https.request(opt, (response) => {
               let raw = '';
               response.on('data', d => raw += d);
@@ -3174,46 +3178,38 @@ const server = http.createServer(async (req, res) => {
                   const parsed = JSON.parse(raw);
                   if (response.statusCode >= 400 || parsed.error) {
                     const errDetail = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
-                    return safeReject(new Error(errDetail || `OpenRouter HTTP ${response.statusCode}`));
+                    return safeReject(new Error(errDetail || `OpenRouter Image API HTTP ${response.statusCode}`));
                   }
-                  const msg = parsed.choices?.[0]?.message;
-                  if (msg) {
-                    const imgItem = msg.images?.[0];
-                    if (imgItem) {
-                      const u = imgItem.image_url?.url || imgItem.url;
-                      if (u) {
-                        if (u.startsWith('data:')) {
-                          const base64Data = u.split(',')[1];
-                          return safeResolve({ buffer: Buffer.from(base64Data, 'base64'), contentType: 'image/png' });
-                        }
-                        return safeResolve({ remoteUrl: u });
-                      }
+                  const item = parsed.data?.[0];
+                  if (item) {
+                    if (item.b64_json) {
+                      const mime = item.media_type || 'image/png';
+                      const buf = Buffer.from(item.b64_json, 'base64');
+                      return safeResolve({ buffer: buf, contentType: mime, remoteUrl: `data:${mime};base64,${item.b64_json}` });
                     }
-                    const content = msg.content || '';
-                    const mdMatch = content.match(/!\[.*?\]\((https?:\/\/[^\s\)]+)\)/);
-                    if (mdMatch) {
-                      return safeResolve({ remoteUrl: mdMatch[1] });
+                    if (item.url) {
+                      return safeResolve({ remoteUrl: item.url });
                     }
                   }
-                  safeReject(new Error('OpenRouter tidak mengembalikan data gambar'));
-                } catch (e) {
-                  safeReject(e);
+                  safeReject(new Error('OpenRouter Image API tidak mengembalikan item data visual'));
+                } catch (jsonErr) {
+                  safeReject(jsonErr);
                 }
               });
-
-              response.on('error', err => safeReject(err));
             });
-            request.on('timeout', () => { request.destroy(); safeReject(new Error('OpenRouter image timed out')); });
+
+            request.on('timeout', () => { request.destroy(); safeReject(new Error('OpenRouter Image API timed out')); });
             request.on('error', err => safeReject(err));
             request.write(postData);
             request.end();
           });
 
-          if (orRes.buffer) {
-            imageBuffer = orRes.buffer;
-            contentType = orRes.contentType || 'image/png';
-          } else if (orRes.remoteUrl) {
-            remoteImageUrl = orRes.remoteUrl;
+          if (orImageRes.buffer) {
+            imageBuffer = orImageRes.buffer;
+            contentType = orImageRes.contentType || 'image/png';
+            remoteImageUrl = orImageRes.remoteUrl || '';
+          } else if (orImageRes.remoteUrl) {
+            remoteImageUrl = orImageRes.remoteUrl;
             try {
               const downloaded = await downloadImageBuffer(remoteImageUrl, 35000);
               imageBuffer = downloaded.buffer;
@@ -3222,15 +3218,109 @@ const server = http.createServer(async (req, res) => {
               console.warn('Gagal mengunduh buffer gambar OpenRouter ke disk:', dlErr.message);
             }
           }
-        } catch (orErr) {
-          console.warn('OpenRouter image API fallback ke Flux Pollinations:', orErr.message);
-          effectiveModel = 'flux';
+        } catch (imgApiErr) {
+          lastOrError = imgApiErr;
+          console.warn('OpenRouter /api/v1/images gagal, mencoba fallback chat/completions:', imgApiErr.message);
+        }
+
+        // 1B. Secondary: Fallback ke Multimodal Chat Completions (jika model chat khusus)
+        if (!imageBuffer && !remoteImageUrl) {
+          try {
+            const orChatRes = await new Promise((resolve, reject) => {
+              let settled = false;
+              const safeResolve = (data) => { if (!settled) { settled = true; resolve(data); } };
+              const safeReject = (err) => { if (!settled) { settled = true; reject(err); } };
+
+              const postData = JSON.stringify({
+                model: effectiveModel,
+                messages: [{ role: 'user', content: `Please generate an image: ${cleanPrompt}` }],
+                modalities: ['image', 'text']
+              });
+              const opt = {
+                hostname: 'openrouter.ai',
+                port: 443,
+                path: '/api/v1/chat/completions',
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${openRouterKey}`,
+                  'Content-Type': 'application/json',
+                  'HTTP-Referer': 'https://github.com/Zozi0999/zoz_router',
+                  'X-Title': 'Zoz Router Image Studio',
+                  'Content-Length': Buffer.byteLength(postData)
+                },
+                timeout: 45000
+              };
+              const request = https.request(opt, (response) => {
+                let raw = '';
+                response.on('data', d => raw += d);
+                response.on('end', () => {
+                  try {
+                    const parsed = JSON.parse(raw);
+                    if (response.statusCode >= 400 || parsed.error) {
+                      const errDetail = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
+                      return safeReject(new Error(errDetail || `OpenRouter Chat API HTTP ${response.statusCode}`));
+                    }
+                    const msg = parsed.choices?.[0]?.message;
+                    if (msg) {
+                      const imgItem = msg.images?.[0];
+                      if (imgItem) {
+                        const u = imgItem.image_url?.url || imgItem.url;
+                        if (u) {
+                          if (u.startsWith('data:')) {
+                            const base64Data = u.split(',')[1];
+                            return safeResolve({ buffer: Buffer.from(base64Data, 'base64'), contentType: 'image/png' });
+                          }
+                          return safeResolve({ remoteUrl: u });
+                        }
+                      }
+                      const content = msg.content || '';
+                      const mdMatch = content.match(/!\[.*?\]\((https?:\/\/[^\s\)]+)\)/);
+                      if (mdMatch) {
+                        return safeResolve({ remoteUrl: mdMatch[1] });
+                      }
+                    }
+                    safeReject(new Error('OpenRouter Chat tidak mengembalikan data gambar'));
+                  } catch (e) {
+                    safeReject(e);
+                  }
+                });
+              });
+              request.on('timeout', () => { request.destroy(); safeReject(new Error('OpenRouter chat image timed out')); });
+              request.on('error', err => safeReject(err));
+              request.write(postData);
+              request.end();
+            });
+
+            if (orChatRes.buffer) {
+              imageBuffer = orChatRes.buffer;
+              contentType = orChatRes.contentType || 'image/png';
+            } else if (orChatRes.remoteUrl) {
+              remoteImageUrl = orChatRes.remoteUrl;
+              try {
+                const downloaded = await downloadImageBuffer(remoteImageUrl, 35000);
+                imageBuffer = downloaded.buffer;
+                contentType = downloaded.contentType || 'image/png';
+              } catch (dlErr) {
+                console.warn('Gagal mengunduh buffer gambar chat OpenRouter ke disk:', dlErr.message);
+              }
+            }
+          } catch (chatErr) {
+            lastOrError = chatErr;
+          }
+        }
+
+        // Jika model cloud OpenRouter gagal, JANGAN diam-diam fallback ke Pollinations!
+        if (!imageBuffer && !remoteImageUrl) {
+          const errDetail = lastOrError ? lastOrError.message : 'OpenRouter tidak mengembalikan visual gambar yang valid';
+          return sendJSON(res, 502, {
+            success: false,
+            error: `Gagal menghasilkan gambar dari model OpenRouter (${effectiveModel}): ${errDetail}`
+          });
         }
       }
 
-      // 2. Engine Default / Fallback: Pollinations AI Multi-Style
-      if (!imageBuffer) {
-        effectiveModel = effectiveModel.includes('/') ? 'flux' : effectiveModel;
+      // 2. Engine Default (Pollinations AI Multi-Style) - HANYA untuk model lokal/Pollinations
+      if (!isCloudModel && !imageBuffer) {
         
         let styledPrompt = cleanPrompt;
         if (effectiveModel === 'flux-realism' && !/photo|realis|cinematic/i.test(cleanPrompt)) {

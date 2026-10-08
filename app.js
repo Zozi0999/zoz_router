@@ -9315,7 +9315,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     AudioEngine.success();
     els.promptInput?.focus();
     const displayName = getImageModelDisplayName(modelVal);
-    showToast(`🎨 Model Gambar Aktif: ${displayName}`);
+    if (modelVal.includes('/') && !STATE.settings.openRouterKey) {
+      showToast(`⚠️ Model ${displayName} aktif. Butuh OpenRouter Key di Pengaturan untuk menghasilkan gambar.`, 'warning');
+    } else {
+      showToast(`🎨 Model Gambar Aktif: ${displayName}`);
+    }
   }
 
   function togglePromptVisibility(forceState) {
@@ -9431,7 +9435,14 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       updateHudStep('[Langkah 3/3] Materialisasi kuantum, upscaling & render final...', 85);
     }, 2200);
 
+    const isCloudModel = activeImageModel.includes('/');
+    const displayName = getImageModelDisplayName(activeImageModel);
+
     try {
+      if (isCloudModel && !STATE.settings.openRouterKey) {
+        throw new Error(`Model cloud OpenRouter (${displayName}) memerlukan API Key. Silakan masukkan OpenRouter API Key Anda di menu Pengaturan > Provider Cloud, atau pilih model gratis di tab Pollinations.`);
+      }
+
       let finalImageUrl = '';
       let resultModel = activeImageModel;
       let actualSeed = Math.floor(Math.random() * 100000000);
@@ -9475,12 +9486,91 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           }
         } catch (serverErr) {
           if (serverErr.name === 'AbortError') throw serverErr;
-          console.warn('Backend image gen fallback ke direct Pollinations AI:', serverErr);
+          if (isCloudModel) {
+            // Direct client-side OpenRouter API call if server endpoint is offline or errored
+            if (STATE.settings.openRouterKey) {
+              try {
+                updateHudStep(`[Langkah 2/3] Menghubungi OpenRouter API langsung (${escapeHtml(displayName)})...`, 60);
+                const directRes = await fetch('https://openrouter.ai/api/v1/images', {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${STATE.settings.openRouterKey}`,
+                    'Content-Type': 'application/json',
+                    'HTTP-Referer': 'https://github.com/Zozi0999/zoz_router',
+                    'X-Title': 'Zoz Router Image Studio'
+                  },
+                  body: JSON.stringify({
+                    model: activeImageModel,
+                    prompt: cleanPrompt,
+                    aspect_ratio: '1:1'
+                  }),
+                  signal: STATE.abortController?.signal
+                });
+                const directData = await directRes.json().catch(() => ({}));
+                if (directRes.ok && directData.data?.[0]) {
+                  const it = directData.data[0];
+                  if (it.b64_json) {
+                    finalImageUrl = `data:${it.media_type || 'image/png'};base64,${it.b64_json}`;
+                  } else if (it.url) {
+                    finalImageUrl = it.url;
+                  }
+                  resultModel = activeImageModel;
+                } else {
+                  const msg = typeof directData.error === 'object' ? (directData.error.message || JSON.stringify(directData.error)) : (directData.error || serverErr.message);
+                  throw new Error(msg);
+                }
+              } catch (directErr) {
+                if (directErr.name === 'AbortError') throw directErr;
+                throw new Error(`Gagal menghasilkan gambar dari model OpenRouter (${displayName}): ${directErr.message}`);
+              }
+            } else {
+              throw serverErr;
+            }
+          } else {
+            console.warn('Backend image gen fallback ke direct Pollinations AI:', serverErr);
+          }
         }
       }
 
-      // Client-side Direct Pollinations Fallback (for GitHub Pages or server fallback)
-      if (!finalImageUrl) {
+      // Client-side Direct OpenRouter (untuk GitHub Pages jika IS_GITHUB_PAGES bernilai true)
+      if (isCloudModel && !finalImageUrl) {
+        if (STATE.settings.openRouterKey) {
+          updateHudStep(`[Langkah 2/3] Menghubungi OpenRouter API langsung (${escapeHtml(displayName)})...`, 60);
+          const directRes = await fetch('https://openrouter.ai/api/v1/images', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${STATE.settings.openRouterKey}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'https://github.com/Zozi0999/zoz_router',
+              'X-Title': 'Zoz Router Image Studio'
+            },
+            body: JSON.stringify({
+              model: activeImageModel,
+              prompt: cleanPrompt,
+              aspect_ratio: '1:1'
+            }),
+            signal: STATE.abortController?.signal
+          });
+          const directData = await directRes.json().catch(() => ({}));
+          if (directRes.ok && directData.data?.[0]) {
+            const it = directData.data[0];
+            if (it.b64_json) {
+              finalImageUrl = `data:${it.media_type || 'image/png'};base64,${it.b64_json}`;
+            } else if (it.url) {
+              finalImageUrl = it.url;
+            }
+            resultModel = activeImageModel;
+          } else {
+            const msg = typeof directData.error === 'object' ? (directData.error.message || JSON.stringify(directData.error)) : (directData.error || 'OpenRouter API gagal merespons');
+            throw new Error(`Gagal menghasilkan gambar dari model OpenRouter (${displayName}): ${msg}`);
+          }
+        } else {
+          throw new Error(`Model cloud OpenRouter (${displayName}) memerlukan API Key. Masukkan API Key di menu Pengaturan > Provider Cloud.`);
+        }
+      }
+
+      // Client-side Direct Pollinations Fallback (HANYA UNTUK MODEL NON-CLOUD / POLLINATIONS)
+      if (!isCloudModel && !finalImageUrl) {
         actualSeed = Math.floor(Math.random() * 100000000);
         let styledPrompt = cleanPrompt;
         const lowModel = activeImageModel.toLowerCase();
@@ -9503,10 +9593,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           urlPrompt = (lastSpace > 600 ? cut.slice(0, lastSpace) : cut).trim();
         }
         const encoded = encodeURIComponent(urlPrompt);
-        const pollinationsModel = activeImageModel.includes('/') ? 'flux' : activeImageModel;
-        finalImageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&model=${encodeURIComponent(pollinationsModel)}&seed=${actualSeed}&nologo=true&enhance=true`;
+        finalImageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&model=${encodeURIComponent(activeImageModel)}&seed=${actualSeed}&nologo=true&enhance=true`;
       }
-
       // Preload image to ensure 100% materialization animation (with 25s safety timeout to prevent infinite UI hang)
       await new Promise((resolve, reject) => {
         const testImg = new Image();
@@ -9600,6 +9688,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         showToast('Generasi gambar dibatalkan oleh pengguna.');
       } else {
         console.error('Image gen error:', err);
+        const isKeyOrCloudErr = isCloudModel || (err.message && (err.message.includes('API Key') || err.message.includes('OpenRouter') || err.message.includes('kredit')));
         bubbleText.innerHTML = `
           <div style="background:rgba(255,0,127,0.08); border:1px solid rgba(255,0,127,0.4); border-radius:10px; padding:14px; line-height:1.5;">
             <div style="font-weight:700; color:#FF2E93; margin-bottom:6px; display:flex; align-items:center; gap:8px;">
@@ -9608,16 +9697,30 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
             <div style="font-size:0.83rem; color:var(--text-main); margin-bottom:8px;">
               ${escapeHtml(err.message || 'Terjadi gangguan saat memproses rendering difusi.')}
             </div>
-            <div style="margin-top:10px; display:flex; gap:8px;">
+            <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
               <button class="btn btn-sm btn-primary retry-img-btn" style="font-size:0.75rem;">
                 <i class="fa-solid fa-rotate-right"></i> Coba Generate Ulang
               </button>
+              ${isKeyOrCloudErr ? `
+              <button class="btn btn-sm btn-outline open-key-settings-btn" style="font-size:0.75rem; border-color:var(--neon-teal); color:var(--neon-teal);">
+                <i class="fa-solid fa-key"></i> Buka Pengaturan API Key
+              </button>
+              ` : ''}
             </div>
           </div>
         `;
         bubbleText.querySelector('.retry-img-btn')?.addEventListener('click', () => {
           assistantRow.remove();
           runImageGeneration(session, cleanPrompt, activeImageModel);
+        });
+        bubbleText.querySelector('.open-key-settings-btn')?.addEventListener('click', () => {
+          const modal = $('#settingsModal');
+          if (modal) {
+            modal.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === 'tabProviders'));
+            modal.querySelectorAll('.settings-tab-pane').forEach(pane => pane.classList.toggle('active', pane.id === 'tabProviders'));
+          }
+          openModal('settingsModal');
+          setTimeout(() => els.settingOpenRouterKey?.focus(), 120);
         });
         AudioEngine.error();
       }

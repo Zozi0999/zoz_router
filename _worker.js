@@ -321,9 +321,25 @@ export default {
         let effectiveModel = (model || 'flux').toLowerCase().trim();
         let finalImageUrl = '';
 
-        if (openRouterKey && effectiveModel.includes('/')) {
+        const isCloudModel = effectiveModel.includes('/');
+
+        // 1. OpenRouter Cloud Dedicated Image Generation (POST /api/v1/images)
+        if (isCloudModel) {
+          if (!openRouterKey) {
+            return new Response(JSON.stringify({
+              success: false,
+              error: `OpenRouter API Key diperlukan untuk model cloud "${effectiveModel}". Silakan masukkan API Key Anda di menu Pengaturan > Provider Cloud.`
+            }), {
+              status: 400,
+              headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            });
+          }
+
+          let lastOrError = null;
+
+          // 1A. Primary: Dedicated OpenRouter Image Generation API (POST /api/v1/images)
           try {
-            const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            const orRes = await fetch('https://openrouter.ai/api/v1/images', {
               method: 'POST',
               headers: {
                 'Authorization': `Bearer ${openRouterKey}`,
@@ -333,31 +349,79 @@ export default {
               },
               body: JSON.stringify({
                 model: effectiveModel,
-                messages: [{ role: 'user', content: `Please generate an image: ${cleanPrompt}` }],
-                modalities: ['image', 'text']
+                prompt: cleanPrompt,
+                aspect_ratio: '1:1'
               })
             });
+
+            const parsed = await orRes.json().catch(() => ({}));
             if (orRes.ok) {
-              const parsed = await orRes.json();
-              const msg = parsed.choices?.[0]?.message;
-              if (msg) {
-                const imgItem = msg.images?.[0];
-                if (imgItem) {
-                  const u = imgItem.image_url?.url || imgItem.url;
-                  if (u) finalImageUrl = u;
-                } else if (msg.content) {
-                  const mdMatch = msg.content.match(/!\[.*?\]\((https?:\/\/[^\s\)]+)\)/);
-                  if (mdMatch) finalImageUrl = mdMatch[1];
+              const item = parsed.data?.[0];
+              if (item) {
+                if (item.b64_json) {
+                  const mime = item.media_type || 'image/png';
+                  finalImageUrl = `data:${mime};base64,${item.b64_json}`;
+                } else if (item.url) {
+                  finalImageUrl = item.url;
                 }
               }
+            } else {
+              const errDetail = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
+              lastOrError = new Error(errDetail || `OpenRouter Image API HTTP ${orRes.status}`);
             }
-          } catch (_) {
-            effectiveModel = 'flux';
+          } catch (err) {
+            lastOrError = err;
+          }
+
+          // 1B. Secondary: Fallback ke Multimodal Chat Completions
+          if (!finalImageUrl) {
+            try {
+              const chatRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${openRouterKey}`,
+                  'Content-Type': 'application/json',
+                  'HTTP-Referer': 'https://github.com/Zozi0999/zoz_router',
+                  'X-Title': 'Zoz Router Image Studio'
+                },
+                body: JSON.stringify({
+                  model: effectiveModel,
+                  messages: [{ role: 'user', content: `Please generate an image: ${cleanPrompt}` }],
+                  modalities: ['image', 'text']
+                })
+              });
+
+              if (chatRes.ok) {
+                const chatParsed = await chatRes.json().catch(() => ({}));
+                const msg = chatParsed.choices?.[0]?.message;
+                if (msg) {
+                  const imgItem = msg.images?.[0];
+                  if (imgItem) {
+                    finalImageUrl = imgItem.image_url?.url || imgItem.url || '';
+                  } else if (msg.content) {
+                    const mdMatch = msg.content.match(/!\[.*?\]\((https?:\/\/[^\s\)]+)\)/);
+                    if (mdMatch) finalImageUrl = mdMatch[1];
+                  }
+                }
+              }
+            } catch (_) {}
+          }
+
+          // Jika model cloud OpenRouter gagal, JANGAN diam-diam fallback ke Pollinations!
+          if (!finalImageUrl) {
+            const msg = lastOrError ? lastOrError.message : 'OpenRouter tidak mengembalikan visual gambar yang valid';
+            return new Response(JSON.stringify({
+              success: false,
+              error: `Gagal menghasilkan gambar dari model cloud ${effectiveModel}: ${msg}`
+            }), {
+              status: 502,
+              headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            });
           }
         }
 
-        if (!finalImageUrl) {
-          effectiveModel = effectiveModel.includes('/') ? 'flux' : effectiveModel;
+        // 2. Default (Pollinations AI Multi-Style) - HANYA untuk model lokal/Pollinations
+        if (!isCloudModel && !finalImageUrl) {
           let styledPrompt = cleanPrompt;
           if (effectiveModel === 'flux-realism' && !/photo|realis|cinematic/i.test(cleanPrompt)) {
             styledPrompt = `${cleanPrompt}, photorealistic, ultra-detailed 8k photography, cinematic lighting`;
