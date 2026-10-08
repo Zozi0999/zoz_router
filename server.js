@@ -618,7 +618,11 @@ async function enrichTextWithYouTubeContext(text) {
   const ids = extractYouTubeVideoIds(text);
   if (ids.length === 0) return { text, youtubeVideos: [] };
 
-  const results = await Promise.all(ids.map(id => fetchYouTubeInfo(`https://www.youtube.com/watch?v=${id}`)));
+  const results = await Promise.all(ids.map(id => {
+    return Promise.resolve()
+      .then(() => fetchYouTubeInfo(`https://www.youtube.com/watch?v=${id}`))
+      .catch(() => null);
+  }));
   const validVideos = results.filter(r => r && r.success);
   if (validVideos.length === 0) return { text, youtubeVideos: [] };
 
@@ -1551,7 +1555,7 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
 
           // Ekstrak tautan referensi penting dalam halaman
           const links = [];
-          const linkRegex = /<a\s+[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+          const linkRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
           let lm;
           while ((lm = linkRegex.exec(html)) !== null && links.length < 8) {
             let href = lm[1].trim();
@@ -2865,12 +2869,12 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/web-search' && (method === 'GET' || method === 'POST')) {
     try {
       let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
-      let apiKey = req.headers['x-serper-key'] || reqUrl.searchParams.get('apiKey') || '';
+      let apiKey = req.headers['x-serper-key'] || req.headers['x-api-key'] || reqUrl.searchParams.get('apiKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('serperApiKey') || '';
       let num = parseInt(reqUrl.searchParams.get('num') || reqUrl.searchParams.get('limit') || '15', 10);
       if (method === 'POST') {
         const body = await parseBody(req);
         query = body.query || body.q || query;
-        apiKey = body.apiKey || body.serperApiKey || apiKey;
+        apiKey = body.apiKey || body.serperApiKey || body.key || apiKey;
         if (body.num || body.limit) num = parseInt(body.num || body.limit, 10);
       }
       if (!query) {
@@ -3229,6 +3233,9 @@ const server = http.createServer(async (req, res) => {
         const localFilePath = path.join(UPLOADS_DIR, filename);
 
         try {
+          if (!fs.existsSync(UPLOADS_DIR)) {
+            fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+          }
           fs.writeFileSync(localFilePath, imageBuffer);
           localUrl = `/uploads/${filename}`;
           sizeBytes = imageBuffer.length;

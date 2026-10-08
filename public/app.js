@@ -2972,9 +2972,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   }
 
   function removeAttachedDoc(idx) {
-    STATE.attachedDocs.splice(idx, 1);
-    renderAttachmentPreviews();
-    AudioEngine.click();
+    if (idx >= 0 && idx < STATE.attachedDocs.length) {
+      STATE.attachedDocs.splice(idx, 1);
+      renderAttachmentPreviews();
+      AudioEngine.click();
+    }
   }
 
   function renderAttachmentPreviews() {
