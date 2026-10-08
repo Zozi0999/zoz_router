@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261008_v144">
+  <link rel="stylesheet" href="style.css?v=20261008_v146">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -584,6 +584,18 @@
                 </div>
               </div>
             </div>
+
+            <!-- AI Music Studio Quick Toggle -->
+            <button class="composer-btn music-gen-toggle" id="musicGenToggleBtn" type="button" title="Mode AI Music Studio (Buat Musik & Audio)" aria-label="Mode Buat Musik AI">
+              <i class="fa-solid fa-music"></i>
+              <span class="music-model-badge" id="musicModelBadge" style="display: none;">Music</span>
+            </button>
+
+            <!-- AI Video Studio Quick Toggle -->
+            <button class="composer-btn video-gen-toggle" id="videoGenToggleBtn" type="button" title="Mode AI Video Studio (Buat Video Sinematik)" aria-label="Mode Buat Video AI">
+              <i class="fa-solid fa-video"></i>
+              <span class="video-model-badge" id="videoModelBadge" style="display: none;">Video</span>
+            </button>
           </div>
 
           <!-- Textarea Input -->
@@ -1242,6 +1254,6 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
-  <script src="app.js?v=20261008_v145"></script>
+  <script src="app.js?v=20261008_v146"></script>
 </body>
 </html>

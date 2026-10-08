@@ -3814,40 +3814,44 @@ const server = http.createServer(async (req, res) => {
     return header;
   }
 
-  function synthesizeProceduralMusicBuffer({ prompt = '', genre = '', duration = 15, bpm = null }) {
-    const p = (prompt + ' ' + genre).toLowerCase();
-    let effectiveGenre = 'cyberpunk';
-    let targetBpm = 128;
-    let titlePrefix = 'Cyberpunk Matrix Protocol';
+  function synthesizeProceduralMusicBuffer({ prompt = '', genre = '', duration = 15, bpm = null, title = null }) {
+    const p = (prompt + ' ' + (genre || '')).toLowerCase();
+    let effectiveGenre = genre ? genre.toLowerCase().trim() : 'cyberpunk';
+    let targetBpm = bpm || 128;
+    let titlePrefix = title || 'Cyberpunk Matrix Protocol';
 
-    if (/lofi|lo-fi|chill|santai|relax|study|hujan|rain/i.test(p)) {
+    if (effectiveGenre.includes('lofi') || effectiveGenre.includes('chill') || /lofi|lo-fi|chill|santai|relax|study|hujan|rain/i.test(p)) {
       effectiveGenre = 'lofi';
       targetBpm = bpm || 80;
-      titlePrefix = 'Midnight Lofi Chill';
-    } else if (/synthwave|retrowave|80s|retro|outrun|neon/i.test(p)) {
+      if (!title) titlePrefix = 'Midnight Lofi Chill';
+    } else if (effectiveGenre.includes('synthwave') || effectiveGenre.includes('retro') || /synthwave|retrowave|80s|retro|outrun|neon/i.test(p)) {
       effectiveGenre = 'synthwave';
       targetBpm = bpm || 115;
-      titlePrefix = 'Neon Highway Synthwave';
-    } else if (/orchestra|orkestra|epic|epil|sinematik|cinematic|pertempuran|battle|heroic/i.test(p)) {
+      if (!title) titlePrefix = 'Neon Highway Synthwave';
+    } else if (effectiveGenre.includes('orchestra') || effectiveGenre.includes('epic') || /orchestra|orkestra|epic|epil|sinematik|cinematic|pertempuran|battle|heroic/i.test(p)) {
       effectiveGenre = 'orchestral';
       targetBpm = bpm || 96;
-      titlePrefix = 'Imperial Titan Anthem';
-    } else if (/ambient|meditation|space|kosmik|tenang|zen|galaxy/i.test(p)) {
+      if (!title) titlePrefix = 'Imperial Titan Anthem';
+    } else if (effectiveGenre.includes('ambient') || effectiveGenre.includes('space') || /ambient|meditation|space|kosmik|tenang|zen|galaxy/i.test(p)) {
       effectiveGenre = 'ambient';
       targetBpm = bpm || 68;
-      titlePrefix = 'Cosmic Horizon Ambient';
-    } else if (/edm|dance|house|techno|club|party|beat/i.test(p)) {
+      if (!title) titlePrefix = 'Cosmic Horizon Ambient';
+    } else if (effectiveGenre.includes('edm') || effectiveGenre.includes('dance') || /edm|dance|house|techno|club|party|beat/i.test(p)) {
       effectiveGenre = 'edm';
       targetBpm = bpm || 128;
-      titlePrefix = 'Neural Overdrive Drop';
-    } else if (/piano|klasik|classical|akustik|acoustic/i.test(p)) {
+      if (!title) titlePrefix = 'Neural Overdrive Drop';
+    } else if (effectiveGenre.includes('piano') || /piano|klasik|classical|akustik|acoustic/i.test(p)) {
       effectiveGenre = 'piano';
       targetBpm = bpm || 84;
-      titlePrefix = 'Celestial Piano Nocturne';
+      if (!title) titlePrefix = 'Celestial Piano Nocturne';
+    } else if (effectiveGenre.includes('rock') || /rock|metal|gitar|guitar/i.test(p)) {
+      effectiveGenre = 'rock';
+      targetBpm = bpm || 138;
+      if (!title) titlePrefix = 'Overdrive Cyber Rock';
     } else {
       effectiveGenre = 'cyberpunk';
       targetBpm = bpm || 130;
-      titlePrefix = 'Singularity Cyber Beat';
+      if (!title) titlePrefix = 'Singularity Cyber Beat';
     }
 
     const sampleRate = 44100;
@@ -3978,7 +3982,7 @@ const server = http.createServer(async (req, res) => {
       genre: effectiveGenre,
       bpm: targetBpm,
       duration: dur,
-      title: `${titlePrefix} [${effectiveGenre.toUpperCase()} • ${targetBpm} BPM]`
+      title: title ? title : `${titlePrefix} [${effectiveGenre.toUpperCase()} • ${targetBpm} BPM]`
     };
   }
 
@@ -4010,7 +4014,125 @@ const server = http.createServer(async (req, res) => {
       }
 
       const cleanPrompt = prompt.trim();
-      const synth = synthesizeProceduralMusicBuffer({ prompt: cleanPrompt, genre, duration, bpm });
+
+      // ==================== AI NEURAL MUSIC COMPOSITION ====================
+      let aiComposition = null;
+      try {
+        const composerSys = 'Kamu adalah AI Neural Music Composer & Audio Architect di ZOZ Router. Analisis konsep pengguna dan hasilkan JSON komposisi musik orisinal valid.';
+        const composerUser = `Konsep: "${cleanPrompt}".
+Rancang komposisi musik ringkas dalam JSON murni:
+{
+  "title": "Judul trek orisinal",
+  "genre": "lofi",
+  "bpm": 80,
+  "scale": "c_minor",
+  "mood": "Santai",
+  "summary": "Aransemen lofi santai berirama lembut"
+}
+Pilih 1 genre saja (misal: cyberpunk, lofi, synthwave, orchestral, ambient, edm, rock, piano). Wajib tutup kurung kurawal JSON.`;
+
+        const postBody = JSON.stringify({
+          model: 'qwen2.5:1.5b',
+          messages: [
+            { role: 'system', content: composerSys },
+            { role: 'user', content: composerUser }
+          ],
+          stream: false,
+          options: { temperature: 0.5, num_predict: 250 }
+        });
+
+        const llmResult = await new Promise((resolve) => {
+          const reqOpt = {
+            hostname: '127.0.0.1',
+            port: 11434,
+            path: '/api/chat',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Content-Length': Buffer.byteLength(postBody)
+            },
+            timeout: 10000
+          };
+          const oReq = http.request(reqOpt, (oRes) => {
+            let data = '';
+            oRes.on('data', chunk => data += chunk);
+            oRes.on('end', () => {
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.message?.content) {
+                  console.log('[AI Music Composer] Ollama returned composition length:', parsed.message.content.length);
+                } else {
+                  console.log('[AI Music Composer] Ollama returned no message content, raw:', data.slice(0, 150));
+                }
+                resolve(parsed.message?.content || null);
+              } catch (e) {
+                console.warn('[AI Music Composer] JSON parse error:', e.message);
+                resolve(null);
+              }
+            });
+          });
+          oReq.on('error', (err) => {
+            console.warn('[AI Music Composer] Ollama request error:', err.message);
+            resolve(null);
+          });
+          oReq.on('timeout', () => {
+            console.warn('[AI Music Composer] Ollama request timeout');
+            oReq.destroy();
+            resolve(null);
+          });
+          oReq.write(postBody);
+          oReq.end();
+        });
+
+        if (llmResult) {
+          const jsonMatch = llmResult.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            try {
+              aiComposition = JSON.parse(jsonMatch[0]);
+              console.log('[AI Music Composer] Successfully parsed composition:', aiComposition.title);
+            } catch (pErr) {
+              console.log('[AI Music Composer] JSON.parse standard failed:', pErr.message);
+              try {
+                const sanitized = jsonMatch[0]
+                  .replace(/,\s*([\}\]])/g, '$1')
+                  .replace(/[\u0000-\u001F]+/g, ' ');
+                aiComposition = JSON.parse(sanitized);
+                console.log('[AI Music Composer] Successfully parsed sanitized composition:', aiComposition.title);
+              } catch (sErr) {
+                console.log('[AI Music Composer] Sanitized parse failed, using regex extraction:', sErr.message);
+                const titleM = jsonMatch[0].match(/"title"\s*:\s*"([^"]+)"/i);
+                const genreM = jsonMatch[0].match(/"genre"\s*:\s*"([^"]+)"/i);
+                const bpmM = jsonMatch[0].match(/"bpm"\s*:\s*(\d+)/i);
+                const summaryM = jsonMatch[0].match(/"summary"\s*:\s*"([^"]+)"/i);
+                if (titleM || genreM || bpmM || summaryM) {
+                  aiComposition = {
+                    title: titleM ? titleM[1] : 'Cyberpunk Neural Melody',
+                    genre: genreM ? genreM[1] : 'lofi',
+                    bpm: bpmM ? parseInt(bpmM[1], 10) : 80,
+                    summary: summaryM ? summaryM[1] : 'Komposisi musik digubah secara cerdas oleh AI Neural Studio.'
+                  };
+                  console.log('[AI Music Composer] Successfully extracted composition via regex:', aiComposition.title);
+                }
+              }
+            }
+          }
+        }
+      } catch (cErr) {
+        console.warn('[AI Music Composer] AI composition helper fallback:', cErr.message);
+      }
+
+      const effectiveTitle = (aiComposition && aiComposition.title) ? aiComposition.title : (genre ? `${genre.toUpperCase()} Neural Beat` : 'Singularity Cyber Beat');
+      const effectiveGenre = (aiComposition && aiComposition.genre) ? aiComposition.genre : genre;
+      const effectiveBpm = (aiComposition && aiComposition.bpm) ? parseInt(aiComposition.bpm, 10) : bpm;
+      const effectiveSummary = (aiComposition && aiComposition.summary) ? aiComposition.summary : 'Komposisi musik digubah secara cerdas oleh AI Neural Studio.';
+
+      const synth = synthesizeProceduralMusicBuffer({
+        prompt: cleanPrompt,
+        genre: effectiveGenre,
+        duration,
+        bpm: effectiveBpm,
+        title: effectiveTitle
+      });
 
       if (!fs.existsSync(UPLOADS_DIR)) {
         fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -4053,7 +4175,7 @@ const server = http.createServer(async (req, res) => {
       const url = `/uploads/${filename}`;
 
       if (sessionId) {
-        appendAssistantMessageToSessionDisk(sessionId, `[Musik AI Hasil Sintesis: "${cleanPrompt}"]`, 'Neural Music Synthesizer', {
+        appendAssistantMessageToSessionDisk(sessionId, `[Musik AI Hasil Sintesis: "${cleanPrompt}"]\n\n- Judul: ${synth.title}\n- Genre: ${(synth.genre || 'Cyberpunk').toUpperCase()} (${synth.bpm} BPM)\n- Aransemen: ${effectiveSummary}\n- Audio: [Putar / Unduh Audio](${url})`, 'AI Neural Music Studio', {
           isMusicGen: true,
           type: 'music_generation',
           audioUrl: url,
@@ -4062,7 +4184,9 @@ const server = http.createServer(async (req, res) => {
           genre: synth.genre,
           bpm: synth.bpm,
           duration: synth.duration,
-          prompt: cleanPrompt
+          prompt: cleanPrompt,
+          aiComposed: Boolean(aiComposition),
+          aiSummary: effectiveSummary
         });
       }
 
@@ -4076,7 +4200,9 @@ const server = http.createServer(async (req, res) => {
         duration: synth.duration,
         sizeBytes: fileStats.size,
         format: isMp3 ? 'mp3' : 'wav',
-        prompt: cleanPrompt
+        prompt: cleanPrompt,
+        aiComposed: Boolean(aiComposition),
+        aiSummary: effectiveSummary
       });
     } catch (err) {
       console.error('Music generation failed:', err);

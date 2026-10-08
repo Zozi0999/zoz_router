@@ -35,12 +35,10 @@ atau
 Sistem akan mengeksekusi penjelajahan dan mengembalikan datanya secara instan untuk Anda cerna sebelum memberikan jawaban final yang akurat dan komprehensif.
 7. Kapabilitas Musik & Audio AI (Universal Neural Music Synthesis):
 Jika Kaisar meminta Anda untuk membuat, mengaransemen, atau memproduksi musik, lagu, nada, irama, beat, atau instrumen apa pun:
-JANGAN PERNAH menolak dengan dalih Anda model teks. Zoz Router dibekali Neural Music Studio yang dapat menghasilkan komposisi musik nyata (Cyberpunk, Lofi, Synthwave, Epic Orchestral, Ambient, EDM, Piano).
-Gambarkan komposisi musik secara megah, sebutkan genre, tempo (BPM), dan instrumen yang Anda rancang untuk Kaisar.
+JANGAN PERNAH membuat lirik teks atau berpura-pura mengarang lagu dalam bentuk teks biasa jika Kaisar ingin mendengarkan musik nyata! Zoz Router dibekali AI Neural Music Studio yang menghasilkan komposisi audio nyata.
 8. Kapabilitas Video AI (Universal Cinematic Video Synthesis):
 Jika Kaisar meminta Anda untuk membuat, merender, atau mengarahkan video, animasi, atau klip visual bergerak apa pun:
-JANGAN PERNAH menolak! Zoz Router dibekali Neural Video Studio yang dapat merender video sinematik gerak kamera 60fps dengan audio soundscape.
-Gambarkan konsep sinematik, sudut kamera, pencahayaan, dan dinamika gerak secara epik untuk Kaisar.`,
+JANGAN PERNAH menolak! Zoz Router dibekali AI Neural Video Studio yang merender video sinematik gerak kamera 60fps dengan audio soundscape.`,
 
     coder: `[ROLE: PRINCIPAL SOFTWARE ARCHITECT & FULLSTACK ENGINEER]
 You are a Principal Software Engineer and Systems Architect.
@@ -153,6 +151,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     get isDeepResearch() { return this.searchMode === 'premium'; },
     get isAutonomousSearch() { return this.searchMode === 'autonomous'; },
     isImageGenMode: false,
+    isMusicGenMode: false,
+    isVideoGenMode: false,
     isGenerating: false,
     abortController: null,
     currentDeepResearchTaskId: null,
@@ -348,6 +348,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     imageModelDropdown: $('#imageModelDropdown'),
     imageModelBadge: $('#imageModelBadge'),
     imageGenToggleBtn: $('#imageGenToggleBtn'),
+    musicGenToggleBtn: $('#musicGenToggleBtn'),
+    musicModelBadge: $('#musicModelBadge'),
+    videoGenToggleBtn: $('#videoGenToggleBtn'),
+    videoModelBadge: $('#videoModelBadge'),
     tabBtnPollinations: $('#tabBtnPollinations'),
     tabBtnOpenRouter: $('#tabBtnOpenRouter'),
     panePollinations: $('#panePollinations'),
@@ -3131,7 +3135,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           genre: safeMeta.genre || 'Cyberpunk',
           bpm: safeMeta.bpm || 128,
           duration: safeMeta.duration || 15,
-          prompt: safeMeta.prompt || content
+          prompt: safeMeta.prompt || content,
+          aiComposed: Boolean(safeMeta.aiComposed),
+          aiSummary: safeMeta.aiSummary || ''
         });
       }
     }
@@ -4777,10 +4783,10 @@ ${organicBlock}
 
     const isExplicitDeepResearch = /^\/(?:deep|research|riset)\s+/i.test(text.trim());
 
-    if (isExplicitMusicCommand || isMusicGenerationTrigger(text)) {
+    if (STATE.isMusicGenMode || isExplicitMusicCommand || isMusicGenerationTrigger(text)) {
       const cleanMusicPrompt = extractMusicPrompt(text);
       await runMusicGeneration(session, cleanMusicPrompt);
-    } else if (isExplicitVideoCommand || isVideoGenerationTrigger(text)) {
+    } else if (STATE.isVideoGenMode || isExplicitVideoCommand || isVideoGenerationTrigger(text)) {
       const cleanVideoPrompt = extractVideoPrompt(text);
       await runVideoGeneration(session, cleanVideoPrompt);
     } else if (STATE.isImageGenMode || isExplicitImageCommand) {
@@ -9690,17 +9696,43 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
   function isMusicGenerationTrigger(promptText) {
     if (!promptText || typeof promptText !== 'string') return false;
     const t = promptText.trim().toLowerCase();
+
+    // 1. Direct slash commands & prefixes (selalu picu tanpa pengecualian)
     if (t.startsWith('/music') || t.startsWith('/musik') || t.startsWith('/audio') || t.startsWith('/song') || t.startsWith('/lagu')) return true;
     if (t.startsWith('music:') || t.startsWith('musik:') || t.startsWith('audio:') || t.startsWith('song:') || t.startsWith('lagu:')) return true;
 
-    // Perintah pembuatan musik bahasa Indonesia
-    if (/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:buatkan|buat|bikin|generate|ciptakan|gubah|aransir|mainkan|perdengarkan)\s+(?:saya\s+|kita\s+|sebuah\s+|suatu\s+)?(?:musik|lagu|audio|soundtrack|melodi|instrumen|irama|beat|nada)\b/i.test(t)) return true;
-    if (/^(?:buatkan|bikin|ciptakan)\s+(?:musik|lagu|soundtrack|beat)\b/i.test(t)) return true;
-    if (/(?:buatkan|bikin|ciptakan|generate)\s+(?:musik|lagu)\s+(?:lofi|cyberpunk|synthwave|epic|santai|jedag|remix)/i.test(t)) return true;
+    // 2. Filter negatif: jangan picu jika pengguna sedang berdiskusi, komplain bug, atau meminta perbaikan kode
+    if (/\b(?:bug|error|masalah|issue|perbaiki|troubleshoot|mengapa|kenapa|source code|skrip|script|koding|coding)\b/i.test(t)) {
+      return false;
+    }
 
-    // Perintah pembuatan musik bahasa Inggris
-    if (/^(?:(?:please|can you|could you)\s+)?(?:generate|create|compose|produce|make)\s+(?:me\s+)?(?:an?\s+)?(?:music|song|track|audio|soundtrack|melody|instrumental|beat)\b/i.test(t)) return true;
-    if (/^(?:compose|produce)\s+(?:me\s+)?(?:an?\s+)?(?:music|song|track)\b/i.test(t)) return true;
+    // 3. Kata kerja / aksi pembuatan musik
+    const actionWords = '(?:buatkan|buat|bikin|membuat|generate|ciptakan|menciptakan|gubah|menggubah|aransir|mainkan|memainkan|perdengarkan|rakit|memproduksi|compose|produce|make|create|play)';
+    // 4. Objek musik (dukung ejaan "music" dan "musik")
+    const musicWords = '(?:musik|music|lagu|song|track|soundtrack|melodi|melody|audio|beat|instrumen|instrumental|nada|irama)';
+
+    // Pola percakapan fleksibel: "ai buatkan music", "tolong buat music", "bisa bikin lagu", "ai yang membuat music", "ai buat music"
+    const flexiblePattern = new RegExp(
+      `(?:^(?:.*\\b)?(?:ai|bot|sistem|kamu|tolong|coba|bisa|mohon|mau|ingin|untuk|yang)\\b\\s+)*` +
+      `${actionWords}\\s+(?:kan\\s+)?(?:saya\\s+|kita\\s+|sebuah\\s+|suatu\\s+|satu\\s+)?(?:ada\\s+)?${musicWords}\\b`,
+      'i'
+    );
+    if (flexiblePattern.test(t)) return true;
+
+    // Pola langsung: "buatkan music", "buat music", "bikin music", "generate music", "compose music"
+    const directPattern = new RegExp(
+      `\\b${actionWords}\\s+(?:kan\\s+)?(?:saya\\s+|kita\\s+|sebuah\\s+|suatu\\s+|satu\\s+)?${musicWords}\\b`,
+      'i'
+    );
+    if (directPattern.test(t)) return true;
+
+    // Pola genre langsung: "musik lofi", "lagu cyberpunk", "music synthwave", "buat musik santai"
+    if (new RegExp(`(?:buatkan|buat|bikin|generate|ciptakan|gubah|putar|mainkan)\\s+${musicWords}\\s+(?:lofi|cyberpunk|synthwave|epic|santai|jedag|remix|edm|rock|pop|klasik|ambient|chill)`, 'i').test(t)) return true;
+    if (new RegExp(`^(?:musik|music|lagu|soundtrack)\\s+(?:lofi|cyberpunk|synthwave|epic|santai|jedag|remix|edm|rock|pop|klasik|ambient|chill)\\b`, 'i').test(t)) return true;
+
+    // Pola bahasa Inggris
+    if (/^(?:(?:please|can you|could you|would you)\s+)?(?:generate|create|compose|produce|make|play)\s+(?:me\s+)?(?:an?\s+)?(?:music|song|track|audio|soundtrack|melody|instrumental|beat)\b/i.test(t)) return true;
+    if (/\b(?:compose|produce)\s+(?:me\s+)?(?:an?\s+)?(?:music|song|track|beat)\b/i.test(t)) return true;
 
     return false;
   }
@@ -9710,8 +9742,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     let p = promptText.trim();
     p = p.replace(/^\/(?:music|musik|audio|song|lagu)\s*/i, '');
     p = p.replace(/^(?:music|musik|audio|song|lagu):\s*/i, '');
-    p = p.replace(/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:buatkan|buat|bikin|generate|ciptakan|gubah|aransir|mainkan|perdengarkan)\s+(?:saya\s+|kita\s+|sebuah\s+|suatu\s+)?(?:musik|lagu|audio|soundtrack|melodi|instrumen|irama|beat|nada)\s+(?:tentang\s+|dari\s+|yang\s+|dengan\s+|genre\s+)?/i, '');
-    p = p.replace(/^(?:(?:please|can you|could you)\s+)?(?:generate|create|compose|produce|make)\s+(?:me\s+)?(?:an?\s+)?(?:music|song|track|audio|soundtrack|melody|instrumental|beat)\s+(?:of\s+|about\s+|with\s+)?/i, '');
+    p = p.replace(/^(?:(?:ai|bot|sistem|kamu|tolong|coba|bisa|mohon|seharusnya|mau|ingin|untuk|yang)\s+)+/i, '');
+    p = p.replace(/^(?:buatkan|buat|bikin|membuat|generate|ciptakan|menciptakan|gubah|menggubah|aransir|mainkan|memainkan|perdengarkan|rakit|memproduksi|compose|produce|make|create|play)\s+(?:kan\s+)?(?:saya\s+|kita\s+|sebuah\s+|suatu\s+|satu\s+)?(?:ada\s+)?(?:musik|music|lagu|song|track|soundtrack|melodi|melody|audio|beat|instrumen|instrumental|nada|irama)\s+(?:tentang\s+|dari\s+|yang\s+|dengan\s+|genre\s+|tema\s+|untuk\s+)?/i, '');
+    p = p.replace(/^(?:(?:please|can you|could you|would you)\s+)?(?:generate|create|compose|produce|make|play)\s+(?:me\s+)?(?:an?\s+)?(?:music|song|track|audio|soundtrack|melody|instrumental|beat)\s+(?:of\s+|about\s+|with\s+|for\s+)?/i, '');
     return p.trim() || promptText.trim();
   }
 
@@ -9719,17 +9752,38 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
   function isVideoGenerationTrigger(promptText) {
     if (!promptText || typeof promptText !== 'string') return false;
     const t = promptText.trim().toLowerCase();
+
+    // 1. Direct slash commands & prefixes
     if (t.startsWith('/video') || t.startsWith('/vid') || t.startsWith('/clip') || t.startsWith('/animasi') || t.startsWith('/motion')) return true;
     if (t.startsWith('video:') || t.startsWith('vid:') || t.startsWith('clip:') || t.startsWith('animasi:')) return true;
 
-    // Perintah pembuatan video bahasa Indonesia
-    if (/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:buatkan|buat|bikin|generate|render|ciptakan)\s+(?:saya\s+|kita\s+|sebuah\s+|suatu\s+)?(?:video|klip|animasi|motion|cuplikan|cinematic)\b/i.test(t)) return true;
-    if (/^(?:buatkan|bikin|ciptakan)\s+(?:video|klip|animasi)\b/i.test(t)) return true;
-    if (/(?:buatkan|bikin|ciptakan|generate)\s+(?:video|klip|animasi)\s+(?:tentang|pendek|sinematik)/i.test(t)) return true;
+    // 2. Filter negatif: jangan picu jika pengguna sedang berdiskusi atau minta perbaikan kode
+    if (/\b(?:bug|error|masalah|issue|perbaiki|troubleshoot|mengapa|kenapa|source code|skrip|script|koding|coding)\b/i.test(t)) {
+      return false;
+    }
 
-    // Perintah pembuatan video bahasa Inggris
-    if (/^(?:(?:please|can you|could you)\s+)?(?:generate|create|render|make|produce)\s+(?:me\s+)?(?:an?\s+)?(?:video|clip|animation|motion clip|cinematic)\b/i.test(t)) return true;
-    if (/^(?:render|animate)\s+(?:me\s+)?(?:an?\s+)?(?:video|clip)\b/i.test(t)) return true;
+    const actionWords = '(?:buatkan|buat|bikin|membuat|generate|render|ciptakan|menciptakan|animasikan|make|create|produce)';
+    const videoWords = '(?:video|vidio|klip|clip|animasi|animation|motion|cuplikan|cinematic)';
+
+    const flexiblePattern = new RegExp(
+      `(?:^(?:.*\\b)?(?:ai|bot|sistem|kamu|tolong|coba|bisa|mohon|mau|ingin|untuk|yang)\\b\\s+)*` +
+      `${actionWords}\\s+(?:kan\\s+)?(?:saya\\s+|kita\\s+|sebuah\\s+|suatu\\s+|satu\\s+)?(?:ada\\s+)?${videoWords}\\b`,
+      'i'
+    );
+    if (flexiblePattern.test(t)) return true;
+
+    const directPattern = new RegExp(
+      `\\b${actionWords}\\s+(?:kan\\s+)?(?:saya\\s+|kita\\s+|sebuah\\s+|suatu\\s+|satu\\s+)?${videoWords}\\b`,
+      'i'
+    );
+    if (directPattern.test(t)) return true;
+
+    if (new RegExp(`(?:buatkan|buat|bikin|generate|render)\\s+${videoWords}\\s+(?:tentang|pendek|sinematik|cinematic|cyberpunk|anime|scifi)`, 'i').test(t)) return true;
+    if (new RegExp(`^(?:video|vidio|animasi|klip)\\s+(?:pendek|sinematik|cyberpunk|anime|scifi)\\b`, 'i').test(t)) return true;
+
+    // English patterns
+    if (/^(?:(?:please|can you|could you|would you)\s+)?(?:generate|create|render|make|produce)\s+(?:me\s+)?(?:an?\s+)?(?:video|clip|animation|motion clip|cinematic)\b/i.test(t)) return true;
+    if (/\b(?:render|animate)\s+(?:me\s+)?(?:an?\s+)?(?:video|clip)\b/i.test(t)) return true;
 
     return false;
   }
@@ -9739,8 +9793,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     let p = promptText.trim();
     p = p.replace(/^\/(?:video|vid|clip|animasi|motion)\s*/i, '');
     p = p.replace(/^(?:video|vid|clip|animasi):\s*/i, '');
-    p = p.replace(/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:buatkan|buat|bikin|generate|render|ciptakan)\s+(?:saya\s+|kita\s+|sebuah\s+|suatu\s+)?(?:video|klip|animasi|motion|cuplikan|cinematic)\s+(?:tentang\s+|dari\s+|yang\s+|dengan\s+)?/i, '');
-    p = p.replace(/^(?:(?:please|can you|could you)\s+)?(?:generate|create|render|make|produce)\s+(?:me\s+)?(?:an?\s+)?(?:video|clip|animation|motion clip|cinematic)\s+(?:of\s+|about\s+|with\s+)?/i, '');
+    p = p.replace(/^(?:(?:ai|bot|sistem|kamu|tolong|coba|bisa|mohon|seharusnya|mau|ingin|untuk|yang)\s+)+/i, '');
+    p = p.replace(/^(?:buatkan|buat|bikin|membuat|generate|render|ciptakan|menciptakan|animasikan|make|create|produce)\s+(?:kan\s+)?(?:saya\s+|kita\s+|sebuah\s+|suatu\s+|satu\s+)?(?:ada\\s+)?(?:video|vidio|klip|clip|animasi|animation|motion|cuplikan|cinematic)\s+(?:tentang\s+|dari\s+|yang\s+|dengan\s+|tema\s+|untuk\s+)?/i, '');
+    p = p.replace(/^(?:(?:please|can you|could you)\s+)?(?:generate|create|render|make|produce)\s+(?:me\s+)?(?:an?\s+)?(?:video|clip|animation|motion clip|cinematic)\s+(?:of\s+|about\s+|with\s+|for\s+)?/i, '');
     return p.trim() || promptText.trim();
   }
 
@@ -9748,16 +9803,22 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
   function isImageGenerationTrigger(promptText) {
     if (!promptText || typeof promptText !== 'string') return false;
     const t = promptText.trim().toLowerCase();
+
     // 1. Direct slash / command prefix
     if (t.startsWith('/image') || t.startsWith('/img') || t.startsWith('/gambar')) return true;
     if (t.startsWith('gambar:') || t.startsWith('image:') || t.startsWith('draw:') || t.startsWith('paint:')) return true;
+
+    // 2. Filter negatif: jangan picu jika sedang berdiskusi bug / koding
+    if (/\b(?:bug|error|masalah|issue|perbaiki|troubleshoot|mengapa|kenapa|source code|skrip|script|koding|coding)\b/i.test(t)) {
+      return false;
+    }
     
-    // 2. Perintah pembuatan visual bahasa Indonesia alami
+    // 3. Perintah pembuatan visual bahasa Indonesia alami
     if (/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:buatkan|buat|bikin|generate|render|lukiskan|lukis|gambarkan|gambarin|desainkan|desain|tampilkan)\s+(?:saya\s+|kita\s+|sebuah\s+|suatu\s+)?(?:gambar|foto|lukisan|ilustrasi|visual|art|karya|desain)\b/i.test(t)) return true;
     if (/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:lukiskan|lukis|gambarkan|gambarin)\s+(?:saya\s+|sebuah\s+|seekor\s+|suatu\s+)?/i.test(t)) return true;
     if (/^(?:gambar(?:kan)?|foto)\s+(?:seekor|sebuah|suasana|pemandangan|karakter|objek|suatu)\b/i.test(t)) return true;
 
-    // 3. Perintah pembuatan visual bahasa Inggris alami
+    // 4. Perintah pembuatan visual bahasa Inggris alami
     if (/^(?:(?:please|can you|could you)\s+)?(?:generate|create|render|draw|paint|design|illustrate|make)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|illustration|art|painting|drawing|visual|graphic)\b/i.test(t)) return true;
     if (/^(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?/i.test(t)) return true;
 
@@ -9867,6 +9928,78 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       const checkIcon = item.querySelector('.image-model-check');
       if (checkIcon) checkIcon.style.display = isSelected ? 'block' : 'none';
     });
+  }
+
+  function updateMusicGenModeUI() {
+    const isMusicMode = Boolean(STATE.isMusicGenMode);
+
+    if (els.composerBox) {
+      els.composerBox.classList.toggle('music-mode-active', isMusicMode);
+    }
+    if (els.musicGenToggleBtn) {
+      els.musicGenToggleBtn.classList.toggle('active', isMusicMode);
+      els.musicGenToggleBtn.setAttribute('aria-pressed', String(isMusicMode));
+      els.musicGenToggleBtn.setAttribute('title', isMusicMode 
+        ? 'Mode Musik Aktif: Neural Music Studio (Klik untuk nonaktifkan)' 
+        : 'AI Music Studio - Buat Musik AI');
+    }
+    if (els.musicModelBadge) {
+      els.musicModelBadge.innerText = 'Neural';
+      els.musicModelBadge.style.display = isMusicMode ? 'inline-block' : 'none';
+    }
+    if (els.sendPromptBtn) {
+      if (isMusicMode) {
+        els.sendPromptBtn.setAttribute('title', 'Gubah Musik dengan AI Neural Studio (Enter)');
+        els.sendPromptBtn.setAttribute('aria-label', 'Gubah Musik dengan AI Neural Studio (Enter)');
+      } else if (!STATE.isImageGenMode && !STATE.isVideoGenMode) {
+        els.sendPromptBtn.setAttribute('title', 'Kirim Prompt (Enter)');
+        els.sendPromptBtn.setAttribute('aria-label', 'Kirim Prompt (Enter)');
+      }
+    }
+    if (els.promptInput && isMusicMode) {
+      els.promptInput.placeholder = 'Deskripsikan musik, beat, atau genre yang ingin digubah (misal: lofi cyberpunk 90bpm)...';
+    } else if (els.promptInput && !STATE.isImageGenMode && !STATE.isVideoGenMode) {
+      els.promptInput.placeholder = '';
+    }
+    if (els.attachOptionGenMusic) {
+      els.attachOptionGenMusic.classList.toggle('active', isMusicMode);
+    }
+  }
+
+  function updateVideoGenModeUI() {
+    const isVideoMode = Boolean(STATE.isVideoGenMode);
+
+    if (els.composerBox) {
+      els.composerBox.classList.toggle('video-mode-active', isVideoMode);
+    }
+    if (els.videoGenToggleBtn) {
+      els.videoGenToggleBtn.classList.toggle('active', isVideoMode);
+      els.videoGenToggleBtn.setAttribute('aria-pressed', String(isVideoMode));
+      els.videoGenToggleBtn.setAttribute('title', isVideoMode 
+        ? 'Mode Video Aktif: Cyber Motion Studio (Klik untuk nonaktifkan)' 
+        : 'AI Video Studio - Render Video AI');
+    }
+    if (els.videoModelBadge) {
+      els.videoModelBadge.innerText = 'Motion';
+      els.videoModelBadge.style.display = isVideoMode ? 'inline-block' : 'none';
+    }
+    if (els.sendPromptBtn) {
+      if (isVideoMode) {
+        els.sendPromptBtn.setAttribute('title', 'Render Video dengan Cyber Motion Studio (Enter)');
+        els.sendPromptBtn.setAttribute('aria-label', 'Render Video dengan Cyber Motion Studio (Enter)');
+      } else if (!STATE.isImageGenMode && !STATE.isMusicGenMode) {
+        els.sendPromptBtn.setAttribute('title', 'Kirim Prompt (Enter)');
+        els.sendPromptBtn.setAttribute('aria-label', 'Kirim Prompt (Enter)');
+      }
+    }
+    if (els.promptInput && isVideoMode) {
+      els.promptInput.placeholder = 'Deskripsikan visual gerak & adegan sinematik video yang ingin dirender...';
+    } else if (els.promptInput && !STATE.isImageGenMode && !STATE.isMusicGenMode) {
+      els.promptInput.placeholder = '';
+    }
+    if (els.attachOptionGenVideo) {
+      els.attachOptionGenVideo.classList.toggle('active', isVideoMode);
+    }
   }
 
   function switchImageModelTab(tabName) {
@@ -10049,6 +10182,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
     STATE.settings.imageModel = modelVal;
     STATE.isImageGenMode = true;
+    STATE.isMusicGenMode = false;
+    STATE.isVideoGenMode = false;
     try {
       localStorage.setItem('zoz_settings_v1', JSON.stringify(STATE.settings));
     } catch (_) {}
@@ -10056,6 +10191,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       els.settingImageModel.value = modelVal;
     }
     updateImageGenModeUI();
+    updateMusicGenModeUI();
+    updateVideoGenModeUI();
     closeImageModelDropdown();
     AudioEngine.success();
     els.promptInput?.focus();
@@ -10488,6 +10625,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     const bpm = track.bpm || 128;
     const dur = track.duration || 15;
     const safePrompt = escapeHtml(track.prompt || '');
+    const aiSummary = escapeHtml(track.aiSummary || '');
+    const isAiComposed = Boolean(track.aiComposed);
     const trackId = 'cyber_audio_' + Math.random().toString(36).substring(2, 9);
 
     return `
@@ -10495,8 +10634,12 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         <div class="cyber-audio-body">
           <div class="cyber-audio-title-row">
             <div class="cyber-audio-title"><i class="fa-solid fa-headphones" style="color:var(--neon-teal); margin-right:6px;"></i> ${safeTitle}</div>
-            <span class="image-meta-badge" style="color:var(--neon-teal); border-color:rgba(0,255,194,0.4);"><i class="fa-solid fa-compact-disc"></i> ${safeGenre.toUpperCase()}</span>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <span class="image-meta-badge" style="color:var(--neon-teal); border-color:rgba(0,255,194,0.4);"><i class="fa-solid fa-compact-disc"></i> ${safeGenre.toUpperCase()}</span>
+              ${isAiComposed ? `<span class="image-meta-badge" style="color:#00F0FF; border-color:rgba(0,240,255,0.4); background:rgba(0,240,255,0.1);"><i class="fa-solid fa-brain"></i> AI Composed</span>` : ''}
+            </div>
           </div>
+          ${aiSummary ? `<div class="cyber-audio-ai-summary" style="font-size:0.75rem; color:var(--text-dim); margin-top:5px; margin-bottom:8px; line-height:1.45; display:flex; align-items:flex-start; gap:6px; border-left:2px solid var(--neon-teal); padding-left:8px; background:rgba(0,255,194,0.03); border-radius:0 6px 6px 0;"><i class="fa-solid fa-wand-magic-sparkles" style="color:var(--neon-teal); margin-top:2px; flex-shrink:0;"></i><span>${aiSummary}</span></div>` : ''}
           <div class="cyber-audio-wave-wrap">
             <canvas class="cyber-audio-wave-canvas" width="480" height="48"></canvas>
           </div>
@@ -10514,7 +10657,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           <div class="image-meta-badges">
             <span class="image-meta-badge"><i class="fa-solid fa-gauge-high"></i> ${bpm} BPM</span>
             <span class="image-meta-badge"><i class="fa-solid fa-clock"></i> ${dur}s</span>
-            <span class="image-meta-badge"><i class="fa-solid fa-microchip"></i> Neural Audio Synth</span>
+            <span class="image-meta-badge" style="color:var(--neon-teal); border-color:rgba(0,255,194,0.3);"><i class="fa-solid fa-microchip"></i> ${isAiComposed ? 'AI Neural Music Architect' : 'Neural Audio Synth'}</span>
           </div>
           <div class="image-actions-bar">
             <button type="button" class="btn btn-xs btn-outline add-gen-to-bgm-btn" data-url="${safeUrl}" data-title="${safeTitle}">
@@ -10856,6 +10999,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       let trackGenre = 'cyberpunk';
       let trackBpm = 128;
       let trackDuration = 15;
+      let trackAiSummary = '';
+      let trackAiComposed = false;
 
       if (!IS_GITHUB_PAGES) {
         try {
@@ -10882,6 +11027,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
               trackGenre = data.genre || trackGenre;
               trackBpm = data.bpm || trackBpm;
               trackDuration = data.duration || trackDuration;
+              trackAiSummary = data.aiSummary || '';
+              trackAiComposed = Boolean(data.aiComposed);
             } else {
               throw new Error(data.error || 'Server tidak mengembalikan file audio');
             }
@@ -10915,7 +11062,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         genre: trackGenre,
         bpm: trackBpm,
         duration: trackDuration,
-        prompt: cleanPrompt
+        prompt: cleanPrompt,
+        aiComposed: trackAiComposed,
+        aiSummary: trackAiSummary
       };
 
       bubbleText.innerHTML = buildCyberAudioPlayerCardHtml(trackData);
@@ -10923,14 +11072,14 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
       metaBox.innerHTML = `
         <strong>Neural Music Studio</strong>
-        <span class="meta-model-badge" style="background:rgba(0,255,194,0.15); border-color:#00FFC2; color:var(--neon-teal);"><i class="fa-solid fa-music"></i> Audio Dihasilkan</span>
+        <span class="meta-model-badge" style="background:rgba(0,255,194,0.15); border-color:#00FFC2; color:var(--neon-teal);"><i class="fa-solid fa-brain"></i> ${trackAiComposed ? 'AI Neural Composition' : 'Audio Dihasilkan'}</span>
         <span>⏱️ ${totalDuration}s</span>
       `;
 
       if (session) {
         session.messages.push({
           role: 'assistant',
-          content: `[Musik AI Hasil Sintesis: "${cleanPrompt}"]\n\n- Judul: ${trackTitle}\n- Genre: ${trackGenre.toUpperCase()} (${trackBpm} BPM)\n- Audio: [Putar / Unduh Audio](${finalAudioUrl})`,
+          content: `[Musik AI Hasil Sintesis: "${cleanPrompt}"]\n\n- Judul: ${trackTitle}\n- Genre: ${trackGenre.toUpperCase()} (${trackBpm} BPM)\n- Aransemen: ${trackAiSummary || 'Digubah oleh AI Neural Music Architect'}\n- Audio: [Putar / Unduh Audio](${finalAudioUrl})`,
           type: 'music_generation',
           isMusicGen: true,
           audioUrl: finalAudioUrl,
@@ -10940,6 +11089,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           bpm: trackBpm,
           duration: trackDuration,
           prompt: cleanPrompt,
+          aiComposed: trackAiComposed,
+          aiSummary: trackAiSummary,
           model: 'Neural Music Synthesizer',
           stats: { duration: totalDuration },
           timestamp: new Date().toISOString()
@@ -13422,18 +13573,54 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       const val = els.promptInput.value;
       if (!STATE.isImageGenMode && /^\/(?:img|gambar|image)\s+/i.test(val)) {
         STATE.isImageGenMode = true;
+        STATE.isMusicGenMode = false;
+        STATE.isVideoGenMode = false;
         els.promptInput.value = val.replace(/^\/(?:img|gambar|image)\s+/i, '');
         updateImageGenModeUI();
+        updateMusicGenModeUI();
+        updateVideoGenModeUI();
         autoResizeTextarea(els.promptInput);
         if (navigator.vibrate) {
           try { navigator.vibrate(30); } catch (_) {}
         }
         showToast('🎨 Mode AI Image Studio Aktif!');
         AudioEngine.success();
-      } else if (STATE.isImageGenMode && /^\/(?:chat|teks|text)\s+/i.test(val)) {
+      } else if (!STATE.isMusicGenMode && /^\/(?:music|musik|audio|song|lagu)\s+/i.test(val)) {
+        STATE.isMusicGenMode = true;
         STATE.isImageGenMode = false;
+        STATE.isVideoGenMode = false;
+        els.promptInput.value = val.replace(/^\/(?:music|musik|audio|song|lagu)\s+/i, '');
+        updateMusicGenModeUI();
+        updateImageGenModeUI();
+        updateVideoGenModeUI();
+        autoResizeTextarea(els.promptInput);
+        if (navigator.vibrate) {
+          try { navigator.vibrate(30); } catch (_) {}
+        }
+        showToast('🎵 Mode AI Music Studio Aktif!');
+        AudioEngine.success();
+      } else if (!STATE.isVideoGenMode && /^\/(?:video|vid|clip|animasi)\s+/i.test(val)) {
+        STATE.isVideoGenMode = true;
+        STATE.isImageGenMode = false;
+        STATE.isMusicGenMode = false;
+        els.promptInput.value = val.replace(/^\/(?:video|vid|clip|animasi)\s+/i, '');
+        updateVideoGenModeUI();
+        updateImageGenModeUI();
+        updateMusicGenModeUI();
+        autoResizeTextarea(els.promptInput);
+        if (navigator.vibrate) {
+          try { navigator.vibrate(30); } catch (_) {}
+        }
+        showToast('🎬 Mode AI Video Motion Studio Aktif!');
+        AudioEngine.success();
+      } else if ((STATE.isImageGenMode || STATE.isMusicGenMode || STATE.isVideoGenMode) && /^\/(?:chat|teks|text)\s+/i.test(val)) {
+        STATE.isImageGenMode = false;
+        STATE.isMusicGenMode = false;
+        STATE.isVideoGenMode = false;
         els.promptInput.value = val.replace(/^\/(?:chat|teks|text)\s+/i, '');
         updateImageGenModeUI();
+        updateMusicGenModeUI();
+        updateVideoGenModeUI();
         autoResizeTextarea(els.promptInput);
         if (navigator.vibrate) {
           try { navigator.vibrate(20); } catch (_) {}
@@ -13672,22 +13859,34 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     });
     els.attachOptionGenMusic?.addEventListener('click', () => {
       closeAttachmentDropdown();
-      if (els.promptInput) {
-        els.promptInput.value = '/music ';
-        els.promptInput.focus();
-        autoResizeTextarea(els.promptInput);
+      STATE.isMusicGenMode = !STATE.isMusicGenMode;
+      if (STATE.isMusicGenMode) {
+        STATE.isImageGenMode = false;
+        STATE.isVideoGenMode = false;
+        updateImageGenModeUI();
+        updateVideoGenModeUI();
       }
-      showToast('🎵 Mode AI Music: Masukkan genre atau deskripsi musik yang Anda inginkan...');
+      updateMusicGenModeUI();
+      if (els.promptInput) {
+        els.promptInput.focus();
+      }
+      showToast(STATE.isMusicGenMode ? '🎵 Mode AI Music Aktif: Masukkan konsep / genre musik...' : 'Mode AI Music dinonaktifkan.');
       AudioEngine.click();
     });
     els.attachOptionGenVideo?.addEventListener('click', () => {
       closeAttachmentDropdown();
-      if (els.promptInput) {
-        els.promptInput.value = '/video ';
-        els.promptInput.focus();
-        autoResizeTextarea(els.promptInput);
+      STATE.isVideoGenMode = !STATE.isVideoGenMode;
+      if (STATE.isVideoGenMode) {
+        STATE.isImageGenMode = false;
+        STATE.isMusicGenMode = false;
+        updateImageGenModeUI();
+        updateMusicGenModeUI();
       }
-      showToast('🎬 Mode AI Video: Masukkan adegan atau deskripsi video yang Anda inginkan...');
+      updateVideoGenModeUI();
+      if (els.promptInput) {
+        els.promptInput.focus();
+      }
+      showToast(STATE.isVideoGenMode ? '🎬 Mode AI Video Aktif: Masukkan deskripsi visual gerak / video...' : 'Mode AI Video dinonaktifkan.');
       AudioEngine.click();
     });
     els.attachOptionDoc?.addEventListener('click', () => {
@@ -13769,6 +13968,48 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     // Embedded AI Image Studio Model Selector Dropdown & Items
     els.imageGenToggleBtn?.addEventListener('click', (e) => {
       toggleImageModelDropdown(e);
+    });
+
+    // Embedded AI Music Studio Toggle Button
+    els.musicGenToggleBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeImageModelDropdown();
+      closeAttachmentDropdown();
+      closeSearchDropdown();
+      STATE.isMusicGenMode = !STATE.isMusicGenMode;
+      if (STATE.isMusicGenMode) {
+        STATE.isImageGenMode = false;
+        STATE.isVideoGenMode = false;
+        updateImageGenModeUI();
+        updateVideoGenModeUI();
+      }
+      updateMusicGenModeUI();
+      if (els.promptInput && STATE.isMusicGenMode) {
+        els.promptInput.focus();
+      }
+      showToast(STATE.isMusicGenMode ? '🎵 AI Neural Music Studio Aktif!' : 'Mode Musik dinonaktifkan.');
+      AudioEngine.click();
+    });
+
+    // Embedded AI Video Studio Toggle Button
+    els.videoGenToggleBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeImageModelDropdown();
+      closeAttachmentDropdown();
+      closeSearchDropdown();
+      STATE.isVideoGenMode = !STATE.isVideoGenMode;
+      if (STATE.isVideoGenMode) {
+        STATE.isImageGenMode = false;
+        STATE.isMusicGenMode = false;
+        updateImageGenModeUI();
+        updateMusicGenModeUI();
+      }
+      updateVideoGenModeUI();
+      if (els.promptInput && STATE.isVideoGenMode) {
+        els.promptInput.focus();
+      }
+      showToast(STATE.isVideoGenMode ? '🎬 AI Video Motion Studio Aktif!' : 'Mode Video dinonaktifkan.');
+      AudioEngine.click();
     });
 
     $$('.image-model-item').forEach(item => {
@@ -14585,6 +14826,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     });
     updateSearchModeUI();
     updateImageGenModeUI();
+    updateMusicGenModeUI();
+    updateVideoGenModeUI();
     autoResizeTextarea(els.promptInput);
     updatePromptVisibilityUI(true);
 
