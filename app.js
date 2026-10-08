@@ -554,6 +554,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }, { passive: true });
 
         stage.addEventListener('touchend', (e) => {
+          if (this.isZoomed) return; // Nonaktifkan swipe berganti foto saat pengguna sedang zoom & panning
           if (e.changedTouches && e.changedTouches[0]) {
             this.touchEndX = e.changedTouches[0].clientX;
             const diff = this.touchStartX - this.touchEndX;
@@ -1161,8 +1162,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         // AI telah selesai menjawab saat pengguna keluar dari aplikasi
         setGeneratingState(false);
         const diskSess = await DeviceStorage.getSession(activeSession.id);
-        if (diskSess && Array.isArray(diskSess.messages) && diskSess.messages.length > (activeSession.messages ? activeSession.messages.length : 0)) {
-          activeSession.messages = diskSess.messages;
+        const diskMsgs = (diskSess && Array.isArray(diskSess.messages)) ? diskSess.messages : [];
+        const activeMsgs = Array.isArray(activeSession.messages) ? activeSession.messages : [];
+        const diskLast = diskMsgs[diskMsgs.length - 1];
+        const activeLast = activeMsgs[activeMsgs.length - 1];
+
+        const hasNewMessages = diskMsgs.length > activeMsgs.length ||
+          (diskLast && activeLast && diskLast.content !== activeLast.content && (diskLast.content.length > activeLast.content.length || diskLast.backgroundCompleted));
+
+        if (hasNewMessages) {
+          activeSession.messages = diskMsgs;
           delete activeSession._isLazyDisk;
           savePersistedState();
           renderCurrentSession();
@@ -1171,15 +1180,34 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           showToast('✨ AI telah selesai menjawab di latar belakang saat Anda keluar.');
         } else if (data.text && data.text.trim()) {
           // Fallback jika sinkronisasi disk sesi belum terbaca di memori
-          const lastMsg = activeSession.messages ? activeSession.messages[activeSession.messages.length - 1] : null;
-          if (!lastMsg || lastMsg.role !== 'assistant') {
+          const trimmed = data.text.trim();
+          if (activeLast && activeLast.role === 'assistant') {
+            if (activeLast.content !== trimmed && (trimmed.length > (activeLast.content || '').length || !activeLast.content)) {
+              activeLast.content = trimmed;
+              activeLast.backgroundCompleted = true;
+              if (data.isDeepResearch) {
+                activeLast.isDeepResearch = true;
+                if (data.chatSummary) activeLast.chatSummary = data.chatSummary;
+                if (Array.isArray(data.sources)) activeLast.sources = data.sources;
+              }
+              activeSession.updatedAt = new Date().toISOString();
+              savePersistedState();
+              renderCurrentSession();
+              renderChatHistory();
+              AudioEngine.success();
+              showToast('✨ AI telah selesai menjawab di latar belakang saat Anda keluar.');
+            }
+          } else {
             if (!activeSession.messages) activeSession.messages = [];
             activeSession.messages.push({
               role: 'assistant',
-              content: data.text.trim(),
+              content: trimmed,
               model: data.model || 'AI Model',
               timestamp: new Date().toISOString(),
-              backgroundCompleted: true
+              backgroundCompleted: true,
+              isDeepResearch: !!data.isDeepResearch,
+              chatSummary: data.chatSummary || null,
+              sources: data.sources || null
             });
             activeSession.updatedAt = new Date().toISOString();
             savePersistedState();
@@ -1253,12 +1281,22 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
               content: finalReportText,
               model: modelName || data.model,
               timestamp: new Date().toISOString(),
-              backgroundCompleted: true
+              backgroundCompleted: true,
+              isDeepResearch: !!data.isDeepResearch,
+              chatSummary: data.chatSummary || null,
+              sources: data.sources || null
             });
           } else {
-            lastMsg.content = finalReportText;
-            lastMsg.model = modelName || data.model;
+            if (finalReportText) {
+              lastMsg.content = finalReportText;
+            }
+            lastMsg.model = modelName || data.model || lastMsg.model;
             lastMsg.backgroundCompleted = true;
+            if (data.isDeepResearch) {
+              lastMsg.isDeepResearch = true;
+              if (data.chatSummary) lastMsg.chatSummary = data.chatSummary;
+              if (Array.isArray(data.sources)) lastMsg.sources = data.sources;
+            }
           }
           session.updatedAt = new Date().toISOString();
           savePersistedState();
@@ -8621,9 +8659,11 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
               'Content-Type': 'application/json',
               'Authorization': STATE.settings.openRouterKey ? `Bearer ${STATE.settings.openRouterKey}` : '',
               'x-openrouter-key': STATE.settings.openRouterKey || '',
-              'x-serper-key': STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e'
+              'x-serper-key': STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e',
+              'x-session-id': session ? session.id : ''
             },
             body: JSON.stringify({
+              sessionId: session ? session.id : null,
               topik: contextualTopic,
               prompt: promptText,
               messages: session ? session.messages : [],

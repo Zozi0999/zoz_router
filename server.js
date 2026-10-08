@@ -782,7 +782,7 @@ function flushChatTaskBuffer(sessionId, provider) {
   }
 }
 
-function appendAssistantMessageToSessionDisk(sessionId, content, modelName) {
+function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extraMeta = {}) {
   if (!sessionId || !content || !content.trim()) return false;
   try {
     const cleanSid = String(sessionId).trim();
@@ -823,10 +823,20 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName) {
     // Cek apakah pesan asisten ini sudah tersimpan sebelumnya (hindari duplikasi)
     const lastMsg = msgs[msgs.length - 1];
     if (lastMsg && lastMsg.role === 'assistant') {
-      if (lastMsg.content === trimmedContent || (lastMsg.content && trimmedContent.startsWith(lastMsg.content))) {
+      const msgAgeMs = lastMsg.timestamp ? (Date.now() - new Date(lastMsg.timestamp).getTime()) : 0;
+      const isRecent = msgAgeMs < 10 * 60 * 1000;
+      const isSamePrefix = lastMsg.content && trimmedContent.startsWith(lastMsg.content) && (isRecent || lastMsg.backgroundCompleted);
+
+      if (lastMsg.content === trimmedContent || isSamePrefix) {
         lastMsg.content = trimmedContent;
         lastMsg.model = modelName || lastMsg.model;
         lastMsg.backgroundCompleted = true;
+        if (extraMeta && typeof extraMeta === 'object') {
+          if (extraMeta.isDeepResearch) lastMsg.isDeepResearch = true;
+          if (extraMeta.chatSummary) lastMsg.chatSummary = extraMeta.chatSummary;
+          if (Array.isArray(extraMeta.sources) && extraMeta.sources.length) lastMsg.sources = extraMeta.sources;
+          if (extraMeta.latency) lastMsg.latency = extraMeta.latency;
+        }
         sessData.updatedAt = new Date().toISOString();
         fs.writeFileSync(sessFile, JSON.stringify(sessData, null, 2), 'utf8');
         return true;
@@ -841,6 +851,13 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName) {
       timestamp: new Date().toISOString(),
       backgroundCompleted: true
     };
+
+    if (extraMeta && typeof extraMeta === 'object') {
+      if (extraMeta.isDeepResearch) newMsg.isDeepResearch = true;
+      if (extraMeta.chatSummary) newMsg.chatSummary = extraMeta.chatSummary;
+      if (Array.isArray(extraMeta.sources) && extraMeta.sources.length) newMsg.sources = extraMeta.sources;
+      if (extraMeta.latency) newMsg.latency = extraMeta.latency;
+    }
 
     msgs.push(newMsg);
     sessData.updatedAt = new Date().toISOString();
@@ -2647,6 +2664,13 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       task.status = 'dibatalkan';
       task.currentStep = 'Riset dihentikan oleh pengguna.';
       task.completedAt = new Date().toISOString();
+      if (config.sessionId && task.hasil) {
+        appendAssistantMessageToSessionDisk(config.sessionId, task.hasil + '\n\n*[Riset dihentikan oleh pengguna]*', config.model || config.finalModel || masterResearchModel || 'Deep Research Pro', {
+          isDeepResearch: true,
+          chatSummary: chatSummary,
+          sources: allSources
+        });
+      }
       return;
     }
 
@@ -2658,6 +2682,14 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     task.chatSummary = chatSummary;
     task.sources = allSources;
     task.completedAt = new Date().toISOString();
+
+    if (config.sessionId) {
+      appendAssistantMessageToSessionDisk(config.sessionId, laporanAkhir, config.model || config.finalModel || masterResearchModel || 'Deep Research Pro', {
+        isDeepResearch: true,
+        chatSummary: chatSummary,
+        sources: allSources
+      });
+    }
 
   } catch (error) {
     console.error('Deep research failed:', error);
@@ -3125,9 +3157,11 @@ const server = http.createServer(async (req, res) => {
       }
 
       pruneResearchTasks();
+      const rawSessionId = body.sessionId || req.headers['x-session-id'] || req.headers['X-Session-ID'] || null;
       const taskId = 'research_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
       dbTugasRiset[taskId] = {
         taskId,
+        sessionId: rawSessionId,
         topik,
         status: 'sedang_meneliti',
         progressPercent: 10,
@@ -3149,6 +3183,7 @@ const server = http.createServer(async (req, res) => {
 
       // Jalankan proses riset secara asinkronus di latar belakang dengan arsitektur 1-Model super efisien
       jalankanRisetOtonom(taskId, topik, {
+        sessionId: rawSessionId,
         messages: body.messages || [],
         model: masterModel,
         provider: body.provider || (masterModel.includes('/') ? 'openrouter' : (masterModel.includes(':') ? 'ollama' : 'openrouter')),
@@ -4473,20 +4508,72 @@ const server = http.createServer(async (req, res) => {
     if (!sid) {
       return sendJSON(res, 400, { error: 'sessionId diperlukan' });
     }
+
     const task = dbActiveChatTasks[sid];
-    if (!task) {
-      return sendJSON(res, 200, { active: false, status: 'none', sessionId: sid });
+    if (task && (task.status === 'streaming' || task.status === 'completed')) {
+      return sendJSON(res, 200, {
+        active: task.status === 'streaming',
+        status: task.status,
+        sessionId: task.sessionId,
+        model: task.model,
+        text: task.fullText || '',
+        startedAt: task.startedAt,
+        completedAt: task.completedAt || null,
+        error: task.error || null
+      });
     }
-    return sendJSON(res, 200, {
-      active: task.status === 'streaming',
-      status: task.status,
-      sessionId: task.sessionId,
-      model: task.model,
-      text: task.fullText || '',
-      startedAt: task.startedAt,
-      completedAt: task.completedAt || null,
-      error: task.error || null
-    });
+
+    // Periksa apakah ada tugas Deep Research aktif atau baru selesai untuk sesi ini
+    for (const rId of Object.keys(dbTugasRiset)) {
+      const rTask = dbTugasRiset[rId];
+      if (rTask && rTask.sessionId === sid) {
+        if (rTask.status === 'sedang_meneliti') {
+          return sendJSON(res, 200, {
+            active: true,
+            status: 'streaming',
+            isDeepResearch: true,
+            taskId: rTask.taskId,
+            sessionId: sid,
+            model: 'Deep Research Pro',
+            text: rTask.hasil || rTask.currentStep || 'Sedang meneliti di latar belakang...',
+            startedAt: rTask.createdAt,
+            completedAt: null,
+            error: null
+          });
+        }
+        if (rTask.status === 'selesai') {
+          return sendJSON(res, 200, {
+            active: false,
+            status: 'completed',
+            isDeepResearch: true,
+            taskId: rTask.taskId,
+            sessionId: sid,
+            model: 'Deep Research Pro',
+            text: rTask.hasil || '',
+            chatSummary: rTask.chatSummary || '',
+            sources: rTask.sources || [],
+            startedAt: rTask.createdAt,
+            completedAt: rTask.completedAt || new Date().toISOString(),
+            error: null
+          });
+        }
+      }
+    }
+
+    if (task) {
+      return sendJSON(res, 200, {
+        active: task.status === 'streaming',
+        status: task.status,
+        sessionId: task.sessionId,
+        model: task.model,
+        text: task.fullText || '',
+        startedAt: task.startedAt,
+        completedAt: task.completedAt || null,
+        error: task.error || null
+      });
+    }
+
+    return sendJSON(res, 200, { active: false, status: 'none', sessionId: sid });
   }
 
   // ----------------------------------------------------
@@ -4497,6 +4584,8 @@ const server = http.createServer(async (req, res) => {
       const body = await parseBody(req);
       const urlSid = pathname.startsWith('/api/chat/stop/') ? pathname.split('/')[4] : null;
       const sid = body.sessionId || urlSid || reqUrl.searchParams.get('sessionId');
+      let stoppedAny = false;
+
       if (sid && dbActiveChatTasks[sid]) {
         const task = dbActiveChatTasks[sid];
         task.status = 'aborted';
@@ -4510,9 +4599,24 @@ const server = http.createServer(async (req, res) => {
         if (task.fullText && task.fullText.trim()) {
           appendAssistantMessageToSessionDisk(sid, task.fullText + '\n\n*[Respons dihentikan oleh pengguna]*', task.model);
         }
-        return sendJSON(res, 200, { success: true, message: 'Tugas chat berhasil dihentikan' });
+        stoppedAny = true;
       }
-      return sendJSON(res, 200, { success: true, message: 'Tidak ada tugas aktif untuk sesi ini' });
+
+      // Hentikan juga tugas Deep Research aktif untuk sesi ini jika ada
+      if (sid) {
+        for (const rId of Object.keys(dbTugasRiset)) {
+          const rTask = dbTugasRiset[rId];
+          if (rTask && (rTask.sessionId === sid || rTask.taskId === sid || rTask.taskId === body.taskId) && rTask.status === 'sedang_meneliti') {
+            rTask.aborted = true;
+            rTask.status = 'dibatalkan';
+            rTask.currentStep = 'Riset dihentikan oleh pengguna.';
+            rTask.completedAt = new Date().toISOString();
+            stoppedAny = true;
+          }
+        }
+      }
+
+      return sendJSON(res, 200, { success: true, message: stoppedAny ? 'Tugas chat/riset berhasil dihentikan' : 'Tidak ada tugas aktif untuk sesi ini' });
     } catch (stopErr) {
       return sendJSON(res, 500, { error: stopErr.message });
     }
