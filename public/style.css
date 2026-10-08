@@ -1967,6 +1967,187 @@ html, body {
   text-transform: none;
 }
 
+/* Tab Navigation */
+.image-model-tabs-nav {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+}
+
+.image-model-tab-btn {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.image-model-tab-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.image-model-tab-btn.active {
+  background: rgba(255, 0, 127, 0.18);
+  border-color: rgba(255, 0, 127, 0.45);
+  color: #fff;
+  box-shadow: 0 0 10px rgba(255, 0, 127, 0.35);
+}
+
+.image-model-tab-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* OpenRouter Tab Specifics */
+.image-model-status-bar {
+  font-size: 0.68rem;
+  padding: 5px 8px;
+  border-radius: 5px;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.image-model-status-bar.connected {
+  background: rgba(0, 255, 194, 0.1);
+  border-color: rgba(0, 255, 194, 0.3);
+  color: var(--neon-teal);
+}
+
+.image-model-status-bar.warning {
+  background: rgba(255, 170, 0, 0.12);
+  border-color: rgba(255, 170, 0, 0.35);
+  color: var(--neon-amber);
+}
+
+.image-model-status-bar .status-action-btn {
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.image-model-status-bar .status-action-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.image-model-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.image-model-search-box .search-box-icon {
+  position: absolute;
+  left: 9px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+.image-model-search-input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 0, 127, 0.28);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px 5px 28px;
+  font-size: 0.74rem;
+  color: #fff;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.image-model-search-input:focus {
+  border-color: #FF007F;
+  box-shadow: 0 0 10px rgba(255, 0, 127, 0.3);
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.image-model-custom-row {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+
+.image-model-custom-input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(0, 240, 255, 0.28);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  color: #fff;
+  outline: none;
+  font-family: monospace;
+  transition: all 0.2s ease;
+}
+
+.image-model-custom-input:focus {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.3);
+}
+
+.image-model-custom-btn {
+  padding: 4px 10px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--neon-cyan), #00b4d8);
+  color: #08090D;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.image-model-custom-btn:hover {
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+  transform: translateY(-1px);
+}
+
+.image-model-openrouter-list {
+  max-height: 250px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-right: 2px;
+}
+
+.image-model-openrouter-list::-webkit-scrollbar {
+  width: 4px;
+}
+.image-model-openrouter-list::-webkit-scrollbar-thumb {
+  background: rgba(0, 240, 255, 0.4);
+  border-radius: 2px;
+}
+
 .image-model-section-divider {
   padding: 6px 10px 2px;
   font-size: 0.62rem;

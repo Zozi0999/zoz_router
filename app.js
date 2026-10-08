@@ -108,6 +108,24 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     { id: 'openai/gpt-5-image', name: 'GPT-5 Image (OpenAI Multimodal)', provider: 'openrouter', cat: 'flagship', tag: 'OpenAI' }
   ];
 
+  // Dedicated OpenRouter Curated Image Engines
+  const CURATED_OPENROUTER_IMAGE_MODELS = [
+    { id: 'black-forest-labs/flux-3-image', name: 'FLUX.3 Image', provider: 'openrouter', cat: 'flagship', tag: 'BFL • Next-Gen', desc: 'Sintesis visual generasi baru Black Forest Labs' },
+    { id: 'black-forest-labs/flux.2-max', name: 'FLUX.2 Max', provider: 'openrouter', cat: 'flagship', tag: 'BFL • Max', desc: 'Presisi dan visual fidelity tertinggi Flux.2' },
+    { id: 'black-forest-labs/flux.2-pro', name: 'FLUX.2 Pro', provider: 'openrouter', cat: 'pro', tag: 'BFL • Pro', desc: 'Model profesional rendering kualitas studio' },
+    { id: 'google/gemini-2.5-flash-image', name: 'Gemini 2.5 Flash Image', provider: 'openrouter', cat: 'flagship', tag: 'Google • Flash', desc: 'Sintesis visual cerdas langsung Google Cloud' },
+    { id: 'google/gemini-3.1-flash-image', name: 'Gemini 3.1 Flash Image', provider: 'openrouter', cat: 'flagship', tag: 'Google • 3.1', desc: 'Generasi visual tingkat lanjut Google Gemini 3.1' },
+    { id: 'google/gemini-3-pro-image', name: 'Gemini 3 Pro Image', provider: 'openrouter', cat: 'flagship', tag: 'Google • Pro', desc: 'Model flagship visual Gemini 3 Pro' },
+    { id: 'openai/gpt-5-image', name: 'GPT-5 Image', provider: 'openrouter', cat: 'flagship', tag: 'OpenAI • GPT-5', desc: 'Engine multimodal visual OpenAI generasi baru' },
+    { id: 'openai/gpt-image-2.5-sunburst', name: 'GPT Image Sunburst', provider: 'openrouter', cat: 'flagship', tag: 'OpenAI • Sunburst', desc: 'Model visual difusi artistik OpenAI' },
+    { id: 'recraft/recraft-v4.1-flash', name: 'Recraft v4.1 Flash', provider: 'openrouter', cat: 'vector', tag: 'Recraft • Flash', desc: 'Spesialis grafis vektor, logo, ilustrasi & tipografi' },
+    { id: 'bytedance-seed/seedream-5-0-flash', name: 'ByteDance SeeDream 5.0', provider: 'openrouter', cat: 'fast', tag: 'ByteDance • Flash', desc: 'Engine visual super cepat ByteDance Seed' },
+    { id: 'x-ai/grok-imagine-image-2.0', name: 'Grok Imagine 2.0', provider: 'openrouter', cat: 'flagship', tag: 'xAI • Grok', desc: 'Sintesis visual fotorealistik & kreatif xAI' },
+    { id: 'qwen/qwen-image-3-pro', name: 'Qwen Image 3 Pro', provider: 'openrouter', cat: 'flagship', tag: 'Alibaba • Qwen', desc: 'Model gambar flagship multimodal Alibaba Cloud' },
+    { id: 'microsoft/mai-image-2.6', name: 'Microsoft MAI Image 2.6', provider: 'openrouter', cat: 'flagship', tag: 'Microsoft • MAI', desc: 'Model generasi gambar AI Microsoft Cloud' },
+    { id: 'krea/krea-2-large', name: 'Krea 2 Large', provider: 'openrouter', cat: 'art', tag: 'Krea • Large', desc: 'Model rendering estetika tinggi untuk kreator' }
+  ];
+
   // ==================== STATE MANAGEMENT ====================
   const STATE = {
     mode: 'ollama', // 'ollama' | 'openrouter' | 'auto'
@@ -321,6 +339,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     imageModelDropdown: $('#imageModelDropdown'),
     imageModelBadge: $('#imageModelBadge'),
     imageGenToggleBtn: $('#imageGenToggleBtn'),
+    tabBtnPollinations: $('#tabBtnPollinations'),
+    tabBtnOpenRouter: $('#tabBtnOpenRouter'),
+    panePollinations: $('#panePollinations'),
+    paneOpenRouter: $('#paneOpenRouter'),
+    openRouterStatusBar: $('#openRouterStatusBar'),
+    openRouterConfigBtn: $('#openRouterConfigBtn'),
+    imageModelSearchInput: $('#imageModelSearchInput'),
+    customOpenRouterImageModelInput: $('#customOpenRouterImageModelInput'),
+    btnApplyCustomImageModel: $('#btnApplyCustomImageModel'),
+    imageModelOpenRouterList: $('#imageModelOpenRouterList'),
     composerBox: $('.composer-box'),
     attachmentPreviewBar: $('#attachmentPreviewBar'),
     imagePreviewImg: $('#imagePreviewImg'),
@@ -9019,6 +9047,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
   function getImageModelDisplayName(modelId) {
     if (!modelId || modelId === 'off') return 'Nonaktif (Mode Obrolan)';
     const found = DEFAULT_IMAGE_MODELS.find(m => m.id === modelId) || 
+                  CURATED_OPENROUTER_IMAGE_MODELS.find(m => m.id === modelId) ||
                   (STATE.availableImageModels && STATE.availableImageModels.find(m => m.id === modelId));
     if (found) return found.name || found.id;
     const m = String(modelId).toLowerCase();
@@ -9029,13 +9058,15 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (m === 'turbo') return 'SDXL Turbo';
     if (m === 'flux-pro') return 'Flux.1 Pro';
     if (m === 'midjourney') return 'Midjourney Style';
-    if (m.includes('gemini')) return 'Gemini 2.5 Flash Image';
-    if (m.includes('gpt')) return 'GPT-5 Image';
+    if (m.includes('/')) {
+      const parts = modelId.split('/');
+      return parts[1] ? parts[1].replace(/[-_]/g, ' ') : modelId;
+    }
     return modelId;
   }
 
   function getImageModelBadgeText(modelId) {
-    if (!modelId) return 'Flux';
+    if (!modelId || modelId === 'off') return 'Flux';
     const m = String(modelId).toLowerCase();
     if (m === 'flux-realism') return 'Realism';
     if (m === 'flux-anime') return 'Anime';
@@ -9043,8 +9074,20 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (m === 'turbo') return 'Turbo';
     if (m === 'flux-pro') return 'Pro';
     if (m === 'midjourney') return 'MJ';
+    if (m.includes('flux-3') || m.includes('flux.3')) return 'FLUX-3';
+    if (m.includes('flux.2') || m.includes('flux-2')) return 'FLUX-2';
     if (m.includes('gemini')) return 'Gemini';
-    if (m.includes('gpt')) return 'GPT-5';
+    if (m.includes('gpt')) return 'GPT';
+    if (m.includes('recraft')) return 'Recraft';
+    if (m.includes('seedream')) return 'Seedream';
+    if (m.includes('grok')) return 'Grok';
+    if (m.includes('qwen')) return 'Qwen';
+    if (m.includes('krea')) return 'Krea';
+    if (m.includes('mai')) return 'MAI';
+    if (m.includes('/')) {
+      const part = modelId.split('/')[1] || modelId;
+      return part.slice(0, 8);
+    }
     return 'Flux';
   }
 
@@ -9093,6 +9136,124 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     });
   }
 
+  function switchImageModelTab(tabName) {
+    const isOR = tabName === 'openrouter';
+    if (els.tabBtnPollinations) els.tabBtnPollinations.classList.toggle('active', !isOR);
+    if (els.tabBtnOpenRouter) els.tabBtnOpenRouter.classList.toggle('active', isOR);
+    if (els.panePollinations) els.panePollinations.style.display = isOR ? 'none' : 'flex';
+    if (els.paneOpenRouter) els.paneOpenRouter.style.display = isOR ? 'flex' : 'none';
+
+    if (isOR) {
+      updateImageModelStatusBar();
+      populateOpenRouterImageModels(els.imageModelSearchInput?.value || '');
+      setTimeout(() => els.imageModelSearchInput?.focus(), 60);
+    }
+  }
+
+  function updateImageModelStatusBar() {
+    if (!els.openRouterStatusBar) return;
+    const hasKey = Boolean(STATE.settings.openRouterKey);
+    els.openRouterStatusBar.className = `image-model-status-bar ${hasKey ? 'connected' : 'warning'}`;
+    els.openRouterStatusBar.innerHTML = hasKey
+      ? `<span><i class="fa-solid fa-circle-check" style="color:var(--neon-teal);"></i> API Key Terhubung • 59+ Cloud Image Engines</span>
+         <button class="status-action-btn" id="openRouterConfigBtn" type="button">Pengaturan</button>`
+      : `<span><i class="fa-solid fa-circle-exclamation" style="color:var(--neon-amber);"></i> Butuh OpenRouter Key untuk cloud models</span>
+         <button class="status-action-btn" id="openRouterConfigBtn" type="button">Buka Pengaturan</button>`;
+
+    const cfgBtn = els.openRouterStatusBar.querySelector('#openRouterConfigBtn');
+    cfgBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeImageModelDropdown();
+      const modal = $('#settingsModal');
+      if (modal) {
+        modal.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === 'tabProviders'));
+        modal.querySelectorAll('.settings-tab-pane').forEach(pane => pane.classList.toggle('active', pane.id === 'tabProviders'));
+      }
+      openModal('settingsModal');
+      AudioEngine.click();
+    });
+  }
+
+  function populateOpenRouterImageModels(searchQuery = '') {
+    if (!els.imageModelOpenRouterList) return;
+    const q = (searchQuery || '').toLowerCase().trim();
+    
+    // Gabungkan model terkurasi dan hasil fetch live OpenRouter
+    const allModelsMap = new Map();
+    CURATED_OPENROUTER_IMAGE_MODELS.forEach(m => allModelsMap.set(m.id, m));
+    if (Array.isArray(STATE.availableImageModels)) {
+      STATE.availableImageModels.forEach(m => {
+        if (m.provider === 'openrouter' || (m.id && m.id.includes('/'))) {
+          if (!allModelsMap.has(m.id)) allModelsMap.set(m.id, m);
+        }
+      });
+    }
+
+    let list = Array.from(allModelsMap.values());
+    if (q) {
+      list = list.filter(m => 
+        m.id.toLowerCase().includes(q) || 
+        (m.name && m.name.toLowerCase().includes(q)) ||
+        (m.desc && m.desc.toLowerCase().includes(q)) ||
+        (m.tag && m.tag.toLowerCase().includes(q))
+      );
+    }
+
+    if (list.length === 0) {
+      els.imageModelOpenRouterList.innerHTML = `
+        <div style="padding: 16px 8px; text-align: center; color: var(--text-dim); font-size: 0.72rem;">
+          <i class="fa-solid fa-ghost" style="font-size: 1.2rem; margin-bottom: 6px; display: block; opacity: 0.5;"></i>
+          Tidak ada model OpenRouter yang cocok dengan "<strong>${escapeHtml(q)}</strong>"<br>
+          Gunakan baris kustom di atas untuk memasukkan model secara manual.
+        </div>
+      `;
+      return;
+    }
+
+    const activeModel = STATE.settings.imageModel || 'flux';
+    const isImageMode = Boolean(STATE.isImageGenMode);
+
+    els.imageModelOpenRouterList.innerHTML = list.map(m => {
+      const isSelected = isImageMode && (m.id === activeModel);
+      let icon = 'fa-cloud';
+      let accentClass = 'cloud-accent';
+      const idLow = m.id.toLowerCase();
+      if (idLow.includes('flux')) { icon = 'fa-bolt-lightning'; accentClass = 'flux-accent'; }
+      else if (idLow.includes('gemini')) { icon = 'fa-brands fa-google'; accentClass = 'realism-accent'; }
+      else if (idLow.includes('gpt') || idLow.includes('openai')) { icon = 'fa-microchip'; accentClass = 'cloud-accent'; }
+      else if (idLow.includes('recraft')) { icon = 'fa-vector-square'; accentClass = 'anime-accent'; }
+      else if (idLow.includes('grok')) { icon = 'fa-rocket'; accentClass = 'turbo-accent'; }
+      else if (idLow.includes('seedream')) { icon = 'fa-seedling'; accentClass = 'cgi-accent'; }
+      else if (idLow.includes('qwen')) { icon = 'fa-dragon'; accentClass = 'mj-accent'; }
+      else if (idLow.includes('krea')) { icon = 'fa-palette'; accentClass = 'pro-accent'; }
+
+      return `
+        <button class="image-model-item ${isSelected ? 'active' : ''}" type="button" data-model="${escapeHtml(m.id)}">
+          <div class="image-model-icon-box ${accentClass}">
+            <i class="${icon}"></i>
+          </div>
+          <div class="image-model-info">
+            <div class="image-model-title-row">
+              <span class="image-model-title">${escapeHtml(m.name || m.id)}</span>
+              <span class="image-model-tag">${escapeHtml(m.tag || 'OpenRouter')}</span>
+            </div>
+            <span class="image-model-desc">${escapeHtml(m.desc || m.id)}</span>
+          </div>
+          <i class="fa-solid fa-check image-model-check" style="${isSelected ? 'display: block;' : 'display: none;'}"></i>
+        </button>
+      `;
+    }).join('');
+
+    // Pasang listener klik ke item model OpenRouter
+    els.imageModelOpenRouterList.querySelectorAll('.image-model-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const modelVal = item.dataset.model;
+        if (modelVal) setImageModel(modelVal);
+      });
+    });
+  }
+
   function toggleImageModelDropdown(e) {
     if (e) {
       e.preventDefault();
@@ -9113,6 +9274,15 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     closeSearchDropdown();
     els.imageModelDropdown.style.display = 'flex';
     els.imageGenToggleBtn?.setAttribute('aria-expanded', 'true');
+
+    // Auto switch ke tab OpenRouter jika model saat ini adalah model cloud OpenRouter
+    const currentModel = STATE.settings.imageModel || 'flux';
+    if (currentModel.includes('/')) {
+      switchImageModelTab('openrouter');
+    } else {
+      switchImageModelTab('pollinations');
+    }
+
     AudioEngine.click();
   }
 
@@ -12031,6 +12201,59 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         const modelVal = item.dataset.model || 'flux';
         setImageModel(modelVal);
       });
+    });
+
+    // Image Model Dropdown Tabs (Pollinations vs OpenRouter)
+    els.tabBtnPollinations?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      switchImageModelTab('pollinations');
+    });
+
+    els.tabBtnOpenRouter?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      switchImageModelTab('openrouter');
+    });
+
+    // OpenRouter Image Model Search Filter
+    els.imageModelSearchInput?.addEventListener('input', (e) => {
+      populateOpenRouterImageModels(e.target.value);
+    });
+
+    els.imageModelSearchInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        const firstItem = els.imageModelOpenRouterList?.querySelector('.image-model-item');
+        if (firstItem && firstItem.dataset.model) {
+          setImageModel(firstItem.dataset.model);
+        }
+      }
+    });
+
+    // Custom OpenRouter Model Button & Enter key
+    els.btnApplyCustomImageModel?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const val = els.customOpenRouterImageModelInput?.value.trim();
+      if (val) {
+        setImageModel(val);
+        if (els.customOpenRouterImageModelInput) els.customOpenRouterImageModelInput.value = '';
+      } else {
+        showToast('⚠️ Masukkan model ID OpenRouter (misal: black-forest-labs/flux-1-schnell)');
+      }
+    });
+
+    els.customOpenRouterImageModelInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        const val = els.customOpenRouterImageModelInput?.value.trim();
+        if (val) {
+          setImageModel(val);
+          els.customOpenRouterImageModelInput.value = '';
+        } else {
+          showToast('⚠️ Masukkan model ID OpenRouter (misal: black-forest-labs/flux-1-schnell)');
+        }
+      }
     });
 
     // Keyboard shortcuts: Alt+I (Image Mode / Dropdown) & Alt+H (Toggle Prompt Visibility)

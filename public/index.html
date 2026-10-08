@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261007_v127">
+  <link rel="stylesheet" href="style.css?v=20261007_v128">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -411,154 +411,161 @@
               <div class="image-model-dropdown-popup" id="imageModelDropdown" style="display: none;">
                 <div class="image-model-dropdown-header">
                   <span><i class="fa-solid fa-wand-magic-sparkles"></i> AI Image Studio Engine</span>
-                  <span class="image-model-header-tag">Multi-Style AI</span>
-                </div>
-                
-                <!-- Nonaktif (Mode Obrolan Biasa) -->
-                <button class="image-model-item" id="imageModelOptionOff" type="button" data-model="off">
-                  <div class="image-model-icon-box off-accent">
-                    <i class="fa-solid fa-ban"></i>
-                  </div>
-                  <div class="image-model-info">
-                    <span class="image-model-title">Nonaktif (Mode Obrolan)</span>
-                    <span class="image-model-desc">Kembali ke pesan teks & penalaran AI</span>
-                  </div>
-                  <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                </button>
-
-                <div class="image-model-section-divider">
-                  <span>Model Gratis & Kilat (Pollinations AI)</span>
+                  <span class="image-model-header-tag" id="imageModelHeaderTag">Multi-Style AI</span>
                 </div>
 
-                <button class="image-model-item active" type="button" data-model="flux">
-                  <div class="image-model-icon-box flux-accent">
-                    <i class="fa-solid fa-bolt-lightning"></i>
-                  </div>
-                  <div class="image-model-info">
-                    <div class="image-model-title-row">
-                      <span class="image-model-title">Flux.1 Schnell</span>
-                      <span class="image-model-tag">Gratis • Kilat</span>
-                    </div>
-                    <span class="image-model-desc">Standar gambar cepat, tajam & serbaguna</span>
-                  </div>
-                  <i class="fa-solid fa-check image-model-check"></i>
-                </button>
-
-                <button class="image-model-item" type="button" data-model="flux-realism">
-                  <div class="image-model-icon-box realism-accent">
-                    <i class="fa-solid fa-camera"></i>
-                  </div>
-                  <div class="image-model-info">
-                    <div class="image-model-title-row">
-                      <span class="image-model-title">Flux Realism</span>
-                      <span class="image-model-tag">Foto • HD</span>
-                    </div>
-                    <span class="image-model-desc">Fotografi realistis, sinematik & tekstur nyata</span>
-                  </div>
-                  <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                </button>
-
-                <button class="image-model-item" type="button" data-model="flux-anime">
-                  <div class="image-model-icon-box anime-accent">
-                    <i class="fa-solid fa-paintbrush"></i>
-                  </div>
-                  <div class="image-model-info">
-                    <div class="image-model-title-row">
-                      <span class="image-model-title">Flux Anime & Manga</span>
-                      <span class="image-model-tag">Anime • 2D</span>
-                    </div>
-                    <span class="image-model-desc">Ilustrasi anime Jepang, manhwa & webtoon</span>
-                  </div>
-                  <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                </button>
-
-                <button class="image-model-item" type="button" data-model="flux-3d">
-                  <div class="image-model-icon-box cgi-accent">
-                    <i class="fa-solid fa-cubes"></i>
-                  </div>
-                  <div class="image-model-info">
-                    <div class="image-model-title-row">
-                      <span class="image-model-title">Flux 3D CGI</span>
-                      <span class="image-model-tag">3D • Render</span>
-                    </div>
-                    <span class="image-model-desc">Render 3D animasi, Octane CGI & Sci-Fi digital</span>
-                  </div>
-                  <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                </button>
-
-                <button class="image-model-item" type="button" data-model="turbo">
-                  <div class="image-model-icon-box turbo-accent">
-                    <i class="fa-solid fa-gauge-high"></i>
-                  </div>
-                  <div class="image-model-info">
-                    <div class="image-model-title-row">
-                      <span class="image-model-title">SDXL Turbo</span>
-                      <span class="image-model-tag">Fast • Realtime</span>
-                    </div>
-                    <span class="image-model-desc">Generasi super cepat dalam hitungan detik</span>
-                  </div>
-                  <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                </button>
-
-                <button class="image-model-item" type="button" data-model="flux-pro">
-                  <div class="image-model-icon-box pro-accent">
-                    <i class="fa-solid fa-gem"></i>
-                  </div>
-                  <div class="image-model-info">
-                    <div class="image-model-title-row">
-                      <span class="image-model-title">Flux.1 Pro</span>
-                      <span class="image-model-tag">Pro • Detail</span>
-                    </div>
-                    <span class="image-model-desc">Komposisi tingkat lanjut & estetika profesional</span>
-                  </div>
-                  <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                </button>
-
-                <button class="image-model-item" type="button" data-model="midjourney">
-                  <div class="image-model-icon-box mj-accent">
-                    <i class="fa-solid fa-palette"></i>
-                  </div>
-                  <div class="image-model-info">
-                    <div class="image-model-title-row">
-                      <span class="image-model-title">Midjourney Style</span>
-                      <span class="image-model-tag">Art • Dramatic</span>
-                    </div>
-                    <span class="image-model-desc">Komposisi artistik, dramatis & wallpaper estetik</span>
-                  </div>
-                  <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                </button>
-
-                <div class="image-model-section-divider">
-                  <span>OpenRouter Cloud (Kunci API)</span>
+                <!-- Tab Switcher Nav: Pollinations vs OpenRouter -->
+                <div class="image-model-tabs-nav" id="imageModelTabsNav">
+                  <button class="image-model-tab-btn active" id="tabBtnPollinations" type="button" data-tab="pollinations">
+                    <i class="fa-solid fa-bolt-lightning"></i> Pollinations (Gratis)
+                  </button>
+                  <button class="image-model-tab-btn" id="tabBtnOpenRouter" type="button" data-tab="openrouter">
+                    <i class="fa-solid fa-cloud"></i> OpenRouter (Cloud)
+                  </button>
                 </div>
 
-                <button class="image-model-item" type="button" data-model="google/gemini-2.5-flash-image">
-                  <div class="image-model-icon-box cloud-accent">
-                    <i class="fa-brands fa-google"></i>
-                  </div>
-                  <div class="image-model-info">
-                    <div class="image-model-title-row">
-                      <span class="image-model-title">Gemini 2.5 Flash Image</span>
-                      <span class="image-model-tag">Google AI</span>
+                <!-- PANE 1: POLLINATIONS (GRATIS & KILAT) -->
+                <div class="image-model-tab-pane" id="panePollinations">
+                  <!-- Nonaktif (Mode Obrolan Biasa) -->
+                  <button class="image-model-item" id="imageModelOptionOff" type="button" data-model="off">
+                    <div class="image-model-icon-box off-accent">
+                      <i class="fa-solid fa-ban"></i>
                     </div>
-                    <span class="image-model-desc">Sintesis visual cerdas langsung Google Cloud</span>
-                  </div>
-                  <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                </button>
+                    <div class="image-model-info">
+                      <span class="image-model-title">Nonaktif (Mode Obrolan)</span>
+                      <span class="image-model-desc">Kembali ke pesan teks & penalaran AI</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
+                  </button>
 
-                <button class="image-model-item" type="button" data-model="openai/gpt-5-image">
-                  <div class="image-model-icon-box cloud-accent">
-                    <i class="fa-solid fa-microchip"></i>
+                  <div class="image-model-section-divider">
+                    <span>Model Gratis & Kilat (Pollinations AI)</span>
                   </div>
-                  <div class="image-model-info">
-                    <div class="image-model-title-row">
-                      <span class="image-model-title">GPT-5 Image</span>
-                      <span class="image-model-tag">OpenAI</span>
+
+                  <button class="image-model-item active" type="button" data-model="flux">
+                    <div class="image-model-icon-box flux-accent">
+                      <i class="fa-solid fa-bolt-lightning"></i>
                     </div>
-                    <span class="image-model-desc">Engine multimodal visual OpenAI generasi baru</span>
+                    <div class="image-model-info">
+                      <div class="image-model-title-row">
+                        <span class="image-model-title">Flux.1 Schnell</span>
+                        <span class="image-model-tag">Gratis • Kilat</span>
+                      </div>
+                      <span class="image-model-desc">Standar gambar cepat, tajam & serbaguna</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check"></i>
+                  </button>
+
+                  <button class="image-model-item" type="button" data-model="flux-realism">
+                    <div class="image-model-icon-box realism-accent">
+                      <i class="fa-solid fa-camera"></i>
+                    </div>
+                    <div class="image-model-info">
+                      <div class="image-model-title-row">
+                        <span class="image-model-title">Flux Realism</span>
+                        <span class="image-model-tag">Foto • HD</span>
+                      </div>
+                      <span class="image-model-desc">Fotografi realistis, sinematik & tekstur nyata</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
+                  </button>
+
+                  <button class="image-model-item" type="button" data-model="flux-anime">
+                    <div class="image-model-icon-box anime-accent">
+                      <i class="fa-solid fa-paintbrush"></i>
+                    </div>
+                    <div class="image-model-info">
+                      <div class="image-model-title-row">
+                        <span class="image-model-title">Flux Anime & Manga</span>
+                        <span class="image-model-tag">Anime • 2D</span>
+                      </div>
+                      <span class="image-model-desc">Ilustrasi anime Jepang, manhwa & webtoon</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
+                  </button>
+
+                  <button class="image-model-item" type="button" data-model="flux-3d">
+                    <div class="image-model-icon-box cgi-accent">
+                      <i class="fa-solid fa-cubes"></i>
+                    </div>
+                    <div class="image-model-info">
+                      <div class="image-model-title-row">
+                        <span class="image-model-title">Flux 3D CGI</span>
+                        <span class="image-model-tag">3D • Render</span>
+                      </div>
+                      <span class="image-model-desc">Render 3D animasi, Octane CGI & Sci-Fi digital</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
+                  </button>
+
+                  <button class="image-model-item" type="button" data-model="turbo">
+                    <div class="image-model-icon-box turbo-accent">
+                      <i class="fa-solid fa-gauge-high"></i>
+                    </div>
+                    <div class="image-model-info">
+                      <div class="image-model-title-row">
+                        <span class="image-model-title">SDXL Turbo</span>
+                        <span class="image-model-tag">Fast • Realtime</span>
+                      </div>
+                      <span class="image-model-desc">Generasi super cepat dalam hitungan detik</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
+                  </button>
+
+                  <button class="image-model-item" type="button" data-model="flux-pro">
+                    <div class="image-model-icon-box pro-accent">
+                      <i class="fa-solid fa-gem"></i>
+                    </div>
+                    <div class="image-model-info">
+                      <div class="image-model-title-row">
+                        <span class="image-model-title">Flux.1 Pro</span>
+                        <span class="image-model-tag">Pro • Detail</span>
+                      </div>
+                      <span class="image-model-desc">Komposisi tingkat lanjut & estetika profesional</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
+                  </button>
+
+                  <button class="image-model-item" type="button" data-model="midjourney">
+                    <div class="image-model-icon-box mj-accent">
+                      <i class="fa-solid fa-palette"></i>
+                    </div>
+                    <div class="image-model-info">
+                      <div class="image-model-title-row">
+                        <span class="image-model-title">Midjourney Style</span>
+                        <span class="image-model-tag">Art • Dramatic</span>
+                      </div>
+                      <span class="image-model-desc">Komposisi artistik, dramatis & wallpaper estetik</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
+                  </button>
+                </div>
+
+                <!-- PANE 2: OPENROUTER (CLOUD IMAGE ENGINES) -->
+                <div class="image-model-tab-pane" id="paneOpenRouter" style="display: none;">
+                  <!-- Status Bar API Key -->
+                  <div class="image-model-status-bar" id="openRouterStatusBar">
+                    <span class="status-text"><i class="fa-solid fa-circle-notch fa-spin"></i> Memeriksa API Key...</span>
+                    <button class="status-action-btn" id="openRouterConfigBtn" type="button">Pengaturan</button>
                   </div>
-                  <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                </button>
+
+                  <!-- Pencarian Model OpenRouter -->
+                  <div class="image-model-search-box">
+                    <i class="fa-solid fa-magnifying-glass search-box-icon"></i>
+                    <input type="text" id="imageModelSearchInput" class="image-model-search-input" placeholder="Cari model OpenRouter (Flux, Gemini, GPT, Recraft...)" autocomplete="off" />
+                  </div>
+
+                  <!-- Custom Model Input Row -->
+                  <div class="image-model-custom-row">
+                    <input type="text" id="customOpenRouterImageModelInput" class="image-model-custom-input" placeholder="ID model kustom (misal: vendor/model)..." autocomplete="off" />
+                    <button class="image-model-custom-btn" id="btnApplyCustomImageModel" type="button">Pilih</button>
+                  </div>
+
+                  <!-- Scrollable Container of OpenRouter Models -->
+                  <div class="image-model-openrouter-list" id="imageModelOpenRouterList">
+                    <!-- Populated dynamically via JS -->
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1219,6 +1226,6 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
-  <script src="app.js?v=20261007_v127"></script>
+  <script src="app.js?v=20261007_v128"></script>
 </body>
 </html>
