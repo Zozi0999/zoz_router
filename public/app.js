@@ -3978,7 +3978,8 @@ ${organicBlock}
 
       // Ambil katalog model khusus Image Generation OpenRouter secara live
       try {
-        const imgRes = await fetch('https://openrouter.ai/api/v1/images/models', { headers }).catch(() => null);
+        const imgUrl = IS_GITHUB_PAGES ? 'https://openrouter.ai/api/v1/images/models' : '/api/openrouter/images/models';
+        const imgRes = await fetch(imgUrl, { headers }).catch(() => null);
         if (imgRes && imgRes.ok) {
           const imgData = await imgRes.json();
           if (imgData && Array.isArray(imgData.data)) {
@@ -3992,6 +3993,9 @@ ${organicBlock}
             }));
             const pollinationsOnly = DEFAULT_IMAGE_MODELS.filter(dm => dm.provider === 'pollinations');
             STATE.availableImageModels = [...pollinationsOnly, ...mappedImgModels];
+            if (els.paneOpenRouter && els.paneOpenRouter.style.display !== 'none') {
+              populateOpenRouterImageModels(els.imageModelSearchInput?.value || '');
+            }
           }
         }
       } catch (imgErr) {
@@ -4293,9 +4297,10 @@ ${organicBlock}
       await runDeepResearchStreaming(session, cleanResearchPrompt || text, effectiveImages, activeModel, activeEngine);
     } else if (isImageGenerationTrigger(text) && !canModelHandleImage && !STATE.settings.openRouterKey && (STATE.mode === 'openrouter' || targetModel.includes('/'))) {
       // Jika model OpenRouter dipilih tapi tanpa API Key untuk tool calling dan tidak mampu gambar langsung,
-      // fallback ke AI Image Studio
+      // fallback ke AI Image Studio dengan model gratis (Pollinations) agar pengguna tetap mendapatkan karya visual
       const cleanImgPrompt = extractImagePrompt(text);
-      await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel);
+      const fallbackImgModel = (STATE.settings.imageModel && !STATE.settings.imageModel.includes('/')) ? STATE.settings.imageModel : 'flux';
+      await runImageGeneration(session, cleanImgPrompt, fallbackImgModel);
     } else {
       // MODE BIASA: Selalu jalankan streaming chat normal dengan pencarian web biasa otonom (BUKAN Deep Research)
       if (STATE.isDeepResearch) {
@@ -9189,6 +9194,19 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       });
     }
 
+    // Pastikan model kustom aktif yang dipilih pengguna tetap muncul di daftar jika belum ada
+    const activeModel = STATE.settings.imageModel || 'flux';
+    if (activeModel.includes('/') && !allModelsMap.has(activeModel)) {
+      allModelsMap.set(activeModel, {
+        id: activeModel,
+        name: getImageModelDisplayName(activeModel),
+        provider: 'openrouter',
+        cat: 'custom',
+        tag: 'Custom • Cloud',
+        desc: `Model Kustom OpenRouter: ${activeModel}`
+      });
+    }
+
     let list = Array.from(allModelsMap.values());
     if (q) {
       list = list.filter(m => 
@@ -9210,7 +9228,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       return;
     }
 
-    const activeModel = STATE.settings.imageModel || 'flux';
     const isImageMode = Boolean(STATE.isImageGenMode);
 
     els.imageModelOpenRouterList.innerHTML = list.map(m => {
@@ -11916,6 +11933,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (window.PointerEvent) {
       els.sendPromptBtn?.addEventListener('pointerdown', startSendPress);
       els.sendPromptBtn?.addEventListener('pointerup', cancelSendPress);
+      els.sendPromptBtn?.addEventListener('pointerleave', cancelSendPress);
       els.sendPromptBtn?.addEventListener('pointercancel', cancelSendPress);
     } else {
       els.sendPromptBtn?.addEventListener('touchstart', startSendPress, { passive: true });
@@ -11923,7 +11941,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       els.sendPromptBtn?.addEventListener('touchcancel', cancelSendPress);
       els.sendPromptBtn?.addEventListener('mousedown', startSendPress);
       els.sendPromptBtn?.addEventListener('mouseup', cancelSendPress);
+      els.sendPromptBtn?.addEventListener('mouseleave', cancelSendPress);
     }
+    window.addEventListener('blur', cancelSendPress);
 
     els.sendPromptBtn?.addEventListener('click', (e) => {
       if (isSendLongPressed) {

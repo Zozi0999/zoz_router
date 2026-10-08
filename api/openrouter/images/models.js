@@ -1,25 +1,22 @@
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, x-title, X-Title, http-referer, HTTP-Referer');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, x-title, X-Title, http-referer, HTTP-Referer, x-openrouter-key');
 
   if (req.method === 'OPTIONS') return res.status(204).end();
 
   try {
     let authHeader = req.headers.authorization;
     if (!authHeader) {
-      const qKey = req.headers['x-api-key'] || req.query?.key || req.query?.apiKey || req.query?.openRouterKey || process.env.OPENROUTER_API_KEY;
+      const qKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || req.query?.key || req.query?.apiKey || req.query?.openRouterKey || process.env.OPENROUTER_API_KEY;
       if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
     }
-    const headers = {};
-    if (authHeader) headers['Authorization'] = authHeader;
-    headers['User-Agent'] = 'ZozRouter/1.0';
+    const headers = {
+      'User-Agent': 'ZozRouter/1.0',
+      ...(authHeader ? { 'Authorization': authHeader } : {})
+    };
 
-    const targetUrl = (req.query?.type === 'images' || req.query?.images === 'true')
-      ? 'https://openrouter.ai/api/v1/images/models'
-      : 'https://openrouter.ai/api/v1/models';
-
-    const response = await fetch(targetUrl, { headers });
+    const response = await fetch('https://openrouter.ai/api/v1/images/models', { headers });
     const rawText = await response.text();
     try {
       const data = JSON.parse(rawText);

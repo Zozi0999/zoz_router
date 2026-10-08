@@ -3822,6 +3822,63 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // OpenRouter: Get Image Model List
+  if ((pathname === '/api/openrouter/images/models' || pathname === '/api/openrouter/image-models') && method === 'GET') {
+    let authHeader = req.headers['authorization'];
+    if (!authHeader) {
+      const qKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || process.env.OPENROUTER_API_KEY;
+      if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
+    }
+    const options = {
+      hostname: 'openrouter.ai',
+      port: 443,
+      path: '/api/v1/images/models',
+      method: 'GET',
+      headers: {
+        'User-Agent': 'ZozRouter/1.0',
+        ...(authHeader ? { 'Authorization': authHeader } : {})
+      },
+      timeout: 15000
+    };
+
+    const proxyReq = https.request(options, (proxyRes) => {
+      let rawData = '';
+      proxyRes.on('data', chunk => rawData += chunk);
+      proxyRes.on('end', () => {
+        try {
+          const data = JSON.parse(rawData);
+          if (proxyRes.statusCode < 200 || proxyRes.statusCode >= 300) {
+            return sendJSON(res, proxyRes.statusCode, {
+              success: false,
+              data: [],
+              error: data?.error?.message || data?.message || `HTTP ${proxyRes.statusCode} from OpenRouter`,
+              ...data
+            });
+          }
+          return sendJSON(res, proxyRes.statusCode, data);
+        } catch (e) {
+          return sendJSON(res, 502, { success: false, data: [], error: 'Failed to parse OpenRouter image models response' });
+        }
+      });
+      proxyRes.on('error', (err) => {
+        if (!res.headersSent) sendJSON(res, 502, { success: false, data: [], error: 'OpenRouter image models stream error: ' + err.message });
+      });
+    });
+
+    proxyReq.on('timeout', () => {
+      proxyReq.destroy();
+      if (!res.headersSent) sendJSON(res, 504, { error: 'OpenRouter image models request timed out (15s)' });
+    });
+
+    proxyReq.on('error', (err) => {
+      if (res.headersSent) return;
+      return sendJSON(res, 503, { error: 'OpenRouter connection error: ' + err.message });
+    });
+
+    proxyReq.end();
+    return;
+  }
+
   // OpenRouter: Validate API Key / Check Auth Status
   if (pathname === '/api/openrouter/auth-check' && method === 'GET') {
     let authHeader = req.headers['authorization'];

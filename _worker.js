@@ -212,6 +212,55 @@ export default {
       }
     }
 
+    // Proxy OpenRouter Image Models
+    if ((url.pathname === '/api/openrouter/images/models' || url.pathname === '/api/openrouter/image-models') && request.method === 'GET') {
+      try {
+        let authHeader = request.headers.get('Authorization');
+        if (!authHeader) {
+          const qKey = request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || url.searchParams.get('openRouterKey') || env?.OPENROUTER_API_KEY;
+          if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
+        }
+        const headers = {
+          'User-Agent': 'ZozRouter/1.0',
+          ...(authHeader ? { 'Authorization': authHeader } : {})
+        };
+        const res = await fetch('https://openrouter.ai/api/v1/images/models', { headers });
+        const rawText = await res.text();
+        try {
+          const parsed = JSON.parse(rawText);
+          if (!res.ok) {
+            return new Response(JSON.stringify({
+              success: false,
+              data: [],
+              error: parsed?.error?.message || parsed?.message || `HTTP ${res.status} from OpenRouter`,
+              ...parsed
+            }), {
+              status: res.status,
+              headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            });
+          }
+          return new Response(rawText, {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        } catch (_) {
+          return new Response(JSON.stringify({
+            success: false,
+            data: [],
+            error: `HTTP ${res.status}: Respon non-JSON dari OpenRouter (${rawText.slice(0, 150)})`
+          }), {
+            status: res.ok ? 200 : res.status,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+      } catch (e) {
+        return new Response(JSON.stringify({ success: false, data: [], error: e.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
     // Proxy OpenRouter Auth Check
     if (url.pathname === '/api/openrouter/auth-check' && request.method === 'GET') {
       try {
