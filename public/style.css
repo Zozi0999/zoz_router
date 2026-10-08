@@ -7352,3 +7352,19 @@ body.modal-open {
 
 
 
+
+/* ==== Generator tools live in the Attachment menu; composer row stays clean for the prompt ==== */
+.composer-btn.image-gen-toggle,
+.composer-btn.music-gen-toggle,
+.composer-btn.video-gen-toggle {
+  display: none !important;
+}
+.image-model-menu-wrapper,
+.music-model-menu-wrapper {
+  width: 0;
+  height: 0;
+  min-width: 0;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+}

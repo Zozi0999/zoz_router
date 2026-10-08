@@ -11590,6 +11590,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
               trackAiComposed = Boolean(data.aiComposed);
               trackAiModel = data.aiModel || trackAiModel;
               trackAiProvider = data.aiProvider || trackAiProvider;
+              if (!data.aiComposed && data.aiError) {
+                showToast(`⚠️ ${data.aiError} Dipakai generator cadangan. Coba model lain / prompt lebih jelas.`, 'warning');
+              }
             } else {
               throw new Error(data.error || 'Server tidak mengembalikan file audio');
             }
@@ -14416,27 +14419,31 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       closeAttachmentDropdown();
       els.imageFileInput?.click();
     });
-    els.attachOptionGenImage?.addEventListener('click', () => {
+    els.attachOptionGenImage?.addEventListener('click', (e) => {
+      e.stopPropagation();
       closeAttachmentDropdown();
       STATE.isImageGenMode = true;
+      STATE.isMusicGenMode = false;
+      STATE.isVideoGenMode = false;
+      updateMusicGenModeUI();
+      updateVideoGenModeUI();
       updateImageGenModeUI();
       openImageModelDropdown();
       AudioEngine.click();
     });
-    els.attachOptionGenMusic?.addEventListener('click', () => {
+    els.attachOptionGenMusic?.addEventListener('click', (e) => {
+      e.stopPropagation();
       closeAttachmentDropdown();
-      STATE.isMusicGenMode = !STATE.isMusicGenMode;
-      if (STATE.isMusicGenMode) {
-        STATE.isImageGenMode = false;
-        STATE.isVideoGenMode = false;
-        updateImageGenModeUI();
-        updateVideoGenModeUI();
-      }
+      STATE.isMusicGenMode = true;
+      STATE.isImageGenMode = false;
+      STATE.isVideoGenMode = false;
+      updateImageGenModeUI();
+      updateVideoGenModeUI();
       updateMusicGenModeUI();
+      openMusicModelDropdown();
       if (els.promptInput) {
         els.promptInput.focus();
       }
-      showToast(STATE.isMusicGenMode ? '🎵 Mode AI Music Aktif: Masukkan konsep / genre musik...' : 'Mode AI Music dinonaktifkan.');
       AudioEngine.click();
     });
     els.attachOptionGenVideo?.addEventListener('click', () => {

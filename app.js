@@ -788,7 +788,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           const tx = this.db.transaction('sessions', 'readwrite');
           const store = tx.objectStore('sessions');
           store.clear();
-          sessions.forEach(s => { if (s && !s._isLazyDisk) store.put(s); });
+          sessions.forEach(s => store.put(s));
           tx.oncomplete = () => resolve(true);
           tx.onerror = () => resolve(false);
         } catch (e) {
@@ -1303,9 +1303,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const globalRes = await fetch('/api/chat/status').catch(() => null);
       if (globalRes && globalRes.ok) {
         const globalData = await globalRes.json();
-        const lastActiveId = safeSessionStorage.getItem('zoz_active_session_id') || localStorage.getItem('zoz_last_active_session_id');
         if (globalData && globalData.activeSessions && globalData.activeSessions.length > 0) {
-          const targetTask = globalData.activeSessions.find(s => s.sessionId === lastActiveId);
+          const targetTask = globalData.activeSessions[0];
           const targetSid = targetTask.sessionId;
           let targetSession = STATE.sessions.find(s => s.id === targetSid);
           if (!targetSession) {
@@ -1322,7 +1321,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             showToast('⚡ Menyambung kembali ke respons AI yang sedang diproses di latar belakang...', 'info');
             return;
           }
-          // If no matching active session, fall through to recentlyCompletedSessions check
         }
 
         if (globalData && globalData.recentlyCompletedSessions && globalData.recentlyCompletedSessions.length > 0) {
@@ -4710,7 +4708,6 @@ ${organicBlock}
     if (!rawText && images.length === 0 && docs.length === 0) return;
     if (STATE.isGenerating) return;
 
-    setGeneratingState(true);
     // Claude AI resilience: minta izin notifikasi saat pengguna berinteraksi
     requestNotificationPermission();
 
@@ -4725,7 +4722,6 @@ ${organicBlock}
       }
       showToast('Mode percakapan standar aktif.');
       AudioEngine.click();
-      STATE.isGenerating = false;
       return;
     }
     if (trimmedLow === '/img' || trimmedLow === '/image' || trimmedLow === '/gambar') {
@@ -4737,7 +4733,6 @@ ${organicBlock}
       }
       showToast('Mode AI Image Studio aktif. Silakan ketik deskripsi visual!');
       AudioEngine.click();
-      STATE.isGenerating = false;
       return;
     }
 
@@ -11595,6 +11590,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
               trackAiComposed = Boolean(data.aiComposed);
               trackAiModel = data.aiModel || trackAiModel;
               trackAiProvider = data.aiProvider || trackAiProvider;
+              if (!data.aiComposed && data.aiError) {
+                showToast(`⚠️ ${data.aiError} Dipakai generator cadangan. Coba model lain / prompt lebih jelas.`, 'warning');
+              }
             } else {
               throw new Error(data.error || 'Server tidak mengembalikan file audio');
             }
@@ -11608,7 +11606,10 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
 
       if (!finalAudioUrl) {
-        throw new Error('Backend gagal menghasilkan musik. Model yang dipilih mungkin tidak mendukung generasi musik.');
+        updateHudStep('[Langkah 2/3] Menjalankan sintesis audio client-side...', 65);
+        const synthWavBlob = await synthesizeClientProceduralAudio(cleanPrompt, options.duration || 15);
+        finalAudioUrl = URL.createObjectURL(synthWavBlob);
+        trackTitle = `Neural Audio [${cleanPrompt.slice(0, 30)}]`;
       }
 
       clearTimeout(timer2);
@@ -14418,27 +14419,31 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       closeAttachmentDropdown();
       els.imageFileInput?.click();
     });
-    els.attachOptionGenImage?.addEventListener('click', () => {
+    els.attachOptionGenImage?.addEventListener('click', (e) => {
+      e.stopPropagation();
       closeAttachmentDropdown();
       STATE.isImageGenMode = true;
+      STATE.isMusicGenMode = false;
+      STATE.isVideoGenMode = false;
+      updateMusicGenModeUI();
+      updateVideoGenModeUI();
       updateImageGenModeUI();
       openImageModelDropdown();
       AudioEngine.click();
     });
-    els.attachOptionGenMusic?.addEventListener('click', () => {
+    els.attachOptionGenMusic?.addEventListener('click', (e) => {
+      e.stopPropagation();
       closeAttachmentDropdown();
-      STATE.isMusicGenMode = !STATE.isMusicGenMode;
-      if (STATE.isMusicGenMode) {
-        STATE.isImageGenMode = false;
-        STATE.isVideoGenMode = false;
-        updateImageGenModeUI();
-        updateVideoGenModeUI();
-      }
+      STATE.isMusicGenMode = true;
+      STATE.isImageGenMode = false;
+      STATE.isVideoGenMode = false;
+      updateImageGenModeUI();
+      updateVideoGenModeUI();
       updateMusicGenModeUI();
+      openMusicModelDropdown();
       if (els.promptInput) {
         els.promptInput.focus();
       }
-      showToast(STATE.isMusicGenMode ? '🎵 Mode AI Music Aktif: Masukkan konsep / genre musik...' : 'Mode AI Music dinonaktifkan.');
       AudioEngine.click();
     });
     els.attachOptionGenVideo?.addEventListener('click', () => {
@@ -15472,13 +15477,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     
     // Set sound toggle button icon
     if (els.soundToggleBtn) {
-      els.soundToggleBtn.innerHTML = STATE.soundEnabled
-        ? '<i class="fa-solid fa-volume-high"></i>'
+      els.soundToggleBtn.innerHTML = STATE.soundEnabled 
+        ? '<i class="fa-solid fa-volume-high"></i>' 
         : '<i class="fa-solid fa-volume-xmark"></i>';
-    }
-    // Hide music generation button in composer toolbar (move to attachment menu)
-    if (els.musicGenToggleBtn) {
-      els.musicGenToggleBtn.style.display = 'none';
     }
 
     // Distinguish Browser Refresh (same tab) vs Fresh App Entry
