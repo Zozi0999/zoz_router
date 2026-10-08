@@ -185,6 +185,6 @@ module.exports = async function handler(req, res) {
       duration: `${duration}s`
     });
   } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: err.message, prompt: prompt || '' });
   }
 };

@@ -3721,7 +3721,7 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 500, {
         success: false,
         error: 'Gagal menghasilkan gambar AI: ' + (err.message || 'Terjadi kesalahan sistem.'),
-        prompt: reqUrl.searchParams.get('prompt') || ''
+        prompt: prompt || reqUrl.searchParams.get('prompt') || ''
       });
     }
   }

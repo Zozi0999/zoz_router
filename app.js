@@ -3188,10 +3188,37 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           }
 
           const session = getActiveSession();
-          // Find index of this message in session
+          // Find index of this message in session (matching either raw content or displayContent)
           let msgIdx = index;
           if (msgIdx < 0 || msgIdx >= session.messages.length) {
-            msgIdx = session.messages.findIndex(m => m.role === 'user' && m.content === originalContent);
+            msgIdx = session.messages.findIndex(m => m.role === 'user' && (m.content === originalContent || m.displayContent === originalContent));
+          }
+
+          const targetUserMsg = (msgIdx >= 0 && msgIdx < session.messages.length) ? session.messages[msgIdx] : null;
+
+          // Preserve / restore attached documents with their full text content
+          let restoredDocs = (docs && Array.isArray(docs)) ? [...docs] : [];
+          if (restoredDocs.length > 0 && targetUserMsg) {
+            restoredDocs = restoredDocs.map(d => {
+              if (d && typeof d.content === 'string' && d.content.trim().length > 0) {
+                return d;
+              }
+              // Check if targetUserMsg.docs has content
+              if (Array.isArray(targetUserMsg.docs)) {
+                const foundDoc = targetUserMsg.docs.find(td => td && td.name === d.name && typeof td.content === 'string' && td.content.trim().length > 0);
+                if (foundDoc) return { ...d, content: foundDoc.content };
+              }
+              // Extract content from targetUserMsg.content
+              if (targetUserMsg.content && typeof targetUserMsg.content === 'string') {
+                const safeName = (d.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const docRegex = new RegExp(`--- \\[LAMPIRAN DOKUMEN:\\s*${safeName}[^\\n]*\\] ---\\n([\\s\\S]*?)\\n--- \\[AKHIR DOKUMEN:`, 'i');
+                const match = targetUserMsg.content.match(docRegex);
+                if (match && match[1]) {
+                  return { ...d, content: match[1] };
+                }
+              }
+              return d;
+            });
           }
 
           if (msgIdx >= 0) {
@@ -3211,8 +3238,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             STATE.attachedImages = [...imgList];
             renderAttachmentPreviews();
           }
-          if (docs && Array.isArray(docs) && docs.length > 0) {
-            STATE.attachedDocs = [...docs];
+          if (restoredDocs && Array.isArray(restoredDocs) && restoredDocs.length > 0) {
+            STATE.attachedDocs = [...restoredDocs];
             renderAttachmentPreviews();
           }
           if (STATE.isPromptHidden) {
@@ -4583,8 +4610,9 @@ ${organicBlock}
 
     // Combine documents with text
     let text = rawText;
-    if (docs.length > 0) {
-      const docsContext = docs.map(d => `--- [LAMPIRAN DOKUMEN: ${d.name} (${d.size})] ---\n${d.content}\n--- [AKHIR DOKUMEN: ${d.name}] ---`).join('\n\n');
+    const validDocs = docs.filter(d => d && typeof d.content === 'string' && d.content.trim().length > 0);
+    if (validDocs.length > 0) {
+      const docsContext = validDocs.map(d => `--- [LAMPIRAN DOKUMEN: ${d.name} (${d.size})] ---\n${d.content}\n--- [AKHIR DOKUMEN: ${d.name}] ---`).join('\n\n');
       text = text ? `${docsContext}\n\n${text}` : docsContext;
     }
 
@@ -4606,12 +4634,13 @@ ${organicBlock}
     }
 
     // Build user message object
+    const docsWithContent = docs.map(d => ({ name: d.name, size: d.size, content: d.content }));
     const docsMeta = docs.map(d => ({ name: d.name, size: d.size }));
     const userMsg = {
       role: 'user',
       content: text,
       displayContent: rawText,
-      docs: docsMeta,
+      docs: docsWithContent.length > 0 ? docsWithContent : (docsMeta.length > 0 ? docsMeta : undefined),
       images: images,
       image: image,
       timestamp: new Date().toISOString()
@@ -4631,7 +4660,7 @@ ${organicBlock}
     renderChatHistory(els.searchHistoryInput?.value || '');
 
     // Immediately render user's message bubble
-    const userRow = appendMessageElement('user', rawText, images, 'Anda', null, session.messages.length - 1, null, docsMeta);
+    const userRow = appendMessageElement('user', rawText, images, 'Anda', null, session.messages.length - 1, null, docsWithContent.length > 0 ? docsWithContent : docsMeta);
     smartScrollChatToBottom(true);
 
     if (STATE.isPromptHidden) {
@@ -6196,6 +6225,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           bubbleText.appendChild(digestionContentBox);
 
           const digestionRenderer = new StreamBufferRenderer(digestionContentBox, () => smartScrollChatToBottom(false));
+          currentRoundNativeCalls = [];
+          currentRoundText = '';
 
           while (true) {
             const { done, value } = await digestionReader.read();
@@ -6211,9 +6242,11 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
               if (!dLine.trim()) continue;
               try {
                 const dParsed = JSON.parse(dLine);
-                if (dParsed.message?.content) {
+                const chunk = dParsed.message?.content || dParsed.response || '';
+                if (chunk) {
                   tokenCount++;
-                  digestionRenderer.append(dParsed.message.content);
+                  digestionRenderer.append(chunk);
+                  currentRoundText += chunk;
                 }
                 if (dParsed.message?.tool_calls && Array.isArray(dParsed.message.tool_calls)) {
                   dParsed.message.tool_calls.forEach(tc => currentRoundNativeCalls.push(tc));
@@ -6225,16 +6258,19 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           if (digestionBuffer && digestionBuffer.trim()) {
             try {
               const dParsed = JSON.parse(digestionBuffer.trim());
-              if (dParsed.message?.content) {
+              const chunk = dParsed.message?.content || dParsed.response || '';
+              if (chunk) {
                 tokenCount++;
-                digestionRenderer.append(dParsed.message.content);
+                digestionRenderer.append(chunk);
+                currentRoundText += chunk;
               }
               if (dParsed.message?.tool_calls && Array.isArray(dParsed.message.tool_calls)) {
                 dParsed.message.tool_calls.forEach(tc => currentRoundNativeCalls.push(tc));
               }
             } catch (_) {}
           }
-          currentRoundText = digestionRenderer.finish();
+          const finishedDigestion = digestionRenderer.finish();
+          if (finishedDigestion) currentRoundText = finishedDigestion;
           fullText = currentRoundText;
         } catch (digestionErr) {
           console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Fetch error:`, digestionErr);
@@ -8912,9 +8948,19 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     let finalReportText = '';
     let chatSummary = '';
 
+    let effectivePrompt = promptText;
+    try {
+      const ytRes = await getYouTubeGroundingContext(promptText);
+      if (ytRes && ytRes.groundingContext) {
+        effectivePrompt = `${promptText}\n\n${ytRes.groundingContext}`;
+      }
+    } catch (ytErr) {
+      console.warn('YouTube grounding skip for Deep Research:', ytErr);
+    }
+
     try {
       let isBackendSuccess = false;
-      const contextualTopic = session ? synthesizeAutonomousSearchQuery(session, promptText) : promptText;
+      const contextualTopic = session ? synthesizeAutonomousSearchQuery(session, effectivePrompt) : effectivePrompt;
 
       // 1. Coba panggil Backend Endpoint /api/mulai-riset (Local Node.js Server)
       if (!IS_GITHUB_PAGES) {
@@ -8931,7 +8977,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             body: JSON.stringify({
               sessionId: session ? session.id : null,
               topik: contextualTopic,
-              prompt: promptText,
+              prompt: effectivePrompt,
               messages: session ? session.messages : [],
               model: masterResearchModel,
               provider: masterResearchModel.includes('/') ? 'openrouter' : (masterResearchModel.includes(':') ? 'ollama' : engine),
@@ -9051,7 +9097,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
         const serperKey = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
         let dataTemuan = [];
-        let currentQuery = promptText;
+        let currentQuery = contextualTopic || effectivePrompt || promptText;
 
         // Iterasi 1: Multi-Agent Parallel Search (Serper Primer & Serper Divergen Zero-Overlap)
         const iter1Serper = await performClientWebSearch(currentQuery, serperKey);
@@ -9074,8 +9120,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
         try {
           const [res1, res2] = await Promise.all([
-            serperBlockIter1 ? callClientLLMDirect(agent1Model, `Analisis temuan web primer untuk topik "${promptText}":\n${serperBlockIter1}`, 'Anda adalah Agen 1: Analis Web Primer Google. Rangkum fakta utama dan tren 2026 dalam 2 paragraf padat.') : Promise.resolve(''),
-            divergentBlockIter1 ? callClientLLMDirect(agent2Model, `Analisis data domain mandiri/teknis untuk topik "${promptText}":\n${divergentBlockIter1}`, 'Anda adalah Agen 2: Analis Data Divergen. Rangkum fakta teknis spesifik dan perspektif independen dalam 2 paragraf padat.') : Promise.resolve('')
+            serperBlockIter1 ? callClientLLMDirect(agent1Model, `Analisis temuan web primer untuk topik "${effectivePrompt}":\n${serperBlockIter1}`, 'Anda adalah Agen 1: Analis Web Primer Google. Rangkum fakta utama dan tren 2026 dalam 2 paragraf padat.') : Promise.resolve(''),
+            divergentBlockIter1 ? callClientLLMDirect(agent2Model, `Analisis data domain mandiri/teknis untuk topik "${effectivePrompt}":\n${divergentBlockIter1}`, 'Anda adalah Agen 2: Analis Data Divergen. Rangkum fakta teknis spesifik dan perspektif independen dalam 2 paragraf padat.') : Promise.resolve('')
           ]);
           analisisAgen1Iter1 = res1 || iter1Serper?.summary || '';
           analisisAgen2Iter1 = res2 || iter1Divergent?.summary || '';
@@ -9139,7 +9185,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
         // Iterasi 2: Eksplorasi Sub-Query & Analisis Teknis 2026
         await new Promise(r => setTimeout(r, 600));
-        const subQuery = `${promptText} data statistik spesifikasi teknis arsitektur 2026`;
+        const subQueryBase = contextualTopic || promptText;
+        const subQuery = `${subQueryBase} data statistik spesifikasi teknis arsitektur 2026`;
         const iter2Serper = await performClientWebSearch(subQuery, serperKey);
         const knownUrls = allSources.map(s => s.url).concat((iter2Serper?.sources || []).map(s => s.url));
         const knownDomains = allSources.map(s => s.domain).concat((iter2Serper?.sources || []).map(s => s.domain)).filter(Boolean);
