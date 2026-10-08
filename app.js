@@ -1156,79 +1156,145 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   let activeChatPollTimer = null;
   let isCheckingBackgroundSync = false;
 
-  async function checkBackgroundChatTasksSync() {
-    if (IS_GITHUB_PAGES || isCheckingBackgroundSync) return;
-    const activeSession = getActiveSession();
-    if (!activeSession) return;
+  function findCurrentActiveSession() {
+    if (STATE.currentSessionId) {
+      return STATE.sessions.find(s => s.id === STATE.currentSessionId) || null;
+    }
+    const lastSid = safeSessionStorage.getItem('zoz_active_session_id') || localStorage.getItem('zoz_last_active_session_id');
+    if (lastSid) {
+      return STATE.sessions.find(s => s.id === lastSid) || null;
+    }
+    return null;
+  }
 
-    isCheckingBackgroundSync = true;
-    try {
-      const res = await fetch(`/api/chat/status/${activeSession.id}`).catch(() => null);
-      if (!res || !res.ok) return;
-      const data = await res.json();
-      if (!data) return;
+  async function handleBackgroundChatCompletion(activeSession, data) {
+    setGeneratingState(false);
+    const diskSess = await DeviceStorage.getSession(activeSession.id);
+    const diskMsgs = (diskSess && Array.isArray(diskSess.messages)) ? diskSess.messages : [];
+    const activeMsgs = Array.isArray(activeSession.messages) ? activeSession.messages : [];
+    const diskLast = diskMsgs[diskMsgs.length - 1];
+    const activeLast = activeMsgs[activeMsgs.length - 1];
 
-      if (data.status === 'streaming') {
-        // AI masih aktif menghasilkan jawaban di background server saat pengguna membuka kembali aplikasi
-        setGeneratingState(true);
-        attachToActiveBackgroundChat(activeSession, data.model, data.text || '');
-      } else if (data.status === 'completed' && data.completedAt) {
-        // AI telah selesai menjawab saat pengguna keluar dari aplikasi
-        setGeneratingState(false);
-        const diskSess = await DeviceStorage.getSession(activeSession.id);
-        const diskMsgs = (diskSess && Array.isArray(diskSess.messages)) ? diskSess.messages : [];
-        const activeMsgs = Array.isArray(activeSession.messages) ? activeSession.messages : [];
-        const diskLast = diskMsgs[diskMsgs.length - 1];
-        const activeLast = activeMsgs[activeMsgs.length - 1];
+    const hasNewMessages = diskMsgs.length > activeMsgs.length ||
+      (diskLast && activeLast && diskLast.content !== activeLast.content && (diskLast.content.length > activeLast.content.length || diskLast.backgroundCompleted));
 
-        const hasNewMessages = diskMsgs.length > activeMsgs.length ||
-          (diskLast && activeLast && diskLast.content !== activeLast.content && (diskLast.content.length > activeLast.content.length || diskLast.backgroundCompleted));
-
-        if (hasNewMessages) {
-          activeSession.messages = diskMsgs;
-          delete activeSession._isLazyDisk;
+    if (hasNewMessages) {
+      activeSession.messages = diskMsgs;
+      delete activeSession._isLazyDisk;
+      savePersistedState();
+      renderCurrentSession();
+      renderChatHistory();
+      AudioEngine.success();
+      showToast('✨ AI telah selesai menjawab di latar belakang saat Anda keluar.');
+    } else if (data.text && data.text.trim()) {
+      const trimmed = data.text.trim();
+      if (!Array.isArray(activeSession.messages)) activeSession.messages = [];
+      const curLast = activeSession.messages[activeSession.messages.length - 1];
+      if (curLast && curLast.role === 'assistant') {
+        if (curLast.content !== trimmed && (trimmed.length > (curLast.content || '').length || !curLast.content)) {
+          curLast.content = trimmed;
+          curLast.backgroundCompleted = true;
+          if (data.isDeepResearch) {
+            curLast.isDeepResearch = true;
+            if (data.chatSummary) curLast.chatSummary = data.chatSummary;
+            if (Array.isArray(data.sources)) curLast.sources = data.sources;
+          }
+          activeSession.updatedAt = new Date().toISOString();
           savePersistedState();
           renderCurrentSession();
           renderChatHistory();
           AudioEngine.success();
           showToast('✨ AI telah selesai menjawab di latar belakang saat Anda keluar.');
-        } else if (data.text && data.text.trim()) {
-          // Fallback jika sinkronisasi disk sesi belum terbaca di memori
-          const trimmed = data.text.trim();
-          if (activeLast && activeLast.role === 'assistant') {
-            if (activeLast.content !== trimmed && (trimmed.length > (activeLast.content || '').length || !activeLast.content)) {
-              activeLast.content = trimmed;
-              activeLast.backgroundCompleted = true;
-              if (data.isDeepResearch) {
-                activeLast.isDeepResearch = true;
-                if (data.chatSummary) activeLast.chatSummary = data.chatSummary;
-                if (Array.isArray(data.sources)) activeLast.sources = data.sources;
-              }
-              activeSession.updatedAt = new Date().toISOString();
-              savePersistedState();
-              renderCurrentSession();
-              renderChatHistory();
-              AudioEngine.success();
-              showToast('✨ AI telah selesai menjawab di latar belakang saat Anda keluar.');
+        }
+      } else {
+        activeSession.messages.push({
+          role: 'assistant',
+          content: trimmed,
+          model: data.model || 'AI Model',
+          timestamp: new Date().toISOString(),
+          backgroundCompleted: true,
+          isDeepResearch: !!data.isDeepResearch,
+          chatSummary: data.chatSummary || null,
+          sources: data.sources || null
+        });
+        activeSession.updatedAt = new Date().toISOString();
+        savePersistedState();
+        renderCurrentSession();
+        renderChatHistory();
+        AudioEngine.success();
+        showToast('✨ AI telah selesai menjawab di latar belakang saat Anda keluar.');
+      }
+    }
+  }
+
+  async function checkBackgroundChatTasksSync() {
+    if (IS_GITHUB_PAGES || isCheckingBackgroundSync) return;
+    isCheckingBackgroundSync = true;
+    try {
+      const activeSession = findCurrentActiveSession();
+
+      // 1. Jika sesi aktif ditemukan, periksa sesi tersebut secara langsung
+      if (activeSession) {
+        const res = await fetch(`/api/chat/status/${activeSession.id}`).catch(() => null);
+        if (res && res.ok) {
+          const data = await res.json();
+          if (data && data.status === 'streaming') {
+            setGeneratingState(true);
+            attachToActiveBackgroundChat(activeSession, data.model, data.text || '');
+            return;
+          } else if (data && data.status === 'completed' && data.completedAt) {
+            await handleBackgroundChatCompletion(activeSession, data);
+            return;
+          }
+        }
+      }
+
+      // 2. Periksa status tugas latar belakang global server jika belum ada sesi aktif atau sesi belum ada tugas
+      const globalRes = await fetch('/api/chat/status').catch(() => null);
+      if (globalRes && globalRes.ok) {
+        const globalData = await globalRes.json();
+        if (globalData && globalData.activeSessions && globalData.activeSessions.length > 0) {
+          const targetTask = globalData.activeSessions[0];
+          const targetSid = targetTask.sessionId;
+          let targetSession = STATE.sessions.find(s => s.id === targetSid);
+          if (!targetSession) {
+            const diskSess = await DeviceStorage.getSession(targetSid);
+            if (diskSess) {
+              STATE.sessions.unshift(diskSess);
+              targetSession = diskSess;
             }
-          } else {
-            if (!activeSession.messages) activeSession.messages = [];
-            activeSession.messages.push({
-              role: 'assistant',
-              content: trimmed,
-              model: data.model || 'AI Model',
-              timestamp: new Date().toISOString(),
-              backgroundCompleted: true,
-              isDeepResearch: !!data.isDeepResearch,
-              chatSummary: data.chatSummary || null,
-              sources: data.sources || null
-            });
-            activeSession.updatedAt = new Date().toISOString();
-            savePersistedState();
-            renderCurrentSession();
-            renderChatHistory();
-            AudioEngine.success();
-            showToast('✨ AI telah selesai menjawab di latar belakang saat Anda keluar.');
+          }
+          if (targetSession) {
+            await switchSession(targetSid);
+            setGeneratingState(true);
+            attachToActiveBackgroundChat(targetSession, targetTask.model, targetTask.text || '');
+            showToast('⚡ Menyambung kembali ke respons AI yang sedang diproses di latar belakang...', 'info');
+            return;
+          }
+        }
+
+        if (globalData && globalData.recentlyCompletedSessions && globalData.recentlyCompletedSessions.length > 0) {
+          const lastActiveId = safeSessionStorage.getItem('zoz_active_session_id') || localStorage.getItem('zoz_last_active_session_id');
+          const matchedTask = globalData.recentlyCompletedSessions.find(s => s.sessionId === lastActiveId) || globalData.recentlyCompletedSessions[0];
+          if (matchedTask) {
+            let matchedSession = STATE.sessions.find(s => s.id === matchedTask.sessionId);
+            if (!matchedSession) {
+              const diskSess = await DeviceStorage.getSession(matchedTask.sessionId);
+              if (diskSess) {
+                STATE.sessions.unshift(diskSess);
+                matchedSession = diskSess;
+              }
+            }
+            if (matchedSession) {
+              const fullDisk = await DeviceStorage.getSession(matchedSession.id);
+              if (fullDisk && Array.isArray(fullDisk.messages)) {
+                matchedSession.messages = fullDisk.messages;
+                delete matchedSession._isLazyDisk;
+                await ChatDB.saveSession(matchedSession);
+                savePersistedState();
+                renderChatHistory();
+              }
+            }
           }
         }
       }
@@ -1306,6 +1372,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           }
 
           // Simpan ke pesan sesi jika belum tersimpan atau perbarui jika teks masih parsial
+          if (!Array.isArray(session.messages)) session.messages = [];
           const lastMsg = session.messages[session.messages.length - 1];
           if (!lastMsg || lastMsg.role !== 'assistant') {
             session.messages.push({
@@ -1335,9 +1402,13 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           renderChatHistory(els.searchHistoryInput?.value || '');
 
           setGeneratingState(false);
-          AudioEngine.receive();
-          notifyAiCompletion('🤖 ' + (modelName || data.model), finalReportText);
-          showToast('✨ AI selesai menjawab di latar belakang.');
+          if (data.status === 'aborted') {
+            showToast('Generasi dihentikan oleh pengguna.');
+          } else {
+            AudioEngine.receive();
+            notifyAiCompletion('🤖 ' + (modelName || data.model), finalReportText);
+            showToast('✨ AI selesai menjawab di latar belakang.');
+          }
         } else if (data.status === 'error') {
           clearInterval(activeChatPollTimer);
           activeChatPollTimer = null;
@@ -2267,6 +2338,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
     STATE.currentSessionId = null;
     safeSessionStorage.removeItem('zoz_active_session_id');
+    try { localStorage.removeItem('zoz_last_active_session_id'); } catch (_) {}
     STATE.isImageGenMode = false;
     updateImageGenModeUI();
     STATE.attachedDocs = [];
@@ -2299,6 +2371,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     STATE.sessions.unshift(newSession);
     STATE.currentSessionId = newSession.id;
     safeSessionStorage.setItem('zoz_active_session_id', newSession.id);
+    try { localStorage.setItem('zoz_last_active_session_id', newSession.id); } catch (_) {}
     savePersistedState();
     return newSession;
   }
@@ -2347,6 +2420,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     STATE.currentSessionId = sessionId;
     safeSessionStorage.setItem('zoz_active_session_id', sessionId);
+    try { localStorage.setItem('zoz_last_active_session_id', sessionId); } catch (_) {}
     STATE.isImageGenMode = false;
     updateImageGenModeUI();
     STATE.attachedDocs = [];
@@ -7206,7 +7280,16 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       clearInterval(activeChatPollTimer);
       activeChatPollTimer = null;
     }
-    const activeSession = getActiveSession();
+    const activeCursor = els.messagesList?.querySelector('.typing-cursor');
+    if (activeCursor) {
+      const bubbleText = activeCursor.closest('.msg-text-content');
+      activeCursor.remove();
+      if (bubbleText) {
+        enhanceCodeBlocks(bubbleText);
+        enhanceChatImages(bubbleText);
+      }
+    }
+    const activeSession = findCurrentActiveSession();
     if (activeSession?.id && !IS_GITHUB_PAGES) {
       fetch('/api/chat/stop', {
         method: 'POST',
@@ -13489,7 +13572,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
     // Distinguish Browser Refresh (same tab) vs Fresh App Entry
     const isTabReload = safeSessionStorage.getItem('zoz_tab_initialized') === 'true';
-    const savedActiveId = safeSessionStorage.getItem('zoz_active_session_id');
+    const savedActiveId = safeSessionStorage.getItem('zoz_active_session_id') || localStorage.getItem('zoz_last_active_session_id');
 
     if (isTabReload && savedActiveId && STATE.sessions.some(s => s.id === savedActiveId)) {
       // Browser Refresh: Keep the user on their active conversation and refresh it
@@ -13498,8 +13581,13 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       renderCurrentSession();
     } else {
       // Fresh App Entry / Reopening: Land cleanly on TAMPILAN UTAMA (Welcome Hero / Beranda Bersih)
+      // Catat inisialisasi tab dan pertahankan penanda sesi terakhir untuk background task recovery
       safeSessionStorage.setItem('zoz_tab_initialized', 'true');
-      safeSessionStorage.removeItem('zoz_active_session_id');
+      if (savedActiveId && STATE.sessions.some(s => s.id === savedActiveId)) {
+        safeSessionStorage.setItem('zoz_active_session_id', savedActiveId);
+      } else {
+        safeSessionStorage.removeItem('zoz_active_session_id');
+      }
       STATE.currentSessionId = null;
       renderChatHistory();
       renderCurrentSession();

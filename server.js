@@ -3958,12 +3958,18 @@ const server = http.createServer(async (req, res) => {
 
         // Upstream returned 200 OK -> Send headers matching client stream mode!
         const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
-        res.writeHead(200, {
-          'Content-Type': contentType,
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-          'Access-Control-Allow-Origin': '*'
-        });
+        if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+          try {
+            res.writeHead(200, {
+              'Content-Type': contentType,
+              'Cache-Control': 'no-cache',
+              'Connection': 'keep-alive',
+              'Access-Control-Allow-Origin': '*'
+            });
+          } catch (writeHeadErr) {
+            console.warn('Notice writing head to client (Ollama):', writeHeadErr.message);
+          }
+        }
 
         proxyRes.on('data', chunk => {
           // Akumulasi token untuk background resilience
@@ -3989,6 +3995,9 @@ const server = http.createServer(async (req, res) => {
 
           // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
           if (sessionId && dbActiveChatTasks[sessionId]) {
+            if (dbActiveChatTasks[sessionId].status === 'aborted') {
+              return; // Jangan timpa status aborted dan jangan simpan ulang
+            }
             flushChatTaskBuffer(sessionId, 'ollama');
             const task = dbActiveChatTasks[sessionId];
             task.status = 'completed';
@@ -4001,8 +4010,10 @@ const server = http.createServer(async (req, res) => {
 
         proxyRes.on('error', (err) => {
           if (sessionId && dbActiveChatTasks[sessionId]) {
-            dbActiveChatTasks[sessionId].status = 'error';
-            dbActiveChatTasks[sessionId].error = err.message;
+            if (dbActiveChatTasks[sessionId].status !== 'aborted') {
+              dbActiveChatTasks[sessionId].status = 'error';
+              dbActiveChatTasks[sessionId].error = err.message;
+            }
           }
           if (clientDisconnected || res.writableEnded || res.destroyed) return;
           try {
@@ -4020,6 +4031,12 @@ const server = http.createServer(async (req, res) => {
       }
 
       proxyReq.on('timeout', () => {
+        if (sessionId && dbActiveChatTasks[sessionId]) {
+          if (dbActiveChatTasks[sessionId].status !== 'aborted') {
+            dbActiveChatTasks[sessionId].status = 'error';
+            dbActiveChatTasks[sessionId].error = 'Ollama stream timed out (120s)';
+          }
+        }
         if (!proxyReq.destroyed) proxyReq.destroy();
         if (clientDisconnected || res.writableEnded || res.destroyed) return;
         try {
@@ -4424,12 +4441,18 @@ const server = http.createServer(async (req, res) => {
 
         // OpenRouter returned 200 OK -> Send headers matching client stream mode!
         const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
-        res.writeHead(200, {
-          'Content-Type': contentType,
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-          'Access-Control-Allow-Origin': '*'
-        });
+        if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+          try {
+            res.writeHead(200, {
+              'Content-Type': contentType,
+              'Cache-Control': 'no-cache',
+              'Connection': 'keep-alive',
+              'Access-Control-Allow-Origin': '*'
+            });
+          } catch (writeHeadErr) {
+            console.warn('Notice writing head to client (OpenRouter):', writeHeadErr.message);
+          }
+        }
 
         proxyRes.on('data', chunk => {
           // Akumulasi token untuk background resilience
@@ -4455,6 +4478,9 @@ const server = http.createServer(async (req, res) => {
 
           // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
           if (sessionId && dbActiveChatTasks[sessionId]) {
+            if (dbActiveChatTasks[sessionId].status === 'aborted') {
+              return; // Jangan timpa status aborted dan jangan simpan ulang
+            }
             flushChatTaskBuffer(sessionId, 'openrouter');
             const task = dbActiveChatTasks[sessionId];
             task.status = 'completed';
@@ -4467,8 +4493,10 @@ const server = http.createServer(async (req, res) => {
 
         proxyRes.on('error', (err) => {
           if (sessionId && dbActiveChatTasks[sessionId]) {
-            dbActiveChatTasks[sessionId].status = 'error';
-            dbActiveChatTasks[sessionId].error = err.message;
+            if (dbActiveChatTasks[sessionId].status !== 'aborted') {
+              dbActiveChatTasks[sessionId].status = 'error';
+              dbActiveChatTasks[sessionId].error = err.message;
+            }
           }
           if (clientDisconnected || res.writableEnded || res.destroyed) return;
           try {
@@ -4489,6 +4517,12 @@ const server = http.createServer(async (req, res) => {
       }
 
       proxyReq.on('timeout', () => {
+        if (sessionId && dbActiveChatTasks[sessionId]) {
+          if (dbActiveChatTasks[sessionId].status !== 'aborted') {
+            dbActiveChatTasks[sessionId].status = 'error';
+            dbActiveChatTasks[sessionId].error = 'OpenRouter stream timed out (120s)';
+          }
+        }
         if (!proxyReq.destroyed) proxyReq.destroy();
         if (clientDisconnected || res.writableEnded || res.destroyed) return;
         try {
@@ -4540,7 +4574,39 @@ const server = http.createServer(async (req, res) => {
   if ((chatStatusMatch || pathname === '/api/chat/status') && method === 'GET') {
     const sid = chatStatusMatch ? chatStatusMatch[1] : (reqUrl.searchParams.get('sessionId') || reqUrl.searchParams.get('id'));
     if (!sid) {
-      return sendJSON(res, 400, { error: 'sessionId diperlukan' });
+      const activeSessions = [];
+      const recentlyCompletedSessions = [];
+      const now = Date.now();
+
+      for (const k of Object.keys(dbActiveChatTasks)) {
+        const t = dbActiveChatTasks[k];
+        if (!t) continue;
+        if (t.status === 'streaming') {
+          activeSessions.push({ sessionId: t.sessionId, model: t.model, startedAt: t.startedAt });
+        } else if (t.status === 'completed' && t.completedAt && (now - t.completedAt < 600000)) {
+          recentlyCompletedSessions.push({ sessionId: t.sessionId, model: t.model, completedAt: t.completedAt });
+        }
+      }
+
+      for (const rId of Object.keys(dbTugasRiset)) {
+        const rTask = dbTugasRiset[rId];
+        if (!rTask) continue;
+        if (rTask.status === 'sedang_meneliti' && rTask.sessionId) {
+          if (!activeSessions.some(s => s.sessionId === rTask.sessionId)) {
+            activeSessions.push({ sessionId: rTask.sessionId, isDeepResearch: true, model: 'Deep Research Pro', startedAt: rTask.createdAt });
+          }
+        } else if (rTask.status === 'selesai' && rTask.sessionId) {
+          if (!recentlyCompletedSessions.some(s => s.sessionId === rTask.sessionId)) {
+            recentlyCompletedSessions.push({ sessionId: rTask.sessionId, isDeepResearch: true, model: 'Deep Research Pro', completedAt: rTask.completedAt });
+          }
+        }
+      }
+
+      return sendJSON(res, 200, {
+        active: activeSessions.length > 0,
+        activeSessions,
+        recentlyCompletedSessions
+      });
     }
 
     const task = dbActiveChatTasks[sid];
