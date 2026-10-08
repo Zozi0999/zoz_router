@@ -4203,6 +4203,7 @@ const server = http.createServer(async (req, res) => {
       // ==================== AI NEURAL MUSIC COMPOSITION ====================
       let aiComposition = null;
       let musicAiError = '';
+      let musicPromptGenre = '';
       let effectiveMusicModel = requestedMusicModel || 'qwen2.5:1.5b';
       let isCloudOpenRouter = false;
 
@@ -4220,21 +4221,44 @@ const server = http.createServer(async (req, res) => {
       let resolvedProvider = isCloudOpenRouter ? 'openrouter' : 'ollama';
 
       try {
-        const composerSys = 'Kamu adalah komposer musik. Kamu menulis partitur nada (MIDI) sebagai JSON murni tanpa penjelasan, tanpa markdown. Partitur yang kamu tulis akan dimainkan apa adanya.';
-        const composerUser = `Konsep musik: "${cleanPrompt}".
-Tulis partitur loop 4 birama (16 beat, 4/4) sebagai JSON murni dengan format persis:
+        const hintLow = cleanPrompt.toLowerCase();
+        const genreRules = [
+          ['lofi', /lofi|lo-fi|chill|santai|relax|study|hujan|rain/],
+          ['synthwave', /synthwave|retrowave|80s|retro|outrun|neon/],
+          ['orchestral', /orchestra|orkestra|epic|epik|sinematik|cinematic|pertempuran|battle|heroic/],
+          ['ambient', /ambient|meditation|meditasi|space|kosmik|tenang|zen|galaxy/],
+          ['edm', /edm|dance|house|techno|club|party|dubstep|trance/],
+          ['piano', /piano|klasik|classical|akustik|acoustic|sedih|sad/],
+          ['rock', /rock|metal|gitar|guitar|punk/],
+          ['cyberpunk', /cyberpunk|futur|robot|sci-?fi|darksynth/]
+        ];
+        const promptGenre = (genre && String(genre).trim()) || (genreRules.find(([, re]) => re.test(hintLow)) || [''])[0];
+        const bpmRanges = { lofi: '70-90', synthwave: '100-120', orchestral: '80-110', ambient: '55-75', edm: '120-135', piano: '65-95', rock: '120-160', cyberpunk: '110-140' };
+        const genreHint = promptGenre
+          ? `Genre target: ${promptGenre}, BPM sekitar ${bpmRanges[promptGenre] || '80-130'}.`
+          : 'Pilih genre & BPM yang paling cocok dengan konsep (jangan otomatis lofi).';
+        musicPromptGenre = promptGenre || '';
+        const variationSeed = Math.random().toString(36).slice(2, 8);
+        const randKey = ['C', 'D', 'E', 'F', 'G', 'A', 'B'][Math.floor(Math.random() * 7)] + (Math.random() < 0.5 ? ' minor' : ' major');
+
+        const composerSys = 'Kamu adalah komposer musik profesional. Kamu menulis partitur nada (MIDI) sebagai JSON murni tanpa penjelasan, tanpa markdown. Setiap konsep harus menghasilkan melodi, ritme, dan judul yang BERBEDA dan sesuai konsep. Partitur yang kamu tulis dimainkan apa adanya.';
+        const composerUser = `Konsep musik dari pengguna: "${cleanPrompt}"
+${genreHint}
+Nada dasar disarankan: ${randKey}. Variasi #${variationSeed} (buat melodi unik, jangan klise).
+
+Tulis partitur loop 4 birama (16 beat, 4/4) sebagai JSON murni dengan struktur:
 {
-  "title": "judul orisinal",
-  "genre": "lofi",
-  "bpm": 90,
-  "key": "C minor",
-  "summary": "satu kalimat deskripsi aransemen",
-  "melody": [[67,0,1],[70,1,0.5],[72,1.5,0.5],[75,2,2]],
-  "bass": [[36,0,2],[34,2,2]],
-  "chords": [[[48,51,55],0,4],[[46,50,53],4,4]],
-  "drums": {"kick":[0,2],"snare":[1,3],"hat":[0,0.5,1,1.5,2,2.5,3,3.5]}
+  "title": "<judul orisinal sesuai konsep>",
+  "genre": "<satu dari: cyberpunk, lofi, synthwave, orchestral, ambient, edm, rock, piano>",
+  "bpm": <angka>,
+  "key": "<nada dasar>",
+  "summary": "<satu kalimat tentang aransemen>",
+  "melody": [[<midi 55-90>, <beat_mulai 0-15.5>, <panjang_beat 0.25-4>], ... 16 sampai 32 not],
+  "bass": [[<midi 28-48>, <beat_mulai>, <panjang_beat>], ... 6 sampai 12 not],
+  "chords": [[[<midi>, <midi>, <midi>], <beat_mulai>, <panjang_beat>], ... 4 akor],
+  "drums": {"kick": [<beat 0-3.5>...], "snare": [<beat>...], "hat": [<beat>...]}
 }
-Aturan: setiap not melody/bass = [nomor_midi, beat_mulai, panjang_beat]; chords = [[nomor_midi,...], beat_mulai, panjang_beat]; drums = posisi beat dalam 1 birama (0-4). melody isi 12-32 not (midi 55-90), bass 4-12 not (midi 28-48), chords 4 akor. Ubah semua nada & ritme agar cocok dengan konsep (jangan menyalin contoh). genre pilih satu: cyberpunk, lofi, synthwave, orchestral, ambient, edm, rock, piano. Balas HANYA JSON.`;
+Aturan: nada melodi harus mengikuti tangga nada ${randKey} agar harmonis; variasikan panjang not dan ritme sesuai mood konsep; drums = posisi beat dalam SATU birama (0 sampai 3.5) dan diulang tiap birama (kosongkan untuk ambient/piano). Balas HANYA JSON.`;
 
         let llmResult = null;
 
@@ -4321,7 +4345,7 @@ Aturan: setiap not melody/bass = [nomor_midi, beat_mulai, panjang_beat]; chords 
         }
 
         // --- SKENARIO 2: LOKAL OLLAMA ---
-        if (!isCloudOpenRouter && !llmResult) {
+        for (let ollamaAttempt = 0; ollamaAttempt < 2 && !isCloudOpenRouter && !llmResult; ollamaAttempt++) {
           console.log(`[AI Music Composer] Memanggil Ollama lokal model: ${effectiveMusicModel}`);
           resolvedModelName = effectiveMusicModel;
           resolvedProvider = 'ollama';
@@ -4428,7 +4452,7 @@ Aturan: setiap not melody/bass = [nomor_midi, beat_mulai, panjang_beat]; chords 
       }
 
       const effectiveTitle = (aiComposition && aiComposition.title) ? aiComposition.title : (genre ? `${genre.toUpperCase()} Neural Beat` : 'Singularity Cyber Beat');
-      const effectiveGenre = (aiComposition && aiComposition.genre) ? String(aiComposition.genre) : genre;
+      const effectiveGenre = musicPromptGenre || ((aiComposition && aiComposition.genre) ? String(aiComposition.genre) : genre);
       const aiBpmNum = aiComposition ? parseInt(aiComposition.bpm, 10) : NaN;
       const effectiveBpm = Number.isFinite(aiBpmNum) ? aiBpmNum : bpm;
       const effectiveSummary = (aiComposition && aiComposition.summary)
@@ -4513,6 +4537,7 @@ Aturan: setiap not melody/bass = [nomor_midi, beat_mulai, panjang_beat]; chords 
           aiComposed: scoreFromAI,
           aiError: scoreFromAI ? '' : musicAiError,
           aiNotes: aiScore ? aiScore.noteCount : 0,
+          aiPreview: aiScore ? aiScore.melody.slice(0, 8).map(n => n.pitch).join(',') : '',
           aiModel: resolvedModelName,
           aiProvider: resolvedProvider,
           aiSummary: effectiveSummary
@@ -4533,6 +4558,7 @@ Aturan: setiap not melody/bass = [nomor_midi, beat_mulai, panjang_beat]; chords 
         aiComposed: scoreFromAI,
           aiError: scoreFromAI ? '' : musicAiError,
           aiNotes: aiScore ? aiScore.noteCount : 0,
+          aiPreview: aiScore ? aiScore.melody.slice(0, 8).map(n => n.pitch).join(',') : '',
         aiModel: resolvedModelName,
         aiProvider: resolvedProvider,
         aiSummary: effectiveSummary
