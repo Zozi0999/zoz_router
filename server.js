@@ -3987,12 +3987,15 @@ const server = http.createServer(async (req, res) => {
   }
 
   if ((pathname === '/api/generate-music' || pathname === '/api/music/generate') && (method === 'POST' || method === 'GET')) {
+    let prompt = '';
     try {
-      let prompt = '';
       let genre = '';
       let bpm = null;
       let duration = 15;
       let sessionId = null;
+
+      let requestedMusicModel = '';
+      let openRouterKey = '';
 
       if (method === 'POST') {
         const body = await parseBody(req);
@@ -4001,12 +4004,20 @@ const server = http.createServer(async (req, res) => {
         bpm = parseInt(body.bpm, 10) || null;
         duration = parseInt(body.duration, 10) || 15;
         sessionId = body.sessionId || req.headers['x-session-id'] || null;
+        requestedMusicModel = (body.musicModel || body.model || '').trim();
+        openRouterKey = (body.openRouterKey || req.headers['x-openrouter-key'] || '').trim();
       } else {
         prompt = reqUrl.searchParams.get('prompt') || reqUrl.searchParams.get('q') || '';
         genre = reqUrl.searchParams.get('genre') || '';
         bpm = parseInt(reqUrl.searchParams.get('bpm'), 10) || null;
         duration = parseInt(reqUrl.searchParams.get('duration'), 10) || 15;
         sessionId = reqUrl.searchParams.get('sessionId') || req.headers['x-session-id'] || null;
+        requestedMusicModel = (reqUrl.searchParams.get('musicModel') || reqUrl.searchParams.get('model') || '').trim();
+        openRouterKey = (reqUrl.searchParams.get('openRouterKey') || req.headers['x-openrouter-key'] || '').trim();
+      }
+
+      if (!openRouterKey && process.env.OPENROUTER_API_KEY) {
+        openRouterKey = process.env.OPENROUTER_API_KEY;
       }
 
       if (!prompt || !prompt.trim()) {
@@ -4017,6 +4028,22 @@ const server = http.createServer(async (req, res) => {
 
       // ==================== AI NEURAL MUSIC COMPOSITION ====================
       let aiComposition = null;
+      let effectiveMusicModel = requestedMusicModel || 'qwen2.5:1.5b';
+      let isCloudOpenRouter = false;
+
+      if (effectiveMusicModel.toLowerCase().startsWith('openrouter:')) {
+        isCloudOpenRouter = true;
+        effectiveMusicModel = effectiveMusicModel.slice(11).trim();
+      } else if (effectiveMusicModel.toLowerCase().startsWith('ollama:')) {
+        isCloudOpenRouter = false;
+        effectiveMusicModel = effectiveMusicModel.slice(7).trim();
+      } else if (effectiveMusicModel.includes('/') || effectiveMusicModel.toLowerCase() === 'openrouter/free') {
+        isCloudOpenRouter = true;
+      }
+
+      let resolvedModelName = effectiveMusicModel;
+      let resolvedProvider = isCloudOpenRouter ? 'openrouter' : 'ollama';
+
       try {
         const composerSys = 'Kamu adalah AI Neural Music Composer & Audio Architect di ZOZ Router. Analisis konsep pengguna dan hasilkan JSON komposisi musik orisinal valid.';
         const composerUser = `Konsep: "${cleanPrompt}".
@@ -4031,58 +4058,149 @@ Rancang komposisi musik ringkas dalam JSON murni:
 }
 Pilih 1 genre saja (misal: cyberpunk, lofi, synthwave, orchestral, ambient, edm, rock, piano). Wajib tutup kurung kurawal JSON.`;
 
-        const postBody = JSON.stringify({
-          model: 'qwen2.5:1.5b',
-          messages: [
-            { role: 'system', content: composerSys },
-            { role: 'user', content: composerUser }
-          ],
-          stream: false,
-          options: { temperature: 0.5, num_predict: 250 }
-        });
+        let llmResult = null;
 
-        const llmResult = await new Promise((resolve) => {
-          const reqOpt = {
-            hostname: '127.0.0.1',
-            port: 11434,
-            path: '/api/chat',
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Content-Length': Buffer.byteLength(postBody)
-            },
-            timeout: 10000
-          };
-          const oReq = http.request(reqOpt, (oRes) => {
-            let data = '';
-            oRes.on('data', chunk => data += chunk);
-            oRes.on('end', () => {
-              try {
-                const parsed = JSON.parse(data);
-                if (parsed.message?.content) {
-                  console.log('[AI Music Composer] Ollama returned composition length:', parsed.message.content.length);
-                } else {
-                  console.log('[AI Music Composer] Ollama returned no message content, raw:', data.slice(0, 150));
-                }
-                resolve(parsed.message?.content || null);
-              } catch (e) {
-                console.warn('[AI Music Composer] JSON parse error:', e.message);
-                resolve(null);
-              }
+        // --- SKENARIO 1: CLOUD OPENROUTER ---
+        if (isCloudOpenRouter) {
+          if (!openRouterKey) {
+            console.warn('[AI Music Composer] OpenRouter Key tidak ada di header/body, fallback ke Ollama lokal qwen2.5:1.5b');
+            isCloudOpenRouter = false;
+            effectiveMusicModel = 'qwen2.5:1.5b';
+            resolvedModelName = effectiveMusicModel;
+            resolvedProvider = 'ollama';
+          } else {
+            console.log(`[AI Music Composer] Memanggil OpenRouter model: ${effectiveMusicModel}`);
+            const postData = JSON.stringify({
+              model: effectiveMusicModel,
+              messages: [
+                { role: 'system', content: composerSys },
+                { role: 'user', content: composerUser }
+              ],
+              temperature: 0.5,
+              max_tokens: 300
             });
+
+            llmResult = await new Promise((resolve) => {
+              const opt = {
+                hostname: 'openrouter.ai',
+                port: 443,
+                path: '/api/v1/chat/completions',
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${openRouterKey}`,
+                  'Content-Type': 'application/json',
+                  'HTTP-Referer': 'https://github.com/Zozi0999/zoz_router',
+                  'X-Title': 'Zoz Router Neural Music Studio',
+                  'Content-Length': Buffer.byteLength(postData)
+                },
+                timeout: 25000
+              };
+
+              const reqOR = https.request(opt, (resOR) => {
+                let raw = '';
+                resOR.on('data', d => raw += d);
+                resOR.on('end', () => {
+                  try {
+                    const parsed = JSON.parse(raw);
+                    if (resOR.statusCode >= 400 || parsed.error) {
+                      const errDetail = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
+                      console.warn('[AI Music Composer] OpenRouter error:', errDetail);
+                      resolve(null);
+                    } else {
+                      const content = parsed.choices?.[0]?.message?.content || null;
+                      if (content) {
+                        console.log('[AI Music Composer] OpenRouter berhasil merespon komposisi');
+                      }
+                      resolve(content);
+                    }
+                  } catch (e) {
+                    console.warn('[AI Music Composer] OpenRouter parse error:', e.message);
+                    resolve(null);
+                  }
+                });
+              });
+
+              reqOR.on('error', (err) => {
+                console.warn('[AI Music Composer] OpenRouter request error:', err.message);
+                resolve(null);
+              });
+              reqOR.on('timeout', () => {
+                console.warn('[AI Music Composer] OpenRouter request timeout');
+                reqOR.destroy();
+                resolve(null);
+              });
+
+              reqOR.write(postData);
+              reqOR.end();
+            });
+
+            if (!llmResult) {
+              console.warn('[AI Music Composer] OpenRouter gagal/null, mencoba fallback ke Ollama lokal qwen2.5:1.5b');
+              effectiveMusicModel = 'qwen2.5:1.5b';
+              isCloudOpenRouter = false;
+            }
+          }
+        }
+
+        // --- SKENARIO 2: LOKAL OLLAMA ---
+        if (!isCloudOpenRouter && !llmResult) {
+          console.log(`[AI Music Composer] Memanggil Ollama lokal model: ${effectiveMusicModel}`);
+          resolvedModelName = effectiveMusicModel;
+          resolvedProvider = 'ollama';
+
+          const postBody = JSON.stringify({
+            model: effectiveMusicModel,
+            messages: [
+              { role: 'system', content: composerSys },
+              { role: 'user', content: composerUser }
+            ],
+            stream: false,
+            options: { temperature: 0.5, num_predict: 250 }
           });
-          oReq.on('error', (err) => {
-            console.warn('[AI Music Composer] Ollama request error:', err.message);
-            resolve(null);
+
+          llmResult = await new Promise((resolve) => {
+            const reqOpt = {
+              hostname: '127.0.0.1',
+              port: 11434,
+              path: '/api/chat',
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(postBody)
+              },
+              timeout: 12000
+            };
+            const oReq = http.request(reqOpt, (oRes) => {
+              let data = '';
+              oRes.on('data', chunk => data += chunk);
+              oRes.on('end', () => {
+                try {
+                  const parsed = JSON.parse(data);
+                  if (parsed.message?.content) {
+                    console.log('[AI Music Composer] Ollama returned composition length:', parsed.message.content.length);
+                  } else {
+                    console.log('[AI Music Composer] Ollama returned no message content, raw:', data.slice(0, 150));
+                  }
+                  resolve(parsed.message?.content || null);
+                } catch (e) {
+                  console.warn('[AI Music Composer] JSON parse error:', e.message);
+                  resolve(null);
+                }
+              });
+            });
+            oReq.on('error', (err) => {
+              console.warn('[AI Music Composer] Ollama request error:', err.message);
+              resolve(null);
+            });
+            oReq.on('timeout', () => {
+              console.warn('[AI Music Composer] Ollama request timeout');
+              oReq.destroy();
+              resolve(null);
+            });
+            oReq.write(postBody);
+            oReq.end();
           });
-          oReq.on('timeout', () => {
-            console.warn('[AI Music Composer] Ollama request timeout');
-            oReq.destroy();
-            resolve(null);
-          });
-          oReq.write(postBody);
-          oReq.end();
-        });
+        }
 
         if (llmResult) {
           const jsonMatch = llmResult.match(/\{[\s\S]*\}/);
@@ -4175,7 +4293,8 @@ Pilih 1 genre saja (misal: cyberpunk, lofi, synthwave, orchestral, ambient, edm,
       const url = `/uploads/${filename}`;
 
       if (sessionId) {
-        appendAssistantMessageToSessionDisk(sessionId, `[Musik AI Hasil Sintesis: "${cleanPrompt}"]\n\n- Judul: ${synth.title}\n- Genre: ${(synth.genre || 'Cyberpunk').toUpperCase()} (${synth.bpm} BPM)\n- Aransemen: ${effectiveSummary}\n- Audio: [Putar / Unduh Audio](${url})`, 'AI Neural Music Studio', {
+        const providerLabel = resolvedProvider === 'openrouter' ? 'Cloud OpenRouter' : 'Ollama Lokal';
+        appendAssistantMessageToSessionDisk(sessionId, `[Musik AI Hasil Sintesis: "${cleanPrompt}"]\n\n- Judul: ${synth.title}\n- Genre: ${(synth.genre || 'Cyberpunk').toUpperCase()} (${synth.bpm} BPM)\n- Engine: ${resolvedModelName} (${providerLabel})\n- Aransemen: ${effectiveSummary}\n- Audio: [Putar / Unduh Audio](${url})`, 'AI Neural Music Studio', {
           isMusicGen: true,
           type: 'music_generation',
           audioUrl: url,
@@ -4186,6 +4305,8 @@ Pilih 1 genre saja (misal: cyberpunk, lofi, synthwave, orchestral, ambient, edm,
           duration: synth.duration,
           prompt: cleanPrompt,
           aiComposed: Boolean(aiComposition),
+          aiModel: resolvedModelName,
+          aiProvider: resolvedProvider,
           aiSummary: effectiveSummary
         });
       }
@@ -4202,6 +4323,8 @@ Pilih 1 genre saja (misal: cyberpunk, lofi, synthwave, orchestral, ambient, edm,
         format: isMp3 ? 'mp3' : 'wav',
         prompt: cleanPrompt,
         aiComposed: Boolean(aiComposition),
+        aiModel: resolvedModelName,
+        aiProvider: resolvedProvider,
         aiSummary: effectiveSummary
       });
     } catch (err) {

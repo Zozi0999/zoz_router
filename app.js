@@ -131,6 +131,18 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     { id: 'krea/krea-2-large', name: 'Krea 2 Large', provider: 'openrouter', cat: 'art', tag: 'Krea • Large', desc: 'Model rendering estetika tinggi untuk kreator' }
   ];
 
+  // Dedicated OpenRouter Curated Music & Audio Composition Models
+  const CURATED_OPENROUTER_MUSIC_MODELS = [
+    { id: 'openrouter/free', name: 'OpenRouter Free Auto', provider: 'openrouter', cat: 'free', tag: 'Gratis • Kilat', desc: 'Rute otomatis model terbaik & tercepat gratis di OpenRouter' },
+    { id: 'google/gemini-2.0-flash-exp:free', name: 'Gemini 2.0 Flash (Free)', provider: 'openrouter', cat: 'free', tag: 'Google • Kilat', desc: 'Penalaran musik super cepat dan cerdas dari Google' },
+    { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B (Free)', provider: 'openrouter', cat: 'free', tag: 'Meta • 70B', desc: 'Model penalaran komprehensif tingkat lanjut Meta AI' },
+    { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3', provider: 'openrouter', cat: 'pro', tag: 'DeepSeek • Flagship', desc: 'Penalaran musik mendalam & aransemen kreatif cerdas' },
+    { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openrouter', cat: 'pro', tag: 'OpenAI • Mini', desc: 'Respon cepat dengan konsistensi JSON komposisi tinggi' },
+    { id: 'qwen/qwen-2.5-72b-instruct', name: 'Qwen 2.5 72B Instruct', provider: 'openrouter', cat: 'pro', tag: 'Alibaba • 72B', desc: 'Kemampuan aransemen nada & variasi tempo sangat luas' },
+    { id: 'mistralai/mistral-small-24b-instruct-2501:free', name: 'Mistral Small 24B (Free)', provider: 'openrouter', cat: 'free', tag: 'Mistral • Free', desc: 'Model efisien berlatensi rendah untuk komposisi audio' },
+    { id: 'anthropic/claude-3.5-haiku', name: 'Claude 3.5 Haiku', provider: 'openrouter', cat: 'pro', tag: 'Anthropic • Cepat', desc: 'Analisis nuansa mood & estetika audio presisi tinggi' }
+  ];
+
   // ==================== STATE MANAGEMENT ====================
   const STATE = {
     mode: 'ollama', // 'ollama' | 'openrouter' | 'auto'
@@ -168,6 +180,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       ollamaModel: 'qwen2.5:1.5b',
       openRouterModel: 'openrouter/free',
       imageModel: 'flux',
+      musicModel: 'qwen2.5:1.5b',
       temperature: 0.7,
       topP: 0.9,
       maxTokens: 8192,
@@ -350,6 +363,21 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     imageGenToggleBtn: $('#imageGenToggleBtn'),
     musicGenToggleBtn: $('#musicGenToggleBtn'),
     musicModelBadge: $('#musicModelBadge'),
+    musicModelMenuWrapper: $('#musicModelMenuWrapper'),
+    musicModelDropdown: $('#musicModelDropdown'),
+    tabBtnMusicOllama: $('#tabBtnMusicOllama'),
+    tabBtnMusicOpenRouter: $('#tabBtnMusicOpenRouter'),
+    paneMusicOllama: $('#paneMusicOllama'),
+    paneMusicOpenRouter: $('#paneMusicOpenRouter'),
+    musicModelOllamaList: $('#musicModelOllamaList'),
+    musicModelOpenRouterList: $('#musicModelOpenRouterList'),
+    customOllamaMusicModelInput: $('#customOllamaMusicModelInput'),
+    btnApplyCustomMusicOllamaModel: $('#btnApplyCustomMusicOllamaModel'),
+    customOpenRouterMusicModelInput: $('#customOpenRouterMusicModelInput'),
+    btnApplyCustomMusicOpenRouterModel: $('#btnApplyCustomMusicOpenRouterModel'),
+    musicModelSearchInput: $('#musicModelSearchInput'),
+    musicOpenRouterStatusBar: $('#musicOpenRouterStatusBar'),
+    musicOpenRouterConfigBtn: $('#musicOpenRouterConfigBtn'),
     videoGenToggleBtn: $('#videoGenToggleBtn'),
     videoModelBadge: $('#videoModelBadge'),
     tabBtnPollinations: $('#tabBtnPollinations'),
@@ -409,6 +437,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     toggleShowSerperKeyBtn: $('#toggleShowSerperKeyBtn'),
     testSerperBtn: $('#testSerperBtn'),
     settingAutoPolicy: $('#settingAutoPolicy'),
+    settingMusicModel: $('#settingMusicModel'),
     paramTemperature: $('#paramTemperature'),
     valTemperature: $('#valTemperature'),
     paramTopP: $('#paramTopP'),
@@ -9930,8 +9959,52 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     });
   }
 
+  function getMusicModelDisplayName(modelId) {
+    if (!modelId || modelId === 'off') return 'Nonaktif (Mode Obrolan)';
+    const foundOR = CURATED_OPENROUTER_MUSIC_MODELS.find(m => m.id === modelId);
+    if (foundOR) return foundOR.name;
+    const foundOllama = (STATE.ollamaModels || []).find(m => (m.id || m.name) === modelId);
+    if (foundOllama) return foundOllama.name || foundOllama.id;
+    const m = String(modelId).toLowerCase();
+    if (m === 'qwen2.5:1.5b') return 'Qwen 2.5 1.5B (Lokal)';
+    if (m === 'llama3.2:3b') return 'Llama 3.2 3B (Lokal)';
+    if (m === 'openrouter/free') return 'OpenRouter Free Auto';
+    if (m.includes('/')) {
+      const parts = modelId.split('/');
+      return parts[1] ? parts[1].replace(/[-_]/g, ' ') : modelId;
+    }
+    return modelId;
+  }
+
+  function getMusicModelBadgeText(modelId) {
+    if (!modelId || modelId === 'off') return 'Music';
+    const m = String(modelId).toLowerCase();
+    if (m.includes('qwen2.5:1.5b')) return 'Qwen 1.5B';
+    if (m.includes('qwen2.5:7b') || m.includes('qwen-2.5-72b')) return 'Qwen';
+    if (m.includes('llama-3.3') || m.includes('llama3.3')) return 'Llama 3.3';
+    if (m.includes('llama3.2:3b') || m.includes('llama3.2')) return 'Llama 3.2';
+    if (m.includes('gemini-2.0') || m.includes('gemini')) return 'Gemini';
+    if (m.includes('deepseek')) return 'DeepSeek';
+    if (m.includes('gpt-4o')) return 'GPT-4o';
+    if (m.includes('gpt')) return 'GPT';
+    if (m.includes('claude') || m.includes('haiku')) return 'Haiku';
+    if (m.includes('mistral')) return 'Mistral';
+    if (m.includes('openrouter/free')) return 'OR Free';
+    if (m.includes('/')) {
+      const part = modelId.split('/')[1] || modelId;
+      return part.slice(0, 8);
+    }
+    if (m.includes(':')) {
+      return m.split(':')[0].slice(0, 8);
+    }
+    return modelId.slice(0, 8);
+  }
+
   function updateMusicGenModeUI() {
     const isMusicMode = Boolean(STATE.isMusicGenMode);
+    const activeModel = STATE.settings.musicModel || 'qwen2.5:1.5b';
+    const badgeText = getMusicModelBadgeText(activeModel);
+    const displayName = getMusicModelDisplayName(activeModel);
 
     if (els.composerBox) {
       els.composerBox.classList.toggle('music-mode-active', isMusicMode);
@@ -9940,29 +10013,276 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       els.musicGenToggleBtn.classList.toggle('active', isMusicMode);
       els.musicGenToggleBtn.setAttribute('aria-pressed', String(isMusicMode));
       els.musicGenToggleBtn.setAttribute('title', isMusicMode 
-        ? 'Mode Musik Aktif: Neural Music Studio (Klik untuk nonaktifkan)' 
-        : 'AI Music Studio - Buat Musik AI');
+        ? `Mode Musik Aktif: ${displayName} (Klik untuk ganti model / nonaktifkan)` 
+        : 'AI Music Studio - Pilih Model Musik AI');
     }
     if (els.musicModelBadge) {
-      els.musicModelBadge.innerText = 'Neural';
+      els.musicModelBadge.innerText = badgeText;
       els.musicModelBadge.style.display = isMusicMode ? 'inline-block' : 'none';
     }
     if (els.sendPromptBtn) {
       if (isMusicMode) {
-        els.sendPromptBtn.setAttribute('title', 'Gubah Musik dengan AI Neural Studio (Enter)');
-        els.sendPromptBtn.setAttribute('aria-label', 'Gubah Musik dengan AI Neural Studio (Enter)');
+        els.sendPromptBtn.setAttribute('title', `Gubah Musik dengan ${displayName} (Enter)`);
+        els.sendPromptBtn.setAttribute('aria-label', `Gubah Musik dengan ${displayName} (Enter)`);
       } else if (!STATE.isImageGenMode && !STATE.isVideoGenMode) {
         els.sendPromptBtn.setAttribute('title', 'Kirim Prompt (Enter)');
         els.sendPromptBtn.setAttribute('aria-label', 'Kirim Prompt (Enter)');
       }
     }
     if (els.promptInput && isMusicMode) {
-      els.promptInput.placeholder = 'Deskripsikan musik, beat, atau genre yang ingin digubah (misal: lofi cyberpunk 90bpm)...';
+      els.promptInput.placeholder = `Deskripsikan musik, beat, atau melodi untuk digubah dengan ${badgeText}...`;
     } else if (els.promptInput && !STATE.isImageGenMode && !STATE.isVideoGenMode) {
       els.promptInput.placeholder = '';
     }
     if (els.attachOptionGenMusic) {
       els.attachOptionGenMusic.classList.toggle('active', isMusicMode);
+    }
+
+    // Sinkronisasi status checked pada popup modal/dropdown musik
+    $$('.music-model-item').forEach(item => {
+      const itemModel = item.dataset.model;
+      const isSelected = isMusicMode ? (itemModel === activeModel) : (itemModel === 'off');
+      item.classList.toggle('active', isSelected);
+      const checkIcon = item.querySelector('.music-model-check');
+      if (checkIcon) checkIcon.style.display = isSelected ? 'block' : 'none';
+    });
+  }
+
+  function switchMusicModelTab(tabName) {
+    const isOR = tabName === 'openrouter';
+    if (els.tabBtnMusicOllama) els.tabBtnMusicOllama.classList.toggle('active', !isOR);
+    if (els.tabBtnMusicOpenRouter) els.tabBtnMusicOpenRouter.classList.toggle('active', isOR);
+    if (els.paneMusicOllama) els.paneMusicOllama.style.display = isOR ? 'none' : 'flex';
+    if (els.paneMusicOpenRouter) els.paneMusicOpenRouter.style.display = isOR ? 'flex' : 'none';
+
+    if (isOR) {
+      updateMusicOpenRouterStatusBar();
+      populateMusicOpenRouterModels(els.musicModelSearchInput?.value || '');
+      setTimeout(() => els.musicModelSearchInput?.focus(), 60);
+    } else {
+      populateMusicOllamaModels();
+    }
+  }
+
+  function updateMusicOpenRouterStatusBar() {
+    if (!els.musicOpenRouterStatusBar) return;
+    const hasKey = Boolean(STATE.settings.openRouterKey);
+    els.musicOpenRouterStatusBar.className = `music-model-status-bar ${hasKey ? 'connected' : 'warning'}`;
+    els.musicOpenRouterStatusBar.innerHTML = hasKey
+      ? `<span><i class="fa-solid fa-circle-check" style="color:var(--neon-teal);"></i> API Key Terhubung • Cloud Neural Music Models Siap</span>
+         <button class="status-action-btn" id="musicOpenRouterConfigBtn" type="button">Pengaturan</button>`
+      : `<span><i class="fa-solid fa-circle-exclamation" style="color:var(--neon-amber);"></i> Butuh OpenRouter Key untuk cloud models</span>
+         <button class="status-action-btn" id="musicOpenRouterConfigBtn" type="button">Buka Pengaturan</button>`;
+
+    const cfgBtn = els.musicOpenRouterStatusBar.querySelector('#musicOpenRouterConfigBtn');
+    cfgBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeMusicModelDropdown();
+      const modal = $('#settingsModal');
+      if (modal) {
+        modal.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === 'tabProviders'));
+        modal.querySelectorAll('.settings-tab-pane').forEach(pane => pane.classList.toggle('active', pane.id === 'tabProviders'));
+      }
+      openModal('settingsModal');
+      AudioEngine.click();
+    });
+  }
+
+  function populateMusicOllamaModels() {
+    if (!els.musicModelOllamaList) return;
+    const activeModel = STATE.settings.musicModel || 'qwen2.5:1.5b';
+    const isMusicMode = Boolean(STATE.isMusicGenMode);
+
+    let models = Array.isArray(STATE.ollamaModels) && STATE.ollamaModels.length > 0 
+      ? [...STATE.ollamaModels]
+      : [{ id: 'qwen2.5:1.5b', name: 'qwen2.5:1.5b' }];
+
+    if (!activeModel.includes('/') && !models.some(m => (m.id || m.name) === activeModel) && activeModel !== 'off') {
+      models.unshift({ id: activeModel, name: activeModel });
+    }
+
+    els.musicModelOllamaList.innerHTML = models.map(m => {
+      const modelId = m.id || m.name;
+      const displayName = m.name || m.id;
+      const isSelected = isMusicMode && (modelId === activeModel);
+      let accentClass = 'music-accent';
+      let icon = 'fa-music';
+      if (modelId.includes('qwen')) { accentClass = 'qwen-accent'; icon = 'fa-dragon'; }
+      else if (modelId.includes('llama')) { accentClass = 'llama-accent'; icon = 'fa-microchip'; }
+      else if (modelId.includes('granite')) { accentClass = 'gemini-accent'; icon = 'fa-bolt'; }
+
+      return `
+        <button class="music-model-item ${isSelected ? 'active' : ''}" type="button" data-model="${escapeHtml(modelId)}">
+          <div class="music-model-icon-box ${accentClass}">
+            <i class="fa-solid ${icon}"></i>
+          </div>
+          <div class="music-model-info">
+            <div class="music-model-title-row">
+              <span class="music-model-title">${escapeHtml(displayName)}</span>
+              <span class="music-model-tag">Ollama Lokal</span>
+            </div>
+            <span class="music-model-desc">Komposisi neural via local server 127.0.0.1:11434</span>
+          </div>
+          <i class="fa-solid fa-check music-model-check" style="${isSelected ? 'display: block;' : 'display: none;'}"></i>
+        </button>
+      `;
+    }).join('');
+
+    els.musicModelOllamaList.querySelectorAll('.music-model-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const modelVal = item.dataset.model;
+        if (modelVal) setMusicModel(modelVal);
+      });
+    });
+  }
+
+  function populateMusicOpenRouterModels(searchQuery = '') {
+    if (!els.musicModelOpenRouterList) return;
+    const q = (searchQuery || '').toLowerCase().trim();
+    const activeModel = STATE.settings.musicModel || 'qwen2.5:1.5b';
+    const isMusicMode = Boolean(STATE.isMusicGenMode);
+
+    const allModelsMap = new Map();
+    CURATED_OPENROUTER_MUSIC_MODELS.forEach(m => allModelsMap.set(m.id, m));
+
+    if (activeModel.includes('/') && !allModelsMap.has(activeModel)) {
+      allModelsMap.set(activeModel, {
+        id: activeModel,
+        name: getMusicModelDisplayName(activeModel),
+        provider: 'openrouter',
+        tag: 'Cloud Model',
+        desc: activeModel
+      });
+    }
+
+    let list = Array.from(allModelsMap.values());
+    if (q) {
+      list = list.filter(m => 
+        m.id.toLowerCase().includes(q) || 
+        (m.name && m.name.toLowerCase().includes(q)) ||
+        (m.desc && m.desc.toLowerCase().includes(q)) ||
+        (m.tag && m.tag.toLowerCase().includes(q))
+      );
+    }
+
+    if (list.length === 0) {
+      els.musicModelOpenRouterList.innerHTML = `
+        <div style="padding: 16px 8px; text-align: center; color: var(--text-dim); font-size: 0.72rem;">
+          <i class="fa-solid fa-ghost" style="font-size: 1.2rem; margin-bottom: 6px; display: block; opacity: 0.5;"></i>
+          Tidak ada model OpenRouter yang cocok dengan "<strong>${escapeHtml(q)}</strong>"<br>
+          Gunakan baris kustom di atas untuk memasukkan model secara manual.
+        </div>
+      `;
+      return;
+    }
+
+    els.musicModelOpenRouterList.innerHTML = list.map(m => {
+      const isSelected = isMusicMode && (m.id === activeModel);
+      let icon = 'fa-cloud';
+      let accentClass = 'cloud-accent';
+      const idLow = m.id.toLowerCase();
+      if (idLow.includes('gemini')) { icon = 'fa-brands fa-google'; accentClass = 'gemini-accent'; }
+      else if (idLow.includes('llama')) { icon = 'fa-microchip'; accentClass = 'llama-accent'; }
+      else if (idLow.includes('qwen')) { icon = 'fa-dragon'; accentClass = 'qwen-accent'; }
+      else if (idLow.includes('deepseek')) { icon = 'fa-brain'; accentClass = 'gemini-accent'; }
+      else if (idLow.includes('free')) { icon = 'fa-bolt-lightning'; accentClass = 'flux-accent'; }
+
+      return `
+        <button class="music-model-item ${isSelected ? 'active' : ''}" type="button" data-model="${escapeHtml(m.id)}">
+          <div class="music-model-icon-box ${accentClass}">
+            <i class="fa-solid ${icon}"></i>
+          </div>
+          <div class="music-model-info">
+            <div class="music-model-title-row">
+              <span class="music-model-title">${escapeHtml(m.name || m.id)}</span>
+              <span class="music-model-tag">${escapeHtml(m.tag || 'OpenRouter')}</span>
+            </div>
+            <span class="music-model-desc">${escapeHtml(m.desc || m.id)}</span>
+          </div>
+          <i class="fa-solid fa-check music-model-check" style="${isSelected ? 'display: block;' : 'display: none;'}"></i>
+        </button>
+      `;
+    }).join('');
+
+    els.musicModelOpenRouterList.querySelectorAll('.music-model-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const modelVal = item.dataset.model;
+        if (modelVal) setMusicModel(modelVal);
+      });
+    });
+  }
+
+  function toggleMusicModelDropdown(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (!els.musicModelDropdown) return;
+    const isHidden = els.musicModelDropdown.style.display === 'none' || !els.musicModelDropdown.style.display;
+    if (isHidden) {
+      openMusicModelDropdown();
+    } else {
+      closeMusicModelDropdown();
+    }
+  }
+
+  function openMusicModelDropdown() {
+    if (!els.musicModelDropdown) return;
+    closeAttachmentDropdown();
+    closeSearchDropdown();
+    closeImageModelDropdown();
+    els.musicModelDropdown.style.display = 'flex';
+    els.musicGenToggleBtn?.setAttribute('aria-expanded', 'true');
+
+    const currentModel = STATE.settings.musicModel || 'qwen2.5:1.5b';
+    if (currentModel.includes('/') || currentModel.startsWith('openrouter:')) {
+      switchMusicModelTab('openrouter');
+    } else {
+      switchMusicModelTab('ollama');
+    }
+
+    AudioEngine.click();
+  }
+
+  function closeMusicModelDropdown() {
+    if (!els.musicModelDropdown) return;
+    els.musicModelDropdown.style.display = 'none';
+    els.musicGenToggleBtn?.setAttribute('aria-expanded', 'false');
+  }
+
+  function setMusicModel(modelVal) {
+    if (modelVal === 'off') {
+      STATE.isMusicGenMode = false;
+      updateMusicGenModeUI();
+      closeMusicModelDropdown();
+      AudioEngine.click();
+      showToast('ℹ️ Mode AI Music Studio dinonaktifkan. Kembali ke obrolan biasa.');
+      return;
+    }
+
+    STATE.settings.musicModel = modelVal;
+    STATE.isMusicGenMode = true;
+    STATE.isImageGenMode = false;
+    STATE.isVideoGenMode = false;
+    try {
+      localStorage.setItem('zoz_settings_v1', JSON.stringify(STATE.settings));
+    } catch (_) {}
+    if (els.settingMusicModel) {
+      els.settingMusicModel.value = modelVal;
+    }
+    updateMusicGenModeUI();
+    updateImageGenModeUI();
+    updateVideoGenModeUI();
+    closeMusicModelDropdown();
+    AudioEngine.success();
+    els.promptInput?.focus();
+    const displayName = getMusicModelDisplayName(modelVal);
+    if (modelVal.includes('/') && !STATE.settings.openRouterKey) {
+      showToast(`⚠️ Model musik ${displayName} dipilih. Butuh OpenRouter Key di Pengaturan untuk memanggil cloud model.`, 'warning');
+    } else {
+      showToast(`🎵 Model Musik Aktif: ${displayName}`);
     }
   }
 
@@ -10150,6 +10470,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (!els.imageModelDropdown) return;
     closeAttachmentDropdown();
     closeSearchDropdown();
+    closeMusicModelDropdown();
     els.imageModelDropdown.style.display = 'flex';
     els.imageGenToggleBtn?.setAttribute('aria-expanded', 'true');
 
@@ -10939,6 +11260,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
   async function runMusicGeneration(session, promptText, options = {}) {
     const cleanPrompt = extractMusicPrompt(promptText) || 'Cyberpunk futuristic darksynth beat';
+    const targetMusicModel = (options.model && typeof options.model === 'string') ? options.model : (STATE.settings.musicModel || 'qwen2.5:1.5b');
+    const targetModelDisplayName = getMusicModelDisplayName(targetMusicModel);
+
     setGeneratingState(true);
     STATE.abortController = new AbortController();
     const startTime = performance.now();
@@ -10954,13 +11278,13 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
             <div class="music-gen-title-box">
               <i class="fa-solid fa-music"></i> AI NEURAL MUSIC STUDIO
             </div>
-            <span class="music-gen-badge">Procedural Synthesis</span>
+            <span class="music-gen-badge">Model: ${escapeHtml(getMusicModelBadgeText(targetMusicModel))}</span>
           </div>
           <div class="music-gen-telemetry">
             <div class="music-gen-status-row">
               <span class="music-gen-status-text">
                 <i class="fa-solid fa-circle-notch fa-spin"></i>
-                <span class="music-gen-step-msg">[Langkah 1/3] Merancang harmoni & komposisi matriks audio...</span>
+                <span class="music-gen-step-msg">[Langkah 1/3] Merancang harmoni dengan ${escapeHtml(targetModelDisplayName)}...</span>
               </span>
               <span class="music-gen-percent-text">20%</span>
             </div>
@@ -11001,6 +11325,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       let trackDuration = 15;
       let trackAiSummary = '';
       let trackAiComposed = false;
+      let trackAiModel = targetMusicModel;
+      let trackAiProvider = targetMusicModel.includes('/') ? 'openrouter' : 'ollama';
 
       if (!IS_GITHUB_PAGES) {
         try {
@@ -11008,13 +11334,16 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'x-session-id': session ? session.id : ''
+              'x-session-id': session ? session.id : '',
+              'x-openrouter-key': STATE.settings.openRouterKey || ''
             },
             body: JSON.stringify({
               prompt: cleanPrompt,
               duration: options.duration || 15,
               bpm: options.bpm || null,
-              sessionId: session ? session.id : null
+              sessionId: session ? session.id : null,
+              musicModel: targetMusicModel,
+              openRouterKey: STATE.settings.openRouterKey || ''
             }),
             signal: STATE.abortController?.signal
           });
@@ -11029,6 +11358,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
               trackDuration = data.duration || trackDuration;
               trackAiSummary = data.aiSummary || '';
               trackAiComposed = Boolean(data.aiComposed);
+              trackAiModel = data.aiModel || trackAiModel;
+              trackAiProvider = data.aiProvider || trackAiProvider;
             } else {
               throw new Error(data.error || 'Server tidak mengembalikan file audio');
             }
@@ -11064,22 +11395,26 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         duration: trackDuration,
         prompt: cleanPrompt,
         aiComposed: trackAiComposed,
-        aiSummary: trackAiSummary
+        aiSummary: trackAiSummary,
+        aiModel: trackAiModel,
+        aiProvider: trackAiProvider
       };
 
       bubbleText.innerHTML = buildCyberAudioPlayerCardHtml(trackData);
       attachAudioPlayerListeners(bubbleText);
 
+      const providerIcon = trackAiProvider === 'openrouter' ? 'fa-cloud' : 'fa-microchip';
+      const modelBadgeName = getMusicModelBadgeText(trackAiModel);
       metaBox.innerHTML = `
         <strong>Neural Music Studio</strong>
-        <span class="meta-model-badge" style="background:rgba(0,255,194,0.15); border-color:#00FFC2; color:var(--neon-teal);"><i class="fa-solid fa-brain"></i> ${trackAiComposed ? 'AI Neural Composition' : 'Audio Dihasilkan'}</span>
+        <span class="meta-model-badge" style="background:rgba(0,255,194,0.15); border-color:#00FFC2; color:var(--neon-teal);"><i class="fa-solid ${providerIcon}"></i> ${escapeHtml(modelBadgeName)} (${trackAiComposed ? 'AI Composed' : 'Audio'})</span>
         <span>⏱️ ${totalDuration}s</span>
       `;
 
       if (session) {
         session.messages.push({
           role: 'assistant',
-          content: `[Musik AI Hasil Sintesis: "${cleanPrompt}"]\n\n- Judul: ${trackTitle}\n- Genre: ${trackGenre.toUpperCase()} (${trackBpm} BPM)\n- Aransemen: ${trackAiSummary || 'Digubah oleh AI Neural Music Architect'}\n- Audio: [Putar / Unduh Audio](${finalAudioUrl})`,
+          content: `[Musik AI Hasil Sintesis: "${cleanPrompt}"]\n\n- Judul: ${trackTitle}\n- Genre: ${trackGenre.toUpperCase()} (${trackBpm} BPM)\n- Engine: ${trackAiModel} (${trackAiProvider})\n- Aransemen: ${trackAiSummary || 'Digubah oleh AI Neural Music Architect'}\n- Audio: [Putar / Unduh Audio](${finalAudioUrl})`,
           type: 'music_generation',
           isMusicGen: true,
           audioUrl: finalAudioUrl,
@@ -11091,7 +11426,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           prompt: cleanPrompt,
           aiComposed: trackAiComposed,
           aiSummary: trackAiSummary,
-          model: 'Neural Music Synthesizer',
+          model: `${trackAiModel} (${trackAiProvider})`,
           stats: { duration: totalDuration },
           timestamp: new Date().toISOString()
         });
@@ -13346,6 +13681,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (els.settingOpenRouterKey) els.settingOpenRouterKey.value = STATE.settings.openRouterKey || '';
     if (els.settingSerperApiKey) els.settingSerperApiKey.value = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
     if (els.settingImageModel) els.settingImageModel.value = STATE.settings.imageModel || 'flux';
+    if (els.settingMusicModel) els.settingMusicModel.value = STATE.settings.musicModel || 'qwen2.5:1.5b';
     if (els.paramTemperature) els.paramTemperature.value = STATE.settings.temperature ?? 0.7;
     if (els.valTemperature) els.valTemperature.innerText = STATE.settings.temperature ?? 0.7;
     if (els.paramTopP) els.paramTopP.value = STATE.settings.topP ?? 0.9;
@@ -13912,6 +14248,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         if (els.imageModelDropdown && els.imageModelDropdown.style.display !== 'none') {
           closeImageModelDropdown();
         }
+        if (els.musicModelDropdown && els.musicModelDropdown.style.display !== 'none') {
+          closeMusicModelDropdown();
+        }
         return;
       }
 
@@ -13930,6 +14269,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           closeImageModelDropdown();
         }
       }
+      if (els.musicModelDropdown && els.musicModelDropdown.style.display !== 'none') {
+        if (!els.musicModelMenuWrapper?.contains(e.target)) {
+          closeMusicModelDropdown();
+        }
+      }
     });
 
     // Dismiss dropdowns & open modals on Escape key
@@ -13938,6 +14282,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         closeAttachmentDropdown();
         closeSearchDropdown();
         closeImageModelDropdown();
+        closeMusicModelDropdown();
 
         if (ImageLightbox.isOpen()) {
           return;
@@ -13970,31 +14315,101 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       toggleImageModelDropdown(e);
     });
 
-    // Embedded AI Music Studio Toggle Button
+    // Embedded AI Music Studio Model Selector Dropdown Toggle
     els.musicGenToggleBtn?.addEventListener('click', (e) => {
+      toggleMusicModelDropdown(e);
+    });
+
+    // Music Model Nonaktif (Mode Obrolan) Option
+    $('#musicModelOptionOff')?.addEventListener('click', (e) => {
       e.stopPropagation();
-      closeImageModelDropdown();
-      closeAttachmentDropdown();
-      closeSearchDropdown();
-      STATE.isMusicGenMode = !STATE.isMusicGenMode;
-      if (STATE.isMusicGenMode) {
-        STATE.isImageGenMode = false;
-        STATE.isVideoGenMode = false;
-        updateImageGenModeUI();
-        updateVideoGenModeUI();
+      setMusicModel('off');
+    });
+
+    // Music Model Dropdown Tabs (Ollama vs OpenRouter)
+    els.tabBtnMusicOllama?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      switchMusicModelTab('ollama');
+    });
+
+    els.tabBtnMusicOpenRouter?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      switchMusicModelTab('openrouter');
+    });
+
+    // OpenRouter Music Model Search Filter
+    els.musicModelSearchInput?.addEventListener('input', (e) => {
+      populateMusicOpenRouterModels(e.target.value);
+    });
+
+    els.musicModelSearchInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        const firstItem = els.musicModelOpenRouterList?.querySelector('.music-model-item');
+        if (firstItem && firstItem.dataset.model) {
+          setMusicModel(firstItem.dataset.model);
+        }
       }
-      updateMusicGenModeUI();
-      if (els.promptInput && STATE.isMusicGenMode) {
-        els.promptInput.focus();
+    });
+
+    // Custom Ollama Music Model Apply Button & Enter Key
+    els.btnApplyCustomMusicOllamaModel?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const val = els.customOllamaMusicModelInput?.value.trim();
+      if (val) {
+        setMusicModel(val);
+        if (els.customOllamaMusicModelInput) els.customOllamaMusicModelInput.value = '';
+      } else {
+        showToast('⚠️ Masukkan nama model Ollama (misal: qwen2.5:1.5b)');
       }
-      showToast(STATE.isMusicGenMode ? '🎵 AI Neural Music Studio Aktif!' : 'Mode Musik dinonaktifkan.');
-      AudioEngine.click();
+    });
+
+    els.customOllamaMusicModelInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        const val = els.customOllamaMusicModelInput?.value.trim();
+        if (val) {
+          setMusicModel(val);
+          els.customOllamaMusicModelInput.value = '';
+        } else {
+          showToast('⚠️ Masukkan nama model Ollama (misal: qwen2.5:1.5b)');
+        }
+      }
+    });
+
+    // Custom OpenRouter Music Model Apply Button & Enter Key
+    els.btnApplyCustomMusicOpenRouterModel?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const val = els.customOpenRouterMusicModelInput?.value.trim();
+      if (val) {
+        setMusicModel(val);
+        if (els.customOpenRouterMusicModelInput) els.customOpenRouterMusicModelInput.value = '';
+      } else {
+        showToast('⚠️ Masukkan model ID OpenRouter (misal: google/gemini-2.0-flash-exp:free)');
+      }
+    });
+
+    els.customOpenRouterMusicModelInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        const val = els.customOpenRouterMusicModelInput?.value.trim();
+        if (val) {
+          setMusicModel(val);
+          els.customOpenRouterMusicModelInput.value = '';
+        } else {
+          showToast('⚠️ Masukkan model ID OpenRouter (misal: google/gemini-2.0-flash-exp:free)');
+        }
+      }
     });
 
     // Embedded AI Video Studio Toggle Button
     els.videoGenToggleBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
       closeImageModelDropdown();
+      closeMusicModelDropdown();
       closeAttachmentDropdown();
       closeSearchDropdown();
       STATE.isVideoGenMode = !STATE.isVideoGenMode;
@@ -14073,7 +14488,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
     });
 
-    // Keyboard shortcuts: Alt+I (Image Mode / Dropdown) & Alt+H (Toggle Prompt Visibility)
+    // Keyboard shortcuts: Alt+I (Image Mode / Dropdown), Alt+M (Music Mode / Dropdown) & Alt+H (Toggle Prompt Visibility)
     document.addEventListener('keydown', (e) => {
       if (e.altKey && (e.key === 'h' || e.key === 'H')) {
         e.preventDefault();
@@ -14084,8 +14499,13 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (e.altKey && (e.key === 'i' || e.key === 'I')) {
         e.preventDefault();
         toggleImageModelDropdown();
+      } else if (e.altKey && (e.key === 'm' || e.key === 'M')) {
+        e.preventDefault();
+        toggleMusicModelDropdown();
       } else if (e.key === 'Escape' && STATE.isImageGenMode && !els.promptInput?.value.trim()) {
         closeImageModelDropdown();
+      } else if (e.key === 'Escape' && STATE.isMusicGenMode && !els.promptInput?.value.trim()) {
+        closeMusicModelDropdown();
       }
     });
 
@@ -14447,6 +14867,10 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
       if (els.settingImageModel) {
         STATE.settings.imageModel = els.settingImageModel.value.trim() || 'flux';
+      }
+
+      if (els.settingMusicModel) {
+        STATE.settings.musicModel = els.settingMusicModel.value.trim() || 'qwen2.5:1.5b';
       }
 
       if (els.paramTemperature) STATE.settings.temperature = parseFloat(els.paramTemperature.value);

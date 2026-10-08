@@ -585,11 +585,85 @@
               </div>
             </div>
 
-            <!-- AI Music Studio Quick Toggle -->
-            <button class="composer-btn music-gen-toggle" id="musicGenToggleBtn" type="button" title="Mode AI Music Studio (Buat Musik & Audio)" aria-label="Mode Buat Musik AI">
-              <i class="fa-solid fa-music"></i>
-              <span class="music-model-badge" id="musicModelBadge" style="display: none;">Music</span>
-            </button>
+            <!-- AI Music Studio Mode & Model Selector Dropdown -->
+            <div class="music-model-menu-wrapper" id="musicModelMenuWrapper">
+              <button class="composer-btn music-gen-toggle" id="musicGenToggleBtn" type="button" title="Pilih Model AI Music Studio (Buat Musik)" aria-label="Pilih Model Buat Musik AI" aria-haspopup="true" aria-expanded="false" aria-pressed="false">
+                <i class="fa-solid fa-music"></i>
+                <span class="music-model-badge" id="musicModelBadge" style="display: none;">Music</span>
+              </button>
+              <div class="music-model-dropdown-popup" id="musicModelDropdown" style="display: none;">
+                <div class="music-model-dropdown-header">
+                  <span><i class="fa-solid fa-music"></i> AI Music Studio Engine</span>
+                  <span class="music-model-header-tag" id="musicModelHeaderTag">Neural Composer</span>
+                </div>
+
+                <!-- Tab Switcher Nav: Ollama (Lokal) vs OpenRouter (Cloud) -->
+                <div class="music-model-tabs-nav" id="musicModelTabsNav">
+                  <button class="music-model-tab-btn active" id="tabBtnMusicOllama" type="button" data-tab="ollama">
+                    <i class="fa-solid fa-microchip"></i> Ollama (Lokal)
+                  </button>
+                  <button class="music-model-tab-btn" id="tabBtnMusicOpenRouter" type="button" data-tab="openrouter">
+                    <i class="fa-solid fa-cloud"></i> OpenRouter (Cloud)
+                  </button>
+                </div>
+
+                <!-- PANE 1: OLLAMA (LOKAL) -->
+                <div class="music-model-tab-pane" id="paneMusicOllama">
+                  <!-- Nonaktif (Mode Obrolan Biasa) -->
+                  <button class="music-model-item" id="musicModelOptionOff" type="button" data-model="off">
+                    <div class="music-model-icon-box off-accent">
+                      <i class="fa-solid fa-ban"></i>
+                    </div>
+                    <div class="music-model-info">
+                      <span class="music-model-title">Nonaktif (Mode Obrolan)</span>
+                      <span class="music-model-desc">Kembali ke obrolan teks & penalaran AI standar</span>
+                    </div>
+                    <i class="fa-solid fa-check music-model-check" style="display: none;"></i>
+                  </button>
+
+                  <div class="music-model-section-divider">
+                    <span>Model Lokal Ollama Terpasang</span>
+                  </div>
+
+                  <!-- Dynamic list of Ollama installed models -->
+                  <div class="music-model-ollama-list" id="musicModelOllamaList">
+                    <!-- Populated dynamically via JS -->
+                  </div>
+
+                  <!-- Custom Local Model Input Row -->
+                  <div class="music-model-custom-row">
+                    <input type="text" id="customOllamaMusicModelInput" class="music-model-custom-input" placeholder="ID model Ollama kustom..." autocomplete="off" />
+                    <button class="music-model-custom-btn" id="btnApplyCustomMusicOllamaModel" type="button">Pilih</button>
+                  </div>
+                </div>
+
+                <!-- PANE 2: OPENROUTER (CLOUD) -->
+                <div class="music-model-tab-pane" id="paneMusicOpenRouter" style="display: none;">
+                  <!-- Status Bar API Key -->
+                  <div class="music-model-status-bar" id="musicOpenRouterStatusBar">
+                    <span class="status-text"><i class="fa-solid fa-circle-notch fa-spin"></i> Memeriksa API Key...</span>
+                    <button class="status-action-btn" id="musicOpenRouterConfigBtn" type="button">Pengaturan</button>
+                  </div>
+
+                  <!-- Pencarian Model OpenRouter -->
+                  <div class="music-model-search-box">
+                    <i class="fa-solid fa-magnifying-glass search-box-icon"></i>
+                    <input type="text" id="musicModelSearchInput" class="music-model-search-input" placeholder="Cari model OpenRouter (Free, Gemini, Llama, DeepSeek...)" autocomplete="off" />
+                  </div>
+
+                  <!-- Custom Model Input Row -->
+                  <div class="music-model-custom-row">
+                    <input type="text" id="customOpenRouterMusicModelInput" class="music-model-custom-input" placeholder="ID model kustom (misal: vendor/model)..." autocomplete="off" />
+                    <button class="music-model-custom-btn" id="btnApplyCustomMusicOpenRouterModel" type="button">Pilih</button>
+                  </div>
+
+                  <!-- Scrollable Container of OpenRouter Models -->
+                  <div class="music-model-openrouter-list" id="musicModelOpenRouterList">
+                    <!-- Populated dynamically via JS -->
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <!-- AI Video Studio Quick Toggle -->
             <button class="composer-btn video-gen-toggle" id="videoGenToggleBtn" type="button" title="Mode AI Video Studio (Buat Video Sinematik)" aria-label="Mode Buat Video AI">
@@ -726,6 +800,12 @@
               <option value="local_first">Ollama Cloud First (Prioritas Ollama Cloud, fallback OpenRouter bila offline)</option>
               <option value="cloud_heavy">Smart Task (Prompt panjang &gt; 500 kata / Coding sulit ke OpenRouter)</option>
             </select>
+          </div>
+
+          <div class="form-group">
+            <label><i class="fa-solid fa-music"></i> Model AI Musik Studio (Default)</label>
+            <input type="text" id="settingMusicModel" placeholder="qwen2.5:1.5b atau vendor/model..." value="qwen2.5:1.5b">
+            <small class="form-hint">Model Ollama lokal (misal: <code>qwen2.5:1.5b</code>) atau OpenRouter cloud (misal: <code>google/gemini-2.0-flash-exp:free</code>).</small>
           </div>
         </div>
 
@@ -1254,6 +1334,6 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
-  <script src="app.js?v=20261008_v146"></script>
+  <script src="app.js?v=20261008_v147"></script>
 </body>
 </html>
