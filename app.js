@@ -69,7 +69,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   // Popular OpenRouter Models Catalog (Live Active Free & Flagship Models)
   const DEFAULT_OPENROUTER_MODELS = [
     { id: 'openrouter/free', name: 'OpenRouter Free Router (Auto)', tag: 'Free • Auto-Route', cat: 'free', desc: 'Rute otomatis cerdas ke model gratis OpenRouter yang paling sehat dan tidak antre.' },
-    { id: 'qwen/qwen3.8-27b:free', name: 'qwen/qwen3.8-27b:free', tag: 'Free • Flagship', cat: 'flagship' },
     { id: 'google/gemma-4-26b-a4b-it:free', name: 'google/gemma-4-26b-a4b-it:free', tag: 'Free • Fast', cat: 'fast' },
     { id: 'google/gemma-4-31b-it:free', name: 'google/gemma-4-31b-it:free', tag: 'Free • Multimodal', cat: 'flagship' },
     { id: 'nvidia/nemotron-3.5-lightning:free', name: 'nvidia/nemotron-3.5-lightning:free', tag: 'Free • Lightning', cat: 'fast' },
@@ -162,12 +161,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     openRouterModels: [...DEFAULT_OPENROUTER_MODELS],
     availableImageModels: [...DEFAULT_IMAGE_MODELS],
     settings: {
-      ollamaEndpoint: 'https://ollama.com',
+      ollamaEndpoint: 'http://127.0.0.1:11434',
       ollamaApiKey: '',
       openRouterKey: '',
       serperApiKey: '075538fed9c64990e1eb32a06726c1e55a933c1e',
-      ollamaModel: 'gemma4:31b',
-      openRouterModel: 'qwen/qwen3.8-27b:free',
+      ollamaModel: 'qwen2.5:1.5b',
+      openRouterModel: 'openrouter/free',
       imageModel: 'flux',
       temperature: 0.7,
       topP: 0.9,
@@ -751,12 +750,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           const tx = this.db.transaction('sessions', 'readwrite');
           const store = tx.objectStore('sessions');
           store.clear();
-          sessions.forEach(s => {
-            // Jangan tulis ulang placeholder lazy-loaded (messages kosong) ke IndexedDB —
-            // sumber kebenaran tetap di disk; menulisnya akan menimpa riwayat dengan array kosong.
-            if (s && s._isLazyDisk) return;
-            store.put(s);
-          });
+          sessions.forEach(s => store.put(s));
           tx.oncomplete = () => resolve(true);
           tx.onerror = () => resolve(false);
         } catch (e) {
@@ -1019,23 +1013,26 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
       }
 
-      // Auto-Migration: Alihkan endpoint lokal lama ke Ollama Cloud resmi (https://ollama.com)
-      if (!STATE.settings.ollamaEndpoint || 
-          STATE.settings.ollamaEndpoint.includes('127.0.0.1') || 
-          STATE.settings.ollamaEndpoint.includes('localhost') || 
-          STATE.settings.ollamaEndpoint.includes('11434')) {
-        STATE.settings.ollamaEndpoint = 'https://ollama.com';
+      // Pastikan endpoint Ollama terdefinisi dengan baik (default ke 127.0.0.1:11434 jika tidak ada API key)
+      if (!STATE.settings.ollamaEndpoint) {
+        STATE.settings.ollamaEndpoint = 'http://127.0.0.1:11434';
+      } else if (STATE.settings.ollamaEndpoint.includes('ollama.com') && !STATE.settings.ollamaApiKey) {
+        // Jika sebelumnya diarahkan ke ollama.com tapi tanpa API key, pulihkan ke Ollama lokal
+        STATE.settings.ollamaEndpoint = 'http://127.0.0.1:11434';
       }
 
-      // Auto-Migration: Alihkan model lokal lama ke model flagship cloud default
+      // Pastikan model Ollama valid (jika di lokal dan model masih gemma4:31b/lama, arahkan ke qwen2.5:1.5b)
+      const isLocalOllama = STATE.settings.ollamaEndpoint.includes('127.0.0.1') || 
+                            STATE.settings.ollamaEndpoint.includes('localhost') || 
+                            STATE.settings.ollamaEndpoint.includes('11434');
       if (!STATE.settings.ollamaModel || 
-          STATE.settings.ollamaModel === 'nemotron-mini:latest' || 
-          STATE.settings.ollamaModel === 'llama3:latest') {
-        STATE.settings.ollamaModel = 'gemma4:31b';
+          (isLocalOllama && (STATE.settings.ollamaModel === 'gemma4:31b' || STATE.settings.ollamaModel === 'nemotron-mini:latest' || STATE.settings.ollamaModel === 'llama3:latest'))) {
+        STATE.settings.ollamaModel = 'qwen2.5:1.5b';
       }
 
-      // Auto-Migration: Alihkan model OpenRouter lama / mati ke model free yang aktif live (qwen/qwen3.8-27b:free)
+      // Auto-Migration: Alihkan model OpenRouter lama / mati ke router gratis (openrouter/free)
       const DEAD_OPENROUTER_MODELS = [
+        'qwen/qwen3.8-27b:free',
         'deepseek/deepseek-r1:free',
         'meta-llama/llama-3.3-70b-instruct:free',
         'deepseek/deepseek-chat:free',
@@ -1045,7 +1042,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         'meta-llama/llama-3.2-11b-vision-instruct:free'
       ];
       if (!STATE.settings.openRouterModel || DEAD_OPENROUTER_MODELS.includes(STATE.settings.openRouterModel)) {
-        STATE.settings.openRouterModel = 'qwen/qwen3.8-27b:free';
+        STATE.settings.openRouterModel = 'openrouter/free';
       }
 
       if (!STATE.settings.imageModel) {
@@ -1268,35 +1265,29 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const globalRes = await fetch('/api/chat/status').catch(() => null);
       if (globalRes && globalRes.ok) {
         const globalData = await globalRes.json();
-        const lastActiveId = safeSessionStorage.getItem('zoz_active_session_id') || localStorage.getItem('zoz_last_active_session_id');
         if (globalData && globalData.activeSessions && globalData.activeSessions.length > 0) {
-          // Cegah hijack sesi: hanya sambungkan ke tugas milik sesi aktif terakhir pengguna,
-          // bukan sembarang sesi pertama di server.
-          const targetTask = lastActiveId
-            ? globalData.activeSessions.find(s => s.sessionId === lastActiveId)
-            : null;
-          if (targetTask) {
-            const targetSid = targetTask.sessionId;
-            let targetSession = STATE.sessions.find(s => s.id === targetSid);
-            if (!targetSession) {
-              const diskSess = await DeviceStorage.getSession(targetSid);
-              if (diskSess) {
-                STATE.sessions.unshift(diskSess);
-                targetSession = diskSess;
-              }
+          const targetTask = globalData.activeSessions[0];
+          const targetSid = targetTask.sessionId;
+          let targetSession = STATE.sessions.find(s => s.id === targetSid);
+          if (!targetSession) {
+            const diskSess = await DeviceStorage.getSession(targetSid);
+            if (diskSess) {
+              STATE.sessions.unshift(diskSess);
+              targetSession = diskSess;
             }
-            if (targetSession) {
-              await switchSession(targetSid);
-              setGeneratingState(true);
-              attachToActiveBackgroundChat(targetSession, targetTask.model, targetTask.text || '');
-              showToast('⚡ Menyambung kembali ke respons AI yang sedang diproses di latar belakang...', 'info');
-              return;
-            }
+          }
+          if (targetSession) {
+            await switchSession(targetSid);
+            setGeneratingState(true);
+            attachToActiveBackgroundChat(targetSession, targetTask.model, targetTask.text || '');
+            showToast('⚡ Menyambung kembali ke respons AI yang sedang diproses di latar belakang...', 'info');
+            return;
           }
         }
 
         if (globalData && globalData.recentlyCompletedSessions && globalData.recentlyCompletedSessions.length > 0) {
-          const matchedTask = globalData.recentlyCompletedSessions.find(s => s.sessionId === lastActiveId);
+          const lastActiveId = safeSessionStorage.getItem('zoz_active_session_id') || localStorage.getItem('zoz_last_active_session_id');
+          const matchedTask = globalData.recentlyCompletedSessions.find(s => s.sessionId === lastActiveId) || globalData.recentlyCompletedSessions[0];
           if (matchedTask) {
             let matchedSession = STATE.sessions.find(s => s.id === matchedTask.sessionId);
             if (!matchedSession) {
@@ -4707,9 +4698,6 @@ ${organicBlock}
     }
 
     const session = getActiveSession();
-    // Kunci status generating SEBELUM await hidrasi lazy sesi untuk mencegah race double-submit.
-    setGeneratingState(true);
-
     // Safety guard: Hydrate full conversation history from storage if session was lazy-loaded
     if (session._isLazyDisk && (!session.messages || session.messages.length === 0)) {
       try {
@@ -4773,9 +4761,9 @@ ${organicBlock}
 
     let targetModel = '';
     if (STATE.mode === 'openrouter') {
-      targetModel = STATE.settings.openRouterModel || 'qwen/qwen3.8-27b:free';
+      targetModel = STATE.settings.openRouterModel || 'openrouter/free';
     } else {
-      targetModel = STATE.settings.ollamaModel || 'gemma4:31b';
+      targetModel = STATE.settings.ollamaModel || 'qwen2.5:1.5b';
     }
 
     let effectiveImages = images;
@@ -5771,7 +5759,7 @@ ${organicBlock}
     } else if (isProviderReturnedError) {
       title = `Penyedia Model OpenRouter Sedang Sibuk (Upstream Provider Error)`;
       desc = `Server penyedia pihak ketiga (upstream) untuk model <code>${escapeHtml(modelName)}</code> sedang mengalami antrean penuh atau gangguan sementara di OpenRouter.`;
-      advice = `💡 <strong>Solusi Cepat:</strong> Coba beralih ke model free lain yang sedang aktif stabil seperti <code>qwen/qwen3.8-27b:free</code> atau <code>google/gemma-4-26b-a4b-it:free</code>, atau klik <strong>Ganti ke Qwen 3.8 27B &amp; Kirim Ulang</strong>.`;
+      advice = `💡 <strong>Solusi Cepat:</strong> Coba beralih ke model free lain yang sedang aktif stabil seperti <code>openrouter/free</code> atau <code>google/gemma-4-26b-a4b-it:free</code>, atau klik <strong>Ganti ke Model Gratis &amp; Kirim Ulang</strong>.`;
     } else if (isCorsOrNetwork && engine === 'ollama') {
       title = `Batasan Koneksi Browser CORS (GitHub Pages)`;
       desc = `Browser memblokir koneksi langsung dari domain <code>github.io</code> ke server <code>ollama.com</code> karena pembatasan CORS server.`;
@@ -6000,7 +5988,11 @@ ${organicBlock}
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
-      let systemContent = personaPrompt ? `${personaPrompt}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
+      const canRunAutonomous = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
+      let systemContent = personaPrompt;
+      if (canRunAutonomous) {
+        systemContent = personaPrompt ? `${personaPrompt}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
+      }
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
       try {
@@ -6022,14 +6014,17 @@ ${organicBlock}
         model: modelName,
         sessionId: session?.id || null,
         messages: messagesPayload,
-        tools: AUTONOMOUS_WEB_TOOLS,
         stream: true,
         options: {
           temperature: parseFloat(STATE.settings.temperature),
-          top_p: parseFloat(STATE.settings.topP)
+          top_p: parseFloat(STATE.settings.topP),
+          repeat_penalty: 1.15
         },
         endpoint: ep
       };
+      if (canRunAutonomous) {
+        requestBody.tools = AUTONOMOUS_WEB_TOOLS;
+      }
       if (session?.id) {
         requestBody.sessionId = session.id;
       }
@@ -6153,6 +6148,7 @@ ${organicBlock}
       fullText = streamRenderer.finish();
 
       // ==================== OLLAMA AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
+      const canRunAutonomousSearch = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
       const maxAutonomousRounds = 1;
       let autonomousRound = 0;
       let preambleHtml = '';
@@ -6161,7 +6157,7 @@ ${organicBlock}
       let currentRoundNativeCalls = accumulatedToolCalls;
       const executedToolSignatures = new Set();
 
-      while (autonomousRound < maxAutonomousRounds) {
+      while (canRunAutonomousSearch && autonomousRound < maxAutonomousRounds) {
         if (STATE.abortController?.signal?.aborted) break;
 
         const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
@@ -6633,7 +6629,11 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
-      let systemContent = personaPrompt ? `${personaPrompt}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
+      const canRunAutonomous = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
+      let systemContent = personaPrompt;
+      if (canRunAutonomous) {
+        systemContent = personaPrompt ? `${personaPrompt}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
+      }
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
       try {
@@ -6670,12 +6670,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         ? [
             modelName,
             'openrouter/free',
-            'qwen/qwen3.8-27b:free',
             'google/gemma-4-26b-a4b-it:free',
-            'nvidia/nemotron-3.5-lightning:free',
-            'liquid/lfm-2.5-2.6b:free',
-            'google/gemma-4-31b-it:free'
-          ].filter((m, idx, arr) => arr.indexOf(m) === idx)
+            'liquid/lfm-2.5-2.6b:free'
+          ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
         : [modelName];
 
       let response = null;
@@ -6761,6 +6758,11 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             } catch (te) {}
           }
           lastErrDetail = errDetail;
+
+          // Hentikan langsung jika error autentikasi (401/403) agar tidak looping sia-sia ke kandidat lain
+          if (res.status === 401 || res.status === 403) {
+            throw new Error(`OpenRouter Authentication Error (HTTP ${res.status}): API Key tidak valid atau belum dipasang.`);
+          }
 
           // Jika model gratis dan masih ada model kandidat berikutnya, coba otomatis
           if (isFreeModel && i < candidateModels.length - 1) {
@@ -6910,6 +6912,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       fullText = streamRenderer.finish();
 
       // ==================== UNIVERSAL AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
+      const canRunAutonomousSearch = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
       const maxAutonomousRounds = 1;
       let autonomousRound = 0;
       let preambleHtml = '';
@@ -6918,7 +6921,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       let currentRoundNativeCalls = accumulatedToolCalls;
       const executedToolSignatures = new Set();
 
-      while (autonomousRound < maxAutonomousRounds) {
+      while (canRunAutonomousSearch && autonomousRound < maxAutonomousRounds) {
         if (STATE.abortController?.signal?.aborted) break;
 
         const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
@@ -7315,9 +7318,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         const actualHasImage = Array.isArray(image) ? image.length > 0 : Boolean(image);
         const errorHtml = formatModelErrorMessage('openrouter', modelName, err, actualHasImage, STATE.webSearchEnabled);
 
-        const isFreeModel = modelName.includes(':free');
-        const fallbackModelCandidate = modelName.includes('qwen') ? 'google/gemma-4-26b-a4b-it:free' : 'qwen/qwen3.8-27b:free';
-        const fallbackLabel = modelName.includes('qwen') ? 'Gemma 4 26B (Free)' : 'Qwen 3.8 27B (Free)';
+        const isFreeModel = modelName.includes(':free') || modelName === 'openrouter/free';
+        const fallbackModelCandidate = modelName === 'openrouter/free' ? 'google/gemma-4-26b-a4b-it:free' : 'openrouter/free';
+        const fallbackLabel = modelName === 'openrouter/free' ? 'Gemma 4 26B (Free)' : 'OpenRouter Free Router';
 
         const rescuedHtml = hasPartialText ? `
           <div class="partial-rescued-content" style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed rgba(255,255,255,0.15);">
@@ -7356,7 +7359,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         });
 
         bubbleText.querySelector('.switch-free-model-btn')?.addEventListener('click', (e) => {
-          const targetFallback = e.currentTarget.dataset.fallback || 'qwen/qwen3.8-27b:free';
+          const targetFallback = e.currentTarget.dataset.fallback || 'openrouter/free';
           selectModel(targetFallback);
           assistantRow.remove();
           runOpenRouterStreaming(session, promptText, image, targetFallback);
@@ -7386,13 +7389,13 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
       if (STATE.settings.autoPolicy === 'cloud_heavy' && isLongOrHeavy && (STATE.settings.openRouterKey || DeviceStorage.isDeviceBackendAvailable)) {
         showToast('🔀 Auto-Router: Mengarahkan tugas kompleks ke OpenRouter Cloud...', 'info');
-        await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'qwen/qwen3.8-27b:free');
+        await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free');
       } else if (isOllamaOnline) {
-        showToast('🔀 Auto-Router: Mengeksekusi via Ollama Cloud Engine...', 'info');
+        showToast('🔀 Auto-Router: Mengeksekusi via Ollama Engine...', 'info');
         await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel);
       } else if (STATE.settings.openRouterKey || DeviceStorage.isDeviceBackendAvailable) {
-        showToast('🔀 Auto-Router: Ollama Cloud offline, fallback ke OpenRouter Cloud...', 'info');
-        await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'qwen/qwen3.8-27b:free');
+        showToast('🔀 Auto-Router: Ollama offline, fallback ke OpenRouter Cloud...', 'info');
+        await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free');
       } else {
         // Kedua engine tidak siap: tampilkan kartu bantuan interaktif dan pulihkan composer
         const assistantRow = appendMessageElement('assistant', '', null, 'Auto-Router Engine');
@@ -7872,12 +7875,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         ? [
             modelName,
             'openrouter/free',
-            'qwen/qwen3.8-27b:free',
             'google/gemma-4-26b-a4b-it:free',
-            'nvidia/nemotron-3.5-lightning:free',
-            'liquid/lfm-2.5-2.6b:free',
-            'google/gemma-4-31b-it:free'
-          ].filter((m, idx, arr) => arr.indexOf(m) === idx)
+            'liquid/lfm-2.5-2.6b:free'
+          ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
         : [modelName];
 
       const isOpenRouterDirect = IS_GITHUB_PAGES;
@@ -7996,12 +7996,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         ? [
             modelName,
             'openrouter/free',
-            'qwen/qwen3.8-27b:free',
             'google/gemma-4-26b-a4b-it:free',
-            'nvidia/nemotron-3.5-lightning:free',
-            'liquid/lfm-2.5-2.6b:free',
-            'google/gemma-4-31b-it:free'
-          ].filter((m, idx, arr) => arr.indexOf(m) === idx)
+            'liquid/lfm-2.5-2.6b:free'
+          ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
         : [modelName];
 
       const isOpenRouterDirect = IS_GITHUB_PAGES;
@@ -10900,26 +10897,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (!finalAudioUrl) {
         updateHudStep('[Langkah 2/3] Menjalankan sintesis audio client-side...', 65);
         const synthWavBlob = await synthesizeClientProceduralAudio(cleanPrompt, options.duration || 15);
+        finalAudioUrl = URL.createObjectURL(synthWavBlob);
         trackTitle = `Neural Audio [${cleanPrompt.slice(0, 30)}]`;
-        // Persistenkan hasil sintesis sebagai data URL agar tetap tersedia setelah reload
-        // (blob URL bersifat session-scoped dan akan mati saat halaman dimuat ulang).
-        finalAudioUrl = await new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result || URL.createObjectURL(synthWavBlob));
-          reader.onerror = () => resolve(URL.createObjectURL(synthWavBlob));
-          reader.readAsDataURL(synthWavBlob);
-        });
-        // Simpan juga blob ke MusicDB agar track tetap bisa diputar dari BGM deck secara offline.
-        try {
-          await MusicDB.saveTrack({
-            id: `synth_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-            name: trackTitle,
-            size: (synthWavBlob.size / (1024 * 1024)).toFixed(1),
-            type: 'audio/wav',
-            blob: synthWavBlob,
-            addedAt: new Date().toISOString()
-          });
-        } catch (_) {}
       }
 
       clearTimeout(timer2);

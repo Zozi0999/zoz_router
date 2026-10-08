@@ -1051,12 +1051,9 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
       ? [
           rawModel,
           'openrouter/free',
-          'qwen/qwen3.8-27b:free',
           'google/gemma-4-26b-a4b-it:free',
-          'nvidia/nemotron-3.5-lightning:free',
-          'liquid/lfm-2.5-2.6b:free',
-          'google/gemma-4-31b-it:free'
-        ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx)
+          'liquid/lfm-2.5-2.6b:free'
+        ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
       : [rawModel || 'google/gemini-2.0-flash-001'];
 
     const tryCallOpenRouter = (targetModel) => {
@@ -1175,13 +1172,15 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     throw lastError || new Error(`Gagal memanggil model OpenRouter: ${rawModel}`);
   }
 
-  // Fallback / Default: Ollama Cloud Engine
+  // Fallback / Default: Ollama Engine
   const activeOllamaKey = ollamaApiKey || (apiKey && !apiKey.startsWith('sk-or-') ? apiKey : null) || process.env.OLLAMA_API_KEY;
   let rawEp = (endpoint || '').trim();
 
-  // Jika endpoint kosong atau mengarah ke localhost / port 11434, atau jika activeOllamaKey ada, arahkan otomatis ke Ollama Cloud
-  if (!rawEp || activeOllamaKey || rawEp.includes('127.0.0.1') || rawEp.includes('localhost') || rawEp.includes('11434')) {
+  // Jika activeOllamaKey ada dan endpoint tidak dispesifikasi, gunakan Ollama Cloud
+  if (activeOllamaKey && (!rawEp || rawEp.includes('127.0.0.1') || rawEp.includes('localhost'))) {
     rawEp = 'https://ollama.com';
+  } else if (!rawEp) {
+    rawEp = 'http://127.0.0.1:11434';
   }
 
   if (!/^https?:\/\//i.test(rawEp)) {
@@ -1194,8 +1193,9 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   const ollamaUrl = resolveEndpointUrl(rawEp, 'api/chat');
   const client = ollamaUrl.protocol === 'https:' ? https : http;
 
+  const isCloudOllama = rawEp.includes('ollama.com');
   const postData = JSON.stringify({
-    model: rawModel || 'gemma4:31b',
+    model: rawModel || (isCloudOllama ? 'gemma4:31b' : 'qwen2.5:1.5b'),
     messages: finalMessages,
     stream: false,
     options: { temperature: 0.3 }
@@ -1984,7 +1984,7 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
   // Mandat Mutlak Kaisar Zozi: Arsitektur 1-Model Deep Research Super Efisien.
   // Gunakan 1 model master tunggal untuk mencerna data Agen 1, mencerna data Agen 2, mengoreksi di Model 3, dan merangkum di Model 4.
   // Hemat kuota kredit RPD tanpa memanggil multi-model berbeda, namun output tetap divergen karena bahan web Primer & Divergen 100% berbeda domain.
-  const masterResearchModel = config.finalModel || config.model || config.agent1Model || 'qwen/qwen3.8-27b:free';
+  const masterResearchModel = config.finalModel || config.model || config.agent1Model || 'openrouter/free';
   const agent1Model = masterResearchModel;
   const agent2Model = masterResearchModel;
   const model3 = masterResearchModel;
@@ -3337,7 +3337,7 @@ const server = http.createServer(async (req, res) => {
         createdAt: new Date().toISOString()
       };
 
-      const masterModel = body.finalModel || body.model || body.agent1Model || 'qwen/qwen3.8-27b:free';
+      const masterModel = body.finalModel || body.model || body.agent1Model || 'openrouter/free';
       const rawAuth = req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '').trim() : null;
       const rawApiKey = req.headers['x-api-key'] ? String(req.headers['x-api-key']).replace(/^Bearer\s+/i, '').trim() : null;
       const rawSerperKey = req.headers['x-serper-key'] ? String(req.headers['x-serper-key']).trim() : null;
