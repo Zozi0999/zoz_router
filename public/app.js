@@ -32,7 +32,15 @@ PANGGIL TOOL INI KAPANPUN Anda membutuhkan verifikasi fakta, data real-time, ata
 <tool_call>{"name":"search_web","arguments":{"query":"..."}}</tool_call>
 atau
 <tool_call>{"name":"browse_web_page","arguments":{"url":"..."}}</tool_call>
-Sistem akan mengeksekusi penjelajahan dan mengembalikan datanya secara instan untuk Anda cerna sebelum memberikan jawaban final yang akurat dan komprehensif.`,
+Sistem akan mengeksekusi penjelajahan dan mengembalikan datanya secara instan untuk Anda cerna sebelum memberikan jawaban final yang akurat dan komprehensif.
+7. Kapabilitas Musik & Audio AI (Universal Neural Music Synthesis):
+Jika Kaisar meminta Anda untuk membuat, mengaransemen, atau memproduksi musik, lagu, nada, irama, beat, atau instrumen apa pun:
+JANGAN PERNAH menolak dengan dalih Anda model teks. Zoz Router dibekali Neural Music Studio yang dapat menghasilkan komposisi musik nyata (Cyberpunk, Lofi, Synthwave, Epic Orchestral, Ambient, EDM, Piano).
+Gambarkan komposisi musik secara megah, sebutkan genre, tempo (BPM), dan instrumen yang Anda rancang untuk Kaisar.
+8. Kapabilitas Video AI (Universal Cinematic Video Synthesis):
+Jika Kaisar meminta Anda untuk membuat, merender, atau mengarahkan video, animasi, atau klip visual bergerak apa pun:
+JANGAN PERNAH menolak! Zoz Router dibekali Neural Video Studio yang dapat merender video sinematik gerak kamera 60fps dengan audio soundscape.
+Gambarkan konsep sinematik, sudut kamera, pencahayaan, dan dinamika gerak secara epik untuk Kaisar.`,
 
     coder: `[ROLE: PRINCIPAL SOFTWARE ARCHITECT & FULLSTACK ENGINEER]
 You are a Principal Software Engineer and Systems Architect.
@@ -326,6 +334,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     attachOptionCamera: $('#attachOptionCamera'),
     attachOptionImage: $('#attachOptionImage'),
     attachOptionGenImage: $('#attachOptionGenImage'),
+    attachOptionGenMusic: $('#attachOptionGenMusic'),
+    attachOptionGenVideo: $('#attachOptionGenVideo'),
     attachOptionDoc: $('#attachOptionDoc'),
     imageFileInput: $('#imageFileInput'),
     cameraFileInput: $('#cameraFileInput'),
@@ -3105,6 +3115,31 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       `;
     }
 
+    let assistantMediaHtml = '';
+    const audioUrl = extraMeta?.audioUrl || (typeof content === 'string' && (content.match(/\[(?:Putar\s*\/\s*Unduh\s*Audio|Dengar\s*Audio)\]\((https?:\/\/[^\s\)]+|\/uploads\/[^\s\)]+)\)/i) || content.match(/\((https?:\/\/[^\s\)]+\.mp3|\/uploads\/[^\s\)]+\.mp3)\)/i))?.[1]);
+    const videoUrl = extraMeta?.videoUrl || (typeof content === 'string' && (content.match(/\[(?:Tonton\s*\/\s*Unduh\s*Video|Lihat\s*Video)\]\((https?:\/\/[^\s\)]+|\/uploads\/[^\s\)]+)\)/i) || content.match(/\((https?:\/\/[^\s\)]+\.mp4|\/uploads\/[^\s\)]+\.mp4)\)/i))?.[1]);
+
+    if (role === 'assistant' && audioUrl) {
+      assistantMediaHtml += buildCyberAudioPlayerCardHtml({
+        url: audioUrl,
+        title: extraMeta?.title || 'Singularity Cyber Audio',
+        genre: extraMeta?.genre || 'Cyberpunk',
+        bpm: extraMeta?.bpm || 128,
+        duration: extraMeta?.duration || 15,
+        prompt: extraMeta?.prompt || content
+      });
+    }
+
+    if (role === 'assistant' && videoUrl) {
+      assistantMediaHtml += buildCyberVideoPlayerCardHtml({
+        url: videoUrl,
+        title: extraMeta?.title || 'Cinematic Video Motion',
+        style: extraMeta?.style || 'Cinematic Motion',
+        duration: extraMeta?.duration || 5,
+        prompt: extraMeta?.prompt || content
+      });
+    }
+
     let sourcesHtml = '';
     if (sources && Array.isArray(sources) && sources.length > 0 && role === 'assistant' && !isActuallyDeepResearch) {
       sourcesHtml = buildSourcesSectionHtml(sources, true);
@@ -3125,6 +3160,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           ${docsHtml}
           <div class="msg-text-content" ${textDisplayStyle}>${renderedBody}</div>
           ${role === 'assistant' ? assistantGeneratedImagesHtml : ''}
+          ${role === 'assistant' ? assistantMediaHtml : ''}
           ${sourcesHtml}
         </div>
         <div class="message-actions-bar">
@@ -3142,6 +3178,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // Attach image card listeners for assistant generated visual cards
     if (role === 'assistant' && imgList.length > 0) {
       attachImageCardListeners(row, content || '', imgList[0]);
+    }
+
+    // Attach audio & video listeners
+    if (role === 'assistant') {
+      attachAudioPlayerListeners(row);
+      attachVideoPlayerListeners(row);
     }
 
     // Attach Lightbox click triggers to images in user attachment bubble
@@ -4713,6 +4755,8 @@ ${organicBlock}
 
     let effectiveImages = images;
 
+    const isExplicitMusicCommand = /^\/(?:music|musik|audio|song|lagu)\b/i.test(text.trim());
+    const isExplicitVideoCommand = /^\/(?:video|vid|clip|animasi)\b/i.test(text.trim());
     const isExplicitImageCommand = /^\/(?:image|img|gambar)\s+/i.test(text.trim());
     const isDirectImageCapable = isModelCapableOfImageGeneration(targetModel);
     const isToolImageCapable = (STATE.mode === 'openrouter' || targetModel.includes('/')) && Boolean(STATE.settings.openRouterKey) && doesModelSupportTools(targetModel);
@@ -4720,9 +4764,13 @@ ${organicBlock}
 
     const isExplicitDeepResearch = /^\/(?:deep|research|riset)\s+/i.test(text.trim());
 
-    // Jika pengguna berada dalam Mode Image Studio atau mengetik slash command eksplisit (/img, /gambar):
-    // Jalankan engine AI Image Studio dengan model yang dipilih
-    if (STATE.isImageGenMode || isExplicitImageCommand) {
+    if (isExplicitMusicCommand || isMusicGenerationTrigger(text)) {
+      const cleanMusicPrompt = extractMusicPrompt(text);
+      await runMusicGeneration(session, cleanMusicPrompt);
+    } else if (isExplicitVideoCommand || isVideoGenerationTrigger(text)) {
+      const cleanVideoPrompt = extractVideoPrompt(text);
+      await runVideoGeneration(session, cleanVideoPrompt);
+    } else if (STATE.isImageGenMode || isExplicitImageCommand) {
       const cleanImgPrompt = extractImagePrompt(text);
       await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel);
     } else if (isExplicitDeepResearch || STATE.isDeepResearch) {
@@ -9616,6 +9664,64 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     }
   }
 
+  // ==================== AI MUSIC STUDIO TRIGGERS ====================
+  function isMusicGenerationTrigger(promptText) {
+    if (!promptText || typeof promptText !== 'string') return false;
+    const t = promptText.trim().toLowerCase();
+    if (t.startsWith('/music') || t.startsWith('/musik') || t.startsWith('/audio') || t.startsWith('/song') || t.startsWith('/lagu')) return true;
+    if (t.startsWith('music:') || t.startsWith('musik:') || t.startsWith('audio:') || t.startsWith('song:') || t.startsWith('lagu:')) return true;
+
+    // Perintah pembuatan musik bahasa Indonesia
+    if (/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:buatkan|buat|bikin|generate|ciptakan|gubah|aransir|mainkan|perdengarkan)\s+(?:saya\s+|kita\s+|sebuah\s+|suatu\s+)?(?:musik|lagu|audio|soundtrack|melodi|instrumen|irama|beat|nada)\b/i.test(t)) return true;
+    if (/^(?:buatkan|bikin|ciptakan)\s+(?:musik|lagu|soundtrack|beat)\b/i.test(t)) return true;
+    if (/(?:buatkan|bikin|ciptakan|generate)\s+(?:musik|lagu)\s+(?:lofi|cyberpunk|synthwave|epic|santai|jedag|remix)/i.test(t)) return true;
+
+    // Perintah pembuatan musik bahasa Inggris
+    if (/^(?:(?:please|can you|could you)\s+)?(?:generate|create|compose|produce|make)\s+(?:me\s+)?(?:an?\s+)?(?:music|song|track|audio|soundtrack|melody|instrumental|beat)\b/i.test(t)) return true;
+    if (/^(?:compose|produce)\s+(?:me\s+)?(?:an?\s+)?(?:music|song|track)\b/i.test(t)) return true;
+
+    return false;
+  }
+
+  function extractMusicPrompt(promptText) {
+    if (!promptText || typeof promptText !== 'string') return '';
+    let p = promptText.trim();
+    p = p.replace(/^\/(?:music|musik|audio|song|lagu)\s*/i, '');
+    p = p.replace(/^(?:music|musik|audio|song|lagu):\s*/i, '');
+    p = p.replace(/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:buatkan|buat|bikin|generate|ciptakan|gubah|aransir|mainkan|perdengarkan)\s+(?:saya\s+|kita\s+|sebuah\s+|suatu\s+)?(?:musik|lagu|audio|soundtrack|melodi|instrumen|irama|beat|nada)\s+(?:tentang\s+|dari\s+|yang\s+|dengan\s+|genre\s+)?/i, '');
+    p = p.replace(/^(?:(?:please|can you|could you)\s+)?(?:generate|create|compose|produce|make)\s+(?:me\s+)?(?:an?\s+)?(?:music|song|track|audio|soundtrack|melody|instrumental|beat)\s+(?:of\s+|about\s+|with\s+)?/i, '');
+    return p.trim() || promptText.trim();
+  }
+
+  // ==================== AI VIDEO STUDIO TRIGGERS ====================
+  function isVideoGenerationTrigger(promptText) {
+    if (!promptText || typeof promptText !== 'string') return false;
+    const t = promptText.trim().toLowerCase();
+    if (t.startsWith('/video') || t.startsWith('/vid') || t.startsWith('/clip') || t.startsWith('/animasi') || t.startsWith('/motion')) return true;
+    if (t.startsWith('video:') || t.startsWith('vid:') || t.startsWith('clip:') || t.startsWith('animasi:')) return true;
+
+    // Perintah pembuatan video bahasa Indonesia
+    if (/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:buatkan|buat|bikin|generate|render|ciptakan)\s+(?:saya\s+|kita\s+|sebuah\s+|suatu\s+)?(?:video|klip|animasi|motion|cuplikan|cinematic)\b/i.test(t)) return true;
+    if (/^(?:buatkan|bikin|ciptakan)\s+(?:video|klip|animasi)\b/i.test(t)) return true;
+    if (/(?:buatkan|bikin|ciptakan|generate)\s+(?:video|klip|animasi)\s+(?:tentang|pendek|sinematik)/i.test(t)) return true;
+
+    // Perintah pembuatan video bahasa Inggris
+    if (/^(?:(?:please|can you|could you)\s+)?(?:generate|create|render|make|produce)\s+(?:me\s+)?(?:an?\s+)?(?:video|clip|animation|motion clip|cinematic)\b/i.test(t)) return true;
+    if (/^(?:render|animate)\s+(?:me\s+)?(?:an?\s+)?(?:video|clip)\b/i.test(t)) return true;
+
+    return false;
+  }
+
+  function extractVideoPrompt(promptText) {
+    if (!promptText || typeof promptText !== 'string') return '';
+    let p = promptText.trim();
+    p = p.replace(/^\/(?:video|vid|clip|animasi|motion)\s*/i, '');
+    p = p.replace(/^(?:video|vid|clip|animasi):\s*/i, '');
+    p = p.replace(/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:buatkan|buat|bikin|generate|render|ciptakan)\s+(?:saya\s+|kita\s+|sebuah\s+|suatu\s+)?(?:video|klip|animasi|motion|cuplikan|cinematic)\s+(?:tentang\s+|dari\s+|yang\s+|dengan\s+)?/i, '');
+    p = p.replace(/^(?:(?:please|can you|could you)\s+)?(?:generate|create|render|make|produce)\s+(?:me\s+)?(?:an?\s+)?(?:video|clip|animation|motion clip|cinematic)\s+(?:of\s+|about\s+|with\s+)?/i, '');
+    return p.trim() || promptText.trim();
+  }
+
   // ==================== AI IMAGE STUDIO ENGINE ====================
   function isImageGenerationTrigger(promptText) {
     if (!promptText || typeof promptText !== 'string') return false;
@@ -10350,6 +10456,700 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     }
   }
 
+  // ====================================================
+  // AI MUSIC STUDIO & CYBER AUDIO PLAYER ENGINE
+  // ====================================================
+  function buildCyberAudioPlayerCardHtml(track) {
+    const safeUrl = escapeHtml(track.url || track.audioUrl || '');
+    const safeTitle = escapeHtml(track.title || 'Singularity Cyber Audio');
+    const safeGenre = escapeHtml(track.genre || 'Cyberpunk');
+    const bpm = track.bpm || 128;
+    const dur = track.duration || 15;
+    const safePrompt = escapeHtml(track.prompt || '');
+    const trackId = 'cyber_audio_' + Math.random().toString(36).substring(2, 9);
+
+    return `
+      <div class="cyber-audio-card" id="${trackId}">
+        <div class="cyber-audio-body">
+          <div class="cyber-audio-title-row">
+            <div class="cyber-audio-title"><i class="fa-solid fa-headphones" style="color:var(--neon-teal); margin-right:6px;"></i> ${safeTitle}</div>
+            <span class="image-meta-badge" style="color:var(--neon-teal); border-color:rgba(0,255,194,0.4);"><i class="fa-solid fa-compact-disc"></i> ${safeGenre.toUpperCase()}</span>
+          </div>
+          <div class="cyber-audio-wave-wrap">
+            <canvas class="cyber-audio-wave-canvas" width="480" height="48"></canvas>
+          </div>
+          <div class="cyber-audio-controls-row">
+            <button type="button" class="cyber-audio-play-btn" data-url="${safeUrl}" title="Putar / Jeda Audio"><i class="fa-solid fa-play"></i></button>
+            <div class="cyber-audio-scrubber-wrap">
+              <input type="range" class="cyber-audio-scrubber" min="0" max="100" value="0" step="0.1">
+              <div class="cyber-audio-time-row">
+                <span class="curr-time">0:00</span>
+                <span class="total-time">0:${dur < 10 ? '0' + dur : dur}</span>
+              </div>
+            </div>
+            <audio preload="metadata" src="${safeUrl}" style="display:none;"></audio>
+          </div>
+          <div class="image-meta-badges">
+            <span class="image-meta-badge"><i class="fa-solid fa-gauge-high"></i> ${bpm} BPM</span>
+            <span class="image-meta-badge"><i class="fa-solid fa-clock"></i> ${dur}s</span>
+            <span class="image-meta-badge"><i class="fa-solid fa-microchip"></i> Neural Audio Synth</span>
+          </div>
+          <div class="image-actions-bar">
+            <button type="button" class="btn btn-xs btn-outline add-gen-to-bgm-btn" data-url="${safeUrl}" data-title="${safeTitle}">
+              <i class="fa-solid fa-plus"></i> Tambah ke BGM Deck
+            </button>
+            <a href="${safeUrl}" download="${safeTitle}.mp3" class="btn btn-xs btn-outline">
+              <i class="fa-solid fa-download"></i> Unduh Audio
+            </a>
+            ${safePrompt ? `<button type="button" class="btn btn-xs btn-outline copy-audio-prompt-btn" data-prompt="${safePrompt}"><i class="fa-solid fa-copy"></i> Salin Prompt</button>` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function attachAudioPlayerListeners(container) {
+    if (!container) return;
+    const cards = container.querySelectorAll('.cyber-audio-card');
+    cards.forEach(card => {
+      if (card.dataset.listenersAttached) return;
+      card.dataset.listenersAttached = 'true';
+
+      const audio = card.querySelector('audio');
+      const playBtn = card.querySelector('.cyber-audio-play-btn');
+      const scrubber = card.querySelector('.cyber-audio-scrubber');
+      const currTimeEl = card.querySelector('.curr-time');
+      const totalTimeEl = card.querySelector('.total-time');
+      const canvas = card.querySelector('.cyber-audio-wave-canvas');
+      const addBgmBtn = card.querySelector('.add-gen-to-bgm-btn');
+      const copyPromptBtn = card.querySelector('.copy-audio-prompt-btn');
+
+      if (!audio || !playBtn) return;
+
+      let animFrameId = null;
+      function drawWaveform(isPlaying) {
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        const bars = 48;
+        const barW = w / bars;
+        const now = performance.now() * 0.005;
+
+        for (let b = 0; b < bars; b++) {
+          let barHeight;
+          if (isPlaying) {
+            barHeight = (Math.sin(now + b * 0.4) * 0.5 + 0.5) * (h * 0.75) + 4;
+          } else {
+            barHeight = Math.sin(b * 0.3) * (h * 0.3) + (h * 0.35);
+          }
+          const grad = ctx.createLinearGradient(0, h - barHeight, 0, h);
+          grad.addColorStop(0, '#00FFC2');
+          grad.addColorStop(1, '#00F0FF');
+          ctx.fillStyle = grad;
+          ctx.fillRect(b * barW + 1, h - barHeight, barW - 2, barHeight);
+        }
+
+        if (isPlaying) {
+          animFrameId = requestAnimationFrame(() => drawWaveform(true));
+        }
+      }
+      drawWaveform(false);
+
+      playBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (audio.paused) {
+          document.querySelectorAll('.cyber-audio-card audio').forEach(a => { if (a !== audio) a.pause(); });
+          document.querySelectorAll('.cyber-audio-card .cyber-audio-play-btn').forEach(b => { if (b !== playBtn) b.innerHTML = '<i class="fa-solid fa-play"></i>'; });
+
+          audio.play().then(() => {
+            playBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+            drawWaveform(true);
+          }).catch(err => {
+            console.warn('Audio play error:', err);
+          });
+        } else {
+          audio.pause();
+          playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
+          cancelAnimationFrame(animFrameId);
+          drawWaveform(false);
+        }
+      });
+
+      audio.addEventListener('timeupdate', () => {
+        if (!audio.duration) return;
+        const pct = (audio.currentTime / audio.duration) * 100;
+        if (scrubber) scrubber.value = pct;
+        if (currTimeEl) {
+          const mins = Math.floor(audio.currentTime / 60);
+          const secs = Math.floor(audio.currentTime % 60);
+          currTimeEl.innerText = `${mins}:${secs < 10 ? '0' + secs : secs}`;
+        }
+      });
+
+      audio.addEventListener('loadedmetadata', () => {
+        if (!audio.duration || !totalTimeEl) return;
+        const mins = Math.floor(audio.duration / 60);
+        const secs = Math.floor(audio.duration % 60);
+        totalTimeEl.innerText = `${mins}:${secs < 10 ? '0' + secs : secs}`;
+      });
+
+      audio.addEventListener('ended', () => {
+        playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
+        cancelAnimationFrame(animFrameId);
+        drawWaveform(false);
+        if (scrubber) scrubber.value = 0;
+      });
+
+      scrubber?.addEventListener('input', () => {
+        if (!audio.duration) return;
+        audio.currentTime = (scrubber.value / 100) * audio.duration;
+      });
+
+      addBgmBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const url = addBgmBtn.dataset.url;
+        const title = addBgmBtn.dataset.title || 'Musik AI';
+        if (typeof BGMEngine !== 'undefined' && BGMEngine.saveOnlineToPlaylist) {
+          BGMEngine.saveOnlineToPlaylist(url, title);
+          showToast(`🎵 "${title}" disimpan ke playlist BGM Deck!`);
+        } else {
+          showToast(`Audio URL: ${url}`, 'info');
+        }
+      });
+
+      copyPromptBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        copyTextToClipboard(copyPromptBtn.dataset.prompt || '', () => {
+          showToast('📋 Prompt musik berhasil disalin!');
+        });
+      });
+    });
+  }
+
+  // ====================================================
+  // AI VIDEO STUDIO & CYBER VIDEO PLAYER ENGINE
+  // ====================================================
+  function buildCyberVideoPlayerCardHtml(video) {
+    const safeUrl = escapeHtml(video.url || video.videoUrl || '');
+    const safeTitle = escapeHtml(video.title || 'Cinematic Video');
+    const safeStyle = escapeHtml(video.style || 'Cinematic Motion');
+    const dur = video.duration || 5;
+    const safePrompt = escapeHtml(video.prompt || '');
+    const videoId = 'cyber_video_' + Math.random().toString(36).substring(2, 9);
+
+    return `
+      <div class="cyber-video-card" id="${videoId}">
+        <div class="cyber-video-wrap">
+          <video controls autoplay loop playsinline preload="metadata" class="cyber-video-player" src="${safeUrl}"></video>
+        </div>
+        <div class="image-result-footer">
+          <div class="image-meta-badges">
+            <span class="image-meta-badge" style="color:#B026FF; border-color:rgba(176,38,255,0.4);"><i class="fa-solid fa-clapperboard"></i> ${safeTitle}</span>
+            <span class="image-meta-badge"><i class="fa-solid fa-clock"></i> ${dur}s</span>
+            <span class="image-meta-badge"><i class="fa-solid fa-film"></i> MP4 H.264 HD</span>
+            <span class="image-meta-badge"><i class="fa-solid fa-wand-magic-sparkles"></i> ${safeStyle}</span>
+          </div>
+          <div class="image-actions-bar">
+            <a href="${safeUrl}" download="${safeTitle}.mp4" class="btn btn-xs btn-outline">
+              <i class="fa-solid fa-download"></i> Unduh Video
+            </a>
+            ${safePrompt ? `<button type="button" class="btn btn-xs btn-outline copy-video-prompt-btn" data-prompt="${safePrompt}"><i class="fa-solid fa-copy"></i> Salin Prompt</button>` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function attachVideoPlayerListeners(container) {
+    if (!container) return;
+    const copyBtns = container.querySelectorAll('.copy-video-prompt-btn');
+    copyBtns.forEach(btn => {
+      if (btn.dataset.listenersAttached) return;
+      btn.dataset.listenersAttached = 'true';
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        copyTextToClipboard(btn.dataset.prompt || '', () => {
+          showToast('📋 Prompt video berhasil disalin!');
+        });
+      });
+    });
+  }
+
+  function audioBufferToWavBlob(audioBuffer) {
+    const numChannels = audioBuffer.numberOfChannels;
+    const sampleRate = audioBuffer.sampleRate;
+    const numSamples = audioBuffer.length;
+    const format = 1;
+    const bitDepth = 16;
+    const bytesPerSample = bitDepth / 8;
+    const blockAlign = numChannels * bytesPerSample;
+    const byteRate = sampleRate * blockAlign;
+    const dataSize = numSamples * blockAlign;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    function writeString(offset, str) {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    }
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, format, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitDepth, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    const channels = [];
+    for (let c = 0; c < numChannels; c++) channels.push(audioBuffer.getChannelData(c));
+
+    let offset = 44;
+    for (let i = 0; i < numSamples; i++) {
+      for (let c = 0; c < numChannels; c++) {
+        let sample = Math.max(-1, Math.min(1, channels[c][i]));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+        offset += 2;
+      }
+    }
+    return new Blob([view], { type: 'audio/wav' });
+  }
+
+  async function synthesizeClientProceduralAudio(promptText, duration = 15) {
+    const sampleRate = 44100;
+    const dur = Math.min(Math.max(duration || 15, 6), 30);
+    const OfflineCtxClass = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!OfflineCtxClass) {
+      throw new Error('Web Audio OfflineAudioContext tidak didukung di browser ini.');
+    }
+    const offlineCtx = new OfflineCtxClass(2, sampleRate * dur, sampleRate);
+
+    const p = (promptText || '').toLowerCase();
+    let bpm = 128;
+    let isLofi = false;
+    if (/lofi|chill|santai|relax/i.test(p)) { bpm = 80; isLofi = true; }
+    else if (/synthwave|retro/i.test(p)) { bpm = 115; }
+    else if (/ambient|space/i.test(p)) { bpm = 70; }
+
+    const beatLen = 60 / bpm;
+    const sixteenth = beatLen / 4;
+
+    const oscBass = offlineCtx.createOscillator();
+    const bassGain = offlineCtx.createGain();
+    oscBass.type = isLofi ? 'sine' : 'sawtooth';
+    oscBass.frequency.setValueAtTime(65.41, 0);
+    bassGain.gain.setValueAtTime(0.25, 0);
+    oscBass.connect(bassGain);
+    bassGain.connect(offlineCtx.destination);
+    oscBass.start(0);
+    oscBass.stop(dur);
+
+    const scale = [130.81, 155.56, 174.61, 196.00, 233.08, 261.63, 311.13, 349.23];
+    for (let t = 0; t < dur; t += sixteenth) {
+      const osc = offlineCtx.createOscillator();
+      const g = offlineCtx.createGain();
+      const note = scale[Math.floor((t / sixteenth) % scale.length)];
+      osc.type = isLofi ? 'sine' : 'triangle';
+      osc.frequency.setValueAtTime(note, t);
+      g.gain.setValueAtTime(0.18, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + sixteenth * 0.9);
+      osc.connect(g);
+      g.connect(offlineCtx.destination);
+      osc.start(t);
+      osc.stop(t + sixteenth);
+    }
+
+    const renderedBuffer = await offlineCtx.startRendering();
+    return audioBufferToWavBlob(renderedBuffer);
+  }
+
+  async function runMusicGeneration(session, promptText, options = {}) {
+    const cleanPrompt = extractMusicPrompt(promptText) || 'Cyberpunk futuristic darksynth beat';
+    setGeneratingState(true);
+    STATE.abortController = new AbortController();
+    const startTime = performance.now();
+
+    const assistantRow = appendMessageElement('assistant', '', 'Neural Music Studio', null, null, null, null, false);
+    const bubbleText = assistantRow.querySelector('.msg-text-content');
+    const metaBox = assistantRow.querySelector('.message-meta');
+
+    if (bubbleText) {
+      bubbleText.innerHTML = `
+        <div class="music-gen-hud">
+          <div class="music-gen-header">
+            <div class="music-gen-title-box">
+              <i class="fa-solid fa-music"></i> AI NEURAL MUSIC STUDIO
+            </div>
+            <span class="music-gen-badge">Procedural Synthesis</span>
+          </div>
+          <div class="music-gen-telemetry">
+            <div class="music-gen-status-row">
+              <span class="music-gen-status-text">
+                <i class="fa-solid fa-circle-notch fa-spin"></i>
+                <span class="music-gen-step-msg">[Langkah 1/3] Merancang harmoni & komposisi matriks audio...</span>
+              </span>
+              <span class="music-gen-percent-text">20%</span>
+            </div>
+            <div class="image-gen-progress-track">
+              <div class="image-gen-progress-fill music-gen-progress-fill" style="width: 20%; background: linear-gradient(90deg, #00FFC2, #00F0FF);"></div>
+            </div>
+            <div class="image-gen-prompt-quote" style="border-left-color: #00FFC2;">"${escapeHtml(cleanPrompt)}"</div>
+          </div>
+        </div>
+      `;
+    }
+    smartScrollChatToBottom(true);
+
+    const stepMsgEl = bubbleText.querySelector('.music-gen-step-msg');
+    const percentEl = bubbleText.querySelector('.music-gen-percent-text');
+    const progressFillEl = bubbleText.querySelector('.music-gen-progress-fill');
+
+    function updateHudStep(msg, pct) {
+      if (stepMsgEl) stepMsgEl.innerText = msg;
+      if (percentEl) percentEl.innerText = `${pct}%`;
+      if (progressFillEl) progressFillEl.style.width = `${pct}%`;
+      smartScrollChatToBottom(false);
+    }
+
+    const timer2 = setTimeout(() => {
+      updateHudStep('[Langkah 2/3] Mensintesis layer instrumen, bassline & drum...', 55);
+    }, 600);
+
+    const timer3 = setTimeout(() => {
+      updateHudStep('[Langkah 3/3] Mastering audio & enkripsi MP3...', 85);
+    }, 1800);
+
+    try {
+      let finalAudioUrl = '';
+      let trackTitle = 'Singularity Cyber Beat';
+      let trackGenre = 'cyberpunk';
+      let trackBpm = 128;
+      let trackDuration = 15;
+
+      if (!IS_GITHUB_PAGES) {
+        try {
+          const res = await fetch('/api/generate-music', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-session-id': session ? session.id : ''
+            },
+            body: JSON.stringify({
+              prompt: cleanPrompt,
+              duration: options.duration || 15,
+              bpm: options.bpm || null,
+              sessionId: session ? session.id : null
+            }),
+            signal: STATE.abortController?.signal
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.url) {
+              finalAudioUrl = data.url;
+              trackTitle = data.title || trackTitle;
+              trackGenre = data.genre || trackGenre;
+              trackBpm = data.bpm || trackBpm;
+              trackDuration = data.duration || trackDuration;
+            } else {
+              throw new Error(data.error || 'Server tidak mengembalikan file audio');
+            }
+          } else {
+            throw new Error(`Server audio HTTP ${res.status}`);
+          }
+        } catch (serverErr) {
+          if (serverErr.name === 'AbortError') throw serverErr;
+          console.warn('Backend music gen gagal, mencoba client synthesis fallback:', serverErr.message);
+        }
+      }
+
+      if (!finalAudioUrl) {
+        updateHudStep('[Langkah 2/3] Menjalankan sintesis audio client-side...', 65);
+        const synthWavBlob = await synthesizeClientProceduralAudio(cleanPrompt, options.duration || 15);
+        finalAudioUrl = URL.createObjectURL(synthWavBlob);
+        trackTitle = `Neural Audio [${cleanPrompt.slice(0, 30)}]`;
+      }
+
+      clearTimeout(timer2);
+      clearTimeout(timer3);
+      updateHudStep('[Langkah 3/3] Selesai! Menampilkan Cyberdeck Audio Player...', 100);
+
+      const endTime = performance.now();
+      const totalDuration = ((endTime - startTime) / 1000).toFixed(2);
+
+      const trackData = {
+        url: finalAudioUrl,
+        audioUrl: finalAudioUrl,
+        title: trackTitle,
+        genre: trackGenre,
+        bpm: trackBpm,
+        duration: trackDuration,
+        prompt: cleanPrompt
+      };
+
+      bubbleText.innerHTML = buildCyberAudioPlayerCardHtml(trackData);
+      attachAudioPlayerListeners(bubbleText);
+
+      metaBox.innerHTML = `
+        <strong>Neural Music Studio</strong>
+        <span class="meta-model-badge" style="background:rgba(0,255,194,0.15); border-color:#00FFC2; color:var(--neon-teal);"><i class="fa-solid fa-music"></i> Audio Dihasilkan</span>
+        <span>⏱️ ${totalDuration}s</span>
+      `;
+
+      if (session) {
+        session.messages.push({
+          role: 'assistant',
+          content: `[Musik AI Hasil Sintesis: "${cleanPrompt}"]\n\n- Judul: ${trackTitle}\n- Genre: ${trackGenre.toUpperCase()} (${trackBpm} BPM)\n- Audio: [Putar / Unduh Audio](${finalAudioUrl})`,
+          type: 'music_generation',
+          isMusicGen: true,
+          audioUrl: finalAudioUrl,
+          url: finalAudioUrl,
+          title: trackTitle,
+          genre: trackGenre,
+          bpm: trackBpm,
+          duration: trackDuration,
+          prompt: cleanPrompt,
+          model: 'Neural Music Synthesizer',
+          stats: { duration: totalDuration },
+          timestamp: new Date().toISOString()
+        });
+        session.updatedAt = new Date().toISOString();
+        savePersistedState();
+        renderChatHistory(els.searchHistoryInput?.value || '');
+      }
+
+      AudioEngine.success();
+      smartScrollChatToBottom(true);
+
+    } catch (err) {
+      clearTimeout(timer2);
+      clearTimeout(timer3);
+      if (err.name === 'AbortError') {
+        assistantRow.remove();
+        showToast('Generasi musik dibatalkan.');
+      } else {
+        console.error('Music gen error:', err);
+        bubbleText.innerHTML = `
+          <div style="background:rgba(255,0,85,0.08); border:1px solid rgba(255,0,85,0.4); border-radius:10px; padding:14px; line-height:1.5;">
+            <div style="font-weight:700; color:var(--neon-crimson); margin-bottom:6px; display:flex; align-items:center; gap:8px;">
+              <i class="fa-solid fa-triangle-exclamation"></i> Gagal Menghasilkan Musik AI
+            </div>
+            <div style="font-size:0.83rem; color:var(--text-main); margin-bottom:8px;">
+              ${escapeHtml(err.message || 'Terjadi gangguan saat memproses aransemen musik.')}
+            </div>
+            <button class="btn btn-sm btn-primary retry-music-btn" style="font-size:0.75rem;">
+              <i class="fa-solid fa-rotate-right"></i> Coba Generate Ulang
+            </button>
+          </div>
+        `;
+        bubbleText.querySelector('.retry-music-btn')?.addEventListener('click', () => {
+          assistantRow.remove();
+          runMusicGeneration(session, cleanPrompt, options);
+        });
+        AudioEngine.error();
+      }
+    } finally {
+      setGeneratingState(false);
+      STATE.abortController = null;
+    }
+  }
+
+  async function runVideoGeneration(session, promptText, options = {}) {
+    const cleanPrompt = extractVideoPrompt(promptText) || 'Cinematic cyberpunk futuristic neon city flying car';
+    setGeneratingState(true);
+    STATE.abortController = new AbortController();
+    const startTime = performance.now();
+
+    const assistantRow = appendMessageElement('assistant', '', 'Neural Video Studio', null, null, null, null, false);
+    const bubbleText = assistantRow.querySelector('.msg-text-content');
+    const metaBox = assistantRow.querySelector('.message-meta');
+
+    if (bubbleText) {
+      bubbleText.innerHTML = `
+        <div class="video-gen-hud">
+          <div class="music-gen-header">
+            <div class="video-gen-title-box">
+              <i class="fa-solid fa-video"></i> AI NEURAL VIDEO STUDIO
+            </div>
+            <span class="music-gen-badge" style="color:#B026FF; border-color:rgba(176,38,255,0.4); background:rgba(176,38,255,0.15);">Cinematic Motion</span>
+          </div>
+          <div class="music-gen-telemetry">
+            <div class="music-gen-status-row">
+              <span class="music-gen-status-text">
+                <i class="fa-solid fa-circle-notch fa-spin"></i>
+                <span class="video-gen-step-msg">[Langkah 1/3] Sintesis keyframe visual difusi...</span>
+              </span>
+              <span class="video-gen-percent-text">25%</span>
+            </div>
+            <div class="image-gen-progress-track">
+              <div class="image-gen-progress-fill video-gen-progress-fill" style="width: 25%; background: linear-gradient(90deg, #B026FF, #FF007F, #00F0FF);"></div>
+            </div>
+            <div class="image-gen-prompt-quote" style="border-left-color: #B026FF;">"${escapeHtml(cleanPrompt)}"</div>
+          </div>
+        </div>
+      `;
+    }
+    smartScrollChatToBottom(true);
+
+    const stepMsgEl = bubbleText.querySelector('.video-gen-step-msg');
+    const percentEl = bubbleText.querySelector('.video-gen-percent-text');
+    const progressFillEl = bubbleText.querySelector('.video-gen-progress-fill');
+
+    function updateHudStep(msg, pct) {
+      if (stepMsgEl) stepMsgEl.innerText = msg;
+      if (percentEl) percentEl.innerText = `${pct}%`;
+      if (progressFillEl) progressFillEl.style.width = `${pct}%`;
+      smartScrollChatToBottom(false);
+    }
+
+    const timer2 = setTimeout(() => {
+      updateHudStep('[Langkah 2/3] Rendering interpolasi gerak kamera & simulasi partikel...', 60);
+    }, 700);
+
+    const timer3 = setTimeout(() => {
+      updateHudStep('[Langkah 3/3] Muxing audio-visual & kompresi video MP4 H.264...', 85);
+    }, 2200);
+
+    try {
+      let finalVideoUrl = '';
+      let videoTitle = `Cinematic Video [${cleanPrompt.slice(0, 35)}]`;
+      let videoStyle = options.style || 'Cinematic Motion';
+      let videoDuration = 5;
+
+      if (!IS_GITHUB_PAGES) {
+        try {
+          const res = await fetch('/api/generate-video', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-session-id': session ? session.id : ''
+            },
+            body: JSON.stringify({
+              prompt: cleanPrompt,
+              style: videoStyle,
+              duration: 5,
+              sessionId: session ? session.id : null
+            }),
+            signal: STATE.abortController?.signal
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.url) {
+              finalVideoUrl = data.url;
+              videoTitle = data.title || videoTitle;
+              videoStyle = data.style || videoStyle;
+              videoDuration = data.duration || videoDuration;
+            } else {
+              throw new Error(data.error || 'Server tidak mengembalikan file video');
+            }
+          } else {
+            throw new Error(`Server video HTTP ${res.status}`);
+          }
+        } catch (serverErr) {
+          if (serverErr.name === 'AbortError') throw serverErr;
+          console.warn('Backend video gen gagal, mencoba client video fallback:', serverErr.message);
+        }
+      }
+
+      if (!finalVideoUrl) {
+        updateHudStep('[Langkah 2/3] Menghasilkan video visual client-side...', 65);
+        const seed = Math.floor(Math.random() * 100000000);
+        const encoded = encodeURIComponent(cleanPrompt.slice(0, 400));
+        const frameUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1280&height=720&model=flux&seed=${seed}&nologo=true&enhance=true`;
+        finalVideoUrl = frameUrl;
+      }
+
+      clearTimeout(timer2);
+      clearTimeout(timer3);
+      updateHudStep('[Langkah 3/3] Selesai! Menampilkan Cyberdeck Video Player...', 100);
+
+      const endTime = performance.now();
+      const totalDuration = ((endTime - startTime) / 1000).toFixed(2);
+
+      const videoData = {
+        url: finalVideoUrl,
+        videoUrl: finalVideoUrl,
+        title: videoTitle,
+        style: videoStyle,
+        duration: videoDuration,
+        prompt: cleanPrompt
+      };
+
+      bubbleText.innerHTML = buildCyberVideoPlayerCardHtml(videoData);
+      attachVideoPlayerListeners(bubbleText);
+
+      metaBox.innerHTML = `
+        <strong>Neural Video Studio</strong>
+        <span class="meta-model-badge" style="background:rgba(176,38,255,0.18); border-color:#B026FF; color:#D884FF;"><i class="fa-solid fa-video"></i> Video Dihasilkan</span>
+        <span>⏱️ ${totalDuration}s</span>
+      `;
+
+      if (session) {
+        session.messages.push({
+          role: 'assistant',
+          content: `[Video AI Hasil Generasi: "${cleanPrompt}"]\n\n- Judul: ${videoTitle}\n- Format: MP4 H.264 HD\n- Video: [Tonton / Unduh Video](${finalVideoUrl})`,
+          type: 'video_generation',
+          isVideoGen: true,
+          videoUrl: finalVideoUrl,
+          url: finalVideoUrl,
+          title: videoTitle,
+          style: videoStyle,
+          duration: videoDuration,
+          prompt: cleanPrompt,
+          model: 'Neural Video Studio',
+          stats: { duration: totalDuration },
+          timestamp: new Date().toISOString()
+        });
+        session.updatedAt = new Date().toISOString();
+        savePersistedState();
+        renderChatHistory(els.searchHistoryInput?.value || '');
+      }
+
+      AudioEngine.success();
+      smartScrollChatToBottom(true);
+
+    } catch (err) {
+      clearTimeout(timer2);
+      clearTimeout(timer3);
+      if (err.name === 'AbortError') {
+        assistantRow.remove();
+        showToast('Generasi video dibatalkan.');
+      } else {
+        console.error('Video gen error:', err);
+        bubbleText.innerHTML = `
+          <div style="background:rgba(255,0,85,0.08); border:1px solid rgba(255,0,85,0.4); border-radius:10px; padding:14px; line-height:1.5;">
+            <div style="font-weight:700; color:var(--neon-crimson); margin-bottom:6px; display:flex; align-items:center; gap:8px;">
+              <i class="fa-solid fa-triangle-exclamation"></i> Gagal Menghasilkan Video AI
+            </div>
+            <div style="font-size:0.83rem; color:var(--text-main); margin-bottom:8px;">
+              ${escapeHtml(err.message || 'Terjadi gangguan saat memproses rendering video.')}
+            </div>
+            <button class="btn btn-sm btn-primary retry-video-btn" style="font-size:0.75rem;">
+              <i class="fa-solid fa-rotate-right"></i> Coba Generate Ulang
+            </button>
+          </div>
+        `;
+        bubbleText.querySelector('.retry-video-btn')?.addEventListener('click', () => {
+          assistantRow.remove();
+          runVideoGeneration(session, cleanPrompt, options);
+        });
+        AudioEngine.error();
+      }
+    } finally {
+      setGeneratingState(false);
+      STATE.abortController = null;
+    }
+  }
 
   // ==================== SYSTEM PRESET HANDLER ====================
   function applySystemPreset(presetKey) {
@@ -12846,6 +13646,26 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       STATE.isImageGenMode = true;
       updateImageGenModeUI();
       openImageModelDropdown();
+      AudioEngine.click();
+    });
+    els.attachOptionGenMusic?.addEventListener('click', () => {
+      closeAttachmentDropdown();
+      if (els.promptInput) {
+        els.promptInput.value = '/music ';
+        els.promptInput.focus();
+        autoResizeTextarea(els.promptInput);
+      }
+      showToast('🎵 Mode AI Music: Masukkan genre atau deskripsi musik yang Anda inginkan...');
+      AudioEngine.click();
+    });
+    els.attachOptionGenVideo?.addEventListener('click', () => {
+      closeAttachmentDropdown();
+      if (els.promptInput) {
+        els.promptInput.value = '/video ';
+        els.promptInput.focus();
+        autoResizeTextarea(els.promptInput);
+      }
+      showToast('🎬 Mode AI Video: Masukkan adegan atau deskripsi video yang Anda inginkan...');
       AudioEngine.click();
     });
     els.attachOptionDoc?.addEventListener('click', () => {

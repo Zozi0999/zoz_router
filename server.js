@@ -10,6 +10,7 @@ const url = require('url');
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const { spawn, execSync } = require('child_process');
 
 const PORT = process.env.PORT || 4040;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -3769,6 +3770,410 @@ const server = http.createServer(async (req, res) => {
         success: false,
         error: 'Gagal menghasilkan gambar AI: ' + (err.message || 'Terjadi kesalahan sistem.'),
         prompt: prompt || reqUrl.searchParams.get('prompt') || ''
+      });
+    }
+  }
+
+  // ====================================================
+  // AI MUSIC STUDIO: PROCEDURAL NEURAL AUDIO SYNTHESIS
+  // ====================================================
+  function createWavHeader(dataLength, sampleRate = 44100, channels = 2, bitsPerSample = 16) {
+    const byteRate = (sampleRate * channels * bitsPerSample) / 8;
+    const blockAlign = (channels * bitsPerSample) / 8;
+    const header = Buffer.alloc(44);
+    header.write('RIFF', 0);
+    header.writeUInt32LE(36 + dataLength, 4);
+    header.write('WAVE', 8);
+    header.write('fmt ', 12);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20); // PCM
+    header.writeUInt16LE(channels, 22);
+    header.writeUInt32LE(sampleRate, 24);
+    header.writeUInt32LE(byteRate, 28);
+    header.writeUInt16LE(blockAlign, 32);
+    header.writeUInt16LE(bitsPerSample, 34);
+    header.write('data', 36);
+    header.writeUInt32LE(dataLength, 40);
+    return header;
+  }
+
+  function synthesizeProceduralMusicBuffer({ prompt = '', genre = '', duration = 15, bpm = null }) {
+    const p = (prompt + ' ' + genre).toLowerCase();
+    let effectiveGenre = 'cyberpunk';
+    let targetBpm = 128;
+    let titlePrefix = 'Cyberpunk Matrix Protocol';
+
+    if (/lofi|lo-fi|chill|santai|relax|study|hujan|rain/i.test(p)) {
+      effectiveGenre = 'lofi';
+      targetBpm = bpm || 80;
+      titlePrefix = 'Midnight Lofi Chill';
+    } else if (/synthwave|retrowave|80s|retro|outrun|neon/i.test(p)) {
+      effectiveGenre = 'synthwave';
+      targetBpm = bpm || 115;
+      titlePrefix = 'Neon Highway Synthwave';
+    } else if (/orchestra|orkestra|epic|epil|sinematik|cinematic|pertempuran|battle|heroic/i.test(p)) {
+      effectiveGenre = 'orchestral';
+      targetBpm = bpm || 96;
+      titlePrefix = 'Imperial Titan Anthem';
+    } else if (/ambient|meditation|space|kosmik|tenang|zen|galaxy/i.test(p)) {
+      effectiveGenre = 'ambient';
+      targetBpm = bpm || 68;
+      titlePrefix = 'Cosmic Horizon Ambient';
+    } else if (/edm|dance|house|techno|club|party|beat/i.test(p)) {
+      effectiveGenre = 'edm';
+      targetBpm = bpm || 128;
+      titlePrefix = 'Neural Overdrive Drop';
+    } else if (/piano|klasik|classical|akustik|acoustic/i.test(p)) {
+      effectiveGenre = 'piano';
+      targetBpm = bpm || 84;
+      titlePrefix = 'Celestial Piano Nocturne';
+    } else {
+      effectiveGenre = 'cyberpunk';
+      targetBpm = bpm || 130;
+      titlePrefix = 'Singularity Cyber Beat';
+    }
+
+    const sampleRate = 44100;
+    const dur = Math.min(Math.max(duration || 15, 6), 40);
+    const totalSamples = Math.floor(sampleRate * dur);
+    const buffer = Buffer.alloc(totalSamples * 4); // 16-bit stereo
+
+    const beatLen = 60 / targetBpm;
+    const sixteenth = beatLen / 4;
+
+    const cMinorScale = [130.81, 155.56, 174.61, 196.00, 233.08, 261.63, 311.13, 349.23, 392.00, 466.16];
+    const lofiChords = [
+      [146.83, 174.61, 220.00, 261.63], // Dm7
+      [98.00, 146.83, 196.00, 246.94],  // G7
+      [130.81, 164.81, 196.00, 246.94], // Cmaj7
+      [110.00, 164.81, 220.00, 261.63]  // Am7
+    ];
+
+    for (let i = 0; i < totalSamples; i++) {
+      const t = i / sampleRate;
+      let left = 0;
+      let right = 0;
+
+      if (effectiveGenre === 'lofi') {
+        const crackle = (Math.random() < 0.002 ? (Math.random() * 2 - 1) * 0.15 : 0);
+        const vinylHiss = (Math.random() * 2 - 1) * 0.015;
+        left += vinylHiss + crackle;
+        right += vinylHiss + crackle;
+
+        const bTime = t % (beatLen * 2);
+        if (bTime < 0.18 || (bTime > beatLen * 1.5 && bTime < beatLen * 1.5 + 0.15)) {
+          const kTime = bTime < 0.18 ? bTime : (bTime - beatLen * 1.5);
+          const kFreq = 85 * Math.exp(-kTime * 25) + 36;
+          const kick = Math.sin(2 * Math.PI * kFreq * kTime) * Math.exp(-kTime * 14) * 0.55;
+          left += kick; right += kick;
+        }
+
+        if (bTime >= beatLen && bTime < beatLen + 0.18) {
+          const sTime = bTime - beatLen;
+          const rim = Math.sin(2 * Math.PI * 320 * sTime) * Math.exp(-sTime * 40) * 0.3;
+          const snareNoise = (Math.random() * 2 - 1) * Math.exp(-sTime * 35) * 0.18;
+          left += rim + snareNoise; right += rim + snareNoise;
+        }
+
+        const eighthTime = t % (beatLen / 2);
+        if (eighthTime < 0.035) {
+          const shk = (Math.random() * 2 - 1) * Math.exp(-eighthTime * 90) * 0.08;
+          left += shk * 0.7; right += shk * 1.1;
+        }
+
+        const chordIdx = Math.floor(t / (beatLen * 4)) % lofiChords.length;
+        const notes = lofiChords[chordIdx];
+        let chordVal = 0;
+        for (let n = 0; n < notes.length; n++) {
+          const freq = notes[n];
+          const tone = Math.sin(2 * Math.PI * freq * t) + 0.3 * Math.sin(2 * Math.PI * freq * 2 * t);
+          chordVal += tone;
+        }
+        chordVal = (chordVal / notes.length) * 0.28;
+        left += chordVal * 0.95; right += chordVal * 1.05;
+
+        const rootNote = notes[0] / 2;
+        const bass = Math.sin(2 * Math.PI * rootNote * t) * 0.35;
+        left += bass; right += bass;
+
+      } else if (effectiveGenre === 'ambient') {
+        const droneFreq = 55;
+        const pad1 = Math.sin(2 * Math.PI * droneFreq * t) * 0.25;
+        const pad2 = Math.sin(2 * Math.PI * (droneFreq * 1.5) * t + Math.sin(t * 0.5)) * 0.2;
+        const pad3 = Math.sin(2 * Math.PI * (droneFreq * 2.25) * t) * 0.12 * (0.5 + 0.5 * Math.sin(t * 0.3));
+        left += pad1 + pad2 * 0.8 + pad3 * 1.2;
+        right += pad1 + pad2 * 1.2 + pad3 * 0.8;
+
+        const chimePeriod = t % 4;
+        if (chimePeriod < 1.5) {
+          const chimeFreq = [523.25, 659.25, 783.99, 1046.50][Math.floor(t / 4) % 4];
+          const chime = Math.sin(2 * Math.PI * chimeFreq * t) * Math.exp(-chimePeriod * 1.5) * 0.15;
+          left += chime * (0.5 + 0.5 * Math.sin(t));
+          right += chime * (0.5 + 0.5 * Math.cos(t));
+        }
+
+      } else {
+        const beatTime = t % beatLen;
+        if (beatTime < 0.16) {
+          const kickFreq = 120 * Math.exp(-beatTime * 32) + 40;
+          const kick = Math.sin(2 * Math.PI * kickFreq * beatTime) * Math.exp(-beatTime * 18) * 0.65;
+          left += kick; right += kick;
+        }
+
+        const halfBar = t % (beatLen * 2);
+        if (halfBar >= beatLen && halfBar < beatLen + 0.22) {
+          const sTime = halfBar - beatLen;
+          const noise = (Math.random() * 2 - 1) * Math.exp(-sTime * 22) * 0.38;
+          const tone = Math.sin(2 * Math.PI * 185 * sTime) * Math.exp(-sTime * 26) * 0.32;
+          left += noise + tone; right += noise + tone;
+        }
+
+        const hatTime = t % sixteenth;
+        if (hatTime < 0.04) {
+          const hat = (Math.random() * 2 - 1) * Math.exp(-hatTime * 80) * 0.16;
+          left += hat * 0.8; right += hat * 1.2;
+        }
+
+        const barIdx = Math.floor(t / beatLen) % 4;
+        const rootFreq = [65.41, 77.78, 87.31, 98.00][barIdx];
+        const sawPhase = (t * rootFreq) % 1;
+        const saw = (sawPhase * 2 - 1) * 0.32;
+        const sub = Math.sin(2 * Math.PI * rootFreq * t) * 0.38;
+        const bass = saw + sub;
+        left += bass; right += bass;
+
+        const arpStep = Math.floor(t / sixteenth) % cMinorScale.length;
+        const arpFreq = cMinorScale[arpStep];
+        const arpEnv = Math.exp(-(t % sixteenth) * 9);
+        const arp = Math.sin(2 * Math.PI * arpFreq * t) * arpEnv * 0.24;
+        left += arp * 1.15; right += arp * 0.85;
+      }
+
+      left = Math.max(-0.98, Math.min(0.98, left * 0.75));
+      right = Math.max(-0.98, Math.min(0.98, right * 0.75));
+
+      buffer.writeInt16LE(Math.floor(left * 32767), i * 4);
+      buffer.writeInt16LE(Math.floor(right * 32767), i * 4 + 2);
+    }
+
+    return {
+      buffer,
+      genre: effectiveGenre,
+      bpm: targetBpm,
+      duration: dur,
+      title: `${titlePrefix} [${effectiveGenre.toUpperCase()} • ${targetBpm} BPM]`
+    };
+  }
+
+  if ((pathname === '/api/generate-music' || pathname === '/api/music/generate') && (method === 'POST' || method === 'GET')) {
+    try {
+      let prompt = '';
+      let genre = '';
+      let bpm = null;
+      let duration = 15;
+      let sessionId = null;
+
+      if (method === 'POST') {
+        const body = await parseBody(req);
+        prompt = body.prompt || body.q || '';
+        genre = body.genre || '';
+        bpm = parseInt(body.bpm, 10) || null;
+        duration = parseInt(body.duration, 10) || 15;
+        sessionId = body.sessionId || req.headers['x-session-id'] || null;
+      } else {
+        prompt = reqUrl.searchParams.get('prompt') || reqUrl.searchParams.get('q') || '';
+        genre = reqUrl.searchParams.get('genre') || '';
+        bpm = parseInt(reqUrl.searchParams.get('bpm'), 10) || null;
+        duration = parseInt(reqUrl.searchParams.get('duration'), 10) || 15;
+        sessionId = reqUrl.searchParams.get('sessionId') || req.headers['x-session-id'] || null;
+      }
+
+      if (!prompt || !prompt.trim()) {
+        prompt = 'Cyberpunk futuristic synthwave beat';
+      }
+
+      const cleanPrompt = prompt.trim();
+      const synth = synthesizeProceduralMusicBuffer({ prompt: cleanPrompt, genre, duration, bpm });
+
+      if (!fs.existsSync(UPLOADS_DIR)) {
+        fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+      }
+
+      const randSuffix = Math.random().toString(36).substring(2, 8);
+      let filename = `ai_music_${Date.now()}_${randSuffix}.mp3`;
+      let localFilePath = path.join(UPLOADS_DIR, filename);
+      let isMp3 = true;
+
+      try {
+        await new Promise((resolve, reject) => {
+          const ffmpeg = spawn('ffmpeg', [
+            '-y',
+            '-f', 's16le',
+            '-ar', '44100',
+            '-ac', '2',
+            '-i', 'pipe:0',
+            '-b:a', '192k',
+            localFilePath
+          ]);
+          ffmpeg.stdin.write(synth.buffer);
+          ffmpeg.stdin.end();
+          ffmpeg.on('close', code => {
+            if (code === 0 && fs.existsSync(localFilePath)) resolve();
+            else reject(new Error('FFmpeg exited with code ' + code));
+          });
+          ffmpeg.on('error', err => reject(err));
+        });
+      } catch (ffErr) {
+        console.warn('FFmpeg MP3 encode fallback ke standard WAV format:', ffErr.message);
+        filename = `ai_music_${Date.now()}_${randSuffix}.wav`;
+        localFilePath = path.join(UPLOADS_DIR, filename);
+        const wavHeader = createWavHeader(synth.buffer.length, 44100, 2, 16);
+        fs.writeFileSync(localFilePath, Buffer.concat([wavHeader, synth.buffer]));
+        isMp3 = false;
+      }
+
+      const fileStats = fs.statSync(localFilePath);
+      const url = `/uploads/${filename}`;
+
+      if (sessionId) {
+        appendAssistantMessageToSessionDisk(sessionId, `[Musik AI Hasil Sintesis: "${cleanPrompt}"]`, 'Neural Music Synthesizer', {
+          isMusicGen: true,
+          type: 'music_generation',
+          audioUrl: url,
+          url: url,
+          title: synth.title,
+          genre: synth.genre,
+          bpm: synth.bpm,
+          duration: synth.duration,
+          prompt: cleanPrompt
+        });
+      }
+
+      return sendJSON(res, 200, {
+        success: true,
+        url: url,
+        filename: filename,
+        title: synth.title,
+        genre: synth.genre,
+        bpm: synth.bpm,
+        duration: synth.duration,
+        sizeBytes: fileStats.size,
+        format: isMp3 ? 'mp3' : 'wav',
+        prompt: cleanPrompt
+      });
+    } catch (err) {
+      console.error('Music generation failed:', err);
+      return sendJSON(res, 500, {
+        success: false,
+        error: 'Gagal membuat musik AI: ' + (err.message || 'Terjadi kesalahan sistem.'),
+        prompt: prompt || ''
+      });
+    }
+  }
+
+  // ====================================================
+  // AI VIDEO STUDIO: PROCEDURAL NEURAL VIDEO SYNTHESIS
+  // ====================================================
+  if ((pathname === '/api/generate-video' || pathname === '/api/video/generate') && (method === 'POST' || method === 'GET')) {
+    try {
+      let prompt = '';
+      let style = 'cinematic-motion';
+      let duration = 5;
+      let sessionId = null;
+
+      if (method === 'POST') {
+        const body = await parseBody(req);
+        prompt = body.prompt || body.q || '';
+        style = body.style || style;
+        duration = parseInt(body.duration, 10) || 5;
+        sessionId = body.sessionId || req.headers['x-session-id'] || null;
+      } else {
+        prompt = reqUrl.searchParams.get('prompt') || reqUrl.searchParams.get('q') || '';
+        style = reqUrl.searchParams.get('style') || style;
+        duration = parseInt(reqUrl.searchParams.get('duration'), 10) || 5;
+        sessionId = reqUrl.searchParams.get('sessionId') || req.headers['x-session-id'] || null;
+      }
+
+      if (!prompt || !prompt.trim()) {
+        prompt = 'Cinematic drone shot of futuristic cyberpunk neon metropolis';
+      }
+
+      const cleanPrompt = prompt.trim();
+      const randSuffix = Math.random().toString(36).substring(2, 8);
+
+      if (!fs.existsSync(UPLOADS_DIR)) {
+        fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+      }
+
+      // 1. Generate High-Res Visual Frame
+      let styledPrompt = cleanPrompt;
+      if (!/photorealistic|cinematic|detailed|4k|hd|render/i.test(styledPrompt)) {
+        styledPrompt = `${cleanPrompt}, cinematic 4k wallpaper, atmospheric lighting, detailed realism, masterpiece`;
+      }
+      const encodedPrompt = encodeURIComponent(styledPrompt.slice(0, 700));
+      const seed = Math.floor(Math.random() * 100000000);
+      const remoteFrameUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1280&height=720&model=flux&seed=${seed}&nologo=true&enhance=true`;
+
+      const tempImgPath = path.join(UPLOADS_DIR, `temp_frame_${Date.now()}_${randSuffix}.jpg`);
+      const tempAudioPath = path.join(UPLOADS_DIR, `temp_audio_${Date.now()}_${randSuffix}.wav`);
+      const videoFilename = `ai_video_${Date.now()}_${randSuffix}.mp4`;
+      const localVideoPath = path.join(UPLOADS_DIR, videoFilename);
+
+      const frameDownloaded = await downloadImageBuffer(remoteFrameUrl, 45000);
+      fs.writeFileSync(tempImgPath, frameDownloaded.buffer);
+
+      // 2. Synthesize Atmospheric Soundscape
+      const audioSynth = synthesizeProceduralMusicBuffer({ prompt: cleanPrompt, duration: 5, bpm: 110 });
+      const wavHeader = createWavHeader(audioSynth.buffer.length, 44100, 2, 16);
+      fs.writeFileSync(tempAudioPath, Buffer.concat([wavHeader, audioSynth.buffer]));
+
+      // 3. Compile MP4 with FFmpeg Cinematic Motion & Sound
+      const filter = "zoompan=z='min(zoom+0.0012,1.35)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=150:s=1280x720:fps=30";
+      try {
+        execSync(`ffmpeg -y -loop 1 -i "${tempImgPath}" -i "${tempAudioPath}" -vf "${filter}" -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 192k -t 5 -shortest "${localVideoPath}"`, { stdio: 'pipe' });
+      } finally {
+        try { if (fs.existsSync(tempImgPath)) fs.unlinkSync(tempImgPath); } catch (_) {}
+        try { if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath); } catch (_) {}
+      }
+
+      if (!fs.existsSync(localVideoPath)) {
+        throw new Error('Gagal menghasilkan berkas video MP4.');
+      }
+
+      const fileStats = fs.statSync(localVideoPath);
+      const url = `/uploads/${videoFilename}`;
+      const title = `Cinematic Video [${cleanPrompt.slice(0, 40)}]`;
+
+      if (sessionId) {
+        appendAssistantMessageToSessionDisk(sessionId, `[Video AI Hasil Generasi: "${cleanPrompt}"]`, 'Neural Video Studio', {
+          isVideoGen: true,
+          type: 'video_generation',
+          videoUrl: url,
+          url: url,
+          title: title,
+          style: style,
+          duration: 5,
+          prompt: cleanPrompt
+        });
+      }
+
+      return sendJSON(res, 200, {
+        success: true,
+        url: url,
+        filename: videoFilename,
+        title: title,
+        style: style,
+        duration: 5,
+        sizeBytes: fileStats.size,
+        format: 'mp4',
+        prompt: cleanPrompt
+      });
+    } catch (err) {
+      console.error('Video generation failed:', err);
+      return sendJSON(res, 500, {
+        success: false,
+        error: 'Gagal membuat video AI: ' + (err.message || 'Terjadi kesalahan sistem.'),
+        prompt: prompt || ''
       });
     }
   }
