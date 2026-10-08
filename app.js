@@ -2848,7 +2848,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       if (imagesToDisplay && imagesToDisplay.length > 0 && /^📷 \[\d+ Foto Lampiran\]$/.test(textToDisplay.trim())) {
         textToDisplay = '';
       }
-      appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs, msg.isDeepResearch, msg.latency, msg.timestamp || session.updatedAt || session.createdAt);
+      appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs, msg.isDeepResearch, msg.latency, msg.timestamp || session.updatedAt || session.createdAt, msg);
     });
 
     enhanceCodeBlocks(els.messagesList);
@@ -3013,7 +3013,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     els.messagesList.appendChild(row);
   }
 
-  function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1, sources = null, docs = null, isDeepResearch = false, latency = null, timestamp = null) {
+  function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1, sources = null, docs = null, isDeepResearch = false, latency = null, timestamp = null, extraMeta = null) {
     const row = document.createElement('div');
     row.className = `message-row ${role}`;
     row.dataset.index = index;
@@ -3116,28 +3116,35 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
 
     let assistantMediaHtml = '';
-    const audioUrl = extraMeta?.audioUrl || (typeof content === 'string' && (content.match(/\[(?:Putar\s*\/\s*Unduh\s*Audio|Dengar\s*Audio)\]\((https?:\/\/[^\s\)]+|\/uploads\/[^\s\)]+)\)/i) || content.match(/\((https?:\/\/[^\s\)]+\.mp3|\/uploads\/[^\s\)]+\.mp3)\)/i))?.[1]);
-    const videoUrl = extraMeta?.videoUrl || (typeof content === 'string' && (content.match(/\[(?:Tonton\s*\/\s*Unduh\s*Video|Lihat\s*Video)\]\((https?:\/\/[^\s\)]+|\/uploads\/[^\s\)]+)\)/i) || content.match(/\((https?:\/\/[^\s\)]+\.mp4|\/uploads\/[^\s\)]+\.mp4)\)/i))?.[1]);
+    const safeMeta = (extraMeta && typeof extraMeta === 'object') ? extraMeta : {};
+    const audioUrl = safeMeta.audioUrl || safeMeta.url || (typeof content === 'string' && (content.match(/\[(?:Putar\s*\/\s*Unduh\s*Audio|Dengar\s*Audio)\]\((https?:\/\/[^\s\)]+|\/uploads\/[^\s\)]+)\)/i) || content.match(/\((https?:\/\/[^\s\)]+\.mp3|\/uploads\/[^\s\)]+\.mp3)\)/i))?.[1]);
+    const videoUrl = safeMeta.videoUrl || (safeMeta.type === 'video_generation' && safeMeta.url) || (typeof content === 'string' && (content.match(/\[(?:Tonton\s*\/\s*Unduh\s*Video|Lihat\s*Video)\]\((https?:\/\/[^\s\)]+|\/uploads\/[^\s\)]+)\)/i) || content.match(/\((https?:\/\/[^\s\)]+\.mp4|\/uploads\/[^\s\)]+\.mp4)\)/i))?.[1]);
 
-    if (role === 'assistant' && audioUrl) {
-      assistantMediaHtml += buildCyberAudioPlayerCardHtml({
-        url: audioUrl,
-        title: extraMeta?.title || 'Singularity Cyber Audio',
-        genre: extraMeta?.genre || 'Cyberpunk',
-        bpm: extraMeta?.bpm || 128,
-        duration: extraMeta?.duration || 15,
-        prompt: extraMeta?.prompt || content
-      });
+    if (role === 'assistant' && audioUrl && (safeMeta.isMusicGen || safeMeta.type === 'music_generation' || /\.mp3(?:$|\?)/i.test(audioUrl) || /Audio/i.test(content || ''))) {
+      if (typeof buildCyberAudioPlayerCardHtml === 'function') {
+        assistantMediaHtml += buildCyberAudioPlayerCardHtml({
+          url: audioUrl,
+          audioUrl: audioUrl,
+          title: safeMeta.title || 'Singularity Cyber Audio',
+          genre: safeMeta.genre || 'Cyberpunk',
+          bpm: safeMeta.bpm || 128,
+          duration: safeMeta.duration || 15,
+          prompt: safeMeta.prompt || content
+        });
+      }
     }
 
-    if (role === 'assistant' && videoUrl) {
-      assistantMediaHtml += buildCyberVideoPlayerCardHtml({
-        url: videoUrl,
-        title: extraMeta?.title || 'Cinematic Video Motion',
-        style: extraMeta?.style || 'Cinematic Motion',
-        duration: extraMeta?.duration || 5,
-        prompt: extraMeta?.prompt || content
-      });
+    if (role === 'assistant' && videoUrl && (safeMeta.isVideoGen || safeMeta.type === 'video_generation' || /\.mp4(?:$|\?)/i.test(videoUrl) || /Video/i.test(content || ''))) {
+      if (typeof buildCyberVideoPlayerCardHtml === 'function') {
+        assistantMediaHtml += buildCyberVideoPlayerCardHtml({
+          url: videoUrl,
+          videoUrl: videoUrl,
+          title: safeMeta.title || 'Cinematic Video Motion',
+          style: safeMeta.style || 'Cinematic Motion',
+          duration: safeMeta.duration || 5,
+          prompt: safeMeta.prompt || content
+        });
+      }
     }
 
     let sourcesHtml = '';
@@ -3182,8 +3189,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     // Attach audio & video listeners
     if (role === 'assistant') {
-      attachAudioPlayerListeners(row);
-      attachVideoPlayerListeners(row);
+      try {
+        if (typeof attachAudioPlayerListeners === 'function') attachAudioPlayerListeners(row);
+        if (typeof attachVideoPlayerListeners === 'function') attachVideoPlayerListeners(row);
+      } catch (mediaListenerErr) {
+        console.warn('Media player listener init notice:', mediaListenerErr);
+      }
     }
 
     // Attach Lightbox click triggers to images in user attachment bubble
@@ -10528,7 +10539,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
       let animFrameId = null;
       function drawWaveform(isPlaying) {
-        if (!canvas) return;
+        if (!canvas || typeof canvas.getContext !== 'function') return;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
         const w = canvas.width;
@@ -10778,7 +10789,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     STATE.abortController = new AbortController();
     const startTime = performance.now();
 
-    const assistantRow = appendMessageElement('assistant', '', 'Neural Music Studio', null, null, null, null, false);
+    const assistantRow = appendMessageElement('assistant', '', null, 'Neural Music Studio');
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     const metaBox = assistantRow.querySelector('.message-meta');
 
@@ -10969,7 +10980,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     STATE.abortController = new AbortController();
     const startTime = performance.now();
 
-    const assistantRow = appendMessageElement('assistant', '', 'Neural Video Studio', null, null, null, null, false);
+    const assistantRow = appendMessageElement('assistant', '', null, 'Neural Video Studio');
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     const metaBox = assistantRow.querySelector('.message-meta');
 
