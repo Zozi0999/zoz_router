@@ -788,7 +788,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           const tx = this.db.transaction('sessions', 'readwrite');
           const store = tx.objectStore('sessions');
           store.clear();
-          sessions.forEach(s => store.put(s));
+          sessions.forEach(s => { if (s && !s._isLazyDisk) store.put(s); });
           tx.oncomplete = () => resolve(true);
           tx.onerror = () => resolve(false);
         } catch (e) {
@@ -1303,8 +1303,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const globalRes = await fetch('/api/chat/status').catch(() => null);
       if (globalRes && globalRes.ok) {
         const globalData = await globalRes.json();
+        const lastActiveId = safeSessionStorage.getItem('zoz_active_session_id') || localStorage.getItem('zoz_last_active_session_id');
         if (globalData && globalData.activeSessions && globalData.activeSessions.length > 0) {
-          const targetTask = globalData.activeSessions[0];
+          const targetTask = globalData.activeSessions.find(s => s.sessionId === lastActiveId);
           const targetSid = targetTask.sessionId;
           let targetSession = STATE.sessions.find(s => s.id === targetSid);
           if (!targetSession) {
@@ -1321,6 +1322,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             showToast('⚡ Menyambung kembali ke respons AI yang sedang diproses di latar belakang...', 'info');
             return;
           }
+          // If no matching active session, fall through to recentlyCompletedSessions check
         }
 
         if (globalData && globalData.recentlyCompletedSessions && globalData.recentlyCompletedSessions.length > 0) {
@@ -4708,6 +4710,7 @@ ${organicBlock}
     if (!rawText && images.length === 0 && docs.length === 0) return;
     if (STATE.isGenerating) return;
 
+    setGeneratingState(true);
     // Claude AI resilience: minta izin notifikasi saat pengguna berinteraksi
     requestNotificationPermission();
 
@@ -4722,6 +4725,7 @@ ${organicBlock}
       }
       showToast('Mode percakapan standar aktif.');
       AudioEngine.click();
+      STATE.isGenerating = false;
       return;
     }
     if (trimmedLow === '/img' || trimmedLow === '/image' || trimmedLow === '/gambar') {
@@ -4733,6 +4737,7 @@ ${organicBlock}
       }
       showToast('Mode AI Image Studio aktif. Silakan ketik deskripsi visual!');
       AudioEngine.click();
+      STATE.isGenerating = false;
       return;
     }
 
@@ -11605,7 +11610,24 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (!finalAudioUrl) {
         updateHudStep('[Langkah 2/3] Menjalankan sintesis audio client-side...', 65);
         const synthWavBlob = await synthesizeClientProceduralAudio(cleanPrompt, options.duration || 15);
-        finalAudioUrl = URL.createObjectURL(synthWavBlob);
+        // Convert blob to data URL for persistence
+        finalAudioUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.onerror = () => resolve(URL.createObjectURL(synthWavBlob));
+          reader.readAsDataURL(synthWavBlob);
+        });
+        // Persist blob to MusicDB for offline playback
+        try {
+          await MusicDB.saveTrack({
+            id: `synth_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            name: `Neural Audio [${cleanPrompt.slice(0, 30)}]`,
+            size: ((synthWavBlob.size || 0) / (1024 * 1024)).toFixed(1),
+            type: 'audio/wav',
+            blob: synthWavBlob,
+            addedAt: new Date().toISOString()
+          });
+        } catch (_) {}
         trackTitle = `Neural Audio [${cleanPrompt.slice(0, 30)}]`;
       }
 
