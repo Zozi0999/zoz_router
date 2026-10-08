@@ -3955,6 +3955,47 @@ const server = http.createServer(async (req, res) => {
       delete body.apiKey;
       delete body.ollamaApiKey;
 
+      // Defense-in-depth: Resolusi dan sanitasi gambar lokal (/uploads/) menjadi raw Base64 untuk endpoint Ollama
+      if (Array.isArray(body.messages)) {
+        for (const msg of body.messages) {
+          // 1. Ekstrak gambar dari format multimodal content part (jika dikirim dalam format OpenAI/OpenRouter)
+          if (Array.isArray(msg.content)) {
+            const textParts = [];
+            if (!Array.isArray(msg.images)) msg.images = [];
+            for (const part of msg.content) {
+              if (part && part.type === 'text') {
+                textParts.push(part.text || '');
+              } else if (part && part.type === 'image_url' && part.image_url?.url) {
+                msg.images.push(part.image_url.url);
+              }
+            }
+            msg.content = textParts.join('\n').trim();
+          }
+
+          // 2. Sanitasi seluruh array msg.images menjadi string Base64 murni tanpa scheme/path
+          if (Array.isArray(msg.images)) {
+            msg.images = msg.images.map(img => {
+              if (typeof img === 'string') {
+                if (img.startsWith('data:image')) {
+                  return img.replace(/^data:image\/[a-z0-9.+_-]+;base64,/i, '').replace(/[\r\n\s]/g, '');
+                }
+                const uploadMatch = img.match(/(?:\/uploads\/|^uploads\/)([a-zA-Z0-9_.-]+)$/);
+                if (uploadMatch) {
+                  const filename = uploadMatch[1];
+                  const localPath = path.join(UPLOADS_DIR, filename);
+                  if (fs.existsSync(localPath)) {
+                    try {
+                      return fs.readFileSync(localPath).toString('base64');
+                    } catch (_) {}
+                  }
+                }
+              }
+              return img;
+            });
+          }
+        }
+      }
+
       if (sessionId) {
         dbActiveChatTasks[sessionId] = {
           sessionId,
@@ -4146,6 +4187,12 @@ const server = http.createServer(async (req, res) => {
       });
 
       proxyReq.on('error', (err) => {
+        if (sessionId && dbActiveChatTasks[sessionId]) {
+          if (dbActiveChatTasks[sessionId].status !== 'aborted') {
+            dbActiveChatTasks[sessionId].status = 'error';
+            dbActiveChatTasks[sessionId].error = err.message;
+          }
+        }
         // If client closed or socket was destroyed on abort, suppress write-after-end errors
         if (clientDisconnected || res.writableEnded || res.destroyed) {
           return;
@@ -4646,8 +4693,10 @@ const server = http.createServer(async (req, res) => {
 
       proxyReq.on('error', (err) => {
         if (sessionId && dbActiveChatTasks[sessionId]) {
-          dbActiveChatTasks[sessionId].status = 'error';
-          dbActiveChatTasks[sessionId].error = err.message;
+          if (dbActiveChatTasks[sessionId].status !== 'aborted') {
+            dbActiveChatTasks[sessionId].status = 'error';
+            dbActiveChatTasks[sessionId].error = err.message;
+          }
         }
         // If client disconnected or socket was intentionally aborted, suppress error write-after-end
         if (clientDisconnected || res.writableEnded || res.destroyed) {
@@ -4730,67 +4779,80 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Periksa apakah ada tugas Deep Research aktif atau baru selesai untuk sesi ini
+    const matchingResearchTasks = [];
     for (const rId of Object.keys(dbTugasRiset)) {
       const rTask = dbTugasRiset[rId];
-      if (rTask && rTask.sessionId === sid) {
-        if (rTask.status === 'sedang_meneliti') {
-          return sendJSON(res, 200, {
-            active: true,
-            status: 'streaming',
-            isDeepResearch: true,
-            taskId: rTask.taskId,
-            sessionId: sid,
-            model: 'Deep Research Pro',
-            text: rTask.hasil || rTask.currentStep || 'Sedang meneliti di latar belakang...',
-            startedAt: rTask.createdAt,
-            completedAt: null,
-            error: null
-          });
-        }
-        if (rTask.status === 'selesai') {
-          return sendJSON(res, 200, {
-            active: false,
-            status: 'completed',
-            isDeepResearch: true,
-            taskId: rTask.taskId,
-            sessionId: sid,
-            model: 'Deep Research Pro',
-            text: rTask.hasil || '',
-            chatSummary: rTask.chatSummary || '',
-            sources: rTask.sources || [],
-            startedAt: rTask.createdAt,
-            completedAt: rTask.completedAt || new Date().toISOString(),
-            error: null
-          });
-        }
-        if (rTask.status === 'dibatalkan') {
-          return sendJSON(res, 200, {
-            active: false,
-            status: 'aborted',
-            isDeepResearch: true,
-            taskId: rTask.taskId,
-            sessionId: sid,
-            model: 'Deep Research Pro',
-            text: rTask.hasil || rTask.currentStep || 'Riset dihentikan oleh pengguna.',
-            startedAt: rTask.createdAt,
-            completedAt: rTask.completedAt || new Date().toISOString(),
-            error: null
-          });
-        }
-        if (rTask.status === 'gagal') {
-          return sendJSON(res, 200, {
-            active: false,
-            status: 'error',
-            isDeepResearch: true,
-            taskId: rTask.taskId,
-            sessionId: sid,
-            model: 'Deep Research Pro',
-            text: rTask.currentStep || '',
-            startedAt: rTask.createdAt,
-            completedAt: rTask.completedAt || new Date().toISOString(),
-            error: rTask.error || 'Terjadi kesalahan pada riset mendalam.'
-          });
-        }
+      if (rTask && (rTask.sessionId === sid || rTask.taskId === sid)) {
+        matchingResearchTasks.push(rTask);
+      }
+    }
+
+    if (matchingResearchTasks.length > 0) {
+      // Prioritaskan tugas yang sedang aktif/meneliti terlebih dahulu
+      let rTask = matchingResearchTasks.find(t => t.status === 'sedang_meneliti');
+      if (!rTask) {
+        // Jika tidak ada yang sedang aktif, ambil tugas terbaru berdasarkan completedAt atau createdAt
+        matchingResearchTasks.sort((a, b) => new Date(b.completedAt || b.createdAt || 0) - new Date(a.completedAt || a.createdAt || 0));
+        rTask = matchingResearchTasks[0];
+      }
+
+      if (rTask.status === 'sedang_meneliti') {
+        return sendJSON(res, 200, {
+          active: true,
+          status: 'streaming',
+          isDeepResearch: true,
+          taskId: rTask.taskId,
+          sessionId: sid,
+          model: 'Deep Research Pro',
+          text: rTask.hasil || rTask.currentStep || 'Sedang meneliti di latar belakang...',
+          startedAt: rTask.createdAt,
+          completedAt: null,
+          error: null
+        });
+      }
+      if (rTask.status === 'selesai') {
+        return sendJSON(res, 200, {
+          active: false,
+          status: 'completed',
+          isDeepResearch: true,
+          taskId: rTask.taskId,
+          sessionId: sid,
+          model: 'Deep Research Pro',
+          text: rTask.hasil || '',
+          chatSummary: rTask.chatSummary || '',
+          sources: rTask.sources || [],
+          startedAt: rTask.createdAt,
+          completedAt: rTask.completedAt || new Date().toISOString(),
+          error: null
+        });
+      }
+      if (rTask.status === 'dibatalkan') {
+        return sendJSON(res, 200, {
+          active: false,
+          status: 'aborted',
+          isDeepResearch: true,
+          taskId: rTask.taskId,
+          sessionId: sid,
+          model: 'Deep Research Pro',
+          text: rTask.hasil || rTask.currentStep || 'Riset dihentikan oleh pengguna.',
+          startedAt: rTask.createdAt,
+          completedAt: rTask.completedAt || new Date().toISOString(),
+          error: null
+        });
+      }
+      if (rTask.status === 'gagal') {
+        return sendJSON(res, 200, {
+          active: false,
+          status: 'error',
+          isDeepResearch: true,
+          taskId: rTask.taskId,
+          sessionId: sid,
+          model: 'Deep Research Pro',
+          text: rTask.currentStep || '',
+          startedAt: rTask.createdAt,
+          completedAt: rTask.completedAt || new Date().toISOString(),
+          error: rTask.error || 'Terjadi kesalahan pada riset mendalam.'
+        });
       }
     }
 

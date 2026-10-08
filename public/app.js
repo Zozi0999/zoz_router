@@ -8619,7 +8619,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
     const modelsUsedEl = document.getElementById('fullReportModelsUsed');
     if (modelsUsedEl) {
-      modelsUsedEl.textContent = meta.model || 'Pipeline 3-Model Hierarkis';
+      modelsUsedEl.textContent = meta.model || 'Deep Research Pro';
     }
 
     // Simpan ke state pelacak laporan aktif
@@ -9021,13 +9021,18 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
                   break;
                 } else if (statusData.status === 'gagal' || statusData.status === 'dibatalkan') {
                   STATE.currentDeepResearchTaskId = null;
-                  throw new Error(statusData.error || (statusData.status === 'dibatalkan' ? 'Riset dibatalkan oleh pengguna.' : 'Riset gagal diselesaikan.'));
+                  const errMsg = statusData.error || (statusData.status === 'dibatalkan' ? 'Riset dibatalkan oleh pengguna.' : 'Riset gagal diselesaikan.');
+                  const statusErr = new Error(errMsg);
+                  if (statusData.status === 'dibatalkan') {
+                    statusErr.name = 'AbortError';
+                  }
+                  throw statusErr;
                 }
               }
             }
           }
         } catch (backendErr) {
-          if (backendErr.name === 'AbortError' || currentAbortController.signal.aborted || !STATE.isGenerating) {
+          if (backendErr.name === 'AbortError' || backendErr.message?.includes('dibatalkan') || currentAbortController.signal.aborted || !STATE.isGenerating) {
             if (STATE.currentDeepResearchTaskId && !IS_GITHUB_PAGES) {
               fetch('/api/batal-riset/' + STATE.currentDeepResearchTaskId, { method: 'POST' }).catch(() => {});
             }
