@@ -323,7 +323,7 @@ export default {
 
         if (openRouterKey && effectiveModel.includes('/')) {
           try {
-            const orRes = await fetch('https://openrouter.ai/api/v1/images', {
+            const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
               method: 'POST',
               headers: {
                 'Authorization': `Bearer ${openRouterKey}`,
@@ -331,16 +331,23 @@ export default {
                 'HTTP-Referer': 'https://github.com/Zozi0999/zoz_router',
                 'X-Title': 'Zoz Router Image Studio'
               },
-              body: JSON.stringify({ model: effectiveModel, prompt: cleanPrompt, width, height, n: 1 })
+              body: JSON.stringify({
+                model: effectiveModel,
+                messages: [{ role: 'user', content: `Please generate an image: ${cleanPrompt}` }],
+                modalities: ['image', 'text']
+              })
             });
             if (orRes.ok) {
               const parsed = await orRes.json();
-              const imgItem = parsed.data?.[0] || parsed.images?.[0] || parsed.choices?.[0];
-              if (imgItem) {
-                if (imgItem.b64_json) {
-                  finalImageUrl = `data:image/png;base64,${imgItem.b64_json}`;
-                } else if (imgItem.url) {
-                  finalImageUrl = imgItem.url;
+              const msg = parsed.choices?.[0]?.message;
+              if (msg) {
+                const imgItem = msg.images?.[0];
+                if (imgItem) {
+                  const u = imgItem.image_url?.url || imgItem.url;
+                  if (u) finalImageUrl = u;
+                } else if (msg.content) {
+                  const mdMatch = msg.content.match(/!\[.*?\]\((https?:\/\/[^\s\)]+)\)/);
+                  if (mdMatch) finalImageUrl = mdMatch[1];
                 }
               }
             }
@@ -351,7 +358,20 @@ export default {
 
         if (!finalImageUrl) {
           effectiveModel = effectiveModel.includes('/') ? 'flux' : effectiveModel;
-          let urlPrompt = cleanPrompt;
+          let styledPrompt = cleanPrompt;
+          if (effectiveModel === 'flux-realism' && !/photo|realis|cinematic/i.test(cleanPrompt)) {
+            styledPrompt = `${cleanPrompt}, photorealistic, ultra-detailed 8k photography, cinematic lighting`;
+          } else if (effectiveModel === 'flux-anime' && !/anime|manga|2d/i.test(cleanPrompt)) {
+            styledPrompt = `${cleanPrompt}, anime aesthetic, high quality Japanese manga style, vibrant colors, detailed line art`;
+          } else if (effectiveModel === 'flux-3d' && !/3d|cgi|render/i.test(cleanPrompt)) {
+            styledPrompt = `${cleanPrompt}, 3d digital render, octane render, unreal engine 5, 3d cgi volumetric lighting`;
+          } else if (effectiveModel === 'midjourney' && !/artistic|midjourney/i.test(cleanPrompt)) {
+            styledPrompt = `${cleanPrompt}, midjourney aesthetic, artistic concept art, dramatic composition, breathtaking detail`;
+          } else if (effectiveModel === 'flux-pro' && !/masterpiece|pro/i.test(cleanPrompt)) {
+            styledPrompt = `${cleanPrompt}, masterpiece, professional award-winning composition, ultra sharp details`;
+          }
+
+          let urlPrompt = styledPrompt;
           if (urlPrompt.length > 800) {
             const cut = urlPrompt.slice(0, 800);
             const lastSpace = cut.lastIndexOf(' ');

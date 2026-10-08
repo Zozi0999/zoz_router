@@ -3149,15 +3149,13 @@ const server = http.createServer(async (req, res) => {
 
             const postData = JSON.stringify({
               model: effectiveModel,
-              prompt: cleanPrompt,
-              width: width,
-              height: height,
-              n: 1
+              messages: [{ role: 'user', content: `Please generate an image: ${cleanPrompt}` }],
+              modalities: ['image', 'text']
             });
             const opt = {
               hostname: 'openrouter.ai',
               port: 443,
-              path: '/api/v1/images',
+              path: '/api/v1/chat/completions',
               method: 'POST',
               headers: {
                 'Authorization': `Bearer ${openRouterKey}`,
@@ -3178,13 +3176,23 @@ const server = http.createServer(async (req, res) => {
                     const errDetail = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
                     return safeReject(new Error(errDetail || `OpenRouter HTTP ${response.statusCode}`));
                   }
-                  const imgItem = parsed.data?.[0] || parsed.images?.[0] || parsed.choices?.[0];
-                  if (imgItem) {
-                    if (imgItem.b64_json) {
-                      return safeResolve({ buffer: Buffer.from(imgItem.b64_json, 'base64'), contentType: 'image/png' });
+                  const msg = parsed.choices?.[0]?.message;
+                  if (msg) {
+                    const imgItem = msg.images?.[0];
+                    if (imgItem) {
+                      const u = imgItem.image_url?.url || imgItem.url;
+                      if (u) {
+                        if (u.startsWith('data:')) {
+                          const base64Data = u.split(',')[1];
+                          return safeResolve({ buffer: Buffer.from(base64Data, 'base64'), contentType: 'image/png' });
+                        }
+                        return safeResolve({ remoteUrl: u });
+                      }
                     }
-                    if (imgItem.url) {
-                      return safeResolve({ remoteUrl: imgItem.url });
+                    const content = msg.content || '';
+                    const mdMatch = content.match(/!\[.*?\]\((https?:\/\/[^\s\)]+)\)/);
+                    if (mdMatch) {
+                      return safeResolve({ remoteUrl: mdMatch[1] });
                     }
                   }
                   safeReject(new Error('OpenRouter tidak mengembalikan data gambar'));
@@ -3220,11 +3228,25 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      // 2. Engine Default / Fallback: Flux.1 Neural Diffusion via Pollinations AI
+      // 2. Engine Default / Fallback: Pollinations AI Multi-Style
       if (!imageBuffer) {
         effectiveModel = effectiveModel.includes('/') ? 'flux' : effectiveModel;
+        
+        let styledPrompt = cleanPrompt;
+        if (effectiveModel === 'flux-realism' && !/photo|realis|cinematic/i.test(cleanPrompt)) {
+          styledPrompt = `${cleanPrompt}, photorealistic, ultra-detailed 8k photography, cinematic lighting`;
+        } else if (effectiveModel === 'flux-anime' && !/anime|manga|2d/i.test(cleanPrompt)) {
+          styledPrompt = `${cleanPrompt}, anime aesthetic, high quality Japanese manga style, vibrant colors, detailed line art`;
+        } else if (effectiveModel === 'flux-3d' && !/3d|cgi|render/i.test(cleanPrompt)) {
+          styledPrompt = `${cleanPrompt}, 3d digital render, octane render, unreal engine 5, 3d cgi volumetric lighting`;
+        } else if (effectiveModel === 'midjourney' && !/artistic|midjourney/i.test(cleanPrompt)) {
+          styledPrompt = `${cleanPrompt}, midjourney aesthetic, artistic concept art, dramatic composition, breathtaking detail`;
+        } else if (effectiveModel === 'flux-pro' && !/masterpiece|pro/i.test(cleanPrompt)) {
+          styledPrompt = `${cleanPrompt}, masterpiece, professional award-winning composition, ultra sharp details`;
+        }
+
         // Pemangkasan semantik aman (smart boundary truncation) untuk URL GET guna mencegah error HTTP 414 URI Too Long
-        let urlPrompt = cleanPrompt;
+        let urlPrompt = styledPrompt;
         if (urlPrompt.length > 800) {
           const cut = urlPrompt.slice(0, 800);
           const lastSpace = cut.lastIndexOf(' ');

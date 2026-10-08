@@ -102,13 +102,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     { id: 'flux-anime', name: 'Flux Anime (Gaya Ilustrasi Anime & Manga)', provider: 'pollinations', cat: 'anime', tag: 'Anime • 2D' },
     { id: 'flux-3d', name: 'Flux 3D (Render 3D CGI & Sci-Fi)', provider: 'pollinations', cat: '3d', tag: '3D • CGI' },
     { id: 'turbo', name: 'SDXL Turbo (Ultra Fast Generation)', provider: 'pollinations', cat: 'fast', tag: 'Fast • Turbo' },
-    { id: 'black-forest-labs/flux-1-schnell', name: 'FLUX.1 Schnell (OpenRouter Dedicated)', provider: 'openrouter', cat: 'flagship', tag: 'OpenRouter • Schnell' },
-    { id: 'black-forest-labs/flux-1-dev', name: 'FLUX.1 Dev (OpenRouter Kualitas Tinggi)', provider: 'openrouter', cat: 'flagship', tag: 'OpenRouter • Dev' },
-    { id: 'black-forest-labs/flux-3-image', name: 'FLUX.3 Image (OpenRouter Next-Gen)', provider: 'openrouter', cat: 'flagship', tag: 'OpenRouter • FLUX-3' },
-    { id: 'recraft/recraft-v4.1-flash', name: 'Recraft v4.1 Flash (Vektor & Grafis)', provider: 'openrouter', cat: 'vector', tag: 'OpenRouter • Vector' },
-    { id: 'openai/gpt-image-2.5-sunburst', name: 'GPT Image Sunburst (OpenAI)', provider: 'openrouter', cat: 'flagship', tag: 'OpenRouter • DALL-E' },
-    { id: 'google/imagen-3', name: 'Google Imagen 3 (Photorealistic Ultra)', provider: 'openrouter', cat: 'flagship', tag: 'OpenRouter • Imagen' },
-    { id: 'bytedance-seed/seedream-5-0-flash', name: 'ByteDance SeeDream 5.0 Flash', provider: 'openrouter', cat: 'fast', tag: 'OpenRouter • Flash' }
+    { id: 'flux-pro', name: 'Flux.1 Pro (Kualitas Tinggi & Detail Presisi)', provider: 'pollinations', cat: 'pro', tag: 'Pro • Detail' },
+    { id: 'midjourney', name: 'Midjourney Style (Artistik & Estetik)', provider: 'pollinations', cat: 'art', tag: 'Art • Style' },
+    { id: 'google/gemini-2.5-flash-image', name: 'Gemini 2.5 Flash Image (Google Cloud)', provider: 'openrouter', cat: 'flagship', tag: 'Google AI' },
+    { id: 'openai/gpt-5-image', name: 'GPT-5 Image (OpenAI Multimodal)', provider: 'openrouter', cat: 'flagship', tag: 'OpenAI' }
   ];
 
   // ==================== STATE MANAGEMENT ====================
@@ -320,6 +317,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     webSearchIcon: $('#webSearchIcon'),
     searchBadge: $('#searchBadge'),
     searchDropdown: $('#searchDropdown'),
+    imageModelMenuWrapper: $('#imageModelMenuWrapper'),
+    imageModelDropdown: $('#imageModelDropdown'),
+    imageModelBadge: $('#imageModelBadge'),
     imageGenToggleBtn: $('#imageGenToggleBtn'),
     composerBox: $('.composer-box'),
     attachmentPreviewBar: $('#attachmentPreviewBar'),
@@ -9016,27 +9016,136 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     return p.trim() || promptText.trim();
   }
 
+  function getImageModelDisplayName(modelId) {
+    if (!modelId || modelId === 'off') return 'Nonaktif (Mode Obrolan)';
+    const found = DEFAULT_IMAGE_MODELS.find(m => m.id === modelId) || 
+                  (STATE.availableImageModels && STATE.availableImageModels.find(m => m.id === modelId));
+    if (found) return found.name || found.id;
+    const m = String(modelId).toLowerCase();
+    if (m === 'flux') return 'Flux.1 Schnell';
+    if (m === 'flux-realism') return 'Flux Realism';
+    if (m === 'flux-anime') return 'Flux Anime & Manga';
+    if (m === 'flux-3d') return 'Flux 3D CGI';
+    if (m === 'turbo') return 'SDXL Turbo';
+    if (m === 'flux-pro') return 'Flux.1 Pro';
+    if (m === 'midjourney') return 'Midjourney Style';
+    if (m.includes('gemini')) return 'Gemini 2.5 Flash Image';
+    if (m.includes('gpt')) return 'GPT-5 Image';
+    return modelId;
+  }
+
+  function getImageModelBadgeText(modelId) {
+    if (!modelId) return 'Flux';
+    const m = String(modelId).toLowerCase();
+    if (m === 'flux-realism') return 'Realism';
+    if (m === 'flux-anime') return 'Anime';
+    if (m === 'flux-3d') return '3D CGI';
+    if (m === 'turbo') return 'Turbo';
+    if (m === 'flux-pro') return 'Pro';
+    if (m === 'midjourney') return 'MJ';
+    if (m.includes('gemini')) return 'Gemini';
+    if (m.includes('gpt')) return 'GPT-5';
+    return 'Flux';
+  }
+
   function updateImageGenModeUI() {
+    const isImageMode = Boolean(STATE.isImageGenMode);
+    const activeModel = STATE.settings.imageModel || 'flux';
+    const badgeText = getImageModelBadgeText(activeModel);
+    const displayName = getImageModelDisplayName(activeModel);
+
     if (els.composerBox) {
-      els.composerBox.classList.toggle('image-mode-active', Boolean(STATE.isImageGenMode));
+      els.composerBox.classList.toggle('image-mode-active', isImageMode);
     }
     if (els.imageGenToggleBtn) {
-      els.imageGenToggleBtn.classList.toggle('active', Boolean(STATE.isImageGenMode));
-      els.imageGenToggleBtn.setAttribute('aria-pressed', String(Boolean(STATE.isImageGenMode)));
-      els.imageGenToggleBtn.setAttribute('title', STATE.isImageGenMode ? 'Matikan Mode Gambar (Kembali ke Obrolan)' : 'Mode AI Image Studio (Buat Gambar)');
+      els.imageGenToggleBtn.classList.toggle('active', isImageMode);
+      els.imageGenToggleBtn.setAttribute('aria-pressed', String(isImageMode));
+      els.imageGenToggleBtn.setAttribute('title', isImageMode 
+        ? `Mode Gambar Aktif: ${displayName} (Klik untuk ganti model / nonaktifkan)` 
+        : 'AI Image Studio - Pilih Model Gambar');
+    }
+    if (els.imageModelBadge) {
+      els.imageModelBadge.innerText = badgeText;
+      els.imageModelBadge.style.display = isImageMode ? 'inline-block' : 'none';
     }
     if (els.sendPromptBtn) {
-      if (STATE.isImageGenMode) {
-        els.sendPromptBtn.setAttribute('title', 'Generate Gambar (Enter) | Tahan 450ms untuk Mode Percakapan');
-        els.sendPromptBtn.setAttribute('aria-label', 'Generate Gambar (Enter)');
+      if (isImageMode) {
+        els.sendPromptBtn.setAttribute('title', `Generate Gambar dengan ${displayName} (Enter) | Tahan 450ms untuk Mode Percakapan`);
+        els.sendPromptBtn.setAttribute('aria-label', `Generate Gambar dengan ${displayName} (Enter)`);
       } else {
         els.sendPromptBtn.setAttribute('title', 'Kirim Prompt (Enter) | Tahan 450ms untuk Mode Gambar');
         els.sendPromptBtn.setAttribute('aria-label', 'Kirim Prompt (Enter)');
       }
     }
     if (els.promptInput) {
-      els.promptInput.placeholder = '';
+      els.promptInput.placeholder = isImageMode 
+        ? `Deskripsikan visual yang ingin dibuat dengan ${badgeText}...` 
+        : '';
     }
+
+    // Sinkronisasi status checked pada popup modal/dropdown
+    $$('.image-model-item').forEach(item => {
+      const itemModel = item.dataset.model;
+      const isSelected = isImageMode ? (itemModel === activeModel) : (itemModel === 'off');
+      item.classList.toggle('active', isSelected);
+      const checkIcon = item.querySelector('.image-model-check');
+      if (checkIcon) checkIcon.style.display = isSelected ? 'block' : 'none';
+    });
+  }
+
+  function toggleImageModelDropdown(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (!els.imageModelDropdown) return;
+    const isHidden = els.imageModelDropdown.style.display === 'none' || !els.imageModelDropdown.style.display;
+    if (isHidden) {
+      openImageModelDropdown();
+    } else {
+      closeImageModelDropdown();
+    }
+  }
+
+  function openImageModelDropdown() {
+    if (!els.imageModelDropdown) return;
+    closeAttachmentDropdown();
+    closeSearchDropdown();
+    els.imageModelDropdown.style.display = 'flex';
+    els.imageGenToggleBtn?.setAttribute('aria-expanded', 'true');
+    AudioEngine.click();
+  }
+
+  function closeImageModelDropdown() {
+    if (!els.imageModelDropdown) return;
+    els.imageModelDropdown.style.display = 'none';
+    els.imageGenToggleBtn?.setAttribute('aria-expanded', 'false');
+  }
+
+  function setImageModel(modelVal) {
+    if (modelVal === 'off') {
+      STATE.isImageGenMode = false;
+      updateImageGenModeUI();
+      closeImageModelDropdown();
+      AudioEngine.click();
+      showToast('ℹ️ Mode Buat Gambar dinonaktifkan. Kembali ke obrolan biasa.');
+      return;
+    }
+
+    STATE.settings.imageModel = modelVal;
+    STATE.isImageGenMode = true;
+    try {
+      localStorage.setItem('zoz_settings_v1', JSON.stringify(STATE.settings));
+    } catch (_) {}
+    if (els.settingImageModel) {
+      els.settingImageModel.value = modelVal;
+    }
+    updateImageGenModeUI();
+    closeImageModelDropdown();
+    AudioEngine.success();
+    els.promptInput?.focus();
+    const displayName = getImageModelDisplayName(modelVal);
+    showToast(`🎨 Model Gambar Aktif: ${displayName}`);
   }
 
   function togglePromptVisibility(forceState) {
@@ -9203,7 +9312,21 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       // Client-side Direct Pollinations Fallback (for GitHub Pages or server fallback)
       if (!finalImageUrl) {
         actualSeed = Math.floor(Math.random() * 100000000);
-        let urlPrompt = cleanPrompt;
+        let styledPrompt = cleanPrompt;
+        const lowModel = activeImageModel.toLowerCase();
+        if (lowModel === 'flux-realism' && !/photo|realis|cinematic/i.test(cleanPrompt)) {
+          styledPrompt = `${cleanPrompt}, photorealistic, ultra-detailed 8k photography, cinematic lighting`;
+        } else if (lowModel === 'flux-anime' && !/anime|manga|2d/i.test(cleanPrompt)) {
+          styledPrompt = `${cleanPrompt}, anime aesthetic, high quality Japanese manga style, vibrant colors, detailed line art`;
+        } else if (lowModel === 'flux-3d' && !/3d|cgi|render/i.test(cleanPrompt)) {
+          styledPrompt = `${cleanPrompt}, 3d digital render, octane render, unreal engine 5, 3d cgi volumetric lighting`;
+        } else if (lowModel === 'midjourney' && !/artistic|midjourney/i.test(cleanPrompt)) {
+          styledPrompt = `${cleanPrompt}, midjourney aesthetic, artistic concept art, dramatic composition, breathtaking detail`;
+        } else if (lowModel === 'flux-pro' && !/masterpiece|pro/i.test(cleanPrompt)) {
+          styledPrompt = `${cleanPrompt}, masterpiece, professional award-winning composition, ultra sharp details`;
+        }
+
+        let urlPrompt = styledPrompt;
         if (urlPrompt.length > 800) {
           const cut = urlPrompt.slice(0, 800);
           const lastSpace = cut.lastIndexOf(' ');
@@ -11818,8 +11941,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       closeAttachmentDropdown();
       STATE.isImageGenMode = true;
       updateImageGenModeUI();
-      els.promptInput?.focus();
-      showToast('🎨 Mode AI Image Studio aktif. Ketik deskripsi visual yang ingin dibuat...');
+      openImageModelDropdown();
       AudioEngine.click();
     });
     els.attachOptionDoc?.addEventListener('click', () => {
@@ -11832,7 +11954,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     els.removeImageBtn?.addEventListener('click', clearAttachedImage);
     els.docFileInput?.addEventListener('change', handleDocUpload);
 
-    // Dismiss attachment & search dropdowns when clicking outside
+    // Dismiss attachment, search & image model dropdowns when clicking outside
     document.addEventListener('click', (e) => {
       // If clicking inside an active modal, cleanly close dropdowns without interfering with modal interaction
       if (e.target && e.target.closest && e.target.closest('.modal-backdrop.show')) {
@@ -11841,6 +11963,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         }
         if (els.searchDropdown && els.searchDropdown.style.display !== 'none') {
           closeSearchDropdown();
+        }
+        if (els.imageModelDropdown && els.imageModelDropdown.style.display !== 'none') {
+          closeImageModelDropdown();
         }
         return;
       }
@@ -11855,6 +11980,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           closeSearchDropdown();
         }
       }
+      if (els.imageModelDropdown && els.imageModelDropdown.style.display !== 'none') {
+        if (!els.imageModelMenuWrapper?.contains(e.target)) {
+          closeImageModelDropdown();
+        }
+      }
     });
 
     // Dismiss dropdowns & open modals on Escape key
@@ -11862,6 +11992,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (e.key === 'Escape') {
         closeAttachmentDropdown();
         closeSearchDropdown();
+        closeImageModelDropdown();
 
         if (ImageLightbox.isOpen()) {
           return;
@@ -11889,19 +12020,20 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       });
     });
 
-    // Embedded AI Image Studio Toggle Listener
+    // Embedded AI Image Studio Model Selector Dropdown & Items
     els.imageGenToggleBtn?.addEventListener('click', (e) => {
-      e.preventDefault();
-      STATE.isImageGenMode = !STATE.isImageGenMode;
-      updateImageGenModeUI();
-      if (STATE.isImageGenMode) {
-        AudioEngine.success();
-      } else {
-        AudioEngine.click();
-      }
+      toggleImageModelDropdown(e);
     });
 
-    // Keyboard shortcuts: Alt+I (Image Mode) & Alt+H (Toggle Prompt Visibility)
+    $$('.image-model-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const modelVal = item.dataset.model || 'flux';
+        setImageModel(modelVal);
+      });
+    });
+
+    // Keyboard shortcuts: Alt+I (Image Mode / Dropdown) & Alt+H (Toggle Prompt Visibility)
     document.addEventListener('keydown', (e) => {
       if (e.altKey && (e.key === 'h' || e.key === 'H')) {
         e.preventDefault();
@@ -11911,17 +12043,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
       if (e.altKey && (e.key === 'i' || e.key === 'I')) {
         e.preventDefault();
-        STATE.isImageGenMode = !STATE.isImageGenMode;
-        updateImageGenModeUI();
-        if (STATE.isImageGenMode) {
-          AudioEngine.success();
-          els.promptInput?.focus();
-        } else {
-          AudioEngine.click();
-        }
-      } else if (e.key === 'Escape' && STATE.isImageGenMode && !els.promptInput.value.trim()) {
-        STATE.isImageGenMode = false;
-        updateImageGenModeUI();
+        toggleImageModelDropdown();
+      } else if (e.key === 'Escape' && STATE.isImageGenMode && !els.promptInput?.value.trim()) {
+        closeImageModelDropdown();
       }
     });
 
