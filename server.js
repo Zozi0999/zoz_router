@@ -2787,82 +2787,93 @@ const server = http.createServer(async (req, res) => {
     if (relUpload.startsWith('..') || path.isAbsolute(relUpload)) {
       return sendJSON(res, 403, { error: 'Forbidden' });
     }
-    if (fs.existsSync(uploadFilePath) && fs.statSync(uploadFilePath).isFile()) {
-      const ext = path.extname(uploadFilePath).toLowerCase();
-      const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-      const stat = fs.statSync(uploadFilePath);
-      const totalSize = stat.size;
-      const range = req.headers.range;
+    try {
+      if (fs.existsSync(uploadFilePath)) {
+        const stat = fs.statSync(uploadFilePath);
+        if (stat.isFile()) {
+          const ext = path.extname(uploadFilePath).toLowerCase();
+          const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+          const totalSize = stat.size;
+          const range = req.headers.range;
 
-      if (range) {
-        const parts = range.replace(/bytes=/, '').split('-');
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+          if (range) {
+            const parts = range.replace(/bytes=/, '').split('-');
+            const start = parseInt(parts[0], 10);
+            const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
 
-        if (isNaN(start) || start >= totalSize || end < start || end >= totalSize) {
-          res.writeHead(416, {
-            'Content-Range': `bytes */${totalSize}`,
+            if (isNaN(start) || start >= totalSize || end < start || end >= totalSize) {
+              res.writeHead(416, {
+                'Content-Range': `bytes */${totalSize}`,
+                'Access-Control-Allow-Origin': '*'
+              });
+              return res.end();
+            }
+
+            const chunkSize = (end - start) + 1;
+            res.writeHead(206, {
+              'Content-Range': `bytes ${start}-${end}/${totalSize}`,
+              'Accept-Ranges': 'bytes',
+              'Content-Length': chunkSize,
+              'Content-Type': contentType,
+              'Cache-Control': 'public, max-age=86400',
+              'Access-Control-Allow-Origin': '*'
+            });
+
+            if (method === 'HEAD') {
+              return res.end();
+            }
+
+            const stream = fs.createReadStream(uploadFilePath, { start, end });
+            stream.on('error', (err) => {
+              console.error('[Upload Range Stream Error]:', err?.message || err);
+              if (!res.headersSent) {
+                sendJSON(res, 500, { error: 'Gagal membaca segmen media' });
+              } else {
+                try { res.destroy(); } catch (_) {}
+              }
+            });
+            req.on('close', () => {
+              try { stream.destroy(); } catch (_) {}
+            });
+            stream.pipe(res);
+            return;
+          }
+
+          res.writeHead(200, {
+            'Content-Type': contentType,
+            'Content-Length': totalSize,
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'public, max-age=86400',
             'Access-Control-Allow-Origin': '*'
           });
-          return res.end();
-        }
-
-        const chunkSize = (end - start) + 1;
-        res.writeHead(206, {
-          'Content-Range': `bytes ${start}-${end}/${totalSize}`,
-          'Accept-Ranges': 'bytes',
-          'Content-Length': chunkSize,
-          'Content-Type': contentType,
-          'Cache-Control': 'public, max-age=86400',
-          'Access-Control-Allow-Origin': '*'
-        });
-
-        if (method === 'HEAD') {
-          return res.end();
-        }
-
-        const stream = fs.createReadStream(uploadFilePath, { start, end });
-        stream.on('error', (err) => {
-          console.error('[Upload Range Stream Error]:', err?.message || err);
-          if (!res.headersSent) {
-            sendJSON(res, 500, { error: 'Gagal membaca segmen media' });
-          } else {
-            try { res.destroy(); } catch (_) {}
+          if (method === 'HEAD') {
+            return res.end();
           }
-        });
-        req.on('close', () => {
-          try { stream.destroy(); } catch (_) {}
-        });
-        stream.pipe(res);
+          const stream = fs.createReadStream(uploadFilePath);
+          stream.on('error', (err) => {
+            console.error('[Upload Stream Error]:', err?.message || err);
+            if (!res.headersSent) {
+              sendJSON(res, 500, { error: 'Gagal membaca berkas media' });
+            } else {
+              try { res.destroy(); } catch (_) {}
+            }
+          });
+          req.on('close', () => {
+            try { stream.destroy(); } catch (_) {}
+          });
+          stream.pipe(res);
+          return;
+        }
+      }
+      return sendJSON(res, 404, { error: 'Media file tidak ditemukan di penyimpanan perangkat.' });
+    } catch (fsErr) {
+      if (!res.headersSent) {
+        return sendJSON(res, 500, { error: 'Gagal mengakses berkas media: ' + fsErr.message });
+      } else {
+        try { res.destroy(); } catch (_) {}
         return;
       }
-
-      res.writeHead(200, {
-        'Content-Type': contentType,
-        'Content-Length': totalSize,
-        'Accept-Ranges': 'bytes',
-        'Cache-Control': 'public, max-age=86400',
-        'Access-Control-Allow-Origin': '*'
-      });
-      if (method === 'HEAD') {
-        return res.end();
-      }
-      const stream = fs.createReadStream(uploadFilePath);
-      stream.on('error', (err) => {
-        console.error('[Upload Stream Error]:', err?.message || err);
-        if (!res.headersSent) {
-          sendJSON(res, 500, { error: 'Gagal membaca berkas media' });
-        } else {
-          try { res.destroy(); } catch (_) {}
-        }
-      });
-      req.on('close', () => {
-        try { stream.destroy(); } catch (_) {}
-      });
-      stream.pipe(res);
-      return;
     }
-    return sendJSON(res, 404, { error: 'Media file tidak ditemukan di penyimpanan perangkat.' });
   }
 
 // Web Search API Endpoint (Serper Google Search Engine)
@@ -3040,8 +3051,8 @@ const server = http.createServer(async (req, res) => {
   // YOUTUBE OEMBED METADATA GROUNDING API
   // ----------------------------------------------------
   if (pathname === '/api/youtube-info' && (method === 'GET' || method === 'POST')) {
+    let targetUrl = '';
     try {
-      let targetUrl = '';
       if (method === 'GET') {
         targetUrl = reqUrl.searchParams.get('url') || reqUrl.searchParams.get('link') || '';
       } else {

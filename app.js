@@ -1995,6 +1995,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     safeSessionStorage.removeItem('zoz_active_session_id');
     STATE.isImageGenMode = false;
     updateImageGenModeUI();
+    STATE.attachedDocs = [];
+    clearAttachedImages();
+    if (els.docFileInput) els.docFileInput.value = '';
+    renderAttachmentPreviews();
     renderChatHistory();
     renderCurrentSession();
     AudioEngine.click();
@@ -2060,6 +2064,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     safeSessionStorage.setItem('zoz_active_session_id', sessionId);
     STATE.isImageGenMode = false;
     updateImageGenModeUI();
+    STATE.attachedDocs = [];
+    clearAttachedImages();
+    if (els.docFileInput) els.docFileInput.value = '';
+    renderAttachmentPreviews();
     savePersistedState();
     renderChatHistory();
     renderCurrentSession();
@@ -10157,7 +10165,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         if (this.currentMode === 'youtube' && this.ytPlayer && this.ytPlayer.playVideo) {
           this.ytPlayer.playVideo();
           this.setPlayingState(true);
-        } else if (this.currentMode === 'file' && this.currentIndex >= 0 && this.currentIndex < this.playlist.length) {
+        } else if (this.currentMode === 'file' && ((this.currentIndex >= 0 && this.currentIndex < this.playlist.length) || (this.currentOnlineTrack && this.audio.src))) {
           const playPromise = this.audio.play();
           if (playPromise !== undefined) {
             playPromise
@@ -10294,24 +10302,24 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       const cur = this.audio.currentTime || 0;
       const dur = this.audio.duration || 0;
       
-      if (dur > 0 && els.deckProgressSlider) {
+      if (isFinite(dur) && dur > 0 && els.deckProgressSlider) {
         els.deckProgressSlider.value = (cur / dur) * 100;
       }
 
       if (els.deckCurrentTrackMeta) {
         const curStr = this.formatTime(cur);
-        const durStr = dur ? this.formatTime(dur) : '--:--';
+        const durStr = (isFinite(dur) && dur > 0) ? this.formatTime(dur) : '--:--';
         els.deckCurrentTrackMeta.innerText = `${curStr} / ${durStr}`;
       }
     },
 
     seek(percent) {
-      if (this.currentMode === 'file' && this.audio && this.audio.duration) {
+      if (this.currentMode === 'file' && this.audio && isFinite(this.audio.duration) && this.audio.duration > 0) {
         this.audio.currentTime = (percent / 100) * this.audio.duration;
       } else if (this.currentMode === 'youtube' && this.ytPlayer && typeof this.ytPlayer.getDuration === 'function' && typeof this.ytPlayer.seekTo === 'function') {
         try {
           const dur = this.ytPlayer.getDuration() || 0;
-          if (dur > 0) {
+          if (isFinite(dur) && dur > 0) {
             this.ytPlayer.seekTo((percent / 100) * dur, true);
           }
         } catch (_) {}
@@ -10715,6 +10723,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     },
 
     formatTime(sec) {
+      if (!isFinite(sec) || isNaN(sec) || sec < 0) return '--:--';
       const m = Math.floor(sec / 60);
       const s = Math.floor(sec % 60);
       return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
