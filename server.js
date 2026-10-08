@@ -836,6 +836,14 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
           if (extraMeta.chatSummary) lastMsg.chatSummary = extraMeta.chatSummary;
           if (Array.isArray(extraMeta.sources) && extraMeta.sources.length) lastMsg.sources = extraMeta.sources;
           if (extraMeta.latency) lastMsg.latency = extraMeta.latency;
+          if (extraMeta.isImageGen) lastMsg.isImageGen = true;
+          if (extraMeta.type) lastMsg.type = extraMeta.type;
+          if (extraMeta.imageUrl) lastMsg.imageUrl = extraMeta.imageUrl;
+          if (extraMeta.url) lastMsg.url = extraMeta.url;
+          if (extraMeta.prompt) lastMsg.prompt = extraMeta.prompt;
+          if (extraMeta.width) lastMsg.width = extraMeta.width;
+          if (extraMeta.height) lastMsg.height = extraMeta.height;
+          if (extraMeta.seed) lastMsg.seed = extraMeta.seed;
         }
         sessData.updatedAt = new Date().toISOString();
         fs.writeFileSync(sessFile, JSON.stringify(sessData, null, 2), 'utf8');
@@ -857,6 +865,14 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
       if (extraMeta.chatSummary) newMsg.chatSummary = extraMeta.chatSummary;
       if (Array.isArray(extraMeta.sources) && extraMeta.sources.length) newMsg.sources = extraMeta.sources;
       if (extraMeta.latency) newMsg.latency = extraMeta.latency;
+      if (extraMeta.isImageGen) newMsg.isImageGen = true;
+      if (extraMeta.type) newMsg.type = extraMeta.type;
+      if (extraMeta.imageUrl) newMsg.imageUrl = extraMeta.imageUrl;
+      if (extraMeta.url) newMsg.url = extraMeta.url;
+      if (extraMeta.prompt) newMsg.prompt = extraMeta.prompt;
+      if (extraMeta.width) newMsg.width = extraMeta.width;
+      if (extraMeta.height) newMsg.height = extraMeta.height;
+      if (extraMeta.seed) newMsg.seed = extraMeta.seed;
     }
 
     msgs.push(newMsg);
@@ -3291,10 +3307,12 @@ const server = http.createServer(async (req, res) => {
       let height = 1024;
       let seed = null;
       let openRouterKey = null;
+      let sessionId = null;
 
       if (method === 'POST') {
         const body = await parseBody(req);
         prompt = body.prompt || body.q || '';
+        sessionId = body.sessionId || req.headers['x-session-id'] || req.headers['X-Session-ID'] || null;
         model = body.model || model;
         width = parseInt(body.width, 10) || width;
         height = parseInt(body.height, 10) || height;
@@ -3302,6 +3320,7 @@ const server = http.createServer(async (req, res) => {
         openRouterKey = body.openRouterKey || body.apiKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       } else {
         prompt = reqUrl.searchParams.get('prompt') || reqUrl.searchParams.get('q') || '';
+        sessionId = reqUrl.searchParams.get('sessionId') || req.headers['x-session-id'] || req.headers['X-Session-ID'] || null;
         model = reqUrl.searchParams.get('model') || model;
         width = parseInt(reqUrl.searchParams.get('width'), 10) || width;
         height = parseInt(reqUrl.searchParams.get('height'), 10) || height;
@@ -3583,6 +3602,21 @@ const server = http.createServer(async (req, res) => {
       }
 
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+
+      if (sessionId) {
+        appendAssistantMessageToSessionDisk(sessionId, `[Gambar AI Hasil Generasi: "${cleanPrompt}"]`, effectiveModel, {
+          isImageGen: true,
+          type: 'image_generation',
+          imageUrl: finalUrl,
+          url: finalUrl,
+          prompt: cleanPrompt,
+          model: effectiveModel,
+          width: width,
+          height: height,
+          seed: actualSeed,
+          latency: duration
+        });
+      }
 
       return sendJSON(res, 200, {
         success: true,

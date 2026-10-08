@@ -6210,10 +6210,46 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         }
         showToast('Generasi dihentikan oleh pengguna.');
       } else {
+        const partialText = streamRenderer ? streamRenderer.finish() : '';
+        const hasPartialText = Boolean(partialText && partialText.trim());
+
+        if (hasPartialText && STATE.sessions.some(s => s.id === session.id)) {
+          const rescuedText = `${partialText.trim()}\n\n*[Koneksi terputus saat streaming]*`;
+          const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
+
+          session.messages.push({
+            role: 'assistant',
+            content: rescuedText,
+            model: modelName,
+            engine: 'ollama',
+            sources: webSources,
+            stats: { duration: totalTime, tokens: tokenCount, interrupted: true },
+            timestamp: new Date().toISOString()
+          });
+          session.updatedAt = new Date().toISOString();
+          savePersistedState();
+          renderChatHistory(els.searchHistoryInput?.value || '');
+
+          if (metaBox) {
+            metaBox.innerHTML = `
+              <strong>${modelName}</strong>
+              <span class="meta-model-badge">Ollama</span>
+              <span>⏱️ ${totalTime}s (Terputus)</span>
+            `;
+          }
+        }
+
         const actualHasImage = Array.isArray(image) ? image.length > 0 : Boolean(image);
         const errorHtml = formatModelErrorMessage('ollama', modelName, err, actualHasImage, STATE.webSearchEnabled);
 
+        const rescuedHtml = hasPartialText ? `
+          <div class="partial-rescued-content" style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed rgba(255,255,255,0.15);">
+            ${renderMarkdown(partialText.trim())}
+          </div>
+        ` : '';
+
         bubbleText.innerHTML = `
+          ${rescuedHtml}
           ${errorHtml}
           <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
             <button class="btn btn-sm btn-primary switch-openrouter-btn" style="font-size:0.75rem;">
@@ -6227,7 +6263,14 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             </button>
           </div>
         `;
-        
+
+        if (hasPartialText) {
+          enhanceCodeBlocks(bubbleText);
+          if (webSources && webSources.length > 0) {
+            renderMessageSources(assistantRow, webSources, true);
+          }
+        }
+
         bubbleText.querySelector('.switch-openrouter-btn')?.addEventListener('click', () => {
           assistantRow.remove();
           setEngineMode('openrouter');
@@ -6243,7 +6286,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           syncSettingsModalFields();
           openModal('settingsModal');
         });
-        
+
         AudioEngine.error();
       }
     } finally {
@@ -6984,6 +7027,35 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         }
         showToast('Generasi dihentikan.');
       } else {
+        const partialText = streamRenderer ? streamRenderer.finish() : '';
+        const hasPartialText = Boolean(partialText && partialText.trim());
+
+        if (hasPartialText && STATE.sessions.some(s => s.id === session.id)) {
+          const rescuedText = `${partialText.trim()}\n\n*[Koneksi terputus saat streaming]*`;
+          const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
+
+          session.messages.push({
+            role: 'assistant',
+            content: rescuedText,
+            model: modelName,
+            engine: 'openrouter',
+            sources: webSources,
+            stats: { duration: totalTime, tokens: tokenCount, interrupted: true },
+            timestamp: new Date().toISOString()
+          });
+          session.updatedAt = new Date().toISOString();
+          savePersistedState();
+          renderChatHistory(els.searchHistoryInput?.value || '');
+
+          if (metaBox) {
+            metaBox.innerHTML = `
+              <strong>${modelName}</strong>
+              <span class="meta-model-badge" style="background:rgba(255,82,0,0.15); color:var(--neon-amber);">OpenRouter</span>
+              <span>⏱️ ${totalTime}s (Terputus)</span>
+            `;
+          }
+        }
+
         const actualHasImage = Array.isArray(image) ? image.length > 0 : Boolean(image);
         const errorHtml = formatModelErrorMessage('openrouter', modelName, err, actualHasImage, STATE.webSearchEnabled);
 
@@ -6991,7 +7063,14 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         const fallbackModelCandidate = modelName.includes('qwen') ? 'google/gemma-4-26b-a4b-it:free' : 'qwen/qwen3.8-27b:free';
         const fallbackLabel = modelName.includes('qwen') ? 'Gemma 4 26B (Free)' : 'Qwen 3.8 27B (Free)';
 
+        const rescuedHtml = hasPartialText ? `
+          <div class="partial-rescued-content" style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed rgba(255,255,255,0.15);">
+            ${renderMarkdown(partialText.trim())}
+          </div>
+        ` : '';
+
         bubbleText.innerHTML = `
+          ${rescuedHtml}
           ${errorHtml}
           <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
             <button class="btn btn-sm btn-outline retry-send-btn" style="border-color:var(--neon-cyan); color:var(--neon-cyan); font-size:0.75rem;">
@@ -7007,7 +7086,14 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             </button>
           </div>
         `;
-        
+
+        if (hasPartialText) {
+          enhanceCodeBlocks(bubbleText);
+          if (webSources && webSources.length > 0) {
+            renderMessageSources(assistantRow, webSources, true);
+          }
+        }
+
         bubbleText.querySelector('.retry-send-btn')?.addEventListener('click', () => {
           assistantRow.remove();
           runOpenRouterStreaming(session, promptText, image, modelName);
@@ -7024,7 +7110,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           syncSettingsModalFields();
           openModal('settingsModal');
         });
-        
+
         AudioEngine.error();
       }
     } finally {
@@ -9761,13 +9847,16 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
       if (!IS_GITHUB_PAGES) {
         try {
+          const targetSessId = session ? session.id : (STATE.currentSessionId || null);
           const res = await fetch('/api/generate-image', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': STATE.settings.openRouterKey ? `Bearer ${STATE.settings.openRouterKey}` : ''
+              'Authorization': STATE.settings.openRouterKey ? `Bearer ${STATE.settings.openRouterKey}` : '',
+              'x-session-id': targetSessId || ''
             },
             body: JSON.stringify({
+              sessionId: targetSessId,
               prompt: cleanPrompt,
               model: activeImageModel,
               width: 1024,
@@ -10174,7 +10263,10 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
       // Visual Markdown Image Rendering for AI Image Studio results
       if (m.type === 'image_generation' || m.isImageGen || m.imageUrl) {
-        const imgUrl = m.imageUrl || m.url || '';
+        let imgUrl = m.imageUrl || m.url || '';
+        if (typeof imgUrl === 'string' && imgUrl.startsWith('/')) {
+          imgUrl = window.location.origin + imgUrl;
+        }
         const promptDesc = m.prompt ? m.prompt.replace(/[\[\]]/g, '') : 'Karya Seni AI';
         content += `\n\n![${promptDesc}](${imgUrl})\n\n`;
       }
@@ -10182,7 +10274,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       // Preserve user image attachments in Markdown
       if (m.images && Array.isArray(m.images) && m.images.length > 0) {
         m.images.forEach((img, i) => {
-          content += `\n\n![Lampiran Foto ${i + 1}](${img})\n\n`;
+          const resolvedImg = (typeof img === 'string' && img.startsWith('/')) ? (window.location.origin + img) : img;
+          content += `\n\n![Lampiran Foto ${i + 1}](${resolvedImg})\n\n`;
         });
       }
 
