@@ -37,8 +37,10 @@ const MIME_TYPES = {
   '.m4a': 'audio/mp4',
   '.flac': 'audio/flac',
   '.aac': 'audio/aac',
+  '.weba': 'audio/webm',
   '.mp4': 'video/mp4',
-  '.webm': 'video/webm'
+  '.webm': 'video/webm',
+  '.ogv': 'video/ogg'
 };
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -2701,6 +2703,21 @@ const server = http.createServer(async (req, res) => {
           'image/svg+xml': '.svg',
           'image/x-icon': '.ico',
           'image/vnd.microsoft.icon': '.ico',
+          'audio/mpeg': '.mp3',
+          'audio/mp3': '.mp3',
+          'audio/wav': '.wav',
+          'audio/x-wav': '.wav',
+          'audio/ogg': '.ogg',
+          'audio/mp4': '.m4a',
+          'audio/x-m4a': '.m4a',
+          'audio/m4a': '.m4a',
+          'audio/aac': '.aac',
+          'audio/flac': '.flac',
+          'audio/x-flac': '.flac',
+          'audio/webm': '.weba',
+          'video/mp4': '.mp4',
+          'video/webm': '.webm',
+          'video/ogg': '.ogv',
           'application/pdf': '.pdf',
           'text/plain': '.txt'
         };
@@ -2714,6 +2731,14 @@ const server = http.createServer(async (req, res) => {
           else if (sub.includes('png')) ext = '.png';
           else if (sub.includes('webp')) ext = '.webp';
           else if (sub.includes('gif')) ext = '.gif';
+          else if (sub.includes('mpeg') || sub.includes('mp3')) ext = '.mp3';
+          else if (sub.includes('wav')) ext = '.wav';
+          else if (sub.includes('ogg')) ext = mime.startsWith('video') ? '.ogv' : '.ogg';
+          else if (sub.includes('flac')) ext = '.flac';
+          else if (sub.includes('aac')) ext = '.aac';
+          else if (sub.includes('m4a')) ext = '.m4a';
+          else if (sub.includes('mp4')) ext = mime.startsWith('audio') ? '.m4a' : '.mp4';
+          else if (sub.includes('webm')) ext = mime.startsWith('audio') ? '.weba' : '.webm';
           else if (sub.includes('pdf')) ext = '.pdf';
           else ext = '.bin';
         }
@@ -2727,6 +2752,9 @@ const server = http.createServer(async (req, res) => {
       }
 
       const filename = `media_${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`;
+      if (!fs.existsSync(UPLOADS_DIR)) {
+        fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+      }
       const targetFile = path.join(UPLOADS_DIR, filename);
       fs.writeFileSync(targetFile, buffer);
       return sendJSON(res, 200, {
@@ -2745,7 +2773,11 @@ const server = http.createServer(async (req, res) => {
     if (method !== 'GET' && method !== 'HEAD') {
       return sendJSON(res, 405, { error: 'Method Not Allowed' });
     }
-    const uploadFilename = path.basename(pathname);
+    let decodedUploadPath = pathname;
+    try {
+      decodedUploadPath = decodeURIComponent(pathname);
+    } catch (_) {}
+    const uploadFilename = path.basename(decodedUploadPath);
     const uploadFilePath = path.join(UPLOADS_DIR, uploadFilename);
     const relUpload = path.relative(UPLOADS_DIR, uploadFilePath);
     if (relUpload.startsWith('..') || path.isAbsolute(relUpload)) {
@@ -3416,6 +3448,9 @@ const server = http.createServer(async (req, res) => {
         windowsHide: true,
         shell: true
       });
+      child.on('error', (err) => {
+        console.warn('[Ollama Background Spawn Error]:', err?.message || err);
+      });
       child.unref();
       return sendJSON(res, 200, { status: 'starting', message: 'Perintah `ollama serve` telah dipicu di latar belakang.' });
     } catch (e) {
@@ -3963,7 +3998,14 @@ const server = http.createServer(async (req, res) => {
     return sendJSON(res, 405, { error: 'Method Not Allowed' });
   }
 
-  let safePath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
+  let decodedPath = pathname;
+  try {
+    decodedPath = decodeURIComponent(pathname);
+  } catch (e) {
+    return sendJSON(res, 400, { error: 'Bad Request: Malformed URI sequence' });
+  }
+
+  let safePath = path.normalize(decodedPath).replace(/^(\.\.[\/\\])+/, '');
   if (safePath === '/' || safePath === '\\') safePath = '/index.html';
 
   const filePath = path.join(PUBLIC_DIR, safePath);

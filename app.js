@@ -3329,12 +3329,17 @@ ${organicBlock}
     // 1. Try local server endpoint first if not github pages
     if (!IS_GITHUB_PAGES) {
       try {
-        const resp = await fetch(`/api/youtube-info?url=${encodeURIComponent(canonicalUrl)}`);
+        const c1 = new AbortController();
+        const t1 = setTimeout(() => c1.abort(), 8000);
+        const resp = await fetch(`/api/youtube-info?url=${encodeURIComponent(canonicalUrl)}`, {
+          signal: c1.signal
+        });
+        clearTimeout(t1);
         if (resp.ok) {
           result = await resp.json();
         }
       } catch (err) {
-        console.warn('Backend YouTube info fetch failed, trying direct oEmbed fallback:', err);
+        console.warn('Backend YouTube info fetch failed, trying direct oEmbed fallback:', err?.message || err);
       }
     }
 
@@ -3342,7 +3347,12 @@ ${organicBlock}
     if (!result || !result.success) {
       try {
         const directUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`;
-        const resp = await fetch(directUrl);
+        const c2 = new AbortController();
+        const t2 = setTimeout(() => c2.abort(), 8000);
+        const resp = await fetch(directUrl, {
+          signal: c2.signal
+        });
+        clearTimeout(t2);
         if (resp.ok) {
           const parsed = await resp.json();
           result = {
@@ -3358,7 +3368,7 @@ ${organicBlock}
           };
         }
       } catch (directErr) {
-        console.warn('Direct YouTube oEmbed fetch error:', directErr);
+        console.warn('Direct YouTube oEmbed fetch error:', directErr?.message || directErr);
       }
     }
 
@@ -10146,8 +10156,21 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           this.ytPlayer.playVideo();
           this.setPlayingState(true);
         } else if (this.currentMode === 'file' && this.currentIndex >= 0 && this.currentIndex < this.playlist.length) {
-          this.audio.play();
-          this.setPlayingState(true);
+          const playPromise = this.audio.play();
+          if (playPromise !== undefined) {
+            playPromise
+              .then(() => {
+                this.setPlayingState(true);
+                this.updateUI();
+              })
+              .catch((err) => {
+                console.warn('Audio play failed:', err?.message || err);
+                this.setPlayingState(false);
+                this.updateUI();
+              });
+          } else {
+            this.setPlayingState(true);
+          }
         } else if (this.currentMode === 'ambient' && this.activeAmbientId) {
           this.startAmbient(this.activeAmbientId);
         } else if (this.playlist.length > 0) {
@@ -10240,7 +10263,19 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     onTrackEnded() {
       if (this.loopMode === 'one') {
         this.audio.currentTime = 0;
-        this.audio.play();
+        const playPromise = this.audio.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              this.setPlayingState(true);
+              this.updateUI();
+            })
+            .catch((err) => {
+              console.warn('Audio loop replay failed:', err?.message || err);
+              this.setPlayingState(false);
+              this.updateUI();
+            });
+        }
       } else if (this.loopMode === 'all') {
         this.nextTrack();
       } else {
