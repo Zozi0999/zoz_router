@@ -802,12 +802,22 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
     }
 
     // Jika file sesi fisik belum ada di disk (misal user langsung keluar sesaat setelah kirim pesan),
-    // buat otomatis struktur sesi agar jawaban latar belakang tidak hilang
+    // buat otomatis struktur sesi agar jawaban latar belakang tidak hilang dan pertanyaan user tetap ada
     if (!sessData || typeof sessData !== 'object') {
+      const initialMsgs = [];
+      const userPrompt = (sessionId && dbActiveChatTasks[sessionId]?.userPrompt) ? dbActiveChatTasks[sessionId].userPrompt : null;
+      if (userPrompt) {
+        initialMsgs.push({
+          id: 'msg_usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+          role: 'user',
+          content: userPrompt,
+          timestamp: new Date(Date.now() - 3000).toISOString()
+        });
+      }
       sessData = {
         id: cleanSid,
-        title: 'Percakapan Baru',
-        messages: [],
+        title: userPrompt ? (userPrompt.length > 30 ? userPrompt.substring(0, 30) + '...' : userPrompt) : 'Percakapan Baru',
+        messages: initialMsgs,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         model: modelName || 'AI Model'
@@ -2877,6 +2887,26 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 403, { error: 'Forbidden: Path traversal terdeteksi.' });
     }
     try {
+      // Hentikan tugas background chat aktif untuk sesi ini agar tidak membangkitkan zombi sesi
+      if (sessionId && dbActiveChatTasks[sessionId]) {
+        const bgTask = dbActiveChatTasks[sessionId];
+        bgTask.status = 'aborted';
+        if (bgTask.proxyReq && !bgTask.proxyReq.destroyed) {
+          try { bgTask.proxyReq.destroy(); } catch (_) {}
+        }
+        delete dbActiveChatTasks[sessionId];
+      }
+
+      // Hentikan tugas Deep Research aktif untuk sesi ini jika ada
+      for (const rId of Object.keys(dbTugasRiset)) {
+        const rTask = dbTugasRiset[rId];
+        if (rTask && (rTask.sessionId === sessionId || rTask.taskId === sessionId)) {
+          rTask.aborted = true;
+          rTask.status = 'dibatalkan';
+          delete dbTugasRiset[rId];
+        }
+      }
+
       if (fs.existsSync(sessFile)) {
         fs.unlinkSync(sessFile);
       }
@@ -2889,6 +2919,28 @@ const server = http.createServer(async (req, res) => {
   // 6. Delete all sessions from disk
   if (pathname === '/api/sessions' && method === 'DELETE') {
     try {
+      // Hentikan semua tugas background chat aktif
+      for (const sid of Object.keys(dbActiveChatTasks)) {
+        const bgTask = dbActiveChatTasks[sid];
+        if (bgTask) {
+          bgTask.status = 'aborted';
+          if (bgTask.proxyReq && !bgTask.proxyReq.destroyed) {
+            try { bgTask.proxyReq.destroy(); } catch (_) {}
+          }
+        }
+        delete dbActiveChatTasks[sid];
+      }
+
+      // Hentikan semua tugas Deep Research aktif
+      for (const rId of Object.keys(dbTugasRiset)) {
+        const rTask = dbTugasRiset[rId];
+        if (rTask) {
+          rTask.aborted = true;
+          rTask.status = 'dibatalkan';
+        }
+        delete dbTugasRiset[rId];
+      }
+
       if (fs.existsSync(SESSIONS_DIR)) {
         const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'));
         for (const file of files) {
@@ -3857,6 +3909,17 @@ const server = http.createServer(async (req, res) => {
       }
 
       const sessionId = body.sessionId || req.headers['x-session-id'] || null;
+      let userPrompt = null;
+      if (Array.isArray(body.messages) && body.messages.length > 0) {
+        const lastUser = [...body.messages].reverse().find(m => m.role === 'user');
+        if (lastUser) {
+          userPrompt = typeof lastUser.content === 'string'
+            ? lastUser.content
+            : (Array.isArray(lastUser.content)
+                ? lastUser.content.map(c => c.text || (c.type === 'text' ? c.text : '')).filter(Boolean).join('\n')
+                : '');
+        }
+      }
       delete body.sessionId;
       delete body.endpoint; // Don't send custom field to Ollama
       delete body.apiKey;
@@ -3867,6 +3930,7 @@ const server = http.createServer(async (req, res) => {
           sessionId,
           model: body.model || 'Ollama Model',
           provider: 'ollama',
+          userPrompt: userPrompt || null,
           fullText: '',
           rawBuffer: '',
           status: 'streaming',
@@ -4310,6 +4374,17 @@ const server = http.createServer(async (req, res) => {
       delete body.openRouterKey;
 
       const sessionId = body.sessionId || req.headers['x-session-id'] || null;
+      let userPrompt = null;
+      if (Array.isArray(body.messages) && body.messages.length > 0) {
+        const lastUser = [...body.messages].reverse().find(m => m.role === 'user');
+        if (lastUser) {
+          userPrompt = typeof lastUser.content === 'string'
+            ? lastUser.content
+            : (Array.isArray(lastUser.content)
+                ? lastUser.content.map(c => c.text || (c.type === 'text' ? c.text : '')).filter(Boolean).join('\n')
+                : '');
+        }
+      }
       delete body.sessionId;
 
       if (sessionId) {
@@ -4317,6 +4392,7 @@ const server = http.createServer(async (req, res) => {
           sessionId,
           model: body.model || 'OpenRouter Model',
           provider: 'openrouter',
+          userPrompt: userPrompt || null,
           fullText: '',
           rawBuffer: '',
           status: 'streaming',

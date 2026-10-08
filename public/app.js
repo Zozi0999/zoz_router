@@ -1346,7 +1346,21 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
         const currentText = data.text || '';
         if (bubbleText && currentText) {
-          bubbleText.innerHTML = renderMarkdown(currentText) + (data.status === 'streaming' ? '<span class="typing-cursor"></span>' : '');
+          if (data.isDeepResearch && data.status === 'streaming') {
+            bubbleText.innerHTML = `
+              <div class="deep-research-live-card" style="padding:14px; border:1px solid rgba(0,240,255,0.3); border-radius:12px; background:rgba(10,15,25,0.7); backdrop-filter:blur(8px);">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; color:var(--neon-cyan); font-weight:600; font-size:0.95rem;">
+                  <i class="fa-solid fa-atom fa-spin"></i> Deep Research Pro Aktif di Latar Belakang
+                </div>
+                <div style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:6px;">${escapeHtml(currentText)}</div>
+                <div style="width:100%; background:rgba(255,255,255,0.1); border-radius:4px; height:4px; overflow:hidden;">
+                  <div style="width:65%; height:100%; background:linear-gradient(90deg, var(--neon-cyan), var(--neon-purple)); border-radius:4px; animation: progress-indeterminate 1.5s infinite linear;"></div>
+                </div>
+              </div>
+            `;
+          } else {
+            bubbleText.innerHTML = renderMarkdown(currentText) + (data.status === 'streaming' ? '<span class="typing-cursor"></span>' : '');
+          }
           smartScrollChatToBottom(false);
         }
 
@@ -1355,18 +1369,28 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           activeChatPollTimer = null;
 
           const finalReportText = currentText;
+          const actualModelName = modelName || data.model || (data.isDeepResearch ? 'Deep Research Pro' : 'AI Model');
           if (bubbleText) {
-            bubbleText.innerHTML = renderMarkdown(finalReportText);
-            enhanceCodeBlocks(bubbleText);
-            enhanceChatImages(bubbleText);
+            if (data.isDeepResearch) {
+              const allSources = Array.isArray(data.sources) ? data.sources : [];
+              const chatSummary = data.chatSummary || '';
+              const nowIso = new Date().toISOString();
+              bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(finalReportText, actualModelName, allSources, nowIso, chatSummary);
+              enhanceCodeBlocks(bubbleText);
+              attachDeepResearchCardEvents(assistantRow, finalReportText, actualModelName, allSources, nowIso);
+            } else {
+              bubbleText.innerHTML = renderMarkdown(finalReportText);
+              enhanceCodeBlocks(bubbleText);
+              enhanceChatImages(bubbleText);
+            }
           }
           if (assistantRow) assistantRow.dataset.fullContent = finalReportText;
 
           const duration = ((performance.now() - startTime) / 1000).toFixed(1);
           if (metaBox) {
             metaBox.innerHTML = `
-              <strong>${escapeHtml(modelName || data.model || 'AI Model')}</strong>
-              <span class="meta-model-badge" style="background:rgba(0,240,255,0.15); color:var(--neon-cyan);">Background Sync</span>
+              <strong>${escapeHtml(actualModelName)}</strong>
+              <span class="meta-model-badge" style="background:rgba(0,240,255,0.15); color:var(--neon-cyan);">${data.isDeepResearch ? 'Deep Research Sync' : 'Background Sync'}</span>
               <span>⏱️ ${duration}s</span>
             `;
           }
@@ -2473,12 +2497,30 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       stopGeneration();
     }
 
+    // Hentikan tugas background chat/riset aktif di server agar tidak membangkitkan zombi sesi
+    if (sessionId) {
+      try {
+        fetch('/api/chat/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId })
+        }).catch(() => {});
+      } catch (_) {}
+    }
+
     STATE.sessions = STATE.sessions.filter(s => s.id !== sessionId);
     await DeviceStorage.deleteSession(sessionId);
 
     if (STATE.currentSessionId === sessionId) {
       STATE.currentSessionId = null;
       safeSessionStorage.removeItem('zoz_active_session_id');
+      try { localStorage.removeItem('zoz_last_active_session_id'); } catch (_) {}
+    } else {
+      try {
+        if (localStorage.getItem('zoz_last_active_session_id') === sessionId) {
+          localStorage.removeItem('zoz_last_active_session_id');
+        }
+      } catch (_) {}
     }
 
     savePersistedState();
@@ -6370,7 +6412,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
   // --- OPENROUTER STREAMING EXECUTION ---
   async function runOpenRouterStreaming(session, promptText, image, modelName) {
-    if (!STATE.settings.openRouterKey) {
+    if (!STATE.settings.openRouterKey && !DeviceStorage.isDeviceBackendAvailable) {
       const assistantRow = appendMessageElement('assistant', '', null, modelName || 'OpenRouter Gateway');
       const bubbleText = assistantRow.querySelector('.msg-text-content');
       
@@ -7202,15 +7244,15 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       // Policy check
       const isLongOrHeavy = (promptText.length > 800) || (promptText.toLowerCase().includes('buatkan sistem') || promptText.toLowerCase().includes('arsitektur kompleks'));
 
-      if (STATE.settings.autoPolicy === 'cloud_heavy' && isLongOrHeavy && STATE.settings.openRouterKey) {
+      if (STATE.settings.autoPolicy === 'cloud_heavy' && isLongOrHeavy && (STATE.settings.openRouterKey || DeviceStorage.isDeviceBackendAvailable)) {
         showToast('🔀 Auto-Router: Mengarahkan tugas kompleks ke OpenRouter Cloud...', 'info');
-        await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
+        await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'qwen/qwen3.8-27b:free');
       } else if (isOllamaOnline) {
         showToast('🔀 Auto-Router: Mengeksekusi via Ollama Cloud Engine...', 'info');
         await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel);
-      } else if (STATE.settings.openRouterKey) {
+      } else if (STATE.settings.openRouterKey || DeviceStorage.isDeviceBackendAvailable) {
         showToast('🔀 Auto-Router: Ollama Cloud offline, fallback ke OpenRouter Cloud...', 'info');
-        await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
+        await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'qwen/qwen3.8-27b:free');
       } else {
         // Kedua engine tidak siap: tampilkan kartu bantuan interaktif dan pulihkan composer
         const assistantRow = appendMessageElement('assistant', '', null, 'Auto-Router Engine');
@@ -12495,6 +12537,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         STATE.sessions = [];
         STATE.currentSessionId = null;
         safeSessionStorage.removeItem('zoz_active_session_id');
+        try { localStorage.removeItem('zoz_last_active_session_id'); } catch (_) {}
         await DeviceStorage.clearAllSessions();
         savePersistedState();
         createNewSession();
