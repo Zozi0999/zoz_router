@@ -11608,27 +11608,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
 
       if (!finalAudioUrl) {
-        updateHudStep('[Langkah 2/3] Menjalankan sintesis audio client-side...', 65);
-        const synthWavBlob = await synthesizeClientProceduralAudio(cleanPrompt, options.duration || 15);
-        // Convert blob to data URL for persistence
-        finalAudioUrl = await new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result);
-          reader.onerror = () => resolve(URL.createObjectURL(synthWavBlob));
-          reader.readAsDataURL(synthWavBlob);
-        });
-        // Persist blob to MusicDB for offline playback
-        try {
-          await MusicDB.saveTrack({
-            id: `synth_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-            name: `Neural Audio [${cleanPrompt.slice(0, 30)}]`,
-            size: ((synthWavBlob.size || 0) / (1024 * 1024)).toFixed(1),
-            type: 'audio/wav',
-            blob: synthWavBlob,
-            addedAt: new Date().toISOString()
-          });
-        } catch (_) {}
-        trackTitle = `Neural Audio [${cleanPrompt.slice(0, 30)}]`;
+        throw new Error('Backend gagal menghasilkan musik. Model yang dipilih mungkin tidak mendukung generasi musik.');
       }
 
       clearTimeout(timer2);
