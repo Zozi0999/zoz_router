@@ -2614,6 +2614,9 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 403, { error: 'Forbidden: Path traversal terdeteksi.' });
       }
       body.updatedAt = new Date().toISOString();
+      if (!fs.existsSync(SESSIONS_DIR)) {
+        fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+      }
       fs.writeFileSync(sessFile, JSON.stringify(body, null, 2), 'utf8');
       return sendJSON(res, 200, { success: true, session: body });
     } catch (err) {
@@ -2641,6 +2644,9 @@ const server = http.createServer(async (req, res) => {
         id: sessionId,
         updatedAt: new Date().toISOString()
       };
+      if (!fs.existsSync(SESSIONS_DIR)) {
+        fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+      }
       fs.writeFileSync(sessFile, JSON.stringify(updated, null, 2), 'utf8');
       return sendJSON(res, 200, { success: true, session: updated });
     } catch (err) {
@@ -2914,7 +2920,8 @@ const server = http.createServer(async (req, res) => {
       if (!query || !query.trim()) {
         return sendJSON(res, 400, { error: 'Parameter query `query` atau `q` diperlukan.' });
       }
-      const data = await performAutonomousSearch(query, maxResults, context);
+      const safeMaxResults = Math.min(Math.max(isNaN(maxResults) ? 8 : maxResults, 1), 30);
+      const data = await performAutonomousSearch(query, safeMaxResults, context);
       return sendJSON(res, 200, { success: true, ...data });
     } catch (e) {
       return sendJSON(res, 500, { error: 'Gagal menjalankan tool pencarian web otonom: ' + e.message });
@@ -2934,7 +2941,8 @@ const server = http.createServer(async (req, res) => {
       if (!targetUrl || !targetUrl.trim()) {
         return sendJSON(res, 400, { error: 'Parameter `url` diperlukan untuk membaca konten halaman.' });
       }
-      const data = await browseWebPageContent(targetUrl, maxChars);
+      const safeMaxChars = Math.min(Math.max(isNaN(maxChars) ? 5000 : maxChars, 200), 50000);
+      const data = await browseWebPageContent(targetUrl, safeMaxChars);
       return sendJSON(res, 200, { success: true, ...data });
     } catch (e) {
       return sendJSON(res, 500, { error: 'Gagal membaca halaman web: ' + e.message });

@@ -9489,12 +9489,12 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       md += `### ${sender}\n\n${content}\n\n---\n\n`;
     });
 
-    const cleanTitle = (session.title || 'chat').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+    const cleanTitle = sanitizeReportFilename(session.title || 'chat');
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `zoz-router-${cleanTitle || 'chat'}.md`;
+    a.download = `zoz-router-${cleanTitle}.md`;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => {
@@ -10083,6 +10083,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           this.stop();
           if (this.playlist.length > 0) {
             this.playTrack(Math.min(idx, this.playlist.length - 1));
+          } else {
+            this.currentIndex = -1;
           }
         } else if (this.currentIndex > idx) {
           this.currentIndex--;

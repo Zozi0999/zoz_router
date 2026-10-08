@@ -43,6 +43,7 @@ module.exports = async function handler(req, res) {
 
     const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`;
     const ytRes = await fetch(oembedUrl, {
+      signal: AbortSignal.timeout(8000),
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
       }
