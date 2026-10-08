@@ -1131,9 +1131,138 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           }
         }
       }
+
+      // 4. Periksa apakah ada tugas chat latar belakang yang sedang berjalan atau baru selesai
+      await checkBackgroundChatTasksSync();
     } catch (err) {
       console.warn('Background storage sync notice:', err);
     }
+  }
+
+  // ==================== CLAUDE AI RESILIENCE: BACKGROUND CHAT SYNC & POLLING ====================
+  let activeChatPollTimer = null;
+
+  async function checkBackgroundChatTasksSync() {
+    if (IS_GITHUB_PAGES) return;
+    const activeSession = getActiveSession();
+    if (!activeSession) return;
+
+    try {
+      const res = await fetch(`/api/chat/status/${activeSession.id}`).catch(() => null);
+      if (!res || !res.ok) return;
+      const data = await res.json();
+      if (!data) return;
+
+      if (data.status === 'streaming') {
+        // AI masih aktif menghasilkan jawaban di background server saat pengguna membuka kembali aplikasi
+        setGeneratingState(true);
+        attachToActiveBackgroundChat(activeSession, data.model, data.text || '');
+      } else if (data.status === 'completed' && data.completedAt) {
+        // AI telah selesai menjawab saat pengguna keluar dari aplikasi
+        const diskSess = await DeviceStorage.getSession(activeSession.id);
+        if (diskSess && Array.isArray(diskSess.messages) && diskSess.messages.length > (activeSession.messages ? activeSession.messages.length : 0)) {
+          activeSession.messages = diskSess.messages;
+          delete activeSession._isLazyDisk;
+          savePersistedState();
+          renderCurrentSession();
+          renderChatHistory();
+          setGeneratingState(false);
+          AudioEngine.success();
+          showToast('✨ AI telah selesai menjawab di latar belakang saat Anda keluar.');
+        }
+      }
+    } catch (_) {}
+  }
+
+  function attachToActiveBackgroundChat(session, modelName, initialText = '') {
+    if (activeChatPollTimer) clearInterval(activeChatPollTimer);
+
+    // Dapatkan baris asisten terakhir atau buat baris baru jika belum ada
+    let assistantRow = els.messagesList?.querySelector('.message-row.assistant:last-child');
+    let isLastMsgAssistant = false;
+    if (session.messages && session.messages.length > 0) {
+      const lastMsg = session.messages[session.messages.length - 1];
+      if (lastMsg.role === 'assistant') isLastMsgAssistant = true;
+    }
+
+    if (!assistantRow || isLastMsgAssistant) {
+      assistantRow = appendMessageElement('assistant', '', null, modelName || 'AI Assistant');
+    }
+
+    const bubbleText = assistantRow?.querySelector('.msg-text-content');
+    const metaBox = assistantRow?.querySelector('.message-meta');
+    if (bubbleText) {
+      bubbleText.innerHTML = renderMarkdown(initialText || '') + '<span class="typing-cursor"></span>';
+    }
+    smartScrollChatToBottom(true);
+
+    const startTime = performance.now();
+
+    activeChatPollTimer = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/chat/status/${session.id}`).catch(() => null);
+        if (!res || !res.ok) return;
+        const data = await res.json();
+        if (!data) return;
+
+        const currentText = data.text || '';
+        if (bubbleText && currentText) {
+          bubbleText.innerHTML = renderMarkdown(currentText) + (data.status === 'streaming' ? '<span class="typing-cursor"></span>' : '');
+          smartScrollChatToBottom(false);
+        }
+
+        if (data.status === 'completed' || data.status === 'none' || data.status === 'aborted') {
+          clearInterval(activeChatPollTimer);
+          activeChatPollTimer = null;
+
+          const finalReportText = currentText;
+          if (bubbleText) {
+            bubbleText.innerHTML = renderMarkdown(finalReportText);
+            enhanceCodeBlocks(bubbleText);
+            enhanceChatImages(bubbleText);
+          }
+          if (assistantRow) assistantRow.dataset.fullContent = finalReportText;
+
+          const duration = ((performance.now() - startTime) / 1000).toFixed(1);
+          if (metaBox) {
+            metaBox.innerHTML = `
+              <strong>${escapeHtml(modelName || data.model || 'AI Model')}</strong>
+              <span class="meta-model-badge" style="background:rgba(0,240,255,0.15); color:var(--neon-cyan);">Background Sync</span>
+              <span>⏱️ ${duration}s</span>
+            `;
+          }
+
+          // Simpan ke pesan sesi jika belum tersimpan
+          const lastMsg = session.messages[session.messages.length - 1];
+          if (!lastMsg || lastMsg.role !== 'assistant') {
+            session.messages.push({
+              role: 'assistant',
+              content: finalReportText,
+              model: modelName || data.model,
+              timestamp: new Date().toISOString(),
+              backgroundCompleted: true
+            });
+            session.updatedAt = new Date().toISOString();
+            savePersistedState();
+            renderChatHistory(els.searchHistoryInput?.value || '');
+          }
+
+          setGeneratingState(false);
+          AudioEngine.receive();
+          notifyAiCompletion('🤖 ' + (modelName || data.model), finalReportText);
+          showToast('✨ AI selesai menjawab di latar belakang.');
+        } else if (data.status === 'error') {
+          clearInterval(activeChatPollTimer);
+          activeChatPollTimer = null;
+          setGeneratingState(false);
+          if (bubbleText) {
+            bubbleText.innerHTML = `<div style="color:var(--neon-crimson); font-size:0.85rem;"><i class="fa-solid fa-triangle-exclamation"></i> Gagal menyelesaikan respons di latar belakang: ${escapeHtml(data.error || 'Terjadi kesalahan')}</div>`;
+          }
+        }
+      } catch (pollErr) {
+        console.warn('Error polling background chat:', pollErr);
+      }
+    }, 800);
   }
 
   async function loadPersistedState() {
@@ -1234,6 +1363,32 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       toast.style.transform = 'translateY(-10px)';
       setTimeout(() => toast.remove(), 250);
     }, 1500);
+  }
+
+  // ==================== BROWSER DESKTOP/MOBILE NOTIFICATIONS ====================
+  function requestNotificationPermission() {
+    if ('Notification' in window && Notification.permission === 'default') {
+      try {
+        Notification.requestPermission().catch(() => {});
+      } catch (_) {}
+    }
+  }
+
+  function notifyAiCompletion(title, textBody) {
+    if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+      try {
+        const cleanText = (textBody || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+        const snippet = cleanText.slice(0, 140) + (cleanText.length > 140 ? '...' : '');
+        const notif = new Notification(title || '🤖 Zoz Router AI', {
+          body: snippet || 'Jawaban AI telah selesai diproses.',
+          icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="%2300F0FF"/><text x="50" y="66" font-size="46" font-weight="bold" text-anchor="middle" fill="%2308090D">Z</text></svg>'
+        });
+        notif.onclick = () => {
+          try { window.focus(); } catch (_) {}
+          notif.close();
+        };
+      } catch (_) {}
+    }
   }
 
   // ==================== UTILS ====================
@@ -4171,6 +4326,9 @@ ${organicBlock}
     if (!rawText && images.length === 0 && docs.length === 0) return;
     if (STATE.isGenerating) return;
 
+    // Claude AI resilience: minta izin notifikasi saat pengguna berinteraksi
+    requestNotificationPermission();
+
     // Intersepsi perintah keluar / beralih mode cepat
     const trimmedLow = rawText.toLowerCase();
     if (trimmedLow === '/chat' || trimmedLow === '/teks' || trimmedLow === '/text') {
@@ -5508,6 +5666,7 @@ ${organicBlock}
       const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
       const requestBody = {
         model: modelName,
+        sessionId: session?.id || null,
         messages: messagesPayload,
         tools: AUTONOMOUS_WEB_TOOLS,
         stream: true,
@@ -5517,11 +5676,17 @@ ${organicBlock}
         },
         endpoint: ep
       };
+      if (session?.id) {
+        requestBody.sessionId = session.id;
+      }
       if (STATE.settings.ollamaApiKey) {
         requestBody.apiKey = STATE.settings.ollamaApiKey;
       }
 
       const headers = { 'Content-Type': 'application/json' };
+      if (session?.id) {
+        headers['X-Session-ID'] = session.id;
+      }
       if (STATE.settings.ollamaApiKey) {
         headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
@@ -5770,6 +5935,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           options: requestBody.options,
           endpoint: ep
         };
+        if (session?.id) digestionBody.sessionId = session.id;
         if (STATE.settings.ollamaApiKey) digestionBody.apiKey = STATE.settings.ollamaApiKey;
 
         currentRoundText = '';
@@ -5903,6 +6069,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         renderChatHistory(els.searchHistoryInput?.value || '');
       }
       AudioEngine.receive();
+      notifyAiCompletion('🤖 ' + modelName, fullText);
 
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -6085,6 +6252,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${STATE.settings.openRouterKey}`
       };
+      if (session?.id) {
+        headers['X-Session-ID'] = session.id;
+      }
       if (isOpenRouterDirect) {
         headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
         headers['X-Title'] = 'ZOZ Router';
@@ -6116,6 +6286,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
         const requestBody = {
           model: currentModel,
+          sessionId: session?.id || null,
           messages: currentMessagesPayload,
           stream: true,
           temperature: parseFloat(STATE.settings.temperature),
@@ -6124,6 +6295,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             allow_fallbacks: true
           }
         };
+        if (session?.id) {
+          requestBody.sessionId = session.id;
+        }
 
         if (currentIsImageCapable) {
           requestBody.modalities = ['text', 'image'];
@@ -6469,6 +6643,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           temperature: parseFloat(STATE.settings.temperature),
           top_p: parseFloat(STATE.settings.topP)
         };
+        if (session?.id) digestionRequestBody.sessionId = session.id;
         if (!isOpenRouterDirect) digestionRequestBody.apiKey = STATE.settings.openRouterKey;
 
         currentRoundText = '';
@@ -6669,6 +6844,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         renderChatHistory(els.searchHistoryInput?.value || '');
       }
       AudioEngine.receive();
+      notifyAiCompletion('🤖 ' + (actualModelUsed || modelName), fullText);
 
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -6835,6 +7011,18 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
   }
 
   function stopGeneration() {
+    if (activeChatPollTimer) {
+      clearInterval(activeChatPollTimer);
+      activeChatPollTimer = null;
+    }
+    const activeSession = getActiveSession();
+    if (activeSession?.id && !IS_GITHUB_PAGES) {
+      fetch('/api/chat/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: activeSession.id })
+      }).catch(() => {});
+    }
     if (STATE.currentDeepResearchTaskId && !IS_GITHUB_PAGES) {
       const abortTaskId = STATE.currentDeepResearchTaskId;
       STATE.currentDeepResearchTaskId = null;
@@ -13069,6 +13257,16 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           }
         }, 100);
       });
+    });
+
+    // Claude AI resilience: sinkronisasi respons latar belakang saat pengguna kembali membuka aplikasi atau tab
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        checkBackgroundChatTasksSync();
+      }
+    });
+    window.addEventListener('focus', () => {
+      checkBackgroundChatTasksSync();
     });
   }
 

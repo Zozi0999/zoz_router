@@ -687,6 +687,120 @@ function pruneResearchTasks() {
 // Timer pembersihan berkala setiap 15 menit
 setInterval(pruneResearchTasks, 15 * 60 * 1000).unref();
 
+// ==================== BACKGROUND PERSISTENT CHAT ENGINE (CLAUDE AI RESILIENCE) ====================
+// Mengizinkan AI terus menyelesaikan respons dan menyimpan jawaban ke disk sesi
+// meskipun pengguna menutup tab peramban, meminimalkan aplikasi, atau keluar dari sesi (seperti Claude AI).
+const dbActiveChatTasks = {}; // sessionId -> { taskId, sessionId, model, fullText, rawBuffer, status, startedAt, completedAt, proxyReq }
+
+function pruneActiveChatTasks() {
+  try {
+    const ONE_HOUR = 60 * 60 * 1000;
+    const now = Date.now();
+    for (const sid of Object.keys(dbActiveChatTasks)) {
+      const t = dbActiveChatTasks[sid];
+      if (t && t.startedAt && (now - t.startedAt > ONE_HOUR)) {
+        if (t.proxyReq && !t.proxyReq.destroyed) {
+          try { t.proxyReq.destroy(); } catch (_) {}
+        }
+        delete dbActiveChatTasks[sid];
+      }
+    }
+  } catch (e) {
+    console.warn('Warning pruning chat tasks:', e.message);
+  }
+}
+
+setInterval(pruneActiveChatTasks, 10 * 60 * 1000).unref();
+
+function accumulateChatChunk(sessionId, chunk, provider) {
+  if (!sessionId || !dbActiveChatTasks[sessionId]) return;
+  const task = dbActiveChatTasks[sessionId];
+  const str = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+  task.rawBuffer = (task.rawBuffer || '') + str;
+  const lines = task.rawBuffer.split('\n');
+  task.rawBuffer = lines.pop(); // simpan sisa baris parsial
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (provider === 'openrouter') {
+      if (!trimmed.startsWith('data:')) continue;
+      const jsonStr = trimmed.replace(/^data:\s*/, '').trim();
+      if (jsonStr === '[DONE]') continue;
+      try {
+        const parsed = JSON.parse(jsonStr);
+        const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || '';
+        if (delta) {
+          task.fullText += delta;
+          task.lastTokenTime = Date.now();
+        }
+      } catch (_) {}
+    } else {
+      // Ollama
+      try {
+        const parsed = JSON.parse(trimmed);
+        const delta = parsed.message?.content || parsed.response || '';
+        if (delta) {
+          task.fullText += delta;
+          task.lastTokenTime = Date.now();
+        }
+      } catch (_) {}
+    }
+  }
+}
+
+function appendAssistantMessageToSessionDisk(sessionId, content, modelName) {
+  if (!sessionId || !content || !content.trim()) return false;
+  try {
+    const cleanSid = String(sessionId).trim();
+    if (!/^[a-zA-Z0-9_-]+$/.test(cleanSid)) return false;
+    const sessFile = path.join(SESSIONS_DIR, `${cleanSid}.json`);
+    if (!fs.existsSync(sessFile)) return false;
+
+    let sessData = null;
+    try {
+      sessData = JSON.parse(fs.readFileSync(sessFile, 'utf8'));
+    } catch (_) {
+      return false;
+    }
+    if (!sessData || !Array.isArray(sessData.messages)) return false;
+
+    const msgs = sessData.messages;
+    const trimmedContent = content.trim();
+
+    // Cek apakah pesan asisten ini sudah tersimpan sebelumnya (hindari duplikasi)
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.role === 'assistant') {
+      if (lastMsg.content === trimmedContent || (lastMsg.content && trimmedContent.startsWith(lastMsg.content))) {
+        lastMsg.content = trimmedContent;
+        lastMsg.model = modelName || lastMsg.model;
+        lastMsg.backgroundCompleted = true;
+        sessData.updatedAt = new Date().toISOString();
+        fs.writeFileSync(sessFile, JSON.stringify(sessData, null, 2), 'utf8');
+        return true;
+      }
+    }
+
+    const newMsg = {
+      id: 'msg_bg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      role: 'assistant',
+      content: trimmedContent,
+      model: modelName || sessData.model || 'AI Model',
+      timestamp: new Date().toISOString(),
+      backgroundCompleted: true
+    };
+
+    msgs.push(newMsg);
+    sessData.updatedAt = new Date().toISOString();
+
+    fs.writeFileSync(sessFile, JSON.stringify(sessData, null, 2), 'utf8');
+    return true;
+  } catch (err) {
+    console.warn(`[Background Chat Engine] Gagal menyimpan respons asisten ke sesi disk ${sessionId}:`, err.message);
+    return false;
+  }
+}
+
 // Helper jeda asinkronus untuk mencegah lonjakan rate-limit (RPM)
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -3621,9 +3735,24 @@ const server = http.createServer(async (req, res) => {
         body.model = 'gemma4:31b';
       }
 
+      const sessionId = body.sessionId || req.headers['x-session-id'] || null;
+      delete body.sessionId;
       delete body.endpoint; // Don't send custom field to Ollama
       delete body.apiKey;
       delete body.ollamaApiKey;
+
+      if (sessionId) {
+        dbActiveChatTasks[sessionId] = {
+          sessionId,
+          model: body.model || 'Ollama Model',
+          provider: 'ollama',
+          fullText: '',
+          rawBuffer: '',
+          status: 'streaming',
+          startedAt: Date.now(),
+          proxyReq: null
+        };
+      }
 
       const ollamaUrl = resolveEndpointUrl(customEndpoint, 'api/chat');
       const client = ollamaUrl.protocol === 'https:' ? https : http;
@@ -3648,8 +3777,12 @@ const server = http.createServer(async (req, res) => {
 
       req.on('close', () => {
         clientDisconnected = true;
-        if (proxyReq && !proxyReq.destroyed) {
-          proxyReq.destroy();
+        // JANGAN hancurkan proxyReq jika sessionId ada! Biarkan server menyelesaikan generasi LLM di latar belakang
+        // layaknya di Claude AI agar jawaban tersimpan utuh ke disk sesi saat pengguna menutup peramban/aplikasi.
+        if (!sessionId) {
+          if (proxyReq && !proxyReq.destroyed) {
+            proxyReq.destroy();
+          }
         }
       });
 
@@ -3658,15 +3791,22 @@ const server = http.createServer(async (req, res) => {
         headers: proxyHeaders,
         timeout: 120000
       }, (proxyRes) => {
+        if (sessionId && dbActiveChatTasks[sessionId]) {
+          dbActiveChatTasks[sessionId].proxyReq = proxyReq;
+        }
+
         if (clientDisconnected || res.writableEnded || res.destroyed) {
-          if (!proxyReq.destroyed) proxyReq.destroy();
-          return;
+          if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
+          if (!sessionId) return;
         }
 
         const statusCode = proxyRes.statusCode || 200;
 
         // If upstream returned error (HTTP >= 400)
         if (statusCode >= 400) {
+          if (sessionId && dbActiveChatTasks[sessionId]) {
+            dbActiveChatTasks[sessionId].status = 'error';
+          }
           let errData = '';
           proxyRes.on('data', chunk => {
             if (!clientDisconnected) errData += chunk;
@@ -3699,8 +3839,13 @@ const server = http.createServer(async (req, res) => {
         });
 
         proxyRes.on('data', chunk => {
+          // Akumulasi token untuk background resilience
+          if (sessionId) {
+            accumulateChatChunk(sessionId, chunk, 'ollama');
+          }
+
           if (clientDisconnected || res.writableEnded || res.destroyed) {
-            if (!proxyReq.destroyed) proxyReq.destroy();
+            if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
             return;
           }
           try {
@@ -3714,9 +3859,23 @@ const server = http.createServer(async (req, res) => {
               res.end();
             } catch (e) {}
           }
+
+          // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
+          if (sessionId && dbActiveChatTasks[sessionId]) {
+            const task = dbActiveChatTasks[sessionId];
+            task.status = 'completed';
+            task.completedAt = Date.now();
+            if (task.fullText && task.fullText.trim()) {
+              appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model);
+            }
+          }
         });
 
         proxyRes.on('error', (err) => {
+          if (sessionId && dbActiveChatTasks[sessionId]) {
+            dbActiveChatTasks[sessionId].status = 'error';
+            dbActiveChatTasks[sessionId].error = err.message;
+          }
           if (clientDisconnected || res.writableEnded || res.destroyed) return;
           try {
             if (!res.headersSent) {
@@ -4001,6 +4160,22 @@ const server = http.createServer(async (req, res) => {
       delete body.apiKey;
       delete body.openRouterKey;
 
+      const sessionId = body.sessionId || req.headers['x-session-id'] || null;
+      delete body.sessionId;
+
+      if (sessionId) {
+        dbActiveChatTasks[sessionId] = {
+          sessionId,
+          model: body.model || 'OpenRouter Model',
+          provider: 'openrouter',
+          fullText: '',
+          rawBuffer: '',
+          status: 'streaming',
+          startedAt: Date.now(),
+          proxyReq: null
+        };
+      }
+
       // Defense-in-depth: Cegah konflik mutlak parameter model dan models pada OpenRouter
       if (body.model && body.models) {
         delete body.models;
@@ -4061,21 +4236,32 @@ const server = http.createServer(async (req, res) => {
 
       req.on('close', () => {
         clientDisconnected = true;
-        if (proxyReq && !proxyReq.destroyed) {
-          proxyReq.destroy();
+        // JANGAN hancurkan proxyReq jika sessionId ada! Biarkan server menyelesaikan generasi LLM di latar belakang
+        // layaknya di Claude AI agar jawaban tersimpan utuh ke disk sesi saat pengguna menutup peramban/aplikasi.
+        if (!sessionId) {
+          if (proxyReq && !proxyReq.destroyed) {
+            proxyReq.destroy();
+          }
         }
       });
 
       proxyReq = https.request(options, (proxyRes) => {
+        if (sessionId && dbActiveChatTasks[sessionId]) {
+          dbActiveChatTasks[sessionId].proxyReq = proxyReq;
+        }
+
         if (clientDisconnected || res.writableEnded || res.destroyed) {
-          if (!proxyReq.destroyed) proxyReq.destroy();
-          return;
+          if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
+          if (!sessionId) return;
         }
 
         const statusCode = proxyRes.statusCode || 200;
 
         // If OpenRouter returned non-200 (e.g. 401 Unauthorized, 402 Payment Required, 429 Rate Limit)
         if (statusCode !== 200) {
+          if (sessionId && dbActiveChatTasks[sessionId]) {
+            dbActiveChatTasks[sessionId].status = 'error';
+          }
           let errData = '';
           proxyRes.on('data', chunk => {
             if (!clientDisconnected) errData += chunk;
@@ -4108,8 +4294,13 @@ const server = http.createServer(async (req, res) => {
         });
 
         proxyRes.on('data', chunk => {
+          // Akumulasi token untuk background resilience
+          if (sessionId) {
+            accumulateChatChunk(sessionId, chunk, 'openrouter');
+          }
+
           if (clientDisconnected || res.writableEnded || res.destroyed) {
-            if (proxyReq && !proxyReq.destroyed) proxyReq.destroy();
+            if (!sessionId && proxyReq && !proxyReq.destroyed) proxyReq.destroy();
             return;
           }
           try {
@@ -4123,9 +4314,23 @@ const server = http.createServer(async (req, res) => {
               res.end();
             } catch (e) {}
           }
+
+          // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
+          if (sessionId && dbActiveChatTasks[sessionId]) {
+            const task = dbActiveChatTasks[sessionId];
+            task.status = 'completed';
+            task.completedAt = Date.now();
+            if (task.fullText && task.fullText.trim()) {
+              appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model);
+            }
+          }
         });
 
         proxyRes.on('error', (err) => {
+          if (sessionId && dbActiveChatTasks[sessionId]) {
+            dbActiveChatTasks[sessionId].status = 'error';
+            dbActiveChatTasks[sessionId].error = err.message;
+          }
           if (clientDisconnected || res.writableEnded || res.destroyed) return;
           try {
             if (!res.headersSent) {
@@ -4157,6 +4362,10 @@ const server = http.createServer(async (req, res) => {
       });
 
       proxyReq.on('error', (err) => {
+        if (sessionId && dbActiveChatTasks[sessionId]) {
+          dbActiveChatTasks[sessionId].status = 'error';
+          dbActiveChatTasks[sessionId].error = err.message;
+        }
         // If client disconnected or socket was intentionally aborted, suppress error write-after-end
         if (clientDisconnected || res.writableEnded || res.destroyed) {
           return;
@@ -4179,6 +4388,57 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 500, { error: err.message });
     }
     return;
+  }
+
+  // ----------------------------------------------------
+  // CLAUDE AI RESILIENCE: GET CHAT TASK STATUS
+  // ----------------------------------------------------
+  const chatStatusMatch = pathname.match(/^\/api\/chat\/status\/([a-zA-Z0-9_-]+)$/);
+  if ((chatStatusMatch || pathname === '/api/chat/status') && method === 'GET') {
+    const sid = chatStatusMatch ? chatStatusMatch[1] : (reqUrl.searchParams.get('sessionId') || reqUrl.searchParams.get('id'));
+    if (!sid) {
+      return sendJSON(res, 400, { error: 'sessionId diperlukan' });
+    }
+    const task = dbActiveChatTasks[sid];
+    if (!task) {
+      return sendJSON(res, 200, { active: false, status: 'none', sessionId: sid });
+    }
+    return sendJSON(res, 200, {
+      active: task.status === 'streaming',
+      status: task.status,
+      sessionId: task.sessionId,
+      model: task.model,
+      text: task.fullText || '',
+      startedAt: task.startedAt,
+      completedAt: task.completedAt || null,
+      error: task.error || null
+    });
+  }
+
+  // ----------------------------------------------------
+  // CLAUDE AI RESILIENCE: STOP ACTIVE CHAT TASK
+  // ----------------------------------------------------
+  if ((pathname === '/api/chat/stop' || pathname.startsWith('/api/chat/stop/')) && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const urlSid = pathname.startsWith('/api/chat/stop/') ? pathname.split('/')[4] : null;
+      const sid = body.sessionId || urlSid || reqUrl.searchParams.get('sessionId');
+      if (sid && dbActiveChatTasks[sid]) {
+        const task = dbActiveChatTasks[sid];
+        task.status = 'aborted';
+        if (task.proxyReq && !task.proxyReq.destroyed) {
+          try { task.proxyReq.destroy(); } catch (_) {}
+        }
+        // Simpan potongan yang sudah terlanjur dibuat
+        if (task.fullText && task.fullText.trim()) {
+          appendAssistantMessageToSessionDisk(sid, task.fullText + '\n\n*[Respons dihentikan oleh pengguna]*', task.model);
+        }
+        return sendJSON(res, 200, { success: true, message: 'Tugas chat berhasil dihentikan' });
+      }
+      return sendJSON(res, 200, { success: true, message: 'Tidak ada tugas aktif untuk sesi ini' });
+    } catch (stopErr) {
+      return sendJSON(res, 500, { error: stopErr.message });
+    }
   }
 
   // --- GUARD UNMATCHED API ROUTES (Prevent SPA HTML fallback for missing API endpoints) ---
