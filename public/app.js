@@ -1443,8 +1443,34 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           activeChatPollTimer = null;
           STATE.currentDeepResearchTaskId = null;
           setGeneratingState(false);
+          const partialText = data.text || '';
           if (bubbleText) {
-            bubbleText.innerHTML = `<div style="color:var(--neon-crimson); font-size:0.85rem;"><i class="fa-solid fa-triangle-exclamation"></i> Gagal menyelesaikan respons di latar belakang: ${escapeHtml(data.error || 'Terjadi kesalahan')}</div>`;
+            if (partialText.trim()) {
+              bubbleText.innerHTML = renderMarkdown(partialText) + `\n\n<div style="color:var(--neon-crimson); font-size:0.82rem; margin-top:8px; padding:6px 10px; border-left:2px solid var(--neon-crimson); background:rgba(255,0,85,0.08); border-radius:4px;"><i class="fa-solid fa-triangle-exclamation"></i> Respons terputus: ${escapeHtml(data.error || 'Terjadi kesalahan koneksi')}</div>`;
+              enhanceCodeBlocks(bubbleText);
+              enhanceChatImages(bubbleText);
+            } else {
+              bubbleText.innerHTML = `<div style="color:var(--neon-crimson); font-size:0.85rem;"><i class="fa-solid fa-triangle-exclamation"></i> Gagal menyelesaikan respons di latar belakang: ${escapeHtml(data.error || 'Terjadi kesalahan')}</div>`;
+            }
+          }
+          if (partialText.trim()) {
+            if (!Array.isArray(session.messages)) session.messages = [];
+            const lastMsg = session.messages[session.messages.length - 1];
+            const interruptedText = partialText + `\n\n*[Respons terputus: ${data.error || 'koneksi terputus'}]*`;
+            if (!lastMsg || lastMsg.role !== 'assistant') {
+              session.messages.push({
+                role: 'assistant',
+                content: interruptedText,
+                model: modelName || data.model,
+                timestamp: new Date().toISOString()
+              });
+            } else {
+              lastMsg.content = interruptedText;
+              lastMsg.model = modelName || data.model || lastMsg.model;
+            }
+            session.updatedAt = new Date().toISOString();
+            savePersistedState();
+            renderChatHistory(els.searchHistoryInput?.value || '');
           }
         }
       } catch (pollErr) {
@@ -4640,7 +4666,7 @@ ${organicBlock}
       role: 'user',
       content: text,
       displayContent: rawText,
-      docs: docsWithContent.length > 0 ? docsWithContent : (docsMeta.length > 0 ? docsMeta : undefined),
+      docs: docsMeta.length > 0 ? docsMeta : undefined,
       images: images,
       image: image,
       timestamp: new Date().toISOString()
@@ -8949,10 +8975,18 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     let chatSummary = '';
 
     let effectivePrompt = promptText;
+    let searchPrompt = promptText;
     try {
       const ytRes = await getYouTubeGroundingContext(promptText);
-      if (ytRes && ytRes.groundingContext) {
-        effectivePrompt = `${promptText}\n\n${ytRes.groundingContext}`;
+      if (ytRes) {
+        if (ytRes.groundingContext) {
+          effectivePrompt = `${promptText}\n\n${ytRes.groundingContext}`;
+        }
+        if (Array.isArray(ytRes.videos) && ytRes.videos.length > 0) {
+          const videoTitles = ytRes.videos.map(v => v.title).filter(Boolean).join(' ');
+          const promptWithoutYtUrls = promptText.replace(/https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=[a-zA-Z0-9_-]+|youtu\.be\/[a-zA-Z0-9_-]+)[^\s]*/gi, '').trim();
+          searchPrompt = `${promptWithoutYtUrls} ${videoTitles}`.trim() || videoTitles || promptText;
+        }
       }
     } catch (ytErr) {
       console.warn('YouTube grounding skip for Deep Research:', ytErr);
@@ -8960,7 +8994,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
     try {
       let isBackendSuccess = false;
-      const contextualTopic = session ? synthesizeAutonomousSearchQuery(session, effectivePrompt) : effectivePrompt;
+      const contextualTopic = session ? synthesizeAutonomousSearchQuery(session, searchPrompt) : searchPrompt;
 
       // 1. Coba panggil Backend Endpoint /api/mulai-riset (Local Node.js Server)
       if (!IS_GITHUB_PAGES) {
@@ -8977,8 +9011,11 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             body: JSON.stringify({
               sessionId: session ? session.id : null,
               topik: contextualTopic,
-              prompt: effectivePrompt,
-              messages: session ? session.messages : [],
+              prompt: searchPrompt,
+              messages: (session && Array.isArray(session.messages)) ? session.messages.map(m => ({
+                role: m.role || 'user',
+                content: typeof m.content === 'string' ? m.content : ''
+              })) : [],
               model: masterResearchModel,
               provider: masterResearchModel.includes('/') ? 'openrouter' : (masterResearchModel.includes(':') ? 'ollama' : engine),
               endpoint: STATE.settings.ollamaEndpoint,
@@ -9097,7 +9134,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
         const serperKey = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
         let dataTemuan = [];
-        let currentQuery = contextualTopic || effectivePrompt || promptText;
+        let currentQuery = contextualTopic || searchPrompt || promptText;
 
         // Iterasi 1: Multi-Agent Parallel Search (Serper Primer & Serper Divergen Zero-Overlap)
         const iter1Serper = await performClientWebSearch(currentQuery, serperKey);
@@ -9185,7 +9222,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
         // Iterasi 2: Eksplorasi Sub-Query & Analisis Teknis 2026
         await new Promise(r => setTimeout(r, 600));
-        const subQueryBase = contextualTopic || promptText;
+        const subQueryBase = contextualTopic || searchPrompt || promptText;
         const subQuery = `${subQueryBase} data statistik spesifikasi teknis arsitektur 2026`;
         const iter2Serper = await performClientWebSearch(subQuery, serperKey);
         const knownUrls = allSources.map(s => s.url).concat((iter2Serper?.sources || []).map(s => s.url));

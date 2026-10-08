@@ -785,6 +785,19 @@ function flushChatTaskBuffer(sessionId, provider) {
   }
 }
 
+function markChatTaskInterrupted(sessionId, reason = 'Koneksi terputus') {
+  if (!sessionId || !dbActiveChatTasks[sessionId]) return;
+  const task = dbActiveChatTasks[sessionId];
+  if (task.status === 'aborted' || task.status === 'completed') return;
+  task.status = 'error';
+  task.error = reason;
+  task.completedAt = Date.now();
+  flushChatTaskBuffer(sessionId, task.provider || 'openrouter');
+  if (task.fullText && task.fullText.trim()) {
+    appendAssistantMessageToSessionDisk(sessionId, task.fullText + `\n\n*[Respons terputus: ${reason}]*`, task.model);
+  }
+}
+
 function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extraMeta = {}) {
   if (!sessionId || !content || !content.trim()) return false;
   try {
@@ -3098,19 +3111,49 @@ const server = http.createServer(async (req, res) => {
           const totalSize = stat.size;
           const range = req.headers.range;
 
-          if (range) {
-            const parts = range.replace(/bytes=/, '').split('-');
-            const start = parseInt(parts[0], 10);
-            const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+          let isRangeRequest = false;
+          let start = 0;
+          let end = totalSize - 1;
 
-            if (isNaN(start) || start >= totalSize || end < start || end >= totalSize) {
-              res.writeHead(416, {
-                'Content-Range': `bytes */${totalSize}`,
-                'Access-Control-Allow-Origin': '*'
-              });
-              return res.end();
+          if (range && typeof range === 'string' && range.startsWith('bytes=')) {
+            const parts = range.replace(/^bytes=/, '').trim().split('-');
+            const rawStart = parts[0];
+            const rawEnd = parts[1];
+
+            if (rawStart === '' && rawEnd !== '') {
+              // Suffix byte range (e.g. bytes=-500)
+              const suffixLen = parseInt(rawEnd, 10);
+              if (!isNaN(suffixLen) && suffixLen > 0) {
+                start = Math.max(0, totalSize - suffixLen);
+                end = totalSize - 1;
+                isRangeRequest = true;
+              }
+            } else if (rawStart !== '') {
+              start = parseInt(rawStart, 10);
+              if (!isNaN(start)) {
+                if (rawEnd !== '') {
+                  const parsedEnd = parseInt(rawEnd, 10);
+                  if (!isNaN(parsedEnd)) {
+                    end = Math.min(parsedEnd, totalSize - 1);
+                  }
+                }
+                isRangeRequest = true;
+              }
             }
 
+            if (isRangeRequest) {
+              if (start >= totalSize || start > end || start < 0) {
+                res.writeHead(416, {
+                  'Content-Range': `bytes */${totalSize}`,
+                  'Access-Control-Allow-Origin': '*',
+                  'X-Content-Type-Options': 'nosniff'
+                });
+                return res.end();
+              }
+            }
+          }
+
+          if (isRangeRequest) {
             const chunkSize = (end - start) + 1;
             res.writeHead(206, {
               'Content-Range': `bytes ${start}-${end}/${totalSize}`,
@@ -3118,7 +3161,9 @@ const server = http.createServer(async (req, res) => {
               'Content-Length': chunkSize,
               'Content-Type': contentType,
               'Cache-Control': 'public, max-age=86400',
-              'Access-Control-Allow-Origin': '*'
+              'Access-Control-Allow-Origin': '*',
+              'X-Content-Type-Options': 'nosniff',
+              'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox"
             });
 
             if (method === 'HEAD') {
@@ -3146,7 +3191,9 @@ const server = http.createServer(async (req, res) => {
             'Content-Length': totalSize,
             'Accept-Ranges': 'bytes',
             'Cache-Control': 'public, max-age=86400',
-            'Access-Control-Allow-Origin': '*'
+            'Access-Control-Allow-Origin': '*',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox"
           });
           if (method === 'HEAD') {
             return res.end();
@@ -4145,10 +4192,7 @@ const server = http.createServer(async (req, res) => {
 
         proxyRes.on('error', (err) => {
           if (sessionId && dbActiveChatTasks[sessionId]) {
-            if (dbActiveChatTasks[sessionId].status !== 'aborted') {
-              dbActiveChatTasks[sessionId].status = 'error';
-              dbActiveChatTasks[sessionId].error = err.message;
-            }
+            markChatTaskInterrupted(sessionId, err.message || 'Ollama stream interrupted');
           }
           if (clientDisconnected || res.writableEnded || res.destroyed) return;
           try {
@@ -4167,10 +4211,7 @@ const server = http.createServer(async (req, res) => {
 
       proxyReq.on('timeout', () => {
         if (sessionId && dbActiveChatTasks[sessionId]) {
-          if (dbActiveChatTasks[sessionId].status !== 'aborted') {
-            dbActiveChatTasks[sessionId].status = 'error';
-            dbActiveChatTasks[sessionId].error = 'Ollama stream timed out (120s)';
-          }
+          markChatTaskInterrupted(sessionId, 'Ollama stream timed out (120s)');
         }
         if (!proxyReq.destroyed) proxyReq.destroy();
         if (clientDisconnected || res.writableEnded || res.destroyed) return;
@@ -4188,10 +4229,7 @@ const server = http.createServer(async (req, res) => {
 
       proxyReq.on('error', (err) => {
         if (sessionId && dbActiveChatTasks[sessionId]) {
-          if (dbActiveChatTasks[sessionId].status !== 'aborted') {
-            dbActiveChatTasks[sessionId].status = 'error';
-            dbActiveChatTasks[sessionId].error = err.message;
-          }
+          markChatTaskInterrupted(sessionId, err.message || 'Ollama connection error');
         }
         // If client closed or socket was destroyed on abort, suppress write-after-end errors
         if (clientDisconnected || res.writableEnded || res.destroyed) {
@@ -4646,10 +4684,7 @@ const server = http.createServer(async (req, res) => {
 
         proxyRes.on('error', (err) => {
           if (sessionId && dbActiveChatTasks[sessionId]) {
-            if (dbActiveChatTasks[sessionId].status !== 'aborted') {
-              dbActiveChatTasks[sessionId].status = 'error';
-              dbActiveChatTasks[sessionId].error = err.message;
-            }
+            markChatTaskInterrupted(sessionId, err.message || 'OpenRouter stream interrupted');
           }
           if (clientDisconnected || res.writableEnded || res.destroyed) return;
           try {
@@ -4671,10 +4706,7 @@ const server = http.createServer(async (req, res) => {
 
       proxyReq.on('timeout', () => {
         if (sessionId && dbActiveChatTasks[sessionId]) {
-          if (dbActiveChatTasks[sessionId].status !== 'aborted') {
-            dbActiveChatTasks[sessionId].status = 'error';
-            dbActiveChatTasks[sessionId].error = 'OpenRouter stream timed out (120s)';
-          }
+          markChatTaskInterrupted(sessionId, 'OpenRouter stream timed out (120s)');
         }
         if (!proxyReq.destroyed) proxyReq.destroy();
         if (clientDisconnected || res.writableEnded || res.destroyed) return;
@@ -4693,10 +4725,7 @@ const server = http.createServer(async (req, res) => {
 
       proxyReq.on('error', (err) => {
         if (sessionId && dbActiveChatTasks[sessionId]) {
-          if (dbActiveChatTasks[sessionId].status !== 'aborted') {
-            dbActiveChatTasks[sessionId].status = 'error';
-            dbActiveChatTasks[sessionId].error = err.message;
-          }
+          markChatTaskInterrupted(sessionId, err.message || 'OpenRouter connection error');
         }
         // If client disconnected or socket was intentionally aborted, suppress error write-after-end
         if (clientDisconnected || res.writableEnded || res.destroyed) {
@@ -4882,7 +4911,7 @@ const server = http.createServer(async (req, res) => {
       const sid = body.sessionId || urlSid || reqUrl.searchParams.get('sessionId');
       let stoppedAny = false;
 
-      if (sid && dbActiveChatTasks[sid]) {
+      if (sid && dbActiveChatTasks[sid] && dbActiveChatTasks[sid].status === 'streaming') {
         const task = dbActiveChatTasks[sid];
         task.status = 'aborted';
         if (task.proxyReq && !task.proxyReq.destroyed) {
