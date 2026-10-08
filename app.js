@@ -1117,18 +1117,30 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           }
         }
 
-        // Hydrate active session if tab was refreshed with a lazy disk session
-        if (isTabReload && savedActiveId) {
-          const activeSess = STATE.sessions.find(s => s.id === savedActiveId);
-          if (activeSess && activeSess._isLazyDisk && (!activeSess.messages || activeSess.messages.length === 0)) {
+        // Hydrate active session from Device Disk Storage to ensure background messages are never overwritten
+        const targetSid = savedActiveId || STATE.currentSessionId;
+        if (targetSid) {
+          const activeSess = STATE.sessions.find(s => s.id === targetSid);
+          if (activeSess) {
             try {
-              const full = await DeviceStorage.getSession(savedActiveId);
+              const full = await DeviceStorage.getSession(targetSid);
               if (full && Array.isArray(full.messages)) {
-                activeSess.messages = full.messages;
-                delete activeSess._isLazyDisk;
-                renderCurrentSession();
+                const diskLen = full.messages.length;
+                const memLen = activeSess.messages ? activeSess.messages.length : 0;
+                const diskLast = full.messages[diskLen - 1];
+                const memLast = activeSess.messages ? activeSess.messages[memLen - 1] : null;
+
+                if (activeSess._isLazyDisk || diskLen > memLen || (diskLast && memLast && diskLast.content !== memLast.content && (diskLast.content.length > (memLast.content || '').length || diskLast.backgroundCompleted))) {
+                  activeSess.messages = full.messages;
+                  delete activeSess._isLazyDisk;
+                  await ChatDB.saveSession(activeSess);
+                  renderCurrentSession();
+                  renderChatHistory();
+                }
               }
-            } catch (e) {}
+            } catch (e) {
+              console.warn('Notice hydrating active session from disk:', e);
+            }
           }
         }
       }
@@ -1142,12 +1154,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
   // ==================== CLAUDE AI RESILIENCE: BACKGROUND CHAT SYNC & POLLING ====================
   let activeChatPollTimer = null;
+  let isCheckingBackgroundSync = false;
 
   async function checkBackgroundChatTasksSync() {
-    if (IS_GITHUB_PAGES) return;
+    if (IS_GITHUB_PAGES || isCheckingBackgroundSync) return;
     const activeSession = getActiveSession();
     if (!activeSession) return;
 
+    isCheckingBackgroundSync = true;
     try {
       const res = await fetch(`/api/chat/status/${activeSession.id}`).catch(() => null);
       if (!res || !res.ok) return;
@@ -1218,7 +1232,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           }
         }
       }
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      setTimeout(() => {
+        isCheckingBackgroundSync = false;
+      }, 350);
+    }
   }
 
   function attachToActiveBackgroundChat(session, modelName, initialText = '') {
@@ -1241,6 +1260,19 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     activeChatPollTimer = setInterval(async () => {
       try {
+        if (STATE.currentSessionId !== session.id) {
+          clearInterval(activeChatPollTimer);
+          activeChatPollTimer = null;
+          return;
+        }
+
+        if (performance.now() - startTime > 15 * 60 * 1000) {
+          clearInterval(activeChatPollTimer);
+          activeChatPollTimer = null;
+          setGeneratingState(false);
+          return;
+        }
+
         const res = await fetch(`/api/chat/status/${session.id}`).catch(() => null);
         if (!res || !res.ok) return;
         const data = await res.json();
@@ -2226,6 +2258,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
   // ==================== SESSIONS & CHAT MANAGEMENT ====================
   function createNewSession(initialTitle = 'Obrolan Baru', targetMode = STATE.mode) {
+    if (activeChatPollTimer) {
+      clearInterval(activeChatPollTimer);
+      activeChatPollTimer = null;
+    }
     if (STATE.isGenerating) {
       stopGeneration();
     }
@@ -2275,17 +2311,28 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     const targetSession = STATE.sessions.find(s => s.id === sessionId);
     if (!targetSession) return;
 
-    // Lazy load messages from device disk or IndexedDB vault if needed
-    if (targetSession._isLazyDisk && (!targetSession.messages || targetSession.messages.length === 0)) {
-      try {
-        const fullSess = await DeviceStorage.getSession(sessionId);
-        if (fullSess && Array.isArray(fullSess.messages)) {
+    if (activeChatPollTimer) {
+      clearInterval(activeChatPollTimer);
+      activeChatPollTimer = null;
+    }
+
+    // Sinkronkan pesan dari disk storage jika targetSession lazy-loaded ATAU jika disk memiliki pembaruan latar belakang
+    try {
+      const fullSess = await DeviceStorage.getSession(sessionId);
+      if (fullSess && Array.isArray(fullSess.messages)) {
+        const diskLen = fullSess.messages.length;
+        const memLen = targetSession.messages ? targetSession.messages.length : 0;
+        const diskLast = fullSess.messages[diskLen - 1];
+        const memLast = targetSession.messages ? targetSession.messages[memLen - 1] : null;
+
+        if (targetSession._isLazyDisk || diskLen > memLen || (diskLast && memLast && diskLast.content !== memLast.content && (diskLast.content.length > (memLast.content || '').length || diskLast.backgroundCompleted))) {
           targetSession.messages = fullSess.messages;
           delete targetSession._isLazyDisk;
+          await ChatDB.saveSession(targetSession);
         }
-      } catch (e) {
-        console.warn('Gagal memuat detail sesi dari storage:', e);
       }
+    } catch (e) {
+      console.warn('Gagal memuat detail sesi dari storage:', e);
     }
 
     // If session has different mode, switch tab
@@ -2316,6 +2363,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       els.sidebar.classList.remove('open');
       els.sidebarBackdrop?.classList.remove('show');
     }
+
+    // Periksa apakah sesi tujuan memiliki tugas aktif atau selesai di background
+    checkBackgroundChatTasksSync();
   }
 
   let activeHistoryDropdown = null;
