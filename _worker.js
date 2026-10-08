@@ -1,3 +1,26 @@
+function isPrivateHostname(hostname) {
+  if (!hostname) return true;
+  const h = String(hostname).toLowerCase().replace(/^\[|\]$/g, '');
+  if (['localhost','127.0.0.1','::1','0.0.0.0','::','0'].includes(h)) return true;
+  if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true;
+  if (/^fc00:|^fe80:/i.test(h)) return true;
+  if (h.startsWith('::ffff:127.') || h.startsWith('::ffff:192.168.') || h.startsWith('::ffff:10.')) return true;
+  if (h.endsWith('.local') || h.endsWith('.internal') || h.endsWith('.localhost')) return true;
+  return false;
+}
+
+function isOllamaEndpointForbidden(endpointUrl) {
+  let parsed;
+  try { parsed = new URL(endpointUrl); } catch (e) { return true; }
+  if (!['http:', 'https:'].includes(parsed.protocol)) return true;
+  const host = (parsed.hostname || '').toLowerCase();
+  const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+  if ((host === '127.0.0.1' || host === 'localhost' || host === '::1') && port === '11434') return false;
+  return isPrivateHostname(host);
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -42,6 +65,12 @@ export default {
           cleanEndpoint = (authHeader ? 'https://' : 'http://') + cleanEndpoint;
         }
         const parsedBase = new URL(cleanEndpoint);
+        if (isOllamaEndpointForbidden(cleanEndpoint)) {
+          return new Response(JSON.stringify({ error: 'Endpoint Ollama mengarah ke host privat/internal — akses diblokir (SSRF Protection).' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
         let curPath = parsedBase.pathname.replace(/\/+$/, '');
         if (curPath.endsWith('/api/chat')) {
           // already ends with /api/chat
@@ -93,6 +122,12 @@ export default {
           cleanEndpoint = (authHeader ? 'https://' : 'http://') + cleanEndpoint;
         }
         const parsedBase = new URL(cleanEndpoint);
+        if (isOllamaEndpointForbidden(cleanEndpoint)) {
+          return new Response(JSON.stringify({ error: 'Endpoint Ollama mengarah ke host privat/internal — akses diblokir (SSRF Protection).' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
         let curPath = parsedBase.pathname.replace(/\/+$/, '');
         if (curPath.endsWith('/api/tags')) {
           // already ends with /api/tags
@@ -537,7 +572,13 @@ export default {
           });
         }
         const targetNum = Math.min(Math.max(isNaN(num) ? 15 : num, 1), 30);
-        const serperKey = apiKey || env?.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+        const serperKey = apiKey || env?.SERPER_API_KEY;
+        if (!serperKey) {
+          return new Response(JSON.stringify({ success: false, error: 'Serper API key diperlukan. Setel SERPER_API_KEY atau kirim header x-serper-key.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
         const serperRes = await fetch('https://google.serper.dev/search', {
           method: 'POST',
           headers: {

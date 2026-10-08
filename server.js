@@ -153,6 +153,18 @@ function isPrivateHost(hostname, port) {
   return false;
 }
 
+// Validasi endpoint Ollama terhadap SSRF — blokir host privat/internal kecuali Ollama lokal default (127.0.0.1:11434)
+function isOllamaEndpointForbidden(endpointUrl) {
+  let parsed;
+  try { parsed = new URL(endpointUrl); } catch (e) { return true; }
+  if (!['http:', 'https:'].includes(parsed.protocol)) return true;
+  const host = (parsed.hostname || '').toLowerCase();
+  const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+  // Izinkan Ollama lokal default untuk development (bukan vektor SSRF)
+  if ((host === '127.0.0.1' || host === 'localhost' || host === '::1') && port === '11434') return false;
+  return isPrivateHost(host, port);
+}
+
 // Helper untuk mengunduh buffer gambar dari URL eksternal dengan proteksi SSRF, batas redirect loop, dan memory buffer cap
 function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
   return new Promise((resolve, reject) => {
@@ -315,7 +327,10 @@ function performWebSearch(query, apiKey = null, num = 15) {
     }
     const cleanQuery = query.trim();
     const targetNum = Math.min(Math.max(parseInt(num, 10) || 15, 1), 30);
-    const serperKey = apiKey || process.env.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+    const serperKey = apiKey || process.env.SERPER_API_KEY;
+    if (!serperKey) {
+      return safeResolve({ query: cleanQuery, count: 0, results: [], error: 'Serper API key tidak dikonfigurasi. Setel SERPER_API_KEY atau kirim header x-serper-key.' });
+    }
     const postData = JSON.stringify({
       q: cleanQuery,
       num: targetNum,
@@ -1960,7 +1975,7 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
   const task = dbTugasRiset[taskId];
   if (!task) return;
 
-  const serperKey = config.serperApiKey || process.env.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+  const serperKey = config.serperApiKey || process.env.SERPER_API_KEY;
   const maxIterations = config.maxIterations || 3;
   let allSources = [];
   let dataTemuan = [];
@@ -3180,8 +3195,10 @@ const server = http.createServer(async (req, res) => {
                 try { res.destroy(); } catch (_) {}
               }
             });
-            req.on('close', () => {
-              try { stream.destroy(); } catch (_) {}
+            res.on('close', () => {
+              if (!res.writableEnded) {
+                try { stream.destroy(); } catch (_) {}
+              }
             });
             stream.pipe(res);
             return;
@@ -4180,12 +4197,11 @@ const server = http.createServer(async (req, res) => {
 
 // Ollama: Check status & get models (with multi-route fallback & disk manifests)
   if (pathname === '/api/ollama/models' && method === 'GET') {
-    let rawEndpoint = reqUrl.searchParams.get('endpoint') || req.headers['x-ollama-endpoint'] || 'https://ollama.com';
+    let rawEndpoint = reqUrl.searchParams.get('endpoint') || req.headers['x-ollama-endpoint'] || 'http://127.0.0.1:11434';
     const authHeader = req.headers['authorization'] || (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null);
 
-    // Jika endpoint mengarah ke localhost/127.0.0.1/11434 atau kosong, alihkan otomatis ke Ollama Cloud resmi (https://ollama.com)
-    if (!rawEndpoint || rawEndpoint.includes('127.0.0.1') || rawEndpoint.includes('localhost') || rawEndpoint.includes('11434')) {
-      rawEndpoint = 'https://ollama.com';
+    if (!rawEndpoint) {
+      rawEndpoint = 'http://127.0.0.1:11434';
     }
 
     rawEndpoint = rawEndpoint.trim();
@@ -4195,6 +4211,11 @@ const server = http.createServer(async (req, res) => {
         : `http://${rawEndpoint}`;
     }
     rawEndpoint = rawEndpoint.replace(/\/+$/, '');
+
+    // Proteksi SSRF: blokir endpoint yang mengarah ke host privat/internal (metadata cloud, LAN, dll.)
+    if (isOllamaEndpointForbidden(rawEndpoint)) {
+      return sendJSON(res, 400, { error: 'Endpoint Ollama mengarah ke host privat/internal — akses diblokir (SSRF Protection).' });
+    }
 
     const tryFetchTags = (endpointUrl) => {
       return new Promise((resolve) => {
@@ -4371,11 +4392,10 @@ const server = http.createServer(async (req, res) => {
       const body = await parseBody(req);
       const rawKey = body.apiKey || body.ollamaApiKey || req.headers['x-ollama-key'] || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : '') || process.env.OLLAMA_API_KEY;
       const authHeader = rawKey ? `Bearer ${rawKey}` : (req.headers['authorization'] || null);
-      let customEndpoint = req.headers['x-ollama-endpoint'] || body.endpoint || 'https://ollama.com';
+      let customEndpoint = req.headers['x-ollama-endpoint'] || body.endpoint || 'http://127.0.0.1:11434';
 
-      // Alihkan otomatis ke endpoint resmi Ollama Cloud jika kosong atau mengarah ke port lokal 11434/localhost
-      if (!customEndpoint || customEndpoint.includes('127.0.0.1') || customEndpoint.includes('localhost') || customEndpoint.includes('11434')) {
-        customEndpoint = 'https://ollama.com';
+      if (!customEndpoint) {
+        customEndpoint = 'http://127.0.0.1:11434';
       }
 
       customEndpoint = customEndpoint.trim();
@@ -4386,8 +4406,13 @@ const server = http.createServer(async (req, res) => {
       }
       customEndpoint = customEndpoint.replace(/\/+$/, '');
 
+      // Proteksi SSRF: blokir endpoint yang mengarah ke host privat/internal (metadata cloud, LAN, dll.)
+      if (isOllamaEndpointForbidden(customEndpoint)) {
+        return sendJSON(res, 400, { error: 'Endpoint Ollama mengarah ke host privat/internal — akses diblokir (SSRF Protection).' });
+      }
+
       if (!body.model) {
-        body.model = 'gemma4:31b';
+        body.model = 'qwen2.5:1.5b';
       }
 
       const sessionId = body.sessionId || req.headers['x-session-id'] || null;
@@ -4483,14 +4508,13 @@ const server = http.createServer(async (req, res) => {
       let clientDisconnected = false;
       let proxyReq = null;
 
-      req.on('close', () => {
+      res.on('close', () => {
+        if (res.writableEnded) return; // penyelesaian normal, bukan disconnect klien
         clientDisconnected = true;
         // JANGAN hancurkan proxyReq jika sessionId ada! Biarkan server menyelesaikan generasi LLM di latar belakang
         // layaknya di Claude AI agar jawaban tersimpan utuh ke disk sesi saat pengguna menutup peramban/aplikasi.
-        if (!sessionId) {
-          if (proxyReq && !proxyReq.destroyed) {
-            proxyReq.destroy();
-          }
+        if (!sessionId && proxyReq && !proxyReq.destroyed) {
+          proxyReq.destroy();
         }
       });
 
@@ -4979,14 +5003,13 @@ const server = http.createServer(async (req, res) => {
       let clientDisconnected = false;
       let proxyReq = null;
 
-      req.on('close', () => {
+      res.on('close', () => {
+        if (res.writableEnded) return; // penyelesaian normal, bukan disconnect klien
         clientDisconnected = true;
         // JANGAN hancurkan proxyReq jika sessionId ada! Biarkan server menyelesaikan generasi LLM di latar belakang
         // layaknya di Claude AI agar jawaban tersimpan utuh ke disk sesi saat pengguna menutup peramban/aplikasi.
-        if (!sessionId) {
-          if (proxyReq && !proxyReq.destroyed) {
-            proxyReq.destroy();
-          }
+        if (!sessionId && proxyReq && !proxyReq.destroyed) {
+          proxyReq.destroy();
         }
       });
 

@@ -28,7 +28,10 @@ module.exports = async function handler(req, res) {
     }
 
     const targetNum = Math.min(Math.max(isNaN(num) ? 15 : num, 1), 30);
-    const serperKey = apiKey || process.env.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+    const serperKey = apiKey || process.env.SERPER_API_KEY;
+    if (!serperKey) {
+      return res.status(400).json({ error: 'Serper API key diperlukan. Setel SERPER_API_KEY atau kirim header x-serper-key.' });
+    }
 
     const response = await fetch('https://google.serper.dev/search', {
       method: 'POST',

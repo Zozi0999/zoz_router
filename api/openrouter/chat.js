@@ -40,7 +40,8 @@ module.exports = async function handler(req, res) {
     const abortController = new AbortController();
     let clientDisconnected = false;
 
-    req.on('close', () => {
+    res.on('close', () => {
+      if (res.writableEnded) return;
       clientDisconnected = true;
       abortController.abort();
     });

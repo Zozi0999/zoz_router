@@ -751,7 +751,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           const tx = this.db.transaction('sessions', 'readwrite');
           const store = tx.objectStore('sessions');
           store.clear();
-          sessions.forEach(s => store.put(s));
+          sessions.forEach(s => {
+            // Jangan tulis ulang placeholder lazy-loaded (messages kosong) ke IndexedDB —
+            // sumber kebenaran tetap di disk; menulisnya akan menimpa riwayat dengan array kosong.
+            if (s && s._isLazyDisk) return;
+            store.put(s);
+          });
           tx.oncomplete = () => resolve(true);
           tx.onerror = () => resolve(false);
         } catch (e) {
@@ -1263,29 +1268,35 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const globalRes = await fetch('/api/chat/status').catch(() => null);
       if (globalRes && globalRes.ok) {
         const globalData = await globalRes.json();
+        const lastActiveId = safeSessionStorage.getItem('zoz_active_session_id') || localStorage.getItem('zoz_last_active_session_id');
         if (globalData && globalData.activeSessions && globalData.activeSessions.length > 0) {
-          const targetTask = globalData.activeSessions[0];
-          const targetSid = targetTask.sessionId;
-          let targetSession = STATE.sessions.find(s => s.id === targetSid);
-          if (!targetSession) {
-            const diskSess = await DeviceStorage.getSession(targetSid);
-            if (diskSess) {
-              STATE.sessions.unshift(diskSess);
-              targetSession = diskSess;
+          // Cegah hijack sesi: hanya sambungkan ke tugas milik sesi aktif terakhir pengguna,
+          // bukan sembarang sesi pertama di server.
+          const targetTask = lastActiveId
+            ? globalData.activeSessions.find(s => s.sessionId === lastActiveId)
+            : null;
+          if (targetTask) {
+            const targetSid = targetTask.sessionId;
+            let targetSession = STATE.sessions.find(s => s.id === targetSid);
+            if (!targetSession) {
+              const diskSess = await DeviceStorage.getSession(targetSid);
+              if (diskSess) {
+                STATE.sessions.unshift(diskSess);
+                targetSession = diskSess;
+              }
             }
-          }
-          if (targetSession) {
-            await switchSession(targetSid);
-            setGeneratingState(true);
-            attachToActiveBackgroundChat(targetSession, targetTask.model, targetTask.text || '');
-            showToast('⚡ Menyambung kembali ke respons AI yang sedang diproses di latar belakang...', 'info');
-            return;
+            if (targetSession) {
+              await switchSession(targetSid);
+              setGeneratingState(true);
+              attachToActiveBackgroundChat(targetSession, targetTask.model, targetTask.text || '');
+              showToast('⚡ Menyambung kembali ke respons AI yang sedang diproses di latar belakang...', 'info');
+              return;
+            }
           }
         }
 
         if (globalData && globalData.recentlyCompletedSessions && globalData.recentlyCompletedSessions.length > 0) {
-          const lastActiveId = safeSessionStorage.getItem('zoz_active_session_id') || localStorage.getItem('zoz_last_active_session_id');
-          const matchedTask = globalData.recentlyCompletedSessions.find(s => s.sessionId === lastActiveId) || globalData.recentlyCompletedSessions[0];
+          const matchedTask = globalData.recentlyCompletedSessions.find(s => s.sessionId === lastActiveId);
           if (matchedTask) {
             let matchedSession = STATE.sessions.find(s => s.id === matchedTask.sessionId);
             if (!matchedSession) {
@@ -4696,6 +4707,9 @@ ${organicBlock}
     }
 
     const session = getActiveSession();
+    // Kunci status generating SEBELUM await hidrasi lazy sesi untuk mencegah race double-submit.
+    setGeneratingState(true);
+
     // Safety guard: Hydrate full conversation history from storage if session was lazy-loaded
     if (session._isLazyDisk && (!session.messages || session.messages.length === 0)) {
       try {
@@ -10886,8 +10900,26 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (!finalAudioUrl) {
         updateHudStep('[Langkah 2/3] Menjalankan sintesis audio client-side...', 65);
         const synthWavBlob = await synthesizeClientProceduralAudio(cleanPrompt, options.duration || 15);
-        finalAudioUrl = URL.createObjectURL(synthWavBlob);
         trackTitle = `Neural Audio [${cleanPrompt.slice(0, 30)}]`;
+        // Persistenkan hasil sintesis sebagai data URL agar tetap tersedia setelah reload
+        // (blob URL bersifat session-scoped dan akan mati saat halaman dimuat ulang).
+        finalAudioUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result || URL.createObjectURL(synthWavBlob));
+          reader.onerror = () => resolve(URL.createObjectURL(synthWavBlob));
+          reader.readAsDataURL(synthWavBlob);
+        });
+        // Simpan juga blob ke MusicDB agar track tetap bisa diputar dari BGM deck secara offline.
+        try {
+          await MusicDB.saveTrack({
+            id: `synth_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            name: trackTitle,
+            size: (synthWavBlob.size / (1024 * 1024)).toFixed(1),
+            type: 'audio/wav',
+            blob: synthWavBlob,
+            addedAt: new Date().toISOString()
+          });
+        } catch (_) {}
       }
 
       clearTimeout(timer2);
