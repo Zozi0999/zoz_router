@@ -2661,12 +2661,55 @@ html, body {
   color: #080B10;
 }
 
+.music-model-filter-pills {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 1px 0 5px;
+  margin-bottom: 5px;
+  scrollbar-width: none;
+}
+
+.music-model-filter-pills::-webkit-scrollbar {
+  display: none;
+}
+
+.music-filter-pill {
+  font-size: 0.64rem;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.music-filter-pill:hover {
+  background: rgba(0, 255, 194, 0.12);
+  border-color: rgba(0, 255, 194, 0.35);
+  color: #fff;
+}
+
+.music-filter-pill.active {
+  background: rgba(0, 255, 194, 0.22);
+  border-color: var(--neon-teal);
+  color: var(--neon-teal);
+  font-weight: 700;
+  box-shadow: 0 0 10px rgba(0, 255, 194, 0.25);
+}
+
 .music-model-openrouter-list,
 .music-model-ollama-list {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  max-height: 250px;
+  max-height: 330px;
   overflow-y: auto;
 }
 

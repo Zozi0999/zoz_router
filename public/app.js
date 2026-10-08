@@ -194,6 +194,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     catalogTargetInputId: null,
     catalogSearchQuery: '',
     catalogCategoryFilter: 'all', // 'all' | 'free' | 'reasoning' | 'fast' | 'flagship' | 'coding'
+    musicOpenRouterCatFilter: 'all', // 'all' | 'free' | 'google' | 'openai' | 'anthropic' | 'meta' | 'deepseek' | 'qwen' | 'mistral'
     activeInspectionTab: 'agent1', // 'agent1' | 'agent2' | 'scraper' | 'synthesizer' | 'model4'
     currentLiveInspection: null,
     openRouterBalance: null, // { totalCredits, totalUsage, remaining, isFreeTier, lastChecked }
@@ -371,6 +372,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     paneMusicOpenRouter: $('#paneMusicOpenRouter'),
     musicModelOllamaList: $('#musicModelOllamaList'),
     musicModelOpenRouterList: $('#musicModelOpenRouterList'),
+    musicOllamaSearchInput: $('#musicOllamaSearchInput'),
+    musicOllamaCountText: $('#musicOllamaCountText'),
+    musicOpenRouterFilterPills: $('#musicOpenRouterFilterPills'),
+    musicOpenRouterCountText: $('#musicOpenRouterCountText'),
     customOllamaMusicModelInput: $('#customOllamaMusicModelInput'),
     btnApplyCustomMusicOllamaModel: $('#btnApplyCustomMusicOllamaModel'),
     customOpenRouterMusicModelInput: $('#customOpenRouterMusicModelInput'),
@@ -4177,6 +4182,9 @@ ${organicBlock}
         }
         updateModelUI();
         populateModelDropdown();
+        if (els.musicModelDropdown && els.musicModelDropdown.style.display !== 'none') {
+          populateMusicOllamaModels(els.musicOllamaSearchInput?.value || '');
+        }
         if (STATE.activeCatalogTab === 'ollama') {
           renderLiveModelCatalog();
         }
@@ -4483,6 +4491,7 @@ ${organicBlock}
             return {
               id: m.id,
               name: m.name || m.id,
+              description: m.description || '',
               context_length: m.context_length || null,
               hasImageOutput: hasImageOutput,
               supportsTools: supportsTools,
@@ -4495,6 +4504,9 @@ ${organicBlock}
             els.badgeOpenRouterCount.innerText = mapped.length;
           }
           populateModelDropdown();
+          if (els.musicModelDropdown && els.musicModelDropdown.style.display !== 'none') {
+            populateMusicOpenRouterModels(els.musicModelSearchInput?.value || '');
+          }
           if (STATE.activeCatalogTab === 'openrouter') {
             renderLiveModelCatalog();
           }
@@ -9961,10 +9973,12 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
   function getMusicModelDisplayName(modelId) {
     if (!modelId || modelId === 'off') return 'Nonaktif (Mode Obrolan)';
-    const foundOR = CURATED_OPENROUTER_MUSIC_MODELS.find(m => m.id === modelId);
-    if (foundOR) return foundOR.name;
-    const foundOllama = (STATE.ollamaModels || []).find(m => (m.id || m.name) === modelId);
-    if (foundOllama) return foundOllama.name || foundOllama.id;
+    const foundOR = (STATE.openRouterModels || []).find(m => m.id === modelId);
+    if (foundOR) return foundOR.name || foundOR.id;
+    const foundCurated = CURATED_OPENROUTER_MUSIC_MODELS.find(m => m.id === modelId);
+    if (foundCurated) return foundCurated.name;
+    const foundOllama = (STATE.ollamaModels || []).find(m => (m.id || m.name || m.model) === modelId);
+    if (foundOllama) return foundOllama.name || foundOllama.model || foundOllama.id;
     const m = String(modelId).toLowerCase();
     if (m === 'qwen2.5:1.5b') return 'Qwen 2.5 1.5B (Lokal)';
     if (m === 'llama3.2:3b') return 'Llama 3.2 3B (Lokal)';
@@ -9980,24 +9994,29 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (!modelId || modelId === 'off') return 'Music';
     const m = String(modelId).toLowerCase();
     if (m.includes('qwen2.5:1.5b')) return 'Qwen 1.5B';
-    if (m.includes('qwen2.5:7b') || m.includes('qwen-2.5-72b')) return 'Qwen';
+    if (m.includes('qwen2.5:7b') || m.includes('qwen-2.5-72b') || m.includes('qwen2.5') || m.includes('qwen')) return 'Qwen';
     if (m.includes('llama-3.3') || m.includes('llama3.3')) return 'Llama 3.3';
     if (m.includes('llama3.2:3b') || m.includes('llama3.2')) return 'Llama 3.2';
-    if (m.includes('gemini-2.0') || m.includes('gemini')) return 'Gemini';
-    if (m.includes('deepseek')) return 'DeepSeek';
+    if (m.includes('llama')) return 'Llama';
+    if (m.includes('gemini-2.0') || m.includes('gemini-2') || m.includes('gemini')) return 'Gemini';
+    if (m.includes('deepseek-v4') || m.includes('deepseek-r1') || m.includes('deepseek')) return 'DeepSeek';
     if (m.includes('gpt-4o')) return 'GPT-4o';
-    if (m.includes('gpt')) return 'GPT';
-    if (m.includes('claude') || m.includes('haiku')) return 'Haiku';
-    if (m.includes('mistral')) return 'Mistral';
+    if (m.includes('gpt-4') || m.includes('gpt-3') || m.includes('gpt')) return 'GPT';
+    if (m.includes('claude-3.5') || m.includes('claude') || m.includes('haiku') || m.includes('sonnet')) return 'Claude';
+    if (m.includes('mistral') || m.includes('codestral') || m.includes('mixtral')) return 'Mistral';
+    if (m.includes('nemotron')) return 'Nemotron';
+    if (m.includes('granite')) return 'Granite';
+    if (m.includes('kimi')) return 'Kimi';
+    if (m.includes('gemma')) return 'Gemma';
     if (m.includes('openrouter/free')) return 'OR Free';
     if (m.includes('/')) {
       const part = modelId.split('/')[1] || modelId;
-      return part.slice(0, 8);
+      return part.slice(0, 10);
     }
     if (m.includes(':')) {
-      return m.split(':')[0].slice(0, 8);
+      return m.split(':')[0].slice(0, 10);
     }
-    return modelId.slice(0, 8);
+    return modelId.slice(0, 10);
   }
 
   function updateMusicGenModeUI() {
@@ -10060,7 +10079,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       populateMusicOpenRouterModels(els.musicModelSearchInput?.value || '');
       setTimeout(() => els.musicModelSearchInput?.focus(), 60);
     } else {
-      populateMusicOllamaModels();
+      populateMusicOllamaModels(els.musicOllamaSearchInput?.value || '');
+      setTimeout(() => els.musicOllamaSearchInput?.focus(), 60);
     }
   }
 
@@ -10088,28 +10108,105 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     });
   }
 
-  function populateMusicOllamaModels() {
+  function populateMusicOllamaModels(searchQuery = '') {
     if (!els.musicModelOllamaList) return;
+    const q = (typeof searchQuery === 'string' ? searchQuery : (els.musicOllamaSearchInput?.value || '')).toLowerCase().trim();
     const activeModel = STATE.settings.musicModel || 'qwen2.5:1.5b';
     const isMusicMode = Boolean(STATE.isMusicGenMode);
 
-    let models = Array.isArray(STATE.ollamaModels) && STATE.ollamaModels.length > 0 
+    let rawList = Array.isArray(STATE.ollamaModels) && STATE.ollamaModels.length > 0 
       ? [...STATE.ollamaModels]
-      : [{ id: 'qwen2.5:1.5b', name: 'qwen2.5:1.5b' }];
+      : [];
 
-    if (!activeModel.includes('/') && !models.some(m => (m.id || m.name) === activeModel) && activeModel !== 'off') {
-      models.unshift({ id: activeModel, name: activeModel });
+    // Trigger auto-discovery jika model Ollama masih kosong
+    if (rawList.length === 0) {
+      checkOllamaHealth().then(() => {
+        if (Array.isArray(STATE.ollamaModels) && STATE.ollamaModels.length > 0) {
+          populateMusicOllamaModels(els.musicOllamaSearchInput?.value || '');
+        }
+      }).catch(() => {});
     }
 
-    els.musicModelOllamaList.innerHTML = models.map(m => {
-      const modelId = m.id || m.name;
-      const displayName = m.name || m.id;
+    // Default fallback jika belum ada data sama sekali
+    if (rawList.length === 0) {
+      rawList = [
+        { name: 'qwen2.5:1.5b', model: 'qwen2.5:1.5b' },
+        { name: 'llama3.2:3b', model: 'llama3.2:3b' }
+      ];
+    }
+
+    // Pastikan model aktif saat ini tetap ada di daftar jika itu model Ollama
+    if (!activeModel.includes('/') && activeModel !== 'off' && !rawList.some(m => (m.name || m.model || m.id) === activeModel)) {
+      rawList.unshift({ name: activeModel, model: activeModel });
+    }
+
+    // Filter pencarian teks
+    let filtered = rawList;
+    if (q) {
+      filtered = rawList.filter(m => {
+        const id = (m.name || m.model || m.id || '').toLowerCase();
+        return id.includes(q);
+      });
+    }
+
+    // Perbarui teks counter model resmi Ollama
+    if (els.musicOllamaCountText) {
+      els.musicOllamaCountText.innerText = `${filtered.length} Model Resmi`;
+    }
+
+    if (filtered.length === 0) {
+      els.musicModelOllamaList.innerHTML = `
+        <div style="padding: 24px 8px; text-align: center; color: var(--text-dim); font-size: 0.75rem;">
+          <i class="fa-solid fa-ghost" style="font-size: 1.3rem; margin-bottom: 8px; display: block; opacity: 0.5;"></i>
+          Tidak ada model Ollama yang cocok dengan "<strong>${escapeHtml(q)}</strong>"<br>
+          Gunakan baris kustom di bawah untuk memasukkan nama model manual.
+        </div>
+      `;
+      return;
+    }
+
+    els.musicModelOllamaList.innerHTML = filtered.map(m => {
+      const modelId = m.name || m.model || m.id;
+      const displayName = m.name || m.model || m.id;
       const isSelected = isMusicMode && (modelId === activeModel);
+      const idLow = modelId.toLowerCase();
+
       let accentClass = 'music-accent';
       let icon = 'fa-music';
-      if (modelId.includes('qwen')) { accentClass = 'qwen-accent'; icon = 'fa-dragon'; }
-      else if (modelId.includes('llama')) { accentClass = 'llama-accent'; icon = 'fa-microchip'; }
-      else if (modelId.includes('granite')) { accentClass = 'gemini-accent'; icon = 'fa-bolt'; }
+      let tag = 'Ollama Lokal';
+      let desc = 'Model resmi terpasang pada Ollama 127.0.0.1:11434';
+
+      if (idLow.includes('qwen')) { 
+        accentClass = 'qwen-accent'; 
+        icon = 'fa-dragon'; 
+        tag = 'Qwen Neural'; 
+      } else if (idLow.includes('llama')) { 
+        accentClass = 'llama-accent'; 
+        icon = 'fa-microchip'; 
+        tag = 'Meta Llama'; 
+      } else if (idLow.includes('granite')) { 
+        accentClass = 'gemini-accent'; 
+        icon = 'fa-bolt'; 
+        tag = 'IBM Granite'; 
+      } else if (idLow.includes('nemotron')) { 
+        accentClass = 'flux-accent'; 
+        icon = 'fa-brain'; 
+        tag = 'NVIDIA Cloud';
+        desc = 'Model penalaran audio resmi NVIDIA Nemotron';
+      } else if (idLow.includes('deepseek')) { 
+        accentClass = 'gemini-accent'; 
+        icon = 'fa-eye'; 
+        tag = 'DeepSeek'; 
+      } else if (idLow.includes('kimi')) { 
+        accentClass = 'cloud-accent'; 
+        icon = 'fa-cloud'; 
+        tag = 'Kimi Cloud'; 
+      }
+
+      if (idLow.includes(':cloud')) {
+        tag = tag.replace('Lokal', 'Cloud');
+        desc = 'Model resmi Ollama Cloud via server 127.0.0.1:11434';
+      }
 
       return `
         <button class="music-model-item ${isSelected ? 'active' : ''}" type="button" data-model="${escapeHtml(modelId)}">
@@ -10119,9 +10216,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           <div class="music-model-info">
             <div class="music-model-title-row">
               <span class="music-model-title">${escapeHtml(displayName)}</span>
-              <span class="music-model-tag">Ollama Lokal</span>
+              <span class="music-model-tag">${escapeHtml(tag)}</span>
             </div>
-            <span class="music-model-desc">Komposisi neural via local server 127.0.0.1:11434</span>
+            <span class="music-model-desc">${escapeHtml(desc)}</span>
           </div>
           <i class="fa-solid fa-check music-model-check" style="${isSelected ? 'display: block;' : 'display: none;'}"></i>
         </button>
@@ -10139,64 +10236,167 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
   function populateMusicOpenRouterModels(searchQuery = '') {
     if (!els.musicModelOpenRouterList) return;
-    const q = (searchQuery || '').toLowerCase().trim();
+    const q = (typeof searchQuery === 'string' ? searchQuery : (els.musicModelSearchInput?.value || '')).toLowerCase().trim();
     const activeModel = STATE.settings.musicModel || 'qwen2.5:1.5b';
     const isMusicMode = Boolean(STATE.isMusicGenMode);
+    const cat = STATE.musicOpenRouterCatFilter || 'all';
 
+    // Ambil seluruh model resmi yang terdaftar dari OpenRouter API (STATE.openRouterModels)
     const allModelsMap = new Map();
+
+    // Masukkan curated rekomendasi awal sebagai base enrichment jika ada
     CURATED_OPENROUTER_MUSIC_MODELS.forEach(m => allModelsMap.set(m.id, m));
 
+    // Masukkan SELURUH 468+ model resmi dari OpenRouter
+    if (Array.isArray(STATE.openRouterModels) && STATE.openRouterModels.length > 0) {
+      STATE.openRouterModels.forEach(m => {
+        if (!allModelsMap.has(m.id)) {
+          allModelsMap.set(m.id, {
+            id: m.id,
+            name: m.name || m.id,
+            provider: 'openrouter',
+            tag: m.tag || (m.id.includes(':free') ? 'Free' : 'Cloud'),
+            cat: m.cat || (m.id.includes(':free') ? 'free' : 'flagship'),
+            desc: m.description || m.desc || m.id
+          });
+        } else {
+          // Merge description & name jika belum lengkap
+          const existing = allModelsMap.get(m.id);
+          if (m.name && (!existing.name || existing.name === existing.id)) existing.name = m.name;
+          if (m.description && (!existing.desc || existing.desc === existing.id)) existing.desc = m.description;
+        }
+      });
+    } else {
+      // Pemicu fetch otomatis jika daftar belum tersedia
+      fetchOpenRouterModelsList().then(() => {
+        if (Array.isArray(STATE.openRouterModels) && STATE.openRouterModels.length > 0) {
+          populateMusicOpenRouterModels(els.musicModelSearchInput?.value || '');
+        }
+      }).catch(() => {});
+    }
+
+    // Pastikan activeModel muncul jika merupakan OpenRouter model
     if (activeModel.includes('/') && !allModelsMap.has(activeModel)) {
       allModelsMap.set(activeModel, {
         id: activeModel,
         name: getMusicModelDisplayName(activeModel),
         provider: 'openrouter',
         tag: 'Cloud Model',
+        cat: 'cloud',
         desc: activeModel
       });
     }
 
     let list = Array.from(allModelsMap.values());
+
+    // 1. Filter Kategori Pills (Semua, Gratis, Google, OpenAI, Anthropic, Meta, DeepSeek, Qwen, Mistral)
+    if (cat !== 'all') {
+      list = list.filter(m => {
+        const idLow = (m.id || '').toLowerCase();
+        const nameLow = (m.name || '').toLowerCase();
+        if (cat === 'free') {
+          return idLow.includes(':free') || idLow.endsWith('/free') || idLow === 'openrouter/free' || m.tag === 'Free' || m.cat === 'free';
+        }
+        if (cat === 'google') {
+          return idLow.includes('google') || idLow.includes('gemini') || nameLow.includes('google');
+        }
+        if (cat === 'openai') {
+          return idLow.includes('openai') || idLow.includes('gpt') || nameLow.includes('openai');
+        }
+        if (cat === 'anthropic') {
+          return idLow.includes('anthropic') || idLow.includes('claude') || nameLow.includes('anthropic');
+        }
+        if (cat === 'meta') {
+          return idLow.includes('meta') || idLow.includes('llama') || nameLow.includes('meta');
+        }
+        if (cat === 'deepseek') {
+          return idLow.includes('deepseek') || nameLow.includes('deepseek');
+        }
+        if (cat === 'qwen') {
+          return idLow.includes('qwen') || nameLow.includes('qwen');
+        }
+        if (cat === 'mistral') {
+          return idLow.includes('mistral') || nameLow.includes('mistral');
+        }
+        return true;
+      });
+    }
+
+    // 2. Filter Pencarian Teks Cerdas
     if (q) {
       list = list.filter(m => 
-        m.id.toLowerCase().includes(q) || 
+        (m.id && m.id.toLowerCase().includes(q)) || 
         (m.name && m.name.toLowerCase().includes(q)) ||
         (m.desc && m.desc.toLowerCase().includes(q)) ||
         (m.tag && m.tag.toLowerCase().includes(q))
       );
     }
 
+    // Perbarui counter model resmi OpenRouter
+    if (els.musicOpenRouterCountText) {
+      els.musicOpenRouterCountText.innerText = `${list.length} Model Resmi`;
+    }
+
     if (list.length === 0) {
       els.musicModelOpenRouterList.innerHTML = `
-        <div style="padding: 16px 8px; text-align: center; color: var(--text-dim); font-size: 0.72rem;">
-          <i class="fa-solid fa-ghost" style="font-size: 1.2rem; margin-bottom: 6px; display: block; opacity: 0.5;"></i>
-          Tidak ada model OpenRouter yang cocok dengan "<strong>${escapeHtml(q)}</strong>"<br>
-          Gunakan baris kustom di atas untuk memasukkan model secara manual.
+        <div style="padding: 24px 8px; text-align: center; color: var(--text-dim); font-size: 0.72rem;">
+          <i class="fa-solid fa-ghost" style="font-size: 1.3rem; margin-bottom: 8px; display: block; opacity: 0.5;"></i>
+          Tidak ada model OpenRouter yang cocok dengan filter & kata kunci "<strong>${escapeHtml(q || cat)}</strong>"<br>
+          Gunakan baris kustom di bawah untuk memasukkan ID model secara manual.
         </div>
       `;
       return;
     }
 
-    els.musicModelOpenRouterList.innerHTML = list.map(m => {
+    // Batasi render DOM hingga 75 item teratas untuk menjaga responsivitas 60 FPS
+    const maxRender = 75;
+    const itemsToRender = list.slice(0, maxRender);
+    const hasMore = list.length > maxRender;
+
+    let itemsHtml = itemsToRender.map(m => {
       const isSelected = isMusicMode && (m.id === activeModel);
-      let icon = 'fa-cloud';
+      let icon = 'fa-solid fa-cloud';
       let accentClass = 'cloud-accent';
       const idLow = m.id.toLowerCase();
-      if (idLow.includes('gemini')) { icon = 'fa-brands fa-google'; accentClass = 'gemini-accent'; }
-      else if (idLow.includes('llama')) { icon = 'fa-microchip'; accentClass = 'llama-accent'; }
-      else if (idLow.includes('qwen')) { icon = 'fa-dragon'; accentClass = 'qwen-accent'; }
-      else if (idLow.includes('deepseek')) { icon = 'fa-brain'; accentClass = 'gemini-accent'; }
-      else if (idLow.includes('free')) { icon = 'fa-bolt-lightning'; accentClass = 'flux-accent'; }
+
+      if (idLow.includes('gemini') || idLow.includes('google')) { 
+        icon = 'fa-brands fa-google'; 
+        accentClass = 'gemini-accent'; 
+      } else if (idLow.includes('llama') || idLow.includes('meta')) { 
+        icon = 'fa-solid fa-infinity'; 
+        accentClass = 'llama-accent'; 
+      } else if (idLow.includes('qwen')) { 
+        icon = 'fa-solid fa-dragon'; 
+        accentClass = 'qwen-accent'; 
+      } else if (idLow.includes('deepseek')) { 
+        icon = 'fa-solid fa-eye'; 
+        accentClass = 'gemini-accent'; 
+      } else if (idLow.includes('claude') || idLow.includes('anthropic')) { 
+        icon = 'fa-solid fa-brain'; 
+        accentClass = 'flux-accent'; 
+      } else if (idLow.includes('gpt') || idLow.includes('openai')) { 
+        icon = 'fa-solid fa-microchip'; 
+        accentClass = 'cloud-accent'; 
+      } else if (idLow.includes('mistral')) { 
+        icon = 'fa-solid fa-wind'; 
+        accentClass = 'flux-accent'; 
+      } else if (idLow.includes('free')) { 
+        icon = 'fa-solid fa-bolt-lightning'; 
+        accentClass = 'flux-accent'; 
+      }
+
+      const isFree = idLow.includes(':free') || idLow.endsWith('/free') || idLow === 'openrouter/free' || m.tag === 'Free' || m.cat === 'free';
+      const tagText = isFree ? 'Gratis' : (m.tag || 'OpenRouter');
 
       return `
         <button class="music-model-item ${isSelected ? 'active' : ''}" type="button" data-model="${escapeHtml(m.id)}">
           <div class="music-model-icon-box ${accentClass}">
-            <i class="fa-solid ${icon}"></i>
+            <i class="${icon}"></i>
           </div>
           <div class="music-model-info">
             <div class="music-model-title-row">
               <span class="music-model-title">${escapeHtml(m.name || m.id)}</span>
-              <span class="music-model-tag">${escapeHtml(m.tag || 'OpenRouter')}</span>
+              <span class="music-model-tag ${isFree ? 'free-tag' : ''}">${escapeHtml(tagText)}</span>
             </div>
             <span class="music-model-desc">${escapeHtml(m.desc || m.id)}</span>
           </div>
@@ -10204,6 +10404,18 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         </button>
       `;
     }).join('');
+
+    if (hasMore) {
+      itemsHtml += `
+        <div style="padding: 10px 8px; text-align: center; color: var(--text-dim); font-size: 0.72rem; border-top: 1px dashed var(--border-color); margin-top: 6px;">
+          <i class="fa-solid fa-list-check" style="margin-right: 4px; color: var(--neon-teal);"></i>
+          Menampilkan ${maxRender} dari <strong>${list.length}</strong> model resmi OpenRouter.<br>
+          Ketik nama model di kotak pencarian untuk menemukan model spesifik lainnya.
+        </div>
+      `;
+    }
+
+    els.musicModelOpenRouterList.innerHTML = itemsHtml;
 
     els.musicModelOpenRouterList.querySelectorAll('.music-model-item').forEach(item => {
       item.addEventListener('click', (e) => {
@@ -10235,6 +10447,24 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     closeImageModelDropdown();
     els.musicModelDropdown.style.display = 'flex';
     els.musicGenToggleBtn?.setAttribute('aria-expanded', 'true');
+
+    // Auto-fetch model resmi OpenRouter jika belum di-cache
+    if (!STATE.openRouterModels || STATE.openRouterModels.length <= 10) {
+      fetchOpenRouterModelsList().then(() => {
+        if (els.paneMusicOpenRouter && els.paneMusicOpenRouter.style.display !== 'none') {
+          populateMusicOpenRouterModels(els.musicModelSearchInput?.value || '');
+        }
+      }).catch(() => {});
+    }
+
+    // Auto-fetch model resmi Ollama jika belum ada
+    if (!STATE.ollamaModels || STATE.ollamaModels.length === 0) {
+      checkOllamaHealth().then(() => {
+        if (els.paneMusicOllama && els.paneMusicOllama.style.display !== 'none') {
+          populateMusicOllamaModels(els.musicOllamaSearchInput?.value || '');
+        }
+      }).catch(() => {});
+    }
 
     const currentModel = STATE.settings.musicModel || 'qwen2.5:1.5b';
     if (currentModel.includes('/') || currentModel.startsWith('openrouter:')) {
@@ -14335,6 +14565,34 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     els.tabBtnMusicOpenRouter?.addEventListener('click', (e) => {
       e.stopPropagation();
       switchMusicModelTab('openrouter');
+    });
+
+    // Ollama Music Model Search Filter
+    els.musicOllamaSearchInput?.addEventListener('input', (e) => {
+      populateMusicOllamaModels(e.target.value);
+    });
+
+    els.musicOllamaSearchInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        const firstItem = els.musicModelOllamaList?.querySelector('.music-model-item');
+        if (firstItem && firstItem.dataset.model) {
+          setMusicModel(firstItem.dataset.model);
+        }
+      }
+    });
+
+    // OpenRouter Music Model Filter Pills
+    $$('#musicOpenRouterFilterPills .music-filter-pill').forEach(pill => {
+      pill.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cat = pill.dataset.cat || 'all';
+        STATE.musicOpenRouterCatFilter = cat;
+        $$('#musicOpenRouterFilterPills .music-filter-pill').forEach(p => p.classList.toggle('active', p === pill));
+        populateMusicOpenRouterModels(els.musicModelSearchInput?.value || '');
+        AudioEngine.click();
+      });
     });
 
     // OpenRouter Music Model Search Filter

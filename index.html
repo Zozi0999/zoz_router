@@ -622,7 +622,13 @@
                   </button>
 
                   <div class="music-model-section-divider">
-                    <span>Model Lokal Ollama Terpasang</span>
+                    <span>Model Resmi Ollama (<span id="musicOllamaCountText">Memuat...</span>)</span>
+                  </div>
+
+                  <!-- Pencarian Model Ollama -->
+                  <div class="music-model-search-box">
+                    <i class="fa-solid fa-magnifying-glass search-box-icon"></i>
+                    <input type="text" id="musicOllamaSearchInput" class="music-model-search-input" placeholder="Cari model Ollama lokal..." autocomplete="off" />
                   </div>
 
                   <!-- Dynamic list of Ollama installed models -->
@@ -648,13 +654,30 @@
                   <!-- Pencarian Model OpenRouter -->
                   <div class="music-model-search-box">
                     <i class="fa-solid fa-magnifying-glass search-box-icon"></i>
-                    <input type="text" id="musicModelSearchInput" class="music-model-search-input" placeholder="Cari model OpenRouter (Free, Gemini, Llama, DeepSeek...)" autocomplete="off" />
+                    <input type="text" id="musicModelSearchInput" class="music-model-search-input" placeholder="Cari 468+ model resmi OpenRouter..." autocomplete="off" />
+                  </div>
+
+                  <!-- Kategori Filter Cepat OpenRouter -->
+                  <div class="music-model-filter-pills" id="musicOpenRouterFilterPills">
+                    <button class="music-filter-pill active" type="button" data-cat="all">Semua</button>
+                    <button class="music-filter-pill" type="button" data-cat="free"><i class="fa-solid fa-bolt"></i> Gratis</button>
+                    <button class="music-filter-pill" type="button" data-cat="google"><i class="fa-brands fa-google"></i> Google</button>
+                    <button class="music-filter-pill" type="button" data-cat="openai"><i class="fa-solid fa-microchip"></i> OpenAI</button>
+                    <button class="music-filter-pill" type="button" data-cat="anthropic"><i class="fa-solid fa-brain"></i> Anthropic</button>
+                    <button class="music-filter-pill" type="button" data-cat="meta"><i class="fa-solid fa-infinity"></i> Meta</button>
+                    <button class="music-filter-pill" type="button" data-cat="deepseek"><i class="fa-solid fa-eye"></i> DeepSeek</button>
+                    <button class="music-filter-pill" type="button" data-cat="qwen"><i class="fa-solid fa-dragon"></i> Qwen</button>
+                    <button class="music-filter-pill" type="button" data-cat="mistral"><i class="fa-solid fa-wind"></i> Mistral</button>
                   </div>
 
                   <!-- Custom Model Input Row -->
                   <div class="music-model-custom-row">
                     <input type="text" id="customOpenRouterMusicModelInput" class="music-model-custom-input" placeholder="ID model kustom (misal: vendor/model)..." autocomplete="off" />
                     <button class="music-model-custom-btn" id="btnApplyCustomMusicOpenRouterModel" type="button">Pilih</button>
+                  </div>
+
+                  <div class="music-model-section-divider">
+                    <span>Katalog Resmi OpenRouter (<span id="musicOpenRouterCountText">468 Model</span>)</span>
                   </div>
 
                   <!-- Scrollable Container of OpenRouter Models -->
@@ -1334,6 +1357,6 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
-  <script src="app.js?v=20261008_v147"></script>
+  <script src="app.js?v=20261008_v148"></script>
 </body>
 </html>
