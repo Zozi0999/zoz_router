@@ -1159,6 +1159,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         attachToActiveBackgroundChat(activeSession, data.model, data.text || '');
       } else if (data.status === 'completed' && data.completedAt) {
         // AI telah selesai menjawab saat pengguna keluar dari aplikasi
+        setGeneratingState(false);
         const diskSess = await DeviceStorage.getSession(activeSession.id);
         if (diskSess && Array.isArray(diskSess.messages) && diskSess.messages.length > (activeSession.messages ? activeSession.messages.length : 0)) {
           activeSession.messages = diskSess.messages;
@@ -1166,9 +1167,27 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           savePersistedState();
           renderCurrentSession();
           renderChatHistory();
-          setGeneratingState(false);
           AudioEngine.success();
           showToast('✨ AI telah selesai menjawab di latar belakang saat Anda keluar.');
+        } else if (data.text && data.text.trim()) {
+          // Fallback jika sinkronisasi disk sesi belum terbaca di memori
+          const lastMsg = activeSession.messages ? activeSession.messages[activeSession.messages.length - 1] : null;
+          if (!lastMsg || lastMsg.role !== 'assistant') {
+            if (!activeSession.messages) activeSession.messages = [];
+            activeSession.messages.push({
+              role: 'assistant',
+              content: data.text.trim(),
+              model: data.model || 'AI Model',
+              timestamp: new Date().toISOString(),
+              backgroundCompleted: true
+            });
+            activeSession.updatedAt = new Date().toISOString();
+            savePersistedState();
+            renderCurrentSession();
+            renderChatHistory();
+            AudioEngine.success();
+            showToast('✨ AI telah selesai menjawab di latar belakang saat Anda keluar.');
+          }
         }
       }
     } catch (_) {}
@@ -1177,15 +1196,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   function attachToActiveBackgroundChat(session, modelName, initialText = '') {
     if (activeChatPollTimer) clearInterval(activeChatPollTimer);
 
-    // Dapatkan baris asisten terakhir atau buat baris baru jika belum ada
+    // Dapatkan baris asisten terakhir atau buat baris baru jika belum ada di DOM
     let assistantRow = els.messagesList?.querySelector('.message-row.assistant:last-child');
-    let isLastMsgAssistant = false;
-    if (session.messages && session.messages.length > 0) {
-      const lastMsg = session.messages[session.messages.length - 1];
-      if (lastMsg.role === 'assistant') isLastMsgAssistant = true;
-    }
-
-    if (!assistantRow || isLastMsgAssistant) {
+    if (!assistantRow) {
       assistantRow = appendMessageElement('assistant', '', null, modelName || 'AI Assistant');
     }
 
@@ -1232,7 +1245,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             `;
           }
 
-          // Simpan ke pesan sesi jika belum tersimpan
+          // Simpan ke pesan sesi jika belum tersimpan atau perbarui jika teks masih parsial
           const lastMsg = session.messages[session.messages.length - 1];
           if (!lastMsg || lastMsg.role !== 'assistant') {
             session.messages.push({
@@ -1242,10 +1255,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
               timestamp: new Date().toISOString(),
               backgroundCompleted: true
             });
-            session.updatedAt = new Date().toISOString();
-            savePersistedState();
-            renderChatHistory(els.searchHistoryInput?.value || '');
+          } else {
+            lastMsg.content = finalReportText;
+            lastMsg.model = modelName || data.model;
+            lastMsg.backgroundCompleted = true;
           }
+          session.updatedAt = new Date().toISOString();
+          savePersistedState();
+          renderChatHistory(els.searchHistoryInput?.value || '');
 
           setGeneratingState(false);
           AudioEngine.receive();

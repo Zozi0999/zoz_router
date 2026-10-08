@@ -63,7 +63,7 @@ function sendJSON(res, statusCode, data) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID'
   });
   res.end(JSON.stringify(data));
 }
@@ -749,21 +749,73 @@ function accumulateChatChunk(sessionId, chunk, provider) {
   }
 }
 
+function flushChatTaskBuffer(sessionId, provider) {
+  if (!sessionId || !dbActiveChatTasks[sessionId]) return;
+  const task = dbActiveChatTasks[sessionId];
+  if (task.rawBuffer && task.rawBuffer.trim()) {
+    const trimmed = task.rawBuffer.trim();
+    task.rawBuffer = '';
+    if (provider === 'openrouter') {
+      if (trimmed.startsWith('data:')) {
+        const jsonStr = trimmed.replace(/^data:\s*/, '').trim();
+        if (jsonStr !== '[DONE]') {
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || '';
+            if (delta) {
+              task.fullText += delta;
+              task.lastTokenTime = Date.now();
+            }
+          } catch (_) {}
+        }
+      }
+    } else {
+      try {
+        const parsed = JSON.parse(trimmed);
+        const delta = parsed.message?.content || parsed.response || '';
+        if (delta) {
+          task.fullText += delta;
+          task.lastTokenTime = Date.now();
+        }
+      } catch (_) {}
+    }
+  }
+}
+
 function appendAssistantMessageToSessionDisk(sessionId, content, modelName) {
   if (!sessionId || !content || !content.trim()) return false;
   try {
     const cleanSid = String(sessionId).trim();
     if (!/^[a-zA-Z0-9_-]+$/.test(cleanSid)) return false;
+    if (!fs.existsSync(SESSIONS_DIR)) {
+      try { fs.mkdirSync(SESSIONS_DIR, { recursive: true }); } catch (_) {}
+    }
     const sessFile = path.join(SESSIONS_DIR, `${cleanSid}.json`);
-    if (!fs.existsSync(sessFile)) return false;
 
     let sessData = null;
-    try {
-      sessData = JSON.parse(fs.readFileSync(sessFile, 'utf8'));
-    } catch (_) {
-      return false;
+    if (fs.existsSync(sessFile)) {
+      try {
+        sessData = JSON.parse(fs.readFileSync(sessFile, 'utf8'));
+      } catch (_) {
+        sessData = null;
+      }
     }
-    if (!sessData || !Array.isArray(sessData.messages)) return false;
+
+    // Jika file sesi fisik belum ada di disk (misal user langsung keluar sesaat setelah kirim pesan),
+    // buat otomatis struktur sesi agar jawaban latar belakang tidak hilang
+    if (!sessData || typeof sessData !== 'object') {
+      sessData = {
+        id: cleanSid,
+        title: 'Percakapan Baru',
+        messages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        model: modelName || 'AI Model'
+      };
+    }
+    if (!Array.isArray(sessData.messages)) {
+      sessData.messages = [];
+    }
 
     const msgs = sessData.messages;
     const trimmedContent = content.trim();
@@ -2637,7 +2689,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID'
     });
     return res.end();
   }
@@ -3795,6 +3847,12 @@ const server = http.createServer(async (req, res) => {
           dbActiveChatTasks[sessionId].proxyReq = proxyReq;
         }
 
+        // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
+        if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+          if (!proxyReq.destroyed) proxyReq.destroy();
+          return;
+        }
+
         if (clientDisconnected || res.writableEnded || res.destroyed) {
           if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
           if (!sessionId) return;
@@ -3862,6 +3920,7 @@ const server = http.createServer(async (req, res) => {
 
           // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
           if (sessionId && dbActiveChatTasks[sessionId]) {
+            flushChatTaskBuffer(sessionId, 'ollama');
             const task = dbActiveChatTasks[sessionId];
             task.status = 'completed';
             task.completedAt = Date.now();
@@ -3886,6 +3945,10 @@ const server = http.createServer(async (req, res) => {
           } catch (e) {}
         });
       });
+
+      if (sessionId && dbActiveChatTasks[sessionId]) {
+        dbActiveChatTasks[sessionId].proxyReq = proxyReq;
+      }
 
       proxyReq.on('timeout', () => {
         if (!proxyReq.destroyed) proxyReq.destroy();
@@ -4250,6 +4313,12 @@ const server = http.createServer(async (req, res) => {
           dbActiveChatTasks[sessionId].proxyReq = proxyReq;
         }
 
+        // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
+        if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+          if (!proxyReq.destroyed) proxyReq.destroy();
+          return;
+        }
+
         if (clientDisconnected || res.writableEnded || res.destroyed) {
           if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
           if (!sessionId) return;
@@ -4317,6 +4386,7 @@ const server = http.createServer(async (req, res) => {
 
           // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
           if (sessionId && dbActiveChatTasks[sessionId]) {
+            flushChatTaskBuffer(sessionId, 'openrouter');
             const task = dbActiveChatTasks[sessionId];
             task.status = 'completed';
             task.completedAt = Date.now();
@@ -4344,6 +4414,10 @@ const server = http.createServer(async (req, res) => {
           } catch (e) {}
         });
       });
+
+      if (sessionId && dbActiveChatTasks[sessionId]) {
+        dbActiveChatTasks[sessionId].proxyReq = proxyReq;
+      }
 
       proxyReq.on('timeout', () => {
         if (!proxyReq.destroyed) proxyReq.destroy();
@@ -4428,6 +4502,9 @@ const server = http.createServer(async (req, res) => {
         task.status = 'aborted';
         if (task.proxyReq && !task.proxyReq.destroyed) {
           try { task.proxyReq.destroy(); } catch (_) {}
+        }
+        if (task.rawBuffer) {
+          flushChatTaskBuffer(sid, task.provider || 'openrouter');
         }
         // Simpan potongan yang sudah terlanjur dibuat
         if (task.fullText && task.fullText.trim()) {
