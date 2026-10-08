@@ -753,31 +753,34 @@ function flushChatTaskBuffer(sessionId, provider) {
   if (!sessionId || !dbActiveChatTasks[sessionId]) return;
   const task = dbActiveChatTasks[sessionId];
   if (task.rawBuffer && task.rawBuffer.trim()) {
-    const trimmed = task.rawBuffer.trim();
+    const raw = task.rawBuffer;
     task.rawBuffer = '';
-    if (provider === 'openrouter') {
-      if (trimmed.startsWith('data:')) {
+    const lines = raw.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (provider === 'openrouter') {
+        if (!trimmed.startsWith('data:')) continue;
         const jsonStr = trimmed.replace(/^data:\s*/, '').trim();
-        if (jsonStr !== '[DONE]') {
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || '';
-            if (delta) {
-              task.fullText += delta;
-              task.lastTokenTime = Date.now();
-            }
-          } catch (_) {}
-        }
+        if (jsonStr === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || '';
+          if (delta) {
+            task.fullText += delta;
+            task.lastTokenTime = Date.now();
+          }
+        } catch (_) {}
+      } else {
+        try {
+          const parsed = JSON.parse(trimmed);
+          const delta = parsed.message?.content || parsed.response || '';
+          if (delta) {
+            task.fullText += delta;
+            task.lastTokenTime = Date.now();
+          }
+        } catch (_) {}
       }
-    } else {
-      try {
-        const parsed = JSON.parse(trimmed);
-        const delta = parsed.message?.content || parsed.response || '';
-        if (delta) {
-          task.fullText += delta;
-          task.lastTokenTime = Date.now();
-        }
-      } catch (_) {}
     }
   }
 }
@@ -805,7 +808,20 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
     // buat otomatis struktur sesi agar jawaban latar belakang tidak hilang dan pertanyaan user tetap ada
     if (!sessData || typeof sessData !== 'object') {
       const initialMsgs = [];
-      const userPrompt = (sessionId && dbActiveChatTasks[sessionId]?.userPrompt) ? dbActiveChatTasks[sessionId].userPrompt : null;
+      let userPrompt = (sessionId && dbActiveChatTasks[sessionId]?.userPrompt) ? dbActiveChatTasks[sessionId].userPrompt : null;
+      if (!userPrompt && extraMeta && typeof extraMeta === 'object' && extraMeta.prompt) {
+        userPrompt = extraMeta.prompt;
+      }
+      if (!userPrompt && sessionId) {
+        for (const rId of Object.keys(dbTugasRiset)) {
+          const r = dbTugasRiset[rId];
+          if (r && (r.sessionId === sessionId || r.taskId === sessionId) && r.topik) {
+            userPrompt = r.topik;
+            break;
+          }
+        }
+      }
+
       if (userPrompt) {
         initialMsgs.push({
           id: 'msg_usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
@@ -814,9 +830,23 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
           timestamp: new Date(Date.now() - 3000).toISOString()
         });
       }
+
+      let dynamicTitle = 'Percakapan Baru';
+      if (userPrompt) {
+        const cleanP = String(userPrompt).trim().replace(/^#+\s*/, '');
+        const shortP = cleanP.length > 32 ? cleanP.substring(0, 32) + '...' : cleanP;
+        if (extraMeta?.isImageGen) {
+          dynamicTitle = `🎨 Gambar: ${shortP}`;
+        } else if (extraMeta?.isDeepResearch) {
+          dynamicTitle = `🔍 Riset: ${shortP}`;
+        } else {
+          dynamicTitle = shortP;
+        }
+      }
+
       sessData = {
         id: cleanSid,
-        title: userPrompt ? (userPrompt.length > 30 ? userPrompt.substring(0, 30) + '...' : userPrompt) : 'Percakapan Baru',
+        title: dynamicTitle,
         messages: initialMsgs,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -4731,6 +4761,34 @@ const server = http.createServer(async (req, res) => {
             startedAt: rTask.createdAt,
             completedAt: rTask.completedAt || new Date().toISOString(),
             error: null
+          });
+        }
+        if (rTask.status === 'dibatalkan') {
+          return sendJSON(res, 200, {
+            active: false,
+            status: 'aborted',
+            isDeepResearch: true,
+            taskId: rTask.taskId,
+            sessionId: sid,
+            model: 'Deep Research Pro',
+            text: rTask.hasil || rTask.currentStep || 'Riset dihentikan oleh pengguna.',
+            startedAt: rTask.createdAt,
+            completedAt: rTask.completedAt || new Date().toISOString(),
+            error: null
+          });
+        }
+        if (rTask.status === 'gagal') {
+          return sendJSON(res, 200, {
+            active: false,
+            status: 'error',
+            isDeepResearch: true,
+            taskId: rTask.taskId,
+            sessionId: sid,
+            model: 'Deep Research Pro',
+            text: rTask.currentStep || '',
+            startedAt: rTask.createdAt,
+            completedAt: rTask.completedAt || new Date().toISOString(),
+            error: rTask.error || 'Terjadi kesalahan pada riset mendalam.'
           });
         }
       }

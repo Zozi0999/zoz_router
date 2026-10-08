@@ -1344,6 +1344,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         const data = await res.json();
         if (!data) return;
 
+        if (data.isDeepResearch && data.taskId) {
+          STATE.currentDeepResearchTaskId = data.taskId;
+        }
+
         const currentText = data.text || '';
         if (bubbleText && currentText) {
           if (data.isDeepResearch && data.status === 'streaming') {
@@ -1367,6 +1371,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         if (data.status === 'completed' || data.status === 'none' || data.status === 'aborted') {
           clearInterval(activeChatPollTimer);
           activeChatPollTimer = null;
+          STATE.currentDeepResearchTaskId = null;
 
           const finalReportText = currentText;
           const actualModelName = modelName || data.model || (data.isDeepResearch ? 'Deep Research Pro' : 'AI Model');
@@ -1436,6 +1441,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         } else if (data.status === 'error') {
           clearInterval(activeChatPollTimer);
           activeChatPollTimer = null;
+          STATE.currentDeepResearchTaskId = null;
           setGeneratingState(false);
           if (bubbleText) {
             bubbleText.innerHTML = `<div style="color:var(--neon-crimson); font-size:0.85rem;"><i class="fa-solid fa-triangle-exclamation"></i> Gagal menyelesaikan respons di latar belakang: ${escapeHtml(data.error || 'Terjadi kesalahan')}</div>`;
