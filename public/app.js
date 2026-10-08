@@ -1045,7 +1045,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         STATE.soundEnabled = savedSound === 'true';
       }
       const savedSearchMode = localStorage.getItem('zoz_router_search_mode_v1');
-      if (savedSearchMode && ['off', 'default', 'autonomous'].includes(savedSearchMode)) {
+      if (savedSearchMode && ['off', 'default', 'premium', 'autonomous'].includes(savedSearchMode)) {
         STATE.searchMode = savedSearchMode;
       } else {
         STATE.searchMode = 'off';
@@ -4670,9 +4670,9 @@ ${organicBlock}
     if (STATE.isImageGenMode || isExplicitImageCommand) {
       const cleanImgPrompt = extractImagePrompt(text);
       await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel);
-    } else if (isExplicitDeepResearch) {
-      // Deep Research HANYA dieksekusi jika pengguna secara eksplisit mengetik slash command /deep atau /research
-      const cleanResearchPrompt = text.replace(/^\/(?:deep|research|riset)\s+/i, '').trim();
+    } else if (isExplicitDeepResearch || STATE.isDeepResearch) {
+      // Deep Research dieksekusi jika pengguna mengaktifkan mode Deep Research (Premium) dari UI atau mengetik slash command
+      const cleanResearchPrompt = isExplicitDeepResearch ? text.replace(/^\/(?:deep|research|riset)\s+/i, '').trim() : text.trim();
       const activeEngine = (STATE.mode === 'auto')
         ? (STATE.settings.autoPolicy === 'cloud_first' ? 'openrouter' : 'ollama')
         : STATE.mode;
@@ -4687,15 +4687,7 @@ ${organicBlock}
       const fallbackImgModel = (STATE.settings.imageModel && !STATE.settings.imageModel.includes('/')) ? STATE.settings.imageModel : 'flux';
       await runImageGeneration(session, cleanImgPrompt, fallbackImgModel);
     } else {
-      // MODE BIASA: Selalu jalankan streaming chat normal dengan pencarian web biasa otonom (BUKAN Deep Research)
-      if (STATE.isDeepResearch) {
-        // Pulihkan searchMode agar status premium lama tidak membajak obrolan biasa
-        STATE.searchMode = 'off';
-        try {
-          localStorage.setItem('zoz_router_search_mode_v1', 'off');
-        } catch (_) {}
-        updateSearchModeUI();
-      }
+      // MODE BIASA: Selalu jalankan streaming chat normal dengan pencarian web biasa otonom
       if (STATE.mode === 'auto') {
         await runAutoRouterStreaming(session, text, effectiveImages);
       } else if (STATE.mode === 'openrouter') {
@@ -5795,8 +5787,14 @@ ${organicBlock}
         if (imgs.length > 0 && isLatestTurn) {
           const rawImages = [];
           imgs.forEach(img => {
-            const raw = String(img).replace(/^data:image\/[a-z0-9.+_-]+;base64,/i, '').replace(/[\r\n\s]/g, '');
-            if (raw) rawImages.push(raw);
+            if (typeof img === 'string') {
+              if (img.startsWith('data:image')) {
+                const raw = String(img).replace(/^data:image\/[a-z0-9.+_-]+;base64,/i, '').replace(/[\r\n\s]/g, '');
+                if (raw) rawImages.push(raw);
+              } else if (/^[A-Za-z0-9+/=]+$/.test(img.trim()) && img.trim().length > 50) {
+                rawImages.push(img.trim().replace(/[\r\n\s]/g, ''));
+              }
+            }
           });
           if (rawImages.length > 0) item.images = rawImages;
         }
@@ -5888,7 +5886,8 @@ ${organicBlock}
       }
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
-      const messagesPayload = buildSanitizedMessagesPayload(session, rawImgs, 'ollama', systemContent, modelName);
+      const resolvedImgs = await Promise.all(rawImgs.map(resolveImageToDataUrlSafe));
+      const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'ollama', systemContent, modelName);
 
       const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
       const requestBody = {
@@ -10403,8 +10402,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
 
       // Preserve user image attachments in Markdown
-      if (m.images && Array.isArray(m.images) && m.images.length > 0) {
-        m.images.forEach((img, i) => {
+      const allUserImgs = (m.images && Array.isArray(m.images) && m.images.length > 0)
+        ? m.images
+        : (m.image ? [m.image] : []);
+      if (allUserImgs.length > 0) {
+        allUserImgs.forEach((img, i) => {
           const resolvedImg = (typeof img === 'string' && img.startsWith('/')) ? (window.location.origin + img) : img;
           content += `\n\n![Lampiran Foto ${i + 1}](${resolvedImg})\n\n`;
         });
