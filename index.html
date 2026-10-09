@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261009_v161">
+  <link rel="stylesheet" href="style.css?v=20261009_v162">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -296,6 +296,25 @@
           <button class="convert-md-pill" id="convertToMdPillBtn" type="button" title="Konversi teks panjang di input menjadi file markdown (.md) agar tidak memenuhi prompt">
             <i class="fa-solid fa-file-code"></i> <span>Jadikan File Markdown (.md)</span>
           </button>
+        </div>
+
+        <!-- Pop-up Card Notifikasi Konversi Markdown (Setuju / Tidak) -->
+        <div class="composer-fold-prompt-card" id="composerFoldPromptCard" style="display: none;">
+          <div class="fold-card-left">
+            <div class="fold-card-icon"><i class="fa-solid fa-file-code"></i></div>
+            <div class="fold-card-text">
+              <strong id="foldCardTitle">Kodingan / Teks Panjang Terdeteksi</strong>
+              <span id="foldCardSubtitle">Ubah menjadi file dokumen Markdown (.md) agar kolom prompt tetap bersih?</span>
+            </div>
+          </div>
+          <div class="fold-card-actions">
+            <button type="button" class="btn-fold-action btn-fold-confirm" id="btnFoldConfirm">
+              <i class="fa-solid fa-check"></i> <span>Setuju (Ubah ke .MD)</span>
+            </button>
+            <button type="button" class="btn-fold-action btn-fold-dismiss" id="btnFoldDismiss" title="Biarkan teks di prompt">
+              <i class="fa-solid fa-xmark"></i> <span>Tidak</span>
+            </button>
+          </div>
         </div>
 
         <div class="composer-box">
@@ -1319,6 +1338,37 @@
           </button>
           <button class="btn btn-primary" data-close="docPreviewModal" type="button">Tutup</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6.6. PROMPT FOLDING CONFIRMATION MODAL (Claude / Grok AI Style) -->
+  <div class="modal-backdrop" id="promptFoldConfirmModal">
+    <div class="modal-card modal-md">
+      <div class="modal-header">
+        <div class="modal-title"><i class="fa-solid fa-file-code"></i> Konfirmasi Konversi Dokumen</div>
+        <button class="modal-close-btn" data-close="promptFoldConfirmModal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body" style="padding: 18px 20px;">
+        <p style="margin-bottom: 12px; font-size: 0.9rem; color: var(--text-main); line-height: 1.5;">
+          Kodingan atau teks panjang terdeteksi di kolom prompt. Apakah Anda ingin mengubahnya menjadi file lampiran Markdown (<strong style="color:var(--neon-cyan);" id="foldModalFileName">styles.css.md</strong>) agar kolom prompt tetap bersih dan Anda bisa bertanya dengan leluasa?
+        </p>
+        <div style="background: rgba(0,0,0,0.5); border: 1px solid rgba(0,240,255,0.25); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 14px; font-family: var(--font-code); font-size: 0.78rem; max-height: 140px; overflow-y: auto; white-space: pre-wrap; color: var(--text-dim);" id="foldModalSnippet"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.75rem; color:var(--text-dim); flex-wrap:wrap; gap:8px;">
+          <span id="foldModalMeta"><i class="fa-solid fa-align-left"></i> 9 baris • 215 karakter</span>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:var(--text-dim);">
+            <input type="checkbox" id="chkAutoFoldAlways">
+            <span>Selalu otomatis konversi tanpa tanya lagi</span>
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:10px;">
+        <button class="btn btn-secondary" id="btnFoldModalCancel" type="button">
+          <i class="fa-solid fa-xmark"></i> Tidak, Biarkan di Prompt
+        </button>
+        <button class="btn btn-primary" id="btnFoldModalConfirm" type="button">
+          <i class="fa-solid fa-check"></i> Setuju, Ubah ke File .MD
+        </button>
       </div>
     </div>
   </div>

@@ -367,6 +367,18 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     attachmentPreviewBar: $('#attachmentPreviewBar'),
     autoConvertDocRow: $('#autoConvertDocRow'),
     convertToMdPillBtn: $('#convertToMdPillBtn'),
+    composerFoldPromptCard: $('#composerFoldPromptCard'),
+    foldCardTitle: $('#foldCardTitle'),
+    foldCardSubtitle: $('#foldCardSubtitle'),
+    btnFoldConfirm: $('#btnFoldConfirm'),
+    btnFoldDismiss: $('#btnFoldDismiss'),
+    promptFoldConfirmModal: $('#promptFoldConfirmModal'),
+    foldModalFileName: $('#foldModalFileName'),
+    foldModalSnippet: $('#foldModalSnippet'),
+    foldModalMeta: $('#foldModalMeta'),
+    chkAutoFoldAlways: $('#chkAutoFoldAlways'),
+    btnFoldModalConfirm: $('#btnFoldModalConfirm'),
+    btnFoldModalCancel: $('#btnFoldModalCancel'),
     docPreviewModal: $('#docPreviewModal'),
     docPreviewModalTitle: $('#docPreviewModalTitle'),
     docPreviewMetaName: $('#docPreviewMetaName'),
@@ -3808,9 +3820,154 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (els.autoConvertDocRow) {
       els.autoConvertDocRow.style.display = 'none';
     }
+    hideComposerFoldPromptCard();
 
     showToast(`📄 Teks panjang otomatis dikonversi ke file markdown [${doc.name}]! Kolom prompt tetap bersih.`, 'info');
     return true;
+  }
+
+  let pendingFoldText = '';
+  let pendingFoldInstruction = '';
+  let pendingFoldDismissedHash = '';
+  let pendingFoldPastedDirectly = false;
+
+  function hideComposerFoldPromptCard() {
+    if (els.composerFoldPromptCard) {
+      els.composerFoldPromptCard.style.display = 'none';
+    }
+  }
+
+  function checkAndShowPromptFoldPrompt(incomingText, forceModal = false, fromPaste = false) {
+    if (!incomingText || typeof incomingText !== 'string') {
+      hideComposerFoldPromptCard();
+      return false;
+    }
+    const trimmed = incomingText.trim();
+    if (!shouldAutoConvertAsDocument(trimmed)) {
+      hideComposerFoldPromptCard();
+      return false;
+    }
+
+    // Jika user sudah mencentang opsi selalu otomatis konversi
+    const alwaysAutoFold = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
+    if (alwaysAutoFold) {
+      hideComposerFoldPromptCard();
+      return tryAutoConvertInputToDoc(trimmed);
+    }
+
+    const textHash = `${trimmed.length}_${trimmed.substring(0, 50)}`;
+    if (!forceModal && pendingFoldDismissedHash === textHash) {
+      return false;
+    }
+
+    // Ambil instruksi baris pertama jika ada
+    const lines = trimmed.split('\n');
+    let promptInstruction = '';
+    let docBody = trimmed;
+
+    if (lines.length >= 2) {
+      const firstLine = lines[0].trim();
+      if (firstLine.length <= 120 && (/(?:tolong|jelaskan|analisis|baca|ringkas|review|perbaiki|fix|cek|bantu|buatkan|kenapa|mengapa|gimana|bagaimana|apa(?:kah)?|how|what|why|explain|analyze|help)\b/i.test(firstLine) || firstLine.endsWith(':') || firstLine.endsWith('?'))) {
+        promptInstruction = firstLine;
+        docBody = lines.slice(1).join('\n').trim();
+      }
+    }
+
+    const typeInfo = detectDocumentTypeAndExt(docBody);
+    const fileName = typeInfo.customName || `code-snippet.${typeInfo.ext}`;
+    const lineCount = docBody.split('\n').length;
+    const charCount = docBody.length;
+
+    pendingFoldText = docBody;
+    pendingFoldInstruction = promptInstruction;
+    pendingFoldPastedDirectly = fromPaste;
+
+    // Tampilkan Floating Card di atas composer
+    if (els.composerFoldPromptCard) {
+      if (els.foldCardTitle) {
+        els.foldCardTitle.textContent = `${typeInfo.label || 'Kodingan / Teks'} Terdeteksi (${fileName})`;
+      }
+      if (els.foldCardSubtitle) {
+        els.foldCardSubtitle.textContent = `${lineCount} baris (${charCount.toLocaleString('id-ID')} karakter) • Ubah ke file markdown agar prompt bersih?`;
+      }
+      els.composerFoldPromptCard.style.display = 'flex';
+    }
+
+    // Jika forceModal (misal saat paste kodingan besar)
+    if (forceModal && els.promptFoldConfirmModal) {
+      if (els.foldModalFileName) {
+        els.foldModalFileName.textContent = fileName;
+      }
+      if (els.foldModalSnippet) {
+        els.foldModalSnippet.textContent = docBody.length > 500 ? docBody.substring(0, 500) + '\n\n... (teks dipotong untuk preview)' : docBody;
+      }
+      if (els.foldModalMeta) {
+        els.foldModalMeta.innerHTML = `<i class="fa-solid fa-align-left"></i> ${lineCount} baris &bull; ${charCount.toLocaleString('id-ID')} karakter`;
+      }
+      if (els.chkAutoFoldAlways) {
+        els.chkAutoFoldAlways.checked = false;
+      }
+      openModal('promptFoldConfirmModal');
+    }
+
+    return true;
+  }
+
+  function executeConfirmedPromptFold() {
+    if (!pendingFoldText) {
+      hideComposerFoldPromptCard();
+      closeModal('promptFoldConfirmModal');
+      return;
+    }
+
+    if (els.chkAutoFoldAlways && els.chkAutoFoldAlways.checked) {
+      localStorage.setItem('zoz_always_auto_fold_prompt', 'true');
+    }
+
+    const doc = convertTextToMarkdownDoc(pendingFoldText);
+    if (doc) {
+      STATE.attachedDocs.push(doc);
+      renderAttachmentPreviews();
+      AudioEngine.success();
+
+      if (navigator.vibrate) {
+        try { navigator.vibrate(40); } catch (_) {}
+      }
+
+      if (els.promptInput) {
+        els.promptInput.value = pendingFoldInstruction || '';
+        autoResizeTextarea(els.promptInput);
+        els.promptInput.focus();
+      }
+
+      showToast(`📄 Berhasil! Teks diubah ke file markdown [${doc.name}]. Kolom prompt bersih.`, 'info');
+    }
+
+    hideComposerFoldPromptCard();
+    closeModal('promptFoldConfirmModal');
+    pendingFoldText = '';
+    pendingFoldInstruction = '';
+    pendingFoldPastedDirectly = false;
+  }
+
+  function dismissPromptFold(insertIntoPromptIfPasted = false) {
+    if (pendingFoldText) {
+      pendingFoldDismissedHash = `${pendingFoldText.length}_${pendingFoldText.substring(0, 50)}`;
+    }
+
+    if (insertIntoPromptIfPasted && pendingFoldPastedDirectly && pendingFoldText && els.promptInput) {
+      const fullText = pendingFoldInstruction ? `${pendingFoldInstruction}\n${pendingFoldText}` : pendingFoldText;
+      const currentVal = els.promptInput.value;
+      els.promptInput.value = currentVal ? `${currentVal}\n${fullText}` : fullText;
+      autoResizeTextarea(els.promptInput);
+      els.promptInput.focus();
+    }
+
+    hideComposerFoldPromptCard();
+    closeModal('promptFoldConfirmModal');
+    pendingFoldText = '';
+    pendingFoldInstruction = '';
+    pendingFoldPastedDirectly = false;
   }
 
   function openDocPreviewModal(doc, idx) {
@@ -15033,17 +15190,20 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
       if (pastedText && shouldAutoConvertAsDocument(pastedText)) {
         e.preventDefault();
-        const currentText = (els.promptInput ? els.promptInput.value.trim() : '');
-        // Lipat HANYA pastekan menjadi dokumen. Teks pertanyaan yang sudah diketik user
-        // tidak boleh tertelan ke dalam file — ia tetap menjadi isi prompt.
-        const converted = tryAutoConvertInputToDoc(pastedText);
-        if (converted) {
-          if (currentText && els.promptInput) {
+        const alwaysAuto = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
+        if (alwaysAuto) {
+          const currentText = (els.promptInput ? els.promptInput.value.trim() : '');
+          const converted = tryAutoConvertInputToDoc(pastedText);
+          if (converted && currentText && els.promptInput) {
             els.promptInput.value = currentText;
+            autoResizeTextarea(els.promptInput);
+            els.promptInput?.focus();
           }
-          autoResizeTextarea(els.promptInput);
-          els.promptInput?.focus();
+          return;
         }
+
+        // Tampilkan pop-up modal & floating card konfirmasi interaktif
+        checkAndShowPromptFoldPrompt(pastedText, true, true);
         return;
       }
     });
@@ -15056,15 +15216,19 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       } catch (_) {}
       if (droppedText && shouldAutoConvertAsDocument(droppedText)) {
         e.preventDefault();
-        const currentText = (els.promptInput ? els.promptInput.value.trim() : '');
-        const converted = tryAutoConvertInputToDoc(droppedText);
-        if (converted) {
-          if (currentText && els.promptInput) {
+        const alwaysAuto = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
+        if (alwaysAuto) {
+          const currentText = (els.promptInput ? els.promptInput.value.trim() : '');
+          const converted = tryAutoConvertInputToDoc(droppedText);
+          if (converted && currentText && els.promptInput) {
             els.promptInput.value = currentText;
+            autoResizeTextarea(els.promptInput);
+            els.promptInput?.focus();
           }
-          autoResizeTextarea(els.promptInput);
-          els.promptInput?.focus();
+          return;
         }
+
+        checkAndShowPromptFoldPrompt(droppedText, true, true);
       }
     });
 
@@ -15082,13 +15246,19 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         }
       }
 
-      // Real-time reactive auto-convert jika teks yang dimasukkan (misal paste/drop/bulk-insert)
-      // merupakan kodingan atau laporan panjang
+      // Deteksi kodingan / teks panjang untuk pop-up konfirmasi atau auto-convert
       if (val && shouldAutoConvertAsDocument(val)) {
-        if (e?.inputType === 'insertFromPaste' || e?.inputType === 'insertFromDrop' || val.length >= 180 || val.split('\n').length >= 4) {
-          tryAutoConvertInputToDoc(val);
-          return;
+        const alwaysAuto = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
+        if (alwaysAuto) {
+          if (e?.inputType === 'insertFromPaste' || e?.inputType === 'insertFromDrop' || val.length >= 180 || val.split('\n').length >= 4) {
+            tryAutoConvertInputToDoc(val);
+            return;
+          }
+        } else {
+          checkAndShowPromptFoldPrompt(val, false, false);
         }
+      } else {
+        hideComposerFoldPromptCard();
       }
 
       // Auto-detect prefix /img, /gambar, /image untuk mengaktifkan AI Image Studio seketika
@@ -15155,12 +15325,24 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     els.convertToMdPillBtn?.addEventListener('click', () => {
       const val = els.promptInput ? els.promptInput.value.trim() : '';
       if (!val) return;
-      // Pakai jalur konversi yang sama dengan auto-convert: baris instruksi
-      // tetap dipertahankan di kolom prompt, hanya isi dokumen yang dilipat.
-      const ok = tryAutoConvertInputToDoc(val);
-      if (!ok) {
-        showToast('Teks terlalu pendek atau tidak cocok untuk dikonversi menjadi dokumen.', 'info');
-      }
+      // Buka modal konversi interaktif agar user bisa konfirmasi
+      checkAndShowPromptFoldPrompt(val, true, false);
+    });
+
+    // Event listener untuk Pop-up Card Konfirmasi (Setuju / Tidak)
+    els.btnFoldConfirm?.addEventListener('click', () => {
+      executeConfirmedPromptFold();
+    });
+    els.btnFoldDismiss?.addEventListener('click', () => {
+      dismissPromptFold(true);
+    });
+
+    // Event listener untuk Modal Konfirmasi (Setuju / Batal)
+    els.btnFoldModalConfirm?.addEventListener('click', () => {
+      executeConfirmedPromptFold();
+    });
+    els.btnFoldModalCancel?.addEventListener('click', () => {
+      dismissPromptFold(true);
     });
 
     // Event listener untuk Document Preview & Revert Modal
