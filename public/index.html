@@ -260,6 +260,13 @@
           </div>
         </div>
 
+        <!-- Tombol Cepat Konversi Teks Panjang ke Markdown (Claude/Grok Style) -->
+        <div class="auto-convert-doc-row" id="autoConvertDocRow" style="display: none;">
+          <button class="convert-md-pill" id="convertToMdPillBtn" type="button" title="Konversi teks panjang di input menjadi file markdown (.md) agar tidak memenuhi prompt">
+            <i class="fa-solid fa-file-code"></i> <span>Jadikan File Markdown (.md)</span>
+          </button>
+        </div>
+
         <!-- System Prompt Active Banner (if configured) -->
         <div class="active-preset-banner" id="activePresetBanner" style="display: none;">
           <i class="fa-solid fa-sparkles"></i>
@@ -1283,6 +1290,35 @@
         <button class="btn btn-primary" id="btnExecuteExportChat">
           <i class="fa-solid fa-download"></i> Unduh Sekarang (.md)
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6.5. DOCUMENT PREVIEW & REVERT MODAL (Claude / Grok AI Style) -->
+  <div class="modal-backdrop" id="docPreviewModal">
+    <div class="modal-card modal-lg doc-preview-modal-card">
+      <div class="modal-header">
+        <div class="modal-title" id="docPreviewModalTitle"><i class="fa-solid fa-file-code"></i> Pratinjau Dokumen</div>
+        <button class="modal-close-btn" data-close="docPreviewModal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body doc-preview-modal-body">
+        <div class="doc-preview-meta-bar" id="docPreviewMetaBar">
+          <span id="docPreviewMetaName"><i class="fa-solid fa-file"></i> -</span>
+          <span id="docPreviewMetaSize"><i class="fa-solid fa-weight-scale"></i> -</span>
+          <span id="docPreviewMetaLines"><i class="fa-solid fa-align-left"></i> -</span>
+        </div>
+        <pre class="doc-preview-content" id="docPreviewContent"></pre>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <button class="btn btn-secondary" id="revertDocToPromptBtn" type="button" title="Kembalikan isi file ini ke dalam kolom input prompt">
+          <i class="fa-solid fa-arrow-rotate-left"></i> Kembalikan ke Prompt
+        </button>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-danger btn-sm" id="deleteDocFromModalBtn" type="button" title="Hapus file lampiran ini">
+            <i class="fa-solid fa-trash"></i> Hapus
+          </button>
+          <button class="btn btn-primary" data-close="docPreviewModal" type="button">Tutup</button>
+        </div>
       </div>
     </div>
   </div>

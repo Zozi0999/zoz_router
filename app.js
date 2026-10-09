@@ -365,6 +365,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     imageModelOpenRouterList: $('#imageModelOpenRouterList'),
     composerBox: $('.composer-box'),
     attachmentPreviewBar: $('#attachmentPreviewBar'),
+    autoConvertDocRow: $('#autoConvertDocRow'),
+    convertToMdPillBtn: $('#convertToMdPillBtn'),
+    docPreviewModal: $('#docPreviewModal'),
+    docPreviewModalTitle: $('#docPreviewModalTitle'),
+    docPreviewMetaName: $('#docPreviewMetaName'),
+    docPreviewMetaSize: $('#docPreviewMetaSize'),
+    docPreviewMetaLines: $('#docPreviewMetaLines'),
+    docPreviewContent: $('#docPreviewContent'),
+    revertDocToPromptBtn: $('#revertDocToPromptBtn'),
+    deleteDocFromModalBtn: $('#deleteDocFromModalBtn'),
     imagePreviewImg: $('#imagePreviewImg'),
     removeImageBtn: $('#removeImageBtn'),
     activePresetBanner: $('#activePresetBanner'),
@@ -3570,6 +3580,153 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
   }
 
+  // ==================== AUTO MARKDOWN FILE CONVERTER (CLAUDE & GROK AI STYLE) ====================
+  let activePreviewDocIndex = -1;
+
+  function detectDocumentTypeAndExt(text) {
+    if (!text || typeof text !== 'string') return { ext: 'md', lang: 'markdown', label: 'Dokumen' };
+    const trimmed = text.trim();
+
+    // 1. Cek judul Markdown (# Judul)
+    const mdHeaderMatch = trimmed.match(/^#+\s+([^\n\r]{2,40})/);
+    if (mdHeaderMatch) {
+      const slug = mdHeaderMatch[1].trim().replace(/[^a-zA-Z0-9_\-\s]/g, '').replace(/\s+/g, '-').toLowerCase();
+      if (slug.length >= 3) {
+        return { ext: 'md', lang: 'markdown', label: slug, customName: `${slug}.md` };
+      }
+    }
+
+    // 2. HTML
+    if (/<(?:!doctype\s+html|html|head|body|div|section|table)\b/i.test(trimmed)) {
+      return { ext: 'html.md', lang: 'html', label: 'HTML Snippet' };
+    }
+
+    // 3. JSON
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try {
+        JSON.parse(trimmed);
+        return { ext: 'json.md', lang: 'json', label: 'Data JSON' };
+      } catch (_) {}
+    }
+
+    // 4. SQL
+    if (/\b(?:SELECT\s+.*\s+FROM|INSERT\s+INTO|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE|UPDATE\s+.*\s+SET)\b/i.test(trimmed)) {
+      return { ext: 'sql.md', lang: 'sql', label: 'Query SQL' };
+    }
+
+    // 5. Python
+    if (/\b(?:def\s+[a-zA-Z_]\w*\s*\(|import\s+[a-zA-Z_]|from\s+[a-zA-Z_].*import|if\s+__name__\s*==\s*['"]__main__['"])/.test(trimmed)) {
+      return { ext: 'py.md', lang: 'python', label: 'Python Script' };
+    }
+
+    // 6. JavaScript / TypeScript
+    if (/\b(?:const\s+[a-zA-Z_]|let\s+[a-zA-Z_]|function\s+[a-zA-Z_]|import\s+.*from|export\s+(?:default|const|function)|console\.log\(|async\s+function|=>)/.test(trimmed)) {
+      if (/\b(?:interface\s+[A-Z]|type\s+[A-Z]|:\s*(?:string|number|boolean|any)\b)/.test(trimmed)) {
+        return { ext: 'ts.md', lang: 'typescript', label: 'TypeScript Code' };
+      }
+      return { ext: 'js.md', lang: 'javascript', label: 'JavaScript Code' };
+    }
+
+    // 7. CSS
+    if (/[a-zA-Z0-9_\-#.]+\s*\{\s*[\w\-]+\s*:[^;]+;/i.test(trimmed)) {
+      return { ext: 'css.md', lang: 'css', label: 'Styles CSS' };
+    }
+
+    // 8. Log / Trace
+    if (/\b(?:\[(?:INFO|ERROR|WARN|DEBUG)\]|Traceback\s+\(most\s+recent\s+call\s+last\)|Exception in thread|FATAL:)\b/i.test(trimmed)) {
+      return { ext: 'log.md', lang: 'log', label: 'System Log' };
+    }
+
+    // 9. Laporan / Artikel Umum
+    const firstLine = trimmed.split('\n')[0].replace(/[^a-zA-Z0-9_\-\s]/g, '').trim();
+    if (firstLine.length >= 4 && firstLine.length <= 30) {
+      const slug = firstLine.replace(/\s+/g, '-').toLowerCase();
+      return { ext: 'md', lang: 'markdown', label: 'Dokumen', customName: `${slug}.md` };
+    }
+
+    return { ext: 'md', lang: 'markdown', label: 'Dokumen Teks' };
+  }
+
+  function convertTextToMarkdownDoc(rawText, userGivenName = '') {
+    if (!rawText || typeof rawText !== 'string' || !rawText.trim()) return null;
+    const cleanText = rawText.trim();
+    const typeInfo = detectDocumentTypeAndExt(cleanText);
+
+    let baseName = userGivenName || typeInfo.customName;
+    if (!baseName) {
+      if (typeInfo.lang !== 'markdown') {
+        baseName = `code-snippet.${typeInfo.ext}`;
+      } else {
+        baseName = `dokumen-lampiran.md`;
+      }
+    }
+
+    // Unik nama file
+    const existingNames = (STATE.attachedDocs || []).map(d => (d.name || '').toLowerCase());
+    let finalName = baseName;
+    let counter = 1;
+    while (existingNames.includes(finalName.toLowerCase())) {
+      const dotIdx = baseName.lastIndexOf('.');
+      if (dotIdx > 0) {
+        finalName = `${baseName.substring(0, dotIdx)}-${counter}${baseName.substring(dotIdx)}`;
+      } else {
+        finalName = `${baseName}-${counter}`;
+      }
+      counter++;
+    }
+
+    let formattedContent = cleanText;
+    if (typeInfo.lang !== 'markdown' && !cleanText.startsWith('```')) {
+      formattedContent = `\`\`\`${typeInfo.lang}\n${cleanText}\n\`\`\``;
+    }
+
+    const bytes = new Blob([formattedContent]).size;
+    const sizeStr = bytes < 1024 
+      ? `${bytes} B` 
+      : bytes < 1024 * 1024 
+        ? `${(bytes / 1024).toFixed(1)} KB` 
+        : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+
+    const charCount = cleanText.length;
+    const lineCount = cleanText.split('\n').length;
+
+    return {
+      name: finalName,
+      size: `${sizeStr} • ${lineCount} baris`,
+      content: formattedContent,
+      rawContent: cleanText,
+      lang: typeInfo.lang,
+      charCount,
+      lineCount,
+      isAutoConvertedMarkdown: true
+    };
+  }
+
+  function openDocPreviewModal(doc, idx) {
+    if (!doc) return;
+    activePreviewDocIndex = idx;
+    if (els.docPreviewModalTitle) {
+      const isMdCode = Boolean(doc.isAutoConvertedMarkdown || (doc.name && /\.(?:md|markdown|js|ts|py|html|css|json|sql|sh)$/i.test(doc.name)));
+      els.docPreviewModalTitle.innerHTML = `<i class="${isMdCode ? 'fa-solid fa-file-code' : 'fa-solid fa-file-lines'}"></i> ${escapeHtml(doc.name)}`;
+    }
+    if (els.docPreviewMetaName) {
+      els.docPreviewMetaName.innerHTML = `<i class="fa-solid fa-file"></i> ${escapeHtml(doc.name)}`;
+    }
+    if (els.docPreviewMetaSize) {
+      els.docPreviewMetaSize.innerHTML = `<i class="fa-solid fa-weight-scale"></i> ${escapeHtml(doc.size || '')}`;
+    }
+    if (els.docPreviewMetaLines) {
+      const raw = doc.rawContent || doc.content || '';
+      const lines = raw.split('\n').length;
+      const chars = raw.length;
+      els.docPreviewMetaLines.innerHTML = `<i class="fa-solid fa-align-left"></i> ${lines} baris (${chars.toLocaleString('id-ID')} karakter)`;
+    }
+    if (els.docPreviewContent) {
+      els.docPreviewContent.textContent = doc.rawContent || doc.content || '';
+    }
+    openModal('docPreviewModal');
+  }
+
   function renderAttachmentPreviews() {
     if (!els.attachmentPreviewBar) return;
     const hasImages = STATE.attachedImages && STATE.attachedImages.length > 0;
@@ -3610,14 +3767,22 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // Append Doc Chips
     if (hasDocs) {
       STATE.attachedDocs.forEach((doc, idx) => {
+        const isMarkdownOrCode = Boolean(doc.isAutoConvertedMarkdown || (doc.name && /\.(?:md|markdown|js|ts|py|html|css|json|sql|sh|txt)$/i.test(doc.name)));
+        const iconClass = isMarkdownOrCode ? 'fa-solid fa-file-code' : 'fa-solid fa-file-lines';
         const chip = document.createElement('div');
         chip.className = 'doc-preview-chip';
+        chip.title = 'Klik untuk pratinjau isi dokumen atau kode';
+        chip.style.cursor = 'pointer';
         chip.innerHTML = `
-          <i class="fa-solid fa-file-lines doc-icon"></i>
+          <i class="${iconClass} doc-icon"></i>
           <span class="doc-name" title="${escapeHtml(doc.name)}">${escapeHtml(doc.name)}</span>
           <span class="doc-size">(${escapeHtml(doc.size)})</span>
           <button class="remove-doc-btn" data-idx="${idx}" title="Hapus file"><i class="fa-solid fa-xmark"></i></button>
         `;
+        chip.addEventListener('click', (e) => {
+          if (e.target.closest('.remove-doc-btn')) return;
+          openDocPreviewModal(doc, idx);
+        });
         chip.querySelector('.remove-doc-btn').addEventListener('click', (e) => {
           e.stopPropagation();
           removeAttachedDoc(idx);
@@ -4032,22 +4197,27 @@ ${organicBlock}
         <div class="yt-card-thumb-wrap">
           <img src="${safeThumb}" alt="${safeTitle}" class="yt-card-thumb" loading="lazy">
           <div class="yt-card-badge"><i class="fa-brands fa-youtube"></i> YouTube</div>
+          ${vidId ? `<button type="button" class="yt-thumb-play" data-action="play-in-chat" data-video-id="${vidId}" data-title="${safeTitle}" title="Putar langsung di percakapan"><i class="fa-solid fa-play"></i></button>` : ''}
         </div>
         <div class="yt-card-info">
           <h4 class="yt-card-title" title="${safeTitle}">${safeTitle}</h4>
           <div class="yt-card-channel"><i class="fa-solid fa-circle-user"></i> ${safeChannel}</div>
           <div class="yt-card-actions">
-            ${vidId ? `<button type="button" class="yt-card-btn play-yt-btn" data-video-id="${vidId}" data-title="${safeTitle}"><i class="fa-solid fa-play"></i> Putar di BGM</button>` : ''}
-            <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="yt-card-btn open-yt-btn"><i class="fa-solid fa-arrow-up-right-from-square"></i> Buka Video</a>
+            ${vidId ? `<button type="button" class="yt-card-btn play-chat-btn" data-action="play-in-chat" data-video-id="${vidId}" data-title="${safeTitle}"><i class="fa-solid fa-play"></i> Putar di Chat</button>` : ''}
+            ${vidId ? `<button type="button" class="yt-card-btn play-yt-btn" data-video-id="${vidId}" data-title="${safeTitle}"><i class="fa-solid fa-headphones"></i> Putar di BGM</button>` : ''}
+            <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="yt-card-btn open-yt-btn"><i class="fa-brands fa-youtube"></i> Tonton Langsung di YouTube</a>
           </div>
         </div>
       </div>
     `;
   }
 
-  async function renderYouTubeCardsForMessage(row, text) {
-    if (!row || !text || typeof text !== 'string') return;
-    const ids = extractYouTubeVideoIdsClient(text);
+  async function renderYouTubeCardsForMessage(row, text, extraIds = []) {
+    if (!row) return;
+    const ids = Array.isArray(extraIds) ? extraIds.filter(Boolean) : [];
+    if (typeof text === 'string' && text) {
+      extractYouTubeVideoIdsClient(text).forEach((id) => { if (id && !ids.includes(id)) ids.push(id); });
+    }
     if (ids.length === 0) return;
     const bubble = row.querySelector('.message-bubble');
     if (!bubble) return;
@@ -4085,6 +4255,30 @@ ${organicBlock}
         AudioEngine.click();
       }
     }
+  });
+
+  // Delegasi klik: putar video YouTube langsung DI DALAM percakapan (embed iframe)
+  document.addEventListener('click', (e) => {
+    const playBtn = e.target.closest ? e.target.closest('[data-action="play-in-chat"]') : null;
+    if (!playBtn) return;
+    const vidId = playBtn.dataset.videoId;
+    const title = playBtn.dataset.title || 'Video YouTube';
+    if (!vidId) return;
+    const card = playBtn.closest('.youtube-preview-card');
+    if (!card || card.classList.contains('yt-card-playing')) return;
+    const thumbWrap = card.querySelector('.yt-card-thumb-wrap');
+    if (!thumbWrap) return;
+
+    card.classList.add('yt-card-playing');
+    const frame = document.createElement('div');
+    frame.className = 'yt-embed-frame';
+    frame.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(vidId)}?autoplay=1&rel=0&modestbranding=1" title="${escapeHtml(title)}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen loading="lazy"></iframe>`;
+    thumbWrap.replaceWith(frame);
+
+    // Tombol "Putar di Chat" sudah tidak relevan saat video sedang berjalan
+    card.querySelector('.play-chat-btn')?.remove();
+    AudioEngine.click();
+    showToast(`▶ Memutar "${title}" di dalam percakapan`);
   });
 
   // ==================== UNIVERSAL WEB CONTENT EXTRACTOR & READER TOOL ====================
@@ -4842,7 +5036,31 @@ ${organicBlock}
     }
 
     // Simpan prompt teks asli pengguna untuk tampilan gelembung obrolan (displayContent)
-    const originalUserPrompt = rawText;
+    let originalUserPrompt = rawText;
+
+    // Claude / Grok AI Style: Jika prompt teks yang dikirim pengguna sangat panjang (kodingan raksasa atau laporan panjang > 1200 chars / > 20 baris)
+    // dan belum ada dokumen lampiran, otomatis konversi blok raksasa tersebut menjadi file markdown lampiran
+    if (rawText && (rawText.length >= 1200 || rawText.split('\n').length >= 20) && docs.length === 0) {
+      const lines = rawText.split('\n');
+      const firstLine = lines[0].trim();
+      let promptInstruction = '';
+      let snippetContent = rawText;
+
+      // Jika ada baris pengantar pendek di awal (misal "tolong jelaskan kode ini:\n...")
+      if (firstLine.length <= 140 && (/(?:tolong|jelaskan|analisis|baca|ringkas|review|perbaiki|fix|cek|bantu|buatkan|how|what|why|explain|analyze|help)\b/i.test(firstLine) || firstLine.endsWith(':'))) {
+        promptInstruction = firstLine;
+        snippetContent = lines.slice(1).join('\n').trim();
+      }
+
+      if (snippetContent.length >= 600 || snippetContent.split('\n').length >= 15) {
+        const autoDoc = convertTextToMarkdownDoc(snippetContent);
+        if (autoDoc) {
+          docs.push(autoDoc);
+          originalUserPrompt = promptInstruction ? `${promptInstruction} [File: ${autoDoc.name}]` : `[File: ${autoDoc.name}]`;
+          rawText = promptInstruction || `Tolong pelajari, analisis, dan jelaskan isi file dokumen ${autoDoc.name} di atas secara komprehensif.`;
+        }
+      }
+    }
 
     // Auto-Extraction URL Web Publik untuk Analisis & Ringkasan AI
     const detectedWebUrls = extractWebUrlsFromText(rawText);
@@ -4883,7 +5101,7 @@ ${organicBlock}
     const validDocs = docs.filter(d => d && typeof d.content === 'string' && d.content.trim().length > 0);
     if (validDocs.length > 0) {
       const docsContext = validDocs.map(d => `--- [LAMPIRAN DOKUMEN: ${d.name} (${d.size})] ---\n${d.content}\n--- [AKHIR DOKUMEN: ${d.name}] ---`).join('\n\n');
-      text = text ? `${docsContext}\n\n${text}` : docsContext;
+      text = text ? `${docsContext}\n\n${text}` : `${docsContext}\n\nTolong baca, pahami, dan analisis isi dokumen lampiran di atas secara komprehensif.`;
     }
 
     const session = getActiveSession();
@@ -4903,13 +5121,19 @@ ${organicBlock}
       els.welcomeHero.style.display = 'none';
     }
 
+    // Tampilan gelembung obrolan
+    let displayPrompt = originalUserPrompt;
+    if (!displayPrompt && docs.length > 0) {
+      displayPrompt = `Tolong analisis file ${docs[0].name}`;
+    }
+
     // Build user message object
     const docsWithContent = docs.map(d => ({ name: d.name, size: d.size, content: d.content, url: d.url, isWeb: d.isWeb }));
     const docsMeta = docs.map(d => ({ name: d.name, size: d.size, url: d.url, isWeb: d.isWeb }));
     const userMsg = {
       role: 'user',
       content: text,
-      displayContent: originalUserPrompt,
+      displayContent: displayPrompt,
       docs: docsMeta.length > 0 ? docsMeta : undefined,
       images: images,
       image: image,
@@ -4919,7 +5143,7 @@ ${organicBlock}
     // Auto title session if first message
     if (session.messages.length === 0) {
       const fallbackTitle = docs.length > 0 ? (docs[0].name || 'Dokumen Lampiran') : (images.length > 0 ? 'Analisis Gambar' : 'Percakapan Baru');
-      let cleanCandidate = (originalUserPrompt || '').replace(/^\/(?:image|img|gambar|deep|research|riset|web|search|canvas)\s+/i, '').trim();
+      let cleanCandidate = (displayPrompt || '').replace(/^\/(?:image|img|gambar|deep|research|riset|web|search|canvas)\s+/i, '').trim();
       const titleCandidate = cleanCandidate || fallbackTitle;
       session.title = titleCandidate.length > 30 ? titleCandidate.substring(0, 30) + '...' : titleCandidate;
     }
@@ -4930,7 +5154,7 @@ ${organicBlock}
     renderChatHistory(els.searchHistoryInput?.value || '');
 
     // Immediately render user's message bubble
-    const userRow = appendMessageElement('user', originalUserPrompt, images, 'Anda', null, session.messages.length - 1, null, docsWithContent.length > 0 ? docsWithContent : docsMeta);
+    const userRow = appendMessageElement('user', displayPrompt, images, 'Anda', null, session.messages.length - 1, null, docsWithContent.length > 0 ? docsWithContent : docsMeta);
     smartScrollChatToBottom(true);
 
     if (STATE.isPromptHidden) {
@@ -4943,6 +5167,9 @@ ${organicBlock}
     if (els.promptInput) {
       els.promptInput.value = '';
       autoResizeTextarea(els.promptInput);
+    }
+    if (els.autoConvertDocRow) {
+      els.autoConvertDocRow.style.display = 'none';
     }
     STATE.attachedDocs = [];
     clearAttachedImages();
@@ -5206,6 +5433,170 @@ ${organicBlock}
     };
   }
 
+  // ==================== PENCARIAN VIDEO YOUTUBE (CLIENT) ====================
+  // Dipakai tool `search_youtube`: endpoint lokal dulu, fallback lintas-origin
+  // (GitHub Pages / endpoint gagal) lewat proxy publik CORS-bebas.
+  function ytClientText(node) {
+    if (!node) return '';
+    if (typeof node.simpleText === 'string') return node.simpleText;
+    if (Array.isArray(node.runs)) return node.runs.map((r) => (r && r.text) || '').join('');
+    if (typeof node.content === 'string') return node.content;
+    return '';
+  }
+
+  function ytClientExtractJson(source, marker) {
+    if (!source || typeof source !== 'string') return null;
+    const idx = source.indexOf(marker);
+    if (idx === -1) return null;
+    const start = source.indexOf('{', idx + marker.length);
+    if (start === -1) return null;
+    let depth = 0, inStr = false, esc = false;
+    for (let i = start; i < source.length; i++) {
+      const c = source[i];
+      if (esc) { esc = false; continue; }
+      if (c === '\\') { esc = true; continue; }
+      if (c === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (c === '{') depth++;
+      else if (c === '}') { depth--; if (depth === 0) return source.slice(start, i + 1); }
+    }
+    return null;
+  }
+
+  function ytClientDurationSeconds(text) {
+    if (!text || typeof text !== 'string') return 0;
+    const parts = text.split(':').map((p) => parseInt(p, 10));
+    if (parts.some((n) => Number.isNaN(n))) return 0;
+    return parts.reduce((acc, n) => acc * 60 + n, 0);
+  }
+
+  function ytClientMapVideoRenderer(vr) {
+    if (!vr || !vr.videoId) return null;
+    const title = ytClientText(vr.title);
+    if (!title) return null;
+    const ownerRuns = vr.ownerText && vr.ownerText.runs;
+    const ownerNav = ownerRuns && ownerRuns[0] && ownerRuns[0].navigationEndpoint && ownerRuns[0].navigationEndpoint.browseEndpoint;
+    const channelPath = ownerNav && ownerNav.canonicalBaseUrl;
+    const durationText = ytClientText(vr.lengthText);
+    return {
+      videoId: vr.videoId,
+      title,
+      channel: ytClientText(vr.ownerText || vr.longBylineText) || '',
+      channelUrl: channelPath ? `https://www.youtube.com${channelPath}` : '',
+      durationText,
+      durationSeconds: ytClientDurationSeconds(durationText),
+      viewText: ytClientText(vr.viewCountText) || ytClientText(vr.shortViewCountText),
+      publishedText: ytClientText(vr.publishedTimeText),
+      description: ytClientText(vr.descriptionSnippet).slice(0, 260),
+      url: `https://www.youtube.com/watch?v=${vr.videoId}`,
+      thumbnail: `https://i.ytimg.com/vi/${vr.videoId}/hqdefault.jpg`,
+      source: 'YouTube Search'
+    };
+  }
+
+  function ytClientCollect(node, out, limit) {
+    if (!node || typeof node !== 'object' || out.length >= limit) return;
+    if (Array.isArray(node)) {
+      for (const item of node) { ytClientCollect(item, out, limit); if (out.length >= limit) return; }
+      return;
+    }
+    if (node.videoRenderer) {
+      const m = ytClientMapVideoRenderer(node.videoRenderer);
+      if (m && !out.some((v) => v.videoId === m.videoId)) out.push(m);
+      if (out.length >= limit) return;
+    }
+    if (node.lockupViewModel && node.lockupViewModel.contentId && String(node.lockupViewModel.contentType || '').toUpperCase().includes('VIDEO')) {
+      const lv = node.lockupViewModel;
+      const meta = (lv.metadata && lv.metadata.lockupMetadataViewModel) || {};
+      const title = (meta.title && meta.title.content) || '';
+      if (title && !out.some((v) => v.videoId === lv.contentId)) {
+        out.push({
+          videoId: lv.contentId,
+          title,
+          channel: '',
+          channelUrl: '',
+          durationText: '',
+          durationSeconds: 0,
+          viewText: (meta.metadata && meta.metadata.content) || '',
+          publishedText: '',
+          description: '',
+          url: `https://www.youtube.com/watch?v=${lv.contentId}`,
+          thumbnail: `https://i.ytimg.com/vi/${lv.contentId}/hqdefault.jpg`,
+          source: 'YouTube Search'
+        });
+      }
+      if (out.length >= limit) return;
+    }
+    for (const key of Object.keys(node)) { ytClientCollect(node[key], out, limit); if (out.length >= limit) return; }
+  }
+
+  function ytClientParseHtml(html, limit) {
+    const jsonStr = ytClientExtractJson(html, 'ytInitialData');
+    if (!jsonStr) return [];
+    try {
+      const out = [];
+      ytClientCollect(JSON.parse(jsonStr), out, limit);
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  async function searchYouTubeClient(query, maxResults = 6) {
+    const q = String(query || '').trim();
+    const limit = Math.max(1, Math.min(10, parseInt(maxResults, 10) || 6));
+    const payload = { success: false, query: q, count: 0, results: [], error: 'Pencarian video YouTube tidak tersedia saat ini.' };
+
+    // 1) Endpoint lokal (server.js / Vercel / worker)
+    if (!IS_GITHUB_PAGES) {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 13000);
+        const resp = await fetch('/api/youtube-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: q, limit }),
+          signal: ctrl.signal
+        });
+        clearTimeout(t);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data && Array.isArray(data.results)) {
+            payload.success = data.success !== false && data.results.length > 0;
+            payload.results = data.results;
+            payload.count = data.results.length;
+            payload.error = payload.success ? undefined : (data.error || payload.error);
+            return payload;
+          }
+        }
+      } catch (_) {
+        // lanjut ke fallback
+      }
+    }
+
+    // 2) Fallback lintas-origin lewat proxy publik (untuk GitHub Pages / endpoint gagal)
+    try {
+      const target = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}&hl=en&gl=US`;
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`;
+      const ctrl2 = new AbortController();
+      const t2 = setTimeout(() => ctrl2.abort(), 13000);
+      const resp2 = await fetch(proxyUrl, { signal: ctrl2.signal });
+      clearTimeout(t2);
+      if (resp2.ok) {
+        const html = await resp2.text();
+        const results = ytClientParseHtml(html, limit);
+        payload.success = results.length > 0;
+        payload.results = results;
+        payload.count = results.length;
+        payload.error = payload.success ? undefined : payload.error;
+        return payload;
+      }
+    } catch (_) {
+      // diamkan; payload kesalahan sudah siap
+    }
+    return payload;
+  }
+
   async function executeAutonomousWebTool(toolName, rawArgs, promptContext = '', session = null) {
     try {
       let args = {};
@@ -5215,10 +5606,11 @@ ${organicBlock}
           args = JSON.parse(trimmed);
         } catch (_) {
           // If string is raw text (not JSON), use it directly
-          if (toolName === 'search_web') {
-            args = { query: trimmed };
-          } else if (toolName === 'browse_web_page') {
+          if (toolName === 'browse_web_page') {
             args = { url: trimmed };
+          } else {
+            // search_web & search_youtube sama-sama memakai query
+            args = { query: trimmed };
           }
         }
       } else if (rawArgs && typeof rawArgs === 'object') {
@@ -5232,6 +5624,49 @@ ${organicBlock}
         else if (args.input && typeof args.input === 'object') args = args.input;
       }
       
+      if (toolName === 'search_youtube') {
+        let query = args.query || args.q || args.keyword || args.search || args.topic || args.title || args.text || (typeof args === 'string' ? args : '');
+        if (!query || !String(query).trim()) {
+          query = promptContext || 'video populer hari ini';
+        }
+        query = String(query).trim();
+        const maxResults = Math.max(1, Math.min(10, parseInt(args.max_results || args.maxResults || args.limit, 10) || 6));
+
+        const data = await searchYouTubeClient(query, maxResults);
+        const list = (data && Array.isArray(data.results)) ? data.results : [];
+        if (list.length === 0) {
+          return {
+            text: `Hasil pencarian video YouTube untuk "${query}": tidak ditemukan video. Coba kata kunci alternatif yang lebih spesifik.`,
+            sources: [],
+            videoIds: []
+          };
+        }
+
+        let output = `HASIL PENCARIAN VIDEO YOUTUBE UNTUK "${query}":\n`;
+        output += `Ditemukan ${list.length} video relevan:\n`;
+        list.forEach((v, idx) => {
+          output += `\n[${idx + 1}] ${v.title}\n`;
+          output += `URL: ${v.url}\n`;
+          if (v.channel) output += `Channel: ${v.channel}\n`;
+          if (v.durationText) output += `Durasi: ${v.durationText}\n`;
+          if (v.viewText) output += `Tayangan: ${v.viewText}\n`;
+          if (v.publishedText) output += `Dipublikasikan: ${v.publishedText}\n`;
+          if (v.description) output += `Deskripsi: ${v.description}\n`;
+        });
+        output += `\nCatatan: video di atas dapat diputar langsung di dalam percakapan. Sertakan tautan video yang Anda rekomendasikan (format markdown [Judul](URL)) di dalam jawaban akhir.`;
+
+        return {
+          text: output,
+          sources: list.map((v) => ({
+            title: v.title,
+            url: v.url,
+            domain: 'youtube.com',
+            snippet: `${v.channel ? `Video YouTube oleh ${v.channel}: ` : 'Video YouTube: '}${(v.description || v.title || '').slice(0, 160)}`
+          })),
+          videoIds: list.map((v) => v.videoId).filter(Boolean)
+        };
+      }
+
       if (toolName === 'search_web') {
         let query = args.query || args.q || args.keyword || args.search || args.topic || args.text || (typeof args === 'string' ? args : '');
         if (!query || !query.trim()) {
@@ -5947,28 +6382,34 @@ Format teks (untuk model tanpa function calling):
   }
 
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
-    let iconClass = 'fa-magnifying-glass';
+    const isYouTube = toolName === 'search_youtube';
+    const isBrowse = toolName === 'browse_web_page';
+
+    // iconClass sudah memuat prefiks family-nya (fa-solid / fa-brands) agar tidak
+    // bentrok dengan aturan font-family bila digabung dengan fa-solid.
+    let iconClass = status === 'loading' ? 'fa-solid fa-magnifying-glass fa-spin' : 'fa-solid fa-circle-check';
     let title = 'PENCARIAN WEB LIVE (ZERO-API)';
-    
-    if (toolName === 'browse_web_page') {
+
+    if (isYouTube) {
+      title = 'PENCARIAN VIDEO YOUTUBE LIVE';
+      iconClass = status === 'loading' ? 'fa-brands fa-youtube fa-spin' : 'fa-brands fa-youtube';
+    } else if (isBrowse) {
       title = 'PENJELAJAHAN HALAMAN WEB';
-      iconClass = status === 'loading' ? 'fa-compass fa-spin' : 'fa-circle-check';
-    } else {
-      iconClass = status === 'loading' ? 'fa-magnifying-glass fa-spin' : 'fa-circle-check';
+      iconClass = status === 'loading' ? 'fa-solid fa-compass fa-spin' : 'fa-solid fa-circle-check';
     }
 
     const actionText = status === 'loading'
-      ? (toolName === 'browse_web_page' ? `Membaca URL: "${escapeHtml(targetText)}"` : `Mencari web: "${escapeHtml(targetText)}"`)
-      : (toolName === 'browse_web_page' ? `Halaman selesai dibaca: "${escapeHtml(targetText)}"` : `Pencarian selesai: "${escapeHtml(targetText)}"`);
+      ? (isYouTube ? `Mencari video: "${escapeHtml(targetText)}"` : isBrowse ? `Membaca URL: "${escapeHtml(targetText)}"` : `Mencari web: "${escapeHtml(targetText)}"`)
+      : (isYouTube ? `Video ditemukan: "${escapeHtml(targetText)}"` : isBrowse ? `Halaman selesai dibaca: "${escapeHtml(targetText)}"` : `Pencarian selesai: "${escapeHtml(targetText)}"`);
 
     const subText = status === 'loading'
-      ? (toolName === 'browse_web_page' ? 'Mengekstrak teks & konten halaman secara langsung...' : 'Mengumpulkan berita live & multi-sumber terkini...')
-      : (toolName === 'browse_web_page' ? 'Konten halaman diserap & disintesis oleh AI...' : 'Data berita aktual diserap & disintesis oleh AI...');
+      ? (isYouTube ? 'Menelusuri katalog video YouTube secara langsung...' : isBrowse ? 'Mengekstrak teks & konten halaman secara langsung...' : 'Mengumpulkan berita live & multi-sumber terkini...')
+      : (isYouTube ? 'Daftar video siap diputar langsung di percakapan...' : isBrowse ? 'Konten halaman diserap & disintesis oleh AI...' : 'Data berita aktual diserap & disintesis oleh AI...');
 
     return `
       <div class="autonomous-tool-hud${status === 'done' ? ' done' : ''}">
         <div class="autonomous-tool-icon-wrap">
-          <i class="fa-solid ${iconClass}"></i>
+          <i class="${iconClass}"></i>
         </div>
         <div class="autonomous-tool-content">
           <div class="autonomous-tool-title">
@@ -6255,6 +6696,7 @@ Format teks (untuk model tanpa function calling):
     let webSources = null;
     let streamRenderer = null;
     let executedHudHtml = '';
+    const foundYouTubeIds = []; // ID video hasil tool search_youtube (dipakai render kartu)
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -6495,6 +6937,11 @@ Format teks (untuk model tanpa function calling):
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
           }
+          if (toolName === 'search_youtube' && Array.isArray(toolExecRes.videoIds)) {
+            toolExecRes.videoIds.forEach((vid) => {
+              if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
+            });
+          }
           roundToolResponsesText += `\n[HASIL PENGUMPULAN DATA OTONOM (${toolName})]:\n${toolExecRes.text}\n`;
           executedHudHtml += createAutonomousToolHudHtml(toolName, previewArg, 'done');
         }
@@ -6502,7 +6949,7 @@ Format teks (untuk model tanpa function calling):
         if (STATE.abortController?.signal?.aborted) break;
 
         // Tampilkan HUD bahwa data berita live sedang disintesis oleh AI
-        bubbleText.innerHTML = preambleHtml + executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);"><i class="fa-solid fa-bolt"></i> Menyintesis data berita web terbaru...</span></div>`;
+        bubbleText.innerHTML = preambleHtml + executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);"><i class="fa-solid fa-bolt"></i> Menyintesis hasil pencarian terbaru...</span></div>`;
         smartScrollChatToBottom(true);
 
         if (cleanAssistant) {
@@ -6511,13 +6958,14 @@ Format teks (untuk model tanpa function calling):
           conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
         }
 
-        const roundInstruction = `[INFORMASI HASIL PENCARIAN WEB TERBARU TELAH TERSEDIA]:
+        const roundInstruction = `[INFORMASI HASIL PENCARIAN TERBARU TELAH TERSEDIA]:
 Gunakan data hasil pencarian di atas untuk menjawab pertanyaan pengguna secara komprehensif, jelas, faktual, dan akurat.
+Jika hasilnya berupa video YouTube: jelaskan dan rekomendasikan video yang paling relevan (judul, channel, durasi, tayangan), lalu WAJIB sisipkan tautan video pilihan Anda dengan format markdown [Judul Video](https://www.youtube.com/watch?v=ID) agar kartu video dapat ditampilkan dan diputar langsung di dalam percakapan.
 Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi robotik, dan tanpa format pemanggilan tool lagi.`;
 
         conversationChain.push({
           role: 'user',
-          content: `[DATA HASIL PENCARIAN BERITA WEB TERBARU (LIVE MULTI-SOURCE)]:\n${roundToolResponsesText}\n\n${roundInstruction}`
+          content: `[DATA HASIL PENCARIAN LIVE (WEB / VIDEO)]:\n${roundToolResponsesText}\n\n${roundInstruction}`
         });
 
         const digestionBody = {
@@ -6637,7 +7085,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         webSources = deduplicateSources(webSources);
         renderMessageSources(assistantRow, webSources, true);
       }
-      renderYouTubeCardsForMessage(assistantRow, fullText);
+      renderYouTubeCardsForMessage(assistantRow, fullText, foundYouTubeIds);
       metaBox.innerHTML = `
         <strong>${modelName}</strong>
         <span class="meta-model-badge">Ollama</span>
@@ -6868,6 +7316,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     let streamRenderer = null;
     let actualModelUsed = null;
     let executedHudHtml = '';
+    const foundYouTubeIds = []; // ID video hasil tool search_youtube (dipakai render kartu)
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -7233,6 +7682,11 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
           }
+          if (toolName === 'search_youtube' && Array.isArray(toolExecRes.videoIds)) {
+            toolExecRes.videoIds.forEach((vid) => {
+              if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
+            });
+          }
           roundToolResponsesText += `\n[HASIL PENGUMPULAN DATA OTONOM (${toolName})]:\n${toolExecRes.text}\n`;
           executedHudHtml += createAutonomousToolHudHtml(toolName, previewArg, 'done');
         }
@@ -7240,7 +7694,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         if (STATE.abortController?.signal?.aborted) break;
 
         // Tampilkan HUD bahwa data berita live sedang disintesis oleh AI
-        bubbleText.innerHTML = preambleHtml + executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);"><i class="fa-solid fa-bolt"></i> Menyintesis data berita web terbaru...</span></div>`;
+        bubbleText.innerHTML = preambleHtml + executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);"><i class="fa-solid fa-bolt"></i> Menyintesis hasil pencarian terbaru...</span></div>`;
         smartScrollChatToBottom(true);
 
         if (cleanAssistant) {
@@ -7249,13 +7703,14 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
         }
 
-        const roundInstruction = `[INFORMASI HASIL PENCARIAN WEB TERBARU TELAH TERSEDIA]:
+        const roundInstruction = `[INFORMASI HASIL PENCARIAN TERBARU TELAH TERSEDIA]:
 Gunakan data hasil pencarian di atas untuk menjawab pertanyaan pengguna secara komprehensif, jelas, faktual, dan akurat.
+Jika hasilnya berupa video YouTube: jelaskan dan rekomendasikan video yang paling relevan (judul, channel, durasi, tayangan), lalu WAJIB sisipkan tautan video pilihan Anda dengan format markdown [Judul Video](https://www.youtube.com/watch?v=ID) agar kartu video dapat ditampilkan dan diputar langsung di dalam percakapan.
 Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi robotik, dan tanpa format pemanggilan tool lagi.`;
 
         conversationChain.push({
           role: 'user',
-          content: `[DATA HASIL PENCARIAN BERITA WEB TERBARU (LIVE MULTI-SOURCE)]:\n${roundToolResponsesText}\n\n${roundInstruction}`
+          content: `[DATA HASIL PENCARIAN LIVE (WEB / VIDEO)]:\n${roundToolResponsesText}\n\n${roundInstruction}`
         });
 
         // Jalankan panggilan streaming ke model untuk putaran berikutnya
@@ -7432,7 +7887,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         webSources = deduplicateSources(webSources);
         renderMessageSources(assistantRow, webSources, true);
       }
-      renderYouTubeCardsForMessage(assistantRow, fullText);
+      renderYouTubeCardsForMessage(assistantRow, fullText, foundYouTubeIds);
       const effectiveDisplay = actualModelUsed ? `${actualModelUsed} (Failover)` : modelName;
       metaBox.innerHTML = `
         <strong title="${actualModelUsed ? 'Model dialihkan oleh OpenRouter ke ' + actualModelUsed : modelName}">${escapeHtml(effectiveDisplay)}</strong>
@@ -14408,18 +14863,37 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
     els.promptInput?.addEventListener('paste', async (e) => {
       const items = (e.clipboardData || window.clipboardData)?.items;
-      if (!items) return;
-      for (const item of items) {
-        if (item.type && item.type.startsWith('image/')) {
-          e.preventDefault();
-          const file = item.getAsFile();
-          if (file) {
-            const ok = await processSingleImageFile(file);
-            if (ok) {
-              renderAttachmentPreviews();
-              AudioEngine.click();
+      if (items) {
+        for (const item of items) {
+          if (item.type && item.type.startsWith('image/')) {
+            e.preventDefault();
+            const file = item.getAsFile();
+            if (file) {
+              const ok = await processSingleImageFile(file);
+              if (ok) {
+                renderAttachmentPreviews();
+                AudioEngine.click();
+              }
             }
+            return;
           }
+        }
+      }
+
+      // Claude & Grok AI Style: Otomatis konversi teks panjang / kodingan / laporan menjadi file markdown
+      const pastedText = (e.clipboardData || window.clipboardData)?.getData('text/plain');
+      if (pastedText && (pastedText.length >= 800 || pastedText.split('\n').length >= 20)) {
+        e.preventDefault();
+        const doc = convertTextToMarkdownDoc(pastedText);
+        if (doc) {
+          STATE.attachedDocs.push(doc);
+          renderAttachmentPreviews();
+          AudioEngine.success();
+          if (navigator.vibrate) {
+            try { navigator.vibrate(40); } catch (_) {}
+          }
+          showToast(`📄 Teks panjang otomatis dikonversi ke file markdown [${doc.name}]! Kolom prompt tetap bersih untuk pertanyaan Anda.`, 'info');
+          els.promptInput?.focus();
         }
       }
     });
@@ -14427,8 +14901,17 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     els.promptInput?.addEventListener('input', () => {
       autoResizeTextarea(els.promptInput);
 
-      // Auto-detect prefix /img, /gambar, /image untuk mengaktifkan AI Image Studio seketika
+      // Cek apakah ada teks panjang di textarea untuk menampilkan tombol konversi cepat
       const val = els.promptInput.value;
+      if (els.autoConvertDocRow) {
+        if (val && (val.length >= 800 || val.split('\n').length >= 20)) {
+          els.autoConvertDocRow.style.display = 'flex';
+        } else {
+          els.autoConvertDocRow.style.display = 'none';
+        }
+      }
+
+      // Auto-detect prefix /img, /gambar, /image untuk mengaktifkan AI Image Studio seketika
       if (!STATE.isImageGenMode && /^\/(?:img|gambar|image)\s+/i.test(val)) {
         STATE.isImageGenMode = true;
         STATE.isMusicGenMode = false;
@@ -14484,6 +14967,51 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           try { navigator.vibrate(20); } catch (_) {}
         }
         showToast('💬 Mode Percakapan Standar.');
+        AudioEngine.click();
+      }
+    });
+
+    // Tombol Konversi Teks Panjang ke Markdown
+    els.convertToMdPillBtn?.addEventListener('click', () => {
+      const val = els.promptInput ? els.promptInput.value.trim() : '';
+      if (!val) return;
+      const doc = convertTextToMarkdownDoc(val);
+      if (doc) {
+        STATE.attachedDocs.push(doc);
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+        if (els.autoConvertDocRow) els.autoConvertDocRow.style.display = 'none';
+        renderAttachmentPreviews();
+        AudioEngine.success();
+        showToast(`📄 Teks berhasil dikonversi ke file [${doc.name}]. Ketik pertanyaan Anda dengan leluasa!`, 'success');
+        els.promptInput?.focus();
+      }
+    });
+
+    // Event listener untuk Document Preview & Revert Modal
+    els.revertDocToPromptBtn?.addEventListener('click', () => {
+      if (activePreviewDocIndex >= 0 && activePreviewDocIndex < STATE.attachedDocs.length) {
+        const doc = STATE.attachedDocs[activePreviewDocIndex];
+        const textToRestore = doc.rawContent || doc.content || '';
+        STATE.attachedDocs.splice(activePreviewDocIndex, 1);
+        renderAttachmentPreviews();
+        if (els.promptInput) {
+          els.promptInput.value = els.promptInput.value ? `${els.promptInput.value}\n\n${textToRestore}` : textToRestore;
+          autoResizeTextarea(els.promptInput);
+          els.promptInput.focus();
+        }
+        closeModal('docPreviewModal');
+        showToast('↩️ File dokumen dikembalikan ke kolom prompt input.');
+        AudioEngine.click();
+      }
+    });
+
+    els.deleteDocFromModalBtn?.addEventListener('click', () => {
+      if (activePreviewDocIndex >= 0 && activePreviewDocIndex < STATE.attachedDocs.length) {
+        STATE.attachedDocs.splice(activePreviewDocIndex, 1);
+        renderAttachmentPreviews();
+        closeModal('docPreviewModal');
+        showToast('File dokumen dihapus.');
         AudioEngine.click();
       }
     });
