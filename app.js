@@ -4694,6 +4694,11 @@ ${organicBlock}
   async function checkOllamaHealth() {
     els.ollamaStatusVal.innerText = 'Memeriksa...';
     els.ollamaIndicator.className = 'status-indicator';
+    // WAJIB dideklarasikan: tanpa ini, bila semua fetch gagal, baris
+    // `if (rawModels.length === 0 ...)` akan melempar ReferenceError (senyap,
+    // tertangkap try luar) sehingga daftar model terlihat kosong.
+    let rawModels = [];
+    let isRunning = false;
     try {
       const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
       const headers = {};
@@ -4703,14 +4708,34 @@ ${organicBlock}
       }
 
       if (location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
-        els.ollamaStatusVal.innerText = 'Localhost Terblokir (Mixed Content)';
-        els.ollamaStatusVal.title = 'Halaman HTTPS memblokir akses langsung ke HTTP localhost. Gunakan OpenRouter di Cloud atau jalankan lokal di port 4040.';
-        els.ollamaIndicator.className = 'status-indicator status-warning';
-        STATE.ollamaModels = [];
-        if (els.badgeOllamaCount) els.badgeOllamaCount.innerText = '0';
-        populateModelDropdown();
-        updateOllamaStatusUI();
-        return false;
+        // Jangan langsung menyerah: yang diblokir browser hanyalah akses HTTPS -> HTTP
+        // lokal. Ambil daftar model lewat gateway proxy (/api/ollama/models) yang tetap
+        // bisa menjangkau Ollama Cloud, supaya daftar model TIDAK kosong di Vercel.
+        try {
+          const gwUrl = '/api/ollama/models' + (STATE.settings.ollamaApiKey ? '?endpoint=' + encodeURIComponent('https://ollama.com') : '');
+          const gwRes = await fetch(gwUrl, { headers }).catch(() => null);
+          if (gwRes && gwRes.ok) {
+            const gwData = await gwRes.json();
+            if (Array.isArray(gwData.models) && gwData.models.length > 0) {
+              rawModels = gwData.models;
+              isRunning = gwData.server_running !== false;
+            }
+          }
+        } catch (gwErr) {
+          console.warn('Gagal memuat daftar model Ollama via gateway:', gwErr && gwErr.message);
+        }
+
+        if (rawModels.length === 0) {
+          els.ollamaStatusVal.innerText = 'Localhost Terblokir (Mixed Content)';
+          els.ollamaStatusVal.title = 'Halaman HTTPS memblokir akses langsung ke HTTP localhost. Ubah endpoint ke https://ollama.com di Pengaturan, atau gunakan OpenRouter.';
+          els.ollamaIndicator.className = 'status-indicator status-warning';
+          STATE.ollamaModels = [];
+          if (els.badgeOllamaCount) els.badgeOllamaCount.innerText = '0';
+          populateModelDropdown();
+          updateOllamaStatusUI();
+          return false;
+        }
+        // Daftar model dari gateway tersedia — lanjut ke blok render di bawah.
       }
 
       if (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) {
