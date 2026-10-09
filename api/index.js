@@ -74,6 +74,31 @@ module.exports = async function handler(req, res) {
     }
   } catch (_) {}
 
+  // Probe diagnostik — ditangani gateway agar tetap hidup walau rewrite
+  // mengarahkan /api/ping ke endpoint ini.
+  if (String(req.url || '').split('?')[0] === '/api/ping') {
+    let engineStatus = 'lazy (belum dimuat)';
+    let engineError = null;
+    const t0 = Date.now();
+    try {
+      engineStatus = typeof (require('../server.js') || {}).requestHandler;
+    } catch (e) {
+      engineStatus = 'error';
+      engineError = e && e.message ? e.message : String(e);
+    }
+    return sendJson(res, 200, {
+      ok: true,
+      time: new Date().toISOString(),
+      node: process.version,
+      vercelEnv: process.env.VERCEL_ENV || (process.env.VERCEL ? 'vercel' : 'lokal'),
+      region: process.env.VERCEL_REGION || null,
+      requestUrl: req.url,
+      engineLoadMs: Date.now() - t0,
+      engineRequestHandler: engineStatus,
+      engineError: engineError
+    });
+  }
+
   const startedAt = Date.now();
   let finished = false;
   const watchdog = setTimeout(() => {
