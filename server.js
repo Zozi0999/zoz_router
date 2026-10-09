@@ -6126,13 +6126,20 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-process.on('unhandledRejection', (reason) => {
-  console.warn('⚠️ Warning: Unhandled Promise Rejection ditangkap:', reason && (reason.stack || reason.message || reason));
-});
+// Vercel Serverless: JANGAN pasang penangan uncaughtException / unhandledRejection
+// di sana. Bila exception ditelan, proses tetap hidup tetapi respons tidak pernah
+// dikirim, sehingga platform membunuh fungsi dan menampilkan
+// "500 FUNCTION_INVOCATION_FAILED" tanpa keterangan apa pun. Di server lokal
+// justru sebaliknya: kita ingin error tercatat rapi dan server tetap berjalan.
+if (!IS_VERCEL_ENV) {
+  process.on('unhandledRejection', (reason) => {
+    console.warn('⚠️ Warning: Unhandled Promise Rejection ditangkap:', reason && (reason.stack || reason.message || reason));
+  });
 
-process.on('uncaughtException', (err) => {
-  console.error('⚠️ Critical: Uncaught Exception ditangkap:', err && (err.stack || err.message || err));
-});
+  process.on('uncaughtException', (err) => {
+    console.error('⚠️ Critical: Uncaught Exception ditangkap:', err && (err.stack || err.message || err));
+  });
+}
 
 process.on('SIGINT', () => {
   console.log('\n🛑 Menghentikan server ZOZ ROUTER secara anggun...');
