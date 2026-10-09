@@ -1915,6 +1915,30 @@ html, body {
   transition: all 0.2s ease;
 }
 
+/* AI Music Mode Indicator */
+.composer-tools-left .music-mode-indicator {
+  display: none;
+  width: 28px;
+  height: 28px;
+  margin: 4px 6px;
+  border-radius: 4px;
+  background: rgba(0,255,194,0.1);
+  color: #00FFC2;
+  border: 1px solid rgba(0,255,194,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.composer-tools-left .music-mode-indicator:hover {
+  background: rgba(0,255,194,0.2);
+  color: #00F0FF;
+}
+.composer-tools-left .music-mode-indicator:hover i {
+  /* icon will be changed via JS */
+}
+
 .composer-btn:hover {
   color: var(--neon-cyan);
   background: var(--bg-card);

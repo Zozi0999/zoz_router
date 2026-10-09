@@ -8,6 +8,19 @@
 
   const IS_GITHUB_PAGES = Boolean(location.hostname && location.hostname.endsWith('github.io')) || location.protocol === 'file:';
 
+  const extractDomainSafe = (url) => {
+    try {
+      const u = new URL(url);
+      return u.hostname.replace(/^www\./, '');
+    } catch(e) {
+      if (typeof url === 'string') {
+        const parts = url.split('/');
+        return parts.length > 2 ? parts[2].replace(/^www\./, '') : 'web';
+      }
+      return 'web';
+    }
+  };
+
   // ==================== SYSTEM PRESETS ====================
   const SYSTEM_PRESETS = {
     default: '',
@@ -2318,7 +2331,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     session.messages.forEach(m => messagesPayload.push({ role: m.role, content: m.content || '' }));
     messagesPayload.push({ role: 'user', content: promptInstruction });
 
-    const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+    const chatUrl = (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
     const res = await fetch(chatUrl, {
       method: 'POST',
       headers,
@@ -3030,7 +3043,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         <div class="attached-images-gallery ${gridClass}">
           ${imgList.map((src, imgIdx) => `
             <div class="chat-img-thumb-wrap" data-img-idx="${imgIdx}" title="Klik untuk melihat foto layar penuh">
-              <img src="${escapeHtml(src)}" alt="Foto ${imgIdx + 1}" class="chat-zoomable-img">
+              <img src="${src}" alt="Foto ${imgIdx + 1}" class="chat-zoomable-img">
               <div class="chat-img-overlay">
                 <i class="fa-solid fa-expand"></i>
               </div>
@@ -3520,7 +3533,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         card.className = 'preview-card';
         card.title = 'Klik untuk melihat foto layar penuh';
         card.innerHTML = `
-          <img src="${escapeHtml(imgSrc)}" alt="Lampiran Foto ${idx + 1}">
+          <img src="${imgSrc}" alt="Lampiran Foto ${idx + 1}">
           <button class="remove-attachment-btn" data-img-idx="${idx}" title="Hapus Foto"><i class="fa-solid fa-xmark"></i></button>
         `;
         card.querySelector('img').addEventListener('click', (e) => {
@@ -4062,7 +4075,7 @@ ${organicBlock}
       let rawModels = [];
       let isRunning = false;
 
-      if (IS_GITHUB_PAGES) {
+      if (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) {
         // Direct browser fetch
         try {
           // 1. Try /api/tags
@@ -6042,7 +6055,7 @@ ${organicBlock}
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
       }
 
-      const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+      const chatUrl = (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
 
       let response = await fetch(chatUrl, {
         method: 'POST',
@@ -7968,7 +7981,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         endpoint: ep
       };
       if (STATE.settings.ollamaApiKey) requestBody.apiKey = STATE.settings.ollamaApiKey;
-      const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+      const chatUrl = (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
 
       const res = await fetch(chatUrl, {
         method: 'POST',
@@ -8153,7 +8166,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       };
       if (STATE.settings.ollamaApiKey) requestBody.apiKey = STATE.settings.ollamaApiKey;
 
-      const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+      const chatUrl = (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
       const response = await fetch(chatUrl, {
         method: 'POST',
         headers,
@@ -14627,7 +14640,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     // Music Mode Indicator (hover to deactivate)
     els.musicModeIndicator?.addEventListener('click', (e) => {
       e.stopPropagation();
-      setMusicMode('off');
+      setMusicModel('off');
     });
     els.musicModeIndicator?.addEventListener('mouseenter', () => {
       if (els.musicModeIndicator) {
@@ -15079,7 +15092,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           headers['x-ollama-key'] = key;
         }
 
-        if (IS_GITHUB_PAGES) {
+        if (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) {
           // Direct browser testing
           let res = await fetch(resolveEndpointUrl(ep, 'api/tags'), { headers, mode: 'cors' }).catch(() => null);
           if (!res || !res.ok) {
