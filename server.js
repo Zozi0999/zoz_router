@@ -1241,6 +1241,10 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   }
   rawEp = rawEp.replace(/\/+$/, '');
 
+  if (isOllamaEndpointForbidden(rawEp)) {
+    throw new Error('Endpoint Ollama mengarah ke host privat/internal - akses diblokir (SSRF Protection).');
+  }
+
   const ollamaUrl = resolveEndpointUrl(rawEp, 'api/chat');
   const client = ollamaUrl.protocol === 'https:' ? https : http;
 
@@ -3376,6 +3380,16 @@ const server = http.createServer(async (req, res) => {
       const topik = body.topik || body.topic || body.query || body.prompt || '';
       if (!topik) {
         return sendJSON(res, 400, { error: 'Parameter `topik` atau `prompt` diperlukan untuk memulai Deep Research.' });
+      }
+
+      if (body.endpoint && typeof body.endpoint === 'string') {
+        let testEp = body.endpoint.trim();
+        if (!/^https?:\/\//i.test(testEp)) {
+          testEp = `http://${testEp}`;
+        }
+        if (isOllamaEndpointForbidden(testEp)) {
+          return sendJSON(res, 400, { error: 'Endpoint Ollama mengarah ke host privat/internal - akses diblokir (SSRF Protection).' });
+        }
       }
 
       pruneResearchTasks();
