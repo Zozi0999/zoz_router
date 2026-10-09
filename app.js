@@ -15277,7 +15277,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
 
       if (els.settingMusicModel) {
-        STATE.settings.musicModel = els.settingMusicModel.value.trim() || 'qwen2.5:1.5b';
+        STATE.settings.musicModel = els.settingMusicModel.value.trim() || DEFAULT_MUSIC_MODEL;
+        normalizeMusicModelSetting();
       }
 
       if (els.paramTemperature) STATE.settings.temperature = parseFloat(els.paramTemperature.value);
