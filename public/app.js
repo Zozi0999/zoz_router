@@ -2330,7 +2330,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     session.messages.forEach(m => messagesPayload.push({ role: m.role, content: m.content || '' }));
     messagesPayload.push({ role: 'user', content: promptInstruction });
 
-    const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+    const chatUrl = (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
     const res = await fetch(chatUrl, {
       method: 'POST',
       headers,
@@ -4074,7 +4074,7 @@ ${organicBlock}
       let rawModels = [];
       let isRunning = false;
 
-      if (IS_GITHUB_PAGES) {
+      if (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) {
         // Direct browser fetch
         try {
           // 1. Try /api/tags
@@ -6054,7 +6054,7 @@ ${organicBlock}
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
       }
 
-      const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+      const chatUrl = (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
 
       let response = await fetch(chatUrl, {
         method: 'POST',
@@ -7980,7 +7980,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         endpoint: ep
       };
       if (STATE.settings.ollamaApiKey) requestBody.apiKey = STATE.settings.ollamaApiKey;
-      const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+      const chatUrl = (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
 
       const res = await fetch(chatUrl, {
         method: 'POST',
@@ -8165,7 +8165,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       };
       if (STATE.settings.ollamaApiKey) requestBody.apiKey = STATE.settings.ollamaApiKey;
 
-      const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+      const chatUrl = (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
       const response = await fetch(chatUrl, {
         method: 'POST',
         headers,
@@ -15067,7 +15067,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
           headers['x-ollama-key'] = key;
         }
 
-        if (IS_GITHUB_PAGES) {
+        if (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) {
           // Direct browser testing
           let res = await fetch(resolveEndpointUrl(ep, 'api/tags'), { headers, mode: 'cors' }).catch(() => null);
           if (!res || !res.ok) {
