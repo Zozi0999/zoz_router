@@ -59,7 +59,8 @@ export default {
     if (url.pathname === '/api/ollama/chat' && request.method === 'POST') {
       try {
         const body = await request.json();
-        const authHeader = request.headers.get('Authorization') || (body.apiKey ? `Bearer ${body.apiKey}` : (body.ollamaApiKey ? `Bearer ${body.ollamaApiKey}` : (request.headers.get('x-ollama-key') ? `Bearer ${request.headers.get('x-ollama-key')}` : '')));
+        const apiKey = body.apiKey ? String(body.apiKey).replace(/^Bearer\s+/i, '').trim() : (body.ollamaApiKey ? String(body.ollamaApiKey).replace(/^Bearer\s+/i, '').trim() : (request.headers.get('x-ollama-key') ? String(request.headers.get('x-ollama-key')).replace(/^Bearer\s+/i, '').trim() : ''));
+        const authHeader = request.headers.get('Authorization') || (apiKey ? `Bearer ${apiKey}` : '');
         const targetEndpoint = body.endpoint || 'https://ollama.com';
         let cleanEndpoint = (targetEndpoint || 'https://ollama.com').trim();
         if (!cleanEndpoint.startsWith('http://') && !cleanEndpoint.startsWith('https://')) {
@@ -113,7 +114,8 @@ export default {
     // Proxy Ollama Models
     if (url.pathname === '/api/ollama/models' && request.method === 'GET') {
       try {
-        const authHeader = request.headers.get('Authorization') || (request.headers.get('x-ollama-key') ? `Bearer ${request.headers.get('x-ollama-key')}` : '') || (request.headers.get('x-api-key') ? `Bearer ${request.headers.get('x-api-key')}` : '') || (url.searchParams.get('key') ? `Bearer ${url.searchParams.get('key')}` : '') || (url.searchParams.get('apiKey') ? `Bearer ${url.searchParams.get('apiKey')}` : '');
+        const key = request.headers.get('x-ollama-key') || request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || '';
+        const authHeader = request.headers.get('Authorization') || (key ? `Bearer ${String(key).replace(/^Bearer\s+/i, '').trim()}` : '');
         const endpoint = url.searchParams.get('endpoint') || (authHeader ? 'https://ollama.com' : 'http://127.0.0.1:11434');
         const headers = {};
         if (authHeader) headers['Authorization'] = authHeader;

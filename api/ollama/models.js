@@ -32,7 +32,8 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const authHeader = req.headers.authorization || (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : '') || (req.headers['x-api-key'] ? `Bearer ${req.headers['x-api-key']}` : '') || (req.query?.key ? `Bearer ${req.query.key}` : '') || (req.query?.apiKey ? `Bearer ${req.query.apiKey}` : '');
+    const key = req.headers['x-ollama-key'] ? String(req.headers['x-ollama-key']).replace(/^Bearer\s+/i, '').trim() : (req.headers['x-api-key'] ? String(req.headers['x-api-key']).replace(/^Bearer\s+/i, '').trim() : (req.query?.key ? String(req.query.key).replace(/^Bearer\s+/i, '').trim() : (req.query?.apiKey ? String(req.query.apiKey).replace(/^Bearer\s+/i, '').trim() : '')));
+    const authHeader = req.headers.authorization || (key ? `Bearer ${key}` : '');
     const endpoint = req.query?.endpoint || (authHeader ? 'https://ollama.com' : 'http://127.0.0.1:11434');
 
     const headers = {};

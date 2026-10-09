@@ -42,7 +42,8 @@ module.exports = async function handler(req, res) {
     }
     body = body || {};
 
-    const authHeader = req.headers.authorization || (body.apiKey ? `Bearer ${body.apiKey}` : (body.ollamaApiKey ? `Bearer ${body.ollamaApiKey}` : (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : '')));
+    const key = body.apiKey ? String(body.apiKey).replace(/^Bearer\s+/i, '').trim() : (body.ollamaApiKey ? String(body.ollamaApiKey).replace(/^Bearer\s+/i, '').trim() : (req.headers['x-ollama-key'] ? String(req.headers['x-ollama-key']).replace(/^Bearer\s+/i, '').trim() : ''));
+    const authHeader = req.headers.authorization || (key ? `Bearer ${key}` : '');
 
     let targetEndpoint = body.endpoint || 'https://ollama.com';
     if (authHeader && (!body.endpoint || body.endpoint.includes('127.0.0.1') || body.endpoint.includes('localhost'))) {

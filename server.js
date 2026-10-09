@@ -144,8 +144,21 @@ function isPrivateHost(hostname, port) {
   if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)) return true;
   if (/^169\.254\./.test(host)) return true; // Link-local
   if (/^fc00:|^fe80:/i.test(host)) return true; // IPv6 Unique Local & Link-Local
-  if (host.startsWith('::ffff:')) return true; // Block all IPv4-mapped IPv6
-  if (host.startsWith('::7f00:') || host.startsWith('::a9fe:') || host.startsWith('::c0a8:') || host.startsWith('::0a')) return true; // Block mapped hex variants
+
+  // Handle IPv4-mapped IPv6 addresses (::ffff:10.x.x.x, ::ffff:192.168.x.x, etc.)
+  if (host.startsWith('::ffff:')) {
+    const ipv4Part = host.slice(7);
+    if (/^127\./.test(ipv4Part)) return true;
+    if (/^10\./.test(ipv4Part)) return true;
+    if (/^192\.168\./.test(ipv4Part)) return true;
+    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ipv4Part)) return true;
+    if (/^169\.254\./.test(ipv4Part)) return true;
+    if (/^0\.0\.0\.0$/.test(ipv4Part)) return true;
+    return true; // Block all IPv4-mapped IPv6 as private
+  }
+
+  // Block other IPv4-mapped IPv6 hex variants
+  if (host.startsWith('::7f00:') || host.startsWith('::a9fe:') || host.startsWith('::c0a8:') || host.startsWith('::0a')) return true;
   if (host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.localhost')) return true;
   const numPort = Number(port);
   if (numPort === 11434 || numPort === 4040 || numPort === 8080) {
@@ -164,6 +177,22 @@ function isOllamaEndpointForbidden(endpointUrl) {
   // Izinkan Ollama lokal default untuk development (bukan vektor SSRF)
   if ((host === '127.0.0.1' || host === 'localhost' || host === '::1') && port === '11434') return false;
   return isPrivateHost(host, port);
+}
+
+// Validasi sessionId untuk mencegah path traversal
+function validateSessionId(sessionId) {
+  if (!sessionId || typeof sessionId !== 'string') return { valid: false, error: 'ID sesi diperlukan.' };
+  const id = sessionId.trim();
+  if (id.length > 128) return { valid: false, error: 'ID sesi terlalu panjang (maks 128 karakter).' };
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) return { valid: false, error: 'Format ID sesi tidak valid. Hanya alphanumeric, garis bawah, dan tanda hubung yang diperbolehkan.' };
+  // Resolve path dan pastikan tidak keluar dari SESSIONS_DIR
+  const sessFile = path.join(SESSIONS_DIR, `${id}.json`);
+  const resolved = path.resolve(sessFile);
+  const resolvedSessionsDir = path.resolve(SESSIONS_DIR);
+  if (!resolved.startsWith(resolvedSessionsDir + path.sep) && resolved !== resolvedSessionsDir) {
+    return { valid: false, error: 'Forbidden: Path traversal terdeteksi.' };
+  }
+  return { valid: true, id, sessFile };
 }
 
 // Helper untuk mengunduh buffer gambar dari URL eksternal dengan proteksi SSRF, batas redirect loop, dan memory buffer cap
@@ -2872,12 +2901,9 @@ const server = http.createServer(async (req, res) => {
 
   // 2. Get specific session full data
   if (sessionMatch && method === 'GET') {
-    const sessionId = sessionMatch[1];
-    const sessFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
-    const relSess = path.relative(SESSIONS_DIR, sessFile);
-    if (relSess.startsWith('..') || path.isAbsolute(relSess)) {
-      return sendJSON(res, 403, { error: 'Forbidden: Path traversal terdeteksi.' });
-    }
+    const validation = validateSessionId(sessionMatch[1]);
+    if (!validation.valid) return sendJSON(res, 400, { error: validation.error });
+    const { id, sessFile } = validation;
     if (!fs.existsSync(sessFile)) {
       return sendJSON(res, 404, { error: 'Sesi tidak ditemukan di disk perangkat.' });
     }
@@ -2896,16 +2922,11 @@ const server = http.createServer(async (req, res) => {
       if (!body || !body.id) {
         return sendJSON(res, 400, { error: 'ID sesi diperlukan.' });
       }
-      const sessionId = String(body.id).trim();
-      if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
-        return sendJSON(res, 400, { error: 'Format ID sesi tidak valid. Hanya alphanumeric, garis bawah, dan tanda hubung yang diperbolehkan.' });
-      }
-      const sessFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
-      const relSess = path.relative(SESSIONS_DIR, sessFile);
-      if (relSess.startsWith('..') || path.isAbsolute(relSess)) {
-        return sendJSON(res, 403, { error: 'Forbidden: Path traversal terdeteksi.' });
-      }
+      const validation = validateSessionId(String(body.id).trim());
+      if (!validation.valid) return sendJSON(res, 400, { error: validation.error });
+      const { id, sessFile } = validation;
       body.updatedAt = new Date().toISOString();
+      body.id = id;
       if (!fs.existsSync(SESSIONS_DIR)) {
         fs.mkdirSync(SESSIONS_DIR, { recursive: true });
       }
@@ -2918,12 +2939,9 @@ const server = http.createServer(async (req, res) => {
 
   // 4. Update session (Rename / Edit title / Merge update)
   if (sessionMatch && (method === 'PUT' || method === 'PATCH')) {
-    const sessionId = sessionMatch[1];
-    const sessFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
-    const relSess = path.relative(SESSIONS_DIR, sessFile);
-    if (relSess.startsWith('..') || path.isAbsolute(relSess)) {
-      return sendJSON(res, 403, { error: 'Forbidden: Path traversal terdeteksi.' });
-    }
+    const validation = validateSessionId(sessionMatch[1]);
+    if (!validation.valid) return sendJSON(res, 400, { error: validation.error });
+    const { id, sessFile } = validation;
     try {
       const body = await parseBody(req);
       let existing = {};
@@ -2933,7 +2951,7 @@ const server = http.createServer(async (req, res) => {
       const updated = {
         ...existing,
         ...body,
-        id: sessionId,
+        id: id,
         updatedAt: new Date().toISOString()
       };
       if (!fs.existsSync(SESSIONS_DIR)) {
@@ -2948,27 +2966,24 @@ const server = http.createServer(async (req, res) => {
 
   // 5. Delete specific session file from disk
   if (sessionMatch && method === 'DELETE') {
-    const sessionId = sessionMatch[1];
-    const sessFile = path.join(SESSIONS_DIR, `${sessionId}.json`);
-    const relSess = path.relative(SESSIONS_DIR, sessFile);
-    if (relSess.startsWith('..') || path.isAbsolute(relSess)) {
-      return sendJSON(res, 403, { error: 'Forbidden: Path traversal terdeteksi.' });
-    }
+    const validation = validateSessionId(sessionMatch[1]);
+    if (!validation.valid) return sendJSON(res, 400, { error: validation.error });
+    const { id, sessFile } = validation;
     try {
       // Hentikan tugas background chat aktif untuk sesi ini agar tidak membangkitkan zombi sesi
-      if (sessionId && dbActiveChatTasks[sessionId]) {
-        const bgTask = dbActiveChatTasks[sessionId];
+      if (id && dbActiveChatTasks[id]) {
+        const bgTask = dbActiveChatTasks[id];
         bgTask.status = 'aborted';
         if (bgTask.proxyReq && !bgTask.proxyReq.destroyed) {
           try { bgTask.proxyReq.destroy(); } catch (_) {}
         }
-        delete dbActiveChatTasks[sessionId];
+        delete dbActiveChatTasks[id];
       }
 
       // Hentikan tugas Deep Research aktif untuk sesi ini jika ada
       for (const rId of Object.keys(dbTugasRiset)) {
         const rTask = dbTugasRiset[rId];
-        if (rTask && (rTask.sessionId === sessionId || rTask.taskId === sessionId)) {
+        if (rTask && (rTask.sessionId === id || rTask.taskId === id)) {
           rTask.aborted = true;
           rTask.status = 'dibatalkan';
           delete dbTugasRiset[rId];
@@ -3256,7 +3271,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/web-search' && (method === 'GET' || method === 'POST')) {
     try {
       let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
-      let apiKey = req.headers['x-serper-key'] || req.headers['x-api-key'] || reqUrl.searchParams.get('apiKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('serperApiKey') || '';
+      let apiKey = req.headers['x-serper-key'] || req.headers['x-api-key'] || '';
       let num = parseInt(reqUrl.searchParams.get('num') || reqUrl.searchParams.get('limit') || '15', 10);
       if (method === 'POST') {
         const body = await parseBody(req);
@@ -3481,7 +3496,7 @@ const server = http.createServer(async (req, res) => {
         width = parseInt(reqUrl.searchParams.get('width'), 10) || width;
         height = parseInt(reqUrl.searchParams.get('height'), 10) || height;
         seed = reqUrl.searchParams.get('seed') || null;
-        openRouterKey = reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
+        openRouterKey = (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       }
 
       if (openRouterKey) {
@@ -4051,7 +4066,7 @@ const server = http.createServer(async (req, res) => {
         prompt = reqUrl.searchParams.get('prompt') || reqUrl.searchParams.get('q') || '';
         sessionId = reqUrl.searchParams.get('sessionId') || req.headers['x-session-id'] || null;
         requestedMusicModel = (reqUrl.searchParams.get('musicModel') || reqUrl.searchParams.get('model') || '').trim();
-        openRouterKey = (reqUrl.searchParams.get('openRouterKey') || req.headers['x-openrouter-key'] || '').trim();
+        openRouterKey = (req.headers['x-openrouter-key'] || '').trim();
       }
       openRouterKey = String(openRouterKey || '').replace(/^Bearer\s+/i, '').trim();
       if (!openRouterKey && process.env.OPENROUTER_API_KEY) openRouterKey = process.env.OPENROUTER_API_KEY;
@@ -4638,7 +4653,7 @@ const server = http.createServer(async (req, res) => {
 
         // Upstream returned 200 OK -> Send headers matching client stream mode!
         const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
-        if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+        if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
           try {
             res.writeHead(200, {
               'Content-Type': contentType,
@@ -4754,7 +4769,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/openrouter/models' && method === 'GET') {
     let authHeader = req.headers['authorization'];
     if (!authHeader) {
-      const qKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || process.env.OPENROUTER_API_KEY;
+      const qKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
     }
     const options = {
@@ -4811,7 +4826,7 @@ const server = http.createServer(async (req, res) => {
   if ((pathname === '/api/openrouter/images/models' || pathname === '/api/openrouter/image-models') && method === 'GET') {
     let authHeader = req.headers['authorization'];
     if (!authHeader) {
-      const qKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || process.env.OPENROUTER_API_KEY;
+      const qKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
     }
     const options = {
@@ -4868,7 +4883,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/openrouter/auth-check' && method === 'GET') {
     let authHeader = req.headers['authorization'];
     if (!authHeader) {
-      const qKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || process.env.OPENROUTER_API_KEY;
+      const qKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
     }
     if (!authHeader) {
@@ -4921,7 +4936,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/openrouter/credits' && method === 'GET') {
     let authHeader = req.headers['authorization'];
     if (!authHeader) {
-      const qKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || reqUrl.searchParams.get('openRouterKey') || reqUrl.searchParams.get('key') || reqUrl.searchParams.get('apiKey') || process.env.OPENROUTER_API_KEY;
+      const qKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
     }
     if (!authHeader) {
@@ -5129,7 +5144,7 @@ const server = http.createServer(async (req, res) => {
 
         // OpenRouter returned 200 OK -> Send headers matching client stream mode!
         const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
-        if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+        if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
           try {
             res.writeHead(200, {
               'Content-Type': contentType,
