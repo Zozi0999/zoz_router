@@ -328,6 +328,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     imageModelDropdown: $('#imageModelDropdown'),
     imageModelBadge: $('#imageModelBadge'),
     imageGenToggleBtn: $('#imageGenToggleBtn'),
+    imageModeIndicator: $('#imageModeIndicator'),
     musicGenToggleBtn: $('#musicGenToggleBtn'),
     musicModeIndicator: $('#musicModeIndicator'),
     musicModelBadge: $('#musicModelBadge'),
@@ -10035,6 +10036,16 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         : '';
     }
 
+    if (els.imageModeIndicator) {
+      els.imageModeIndicator.style.display = isImageMode ? 'flex' : 'none';
+      // Selalu reset ikon ke ikon gambar, agar tidak menyimpan ikon silang
+      // sisa hover saat mode gambar dinonaktifkan lalu diaktifkan kembali.
+      const indicatorIcon = els.imageModeIndicator.querySelector('i');
+      if (indicatorIcon) {
+        indicatorIcon.className = 'fa-solid fa-image';
+      }
+    }
+
     // Sinkronisasi status checked pada popup modal/dropdown
     $$('.image-model-item').forEach(item => {
       const itemModel = item.dataset.model;
@@ -14844,6 +14855,26 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         const modelVal = item.dataset.model || 'flux';
         setImageModel(modelVal);
       });
+    });
+
+    // Image Mode Indicator (hover untuk menonaktifkan — sama seperti music indicator)
+    els.imageModeIndicator?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const icon = els.imageModeIndicator?.querySelector('i');
+      if (icon) icon.className = 'fa-solid fa-image';
+      setImageModel('off');
+    });
+    els.imageModeIndicator?.addEventListener('mouseenter', () => {
+      if (els.imageModeIndicator) {
+        const icon = els.imageModeIndicator.querySelector('i');
+        if (icon) icon.className = 'fa-solid fa-times';
+      }
+    });
+    els.imageModeIndicator?.addEventListener('mouseleave', () => {
+      // Reset tanpa syarat: saat mode dinonaktifkan lewat klik, mouseleave
+      // tetap harus mengembalikan ikon agar tidak nyangkut di silang.
+      const icon = els.imageModeIndicator?.querySelector('i');
+      if (icon) icon.className = 'fa-solid fa-image';
     });
 
     // Image Model Dropdown Tabs (Pollinations vs OpenRouter)

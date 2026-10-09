@@ -1939,6 +1939,26 @@ html, body {
   /* icon will be changed via JS */
 }
 
+/* AI Image Mode Indicator (cara kerja sama dengan music-mode-indicator) */
+.composer-tools-left .image-mode-indicator {
+  width: 28px;
+  height: 28px;
+  margin: 4px 6px;
+  border-radius: 4px;
+  background: rgba(255, 0, 127, 0.1);
+  color: #FF007F;
+  border: 1px solid rgba(255, 0, 127, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.composer-tools-left .image-mode-indicator:hover {
+  background: rgba(255, 0, 127, 0.2);
+  color: #FF2E93;
+}
+
 .composer-btn:hover {
   color: var(--neon-cyan);
   background: var(--bg-card);
