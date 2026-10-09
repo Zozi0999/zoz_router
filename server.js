@@ -740,15 +740,21 @@ const dbActiveChatTasks = {}; // sessionId -> { taskId, sessionId, model, fullTe
 
 function pruneActiveChatTasks() {
   try {
-    const ONE_HOUR = 60 * 60 * 1000;
+    const FIFTEEN_MINS = 15 * 60 * 1000;
     const now = Date.now();
     for (const sid of Object.keys(dbActiveChatTasks)) {
       const t = dbActiveChatTasks[sid];
-      if (t && t.startedAt && (now - t.startedAt > ONE_HOUR)) {
-        if (t.proxyReq && !t.proxyReq.destroyed) {
-          try { t.proxyReq.destroy(); } catch (_) {}
+      if (t) {
+        if (t.status === 'completed' || t.status === 'error' || t.status === 'aborted') {
+          delete dbActiveChatTasks[sid];
+          continue;
         }
-        delete dbActiveChatTasks[sid];
+        if (t.startedAt && (now - t.startedAt > FIFTEEN_MINS)) {
+          if (t.proxyReq && !t.proxyReq.destroyed) {
+            try { t.proxyReq.destroy(); } catch (_) {}
+          }
+          delete dbActiveChatTasks[sid];
+        }
       }
     }
   } catch (e) {
@@ -4668,6 +4674,9 @@ const server = http.createServer(async (req, res) => {
             if (!clientDisconnected) errData += chunk;
           });
           proxyRes.on('end', () => {
+            if (sessionId) {
+              delete dbActiveChatTasks[sessionId];
+            }
             if (clientDisconnected || res.writableEnded || res.destroyed) return;
             try {
               let parsedErr = null;
@@ -4677,6 +4686,9 @@ const server = http.createServer(async (req, res) => {
             } catch (e) {}
           });
           proxyRes.on('error', (err) => {
+            if (sessionId) {
+              delete dbActiveChatTasks[sessionId];
+            }
             if (clientDisconnected || res.writableEnded || res.destroyed) return;
             if (!res.headersSent) {
               sendJSON(res, 502, { error: `Ollama upstream error stream interrupted: ${err.message}` });
@@ -5168,6 +5180,9 @@ const server = http.createServer(async (req, res) => {
             if (!clientDisconnected) errData += chunk;
           });
           proxyRes.on('end', () => {
+            if (sessionId) {
+              delete dbActiveChatTasks[sessionId];
+            }
             if (clientDisconnected || res.writableEnded || res.destroyed) return;
             try {
               let parsedErr = null;
@@ -5177,6 +5192,9 @@ const server = http.createServer(async (req, res) => {
             } catch (e) {}
           });
           proxyRes.on('error', (err) => {
+            if (sessionId) {
+              delete dbActiveChatTasks[sessionId];
+            }
             if (clientDisconnected || res.writableEnded || res.destroyed) return;
             if (!res.headersSent) {
               sendJSON(res, 502, { error: `OpenRouter error stream interrupted: ${err.message}` });
