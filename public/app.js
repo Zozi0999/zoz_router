@@ -8,6 +8,19 @@
 
   const IS_GITHUB_PAGES = Boolean(location.hostname && location.hostname.endsWith('github.io')) || location.protocol === 'file:';
 
+  const extractDomainSafe = (url) => {
+    try {
+      const u = new URL(url);
+      return u.hostname.replace(/^www\./, '');
+    } catch(e) {
+      if (typeof url === 'string') {
+        const parts = url.split('/');
+        return parts.length > 2 ? parts[2].replace(/^www\./, '') : 'web';
+      }
+      return 'web';
+    }
+  };
+
   // ==================== SYSTEM PRESETS ====================
   const SYSTEM_PRESETS = {
     default: '',
