@@ -4238,7 +4238,11 @@ ${organicBlock}
       };
     }
 
-    clientYouTubeCache.set(cacheKey, result);
+    // Hanya cache hasil sukses: kegagalan oEmbed bersifat sementara (mis. rate
+    // limit) dan tidak boleh menempel sehingga kartu video hilang permanen.
+    if (result && result.success) {
+      clientYouTubeCache.set(cacheKey, result);
+    }
     return result;
   }
 
@@ -4322,13 +4326,27 @@ ${organicBlock}
     bubble.insertBefore(cardsContainer, bubble.firstChild);
 
     for (const vidId of ids) {
-      const info = await fetchYouTubeInfoClient(vidId);
-      if (info && info.success) {
-        const cardWrapper = document.createElement('div');
-        cardWrapper.innerHTML = buildYouTubePreviewCardHtml(info);
-        if (cardWrapper.firstElementChild) {
-          cardsContainer.appendChild(cardWrapper.firstElementChild);
-        }
+      let info = null;
+      try {
+        info = await fetchYouTubeInfoClient(vidId);
+      } catch (_) {
+        info = null;
+      }
+      // Metadata oEmbed bisa gagal sementara (rate limit / jaringan). Kartu tetap
+      // dirender dengan metadata dasar agar tombol putar & "Tonton Langsung"
+      // tetap tersedia daripada menghilang sama sekali.
+      const meta = info || {};
+      const cardData = {
+        videoId: meta.videoId || vidId,
+        url: meta.url || `https://www.youtube.com/watch?v=${vidId}`,
+        title: meta.title || `Video YouTube (${vidId})`,
+        channel: meta.channel || 'YouTube',
+        thumbnail: meta.thumbnail || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`
+      };
+      const cardWrapper = document.createElement('div');
+      cardWrapper.innerHTML = buildYouTubePreviewCardHtml(cardData);
+      if (cardWrapper.firstElementChild) {
+        cardsContainer.appendChild(cardWrapper.firstElementChild);
       }
     }
 
