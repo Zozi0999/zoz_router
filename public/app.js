@@ -82,40 +82,18 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
   // Dedicated Image Synthesis Models (Pollinations Multi-Style & OpenRouter Image Engines)
   const DEFAULT_IMAGE_MODELS = [
-    { id: 'flux', name: 'Flux.1 Schnell (Pollinations / Gratis & Cepat)', provider: 'pollinations', cat: 'free', tag: 'Gratis • Schnell' },
-    { id: 'flux-realism', name: 'Flux Realism (Foto Realistis Sinematik)', provider: 'pollinations', cat: 'realistic', tag: 'Realism • HD' },
-    { id: 'flux-anime', name: 'Flux Anime (Gaya Ilustrasi Anime & Manga)', provider: 'pollinations', cat: 'anime', tag: 'Anime • 2D' },
-    { id: 'flux-3d', name: 'Flux 3D (Render 3D CGI & Sci-Fi)', provider: 'pollinations', cat: '3d', tag: '3D • CGI' },
-    { id: 'turbo', name: 'SDXL Turbo (Ultra Fast Generation)', provider: 'pollinations', cat: 'fast', tag: 'Fast • Turbo' },
-    { id: 'flux-pro', name: 'Flux.1 Pro (Kualitas Tinggi & Detail Presisi)', provider: 'pollinations', cat: 'pro', tag: 'Pro • Detail' },
-    { id: 'midjourney', name: 'Midjourney Style (Artistik & Estetik)', provider: 'pollinations', cat: 'art', tag: 'Art • Style' },
-    { id: 'google/gemini-2.5-flash-image', name: 'Gemini 2.5 Flash Image (Google Cloud)', provider: 'openrouter', cat: 'flagship', tag: 'Google AI' },
-    { id: 'openai/gpt-5-image', name: 'GPT-5 Image (OpenAI Multimodal)', provider: 'openrouter', cat: 'flagship', tag: 'OpenAI' }
+    { id: 'flux', name: 'Flux.1 Schnell (Pollinations)', provider: 'pollinations', cat: 'free', tag: 'Gratis • Schnell' },
+    { id: 'flux-realism', name: 'Flux Realism', provider: 'pollinations', cat: 'realistic', tag: 'Realism • HD' },
+    { id: 'flux-anime', name: 'Flux Anime', provider: 'pollinations', cat: 'anime', tag: 'Anime • 2D' },
+    { id: 'flux-3d', name: 'Flux 3D', provider: 'pollinations', cat: '3d', tag: '3D • CGI' },
+    { id: 'turbo', name: 'SDXL Turbo', provider: 'pollinations', cat: 'fast', tag: 'Fast • Turbo' }
   ];
 
   // Dedicated OpenRouter Curated Image Engines
-  const CURATED_OPENROUTER_IMAGE_MODELS = [
-    { id: 'black-forest-labs/flux-3-image', name: 'FLUX.3 Image', provider: 'openrouter', cat: 'flagship', tag: 'BFL • Next-Gen', desc: 'Sintesis visual generasi baru Black Forest Labs' },
-    { id: 'black-forest-labs/flux.2-max', name: 'FLUX.2 Max', provider: 'openrouter', cat: 'flagship', tag: 'BFL • Max', desc: 'Presisi dan visual fidelity tertinggi Flux.2' },
-    { id: 'black-forest-labs/flux.2-pro', name: 'FLUX.2 Pro', provider: 'openrouter', cat: 'pro', tag: 'BFL • Pro', desc: 'Model profesional rendering kualitas studio' },
-    { id: 'google/gemini-2.5-flash-image', name: 'Gemini 2.5 Flash Image', provider: 'openrouter', cat: 'flagship', tag: 'Google • Flash', desc: 'Sintesis visual cerdas langsung Google Cloud' },
-    { id: 'google/gemini-3.1-flash-image', name: 'Gemini 3.1 Flash Image', provider: 'openrouter', cat: 'flagship', tag: 'Google • 3.1', desc: 'Generasi visual tingkat lanjut Google Gemini 3.1' },
-    { id: 'google/gemini-3-pro-image', name: 'Gemini 3 Pro Image', provider: 'openrouter', cat: 'flagship', tag: 'Google • Pro', desc: 'Model flagship visual Gemini 3 Pro' },
-    { id: 'openai/gpt-5-image', name: 'GPT-5 Image', provider: 'openrouter', cat: 'flagship', tag: 'OpenAI • GPT-5', desc: 'Engine multimodal visual OpenAI generasi baru' },
-    { id: 'openai/gpt-image-2.5-sunburst', name: 'GPT Image Sunburst', provider: 'openrouter', cat: 'flagship', tag: 'OpenAI • Sunburst', desc: 'Model visual difusi artistik OpenAI' },
-    { id: 'recraft/recraft-v4.1-flash', name: 'Recraft v4.1 Flash', provider: 'openrouter', cat: 'vector', tag: 'Recraft • Flash', desc: 'Spesialis grafis vektor, logo, ilustrasi & tipografi' },
-    { id: 'bytedance-seed/seedream-5-0-flash', name: 'ByteDance SeeDream 5.0', provider: 'openrouter', cat: 'fast', tag: 'ByteDance • Flash', desc: 'Engine visual super cepat ByteDance Seed' },
-    { id: 'x-ai/grok-imagine-image-2.0', name: 'Grok Imagine 2.0', provider: 'openrouter', cat: 'flagship', tag: 'xAI • Grok', desc: 'Sintesis visual fotorealistik & kreatif xAI' },
-    { id: 'qwen/qwen-image-3-pro', name: 'Qwen Image 3 Pro', provider: 'openrouter', cat: 'flagship', tag: 'Alibaba • Qwen', desc: 'Model gambar flagship multimodal Alibaba Cloud' },
-    { id: 'microsoft/mai-image-2.6', name: 'Microsoft MAI Image 2.6', provider: 'openrouter', cat: 'flagship', tag: 'Microsoft • MAI', desc: 'Model generasi gambar AI Microsoft Cloud' },
-    { id: 'krea/krea-2-large', name: 'Krea 2 Large', provider: 'openrouter', cat: 'art', tag: 'Krea • Large', desc: 'Model rendering estetika tinggi untuk kreator' }
-  ];
+  const CURATED_OPENROUTER_IMAGE_MODELS = []; // Kosongkan karena OpenRouter tidak mendistribusikan model gambar secara default
 
   // Model pembuat musik/audio ASLI (output audio) di OpenRouter. Model teks tidak bisa membuat suara.
-  const CURATED_OPENROUTER_MUSIC_MODELS = [
-    { id: 'google/lyria-3-clip-preview', name: 'Google Lyria 3 Clip', provider: 'openrouter', cat: 'google', tag: 'Google • ~30 dtk • $0.04', desc: 'Model musik AI Google: klip 30 detik 48kHz stereo dari deskripsi teks' },
-    { id: 'google/lyria-3-pro-preview', name: 'Google Lyria 3 Pro', provider: 'openrouter', cat: 'google', tag: 'Google • Lagu penuh • $0.08', desc: 'Lagu utuh berstruktur (bait, reff, bridge) dengan vokal, 48kHz stereo' }
-  ];
+  const CURATED_OPENROUTER_MUSIC_MODELS = []; // Kosongkan karena model seperti Lyria/Suno tidak ada di OpenRouter (hanya halusinasi AI sebelumnya)
 
   // ==================== STATE MANAGEMENT ====================
   const STATE = {
@@ -5781,7 +5759,7 @@ ${organicBlock}
     } else if (isProviderReturnedError) {
       title = `Penyedia Model OpenRouter Sedang Sibuk (Upstream Provider Error)`;
       desc = `Server penyedia pihak ketiga (upstream) untuk model <code>${escapeHtml(modelName)}</code> sedang mengalami antrean penuh atau gangguan sementara di OpenRouter.`;
-      advice = `💡 <strong>Solusi Cepat:</strong> Coba beralih ke model free lain yang sedang aktif stabil seperti <code>openrouter/free</code> atau <code>google/gemma-4-26b-a4b-it:free</code>, atau klik <strong>Ganti ke Model Gratis &amp; Kirim Ulang</strong>.`;
+      advice = `💡 <strong>Solusi Cepat:</strong> Coba beralih ke model free lain yang sedang aktif stabil seperti <code>openrouter/free</code> atau <code>google/gemma-2-9b-it:free</code>, atau klik <strong>Ganti ke Model Gratis &amp; Kirim Ulang</strong>.`;
     } else if (isCorsOrNetwork && engine === 'ollama') {
       title = `Batasan Koneksi Browser CORS (GitHub Pages)`;
       desc = `Browser memblokir koneksi langsung dari domain <code>github.io</code> ke server <code>ollama.com</code> karena pembatasan CORS server.`;
@@ -6692,8 +6670,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         ? [
             modelName,
             'openrouter/free',
-            'google/gemma-4-26b-a4b-it:free',
-            'liquid/lfm-2.5-2.6b:free'
+            'google/gemma-2-9b-it:free',
+            'meta-llama/llama-3.1-8b-instruct:free'
           ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
         : [modelName];
 
@@ -7341,8 +7319,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         const errorHtml = formatModelErrorMessage('openrouter', modelName, err, actualHasImage, STATE.webSearchEnabled);
 
         const isFreeModel = modelName.includes(':free') || modelName === 'openrouter/free';
-        const fallbackModelCandidate = modelName === 'openrouter/free' ? 'google/gemma-4-26b-a4b-it:free' : 'openrouter/free';
-        const fallbackLabel = modelName === 'openrouter/free' ? 'Gemma 4 26B (Free)' : 'OpenRouter Free Router';
+        const fallbackModelCandidate = modelName === 'openrouter/free' ? 'google/gemma-2-9b-it:free' : 'openrouter/free';
+        const fallbackLabel = modelName === 'openrouter/free' ? 'Gemma 2 9B (Free)' : 'OpenRouter Free Router';
 
         const rescuedHtml = hasPartialText ? `
           <div class="partial-rescued-content" style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed rgba(255,255,255,0.15);">
@@ -7897,8 +7875,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         ? [
             modelName,
             'openrouter/free',
-            'google/gemma-4-26b-a4b-it:free',
-            'liquid/lfm-2.5-2.6b:free'
+            'google/gemma-2-9b-it:free',
+            'meta-llama/llama-3.1-8b-instruct:free'
           ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
         : [modelName];
 
@@ -8018,8 +7996,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         ? [
             modelName,
             'openrouter/free',
-            'google/gemma-4-26b-a4b-it:free',
-            'liquid/lfm-2.5-2.6b:free'
+            'google/gemma-2-9b-it:free',
+            'meta-llama/llama-3.1-8b-instruct:free'
           ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
         : [modelName];
 
