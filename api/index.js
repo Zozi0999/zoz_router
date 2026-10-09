@@ -15,6 +15,12 @@ module.exports = async function handler(req, res) {
     return res.status(204).end();
   }
 
+  // Restore original request URL if rewritten by Vercel
+  const matchedPath = req.headers['x-matched-path'] || req.headers['x-forwarded-uri'] || req.headers['x-original-url'];
+  if (matchedPath && matchedPath.startsWith('/api') && (req.url === '/api' || req.url === '/api/')) {
+    req.url = matchedPath;
+  }
+
   try {
     await requestHandler(req, res);
   } catch (err) {

@@ -3275,6 +3275,17 @@ async function requestHandler(req, res) {
 
   // --- API ROUTES ---
 
+  // Gateway root info
+  if ((pathname === '/api' || pathname === '/api/') && method === 'GET') {
+    return sendJSON(res, 200, {
+      status: 'online',
+      name: 'ZOZ ROUTER Neural Gateway',
+      version: '1.0.0',
+      cloud: Boolean(IS_VERCEL_ENV),
+      timestamp: new Date().toISOString()
+    });
+  }
+
   // Health check
   if (pathname === '/api/health' && method === 'GET') {
     return sendJSON(res, 200, {
