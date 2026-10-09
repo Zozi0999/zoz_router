@@ -6028,6 +6028,12 @@ async function requestHandler(req, res) {
     return sendJSON(res, 405, { error: 'Method Not Allowed' });
   }
 
+  // --- VERCEL SERVERLESS GUARD ---
+  // Di Vercel Serverless, static files dilayani langsung oleh Edge CDN. Function ini hanya melayani /api/*
+  if (IS_VERCEL_ENV) {
+    return sendJSON(res, 404, { error: 'API endpoint not found on Vercel Gateway', path: pathname });
+  }
+
   let decodedPath = pathname;
   try {
     decodedPath = decodeURIComponent(pathname);
