@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261009_v160">
+  <link rel="stylesheet" href="style.css?v=20261009_v161">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -250,23 +250,6 @@
 
       <!-- BOTTOM COMPOSER / INPUT SECTION (For Single / Auto Mode) -->
       <footer class="composer-container" id="mainComposerContainer">
-        <!-- Live Attachment Preview Area -->
-        <div class="attachment-preview-bar" id="attachmentPreviewBar" style="display: none;">
-          <div class="preview-card" id="imagePreviewCard">
-            <img id="imagePreviewImg" src="" alt="Lampiran Gambar">
-            <button class="remove-attachment-btn" id="removeImageBtn" title="Hapus Gambar">
-              <i class="fa-solid fa-xmark"></i>
-            </button>
-          </div>
-        </div>
-
-        <!-- Tombol Cepat Konversi Teks Panjang ke Markdown (Claude/Grok Style) -->
-        <div class="auto-convert-doc-row" id="autoConvertDocRow" style="display: none;">
-          <button class="convert-md-pill" id="convertToMdPillBtn" type="button" title="Konversi teks panjang di input menjadi file markdown (.md) agar tidak memenuhi prompt">
-            <i class="fa-solid fa-file-code"></i> <span>Jadikan File Markdown (.md)</span>
-          </button>
-        </div>
-
         <!-- System Prompt Active Banner (if configured) -->
         <div class="active-preset-banner" id="activePresetBanner" style="display: none;">
           <i class="fa-solid fa-sparkles"></i>
@@ -295,6 +278,23 @@
                 </div>
               </div>
             </div>
+          </button>
+        </div>
+
+        <!-- Live Attachment Preview Area (Claude/Grok Style) -->
+        <div class="attachment-preview-bar" id="attachmentPreviewBar" style="display: none;">
+          <div class="preview-card" id="imagePreviewCard">
+            <img id="imagePreviewImg" src="" alt="Lampiran Gambar">
+            <button class="remove-attachment-btn" id="removeImageBtn" title="Hapus Gambar">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Tombol Cepat Konversi Teks Panjang ke Markdown (Claude/Grok Style) -->
+        <div class="auto-convert-doc-row" id="autoConvertDocRow" style="display: none;">
+          <button class="convert-md-pill" id="convertToMdPillBtn" type="button" title="Konversi teks panjang di input menjadi file markdown (.md) agar tidak memenuhi prompt">
+            <i class="fa-solid fa-file-code"></i> <span>Jadikan File Markdown (.md)</span>
           </button>
         </div>
 
@@ -1399,6 +1399,6 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
-  <script src="app.js?v=20261009_v160"></script>
+  <script src="app.js?v=20261009_v161"></script>
 </body>
 </html>

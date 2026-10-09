@@ -2943,10 +2943,12 @@ html, body {
 
 /* Auto Markdown Snippet Pill & Convert Row */
 .auto-convert-doc-row {
+  max-width: 920px;
+  margin: 0 auto 6px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 6px 6px 6px;
+  padding: 2px 4px;
   animation: fadeIn 0.25s ease;
 }
 

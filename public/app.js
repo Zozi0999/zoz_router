@@ -3640,8 +3640,13 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       return { ext: 'code.md', lang: 'c', label: 'Source Code', customName: 'source-code.md' };
     }
 
-    // 9. CSS
-    if (/[a-zA-Z0-9_\-#.]+\s*\{\s*[\w\-]+\s*:[^;]+;/i.test(trimmed)) {
+    // 9. CSS / Styles
+    if (
+      /\b(?:display|margin|padding|border|color|background|font|width|height|position|align|flex|grid|transform|opacity|z-index)\s*:/i.test(trimmed) ||
+      /[a-zA-Z0-9_\-#.:>\s,]+\s*\{\s*[^}]*\}/.test(trimmed) ||
+      /(?:@media|@keyframes|\.[\w\-]+|#[\w\-]+)\s*\{/i.test(trimmed) ||
+      /[a-zA-Z0-9_\-#.]+\s*\{\s*[\w\-]+\s*:[^;]+;/i.test(trimmed)
+    ) {
       return { ext: 'css.md', lang: 'css', label: 'Styles CSS', customName: 'styles.css.md' };
     }
 
@@ -3665,8 +3670,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     const trimmed = text.trim();
     if (!trimmed) return false;
 
-    // 1. Blok kode Markdown fenced (```), langsung konversi jika minimal 60 karakter
-    if (/```[\s\S]*?```/.test(trimmed) && trimmed.length >= 60) return true;
+    // 1. Blok kode Markdown fenced (```), langsung konversi jika minimal 40 karakter
+    if (/```[\s\S]*?```/.test(trimmed) && trimmed.length >= 40) return true;
 
     const lines = trimmed.split('\n');
     const lineCount = lines.length;
@@ -3674,23 +3679,32 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     // 2. Deteksi pola kodingan atau struktur bahasa pemrograman
     const isCode = (
-      /\b(?:function\b|const\b|let\b|var\b|import\b|export\b|class\b|console\.log|=>)\b/.test(trimmed) ||
-      /\b(?:def\b|elif\b|import\b|from\s+\w+\s+import|class\b|if\s+__name__)\b/.test(trimmed) ||
-      /<(?:!DOCTYPE|html|head|body|div|span|script|style|template|section)\b/i.test(trimmed) ||
-      /[a-zA-Z0-9_\-#.]+\s*\{\s*[\w\-]+\s*:[^;]+;/i.test(trimmed) ||
-      /\b(?:SELECT\b.*?\bFROM\b|INSERT\s+INTO|CREATE\s+TABLE|UPDATE\b.*?\bSET)\b/i.test(trimmed) ||
-      /(?:<\?php|\bpublic\s+class\b|#include\b|\bpackage\s+\w+|\bfn\s+\w+\b|\bfunc\s+\w+\b)/.test(trimmed) ||
+      // JavaScript / TypeScript
+      /\b(?:function\b|const\b|let\b|var\b|import\b|export\b|class\b|console\.log|=>|async\s+function)\b/.test(trimmed) ||
+      // Python
+      /\b(?:def\b|elif\b|import\b|from\s+\w+\s+import|class\b|if\s+__name__|print\s*\()/.test(trimmed) ||
+      // HTML / XML / JSX
+      /<(?:!DOCTYPE|html|head|body|div|span|script|style|template|section|p|a|ul|li|table|h[1-6])\b/i.test(trimmed) ||
+      // CSS / SCSS (selectors with curly braces, properties with colons, @media, etc.)
+      /\b(?:display|margin|padding|border|color|background|font|width|height|position|align|flex|grid|transform|opacity|z-index)\s*:/i.test(trimmed) ||
+      /[a-zA-Z0-9_\-#.:>\s,]+\s*\{\s*[^}]*\}/.test(trimmed) ||
+      // SQL
+      /\b(?:SELECT\b.*?\bFROM\b|INSERT\s+INTO|CREATE\s+TABLE|UPDATE\b.*?\bSET|DELETE\s+FROM)\b/i.test(trimmed) ||
+      // PHP / C / C++ / Java / Rust / Go / Shell
+      /(?:<\?php|\bpublic\s+class\b|#include\b|\bpackage\s+\w+|\bfn\s+\w+\b|\bfunc\s+\w+\b|\b(?:npm|curl|docker|git|chmod|sudo|export)\s+\w+)/.test(trimmed) ||
+      // JSON / Arrays
       ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) ||
-      (lineCount >= 3 && /[\{\};=()]/.test(trimmed) && !/^[A-Za-z\s]+$/.test(trimmed))
+      // Multi-line code-like construct
+      (lineCount >= 2 && /[\{\};=()\[\]<>]/.test(trimmed) && !/^[A-Za-z\s]+$/.test(trimmed))
     );
 
     if (isCode) {
-      // Untuk kodingan: cukup 100 karakter ATAU 3 baris
-      if (charCount >= 100 || lineCount >= 3) return true;
+      // Untuk kodingan: cukup 50 karakter ATAU 2 baris
+      if (charCount >= 50 || lineCount >= 2) return true;
     }
 
-    // 3. Teks panjang / laporan / artikel / log: cukup 250 karakter ATAU 5 baris
-    if (charCount >= 250 || lineCount >= 5) {
+    // 3. Teks panjang / laporan / artikel / log: cukup 180 karakter ATAU 4 baris
+    if (charCount >= 180 || lineCount >= 4) {
       return true;
     }
 
@@ -15020,15 +15034,37 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (pastedText && shouldAutoConvertAsDocument(pastedText)) {
         e.preventDefault();
         const currentText = (els.promptInput ? els.promptInput.value.trim() : '');
-        // Lipat HANYA pastekan menjadi dokumen. Teks yang sudah diketik user
+        // Lipat HANYA pastekan menjadi dokumen. Teks pertanyaan yang sudah diketik user
         // tidak boleh tertelan ke dalam file — ia tetap menjadi isi prompt.
         const converted = tryAutoConvertInputToDoc(pastedText);
-        if (converted && currentText && els.promptInput) {
-          els.promptInput.value = currentText;
+        if (converted) {
+          if (currentText && els.promptInput) {
+            els.promptInput.value = currentText;
+          }
           autoResizeTextarea(els.promptInput);
-          els.promptInput.focus();
+          els.promptInput?.focus();
         }
         return;
+      }
+    });
+
+    // Tangani drag & drop teks kodingan/laporan langsung ke textarea prompt
+    els.promptInput?.addEventListener('drop', (e) => {
+      let droppedText = '';
+      try {
+        droppedText = e.dataTransfer ? e.dataTransfer.getData('text/plain') : '';
+      } catch (_) {}
+      if (droppedText && shouldAutoConvertAsDocument(droppedText)) {
+        e.preventDefault();
+        const currentText = (els.promptInput ? els.promptInput.value.trim() : '');
+        const converted = tryAutoConvertInputToDoc(droppedText);
+        if (converted) {
+          if (currentText && els.promptInput) {
+            els.promptInput.value = currentText;
+          }
+          autoResizeTextarea(els.promptInput);
+          els.promptInput?.focus();
+        }
       }
     });
 
@@ -15037,21 +15073,21 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
       const val = els.promptInput ? els.promptInput.value : '';
 
-      // Real-time reactive auto-convert: Jika teks yang dimasukkan (misal dari paste/drag/insert)
-      // merupakan kodingan atau laporan panjang, langsung konversi seketika!
-      if (val && shouldAutoConvertAsDocument(val)) {
-        if (e?.inputType === 'insertFromPaste' || val.length >= 300 || val.split('\n').length >= 5) {
-          tryAutoConvertInputToDoc(val);
-          return;
-        }
-      }
-
-      // Cek apakah ada teks panjang di textarea untuk menampilkan tombol konversi cepat
+      // Tampilkan tombol pill konversi jika ada teks yang cocok dikonversi
       if (els.autoConvertDocRow) {
         if (val && shouldAutoConvertAsDocument(val)) {
           els.autoConvertDocRow.style.display = 'flex';
         } else {
           els.autoConvertDocRow.style.display = 'none';
+        }
+      }
+
+      // Real-time reactive auto-convert jika teks yang dimasukkan (misal paste/drop/bulk-insert)
+      // merupakan kodingan atau laporan panjang
+      if (val && shouldAutoConvertAsDocument(val)) {
+        if (e?.inputType === 'insertFromPaste' || e?.inputType === 'insertFromDrop' || val.length >= 180 || val.split('\n').length >= 4) {
+          tryAutoConvertInputToDoc(val);
+          return;
         }
       }
 
