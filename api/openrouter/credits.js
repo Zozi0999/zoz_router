@@ -8,8 +8,10 @@ module.exports = async function handler(req, res) {
   try {
     let authHeader = req.headers.authorization;
     if (!authHeader) {
-      const qKey = req.headers['x-api-key'] || req.query?.key || req.query?.apiKey || req.query?.openRouterKey || process.env.OPENROUTER_API_KEY;
+      const qKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
+    } else {
+      authHeader = `Bearer ${String(authHeader).replace(/^Bearer\s+/i, '').trim()}`;
     }
     if (!authHeader) return res.status(401).json({ error: 'Authorization header is required' });
 

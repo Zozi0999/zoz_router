@@ -13,7 +13,7 @@ module.exports = async function handler(req, res) {
     }
     body = body || {};
 
-    let apiKey = body.apiKey || body.openRouterKey || req.headers['x-api-key'] || (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, '').trim() : '') || req.query?.key || req.query?.apiKey || req.query?.openRouterKey || process.env.OPENROUTER_API_KEY;
+    let apiKey = body.apiKey || body.openRouterKey || req.headers['x-openrouter-key'] || req.headers['x-api-key'] || (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, '').trim() : '') || process.env.OPENROUTER_API_KEY;
     if (apiKey) {
       apiKey = String(apiKey).replace(/^Bearer\s+/i, '').trim();
     }

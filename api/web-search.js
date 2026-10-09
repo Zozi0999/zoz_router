@@ -9,7 +9,7 @@ module.exports = async function handler(req, res) {
 
   try {
     let query = req.query?.q || req.query?.query || '';
-    let apiKey = req.headers['x-serper-key'] || req.headers['x-api-key'] || req.query?.apiKey || req.query?.key || req.query?.serperApiKey || '';
+    let apiKey = req.headers['x-serper-key'] || req.headers['x-api-key'] || '';
     let num = parseInt(req.query?.num || req.query?.limit || '15', 10);
 
     if (req.method === 'POST' && req.body) {
