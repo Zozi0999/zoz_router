@@ -315,6 +315,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     imageModelBadge: $('#imageModelBadge'),
     imageGenToggleBtn: $('#imageGenToggleBtn'),
     musicGenToggleBtn: $('#musicGenToggleBtn'),
+    musicModeIndicator: $('#musicModeIndicator'),
     musicModelBadge: $('#musicModelBadge'),
     musicModelMenuWrapper: $('#musicModelMenuWrapper'),
     musicModelDropdown: $('#musicModelDropdown'),
@@ -10082,6 +10083,9 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (els.attachOptionGenMusic) {
       els.attachOptionGenMusic.classList.toggle('active', isMusicMode);
     }
+    if (els.musicModeIndicator) {
+      els.musicModeIndicator.style.display = isMusicMode ? 'flex' : 'none';
+    }
 
     // Sinkronisasi status checked pada popup modal/dropdown musik
     $$('.music-model-item').forEach(item => {
@@ -14619,6 +14623,27 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     $('#musicModelOptionOff')?.addEventListener('click', (e) => {
       e.stopPropagation();
       setMusicModel('off');
+    });
+    // Music Mode Indicator (hover to deactivate)
+    els.musicModeIndicator?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setMusicMode('off');
+    });
+    els.musicModeIndicator?.addEventListener('mouseenter', () => {
+      if (els.musicModeIndicator) {
+        const icon = els.musicModeIndicator.querySelector('i');
+        if (icon) {
+          icon.className = 'fa-solid fa-times';
+        }
+      }
+    });
+    els.musicModeIndicator?.addEventListener('mouseleave', () => {
+      if (els.musicModeIndicator && STATE.isMusicGenMode) {
+        const icon = els.musicModeIndicator.querySelector('i');
+        if (icon) {
+          icon.className = 'fa-solid fa-music';
+        }
+      }
     });
 
     // Music Model Dropdown Tabs (Ollama vs OpenRouter)
