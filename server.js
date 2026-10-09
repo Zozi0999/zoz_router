@@ -144,7 +144,8 @@ function isPrivateHost(hostname, port) {
   if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)) return true;
   if (/^169\.254\./.test(host)) return true; // Link-local
   if (/^fc00:|^fe80:/i.test(host)) return true; // IPv6 Unique Local & Link-Local
-  if (host.startsWith('::ffff:127.') || host.startsWith('::ffff:192.168.') || host.startsWith('::ffff:10.')) return true;
+  if (host.startsWith('::ffff:')) return true; // Block all IPv4-mapped IPv6
+  if (host.startsWith('::7f00:') || host.startsWith('::a9fe:') || host.startsWith('::c0a8:') || host.startsWith('::0a')) return true; // Block mapped hex variants
   if (host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.localhost')) return true;
   const numPort = Number(port);
   if (numPort === 11434 || numPort === 4040 || numPort === 8080) {
@@ -1051,8 +1052,8 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
       ? [
           rawModel,
           'openrouter/free',
-          'google/gemma-4-26b-a4b-it:free',
-          'liquid/lfm-2.5-2.6b:free'
+          'google/gemma-2-9b-it:free',
+          'meta-llama/llama-3.1-8b-instruct:free'
         ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
       : [rawModel || 'google/gemini-2.0-flash-001'];
 
@@ -1358,36 +1359,40 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
           stream = res;
         }
 
+        let chunks = [];
+        let totalLen = 0;
         stream.on('data', chunk => {
-          rawHtml += chunk;
-          if (rawHtml.length >= 300000 && !resolved) {
+          chunks.push(chunk);
+          totalLen += chunk.length;
+          if (totalLen >= 300000 && !resolved) {
             req.destroy();
+            rawHtml = Buffer.concat(chunks).toString('utf8');
             finishExtract(rawHtml);
           }
         });
 
-        stream.on('end', () => finishExtract(rawHtml));
+        stream.on('end', () => { if (!resolved) { rawHtml = typeof chunks !== 'undefined' && chunks.length > 0 ? Buffer.concat(chunks).toString('utf8') : rawHtml; finishExtract(rawHtml); } });
         stream.on('error', () => {
           try { res.unpipe(); } catch (_) {}
           try { if (stream !== res) stream.destroy(); } catch (_) {}
-          if (rawHtml.length > 0) finishExtract(rawHtml);
+          if (typeof chunks !== 'undefined' && chunks.length > 0) { rawHtml = Buffer.concat(chunks).toString('utf8'); finishExtract(rawHtml); } else if (rawHtml.length > 0) { finishExtract(rawHtml); }
           else if (!resolved) { resolved = true; resolve(''); }
         });
         res.on('error', () => {
           try { res.unpipe(); } catch (_) {}
           try { if (stream !== res) stream.destroy(); } catch (_) {}
-          if (rawHtml.length > 0) finishExtract(rawHtml);
+          if (typeof chunks !== 'undefined' && chunks.length > 0) { rawHtml = Buffer.concat(chunks).toString('utf8'); finishExtract(rawHtml); } else if (rawHtml.length > 0) { finishExtract(rawHtml); }
           else if (!resolved) { resolved = true; resolve(''); }
         });
       });
 
       req.on('timeout', () => {
         req.destroy();
-        if (rawHtml.length > 0) finishExtract(rawHtml);
+        if (typeof chunks !== 'undefined' && chunks.length > 0) { rawHtml = Buffer.concat(chunks).toString('utf8'); finishExtract(rawHtml); } else if (rawHtml.length > 0) { finishExtract(rawHtml); }
         else if (!resolved) { resolved = true; resolve(''); }
       });
       req.on('error', () => {
-        if (rawHtml.length > 0) finishExtract(rawHtml);
+        if (typeof chunks !== 'undefined' && chunks.length > 0) { rawHtml = Buffer.concat(chunks).toString('utf8'); finishExtract(rawHtml); } else if (rawHtml.length > 0) { finishExtract(rawHtml); }
         else if (!resolved) { resolved = true; resolve(''); }
       });
       req.end();
@@ -1894,36 +1899,40 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
           stream = res;
         }
 
+        let chunks2 = [];
+        let totalLen2 = 0;
         stream.on('data', chunk => {
-          rawHtml += chunk;
-          if (rawHtml.length >= 600000 && !resolved) {
+          chunks2.push(chunk);
+          totalLen2 += chunk.length;
+          if (totalLen2 >= 600000 && !resolved) {
             req.destroy();
+            rawHtml = Buffer.concat(chunks2).toString('utf8');
             finishParsing(rawHtml);
           }
         });
 
-        stream.on('end', () => finishParsing(rawHtml));
+        stream.on('end', () => { if (!resolved) { rawHtml = typeof chunks2 !== 'undefined' && chunks2.length > 0 ? Buffer.concat(chunks2).toString('utf8') : rawHtml; finishParsing(rawHtml); } });
         stream.on('error', (err) => {
           try { res.unpipe(); } catch (_) {}
           try { if (stream !== res) stream.destroy(); } catch (_) {}
-          if (rawHtml.length > 0) finishParsing(rawHtml);
+          if (typeof chunks2 !== 'undefined' && chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
           else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: err.message, text: '' }); }
         });
         res.on('error', (err) => {
           try { res.unpipe(); } catch (_) {}
           try { if (stream !== res) stream.destroy(); } catch (_) {}
-          if (rawHtml.length > 0) finishParsing(rawHtml);
+          if (typeof chunks2 !== 'undefined' && chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
           else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: err.message, text: '' }); }
         });
       });
 
       req.on('timeout', () => {
         req.destroy();
-        if (rawHtml.length > 0) finishParsing(rawHtml);
+        if (typeof chunks2 !== 'undefined' && chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
         else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: 'Connection timeout', text: '' }); }
       });
       req.on('error', (err) => {
-        if (rawHtml.length > 0) finishParsing(rawHtml);
+        if (typeof chunks2 !== 'undefined' && chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
         else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: err.message, text: '' }); }
       });
       req.end();
