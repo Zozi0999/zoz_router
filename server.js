@@ -3948,7 +3948,8 @@ const server = http.createServer(async (req, res) => {
             console.warn('[AI Music] Tidak ada audio di respons. Cuplikan:', raw.slice(0, 400));
             return reject(new Error('Model tidak mengembalikan data audio. Cuplikan respons: ' + raw.replace(/\s+/g, ' ').slice(0, 200)));
           }
-          const audioBuf = Buffer.concat(sink.audio.map(b => Buffer.from(b, 'base64')));
+          const b64Merged = sink.audio.join('').replace(/^data:audio\/[^;]+;base64,/i, '').replace(/\s+/g, '');
+          const audioBuf = Buffer.from(b64Merged, 'base64');
           resolve({ audio: audioBuf, text: sink.text.trim() });
         });
       });
@@ -3986,12 +3987,13 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 400, { success: false, error: 'Prompt musik kosong. Jelaskan musik yang ingin dibuat.' });
       }
 
-      const model = requestedMusicModel.replace(/^openrouter:/i, '').trim();
-      if (!model || !MUSIC_AUDIO_MODEL_RE.test(model)) {
+      const rawModel = (requestedMusicModel || '').replace(/^openrouter:/i, '').trim();
+      const model = rawModel || DEFAULT_MUSIC_MODEL;
+      if (!MUSIC_AUDIO_MODEL_RE.test(model)) {
         return sendJSON(res, 400, {
           success: false,
           code: 'NOT_AUDIO_MODEL',
-          error: `Model "${model || '(kosong)'}" adalah model teks dan tidak bisa menghasilkan audio. Pilih model pembuat musik seperti Google Lyria 3 (${DEFAULT_MUSIC_MODEL}).`,
+          error: `Model "${model}" adalah model teks dan tidak bisa menghasilkan audio. Pilih model pembuat musik seperti Google Lyria 3 (${DEFAULT_MUSIC_MODEL}).`,
           prompt: cleanPrompt
         });
       }

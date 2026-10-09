@@ -11281,49 +11281,193 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     });
   }
 
-  function audioBufferToWavBlob(audioBuffer) {
-    const numChannels = audioBuffer.numberOfChannels;
-    const sampleRate = audioBuffer.sampleRate;
-    const numSamples = audioBuffer.length;
-    const format = 1;
-    const bitDepth = 16;
-    const bytesPerSample = bitDepth / 8;
-    const blockAlign = numChannels * bytesPerSample;
-    const byteRate = sampleRate * blockAlign;
-    const dataSize = numSamples * blockAlign;
-    const buffer = new ArrayBuffer(44 + dataSize);
+  function base64ToUint8Array(base64) {
+    let b64 = String(base64 || '').replace(/[^A-Za-z0-9+/=]/g, '');
+    while (b64.length % 4 !== 0) b64 += '=';
+    const binary = atob(b64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  function detectAudioMimeFromBytes(bytes) {
+    if (!bytes || bytes.length < 4) return null;
+    if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) return 'audio/wav';
+    if (bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) return 'audio/mp3';
+    if (bytes[0] === 0xFF && (bytes[1] & 0xE0) === 0xE0) return 'audio/mp3';
+    if (bytes[0] === 0x4F && bytes[1] === 0x67 && bytes[2] === 0x67 && bytes[3] === 0x53) return 'audio/ogg';
+    if (bytes[0] === 0x66 && bytes[1] === 0x4C && bytes[2] === 0x61 && bytes[3] === 0x43) return 'audio/flac';
+    if (bytes.length > 12 && bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) return 'audio/mp4';
+    return null;
+  }
+
+  function wrapPcm16InWavBlob(pcmBytes, sampleRate = 24000, numChannels = 1) {
+    const dataLen = pcmBytes.length;
+    const buffer = new ArrayBuffer(44 + dataLen);
     const view = new DataView(buffer);
+    const byteRate = sampleRate * numChannels * 2;
+    const blockAlign = numChannels * 2;
 
-    function writeString(offset, str) {
-      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-    }
+    view.setUint32(0, 0x52494646, false); // "RIFF"
+    view.setUint32(4, 36 + dataLen, true);
+    view.setUint32(8, 0x57415645, false); // "WAVE"
 
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + dataSize, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
+    view.setUint32(12, 0x666D7420, false); // "fmt "
     view.setUint32(16, 16, true);
-    view.setUint16(20, format, true);
+    view.setUint16(20, 1, true); // PCM
     view.setUint16(22, numChannels, true);
     view.setUint32(24, sampleRate, true);
     view.setUint32(28, byteRate, true);
     view.setUint16(32, blockAlign, true);
-    view.setUint16(34, bitDepth, true);
-    writeString(36, 'data');
-    view.setUint32(40, dataSize, true);
+    view.setUint16(34, 16, true);
 
-    const channels = [];
-    for (let c = 0; c < numChannels; c++) channels.push(audioBuffer.getChannelData(c));
+    view.setUint32(36, 0x64617461, false); // "data"
+    view.setUint32(40, dataLen, true);
 
-    let offset = 44;
-    for (let i = 0; i < numSamples; i++) {
-      for (let c = 0; c < numChannels; c++) {
-        let sample = Math.max(-1, Math.min(1, channels[c][i]));
-        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
-        offset += 2;
+    const outBytes = new Uint8Array(buffer);
+    outBytes.set(pcmBytes, 44);
+    return new Blob([outBytes], { type: 'audio/wav' });
+  }
+
+  async function generateAudioViaOpenRouterClient({ model, prompt, key, signal }) {
+    if (!key) {
+      throw new Error('NO_KEY: Butuh OpenRouter API Key (Pengaturan → Providers) untuk memanggil model musik AI Google Lyria 3.');
+    }
+    const cleanModel = String(model || 'google/lyria-3-clip-preview').replace(/^openrouter:/i, '').trim();
+
+    const payload = {
+      model: cleanModel,
+      messages: [{ role: 'user', content: prompt }],
+      modalities: ['text', 'audio'],
+      stream: true
+    };
+    if (/gpt-audio/i.test(cleanModel)) {
+      payload.audio = { voice: 'alloy', format: 'pcm16' };
+    }
+
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://github.com/Zozi0999/zoz_router',
+        'X-Title': 'Zoz Router AI Music Studio'
+      },
+      body: JSON.stringify(payload),
+      signal
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      let errMsg = `OpenRouter HTTP ${res.status}`;
+      if (errJson && errJson.error) {
+        errMsg = typeof errJson.error === 'object'
+          ? (errJson.error.message || JSON.stringify(errJson.error))
+          : String(errJson.error);
+      }
+      if (res.status === 401) {
+        throw new Error('NO_KEY: API Key OpenRouter tidak valid atau belum diisi. Periksa API Key di menu Pengaturan → Providers.');
+      }
+      if (res.status === 402) {
+        throw new Error('Saldo kredit OpenRouter tidak mencukupi untuk menggunakan model Google Lyria.');
+      }
+      throw new Error(`OpenRouter (${cleanModel}): ${errMsg}`);
+    }
+
+    const sink = { text: '', base64Parts: [] };
+
+    const processChoice = (choice) => {
+      if (!choice) return;
+      for (const m of [choice.delta, choice.message]) {
+        if (!m || typeof m !== 'object') continue;
+        if (typeof m.content === 'string') sink.text += m.content;
+        else if (Array.isArray(m.content)) {
+          for (const part of m.content) {
+            if (!part || typeof part !== 'object') continue;
+            if (typeof part.text === 'string') sink.text += part.text;
+            const a = part.audio || part.output_audio;
+            if (a && typeof a.data === 'string') sink.base64Parts.push(a.data);
+            else if (typeof part.data === 'string' && /audio/i.test(String(part.type || ''))) sink.base64Parts.push(part.data);
+            const u = (part.audio_url && part.audio_url.url) || (part.audio && part.audio.url) || '';
+            if (typeof u === 'string' && u.includes('base64,')) sink.base64Parts.push(u.split('base64,')[1]);
+          }
+        }
+        if (m.audio && typeof m.audio === 'object' && !Array.isArray(m.audio)) {
+          if (typeof m.audio.data === 'string') sink.base64Parts.push(m.audio.data);
+          if (typeof m.audio.transcript === 'string') sink.text += m.audio.transcript;
+          const u = m.audio.url || '';
+          if (typeof u === 'string' && u.includes('base64,')) sink.base64Parts.push(u.split('base64,')[1]);
+        }
+      }
+    };
+
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('text/event-stream')) {
+      const json = await res.json();
+      if (json.error) throw new Error(typeof json.error === 'object' ? (json.error.message || JSON.stringify(json.error)) : String(json.error));
+      if (Array.isArray(json.choices)) json.choices.forEach(processChoice);
+    } else {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          const l = line.trim();
+          if (!l || l.startsWith(':') || !l.startsWith('data:')) continue;
+          const data = l.slice(5).trim();
+          if (!data || data === '[DONE]') continue;
+          try {
+            const j = JSON.parse(data);
+            if (j.error) throw new Error(typeof j.error === 'object' ? (j.error.message || JSON.stringify(j.error)) : String(j.error));
+            if (Array.isArray(j.choices)) j.choices.forEach(processChoice);
+          } catch (e) {
+            if (e.message && !e.message.includes('JSON')) throw e;
+          }
+        }
+      }
+      if (buffer.trim()) {
+        const l = buffer.trim();
+        if (l.startsWith('data:')) {
+          const data = l.slice(5).trim();
+          if (data && data !== '[DONE]') {
+            try {
+              const j = JSON.parse(data);
+              if (Array.isArray(j.choices)) j.choices.forEach(processChoice);
+            } catch (_) {}
+          }
+        }
       }
     }
-    return new Blob([view], { type: 'audio/wav' });
+
+    if (sink.base64Parts.length === 0) {
+      throw new Error(`Model "${cleanModel}" tidak mengembalikan aliran audio biner. Pastikan model Google Lyria 3 dipilih.`);
+    }
+
+    const mergedBase64 = sink.base64Parts.join('').replace(/^data:audio\/[^;]+;base64,/i, '').replace(/\s+/g, '');
+    const mergedBytes = base64ToUint8Array(mergedBase64);
+    const mime = detectAudioMimeFromBytes(mergedBytes);
+    let blob;
+    if (mime) {
+      blob = new Blob([mergedBytes], { type: mime });
+    } else {
+      blob = wrapPcm16InWavBlob(mergedBytes, 24000, 1);
+    }
+
+    const blobUrl = URL.createObjectURL(blob);
+    return {
+      url: blobUrl,
+      blob,
+      sizeBytes: blob.size,
+      mimeType: blob.type,
+      text: sink.text.trim(),
+      model: cleanModel
+    };
   }
 
   async function runMusicGeneration(session, promptText, options = {}) {
@@ -11379,11 +11523,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     }
 
     const timer2 = setTimeout(() => {
-      updateHudStep(`[Langkah 2/3] ${targetModelDisplayName} sedang menggubah & merender audio (bisa 20-90 detik)...`, 55);
+      updateHudStep(`[Langkah 2/3] ${targetModelDisplayName} sedang menggubah & merender audio AI (20-90 detik)...`, 55);
     }, 1500);
 
     const timer3 = setTimeout(() => {
-      updateHudStep('[Langkah 3/3] Menunggu audio dari model AI...', 85);
+      updateHudStep('[Langkah 3/3] Menunggu aliran audio dari model AI...', 85);
     }, 15000);
 
     try {
@@ -11391,45 +11535,88 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       let trackTitle = 'AI Track';
       let trackGenre = 'ai';
       let trackBpm = null;
-      let trackDuration = 0;
+      let trackDuration = /clip/i.test(targetMusicModel) ? 30 : 0;
       let trackAiSummary = '';
-      let trackAiComposed = false;
+      let trackAiComposed = true;
       let trackAiModel = targetMusicModel;
       let trackAiProvider = 'openrouter';
+      let generatedSuccessfully = false;
 
-      if (IS_GITHUB_PAGES) {
-        throw new Error('Pembuatan musik AI membutuhkan server lokal Zoz Router (http://localhost:4040) dan OpenRouter API Key.');
+      // 1. Coba panggil server backend lokal jika bukan di GitHub Pages
+      if (!IS_GITHUB_PAGES) {
+        try {
+          updateHudStep(`[Langkah 2/3] Menghubungi server musik Zoz Router...`, 45);
+          const res = await fetch('/api/generate-music', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-session-id': session ? session.id : '',
+              'x-openrouter-key': STATE.settings.openRouterKey || ''
+            },
+            body: JSON.stringify({
+              prompt: cleanPrompt,
+              sessionId: session ? session.id : null,
+              musicModel: targetMusicModel,
+              openRouterKey: STATE.settings.openRouterKey || ''
+            }),
+            signal: STATE.abortController?.signal
+          });
+
+          if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            if (data.success && data.url) {
+              finalAudioUrl = data.url;
+              trackTitle = data.title || trackTitle;
+              trackGenre = data.genre || trackGenre;
+              trackBpm = data.bpm || null;
+              trackDuration = data.duration || trackDuration;
+              trackAiSummary = data.aiSummary || '';
+              trackAiComposed = true;
+              trackAiModel = data.aiModel || trackAiModel;
+              trackAiProvider = data.aiProvider || trackAiProvider;
+              generatedSuccessfully = true;
+            } else {
+              throw new Error(data.error || 'Server backend tidak mengembalikan data audio.');
+            }
+          } else {
+            let errorMsg = `Server audio HTTP ${res.status}`;
+            try {
+              const errData = await res.json();
+              if (errData && errData.error) errorMsg = errData.error;
+            } catch (_) {}
+            throw new Error(errorMsg);
+          }
+        } catch (serverErr) {
+          if (serverErr.name === 'AbortError') throw serverErr;
+          console.warn('[Music Studio] Server local gagal/offline, beralih ke Direct OpenRouter Client:', serverErr.message);
+        }
       }
 
-      const res = await fetch('/api/generate-music', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-session-id': session ? session.id : '',
-          'x-openrouter-key': STATE.settings.openRouterKey || ''
-        },
-        body: JSON.stringify({
+      // 2. Direct Browser OpenRouter Client (untuk GitHub Pages atau jika server lokal offline/404)
+      if (!generatedSuccessfully) {
+        if (!STATE.settings.openRouterKey) {
+          throw new Error('NO_KEY: Butuh OpenRouter API Key (Pengaturan → Providers) untuk memanggil model musik AI Google Lyria 3.');
+        }
+
+        updateHudStep(`[Langkah 2/3] Memanggil ${escapeHtml(targetModelDisplayName)} via OpenRouter Cloud langsung...`, 60);
+
+        const clientAudio = await generateAudioViaOpenRouterClient({
+          model: targetMusicModel,
           prompt: cleanPrompt,
-          sessionId: session ? session.id : null,
-          musicModel: targetMusicModel,
-          openRouterKey: STATE.settings.openRouterKey || ''
-        }),
-        signal: STATE.abortController?.signal
-      });
+          key: STATE.settings.openRouterKey,
+          signal: STATE.abortController?.signal
+        });
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success || !data.url) {
-        throw new Error(data.error || `Server audio HTTP ${res.status}`);
+        finalAudioUrl = clientAudio.url;
+        trackDuration = /clip/i.test(targetMusicModel) ? 30 : 0;
+        trackAiSummary = clientAudio.text || `Dihasilkan langsung oleh model AI ${targetModelDisplayName}`;
+        trackAiModel = clientAudio.model;
+        trackAiProvider = 'openrouter';
+
+        const words = cleanPrompt.replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean).slice(0, 6);
+        trackTitle = words.length ? words.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : 'Lyria Track';
+        generatedSuccessfully = true;
       }
-      finalAudioUrl = data.url;
-      trackTitle = data.title || trackTitle;
-      trackGenre = data.genre || trackGenre;
-      trackBpm = data.bpm || null;
-      trackDuration = data.duration || 0;
-      trackAiSummary = data.aiSummary || '';
-      trackAiComposed = Boolean(data.aiComposed);
-      trackAiModel = data.aiModel || trackAiModel;
-      trackAiProvider = data.aiProvider || trackAiProvider;
 
       clearTimeout(timer2);
       clearTimeout(timer3);
@@ -11459,14 +11646,14 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       const modelBadgeName = getMusicModelBadgeText(trackAiModel);
       metaBox.innerHTML = `
         <strong>Neural Music Studio</strong>
-        <span class="meta-model-badge" style="background:rgba(0,255,194,0.15); border-color:#00FFC2; color:var(--neon-teal);"><i class="fa-solid ${providerIcon}"></i> ${escapeHtml(modelBadgeName)} (${trackAiComposed ? 'AI Composed' : 'Audio'})</span>
+        <span class="meta-model-badge" style="background:rgba(0,255,194,0.15); border-color:#00FFC2; color:var(--neon-teal);"><i class="fa-solid ${providerIcon}"></i> ${escapeHtml(modelBadgeName)} (AI Audio)</span>
         <span>⏱️ ${totalDuration}s</span>
       `;
 
       if (session) {
         session.messages.push({
           role: 'assistant',
-          content: `[Musik AI Hasil Sintesis: "${cleanPrompt}"]\n\n- Judul: ${trackTitle}\n- Engine: ${trackAiModel} (${trackAiProvider})\n- Aransemen: ${trackAiSummary || 'Digubah oleh AI Neural Music Architect'}\n- Audio: [Putar / Unduh Audio](${finalAudioUrl})`,
+          content: `[Musik AI: "${cleanPrompt}"]\n\n- Judul: ${trackTitle}\n- Engine: ${trackAiModel} (${trackAiProvider})\n- Aransemen: ${trackAiSummary || 'Digubah oleh AI Neural Music Studio'}\n- Audio: [Putar / Unduh Audio](${finalAudioUrl})`,
           type: 'music_generation',
           isMusicGen: true,
           audioUrl: finalAudioUrl,
@@ -11498,19 +11685,38 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         showToast('Generasi musik dibatalkan.');
       } else {
         console.error('Music gen error:', err);
+        const isKeyError = err.message && (err.message.includes('NO_KEY') || err.message.includes('API Key') || err.message.includes('OpenRouter API Key'));
+        const cleanErrMsg = (err.message || 'Terjadi gangguan saat memproses aransemen musik.').replace(/^NO_KEY:\s*/, '');
+
         bubbleText.innerHTML = `
           <div style="background:rgba(255,0,85,0.08); border:1px solid rgba(255,0,85,0.4); border-radius:10px; padding:14px; line-height:1.5;">
             <div style="font-weight:700; color:var(--neon-crimson); margin-bottom:6px; display:flex; align-items:center; gap:8px;">
               <i class="fa-solid fa-triangle-exclamation"></i> Gagal Menghasilkan Musik AI
             </div>
-            <div style="font-size:0.83rem; color:var(--text-main); margin-bottom:8px;">
-              ${escapeHtml(err.message || 'Terjadi gangguan saat memproses aransemen musik.')}
+            <div style="font-size:0.83rem; color:var(--text-main); margin-bottom:12px;">
+              ${escapeHtml(cleanErrMsg)}
             </div>
-            <button class="btn btn-sm btn-primary retry-music-btn" style="font-size:0.75rem;">
-              <i class="fa-solid fa-rotate-right"></i> Coba Generate Ulang
-            </button>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+              ${isKeyError ? `
+                <button class="btn btn-sm btn-outline open-settings-key-btn" style="font-size:0.75rem; border-color:var(--neon-teal); color:var(--neon-teal);">
+                  <i class="fa-solid fa-key"></i> Buka Pengaturan API Key
+                </button>
+              ` : ''}
+              <button class="btn btn-sm btn-primary retry-music-btn" style="font-size:0.75rem;">
+                <i class="fa-solid fa-rotate-right"></i> Coba Generate Ulang
+              </button>
+            </div>
           </div>
         `;
+        bubbleText.querySelector('.open-settings-key-btn')?.addEventListener('click', () => {
+          const modal = els.settingsModal || $('#settingsModal');
+          if (modal) {
+            modal.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.target === 'tabProviders' || btn.dataset.tab === 'tabProviders'));
+            modal.querySelectorAll('.settings-tab-pane').forEach(pane => pane.classList.toggle('active', pane.id === 'tabProviders'));
+          }
+          openModal('settingsModal');
+          setTimeout(() => { els.settingOpenRouterKey?.focus(); }, 300);
+        });
         bubbleText.querySelector('.retry-music-btn')?.addEventListener('click', () => {
           assistantRow.remove();
           runMusicGeneration(session, cleanPrompt, options);
