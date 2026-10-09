@@ -3096,13 +3096,33 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (docs && Array.isArray(docs) && docs.length > 0 && role === 'user') {
       docsHtml = `
         <div class="attached-docs-badge-row">
-          ${docs.map(d => `
-            <div class="msg-doc-badge">
-              <i class="fa-solid fa-file-lines"></i>
-              <span class="msg-doc-name" title="${escapeHtml(d.name)}">${escapeHtml(d.name)}</span>
-              <span class="msg-doc-size">${escapeHtml(d.size || '')}</span>
-            </div>
-          `).join('')}
+          ${docs.map(d => {
+            const isWebDoc = Boolean(d.isWeb || (d.name && d.name.startsWith('[Web:')) || d.url);
+            let targetUrl = d.url;
+            if (!targetUrl && isWebDoc && typeof d.content === 'string') {
+              const urlMatch = d.content.match(/Sumber URL:\s*(https?:\/\/[^\s\n]+)/i);
+              if (urlMatch) targetUrl = urlMatch[1];
+            }
+            const iconClass = isWebDoc ? 'fa-solid fa-globe' : 'fa-solid fa-file-lines';
+            const iconColor = isWebDoc ? 'color: var(--neon-cyan);' : '';
+            if (isWebDoc && targetUrl) {
+              return `
+                <a href="${escapeHtml(targetUrl)}" target="_blank" rel="noopener noreferrer" class="msg-doc-badge msg-doc-web-link" title="Buka tautan website: ${escapeHtml(targetUrl)}">
+                  <i class="${iconClass}" style="${iconColor}"></i>
+                  <span class="msg-doc-name" title="${escapeHtml(d.name)}">${escapeHtml(d.name)}</span>
+                  <span class="msg-doc-size">${escapeHtml(d.size || '')}</span>
+                  <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:0.65rem; opacity:0.75; margin-left:2px;"></i>
+                </a>
+              `;
+            }
+            return `
+              <div class="msg-doc-badge">
+                <i class="${iconClass}" style="${iconColor}"></i>
+                <span class="msg-doc-name" title="${escapeHtml(d.name)}">${escapeHtml(d.name)}</span>
+                <span class="msg-doc-size">${escapeHtml(d.size || '')}</span>
+              </div>
+            `;
+          }).join('')}
         </div>
       `;
     }
@@ -4836,7 +4856,9 @@ ${organicBlock}
             docs.push({
               name: docName,
               size: `${res.charCount || res.content.length} karakter`,
-              content: `Sumber URL: ${res.url}\nJudul Halaman: ${res.title}\nDomain: ${res.domain}\n\n${res.content}`
+              content: `Sumber URL: ${res.url}\nJudul Halaman: ${res.title}\nDomain: ${res.domain}\n\n${res.content}`,
+              url: res.url,
+              isWeb: true
             });
           }
         });
@@ -4879,8 +4901,8 @@ ${organicBlock}
     }
 
     // Build user message object
-    const docsWithContent = docs.map(d => ({ name: d.name, size: d.size, content: d.content }));
-    const docsMeta = docs.map(d => ({ name: d.name, size: d.size }));
+    const docsWithContent = docs.map(d => ({ name: d.name, size: d.size, content: d.content, url: d.url, isWeb: d.isWeb }));
+    const docsMeta = docs.map(d => ({ name: d.name, size: d.size, url: d.url, isWeb: d.isWeb }));
     const userMsg = {
       role: 'user',
       content: text,
@@ -5069,8 +5091,62 @@ ${organicBlock}
           required: ['url']
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'search_youtube',
+        description: 'Cari video YouTube berdasarkan kata kunci. Mengembalikan daftar video (judul, channel, durasi, jumlah tayangan, URL, thumbnail) yang bisa langsung diputar di dalam percakapan atau dibuka di YouTube. Gunakan kapan pun pengguna meminta mencarikan, menemukan, atau menonton sebuah video/tutorial/klip musik.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Kata kunci pencarian video YouTube (misal: "tutorial React JS", "lagu cyberpunk", "review RTX 5090")'
+            },
+            max_results: {
+              type: 'integer',
+              description: 'Jumlah video maksimal yang ingin dikembalikan (1-10, default 6)'
+            }
+          },
+          required: ['query']
+        }
+      }
     }
   ];
+
+  // Tool video YouTube selalu aktif — tidak bergantung pada toggle Mode Pencarian Web,
+  // sehingga SEMUA model (native tool calling maupun format teks) tetap bisa memakainya.
+  const YOUTUBE_TOOL_ONLY = AUTONOMOUS_WEB_TOOLS.filter(t => t && t.function && t.function.name === 'search_youtube');
+
+  // Daftar nama tool otonom yang dikenal sistem (native call maupun parse teks)
+  const AUTONOMOUS_TOOL_NAMES = ['search_web', 'browse_web_page', 'search_youtube'];
+
+  // Aturan izin: search_youtube SELALU aktif; tool web hanya bila Mode Pencarian Web aktif.
+  function isAutonomousToolAllowed(toolName, webToolsAllowed) {
+    if (toolName === 'search_youtube') return true;
+    return Boolean(webToolsAllowed);
+  }
+
+  // Sumber tanda tangan dedup per tool (mencegah loop pemanggilan berulang)
+  function getAutonomousToolSignature(call) {
+    const toolName = call && call.function ? call.function.name : '';
+    let raw = null;
+    try {
+      raw = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : call.function.arguments;
+    } catch (_) {
+      raw = String(call.function.arguments || '');
+    }
+    if (toolName === 'search_web') return 'search_web';
+    if (toolName === 'search_youtube') {
+      const q = (raw && typeof raw === 'object') ? (raw.query || raw.q || '') : String(raw || '');
+      return `youtube:${String(q).trim().toLowerCase()}`;
+    }
+    let url = '';
+    if (raw && typeof raw === 'object') url = raw.url || raw.target || raw.link || '';
+    else if (typeof raw === 'string') url = raw;
+    return `browse:${String(url).trim().toLowerCase()}`;
+  }
 
   function stripDateNoise(q) {
     if (!q || typeof q !== 'string') return '';
@@ -5843,6 +5919,29 @@ ${organicBlock}
   }
   const AUTONOMOUS_SYSTEM_DIRECTIVE = getAutonomousSystemDirective();
 
+  function getYouTubeToolDirective() {
+    return `### INSTRUKSI SISTEM: TOOL PENCARIAN VIDEO YOUTUBE (search_youtube)
+
+Tool \`search_youtube\` selalu aktif untuk SEMUA model, terlepas dari status Mode Pencarian Web.
+
+1. KAPAN WAJIB DIPAKAI:
+- Pengguna meminta mencarikan/menemukan/mencari/memutar/menonton sebuah video (YouTube, tutorial, klip musik, film, pertandingan, podcast, vlog, review, dsb).
+- Argumen \`query\` berisi kata kunci alami hasil ekstraksi dari permintaan pengguna (misal: "tutorial React JS untuk pemula").
+- Argumen \`max_results\` opsional (1-10, default 6).
+
+2. FORMAT PEMANGGILAN (dukung SEMUA model):
+Format native/JSON:
+  {"name":"search_youtube","arguments":{"query":"kata kunci","max_results":6}}
+Format teks (untuk model tanpa function calling):
+  search_youtube("kata kunci")
+  atau: search_youtube({"query":"kata kunci"})
+
+3. SETELAH SISTEM MENGEMBALIKAN HASIL:
+- Jelaskan dan rekomendasikan video yang paling relevan secara jelas (judul, channel, durasi, jumlah tayangan).
+- WAJIB menyertakan tautan video pilihan Anda secara langsung di dalam jawaban akhir dengan format markdown, misal [Judul Video](https://www.youtube.com/watch?v=ID), agar kartu video dapat ditampilkan dan diputar langsung di dalam percakapan.
+- Jangan mengarang data video; gunakan hanya hasil yang diberikan sistem.`;
+  }
+
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
     let iconClass = 'fa-magnifying-glass';
     let title = 'PENCARIAN WEB LIVE (ZERO-API)';
@@ -6160,6 +6259,10 @@ ${organicBlock}
       if (canRunAutonomous) {
         systemContent = personaPrompt ? `${personaPrompt}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
       }
+      // Tool video YouTube selalu diumumkan, terlepas dari toggle Mode Pencarian Web.
+      systemContent = systemContent
+        ? `${systemContent}\n\n${getYouTubeToolDirective()}`
+        : getYouTubeToolDirective();
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
       try {
@@ -6189,9 +6292,8 @@ ${organicBlock}
         },
         endpoint: ep
       };
-      if (canRunAutonomous) {
-        requestBody.tools = AUTONOMOUS_WEB_TOOLS;
-      }
+      // Tool video YouTube selalu disertakan; tool web hanya saat Mode Pencarian Web aktif.
+      requestBody.tools = canRunAutonomous ? AUTONOMOUS_WEB_TOOLS : YOUTUBE_TOOL_ONLY;
       if (session?.id) {
         requestBody.sessionId = session.id;
       }
@@ -6324,11 +6426,13 @@ ${organicBlock}
       let currentRoundNativeCalls = accumulatedToolCalls;
       const executedToolSignatures = new Set();
 
-      while (canRunAutonomousSearch && autonomousRound < maxAutonomousRounds) {
+      // Loop tetap dijalankan walau Mode Pencarian Web mati: filter izin di bawah
+      // yang memblokir tool web, sementara search_youtube selalu diperbolehkan.
+      while (autonomousRound < maxAutonomousRounds) {
         if (STATE.abortController?.signal?.aborted) break;
 
-        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
-        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
+        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && AUTONOMOUS_TOOL_NAMES.includes(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
+        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && AUTONOMOUS_TOOL_NAMES.includes(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
         let rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
 
         if (rawAutonomousCalls.length === 0) {
@@ -6801,6 +6905,10 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       if (canRunAutonomous) {
         systemContent = personaPrompt ? `${personaPrompt}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
       }
+      // Tool video YouTube selalu diumumkan, terlepas dari toggle Mode Pencarian Web.
+      systemContent = systemContent
+        ? `${systemContent}\n\n${getYouTubeToolDirective()}`
+        : getYouTubeToolDirective();
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
       try {
@@ -6885,7 +6993,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             }
             availableTools.push(imageGenTool);
           }
-          availableTools.push(...AUTONOMOUS_WEB_TOOLS);
+          // Tool video YouTube selalu disertakan; tool web hanya saat Mode Pencarian Web aktif.
+          availableTools.push(...(canRunAutonomous ? AUTONOMOUS_WEB_TOOLS : YOUTUBE_TOOL_ONLY));
           requestBody.tools = availableTools;
         }
 
@@ -7088,11 +7197,13 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       let currentRoundNativeCalls = accumulatedToolCalls;
       const executedToolSignatures = new Set();
 
-      while (canRunAutonomousSearch && autonomousRound < maxAutonomousRounds) {
+      // Loop tetap dijalankan walau Mode Pencarian Web mati: filter izin di bawah
+      // yang memblokir tool web, sementara search_youtube selalu diperbolehkan.
+      while (autonomousRound < maxAutonomousRounds) {
         if (STATE.abortController?.signal?.aborted) break;
 
-        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
-        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && (tc.function.name === 'search_web' || tc.function.name === 'browse_web_page'));
+        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && AUTONOMOUS_TOOL_NAMES.includes(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
+        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && AUTONOMOUS_TOOL_NAMES.includes(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
         let rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
 
         if (rawAutonomousCalls.length === 0) {

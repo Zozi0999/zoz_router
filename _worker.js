@@ -22,6 +22,221 @@ function isOllamaEndpointForbidden(endpointUrl) {
   return isPrivateHostname(host);
 }
 
+// ==================== YOUTUBE LIVE SEARCH (ZERO API KEY) ====================
+const YT_SEARCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const YT_INVIDIOUS = ['https://inv.nadeko.net', 'https://yewtu.be', 'https://invidious.nerdvpn.de'];
+const ytSearchCache = new Map();
+
+function ytDurationSeconds(text) {
+  if (!text || typeof text !== 'string') return 0;
+  const parts = text.split(':').map((p) => parseInt(p, 10));
+  if (parts.some((n) => Number.isNaN(n))) return 0;
+  return parts.reduce((acc, n) => acc * 60 + n, 0);
+}
+
+function ytExtractJsonAfterMarker(source, marker) {
+  if (!source || typeof source !== 'string') return null;
+  const idx = source.indexOf(marker);
+  if (idx === -1) return null;
+  const start = source.indexOf('{', idx + marker.length);
+  if (start === -1) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < source.length; i++) {
+    const c = source[i];
+    if (esc) { esc = false; continue; }
+    if (c === '\\') { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === '{') depth++;
+    else if (c === '}') { depth--; if (depth === 0) return source.slice(start, i + 1); }
+  }
+  return null;
+}
+
+function ytTextOf(node) {
+  if (!node) return '';
+  if (typeof node.simpleText === 'string') return node.simpleText;
+  if (Array.isArray(node.runs)) return node.runs.map((r) => (r && r.text) || '').join('');
+  if (typeof node.content === 'string') return node.content;
+  return '';
+}
+
+function ytMapVideoRenderer(vr) {
+  if (!vr || !vr.videoId) return null;
+  const title = ytTextOf(vr.title);
+  if (!title) return null;
+  const ownerRuns = vr.ownerText && vr.ownerText.runs;
+  const ownerNav = ownerRuns && ownerRuns[0] && ownerRuns[0].navigationEndpoint && ownerRuns[0].navigationEndpoint.browseEndpoint;
+  const channelPath = ownerNav && ownerNav.canonicalBaseUrl;
+  const durationText = ytTextOf(vr.lengthText);
+  return {
+    videoId: vr.videoId,
+    title,
+    channel: ytTextOf(vr.ownerText || vr.longBylineText) || '',
+    channelUrl: channelPath ? `https://www.youtube.com${channelPath}` : '',
+    durationText,
+    durationSeconds: ytDurationSeconds(durationText),
+    viewText: ytTextOf(vr.viewCountText) || ytTextOf(vr.shortViewCountText),
+    publishedText: ytTextOf(vr.publishedTimeText),
+    description: ytTextOf(vr.descriptionSnippet).slice(0, 260),
+    url: `https://www.youtube.com/watch?v=${vr.videoId}`,
+    thumbnail: `https://i.ytimg.com/vi/${vr.videoId}/hqdefault.jpg`,
+    source: 'YouTube Search'
+  };
+}
+
+function ytMapLockup(lv) {
+  if (!lv || !lv.contentId) return null;
+  const meta = (lv.metadata && lv.metadata.lockupMetadataViewModel) || {};
+  const title = (meta.title && meta.title.content) || '';
+  if (!title) return null;
+  const metaLine = (meta.metadata && meta.metadata.content) || '';
+  const sources = (meta.image && meta.image.thumbnailSources) || [];
+  let thumb = '';
+  for (const s of sources) {
+    if (s && typeof s.url === 'string' && /hqdefault|mqdefault|maxresdefault/i.test(s.url)) { thumb = s.url; break; }
+  }
+  if (!thumb && sources.length && sources[0].url) thumb = sources[0].url;
+  if (thumb && thumb.startsWith('//')) thumb = `https:${thumb}`;
+  if (thumb && thumb.startsWith('/')) thumb = `https://i.ytimg.com${thumb}`;
+  return {
+    videoId: lv.contentId,
+    title,
+    channel: '',
+    channelUrl: '',
+    durationText: '',
+    durationSeconds: 0,
+    viewText: metaLine,
+    publishedText: '',
+    description: metaLine.slice(0, 260),
+    url: `https://www.youtube.com/watch?v=${lv.contentId}`,
+    thumbnail: thumb || `https://i.ytimg.com/vi/${lv.contentId}/hqdefault.jpg`,
+    source: 'YouTube Search'
+  };
+}
+
+function ytCollect(node, out, limit) {
+  if (!node || typeof node !== 'object' || out.length >= limit) return;
+  if (Array.isArray(node)) {
+    for (const item of node) { ytCollect(item, out, limit); if (out.length >= limit) return; }
+    return;
+  }
+  if (node.videoRenderer) {
+    const m = ytMapVideoRenderer(node.videoRenderer);
+    if (m && !out.some((v) => v.videoId === m.videoId)) out.push(m);
+    if (out.length >= limit) return;
+  }
+  if (node.lockupViewModel && node.lockupViewModel.contentId && String(node.lockupViewModel.contentType || '').toUpperCase().includes('VIDEO')) {
+    const m = ytMapLockup(node.lockupViewModel);
+    if (m && !out.some((v) => v.videoId === m.videoId)) out.push(m);
+    if (out.length >= limit) return;
+  }
+  for (const k of Object.keys(node)) { ytCollect(node[k], out, limit); if (out.length >= limit) return; }
+}
+
+async function ytSearchViaYouTubePage(query, limit) {
+  try {
+    const resp = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&hl=en&gl=US`, {
+      signal: AbortSignal.timeout(10000),
+      headers: { 'User-Agent': YT_SEARCH_UA, 'Accept-Language': 'en-US,en;q=0.9', 'Cookie': 'SOCS=CAI' }
+    });
+    if (!resp.ok) return [];
+    const html = await resp.text();
+    const jsonStr = ytExtractJsonAfterMarker(html, 'ytInitialData');
+    if (!jsonStr) return [];
+    const out = [];
+    ytCollect(JSON.parse(jsonStr), out, limit);
+    return out;
+  } catch (_) {
+    return [];
+  }
+}
+
+async function ytSearchViaInvidious(query, limit) {
+  const seen = new Set();
+  for (const base of YT_INVIDIOUS) {
+    try {
+      const resp = await fetch(`${base}/api/v1/search?q=${encodeURIComponent(query)}&type=video`, {
+        signal: AbortSignal.timeout(7000),
+        headers: { 'Accept': 'application/json', 'User-Agent': YT_SEARCH_UA }
+      });
+      if (!resp.ok) continue;
+      const list = await resp.json();
+      if (!Array.isArray(list)) continue;
+      const mapped = list
+        .filter((it) => it && it.videoId && it.title)
+        .slice(0, limit)
+        .map((it) => ({
+          videoId: it.videoId,
+          title: it.title,
+          channel: it.author || '',
+          channelUrl: it.authorUrl ? (String(it.authorUrl).startsWith('http') ? it.authorUrl : `${base}${it.authorUrl}`) : '',
+          durationText: '',
+          durationSeconds: Number(it.lengthSeconds) || 0,
+          viewText: Number(it.viewCount) > 0 ? `${Number(it.viewCount).toLocaleString('en-US')} views` : '',
+          publishedText: it.publishedText || '',
+          description: String(it.description || '').slice(0, 260),
+          url: `https://www.youtube.com/watch?v=${it.videoId}`,
+          thumbnail: `https://i.ytimg.com/vi/${it.videoId}/hqdefault.jpg`,
+          source: 'Invidious'
+        }));
+      const fresh = mapped.filter((v) => {
+        if (!v.videoId || seen.has(v.videoId)) return false;
+        seen.add(v.videoId);
+        return true;
+      });
+      if (fresh.length) return fresh;
+    } catch (_) {}
+  }
+  return [];
+}
+
+async function ytEnrich(results) {
+  const missing = results.filter((v) => !v.channel);
+  if (missing.length === 0) return results;
+  await Promise.all(missing.map(async (v) => {
+    try {
+      const r = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(v.url)}&format=json`, {
+        signal: AbortSignal.timeout(5000),
+        headers: { 'User-Agent': YT_SEARCH_UA }
+      });
+      if (!r.ok) return;
+      const info = await r.json();
+      if (info && info.author_name) {
+        v.channel = info.author_name;
+        if (info.title && !v.title) v.title = info.title;
+        if (info.thumbnail_url && !v.thumbnail) v.thumbnail = info.thumbnail_url;
+      }
+    } catch (_) {}
+  }));
+  return results;
+}
+
+async function ytSearchVideos(query, maxResults) {
+  const q = String(query || '').trim();
+  if (!q) throw new Error('Parameter query tidak boleh kosong.');
+  const limit = Math.max(1, Math.min(10, parseInt(maxResults, 10) || 6));
+  const key = `${q.toLowerCase()}::${limit}`;
+  if (ytSearchCache.has(key)) return ytSearchCache.get(key);
+
+  let results = await ytSearchViaYouTubePage(q, limit);
+  if (results.length === 0) results = await ytSearchViaInvidious(q, limit);
+  if (results.length > 0) results = await ytEnrich(results);
+
+  const payload = {
+    success: results.length > 0,
+    query: q,
+    count: results.length,
+    results,
+    error: results.length > 0 ? undefined : 'Tidak ditemukan hasil video. Coba kata kunci lain.'
+  };
+  if (results.length > 0) {
+    if (ytSearchCache.size > 80) ytSearchCache.delete(ytSearchCache.keys().next().value);
+    ytSearchCache.set(key, payload);
+  }
+  return payload;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -678,6 +893,40 @@ export default {
           type: data.type || 'video',
           html: data.html || ''
         }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ success: false, error: e.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
+    // YouTube Live Search (penunjang tool search_youtube, zero API key)
+    if (url.pathname === '/api/youtube-search' && (request.method === 'GET' || request.method === 'POST')) {
+      try {
+        let query = '';
+        let maxResults = 6;
+        if (request.method === 'GET') {
+          query = url.searchParams.get('q') || url.searchParams.get('query') || '';
+          maxResults = parseInt(url.searchParams.get('limit') || '6', 10) || 6;
+        } else {
+          const body = await request.json().catch(() => ({}));
+          query = body.q || body.query || body.keyword || '';
+          maxResults = parseInt(body.limit || body.max_results, 10) || 6;
+        }
+
+        if (!query || !String(query).trim()) {
+          return new Response(JSON.stringify({ success: false, error: 'Parameter query diperlukan.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        const data = await ytSearchVideos(String(query).trim(), maxResults);
+        return new Response(JSON.stringify(data), {
           status: 200,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
