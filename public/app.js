@@ -1472,13 +1472,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           STATE.currentDeepResearchTaskId = null;
           setGeneratingState(false);
           const partialText = data.text || '';
+          const errDetail = typeof data.error === 'object' && data.error ? (data.error.message || JSON.stringify(data.error)) : String(data.error || 'Terjadi kesalahan koneksi');
           if (bubbleText) {
             if (partialText.trim()) {
-              bubbleText.innerHTML = renderMarkdown(partialText) + `\n\n<div style="color:var(--neon-crimson); font-size:0.82rem; margin-top:8px; padding:6px 10px; border-left:2px solid var(--neon-crimson); background:rgba(255,0,85,0.08); border-radius:4px;"><i class="fa-solid fa-triangle-exclamation"></i> Respons terputus: ${escapeHtml(data.error || 'Terjadi kesalahan koneksi')}</div>`;
+              bubbleText.innerHTML = renderMarkdown(partialText) + `\n\n<div style="color:var(--neon-crimson); font-size:0.82rem; margin-top:8px; padding:6px 10px; border-left:2px solid var(--neon-crimson); background:rgba(255,0,85,0.08); border-radius:4px;"><i class="fa-solid fa-triangle-exclamation"></i> Respons terputus: ${escapeHtml(errDetail)}</div>`;
               enhanceCodeBlocks(bubbleText);
               enhanceChatImages(bubbleText);
             } else {
-              bubbleText.innerHTML = `<div style="color:var(--neon-crimson); font-size:0.85rem;"><i class="fa-solid fa-triangle-exclamation"></i> Gagal menyelesaikan respons di latar belakang: ${escapeHtml(data.error || 'Terjadi kesalahan')}</div>`;
+              bubbleText.innerHTML = `<div style="color:var(--neon-crimson); font-size:0.85rem;"><i class="fa-solid fa-triangle-exclamation"></i> Gagal menyelesaikan respons di latar belakang: ${escapeHtml(errDetail)}</div>`;
             }
           }
           if (partialText.trim()) {
@@ -1487,7 +1488,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             if (session.messages.length > 0) {
               lastMsg = session.messages[session.messages.length - 1];
             }
-            const interruptedText = partialText + `\n\n*[Respons terputus: ${data.error || 'koneksi terputus'}]*`;
+            const interruptedText = partialText + `\n\n*[Respons terputus: ${errDetail}]*`;
             if (!lastMsg || lastMsg.role !== 'assistant') {
               session.messages.push({
                 role: 'assistant',
@@ -2232,13 +2233,13 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             }
           }
         }
-        if (targetMsg) targetMsg.content = merged;
-        let lastMsg = null;
-        if (session.messages && session.messages.length > 0) {
-          lastMsg = session.messages[session.messages.length - 1];
-        }
-        else if (lastMsg && lastMsg.role === 'assistant') {
-          lastMsg.content = merged;
+        if (targetMsg) {
+          targetMsg.content = merged;
+        } else {
+          const lastMsg = (session.messages && session.messages.length > 0) ? session.messages[session.messages.length - 1] : null;
+          if (lastMsg && lastMsg.role === 'assistant') {
+            lastMsg.content = merged;
+          }
         }
         assistantRow.dataset.fullContent = merged;
         session.updatedAt = new Date().toISOString();
