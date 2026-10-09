@@ -5,8 +5,9 @@ function isPrivateHostname(hostname) {
   if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h)) return true;
   if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return true;
   if (/^169\.254\./.test(h)) return true;
-  if (/^fc00:|^fe80:/i.test(h)) return true;
-  if (h.startsWith('::ffff:127.') || h.startsWith('::ffff:192.168.') || h.startsWith('::ffff:10.')) return true;
+  if (/^fc00:|^fe80:/i.test(h)) return true; // IPv6 Unique Local & Link-Local
+  if (h.startsWith('::ffff:')) return true; // Block all IPv4-mapped IPv6
+  if (h.startsWith('::7f00:') || h.startsWith('::a9fe:') || h.startsWith('::c0a8:') || h.startsWith('::0a')) return true; // Block mapped hex variants
   if (h.endsWith('.local') || h.endsWith('.internal') || h.endsWith('.localhost')) return true;
   return false;
 }
