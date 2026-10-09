@@ -3043,7 +3043,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         <div class="attached-images-gallery ${gridClass}">
           ${imgList.map((src, imgIdx) => `
             <div class="chat-img-thumb-wrap" data-img-idx="${imgIdx}" title="Klik untuk melihat foto layar penuh">
-              <img src="${src}" alt="Foto ${imgIdx + 1}" class="chat-zoomable-img">
+              <img src="${escapeHtml(src)}" alt="Foto ${imgIdx + 1}" class="chat-zoomable-img">
               <div class="chat-img-overlay">
                 <i class="fa-solid fa-expand"></i>
               </div>
@@ -3533,7 +3533,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         card.className = 'preview-card';
         card.title = 'Klik untuk melihat foto layar penuh';
         card.innerHTML = `
-          <img src="${imgSrc}" alt="Lampiran Foto ${idx + 1}">
+          <img src="${escapeHtml(imgSrc)}" alt="Lampiran Foto ${idx + 1}">
           <button class="remove-attachment-btn" data-img-idx="${idx}" title="Hapus Foto"><i class="fa-solid fa-xmark"></i></button>
         `;
         card.querySelector('img').addEventListener('click', (e) => {
