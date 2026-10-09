@@ -66,39 +66,19 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
   // Popular OpenRouter Models Catalog (Live Active Free & Flagship Models)
   const DEFAULT_OPENROUTER_MODELS = [
-    { id: 'openrouter/free', name: 'OpenRouter Free Router (Auto)', tag: 'Free • Auto-Route', cat: 'free', desc: 'Rute otomatis cerdas ke model gratis OpenRouter yang paling sehat dan tidak antre.' },
-    { id: 'google/gemma-4-26b-a4b-it:free', name: 'google/gemma-4-26b-a4b-it:free', tag: 'Free • Fast', cat: 'fast' },
-    { id: 'google/gemma-4-31b-it:free', name: 'google/gemma-4-31b-it:free', tag: 'Free • Multimodal', cat: 'flagship' },
-    { id: 'nvidia/nemotron-3.5-lightning:free', name: 'nvidia/nemotron-3.5-lightning:free', tag: 'Free • Lightning', cat: 'fast' },
-    { id: 'liquid/lfm-2.5-2.6b:free', name: 'liquid/lfm-2.5-2.6b:free', tag: 'Free • Compact', cat: 'fast' },
-    { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', name: 'nvidia/nemotron-3-ultra-550b-a55b:free', tag: 'Free • Massive', cat: 'flagship' },
-    { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', name: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', tag: 'Free • Reasoning', cat: 'reasoning' },
-    { id: 'openai/gpt-4o', name: 'openai/gpt-4o', tag: 'Flagship • 👁️ Vision', cat: 'flagship' },
-    { id: 'anthropic/claude-3.5-sonnet', name: 'anthropic/claude-3.5-sonnet', tag: 'Flagship • Coding', cat: 'coding' },
-    { id: 'deepseek/deepseek-chat', name: 'deepseek/deepseek-chat', tag: 'Flagship • V3', cat: 'flagship' },
-    { id: 'mistralai/mistral-large-2411', name: 'mistralai/mistral-large-2411', tag: 'Pro • Flagship', cat: 'flagship' }
+    { id: 'openrouter/auto', name: 'OpenRouter Auto Router', tag: 'Auto', cat: 'free', desc: 'Rute otomatis cerdas OpenRouter.' },
+    { id: 'google/gemini-pro-1.5', name: 'Google Gemini Pro 1.5', tag: 'Pro', cat: 'flagship' },
+    { id: 'google/gemma-2-9b-it:free', name: 'google/gemma-2-9b-it:free', tag: 'Free', cat: 'free' },
+    { id: 'meta-llama/llama-3.1-70b-instruct', name: 'Meta Llama 3.1 70B', tag: 'Flagship', cat: 'flagship' },
+    { id: 'meta-llama/llama-3.1-8b-instruct:free', name: 'meta-llama/llama-3.1-8b-instruct:free', tag: 'Free', cat: 'free' },
+    { id: 'anthropic/claude-3.5-sonnet', name: 'Anthropic Claude 3.5 Sonnet', tag: 'Coding', cat: 'coding' },
+    { id: 'openai/gpt-4o', name: 'OpenAI GPT-4o', tag: 'Vision', cat: 'flagship' },
+    { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat', tag: 'Coding', cat: 'coding' },
+    { id: 'qwen/qwen-2-7b-instruct:free', name: 'qwen/qwen-2-7b-instruct:free', tag: 'Free', cat: 'free' }
   ];
 
   // Official Ollama Cloud Flagship Models (Free Included Usage vs Usage Credits)
-  const OFFICIAL_OLLAMA_CLOUD_MODELS = [
-    { id: 'gemma4:31b', name: 'gemma4:31b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', desc: 'Model multimodal flagship resmi Ollama Cloud (Included Free Usage).' },
-    { id: 'gpt-oss:120b', name: 'gpt-oss:120b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', desc: 'GPT-OSS 120B Flagship Cloud (Included Free Usage).' },
-    { id: 'gpt-oss:20b', name: 'gpt-oss:20b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', desc: 'GPT-OSS 20B High-Throughput (Included Free Usage).' },
-    { id: 'nemotron-3-super', name: 'nemotron-3-super', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', desc: 'NVIDIA Nemotron Super Flagship Cloud (Included Free Usage).' },
-    { id: 'nemotron-3-ultra', name: 'nemotron-3-ultra', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', desc: 'NVIDIA Nemotron Ultra High-Parameter (Included Free Usage).' },
-    { id: 'nemotron-3-nano:30b', name: 'nemotron-3-nano:30b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', desc: 'NVIDIA Nemotron Fast Nano Cloud (Included Free Usage).' },
-    { id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', desc: 'Model cloud kecepatan tinggi DeepSeek (Usage Credits).' },
-    { id: 'deepseek-v4-pro:0813', name: 'deepseek-v4-pro:0813', tag: 'Reasoning Cloud', isFree: false, cat: 'reasoning', desc: 'Model reasoning mendalam DeepSeek Cloud (Usage Credits).' },
-    { id: 'mistral-large-3:675b', name: 'mistral-large-3:675b', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', desc: 'Mistral Large 3 Massive Cloud (Usage Credits).' },
-    { id: 'kimi-k3', name: 'kimi-k3', tag: 'Long Context Cloud', isFree: false, cat: 'flagship', desc: 'Moonshot Kimi K3 Long Context (Usage Credits).' },
-    { id: 'kimi-k2.6', name: 'kimi-k2.6', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', desc: 'Moonshot Kimi K2.6 Cloud (Usage Credits).' },
-    { id: 'kimi-k2.7-code', name: 'kimi-k2.7-code', tag: 'Coding Cloud', isFree: false, cat: 'coding', desc: 'Kimi Coding Cloud Specialist (Usage Credits).' },
-    { id: 'minimax-m3', name: 'minimax-m3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', desc: 'MiniMax M3 Flagship Cloud (Usage Credits).' },
-    { id: 'minimax-m2.7', name: 'minimax-m2.7', tag: 'Cloud', isFree: false, cat: 'flagship', desc: 'MiniMax M2.7 Cloud (Usage Credits).' },
-    { id: 'glm-5.3', name: 'glm-5.3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', desc: 'Zhipu GLM-5.3 Flagship Cloud (Usage Credits).' },
-    { id: 'glm-5.3-flash', name: 'glm-5.3-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', desc: 'GLM-5.3 Flash Ultra Fast (Usage Credits).' },
-    { id: 'glm-5.2', name: 'glm-5.2', tag: 'Cloud', isFree: false, cat: 'flagship', desc: 'GLM-5.2 Cloud Model (Usage Credits).' }
-  ];
+  const OFFICIAL_OLLAMA_CLOUD_MODELS = []; // Kosong agar langsung fetch dari API /api/tags
 
   // Dedicated Image Synthesis Models (Pollinations Multi-Style & OpenRouter Image Engines)
   const DEFAULT_IMAGE_MODELS = [
