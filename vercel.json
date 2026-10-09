@@ -1,5 +1,6 @@
 {
-  "cleanUrls": true,
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
   "headers": [
     {
       "source": "/api/(.*)",
@@ -7,6 +8,13 @@
         { "key": "Access-Control-Allow-Origin", "value": "*" },
         { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,PATCH,DELETE,OPTIONS" },
         { "key": "Access-Control-Allow-Headers", "value": "Content-Type,Authorization,x-ollama-endpoint,x-title,HTTP-Referer,x-serper-key,x-ollama-key,x-api-key,x-openrouter-key,x-session-id,X-Session-ID" }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
       ]
     }
   ]
