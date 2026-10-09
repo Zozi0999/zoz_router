@@ -1055,6 +1055,22 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     console.warn('YouTube auto-enrichment warning in callLLMBackend:', ytErr.message);
   }
 
+  // Auto-enrich Web Page links in user turns with real-time extracted content
+  try {
+    for (let i = finalMessages.length - 1; i >= 0; i--) {
+      const msg = finalMessages[i];
+      if (msg.role === 'user' && typeof msg.content === 'string' && extractWebUrls(msg.content).length > 0) {
+        const enrichedWeb = await enrichTextWithWebPageContext(msg.content);
+        if (enrichedWeb.webPages && enrichedWeb.webPages.length > 0) {
+          msg.content = enrichedWeb.text;
+          break;
+        }
+      }
+    }
+  } catch (webErr) {
+    console.warn('Web page auto-enrichment warning in callLLMBackend:', webErr.message);
+  }
+
   const rawModel = (model || '').trim();
   // Auto-detect Provider per Model secara cerdas
   let effectiveProvider = provider || 'ollama';
@@ -1315,18 +1331,18 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
 
 
 // Helper untuk melakukan web scraping / pemindaian konten artikel mendalam dari URL dengan proteksi redirect loop & SSRF
-function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
+function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
   return new Promise((resolve) => {
     try {
       if (redirectCount > 3) {
-        return resolve(''); // Batas maksimal 3 hop redirect
+        return resolve({ success: false, error: 'Batas maksimal 3 hop redirect tercapai.' });
       }
       if (!targetUrl || typeof targetUrl !== 'string' || !/^https?:\/\//i.test(targetUrl)) {
-        return resolve('');
+        return resolve({ success: false, error: 'URL target tidak valid.' });
       }
       const parsedUrl = new URL(targetUrl);
       if (isPrivateHost(parsedUrl.hostname, parsedUrl.port)) {
-        return resolve(''); // Cegah akses ke host lokal / intranet
+        return resolve({ success: false, error: 'Akses ke host lokal / intranet diblokir (SSRF Protection).' });
       }
       const client = parsedUrl.protocol === 'https:' ? https : http;
 
@@ -1336,12 +1352,12 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
         path: parsedUrl.pathname + parsedUrl.search,
         method: 'GET',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
+          'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
           'Accept-Encoding': 'gzip, deflate, br'
         },
-        timeout: 6000
+        timeout: 9000
       };
 
       let rawHtml = '';
@@ -1351,6 +1367,15 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
         if (resolved) return;
         resolved = true;
         try {
+          const titleMatch = html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+          let pageTitle = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : '';
+          pageTitle = pageTitle
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'");
+
           let clean = html
             .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
             .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
@@ -1373,9 +1398,16 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
             .replace(/\s+/g, ' ')
             .trim();
 
-          resolve(clean.substring(0, maxChars));
+          resolve({
+            success: true,
+            url: targetUrl,
+            domain: parsedUrl.hostname,
+            title: pageTitle || parsedUrl.hostname,
+            charCount: Math.min(clean.length, maxChars),
+            content: clean.substring(0, maxChars)
+          });
         } catch (e) {
-          resolve('');
+          resolve({ success: false, error: e.message });
         }
       }
 
@@ -1385,17 +1417,17 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
             res.resume();
             resolved = true;
             const redirectUrl = new URL(res.headers.location, targetUrl).toString();
-            return fetchPageContent(redirectUrl, maxChars, redirectCount + 1).then(resolve);
+            return fetchPageDetails(redirectUrl, maxChars, redirectCount + 1).then(resolve);
           } catch (e) {
             resolved = true;
-            return resolve('');
+            return resolve({ success: false, error: 'Redirect error: ' + e.message });
           }
         }
 
         if (res.statusCode < 200 || res.statusCode >= 300) {
           res.resume();
           resolved = true;
-          return resolve('');
+          return resolve({ success: false, error: `HTTP ${res.statusCode}` });
         }
 
         // Dekompresi stream jika server web mengembalikan format gzip, deflate, atau brotli
@@ -1425,35 +1457,102 @@ function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
           }
         });
 
-        stream.on('end', () => { if (!resolved) { rawHtml = typeof chunks !== 'undefined' && chunks.length > 0 ? Buffer.concat(chunks).toString('utf8') : rawHtml; finishExtract(rawHtml); } });
+        stream.on('end', () => {
+          if (!resolved) {
+            rawHtml = typeof chunks !== 'undefined' && chunks.length > 0 ? Buffer.concat(chunks).toString('utf8') : rawHtml;
+            finishExtract(rawHtml);
+          }
+        });
         stream.on('error', () => {
           try { res.unpipe(); } catch (_) {}
           try { if (stream !== res) stream.destroy(); } catch (_) {}
-          if (typeof chunks !== 'undefined' && chunks.length > 0) { rawHtml = Buffer.concat(chunks).toString('utf8'); finishExtract(rawHtml); } else if (rawHtml.length > 0) { finishExtract(rawHtml); }
-          else if (!resolved) { resolved = true; resolve(''); }
+          if (!resolved) {
+            resolved = true;
+            resolve({ success: false, error: 'Stream decompression error' });
+          }
         });
         res.on('error', () => {
           try { res.unpipe(); } catch (_) {}
           try { if (stream !== res) stream.destroy(); } catch (_) {}
-          if (typeof chunks !== 'undefined' && chunks.length > 0) { rawHtml = Buffer.concat(chunks).toString('utf8'); finishExtract(rawHtml); } else if (rawHtml.length > 0) { finishExtract(rawHtml); }
-          else if (!resolved) { resolved = true; resolve(''); }
+          if (!resolved) {
+            resolved = true;
+            resolve({ success: false, error: 'Response error' });
+          }
         });
       });
 
       req.on('timeout', () => {
         req.destroy();
-        if (typeof chunks !== 'undefined' && chunks.length > 0) { rawHtml = Buffer.concat(chunks).toString('utf8'); finishExtract(rawHtml); } else if (rawHtml.length > 0) { finishExtract(rawHtml); }
-        else if (!resolved) { resolved = true; resolve(''); }
+        if (!resolved) {
+          resolved = true;
+          resolve({ success: false, error: 'Network timeout (9s)' });
+        }
       });
-      req.on('error', () => {
-        if (typeof chunks !== 'undefined' && chunks.length > 0) { rawHtml = Buffer.concat(chunks).toString('utf8'); finishExtract(rawHtml); } else if (rawHtml.length > 0) { finishExtract(rawHtml); }
-        else if (!resolved) { resolved = true; resolve(''); }
+      req.on('error', (err) => {
+        if (!resolved) {
+          resolved = true;
+          resolve({ success: false, error: err.message });
+        }
       });
       req.end();
     } catch (err) {
-      resolve('');
+      resolve({ success: false, error: err.message });
     }
   });
+}
+
+function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
+  return fetchPageDetails(targetUrl, maxChars, redirectCount)
+    .then(res => (res && res.success && res.content) ? res.content : '');
+}
+
+// Ekstraktor URL web publik (mengecualikan YouTube karena sudah ada oEmbed khusus)
+function extractWebUrls(text) {
+  if (!text || typeof text !== 'string') return [];
+  const urlRegex = /https?:\/\/[^\s<>"'{}|\\^`\[\]]+/gi;
+  const matches = text.match(urlRegex) || [];
+  return matches.map(u => u.replace(/[.,!?;:)]+$/, '')).filter(u => {
+    try {
+      const p = new URL(u);
+      const h = p.hostname.toLowerCase();
+      if (h.includes('youtube.com') || h.includes('youtu.be')) return false;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  });
+}
+
+// Universal Web Page Grounding Enricher: injects real-time extracted article text for 100% of LLM models
+async function enrichTextWithWebPageContext(text) {
+  if (!text || typeof text !== 'string') return { text, webPages: [] };
+  const urls = extractWebUrls(text);
+  if (urls.length === 0) return { text, webPages: [] };
+
+  const targetUrls = urls.slice(0, 3);
+  const results = await Promise.all(targetUrls.map(url => fetchPageDetails(url, 6000)));
+  const validPages = results.filter(r => r && r.success && r.content && r.content.length > 50);
+
+  if (validPages.length === 0) return { text, webPages: [] };
+
+  const contextBlocks = validPages.map((p, idx) => {
+    return `[KONTEN TERVERIFIKASI SITUS WEB #${idx + 1}]
+- Sumber URL: ${p.url}
+- Judul Halaman: "${p.title}"
+- Domain: ${p.domain}
+- Panjang Teks: ${p.charCount} karakter
+--- ISI TEKS BERSIH HALAMAN ---
+${p.content}
+--- AKHIR ISI SITUS WEB #${idx + 1} ---`;
+  }).join('\n\n');
+
+  const groundingPrompt = `\n\n### DATA KONTEN WEB HASIL EKSTRAKSI REAL-TIME:\n${contextBlocks}\n\nInstruksi untuk AI: Gunakan dokumen teks situs web resmi yang berhasil diekstrak di atas untuk menjawab, merangkum, menganalisis, dan menjelaskan isi halaman web tersebut kepada pengguna secara akurat, mendalam, dan bebas halusinasi.`;
+
+  return {
+    text: text + groundingPrompt,
+    webPages: validPages,
+    groundingContext: groundingPrompt
+  };
 }
 
 // ==================== AUTONOMOUS MULTI-SOURCE WEB EXPLORER ENGINES ====================
@@ -3513,6 +3612,33 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, info);
     } catch (err) {
       return sendJSON(res, 200, { success: false, error: err.message, url: targetUrl ? targetUrl.trim() : '' });
+    }
+  }
+
+  // ----------------------------------------------------
+  // WEB PAGE CONTENT EXTRACTOR / READER TOOL API
+  // ----------------------------------------------------
+  if ((pathname === '/api/extract-web' || pathname === '/api/read-url' || pathname === '/api/scrape-url') && (method === 'GET' || method === 'POST')) {
+    let targetUrl = '';
+    let maxChars = 8000;
+    try {
+      if (method === 'GET') {
+        targetUrl = reqUrl.searchParams.get('url') || reqUrl.searchParams.get('link') || '';
+        if (reqUrl.searchParams.get('maxChars')) maxChars = parseInt(reqUrl.searchParams.get('maxChars'), 10) || 8000;
+      } else {
+        const body = await parseBody(req);
+        targetUrl = body.url || body.link || '';
+        if (body.maxChars) maxChars = parseInt(body.maxChars, 10) || 8000;
+      }
+
+      if (!targetUrl || !targetUrl.trim()) {
+        return sendJSON(res, 400, { success: false, error: 'Parameter url diperlukan.' });
+      }
+
+      const result = await fetchPageDetails(targetUrl.trim(), maxChars);
+      return sendJSON(res, 200, result);
+    } catch (err) {
+      return sendJSON(res, 500, { success: false, error: 'Gagal mengekstrak web: ' + err.message });
     }
   }
 

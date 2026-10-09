@@ -4067,6 +4067,80 @@ ${organicBlock}
     }
   });
 
+  // ==================== UNIVERSAL WEB CONTENT EXTRACTOR & READER TOOL ====================
+  const clientWebContentCache = new Map();
+
+  function extractWebUrlsFromText(input) {
+    if (!input || typeof input !== 'string') return [];
+    const urlRegex = /https?:\/\/[^\s<>"'{}|\\^`\[\]]+/gi;
+    const matches = input.match(urlRegex) || [];
+    return matches.map(u => u.replace(/[.,!?;:)]+$/, '')).filter(u => {
+      try {
+        const p = new URL(u);
+        const h = p.hostname.toLowerCase();
+        if (h.includes('youtube.com') || h.includes('youtu.be')) return false;
+        if (/\.(png|jpe?g|webp|gif|svg|mp4|webm|mp3|wav|ogg|pdf)$/i.test(p.pathname)) return false;
+        return true;
+      } catch (_) {
+        return false;
+      }
+    });
+  }
+
+  async function extractWebContentFromUrl(targetUrl, maxChars = 8000) {
+    if (!targetUrl || typeof targetUrl !== 'string') return null;
+    let clean = targetUrl.trim();
+    if (!/^https?:\/\//i.test(clean)) clean = 'https://' + clean;
+
+    if (clientWebContentCache.has(clean)) {
+      return clientWebContentCache.get(clean);
+    }
+
+    // 1. Coba endpoint ekstraksi web resmi Zoz Router (/api/extract-web)
+    try {
+      const ep = '/api/extract-web?url=' + encodeURIComponent(clean) + '&maxChars=' + maxChars;
+      const res = await fetch(ep, {
+        headers: { 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(10000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && data.content && data.content.length > 30) {
+          clientWebContentCache.set(clean, data);
+          return data;
+        }
+      }
+    } catch (_) {}
+
+    // 2. Fallback: coba endpoint /api/tools/browse-page
+    try {
+      const res = await fetch('/api/tools/browse-page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: clean, maxChars }),
+        signal: AbortSignal.timeout(10000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const text = data.content || data.text || '';
+        if (text && text.length > 30) {
+          const formatted = {
+            success: true,
+            url: clean,
+            domain: (new URL(clean)).hostname,
+            title: data.title || (new URL(clean)).hostname,
+            charCount: text.length,
+            content: text
+          };
+          clientWebContentCache.set(clean, formatted);
+          return formatted;
+        }
+      }
+    } catch (_) {}
+
+    return { success: false, url: clean, error: 'Gagal mengekstrak website.' };
+  }
+
   // ==================== URL & ENDPOINT NORMALIZER ====================
   function normalizeEndpoint(ep) {
     if (!ep || typeof ep !== 'string' || !ep.trim()) return 'https://ollama.com';
@@ -4745,6 +4819,38 @@ ${organicBlock}
       showToast('Mode AI Image Studio aktif. Silakan ketik deskripsi visual!');
       AudioEngine.click();
       return;
+    }
+
+    // Auto-Extraction URL Web Publik untuk Analisis & Ringkasan AI
+    const detectedWebUrls = extractWebUrlsFromText(rawText);
+    if (detectedWebUrls.length > 0) {
+      const urlsToScrape = detectedWebUrls.slice(0, 2);
+      try {
+        const scrapePromises = urlsToScrape.map(u => extractWebContentFromUrl(u, 7500));
+        const scrapeResults = await Promise.all(scrapePromises);
+        let extractedCount = 0;
+        scrapeResults.forEach(res => {
+          if (res && res.success && res.content && res.content.length > 30) {
+            extractedCount++;
+            const docName = `[Web: ${res.title || res.domain}]`;
+            docs.push({
+              name: docName,
+              size: `${res.charCount || res.content.length} karakter`,
+              content: `Sumber URL: ${res.url}\nJudul Halaman: ${res.title}\nDomain: ${res.domain}\n\n${res.content}`
+            });
+          }
+        });
+        if (extractedCount > 0) {
+          showToast(`🌐 Berhasil mengekstrak ${extractedCount} konten website secara langsung!`, 'success');
+          // Jika pengguna hanya menempelkan link atau slash command tanpa instruksi khusus, otomatis buat prompt ringkasan
+          let cleanPromptCheck = rawText.replace(/^\/(?:web|read|ringkas|baca|scrape)\s+/i, '').trim();
+          if (/^https?:\/\/[^\s]+$/i.test(cleanPromptCheck)) {
+            rawText = `Tolong baca, analisis, dan rangkum intisari serta poin-poin penting dari website berikut secara terstruktur: ${cleanPromptCheck}`;
+          }
+        }
+      } catch (err) {
+        console.warn('Auto-scrape URL web notice:', err.message);
+      }
     }
 
     // Combine documents with text
