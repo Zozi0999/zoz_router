@@ -3814,758 +3814,265 @@ const server = http.createServer(async (req, res) => {
     return header;
   }
 
-  function synthesizeProceduralMusicBuffer({ prompt = '', genre = '', duration = 15, bpm = null, title = null }) {
-    const p = (prompt + ' ' + (genre || '')).toLowerCase();
-    let effectiveGenre = genre ? genre.toLowerCase().trim() : 'cyberpunk';
-    let targetBpm = bpm || 128;
-    let titlePrefix = title || 'Cyberpunk Matrix Protocol';
+  // ====================================================
+  // AI MUSIC STUDIO: REAL AUDIO FROM AUDIO-OUTPUT AI MODELS (Google Lyria 3 via OpenRouter)
+  // Tidak ada sintesis lokal / generator prosedural: audio berasal langsung dari model AI.
+  // ====================================================
+  const MUSIC_AUDIO_MODEL_RE = /lyria|musicgen|suno|udio|stable-audio|gpt-audio/i;
+  const DEFAULT_MUSIC_MODEL = 'google/lyria-3-clip-preview';
 
-    if (effectiveGenre.includes('lofi') || effectiveGenre.includes('chill') || /lofi|lo-fi|chill|santai|relax|study|hujan|rain/i.test(p)) {
-      effectiveGenre = 'lofi';
-      targetBpm = bpm || 80;
-      if (!title) titlePrefix = 'Midnight Lofi Chill';
-    } else if (effectiveGenre.includes('synthwave') || effectiveGenre.includes('retro') || /synthwave|retrowave|80s|retro|outrun|neon/i.test(p)) {
-      effectiveGenre = 'synthwave';
-      targetBpm = bpm || 115;
-      if (!title) titlePrefix = 'Neon Highway Synthwave';
-    } else if (effectiveGenre.includes('orchestra') || effectiveGenre.includes('epic') || /orchestra|orkestra|epic|epil|sinematik|cinematic|pertempuran|battle|heroic/i.test(p)) {
-      effectiveGenre = 'orchestral';
-      targetBpm = bpm || 96;
-      if (!title) titlePrefix = 'Imperial Titan Anthem';
-    } else if (effectiveGenre.includes('ambient') || effectiveGenre.includes('space') || /ambient|meditation|space|kosmik|tenang|zen|galaxy/i.test(p)) {
-      effectiveGenre = 'ambient';
-      targetBpm = bpm || 68;
-      if (!title) titlePrefix = 'Cosmic Horizon Ambient';
-    } else if (effectiveGenre.includes('edm') || effectiveGenre.includes('dance') || /edm|dance|house|techno|club|party|beat/i.test(p)) {
-      effectiveGenre = 'edm';
-      targetBpm = bpm || 128;
-      if (!title) titlePrefix = 'Neural Overdrive Drop';
-    } else if (effectiveGenre.includes('piano') || /piano|klasik|classical|akustik|acoustic/i.test(p)) {
-      effectiveGenre = 'piano';
-      targetBpm = bpm || 84;
-      if (!title) titlePrefix = 'Celestial Piano Nocturne';
-    } else if (effectiveGenre.includes('rock') || /rock|metal|gitar|guitar/i.test(p)) {
-      effectiveGenre = 'rock';
-      targetBpm = bpm || 138;
-      if (!title) titlePrefix = 'Overdrive Cyber Rock';
-    } else {
-      effectiveGenre = 'cyberpunk';
-      targetBpm = bpm || 130;
-      if (!title) titlePrefix = 'Singularity Cyber Beat';
-    }
-
-    const sampleRate = 44100;
-    const dur = Math.min(Math.max(duration || 15, 6), 40);
-    const totalSamples = Math.floor(sampleRate * dur);
-    const buffer = Buffer.alloc(totalSamples * 4); // 16-bit stereo
-
-    const beatLen = 60 / targetBpm;
-    const sixteenth = beatLen / 4;
-
-    const cMinorScale = [130.81, 155.56, 174.61, 196.00, 233.08, 261.63, 311.13, 349.23, 392.00, 466.16];
-    const lofiChords = [
-      [146.83, 174.61, 220.00, 261.63], // Dm7
-      [98.00, 146.83, 196.00, 246.94],  // G7
-      [130.81, 164.81, 196.00, 246.94], // Cmaj7
-      [110.00, 164.81, 220.00, 261.63]  // Am7
-    ];
-
-    for (let i = 0; i < totalSamples; i++) {
-      const t = i / sampleRate;
-      let left = 0;
-      let right = 0;
-
-      if (effectiveGenre === 'lofi') {
-        const crackle = (Math.random() < 0.002 ? (Math.random() * 2 - 1) * 0.15 : 0);
-        const vinylHiss = (Math.random() * 2 - 1) * 0.015;
-        left += vinylHiss + crackle;
-        right += vinylHiss + crackle;
-
-        const bTime = t % (beatLen * 2);
-        if (bTime < 0.18 || (bTime > beatLen * 1.5 && bTime < beatLen * 1.5 + 0.15)) {
-          const kTime = bTime < 0.18 ? bTime : (bTime - beatLen * 1.5);
-          const kFreq = 85 * Math.exp(-kTime * 25) + 36;
-          const kick = Math.sin(2 * Math.PI * kFreq * kTime) * Math.exp(-kTime * 14) * 0.55;
-          left += kick; right += kick;
-        }
-
-        if (bTime >= beatLen && bTime < beatLen + 0.18) {
-          const sTime = bTime - beatLen;
-          const rim = Math.sin(2 * Math.PI * 320 * sTime) * Math.exp(-sTime * 40) * 0.3;
-          const snareNoise = (Math.random() * 2 - 1) * Math.exp(-sTime * 35) * 0.18;
-          left += rim + snareNoise; right += rim + snareNoise;
-        }
-
-        const eighthTime = t % (beatLen / 2);
-        if (eighthTime < 0.035) {
-          const shk = (Math.random() * 2 - 1) * Math.exp(-eighthTime * 90) * 0.08;
-          left += shk * 0.7; right += shk * 1.1;
-        }
-
-        const chordIdx = Math.floor(t / (beatLen * 4)) % lofiChords.length;
-        const notes = lofiChords[chordIdx];
-        let chordVal = 0;
-        for (let n = 0; n < notes.length; n++) {
-          const freq = notes[n];
-          const tone = Math.sin(2 * Math.PI * freq * t) + 0.3 * Math.sin(2 * Math.PI * freq * 2 * t);
-          chordVal += tone;
-        }
-        chordVal = (chordVal / notes.length) * 0.28;
-        left += chordVal * 0.95; right += chordVal * 1.05;
-
-        const rootNote = notes[0] / 2;
-        const bass = Math.sin(2 * Math.PI * rootNote * t) * 0.35;
-        left += bass; right += bass;
-
-      } else if (effectiveGenre === 'ambient') {
-        const droneFreq = 55;
-        const pad1 = Math.sin(2 * Math.PI * droneFreq * t) * 0.25;
-        const pad2 = Math.sin(2 * Math.PI * (droneFreq * 1.5) * t + Math.sin(t * 0.5)) * 0.2;
-        const pad3 = Math.sin(2 * Math.PI * (droneFreq * 2.25) * t) * 0.12 * (0.5 + 0.5 * Math.sin(t * 0.3));
-        left += pad1 + pad2 * 0.8 + pad3 * 1.2;
-        right += pad1 + pad2 * 1.2 + pad3 * 0.8;
-
-        const chimePeriod = t % 4;
-        if (chimePeriod < 1.5) {
-          const chimeFreq = [523.25, 659.25, 783.99, 1046.50][Math.floor(t / 4) % 4];
-          const chime = Math.sin(2 * Math.PI * chimeFreq * t) * Math.exp(-chimePeriod * 1.5) * 0.15;
-          left += chime * (0.5 + 0.5 * Math.sin(t));
-          right += chime * (0.5 + 0.5 * Math.cos(t));
-        }
-
-      } else {
-        const beatTime = t % beatLen;
-        if (beatTime < 0.16) {
-          const kickFreq = 120 * Math.exp(-beatTime * 32) + 40;
-          const kick = Math.sin(2 * Math.PI * kickFreq * beatTime) * Math.exp(-beatTime * 18) * 0.65;
-          left += kick; right += kick;
-        }
-
-        const halfBar = t % (beatLen * 2);
-        if (halfBar >= beatLen && halfBar < beatLen + 0.22) {
-          const sTime = halfBar - beatLen;
-          const noise = (Math.random() * 2 - 1) * Math.exp(-sTime * 22) * 0.38;
-          const tone = Math.sin(2 * Math.PI * 185 * sTime) * Math.exp(-sTime * 26) * 0.32;
-          left += noise + tone; right += noise + tone;
-        }
-
-        const hatTime = t % sixteenth;
-        if (hatTime < 0.04) {
-          const hat = (Math.random() * 2 - 1) * Math.exp(-hatTime * 80) * 0.16;
-          left += hat * 0.8; right += hat * 1.2;
-        }
-
-        const barIdx = Math.floor(t / beatLen) % 4;
-        const rootFreq = [65.41, 77.78, 87.31, 98.00][barIdx];
-        const sawPhase = (t * rootFreq) % 1;
-        const saw = (sawPhase * 2 - 1) * 0.32;
-        const sub = Math.sin(2 * Math.PI * rootFreq * t) * 0.38;
-        const bass = saw + sub;
-        left += bass; right += bass;
-
-        const arpStep = Math.floor(t / sixteenth) % cMinorScale.length;
-        const arpFreq = cMinorScale[arpStep];
-        const arpEnv = Math.exp(-(t % sixteenth) * 9);
-        const arp = Math.sin(2 * Math.PI * arpFreq * t) * arpEnv * 0.24;
-        left += arp * 1.15; right += arp * 0.85;
-      }
-
-      left = Math.max(-0.98, Math.min(0.98, left * 0.75));
-      right = Math.max(-0.98, Math.min(0.98, right * 0.75));
-
-      buffer.writeInt16LE(Math.floor(left * 32767), i * 4);
-      buffer.writeInt16LE(Math.floor(right * 32767), i * 4 + 2);
-    }
-
-    return {
-      buffer,
-      genre: effectiveGenre,
-      bpm: targetBpm,
-      duration: dur,
-      title: title ? title : `${titlePrefix} [${effectiveGenre.toUpperCase()} • ${targetBpm} BPM]`
-    };
+  function detectAudioContainer(buf) {
+    if (!buf || buf.length < 4) return null;
+    if (buf.slice(0, 4).toString('latin1') === 'RIFF') return 'wav';
+    if (buf.slice(0, 3).toString('latin1') === 'ID3') return 'mp3';
+    if (buf[0] === 0xFF && (buf[1] & 0xE0) === 0xE0) return 'mp3';
+    if (buf.slice(0, 4).toString('latin1') === 'OggS') return 'ogg';
+    if (buf.slice(0, 4).toString('latin1') === 'fLaC') return 'flac';
+    if (buf.length > 12 && buf.slice(4, 8).toString('latin1') === 'ftyp') return 'm4a';
+    return null;
   }
 
-  // ==================== SCORE-BASED MUSIC RENDERER (NOTES WRITTEN BY THE CHOSEN AI MODEL) ====================
-  function sanitizeMusicScore(raw) {
-    if (!raw || typeof raw !== 'object') return null;
-    const num = (v, d) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
-    const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-
-    const normNotes = (arr, minP, maxP) => {
-      if (!Array.isArray(arr)) return [];
-      const out = [];
-      for (const n of arr) {
-        let pitch, start, len;
-        if (Array.isArray(n)) { pitch = num(n[0], NaN); start = num(n[1], NaN); len = num(n[2], 1); }
-        else if (n && typeof n === 'object') {
-          pitch = num(n.pitch ?? n.note ?? n.midi, NaN);
-          start = num(n.start ?? n.time ?? n.beat, NaN);
-          len = num(n.length ?? n.len ?? n.dur ?? n.duration, 1);
-        } else continue;
-        if (!Number.isFinite(pitch) || !Number.isFinite(start)) continue;
-        out.push({ pitch: Math.round(clamp(pitch, minP, maxP)), start: clamp(start, 0, 64), len: clamp(len, 0.125, 16) });
-        if (out.length >= 256) break;
-      }
-      return out;
-    };
-
-    const melody = normNotes(raw.melody, 36, 100);
-    const bass = normNotes(raw.bass, 24, 60);
-
-    const chords = [];
-    if (Array.isArray(raw.chords)) {
-      for (const c of raw.chords) {
-        let pitches, start, len;
-        if (Array.isArray(c)) { pitches = c[0]; start = num(c[1], NaN); len = num(c[2], 4); }
-        else if (c && typeof c === 'object') { pitches = c.notes ?? c.pitches; start = num(c.start ?? c.time, NaN); len = num(c.length ?? c.len ?? c.dur, 4); }
-        else continue;
-        if (!Array.isArray(pitches) || !Number.isFinite(start)) continue;
-        const ps = pitches.map(p => num(p, NaN)).filter(p => Number.isFinite(p)).map(p => Math.round(clamp(p, 36, 84))).slice(0, 6);
-        if (!ps.length) continue;
-        chords.push({ pitches: ps, start: clamp(start, 0, 64), len: clamp(len, 0.5, 16) });
-        if (chords.length >= 64) break;
+  function extractAudioFromParts(parts, sink) {
+    if (!Array.isArray(parts)) return;
+    for (const part of parts) {
+      if (!part || typeof part !== 'object') continue;
+      if (typeof part.text === 'string') sink.text += part.text;
+      const a = part.audio || part.input_audio || part.output_audio;
+      if (a && typeof a.data === 'string') sink.audio.push(a.data);
+      else if (typeof part.data === 'string' && /audio/i.test(String(part.type || ''))) sink.audio.push(part.data);
+      const url = (part.audio_url && part.audio_url.url) || (part.audio && part.audio.url) || '';
+      if (typeof url === 'string' && url.startsWith('data:')) {
+        const idx = url.indexOf('base64,');
+        if (idx !== -1) sink.audio.push(url.slice(idx + 7));
       }
     }
-
-    const drums = { kick: [], snare: [], hat: [] };
-    if (raw.drums && typeof raw.drums === 'object') {
-      for (const k of ['kick', 'snare', 'hat']) {
-        const a = raw.drums[k] ?? raw.drums[k + 's'];
-        if (Array.isArray(a)) drums[k] = a.map(v => num(v, NaN)).filter(v => Number.isFinite(v) && v >= 0 && v < 64).slice(0, 128);
-      }
-    }
-
-    const totalNotes = melody.length + bass.length + chords.length;
-    if (melody.length < 3 && totalNotes < 6) return null;
-
-    let maxEnd = 4;
-    for (const n of [...melody, ...bass]) maxEnd = Math.max(maxEnd, n.start + n.len);
-    for (const c of chords) maxEnd = Math.max(maxEnd, c.start + c.len);
-    const declaredLoop = num(raw.loopBeats ?? raw.loop_beats ?? raw.beats, 0);
-    const loopBeats = clamp(Math.ceil(Math.max(maxEnd, declaredLoop) / 4) * 4, 4, 64);
-
-    return { melody, bass, chords, drums, loopBeats, noteCount: totalNotes };
   }
 
-  function renderMusicScoreBuffer(score, { duration = 20, bpm = 100, genre = 'cyberpunk' }) {
-    const sr = 44100;
-    const dur = Math.min(Math.max(duration || 20, 6), 40);
-    const total = Math.floor(sr * dur);
-    const L = new Float32Array(total);
-    const R = new Float32Array(total);
-    const safeBpm = Math.min(Math.max(bpm || 100, 50), 200);
-    const beat = 60 / safeBpm;
-    const g = String(genre || '').toLowerCase();
-
-    const preset = (() => {
-      if (/lofi|chill/.test(g)) return { lead: 'tri', pad: 'sine', bass: 'sine', leadGain: 0.30, atk: 0.01, decay: 3.0 };
-      if (/piano|classic/.test(g)) return { lead: 'piano', pad: 'piano', bass: 'sine', leadGain: 0.32, atk: 0.003, decay: 2.2 };
-      if (/orchestra|epic|cinematic/.test(g)) return { lead: 'saw', pad: 'saw', bass: 'saw', leadGain: 0.20, atk: 0.12, decay: 0.4 };
-      if (/ambient|space/.test(g)) return { lead: 'sine', pad: 'sine', bass: 'sine', leadGain: 0.26, atk: 0.35, decay: 0.2 };
-      if (/synthwave|retro/.test(g)) return { lead: 'saw', pad: 'saw', bass: 'saw', leadGain: 0.22, atk: 0.01, decay: 1.2 };
-      if (/rock|metal/.test(g)) return { lead: 'square', pad: 'saw', bass: 'square', leadGain: 0.20, atk: 0.005, decay: 1.6 };
-      return { lead: 'square', pad: 'saw', bass: 'saw', leadGain: 0.20, atk: 0.005, decay: 2.0 };
-    })();
-
-    const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
-    const osc = (type, ph) => {
-      const c = ph - Math.floor(ph);
-      switch (type) {
-        case 'sine': return Math.sin(2 * Math.PI * c);
-        case 'tri': return 1 - 4 * Math.abs(c - 0.5);
-        case 'saw': return 2 * c - 1;
-        case 'square': return c < 0.5 ? 0.7 : -0.7;
-        case 'piano': return Math.sin(2 * Math.PI * c) + 0.45 * Math.sin(4 * Math.PI * c) + 0.2 * Math.sin(6 * Math.PI * c);
-        default: return Math.sin(2 * Math.PI * c);
-      }
-    };
-
-    const addNote = (pitch, startSec, lenSec, type, gain, pan, atk, decay) => {
-      if (startSec >= dur) return;
-      const f = mtof(pitch);
-      const rel = 0.12;
-      const s0 = Math.floor(startSec * sr);
-      const s1 = Math.min(total, Math.floor((startSec + lenSec + rel) * sr));
-      const lp = Math.max(0, Math.min(1, 0.5 + pan * 0.5));
-      for (let i = s0; i < s1; i++) {
-        const t = (i - s0) / sr;
-        let env = t < atk ? t / Math.max(atk, 1e-4) : 1;
-        if (decay > 0) env *= Math.exp(-t * decay * 0.6) * 0.8 + 0.2;
-        if (t > lenSec) env *= Math.max(0, 1 - (t - lenSec) / rel);
-        const v = osc(type, f * t) * env * gain;
-        L[i] += v * (1 - lp) * 1.4;
-        R[i] += v * lp * 1.4;
-      }
-    };
-
-    const addKick = (ts) => {
-      const s0 = Math.floor(ts * sr), n = Math.floor(0.22 * sr);
-      for (let i = 0; i < n && s0 + i < total; i++) {
-        const t = i / sr;
-        const v = Math.sin(2 * Math.PI * (40 + 110 * Math.exp(-t * 30)) * t) * Math.exp(-t * 16) * 0.7;
-        L[s0 + i] += v; R[s0 + i] += v;
-      }
-    };
-    const addSnare = (ts) => {
-      const s0 = Math.floor(ts * sr), n = Math.floor(0.2 * sr);
-      for (let i = 0; i < n && s0 + i < total; i++) {
-        const t = i / sr;
-        const v = ((Math.random() * 2 - 1) * 0.35 + Math.sin(2 * Math.PI * 190 * t) * 0.25) * Math.exp(-t * 24);
-        L[s0 + i] += v; R[s0 + i] += v;
-      }
-    };
-    const addHat = (ts) => {
-      const s0 = Math.floor(ts * sr), n = Math.floor(0.05 * sr);
-      for (let i = 0; i < n && s0 + i < total; i++) {
-        const t = i / sr;
-        const v = (Math.random() * 2 - 1) * Math.exp(-t * 90) * 0.15;
-        L[s0 + i] += v * 0.8; R[s0 + i] += v * 1.1;
-      }
-    };
-
-    const loopSec = score.loopBeats * beat;
-    const drumMax = Math.max(0, ...score.drums.kick, ...score.drums.snare, ...score.drums.hat);
-    const hasDrums = score.drums.kick.length + score.drums.snare.length + score.drums.hat.length > 0;
-    const noDrumGenres = /ambient|space|piano|classic/.test(g);
-
-    for (let off = 0; off < dur; off += loopSec) {
-      for (const n of score.melody) addNote(n.pitch, off + n.start * beat, n.len * beat, preset.lead, preset.leadGain, 0.25, preset.atk, preset.decay);
-      for (const n of score.bass) addNote(n.pitch, off + n.start * beat, n.len * beat, preset.bass, 0.30, 0, preset.atk, 0.8);
-      for (const c of score.chords) {
-        c.pitches.forEach((p, idx) => addNote(p, off + c.start * beat, c.len * beat, preset.pad, 0.10, (idx % 2 ? -0.4 : 0.4), Math.max(preset.atk, 0.03), 0.3));
-      }
-      if (hasDrums && !noDrumGenres) {
-        const perBar = drumMax < 4.0001;
-        const bars = perBar ? Math.round(score.loopBeats / 4) : 1;
-        for (let b = 0; b < bars; b++) {
-          const bo = off + (perBar ? b * 4 * beat : 0);
-          score.drums.kick.forEach(x => addKick(bo + x * beat));
-          score.drums.snare.forEach(x => addSnare(bo + x * beat));
-          score.drums.hat.forEach(x => addHat(bo + x * beat));
+  function collectChoice(choice, sink) {
+    if (!choice) return;
+    for (const m of [choice.delta, choice.message]) {
+      if (!m || typeof m !== 'object') continue;
+      if (typeof m.content === 'string') sink.text += m.content;
+      else extractAudioFromParts(m.content, sink);
+      if (m.audio && typeof m.audio === 'object' && !Array.isArray(m.audio)) {
+        if (typeof m.audio.data === 'string') sink.audio.push(m.audio.data);
+        if (typeof m.audio.transcript === 'string') sink.text += m.audio.transcript;
+        const url = m.audio.url || '';
+        if (typeof url === 'string' && url.startsWith('data:')) {
+          const idx = url.indexOf('base64,');
+          if (idx !== -1) sink.audio.push(url.slice(idx + 7));
         }
       }
+      if (Array.isArray(m.audio)) extractAudioFromParts(m.audio, sink);
     }
+  }
 
-    let peak = 0.0001;
-    for (let i = 0; i < total; i++) peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]));
-    const norm = 0.9 / peak;
-    const buffer = Buffer.alloc(total * 4);
-    for (let i = 0; i < total; i++) {
-      const l = Math.tanh(L[i] * norm * 1.1) * 0.95;
-      const r = Math.tanh(R[i] * norm * 1.1) * 0.95;
-      buffer.writeInt16LE(Math.floor(l * 32767), i * 4);
-      buffer.writeInt16LE(Math.floor(r * 32767), i * 4 + 2);
-    }
-    return { buffer, duration: dur, bpm: Math.round(safeBpm) };
+  function generateAudioViaOpenRouter({ model, prompt, key, timeoutMs = 300000 }) {
+    return new Promise((resolve, reject) => {
+      const payload = {
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        modalities: ['text', 'audio'],
+        stream: true
+      };
+      if (/gpt-audio/i.test(model)) payload.audio = { voice: 'alloy', format: 'pcm16' };
+      const postData = JSON.stringify(payload);
+      const opt = {
+        hostname: 'openrouter.ai',
+        port: 443,
+        path: '/api/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://github.com/Zozi0999/zoz_router',
+          'X-Title': 'Zoz Router AI Music Studio',
+          'Content-Length': Buffer.byteLength(postData)
+        },
+        timeout: timeoutMs
+      };
+
+      const sink = { text: '', audio: [] };
+      let raw = '';
+      let buffer = '';
+      let streamError = null;
+
+      const handleLine = (line) => {
+        const l = line.trim();
+        if (!l || l.startsWith(':') || !l.startsWith('data:')) return;
+        const data = l.slice(5).trim();
+        if (!data || data === '[DONE]') return;
+        try {
+          const json = JSON.parse(data);
+          if (json.error) {
+            streamError = typeof json.error === 'object' ? (json.error.message || JSON.stringify(json.error)) : String(json.error);
+            return;
+          }
+          if (Array.isArray(json.choices)) json.choices.forEach(c => collectChoice(c, sink));
+        } catch (_) { /* partial chunk */ }
+      };
+
+      const req2 = https.request(opt, (resp) => {
+        resp.setEncoding('utf8');
+        resp.on('data', (chunk) => {
+          raw += chunk;
+          if (raw.length > 200 * 1024 * 1024) { req2.destroy(new Error('Respons audio terlalu besar')); return; }
+          buffer += chunk;
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+          lines.forEach(handleLine);
+        });
+        resp.on('end', () => {
+          if (buffer) handleLine(buffer);
+
+          if (resp.statusCode >= 400) {
+            let msg = `HTTP ${resp.statusCode}`;
+            try {
+              const j = JSON.parse(raw);
+              const e = j.error;
+              msg = (e && (e.message || (e.metadata && e.metadata.raw))) || JSON.stringify(j).slice(0, 300);
+            } catch (_) { msg += ': ' + raw.slice(0, 300); }
+            return reject(new Error(msg));
+          }
+          if (streamError) return reject(new Error(streamError));
+
+          if (sink.audio.length === 0 && raw.trim().startsWith('{')) {
+            try {
+              const j = JSON.parse(raw);
+              if (j.error) return reject(new Error(typeof j.error === 'object' ? (j.error.message || JSON.stringify(j.error)) : String(j.error)));
+              if (Array.isArray(j.choices)) j.choices.forEach(c => collectChoice(c, sink));
+            } catch (_) { /* ignore */ }
+          }
+
+          if (sink.audio.length === 0) {
+            console.warn('[AI Music] Tidak ada audio di respons. Cuplikan:', raw.slice(0, 400));
+            return reject(new Error('Model tidak mengembalikan data audio. Cuplikan respons: ' + raw.replace(/\s+/g, ' ').slice(0, 200)));
+          }
+          const audioBuf = Buffer.concat(sink.audio.map(b => Buffer.from(b, 'base64')));
+          resolve({ audio: audioBuf, text: sink.text.trim() });
+        });
+      });
+      req2.on('error', reject);
+      req2.on('timeout', () => req2.destroy(new Error('Timeout: model audio terlalu lama merespons')));
+      req2.write(postData);
+      req2.end();
+    });
   }
 
   if ((pathname === '/api/generate-music' || pathname === '/api/music/generate') && (method === 'POST' || method === 'GET')) {
     let prompt = '';
     try {
-      let genre = '';
-      let bpm = null;
-      let duration = 15;
       let sessionId = null;
-
       let requestedMusicModel = '';
       let openRouterKey = '';
 
       if (method === 'POST') {
         const body = await parseBody(req);
         prompt = body.prompt || body.q || '';
-        genre = body.genre || '';
-        bpm = parseInt(body.bpm, 10) || null;
-        duration = parseInt(body.duration, 10) || 15;
         sessionId = body.sessionId || req.headers['x-session-id'] || null;
         requestedMusicModel = (body.musicModel || body.model || '').trim();
         openRouterKey = (body.openRouterKey || req.headers['x-openrouter-key'] || '').trim();
       } else {
         prompt = reqUrl.searchParams.get('prompt') || reqUrl.searchParams.get('q') || '';
-        genre = reqUrl.searchParams.get('genre') || '';
-        bpm = parseInt(reqUrl.searchParams.get('bpm'), 10) || null;
-        duration = parseInt(reqUrl.searchParams.get('duration'), 10) || 15;
         sessionId = reqUrl.searchParams.get('sessionId') || req.headers['x-session-id'] || null;
         requestedMusicModel = (reqUrl.searchParams.get('musicModel') || reqUrl.searchParams.get('model') || '').trim();
         openRouterKey = (reqUrl.searchParams.get('openRouterKey') || req.headers['x-openrouter-key'] || '').trim();
       }
+      openRouterKey = String(openRouterKey || '').replace(/^Bearer\s+/i, '').trim();
+      if (!openRouterKey && process.env.OPENROUTER_API_KEY) openRouterKey = process.env.OPENROUTER_API_KEY;
 
-      if (!openRouterKey && process.env.OPENROUTER_API_KEY) {
-        openRouterKey = process.env.OPENROUTER_API_KEY;
+      const cleanPrompt = (prompt || '').trim();
+      if (!cleanPrompt) {
+        return sendJSON(res, 400, { success: false, error: 'Prompt musik kosong. Jelaskan musik yang ingin dibuat.' });
       }
 
-      if (!prompt || !prompt.trim()) {
-        prompt = 'Cyberpunk futuristic synthwave beat';
-      }
-
-      const cleanPrompt = prompt.trim();
-
-      // ==================== AI NEURAL MUSIC COMPOSITION ====================
-      let aiComposition = null;
-      let musicAiError = '';
-      let musicPromptGenre = '';
-      let effectiveMusicModel = requestedMusicModel || 'qwen2.5:1.5b';
-      let isCloudOpenRouter = false;
-
-      if (effectiveMusicModel.toLowerCase().startsWith('openrouter:')) {
-        isCloudOpenRouter = true;
-        effectiveMusicModel = effectiveMusicModel.slice(11).trim();
-      } else if (effectiveMusicModel.toLowerCase().startsWith('ollama:')) {
-        isCloudOpenRouter = false;
-        effectiveMusicModel = effectiveMusicModel.slice(7).trim();
-      } else if (effectiveMusicModel.includes('/') || effectiveMusicModel.toLowerCase() === 'openrouter/free') {
-        isCloudOpenRouter = true;
-      }
-
-      let resolvedModelName = effectiveMusicModel;
-      let resolvedProvider = isCloudOpenRouter ? 'openrouter' : 'ollama';
-
-      try {
-        const hintLow = cleanPrompt.toLowerCase();
-        const genreRules = [
-          ['lofi', /lofi|lo-fi|chill|santai|relax|study|hujan|rain/],
-          ['synthwave', /synthwave|retrowave|80s|retro|outrun|neon/],
-          ['orchestral', /orchestra|orkestra|epic|epik|sinematik|cinematic|pertempuran|battle|heroic/],
-          ['ambient', /ambient|meditation|meditasi|space|kosmik|tenang|zen|galaxy/],
-          ['edm', /edm|dance|house|techno|club|party|dubstep|trance/],
-          ['piano', /piano|klasik|classical|akustik|acoustic|sedih|sad/],
-          ['rock', /rock|metal|gitar|guitar|punk/],
-          ['cyberpunk', /cyberpunk|futur|robot|sci-?fi|darksynth/]
-        ];
-        const promptGenre = (genre && String(genre).trim()) || (genreRules.find(([, re]) => re.test(hintLow)) || [''])[0];
-        const bpmRanges = { lofi: '70-90', synthwave: '100-120', orchestral: '80-110', ambient: '55-75', edm: '120-135', piano: '65-95', rock: '120-160', cyberpunk: '110-140' };
-        const genreHint = promptGenre
-          ? `Genre target: ${promptGenre}, BPM sekitar ${bpmRanges[promptGenre] || '80-130'}.`
-          : 'Pilih genre & BPM yang paling cocok dengan konsep (jangan otomatis lofi).';
-        musicPromptGenre = promptGenre || '';
-        const variationSeed = Math.random().toString(36).slice(2, 8);
-        const randKey = ['C', 'D', 'E', 'F', 'G', 'A', 'B'][Math.floor(Math.random() * 7)] + (Math.random() < 0.5 ? ' minor' : ' major');
-
-        const composerSys = 'Kamu adalah komposer musik profesional. Kamu menulis partitur nada (MIDI) sebagai JSON murni tanpa penjelasan, tanpa markdown. Setiap konsep harus menghasilkan melodi, ritme, dan judul yang BERBEDA dan sesuai konsep. Partitur yang kamu tulis dimainkan apa adanya.';
-        const composerUser = `Konsep musik dari pengguna: "${cleanPrompt}"
-${genreHint}
-Nada dasar disarankan: ${randKey}. Variasi #${variationSeed} (buat melodi unik, jangan klise).
-
-Tulis partitur loop 4 birama (16 beat, 4/4) sebagai JSON murni dengan struktur:
-{
-  "title": "<judul orisinal sesuai konsep>",
-  "genre": "<satu dari: cyberpunk, lofi, synthwave, orchestral, ambient, edm, rock, piano>",
-  "bpm": <angka>,
-  "key": "<nada dasar>",
-  "summary": "<satu kalimat tentang aransemen>",
-  "melody": [[<midi 55-90>, <beat_mulai 0-15.5>, <panjang_beat 0.25-4>], ... 16 sampai 32 not],
-  "bass": [[<midi 28-48>, <beat_mulai>, <panjang_beat>], ... 6 sampai 12 not],
-  "chords": [[[<midi>, <midi>, <midi>], <beat_mulai>, <panjang_beat>], ... 4 akor],
-  "drums": {"kick": [<beat 0-3.5>...], "snare": [<beat>...], "hat": [<beat>...]}
-}
-Aturan: nada melodi harus mengikuti tangga nada ${randKey} agar harmonis; variasikan panjang not dan ritme sesuai mood konsep; drums = posisi beat dalam SATU birama (0 sampai 3.5) dan diulang tiap birama (kosongkan untuk ambient/piano). Balas HANYA JSON.`;
-
-        let llmResult = null;
-
-        // --- SKENARIO 1: CLOUD OPENROUTER ---
-        if (isCloudOpenRouter) {
-          if (!openRouterKey) {
-            console.warn('[AI Music Composer] OpenRouter Key tidak ada di header/body, fallback ke Ollama lokal qwen2.5:1.5b');
-            isCloudOpenRouter = false;
-            effectiveMusicModel = 'qwen2.5:1.5b';
-            resolvedModelName = effectiveMusicModel;
-            resolvedProvider = 'ollama';
-          } else {
-            console.log(`[AI Music Composer] Memanggil OpenRouter model: ${effectiveMusicModel}`);
-            const postData = JSON.stringify({
-              model: effectiveMusicModel,
-              messages: [
-                { role: 'system', content: composerSys },
-                { role: 'user', content: composerUser }
-              ],
-              temperature: 0.8,
-              max_tokens: 3000
-            });
-
-            llmResult = await new Promise((resolve) => {
-              const opt = {
-                hostname: 'openrouter.ai',
-                port: 443,
-                path: '/api/v1/chat/completions',
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${openRouterKey}`,
-                  'Content-Type': 'application/json',
-                  'HTTP-Referer': 'https://github.com/Zozi0999/zoz_router',
-                  'X-Title': 'Zoz Router Neural Music Studio',
-                  'Content-Length': Buffer.byteLength(postData)
-                },
-                timeout: 120000
-              };
-
-              const reqOR = https.request(opt, (resOR) => {
-                let raw = '';
-                resOR.on('data', d => raw += d);
-                resOR.on('end', () => {
-                  try {
-                    const parsed = JSON.parse(raw);
-                    if (resOR.statusCode >= 400 || parsed.error) {
-                      const errDetail = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
-                      console.warn('[AI Music Composer] OpenRouter error:', errDetail);
-                      resolve(null);
-                    } else {
-                      const content = parsed.choices?.[0]?.message?.content || null;
-                      if (content) {
-                        console.log('[AI Music Composer] OpenRouter berhasil merespon komposisi');
-                      }
-                      resolve(content);
-                    }
-                  } catch (e) {
-                    console.warn('[AI Music Composer] OpenRouter parse error:', e.message);
-                    resolve(null);
-                  }
-                });
-              });
-
-              reqOR.on('error', (err) => {
-                console.warn('[AI Music Composer] OpenRouter request error:', err.message);
-                resolve(null);
-              });
-              reqOR.on('timeout', () => {
-                console.warn('[AI Music Composer] OpenRouter request timeout');
-                reqOR.destroy();
-                resolve(null);
-              });
-
-              reqOR.write(postData);
-              reqOR.end();
-            });
-
-            if (!llmResult) {
-              console.warn('[AI Music Composer] OpenRouter gagal/null, mencoba fallback ke Ollama lokal qwen2.5:1.5b');
-              effectiveMusicModel = 'qwen2.5:1.5b';
-              isCloudOpenRouter = false;
-            }
-          }
-        }
-
-        // --- SKENARIO 2: LOKAL OLLAMA ---
-        for (let ollamaAttempt = 0; ollamaAttempt < 2 && !isCloudOpenRouter && !llmResult; ollamaAttempt++) {
-          console.log(`[AI Music Composer] Memanggil Ollama lokal model: ${effectiveMusicModel}`);
-          resolvedModelName = effectiveMusicModel;
-          resolvedProvider = 'ollama';
-
-          const postBody = JSON.stringify({
-            model: effectiveMusicModel,
-            messages: [
-              { role: 'system', content: composerSys },
-              { role: 'user', content: composerUser }
-            ],
-            stream: false,
-            format: 'json',
-            options: { temperature: 0.8, num_predict: 2000 }
-          });
-
-          llmResult = await new Promise((resolve) => {
-            const reqOpt = {
-              hostname: '127.0.0.1',
-              port: 11434,
-              path: '/api/chat',
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(postBody)
-              },
-              timeout: 180000
-            };
-            const oReq = http.request(reqOpt, (oRes) => {
-              let data = '';
-              oRes.on('data', chunk => data += chunk);
-              oRes.on('end', () => {
-                try {
-                  const parsed = JSON.parse(data);
-                  if (parsed.message?.content) {
-                    console.log('[AI Music Composer] Ollama returned composition length:', parsed.message.content.length);
-                  } else {
-                    console.log('[AI Music Composer] Ollama returned no message content, raw:', data.slice(0, 150));
-                  }
-                  resolve(parsed.message?.content || null);
-                } catch (e) {
-                  console.warn('[AI Music Composer] JSON parse error:', e.message);
-                  resolve(null);
-                }
-              });
-            });
-            oReq.on('error', (err) => {
-              console.warn('[AI Music Composer] Ollama request error:', err.message);
-              resolve(null);
-            });
-            oReq.on('timeout', () => {
-              console.warn('[AI Music Composer] Ollama request timeout');
-              oReq.destroy();
-              resolve(null);
-            });
-            oReq.write(postBody);
-            oReq.end();
-          });
-        }
-
-        if (llmResult) {
-          const cleaned = String(llmResult).replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/```(?:json)?/gi, '');
-          const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            try {
-              aiComposition = JSON.parse(jsonMatch[0]);
-              console.log('[AI Music Composer] Successfully parsed composition:', aiComposition.title);
-            } catch (pErr) {
-              console.log('[AI Music Composer] JSON.parse standard failed:', pErr.message);
-              try {
-                const sanitized = jsonMatch[0]
-                  .replace(/,\s*([\}\]])/g, '$1')
-                  .replace(/[\u0000-\u001F]+/g, ' ');
-                aiComposition = JSON.parse(sanitized);
-                console.log('[AI Music Composer] Successfully parsed sanitized composition:', aiComposition.title);
-              } catch (sErr) {
-                console.log('[AI Music Composer] Sanitized parse failed, using regex extraction:', sErr.message);
-                const titleM = jsonMatch[0].match(/"title"\s*:\s*"([^"]+)"/i);
-                const genreM = jsonMatch[0].match(/"genre"\s*:\s*"([^"]+)"/i);
-                const bpmM = jsonMatch[0].match(/"bpm"\s*:\s*(\d+)/i);
-                const summaryM = jsonMatch[0].match(/"summary"\s*:\s*"([^"]+)"/i);
-                if (titleM || genreM || bpmM || summaryM) {
-                  aiComposition = {
-                    title: titleM ? titleM[1] : 'Cyberpunk Neural Melody',
-                    genre: genreM ? genreM[1] : 'lofi',
-                    bpm: bpmM ? parseInt(bpmM[1], 10) : 80,
-                    summary: summaryM ? summaryM[1] : 'Komposisi musik digubah oleh AI.'
-                  };
-                  console.log('[AI Music Composer] Extracted metadata only via regex:', aiComposition.title);
-                }
-              }
-            }
-          }
-        } else {
-          musicAiError = `Model ${resolvedModelName} (${resolvedProvider}) tidak merespons / gagal.`;
-        }
-      } catch (cErr) {
-        musicAiError = 'Kesalahan komposer: ' + cErr.message;
-        console.warn('[AI Music Composer] AI composition helper fallback:', cErr.message);
-      }
-
-      const aiScore = sanitizeMusicScore(aiComposition);
-      if (!aiScore && !musicAiError) {
-        musicAiError = `Model ${resolvedModelName} tidak menghasilkan partitur nada yang valid.`;
-      }
-
-      const effectiveTitle = (aiComposition && aiComposition.title) ? aiComposition.title : (genre ? `${genre.toUpperCase()} Neural Beat` : 'Singularity Cyber Beat');
-      const effectiveGenre = musicPromptGenre || ((aiComposition && aiComposition.genre) ? String(aiComposition.genre) : genre);
-      const aiBpmNum = aiComposition ? parseInt(aiComposition.bpm, 10) : NaN;
-      const effectiveBpm = Number.isFinite(aiBpmNum) ? aiBpmNum : bpm;
-      const effectiveSummary = (aiComposition && aiComposition.summary)
-        ? aiComposition.summary
-        : 'Tidak ada partitur dari model; memakai generator prosedural cadangan.';
-
-      let synth;
-      if (aiScore) {
-        const r = renderMusicScoreBuffer(aiScore, { duration, bpm: effectiveBpm || 100, genre: effectiveGenre || 'cyberpunk' });
-        synth = {
-          buffer: r.buffer,
-          duration: r.duration,
-          bpm: r.bpm,
-          genre: String(effectiveGenre || 'ai').toLowerCase(),
-          title: effectiveTitle
-        };
-        console.log(`[AI Music Composer] Render partitur AI: ${aiScore.noteCount} not dari ${resolvedModelName}`);
-      } else {
-        console.warn('[AI Music Composer] Fallback ke generator prosedural:', musicAiError);
-        synth = synthesizeProceduralMusicBuffer({
-          prompt: cleanPrompt,
-          genre: effectiveGenre,
-          duration,
-          bpm: effectiveBpm,
-          title: effectiveTitle
+      const model = requestedMusicModel.replace(/^openrouter:/i, '').trim();
+      if (!model || !MUSIC_AUDIO_MODEL_RE.test(model)) {
+        return sendJSON(res, 400, {
+          success: false,
+          code: 'NOT_AUDIO_MODEL',
+          error: `Model "${model || '(kosong)'}" adalah model teks dan tidak bisa menghasilkan audio. Pilih model pembuat musik seperti Google Lyria 3 (${DEFAULT_MUSIC_MODEL}).`,
+          prompt: cleanPrompt
         });
       }
-      const scoreFromAI = Boolean(aiScore);
-
-      if (!fs.existsSync(UPLOADS_DIR)) {
-        fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+      if (!openRouterKey) {
+        return sendJSON(res, 401, {
+          success: false,
+          code: 'NO_KEY',
+          error: 'Butuh OpenRouter API Key (Pengaturan → Providers) untuk memanggil model musik AI Google Lyria.',
+          prompt: cleanPrompt
+        });
       }
 
+      console.log(`[AI Music] Meminta audio asli dari ${model} ...`);
+      const t0 = Date.now();
+      const result = await generateAudioViaOpenRouter({ model, prompt: cleanPrompt, key: openRouterKey });
+      console.log(`[AI Music] Audio diterima: ${result.audio.length} bytes dalam ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+
+      if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
       const randSuffix = Math.random().toString(36).substring(2, 8);
-      let filename = `ai_music_${Date.now()}_${randSuffix}.mp3`;
-      let localFilePath = path.join(UPLOADS_DIR, filename);
-      let isMp3 = true;
-
-      try {
-        await new Promise((resolve, reject) => {
-          const ffmpeg = spawn('ffmpeg', [
-            '-y',
-            '-f', 's16le',
-            '-ar', '44100',
-            '-ac', '2',
-            '-i', 'pipe:0',
-            '-b:a', '192k',
-            localFilePath
-          ]);
-          ffmpeg.stdin.write(synth.buffer);
-          ffmpeg.stdin.end();
-          ffmpeg.on('close', code => {
-            if (code === 0 && fs.existsSync(localFilePath)) resolve();
-            else reject(new Error('FFmpeg exited with code ' + code));
-          });
-          ffmpeg.on('error', err => reject(err));
-        });
-      } catch (ffErr) {
-        console.warn('FFmpeg MP3 encode fallback ke standard WAV format:', ffErr.message);
-        filename = `ai_music_${Date.now()}_${randSuffix}.wav`;
-        localFilePath = path.join(UPLOADS_DIR, filename);
-        const wavHeader = createWavHeader(synth.buffer.length, 44100, 2, 16);
-        fs.writeFileSync(localFilePath, Buffer.concat([wavHeader, synth.buffer]));
-        isMp3 = false;
+      let ext = detectAudioContainer(result.audio);
+      let outBuf = result.audio;
+      if (!ext) {
+        // PCM16 mentah (format audio OpenAI: 24 kHz mono) -> bungkus WAV
+        outBuf = Buffer.concat([createWavHeader(result.audio.length, 24000, 1, 16), result.audio]);
+        ext = 'wav';
       }
-
-      const fileStats = fs.statSync(localFilePath);
+      const filename = `ai_music_${Date.now()}_${randSuffix}.${ext}`;
+      const localFilePath = path.join(UPLOADS_DIR, filename);
+      fs.writeFileSync(localFilePath, outBuf);
       const url = `/uploads/${filename}`;
 
+      let duration = /clip/i.test(model) ? 30 : 0;
+      if (ext === 'wav' && outBuf.length > 44) {
+        try {
+          const byteRate = outBuf.readUInt32LE(28);
+          if (byteRate > 0) duration = Math.round((outBuf.length - 44) / byteRate);
+        } catch (_) { /* ignore */ }
+      }
+
+      const words = cleanPrompt.replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean).slice(0, 6);
+      const title = words.length ? words.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : 'Lyria Track';
+      const aiSummary = (result.text || '').replace(/\s+/g, ' ').slice(0, 400) || `Dihasilkan langsung oleh ${model}`;
+      const genre = 'ai';
+
       if (sessionId) {
-        const providerLabel = resolvedProvider === 'openrouter' ? 'Cloud OpenRouter' : 'Ollama Lokal';
-        appendAssistantMessageToSessionDisk(sessionId, `[Musik AI Hasil Sintesis: "${cleanPrompt}"]\n\n- Judul: ${synth.title}\n- Genre: ${(synth.genre || 'Cyberpunk').toUpperCase()} (${synth.bpm} BPM)\n- Engine: ${resolvedModelName} (${providerLabel})\n- Aransemen: ${effectiveSummary}${scoreFromAI ? `\n- Partitur: ${aiScore.noteCount} not ditulis oleh model` : `\n- ⚠️ Fallback: ${musicAiError}`}\n- Audio: [Putar / Unduh Audio](${url})`, 'AI Neural Music Studio', {
+        appendAssistantMessageToSessionDisk(sessionId, `[Musik AI: "${cleanPrompt}"]\n\n- Judul: ${title}\n- Engine: ${model} (Audio asli dari model AI)\n- Catatan model: ${aiSummary}\n- Audio: [Putar / Unduh Audio](${url})`, 'AI Neural Music Studio', {
           isMusicGen: true,
           type: 'music_generation',
           audioUrl: url,
           url: url,
-          title: synth.title,
-          genre: synth.genre,
-          bpm: synth.bpm,
-          duration: synth.duration,
+          title,
+          genre,
+          bpm: null,
+          duration,
           prompt: cleanPrompt,
-          aiComposed: scoreFromAI,
-          aiError: scoreFromAI ? '' : musicAiError,
-          aiNotes: aiScore ? aiScore.noteCount : 0,
-          aiPreview: aiScore ? aiScore.melody.slice(0, 8).map(n => n.pitch).join(',') : '',
-          aiModel: resolvedModelName,
-          aiProvider: resolvedProvider,
-          aiSummary: effectiveSummary
+          aiComposed: true,
+          aiModel: model,
+          aiProvider: 'openrouter',
+          aiSummary
         });
       }
 
       return sendJSON(res, 200, {
         success: true,
-        url: url,
-        filename: filename,
-        title: synth.title,
-        genre: synth.genre,
-        bpm: synth.bpm,
-        duration: synth.duration,
-        sizeBytes: fileStats.size,
-        format: isMp3 ? 'mp3' : 'wav',
+        url,
+        filename,
+        title,
+        genre,
+        bpm: null,
+        duration,
+        sizeBytes: outBuf.length,
+        format: ext,
         prompt: cleanPrompt,
-        aiComposed: scoreFromAI,
-          aiError: scoreFromAI ? '' : musicAiError,
-          aiNotes: aiScore ? aiScore.noteCount : 0,
-          aiPreview: aiScore ? aiScore.melody.slice(0, 8).map(n => n.pitch).join(',') : '',
-        aiModel: resolvedModelName,
-        aiProvider: resolvedProvider,
-        aiSummary: effectiveSummary
+        aiComposed: true,
+        aiModel: model,
+        aiProvider: 'openrouter',
+        aiSummary
       });
     } catch (err) {
       console.error('Music generation failed:', err);
-      return sendJSON(res, 500, {
+      return sendJSON(res, 502, {
         success: false,
         error: 'Gagal membuat musik AI: ' + (err.message || 'Terjadi kesalahan sistem.'),
         prompt: prompt || ''
@@ -4625,7 +4132,7 @@ Aturan: nada melodi harus mengikuti tangga nada ${randKey} agar harmonis; varias
       fs.writeFileSync(tempImgPath, frameDownloaded.buffer);
 
       // 2. Synthesize Atmospheric Soundscape
-      const audioSynth = synthesizeProceduralMusicBuffer({ prompt: cleanPrompt, duration: 5, bpm: 110 });
+      const audioSynth = { buffer: Buffer.alloc(44100 * 5 * 4) }; // video silent track (no local music synthesis)
       const wavHeader = createWavHeader(audioSynth.buffer.length, 44100, 2, 16);
       fs.writeFileSync(tempAudioPath, Buffer.concat([wavHeader, audioSynth.buffer]));
 
