@@ -4841,6 +4841,9 @@ ${organicBlock}
       return;
     }
 
+    // Simpan prompt teks asli pengguna untuk tampilan gelembung obrolan (displayContent)
+    const originalUserPrompt = rawText;
+
     // Auto-Extraction URL Web Publik untuk Analisis & Ringkasan AI
     const detectedWebUrls = extractWebUrlsFromText(rawText);
     if (detectedWebUrls.length > 0) {
@@ -4906,7 +4909,7 @@ ${organicBlock}
     const userMsg = {
       role: 'user',
       content: text,
-      displayContent: rawText,
+      displayContent: originalUserPrompt,
       docs: docsMeta.length > 0 ? docsMeta : undefined,
       images: images,
       image: image,
@@ -4916,7 +4919,7 @@ ${organicBlock}
     // Auto title session if first message
     if (session.messages.length === 0) {
       const fallbackTitle = docs.length > 0 ? (docs[0].name || 'Dokumen Lampiran') : (images.length > 0 ? 'Analisis Gambar' : 'Percakapan Baru');
-      let cleanCandidate = (rawText || '').replace(/^\/(?:image|img|gambar|deep|research|riset|web|search|canvas)\s+/i, '').trim();
+      let cleanCandidate = (originalUserPrompt || '').replace(/^\/(?:image|img|gambar|deep|research|riset|web|search|canvas)\s+/i, '').trim();
       const titleCandidate = cleanCandidate || fallbackTitle;
       session.title = titleCandidate.length > 30 ? titleCandidate.substring(0, 30) + '...' : titleCandidate;
     }
@@ -4927,7 +4930,7 @@ ${organicBlock}
     renderChatHistory(els.searchHistoryInput?.value || '');
 
     // Immediately render user's message bubble
-    const userRow = appendMessageElement('user', rawText, images, 'Anda', null, session.messages.length - 1, null, docsWithContent.length > 0 ? docsWithContent : docsMeta);
+    const userRow = appendMessageElement('user', originalUserPrompt, images, 'Anda', null, session.messages.length - 1, null, docsWithContent.length > 0 ? docsWithContent : docsMeta);
     smartScrollChatToBottom(true);
 
     if (STATE.isPromptHidden) {
@@ -5678,9 +5681,9 @@ ${organicBlock}
     if (!text || typeof text !== 'string') return '';
     let cleaned = text
       .replace(/<(?:tool_call|function_call)>[\s\S]*?<\/(?:tool_call|function_call)>/gi, '')
-      .replace(/<invoke\s+name=["'](?:search_web|browse_web_page)["']>[\s\S]*?<\/invoke>/gi, '')
+      .replace(/<invoke\s+name=["'](?:search_web|browse_web_page|search_youtube)["']>[\s\S]*?<\/invoke>/gi, '')
       .replace(/\[TOOL_CALLS\][\s\S]*?(?:\[\/TOOL_CALLS\]|(?=\n\n)|$)/gi, '')
-      .replace(/```(?:tool_call|json)?\s*\{[\s\S]*?"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page)"[\s\S]*?\}\s*```/gi, '');
+      .replace(/```(?:tool_call|json)?\s*\{[\s\S]*?"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page|search_youtube)"[\s\S]*?\}\s*```/gi, '');
 
     // Hapus blok JSON seimbang yang merepresentasikan pemanggilan tool mentah
     const jsonBlocks = extractBalancedJsonObjects(cleaned);
@@ -5696,9 +5699,9 @@ ${organicBlock}
 
     // Bersihkan residu teks bocor seperti "We will call search_web for ..."
     cleaned = cleaned
-      .replace(/(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(?:search_web|browse_web_page)[\s\S]*?(?:\.|\n|$)/gi, '')
-      .replace(/(?:search_web|browse_web_page)\s*\(\s*\{[\s\S]*?\}\s*\)/gi, '')
-      .replace(/(?:search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?(["'`])[\s\S]*?\1\s*\)/gi, '')
+      .replace(/(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(?:search_web|browse_web_page|search_youtube)[\s\S]*?(?:\.|\n|$)/gi, '')
+      .replace(/(?:search_web|browse_web_page|search_youtube)\s*\(\s*\{[\s\S]*?\}\s*\)/gi, '')
+      .replace(/(?:search_web|browse_web_page|search_youtube)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?(["'`])[\s\S]*?\1\s*\)/gi, '')
       .trim();
 
     return cleaned;
@@ -5800,7 +5803,7 @@ ${organicBlock}
     }
 
     // 3. Anthropic XML format: <invoke name="search_web"><parameter name="query">...</parameter></invoke>
-    const invokeRegex = /<invoke\s+name=["'](search_web|browse_web_page)["']>([\s\S]*?)<\/invoke>/gi;
+    const invokeRegex = /<invoke\s+name=["'](search_web|browse_web_page|search_youtube)["']>([\s\S]*?)<\/invoke>/gi;
     let ivm;
     while ((ivm = invokeRegex.exec(text)) !== null) {
       const name = ivm[1];
@@ -5813,7 +5816,7 @@ ${organicBlock}
     }
 
     // 4. Fenced codeblock ```json ... ``` or ```tool_call ... ```
-    const codeBlockRegex = /```(?:json|tool_call)?\s*(\{\s*"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page)"[\s\S]*?\})\s*```/gi;
+    const codeBlockRegex = /```(?:json|tool_call)?\s*(\{\s*"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page|search_youtube)"[\s\S]*?\})\s*```/gi;
     let cm;
     while ((cm = codeBlockRegex.exec(text)) !== null) {
       try {
@@ -5847,7 +5850,7 @@ ${organicBlock}
     }
 
     // 6. Function call with JSON argument: search_web({"query": "..."}) or browse_web_page({"url": "..."})
-    const funcJsonRegex = /(search_web|browse_web_page)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
+    const funcJsonRegex = /(search_web|browse_web_page|search_youtube)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
     let fjm;
     while ((fjm = funcJsonRegex.exec(textWithoutCode)) !== null) {
       if (isLongCompleteText && fjm.index > 220) continue;
@@ -5866,7 +5869,7 @@ ${organicBlock}
 
     // 7. Function call syntax: search_web("query") or browse_web_page("url")
     // Jika teks sangat panjang (> 300 kata), hanya izinkan jika pemanggilan ada di awal teks (< 200 karakter)
-    const funcRegex = /(search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?(["'`])([\s\S]*?)\2\s*\)/gi;
+    const funcRegex = /(search_web|browse_web_page|search_youtube)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?(["'`])([\s\S]*?)\2\s*\)/gi;
     let fm;
     while ((fm = funcRegex.exec(textWithoutCode)) !== null) {
       if (isLongCompleteText && fm.index > 220) continue;
@@ -5879,7 +5882,7 @@ ${organicBlock}
 
     // 8. Conversational triggers: "We will call search_web for <query>"
     // Hanya picu jika berada di awal generasi (bukan teks penutup di akhir pesan panjang)
-    const convRegex = /(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(search_web|browse_web_page)(?:\s+(?:for|with|tentang|query|:))?\s*(["'`])([^\n]+?)\2/gi;
+    const convRegex = /(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(search_web|browse_web_page|search_youtube)(?:\s+(?:for|with|tentang|query|:))?\s*(["'`])([^\n]+?)\2/gi;
     let cvm;
     while ((cvm = convRegex.exec(textWithoutCode)) !== null) {
       if (isLongCompleteText && cvm.index > 220) continue;
@@ -6441,28 +6444,10 @@ Format teks (untuk model tanpa function calling):
 
         // Filter out duplicate or loop tool calls
         const detectedAutonomousCalls = rawAutonomousCalls.filter(call => {
-          const toolName = call.function.name;
-          if (toolName === 'search_web') {
-            if (executedToolSignatures.has('search_web')) return false; // Prevent repeated search loop
-            return true;
-          }
-          if (toolName === 'browse_web_page') {
-            let tUrl = '';
-            try {
-              const raw = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : call.function.arguments;
-              if (raw && typeof raw === 'object') {
-                tUrl = raw.url || raw.target || raw.link || '';
-              } else if (typeof raw === 'string') {
-                tUrl = raw;
-              }
-            } catch (_) {
-              tUrl = String(call.function.arguments || '');
-            }
-            const sig = `browse:${(tUrl || '').trim().toLowerCase()}`;
-            if (executedToolSignatures.has(sig)) return false;
-            return true;
-          }
-          return false;
+          if (!call || !call.function || !AUTONOMOUS_TOOL_NAMES.includes(call.function.name)) return false;
+          const sig = getAutonomousToolSignature(call);
+          if (executedToolSignatures.has(sig)) return false; // Cegah pemanggilan tool berulang (loop)
+          return true;
         });
 
         if (detectedAutonomousCalls.length === 0) {
@@ -6496,22 +6481,7 @@ Format teks (untuk model tanpa function calling):
             previewArg = String(call.function.arguments || '');
           }
 
-          if (toolName === 'search_web') {
-            executedToolSignatures.add('search_web');
-          } else if (toolName === 'browse_web_page') {
-            let tUrl = '';
-            try {
-              const raw = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : call.function.arguments;
-              if (raw && typeof raw === 'object') {
-                tUrl = raw.url || raw.target || raw.link || '';
-              } else if (typeof raw === 'string') {
-                tUrl = raw;
-              }
-            } catch (_) {
-              tUrl = String(call.function.arguments || '');
-            }
-            executedToolSignatures.add(`browse:${(tUrl || '').trim().toLowerCase()}`);
-          }
+          executedToolSignatures.add(getAutonomousToolSignature(call));
           toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
 
           // Visual status loading di gelembung obrolan (Preamble teks dipertahankan)
@@ -7212,28 +7182,10 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
         // Filter out duplicate or loop tool calls
         const detectedAutonomousCalls = rawAutonomousCalls.filter(call => {
-          const toolName = call.function.name;
-          if (toolName === 'search_web') {
-            if (executedToolSignatures.has('search_web')) return false; // Prevent repeated search loop
-            return true;
-          }
-          if (toolName === 'browse_web_page') {
-            let tUrl = '';
-            try {
-              const raw = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : call.function.arguments;
-              if (raw && typeof raw === 'object') {
-                tUrl = raw.url || raw.target || raw.link || '';
-              } else if (typeof raw === 'string') {
-                tUrl = raw;
-              }
-            } catch (_) {
-              tUrl = String(call.function.arguments || '');
-            }
-            const sig = `browse:${(tUrl || '').trim().toLowerCase()}`;
-            if (executedToolSignatures.has(sig)) return false;
-            return true;
-          }
-          return false;
+          if (!call || !call.function || !AUTONOMOUS_TOOL_NAMES.includes(call.function.name)) return false;
+          const sig = getAutonomousToolSignature(call);
+          if (executedToolSignatures.has(sig)) return false; // Cegah pemanggilan tool berulang (loop)
+          return true;
         });
 
         if (detectedAutonomousCalls.length === 0) {
@@ -7267,22 +7219,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             previewArg = String(call.function.arguments || '');
           }
 
-          if (toolName === 'search_web') {
-            executedToolSignatures.add('search_web');
-          } else if (toolName === 'browse_web_page') {
-            let tUrl = '';
-            try {
-              const raw = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : call.function.arguments;
-              if (raw && typeof raw === 'object') {
-                tUrl = raw.url || raw.target || raw.link || '';
-              } else if (typeof raw === 'string') {
-                tUrl = raw;
-              }
-            } catch (_) {
-              tUrl = String(call.function.arguments || '');
-            }
-            executedToolSignatures.add(`browse:${(tUrl || '').trim().toLowerCase()}`);
-          }
+          executedToolSignatures.add(getAutonomousToolSignature(call));
           toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
 
           // Visual status loading di gelembung obrolan (Preamble teks dipertahankan)

@@ -4841,6 +4841,9 @@ ${organicBlock}
       return;
     }
 
+    // Simpan prompt teks asli pengguna untuk tampilan gelembung obrolan (displayContent)
+    const originalUserPrompt = rawText;
+
     // Auto-Extraction URL Web Publik untuk Analisis & Ringkasan AI
     const detectedWebUrls = extractWebUrlsFromText(rawText);
     if (detectedWebUrls.length > 0) {
@@ -4906,7 +4909,7 @@ ${organicBlock}
     const userMsg = {
       role: 'user',
       content: text,
-      displayContent: rawText,
+      displayContent: originalUserPrompt,
       docs: docsMeta.length > 0 ? docsMeta : undefined,
       images: images,
       image: image,
@@ -4916,7 +4919,7 @@ ${organicBlock}
     // Auto title session if first message
     if (session.messages.length === 0) {
       const fallbackTitle = docs.length > 0 ? (docs[0].name || 'Dokumen Lampiran') : (images.length > 0 ? 'Analisis Gambar' : 'Percakapan Baru');
-      let cleanCandidate = (rawText || '').replace(/^\/(?:image|img|gambar|deep|research|riset|web|search|canvas)\s+/i, '').trim();
+      let cleanCandidate = (originalUserPrompt || '').replace(/^\/(?:image|img|gambar|deep|research|riset|web|search|canvas)\s+/i, '').trim();
       const titleCandidate = cleanCandidate || fallbackTitle;
       session.title = titleCandidate.length > 30 ? titleCandidate.substring(0, 30) + '...' : titleCandidate;
     }
@@ -4927,7 +4930,7 @@ ${organicBlock}
     renderChatHistory(els.searchHistoryInput?.value || '');
 
     // Immediately render user's message bubble
-    const userRow = appendMessageElement('user', rawText, images, 'Anda', null, session.messages.length - 1, null, docsWithContent.length > 0 ? docsWithContent : docsMeta);
+    const userRow = appendMessageElement('user', originalUserPrompt, images, 'Anda', null, session.messages.length - 1, null, docsWithContent.length > 0 ? docsWithContent : docsMeta);
     smartScrollChatToBottom(true);
 
     if (STATE.isPromptHidden) {
@@ -6441,28 +6444,10 @@ Format teks (untuk model tanpa function calling):
 
         // Filter out duplicate or loop tool calls
         const detectedAutonomousCalls = rawAutonomousCalls.filter(call => {
-          const toolName = call.function.name;
-          if (toolName === 'search_web') {
-            if (executedToolSignatures.has('search_web')) return false; // Prevent repeated search loop
-            return true;
-          }
-          if (toolName === 'browse_web_page') {
-            let tUrl = '';
-            try {
-              const raw = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : call.function.arguments;
-              if (raw && typeof raw === 'object') {
-                tUrl = raw.url || raw.target || raw.link || '';
-              } else if (typeof raw === 'string') {
-                tUrl = raw;
-              }
-            } catch (_) {
-              tUrl = String(call.function.arguments || '');
-            }
-            const sig = `browse:${(tUrl || '').trim().toLowerCase()}`;
-            if (executedToolSignatures.has(sig)) return false;
-            return true;
-          }
-          return false;
+          if (!call || !call.function || !AUTONOMOUS_TOOL_NAMES.includes(call.function.name)) return false;
+          const sig = getAutonomousToolSignature(call);
+          if (executedToolSignatures.has(sig)) return false; // Cegah pemanggilan tool berulang (loop)
+          return true;
         });
 
         if (detectedAutonomousCalls.length === 0) {
@@ -6496,22 +6481,7 @@ Format teks (untuk model tanpa function calling):
             previewArg = String(call.function.arguments || '');
           }
 
-          if (toolName === 'search_web') {
-            executedToolSignatures.add('search_web');
-          } else if (toolName === 'browse_web_page') {
-            let tUrl = '';
-            try {
-              const raw = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : call.function.arguments;
-              if (raw && typeof raw === 'object') {
-                tUrl = raw.url || raw.target || raw.link || '';
-              } else if (typeof raw === 'string') {
-                tUrl = raw;
-              }
-            } catch (_) {
-              tUrl = String(call.function.arguments || '');
-            }
-            executedToolSignatures.add(`browse:${(tUrl || '').trim().toLowerCase()}`);
-          }
+          executedToolSignatures.add(getAutonomousToolSignature(call));
           toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
 
           // Visual status loading di gelembung obrolan (Preamble teks dipertahankan)
@@ -7212,28 +7182,10 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
         // Filter out duplicate or loop tool calls
         const detectedAutonomousCalls = rawAutonomousCalls.filter(call => {
-          const toolName = call.function.name;
-          if (toolName === 'search_web') {
-            if (executedToolSignatures.has('search_web')) return false; // Prevent repeated search loop
-            return true;
-          }
-          if (toolName === 'browse_web_page') {
-            let tUrl = '';
-            try {
-              const raw = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : call.function.arguments;
-              if (raw && typeof raw === 'object') {
-                tUrl = raw.url || raw.target || raw.link || '';
-              } else if (typeof raw === 'string') {
-                tUrl = raw;
-              }
-            } catch (_) {
-              tUrl = String(call.function.arguments || '');
-            }
-            const sig = `browse:${(tUrl || '').trim().toLowerCase()}`;
-            if (executedToolSignatures.has(sig)) return false;
-            return true;
-          }
-          return false;
+          if (!call || !call.function || !AUTONOMOUS_TOOL_NAMES.includes(call.function.name)) return false;
+          const sig = getAutonomousToolSignature(call);
+          if (executedToolSignatures.has(sig)) return false; // Cegah pemanggilan tool berulang (loop)
+          return true;
         });
 
         if (detectedAutonomousCalls.length === 0) {
@@ -7267,22 +7219,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             previewArg = String(call.function.arguments || '');
           }
 
-          if (toolName === 'search_web') {
-            executedToolSignatures.add('search_web');
-          } else if (toolName === 'browse_web_page') {
-            let tUrl = '';
-            try {
-              const raw = (typeof call.function.arguments === 'string') ? JSON.parse(call.function.arguments) : call.function.arguments;
-              if (raw && typeof raw === 'object') {
-                tUrl = raw.url || raw.target || raw.link || '';
-              } else if (typeof raw === 'string') {
-                tUrl = raw;
-              }
-            } catch (_) {
-              tUrl = String(call.function.arguments || '');
-            }
-            executedToolSignatures.add(`browse:${(tUrl || '').trim().toLowerCase()}`);
-          }
+          executedToolSignatures.add(getAutonomousToolSignature(call));
           toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
 
           // Visual status loading di gelembung obrolan (Preamble teks dipertahankan)
