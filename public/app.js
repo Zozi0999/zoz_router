@@ -5692,7 +5692,7 @@ ${organicBlock}
       try {
         const p = JSON.parse(block.json);
         const name = p.name || p.function || p.tool;
-        if (name === 'search_web' || name === 'browse_web_page') {
+        if (AUTONOMOUS_TOOL_NAMES.includes(name)) {
           cleaned = cleaned.replace(block.json, '');
         }
       } catch (_) {}
@@ -5757,7 +5757,7 @@ ${organicBlock}
     const seenIds = new Set();
 
     function addCall(toolName, rawArgs, rawTag) {
-      if (!toolName || (toolName !== 'search_web' && toolName !== 'browse_web_page')) return;
+      if (!toolName || !AUTONOMOUS_TOOL_NAMES.includes(toolName)) return;
       const serializedArgs = (typeof rawArgs === 'object') ? JSON.stringify(rawArgs) : String(rawArgs);
       const callKey = `${toolName}:${serializedArgs}`;
       if (!seenIds.has(callKey)) {
@@ -5812,7 +5812,7 @@ ${organicBlock}
       const paramMatch = inner.match(/<parameter\s+name=["'](?:query|q|url|target)["']>([\s\S]*?)<\/parameter>/i);
       const val = paramMatch ? paramMatch[1].trim() : inner.replace(/<[^>]+>/g, '').trim();
       if (val) {
-        addCall(name, name === 'search_web' ? { query: val } : { url: val }, ivm[0]);
+        addCall(name, name === 'browse_web_page' ? { url: val } : { query: val }, ivm[0]);
       }
     }
 
@@ -5843,7 +5843,7 @@ ${organicBlock}
       try {
         const p = JSON.parse(block.json);
         const name = p.name || p.function || p.tool;
-        if (name === 'search_web' || name === 'browse_web_page') {
+        if (AUTONOMOUS_TOOL_NAMES.includes(name)) {
           const args = p.arguments ?? p.parameters ?? p.args ?? p.input ?? {};
           addCall(name, args, block.json);
         }
@@ -5863,7 +5863,7 @@ ${organicBlock}
       } catch (_) {
         const qMatch = fjm[2].match(/["'](?:query|q|keyword|search|url|link)["']\s*:\s*["']([^"']+)["']/i);
         if (qMatch) {
-          addCall(name, name === 'search_web' ? { query: qMatch[1] } : { url: qMatch[1] }, fjm[0]);
+          addCall(name, name === 'browse_web_page' ? { url: qMatch[1] } : { query: qMatch[1] }, fjm[0]);
         }
       }
     }
@@ -5877,7 +5877,7 @@ ${organicBlock}
       const name = fm[1];
       const val = fm[3].trim();
       if (val) {
-        addCall(name, name === 'search_web' ? { query: val } : { url: val }, fm[0]);
+        addCall(name, name === 'browse_web_page' ? { url: val } : { query: val }, fm[0]);
       }
     }
 
@@ -5890,7 +5890,7 @@ ${organicBlock}
       const name = cvm[1];
       const val = cvm[3].trim();
       if (val) {
-        addCall(name, name === 'search_web' ? { query: val } : { url: val }, cvm[0]);
+        addCall(name, name === 'browse_web_page' ? { url: val } : { query: val }, cvm[0]);
       }
     }
 
