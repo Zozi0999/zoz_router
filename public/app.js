@@ -1188,8 +1188,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     const diskSess = await DeviceStorage.getSession(activeSession.id);
     const diskMsgs = (diskSess && Array.isArray(diskSess.messages)) ? diskSess.messages : [];
     const activeMsgs = Array.isArray(activeSession.messages) ? activeSession.messages : [];
-    const diskLast = diskMsgs[diskMsgs.length - 1];
-    const activeLast = activeMsgs[activeMsgs.length - 1];
+    let diskLast = null;
+    if (diskMsgs.length > 0) {
+      diskLast = diskMsgs[diskMsgs.length - 1];
+    }
+    let activeLast = null;
+    if (activeMsgs.length > 0) {
+      activeLast = activeMsgs[activeMsgs.length - 1];
+    }
 
     const hasNewMessages = diskMsgs.length > activeMsgs.length ||
       (diskLast && activeLast && diskLast.content !== activeLast.content && (diskLast.content.length > activeLast.content.length || diskLast.backgroundCompleted));
@@ -1205,7 +1211,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     } else if (data.text && data.text.trim()) {
       const trimmed = data.text.trim();
       if (!Array.isArray(activeSession.messages)) activeSession.messages = [];
-      const curLast = activeSession.messages[activeSession.messages.length - 1];
+      let curLast = null;
+      if (activeSession.messages.length > 0) {
+        curLast = activeSession.messages[activeSession.messages.length - 1];
+      }
       if (curLast && curLast.role === 'assistant') {
         if (curLast.content !== trimmed && (trimmed.length > (curLast.content || '').length || !curLast.content)) {
           curLast.content = trimmed;
@@ -1418,7 +1427,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
           // Simpan ke pesan sesi jika belum tersimpan atau perbarui jika teks masih parsial
           if (!Array.isArray(session.messages)) session.messages = [];
-          const lastMsg = session.messages[session.messages.length - 1];
+          let lastMsg = null;
+          if (session.messages.length > 0) {
+            lastMsg = session.messages[session.messages.length - 1];
+          }
           if (!lastMsg || lastMsg.role !== 'assistant') {
             session.messages.push({
               role: 'assistant',
@@ -1471,7 +1483,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           }
           if (partialText.trim()) {
             if (!Array.isArray(session.messages)) session.messages = [];
-            const lastMsg = session.messages[session.messages.length - 1];
+            let lastMsg = null;
+            if (session.messages.length > 0) {
+              lastMsg = session.messages[session.messages.length - 1];
+            }
             const interruptedText = partialText + `\n\n*[Respons terputus: ${data.error || 'koneksi terputus'}]*`;
             if (!lastMsg || lastMsg.role !== 'assistant') {
               session.messages.push({
@@ -1502,9 +1517,21 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
   function savePersistedState() {
     try {
-      localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings));
-      localStorage.setItem('zoz_router_sound_v1', String(STATE.soundEnabled));
-      localStorage.setItem('zoz_router_search_mode_v1', STATE.searchMode || 'off');
+      try {
+        localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings));
+      } catch (e) {
+        console.warn('Failed to save settings:', e);
+      }
+      try {
+        localStorage.setItem('zoz_router_sound_v1', String(STATE.soundEnabled));
+      } catch (e) {
+        console.warn('Failed to save sound setting:', e);
+      }
+      try {
+        localStorage.setItem('zoz_router_search_mode_v1', STATE.searchMode || 'off');
+      } catch (e) {
+        console.warn('Failed to save search mode:', e);
+      }
 
       // Save active session to Device Disk Storage
       if (STATE.currentSessionId) {
@@ -2206,8 +2233,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           }
         }
         if (targetMsg) targetMsg.content = merged;
-        else if (session.messages && session.messages.length > 0 && session.messages[session.messages.length - 1].role === 'assistant') {
-          session.messages[session.messages.length - 1].content = merged;
+        let lastMsg = null;
+        if (session.messages && session.messages.length > 0) {
+          lastMsg = session.messages[session.messages.length - 1];
+        }
+        else if (lastMsg && lastMsg.role === 'assistant') {
+          lastMsg.content = merged;
         }
         assistantRow.dataset.fullContent = merged;
         session.updatedAt = new Date().toISOString();
@@ -2637,7 +2668,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       if (!isNaN(t)) return t;
     }
     if (s.messages && s.messages.length > 0) {
-      const lastMsg = s.messages[s.messages.length - 1];
+      let lastMsg = null;
+      if (s.messages.length > 0) {
+        lastMsg = s.messages[s.messages.length - 1];
+      }
       if (lastMsg && lastMsg.timestamp) {
         const t = new Date(lastMsg.timestamp).getTime();
         if (!isNaN(t)) return t;
