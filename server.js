@@ -10,7 +10,7 @@ const url = require('url');
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
-const { spawn, execSync } = require('child_process');
+const { spawn } = require('child_process');
 
 const PORT = process.env.PORT || 4040;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -4277,10 +4277,35 @@ const server = http.createServer(async (req, res) => {
       const wavHeader = createWavHeader(audioSynth.buffer.length, 44100, 2, 16);
       fs.writeFileSync(tempAudioPath, Buffer.concat([wavHeader, audioSynth.buffer]));
 
-      // 3. Compile MP4 with FFmpeg Cinematic Motion & Sound
+      // 3. Compile MP4 with FFmpeg Cinematic Motion & Sound (Asynchronous Non-Blocking)
       const filter = "zoompan=z='min(zoom+0.0012,1.35)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=150:s=1280x720:fps=30";
       try {
-        execSync(`ffmpeg -y -loop 1 -i "${tempImgPath}" -i "${tempAudioPath}" -vf "${filter}" -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 192k -t 5 -shortest "${localVideoPath}"`, { stdio: 'pipe' });
+        await new Promise((resolve, reject) => {
+          const ffmpegArgs = [
+            '-y',
+            '-loop', '1',
+            '-i', tempImgPath,
+            '-i', tempAudioPath,
+            '-vf', filter,
+            '-c:v', 'libx264',
+            '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac',
+            '-b:a', '192k',
+            '-t', '5',
+            '-shortest',
+            localVideoPath
+          ];
+          const proc = spawn('ffmpeg', ffmpegArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
+          let stderr = '';
+          if (proc.stderr) {
+            proc.stderr.on('data', chunk => { stderr += chunk; });
+          }
+          proc.on('close', code => {
+            if (code === 0) resolve();
+            else reject(new Error(`FFmpeg gagal (exit code ${code}): ${stderr.slice(-300)}`));
+          });
+          proc.on('error', err => reject(err));
+        });
       } finally {
         try { if (fs.existsSync(tempImgPath)) fs.unlinkSync(tempImgPath); } catch (_) {}
         try { if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath); } catch (_) {}
