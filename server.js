@@ -44,11 +44,12 @@ const MIME_TYPES = {
   '.ogv': 'video/ogg'
 };
 
-const DATA_DIR = path.join(__dirname, 'data');
+const IS_VERCEL_ENV = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const DATA_DIR = IS_VERCEL_ENV ? path.join('/tmp', 'data') : path.join(__dirname, 'data');
 const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 
-// Ensure data directories exist on device storage
+// Ensure data directories exist on device storage safely
 try {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
@@ -69,8 +70,35 @@ function sendJSON(res, statusCode, data) {
   res.end(JSON.stringify(data));
 }
 
-// Helper to parse JSON request body safely with Buffer chunks
+// Helper to parse JSON request body safely with Buffer chunks and Serverless pre-parsed support
 function parseBody(req) {
+  // Dukungan lingkungan serverless (Vercel / Lambda) di mana body sudah di-parse oleh gateway
+  if (req.body !== undefined && req.body !== null) {
+    if (typeof req.body === 'object') {
+      return Promise.resolve(req.body);
+    }
+    if (typeof req.body === 'string') {
+      try {
+        return Promise.resolve(req.body.trim() ? JSON.parse(req.body) : {});
+      } catch (_) {
+        return Promise.resolve({});
+      }
+    }
+    if (Buffer.isBuffer(req.body)) {
+      try {
+        const str = req.body.toString('utf8');
+        return Promise.resolve(str.trim() ? JSON.parse(str) : {});
+      } catch (_) {
+        return Promise.resolve({});
+      }
+    }
+  }
+
+  // Jika stream sudah ended atau tidak ada body, jangan tunggu event yang tidak akan pernah fired
+  if (req.readableEnded || req.complete) {
+    return Promise.resolve({});
+  }
+
   return new Promise((resolve, reject) => {
     let settled = false;
     const safeResolve = (val) => {
@@ -107,7 +135,7 @@ function parseBody(req) {
       }
     });
     req.on('close', () => {
-      if (!req.complete) {
+      if (!req.complete && !settled) {
         safeReject(new Error('Request aborted by client'));
       }
     });
@@ -3219,8 +3247,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
   }
 }
 
-// Main HTTP Server
-const server = http.createServer(async (req, res) => {
+// Main HTTP Request Handler & Server
+async function requestHandler(req, res) {
   let reqUrl;
   try {
     reqUrl = new URL(req.url, `http://${req.headers.host || 'localhost:4040'}`);
@@ -6066,7 +6094,9 @@ const server = http.createServer(async (req, res) => {
       res.end(content);
     });
   });
-});
+}
+
+const server = http.createServer(requestHandler);
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
@@ -6107,3 +6137,4 @@ if (require.main === module && !process.env.VERCEL) {
 }
 
 module.exports = server;
+module.exports.requestHandler = requestHandler;

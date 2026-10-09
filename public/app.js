@@ -6,7 +6,19 @@
 (() => {
   'use strict';
 
+  const IS_VERCEL = Boolean(location.hostname && location.hostname.endsWith('vercel.app'));
   const IS_GITHUB_PAGES = Boolean(location.hostname && location.hostname.endsWith('github.io')) || location.protocol === 'file:';
+  const IS_CLOUD_HOSTED = Boolean(
+    IS_VERCEL ||
+    IS_GITHUB_PAGES ||
+    (location.hostname && (
+      location.hostname.endsWith('pages.dev') ||
+      location.hostname.endsWith('netlify.app') ||
+      location.hostname.endsWith('render.com') ||
+      location.hostname.endsWith('railway.app') ||
+      (location.protocol === 'https:' && !/^(?:localhost|127\.0\.0\.1|\[::1\])$/i.test(location.hostname))
+    ))
+  );
 
   const extractDomainSafe = (url) => {
     try {
@@ -1071,6 +1083,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       ];
       if (!STATE.settings.openRouterModel || DEAD_OPENROUTER_MODELS.includes(STATE.settings.openRouterModel)) {
         STATE.settings.openRouterModel = 'openrouter/free';
+      }
+
+      // Jika baru pertama kali dibuka di cloud (Vercel) dan endpoint masih localhost, jadikan mode auto secara default
+      if (IS_CLOUD_HOSTED && !saved && STATE.settings.mode === 'ollama') {
+        STATE.settings.mode = 'auto';
       }
 
       if (!STATE.settings.imageModel) {
@@ -2286,7 +2303,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   }
 
   async function streamContinuationOpenRouter(session, modelName, promptInstruction, bubbleText, currentFullText) {
-    const isOpenRouterDirect = IS_GITHUB_PAGES;
+    const isOpenRouterDirect = IS_GITHUB_PAGES || IS_CLOUD_HOSTED;
     const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
     const headers = {
       'Content-Type': 'application/json',
@@ -4685,8 +4702,16 @@ ${organicBlock}
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
       }
 
-      let rawModels = [];
-      let isRunning = false;
+      if (location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+        els.ollamaStatusVal.innerText = 'Localhost Terblokir (Mixed Content)';
+        els.ollamaStatusVal.title = 'Halaman HTTPS memblokir akses langsung ke HTTP localhost. Gunakan OpenRouter di Cloud atau jalankan lokal di port 4040.';
+        els.ollamaIndicator.className = 'status-indicator status-warning';
+        STATE.ollamaModels = [];
+        if (els.badgeOllamaCount) els.badgeOllamaCount.innerText = '0';
+        populateModelDropdown();
+        updateOllamaStatusUI();
+        return false;
+      }
 
       if (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) {
         // Direct browser fetch
@@ -6735,7 +6760,11 @@ Format teks (untuk model tanpa function calling):
   function formatModelErrorMessage(engine, modelName, err, hasImage = false, hasWebSearch = false) {
     const rawMsg = (err && err.message) ? err.message : String(err || 'Unknown error');
     const msg = rawMsg.toLowerCase();
-    const isCorsOrNetwork = IS_GITHUB_PAGES && (msg.includes('failed to fetch') || msg.includes('networkerror') || err.name === 'TypeError');
+    const isMixedContentLocal = (location.protocol === 'https:' || IS_CLOUD_HOSTED) && (
+      msg.includes('mixed_content') || 
+      ((msg.includes('failed to fetch') || msg.includes('networkerror') || err?.name === 'TypeError') && engine === 'ollama')
+    );
+    const isCorsOrNetwork = (IS_GITHUB_PAGES || IS_CLOUD_HOSTED) && (msg.includes('failed to fetch') || msg.includes('networkerror') || err.name === 'TypeError');
     const actualHasImage = Array.isArray(hasImage) ? hasImage.length > 0 : Boolean(hasImage);
     const isVisionUnsupported = actualHasImage && (
       msg.includes('image') || 
@@ -6755,7 +6784,11 @@ Format teks (untuk model tanpa function calling):
     let desc = escapeHtml(rawMsg);
     let advice = '';
 
-    if (isVisionUnsupported) {
+    if (isMixedContentLocal && engine === 'ollama') {
+      title = `Koneksi Ollama Lokal Terblokir oleh Keamanan Browser HTTPS`;
+      desc = `Anda sedang membuka Zoz Router melalui Cloud HTTPS (<code>${escapeHtml(location.hostname)}</code>). Kebijakan keamanan browser (Mixed Content) melarang halaman web HTTPS mengakses alamat HTTP lokal (<code>${escapeHtml(STATE.settings.ollamaEndpoint)}</code>).`;
+      advice = `💡 <strong>Solusi Cepat:</strong><br>&bull; <strong>Gunakan OpenRouter (Cloud AI):</strong> Buka Pengaturan, gunakan model gratis OpenRouter (DeepSeek, Gemma, dll) yang didukung 100% di cloud.<br>&bull; <strong>Jalankan di Komputer Lokal:</strong> Buka <code>http://localhost:4040</code> di komputer Anda untuk akses penuh ke Ollama lokal.<br>&bull; <strong>Atau Gunakan HTTPS Tunnel:</strong> Hubungkan Ollama via Cloudflare Tunnel atau ngrok lalu masukkan URL HTTPS-nya di Pengaturan.`;
+    } else if (isVisionUnsupported) {
       title = `Model ${escapeHtml(modelName)} Tidak Mendukung Input Gambar`;
       desc = `Model ini menolak pemrosesan gambar multimodal karena beroperasi dalam mode teks murni (text-only).`;
       advice = `💡 <strong>Saran:</strong> Beralihlah ke model multimodal seperti <code>google/gemini-2.0-flash-exp:free</code>, <code>openai/gpt-4o</code>, <code>gemma4:31b</code>, atau kirim prompt Anda tanpa lampiran gambar.`;
@@ -6764,9 +6797,9 @@ Format teks (untuk model tanpa function calling):
       desc = `Server penyedia pihak ketiga (upstream) untuk model <code>${escapeHtml(modelName)}</code> sedang mengalami antrean penuh atau gangguan sementara di OpenRouter.`;
       advice = `💡 <strong>Solusi Cepat:</strong> Coba beralih ke model free lain yang sedang aktif stabil seperti <code>openrouter/free</code> atau <code>google/gemma-2-9b-it:free</code>, atau klik <strong>Ganti ke Model Gratis &amp; Kirim Ulang</strong>.`;
     } else if (isCorsOrNetwork && engine === 'ollama') {
-      title = `Batasan Koneksi Browser CORS (GitHub Pages)`;
-      desc = `Browser memblokir koneksi langsung dari domain <code>github.io</code> ke server <code>ollama.com</code> karena pembatasan CORS server.`;
-      advice = `💡 <strong>Solusi Cepat:</strong> Gunakan <strong>OpenRouter (Cloud)</strong> yang didukung 100% di web GitHub Pages tanpa batasan CORS, atau jalankan Desktop Gateway <code>http://localhost:4040</code> di PC Anda.`;
+      title = `Batasan Koneksi Browser CORS / Jaringan`;
+      desc = `Browser memblokir koneksi dari domain <code>${escapeHtml(location.hostname)}</code> ke endpoint <code>${escapeHtml(STATE.settings.ollamaEndpoint)}</code>.`;
+      advice = `💡 <strong>Solusi Cepat:</strong> Gunakan <strong>OpenRouter (Cloud)</strong> yang didukung 100% di cloud tanpa batasan CORS, atau jalankan Desktop Gateway <code>http://localhost:4040</code> di PC Anda.`;
     } else if (isAuthError) {
       title = `Autentikasi / API Key Diperlukan`;
       desc = `API Key untuk provider <strong>${engine === 'ollama' ? 'Ollama Cloud' : 'OpenRouter'}</strong> tidak valid, belum diisi, atau kadaluarsa.`;
@@ -7048,6 +7081,9 @@ Format teks (untuk model tanpa function calling):
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
       }
 
+      if (location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+        throw new Error('mixed_content: Browser HTTPS memblokir koneksi ke Ollama localhost HTTP.');
+      }
       const chatUrl = (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
 
       let response = await fetch(chatUrl, {
@@ -7637,7 +7673,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       const resolvedImgs = await Promise.all(rawImgs.map(resolveImageToDataUrlSafe));
       const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, modelName);
 
-      const isOpenRouterDirect = IS_GITHUB_PAGES;
+      const isOpenRouterDirect = IS_GITHUB_PAGES || IS_CLOUD_HOSTED;
       const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
       const headers = {
         'Content-Type': 'application/json',
@@ -8843,7 +8879,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
         : [modelName];
 
-      const isOpenRouterDirect = IS_GITHUB_PAGES;
+      const isOpenRouterDirect = IS_GITHUB_PAGES || IS_CLOUD_HOSTED;
       const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
       const headers = {
         'Content-Type': 'application/json',
@@ -8964,7 +9000,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
         : [modelName];
 
-      const isOpenRouterDirect = IS_GITHUB_PAGES;
+      const isOpenRouterDirect = IS_GITHUB_PAGES || IS_CLOUD_HOSTED;
       const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
       const headers = {
         'Content-Type': 'application/json',
