@@ -131,6 +131,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     isMusicGenMode: false,
     isVideoGenMode: false,
     isGenerating: false,
+    isSending: false, // Guard anti pengiriman ganda (Enter berulang saat masih ada await)
     abortController: null,
     currentDeepResearchTaskId: null,
     soundEnabled: true,
@@ -1146,7 +1147,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
                 const diskLast = full.messages[diskLen - 1];
                 const memLast = activeSess.messages ? activeSess.messages[memLen - 1] : null;
 
-                if (activeSess._isLazyDisk || diskLen > memLen || (diskLast && memLast && diskLast.content !== memLast.content && (diskLast.content.length > (memLast.content || '').length || diskLast.backgroundCompleted))) {
+                if (activeSess._isLazyDisk || diskLen > memLen || (diskLast && memLast && diskLast.content !== memLast.content && ((diskLast.content || '').length > (memLast.content || '').length || diskLast.backgroundCompleted))) {
                   activeSess.messages = full.messages;
                   delete activeSess._isLazyDisk;
                   await ChatDB.saveSession(activeSess);
@@ -1198,7 +1199,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
 
     const hasNewMessages = diskMsgs.length > activeMsgs.length ||
-      (diskLast && activeLast && diskLast.content !== activeLast.content && (diskLast.content.length > activeLast.content.length || diskLast.backgroundCompleted));
+      (diskLast && activeLast && diskLast.content !== activeLast.content && ((diskLast.content || '').length > (activeLast.content || '').length || diskLast.backgroundCompleted));
 
     if (hasNewMessages) {
       activeSession.messages = diskMsgs;
@@ -2227,8 +2228,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         let targetMsg = null;
         if (Array.isArray(session.messages)) {
           for (let i = session.messages.length - 1; i >= 0; i--) {
-            if (session.messages[i].role === 'assistant' && (session.messages[i].content === previousText || session.messages[i].content.startsWith(previousText.substring(0, 50)))) {
-              targetMsg = session.messages[i];
+            const msg = session.messages[i];
+            const msgContent = (msg && typeof msg.content === 'string') ? msg.content : '';
+            if (msg && msg.role === 'assistant' && (msgContent === previousText || msgContent.startsWith(previousText.substring(0, 50)))) {
+              targetMsg = msg;
               break;
             }
           }
@@ -2502,7 +2505,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         const diskLast = fullSess.messages[diskLen - 1];
         const memLast = targetSession.messages ? targetSession.messages[memLen - 1] : null;
 
-        if (targetSession._isLazyDisk || diskLen > memLen || (diskLast && memLast && diskLast.content !== memLast.content && (diskLast.content.length > (memLast.content || '').length || diskLast.backgroundCompleted))) {
+        if (targetSession._isLazyDisk || diskLen > memLen || (diskLast && memLast && diskLast.content !== memLast.content && ((diskLast.content || '').length > (memLast.content || '').length || diskLast.backgroundCompleted))) {
           targetSession.messages = fullSess.messages;
           delete targetSession._isLazyDisk;
           await ChatDB.saveSession(targetSession);
@@ -4708,7 +4711,12 @@ ${organicBlock}
     const docs = [...(STATE.attachedDocs || [])];
 
     if (!rawText && images.length === 0 && docs.length === 0) return;
-    if (STATE.isGenerating) return;
+    if (STATE.isGenerating || STATE.isSending) return;
+
+    // Tutup celah await (hydrasi sesi lazy-disk) sebelum input dibersihkan,
+    // agar Enter berulang tidak mengirim dua kali / memicu dua stream.
+    STATE.isSending = true;
+    try {
 
     // Claude AI resilience: minta izin notifikasi saat pengguna berinteraksi
     requestNotificationPermission();
@@ -4868,6 +4876,9 @@ ${organicBlock}
           await runOllamaStreaming(session, text, effectiveImages, targetModel);
         }
       }
+    }
+    } finally {
+      STATE.isSending = false;
     }
   }
 
@@ -10040,7 +10051,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
   function normalizeMusicModelSetting() {
     if (!isAudioMusicModel(STATE.settings.musicModel)) {
       STATE.settings.musicModel = DEFAULT_MUSIC_MODEL;
-      try { localStorage.setItem('zoz_settings_v1', JSON.stringify(STATE.settings)); } catch (_) {}
+      try { localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings)); } catch (_) {}
       if (els.settingMusicModel) els.settingMusicModel.value = DEFAULT_MUSIC_MODEL;
     }
   }
@@ -10133,6 +10144,12 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     }
     if (els.musicModeIndicator) {
       els.musicModeIndicator.style.display = isMusicMode ? 'flex' : 'none';
+      // Selalu reset ikon ke nota musik, agar tidak menyimpan ikon silang
+      // sisa hover saat mode musik dinonaktifkan lalu diaktifkan kembali.
+      const indicatorIcon = els.musicModeIndicator.querySelector('i');
+      if (indicatorIcon) {
+        indicatorIcon.className = 'fa-solid fa-music';
+      }
     }
 
     // Sinkronisasi status checked pada popup modal/dropdown musik
@@ -10454,7 +10471,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     STATE.isImageGenMode = false;
     STATE.isVideoGenMode = false;
     try {
-      localStorage.setItem('zoz_settings_v1', JSON.stringify(STATE.settings));
+      localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings));
     } catch (_) {}
     if (els.settingMusicModel) {
       els.settingMusicModel.value = modelVal;
@@ -10693,11 +10710,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     STATE.isMusicGenMode = false;
     STATE.isVideoGenMode = false;
     try {
-      localStorage.setItem('zoz_settings_v1', JSON.stringify(STATE.settings));
+      localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings));
     } catch (_) {}
-    if (els.settingImageModel) {
-      els.settingImageModel.value = modelVal;
-    }
     updateImageGenModeUI();
     updateMusicGenModeUI();
     updateVideoGenModeUI();
@@ -14023,7 +14037,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     if (els.settingOllamaApiKey) els.settingOllamaApiKey.value = STATE.settings.ollamaApiKey || '';
     if (els.settingOpenRouterKey) els.settingOpenRouterKey.value = STATE.settings.openRouterKey || '';
     if (els.settingSerperApiKey) els.settingSerperApiKey.value = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
-    if (els.settingImageModel) els.settingImageModel.value = STATE.settings.imageModel || 'flux';
     if (els.settingMusicModel) els.settingMusicModel.value = STATE.settings.musicModel || 'google/lyria-3-clip-preview';
     if (els.paramTemperature) els.paramTemperature.value = STATE.settings.temperature ?? 0.7;
     if (els.valTemperature) els.valTemperature.innerText = STATE.settings.temperature ?? 0.7;
@@ -14675,6 +14688,8 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     // Music Mode Indicator (hover to deactivate)
     els.musicModeIndicator?.addEventListener('click', (e) => {
       e.stopPropagation();
+      const icon = els.musicModeIndicator?.querySelector('i');
+      if (icon) icon.className = 'fa-solid fa-music';
       setMusicModel('off');
     });
     els.musicModeIndicator?.addEventListener('mouseenter', () => {
@@ -14686,11 +14701,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       }
     });
     els.musicModeIndicator?.addEventListener('mouseleave', () => {
-      if (els.musicModeIndicator && STATE.isMusicGenMode) {
-        const icon = els.musicModeIndicator.querySelector('i');
-        if (icon) {
-          icon.className = 'fa-solid fa-music';
-        }
+      // Reset tanpa syarat: saat mode dinonaktifkan lewat klik, mouseleave
+      // tetap harus mengembalikan ikon agar tidak nyangkut di silang.
+      const icon = els.musicModeIndicator?.querySelector('i');
+      if (icon) {
+        icon.className = 'fa-solid fa-music';
       }
     });
 
@@ -15259,10 +15274,6 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
       if (els.settingSerperApiKey) {
         STATE.settings.serperApiKey = els.settingSerperApiKey.value.trim();
-      }
-
-      if (els.settingImageModel) {
-        STATE.settings.imageModel = els.settingImageModel.value.trim() || 'flux';
       }
 
       if (els.settingMusicModel) {
