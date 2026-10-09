@@ -842,6 +842,8 @@ function markChatTaskInterrupted(sessionId, reason = 'Koneksi terputus') {
   if (task.fullText && task.fullText.trim()) {
     appendAssistantMessageToSessionDisk(sessionId, task.fullText + `\n\n*[Respons terputus: ${reason}]*`, task.model);
   }
+  // Clean up completed/interrupted task
+  delete dbActiveChatTasks[sessionId];
 }
 
 function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extraMeta = {}) {
@@ -945,7 +947,14 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
           if (extraMeta.seed) lastMsg.seed = extraMeta.seed;
         }
         sessData.updatedAt = new Date().toISOString();
-        fs.writeFileSync(sessFile, JSON.stringify(sessData, null, 2), 'utf8');
+        const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        try {
+          fs.writeFileSync(tempFile, JSON.stringify(sessData, null, 2), 'utf8');
+          fs.renameSync(tempFile, sessFile);
+        } catch (err) {
+          try { fs.unlinkSync(tempFile); } catch {}
+          throw err;
+        }
         return true;
       }
     }
@@ -976,8 +985,14 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
 
     msgs.push(newMsg);
     sessData.updatedAt = new Date().toISOString();
-
-    fs.writeFileSync(sessFile, JSON.stringify(sessData, null, 2), 'utf8');
+    const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    try {
+      fs.writeFileSync(tempFile, JSON.stringify(sessData, null, 2), 'utf8');
+      fs.renameSync(tempFile, sessFile);
+    } catch (err) {
+      try { fs.unlinkSync(tempFile); } catch {}
+      throw err;
+    }
     return true;
   } catch (err) {
     console.warn(`[Background Chat Engine] Gagal menyimpan respons asisten ke sesi disk ${sessionId}:`, err.message);
@@ -2930,7 +2945,14 @@ const server = http.createServer(async (req, res) => {
       if (!fs.existsSync(SESSIONS_DIR)) {
         fs.mkdirSync(SESSIONS_DIR, { recursive: true });
       }
-      fs.writeFileSync(sessFile, JSON.stringify(body, null, 2), 'utf8');
+      const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      try {
+        fs.writeFileSync(tempFile, JSON.stringify(body, null, 2), 'utf8');
+        fs.renameSync(tempFile, sessFile);
+      } catch (err) {
+        try { fs.unlinkSync(tempFile); } catch {}
+        throw err;
+      }
       return sendJSON(res, 200, { success: true, session: body });
     } catch (err) {
       return sendJSON(res, 500, { error: 'Gagal menyimpan sesi ke disk perangkat: ' + err.message });
@@ -2957,7 +2979,14 @@ const server = http.createServer(async (req, res) => {
       if (!fs.existsSync(SESSIONS_DIR)) {
         fs.mkdirSync(SESSIONS_DIR, { recursive: true });
       }
-      fs.writeFileSync(sessFile, JSON.stringify(updated, null, 2), 'utf8');
+      const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      try {
+        fs.writeFileSync(tempFile, JSON.stringify(updated, null, 2), 'utf8');
+        fs.renameSync(tempFile, sessFile);
+      } catch (err) {
+        try { fs.unlinkSync(tempFile); } catch {}
+        throw err;
+      }
       return sendJSON(res, 200, { success: true, session: updated });
     } catch (err) {
       return sendJSON(res, 500, { error: 'Gagal memperbarui sesi di disk: ' + err.message });
@@ -4558,6 +4587,9 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (sessionId) {
+        if (dbActiveChatTasks[sessionId] && dbActiveChatTasks[sessionId].status === 'streaming') {
+          return sendJSON(res, 429, { error: 'Stream already active for this session' });
+        }
         dbActiveChatTasks[sessionId] = {
           sessionId,
           model: body.model || 'Ollama Model',
@@ -4614,6 +4646,8 @@ const server = http.createServer(async (req, res) => {
         // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
         if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
           if (!proxyReq.destroyed) proxyReq.destroy();
+          // Clean up aborted task
+          delete dbActiveChatTasks[sessionId];
           return;
         }
 
@@ -4691,7 +4725,9 @@ const server = http.createServer(async (req, res) => {
           // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
           if (sessionId && dbActiveChatTasks[sessionId]) {
             if (dbActiveChatTasks[sessionId].status === 'aborted') {
-              return; // Jangan timpa status aborted dan jangan simpan ulang
+              // Jangan timpa status aborted dan jangan simpan ulang
+              delete dbActiveChatTasks[sessionId];
+              return;
             }
             flushChatTaskBuffer(sessionId, 'ollama');
             const task = dbActiveChatTasks[sessionId];
@@ -4700,6 +4736,8 @@ const server = http.createServer(async (req, res) => {
             if (task.fullText && task.fullText.trim()) {
               appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model);
             }
+            // Clean up completed task
+            delete dbActiveChatTasks[sessionId];
           }
         });
 
@@ -5016,6 +5054,9 @@ const server = http.createServer(async (req, res) => {
       delete body.sessionId;
 
       if (sessionId) {
+        if (dbActiveChatTasks[sessionId] && dbActiveChatTasks[sessionId].status === 'streaming') {
+          return sendJSON(res, 429, { error: 'Stream already active for this session' });
+        }
         dbActiveChatTasks[sessionId] = {
           sessionId,
           model: body.model || 'OpenRouter Model',
@@ -5105,6 +5146,8 @@ const server = http.createServer(async (req, res) => {
         // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
         if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
           if (!proxyReq.destroyed) proxyReq.destroy();
+          // Clean up aborted task
+          delete dbActiveChatTasks[sessionId];
           return;
         }
 
@@ -5182,7 +5225,9 @@ const server = http.createServer(async (req, res) => {
           // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
           if (sessionId && dbActiveChatTasks[sessionId]) {
             if (dbActiveChatTasks[sessionId].status === 'aborted') {
-              return; // Jangan timpa status aborted dan jangan simpan ulang
+              // Jangan timpa status aborted dan jangan simpan ulang
+              delete dbActiveChatTasks[sessionId];
+              return;
             }
             flushChatTaskBuffer(sessionId, 'openrouter');
             const task = dbActiveChatTasks[sessionId];
@@ -5191,6 +5236,8 @@ const server = http.createServer(async (req, res) => {
             if (task.fullText && task.fullText.trim()) {
               appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model);
             }
+            // Clean up completed task
+            delete dbActiveChatTasks[sessionId];
           }
         });
 
