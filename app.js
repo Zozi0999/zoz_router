@@ -5148,7 +5148,8 @@ ${organicBlock}
     let url = '';
     if (raw && typeof raw === 'object') url = raw.url || raw.target || raw.link || '';
     else if (typeof raw === 'string') url = raw;
-    return `browse:${String(url).trim().toLowerCase()}`;
+    const cleanUrl = String(url).trim().toLowerCase().replace(/\/+$/, '');
+    return `browse:${cleanUrl}`;
   }
 
   function stripDateNoise(q) {
@@ -5756,7 +5757,7 @@ ${organicBlock}
     const seenIds = new Set();
 
     function addCall(toolName, rawArgs, rawTag) {
-      if (!toolName || (toolName !== 'search_web' && toolName !== 'browse_web_page')) return;
+      if (!toolName || !AUTONOMOUS_TOOL_NAMES.includes(toolName)) return;
       const serializedArgs = (typeof rawArgs === 'object') ? JSON.stringify(rawArgs) : String(rawArgs);
       const callKey = `${toolName}:${serializedArgs}`;
       if (!seenIds.has(callKey)) {

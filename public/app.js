@@ -5148,7 +5148,8 @@ ${organicBlock}
     let url = '';
     if (raw && typeof raw === 'object') url = raw.url || raw.target || raw.link || '';
     else if (typeof raw === 'string') url = raw;
-    return `browse:${String(url).trim().toLowerCase()}`;
+    const cleanUrl = String(url).trim().toLowerCase().replace(/\/+$/, '');
+    return `browse:${cleanUrl}`;
   }
 
   function stripDateNoise(q) {
@@ -5681,9 +5682,9 @@ ${organicBlock}
     if (!text || typeof text !== 'string') return '';
     let cleaned = text
       .replace(/<(?:tool_call|function_call)>[\s\S]*?<\/(?:tool_call|function_call)>/gi, '')
-      .replace(/<invoke\s+name=["'](?:search_web|browse_web_page)["']>[\s\S]*?<\/invoke>/gi, '')
+      .replace(/<invoke\s+name=["'](?:search_web|browse_web_page|search_youtube)["']>[\s\S]*?<\/invoke>/gi, '')
       .replace(/\[TOOL_CALLS\][\s\S]*?(?:\[\/TOOL_CALLS\]|(?=\n\n)|$)/gi, '')
-      .replace(/```(?:tool_call|json)?\s*\{[\s\S]*?"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page)"[\s\S]*?\}\s*```/gi, '');
+      .replace(/```(?:tool_call|json)?\s*\{[\s\S]*?"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page|search_youtube)"[\s\S]*?\}\s*```/gi, '');
 
     // Hapus blok JSON seimbang yang merepresentasikan pemanggilan tool mentah
     const jsonBlocks = extractBalancedJsonObjects(cleaned);
@@ -5699,9 +5700,9 @@ ${organicBlock}
 
     // Bersihkan residu teks bocor seperti "We will call search_web for ..."
     cleaned = cleaned
-      .replace(/(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(?:search_web|browse_web_page)[\s\S]*?(?:\.|\n|$)/gi, '')
-      .replace(/(?:search_web|browse_web_page)\s*\(\s*\{[\s\S]*?\}\s*\)/gi, '')
-      .replace(/(?:search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?(["'`])[\s\S]*?\1\s*\)/gi, '')
+      .replace(/(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(?:search_web|browse_web_page|search_youtube)[\s\S]*?(?:\.|\n|$)/gi, '')
+      .replace(/(?:search_web|browse_web_page|search_youtube)\s*\(\s*\{[\s\S]*?\}\s*\)/gi, '')
+      .replace(/(?:search_web|browse_web_page|search_youtube)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?(["'`])[\s\S]*?\1\s*\)/gi, '')
       .trim();
 
     return cleaned;
@@ -5803,7 +5804,7 @@ ${organicBlock}
     }
 
     // 3. Anthropic XML format: <invoke name="search_web"><parameter name="query">...</parameter></invoke>
-    const invokeRegex = /<invoke\s+name=["'](search_web|browse_web_page)["']>([\s\S]*?)<\/invoke>/gi;
+    const invokeRegex = /<invoke\s+name=["'](search_web|browse_web_page|search_youtube)["']>([\s\S]*?)<\/invoke>/gi;
     let ivm;
     while ((ivm = invokeRegex.exec(text)) !== null) {
       const name = ivm[1];
@@ -5816,7 +5817,7 @@ ${organicBlock}
     }
 
     // 4. Fenced codeblock ```json ... ``` or ```tool_call ... ```
-    const codeBlockRegex = /```(?:json|tool_call)?\s*(\{\s*"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page)"[\s\S]*?\})\s*```/gi;
+    const codeBlockRegex = /```(?:json|tool_call)?\s*(\{\s*"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page|search_youtube)"[\s\S]*?\})\s*```/gi;
     let cm;
     while ((cm = codeBlockRegex.exec(text)) !== null) {
       try {
@@ -5850,7 +5851,7 @@ ${organicBlock}
     }
 
     // 6. Function call with JSON argument: search_web({"query": "..."}) or browse_web_page({"url": "..."})
-    const funcJsonRegex = /(search_web|browse_web_page)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
+    const funcJsonRegex = /(search_web|browse_web_page|search_youtube)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
     let fjm;
     while ((fjm = funcJsonRegex.exec(textWithoutCode)) !== null) {
       if (isLongCompleteText && fjm.index > 220) continue;
@@ -5869,7 +5870,7 @@ ${organicBlock}
 
     // 7. Function call syntax: search_web("query") or browse_web_page("url")
     // Jika teks sangat panjang (> 300 kata), hanya izinkan jika pemanggilan ada di awal teks (< 200 karakter)
-    const funcRegex = /(search_web|browse_web_page)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?(["'`])([\s\S]*?)\2\s*\)/gi;
+    const funcRegex = /(search_web|browse_web_page|search_youtube)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?(["'`])([\s\S]*?)\2\s*\)/gi;
     let fm;
     while ((fm = funcRegex.exec(textWithoutCode)) !== null) {
       if (isLongCompleteText && fm.index > 220) continue;
@@ -5882,7 +5883,7 @@ ${organicBlock}
 
     // 8. Conversational triggers: "We will call search_web for <query>"
     // Hanya picu jika berada di awal generasi (bukan teks penutup di akhir pesan panjang)
-    const convRegex = /(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(search_web|browse_web_page)(?:\s+(?:for|with|tentang|query|:))?\s*(["'`])([^\n]+?)\2/gi;
+    const convRegex = /(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(search_web|browse_web_page|search_youtube)(?:\s+(?:for|with|tentang|query|:))?\s*(["'`])([^\n]+?)\2/gi;
     let cvm;
     while ((cvm = convRegex.exec(textWithoutCode)) !== null) {
       if (isLongCompleteText && cvm.index > 220) continue;
