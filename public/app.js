@@ -3401,7 +3401,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           if (STATE.isPromptHidden) {
             togglePromptVisibility(false);
           }
-          handleSendPrompt();
+          handleSendPrompt().catch((err) => {
+            console.error('Edit-and-resend gagal:', err);
+            showToast('Gagal mengirim pesan: ' + (err && err.message ? err.message : err), 'error');
+          });
         };
 
         editorBox.querySelector('.save-edit-btn')?.addEventListener('click', doSaveAndResend);
@@ -3766,7 +3769,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     if (lines.length >= 2) {
       const firstLine = lines[0].trim();
-      if (firstLine.length <= 120 && (/(?:tolong|jelaskan|analisis|baca|ringkas|review|perbaiki|fix|cek|bantu|buatkan|how|what|why|explain|analyze|help)\b/i.test(firstLine) || firstLine.endsWith(':'))) {
+      if (firstLine.length <= 120 && (/(?:tolong|jelaskan|analisis|baca|ringkas|review|perbaiki|fix|cek|bantu|buatkan|kenapa|mengapa|gimana|bagaimana|apa(?:kah)?|how|what|why|explain|analyze|help)\b/i.test(firstLine) || firstLine.endsWith(':') || firstLine.endsWith('?'))) {
         promptInstruction = firstLine;
         docBody = lines.slice(1).join('\n').trim();
       }
@@ -5106,7 +5109,10 @@ ${organicBlock}
 
   // ==================== DISPATCH / STREAMING ENGINE ====================
   async function handleSendPrompt() {
-    const rawText = els.promptInput ? els.promptInput.value.trim() : '';
+    // HARUS `let`: blok auto-convert saat kirim (lihat di bawah) dan jalur rewrite
+    // URL me-assign ulang rawText. Pakai `const` akan melempar TypeError senyap
+    // di dalam try tanpa catch sehingga pesan tidak pernah terkirim.
+    let rawText = els.promptInput ? els.promptInput.value.trim() : '';
     const images = [...(STATE.attachedImages || [])];
     const image = images.length > 0 ? images[0] : null;
     const docs = [...(STATE.attachedDocs || [])];
@@ -5159,7 +5165,7 @@ ${organicBlock}
       let snippetContent = rawText;
 
       // Jika ada baris pengantar pendek di awal (misal "tolong jelaskan kode ini:\n...")
-      if (firstLine.length <= 120 && (/(?:tolong|jelaskan|analisis|baca|ringkas|review|perbaiki|fix|cek|bantu|buatkan|how|what|why|explain|analyze|help)\b/i.test(firstLine) || firstLine.endsWith(':'))) {
+      if (firstLine.length <= 120 && (/(?:tolong|jelaskan|analisis|baca|ringkas|review|perbaiki|fix|cek|bantu|buatkan|kenapa|mengapa|gimana|bagaimana|apa(?:kah)?|how|what|why|explain|analyze|help)\b/i.test(firstLine) || firstLine.endsWith(':') || firstLine.endsWith('?'))) {
         promptInstruction = firstLine;
         snippetContent = lines.slice(1).join('\n').trim();
       }
@@ -5346,6 +5352,11 @@ ${organicBlock}
         }
       }
     }
+    } catch (err) {
+      // Jangan sampai kegagalan di dalam blok kirim jadi unhandled rejection senyap
+      // (pola inilah yang menyembunyikan bug "const rawText" selama berminggu-minggu).
+      console.error('handleSendPrompt gagal:', err);
+      showToast('Gagal mengirim pesan: ' + (err && err.message ? err.message : err), 'error');
     } finally {
       STATE.isSending = false;
     }
@@ -14958,7 +14969,10 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         isSendLongPressed = false;
         return;
       }
-      handleSendPrompt();
+      handleSendPrompt().catch((err) => {
+        console.error('Kirim prompt gagal:', err);
+        showToast('Gagal mengirim pesan: ' + (err && err.message ? err.message : err), 'error');
+      });
     });
 
     els.stopGenerationBtn?.addEventListener('click', stopGeneration);
@@ -14967,7 +14981,10 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     els.promptInput?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
         e.preventDefault();
-        handleSendPrompt();
+        handleSendPrompt().catch((err) => {
+          console.error('Kirim prompt (Enter) gagal:', err);
+          showToast('Gagal mengirim pesan: ' + (err && err.message ? err.message : err), 'error');
+        });
       }
     });
 
@@ -15003,8 +15020,14 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (pastedText && shouldAutoConvertAsDocument(pastedText)) {
         e.preventDefault();
         const currentText = (els.promptInput ? els.promptInput.value.trim() : '');
-        const combined = currentText ? `${currentText}\n${pastedText}` : pastedText;
-        tryAutoConvertInputToDoc(combined);
+        // Lipat HANYA pastekan menjadi dokumen. Teks yang sudah diketik user
+        // tidak boleh tertelan ke dalam file — ia tetap menjadi isi prompt.
+        const converted = tryAutoConvertInputToDoc(pastedText);
+        if (converted && currentText && els.promptInput) {
+          els.promptInput.value = currentText;
+          autoResizeTextarea(els.promptInput);
+          els.promptInput.focus();
+        }
         return;
       }
     });
@@ -15096,16 +15119,11 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     els.convertToMdPillBtn?.addEventListener('click', () => {
       const val = els.promptInput ? els.promptInput.value.trim() : '';
       if (!val) return;
-      const doc = convertTextToMarkdownDoc(val);
-      if (doc) {
-        STATE.attachedDocs.push(doc);
-        els.promptInput.value = '';
-        autoResizeTextarea(els.promptInput);
-        if (els.autoConvertDocRow) els.autoConvertDocRow.style.display = 'none';
-        renderAttachmentPreviews();
-        AudioEngine.success();
-        showToast(`📄 Teks berhasil dikonversi ke file [${doc.name}]. Ketik pertanyaan Anda dengan leluasa!`, 'success');
-        els.promptInput?.focus();
+      // Pakai jalur konversi yang sama dengan auto-convert: baris instruksi
+      // tetap dipertahankan di kolom prompt, hanya isi dokumen yang dilipat.
+      const ok = tryAutoConvertInputToDoc(val);
+      if (!ok) {
+        showToast('Teks terlalu pendek atau tidak cocok untuk dikonversi menjadi dokumen.', 'info');
       }
     });
 
