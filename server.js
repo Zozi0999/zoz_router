@@ -3022,7 +3022,7 @@ const server = http.createServer(async (req, res) => {
       if (fs.existsSync(sessFile)) {
         fs.unlinkSync(sessFile);
       }
-      return sendJSON(res, 200, { success: true, message: `Sesi ${sessionId} berhasil dihapus dari penyimpanan perangkat.` });
+      return sendJSON(res, 200, { success: true, message: `Sesi ${id} berhasil dihapus dari penyimpanan perangkat.` });
     } catch (err) {
       return sendJSON(res, 500, { error: 'Gagal menghapus file sesi dari disk: ' + err.message });
     }
