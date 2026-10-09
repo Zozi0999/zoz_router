@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261009_v164">
+  <link rel="stylesheet" href="style.css?v=20261009_v165">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -376,6 +376,16 @@
                     <span class="attach-item-title">Buat Video AI</span>
                   </div>
                 </button>
+                <button class="attachment-menu-item" id="attachOptionYouTubeSearch" type="button" aria-pressed="false">
+                  <div class="attach-item-icon-box youtube-search-accent" style="background: rgba(255, 0, 0, 0.15); border-color: rgba(255, 0, 0, 0.4); color: #FF0033;">
+                    <i class="fa-brands fa-youtube"></i>
+                  </div>
+                  <div class="attach-item-info">
+                    <span class="attach-item-title">Cari Video YouTube</span>
+                    <span class="attach-item-desc">Tool pencarian video yang dapat dipakai semua model AI</span>
+                  </div>
+                  <i class="fa-solid fa-check attach-yt-check" aria-hidden="true"></i>
+                </button>
                 <button class="attachment-menu-item" id="attachOptionDoc" type="button">
                   <div class="attach-item-icon-box doc-accent">
                     <i class="fa-solid fa-file-lines"></i>
@@ -724,6 +734,10 @@
             <!-- AI Image Mode Indicator -->
             <button class="composer-btn image-mode-indicator" id="imageModeIndicator" type="button" title="Mode Gambar Aktif" aria-label="Mode Gambar Aktif" style="display:none;">
               <i class="fa-solid fa-image"></i>
+            </button>
+            <!-- AI YouTube Search Mode Indicator -->
+            <button class="composer-btn youtube-mode-indicator" id="youtubeModeIndicator" type="button" title="Mode Pencarian Video YouTube Aktif" aria-label="Mode Pencarian Video YouTube Aktif" style="display:none;">
+              <i class="fa-brands fa-youtube"></i>
             </button>
           </div>
 
@@ -1449,6 +1463,6 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
-  <script src="app.js?v=20261009_v164"></script>
+  <script src="app.js?v=20261009_v165"></script>
 </body>
 </html>

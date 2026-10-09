@@ -142,6 +142,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     isImageGenMode: false,
     isMusicGenMode: false,
     isVideoGenMode: false,
+    isYouTubeSearchMode: false, // Tool "Cari Video YouTube" (toggle dari menu Lampiran)
     isGenerating: false,
     isSending: false, // Guard anti pengiriman ganda (Enter berulang saat masih ada await)
     abortController: null,
@@ -165,7 +166,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       systemPrompt: SYSTEM_PRESETS.kaisar,
       customSystemPrompt: '',
       activePreset: 'kaisar',
-      autoPolicy: 'local_first'
+      autoPolicy: 'local_first',
+      youtubeSearchTool: false // Tool pencarian video YouTube (toggle dari menu Lampiran)
     },
     activeCatalogTab: 'ollama', // 'ollama' | 'openrouter'
     dropdownModelTab: 'ollama', // 'ollama' | 'openrouter'
@@ -328,6 +330,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     attachOptionGenMusic: $('#attachOptionGenMusic'),
     attachOptionGenVideo: $('#attachOptionGenVideo'),
     attachOptionDoc: $('#attachOptionDoc'),
+    attachOptionYouTubeSearch: $('#attachOptionYouTubeSearch'),
     imageFileInput: $('#imageFileInput'),
     cameraFileInput: $('#cameraFileInput'),
     docFileInput: $('#docFileInput'),
@@ -341,6 +344,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     imageModelBadge: $('#imageModelBadge'),
     imageGenToggleBtn: $('#imageGenToggleBtn'),
     imageModeIndicator: $('#imageModeIndicator'),
+    youtubeModeIndicator: $('#youtubeModeIndicator'),
     musicGenToggleBtn: $('#musicGenToggleBtn'),
     musicModeIndicator: $('#musicModeIndicator'),
     musicModelBadge: $('#musicModelBadge'),
@@ -1042,6 +1046,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           console.warn('Gagal mengurai zoz_router_settings_v1 dari localStorage:', parseErr.message);
         }
       }
+
+      // Sinkronkan tool "Cari Video YouTube" dari preferensi tersimpan
+      STATE.isYouTubeSearchMode = Boolean(STATE.settings.youtubeSearchTool);
 
       // Pastikan customSystemPrompt terinisialisasi jika user sebelumnya sudah punya persona kustom
       if (typeof STATE.settings.customSystemPrompt !== 'string') {
@@ -5696,8 +5703,19 @@ ${organicBlock}
 
   // Aturan izin: search_youtube SELALU aktif; tool web hanya bila Mode Pencarian Web aktif.
   function isAutonomousToolAllowed(toolName, webToolsAllowed) {
-    if (toolName === 'search_youtube') return true;
+    if (toolName === 'search_youtube') return Boolean(STATE.isYouTubeSearchMode);
     return Boolean(webToolsAllowed);
+  }
+
+  // Susun daftar tool yang benar-benar dikirim ke model sesuai preferensi pengguna:
+  //  - search_web / browse_web_page : hanya bila Mode Pencarian Web aktif
+  //  - search_youtube               : hanya bila toggle "Cari Video YouTube" aktif
+  function getSelectableAutonomousTools(webToolsAllowed) {
+    return AUTONOMOUS_WEB_TOOLS.filter((t) => {
+      const name = t && t.function ? t.function.name : '';
+      if (name === 'search_youtube') return Boolean(STATE.isYouTubeSearchMode);
+      return Boolean(webToolsAllowed);
+    });
   }
 
   // Sumber tanda tangan dedup per tool (mencegah loop pemanggilan berulang)
@@ -7055,10 +7073,13 @@ Format teks (untuk model tanpa function calling):
       if (canRunAutonomous) {
         systemContent = personaPrompt ? `${personaPrompt}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
       }
-      // Tool video YouTube selalu diumumkan, terlepas dari toggle Mode Pencarian Web.
-      systemContent = systemContent
-        ? `${systemContent}\n\n${getYouTubeToolDirective()}`
-        : getYouTubeToolDirective();
+      // Tool video YouTube hanya diumumkan bila toggle "Cari Video YouTube" aktif
+      // (agar model tidak memanggil tool yang tidak dikirim).
+      if (STATE.isYouTubeSearchMode) {
+        systemContent = systemContent
+          ? `${systemContent}\n\n${getYouTubeToolDirective()}`
+          : getYouTubeToolDirective();
+      }
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
       try {
@@ -7089,7 +7110,8 @@ Format teks (untuk model tanpa function calling):
         endpoint: ep
       };
       // Tool video YouTube selalu disertakan; tool web hanya saat Mode Pencarian Web aktif.
-      requestBody.tools = canRunAutonomous ? AUTONOMOUS_WEB_TOOLS : YOUTUBE_TOOL_ONLY;
+      const selectedOllamaTools = getSelectableAutonomousTools(canRunAutonomous);
+      if (selectedOllamaTools.length > 0) requestBody.tools = selectedOllamaTools;
       if (session?.id) {
         requestBody.sessionId = session.id;
       }
@@ -7678,10 +7700,13 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       if (canRunAutonomous) {
         systemContent = personaPrompt ? `${personaPrompt}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
       }
-      // Tool video YouTube selalu diumumkan, terlepas dari toggle Mode Pencarian Web.
-      systemContent = systemContent
-        ? `${systemContent}\n\n${getYouTubeToolDirective()}`
-        : getYouTubeToolDirective();
+      // Tool video YouTube hanya diumumkan bila toggle "Cari Video YouTube" aktif
+      // (agar model tidak memanggil tool yang tidak dikirim).
+      if (STATE.isYouTubeSearchMode) {
+        systemContent = systemContent
+          ? `${systemContent}\n\n${getYouTubeToolDirective()}`
+          : getYouTubeToolDirective();
+      }
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
       try {
@@ -7766,9 +7791,17 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             }
             availableTools.push(imageGenTool);
           }
-          // Tool video YouTube selalu disertakan; tool web hanya saat Mode Pencarian Web aktif.
-          availableTools.push(...(canRunAutonomous ? AUTONOMOUS_WEB_TOOLS : YOUTUBE_TOOL_ONLY));
-          requestBody.tools = availableTools;
+          // Tool disaring sesuai preferensi pengguna:
+          // - web (search_web / browse_web_page) hanya bila Mode Pencarian Web aktif
+          // - pencarian video YouTube hanya bila toggle "Cari Video YouTube" aktif
+          const selectedAutonomousTools = getSelectableAutonomousTools(canRunAutonomous);
+          if (selectedAutonomousTools.length > 0) {
+            availableTools.push(...selectedAutonomousTools);
+          }
+          // Jangan kirim array tools kosong — OpenRouter menolak permintaan dengantools: [].
+          if (availableTools.length > 0) {
+            requestBody.tools = availableTools;
+          }
         }
 
         if (!isOpenRouterDirect) {
@@ -11017,6 +11050,44 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       const checkIcon = item.querySelector('.image-model-check');
       if (checkIcon) checkIcon.style.display = isSelected ? 'block' : 'none';
     });
+  }
+
+  // ==================== AI YOUTUBE SEARCH TOOL (TOGGLE) ====================
+  // Tool pencarian video yang dapat dipakai semua model AI (native tool calling
+  // maupun format teks). Diaktifkan/dinonaktifkan dari menu Lampiran; indikatornya
+  // muncul di kiri kolom prompt dan dapat dimatikan lewat klik (ikon silang saat hover).
+  function updateYouTubeModeUI() {
+    const isOn = Boolean(STATE.isYouTubeSearchMode);
+
+    if (els.youtubeModeIndicator) {
+      els.youtubeModeIndicator.style.display = isOn ? 'flex' : 'none';
+      els.youtubeModeIndicator.setAttribute('aria-pressed', String(isOn));
+      // Selalu reset ikon agar tidak menyimpan silang sisa hover.
+      const indicatorIcon = els.youtubeModeIndicator.querySelector('i');
+      if (indicatorIcon) indicatorIcon.className = 'fa-brands fa-youtube';
+    }
+
+    if (els.attachOptionYouTubeSearch) {
+      els.attachOptionYouTubeSearch.classList.toggle('active', isOn);
+      els.attachOptionYouTubeSearch.setAttribute('aria-pressed', String(isOn));
+      const checkIcon = els.attachOptionYouTubeSearch.querySelector('.attach-yt-check');
+      if (checkIcon) checkIcon.style.display = isOn ? 'block' : 'none';
+    }
+  }
+
+  function setYouTubeSearchMode(enabled) {
+    const on = Boolean(enabled);
+    STATE.isYouTubeSearchMode = on;
+    STATE.settings.youtubeSearchTool = on;
+    updateYouTubeModeUI();
+    savePersistedState();
+    AudioEngine.click();
+    showToast(
+      on
+        ? '🔎 Tool "Cari Video YouTube" aktif. Model AI akan otomatis memanggilnya saat Anda meminta video.'
+        : '🔎 Tool "Cari Video YouTube" nonaktif. Model AI tidak akan mencari video.',
+      'info'
+    );
   }
 
   const MUSIC_AUDIO_RE = /lyria|musicgen|suno|udio|stable-audio|gpt-audio/i;
@@ -15697,6 +15768,12 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       showToast(STATE.isVideoGenMode ? '🎬 Mode AI Video Aktif: Masukkan deskripsi visual gerak / video...' : 'Mode AI Video dinonaktifkan.');
       AudioEngine.click();
     });
+    // Toggle tool "Cari Video YouTube" (independen dari mode gambar/musik/video)
+    els.attachOptionYouTubeSearch?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAttachmentDropdown();
+      setYouTubeSearchMode(!STATE.isYouTubeSearchMode);
+    });
     els.attachOptionDoc?.addEventListener('click', () => {
       closeAttachmentDropdown();
       els.docFileInput?.click();
@@ -15976,6 +16053,25 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       // tetap harus mengembalikan ikon agar tidak nyangkut di silang.
       const icon = els.imageModeIndicator?.querySelector('i');
       if (icon) icon.className = 'fa-solid fa-image';
+    });
+
+    // YouTube Search Mode Indicator (hover untuk menonaktifkan — sama seperti image/music indicator)
+    els.youtubeModeIndicator?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const icon = els.youtubeModeIndicator?.querySelector('i');
+      if (icon) icon.className = 'fa-brands fa-youtube';
+      setYouTubeSearchMode(false);
+    });
+    els.youtubeModeIndicator?.addEventListener('mouseenter', () => {
+      if (els.youtubeModeIndicator) {
+        const icon = els.youtubeModeIndicator.querySelector('i');
+        if (icon) icon.className = 'fa-solid fa-times';
+      }
+    });
+    els.youtubeModeIndicator?.addEventListener('mouseleave', () => {
+      // Reset tanpa syarat agar ikon tidak nyangkut di silang setelah klik.
+      const icon = els.youtubeModeIndicator?.querySelector('i');
+      if (icon) icon.className = 'fa-brands fa-youtube';
     });
 
     // Image Model Dropdown Tabs (Pollinations vs OpenRouter)
@@ -16792,6 +16888,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     updateImageGenModeUI();
     updateMusicGenModeUI();
     updateVideoGenModeUI();
+    updateYouTubeModeUI();
     autoResizeTextarea(els.promptInput);
     updatePromptVisibilityUI(true);
 

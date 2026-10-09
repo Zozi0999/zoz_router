@@ -1959,6 +1959,40 @@ html, body {
   color: #FF2E93;
 }
 
+/* AI YouTube Search Mode Indicator (cara kerja sama dengan music/image indicator) */
+.composer-tools-left .youtube-mode-indicator {
+  width: 28px;
+  height: 28px;
+  margin: 4px 6px;
+  border-radius: 4px;
+  background: rgba(255, 0, 51, 0.1);
+  color: #FF0033;
+  border: 1px solid rgba(255, 0, 51, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.composer-tools-left .youtube-mode-indicator:hover {
+  background: rgba(255, 0, 51, 0.2);
+  color: #FF3355;
+}
+
+/* Status aktif untuk item menu lampiran (mis. Cari Video YouTube) */
+.attachment-menu-item.active {
+  background: rgba(255, 255, 255, 0.06);
+}
+.attach-yt-check {
+  display: none;
+  color: #FF0033;
+  font-size: 0.85rem;
+  margin-left: auto;
+}
+.attachment-menu-item.active .attach-yt-check {
+  display: block;
+}
+
 .composer-btn:hover {
   color: var(--neon-cyan);
   background: var(--bg-card);
