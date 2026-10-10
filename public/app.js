@@ -1109,14 +1109,27 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         STATE.soundEnabled = savedSound === 'true';
       }
       const savedSearchMode = localStorage.getItem('zoz_router_search_mode_v1');
+      const searchModeMigrated = localStorage.getItem('zoz_router_search_mode_migrated_v1') === 'true';
       if (savedSearchMode && ['off', 'default', 'premium', 'autonomous'].includes(savedSearchMode)) {
         STATE.searchMode = savedSearchMode;
+        // Migrasi legacy: versi lama selalu menulis 'off' sebagai default dan
+        // menyembunyikan menu toggle, sehingga 'off' hampir pasti BUKAN pilihan user.
+        // Dimigrasi sekali saja; pilihan 'off' yang dipilih user setelah ini dihormati.
+        if (!searchModeMigrated && savedSearchMode === 'off') {
+          STATE.searchMode = 'default';
+          try {
+            localStorage.setItem('zoz_router_search_mode_v1', 'default');
+          } catch (_) {}
+        }
       } else {
         STATE.searchMode = 'default';
         try {
           localStorage.setItem('zoz_router_search_mode_v1', 'default');
         } catch (_) {}
       }
+      try {
+        localStorage.setItem('zoz_router_search_mode_migrated_v1', 'true');
+      } catch (_) {}
       const savedPromptHidden = localStorage.getItem('zoz_prompt_hidden');
       if (savedPromptHidden !== null) {
         STATE.isPromptHidden = savedPromptHidden === 'true';
@@ -1577,7 +1590,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         console.warn('Failed to save sound setting:', e);
       }
       try {
-        localStorage.setItem('zoz_router_search_mode_v1', STATE.searchMode || 'off');
+        localStorage.setItem('zoz_router_search_mode_v1', STATE.searchMode || 'default');
       } catch (e) {
         console.warn('Failed to save search mode:', e);
       }
@@ -5769,22 +5782,30 @@ ${organicBlock}
     'search_youtube'
   ];
 
-  // Aturan izin: search_youtube bila toggle YouTube aktif; ekstraksi web URL selalu diizinkan; tool search bila Mode Pencarian aktif.
+  // Keluarga tool ekstraksi/baca URL: diizinkan SELALU (bukan "pencarian"),
+  // sehingga tetap bisa dipakai saat pengguna menempel URL dan memintanya dibaca,
+  // bahkan bila Mode Pencarian Web sedang nonaktif.
+  const EXTRACTION_TOOL_NAMES = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'];
+
+  // Aturan izin (dipakai saat EKSEKUSI call): search_youtube bila toggle YouTube aktif;
+  // ekstraksi web URL selalu diizinkan; tool search bila Mode Pencarian Web aktif.
   function isAutonomousToolAllowed(toolName, webToolsAllowed) {
     if (toolName === 'search_youtube') return Boolean(STATE.isYouTubeSearchMode);
-    if (['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(toolName)) {
-      return true;
-    }
+    if (EXTRACTION_TOOL_NAMES.includes(toolName)) return true;
     return Boolean(webToolsAllowed);
   }
 
-  // Susun daftar tool yang benar-benar dikirim ke model sesuai preferensi pengguna:
-  //  - search_web / browse_web_page / extract_web / read_url : bila Mode Pencarian Web aktif
-  //  - search_youtube                                         : bila toggle "Cari Video YouTube" aktif
+  // Susun daftar tool yang benar-benar DIKIRIMKAN ke model (wajib konsisten dengan
+  // isAutonomousToolAllowed di atas, jika tidak model menerima tool yang nantinya
+  // diblokir, atau sebaliknya menerima tool yang tak pernah diumumkan):
+  //  - search_youtube            : bila toggle "Cari Video YouTube" aktif
+  //  - keluarga extract/browse   : SELALU
+  //  - search_web/web_search     : bila Mode Pencarian Web aktif
   function getSelectableAutonomousTools(webToolsAllowed) {
     return AUTONOMOUS_WEB_TOOLS.filter((t) => {
       const name = t && t.function ? t.function.name : '';
       if (name === 'search_youtube') return Boolean(STATE.isYouTubeSearchMode);
+      if (EXTRACTION_TOOL_NAMES.includes(name)) return true;
       return Boolean(webToolsAllowed);
     });
   }
