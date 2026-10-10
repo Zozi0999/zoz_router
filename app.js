@@ -134,7 +134,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     get attachedImage() { return (this.attachedImages && this.attachedImages.length > 0) ? this.attachedImages[0] : null; },
     set attachedImage(val) { this.attachedImages = val ? (Array.isArray(val) ? val : [val]) : []; },
     attachedDocs: [], // Array of { name, size, content }
-    searchMode: 'off', // 'off' | 'default' | 'premium' | 'autonomous'
+    searchMode: 'default', // 'off' | 'default' | 'premium' | 'autonomous'
     get webSearchEnabled() { return this.searchMode !== 'off'; },
     set webSearchEnabled(val) { this.searchMode = val ? 'default' : 'off'; },
     get isDeepResearch() { return this.searchMode === 'premium'; },
@@ -1112,9 +1112,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       if (savedSearchMode && ['off', 'default', 'premium', 'autonomous'].includes(savedSearchMode)) {
         STATE.searchMode = savedSearchMode;
       } else {
-        STATE.searchMode = 'off';
+        STATE.searchMode = 'default';
         try {
-          localStorage.setItem('zoz_router_search_mode_v1', 'off');
+          localStorage.setItem('zoz_router_search_mode_v1', 'default');
         } catch (_) {}
       }
       const savedPromptHidden = localStorage.getItem('zoz_prompt_hidden');
@@ -4178,6 +4178,30 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
       }
 
+      // 3. Fallback ke Zero-API Autonomous Search (/api/tools/search-web) jika Serper gagal atau tanpa hasil
+      if (!data || (!data.organic?.length && !data.results?.length && !data.knowledgeGraph && !data.answerBox)) {
+        try {
+          const autoRes = await fetch('/api/tools/search-web', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: smartQuery, maxResults: 8 })
+          }).catch(() => null);
+          if (autoRes && autoRes.ok) {
+            const autoData = await autoRes.json().catch(() => null);
+            if (autoData && Array.isArray(autoData.results) && autoData.results.length > 0) {
+              data = {
+                organic: autoData.results.map(r => ({
+                  title: r.title,
+                  link: r.url,
+                  snippet: r.snippet,
+                  date: r.pubDate
+                }))
+              };
+            }
+          }
+        } catch (_) {}
+      }
+
       if (!data) return null;
 
       const sources = [];
@@ -4635,6 +4659,32 @@ ${organicBlock}
             title: data.title || (new URL(clean)).hostname,
             charCount: text.length,
             content: text
+          };
+          clientWebContentCache.set(clean, formatted);
+          return formatted;
+        }
+      }
+    } catch (_) {}
+
+    // 3. Fallback Client-side Jina Reader (CORS Open, Super Cepat & Teks Bersih Markdown)
+    try {
+      const jinaRes = await fetch(`https://r.jina.ai/${encodeURI(clean)}`, {
+        headers: { 'Accept': 'text/plain' },
+        signal: AbortSignal.timeout(8000)
+      });
+      if (jinaRes.ok) {
+        const markdown = await jinaRes.text();
+        if (markdown && markdown.length > 50) {
+          const titleMatch = markdown.match(/^Title:\s*(.+)$/m) || markdown.match(/^#\s+(.+)$/m);
+          let docTitle = titleMatch ? titleMatch[1].trim() : '';
+          try { if (!docTitle) docTitle = new URL(clean).hostname; } catch (_) {}
+          const formatted = {
+            success: true,
+            url: clean,
+            domain: (new URL(clean)).hostname,
+            title: docTitle || (new URL(clean)).hostname,
+            charCount: Math.min(markdown.length, maxChars),
+            content: markdown.substring(0, maxChars)
           };
           clientWebContentCache.set(clean, formatted);
           return formatted;
@@ -5654,6 +5704,40 @@ ${organicBlock}
     {
       type: 'function',
       function: {
+        name: 'extract_web',
+        description: 'Ekstrak dan baca seluruh isi teks artikel atau dokumen dari sebuah URL website secara penuh untuk dipelajari, diringkas, atau dianalisis mendalam.',
+        parameters: {
+          type: 'object',
+          properties: {
+            url: {
+              type: 'string',
+              description: 'Alamat URL website yang ingin diekstrak (misal: https://example.com/artikel)'
+            }
+          },
+          required: ['url']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'read_url',
+        description: 'Kunjungi dan baca isi teks konten sebuah tautan/URL web secara lengkap.',
+        parameters: {
+          type: 'object',
+          properties: {
+            url: {
+              type: 'string',
+              description: 'Alamat URL web yang ingin dibaca'
+            }
+          },
+          required: ['url']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
         name: 'search_youtube',
         description: 'Cari video YouTube berdasarkan kata kunci. Mengembalikan daftar video (judul, channel, durasi, jumlah tayangan, URL, thumbnail) yang bisa langsung diputar di dalam percakapan atau dibuka di YouTube. Gunakan kapan pun pengguna meminta mencarikan, menemukan, atau menonton sebuah video/tutorial/klip musik.',
         parameters: {
@@ -5679,17 +5763,24 @@ ${organicBlock}
   const YOUTUBE_TOOL_ONLY = AUTONOMOUS_WEB_TOOLS.filter(t => t && t.function && t.function.name === 'search_youtube');
 
   // Daftar nama tool otonom yang dikenal sistem (native call maupun parse teks)
-  const AUTONOMOUS_TOOL_NAMES = ['search_web', 'browse_web_page', 'search_youtube'];
+  const AUTONOMOUS_TOOL_NAMES = [
+    'search_web', 'web_search', 'search',
+    'browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url',
+    'search_youtube'
+  ];
 
-  // Aturan izin: search_youtube SELALU aktif; tool web hanya bila Mode Pencarian Web aktif.
+  // Aturan izin: search_youtube bila toggle YouTube aktif; ekstraksi web URL selalu diizinkan; tool search bila Mode Pencarian aktif.
   function isAutonomousToolAllowed(toolName, webToolsAllowed) {
     if (toolName === 'search_youtube') return Boolean(STATE.isYouTubeSearchMode);
+    if (['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(toolName)) {
+      return true;
+    }
     return Boolean(webToolsAllowed);
   }
 
   // Susun daftar tool yang benar-benar dikirim ke model sesuai preferensi pengguna:
-  //  - search_web / browse_web_page : hanya bila Mode Pencarian Web aktif
-  //  - search_youtube               : hanya bila toggle "Cari Video YouTube" aktif
+  //  - search_web / browse_web_page / extract_web / read_url : bila Mode Pencarian Web aktif
+  //  - search_youtube                                         : bila toggle "Cari Video YouTube" aktif
   function getSelectableAutonomousTools(webToolsAllowed) {
     return AUTONOMOUS_WEB_TOOLS.filter((t) => {
       const name = t && t.function ? t.function.name : '';
@@ -5707,7 +5798,7 @@ ${organicBlock}
     } catch (_) {
       raw = String(call.function.arguments || '');
     }
-    if (toolName === 'search_web') return 'search_web';
+    if (toolName === 'search_web' || toolName === 'web_search' || toolName === 'search') return 'search_web';
     if (toolName === 'search_youtube') {
       const q = (raw && typeof raw === 'object') ? (raw.query || raw.q || '') : String(raw || '');
       return `youtube:${String(q).trim().toLowerCase()}`;
@@ -5946,7 +6037,7 @@ ${organicBlock}
           args = JSON.parse(trimmed);
         } catch (_) {
           // If string is raw text (not JSON), use it directly
-          if (toolName === 'browse_web_page') {
+          if (['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(toolName)) {
             args = { url: trimmed };
           } else {
             // search_web & search_youtube sama-sama memakai query
@@ -6007,7 +6098,7 @@ ${organicBlock}
         };
       }
 
-      if (toolName === 'search_web') {
+      if (['search_web', 'web_search', 'search'].includes(toolName)) {
         let query = args.query || args.q || args.keyword || args.search || args.topic || args.text || (typeof args === 'string' ? args : '');
         if (!query || !query.trim()) {
           query = promptContext || 'berita dan informasi terkini';
@@ -6291,7 +6382,7 @@ ${organicBlock}
         return { text: output, sources: results };
       }
       
-      if (toolName === 'browse_web_page') {
+      if (['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(toolName)) {
         let url = args.url || args.target || args.link || args.href || args.targetUrl || (typeof args === 'string' ? args : '');
         if (!url || !url.trim()) return { text: 'Error: Parameter `url` tidak boleh kosong.', sources: [] };
         url = url.trim();
@@ -6317,6 +6408,27 @@ ${organicBlock}
           try {
             const browseController = new AbortController();
             const browseTimeout = setTimeout(() => browseController.abort(), 12000);
+
+            // 1. Coba endpoint ekstraksi web resmi Zoz Router (/api/extract-web)
+            try {
+              const extRes = await fetch(`/api/extract-web?url=${encodeURIComponent(url)}&maxChars=8000`, {
+                headers: { 'Accept': 'application/json' },
+                signal: browseController.signal
+              });
+              if (extRes.ok) {
+                const extData = await extRes.json();
+                if (extData && extData.success && extData.content && extData.content.length > 40) {
+                  clearTimeout(browseTimeout);
+                  const docTitle = extData.title || (extractDomainSafe ? extractDomainSafe(url) : 'Halaman Web');
+                  return {
+                    text: `KONTEN HALAMAN WEB "${docTitle}" (${url}):\n\n${extData.content}`,
+                    sources: [{ title: docTitle, url: url, domain: extData.domain || 'web', snippet: extData.content.substring(0, 160) }]
+                  };
+                }
+              }
+            } catch (_) {}
+
+            // 2. Fallback: coba endpoint /api/tools/browse-page
             const res = await fetch('/api/tools/browse-page', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -6531,10 +6643,51 @@ ${organicBlock}
     const calls = [];
     const seenIds = new Set();
 
+    function normalizeToolName(name) {
+      if (!name) return '';
+      const n = String(name).toLowerCase().trim();
+      if (['web_search', 'search', 'pencarian_web', 'cari_web'].includes(n)) return 'search_web';
+      if (['browse_web', 'browse_page', 'baca_web', 'scrape_url'].includes(n)) return 'browse_web_page';
+      if (['baca_url', 'ambil_web'].includes(n)) return 'extract_web';
+      return n;
+    }
+
     function addCall(toolName, rawArgs, rawTag) {
-      if (!toolName || !AUTONOMOUS_TOOL_NAMES.includes(toolName)) return;
-      const serializedArgs = (typeof rawArgs === 'object') ? JSON.stringify(rawArgs) : String(rawArgs);
-      const callKey = `${toolName}:${serializedArgs}`;
+      const normalizedName = normalizeToolName(toolName);
+      if (!normalizedName || !AUTONOMOUS_TOOL_NAMES.includes(normalizedName)) return;
+
+      let parsedArgs = rawArgs;
+      if (typeof rawArgs === 'string') {
+        const trimmed = rawArgs.trim();
+        try {
+          parsedArgs = JSON.parse(trimmed);
+        } catch (_) {
+          if (['browse_web_page', 'extract_web', 'read_url'].includes(normalizedName)) {
+            parsedArgs = { url: trimmed };
+          } else if (normalizedName === 'search_youtube') {
+            parsedArgs = { query: trimmed };
+          } else {
+            parsedArgs = { query: trimmed };
+          }
+        }
+      } else if (!parsedArgs || typeof parsedArgs !== 'object') {
+        parsedArgs = {};
+      }
+
+      // Normalisasi properti argumen
+      if (['browse_web_page', 'extract_web', 'read_url'].includes(normalizedName)) {
+        const urlVal = parsedArgs.url || parsedArgs.target || parsedArgs.link || parsedArgs.href || parsedArgs.targetUrl || '';
+        parsedArgs = { url: String(urlVal).trim() };
+      } else if (normalizedName === 'search_youtube') {
+        const qVal = parsedArgs.query || parsedArgs.q || parsedArgs.keyword || parsedArgs.search || '';
+        parsedArgs = { query: String(qVal).trim(), max_results: parsedArgs.max_results || 6 };
+      } else if (normalizedName === 'search_web') {
+        const qVal = parsedArgs.query || parsedArgs.q || parsedArgs.keyword || parsedArgs.search || parsedArgs.topic || '';
+        parsedArgs = { query: String(qVal).trim() };
+      }
+
+      const serializedArgs = JSON.stringify(parsedArgs);
+      const callKey = `${normalizedName}:${serializedArgs}`;
       if (!seenIds.has(callKey)) {
         seenIds.add(callKey);
         calls.push({
@@ -6542,7 +6695,7 @@ ${organicBlock}
           type: 'function',
           rawTag: rawTag || '',
           function: {
-            name: toolName,
+            name: normalizedName,
             arguments: serializedArgs
           }
         });
@@ -6579,20 +6732,21 @@ ${organicBlock}
     }
 
     // 3. Anthropic XML format: <invoke name="search_web"><parameter name="query">...</parameter></invoke>
-    const invokeRegex = /<invoke\s+name=["'](search_web|browse_web_page|search_youtube)["']>([\s\S]*?)<\/invoke>/gi;
+    const invokeRegex = /<invoke\s+name=["'](search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube)["']>([\s\S]*?)<\/invoke>/gi;
     let ivm;
     while ((ivm = invokeRegex.exec(text)) !== null) {
       const name = ivm[1];
       const inner = ivm[2];
-      const paramMatch = inner.match(/<parameter\s+name=["'](?:query|q|url|target)["']>([\s\S]*?)<\/parameter>/i);
+      const paramMatch = inner.match(/<parameter\s+name=["'](?:query|q|url|target|link|href)["']>([\s\S]*?)<\/parameter>/i);
       const val = paramMatch ? paramMatch[1].trim() : inner.replace(/<[^>]+>/g, '').trim();
       if (val) {
-        addCall(name, name === 'browse_web_page' ? { url: val } : { query: val }, ivm[0]);
+        const isUrlTool = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(name.toLowerCase());
+        addCall(name, isUrlTool ? { url: val } : { query: val }, ivm[0]);
       }
     }
 
     // 4. Fenced codeblock ```json ... ``` or ```tool_call ... ```
-    const codeBlockRegex = /```(?:json|tool_call)?\s*(\{\s*"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page|search_youtube)"[\s\S]*?\})\s*```/gi;
+    const codeBlockRegex = /```(?:json|tool_call)?\s*(\{\s*"(?:name|function|tool)"\s*:\s*"(?:search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube)"[\s\S]*?\})\s*```/gi;
     let cm;
     while ((cm = codeBlockRegex.exec(text)) !== null) {
       try {
@@ -6618,7 +6772,7 @@ ${organicBlock}
       try {
         const p = JSON.parse(block.json);
         const name = p.name || p.function || p.tool;
-        if (AUTONOMOUS_TOOL_NAMES.includes(name)) {
+        if (AUTONOMOUS_TOOL_NAMES.includes(name) || AUTONOMOUS_TOOL_NAMES.includes(normalizeToolName(name))) {
           const args = p.arguments ?? p.parameters ?? p.args ?? p.input ?? {};
           addCall(name, args, block.json);
         }
@@ -6626,7 +6780,7 @@ ${organicBlock}
     }
 
     // 6. Function call with JSON argument: search_web({"query": "..."}) or browse_web_page({"url": "..."})
-    const funcJsonRegex = /(search_web|browse_web_page|search_youtube)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
+    const funcJsonRegex = /(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
     let fjm;
     while ((fjm = funcJsonRegex.exec(textWithoutCode)) !== null) {
       if (isLongCompleteText && fjm.index > 220) continue;
@@ -6636,36 +6790,39 @@ ${organicBlock}
         const p = JSON.parse(cleanJson);
         addCall(name, p, fjm[0]);
       } catch (_) {
-        const qMatch = fjm[2].match(/["'](?:query|q|keyword|search|url|link)["']\s*:\s*["']([^"']+)["']/i);
+        const qMatch = fjm[2].match(/["'](?:query|q|keyword|search|url|link|target)["']\s*:\s*["']([^"']+)["']/i);
         if (qMatch) {
-          addCall(name, name === 'browse_web_page' ? { url: qMatch[1] } : { query: qMatch[1] }, fjm[0]);
+          const isUrlTool = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(name.toLowerCase());
+          addCall(name, isUrlTool ? { url: qMatch[1] } : { query: qMatch[1] }, fjm[0]);
         }
       }
     }
 
     // 7. Function call syntax: search_web("query") or browse_web_page("url")
     // Jika teks sangat panjang (> 300 kata), hanya izinkan jika pemanggilan ada di awal teks (< 200 karakter)
-    const funcRegex = /(search_web|browse_web_page|search_youtube)\s*\(\s*(?:(?:query|url|q)\s*[:=]\s*)?(["'`])([\s\S]*?)\2\s*\)/gi;
+    const funcRegex = /(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube)\s*\(\s*(?:(?:query|url|q|link|target)\s*[:=]\s*)?(["'`])([\s\S]*?)\2\s*\)/gi;
     let fm;
     while ((fm = funcRegex.exec(textWithoutCode)) !== null) {
       if (isLongCompleteText && fm.index > 220) continue;
       const name = fm[1];
       const val = fm[3].trim();
       if (val) {
-        addCall(name, name === 'browse_web_page' ? { url: val } : { query: val }, fm[0]);
+        const isUrlTool = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(name.toLowerCase());
+        addCall(name, isUrlTool ? { url: val } : { query: val }, fm[0]);
       }
     }
 
     // 8. Conversational triggers: "We will call search_web for <query>"
     // Hanya picu jika berada di awal generasi (bukan teks penutup di akhir pesan panjang)
-    const convRegex = /(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(search_web|browse_web_page|search_youtube)(?:\s+(?:for|with|tentang|query|:))?\s*(["'`])([^\n]+?)\2/gi;
+    const convRegex = /(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari|menjelajahi|ekstrak)\s+(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube)(?:\s+(?:for|with|tentang|query|url|:))?\s*(["'`])([^\n]+?)\2/gi;
     let cvm;
     while ((cvm = convRegex.exec(textWithoutCode)) !== null) {
       if (isLongCompleteText && cvm.index > 220) continue;
       const name = cvm[1];
       const val = cvm[3].trim();
       if (val) {
-        addCall(name, name === 'browse_web_page' ? { url: val } : { query: val }, cvm[0]);
+        const isUrlTool = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(name.toLowerCase());
+        addCall(name, isUrlTool ? { url: val } : { query: val }, cvm[0]);
       }
     }
 
@@ -6673,27 +6830,29 @@ ${organicBlock}
   }
 
   function getAutonomousSystemDirective() {
-    return `### INSTRUKSI SISTEM: KESADARAN PENGETAHUAN & PENGGUNAAN ALAT PENCARIAN WEB LIVE
+    return `### INSTRUKSI SISTEM: KESADARAN PENGETAHUAN & PENGGUNAAN ALAT PENCARIAN & PENJELAJAHAN WEB LIVE
 
 1. KESADARAN BATASAN PENGETAHUAN (KNOWLEDGE CUTOFF):
 - Anda adalah asisten AI yang sepenuhnya menyadari bahwa pengetahuan internal bawaan Anda memiliki batasan waktu (knowledge cutoff).
 - Anda TIDAK MEMILIKI pengetahuan bawaan mengenai data real-time, berita mutakhir, peristiwa terkini, atau informasi spesifik dunia nyata saat ini dalam topik APA PUN (politik, ekonomi, pasar saham, olahraga, sains, hiburan, hukum, peristiwa global maupun lokal).
 - Dilarang menebak atau mengarang spekulasi tentang peristiwa dunia nyata terkini tanpa mencari fakta aktual melalui alat pencarian web.
 
-2. KEWAJIBAN MENGGUNAKAN TOOL search_web:
-- Kapan pun pengguna menanyakan fakta dunia nyata, berita terkini, perkembangan mutakhir, data pasar, harga, atau topik apa pun yang memerlukan verifikasi data aktual: ANDA HARUS MENYADARI KETIDAKTAHUAN ANDA DAN WAJIB MEMANGGIL TOOL \`search_web\`!
-- Panggil tool secara langsung:
-  search_web("kata kunci pencarian yang relevan")
-  atau
-  <tool_call>{"name":"search_web","arguments":{"query":"kata kunci pencarian yang relevan"}}</tool_call>
-  Keluarkan pemanggilan tool ini pada awal jawaban tanpa bertele-tele.
-- Rumuskan kueri pencarian yang ringkas, efektif, dan alami pada inti topik yang dicari (misal: "pasar saham global hari ini", "Donald Trump meeting CEOs", "penangkapan narkoba terbaru").
-- Dilarang menambahkan tanggal kalender fiktif atau operator kustom ke dalam argumen kueri search_web.
+2. KEWAJIBAN MENGGUNAKAN TOOL PENCARIAN & PENJELAJAHAN WEB:
+- Gunakan alat pencarian dan penjelajahan web live kapan pun diperlukan untuk menjawab secara faktual:
+  a. search_web: Untuk mencari informasi terkini, artikel, berita, atau data dari mesin pencari web.
+     Format: search_web("kata kunci") atau <tool_call>{"name":"search_web","arguments":{"query":"kata kunci"}}</tool_call>
+  b. browse_web_page / extract_web: Untuk membaca, menjelajahi, dan mengekstrak isi teks lengkap dari suatu tautan web (URL) spesifik.
+     Format: browse_web_page("https://example.com/artikel") atau <tool_call>{"name":"browse_web_page","arguments":{"url":"https://example.com/artikel"}}</tool_call>
+- Jika pengguna melampirkan atau menyebutkan URL/tautan web dan meminta membaca atau merangkumnya: WAJIB panggil tool browse_web_page("URL") atau extract_web("URL")!
+- Keluarkan pemanggilan tool pada awal jawaban secara langsung tanpa bertele-tele.
+- Rumuskan kueri pencarian yang ringkas, efektif, dan alami pada inti topik yang dicari.
+- Dilarang menambahkan tanggal kalender fiktif atau operator kustom ke dalam argumen kueri.
 - Anda dapat menjawab topik APA PUN di dunia nyata (bukan hanya tentang AI atau teknologi). Gunakan pencarian web untuk mendapatkan fakta terpercaya.
 - HANYA jika pertanyaan pengguna berupa penjelasan konsep dasar teori, logika matematika murni, penulisan kode pemrograman standar, atau percakapan kasual yang sama sekali tidak membutuhkan fakta dunia nyata: Anda boleh langsung menjawab tanpa memanggil alat.
 
-3. SINTESIS SETELAH PENCARIAN WEB:
-- Setelah sistem mengeksekusi pencarian web dan menyediakan data kepada Anda, berikan jawaban akhir yang komprehensif, jelas, akurat, dan informatif berdasarkan informasi yang dihimpun.
+3. SINTESIS SETELAH PENCARIAN & PENJELAJAHAN WEB:
+- Setelah sistem mengeksekusi alat dan menyediakan data kepada Anda, berikan jawaban akhir yang komprehensif, jelas, akurat, dan informatif berdasarkan informasi yang dihimpun.
+- Wajib sertakan referensi tautan markdown [Nama Sumber](URL) jika merujuk fakta atau tautan spesifik.
 - Jawab secara langsung tanpa penolakan kaku, tanpa basa-basi robotik, dan tanpa mencetak format pemanggilan tool lagi.`;
   }
   const AUTONOMOUS_SYSTEM_DIRECTIVE = getAutonomousSystemDirective();
@@ -6723,7 +6882,7 @@ Format teks (untuk model tanpa function calling):
 
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
     const isYouTube = toolName === 'search_youtube';
-    const isBrowse = toolName === 'browse_web_page';
+    const isBrowse = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(toolName);
 
     // iconClass sudah memuat prefiks family-nya (fa-solid / fa-brands) agar tidak
     // bentrok dengan aturan font-family bila digabung dengan fa-solid.
@@ -6734,13 +6893,13 @@ Format teks (untuk model tanpa function calling):
       title = 'PENCARIAN VIDEO YOUTUBE LIVE';
       iconClass = status === 'loading' ? 'fa-brands fa-youtube fa-spin' : 'fa-brands fa-youtube';
     } else if (isBrowse) {
-      title = 'PENJELAJAHAN HALAMAN WEB';
+      title = (toolName === 'extract_web' || toolName === 'read_url') ? 'EKSTRAKSI KONTEN WEB' : 'PENJELAJAHAN HALAMAN WEB';
       iconClass = status === 'loading' ? 'fa-solid fa-compass fa-spin' : 'fa-solid fa-circle-check';
     }
 
     const actionText = status === 'loading'
-      ? (isYouTube ? `Mencari video: "${escapeHtml(targetText)}"` : isBrowse ? `Membaca URL: "${escapeHtml(targetText)}"` : `Mencari web: "${escapeHtml(targetText)}"`)
-      : (isYouTube ? `Video ditemukan: "${escapeHtml(targetText)}"` : isBrowse ? `Halaman selesai dibaca: "${escapeHtml(targetText)}"` : `Pencarian selesai: "${escapeHtml(targetText)}"`);
+      ? (isYouTube ? `Mencari video: "${escapeHtml(targetText)}"` : isBrowse ? `Mengekstrak URL: "${escapeHtml(targetText)}"` : `Mencari web: "${escapeHtml(targetText)}"`)
+      : (isYouTube ? `Video ditemukan: "${escapeHtml(targetText)}"` : isBrowse ? `Halaman selesai diekstrak: "${escapeHtml(targetText)}"` : `Pencarian selesai: "${escapeHtml(targetText)}"`);
 
     const subText = status === 'loading'
       ? (isYouTube ? 'Menelusuri katalog video YouTube secara langsung...' : isBrowse ? 'Mengekstrak teks & konten halaman secara langsung...' : 'Mengumpulkan berita live & multi-sumber terkini...')
@@ -7070,6 +7229,25 @@ Format teks (untuk model tanpa function calling):
         }
       } catch (ytErr) {
         console.warn('YouTube client grounding error:', ytErr);
+      }
+
+      // DEFAULT WEB SEARCH MODE (Pencarian Kilat Google / Multi-source Grounding)
+      if (STATE.searchMode === 'default') {
+        try {
+          const searchRes = await getWebSearchContext(promptText, session, bubbleText);
+          if (searchRes && searchRes.systemPromptContext) {
+            systemContent = systemContent
+              ? `${systemContent}\n\n${searchRes.systemPromptContext}`
+              : searchRes.systemPromptContext;
+            if (searchRes.sources && Array.isArray(searchRes.sources)) {
+              if (!webSources) webSources = [];
+              webSources.push(...searchRes.sources);
+            }
+            bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+          }
+        } catch (searchErr) {
+          console.warn('Default web search grounding error:', searchErr);
+        }
       }
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
@@ -7697,6 +7875,25 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         }
       } catch (ytErr) {
         console.warn('YouTube client grounding error:', ytErr);
+      }
+
+      // DEFAULT WEB SEARCH MODE (Pencarian Kilat Google / Multi-source Grounding)
+      if (STATE.searchMode === 'default') {
+        try {
+          const searchRes = await getWebSearchContext(promptText, session, bubbleText);
+          if (searchRes && searchRes.systemPromptContext) {
+            systemContent = systemContent
+              ? `${systemContent}\n\n${searchRes.systemPromptContext}`
+              : searchRes.systemPromptContext;
+            if (searchRes.sources && Array.isArray(searchRes.sources)) {
+              if (!webSources) webSources = [];
+              webSources.push(...searchRes.sources);
+            }
+            bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+          }
+        } catch (searchErr) {
+          console.warn('Default web search grounding error:', searchErr);
+        }
       }
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);

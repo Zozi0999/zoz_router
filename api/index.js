@@ -48,29 +48,62 @@ module.exports = async function handler(req, res) {
     const rawUrl = String(req.url || '');
     const qIdx = rawUrl.indexOf('?');
     const currentPath = qIdx >= 0 ? rawUrl.slice(0, qIdx) : rawUrl;
-    const currentQuery = qIdx >= 0 ? rawUrl.slice(qIdx) : '';
+    let currentQuery = qIdx >= 0 ? rawUrl.slice(qIdx) : '';
 
     const isRestorable = (currentPath === '/api' || currentPath === '/api/' || currentPath === '/api/index');
     if (isRestorable) {
       const hdrs = req.headers || {};
-      const candidates = [hdrs['x-matched-path'], hdrs['x-forwarded-uri'], hdrs['x-original-url'], hdrs['x-vercel-original-path']];
+      const candidates = [
+        hdrs['x-forwarded-uri'],
+        hdrs['x-original-url'],
+        hdrs['x-matched-path'],
+        hdrs['x-vercel-original-path']
+      ];
       let originalPath = '';
       for (let i = 0; i < candidates.length; i++) {
         const c = candidates[i];
         if (!c || typeof c !== 'string') continue;
         const ci = c.indexOf('?');
         const cp = ci >= 0 ? c.slice(0, ci) : c;
-        // Lewati bila header ternyata menunjuk destinasi (bukan path API asli).
-        if (cp.indexOf('/api/') === 0 && cp !== '/api/index' && cp !== '/api') { originalPath = cp; break; }
+        // Lewati bila header ternyata template/pattern rewrite (mengandung :, *, (, ), [)
+        if (cp.includes(':') || cp.includes('*') || cp.includes('(') || cp.includes(')') || cp.includes('[')) continue;
+        // Lewati bila header ternyata menunjuk destinasi gateway (bukan rute API asli).
+        if (cp.indexOf('/api/') === 0 && cp !== '/api/index' && cp !== '/api') {
+          originalPath = cp;
+          // Gunakan query dari header jika rawUrl tidak membawa query string
+          if (ci >= 0 && !currentQuery) {
+            currentQuery = c.slice(ci);
+          }
+          break;
+        }
       }
-      // Fallback: rekonstruksi dari query bila tersedia (bentuk ?slug[]=health)
+      // Fallback: rekonstruksi dari parameter query Vercel (:path*) bila tersedia
       if (!originalPath && req.query && typeof req.query === 'object') {
-        const slug = req.query.slug || req.query.path || req.query.all;
+        const slug = req.query.path || req.query.slug || req.query.all;
         const parts = Array.isArray(slug) ? slug : (typeof slug === 'string' ? slug.split('/') : []);
         const cleaned = parts.filter(Boolean);
         if (cleaned.length) originalPath = '/api/' + cleaned.join('/');
       }
-      if (originalPath) req.url = originalPath + currentQuery;
+
+      // Bersihkan parameter internal rewrite Vercel (path, slug, all) dari query string
+      let cleanedQuery = currentQuery;
+      if (cleanedQuery) {
+        try {
+          const fakeUrl = new URL('http://localhost' + (originalPath || '/api') + cleanedQuery);
+          let modified = false;
+          ['path', 'slug', 'all'].forEach(k => {
+            if (fakeUrl.searchParams.has(k)) {
+              fakeUrl.searchParams.delete(k);
+              modified = true;
+            }
+          });
+          if (modified) {
+            cleanedQuery = fakeUrl.search;
+          }
+        } catch (_) {}
+      }
+
+      if (originalPath) req.url = originalPath + cleanedQuery;
     }
   } catch (_) {}
 

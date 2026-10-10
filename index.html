@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261010_v166">
+  <link rel="stylesheet" href="style.css?v=20261010_v167">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -397,9 +397,9 @@
               </div>
             </div>
 
-            <!-- Web Search & Deep Research Mode Menu (Sembunyi: Web Explorer kini aktif secara otonom & natif di AI tanpa tombol manual) -->
-            <div class="search-menu-wrapper" id="searchMenuWrapper" style="display: none;">
-              <button class="composer-btn web-search-toggle" id="webSearchToggleBtn" type="button" title="Pilih Mode Pencarian Web & Deep Research" aria-expanded="false">
+            <!-- Web Search & Deep Research Mode Menu -->
+            <div class="search-menu-wrapper" id="searchMenuWrapper">
+              <button class="composer-btn web-search-toggle mode-default active" id="webSearchToggleBtn" type="button" title="Mode Penelusuran Web & Deep Research (Mode Default: Aktif)" aria-expanded="false">
                 <i class="fa-solid fa-globe" id="webSearchIcon"></i>
                 <span class="search-badge" id="searchBadge" style="display: none;">PRO</span>
               </button>
@@ -409,7 +409,7 @@
                 <div class="search-dropdown-header">
                   <span><i class="fa-solid fa-satellite-dish"></i> Mode Penelusuran Web</span>
                 </div>
-                <button class="search-menu-item active" id="searchOptionOff" type="button" data-mode="off">
+                <button class="search-menu-item" id="searchOptionOff" type="button" data-mode="off">
                   <div class="search-item-icon-box off-accent">
                     <i class="fa-solid fa-ban"></i>
                   </div>
@@ -417,9 +417,9 @@
                     <span class="search-item-title">Nonaktif</span>
                     <span class="search-item-desc">Pengetahuan bawaan model AI</span>
                   </div>
-                  <i class="fa-solid fa-check search-item-check"></i>
+                  <i class="fa-solid fa-check search-item-check" style="display: none;"></i>
                 </button>
-                <button class="search-menu-item" id="searchOptionDefault" type="button" data-mode="default">
+                <button class="search-menu-item active" id="searchOptionDefault" type="button" data-mode="default">
                   <div class="search-item-icon-box default-accent">
                     <i class="fa-solid fa-globe"></i>
                   </div>
@@ -427,7 +427,7 @@
                     <span class="search-item-title">Mode Default</span>
                     <span class="search-item-desc">Pencarian kilat Google real-time</span>
                   </div>
-                  <i class="fa-solid fa-check search-item-check" style="display: none;"></i>
+                  <i class="fa-solid fa-check search-item-check"></i>
                 </button>
                 <button class="search-menu-item" id="searchOptionPremium" type="button" data-mode="premium">
                   <div class="search-item-icon-box premium-accent">
@@ -1463,6 +1463,6 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
-  <script src="app.js?v=20261010_v166"></script>
+  <script src="app.js?v=20261010_v167"></script>
 </body>
 </html>

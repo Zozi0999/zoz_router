@@ -385,7 +385,7 @@ function performWebSearch(query, apiKey = null, num = 15) {
     }
     const cleanQuery = query.trim();
     const targetNum = Math.min(Math.max(parseInt(num, 10) || 15, 1), 30);
-    const serperKey = apiKey || process.env.SERPER_API_KEY;
+    const serperKey = apiKey || process.env.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
     if (!serperKey) {
       return safeResolve({ query: cleanQuery, count: 0, results: [], error: 'Serper API key tidak dikonfigurasi. Setel SERPER_API_KEY atau kirim header x-serper-key.' });
     }
@@ -1727,6 +1727,21 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
         if (res.statusCode < 200 || res.statusCode >= 300) {
           res.resume();
           resolved = true;
+          if (redirectCount === 0) {
+            return fallbackJinaReader(targetUrl, maxChars).then(jinaRes => {
+              if (jinaRes && jinaRes.text && jinaRes.text.length > 30) {
+                return resolve({
+                  success: true,
+                  url: targetUrl,
+                  domain: parsedUrl.hostname,
+                  title: jinaRes.title || parsedUrl.hostname,
+                  charCount: Math.min(jinaRes.text.length, maxChars),
+                  content: jinaRes.text.substring(0, maxChars)
+                });
+              }
+              return resolve({ success: false, error: `HTTP ${res.statusCode}` });
+            }).catch(() => resolve({ success: false, error: `HTTP ${res.statusCode}` }));
+          }
           return resolve({ success: false, error: `HTTP ${res.statusCode}` });
         }
 
@@ -1768,6 +1783,21 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
           try { if (stream !== res) stream.destroy(); } catch (_) {}
           if (!resolved) {
             resolved = true;
+            if (redirectCount === 0) {
+              return fallbackJinaReader(targetUrl, maxChars).then(jinaRes => {
+                if (jinaRes && jinaRes.text && jinaRes.text.length > 30) {
+                  return resolve({
+                    success: true,
+                    url: targetUrl,
+                    domain: parsedUrl.hostname,
+                    title: jinaRes.title || parsedUrl.hostname,
+                    charCount: Math.min(jinaRes.text.length, maxChars),
+                    content: jinaRes.text.substring(0, maxChars)
+                  });
+                }
+                return resolve({ success: false, error: 'Stream decompression error' });
+              }).catch(() => resolve({ success: false, error: 'Stream decompression error' }));
+            }
             resolve({ success: false, error: 'Stream decompression error' });
           }
         });
@@ -1776,6 +1806,21 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
           try { if (stream !== res) stream.destroy(); } catch (_) {}
           if (!resolved) {
             resolved = true;
+            if (redirectCount === 0) {
+              return fallbackJinaReader(targetUrl, maxChars).then(jinaRes => {
+                if (jinaRes && jinaRes.text && jinaRes.text.length > 30) {
+                  return resolve({
+                    success: true,
+                    url: targetUrl,
+                    domain: parsedUrl.hostname,
+                    title: jinaRes.title || parsedUrl.hostname,
+                    charCount: Math.min(jinaRes.text.length, maxChars),
+                    content: jinaRes.text.substring(0, maxChars)
+                  });
+                }
+                return resolve({ success: false, error: 'Response error' });
+              }).catch(() => resolve({ success: false, error: 'Response error' }));
+            }
             resolve({ success: false, error: 'Response error' });
           }
         });
@@ -1785,17 +1830,62 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
         req.destroy();
         if (!resolved) {
           resolved = true;
+          if (redirectCount === 0) {
+            return fallbackJinaReader(targetUrl, maxChars).then(jinaRes => {
+              if (jinaRes && jinaRes.text && jinaRes.text.length > 30) {
+                return resolve({
+                  success: true,
+                  url: targetUrl,
+                  domain: parsedUrl.hostname,
+                  title: jinaRes.title || parsedUrl.hostname,
+                  charCount: Math.min(jinaRes.text.length, maxChars),
+                  content: jinaRes.text.substring(0, maxChars)
+                });
+              }
+              return resolve({ success: false, error: 'Network timeout (9s)' });
+            }).catch(() => resolve({ success: false, error: 'Network timeout (9s)' }));
+          }
           resolve({ success: false, error: 'Network timeout (9s)' });
         }
       });
       req.on('error', (err) => {
         if (!resolved) {
           resolved = true;
+          if (redirectCount === 0) {
+            return fallbackJinaReader(targetUrl, maxChars).then(jinaRes => {
+              if (jinaRes && jinaRes.text && jinaRes.text.length > 30) {
+                return resolve({
+                  success: true,
+                  url: targetUrl,
+                  domain: parsedUrl.hostname,
+                  title: jinaRes.title || parsedUrl.hostname,
+                  charCount: Math.min(jinaRes.text.length, maxChars),
+                  content: jinaRes.text.substring(0, maxChars)
+                });
+              }
+              return resolve({ success: false, error: err.message });
+            }).catch(() => resolve({ success: false, error: err.message }));
+          }
           resolve({ success: false, error: err.message });
         }
       });
       req.end();
     } catch (err) {
+      if (redirectCount === 0) {
+        return fallbackJinaReader(targetUrl, maxChars).then(jinaRes => {
+          if (jinaRes && jinaRes.text && jinaRes.text.length > 30) {
+            return resolve({
+              success: true,
+              url: targetUrl,
+              domain: parsedUrl.hostname,
+              title: jinaRes.title || parsedUrl.hostname,
+              charCount: Math.min(jinaRes.text.length, maxChars),
+              content: jinaRes.text.substring(0, maxChars)
+            });
+          }
+          return resolve({ success: false, error: err.message });
+        }).catch(() => resolve({ success: false, error: err.message }));
+      }
       resolve({ success: false, error: err.message });
     }
   });
