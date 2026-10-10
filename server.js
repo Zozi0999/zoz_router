@@ -1447,6 +1447,8 @@ function pruneActiveChatTasks() {
 
 setInterval(pruneActiveChatTasks, 10 * 60 * 1000).unref();
 
+const MAX_FULLTEXT_BYTES = 10 * 1024 * 1024; // 10MB limit for accumulated response text
+
 function accumulateChatChunk(sessionId, chunk, provider) {
   if (!sessionId || !dbActiveChatTasks[sessionId]) return;
   const task = dbActiveChatTasks[sessionId];
@@ -1473,6 +1475,10 @@ function accumulateChatChunk(sessionId, chunk, provider) {
         const parsed = JSON.parse(jsonStr);
         const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || parsed.choices?.[0]?.message?.content || '';
         if (delta) {
+          // Limit fullText buffer to prevent memory exhaustion on very long responses
+          if (Buffer.byteLength(task.fullText + delta, 'utf8') > MAX_FULLTEXT_BYTES) {
+            task.fullText = task.fullText.slice(-MAX_FULLTEXT_BYTES / 2); // Keep last half
+          }
           task.fullText += delta;
           task.lastTokenTime = Date.now();
         }
@@ -1483,6 +1489,10 @@ function accumulateChatChunk(sessionId, chunk, provider) {
         const parsed = JSON.parse(trimmed);
         const delta = parsed.message?.content || parsed.response || '';
         if (delta) {
+          // Limit fullText buffer to prevent memory exhaustion on very long responses
+          if (Buffer.byteLength(task.fullText + delta, 'utf8') > MAX_FULLTEXT_BYTES) {
+            task.fullText = task.fullText.slice(-MAX_FULLTEXT_BYTES / 2); // Keep last half
+          }
           task.fullText += delta;
           task.lastTokenTime = Date.now();
         }
@@ -3887,6 +3897,10 @@ async function requestHandler(req, res) {
                 try { stream.destroy(); } catch (_) {}
               }
             });
+            res.on('error', (err) => {
+              console.error('[Upload Range Response Error]:', err?.message || err);
+              try { stream.destroy(); } catch (_) {}
+            });
             stream.pipe(res);
             return;
           }
@@ -3913,6 +3927,10 @@ async function requestHandler(req, res) {
             }
           });
           req.on('close', () => {
+            try { stream.destroy(); } catch (_) {}
+          });
+          res.on('error', (err) => {
+            console.error('[Upload Response Error]:', err?.message || err);
             try { stream.destroy(); } catch (_) {}
           });
           stream.pipe(res);
