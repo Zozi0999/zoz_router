@@ -3701,46 +3701,25 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     return { ext: 'md', lang: 'markdown', label: 'Dokumen Teks', customName: 'dokumen-lampiran.md' };
   }
 
+  function countPromptWords(text) {
+    if (!text || typeof text !== 'string') return 0;
+    const trimmed = text.trim();
+    if (!trimmed) return 0;
+    const words = trimmed.match(/\S+/g);
+    return words ? words.length : 0;
+  }
+
   function shouldAutoConvertAsDocument(text) {
     if (!text || typeof text !== 'string') return false;
     const trimmed = text.trim();
     if (!trimmed) return false;
 
-    // 1. Blok kode Markdown fenced (```), langsung konversi jika minimal 40 karakter
-    if (/```[\s\S]*?```/.test(trimmed) && trimmed.length >= 40) return true;
+    // Mandat Kaisar Zozi: Minimal 500 KATA sebelum memicu notifikasi konversi ke markdown!
+    // Teks di bawah 500 kata (misal 50, 100, 200, 400 kata) dibiarkan tetap di kolom prompt tanpa notifikasi.
+    const wordCount = countPromptWords(trimmed);
 
-    const lines = trimmed.split('\n');
-    const lineCount = lines.length;
-    const charCount = trimmed.length;
-
-    // 2. Deteksi pola kodingan atau struktur bahasa pemrograman
-    const isCode = (
-      // JavaScript / TypeScript
-      /\b(?:function\b|const\b|let\b|var\b|import\b|export\b|class\b|console\.log|=>|async\s+function)\b/.test(trimmed) ||
-      // Python
-      /\b(?:def\b|elif\b|import\b|from\s+\w+\s+import|class\b|if\s+__name__|print\s*\()/.test(trimmed) ||
-      // HTML / XML / JSX
-      /<(?:!DOCTYPE|html|head|body|div|span|script|style|template|section|p|a|ul|li|table|h[1-6])\b/i.test(trimmed) ||
-      // CSS / SCSS (selectors with curly braces, properties with colons, @media, etc.)
-      /\b(?:display|margin|padding|border|color|background|font|width|height|position|align|flex|grid|transform|opacity|z-index)\s*:/i.test(trimmed) ||
-      /[a-zA-Z0-9_\-#.:>\s,]+\s*\{\s*[^}]*\}/.test(trimmed) ||
-      // SQL
-      /\b(?:SELECT\b.*?\bFROM\b|INSERT\s+INTO|CREATE\s+TABLE|UPDATE\b.*?\bSET|DELETE\s+FROM)\b/i.test(trimmed) ||
-      // PHP / C / C++ / Java / Rust / Go / Shell
-      /(?:<\?php|\bpublic\s+class\b|#include\b|\bpackage\s+\w+|\bfn\s+\w+\b|\bfunc\s+\w+\b|\b(?:npm|curl|docker|git|chmod|sudo|export)\s+\w+)/.test(trimmed) ||
-      // JSON / Arrays
-      ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) ||
-      // Multi-line code-like construct
-      (lineCount >= 2 && /[\{\};=()\[\]<>]/.test(trimmed) && !/^[A-Za-z\s]+$/.test(trimmed))
-    );
-
-    if (isCode) {
-      // Untuk kodingan: cukup 50 karakter ATAU 2 baris
-      if (charCount >= 50 || lineCount >= 2) return true;
-    }
-
-    // 3. Teks panjang / laporan / artikel / log: cukup 180 karakter ATAU 4 baris
-    if (charCount >= 180 || lineCount >= 4) {
+    // Memicu notifikasi hanya jika mencapai minimal 500 kata (atau teks masif >= 4000 karakter)
+    if (wordCount >= 500 || trimmed.length >= 4000) {
       return true;
     }
 
@@ -3899,6 +3878,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     const typeInfo = detectDocumentTypeAndExt(docBody);
     const fileName = typeInfo.customName || `code-snippet.${typeInfo.ext}`;
+    const wordCount = countPromptWords(docBody);
     const lineCount = docBody.split('\n').length;
     const charCount = docBody.length;
 
@@ -3909,10 +3889,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // Tampilkan Floating Card di atas composer
     if (els.composerFoldPromptCard) {
       if (els.foldCardTitle) {
-        els.foldCardTitle.textContent = `${typeInfo.label || 'Kodingan / Teks'} Terdeteksi (${fileName})`;
+        els.foldCardTitle.textContent = `${typeInfo.label || 'Teks Panjang / Kodingan'} Terdeteksi (${fileName})`;
       }
       if (els.foldCardSubtitle) {
-        els.foldCardSubtitle.textContent = `${lineCount} baris (${charCount.toLocaleString('id-ID')} karakter) • Ubah ke file markdown agar prompt bersih?`;
+        els.foldCardSubtitle.textContent = `${wordCount.toLocaleString('id-ID')} kata • ${lineCount} baris (${charCount.toLocaleString('id-ID')} karakter) • Ubah ke file markdown agar prompt bersih?`;
       }
       els.composerFoldPromptCard.style.display = 'flex';
     }
@@ -3926,7 +3906,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         els.foldModalSnippet.textContent = docBody.length > 500 ? docBody.substring(0, 500) + '\n\n... (teks dipotong untuk preview)' : docBody;
       }
       if (els.foldModalMeta) {
-        els.foldModalMeta.innerHTML = `<i class="fa-solid fa-align-left"></i> ${lineCount} baris &bull; ${charCount.toLocaleString('id-ID')} karakter`;
+        els.foldModalMeta.innerHTML = `<i class="fa-solid fa-align-left"></i> ${wordCount.toLocaleString('id-ID')} kata &bull; ${lineCount} baris &bull; ${charCount.toLocaleString('id-ID')} karakter`;
       }
       if (els.chkAutoFoldAlways) {
         els.chkAutoFoldAlways.checked = false;
@@ -15382,7 +15362,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       if (val && shouldAutoConvertAsDocument(val)) {
         const alwaysAuto = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
         if (alwaysAuto) {
-          if (e?.inputType === 'insertFromPaste' || e?.inputType === 'insertFromDrop' || val.length >= 180 || val.split('\n').length >= 4) {
+          if (countPromptWords(val) >= 500 || val.length >= 4000) {
             tryAutoConvertInputToDoc(val);
             return;
           }
