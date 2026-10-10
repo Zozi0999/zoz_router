@@ -1979,6 +1979,25 @@ function extractWebUrls(text) {
   });
 }
 
+// Ekstraktor URL kustom komprehensif untuk Mode Deep Research (penganalisis web kustom URL)
+function extractCustomAnalysisUrls(text) {
+  if (!text || typeof text !== 'string') return [];
+  const urlRegex = /(?:https?:\/\/[^\s<>"'{}|\\^`\[\]]+|www\.[^\s<>"'{}|\\^`\[\]]+)/gi;
+  const matches = text.match(urlRegex) || [];
+  return matches.map(u => {
+    let clean = u.replace(/[.,!?;:)]+$/, '');
+    if (/^www\./i.test(clean)) clean = 'https://' + clean;
+    return clean;
+  }).filter(u => {
+    try {
+      new URL(u);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  });
+}
+
 // Universal Web Page Grounding Enricher: injects real-time extracted article text for 100% of LLM models
 async function enrichTextWithWebPageContext(text) {
   if (!text || typeof text !== 'string') return { text, webPages: [] };
@@ -2588,787 +2607,281 @@ function fallbackJinaReader(targetUrl, maxChars = 5000) {
   });
 }
 
-// Fungsi Logika Agen: Meneliti Berulang Secara Otonom dengan 6 Pilar Deep Research Premium
+// Fungsi Logika Agen: Penganalisis Web Kustom URL Mendalam (Deep Custom URL Web Content Analyzer)
 async function jalankanRisetOtonom(taskId, topik, config = {}) {
   const task = dbTugasRiset[taskId];
   if (!task) return;
 
-  const serperKey = config.serperApiKey || process.env.SERPER_API_KEY;
-  const maxIterations = config.maxIterations || 3;
   let allSources = [];
-  let dataTemuan = [];
-  let scrapedArticles = [];
-
-  // Mandat Mutlak Kaisar Zozi: Arsitektur 1-Model Deep Research Super Efisien.
-  // Gunakan 1 model master tunggal untuk mencerna data Agen 1, mencerna data Agen 2, mengoreksi di Model 3, dan merangkum di Model 4.
-  // Hemat kuota kredit RPD tanpa memanggil multi-model berbeda, namun output tetap divergen karena bahan web Primer & Divergen 100% berbeda domain.
+  let scrapedPages = [];
   const masterResearchModel = config.finalModel || config.model || config.agent1Model || 'openrouter/free';
-  const agent1Model = masterResearchModel;
-  const agent2Model = masterResearchModel;
-  const model3 = masterResearchModel;
-  const model4 = masterResearchModel;
+
+  // 1. Kumpulkan seluruh URL target kustom yang diberikan pengguna
+  let targetUrls = Array.isArray(config.targetUrls) ? config.targetUrls.filter(Boolean) : [];
+  if (config.urls && Array.isArray(config.urls)) {
+    config.urls.forEach(u => { if (!targetUrls.includes(u)) targetUrls.push(u); });
+  }
+  const textUrls = extractCustomAnalysisUrls(`${topik} ${config.prompt || ''}`);
+  textUrls.forEach(u => {
+    if (!targetUrls.includes(u)) targetUrls.push(u);
+  });
+
+  // Pastikan URL memiliki format protokol https:// atau http://
+  targetUrls = targetUrls.map(u => {
+    let clean = String(u).trim();
+    if (!/^https?:\/\//i.test(clean)) clean = 'https://' + clean;
+    return clean;
+  });
+
+  // Eliminasi duplikat
+  targetUrls = Array.from(new Set(targetUrls));
+
+  if (targetUrls.length === 0) {
+    task.status = 'gagal';
+    task.error = 'Deep Research kini berfungsi sebagai Penganalisis Web Kustom URL. Harap sertakan minimal 1 tautan URL kustom (misal: https://example.com/artikel) untuk dianalisis.';
+    task.currentStep = 'Gagal: Tidak ada URL kustom yang disediakan.';
+    task.completedAt = new Date().toISOString();
+    return;
+  }
 
   try {
     // ==========================================
-    // PILAR 1 & 6: PENCARIAN MULTI-TAHAP & ASYNCHRONOUS QUEUE (DUAL-AGENT SERPER DIVERGEN)
+    // TAHAP 1/3: EKSTRAKSI KONTEN LENGKAP DARI URL KUSTOM
     // ==========================================
-    task.currentStep = '[Langkah 1/3] Menelusuri Google via Multi-Agen (Dual-Agent Serper Divergen)...';
-    task.progressPercent = 15;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 1/3] Memulai riset dual-agen Google Serper divergen untuk: "${topik}"`);
+    task.currentStep = `[Langkah 1/3] Mengambil & mengekstrak konten lengkap dari ${targetUrls.length} URL kustom...`;
+    task.progressPercent = 20;
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 1/3] Memulai ekstraksi web mendalam untuk ${targetUrls.length} URL: ${targetUrls.join(', ')}`);
 
-    let currentQuery = topik;
+    for (let idx = 0; idx < targetUrls.length; idx++) {
+      if (task.aborted) break;
+      const targetUrl = targetUrls[idx];
+      let domain = targetUrl;
+      try {
+        const parsed = new URL(targetUrl);
+        domain = parsed.hostname;
+      } catch (_) {}
 
-    for (let i = 1; i <= maxIterations; i++) {
-      if (task.aborted) {
-        task.status = 'dibatalkan';
-        task.currentStep = 'Riset dihentikan oleh pengguna.';
-        task.completedAt = new Date().toISOString();
-        return;
-      }
+      task.currentStep = `[Langkah 1/3] Mengunduh konten halaman (${idx + 1}/${targetUrls.length}): ${domain}...`;
+      task.progressPercent = 20 + Math.round(((idx + 1) / targetUrls.length) * 25);
 
-      task.currentStep = `[Langkah 1/3] Iterasi ${i}/${maxIterations}: Menjelajah Paralel (Agen 1: Serper Primer & Agen 2: Serper Divergen) -> "${currentQuery}"`;
-      task.progressPercent = 15 + Math.round((i / (maxIterations + 1)) * 30);
-      task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Iterasi ${i}: Menjalankan riset paralel Serper divergen -> "${currentQuery}"`);
+      try {
+        // Ekstraksi konten dengan browseWebPageContent dan fallback fetchPageDetails
+        let browseRes = await browseWebPageContent(targetUrl, 16000);
+        let contentText = (browseRes && browseRes.text && browseRes.text.length > 100) ? browseRes.text : '';
+        let pageTitle = (browseRes && browseRes.title) ? browseRes.title : domain;
 
-      // 1. Eksekusi Agen 1 (Perspektif Primer)
-      const searchResSerper = await performWebSearch(currentQuery, serperKey);
-
-      // Kumpulkan URL dan domain unik dari Agen 1 serta riwayat sumber sebelumnya
-      const agent1Urls = new Set();
-      const agent1Domains = new Set();
-      (searchResSerper.results || []).forEach(r => {
-        if (r.url) agent1Urls.add(r.url);
-        const d = (r.domain || extractDomainSafe(r.url) || '').toLowerCase().replace(/^www\./, '');
-        if (d) agent1Domains.add(d);
-      });
-      allSources.forEach(s => {
-        if (s.url) agent1Urls.add(s.url);
-        const d = (s.domain || extractDomainSafe(s.url) || '').toLowerCase().replace(/^www\./, '');
-        if (d) agent1Domains.add(d);
-      });
-
-      // 2. Eksekusi Agen 2 (Perspektif Divergen / Analitis Mendalam dengan Eksklusi Domain)
-      let divergentQuery = `${currentQuery} analisis mendalam data statistik riset teknis 2026`;
-      const topExclude = Array.from(agent1Domains).slice(0, 3);
-      if (topExclude.length > 0) {
-        divergentQuery += topExclude.map(d => ` -site:${d}`).join('');
-      }
-      const searchResDivergentRaw = await performWebSearch(divergentQuery, serperKey);
-
-      // Filter ketat Agen 2: Zero-Collision (100% domain & URL berbeda)
-      const filteredDivergentResults = [];
-      if (Array.isArray(searchResDivergentRaw.results)) {
-        for (const item of searchResDivergentRaw.results) {
-          if (!item.url) continue;
-          const itemDomain = (item.domain || extractDomainSafe(item.url) || '').toLowerCase().replace(/^www\./, '');
-          if (agent1Urls.has(item.url) || (itemDomain && agent1Domains.has(itemDomain))) {
-            continue; // Eliminasi mutlak: tidak boleh sama domain atau URL!
+        if (!contentText || contentText.length < 100) {
+          const detailRes = await fetchPageDetails(targetUrl, 16000);
+          if (detailRes && detailRes.success && detailRes.content) {
+            contentText = detailRes.content;
+            pageTitle = detailRes.title || pageTitle;
           }
-          filteredDivergentResults.push({
-            ...item,
-            domain: itemDomain || item.domain,
-            sourceProvider: 'Serper (Divergen)'
-          });
-          agent1Urls.add(item.url);
-          if (itemDomain) agent1Domains.add(itemDomain);
-          if (filteredDivergentResults.length >= 15) break;
         }
+
+        if (contentText && contentText.length > 50) {
+          const pageItem = {
+            url: targetUrl,
+            domain: domain,
+            title: pageTitle || domain,
+            content: contentText,
+            charCount: contentText.length,
+            publishDate: browseRes?.publishDate || null
+          };
+          scrapedPages.push(pageItem);
+          allSources.push({
+            title: pageItem.title,
+            url: targetUrl,
+            domain: domain,
+            snippet: contentText.slice(0, 300) + '...',
+            sourceProvider: 'Custom URL Target'
+          });
+          task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Berhasil mengekstrak [${domain}]: "${pageItem.title.slice(0, 45)}" (${pageItem.charCount} karakter)`);
+        } else {
+          task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Konten dari [${domain}] terlalu minim atau terproteksi.`);
+        }
+      } catch (errScrape) {
+        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Gagal mengekstrak [${domain}]: ${errScrape.message}`);
       }
 
-      const searchResDivergent = {
-        query: divergentQuery,
-        error: searchResDivergentRaw.error,
-        count: filteredDivergentResults.length,
-        knowledgeGraph: searchResDivergentRaw.knowledgeGraph || null,
-        answerBox: searchResDivergentRaw.answerBox || null,
-        results: filteredDivergentResults
-      };
-
-      if (searchResSerper.error) {
-        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Agen 1 (Serper Primer): "${searchResSerper.error}".`);
-      } else {
-        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Agen 1 (Serper Primer) menemukan ${searchResSerper.results?.length || 0} sumber data web.`);
-      }
-
-      if (searchResDivergent.error) {
-        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Agen 2 (Serper Divergen): "${searchResDivergent.error}".`);
-      } else {
-        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Agen 2 (Serper Divergen) menemukan ${searchResDivergent.results.length} sumber unik (100% domain berbeda).`);
-      }
-
-      // Format data Agen 1 (Google Serper Primer)
-      let serperBlock = '';
-      if (searchResSerper.knowledgeGraph) {
-        serperBlock += `\n[KNOWLEDGE GRAPH - SERPER PRIMER]: ${searchResSerper.knowledgeGraph.title || ''} - ${searchResSerper.knowledgeGraph.snippet || ''}\n`;
-      }
-      if (searchResSerper.answerBox) {
-        serperBlock += `\n[ANSWER BOX - SERPER PRIMER]: ${searchResSerper.answerBox.snippet || ''}\n`;
-      }
-      if (Array.isArray(searchResSerper.results)) {
-        searchResSerper.results.forEach((item) => {
-          serperBlock += `\n- [Web Serper Primer] ${item.title}: ${item.snippet} (${item.url})`;
-          if (item.url && !allSources.some(s => s.url === item.url)) {
-            allSources.push({
-              title: item.title,
-              url: item.url,
-              snippet: item.snippet,
-              domain: item.domain || extractDomainSafe(item.url),
-              sourceProvider: 'Serper (Primer)'
-            });
-          }
-        });
-      }
-
-      // Format data Agen 2 (Google Serper Divergen - Domain Mandiri)
-      let divergentBlock = '';
-      if (searchResDivergent.knowledgeGraph) {
-        divergentBlock += `\n[KNOWLEDGE GRAPH - SERPER DIVERGEN]: ${searchResDivergent.knowledgeGraph.title || ''} - ${searchResDivergent.knowledgeGraph.snippet || ''}\n`;
-      }
-      if (searchResDivergent.answerBox) {
-        divergentBlock += `\n[ANSWER BOX - SERPER DIVERGEN]: ${searchResDivergent.answerBox.snippet || ''}\n`;
-      }
-      if (Array.isArray(searchResDivergent.results)) {
-        searchResDivergent.results.forEach((item) => {
-          divergentBlock += `\n- [Web Serper Divergen] ${item.title}: ${item.snippet} (${item.url})`;
-          if (item.url && !allSources.some(s => s.url === item.url)) {
-            allSources.push({
-              title: item.title,
-              url: item.url,
-              snippet: item.snippet,
-              domain: item.domain || extractDomainSafe(item.url),
-              sourceProvider: 'Serper (Divergen)'
-            });
-          }
-        });
-      }
-
-      // Publikasikan Snapshot Live Inspection SEGERA (agar sumber langsung terlihat di UI tanpa menunggu LLM)
+      // Update snapshot Live Inspection
       task.liveInspection = {
         topik,
-        currentQuery,
-        iteration: i,
-        maxIterations,
+        mode: 'custom_url_analyzer',
+        targetUrls,
         timestamp: new Date().toLocaleTimeString('id-ID'),
+        scrapedPagesCount: scrapedPages.length,
         agent1: {
-          name: 'Agen 1 (Pakar Web Google)',
-          provider: 'Google Serper API (Primer)',
+          name: 'Penganalisis Web Kustom URL (Ekstraksi Konten)',
+          provider: 'Deep Web Extractor',
           model: masterResearchModel,
-          resultsCount: searchResSerper.results?.length || 0,
-          results: (searchResSerper.results || []).map(r => ({ title: r.title, url: r.url, link: r.url, snippet: r.snippet })),
-          analysis: 'Sedang menganalisis temuan web dan mengekstrak poin penting...'
-        },
-        agent2: {
-          name: 'Agen 2 (Pakar Analisis Divergen)',
-          provider: 'Google Serper API (Divergen)',
-          model: masterResearchModel,
-          resultsCount: searchResDivergent.results?.length || 0,
-          knowledgeGraph: searchResDivergent.knowledgeGraph || null,
-          answerBox: searchResDivergent.answerBox || null,
-          results: (searchResDivergent.results || []).map(r => ({ title: r.title, url: r.url, link: r.url, snippet: r.snippet })),
-          analysis: 'Sedang mengekstrak data analitis mendalam dari domain independen 100% berbeda...'
+          resultsCount: scrapedPages.length,
+          results: scrapedPages.map(p => ({ title: p.title, link: p.url, snippet: p.content.slice(0, 250) + '...' })),
+          analysis: `Berhasil mengekstrak ${scrapedPages.length} halaman web kustom utuh untuk telaah mendalam.`
         },
         scraper: {
-          status: 'siap',
-          totalScraped: allSources.slice(0, 30).length,
-          articles: allSources.slice(0, 30).map((s) => ({
-            title: s.title,
-            url: s.url,
-            domain: s.domain || extractDomainSafe(s.url),
-            length: (s.snippet || '').length,
-            sample: s.snippet || 'Menunggu giliran pemindaian mendalam...'
+          status: 'selesai',
+          totalScraped: scrapedPages.length,
+          articles: scrapedPages.map(p => ({
+            title: p.title,
+            url: p.url,
+            domain: p.domain,
+            sourceProvider: 'URL Kustom Analisis',
+            length: p.charCount,
+            sample: p.content.slice(0, 300) + '...'
           }))
         },
-        scrapedArticlesCount: Math.min(allSources.length, 30),
-        totalSourcesCount: allSources.length
-      };
-
-      // 2. Jalankan Analisis Spesialis Paralel oleh LLM Agen 1 dan LLM Agen 2 (Model Riset Tunggal)
-      task.currentStep = `[Langkah 1/3] Iterasi ${i}/${maxIterations}: Model Riset (${masterResearchModel}) menganalisis temuan Primer & Divergen...`;
-
-      const promptAgen1 = `Anda adalah Agen 1 (Pakar Analis Web Google).
-Topik Riset: "${topik}"
-Sub-Query: "${currentQuery}"
-Data Mentah Web Serper Primer:
-${serperBlock || 'Tidak ada data Serper.'}
-
-Tugas Anda:
-Analisis temuan web di atas secara objektif. Rangkum fakta utama, tren industri terbaru tahun 2026, dan poin-poin penting yang ditemukan dalam 2-3 paragraf padat.`;
-
-      const promptAgen2 = `Anda adalah Agen 2 (Pakar Analisis Data Mendalam & Divergen).
-Topik Riset: "${topik}"
-Sub-Query: "${currentQuery}"
-Data Mentah Web Serper Divergen (Sumber Domain Mandiri):
-${divergentBlock || 'Tidak ada data Serper Divergen.'}
-
-Tugas Anda:
-Analisis data di atas secara mendalam. Ekstrak entitas kunci, data statistik terverifikasi tahun 2026, aspek teknis spesifik, dan perspektif pelengkap dalam 2-3 paragraf padat.`;
-
-      let analisisAgen1 = 'Tidak ada data dari Agen 1.';
-      let analisisAgen2 = 'Tidak ada data dari Agen 2.';
-
-      if (isFreeTierModel(masterResearchModel)) {
-        // Eksekusi sekuensial dengan jeda adaptif pada model free untuk mencegah HTTP 429 concurrency limit
-        if (serperBlock.trim()) {
-          analisisAgen1 = await callLLMBackend({
-            ...config,
-            messages: [],
-            model: masterResearchModel,
-            prompt: promptAgen1,
-            system: 'Anda adalah Agen 1: Analis Web Google yang fokus mengekstrak tren utama dan informasi relevan dari web.'
-          }).catch((err) => {
-            console.warn('Gagal memanggil Model Agen 1 di backend:', err?.message || err);
-            return `[Ringkasan Ekstraksi Data Serper]:\n${serperBlock}`;
-          });
-        }
-        await sleep(1200);
-        if (divergentBlock.trim()) {
-          analisisAgen2 = await callLLMBackend({
-            ...config,
-            messages: [],
-            model: masterResearchModel,
-            prompt: promptAgen2,
-            system: 'Anda adalah Agen 2: Analis Data Divergen & Teknis yang fokus mengekstrak fakta terverifikasi dan sudut pandang spesifik dari domain mandiri.'
-          }).catch((err) => {
-            console.warn('Gagal memanggil Model Agen 2 di backend:', err?.message || err);
-            return `[Ringkasan Ekstraksi Data Serper Divergen]:\n${divergentBlock}`;
-          });
-        }
-      } else {
-        const [res1, res2] = await Promise.all([
-          (serperBlock.trim()) ? callLLMBackend({
-            ...config,
-            messages: [],
-            model: masterResearchModel,
-            prompt: promptAgen1,
-            system: 'Anda adalah Agen 1: Analis Web Google yang fokus mengekstrak tren utama dan informasi relevan dari web.'
-          }).catch((err) => {
-            console.warn('Gagal memanggil Model Agen 1 di backend:', err?.message || err);
-            return `[Ringkasan Ekstraksi Data Serper]:\n${serperBlock}`;
-          }) : Promise.resolve('Tidak ada data dari Agen 1.'),
-
-          (divergentBlock.trim()) ? callLLMBackend({
-            ...config,
-            messages: [],
-            model: masterResearchModel,
-            prompt: promptAgen2,
-            system: 'Anda adalah Agen 2: Analis Data Divergen & Teknis yang fokus mengekstrak fakta terverifikasi dan sudut pandang spesifik dari domain mandiri.'
-          }).catch((err) => {
-            console.warn('Gagal memanggil Model Agen 2 di backend:', err?.message || err);
-            return `[Ringkasan Ekstraksi Data Serper Divergen]:\n${divergentBlock}`;
-          }) : Promise.resolve('Tidak ada data dari Agen 2.')
-        ]);
-        analisisAgen1 = res1;
-        analisisAgen2 = res2;
-      }
-
-      task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Analisis spesialis selesai: Model Riset (${masterResearchModel}) menganalisis temuan Primer & Divergen.`);
-
-      // Update hasil analisis teks LLM ke snapshot Live Inspection
-      if (task.liveInspection) {
-        if (task.liveInspection.agent1) task.liveInspection.agent1.analysis = analisisAgen1 || '';
-        if (task.liveInspection.agent2) task.liveInspection.agent2.analysis = analisisAgen2 || '';
-      }
-
-      const findingsText = `[HASIL ANALISIS AGEN 1 - PAKAR WEB (${masterResearchModel})]:\n${analisisAgen1}\n\n[HASIL ANALISIS AGEN 2 - PAKAR ANALISIS DIVERGEN (${masterResearchModel})]:\n${analisisAgen2}`;
-
-      dataTemuan.push(`### Temuan Terverifikasi Iterasi ${i} (Query: "${currentQuery}"):\n${findingsText}`);
-
-      if (i < maxIterations) {
-        try {
-          if (isFreeTierModel(masterResearchModel)) {
-            await sleep(1500); // Jeda pelindung rate-limit sebelum planner evaluator
-          }
-          const evalPrompt = `Anda adalah AI Deep Research Planner.
-Topik Utama: "${topik}"
-Data Temuan Saat Ini:
-${dataTemuan.join('\n\n')}
-
-Tugas Evaluasi:
-1. Analisis apakah informasi di atas sudah memadai untuk laporan mendalam komprehensif tahun 2026?
-2. Jika sudah lengkap, jawab JSON: {"sudahCukup": true}
-3. Jika belum, rumuskan kata kunci pencarian Google yang baru dan sangat spesifik (misal: aspek teknis, data statistik terbaru 2026, opini pakar, regulasi, studi kasus) dalam format JSON: {"sudahCukup": false, "kataKunciBaru": "query spesifik baru"}
-Keluarkan hanya JSON valid tanpa teks tambahan.`;
-
-          const evalModel = masterResearchModel;
-          const evalResult = await callLLMBackend({
-            ...config,
-            model: evalModel,
-            prompt: evalPrompt,
-            system: 'Anda adalah Research Evaluator otonom yang teliti dan analitis.'
-          });
-
-          let parsedEval = null;
-          try {
-            const jsonMatch = evalResult.match(/\{[\s\S]*\}/);
-            if (jsonMatch) parsedEval = JSON.parse(jsonMatch[0]);
-          } catch (pe) {}
-
-          if (parsedEval && parsedEval.sudahCukup === true) {
-            task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Penelusuran selesai pada iterasi ${i}. Melanjutkan ke pemindaian konten mendalam.`);
-            break;
-          } else if (parsedEval && parsedEval.kataKunciBaru) {
-            currentQuery = parsedEval.kataKunciBaru;
-            task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Menemukan sub-topik lanjutan: "${currentQuery}"`);
-          } else {
-            if (i === 1) currentQuery = `${topik} spesifikasi teknis arsitektur 2026`;
-            else if (i === 2) currentQuery = `${topik} benchmarking analisis komparasi studi kasus regulasi`;
-          }
-        } catch (evalErr) {
-          if (i === 1) currentQuery = `${topik} data teknis terbaru 2026`;
-          else if (i === 2) currentQuery = `${topik} tantangan regulasi implementasi masa depan`;
-        }
-      }
-    }
-
-    // ==========================================
-    // PILAR 2: PEMINDAIAN KONTEN MENDALAM (AUTOMATED WEB SCRAPING)
-    // ==========================================
-    if (task.aborted) {
-      task.status = 'dibatalkan';
-      task.currentStep = 'Riset dihentikan oleh pengguna.';
-      task.completedAt = new Date().toISOString();
-      return;
-    }
-
-    // Balanced Interleaved Scraping: Ambil secara seimbang antara Agen 1 (Primer) dan Agen 2 (Divergen)
-    const primerSources = allSources.filter(s => (s.sourceProvider || '').includes('Primer') || (!(s.sourceProvider || '').includes('Divergen')));
-    const divergenSources = allSources.filter(s => (s.sourceProvider || '').includes('Divergen'));
-    const targetScrapeUrls = [];
-    const maxScrapeTarget = 30; // Minimal 20 - 30 website sesuai mandat Kaisar Zozi
-    let pIdx = 0;
-    let dIdx = 0;
-
-    while (targetScrapeUrls.length < maxScrapeTarget && (pIdx < primerSources.length || dIdx < divergenSources.length)) {
-      if (pIdx < primerSources.length && targetScrapeUrls.length < maxScrapeTarget) {
-        targetScrapeUrls.push(primerSources[pIdx++]);
-      }
-      if (dIdx < divergenSources.length && targetScrapeUrls.length < maxScrapeTarget) {
-        targetScrapeUrls.push(divergenSources[dIdx++]);
-      }
-    }
-    if (targetScrapeUrls.length === 0) {
-      targetScrapeUrls.push(...allSources.slice(0, maxScrapeTarget));
-    }
-
-    task.currentStep = `[Langkah 2/3] Menganalisis & memindai konten mendalam ${targetScrapeUrls.length} artikel web seimbang (Web Scraping)...`;
-    task.progressPercent = 55;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 2/3] Memulai web scraping ke ${targetScrapeUrls.length} tautan seimbang (Serper Primer & Serper Divergen).`);
-    if (task.liveInspection) {
-      task.liveInspection.scrapedArticlesCount = targetScrapeUrls.length;
-      task.liveInspection.scraper = {
-        status: 'memindai',
-        totalScraped: targetScrapeUrls.length,
-        articles: targetScrapeUrls.map(u => ({
-          title: u.title,
-          url: u.url,
-          domain: u.domain,
-          sourceProvider: u.sourceProvider,
-          length: (u.snippet || '').length,
-          sample: u.snippet || 'Sedang mengekstrak teks artikel utuh...'
-        }))
-      };
-    }
-
-    // Eksekusi Web Scraping secara Batch Concurrency (5 request simultan per batch) untuk kecepatan tinggi
-    const SCRAPE_BATCH_SIZE = 5;
-    for (let idx = 0; idx < targetScrapeUrls.length; idx += SCRAPE_BATCH_SIZE) {
-      if (task.aborted) break;
-      const currentBatch = targetScrapeUrls.slice(idx, idx + SCRAPE_BATCH_SIZE);
-      const batchNum = Math.floor(idx / SCRAPE_BATCH_SIZE) + 1;
-      const totalBatches = Math.ceil(targetScrapeUrls.length / SCRAPE_BATCH_SIZE);
-
-      task.currentStep = `[Langkah 2/3] Memindai serentak batch ${batchNum}/${totalBatches} (${Math.min(idx + SCRAPE_BATCH_SIZE, targetScrapeUrls.length)}/${targetScrapeUrls.length} artikel)...`;
-      task.progressPercent = 55 + Math.round((Math.min(idx + SCRAPE_BATCH_SIZE, targetScrapeUrls.length) / targetScrapeUrls.length) * 20);
-
-      const batchPromises = currentBatch.map(async (sourceItem) => {
-        const providerLabel = sourceItem.sourceProvider || 'Web';
-        try {
-          const scrapedText = await fetchPageContent(sourceItem.url, 3500);
-          if (scrapedText && scrapedText.length > 200) {
-            return {
-              title: sourceItem.title,
-              url: sourceItem.url,
-              domain: sourceItem.domain,
-              sourceProvider: providerLabel,
-              content: scrapedText
-            };
-          }
-        } catch (e) {}
-        return null;
-      });
-
-      const batchResults = await Promise.allSettled(batchPromises);
-      batchResults.forEach(res => {
-        if (res.status === 'fulfilled' && res.value) {
-          scrapedArticles.push(res.value);
-          const safeTitle = res.value.title || 'Artikel Web';
-          task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Berhasil memindai konten [${res.value.sourceProvider}]: "${safeTitle.substring(0, 40)}..." (${(res.value.content || '').length} karakter)`);
-        }
-      });
-
-      if (task.liveInspection) {
-        task.liveInspection.scrapedArticlesCount = scrapedArticles.length;
-        task.liveInspection.scraper = {
-          status: idx + SCRAPE_BATCH_SIZE >= targetScrapeUrls.length ? 'selesai' : 'memindai',
-          totalScraped: scrapedArticles.length,
-          articles: scrapedArticles.map(a => ({
-            title: a.title || 'Artikel Web',
-            url: a.url,
-            domain: a.domain,
-            sourceProvider: a.sourceProvider,
-            length: (a.content || '').length,
-            sample: (a.content || '').substring(0, 240) + '...'
+        analyzer: {
+          name: 'Penganalisis Web Kustom URL',
+          model: masterResearchModel,
+          urls: scrapedPages.map(p => ({
+            url: p.url,
+            domain: p.domain,
+            title: p.title,
+            charCount: p.charCount,
+            sample: p.content.slice(0, 300) + '...'
           }))
-        };
-      }
-    }
-
-    // Gabungkan konten hasil scraping ke dalam data temuan
-    if (scrapedArticles.length > 0) {
-      const scrapedBlock = scrapedArticles.map((art, idx) => `--- [KONTEN UTUH ARTIKEL ${idx + 1}: ${art.title} (${art.url}) | ASAL: ${art.sourceProvider || 'Web'}] ---\n${art.content}\n--- [AKHIR ARTIKEL ${idx + 1}] ---`).join('\n\n');
-      dataTemuan.push(`### Hasil Pemindaian Konten Mendalam (Full Web Scraping):\n${scrapedBlock}`);
-
-      if (task.liveInspection) {
-        task.liveInspection.scrapedArticlesCount = scrapedArticles.length;
-        task.liveInspection.scraper = {
-          status: 'selesai',
-          totalScraped: scrapedArticles.length,
-          articles: scrapedArticles.map(a => ({
-            title: a.title || 'Artikel Web',
-            url: a.url,
-            domain: a.domain,
-            length: (a.content || '').length,
-            sample: (a.content || '').substring(0, 240) + '...'
-          }))
-        };
-      }
-    } else if (task.liveInspection) {
-      task.liveInspection.scrapedArticlesCount = targetScrapeUrls.length;
-      task.liveInspection.scraper = {
-        status: 'selesai',
-        totalScraped: targetScrapeUrls.length,
-        articles: targetScrapeUrls.map(u => ({
-          title: u.title,
-          url: u.url,
-          domain: u.domain,
-          length: (u.snippet || '').length + 320,
-          sample: `${u.snippet}\n[Konten dievaluasi dari cuplikan primer terverifikasi]`
-        }))
+        }
       };
     }
 
-    // ==========================================
-    // PILAR 2.5: PENCERNAAN KONTEN UTUH WEB OLEH MODEL RISET TUNGGAL
-    // ==========================================
-    task.currentStep = `[Langkah 2/3] Model Riset (${masterResearchModel}) mencerna isi teks artikel web Primer & Divergen...`;
-    task.progressPercent = 75;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 2/3] Model Riset (${masterResearchModel}) mulai mencerna teks artikel web Primer & Divergen secara mendalam.`);
-
-    function buildBudgetedScrapedText(articles, maxTotalChars = 12000, perArticleCap = 2500) {
-      if (!articles || articles.length === 0) return '';
-      let remaining = maxTotalChars;
-      const chunks = [];
-      for (let idx = 0; idx < articles.length; idx++) {
-        if (remaining <= 250) break;
-        const a = articles[idx];
-        const rawContent = (a.content || '').trim();
-        if (!rawContent) continue;
-        const allowed = Math.min(perArticleCap, remaining);
-        const snippet = rawContent.length > allowed
-          ? (rawContent.substring(0, allowed) + '\n... [konten artikel dipadatkan untuk batas konteks]')
-          : rawContent;
-        const block = `[Dokumen ${idx + 1}: ${a.title || 'Artikel'} (${a.url || ''})]\n${snippet}`;
-        chunks.push(block);
-        remaining -= block.length;
-      }
-      return chunks.join('\n\n');
-    }
-
-    const primerArticles = scrapedArticles.filter(a => (a.sourceProvider || '').includes('Primer') || (!(a.sourceProvider || '').includes('Divergen')));
-    const divergenArticles = scrapedArticles.filter(a => (a.sourceProvider || '').includes('Divergen'));
-
-    const primerScrapedText = buildBudgetedScrapedText(primerArticles, 12000, 2500);
-    const divergenScrapedText = buildBudgetedScrapedText(divergenArticles, 12000, 2500);
-
-    const promptCernaPrimer = `Anda adalah Agen 1 (Pakar Web Google & Riset Primer).
-Topik Riset: "${topik}"
-
-Berikut adalah isi teks utuh dokumen web primer hasil pemindaian langsung:
-${primerScrapedText || 'Tidak ada teks artikel primer utuh.'}
-
-Tugas Anda:
-Cerna dan analisis secara mendalam seluruh teks web primer di atas. Rangkum temuan kunci, tren utama tahun 2026, data penting, dan fakta konkret dalam 3-4 paragraf berbobot padat.`;
-
-    const promptCernaDivergen = `Anda adalah Agen 2 (Pakar Analisis Divergen & Domain Mandiri).
-Topik Riset: "${topik}"
-
-Berikut adalah isi teks utuh dokumen web dari domain independen/teknis hasil pemindaian langsung:
-${divergenScrapedText || 'Tidak ada teks artikel divergen utuh.'}
-
-Tugas Anda:
-Cerna dan analisis secara kritis seluruh teks web divergen di atas. Ekstrak perspektif alternatif, data statistik spesifik, arsitektur teknis, dan tantangan riil dalam 3-4 paragraf berbobot padat.`;
-
-    let laporanPakarAgen1 = '';
-    let laporanPakarAgen2 = '';
-
-    try {
-      if (isFreeTierModel(masterResearchModel)) {
-        if (primerScrapedText.trim()) {
-          laporanPakarAgen1 = await callLLMBackend({
-            ...config,
-            messages: [],
-            model: masterResearchModel,
-            prompt: promptCernaPrimer,
-            system: 'Anda adalah Agen 1: Analis Web Primer yang bertugas membedah dan menyaring konten artikel web.'
-          }).catch(err => {
-            console.warn('Gagal pencernaan artikel Agen 1:', err?.message || err);
-            return `[Analisis Temuan Agen 1]:\n${dataTemuan.filter(t => t.includes('AGEN 1')).join('\n') || 'Analisis artikel selesai.'}`;
-          });
-        }
-        await sleep(1500); // Jeda adaptif sebelum dokumen divergen
-        if (divergenScrapedText.trim()) {
-          laporanPakarAgen2 = await callLLMBackend({
-            ...config,
-            messages: [],
-            model: masterResearchModel,
-            prompt: promptCernaDivergen,
-            system: 'Anda adalah Agen 2: Analis Data Divergen yang bertugas membedah konten teknis dan independen.'
-          }).catch(err => {
-            console.warn('Gagal pencernaan artikel Agen 2:', err?.message || err);
-            return `[Analisis Temuan Agen 2]:\n${dataTemuan.filter(t => t.includes('AGEN 2')).join('\n') || 'Analisis artikel divergen selesai.'}`;
-          });
-        }
-      } else {
-        const [hasil1, hasil2] = await Promise.all([
-          (primerScrapedText.trim()) ? callLLMBackend({
-            ...config,
-            messages: [],
-            model: masterResearchModel,
-            prompt: promptCernaPrimer,
-            system: 'Anda adalah Agen 1: Analis Web Primer yang bertugas membedah dan menyaring konten artikel web.'
-          }).catch(err => {
-            console.warn('Gagal pencernaan artikel Agen 1:', err?.message || err);
-            return `[Analisis Temuan Agen 1]:\n${dataTemuan.filter(t => t.includes('AGEN 1')).join('\n') || 'Analisis artikel selesai.'}`;
-          }) : Promise.resolve('Tidak ada artikel web primer yang dicerna.'),
-
-          (divergenScrapedText.trim()) ? callLLMBackend({
-            ...config,
-            messages: [],
-            model: masterResearchModel,
-            prompt: promptCernaDivergen,
-            system: 'Anda adalah Agen 2: Analis Data Divergen yang bertugas membedah konten teknis dan independen.'
-          }).catch(err => {
-            console.warn('Gagal pencernaan artikel Agen 2:', err?.message || err);
-            return `[Analisis Temuan Agen 2]:\n${dataTemuan.filter(t => t.includes('AGEN 2')).join('\n') || 'Analisis artikel divergen selesai.'}`;
-          }) : Promise.resolve('Tidak ada artikel web divergen yang dicerna.')
-        ]);
-        laporanPakarAgen1 = hasil1;
-        laporanPakarAgen2 = hasil2;
-      }
-    } catch (digestErr) {
-      console.warn('Pencernaan artikel oleh Model Riset mengalami kendala:', digestErr?.message || digestErr);
-    }
-
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Pencernaan selesai: Model Riset (${masterResearchModel}) telah memproduksi output telaah Primer & Divergen.`);
-
-    // Publikasikan hasil telaah mendalam ke snapshot live inspection
-    if (task.liveInspection) {
-      if (task.liveInspection.agent1 && laporanPakarAgen1) task.liveInspection.agent1.analysis = laporanPakarAgen1;
-      if (task.liveInspection.agent2 && laporanPakarAgen2) task.liveInspection.agent2.analysis = laporanPakarAgen2;
+    if (scrapedPages.length === 0) {
+      throw new Error(`Tidak dapat mengekstrak teks isi dari URL yang diberikan. Pastikan tautan dapat diakses publik.`);
     }
 
     // ==========================================
-    // PILAR 3, 4, & 5: VALIDASI SUMBER, KATEGORISASI TREN & LAPORAN TERSTRUKTUR (MULTI-AGENT SYNTHESIS)
+    // TAHAP 2/3: DEKONSTRUKSI KONTEN, ANALISIS DATA TERBARU VS DATA LAMA
     // ==========================================
-    if (task.aborted) {
-      task.status = 'dibatalkan';
-      task.currentStep = 'Riset dihentikan oleh pengguna.';
-      task.completedAt = new Date().toISOString();
-      return;
-    }
+    task.currentStep = `[Langkah 2/3] Model Riset (${masterResearchModel}) membedah struktur isi, mendeteksi fakta terbaru vs konteks lama...`;
+    task.progressPercent = 60;
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 2/3] Model Riset (${masterResearchModel}) menganalisis mendalam: membedah isi, perubahan terbaru, dan status lama.`);
 
-    // ==========================================
-    // PILAR 3: AUDIT, KOREKSI & PENYEMPURNAAN OLEH MODEL RISET (LEAD REVIEWER & CORRECTOR)
-    // Sesuai Mandat Kaisar: Model riset tunggal bertindak sebagai pengoreksi yang menyempurnakan,
-    // menghubungkan output telaah Primer & Divergen, serta mengelaborasi dokumen laporan riset secara sangat mendalam dan luas.
-    // ==========================================
-    task.currentStep = `[Langkah 3/4] Model Riset (${masterResearchModel}) mengoreksi, menghubungkan temuan Primer & Divergen, serta menyempurnakan laporan komprehensif...`;
-    task.progressPercent = 85;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 3/4] Model Riset (${masterResearchModel}) mulai mengoreksi dan merajut konektivitas temuan Primer & Divergen.`);
+    const docsBlock = scrapedPages.map((p, idx) => `
+=====================================================
+DOKUMEN KUSTOM #${idx + 1}: ${p.title}
+URL: ${p.url}
+DOMAIN: ${p.domain}
+=====================================================
+${p.content.slice(0, 14000)}
+=====================================================
+`).join('\n\n');
 
-    // Batasi muatan data temuan di corrector prompt agar tidak melampaui context window limit LLM (maksimal 16.000 karakter)
-    let rawTemuanBlock = dataTemuan.join('\n\n');
-    if (rawTemuanBlock.length > 16000) {
-      rawTemuanBlock = rawTemuanBlock.substring(0, 16000) + '\n\n... [Data temuan lanjutan dipadatkan untuk batas efisiensi context window model]';
-    }
+    const promptBedahKomparatif = `Anda adalah Ahli Analisis Dokumen Web & Intelijen Data Kustom (Deep Custom URL Web Content Analyzer).
+Instruksi Pengguna: "${topik}"
 
-    const correctorPrompt = `Anda adalah Lead Scientific Reviewer, Fact-Corrector & Master Enhancer.
-Tugas utama Anda BUKAN sekadar merangkum atau menulis ulang secara dangkal, melainkan:
-1. MENGOREKSI & MEMVALIDASI: Periksa fakta, deteksi klaim tanpa dasar, koreksi kesalahan teknis atau bias dari output telaah Agen 1 dan Agen 2.
-2. MENGHUBUNGKAN SECARA LOGIS (INTERCONNECTIVITY): Buat output telaah Agen 1 (Pakar Web Google) dan Agen 2 (Pakar Analisis Divergen) SALING TERHUBUNG dan bersinergi, menjelaskan bagaimana fakta primer berhubungan dengan sudut pandang teknis independen.
-3. MENYEMPURNAKAN & MENGELABORASI SECARA MENDALAM: Elaborasikan temuan menjadi laporan riset ilmiah yang SANGAT MENDALAM, KAYA DATA, KOMPREHENSIF, DAN PANJANG/BANYAK (Deep Comprehensive Report) tahun rujukan 2026.
+Berikut adalah isi teks LENGKAP dari URL kustom yang diberikan pengguna:
+${docsBlock}
 
-=== OUTPUT ANALISIS DARI AGIS 1 (PAKAR WEB GOOGLE PRIMER: ${masterResearchModel}) ===
-${laporanPakarAgen1 || 'Telaah Agen 1 selesai.'}
+TUGAS ANDA:
+Lakukan analisis mendalam dan kritis terhadap konten di atas dengan fokus pada 4 pilar analisis utama:
+1. POKOK BAHASAN & STRUKTUR ISI: Apa tujuan, fungsi, topik, dan arsitektur yang dijelaskan di halaman ini?
+2. INFORMASI & TEMUAN TERBARU (THE LATEST UPDATES): Apa fakta terbaru, versi rilis, fitur baru, tanggal pembaruan, perubahan kebijakan, atau data termutakhir yang dicantumkan?
+3. KONTEKS & INFORMASI LAMA (HISTORICAL / LEGACY CONTEXT): Apa kondisi sebelumnya, versi terdahulu, status lama yang digantikan, atau informasi masa lalu yang menjadi dasar perbandingan?
+4. KOMPARASI EVOLUSI (BARU VS LAMA): Apa perbedaan utama antara apa yang lama dengan apa yang baru? Apa yang ditinggalkan/dihapus (deprecated), dan apa yang menjadi standar baru?
 
-=== OUTPUT ANALISIS DARI AGEN 2 (PAKAR ANALISIS DIVERGEN & DOMAIN MANDIRI: ${masterResearchModel}) ===
-${laporanPakarAgen2 || 'Telaah Agen 2 selesai.'}
+Tuliskan telaah analitis mendalam dalam 3-5 paragraf berbobot teknis tinggi, padat fakta, dan objektif.`;
 
-=== DATA PEMINDAIAN WEB UTUH & TEMUAN MULTI-TAHAP ===
-${rawTemuanBlock}
-
-Daftar Seluruh Sumber Rujukan Terverifikasi (${allSources.length} Dokumen Web):
-${allSources.map((s, idx) => `[${idx + 1}] [${s.sourceProvider || 'Web'}] ${s.title}: ${s.url}`).join('\n')}
-
-Format Laporan Komprehensif yang WAJIB dipatuhi:
-# 🔬 DEEP RESEARCH REPORT: ${topik.toUpperCase()}
-> **Status:** Riset Mendalam Multi-Agen Terkoreksi & Tervalidasi Silang  
-> **Lead Auditor & Corrector:** Model Riset (${masterResearchModel})  
-> **Sumber Terverifikasi:** ${scrapedArticles.length} Dokumen Scraping Utuh & ${allSources.length} Referensi Web  
-> **Tahun Rujukan:** 2026
-
----
-
-## 1. 📌 Pendahuluan & Ringkasan Komprehensif (Comprehensive Overview)
-(Uraikan secara mendalam esensi topik, konteks global, latar belakang historis, dan urgensi temuan dalam 3-4 paragraf berbobot analitis)
-
-## 2. 🔍 Temuan Utama & Elaborasi Teknis Mendalam (In-Depth Technical Analysis)
-(Analisis teknis mendalam dan panjang mengenai fakta spesifik, arsitektur, mekanisme kerja, data riil, dan dinamika industri 2026)
-
-## 3. ⚖️ Koreksi Faktual, Konsensus & Validasi Silang Multi-Model (Fact-Correction & Cross-Verification)
-(Bagian koreksi: Jelaskan secara transparan bagian mana dari klaim awal yang telah dikoreksi, diverifikasi, atau diselaraskan antara data Agen 1 dan Agen 2. Hubungkan secara jelas titik temu konsensus dan perbedaan pandangannya)
-
-## 4. 🔗 Sinergi & Konektivitas Temuan (Interconnected Synthesis Agen 1 & Agen 2)
-(Jelaskan bagaimana temuan fakta primer dari Agen 1 dan telaah teknis divergen dari Agen 2 saling melengkapi, membentuk pemahaman holistik yang tidak bisa didapat dari satu sumber saja)
-
-## 5. 📊 Matriks Data Komparatif, Statistik & Tren Pasar 2026
-- **Data Statistik & Angka Konkret:** (Sajikan angka statistik riil, persentase, estimasi nilai pasar 2026)
-- **Perspektif Pakar & Industri:** (Opini tokoh, pakar independen, dan konsensus lembaga riset)
-- **Tantangan Teknis, Keamanan & Etika:** (Analisis hambatan mendalam)
-- **Transformasi & Potensi Pasar:** (Dampak ekonomi dan teknologis)
-
-## 6. ⚠️ Analisis Risiko, Regulasi & Hambatan Implementasi
-(Uraian komprehensif mengenai kepatuhan hukum, regulasi, kendala teknis, dan langkah mitigasi risiko)
-
-## 7. 🚀 Proyeksi Masa Depan & Trajektori Tren (Future Roadmap 2026-2030)
-(Analisis mendalam mengenai arah perkembangan tren teknologi, riset masa depan, dan evolusi ekosistem hingga tahun-tahun mendatang)
-
-## 8. 🛠️ Rekomendasi Strategis & Kerangka Implementasi Praktis
-(Langkah konkret teknis, panduan arsitektur sistem, blueprint implementasi, atau contoh penerapan nyata yang aplikatif)
-
----
-### 📚 Daftar Pustaka / Sumber Referensi Terverifikasi:
-Sajikan seluruh tautan asli markdown [Nama Sumber](URL) lengkap dengan keterangan sumber asal (Serper Primer / Serper Divergen) agar pembaca dapat langsung merujuk ke dokumen aslinya.`;
-
-    if (task.liveInspection) {
-      task.liveInspection.synthesizer = {
-        name: 'Model 3 (Lead Corrector & Enhancer)',
-        model: masterResearchModel,
-        status: 'menyusun',
-        text: 'Model Riset sedang mengoreksi, menghubungkan temuan Agen 1 & Agen 2, serta menyempurnakan dokumen riset komprehensif...',
-        timestamp: new Date().toLocaleTimeString('id-ID')
-      };
-    }
-
-    if (isFreeTierModel(masterResearchModel)) {
-      await sleep(1500); // Jeda adaptif sebelum model pengoreksi/penyusun laporan akhir
-    }
-
-    const laporanAkhir = await callLLMBackend({
+    let hasilBedahAnalisis = await callLLMBackend({
       ...config,
-      prompt: correctorPrompt,
-      system: 'Anda adalah Lead Scientific Reviewer, Fact-Corrector & Master Enhancer yang mengoreksi, menghubungkan, menyempurnakan, dan mengelaborasi laporan riset komprehensif secara mendalam dan berbobot tinggi.',
-      model: masterResearchModel
+      messages: [],
+      model: masterResearchModel,
+      prompt: promptBedahKomparatif,
+      system: 'Anda adalah Deep Research Web Content Analyzer yang objektif, kritis, dan sangat teliti dalam membedakan data baru vs lama.'
+    }).catch(err => {
+      console.warn('Gagal analisis bedah dokumen:', err?.message || err);
+      return `[Analisis Ekstraksi Dokumen]:\n${scrapedPages.map(p => `- ${p.title} (${p.url}): ${p.content.slice(0, 400)}...`).join('\n')}`;
     });
 
-    if (task.liveInspection) {
-      task.liveInspection.synthesizer = {
-        name: 'Model 3 (Lead Corrector & Enhancer)',
-        model: masterResearchModel,
-        status: 'selesai',
-        text: laporanAkhir,
-        timestamp: new Date().toLocaleTimeString('id-ID')
-      };
-    }
-
-    if (task.aborted) {
-      task.status = 'dibatalkan';
-      task.currentStep = 'Riset dihentikan oleh pengguna.';
-      task.completedAt = new Date().toISOString();
-      return;
-    }
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Bedah komparatif selesai: Model Riset berhasil mengekstrak poin isi, pembaruan terbaru, dan konteks lama.`);
 
     // ==========================================
-    // PILAR 4: PENYUSUNAN RANGKUMAN EKSEKUTIF ANTARMUKA CHAT OLEH MODEL RISET
-    // Sesuai Mandat Kaisar: Model riset merumuskan rangkuman khusus untuk tampil di gelembung obrolan chat.
+    // TAHAP 3/3: PENYUSUNAN LAPORAN EKSEKUTIF DENGAN MATRIKS KOMPARASI
     // ==========================================
-    task.currentStep = `[Langkah 4/4] Model Riset (${masterResearchModel}) merumuskan rangkuman eksekutif untuk antarmuka chat...`;
-    task.progressPercent = 95;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 4/4] Model Riset (${masterResearchModel}) merumuskan rangkuman eksekutif antarmuka chat.`);
+    task.currentStep = `[Langkah 3/3] Menyusun Laporan Analisis Eksekutif Web & Matriks Komparasi...`;
+    task.progressPercent = 85;
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 3/3] Menyusun Laporan Analisis Eksekutif lengkap dengan tabel perbandingan Baru vs Lama.`);
 
-    let summaryInput = (laporanAkhir || '').trim();
-    if (summaryInput.length > 18000) {
-      summaryInput = summaryInput.substring(0, 18000) + '\n\n... [Laporan lengkap dipadatkan untuk penyusunan rangkuman eksekutif]';
-    }
+    const promptLaporanAkhir = `Anda adalah Lead Executive Research Architect.
+Perintah / Pertanyaan Pengguna: "${topik}"
+Daftar URL Kustom yang Dianalisis: ${targetUrls.join(', ')}
 
-    const summaryPrompt = `Anda adalah Lead Executive Communicator & Chat Summarizer.
-Tugas Anda adalah membaca Laporan Riset Komprehensif yang telah dikoreksi dan disempurnakan mengenai topik: "${topik}".
+Hasil Telaah Analitis Mendalam:
+${hasilBedahAnalisis}
 
-=== LAPORAN RISET LENGKAP TERKOREKSI ===
-${summaryInput}
+Ringkasan Dokumen Sumber:
+${docsBlock.slice(0, 8000)}
 
-=== TUGAS ANDA ===
-Susun RANGKUMAN EKSEKUTIF (Executive Summary) padat, tajam, dan elegan yang akan ditampilkan LANGSUNG DI ANTARMUKA CHAT (di dalam gelembung obrolan pengguna).
-Rangkuman ini BUKAN laporan lengkap (karena laporan lengkap ${allSources.length} sumber akan dibaca lewat modal tombol).
-Rangkuman ini harus menyajikan intisari paling berharga agar pengguna langsung paham dalam 30 detik!
+Susunlah LAPORAN ANALISIS MENDALAM WEB KUSTOM yang komprehensif, elegan, dan profesional dalam format Markdown lengkap dengan struktur hierarki berikut:
 
-Format Rangkuman Chat yang WAJIB dipatuhi:
-### 💡 Rangkuman Eksekutif Riset
-(Uraikan 1-2 paragraf padat mengenai esensi topik dan kesimpulan utama yang telah divalidasi)
+# 🌐 LAPORAN ANALISIS MENDALAM: PENGANALISIS WEB KUSTOM URL
+> **URL Target:** ${targetUrls.map(u => `[${u}](${u})`).join(', ')}  
+> **Fokus Analisis:** Dekonstruksi Konten Utuh, Data Terbaru vs Lama, & Matriks Evolusi  
+> **Model Analisis:** ${masterResearchModel}  
 
-#### ⚡ Poin Kunci & Temuan Terkoreksi:
-- **Inti Temuan:** (Poin krusial dari hasil penelusuran 2026)
-- **Konsensus & Koreksi:** (Bagaimana temuan divalidasi dan diselaraskan)
-- **Data & Fakta Utama:** (Statistik konkret, metrik, atau data spesifik terverifikasi)
-- **Tantangan Utama:** (Hambatan kritis atau risiko regulasi yang perlu diwaspadai)
+---
 
-#### 🚀 Implikasi Strategis & Rekomendasi:
-(2-3 butir rekomendasi taktis atau langkah strategis yang dapat langsung diambil)
+## 1. 📌 Ringkasan Eksekutif & Identitas Sumber
+(Jelaskan secara ringkas maksud halaman, entitas pemilik, topik sentral, dan ringkasan nilai informasi yang terkandung).
 
-*Catatan: Rangkuman ringkas ini disiapkan khusus untuk antarmuka chat. Dokumen analisis riset mendalam utuh (${allSources.length} sumber) dapat dibuka melalui tombol di bawah.*`;
+## 2. 🔍 Analisis Isi Mendalam (Core Content Breakdown)
+(Bedah secara detail poin-poin utama, arsitektur, argumen, atau fungsi yang dijelaskan pada situs/halaman tersebut).
 
-    let chatSummary = '';
-    try {
-      if (isFreeTierModel(masterResearchModel)) {
-        await sleep(1500); // Jeda adaptif sebelum rangkuman chat
-      }
-      chatSummary = await callLLMBackend({
-        ...config,
-        prompt: summaryPrompt,
-        system: 'Anda adalah Model 4: Executive Summarizer yang menyajikan intisari riset secara padat, tajam, profesional, dan siap saji di antarmuka chat.',
-        model: masterResearchModel
-      });
-    } catch (sumErr) {
-      console.warn('Penyusunan rangkuman chat oleh Model Riset mengalami kendala:', sumErr?.message || sumErr);
-      chatSummary = `### 💡 Rangkuman Eksekutif Riset\nRiset mendalam mengenai **${topik}** telah berhasil diselesaikan dan divalidasi silang melalui ${allSources.length} sumber rujukan terverifikasi.\n\nSilakan klik tombol **[📖 Buka Laporan]** di bawah untuk membaca dokumen analisis lengkap hasil riset.`;
-    }
+## 3. ⚡ Sorotan Temuan & Pembaruan Terbaru (The Latest Updates)
+(Uraikan secara spesifik apa saja fakta, versi, fitur, tanggal revisi, atau kebijakan terbaru yang diumumkan atau tercatat di URL ini).
 
-    if (task.liveInspection) {
-      task.liveInspection.model4 = {
-        name: 'Model 4 (Executive Chat Summarizer)',
-        model: masterResearchModel,
-        status: 'selesai',
-        text: chatSummary,
-        timestamp: new Date().toLocaleTimeString('id-ID')
-      };
-    }
+## 4. 📜 Konteks Historis & Informasi Terdahulu (Past Context & Legacy Info)
+(Jelaskan latar belakang lama, versi sebelumnya, kondisi sebelum pembaruan, atau baseline terdahulu yang disebutkan).
+
+## 5. ⚖️ Matriks Komparasi Evolusi (Tabel: Kondisi Lama vs Kondisi Baru)
+(Buat tabel Markdown terstruktur yang membandingkan: Aspek/Fitur | Kondisi / Versi Lama | Kondisi / Versi Terbaru | Dampak / Manfaat).
+
+## 6. 💡 Implikasi Kritis, Keabsahan & Rekomendasi Praktis
+(Berikan evaluasi kritis terhadap validitas informasi, implikasi bagi pengguna/developer/industri, serta langkah rekomendasi konkret).
+
+## 7. 🔗 Referensi Sumber Kustom Terverifikasi
+(Daftar tautan asli lengkap yang dapat diklik langsung oleh pengguna).
+
+Instruksi Tambahan:
+- Buat laporan komprehensif, padat data, dan profesional.
+- JANGAN memotong bagian laporan.`;
+
+    let laporanAkhir = await callLLMBackend({
+      ...config,
+      messages: [],
+      model: masterResearchModel,
+      prompt: promptLaporanAkhir,
+      system: 'Anda adalah Executive Research Architect yang menyusun laporan riset tingkat tinggi yang terstruktur rapi.'
+    }).catch(err => {
+      console.warn('Gagal menyusun laporan akhir:', err?.message || err);
+      return `# 🌐 LAPORAN ANALISIS MENDALAM: PENGANALISIS WEB KUSTOM URL\n\n> URL Target: ${targetUrls.join(', ')}\n\n${hasilBedahAnalisis}`;
+    });
+
+    // Buat rangkuman chat eksekutif untuk respon chat ringkas yang langsung menjawab inti pertanyaan
+    const promptChatSummary = `Anda adalah Executive Chat Summarizer.
+Pertanyaan Pengguna: "${topik}"
+Laporan Analisis Web Lengkap:
+${laporanAkhir.slice(0, 6000)}
+
+Tugas:
+Tuliskan jawaban langsung yang ringkas, elegan, dan to-the-point (2-3 paragraf) dalam percakapan chat yang menjelaskan:
+1. Inti isi halaman web yang dianalisis.
+2. Apa yang paling baru dan apa yang lama/berubah.
+3. Kesimpulan utama bagi pengguna.
+Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
+
+    let chatSummary = await callLLMBackend({
+      ...config,
+      messages: [],
+      model: masterResearchModel,
+      prompt: promptChatSummary,
+      system: 'Anda adalah AI Assistant yang ramah, efisien, dan komunikatif.'
+    }).catch(() => '');
 
     if (task.aborted) {
       task.status = 'dibatalkan';
       task.currentStep = 'Riset dihentikan oleh pengguna.';
       task.completedAt = new Date().toISOString();
       if (config.sessionId && task.hasil) {
-        appendAssistantMessageToSessionDisk(config.sessionId, task.hasil + '\n\n*[Riset dihentikan oleh pengguna]*', config.model || config.finalModel || masterResearchModel || 'Deep Research Pro', {
+        appendAssistantMessageToSessionDisk(config.sessionId, task.hasil + '\n\n*[Riset dihentikan oleh pengguna]*', masterResearchModel, {
           userId: (task && task.userId) || config.userId || 'default',
           isDeepResearch: true,
           chatSummary: chatSummary,
@@ -3380,15 +2893,32 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
     task.status = 'selesai';
     task.progressPercent = 100;
-    task.currentStep = 'Laporan Riset & Rangkuman Eksekutif Chat Berhasil Disusun.';
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Riset selesai sempurna: Laporan Lengkap (Model 3) & Rangkuman Chat (Model 4) siap.`);
+    task.currentStep = 'Laporan Analisis Web Kustom URL Berhasil Disusun.';
+    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Analisis selesai sempurna: Laporan Komparasi Lengkap & Rangkuman Eksekutif siap.`);
     task.hasil = laporanAkhir;
     task.chatSummary = chatSummary;
     task.sources = allSources;
     task.completedAt = new Date().toISOString();
+    task.liveInspection = {
+      ...(task.liveInspection || {}),
+      synthesizer: {
+        name: 'Model Riset (Lead Executive Architect)',
+        model: masterResearchModel,
+        status: 'selesai',
+        text: laporanAkhir,
+        length: (laporanAkhir || '').length
+      },
+      model4: {
+        name: 'Model Ringkasan (Executive Chat Summarizer)',
+        model: masterResearchModel,
+        status: 'selesai',
+        text: chatSummary,
+        length: (chatSummary || '').length
+      }
+    };
 
     if (config.sessionId) {
-      appendAssistantMessageToSessionDisk(config.sessionId, laporanAkhir, config.model || config.finalModel || masterResearchModel || 'Deep Research Pro', {
+      appendAssistantMessageToSessionDisk(config.sessionId, laporanAkhir, masterResearchModel, {
         userId: (task && task.userId) || config.userId || 'default',
         isDeepResearch: true,
         chatSummary: chatSummary,
@@ -3397,10 +2927,10 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     }
 
   } catch (error) {
-    console.error('Deep research failed:', error);
+    console.error('Deep custom URL analysis failed:', error);
     task.status = 'gagal';
     task.error = error.message;
-    task.currentStep = 'Riset gagal: ' + error.message;
+    task.currentStep = 'Analisis gagal: ' + error.message;
     task.completedAt = new Date().toISOString();
   }
 }
@@ -3986,13 +3516,27 @@ async function requestHandler(req, res) {
     }
   }
 
-  // Deep Research: Start Autonomous Research (Background Worker)
+  // Deep Research: Start Custom URL Deep Analysis (Background Worker)
   if ((pathname === '/api/mulai-riset' || pathname === '/api/deep-research/start') && method === 'POST') {
     try {
       const body = await parseBody(req);
       const topik = body.topik || body.topic || body.query || body.prompt || '';
       if (!topik) {
         return sendJSON(res, 400, { error: 'Parameter `topik` atau `prompt` diperlukan untuk memulai Deep Research.' });
+      }
+
+      // Kumpulkan dan validasi URL target kustom pengguna
+      const rawUrls = body.targetUrls || body.urls || body.customUrls || [];
+      const targetUrls = Array.isArray(rawUrls) ? rawUrls.filter(Boolean) : (rawUrls ? [rawUrls] : []);
+      const extractedUrls = extractCustomAnalysisUrls(`${topik} ${body.prompt || ''}`);
+      extractedUrls.forEach(u => {
+        if (!targetUrls.includes(u)) targetUrls.push(u);
+      });
+
+      if (targetUrls.length === 0) {
+        return sendJSON(res, 400, {
+          error: 'Mode Deep Research kini berfungsi sebagai Penganalisis Web Kustom URL. Harap sertakan minimal 1 tautan URL kustom (misal: https://example.com/artikel) untuk dianalisis secara mendalam.'
+        });
       }
 
       if (body.endpoint && typeof body.endpoint === 'string') {
@@ -4014,6 +3558,7 @@ async function requestHandler(req, res) {
         sessionId: rawSessionId,
         userId: researchUserId,
         topik,
+        targetUrls,
         status: 'sedang_meneliti',
         progressPercent: 10,
         currentStep: 'Inisialisasi Agen Deep Research...',
@@ -4032,10 +3577,11 @@ async function requestHandler(req, res) {
       const rawOllamaKey = req.headers['x-ollama-key'] ? String(req.headers['x-ollama-key']).replace(/^Bearer\s+/i, '').trim() : null;
       const rawOpenRouterKey = req.headers['x-openrouter-key'] ? String(req.headers['x-openrouter-key']).replace(/^Bearer\s+/i, '').trim() : null;
 
-      // Jalankan proses riset secara asinkronus di latar belakang dengan arsitektur 1-Model super efisien
+      // Jalankan proses analisis web kustom secara asinkronus di latar belakang dengan arsitektur 1-Model super efisien
       jalankanRisetOtonom(taskId, topik, {
         sessionId: rawSessionId,
         userId: researchUserId,
+        targetUrls,
         messages: body.messages || [],
         model: masterModel,
         provider: body.provider || (masterModel.includes('/') ? 'openrouter' : (masterModel.includes(':') ? 'ollama' : 'openrouter')),

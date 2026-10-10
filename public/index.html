@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261010_v170">
+  <link rel="stylesheet" href="style.css?v=20261010_v171">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -276,17 +276,29 @@
           <button class="clear-preset-btn" id="clearPresetBtn"><i class="fa-solid fa-xmark"></i></button>
         </div>
 
-        <!-- Deep Research Active Banner with Cross [X] Button -->
+        <!-- Deep Research Active Banner with Custom URL Input & Cross [X] Button -->
         <div class="active-research-banner" id="activeResearchBanner" style="display: none;">
-          <div class="research-banner-left">
-            <span class="research-banner-pulse"></span>
-            <i class="fa-solid fa-microscope" style="color: var(--neon-amber);"></i>
-            <span class="research-banner-text"><strong>Deep Research Aktif:</strong> Riset mendalam multi-iterasi</span>
+          <div class="research-banner-top">
+            <div class="research-banner-left">
+              <span class="research-banner-pulse"></span>
+              <i class="fa-solid fa-microscope" style="color: var(--neon-amber);"></i>
+              <span class="research-banner-text"><strong>Deep Research Aktif:</strong> Penganalisis Web Kustom URL</span>
+            </div>
+            <button type="button" class="clear-research-banner-btn" id="clearResearchBannerBtn" title="Matikan Deep Research (Kembali ke mode biasa)" aria-label="Matikan Deep Research">
+              <i class="fa-solid fa-xmark"></i>
+              <span>Matikan</span>
+            </button>
           </div>
-          <button type="button" class="clear-research-banner-btn" id="clearResearchBannerBtn" title="Matikan Deep Research (Kembali ke mode biasa)" aria-label="Matikan Deep Research">
-            <i class="fa-solid fa-xmark"></i>
-            <span>Matikan</span>
-          </button>
+          <div class="research-banner-url-row">
+            <div class="research-url-input-wrap">
+              <i class="fa-solid fa-link" style="color: var(--neon-amber); font-size: 0.8rem;"></i>
+              <input type="url" id="researchTargetUrlInput" placeholder="Tempel URL kustom yang ingin dianalisis (misal: https://example.com/artikel)..." autocomplete="off" spellcheck="false">
+              <button type="button" id="researchAddUrlBtn" class="research-add-url-btn" title="Tambahkan URL target">
+                <i class="fa-solid fa-plus"></i> <span>Tambah</span>
+              </button>
+            </div>
+            <div class="research-url-chips-container" id="researchUrlChips" style="display: none;"></div>
+          </div>
         </div>
 
         <!-- BOLA NEUTRON QUANTUM -->
@@ -471,8 +483,8 @@
                     <i class="fa-solid fa-microscope"></i>
                   </div>
                   <div class="search-item-info">
-                    <span class="search-item-title">Mode Premium (Deep Research)</span>
-                    <span class="search-item-desc">Riset mendalam multi-iterasi & sintesis otonom</span>
+                    <span class="search-item-title">Mode Deep Research (Penganalisis URL Kustom)</span>
+                    <span class="search-item-desc">Analisis mendalam isi, fakta terbaru vs lama dari URL kustom</span>
                   </div>
                   <div class="search-item-action-area">
                     <i class="fa-solid fa-check search-item-check" style="display: none;"></i>
@@ -1511,6 +1523,6 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
-  <script src="app.js?v=20261010_v170"></script>
+  <script src="app.js?v=20261010_v171"></script>
 </body>
 </html>
