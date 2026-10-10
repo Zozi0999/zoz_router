@@ -829,7 +829,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         setTimeout(() => a.remove(), 500);
         // F14: jalur fallback TIDAK boleh menampilkan toast "berhasil" — unduhan
         // otomatis sering diblokir CORS dan tab baru hanya membuka gambar.
-        showToast('Gagal mengunduh langsung (CORS) — gambar dibuka di tab baru, gunakan klik-kanan → Simpan Gambar.', 'info');
+        showToast('Gagal mengunduh langsung (CORS) — gambar dibuka di tab baru, gunakan klik-kanan → Simpan Gambar.', 'error');
       }
       AudioEngine.click();
     },
@@ -14415,6 +14415,10 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           stageEl._tocScrollHandler = null;
         }
       }
+      // Clean up AI File Studio active file reference to prevent memory leak
+      if (modalId === 'aiFileStudioModal') {
+        activeAIFile = null;
+      }
       if (triggerHistoryBack && history.state?.modal === modalId) {
         history.back();
       }
@@ -15313,13 +15317,17 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           (this.currentMode === 'youtube' && this.ytPlayer && typeof this.ytPlayer.getPlayerState === 'function' && (this.ytPlayer.getPlayerState() === 2 || this.ytPlayer.getPlayerState() === -1)) ||
           (this.currentMode === 'ambient' && (!this.audioCtx || this.audioCtx.state !== 'running') && this.ambientNodes.length === 0);
         if (stillSilent) {
-          this._reviveAttempts = (this._reviveAttempts || 0) + 1;
-          if (this._reviveAttempts >= 4) {
+          // Separate attempt counters per mode to prevent ambient failures from
+          // affecting file/youtube playback recovery (M12)
+          const attemptKey = this.currentMode === 'ambient' ? '_reviveAttemptsAmbient' : '_reviveAttempts';
+          this[attemptKey] = (this[attemptKey] || 0) + 1;
+          if (this[attemptKey] >= 4) {
             this.wantsPlayback = false;
             this.stopGuardian();
           }
         } else {
-          this._reviveAttempts = 0;
+          const attemptKey = this.currentMode === 'ambient' ? '_reviveAttemptsAmbient' : '_reviveAttempts';
+          this[attemptKey] = 0;
         }
       } catch (_) {}
     },

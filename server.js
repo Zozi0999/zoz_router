@@ -1411,8 +1411,8 @@ setInterval(() => {
 function pruneActiveChatTasks() {
   try {
     const FIFTEEN_MINS = 15 * 60 * 1000;
-    // M26: task yang MASIH streaming diberi jangkau60 menit — dulu semuanya dipotong
-    // di15 menit, sehingga generasi panjang (riset/panjang/jawaban lambat) kehilangan
+    // M26: task yang MASIH streaming diberi jangkau 60 menit — dulu semuanya dipotong
+    // di 15 menit, sehingga generasi panjang (riset/panjang/jawaban lambat) kehilangan
     // proxyReq-nya di tengah jalan dan parsial tak pernah tersimpan.
     const SIXTY_MINS = 60 * 60 * 1000;
     const now = Date.now();
@@ -1425,8 +1425,16 @@ function pruneActiveChatTasks() {
         }
         const ageLimit = t.status === 'streaming' ? SIXTY_MINS : FIFTEEN_MINS;
         if (t.startedAt && (now - t.startedAt > ageLimit)) {
+          // Destroy proxy request first to prevent use-after-free
           if (t.proxyReq && !t.proxyReq.destroyed) {
             try { t.proxyReq.destroy(); } catch (_) {}
+          }
+          // Flush any remaining buffer before deleting
+          if (t.rawBuffer && t.rawBuffer.trim()) {
+            flushChatTaskBuffer(sid, t.provider || 'openrouter');
+          }
+          if (t.fullText && t.fullText.trim()) {
+            appendAssistantMessageToSessionDisk(sid, t.fullText + `\n\n*[Respons terputus: Kadaluwarsa]*`, t.model);
           }
           delete dbActiveChatTasks[sid];
         }
