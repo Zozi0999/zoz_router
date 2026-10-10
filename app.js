@@ -510,10 +510,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     activePresetBanner: $('#activePresetBanner'),
     activePresetName: $('#activePresetName'),
     clearPresetBtn: $('#clearPresetBtn'),
-    activeResearchBanner: $('#activeResearchBanner'),
-    clearResearchBannerBtn: $('#clearResearchBannerBtn'),
-    researchManageUrlsBtn: $('#researchManageUrlsBtn'),
-    researchUrlCountBadge: $('#researchUrlCountBadge'),
     researchUrlManagerModal: $('#researchUrlManagerModal'),
     researchUrlManagerInput: $('#researchUrlManagerInput'),
     researchUrlManagerAddBtn: $('#researchUrlManagerAddBtn'),
@@ -2798,6 +2794,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     try { localStorage.removeItem('zoz_last_active_session_id'); } catch (_) {}
     STATE.isImageGenMode = false;
     updateImageGenModeUI();
+    STATE.isMusicGenMode = false;
+    if (typeof updateMusicGenModeUI === 'function') updateMusicGenModeUI();
+    STATE.isVideoGenMode = false;
+    if (typeof updateVideoGenModeUI === 'function') updateVideoGenModeUI();
+    clearResearchTargetUrls();
     STATE.attachedDocs = [];
     clearAttachedImages();
     if (els.docFileInput) els.docFileInput.value = '';
@@ -2893,6 +2894,17 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     try { localStorage.setItem('zoz_last_active_session_id', sessionId); } catch (_) {}
     STATE.isImageGenMode = false;
     updateImageGenModeUI();
+    STATE.isMusicGenMode = false;
+    if (typeof updateMusicGenModeUI === 'function') updateMusicGenModeUI();
+    STATE.isVideoGenMode = false;
+    if (typeof updateVideoGenModeUI === 'function') updateVideoGenModeUI();
+    // Sinkronkan URL target riset sesuai sesi yang dituju
+    if (Array.isArray(targetSession.researchTargetUrls)) {
+      STATE.researchTargetUrls = [...targetSession.researchTargetUrls];
+    } else {
+      STATE.researchTargetUrls = [];
+    }
+    renderResearchUrlChips();
     STATE.attachedDocs = [];
     clearAttachedImages();
     if (els.docFileInput) els.docFileInput.value = '';
@@ -6295,7 +6307,6 @@ ${organicBlock}
     let effectiveImages = images;
 
     const isExplicitMusicCommand = /^\/(?:music|musik|audio|song|lagu)\b/i.test(text.trim());
-    const isExplicitVideoCommand = /^\/(?:video|vid|clip|animasi)\b/i.test(text.trim());
     const isExplicitImageCommand = /^\/(?:image|img|gambar)\s+/i.test(text.trim());
     const isDirectImageCapable = isModelCapableOfImageGeneration(targetModel);
     const isToolImageCapable = (STATE.mode === 'openrouter' || targetModel.includes('/')) && Boolean(STATE.settings.openRouterKey) && doesModelSupportTools(targetModel);
@@ -6304,9 +6315,6 @@ ${organicBlock}
     if (STATE.isMusicGenMode || isExplicitMusicCommand || isMusicGenerationTrigger(text)) {
       const cleanMusicPrompt = extractMusicPrompt(text);
       await runMusicGeneration(session, cleanMusicPrompt);
-    } else if (STATE.isVideoGenMode || isExplicitVideoCommand || isVideoGenerationTrigger(text)) {
-      const cleanVideoPrompt = extractVideoPrompt(text);
-      await runVideoGeneration(session, cleanVideoPrompt);
     } else if (STATE.isImageGenMode || isExplicitImageCommand) {
       const cleanImgPrompt = extractImagePrompt(text);
       await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel);
@@ -9760,10 +9768,6 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       els.webSearchToggleBtn.title = 'Mode Pencarian Web (Nonaktif - Klik untuk aktifkan)';
     }
 
-    // Floating Deep Research Banner dinonaktifkan (digantikan popup modal langsung)
-    if (els.activeResearchBanner) {
-      els.activeResearchBanner.style.display = 'none';
-    }
     if (mode === 'premium') {
       renderResearchUrlChips();
     }
@@ -9853,6 +9857,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       return false;
     }
     STATE.researchTargetUrls.push(url);
+    syncActiveSessionResearchUrls();
     renderResearchUrlChips();
     if (els.researchTargetUrlInput) els.researchTargetUrlInput.value = '';
     if (els.researchUrlManagerInput) els.researchUrlManagerInput.value = '';
@@ -9864,12 +9869,24 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     if (!Array.isArray(STATE.researchTargetUrls)) return;
     if (index >= 0 && index < STATE.researchTargetUrls.length) {
       STATE.researchTargetUrls.splice(index, 1);
+      syncActiveSessionResearchUrls();
       renderResearchUrlChips();
+    }
+  }
+
+  function syncActiveSessionResearchUrls() {
+    if (STATE.currentSessionId) {
+      const activeSess = STATE.sessions.find(s => s.id === STATE.currentSessionId);
+      if (activeSess) {
+        activeSess.researchTargetUrls = [...STATE.researchTargetUrls];
+        savePersistedState();
+      }
     }
   }
 
   function clearResearchTargetUrls() {
     STATE.researchTargetUrls = [];
+    syncActiveSessionResearchUrls();
     renderResearchUrlChips();
     if (els.researchTargetUrlInput) els.researchTargetUrlInput.value = '';
     if (els.researchUrlManagerInput) els.researchUrlManagerInput.value = '';
@@ -11266,6 +11283,16 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
     container.querySelectorAll('[data-action="open-full-report"]').forEach(el => {
       el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openReport();
+      });
+    });
+
+    // Logo / Badge Deep Research & Badge Sumber di metadata bubble kini bisa diklik untuk langsung membuka laporan & sumber
+    container.querySelectorAll('.engine-badge, .sources-badge').forEach(badge => {
+      badge.style.cursor = 'pointer';
+      badge.setAttribute('title', 'Klik untuk melihat sumber & laporan lengkap riset');
+      badge.addEventListener('click', (e) => {
         e.stopPropagation();
         openReport();
       });
@@ -16855,20 +16882,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         }
         showToast('🎵 Mode AI Music Studio Aktif!');
         AudioEngine.success();
-      } else if (!STATE.isVideoGenMode && /^\/(?:video|vid|clip|animasi)\s+/i.test(val)) {
-        STATE.isVideoGenMode = true;
-        STATE.isImageGenMode = false;
-        STATE.isMusicGenMode = false;
-        els.promptInput.value = val.replace(/^\/(?:video|vid|clip|animasi)\s+/i, '');
-        updateVideoGenModeUI();
-        updateImageGenModeUI();
-        updateMusicGenModeUI();
-        autoResizeTextarea(els.promptInput);
-        if (navigator.vibrate) {
-          try { navigator.vibrate(30); } catch (_) {}
-        }
-        showToast('🎬 Mode AI Video Motion Studio Aktif!');
-        AudioEngine.success();
       } else if ((STATE.isImageGenMode || STATE.isMusicGenMode || STATE.isVideoGenMode) && /^\/(?:chat|teks|text)\s+/i.test(val)) {
         STATE.isImageGenMode = false;
         STATE.isMusicGenMode = false;
@@ -17318,20 +17331,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       e.preventDefault();
       e.stopPropagation();
       toggleSearchDropdown(e);
-    });
-
-    // Tombol silang [X] pada Floating Banner Deep Research (jika ada)
-    els.clearResearchBannerBtn?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      clearResearchTargetUrls();
-      setSearchMode('default');
-      showToast('Mode Deep Research dinonaktifkan. Kembali ke Mode Default.');
-    });
-
-    // Buka modal kelola URL Deep Research
-    els.researchManageUrlsBtn?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openResearchUrlManagerModal();
     });
 
     // Modal: Matikan Mode Riset
