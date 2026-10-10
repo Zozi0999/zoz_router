@@ -16112,8 +16112,10 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
     // Tombol silang [X] pada Floating Banner Deep Research di atas composer
     els.clearResearchBannerBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
-      setSearchMode('off');
-      showToast('Mode Deep Research dinonaktifkan.');
+      // Sesuai label tombolnya ("Kembali ke mode biasa"): matikan Deep Research
+      // tetapi kembali ke Mode Default — bukan mematikan seluruh pencarian web.
+      setSearchMode('default');
+      showToast('Mode Deep Research dinonaktifkan. Kembali ke Mode Default.');
     });
 
     $$('.search-menu-item').forEach(item => {
@@ -16136,6 +16138,16 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
         e.stopPropagation();
         setSearchMode('off');
         showToast('Mode riset/pencarian dinonaktifkan.');
+      });
+      // Elemen ini kini <span role="button" tabindex="0"> (karena <button> bersarang
+      // di dalam <button> dilarang oleh HTML spec dan merusak tampilan menu riset).
+      // Kembalikan perilaku keyboard agar tetap bisa diakses via Enter/Space.
+      btn.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          e.stopPropagation();
+          btn.click();
+        }
       });
     });
 
