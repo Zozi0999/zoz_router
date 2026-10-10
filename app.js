@@ -3877,10 +3877,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (ext === 'docx' || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
       try {
         if (!window.JSZip) {
-          return `[Pustaka pembaca DOCX (JSZip) belum termuat atau diblokir peramban. Tidak dapat membaca file "${file.name}".]`;
+          return Promise.resolve(`[Pustaka pembaca DOCX (JSZip) belum termuat atau diblokir peramban. Tidak dapat membaca file "${file.name}".]`);
         }
         const arrayBuffer = await file.arrayBuffer();
-        const zip = await JSZip.loadAsync(arrayBuffer);
+        let zip;
+        try {
+          zip = await JSZip.loadAsync(arrayBuffer);
+        } catch (zipErr) {
+          console.warn('JSZip loadAsync error:', zipErr);
+          return `[File DOCX "${file.name}" corrupt atau bukan arsip ZIP valid: ${zipErr.message}]`;
+        }
         const docXml = zip.file('word/document.xml');
         if (docXml) {
           const xmlText = await docXml.async('text');

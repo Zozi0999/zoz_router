@@ -222,6 +222,86 @@ function isOllamaEndpointForbidden(endpointUrl) {
 // - literal IP → lolos (isPrivateHost sudah memeriksa angkanya)
 // - DNS gagal (ENOTFOUND dst) → lolos (biarkan koneksi gagal alami dengan pesannya)
 // - me-resolve ke IP privat → DITOLAK
+// Helper: check if an IPv4 address is in a reserved/special-use range
+// that should be treated as "private" for SSRF/DNS-rebinding protection.
+// This complements isPrivateHost() which handles RFC1918 + loopback + link-local.
+function isPrivateOrReservedIPv4(ip) {
+  if (!ip || typeof ip !== 'string') return false;
+  // IPv4-mapped IPv6 (::ffff:x.x.x.x) - extract IPv4 part
+  let ipv4 = ip;
+  if (ip.startsWith('::ffff:')) {
+    ipv4 = ip.slice(7);
+  }
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(ipv4)) return false;
+  const parts = ipv4.split('.').map(Number);
+  if (parts.some(p => p < 0 || p > 255)) return false;
+  const [a, b, c, d] = parts;
+
+  // 0.0.0.0/8 - "this network" (RFC 1122)
+  if (a === 0) return true;
+  // 10.0.0.0/8 - private (RFC 1918) - covered by isPrivateHost
+  // 100.64.0.0/10 - CGNAT (RFC 6598)
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  // 127.0.0.0/8 - loopback (RFC 1122) - covered by isPrivateHost
+  // 169.254.0.0/16 - link-local (RFC 3927) - covered by isPrivateHost
+  // 172.16.0.0/12 - private (RFC 1918) - covered by isPrivateHost
+  // 192.0.0.0/24 - IETF protocol assignments (RFC 6890)
+  if (a === 192 && b === 0 && c === 0) return true;
+  // 192.0.2.0/24 - TEST-NET-1 (RFC 5737)
+  if (a === 192 && b === 0 && c === 2) return true;
+  // 192.88.99.0/24 - 6to4 relay anycast (RFC 3068, deprecated but still in use)
+  if (a === 192 && b === 88 && c === 99) return true;
+  // 192.168.0.0/16 - private (RFC 1918) - covered by isPrivateHost
+  // 198.18.0.0/15 - benchmarking (RFC 2544)
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  // 198.51.100.0/24 - TEST-NET-2 (RFC 5737)
+  if (a === 198 && b === 51 && c === 100) return true;
+  // 203.0.113.0/24 - TEST-NET-3 (RFC 5737)
+  if (a === 203 && b === 0 && c === 113) return true;
+  // 224.0.0.0/4 - multicast (RFC 1112)
+  if (a >= 224 && a <= 239) return true;
+  // 240.0.0.0/4 - reserved for future use (RFC 1112)
+  if (a >= 240) return true;
+  // 255.255.255.255/32 - limited broadcast (RFC 919)
+  if (a === 255 && b === 255 && c === 255 && d === 255) return true;
+  return false;
+}
+
+// Helper: check if an IPv6 address is in a reserved/special-use range
+function isPrivateOrReservedIPv6(ip) {
+  if (!ip || typeof ip !== 'string') return false;
+  const lower = ip.toLowerCase();
+  // ::1/128 - loopback
+  if (lower === '::1') return true;
+  // ::/128 - unspecified
+  if (lower === '::') return true;
+  // ::ffff:0:0/96 - IPv4-mapped (handled by extracting IPv4 and checking isPrivateOrReservedIPv4)
+  if (lower.startsWith('::ffff:')) return isPrivateOrReservedIPv4(lower.slice(7));
+  // fc00::/7 - unique local addresses (RFC 4193)
+  if (/^fc[0-9a-f]:/.test(lower) || /^fd[0-9a-f]:/.test(lower)) return true;
+  // fe80::/10 - link-local (RFC 4291)
+  if (/^fe[89ab][0-9a-f]:/.test(lower)) return true;
+  // 2001:db8::/32 - documentation (RFC 3849)
+  if (lower.startsWith('2001:db8:')) return true;
+  // ff00::/8 - multicast (RFC 4291)
+  if (lower.startsWith('ff')) return true;
+  // 2001:10::/28 - ORCHID (RFC 4843, deprecated)
+  if (lower.startsWith('2001:10:')) return true;
+  // 2001:20::/28 - ORCHIDv2 (RFC 7343)
+  if (lower.startsWith('2001:20:')) return true;
+  return false;
+}
+
+// ===== M23: PELINDUNG SSRF RESOLUSI DNS (anti DNS-rebinding) =====
+// Cek hostname-string saja bisa dibobol: hostname publik yang me-resolve ke IP
+// privat/loopback/metadata (rebinding, *.nip.io, DNS penyerang lolos). Fungsi ini
+// me-resolve dulu pakai dns.resolve4/resolve6 (bypass /etc/hosts) dan MENOLAK
+// bila ada SATU PUN hasil privat/reserved. Hasil:
+// - URL tak terurai / protokol non-http → lolos (validasi string di bawah menangani)
+// - literal IP → lolos (isPrivateHost sudah memeriksa angkanya)
+// - DNS gagal (ENOTFOUND dst) → lolos (biarkan koneksi gagal alami dengan pesannya)
+// - me-resolve ke IP privat/reserved → DITOLAK
+// Returns { ok: boolean, msg?: string, ips?: string[] } where ips are pinned IPv4/IPv6 addresses
 async function assertResolvesPublic(rawUrl) {
   try {
     if (!rawUrl || typeof rawUrl !== 'string') return { ok: true };
@@ -230,19 +310,29 @@ async function assertResolvesPublic(rawUrl) {
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: true };
     const host = u.hostname.replace(/^\[/, '').replace(/\]$/, '');
     if (!host || net.isIP(host)) return { ok: true };
-    const addrs = await dns.promises.lookup(host, { all: true });
-    if (!Array.isArray(addrs) || addrs.length === 0) return { ok: true };
-    for (const a of addrs) {
-      const ip = String(a && a.address ? a.address : '');
-      // Rentang tambahan di luar isPrivateHost: CGNAT100.64/10,192.0.0/24, benchmark198.18/15
-      const extraPrivate = /^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./.test(ip) ||
-        /^192\.0\.0\./.test(ip) || /^198\.(1[89])\./.test(ip);
-      if (extraPrivate || isPrivateHost(ip, undefined)) {
-        return { ok: false, msg: `Akses diblokir (SSRF/DNS-rebinding): hostname me-resolve ke IP privat ${ip}.` };
+
+    // Use dns.resolve4 and dns.resolve6 instead of lookup to bypass /etc/hosts
+    // and get authoritative DNS results. Run both in parallel.
+    const [ipv4Addrs, ipv6Addrs] = await Promise.all([
+      dns.promises.resolve4(host).catch(() => []),
+      dns.promises.resolve6(host).catch(() => [])
+    ]);
+
+    const allIps = [...(Array.isArray(ipv4Addrs) ? ipv4Addrs : []), ...(Array.isArray(ipv6Addrs) ? ipv6Addrs : [])];
+    if (allIps.length === 0) return { ok: true };
+
+    for (const ip of allIps) {
+      const ipStr = String(ip).trim();
+      if (!ipStr) continue;
+      // Check both IPv4 and IPv6 private/reserved ranges
+      if (isPrivateOrReservedIPv4(ipStr) || isPrivateOrReservedIPv6(ipStr) || isPrivateHost(ipStr, undefined)) {
+        return { ok: false, msg: `Akses diblokir (SSRF/DNS-rebinding): hostname me-resolve ke IP privat/reserved ${ipStr}.` };
       }
     }
-    return { ok: true };
+    // Return pinned IPs for callers that want to enforce IP pinning on subsequent connections
+    return { ok: true, ips: allIps };
   } catch (_) {
+    // DNS resolution failed (ENOTFOUND, etc.) - allow connection to proceed naturally
     return { ok: true };
   }
 }
@@ -1243,15 +1333,62 @@ let lastOllamaSpawnAt = 0;
 let lastUncaughtInfo = null;
 
 // ===== RATE LIMITER IN-MEMORI PER-IP (M22) =====
-// Window geser60 detik. Tanpa ini, loop permintaan bisa menghabiskan memori
+// Window geser 60 detik. Tanpa ini, loop permintaan bisa menghabiskan memori
 // (body 50MB × paralel) dan mengisi disk lewat POST /api/sessions tanpa batas.
 // Sesuaikan lewat env ZOX_RATE_GENERAL / ZOX_RATE_SESSIONS bila perlu.
 const RATE_LIMIT_GENERAL = { name: 'general', windowMs: 60000, max: Number(process.env.ZOX_RATE_GENERAL) || 300 };
 const RATE_LIMIT_SESSION_WRITE = { name: 'sessions', windowMs: 60000, max: Number(process.env.ZOX_RATE_SESSIONS) || 60 };
 const rateBuckets = new Map(); // "ip|namaLimiter" -> { count, resetAt }
 
+// Normalisasi IP: hapus zone ID IPv6 (%eth0), mapped IPv4 (::ffff:), bracket IPv6
+function normalizeIp(ip) {
+  if (!ip || typeof ip !== 'string') return 'unknown';
+  let cleaned = ip.trim();
+  // Hapus zone ID IPv6 (e.g., "::1%eth0" -> "::1")
+  const zoneIdx = cleaned.indexOf('%');
+  if (zoneIdx !== -1) cleaned = cleaned.slice(0, zoneIdx);
+  // Hapus bracket IPv6 (e.g., "[::1]" -> "::1")
+  if (cleaned.startsWith('[') && cleaned.endsWith(']')) cleaned = cleaned.slice(1, -1);
+  // IPv4-mapped IPv6 (e.g., "::ffff:192.168.1.1" -> "192.168.1.1")
+  // Handle all IPv4-mapped IPv6 formats: ::ffff:x:x or ::ffff:0:x.x.x.x
+  if (cleaned.startsWith('::ffff:')) {
+    const mapped = cleaned.slice(7);
+    // If it contains dots, it's already in IPv4 format (::ffff:192.168.1.1)
+    if (mapped.includes('.')) {
+      cleaned = mapped;
+    } else {
+      // Convert hex IPv4-mapped (::ffff:c0a8:0101 -> 192.168.1.1)
+      const parts = mapped.split(':');
+      if (parts.length === 2) {
+        const high = parseInt(parts[0], 16);
+        const low = parseInt(parts[1], 16);
+        if (!isNaN(high) && !isNaN(low)) {
+          cleaned = `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
+        }
+      }
+    }
+  }
+  // IPv4-compat IPv6 (deprecated but handle anyway): ::c0a8:0101 -> 192.168.1.1
+  else if (cleaned.startsWith('::') && cleaned.includes(':') && !cleaned.startsWith('::ffff:')) {
+    const parts = cleaned.split(':');
+    // Handle ::a:b:c:d format (last two hextets = IPv4)
+    if (parts.length >= 3 && parts[0] === '' && parts[1] === '') {
+      const lastTwo = parts.slice(-2);
+      if (lastTwo.length === 2 && lastTwo.every(p => /^[0-9a-fA-F]{1,4}$/.test(p))) {
+        const high = parseInt(lastTwo[0], 16);
+        const low = parseInt(lastTwo[1], 16);
+        if (!isNaN(high) && !isNaN(low) && high <= 0xffff && low <= 0xffff) {
+          cleaned = `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
+        }
+      }
+    }
+  }
+  return cleaned;
+}
+
 function rateLimitCheck(req, limit) {
-  const ip = (req.socket && req.socket.remoteAddress) || 'unknown';
+  const rawIp = (req.socket && req.socket.remoteAddress) || 'unknown';
+  const ip = normalizeIp(rawIp);
   const key = ip + '|' + (limit.name || 'x'); // bucket TERPISAH per limiter
   const now = Date.now();
   let bucket = rateBuckets.get(key);
@@ -1396,6 +1533,12 @@ function markChatTaskInterrupted(sessionId, reason = 'Koneksi terputus') {
   task.status = 'error';
   task.error = reason;
   task.completedAt = Date.now();
+
+  // Destroy proxy request first to prevent use-after-free
+  if (task.proxyReq && !task.proxyReq.destroyed) {
+    try { task.proxyReq.destroy(); } catch (_) {}
+  }
+
   flushChatTaskBuffer(sessionId, task.provider || 'openrouter');
   if (task.fullText && task.fullText.trim()) {
     appendAssistantMessageToSessionDisk(sessionId, task.fullText + `\n\n*[Respons terputus: ${reason}]*`, task.model);
@@ -3255,6 +3398,17 @@ async function requestHandler(req, res) {
   }
   const reqUserId = identityResult.userId;
 
+  // Helper: safe parseBody wrapper that converts rejection to 400 response
+  async function safeParseBody(req) {
+    try {
+      return await parseBody(req);
+    } catch (e) {
+      const msg = e && e.message ? e.message : 'Body JSON tidak valid.';
+      sendJSON(res, 400, { error: msg });
+      return null; // signal to caller to return early
+    }
+  }
+
   // --- API ROUTES ---
 
   // Gateway root info
@@ -3393,8 +3547,9 @@ async function requestHandler(req, res) {
 
   // 3. Create or save session to disk
   if (pathname === '/api/sessions' && method === 'POST') {
+    const body = await safeParseBody(req);
+    if (!body) return;
     try {
-      const body = await parseBody(req);
       const rawId = (body && body.id) ? String(body.id).trim() : ('ses_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
       const effectiveUid = reqUserId; // identitas HANYA dari header tervalidasi — body.userId tidak dipercaya
       const validation = validateSessionId(rawId, effectiveUid);
@@ -3425,8 +3580,9 @@ async function requestHandler(req, res) {
     const validation = validateSessionId(sessionMatch[1], reqUserId);
     if (!validation.valid) return sendJSON(res, 400, { error: validation.error });
     const { id, sessFile, userDir } = validation;
+    const body = await safeParseBody(req);
+    if (!body) return;
     try {
-      const body = await parseBody(req);
       let existing = {};
       if (fs.existsSync(sessFile)) {
         try { existing = JSON.parse(fs.readFileSync(sessFile, 'utf8')); } catch (e) {}
@@ -3535,11 +3691,11 @@ async function requestHandler(req, res) {
 
   // 7. Native Media Upload to Disk (Stores files in data/uploads/)
   if (pathname === '/api/upload' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      if (!body || !body.data) {
-        return sendJSON(res, 400, { error: 'Data gambar atau file diperlukan.' });
-      }
+    const body = await safeParseBody(req);
+    if (!body) return;
+    if (!body.data) {
+      return sendJSON(res, 400, { error: 'Data gambar atau file diperlukan.' });
+    }
       let rawData = String(body.data).trim();
       let ext = '.png';
       let base64Content = rawData;
@@ -3607,22 +3763,23 @@ async function requestHandler(req, res) {
         return sendJSON(res, 400, { error: 'Data base64 tidak valid atau kosong.' });
       }
 
-      // F17: nama acak kriptografis (bukan Math.random 6 char yang bisa ditebak)
-      const filename = `media_${Date.now()}_${crypto.randomBytes(8).toString('hex')}${ext}`;
-      if (!fs.existsSync(UPLOADS_DIR)) {
-        fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+      try {
+        // F17: nama acak kriptografis (bukan Math.random 6 char yang bisa ditebak)
+        const filename = `media_${Date.now()}_${crypto.randomBytes(8).toString('hex')}${ext}`;
+        if (!fs.existsSync(UPLOADS_DIR)) {
+          fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+        }
+        const targetFile = path.join(UPLOADS_DIR, filename);
+        fs.writeFileSync(targetFile, buffer);
+        return sendJSON(res, 200, {
+          success: true,
+          url: `/uploads/${filename}`,
+          filename,
+          size: buffer.length
+        });
+      } catch (err) {
+        return sendJSON(res, 500, { error: 'Gagal menyimpan file ke disk perangkat: ' + err.message });
       }
-      const targetFile = path.join(UPLOADS_DIR, filename);
-      fs.writeFileSync(targetFile, buffer);
-      return sendJSON(res, 200, {
-        success: true,
-        url: `/uploads/${filename}`,
-        filename,
-        size: buffer.length
-      });
-    } catch (err) {
-      return sendJSON(res, 500, { error: 'Gagal menyimpan file ke disk perangkat: ' + err.message });
-    }
   }
 
   // 8. Serve Uploaded Media from Disk
@@ -3772,7 +3929,8 @@ async function requestHandler(req, res) {
       let apiKey = req.headers['x-serper-key'] || req.headers['x-api-key'] || '';
       let num = parseInt(reqUrl.searchParams.get('num') || reqUrl.searchParams.get('limit') || '15', 10);
       if (method === 'POST') {
-        const body = await parseBody(req);
+        const body = await safeParseBody(req);
+        if (!body) return;
         query = body.query || body.q || query;
         apiKey = body.apiKey || body.serperApiKey || body.key || apiKey;
         if (body.num || body.limit) num = parseInt(body.num || body.limit, 10);
@@ -3795,7 +3953,8 @@ async function requestHandler(req, res) {
       let context = reqUrl.searchParams.get('context') || '';
       let maxResults = parseInt(reqUrl.searchParams.get('maxResults') || '8', 10);
       if (method === 'POST') {
-        const body = await parseBody(req);
+        const body = await safeParseBody(req);
+        if (!body) return;
         query = body.query || body.q || query;
         context = body.context || body.conversationContext || context;
         if (body.maxResults) maxResults = parseInt(body.maxResults, 10);
@@ -3817,7 +3976,8 @@ async function requestHandler(req, res) {
       let targetUrl = reqUrl.searchParams.get('url') || reqUrl.searchParams.get('target') || '';
       let maxChars = parseInt(reqUrl.searchParams.get('maxChars') || '5000', 10);
       if (method === 'POST') {
-        const body = await parseBody(req);
+        const body = await safeParseBody(req);
+        if (!body) return;
         targetUrl = body.url || body.targetUrl || targetUrl;
         if (body.maxChars) maxChars = parseInt(body.maxChars, 10);
       }
@@ -3834,8 +3994,9 @@ async function requestHandler(req, res) {
 
   // Deep Research: Start Custom URL Deep Analysis (Background Worker)
   if ((pathname === '/api/mulai-riset' || pathname === '/api/deep-research/start') && method === 'POST') {
+    const body = await safeParseBody(req);
+    if (!body) return;
     try {
-      const body = await parseBody(req);
       const topik = body.topik || body.topic || body.query || body.prompt || '';
       if (!topik) {
         return sendJSON(res, 400, { error: 'Parameter `topik` atau `prompt` diperlukan untuk memulai Deep Research.' });
@@ -3992,7 +4153,8 @@ async function requestHandler(req, res) {
       if (method === 'GET') {
         targetUrl = reqUrl.searchParams.get('url') || reqUrl.searchParams.get('link') || '';
       } else {
-        const body = await parseBody(req);
+        const body = await safeParseBody(req);
+        if (!body) return;
         targetUrl = body.url || body.link || '';
       }
 
@@ -4018,7 +4180,8 @@ async function requestHandler(req, res) {
         query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
         maxResults = parseInt(reqUrl.searchParams.get('limit') || '6', 10) || 6;
       } else {
-        const body = await parseBody(req);
+        const body = await safeParseBody(req);
+        if (!body) return;
         query = body.q || body.query || body.keyword || '';
         maxResults = parseInt(body.limit || body.max_results, 10) || 6;
       }
@@ -4045,7 +4208,8 @@ async function requestHandler(req, res) {
         targetUrl = reqUrl.searchParams.get('url') || reqUrl.searchParams.get('link') || '';
         if (reqUrl.searchParams.get('maxChars')) maxChars = parseInt(reqUrl.searchParams.get('maxChars'), 10) || 8000;
       } else {
-        const body = await parseBody(req);
+        const body = await safeParseBody(req);
+        if (!body) return;
         targetUrl = body.url || body.link || '';
         if (body.maxChars) maxChars = parseInt(body.maxChars, 10) || 8000;
       }
@@ -4076,7 +4240,8 @@ async function requestHandler(req, res) {
 
       let rawImageUserId = null;
       if (method === 'POST') {
-        const body = await parseBody(req);
+        const body = await safeParseBody(req);
+        if (!body) return;
         prompt = body.prompt || body.q || '';
         sessionId = body.sessionId || req.headers['x-session-id'] || req.headers['X-Session-ID'] || null;
         rawImageUserId = body.userId || null;
@@ -4659,7 +4824,8 @@ async function requestHandler(req, res) {
 
       let rawMusicUserId = null;
       if (method === 'POST') {
-        const body = await parseBody(req);
+        const body = await safeParseBody(req);
+        if (!body) return;
         prompt = body.prompt || body.q || '';
         sessionId = body.sessionId || req.headers['x-session-id'] || null;
         rawMusicUserId = body.userId || null;
@@ -4792,7 +4958,8 @@ async function requestHandler(req, res) {
 
       let rawVideoUserId = null;
       if (method === 'POST') {
-        const body = await parseBody(req);
+        const body = await safeParseBody(req);
+        if (!body) return;
         prompt = body.prompt || body.q || '';
         style = body.style || style;
         duration = parseInt(body.duration, 10) || 5;
@@ -5127,8 +5294,9 @@ async function requestHandler(req, res) {
   // Ollama Cloud: Chat Completion (Streaming Proxy)
   if (pathname === '/api/ollama/chat' && method === 'POST') {
     let sessionId = null; // M20: di-hoist agar catch di bawah bisa membersihkan task map
+    const body = await safeParseBody(req);
+    if (!body) return;
     try {
-      const body = await parseBody(req);
       const clientSuppliedKey = body.apiKey || body.ollamaApiKey || req.headers['x-ollama-key'] || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : '');
       let customEndpoint = req.headers['x-ollama-endpoint'] || body.endpoint || 'http://127.0.0.1:11434';
 
@@ -5688,8 +5856,9 @@ async function requestHandler(req, res) {
   // OpenRouter: Chat Completion (Streaming Proxy)
   if (pathname === '/api/openrouter/chat' && method === 'POST') {
     let sessionId = null; // M20: di-hoist agar catch di bawah bisa membersihkan task map
+    const body = await safeParseBody(req);
+    if (!body) return;
     try {
-      const body = await parseBody(req);
       const authHeader = req.headers['authorization'];
       const rawKey = body.apiKey || body.openRouterKey || req.headers['x-openrouter-key'] || req.headers['x-api-key'] || (authHeader ? authHeader.replace(/^Bearer\s+/i, '') : '') || process.env.OPENROUTER_API_KEY;
 
@@ -6163,7 +6332,8 @@ async function requestHandler(req, res) {
   // ----------------------------------------------------
   if ((pathname === '/api/chat/stop' || pathname.startsWith('/api/chat/stop/')) && method === 'POST') {
     try {
-      const body = await parseBody(req);
+      const body = await safeParseBody(req);
+      if (!body) return;
       const urlSid = pathname.startsWith('/api/chat/stop/') ? pathname.split('/')[4] : null;
       const sid = body.sessionId || urlSid || reqUrl.searchParams.get('sessionId');
       const stopUserId = reqUserId;
@@ -6265,7 +6435,15 @@ async function requestHandler(req, res) {
         // F20: streaming langsung dari disk — tanpa memuat seluruh file ke memori
         // (models.json ~782KB per permintaan; file besar menghasilkan puncak RAM N×).
         const idxStream = fs.createReadStream(indexPath);
-        idxStream.on('error', () => { if (!res.destroyed) { try { res.destroy(); } catch (_) {} } });
+        idxStream.on('error', (err) => {
+          console.error('[Static Index Stream Error]:', err?.message || err);
+          if (!res.headersSent && !res.destroyed) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Gagal membaca berkas statis' }));
+          } else if (!res.destroyed) {
+            try { res.destroy(); } catch (_) {}
+          }
+        });
         if (res.writableEnded || res.destroyed) { idxStream.destroy(); return; }
         idxStream.pipe(res);
       });
@@ -6284,7 +6462,15 @@ async function requestHandler(req, res) {
 
     // F20: streaming dari disk, bukan readFile penuh ke memori.
     const fileStream = fs.createReadStream(filePath);
-    fileStream.on('error', () => { if (!res.destroyed) { try { res.destroy(); } catch (_) {} } });
+    fileStream.on('error', (err) => {
+      console.error('[Static File Stream Error]:', err?.message || err);
+      if (!res.headersSent && !res.destroyed) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Gagal membaca berkas statis' }));
+      } else if (!res.destroyed) {
+        try { res.destroy(); } catch (_) {}
+      }
+    });
     if (res.writableEnded || res.destroyed) { fileStream.destroy(); return; }
     fileStream.pipe(res);
   });
