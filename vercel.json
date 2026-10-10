@@ -1,6 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 60
+    }
+  },
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/index" }
   ],
@@ -10,7 +15,7 @@
       "headers": [
         { "key": "Access-Control-Allow-Origin", "value": "*" },
         { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,PATCH,DELETE,OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type,Authorization,x-ollama-endpoint,x-title,HTTP-Referer,x-serper-key,x-ollama-key,x-api-key,x-openrouter-key,x-session-id,X-Session-ID" }
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type,Authorization,x-ollama-endpoint,x-title,HTTP-Referer,x-serper-key,x-ollama-key,x-api-key,x-openrouter-key,x-session-id,X-Session-ID,x-user-id,X-User-ID,x-client-id,X-Client-ID,x-user-token,X-User-Token" }
       ]
     },
     {

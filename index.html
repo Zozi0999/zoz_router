@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261010_v175">
+  <link rel="stylesheet" href="style.css?v=20261010_v177">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -103,7 +103,7 @@
           <button class="bgm-ctrl-btn" id="bgmNextBtn" title="Lagu Berikutnya"><i class="fa-solid fa-forward-step"></i></button>
           <div class="bgm-vol-slider-wrap" title="Volume BGM">
             <i class="fa-solid fa-volume-low" style="font-size: 0.68rem; color: var(--text-dim);"></i>
-            <input type="range" id="bgmMiniVolume" min="0" max="1" step="0.05" value="0.5">
+            <input type="range" id="bgmMiniVolume" aria-label="Volume BGM mini" min="0" max="1" step="0.05" value="0.5">
           </div>
         </div>
       </div>
@@ -273,7 +273,7 @@
         <div class="active-preset-banner" id="activePresetBanner" style="display: none;">
           <i class="fa-solid fa-sparkles"></i>
           <span id="activePresetName">Persona: Default</span>
-          <button class="clear-preset-btn" id="clearPresetBtn"><i class="fa-solid fa-xmark"></i></button>
+          <button class="clear-preset-btn" id="clearPresetBtn" type="button" aria-label="Hapus preset kustom" title="Hapus preset kustom"><i class="fa-solid fa-xmark"></i></button>
         </div>
 
         <!-- Deep Research Active Banner with Custom URL Input & Cross [X] Button -->
@@ -303,7 +303,7 @@
 
         <!-- BOLA NEUTRON QUANTUM -->
         <div class="composer-crown-row" id="composerCrownRow">
-          <button class="neutron-crown-btn state-red" id="neutronCrownBtn" type="button">
+          <button class="neutron-crown-btn state-red" id="neutronCrownBtn" type="button" aria-label="Sembunyikan kolom prompt" title="Sembunyikan / tampilkan kolom prompt">
             <div class="neutron-orb">
               <div class="neutron-core"></div>
               <div class="neutron-ring-wrap ring-1-wrap">
@@ -803,9 +803,10 @@
 
           <!-- Textarea Input -->
           <div class="input-field-wrap">
-            <textarea 
-              id="promptInput" 
-              placeholder="" 
+            <textarea
+              id="promptInput"
+              aria-label="Ketik prompt untuk AI"
+              placeholder=""
               rows="1"
             ></textarea>
           </div>
@@ -831,7 +832,7 @@
     <div class="modal-card">
       <div class="modal-header">
         <div class="modal-title"><i class="fa-solid fa-sliders"></i> Konfigurasi Zoz Router</div>
-        <button class="modal-close-btn" data-close="settingsModal"><i class="fa-solid fa-xmark"></i></button>
+        <button class="modal-close-btn" data-close="settingsModal" aria-label="Tutup pengaturan" title="Tutup pengaturan"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="modal-body">
         <!-- Tab Navigation -->
@@ -844,7 +845,7 @@
         <!-- Tab 1: Providers -->
         <div class="settings-tab-pane active" id="tabProviders">
           <div class="form-group">
-            <label><i class="fa-solid fa-cloud"></i> Ollama Cloud Endpoint</label>
+            <label for="settingOllamaEndpoint"><i class="fa-solid fa-cloud"></i> Ollama Cloud Endpoint</label>
             <div class="input-with-action">
               <input type="text" id="settingOllamaEndpoint" placeholder="https://ollama.com" value="https://ollama.com">
               <button class="btn btn-sm btn-outline" id="testOllamaBtn">Tes Endpoint</button>
@@ -853,10 +854,10 @@
           </div>
 
           <div class="form-group">
-            <label><i class="fa-solid fa-key"></i> Ollama Cloud API Key</label>
+            <label for="settingOllamaApiKey"><i class="fa-solid fa-key"></i> Ollama Cloud API Key</label>
             <div class="input-with-action">
               <input type="password" id="settingOllamaApiKey" placeholder="Masukkan Ollama API Key dari ollama.com/settings...">
-              <button class="btn btn-sm btn-outline" id="toggleShowOllamaKeyBtn"><i class="fa-solid fa-eye"></i></button>
+              <button class="btn btn-sm btn-outline" id="toggleShowOllamaKeyBtn" aria-label="Tampilkan atau sembunyikan Ollama API Key" title="Tampilkan/sembunyikan key"><i class="fa-solid fa-eye"></i></button>
               <button class="btn btn-sm btn-outline" id="testOllamaKeyBtn">Validasi Key</button>
             </div>
             <small class="form-hint">Dapatkan API Key di <a href="https://ollama.com/settings" target="_blank" rel="noopener">ollama.com/settings</a>.</small>
@@ -882,10 +883,10 @@
           </div>
 
           <div class="form-group">
-            <label><i class="fa-solid fa-key"></i> OpenRouter API Key</label>
+            <label for="settingOpenRouterKey"><i class="fa-solid fa-key"></i> OpenRouter API Key</label>
             <div class="input-with-action">
               <input type="password" id="settingOpenRouterKey" placeholder="sk-or-v1-...">
-              <button class="btn btn-sm btn-outline" id="toggleShowKeyBtn"><i class="fa-solid fa-eye"></i></button>
+              <button class="btn btn-sm btn-outline" id="toggleShowKeyBtn" aria-label="Tampilkan atau sembunyikan OpenRouter API Key" title="Tampilkan/sembunyikan key"><i class="fa-solid fa-eye"></i></button>
               <button class="btn btn-sm btn-outline" id="testOpenRouterBtn">Validasi Key</button>
             </div>
             <small class="form-hint">API Key disimpan aman di browser lokal Anda (localStorage). Dapatkan di <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a>.</small>
@@ -914,17 +915,17 @@
           </div>
 
           <div class="form-group">
-            <label><i class="fa-solid fa-magnifying-glass"></i> Serper.dev API Key (Google Web Search Real-Time)</label>
+            <label for="settingSerperApiKey"><i class="fa-solid fa-magnifying-glass"></i> Serper.dev API Key (Google Web Search Real-Time)</label>
             <div class="input-with-action">
               <input type="password" id="settingSerperApiKey" placeholder="075538fed9c64990e1eb32a06726c1e55a933c1e" value="075538fed9c64990e1eb32a06726c1e55a933c1e">
-              <button class="btn btn-sm btn-outline" id="toggleShowSerperKeyBtn"><i class="fa-solid fa-eye"></i></button>
+              <button class="btn btn-sm btn-outline" id="toggleShowSerperKeyBtn" aria-label="Tampilkan atau sembunyikan Serper API Key" title="Tampilkan/sembunyikan key"><i class="fa-solid fa-eye"></i></button>
               <button class="btn btn-sm btn-outline" id="testSerperBtn">Tes Web Search</button>
             </div>
             <small class="form-hint">Mesin pencari internet Google real-time untuk Ollama dan OpenRouter. Dapatkan API Key di <a href="https://serper.dev" target="_blank" rel="noopener">serper.dev</a>.</small>
           </div>
 
           <div class="form-group">
-            <label><i class="fa-solid fa-shield-virus"></i> Auto-Router Policy</label>
+            <label for="settingAutoPolicy"><i class="fa-solid fa-shield-virus"></i> Auto-Router Policy</label>
             <select id="settingAutoPolicy" class="custom-select">
               <option value="local_first">Ollama Cloud First (Prioritas Ollama Cloud, fallback OpenRouter bila offline)</option>
               <option value="cloud_heavy">Smart Task (Prompt panjang &gt; 500 kata / Coding sulit ke OpenRouter)</option>
@@ -932,7 +933,7 @@
           </div>
 
           <div class="form-group">
-            <label><i class="fa-solid fa-music"></i> Model AI Musik Studio (Default)</label>
+            <label for="settingMusicModel"><i class="fa-solid fa-music"></i> Model AI Musik Studio (Default)</label>
             <input type="text" id="settingMusicModel" placeholder="qwen2.5:1.5b atau vendor/model..." value="qwen2.5:1.5b">
             <small class="form-hint">Model Ollama lokal (misal: <code>qwen2.5:1.5b</code>) atau OpenRouter cloud (misal: <code>google/gemini-2.0-flash-exp:free</code>).</small>
           </div>
@@ -942,7 +943,7 @@
         <div class="settings-tab-pane" id="tabParameters">
           <div class="form-group">
             <div class="range-header">
-              <label>Temperature (Kreativitas):</label>
+              <label for="paramTemperature">Temperature (Kreativitas):</label>
               <span class="range-val" id="valTemperature">0.7</span>
             </div>
             <input type="range" id="paramTemperature" min="0" max="2.0" step="0.05" value="0.7">
@@ -951,7 +952,7 @@
 
           <div class="form-group">
             <div class="range-header">
-              <label>Top P (Nucleus Sampling):</label>
+              <label for="paramTopP">Top P (Nucleus Sampling):</label>
               <span class="range-val" id="valTopP">0.9</span>
             </div>
             <input type="range" id="paramTopP" min="0" max="1.0" step="0.05" value="0.9">
@@ -981,7 +982,7 @@
           </div>
 
           <div class="form-group" style="margin-top: 14px;">
-            <label>Instruksi Prompt Sistem (System Prompt):</label>
+            <label for="settingSystemPrompt">Instruksi Prompt Sistem (System Prompt):</label>
             <textarea id="settingSystemPrompt" rows="6" placeholder="Ketik instruksi persona AI kustom di sini..."></textarea>
             <div class="form-hint" style="font-size: 11px; color: var(--text-muted); margin-top: 5px;"><i class="fa-solid fa-circle-info"></i> Persona kustom Anda akan selalu tersimpan aman meskipun beralih ke Default atau preset lain.</div>
           </div>
@@ -1000,7 +1001,7 @@
     <div class="modal-card modal-lg">
       <div class="modal-header">
         <div class="modal-title"><i class="fa-solid fa-headphones"></i> Cyber BGM Deck • Musik Latar Belakang</div>
-        <button class="modal-close-btn" data-close="musicDeckModal"><i class="fa-solid fa-xmark"></i></button>
+        <button class="modal-close-btn" data-close="musicDeckModal" aria-label="Tutup Cyber BGM Deck" title="Tutup Cyber BGM Deck"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
       <!-- Settings / Deck Tabs -->
@@ -1057,12 +1058,12 @@
             
             <div style="display: flex; flex-direction: column; gap: 10px;">
               <div class="form-group" style="margin-bottom: 0;">
-                <label style="font-size: 0.78rem; color: var(--text-muted);">URL YouTube / Stream Audio:</label>
+                <label for="onlineAudioUrlInput" style="font-size: 0.78rem; color: var(--text-muted);">URL YouTube / Stream Audio:</label>
                 <input type="text" id="onlineAudioUrlInput" placeholder="https://www.youtube.com/watch?v=... atau https://domain.com/music.mp3">
               </div>
 
               <div class="form-group" style="margin-bottom: 0;">
-                <label style="font-size: 0.78rem; color: var(--text-muted);">Judul Lagu (Opsional):</label>
+                <label for="onlineAudioTitleInput" style="font-size: 0.78rem; color: var(--text-muted);">Judul Lagu (Opsional):</label>
                 <input type="text" id="onlineAudioTitleInput" placeholder="Beri nama lagu / radio stream...">
               </div>
 
@@ -1077,13 +1078,20 @@
             </div>
           </div>
 
+          <!-- Tombol tampil/sembunyikan DI LUAR wrap: dulu tombolnya berada DI DALAM
+               wrap sehingga mengklik "Sembunyikan" menyembunyikan tombol itu sendiri
+               beserta satu-satunya jalan untuk memunculkannya kembali (H9).
+               Label awal "Tampilkan" karena wrap memang mulai dalam keadaan tersembunyi. -->
+          <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+            <button class="btn btn-xs btn-outline" id="toggleYtPlayerVisibilityBtn" title="Tampilkan atau sembunyikan pemutar video" style="font-size: 0.68rem; padding: 2px 8px;"><i class="fa-solid fa-eye"></i> Tampilkan Video</button>
+          </div>
+
           <!-- YouTube Hidden / Embed Container -->
           <div id="ytPlayerContainerWrap" style="margin-bottom: 16px; border-radius: var(--radius-sm); overflow: hidden; display: none; background: #000; border: 1px solid var(--border-subtle);">
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: rgba(0,0,0,0.6); font-size: 0.75rem; gap: 8px;">
               <span style="color: var(--neon-cyan);"><i class="fa-brands fa-youtube"></i> YouTube Player Aktif</span>
               <div style="display: flex; gap: 6px;">
                 <button class="btn btn-xs btn-outline" id="ytFsBtn" title="Putar video ke seluruh layar" style="font-size: 0.68rem; padding: 2px 6px;"><i class="fa-solid fa-expand"></i> Layar Penuh</button>
-                <button class="btn btn-xs btn-outline" id="toggleYtPlayerVisibilityBtn" style="font-size: 0.68rem; padding: 2px 6px;">Sembunyikan Video</button>
               </div>
             </div>
             <div id="ytPlayerContainer" style="width: 100%; height: 200px;"></div>
@@ -1144,7 +1152,7 @@
 
             <!-- Progress Bar -->
             <div class="deck-progress-container">
-              <input type="range" id="deckProgressSlider" min="0" max="100" value="0" step="0.1">
+              <input type="range" id="deckProgressSlider" aria-label="Posisi pemutaran lagu" min="0" max="100" value="0" step="0.1">
             </div>
 
             <!-- Main Big Controls -->
@@ -1156,7 +1164,7 @@
 
             <div class="form-group" style="margin-top: 4px;">
               <div class="range-header">
-                <label><i class="fa-solid fa-volume-high"></i> Master Volume BGM:</label>
+                <label for="deckMasterVolume"><i class="fa-solid fa-volume-high"></i> Master Volume BGM:</label>
                 <span class="range-val" id="valMasterVolume">50%</span>
               </div>
               <input type="range" id="deckMasterVolume" min="0" max="1" step="0.01" value="0.5">
@@ -1203,7 +1211,7 @@
         <div class="modal-title">
           <i class="fa-solid fa-layer-group" style="color: var(--neon-cyan);"></i> Katalog Model Real-Time (Live)
         </div>
-        <button class="modal-close-btn" data-close="liveModelCatalogModal"><i class="fa-solid fa-xmark"></i></button>
+        <button class="modal-close-btn" data-close="liveModelCatalogModal" aria-label="Tutup katalog model" title="Tutup katalog model"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
       <!-- Tab Navigation: Ollama vs OpenRouter -->
@@ -1359,7 +1367,7 @@
           <i class="fa-solid fa-file-export" style="color: var(--neon-cyan);"></i>
           <span>Konfirmasi Ekspor Obrolan</span>
         </div>
-        <button class="modal-close-btn" data-close="exportConfirmModal"><i class="fa-solid fa-xmark"></i></button>
+        <button class="modal-close-btn" data-close="exportConfirmModal" aria-label="Batal ekspor" title="Batal ekspor"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="modal-body" style="padding: 20px;">
         <div style="display: flex; align-items: flex-start; gap: 14px; margin-bottom: 16px;">
@@ -1395,7 +1403,7 @@
     <div class="modal-card modal-lg doc-preview-modal-card">
       <div class="modal-header">
         <div class="modal-title" id="docPreviewModalTitle"><i class="fa-solid fa-file-code"></i> Pratinjau Dokumen</div>
-        <button class="modal-close-btn" data-close="docPreviewModal"><i class="fa-solid fa-xmark"></i></button>
+        <button class="modal-close-btn" data-close="docPreviewModal" aria-label="Tutup pratinjau dokumen" title="Tutup pratinjau dokumen"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="modal-body doc-preview-modal-body">
         <div class="doc-preview-meta-bar" id="docPreviewMetaBar">
@@ -1455,7 +1463,7 @@
     <div class="modal-card modal-md">
       <div class="modal-header">
         <div class="modal-title"><i class="fa-solid fa-file-code"></i> Konfirmasi Konversi Dokumen</div>
-        <button class="modal-close-btn" data-close="promptFoldConfirmModal"><i class="fa-solid fa-xmark"></i></button>
+        <button class="modal-close-btn" data-close="promptFoldConfirmModal" aria-label="Tutup konfirmasi konversi prompt" title="Tutup konfirmasi"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="modal-body" style="padding: 18px 20px;">
         <p style="margin-bottom: 12px; font-size: 0.9rem; color: var(--text-main); line-height: 1.5;">
@@ -1557,6 +1565,6 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
-  <script src="app.js?v=20261010_v175"></script>
+  <script src="app.js?v=20261010_v177"></script>
 </body>
 </html>

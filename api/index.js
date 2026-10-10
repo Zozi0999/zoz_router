@@ -10,7 +10,14 @@
  *   mengirim 504 daripada menggantung sampai dibunuh platform.
  */
 
-const WATCHDOG_MS = 10000;
+// M19: Watchdog dulunya 10 detik — padahal banyak endpoint yang SAH-sah saja
+// butuh 35-45 detik (unduhan image generation, browse-page, web-search,
+// youtube-search). Akibatnya klien menerima 504 padahal engine tetap jalan dan
+// kredit API tetap terbakar. Kini default 65 detik: sedikit DI ATAS
+// maxDuration Vercel (60 detik, lihat vercel.json) sehingga platform yang
+// menangani timeout lebih dulu, dan watchdog hanya jadi backstop (mis. saat
+// file ini dipakai di luar Vercel). Bisa dioverride via GATEWAY_WATCHDOG_MS.
+const WATCHDOG_MS = Number(process.env.GATEWAY_WATCHDOG_MS) || 65000;
 
 function sendJson(res, status, payload) {
   if (!res) return;
@@ -29,7 +36,7 @@ function sendJson(res, status, payload) {
 function setCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token');
 }
 
 module.exports = async function handler(req, res) {
@@ -156,11 +163,12 @@ module.exports = async function handler(req, res) {
     finished = true;
     clearTimeout(watchdog);
     console.error('[Vercel Gateway] Gagal memuat engine server.js:', err);
+    // F11: stack & versi Node TIDAK dikirim ke klien (membocorkan path absolut,
+    // versi runtime, dan struktur internal ke pemanggil anonim). Stack tetap
+    // tercatat di log server via console.error di atas.
     return sendJson(res, 500, {
       error: 'Gagal memuat engine ZOZ Router',
       details: err && err.message ? err.message : String(err),
-      stack: (err && err.stack ? String(err.stack) : '').split('\n').slice(0, 6),
-      node: process.version,
       vercel: !!process.env.VERCEL
     });
   }
@@ -169,10 +177,10 @@ module.exports = async function handler(req, res) {
     await requestHandler(req, res);
   } catch (err) {
     console.error('[Vercel Gateway Error] ' + (req && req.url ? req.url : '?') + ' setelah ' + (Date.now() - startedAt) + 'ms:', err);
+    // F11: tanpa stack di respons — hanya pesan kesalahan (log lengkap di server).
     sendJson(res, 500, {
       error: 'Internal Server Error on Vercel Gateway',
-      details: err && err.message ? err.message : String(err),
-      stack: (err && err.stack ? String(err.stack) : '').split('\n').slice(0, 8)
+      details: err && err.message ? err.message : String(err)
     });
   } finally {
     finished = true;

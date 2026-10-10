@@ -10,6 +10,9 @@ const url = require('url');
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const crypto = require('crypto');
+const dns = require('dns');
+const net = require('net');
 const { spawn } = require('child_process');
 
 const PORT = process.env.PORT || 4040;
@@ -65,7 +68,7 @@ function sendJSON(res, statusCode, data) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token'
   });
   res.end(JSON.stringify(data));
 }
@@ -81,7 +84,9 @@ function parseBody(req) {
       try {
         return Promise.resolve(req.body.trim() ? JSON.parse(req.body) : {});
       } catch (_) {
-        return Promise.resolve({});
+        // F18: JSON rusak jangan pernah dianggap {} (dulu POST /api/sessions dengan
+        // body terpotong sukses palsu & membuat sesi sampah).
+        return Promise.reject(new Error('Body JSON tidak valid.'));
       }
     }
     if (Buffer.isBuffer(req.body)) {
@@ -89,7 +94,7 @@ function parseBody(req) {
         const str = req.body.toString('utf8');
         return Promise.resolve(str.trim() ? JSON.parse(str) : {});
       } catch (_) {
-        return Promise.resolve({});
+        return Promise.reject(new Error('Body JSON tidak valid.'));
       }
     }
   }
@@ -131,7 +136,9 @@ function parseBody(req) {
         if (!bodyStr.trim()) return safeResolve({});
         safeResolve(JSON.parse(bodyStr));
       } catch (e) {
-        safeResolve({});
+        // F18: reject, jangan senyapkan — penulis JSON rusak kini menerima error
+        // (4xx/5xx dari rute) alih-alih sukses 200 dengan data sampah.
+        safeReject(new Error('Body JSON tidak valid: ' + (e && e.message ? e.message : e)));
       }
     });
     req.on('close', () => {
@@ -207,6 +214,50 @@ function isOllamaEndpointForbidden(endpointUrl) {
   return isPrivateHost(host, port);
 }
 
+// ===== M23: PELINDUNG SSRF RESOLUSI DNS (anti DNS-rebinding) =====
+// Cek hostname-string saja bisa dibobol: hostname publik yang me-resolve ke IP
+// privat/loopback/metadata (rebinding, *.nip.io, DNS penyerang lolos). Fungsi ini
+// me-resolve dulu dan MENOLAK bila ada SATU PUN hasil privat. Hasil:
+// - URL tak terurai / protokol non-http → lolos (validasi string di bawah menangani)
+// - literal IP → lolos (isPrivateHost sudah memeriksa angkanya)
+// - DNS gagal (ENOTFOUND dst) → lolos (biarkan koneksi gagal alami dengan pesannya)
+// - me-resolve ke IP privat → DITOLAK
+async function assertResolvesPublic(rawUrl) {
+  try {
+    if (!rawUrl || typeof rawUrl !== 'string') return { ok: true };
+    const asUrl = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(rawUrl.trim()) ? rawUrl.trim() : 'http://' + rawUrl.trim();
+    const u = new URL(asUrl);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: true };
+    const host = u.hostname.replace(/^\[/, '').replace(/\]$/, '');
+    if (!host || net.isIP(host)) return { ok: true };
+    const addrs = await dns.promises.lookup(host, { all: true });
+    if (!Array.isArray(addrs) || addrs.length === 0) return { ok: true };
+    for (const a of addrs) {
+      const ip = String(a && a.address ? a.address : '');
+      // Rentang tambahan di luar isPrivateHost: CGNAT100.64/10,192.0.0/24, benchmark198.18/15
+      const extraPrivate = /^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./.test(ip) ||
+        /^192\.0\.0\./.test(ip) || /^198\.(1[89])\./.test(ip);
+      if (extraPrivate || isPrivateHost(ip, undefined)) {
+        return { ok: false, msg: `Akses diblokir (SSRF/DNS-rebinding): hostname me-resolve ke IP privat ${ip}.` };
+      }
+    }
+    return { ok: true };
+  } catch (_) {
+    return { ok: true };
+  }
+}
+
+// Endpoint Ollama yang BOLEH menerima secret milik server (OLLAMA_API_KEY dari
+// environment). Endpoint khusus yang dikirim klien bisa menunjuk ke server
+// penyerang — env key tidak pernah diteruskan ke sana (pencegahan ekstraksi
+// secret lewat endpoint SSRF yang dikontrol klien).
+function isTrustedOllamaEndpoint(endpointUrl) {
+  let parsed;
+  try { parsed = new URL(endpointUrl); } catch (e) { return false; }
+  const host = (parsed.hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  return host === 'ollama.com' || host === '127.0.0.1' || host === 'localhost' || host === '::1';
+}
+
 // Sanitasi userId untuk mencegah path traversal dan memastikan isolasi pengguna
 function sanitizeUserId(userId) {
   if (!userId || typeof userId !== 'string') return 'default';
@@ -215,6 +266,88 @@ function sanitizeUserId(userId) {
     return 'default';
   }
   return clean;
+}
+
+// ==================== IDENTITAS KLIEN (capability token) ====================
+// Dulu identitas hanya mengandalkan header X-User-ID yang bisa dipalsukan siapa
+// saja → setiap user bisa membaca/menghapus sesi user lain. Kini setiap userId
+// harus "mendaftar" pada kunjungan pertama dengan X-User-Token (secret acak
+// 256-bit yang hanya hidup di localStorage klien). Server menyimpan SHA-256 dari
+// token, bukan token mentah. Request dari userId terdaftar tanpa token yang
+// cocok DITOLAK (401). Identitas 'default'/tanpa header tetap anonim untuk
+// kompatibilitas klien lawas & perkakas baris perintah.
+const IDENTITY_FILE = path.join(DATA_DIR, 'identities.json');
+let identityRegistry = null;
+
+function loadIdentityRegistry() {
+  if (identityRegistry) return identityRegistry;
+  try {
+    let parsed = {};
+    if (fs.existsSync(IDENTITY_FILE)) {
+      parsed = JSON.parse(fs.readFileSync(IDENTITY_FILE, 'utf8'));
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) parsed = {};
+    }
+    // Object.create(null): mencegah __proto__/constructor (lolos regex userId)
+    // dari prototype-pollution saat lookup/penulisan.
+    identityRegistry = Object.assign(Object.create(null), parsed);
+  } catch (_) {
+    identityRegistry = Object.create(null);
+  }
+  return identityRegistry;
+}
+
+function hashUserToken(token) {
+  return crypto.createHash('sha256').update(String(token), 'utf8').digest('hex');
+}
+
+function persistIdentityRegistry() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    const tmp = IDENTITY_FILE + '.tmp-' + process.pid;
+    fs.writeFileSync(tmp, JSON.stringify(identityRegistry || {}, null, 2), 'utf8');
+    fs.renameSync(tmp, IDENTITY_FILE);
+  } catch (_) {}
+}
+
+// Resolusi identitas SEKALI per request. Mengembalikan { userId } bila sah, atau
+// { error, status } bila request harus ditolak. Sumber identitas HANYA header
+// (atau query untuk endpoint GET khusus) — body.userId tidak pernah dipercaya.
+function resolveRequestIdentity(req, reqUrl) {
+  const rawUid = req.headers['x-user-id'] || req.headers['x-client-id'] ||
+    (reqUrl ? reqUrl.searchParams.get('userId') : null);
+  const token = req.headers['x-user-token'] ||
+    (reqUrl ? reqUrl.searchParams.get('userToken') : null);
+
+  // Tanpa identitas = klien lawas → bucket bersama 'default' (perilaku lama).
+  if (!rawUid || rawUid === 'default') {
+    return { userId: 'default', anonymous: true };
+  }
+
+  const uid = String(rawUid).trim();
+  const clean = sanitizeUserId(uid);
+  if (clean !== uid) {
+    return { status: 400, error: 'Format X-User-ID tidak valid. Gunakan hanya alphanumeric, underscore, dan dash (maks 64 karakter).' };
+  }
+
+  const registry = loadIdentityRegistry();
+  const hash = token ? hashUserToken(token) : null;
+  const known = Object.prototype.hasOwnProperty.call(registry, clean);
+
+  if (known) {
+    // Terdaftar: WAJIB membawa token yang cocok (menangkal pembajakan identitas).
+    if (!hash || hash !== registry[clean]) {
+      return { status: 401, error: 'X-User-Token tidak cocok untuk identitas ini. Identitas user tidak dapat dipalsukan.' };
+    }
+  } else {
+    // Pendaftaran kunjungan pertama: token wajib agar uid tak dikenal tidak
+    // bisa diklaim oleh pihak lain.
+    if (!hash) {
+      return { status: 401, error: 'X-User-Token dibutuhkan untuk mendaftarkan identitas baru. Perbarui klien Zoz Router (refresh halaman).' };
+    }
+    registry[clean] = hash;
+    persistIdentityRegistry();
+  }
+  return { userId: clean };
 }
 
 // Dapatkan direktori penyimpanan sesi khusus per user
@@ -274,7 +407,11 @@ function validateSessionId(sessionId, userId = 'default') {
 
 // Helper untuk mengunduh buffer gambar dari URL eksternal dengan proteksi SSRF, batas redirect loop, dan memory buffer cap
 function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
-  return new Promise((resolve, reject) => {
+  // M23: guard DNS anti-rebinding sebelum koneksi — berjalan di TIAP hop karena
+  // fungsi ini rekursif saat redirect (redirect bisa mengarah ke host internal).
+  return assertResolvesPublic(imageUrl).then((verdict) => {
+    if (!verdict.ok) return Promise.reject(new Error(verdict.msg));
+    return new Promise((resolve, reject) => {
     let settled = false;
     const safeResolve = (val) => {
       if (!settled) {
@@ -353,6 +490,7 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
     } catch (e) {
       safeReject(e);
     }
+    });
   });
 }
 
@@ -1085,11 +1223,61 @@ setInterval(pruneResearchTasks, 15 * 60 * 1000).unref();
 // ==================== BACKGROUND PERSISTENT CHAT ENGINE (CLAUDE AI RESILIENCE) ====================
 // Mengizinkan AI terus menyelesaikan respons dan menyimpan jawaban ke disk sesi
 // meskipun pengguna menutup tab peramban, meminimalkan aplikasi, atau keluar dari sesi (seperti Claude AI).
-const dbActiveChatTasks = {}; // sessionId -> { taskId, sessionId, model, fullText, rawBuffer, status, startedAt, completedAt, proxyReq }
+// null-prototype: sessionId attacker yang lolos regex ('__proto__', 'constructor')
+// menjadi properti data BIASA, bukan pemicu prototype pollution (M21).
+const dbActiveChatTasks = Object.create(null); // sessionId -> { taskId, sessionId, model, fullText, rawBuffer, status, startedAt, completedAt, proxyReq }
+
+// Kunci task wajib format aman; nilai tak valid → null (tanpa persistensi latar),
+// alih-alih dipakai mentah sebagai property key.
+function sanitizeTaskKey(sid) {
+  if (!sid || typeof sid !== 'string') return null;
+  const s = sid.trim();
+  return (/^[a-zA-Z0-9_-]{1,128}$/.test(s)) ? s : null;
+}
+
+// F12: jeda minimum antar spawn `ollama serve` (endpoint tak ber-auth).
+let lastOllamaSpawnAt = 0;
+
+// F19: catat exception terakhir untuk /api/health agar kegagalan di luar request
+// tetap teramati tanpa harus membuka log (proses sengaja dipertahankan hidup).
+let lastUncaughtInfo = null;
+
+// ===== RATE LIMITER IN-MEMORI PER-IP (M22) =====
+// Window geser60 detik. Tanpa ini, loop permintaan bisa menghabiskan memori
+// (body 50MB × paralel) dan mengisi disk lewat POST /api/sessions tanpa batas.
+// Sesuaikan lewat env ZOX_RATE_GENERAL / ZOX_RATE_SESSIONS bila perlu.
+const RATE_LIMIT_GENERAL = { name: 'general', windowMs: 60000, max: Number(process.env.ZOX_RATE_GENERAL) || 300 };
+const RATE_LIMIT_SESSION_WRITE = { name: 'sessions', windowMs: 60000, max: Number(process.env.ZOX_RATE_SESSIONS) || 60 };
+const rateBuckets = new Map(); // "ip|namaLimiter" -> { count, resetAt }
+
+function rateLimitCheck(req, limit) {
+  const ip = (req.socket && req.socket.remoteAddress) || 'unknown';
+  const key = ip + '|' + (limit.name || 'x'); // bucket TERPISAH per limiter
+  const now = Date.now();
+  let bucket = rateBuckets.get(key);
+  if (!bucket || now >= bucket.resetAt) {
+    bucket = { count: 0, resetAt: now + limit.windowMs };
+    rateBuckets.set(key, bucket);
+  }
+  bucket.count += 1;
+  if (bucket.count <= limit.max) return null;
+  return Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, b] of rateBuckets) {
+    if (now >= b.resetAt) rateBuckets.delete(ip);
+  }
+}, 60000).unref();
 
 function pruneActiveChatTasks() {
   try {
     const FIFTEEN_MINS = 15 * 60 * 1000;
+    // M26: task yang MASIH streaming diberi jangkau60 menit — dulu semuanya dipotong
+    // di15 menit, sehingga generasi panjang (riset/panjang/jawaban lambat) kehilangan
+    // proxyReq-nya di tengah jalan dan parsial tak pernah tersimpan.
+    const SIXTY_MINS = 60 * 60 * 1000;
     const now = Date.now();
     for (const sid of Object.keys(dbActiveChatTasks)) {
       const t = dbActiveChatTasks[sid];
@@ -1098,7 +1286,8 @@ function pruneActiveChatTasks() {
           delete dbActiveChatTasks[sid];
           continue;
         }
-        if (t.startedAt && (now - t.startedAt > FIFTEEN_MINS)) {
+        const ageLimit = t.status === 'streaming' ? SIXTY_MINS : FIFTEEN_MINS;
+        if (t.startedAt && (now - t.startedAt > ageLimit)) {
           if (t.proxyReq && !t.proxyReq.destroyed) {
             try { t.proxyReq.destroy(); } catch (_) {}
           }
@@ -1125,12 +1314,19 @@ function accumulateChatChunk(sessionId, chunk, provider) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     if (provider === 'openrouter') {
-      if (!trimmed.startsWith('data:')) continue;
-      const jsonStr = trimmed.replace(/^data:\s*/, '').trim();
-      if (jsonStr === '[DONE]') continue;
+      let jsonStr = null;
+      if (trimmed.startsWith('data:')) {
+        jsonStr = trimmed.replace(/^data:\s*/, '').trim();
+        if (jsonStr === '[DONE]') continue;
+      } else {
+        // F14: respons NON-stream (stream:false) = satu objek JSON utuh tanpa
+        // awalan 'data:'. Dulu baris ini di-skip → fullText kosong → jawaban
+        // tidak pernah dipersist ke file sesi (hilang saat refresh).
+        jsonStr = trimmed;
+      }
       try {
         const parsed = JSON.parse(jsonStr);
-        const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || '';
+        const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || parsed.choices?.[0]?.message?.content || '';
         if (delta) {
           task.fullText += delta;
           task.lastTokenTime = Date.now();
@@ -1161,12 +1357,19 @@ function flushChatTaskBuffer(sessionId, provider) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       if (provider === 'openrouter') {
-        if (!trimmed.startsWith('data:')) continue;
-        const jsonStr = trimmed.replace(/^data:\s*/, '').trim();
-        if (jsonStr === '[DONE]') continue;
+        let jsonStr = null;
+        if (trimmed.startsWith('data:')) {
+          jsonStr = trimmed.replace(/^data:\s*/, '').trim();
+          if (jsonStr === '[DONE]') continue;
+        } else {
+          // F14: respons NON-stream (stream:false) = satu objek JSON utuh tanpa
+          // awalan 'data:' — baris terakhir yang tertinggal di rawBuffer kini ikut
+          // diekstrak (dulu di-skip → jawaban tak pernah dipersist).
+          jsonStr = trimmed;
+        }
         try {
           const parsed = JSON.parse(jsonStr);
-          const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || '';
+          const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || parsed.choices?.[0]?.message?.content || '';
           if (delta) {
             task.fullText += delta;
             task.lastTokenTime = Date.now();
@@ -1606,7 +1809,14 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   }
 
   // Fallback / Default: Ollama Engine
-  const activeOllamaKey = ollamaApiKey || (apiKey && !apiKey.startsWith('sk-or-') ? apiKey : null) || process.env.OLLAMA_API_KEY;
+  // H6: env OLLAMA_API_KEY hanya dipakai bila endpoint tidak dispesifikasi klien,
+  // localhost, atau ollama.com — endpoint khusus klien tak pernah menerima secret.
+  const ollamaEpTrim = (endpoint || '').trim();
+  const ollamaEpIsCustom = Boolean(ollamaEpTrim) && !isTrustedOllamaEndpoint(
+    /^https?:\/\//i.test(ollamaEpTrim) ? ollamaEpTrim : 'http://' + ollamaEpTrim
+  );
+  const activeOllamaKey = ollamaApiKey || (apiKey && !apiKey.startsWith('sk-or-') ? apiKey : null) ||
+    (ollamaEpIsCustom ? null : process.env.OLLAMA_API_KEY);
   let rawEp = (endpoint || '').trim();
 
   // Jika activeOllamaKey ada dan endpoint tidak dispesifikasi, gunakan Ollama Cloud
@@ -1625,6 +1835,11 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
 
   if (isOllamaEndpointForbidden(rawEp)) {
     throw new Error('Endpoint Ollama mengarah ke host privat/internal - akses diblokir (SSRF Protection).');
+  }
+  // M23: endpoint non-tepercaya yang me-resolve ke IP privat (DNS-rebinding) ditolak.
+  if (!isTrustedOllamaEndpoint(rawEp)) {
+    const dnsVerdict = await assertResolvesPublic(rawEp);
+    if (!dnsVerdict.ok) throw new Error(dnsVerdict.msg);
   }
 
   const ollamaUrl = resolveEndpointUrl(rawEp, 'api/chat');
@@ -1698,7 +1913,10 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
 
 // Helper untuk melakukan web scraping / pemindaian konten artikel mendalam dari URL dengan proteksi redirect loop & SSRF
 function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
-  return new Promise((resolve) => {
+  // M23: guard DNS anti-rebinding (juga diulang untuk tiap hop redirect rekursif).
+  return assertResolvesPublic(targetUrl).then((verdict) => {
+    if (!verdict.ok) return { success: false, error: verdict.msg };
+    return new Promise((resolve) => {
     try {
       if (redirectCount > 3) {
         return resolve({ success: false, error: 'Batas maksimal 3 hop redirect tercapai.' });
@@ -1954,6 +2172,7 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
       }
       resolve({ success: false, error: err.message });
     }
+    });
   });
 }
 
@@ -2397,7 +2616,10 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
 
 // Engine pembaca dan penjelajah halaman web mandiri (Deep Page Browser)
 function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
-  return new Promise((resolve) => {
+  // M23: guard DNS anti-rebinding (juga diulang untuk tiap hop redirect rekursif).
+  return assertResolvesPublic(targetUrl).then((verdict) => {
+    if (!verdict.ok) return { url: targetUrl, error: verdict.msg, text: '' };
+    return new Promise((resolve) => {
     try {
       if (redirectCount > 3) return resolve({ url: targetUrl, error: 'Too many redirects', text: '' });
       if (!targetUrl || typeof targetUrl !== 'string') {
@@ -2567,6 +2789,7 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
     } catch (err) {
       resolve({ url: targetUrl, error: err.message, text: '' });
     }
+    });
   });
 }
 
@@ -2981,10 +3204,56 @@ async function requestHandler(req, res) {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token'
     });
     return res.end();
   }
+
+  // ===== GERBANG LINTAS-ASAL UNTUK /api (SEBELUM registrasi identitas) =====
+  // Sebagian endpoint memakai key milik SERVER (env OPENROUTER_API_KEY/SERPER_API_KEY
+  // /OLLAMA_API_KEY) sebagai fallback. Tanpa gerbang ini, halaman web jahat mana pun
+  // bisa memanggil API dari browser korban (ACAO:*) dan membakar kredit API operator.
+  // Browser SELALU mengirim Origin/Sec-Fetch-Site lintas-asal → diblokir (403);
+  // curl/klien lokal (tanpa Origin) dan front-end same-origin tetap diizinkan.
+  // Front-end di domain terpisah: setel ZOX_ALLOW_CROSS_ORIGIN=1 untuk mengizinkan.
+  if (pathname.startsWith('/api') && process.env.ZOX_ALLOW_CROSS_ORIGIN !== '1') {
+    let crossSite = req.headers['sec-fetch-site'] === 'cross-site';
+    if (!crossSite && req.headers.origin) {
+      try {
+        crossSite = new URL(req.headers.origin).host !== (req.headers.host || '');
+      } catch (_) {
+        crossSite = true;
+      }
+    }
+    if (crossSite) {
+      return sendJSON(res, 403, { error: 'Akses API lintas-asal ditolak. Bila front-end Anda sengaja dihosting di domain berbeda, setel ZOX_ALLOW_CROSS_ORIGIN=1 di server.' });
+    }
+  }
+
+  // ===== RATE LIMIT (M22) — sebelum identitas agar banjir tak sempat menulis registry =====
+  if (pathname.startsWith('/api') && pathname !== '/api/health' && pathname !== '/api/ping') {
+    const retryAfter = rateLimitCheck(req, RATE_LIMIT_GENERAL);
+    if (retryAfter !== null) {
+      res.setHeader('Retry-After', String(retryAfter));
+      return sendJSON(res, 429, { error: 'Terlalu banyak permintaan dari alamat ini. Coba lagi dalam ' + retryAfter + ' detik.' });
+    }
+    if (pathname === '/api/sessions' && method === 'POST') {
+      const writeRetry = rateLimitCheck(req, RATE_LIMIT_SESSION_WRITE);
+      if (writeRetry !== null) {
+        res.setHeader('Retry-After', String(writeRetry));
+        return sendJSON(res, 429, { error: 'Terlalu banyak penyimpanan sesi. Coba lagi dalam ' + writeRetry + ' detik.' });
+      }
+    }
+  }
+
+  // ===== RESOLUSI IDENTITAS (sekali per request, sebelum semua rute) =====
+  // Menolak lebih awal request dengan identitas tidak valid / token salah, agar
+  // seluruh rute di bawah ini hanya melihat reqUserId yang sudah tervalidasi.
+  const identityResult = resolveRequestIdentity(req, reqUrl);
+  if (identityResult.error) {
+    return sendJSON(res, identityResult.status || 400, { error: identityResult.error });
+  }
+  const reqUserId = identityResult.userId;
 
   // --- API ROUTES ---
 
@@ -3007,13 +3276,13 @@ async function requestHandler(req, res) {
       version: '1.0.0',
       storage: IS_VERCEL_ENV ? 'cloud-stateless' : 'device-disk',
       uptime: process.uptime(),
+      lastUncaught: lastUncaughtInfo, // F19: exception di luar request terlihat di sini
       timestamp: new Date().toISOString()
     });
   }
 
   // --- DEVICE STORAGE: SESSIONS & CHAT HISTORY ---
   const sessionMatch = pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)$/);
-  const reqUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
 
   // 1. List all sessions (Lightweight summaries)
   if (pathname === '/api/sessions' && method === 'GET') {
@@ -3031,11 +3300,17 @@ async function requestHandler(req, res) {
       // mengirim X-User-ID sehingga hanya membaca data/sessions/<userId>/ — tanpa langkah
       // ini riwayat lama menjadi tak terlihat sama sekali. Pemindahan dilakukan bila
       // pengguna belum memiliki sesi, sehingga sesi lama langsung menjadi privat miliknya.
-      if (!userDirHasSessions && reqUserId !== 'default') {
+      // PENGERAT: adopsi hanya boleh terjadi SEKALI sepanjang umur server
+      // (penanda .legacy_adopted) — tanpa ini, setiap pengguna baru yang folder-nya
+      // kosong bisa "mencuri" seluruh sesi default/ (pemindahan permanen).
+      const legacyAdoptMarker = path.join(SESSIONS_DIR, '.legacy_adopted');
+      const legacyAlreadyAdopted = fs.existsSync(legacyAdoptMarker);
+      if (!userDirHasSessions && reqUserId !== 'default' && !legacyAlreadyAdopted) {
         const legacyDir = path.join(SESSIONS_DIR, 'default');
         if (fs.existsSync(legacyDir)) {
           const legacyFiles = fs.readdirSync(legacyDir).filter(f => f.endsWith('.json'));
           if (legacyFiles.length > 0) {
+            let adoptedCount = 0;
             try { fs.mkdirSync(rawUserDir, { recursive: true }); } catch (_) {}
             for (const lf of legacyFiles) {
               try {
@@ -3043,15 +3318,25 @@ async function requestHandler(req, res) {
                 const dstFile = path.join(rawUserDir, lf);
                 if (fs.existsSync(dstFile)) {
                   fs.unlinkSync(srcFile);
+                  adoptedCount++;
                   continue;
                 }
                 fs.renameSync(srcFile, dstFile);
+                adoptedCount++;
                 // Stempel pemilik agar konsisten dengan partisi penyimpanan
                 try {
                   const obj = JSON.parse(fs.readFileSync(dstFile, 'utf8'));
                   obj.userId = reqUserId;
                   fs.writeFileSync(dstFile, JSON.stringify(obj, null, 2), 'utf8');
                 } catch (_) {}
+              } catch (_) {}
+            }
+            // Tulis penanda SEKALI ADOPSI BERHASIL — adopsi tidak akan pernah
+            // terjadi lagi, sehingga user baru berikutnya tidak bisa mengklaim
+            // sisa sesi legacy (adopsi = kepindahan permanen, bukan salinan).
+            if (adoptedCount > 0) {
+              try {
+                fs.writeFileSync(legacyAdoptMarker, JSON.stringify({ adoptedBy: reqUserId, count: adoptedCount, at: new Date().toISOString() }, null, 2), 'utf8');
               } catch (_) {}
             }
           }
@@ -3111,7 +3396,7 @@ async function requestHandler(req, res) {
     try {
       const body = await parseBody(req);
       const rawId = (body && body.id) ? String(body.id).trim() : ('ses_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
-      const effectiveUid = sanitizeUserId((body && body.userId) || reqUserId);
+      const effectiveUid = reqUserId; // identitas HANYA dari header tervalidasi — body.userId tidak dipercaya
       const validation = validateSessionId(rawId, effectiveUid);
       if (!validation.valid) return sendJSON(res, 400, { error: validation.error });
       const { id, sessFile, userDir } = validation;
@@ -3322,7 +3607,8 @@ async function requestHandler(req, res) {
         return sendJSON(res, 400, { error: 'Data base64 tidak valid atau kosong.' });
       }
 
-      const filename = `media_${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`;
+      // F17: nama acak kriptografis (bukan Math.random 6 char yang bisa ditebak)
+      const filename = `media_${Date.now()}_${crypto.randomBytes(8).toString('hex')}${ext}`;
       if (!fs.existsSync(UPLOADS_DIR)) {
         fs.mkdirSync(UPLOADS_DIR, { recursive: true });
       }
@@ -3577,11 +3863,16 @@ async function requestHandler(req, res) {
         if (isOllamaEndpointForbidden(testEp)) {
           return sendJSON(res, 400, { error: 'Endpoint Ollama mengarah ke host privat/internal - akses diblokir (SSRF Protection).' });
         }
+        // M23: DNS-rebinding guard untuk endpoint non-tepercaya.
+        if (!isTrustedOllamaEndpoint(testEp)) {
+          const dnsVerdict = await assertResolvesPublic(testEp);
+          if (!dnsVerdict.ok) return sendJSON(res, 400, { error: dnsVerdict.msg });
+        }
       }
 
       pruneResearchTasks();
       const rawSessionId = body.sessionId || req.headers['x-session-id'] || req.headers['X-Session-ID'] || null;
-      const researchUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || body.userId || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
+      const researchUserId = reqUserId;
       const taskId = 'research_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
       dbTugasRiset[taskId] = {
         taskId,
@@ -3654,7 +3945,7 @@ async function requestHandler(req, res) {
     if (!dataTugas) {
       return sendJSON(res, 404, { error: 'Tugas riset tidak ditemukan.' });
     }
-    const checkUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
+    const checkUserId = reqUserId;
     if (dataTugas.userId && dataTugas.userId !== checkUserId) {
       return sendJSON(res, 403, { error: 'Akses ditolak: Anda tidak memiliki akses ke tugas riset ini.' });
     }
@@ -3679,7 +3970,7 @@ async function requestHandler(req, res) {
     const taskId = cancelResearchMatch[1];
     const dataTugas = dbTugasRiset[taskId];
     if (dataTugas) {
-      const checkUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
+      const checkUserId = reqUserId;
       if (dataTugas.userId && dataTugas.userId !== checkUserId) {
         return sendJSON(res, 403, { error: 'Akses ditolak.' });
       }
@@ -3805,7 +4096,7 @@ async function requestHandler(req, res) {
         openRouterKey = (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       }
 
-      const imageUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || rawImageUserId || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
+      const imageUserId = reqUserId;
 
       if (openRouterKey) {
         openRouterKey = String(openRouterKey).replace(/^Bearer\s+/i, '').trim();
@@ -4059,7 +4350,8 @@ async function requestHandler(req, res) {
 
       if (imageBuffer && imageBuffer.length > 0) {
         const ext = contentType.includes('webp') ? 'webp' : (contentType.includes('jpeg') || contentType.includes('jpg') ? 'jpg' : 'png');
-        filename = `ai_gen_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
+        // F17: nama acak kriptografis (bukan Math.random yang bisa ditebak)
+        filename = `ai_gen_${Date.now()}_${crypto.randomBytes(8).toString('hex')}.${ext}`;
         const localFilePath = path.join(UPLOADS_DIR, filename);
 
         try {
@@ -4381,7 +4673,7 @@ async function requestHandler(req, res) {
         openRouterKey = (req.headers['x-openrouter-key'] || '').trim();
       }
 
-      const musicUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || rawMusicUserId || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
+      const musicUserId = reqUserId;
 
       openRouterKey = String(openRouterKey || '').replace(/^Bearer\s+/i, '').trim();
       if (!openRouterKey && process.env.OPENROUTER_API_KEY) openRouterKey = process.env.OPENROUTER_API_KEY;
@@ -4514,7 +4806,7 @@ async function requestHandler(req, res) {
         rawVideoUserId = reqUrl.searchParams.get('userId') || null;
       }
 
-      const videoUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || rawVideoUserId || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
+      const videoUserId = reqUserId;
 
       if (!prompt || !prompt.trim()) {
         prompt = 'Cinematic drone shot of futuristic cyberpunk neon metropolis';
@@ -4646,6 +4938,11 @@ async function requestHandler(req, res) {
     // Proteksi SSRF: blokir endpoint yang mengarah ke host privat/internal (metadata cloud, LAN, dll.)
     if (isOllamaEndpointForbidden(rawEndpoint)) {
       return sendJSON(res, 400, { error: 'Endpoint Ollama mengarah ke host privat/internal — akses diblokir (SSRF Protection).' });
+    }
+    // M23: DNS-rebinding guard untuk endpoint non-tepercaya.
+    if (!isTrustedOllamaEndpoint(rawEndpoint)) {
+      const dnsVerdict = await assertResolvesPublic(rawEndpoint);
+      if (!dnsVerdict.ok) return sendJSON(res, 400, { error: dnsVerdict.msg });
     }
 
     const tryFetchTags = (endpointUrl) => {
@@ -4799,6 +5096,15 @@ async function requestHandler(req, res) {
 
   // Ollama: Start Background Service
   if (pathname === '/api/ollama/start' && method === 'POST') {
+    // F12: endpoint ini TANPA auth dan men-spawn proses (shell:true) — tanpa jeda,
+    // loop request membanjiri host dengan proses ollama/cmd.exe. Cooldown10 menit.
+    const spawnNow = Date.now();
+    if (spawnNow - lastOllamaSpawnAt < 10 * 60 * 1000) {
+      return sendJSON(res, 429, {
+        error: 'Ollama baru saja dipicu. Tunggu 10 menit sebelum memicu ulang.',
+        retryAfterSec: Math.ceil((10 * 60 * 1000 - (spawnNow - lastOllamaSpawnAt)) / 1000)
+      });
+    }
     const { spawn } = require('child_process');
     try {
       const child = spawn('ollama', ['serve'], {
@@ -4811,6 +5117,7 @@ async function requestHandler(req, res) {
         console.warn('[Ollama Background Spawn Error]:', err?.message || err);
       });
       child.unref();
+      lastOllamaSpawnAt = spawnNow;
       return sendJSON(res, 200, { status: 'starting', message: 'Perintah `ollama serve` telah dipicu di latar belakang.' });
     } catch (e) {
       return sendJSON(res, 500, { error: 'Gagal menjalankan ollama: ' + e.message });
@@ -4819,10 +5126,10 @@ async function requestHandler(req, res) {
 
   // Ollama Cloud: Chat Completion (Streaming Proxy)
   if (pathname === '/api/ollama/chat' && method === 'POST') {
+    let sessionId = null; // M20: di-hoist agar catch di bawah bisa membersihkan task map
     try {
       const body = await parseBody(req);
-      const rawKey = body.apiKey || body.ollamaApiKey || req.headers['x-ollama-key'] || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : '') || process.env.OLLAMA_API_KEY;
-      const authHeader = rawKey ? `Bearer ${rawKey}` : (req.headers['authorization'] || null);
+      const clientSuppliedKey = body.apiKey || body.ollamaApiKey || req.headers['x-ollama-key'] || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : '');
       let customEndpoint = req.headers['x-ollama-endpoint'] || body.endpoint || 'http://127.0.0.1:11434';
 
       if (!customEndpoint) {
@@ -4831,8 +5138,8 @@ async function requestHandler(req, res) {
 
       customEndpoint = customEndpoint.trim();
       if (!/^https?:\/\//i.test(customEndpoint)) {
-        customEndpoint = (customEndpoint.includes(':443') || customEndpoint.includes('ollama.com') || customEndpoint.includes('.com') || customEndpoint.includes('.io') || customEndpoint.includes('.ai') || customEndpoint.includes('.app')) 
-          ? `https://${customEndpoint}` 
+        customEndpoint = (customEndpoint.includes(':443') || customEndpoint.includes('ollama.com') || customEndpoint.includes('.com') || customEndpoint.includes('.io') || customEndpoint.includes('.ai') || customEndpoint.includes('.app'))
+          ? `https://${customEndpoint}`
           : `http://${customEndpoint}`;
       }
       customEndpoint = customEndpoint.replace(/\/+$/, '');
@@ -4841,13 +5148,26 @@ async function requestHandler(req, res) {
       if (isOllamaEndpointForbidden(customEndpoint)) {
         return sendJSON(res, 400, { error: 'Endpoint Ollama mengarah ke host privat/internal — akses diblokir (SSRF Protection).' });
       }
+      // M23: DNS-rebinding guard — endpoint publik yang me-resolve ke IP privat ditolak.
+      if (!isTrustedOllamaEndpoint(customEndpoint)) {
+        const dnsVerdict = await assertResolvesPublic(customEndpoint);
+        if (!dnsVerdict.ok) return sendJSON(res, 400, { error: dnsVerdict.msg });
+      }
+
+      // H6: env OLLAMA_API_KEY hanya diteruskan ke endpoint TePERCAYA
+      // (localhost / ollama.com). Endpoint khusus milik klien — yang bisa
+      // menunjuk ke server penyerang — TIDAK PERNAH menerima secret server;
+      // klien tetap boleh memakai key miliknya sendiri via x-ollama-key.
+      const rawKey = clientSuppliedKey ||
+        (isTrustedOllamaEndpoint(customEndpoint) ? process.env.OLLAMA_API_KEY : null);
+      const authHeader = rawKey ? `Bearer ${rawKey}` : (req.headers['authorization'] || null);
 
       if (!body.model) {
         body.model = 'qwen2.5:1.5b';
       }
 
-      const sessionId = body.sessionId || req.headers['x-session-id'] || null;
-      const chatUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || body.userId || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
+      sessionId = sanitizeTaskKey(body.sessionId || req.headers['x-session-id'] || null);
+      const chatUserId = reqUserId;
       let userPrompt = null;
       if (Array.isArray(body.messages) && body.messages.length > 0) {
         const lastUser = [...body.messages].reverse().find(m => m.role === 'user');
@@ -5037,7 +5357,14 @@ async function requestHandler(req, res) {
             return;
           }
           try {
-            res.write(chunk);
+            const flushed = res.write(chunk);
+            // M27: hormati backpressure — klien lambat yang berhenti membaca
+            // (tapi socket tetap terbuka) menghentikan sementara upstream alih-alih
+            // menumpuk token tak terbatas di memori proses.
+            if (flushed === false && typeof proxyRes.pause === 'function') {
+              proxyRes.pause();
+              res.once('drain', () => { try { proxyRes.resume(); } catch (_) {} });
+            }
           } catch (e) {}
         });
 
@@ -5124,6 +5451,14 @@ async function requestHandler(req, res) {
       proxyReq.write(postData);
       proxyReq.end();
     } catch (err) {
+      // M20: throw sinkron (umumnya ERR_INVALID_CHAR dari header Authorization/API-key
+      // yang mengandung CRLF) terjadi SEBELUM proxyReq terpasang, sehingga task tetap
+      // 'streaming' dan sesi dikunci 429 hingga prune 15 menit. Bersihkan di sini.
+      if (sessionId && dbActiveChatTasks[sessionId] &&
+          dbActiveChatTasks[sessionId].status === 'streaming' &&
+          !dbActiveChatTasks[sessionId].proxyReq) {
+        delete dbActiveChatTasks[sessionId];
+      }
       return sendJSON(res, 500, { error: err.message });
     }
     return;
@@ -5352,6 +5687,7 @@ async function requestHandler(req, res) {
 
   // OpenRouter: Chat Completion (Streaming Proxy)
   if (pathname === '/api/openrouter/chat' && method === 'POST') {
+    let sessionId = null; // M20: di-hoist agar catch di bawah bisa membersihkan task map
     try {
       const body = await parseBody(req);
       const authHeader = req.headers['authorization'];
@@ -5365,8 +5701,8 @@ async function requestHandler(req, res) {
       delete body.apiKey;
       delete body.openRouterKey;
 
-      const sessionId = body.sessionId || req.headers['x-session-id'] || null;
-      const chatUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || body.userId || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
+      sessionId = sanitizeTaskKey(body.sessionId || req.headers['x-session-id'] || null);
+      const chatUserId = reqUserId;
       let userPrompt = null;
       if (Array.isArray(body.messages) && body.messages.length > 0) {
         const lastUser = [...body.messages].reverse().find(m => m.role === 'user');
@@ -5545,7 +5881,12 @@ async function requestHandler(req, res) {
             return;
           }
           try {
-            res.write(chunk);
+            const flushed = res.write(chunk);
+            // M27: backpressure — hentikan baca upstream saat klien lambat.
+            if (flushed === false && typeof proxyRes.pause === 'function') {
+              proxyRes.pause();
+              res.once('drain', () => { try { proxyRes.resume(); } catch (_) {} });
+            }
           } catch (e) {}
         });
 
@@ -5639,6 +5980,14 @@ async function requestHandler(req, res) {
       proxyReq.write(postData);
       proxyReq.end();
     } catch (err) {
+      // M20: throw sinkron (umumnya ERR_INVALID_CHAR dari header Authorization/API-key
+      // yang mengandung CRLF) terjadi SEBELUM proxyReq terpasang, sehingga task tetap
+      // 'streaming' dan sesi dikunci 429 hingga prune 15 menit. Bersihkan di sini.
+      if (sessionId && dbActiveChatTasks[sessionId] &&
+          dbActiveChatTasks[sessionId].status === 'streaming' &&
+          !dbActiveChatTasks[sessionId].proxyReq) {
+        delete dbActiveChatTasks[sessionId];
+      }
       return sendJSON(res, 500, { error: err.message });
     }
     return;
@@ -5649,7 +5998,7 @@ async function requestHandler(req, res) {
   // ----------------------------------------------------
   const chatStatusMatch = pathname.match(/^\/api\/chat\/status\/([a-zA-Z0-9_-]+)$/);
   if ((chatStatusMatch || pathname === '/api/chat/status') && method === 'GET') {
-    const statusUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
+    const statusUserId = reqUserId;
     const sid = chatStatusMatch ? chatStatusMatch[1] : (reqUrl.searchParams.get('sessionId') || reqUrl.searchParams.get('id'));
     if (!sid) {
       const activeSessions = [];
@@ -5817,7 +6166,7 @@ async function requestHandler(req, res) {
       const body = await parseBody(req);
       const urlSid = pathname.startsWith('/api/chat/stop/') ? pathname.split('/')[4] : null;
       const sid = body.sessionId || urlSid || reqUrl.searchParams.get('sessionId');
-      const stopUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || body.userId || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
+      const stopUserId = reqUserId;
       let stoppedAny = false;
 
       if (sid && dbActiveChatTasks[sid] && dbActiveChatTasks[sid].status === 'streaming') {
@@ -5913,14 +6262,12 @@ async function requestHandler(req, res) {
           'Cache-Control': 'no-cache'
         });
         if (method === 'HEAD') return res.end();
-        fs.readFile(indexPath, (idxErr, content) => {
-          if (res.writableEnded || res.destroyed) return;
-          if (idxErr) {
-            try { res.destroy(); } catch (_) {}
-            return;
-          }
-          res.end(content);
-        });
+        // F20: streaming langsung dari disk — tanpa memuat seluruh file ke memori
+        // (models.json ~782KB per permintaan; file besar menghasilkan puncak RAM N×).
+        const idxStream = fs.createReadStream(indexPath);
+        idxStream.on('error', () => { if (!res.destroyed) { try { res.destroy(); } catch (_) {} } });
+        if (res.writableEnded || res.destroyed) { idxStream.destroy(); return; }
+        idxStream.pipe(res);
       });
       return;
     }
@@ -5935,14 +6282,11 @@ async function requestHandler(req, res) {
     });
     if (method === 'HEAD') return res.end();
 
-    fs.readFile(filePath, (readErr, content) => {
-      if (res.writableEnded || res.destroyed) return;
-      if (readErr) {
-        try { res.destroy(); } catch (_) {}
-        return;
-      }
-      res.end(content);
-    });
+    // F20: streaming dari disk, bukan readFile penuh ke memori.
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.on('error', () => { if (!res.destroyed) { try { res.destroy(); } catch (_) {} } });
+    if (res.writableEnded || res.destroyed) { fileStream.destroy(); return; }
+    fileStream.pipe(res);
   });
 }
 
@@ -5971,6 +6315,9 @@ if (!IS_VERCEL_ENV) {
 
   process.on('uncaughtException', (err) => {
     console.error('⚠️ Critical: Uncaught Exception ditangkap:', err && (err.stack || err.message || err));
+    // F19: permukaan observabilitas — kegagalan di luar request kini terlihat di
+    // /api/health (proses tetap hidup agar server lokal tak mati karena satu error).
+    lastUncaughtInfo = { at: new Date().toISOString(), message: String((err && err.message) || err) };
   });
 }
 

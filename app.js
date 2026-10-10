@@ -138,9 +138,33 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
   }
 
+  // Capability token identitas: secret acak 256-bit yang hanya diketahui browser
+  // ini. Server menyimpan SHA-256-nya pada pendaftaran kunjungan pertama lalu
+  // MENOLAK setiap request ber-X-User-ID yang tidak membawa token cocok — sehingga
+  // X-User-ID yang bocor (log/URL) tidak lagi cukup untuk membaca sesi orang lain.
+  function getOrCreateUserToken() {
+    try {
+      let token = localStorage.getItem('zoz_user_token_v1');
+      if (!token || typeof token !== 'string' || token.length < 32) {
+        const bytes = new Uint8Array(32);
+        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+          crypto.getRandomValues(bytes);
+        } else {
+          for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+        }
+        token = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        localStorage.setItem('zoz_user_token_v1', token);
+      }
+      return token;
+    } catch (_) {
+      return '';
+    }
+  }
+
   // ==================== STATE MANAGEMENT ====================
   const STATE = {
     userId: getOrCreateUserId(),
+    userToken: getOrCreateUserToken(),
     mode: 'ollama', // 'ollama' | 'openrouter' | 'auto'
     sessions: [],
     currentSessionId: null,
@@ -202,6 +226,56 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     ollamaStatus: { online: true, modelCount: 0, lastChecked: null },
     isPromptHidden: false
   };
+
+  // H9: label tombol tampil/sembunyikan pemutar YouTube selalu mencerminkan
+  // kondisi wrap. Dipanggil dari handler toggle DAN dari setiap jalur yang
+  // mengubah wrap.style.display (playYouTube/playDirectUrl/playTrack) — dulu
+  // label hanya diganti oleh handler sehingga basi ("Tampilkan" saat video
+  // terlihat, atau tombol terkubur karena berada di dalam wrap yang disembunyikan).
+  function syncYtPlayerVisibilityBtn() {
+    try {
+      const btn = els.toggleYtPlayerVisibilityBtn;
+      const wrap = els.ytPlayerContainerWrap;
+      if (!btn || !wrap) return;
+      const hidden = !wrap.style.display || wrap.style.display === 'none';
+      btn.innerHTML = hidden
+        ? '<i class="fa-solid fa-eye"></i> Tampilkan Video'
+        : '<i class="fa-solid fa-eye-slash"></i> Sembunyikan Video';
+    } catch (_) {}
+  }
+
+  // ===== IDENTITAS OTOMATIS PADA SEMUA REQUEST SAME-ORIGIN =====
+  // Dipasang SEKALI di sini sehingga setiap fetch('/api/...') — termasuk yang
+  // belum pernah menyertakan header identitas — otomatis membawa X-User-ID +
+  // X-User-Token. Server menolak (401) request ber-identitas tanpa token cocok;
+  // tanpa wrapper ini satu pun request yang lupa header akan gagal.
+  (function installIdentityHeaders() {
+    try {
+      const origFetch = window.fetch;
+      if (typeof origFetch !== 'function') return;
+      window.fetch = function (input, init) {
+        try {
+          const url = (typeof input === 'string') ? input
+            : (input && typeof input === 'object' && typeof input.url === 'string') ? input.url
+            : (input instanceof URL) ? input.href : '';
+          const isSameOrigin = url.startsWith('/') ||
+            url.startsWith(window.location.origin + '/') ||
+            url === window.location.origin;
+          if (isSameOrigin && STATE.userId) {
+            const hdrs = new Headers((init && init.headers) || (input && input.headers) || undefined);
+            if (!hdrs.has('X-User-ID')) hdrs.set('X-User-ID', STATE.userId);
+            if (STATE.userToken && !hdrs.has('X-User-Token')) hdrs.set('X-User-Token', STATE.userToken);
+            if (init) {
+              init.headers = hdrs;
+              return origFetch(input, init);
+            }
+            return origFetch(input, { headers: hdrs });
+          }
+        } catch (_) {}
+        return origFetch(input, init);
+      };
+    } catch (_) {}
+  })();
 
   // ==================== AUDIO SYNTHESIZER (Sci-Fi Cyber Blips) ====================
   const AudioEngine = {
@@ -744,6 +818,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           a.remove();
           URL.revokeObjectURL(blobUrl);
         }, 3000);
+        showToast('Foto berhasil diunduh.');
       } catch (err) {
         const a = document.createElement('a');
         a.href = src;
@@ -752,8 +827,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         document.body.appendChild(a);
         a.click();
         setTimeout(() => a.remove(), 500);
+        // F14: jalur fallback TIDAK boleh menampilkan toast "berhasil" — unduhan
+        // otomatis sering diblokir CORS dan tab baru hanya membuka gambar.
+        showToast('Gagal mengunduh langsung (CORS) — gambar dibuka di tab baru, gunakan klik-kanan → Simpan Gambar.', 'info');
       }
-      showToast('Foto berhasil diunduh.');
       AudioEngine.click();
     },
 
@@ -1157,9 +1234,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         STATE.settings.openRouterModel = 'openrouter/free';
       }
 
-      // Jika baru pertama kali dibuka di cloud (Vercel) dan endpoint masih localhost, jadikan mode auto secara default
-      if (IS_CLOUD_HOSTED && !saved && STATE.settings.mode === 'ollama') {
-        STATE.settings.mode = 'auto';
+      // Jika baru pertama kali dibuka di cloud (Vercel) dan mode masih default 'ollama',
+      // jadikan mode auto secara default.
+      // H1 FIX: `saved` tidak pernah dideklarasikan → ReferenceError tiap load di cloud
+      // host yang ditelan catch luar, sehingga SELURUH sisa load preferensi + mirror
+      // sesi dilewatkan. `STATE.settings.mode` juga tidak pernah ada — mode hidup di
+      // STATE.mode. Kini memakai savedSettings (ada = pernah disimpan) & STATE.mode.
+      if (IS_CLOUD_HOSTED && !savedSettings && STATE.mode === 'ollama') {
+        STATE.mode = 'auto';
       }
 
       if (!STATE.settings.imageModel) {
@@ -1493,7 +1575,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     const startTime = performance.now();
 
+    // M7: proteksi overlap — poll lambat (latensi > interval 800ms) tak boleh
+    // meluncurkan tick baru sebelum yang selesai berjalan. Tanpa ini, handler
+    // "selesai" bisa dieksekusi berulang oleh tick antrian: toast sukses, save,
+    // dan notifikasi ganda. pollDone mengunci tick yang terlanjur masuk.
+    let pollBusy = false;
+    let pollDone = false;
     activeChatPollTimer = setInterval(async () => {
+      if (pollBusy || pollDone) return;
+      pollBusy = true;
       try {
         if (STATE.currentSessionId !== session.id) {
           clearInterval(activeChatPollTimer);
@@ -1540,6 +1630,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
 
         if (data.status === 'completed' || data.status === 'none' || data.status === 'aborted') {
+          pollDone = true; // M7: kunci — tick antrian yang tersisa tidak boleh mengulang handler ini
           clearInterval(activeChatPollTimer);
           activeChatPollTimer = null;
           STATE.currentDeepResearchTaskId = null;
@@ -1613,6 +1704,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             showToast('✨ AI selesai menjawab di latar belakang.');
           }
         } else if (data.status === 'error') {
+          pollDone = true; // M7: kunci agar handler error tidak berjalan dua kali
           clearInterval(activeChatPollTimer);
           activeChatPollTimer = null;
           STATE.currentDeepResearchTaskId = null;
@@ -1653,6 +1745,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
       } catch (pollErr) {
         console.warn('Error polling background chat:', pollErr);
+      } finally {
+        pollBusy = false; // M7: lepas kunci tick setiap iterasi selesai
       }
     }, 800);
   }
@@ -1717,7 +1811,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             if (Array.isArray(m.files) && m.files.length > 0) {
               safeFiles = m.files.map(f => ({
                 name: f.name, mime: f.mime, lang: f.lang, content: f.content,
-                rawContent: f.rawContent, byteSize: f.byteSize, lineCount: f.lineCount,
+                byteSize: f.byteSize, lineCount: f.lineCount,
                 size: f.size, desc: f.desc, isGeneratedByAI: true
               }));
             }
@@ -2446,6 +2540,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
+      // H2: TOLAK saat masih ada stream berjalan. Handler ini membuat AbortController
+      // BARU yang menimpa controller milik stream aktif — akibatnya tombol Stop jadi
+      // mati untuk stream lama dan beberapa generasi bisa berjalan paralel
+      // (jawaban tercampur di session.messages). Tombol dibiarkan ada agar bisa
+      // diklik lagi setelah generasi selesai.
+      if (STATE.isGenerating || STATE.isSending) {
+        showToast('Masih ada respons yang sedang dihasilkan — tunggu selesai atau tekan Stop dulu.', 'info');
+        return;
+      }
       btn.remove();
       const bubbleText = assistantRow.querySelector('.msg-text-content');
       const continuePrompt = "Lanjutkan penjelasan/kode secara persis mulai dari kata/kalimat terakhir yang terpotong. JANGAN mengulang teks dari awal, langsung teruskan kelanjutannya.";
@@ -2702,6 +2805,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (window.innerWidth <= 768 && els.sidebar?.classList.contains('open')) {
       els.sidebar.classList.remove('open');
       els.sidebarBackdrop?.classList.remove('show');
+      // M15: pop entri {modal:'sidebar'} yang dipush saat sidebar dibuka — tanpa ini
+      // entri jadi yatim: tombol Back hardware ditelan, atau Back berikutnya
+      // memunculkan sidebar ghost & menutup modal yang sedang terbuka.
+      if (history.state?.modal === 'sidebar') history.back();
     }
   }
 
@@ -2728,6 +2835,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     return newSession;
   }
 
+  // M9: token per-pemanggilan — klik sesi terAKHIR yang menang, terlepas dari urutan
+  // selesai await-nya (dulu "last-resolved-wins": sidebar bisa menyorot sesi A
+  // padahal pengguna memilih B, dan input terasosiasi ke sesi yang salah).
+  let sessionSwitchToken = 0;
   async function switchSession(sessionId) {
     if (STATE.isGenerating) {
       showToast('Harap tunggu atau hentikan generasi respons saat ini.', 'error');
@@ -2735,6 +2846,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
     const targetSession = STATE.sessions.find(s => s.id === sessionId);
     if (!targetSession) return;
+    const switchToken = ++sessionSwitchToken;
 
     if (activeChatPollTimer) {
       clearInterval(activeChatPollTimer);
@@ -2759,6 +2871,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     } catch (e) {
       console.warn('Gagal memuat detail sesi dari storage:', e);
     }
+
+    // M9: pengguna sudah memilih sesi LAIN selama await di atas → batalkan hasil basi ini
+    if (switchToken !== sessionSwitchToken) return;
 
     // If session has different mode, switch tab
     if (targetSession.mode && targetSession.mode !== STATE.mode) {
@@ -2788,6 +2903,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (window.innerWidth <= 768 && els.sidebar?.classList.contains('open')) {
       els.sidebar.classList.remove('open');
       els.sidebarBackdrop?.classList.remove('show');
+      // M15: sama seperti createNewSession — buang entri history sidebar yatim.
+      if (history.state?.modal === 'sidebar') history.back();
     }
 
     // Periksa apakah sesi tujuan memiliki tugas aktif atau selesai di background
@@ -2819,6 +2936,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (e) e.stopPropagation();
     const target = STATE.sessions.find(s => s.id === sessionId);
     if (!target) return;
+
+    // H5: konfirmasi SEBELUM penghapusan permanen — dulu satu klik tak sengaja
+    // (menu "Hapus" bersebelahan dengan Export/Rename) langsung menghapus sesi
+    // beserta seluruh pesan dari IndexedDB tanpa undo, padahal hapus massal dan
+    // hapus playlist keduanya memakai confirm().
+    if (!confirm(`Hapus percakapan "${target.title || 'Obrolan Baru'}"?\n\nSeluruh pesan di dalamnya akan dihapus PERMANEN dan tidak bisa dikembalikan.`)) {
+      return;
+    }
 
     // Abort active in-flight generation if deleting the current generating session
     if (STATE.isGenerating && STATE.currentSessionId === sessionId) {
@@ -3090,7 +3215,27 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           deleteSession(session.id);
         });
 
-        item.querySelector('.history-item-actions').appendChild(dropdown);
+        // Pasang FIXED di root: dulu dropdown adalah child absolut di dalam
+        // .history-section (overflow-y:auto) sehingga menu pada item dekat dasar
+        // daftar terpotong tepi scroll dan item "Hapus" jadi tak terjangkau.
+        document.body.appendChild(dropdown);
+        const anchor = e.currentTarget.getBoundingClientRect();
+        dropdown.style.position = 'fixed';
+        dropdown.style.zIndex = '1200';
+        dropdown.style.right = '0px'; // fallback saat pengukuran
+        dropdown.style.top = '0px';
+        const menuW = dropdown.offsetWidth;
+        const menuH = dropdown.offsetHeight;
+        let menuTop = anchor.bottom + 4;
+        if (menuTop + menuH > window.innerHeight - 8) {
+          menuTop = Math.max(8, anchor.top - menuH - 4); // flip ke atas bila melewati dasar layar
+        }
+        let menuRight = Math.max(8, window.innerWidth - anchor.right);
+        if (menuRight + menuW > window.innerWidth - 8) {
+          menuRight = Math.max(8, window.innerWidth - menuW - 8);
+        }
+        dropdown.style.top = menuTop + 'px';
+        dropdown.style.right = menuRight + 'px';
         activeHistoryDropdown = dropdown;
         AudioEngine.click();
       });
@@ -3574,6 +3719,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
         // Save & Resend
         const doSaveAndResend = () => {
+          // M5: cek KEDUA guard SAAT tombol ditekan (bukan hanya saat editor dibuka).
+          // Saat masih ada await awal di handleSendPrompt (scrape URL / hydrate sesi),
+          // isSending=true tetapi isGenerating=false — dulu riwayat sudah dipotong
+          // lebih dulu lalu kirim dibatalkan diam-diam oleh guard → pesan hilang.
+          if (STATE.isGenerating || STATE.isSending) {
+            showToast('Masih ada pengiriman yang diproses — tunggu selesai dulu sebelum mengedit & mengirim ulang.', 'error');
+            return;
+          }
           const newText = textarea ? textarea.value.trim() : '';
           if (!newText && (!imgList || imgList.length === 0) && (!docs || docs.length === 0)) {
             showToast('Prompt tidak boleh kosong.', 'error');
@@ -4288,7 +4441,11 @@ Aturan wajib:
       mime: mime || guessMimeFromName(cleanName),
       lang: lang || guessLangFromName(cleanName),
       content: String(content),
-      rawContent: String(content),
+      // M1: TANPA rawContent duplikat — dulu string yang sama disimpan dua kali
+      // (content + rawContent) dan mirror localStorage ikut mem-serialize keduanya →
+      // payload AI File membengkak 2× dan kuota ~5MB 'zoz_router_sessions_v1' mudah
+      // pecah (fallback-nya menulis messages: [] → badan pesan hilang dari mirror).
+      // Semua pembaca memakai `file.rawContent || file.content` sehingga aman.
       byteSize: bytes,
       lineCount: lineCount,
       size: formatFileSize(bytes) + ' • ' + lineCount + ' baris',
@@ -5126,6 +5283,16 @@ ${organicBlock}
   // ==================== UNIVERSAL WEB CONTENT EXTRACTOR & READER TOOL ====================
   const clientWebContentCache = new Map();
 
+  // F12: cache ekstraksi web kini dibatasi64 entri (FIFO) — dulu tak berbatas,
+  // setiap URL unik menahan payload ~8KB+ sepanjang usia halaman (pertumbuhan memori).
+  function rememberWebContent(key, value) {
+    clientWebContentCache.set(key, value);
+    while (clientWebContentCache.size > 64) {
+      const oldest = clientWebContentCache.keys().next().value;
+      clientWebContentCache.delete(oldest);
+    }
+  }
+
   function extractWebUrlsFromText(input) {
     if (!input || typeof input !== 'string') return [];
     const urlRegex = /https?:\/\/[^\s<>"'{}|\\^`\[\]]+/gi;
@@ -5162,7 +5329,7 @@ ${organicBlock}
       if (res.ok) {
         const data = await res.json();
         if (data && data.success && data.content && data.content.length > 30) {
-          clientWebContentCache.set(clean, data);
+          rememberWebContent(clean, data);
           return data;
         }
       }
@@ -5188,7 +5355,7 @@ ${organicBlock}
             charCount: text.length,
             content: text
           };
-          clientWebContentCache.set(clean, formatted);
+          rememberWebContent(clean, formatted);
           return formatted;
         }
       }
@@ -5214,7 +5381,7 @@ ${organicBlock}
             charCount: Math.min(markdown.length, maxChars),
             content: markdown.substring(0, maxChars)
           };
-          clientWebContentCache.set(clean, formatted);
+          rememberWebContent(clean, formatted);
           return formatted;
         }
       }
@@ -5610,9 +5777,8 @@ ${organicBlock}
       els.settingOllamaModelCountText.innerHTML = `<i class="fa-solid fa-layer-group"></i> ${modelCount} Model Siap`;
     }
 
-    if (els.settingOllamaCreditsText) {
-      els.settingOllamaCreditsText.style.display = 'none';
-    }
+    // (Rujukan mati els.settingOllamaCreditsText dihapus — id itu tidak pernah ada
+    //  di index.html maupun map els; cabangnya tak pernah tercapai.)
 
     // Banner di Live Model Catalog Modal
     if (STATE.activeCatalogTab === 'ollama') {
@@ -6098,6 +6264,12 @@ ${organicBlock}
       els.promptInput.value = '';
       autoResizeTextarea(els.promptInput);
     }
+    // M6: kartu "Ubah ke file markdown?" ikut dibersihkan — prompt dikosongkan
+    // secara programatik (tanpa event input), jadi kartu basi tetap terlihat di
+    // atas composer; diklik → teks LAMA dilampirkan sebagai dokumen ke pesan
+    // berikutnya (konten ganda terkirim diam-diam ke model).
+    hideComposerFoldPromptCard();
+    pendingFoldText = '';
     if (els.autoConvertDocRow) {
       els.autoConvertDocRow.style.display = 'none';
     }
@@ -8171,6 +8343,13 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           if (finishedDigestion) currentRoundText = finishedDigestion;
           fullText = currentRoundText;
         } catch (digestionErr) {
+          // H3: AbortError JANGAN ditelan oleh catch tool-round ini. Dulu abort saat
+          // eksekusi tool/digestion jatuh ke jalur "sukses": bunyi selesai + notifikasi
+          // desktop padahal pengguna menekan Stop. Teruskan ke catch luar agar
+          // penangan AbortError yang menyelesaikan (toast "dihentikan" + parsial).
+          if (digestionErr && (digestionErr.name === 'AbortError' || STATE.abortController?.signal?.aborted)) {
+            throw digestionErr;
+          }
           console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Fetch error:`, digestionErr);
           if (!fullText.trim()) fullText = cleanAssistant || '';
           break;
@@ -8184,6 +8363,13 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       const generatedFiles = extractedAiFiles.files;
       if (generatedFiles.length > 0) {
         fullText = stripGeneratedFileBlocks(fullText, extractedAiFiles.rawBlocks);
+      } else if (fullText.indexOf('<<<ZOZ_FILE') !== -1 || fullText.indexOf('<<<END_ZOZ_FILE') !== -1) {
+        // M2: ada marker tapi TIDAK ada blok utuh (stream terputus sebelum
+        // <<<END_ZOZ_FILE / END yatim). Dulu marker + isi blok tampil mentah di
+        // gelembung final dan persist ke riwayat — padahal saat streaming barisnya
+        // disembunyikan. Buang sisa blok (hideFileBlocksForDisplay memangkas dari
+        // marker terbuka sampai akhir teks — tak ada isi setelah blok tak tertutup).
+        fullText = stripGeneratedFileBlocks(hideFileBlocksForDisplay(fullText), []);
       }
 
       // Bersihkan sisa tag tool_call dan residu raw JSON jika ada sebelum render markdown final
@@ -8192,7 +8378,15 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         fullText = cleanFinalText;
       }
 
-      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && !STATE.abortController?.signal?.aborted) {
+      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml) {
+        if (STATE.abortController?.signal?.aborted) {
+          // H3: dibatalkan sebelum ada teks sama sekali → HAPUS baris & beri tahu
+          // pengguna. Dulu kondisi ini di-skip saat aborted sehingga gelembung KOSONG
+          // tersimpan sebagai jawaban "selesai" dan tetap terkirim sebagai konteks.
+          assistantRow.remove();
+          showToast('Generasi dihentikan oleh pengguna.');
+          return;
+        }
         throw new Error('Model Ollama menyelesaikan koneksi tanpa menghasilkan respon teks.');
       }
 
@@ -9015,6 +9209,11 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           currentRoundText = digestionRenderer.finish();
           fullText = currentRoundText;
         } catch (digestionErr) {
+          // H3: sama seperti jalur Ollama — AbortError diteruskan ke catch luar,
+          // bukan dipaksa jadi respons "selesai" yang menyesatkan.
+          if (digestionErr && (digestionErr.name === 'AbortError' || STATE.abortController?.signal?.aborted)) {
+            throw digestionErr;
+          }
           console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Fetch error:`, digestionErr);
           if (!fullText.trim()) fullText = cleanAssistant || '';
           break;
@@ -9028,6 +9227,13 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       const generatedFiles = extractedAiFiles.files;
       if (generatedFiles.length > 0) {
         fullText = stripGeneratedFileBlocks(fullText, extractedAiFiles.rawBlocks);
+      } else if (fullText.indexOf('<<<ZOZ_FILE') !== -1 || fullText.indexOf('<<<END_ZOZ_FILE') !== -1) {
+        // M2: ada marker tapi TIDAK ada blok utuh (stream terputus sebelum
+        // <<<END_ZOZ_FILE / END yatim). Dulu marker + isi blok tampil mentah di
+        // gelembung final dan persist ke riwayat — padahal saat streaming barisnya
+        // disembunyikan. Buang sisa blok (hideFileBlocksForDisplay memangkas dari
+        // marker terbuka sampai akhir teks — tak ada isi setelah blok tak tertutup).
+        fullText = stripGeneratedFileBlocks(hideFileBlocksForDisplay(fullText), []);
       }
 
       // Bersihkan sisa tag tool_call dan residu raw JSON jika ada sebelum render markdown final
@@ -9036,7 +9242,13 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         fullText = cleanFinalText;
       }
 
-      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && collectedImages.length === 0 && !STATE.abortController?.signal?.aborted) {
+      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && collectedImages.length === 0) {
+        if (STATE.abortController?.signal?.aborted) {
+          // H3: sama seperti Ollama — jangan simpan gelembung kosong sebagai jawaban.
+          assistantRow.remove();
+          showToast('Generasi dihentikan.');
+          return;
+        }
         throw new Error('Model OpenRouter menyelesaikan koneksi tanpa menghasilkan respon teks.');
       }
 
@@ -10421,20 +10633,79 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 </body>
 </html>`;
 
-    const blob = new Blob(['\ufeff', wordContent], { type: 'application/msword;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${cleanFilename}.docx`;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      if (document.body.contains(a)) {
-        document.body.removeChild(a);
+    // F13: DOCX ASLI (OOXML zip) via JSZip \u2014 dulu konten HTML diberi ekstensi
+    // .docx sehingga Word memperingatkan "format dan ekstensi tidak cocok" dan
+    // pembaca DOCX-saja bisa menolak. Tanpa JSZip \u2192 unduh sebagai .doc (ekstensi
+    // yang jujur untuk konten HTML ala Word).
+    const downloadWordBlob = (blobObj, ext, msg) => {
+      const url = URL.createObjectURL(blobObj);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${cleanFilename}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        if (document.body.contains(a)) document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 800);
+      showToast(msg, 'success');
+    };
+
+    if (typeof JSZip === 'undefined') {
+      downloadWordBlob(new Blob(['\ufeff', wordContent], { type: 'application/msword;charset=utf-8' }), 'doc',
+        'Laporan diunduh sebagai .doc (pustaka JSZip tidak tersedia).');
+      return;
+    }
+
+    const xmlEscape = (s) => String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const docParagraphs = String(markdownText || '').split(/\r?\n/).map((line) => {
+      if (!line.trim()) return '<w:p/>';
+      let text = line;
+      let bold = false;
+      let size = null;
+      const heading = line.match(/^(#{1,6})\s+(.*)$/);
+      if (heading) {
+        text = heading[2];
+        bold = true;
+        size = heading[1].length === 1 ? 32 : (heading[1].length === 2 ? 26 : 22);
+      } else {
+        text = text
+          .replace(/\*\*(.+?)\*\*/g, '$1')
+          .replace(/\*(.+?)\*/g, '$1')
+          .replace(/`([^`]+)`/g, '$1')
+          .replace(/^>\s?/, '')
+          .replace(/^[-*]\s+/, '\u2022 ');
       }
-      URL.revokeObjectURL(url);
-    }, 800);
-    showToast('Laporan berhasil diunduh dalam format Word (.docx)', 'success');
+      const rPr = (bold || size)
+        ? `<w:rPr>${bold ? '<w:b/>' : ''}${size ? `<w:sz w:val="${size}"/><w:szCs w:val="${size}"/>` : ''}</w:rPr>`
+        : '';
+      return `<w:p><w:r>${rPr}<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`;
+    }).join('');
+
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+    zip.folder('_rels').file('.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+    zip.folder('word').file('document.xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+      `<w:p><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t xml:space="preserve">${xmlEscape(title)}</w:t></w:r></w:p>` +
+      `<w:p><w:r><w:rPr><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">${xmlEscape('ZOZ ROUTER \u2022 Deep Research \u2022 Diterbitkan: ' + currentDate)}</w:t></w:r></w:p>` +
+      docParagraphs +
+      '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/></w:sectPr>' +
+      '</w:body></w:document>');
+
+    zip.generateAsync({ type: 'blob' }).then((zipBlob) => {
+      downloadWordBlob(
+        new Blob([zipBlob], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),
+        'docx',
+        'Laporan berhasil diunduh dalam format DOCX asli.'
+      );
+    }).catch(() => {
+      downloadWordBlob(new Blob(['\ufeff', wordContent], { type: 'application/msword;charset=utf-8' }), 'doc',
+        'Gagal membuat DOCX \u2014 diunduh sebagai .doc sebagai gantinya.');
+    });
   }
 
   function downloadReportPDF(title, markdownText) {
@@ -12622,8 +12893,11 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     if (els.neutronCrownBtn) {
       els.neutronCrownBtn.classList.toggle('state-blue', isHidden);
       els.neutronCrownBtn.classList.toggle('state-red', !isHidden);
-      els.neutronCrownBtn.removeAttribute('title');
-      els.neutronCrownBtn.removeAttribute('aria-label');
+      // A11y: label DIPERBARUI sesuai state, bukan dihapus — dulu title/aria-label
+      // dibuang setiap toggle sehingga tombol permanen "tak bernama" di screen reader.
+      const crownLabel = isHidden ? 'Tampilkan kembali kolom prompt' : 'Sembunyikan kolom prompt';
+      els.neutronCrownBtn.setAttribute('title', crownLabel);
+      els.neutronCrownBtn.setAttribute('aria-label', crownLabel);
     }
 
     if (!silent && !isHidden) {
@@ -13438,6 +13712,20 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     };
   }
 
+  // M16: blob: URL musik hasil generate dibatasi (6 terbaru) dan yang lebih tua
+  // direvoke — dulu tidak pernah direvoke sehingga setiap generate menahan blob
+  // di memori selama sesi penuh (pertumbuhan tak terbatas). URL yang sudah
+  // di-revoke memang mati permanen — itu inherent ke blob:, tetap mati saat reload.
+  const liveGeneratedAudioUrls = [];
+  function registerGeneratedAudioUrl(url) {
+    if (!url || typeof url !== 'string' || url.indexOf('blob:') !== 0) return;
+    liveGeneratedAudioUrls.push(url);
+    while (liveGeneratedAudioUrls.length > 6) {
+      const oldest = liveGeneratedAudioUrls.shift();
+      try { URL.revokeObjectURL(oldest); } catch (_) {}
+    }
+  }
+
   async function runMusicGeneration(session, promptText, options = {}) {
     const cleanPrompt = extractMusicPrompt(promptText) || 'Cyberpunk futuristic darksynth beat';
     const tunneledPrompt = neuralTunnelMusicPrompt(cleanPrompt);
@@ -13594,6 +13882,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       clearTimeout(timer2);
       clearTimeout(timer3);
       updateHudStep('[Langkah 3/3] Selesai! Menampilkan Cyberdeck Audio Player...', 100);
+      // M16: daftarkan blob URL agar yang paling tua direvoke otomatis
+      if (finalAudioUrl) registerGeneratedAudioUrl(finalAudioUrl);
 
       const endTime = performance.now();
       const totalDuration = ((endTime - startTime) / 1000).toFixed(2);
@@ -14190,6 +14480,10 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           const req = tx.objectStore('tracks').getAll();
           req.onsuccess = () => resolve(req.result || []);
           req.onerror = () => resolve([]);
+          // F11: transaksi yang di-abort (tekanan storage / tab lain menutup DB)
+          // kini menyelesaikan Promise — dulu gantung selamanya dan init() playlist
+          // tak pernah selesai (UI playlist/ambient tak pernah terinisialisasi).
+          tx.onabort = () => resolve([]);
         } catch (e) {
           resolve([]);
         }
@@ -14204,6 +14498,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           tx.objectStore('tracks').delete(id);
           tx.oncomplete = () => resolve(true);
           tx.onerror = () => resolve(false);
+          tx.onabort = () => resolve(false); // F11: jangan gantung
         } catch (e) {
           resolve(false);
         }
@@ -14218,6 +14513,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           tx.objectStore('tracks').clear();
           tx.oncomplete = () => resolve(true);
           tx.onerror = () => resolve(false);
+          tx.onabort = () => resolve(false); // F11: jangan gantung
         } catch (e) {
           resolve(false);
         }
@@ -14299,18 +14595,31 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       // Audio Event Handlers
       this.audio.addEventListener('timeupdate', () => this.onTimeUpdate());
       this.audio.addEventListener('ended', () => this.onTrackEnded());
-      // Pause pada audio element saat tab terlihat = niat pengguna (mis. lewat
-      // kontrol OS/media key) → matikan guardian agar musik tidak dibangunkan lagi.
-      // Pause dalam 800ms setelah pergantian track/src diabaikan (bukan niat user).
+      // Sumber file yang BARU sudah benar-benar berbunyi → tutup jendela abaikan-
+      // pause (dipakai hanya saat ganti track) lebih awal. Akibatnya pause pengguna
+      // sesaat setelah lagu berganti TETAP dihormati (dulu kejebak 800ms penuh).
+      this.audio.addEventListener('playing', () => {
+        this._ignorePauseUntil = 0;
+        this._reviveAttempts = 0;
+      });
+      // Pause di luar jendela pergantian = niat pengguna/SISTEM (tombol app sudah
+      // menandai wantsPlayback sendiri; ini untuk media key OS, headphone Bluetooth
+      // yang dilepas, dll.) — HORMATI tanpa memandang tab terlihat atau tidak.
+      // Dulu pause saat tab tersembunyi diabaikan → guardian "membangunkan" musik
+      // beberapa detik kemudian dan suara meledak dari speaker tanpa diminta.
       this.audio.addEventListener('pause', () => {
         if (this._ignorePauseUntil && performance.now() < this._ignorePauseUntil) return;
-        if (this.currentMode === 'file' && document.visibilityState === 'visible' && this.audio.paused && this.wantsPlayback) {
+        if (this.currentMode === 'file' && this.audio.paused && this.wantsPlayback) {
           this.wantsPlayback = false;
           this.stopGuardian();
           this.setPlayingState(false);
         }
       });
       this.audio.addEventListener('error', () => {
+        // Sumber mati (404 / codec tak didukung / URL stream habis) → matikan
+        // guardian SEKALIGUS, jangan retry play() ke src rusak tiap 4 detik selamanya.
+        this.wantsPlayback = false;
+        this.stopGuardian();
         showToast('Gagal memutar file audio.', 'error');
         this.setPlayingState(false);
       });
@@ -14446,6 +14755,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
       const containerWrap = els.ytPlayerContainerWrap;
       if (containerWrap) containerWrap.style.display = 'block';
+      syncYtPlayerVisibilityBtn();
 
       const createOrLoad = () => {
         try {
@@ -14469,6 +14779,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
                 },
                 onStateChange: (e) => {
                   if (e.data === YT.PlayerState.PLAYING) {
+                    this._ignorePauseUntil = 0;
+                    this._reviveAttempts = 0;
                     this.setPlayingState(true);
                     if (!customTitle && this.ytPlayer.getVideoData) {
                       const d = this.ytPlayer.getVideoData();
@@ -14478,32 +14790,54 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
                       }
                     }
                   } else if (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.ENDED) {
-                    // Pause dari kontrol iframe YouTube SENDIRI saat tab terlihat
-                    // = niat pengguna → matikan guardian. Pause saat tab tersembunyi
-                    // = suspend browser → guardian tetap boleh membangunkan lagi.
-                    if (e.data === YT.PlayerState.PAUSED && document.visibilityState === 'visible') {
-                      const stillWants = this.isPlaying;
-                      if (stillWants) {
+                    // H4: event PAUSED/ENDED bisa datang TERLAMBAT setelah pengguna
+                    // sudah pindah ke lagu/mode lain (pauseVideo saat beralih memicu
+                    // event asinkron). Tanpa guard ini, event basi membajak state:
+                    // guardian lagu baru dimatikan & UI dipaksa "paused".
+                    if (this.currentMode !== 'youtube') return;
+
+                    if (e.data === YT.PlayerState.PAUSED) {
+                      // Masih dalam jendela pergantian (loadVideoById / pindah mode):
+                      // pause ini berasal dari SWAP buatan kita, bukan pengguna.
+                      if (this._ignorePauseUntil && performance.now() < this._ignorePauseUntil) return;
+                      // Pause iframe YouTube = niat pengguna/system (tombol app sudah
+                      // menandai wantsPlayback sendiri sebelum pauseVideo) — hormati
+                      // tanpa memandang tab terlihat; jangan biarkan guardian kembali.
+                      if (this.isPlaying) {
                         this.wantsPlayback = false;
                         this.stopGuardian();
                       }
+                      this.setPlayingState(false);
+                      return;
                     }
+
+                    // ENDED
                     this.setPlayingState(false);
-                    if (e.data === YT.PlayerState.ENDED) {
-                      if (this.loopMode === 'one') {
-                        if (e.target && typeof e.target.seekTo === 'function' && typeof e.target.playVideo === 'function') {
-                          e.target.seekTo(0);
-                          e.target.playVideo();
-                          this.setPlayingState(true);
-                        }
-                      } else if (this.loopMode === 'all') {
-                        this.nextTrack();
+                    if (this.loopMode === 'one') {
+                      if (e.target && typeof e.target.seekTo === 'function' && typeof e.target.playVideo === 'function') {
+                        e.target.seekTo(0);
+                        e.target.playVideo();
+                        this.setPlayingState(true);
                       }
+                      return;
                     }
+                    if (this.loopMode === 'all' && this.playlist.length > 0) {
+                      this.nextTrack(); // wrap ke awal playlist
+                      return;
+                    }
+                    // Loop mati, ATAU loop-all tanpa playlist (video dari kotak URL):
+                    // akhiri bersih — matikan guardian agar interval/listener 4 detik
+                    // tidak hidup percuma sampai reload halaman (M13).
+                    this.wantsPlayback = false;
+                    this.stopGuardian();
                   }
                 },
                 onError: (e) => {
                   console.warn('YouTube Player error code:', e.data);
+                  // Pemutar rusak/dibatasi → jangan biarkan guardian memanggil
+                  // playVideo() ulang tiap 4 detik ke video yang sama-sama error.
+                  this.wantsPlayback = false;
+                  this.stopGuardian();
                   showToast('Video YouTube tidak dapat diputar atau dibatasi oleh pemilik video.', 'error');
                   this.setPlayingState(false);
                 }
@@ -14543,6 +14877,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       }
       const containerWrap = els.ytPlayerContainerWrap;
       if (containerWrap) containerWrap.style.display = 'none';
+      syncYtPlayerVisibilityBtn();
 
       this.wantsPlayback = true;
       this.startGuardian();
@@ -14723,6 +15058,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         }
         const containerWrap = els.ytPlayerContainerWrap;
         if (containerWrap) containerWrap.style.display = 'none';
+        syncYtPlayerVisibilityBtn();
 
         this.initAudioContext();
         this.stopAmbient();
@@ -14959,6 +15295,27 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           this.startAmbient(this.activeAmbientId);
         }
       } catch (_) {}
+
+      // BATAS PERCOBAAN BANGKIT (M12): bila setelah 4 siklus berturut-turut audio
+      // tetap tidak berbunyi (sumber mati, AudioContext gagal dibuat, kebijakan
+      // autoplay), menyerah dan matikan guardian — daripada memanggil play() ke
+      // sumber rusak tanpa henti sampai halaman ditutup. Sukses 'playing'/PLAYING
+      // me-reset penghitung ke 0.
+      try {
+        const stillSilent =
+          (this.currentMode === 'file' && this.audio && this.audio.src && this.audio.paused) ||
+          (this.currentMode === 'youtube' && this.ytPlayer && typeof this.ytPlayer.getPlayerState === 'function' && (this.ytPlayer.getPlayerState() === 2 || this.ytPlayer.getPlayerState() === -1)) ||
+          (this.currentMode === 'ambient' && (!this.audioCtx || this.audioCtx.state !== 'running') && this.ambientNodes.length === 0);
+        if (stillSilent) {
+          this._reviveAttempts = (this._reviveAttempts || 0) + 1;
+          if (this._reviveAttempts >= 4) {
+            this.wantsPlayback = false;
+            this.stopGuardian();
+          }
+        } else {
+          this._reviveAttempts = 0;
+        }
+      } catch (_) {}
     },
 
     onTrackEnded() {
@@ -14978,7 +15335,17 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
             });
         }
       } else if (this.loopMode === 'all') {
-        this.nextTrack();
+        if (this.playlist.length > 0) {
+          this.nextTrack();
+        } else {
+          // Loop-all tapi playlist kosong (stream URL tunggal): tak ada lagu yang
+          // bisa diputar lagi → AKHIRI. Tanpa ini guardian terus membangunkan
+          // stream yang sudah habis dari atas tiap 4 detik di tab tersembunyi —
+          // loop tak berujung yang membakar CPU/jaringan (M14).
+          this.wantsPlayback = false;
+          this.stopGuardian();
+          this.setPlayingState(false);
+        }
       } else {
         if (this.currentIndex < this.playlist.length - 1) {
           this.nextTrack();
@@ -15049,6 +15416,17 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     // --- PROCEDURAL SYNTHESIZER GENERATOR ---
     startAmbient(presetId) {
       this.initAudioContext();
+      // M18: VALIDASI AudioContext SEBELUM commit state. Dulu wantsPlayback/
+      // guardian diset lebih dulu; bila audioCtx null (peramban tanpa Web Audio)
+      // ctx.createGain() melempar di tengah → guardian terus memanggil startAmbient
+      // tiap 4 detik dalam siklus error abadi tanpa suara.
+      if (!this.audioCtx) {
+        showToast('Web Audio API tidak tersedia — preset ambient tidak dapat dijalankan.', 'error');
+        return;
+      }
+      if (this.audioCtx.state === 'suspended') {
+        this.audioCtx.resume().catch(() => {});
+      }
       this._ignorePauseUntil = performance.now() + 800;
       if (this.audio) this.audio.pause();
       this.stopAmbient();
@@ -15227,6 +15605,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         } catch (e) {}
       });
       this.ambientNodes = [];
+      // M17: lepaskan JUGA gain node pembawa — dulu hanya nodes yang dilepas sementara
+      // gain lama tetap menempel di graph analyser dan menumpuk tiap ganti preset.
+      if (this.ambientGainNode) {
+        try { this.ambientGainNode.disconnect(); } catch (_) {}
+        this.ambientGainNode = null;
+      }
     },
 
     // --- UI RENDERING & SYNCHRONIZATION ---
@@ -16586,9 +16970,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       if (wrap) {
         const isHidden = wrap.style.display === 'none';
         wrap.style.display = isHidden ? 'block' : 'none';
-        els.toggleYtPlayerVisibilityBtn.innerHTML = isHidden
-          ? '<i class="fa-solid fa-eye-slash"></i> Sembunyikan'
-          : '<i class="fa-solid fa-eye"></i> Tampilkan';
+        syncYtPlayerVisibilityBtn();
       }
       AudioEngine.click();
     });

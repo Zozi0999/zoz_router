@@ -428,6 +428,12 @@ html, body {
   opacity: 1;
 }
 
+/* A11y: kontrol yang biasanya muncul saat hover tetap terlihat ketika diTab
+   (tanpa ini fokus jatuh ke tombol opacity:0 yang tak terlihat). */
+.history-item:focus-within .history-item-actions {
+  opacity: 1;
+}
+
 @media (max-width: 768px) {
   .history-item-actions {
     opacity: 0.85;
@@ -1896,6 +1902,9 @@ html, body {
 .composer-container.composer-collapsed .composer-box {
   max-height: 0;
   opacity: 0;
+  /* visibility (bukan hanya opacity) mengeluarkan textarea/tombol dari tab order —
+     dulu pengguna bisa mengetik & mengirim pesan tak terlihat saat composer "collapse". */
+  visibility: hidden;
   transform: translateY(14px) scale(0.96);
   pointer-events: none;
   padding-top: 0;
@@ -3868,7 +3877,9 @@ body.modal-open {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  z-index: 10005;
+  /* Di atas semua modal (katalog/inspector z10050 !important) — dulu toast
+     tenggelam di belakang modal dan umpan balik tak pernah terlihat. */
+  z-index: 10100;
   pointer-events: none;
 }
 
@@ -5524,7 +5535,8 @@ body.modal-open {
   transition: opacity 0.2s ease;
 }
 
-.chat-img-thumb-wrap:hover .chat-img-overlay {
+.chat-img-thumb-wrap:hover .chat-img-overlay,
+.chat-img-thumb-wrap:focus-within .chat-img-overlay {
   opacity: 1;
 }
 
@@ -5740,8 +5752,10 @@ body.modal-open {
 @media (max-width: 768px) {
   .modal-catalog-card {
     width: 96vw !important;
-    max-height: 94vh !important;
-    height: 94vh !important;
+    /* backdrop padding20px (40px total): 94vh + 40px melebihi100vh di layar
+       pendek (browser chrome / keyboard terbuka) → baris bawah terpotong. */
+    max-height: calc(100vh - 40px) !important;
+    height: calc(100vh - 40px) !important;
     border-radius: var(--radius-md) !important;
   }
 }
@@ -6036,8 +6050,10 @@ body.modal-open {
 .inspector-modal-card {
   width: 95vw !important;
   max-width: 1050px !important;
-  height: 90vh !important;
-  max-height: 90vh !important;
+  /* calc memperhitungkan padding backdrop40px —90vh murni bisa meluber di
+     viewport pendek. */
+  height: calc(100vh - 40px) !important;
+  max-height: calc(100vh - 40px) !important;
   display: flex !important;
   flex-direction: column !important;
   overflow: hidden !important;
@@ -6534,7 +6550,8 @@ body.modal-open {
   z-index: 5;
 }
 
-.image-result-card:hover .image-result-overlay {
+.image-result-card:hover .image-result-overlay,
+.image-result-card:focus-within .image-result-overlay {
   opacity: 1;
   transform: translateY(0);
 }
@@ -7114,6 +7131,10 @@ body.modal-open {
   width: 95vw;
   max-width: 1320px;
   height: 94vh;
+  /* Backdrop memberi padding16px (32px total) — tanpa batas ini kartu selalu
+    32px lebih tinggi dari kotak yang tersedia: header/ footer terpotong dan
+     tak bisa di-scroll (body html overflow:hidden). */
+  max-height: calc(100vh - 32px);
   background: var(--bg-card);
   border: 1px solid var(--border-glow);
   border-radius: var(--radius-lg);
@@ -7443,8 +7464,9 @@ body.modal-open {
     padding: 12px 14px;
   }
   .full-report-modal-card {
-    width: 100vw;
-    height: 100vh;
+    /* calc: sisa tepi backdrop padding16px — dulu100vw/100vh meluber32px keluar layar */
+    width: calc(100vw - 32px);
+    height: calc(100vh - 32px);
     border-radius: 0;
   }
   .full-report-actions span {
@@ -7480,6 +7502,11 @@ body.modal-open {
 @media print {
   body * {
     visibility: hidden;
+  }
+  /* Tombol HUD scroll lolos dari aturan body * (spesifisitas .visible lebih
+     tinggi) — dulu ikut tercetak menimpa konten. */
+  .scroll-bottom-btn {
+    display: none !important;
   }
   #deepResearchReportModal, #deepResearchReportModal * {
     visibility: visible;
@@ -7959,6 +7986,38 @@ body.modal-open {
   height: 100%;
   border: 0;
   background: #fff;
+}
+
+/* Masalah YANG SAMA dengan YouTube yang sudah diperbaiki: CSS author
+   (position:absolute; width/height:100%) MENANG di atas UA stylesheet
+   :-webkit-full-screen sehingga iframe pratinjau tampil kecil di layar hitam.
+   Paksa dimensi fullscreen ke viewport. */
+.ai-file-studio-pane iframe:fullscreen,
+.ai-file-studio-pane iframe:-webkit-full-screen {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  max-height: none !important;
+  border: 0 !important;
+  margin: 0 !important;
+  z-index: 2147483647;
+}
+
+.ai-file-studio-pane:fullscreen,
+.ai-file-studio-pane:-webkit-full-screen {
+  width: 100vw !important;
+  height: 100vh !important;
+  border-radius: 0 !important;
+  border: none !important;
+}
+
+.ai-file-studio-pane:fullscreen iframe,
+.ai-file-studio-pane:-webkit-full-screen iframe {
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .ai-file-studio-placeholder {

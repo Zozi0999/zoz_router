@@ -237,6 +237,25 @@ async function ytSearchVideos(query, maxResults) {
   return payload;
 }
 
+// H8 (Cloudflare Worker): key milik OPERATOR (env OPENROUTER_API_KEY/SERPER_API_KEY)
+// hanya dipakai untuk permintaan same-origin / non-browser. Halaman lintas-asal
+// tidak pernah menerimanya (ACAO:* tidak lagi berarti pembakaran kredit gratis).
+// Front-end di domain terpisah: setel env ZOX_ALLOW_CROSS_ORIGIN=1.
+function envKeyAllowed(request, env) {
+  try {
+    if (env && env.ZOX_ALLOW_CROSS_ORIGIN === '1') return true;
+  } catch (_) {}
+  const sfs = request.headers.get('sec-fetch-site');
+  if (sfs && sfs !== 'same-origin' && sfs !== 'none') return false;
+  const origin = request.headers.get('origin');
+  if (!origin) return true; // non-browser (curl/fetch tanpa Origin)
+  try {
+    return new URL(origin).host === new URL(request.url).host;
+  } catch (_) {
+    return false;
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -248,7 +267,7 @@ export default {
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-ollama-key, x-serper-key, x-api-key, x-openrouter-key, x-title, X-Title, HTTP-Referer, http-referer, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID'
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-ollama-key, x-serper-key, x-api-key, x-openrouter-key, x-title, X-Title, HTTP-Referer, http-referer, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token'
         }
       });
     }
@@ -329,7 +348,7 @@ export default {
     // Proxy Ollama Models
     if (url.pathname === '/api/ollama/models' && request.method === 'GET') {
       try {
-        const key = request.headers.get('x-ollama-key') || request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || '';
+        const key = request.headers.get('x-ollama-key') || request.headers.get('x-api-key') || '';
         const authHeader = request.headers.get('Authorization') || (key ? `Bearer ${String(key).replace(/^Bearer\s+/i, '').trim()}` : '');
         const endpoint = url.searchParams.get('endpoint') || (authHeader ? 'https://ollama.com' : 'http://127.0.0.1:11434');
         const headers = {};
@@ -374,7 +393,7 @@ export default {
     if (url.pathname === '/api/openrouter/chat' && request.method === 'POST') {
       try {
         const body = await request.json().catch(() => ({}));
-        let apiKey = body.apiKey || body.openRouterKey || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '').trim() : '') || url.searchParams.get('key') || url.searchParams.get('apiKey') || url.searchParams.get('openRouterKey') || env?.OPENROUTER_API_KEY;
+        let apiKey = body.apiKey || body.openRouterKey || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '').trim() : '') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
         if (apiKey) apiKey = String(apiKey).replace(/^Bearer\s+/i, '').trim();
         if (!apiKey) {
           return new Response(JSON.stringify({ error: 'Missing OpenRouter API Key' }), {
@@ -422,7 +441,7 @@ export default {
       try {
         let authHeader = request.headers.get('Authorization');
         if (!authHeader) {
-          const qKey = request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || url.searchParams.get('openRouterKey') || env?.OPENROUTER_API_KEY;
+          const qKey = request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
           if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
         }
         const headers = {};
@@ -470,7 +489,7 @@ export default {
       try {
         let authHeader = request.headers.get('Authorization');
         if (!authHeader) {
-          const qKey = request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || url.searchParams.get('openRouterKey') || env?.OPENROUTER_API_KEY;
+          const qKey = request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
           if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
         }
         const headers = {
@@ -519,7 +538,7 @@ export default {
       try {
         let authHeader = request.headers.get('Authorization');
         if (!authHeader) {
-          const qKey = request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || url.searchParams.get('openRouterKey') || env?.OPENROUTER_API_KEY;
+          const qKey = request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
           if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
         }
         if (!authHeader) {
@@ -550,7 +569,7 @@ export default {
       try {
         let authHeader = request.headers.get('Authorization');
         if (!authHeader) {
-          const qKey = request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || url.searchParams.get('key') || url.searchParams.get('apiKey') || url.searchParams.get('openRouterKey') || env?.OPENROUTER_API_KEY;
+          const qKey = request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
           if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
         }
         if (!authHeader) {
@@ -593,14 +612,14 @@ export default {
           width = parseInt(body.width, 10) || width;
           height = parseInt(body.height, 10) || height;
           seed = body.seed || null;
-          openRouterKey = body.openRouterKey || body.apiKey || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || env?.OPENROUTER_API_KEY;
+          openRouterKey = body.openRouterKey || body.apiKey || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
         } else {
           prompt = url.searchParams.get('prompt') || url.searchParams.get('q') || '';
           model = url.searchParams.get('model') || model;
           width = parseInt(url.searchParams.get('width'), 10) || width;
           height = parseInt(url.searchParams.get('height'), 10) || height;
           seed = url.searchParams.get('seed') || null;
-          openRouterKey = url.searchParams.get('openRouterKey') || url.searchParams.get('key') || url.searchParams.get('apiKey') || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || env?.OPENROUTER_API_KEY;
+          openRouterKey = (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
         }
 
         if (openRouterKey) {
@@ -775,12 +794,12 @@ export default {
     if (url.pathname === '/api/web-search') {
       try {
         let query = url.searchParams.get('q') || url.searchParams.get('query') || '';
-        let apiKey = request.headers.get('x-serper-key') || request.headers.get('x-api-key') || url.searchParams.get('apiKey') || url.searchParams.get('key') || '' || env?.SERPER_API_KEY;
+        let apiKey = request.headers.get('x-serper-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.SERPER_API_KEY : null);
         let num = parseInt(url.searchParams.get('num') || url.searchParams.get('limit') || '15', 10);
         if (request.method === 'POST') {
           const body = await request.json().catch(() => ({}));
           query = body.query || body.q || query;
-          apiKey = body.apiKey || body.serperApiKey || apiKey || env?.SERPER_API_KEY;
+          apiKey = body.apiKey || body.serperApiKey || apiKey || (envKeyAllowed(request, env) ? env?.SERPER_API_KEY : null);
           if (body.num || body.limit) num = parseInt(body.num || body.limit, 10);
         }
         if (!query || !query.trim()) {
@@ -790,7 +809,7 @@ export default {
           });
         }
         const targetNum = Math.min(Math.max(isNaN(num) ? 15 : num, 1), 30);
-        const serperKey = apiKey || env?.SERPER_API_KEY;
+        const serperKey = apiKey || (envKeyAllowed(request, env) ? env?.SERPER_API_KEY : null);
         if (!serperKey) {
           return new Response(JSON.stringify({ success: false, error: 'Serper API key diperlukan. Setel SERPER_API_KEY atau kirim header x-serper-key.' }), {
             status: 400,
