@@ -408,6 +408,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     activePresetBanner: $('#activePresetBanner'),
     activePresetName: $('#activePresetName'),
     clearPresetBtn: $('#clearPresetBtn'),
+    activeResearchBanner: $('#activeResearchBanner'),
+    clearResearchBannerBtn: $('#clearResearchBannerBtn'),
     
     // Buttons & Modals
     settingsBtn: $('#settingsBtn'),
@@ -8948,30 +8950,45 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       els.webSearchToggleBtn.classList.add('mode-autonomous', 'active');
       if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-compass';
       if (els.searchBadge) els.searchBadge.style.display = 'none';
-      els.webSearchToggleBtn.title = 'Autonomous Web Explorer: Aktif (AI menjelajah & mencerna web secara mandiri)';
+      els.webSearchToggleBtn.title = 'Autonomous Web Explorer: Aktif (Klik untuk ubah / matikan)';
     } else if (mode === 'default') {
       els.webSearchToggleBtn.classList.add('mode-default', 'active');
       if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-globe';
       if (els.searchBadge) els.searchBadge.style.display = 'none';
-      els.webSearchToggleBtn.title = 'Pencarian Web Default: Aktif (Klik untuk ubah mode)';
+      els.webSearchToggleBtn.title = 'Pencarian Web Default: Aktif (Klik untuk ubah / matikan)';
     } else if (mode === 'premium') {
       els.webSearchToggleBtn.classList.add('mode-premium', 'active');
       if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-microscope';
       if (els.searchBadge) els.searchBadge.style.display = 'block';
-      els.webSearchToggleBtn.title = 'Deep Research (Premium): Aktif (Klik untuk ubah mode)';
+      els.webSearchToggleBtn.title = 'Deep Research (Premium): Aktif (Klik untuk matikan)';
     } else {
       if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-globe';
       if (els.searchBadge) els.searchBadge.style.display = 'none';
       els.webSearchToggleBtn.title = 'Mode Pencarian Web (Nonaktif - Klik untuk aktifkan)';
     }
 
-    // Update active check indicators in popup menu
+    // Floating Deep Research Banner di atas composer box dengan tombol silang [X]
+    if (els.activeResearchBanner) {
+      els.activeResearchBanner.style.display = (mode === 'premium') ? 'flex' : 'none';
+    }
+
+    // Update active check indicators & tombol silang [X] pada popup menu
     $$('.search-menu-item').forEach(item => {
       const itemMode = item.dataset.mode || 'off';
       const isActive = itemMode === mode;
       item.classList.toggle('active', isActive);
+
       const checkIcon = item.querySelector('.search-item-check');
-      if (checkIcon) checkIcon.style.display = isActive ? 'block' : 'none';
+      const closeBtn = item.querySelector('.search-item-close-btn');
+
+      if (isActive && itemMode !== 'off') {
+        // Tampilkan tombol silang (X) yang jelas pada mode yang sedang aktif
+        if (checkIcon) checkIcon.style.display = 'none';
+        if (closeBtn) closeBtn.style.display = 'inline-flex';
+      } else {
+        if (checkIcon) checkIcon.style.display = isActive ? 'block' : 'none';
+        if (closeBtn) closeBtn.style.display = 'none';
+      }
     });
   }
 
@@ -16092,11 +16109,33 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       toggleSearchDropdown(e);
     });
 
+    // Tombol silang [X] pada Floating Banner Deep Research di atas composer
+    els.clearResearchBannerBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setSearchMode('off');
+      showToast('Mode Deep Research dinonaktifkan.');
+    });
+
     $$('.search-menu-item').forEach(item => {
       item.addEventListener('click', (e) => {
         e.stopPropagation();
         const mode = item.dataset.mode || 'off';
-        setSearchMode(mode);
+        // Jika mode yang diklik sudah aktif (terutama Deep Research), klik ini langsung mematikannya (toggle off)
+        if (mode === STATE.searchMode && mode !== 'off') {
+          setSearchMode('off');
+          showToast(mode === 'premium' ? 'Mode Deep Research dinonaktifkan.' : 'Mode pencarian dinonaktifkan.');
+        } else {
+          setSearchMode(mode);
+          if (mode === 'premium') showToast('Mode Deep Research (Premium) diaktifkan.');
+        }
+      });
+    });
+
+    $$('.search-item-close-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setSearchMode('off');
+        showToast('Mode riset/pencarian dinonaktifkan.');
       });
     });
 

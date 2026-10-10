@@ -612,11 +612,12 @@ html, body {
 
 .mode-tabs {
   display: flex;
-  background: var(--bg-core);
-  padding: 3px;
+  background: transparent;
+  padding: 0;
   border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
-  gap: 2px;
+  border: none;
+  gap: 4px;
+  align-items: center;
 }
 
 .mode-tab {
@@ -646,11 +647,88 @@ html, body {
   border: 1px solid rgba(0, 240, 255, 0.2);
 }
 
+/* Cyberpunk Auto Router Brand Pill */
+.mode-tab#modeAuto {
+  background: linear-gradient(135deg, rgba(14, 20, 36, 0.88), rgba(20, 28, 52, 0.94));
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  color: var(--text-main);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), 0 0 10px rgba(0, 240, 255, 0.15);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+
+.mode-tab#modeAuto:hover {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.16), rgba(20, 32, 60, 0.96));
+  border-color: var(--neon-cyan);
+  box-shadow: 0 6px 20px rgba(0, 240, 255, 0.35);
+  transform: translateY(-1px);
+}
+
 .mode-tab#modeAuto.active {
-  background: rgba(0, 240, 255, 0.12);
-  border: 1px solid rgba(0, 240, 255, 0.45);
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.22), rgba(0, 255, 194, 0.14));
+  border-color: var(--neon-cyan);
+  color: #ffffff;
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.45), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+}
+
+.auto-router-logo-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+.auto-router-logo-svg {
+  width: 18px;
+  height: 18px;
+  filter: drop-shadow(0 0 4px rgba(0, 240, 255, 0.7));
+  transition: transform 0.3s ease;
+}
+
+.mode-tab#modeAuto:hover .auto-router-logo-svg {
+  transform: rotate(60deg) scale(1.1);
+}
+
+.auto-router-quantum-dot {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--neon-teal);
+  box-shadow: 0 0 8px var(--neon-teal);
+  animation: pulseTeal 1.6s infinite alternate;
+}
+
+.auto-router-text {
+  font-family: 'Space Grotesk', sans-serif;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  background: linear-gradient(90deg, #ffffff 40%, var(--neon-cyan) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.auto-router-mini-badge {
+  font-size: 0.58rem;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 240, 255, 0.15);
+  border: 1px solid rgba(0, 240, 255, 0.4);
   color: var(--neon-cyan);
-  box-shadow: 0 0 14px rgba(0, 240, 255, 0.25);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 /* Top Nav Right */
@@ -4914,15 +4992,109 @@ body.modal-open {
   text-overflow: ellipsis;
 }
 
+.search-item-action-area {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .search-item-check {
   font-size: 0.85rem;
   color: var(--neon-cyan);
-  margin-left: auto;
   flex-shrink: 0;
 }
 
 .search-menu-item[data-mode="premium"] .search-item-check {
   color: var(--neon-amber);
+}
+
+.search-item-close-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 70, 70, 0.16);
+  border: 1px solid rgba(255, 70, 70, 0.45);
+  color: #ff6b6b;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.search-item-close-btn:hover {
+  background: rgba(255, 70, 70, 0.35);
+  border-color: #ff4d4d;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(255, 70, 70, 0.6);
+  transform: scale(1.06);
+}
+
+.search-item-close-btn .close-btn-text {
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+/* Deep Research Active Floating Banner above Composer */
+.active-research-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  margin-bottom: 8px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, rgba(255, 170, 0, 0.14) 0%, rgba(20, 26, 44, 0.94) 100%);
+  border: 1px solid rgba(255, 170, 0, 0.45);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5), 0 0 16px rgba(255, 170, 0, 0.2);
+  color: var(--text-main);
+  animation: fadeInDown 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.research-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.82rem;
+}
+
+.research-banner-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--neon-amber);
+  box-shadow: 0 0 10px var(--neon-amber);
+  animation: pulseGold 1.5s infinite alternate;
+  flex-shrink: 0;
+}
+
+.clear-research-banner-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 70, 70, 0.16);
+  border: 1px solid rgba(255, 70, 70, 0.5);
+  color: #ff6b6b;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.clear-research-banner-btn:hover {
+  background: rgba(255, 70, 70, 0.35);
+  border-color: #ff4d4d;
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(255, 70, 70, 0.6);
+  transform: scale(1.04);
 }
 
 /* ==================== WEB SEARCH HUD & REAL-TIME SOURCES ==================== */

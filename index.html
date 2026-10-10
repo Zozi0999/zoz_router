@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261010_v168">
+  <link rel="stylesheet" href="style.css?v=20261010_v169">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -137,7 +137,26 @@
           <!-- Mode Tabs (Auto Router) -->
           <div class="mode-tabs">
             <button class="mode-tab" data-mode="auto" id="modeAuto" title="Auto routing pintar: Ollama Cloud first + OpenRouter fallback (Klik untuk beralih mode)">
-              <span class="tab-icon">🔀</span> Auto Router
+              <span class="auto-router-logo-wrap">
+                <svg class="auto-router-logo-svg" viewBox="0 0 24 24" width="16" height="16" fill="none">
+                  <defs>
+                    <linearGradient id="arGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stop-color="#00F0FF" />
+                      <stop offset="50%" stop-color="#00FFC2" />
+                      <stop offset="100%" stop-color="#FF5200" />
+                    </linearGradient>
+                  </defs>
+                  <polygon points="12,2 20.5,7 20.5,17 12,22 3.5,17 3.5,7" stroke="url(#arGrad)" stroke-width="1.8" stroke-linejoin="round" fill="rgba(0,240,255,0.08)"/>
+                  <path d="M7 8.5 H17 L7 15.5 H17" stroke="url(#arGrad)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <circle cx="12" cy="2" r="1.5" fill="#00FFC2"/>
+                  <circle cx="20.5" cy="12" r="1.5" fill="#00F0FF"/>
+                  <circle cx="3.5" cy="12" r="1.5" fill="#FF5200"/>
+                  <circle cx="12" cy="22" r="1.5" fill="#00FFC2"/>
+                </svg>
+                <span class="auto-router-quantum-dot"></span>
+              </span>
+              <span class="auto-router-text">Auto Router</span>
+              <span class="auto-router-mini-badge">AI</span>
             </button>
           </div>
         </div>
@@ -255,6 +274,19 @@
           <i class="fa-solid fa-sparkles"></i>
           <span id="activePresetName">Persona: Default</span>
           <button class="clear-preset-btn" id="clearPresetBtn"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <!-- Deep Research Active Banner with Cross [X] Button -->
+        <div class="active-research-banner" id="activeResearchBanner" style="display: none;">
+          <div class="research-banner-left">
+            <span class="research-banner-pulse"></span>
+            <i class="fa-solid fa-microscope" style="color: var(--neon-amber);"></i>
+            <span class="research-banner-text"><strong>Deep Research Aktif:</strong> Riset mendalam multi-iterasi</span>
+          </div>
+          <button type="button" class="clear-research-banner-btn" id="clearResearchBannerBtn" title="Matikan Deep Research (Kembali ke mode biasa)" aria-label="Matikan Deep Research">
+            <i class="fa-solid fa-xmark"></i>
+            <span>Matikan</span>
+          </button>
         </div>
 
         <!-- BOLA NEUTRON QUANTUM -->
@@ -427,7 +459,12 @@
                     <span class="search-item-title">Mode Default</span>
                     <span class="search-item-desc">Pencarian kilat Google real-time</span>
                   </div>
-                  <i class="fa-solid fa-check search-item-check"></i>
+                  <div class="search-item-action-area">
+                    <i class="fa-solid fa-check search-item-check"></i>
+                    <button type="button" class="search-item-close-btn" title="Matikan mode ini (Kembali ke Nonaktif)" style="display: none;" aria-label="Matikan mode">
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
+                  </div>
                 </button>
                 <button class="search-menu-item" id="searchOptionPremium" type="button" data-mode="premium">
                   <div class="search-item-icon-box premium-accent">
@@ -437,7 +474,13 @@
                     <span class="search-item-title">Mode Premium (Deep Research)</span>
                     <span class="search-item-desc">Riset mendalam multi-iterasi & sintesis otonom</span>
                   </div>
-                  <i class="fa-solid fa-check search-item-check" style="display: none;"></i>
+                  <div class="search-item-action-area">
+                    <i class="fa-solid fa-check search-item-check" style="display: none;"></i>
+                    <button type="button" class="search-item-close-btn" title="Matikan Deep Research (Kembali ke Nonaktif)" style="display: none;" aria-label="Matikan Deep Research">
+                      <i class="fa-solid fa-xmark"></i>
+                      <span class="close-btn-text">Matikan</span>
+                    </button>
+                  </div>
                 </button>
                 <button class="search-menu-item" id="searchOptionAutonomous" type="button" data-mode="autonomous">
                   <div class="search-item-icon-box auto-accent">
@@ -447,7 +490,12 @@
                     <span class="search-item-title">Autonomous Web Explorer</span>
                     <span class="search-item-desc">Tool mandiri dari nol (Tanpa Serper, dipanggil bebas oleh AI)</span>
                   </div>
-                  <i class="fa-solid fa-check search-item-check" style="display: none;"></i>
+                  <div class="search-item-action-area">
+                    <i class="fa-solid fa-check search-item-check" style="display: none;"></i>
+                    <button type="button" class="search-item-close-btn" title="Matikan mode ini (Kembali ke Nonaktif)" style="display: none;" aria-label="Matikan mode">
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
+                  </div>
                 </button>
               </div>
             </div>
@@ -1463,6 +1511,6 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
-  <script src="app.js?v=20261010_v168"></script>
+  <script src="app.js?v=20261010_v169"></script>
 </body>
 </html>
