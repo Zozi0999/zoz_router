@@ -228,9 +228,20 @@ function isOllamaEndpointForbidden(endpointUrl) {
 function isPrivateOrReservedIPv4(ip) {
   if (!ip || typeof ip !== 'string') return false;
   // IPv4-mapped IPv6 (::ffff:x.x.x.x) - extract IPv4 part
-  let ipv4 = ip;
-  if (ip.startsWith('::ffff:')) {
-    ipv4 = ip.slice(7);
+  let ipv4 = ip.trim();
+  if (ipv4.startsWith('::ffff:')) {
+    ipv4 = ipv4.slice(7);
+  }
+  // If hex mapped/compat parts like a9fe:a0fe
+  if (ipv4.includes(':')) {
+    const parts = ipv4.split(':');
+    if (parts.length === 2) {
+      const high = parseInt(parts[0], 16);
+      const low = parseInt(parts[1], 16);
+      if (!isNaN(high) && !isNaN(low)) {
+        ipv4 = `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
+      }
+    }
   }
   if (!/^\d+\.\d+\.\d+\.\d+$/.test(ipv4)) return false;
   const parts = ipv4.split('.').map(Number);
@@ -239,19 +250,24 @@ function isPrivateOrReservedIPv4(ip) {
 
   // 0.0.0.0/8 - "this network" (RFC 1122)
   if (a === 0) return true;
-  // 10.0.0.0/8 - private (RFC 1918) - covered by isPrivateHost
+  // 10.0.0.0/8 - private (RFC 1918)
+  if (a === 10) return true;
   // 100.64.0.0/10 - CGNAT (RFC 6598)
   if (a === 100 && b >= 64 && b <= 127) return true;
-  // 127.0.0.0/8 - loopback (RFC 1122) - covered by isPrivateHost
-  // 169.254.0.0/16 - link-local (RFC 3927) - covered by isPrivateHost
-  // 172.16.0.0/12 - private (RFC 1918) - covered by isPrivateHost
+  // 127.0.0.0/8 - loopback (RFC 1122)
+  if (a === 127) return true;
+  // 169.254.0.0/16 - link-local (RFC 3927)
+  if (a === 169 && b === 254) return true;
+  // 172.16.0.0/12 - private (RFC 1918)
+  if (a === 172 && b >= 16 && b <= 31) return true;
   // 192.0.0.0/24 - IETF protocol assignments (RFC 6890)
   if (a === 192 && b === 0 && c === 0) return true;
   // 192.0.2.0/24 - TEST-NET-1 (RFC 5737)
   if (a === 192 && b === 0 && c === 2) return true;
   // 192.88.99.0/24 - 6to4 relay anycast (RFC 3068, deprecated but still in use)
   if (a === 192 && b === 88 && c === 99) return true;
-  // 192.168.0.0/16 - private (RFC 1918) - covered by isPrivateHost
+  // 192.168.0.0/16 - private (RFC 1918)
+  if (a === 192 && b === 168) return true;
   // 198.18.0.0/15 - benchmarking (RFC 2544)
   if (a === 198 && (b === 18 || b === 19)) return true;
   // 198.51.100.0/24 - TEST-NET-2 (RFC 5737)
@@ -270,25 +286,58 @@ function isPrivateOrReservedIPv4(ip) {
 // Helper: check if an IPv6 address is in a reserved/special-use range
 function isPrivateOrReservedIPv6(ip) {
   if (!ip || typeof ip !== 'string') return false;
-  const lower = ip.toLowerCase();
+  let lower = ip.toLowerCase().trim();
+  if (lower.startsWith('[') && lower.endsWith(']')) lower = lower.slice(1, -1);
+  const zoneIdx = lower.indexOf('%');
+  if (zoneIdx !== -1) lower = lower.slice(0, zoneIdx);
+
   // ::1/128 - loopback
   if (lower === '::1') return true;
   // ::/128 - unspecified
   if (lower === '::') return true;
   // ::ffff:0:0/96 - IPv4-mapped (handled by extracting IPv4 and checking isPrivateOrReservedIPv4)
-  if (lower.startsWith('::ffff:')) return isPrivateOrReservedIPv4(lower.slice(7));
+  if (lower.startsWith('::ffff:')) {
+    const mapped = lower.slice(7);
+    if (mapped.includes('.')) return isPrivateOrReservedIPv4(mapped);
+    if (mapped.includes(':')) {
+      const parts = mapped.split(':');
+      if (parts.length === 2) {
+        const high = parseInt(parts[0], 16);
+        const low = parseInt(parts[1], 16);
+        if (!isNaN(high) && !isNaN(low)) {
+          const dotted = `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
+          return isPrivateOrReservedIPv4(dotted);
+        }
+      }
+    }
+    return true; // Malformed/reserved mapped IPv6 -> reject defensively
+  }
+  // ::/96 - IPv4-compatible (deprecated)
+  if (lower.startsWith('::') && lower !== '::1' && lower !== '::') {
+    const compat = lower.slice(2);
+    if (compat.includes('.')) return isPrivateOrReservedIPv4(compat);
+    const parts = compat.split(':');
+    if (parts.length === 2) {
+      const high = parseInt(parts[0], 16);
+      const low = parseInt(parts[1], 16);
+      if (!isNaN(high) && !isNaN(low)) {
+        const dotted = `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
+        return isPrivateOrReservedIPv4(dotted);
+      }
+    }
+  }
   // fc00::/7 - unique local addresses (RFC 4193)
-  if (/^fc[0-9a-f]:/.test(lower) || /^fd[0-9a-f]:/.test(lower)) return true;
+  if (/^f[cd][0-9a-f]{0,2}:/i.test(lower)) return true;
   // fe80::/10 - link-local (RFC 4291)
-  if (/^fe[89ab][0-9a-f]:/.test(lower)) return true;
+  if (/^fe[89ab][0-9a-f]{0,2}:/i.test(lower)) return true;
   // 2001:db8::/32 - documentation (RFC 3849)
-  if (lower.startsWith('2001:db8:')) return true;
+  if (lower.startsWith('2001:db8:') || lower.startsWith('2001:0db8:')) return true;
   // ff00::/8 - multicast (RFC 4291)
   if (lower.startsWith('ff')) return true;
   // 2001:10::/28 - ORCHID (RFC 4843, deprecated)
-  if (lower.startsWith('2001:10:')) return true;
+  if (lower.startsWith('2001:10:') || lower.startsWith('2001:0010:')) return true;
   // 2001:20::/28 - ORCHIDv2 (RFC 7343)
-  if (lower.startsWith('2001:20:')) return true;
+  if (lower.startsWith('2001:20:') || lower.startsWith('2001:0020:')) return true;
   return false;
 }
 
@@ -377,9 +426,15 @@ function loadIdentityRegistry() {
       parsed = JSON.parse(fs.readFileSync(IDENTITY_FILE, 'utf8'));
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) parsed = {};
     }
-    // Object.create(null): mencegah __proto__/constructor (lolos regex userId)
+    // Object.create(null) dengan filter eksplisit: mencegah __proto__/constructor/prototype
     // dari prototype-pollution saat lookup/penulisan.
-    identityRegistry = Object.assign(Object.create(null), parsed);
+    identityRegistry = Object.create(null);
+    if (parsed && typeof parsed === 'object') {
+      for (const [key, val] of Object.entries(parsed)) {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+        identityRegistry[key] = val;
+      }
+    }
   } catch (_) {
     identityRegistry = Object.create(null);
   }
@@ -3810,11 +3865,12 @@ async function requestHandler(req, res) {
       decodedUploadPath = decodeURIComponent(pathname);
     } catch (_) {}
     const uploadFilename = path.basename(decodedUploadPath);
-    const uploadFilePath = path.join(UPLOADS_DIR, uploadFilename);
-    const relUpload = path.relative(UPLOADS_DIR, uploadFilePath);
-    if (relUpload.startsWith('..') || path.isAbsolute(relUpload)) {
+    const resolvedUploadDir = path.resolve(UPLOADS_DIR);
+    const resolvedUploadFile = path.resolve(UPLOADS_DIR, uploadFilename);
+    if (!resolvedUploadFile.startsWith(resolvedUploadDir + path.sep)) {
       return sendJSON(res, 403, { error: 'Forbidden' });
     }
+    const uploadFilePath = resolvedUploadFile;
     try {
       if (fs.existsSync(uploadFilePath)) {
         const stat = fs.statSync(uploadFilePath);
@@ -4060,7 +4116,7 @@ async function requestHandler(req, res) {
       pruneResearchTasks();
       const rawSessionId = body.sessionId || req.headers['x-session-id'] || req.headers['X-Session-ID'] || null;
       const researchUserId = reqUserId;
-      const taskId = 'research_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+      const taskId = 'research_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
       dbTugasRiset[taskId] = {
         taskId,
         sessionId: rawSessionId,
@@ -4204,12 +4260,14 @@ async function requestHandler(req, res) {
       let maxResults = 6;
       if (method === 'GET') {
         query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
-        maxResults = parseInt(reqUrl.searchParams.get('limit') || '6', 10) || 6;
+        const parsedLimit = parseInt(reqUrl.searchParams.get('limit') || '6', 10);
+        maxResults = Math.min(Math.max(isNaN(parsedLimit) ? 6 : parsedLimit, 1), 20);
       } else {
         const body = await safeParseBody(req);
         if (!body) return;
         query = body.q || body.query || body.keyword || '';
-        maxResults = parseInt(body.limit || body.max_results, 10) || 6;
+        const parsedLimit = parseInt(body.limit || body.max_results || '6', 10);
+        maxResults = Math.min(Math.max(isNaN(parsedLimit) ? 6 : parsedLimit, 1), 20);
       }
 
       if (!query || !String(query).trim()) {
@@ -5645,12 +5703,13 @@ async function requestHandler(req, res) {
       proxyReq.write(postData);
       proxyReq.end();
     } catch (err) {
-      // M20: throw sinkron (umumnya ERR_INVALID_CHAR dari header Authorization/API-key
-      // yang mengandung CRLF) terjadi SEBELUM proxyReq terpasang, sehingga task tetap
-      // 'streaming' dan sesi dikunci 429 hingga prune 15 menit. Bersihkan di sini.
-      if (sessionId && dbActiveChatTasks[sessionId] &&
-          dbActiveChatTasks[sessionId].status === 'streaming' &&
-          !dbActiveChatTasks[sessionId].proxyReq) {
+      // Pembersihan aman jika terjadi throw sinkron (ERR_INVALID_CHAR, payload error, socket write error)
+      if (sessionId && dbActiveChatTasks[sessionId]) {
+        try {
+          if (dbActiveChatTasks[sessionId].proxyReq && !dbActiveChatTasks[sessionId].proxyReq.destroyed) {
+            dbActiveChatTasks[sessionId].proxyReq.destroy();
+          }
+        } catch (_) {}
         delete dbActiveChatTasks[sessionId];
       }
       return sendJSON(res, 500, { error: err.message });
@@ -5977,7 +6036,7 @@ async function requestHandler(req, res) {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': apiKey,
-          'HTTP-Referer': 'http://localhost:4040',
+          'HTTP-Referer': req.headers.origin || req.headers.referer || process.env.ZOX_APP_URL || 'https://github.com/Zozi0999/zoz_router',
           'X-Title': 'ZOZ ROUTER Neural AI Gateway',
           'Content-Length': Buffer.byteLength(postData)
         },
@@ -6175,12 +6234,13 @@ async function requestHandler(req, res) {
       proxyReq.write(postData);
       proxyReq.end();
     } catch (err) {
-      // M20: throw sinkron (umumnya ERR_INVALID_CHAR dari header Authorization/API-key
-      // yang mengandung CRLF) terjadi SEBELUM proxyReq terpasang, sehingga task tetap
-      // 'streaming' dan sesi dikunci 429 hingga prune 15 menit. Bersihkan di sini.
-      if (sessionId && dbActiveChatTasks[sessionId] &&
-          dbActiveChatTasks[sessionId].status === 'streaming' &&
-          !dbActiveChatTasks[sessionId].proxyReq) {
+      // Pembersihan aman jika terjadi throw sinkron (ERR_INVALID_CHAR, payload error, socket write error)
+      if (sessionId && dbActiveChatTasks[sessionId]) {
+        try {
+          if (dbActiveChatTasks[sessionId].proxyReq && !dbActiveChatTasks[sessionId].proxyReq.destroyed) {
+            dbActiveChatTasks[sessionId].proxyReq.destroy();
+          }
+        } catch (_) {}
         delete dbActiveChatTasks[sessionId];
       }
       return sendJSON(res, 500, { error: err.message });
