@@ -422,7 +422,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     attachOptionImage: $('#attachOptionImage'),
     attachOptionGenImage: $('#attachOptionGenImage'),
     attachOptionGenMusic: $('#attachOptionGenMusic'),
-    attachOptionGenVideo: $('#attachOptionGenVideo'),
     attachOptionDoc: $('#attachOptionDoc'),
     attachOptionYouTubeSearch: $('#attachOptionYouTubeSearch'),
     imageFileInput: $('#imageFileInput'),
@@ -461,8 +460,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     musicModelSearchInput: $('#musicModelSearchInput'),
     musicOpenRouterStatusBar: $('#musicOpenRouterStatusBar'),
     musicOpenRouterConfigBtn: $('#musicOpenRouterConfigBtn'),
-    videoGenToggleBtn: $('#videoGenToggleBtn'),
-    videoModelBadge: $('#videoModelBadge'),
     tabBtnPollinations: $('#tabBtnPollinations'),
     tabBtnOpenRouter: $('#tabBtnOpenRouter'),
     panePollinations: $('#panePollinations'),
@@ -17227,22 +17224,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       }
       AudioEngine.click();
     });
-    els.attachOptionGenVideo?.addEventListener('click', () => {
-      closeAttachmentDropdown();
-      STATE.isVideoGenMode = !STATE.isVideoGenMode;
-      if (STATE.isVideoGenMode) {
-        STATE.isImageGenMode = false;
-        STATE.isMusicGenMode = false;
-        updateImageGenModeUI();
-        updateMusicGenModeUI();
-      }
-      updateVideoGenModeUI();
-      if (els.promptInput) {
-        els.promptInput.focus();
-      }
-      showToast(STATE.isVideoGenMode ? '🎬 Mode AI Video Aktif: Masukkan deskripsi visual gerak / video...' : 'Mode AI Video dinonaktifkan.');
-      AudioEngine.click();
-    });
     // Toggle tool "Cari Video YouTube" (independen dari mode gambar/musik/video)
     els.attachOptionYouTubeSearch?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -17583,28 +17564,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           showToast('⚠️ Masukkan model ID OpenRouter (misal: google/gemini-2.0-flash-exp:free)');
         }
       }
-    });
-
-    // Embedded AI Video Studio Toggle Button
-    els.videoGenToggleBtn?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeImageModelDropdown();
-      closeMusicModelDropdown();
-      closeAttachmentDropdown();
-      closeSearchDropdown();
-      STATE.isVideoGenMode = !STATE.isVideoGenMode;
-      if (STATE.isVideoGenMode) {
-        STATE.isImageGenMode = false;
-        STATE.isMusicGenMode = false;
-        updateImageGenModeUI();
-        updateMusicGenModeUI();
-      }
-      updateVideoGenModeUI();
-      if (els.promptInput && STATE.isVideoGenMode) {
-        els.promptInput.focus();
-      }
-      showToast(STATE.isVideoGenMode ? '🎬 AI Video Motion Studio Aktif!' : 'Mode Video dinonaktifkan.');
-      AudioEngine.click();
     });
 
     $$('.image-model-item').forEach(item => {
