@@ -1988,9 +1988,28 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     return (element.scrollHeight - element.scrollTop - element.clientHeight) <= threshold;
   }
 
+  let scrollBottomBtnHideTimeout = null;
+
   function toggleScrollBottomBtn(show) {
     if (!els.scrollBottomBtn) return;
-    els.scrollBottomBtn.style.display = show ? 'flex' : 'none';
+    if (scrollBottomBtnHideTimeout) {
+      clearTimeout(scrollBottomBtnHideTimeout);
+      scrollBottomBtnHideTimeout = null;
+    }
+
+    if (show) {
+      els.scrollBottomBtn.style.display = 'flex';
+      requestAnimationFrame(() => {
+        els.scrollBottomBtn?.classList.add('visible');
+      });
+    } else {
+      els.scrollBottomBtn.classList.remove('visible');
+      scrollBottomBtnHideTimeout = setTimeout(() => {
+        if (!els.scrollBottomBtn?.classList.contains('visible')) {
+          els.scrollBottomBtn.style.display = 'none';
+        }
+      }, 300);
+    }
   }
 
   function smartScrollChatToBottom(force = false) {
@@ -2019,6 +2038,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     let wheelTimer = null;
     let wheelHoldTimer = null;
     let wheelAccumDelta = 0;
+    let isScrollBtnVisible = false;
 
     function showPullLoading() {
       if (!els.pullUpNewChatWrapper) return;
@@ -2114,15 +2134,35 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     });
 
     const handleScrollEvent = (el = els.chatViewport) => {
-      if (isAutoScrolling) return;
-      const atBottom = isChatAtBottom(el, 45);
-      if (!atBottom) {
-        userScrolledUp = true;
-        toggleScrollBottomBtn(true);
+      if (!el || isAutoScrolling) return;
+
+      const scrollHeight = el.scrollHeight;
+      const scrollTop = el.scrollTop;
+      const clientHeight = el.clientHeight;
+      const distFromBottom = Math.max(0, scrollHeight - scrollTop - clientHeight);
+
+      // Ambang batas kemunculan tombol gulir (Scroll to Bottom Button Threshold):
+      // Sesuai instruksi Kaisar Zozi: tombol tidak boleh muncul terlalu cepat saat pengguna hanya
+      // menggulir sedikit (misal 50-200px dari dasar). Tombol HANYA muncul jika pengguna menggulir
+      // jauh lebih tinggi ke atas (misal di bagian tengah output jawaban atau di percakapan-percakapan lama sebelumnya).
+      // Ambang batas: minimal 380px atau 45% dari tinggi viewport obrolan.
+      const showThreshold = Math.max(380, Math.round(clientHeight * 0.45));
+      const hideThreshold = 80; // Sembunyi halus saat pengguna sudah dekat kembali ke bawah
+
+      // Atur userScrolledUp untuk menjaga agar streaming tidak menyentak viewport jika pengguna sedang membaca
+      userScrolledUp = distFromBottom > 70;
+
+      if (distFromBottom >= showThreshold) {
+        if (!isScrollBtnVisible) {
+          isScrollBtnVisible = true;
+          toggleScrollBottomBtn(true);
+        }
         hidePullWrapper(true, false);
-      } else {
-        userScrolledUp = false;
-        toggleScrollBottomBtn(false);
+      } else if (distFromBottom <= hideThreshold) {
+        if (isScrollBtnVisible) {
+          isScrollBtnVisible = false;
+          toggleScrollBottomBtn(false);
+        }
       }
     };
 
@@ -2146,13 +2186,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         const atBottom = isChatAtBottom(els.chatViewport, 45);
 
         if (deltaY < -10 || (!atBottom && deltaY < 0)) {
-          // Scrolling up into previous messages
-          userScrolledUp = true;
-          toggleScrollBottomBtn(true);
+          // Scrolling up into previous messages: sembunyikan pull wrapper, handleScrollEvent yang akan mengecek threshold
           hidePullWrapper(true, false);
         } else if (atBottom && deltaY > 12) {
           userScrolledUp = false;
-          toggleScrollBottomBtn(false);
+          if (isScrollBtnVisible) {
+            isScrollBtnVisible = false;
+            toggleScrollBottomBtn(false);
+          }
 
           if (!els.pullUpNewChatWrapper?.classList.contains('revealed')) {
             showPullLoading();
@@ -2185,15 +2226,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // Desktop wheel: track scroll-and-hold at bottom to reveal New Chat button
     els.chatViewport?.addEventListener('wheel', (e) => {
       if (e.deltaY < 0) {
-        // Scrolling up into past messages
-        userScrolledUp = true;
-        toggleScrollBottomBtn(true);
+        // Scrolling up into past messages: sembunyikan pull wrapper, handleScrollEvent yang akan mengecek threshold
         hidePullWrapper(true, false);
       } else if (e.deltaY > 0) {
         const atBottom = isChatAtBottom(els.chatViewport, 45);
         if (atBottom) {
           userScrolledUp = false;
-          toggleScrollBottomBtn(false);
+          if (isScrollBtnVisible) {
+            isScrollBtnVisible = false;
+            toggleScrollBottomBtn(false);
+          }
 
           if (!els.pullUpNewChatWrapper?.classList.contains('revealed')) {
             showPullLoading();
@@ -2229,6 +2271,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     els.scrollBottomBtn?.addEventListener('click', () => {
       if (els.chatViewport) els.chatViewport.scrollTo({ top: els.chatViewport.scrollHeight, behavior: 'smooth' });
       userScrolledUp = false;
+      isScrollBtnVisible = false;
       toggleScrollBottomBtn(false);
       AudioEngine.click();
     });
