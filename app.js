@@ -5547,6 +5547,11 @@ ${organicBlock}
 
     // Simpan prompt teks asli pengguna untuk tampilan gelembung obrolan (displayContent)
     let originalUserPrompt = rawText;
+    // Ambil URL & perintah slash dari teks ASLI sebelum auto-conversion. Blok lipat di
+    // bawah menimpa rawText dengan instruksi singkat sehingga URL/perintah di dalamnya
+    // hilang — bila divalidasi setelah lipat, Mode Deep Research menolak URL yang sah.
+    const preFoldUrls = extractCustomAnalysisUrls(rawText);
+    const preFoldDeepCommand = /^\/(?:deep|research|riset)\s+/i.test(rawText.trim());
 
     // Claude / Grok AI Style: Jika prompt teks yang dikirim pengguna merupakan codingan atau laporan panjang
     // dan belum ada dokumen lampiran, otomatis konversi blok tersebut menjadi file markdown lampiran
@@ -5570,12 +5575,16 @@ ${organicBlock}
       }
     }
 
-    const isExplicitDeepResearch = /^\/(?:deep|research|riset)\s+/i.test(rawText.trim());
+    const isExplicitDeepResearch = preFoldDeepCommand || /^\/(?:deep|research|riset)\s+/i.test(rawText.trim());
     if (STATE.isDeepResearch || isExplicitDeepResearch) {
       // Validasi URL kustom untuk Mode Deep Research
       let targetUrls = Array.isArray(STATE.researchTargetUrls) ? [...STATE.researchTargetUrls] : [];
       const promptUrls = extractCustomAnalysisUrls(rawText);
       promptUrls.forEach(u => {
+        if (!targetUrls.includes(u)) targetUrls.push(u);
+      });
+      // URL dari teks asli (sebelum lipat otomatis) juga dihitung sah
+      preFoldUrls.forEach(u => {
         if (!targetUrls.includes(u)) targetUrls.push(u);
       });
 

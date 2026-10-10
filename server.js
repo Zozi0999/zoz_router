@@ -2994,14 +2994,19 @@ async function requestHandler(req, res) {
   if (pathname === '/api/sessions' && method === 'GET') {
     try {
       const rawUserDir = path.join(SESSIONS_DIR, reqUserId);
+      // Adopsi dipicu bila dir pengguna belum pernah dibuat ATAU masih kosong.
+      // Kondisi kedua penting: getUserSessionsDir membuat folder pada permintaan
+      // apa pun (mis. POST /api/sessions terjadi sebelum GET), sehingga folder bisa
+      // terbentuk lebih dulu dan sesi legacy terdampar selamanya di 'default/'.
+      const userDirHasSessions = fs.existsSync(rawUserDir) &&
+        fs.readdirSync(rawUserDir).some(f => f.endsWith('.json'));
 
       // ADOPSI SESI LEGACY: sebelum ada identitas pengguna, seluruh sesi hidup di
       // data/sessions/ (lalu dipindahkan migrasi ke data/sessions/default/). Klien kini
       // mengirim X-User-ID sehingga hanya membaca data/sessions/<userId>/ — tanpa langkah
-      // ini riwayat lama menjadi tak terlihat sama sekali. Pemindahan dilakukan pada
-      // kunjungan pertama (dir belum pernah dibuat), sehingga sesi lama langsung menjadi
-      // privat milik pengguna tersebut.
-      if (!fs.existsSync(rawUserDir) && reqUserId !== 'default') {
+      // ini riwayat lama menjadi tak terlihat sama sekali. Pemindahan dilakukan bila
+      // pengguna belum memiliki sesi, sehingga sesi lama langsung menjadi privat miliknya.
+      if (!userDirHasSessions && reqUserId !== 'default') {
         const legacyDir = path.join(SESSIONS_DIR, 'default');
         if (fs.existsSync(legacyDir)) {
           const legacyFiles = fs.readdirSync(legacyDir).filter(f => f.endsWith('.json'));
