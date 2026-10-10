@@ -2708,15 +2708,15 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
         topik,
         mode: 'custom_url_analyzer',
         targetUrls,
-        timestamp: new Date().toLocaleTimeString('it-IT'),
+        timestamp: new Date().toLocaleTimeString('id-ID'),
         scrapedPagesCount: scrapedPages.length,
         agent1: {
-          name: 'Estrattore di Contenuti Web (URL Bersaglio)',
+          name: 'Penganalisis Web Kustom URL (Ekstraksi Konten)',
           provider: 'Deep Web Extractor',
           model: masterResearchModel,
           resultsCount: scrapedPages.length,
           results: scrapedPages.map(p => ({ title: p.title, link: p.url, snippet: p.content.slice(0, 250) + '...', charCount: p.charCount })),
-          analysis: `Estrazione riuscita: ${scrapedPages.length} documenti web integrali acquisiti con successo per l'analisi approfondita.`
+          analysis: `Berhasil mengekstrak ${scrapedPages.length} halaman web kustom utuh untuk telaah mendalam.`
         },
         scraper: {
           status: 'completato',
@@ -2726,13 +2726,13 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
             title: p.title,
             url: p.url,
             domain: p.domain,
-            sourceProvider: 'URL Bersaglio',
+            sourceProvider: 'URL Kustom Analisis',
             length: p.charCount,
             sample: p.content.slice(0, 300) + '...'
           }))
         },
         analyzer: {
-          name: 'Analizzatore Web URL',
+          name: 'Penganalisis Web Kustom URL',
           model: masterResearchModel,
           urls: scrapedPages.map(p => ({
             url: p.url,
@@ -2797,7 +2797,7 @@ Tuliskan telaah analitis mendalam dalam 3-5 paragraf berbobot teknis tinggi, pad
     task.liveInspection = {
       ...(task.liveInspection || {}),
       agent2: {
-        name: 'Decomposizione Concettuale & Analisi Strutturale',
+        name: 'Dekonstruksi Konseptual & Analisis Struktur',
         provider: 'Neural Content Deconstructor',
         model: masterResearchModel,
         resultsCount: scrapedPages.length,
@@ -2811,7 +2811,7 @@ Tuliskan telaah analitis mendalam dalam 3-5 paragraf berbobot teknis tinggi, pad
           title: p.title,
           url: p.url,
           domain: p.domain,
-          sourceProvider: 'URL Bersaglio',
+          sourceProvider: 'URL Kustom Analisis',
           length: p.charCount,
           sample: p.content.slice(0, 350) + '...'
         }))
@@ -2927,14 +2927,14 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     task.liveInspection = {
       ...(task.liveInspection || {}),
       synthesizer: {
-        name: 'Relazione Esecutiva Integrale & Matrice Comparativa',
+        name: 'Model 3 (Lead Corrector & Enhancer)',
         model: masterResearchModel,
         status: 'selesai',
         text: laporanAkhir,
         length: (laporanAkhir || '').length
       },
       model4: {
-        name: 'Sommario Esecutivo per la Conversazione Chat',
+        name: 'Model 4 (Executive Chat Summarizer)',
         model: masterResearchModel,
         status: 'selesai',
         text: chatSummary,

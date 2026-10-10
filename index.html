@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261010_v172">
+  <link rel="stylesheet" href="style.css?v=20261010_v173">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -1297,40 +1297,40 @@
       <div class="modal-header">
         <div class="modal-title" style="display: flex; align-items: center; gap: 8px;">
           <i class="fa-solid fa-satellite-dish" style="color: var(--neon-cyan);"></i>
-          <span>Ispettore Deep Research Live</span>
-          <span class="badge" style="font-size: 0.68rem; background: rgba(0, 240, 255, 0.15); color: var(--neon-cyan); border: 1px solid rgba(0, 240, 255, 0.3); padding: 2px 8px; border-radius: 999px;">Trasparenza Analitica URL</span>
+          <span>Live Deep Research Inspector</span>
+          <span class="badge" style="font-size: 0.68rem; background: rgba(0, 240, 255, 0.15); color: var(--neon-cyan); border: 1px solid rgba(0, 240, 255, 0.3); padding: 2px 8px; border-radius: 999px;">Transparansi Multi-Agen Nyata</span>
         </div>
-        <button class="modal-close-btn inspector-close-x-btn" data-close="liveResearchInspectionModal" title="Chiudi Ispezione"><i class="fa-solid fa-xmark"></i></button>
+        <button class="modal-close-btn inspector-close-x-btn" data-close="liveResearchInspectionModal" title="Tutup Pertinjau"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
       <!-- Live Inspector Header / Summary Bar -->
       <div class="inspector-summary-bar" style="background: rgba(0, 0, 0, 0.35); border-bottom: 1px solid var(--border-subtle); padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between; font-size: 0.8rem;">
         <div>
-          <span style="color: var(--text-dim);">Obiettivo dell'Analisi:</span> <strong id="inspectTopik" style="color: #FFF;">-</strong>
+          <span style="color: var(--text-dim);">Topik Riset:</span> <strong id="inspectTopik" style="color: #FFF;">-</strong>
         </div>
         <div style="display: flex; gap: 16px; align-items: center;">
-          <span><i class="fa-solid fa-link" style="color: var(--neon-cyan);"></i> URL Bersaglio: <code id="inspectCurrentQuery" style="color: var(--neon-teal);">-</code></span>
-          <span><i class="fa-solid fa-circle-nodes" style="color: var(--neon-amber);"></i> Fase del Processo: <strong id="inspectIteration" style="color: #FFF;">-</strong></span>
+          <span><i class="fa-solid fa-magnifying-glass" style="color: var(--neon-cyan);"></i> Query Aktif: <code id="inspectCurrentQuery" style="color: var(--neon-teal);">-</code></span>
+          <span><i class="fa-solid fa-repeat" style="color: var(--neon-amber);"></i> Iterasi: <strong id="inspectIteration" style="color: #FFF;">-</strong></span>
           <span><i class="fa-solid fa-clock" style="color: var(--text-dim);"></i> <span id="inspectTimestamp">-</span></span>
         </div>
       </div>
 
-      <!-- Inspector Tabs (Italiano - Analizzatore Web URL) -->
+      <!-- Inspector Tabs (Penganalisis Web Kustom URL) -->
       <div class="settings-tabs inspector-tabs">
         <button class="settings-tab-btn active" id="btnTabInspectAgent1" data-inspect-tab="agent1" style="white-space: nowrap; flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px;">
-          <i class="fa-solid fa-link" style="color: #00F0FF;"></i> Estrattore URL (<span id="inspectCountAgent1">0</span>)
+          <i class="fa-solid fa-robot" style="color: #00F0FF;"></i> Agen 1: Serper (<span id="inspectCountAgent1">0</span>)
         </button>
         <button class="settings-tab-btn" id="btnTabInspectAgent2" data-inspect-tab="agent2" style="white-space: nowrap; flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px;">
-          <i class="fa-solid fa-layer-group" style="color: #00FFC2;"></i> Decomposizione (<span id="inspectCountAgent2">0</span>)
+          <i class="fa-solid fa-microchip" style="color: #00FFC2;"></i> Agen 2: Serper Divergen (<span id="inspectCountAgent2">0</span>)
         </button>
         <button class="settings-tab-btn" id="btnTabInspectScraper" data-inspect-tab="scraper" style="white-space: nowrap; flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px;">
-          <i class="fa-solid fa-scale-balanced" style="color: #FFB703;"></i> Novità vs Archivio (<span id="inspectCountScraper">0</span>)
+          <i class="fa-solid fa-file-lines" style="color: #FFB703;"></i> Web Scraper (<span id="inspectCountScraper">0</span>)
         </button>
         <button class="settings-tab-btn" id="btnTabInspectSynthesizer" data-inspect-tab="synthesizer" style="white-space: nowrap; flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px;">
-          <i class="fa-solid fa-file-contract" style="color: #FF007F;"></i> Relazione Finale (<span id="inspectCountSynthesizer">Bozza</span>)
+          <i class="fa-solid fa-feather-pointed" style="color: #FF007F;"></i> Model 3: Pengoreksi (<span id="inspectCountSynthesizer">Laporan</span>)
         </button>
         <button class="settings-tab-btn" id="btnTabInspectModel4" data-inspect-tab="model4" style="white-space: nowrap; flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px;">
-          <i class="fa-solid fa-comment-dots" style="color: var(--neon-cyan);"></i> Sommario Chat (<span id="inspectCountModel4">Pronto</span>)
+          <i class="fa-solid fa-sparkles" style="color: var(--neon-cyan);"></i> Model 4: Rangkuman Chat (<span id="inspectCountModel4">Siap</span>)
         </button>
       </div>
 
@@ -1341,9 +1341,9 @@
 
       <div class="modal-footer inspector-modal-footer">
         <span style="font-size: 0.74rem; color: var(--text-dim);">
-          <i class="fa-solid fa-circle-check" style="color: var(--neon-teal);"></i> Dati in streaming continuo dal motore di decodifica dei contenuti web.
+          <i class="fa-solid fa-circle-check" style="color: var(--neon-teal);"></i> Data streaming langsung dari proses pencarian & inferensi AI nyata.
         </span>
-        <button class="btn btn-secondary btn-close-inspector" data-close="liveResearchInspectionModal"><i class="fa-solid fa-xmark"></i> Chiudi Ispezione</button>
+        <button class="btn btn-secondary btn-close-inspector" data-close="liveResearchInspectionModal"><i class="fa-solid fa-xmark"></i> Tutup Pertinjau</button>
       </div>
     </div>
   </div>
@@ -1523,6 +1523,6 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
-  <script src="app.js?v=20261010_v172"></script>
+  <script src="app.js?v=20261010_v173"></script>
 </body>
 </html>
