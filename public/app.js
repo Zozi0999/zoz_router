@@ -522,6 +522,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     researchUrlManagerAddBtn: $('#researchUrlManagerAddBtn'),
     researchUrlManagerList: $('#researchUrlManagerList'),
     researchUrlManagerDoneBtn: $('#researchUrlManagerDoneBtn'),
+    researchUrlManagerDisableBtn: $('#researchUrlManagerDisableBtn'),
+    researchUrlManagerSwitchModeBtn: $('#researchUrlManagerSwitchModeBtn'),
     
     // Buttons & Modals
     settingsBtn: $('#settingsBtn'),
@@ -9749,20 +9751,24 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     } else if (mode === 'premium') {
       els.webSearchToggleBtn.classList.add('mode-premium', 'active');
       if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-microscope';
-      if (els.searchBadge) els.searchBadge.style.display = 'block';
-      els.webSearchToggleBtn.title = 'Deep Research (Premium): Aktif (Klik untuk matikan)';
+      const count = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls.length : 0;
+      if (els.searchBadge) {
+        els.searchBadge.style.display = 'block';
+        els.searchBadge.textContent = count > 0 ? `PRO • ${count}` : 'PRO';
+      }
+      els.webSearchToggleBtn.title = `Deep Research: ${count} URL Sumber (Klik untuk kelola sumber)`;
     } else {
       if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-globe';
       if (els.searchBadge) els.searchBadge.style.display = 'none';
       els.webSearchToggleBtn.title = 'Mode Pencarian Web (Nonaktif - Klik untuk aktifkan)';
     }
 
-    // Floating Deep Research Banner di atas composer box dengan tombol silang [X]
+    // Floating Deep Research Banner dinonaktifkan (digantikan popup modal langsung)
     if (els.activeResearchBanner) {
-      els.activeResearchBanner.style.display = (mode === 'premium') ? 'flex' : 'none';
-      if (mode === 'premium') {
-        renderResearchUrlChips();
-      }
+      els.activeResearchBanner.style.display = 'none';
+    }
+    if (mode === 'premium') {
+      renderResearchUrlChips();
     }
 
     // Update active check indicators & tombol silang [X] pada popup menu
@@ -9884,6 +9890,13 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     // Update badge count
     const count = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls.length : 0;
     if (els.researchUrlCountBadge) els.researchUrlCountBadge.textContent = count;
+    if (els.searchBadge && STATE.searchMode === 'premium') {
+      els.searchBadge.style.display = 'block';
+      els.searchBadge.textContent = count > 0 ? `PRO • ${count}` : 'PRO';
+    }
+    if (els.webSearchToggleBtn && STATE.searchMode === 'premium') {
+      els.webSearchToggleBtn.title = `Deep Research: ${count} URL Sumber (Klik untuk kelola sumber)`;
+    }
 
     // Update inline chips (for backward compatibility / banner display)
     if (els.researchUrlChips) {
@@ -17310,14 +17323,25 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
     // Search Mode Toggle & Menu Items
     els.webSearchToggleBtn?.addEventListener('click', (e) => {
+      if (STATE.searchMode === 'premium') {
+        // Mode Deep Research aktif: klik ikon/logo langsung membuka popup kelola sumber
+        e.stopPropagation();
+        openResearchUrlManagerModal();
+      } else {
+        toggleSearchDropdown(e);
+      }
+    });
+
+    // Klik kanan / long-press membuka menu pilihan mode
+    els.webSearchToggleBtn?.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       toggleSearchDropdown(e);
     });
 
-    // Tombol silang [X] pada Floating Banner Deep Research di atas composer
+    // Tombol silang [X] pada Floating Banner Deep Research (jika ada)
     els.clearResearchBannerBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
-      // Sesuai label tombolnya ("Kembali ke mode biasa"): matikan Deep Research
-      // tetapi kembali ke Mode Default — bukan mematikan seluruh pencarian web.
       clearResearchTargetUrls();
       setSearchMode('default');
       showToast('Mode Deep Research dinonaktifkan. Kembali ke Mode Default.');
@@ -17327,6 +17351,22 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     els.researchManageUrlsBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
       openResearchUrlManagerModal();
+    });
+
+    // Modal: Matikan Mode Riset
+    els.researchUrlManagerDisableBtn?.addEventListener('click', () => {
+      clearResearchTargetUrls();
+      setSearchMode('default');
+      closeModal('researchUrlManagerModal');
+      showToast('Mode Deep Research dinonaktifkan. Kembali ke Mode Default.');
+    });
+
+    // Modal: Ganti Mode Penelusuran
+    els.researchUrlManagerSwitchModeBtn?.addEventListener('click', () => {
+      closeModal('researchUrlManagerModal');
+      setTimeout(() => {
+        openSearchDropdown();
+      }, 150);
     });
 
     // Modal: Tambah URL
@@ -17361,13 +17401,22 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       item.addEventListener('click', (e) => {
         e.stopPropagation();
         const mode = item.dataset.mode || 'off';
-        // Jika mode yang diklik sudah aktif (terutama Deep Research), klik ini langsung mematikannya (toggle off)
+        // Jika mode yang diklik sudah aktif
         if (mode === STATE.searchMode && mode !== 'off') {
-          setSearchMode('off');
-          showToast(mode === 'premium' ? 'Mode Deep Research dinonaktifkan.' : 'Mode pencarian dinonaktifkan.');
+          if (mode === 'premium') {
+            closeSearchDropdown();
+            openResearchUrlManagerModal();
+          } else {
+            setSearchMode('off');
+            showToast(mode === 'premium' ? 'Mode Deep Research dinonaktifkan.' : 'Mode pencarian dinonaktifkan.');
+          }
         } else {
           setSearchMode(mode);
-          if (mode === 'premium') showToast('Mode Deep Research (Premium) diaktifkan.');
+          if (mode === 'premium') {
+            showToast('Mode Deep Research diaktifkan.');
+            closeSearchDropdown();
+            openResearchUrlManagerModal();
+          }
         }
       });
     });

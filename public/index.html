@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261010_v181">
+  <link rel="stylesheet" href="style.css?v=20261010_v182">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -274,28 +274,6 @@
           <i class="fa-solid fa-sparkles"></i>
           <span id="activePresetName">Persona: Default</span>
           <button class="clear-preset-btn" id="clearPresetBtn" type="button" aria-label="Hapus preset kustom" title="Hapus preset kustom"><i class="fa-solid fa-xmark"></i></button>
-        </div>
-
-        <!-- Deep Research Active Banner with URL Management Button -->
-        <div class="active-research-banner" id="activeResearchBanner" style="display: none;">
-          <div class="research-banner-top">
-            <div class="research-banner-left">
-              <span class="research-banner-pulse"></span>
-              <i class="fa-solid fa-microscope" style="color: var(--neon-amber);"></i>
-              <span class="research-banner-text"><strong>Deep Research Aktif:</strong> Penganalisis Web Kustom URL</span>
-            </div>
-            <button type="button" class="clear-research-banner-btn" id="clearResearchBannerBtn" title="Matikan Deep Research (Kembali ke mode biasa)" aria-label="Matikan Deep Research">
-              <i class="fa-solid fa-xmark"></i>
-              <span>Matikan</span>
-            </button>
-          </div>
-          <div class="research-banner-url-row">
-            <button type="button" class="research-manage-urls-btn" id="researchManageUrlsBtn" title="Kelola URL Sumber Deep Research">
-              <i class="fa-solid fa-link"></i>
-              <span>Kelola Sumber (<span id="researchUrlCountBadge">0</span>)</span>
-              <i class="fa-solid fa-chevron-right"></i>
-            </button>
-          </div>
         </div>
 
         <!-- BOLA NEUTRON QUANTUM -->
@@ -1572,9 +1550,19 @@
           <i class="fa-solid fa-lightbulb"></i> Tip: Gunakan URL artikel, berita, dokumentasi, atau halaman web publik. Hindari URL yang memerlukan login.
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" data-close="researchUrlManagerModal">Tutup</button>
-        <button class="btn btn-primary" id="researchUrlManagerDoneBtn"><i class="fa-solid fa-check"></i> Selesai</button>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-sm btn-outline-danger" id="researchUrlManagerDisableBtn" type="button" title="Matikan Deep Research dan kembali ke Mode Default">
+            <i class="fa-solid fa-power-off"></i> Matikan Mode Riset
+          </button>
+          <button class="btn btn-sm btn-secondary" id="researchUrlManagerSwitchModeBtn" type="button" title="Ganti ke mode penelusuran web lain">
+            <i class="fa-solid fa-satellite-dish"></i> Ganti Mode
+          </button>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-sm btn-secondary" data-close="researchUrlManagerModal" type="button">Tutup</button>
+          <button class="btn btn-sm btn-primary" id="researchUrlManagerDoneBtn" type="button"><i class="fa-solid fa-check"></i> Selesai</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1594,6 +1582,6 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
-  <script src="app.js?v=20261010_v181"></script>
+  <script src="app.js?v=20261010_v182"></script>
 </body>
 </html>
