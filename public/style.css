@@ -2013,38 +2013,6 @@ html, body {
   box-shadow: 0 0 22px rgba(0, 255, 194, 0.7);
 }
 
-.composer-box.video-mode-active {
-  border-color: #B5179E;
-  box-shadow: 0 8px 30px rgba(181, 23, 158, 0.22), inset 0 0 12px rgba(181, 23, 158, 0.08);
-  animation: cyberVideoPulse 3s infinite ease-in-out;
-}
-
-.composer-box.video-mode-active:focus-within {
-  border-color: #7209B7;
-  box-shadow: 0 8px 36px rgba(114, 9, 183, 0.32), inset 0 0 16px rgba(114, 9, 183, 0.12);
-}
-
-@keyframes cyberVideoPulse {
-  0%, 100% {
-    box-shadow: 0 8px 26px rgba(181, 23, 158, 0.18), inset 0 0 10px rgba(181, 23, 158, 0.05);
-  }
-  50% {
-    box-shadow: 0 8px 36px rgba(181, 23, 158, 0.35), inset 0 0 18px rgba(181, 23, 158, 0.15);
-  }
-}
-
-.composer-box.video-mode-active .send-btn {
-  background: linear-gradient(135deg, #B5179E, #4361EE);
-  color: #ffffff;
-  border-color: rgba(181, 23, 158, 0.5);
-  box-shadow: 0 0 16px rgba(181, 23, 158, 0.4);
-}
-
-.composer-box.video-mode-active .send-btn:hover {
-  background: linear-gradient(135deg, #C77DFF, #4CC9F0);
-  box-shadow: 0 0 22px rgba(181, 23, 158, 0.65);
-}
-
 .composer-tools-left, .composer-tools-right {
   display: flex;
   align-items: center;
@@ -2230,41 +2198,6 @@ html, body {
   border-radius: 4px;
   letter-spacing: 0.4px;
   box-shadow: 0 0 10px rgba(0, 255, 194, 0.7);
-  pointer-events: none;
-  animation: badgePop 0.25s ease;
-  white-space: nowrap;
-}
-
-.composer-btn.video-gen-toggle {
-  position: relative;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.composer-btn.video-gen-toggle:hover {
-  color: #FF0055;
-  background: rgba(255, 0, 85, 0.12);
-  box-shadow: 0 0 10px rgba(255, 0, 85, 0.35);
-}
-
-.composer-btn.video-gen-toggle.active {
-  color: #ffffff;
-  background: linear-gradient(135deg, #FF0055, #9D4EDD);
-  border-color: #FF0055;
-  box-shadow: 0 0 16px rgba(255, 0, 85, 0.6);
-}
-
-.video-model-badge {
-  position: absolute;
-  top: -6px;
-  right: -8px;
-  background: linear-gradient(135deg, #FF0055, #9D4EDD);
-  color: #fff;
-  font-size: 0.56rem;
-  font-weight: 800;
-  padding: 1px 5px;
-  border-radius: 4px;
-  letter-spacing: 0.4px;
-  box-shadow: 0 0 10px rgba(255, 0, 85, 0.7);
   pointer-events: none;
   animation: badgePop 0.25s ease;
   white-space: nowrap;
@@ -5057,66 +4990,6 @@ body.modal-open {
   font-weight: 700;
 }
 
-/* Deep Research Active Floating Banner (dinonaktifkan / diganti popup modal) */
-.active-research-banner {
-  display: none !important;
-}
-
-.research-banner-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-}
-
-.research-banner-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 0.82rem;
-}
-
-.research-banner-pulse {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--neon-amber);
-  box-shadow: 0 0 10px var(--neon-amber);
-  animation: pulseGold 1.5s infinite alternate;
-  flex-shrink: 0;
-}
-
-.clear-research-banner-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(255, 70, 70, 0.16);
-  border: 1px solid rgba(255, 70, 70, 0.5);
-  color: #ff6b6b;
-  font-size: 0.74rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-
-.clear-research-banner-btn:hover {
-  background: rgba(255, 70, 70, 0.35);
-  border-color: #ff4d4d;
-  color: #ffffff;
-  box-shadow: 0 0 14px rgba(255, 70, 70, 0.6);
-  transform: scale(1.04);
-}
-
-.research-banner-url-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-}
-
 .research-url-input-wrap {
   display: flex;
   align-items: center;
@@ -6756,7 +6629,7 @@ body.modal-open {
 /* ==========================================================================
    AI MUSIC STUDIO & CYBER AUDIO PLAYER
    ========================================================================== */
-.music-gen-hud, .video-gen-hud {
+.music-gen-hud {
   background: rgba(10, 14, 24, 0.94);
   border-radius: var(--radius-md);
   padding: 16px;
@@ -6777,11 +6650,6 @@ body.modal-open {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 24px rgba(0, 255, 194, 0.15);
 }
 
-.video-gen-hud {
-  border: 1px solid rgba(176, 38, 255, 0.45);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 24px rgba(176, 38, 255, 0.15);
-}
-
 .music-gen-title-box {
   display: flex;
   align-items: center;
@@ -6791,17 +6659,6 @@ body.modal-open {
   font-size: 0.86rem;
   color: var(--neon-teal);
   text-shadow: 0 0 10px rgba(0, 255, 194, 0.5);
-}
-
-.video-gen-title-box {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--font-code);
-  font-weight: 700;
-  font-size: 0.86rem;
-  color: #B026FF;
-  text-shadow: 0 0 10px rgba(176, 38, 255, 0.5);
 }
 
 /* Audio Player Card */
@@ -8519,8 +8376,7 @@ body.modal-open {
 
 /* ==== Generator tools live in the Attachment menu; composer row stays clean for the prompt ==== */
 .composer-btn.image-gen-toggle,
-.composer-btn.music-gen-toggle,
-.composer-btn.video-gen-toggle {
+.composer-btn.music-gen-toggle {
   display: none !important;
 }
 .image-model-menu-wrapper,

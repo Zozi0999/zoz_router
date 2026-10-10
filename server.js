@@ -660,47 +660,6 @@ const OFFICIAL_OLLAMA_CLOUD_MODELS = [
   { name: 'glm-5.2', model: 'glm-5.2', tag: 'Cloud', isFree: false, cat: 'flagship', details: { family: 'glm' } }
 ];
 
-// Helper to discover locally installed Ollama models from manifest files on disk
-function getLocalOllamaManifests() {
-  const userHome = process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\user';
-  const manifestsDir = path.join(userHome, '.ollama', 'models', 'manifests');
-  const models = [];
-
-  function scan(dir, relPath = '') {
-    if (!fs.existsSync(dir)) return;
-    try {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        const subRel = relPath ? `${relPath}/${entry.name}` : entry.name;
-        if (entry.isDirectory()) {
-          scan(fullPath, subRel);
-        } else if (entry.isFile()) {
-          const parts = subRel.split(/[\/\\]/);
-          if (parts.length >= 2) {
-            const tag = parts[parts.length - 1];
-            const modelName = parts[parts.length - 2];
-            const fullName = `${modelName}:${tag}`;
-            const stat = fs.statSync(fullPath);
-            models.push({
-              name: fullName,
-              model: fullName,
-              size: stat.size,
-              modified_at: stat.mtime.toISOString(),
-              details: { format: 'gguf', family: modelName }
-            });
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Error reading manifest directory:', e.message);
-    }
-  }
-
-  scan(manifestsDir);
-  return models;
-}
-
 // Helper to perform quick web search via Serper Google Search API
 function performWebSearch(query, apiKey = null, num = 15) {
   return new Promise((resolve) => {
@@ -869,6 +828,7 @@ const YOUTUBE_ALLOWED_HOSTS = new Set([
 
 const YOUTUBE_URL_REGEX = /(?:https?:\/\/)?(?:www\.|m\.|music\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:[^\s]*)?/gi;
 
+const YOUTUBE_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 jam TTL
 const youtubeInfoCache = new Map();
 
 function extractYouTubeVideoIds(text) {
@@ -916,7 +876,11 @@ async function fetchYouTubeInfo(rawUrl) {
 
   const canonicalUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : parsedUrl.href;
   if (youtubeInfoCache.has(canonicalUrl)) {
-    return youtubeInfoCache.get(canonicalUrl);
+    const cached = youtubeInfoCache.get(canonicalUrl);
+    if (cached && (Date.now() - cached.cachedAt < YOUTUBE_CACHE_TTL)) {
+      return cached.data;
+    }
+    youtubeInfoCache.delete(canonicalUrl);
   }
 
   const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`;
@@ -975,7 +939,7 @@ async function fetchYouTubeInfo(rawUrl) {
             const firstKey = youtubeInfoCache.keys().next().value;
             youtubeInfoCache.delete(firstKey);
           }
-          youtubeInfoCache.set(canonicalUrl, result);
+          youtubeInfoCache.set(canonicalUrl, { data: result, cachedAt: Date.now() });
           safeResolve(result);
         } catch (e) {
           safeResolve({
@@ -1295,7 +1259,13 @@ async function searchYouTubeVideos(query, maxResults = 6) {
   if (!q) throw new Error('Parameter query tidak boleh kosong.');
   const limit = Math.max(1, Math.min(10, parseInt(maxResults, 10) || 6));
   const cacheKey = `${q.toLowerCase()}::${limit}`;
-  if (youtubeSearchCache.has(cacheKey)) return youtubeSearchCache.get(cacheKey);
+  if (youtubeSearchCache.has(cacheKey)) {
+    const cached = youtubeSearchCache.get(cacheKey);
+    if (cached && (Date.now() - cached.cachedAt < YOUTUBE_CACHE_TTL)) {
+      return cached.data;
+    }
+    youtubeSearchCache.delete(cacheKey);
+  }
 
   let results = await searchViaYouTubeResultsPage(q, limit);
   if (results.length === 0) {
@@ -1317,10 +1287,27 @@ async function searchYouTubeVideos(query, maxResults = 6) {
       const first = youtubeSearchCache.keys().next().value;
       youtubeSearchCache.delete(first);
     }
-    youtubeSearchCache.set(cacheKey, payload);
+    youtubeSearchCache.set(cacheKey, { data: payload, cachedAt: Date.now() });
   }
   return payload;
 }
+
+function pruneYouTubeCaches() {
+  try {
+    const now = Date.now();
+    for (const [key, val] of youtubeInfoCache.entries()) {
+      if (!val || !val.cachedAt || (now - val.cachedAt >= YOUTUBE_CACHE_TTL)) {
+        youtubeInfoCache.delete(key);
+      }
+    }
+    for (const [key, val] of youtubeSearchCache.entries()) {
+      if (!val || !val.cachedAt || (now - val.cachedAt >= YOUTUBE_CACHE_TTL)) {
+        youtubeSearchCache.delete(key);
+      }
+    }
+  } catch (_) {}
+}
+setInterval(pruneYouTubeCaches, 30 * 60 * 1000).unref();
 
 // ==================== DEEP RESEARCH AUTONOMOUS ENGINE (PREMIUM) ====================
 const dbTugasRiset = {};
@@ -1793,12 +1780,6 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
 
 // Helper jeda asinkronus untuk mencegah lonjakan rate-limit (RPM)
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-function isFreeTierModel(modelName) {
-  if (!modelName || typeof modelName !== 'string') return false;
-  const lower = modelName.toLowerCase();
-  return lower.includes(':free') || lower.endsWith('/free') || lower === 'openrouter/free';
-}
 
 // Helper untuk memanggil LLM (OpenRouter atau Ollama) dari backend dengan dukungan riwayat pesan & auto-detect provider per model
 async function callLLMBackend({ prompt, system, messages, model, provider, endpoint, apiKey, openRouterKey, ollamaApiKey }) {
@@ -2390,11 +2371,6 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
     }
     });
   });
-}
-
-function fetchPageContent(targetUrl, maxChars = 3500, redirectCount = 0) {
-  return fetchPageDetails(targetUrl, maxChars, redirectCount)
-    .then(res => (res && res.success && res.content) ? res.content : '');
 }
 
 // Ekstraktor URL web publik (mengecualikan YouTube karena sudah ada oEmbed khusus)
@@ -5025,145 +5001,6 @@ async function requestHandler(req, res) {
       return sendJSON(res, 502, {
         success: false,
         error: 'Gagal membuat musik AI: ' + (err.message || 'Terjadi kesalahan sistem.'),
-        prompt: prompt || ''
-      });
-    }
-  }
-
-  // ====================================================
-  // AI VIDEO STUDIO: PROCEDURAL NEURAL VIDEO SYNTHESIS
-  // ====================================================
-  if ((pathname === '/api/generate-video' || pathname === '/api/video/generate') && (method === 'POST' || method === 'GET')) {
-    try {
-      let prompt = '';
-      let style = 'cinematic-motion';
-      let duration = 5;
-      let sessionId = null;
-
-      let rawVideoUserId = null;
-      if (method === 'POST') {
-        const body = await safeParseBody(req);
-        if (!body) return;
-        prompt = body.prompt || body.q || '';
-        style = body.style || style;
-        duration = parseInt(body.duration, 10) || 5;
-        sessionId = body.sessionId || req.headers['x-session-id'] || null;
-        rawVideoUserId = body.userId || null;
-      } else {
-        prompt = reqUrl.searchParams.get('prompt') || reqUrl.searchParams.get('q') || '';
-        style = reqUrl.searchParams.get('style') || style;
-        duration = parseInt(reqUrl.searchParams.get('duration'), 10) || 5;
-        sessionId = reqUrl.searchParams.get('sessionId') || req.headers['x-session-id'] || null;
-        rawVideoUserId = reqUrl.searchParams.get('userId') || null;
-      }
-
-      const videoUserId = reqUserId;
-
-      if (!prompt || !prompt.trim()) {
-        prompt = 'Cinematic drone shot of futuristic cyberpunk neon metropolis';
-      }
-
-      const cleanPrompt = prompt.trim();
-      const randSuffix = Math.random().toString(36).substring(2, 8);
-
-      if (!fs.existsSync(UPLOADS_DIR)) {
-        fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-      }
-
-      // 1. Generate High-Res Visual Frame
-      let styledPrompt = cleanPrompt;
-      if (!/photorealistic|cinematic|detailed|4k|hd|render/i.test(styledPrompt)) {
-        styledPrompt = `${cleanPrompt}, cinematic 4k wallpaper, atmospheric lighting, detailed realism, masterpiece`;
-      }
-      const encodedPrompt = encodeURIComponent(styledPrompt.slice(0, 700));
-      const seed = Math.floor(Math.random() * 100000000);
-      const remoteFrameUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1280&height=720&model=flux&seed=${seed}&nologo=true&enhance=true`;
-
-      const tempImgPath = path.join(UPLOADS_DIR, `temp_frame_${Date.now()}_${randSuffix}.jpg`);
-      const tempAudioPath = path.join(UPLOADS_DIR, `temp_audio_${Date.now()}_${randSuffix}.wav`);
-      const videoFilename = `ai_video_${Date.now()}_${randSuffix}.mp4`;
-      const localVideoPath = path.join(UPLOADS_DIR, videoFilename);
-
-      const frameDownloaded = await downloadImageBuffer(remoteFrameUrl, 45000);
-      fs.writeFileSync(tempImgPath, frameDownloaded.buffer);
-
-      // 2. Synthesize Atmospheric Soundscape
-      const audioSynth = { buffer: Buffer.alloc(44100 * 5 * 4) }; // video silent track (no local music synthesis)
-      const wavHeader = createWavHeader(audioSynth.buffer.length, 44100, 2, 16);
-      fs.writeFileSync(tempAudioPath, Buffer.concat([wavHeader, audioSynth.buffer]));
-
-      // 3. Compile MP4 with FFmpeg Cinematic Motion & Sound (Asynchronous Non-Blocking)
-      const filter = "zoompan=z='min(zoom+0.0012,1.35)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=150:s=1280x720:fps=30";
-      try {
-        await new Promise((resolve, reject) => {
-          const ffmpegArgs = [
-            '-y',
-            '-loop', '1',
-            '-i', tempImgPath,
-            '-i', tempAudioPath,
-            '-vf', filter,
-            '-c:v', 'libx264',
-            '-pix_fmt', 'yuv420p',
-            '-c:a', 'aac',
-            '-b:a', '192k',
-            '-t', '5',
-            '-shortest',
-            localVideoPath
-          ];
-          const proc = spawn('ffmpeg', ffmpegArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
-          let stderr = '';
-          if (proc.stderr) {
-            proc.stderr.on('data', chunk => { stderr += chunk; });
-          }
-          proc.on('close', code => {
-            if (code === 0) resolve();
-            else reject(new Error(`FFmpeg gagal (exit code ${code}): ${stderr.slice(-300)}`));
-          });
-          proc.on('error', err => reject(err));
-        });
-      } finally {
-        try { if (fs.existsSync(tempImgPath)) fs.unlinkSync(tempImgPath); } catch (_) {}
-        try { if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath); } catch (_) {}
-      }
-
-      if (!fs.existsSync(localVideoPath)) {
-        throw new Error('Gagal menghasilkan berkas video MP4.');
-      }
-
-      const fileStats = fs.statSync(localVideoPath);
-      const url = `/uploads/${videoFilename}`;
-      const title = `Cinematic Video [${cleanPrompt.slice(0, 40)}]`;
-
-      if (sessionId) {
-        appendAssistantMessageToSessionDisk(sessionId, `[Video AI Hasil Generasi: "${cleanPrompt}"]`, 'Neural Video Studio', {
-          userId: videoUserId,
-          isVideoGen: true,
-          type: 'video_generation',
-          videoUrl: url,
-          url: url,
-          title: title,
-          style: style,
-          duration: 5,
-          prompt: cleanPrompt
-        });
-      }
-
-      return sendJSON(res, 200, {
-        success: true,
-        url: url,
-        filename: videoFilename,
-        title: title,
-        style: style,
-        duration: 5,
-        sizeBytes: fileStats.size,
-        format: 'mp4',
-        prompt: cleanPrompt
-      });
-    } catch (err) {
-      console.error('Video generation failed:', err);
-      return sendJSON(res, 500, {
-        success: false,
-        error: 'Gagal membuat video AI: ' + (err.message || 'Terjadi kesalahan sistem.'),
         prompt: prompt || ''
       });
     }

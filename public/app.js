@@ -185,7 +185,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     researchTargetUrls: [], // Target URL kustom untuk Mode Deep Research
     isImageGenMode: false,
     isMusicGenMode: false,
-    isVideoGenMode: false,
     isYouTubeSearchMode: false, // Tool "Cari Video YouTube" (toggle dari menu Lampiran)
     isGenerating: false,
     isSending: false, // Guard anti pengiriman ganda (Enter berulang saat masih ada await)
@@ -1750,11 +1749,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }, 800);
   }
 
-  async function loadPersistedState() {
-    loadPersistedStateSync();
-    await syncPersistedStorageBackground();
-  }
-
   function savePersistedState() {
     try {
       try {
@@ -2796,8 +2790,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     updateImageGenModeUI();
     STATE.isMusicGenMode = false;
     if (typeof updateMusicGenModeUI === 'function') updateMusicGenModeUI();
-    STATE.isVideoGenMode = false;
-    if (typeof updateVideoGenModeUI === 'function') updateVideoGenModeUI();
     clearResearchTargetUrls();
     STATE.attachedDocs = [];
     clearAttachedImages();
@@ -2896,8 +2888,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     updateImageGenModeUI();
     STATE.isMusicGenMode = false;
     if (typeof updateMusicGenModeUI === 'function') updateMusicGenModeUI();
-    STATE.isVideoGenMode = false;
-    if (typeof updateVideoGenModeUI === 'function') updateVideoGenModeUI();
     // Sinkronkan URL target riset sesuai sesi yang dituju
     if (Array.isArray(targetSession.researchTargetUrls)) {
       STATE.researchTargetUrls = [...targetSession.researchTargetUrls];
@@ -7350,49 +7340,6 @@ ${organicBlock}
     return cleaned;
   }
 
-  function deriveAutonomousTarget(promptText, session) {
-    if (!promptText) return { toolName: 'search_web', target: '' };
-    let target = promptText.trim();
-    const urlMatch = promptText.match(/https?:\/\/[^\s]+/i);
-    if (urlMatch) {
-      return { toolName: 'browse_web_page', target: urlMatch[0] };
-    }
-
-    let cleaned = promptText
-      .replace(/^(tolong|coba|bisakah kamu|bisa tolong|mohon|silakan)\s+/i, '')
-      .replace(/^(cari|carikan|search|jelajahi|browsing|brows)\s+(tentang|mengenai|info|informasi|data)?\s*/i, '')
-      .replace(/[?.,!]+$/g, '')
-      .trim();
-
-    // Koreksi typo umum pengguna (misal: "Updat" -> "Update")
-    cleaned = cleaned.replace(/\bupdat\b/i, 'update');
-
-    // Ekspansi cerdas konteks obrolan jika query pengguna pendek atau mengandung kata rujukan / follow-up (misal "jadi apa model terkuatnya?")
-    const hasFollowUpIndicator =
-      /^(jadi|lalu|terus|kemudian|bagaimana|gimana|dan|apa|siapa|yang|kalau|kalo)\b/i.test(cleaned) ||
-      /\b(terkuatnya|terbarunya|harganya|fiturnya|fungsinya|kelebihannya|kelemahannya|perbandingannya|bedanya|speknya|rilisnya)\b/i.test(cleaned) ||
-      /\b(nya|itu|ini|tersebut)\b/i.test(cleaned);
-    const isShortOrYear = cleaned.length < 8 || /^(20\d\d|update|terbaru|roadmap|kapan|rilis|fitur|berita)$/i.test(cleaned);
-
-    if ((isShortOrYear || hasFollowUpIndicator) && session && Array.isArray(session.messages) && session.messages.length > 0) {
-      for (let i = session.messages.length - 1; i >= 0; i--) {
-        const prevMsg = session.messages[i];
-        if (prevMsg && prevMsg.content && prevMsg.role !== 'system') {
-          const prevClean = prevMsg.content.replace(/<[^>]+>/g, '').replace(/https?:\/\/[^\s]+/g, '').substring(0, 120);
-          const words = prevClean.match(/\b([A-Za-z0-9_-]{3,})\b/g) || [];
-          const filtered = words.filter(w => !/^(yang|dan|dari|untuk|pada|adalah|akan|bisa|saya|kamu|anda|dengan|dalam|tidak|ini|itu|the|and|for|with|this|that|have)$/i.test(w));
-          const subject = filtered.slice(0, 3).join(' ');
-          if (subject && !cleaned.toLowerCase().includes(subject.toLowerCase())) {
-            cleaned = `${subject} ${cleaned}`.trim();
-            break;
-          }
-        }
-      }
-    }
-
-    return { toolName: 'search_web', target: cleaned || promptText.trim() };
-  }
-
   function extractInlineToolCalls(text) {
     if (!text || typeof text !== 'string') return [];
     const calls = [];
@@ -9985,165 +9932,6 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
   }
 
   // ==================== DEEP RESEARCH STREAMING ENGINE (PREMIUM) ====================
-  async function performClientWebSearch(query, serperKey) {
-    try {
-      let data = null;
-      try {
-        const directRes = await fetch('https://google.serper.dev/search', {
-          method: 'POST',
-          headers: {
-            'X-API-KEY': serperKey,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ q: query, num: 15, gl: 'us', hl: 'en' }),
-          signal: STATE.abortController?.signal
-        });
-        if (directRes.ok) data = await directRes.json();
-      } catch (e) {}
-
-      if (!data) {
-        const proxyRes = await fetch('/api/web-search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-serper-key': serperKey },
-          body: JSON.stringify({ query: query, apiKey: serperKey, num: 15 }),
-          signal: STATE.abortController?.signal
-        }).catch(() => null);
-        if (proxyRes && proxyRes.ok) data = await proxyRes.json();
-      }
-
-      if (!data) return null;
-
-      const sources = [];
-      let summary = '';
-      if (data.knowledgeGraph) {
-        summary += `\n[KG]: ${data.knowledgeGraph.title || ''}: ${data.knowledgeGraph.description || ''}\n`;
-      }
-      if (data.answerBox) {
-        summary += `\n[ANSWER]: ${data.answerBox.answer || data.answerBox.snippet || ''}\n`;
-      }
-      const list = data.organic || data.results || [];
-      if (Array.isArray(list)) {
-        list.slice(0, 15).forEach((item, idx) => {
-          summary += `\n${idx + 1}. ${item.title}: ${item.snippet} (${item.link || item.url || ''})`;
-          if (item.link || item.url) {
-            sources.push({
-              title: item.title,
-              url: item.link || item.url,
-              snippet: item.snippet || '',
-              domain: (item.link || item.url).replace(/^https?:\/\//i, '').split('/')[0]
-            });
-          }
-        });
-      }
-      return { summary, sources };
-    } catch (e) {
-      return null;
-    }
-  }
-
-  // Client-Side Helper for Divergent Serper Search (Strict zero domain/URL overlap)
-  async function performClientDivergentSearch(query, serperApiKey, excludeDomains = [], excludeUrls = []) {
-    try {
-      const serperKey = serperApiKey || STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
-      const excludeDomainSet = new Set((excludeDomains || []).map(d => String(d).toLowerCase().replace(/^www\./, '')));
-      const excludeUrlSet = new Set((excludeUrls || []).map(u => String(u).trim()));
-
-      // 1. Buat query pencarian mendalam dengan kata kunci analitis
-      let divergentQuery = `${query} riset data analisis spesifik 2026`;
-      
-      // Tambahkan filter eksklusi -site: untuk domain teratas yang sudah diambil Agen 1
-      const topExclude = Array.from(excludeDomainSet).slice(0, 3);
-      if (topExclude.length > 0) {
-        divergentQuery += topExclude.map(d => ` -site:${d}`).join('');
-      }
-
-      let data = null;
-      try {
-        const directRes = await fetch('https://google.serper.dev/search', {
-          method: 'POST',
-          headers: {
-            'X-API-KEY': serperKey,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ q: divergentQuery, num: 20, gl: 'us', hl: 'en' }),
-          signal: STATE.abortController?.signal
-        });
-        if (directRes.ok) data = await directRes.json();
-      } catch (e) {}
-
-      if (!data) {
-        const proxyRes = await fetch('/api/web-search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-serper-key': serperKey },
-          body: JSON.stringify({ query: divergentQuery, apiKey: serperKey, num: 20 }),
-          signal: STATE.abortController?.signal
-        }).catch(() => null);
-        if (proxyRes && proxyRes.ok) data = await proxyRes.json();
-      }
-
-      if (!data) return null;
-
-      const sources = [];
-      let summary = '';
-      if (data.knowledgeGraph) {
-        summary += `\n[KG DIVERGEN]: ${data.knowledgeGraph.title || ''}: ${data.knowledgeGraph.description || ''}\n`;
-      }
-      if (data.answerBox) {
-        summary += `\n[ANSWER DIVERGEN]: ${data.answerBox.answer || data.answerBox.snippet || ''}\n`;
-      }
-
-      const list = data.organic || data.results || [];
-      let addedCount = 0;
-      if (Array.isArray(list)) {
-        for (const item of list) {
-          const itemUrl = item.link || item.url || '';
-          if (!itemUrl) continue;
-          const rawDomain = (itemUrl.replace(/^https?:\/\//i, '').split('/')[0] || '').toLowerCase();
-          const cleanDomain = rawDomain.replace(/^www\./, '');
-
-          // Filter mutlak: jika URL atau domain sudah diambil Agen 1, lewati!
-          if (excludeUrlSet.has(itemUrl) || excludeDomainSet.has(cleanDomain)) {
-            continue;
-          }
-
-          addedCount++;
-          summary += `\n${addedCount}. [Serper Divergen] ${item.title}: ${item.snippet} (${itemUrl})`;
-          sources.push({
-            title: item.title,
-            url: itemUrl,
-            snippet: item.snippet || '',
-            domain: cleanDomain || rawDomain,
-            sourceProvider: 'Serper (Divergen)'
-          });
-          excludeUrlSet.add(itemUrl);
-          excludeDomainSet.add(cleanDomain);
-
-          if (addedCount >= 15) break;
-        }
-      }
-
-      return { summary, sources };
-    } catch (e) {
-      return null;
-    }
-  }
-
-  // Helper untuk menyeimbangkan artikel scraper antara Agen 1 (Primer) dan Agen 2 (Divergen)
-  function getBalancedScrapeList(sources, maxCount = 30) {
-    if (!Array.isArray(sources) || sources.length === 0) return [];
-    const primer = sources.filter(s => (s.sourceProvider || '').includes('Primer') || (!(s.sourceProvider || '').includes('Divergen')));
-    const divergen = sources.filter(s => (s.sourceProvider || '').includes('Divergen'));
-    if (primer.length === 0 || divergen.length === 0) return sources.slice(0, maxCount);
-    const balanced = [];
-    let p = 0;
-    let d = 0;
-    while (balanced.length < maxCount && (p < primer.length || d < divergen.length)) {
-      if (p < primer.length && balanced.length < maxCount) balanced.push(primer[p++]);
-      if (d < divergen.length && balanced.length < maxCount) balanced.push(divergen[d++]);
-    }
-    return balanced;
-  }
-
   // Helper non-streaming untuk eksekusi telaah mandiri Model Agen 1 & Agen 2 di browser
   async function callClientLLMDirect(modelName, prompt, system = '', engine = '') {
     if (!prompt || !modelName) return '';
@@ -10533,58 +10321,6 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       return lines[0].replace(/^#+\s*/, '').trim();
     }
     return 'Laporan Riset Mendalam (Deep Research)';
-  }
-
-  function extractReportSummary(fullText) {
-    if (!fullText || typeof fullText !== 'string') return '';
-    const text = fullText.trim();
-
-    // 1. Ekstraksi Bab 1 / Ringkasan Eksekutif: buang seluruh baris heading-nya secara tuntas
-    const regexHeading = /^##\s*(?:1\.\s*)?.*?(?:Ringkasan\s*Eksekutif|Executive\s*Summary|Pendahuluan|Ringkasan\s*Komprehensif|Comprehensive\s*Overview)[^\n]*\n([\s\S]*?)(?=(?:\n##\s*2\.|\n##\s+[A-Za-z0-9]|\n---\n|$))/im;
-    const match = text.match(regexHeading);
-    if (match && match[1] && match[1].trim().length > 40) {
-      // Bersihkan instruksi template dalam kurung seperti "(Uraikan ringkasan...)" jika ada
-      let clean = match[1].replace(/^\s*\([^)]*\)\s*\n*/, '').trim();
-      if (clean.length > 40) {
-        return clean.length > 1600 ? clean.slice(0, 1600) + '...' : clean;
-      }
-    }
-
-    // 2. Jika dokumen memiliki pengantar sebelum heading H2 pertama
-    const h2Parts = text.split(/\n(?=##\s+)/);
-    if (h2Parts.length > 0) {
-      const introParagraphs = h2Parts[0]
-        .split(/\n\s*\n/)
-        .map(p => p.trim())
-        .filter(p => !p.startsWith('#') && !p.startsWith('>') && !p.startsWith('---') && p.length > 30);
-      
-      if (introParagraphs.length > 0) {
-        const combined = introParagraphs.slice(0, 3).join('\n\n');
-        return combined.length > 1400 ? combined.slice(0, 1400) + '...' : combined;
-      }
-    }
-
-    // 3. Jika pendahuluan ada di dalam section H2 pertama (h2Parts[1])
-    if (h2Parts.length > 1) {
-      const candidate = h2Parts[1].replace(/^##\s+[^\n]*\n+/, '').trim();
-      let clean = candidate.replace(/^\s*\([^)]*\)\s*\n*/, '').trim();
-      if (clean.length > 40) {
-        return clean.length > 1400 ? clean.slice(0, 1400) + '...' : clean;
-      }
-    }
-
-    // 4. Fallback umum non-heading
-    const paragraphs = text
-      .split(/\n\s*\n/)
-      .map(p => p.trim())
-      .filter(p => !p.startsWith('#') && !p.startsWith('>') && !p.startsWith('---') && p.length > 20);
-
-    if (paragraphs.length > 0) {
-      const combined = paragraphs.slice(0, 3).join('\n\n');
-      return combined.length > 1200 ? combined.slice(0, 1200) + '...' : combined;
-    }
-
-    return text.length > 600 ? text.slice(0, 600) + '...' : text;
   }
 
   function sanitizeReportFilename(title) {
@@ -12053,57 +11789,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     return cleaned;
   }
 
-  // ==================== AI VIDEO STUDIO TRIGGERS ====================
-  function isVideoGenerationTrigger(promptText) {
-    if (!promptText || typeof promptText !== 'string') return false;
-    const t = promptText.trim().toLowerCase();
-
-    // 1. Direct slash commands & prefixes
-    if (t.startsWith('/video') || t.startsWith('/vid') || t.startsWith('/clip') || t.startsWith('/animasi') || t.startsWith('/motion')) return true;
-    if (t.startsWith('video:') || t.startsWith('vid:') || t.startsWith('clip:') || t.startsWith('animasi:')) return true;
-
-    // 2. Filter negatif: jangan picu jika pengguna sedang berdiskusi atau minta perbaikan kode
-    if (/\b(?:bug|error|masalah|issue|perbaiki|troubleshoot|mengapa|kenapa|source code|skrip|script|koding|coding)\b/i.test(t)) {
-      return false;
-    }
-
-    const actionWords = '(?:buatkan|buat|bikin|membuat|generate|render|ciptakan|menciptakan|animasikan|make|create|produce)';
-    const videoWords = '(?:video|vidio|klip|clip|animasi|animation|motion|cuplikan|cinematic)';
-
-    const flexiblePattern = new RegExp(
-      `(?:^(?:.*\\b)?(?:ai|bot|sistem|kamu|tolong|coba|bisa|mohon|mau|ingin|untuk|yang)\\b\\s+)*` +
-      `${actionWords}\\s+(?:kan\\s+)?(?:saya\\s+|kita\\s+|sebuah\\s+|suatu\\s+|satu\\s+)?(?:ada\\s+)?${videoWords}\\b`,
-      'i'
-    );
-    if (flexiblePattern.test(t)) return true;
-
-    const directPattern = new RegExp(
-      `\\b${actionWords}\\s+(?:kan\\s+)?(?:saya\\s+|kita\\s+|sebuah\\s+|suatu\\s+|satu\\s+)?${videoWords}\\b`,
-      'i'
-    );
-    if (directPattern.test(t)) return true;
-
-    if (new RegExp(`(?:buatkan|buat|bikin|generate|render)\\s+${videoWords}\\s+(?:tentang|pendek|sinematik|cinematic|cyberpunk|anime|scifi)`, 'i').test(t)) return true;
-    if (new RegExp(`^(?:video|vidio|animasi|klip)\\s+(?:pendek|sinematik|cyberpunk|anime|scifi)\\b`, 'i').test(t)) return true;
-
-    // English patterns
-    if (/^(?:(?:please|can you|could you|would you)\s+)?(?:generate|create|render|make|produce)\s+(?:me\s+)?(?:an?\s+)?(?:video|clip|animation|motion clip|cinematic)\b/i.test(t)) return true;
-    if (/\b(?:render|animate)\s+(?:me\s+)?(?:an?\s+)?(?:video|clip)\b/i.test(t)) return true;
-
-    return false;
-  }
-
-  function extractVideoPrompt(promptText) {
-    if (!promptText || typeof promptText !== 'string') return '';
-    let p = promptText.trim();
-    p = p.replace(/^\/(?:video|vid|clip|animasi|motion)\s*/i, '');
-    p = p.replace(/^(?:video|vid|clip|animasi):\s*/i, '');
-    p = p.replace(/^(?:(?:ai|bot|sistem|kamu|tolong|coba|bisa|mohon|seharusnya|mau|ingin|untuk|yang)\s+)+/i, '');
-    p = p.replace(/^(?:buatkan|buat|bikin|membuat|generate|render|ciptakan|menciptakan|animasikan|make|create|produce)\s+(?:kan\s+)?(?:saya\s+|kita\s+|sebuah\s+|suatu\s+|satu\s+)?(?:ada\\s+)?(?:video|vidio|klip|clip|animasi|animation|motion|cuplikan|cinematic)\s+(?:tentang\s+|dari\s+|yang\s+|dengan\s+|tema\s+|untuk\s+)?/i, '');
-    p = p.replace(/^(?:(?:please|can you|could you)\s+)?(?:generate|create|render|make|produce)\s+(?:me\s+)?(?:an?\s+)?(?:video|clip|animation|motion clip|cinematic)\s+(?:of\s+|about\s+|with\s+|for\s+)?/i, '');
-    return p.trim() || promptText.trim();
-  }
-
   // ==================== AI IMAGE STUDIO ENGINE ====================
   function isImageGenerationTrigger(promptText) {
     if (!promptText || typeof promptText !== 'string') return false;
@@ -12367,14 +12052,14 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       if (isMusicMode) {
         els.sendPromptBtn.setAttribute('title', `Gubah Musik dengan ${displayName} (Enter)`);
         els.sendPromptBtn.setAttribute('aria-label', `Gubah Musik dengan ${displayName} (Enter)`);
-      } else if (!STATE.isImageGenMode && !STATE.isVideoGenMode) {
+      } else if (!STATE.isImageGenMode) {
         els.sendPromptBtn.setAttribute('title', 'Kirim Prompt (Enter)');
         els.sendPromptBtn.setAttribute('aria-label', 'Kirim Prompt (Enter)');
       }
     }
     if (els.promptInput && isMusicMode) {
       els.promptInput.placeholder = `Deskripsikan musik, beat, atau melodi untuk digubah dengan ${badgeText}...`;
-    } else if (els.promptInput && !STATE.isImageGenMode && !STATE.isVideoGenMode) {
+    } else if (els.promptInput && !STATE.isImageGenMode) {
       els.promptInput.placeholder = '';
     }
     if (els.attachOptionGenMusic) {
@@ -12707,7 +12392,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     STATE.settings.musicModel = modelVal;
     STATE.isMusicGenMode = true;
     STATE.isImageGenMode = false;
-    STATE.isVideoGenMode = false;
     try {
       localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings));
     } catch (_) {}
@@ -12716,7 +12400,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     }
     updateMusicGenModeUI();
     updateImageGenModeUI();
-    updateVideoGenModeUI();
     closeMusicModelDropdown();
     AudioEngine.success();
     els.promptInput?.focus();
@@ -12725,42 +12408,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       showToast(`⚠️ Model musik ${displayName} dipilih. Butuh OpenRouter Key di Pengaturan untuk memanggil cloud model.`, 'warning');
     } else {
       showToast(`🎵 Model Musik Aktif: ${displayName}`);
-    }
-  }
-
-  function updateVideoGenModeUI() {
-    const isVideoMode = Boolean(STATE.isVideoGenMode);
-
-    if (els.composerBox) {
-      els.composerBox.classList.toggle('video-mode-active', isVideoMode);
-    }
-    if (els.videoGenToggleBtn) {
-      els.videoGenToggleBtn.classList.toggle('active', isVideoMode);
-      els.videoGenToggleBtn.setAttribute('aria-pressed', String(isVideoMode));
-      els.videoGenToggleBtn.setAttribute('title', isVideoMode 
-        ? 'Mode Video Aktif: Cyber Motion Studio (Klik untuk nonaktifkan)' 
-        : 'AI Video Studio - Render Video AI');
-    }
-    if (els.videoModelBadge) {
-      els.videoModelBadge.innerText = 'Motion';
-      els.videoModelBadge.style.display = isVideoMode ? 'inline-block' : 'none';
-    }
-    if (els.sendPromptBtn) {
-      if (isVideoMode) {
-        els.sendPromptBtn.setAttribute('title', 'Render Video dengan Cyber Motion Studio (Enter)');
-        els.sendPromptBtn.setAttribute('aria-label', 'Render Video dengan Cyber Motion Studio (Enter)');
-      } else if (!STATE.isImageGenMode && !STATE.isMusicGenMode) {
-        els.sendPromptBtn.setAttribute('title', 'Kirim Prompt (Enter)');
-        els.sendPromptBtn.setAttribute('aria-label', 'Kirim Prompt (Enter)');
-      }
-    }
-    if (els.promptInput && isVideoMode) {
-      els.promptInput.placeholder = 'Deskripsikan visual gerak & adegan sinematik video yang ingin dirender...';
-    } else if (els.promptInput && !STATE.isImageGenMode && !STATE.isMusicGenMode) {
-      els.promptInput.placeholder = '';
-    }
-    if (els.attachOptionGenVideo) {
-      els.attachOptionGenVideo.classList.toggle('active', isVideoMode);
     }
   }
 
@@ -12946,13 +12593,11 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     STATE.settings.imageModel = modelVal;
     STATE.isImageGenMode = true;
     STATE.isMusicGenMode = false;
-    STATE.isVideoGenMode = false;
     try {
       localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings));
     } catch (_) {}
     updateImageGenModeUI();
     updateMusicGenModeUI();
-    updateVideoGenModeUI();
     closeImageModelDropdown();
     AudioEngine.success();
     els.promptInput?.focus();
@@ -14082,197 +13727,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         bubbleText.querySelector('.retry-music-btn')?.addEventListener('click', () => {
           assistantRow.remove();
           runMusicGeneration(session, cleanPrompt, options);
-        });
-        AudioEngine.error();
-      }
-    } finally {
-      setGeneratingState(false);
-      STATE.abortController = null;
-    }
-  }
-
-  async function runVideoGeneration(session, promptText, options = {}) {
-    const cleanPrompt = extractVideoPrompt(promptText) || 'Cinematic cyberpunk futuristic neon city flying car';
-    setGeneratingState(true);
-    STATE.abortController = new AbortController();
-    const startTime = performance.now();
-
-    const assistantRow = appendMessageElement('assistant', '', null, 'Neural Video Studio');
-    const bubbleText = assistantRow.querySelector('.msg-text-content');
-    const metaBox = assistantRow.querySelector('.message-meta');
-
-    if (bubbleText) {
-      bubbleText.innerHTML = `
-        <div class="video-gen-hud">
-          <div class="music-gen-header">
-            <div class="video-gen-title-box">
-              <i class="fa-solid fa-video"></i> AI NEURAL VIDEO STUDIO
-            </div>
-            <span class="music-gen-badge" style="color:#B026FF; border-color:rgba(176,38,255,0.4); background:rgba(176,38,255,0.15);">Cinematic Motion</span>
-          </div>
-          <div class="music-gen-telemetry">
-            <div class="music-gen-status-row">
-              <span class="music-gen-status-text">
-                <i class="fa-solid fa-circle-notch fa-spin"></i>
-                <span class="video-gen-step-msg">[Langkah 1/3] Sintesis keyframe visual difusi...</span>
-              </span>
-              <span class="video-gen-percent-text">25%</span>
-            </div>
-            <div class="image-gen-progress-track">
-              <div class="image-gen-progress-fill video-gen-progress-fill" style="width: 25%; background: linear-gradient(90deg, #B026FF, #FF007F, #00F0FF);"></div>
-            </div>
-            <div class="image-gen-prompt-quote" style="border-left-color: #B026FF;">"${escapeHtml(cleanPrompt)}"</div>
-          </div>
-        </div>
-      `;
-    }
-    smartScrollChatToBottom(true);
-
-    const stepMsgEl = bubbleText.querySelector('.video-gen-step-msg');
-    const percentEl = bubbleText.querySelector('.video-gen-percent-text');
-    const progressFillEl = bubbleText.querySelector('.video-gen-progress-fill');
-
-    function updateHudStep(msg, pct) {
-      if (stepMsgEl) stepMsgEl.innerText = msg;
-      if (percentEl) percentEl.innerText = `${pct}%`;
-      if (progressFillEl) progressFillEl.style.width = `${pct}%`;
-      smartScrollChatToBottom(false);
-    }
-
-    const timer2 = setTimeout(() => {
-      updateHudStep('[Langkah 2/3] Rendering interpolasi gerak kamera & simulasi partikel...', 60);
-    }, 700);
-
-    const timer3 = setTimeout(() => {
-      updateHudStep('[Langkah 3/3] Muxing audio-visual & kompresi video MP4 H.264...', 85);
-    }, 2200);
-
-    try {
-      let finalVideoUrl = '';
-      let videoTitle = `Cinematic Video [${cleanPrompt.slice(0, 35)}]`;
-      let videoStyle = options.style || 'Cinematic Motion';
-      let videoDuration = 5;
-
-      if (!IS_GITHUB_PAGES) {
-        try {
-          const res = await fetch('/api/generate-video', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-session-id': session ? session.id : '',
-              'X-User-ID': STATE.userId || 'default',
-              'x-user-id': STATE.userId || 'default'
-            },
-            body: JSON.stringify({
-              userId: STATE.userId || 'default',
-              prompt: cleanPrompt,
-              style: videoStyle,
-              duration: 5,
-              sessionId: session ? session.id : null
-            }),
-            signal: STATE.abortController?.signal
-          });
-
-          if (res.ok) {
-            const data = await res.json();
-            if (data.success && data.url) {
-              finalVideoUrl = data.url;
-              videoTitle = data.title || videoTitle;
-              videoStyle = data.style || videoStyle;
-              videoDuration = data.duration || videoDuration;
-            } else {
-              throw new Error(data.error || 'Server tidak mengembalikan file video');
-            }
-          } else {
-            throw new Error(`Server video HTTP ${res.status}`);
-          }
-        } catch (serverErr) {
-          if (serverErr.name === 'AbortError') throw serverErr;
-          console.warn('Backend video gen gagal, mencoba client video fallback:', serverErr.message);
-        }
-      }
-
-      if (!finalVideoUrl) {
-        updateHudStep('[Langkah 2/3] Menghasilkan video visual client-side...', 65);
-        const seed = Math.floor(Math.random() * 100000000);
-        const encoded = encodeURIComponent(cleanPrompt.slice(0, 400));
-        const frameUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1280&height=720&model=flux&seed=${seed}&nologo=true&enhance=true`;
-        finalVideoUrl = frameUrl;
-      }
-
-      clearTimeout(timer2);
-      clearTimeout(timer3);
-      updateHudStep('[Langkah 3/3] Selesai! Menampilkan Cyberdeck Video Player...', 100);
-
-      const endTime = performance.now();
-      const totalDuration = ((endTime - startTime) / 1000).toFixed(2);
-
-      const videoData = {
-        url: finalVideoUrl,
-        videoUrl: finalVideoUrl,
-        title: videoTitle,
-        style: videoStyle,
-        duration: videoDuration,
-        prompt: cleanPrompt
-      };
-
-      bubbleText.innerHTML = buildCyberVideoPlayerCardHtml(videoData);
-      attachVideoPlayerListeners(bubbleText);
-
-      metaBox.innerHTML = `
-        <strong>Neural Video Studio</strong>
-        <span class="meta-model-badge" style="background:rgba(176,38,255,0.18); border-color:#B026FF; color:#D884FF;"><i class="fa-solid fa-video"></i> Video Dihasilkan</span>
-        <span>⏱️ ${totalDuration}s</span>
-      `;
-
-      if (session) {
-        session.messages.push({
-          role: 'assistant',
-          content: `[Video AI Hasil Generasi: "${cleanPrompt}"]\n\n- Judul: ${videoTitle}\n- Format: MP4 H.264 HD\n- Video: [Tonton / Unduh Video](${finalVideoUrl})`,
-          type: 'video_generation',
-          isVideoGen: true,
-          videoUrl: finalVideoUrl,
-          url: finalVideoUrl,
-          title: videoTitle,
-          style: videoStyle,
-          duration: videoDuration,
-          prompt: cleanPrompt,
-          model: 'Neural Video Studio',
-          stats: { duration: totalDuration },
-          timestamp: new Date().toISOString()
-        });
-        session.updatedAt = new Date().toISOString();
-        savePersistedState();
-        renderChatHistory(els.searchHistoryInput?.value || '');
-      }
-
-      AudioEngine.success();
-      smartScrollChatToBottom(true);
-
-    } catch (err) {
-      clearTimeout(timer2);
-      clearTimeout(timer3);
-      if (err.name === 'AbortError') {
-        assistantRow.remove();
-        showToast('Generasi video dibatalkan.');
-      } else {
-        console.error('Video gen error:', err);
-        bubbleText.innerHTML = `
-          <div style="background:rgba(255,0,85,0.08); border:1px solid rgba(255,0,85,0.4); border-radius:10px; padding:14px; line-height:1.5;">
-            <div style="font-weight:700; color:var(--neon-crimson); margin-bottom:6px; display:flex; align-items:center; gap:8px;">
-              <i class="fa-solid fa-triangle-exclamation"></i> Gagal Menghasilkan Video AI
-            </div>
-            <div style="font-size:0.83rem; color:var(--text-main); margin-bottom:8px;">
-              ${escapeHtml(err.message || 'Terjadi gangguan saat memproses rendering video.')}
-            </div>
-            <button class="btn btn-sm btn-primary retry-video-btn" style="font-size:0.75rem;">
-              <i class="fa-solid fa-rotate-right"></i> Coba Generate Ulang
-            </button>
-          </div>
-        `;
-        bubbleText.querySelector('.retry-video-btn')?.addEventListener('click', () => {
-          assistantRow.remove();
-          runVideoGeneration(session, cleanPrompt, options);
         });
         AudioEngine.error();
       }
@@ -16857,11 +16311,9 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       if (!STATE.isImageGenMode && /^\/(?:img|gambar|image)\s+/i.test(val)) {
         STATE.isImageGenMode = true;
         STATE.isMusicGenMode = false;
-        STATE.isVideoGenMode = false;
         els.promptInput.value = val.replace(/^\/(?:img|gambar|image)\s+/i, '');
         updateImageGenModeUI();
         updateMusicGenModeUI();
-        updateVideoGenModeUI();
         autoResizeTextarea(els.promptInput);
         if (navigator.vibrate) {
           try { navigator.vibrate(30); } catch (_) {}
@@ -16871,25 +16323,21 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       } else if (!STATE.isMusicGenMode && /^\/(?:music|musik|audio|song|lagu)\s+/i.test(val)) {
         STATE.isMusicGenMode = true;
         STATE.isImageGenMode = false;
-        STATE.isVideoGenMode = false;
         els.promptInput.value = val.replace(/^\/(?:music|musik|audio|song|lagu)\s+/i, '');
         updateMusicGenModeUI();
         updateImageGenModeUI();
-        updateVideoGenModeUI();
         autoResizeTextarea(els.promptInput);
         if (navigator.vibrate) {
           try { navigator.vibrate(30); } catch (_) {}
         }
         showToast('🎵 Mode AI Music Studio Aktif!');
         AudioEngine.success();
-      } else if ((STATE.isImageGenMode || STATE.isMusicGenMode || STATE.isVideoGenMode) && /^\/(?:chat|teks|text)\s+/i.test(val)) {
+      } else if ((STATE.isImageGenMode || STATE.isMusicGenMode) && /^\/(?:chat|teks|text)\s+/i.test(val)) {
         STATE.isImageGenMode = false;
         STATE.isMusicGenMode = false;
-        STATE.isVideoGenMode = false;
         els.promptInput.value = val.replace(/^\/(?:chat|teks|text)\s+/i, '');
         updateImageGenModeUI();
         updateMusicGenModeUI();
-        updateVideoGenModeUI();
         autoResizeTextarea(els.promptInput);
         if (navigator.vibrate) {
           try { navigator.vibrate(20); } catch (_) {}
@@ -17215,9 +16663,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       closeAttachmentDropdown();
       STATE.isImageGenMode = true;
       STATE.isMusicGenMode = false;
-      STATE.isVideoGenMode = false;
       updateMusicGenModeUI();
-      updateVideoGenModeUI();
       updateImageGenModeUI();
       openImageModelDropdown();
       AudioEngine.click();
@@ -17227,9 +16673,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       closeAttachmentDropdown();
       STATE.isMusicGenMode = true;
       STATE.isImageGenMode = false;
-      STATE.isVideoGenMode = false;
       updateImageGenModeUI();
-      updateVideoGenModeUI();
       updateMusicGenModeUI();
       openMusicModelDropdown();
       if (els.promptInput) {
@@ -18425,7 +17869,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     updateSearchModeUI();
     updateImageGenModeUI();
     updateMusicGenModeUI();
-    updateVideoGenModeUI();
     updateYouTubeModeUI();
     autoResizeTextarea(els.promptInput);
     updatePromptVisibilityUI(true);
