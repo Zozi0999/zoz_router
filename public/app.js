@@ -9663,6 +9663,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
   function openAttachmentDropdown() {
     if (!els.attachmentDropdown) return;
+    closeSearchDropdown();
+    closeImageModelDropdown();
+    closeMusicModelDropdown();
     els.attachmentDropdown.style.display = 'flex';
     els.attachToggleBtn?.classList.add('active');
     els.attachToggleBtn?.setAttribute('aria-expanded', 'true');
@@ -9708,7 +9711,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         els.searchBadge.style.display = 'block';
         els.searchBadge.textContent = count > 0 ? `PRO • ${count}` : 'PRO';
       }
-      els.webSearchToggleBtn.title = `Deep Research: ${count} URL Sumber (Klik untuk kelola sumber)`;
+      els.webSearchToggleBtn.title = `Deep Research: ${count} URL Sumber (Klik tombol untuk menu, klik badge PRO untuk kelola sumber)`;
     } else {
       if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-globe';
       if (els.searchBadge) els.searchBadge.style.display = 'none';
@@ -9717,9 +9720,13 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
     if (mode === 'premium') {
       renderResearchUrlChips();
+    } else {
+      if (els.researchUrlChips) {
+        els.researchUrlChips.style.display = 'none';
+      }
     }
 
-    // Update active check indicators & tombol silang [X] pada popup menu
+    // Update active check indicators & tombol aksi pada popup menu
     $$('.search-menu-item').forEach(item => {
       const itemMode = item.dataset.mode || 'off';
       const isActive = itemMode === mode;
@@ -9727,14 +9734,16 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
       const checkIcon = item.querySelector('.search-item-check');
       const closeBtn = item.querySelector('.search-item-close-btn');
+      const manageBtn = item.querySelector('.search-item-manage-btn');
 
-      if (isActive && itemMode !== 'off') {
-        // Tampilkan tombol silang (X) yang jelas pada mode yang sedang aktif
-        if (checkIcon) checkIcon.style.display = 'none';
-        if (closeBtn) closeBtn.style.display = 'inline-flex';
-      } else {
-        if (checkIcon) checkIcon.style.display = isActive ? 'block' : 'none';
-        if (closeBtn) closeBtn.style.display = 'none';
+      if (checkIcon) {
+        checkIcon.style.display = isActive ? 'inline-block' : 'none';
+      }
+      if (closeBtn) {
+        closeBtn.style.display = (isActive && itemMode !== 'off') ? 'inline-flex' : 'none';
+      }
+      if (manageBtn) {
+        manageBtn.style.display = (isActive && itemMode === 'premium') ? 'inline-flex' : 'none';
       }
     });
   }
@@ -9753,6 +9762,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
   function openSearchDropdown() {
     if (!els.searchDropdown) return;
     closeAttachmentDropdown();
+    closeImageModelDropdown();
+    closeMusicModelDropdown();
     els.searchDropdown.style.display = 'flex';
     els.webSearchToggleBtn?.setAttribute('aria-expanded', 'true');
     AudioEngine.click();
@@ -9856,11 +9867,15 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       els.searchBadge.textContent = count > 0 ? `PRO • ${count}` : 'PRO';
     }
     if (els.webSearchToggleBtn && STATE.searchMode === 'premium') {
-      els.webSearchToggleBtn.title = `Deep Research: ${count} URL Sumber (Klik untuk kelola sumber)`;
+      els.webSearchToggleBtn.title = `Deep Research: ${count} URL Sumber (Klik tombol untuk menu, klik badge PRO untuk kelola sumber)`;
     }
 
     // Update inline chips (for backward compatibility / banner display)
     if (els.researchUrlChips) {
+      if (STATE.searchMode !== 'premium') {
+        els.researchUrlChips.style.display = 'none';
+        return;
+      }
       const urls = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls : [];
       if (urls.length === 0) {
         els.researchUrlChips.style.display = 'none';
@@ -16761,12 +16776,15 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
     // Search Mode Toggle & Menu Items
     els.webSearchToggleBtn?.addEventListener('click', (e) => {
+      toggleSearchDropdown(e);
+    });
+
+    // Klik langsung pada badge PRO untuk kelola URL Deep Research jika mode premium aktif
+    els.searchBadge?.addEventListener('click', (e) => {
       if (STATE.searchMode === 'premium') {
-        // Mode Deep Research aktif: klik ikon/logo langsung membuka popup kelola sumber
         e.stopPropagation();
+        closeSearchDropdown();
         openResearchUrlManagerModal();
-      } else {
-        toggleSearchDropdown(e);
       }
     });
 
@@ -16825,22 +16843,39 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       item.addEventListener('click', (e) => {
         e.stopPropagation();
         const mode = item.dataset.mode || 'off';
-        // Jika mode yang diklik sudah aktif
-        if (mode === STATE.searchMode && mode !== 'off') {
-          if (mode === 'premium') {
-            closeSearchDropdown();
-            openResearchUrlManagerModal();
-          } else {
-            setSearchMode('off');
-            showToast(mode === 'premium' ? 'Mode Deep Research dinonaktifkan.' : 'Mode pencarian dinonaktifkan.');
-          }
-        } else {
+        if (mode !== STATE.searchMode) {
           setSearchMode(mode);
           if (mode === 'premium') {
             showToast('Mode Deep Research diaktifkan.');
-            closeSearchDropdown();
-            openResearchUrlManagerModal();
+            if (!STATE.researchTargetUrls || STATE.researchTargetUrls.length === 0) {
+              openResearchUrlManagerModal();
+            }
+          } else if (mode === 'default') {
+            showToast('Mode Pencarian Web Default aktif.');
+          } else if (mode === 'autonomous') {
+            showToast('Autonomous Web Explorer aktif.');
+          } else {
+            showToast('Pencarian web dinonaktifkan.');
           }
+        } else {
+          // Klik mode yang sudah aktif cukup menutup menu tanpa mematikan mode
+          closeSearchDropdown();
+        }
+      });
+    });
+
+    // Tombol Kelola URL khusus pada item Deep Research
+    $$('.search-item-manage-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeSearchDropdown();
+        openResearchUrlManagerModal();
+      });
+      btn.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          e.stopPropagation();
+          btn.click();
         }
       });
     });

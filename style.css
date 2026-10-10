@@ -4797,7 +4797,8 @@ body.modal-open {
   border-radius: 4px;
   letter-spacing: 0.5px;
   box-shadow: 0 0 8px rgba(255, 183, 3, 0.6);
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
   animation: badgePop 0.3s ease;
 }
 
@@ -4959,6 +4960,35 @@ body.modal-open {
 
 .search-menu-item[data-mode="premium"] .search-item-check {
   color: var(--neon-amber);
+}
+
+.search-item-manage-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 170, 0, 0.18);
+  border: 1px solid rgba(255, 170, 0, 0.5);
+  color: var(--neon-amber);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.search-item-manage-btn:hover {
+  background: rgba(255, 170, 0, 0.35);
+  border-color: var(--neon-amber);
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(255, 170, 0, 0.6);
+  transform: scale(1.05);
+}
+
+.search-item-manage-btn .manage-btn-text {
+  font-size: 0.68rem;
+  font-weight: 700;
 }
 
 .search-item-close-btn {
