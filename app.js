@@ -5242,7 +5242,7 @@ ${organicBlock}
     card.classList.add('yt-card-playing');
     const frame = document.createElement('div');
     frame.className = 'yt-embed-frame';
-    frame.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(vidId)}?autoplay=1&rel=0&modestbranding=1" title="${escapeHtml(title)}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen loading="lazy"></iframe>`;
+    frame.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(vidId)}?autoplay=1&rel=0&modestbranding=1&playsinline=1" title="${escapeHtml(title)}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen loading="lazy"></iframe>`;
     thumbWrap.replaceWith(frame);
 
     // Tombol "Putar di Chat" sudah tidak relevan saat video sedang berjalan
@@ -14787,6 +14787,23 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
                     e.target.playVideo();
                   } catch (_) {}
                   this.setPlayingState(true);
+
+                  // Tambahkan allow="fullscreen" ke iframe YouTube agar fullscreen
+                  // berfungsi di mobile (YouTube IFrame API tidak menambahkannya otomatis)
+                  try {
+                    const container = document.getElementById('ytPlayerContainer');
+                    if (container) {
+                      const ytIframe = container.querySelector('iframe');
+                      if (ytIframe && !ytIframe.hasAttribute('allow')) {
+                        ytIframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen');
+                      } else if (ytIframe && ytIframe.hasAttribute('allow')) {
+                        const currentAllow = ytIframe.getAttribute('allow');
+                        if (!currentAllow.includes('fullscreen')) {
+                          ytIframe.setAttribute('allow', currentAllow + '; fullscreen');
+                        }
+                      }
+                    }
+                  } catch (_) {}
                 },
                 onStateChange: (e) => {
                   if (e.data === YT.PlayerState.PLAYING) {
@@ -16990,19 +17007,37 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       AudioEngine.click();
     });
 
-    // Tombol "Layar Penuh": fullscreen-kan SELURUH container player (bukan iframe
-    // YouTube yang ukurannya menempel pada kartu sehingga video tampil kecil).
+    // Tombol "Layar Penuh": fullscreen-kan iframe YouTube ASLI (bukan container wrap).
+    // YouTube IFrame API menciptakan iframe di dalam #ytPlayerContainer.
+    // Di mobile, iframe ITU yang harus requestFullscreen(), bukan wrap-nya.
     els.ytFsBtn?.addEventListener('click', () => {
       const wrap = els.ytPlayerContainerWrap;
-      if (!wrap) return;
+      const container = els.ytPlayerContainer;
+      if (!wrap || !container) return;
+
+      // Cari iframe YouTube asli yang dibuat oleh YouTube IFrame API
+      const ytIframe = container.querySelector('iframe');
+
       try {
         if (document.fullscreenElement || document.webkitFullscreenElement) {
           (document.exitFullscreen || document.webkitExitFullscreen).call(document);
         } else {
-          const req = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
+          // Prioritas: fullscreen iframe YouTube asli (diperlukan di mobile)
+          const targetEl = ytIframe || wrap;
+          const req = targetEl.requestFullscreen || targetEl.webkitRequestFullscreen || targetEl.mozRequestFullScreen || targetEl.msRequestFullscreen;
           if (req) {
-            const p = req.call(wrap);
-            if (p && typeof p.catch === 'function') p.catch(() => showToast('Fullscreen diblokir oleh browser.', 'error'));
+            const p = req.call(targetEl);
+            if (p && typeof p.catch === 'function') {
+              p.catch((err) => {
+                // Fallback: coba fullscreen wrap jika iframe gagal
+                if (targetEl === ytIframe && wrap !== ytIframe) {
+                  const wrapReq = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
+                  if (wrapReq) wrapReq.call(wrap).catch(() => showToast('Fullscreen diblokir oleh browser.', 'error'));
+                } else {
+                  showToast('Fullscreen diblokir oleh browser.', 'error');
+                }
+              });
+            }
           } else {
             showToast('Browser ini tidak mendukung Fullscreen API.', 'error');
           }
