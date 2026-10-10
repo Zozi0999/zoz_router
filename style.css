@@ -8219,6 +8219,61 @@ body.modal-open {
   border: 0;
 }
 
+/* ==================== FULLSCREEN VIDEO YOUTUBE (perbaikan video kecil) ====================
+   Akar masalah: saat iframe video di-fullscreen, CSS author (position:absolute;
+   width:100%; height:100%) MENANG di atas UA stylesheet :-webkit-full-screen, sehingga
+   iframe tetap berukuran seukuran kartu/container (mis. 200px) di atas layar hitam.
+   Paksa ulang dimensi fullscreen ke viewport. */
+.yt-embed-frame iframe:fullscreen,
+.yt-embed-frame iframe:-webkit-full-screen,
+#ytPlayerContainer iframe:fullscreen,
+#ytPlayerContainer iframe:-webkit-full-screen,
+#ytPlayerContainer > iframe:fullscreen,
+#ytPlayerContainer > iframe:-webkit-full-screen {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  max-height: none !important;
+  border: 0 !important;
+  margin: 0 !important;
+  z-index: 2147483647;
+}
+
+/* Tombol "Layar Penuh" khusus deck player: fullscreen-kan container, bukan iframe */
+#ytPlayerContainerWrap:fullscreen,
+#ytPlayerContainerWrap:-webkit-full-screen {
+  border-radius: 0;
+  border: none;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  max-width: none;
+  max-height: none;
+}
+
+#ytPlayerContainerWrap:fullscreen #ytPlayerContainer,
+#ytPlayerContainerWrap:-webkit-full-screen #ytPlayerContainer {
+  height: auto !important;
+  flex: 1 1 auto !important;
+  min-height: 0;
+}
+
+#ytPlayerContainerWrap:fullscreen iframe,
+#ytPlayerContainerWrap:-webkit-full-screen iframe {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Header bar tetap di atas saat fullscreen container */
+#ytPlayerContainerWrap:fullscreen > div:first-child,
+#ytPlayerContainerWrap:-webkit-full-screen > div:first-child {
+  flex: 0 0 auto;
+  order: -1;
+}
+
 @media (max-width: 600px) {
   .youtube-preview-card {
     flex-direction: column;

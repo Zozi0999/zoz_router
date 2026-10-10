@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261010_v174">
+  <link rel="stylesheet" href="style.css?v=20261010_v175">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -1079,9 +1079,12 @@
 
           <!-- YouTube Hidden / Embed Container -->
           <div id="ytPlayerContainerWrap" style="margin-bottom: 16px; border-radius: var(--radius-sm); overflow: hidden; display: none; background: #000; border: 1px solid var(--border-subtle);">
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: rgba(0,0,0,0.6); font-size: 0.75rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: rgba(0,0,0,0.6); font-size: 0.75rem; gap: 8px;">
               <span style="color: var(--neon-cyan);"><i class="fa-brands fa-youtube"></i> YouTube Player Aktif</span>
-              <button class="btn btn-xs btn-outline" id="toggleYtPlayerVisibilityBtn" style="font-size: 0.68rem; padding: 2px 6px;">Sembunyikan Video</button>
+              <div style="display: flex; gap: 6px;">
+                <button class="btn btn-xs btn-outline" id="ytFsBtn" title="Putar video ke seluruh layar" style="font-size: 0.68rem; padding: 2px 6px;"><i class="fa-solid fa-expand"></i> Layar Penuh</button>
+                <button class="btn btn-xs btn-outline" id="toggleYtPlayerVisibilityBtn" style="font-size: 0.68rem; padding: 2px 6px;">Sembunyikan Video</button>
+              </div>
             </div>
             <div id="ytPlayerContainer" style="width: 100%; height: 200px;"></div>
           </div>
@@ -1554,6 +1557,6 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
-  <script src="app.js?v=20261010_v174"></script>
+  <script src="app.js?v=20261010_v175"></script>
 </body>
 </html>

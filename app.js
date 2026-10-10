@@ -531,6 +531,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     ytPlayerContainerWrap: $('#ytPlayerContainerWrap'),
     ytPlayerContainer: $('#ytPlayerContainer'),
     toggleYtPlayerVisibilityBtn: $('#toggleYtPlayerVisibilityBtn'),
+    ytFsBtn: $('#ytFsBtn'),
 
     // Floating scroll to bottom button
     scrollBottomBtn: $('#scrollBottomBtn'),
@@ -2155,6 +2156,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     let wheelHoldTimer = null;
     let wheelAccumDelta = 0;
     let isScrollBtnVisible = false;
+    // Dwell delay: tombol gulir-bawah hanya muncul setelah pengguna MENAHAN posisi
+    // menggulir ke atas selama beberapa saat (bukan langsung reaktif saat melewati ambang).
+    let scrollBtnDwellTimer = null;
+    const SCROLL_BTN_DWELL_MS = 700;
 
     function showPullLoading() {
       if (!els.pullUpNewChatWrapper) return;
@@ -2269,12 +2274,27 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       userScrolledUp = distFromBottom > 70;
 
       if (distFromBottom >= showThreshold) {
-        if (!isScrollBtnVisible) {
-          isScrollBtnVisible = true;
-          toggleScrollBottomBtn(true);
+        // Tampil HANYA setelah posisi menggulir ke atas ditahan stabil selama
+        // SCROLL_BTN_DWELL_MS. Jika pengguna kembali ke dasar sebelum dwell selesai,
+        // timer dibatalkan sehingga tombol tidak pernah muncul (anti-reaktif).
+        if (!isScrollBtnVisible && !scrollBtnDwellTimer) {
+          scrollBtnDwellTimer = setTimeout(() => {
+            scrollBtnDwellTimer = null;
+            const el = els.chatViewport;
+            if (!el) return;
+            const stillAway = (el.scrollHeight - el.scrollTop - el.clientHeight) >= showThreshold;
+            if (stillAway && !isScrollBtnVisible) {
+              isScrollBtnVisible = true;
+              toggleScrollBottomBtn(true);
+            }
+          }, SCROLL_BTN_DWELL_MS);
         }
         hidePullWrapper(true, false);
       } else if (distFromBottom <= hideThreshold) {
+        if (scrollBtnDwellTimer) {
+          clearTimeout(scrollBtnDwellTimer);
+          scrollBtnDwellTimer = null;
+        }
         if (isScrollBtnVisible) {
           isScrollBtnVisible = false;
           toggleScrollBottomBtn(false);
@@ -2314,9 +2334,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           if (!els.pullUpNewChatWrapper?.classList.contains('revealed')) {
             showPullLoading();
 
-            // Arm hold timer as soon as user pulls past bottom
+            // Arm hold timer as soon as user pulls past bottom.
+            // Dwell ditahan lebih lama agar tombol tidak muncul karena tarikan sesaat.
             if (!pullHoldTimer) {
-              const holdDuration = deltaY >= 40 ? 200 : 320;
+              const holdDuration = deltaY >= 60 ? 550 : 750;
               pullHoldTimer = setTimeout(() => {
                 revealPullNewChatBtn();
                 pullHoldTimer = null;
@@ -2357,28 +2378,32 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             showPullLoading();
             wheelAccumDelta += Math.abs(e.deltaY);
 
-            // User scrolling down at bottom and holding or repeated wheeling
+            // User scrolling down at bottom and holding or repeated wheeling.
+            // Dwell ditahan: putaran roda sesaat TIDAK langsung membuka tombol —
+            // pengguna harus menahan/menggulir terus selama ~650ms.
             if (!wheelHoldTimer) {
               wheelHoldTimer = setTimeout(() => {
                 revealPullNewChatBtn();
                 wheelHoldTimer = null;
-              }, 260);
+              }, 650);
             }
 
-            // Quick energetic wheel gesture threshold
-            if (wheelAccumDelta >= 70) {
+            // Quick energetic wheel gesture threshold (dinaikkan dari 70 → 400:
+            // butuh beberapa putaran roda berturut-turut, bukan satu sentakan).
+            if (wheelAccumDelta >= 400) {
               if (wheelHoldTimer) clearTimeout(wheelHoldTimer);
               wheelHoldTimer = null;
               revealPullNewChatBtn();
             }
 
-            // If user only gave a tiny accidental wheel tick and stopped, rebound after 300ms
+            // If user only gave a tiny accidental wheel tick and stopped, rebound after 450ms
             if (wheelTimer) clearTimeout(wheelTimer);
             wheelTimer = setTimeout(() => {
+              wheelAccumDelta = 0;
               if (!els.pullUpNewChatWrapper?.classList.contains('revealed')) {
                 hidePullWrapper(false, true);
               }
-            }, 300);
+            }, 450);
           }
         }
       }
@@ -14247,6 +14272,10 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     loopMode: 'all', // 'all' | 'one' | 'none'
     isShuffle: false,
     animFrameId: null,
+    // Niat pemutaran pengguna: tetap true walau browser men-suspend audio saat tab
+    // disembunyikan/di-minimize. Dipakai guardian untuk membangunkan playback lagi.
+    wantsPlayback: false,
+    guardianTimer: null,
 
     async init() {
       this.audio = new Audio();
@@ -14270,6 +14299,17 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       // Audio Event Handlers
       this.audio.addEventListener('timeupdate', () => this.onTimeUpdate());
       this.audio.addEventListener('ended', () => this.onTrackEnded());
+      // Pause pada audio element saat tab terlihat = niat pengguna (mis. lewat
+      // kontrol OS/media key) → matikan guardian agar musik tidak dibangunkan lagi.
+      // Pause dalam 800ms setelah pergantian track/src diabaikan (bukan niat user).
+      this.audio.addEventListener('pause', () => {
+        if (this._ignorePauseUntil && performance.now() < this._ignorePauseUntil) return;
+        if (this.currentMode === 'file' && document.visibilityState === 'visible' && this.audio.paused && this.wantsPlayback) {
+          this.wantsPlayback = false;
+          this.stopGuardian();
+          this.setPlayingState(false);
+        }
+      });
       this.audio.addEventListener('error', () => {
         showToast('Gagal memutar file audio.', 'error');
         this.setPlayingState(false);
@@ -14390,9 +14430,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
     playYouTube(videoId, customTitle = null) {
       this.initAudioContext();
+      this._ignorePauseUntil = performance.now() + 800;
       if (this.audio) this.audio.pause();
       this.stopAmbient();
 
+      this.wantsPlayback = true;
+      this.startGuardian();
       this.currentMode = 'youtube';
       this.activeAmbientId = null;
       this.currentOnlineTrack = {
@@ -14435,6 +14478,16 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
                       }
                     }
                   } else if (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.ENDED) {
+                    // Pause dari kontrol iframe YouTube SENDIRI saat tab terlihat
+                    // = niat pengguna → matikan guardian. Pause saat tab tersembunyi
+                    // = suspend browser → guardian tetap boleh membangunkan lagi.
+                    if (e.data === YT.PlayerState.PAUSED && document.visibilityState === 'visible') {
+                      const stillWants = this.isPlaying;
+                      if (stillWants) {
+                        this.wantsPlayback = false;
+                        this.stopGuardian();
+                      }
+                    }
                     this.setPlayingState(false);
                     if (e.data === YT.PlayerState.ENDED) {
                       if (this.loopMode === 'one') {
@@ -14491,10 +14544,13 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       const containerWrap = els.ytPlayerContainerWrap;
       if (containerWrap) containerWrap.style.display = 'none';
 
+      this.wantsPlayback = true;
+      this.startGuardian();
       this.currentMode = 'file';
       this.activeAmbientId = null;
       this.currentOnlineTrack = { type: 'stream', url, title };
 
+      this._ignorePauseUntil = performance.now() + 800;
       this.audio.src = url;
       this.audio.currentTime = 0;
       this.audio.play()
@@ -14670,10 +14726,13 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
         this.initAudioContext();
         this.stopAmbient();
+        this.wantsPlayback = true;
+        this.startGuardian();
         this.currentMode = 'file';
         this.activeAmbientId = null;
         this.currentOnlineTrack = null;
 
+        this._ignorePauseUntil = performance.now() + 800;
         this.audio.src = track.url;
         this.audio.currentTime = 0;
         
@@ -14695,6 +14754,9 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       this.initAudioContext();
 
       if (this.isPlaying) {
+        // Pause eksplisit dari pengguna: hentikan guardian agar tidak "membangunkan" lagi
+        this.wantsPlayback = false;
+        this.stopGuardian();
         if (this.currentMode === 'youtube' && this.ytPlayer && this.ytPlayer.pauseVideo) {
           this.ytPlayer.pauseVideo();
         } else if (this.currentMode === 'file') {
@@ -14704,6 +14766,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         }
         this.setPlayingState(false);
       } else {
+        this.wantsPlayback = true;
+        this.startGuardian();
         if (this.currentMode === 'youtube' && this.ytPlayer && this.ytPlayer.playVideo) {
           this.ytPlayer.playVideo();
           this.setPlayingState(true);
@@ -14790,6 +14854,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
     stop() {
       this.stopYouTubeProgressTimer();
+      this.wantsPlayback = false;
+      this.stopGuardian();
       if (this.audio) {
         this.audio.pause();
         this.audio.currentTime = 0;
@@ -14810,6 +14876,89 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         this.stopYouTubeProgressTimer();
       }
       this.updateUI();
+    },
+
+    updateMediaSession(title) {
+      try {
+        if (!('mediaSession' in navigator)) return;
+        const cleanTitle = String(title || 'Cyber BGM').replace(/^[^\w(#]+\s/, '');
+        if (this._msTitle === cleanTitle && this._msState === this.isPlaying) return;
+        this._msTitle = cleanTitle;
+        this._msState = this.isPlaying;
+
+        if (typeof MediaMetadata !== 'undefined') {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: cleanTitle,
+            artist: 'Cyber BGM Deck',
+            album: 'ZOZ Router • Musik Latar Belakang'
+          });
+        }
+        navigator.mediaSession.playbackState = this.isPlaying ? 'playing' : 'paused';
+
+        const safeSet = (action, fn) => {
+          try { navigator.mediaSession.setActionHandler(action, fn); } catch (_) {}
+        };
+        safeSet('play', () => { if (!this.isPlaying) this.togglePlayPause(); });
+        safeSet('pause', () => { if (this.isPlaying) this.togglePlayPause(); });
+        safeSet('nexttrack', () => this.nextTrack());
+        safeSet('previoustrack', () => this.prevTrack());
+        safeSet('stop', () => this.stop());
+      } catch (_) {}
+    },
+
+    // ==================== BACKGROUND PLAYBACK GUARDIAN ====================
+    // Musik "Latar Belakang" harus tetap hidup saat tab disembunyikan, window
+    // di-minimize, atau pengguna pindah aplikasi. Browser sering men-suspend
+    // AudioContext / media element saat halaman jadi tidak terlihat — guardian
+    // ini membangunkan playback kembali sesuai NIAT pengguna (wantsPlayback),
+    // tanpa pernah menghidupkan lagi musik yang sengaja di-pause pengguna.
+    startGuardian() {
+      if (this.guardianTimer) return;
+      this.guardianTimer = setInterval(() => this.revivePlayback(), 4000);
+      document.addEventListener('visibilitychange', this._visHandler = () => this.revivePlayback());
+      window.addEventListener('focus', this._focusHandler = () => this.revivePlayback());
+      window.addEventListener('pagehide', this._pageHandler = () => this.revivePlayback());
+      this.revivePlayback();
+    },
+
+    stopGuardian() {
+      if (this.guardianTimer) {
+        clearInterval(this.guardianTimer);
+        this.guardianTimer = null;
+      }
+      if (this._visHandler) { document.removeEventListener('visibilitychange', this._visHandler); this._visHandler = null; }
+      if (this._focusHandler) { window.removeEventListener('focus', this._focusHandler); this._focusHandler = null; }
+      if (this._pageHandler) { window.removeEventListener('pagehide', this._pageHandler); this._pageHandler = null; }
+    },
+
+    revivePlayback() {
+      if (!this.wantsPlayback) return;
+      try {
+        // 1. Bangunkan AudioContext yang di-suspend browser
+        if (this.audioCtx && this.audioCtx.state === 'suspended') {
+          this.audioCtx.resume().catch(() => {});
+        }
+
+        // 2. Mode file/stream lokal: audio element yang dipaksa pause browser
+        if (this.currentMode === 'file' && this.audio && this.audio.paused && this.audio.src) {
+          const p = this.audio.play();
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        }
+
+        // 3. Mode YouTube: player yang di-pause browser saat tab hidden
+        if (this.currentMode === 'youtube' && this.ytPlayer && typeof this.ytPlayer.getPlayerState === 'function') {
+          const st = this.ytPlayer.getPlayerState();
+          // 2 = PAUSED, -1 = cued (belum main), 5 = ended tapi loop masih aktif
+          if (st === 2 || st === -1) {
+            if (typeof this.ytPlayer.playVideo === 'function') this.ytPlayer.playVideo();
+          }
+        }
+
+        // 4. Mode ambient synth: oscillator sudah mati → nyalakan ulang preset yang sama
+        if (this.currentMode === 'ambient' && this.activeAmbientId && this.ambientNodes.length === 0) {
+          this.startAmbient(this.activeAmbientId);
+        }
+      } catch (_) {}
     },
 
     onTrackEnded() {
@@ -14834,6 +14983,10 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         if (this.currentIndex < this.playlist.length - 1) {
           this.nextTrack();
         } else {
+          // Playlist habis & loop nonaktif: ini akhir pemutaran — matikan guardian
+          // supaya tidak membangunkan audio yang sudah ended (diputar ulang dari 0).
+          this.wantsPlayback = false;
+          this.stopGuardian();
           this.setPlayingState(false);
         }
       }
@@ -14896,9 +15049,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     // --- PROCEDURAL SYNTHESIZER GENERATOR ---
     startAmbient(presetId) {
       this.initAudioContext();
+      this._ignorePauseUntil = performance.now() + 800;
       if (this.audio) this.audio.pause();
       this.stopAmbient();
 
+      this.wantsPlayback = true;
+      this.startGuardian();
       this.currentMode = 'ambient';
       this.activeAmbientId = presetId;
       this.currentIndex = -1;
@@ -15191,6 +15347,11 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
       if (els.bgmTrackTitle) els.bgmTrackTitle.innerText = title;
       if (els.deckCurrentTrackName) els.deckCurrentTrackName.innerText = title;
+
+      // Media Session API: daftarkan metadata ke OS agar playback diakui sebagai
+      // "media latar belakang" (muncul di media overlay Windows/macOS/Android dan
+      // sinyal kuat ke browser untuk MENGHENTIKAN auto-suspend tab yang bermusik).
+      this.updateMediaSession(title);
 
       // Play / Pause Icons
       const playIcon = this.isPlaying ? '<i class="fa-solid fa-pause"></i>' : '<i class="fa-solid fa-play"></i>';
@@ -16425,9 +16586,32 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       if (wrap) {
         const isHidden = wrap.style.display === 'none';
         wrap.style.display = isHidden ? 'block' : 'none';
-        els.toggleYtPlayerVisibilityBtn.innerHTML = isHidden 
-          ? '<i class="fa-solid fa-eye-slash"></i> Sembunyikan' 
+        els.toggleYtPlayerVisibilityBtn.innerHTML = isHidden
+          ? '<i class="fa-solid fa-eye-slash"></i> Sembunyikan'
           : '<i class="fa-solid fa-eye"></i> Tampilkan';
+      }
+      AudioEngine.click();
+    });
+
+    // Tombol "Layar Penuh": fullscreen-kan SELURUH container player (bukan iframe
+    // YouTube yang ukurannya menempel pada kartu sehingga video tampil kecil).
+    els.ytFsBtn?.addEventListener('click', () => {
+      const wrap = els.ytPlayerContainerWrap;
+      if (!wrap) return;
+      try {
+        if (document.fullscreenElement || document.webkitFullscreenElement) {
+          (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+        } else {
+          const req = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
+          if (req) {
+            const p = req.call(wrap);
+            if (p && typeof p.catch === 'function') p.catch(() => showToast('Fullscreen diblokir oleh browser.', 'error'));
+          } else {
+            showToast('Browser ini tidak mendukung Fullscreen API.', 'error');
+          }
+        }
+      } catch (err) {
+        showToast('Gagal memasuk layar penuh: ' + (err && err.message ? err.message : err), 'error');
       }
       AudioEngine.click();
     });
