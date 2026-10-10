@@ -3463,6 +3463,41 @@ async function requestHandler(req, res) {
   // 1. List all sessions (Lightweight summaries)
   if (pathname === '/api/sessions' && method === 'GET') {
     try {
+      const rawUserDir = path.join(SESSIONS_DIR, reqUserId);
+
+      // ADOPSI SESI LEGACY: sebelum ada identitas pengguna, seluruh sesi hidup di
+      // data/sessions/ (lalu dipindahkan migrasi ke data/sessions/default/). Klien kini
+      // mengirim X-User-ID sehingga hanya membaca data/sessions/<userId>/ — tanpa langkah
+      // ini riwayat lama menjadi tak terlihat sama sekali. Pemindahan dilakukan pada
+      // kunjungan pertama (dir belum pernah dibuat), sehingga sesi lama langsung menjadi
+      // privat milik pengguna tersebut.
+      if (!fs.existsSync(rawUserDir) && reqUserId !== 'default') {
+        const legacyDir = path.join(SESSIONS_DIR, 'default');
+        if (fs.existsSync(legacyDir)) {
+          const legacyFiles = fs.readdirSync(legacyDir).filter(f => f.endsWith('.json'));
+          if (legacyFiles.length > 0) {
+            try { fs.mkdirSync(rawUserDir, { recursive: true }); } catch (_) {}
+            for (const lf of legacyFiles) {
+              try {
+                const srcFile = path.join(legacyDir, lf);
+                const dstFile = path.join(rawUserDir, lf);
+                if (fs.existsSync(dstFile)) {
+                  fs.unlinkSync(srcFile);
+                  continue;
+                }
+                fs.renameSync(srcFile, dstFile);
+                // Stempel pemilik agar konsisten dengan partisi penyimpanan
+                try {
+                  const obj = JSON.parse(fs.readFileSync(dstFile, 'utf8'));
+                  obj.userId = reqUserId;
+                  fs.writeFileSync(dstFile, JSON.stringify(obj, null, 2), 'utf8');
+                } catch (_) {}
+              } catch (_) {}
+            }
+          }
+        }
+      }
+
       const userDir = getUserSessionsDir(reqUserId);
       if (!fs.existsSync(userDir)) {
         return sendJSON(res, 200, { sessions: [] });
@@ -3584,7 +3619,7 @@ async function requestHandler(req, res) {
       // Hentikan tugas background chat aktif untuk sesi ini hanya jika milik user ini
       if (id && dbActiveChatTasks[id]) {
         const bgTask = dbActiveChatTasks[id];
-        if (!bgTask.userId || bgTask.userId === reqUserId || reqUserId === 'default') {
+        if (!bgTask.userId || bgTask.userId === reqUserId) {
           bgTask.status = 'aborted';
           if (bgTask.proxyReq && !bgTask.proxyReq.destroyed) {
             try { bgTask.proxyReq.destroy(); } catch (_) {}
@@ -3597,7 +3632,7 @@ async function requestHandler(req, res) {
       for (const rId of Object.keys(dbTugasRiset)) {
         const rTask = dbTugasRiset[rId];
         if (rTask && (rTask.sessionId === id || rTask.taskId === id)) {
-          if (!rTask.userId || rTask.userId === reqUserId || reqUserId === 'default') {
+          if (!rTask.userId || rTask.userId === reqUserId) {
             rTask.aborted = true;
             rTask.status = 'dibatalkan';
             delete dbTugasRiset[rId];
@@ -3621,7 +3656,7 @@ async function requestHandler(req, res) {
       // Hentikan tugas background chat hanya untuk user ini
       for (const sid of Object.keys(dbActiveChatTasks)) {
         const bgTask = dbActiveChatTasks[sid];
-        if (bgTask && (!bgTask.userId || bgTask.userId === reqUserId || reqUserId === 'default')) {
+        if (bgTask && (!bgTask.userId || bgTask.userId === reqUserId)) {
           bgTask.status = 'aborted';
           if (bgTask.proxyReq && !bgTask.proxyReq.destroyed) {
             try { bgTask.proxyReq.destroy(); } catch (_) {}
@@ -3633,7 +3668,7 @@ async function requestHandler(req, res) {
       // Hentikan tugas Deep Research hanya untuk user ini
       for (const rId of Object.keys(dbTugasRiset)) {
         const rTask = dbTugasRiset[rId];
-        if (rTask && (!rTask.userId || rTask.userId === reqUserId || reqUserId === 'default')) {
+        if (rTask && (!rTask.userId || rTask.userId === reqUserId)) {
           rTask.aborted = true;
           rTask.status = 'dibatalkan';
           delete dbTugasRiset[rId];
@@ -4044,7 +4079,7 @@ async function requestHandler(req, res) {
       return sendJSON(res, 404, { error: 'Tugas riset tidak ditemukan.' });
     }
     const checkUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
-    if (dataTugas.userId && checkUserId !== 'default' && dataTugas.userId !== checkUserId) {
+    if (dataTugas.userId && dataTugas.userId !== checkUserId) {
       return sendJSON(res, 403, { error: 'Akses ditolak: Anda tidak memiliki akses ke tugas riset ini.' });
     }
     return sendJSON(res, 200, {
@@ -4069,7 +4104,7 @@ async function requestHandler(req, res) {
     const dataTugas = dbTugasRiset[taskId];
     if (dataTugas) {
       const checkUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
-      if (dataTugas.userId && checkUserId !== 'default' && dataTugas.userId !== checkUserId) {
+      if (dataTugas.userId && dataTugas.userId !== checkUserId) {
         return sendJSON(res, 403, { error: 'Akses ditolak.' });
       }
       dataTugas.aborted = true;
@@ -6049,7 +6084,7 @@ async function requestHandler(req, res) {
         const t = dbActiveChatTasks[k];
         if (!t) continue;
         // PRIVACY ENFORCEMENT: Only include tasks for the requesting user!
-        if (t.userId && statusUserId !== 'default' && t.userId !== statusUserId) {
+        if (t.userId && t.userId !== statusUserId) {
           continue;
         }
         if (t.status === 'streaming') {
@@ -6063,7 +6098,7 @@ async function requestHandler(req, res) {
         const rTask = dbTugasRiset[rId];
         if (!rTask) continue;
         // PRIVACY ENFORCEMENT: Only include research tasks for the requesting user!
-        if (rTask.userId && statusUserId !== 'default' && rTask.userId !== statusUserId) {
+        if (rTask.userId && rTask.userId !== statusUserId) {
           continue;
         }
         if (rTask.status === 'sedang_meneliti' && rTask.sessionId) {
@@ -6087,7 +6122,7 @@ async function requestHandler(req, res) {
     const task = dbActiveChatTasks[sid];
     if (task && (task.status === 'streaming' || task.status === 'completed')) {
       // PRIVACY ENFORCEMENT: If task belongs to another user, deny access!
-      if (task.userId && statusUserId !== 'default' && task.userId !== statusUserId) {
+      if (task.userId && task.userId !== statusUserId) {
         return sendJSON(res, 200, { active: false, status: 'none', sessionId: sid });
       }
       return sendJSON(res, 200, {
@@ -6107,7 +6142,7 @@ async function requestHandler(req, res) {
     for (const rId of Object.keys(dbTugasRiset)) {
       const rTask = dbTugasRiset[rId];
       if (rTask && (rTask.sessionId === sid || rTask.taskId === sid)) {
-        if (!rTask.userId || statusUserId === 'default' || rTask.userId === statusUserId) {
+        if (!rTask.userId || rTask.userId === statusUserId) {
           matchingResearchTasks.push(rTask);
         }
       }
@@ -6211,7 +6246,7 @@ async function requestHandler(req, res) {
 
       if (sid && dbActiveChatTasks[sid] && dbActiveChatTasks[sid].status === 'streaming') {
         const task = dbActiveChatTasks[sid];
-        if (!task.userId || stopUserId === 'default' || task.userId === stopUserId) {
+        if (!task.userId || task.userId === stopUserId) {
           task.status = 'aborted';
           if (task.proxyReq && !task.proxyReq.destroyed) {
             try { task.proxyReq.destroy(); } catch (_) {}
@@ -6232,7 +6267,7 @@ async function requestHandler(req, res) {
         for (const rId of Object.keys(dbTugasRiset)) {
           const rTask = dbTugasRiset[rId];
           if (rTask && (rTask.sessionId === sid || rTask.taskId === sid || rTask.taskId === body.taskId) && rTask.status === 'sedang_meneliti') {
-            if (!rTask.userId || stopUserId === 'default' || rTask.userId === stopUserId) {
+            if (!rTask.userId || rTask.userId === stopUserId) {
               rTask.aborted = true;
               rTask.status = 'dibatalkan';
               rTask.currentStep = 'Riset dihentikan oleh pengguna.';
