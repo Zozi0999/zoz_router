@@ -2708,30 +2708,31 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
         topik,
         mode: 'custom_url_analyzer',
         targetUrls,
-        timestamp: new Date().toLocaleTimeString('id-ID'),
+        timestamp: new Date().toLocaleTimeString('it-IT'),
         scrapedPagesCount: scrapedPages.length,
         agent1: {
-          name: 'Penganalisis Web Kustom URL (Ekstraksi Konten)',
+          name: 'Estrattore di Contenuti Web (URL Bersaglio)',
           provider: 'Deep Web Extractor',
           model: masterResearchModel,
           resultsCount: scrapedPages.length,
-          results: scrapedPages.map(p => ({ title: p.title, link: p.url, snippet: p.content.slice(0, 250) + '...' })),
-          analysis: `Berhasil mengekstrak ${scrapedPages.length} halaman web kustom utuh untuk telaah mendalam.`
+          results: scrapedPages.map(p => ({ title: p.title, link: p.url, snippet: p.content.slice(0, 250) + '...', charCount: p.charCount })),
+          analysis: `Estrazione riuscita: ${scrapedPages.length} documenti web integrali acquisiti con successo per l'analisi approfondita.`
         },
         scraper: {
-          status: 'selesai',
+          status: 'completato',
           totalScraped: scrapedPages.length,
+          temporalAnalysis: '',
           articles: scrapedPages.map(p => ({
             title: p.title,
             url: p.url,
             domain: p.domain,
-            sourceProvider: 'URL Kustom Analisis',
+            sourceProvider: 'URL Bersaglio',
             length: p.charCount,
             sample: p.content.slice(0, 300) + '...'
           }))
         },
         analyzer: {
-          name: 'Penganalisis Web Kustom URL',
+          name: 'Analizzatore Web URL',
           model: masterResearchModel,
           urls: scrapedPages.map(p => ({
             url: p.url,
@@ -2792,6 +2793,30 @@ Tuliskan telaah analitis mendalam dalam 3-5 paragraf berbobot teknis tinggi, pad
     });
 
     task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Bedah komparatif selesai: Model Riset berhasil mengekstrak poin isi, pembaruan terbaru, dan konteks lama.`);
+
+    task.liveInspection = {
+      ...(task.liveInspection || {}),
+      agent2: {
+        name: 'Decomposizione Concettuale & Analisi Strutturale',
+        provider: 'Neural Content Deconstructor',
+        model: masterResearchModel,
+        resultsCount: scrapedPages.length,
+        analysis: hasilBedahAnalisis
+      },
+      scraper: {
+        status: 'completato',
+        totalScraped: scrapedPages.length,
+        temporalAnalysis: hasilBedahAnalisis,
+        articles: scrapedPages.map(p => ({
+          title: p.title,
+          url: p.url,
+          domain: p.domain,
+          sourceProvider: 'URL Bersaglio',
+          length: p.charCount,
+          sample: p.content.slice(0, 350) + '...'
+        }))
+      }
+    };
 
     // ==========================================
     // TAHAP 3/3: PENYUSUNAN LAPORAN EKSEKUTIF DENGAN MATRIKS KOMPARASI
@@ -2902,14 +2927,14 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     task.liveInspection = {
       ...(task.liveInspection || {}),
       synthesizer: {
-        name: 'Model Riset (Lead Executive Architect)',
+        name: 'Relazione Esecutiva Integrale & Matrice Comparativa',
         model: masterResearchModel,
         status: 'selesai',
         text: laporanAkhir,
         length: (laporanAkhir || '').length
       },
       model4: {
-        name: 'Model Ringkasan (Executive Chat Summarizer)',
+        name: 'Sommario Esecutivo per la Conversazione Chat',
         model: masterResearchModel,
         status: 'selesai',
         text: chatSummary,

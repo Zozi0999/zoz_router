@@ -10553,9 +10553,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           <div class="deep-research-header">
             <div class="deep-research-title">
               <i class="fa-solid fa-microscope" style="color:var(--neon-amber);"></i>
-              <span>Deep Research: Penganalisis Web Kustom URL</span>
+              <span>Deep Research: Analizzatore Web URL</span>
             </div>
-            <span class="deep-research-badge">${effectiveTargetUrls.length} URL Target</span>
+            <span class="deep-research-badge">${effectiveTargetUrls.length} URL Bersaglio</span>
           </div>
           <div class="deep-research-progress-bar">
             <div class="deep-research-progress-fill" style="width: ${progress}%;"></div>
@@ -10575,7 +10575,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           </div>
           <div class="deep-research-actions" style="margin-top: 10px; display: flex; gap: 8px;">
             <button type="button" class="btn btn-xs btn-outline btn-live-inspection-trigger" style="font-size: 0.76rem; border-color: rgba(0, 240, 255, 0.4); color: var(--neon-cyan); background: rgba(0, 240, 255, 0.08); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 5px 12px; border-radius: var(--radius-sm); font-weight: 600;">
-              <i class="fa-solid fa-eye"></i> Pertinjau Proses Nyata (Live Inspection)
+              <i class="fa-solid fa-eye"></i> Ispezione Live in Tempo Reale
             </button>
           </div>
         </div>
@@ -10720,9 +10720,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
                   } else {
                     updateLiveInspectionData({
                       synthesizer: {
-                        name: 'Model 3 (Lead Corrector & Enhancer)',
+                        name: 'Relazione Esecutiva Integrale & Matrice Comparativa',
                         model: masterResearchModel,
-                        status: 'selesai',
+                        status: 'completato',
                         text: finalReportText,
                         length: (finalReportText || '').length
                       }
@@ -10733,10 +10733,11 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
                   } else if (chatSummary) {
                     updateLiveInspectionData({
                       model4: {
-                        name: 'Model 4 (Executive Chat Summarizer)',
+                        name: 'Sommario Esecutivo per la Conversazione Chat',
                         model: masterResearchModel,
-                        status: 'selesai',
-                        text: chatSummary
+                        status: 'completato',
+                        text: chatSummary,
+                        length: (chatSummary || '').length
                       }
                     });
                   }
@@ -10824,24 +10825,36 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           currentQuery: effectiveTargetUrls.join(', '),
           iteration: 1,
           maxIterations: 1,
-          timestamp: new Date().toLocaleTimeString('id-ID'),
+          timestamp: new Date().toLocaleTimeString('it-IT'),
           agent1: {
-            name: 'Penganalisis Web Kustom URL (Ekstraksi Konten)',
+            name: 'Estrattore di Contenuti Web (URL Bersaglio)',
             provider: 'Deep Web Extractor',
             model: masterResearchModel,
             resultsCount: scrapedPages.length,
-            results: scrapedPages.map(p => ({ title: p.title, link: p.url, snippet: p.content.slice(0, 250) + '...' })),
-            analysis: `Berhasil mengekstrak ${scrapedPages.length} dokumen web kustom secara utuh untuk dianalisis.`
+            results: scrapedPages.map(p => ({ title: p.title, link: p.url, snippet: p.content.slice(0, 250) + '...', charCount: p.charCount })),
+            analysis: `Estrazione riuscita: ${scrapedPages.length} documenti web integrali acquisiti con successo per l'analisi approfondita.`
           },
           scraper: {
-            status: 'selesai',
+            status: 'completato',
             totalScraped: scrapedPages.length,
+            temporalAnalysis: '',
             articles: scrapedPages.map(p => ({
               title: p.title,
               url: p.url,
               domain: p.domain,
-              sourceProvider: 'URL Kustom Analisis',
+              sourceProvider: 'URL Bersaglio',
               length: p.charCount,
+              sample: p.content.slice(0, 300) + '...'
+            }))
+          },
+          analyzer: {
+            name: 'Analizzatore Web URL',
+            model: masterResearchModel,
+            urls: scrapedPages.map(p => ({
+              url: p.url,
+              domain: p.domain,
+              title: p.title,
+              charCount: p.charCount,
               sample: p.content.slice(0, 300) + '...'
             }))
           },
@@ -10885,6 +10898,29 @@ TUGAS ANDA:
           console.warn('Gagal analisis bedah client-side:', e);
           hasilBedahAnalisis = `[Rangkuman Ekstraksi Dokumen]:\n${scrapedPages.map(p => `- ${p.title} (${p.url}): ${p.content.slice(0, 400)}...`).join('\n')}`;
         }
+
+        updateLiveInspectionData({
+          agent2: {
+            name: 'Decomposizione Concettuale & Analisi Strutturale',
+            provider: 'Neural Content Deconstructor',
+            model: masterResearchModel,
+            resultsCount: scrapedPages.length,
+            analysis: hasilBedahAnalisis
+          },
+          scraper: {
+            status: 'completato',
+            totalScraped: scrapedPages.length,
+            temporalAnalysis: hasilBedahAnalisis,
+            articles: scrapedPages.map(p => ({
+              title: p.title,
+              url: p.url,
+              domain: p.domain,
+              sourceProvider: 'URL Bersaglio',
+              length: p.charCount,
+              sample: p.content.slice(0, 350) + '...'
+            }))
+          }
+        });
 
         // TAHAP 3/3: PENYUSUNAN LAPORAN EKSEKUTIF DENGAN MATRIKS KOMPARASI
         stepItems[stepItems.length - 1].status = 'done';
@@ -10957,16 +10993,16 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
         updateLiveInspectionData({
           synthesizer: {
-            name: 'Model Riset (Lead Executive Architect)',
+            name: 'Relazione Esecutiva Integrale & Matrice Comparativa',
             model: masterResearchModel,
-            status: 'selesai',
+            status: 'completato',
             text: finalReportText,
             length: (finalReportText || '').length
           },
           model4: {
-            name: 'Model Ringkasan (Executive Chat Summarizer)',
+            name: 'Sommario Esecutivo per la Conversazione Chat',
             model: masterResearchModel,
-            status: 'selesai',
+            status: 'completato',
             text: chatSummary,
             length: (chatSummary || '').length
           }
@@ -11055,7 +11091,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
               <i class="fa-solid fa-rotate-right"></i> Coba Riset Ulang
             </button>
             <button class="btn btn-sm btn-outline inspect-research-err-btn" style="border-color:rgba(0, 240, 255, 0.4); color:var(--neon-cyan); font-size:0.75rem;">
-              <i class="fa-solid fa-eye"></i> Pertinjau Log Riset
+              <i class="fa-solid fa-eye"></i> Ispeziona Log Analisi
             </button>
             <button class="btn btn-sm btn-outline open-settings-btn" style="border-color:var(--neon-amber); color:var(--neon-amber); font-size:0.75rem;">
               <i class="fa-solid fa-gear"></i> Buka Pengaturan
@@ -15151,7 +15187,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     if (els.inspectTopik) els.inspectTopik.innerText = currentInsp.topik || '-';
     if (els.inspectCurrentQuery) els.inspectCurrentQuery.innerText = currentInsp.currentQuery || '-';
     if (els.inspectIteration) els.inspectIteration.innerText = `${currentInsp.iteration || 1} / ${currentInsp.maxIterations || 3}`;
-    if (els.inspectTimestamp) els.inspectTimestamp.innerText = currentInsp.timestamp || new Date().toLocaleTimeString('id-ID');
+    if (els.inspectTimestamp) els.inspectTimestamp.innerText = currentInsp.timestamp || new Date().toLocaleTimeString('it-IT');
 
     if (els.inspectCountAgent1) {
       els.inspectCountAgent1.innerText = currentInsp.agent1?.resultsCount || (currentInsp.agent1?.results?.length || 0);
@@ -15164,11 +15200,11 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     }
     if (els.inspectCountSynthesizer) {
       const synLen = currentInsp.synthesizer?.text ? currentInsp.synthesizer.text.length : (currentInsp.synthesizer?.length || 0);
-      els.inspectCountSynthesizer.innerText = synLen > 0 ? (synLen > 999 ? `${(synLen / 1000).toFixed(1)}k` : `${synLen}`) : (currentInsp.synthesizer?.status === 'selesai' ? 'Selesai' : 'Siap');
+      els.inspectCountSynthesizer.innerText = synLen > 0 ? (synLen > 999 ? `${(synLen / 1000).toFixed(1)}k` : `${synLen}`) : (currentInsp.synthesizer?.status === 'selesai' || currentInsp.synthesizer?.status === 'completato' ? 'Completo' : 'Bozza');
     }
     if (els.inspectCountModel4) {
       const m4Len = currentInsp.model4?.text ? currentInsp.model4.text.length : (currentInsp.model4?.length || 0);
-      els.inspectCountModel4.innerText = m4Len > 0 ? (m4Len > 999 ? `${(m4Len / 1000).toFixed(1)}k` : `${m4Len}`) : (currentInsp.model4?.status === 'selesai' ? 'Selesai' : 'Siap');
+      els.inspectCountModel4.innerText = m4Len > 0 ? (m4Len > 999 ? `${(m4Len / 1000).toFixed(1)}k` : `${m4Len}`) : (currentInsp.model4?.status === 'selesai' || currentInsp.model4?.status === 'completato' ? 'Completo' : 'Pronto');
     }
 
     // Jika modal terbuka, langsung live update view secara dinamis
@@ -15196,8 +15232,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       container.innerHTML = `
         <div style="text-align:center; padding: 40px 20px; color: var(--text-dim);">
           <i class="fa-solid fa-satellite fa-spin" style="font-size: 2.4rem; color: var(--neon-cyan); margin-bottom: 12px; display:block;"></i>
-          <h4 style="color:#FFF; margin:0 0 6px 0;">Menunggu Data Live Dari Agen Riset...</h4>
-          <p style="font-size:0.82rem; margin:0;">Mulai Deep Research dari composer untuk melihat streaming data proses pencarian Agen 1 dan Agen 2 secara real-time.</p>
+          <h4 style="color:#FFF; margin:0 0 6px 0;">In Attesa dei Dati dall'Agente di Analisi...</h4>
+          <p style="font-size:0.82rem; margin:0;">Avvia Deep Research dal composer con URL di riferimento per ispezionare il processo analitico e la decodifica dei contenuti in tempo reale.</p>
         </div>
       `;
       return;
@@ -15212,25 +15248,25 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         <div class="inspector-card">
           <div class="inspector-card-header">
             <div class="inspector-card-title">
-              <i class="fa-solid fa-robot" style="color: #00F0FF;"></i>
-              <span>${escapeHtml(ag1.name || 'Agen 1 (Pakar Web Google)')}</span>
+              <i class="fa-solid fa-link" style="color: #00F0FF;"></i>
+              <span>${escapeHtml(ag1.name || 'Estrattore di Contenuti Web (URL Bersaglio)')}</span>
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
-              <span class="catalog-badge">${escapeHtml(ag1.provider || 'Serper API')}</span>
-              <span class="catalog-badge" style="background:rgba(0,240,255,0.08); color:#00F0FF;">Model: ${escapeHtml(ag1.model || 'Default')}</span>
+              <span class="catalog-badge">${escapeHtml(ag1.provider || 'Deep Web Extractor')}</span>
+              <span class="catalog-badge" style="background:rgba(0,240,255,0.08); color:#00F0FF;">Modello: ${escapeHtml(ag1.model || 'Default')}</span>
             </div>
           </div>
 
           <div style="margin-bottom: 14px;">
             <div style="font-size: 0.78rem; font-weight: 700; color: #64F3FF; margin-bottom: 8px;">
-              <i class="fa-solid fa-magnifying-glass"></i> Hasil Penelusuran Organik Google Serper (${results.length} Sumber):
+              <i class="fa-solid fa-file-export"></i> Documenti Web Integrali Acquisiti (${results.length} Risorse URL):
             </div>
-            ${results.length === 0 ? '<div style="font-size:0.78rem; color:var(--text-dim); font-style:italic;">Belum ada hasil pencarian.</div>' : ''}
+            ${results.length === 0 ? '<div style="font-size:0.78rem; color:var(--text-dim); font-style:italic;">Nessun URL estratto finora.</div>' : ''}
             ${results.map((r, idx) => `
               <div class="inspector-source-item">
                 <div class="inspector-source-title">
                   <a href="${escapeHtml(r.link || r.url || '#')}" target="_blank" rel="noopener noreferrer">
-                    [${idx + 1}] ${escapeHtml(r.title || 'Tanpa Judul')}
+                    [${idx + 1}] ${escapeHtml(r.title || 'Senza Titolo')}
                   </a>
                 </div>
                 <div class="inspector-source-snippet">${escapeHtml(r.snippet || r.content || '')}</div>
@@ -15241,9 +15277,9 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
           <div>
             <div style="font-size: 0.78rem; font-weight: 700; color: var(--neon-teal); margin-bottom: 8px;">
-              <i class="fa-solid fa-brain"></i> Output Analisis Teks Spesialis Agen 1 (LLM Asli):
+              <i class="fa-solid fa-brain"></i> Risultato dell'Estrazione Iniziale & Validazione:
             </div>
-            <div class="inspector-analysis-box">${escapeHtml(ag1.analysis || 'Sedang memproses analisis...')}</div>
+            <div class="inspector-analysis-box">${escapeHtml(ag1.analysis || 'Estrazione e normalizzazione dei contenuti in corso...')}</div>
           </div>
         </div>
       `;
@@ -15254,174 +15290,158 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         <div class="inspector-card">
           <div class="inspector-card-header">
             <div class="inspector-card-title">
-              <i class="fa-solid fa-microchip" style="color: #00FFC2;"></i>
-              <span>${escapeHtml(ag2.name || 'Agen 2 (Pakar Analisis Divergen / Serper)')}</span>
+              <i class="fa-solid fa-layer-group" style="color: #00FFC2;"></i>
+              <span>${escapeHtml(ag2.name || 'Decomposizione Concettuale & Analisi Strutturale')}</span>
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
-              <span class="catalog-badge" style="border-color:rgba(0,255,194,0.4); color:#00FFC2;">${escapeHtml(ag2.provider || 'Google Serper (Divergen)')}</span>
-              <span class="catalog-badge" style="background:rgba(0,255,194,0.08); color:#00FFC2;">Model: ${escapeHtml(ag2.model || 'Default')}</span>
+              <span class="catalog-badge" style="border-color:rgba(0,255,194,0.4); color:#00FFC2;">${escapeHtml(ag2.provider || 'Neural Content Deconstructor')}</span>
+              <span class="catalog-badge" style="background:rgba(0,255,194,0.08); color:#00FFC2;">Modello: ${escapeHtml(ag2.model || 'Default')}</span>
             </div>
           </div>
 
-          ${ag2.answerBox ? `
-            <div class="inspector-source-item" style="border-color: rgba(255, 183, 3, 0.4); background: rgba(255, 183, 3, 0.05); margin-bottom: 12px;">
-              <div style="color: #FFB703; font-weight: 700; font-size: 0.78rem; margin-bottom: 4px;">
-                <i class="fa-solid fa-bolt"></i> Google Serper Answer Box:
-              </div>
-              <div style="font-size: 0.8rem; color: #FFF;">${escapeHtml(ag2.answerBox.answer || ag2.answerBox.snippet || JSON.stringify(ag2.answerBox))}</div>
-            </div>
-          ` : ''}
-
-          ${ag2.knowledgeGraph ? `
-            <div class="inspector-source-item" style="border-color: rgba(0, 240, 255, 0.4); background: rgba(0, 240, 255, 0.05); margin-bottom: 12px;">
-              <div style="color: #00F0FF; font-weight: 700; font-size: 0.78rem; margin-bottom: 4px;">
-                <i class="fa-solid fa-circle-nodes"></i> Google Serper Knowledge Graph:
-              </div>
-              <div style="font-weight: 600; font-size: 0.84rem; color: #FFF;">${escapeHtml(ag2.knowledgeGraph.title || '')} (${escapeHtml(ag2.knowledgeGraph.type || '')})</div>
-              <div style="font-size: 0.78rem; color: var(--text-dim); margin-top: 2px;">${escapeHtml(ag2.knowledgeGraph.description || '')}</div>
-            </div>
-          ` : ''}
-
-          <div style="margin-bottom: 14px;">
-            <div style="font-size: 0.78rem; font-weight: 700; color: #64F3FF; margin-bottom: 8px;">
-              <i class="fa-solid fa-list-check"></i> Hasil Penelusuran Serper Divergen (${results.length} Sumber - Domain Mandiri):
-            </div>
-            ${results.length === 0 ? '<div style="font-size:0.78rem; color:var(--text-dim); font-style:italic;">Belum ada hasil pencarian.</div>' : ''}
-            ${results.map((r, idx) => `
-              <div class="inspector-source-item">
-                <div class="inspector-source-title">
-                  <a href="${escapeHtml(r.link || r.url || '#')}" target="_blank" rel="noopener noreferrer">
-                    [${idx + 1}] ${escapeHtml(r.title || 'Tanpa Judul')}
-                  </a>
-                </div>
-                <div class="inspector-source-snippet">${escapeHtml(r.snippet || '')}</div>
-                <div style="font-size:0.68rem; color:var(--text-dim); margin-top:3px; font-family:var(--font-code);">${escapeHtml(r.link || r.url || '')}</div>
-              </div>
-            `).join('')}
-          </div>
+          <p style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 12px; line-height: 1.45;">
+            Questo modulo scompone la struttura concettuale e semantica del documento, analizzando l'architettura dei contenuti, le argomentazioni primarie, i dati quantitativi e le tesi espresse nelle pagine web target.
+          </p>
 
           <div>
             <div style="font-size: 0.78rem; font-weight: 700; color: var(--neon-teal); margin-bottom: 8px;">
-              <i class="fa-solid fa-brain"></i> Output Analisis Teks Spesialis Agen 2 (LLM Asli):
+              <i class="fa-solid fa-diagram-project"></i> Risultato della Decomposizione Strutturale & Argomentativa:
             </div>
-            <div class="inspector-analysis-box">${escapeHtml(ag2.analysis || 'Sedang memproses analisis...')}</div>
+            <div class="inspector-analysis-box" style="white-space: pre-wrap; font-size: 0.82rem; line-height: 1.55;">${escapeHtml(ag2.analysis || 'Decomposizione strutturale e concettuale in elaborazione...')}</div>
           </div>
         </div>
       `;
     } else if (tab === 'scraper') {
       const scraper = insp.scraper || {};
       const articles = scraper.articles || [];
+      const temporalAnalysis = scraper.temporalAnalysis || '';
       container.innerHTML = `
         <div class="inspector-card">
           <div class="inspector-card-header">
             <div class="inspector-card-title">
-              <i class="fa-solid fa-file-lines" style="color: #FFB703;"></i>
-              <span>Pemindaian Konten Mendalam (Automated Web Scraper)</span>
+              <i class="fa-solid fa-scale-balanced" style="color: #FFB703;"></i>
+              <span>Analisi Temporale: Novità vs Archivio Storico</span>
             </div>
             <span class="catalog-badge" style="background:rgba(255,183,3,0.12); color:#FFB703; border-color:rgba(255,183,3,0.3);">
-              Total: ${articles.length} Dokumen Web Utuh
+              Totale: ${articles.length} Documenti Integrali
             </span>
           </div>
 
           <p style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 12px; line-height: 1.45;">
-            Engine scraper membuka langsung halaman web target dan mengekstrak seluruh teks artikel utuh (bukan sekadar cuplikan snippet Google) untuk validasi silang fakta mendalam.
+            Valutazione cronologica e comparativa: isola con precisione cosa è stato introdotto di recente (ultimi aggiornamenti, nuove versioni, modifiche di policy) rispetto alle regole e allo stato precedente (dati obsoleti, deprecati o sostituiti).
           </p>
 
-          ${articles.length === 0 ? `
-            <div style="text-align:center; padding: 24px; color: var(--text-dim); font-size: 0.8rem; font-style:italic;">
-              Belum ada artikel yang dipindai secara utuh pada langkah ini.
+          ${temporalAnalysis ? `
+            <div style="margin-bottom: 16px;">
+              <div style="font-size: 0.78rem; font-weight: 700; color: #FFB703; margin-bottom: 8px;">
+                <i class="fa-solid fa-timeline"></i> Sintesi Comparativa (Novità vs Stato Precedente):
+              </div>
+              <div class="inspector-analysis-box" style="background: rgba(255,183,3,0.05); border-color: rgba(255,183,3,0.3); font-size:0.8rem; line-height:1.55; white-space: pre-wrap;">
+                ${escapeHtml(temporalAnalysis)}
+              </div>
             </div>
-          ` : articles.map((art, idx) => `
-            <div class="inspector-source-item" style="margin-bottom: 12px;">
-              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px; gap:8px;">
-                <div class="inspector-source-title" style="margin:0;">
-                  <a href="${escapeHtml(art.url)}" target="_blank" rel="noopener noreferrer">
-                    [${idx + 1}] ${escapeHtml(art.title)}
-                  </a>
-                </div>
-                <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-                  ${art.sourceProvider ? `
-                    <span style="font-size:0.65rem; padding:2px 6px; border-radius:4px; font-weight:600; font-family:var(--font-code); ${art.sourceProvider.includes('Divergen') ? 'background:rgba(187,134,252,0.15); color:#BB86FC; border:1px solid rgba(187,134,252,0.3);' : 'background:rgba(0,180,216,0.15); color:#00B4D8; border:1px solid rgba(0,180,216,0.3);'}">
-                      ${escapeHtml(art.sourceProvider)}
+          ` : ''}
+
+          <div style="margin-bottom: 14px;">
+            <div style="font-size: 0.78rem; font-weight: 700; color: #64F3FF; margin-bottom: 8px;">
+              <i class="fa-solid fa-file-lines"></i> Ispezione Documenti Web Estratti (${articles.length} Sorgenti):
+            </div>
+            ${articles.length === 0 ? `
+              <div style="text-align:center; padding: 24px; color: var(--text-dim); font-size: 0.8rem; font-style:italic;">
+                Nessun documento estratto finora per questa fase.
+              </div>
+            ` : articles.map((art, idx) => `
+              <div class="inspector-source-item" style="margin-bottom: 12px;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px; gap:8px;">
+                  <div class="inspector-source-title" style="margin:0;">
+                    <a href="${escapeHtml(art.url)}" target="_blank" rel="noopener noreferrer">
+                      [${idx + 1}] ${escapeHtml(art.title)}
+                    </a>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+                    <span style="font-size:0.65rem; padding:2px 6px; border-radius:4px; font-weight:600; font-family:var(--font-code); background:rgba(0,180,216,0.15); color:#00B4D8; border:1px solid rgba(0,180,216,0.3);">
+                      ${escapeHtml(art.sourceProvider || 'URL Bersaglio')}
                     </span>
-                  ` : ''}
-                  <span style="font-size:0.68rem; color:var(--neon-teal); font-family:var(--font-code); background:rgba(0,255,194,0.1); padding:2px 6px; border-radius:4px;">
-                    ${art.length ? (art.length > 999 ? `${(art.length / 1000).toFixed(1)}k karakter` : `${art.length} karakter`) : 'Teks Utuh'}
-                  </span>
+                    <span style="font-size:0.68rem; color:var(--neon-teal); font-family:var(--font-code); background:rgba(0,255,194,0.1); padding:2px 6px; border-radius:4px;">
+                      ${art.length ? (art.length > 999 ? `${(art.length / 1000).toFixed(1)}k caratteri` : `${art.length} caratteri`) : 'Testo Integrale'}
+                    </span>
+                  </div>
+                </div>
+                <div style="font-size:0.68rem; color:var(--text-dim); margin-bottom:6px; font-family:var(--font-code);">${escapeHtml(art.url)}</div>
+                <div class="inspector-source-snippet" style="background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:4px; font-size:0.74rem;">
+                  <strong style="color:var(--text-muted); display:block; margin-bottom:2px; font-size:0.68rem;">Campione di Testo Estratto:</strong>
+                  ${escapeHtml(art.sample || art.preview || art.content || '')}
                 </div>
               </div>
-              <div style="font-size:0.68rem; color:var(--text-dim); margin-bottom:6px; font-family:var(--font-code);">${escapeHtml(art.url)}</div>
-              <div class="inspector-source-snippet" style="background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:4px; font-size:0.74rem;">
-                <strong style="color:var(--text-muted); display:block; margin-bottom:2px; font-size:0.68rem;">Cuplikan Isi Teks Artikel Asli:</strong>
-                ${escapeHtml(art.sample || art.preview || art.content || '')}
-              </div>
-            </div>
-          `).join('')}
+            `).join('')}
+          </div>
         </div>
       `;
     } else if (tab === 'synthesizer') {
       const syn = insp.synthesizer || {};
       const synText = syn.text || insp.hasil || '';
+      const isComplete = syn.status === 'selesai' || syn.status === 'completato';
       container.innerHTML = `
         <div class="inspector-card">
           <div class="inspector-card-header">
             <div class="inspector-card-title">
-              <i class="fa-solid fa-feather-pointed" style="color: #FF007F;"></i>
-              <span>${escapeHtml(syn.name || 'Model 3: Pengoreksi & Penyempurna Laporan (Lead Corrector)')}</span>
+              <i class="fa-solid fa-file-contract" style="color: #FF007F;"></i>
+              <span>${escapeHtml(syn.name || 'Relazione Esecutiva Integrale & Matrice Comparativa')}</span>
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
               <span class="catalog-badge" style="background:rgba(255,0,127,0.1); color:#FF007F; border-color:rgba(255,0,127,0.3);">
-                Model: ${escapeHtml(syn.model || STATE.activeModel || (STATE.currentEngine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel) || 'Lead Corrector')}
+                Modello: ${escapeHtml(syn.model || STATE.activeModel || (STATE.currentEngine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel) || 'Lead Architect')}
               </span>
               <span class="catalog-badge" style="background:rgba(0,255,194,0.1); color:var(--neon-teal);">
-                ${syn.status === 'selesai' ? '<i class="fa-solid fa-check"></i> Selesai' : (synText ? '<i class="fa-solid fa-spinner fa-spin"></i> Mengoreksi...' : 'Menunggu')}
+                ${isComplete ? '<i class="fa-solid fa-check"></i> Completo' : (synText ? '<i class="fa-solid fa-spinner fa-spin"></i> Generazione...' : 'In attesa')}
               </span>
             </div>
           </div>
 
           <p style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 12px; line-height: 1.45;">
-            Model 3 bertindak sebagai Lead Reviewer & Fact-Corrector yang mengoreksi klaim/bias, merajut konektivitas logis antara Model 1 dan Model 2, serta menyempurnakan dokumen riset komprehensif 8 bab tahun rujukan 2026.
+            Sintesi analitica finale: struttura la relazione esecutiva completa a 7 sezioni con matrice comparativa Markdown tra dati storici e novità assolute.
           </p>
 
           <div>
             <div style="font-size: 0.78rem; font-weight: 700; color: #FF007F; margin-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
-              <span><i class="fa-solid fa-terminal"></i> Draft Live Laporan Riset Komprehensif Terkoreksi:</span>
-              <span style="font-size:0.7rem; color:var(--text-dim); font-family:var(--font-code);">${synText ? `${synText.length} karakter` : '0 karakter'}</span>
+              <span><i class="fa-solid fa-terminal"></i> Bozza Live della Relazione Esecutiva:</span>
+              <span style="font-size:0.7rem; color:var(--text-dim); font-family:var(--font-code);">${synText ? `${synText.length} caratteri` : '0 caratteri'}</span>
             </div>
-            <div class="inspector-analysis-box" style="max-height: 480px; overflow-y: auto; white-space: pre-wrap; font-family: var(--font-code); font-size: 0.8rem; line-height: 1.5; border-color: rgba(255,0,127,0.3); background: rgba(20, 8, 16, 0.6);">${escapeHtml(synText || 'Model 3 sedang menunggu hasil telaah Model 1 & Model 2 sebelum mulai mengoreksi dan menyempurnakan laporan...')}</div>
+            <div class="inspector-analysis-box" style="max-height: 480px; overflow-y: auto; white-space: pre-wrap; font-family: var(--font-code); font-size: 0.8rem; line-height: 1.5; border-color: rgba(255,0,127,0.3); background: rgba(20, 8, 16, 0.6);">${escapeHtml(synText || 'In attesa del completamento delle fasi precedenti per la generazione della relazione finale...')}</div>
           </div>
         </div>
       `;
     } else if (tab === 'model4') {
       const m4 = insp.model4 || {};
       const m4Text = m4.text || '';
+      const isComplete = m4.status === 'selesai' || m4.status === 'completato';
       container.innerHTML = `
         <div class="inspector-card">
           <div class="inspector-card-header">
             <div class="inspector-card-title">
-              <i class="fa-solid fa-sparkles" style="color: var(--neon-cyan);"></i>
-              <span>${escapeHtml(m4.name || 'Model 4: Perangkum Chat Eksekutif (Executive Summarizer)')}</span>
+              <i class="fa-solid fa-comment-dots" style="color: var(--neon-cyan);"></i>
+              <span>${escapeHtml(m4.name || 'Sommario Esecutivo per la Conversazione Chat')}</span>
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
               <span class="catalog-badge" style="background:rgba(0,240,255,0.08); color:var(--neon-cyan); border-color:rgba(0,240,255,0.3);">
-                Model: ${escapeHtml(m4.model || STATE.activeModel || (STATE.currentEngine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel) || 'Executive Summarizer')}
+                Modello: ${escapeHtml(m4.model || STATE.activeModel || (STATE.currentEngine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel) || 'Chat Summarizer')}
               </span>
               <span class="catalog-badge" style="background:rgba(0,255,194,0.1); color:var(--neon-teal);">
-                ${m4.status === 'selesai' ? '<i class="fa-solid fa-check"></i> Selesai' : (m4Text ? '<i class="fa-solid fa-spinner fa-spin"></i> Merumuskan...' : 'Menunggu')}
+                ${isComplete ? '<i class="fa-solid fa-check"></i> Completo' : (m4Text ? '<i class="fa-solid fa-spinner fa-spin"></i> Sintesi...' : 'In attesa')}
               </span>
             </div>
           </div>
 
           <p style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 12px; line-height: 1.45;">
-            Model 4 membaca dokumen komprehensif hasil koreksi Model 3 dan merumuskan intisari eksekutif padat untuk disajikan langsung di gelembung obrolan chat pengguna.
+            Elabora una sintesi esecutiva concisa e professionale (2-3 paragrafi) derivata dalla relazione integrale, pronta per essere inviata direttamente nella conversazione chat.
           </p>
 
           <div>
             <div style="font-size: 0.78rem; font-weight: 700; color: var(--neon-cyan); margin-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
-              <span><i class="fa-solid fa-comment-dots"></i> Draft Live Rangkuman Eksekutif Chat:</span>
-              <span style="font-size:0.7rem; color:var(--text-dim); font-family:var(--font-code);">${m4Text ? `${m4Text.length} karakter` : '0 karakter'}</span>
+              <span><i class="fa-solid fa-comment-dots"></i> Anteprima Live del Sommario Chat:</span>
+              <span style="font-size:0.7rem; color:var(--text-dim); font-family:var(--font-code);">${m4Text ? `${m4Text.length} caratteri` : '0 caratteri'}</span>
             </div>
-            <div class="inspector-analysis-box" style="max-height: 480px; overflow-y: auto; white-space: pre-wrap; font-family: var(--font-code); font-size: 0.8rem; line-height: 1.5; border-color: rgba(0,240,255,0.3); background: rgba(8, 20, 24, 0.6);">${escapeHtml(m4Text || 'Model 4 sedang menunggu penyelesaian laporan terkoreksi dari Model 3...')}</div>
+            <div class="inspector-analysis-box" style="max-height: 480px; overflow-y: auto; white-space: pre-wrap; font-family: var(--font-code); font-size: 0.8rem; line-height: 1.5; border-color: rgba(0,240,255,0.3); background: rgba(8, 20, 24, 0.6);">${escapeHtml(m4Text || 'In attesa della relazione finale per la formulazione del sommario chat...')}</div>
           </div>
         </div>
       `;
