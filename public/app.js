@@ -120,8 +120,27 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   // Model pembuat musik/audio ASLI (output audio) di OpenRouter. Model teks tidak bisa membuat suara.
   const CURATED_OPENROUTER_MUSIC_MODELS = []; // Kosongkan karena model seperti Lyria/Suno tidak ada di OpenRouter (hanya halusinasi AI sebelumnya)
 
+  // Persistent Unique Client / User Identity Token for Strict User Isolation
+  function getOrCreateUserId() {
+    try {
+      let uid = localStorage.getItem('zoz_user_id_v1');
+      if (!uid || typeof uid !== 'string' || uid.length < 8) {
+        if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+          uid = 'usr_' + crypto.randomUUID().replace(/-/g, '');
+        } else {
+          uid = 'usr_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 10);
+        }
+        localStorage.setItem('zoz_user_id_v1', uid);
+      }
+      return uid;
+    } catch (_) {
+      return 'usr_guest_' + Date.now().toString(36);
+    }
+  }
+
   // ==================== STATE MANAGEMENT ====================
   const STATE = {
+    userId: getOrCreateUserId(),
     mode: 'ollama', // 'ollama' | 'openrouter' | 'auto'
     sessions: [],
     currentSessionId: null,
@@ -853,18 +872,22 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     isDeviceBackendAvailable: false,
 
     async init() {
-      if (IS_GITHUB_PAGES) {
+      if (IS_GITHUB_PAGES || IS_CLOUD_HOSTED) {
         this.isDeviceBackendAvailable = false;
         return;
       }
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 2000);
-        const res = await fetch('/api/health', { method: 'GET', signal: controller.signal });
+        const res = await fetch('/api/health', {
+          method: 'GET',
+          headers: { 'X-User-ID': STATE.userId },
+          signal: controller.signal
+        });
         clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();
-          if (data && data.storage === 'device-disk') {
+          if (data && data.storage === 'device-disk' && !IS_CLOUD_HOSTED) {
             this.isDeviceBackendAvailable = true;
           }
         }
@@ -878,7 +901,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 2500);
-        const res = await fetch('/api/sessions', { signal: controller.signal });
+        const res = await fetch('/api/sessions', {
+          headers: { 'X-User-ID': STATE.userId },
+          signal: controller.signal
+        });
         clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();
@@ -895,7 +921,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 3000);
-          const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, { signal: controller.signal });
+          const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+            headers: { 'X-User-ID': STATE.userId },
+            signal: controller.signal
+          });
           clearTimeout(timeoutId);
           if (res.ok) {
             return await res.json();
@@ -915,6 +944,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     async saveSession(session) {
       if (!session || !session.id) return;
+      session.userId = STATE.userId;
       // Safety guard: Never overwrite disk storage with an unhydrated lazy-loaded session
       if (session._isLazyDisk) {
         return;
@@ -923,8 +953,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         try {
           await fetch('/api/sessions', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(session)
+            headers: {
+              'Content-Type': 'application/json',
+              'X-User-ID': STATE.userId
+            },
+            body: JSON.stringify({ ...session, userId: STATE.userId })
           });
         } catch (e) {
           console.warn('DeviceStorage saveSession failed:', e.message);
@@ -940,8 +973,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         try {
           await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(patch)
+            headers: {
+              'Content-Type': 'application/json',
+              'X-User-ID': STATE.userId
+            },
+            body: JSON.stringify({ ...patch, userId: STATE.userId })
           });
         } catch (e) {
           console.warn('DeviceStorage updateSessionMetadata failed:', e.message);
@@ -950,6 +986,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const sess = STATE.sessions.find(s => s.id === id);
       if (sess) {
         Object.assign(sess, patch);
+        sess.userId = STATE.userId;
         if (!sess._isLazyDisk || (sess.messages && sess.messages.length > 0)) {
           await ChatDB.saveSession(sess);
         }
@@ -962,8 +999,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         try {
           await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: newTitle })
+            headers: {
+              'Content-Type': 'application/json',
+              'X-User-ID': STATE.userId
+            },
+            body: JSON.stringify({ title: newTitle, userId: STATE.userId })
           });
         } catch (e) {
           console.warn('DeviceStorage renameSession failed:', e.message);
@@ -972,6 +1012,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const sess = STATE.sessions.find(s => s.id === id);
       if (sess) {
         sess.title = newTitle;
+        sess.userId = STATE.userId;
         await ChatDB.saveSession(sess);
       }
     },
@@ -981,7 +1022,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       if (this.isDeviceBackendAvailable) {
         try {
           await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: { 'X-User-ID': STATE.userId }
           });
         } catch (e) {
           console.warn('DeviceStorage deleteSession failed:', e.message);
@@ -994,7 +1036,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       if (this.isDeviceBackendAvailable) {
         try {
           await fetch('/api/sessions', {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: { 'X-User-ID': STATE.userId }
           });
         } catch (e) {
           console.warn('DeviceStorage clearAllSessions failed:', e.message);
@@ -1008,8 +1051,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       try {
         const res = await fetch('/api/upload', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data: base64Data })
+          headers: {
+            'Content-Type': 'application/json',
+            'X-User-ID': STATE.userId || 'default',
+            'x-user-id': STATE.userId || 'default'
+          },
+          body: JSON.stringify({ data: base64Data, userId: STATE.userId || 'default' })
         });
         if (res.ok) {
           const data = await res.json();
@@ -1143,7 +1190,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         try {
           const parsed = JSON.parse(savedSessions);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            STATE.sessions = parsed;
+            // KEAMANAN KETAT: Bersihkan sesi lazy disk asing dan sesi yang memiliki userId milik orang lain
+            STATE.sessions = parsed.filter(s => {
+              if (s._isLazyDisk) return false;
+              if (s.userId && s.userId !== STATE.userId) return false;
+              return true;
+            });
+            STATE.sessions.forEach(s => {
+              if (!s.userId) s.userId = STATE.userId;
+            });
           }
         } catch (e) {}
       }
@@ -1160,15 +1215,27 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       // 2. Sync from IndexedDB Vault
       const dbSessions = await ChatDB.getAllSessions();
       if (Array.isArray(dbSessions) && dbSessions.length > 0) {
-        if (dbSessions.length >= STATE.sessions.length) {
-          STATE.sessions = dbSessions;
+        // KEAMANAN KETAT: Prune sesi yang berasal dari user lain atau lazy disk asing
+        const validDbSessions = dbSessions.filter(s => {
+          if (s._isLazyDisk) return false;
+          if (s.userId && s.userId !== STATE.userId) return false;
+          return true;
+        });
+        validDbSessions.forEach(s => {
+          if (!s.userId) s.userId = STATE.userId;
+        });
+        if (validDbSessions.length !== dbSessions.length) {
+          await ChatDB.saveAllSessions(validDbSessions);
+        }
+        if (validDbSessions.length >= STATE.sessions.length) {
+          STATE.sessions = validDbSessions;
           renderChatHistory();
           if (STATE.currentSessionId) renderCurrentSession();
         }
       }
 
-      // 3. Sync lightweight session headers from Device Disk Storage if backend is online
-      if (DeviceStorage.isDeviceBackendAvailable) {
+      // 3. Sync lightweight session headers from Device Disk Storage HANYA bila backend lokal online dan bukan cloud
+      if (DeviceStorage.isDeviceBackendAvailable && !IS_CLOUD_HOSTED) {
         const diskList = await DeviceStorage.getSessionsList();
         if (Array.isArray(diskList) && diskList.length > 0) {
           let hasNewSessions = false;
@@ -1177,6 +1244,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             if (!existing) {
               STATE.sessions.push({
                 id: diskItem.id,
+                userId: STATE.userId,
                 title: diskItem.title || 'Obrolan Baru',
                 mode: diskItem.mode || 'ollama',
                 createdAt: diskItem.createdAt,
@@ -1212,6 +1280,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
                 if (activeSess._isLazyDisk || diskLen > memLen || (diskLast && memLast && diskLast.content !== memLast.content && ((diskLast.content || '').length > (memLast.content || '').length || diskLast.backgroundCompleted))) {
                   activeSess.messages = full.messages;
                   delete activeSess._isLazyDisk;
+                  activeSess.userId = STATE.userId;
                   await ChatDB.saveSession(activeSess);
                   renderCurrentSession();
                   renderChatHistory();
@@ -1323,7 +1392,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
       // 1. Jika sesi aktif ditemukan, periksa sesi tersebut secara langsung
       if (activeSession) {
-        const res = await fetch(`/api/chat/status/${activeSession.id}`).catch(() => null);
+        const res = await fetch(`/api/chat/status/${encodeURIComponent(activeSession.id)}`, {
+          headers: { 'X-User-ID': STATE.userId }
+        }).catch(() => null);
         if (res && res.ok) {
           const data = await res.json();
           if (data && data.status === 'streaming') {
@@ -1337,47 +1408,41 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
       }
 
-      // 2. Periksa status tugas latar belakang global server jika belum ada sesi aktif atau sesi belum ada tugas
-      const globalRes = await fetch('/api/chat/status').catch(() => null);
+      // 2. Periksa status tugas latar belakang milik user ini jika ada sesi user yang belum selesai
+      const globalRes = await fetch(`/api/chat/status?userId=${encodeURIComponent(STATE.userId)}`, {
+        headers: { 'X-User-ID': STATE.userId }
+      }).catch(() => null);
       if (globalRes && globalRes.ok) {
         const globalData = await globalRes.json();
         if (globalData && globalData.activeSessions && globalData.activeSessions.length > 0) {
-          const targetTask = globalData.activeSessions[0];
-          const targetSid = targetTask.sessionId;
-          let targetSession = STATE.sessions.find(s => s.id === targetSid);
-          if (!targetSession) {
-            const diskSess = await DeviceStorage.getSession(targetSid);
-            if (diskSess) {
-              STATE.sessions.unshift(diskSess);
-              targetSession = diskSess;
+          // KEAMANAN KETAT: Hanya tangani tugas yang sessionId-nya SUDAH ADA di STATE.sessions milik user ini!
+          const targetTask = globalData.activeSessions.find(t => STATE.sessions.some(s => s.id === t.sessionId));
+          if (targetTask) {
+            const targetSid = targetTask.sessionId;
+            const targetSession = STATE.sessions.find(s => s.id === targetSid);
+            if (targetSession) {
+              await switchSession(targetSid);
+              setGeneratingState(true);
+              attachToActiveBackgroundChat(targetSession, targetTask.model, targetTask.text || '');
+              showToast('⚡ Menyambung kembali ke respons AI Anda yang sedang diproses di latar belakang...', 'info');
+              return;
             }
-          }
-          if (targetSession) {
-            await switchSession(targetSid);
-            setGeneratingState(true);
-            attachToActiveBackgroundChat(targetSession, targetTask.model, targetTask.text || '');
-            showToast('⚡ Menyambung kembali ke respons AI yang sedang diproses di latar belakang...', 'info');
-            return;
           }
         }
 
         if (globalData && globalData.recentlyCompletedSessions && globalData.recentlyCompletedSessions.length > 0) {
           const lastActiveId = safeSessionStorage.getItem('zoz_active_session_id') || localStorage.getItem('zoz_last_active_session_id');
-          const matchedTask = globalData.recentlyCompletedSessions.find(s => s.sessionId === lastActiveId) || globalData.recentlyCompletedSessions[0];
+          // KEAMANAN KETAT: Hanya sinkronkan tugas milik user saat ini
+          const matchedTask = globalData.recentlyCompletedSessions.find(s => s.sessionId === lastActiveId && STATE.sessions.some(sess => sess.id === s.sessionId)) ||
+                              globalData.recentlyCompletedSessions.find(s => STATE.sessions.some(sess => sess.id === s.sessionId));
           if (matchedTask) {
             let matchedSession = STATE.sessions.find(s => s.id === matchedTask.sessionId);
-            if (!matchedSession) {
-              const diskSess = await DeviceStorage.getSession(matchedTask.sessionId);
-              if (diskSess) {
-                STATE.sessions.unshift(diskSess);
-                matchedSession = diskSess;
-              }
-            }
             if (matchedSession) {
               const fullDisk = await DeviceStorage.getSession(matchedSession.id);
               if (fullDisk && Array.isArray(fullDisk.messages)) {
                 matchedSession.messages = fullDisk.messages;
                 delete matchedSession._isLazyDisk;
+                matchedSession.userId = STATE.userId;
                 await ChatDB.saveSession(matchedSession);
                 savePersistedState();
                 renderChatHistory();
@@ -1427,7 +1492,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           return;
         }
 
-        const res = await fetch(`/api/chat/status/${session.id}`).catch(() => null);
+        const res = await fetch(`/api/chat/status/${encodeURIComponent(session.id)}`, {
+          headers: { 'X-User-ID': STATE.userId }
+        }).catch(() => null);
         if (!res || !res.ok) return;
         const data = await res.json();
         if (!data) return;
@@ -1601,6 +1668,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       if (STATE.currentSessionId) {
         const activeSess = STATE.sessions.find(s => s.id === STATE.currentSessionId);
         if (activeSess) {
+          activeSess.userId = STATE.userId;
           DeviceStorage.saveSession(activeSess);
         }
       }
@@ -2575,6 +2643,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // Return or create active working session
     const newSession = {
       id: generateId(),
+      userId: STATE.userId,
       title: 'Obrolan Baru',
       mode: targetMode,
       messages: [],
@@ -2690,8 +2759,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       try {
         fetch('/api/chat/stop', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId })
+          headers: {
+            'Content-Type': 'application/json',
+            'X-User-ID': STATE.userId
+          },
+          body: JSON.stringify({ sessionId, userId: STATE.userId })
         }).catch(() => {});
       } catch (_) {}
     }
@@ -7339,6 +7411,9 @@ Format teks (untuk model tanpa function calling):
       if (session?.id) {
         requestBody.sessionId = session.id;
       }
+      if (STATE.userId) {
+        requestBody.userId = STATE.userId;
+      }
       if (STATE.settings.ollamaApiKey) {
         requestBody.apiKey = STATE.settings.ollamaApiKey;
       }
@@ -7346,6 +7421,9 @@ Format teks (untuk model tanpa function calling):
       const headers = { 'Content-Type': 'application/json' };
       if (session?.id) {
         headers['X-Session-ID'] = session.id;
+      }
+      if (STATE.userId) {
+        headers['X-User-ID'] = STATE.userId;
       }
       if (STATE.settings.ollamaApiKey) {
         headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
@@ -7975,6 +8053,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       if (session?.id) {
         headers['X-Session-ID'] = session.id;
       }
+      if (STATE.userId) {
+        headers['X-User-ID'] = STATE.userId;
+      }
       if (isOpenRouterDirect) {
         headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
         headers['X-Title'] = 'ZOZ Router';
@@ -8014,6 +8095,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         };
         if (session?.id) {
           requestBody.sessionId = session.id;
+        }
+        if (STATE.userId) {
+          requestBody.userId = STATE.userId;
         }
 
         if (currentIsImageCapable) {
@@ -8778,14 +8862,20 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     if (activeSession?.id && !IS_GITHUB_PAGES) {
       fetch('/api/chat/stop', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: activeSession.id })
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-ID': STATE.userId
+        },
+        body: JSON.stringify({ sessionId: activeSession.id, userId: STATE.userId })
       }).catch(() => {});
     }
     if (STATE.currentDeepResearchTaskId && !IS_GITHUB_PAGES) {
       const abortTaskId = STATE.currentDeepResearchTaskId;
       STATE.currentDeepResearchTaskId = null;
-      fetch('/api/batal-riset/' + abortTaskId, { method: 'POST' }).catch(() => {});
+      fetch('/api/batal-riset/' + abortTaskId, {
+        method: 'POST',
+        headers: { 'X-User-ID': STATE.userId }
+      }).catch(() => {});
     }
     if (STATE.abortController) {
       STATE.abortController.abort();
@@ -10391,9 +10481,12 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
               'Authorization': STATE.settings.openRouterKey ? `Bearer ${STATE.settings.openRouterKey}` : '',
               'x-openrouter-key': STATE.settings.openRouterKey || '',
               'x-serper-key': STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e',
-              'x-session-id': session ? session.id : ''
+              'x-session-id': session ? session.id : '',
+              'X-User-ID': STATE.userId || 'default',
+              'x-user-id': STATE.userId || 'default'
             },
             body: JSON.stringify({
+              userId: STATE.userId || 'default',
               sessionId: session ? session.id : null,
               topik: contextualTopic,
               prompt: searchPrompt,
@@ -10429,12 +10522,24 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
                 await new Promise(r => setTimeout(r, 1000));
                 if (currentAbortController.signal.aborted || !STATE.isGenerating) {
                   if (!IS_GITHUB_PAGES) {
-                    fetch('/api/batal-riset/' + taskId, { method: 'POST' }).catch(() => {});
+                    fetch('/api/batal-riset/' + taskId, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'X-User-ID': STATE.userId || 'default',
+                        'x-user-id': STATE.userId || 'default'
+                      },
+                      body: JSON.stringify({ userId: STATE.userId || 'default' })
+                    }).catch(() => {});
                   }
                   break;
                 }
 
                 const checkRes = await fetch(`/api/status-riset/${taskId}`, {
+                  headers: {
+                    'X-User-ID': STATE.userId || 'default',
+                    'x-user-id': STATE.userId || 'default'
+                  },
                   signal: currentAbortController.signal
                 });
                 if (!checkRes.ok) break;
@@ -10502,7 +10607,15 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         } catch (backendErr) {
           if (backendErr.name === 'AbortError' || backendErr.message?.includes('dibatalkan') || currentAbortController.signal.aborted || !STATE.isGenerating) {
             if (STATE.currentDeepResearchTaskId && !IS_GITHUB_PAGES) {
-              fetch('/api/batal-riset/' + STATE.currentDeepResearchTaskId, { method: 'POST' }).catch(() => {});
+              fetch('/api/batal-riset/' + STATE.currentDeepResearchTaskId, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-User-ID': STATE.userId || 'default',
+                  'x-user-id': STATE.userId || 'default'
+                },
+                body: JSON.stringify({ userId: STATE.userId || 'default' })
+              }).catch(() => {});
             }
             const abortErr = new Error('Deep Research dihentikan oleh pengguna.');
             abortErr.name = 'AbortError';
@@ -12162,9 +12275,12 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
             headers: {
               'Content-Type': 'application/json',
               'Authorization': STATE.settings.openRouterKey ? `Bearer ${STATE.settings.openRouterKey}` : '',
-              'x-session-id': targetSessId || ''
+              'x-session-id': targetSessId || '',
+              'X-User-ID': STATE.userId || 'default',
+              'x-user-id': STATE.userId || 'default'
             },
             body: JSON.stringify({
+              userId: STATE.userId || 'default',
               sessionId: targetSessId,
               prompt: cleanPrompt,
               model: activeImageModel,
@@ -12952,9 +13068,12 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
             headers: {
               'Content-Type': 'application/json',
               'x-session-id': session ? session.id : '',
-              'x-openrouter-key': STATE.settings.openRouterKey || ''
+              'x-openrouter-key': STATE.settings.openRouterKey || '',
+              'X-User-ID': STATE.userId || 'default',
+              'x-user-id': STATE.userId || 'default'
             },
             body: JSON.stringify({
+              userId: STATE.userId || 'default',
               prompt: tunneledPrompt,
               originalPrompt: cleanPrompt,
               sessionId: session ? session.id : null,
@@ -13199,9 +13318,12 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'x-session-id': session ? session.id : ''
+              'x-session-id': session ? session.id : '',
+              'X-User-ID': STATE.userId || 'default',
+              'x-user-id': STATE.userId || 'default'
             },
             body: JSON.stringify({
+              userId: STATE.userId || 'default',
               prompt: cleanPrompt,
               style: videoStyle,
               duration: 5,

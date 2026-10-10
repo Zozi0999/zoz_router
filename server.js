@@ -65,7 +65,7 @@ function sendJSON(res, statusCode, data) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID'
   });
   res.end(JSON.stringify(data));
 }
@@ -207,20 +207,69 @@ function isOllamaEndpointForbidden(endpointUrl) {
   return isPrivateHost(host, port);
 }
 
-// Validasi sessionId untuk mencegah path traversal
-function validateSessionId(sessionId) {
+// Sanitasi userId untuk mencegah path traversal dan memastikan isolasi pengguna
+function sanitizeUserId(userId) {
+  if (!userId || typeof userId !== 'string') return 'default';
+  const clean = userId.trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(clean) || clean.length > 64) {
+    return 'default';
+  }
+  return clean;
+}
+
+// Dapatkan direktori penyimpanan sesi khusus per user
+function getUserSessionsDir(userId) {
+  const cleanUid = sanitizeUserId(userId);
+  const userDir = path.join(SESSIONS_DIR, cleanUid);
+  if (!fs.existsSync(userDir)) {
+    try { fs.mkdirSync(userDir, { recursive: true }); } catch (_) {}
+  }
+  return userDir;
+}
+
+// Migrasi file sesi lama di root SESSIONS_DIR ke folder 'default'
+function migrateLegacySessionsIfAny() {
+  try {
+    if (!fs.existsSync(SESSIONS_DIR)) return;
+    const entries = fs.readdirSync(SESSIONS_DIR, { withFileTypes: true });
+    const legacyFiles = entries.filter(e => e.isFile() && e.name.endsWith('.json'));
+    if (legacyFiles.length > 0) {
+      const defaultUserDir = path.join(SESSIONS_DIR, 'default');
+      if (!fs.existsSync(defaultUserDir)) {
+        fs.mkdirSync(defaultUserDir, { recursive: true });
+      }
+      for (const f of legacyFiles) {
+        const oldPath = path.join(SESSIONS_DIR, f.name);
+        const newPath = path.join(defaultUserDir, f.name);
+        try {
+          if (!fs.existsSync(newPath)) {
+            fs.renameSync(oldPath, newPath);
+          } else {
+            fs.unlinkSync(oldPath);
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+}
+try { migrateLegacySessionsIfAny(); } catch (_) {}
+
+// Validasi sessionId untuk mencegah path traversal dan memastikan isolasi per user
+function validateSessionId(sessionId, userId = 'default') {
   if (!sessionId || typeof sessionId !== 'string') return { valid: false, error: 'ID sesi diperlukan.' };
   const id = sessionId.trim();
   if (id.length > 128) return { valid: false, error: 'ID sesi terlalu panjang (maks 128 karakter).' };
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) return { valid: false, error: 'Format ID sesi tidak valid. Hanya alphanumeric, garis bawah, dan tanda hubung yang diperbolehkan.' };
-  // Resolve path dan pastikan tidak keluar dari SESSIONS_DIR
-  const sessFile = path.join(SESSIONS_DIR, `${id}.json`);
+  
+  const cleanUid = sanitizeUserId(userId);
+  const userDir = getUserSessionsDir(cleanUid);
+  const sessFile = path.join(userDir, `${id}.json`);
   const resolved = path.resolve(sessFile);
-  const resolvedSessionsDir = path.resolve(SESSIONS_DIR);
-  if (!resolved.startsWith(resolvedSessionsDir + path.sep) && resolved !== resolvedSessionsDir) {
+  const resolvedUserDir = path.resolve(userDir);
+  if (!resolved.startsWith(resolvedUserDir + path.sep) && resolved !== resolvedUserDir) {
     return { valid: false, error: 'Forbidden: Path traversal terdeteksi.' };
   }
-  return { valid: true, id, sessFile };
+  return { valid: true, id, sessFile, userDir, userId: cleanUid };
 }
 
 // Helper untuk mengunduh buffer gambar dari URL eksternal dengan proteksi SSRF, batas redirect loop, dan memory buffer cap
@@ -1152,15 +1201,32 @@ function markChatTaskInterrupted(sessionId, reason = 'Koneksi terputus') {
   delete dbActiveChatTasks[sessionId];
 }
 
-function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extraMeta = {}) {
+function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extraMeta = {}, explicitUserId = null) {
   if (!sessionId || !content || !content.trim()) return false;
   try {
     const cleanSid = String(sessionId).trim();
     if (!/^[a-zA-Z0-9_-]+$/.test(cleanSid)) return false;
-    if (!fs.existsSync(SESSIONS_DIR)) {
-      try { fs.mkdirSync(SESSIONS_DIR, { recursive: true }); } catch (_) {}
+
+    // Tentukan userId pemilik sesi
+    let effectiveUid = explicitUserId;
+    if (!effectiveUid && dbActiveChatTasks[cleanSid]?.userId) {
+      effectiveUid = dbActiveChatTasks[cleanSid].userId;
     }
-    const sessFile = path.join(SESSIONS_DIR, `${cleanSid}.json`);
+    if (!effectiveUid && extraMeta && typeof extraMeta === 'object' && extraMeta.userId) {
+      effectiveUid = extraMeta.userId;
+    }
+    if (!effectiveUid) {
+      for (const rId of Object.keys(dbTugasRiset)) {
+        const r = dbTugasRiset[rId];
+        if (r && (r.sessionId === cleanSid || r.taskId === cleanSid) && r.userId) {
+          effectiveUid = r.userId;
+          break;
+        }
+      }
+    }
+    const cleanUid = sanitizeUserId(effectiveUid || 'default');
+    const userDir = getUserSessionsDir(cleanUid);
+    const sessFile = path.join(userDir, `${cleanSid}.json`);
 
     let sessData = null;
     if (fs.existsSync(sessFile)) {
@@ -3303,6 +3369,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
       task.completedAt = new Date().toISOString();
       if (config.sessionId && task.hasil) {
         appendAssistantMessageToSessionDisk(config.sessionId, task.hasil + '\n\n*[Riset dihentikan oleh pengguna]*', config.model || config.finalModel || masterResearchModel || 'Deep Research Pro', {
+          userId: (task && task.userId) || config.userId || 'default',
           isDeepResearch: true,
           chatSummary: chatSummary,
           sources: allSources
@@ -3322,6 +3389,7 @@ Format Rangkuman Chat yang WAJIB dipatuhi:
 
     if (config.sessionId) {
       appendAssistantMessageToSessionDisk(config.sessionId, laporanAkhir, config.model || config.finalModel || masterResearchModel || 'Deep Research Pro', {
+        userId: (task && task.userId) || config.userId || 'default',
         isDeepResearch: true,
         chatSummary: chatSummary,
         sources: allSources
@@ -3358,7 +3426,7 @@ async function requestHandler(req, res) {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID'
     });
     return res.end();
   }
@@ -3382,7 +3450,7 @@ async function requestHandler(req, res) {
       status: 'online',
       name: 'Zoz Router',
       version: '1.0.0',
-      storage: 'device-disk',
+      storage: IS_VERCEL_ENV ? 'cloud-stateless' : 'device-disk',
       uptime: process.uptime(),
       timestamp: new Date().toISOString()
     });
@@ -3390,23 +3458,26 @@ async function requestHandler(req, res) {
 
   // --- DEVICE STORAGE: SESSIONS & CHAT HISTORY ---
   const sessionMatch = pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)$/);
+  const reqUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
 
   // 1. List all sessions (Lightweight summaries)
   if (pathname === '/api/sessions' && method === 'GET') {
     try {
-      if (!fs.existsSync(SESSIONS_DIR)) {
+      const userDir = getUserSessionsDir(reqUserId);
+      if (!fs.existsSync(userDir)) {
         return sendJSON(res, 200, { sessions: [] });
       }
-      const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'));
+      const files = fs.readdirSync(userDir).filter(f => f.endsWith('.json'));
       const sessions = [];
       for (const file of files) {
         try {
-          const fullPath = path.join(SESSIONS_DIR, file);
+          const fullPath = path.join(userDir, file);
           const content = fs.readFileSync(fullPath, 'utf8');
           const sess = JSON.parse(content);
           const lastMsg = (sess.messages && sess.messages.length > 0) ? sess.messages[sess.messages.length - 1].content : '';
           sessions.push({
             id: sess.id || path.basename(file, '.json'),
+            userId: reqUserId,
             title: sess.title || 'Obrolan Baru',
             mode: sess.mode || 'ollama',
             createdAt: sess.createdAt || fs.statSync(fullPath).birthtime.toISOString(),
@@ -3426,11 +3497,11 @@ async function requestHandler(req, res) {
 
   // 2. Get specific session full data
   if (sessionMatch && method === 'GET') {
-    const validation = validateSessionId(sessionMatch[1]);
+    const validation = validateSessionId(sessionMatch[1], reqUserId);
     if (!validation.valid) return sendJSON(res, 400, { error: validation.error });
     const { id, sessFile } = validation;
     if (!fs.existsSync(sessFile)) {
-      return sendJSON(res, 404, { error: 'Sesi tidak ditemukan di disk perangkat.' });
+      return sendJSON(res, 404, { error: 'Sesi tidak ditemukan di penyimpanan perangkat Anda.' });
     }
     try {
       const data = JSON.parse(fs.readFileSync(sessFile, 'utf8'));
@@ -3444,16 +3515,16 @@ async function requestHandler(req, res) {
   if (pathname === '/api/sessions' && method === 'POST') {
     try {
       const body = await parseBody(req);
-      if (!body || !body.id) {
-        return sendJSON(res, 400, { error: 'ID sesi diperlukan.' });
-      }
-      const validation = validateSessionId(String(body.id).trim());
+      const rawId = (body && body.id) ? String(body.id).trim() : ('ses_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
+      const effectiveUid = sanitizeUserId((body && body.userId) || reqUserId);
+      const validation = validateSessionId(rawId, effectiveUid);
       if (!validation.valid) return sendJSON(res, 400, { error: validation.error });
-      const { id, sessFile } = validation;
+      const { id, sessFile, userDir } = validation;
       body.updatedAt = new Date().toISOString();
       body.id = id;
-      if (!fs.existsSync(SESSIONS_DIR)) {
-        fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+      body.userId = effectiveUid;
+      if (!fs.existsSync(userDir)) {
+        fs.mkdirSync(userDir, { recursive: true });
       }
       const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       try {
@@ -3471,9 +3542,9 @@ async function requestHandler(req, res) {
 
   // 4. Update session (Rename / Edit title / Merge update)
   if (sessionMatch && (method === 'PUT' || method === 'PATCH')) {
-    const validation = validateSessionId(sessionMatch[1]);
+    const validation = validateSessionId(sessionMatch[1], reqUserId);
     if (!validation.valid) return sendJSON(res, 400, { error: validation.error });
-    const { id, sessFile } = validation;
+    const { id, sessFile, userDir } = validation;
     try {
       const body = await parseBody(req);
       let existing = {};
@@ -3484,10 +3555,11 @@ async function requestHandler(req, res) {
         ...existing,
         ...body,
         id: id,
+        userId: reqUserId,
         updatedAt: new Date().toISOString()
       };
-      if (!fs.existsSync(SESSIONS_DIR)) {
-        fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+      if (!fs.existsSync(userDir)) {
+        fs.mkdirSync(userDir, { recursive: true });
       }
       const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       try {
@@ -3505,34 +3577,39 @@ async function requestHandler(req, res) {
 
   // 5. Delete specific session file from disk
   if (sessionMatch && method === 'DELETE') {
-    const validation = validateSessionId(sessionMatch[1]);
+    const validation = validateSessionId(sessionMatch[1], reqUserId);
     if (!validation.valid) return sendJSON(res, 400, { error: validation.error });
     const { id, sessFile } = validation;
     try {
-      // Hentikan tugas background chat aktif untuk sesi ini agar tidak membangkitkan zombi sesi
+      // Hentikan tugas background chat aktif untuk sesi ini hanya jika milik user ini
       if (id && dbActiveChatTasks[id]) {
         const bgTask = dbActiveChatTasks[id];
-        bgTask.status = 'aborted';
-        if (bgTask.proxyReq && !bgTask.proxyReq.destroyed) {
-          try { bgTask.proxyReq.destroy(); } catch (_) {}
+        if (!bgTask.userId || bgTask.userId === reqUserId || reqUserId === 'default') {
+          bgTask.status = 'aborted';
+          if (bgTask.proxyReq && !bgTask.proxyReq.destroyed) {
+            try { bgTask.proxyReq.destroy(); } catch (_) {}
+          }
+          delete dbActiveChatTasks[id];
         }
-        delete dbActiveChatTasks[id];
       }
 
-      // Hentikan tugas Deep Research aktif untuk sesi ini jika ada
+      // Hentikan tugas Deep Research aktif untuk sesi ini jika ada dan milik user ini
       for (const rId of Object.keys(dbTugasRiset)) {
         const rTask = dbTugasRiset[rId];
         if (rTask && (rTask.sessionId === id || rTask.taskId === id)) {
-          rTask.aborted = true;
-          rTask.status = 'dibatalkan';
-          delete dbTugasRiset[rId];
+          if (!rTask.userId || rTask.userId === reqUserId || reqUserId === 'default') {
+            rTask.aborted = true;
+            rTask.status = 'dibatalkan';
+            delete dbTugasRiset[rId];
+          }
         }
       }
 
-      if (fs.existsSync(sessFile)) {
-        fs.unlinkSync(sessFile);
+      if (!fs.existsSync(sessFile)) {
+        return sendJSON(res, 404, { error: `Sesi ${id} tidak ditemukan di penyimpanan Anda.` });
       }
-      return sendJSON(res, 200, { success: true, message: `Sesi ${id} berhasil dihapus dari penyimpanan perangkat.` });
+      fs.unlinkSync(sessFile);
+      return sendJSON(res, 200, { success: true, message: `Sesi ${id} berhasil dihapus dari penyimpanan perangkat Anda.` });
     } catch (err) {
       return sendJSON(res, 500, { error: 'Gagal menghapus file sesi dari disk: ' + err.message });
     }
@@ -3541,35 +3618,36 @@ async function requestHandler(req, res) {
   // 6. Delete all sessions from disk
   if (pathname === '/api/sessions' && method === 'DELETE') {
     try {
-      // Hentikan semua tugas background chat aktif
+      // Hentikan tugas background chat hanya untuk user ini
       for (const sid of Object.keys(dbActiveChatTasks)) {
         const bgTask = dbActiveChatTasks[sid];
-        if (bgTask) {
+        if (bgTask && (!bgTask.userId || bgTask.userId === reqUserId || reqUserId === 'default')) {
           bgTask.status = 'aborted';
           if (bgTask.proxyReq && !bgTask.proxyReq.destroyed) {
             try { bgTask.proxyReq.destroy(); } catch (_) {}
           }
+          delete dbActiveChatTasks[sid];
         }
-        delete dbActiveChatTasks[sid];
       }
 
-      // Hentikan semua tugas Deep Research aktif
+      // Hentikan tugas Deep Research hanya untuk user ini
       for (const rId of Object.keys(dbTugasRiset)) {
         const rTask = dbTugasRiset[rId];
-        if (rTask) {
+        if (rTask && (!rTask.userId || rTask.userId === reqUserId || reqUserId === 'default')) {
           rTask.aborted = true;
           rTask.status = 'dibatalkan';
+          delete dbTugasRiset[rId];
         }
-        delete dbTugasRiset[rId];
       }
 
-      if (fs.existsSync(SESSIONS_DIR)) {
-        const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'));
+      const userDir = getUserSessionsDir(reqUserId);
+      if (fs.existsSync(userDir)) {
+        const files = fs.readdirSync(userDir).filter(f => f.endsWith('.json'));
         for (const file of files) {
-          try { fs.unlinkSync(path.join(SESSIONS_DIR, file)); } catch (e) {}
+          try { fs.unlinkSync(path.join(userDir, file)); } catch (e) {}
         }
       }
-      return sendJSON(res, 200, { success: true, message: 'Semua riwayat sesi berhasil dibersihkan dari penyimpanan perangkat.' });
+      return sendJSON(res, 200, { success: true, message: 'Semua riwayat sesi Anda berhasil dibersihkan.' });
     } catch (err) {
       return sendJSON(res, 500, { error: 'Gagal membersihkan riwayat: ' + err.message });
     }
@@ -3894,10 +3972,12 @@ async function requestHandler(req, res) {
 
       pruneResearchTasks();
       const rawSessionId = body.sessionId || req.headers['x-session-id'] || req.headers['X-Session-ID'] || null;
+      const researchUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || body.userId || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
       const taskId = 'research_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
       dbTugasRiset[taskId] = {
         taskId,
         sessionId: rawSessionId,
+        userId: researchUserId,
         topik,
         status: 'sedang_meneliti',
         progressPercent: 10,
@@ -3920,6 +4000,7 @@ async function requestHandler(req, res) {
       // Jalankan proses riset secara asinkronus di latar belakang dengan arsitektur 1-Model super efisien
       jalankanRisetOtonom(taskId, topik, {
         sessionId: rawSessionId,
+        userId: researchUserId,
         messages: body.messages || [],
         model: masterModel,
         provider: body.provider || (masterModel.includes('/') ? 'openrouter' : (masterModel.includes(':') ? 'ollama' : 'openrouter')),
@@ -3962,6 +4043,10 @@ async function requestHandler(req, res) {
     if (!dataTugas) {
       return sendJSON(res, 404, { error: 'Tugas riset tidak ditemukan.' });
     }
+    const checkUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
+    if (dataTugas.userId && checkUserId !== 'default' && dataTugas.userId !== checkUserId) {
+      return sendJSON(res, 403, { error: 'Akses ditolak: Anda tidak memiliki akses ke tugas riset ini.' });
+    }
     return sendJSON(res, 200, {
       taskId: dataTugas.taskId,
       status: dataTugas.status,
@@ -3983,6 +4068,10 @@ async function requestHandler(req, res) {
     const taskId = cancelResearchMatch[1];
     const dataTugas = dbTugasRiset[taskId];
     if (dataTugas) {
+      const checkUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
+      if (dataTugas.userId && checkUserId !== 'default' && dataTugas.userId !== checkUserId) {
+        return sendJSON(res, 403, { error: 'Akses ditolak.' });
+      }
       dataTugas.aborted = true;
       dataTugas.status = 'dibatalkan';
       dataTugas.currentStep = 'Riset dihentikan oleh pengguna.';
@@ -4083,10 +4172,12 @@ async function requestHandler(req, res) {
       let openRouterKey = null;
       let sessionId = null;
 
+      let rawImageUserId = null;
       if (method === 'POST') {
         const body = await parseBody(req);
         prompt = body.prompt || body.q || '';
         sessionId = body.sessionId || req.headers['x-session-id'] || req.headers['X-Session-ID'] || null;
+        rawImageUserId = body.userId || null;
         model = body.model || model;
         width = parseInt(body.width, 10) || width;
         height = parseInt(body.height, 10) || height;
@@ -4095,12 +4186,15 @@ async function requestHandler(req, res) {
       } else {
         prompt = reqUrl.searchParams.get('prompt') || reqUrl.searchParams.get('q') || '';
         sessionId = reqUrl.searchParams.get('sessionId') || req.headers['x-session-id'] || req.headers['X-Session-ID'] || null;
+        rawImageUserId = reqUrl.searchParams.get('userId') || null;
         model = reqUrl.searchParams.get('model') || model;
         width = parseInt(reqUrl.searchParams.get('width'), 10) || width;
         height = parseInt(reqUrl.searchParams.get('height'), 10) || height;
         seed = reqUrl.searchParams.get('seed') || null;
         openRouterKey = (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       }
+
+      const imageUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || rawImageUserId || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
 
       if (openRouterKey) {
         openRouterKey = String(openRouterKey).replace(/^Bearer\s+/i, '').trim();
@@ -4379,6 +4473,7 @@ async function requestHandler(req, res) {
 
       if (sessionId) {
         appendAssistantMessageToSessionDisk(sessionId, `[Gambar AI Hasil Generasi: "${cleanPrompt}"]`, effectiveModel, {
+          userId: imageUserId,
           isImageGen: true,
           type: 'image_generation',
           imageUrl: finalUrl,
@@ -4659,18 +4754,24 @@ async function requestHandler(req, res) {
       let requestedMusicModel = '';
       let openRouterKey = '';
 
+      let rawMusicUserId = null;
       if (method === 'POST') {
         const body = await parseBody(req);
         prompt = body.prompt || body.q || '';
         sessionId = body.sessionId || req.headers['x-session-id'] || null;
+        rawMusicUserId = body.userId || null;
         requestedMusicModel = (body.musicModel || body.model || '').trim();
         openRouterKey = (body.openRouterKey || req.headers['x-openrouter-key'] || '').trim();
       } else {
         prompt = reqUrl.searchParams.get('prompt') || reqUrl.searchParams.get('q') || '';
         sessionId = reqUrl.searchParams.get('sessionId') || req.headers['x-session-id'] || null;
+        rawMusicUserId = reqUrl.searchParams.get('userId') || null;
         requestedMusicModel = (reqUrl.searchParams.get('musicModel') || reqUrl.searchParams.get('model') || '').trim();
         openRouterKey = (req.headers['x-openrouter-key'] || '').trim();
       }
+
+      const musicUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || rawMusicUserId || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
+
       openRouterKey = String(openRouterKey || '').replace(/^Bearer\s+/i, '').trim();
       if (!openRouterKey && process.env.OPENROUTER_API_KEY) openRouterKey = process.env.OPENROUTER_API_KEY;
 
@@ -4733,6 +4834,7 @@ async function requestHandler(req, res) {
 
       if (sessionId) {
         appendAssistantMessageToSessionDisk(sessionId, `[Musik AI: "${cleanPrompt}"]\n\n- Judul: ${title}\n- Engine: ${model} (Audio asli dari model AI)\n- Catatan model: ${aiSummary}\n- Audio: [Putar / Unduh Audio](${url})`, 'AI Neural Music Studio', {
+          userId: musicUserId,
           isMusicGen: true,
           type: 'music_generation',
           audioUrl: url,
@@ -4785,18 +4887,23 @@ async function requestHandler(req, res) {
       let duration = 5;
       let sessionId = null;
 
+      let rawVideoUserId = null;
       if (method === 'POST') {
         const body = await parseBody(req);
         prompt = body.prompt || body.q || '';
         style = body.style || style;
         duration = parseInt(body.duration, 10) || 5;
         sessionId = body.sessionId || req.headers['x-session-id'] || null;
+        rawVideoUserId = body.userId || null;
       } else {
         prompt = reqUrl.searchParams.get('prompt') || reqUrl.searchParams.get('q') || '';
         style = reqUrl.searchParams.get('style') || style;
         duration = parseInt(reqUrl.searchParams.get('duration'), 10) || 5;
         sessionId = reqUrl.searchParams.get('sessionId') || req.headers['x-session-id'] || null;
+        rawVideoUserId = reqUrl.searchParams.get('userId') || null;
       }
+
+      const videoUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || rawVideoUserId || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
 
       if (!prompt || !prompt.trim()) {
         prompt = 'Cinematic drone shot of futuristic cyberpunk neon metropolis';
@@ -4875,6 +4982,7 @@ async function requestHandler(req, res) {
 
       if (sessionId) {
         appendAssistantMessageToSessionDisk(sessionId, `[Video AI Hasil Generasi: "${cleanPrompt}"]`, 'Neural Video Studio', {
+          userId: videoUserId,
           isVideoGen: true,
           type: 'video_generation',
           videoUrl: url,
@@ -5128,6 +5236,7 @@ async function requestHandler(req, res) {
       }
 
       const sessionId = body.sessionId || req.headers['x-session-id'] || null;
+      const chatUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || body.userId || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
       let userPrompt = null;
       if (Array.isArray(body.messages) && body.messages.length > 0) {
         const lastUser = [...body.messages].reverse().find(m => m.role === 'user');
@@ -5191,6 +5300,7 @@ async function requestHandler(req, res) {
         }
         dbActiveChatTasks[sessionId] = {
           sessionId,
+          userId: chatUserId,
           model: body.model || 'Ollama Model',
           provider: 'ollama',
           userPrompt: userPrompt || null,
@@ -5645,6 +5755,7 @@ async function requestHandler(req, res) {
       delete body.openRouterKey;
 
       const sessionId = body.sessionId || req.headers['x-session-id'] || null;
+      const chatUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || body.userId || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
       let userPrompt = null;
       if (Array.isArray(body.messages) && body.messages.length > 0) {
         const lastUser = [...body.messages].reverse().find(m => m.role === 'user');
@@ -5664,6 +5775,7 @@ async function requestHandler(req, res) {
         }
         dbActiveChatTasks[sessionId] = {
           sessionId,
+          userId: chatUserId,
           model: body.model || 'OpenRouter Model',
           provider: 'openrouter',
           userPrompt: userPrompt || null,
@@ -5926,6 +6038,7 @@ async function requestHandler(req, res) {
   // ----------------------------------------------------
   const chatStatusMatch = pathname.match(/^\/api\/chat\/status\/([a-zA-Z0-9_-]+)$/);
   if ((chatStatusMatch || pathname === '/api/chat/status') && method === 'GET') {
+    const statusUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
     const sid = chatStatusMatch ? chatStatusMatch[1] : (reqUrl.searchParams.get('sessionId') || reqUrl.searchParams.get('id'));
     if (!sid) {
       const activeSessions = [];
@@ -5935,6 +6048,10 @@ async function requestHandler(req, res) {
       for (const k of Object.keys(dbActiveChatTasks)) {
         const t = dbActiveChatTasks[k];
         if (!t) continue;
+        // PRIVACY ENFORCEMENT: Only include tasks for the requesting user!
+        if (t.userId && statusUserId !== 'default' && t.userId !== statusUserId) {
+          continue;
+        }
         if (t.status === 'streaming') {
           activeSessions.push({ sessionId: t.sessionId, model: t.model, startedAt: t.startedAt });
         } else if (t.status === 'completed' && t.completedAt && (now - t.completedAt < 600000)) {
@@ -5945,6 +6062,10 @@ async function requestHandler(req, res) {
       for (const rId of Object.keys(dbTugasRiset)) {
         const rTask = dbTugasRiset[rId];
         if (!rTask) continue;
+        // PRIVACY ENFORCEMENT: Only include research tasks for the requesting user!
+        if (rTask.userId && statusUserId !== 'default' && rTask.userId !== statusUserId) {
+          continue;
+        }
         if (rTask.status === 'sedang_meneliti' && rTask.sessionId) {
           if (!activeSessions.some(s => s.sessionId === rTask.sessionId)) {
             activeSessions.push({ sessionId: rTask.sessionId, isDeepResearch: true, model: 'Deep Research Pro', startedAt: rTask.createdAt });
@@ -5965,6 +6086,10 @@ async function requestHandler(req, res) {
 
     const task = dbActiveChatTasks[sid];
     if (task && (task.status === 'streaming' || task.status === 'completed')) {
+      // PRIVACY ENFORCEMENT: If task belongs to another user, deny access!
+      if (task.userId && statusUserId !== 'default' && task.userId !== statusUserId) {
+        return sendJSON(res, 200, { active: false, status: 'none', sessionId: sid });
+      }
       return sendJSON(res, 200, {
         active: task.status === 'streaming',
         status: task.status,
@@ -5982,7 +6107,9 @@ async function requestHandler(req, res) {
     for (const rId of Object.keys(dbTugasRiset)) {
       const rTask = dbTugasRiset[rId];
       if (rTask && (rTask.sessionId === sid || rTask.taskId === sid)) {
-        matchingResearchTasks.push(rTask);
+        if (!rTask.userId || statusUserId === 'default' || rTask.userId === statusUserId) {
+          matchingResearchTasks.push(rTask);
+        }
       }
     }
 
@@ -6079,22 +6206,25 @@ async function requestHandler(req, res) {
       const body = await parseBody(req);
       const urlSid = pathname.startsWith('/api/chat/stop/') ? pathname.split('/')[4] : null;
       const sid = body.sessionId || urlSid || reqUrl.searchParams.get('sessionId');
+      const stopUserId = sanitizeUserId(req.headers['x-user-id'] || req.headers['x-client-id'] || body.userId || (reqUrl ? reqUrl.searchParams.get('userId') : null) || 'default');
       let stoppedAny = false;
 
       if (sid && dbActiveChatTasks[sid] && dbActiveChatTasks[sid].status === 'streaming') {
         const task = dbActiveChatTasks[sid];
-        task.status = 'aborted';
-        if (task.proxyReq && !task.proxyReq.destroyed) {
-          try { task.proxyReq.destroy(); } catch (_) {}
+        if (!task.userId || stopUserId === 'default' || task.userId === stopUserId) {
+          task.status = 'aborted';
+          if (task.proxyReq && !task.proxyReq.destroyed) {
+            try { task.proxyReq.destroy(); } catch (_) {}
+          }
+          if (task.rawBuffer) {
+            flushChatTaskBuffer(sid, task.provider || 'openrouter');
+          }
+          // Simpan potongan yang sudah terlanjur dibuat
+          if (task.fullText && task.fullText.trim()) {
+            appendAssistantMessageToSessionDisk(sid, task.fullText + '\n\n*[Respons dihentikan oleh pengguna]*', task.model);
+          }
+          stoppedAny = true;
         }
-        if (task.rawBuffer) {
-          flushChatTaskBuffer(sid, task.provider || 'openrouter');
-        }
-        // Simpan potongan yang sudah terlanjur dibuat
-        if (task.fullText && task.fullText.trim()) {
-          appendAssistantMessageToSessionDisk(sid, task.fullText + '\n\n*[Respons dihentikan oleh pengguna]*', task.model);
-        }
-        stoppedAny = true;
       }
 
       // Hentikan juga tugas Deep Research aktif untuk sesi ini jika ada
@@ -6102,11 +6232,13 @@ async function requestHandler(req, res) {
         for (const rId of Object.keys(dbTugasRiset)) {
           const rTask = dbTugasRiset[rId];
           if (rTask && (rTask.sessionId === sid || rTask.taskId === sid || rTask.taskId === body.taskId) && rTask.status === 'sedang_meneliti') {
-            rTask.aborted = true;
-            rTask.status = 'dibatalkan';
-            rTask.currentStep = 'Riset dihentikan oleh pengguna.';
-            rTask.completedAt = new Date().toISOString();
-            stoppedAny = true;
+            if (!rTask.userId || stopUserId === 'default' || rTask.userId === stopUserId) {
+              rTask.aborted = true;
+              rTask.status = 'dibatalkan';
+              rTask.currentStep = 'Riset dihentikan oleh pengguna.';
+              rTask.completedAt = new Date().toISOString();
+              stoppedAny = true;
+            }
           }
         }
       }
