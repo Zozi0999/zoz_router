@@ -423,6 +423,17 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     docPreviewContent: $('#docPreviewContent'),
     revertDocToPromptBtn: $('#revertDocToPromptBtn'),
     deleteDocFromModalBtn: $('#deleteDocFromModalBtn'),
+    // AI File Studio (preview langsung + kode + unduh file buatan AI)
+    aiFileStudioModal: $('#aiFileStudioModal'),
+    aiFileStudioTitle: $('#aiFileStudioTitle'),
+    aiFileStudioTabs: $('#aiFileStudioTabs'),
+    aiFileStudioPreviewPane: $('#aiFileStudioPreviewPane'),
+    aiFileStudioFrame: $('#aiFileStudioFrame'),
+    aiFileStudioPlaceholder: $('#aiFileStudioPlaceholder'),
+    aiFileStudioCode: $('#aiFileStudioCode'),
+    aiFileStudioMeta: $('#aiFileStudioMeta'),
+    aiFileStudioCopyBtn: $('#aiFileStudioCopyBtn'),
+    aiFileStudioDownloadBtn: $('#aiFileStudioDownloadBtn'),
     imagePreviewImg: $('#imagePreviewImg'),
     removeImageBtn: $('#removeImageBtn'),
     activePresetBanner: $('#activePresetBanner'),
@@ -1699,6 +1710,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             if (Array.isArray(m.docs)) {
               safeDocs = m.docs.map(d => ({ name: d.name, size: d.size }));
             }
+            // File buatan AI (AI File Studio): simpan juga isi kontennya agar kartu
+            // bisa dibuka lagi setelah reload walau IndexedDB belum tersinkron.
+            let safeFiles = undefined;
+            if (Array.isArray(m.files) && m.files.length > 0) {
+              safeFiles = m.files.map(f => ({
+                name: f.name, mime: f.mime, lang: f.lang, content: f.content,
+                rawContent: f.rawContent, byteSize: f.byteSize, lineCount: f.lineCount,
+                size: f.size, desc: f.desc, isGeneratedByAI: true
+              }));
+            }
             return {
               role: m.role,
               content: m.content,
@@ -1706,6 +1727,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
               docs: safeDocs,
               images: safeImages,
               image: safeImage,
+              files: safeFiles,
               model: m.model,
               engine: m.engine,
               slot: m.slot,
@@ -1991,6 +2013,26 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     let isAutoScrolling = false;
 
     // ==================== HIGH-PERFORMANCE 60FPS STREAM BUFFER RENDERER ====================
+  // Sembunyikan blok ZOZ_FILE (lengkap maupun masih mengalir) dari tampilan sementara
+  // saat streaming, supaya kode mentah file tidak membajak gelembung obrolan.
+  // Teks asli di dalam renderer TIDAK diubah — ekstraksi file tetap dilakukan di akhir stream.
+  function hideFileBlocksForDisplay(text) {
+    if (!text || text.indexOf('<<<ZOZ_FILE') === -1) return text;
+    const out = [];
+    let skipping = false;
+    text.split('\n').forEach((line) => {
+      const t = line.trim();
+      if (!skipping) {
+        if (t.indexOf('<<<ZOZ_FILE') === 0) { skipping = true; return; }
+        out.push(line);
+        return;
+      }
+      // Masih di dalam blok file: buang sampai penanda tutup (atau sampai stream berakhir)
+      if (t.indexOf('<<<END_ZOZ_FILE') === 0) skipping = false;
+    });
+    return out.join('\n');
+  }
+
   class StreamBufferRenderer {
     constructor(bubbleElement, onScrollCallback, prefixHtml = '') {
       this.el = bubbleElement;
@@ -2028,7 +2070,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     render() {
       if (!this.el) return;
-      this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(this.text) + '<span class="typing-cursor"></span>';
+      this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(hideFileBlocksForDisplay(this.text)) + '<span class="typing-cursor"></span>';
       if (this.onScroll && !userScrolledUp) this.onScroll();
     }
 
@@ -2039,7 +2081,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         this.animId = null;
       }
       if (this.el) {
-        this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(this.text);
+        this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(hideFileBlocksForDisplay(this.text));
         enhanceCodeBlocks(this.el);
       }
       if (this.onScroll && !userScrolledUp) this.onScroll();
@@ -3600,6 +3642,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (hasText) {
       renderYouTubeCardsForMessage(row, content);
     }
+    // Kartu file buatan AI juga dirender saat pesan dimuat ulang dari riwayat (msg.files)
+    renderMessageFiles(row, extraMeta && extraMeta.files);
     return row;
   }
 
@@ -3755,6 +3799,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
   // ==================== AUTO MARKDOWN FILE CONVERTER (CLAUDE & GROK AI STYLE) ====================
   let activePreviewDocIndex = -1;
+  let activeAIFile = null; // file yang sedang dibuka di AI File Studio
 
   function detectDocumentTypeAndExt(text) {
     if (!text || typeof text !== 'string') return { ext: 'md', lang: 'markdown', label: 'Dokumen', customName: 'dokumen-lampiran.md' };
@@ -4133,6 +4178,100 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     openModal('docPreviewModal');
   }
 
+  // ==================== AI FILE STUDIO (preview langsung + kode + unduh) ====================
+  // Format keluaran yang diminta ke AI ketika pengguna minta sebuah berkas:
+  //   <<<ZOZ_FILE name="index.html" mime="text/html" lang="html">
+  //   ...isi file apa adanya...
+  //   <<<END_ZOZ_FILE>>>
+  const TICK3 = String.fromCharCode(96).repeat(3);
+
+  function getFileStudioDirective() {
+    return `### INSTRUKSI SISTEM: AI FILE STUDIO (Pembuatan & Pengunduhan File)
+
+Saat pengguna meminta sebuah berkas — website, script (.bat/.py/.sh/.ps1), konfigurasi, dokumen, atau file apa pun — tulis isinya di dalam blok penanda ini:
+
+<<<ZOZ_FILE name="nama-file.ekstensi" mime="tipe/mime" lang="bahasa">
+isi lengkap file, siap pakai, tanpa potongan
+<<<END_ZOZ_FILE>>>
+
+Aturan wajib:
+- name : nama file final yang bisa diunduh (contoh: index.html, hapus-sampah.bat, backup.ps1, app.py)
+- mime : text/html, text/plain, text/x-python, application/json, text/css, text/javascript, dll.
+- lang : html, python, batch, powershell, javascript, css, json, dll. (untuk syntax highlight)
+- Isi file HARUS lengkap, valid, dan langsung bisa dijalankan/dibuka — bukan pseudocode atau potongan.
+- SETELAH blok file, tulis penjelasan singkat dalam Bahasa Indonesia: tujuan program, cara kerja tiap bagian, dan cara memakainya.
+- Jangan menyalin ulang isi file di luar blok penanda, agar tampilan obrolan tetap rapi.`;
+  }
+
+  // Deteksi niat pengguna meminta pembuatan file (Bahasa Indonesia + Inggris)
+  function isFileGenerationRequest(text) {
+    if (!text || typeof text !== 'string') return false;
+    const t = text.toLowerCase();
+    const wants = /\b(?:buatkan|buat|bikin|bikinkan|tolong buat|generate|create|write|tulis|simpan sebagai|unduh|download|export|ekspor|saya butuh file|saya minta file|butuh file|perlukan file|bikinkan file)\b/i.test(t);
+    const target = /\b(?:file|berkas|dokumen|script|skrip|kode program|program|website|situs|halaman web|landing|aplikasi|utilitas|tool|bot|konfigurasi|template|lampiran)\b|\.(?:html?|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|xlsx|ipynb)\b/i.test(t);
+    return wants && target;
+  }
+
+  function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function guessMimeFromName(name) {
+    const ext = (String(name).split('.').pop() || '').toLowerCase();
+    const map = { html: 'text/html', htm: 'text/html', css: 'text/css', js: 'text/javascript', mjs: 'text/javascript', jsx: 'text/plain', ts: 'text/plain', py: 'text/x-python', bat: 'application/bat', cmd: 'application/bat', ps1: 'text/plain', sh: 'application/x-sh', bash: 'application/x-sh', json: 'application/json', yaml: 'text/yaml', yml: 'text/yaml', xml: 'application/xml', sql: 'text/plain', csv: 'text/csv', md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', log: 'text/plain', php: 'text/x-php', java: 'text/plain', c: 'text/plain', cpp: 'text/plain', go: 'text/plain', toml: 'text/plain', ini: 'text/plain', conf: 'text/plain' };
+    return map[ext] || 'text/plain';
+  }
+
+  function guessLangFromName(name) {
+    const ext = (String(name).split('.').pop() || '').toLowerCase();
+    const map = { html: 'html', htm: 'html', css: 'css', js: 'javascript', mjs: 'javascript', jsx: 'javascript', ts: 'typescript', py: 'python', bat: 'batch', ps1: 'powershell', sh: 'shell', bash: 'shell', json: 'json', yaml: 'yaml', yml: 'yaml', xml: 'xml', sql: 'sql', md: 'markdown', markdown: 'markdown', php: 'php', java: 'java', c: 'c', cpp: 'cpp', go: 'go', csv: 'csv', txt: 'text' };
+    return map[ext] || (ext || 'text');
+  }
+
+  function guessFileNameFromLang(lang) {
+    const map = { html: 'index.html', css: 'styles.css', javascript: 'script.js', js: 'script.js', typescript: 'main.ts', ts: 'main.ts', python: 'main.py', py: 'main.py', bash: 'run.sh', sh: 'run.sh', shell: 'run.sh', batch: 'run.bat', bat: 'run.bat', powershell: 'script.ps1', ps1: 'script.ps1', json: 'data.json', yaml: 'config.yaml', yml: 'config.yaml', xml: 'data.xml', sql: 'query.sql', php: 'index.php', java: 'Main.java', c: 'main.c', cpp: 'main.cpp', go: 'main.go', csv: 'data.csv', markdown: 'README.md', md: 'README.md', text: 'notes.txt', txt: 'notes.txt' };
+    return map[lang] || ('file.' + (lang || 'txt'));
+  }
+
+  function getFileIconClass(name) {
+    const ext = (String(name || '').split('.').pop() || '').toLowerCase();
+    const map = {
+      html: 'fa-brands fa-html5', htm: 'fa-brands fa-html5',
+      css: 'fa-brands fa-css3-alt', js: 'fa-brands fa-js', mjs: 'fa-brands fa-js', jsx: 'fa-brands fa-react',
+      ts: 'fa-solid fa-code', py: 'fa-brands fa-python',
+      bat: 'fa-solid fa-terminal', cmd: 'fa-solid fa-terminal', ps1: 'fa-solid fa-terminal',
+      sh: 'fa-solid fa-terminal', bash: 'fa-solid fa-terminal',
+      json: 'fa-solid fa-braces', yaml: 'fa-solid fa-gears', yml: 'fa-solid fa-gears',
+      xml: 'fa-solid fa-code', sql: 'fa-solid fa-database',
+      md: 'fa-brands fa-markdown', markdown: 'fa-brands fa-markdown',
+      txt: 'fa-solid fa-file-lines', log: 'fa-solid fa-file-lines', csv: 'fa-solid fa-table',
+      php: 'fa-brands fa-php', java: 'fa-brands fa-java', go: 'fa-solid fa-microchip',
+      docx: 'fa-solid fa-file-word', pdf: 'fa-solid fa-file-pdf'
+    };
+    return map[ext] || 'fa-solid fa-file-code';
+  }
+
+  function buildAIFile(name, mime, lang, content, desc) {
+    const cleanName = String(name || 'file.txt').trim() || 'file.txt';
+    let bytes = 0;
+    try { bytes = new Blob([content]).size; } catch (_) { bytes = String(content).length; }
+    const lineCount = String(content).split('\n').length;
+    return {
+      name: cleanName,
+      mime: mime || guessMimeFromName(cleanName),
+      lang: lang || guessLangFromName(cleanName),
+      content: String(content),
+      rawContent: String(content),
+      byteSize: bytes,
+      lineCount: lineCount,
+      size: formatFileSize(bytes) + ' • ' + lineCount + ' baris',
+      desc: desc || '',
+      isGeneratedByAI: true
+    };
+  }
+
   function renderAttachmentPreviews() {
     if (!els.attachmentPreviewBar) return;
     const hasImages = STATE.attachedImages && STATE.attachedImages.length > 0;
@@ -4196,6 +4335,200 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         els.attachmentPreviewBar.appendChild(chip);
       });
     }
+  }
+
+  function isPreviewableHtmlFile(file) {
+    if (!file) return false;
+    const mime = String(file.mime || '').toLowerCase();
+    if (mime.indexOf('text/html') >= 0) return true;
+    const ext = (String(file.name || '').split('.').pop() || '').toLowerCase();
+    return ext === 'html' || ext === 'htm' || ext === 'xhtml';
+  }
+
+  function setAIFileStudioTab(tab) {
+    const isPreview = tab === 'preview';
+    if (els.aiFileStudioPreviewPane) els.aiFileStudioPreviewPane.classList.toggle('hidden', !isPreview);
+    if (els.aiFileStudioCode) els.aiFileStudioCode.classList.toggle('active', !isPreview);
+    if (els.aiFileStudioTabs) {
+      els.aiFileStudioTabs.querySelectorAll('.ai-file-tab').forEach((b) => {
+        b.classList.toggle('active', b.dataset.tab === tab);
+      });
+    }
+  }
+
+  function openAIFileStudio(file) {
+    if (!file) return;
+    activeAIFile = file;
+    if (els.aiFileStudioTitle) {
+      els.aiFileStudioTitle.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(file.name)}`;
+    }
+    if (els.aiFileStudioMeta) {
+      els.aiFileStudioMeta.textContent = file.name + ' • ' + (file.size || '') + (file.desc ? ' — ' + file.desc : '');
+    }
+
+    const previewable = isPreviewableHtmlFile(file);
+    setAIFileStudioTab(previewable ? 'preview' : 'code');
+
+    if (els.aiFileStudioCode) {
+      els.aiFileStudioCode.textContent = file.rawContent || file.content || '';
+      try {
+        if (window.hljs && els.aiFileStudioCode.removeAttribute) {
+          els.aiFileStudioCode.removeAttribute('data-highlighted');
+          window.hljs.highlightElement(els.aiFileStudioCode);
+        }
+      } catch (_) {}
+    }
+    if (els.aiFileStudioFrame) {
+      if (previewable) {
+        els.aiFileStudioFrame.srcdoc = file.content || '';
+      } else {
+        els.aiFileStudioFrame.removeAttribute('srcdoc');
+        els.aiFileStudioFrame.srcdoc = '';
+      }
+    }
+    if (els.aiFileStudioPlaceholder) {
+      els.aiFileStudioPlaceholder.classList.toggle('show', !previewable);
+    }
+
+    openModal('aiFileStudioModal');
+  }
+
+  function downloadAIFile(file) {
+    if (!file) return;
+    try {
+      const blob = new Blob([file.content || ''], { type: (String(file.mime || 'text/plain')) + ';charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file.name || 'file.txt';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 4000);
+      showToast('⬇ File ' + file.name + ' berhasil diunduh.', 'success');
+      AudioEngine.click();
+    } catch (err) {
+      showToast('Gagal mengunduh file: ' + (err && err.message ? err.message : err), 'error');
+    }
+  }
+
+  // Ekstrak file buatan AI dari teks respons -> { files, rawBlocks }
+  function extractGeneratedFiles(text, allowFallback) {
+    const out = { files: [], rawBlocks: [] };
+    if (!text || typeof text !== 'string') return out;
+    const lines = text.split('\n');
+
+    // --- Format utama: blok penanda ZOZ_FILE ---
+    let idx = 0;
+    while (idx < lines.length) {
+      const header = lines[idx].trim();
+      if (header.indexOf('<<<ZOZ_FILE') !== 0) { idx++; continue; }
+      let end = -1;
+      for (let j = idx + 1; j < lines.length; j++) {
+        if (lines[j].trim().indexOf('<<<END_ZOZ_FILE') === 0) { end = j; break; }
+      }
+      if (end < 0) { idx++; continue; }
+
+      const nameMatch = header.match(/name="([^"]*)"/);
+      const mimeMatch = header.match(/mime="([^"]*)"/);
+      const langMatch = header.match(/lang="([^"]*)"/);
+      const descMatch = header.match(/desc="([^"]*)"/);
+      const content = lines.slice(idx + 1, end).join('\n');
+      out.files.push(buildAIFile(
+        nameMatch ? nameMatch[1] : 'file.txt',
+        mimeMatch ? mimeMatch[1] : '',
+        langMatch ? langMatch[1] : '',
+        content,
+        descMatch ? descMatch[1] : ''
+      ));
+      out.rawBlocks.push(lines.slice(idx, end + 1).join('\n'));
+      idx = end + 1;
+    }
+
+    // --- Fallback: blok kode besar saat pengguna meminta file/website tapi AI
+    //     tidak memakai penanda (umum terjadi pada model kecil/tanpa tool call) ---
+    if (allowFallback && out.files.length === 0) {
+      for (let i = 0; i < lines.length; i++) {
+        const t = lines[i].trim();
+        if (t.length < 4 || t.slice(0, 3) !== TICK3) continue;
+        const langTag = t.slice(3).trim().toLowerCase();
+        if (!langTag || langTag === TICK3) continue;
+        let end = -1;
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j].trim() === TICK3) { end = j; break; }
+        }
+        if (end <= i) continue;
+        const body = lines.slice(i + 1, end).join('\n');
+        if (body.length < 400) continue;
+        out.files.push(buildAIFile(guessFileNameFromLang(langTag), '', langTag, body, ''));
+        out.rawBlocks.push(lines.slice(i, end + 1).join('\n'));
+        break;
+      }
+    }
+
+    return out;
+  }
+
+  // Hapus blok file dari teks respons agar tampilan gelembung tetap rapi
+  function stripGeneratedFileBlocks(text, rawBlocks) {
+    let out = String(text);
+    if (Array.isArray(rawBlocks)) {
+      rawBlocks.forEach((b) => {
+        if (b) out = out.split(b).join('');
+      });
+    }
+    const kept = out.split('\n').filter((line) => {
+      const t = line.trim();
+      return t.indexOf('<<<ZOZ_FILE') !== 0 && t.indexOf('<<<END_ZOZ_FILE') !== 0;
+    });
+    const cleaned = [];
+    let prevEmpty = false;
+    kept.forEach((line) => {
+      const isEmpty = line.trim() === '';
+      if (isEmpty && prevEmpty) return;
+      cleaned.push(line);
+      prevEmpty = isEmpty;
+    });
+    return cleaned.join('\n').trim();
+  }
+
+  // Sanitasi teks parsial (jalur Abort / Koneksi Terputus): ekstrak blok ZOZ_FILE
+  // yang sudah UTUH menjadi kartu file, lalu buang sisa marker/blok yang belum selesai
+  // agar tidak ada kode mentah yang bocor ke gelembung maupun riwayat.
+  function sanitizePartialResponseWithFiles(text) {
+    const ex = extractGeneratedFiles(String(text || ''), false);
+    let out = ex.files.length > 0 ? stripGeneratedFileBlocks(text, ex.rawBlocks) : String(text || '');
+    out = hideFileBlocksForDisplay(out);
+    return { text: out, files: ex.files };
+  }
+
+  // Kartu file di dalam gelembung obrolan (dipanggil saat render live & riwayat)
+  function renderMessageFiles(row, files) {
+    if (!row || !Array.isArray(files) || files.length === 0) return;
+    const bubble = row.querySelector('.message-bubble');
+    if (!bubble) return;
+    if (bubble.querySelector('.msg-file-cards-wrap')) return;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'msg-file-cards-wrap';
+    files.forEach((file) => {
+      const card = document.createElement('div');
+      card.className = 'ai-file-card';
+      card._aiFile = file;
+      card.innerHTML =
+        '<div class="ai-file-icon"><i class="' + getFileIconClass(file.name) + '"></i></div>' +
+        '<div class="ai-file-info">' +
+        '  <div class="ai-file-name" title="' + escapeHtml(file.name) + '">' + escapeHtml(file.name) + '</div>' +
+        '  <div class="ai-file-meta">' + escapeHtml(file.size || '') + '</div>' +
+        (file.desc ? '  <div class="ai-file-desc" title="' + escapeHtml(file.desc) + '">' + escapeHtml(file.desc) + '</div>' : '') +
+        '</div>' +
+        '<div class="ai-file-actions">' +
+        '  <button class="ai-file-btn preview" type="button" data-act="preview"><i class="fa-solid fa-eye"></i> Pratinjau</button>' +
+        '  <button class="ai-file-btn download" type="button" data-act="download"><i class="fa-solid fa-download"></i> Unduh</button>' +
+        '</div>';
+      wrap.appendChild(card);
+    });
+    bubble.insertBefore(wrap, bubble.firstChild);
   }
 
   // ==================== AUTONOMOUS AI WEB SEARCH SKILL ENGINE ====================
@@ -4727,6 +5060,42 @@ ${organicBlock}
     card.querySelector('.play-chat-btn')?.remove();
     AudioEngine.click();
     showToast(`▶ Memutar "${title}" di dalam percakapan`);
+  });
+
+  // Delegasi klik: tombol Pratinjau / Unduh pada kartu file buatan AI
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest ? e.target.closest('.ai-file-btn') : null;
+    if (!btn) return;
+    const card = btn.closest('.ai-file-card');
+    if (!card || !card._aiFile) return;
+    const file = card._aiFile;
+    if (btn.dataset.act === 'download') {
+      downloadAIFile(file);
+    } else {
+      openAIFileStudio(file);
+    }
+  });
+
+  // Kontrol AI File Studio: tab, salin kode, unduh
+  if (els.aiFileStudioTabs) {
+    els.aiFileStudioTabs.querySelectorAll('.ai-file-tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const name = tab.dataset.tab === 'code' ? 'code' : 'preview';
+        if (name === 'preview' && !isPreviewableHtmlFile(activeAIFile)) {
+          showToast('File ini bukan halaman web — lihat tab Kode Sumber.', 'info');
+          return;
+        }
+        setAIFileStudioTab(name);
+        AudioEngine.click();
+      });
+    });
+  }
+  els.aiFileStudioCopyBtn?.addEventListener('click', () => {
+    if (!activeAIFile) return;
+    copyTextToClipboard(activeAIFile.rawContent || activeAIFile.content || '', null, 'Kode file disalin ke clipboard!');
+  });
+  els.aiFileStudioDownloadBtn?.addEventListener('click', () => {
+    if (activeAIFile) downloadAIFile(activeAIFile);
   });
 
   // ==================== UNIVERSAL WEB CONTENT EXTRACTOR & READER TOOL ====================
@@ -7377,6 +7746,7 @@ Format teks (untuk model tanpa function calling):
     let streamRenderer = null;
     let executedHudHtml = '';
     const foundYouTubeIds = []; // ID video hasil tool search_youtube (dipakai render kartu)
+    const wantsFile = isFileGenerationRequest(promptText); // niat "buatkan file/website" untuk AI File Studio
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -7392,6 +7762,12 @@ Format teks (untuk model tanpa function calling):
           ? `${systemContent}\n\n${getYouTubeToolDirective()}`
           : getYouTubeToolDirective();
       }
+
+      // AI File Studio: selalu diumumkan agar model tahu format blok ZOZ_FILE
+      // ketika pengguna meminta pembuatan file / website.
+      systemContent = systemContent
+        ? `${systemContent}\n\n${getFileStudioDirective()}`
+        : getFileStudioDirective();
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
       try {
@@ -7776,13 +8152,22 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         }
       }
 
+      // ===== AI FILE STUDIO =====
+      // Ekstrak file yang dibuat AI, lalu hapus bloknya dari gelembung agar tidak
+      // tampil kode mentah berulang (kartu file digantikan oleh kartu di bawah).
+      const extractedAiFiles = extractGeneratedFiles(fullText, wantsFile);
+      const generatedFiles = extractedAiFiles.files;
+      if (generatedFiles.length > 0) {
+        fullText = stripGeneratedFileBlocks(fullText, extractedAiFiles.rawBlocks);
+      }
+
       // Bersihkan sisa tag tool_call dan residu raw JSON jika ada sebelum render markdown final
       const cleanFinalText = scrubRawToolCallArtifacts(fullText);
       if (cleanFinalText) {
         fullText = cleanFinalText;
       }
 
-      if (!fullText.trim() && !preambleHtml && !STATE.abortController?.signal?.aborted) {
+      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && !STATE.abortController?.signal?.aborted) {
         throw new Error('Model Ollama menyelesaikan koneksi tanpa menghasilkan respon teks.');
       }
 
@@ -7798,6 +8183,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         renderMessageSources(assistantRow, webSources, true);
       }
       renderYouTubeCardsForMessage(assistantRow, fullText, foundYouTubeIds);
+      renderMessageFiles(assistantRow, generatedFiles);
       metaBox.innerHTML = `
         <strong>${modelName}</strong>
         <span class="meta-model-badge">Ollama</span>
@@ -7820,6 +8206,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           model: modelName,
           engine: 'ollama',
           sources: webSources,
+          files: generatedFiles.length > 0 ? generatedFiles : undefined,
           stats: { duration: totalTime, tps: tps, tokens: tokenCount },
           timestamp: new Date().toISOString()
         });
@@ -7832,12 +8219,15 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
     } catch (err) {
       if (err.name === 'AbortError') {
-        const partialText = streamRenderer ? streamRenderer.finish() : '';
+        const partialRaw = streamRenderer ? streamRenderer.finish() : '';
+        const stoppedPartial = sanitizePartialResponseWithFiles(partialRaw);
+        const partialText = stoppedPartial.text;
         if (partialText && partialText.trim() && STATE.sessions.some(s => s.id === session.id)) {
           const stoppedText = `${partialText.trim()}\n\n*[Respons dihentikan oleh pengguna]*`;
           bubbleText.innerHTML = renderMarkdown(stoppedText);
           enhanceCodeBlocks(bubbleText);
           enhanceChatImages(bubbleText);
+          renderMessageFiles(assistantRow, stoppedPartial.files);
           if (webSources && webSources.length > 0) {
             renderMessageSources(assistantRow, webSources, true);
           }
@@ -7853,6 +8243,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             model: modelName,
             engine: 'ollama',
             sources: webSources,
+            files: stoppedPartial.files.length > 0 ? stoppedPartial.files : undefined,
             stats: { duration: totalTime, tokens: tokenCount, stopped: true },
             timestamp: new Date().toISOString()
           });
@@ -7864,7 +8255,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         }
         showToast('Generasi dihentikan oleh pengguna.');
       } else {
-        const partialText = streamRenderer ? streamRenderer.finish() : '';
+        const rescuePartial = sanitizePartialResponseWithFiles(streamRenderer ? streamRenderer.finish() : '');
+        const partialText = rescuePartial.text;
         const hasPartialText = Boolean(partialText && partialText.trim());
 
         if (hasPartialText && STATE.sessions.some(s => s.id === session.id)) {
@@ -7877,6 +8269,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             model: modelName,
             engine: 'ollama',
             sources: webSources,
+            files: rescuePartial.files.length > 0 ? rescuePartial.files : undefined,
             stats: { duration: totalTime, tokens: tokenCount, interrupted: true },
             timestamp: new Date().toISOString()
           });
@@ -7920,6 +8313,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
         if (hasPartialText) {
           enhanceCodeBlocks(bubbleText);
+          renderMessageFiles(assistantRow, rescuePartial.files);
           if (webSources && webSources.length > 0) {
             renderMessageSources(assistantRow, webSources, true);
           }
@@ -8029,6 +8423,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     let actualModelUsed = null;
     let executedHudHtml = '';
     const foundYouTubeIds = []; // ID video hasil tool search_youtube (dipakai render kartu)
+    const wantsFile = isFileGenerationRequest(promptText); // niat "buatkan file/website" untuk AI File Studio
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -8044,6 +8439,12 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           ? `${systemContent}\n\n${getYouTubeToolDirective()}`
           : getYouTubeToolDirective();
       }
+
+      // AI File Studio: selalu diumumkan agar model tahu format blok ZOZ_FILE
+      // ketika pengguna meminta pembuatan file / website.
+      systemContent = systemContent
+        ? `${systemContent}\n\n${getFileStudioDirective()}`
+        : getFileStudioDirective();
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
       try {
@@ -8595,13 +8996,22 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         }
       }
 
+      // ===== AI FILE STUDIO =====
+      // Ekstrak file yang dibuat AI, lalu hapus bloknya dari gelembung agar tidak
+      // tampil kode mentah berulang (kartu file digantikan oleh kartu di bawah).
+      const extractedAiFiles = extractGeneratedFiles(fullText, wantsFile);
+      const generatedFiles = extractedAiFiles.files;
+      if (generatedFiles.length > 0) {
+        fullText = stripGeneratedFileBlocks(fullText, extractedAiFiles.rawBlocks);
+      }
+
       // Bersihkan sisa tag tool_call dan residu raw JSON jika ada sebelum render markdown final
       const cleanFinalText = scrubRawToolCallArtifacts(fullText);
       if (cleanFinalText) {
         fullText = cleanFinalText;
       }
 
-      if (!fullText.trim() && !preambleHtml && collectedImages.length === 0 && !STATE.abortController?.signal?.aborted) {
+      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && collectedImages.length === 0 && !STATE.abortController?.signal?.aborted) {
         throw new Error('Model OpenRouter menyelesaikan koneksi tanpa menghasilkan respon teks.');
       }
 
@@ -8636,6 +9046,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         renderMessageSources(assistantRow, webSources, true);
       }
       renderYouTubeCardsForMessage(assistantRow, fullText, foundYouTubeIds);
+      renderMessageFiles(assistantRow, generatedFiles);
       const effectiveDisplay = actualModelUsed ? `${actualModelUsed} (Failover)` : modelName;
       metaBox.innerHTML = `
         <strong title="${actualModelUsed ? 'Model dialihkan oleh OpenRouter ke ' + actualModelUsed : modelName}">${escapeHtml(effectiveDisplay)}</strong>
@@ -8660,6 +9071,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           model: actualModelUsed || modelName,
           engine: 'openrouter',
           images: collectedImages.length > 0 ? collectedImages : undefined,
+          files: generatedFiles.length > 0 ? generatedFiles : undefined,
           imageUrl: collectedImages[0] || undefined,
           sources: webSources,
           stats: { duration: totalTime, tps: tps, tokens: tokenCount },
@@ -8674,11 +9086,14 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
     } catch (err) {
       if (err.name === 'AbortError') {
-        const partialText = streamRenderer ? streamRenderer.finish() : '';
+        const partialRaw = streamRenderer ? streamRenderer.finish() : '';
+        const stoppedPartial = sanitizePartialResponseWithFiles(partialRaw);
+        const partialText = stoppedPartial.text;
         if (partialText && partialText.trim() && STATE.sessions.some(s => s.id === session.id)) {
           const stoppedText = `${partialText.trim()}\n\n*[Respons dihentikan oleh pengguna]*`;
           bubbleText.innerHTML = renderMarkdown(stoppedText);
           enhanceCodeBlocks(bubbleText);
+          renderMessageFiles(assistantRow, stoppedPartial.files);
           if (webSources && webSources.length > 0) {
             renderMessageSources(assistantRow, webSources, true);
           }
@@ -8694,6 +9109,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             model: modelName,
             engine: 'openrouter',
             sources: webSources,
+            files: stoppedPartial.files.length > 0 ? stoppedPartial.files : undefined,
             stats: { duration: totalTime, tokens: tokenCount, stopped: true },
             timestamp: new Date().toISOString()
           });
@@ -8705,7 +9121,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         }
         showToast('Generasi dihentikan.');
       } else {
-        const partialText = streamRenderer ? streamRenderer.finish() : '';
+        const rescuePartial = sanitizePartialResponseWithFiles(streamRenderer ? streamRenderer.finish() : '');
+        const partialText = rescuePartial.text;
         const hasPartialText = Boolean(partialText && partialText.trim());
 
         if (hasPartialText && STATE.sessions.some(s => s.id === session.id)) {
@@ -8718,6 +9135,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             model: modelName,
             engine: 'openrouter',
             sources: webSources,
+            files: rescuePartial.files.length > 0 ? rescuePartial.files : undefined,
             stats: { duration: totalTime, tokens: tokenCount, interrupted: true },
             timestamp: new Date().toISOString()
           });
@@ -8767,6 +9185,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
         if (hasPartialText) {
           enhanceCodeBlocks(bubbleText);
+          renderMessageFiles(assistantRow, rescuePartial.files);
           if (webSources && webSources.length > 0) {
             renderMessageSources(assistantRow, webSources, true);
           }

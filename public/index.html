@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261010_v173">
+  <link rel="stylesheet" href="style.css?v=20261010_v174">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -1416,6 +1416,37 @@
     </div>
   </div>
 
+  <!-- 6.5b. AI FILE STUDIO MODAL (Preview Langsung + Kode + Unduh File Buatan AI) -->
+  <div class="modal-backdrop" id="aiFileStudioModal">
+    <div class="modal-card modal-lg ai-file-studio-card">
+      <div class="modal-header">
+        <div class="modal-title" id="aiFileStudioTitle"><i class="fa-solid fa-wand-magic-sparkles"></i> AI File Studio</div>
+        <button class="modal-close-btn" data-close="aiFileStudioModal" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body ai-file-studio-body">
+        <div class="ai-file-studio-tabs" id="aiFileStudioTabs">
+          <button type="button" class="ai-file-tab active" data-tab="preview"><i class="fa-solid fa-eye"></i> Pratinjau</button>
+          <button type="button" class="ai-file-tab" data-tab="code"><i class="fa-solid fa-code"></i> Kode Sumber</button>
+        </div>
+        <div class="ai-file-studio-pane" id="aiFileStudioPreviewPane">
+          <iframe id="aiFileStudioFrame" title="Pratinjau langsung file" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"></iframe>
+          <div class="ai-file-studio-placeholder" id="aiFileStudioPlaceholder">
+            <i class="fa-solid fa-circle-info"></i>
+            <span>File ini tidak bisa ditampilkan sebagai halaman interaktif. Silakan buka tab <strong>Kode Sumber</strong> atau unduh filenya.</span>
+          </div>
+        </div>
+        <pre class="ai-file-studio-code" id="aiFileStudioCode"></pre>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="ai-file-studio-meta" id="aiFileStudioMeta">-</span>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-secondary btn-sm" id="aiFileStudioCopyBtn" type="button" title="Salin seluruh isi file ke clipboard"><i class="fa-solid fa-copy"></i> Salin Kode</button>
+          <button class="btn btn-primary btn-sm" id="aiFileStudioDownloadBtn" type="button" title="Unduh file ini"><i class="fa-solid fa-download"></i> Unduh File</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- 6.6. PROMPT FOLDING CONFIRMATION MODAL (Claude / Grok AI Style) -->
   <div class="modal-backdrop" id="promptFoldConfirmModal">
     <div class="modal-card modal-md">
@@ -1523,6 +1554,6 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
-  <script src="app.js?v=20261010_v173"></script>
+  <script src="app.js?v=20261010_v174"></script>
 </body>
 </html>
