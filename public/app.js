@@ -515,9 +515,13 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     clearPresetBtn: $('#clearPresetBtn'),
     activeResearchBanner: $('#activeResearchBanner'),
     clearResearchBannerBtn: $('#clearResearchBannerBtn'),
-    researchTargetUrlInput: $('#researchTargetUrlInput'),
-    researchAddUrlBtn: $('#researchAddUrlBtn'),
-    researchUrlChips: $('#researchUrlChips'),
+    researchManageUrlsBtn: $('#researchManageUrlsBtn'),
+    researchUrlCountBadge: $('#researchUrlCountBadge'),
+    researchUrlManagerModal: $('#researchUrlManagerModal'),
+    researchUrlManagerInput: $('#researchUrlManagerInput'),
+    researchUrlManagerAddBtn: $('#researchUrlManagerAddBtn'),
+    researchUrlManagerList: $('#researchUrlManagerList'),
+    researchUrlManagerDoneBtn: $('#researchUrlManagerDoneBtn'),
     
     // Buttons & Modals
     settingsBtn: $('#settingsBtn'),
@@ -5242,7 +5246,7 @@ ${organicBlock}
     card.classList.add('yt-card-playing');
     const frame = document.createElement('div');
     frame.className = 'yt-embed-frame';
-    frame.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(vidId)}?autoplay=1&rel=0&modestbranding=1" title="${escapeHtml(title)}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen loading="lazy"></iframe>`;
+    frame.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(vidId)}?autoplay=1&rel=0&modestbranding=1&playsinline=1" title="${escapeHtml(title)}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen loading="lazy"></iframe>`;
     thumbWrap.replaceWith(frame);
 
     // Tombol "Putar di Chat" sudah tidak relevan saat video sedang berjalan
@@ -6156,10 +6160,8 @@ ${organicBlock}
       });
 
       if (targetUrls.length === 0) {
-        showToast('⚠️ Mode Deep Research memerlukan minimal 1 URL kustom untuk dianalisis. Tempel URL di banner atau kolom chat.');
-        if (els.researchTargetUrlInput && STATE.isDeepResearch) {
-          els.researchTargetUrlInput.focus();
-        }
+        showToast('⚠️ Mode Deep Research memerlukan minimal 1 URL kustom untuk dianalisis. Tempel URL di modal Kelola Sumber atau kolom chat.');
+        openResearchUrlManagerModal();
         STATE.isSending = false;
         return;
       }
@@ -9850,6 +9852,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     STATE.researchTargetUrls.push(url);
     renderResearchUrlChips();
     if (els.researchTargetUrlInput) els.researchTargetUrlInput.value = '';
+    if (els.researchUrlManagerInput) els.researchUrlManagerInput.value = '';
     showToast('🔗 URL target berhasil ditambahkan ke Deep Research.');
     return true;
   }
@@ -9866,34 +9869,86 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     STATE.researchTargetUrls = [];
     renderResearchUrlChips();
     if (els.researchTargetUrlInput) els.researchTargetUrlInput.value = '';
+    if (els.researchUrlManagerInput) els.researchUrlManagerInput.value = '';
+  }
+
+  function openResearchUrlManagerModal() {
+    renderResearchUrlManagerList();
+    openModal('researchUrlManagerModal');
+    setTimeout(() => {
+      els.researchUrlManagerInput?.focus();
+    }, 150);
   }
 
   function renderResearchUrlChips() {
-    if (!els.researchUrlChips) return;
+    // Update badge count
+    const count = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls.length : 0;
+    if (els.researchUrlCountBadge) els.researchUrlCountBadge.textContent = count;
+
+    // Update inline chips (for backward compatibility / banner display)
+    if (els.researchUrlChips) {
+      const urls = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls : [];
+      if (urls.length === 0) {
+        els.researchUrlChips.style.display = 'none';
+        els.researchUrlChips.innerHTML = '';
+      } else {
+        els.researchUrlChips.style.display = 'flex';
+        els.researchUrlChips.innerHTML = urls.map((url, idx) => {
+          let domain = url;
+          try { domain = new URL(url).hostname; } catch (_) {}
+          return `
+            <div class="research-url-chip" title="${escapeHtml(url)}">
+              <i class="fa-solid fa-link" style="font-size:0.7rem; color:var(--neon-amber);"></i>
+              <span class="research-url-chip-domain">${escapeHtml(domain)}</span>
+              <button type="button" class="research-url-chip-remove" data-idx="${idx}" title="Hapus URL ini" aria-label="Hapus URL">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+          `;
+        }).join('');
+
+        els.researchUrlChips.querySelectorAll('.research-url-chip-remove').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const idx = parseInt(btn.dataset.idx, 10);
+            removeResearchTargetUrl(idx);
+          });
+        });
+      }
+    }
+
+    // Update modal list
+    renderResearchUrlManagerList();
+  }
+
+  function renderResearchUrlManagerList() {
+    if (!els.researchUrlManagerList) return;
     const urls = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls : [];
     if (urls.length === 0) {
-      els.researchUrlChips.style.display = 'none';
-      els.researchUrlChips.innerHTML = '';
+      els.researchUrlManagerList.innerHTML = `
+        <div style="text-align: center; padding: 24px; color: var(--text-dim); font-size: 0.8rem;">
+          <i class="fa-solid fa-link" style="font-size: 1.5rem; color: rgba(255, 170, 0, 0.3); margin-bottom: 8px; display: block;"></i>
+          Belum ada URL sumber. Tambah URL di atas untuk mulai analisis.
+        </div>
+      `;
       return;
     }
-    els.researchUrlChips.style.display = 'flex';
-    els.researchUrlChips.innerHTML = urls.map((url, idx) => {
+    els.researchUrlManagerList.innerHTML = urls.map((url, idx) => {
       let domain = url;
-      try {
-        domain = new URL(url).hostname;
-      } catch (_) {}
+      try { domain = new URL(url).hostname; } catch (_) {}
       return `
-        <div class="research-url-chip" title="${escapeHtml(url)}">
-          <i class="fa-solid fa-link" style="font-size:0.7rem; color:var(--neon-amber);"></i>
-          <span class="research-url-chip-domain">${escapeHtml(domain)}</span>
-          <button type="button" class="research-url-chip-remove" data-idx="${idx}" title="Hapus URL ini" aria-label="Hapus URL">
+        <div class="research-url-manager-item">
+          <i class="fa-solid fa-link research-url-manager-item-icon"></i>
+          <span class="research-url-manager-item-url" title="${escapeHtml(url)}">${escapeHtml(url)}</span>
+          <span class="research-url-manager-item-domain">${escapeHtml(domain)}</span>
+          <button type="button" class="research-url-manager-item-remove" data-idx="${idx}" title="Hapus URL ini" aria-label="Hapus URL">
             <i class="fa-solid fa-xmark"></i>
           </button>
         </div>
       `;
     }).join('');
 
-    els.researchUrlChips.querySelectorAll('.research-url-chip-remove').forEach(btn => {
+    els.researchUrlManagerList.querySelectorAll('.research-url-manager-item-remove').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const idx = parseInt(btn.dataset.idx, 10);
@@ -14787,6 +14842,23 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
                     e.target.playVideo();
                   } catch (_) {}
                   this.setPlayingState(true);
+
+                  // Tambahkan allow="fullscreen" ke iframe YouTube agar fullscreen
+                  // berfungsi di mobile (YouTube IFrame API tidak menambahkannya otomatis)
+                  try {
+                    const container = document.getElementById('ytPlayerContainer');
+                    if (container) {
+                      const ytIframe = container.querySelector('iframe');
+                      if (ytIframe && !ytIframe.hasAttribute('allow')) {
+                        ytIframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen');
+                      } else if (ytIframe && ytIframe.hasAttribute('allow')) {
+                        const currentAllow = ytIframe.getAttribute('allow');
+                        if (!currentAllow.includes('fullscreen')) {
+                          ytIframe.setAttribute('allow', currentAllow + '; fullscreen');
+                        }
+                      }
+                    }
+                  } catch (_) {}
                 },
                 onStateChange: (e) => {
                   if (e.data === YT.PlayerState.PLAYING) {
@@ -16990,19 +17062,37 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       AudioEngine.click();
     });
 
-    // Tombol "Layar Penuh": fullscreen-kan SELURUH container player (bukan iframe
-    // YouTube yang ukurannya menempel pada kartu sehingga video tampil kecil).
+    // Tombol "Layar Penuh": fullscreen-kan iframe YouTube ASLI (bukan container wrap).
+    // YouTube IFrame API menciptakan iframe di dalam #ytPlayerContainer.
+    // Di mobile, iframe ITU yang harus requestFullscreen(), bukan wrap-nya.
     els.ytFsBtn?.addEventListener('click', () => {
       const wrap = els.ytPlayerContainerWrap;
-      if (!wrap) return;
+      const container = els.ytPlayerContainer;
+      if (!wrap || !container) return;
+
+      // Cari iframe YouTube asli yang dibuat oleh YouTube IFrame API
+      const ytIframe = container.querySelector('iframe');
+
       try {
         if (document.fullscreenElement || document.webkitFullscreenElement) {
           (document.exitFullscreen || document.webkitExitFullscreen).call(document);
         } else {
-          const req = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
+          // Prioritas: fullscreen iframe YouTube asli (diperlukan di mobile)
+          const targetEl = ytIframe || wrap;
+          const req = targetEl.requestFullscreen || targetEl.webkitRequestFullscreen || targetEl.mozRequestFullScreen || targetEl.msRequestFullscreen;
           if (req) {
-            const p = req.call(wrap);
-            if (p && typeof p.catch === 'function') p.catch(() => showToast('Fullscreen diblokir oleh browser.', 'error'));
+            const p = req.call(targetEl);
+            if (p && typeof p.catch === 'function') {
+              p.catch((err) => {
+                // Fallback: coba fullscreen wrap jika iframe gagal
+                if (targetEl === ytIframe && wrap !== ytIframe) {
+                  const wrapReq = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
+                  if (wrapReq) wrapReq.call(wrap).catch(() => showToast('Fullscreen diblokir oleh browser.', 'error'));
+                } else {
+                  showToast('Fullscreen diblokir oleh browser.', 'error');
+                }
+              });
+            }
           } else {
             showToast('Browser ini tidak mendukung Fullscreen API.', 'error');
           }
@@ -17233,19 +17323,38 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       showToast('Mode Deep Research dinonaktifkan. Kembali ke Mode Default.');
     });
 
-    // Tambah URL target analisis dari input banner
-    els.researchAddUrlBtn?.addEventListener('click', (e) => {
-      e.preventDefault();
-      const val = els.researchTargetUrlInput?.value;
-      if (val) addResearchTargetUrl(val);
+    // Buka modal kelola URL Deep Research
+    els.researchManageUrlsBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openResearchUrlManagerModal();
     });
 
-    els.researchTargetUrlInput?.addEventListener('keydown', (e) => {
+    // Modal: Tambah URL
+    els.researchUrlManagerAddBtn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      const val = els.researchUrlManagerInput?.value;
+      if (val) {
+        if (addResearchTargetUrl(val)) {
+          els.researchUrlManagerInput.value = '';
+        }
+      }
+    });
+
+    els.researchUrlManagerInput?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        const val = els.researchTargetUrlInput?.value;
-        if (val) addResearchTargetUrl(val);
+        const val = els.researchUrlManagerInput?.value;
+        if (val) {
+          if (addResearchTargetUrl(val)) {
+            els.researchUrlManagerInput.value = '';
+          }
+        }
       }
+    });
+
+    // Modal: Selesai
+    els.researchUrlManagerDoneBtn?.addEventListener('click', () => {
+      closeModal('researchUrlManagerModal');
     });
 
     $$('.search-menu-item').forEach(item => {

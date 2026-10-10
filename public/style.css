@@ -5227,6 +5227,109 @@ body.modal-open {
   color: #ff5252;
 }
 
+/* Research URL Manager Button */
+.research-manage-urls-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(255, 170, 0, 0.12);
+  border: 1px solid rgba(255, 170, 0, 0.35);
+  border-radius: var(--radius-sm);
+  color: var(--neon-amber);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+  justify-content: center;
+}
+
+.research-manage-urls-btn:hover {
+  background: rgba(255, 170, 0, 0.25);
+  border-color: var(--neon-amber);
+  box-shadow: 0 0 12px rgba(255, 170, 0, 0.4);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+#researchUrlCountBadge {
+  background: var(--neon-amber);
+  color: #08090D;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  min-width: 20px;
+  text-align: center;
+}
+
+/* Research URL Manager Modal */
+.research-url-manager-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.research-url-manager-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(10, 14, 26, 0.7);
+  border: 1px solid rgba(255, 170, 0, 0.2);
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+}
+
+.research-url-manager-item:hover {
+  border-color: rgba(255, 170, 0, 0.5);
+  background: rgba(255, 170, 0, 0.08);
+}
+
+.research-url-manager-item-icon {
+  color: var(--neon-amber);
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+.research-url-manager-item-url {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-code);
+  font-size: 0.78rem;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.research-url-manager-item-domain {
+  font-size: 0.7rem;
+  color: var(--neon-amber);
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+
+.research-url-manager-item-remove {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.research-url-manager-item-remove:hover {
+  color: #ff5252;
+  background: rgba(255, 82, 82, 0.15);
+}
+
 /* ==================== WEB SEARCH HUD & REAL-TIME SOURCES ==================== */
 .web-search-hud {
   display: inline-flex;

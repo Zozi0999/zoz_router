@@ -6160,10 +6160,8 @@ ${organicBlock}
       });
 
       if (targetUrls.length === 0) {
-        showToast('⚠️ Mode Deep Research memerlukan minimal 1 URL kustom untuk dianalisis. Tempel URL di banner atau kolom chat.');
-        if (els.researchTargetUrlInput && STATE.isDeepResearch) {
-          els.researchTargetUrlInput.focus();
-        }
+        showToast('⚠️ Mode Deep Research memerlukan minimal 1 URL kustom untuk dianalisis. Tempel URL di modal Kelola Sumber atau kolom chat.');
+        openResearchUrlManagerModal();
         STATE.isSending = false;
         return;
       }
@@ -9854,6 +9852,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     STATE.researchTargetUrls.push(url);
     renderResearchUrlChips();
     if (els.researchTargetUrlInput) els.researchTargetUrlInput.value = '';
+    if (els.researchUrlManagerInput) els.researchUrlManagerInput.value = '';
     showToast('🔗 URL target berhasil ditambahkan ke Deep Research.');
     return true;
   }
@@ -9870,11 +9869,15 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     STATE.researchTargetUrls = [];
     renderResearchUrlChips();
     if (els.researchTargetUrlInput) els.researchTargetUrlInput.value = '';
+    if (els.researchUrlManagerInput) els.researchUrlManagerInput.value = '';
   }
 
   function openResearchUrlManagerModal() {
     renderResearchUrlManagerList();
     openModal('researchUrlManagerModal');
+    setTimeout(() => {
+      els.researchUrlManagerInput?.focus();
+    }, 150);
   }
 
   function renderResearchUrlChips() {

@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261010_v179">
+  <link rel="stylesheet" href="style.css?v=20261010_v181">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -295,38 +295,6 @@
               <span>Kelola Sumber (<span id="researchUrlCountBadge">0</span>)</span>
               <i class="fa-solid fa-chevron-right"></i>
             </button>
-          </div>
-        </div>
-
-        <!-- Deep Research URL Manager Modal -->
-        <div class="modal-backdrop" id="researchUrlManagerModal">
-          <div class="modal-card modal-lg">
-            <div class="modal-header">
-              <div class="modal-title"><i class="fa-solid fa-microscope" style="color: var(--neon-amber);"></i> Kelola Sumber Deep Research</div>
-              <button class="modal-close-btn" data-close="researchUrlManagerModal" aria-label="Tutup" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <div class="modal-body">
-              <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 82, 0, 0.1); border: 1px solid rgba(255, 82, 0, 0.3); border-radius: var(--radius-md); color: var(--neon-amber); font-size: 0.8rem;">
-                <i class="fa-solid fa-circle-info"></i> Masukkan URL yang ingin dianalisis secara mendalam. Setiap URL akan diekstrak kontennya dan dibandingkan untuk mendeteksi fakta terbaru vs lama.
-              </div>
-              <div class="form-group">
-                <label for="researchUrlManagerInput"><i class="fa-solid fa-plus"></i> Tambah URL Baru</label>
-                <div class="input-with-action">
-                  <input type="url" id="researchUrlManagerInput" placeholder="https://example.com/artikel..." autocomplete="off" spellcheck="false">
-                  <button class="btn btn-sm btn-primary" id="researchUrlManagerAddBtn"><i class="fa-solid fa-plus"></i> Tambah</button>
-                </div>
-              </div>
-              <div class="research-url-manager-list" id="researchUrlManagerList" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
-                <!-- URLs rendered here -->
-              </div>
-              <div style="margin-top: 16px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: var(--radius-sm); font-size: 0.75rem; color: var(--text-dim);">
-                <i class="fa-solid fa-lightbulb"></i> Tip: Gunakan URL artikel, berita, dokumentasi, atau halaman web publik. Hindari URL yang memerlukan login.
-              </div>
-            </div>
-            <div class="modal-footer">
-              <button class="btn btn-secondary" data-close="researchUrlManagerModal">Tutup</button>
-              <button class="btn btn-primary" id="researchUrlManagerDoneBtn"><i class="fa-solid fa-check"></i> Selesai</button>
-            </div>
           </div>
         </div>
 
@@ -1579,6 +1547,38 @@
     </div>
   </div>
 
+  <!-- Deep Research URL Manager Modal -->
+  <div class="modal-backdrop" id="researchUrlManagerModal">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title"><i class="fa-solid fa-microscope" style="color: var(--neon-amber);"></i> Kelola Sumber Deep Research</div>
+        <button class="modal-close-btn" data-close="researchUrlManagerModal" aria-label="Tutup kelola sumber Deep Research" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 82, 0, 0.1); border: 1px solid rgba(255, 82, 0, 0.3); border-radius: var(--radius-md); color: var(--neon-amber); font-size: 0.8rem;">
+          <i class="fa-solid fa-circle-info"></i> Masukkan URL yang ingin dianalisis secara mendalam. Setiap URL akan diekstrak kontennya dan dibandingkan untuk mendeteksi fakta terbaru vs lama.
+        </div>
+        <div class="form-group">
+          <label for="researchUrlManagerInput"><i class="fa-solid fa-plus"></i> Tambah URL Baru</label>
+          <div class="input-with-action">
+            <input type="url" id="researchUrlManagerInput" placeholder="https://example.com/artikel..." autocomplete="off" spellcheck="false">
+            <button class="btn btn-sm btn-primary" id="researchUrlManagerAddBtn"><i class="fa-solid fa-plus"></i> Tambah</button>
+          </div>
+        </div>
+        <div class="research-url-manager-list" id="researchUrlManagerList" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+          <!-- URLs rendered here -->
+        </div>
+        <div style="margin-top: 16px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: var(--radius-sm); font-size: 0.75rem; color: var(--text-dim);">
+          <i class="fa-solid fa-lightbulb"></i> Tip: Gunakan URL artikel, berita, dokumentasi, atau halaman web publik. Hindari URL yang memerlukan login.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close="researchUrlManagerModal">Tutup</button>
+        <button class="btn btn-primary" id="researchUrlManagerDoneBtn"><i class="fa-solid fa-check"></i> Selesai</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
@@ -1594,6 +1594,6 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- Application script -->
-  <script src="app.js?v=20261010_v179"></script>
+  <script src="app.js?v=20261010_v181"></script>
 </body>
 </html>
