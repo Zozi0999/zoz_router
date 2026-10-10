@@ -276,7 +276,7 @@
           <button class="clear-preset-btn" id="clearPresetBtn" type="button" aria-label="Hapus preset kustom" title="Hapus preset kustom"><i class="fa-solid fa-xmark"></i></button>
         </div>
 
-        <!-- Deep Research Active Banner with Custom URL Input & Cross [X] Button -->
+        <!-- Deep Research Active Banner with URL Management Button -->
         <div class="active-research-banner" id="activeResearchBanner" style="display: none;">
           <div class="research-banner-top">
             <div class="research-banner-left">
@@ -290,14 +290,43 @@
             </button>
           </div>
           <div class="research-banner-url-row">
-            <div class="research-url-input-wrap" tabindex="0">
-              <i class="fa-solid fa-link" style="color: var(--neon-amber); font-size: 0.8rem;"></i>
-              <input type="url" id="researchTargetUrlInput" placeholder="Tempel URL kustom yang ingin dianalisis (misal: https://example.com/artikel)..." autocomplete="off" spellcheck="false">
-              <button type="button" id="researchAddUrlBtn" class="research-add-url-btn" title="Tambahkan URL target">
-                <i class="fa-solid fa-plus"></i> <span>Tambah</span>
-              </button>
+            <button type="button" class="research-manage-urls-btn" id="researchManageUrlsBtn" title="Kelola URL Sumber Deep Research">
+              <i class="fa-solid fa-link"></i>
+              <span>Kelola Sumber (<span id="researchUrlCountBadge">0</span>)</span>
+              <i class="fa-solid fa-chevron-right"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Deep Research URL Manager Modal -->
+        <div class="modal-backdrop" id="researchUrlManagerModal">
+          <div class="modal-card modal-lg">
+            <div class="modal-header">
+              <div class="modal-title"><i class="fa-solid fa-microscope" style="color: var(--neon-amber);"></i> Kelola Sumber Deep Research</div>
+              <button class="modal-close-btn" data-close="researchUrlManagerModal" aria-label="Tutup" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div class="research-url-chips-container" id="researchUrlChips" style="display: none;"></div>
+            <div class="modal-body">
+              <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 82, 0, 0.1); border: 1px solid rgba(255, 82, 0, 0.3); border-radius: var(--radius-md); color: var(--neon-amber); font-size: 0.8rem;">
+                <i class="fa-solid fa-circle-info"></i> Masukkan URL yang ingin dianalisis secara mendalam. Setiap URL akan diekstrak kontennya dan dibandingkan untuk mendeteksi fakta terbaru vs lama.
+              </div>
+              <div class="form-group">
+                <label for="researchUrlManagerInput"><i class="fa-solid fa-plus"></i> Tambah URL Baru</label>
+                <div class="input-with-action">
+                  <input type="url" id="researchUrlManagerInput" placeholder="https://example.com/artikel..." autocomplete="off" spellcheck="false">
+                  <button class="btn btn-sm btn-primary" id="researchUrlManagerAddBtn"><i class="fa-solid fa-plus"></i> Tambah</button>
+                </div>
+              </div>
+              <div class="research-url-manager-list" id="researchUrlManagerList" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+                <!-- URLs rendered here -->
+              </div>
+              <div style="margin-top: 16px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: var(--radius-sm); font-size: 0.75rem; color: var(--text-dim);">
+                <i class="fa-solid fa-lightbulb"></i> Tip: Gunakan URL artikel, berita, dokumentasi, atau halaman web publik. Hindari URL yang memerlukan login.
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-secondary" data-close="researchUrlManagerModal">Tutup</button>
+              <button class="btn btn-primary" id="researchUrlManagerDoneBtn"><i class="fa-solid fa-check"></i> Selesai</button>
+            </div>
           </div>
         </div>
 

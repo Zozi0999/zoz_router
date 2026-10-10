@@ -515,9 +515,13 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     clearPresetBtn: $('#clearPresetBtn'),
     activeResearchBanner: $('#activeResearchBanner'),
     clearResearchBannerBtn: $('#clearResearchBannerBtn'),
-    researchTargetUrlInput: $('#researchTargetUrlInput'),
-    researchAddUrlBtn: $('#researchAddUrlBtn'),
-    researchUrlChips: $('#researchUrlChips'),
+    researchManageUrlsBtn: $('#researchManageUrlsBtn'),
+    researchUrlCountBadge: $('#researchUrlCountBadge'),
+    researchUrlManagerModal: $('#researchUrlManagerModal'),
+    researchUrlManagerInput: $('#researchUrlManagerInput'),
+    researchUrlManagerAddBtn: $('#researchUrlManagerAddBtn'),
+    researchUrlManagerList: $('#researchUrlManagerList'),
+    researchUrlManagerDoneBtn: $('#researchUrlManagerDoneBtn'),
     
     // Buttons & Modals
     settingsBtn: $('#settingsBtn'),
@@ -9868,32 +9872,80 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     if (els.researchTargetUrlInput) els.researchTargetUrlInput.value = '';
   }
 
+  function openResearchUrlManagerModal() {
+    renderResearchUrlManagerList();
+    openModal('researchUrlManagerModal');
+  }
+
   function renderResearchUrlChips() {
-    if (!els.researchUrlChips) return;
+    // Update badge count
+    const count = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls.length : 0;
+    if (els.researchUrlCountBadge) els.researchUrlCountBadge.textContent = count;
+
+    // Update inline chips (for backward compatibility / banner display)
+    if (els.researchUrlChips) {
+      const urls = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls : [];
+      if (urls.length === 0) {
+        els.researchUrlChips.style.display = 'none';
+        els.researchUrlChips.innerHTML = '';
+      } else {
+        els.researchUrlChips.style.display = 'flex';
+        els.researchUrlChips.innerHTML = urls.map((url, idx) => {
+          let domain = url;
+          try { domain = new URL(url).hostname; } catch (_) {}
+          return `
+            <div class="research-url-chip" title="${escapeHtml(url)}">
+              <i class="fa-solid fa-link" style="font-size:0.7rem; color:var(--neon-amber);"></i>
+              <span class="research-url-chip-domain">${escapeHtml(domain)}</span>
+              <button type="button" class="research-url-chip-remove" data-idx="${idx}" title="Hapus URL ini" aria-label="Hapus URL">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+          `;
+        }).join('');
+
+        els.researchUrlChips.querySelectorAll('.research-url-chip-remove').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const idx = parseInt(btn.dataset.idx, 10);
+            removeResearchTargetUrl(idx);
+          });
+        });
+      }
+    }
+
+    // Update modal list
+    renderResearchUrlManagerList();
+  }
+
+  function renderResearchUrlManagerList() {
+    if (!els.researchUrlManagerList) return;
     const urls = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls : [];
     if (urls.length === 0) {
-      els.researchUrlChips.style.display = 'none';
-      els.researchUrlChips.innerHTML = '';
+      els.researchUrlManagerList.innerHTML = `
+        <div style="text-align: center; padding: 24px; color: var(--text-dim); font-size: 0.8rem;">
+          <i class="fa-solid fa-link" style="font-size: 1.5rem; color: rgba(255, 170, 0, 0.3); margin-bottom: 8px; display: block;"></i>
+          Belum ada URL sumber. Tambah URL di atas untuk mulai analisis.
+        </div>
+      `;
       return;
     }
-    els.researchUrlChips.style.display = 'flex';
-    els.researchUrlChips.innerHTML = urls.map((url, idx) => {
+    els.researchUrlManagerList.innerHTML = urls.map((url, idx) => {
       let domain = url;
-      try {
-        domain = new URL(url).hostname;
-      } catch (_) {}
+      try { domain = new URL(url).hostname; } catch (_) {}
       return `
-        <div class="research-url-chip" title="${escapeHtml(url)}">
-          <i class="fa-solid fa-link" style="font-size:0.7rem; color:var(--neon-amber);"></i>
-          <span class="research-url-chip-domain">${escapeHtml(domain)}</span>
-          <button type="button" class="research-url-chip-remove" data-idx="${idx}" title="Hapus URL ini" aria-label="Hapus URL">
+        <div class="research-url-manager-item">
+          <i class="fa-solid fa-link research-url-manager-item-icon"></i>
+          <span class="research-url-manager-item-url" title="${escapeHtml(url)}">${escapeHtml(url)}</span>
+          <span class="research-url-manager-item-domain">${escapeHtml(domain)}</span>
+          <button type="button" class="research-url-manager-item-remove" data-idx="${idx}" title="Hapus URL ini" aria-label="Hapus URL">
             <i class="fa-solid fa-xmark"></i>
           </button>
         </div>
       `;
     }).join('');
 
-    els.researchUrlChips.querySelectorAll('.research-url-chip-remove').forEach(btn => {
+    els.researchUrlManagerList.querySelectorAll('.research-url-manager-item-remove').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const idx = parseInt(btn.dataset.idx, 10);
@@ -17268,19 +17320,38 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       showToast('Mode Deep Research dinonaktifkan. Kembali ke Mode Default.');
     });
 
-    // Tambah URL target analisis dari input banner
-    els.researchAddUrlBtn?.addEventListener('click', (e) => {
-      e.preventDefault();
-      const val = els.researchTargetUrlInput?.value;
-      if (val) addResearchTargetUrl(val);
+    // Buka modal kelola URL Deep Research
+    els.researchManageUrlsBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openResearchUrlManagerModal();
     });
 
-    els.researchTargetUrlInput?.addEventListener('keydown', (e) => {
+    // Modal: Tambah URL
+    els.researchUrlManagerAddBtn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      const val = els.researchUrlManagerInput?.value;
+      if (val) {
+        if (addResearchTargetUrl(val)) {
+          els.researchUrlManagerInput.value = '';
+        }
+      }
+    });
+
+    els.researchUrlManagerInput?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        const val = els.researchTargetUrlInput?.value;
-        if (val) addResearchTargetUrl(val);
+        const val = els.researchUrlManagerInput?.value;
+        if (val) {
+          if (addResearchTargetUrl(val)) {
+            els.researchUrlManagerInput.value = '';
+          }
+        }
       }
+    });
+
+    // Modal: Selesai
+    els.researchUrlManagerDoneBtn?.addEventListener('click', () => {
+      closeModal('researchUrlManagerModal');
     });
 
     $$('.search-menu-item').forEach(item => {
