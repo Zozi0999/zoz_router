@@ -4294,7 +4294,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
 
     if (els.chkAutoFoldAlways && els.chkAutoFoldAlways.checked) {
-      localStorage.setItem('zoz_always_auto_fold_prompt', 'true');
+      try {
+        localStorage.setItem('zoz_always_auto_fold_prompt', 'true');
+      } catch (_) {}
     }
 
     const doc = convertTextToMarkdownDoc(pendingFoldText);
