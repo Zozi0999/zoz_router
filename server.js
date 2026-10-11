@@ -6706,11 +6706,13 @@ async function requestHandler(req, res) {
     const ext = path.extname(filePath).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
 
-    // ETag berbasis mtime+size: index.html tetap no-cache (revalidasi tiap
-    // saat), aset statis lain dipublik 1 jam — perubahan file langsung basi
-    // karena ETag-nya berubah ikut mtime.
+    // ETag berbasis mtime+size: SEMUA aset (html maupun non-html) memakai no-cache
+    // = SELALU revalidasi ke server. Respons 304 (ETag cocok) nyaris gratis, jadi
+    // tidak ada gunanya max-age di aplikasi lokal yang file-nya sering diedit —
+    // dulu max-age=3600 membuat browser menyajikan app.js LAMA hingga 1 jam bahkan
+    // setelah refresh biasa (gejala: fix tidak pernah terlihat sampai Ctrl+F5).
     const etag = '"' + stats.mtimeMs + '-' + stats.size + '"';
-    const cacheControl = (ext === '.html') ? 'no-cache' : 'public, max-age=3600, must-revalidate';
+    const cacheControl = 'no-cache';
     if (req.headers['if-none-match'] === etag) {
       res.writeHead(304, { 'ETag': etag, 'Cache-Control': cacheControl, 'Vary': 'Accept-Encoding' });
       return res.end();
