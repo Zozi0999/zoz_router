@@ -271,6 +271,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     isImageGenMode: false,
     isMusicGenMode: false,
     photoEditImage: null, // dataURL foto referensi untuk mode Edit Foto AI (Img2Img)
+    photoEditAwaitingModel: false, // true = pengguna sedang memilih model untuk edit foto (popup dulu, file picker sesudahnya)
     isYouTubeSearchMode: false, // Tool "Cari Video YouTube" (toggle dari menu Lampiran)
     isGenerating: false,
     isSending: false, // Guard anti pengiriman ganda (Enter berulang saat masih ada await)
@@ -2245,12 +2246,28 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
 
     // Model reasoning tertentu (mis. varian :free nemotron dsb.) menyalurkan
-    // SELURUH jawaban ke reasoning_content dengan konten reguler KOSONG — blok
-    // pikiran sudah ditutup (isThinking false = teks final, BUKAN streaming
-    // aktif) tapi jawaban tidak pernah keluar dari blok. Promosikan reasoning
-    // sebagai konten utama agar jawaban tidak terjebak di dalam blok pikiran.
+    // SELURUH respons — termasuk jawaban akhir — ke reasoning_content dengan
+    // konten reguler KOSONG. JANGAN tumpahkan seluruh COT sebagai jawaban
+    // ("nguwaur di awal, jawaban asli tenggelam di akhir"): promosikan hanya
+    // PARAGRAF TERAKHIR sebagai jawaban; sisanya tetap di blok pikiran yang
+    // dilipat. Bila hanya satu paragraf, semuanya jadi jawaban (tanpa blok).
     if (!isThinking && !content.trim() && reasoning.trim()) {
-      return { reasoning: '', content: reasoning.trim(), isThinking: false };
+      let paras = reasoning.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+      // Bila seluruh COT satu blok besar (hanya dipisah \n tunggal — umum pada
+      // model reasoning varian :free), pecah per baris: jawaban biasanya baris
+      // TERAKHIR sedangkan baris sebelumnya masih potongan pikiran.
+      if (paras.length === 1 && paras[0].includes('\n')) {
+        paras = paras[0].split('\n').map(p => p.trim()).filter(Boolean);
+      }
+      if (!paras.length) {
+        return { reasoning: '', content: '', isThinking: false };
+      }
+      let finalAnswer = paras[paras.length - 1];
+      // Residu label COT yang menempel di jawaban: "greeting.Hai, Kaisar..." →
+      // "Hai, Kaisar..." (satu kata huruf kecil + tanda baca diikuti huruf kapital).
+      finalAnswer = finalAnswer.replace(/^[a-z][\w-]*[.:]\s*(?=[A-ZÀ-Þ])/, '');
+      const restThinking = paras.slice(0, -1).join('\n\n');
+      return { reasoning: restThinking, content: finalAnswer, isThinking: false };
     }
 
     return {
@@ -10395,49 +10412,10 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
   function clearPhotoEdit() {
     STATE.photoEditImage = null;
+    STATE.photoEditAwaitingModel = false;
     if (els.photoEditRefThumb) els.photoEditRefThumb.removeAttribute('src');
     if (els.photoEditReferenceCard) els.photoEditReferenceCard.style.display = 'none';
     if (els.photoEditFileInput) els.photoEditFileInput.value = '';
-  }
-
-  // Edit foto (img2img) MENGGUNAKAN model image OpenRouter: bila model gambar
-  // aktif masih Pollinations (id tanpa '/'), pindahkan otomatis ke model image
-  // OpenRouter dengan prioritas dedicated-edit (kontext → gemini-image →
-  // seedream → flux), lalu buka dropdown model gambar agar bisa diganti manual.
-  function ensureOpenRouterImageModelForEdit() {
-    const current = STATE.settings.imageModel || 'flux';
-    if (current.includes('/')) {
-      openImageModelDropdown(); // sudah cloud — biarkan Kaisar memilih manual
-      return;
-    }
-    if (!STATE.settings.openRouterKey) {
-      showToast('⚠️ Edit foto (Img2Img) memerlukan OpenRouter API Key — masukkan di Pengaturan > Provider Cloud.', 'error');
-      openImageModelDropdown();
-      return;
-    }
-    const candidates = (STATE.availableImageModels || []).filter(m =>
-      m && m.id && m.id.includes('/') && m.provider === 'openrouter');
-    if (!candidates.length) {
-      showToast('⚠️ Katalog model image OpenRouter belum termuat — muat ulang halaman (Ctrl+F5).', 'error');
-      openImageModelDropdown();
-      return;
-    }
-    const score = (m) => {
-      const idLow = m.id.toLowerCase();
-      if (idLow.includes('kontext')) return 0; // FLUX Kontext = engine edit image dedicated
-      if (idLow.includes('gemini') && idLow.includes('image')) return 1; // "nano banana"
-      if (idLow.includes('seedream')) return 2;
-      if (idLow.includes('flux')) return 3;
-      return 5;
-    };
-    const best = candidates.slice().sort((a, b) => score(a) - score(b))[0];
-    if (best) {
-      STATE.settings.imageModel = best.id;
-      savePersistedState();
-      updateImageGenModeUI();
-      showToast(`🖼️ Model edit foto disetel ke ${best.name || best.id} (OpenRouter) — klik daftar untuk ganti.`);
-    }
-    openImageModelDropdown();
   }
 
   async function handlePhotoEditFileSelect(e) {
@@ -10452,10 +10430,8 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       // Kompres dulu agar payload base64 ke server tidak membengkak (foto HP bisa 10MB+)
       const dataUrl = await compressImageToWebP(file, 1280, 0.85);
       setPhotoEditImage(dataUrl);
-      showToast('🖼️ Foto referensi aktif — ketik instruksi editan di prompt.');
-      // Wajibkan jalur img2img via model image OpenRouter (server memakai
-      // input_references / chat image_url untuk model cloud).
-      ensureOpenRouterImageModelForEdit();
+      const activeImgModel = getImageModelDisplayName(STATE.settings.imageModel || 'flux');
+      showToast(`🖼️ Foto referensi aktif • Model: ${activeImgModel} — ketik instruksi editan di prompt lalu kirim. Ganti model kapan saja lewat dropdown model gambar.`);
     } catch (compErr) {
       console.warn('Photo edit compress failed:', compErr);
       showToast('Gagal memproses foto referensi.', 'error');
@@ -13404,12 +13380,20 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
   }
 
   function closeImageModelDropdown() {
+    // Menutup dropdown (Esc / klik luar / pilih model) membatalkan alur pemilihan
+    // model-edit-foto yang tertunda — setImageModel sudah menangkap flag-nya sendiri
+    // sebelum fungsi ini dipanggil, jadi jalur pemilihan tetap jalan.
+    STATE.photoEditAwaitingModel = false;
     if (!els.imageModelDropdown) return;
     els.imageModelDropdown.style.display = 'none';
     els.imageGenToggleBtn?.setAttribute('aria-expanded', 'false');
   }
 
   function setImageModel(modelVal) {
+    // Tangkap alur Edit Foto SEBELUM closeImageModelDropdown (yang membersihkan
+    // flag) — dipakai lagi di akhir fungsi untuk membuka file picker foto.
+    const _photoEditFlow = Boolean(STATE.photoEditAwaitingModel);
+    STATE.photoEditAwaitingModel = false;
     if (modelVal === 'off') {
       STATE.isImageGenMode = false;
       updateImageGenModeUI();
@@ -13435,6 +13419,10 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       showToast(`⚠️ Model ${displayName} aktif. Butuh OpenRouter Key di Pengaturan untuk menghasilkan gambar.`, 'warning');
     } else {
       showToast(`🎨 Model Gambar Aktif: ${displayName}`);
+    }
+    // Alur Edit Foto: model sudah DIPILIH pengguna → lanjut ke pemilihan foto referensi.
+    if (_photoEditFlow) {
+      setTimeout(() => els.photoEditFileInput?.click(), 150);
     }
   }
 
@@ -17757,13 +17745,16 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       openImageModelDropdown();
       AudioEngine.click();
     });
-    // Mode Edit Foto AI (Img2Img): pilih foto referensi → kartu tampil →
-    // instruksi edit dikirim sebagai prompt image-generation dengan referenceImage.
+    // Mode Edit Foto AI (Img2Img): ALURNYA = pengguna MEMILIH MODEL dulu lewat
+    // popup (tab OpenRouter), baru dialog pemilihan foto terbuka — pengguna yang
+    // menentukan model, bukan otomatis sistem.
     els.attachOptionEditPhoto?.addEventListener('click', (e) => {
       e.stopPropagation();
       closeAttachmentDropdown();
-      els.photoEditFileInput?.click();
-      AudioEngine.click();
+      STATE.photoEditAwaitingModel = true;
+      openImageModelDropdown();
+      switchImageModelTab('openrouter');
+      showToast('🧩 Pilih dulu model image untuk Edit Foto — setelah dipilih, dialog foto akan otomatis terbuka.');
     });
     els.photoEditFileInput?.addEventListener('change', handlePhotoEditFileSelect);
     els.btnCancelPhotoEdit?.addEventListener('click', (e) => {
