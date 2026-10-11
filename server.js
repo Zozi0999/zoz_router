@@ -15,6 +15,7 @@ const crypto = require('crypto');
 const dns = require('dns');
 const net = require('net');
 const { spawn } = require('child_process');
+const textSafety = require('./text-safety');
 
 // Loader .env minimal (TANPA dependensi eksternal — proyek zero-dep).
 // Baca file .env bila ada, parse baris KEY=VALUE (lewati komentar/baris kosong),
@@ -1539,12 +1540,11 @@ function pruneActiveChatTasks() {
           if (t.proxyReq && !t.proxyReq.destroyed) {
             try { t.proxyReq.destroy(); } catch (_) {}
           }
-          // Flush any remaining buffer before deleting
-          if (t.rawBuffer && t.rawBuffer.trim()) {
-            flushChatTaskBuffer(sid, t.provider || 'openrouter');
-          }
-          if (t.fullText && t.fullText.trim()) {
-            appendAssistantMessageToSessionDisk(sid, t.fullText + `\n\n*[Respons terputus: Kadaluwarsa]*`, t.model)
+          // Flush any remaining buffer before deleting.
+          if (t.rawBuffer && t.rawBuffer.trim()) flushChatTaskBuffer(sid, t.provider || 'openrouter');
+          const partialText = textSafety.stripReasoningText(t.fullText || '');
+          if (partialText.trim()) {
+            appendAssistantMessageToSessionDisk(sid, partialText + `\n\n*[Respons terputus: Kadaluwarsa]*`, t.model)
               .catch(err => console.warn('Gagal simpan respons kadaluwarsa ke sesi:', err && err.message));
           }
           delete dbActiveChatTasks[sid];
@@ -1584,24 +1584,9 @@ function accumulateChatChunk(sessionId, chunk, provider) {
       }
       try {
         const parsed = JSON.parse(jsonStr);
-        const contentDelta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || parsed.choices?.[0]?.message?.content || '';
-        const reasoningDelta = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || parsed.choices?.[0]?.delta?.thought || '';
-        let delta = '';
-        if (reasoningDelta) {
-          if (!task.inReasoning) {
-            task.inReasoning = true;
-            delta = '<think>\n' + reasoningDelta;
-          } else {
-            delta = reasoningDelta;
-          }
-        } else if (contentDelta) {
-          if (task.inReasoning) {
-            task.inReasoning = false;
-            delta = '\n</think>\n\n' + contentDelta;
-          } else {
-            delta = contentDelta;
-          }
-        }
+        // Keep answer channel only. Reasoning fields never enter background
+        // status text, session persistence, copy, or export.
+        const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || parsed.choices?.[0]?.message?.content || '';
         if (delta) {
           // Limit fullText buffer to prevent memory exhaustion on very long responses.
           // Akumulasi byte per-chunk (O(delta)) — byteLength(fullText + delta) yang
@@ -1662,24 +1647,8 @@ function flushChatTaskBuffer(sessionId, provider) {
         }
         try {
           const parsed = JSON.parse(jsonStr);
-          const contentDelta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || parsed.choices?.[0]?.message?.content || '';
-          const reasoningDelta = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || parsed.choices?.[0]?.delta?.thought || '';
-          let delta = '';
-          if (reasoningDelta) {
-            if (!task.inReasoning) {
-              task.inReasoning = true;
-              delta = '<think>\n' + reasoningDelta;
-            } else {
-              delta = reasoningDelta;
-            }
-          } else if (contentDelta) {
-            if (task.inReasoning) {
-              task.inReasoning = false;
-              delta = '\n</think>\n\n' + contentDelta;
-            } else {
-              delta = contentDelta;
-            }
-          }
+          // Flush akhir juga hanya menyimpan kanal jawaban eksplisit.
+          const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || parsed.choices?.[0]?.message?.content || '';
           if (delta) {
             task.fullText += delta;
             task.fullBytes = (task.fullBytes || 0) + Buffer.byteLength(delta, 'utf8');
@@ -1699,11 +1668,6 @@ function flushChatTaskBuffer(sessionId, provider) {
       }
     }
   }
-  if (task.inReasoning) {
-    task.fullText += '\n</think>';
-    task.fullBytes = (task.fullBytes || 0) + Buffer.byteLength('\n</think>', 'utf8');
-    task.inReasoning = false;
-  }
 }
 
 function markChatTaskInterrupted(sessionId, reason = 'Koneksi terputus') {
@@ -1720,11 +1684,6 @@ function markChatTaskInterrupted(sessionId, reason = 'Koneksi terputus') {
   }
 
   flushChatTaskBuffer(sessionId, task.provider || 'openrouter');
-  if (task.inReasoning) {
-    task.fullText += '\n</think>';
-    task.fullBytes = (task.fullBytes || 0) + Buffer.byteLength('\n</think>', 'utf8');
-    task.inReasoning = false;
-  }
   if (task.fullText && task.fullText.trim()) {
     appendAssistantMessageToSessionDisk(sessionId, task.fullText + `\n\n*[Respons terputus: ${reason}]*`, task.model)
       .catch(err => console.warn('Gagal simpan respons terputus ke sesi:', err && err.message));
@@ -1742,6 +1701,9 @@ const sessionAppendQueues = new Map(); // cleanSid -> Promise tail antrean
 
 function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extraMeta = {}, explicitUserId = null) {
   if (!sessionId || !content || !content.trim()) return Promise.resolve(false);
+  // Fail closed for legacy/provider-tagged thought text, regardless of the caller.
+  content = textSafety.stripReasoningText(content);
+  if (!content.trim()) return Promise.resolve(false);
   try {
     const cleanSid = String(sessionId).trim();
     if (!/^[a-zA-Z0-9_-]+$/.test(cleanSid)) return Promise.resolve(false);
@@ -5718,6 +5680,7 @@ async function requestHandler(req, res) {
 
         // Upstream returned 200 OK -> Send headers matching client stream mode!
         const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
+        const reasoningFilter = textSafety.createProviderStreamFilter('ollama', isStream ? 'stream' : 'json');
         if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
           try {
             res.writeHead(200, {
@@ -5732,17 +5695,17 @@ async function requestHandler(req, res) {
         }
 
         proxyRes.on('data', chunk => {
-          // Akumulasi token untuk background resilience
-          if (sessionId) {
-            accumulateChatChunk(sessionId, chunk, 'ollama');
-          }
+          const safeChunk = reasoningFilter.push(chunk);
+          // Persist hanya event jawaban bersih; reasoning provider tidak disimpan.
+          if (sessionId && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'ollama');
 
           if (clientDisconnected || res.writableEnded || res.destroyed) {
             if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
             return;
           }
           try {
-            const flushed = res.write(chunk);
+            if (!safeChunk) return;
+            const flushed = res.write(safeChunk);
             // M27: hormati backpressure — klien lambat yang berhenti membaca
             // (tapi socket tetap terbuka) menghentikan sementara upstream alih-alih
             // menumpuk token tak terbatas di memori proses.
@@ -5754,8 +5717,11 @@ async function requestHandler(req, res) {
         });
 
         proxyRes.on('end', () => {
+          const safeTail = reasoningFilter.end();
+          if (sessionId && safeTail) accumulateChatChunk(sessionId, safeTail, 'ollama');
           if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
             try {
+              if (safeTail) res.write(safeTail);
               res.end();
             } catch (e) {}
           }
@@ -6247,6 +6213,7 @@ async function requestHandler(req, res) {
 
         // OpenRouter returned 200 OK -> Send headers matching client stream mode!
         const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
+        const reasoningFilter = textSafety.createProviderStreamFilter('openrouter', isStream ? 'stream' : 'json');
         if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
           try {
             res.writeHead(200, {
@@ -6261,17 +6228,17 @@ async function requestHandler(req, res) {
         }
 
         proxyRes.on('data', chunk => {
-          // Akumulasi token untuk background resilience
-          if (sessionId) {
-            accumulateChatChunk(sessionId, chunk, 'openrouter');
-          }
+          const safeChunk = reasoningFilter.push(chunk);
+          // Background task menerima frame yang sama setelah reasoning dihapus.
+          if (sessionId && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'openrouter');
 
           if (clientDisconnected || res.writableEnded || res.destroyed) {
             if (!sessionId && proxyReq && !proxyReq.destroyed) proxyReq.destroy();
             return;
           }
           try {
-            const flushed = res.write(chunk);
+            if (!safeChunk) return;
+            const flushed = res.write(safeChunk);
             // M27: backpressure — hentikan baca upstream saat klien lambat.
             if (flushed === false && typeof proxyRes.pause === 'function') {
               proxyRes.pause();
@@ -6281,8 +6248,11 @@ async function requestHandler(req, res) {
         });
 
         proxyRes.on('end', () => {
+          const safeTail = reasoningFilter.end();
+          if (sessionId && safeTail) accumulateChatChunk(sessionId, safeTail, 'openrouter');
           if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
             try {
+              if (safeTail) res.write(safeTail);
               res.end();
             } catch (e) {}
           }

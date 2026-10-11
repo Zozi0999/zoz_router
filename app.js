@@ -6,6 +6,11 @@
 (() => {
   'use strict';
 
+  const TEXT_SAFETY = window.ZozTextSafety || null;
+  const safeAssistantText = (text) => TEXT_SAFETY && typeof text === 'string'
+    ? TEXT_SAFETY.stripReasoningText(text)
+    : (typeof text === 'string' ? text.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '').trim() : '');
+
   const IS_VERCEL = Boolean(location.hostname && location.hostname.endsWith('vercel.app'));
   const IS_GITHUB_PAGES = Boolean(location.hostname && location.hostname.endsWith('github.io')) || location.protocol === 'file:';
   const IS_CLOUD_HOSTED = Boolean(
@@ -2147,7 +2152,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   function notifyAiCompletion(title, textBody) {
     if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
       try {
-        const cleanText = (textBody || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+        const cleanText = safeAssistantText(textBody).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
         const snippet = cleanText.slice(0, 140) + (cleanText.length > 140 ? '...' : '');
         const notif = new Notification(title || '🤖 Zoz Router AI', {
           body: snippet || 'Jawaban AI telah selesai diproses.',
@@ -2198,97 +2203,17 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       .replace(/\bon\w+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '');
   }
 
-  // ==================== DETERMINISTIC REASONING & WEB SYNTHESIS PROCESSORS (NON-REGEX) ====================
+  // ==================== DETERMINISTIC REASONING & WEB SYNTHESIS PROCESSORS ====================
   function splitReasoningAndContent(rawText) {
-    if (!rawText || typeof rawText !== 'string') {
-      return { reasoning: '', content: '', isThinking: false };
-    }
-
-    const thinkOpenTag = '<think>';
-    const thinkCloseTag = '</think>';
-    const lower = rawText.toLowerCase();
-
-    const openIdx = lower.indexOf(thinkOpenTag);
-    if (openIdx === -1) {
-      return { reasoning: '', content: rawText, isThinking: false };
-    }
-
-    let reasoning = '';
-    let content = '';
-    let isThinking = false;
-
-    let currentPos = 0;
-    while (currentPos < rawText.length) {
-      const nextOpen = lower.indexOf(thinkOpenTag, currentPos);
-      if (nextOpen === -1) {
-        content += rawText.substring(currentPos);
-        break;
-      }
-
-      if (nextOpen > currentPos) {
-        content += rawText.substring(currentPos, nextOpen);
-      }
-
-      const contentStart = nextOpen + thinkOpenTag.length;
-      const nextClose = lower.indexOf(thinkCloseTag, contentStart);
-
-      if (nextClose === -1) {
-        const remainingThought = rawText.substring(contentStart);
-        reasoning += (reasoning ? '\n\n' : '') + remainingThought;
-        isThinking = true;
-        currentPos = rawText.length;
-        break;
-      } else {
-        const thoughtChunk = rawText.substring(contentStart, nextClose);
-        reasoning += (reasoning ? '\n\n' : '') + thoughtChunk;
-        currentPos = nextClose + thinkCloseTag.length;
-      }
-    }
-
-    // Model reasoning tertentu (mis. varian :free nemotron dsb.) menyalurkan
-    // SELURUH respons — termasuk jawaban akhir — ke reasoning_content dengan
-    // konten reguler KOSONG. JANGAN tumpahkan seluruh COT sebagai jawaban
-    // ("nguwaur di awal, jawaban asli tenggelam di akhir"): promosikan hanya
-    // PARAGRAF TERAKHIR sebagai jawaban; sisanya tetap di blok pikiran yang
-    // dilipat. Bila hanya satu paragraf, semuanya jadi jawaban (tanpa blok).
-    if (!isThinking && !content.trim() && reasoning.trim()) {
-      let paras = reasoning.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
-      if (!paras.length) {
-        return { reasoning: '', content: '', isThinking: false };
-      }
-      // Paragraf terakhir SERING masih tumpukan baris pikiran + jawaban menempel
-      // di baris TERAKHIR ("ful tone.Hai, Kaisar..."). Ambil baris terakhir saja
-      // sebagai kandidat jawaban; baris pikiran lainnya dikembalikan ke blok
-      // pikiran (terlipat), bukan ditumpahkan ke tampilan utama.
-      let lastPara = paras.pop();
-      let backToThinking = [];
-      if (lastPara.includes('\n')) {
-        const lines = lastPara.split('\n').map(l => l.trim()).filter(Boolean);
-        lastPara = lines.pop() || '';
-        backToThinking = lines;
-      }
-      let finalAnswer = lastPara;
-      // Buang residu COT yang menempel TANPA spasi setelah titik
-      // ("ful tone.Hai, ..." / "greeting.Hai, ...") — jawaban mulai dari titik itu.
-      const gluedIdx = finalAnswer.search(/(?<=[a-zà-ÿ])\.(?=[A-ZÀ-Þ])/);
-      if (gluedIdx > 0 && gluedIdx <= 40) {
-        finalAnswer = finalAnswer.slice(gluedIdx + 1).trim();
-      }
-      // Ekstraksi ternyata kosong → jangan sembunyikan apa pun, tampilkan utuh.
-      if (!finalAnswer.trim()) {
-        return { reasoning: '', content: reasoning.trim(), isThinking: false };
-      }
-      const restThinking = paras
-        .concat(backToThinking.length ? [backToThinking.join('\n')] : [])
-        .join('\n\n');
-      return { reasoning: restThinking.trim(), content: finalAnswer.trim(), isThinking: false };
-    }
-
-    return {
-      reasoning: reasoning.trim(),
-      content: content.trim(),
-      isThinking
-    };
+    if (TEXT_SAFETY) return TEXT_SAFETY.splitReasoningAndContent(rawText);
+    if (typeof rawText !== 'string' || !rawText) return { reasoning: '', content: '', isThinking: false };
+    const open = rawText.toLowerCase().indexOf('<think>');
+    if (open < 0) return { reasoning: '', content: rawText, isThinking: false };
+    let content = rawText.slice(0, open);
+    const close = rawText.toLowerCase().indexOf('</think>', open + 7);
+    if (close < 0) return { reasoning: rawText.slice(open + 7), content, isThinking: true };
+    content += rawText.slice(close + 8);
+    return { reasoning: rawText.slice(open + 7, close), content: content.trim(), isThinking: false };
   }
 
   function synthesizeAutonomousWebSummary(rawToolResponsesText, sources) {
@@ -2318,10 +2243,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // Pisahkan blok pemikiran AI (<think>) dan konten jawaban utama secara deterministik (tanpa regex rentan)
     const parsedBlocks = splitReasoningAndContent(rawText);
     
-    // PEMIKIRAN AI (...) TIDAK DITAMPILKAN LAGI — keputusan Kaisar:
-    // tampilan murni jawaban agar bug output cepat terlihat. Pemisahan blok +
-    // ekstraksi jawaban terakhir (model reasoning-only) TETAP berjalan di
-    // splitReasoningAndContent — hanya HTML blok pikirannya yang tidak dirender.
+    // Reasoning dihapus dari proyeksi tampilan; hanya konten eksplisit di luar
+    // kanal/tag reasoning yang boleh dirender. Jika provider tidak mengirim
+    // jawaban eksplisit, output sengaja tetap kosong (fail closed).
     let contentHtml = '';
     if (parsedBlocks.content) {
       // Rapikan teks robek (satu KATA per baris — khas model :free) menjadi
@@ -2354,7 +2278,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   // menambah overhead saat streaming 60fps tanpa perubahan hasil sama sekali.
   if (window.marked) {
     marked.setOptions({
-      breaks: true,
+      // Single newlines in prose are soft-wrapped, not hard breaks. This keeps
+      // answers with model-inserted line wraps as readable paragraphs while
+      // Markdown blank lines/lists/code retain their structure.
+      breaks: false,
       gfm: true
     });
   }
@@ -2532,28 +2459,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   // PROSA berurutan menjadi satu baris mengalir — baris struktural (heading,
   // list, blockquote, tabel) dan isi BLOK KODE (di antara ```) dibiarkan utuh.
   function reflowShreddedProse(text) {
-    if (!text || text.indexOf('\n') === -1) return text;
-    const STRUCTURAL = /^\s*(#{1,6}\s|>|[-*+]\s|\d+[.)]\s|\|)/;
-    const FENCE = /^\s*(```|~~~)/;
-    const out = [];
-    let inFence = false;
-    let proseRun = [];
-    const flushRun = () => {
-      if (proseRun.length) {
-        out.push(proseRun.join(' ').replace(/\s{2,}/g, ' '));
-        proseRun = [];
-      }
-    };
-    for (const line of text.split('\n')) {
-      if (FENCE.test(line)) { flushRun(); inFence = !inFence; out.push(line); continue; }
-      if (inFence) { out.push(line); continue; }
-      if (STRUCTURAL.test(line)) { flushRun(); out.push(line); continue; }
-      const t = line.trim();
-      if (!t) { flushRun(); out.push(line); continue; }
-      proseRun.push(t);
-    }
-    flushRun();
-    return out.join('\n');
+    return TEXT_SAFETY ? TEXT_SAFETY.reflowShreddedProse(text) : text;
   }
 
   class StreamBufferRenderer {
@@ -2565,34 +2471,20 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       this.renderTimer = null; // handle setTimeout render terjadwal (coalesced)
       this.lastRenderTime = 0;
       this.isDone = false;
-      this.inReasoningTag = false;
     }
 
     setPrefixHtml(prefix) {
       this.prefixHtml = prefix || '';
     }
 
-    appendReasoning(reasoningDelta) {
-      if (reasoningDelta === null || reasoningDelta === undefined) return;
-      const str = String(reasoningDelta);
-      if (!str) return;
-      if (!this.inReasoningTag) {
-        this.inReasoningTag = true;
-        this.append('<think>\n' + str);
-      } else {
-        this.append(str);
-      }
+    appendReasoning(_reasoningDelta) {
+      // Fail closed: kanal reasoning sengaja tidak disimpan/render di transkrip.
     }
 
     append(delta) {
       if (delta === null || delta === undefined) return;
       const str = String(delta);
       if (!str) return;
-      // Jika model berpindah dari fase reasoning ke konten reguler, tutup blok <think>
-      if (this.inReasoningTag && !str.startsWith('<think>') && !str.startsWith('</think>')) {
-        this.inReasoningTag = false;
-        this.text += '\n</think>\n\n';
-      }
       this.text += str;
       if (this.isDone) return;
       this.scheduleRender();
@@ -2620,15 +2512,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
 
     finish(opts = {}) {
-      // opts.render === false → batalkan timer + tutup blok reasoning + kembalikan teks,
-      // TANPA menyentuh DOM (dipakai jalur completion yang sudah merender sendiri di
-      // bawahnya, agar tidak ada renderMarkdown + hljs ganda).
+      // opts.render === false → batalkan timer dan kembalikan teks jawaban,
+      // TANPA menyentuh DOM (jalur completion merender sendiri di bawahnya).
       const shouldRender = opts.render !== false;
       this.isDone = true;
-      if (this.inReasoningTag) {
-        this.inReasoningTag = false;
-        this.text += '\n</think>';
-      }
       if (this.renderTimer !== null) {
         clearTimeout(this.renderTimer);
         this.renderTimer = null;
@@ -3033,7 +2920,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         const needsNewline = previousText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(previousText) || /```\w*$/.test(previousText);
         const needsSpace = !needsNewline && !previousText.endsWith(' ') && !appendedText.startsWith(' ') && !appendedText.startsWith('\n');
         const separator = needsNewline ? '\n' : (needsSpace ? ' ' : '');
-        const merged = (previousText + separator + appendedText).trim();
+        const merged = safeAssistantText((safeAssistantText(previousText) + separator + appendedText).trim());
         bubbleText.innerHTML = renderMarkdown(merged);
         enhanceCodeBlocks(bubbleText);
         
@@ -3049,14 +2936,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           }
         }
         if (targetMsg) {
-          targetMsg.content = merged;
+          targetMsg.content = safeAssistantText(merged);
         } else {
           const lastMsg = (session.messages && session.messages.length > 0) ? session.messages[session.messages.length - 1] : null;
           if (lastMsg && lastMsg.role === 'assistant') {
-            lastMsg.content = merged;
+            lastMsg.content = safeAssistantText(merged);
           }
         }
-        assistantRow.dataset.fullContent = merged;
+        assistantRow.dataset.fullContent = safeAssistantText(merged);
         session.updatedAt = new Date().toISOString();
         savePersistedState();
         renderChatHistory(els.searchHistoryInput?.value || '');
@@ -3090,7 +2977,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (STATE.settings.systemPrompt) {
       messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
     }
-    session.messages.forEach(m => messagesPayload.push({ role: m.role, content: m.content || '' }));
+    session.messages.forEach(m => messagesPayload.push({
+      role: m.role,
+      content: m.role === 'assistant' ? safeAssistantText(m.content || '') : (m.content || '')
+    }));
     messagesPayload.push({ role: 'user', content: promptInstruction });
 
     const res = await fetch(endpoint, {
@@ -3130,29 +3020,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
     };
 
-    // Reasoning WAJIB dibungkus tag  ( sama seperti StreamBufferRenderer
-    // .appendReasoning dan akumulasi server) — dulu reasoning digabung MENTAH ke
-    // konten (content || cReasoning) sehingga proses berpikir model bocor tampil
-    // sebagai jawaban utama.
-    let contInReasoning = false;
-    const feedContinuationDelta = (contentDelta, reasoningDelta) => {
-      if (reasoningDelta) {
-        const piece = contInReasoning ? reasoningDelta : ('\n' + reasoningDelta);
-        contInReasoning = true;
-        appended += piece;
-        appendContinuationChunk(piece);
-        return;
-      }
-      if (contentDelta) {
-        if (contInReasoning) {
-          contInReasoning = false;
-          const closing = '\n\n\n' + '\n\n';
-          appended += closing;
-          appendContinuationChunk(closing);
-        }
-        appended += contentDelta;
-        appendContinuationChunk(contentDelta);
-      }
+    // Reasoning delta tidak pernah masuk buffer/render/persist. Tetap proses
+    // contentDelta pada event yang sama — beberapa provider mengirim keduanya.
+    const feedContinuationDelta = (contentDelta, _reasoningDelta) => {
+      if (!contentDelta) return;
+      appended += contentDelta;
+      appendContinuationChunk(contentDelta);
     };
 
     while (true) {
@@ -3213,7 +3086,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (STATE.settings.systemPrompt) {
       messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
     }
-    session.messages.forEach(m => messagesPayload.push({ role: m.role, content: m.content || '' }));
+    session.messages.forEach(m => messagesPayload.push({
+      role: m.role,
+      content: m.role === 'assistant' ? safeAssistantText(m.content || '') : (m.content || '')
+    }));
     messagesPayload.push({ role: 'user', content: promptInstruction });
 
     const chatUrl = (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
@@ -4055,7 +3931,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       row.dataset.reportDate = resolvedTimestamp;
     }
     if (content) {
-      row.dataset.fullContent = content;
+      row.dataset.fullContent = role === 'assistant' ? safeAssistantText(content) : content;
     }
 
     const avatarIcon = role === 'user' ? '<i class="fa-solid fa-user-ninja"></i>' : '<i class="fa-solid fa-microchip-ai"></i>';
@@ -4142,13 +4018,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       statsHtml = `<span class="meta-model-badge">${escapeHtml(model)}</span>`;
     }
 
-    const hasText = Boolean(content && String(content).trim().length > 0);
+    const safeContent = role === 'assistant' ? safeAssistantText(content || '') : (content || '');
+    const hasText = Boolean(safeContent && String(safeContent).trim().length > 0);
     let renderedBody = '';
     if (isActuallyDeepResearch && role === 'assistant' && hasText) {
       const msgObj = (typeof index === 'number' && index >= 0 && currentSess?.messages?.[index]) ? currentSess.messages[index] : null;
-      renderedBody = buildDeepResearchSummaryCardHtml(content, model, sources, resolvedTimestamp || timestamp, msgObj?.chatSummary || '');
+      renderedBody = buildDeepResearchSummaryCardHtml(safeContent, model, sources, resolvedTimestamp || timestamp, msgObj?.chatSummary || '');
     } else {
-      renderedBody = role === 'assistant' ? renderMarkdown(content || '') : escapeHtml(content || '').replace(/\n/g, '<br>');
+      renderedBody = role === 'assistant' ? renderMarkdown(safeContent) : escapeHtml(safeContent).replace(/\n/g, '<br>');
     }
     const textDisplayStyle = (!hasText && role === 'user') ? 'style="display:none;"' : '';
 
@@ -4407,7 +4284,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     // Message copy button
     row.querySelector('.copy-msg-btn')?.addEventListener('click', () => {
-      const textToCopy = row.dataset.fullContent || content || row.querySelector('.msg-text-content')?.innerText || '';
+      const rawText = row.dataset.fullContent || content || row.querySelector('.msg-text-content')?.innerText || '';
+      const textToCopy = role === 'assistant' ? safeAssistantText(rawText) : rawText;
       copyTextToClipboard(textToCopy, null, 'Pesan disalin ke clipboard!');
     });
 
@@ -5284,6 +5162,7 @@ Aturan wajib:
     const ex = extractGeneratedFiles(String(text || ''), false);
     let out = ex.files.length > 0 ? stripGeneratedFileBlocks(text, ex.rawBlocks) : String(text || '');
     out = hideFileBlocksForDisplay(out);
+    out = safeAssistantText(out);
     return { text: out, files: ex.files };
   }
 
@@ -8497,7 +8376,7 @@ Format teks (untuk model tanpa function calling):
       const imgs = m.images || [];
 
       if (engine === 'ollama') {
-        const item = { role: m.role, content: m.content || '...' };
+        const item = { role: m.role, content: m.role === 'assistant' ? safeAssistantText(m.content || '...') : (m.content || '...') };
         if (imgs.length > 0 && isLatestTurn) {
           const rawImages = [];
           imgs.forEach(img => {
@@ -8555,7 +8434,11 @@ Format teks (untuk model tanpa function calling):
             messagesPayload.push({ role: m.role, content: textSummary });
           }
         } else {
-          messagesPayload.push({ role: m.role, content: m.content || '...' });
+          const messageContent = m.content || '...';
+          messagesPayload.push({
+            role: m.role,
+            content: m.role === 'assistant' ? safeAssistantText(messageContent) : messageContent
+          });
         }
       }
     });
@@ -8788,7 +8671,7 @@ Format teks (untuk model tanpa function calling):
 
       // render:false → render final tunggal ada di bawah (finalRenderedContent),
       // sehingga renderMarkdown + enhanceCodeBlocks/hljs tidak dijalankan dua kali.
-      fullText = streamRenderer.finish({ render: false });
+      fullText = safeAssistantText(streamRenderer.finish({ render: false }));
 
       // ==================== OLLAMA AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const canRunAutonomousSearch = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
@@ -9048,9 +8931,10 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         throw new Error('Model Ollama menyelesaikan koneksi tanpa menghasilkan respon teks.');
       }
 
+      fullText = safeAssistantText(fullText);
       const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
       const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
-      
+
       const finalRenderedContent = (preambleHtml ? preambleHtml : '') + (executedHudHtml ? executedHudHtml + renderMarkdown(fullText) : renderMarkdown(fullText)).trim();
       bubbleText.innerHTML = finalRenderedContent.trim();
       enhanceCodeBlocks(bubbleText);
@@ -9660,7 +9544,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
       // render:false → render final tunggal ada di bawah (finalRenderedContent),
       // sehingga renderMarkdown + enhanceCodeBlocks/hljs tidak dijalankan dua kali.
-      fullText = streamRenderer.finish({ render: false });
+      fullText = safeAssistantText(streamRenderer.finish({ render: false }));
 
       // ==================== UNIVERSAL AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const canRunAutonomousSearch = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
@@ -9970,6 +9854,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         throw new Error('Model OpenRouter menyelesaikan koneksi tanpa menghasilkan respon teks.');
       }
 
+      fullText = safeAssistantText(fullText);
       const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
       const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
 
@@ -11824,6 +11709,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
   function attachDeepResearchCardEvents(container, fullText, model, sources, date) {
     if (!container) return;
+    fullText = safeAssistantText(fullText || '');
     const reportTitle = extractReportTitle(fullText);
     const openReport = () => {
       openDeepResearchReportModal(fullText, reportTitle, {
@@ -14732,7 +14618,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
     session.messages.forEach(m => {
       const sender = m.role === 'user' ? '👤 Pengguna' : `🤖 AI (${m.model || 'Model'})`;
-      let content = m.content || '';
+      let content = m.role === 'assistant' ? safeAssistantText(m.content || '') : (m.content || '');
 
       // Visual Markdown Image Rendering for AI Image Studio results
       if (m.type === 'image_generation' || m.isImageGen || m.imageUrl) {
@@ -18289,23 +18175,27 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
     // ==================== DEEP RESEARCH FULL REPORT MODAL LISTENERS ====================
     document.getElementById('btnExportReportPDF')?.addEventListener('click', () => {
-      if (!currentActiveReport.fullText) return;
-      downloadReportPDF(currentActiveReport.title, currentActiveReport.fullText);
+      const reportText = safeAssistantText(currentActiveReport.fullText || '');
+      if (!reportText) return;
+      downloadReportPDF(currentActiveReport.title, reportText);
     });
 
     document.getElementById('btnExportReportDOCX')?.addEventListener('click', () => {
-      if (!currentActiveReport.fullText) return;
-      downloadReportDOCX(currentActiveReport.title, currentActiveReport.fullText);
+      const reportText = safeAssistantText(currentActiveReport.fullText || '');
+      if (!reportText) return;
+      downloadReportDOCX(currentActiveReport.title, reportText);
     });
 
     document.getElementById('btnExportReportMD')?.addEventListener('click', () => {
-      if (!currentActiveReport.fullText) return;
-      downloadReportMD(currentActiveReport.title, currentActiveReport.fullText);
+      const reportText = safeAssistantText(currentActiveReport.fullText || '');
+      if (!reportText) return;
+      downloadReportMD(currentActiveReport.title, reportText);
     });
 
     document.getElementById('btnCopyFullReport')?.addEventListener('click', () => {
-      if (!currentActiveReport.fullText) return;
-      copyTextToClipboard(currentActiveReport.fullText, null, 'Seluruh teks laporan riset disalin ke clipboard!');
+      const reportText = safeAssistantText(currentActiveReport.fullText || '');
+      if (!reportText) return;
+      copyTextToClipboard(reportText, null, 'Seluruh teks laporan riset disalin ke clipboard!');
     });
 
     document.getElementById('btnToggleReportSources')?.addEventListener('click', () => {
