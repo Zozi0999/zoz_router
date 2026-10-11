@@ -2318,43 +2318,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // Pisahkan blok pemikiran AI (<think>) dan konten jawaban utama secara deterministik (tanpa regex rentan)
     const parsedBlocks = splitReasoningAndContent(rawText);
     
-    let reasoningHtml = '';
-    if (parsedBlocks.reasoning) {
-      // Teks pikiran model reasoning varian :free sering terpotong per-token
-      // (satu KATA per baris) sehingga blok pikiran terlihat berantakan.
-      // Gabungkan \n TUNGAL menjadi spasi agar menjadi prosa mengalir —
-      // batas paragraf (\n\n) tetap dipertahankan.
-      const reflowedReasoning = parsedBlocks.reasoning.replace(/([^\n])\n(?!\n)/g, '$1 ');
-      let reasoningParsed = '';
-      if (window.marked) {
-        try {
-          reasoningParsed = marked.parse(reflowedReasoning);
-        } catch (_) {
-          reasoningParsed = escapeHtml(reflowedReasoning).replace(/\n/g, '<br>');
-        }
-      } else {
-        reasoningParsed = escapeHtml(reflowedReasoning).replace(/\n/g, '<br>');
-      }
-
-      const statusBadge = parsedBlocks.isThinking
-        ? `<span class="reasoning-badge thinking"><i class="fa-solid fa-spinner fa-spin"></i> Berpikir...</span>`
-        : `<span class="reasoning-badge done"><i class="fa-solid fa-check"></i> Selesai Berpikir</span>`;
-
-      const shouldOpen = parsedBlocks.isThinking || !parsedBlocks.content;
-
-      reasoningHtml = `
-        <details class="reasoning-block"${shouldOpen ? ' open' : ''}>
-          <summary class="reasoning-summary">
-            <span class="reasoning-title"><i class="fa-solid fa-brain"></i> Proses Pemikiran AI</span>
-            ${statusBadge}
-          </summary>
-          <div class="reasoning-content markdown-body">
-            ${reasoningParsed}
-          </div>
-        </details>
-      `.trim();
-    }
-
+    // PEMIKIRAN AI (...) TIDAK DITAMPILKAN LAGI — keputusan Kaisar:
+    // tampilan murni jawaban agar bug output cepat terlihat. Pemisahan blok +
+    // ekstraksi jawaban terakhir (model reasoning-only) TETAP berjalan di
+    // splitReasoningAndContent — hanya HTML blok pikirannya yang tidak dirender.
     let contentHtml = '';
     if (parsedBlocks.content) {
       if (window.marked) {
@@ -2367,16 +2334,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       } else {
         contentHtml = escapeHtml(parsedBlocks.content).replace(/\n/g, '<br>');
       }
-    } else if (parsedBlocks.reasoning && !parsedBlocks.isThinking) {
-      contentHtml = `
-        <div class="reasoning-only-notice">
-          <i class="fa-solid fa-hourglass-end"></i> Model telah merumuskan proses pemikiran, tetapi kuota token output tercapai sebelum respon final selesai dirumuskan. Klik tombol <strong>Lanjutkan Jawaban</strong> di bawah untuk melanjutkan.
-        </div>
-      `.trim();
     }
 
-    const combinedHtml = (reasoningHtml ? reasoningHtml + '\n' : '') + contentHtml;
-    const sanitized = sanitizeHtmlSafe(combinedHtml);
+    const sanitized = sanitizeHtmlSafe(contentHtml);
 
     // Pastikan seluruh tautan eksternal (http/https) membuka di tab baru agar tidak memutus sesi obrolan
     return sanitized.replace(/<a\b([^>]*?href=["']https?:\/\/[^"']+["'][^>]*)>/gi, (match, attrs) => {
