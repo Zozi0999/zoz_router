@@ -270,6 +270,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     researchTargetUrls: [], // Target URL kustom untuk Mode Deep Research
     isImageGenMode: false,
     isMusicGenMode: false,
+    photoEditImage: null, // dataURL foto referensi untuk mode Edit Foto AI (Img2Img)
     isYouTubeSearchMode: false, // Tool "Cari Video YouTube" (toggle dari menu Lampiran)
     isGenerating: false,
     isSending: false, // Guard anti pengiriman ganda (Enter berulang saat masih ada await)
@@ -283,7 +284,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       ollamaEndpoint: 'http://127.0.0.1:11434',
       ollamaApiKey: '',
       openRouterKey: '',
-      serperApiKey: '075538fed9c64990e1eb32a06726c1e55a933c1e',
+      serperApiKey: '', // key milik user saja — server menyuplai key env-nya sendiri
       ollamaModel: 'qwen2.5:1.5b',
       openRouterModel: 'openrouter/free',
       imageModel: 'flux',
@@ -510,6 +511,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     attachOptionYouTubeSearch: $('#attachOptionYouTubeSearch'),
     imageFileInput: $('#imageFileInput'),
     cameraFileInput: $('#cameraFileInput'),
+    photoEditFileInput: $('#photoEditFileInput'),
+    photoEditReferenceCard: $('#photoEditReferenceCard'),
+    photoEditRefThumb: $('#photoEditRefThumb'),
+    btnCancelPhotoEdit: $('#btnCancelPhotoEdit'),
+    attachOptionEditPhoto: $('#attachOptionEditPhoto'),
     docFileInput: $('#docFileInput'),
     searchMenuWrapper: $('#searchMenuWrapper'),
     webSearchToggleBtn: $('#webSearchToggleBtn'),
@@ -990,7 +996,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         try {
           const tx = this.db.transaction('sessions', 'readwrite');
           const store = tx.objectStore('sessions');
-          store.clear();
+          // TANPA perintah clear() pada store: metode ini dipakai untuk import/penyimpanan batch,
+          // jadi menghapus seluruh store dulu berarti sesi lain yang tidak ikut
+          // dikirim ikut terhapus. Penghapusan sesi kini eksplisit (ChatDB.deleteSession).
           sessions.forEach(s => store.put(s));
           tx.oncomplete = () => resolve(true);
           tx.onerror = () => resolve(false);
@@ -1127,7 +1135,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
       if (this.isDeviceBackendAvailable) {
         try {
-          await fetch('/api/sessions', {
+          const res = await fetch('/api/sessions', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -1135,6 +1143,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             },
             body: JSON.stringify({ ...session, userId: STATE.userId })
           });
+          if (!res.ok) console.warn('[DeviceStorage] save gagal:', res.status);
         } catch (e) {
           console.warn('DeviceStorage saveSession failed:', e.message);
         }
@@ -1331,9 +1340,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         STATE.settings.imageModel = 'flux';
       }
 
-      if (!STATE.settings.serperApiKey) {
-        STATE.settings.serperApiKey = '075538fed9c64990e1eb32a06726c1e55a933c1e';
-      }
       const savedSound = localStorage.getItem('zoz_router_sound_v1');
       if (savedSound !== null) {
         STATE.soundEnabled = savedSound === 'true';
@@ -1410,7 +1416,13 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           if (!s.userId) s.userId = STATE.userId;
         });
         if (validDbSessions.length !== dbSessions.length) {
+          // saveAllSessions() tak lagi mem-clear store, jadi sesi asing/lazy yang
+          // tersaring harus dihapus eksplisit agar tidak "bangkit" dari vault lokal.
           await ChatDB.saveAllSessions(validDbSessions);
+          const validIds = new Set(validDbSessions.map(s => s.id));
+          for (const s of dbSessions) {
+            if (!validIds.has(s.id)) await ChatDB.deleteSession(s.id);
+          }
         }
         if (validDbSessions.length >= STATE.sessions.length) {
           STATE.sessions = validDbSessions;
@@ -1570,6 +1582,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   }
 
   async function checkBackgroundChatTasksSync() {
+    // JANGAN menyela pengiriman/generasi yang sedang berjalan: sync ini bisa
+    // memanggil setGeneratingState(true) + attachToActiveBackgroundChat dan
+    // membajak gelembung yang sedang dipakai stream aktif.
+    if (STATE.isGenerating || STATE.isSending) return;
     if (IS_GITHUB_PAGES || isCheckingBackgroundSync) return;
     isCheckingBackgroundSync = true;
     try {
@@ -1583,7 +1599,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         if (res && res.ok) {
           const data = await res.json();
           if (data && data.status === 'streaming') {
-            setGeneratingState(true);
             attachToActiveBackgroundChat(activeSession, data.model, data.text || '');
             return;
           } else if (data && data.status === 'completed' && data.completedAt) {
@@ -1607,9 +1622,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             const targetSession = STATE.sessions.find(s => s.id === targetSid);
             if (targetSession) {
               await switchSession(targetSid);
-              setGeneratingState(true);
-              attachToActiveBackgroundChat(targetSession, targetTask.model, targetTask.text || '');
-              showToast('⚡ Menyambung kembali ke respons AI Anda yang sedang diproses di latar belakang...', 'info');
+              if (attachToActiveBackgroundChat(targetSession, targetTask.model, targetTask.text || '')) {
+                showToast('⚡ Menyambung kembali ke respons AI Anda yang sedang diproses di latar belakang...', 'info');
+              }
               return;
             }
           }
@@ -1644,7 +1659,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
   }
 
+  // Encoder untuk estimasi panjang byte (UTF-8) teks poll latar belakang —
+  // dipakai saat server mengirim bentuk full-text (tanpa delta) sebagai nilai `since`.
+  const POLL_TEXT_ENCODER = new TextEncoder();
+
   function attachToActiveBackgroundChat(session, modelName, initialText = '') {
+    // Guard sama dengan checkBackgroundChatTasksSync: tidak boleh ada poll/sinkronisasi
+    // latar belakang yang mengambil alih DOM saat user sedang mengirim/menghasilkan
+    // (guard di sini penting karena pemanggil melewati beberapa await dulu).
+    if (STATE.isGenerating || STATE.isSending) return false;
+    setGeneratingState(true); // dipindah ke sini agar guard di atas benar-benar efektif
     if (activeChatPollTimer) clearInterval(activeChatPollTimer);
 
     // Dapatkan baris asisten terakhir atau buat baris baru jika belum ada di DOM
@@ -1668,6 +1692,18 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // dan notifikasi ganda. pollDone mengunci tick yang terlanjur masuk.
     let pollBusy = false;
     let pollDone = false;
+    // M16: diff-guard render + sinkron inkremental (kontrak /api/chat/status?since=):
+    // server bisa membalas { delta: true, text: <potongan>, fullBytes } sehingga kita
+    // cukup menumpuk potongannya, bukan menarik teks penuh tiap 800ms.
+    let lastRenderedPollText = null;
+    let pollFullBytes = 0;
+    let pollEpoch = 0; // epoch truncation server (kontrak /api/chat/status?since=&epoch=)
+    let pollBufferText = '';
+    // Teks terakhir yang DIKETAHUI tampil (initialText + akumulasi poll yang valid).
+    // Dipakai sebagai fallback saat finalize menerima respons KOSONG — status 'none'
+    // (task sudah dihapus server: stop dari tab lain / kadaluwarsa) datang tanpa field
+    // teks sehingga cabang non-delta di bawah mereset buffer menjadi ''.
+    let lastKnownText = initialText || '';
     activeChatPollTimer = setInterval(async () => {
       if (pollBusy || pollDone) return;
       pollBusy = true;
@@ -1675,17 +1711,23 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         if (STATE.currentSessionId !== session.id) {
           clearInterval(activeChatPollTimer);
           activeChatPollTimer = null;
+          pollBufferText = '';
+          pollFullBytes = 0;
+          pollEpoch = 0;
           return;
         }
 
         if (performance.now() - startTime > 15 * 60 * 1000) {
           clearInterval(activeChatPollTimer);
           activeChatPollTimer = null;
+          pollBufferText = '';
+          pollFullBytes = 0;
+          pollEpoch = 0;
           setGeneratingState(false);
           return;
         }
 
-        const res = await fetch(`/api/chat/status/${encodeURIComponent(session.id)}`, {
+        const res = await fetch(`/api/chat/status?sessionId=${encodeURIComponent(session.id)}&since=${pollFullBytes}&epoch=${pollEpoch}`, {
           headers: { 'X-User-ID': STATE.userId }
         }).catch(() => null);
         if (!res || !res.ok) return;
@@ -1696,10 +1738,34 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           STATE.currentDeepResearchTaskId = data.taskId;
         }
 
-        const currentText = data.text || '';
+        // Bentuk delta (baru): data.text hanya POTONGAN + fullBytes = total byte.
+        // Bentuk lama: data.text = teks penuh → jadikan buffer baru & hitung byte-nya.
+        let currentText = '';
+        if (data.delta === true) {
+          pollBufferText += (data.text || '');
+          // Fallback bila fullBytes tidak dikirim: hitung byte UTF-8 dari buffer,
+          // JANGAN .length (char UTF-16) — untuk teks non-ASCII (emoji/CJK) keduanya
+          // beda dan offset since berikutnya akan menyimpang dari byte sebenarnya.
+          pollFullBytes = data.fullBytes || POLL_TEXT_ENCODER.encode(pollBufferText).length;
+          currentText = pollBufferText;
+        } else {
+          pollBufferText = data.text || '';
+          pollFullBytes = POLL_TEXT_ENCODER.encode(pollBufferText).length;
+          currentText = pollBufferText;
+        }
+        // Sinkron epoch truncation dari server: server mengirim fullEpoch di SETIAP
+        // payload; delta hanya valid dalam epoch yang sama (truncation menggeser
+        // offset byte, jadi potongan epoch lama tak boleh ditumpuk lagi).
+        if (typeof data.fullEpoch === 'number') pollEpoch = data.fullEpoch;
+        // Catat teks valid terakhir SEBELUM cabang finalize di bawah berpotensi
+        // mereset buffer (respons 'none' kosong) — inilah penyelamat parsial.
+        if (currentText && currentText.trim()) lastKnownText = currentText;
         if (bubbleText && currentText) {
           if (data.isDeepResearch && data.status === 'streaming') {
-            bubbleText.innerHTML = `
+            // Diff-guard: hanya render ulang bila teks benar-benar bertambah.
+            if (currentText !== lastRenderedPollText) {
+              lastRenderedPollText = currentText;
+              bubbleText.innerHTML = `
               <div class="deep-research-live-card" style="padding:14px; border:1px solid rgba(0,240,255,0.3); border-radius:12px; background:rgba(10,15,25,0.7); backdrop-filter:blur(8px);">
                 <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; color:var(--neon-cyan); font-weight:600; font-size:0.95rem;">
                   <i class="fa-solid fa-atom fa-spin"></i> Deep Research Pro Aktif di Latar Belakang
@@ -1710,7 +1776,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
                 </div>
               </div>
             `;
-          } else {
+            }
+          } else if (currentText !== lastRenderedPollText) {
+            lastRenderedPollText = currentText;
             bubbleText.innerHTML = renderMarkdown(currentText) + (data.status === 'streaming' ? '<span class="typing-cursor"></span>' : '');
           }
           smartScrollChatToBottom(false);
@@ -1721,11 +1789,21 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           clearInterval(activeChatPollTimer);
           activeChatPollTimer = null;
           STATE.currentDeepResearchTaskId = null;
+          pollBufferText = '';
+          pollFullBytes = 0;
+          pollEpoch = 0;
 
-          const finalReportText = currentText;
+          // Jangan pernah memperlakukan respons KOSONG sebagai konten final: status
+          // 'none' datang tanpa field teks sehingga buffer sudah ter-reset di atas.
+          // Fallback ke teks terakhir yang tampil agar parsial tidak hilang dari DOM.
+          const finalReportText = (currentText && currentText.trim()) ? currentText : lastKnownText;
           const actualModelName = modelName || data.model || (data.isDeepResearch ? 'Deep Research Pro' : 'AI Model');
           if (bubbleText) {
-            if (data.isDeepResearch) {
+            if (!finalReportText.trim()) {
+              // Konten kosong total (tanpa initialText & tanpa stream) — jangan timpa
+              // bubble; cukup buang kursor streaming yang menggantung.
+              bubbleText.querySelector('.typing-cursor')?.remove();
+            } else if (data.isDeepResearch) {
               const allSources = Array.isArray(data.sources) ? data.sources : [];
               const chatSummary = data.chatSummary || '';
               const nowIso = new Date().toISOString();
@@ -1755,17 +1833,23 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           if (session.messages.length > 0) {
             lastMsg = session.messages[session.messages.length - 1];
           }
+          // Hanya push bila benar-benar ada isi — respons kosong ('none' tanpa
+          // fallback) tidak boleh membuat pesan assistant kosong di riwayat.
+          // Struktur if/else dipertahankan seperti semula agar cabang else HANYA
+          // berjalan saat lastMsg assistant (bukan saat lastMsg null + teks kosong).
           if (!lastMsg || lastMsg.role !== 'assistant') {
-            session.messages.push({
-              role: 'assistant',
-              content: finalReportText,
-              model: modelName || data.model,
-              timestamp: new Date().toISOString(),
-              backgroundCompleted: true,
-              isDeepResearch: !!data.isDeepResearch,
-              chatSummary: data.chatSummary || null,
-              sources: data.sources || null
-            });
+            if (finalReportText.trim()) {
+              session.messages.push({
+                role: 'assistant',
+                content: finalReportText,
+                model: modelName || data.model,
+                timestamp: new Date().toISOString(),
+                backgroundCompleted: true,
+                isDeepResearch: !!data.isDeepResearch,
+                chatSummary: data.chatSummary || null,
+                sources: data.sources || null
+              });
+            }
           } else {
             if (finalReportText) {
               lastMsg.content = finalReportText;
@@ -1785,6 +1869,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           setGeneratingState(false);
           if (data.status === 'aborted') {
             showToast('Generasi dihentikan oleh pengguna.');
+          } else if (data.status === 'none') {
+            // Task sudah tidak dikenal server (dihentikan tab lain / kadaluwarsa).
+            // Jangan klaim "selesai" — teks parsial (bila ada) tetap dipertahankan.
+            showToast(finalReportText.trim()
+              ? '⚡ Tugas AI di sesi ini sudah berakhir di server — teks parsial dipertahankan.'
+              : 'Tidak ada tugas aktif untuk sesi ini.');
           } else {
             AudioEngine.receive();
             notifyAiCompletion('🤖 ' + (modelName || data.model), finalReportText);
@@ -1796,7 +1886,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           activeChatPollTimer = null;
           STATE.currentDeepResearchTaskId = null;
           setGeneratingState(false);
-          const partialText = data.text || '';
+          // currentText sudah menampung buffer lengkap (baik bentuk delta maupun full),
+          // jadi diambil SEBELUM buffer di-reset di bawah.
+          const partialText = currentText;
+          pollBufferText = '';
+          pollFullBytes = 0;
+          pollEpoch = 0;
           const errDetail = typeof data.error === 'object' && data.error ? (data.error.message || JSON.stringify(data.error)) : String(data.error || 'Terjadi kesalahan koneksi');
           if (bubbleText) {
             if (partialText.trim()) {
@@ -1836,9 +1931,45 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         pollBusy = false; // M7: lepas kunci tick setiap iterasi selesai
       }
     }, 800);
+    return true; // poll terpasang (guard di atas tidak memblokir)
   }
 
-  function savePersistedState() {
+  // ==================== PERSISTENCE SCHEDULER (DEBOUNCE) ====================
+  // Menulis localStorage + mirror sesi + IndexedDB + POST DeviceStorage di SETIAP
+  // perubahan state ternyata mahal (triple-write). Semua panggilan kini dijadwalkan
+  // dulu (debounce 700ms); hanya panggilan {immediate:true} — hapus sesi, hapus
+  // semua riwayat, flush saat tab ditutup — yang menulis sinkron sekarang juga.
+  let savePersistTimer = null;
+  let savePersistDirty = false;
+  let lastPersistedSessionMeta = new Map(); // id -> updatedAt terakhir yang masuk IndexedDB
+  let localStorageMirrorBroken = false;     // kuota mirror penuh → tahan dulu tulis mirror
+  let localStorageMirrorRetryTimer = null;
+  let localStorageMirrorWarned = false;
+
+  function savePersistedState(options = {}) {
+    savePersistDirty = true;
+    if (options.immediate) {
+      if (savePersistTimer) {
+        clearTimeout(savePersistTimer);
+        savePersistTimer = null;
+      }
+      flushPersistedState();
+      return;
+    }
+    if (savePersistTimer) return;
+    savePersistTimer = setTimeout(() => {
+      savePersistTimer = null;
+      flushPersistedState();
+    }, 700);
+  }
+
+  function flushPersistedState() {
+    if (!savePersistDirty) return;
+    savePersistDirty = false;
+    performPersistedStateSave();
+  }
+
+  function performPersistedStateSave() {
     try {
       try {
         localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings));
@@ -1867,9 +1998,22 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
 
       // Save to IndexedDB (asynchronous & practically unlimited quota)
-      ChatDB.saveAllSessions(STATE.sessions);
+      // Sesi AKTIF sudah tercakup oleh DeviceStorage.saveSession() di atas (yang di
+      // dalamnya memanggil ChatDB.saveSession). Di sini hanya sesi yang updatedAt-nya
+      // berubah sejak save terakhir — dulu SELURUH STATE.sessions ditulis ulang pada
+      // SETIAP save (transaksi besar berulang-ulang tanpa perlu).
+      const dirtySessions = STATE.sessions.filter(s =>
+        s.id !== STATE.currentSessionId && lastPersistedSessionMeta.get(s.id) !== s.updatedAt);
+      if (dirtySessions.length) {
+        ChatDB.saveAllSessions(dirtySessions);
+      }
+      lastPersistedSessionMeta = new Map(STATE.sessions.map(s => [s.id, s.updatedAt]));
 
-      // Mirror lightweight summaries to localStorage
+      // Mirror lightweight summaries to localStorage.
+      // Dilewati sementara bila sebelumnya kena quota: kunci asli 'zoz_router_sessions_v1'
+      // masih berisi mirror LAMA yang utuh dan justru dipertahankan (lihat catch di bawah).
+      // Tulisan IndexedDB + server di atas TETAP jalan.
+      if (localStorageMirrorBroken) return;
       try {
         const lightweight = STATE.sessions.map(s => ({
           id: s.id,
@@ -1880,7 +2024,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           updatedAt: s.updatedAt,
           _isLazyDisk: !!s._isLazyDisk,
           messageCount: typeof s.messageCount === 'number' ? s.messageCount : (Array.isArray(s.messages) ? s.messages.length : 0),
-          messages: (s.messages || []).map(m => {
+          messages: (s.messages || []).map((m, mIdx) => {
             let safeImages = undefined;
             if (Array.isArray(m.images)) {
               safeImages = m.images.map(img => (typeof img === 'string' && img.startsWith('data:')) ? '[data:image]' : img);
@@ -1890,12 +2034,17 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             if (Array.isArray(m.docs)) {
               safeDocs = m.docs.map(d => ({ name: d.name, size: d.size }));
             }
-            // File buatan AI (AI File Studio): simpan juga isi kontennya agar kartu
-            // bisa dibuka lagi setelah reload walau IndexedDB belum tersinkron.
+            // File buatan AI (AI File Studio): isi konten (content) adalah bagian
+            // terbesar dari ukuran mirror dan membuat kuota ~5MB 'zoz_router_sessions_v1'
+            // mudah penuh. IndexedDB tetap sumber kebenaran; mirror hanya menyimpan
+            // isi file untuk 5 pesan terakhir per sesi — kartu yang paling mungkin
+            // dibuka pengguna sesaat setelah reload sebelum sinkronisasi IDB selesai.
+            const keepFileContent = mIdx >= ((s.messages || []).length - 5);
             let safeFiles = undefined;
             if (Array.isArray(m.files) && m.files.length > 0) {
               safeFiles = m.files.map(f => ({
-                name: f.name, mime: f.mime, lang: f.lang, content: f.content,
+                name: f.name, mime: f.mime, lang: f.lang,
+                content: keepFileContent ? f.content : '',
                 byteSize: f.byteSize, lineCount: f.lineCount,
                 size: f.size, desc: f.desc, isGeneratedByAI: true
               }));
@@ -1921,22 +2070,45 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }));
         localStorage.setItem('zoz_router_sessions_v1', JSON.stringify(lightweight));
       } catch (quotaErr) {
-        console.warn('localStorage quota exceeded, saving headers only:', quotaErr.message);
+        // QUOTA PENUH: kunci ASLI masih berisi mirror lama yang UTUH — jangan ditimpa
+        // (dulu ditimpa versi headers-only sehingga isi pesan hilang permanen padahal
+        // byte-nya masih ada). Alih-alih itu:
+        //   (i)  tulis backup terpisah 'zoz_router_sessions_v1_lite' (headers 20 sesi
+        //        terakhir saja) — kunci asli tak tersentuh,
+        //   (ii) set penanda agar save berikutnya melewati mirror penuh (IDB + server
+        //        tetap jalan), lalu coba lagi 5 menit kemudian,
+        //   (iii) console.warn sekali saja.
+        if (!localStorageMirrorWarned) {
+          localStorageMirrorWarned = true;
+          console.warn('localStorage quota exceeded — mirror asli dipertahankan, backup lite dibuat:', quotaErr.message);
+        }
+        localStorageMirrorBroken = true;
         try {
-          const headersOnly = STATE.sessions.map(s => ({
-            id: s.id,
-            title: s.title,
-            mode: s.mode,
-            isPinned: !!s.isPinned,
-            createdAt: s.createdAt,
-            updatedAt: s.updatedAt,
-            _isLazyDisk: !!s._isLazyDisk,
-            messageCount: typeof s.messageCount === 'number' ? s.messageCount : (Array.isArray(s.messages) ? s.messages.length : 0),
-            messages: []
-          }));
-          localStorage.setItem('zoz_router_sessions_v1', JSON.stringify(headersOnly));
+          const headersOnly = STATE.sessions
+            .slice()
+            .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+            .slice(0, 20)
+            .map(s => ({
+              id: s.id,
+              title: s.title,
+              mode: s.mode,
+              isPinned: !!s.isPinned,
+              createdAt: s.createdAt,
+              updatedAt: s.updatedAt,
+              _isLazyDisk: !!s._isLazyDisk,
+              messageCount: typeof s.messageCount === 'number' ? s.messageCount : (Array.isArray(s.messages) ? s.messages.length : 0),
+              messages: []
+            }));
+          localStorage.setItem('zoz_router_sessions_v1_lite', JSON.stringify(headersOnly));
         } catch (innerErr) {
-          console.warn('localStorage completely full, skipping sessions mirroring:', innerErr.message);
+          console.warn('localStorage completely full, skipping lite sessions backup:', innerErr.message);
+        }
+        if (!localStorageMirrorRetryTimer) {
+          localStorageMirrorRetryTimer = setTimeout(() => {
+            localStorageMirrorRetryTimer = null;
+            localStorageMirrorBroken = false;
+            savePersistedState();
+          }, 5 * 60 * 1000);
         }
       }
     } catch (err) {
@@ -2072,6 +2244,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
     }
 
+    // Model reasoning tertentu (mis. varian :free nemotron dsb.) menyalurkan
+    // SELURUH jawaban ke reasoning_content dengan konten reguler KOSONG — blok
+    // pikiran sudah ditutup (isThinking false = teks final, BUKAN streaming
+    // aktif) tapi jawaban tidak pernah keluar dari blok. Promosikan reasoning
+    // sebagai konten utama agar jawaban tidak terjebak di dalam blok pikiran.
+    if (!isThinking && !content.trim() && reasoning.trim()) {
+      return { reasoning: '', content: reasoning.trim(), isThinking: false };
+    }
+
     return {
       reasoning: reasoning.trim(),
       content: content.trim(),
@@ -2142,10 +2323,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (parsedBlocks.content) {
       if (window.marked) {
         try {
-          marked.setOptions({
-            breaks: true,
-            gfm: true
-          });
           contentHtml = marked.parse(parsedBlocks.content);
         } catch (err) {
           console.warn('[renderMarkdown] Error parsing markdown, fallback to escaped text:', err);
@@ -2169,6 +2346,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     return sanitized.replace(/<a\b([^>]*?href=["']https?:\/\/[^"']+["'][^>]*)>/gi, (match, attrs) => {
       const cleanAttrs = attrs.replace(/\s*(?:target|rel)=["'][^"']*["']/gi, '');
       return `<a${cleanAttrs} target="_blank" rel="noopener noreferrer">`;
+    });
+  }
+
+  // Init opsi marked SEKALI di module scope (marked.min.js dimuat sebelum app.js di index.html).
+  // Dulu setOptions dipanggil di dalam renderMarkdown → opsi di-set ulang pada SETIAP render,
+  // menambah overhead saat streaming 60fps tanpa perubahan hasil sama sekali.
+  if (window.marked) {
+    marked.setOptions({
+      breaks: true,
+      gfm: true
     });
   }
 
@@ -2346,7 +2533,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       this.onScroll = onScrollCallback;
       this.prefixHtml = prefixHtml;
       this.text = '';
-      this.animId = null;
+      this.renderTimer = null; // handle setTimeout render terjadwal (coalesced)
       this.lastRenderTime = 0;
       this.isDone = false;
       this.inReasoningTag = false;
@@ -2379,18 +2566,22 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
       this.text += str;
       if (this.isDone) return;
-      const now = performance.now();
-      // Throttle Markdown parsing to every 40ms to keep UI 60fps and prevent CPU lag
-      if (now - this.lastRenderTime > 40) {
+      this.scheduleRender();
+    }
+
+    // SELALU jadwalkan render — TIDAK PERNAH render sinkron dari dalam loop baca SSE.
+    // Coalesced/trailing: selama ada timer, append berikutnya tidak membuat timer baru
+    // (paling banyak satu render per interval adaptif), dan timer selalu menyusul
+    // append terakhir sehingga state final tidak pernah terlewat.
+    scheduleRender() {
+      if (this.renderTimer !== null) return;
+      const interval = Math.min(160, Math.max(40, Math.floor(this.text.length / 250)));
+      const delay = Math.max(0, this.lastRenderTime + interval - performance.now());
+      this.renderTimer = setTimeout(() => {
+        this.renderTimer = null;
+        this.lastRenderTime = performance.now();
         this.render();
-        this.lastRenderTime = now;
-      } else if (!this.animId) {
-        this.animId = requestAnimationFrame(() => {
-          this.animId = null;
-          this.render();
-          this.lastRenderTime = performance.now();
-        });
-      }
+      }, delay);
     }
 
     render() {
@@ -2399,17 +2590,21 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       if (this.onScroll && !userScrolledUp) this.onScroll();
     }
 
-    finish() {
+    finish(opts = {}) {
+      // opts.render === false → batalkan timer + tutup blok reasoning + kembalikan teks,
+      // TANPA menyentuh DOM (dipakai jalur completion yang sudah merender sendiri di
+      // bawahnya, agar tidak ada renderMarkdown + hljs ganda).
+      const shouldRender = opts.render !== false;
       this.isDone = true;
       if (this.inReasoningTag) {
         this.inReasoningTag = false;
         this.text += '\n</think>';
       }
-      if (this.animId) {
-        cancelAnimationFrame(this.animId);
-        this.animId = null;
+      if (this.renderTimer !== null) {
+        clearTimeout(this.renderTimer);
+        this.renderTimer = null;
       }
-      if (this.el) {
+      if (shouldRender && this.el) {
         this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(hideFileBlocksForDisplay(this.text));
         enhanceCodeBlocks(this.el);
       }
@@ -2889,6 +3084,48 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     let buf = '';
     let appended = '';
 
+    // Renderer coalesced: mengganti renderMarkdown sinkron per token (O(n²)) dengan
+    // StreamBufferRenderer. Teks sebelumnya di-seed ke renderer; chunk PERTAMA saja
+    // yang membawa separator (identik dengan logika lama), sisanya append polos.
+    const renderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
+    renderer.text = currentFullText;
+    let seedSep = null;
+    const appendContinuationChunk = (delta) => {
+      if (seedSep === null) {
+        const needsNl = currentFullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(currentFullText) || /```\w*$/.test(currentFullText);
+        const needsSp = !needsNl && !currentFullText.endsWith(' ') && !delta.startsWith(' ') && !delta.startsWith('\n');
+        seedSep = needsNl ? '\n' : (needsSp ? ' ' : '');
+        renderer.append(seedSep + delta);
+      } else {
+        renderer.append(delta);
+      }
+    };
+
+    // Reasoning WAJIB dibungkus tag  ( sama seperti StreamBufferRenderer
+    // .appendReasoning dan akumulasi server) — dulu reasoning digabung MENTAH ke
+    // konten (content || cReasoning) sehingga proses berpikir model bocor tampil
+    // sebagai jawaban utama.
+    let contInReasoning = false;
+    const feedContinuationDelta = (contentDelta, reasoningDelta) => {
+      if (reasoningDelta) {
+        const piece = contInReasoning ? reasoningDelta : ('\n' + reasoningDelta);
+        contInReasoning = true;
+        appended += piece;
+        appendContinuationChunk(piece);
+        return;
+      }
+      if (contentDelta) {
+        if (contInReasoning) {
+          contInReasoning = false;
+          const closing = '\n\n\n' + '\n\n';
+          appended += closing;
+          appendContinuationChunk(closing);
+        }
+        appended += contentDelta;
+        appendContinuationChunk(contentDelta);
+      }
+    };
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
@@ -2906,19 +3143,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         if (jsonStr === '[DONE]') break;
         try {
           const parsed = JSON.parse(jsonStr);
-          const cReasoning = parsed.choices?.[0]?.delta?.reasoning 
-            || parsed.choices?.[0]?.delta?.reasoning_content 
-            || parsed.choices?.[0]?.delta?.thought 
+          const cReasoning = parsed.choices?.[0]?.delta?.reasoning
+            || parsed.choices?.[0]?.delta?.reasoning_content
+            || parsed.choices?.[0]?.delta?.thought
             || '';
-          const delta = parsed.choices?.[0]?.delta?.content || cReasoning;
-          if (delta) {
-            appended += delta;
-            const needsNl = currentFullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(currentFullText) || /```\w*$/.test(currentFullText);
-            const needsSp = !needsNl && !currentFullText.endsWith(' ') && !appended.startsWith(' ') && !appended.startsWith('\n');
-            const sep = needsNl ? '\n' : (needsSp ? ' ' : '');
-            bubbleText.innerHTML = renderMarkdown(currentFullText + sep + appended) + '<span class="typing-cursor"></span>';
-            smartScrollChatToBottom(false);
-          }
+          feedContinuationDelta(parsed.choices?.[0]?.delta?.content, cReasoning);
         } catch (e) {}
       }
     }
@@ -2928,22 +3157,18 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       if (jsonStr !== '[DONE]') {
         try {
           const parsed = JSON.parse(jsonStr);
-          const cReasoning = parsed.choices?.[0]?.delta?.reasoning 
-            || parsed.choices?.[0]?.delta?.reasoning_content 
-            || parsed.choices?.[0]?.delta?.thought 
+          const cReasoning = parsed.choices?.[0]?.delta?.reasoning
+            || parsed.choices?.[0]?.delta?.reasoning_content
+            || parsed.choices?.[0]?.delta?.thought
             || '';
-          const delta = parsed.choices?.[0]?.delta?.content || cReasoning;
-          if (delta) {
-            appended += delta;
-            const needsNl = currentFullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(currentFullText) || /```\w*$/.test(currentFullText);
-            const needsSp = !needsNl && !currentFullText.endsWith(' ') && !appended.startsWith(' ') && !appended.startsWith('\n');
-            const sep = needsNl ? '\n' : (needsSp ? ' ' : '');
-            bubbleText.innerHTML = renderMarkdown(currentFullText + sep + appended) + '<span class="typing-cursor"></span>';
-            smartScrollChatToBottom(false);
-          }
+          feedContinuationDelta(parsed.choices?.[0]?.delta?.content, cReasoning);
         } catch (e) {}
       }
     }
+    // render:false → batalkan timer & kembalikan teks saja. Pemanggil
+    // (handler Lanjutkan) merender merged text-nya sendiri tepat setelah ini,
+    // jadi render + hljs di sini hanya akan membuang-buang siklus.
+    renderer.finish({ render: false });
     return appended;
   }
 
@@ -2986,6 +3211,23 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     let buf = '';
     let appended = '';
 
+    // Renderer coalesced: mengganti renderMarkdown sinkron per token (O(n²)) dengan
+    // StreamBufferRenderer. Teks sebelumnya di-seed ke renderer; chunk PERTAMA saja
+    // yang membawa separator (identik dengan logika lama), sisanya append polos.
+    const renderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false));
+    renderer.text = currentFullText;
+    let seedSep = null;
+    const appendContinuationChunk = (delta) => {
+      if (seedSep === null) {
+        const needsNl = currentFullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(currentFullText) || /```\w*$/.test(currentFullText);
+        const needsSp = !needsNl && !currentFullText.endsWith(' ') && !delta.startsWith(' ') && !delta.startsWith('\n');
+        seedSep = needsNl ? '\n' : (needsSp ? ' ' : '');
+        renderer.append(seedSep + delta);
+      } else {
+        renderer.append(delta);
+      }
+    };
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
@@ -3003,11 +3245,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           const chunk = parsed.message?.content || parsed.response || '';
           if (chunk) {
             appended += chunk;
-            const needsNl = currentFullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(currentFullText) || /```\w*$/.test(currentFullText);
-            const needsSp = !needsNl && !currentFullText.endsWith(' ') && !appended.startsWith(' ') && !appended.startsWith('\n');
-            const sep = needsNl ? '\n' : (needsSp ? ' ' : '');
-            bubbleText.innerHTML = renderMarkdown(currentFullText + sep + appended) + '<span class="typing-cursor"></span>';
-            smartScrollChatToBottom(false);
+            appendContinuationChunk(chunk);
           }
         } catch (e) {}
       }
@@ -3019,14 +3257,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         const chunk = parsed.message?.content || parsed.response || '';
         if (chunk) {
           appended += chunk;
-          const needsNl = currentFullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(currentFullText) || /```\w*$/.test(currentFullText);
-          const needsSp = !needsNl && !currentFullText.endsWith(' ') && !appended.startsWith(' ') && !appended.startsWith('\n');
-          const sep = needsNl ? '\n' : (needsSp ? ' ' : '');
-          bubbleText.innerHTML = renderMarkdown(currentFullText + sep + appended) + '<span class="typing-cursor"></span>';
-          smartScrollChatToBottom(false);
+          appendContinuationChunk(chunk);
         }
       } catch (e) {}
     }
+    // render:false → batalkan timer & kembalikan teks saja. Pemanggil
+    // (handler Lanjutkan) merender merged text-nya sendiri tepat setelah ini,
+    // jadi render + hljs di sini hanya akan membuang-buang siklus.
+    renderer.finish({ render: false });
     return appended;
   }
 
@@ -3043,6 +3281,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     safeSessionStorage.removeItem('zoz_active_session_id');
     try { localStorage.removeItem('zoz_last_active_session_id'); } catch (_) {}
     STATE.isImageGenMode = false;
+    clearPhotoEdit(); // sesi baru — kartu referensi foto tidak boleh ikut pindah
     updateImageGenModeUI();
     STATE.isMusicGenMode = false;
     if (typeof updateMusicGenModeUI === 'function') updateMusicGenModeUI();
@@ -3087,12 +3326,19 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     return newSession;
   }
 
+  // Lookup sesi eksplisit tanpa sisi-efek (tidak membuat sesi baru) — dipakai alur
+  // kirim yang menangkap id sesi SEBELUM await agar pesan tidak salah sasaran.
+  function getSessionById(id) {
+    if (!id) return null;
+    return STATE.sessions.find(s => s.id === id) || null;
+  }
+
   // M9: token per-pemanggilan — klik sesi terAKHIR yang menang, terlepas dari urutan
   // selesai await-nya (dulu "last-resolved-wins": sidebar bisa menyorot sesi A
   // padahal pengguna memilih B, dan input terasosiasi ke sesi yang salah).
   let sessionSwitchToken = 0;
   async function switchSession(sessionId) {
-    if (STATE.isGenerating) {
+    if (STATE.isGenerating || STATE.isSending) {
       showToast('Harap tunggu atau hentikan generasi respons saat ini.', 'error');
       return;
     }
@@ -3141,6 +3387,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     safeSessionStorage.setItem('zoz_active_session_id', sessionId);
     try { localStorage.setItem('zoz_last_active_session_id', sessionId); } catch (_) {}
     STATE.isImageGenMode = false;
+    clearPhotoEdit(); // pindah sesi — kartu referensi foto tidak boleh ikut pindah
     updateImageGenModeUI();
     STATE.isMusicGenMode = false;
     if (typeof updateMusicGenModeUI === 'function') updateMusicGenModeUI();
@@ -3240,7 +3487,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       } catch (_) {}
     }
 
-    savePersistedState();
+    // Immediate: penghapusan sesi tak boleh tertunda debounce — kalau tab ditutup
+    // sebelum timer 700ms, mirror lama masih menyimpan sesi yang sudah dihapus.
+    savePersistedState({ immediate: true });
     renderChatHistory();
     renderCurrentSession();
     AudioEngine.click();
@@ -5101,7 +5350,9 @@ Aturan wajib:
       return null;
     }
     const smartQuery = session ? synthesizeAutonomousSearchQuery(session, query) : query.trim();
-    const serperKey = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+    // Key Serper HANYA dikirim bila user benar-benar mengaturnya; tanpa key kita
+    // langsung jatuh ke proxy backend (yang memakai key env milik server).
+    const serperKey = (STATE.settings.serperApiKey || '').trim() || null;
 
     if (hudElement) {
       hudElement.innerHTML = `
@@ -5115,37 +5366,38 @@ Aturan wajib:
     try {
       let data = null;
 
-      // 1. Direct browser fetch to Serper API
-      try {
-        const directRes = await fetch('https://google.serper.dev/search', {
-          method: 'POST',
-          headers: {
-            'X-API-KEY': serperKey,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            q: smartQuery,
-            num: 6,
-            gl: 'us', // Global Worldwide Search (Tidak terisolasi di satu negara)
-            hl: 'en'
-          })
-        });
-        if (directRes.ok) {
-          data = await directRes.json();
+      // 1. Direct browser fetch to Serper API (hanya jika user punya key sendiri)
+      if (serperKey) {
+        try {
+          const directRes = await fetch('https://google.serper.dev/search', {
+            method: 'POST',
+            headers: {
+              'X-API-KEY': serperKey,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              q: smartQuery,
+              num: 6,
+              gl: 'us', // Global Worldwide Search (Tidak terisolasi di satu negara)
+              hl: 'en'
+            })
+          });
+          if (directRes.ok) {
+            data = await directRes.json();
+          }
+        } catch (errDirect) {
+          console.warn('Direct Serper fetch failed, trying proxy...', errDirect);
         }
-      } catch (errDirect) {
-        console.warn('Direct Serper fetch failed, trying proxy...', errDirect);
       }
 
       // 2. Fallback to proxy /api/web-search if direct fetch failed
       if (!data) {
+        const proxyHeaders = { 'Content-Type': 'application/json' };
+        if (serperKey) proxyHeaders['x-serper-key'] = serperKey;
         const proxyRes = await fetch('/api/web-search', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-serper-key': serperKey
-          },
-          body: JSON.stringify({ query: smartQuery, apiKey: serperKey })
+          headers: proxyHeaders,
+          body: JSON.stringify(serperKey ? { query: smartQuery, apiKey: serperKey } : { query: smartQuery })
         }).catch(() => null);
         if (proxyRes && proxyRes.ok) {
           data = await proxyRes.json();
@@ -6245,8 +6497,34 @@ ${organicBlock}
   }
 
   // ==================== MODEL DROPDOWN & SELECTORS ====================
+  // Satu delegated listener untuk SEMUA baris dropdown (dipasang sekali lewat flag) —
+  // dulu tiap baris memasang 2 listener sendiri dan itu diulang setiap render/search.
+  let dropdownListDelegated = false;
+
   function populateModelDropdown(search = '') {
     if (!els.dropdownModelList) return;
+    if (!dropdownListDelegated) {
+      dropdownListDelegated = true;
+      els.dropdownModelList.addEventListener('click', (e) => {
+        const item = e.target.closest ? e.target.closest('.model-option-item') : null;
+        if (!item) return;
+        const modelId = item.dataset.modelId;
+        if (!modelId) return; // baris info "Menampilkan N dari M model" — non-klik
+        if (e.target.closest && e.target.closest('.model-fav-btn')) {
+          toggleModelFavorite(modelId, e); // di dalamnya sudah preventDefault + stopPropagation
+          return;
+        }
+        const isOllamaTab = STATE.dropdownModelTab === 'ollama';
+        if (isOllamaTab && STATE.mode !== 'ollama') {
+          setEngineMode('ollama');
+        } else if (!isOllamaTab && STATE.mode !== 'openrouter') {
+          setEngineMode('openrouter');
+        }
+        selectModel(modelId);
+        els.modelDropdownMenu.classList.remove('show');
+        AudioEngine.click();
+      });
+    }
     els.dropdownModelList.innerHTML = '';
     const q = search.toLowerCase().trim();
 
@@ -6309,7 +6587,24 @@ ${organicBlock}
       return;
     }
 
-    filtered.forEach(m => {
+    // Batasi rendering: bila hasil filter > 80, render 80 pertama + SEMUA favorit yang
+    // lolos (sort di atas sudah menaruh favorit di depan, tapi tetap dilengkapi kalau
+    // jumlah favorit melebihi 80) + baris info jumlah. Hanya aktif saat > 80 —
+    // daftar kecil tetap dirender penuh.
+    const totalFiltered = filtered.length;
+    let displayList = filtered;
+    if (totalFiltered > 80) {
+      displayList = filtered.slice(0, 80);
+      const keptIds = new Set(displayList.map(m => m.id));
+      filtered.forEach(m => {
+        if (isModelFavorite(m.id) && !keptIds.has(m.id)) {
+          displayList.push(m);
+          keptIds.add(m.id);
+        }
+      });
+    }
+
+    displayList.forEach(m => {
       const item = document.createElement('div');
       const isFav = isModelFavorite(m.id);
       item.className = `model-option-item ${m.id === currentActive ? 'selected' : ''} ${isFav ? 'is-fav' : ''}`;
@@ -6334,25 +6629,18 @@ ${organicBlock}
         <span style="font-size:0.65rem; padding:2px 6px; border-radius:3px; font-weight:600; flex-shrink:0; ${badgeStyle}">${escapeHtml(m.tag || 'AI')}</span>
       `;
 
-      const favBtn = item.querySelector('.model-fav-btn');
-      if (favBtn) {
-        favBtn.addEventListener('click', (e) => {
-          toggleModelFavorite(m.id, e);
-        });
-      }
-
-      item.addEventListener('click', () => {
-        if (isOllamaTab && STATE.mode !== 'ollama') {
-          setEngineMode('ollama');
-        } else if (!isOllamaTab && STATE.mode !== 'openrouter') {
-          setEngineMode('openrouter');
-        }
-        selectModel(m.id);
-        els.modelDropdownMenu.classList.remove('show');
-        AudioEngine.click();
-      });
+      // Kunci identitas baris untuk delegated listener di atas (tanpa listener per-baris)
+      if (m.id) item.dataset.modelId = m.id;
       els.dropdownModelList.appendChild(item);
     });
+
+    if (totalFiltered > 80) {
+      const infoRow = document.createElement('div');
+      infoRow.className = 'model-option-item';
+      infoRow.style.cssText = 'cursor:default; pointer-events:none; justify-content:center; font-size:0.7rem; color:var(--text-dim);';
+      infoRow.textContent = `Menampilkan ${displayList.length} dari ${totalFiltered} model — ketik untuk memfilter`;
+      els.dropdownModelList.appendChild(infoRow);
+    }
   }
 
   function getCurrentModel() {
@@ -6435,6 +6723,9 @@ ${organicBlock}
     // Tutup celah await (hydrasi sesi lazy-disk) sebelum input dibersihkan,
     // agar Enter berulang tidak mengirim dua kali / memicu dua stream.
     STATE.isSending = true;
+    // Tangkap id sesi SEBELUM await pertama (scrape URL & hydrasi): pengguna bisa
+    // berpindah sesi selama await berlangsung — pesan tidak boleh mendarat di sesi baru.
+    const promptTargetSessionId = STATE.currentSessionId;
     try {
 
     // Claude AI resilience: minta izin notifikasi saat pengguna berinteraksi
@@ -6558,7 +6849,14 @@ ${organicBlock}
       text = text ? `${docsContext}\n\n${text}` : `${docsContext}\n\nTolong baca, pahami, dan analisis isi dokumen lampiran di atas secara komprehensif.`;
     }
 
-    const session = getActiveSession();
+    // Resolve sesi dari id yang ditangkap SEBELUM await — jangan pakai
+    // getActiveSession() yang membaca STATE.currentSessionId yang bisa sudah berubah.
+    const session = promptTargetSessionId ? getSessionById(promptTargetSessionId) : getActiveSession();
+    if (!session) {
+      // Sesi sudah dihapus di tengah jalan → batalkan pengiriman dengan anggun
+      // (blok finally mengembalikan STATE.isSending ke false).
+      return;
+    }
     // Safety guard: Hydrate full conversation history from storage if session was lazy-loaded
     if (session._isLazyDisk && (!session.messages || session.messages.length === 0)) {
       try {
@@ -6653,9 +6951,12 @@ ${organicBlock}
     if (STATE.isMusicGenMode || isExplicitMusicCommand || isMusicGenerationTrigger(text)) {
       const cleanMusicPrompt = extractMusicPrompt(text);
       await runMusicGeneration(session, cleanMusicPrompt);
-    } else if (STATE.isImageGenMode || isExplicitImageCommand) {
+    } else if (STATE.isImageGenMode || isExplicitImageCommand || STATE.photoEditImage) {
       const cleanImgPrompt = extractImagePrompt(text);
-      await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel);
+      // Foto referensi aktif → kirim sebagai referenceImage (img2img). Server yang
+      // memilih jalur Pollinations img2img / OpenRouter input_references otomatis.
+      await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel, STATE.photoEditImage || null);
+      clearPhotoEdit(); // sekali pakai — kartu referensi dilepas setelah eksekusi
     } else if (isExplicitDeepResearch || STATE.isDeepResearch) {
       // Deep Research dieksekusi jika pengguna mengaktifkan mode Deep Research (Premium) dari UI atau mengetik slash command
       const cleanResearchPrompt = isExplicitDeepResearch ? text.replace(/^\/(?:deep|research|riset)\s+/i, '').trim() : text.trim();
@@ -7202,7 +7503,7 @@ ${organicBlock}
           effectiveContext = session.messages.slice(-3).map(m => m.content || '').join(' ');
         }
 
-        const serperApiKey = (STATE.settings?.serperApiKey || '').trim() || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+        const serperApiKey = (STATE.settings?.serperApiKey || '').trim() || null;
         const cleanDateQuery = stripDateNoise(query.trim());
         const queriesToSearch = [query.trim()];
         if (cleanDateQuery && cleanDateQuery.length >= 3 && cleanDateQuery.toLowerCase() !== query.trim().toLowerCase()) {
@@ -8456,7 +8757,9 @@ Format teks (untuk model tanpa function calling):
         } catch (_) {}
       }
 
-      fullText = streamRenderer.finish();
+      // render:false → render final tunggal ada di bawah (finalRenderedContent),
+      // sehingga renderMarkdown + enhanceCodeBlocks/hljs tidak dijalankan dua kali.
+      fullText = streamRenderer.finish({ render: false });
 
       // ==================== OLLAMA AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const canRunAutonomousSearch = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
@@ -8730,7 +9033,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       renderYouTubeCardsForMessage(assistantRow, fullText, foundYouTubeIds);
       renderMessageFiles(assistantRow, generatedFiles);
       metaBox.innerHTML = `
-        <strong>${modelName}</strong>
+        <strong>${escapeHtml(modelName)}</strong>
         <span class="meta-model-badge">Ollama</span>
         <span>⏱️ ${totalTime}s</span>
         <span>⚡ ${tps} tps</span>
@@ -8764,7 +9067,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
     } catch (err) {
       if (err.name === 'AbortError') {
-        const partialRaw = streamRenderer ? streamRenderer.finish() : '';
+        // render:false → baris di bawah langsung mengganti innerHTML (atau baris
+        // dihapus), jadi render dari finish hanya akan dibuang.
+        const partialRaw = streamRenderer ? streamRenderer.finish({ render: false }) : '';
         const stoppedPartial = sanitizePartialResponseWithFiles(partialRaw);
         const partialText = stoppedPartial.text;
         if (partialText && partialText.trim() && STATE.sessions.some(s => s.id === session.id)) {
@@ -8778,7 +9083,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           }
           const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
           metaBox.innerHTML = `
-            <strong>${modelName}</strong>
+            <strong>${escapeHtml(modelName)}</strong>
             <span class="meta-model-badge">Ollama</span>
             <span>⏱️ ${totalTime}s (Dihentikan)</span>
           `;
@@ -8800,7 +9105,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         }
         showToast('Generasi dihentikan oleh pengguna.');
       } else {
-        const rescuePartial = sanitizePartialResponseWithFiles(streamRenderer ? streamRenderer.finish() : '');
+        // render:false → bubbleText.innerHTML diganti tanpa syarat beberapa baris
+        // di bawah (kartu error), jadi render dari finish hanya akan dibuang.
+        const rescuePartial = sanitizePartialResponseWithFiles(streamRenderer ? streamRenderer.finish({ render: false }) : '');
         const partialText = rescuePartial.text;
         const hasPartialText = Boolean(partialText && partialText.trim());
 
@@ -8824,7 +9131,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
           if (metaBox) {
             metaBox.innerHTML = `
-              <strong>${modelName}</strong>
+              <strong>${escapeHtml(modelName)}</strong>
               <span class="meta-model-badge">Ollama</span>
               <span>⏱️ ${totalTime}s (Terputus)</span>
             `;
@@ -8865,12 +9172,14 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         }
 
         bubbleText.querySelector('.switch-openrouter-btn')?.addEventListener('click', () => {
+          if (STATE.isGenerating || STATE.isSending) return;
           assistantRow.remove();
           setEngineMode('openrouter');
           runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
         });
 
         bubbleText.querySelector('.retry-send-btn')?.addEventListener('click', () => {
+          if (STATE.isGenerating || STATE.isSending) return;
           assistantRow.remove();
           runOllamaStreaming(session, promptText, image, modelName);
         });
@@ -8924,11 +9233,13 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       });
 
       bubbleText.querySelector('.retry-openrouter-btn')?.addEventListener('click', () => {
+        if (STATE.isGenerating || STATE.isSending) return;
         assistantRow.remove();
         runOpenRouterStreaming(session, promptText, image, modelName);
       });
 
       bubbleText.querySelector('.switch-ollama-btn')?.addEventListener('click', () => {
+        if (STATE.isGenerating || STATE.isSending) return;
         assistantRow.remove();
         setEngineMode('ollama');
         runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel);
@@ -9318,7 +9629,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         }
       }
 
-      fullText = streamRenderer.finish();
+      // render:false → render final tunggal ada di bawah (finalRenderedContent),
+      // sehingga renderMarkdown + enhanceCodeBlocks/hljs tidak dijalankan dua kali.
+      fullText = streamRenderer.finish({ render: false });
 
       // ==================== UNIVERSAL AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const canRunAutonomousSearch = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
@@ -9662,7 +9975,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       renderMessageFiles(assistantRow, generatedFiles);
       const effectiveDisplay = actualModelUsed ? `${actualModelUsed} (Failover)` : modelName;
       metaBox.innerHTML = `
-        <strong title="${actualModelUsed ? 'Model dialihkan oleh OpenRouter ke ' + actualModelUsed : modelName}">${escapeHtml(effectiveDisplay)}</strong>
+        <strong title="${actualModelUsed ? escapeHtml('Model dialihkan oleh OpenRouter ke ' + actualModelUsed) : escapeHtml(modelName)}">${escapeHtml(effectiveDisplay)}</strong>
         <span class="meta-model-badge" style="background:rgba(255,82,0,0.15); color:var(--neon-amber);">OpenRouter</span>
         ${collectedImages.length > 0 ? '<span class="meta-model-badge" style="background:rgba(255,0,127,0.18); border-color:#FF007F; color:#FF66B2;"><i class="fa-solid fa-wand-magic-sparkles"></i> Gambar Dibuat</span>' : ''}
         <span>⏱️ ${totalTime}s</span>
@@ -9699,7 +10012,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
     } catch (err) {
       if (err.name === 'AbortError') {
-        const partialRaw = streamRenderer ? streamRenderer.finish() : '';
+        // render:false → baris di bawah langsung mengganti innerHTML (atau baris
+        // dihapus), jadi render dari finish hanya akan dibuang.
+        const partialRaw = streamRenderer ? streamRenderer.finish({ render: false }) : '';
         const stoppedPartial = sanitizePartialResponseWithFiles(partialRaw);
         const partialText = stoppedPartial.text;
         if (partialText && partialText.trim() && STATE.sessions.some(s => s.id === session.id)) {
@@ -9712,7 +10027,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           }
           const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
           metaBox.innerHTML = `
-            <strong>${modelName}</strong>
+            <strong>${escapeHtml(modelName)}</strong>
             <span class="meta-model-badge" style="background:rgba(255,82,0,0.15); color:var(--neon-amber);">OpenRouter</span>
             <span>⏱️ ${totalTime}s (Dihentikan)</span>
           `;
@@ -9734,7 +10049,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         }
         showToast('Generasi dihentikan.');
       } else {
-        const rescuePartial = sanitizePartialResponseWithFiles(streamRenderer ? streamRenderer.finish() : '');
+        // render:false → bubbleText.innerHTML diganti tanpa syarat beberapa baris
+        // di bawah (kartu error), jadi render dari finish hanya akan dibuang.
+        const rescuePartial = sanitizePartialResponseWithFiles(streamRenderer ? streamRenderer.finish({ render: false }) : '');
         const partialText = rescuePartial.text;
         const hasPartialText = Boolean(partialText && partialText.trim());
 
@@ -9758,7 +10075,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
           if (metaBox) {
             metaBox.innerHTML = `
-              <strong>${modelName}</strong>
+              <strong>${escapeHtml(modelName)}</strong>
               <span class="meta-model-badge" style="background:rgba(255,82,0,0.15); color:var(--neon-amber);">OpenRouter</span>
               <span>⏱️ ${totalTime}s (Terputus)</span>
             `;
@@ -9805,11 +10122,13 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         }
 
         bubbleText.querySelector('.retry-send-btn')?.addEventListener('click', () => {
+          if (STATE.isGenerating || STATE.isSending) return;
           assistantRow.remove();
           runOpenRouterStreaming(session, promptText, image, modelName);
         });
 
         bubbleText.querySelector('.switch-free-model-btn')?.addEventListener('click', (e) => {
+          if (STATE.isGenerating || STATE.isSending) return;
           const targetFallback = e.currentTarget.dataset.fallback || 'openrouter/free';
           selectModel(targetFallback);
           assistantRow.remove();
@@ -9881,6 +10200,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         });
 
         bubbleText.querySelector('.retry-router-btn')?.addEventListener('click', async () => {
+          if (STATE.isGenerating || STATE.isSending) return;
           assistantRow.remove();
           await runAutoRouterStreaming(session, promptText, image);
         });
@@ -10060,6 +10380,87 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
   function clearAttachedImage() {
     clearAttachedImages();
+  }
+
+  // ==================== MODE EDIT FOTO AI (IMG2IMG) ====================
+  // Kartu referensi foto: foto dipilih pengguna dikirim sebagai referenceImage ke
+  // /api/generate-image (Pollinations img2img / OpenRouter input_references).
+  function setPhotoEditImage(dataUrl) {
+    if (!dataUrl) return;
+    STATE.photoEditImage = dataUrl;
+    if (els.photoEditRefThumb) els.photoEditRefThumb.src = dataUrl;
+    if (els.photoEditReferenceCard) els.photoEditReferenceCard.style.display = 'flex';
+    if (els.promptInput) els.promptInput.focus();
+  }
+
+  function clearPhotoEdit() {
+    STATE.photoEditImage = null;
+    if (els.photoEditRefThumb) els.photoEditRefThumb.removeAttribute('src');
+    if (els.photoEditReferenceCard) els.photoEditReferenceCard.style.display = 'none';
+    if (els.photoEditFileInput) els.photoEditFileInput.value = '';
+  }
+
+  // Edit foto (img2img) MENGGUNAKAN model image OpenRouter: bila model gambar
+  // aktif masih Pollinations (id tanpa '/'), pindahkan otomatis ke model image
+  // OpenRouter dengan prioritas dedicated-edit (kontext → gemini-image →
+  // seedream → flux), lalu buka dropdown model gambar agar bisa diganti manual.
+  function ensureOpenRouterImageModelForEdit() {
+    const current = STATE.settings.imageModel || 'flux';
+    if (current.includes('/')) {
+      openImageModelDropdown(); // sudah cloud — biarkan Kaisar memilih manual
+      return;
+    }
+    if (!STATE.settings.openRouterKey) {
+      showToast('⚠️ Edit foto (Img2Img) memerlukan OpenRouter API Key — masukkan di Pengaturan > Provider Cloud.', 'error');
+      openImageModelDropdown();
+      return;
+    }
+    const candidates = (STATE.availableImageModels || []).filter(m =>
+      m && m.id && m.id.includes('/') && m.provider === 'openrouter');
+    if (!candidates.length) {
+      showToast('⚠️ Katalog model image OpenRouter belum termuat — muat ulang halaman (Ctrl+F5).', 'error');
+      openImageModelDropdown();
+      return;
+    }
+    const score = (m) => {
+      const idLow = m.id.toLowerCase();
+      if (idLow.includes('kontext')) return 0; // FLUX Kontext = engine edit image dedicated
+      if (idLow.includes('gemini') && idLow.includes('image')) return 1; // "nano banana"
+      if (idLow.includes('seedream')) return 2;
+      if (idLow.includes('flux')) return 3;
+      return 5;
+    };
+    const best = candidates.slice().sort((a, b) => score(a) - score(b))[0];
+    if (best) {
+      STATE.settings.imageModel = best.id;
+      savePersistedState();
+      updateImageGenModeUI();
+      showToast(`🖼️ Model edit foto disetel ke ${best.name || best.id} (OpenRouter) — klik daftar untuk ganti.`);
+    }
+    openImageModelDropdown();
+  }
+
+  async function handlePhotoEditFileSelect(e) {
+    const file = e.target?.files && e.target.files[0];
+    if (!file) return;
+    if (!isImageFile(file)) {
+      showToast('File yang dipilih bukan gambar yang valid.', 'error');
+      clearPhotoEdit();
+      return;
+    }
+    try {
+      // Kompres dulu agar payload base64 ke server tidak membengkak (foto HP bisa 10MB+)
+      const dataUrl = await compressImageToWebP(file, 1280, 0.85);
+      setPhotoEditImage(dataUrl);
+      showToast('🖼️ Foto referensi aktif — ketik instruksi editan di prompt.');
+      // Wajibkan jalur img2img via model image OpenRouter (server memakai
+      // input_references / chat image_url untuk model cloud).
+      ensureOpenRouterImageModelForEdit();
+    } catch (compErr) {
+      console.warn('Photo edit compress failed:', compErr);
+      showToast('Gagal memproses foto referensi.', 'error');
+      clearPhotoEdit();
+    }
   }
 
   // ==================== ATTACHMENT MENU & POPUP CONTROLLER ====================
@@ -11604,7 +12005,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
               'Content-Type': 'application/json',
               'Authorization': STATE.settings.openRouterKey ? `Bearer ${STATE.settings.openRouterKey}` : '',
               'x-openrouter-key': STATE.settings.openRouterKey || '',
-              'x-serper-key': STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e',
+              'x-serper-key': STATE.settings.serperApiKey || '',
               'x-session-id': session ? session.id : '',
               'X-User-ID': STATE.userId || 'default',
               'x-user-id': STATE.userId || 'default'
@@ -12077,6 +12478,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         `;
 
         bubbleText.querySelector('.retry-research-btn')?.addEventListener('click', () => {
+          if (STATE.isGenerating || STATE.isSending) return;
           assistantRow.remove();
           runDeepResearchStreaming(session, promptText, image, modelName, engine);
         });
@@ -13079,10 +13481,11 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     }
   }
 
-  async function runImageGeneration(session, promptText, customModel = null) {
+  async function runImageGeneration(session, promptText, customModel = null, referenceImage = null) {
     if (!promptText || !promptText.trim()) return;
     const cleanPrompt = promptText.trim();
     const activeImageModel = (customModel && typeof customModel === 'string') ? customModel : (STATE.settings.imageModel || 'flux');
+    const isImgEdit = Boolean(referenceImage); // mode Edit Foto AI (img2img)
     
     setGeneratingState(true);
     STATE.abortController = new AbortController();
@@ -13098,7 +13501,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         <div class="image-gen-header">
           <div class="image-gen-title-box">
             <i class="fa-solid fa-atom fa-spin" style="color:#FF007F;"></i>
-            <span>AI Image Studio (Neural Synthesis)</span>
+            <span>${isImgEdit ? 'AI Photo Edit Studio (Img2Img)' : 'AI Image Studio (Neural Synthesis)'}</span>
           </div>
           <span class="image-gen-badge">${escapeHtml(activeImageModel)}</span>
         </div>
@@ -13183,7 +13586,10 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
               model: activeImageModel,
               width: 1024,
               height: 1024,
-              openRouterKey: STATE.settings.openRouterKey || ''
+              openRouterKey: STATE.settings.openRouterKey || '',
+              // Foto referensi Img2Img (bila aktif) — server memilih jalur
+              // Pollinations img2img POST / OpenRouter input_references otomatis.
+              ...(isImgEdit ? { referenceImage: referenceImage } : {})
             }),
             signal: STATE.abortController?.signal
           });
@@ -13225,7 +13631,10 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
                   body: JSON.stringify({
                     model: activeImageModel,
                     prompt: cleanPrompt,
-                    aspect_ratio: '1:1'
+                    aspect_ratio: '1:1',
+                    // Kesimetrian dengan jalur server: foto referensi ikut dikirim
+                    // sebagai input_references saat mode Edit Foto aktif.
+                    ...(isImgEdit && referenceImage ? { input_references: [referenceImage] } : {})
                   }),
                   signal: STATE.abortController?.signal
                 });
@@ -13433,8 +13842,9 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           </div>
         `;
         bubbleText.querySelector('.retry-img-btn')?.addEventListener('click', () => {
+          if (STATE.isGenerating || STATE.isSending) return;
           assistantRow.remove();
-          runImageGeneration(session, cleanPrompt, activeImageModel);
+          runImageGeneration(session, cleanPrompt, activeImageModel, referenceImage || null);
         });
         bubbleText.querySelector('.open-key-settings-btn')?.addEventListener('click', () => {
           const modal = $('#settingsModal');
@@ -13529,9 +13939,19 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
       if (!audio || !playBtn) return;
 
-      let animFrameId = null;
+      // ID rAF disimpan pada ELEMEN AUDIO (bukan variabel lokal per-kartu) supaya
+      // listener pause/ended/error bisa membatalkan loop dari mana pun — dulu hanya
+      // tombol pause manual & 'ended' yang membatalkan, sehingga loop waveform bocor
+      // terus berjalan saat kartu lain mengambil alih pemutaran (audio.pause() massal).
+      function stopWaveAnim() {
+        if (audio._waveAnimId) {
+          cancelAnimationFrame(audio._waveAnimId);
+          audio._waveAnimId = null;
+        }
+      }
       function drawWaveform(isPlaying) {
         if (!canvas || typeof canvas.getContext !== 'function') return;
+        stopWaveAnim(); // cegah penumpukan beberapa loop pada kartu yang sama
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
         const w = canvas.width;
@@ -13557,7 +13977,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         }
 
         if (isPlaying) {
-          animFrameId = requestAnimationFrame(() => drawWaveform(true));
+          audio._waveAnimId = requestAnimationFrame(() => drawWaveform(true));
         }
       }
       drawWaveform(false);
@@ -13577,7 +13997,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         } else {
           audio.pause();
           playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
-          cancelAnimationFrame(animFrameId);
+          stopWaveAnim();
           drawWaveform(false);
         }
       });
@@ -13602,9 +14022,31 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
       audio.addEventListener('ended', () => {
         playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
-        cancelAnimationFrame(animFrameId);
         drawWaveform(false);
         if (scrubber) scrubber.value = 0;
+      });
+
+      // Resume dari LUAR tombol (media key OS, play() eksternal, kartu lain selesai
+      // dipause-massal) wajib menghidupkan lagi loop waveform + ikon pause. Listener
+      // 'play' mencakup SEMUA jalur pemutaran (klik tombol di atas ikut tercakup —
+      // idempoten karena drawWaveform selalu stopWaveAnim dulu).
+      audio.addEventListener('play', () => {
+        playBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+        drawWaveform(true);
+      });
+
+      // Pause dari LUAR tombol (kartu lain diputar, media key OS, error sumber)
+      // wajib menghentikan rAF loop + mengembalikan ikon — kalau tidak, loop tidak
+      // pernah berhenti dan tombol terlihat masih "pause" padahal audio sudah diam.
+      audio.addEventListener('pause', () => {
+        playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
+        stopWaveAnim();
+        drawWaveform(false);
+      });
+      audio.addEventListener('error', () => {
+        playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
+        stopWaveAnim();
+        drawWaveform(false);
       });
 
       scrubber?.addEventListener('input', () => {
@@ -14152,6 +14594,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           setTimeout(() => { els.settingOpenRouterKey?.focus(); }, 300);
         });
         bubbleText.querySelector('.retry-music-btn')?.addEventListener('click', () => {
+          if (STATE.isGenerating || STATE.isSending) return;
           assistantRow.remove();
           runMusicGeneration(session, cleanPrompt, options);
         });
@@ -14354,6 +14797,14 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     } else {
       document.body.classList.remove('modal-open');
     }
+    // Deck BGM baru saja dibuka (jalur tombol ATAU popstate history) → hidupkan lagi
+    // loop visualisasi yang otomatis mati saat canvas tersembunyi.
+    const deckModal = document.getElementById('musicDeckModal');
+    if (deckModal && deckModal.classList.contains('show')) {
+      try {
+        BGMEngine.ensureVisualizerRunning();
+      } catch (_) {}
+    }
   }
 
   function openModal(modalId) {
@@ -14547,6 +14998,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     currentMode: null, // 'file' | 'ambient'
     activeAmbientId: null,
     volume: 0.5,
+    volumeSaveTimer: null, // debounce tulisan localStorage volume (lihat setVolume)
     loopMode: 'all', // 'all' | 'one' | 'none'
     isShuffle: false,
     animFrameId: null,
@@ -14595,6 +15047,16 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           this.wantsPlayback = false;
           this.stopGuardian();
           this.setPlayingState(false);
+        }
+      });
+      // Resume di LUAR tombol app (media key OS, elemen media lain dilepas) →
+      // samakan state dengan kenyataan: wantsPlayback + indikator playing +
+      // armen ulang loop visualisasi (setPlayingState menanganinya).
+      this.audio.addEventListener('play', () => {
+        if (this._ignorePauseUntil && performance.now() < this._ignorePauseUntil) return;
+        if (this.currentMode === 'file' && !this.audio.paused) {
+          this.wantsPlayback = true;
+          this.setPlayingState(true);
         }
       });
       this.audio.addEventListener('error', () => {
@@ -14667,9 +15129,26 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         isOnline: r.isOnline || false,
         youtubeId: r.youtubeId || null,
         onlineUrl: r.onlineUrl || null,
-        url: r.blob ? URL.createObjectURL(r.blob) : (r.onlineUrl || ''),
+        // Object URL dibuat LAZILY lewat ensureTrackUrl() saat lagu benar-benar
+        // diputar — dulu URL dibuat untuk SEMUA lagu saat startup.
+        url: r.onlineUrl || '',
         blob: r.blob || null
       }));
+    },
+
+    // Bangun object URL saat dibutuhkan (baru dipanggil dari jalur play).
+    // Blob tetap disimpan di memori karena MusicDB belum punya getTrack(id);
+    // hanya URL-nya yang ditunda pembuatannya.
+    ensureTrackUrl(track) {
+      if (!track) return '';
+      if (!track.url && track.blob) {
+        try {
+          track.url = URL.createObjectURL(track.blob);
+        } catch (_) {
+          track.url = '';
+        }
+      }
+      return track.url;
     },
 
     initYouTube(callback) {
@@ -15004,7 +15483,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       const idx = this.playlist.findIndex(t => t.id === id);
       if (idx !== -1) {
         const wasCurrent = (this.currentIndex === idx);
-        if (this.playlist[idx].blob) {
+        if (this.playlist[idx].blob && this.playlist[idx].url) {
           URL.revokeObjectURL(this.playlist[idx].url);
         }
         this.playlist.splice(idx, 1);
@@ -15032,7 +15511,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       
       this.stop();
       this.playlist.forEach(t => {
-        if (t.blob) URL.revokeObjectURL(t.url);
+        if (t.blob && t.url) URL.revokeObjectURL(t.url);
       });
       this.playlist = [];
       this.currentIndex = -1;
@@ -15068,7 +15547,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         this.currentOnlineTrack = null;
 
         this._ignorePauseUntil = performance.now() + 800;
-        this.audio.src = track.url;
+        this.audio.src = this.ensureTrackUrl(track);
         this.audio.currentTime = 0;
         
         const playPromise = this.audio.play();
@@ -15210,6 +15689,9 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       } else {
         this.stopYouTubeProgressTimer();
       }
+      // Loop visualisasi bisa sudah mati (canvas tersembunyi + sebelumnya pause) →
+      // armen ulang tiap mulai play agar bar langsung beranimasi lagi.
+      if (this.isPlaying) this.ensureVisualizerRunning();
       this.updateUI();
     },
 
@@ -15394,9 +15876,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     setVolume(val) {
       const num = parseFloat(val);
       this.volume = isNaN(num) ? 0.7 : Math.max(0, Math.min(1, num));
-      try {
-        localStorage.setItem('zoz_bgm_volume', this.volume.toString());
-      } catch (_) {}
+      // Debounce 300ms: event 'input' slider membanjiri localStorage di tiap frame drag
+      if (this.volumeSaveTimer) clearTimeout(this.volumeSaveTimer);
+      this.volumeSaveTimer = setTimeout(() => {
+        this.volumeSaveTimer = null;
+        this.persistVolume();
+      }, 300);
 
       if (this.audio) this.audio.volume = this.volume;
       if (this.ytPlayer && typeof this.ytPlayer.setVolume === 'function') {
@@ -15414,6 +15899,23 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       if (els.bgmMiniVolume) els.bgmMiniVolume.value = this.volume;
       if (els.deckMasterVolume) els.deckMasterVolume.value = this.volume;
       if (els.valMasterVolume) els.valMasterVolume.innerText = `${Math.round(this.volume * 100)}%`;
+    },
+
+    // Tulis volume ke localStorage sekarang juga (membatalkan debounce yang tertunda).
+    persistVolume() {
+      if (this.volumeSaveTimer) {
+        clearTimeout(this.volumeSaveTimer);
+        this.volumeSaveTimer = null;
+      }
+      try {
+        localStorage.setItem('zoz_bgm_volume', this.volume.toString());
+      } catch (_) {}
+    },
+
+    // Dipanggil saat tab ditutup agar perubahan volume terakhir tidak hilang
+    // bersama debounce 300ms yang masih tertunda.
+    flushVolume() {
+      if (this.volumeSaveTimer) this.persistVolume();
     },
 
     // --- PROCEDURAL SYNTHESIZER GENERATOR ---
@@ -15751,6 +16253,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     },
 
     setupVisualizer() {
+      // Sudah pernah di-setup? Cukup hidupkan lagi loop-nya — mengulang seluruh
+      // fungsi akan mendaftarkan listener resize ganda dan menutupi loop lama.
+      if (this._visualizerDraw) {
+        this.ensureVisualizerRunning();
+        return;
+      }
       const canvas = els.audioVisualizerCanvas;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
@@ -15758,16 +16266,56 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       const bufferLength = 32;
       const dataArray = new Uint8Array(bufferLength);
 
-      const draw = () => {
-        this.animFrameId = requestAnimationFrame(draw);
+      // Cache gradient bar (dibulatkan 4px) — dulu 32× createLinearGradient PER FRAME.
+      // Gradient bergantung pada tinggi bar (ujungnya di h - barHeight), jadi tidak
+      // bisa dipakai satu objek untuk semua bar; kuantisasi 4px praktis tak terlihat.
+      let gradCacheHeight = -1;
+      const gradCache = new Map();
+      const getBarGradient = (h, barHeight) => {
+        if (gradCacheHeight !== h) {
+          gradCache.clear();
+          gradCacheHeight = h;
+        }
+        const bucket = Math.min(Math.max(4, Math.round(barHeight / 4) * 4), h);
+        let gradient = gradCache.get(bucket);
+        if (!gradient) {
+          gradient = ctx.createLinearGradient(0, h, 0, h - bucket);
+          gradient.addColorStop(0, 'rgba(0, 240, 255, 0.25)');
+          gradient.addColorStop(0.6, 'rgba(0, 255, 194, 0.8)');
+          gradient.addColorStop(1, '#00F0FF');
+          gradCache.set(bucket, gradient);
+        }
+        return gradient;
+      };
 
-        // Hanya render jika canvas sedang terlihat di layar atau audio sedang diputar
+      // Lebar container tidak berubah tiap frame → baca dari cache, refresh saat
+      // resize (event) atau maksimal tiap 30 frame.
+      let cachedWidth = 0;
+      let frameTick = 0;
+      window.addEventListener('resize', () => { cachedWidth = 0; });
+
+      const draw = () => {
         const isCanvasVisible = Boolean(canvas.offsetParent);
-        if (!isCanvasVisible && !this.isPlaying) {
+        if (!isCanvasVisible) {
+          if (!this.isPlaying) {
+            // Canvas tersembunyi & musik berhenti → matikan loop TANPA reschedule.
+            // Loop dihidupkan lagi oleh ensureVisualizerRunning() (mulai play / buka deck).
+            this.animFrameId = null;
+            return;
+          }
+          // Musik masih berjalan: loop tetap siaga tapi JANGAN menggambar canvas
+          // yang tak terlihat (pemborosan GPU/CPU tiap frame).
+          this.animFrameId = requestAnimationFrame(draw);
           return;
         }
 
-        const targetW = canvas.parentElement ? canvas.parentElement.clientWidth : 400;
+        this.animFrameId = requestAnimationFrame(draw);
+
+        if (!cachedWidth || frameTick % 30 === 0) {
+          cachedWidth = canvas.parentElement ? canvas.parentElement.clientWidth : 400;
+        }
+        frameTick++;
+        const targetW = cachedWidth || 400;
         const targetH = 110;
         if (canvas.width !== targetW) canvas.width = targetW;
         if (canvas.height !== targetH) canvas.height = targetH;
@@ -15775,6 +16323,11 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         const h = canvas.height;
 
         ctx.clearRect(0, 0, w, h);
+
+        // shadowBlur per bar = rasterisasi blur untuk SETIAP fill (32× per frame).
+        // Glow diganti cap putih tipis tanpa bayangan agar tampilan tetap neon.
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = 'transparent';
 
         if (this.analyser && this.isPlaying) {
           this.analyser.getByteFrequencyData(dataArray);
@@ -15791,25 +16344,30 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           const percent = val / 255;
           const barHeight = Math.max(4, percent * (h - 15));
 
-          const gradient = ctx.createLinearGradient(0, h, 0, h - barHeight);
-          gradient.addColorStop(0, 'rgba(0, 240, 255, 0.25)');
-          gradient.addColorStop(0.6, 'rgba(0, 255, 194, 0.8)');
-          gradient.addColorStop(1, '#00F0FF');
-
-          ctx.fillStyle = gradient;
-          ctx.shadowBlur = this.isPlaying ? 8 : 0;
-          ctx.shadowColor = '#00F0FF';
+          ctx.fillStyle = getBarGradient(h, barHeight);
           ctx.fillRect(x, h - barHeight, barWidth, barHeight);
 
-          // Neon top cap
-          ctx.fillStyle = '#FFF';
+          // Neon top cap (tanpa shadow, alpha rendah)
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
           ctx.fillRect(x, h - barHeight - 2, barWidth, 2);
 
           x += barWidth + barSpacing;
         }
       };
 
+      this._visualizerDraw = draw;
       draw();
+    },
+
+    // Loop visualisasi mati otomatis saat canvas tersembunyi & musik berhenti.
+    // Metode ini menghidupkannya lagi; no-op bila loop masih berjalan.
+    ensureVisualizerRunning() {
+      if (this.animFrameId) return;
+      if (this._visualizerDraw) {
+        this._visualizerDraw();
+      } else {
+        this.setupVisualizer();
+      }
     },
 
     formatTime(sec) {
@@ -15888,9 +16446,31 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     updateCatalogBalanceBannerUI(STATE.activeCatalogTab);
   }
 
+  // Satu delegated listener untuk semua baris katalog (dipasang sekali lewat flag) —
+  // dulu tiap baris memasang 2 listener sendiri di setiap render katalog.
+  let catalogListDelegated = false;
+
   function renderLiveModelCatalog() {
     const container = els.catalogListContainer;
     if (!container) return;
+    if (!catalogListDelegated) {
+      catalogListDelegated = true;
+      container.addEventListener('click', (e) => {
+        const row = e.target.closest ? e.target.closest('.catalog-model-row') : null;
+        if (!row) return;
+        const modelId = row.dataset.modelId;
+        if (!modelId) return; // baris info "Menampilkan N dari M model" — non-klik
+        if (e.target.closest && e.target.closest('.catalog-fav-btn')) {
+          toggleModelFavorite(modelId, e); // sudah preventDefault + stopPropagation di dalamnya
+          return;
+        }
+        if (e.target.closest && e.target.closest('.catalog-select-btn')) {
+          e.preventDefault();
+          e.stopPropagation();
+          applySelectedModelFromCatalog(modelId, STATE.activeCatalogTab === 'ollama' ? 'ollama' : 'openrouter');
+        }
+      });
+    }
     const previousScrollTop = container.scrollTop;
     container.innerHTML = '';
 
@@ -16072,7 +16652,23 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       return;
     }
 
-    list.forEach(m => {
+    // Batasi rendering: bila hasil filter > 80, render 80 pertama + SEMUA favorit yang
+    // lolos (sort di atas sudah menaruh favorit di depan) + baris info jumlah.
+    // Hanya aktif saat > 80 — katalog kecil tetap dirender penuh.
+    const totalFiltered = list.length;
+    let displayList = list;
+    if (totalFiltered > 80) {
+      displayList = list.slice(0, 80);
+      const keptIds = new Set(displayList.map(m => m.id));
+      list.forEach(m => {
+        if (m.id && isModelFavorite(m.id) && !keptIds.has(m.id)) {
+          displayList.push(m);
+          keptIds.add(m.id);
+        }
+      });
+    }
+
+    displayList.forEach(m => {
       const row = document.createElement('div');
       const isFav = isModelFavorite(m.id);
       row.className = `catalog-model-row ${isFav ? 'is-fav' : ''}`;
@@ -16112,21 +16708,18 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         </div>
       `;
 
-      const favBtn = row.querySelector('.catalog-fav-btn');
-      if (favBtn) {
-        favBtn.addEventListener('click', (e) => {
-          toggleModelFavorite(m.id, e);
-        });
-      }
-
-      row.querySelector('.catalog-select-btn').addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        applySelectedModelFromCatalog(m.id, isOllama ? 'ollama' : 'openrouter');
-      });
-
+      // Kunci identitas baris untuk delegated listener di atas (tanpa listener per-baris)
+      if (m.id) row.dataset.modelId = m.id;
       container.appendChild(row);
     });
+
+    if (totalFiltered > 80) {
+      const infoRow = document.createElement('div');
+      infoRow.className = 'catalog-model-row';
+      infoRow.style.cssText = 'cursor:default; pointer-events:none; justify-content:center; font-size:0.72rem; color:var(--text-dim);';
+      infoRow.textContent = `Menampilkan ${displayList.length} dari ${totalFiltered} model — ketik untuk memfilter`;
+      container.appendChild(infoRow);
+    }
 
     if (previousScrollTop > 0) {
       container.scrollTop = previousScrollTop;
@@ -16470,7 +17063,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     if (els.settingOllamaEndpoint) els.settingOllamaEndpoint.value = STATE.settings.ollamaEndpoint || 'https://ollama.com';
     if (els.settingOllamaApiKey) els.settingOllamaApiKey.value = STATE.settings.ollamaApiKey || '';
     if (els.settingOpenRouterKey) els.settingOpenRouterKey.value = STATE.settings.openRouterKey || '';
-    if (els.settingSerperApiKey) els.settingSerperApiKey.value = STATE.settings.serperApiKey || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+    if (els.settingSerperApiKey) els.settingSerperApiKey.value = STATE.settings.serperApiKey || '';
     if (els.settingMusicModel) els.settingMusicModel.value = STATE.settings.musicModel || 'google/lyria-3-clip-preview';
     if (els.paramTemperature) els.paramTemperature.value = STATE.settings.temperature ?? 0.7;
     if (els.valTemperature) els.valTemperature.innerText = STATE.settings.temperature ?? 0.7;
@@ -16605,8 +17198,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       }
     });
 
+    // Debounce 150ms: rebuild dropdown (ratusan baris) tidak perlu di tiap ketikan
+    let modelSearchDebounceTimer = null;
     els.modelSearchInput?.addEventListener('input', (e) => {
-      populateModelDropdown(e.target.value);
+      const value = e.target.value;
+      clearTimeout(modelSearchDebounceTimer);
+      modelSearchDebounceTimer = setTimeout(() => populateModelDropdown(value), 150);
     });
 
     els.useCustomModelBtn?.addEventListener('click', () => {
@@ -16887,7 +17484,14 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
     // New Chat & History
     els.newChatBtn?.addEventListener('click', () => createNewSession());
-    els.searchHistoryInput?.addEventListener('input', (e) => renderChatHistory(e.target.value));
+    // Debounce 150ms: renderChatHistory membongkar & menyusun ulang seluruh daftar
+    // riwayat — jangan lakukan di tiap ketikan pencarian.
+    let historySearchDebounceTimer = null;
+    els.searchHistoryInput?.addEventListener('input', (e) => {
+      const value = e.target.value;
+      clearTimeout(historySearchDebounceTimer);
+      historySearchDebounceTimer = setTimeout(() => renderChatHistory(value), 150);
+    });
     
     els.clearAllHistoryBtn?.addEventListener('click', async () => {
       if (confirm('Apakah Anda yakin ingin menghapus semua riwayat sesi obrolan?')) {
@@ -16899,7 +17503,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         safeSessionStorage.removeItem('zoz_active_session_id');
         try { localStorage.removeItem('zoz_last_active_session_id'); } catch (_) {}
         await DeviceStorage.clearAllSessions();
-        savePersistedState();
+        savePersistedState({ immediate: true });
         createNewSession();
         AudioEngine.click();
       }
@@ -17151,6 +17755,20 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       updateMusicGenModeUI();
       updateImageGenModeUI();
       openImageModelDropdown();
+      AudioEngine.click();
+    });
+    // Mode Edit Foto AI (Img2Img): pilih foto referensi → kartu tampil →
+    // instruksi edit dikirim sebagai prompt image-generation dengan referenceImage.
+    els.attachOptionEditPhoto?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAttachmentDropdown();
+      els.photoEditFileInput?.click();
+      AudioEngine.click();
+    });
+    els.photoEditFileInput?.addEventListener('change', handlePhotoEditFileSelect);
+    els.btnCancelPhotoEdit?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      clearPhotoEdit();
       AudioEngine.click();
     });
     els.attachOptionGenMusic?.addEventListener('click', (e) => {
@@ -17631,6 +18249,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         toggleMusicModelDropdown();
       } else if (e.key === 'Escape' && STATE.isImageGenMode && !els.promptInput?.value.trim()) {
         closeImageModelDropdown();
+      } else if (e.key === 'Escape' && STATE.photoEditImage && !els.promptInput?.value.trim()) {
+        clearPhotoEdit(); // lepas foto referensi saat prompt kosong
       } else if (e.key === 'Escape' && STATE.isMusicGenMode && !els.promptInput?.value.trim()) {
         closeMusicModelDropdown();
       }
@@ -18065,9 +18685,14 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       AudioEngine.click();
     });
 
+    // Debounce 150ms: renderLiveModelCatalog membangun ulang seluruh katalog —
+    // nilai query tetap disimpan langsung agar filter pill/tab yang diklik
+    // sesudahnya memakai kata kunci terbaru.
+    let catalogSearchDebounceTimer = null;
     els.liveModelCatalogSearchInput?.addEventListener('input', (e) => {
       STATE.catalogSearchQuery = e.target.value;
-      renderLiveModelCatalog();
+      clearTimeout(catalogSearchDebounceTimer);
+      catalogSearchDebounceTimer = setTimeout(() => renderLiveModelCatalog(), 150);
     });
 
     document.querySelectorAll('.catalog-filter-pill').forEach(pill => {
@@ -18322,6 +18947,18 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     window.addEventListener('focus', () => {
       checkBackgroundChatTasksSync();
     });
+
+    // Flush persistensi saat tab ditutup/navigasi: semua savePersistedState() lain
+    // kini di-debounce 700ms, jadi tanpa flush sinkron ini perubahan terakhir
+    // (mis. pesan yang barusan dikirim) bisa hilang saat tab ditutup mendadak.
+    const flushPersistenceOnHide = () => {
+      savePersistedState({ immediate: true });
+      try {
+        if (BGMEngine && typeof BGMEngine.flushVolume === 'function') BGMEngine.flushVolume();
+      } catch (_) {}
+    };
+    window.addEventListener('pagehide', flushPersistenceOnHide);
+    window.addEventListener('beforeunload', flushPersistenceOnHide);
   }
 
   // ==================== BOOTSTRAP INITIALIZATION ====================

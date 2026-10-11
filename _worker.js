@@ -5,6 +5,10 @@ function isPrivateHostname(hostname) {
   if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h)) return true;
   if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return true;
   if (/^169\.254\./.test(h)) return true;
+  // Rentang reserved yang dulu terlewat (cocokkan proteksi server-side)
+  if (/^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./.test(h)) return true; // 100.64.0.0/10 CGNAT (RFC 6598)
+  if (/^192\.0\.0\./.test(h)) return true; // 192.0.0.0/24 IETF protocol assignments (RFC 6890)
+  if (/^198\.(18|19)\./.test(h)) return true; // 198.18.0.0/15 benchmarking (RFC 2544)
   if (/^fc00:|^fe80:/i.test(h)) return true; // IPv6 Unique Local & Link-Local
   if (h.startsWith('::ffff:')) return true; // Block all IPv4-mapped IPv6
   if (h.startsWith('::7f00:') || h.startsWith('::a9fe:') || h.startsWith('::c0a8:') || h.startsWith('::0a')) return true; // Block mapped hex variants

@@ -179,7 +179,7 @@ html, body {
   border: none;
   color: var(--text-dim);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .close-sidebar-btn:hover {
@@ -205,7 +205,7 @@ html, body {
   justify-content: center;
   gap: 10px;
   cursor: pointer;
-  transition: all 0.25s ease;
+  transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
 }
 
 .new-chat-btn:hover {
@@ -350,7 +350,7 @@ html, body {
   padding: 9px 12px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
   background: transparent;
   border: 1px solid transparent;
   position: relative;
@@ -470,8 +470,8 @@ html, body {
   border: 1px solid var(--border-glow);
   border-radius: var(--radius-md);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.75), 0 0 16px rgba(0, 240, 255, 0.15);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   z-index: 1200;
   display: flex;
   flex-direction: column;
@@ -582,7 +582,6 @@ html, body {
   justify-content: space-between;
   padding: 0 18px;
   z-index: 50;
-  backdrop-filter: blur(12px);
 }
 
 .top-nav-left {
@@ -802,7 +801,7 @@ html, body {
   flex-direction: column;
   z-index: 700;
   overflow: hidden;
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(6px);
 }
 
 .model-dropdown-menu.show {
@@ -853,7 +852,7 @@ html, body {
   justify-content: space-between;
   font-size: 0.8rem;
   color: var(--text-muted);
-  transition: all 0.15s;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
 }
 
 .model-option-item:hover {
@@ -1015,7 +1014,7 @@ html, body {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: linear-gradient(135deg, rgba(12, 17, 30, 0.90) 0%, rgba(18, 25, 46, 0.95) 100%);
+  background: linear-gradient(135deg, rgba(12, 17, 30, 1) 0%, rgba(18, 25, 46, 1) 100%);
   border: 1px solid rgba(0, 240, 255, 0.45);
   color: var(--neon-cyan);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.75),
@@ -1038,8 +1037,6 @@ html, body {
               border-color 0.2s ease,
               box-shadow 0.2s ease;
   font-size: 1rem;
-  backdrop-filter: blur(20px) saturate(190%);
-  -webkit-backdrop-filter: blur(20px) saturate(190%);
   user-select: none;
 }
 
@@ -1380,6 +1377,8 @@ html, body {
   gap: 14px;
   width: 100%;
   animation: msgFadeIn 0.3s ease;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
 }
 
 @keyframes msgFadeIn {
@@ -2302,8 +2301,8 @@ html, body {
   overflow-y: auto;
   overscroll-behavior: contain;
   background: rgba(13, 16, 26, 0.98);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   border: 1px solid rgba(255, 0, 127, 0.38);
   border-radius: var(--radius-md);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(255, 0, 127, 0.22);
@@ -2721,8 +2720,8 @@ html, body {
   overflow-y: auto;
   overscroll-behavior: contain;
   background: rgba(10, 16, 24, 0.98);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   border: 1px solid rgba(0, 255, 194, 0.38);
   border-radius: var(--radius-md);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(0, 255, 194, 0.22);
@@ -3565,7 +3564,7 @@ body.modal-open {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(4px);
   z-index: 1500;
   display: none;
   align-items: center;
@@ -4332,13 +4331,12 @@ body.modal-open {
 /* Sidebar Mini BGM Widget */
 .sidebar-bgm-widget {
   margin: 10px 12px;
-  background: rgba(13, 16, 26, 0.75);
+  background: rgba(13, 16, 26, 1);
   border: 1px solid rgba(0, 240, 255, 0.25);
   border-radius: var(--radius-md);
   padding: 10px 12px;
-  backdrop-filter: blur(12px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  transition: all 0.25s ease;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
 .sidebar-bgm-widget:hover {
@@ -4375,8 +4373,10 @@ body.modal-open {
   width: 2px;
   background: var(--neon-cyan);
   border-radius: 1px;
-  height: 3px;
-  transition: height 0.2s ease;
+  height: 14px;
+  transform: scaleY(0.2);
+  transform-origin: bottom;
+  transition: transform 0.2s ease;
 }
 
 .bgm-anim-bars.playing span:nth-child(1) { animation: eqBar 0.8s ease-in-out infinite alternate; }
@@ -4385,8 +4385,8 @@ body.modal-open {
 .bgm-anim-bars.playing span:nth-child(4) { animation: eqBar 0.7s ease-in-out 0.3s infinite alternate; }
 
 @keyframes eqBar {
-  0% { height: 3px; }
-  100% { height: 14px; }
+  0% { transform: scaleY(0.2); }
+  100% { transform: scaleY(1); }
 }
 
 .bgm-track-marquee {
@@ -4691,8 +4691,8 @@ body.modal-open {
   left: 0;
   min-width: 270px;
   background: rgba(13, 16, 26, 0.96);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   border: 1px solid rgba(0, 240, 255, 0.35);
   border-radius: var(--radius-md);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7), 0 0 24px rgba(0, 240, 255, 0.18);
@@ -4902,8 +4902,8 @@ body.modal-open {
   left: 0;
   min-width: 290px;
   background: rgba(13, 16, 26, 0.97);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   border: 1px solid rgba(0, 240, 255, 0.35);
   border-radius: var(--radius-md);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 24px rgba(0, 240, 255, 0.18);
@@ -5664,8 +5664,8 @@ body.modal-open {
   position: absolute;
   inset: 0;
   background: rgba(4, 6, 10, 0.94);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 .lightbox-content-wrap {
@@ -5836,7 +5836,7 @@ body.modal-open {
   border: 1px solid rgba(0, 240, 255, 0.3) !important;
   border-radius: var(--radius-lg) !important;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85), 0 0 35px rgba(0, 240, 255, 0.18) !important;
-  backdrop-filter: blur(24px) !important;
+  backdrop-filter: blur(6px) !important;
 }
 
 @media (max-width: 768px) {
@@ -5859,7 +5859,7 @@ body.modal-open {
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: var(--radius-sm);
   margin-bottom: 8px;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   gap: 14px;
 }
 
@@ -8514,7 +8514,6 @@ body.modal-open {
   border-radius: 10px;
   border: 1px solid rgba(168, 85, 247, 0.28);
   background: rgba(168, 85, 247, 0.05);
-  backdrop-filter: blur(8px);
   overflow: hidden;
   transition: all 0.25s ease;
 }
@@ -8605,3 +8604,80 @@ body.modal-open {
   gap: 8px;
 }
 
+
+/* ==================== AI PHOTO EDIT REFERENCE CARD (IMG2IMG) ==================== */
+.photo-edit-ref-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 10px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  border-radius: var(--radius-md, 12px);
+  background: rgba(168, 85, 247, 0.08);
+}
+
+.photo-edit-ref-thumb-wrap {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(168, 85, 247, 0.5);
+  flex-shrink: 0;
+}
+
+.photo-edit-ref-thumb-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.photo-edit-ref-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.photo-edit-ref-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #c084fc;
+}
+
+.photo-edit-tag {
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(168, 85, 247, 0.2);
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  color: #e9d5ff;
+}
+
+.photo-edit-ref-tip {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+.photo-edit-cancel-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 85, 85, 0.35);
+  color: var(--text-dim);
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.photo-edit-cancel-btn:hover {
+  color: #ff5555;
+  border-color: rgba(255, 85, 85, 0.7);
+  background: rgba(255, 85, 85, 0.1);
+}

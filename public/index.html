@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
   <!-- Icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha384-t1nt8BQoYMLFN5p42tRAtuAAFQaCQODekUVeKKZrEnEyp4H2R0RHFz0KWpmj7i8g" crossorigin="anonymous">
   <!-- Highlight.js for code syntax styling -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
   <link rel="stylesheet" href="style.css?v=20261010_v183">
 </head>
@@ -336,12 +336,31 @@
           </div>
         </div>
 
+        <!-- AI Photo Edit Reference Card (Img2Img) -->
+        <div class="photo-edit-ref-card" id="photoEditReferenceCard" style="display: none;">
+          <div class="photo-edit-ref-thumb-wrap">
+            <img id="photoEditRefThumb" src="" alt="Foto Referensi">
+          </div>
+          <div class="photo-edit-ref-info">
+            <div class="photo-edit-ref-header">
+              <i class="fa-solid fa-wand-magic-sparkles"></i>
+              <span>Mode Edit Foto AI (Img2Img)</span>
+              <span class="photo-edit-tag">Foto Aktif</span>
+            </div>
+            <div class="photo-edit-ref-tip">Ketik instruksi editan di prompt (misal: "ganti latar jadi pantai", "ubah gaya jadi kartun/anime", "tambah kacamata hitam")</div>
+          </div>
+          <button type="button" class="photo-edit-cancel-btn" id="btnCancelPhotoEdit" title="Batalkan Mode Edit Foto">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
         <div class="composer-box">
           <!-- Action Buttons Left -->
           <div class="composer-tools-left">
             <!-- Hidden file inputs -->
             <input type="file" id="imageFileInput" accept="image/*" multiple style="display: none;">
             <input type="file" id="cameraFileInput" accept="image/*" capture="environment" style="display: none;">
+            <input type="file" id="photoEditFileInput" accept="image/*" style="display: none;">
             <input type="file" id="docFileInput" accept=".txt,.pdf,.csv,.json,.md,.js,.py,.html,.css,.ts,.java,.cpp,.c,.go,.rs,.sql,.sh,.yaml,.yml,.xml,.doc,.docx" multiple style="display: none;">
 
             <!-- Unified Attachment Menu (ChatGPT & Gemini Style) -->
@@ -369,6 +388,15 @@
                   </div>
                   <div class="attach-item-info">
                     <span class="attach-item-title">Galeri Foto</span>
+                  </div>
+                </button>
+                <button class="attachment-menu-item" id="attachOptionEditPhoto" type="button">
+                  <div class="attach-item-icon-box photo-edit-accent" style="background: rgba(168, 85, 247, 0.15); border-color: rgba(168, 85, 247, 0.4); color: #c084fc;">
+                    <i class="fa-solid fa-paintbrush"></i>
+                  </div>
+                  <div class="attach-item-info">
+                    <span class="attach-item-title">Edit Foto AI (Img2Img)</span>
+                    <span class="attach-item-desc">Ubah gaya, latar, objek, atau modifikasi foto</span>
                   </div>
                 </button>
                 <button class="attachment-menu-item" id="attachOptionGenImage" type="button">
@@ -1568,16 +1596,16 @@
 
   <!-- Dependencies -->
   <!-- Marked.js for Markdown parsing -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js" integrity="sha384-3zf4Pen4fXU90jGg3cxmo7BF4dq8HMtF2s07c/Hhd1Fh+Encm6ApPvNm8vrMJbWu" crossorigin="anonymous" defer></script>
   <!-- DOMPurify for XSS Protection & HTML Sanitization -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.9/purify.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.7/purify.min.js" integrity="sha384-XQqX/4yiUGu+oyr87jvWzRuqBUK/adrY0DunhL+tID9m/9dwSpV8h9Fk/Sg6ifVQ" crossorigin="anonymous" defer></script>
   <!-- Highlight.js for code syntax highlighting -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous" defer></script>
   <!-- PDF.js for Clean Document Extraction -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" integrity="sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e" crossorigin="anonymous" defer></script>
   <!-- JSZip for DOCX Document Extraction -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261010_v183"></script>
+  <script src="app.js?v=20261010_v183" defer></script>
 </body>
 </html>

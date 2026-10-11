@@ -8,12 +8,46 @@ const http = require('http');
 const https = require('https');
 const url = require('url');
 const fs = require('fs');
+const fsp = require('fs').promises;
 const path = require('path');
 const zlib = require('zlib');
 const crypto = require('crypto');
 const dns = require('dns');
 const net = require('net');
 const { spawn } = require('child_process');
+
+// Loader .env minimal (TANPA dependensi eksternal — proyek zero-dep).
+// Baca file .env bila ada, parse baris KEY=VALUE (lewati komentar/baris kosong),
+// dan JANGAN pernah menimpa variabel yang sudah ada di process.env.
+try {
+  const envFilePath = path.join(__dirname, '.env');
+  if (fs.existsSync(envFilePath)) {
+    const envLines = fs.readFileSync(envFilePath, 'utf8').split(/\r?\n/);
+    for (const envLine of envLines) {
+      const trimmedEnvLine = envLine.trim();
+      if (!trimmedEnvLine || trimmedEnvLine.startsWith('#')) continue;
+      const eqIdx = trimmedEnvLine.indexOf('=');
+      if (eqIdx <= 0) continue;
+      const envKey = trimmedEnvLine.slice(0, eqIdx).trim();
+      let envValue = trimmedEnvLine.slice(eqIdx + 1).trim();
+      if (envValue.startsWith('"') || envValue.startsWith("'")) {
+        // Berpetik: nilai = isi di antara petik; komentar inline SETELAH petik
+        // penutup diabaikan (semantik dotenv): KEY="a b" # catatan → "a b".
+        const quoteChar = envValue[0];
+        const closeQuoteIdx = envValue.indexOf(quoteChar, 1);
+        envValue = closeQuoteIdx > 0 ? envValue.slice(1, closeQuoteIdx) : envValue.slice(1);
+      } else {
+        // Tanpa petik: komentar inline dimulai dari spasi diikuti '#' —
+        // "abc # catatan" → "abc", tapi "abc#def" tetap utuh (tanpa spasi).
+        const inlineCommentIdx = envValue.search(/\s#/);
+        if (inlineCommentIdx >= 0) envValue = envValue.slice(0, inlineCommentIdx).trimEnd();
+      }
+      if (envKey && !(envKey in process.env)) process.env[envKey] = envValue;
+    }
+  }
+} catch (envErr) {
+  console.warn('Warning: gagal memuat file .env:', envErr.message);
+}
 
 const PORT = process.env.PORT || 4040;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -172,6 +206,12 @@ function isPrivateHost(hostname, port) {
   if (host.startsWith('[') && host.endsWith(']')) {
     host = host.slice(1, -1);
   }
+  // Literal IP (IPv4/IPv6) → delegasikan ke helper range lengkap supaya
+  // 100.64.0.0/10, 192.0.0.0/24, 198.18.0.0/15, multicast/reserved, dsb ikut
+  // terblokir (rentang yang dulu hanya dicakup isPrivateOrReservedIPv4/IPv6).
+  const ipVersion = net.isIP(host);
+  if (ipVersion === 4) return isPrivateOrReservedIPv4(host);
+  if (ipVersion === 6) return isPrivateOrReservedIPv6(host);
   if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0' || host === '::' || host === '0') return true;
   if (/^127\./.test(host)) return true;
   if (/^10\./.test(host)) return true;
@@ -496,11 +536,22 @@ function resolveRequestIdentity(req, reqUrl) {
 }
 
 // Dapatkan direktori penyimpanan sesi khusus per user
+// Cache direktori yang SUDAH dipastikan ada agar existsSync+mkdirSync tidak
+// berjalan di setiap request (jalur panas: list/detail sesi per permintaan).
+const ensuredUserSessionDirs = new Set();
 function getUserSessionsDir(userId) {
   const cleanUid = sanitizeUserId(userId);
   const userDir = path.join(SESSIONS_DIR, cleanUid);
+  if (ensuredUserSessionDirs.has(cleanUid)) return userDir; // cache hit → langsung
   if (!fs.existsSync(userDir)) {
-    try { fs.mkdirSync(userDir, { recursive: true }); } catch (_) {}
+    try {
+      fs.mkdirSync(userDir, { recursive: true });
+      ensuredUserSessionDirs.add(cleanUid);
+    } catch (_) {
+      // Gagal dibuat → JANGAN di-cache agar percobaan berikutnya mengulang
+    }
+  } else {
+    ensuredUserSessionDirs.add(cleanUid);
   }
   return userDir;
 }
@@ -676,9 +727,9 @@ function performWebSearch(query, apiKey = null, num = 15) {
     }
     const cleanQuery = query.trim();
     const targetNum = Math.min(Math.max(parseInt(num, 10) || 15, 1), 30);
-    const serperKey = apiKey || process.env.SERPER_API_KEY || '075538fed9c64990e1eb32a06726c1e55a933c1e';
+    const serperKey = apiKey || process.env.SERPER_API_KEY || null;
     if (!serperKey) {
-      return safeResolve({ query: cleanQuery, count: 0, results: [], error: 'Serper API key tidak dikonfigurasi. Setel SERPER_API_KEY atau kirim header x-serper-key.' });
+      return safeResolve({ query: cleanQuery, count: 0, results: [], error: 'SERPER_API_KEY belum dikonfigurasi di server. Set env SERPER_API_KEY atau masukkan key di Pengaturan.' });
     }
     const postData = JSON.stringify({
       q: cleanQuery,
@@ -1429,7 +1480,24 @@ function normalizeIp(ip) {
 }
 
 function rateLimitCheck(req, limit) {
-  const rawIp = (req.socket && req.socket.remoteAddress) || 'unknown';
+  let rawIp = (req.socket && req.socket.remoteAddress) || 'unknown';
+  // Di belakang proxy tepercaya (Vercel / TRUST_PROXY=1), semua request datang
+  // dari IP proxy yang sama → bucket tunggal. Pakai hop PALING KANAN x-forwarded-for:
+  // entri itulah yang DITAMBAHKAN oleh proxy tepercaya (IP yang benar-benar ia
+  // lihat dari koneksi masuk) dan tidak bisa dikontrol klien dari luar. Hop kiri
+  // (first-hop) justru kolom bebas yang bisa diisi attacker lewat header XFF palsu
+  // — bila dipakai sebagai kunci, rate-limit bisa dibobol total (bucket baru tiap
+  // request). DI LUAR proxy tepercaya header XFF diabaikan total (tetap
+  // remoteAddress) agar tidak bisa di-bypass dari LAN.
+  const xffHeader = req.headers && req.headers['x-forwarded-for'];
+  const trustedProxy = process.env.TRUST_PROXY === '1' ||
+    (IS_VERCEL_ENV && typeof xffHeader === 'string' && xffHeader.trim() !== '') ||
+    (Boolean(process.env.IS_VERCEL_ENV) && typeof xffHeader === 'string' && xffHeader.trim() !== '');
+  if (trustedProxy) {
+    const hops = String(xffHeader || '').split(',').map(h => h.trim()).filter(Boolean);
+    const trustedHop = hops.length ? hops[hops.length - 1] : ''; // hop kanan = tambahan proxy tepercaya
+    if (net.isIP(trustedHop)) rawIp = trustedHop; // hanya pakai bila bentuknya IP valid
+  }
   const ip = normalizeIp(rawIp);
   const key = ip + '|' + (limit.name || 'x'); // bucket TERPISAH per limiter
   const now = Date.now();
@@ -1476,7 +1544,8 @@ function pruneActiveChatTasks() {
             flushChatTaskBuffer(sid, t.provider || 'openrouter');
           }
           if (t.fullText && t.fullText.trim()) {
-            appendAssistantMessageToSessionDisk(sid, t.fullText + `\n\n*[Respons terputus: Kadaluwarsa]*`, t.model);
+            appendAssistantMessageToSessionDisk(sid, t.fullText + `\n\n*[Respons terputus: Kadaluwarsa]*`, t.model)
+              .catch(err => console.warn('Gagal simpan respons kadaluwarsa ke sesi:', err && err.message));
           }
           delete dbActiveChatTasks[sid];
         }
@@ -1534,11 +1603,17 @@ function accumulateChatChunk(sessionId, chunk, provider) {
           }
         }
         if (delta) {
-          // Limit fullText buffer to prevent memory exhaustion on very long responses
-          if (Buffer.byteLength(task.fullText + delta, 'utf8') > MAX_FULLTEXT_BYTES) {
+          // Limit fullText buffer to prevent memory exhaustion on very long responses.
+          // Akumulasi byte per-chunk (O(delta)) — byteLength(fullText + delta) yang
+          // dulu menyalin seluruh akumulasi setiap chunk (O(n²) total) sudah dihilangkan.
+          const deltaBytes = Buffer.byteLength(delta, 'utf8');
+          if ((task.fullBytes || 0) + deltaBytes > MAX_FULLTEXT_BYTES) {
             task.fullText = task.fullText.slice(-MAX_FULLTEXT_BYTES / 2); // Keep last half
+            task.fullBytes = Buffer.byteLength(task.fullText, 'utf8'); // recompute sekali (peristiwa langka)
+            task.fullEpoch = (task.fullEpoch || 0) + 1; // offset byte bergeser → delta epoch lama tak berlaku
           }
           task.fullText += delta;
+          task.fullBytes = (task.fullBytes || 0) + deltaBytes;
           task.lastTokenTime = Date.now();
         }
       } catch (_) {}
@@ -1548,11 +1623,15 @@ function accumulateChatChunk(sessionId, chunk, provider) {
         const parsed = JSON.parse(trimmed);
         const delta = parsed.message?.content || parsed.response || '';
         if (delta) {
-          // Limit fullText buffer to prevent memory exhaustion on very long responses
-          if (Buffer.byteLength(task.fullText + delta, 'utf8') > MAX_FULLTEXT_BYTES) {
+          // Limit fullText buffer to prevent memory exhaustion on very long responses.
+          const deltaBytes = Buffer.byteLength(delta, 'utf8');
+          if ((task.fullBytes || 0) + deltaBytes > MAX_FULLTEXT_BYTES) {
             task.fullText = task.fullText.slice(-MAX_FULLTEXT_BYTES / 2); // Keep last half
+            task.fullBytes = Buffer.byteLength(task.fullText, 'utf8'); // recompute sekali (peristiwa langka)
+            task.fullEpoch = (task.fullEpoch || 0) + 1; // offset byte bergeser → delta epoch lama tak berlaku
           }
           task.fullText += delta;
+          task.fullBytes = (task.fullBytes || 0) + deltaBytes;
           task.lastTokenTime = Date.now();
         }
       } catch (_) {}
@@ -1603,6 +1682,7 @@ function flushChatTaskBuffer(sessionId, provider) {
           }
           if (delta) {
             task.fullText += delta;
+            task.fullBytes = (task.fullBytes || 0) + Buffer.byteLength(delta, 'utf8');
             task.lastTokenTime = Date.now();
           }
         } catch (_) {}
@@ -1612,6 +1692,7 @@ function flushChatTaskBuffer(sessionId, provider) {
           const delta = parsed.message?.content || parsed.response || '';
           if (delta) {
             task.fullText += delta;
+            task.fullBytes = (task.fullBytes || 0) + Buffer.byteLength(delta, 'utf8');
             task.lastTokenTime = Date.now();
           }
         } catch (_) {}
@@ -1620,6 +1701,7 @@ function flushChatTaskBuffer(sessionId, provider) {
   }
   if (task.inReasoning) {
     task.fullText += '\n</think>';
+    task.fullBytes = (task.fullBytes || 0) + Buffer.byteLength('\n</think>', 'utf8');
     task.inReasoning = false;
   }
 }
@@ -1640,20 +1722,29 @@ function markChatTaskInterrupted(sessionId, reason = 'Koneksi terputus') {
   flushChatTaskBuffer(sessionId, task.provider || 'openrouter');
   if (task.inReasoning) {
     task.fullText += '\n</think>';
+    task.fullBytes = (task.fullBytes || 0) + Buffer.byteLength('\n</think>', 'utf8');
     task.inReasoning = false;
   }
   if (task.fullText && task.fullText.trim()) {
-    appendAssistantMessageToSessionDisk(sessionId, task.fullText + `\n\n*[Respons terputus: ${reason}]*`, task.model);
+    appendAssistantMessageToSessionDisk(sessionId, task.fullText + `\n\n*[Respons terputus: ${reason}]*`, task.model)
+      .catch(err => console.warn('Gagal simpan respons terputus ke sesi:', err && err.message));
   }
   // Clean up completed/interrupted task
   delete dbActiveChatTasks[sessionId];
 }
 
+// Antrean tulis file sesi PER sessionId: sejak appendAssistantMessageToSessionDisk
+// menjadi asinkron, dua pemanggil konkurent untuk sesi yang sama (prune kadaluarsa +
+// completion baru, stop + simpan riset, dsb) bisa sama-sama membaca file LAMA lewat
+// await → tulisan terakhir menimpa yang pertama dan satu pesan hilang permanen.
+// Rantai promise memaksa read-modify-write berjalan satu per satu per sesi.
+const sessionAppendQueues = new Map(); // cleanSid -> Promise tail antrean
+
 function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extraMeta = {}, explicitUserId = null) {
-  if (!sessionId || !content || !content.trim()) return false;
+  if (!sessionId || !content || !content.trim()) return Promise.resolve(false);
   try {
     const cleanSid = String(sessionId).trim();
-    if (!/^[a-zA-Z0-9_-]+$/.test(cleanSid)) return false;
+    if (!/^[a-zA-Z0-9_-]+$/.test(cleanSid)) return Promise.resolve(false);
 
     // Tentukan userId pemilik sesi
     let effectiveUid = explicitUserId;
@@ -1676,10 +1767,59 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
     const userDir = getUserSessionsDir(cleanUid);
     const sessFile = path.join(userDir, `${cleanSid}.json`);
 
-    let sessData = null;
+    // Tangkap konteks task SEBELUM await pertama — beberapa pemanggil (stop,
+    // prune, interrupt) menghapus dbActiveChatTasks tepat setelah memanggil
+    // fungsi ini, jadi userPrompt harus dibaca sebelum I/O asinkron pertama.
+    let userPrompt = (sessionId && dbActiveChatTasks[sessionId]?.userPrompt) ? dbActiveChatTasks[sessionId].userPrompt : null;
+    if (!userPrompt && extraMeta && typeof extraMeta === 'object' && extraMeta.prompt) {
+      userPrompt = extraMeta.prompt;
+    }
+    if (!userPrompt && sessionId) {
+      for (const rId of Object.keys(dbTugasRiset)) {
+        const r = dbTugasRiset[rId];
+        if (r && (r.sessionId === sessionId || r.taskId === sessionId) && r.topik) {
+          userPrompt = r.topik;
+          break;
+        }
+      }
+    }
+
+    // ===== ANTREAN TULIS PER-SESI =====
+    // Konteks (userPrompt & effectiveUid) sudah ditangkap sinkron DI ATAS — sebelum
+    // pemanggil (stop/prune) sempat menghapus dbActiveChatTasks. Sekarang RMW
+    // file-nya diantrekan per cleanSid agar dua penyimpanan konkurent tidak saling
+    // menimpa (lost-update). Antrean tidak pernah reject: error sudah dikonversi
+    // false + warn agar tail antrean selalu lanjut ke pemanggil berikutnya.
+    const prevTail = sessionAppendQueues.get(cleanSid) || Promise.resolve();
+    const tail = prevTail
+      .catch(() => {})
+      .then(() => _appendSessionFileSerialized(cleanSid, effectiveUid || null, userPrompt, content, modelName, extraMeta))
+      .catch(err => {
+        console.warn(`[Background Chat Engine] Gagal menyimpan respons asisten ke sesi disk ${sessionId}:`, err && err.message);
+        return false;
+      })
+      .finally(() => {
+        if (sessionAppendQueues.get(cleanSid) === tail) sessionAppendQueues.delete(cleanSid);
+      });
+    sessionAppendQueues.set(cleanSid, tail);
+    return tail;
+  } catch (err) {
+    console.warn(`[Background Chat Engine] Gagal menyimpan respons asisten ke sesi disk ${sessionId}:`, err && err.message);
+    return Promise.resolve(false);
+  }
+}
+
+// ===== BODY RMW FILE SESI — dijalankan HANYA di dalam antrean per-sesi =====
+// (lihat rantai antrean di appendAssistantMessageToSessionDisk). Path file dihitung
+// ulang di sini karena fungsi induk hanya menangkap konteks, tidak mengeksekusi I/O.
+async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, content, modelName, extraMeta) {
+  const userDir = getUserSessionsDir(sanitizeUserId(effectiveUid || 'default'));
+  const sessFile = path.join(userDir, `${cleanSid}.json`);
+
+  let sessData = null;
     if (fs.existsSync(sessFile)) {
       try {
-        sessData = JSON.parse(fs.readFileSync(sessFile, 'utf8'));
+        sessData = JSON.parse(await fsp.readFile(sessFile, 'utf8'));
       } catch (_) {
         sessData = null;
       }
@@ -1689,19 +1829,6 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
     // buat otomatis struktur sesi agar jawaban latar belakang tidak hilang dan pertanyaan user tetap ada
     if (!sessData || typeof sessData !== 'object') {
       const initialMsgs = [];
-      let userPrompt = (sessionId && dbActiveChatTasks[sessionId]?.userPrompt) ? dbActiveChatTasks[sessionId].userPrompt : null;
-      if (!userPrompt && extraMeta && typeof extraMeta === 'object' && extraMeta.prompt) {
-        userPrompt = extraMeta.prompt;
-      }
-      if (!userPrompt && sessionId) {
-        for (const rId of Object.keys(dbTugasRiset)) {
-          const r = dbTugasRiset[rId];
-          if (r && (r.sessionId === sessionId || r.taskId === sessionId) && r.topik) {
-            userPrompt = r.topik;
-            break;
-          }
-        }
-      }
 
       if (userPrompt) {
         initialMsgs.push({
@@ -1769,7 +1896,7 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
         sessData.updatedAt = new Date().toISOString();
         const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
         try {
-          fs.writeFileSync(tempFile, JSON.stringify(sessData, null, 2), 'utf8');
+          await fsp.writeFile(tempFile, JSON.stringify(sessData, null, 2), 'utf8');
           fs.renameSync(tempFile, sessFile);
         } catch (err) {
           try { fs.unlinkSync(tempFile); } catch {}
@@ -1807,17 +1934,13 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
     sessData.updatedAt = new Date().toISOString();
     const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     try {
-      fs.writeFileSync(tempFile, JSON.stringify(sessData, null, 2), 'utf8');
+      await fsp.writeFile(tempFile, JSON.stringify(sessData, null, 2), 'utf8');
       fs.renameSync(tempFile, sessFile);
     } catch (err) {
       try { fs.unlinkSync(tempFile); } catch {}
       throw err;
     }
     return true;
-  } catch (err) {
-    console.warn(`[Background Chat Engine] Gagal menyimpan respons asisten ke sesi disk ${sessionId}:`, err.message);
-    return false;
-  }
 }
 
 // Helper jeda asinkronus untuk mencegah lonjakan rate-limit (RPM)
@@ -2840,12 +2963,19 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
     if (results.length >= maxResults) break;
   }
 
-  return {
+  const returnPayload = {
     query: cleanQuery,
     engine: 'autonomous_multi_source',
     count: results.length,
     results
   };
+  // Tanpa SERPER_API_KEY, sumber Serper otomatis dilewati (performWebSearch
+  // mengembalikan error tanpa jaringan). Endpoint ini TETAP dilayani oleh News
+  // RSS/DuckDuckGo/Wikipedia, jadi jangan di-503 — tapi kondisinya harus terlihat.
+  if (!process.env.SERPER_API_KEY) {
+    returnPayload.warning = 'SERPER_API_KEY belum dikonfigurasi di server. Set env SERPER_API_KEY atau masukkan key di Pengaturan.';
+  }
+  return returnPayload;
 }
 
 // Engine pembaca dan penjelajah halaman web mandiri (Deep Page Browser)
@@ -3368,7 +3498,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           isDeepResearch: true,
           chatSummary: chatSummary,
           sources: allSources
-        });
+        }).catch(err => console.warn('Gagal simpan riset terhenti ke sesi:', err && err.message));
       }
       return;
     }
@@ -3405,7 +3535,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         isDeepResearch: true,
         chatSummary: chatSummary,
         sources: allSources
-      });
+      }).catch(err => console.warn('Gagal simpan laporan riset ke sesi:', err && err.message));
     }
 
   } catch (error) {
@@ -3592,21 +3722,29 @@ async function requestHandler(req, res) {
       if (!fs.existsSync(userDir)) {
         return sendJSON(res, 200, { sessions: [] });
       }
-      const files = fs.readdirSync(userDir).filter(f => f.endsWith('.json'));
+      const files = (await fsp.readdir(userDir)).filter(f => f.endsWith('.json'));
       const sessions = [];
       for (const file of files) {
         try {
           const fullPath = path.join(userDir, file);
-          const content = fs.readFileSync(fullPath, 'utf8');
+          const content = await fsp.readFile(fullPath, 'utf8');
           const sess = JSON.parse(content);
           const lastMsg = (sess.messages && sess.messages.length > 0) ? sess.messages[sess.messages.length - 1].content : '';
+          // stat hanya saat createdAt/updatedAt tidak ada di isi file (hemat 2 syscall/file)
+          let createdAt = sess.createdAt;
+          let updatedAt = sess.updatedAt;
+          if (!createdAt || !updatedAt) {
+            const st = await fsp.stat(fullPath);
+            createdAt = createdAt || st.birthtime.toISOString();
+            updatedAt = updatedAt || st.mtime.toISOString();
+          }
           sessions.push({
             id: sess.id || path.basename(file, '.json'),
             userId: reqUserId,
             title: sess.title || 'Obrolan Baru',
             mode: sess.mode || 'ollama',
-            createdAt: sess.createdAt || fs.statSync(fullPath).birthtime.toISOString(),
-            updatedAt: sess.updatedAt || fs.statSync(fullPath).mtime.toISOString(),
+            createdAt,
+            updatedAt,
             messageCount: Array.isArray(sess.messages) ? sess.messages.length : 0,
             isPinned: !!sess.isPinned,
             lastSnippet: (typeof lastMsg === 'string') ? lastMsg.substring(0, 80) : ''
@@ -3654,7 +3792,7 @@ async function requestHandler(req, res) {
       }
       const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       try {
-        fs.writeFileSync(tempFile, JSON.stringify(body, null, 2), 'utf8');
+        await fsp.writeFile(tempFile, JSON.stringify(body, null, 2), 'utf8');
         fs.renameSync(tempFile, sessFile);
       } catch (err) {
         try { fs.unlinkSync(tempFile); } catch {}
@@ -3690,7 +3828,7 @@ async function requestHandler(req, res) {
       }
       const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       try {
-        fs.writeFileSync(tempFile, JSON.stringify(updated, null, 2), 'utf8');
+        await fsp.writeFile(tempFile, JSON.stringify(updated, null, 2), 'utf8');
         fs.renameSync(tempFile, sessFile);
       } catch (err) {
         try { fs.unlinkSync(tempFile); } catch {}
@@ -4038,6 +4176,15 @@ async function requestHandler(req, res) {
       if (!query) {
         return sendJSON(res, 400, { error: 'Parameter query `q` atau body `{ query }` diperlukan.' });
       }
+      // Endpoint Serper-MURNI: tanpa key, hasil pasti kosong → gagal nyata (503)
+      // alih-alih 200 dengan results[] kosong yang menyesatkan klien.
+      const effectiveSerperKey = apiKey || process.env.SERPER_API_KEY || null;
+      if (!effectiveSerperKey) {
+        return sendJSON(res, 503, {
+          success: false,
+          error: 'SERPER_API_KEY belum dikonfigurasi di server. Set env SERPER_API_KEY atau masukkan key di Pengaturan.'
+        });
+      }
       const targetNum = Math.min(Math.max(isNaN(num) ? 15 : num, 1), 30);
       const data = await performWebSearch(query, apiKey, targetNum);
       return sendJSON(res, 200, data);
@@ -4339,12 +4486,14 @@ async function requestHandler(req, res) {
       let seed = null;
       let openRouterKey = null;
       let sessionId = null;
+      let referenceImage = null;
 
       let rawImageUserId = null;
       if (method === 'POST') {
         const body = await safeParseBody(req);
         if (!body) return;
         prompt = body.prompt || body.q || '';
+        referenceImage = body.referenceImage || body.image || body.initImage || null;
         sessionId = body.sessionId || req.headers['x-session-id'] || req.headers['X-Session-ID'] || null;
         rawImageUserId = body.userId || null;
         model = body.model || model;
@@ -4354,6 +4503,7 @@ async function requestHandler(req, res) {
         openRouterKey = body.openRouterKey || body.apiKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       } else {
         prompt = reqUrl.searchParams.get('prompt') || reqUrl.searchParams.get('q') || '';
+        referenceImage = reqUrl.searchParams.get('referenceImage') || reqUrl.searchParams.get('image') || null;
         sessionId = reqUrl.searchParams.get('sessionId') || req.headers['x-session-id'] || req.headers['X-Session-ID'] || null;
         rawImageUserId = reqUrl.searchParams.get('userId') || null;
         model = reqUrl.searchParams.get('model') || model;
@@ -4370,8 +4520,23 @@ async function requestHandler(req, res) {
       }
 
       if (!prompt || !prompt.trim()) {
-        return sendJSON(res, 400, { success: false, error: 'Parameter `prompt` diperlukan untuk menghasilkan gambar.' });
+        return sendJSON(res, 400, { success: false, error: 'Parameter `prompt` diperlukan untuk menghasilkan atau mengedit gambar.' });
       }
+
+      // Resolusi URL foto referensi lokal (/uploads/...) ke data URI base64 jika ada
+      let resolvedRefDataUrl = referenceImage;
+      if (typeof referenceImage === 'string' && referenceImage.startsWith('/uploads/')) {
+        const localRefPath = path.join(UPLOADS_DIR, path.basename(referenceImage));
+        if (fs.existsSync(localRefPath)) {
+          try {
+            const refBuffer = fs.readFileSync(localRefPath);
+            const ext = path.extname(localRefPath).toLowerCase().replace('.', '');
+            const mime = ext === 'png' ? 'image/png' : (ext === 'webp' ? 'image/webp' : 'image/jpeg');
+            resolvedRefDataUrl = `data:${mime};base64,${refBuffer.toString('base64')}`;
+          } catch (_) {}
+        }
+      }
+      const isEdit = Boolean(resolvedRefDataUrl);
 
       const cleanPrompt = prompt.trim();
       const actualSeed = seed || Math.floor(Math.random() * 100000000);
@@ -4388,7 +4553,7 @@ async function requestHandler(req, res) {
 
       const isCloudModel = effectiveModel.includes('/');
 
-      // 1. OpenRouter Cloud Dedicated Image Generation (POST /api/v1/images)
+      // 1. OpenRouter Cloud Dedicated Image Generation / Editing (POST /api/v1/images)
       if (isCloudModel) {
         if (!openRouterKey) {
           return sendJSON(res, 400, { 
@@ -4399,18 +4564,22 @@ async function requestHandler(req, res) {
 
         let lastOrError = null;
 
-        // 1A. Primary: Dedicated OpenRouter Image Generation API (POST /api/v1/images)
+        // 1A. Primary: Dedicated OpenRouter Image Generation / Edit API (POST /api/v1/images)
         try {
           const orImageRes = await new Promise((resolve, reject) => {
             let settled = false;
             const safeResolve = (d) => { if (!settled) { settled = true; resolve(d); } };
             const safeReject = (e) => { if (!settled) { settled = true; reject(e); } };
 
-            const postData = JSON.stringify({
+            const imagePayload = {
               model: effectiveModel,
               prompt: cleanPrompt,
               aspect_ratio: '1:1'
-            });
+            };
+            if (isEdit && resolvedRefDataUrl) {
+              imagePayload.input_references = [resolvedRefDataUrl];
+            }
+            const postData = JSON.stringify(imagePayload);
 
             const opt = {
               hostname: 'openrouter.ai',
@@ -4488,9 +4657,15 @@ async function requestHandler(req, res) {
               const safeResolve = (data) => { if (!settled) { settled = true; resolve(data); } };
               const safeReject = (err) => { if (!settled) { settled = true; reject(err); } };
 
+              const userContent = [
+                { type: 'text', text: isEdit ? `Please edit, modify or transform this image according to the instructions: ${cleanPrompt}` : `Please generate an image: ${cleanPrompt}` }
+              ];
+              if (isEdit && resolvedRefDataUrl) {
+                userContent.push({ type: 'image_url', image_url: { url: resolvedRefDataUrl } });
+              }
               const postData = JSON.stringify({
                 model: effectiveModel,
-                messages: [{ role: 'user', content: `Please generate an image: ${cleanPrompt}` }],
+                messages: [{ role: 'user', content: userContent }],
                 modalities: ['image', 'text']
               });
               const opt = {
@@ -4579,34 +4754,101 @@ async function requestHandler(req, res) {
       // 2. Engine Default (Pollinations AI Multi-Style) - HANYA untuk model lokal/Pollinations
       if (!isCloudModel && !imageBuffer) {
         
-        let styledPrompt = cleanPrompt;
-        if (effectiveModel === 'flux-realism' && !/photo|realis|cinematic/i.test(cleanPrompt)) {
-          styledPrompt = `${cleanPrompt}, photorealistic, ultra-detailed 8k photography, cinematic lighting`;
-        } else if (effectiveModel === 'flux-anime' && !/anime|manga|2d/i.test(cleanPrompt)) {
-          styledPrompt = `${cleanPrompt}, anime aesthetic, high quality Japanese manga style, vibrant colors, detailed line art`;
-        } else if (effectiveModel === 'flux-3d' && !/3d|cgi|render/i.test(cleanPrompt)) {
-          styledPrompt = `${cleanPrompt}, 3d digital render, octane render, unreal engine 5, 3d cgi volumetric lighting`;
-        } else if (effectiveModel === 'midjourney' && !/artistic|midjourney/i.test(cleanPrompt)) {
-          styledPrompt = `${cleanPrompt}, midjourney aesthetic, artistic concept art, dramatic composition, breathtaking detail`;
-        } else if (effectiveModel === 'flux-pro' && !/masterpiece|pro/i.test(cleanPrompt)) {
-          styledPrompt = `${cleanPrompt}, masterpiece, professional award-winning composition, ultra sharp details`;
+        // 2A. Jika mode edit foto dan foto referensi ada, panggil endpoint POST Pollinations img2img
+        if (isEdit && resolvedRefDataUrl) {
+          try {
+            const pollinationsRes = await new Promise((resolve, reject) => {
+              let settled = false;
+              const safeResolve = (d) => { if (!settled) { settled = true; resolve(d); } };
+              const safeReject = (e) => { if (!settled) { settled = true; reject(e); } };
+
+              const postData = JSON.stringify({
+                prompt: cleanPrompt,
+                model: effectiveModel,
+                image: resolvedRefDataUrl,
+                width: width,
+                height: height,
+                nologo: true,
+                seed: actualSeed
+              });
+
+              const opt = {
+                hostname: 'image.pollinations.ai',
+                port: 443,
+                path: '/',
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Content-Length': Buffer.byteLength(postData),
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                },
+                timeout: 45000
+              };
+
+              const reqPoll = https.request(opt, (resp) => {
+                if (resp.statusCode >= 400) {
+                  resp.resume(); // habiskan body error agar koneksi socket tidak menggantung
+                  return safeReject(new Error(`Pollinations HTTP ${resp.statusCode}`));
+                }
+                const chunks = [];
+                resp.on('data', c => chunks.push(c));
+                resp.on('end', () => {
+                  const buf = Buffer.concat(chunks);
+                  const mime = resp.headers['content-type'] || 'image/jpeg';
+                  safeResolve({ buffer: buf, contentType: mime });
+                });
+              });
+
+              reqPoll.on('timeout', () => { reqPoll.destroy(); safeReject(new Error('Pollinations POST timeout')); });
+              reqPoll.on('error', err => safeReject(err));
+              reqPoll.write(postData);
+              reqPoll.end();
+            });
+
+            if (pollinationsRes && pollinationsRes.buffer && pollinationsRes.buffer.length > 0) {
+              imageBuffer = pollinationsRes.buffer;
+              contentType = pollinationsRes.contentType || 'image/jpeg';
+            }
+          } catch (editErr) {
+            console.warn('Pollinations POST edit failed, trying GET fallback:', editErr.message);
+          }
         }
 
-        // Pemangkasan semantik aman (smart boundary truncation) untuk URL GET guna mencegah error HTTP 414 URI Too Long
-        let urlPrompt = styledPrompt;
-        if (urlPrompt.length > 800) {
-          const cut = urlPrompt.slice(0, 800);
-          const lastSpace = cut.lastIndexOf(' ');
-          urlPrompt = (lastSpace > 600 ? cut.slice(0, lastSpace) : cut).trim();
-        }
-        const encodedPrompt = encodeURIComponent(urlPrompt);
-        remoteImageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=${encodeURIComponent(effectiveModel)}&seed=${actualSeed}&nologo=true&enhance=true`;
-        try {
-          const downloaded = await downloadImageBuffer(remoteImageUrl, 40000);
-          imageBuffer = downloaded.buffer;
-          contentType = downloaded.contentType || 'image/png';
-        } catch (dlErr) {
-          console.warn('Gagal mengunduh buffer gambar Pollinations ke disk lokal:', dlErr.message);
+        // 2B. Standar text-to-image (atau fallback GET jika POST gagal)
+        if (!imageBuffer) {
+          let styledPrompt = cleanPrompt;
+          if (effectiveModel === 'flux-realism' && !/photo|realis|cinematic/i.test(cleanPrompt)) {
+            styledPrompt = `${cleanPrompt}, photorealistic, ultra-detailed 8k photography, cinematic lighting`;
+          } else if (effectiveModel === 'flux-anime' && !/anime|manga|2d/i.test(cleanPrompt)) {
+            styledPrompt = `${cleanPrompt}, anime aesthetic, high quality Japanese manga style, vibrant colors, detailed line art`;
+          } else if (effectiveModel === 'flux-3d' && !/3d|cgi|render/i.test(cleanPrompt)) {
+            styledPrompt = `${cleanPrompt}, 3d digital render, octane render, unreal engine 5, 3d cgi volumetric lighting`;
+          } else if (effectiveModel === 'midjourney' && !/artistic|midjourney/i.test(cleanPrompt)) {
+            styledPrompt = `${cleanPrompt}, midjourney aesthetic, artistic concept art, dramatic composition, breathtaking detail`;
+          } else if (effectiveModel === 'flux-pro' && !/masterpiece|pro/i.test(cleanPrompt)) {
+            styledPrompt = `${cleanPrompt}, masterpiece, professional award-winning composition, ultra sharp details`;
+          }
+
+          // Pemangkasan semantik aman (smart boundary truncation) untuk URL GET guna mencegah error HTTP 414 URI Too Long
+          let urlPrompt = styledPrompt;
+          if (urlPrompt.length > 800) {
+            const cut = urlPrompt.slice(0, 800);
+            const lastSpace = cut.lastIndexOf(' ');
+            urlPrompt = (lastSpace > 600 ? cut.slice(0, lastSpace) : cut).trim();
+          }
+          const encodedPrompt = encodeURIComponent(urlPrompt);
+          let getUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=${encodeURIComponent(effectiveModel)}&seed=${actualSeed}&nologo=true&enhance=true`;
+          if (isEdit && typeof referenceImage === 'string' && /^https?:\/\//i.test(referenceImage)) {
+            getUrl += `&image=${encodeURIComponent(referenceImage)}`;
+          }
+          remoteImageUrl = getUrl;
+          try {
+            const downloaded = await downloadImageBuffer(remoteImageUrl, 40000);
+            imageBuffer = downloaded.buffer;
+            contentType = downloaded.contentType || 'image/png';
+          } catch (dlErr) {
+            console.warn('Gagal mengunduh buffer gambar Pollinations ke disk lokal:', dlErr.message);
+          }
         }
       }
 
@@ -4618,7 +4860,7 @@ async function requestHandler(req, res) {
       if (imageBuffer && imageBuffer.length > 0) {
         const ext = contentType.includes('webp') ? 'webp' : (contentType.includes('jpeg') || contentType.includes('jpg') ? 'jpg' : 'png');
         // F17: nama acak kriptografis (bukan Math.random yang bisa ditebak)
-        filename = `ai_gen_${Date.now()}_${crypto.randomBytes(8).toString('hex')}.${ext}`;
+        filename = `${isEdit ? 'ai_edit_' : 'ai_gen_'}${Date.now()}_${crypto.randomBytes(8).toString('hex')}.${ext}`;
         const localFilePath = path.join(UPLOADS_DIR, filename);
 
         try {
@@ -4642,9 +4884,11 @@ async function requestHandler(req, res) {
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
       if (sessionId) {
-        appendAssistantMessageToSessionDisk(sessionId, `[Gambar AI Hasil Generasi: "${cleanPrompt}"]`, effectiveModel, {
+        appendAssistantMessageToSessionDisk(sessionId, `[Gambar AI Hasil ${isEdit ? 'Editan' : 'Generasi'}: "${cleanPrompt}"]`, effectiveModel, {
           userId: imageUserId,
           isImageGen: true,
+          isEdit: isEdit,
+          referenceImage: referenceImage || null,
           type: 'image_generation',
           imageUrl: finalUrl,
           url: finalUrl,
@@ -4654,7 +4898,7 @@ async function requestHandler(req, res) {
           height: height,
           seed: actualSeed,
           latency: duration
-        });
+        }).catch(err => console.warn('Gagal simpan notifikasi gambar AI ke sesi:', err && err.message));
       }
 
       return sendJSON(res, 200, {
@@ -4665,6 +4909,8 @@ async function requestHandler(req, res) {
         filename: filename,
         prompt: cleanPrompt,
         model: effectiveModel,
+        isEdit: isEdit,
+        referenceImage: referenceImage || null,
         width: width,
         height: height,
         seed: actualSeed,
@@ -5019,7 +5265,7 @@ async function requestHandler(req, res) {
           aiModel: model,
           aiProvider: 'openrouter',
           aiSummary
-        });
+        }).catch(err => console.warn('Gagal simpan notifikasi musik AI ke sesi:', err && err.message));
       }
 
       return sendJSON(res, 200, {
@@ -5367,6 +5613,8 @@ async function requestHandler(req, res) {
           provider: 'ollama',
           userPrompt: userPrompt || null,
           fullText: '',
+          fullBytes: 0,
+          fullEpoch: 0,
           rawBuffer: '',
           status: 'streaming',
           startedAt: Date.now(),
@@ -5518,7 +5766,8 @@ async function requestHandler(req, res) {
             task.status = 'completed';
             task.completedAt = Date.now();
             if (task.fullText && task.fullText.trim()) {
-              appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model);
+              appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model)
+                .catch(err => console.warn('Gagal simpan respons chat ke sesi:', err && err.message));
             }
             // Clean up completed task
             delete dbActiveChatTasks[sessionId];
@@ -5860,6 +6109,8 @@ async function requestHandler(req, res) {
           provider: 'openrouter',
           userPrompt: userPrompt || null,
           fullText: '',
+          fullBytes: 0,
+          fullEpoch: 0,
           rawBuffer: '',
           status: 'streaming',
           startedAt: Date.now(),
@@ -6042,7 +6293,8 @@ async function requestHandler(req, res) {
             task.status = 'completed';
             task.completedAt = Date.now();
             if (task.fullText && task.fullText.trim()) {
-              appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model);
+              appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model)
+                .catch(err => console.warn('Gagal simpan respons chat ke sesi:', err && err.message));
             }
             // Clean up completed task
             delete dbActiveChatTasks[sessionId];
@@ -6178,22 +6430,56 @@ async function requestHandler(req, res) {
       });
     }
 
+    // Dukungan delta polling: ?since=<offset byte ≥ 0> → kirim hanya potongan
+    // baru dari fullText (hemat bandwidth untuk jawaban panjang yang di-poll).
+    const sinceRaw = reqUrl.searchParams.get('since');
+    const sinceNum = (sinceRaw !== null && sinceRaw !== '') ? Number(sinceRaw) : NaN;
+    const sinceValid = Number.isFinite(sinceNum) && sinceNum >= 0;
+    const sinceOffset = sinceValid ? Math.floor(sinceNum) : 0;
+
+    // Kontrak epoch truncation: ?epoch=<nomor epoch klien>. Truncation memotong
+    // teks dari DEPAN sehingga semua offset byte bergeser — delta HANYA boleh
+    // dikirim bila epoch klien COCOK dengan epoch task saat ini. Klien lama yang
+    // tidak mengirim epoch otomatis mendapat teks penuh (reset aman, tanpa
+    // salah-sambung).
+    const epochRaw = reqUrl.searchParams.get('epoch');
+    const epochNum = (epochRaw !== null && epochRaw !== '') ? Number(epochRaw) : NaN;
+    const clientEpochValid = Number.isFinite(epochNum) && epochNum >= 0;
+
+    const buildTaskStatusPayload = (t) => {
+      const taskText = t.fullText || '';
+      const taskBytes = (typeof t.fullBytes === 'number') ? t.fullBytes : Buffer.byteLength(taskText, 'utf8');
+      const taskEpoch = (typeof t.fullEpoch === 'number') ? t.fullEpoch : 0;
+      const out = {
+        active: t.status === 'streaming',
+        status: t.status,
+        sessionId: t.sessionId,
+        model: t.model,
+        text: taskText,
+        fullBytes: taskBytes,
+        fullEpoch: taskEpoch,
+        startedAt: t.startedAt,
+        completedAt: t.completedAt || null,
+        error: t.error || null
+      };
+      // Delta hanya valid bila: since valid, epoch klien cocok, DAN offset masih
+      // dalam rentang teks. Epoch beda (truncation menggeser offset) atau
+      // since > fullBytes → teks penuh tanpa delta agar klien me-reset buffer
+      // dengan aman.
+      if (sinceValid && clientEpochValid && epochNum === taskEpoch && taskBytes >= sinceOffset) {
+        out.text = Buffer.from(taskText, 'utf8').slice(sinceOffset).toString('utf8');
+        out.delta = true;
+      }
+      return out;
+    };
+
     const task = dbActiveChatTasks[sid];
     if (task && (task.status === 'streaming' || task.status === 'completed')) {
       // PRIVACY ENFORCEMENT: If task belongs to another user, deny access!
       if (task.userId && task.userId !== statusUserId) {
         return sendJSON(res, 200, { active: false, status: 'none', sessionId: sid });
       }
-      return sendJSON(res, 200, {
-        active: task.status === 'streaming',
-        status: task.status,
-        sessionId: task.sessionId,
-        model: task.model,
-        text: task.fullText || '',
-        startedAt: task.startedAt,
-        completedAt: task.completedAt || null,
-        error: task.error || null
-      });
+      return sendJSON(res, 200, buildTaskStatusPayload(task));
     }
 
     // Periksa apakah ada tugas Deep Research aktif atau baru selesai untuk sesi ini
@@ -6277,16 +6563,7 @@ async function requestHandler(req, res) {
     }
 
     if (task) {
-      return sendJSON(res, 200, {
-        active: task.status === 'streaming',
-        status: task.status,
-        sessionId: task.sessionId,
-        model: task.model,
-        text: task.fullText || '',
-        startedAt: task.startedAt,
-        completedAt: task.completedAt || null,
-        error: task.error || null
-      });
+      return sendJSON(res, 200, buildTaskStatusPayload(task));
     }
 
     return sendJSON(res, 200, { active: false, status: 'none', sessionId: sid });
@@ -6316,8 +6593,12 @@ async function requestHandler(req, res) {
           }
           // Simpan potongan yang sudah terlanjur dibuat
           if (task.fullText && task.fullText.trim()) {
-            appendAssistantMessageToSessionDisk(sid, task.fullText + '\n\n*[Respons dihentikan oleh pengguna]*', task.model);
+            appendAssistantMessageToSessionDisk(sid, task.fullText + '\n\n*[Respons dihentikan oleh pengguna]*', task.model)
+              .catch(err => console.warn('Gagal simpan respons terhenti ke sesi:', err && err.message));
           }
+          // Buang task dari map AGAR polling /api/chat/status tidak terus
+          // mengembalikan status 'aborted' untuk sesi yang sudah dihentikan
+          delete dbActiveChatTasks[sid];
           stoppedAny = true;
         }
       }
@@ -6391,10 +6672,17 @@ async function requestHandler(req, res) {
           res.writeHead(404, { 'Content-Type': 'text/plain' });
           return res.end('404 Not Found');
         }
+        // ETag fallback index → 304 murah, tapi index.html selalu revalidasi (no-cache)
+        const idxEtag = '"' + idxStats.mtimeMs + '-' + idxStats.size + '"';
+        if (req.headers['if-none-match'] === idxEtag) {
+          res.writeHead(304, { 'ETag': idxEtag, 'Cache-Control': 'no-cache' });
+          return res.end();
+        }
         res.writeHead(200, {
           'Content-Type': 'text/html; charset=utf-8',
           'Content-Length': idxStats.size,
-          'Cache-Control': 'no-cache'
+          'Cache-Control': 'no-cache',
+          'ETag': idxEtag
         });
         if (method === 'HEAD') return res.end();
         // F20: streaming langsung dari disk — tanpa memuat seluruh file ke memori
@@ -6418,11 +6706,42 @@ async function requestHandler(req, res) {
     const ext = path.extname(filePath).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
 
-    res.writeHead(200, {
+    // ETag berbasis mtime+size: index.html tetap no-cache (revalidasi tiap
+    // saat), aset statis lain dipublik 1 jam — perubahan file langsung basi
+    // karena ETag-nya berubah ikut mtime.
+    const etag = '"' + stats.mtimeMs + '-' + stats.size + '"';
+    const cacheControl = (ext === '.html') ? 'no-cache' : 'public, max-age=3600, must-revalidate';
+    if (req.headers['if-none-match'] === etag) {
+      res.writeHead(304, { 'ETag': etag, 'Cache-Control': cacheControl, 'Vary': 'Accept-Encoding' });
+      return res.end();
+    }
+
+    // Gzip: hanya konten kompresibel > 1KB dan bila klien mendukung
+    const acceptsGzip = String(req.headers['accept-encoding'] || '').toLowerCase().includes('gzip');
+    const mimeBase = contentType.split(';')[0].trim().toLowerCase(); // buang "; charset=..."
+    const isCompressible = mimeBase.startsWith('text/') ||
+      mimeBase === 'application/javascript' ||
+      mimeBase === 'application/json' ||
+      mimeBase === 'image/svg+xml';
+    const useGzip = acceptsGzip && isCompressible && stats.size > 1024;
+
+    const resHeaders = {
       'Content-Type': contentType,
-      'Content-Length': stats.size,
-      'Cache-Control': 'no-cache'
-    });
+      'ETag': etag,
+      'Cache-Control': cacheControl,
+      // Vary WAJIB di SEMUA varian respons (identity maupun gzip, plus jalur 304
+      // di atas) — bila hanya dipasang di respons gzip, cache intermediary bisa
+      // menyimpan satu varian dan menyajikannya ke klien dengan Accept-Encoding
+      // yang berbeda.
+      'Vary': 'Accept-Encoding'
+    };
+    if (useGzip) {
+      resHeaders['Content-Encoding'] = 'gzip';
+      // Content-Length sengaja dihapus → transfer chunked (ukuran terkompresi beda)
+    } else {
+      resHeaders['Content-Length'] = stats.size;
+    }
+    res.writeHead(200, resHeaders);
     if (method === 'HEAD') return res.end();
 
     // F20: streaming dari disk, bukan readFile penuh ke memori.
@@ -6437,7 +6756,23 @@ async function requestHandler(req, res) {
       }
     });
     if (res.writableEnded || res.destroyed) { fileStream.destroy(); return; }
-    fileStream.pipe(res);
+    if (useGzip) {
+      const gzipStream = zlib.createGzip({ level: 6 });
+      gzipStream.on('error', (err) => {
+        console.error('[Static Gzip Stream Error]:', err?.message || err);
+        try { fileStream.destroy(); } catch (_) {}
+        if (!res.destroyed) { try { res.destroy(); } catch (_) {}
+        }
+      });
+      // Klien pergi di tengah jalan → buang kedua stream agar fd tidak bocor
+      res.on('close', () => {
+        try { fileStream.destroy(); } catch (_) {}
+        try { gzipStream.destroy(); } catch (_) {}
+      });
+      fileStream.pipe(gzipStream).pipe(res);
+    } else {
+      fileStream.pipe(res);
+    }
   });
 }
 
