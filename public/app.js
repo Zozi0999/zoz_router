@@ -2324,15 +2324,19 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // splitReasoningAndContent — hanya HTML blok pikirannya yang tidak dirender.
     let contentHtml = '';
     if (parsedBlocks.content) {
+      // Rapikan teks robek (satu KATA per baris — khas model :free) menjadi
+      // paragraf mengalir SEBELUM parse markdown. Blok kode / list / heading /
+      // blockquote / tabel tidak disentuh oleh reflowShreddedProse.
+      const displayContent = reflowShreddedProse(parsedBlocks.content);
       if (window.marked) {
         try {
-          contentHtml = marked.parse(parsedBlocks.content);
+          contentHtml = marked.parse(displayContent);
         } catch (err) {
           console.warn('[renderMarkdown] Error parsing markdown, fallback to escaped text:', err);
-          contentHtml = escapeHtml(parsedBlocks.content).replace(/\n/g, '<br>');
+          contentHtml = escapeHtml(displayContent).replace(/\n/g, '<br>');
         }
       } else {
-        contentHtml = escapeHtml(parsedBlocks.content).replace(/\n/g, '<br>');
+        contentHtml = escapeHtml(displayContent).replace(/\n/g, '<br>');
       }
     }
 
@@ -2520,6 +2524,35 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       // Masih di dalam blok file: buang sampai penanda tutup (atau sampai stream berakhir)
       if (t.indexOf('<<<END_ZOZ_FILE') === 0) skipping = false;
     });
+    return out.join('\n');
+  }
+
+  // Teks dari model reasoning varian :free sering "robek" per-token (satu KATA
+  // per baris sehingga output tertampil vertikal berantakan). Sambung baris
+  // PROSA berurutan menjadi satu baris mengalir — baris struktural (heading,
+  // list, blockquote, tabel) dan isi BLOK KODE (di antara ```) dibiarkan utuh.
+  function reflowShreddedProse(text) {
+    if (!text || text.indexOf('\n') === -1) return text;
+    const STRUCTURAL = /^\s*(#{1,6}\s|>|[-*+]\s|\d+[.)]\s|\|)/;
+    const FENCE = /^\s*(```|~~~)/;
+    const out = [];
+    let inFence = false;
+    let proseRun = [];
+    const flushRun = () => {
+      if (proseRun.length) {
+        out.push(proseRun.join(' ').replace(/\s{2,}/g, ' '));
+        proseRun = [];
+      }
+    };
+    for (const line of text.split('\n')) {
+      if (FENCE.test(line)) { flushRun(); inFence = !inFence; out.push(line); continue; }
+      if (inFence) { out.push(line); continue; }
+      if (STRUCTURAL.test(line)) { flushRun(); out.push(line); continue; }
+      const t = line.trim();
+      if (!t) { flushRun(); out.push(line); continue; }
+      proseRun.push(t);
+    }
+    flushRun();
     return out.join('\n');
   }
 
