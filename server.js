@@ -4577,7 +4577,13 @@ async function requestHandler(req, res) {
               aspect_ratio: '1:1'
             };
             if (isEdit && resolvedRefDataUrl) {
-              imagePayload.input_references = [resolvedRefDataUrl];
+              // Skema resmi OpenRouter Image API: elemen input_references adalah
+              // OBJECT ContentPartImage { type:'image_url', image_url:{url} } —
+              // array string polos DITOLAK Zod ("expected object, received string").
+              // Data URL base64 lokal diterima sesuai dokumentasi.
+              imagePayload.input_references = [
+                { type: 'image_url', image_url: { url: resolvedRefDataUrl } }
+              ];
             }
             const postData = JSON.stringify(imagePayload);
 

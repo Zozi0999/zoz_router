@@ -2253,21 +2253,35 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // dilipat. Bila hanya satu paragraf, semuanya jadi jawaban (tanpa blok).
     if (!isThinking && !content.trim() && reasoning.trim()) {
       let paras = reasoning.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
-      // Bila seluruh COT satu blok besar (hanya dipisah \n tunggal — umum pada
-      // model reasoning varian :free), pecah per baris: jawaban biasanya baris
-      // TERAKHIR sedangkan baris sebelumnya masih potongan pikiran.
-      if (paras.length === 1 && paras[0].includes('\n')) {
-        paras = paras[0].split('\n').map(p => p.trim()).filter(Boolean);
-      }
       if (!paras.length) {
         return { reasoning: '', content: '', isThinking: false };
       }
-      let finalAnswer = paras[paras.length - 1];
-      // Residu label COT yang menempel di jawaban: "greeting.Hai, Kaisar..." →
-      // "Hai, Kaisar..." (satu kata huruf kecil + tanda baca diikuti huruf kapital).
-      finalAnswer = finalAnswer.replace(/^[a-z][\w-]*[.:]\s*(?=[A-ZÀ-Þ])/, '');
-      const restThinking = paras.slice(0, -1).join('\n\n');
-      return { reasoning: restThinking, content: finalAnswer, isThinking: false };
+      // Paragraf terakhir SERING masih tumpukan baris pikiran + jawaban menempel
+      // di baris TERAKHIR ("ful tone.Hai, Kaisar..."). Ambil baris terakhir saja
+      // sebagai kandidat jawaban; baris pikiran lainnya dikembalikan ke blok
+      // pikiran (terlipat), bukan ditumpahkan ke tampilan utama.
+      let lastPara = paras.pop();
+      let backToThinking = [];
+      if (lastPara.includes('\n')) {
+        const lines = lastPara.split('\n').map(l => l.trim()).filter(Boolean);
+        lastPara = lines.pop() || '';
+        backToThinking = lines;
+      }
+      let finalAnswer = lastPara;
+      // Buang residu COT yang menempel TANPA spasi setelah titik
+      // ("ful tone.Hai, ..." / "greeting.Hai, ...") — jawaban mulai dari titik itu.
+      const gluedIdx = finalAnswer.search(/(?<=[a-zà-ÿ])\.(?=[A-ZÀ-Þ])/);
+      if (gluedIdx > 0 && gluedIdx <= 40) {
+        finalAnswer = finalAnswer.slice(gluedIdx + 1).trim();
+      }
+      // Ekstraksi ternyata kosong → jangan sembunyikan apa pun, tampilkan utuh.
+      if (!finalAnswer.trim()) {
+        return { reasoning: '', content: reasoning.trim(), isThinking: false };
+      }
+      const restThinking = paras
+        .concat(backToThinking.length ? [backToThinking.join('\n')] : [])
+        .join('\n\n');
+      return { reasoning: restThinking.trim(), content: finalAnswer.trim(), isThinking: false };
     }
 
     return {
@@ -2306,15 +2320,20 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     
     let reasoningHtml = '';
     if (parsedBlocks.reasoning) {
+      // Teks pikiran model reasoning varian :free sering terpotong per-token
+      // (satu KATA per baris) sehingga blok pikiran terlihat berantakan.
+      // Gabungkan \n TUNGAL menjadi spasi agar menjadi prosa mengalir —
+      // batas paragraf (\n\n) tetap dipertahankan.
+      const reflowedReasoning = parsedBlocks.reasoning.replace(/([^\n])\n(?!\n)/g, '$1 ');
       let reasoningParsed = '';
       if (window.marked) {
         try {
-          reasoningParsed = marked.parse(parsedBlocks.reasoning);
+          reasoningParsed = marked.parse(reflowedReasoning);
         } catch (_) {
-          reasoningParsed = escapeHtml(parsedBlocks.reasoning).replace(/\n/g, '<br>');
+          reasoningParsed = escapeHtml(reflowedReasoning).replace(/\n/g, '<br>');
         }
       } else {
-        reasoningParsed = escapeHtml(parsedBlocks.reasoning).replace(/\n/g, '<br>');
+        reasoningParsed = escapeHtml(reflowedReasoning).replace(/\n/g, '<br>');
       }
 
       const statusBadge = parsedBlocks.isThinking
@@ -13621,8 +13640,9 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
                     prompt: cleanPrompt,
                     aspect_ratio: '1:1',
                     // Kesimetrian dengan jalur server: foto referensi ikut dikirim
-                    // sebagai input_references saat mode Edit Foto aktif.
-                    ...(isImgEdit && referenceImage ? { input_references: [referenceImage] } : {})
+                    // sebagai input_references (skema resmi: object ContentPartImage)
+                    // saat mode Edit Foto aktif.
+                    ...(isImgEdit && referenceImage ? { input_references: [{ type: 'image_url', image_url: { url: referenceImage } }] } : {})
                   }),
                   signal: STATE.abortController?.signal
                 });
