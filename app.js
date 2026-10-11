@@ -9863,7 +9863,6 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
   function renderResearchUrlChips() {
     // Update badge count
     const count = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls.length : 0;
-    if (els.researchUrlCountBadge) els.researchUrlCountBadge.textContent = count;
     if (els.searchBadge && STATE.searchMode === 'premium') {
       els.searchBadge.style.display = 'block';
       els.searchBadge.textContent = count > 0 ? `PRO • ${count}` : 'PRO';
