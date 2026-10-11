@@ -1515,7 +1515,24 @@ function accumulateChatChunk(sessionId, chunk, provider) {
       }
       try {
         const parsed = JSON.parse(jsonStr);
-        const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || parsed.choices?.[0]?.message?.content || '';
+        const contentDelta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || parsed.choices?.[0]?.message?.content || '';
+        const reasoningDelta = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || parsed.choices?.[0]?.delta?.thought || '';
+        let delta = '';
+        if (reasoningDelta) {
+          if (!task.inReasoning) {
+            task.inReasoning = true;
+            delta = '<think>\n' + reasoningDelta;
+          } else {
+            delta = reasoningDelta;
+          }
+        } else if (contentDelta) {
+          if (task.inReasoning) {
+            task.inReasoning = false;
+            delta = '\n</think>\n\n' + contentDelta;
+          } else {
+            delta = contentDelta;
+          }
+        }
         if (delta) {
           // Limit fullText buffer to prevent memory exhaustion on very long responses
           if (Buffer.byteLength(task.fullText + delta, 'utf8') > MAX_FULLTEXT_BYTES) {
@@ -1566,7 +1583,24 @@ function flushChatTaskBuffer(sessionId, provider) {
         }
         try {
           const parsed = JSON.parse(jsonStr);
-          const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || parsed.choices?.[0]?.message?.content || '';
+          const contentDelta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || parsed.choices?.[0]?.message?.content || '';
+          const reasoningDelta = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || parsed.choices?.[0]?.delta?.thought || '';
+          let delta = '';
+          if (reasoningDelta) {
+            if (!task.inReasoning) {
+              task.inReasoning = true;
+              delta = '<think>\n' + reasoningDelta;
+            } else {
+              delta = reasoningDelta;
+            }
+          } else if (contentDelta) {
+            if (task.inReasoning) {
+              task.inReasoning = false;
+              delta = '\n</think>\n\n' + contentDelta;
+            } else {
+              delta = contentDelta;
+            }
+          }
           if (delta) {
             task.fullText += delta;
             task.lastTokenTime = Date.now();
@@ -1584,6 +1618,10 @@ function flushChatTaskBuffer(sessionId, provider) {
       }
     }
   }
+  if (task.inReasoning) {
+    task.fullText += '\n</think>';
+    task.inReasoning = false;
+  }
 }
 
 function markChatTaskInterrupted(sessionId, reason = 'Koneksi terputus') {
@@ -1600,6 +1638,10 @@ function markChatTaskInterrupted(sessionId, reason = 'Koneksi terputus') {
   }
 
   flushChatTaskBuffer(sessionId, task.provider || 'openrouter');
+  if (task.inReasoning) {
+    task.fullText += '\n</think>';
+    task.inReasoning = false;
+  }
   if (task.fullText && task.fullText.trim()) {
     appendAssistantMessageToSessionDisk(sessionId, task.fullText + `\n\n*[Respons terputus: ${reason}]*`, task.model);
   }
