@@ -3203,7 +3203,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
 
     if (filtered.length === 0) {
-      els.chatHistoryList.innerHTML = `<div style="font-size:0.75rem; color:var(--text-dim); text-align:center; padding:16px 8px;">Belum ada riwayat percakapan<br><span style="font-size:0.68rem; opacity:0.7;">Ketik prompt di bawah untuk memulai.</span></div>`;
+      if (q) {
+        els.chatHistoryList.innerHTML = `
+          <div style="font-size:0.75rem; color:var(--text-dim); text-align:center; padding:18px 8px; line-height:1.4;">
+            <i class="fa-solid fa-magnifying-glass" style="font-size:1.1rem; opacity:0.4; margin-bottom:6px; display:block;"></i>
+            Tidak ada percakapan yang cocok dengan "<span style="color:var(--text-main); font-weight:600;">${escapeHtml(filterQuery)}</span>"
+          </div>`;
+      } else {
+        els.chatHistoryList.innerHTML = `<div style="font-size:0.75rem; color:var(--text-dim); text-align:center; padding:16px 8px;">Belum ada riwayat percakapan<br><span style="font-size:0.68rem; opacity:0.7;">Ketik prompt di bawah untuk memulai.</span></div>`;
+      }
       return;
     }
 
@@ -6360,7 +6368,7 @@ ${organicBlock}
     // Auto title session if first message
     if (session.messages.length === 0) {
       const fallbackTitle = docs.length > 0 ? (docs[0].name || 'Dokumen Lampiran') : (images.length > 0 ? 'Analisis Gambar' : 'Percakapan Baru');
-      let cleanCandidate = (displayPrompt || '').replace(/^\/(?:image|img|gambar|deep|research|riset|web|search|canvas)\s+/i, '').trim();
+      let cleanCandidate = (displayPrompt || '').replace(/^\/(?:image|img|gambar|music|musik|audio|song|lagu|deep|research|riset|web|search|canvas|chat|teks)\s+/i, '').trim();
       const titleCandidate = cleanCandidate || fallbackTitle;
       session.title = titleCandidate.length > 30 ? titleCandidate.substring(0, 30) + '...' : titleCandidate;
     }
