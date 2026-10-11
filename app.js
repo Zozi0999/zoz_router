@@ -1855,6 +1855,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       } catch (e) {
         console.warn('Failed to save search mode:', e);
       }
+      saveFavoriteModels();
 
       // Save active session to Device Disk Storage
       if (STATE.currentSessionId) {
@@ -16914,6 +16915,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         closeSearchDropdown();
         closeImageModelDropdown();
         closeMusicModelDropdown();
+        els.modelDropdownMenu?.classList.remove('show');
 
         if (ImageLightbox.isOpen()) {
           return;
@@ -17413,8 +17415,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
             // No modal in current history state -> return to main chat by closing all open modals
             openModals.forEach(m => m.classList.remove('show'));
           }
-          syncBodyModalState();
         }
+        syncBodyModalState();
         return;
       }
 
