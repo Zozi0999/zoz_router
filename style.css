@@ -866,6 +866,94 @@ html, body {
   font-weight: 600;
 }
 
+.model-option-item.is-fav {
+  border-left: 2px solid var(--neon-amber);
+  background: rgba(255, 183, 3, 0.04);
+}
+
+.model-option-item.is-fav:hover {
+  background: rgba(255, 183, 3, 0.1);
+}
+
+/* ==================== MODEL FAVORITE (LAPTOP ICON) STYLES ==================== */
+.model-fav-btn,
+.catalog-fav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  padding: 0;
+  user-select: none;
+}
+
+.model-fav-btn:hover,
+.catalog-fav-btn:hover {
+  background: rgba(0, 240, 255, 0.16);
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.45);
+  transform: scale(1.12);
+}
+
+.model-fav-btn.active,
+.catalog-fav-btn.active {
+  background: linear-gradient(135deg, rgba(255, 183, 3, 0.25), rgba(0, 240, 255, 0.18));
+  border-color: var(--neon-amber);
+  color: var(--neon-amber);
+  box-shadow: 0 0 12px rgba(255, 183, 3, 0.6), inset 0 0 6px rgba(0, 240, 255, 0.2);
+  transform: scale(1.05);
+}
+
+.model-fav-btn.active:hover,
+.catalog-fav-btn.active:hover {
+  background: linear-gradient(135deg, rgba(255, 183, 3, 0.4), rgba(0, 240, 255, 0.3));
+  box-shadow: 0 0 16px rgba(255, 183, 3, 0.85);
+  transform: scale(1.18);
+}
+
+.model-fav-tag {
+  color: var(--neon-amber);
+  font-size: 0.68rem;
+  display: inline-flex;
+  align-items: center;
+  filter: drop-shadow(0 0 4px rgba(255, 183, 3, 0.7));
+  animation: favGlow 2s infinite ease-in-out;
+}
+
+.catalog-fav-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 183, 3, 0.15);
+  border: 1px solid rgba(255, 183, 3, 0.5);
+  color: var(--neon-amber);
+  margin-left: 6px;
+  box-shadow: 0 0 8px rgba(255, 183, 3, 0.4);
+}
+
+.catalog-model-row.is-fav {
+  border-left: 3px solid var(--neon-amber);
+  background: rgba(255, 183, 3, 0.03);
+}
+
+@keyframes favGlow {
+  0%, 100% { opacity: 0.8; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
 .dropdown-custom-add {
   padding: 8px 10px;
   border-top: 1px solid var(--border-subtle);

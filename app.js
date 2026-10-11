@@ -161,10 +161,95 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
   }
 
+  // ==================== FAVORITE MODELS MANAGEMENT ====================
+  function loadFavoriteModels() {
+    try {
+      const raw = localStorage.getItem('zoz_favorite_models_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  function saveFavoriteModels() {
+    try {
+      localStorage.setItem('zoz_favorite_models_v1', JSON.stringify(STATE.favoriteModels || []));
+    } catch (_) {}
+  }
+
+  function isModelFavorite(modelId) {
+    if (!modelId || !STATE.favoriteModels) return false;
+    return STATE.favoriteModels.includes(modelId);
+  }
+
+  function toggleModelFavorite(modelId, e) {
+    if (e) {
+      try {
+        e.preventDefault();
+        e.stopPropagation();
+      } catch (_) {}
+    }
+    if (!modelId) return;
+    if (!Array.isArray(STATE.favoriteModels)) {
+      STATE.favoriteModels = [];
+    }
+    const idx = STATE.favoriteModels.indexOf(modelId);
+    const wasFav = idx !== -1;
+    if (wasFav) {
+      STATE.favoriteModels.splice(idx, 1);
+    } else {
+      STATE.favoriteModels.push(modelId);
+    }
+    saveFavoriteModels();
+    updateCatalogFavBadge();
+
+    // Re-render model dropdown if visible or open
+    try {
+      if (typeof els !== 'undefined' && els.modelDropdownMenu && els.modelDropdownMenu.classList.contains('show')) {
+        const searchVal = els.modelSearchInput ? els.modelSearchInput.value : '';
+        populateModelDropdown(searchVal);
+      }
+    } catch (_) {}
+
+    // Re-render live catalog if visible or open
+    try {
+      const catModal = document.getElementById('liveModelCatalogModal');
+      if (catModal && catModal.classList.contains('show')) {
+        renderLiveModelCatalog();
+      }
+    } catch (_) {}
+
+    try {
+      if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+    } catch (_) {}
+
+    try {
+      if (typeof showToast === 'function') {
+        showToast(
+          wasFav ? `Model "${modelId}" dihapus dari favorit` : `Model "${modelId}" ditambahkan ke favorit!`,
+          wasFav ? 'info' : 'success'
+        );
+      }
+    } catch (_) {}
+  }
+
+  function updateCatalogFavBadge() {
+    try {
+      const badge = document.getElementById('catalogFavCountBadge');
+      if (badge) {
+        const count = Array.isArray(STATE.favoriteModels) ? STATE.favoriteModels.length : 0;
+        badge.textContent = count;
+      }
+    } catch (_) {}
+  }
+
   // ==================== STATE MANAGEMENT ====================
   const STATE = {
     userId: getOrCreateUserId(),
     userToken: getOrCreateUserToken(),
+    favoriteModels: loadFavoriteModels(),
     mode: 'ollama', // 'ollama' | 'openrouter' | 'auto'
     sessions: [],
     currentSessionId: null,
@@ -1298,6 +1383,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           }
         } catch (e) {}
       }
+
+      // Synchronous load favorite models & update badge count
+      STATE.favoriteModels = loadFavoriteModels();
+      updateCatalogFavBadge();
     } catch (err) {
       console.error('Error loading persisted state sync:', err);
     }
@@ -5963,10 +6052,14 @@ ${organicBlock}
     // Filter pencarian
     let filtered = models.filter(m => !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
 
-    // Urutkan model dengan rapi: Model aktif di paling atas, sisanya diurutkan secara alfabetis
+    // Urutkan model dengan rapi: Model aktif di paling atas, disusul model favorit pengguna, lalu sisanya alfabetis
     filtered.sort((a, b) => {
       if (a.id === currentActive) return -1;
       if (b.id === currentActive) return 1;
+      const aFav = isModelFavorite(a.id);
+      const bFav = isModelFavorite(b.id);
+      if (aFav && !bFav) return -1;
+      if (!aFav && bFav) return 1;
       return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
     });
 
@@ -5981,7 +6074,8 @@ ${organicBlock}
 
     filtered.forEach(m => {
       const item = document.createElement('div');
-      item.className = `model-option-item ${m.id === currentActive ? 'selected' : ''}`;
+      const isFav = isModelFavorite(m.id);
+      item.className = `model-option-item ${m.id === currentActive ? 'selected' : ''} ${isFav ? 'is-fav' : ''}`;
       const isFree = m.tag.toLowerCase().includes('free');
       const isCloud = m.tag.toLowerCase().includes('cloud');
       const badgeStyle = isFree 
@@ -5989,12 +6083,26 @@ ${organicBlock}
         : (isCloud ? 'background:rgba(0,240,255,0.12); color:var(--neon-cyan); border:1px solid rgba(0,240,255,0.3);' : 'background:rgba(255,183,3,0.15); color:var(--neon-amber); border:1px solid rgba(255,183,3,0.3);');
 
       item.innerHTML = `
+        <button type="button" class="model-fav-btn ${isFav ? 'active' : ''}" title="${isFav ? 'Hapus dari Model Favorit' : 'Jadikan Model Favorit'}" style="margin-right:8px;">
+          <i class="fa-solid fa-laptop-code"></i>
+        </button>
         <div style="display:flex; flex-direction:column; overflow:hidden; flex:1; padding-right:8px;">
-          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; font-size:0.82rem;">${escapeHtml(m.name || m.id)}</span>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; font-size:0.82rem;">${escapeHtml(m.name || m.id)}</span>
+            ${isFav ? `<span class="model-fav-tag" title="Model Favorit"><i class="fa-solid fa-laptop-code"></i></span>` : ''}
+          </div>
           <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.68rem; color:var(--text-dim); font-family:var(--font-code);">${escapeHtml(m.id)}</span>
         </div>
         <span style="font-size:0.65rem; padding:2px 6px; border-radius:3px; font-weight:600; flex-shrink:0; ${badgeStyle}">${escapeHtml(m.tag || 'AI')}</span>
       `;
+
+      const favBtn = item.querySelector('.model-fav-btn');
+      if (favBtn) {
+        favBtn.addEventListener('click', (e) => {
+          toggleModelFavorite(m.id, e);
+        });
+      }
+
       item.addEventListener('click', () => {
         if (isOllamaTab && STATE.mode !== 'ollama') {
           setEngineMode('ollama');
@@ -15430,6 +15538,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     document.querySelectorAll('.catalog-filter-pill').forEach(p => {
       p.classList.toggle('active', p.dataset.catalogFilter === 'all');
     });
+    updateCatalogFavBadge();
     
     // Auto-detect tab aktif secara cerdas berdasarkan target input dan mode
     if (targetInputId) {
@@ -15523,11 +15632,17 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       });
 
       // Urutkan model Ollama Cloud secara cerdas:
-      // 1. Model Included Free Usage diprioritaskan di paling atas
-      // 2. Model unggulan/frontier populer (DeepSeek, Kimi, Mistral, GLM, MiniMax)
-      // 3. Sisanya diurutkan secara alfabetis A-Z
+      // 1. Model Favorit pengguna di paling atas
+      // 2. Model Included Free Usage diprioritaskan
+      // 3. Model unggulan/frontier populer (DeepSeek, Kimi, Mistral, GLM, MiniMax)
+      // 4. Sisanya diurutkan secara alfabetis A-Z
       const featuredKeywords = ['deepseek', 'mistral', 'kimi', 'glm', 'minimax'];
       list.sort((a, b) => {
+        const aFav = isModelFavorite(a.id);
+        const bFav = isModelFavorite(b.id);
+        if (aFav && !bFav) return -1;
+        if (!aFav && bFav) return 1;
+
         if (a.isFree && !b.isFree) return -1;
         if (!a.isFree && b.isFree) return 1;
 
@@ -15571,11 +15686,17 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       });
 
       // Urutkan OpenRouter secara cerdas:
-      // 1. Model gratis (:free) diprioritaskan di paling atas
-      // 2. Model unggulan/frontier populer (DeepSeek, Llama, Gemini, Claude, GPT, Qwen)
-      // 3. Sisanya diurutkan secara alfabetis A-Z
+      // 1. Model Favorit pengguna di paling atas
+      // 2. Model gratis (:free) diprioritaskan di paling atas
+      // 3. Model unggulan/frontier populer (DeepSeek, Llama, Gemini, Claude, GPT, Qwen)
+      // 4. Sisanya diurutkan secara alfabetis A-Z
       const featuredKeywords = ['deepseek', 'meta-llama', 'llama-3', 'gemini', 'claude', 'gpt-4', 'qwen', 'mistral'];
       list.sort((a, b) => {
+        const aFav = isModelFavorite(a.id);
+        const bFav = isModelFavorite(b.id);
+        if (aFav && !bFav) return -1;
+        if (!aFav && bFav) return 1;
+
         if (a.isFree && !b.isFree) return -1;
         if (!a.isFree && b.isFree) return 1;
 
@@ -15597,7 +15718,9 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       list = list.filter(item => {
         const tagL = (item.tag || '').toLowerCase();
         const idL = (item.id || '').toLowerCase();
-        if (cat === 'free') {
+        if (cat === 'favorites') {
+          return isModelFavorite(item.id);
+        } else if (cat === 'free') {
           return item.isFree || tagL.includes('free') || idL.includes(':free') || idL.endsWith('/free') || idL === 'openrouter/free';
         } else if (cat === 'reasoning') {
           return tagL.includes('reasoning') || idL.includes('reason') || idL.includes('r1') || idL.includes('o1') || idL.includes('o3') || idL.includes('qwq');
@@ -15622,6 +15745,18 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     }
 
     if (list.length === 0) {
+      if (STATE.catalogCategoryFilter === 'favorites') {
+        container.innerHTML = `
+          <div style="text-align:center; padding: 32px 20px; color: var(--text-dim); font-size: 0.85rem;">
+            <i class="fa-solid fa-laptop-code" style="font-size: 2rem; color: var(--neon-amber); margin-bottom: 12px; display:block; filter: drop-shadow(0 0 10px rgba(255,183,3,0.5));"></i>
+            <strong>Belum ada model favorit yang ditandai.</strong><br>
+            <span style="font-size: 0.76rem; display:inline-block; margin-top:6px; max-width:380px; line-height:1.5;">
+              Klik ikon laptop <i class="fa-solid fa-laptop-code" style="color:var(--neon-amber);"></i> pada model mana saja di katalog atau dropdown untuk menjadikannya model favorit Anda!
+            </span>
+          </div>
+        `;
+        return;
+      }
       const filterLabel = STATE.catalogCategoryFilter !== 'all' ? `kategori "${STATE.catalogCategoryFilter}"` : '';
       const queryLabel = q ? `kata kunci "${escapeHtml(q)}"` : '';
       const combinedLabel = [filterLabel, queryLabel].filter(Boolean).join(' dan ');
@@ -15637,7 +15772,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
     list.forEach(m => {
       const row = document.createElement('div');
-      row.className = 'catalog-model-row';
+      const isFav = isModelFavorite(m.id);
+      row.className = `catalog-model-row ${isFav ? 'is-fav' : ''}`;
 
       const tagLower = (m.tag || '').toLowerCase();
       let badgeClass = '';
@@ -15653,7 +15789,10 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
       row.innerHTML = `
         <div class="catalog-model-info">
-          <div class="catalog-model-name">${escapeHtml(m.name)}</div>
+          <div class="catalog-model-name" style="display:flex; align-items:center; gap:6px;">
+            <span>${escapeHtml(m.name)}</span>
+            ${isFav ? `<span class="catalog-fav-indicator"><i class="fa-solid fa-laptop-code"></i> Favorit</span>` : ''}
+          </div>
           <div class="catalog-model-meta">
             <span class="catalog-badge ${badgeClass}">${escapeHtml(m.tag || 'Model')}</span>
             ${m.size ? `<span style="color:var(--text-dim); font-family:var(--font-code); font-size:0.7rem;"><i class="fa-solid fa-hard-drive"></i> ${escapeHtml(m.size)}</span>` : ''}
@@ -15661,10 +15800,22 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
             <span style="color:var(--text-muted); font-size:0.68rem; font-family:var(--font-code);">${escapeHtml(m.id)}</span>
           </div>
         </div>
-        <button class="catalog-select-btn" type="button">
-          <i class="fa-solid fa-check"></i> Gunakan Model
-        </button>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <button class="catalog-fav-btn ${isFav ? 'active' : ''}" type="button" title="${isFav ? 'Hapus dari Model Favorit' : 'Jadikan Model Favorit'}">
+            <i class="fa-solid fa-laptop-code"></i>
+          </button>
+          <button class="catalog-select-btn" type="button">
+            <i class="fa-solid fa-check"></i> Gunakan Model
+          </button>
+        </div>
       `;
+
+      const favBtn = row.querySelector('.catalog-fav-btn');
+      if (favBtn) {
+        favBtn.addEventListener('click', (e) => {
+          toggleModelFavorite(m.id, e);
+        });
+      }
 
       row.querySelector('.catalog-select-btn').addEventListener('click', (e) => {
         e.preventDefault();
@@ -15674,6 +15825,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
       container.appendChild(row);
     });
+
+    updateCatalogFavBadge();
   }
 
   let isApplyingModelCatalog = false;
@@ -17899,6 +18052,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     updatePresetPillUI();
     updateModelUI();
     populateModelDropdown();
+    updateCatalogFavBadge();
     els.modeTabs.forEach(tab => {
       tab.classList.toggle('active', tab.dataset.mode === STATE.mode);
     });
