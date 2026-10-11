@@ -1878,6 +1878,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           isPinned: !!s.isPinned,
           createdAt: s.createdAt,
           updatedAt: s.updatedAt,
+          _isLazyDisk: !!s._isLazyDisk,
+          messageCount: typeof s.messageCount === 'number' ? s.messageCount : (Array.isArray(s.messages) ? s.messages.length : 0),
           messages: (s.messages || []).map(m => {
             let safeImages = undefined;
             if (Array.isArray(m.images)) {
@@ -1928,6 +1930,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             isPinned: !!s.isPinned,
             createdAt: s.createdAt,
             updatedAt: s.updatedAt,
+            _isLazyDisk: !!s._isLazyDisk,
+            messageCount: typeof s.messageCount === 'number' ? s.messageCount : (Array.isArray(s.messages) ? s.messages.length : 0),
             messages: []
           }));
           localStorage.setItem('zoz_router_sessions_v1', JSON.stringify(headersOnly));
@@ -3524,7 +3528,54 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
 
     const session = STATE.sessions.find(s => s.id === STATE.currentSessionId);
-    if (!session || !session.messages || session.messages.length === 0) {
+    if (!session) {
+      if (els.welcomeHero) els.welcomeHero.style.display = 'flex';
+      if (els.messagesList) els.messagesList.innerHTML = '';
+      if (els.pullUpNewChatWrapper) {
+        els.pullUpNewChatWrapper.classList.remove('visible');
+        els.pullUpNewChatWrapper.style.display = 'none';
+      }
+      smartScrollChatToBottom(true);
+      return;
+    }
+
+    // Tangani sesi lazy-disk secara mulus tanpa membuat Welcome Hero berkedip (flicker)
+    if (session._isLazyDisk && (!session.messages || session.messages.length === 0)) {
+      if (els.welcomeHero) els.welcomeHero.style.display = 'none';
+      if (els.pullUpNewChatWrapper) {
+        els.pullUpNewChatWrapper.classList.remove('visible');
+        els.pullUpNewChatWrapper.style.display = 'none';
+      }
+      if (els.messagesList) {
+        els.messagesList.innerHTML = `
+          <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px 20px; color:var(--text-dim); gap:12px;">
+            <i class="fa-solid fa-circle-notch fa-spin" style="font-size:1.8rem; color:var(--neon-cyan);"></i>
+            <span style="font-size:0.85rem; font-weight:500;">Memuat pesan percakapan...</span>
+          </div>
+        `;
+      }
+      if (!session._isHydrating) {
+        session._isHydrating = true;
+        DeviceStorage.getSession(session.id).then(full => {
+          session._isHydrating = false;
+          if (full && Array.isArray(full.messages)) {
+            session.messages = full.messages;
+            delete session._isLazyDisk;
+            ChatDB.saveSession(session);
+            if (STATE.currentSessionId === session.id) {
+              renderCurrentSession();
+            }
+          }
+        }).catch(err => {
+          session._isHydrating = false;
+          console.warn('Notice hydrating session:', err);
+        });
+      }
+      smartScrollChatToBottom(true);
+      return;
+    }
+
+    if (!session.messages || session.messages.length === 0) {
       if (els.welcomeHero) els.welcomeHero.style.display = 'flex';
       if (els.messagesList) els.messagesList.innerHTML = '';
       if (els.pullUpNewChatWrapper) {
@@ -5567,11 +5618,26 @@ ${organicBlock}
     }
   }
 
+  function cleanExtractedUrlPunctuation(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== 'string') return '';
+    let clean = rawUrl.trim().replace(/[.,!?;:]+$/, '');
+    while (clean.endsWith(')')) {
+      const openCount = (clean.match(/\(/g) || []).length;
+      const closeCount = (clean.match(/\)/g) || []).length;
+      if (closeCount > openCount) {
+        clean = clean.slice(0, -1).replace(/[.,!?;:]+$/, '');
+      } else {
+        break;
+      }
+    }
+    return clean;
+  }
+
   function extractWebUrlsFromText(input) {
     if (!input || typeof input !== 'string') return [];
     const urlRegex = /https?:\/\/[^\s<>"'{}|\\^`\[\]]+/gi;
     const matches = input.match(urlRegex) || [];
-    return matches.map(u => u.replace(/[.,!?;:)]+$/, '')).filter(u => {
+    return matches.map(u => cleanExtractedUrlPunctuation(u)).filter(u => {
       try {
         const p = new URL(u);
         const h = p.hostname.toLowerCase();
@@ -6221,7 +6287,7 @@ ${organicBlock}
     const currentActive = getCurrentModel();
 
     // Filter pencarian
-    let filtered = models.filter(m => !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+    let filtered = models.filter(m => !q || (m.id && m.id.toLowerCase().includes(q)) || (m.name && m.name.toLowerCase().includes(q)));
 
     // Urutkan model dengan rapi: Model aktif di paling atas, disusul model favorit pengguna, lalu sisanya alfabetis
     filtered.sort((a, b) => {
@@ -6231,7 +6297,7 @@ ${organicBlock}
       const bFav = isModelFavorite(b.id);
       if (aFav && !bFav) return -1;
       if (!aFav && bFav) return 1;
-      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      return String(a.name || a.id || '').localeCompare(String(b.name || b.id || ''), undefined, { sensitivity: 'base' });
     });
 
     if (filtered.length === 0) {
@@ -6247,8 +6313,9 @@ ${organicBlock}
       const item = document.createElement('div');
       const isFav = isModelFavorite(m.id);
       item.className = `model-option-item ${m.id === currentActive ? 'selected' : ''} ${isFav ? 'is-fav' : ''}`;
-      const isFree = m.tag.toLowerCase().includes('free');
-      const isCloud = m.tag.toLowerCase().includes('cloud');
+      const tagLower = (m.tag || '').toLowerCase();
+      const isFree = tagLower.includes('free');
+      const isCloud = tagLower.includes('cloud');
       const badgeStyle = isFree 
         ? 'background:rgba(0,255,194,0.15); color:var(--neon-teal); border:1px solid rgba(0,255,194,0.3);' 
         : (isCloud ? 'background:rgba(0,240,255,0.12); color:var(--neon-cyan); border:1px solid rgba(0,240,255,0.3);' : 'background:rgba(255,183,3,0.15); color:var(--neon-amber); border:1px solid rgba(255,183,3,0.3);');
@@ -7929,7 +7996,7 @@ Format teks (untuk model tanpa function calling):
       msg.includes('mixed_content') || 
       ((msg.includes('failed to fetch') || msg.includes('networkerror') || err?.name === 'TypeError') && engine === 'ollama')
     );
-    const isCorsOrNetwork = (IS_GITHUB_PAGES || IS_CLOUD_HOSTED) && (msg.includes('failed to fetch') || msg.includes('networkerror') || err.name === 'TypeError');
+    const isCorsOrNetwork = (IS_GITHUB_PAGES || IS_CLOUD_HOSTED) && (msg.includes('failed to fetch') || msg.includes('networkerror') || err?.name === 'TypeError');
     const actualHasImage = Array.isArray(hasImage) ? hasImage.length > 0 : Boolean(hasImage);
     const isVisionUnsupported = actualHasImage && (
       msg.includes('image') || 
@@ -10127,7 +10194,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     const urlRegex = /(?:https?:\/\/[^\s<>"'{}|\\^`\[\]]+|www\.[^\s<>"'{}|\\^`\[\]]+)/gi;
     const matches = text.match(urlRegex) || [];
     return matches.map(u => {
-      let clean = u.replace(/[.,!?;:)]+$/, '');
+      let clean = cleanExtractedUrlPunctuation(u);
       if (/^www\./i.test(clean)) clean = 'https://' + clean;
       return clean;
     }).filter(u => {
@@ -14172,18 +14239,16 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       return;
     }
 
-    // Lazy load messages from device disk if needed before exporting
+    // Lazy load messages from device disk / ChatDB if needed before exporting
     if (session._isLazyDisk && (!session.messages || session.messages.length === 0)) {
-      if (DeviceStorage.isDeviceBackendAvailable) {
-        try {
-          const fullSess = await DeviceStorage.getSession(session.id);
-          if (fullSess && Array.isArray(fullSess.messages)) {
-            session.messages = fullSess.messages;
-            delete session._isLazyDisk;
-          }
-        } catch (e) {
-          console.warn('Gagal memuat detail sesi aktif dari disk untuk ekspor:', e);
+      try {
+        const fullSess = await DeviceStorage.getSession(session.id);
+        if (fullSess && Array.isArray(fullSess.messages)) {
+          session.messages = fullSess.messages;
+          delete session._isLazyDisk;
         }
+      } catch (e) {
+        console.warn('Gagal memuat detail sesi aktif untuk ekspor:', e);
       }
     }
 
@@ -15826,6 +15891,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
   function renderLiveModelCatalog() {
     const container = els.catalogListContainer;
     if (!container) return;
+    const previousScrollTop = container.scrollTop;
     container.innerHTML = '';
 
     const q = (STATE.catalogSearchQuery || '').toLowerCase().trim();
@@ -15890,7 +15956,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         if (aFeatured && !bFeatured) return -1;
         if (!aFeatured && bFeatured) return 1;
 
-        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+        return String(a.name || a.id || '').localeCompare(String(b.name || b.id || ''), undefined, { sensitivity: 'base' });
       });
     } else {
       list = (STATE.openRouterModels || []).map(m => {
@@ -15944,7 +16010,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         if (aFeatured && !bFeatured) return -1;
         if (!aFeatured && bFeatured) return 1;
 
-        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+        return String(a.name || a.id || '').localeCompare(String(b.name || b.id || ''), undefined, { sensitivity: 'base' });
       });
     }
 
@@ -16061,6 +16127,10 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
       container.appendChild(row);
     });
+
+    if (previousScrollTop > 0) {
+      container.scrollTop = previousScrollTop;
+    }
 
     updateCatalogFavBadge();
   }
