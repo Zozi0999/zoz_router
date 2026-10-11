@@ -16210,14 +16210,24 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       });
     });
 
-    // Model Picker: Buka Katalog Model Layar Lebar & Besar Real-Time (Live Catalog)
+    // Model Picker: Toggle Dropdown Model Cepat di Header
     els.modelPickerChip?.addEventListener('click', (e) => {
       e.stopPropagation();
-      AudioEngine.click();
-      if (els.modelDropdownMenu) {
-        els.modelDropdownMenu.classList.remove('show');
+      closeAttachmentDropdown();
+      closeSearchDropdown();
+      closeImageModelDropdown();
+      closeMusicModelDropdown();
+
+      const menu = els.modelDropdownMenu;
+      if (!menu) return;
+
+      const isShow = menu.classList.toggle('show');
+      if (isShow) {
+        STATE.dropdownModelTab = (STATE.mode === 'openrouter' || (STATE.settings.ollamaModel && STATE.settings.ollamaModel.includes('/'))) ? 'openrouter' : 'ollama';
+        populateModelDropdown(els.modelSearchInput?.value || '');
+        setTimeout(() => els.modelSearchInput?.focus(), 80);
       }
-      openLiveModelCatalog(null, 'Model Obrolan Utama');
+      AudioEngine.click();
     });
 
     // Custom Model Direct Input pada Katalog Layar Lebar

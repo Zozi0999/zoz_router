@@ -799,7 +799,7 @@ html, body {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
   display: none;
   flex-direction: column;
-  z-index: 200;
+  z-index: 700;
   overflow: hidden;
   backdrop-filter: blur(16px);
 }
@@ -2310,7 +2310,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  z-index: 1000;
+  z-index: 700;
   animation: dropdownSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   transform-origin: bottom left;
 }
@@ -2729,7 +2729,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  z-index: 1000;
+  z-index: 700;
   animation: dropdownSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   transform-origin: bottom left;
 }
@@ -3565,7 +3565,7 @@ body.modal-open {
   inset: 0;
   background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(8px);
-  z-index: 1000;
+  z-index: 1500;
   display: none;
   align-items: center;
   justify-content: center;
@@ -4696,7 +4696,7 @@ body.modal-open {
   border-radius: var(--radius-md);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7), 0 0 24px rgba(0, 240, 255, 0.18);
   padding: 8px;
-  z-index: 100;
+  z-index: 700;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -4910,7 +4910,7 @@ body.modal-open {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  z-index: 999;
+  z-index: 700;
   animation: dropdownSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   transform-origin: bottom left;
 }
