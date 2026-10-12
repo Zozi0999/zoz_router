@@ -9308,6 +9308,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       let response = null;
       let lastErrDetail = '';
       let activeMessagesPayload = null;
+      let activeEndpoint = '';
+      let activeHeaders = {};
+      let activeRouteType = '';
 
       for (let i = 0; i < candidateModels.length; i++) {
         const currentModel = candidateModels[i];
@@ -9424,6 +9427,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
             if (attemptRes.ok) {
               res = attemptRes;
+              activeEndpoint = targetUrl;
+              activeHeaders = targetHeaders;
+              activeRouteType = routeType;
               break;
             }
 
@@ -9749,19 +9755,39 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           model: actualModelUsed || modelName,
           messages: conversationChain,
           stream: true,
-          temperature: parseFloat(STATE.settings.temperature),
-          top_p: parseFloat(STATE.settings.topP)
+          temperature: parseFloat(STATE.settings.temperature) || 0.7,
+          top_p: parseFloat(STATE.settings.topP) || 0.9,
+          provider: {
+            allow_fallbacks: true
+          }
         };
-        if (session?.id) digestionRequestBody.sessionId = session.id;
-        if (!isOpenRouterDirect) digestionRequestBody.apiKey = STATE.settings.openRouterKey;
+
+        const isDirectRoute = activeRouteType === 'direct' || (!activeEndpoint || activeEndpoint.includes('openrouter.ai'));
+        if (isDirectRoute) {
+          delete digestionRequestBody.sessionId;
+          delete digestionRequestBody.userId;
+          delete digestionRequestBody.apiKey;
+        } else {
+          if (session?.id) digestionRequestBody.sessionId = session.id;
+          if (STATE.userId) digestionRequestBody.userId = STATE.userId;
+          digestionRequestBody.apiKey = STATE.settings.openRouterKey || undefined;
+        }
+
+        const digestionUrl = activeEndpoint || (isDirectRoute ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat');
+        const digestionHeaders = (activeHeaders && Object.keys(activeHeaders).length > 0) ? activeHeaders : {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`,
+          'HTTP-Referer': location.origin || 'https://zozi0999.github.io/zoz_router',
+          'X-Title': 'ZOZ Router'
+        };
 
         currentRoundText = '';
         currentRoundNativeCalls = [];
 
         try {
-          const digestionRes = await fetch(endpoint, {
+          const digestionRes = await fetch(digestionUrl, {
             method: 'POST',
-            headers,
+            headers: digestionHeaders,
             body: JSON.stringify(digestionRequestBody),
             signal: STATE.abortController?.signal
           });
