@@ -6127,6 +6127,18 @@ async function requestHandler(req, res) {
         if (body.tools.length === 0) delete body.tools;
       }
 
+      // Defense-in-depth: Hapus parameter yang tidak didukung pada model tertentu (misal: top_p pada Liquid AI / reasoning)
+      const reqModel = String(body.model || '');
+      const isLiquid = reqModel.includes('liquid') || reqModel.includes('lfm-');
+      const isReasoning = reqModel.includes('/o1') || reqModel.includes('/o3');
+      if (isLiquid && body.top_p !== undefined) {
+        delete body.top_p;
+      }
+      if (isReasoning) {
+        if (body.temperature !== undefined) delete body.temperature;
+        if (body.top_p !== undefined) delete body.top_p;
+      }
+
       // Defense-in-depth: Resolusi gambar lokal (/uploads/) menjadi Base64 data URL agar OpenRouter tidak merejeksi private IP
       if (Array.isArray(body.messages)) {
         for (const msg of body.messages) {

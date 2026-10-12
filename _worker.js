@@ -414,22 +414,32 @@ export default {
             'HTTP-Referer': 'https://zoz-router.pages.dev',
             'X-Title': 'ZOZ Router'
           },
-          body: JSON.stringify({
-            model: body.model || 'qwen/qwen3.8-27b:free',
-            messages: body.messages || [],
-            stream: body.stream !== false,
-            temperature: body.temperature ?? 0.7,
-            top_p: body.top_p ?? 0.9,
-            max_tokens: body.max_tokens ?? 4096,
-            ...(body.plugins ? { plugins: body.plugins } : {}),
-            ...(body.provider ? { provider: body.provider } : {}),
-            ...(body.modalities ? { modalities: body.modalities } : {}),
-            ...(body.reasoning ? { reasoning: body.reasoning } : {}),
-            ...(body.tools && Array.isArray(body.tools) && (!body.model || (!body.model.includes(':free') && !body.model.endsWith('/free') && body.model !== 'openrouter/free')) ? (() => {
+          body: JSON.stringify((() => {
+            const reqModel = body.model || 'openrouter/free';
+            const isLiquid = reqModel.includes('liquid') || reqModel.includes('lfm-');
+            const isReasoning = reqModel.includes('/o1') || reqModel.includes('/o3');
+            const out = {
+              model: reqModel,
+              messages: body.messages || [],
+              stream: body.stream !== false,
+              ...(body.provider ? { provider: body.provider } : { provider: { allow_fallbacks: true } }),
+              ...(body.plugins ? { plugins: body.plugins } : {}),
+              ...(body.modalities ? { modalities: body.modalities } : {}),
+              ...(body.reasoning ? { reasoning: body.reasoning } : {}),
+              ...(body.max_tokens ? { max_tokens: body.max_tokens } : {})
+            };
+            if (!isReasoning) {
+              out.temperature = body.temperature ?? 0.7;
+            }
+            if (!isLiquid && !isReasoning) {
+              out.top_p = body.top_p ?? 0.9;
+            }
+            if (body.tools && Array.isArray(body.tools) && (!reqModel.includes(':free') && !reqModel.endsWith('/free') && reqModel !== 'openrouter/free')) {
               const clean = body.tools.filter(t => t && t.type === 'function' && t.function && t.function.name);
-              return clean.length > 0 ? { tools: clean } : {};
-            })() : {})
-          })
+              if (clean.length > 0) out.tools = clean;
+            }
+            return out;
+          })())
         });
 
         const newHeaders = new Headers(res.headers);

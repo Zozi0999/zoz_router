@@ -97,25 +97,26 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   // Fallback resmi model gratis OpenRouter yang aktif dan terverifikasi live
   const LIVE_FREE_OPENROUTER_FALLBACKS = [
     'openrouter/free',
-    'google/gemma-4-31b-it:free',
-    'google/gemma-4-26b-a4b-it:free',
+    'nvidia/nemotron-3-super-120b-a12b:free',
     'nvidia/nemotron-3.5-lightning:free',
-    'liquid/lfm-2.5-2.6b:free',
-    'inclusionai/ling-3.1-flash',
-    'dots-studio/dots-3-note-preview:free'
+    'nvidia/nemotron-3-ultra-550b-a55b:free',
+    'dots-studio/dots-3-note-preview:free',
+    'cohere/north-mini-code:free',
+    'google/gemma-4-31b-it:free',
+    'liquid/lfm-2.5-2.6b:free'
   ];
 
   // Popular OpenRouter Models Catalog (Live Active Free & Flagship Models)
   const DEFAULT_OPENROUTER_MODELS = [
     { id: 'openrouter/free', name: 'OpenRouter Free Router', tag: 'Free', cat: 'free', desc: 'Rute otomatis cerdas model gratis OpenRouter.' },
     { id: 'openrouter/auto', name: 'OpenRouter Auto Router', tag: 'Auto', cat: 'free', desc: 'Rute otomatis cerdas OpenRouter.' },
-    { id: 'google/gemma-4-31b-it:free', name: 'Google Gemma 4 31B (Free)', tag: 'Free', cat: 'free' },
-    { id: 'google/gemma-4-26b-a4b-it:free', name: 'Google Gemma 4 26B (Free)', tag: 'Free', cat: 'free' },
+    { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'NVIDIA Nemotron 3 Super 120B (Free)', tag: 'Free', cat: 'free' },
     { id: 'nvidia/nemotron-3.5-lightning:free', name: 'NVIDIA Nemotron 3.5 Lightning (Free)', tag: 'Free', cat: 'free' },
+    { id: 'dots-studio/dots-3-note-preview:free', name: 'Dots 3 Note Preview (Free)', tag: 'Free', cat: 'free' },
+    { id: 'google/gemma-4-31b-it:free', name: 'Google Gemma 4 31B (Free)', tag: 'Free', cat: 'free' },
     { id: 'liquid/lfm-2.5-2.6b:free', name: 'Liquid LFM 2.5 2.6B (Free)', tag: 'Free', cat: 'free' },
-    { id: 'inclusionai/ling-3.1-flash', name: 'Ling 3.1 Flash (Free)', tag: 'Free', cat: 'free' },
     { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Meta Llama 3.3 70B', tag: 'Flagship', cat: 'flagship' },
-    { id: 'anthropic/claude-3.5-sonnet', name: 'Anthropic Claude 3.5 Sonnet', tag: 'Coding', cat: 'coding' },
+    { id: 'anthropic/claude-sonnet-4.6', name: 'Anthropic Claude Sonnet 4.6', tag: 'Coding', cat: 'coding' },
     { id: 'openai/gpt-4o', name: 'OpenAI GPT-4o', tag: 'Vision', cat: 'flagship' },
     { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat', tag: 'Coding', cat: 'coding' }
   ];
@@ -2254,7 +2255,18 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     return summary.trim();
   }
 
-  function renderMarkdown(rawText) {
+  function fastSanitizeHtml(dirtyHtml) {
+    if (!dirtyHtml || typeof dirtyHtml !== 'string') return '';
+    return dirtyHtml
+      .replace(/<script\b[\s\S]*?<\/script>/gi, '')
+      .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, '')
+      .replace(/<object\b[\s\S]*?<\/object>/gi, '')
+      .replace(/<embed\b[\s\S]*?<\/embed>/gi, '')
+      .replace(/<form\b[\s\S]*?<\/form>/gi, '')
+      .replace(/\bon\w+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '');
+  }
+
+  function renderMarkdown(rawText, isStreaming = false) {
     if (!rawText) return '';
     
     // Pisahkan blok pemikiran AI (<think>) dan konten jawaban utama secara deterministik (tanpa regex rentan)
@@ -2265,10 +2277,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // jawaban eksplisit, output sengaja tetap kosong (fail closed).
     let contentHtml = '';
     if (parsedBlocks.content) {
-      // Rapikan teks robek (satu KATA per baris — khas model :free) menjadi
-      // paragraf mengalir SEBELUM parse markdown. Blok kode / list / heading /
-      // blockquote / tabel tidak disentuh oleh reflowShreddedProse.
-      const displayContent = reflowShreddedProse(parsedBlocks.content);
+      // Selama streaming, lewati reflowShreddedProse agar CPU hemat daya
+      const displayContent = isStreaming ? parsedBlocks.content : reflowShreddedProse(parsedBlocks.content);
       if (window.marked) {
         try {
           contentHtml = marked.parse(displayContent);
@@ -2281,7 +2291,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
     }
 
-    const sanitized = sanitizeHtmlSafe(contentHtml);
+    // Selama streaming berjalan cepat, gunakan fast regex sanitizer untuk mencegah beban 100% CPU.
+    // Saat stream selesai (finish), full DOMPurify dijalankan secara komprehensif.
+    const sanitized = isStreaming ? fastSanitizeHtml(contentHtml) : sanitizeHtmlSafe(contentHtml);
 
     // Pastikan seluruh tautan eksternal (http/https) membuka di tab baru agar tidak memutus sesi obrolan
     return sanitized.replace(/<a\b([^>]*?href=["']https?:\/\/[^"']+["'][^>]*)>/gi, (match, attrs) => {
@@ -2513,7 +2525,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // append terakhir sehingga state final tidak pernah terlewat.
     scheduleRender() {
       if (this.renderTimer !== null) return;
-      const interval = Math.min(160, Math.max(40, Math.floor(this.text.length / 250)));
+      const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
+      const minInterval = isMobile ? 120 : 75;
+      const interval = Math.min(220, Math.max(minInterval, Math.floor(this.text.length / 120)));
       const delay = Math.max(0, this.lastRenderTime + interval - performance.now());
       this.renderTimer = setTimeout(() => {
         this.renderTimer = null;
@@ -2524,7 +2538,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     render() {
       if (!this.el) return;
-      this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(hideFileBlocksForDisplay(this.text)) + '<span class="typing-cursor"></span>';
+      this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(hideFileBlocksForDisplay(this.text), true) + '<span class="typing-cursor"></span>';
       if (this.onScroll && !userScrolledUp) this.onScroll();
     }
 
@@ -2538,7 +2552,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         this.renderTimer = null;
       }
       if (shouldRender && this.el) {
-        this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(hideFileBlocksForDisplay(this.text));
+        this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(hideFileBlocksForDisplay(this.text), false);
         enhanceCodeBlocks(this.el);
       }
       if (this.onScroll && !userScrolledUp) this.onScroll();
@@ -2979,41 +2993,97 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   }
 
   async function streamContinuationOpenRouter(session, modelName, promptInstruction, bubbleText, currentFullText) {
-    const isOpenRouterDirect = IS_GITHUB_PAGES || IS_CLOUD_HOSTED;
-    const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
-    const headers = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${STATE.settings.openRouterKey}`
-    };
-    if (isOpenRouterDirect) {
-      headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
-      headers['X-Title'] = 'ZOZ Router';
-    }
-
+    const supportsSystem = doesModelSupportSystemRole(modelName);
     const messagesPayload = [];
-    if (STATE.settings.systemPrompt) {
+    if (STATE.settings.systemPrompt && supportsSystem) {
       messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
     }
     session.messages.forEach(m => messagesPayload.push({
       role: m.role,
       content: m.role === 'assistant' ? safeAssistantText(m.content || '') : (m.content || '')
     }));
-    messagesPayload.push({ role: 'user', content: promptInstruction });
+    const userInstruction = (!supportsSystem && STATE.settings.systemPrompt)
+      ? `[Instruksi Sistem: ${STATE.settings.systemPrompt}]\n\n${promptInstruction}`
+      : promptInstruction;
+    messagesPayload.push({ role: 'user', content: userInstruction });
 
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model: modelName,
-        messages: messagesPayload,
-        stream: true,
-        temperature: parseFloat(STATE.settings.temperature),
-        apiKey: isOpenRouterDirect ? undefined : STATE.settings.openRouterKey
-      }),
-      signal: STATE.abortController?.signal
-    });
+    const isLiquid = Boolean(modelName && (modelName.includes('liquid') || modelName.includes('lfm-')));
+    const isReasoning = Boolean(modelName && (modelName.includes('/o1') || modelName.includes('/o3')));
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const basePayload = {
+      model: modelName,
+      messages: messagesPayload,
+      stream: true,
+      provider: { allow_fallbacks: true }
+    };
+    if (!isReasoning) {
+      basePayload.temperature = parseFloat(STATE.settings.temperature) || 0.7;
+    }
+    if (!isLiquid && !isReasoning) {
+      basePayload.top_p = parseFloat(STATE.settings.topP) || 0.9;
+    }
+
+    const tryDirectFirst = IS_GITHUB_PAGES;
+    const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
+
+    let res = null;
+    let lastErrDetail = '';
+
+    for (const routeType of routesToTry) {
+      if (STATE.abortController?.signal?.aborted) break;
+      const isDirect = routeType === 'direct';
+      const endpoint = isDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
+      const headers = { 'Content-Type': 'application/json' };
+      if (STATE.settings.openRouterKey) {
+        headers['Authorization'] = `Bearer ${STATE.settings.openRouterKey}`;
+      }
+      if (isDirect) {
+        headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
+        headers['X-Title'] = 'ZOZ Router';
+      }
+
+      const body = {
+        ...basePayload,
+        ...(isDirect ? {} : {
+          sessionId: session?.id || null,
+          userId: STATE.userId || null,
+          apiKey: STATE.settings.openRouterKey || undefined
+        })
+      };
+
+      try {
+        const attemptRes = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          signal: STATE.abortController?.signal
+        });
+        if (routeType === 'proxy' && attemptRes.status === 404) {
+          continue;
+        }
+        if (attemptRes.ok) {
+          res = attemptRes;
+          break;
+        }
+        let attemptErr = `HTTP ${attemptRes.status}`;
+        try {
+          const errJson = await attemptRes.json();
+          if (errJson && errJson.error) {
+            attemptErr = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
+          }
+        } catch (_) {}
+        lastErrDetail = attemptErr;
+        if (attemptRes.status === 401 || attemptRes.status === 403 || attemptRes.status === 402) {
+          break;
+        }
+      } catch (err) {
+        if (STATE.abortController?.signal?.aborted) throw err;
+        lastErrDetail = err.message || String(err);
+        continue;
+      }
+    }
+
+    if (!res || !res.ok) throw new Error(lastErrDetail || 'Gagal melanjutkan streaming OpenRouter');
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -6362,7 +6432,12 @@ ${organicBlock}
       if (STATE.settings.openRouterKey) {
         headers['Authorization'] = `Bearer ${STATE.settings.openRouterKey}`;
       }
-      const res = await fetch(url, { headers }).catch(() => null);
+      let res = await fetch(url, { headers }).catch(() => null);
+      if (!res || !res.ok) {
+        if (!IS_GITHUB_PAGES) {
+          res = await fetch('https://openrouter.ai/api/v1/models', { headers }).catch(() => null);
+        }
+      }
       if (res && res.ok) {
         const data = await res.json();
         if (data.data && Array.isArray(data.data)) {
@@ -9296,14 +9371,12 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       );
 
       // Siapkan pool kandidat model:
-      // - Jika model gratis ATAU saat berada di Auto Router Mode: masukkan model cadangan gratis teruji (live fallback pool)
-      // - Jika model berbayar dipilih manual: prioritaskan model tersebut, dan bila gagal karena saldo 402/gangguan, berikan failover cerdas
-      const candidateModels = (isFreeModel || STATE.mode === 'auto')
-        ? [
-            modelName,
-            ...LIVE_FREE_OPENROUTER_FALLBACKS
-          ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
-        : [modelName];
+      // - Selalu sertakan fallback gratis terverifikasi agar saat model pilihan kehabisan kredit (HTTP 402)
+      //   atau mengalami gangguan upstream (404/429/502/503), sistem dapat melakukan Smart Failover secara otomatis.
+      const candidateModels = [
+        modelName,
+        ...LIVE_FREE_OPENROUTER_FALLBACKS
+      ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free');
 
       let response = null;
       let lastErrDetail = '';
@@ -9323,18 +9396,26 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         const currentIsImageCapable = isModelCapableOfImageGeneration(currentModel);
         const currentMessagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, currentModel);
 
+        const isLiquid = Boolean(currentModel && (currentModel.includes('liquid') || currentModel.includes('lfm-')));
+        const isReasoning = Boolean(currentModel && (currentModel.includes('/o1') || currentModel.includes('/o3')));
+
         const basePayload = {
           model: currentModel,
           messages: currentMessagesPayload,
           stream: true,
-          temperature: parseFloat(STATE.settings.temperature) || 0.7,
-          top_p: parseFloat(STATE.settings.topP) || 0.9,
           provider: {
             allow_fallbacks: true
           }
         };
 
-        if (currentIsImageCapable) {
+        if (!isReasoning) {
+          basePayload.temperature = parseFloat(STATE.settings.temperature) || 0.7;
+        }
+        if (!isLiquid && !isReasoning) {
+          basePayload.top_p = parseFloat(STATE.settings.topP) || 0.9;
+        }
+
+        if (currentIsImageCapable && (STATE.isImageGenMode || isImageGenerationTrigger(promptText))) {
           basePayload.modalities = ['text', 'image'];
         }
 
@@ -9403,19 +9484,42 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
               signal: STATE.abortController?.signal
             });
 
-            // Resiliensi Tool Rejection: jika upstream mengembalikan 400 karena tools tidak didukung, coba ulang tanpa tools
-            if (attemptRes.status === 400 && targetBody.tools) {
-              console.warn(`[OpenRouter] Model ${currentModel} mengembalikan HTTP 400 dengan tools. Mengulang langsung tanpa tools...`);
-              delete targetBody.tools;
-              delete basePayload.tools;
-              const retryRes = await fetch(targetUrl, {
-                method: 'POST',
-                headers: targetHeaders,
-                body: JSON.stringify(targetBody),
-                signal: STATE.abortController?.signal
-              });
-              if (retryRes.ok) {
-                attemptRes = retryRes;
+            // Resiliensi HTTP 400 & 404: Tangani penolakan tools, top_p, modalities, temperature, atau parameter upstream
+            if (attemptRes.status === 400 || (attemptRes.status === 404 && targetBody.modalities)) {
+              let shouldRetry = false;
+              if (targetBody.modalities) {
+                console.warn(`[OpenRouter] Model ${currentModel} menolak parameter modalities. Menghapus modalities dan mengulang...`);
+                delete targetBody.modalities;
+                delete basePayload.modalities;
+                shouldRetry = true;
+              }
+              if (targetBody.tools) {
+                console.warn(`[OpenRouter] Model ${currentModel} mengembalikan HTTP 400 dengan tools. Mengulang langsung tanpa tools...`);
+                delete targetBody.tools;
+                delete basePayload.tools;
+                shouldRetry = true;
+              }
+              if (targetBody.top_p) {
+                console.warn(`[OpenRouter] Model ${currentModel} mengembalikan HTTP 400. Menghapus top_p dan mengulang...`);
+                delete targetBody.top_p;
+                delete basePayload.top_p;
+                shouldRetry = true;
+              }
+              if (targetBody.temperature && isReasoning) {
+                delete targetBody.temperature;
+                delete basePayload.temperature;
+                shouldRetry = true;
+              }
+              if (shouldRetry) {
+                const retryRes = await fetch(targetUrl, {
+                  method: 'POST',
+                  headers: targetHeaders,
+                  body: JSON.stringify(targetBody),
+                  signal: STATE.abortController?.signal
+                });
+                if (retryRes.ok) {
+                  attemptRes = retryRes;
+                }
               }
             }
 
@@ -9480,20 +9584,17 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         }
 
         // Cek apakah bisa failover ke model berikutnya:
-        // Berlaku jika model gratis, mode auto router, atau jika model berbayar kehabisan kredit (402) / upstream down
-        const canFailover = i < candidateModels.length - 1 && (
-          isFreeModel ||
-          STATE.mode === 'auto' ||
-          lastErrDetail.includes('402') ||
-          lastErrDetail.includes('credit') ||
-          lastErrDetail.includes('Failed to fetch') ||
-          lastErrDetail.includes('502') ||
-          lastErrDetail.includes('503')
-        );
+        // Berlaku untuk semua kegagalan model (402, 404, 429, 400, 500, 502, 503, 504, network failure) selama bukan penolakan auth API Key
+        const isAuthRejection = lastErrDetail.includes('401') || lastErrDetail.includes('403') || lastErrDetail.includes('API Key tidak valid');
+        const canFailover = (i < candidateModels.length - 1) && !isAuthRejection;
 
         if (canFailover) {
           const nextCandidate = candidateModels[i + 1];
-          const reasonNotice = lastErrDetail.includes('402') ? 'memerlukan saldo berbayar' : 'sedang sibuk/gangguan';
+          const reasonNotice = (lastErrDetail.includes('402') || lastErrDetail.includes('credit'))
+            ? 'memerlukan saldo berbayar'
+            : ((lastErrDetail.includes('429') || lastErrDetail.includes('rate limit'))
+                ? 'mencapai batas kuota sementara'
+                : 'sedang sibuk/gangguan');
           console.warn(`[OpenRouter Smart Failover] Model ${currentModel} ${reasonNotice} (${lastErrDetail}). Mengalihkan ke ${nextCandidate}...`);
           bubbleText.innerHTML = `<span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.8; font-style:italic;">Model <b>${escapeHtml(currentModel)}</b> ${reasonNotice}. Mengalihkan otomatis ke <b>${escapeHtml(nextCandidate)}</b>...</span>`;
           await new Promise(r => setTimeout(r, 600));
@@ -9751,16 +9852,24 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         });
 
         // Jalankan panggilan streaming ke model untuk putaran berikutnya
+        const activeDigestionModel = actualModelUsed || modelName;
+        const isDigestionLiquid = Boolean(activeDigestionModel && (activeDigestionModel.includes('liquid') || activeDigestionModel.includes('lfm-')));
+        const isDigestionReasoning = Boolean(activeDigestionModel && (activeDigestionModel.includes('/o1') || activeDigestionModel.includes('/o3')));
+
         const digestionRequestBody = {
-          model: actualModelUsed || modelName,
+          model: activeDigestionModel,
           messages: conversationChain,
           stream: true,
-          temperature: parseFloat(STATE.settings.temperature) || 0.7,
-          top_p: parseFloat(STATE.settings.topP) || 0.9,
           provider: {
             allow_fallbacks: true
           }
         };
+        if (!isDigestionReasoning) {
+          digestionRequestBody.temperature = parseFloat(STATE.settings.temperature) || 0.7;
+        }
+        if (!isDigestionLiquid && !isDigestionReasoning) {
+          digestionRequestBody.top_p = parseFloat(STATE.settings.topP) || 0.9;
+        }
 
         const isDirectRoute = activeRouteType === 'direct' || (!activeEndpoint || activeEndpoint.includes('openrouter.ai'));
         if (isDirectRoute) {
@@ -10018,7 +10127,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
       // Check if output is cut in half and provide one-click continuation button
       if (isOutputTruncated(fullText, finishReason)) {
-        attachContinuationButton(assistantRow.querySelector('.message-content-box') || assistantRow, session, assistantRow, modelName, 'openrouter', fullText);
+        attachContinuationButton(assistantRow.querySelector('.message-content-box') || assistantRow, session, assistantRow, actualModelUsed || modelName, 'openrouter', fullText);
       }
 
       // Save to session if session is still alive
@@ -10118,8 +10227,12 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         const errorHtml = formatModelErrorMessage('openrouter', modelName, err, actualHasImage, STATE.webSearchEnabled);
 
         const isFreeModel = Boolean(modelName && (modelName.includes(':free') || modelName.endsWith('/free') || modelName === 'openrouter/free'));
-        const fallbackModelCandidate = (modelName === 'openrouter/free' || modelName.includes(':free')) ? 'google/gemma-4-31b-it:free' : 'openrouter/free';
-        const fallbackLabel = (modelName === 'openrouter/free' || modelName.includes(':free')) ? 'Gemma 4 31B (Free)' : 'OpenRouter Free Router';
+        const fallbackModelCandidate = (modelName === 'openrouter/free') 
+          ? 'nvidia/nemotron-3-super-120b-a12b:free' 
+          : 'openrouter/free';
+        const fallbackLabel = (modelName === 'openrouter/free') 
+          ? 'Nemotron 3 Super 120B (Free)' 
+          : 'OpenRouter Free Router';
 
         const rescuedHtml = hasPartialText ? `
           <div class="partial-rescued-content" style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed rgba(255,255,255,0.15);">
@@ -10771,29 +10884,21 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     const resolvedEngine = isModelOpenRouter ? 'openrouter' : (isModelOllama ? 'ollama' : (engine || (STATE.settings.openRouterKey ? 'openrouter' : 'ollama')));
 
     if (resolvedEngine === 'openrouter' || (STATE.settings.openRouterKey && !isModelOllama)) {
-      const isFreeModel = Boolean(modelName && (modelName.includes(':free') || modelName === 'openrouter/free' || modelName.endsWith('/free')));
-      const candidateModels = isFreeModel
-        ? [
-            modelName,
-            ...LIVE_FREE_OPENROUTER_FALLBACKS
-          ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
-        : [modelName, ...LIVE_FREE_OPENROUTER_FALLBACKS].filter(Boolean);
+      const candidateModels = [
+        modelName,
+        ...LIVE_FREE_OPENROUTER_FALLBACKS
+      ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free');
 
-      const isOpenRouterDirect = IS_GITHUB_PAGES || IS_CLOUD_HOSTED;
-      const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
-      const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`
-      };
-      if (isOpenRouterDirect) {
-        headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
-        headers['X-Title'] = 'ZOZ Router Multi-Agent';
-      }
+      const tryDirectFirst = IS_GITHUB_PAGES;
+      const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
 
       let lastErr = null;
       for (let i = 0; i < candidateModels.length; i++) {
         const curModel = candidateModels[i];
         const supportsSystem = doesModelSupportSystemRole(curModel);
+        const isLiquid = Boolean(curModel && (curModel.includes('liquid') || curModel.includes('lfm-')));
+        const isReasoning = Boolean(curModel && (curModel.includes('/o1') || curModel.includes('/o3')));
+
         const messages = [];
         if (system && system.trim()) {
           if (supportsSystem) {
@@ -10806,44 +10911,78 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           messages.push({ role: 'user', content: prompt.trim() });
         }
 
-        const requestBody = {
+        const basePayload = {
           model: curModel,
           messages,
           stream: false,
-          temperature: 0.3,
           provider: {
             allow_fallbacks: true
           }
         };
-        if (!isOpenRouterDirect) requestBody.apiKey = STATE.settings.openRouterKey;
+        if (!isReasoning) {
+          basePayload.temperature = 0.3;
+        }
+        if (!isLiquid && !isReasoning) {
+          basePayload.top_p = 0.9;
+        }
 
-        try {
-          const res = await fetch(endpoint, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(requestBody),
-            signal: STATE.abortController?.signal
-          });
-          if (!res.ok) {
-            let errDetail = `OpenRouter HTTP ${res.status}`;
-            try {
-              const errJson = await res.json();
-              if (errJson && errJson.error) {
-                errDetail = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
-              }
-            } catch (e) {}
-            throw new Error(errDetail);
+        let modelSuccessText = null;
+
+        for (const routeType of routesToTry) {
+          if (STATE.abortController?.signal?.aborted) break;
+          const isDirect = routeType === 'direct';
+          const endpoint = isDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
+          const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`
+          };
+          if (isDirect) {
+            headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
+            headers['X-Title'] = 'ZOZ Router Multi-Agent';
           }
-          const data = await res.json();
-          return data.choices?.[0]?.message?.content || '';
-        } catch (callErr) {
-          if (STATE.abortController?.signal?.aborted) throw callErr;
-          lastErr = callErr;
-          if (isFreeModel && i < candidateModels.length - 1) {
-            console.warn(`[callClientLLMDirect] Failover dari ${curModel} ke ${candidateModels[i + 1]}:`, callErr.message);
+
+          const requestBody = {
+            ...basePayload,
+            ...(isDirect ? {} : { apiKey: STATE.settings.openRouterKey || undefined })
+          };
+
+          try {
+            const res = await fetch(endpoint, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(requestBody),
+              signal: STATE.abortController?.signal
+            });
+            if (routeType === 'proxy' && res.status === 404) continue;
+            if (!res.ok) {
+              let errDetail = `OpenRouter HTTP ${res.status}`;
+              try {
+                const errJson = await res.json();
+                if (errJson && errJson.error) {
+                  errDetail = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
+                }
+              } catch (e) {}
+              lastErr = new Error(errDetail);
+              if (res.status === 401 || res.status === 403 || res.status === 402) break;
+              continue;
+            }
+            const data = await res.json();
+            modelSuccessText = data.choices?.[0]?.message?.content || '';
+            break;
+          } catch (callErr) {
+            if (STATE.abortController?.signal?.aborted) throw callErr;
+            lastErr = callErr;
             continue;
           }
-          throw callErr;
+        }
+
+        if (modelSuccessText !== null) {
+          return modelSuccessText;
+        }
+
+        if (i < candidateModels.length - 1) {
+          console.warn(`[callClientLLMDirect] Failover dari ${curModel} ke ${candidateModels[i + 1]}:`, lastErr?.message);
+          continue;
         }
       }
       throw lastErr || new Error('Gagal memanggil model OpenRouter');
@@ -10890,78 +11029,98 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     const resolvedEngine = isModelOpenRouter ? 'openrouter' : (isModelOllama ? 'ollama' : (engine || 'ollama'));
 
     if (resolvedEngine === 'openrouter' || (!STATE.settings.ollamaModel && STATE.settings.openRouterKey && !isModelOllama)) {
-      const isFreeModel = Boolean(modelName && (modelName.includes(':free') || modelName === 'openrouter/free' || modelName.endsWith('/free')));
-      const candidateModels = (isFreeModel || STATE.mode === 'auto')
-        ? [
-            modelName,
-            ...LIVE_FREE_OPENROUTER_FALLBACKS
-          ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
-        : [modelName];
+      const candidateModels = [
+        modelName,
+        ...LIVE_FREE_OPENROUTER_FALLBACKS
+      ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free');
 
-      const isOpenRouterDirect = IS_GITHUB_PAGES || IS_CLOUD_HOSTED;
-      const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
-      const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`
-      };
-      if (isOpenRouterDirect) {
-        headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
-        headers['X-Title'] = 'ZOZ Router Deep Research';
-      }
+      const tryDirectFirst = IS_GITHUB_PAGES;
+      const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
 
       let response = null;
       let lastErrDetail = '';
       for (let i = 0; i < candidateModels.length; i++) {
         const curModel = candidateModels[i];
         const curMessagesPayload = buildSanitizedMessagesPayload(session, [], 'openrouter', systemPrompt, curModel);
-        const requestBody = {
+        const isLiquid = Boolean(curModel && (curModel.includes('liquid') || curModel.includes('lfm-')));
+        const isReasoning = Boolean(curModel && (curModel.includes('/o1') || curModel.includes('/o3')));
+
+        const basePayload = {
           model: curModel,
           messages: curMessagesPayload,
           stream: true,
-          temperature: 0.3,
           provider: {
             allow_fallbacks: true
           }
         };
-        if (!isOpenRouterDirect) requestBody.apiKey = STATE.settings.openRouterKey;
+        if (!isReasoning) {
+          basePayload.temperature = 0.3;
+        }
+        if (!isLiquid && !isReasoning) {
+          basePayload.top_p = 0.9;
+        }
 
-        try {
-          const res = await fetch(endpoint, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(requestBody),
-            signal: STATE.abortController?.signal
-          });
+        let modelRes = null;
 
-          if (res.ok) {
-            response = res;
-            break;
+        for (const routeType of routesToTry) {
+          if (STATE.abortController?.signal?.aborted) break;
+          const isDirect = routeType === 'direct';
+          const endpoint = isDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
+          const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`
+          };
+          if (isDirect) {
+            headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
+            headers['X-Title'] = 'ZOZ Router Deep Research';
           }
 
-          let errDetail = `OpenRouter HTTP ${res.status}`;
+          const requestBody = {
+            ...basePayload,
+            ...(isDirect ? {} : { apiKey: STATE.settings.openRouterKey || undefined })
+          };
+
           try {
-            const errData = await res.json();
-            if (errData && errData.error) {
-              errDetail = typeof errData.error === 'object' ? (errData.error.message || JSON.stringify(errData.error)) : errData.error;
-            }
-          } catch (je) {}
-          lastErrDetail = errDetail;
+            const res = await fetch(endpoint, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(requestBody),
+              signal: STATE.abortController?.signal
+            });
 
-          if (isFreeModel && i < candidateModels.length - 1) {
-            console.warn(`[streamLLMSynthesis] Failover dari ${curModel} ke ${candidateModels[i + 1]} (${errDetail})`);
+            if (routeType === 'proxy' && res.status === 404) continue;
+
+            if (res.ok) {
+              modelRes = res;
+              break;
+            }
+
+            let errDetail = `OpenRouter HTTP ${res.status}`;
+            try {
+              const errData = await res.json();
+              if (errData && errData.error) {
+                errDetail = typeof errData.error === 'object' ? (errData.error.message || JSON.stringify(errData.error)) : errData.error;
+              }
+            } catch (je) {}
+            lastErrDetail = errDetail;
+            if (res.status === 401 || res.status === 403 || res.status === 402) break;
+          } catch (fetchErr) {
+            if (STATE.abortController?.signal?.aborted) throw fetchErr;
+            lastErrDetail = fetchErr.message || String(fetchErr);
             continue;
-          } else {
-            throw new Error(errDetail);
           }
-        } catch (fetchErr) {
-          if (STATE.abortController?.signal?.aborted) throw fetchErr;
-          lastErrDetail = fetchErr.message || String(fetchErr);
-          if (isFreeModel && i < candidateModels.length - 1) {
-            console.warn(`[streamLLMSynthesis] Fetch error pada ${curModel}:`, fetchErr.message);
-            continue;
-          } else {
-            throw fetchErr;
-          }
+        }
+
+        if (modelRes && modelRes.ok) {
+          response = modelRes;
+          break;
+        }
+
+        if (i < candidateModels.length - 1) {
+          console.warn(`[streamLLMSynthesis] Failover dari ${curModel} ke ${candidateModels[i + 1]} (${lastErrDetail})`);
+          continue;
+        } else {
+          throw new Error(lastErrDetail || 'Gagal memulai streaming sintesis OpenRouter');
         }
       }
 
@@ -16348,15 +16507,10 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       const draw = () => {
         const isCanvasVisible = Boolean(canvas.offsetParent);
         if (!isCanvasVisible) {
-          if (!this.isPlaying) {
-            // Canvas tersembunyi & musik berhenti → matikan loop TANPA reschedule.
-            // Loop dihidupkan lagi oleh ensureVisualizerRunning() (mulai play / buka deck).
-            this.animFrameId = null;
-            return;
-          }
-          // Musik masih berjalan: loop tetap siaga tapi JANGAN menggambar canvas
-          // yang tak terlihat (pemborosan GPU/CPU tiap frame).
-          this.animFrameId = requestAnimationFrame(draw);
+          // Canvas tersembunyi (modal BGM Deck ditutup) → hentikan loop rAF sepenuhnya.
+          // Menghemat 60-120 frame/detik siklus CPU/GPU di latar belakang saat musik berjalan.
+          // Loop dihidupkan lagi oleh ensureVisualizerRunning() saat modal deck dibuka.
+          this.animFrameId = null;
           return;
         }
 
@@ -18647,16 +18801,44 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         return;
       }
       try {
-        const res = await fetch('/api/openrouter/auth-check', {
-          headers: { 'Authorization': `Bearer ${key}` }
-        });
-        const data = await res.json();
-        if (res.ok) {
+        const isDirectFirst = IS_GITHUB_PAGES;
+        const endpoints = isDirectFirst
+          ? ['https://openrouter.ai/api/v1/auth/key', '/api/openrouter/auth-check']
+          : ['/api/openrouter/auth-check', 'https://openrouter.ai/api/v1/auth/key'];
+        
+        let valid = false;
+        let lastErrorMsg = 'Key tidak valid';
+
+        for (const ep of endpoints) {
+          const isDirect = ep.includes('openrouter.ai');
+          const headers = { 'Authorization': `Bearer ${key}` };
+          if (isDirect) {
+            headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
+            headers['X-Title'] = 'ZOZ Router';
+          }
+          try {
+            const res = await fetch(ep, { headers, cache: 'no-store' });
+            if (res.status === 404 && !isDirect) continue;
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+              valid = true;
+              break;
+            } else {
+              lastErrorMsg = (data && data.error) ? (typeof data.error === 'object' ? (data.error.message || JSON.stringify(data.error)) : data.error) : `HTTP ${res.status}`;
+              if (res.status === 401 || res.status === 403) break;
+            }
+          } catch (netErr) {
+            lastErrorMsg = netErr.message;
+            continue;
+          }
+        }
+
+        if (valid) {
           showToast('✅ OpenRouter API Key valid & aktif!');
           await fetchOpenRouterCredits(true);
         } else {
-          showToast(`❌ Validasi gagal: ${data.error || 'Key tidak valid'}`, 'error');
-          updateOpenRouterBalanceUI({ error: data.error || 'Key tidak valid' });
+          showToast(`❌ Validasi gagal: ${lastErrorMsg}`, 'error');
+          updateOpenRouterBalanceUI({ error: lastErrorMsg });
         }
       } catch (e) {
         showToast('❌ Gagal memeriksa API Key.', 'error');
@@ -18990,7 +19172,9 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     document.addEventListener('visibilitychange', () => {
       if (document.hidden || document.visibilityState === 'hidden') {
         preserveChatScrollPosition();
+        document.body.classList.add('page-paused');
       } else if (document.visibilityState === 'visible') {
+        document.body.classList.remove('page-paused');
         requestAnimationFrame(restoreChatScrollPosition);
         checkBackgroundChatTasksSync();
       }
