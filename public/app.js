@@ -3865,6 +3865,13 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       if (imagesToDisplay && imagesToDisplay.length > 0 && /^📷 \[\d+ Foto Lampiran\]$/.test(textToDisplay.trim())) {
         textToDisplay = '';
       }
+      if (msg.role === 'user' && msg.docs && Array.isArray(msg.docs) && msg.docs.length > 0) {
+        if (/^\[File:\s*[^\]]+\]$/i.test(textToDisplay.trim())) {
+          textToDisplay = '';
+        } else if (/\[File:\s*[^\]]+\]/i.test(textToDisplay)) {
+          textToDisplay = textToDisplay.replace(/\s*\[File:\s*[^\]]+\]/gi, '').trim();
+        }
+      }
       appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs, msg.isDeepResearch, msg.latency, msg.timestamp || session.updatedAt || session.createdAt, msg);
     });
 
@@ -4060,7 +4067,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         <div class="attached-images-gallery ${gridClass}">
           ${imgList.map((src, imgIdx) => `
             <div class="chat-img-thumb-wrap" data-img-idx="${imgIdx}" title="Klik untuk melihat foto layar penuh" tabindex="0">
-              <img src="${escapeHtml(src)}" alt="Foto ${imgIdx + 1}" class="chat-zoomable-img">
+              <img src="${escapeHtml(src)}" alt="Foto ${imgIdx + 1}" class="chat-zoomable-img" loading="lazy" decoding="async">
               <div class="chat-img-overlay">
                 <i class="fa-solid fa-expand"></i>
               </div>
@@ -4094,7 +4101,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
               `;
             }
             return `
-              <div class="msg-doc-badge">
+              <div class="msg-doc-badge" data-doc-name="${escapeHtml(d.name || '')}" title="Klik untuk membuka & membaca file lampiran">
                 <i class="${iconClass}" style="${iconColor}"></i>
                 <span class="msg-doc-name" title="${escapeHtml(d.name)}">${escapeHtml(d.name)}</span>
                 <span class="msg-doc-size">${escapeHtml(d.size || '')}</span>
@@ -4133,7 +4140,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       statsHtml = `<span class="meta-model-badge">${escapeHtml(model)}</span>`;
     }
 
-    const safeContent = role === 'assistant' ? safeAssistantText(content || '') : (content || '');
+    let safeContent = role === 'assistant' ? safeAssistantText(content || '') : (content || '');
+    if (role === 'user' && docs && Array.isArray(docs) && docs.length > 0 && typeof safeContent === 'string') {
+      if (/^\[File:\s*[^\]]+\]$/i.test(safeContent.trim())) {
+        safeContent = '';
+      } else if (/\[File:\s*[^\]]+\]/i.test(safeContent)) {
+        safeContent = safeContent.replace(/\s*\[File:\s*[^\]]+\]/gi, '').trim();
+      }
+    }
     const hasText = Boolean(safeContent && String(safeContent).trim().length > 0);
     let renderedBody = '';
     if (isActuallyDeepResearch && role === 'assistant' && hasText) {
@@ -4257,6 +4271,34 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // Enhance any inline markdown images
     enhanceChatImages(row);
 
+    // Attach click triggers to document badges in user attachment bubble (view-only inspection)
+    if (docs && docs.length > 0 && role === 'user') {
+      row.querySelectorAll('.msg-doc-badge:not(.msg-doc-web-link)').forEach((badgeEl, bIdx) => {
+        badgeEl.style.cursor = 'pointer';
+        badgeEl.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const targetDoc = (docs && docs[bIdx]) ? docs[bIdx] : null;
+          if (!targetDoc) return;
+          let docContent = targetDoc.rawContent || targetDoc.content || '';
+          if (!docContent && typeof content === 'string') {
+            const safeName = (targetDoc.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const docRegex = new RegExp(`--- \\[LAMPIRAN DOKUMEN:\\s*${safeName}[^\\n]*\\] ---\\r?\\n([\\s\\S]*?)\\r?\\n--- \\[AKHIR DOKUMEN:`, 'i');
+            const match = content.match(docRegex);
+            if (match && match[1]) {
+              docContent = match[1];
+            }
+          }
+          openDocPreviewModal({
+            name: targetDoc.name,
+            size: targetDoc.size,
+            content: docContent,
+            rawContent: docContent,
+            isAutoConvertedMarkdown: targetDoc.isAutoConvertedMarkdown || true
+          }, -1);
+        });
+      });
+    }
+
 
     // Edit Prompt Button Handler (for User messages)
     if (role === 'user') {
@@ -4274,7 +4316,24 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         if (bubble.querySelector('.inline-edit-box')) return;
 
         // Create inline editor
-        const originalContent = content;
+        let originalContent = content;
+        if (role === 'user' && docs && Array.isArray(docs) && docs.length > 0 && typeof originalContent === 'string') {
+          if (/^\[File:\s*[^\]]+\]$/i.test(originalContent.trim())) {
+            const sessMsg = (index >= 0 && currentSess?.messages?.[index]) ? currentSess.messages[index] : null;
+            if (sessMsg && typeof sessMsg.content === 'string') {
+              const trailingPrompt = sessMsg.content.replace(/^[\s\S]*--- \[AKHIR DOKUMEN:[^\]]*\] ---\s*/i, '').trim();
+              if (trailingPrompt && !/^Tolong pelajari, analisis, dan jelaskan/i.test(trailingPrompt)) {
+                originalContent = trailingPrompt;
+              } else {
+                originalContent = '';
+              }
+            } else {
+              originalContent = '';
+            }
+          } else if (/\[File:\s*[^\]]+\]/i.test(originalContent)) {
+            originalContent = originalContent.replace(/\s*\[File:\s*[^\]]+\]/gi, '').trim();
+          }
+        }
         textContainer.style.display = 'none';
         if (actionsBar) actionsBar.style.display = 'none';
 
@@ -4324,7 +4383,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           // Find index of this message in session (matching either raw content or displayContent)
           let msgIdx = index;
           if (msgIdx < 0 || msgIdx >= session.messages.length) {
-            msgIdx = session.messages.findIndex(m => m.role === 'user' && (m.content === originalContent || m.displayContent === originalContent));
+            msgIdx = session.messages.findIndex(m => m.role === 'user' && (m.content === originalContent || m.displayContent === originalContent || m.content === content || m.displayContent === content));
           }
 
           const targetUserMsg = (msgIdx >= 0 && msgIdx < session.messages.length) ? session.messages[msgIdx] : null;
@@ -4344,7 +4403,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
               // Extract content from targetUserMsg.content
               if (targetUserMsg.content && typeof targetUserMsg.content === 'string') {
                 const safeName = (d.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const docRegex = new RegExp(`--- \\[LAMPIRAN DOKUMEN:\\s*${safeName}[^\\n]*\\] ---\\n([\\s\\S]*?)\\n--- \\[AKHIR DOKUMEN:`, 'i');
+                const docRegex = new RegExp(`--- \\[LAMPIRAN DOKUMEN:\\s*${safeName}[^\\n]*\\] ---\\r?\\n([\\s\\S]*?)\\r?\\n--- \\[AKHIR DOKUMEN:`, 'i');
                 const match = targetUserMsg.content.match(docRegex);
                 if (match && match[1]) {
                   return { ...d, content: match[1] };
@@ -4399,7 +4458,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     // Message copy button
     row.querySelector('.copy-msg-btn')?.addEventListener('click', () => {
-      const rawText = row.dataset.fullContent || content || row.querySelector('.msg-text-content')?.innerText || '';
+      let rawText = row.dataset.fullContent || content || row.querySelector('.msg-text-content')?.innerText || '';
+      if (role === 'user' && !rawText && docs && docs.length > 0) {
+        rawText = docs.map(d => `[Dokumen: ${d.name || 'lampiran'}]`).join('\n');
+      }
       const textToCopy = role === 'assistant' ? safeAssistantText(rawText) : rawText;
       copyTextToClipboard(textToCopy, null, 'Pesan disalin ke clipboard!');
     });
@@ -4737,24 +4799,139 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     };
   }
 
-  function tryAutoConvertInputToDoc(incomingText) {
+  // Helper universal untuk mengekstrak instruksi prompt terpisah dari badan dokumen lampiran
+  function extractPromptAndDocContent(incomingText, existingPrompt = '') {
+    if (!incomingText || typeof incomingText !== 'string') {
+      return { docBody: '', promptInstruction: (existingPrompt || '').trim() };
+    }
+    const cleanText = incomingText.trim();
+    if (!cleanText) {
+      return { docBody: '', promptInstruction: (existingPrompt || '').trim() };
+    }
+
+    let docBody = cleanText;
+    let extractedInstruction = '';
+
+    // Regex pengenal instruksi / prompt (Indonesia & Inggris)
+    const INSTRUCTION_KEYWORD_RE = /(?:tolong|mohon|silakan|coba|bantu|jelaskan|analisis|analisa|evaluasi|tinjau|baca|ringkas|rangkum|simpulkan|review|perbaiki|fix|cek|buatkan|kenapa|mengapa|gimana|bagaimana|bagaimanakah|apa(?:kah)?|artikan|terjemahkan|explain|analyze|review|summarize|read|fix|help|check|please|how|what|why|where|could you|can you)\b/i;
+
+    // 1. Deteksi blok kode markdown terisolasi (```lang ... ```)
+    const codeFenceMatch = cleanText.match(/^([\s\S]*?)(```[a-zA-Z0-9_-]*\s*\n[\s\S]*?\n```)([\s\S]*)$/);
+    if (codeFenceMatch) {
+      const prefix = codeFenceMatch[1].trim();
+      const codeFence = codeFenceMatch[2].trim();
+      const suffix = codeFenceMatch[3].trim();
+      // Bila blok kode cukup substansial (>= 15 baris atau >= 250 karakter)
+      if (codeFence.length >= 250 || codeFence.split('\n').length >= 15) {
+        docBody = codeFence;
+        const outerParts = [prefix, suffix].filter(Boolean);
+        if (outerParts.length > 0) {
+          extractedInstruction = outerParts.join('\n\n').trim();
+        }
+      }
+    }
+
+    // 2. Jika belum terurai: Deteksi instruksi di AWAL teks
+    if (!extractedInstruction && docBody === cleanText) {
+      const lines = cleanText.split('\n');
+      if (lines.length >= 3) {
+        // Cek 1-5 baris pertama sebelum baris kosong (\n\n) atau divider (---, ===)
+        for (let i = 0; i < Math.min(lines.length - 2, 6); i++) {
+          const candidateLines = lines.slice(0, i + 1);
+          const candidateText = candidateLines.map(l => l.trim()).join(' ').trim();
+          const nextLine = lines[i + 1].trim();
+          const separatorHit = (nextLine === '' || /^[-=_*]{3,}$/.test(nextLine));
+
+          if (candidateText.length <= 400 && (
+            (separatorHit && (INSTRUCTION_KEYWORD_RE.test(candidateText) || candidateText.endsWith(':') || candidateText.endsWith('?'))) ||
+            (!separatorHit && (candidateText.endsWith(':') || candidateText.endsWith('?')) && INSTRUCTION_KEYWORD_RE.test(candidateText))
+          )) {
+            let bodyStartIdx = i + 1;
+            while (bodyStartIdx < lines.length && (lines[bodyStartIdx].trim() === '' || /^[-=_*]{3,}$/.test(lines[bodyStartIdx].trim()))) {
+              bodyStartIdx++;
+            }
+            if (bodyStartIdx < lines.length) {
+              const remainingBody = lines.slice(bodyStartIdx).join('\n').trim();
+              if (remainingBody.length >= 200 || remainingBody.split('\n').length >= 10) {
+                extractedInstruction = candidateLines.join('\n').trim();
+                docBody = remainingBody;
+                break;
+              }
+            }
+          }
+        }
+
+        // Fallback baris pertama instruksi pendek (<= 160 karakter)
+        if (!extractedInstruction && lines.length >= 2) {
+          const firstLine = lines[0].trim();
+          if (firstLine.length <= 160 && (INSTRUCTION_KEYWORD_RE.test(firstLine) || firstLine.endsWith(':') || firstLine.endsWith('?'))) {
+            let bodyStartIdx = 1;
+            while (bodyStartIdx < lines.length && lines[bodyStartIdx].trim() === '') {
+              bodyStartIdx++;
+            }
+            const remainingBody = lines.slice(bodyStartIdx).join('\n').trim();
+            if (remainingBody.length >= 200 || remainingBody.split('\n').length >= 10) {
+              extractedInstruction = firstLine;
+              docBody = remainingBody;
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Deteksi instruksi di AKHIR teks (sangat lazim: user menempel kodingan/laporan, lalu menulis pertanyaan di bawah)
+    if (!extractedInstruction && docBody === cleanText) {
+      const lines = cleanText.split('\n');
+      if (lines.length >= 3) {
+        for (let i = lines.length - 1; i >= Math.max(lines.length - 6, 2); i--) {
+          const candidateLines = lines.slice(i);
+          const candidateText = candidateLines.map(l => l.trim()).join(' ').trim();
+          const prevLine = lines[i - 1].trim();
+          const separatorHit = (prevLine === '' || /^[-=_*]{3,}$/.test(prevLine));
+
+          if (candidateText.length <= 400 && (
+            (separatorHit && (INSTRUCTION_KEYWORD_RE.test(candidateText) || candidateText.endsWith('?') || candidateText.endsWith(':'))) ||
+            candidateText.endsWith('?') ||
+            (candidateLines.length <= 2 && INSTRUCTION_KEYWORD_RE.test(candidateText))
+          )) {
+            let bodyEndIdx = i - 1;
+            while (bodyEndIdx >= 0 && (lines[bodyEndIdx].trim() === '' || /^[-=_*]{3,}$/.test(lines[bodyEndIdx].trim()))) {
+              bodyEndIdx--;
+            }
+            if (bodyEndIdx >= 0) {
+              const remainingBody = lines.slice(0, bodyEndIdx + 1).join('\n').trim();
+              if (remainingBody.length >= 200 || remainingBody.split('\n').length >= 10) {
+                extractedInstruction = candidateLines.join('\n').trim();
+                docBody = remainingBody;
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 4. Gabungkan instruksi dengan existingPrompt jika ada (misal teks sebelum paste di kolom prompt)
+    const cleanExisting = (existingPrompt || '').trim();
+    let finalPromptInstruction = '';
+    if (cleanExisting && extractedInstruction) {
+      finalPromptInstruction = `${cleanExisting}\n\n${extractedInstruction}`.trim();
+    } else {
+      finalPromptInstruction = cleanExisting || extractedInstruction || '';
+    }
+
+    return {
+      docBody: docBody || cleanText,
+      promptInstruction: finalPromptInstruction
+    };
+  }
+
+  function tryAutoConvertInputToDoc(incomingText, existingPrompt = '') {
     if (!incomingText || typeof incomingText !== 'string') return false;
     const trimmed = incomingText.trim();
     if (!shouldAutoConvertAsDocument(trimmed)) return false;
 
-    // Periksa apakah ada instruksi pengantar singkat di baris pertama
-    const lines = trimmed.split('\n');
-    let promptInstruction = '';
-    let docBody = trimmed;
-
-    if (lines.length >= 2) {
-      const firstLine = lines[0].trim();
-      if (firstLine.length <= 120 && (/(?:tolong|jelaskan|analisis|baca|ringkas|review|perbaiki|fix|cek|bantu|buatkan|kenapa|mengapa|gimana|bagaimana|apa(?:kah)?|how|what|why|explain|analyze|help)\b/i.test(firstLine) || firstLine.endsWith(':') || firstLine.endsWith('?'))) {
-        promptInstruction = firstLine;
-        docBody = lines.slice(1).join('\n').trim();
-      }
-    }
-
+    const { docBody, promptInstruction } = extractPromptAndDocContent(trimmed, existingPrompt);
     const doc = convertTextToMarkdownDoc(docBody);
     if (!doc) return false;
 
@@ -4782,6 +4959,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
   let pendingFoldText = '';
   let pendingFoldInstruction = '';
+  let pendingFoldRawIncoming = '';
   let pendingFoldDismissedHash = '';
   let pendingFoldPastedDirectly = false;
 
@@ -4791,7 +4969,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
   }
 
-  function checkAndShowPromptFoldPrompt(incomingText, forceModal = false, fromPaste = false) {
+  function checkAndShowPromptFoldPrompt(incomingText, forceModal = false, fromPaste = false, existingPrompt = '') {
     if (!incomingText || typeof incomingText !== 'string') {
       hideComposerFoldPromptCard();
       return false;
@@ -4806,7 +4984,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     const alwaysAutoFold = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
     if (alwaysAutoFold) {
       hideComposerFoldPromptCard();
-      return tryAutoConvertInputToDoc(trimmed);
+      return tryAutoConvertInputToDoc(trimmed, existingPrompt);
     }
 
     const textHash = `${trimmed.length}_${trimmed.substring(0, 50)}`;
@@ -4814,19 +4992,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       return false;
     }
 
-    // Ambil instruksi baris pertama jika ada
-    const lines = trimmed.split('\n');
-    let promptInstruction = '';
-    let docBody = trimmed;
-
-    if (lines.length >= 2) {
-      const firstLine = lines[0].trim();
-      if (firstLine.length <= 120 && (/(?:tolong|jelaskan|analisis|baca|ringkas|review|perbaiki|fix|cek|bantu|buatkan|kenapa|mengapa|gimana|bagaimana|apa(?:kah)?|how|what|why|explain|analyze|help)\b/i.test(firstLine) || firstLine.endsWith(':') || firstLine.endsWith('?'))) {
-        promptInstruction = firstLine;
-        docBody = lines.slice(1).join('\n').trim();
-      }
-    }
-
+    const { docBody, promptInstruction } = extractPromptAndDocContent(trimmed, existingPrompt);
     const typeInfo = detectDocumentTypeAndExt(docBody);
     const fileName = typeInfo.customName || `code-snippet.${typeInfo.ext}`;
     const wordCount = countPromptWords(docBody);
@@ -4835,6 +5001,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     pendingFoldText = docBody;
     pendingFoldInstruction = promptInstruction;
+    pendingFoldRawIncoming = incomingText;
     pendingFoldPastedDirectly = fromPaste;
 
     // Tampilkan Floating Card di atas composer
@@ -4901,9 +5068,13 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
 
     hideComposerFoldPromptCard();
+    if (els.autoConvertDocRow) {
+      els.autoConvertDocRow.style.display = 'none';
+    }
     closeModal('promptFoldConfirmModal');
     pendingFoldText = '';
     pendingFoldInstruction = '';
+    pendingFoldRawIncoming = '';
     pendingFoldPastedDirectly = false;
   }
 
@@ -4912,22 +5083,25 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       pendingFoldDismissedHash = `${pendingFoldText.length}_${pendingFoldText.substring(0, 50)}`;
     }
 
-    if (insertIntoPromptIfPasted && pendingFoldPastedDirectly && pendingFoldText && els.promptInput) {
-      const fullText = pendingFoldInstruction ? `${pendingFoldInstruction}\n${pendingFoldText}` : pendingFoldText;
-      const currentVal = els.promptInput.value;
-      els.promptInput.value = currentVal ? `${currentVal}\n${fullText}` : fullText;
-      autoResizeTextarea(els.promptInput);
-      els.promptInput.focus();
+    if (insertIntoPromptIfPasted && pendingFoldPastedDirectly && els.promptInput) {
+      const incomingToRestore = pendingFoldRawIncoming || pendingFoldText;
+      if (incomingToRestore) {
+        const currentVal = els.promptInput.value;
+        els.promptInput.value = currentVal ? `${currentVal}\n${incomingToRestore}` : incomingToRestore;
+        autoResizeTextarea(els.promptInput);
+        els.promptInput.focus();
+      }
     }
 
     hideComposerFoldPromptCard();
     closeModal('promptFoldConfirmModal');
     pendingFoldText = '';
     pendingFoldInstruction = '';
+    pendingFoldRawIncoming = '';
     pendingFoldPastedDirectly = false;
   }
 
-  function openDocPreviewModal(doc, idx) {
+  function openDocPreviewModal(doc, idx = -1) {
     if (!doc) return;
     activePreviewDocIndex = idx;
     if (els.docPreviewModalTitle) {
@@ -4948,6 +5122,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
     if (els.docPreviewContent) {
       els.docPreviewContent.textContent = doc.rawContent || doc.content || '';
+    }
+    if (els.revertDocToPromptBtn) {
+      els.revertDocToPromptBtn.style.display = (idx >= 0) ? 'inline-flex' : 'none';
+    }
+    if (els.deleteDocFromModalBtn) {
+      els.deleteDocFromModalBtn.style.display = (idx >= 0) ? 'inline-flex' : 'none';
     }
     openModal('docPreviewModal');
   }
@@ -5072,7 +5252,7 @@ Aturan wajib:
         card.className = 'preview-card';
         card.title = 'Klik untuk melihat foto layar penuh';
         card.innerHTML = `
-          <img src="${escapeHtml(imgSrc)}" alt="Lampiran Foto ${idx + 1}">
+          <img src="${escapeHtml(imgSrc)}" alt="Lampiran Foto ${idx + 1}" loading="lazy" decoding="async">
           <button class="remove-attachment-btn" data-img-idx="${idx}" title="Hapus Foto"><i class="fa-solid fa-xmark"></i></button>
         `;
         card.querySelector('img').addEventListener('click', (e) => {
@@ -5632,12 +5812,9 @@ ${organicBlock}
     // 1. Try local server endpoint first if not github pages
     if (!IS_GITHUB_PAGES) {
       try {
-        const c1 = new AbortController();
-        const t1 = setTimeout(() => c1.abort(), 8000);
         const resp = await fetch(`/api/youtube-info?url=${encodeURIComponent(canonicalUrl)}`, {
-          signal: c1.signal
+          signal: AbortSignal.timeout(8000)
         });
-        clearTimeout(t1);
         if (resp.ok) {
           result = await resp.json();
         }
@@ -5650,12 +5827,9 @@ ${organicBlock}
     if (!result || !result.success) {
       try {
         const directUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`;
-        const c2 = new AbortController();
-        const t2 = setTimeout(() => c2.abort(), 8000);
         const resp = await fetch(directUrl, {
-          signal: c2.signal
+          signal: AbortSignal.timeout(8000)
         });
-        clearTimeout(t2);
         if (resp.ok) {
           const parsed = await resp.json();
           result = {
@@ -5744,7 +5918,7 @@ ${organicBlock}
     return `
       <div class="youtube-preview-card" data-video-id="${vidId}">
         <div class="yt-card-thumb-wrap">
-          <img src="${safeThumb}" alt="${safeTitle}" class="yt-card-thumb" loading="lazy">
+          <img src="${safeThumb}" alt="${safeTitle}" class="yt-card-thumb" loading="lazy" decoding="async">
           <div class="yt-card-badge"><i class="fa-brands fa-youtube"></i> YouTube</div>
           ${vidId ? `<button type="button" class="yt-thumb-play" data-action="play-in-chat" data-video-id="${vidId}" data-title="${safeTitle}" title="Putar langsung di percakapan"><i class="fa-solid fa-play"></i></button>` : ''}
         </div>
@@ -5772,28 +5946,30 @@ ${organicBlock}
     if (!bubble) return;
     if (bubble.querySelector('.msg-youtube-cards-wrap')) return;
 
+    const cardResults = await Promise.all(
+      ids.map(async (vidId) => {
+        let info = null;
+        try {
+          info = await fetchYouTubeInfoClient(vidId);
+        } catch (_) {
+          info = null;
+        }
+        const meta = info || {};
+        return {
+          videoId: meta.videoId || vidId,
+          url: meta.url || `https://www.youtube.com/watch?v=${vidId}`,
+          title: meta.title || `Video YouTube (${vidId})`,
+          channel: meta.channel || 'YouTube',
+          thumbnail: meta.thumbnail || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`
+        };
+      })
+    );
+
+    if (!row.isConnected || bubble.querySelector('.msg-youtube-cards-wrap')) return;
+
     const cardsContainer = document.createElement('div');
     cardsContainer.className = 'msg-youtube-cards-wrap';
-    bubble.insertBefore(cardsContainer, bubble.firstChild);
-
-    for (const vidId of ids) {
-      let info = null;
-      try {
-        info = await fetchYouTubeInfoClient(vidId);
-      } catch (_) {
-        info = null;
-      }
-      // Metadata oEmbed bisa gagal sementara (rate limit / jaringan). Kartu tetap
-      // dirender dengan metadata dasar agar tombol putar & "Tonton Langsung"
-      // tetap tersedia daripada menghilang sama sekali.
-      const meta = info || {};
-      const cardData = {
-        videoId: meta.videoId || vidId,
-        url: meta.url || `https://www.youtube.com/watch?v=${vidId}`,
-        title: meta.title || `Video YouTube (${vidId})`,
-        channel: meta.channel || 'YouTube',
-        thumbnail: meta.thumbnail || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`
-      };
+    for (const cardData of cardResults) {
       const cardWrapper = document.createElement('div');
       cardWrapper.innerHTML = buildYouTubePreviewCardHtml(cardData);
       if (cardWrapper.firstElementChild) {
@@ -5801,8 +5977,8 @@ ${organicBlock}
       }
     }
 
-    if (cardsContainer.children.length === 0) {
-      cardsContainer.remove();
+    if (cardsContainer.children.length > 0) {
+      bubble.insertBefore(cardsContainer, bubble.firstChild);
     }
   }
 
@@ -6798,21 +6974,12 @@ ${organicBlock}
     // Claude / Grok AI Style: Jika prompt teks yang dikirim pengguna merupakan codingan atau laporan panjang
     // dan belum ada dokumen lampiran, otomatis konversi blok tersebut menjadi file markdown lampiran
     if (rawText && shouldAutoConvertAsDocument(rawText) && docs.length === 0) {
-      const lines = rawText.split('\n');
-      const firstLine = lines[0].trim();
-      let promptInstruction = '';
-      let snippetContent = rawText;
-
-      // Jika ada baris pengantar pendek di awal (misal "tolong jelaskan kode ini:\n...")
-      if (firstLine.length <= 120 && (/(?:tolong|jelaskan|analisis|baca|ringkas|review|perbaiki|fix|cek|bantu|buatkan|kenapa|mengapa|gimana|bagaimana|apa(?:kah)?|how|what|why|explain|analyze|help)\b/i.test(firstLine) || firstLine.endsWith(':') || firstLine.endsWith('?'))) {
-        promptInstruction = firstLine;
-        snippetContent = lines.slice(1).join('\n').trim();
-      }
-
-      const autoDoc = convertTextToMarkdownDoc(snippetContent);
+      const { docBody, promptInstruction } = extractPromptAndDocContent(rawText);
+      const autoDoc = convertTextToMarkdownDoc(docBody);
       if (autoDoc) {
         docs.push(autoDoc);
-        originalUserPrompt = promptInstruction ? `${promptInstruction} [File: ${autoDoc.name}]` : `[File: ${autoDoc.name}]`;
+        // Pertahankan prompt instruksi asli pengguna tanpa placeholder [File: ...]
+        originalUserPrompt = promptInstruction || '';
         rawText = promptInstruction || `Tolong pelajari, analisis, dan jelaskan isi file dokumen ${autoDoc.name} di atas secara komprehensif.`;
       }
     }
@@ -6905,9 +7072,13 @@ ${organicBlock}
     }
 
     // Tampilan gelembung obrolan
-    let displayPrompt = originalUserPrompt;
-    if (!displayPrompt && docs.length > 0) {
-      displayPrompt = `Tolong analisis file ${docs[0].name}`;
+    let displayPrompt = originalUserPrompt || '';
+    if (displayPrompt && docs.length > 0) {
+      if (/^\[File:\s*[^\]]+\]$/i.test(displayPrompt.trim())) {
+        displayPrompt = '';
+      } else if (/\[File:\s*[^\]]+\]/i.test(displayPrompt)) {
+        displayPrompt = displayPrompt.replace(/\s*\[File:\s*[^\]]+\]/gi, '').trim();
+      }
     }
 
     // Build user message object
@@ -7376,15 +7547,12 @@ ${organicBlock}
     // 1) Endpoint lokal (server.js / Vercel / worker)
     if (!IS_GITHUB_PAGES) {
       try {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 13000);
         const resp = await fetch('/api/youtube-search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: q, limit }),
-          signal: ctrl.signal
+          signal: AbortSignal.timeout(10000)
         });
-        clearTimeout(t);
         if (resp.ok) {
           const data = await resp.json();
           if (data && Array.isArray(data.results)) {
@@ -7404,10 +7572,7 @@ ${organicBlock}
     try {
       const target = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}&hl=en&gl=US`;
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`;
-      const ctrl2 = new AbortController();
-      const t2 = setTimeout(() => ctrl2.abort(), 13000);
-      const resp2 = await fetch(proxyUrl, { signal: ctrl2.signal });
-      clearTimeout(t2);
+      const resp2 = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
       if (resp2.ok) {
         const html = await resp2.text();
         const results = ytClientParseHtml(html, limit);
@@ -7430,6 +7595,11 @@ ${organicBlock}
   const TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
 
   async function executeAutonomousWebTool(toolName, rawArgs, promptContext = '', session = null) {
+    if (STATE.abortController?.signal?.aborted) {
+      const abortErr = new Error('The operation was aborted');
+      abortErr.name = 'AbortError';
+      throw abortErr;
+    }
     try {
       let args = {};
       if (typeof rawArgs === 'string') {
@@ -7483,7 +7653,7 @@ ${organicBlock}
       }
 
       const cacheAndReturn = (data) => {
-        if (data && data.text && !data.text.startsWith('Error:')) {
+        if (data && data.text && !data.text.startsWith('Error:') && canonicalArg) {
           AUTONOMOUS_TOOL_CACHE.set(cacheKey, {
             data,
             expiresAt: Date.now() + TOOL_CACHE_TTL_MS
@@ -7853,19 +8023,15 @@ ${organicBlock}
         
         if (!IS_GITHUB_PAGES) {
           try {
-            const browseController = new AbortController();
-            const browseTimeout = setTimeout(() => browseController.abort(), 12000);
-
             // 1. Coba endpoint ekstraksi web resmi Zoz Router (/api/extract-web)
             try {
               const extRes = await fetch(`/api/extract-web?url=${encodeURIComponent(url)}&maxChars=8000`, {
                 headers: { 'Accept': 'application/json' },
-                signal: browseController.signal
+                signal: AbortSignal.timeout(8000)
               });
               if (extRes.ok) {
                 const extData = await extRes.json();
                 if (extData && extData.success && extData.content && extData.content.length > 40) {
-                  clearTimeout(browseTimeout);
                   const docTitle = extData.title || (extractDomainSafe ? extractDomainSafe(url) : 'Halaman Web');
                   return cacheAndReturn({
                     text: `KONTEN HALAMAN WEB "${docTitle}" (${url}):\n\n${extData.content}`,
@@ -7880,9 +8046,8 @@ ${organicBlock}
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ url: url, maxChars: 5000 }),
-              signal: browseController.signal
+              signal: AbortSignal.timeout(8000)
             });
-            clearTimeout(browseTimeout);
             if (res.ok) {
               const data = await res.json();
               if (data && data.text && data.text.length > 50) {
@@ -7906,13 +8071,10 @@ ${organicBlock}
 
         // Client-side universal reader via Jina Reader (CORS open, converts any URL to clean markdown)
         try {
-          const jinaController = new AbortController();
-          const jinaTimeout = setTimeout(() => jinaController.abort(), 7500);
           const jinaRes = await fetch(`https://r.jina.ai/${encodeURI(url)}`, {
-            signal: jinaController.signal,
+            signal: AbortSignal.timeout(7500),
             headers: { 'Accept': 'text/plain' }
           });
-          clearTimeout(jinaTimeout);
           if (jinaRes.ok) {
             const markdown = await jinaRes.text();
             if (markdown && markdown.length > 80) {
@@ -7936,10 +8098,7 @@ ${organicBlock}
               const langMatch = url.match(/https?:\/\/([a-z]+)\.wikipedia\.org/i);
               const lang = langMatch ? langMatch[1] : 'id';
               const restApiUrl = `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle)}`;
-              const wikiController = new AbortController();
-              const wikiTimeout = setTimeout(() => wikiController.abort(), 6000);
-              const wikiRes = await fetch(restApiUrl, { signal: wikiController.signal });
-              clearTimeout(wikiTimeout);
+              const wikiRes = await fetch(restApiUrl, { signal: AbortSignal.timeout(6000) });
               if (wikiRes.ok) {
                 const wData = await wikiRes.json();
                 const extract = wData.extract || wData.description || 'Halaman Wikipedia';
@@ -7957,6 +8116,9 @@ ${organicBlock}
       
       return { text: `Error: Tool "${toolName}" tidak dikenal.`, sources: [] };
     } catch (err) {
+      if (err && (err.name === 'AbortError' || STATE.abortController?.signal?.aborted)) {
+        throw err;
+      }
       return { text: `Error menjalankan tool ${toolName}: ${err.message}`, sources: [] };
     }
   }
@@ -8839,7 +9001,11 @@ Format teks (untuk model tanpa function calling):
       // Loop tetap dijalankan walau Mode Pencarian Web mati: filter izin di bawah
       // yang memblokir tool web, sementara search_youtube selalu diperbolehkan.
       while (autonomousRound < maxAutonomousRounds) {
-        if (STATE.abortController?.signal?.aborted) break;
+        if (STATE.abortController?.signal?.aborted) {
+          const abortErr = new Error('The operation was aborted');
+          abortErr.name = 'AbortError';
+          throw abortErr;
+        }
 
         const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && AUTONOMOUS_TOOL_NAMES.includes(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
         const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && AUTONOMOUS_TOOL_NAMES.includes(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
@@ -8884,7 +9050,7 @@ Format teks (untuk model tanpa function calling):
             } else if (raw !== null && raw !== undefined) {
               parsedArgs = { query: String(raw), url: String(raw) };
             }
-            previewArg = parsedArgs.query || parsedArgs.url || JSON.stringify(parsedArgs);
+            previewArg = parsedArgs.query || parsedArgs.url || parsedArgs.q || parsedArgs.keyword || parsedArgs.target || (Object.keys(parsedArgs).length === 0 ? (promptText || '') : JSON.stringify(parsedArgs));
           } catch (_) {
             previewArg = String(call.function.arguments || '');
           }
@@ -8923,7 +9089,11 @@ Format teks (untuk model tanpa function calling):
           executedHudHtml += createAutonomousToolHudHtml(toolName, previewArg, 'done');
         }
 
-        if (STATE.abortController?.signal?.aborted) break;
+        if (STATE.abortController?.signal?.aborted) {
+          const abortErr = new Error('The operation was aborted');
+          abortErr.name = 'AbortError';
+          throw abortErr;
+        }
 
         // Tampilkan HUD bahwa data berita live sedang disintesis oleh AI
         bubbleText.innerHTML = preambleHtml + executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);"><i class="fa-solid fa-bolt"></i> Menyintesis hasil pencarian terbaru...</span></div>`;
@@ -9031,7 +9201,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
               }
             } catch (_) {}
           }
-          const finishedDigestion = digestionRenderer.finish();
+          const finishedDigestion = digestionRenderer.finish({ render: false });
           if (finishedDigestion) currentRoundText = finishedDigestion;
           fullText = currentRoundText;
           if (!fullText.trim() && (roundToolResponsesText || (webSources && webSources.length > 0))) {
@@ -9811,7 +9981,11 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       // Loop tetap dijalankan walau Mode Pencarian Web mati: filter izin di bawah
       // yang memblokir tool web, sementara search_youtube selalu diperbolehkan.
       while (autonomousRound < maxAutonomousRounds) {
-        if (STATE.abortController?.signal?.aborted) break;
+        if (STATE.abortController?.signal?.aborted) {
+          const abortErr = new Error('The operation was aborted');
+          abortErr.name = 'AbortError';
+          throw abortErr;
+        }
 
         const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && AUTONOMOUS_TOOL_NAMES.includes(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
         const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && AUTONOMOUS_TOOL_NAMES.includes(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
@@ -9856,7 +10030,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             } else if (raw !== null && raw !== undefined) {
               parsedArgs = { query: String(raw), url: String(raw) };
             }
-            previewArg = parsedArgs.query || parsedArgs.url || JSON.stringify(parsedArgs);
+            previewArg = parsedArgs.query || parsedArgs.url || parsedArgs.q || parsedArgs.keyword || parsedArgs.target || (Object.keys(parsedArgs).length === 0 ? (promptText || '') : JSON.stringify(parsedArgs));
           } catch (_) {
             previewArg = String(call.function.arguments || '');
           }
@@ -9895,7 +10069,11 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           executedHudHtml += createAutonomousToolHudHtml(toolName, previewArg, 'done');
         }
 
-        if (STATE.abortController?.signal?.aborted) break;
+        if (STATE.abortController?.signal?.aborted) {
+          const abortErr = new Error('The operation was aborted');
+          abortErr.name = 'AbortError';
+          throw abortErr;
+        }
 
         // Tampilkan HUD bahwa data berita live sedang disintesis oleh AI
         bubbleText.innerHTML = preambleHtml + executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);"><i class="fa-solid fa-bolt"></i> Menyintesis hasil pencarian terbaru...</span></div>`;
@@ -10086,7 +10264,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
               } catch (_) {}
             }
           }
-          currentRoundText = digestionRenderer.finish();
+          currentRoundText = digestionRenderer.finish({ render: false });
           fullText = currentRoundText;
           if (!fullText.trim() && (roundToolResponsesText || (webSources && webSources.length > 0))) {
             fullText = synthesizeAutonomousWebSummary(roundToolResponsesText, webSources);
@@ -17601,12 +17779,11 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
       if (pastedText && shouldAutoConvertAsDocument(pastedText)) {
         e.preventDefault();
+        const currentInputText = (els.promptInput ? els.promptInput.value.trim() : '');
         const alwaysAuto = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
         if (alwaysAuto) {
-          const currentText = (els.promptInput ? els.promptInput.value.trim() : '');
-          const converted = tryAutoConvertInputToDoc(pastedText);
-          if (converted && currentText && els.promptInput) {
-            els.promptInput.value = currentText;
+          const converted = tryAutoConvertInputToDoc(pastedText, currentInputText);
+          if (converted && els.promptInput) {
             autoResizeTextarea(els.promptInput);
             els.promptInput?.focus();
           }
@@ -17614,7 +17791,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         }
 
         // Tampilkan pop-up modal & floating card konfirmasi interaktif
-        checkAndShowPromptFoldPrompt(pastedText, true, true);
+        checkAndShowPromptFoldPrompt(pastedText, true, true, currentInputText);
         return;
       }
     });
@@ -17627,19 +17804,18 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       } catch (_) {}
       if (droppedText && shouldAutoConvertAsDocument(droppedText)) {
         e.preventDefault();
+        const currentInputText = (els.promptInput ? els.promptInput.value.trim() : '');
         const alwaysAuto = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
         if (alwaysAuto) {
-          const currentText = (els.promptInput ? els.promptInput.value.trim() : '');
-          const converted = tryAutoConvertInputToDoc(droppedText);
-          if (converted && currentText && els.promptInput) {
-            els.promptInput.value = currentText;
+          const converted = tryAutoConvertInputToDoc(droppedText, currentInputText);
+          if (converted && els.promptInput) {
             autoResizeTextarea(els.promptInput);
             els.promptInput?.focus();
           }
           return;
         }
 
-        checkAndShowPromptFoldPrompt(droppedText, true, true);
+        checkAndShowPromptFoldPrompt(droppedText, true, true, currentInputText);
       }
     });
 
