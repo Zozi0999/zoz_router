@@ -2019,13 +2019,14 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     const key = openRouterKey || (apiKey && apiKey.startsWith('sk-or-') ? apiKey : null) || process.env.OPENROUTER_API_KEY;
     if (!key) throw new Error('OpenRouter API Key diperlukan untuk model cloud: ' + (rawModel || 'default'));
 
-    const isFreeModel = (rawModel || '').includes(':free') || rawModel === 'openrouter/free';
+    const isFreeModel = (rawModel || '').includes(':free') || (rawModel || '').endsWith('/free') || rawModel === 'openrouter/free';
     const candidateModels = isFreeModel
       ? [
           rawModel,
           'openrouter/free',
-          'google/gemma-2-9b-it:free',
-          'meta-llama/llama-3.1-8b-instruct:free'
+          'google/gemma-4-31b-it:free',
+          'google/gemma-4-26b-a4b-it:free',
+          'nvidia/nemotron-3.5-lightning:free'
         ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
       : [rawModel || 'google/gemini-2.0-flash-001'];
 
@@ -6090,6 +6091,7 @@ async function requestHandler(req, res) {
         }
       }
       delete body.sessionId;
+      delete body.userId; // Cegah error Pydantic / upstream validation di OpenRouter
 
       if (sessionId) {
         if (dbActiveChatTasks[sessionId] && dbActiveChatTasks[sessionId].status === 'streaming') {
@@ -6116,10 +6118,13 @@ async function requestHandler(req, res) {
         delete body.models;
       }
 
-      // Defense-in-depth: Hapus tool gambar jika model adalah model gratis
-      const isFree = body.model && (body.model.includes(':free') || body.model === 'openrouter/free');
+      // Defense-in-depth: Hapus tool jika model gratis, atau filter tool agar hanya fungsi bertipe 'function'
+      const isFree = body.model && (body.model.includes(':free') || body.model.endsWith('/free') || body.model === 'openrouter/free');
       if (isFree && Array.isArray(body.tools)) {
         delete body.tools;
+      } else if (Array.isArray(body.tools)) {
+        body.tools = body.tools.filter(t => t && t.type === 'function' && t.function && t.function.name);
+        if (body.tools.length === 0) delete body.tools;
       }
 
       // Defense-in-depth: Resolusi gambar lokal (/uploads/) menjadi Base64 data URL agar OpenRouter tidak merejeksi private IP

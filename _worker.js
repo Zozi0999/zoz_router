@@ -425,8 +425,10 @@ export default {
             ...(body.provider ? { provider: body.provider } : {}),
             ...(body.modalities ? { modalities: body.modalities } : {}),
             ...(body.reasoning ? { reasoning: body.reasoning } : {}),
-            ...(body.response_format ? { response_format: body.response_format } : {}),
-            ...(body.tools && Array.isArray(body.tools) && (!body.model || (!body.model.includes(':free') && body.model !== 'openrouter/free')) ? { tools: body.tools } : {})
+            ...(body.tools && Array.isArray(body.tools) && (!body.model || (!body.model.includes(':free') && !body.model.endsWith('/free') && body.model !== 'openrouter/free')) ? (() => {
+              const clean = body.tools.filter(t => t && t.type === 'function' && t.function && t.function.name);
+              return clean.length > 0 ? { tools: clean } : {};
+            })() : {})
           })
         });
 

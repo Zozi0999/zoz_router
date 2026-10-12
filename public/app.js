@@ -94,17 +94,30 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 Autonomous Web Explorer: You have built-in zero-API web exploration tools (search_web, browse_web_page). Call them whenever needed to gather live facts and unconstrained web intelligence via <tool_call>{"name":"...","arguments":{...}}</tool_call> or native tool calls.`
   };
 
+  // Fallback resmi model gratis OpenRouter yang aktif dan terverifikasi live
+  const LIVE_FREE_OPENROUTER_FALLBACKS = [
+    'openrouter/free',
+    'google/gemma-4-31b-it:free',
+    'google/gemma-4-26b-a4b-it:free',
+    'nvidia/nemotron-3.5-lightning:free',
+    'liquid/lfm-2.5-2.6b:free',
+    'inclusionai/ling-3.1-flash',
+    'dots-studio/dots-3-note-preview:free'
+  ];
+
   // Popular OpenRouter Models Catalog (Live Active Free & Flagship Models)
   const DEFAULT_OPENROUTER_MODELS = [
+    { id: 'openrouter/free', name: 'OpenRouter Free Router', tag: 'Free', cat: 'free', desc: 'Rute otomatis cerdas model gratis OpenRouter.' },
     { id: 'openrouter/auto', name: 'OpenRouter Auto Router', tag: 'Auto', cat: 'free', desc: 'Rute otomatis cerdas OpenRouter.' },
-    { id: 'google/gemini-pro-1.5', name: 'Google Gemini Pro 1.5', tag: 'Pro', cat: 'flagship' },
-    { id: 'google/gemma-2-9b-it:free', name: 'google/gemma-2-9b-it:free', tag: 'Free', cat: 'free' },
-    { id: 'meta-llama/llama-3.1-70b-instruct', name: 'Meta Llama 3.1 70B', tag: 'Flagship', cat: 'flagship' },
-    { id: 'meta-llama/llama-3.1-8b-instruct:free', name: 'meta-llama/llama-3.1-8b-instruct:free', tag: 'Free', cat: 'free' },
+    { id: 'google/gemma-4-31b-it:free', name: 'Google Gemma 4 31B (Free)', tag: 'Free', cat: 'free' },
+    { id: 'google/gemma-4-26b-a4b-it:free', name: 'Google Gemma 4 26B (Free)', tag: 'Free', cat: 'free' },
+    { id: 'nvidia/nemotron-3.5-lightning:free', name: 'NVIDIA Nemotron 3.5 Lightning (Free)', tag: 'Free', cat: 'free' },
+    { id: 'liquid/lfm-2.5-2.6b:free', name: 'Liquid LFM 2.5 2.6B (Free)', tag: 'Free', cat: 'free' },
+    { id: 'inclusionai/ling-3.1-flash', name: 'Ling 3.1 Flash (Free)', tag: 'Free', cat: 'free' },
+    { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Meta Llama 3.3 70B', tag: 'Flagship', cat: 'flagship' },
     { id: 'anthropic/claude-3.5-sonnet', name: 'Anthropic Claude 3.5 Sonnet', tag: 'Coding', cat: 'coding' },
     { id: 'openai/gpt-4o', name: 'OpenAI GPT-4o', tag: 'Vision', cat: 'flagship' },
-    { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat', tag: 'Coding', cat: 'coding' },
-    { id: 'qwen/qwen-2-7b-instruct:free', name: 'qwen/qwen-2-7b-instruct:free', tag: 'Free', cat: 'free' }
+    { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat', tag: 'Coding', cat: 'coding' }
   ];
 
   // Official Ollama Cloud Flagship Models (Free Included Usage vs Usage Credits)
@@ -6369,8 +6382,8 @@ ${organicBlock}
               hasImageOutput: hasImageOutput,
               hasAudioOutput: outMods.includes('audio') || modalityStr.endsWith('audio'),
               supportsTools: supportsTools,
-              tag: (m.id.includes(':free') || m.id.endsWith('/free') || m.id === 'openrouter/free' || m.pricing?.prompt === '0') ? 'Free' : 'Cloud',
-              cat: (m.id.includes(':free') || m.id.endsWith('/free') || m.id === 'openrouter/free' || m.pricing?.prompt === '0') ? 'free' : 'flagship'
+              tag: (m.id.includes(':free') || m.id.endsWith('/free') || m.id === 'openrouter/free' || (m.pricing && parseFloat(m.pricing.prompt) === 0 && parseFloat(m.pricing.completion) === 0)) ? 'Free' : 'Cloud',
+              cat: (m.id.includes(':free') || m.id.endsWith('/free') || m.id === 'openrouter/free' || (m.pricing && parseFloat(m.pricing.prompt) === 0 && parseFloat(m.pricing.completion) === 0)) ? 'free' : 'flagship'
             };
           });
           STATE.openRouterModels = mapped;
@@ -8250,10 +8263,18 @@ Format teks (untuk model tanpa function calling):
       title = `Model ${escapeHtml(modelName)} Tidak Mendukung Input Gambar`;
       desc = `Model ini menolak pemrosesan gambar multimodal karena beroperasi dalam mode teks murni (text-only).`;
       advice = `💡 <strong>Saran:</strong> Beralihlah ke model multimodal seperti <code>google/gemini-2.0-flash-exp:free</code>, <code>openai/gpt-4o</code>, <code>gemma4:31b</code>, atau kirim prompt Anda tanpa lampiran gambar.`;
+    } else if (engine === 'openrouter' && (msg.includes('402') || msg.includes('insufficient') || msg.includes('payment required') || msg.includes('credit'))) {
+      title = `Model Berbayar Memerlukan Saldo OpenRouter (HTTP 402)`;
+      desc = `Model <code>${escapeHtml(modelName)}</code> adalah model cloud berbayar (paid tier) dan saldo kredit OpenRouter Anda belum mencukupi untuk memproses permintaan ini.`;
+      advice = `💡 <strong>Solusi Cepat:</strong> Klik tombol <strong>Ganti ke Model Gratis &amp; Kirim Ulang</strong> di bawah untuk menggunakan model tanpa biaya, atau isi ulang kredit OpenRouter Anda di <code>openrouter.ai</code>.`;
+    } else if (engine === 'openrouter' && (msg.includes('failed to fetch') || msg.includes('networkerror') || err?.name === 'TypeError')) {
+      title = `Koneksi ke OpenRouter Terganggu / Terblokir Jaringan`;
+      desc = `Koneksi browser ke API OpenRouter gagal dilakukan (${escapeHtml(rawMsg)}). Hal ini bisa disebabkan oleh kebijakan CORS, VPN, pemblokir iklan (adblocker), atau jaringan internet Anda.`;
+      advice = `💡 <strong>Solusi Cepat:</strong> Coba klik <strong>Coba Kirim Ulang</strong> atau beralih ke model gratis stabil dengan klik <strong>Ganti ke Model Gratis &amp; Kirim Ulang</strong>.`;
     } else if (isProviderReturnedError) {
       title = `Penyedia Model OpenRouter Sedang Sibuk (Upstream Provider Error)`;
       desc = `Server penyedia pihak ketiga (upstream) untuk model <code>${escapeHtml(modelName)}</code> sedang mengalami antrean penuh atau gangguan sementara di OpenRouter.`;
-      advice = `💡 <strong>Solusi Cepat:</strong> Coba beralih ke model free lain yang sedang aktif stabil seperti <code>openrouter/free</code> atau <code>google/gemma-2-9b-it:free</code>, atau klik <strong>Ganti ke Model Gratis &amp; Kirim Ulang</strong>.`;
+      advice = `💡 <strong>Solusi Cepat:</strong> Coba beralih ke model free lain yang sedang aktif stabil seperti <code>openrouter/free</code> atau <code>google/gemma-4-31b-it:free</code>, atau klik <strong>Ganti ke Model Gratis &amp; Kirim Ulang</strong>.`;
     } else if (isCorsOrNetwork && engine === 'ollama') {
       title = `Batasan Koneksi Browser CORS / Jaringan`;
       desc = `Browser memblokir koneksi dari domain <code>${escapeHtml(location.hostname)}</code> ke endpoint <code>${escapeHtml(STATE.settings.ollamaEndpoint)}</code>.`;
@@ -9266,31 +9287,21 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       const resolvedImgs = await Promise.all(rawImgs.map(resolveImageToDataUrlSafe));
       const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, modelName);
 
-      const isOpenRouterDirect = IS_GITHUB_PAGES || IS_CLOUD_HOSTED;
-      const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
-      const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${STATE.settings.openRouterKey}`
-      };
-      if (session?.id) {
-        headers['X-Session-ID'] = session.id;
-      }
-      if (STATE.userId) {
-        headers['X-User-ID'] = STATE.userId;
-      }
-      if (isOpenRouterDirect) {
-        headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
-        headers['X-Title'] = 'ZOZ Router';
-      }
+      // Deteksi apakah model gratis atau berbayar
+      const isFreeModel = Boolean(
+        modelName.includes(':free') ||
+        modelName.endsWith('/free') ||
+        modelName === 'openrouter/free' ||
+        (STATE.openRouterModels || []).some(m => m.id === modelName && (m.cat === 'free' || m.tag === 'Free'))
+      );
 
-      // Deteksi model gratis dan siapkan pool kandidat failover cerdas
-      const isFreeModel = modelName.includes(':free') || modelName === 'openrouter/free';
-      const candidateModels = isFreeModel
+      // Siapkan pool kandidat model:
+      // - Jika model gratis ATAU saat berada di Auto Router Mode: masukkan model cadangan gratis teruji (live fallback pool)
+      // - Jika model berbayar dipilih manual: prioritaskan model tersebut, dan bila gagal karena saldo 402/gangguan, berikan failover cerdas
+      const candidateModels = (isFreeModel || STATE.mode === 'auto')
         ? [
             modelName,
-            'openrouter/free',
-            'google/gemma-2-9b-it:free',
-            'meta-llama/llama-3.1-8b-instruct:free'
+            ...LIVE_FREE_OPENROUTER_FALLBACKS
           ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
         : [modelName];
 
@@ -9300,125 +9311,189 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
       for (let i = 0; i < candidateModels.length; i++) {
         const currentModel = candidateModels[i];
-        const currentIsFree = currentModel.includes(':free') || currentModel === 'openrouter/free';
+        const currentIsFree = Boolean(
+          currentModel.includes(':free') ||
+          currentModel.endsWith('/free') ||
+          currentModel === 'openrouter/free' ||
+          (STATE.openRouterModels || []).some(m => m.id === currentModel && (m.cat === 'free' || m.tag === 'Free'))
+        );
         const currentIsImageCapable = isModelCapableOfImageGeneration(currentModel);
         const currentMessagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, currentModel);
 
-        const requestBody = {
+        const basePayload = {
           model: currentModel,
-          sessionId: session?.id || null,
           messages: currentMessagesPayload,
           stream: true,
-          temperature: parseFloat(STATE.settings.temperature),
-          top_p: parseFloat(STATE.settings.topP),
+          temperature: parseFloat(STATE.settings.temperature) || 0.7,
+          top_p: parseFloat(STATE.settings.topP) || 0.9,
           provider: {
             allow_fallbacks: true
           }
         };
-        if (session?.id) {
-          requestBody.sessionId = session.id;
-        }
-        if (STATE.userId) {
-          requestBody.userId = STATE.userId;
-        }
 
         if (currentIsImageCapable) {
-          requestBody.modalities = ['text', 'image'];
+          basePayload.modalities = ['text', 'image'];
         }
 
         // Pasang tools HANYA jika bukan model gratis, API key ada, dan model mendukung tools
         const canUseTools = doesModelSupportTools(currentModel);
         if (!currentIsFree && canUseTools && STATE.settings.openRouterKey) {
-          const availableTools = [];
-          if (STATE.isImageGenMode || currentIsImageCapable) {
-            const imageGenTool = {
-              type: 'openrouter:image_generation'
-            };
-            const activeImgModel = STATE.settings.imageModel || 'black-forest-labs/flux-1-schnell';
-            if (activeImgModel && activeImgModel.includes('/')) {
-              imageGenTool.parameters = { model: activeImgModel };
-            }
-            availableTools.push(imageGenTool);
-          }
-          // Tool disaring sesuai preferensi pengguna:
-          // - web (search_web / browse_web_page) hanya bila Mode Pencarian Web aktif
-          // - pencarian video YouTube hanya bila toggle "Cari Video YouTube" aktif
           const selectedAutonomousTools = getSelectableAutonomousTools(canRunAutonomous);
-          if (selectedAutonomousTools.length > 0) {
-            availableTools.push(...selectedAutonomousTools);
-          }
-          // Jangan kirim array tools kosong — OpenRouter menolak permintaan dengantools: [].
-          if (availableTools.length > 0) {
-            requestBody.tools = availableTools;
+          const validFunctionTools = (selectedAutonomousTools || []).filter(t => t && t.type === 'function' && t.function && t.function.name);
+          if (validFunctionTools.length > 0) {
+            basePayload.tools = validFunctionTools;
           }
         }
 
-        if (!isOpenRouterDirect) {
-          requestBody.apiKey = STATE.settings.openRouterKey;
-        }
+        // DUAL-PATH RESILIENCE: Coba rute primer, jika terhambat CORS/network/404, otomatis coba rute sekunder
+        const tryDirectFirst = IS_GITHUB_PAGES;
+        const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
 
-        try {
-          const res = await fetch(endpoint, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(requestBody),
-            signal: STATE.abortController?.signal
-          });
+        let res = null;
+        let routeErrDetail = '';
 
-          if (res.ok) {
-            response = res;
-            activeMessagesPayload = currentMessagesPayload;
-            if (currentModel !== modelName) {
-              actualModelUsed = currentModel;
+        for (const routeType of routesToTry) {
+          if (STATE.abortController?.signal?.aborted) break;
+
+          let targetUrl = '';
+          let targetHeaders = {};
+          let targetBody = {};
+
+          if (routeType === 'direct') {
+            // Direct call ke OpenRouter API (CORS-compliant: JANGAN kirim X-User-ID/X-Session-ID agar lolos preflight)
+            targetUrl = 'https://openrouter.ai/api/v1/chat/completions';
+            targetHeaders = {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`,
+              'HTTP-Referer': location.origin || 'https://zozi0999.github.io/zoz_router',
+              'X-Title': 'ZOZ Router'
+            };
+            targetBody = { ...basePayload };
+          } else {
+            // Proxy backend (/api/openrouter/chat)
+            targetUrl = '/api/openrouter/chat';
+            targetHeaders = {
+              'Content-Type': 'application/json'
+            };
+            if (STATE.settings.openRouterKey) {
+              targetHeaders['Authorization'] = `Bearer ${STATE.settings.openRouterKey}`;
             }
-            break;
+            if (session?.id) {
+              targetHeaders['X-Session-ID'] = session.id;
+            }
+            if (STATE.userId) {
+              targetHeaders['X-User-ID'] = STATE.userId;
+            }
+            targetBody = {
+              ...basePayload,
+              sessionId: session?.id || null,
+              userId: STATE.userId || null,
+              apiKey: STATE.settings.openRouterKey || undefined
+            };
           }
 
-          let errDetail = `HTTP ${res.status}`;
           try {
-            const errJson = await res.json();
-            if (errJson && errJson.error) {
-              const baseErr = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
-              const rawUpstream = errJson.details?.error?.metadata?.raw || errJson.error?.metadata?.raw;
-              errDetail = rawUpstream ? `${baseErr} (${rawUpstream})` : baseErr;
+            let attemptRes = await fetch(targetUrl, {
+              method: 'POST',
+              headers: targetHeaders,
+              body: JSON.stringify(targetBody),
+              signal: STATE.abortController?.signal
+            });
+
+            // Resiliensi Tool Rejection: jika upstream mengembalikan 400 karena tools tidak didukung, coba ulang tanpa tools
+            if (attemptRes.status === 400 && targetBody.tools) {
+              console.warn(`[OpenRouter] Model ${currentModel} mengembalikan HTTP 400 dengan tools. Mengulang langsung tanpa tools...`);
+              delete targetBody.tools;
+              delete basePayload.tools;
+              const retryRes = await fetch(targetUrl, {
+                method: 'POST',
+                headers: targetHeaders,
+                body: JSON.stringify(targetBody),
+                signal: STATE.abortController?.signal
+              });
+              if (retryRes.ok) {
+                attemptRes = retryRes;
+              }
             }
-          } catch (je) {
+
+            // Jika proxy mengembalikan 404 (misal static host tanpa server), fallback ke direct
+            if (routeType === 'proxy' && attemptRes.status === 404) {
+              console.warn(`[OpenRouter Proxy 404] Backend proxy tidak tersedia di host ini. Beralih ke direct OpenRouter API...`);
+              continue;
+            }
+
+            if (attemptRes.ok) {
+              res = attemptRes;
+              break;
+            }
+
+            let attemptErr = `HTTP ${attemptRes.status}`;
             try {
-              const raw = await res.text();
-              if (raw) errDetail = raw.substring(0, 200);
-            } catch (te) {}
-          }
-          lastErrDetail = errDetail;
+              const errJson = await attemptRes.json();
+              if (errJson && errJson.error) {
+                const baseErr = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
+                const rawUpstream = errJson.details?.error?.metadata?.raw || errJson.error?.metadata?.raw;
+                attemptErr = rawUpstream ? `${baseErr} (${rawUpstream})` : baseErr;
+              }
+            } catch (je) {
+              try {
+                const raw = await attemptRes.text();
+                if (raw) attemptErr = raw.substring(0, 200);
+              } catch (_) {}
+            }
 
-          // Hentikan langsung jika error autentikasi (401/403) agar tidak looping sia-sia ke kandidat lain
-          if (res.status === 401 || res.status === 403) {
-            throw new Error(`OpenRouter Authentication Error (HTTP ${res.status}): API Key tidak valid atau belum dipasang.`);
-          }
+            routeErrDetail = attemptErr;
 
-          // Jika model gratis dan masih ada model kandidat berikutnya, coba otomatis
-          if (isFreeModel && i < candidateModels.length - 1) {
-            const nextCandidate = candidateModels[i + 1];
-            console.warn(`[OpenRouter Free Failover] Model ${currentModel} gagal (${errDetail}). Mengalihkan ke ${nextCandidate}...`);
-            bubbleText.innerHTML = `<span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.8; font-style:italic;">Model <b>${escapeHtml(currentModel)}</b> sibuk (${res.status}). Mengalihkan otomatis ke <b>${escapeHtml(nextCandidate)}</b>...</span>`;
-            await new Promise(r => setTimeout(r, 600));
+            // Jika error adalah 401/403/402, jangan loop rute lain untuk model ini
+            if (attemptRes.status === 401 || attemptRes.status === 403 || attemptRes.status === 402) {
+              break;
+            }
+          } catch (netErr) {
+            if (STATE.abortController?.signal?.aborted) throw netErr;
+            console.warn(`[OpenRouter Dual-Path] Jalur ${routeType} mengalami kendala:`, netErr.message);
+            routeErrDetail = netErr.message || String(netErr);
+            // Lanjut mencoba rute alternatif
             continue;
-          } else {
-            throw new Error(errDetail);
           }
-        } catch (fetchErr) {
-          if (STATE.abortController?.signal?.aborted) {
-            throw fetchErr;
+        }
+
+        if (res && res.ok) {
+          response = res;
+          activeMessagesPayload = currentMessagesPayload;
+          if (currentModel !== modelName) {
+            actualModelUsed = currentModel;
           }
-          lastErrDetail = fetchErr.message || String(fetchErr);
-          if (isFreeModel && i < candidateModels.length - 1) {
-            const nextCandidate = candidateModels[i + 1];
-            console.warn(`[OpenRouter Free Failover] Fetch error pada ${currentModel}:`, fetchErr.message);
-            bubbleText.innerHTML = `<span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.8; font-style:italic;">Koneksi ke <b>${escapeHtml(currentModel)}</b> terputus. Mencoba <b>${escapeHtml(nextCandidate)}</b>...</span>`;
-            await new Promise(r => setTimeout(r, 600));
-            continue;
-          } else {
-            throw fetchErr;
-          }
+          break;
+        }
+
+        lastErrDetail = routeErrDetail || 'Gagal terhubung ke penyedia model OpenRouter.';
+
+        // Hentikan failover jika autentikasi ditolak mutlak (401/403)
+        if (lastErrDetail.includes('401') || lastErrDetail.includes('403') || lastErrDetail.includes('API Key tidak valid')) {
+          throw new Error(`OpenRouter Authentication Error: API Key tidak valid atau belum dipasang.`);
+        }
+
+        // Cek apakah bisa failover ke model berikutnya:
+        // Berlaku jika model gratis, mode auto router, atau jika model berbayar kehabisan kredit (402) / upstream down
+        const canFailover = i < candidateModels.length - 1 && (
+          isFreeModel ||
+          STATE.mode === 'auto' ||
+          lastErrDetail.includes('402') ||
+          lastErrDetail.includes('credit') ||
+          lastErrDetail.includes('Failed to fetch') ||
+          lastErrDetail.includes('502') ||
+          lastErrDetail.includes('503')
+        );
+
+        if (canFailover) {
+          const nextCandidate = candidateModels[i + 1];
+          const reasonNotice = lastErrDetail.includes('402') ? 'memerlukan saldo berbayar' : 'sedang sibuk/gangguan';
+          console.warn(`[OpenRouter Smart Failover] Model ${currentModel} ${reasonNotice} (${lastErrDetail}). Mengalihkan ke ${nextCandidate}...`);
+          bubbleText.innerHTML = `<span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.8; font-style:italic;">Model <b>${escapeHtml(currentModel)}</b> ${reasonNotice}. Mengalihkan otomatis ke <b>${escapeHtml(nextCandidate)}</b>...</span>`;
+          await new Promise(r => setTimeout(r, 600));
+          continue;
+        } else {
+          throw new Error(lastErrDetail);
         }
       }
 
@@ -10016,9 +10091,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         const actualHasImage = Array.isArray(image) ? image.length > 0 : Boolean(image);
         const errorHtml = formatModelErrorMessage('openrouter', modelName, err, actualHasImage, STATE.webSearchEnabled);
 
-        const isFreeModel = modelName.includes(':free') || modelName === 'openrouter/free';
-        const fallbackModelCandidate = modelName === 'openrouter/free' ? 'google/gemma-2-9b-it:free' : 'openrouter/free';
-        const fallbackLabel = modelName === 'openrouter/free' ? 'Gemma 2 9B (Free)' : 'OpenRouter Free Router';
+        const isFreeModel = Boolean(modelName && (modelName.includes(':free') || modelName.endsWith('/free') || modelName === 'openrouter/free'));
+        const fallbackModelCandidate = (modelName === 'openrouter/free' || modelName.includes(':free')) ? 'google/gemma-4-31b-it:free' : 'openrouter/free';
+        const fallbackLabel = (modelName === 'openrouter/free' || modelName.includes(':free')) ? 'Gemma 4 31B (Free)' : 'OpenRouter Free Router';
 
         const rescuedHtml = hasPartialText ? `
           <div class="partial-rescued-content" style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed rgba(255,255,255,0.15);">
@@ -10033,11 +10108,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
             <button class="btn btn-sm btn-outline retry-send-btn" style="border-color:var(--neon-cyan); color:var(--neon-cyan); font-size:0.75rem;">
                <i class="fa-solid fa-rotate-right"></i> Coba Kirim Ulang
             </button>
-            ${isFreeModel ? `
-              <button class="btn btn-sm btn-outline switch-free-model-btn" data-fallback="${fallbackModelCandidate}" style="border-color:var(--neon-teal); color:var(--neon-teal); font-size:0.75rem;">
-                <i class="fa-solid fa-bolt"></i> Ganti ke ${fallbackLabel} &amp; Kirim Ulang
-              </button>
-            ` : ''}
+            <button class="btn btn-sm btn-outline switch-free-model-btn" data-fallback="${fallbackModelCandidate}" style="border-color:var(--neon-teal); color:var(--neon-teal); font-size:0.75rem;">
+              <i class="fa-solid fa-bolt"></i> Ganti ke ${fallbackLabel} &amp; Kirim Ulang
+            </button>
             <button class="btn btn-sm btn-outline open-settings-btn" style="border-color:var(--neon-amber); color:var(--neon-amber); font-size:0.75rem;">
               <i class="fa-solid fa-gear"></i> Buka Pengaturan & Key
             </button>
@@ -10676,17 +10749,15 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       const candidateModels = isFreeModel
         ? [
             modelName,
-            'openrouter/free',
-            'google/gemma-2-9b-it:free',
-            'meta-llama/llama-3.1-8b-instruct:free'
+            ...LIVE_FREE_OPENROUTER_FALLBACKS
           ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
-        : [modelName];
+        : [modelName, ...LIVE_FREE_OPENROUTER_FALLBACKS].filter(Boolean);
 
       const isOpenRouterDirect = IS_GITHUB_PAGES || IS_CLOUD_HOSTED;
       const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
       const headers = {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${STATE.settings.openRouterKey}`
+        'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`
       };
       if (isOpenRouterDirect) {
         headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
@@ -10794,12 +10865,10 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
     if (resolvedEngine === 'openrouter' || (!STATE.settings.ollamaModel && STATE.settings.openRouterKey && !isModelOllama)) {
       const isFreeModel = Boolean(modelName && (modelName.includes(':free') || modelName === 'openrouter/free' || modelName.endsWith('/free')));
-      const candidateModels = isFreeModel
+      const candidateModels = (isFreeModel || STATE.mode === 'auto')
         ? [
             modelName,
-            'openrouter/free',
-            'google/gemma-2-9b-it:free',
-            'meta-llama/llama-3.1-8b-instruct:free'
+            ...LIVE_FREE_OPENROUTER_FALLBACKS
           ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
         : [modelName];
 
@@ -10807,7 +10876,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
       const endpoint = isOpenRouterDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
       const headers = {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${STATE.settings.openRouterKey}`
+        'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`
       };
       if (isOpenRouterDirect) {
         headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
