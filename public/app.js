@@ -520,6 +520,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     photoEditFileInput: $('#photoEditFileInput'),
     photoEditReferenceCard: $('#photoEditReferenceCard'),
     photoEditRefThumb: $('#photoEditRefThumb'),
+    photoEditRefThumbWrap: $('#photoEditRefThumbWrap'),
+    photoEditActiveModelLabel: $('#photoEditActiveModelLabel'),
+    btnChangePhotoEditImage: $('#btnChangePhotoEditImage'),
+    btnChangePhotoEditModel: $('#btnChangePhotoEditModel'),
     btnCancelPhotoEdit: $('#btnCancelPhotoEdit'),
     attachOptionEditPhoto: $('#attachOptionEditPhoto'),
     docFileInput: $('#docFileInput'),
@@ -6864,7 +6868,7 @@ ${organicBlock}
       // Foto referensi aktif → kirim sebagai referenceImage (img2img). Server yang
       // memilih jalur Pollinations img2img / OpenRouter input_references otomatis.
       await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel, STATE.photoEditImage || null);
-      clearPhotoEdit(); // sekali pakai — kartu referensi dilepas setelah eksekusi
+      // Mode Edit Foto tetap aktif jika pengguna belum membatalkannya (bukan hanya sekali pakai)
     } else if (isExplicitDeepResearch || STATE.isDeepResearch) {
       // Deep Research dieksekusi jika pengguna mengaktifkan mode Deep Research (Premium) dari UI atau mengetik slash command
       const cleanResearchPrompt = isExplicitDeepResearch ? text.replace(/^\/(?:deep|research|riset)\s+/i, '').trim() : text.trim();
@@ -10304,6 +10308,9 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     STATE.photoEditImage = dataUrl;
     if (els.photoEditRefThumb) els.photoEditRefThumb.src = dataUrl;
     if (els.photoEditReferenceCard) els.photoEditReferenceCard.style.display = 'flex';
+    if (els.photoEditActiveModelLabel) {
+      els.photoEditActiveModelLabel.textContent = getImageModelDisplayName(STATE.settings.imageModel || 'flux');
+    }
     if (els.promptInput) els.promptInput.focus();
   }
 
@@ -10317,18 +10324,28 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
 
   async function handlePhotoEditFileSelect(e) {
     const file = e.target?.files && e.target.files[0];
+    if (els.photoEditFileInput) els.photoEditFileInput.value = '';
     if (!file) return;
     if (!isImageFile(file)) {
       showToast('File yang dipilih bukan gambar yang valid.', 'error');
       clearPhotoEdit();
       return;
     }
+    const isReplacing = Boolean(STATE.photoEditImage);
     try {
       // Kompres dulu agar payload base64 ke server tidak membengkak (foto HP bisa 10MB+)
       const dataUrl = await compressImageToWebP(file, 1280, 0.85);
       setPhotoEditImage(dataUrl);
+      STATE.isImageGenMode = true;
+      updateImageGenModeUI();
       const activeImgModel = getImageModelDisplayName(STATE.settings.imageModel || 'flux');
-      showToast(`🖼️ Foto referensi aktif • Model: ${activeImgModel} — ketik instruksi editan di prompt lalu kirim. Ganti model kapan saja lewat dropdown model gambar.`);
+      if (isReplacing) {
+        showToast(`🖼️ Foto referensi berhasil diganti! Model aktif: ${activeImgModel}`);
+      } else {
+        // Buka popup pemilih model jika baru pertama kali memuat foto agar pengguna dapat memilih model secara manual
+        openImageModelDropdown();
+        showToast(`🖼️ Foto referensi dimuat! Model aktif: ${activeImgModel}. Pilih model jika ingin mengganti.`);
+      }
     } catch (compErr) {
       console.warn('Photo edit compress failed:', compErr);
       showToast('Gagal memproses foto referensi.', 'error');
@@ -12521,12 +12538,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
   function extractImagePrompt(promptText) {
     if (!promptText || typeof promptText !== 'string') return '';
     let p = promptText.trim();
-    p = p.replace(/^\/(?:image|img|gambar)\s*/i, '');
-    p = p.replace(/^(?:gambar|image|draw|paint):\s*/i, '');
-    p = p.replace(/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:buatkan|buat|bikin|generate|render|lukiskan|lukis|gambarkan|gambarin|desainkan|desain|tampilkan)\s+(?:saya\s+|kita\s+|sebuah\s+|suatu\s+)?(?:gambar|foto|lukisan|ilustrasi|visual|art|karya|desain)\s+(?:tentang\s+|dari\s+|sebuah\s+|seekor\s+|suatu\s+)?/i, '');
+    p = p.replace(/^\/(?:image|img|gambar|edit|editfoto|editphoto)\s*/i, '');
+    p = p.replace(/^(?:gambar|image|draw|paint|edit|editkan|ubah|rubah):\s*/i, '');
+    p = p.replace(/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:editkan|edit|ubahkan|ubah|gantikan|ganti|modifikasi|buatkan|buat|bikin|generate|render|lukiskan|lukis|gambarkan|gambarin|desainkan|desain|tampilkan)\s+(?:saya\s+|kita\s+|sebuah\s+|suatu\s+|foto\s+ini\s+|gambar\s+ini\s+)?(?:gambar|foto|lukisan|ilustrasi|visual|art|karya|desain)?\s*(?:tentang\s+|dari\s+|sebuah\s+|seekor\s+|suatu\s+|menjadi\s+|jadi\s+)?/i, '');
     p = p.replace(/^(?:(?:tolong|coba|bisa|mohon)\s+)?(?:lukiskan|lukis|gambarkan|gambarin)\s+(?:saya\s+|sebuah\s+|seekor\s+|suatu\s+)?/i, '');
     p = p.replace(/^(?:gambar(?:kan)?|foto)\s+(?:seekor|sebuah|suasana|pemandangan|karakter|objek|suatu)\s+/i, '');
-    p = p.replace(/^(?:(?:please|can you|could you)\s+)?(?:generate|create|render|draw|paint|design|illustrate|make)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|illustration|art|painting|drawing|visual|graphic)\s+(?:of\s+)?/i, '');
+    p = p.replace(/^(?:(?:please|can you|could you)\s+)?(?:edit|modify|transform|change|generate|create|render|draw|paint|design|illustrate|make)\s+(?:me\s+)?(?:this\s+photo\s+|this\s+image\s+)?(?:an?\s+)?(?:image|picture|photo|illustration|art|painting|drawing|visual|graphic)?\s*(?:of\s+|into\s+|to\s+)?/i, '');
     p = p.replace(/^(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:of\s+)?/i, '');
     return p.trim() || promptText.trim();
   }
@@ -12597,6 +12614,9 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     if (els.imageModelBadge) {
       els.imageModelBadge.innerText = badgeText;
       els.imageModelBadge.style.display = isImageMode ? 'inline-block' : 'none';
+    }
+    if (els.photoEditActiveModelLabel) {
+      els.photoEditActiveModelLabel.textContent = displayName;
     }
     if (els.sendPromptBtn) {
       if (isImageMode) {
@@ -13278,9 +13298,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
   }
 
   function closeImageModelDropdown() {
-    // Menutup dropdown (Esc / klik luar / pilih model) membatalkan alur pemilihan
-    // model-edit-foto yang tertunda — setImageModel sudah menangkap flag-nya sendiri
-    // sebelum fungsi ini dipanggil, jadi jalur pemilihan tetap jalan.
     STATE.photoEditAwaitingModel = false;
     if (!els.imageModelDropdown) return;
     els.imageModelDropdown.style.display = 'none';
@@ -13288,14 +13305,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
   }
 
   function setImageModel(modelVal) {
-    // Tangkap alur Edit Foto SEBELUM closeImageModelDropdown (yang membersihkan
-    // flag) — dipakai lagi di akhir fungsi untuk membuka file picker foto.
-    const _photoEditFlow = Boolean(STATE.photoEditAwaitingModel);
     STATE.photoEditAwaitingModel = false;
     if (modelVal === 'off') {
       STATE.isImageGenMode = false;
       updateImageGenModeUI();
       closeImageModelDropdown();
+      clearPhotoEdit();
       AudioEngine.click();
       showToast('ℹ️ Mode Buat Gambar dinonaktifkan. Kembali ke obrolan biasa.');
       return;
@@ -13313,14 +13328,18 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     AudioEngine.success();
     els.promptInput?.focus();
     const displayName = getImageModelDisplayName(modelVal);
-    if (modelVal.includes('/') && !STATE.settings.openRouterKey) {
-      showToast(`⚠️ Model ${displayName} aktif. Butuh OpenRouter Key di Pengaturan untuk menghasilkan gambar.`, 'warning');
+    if (STATE.photoEditImage) {
+      if (modelVal.includes('/') && !STATE.settings.openRouterKey) {
+        showToast(`⚠️ Model Edit Foto ${displayName} dipilih. Butuh OpenRouter Key di Pengaturan.`, 'warning');
+      } else {
+        showToast(`🎨 Model Edit Foto Aktif: ${displayName}`);
+      }
     } else {
-      showToast(`🎨 Model Gambar Aktif: ${displayName}`);
-    }
-    // Alur Edit Foto: model sudah DIPILIH pengguna → lanjut ke pemilihan foto referensi.
-    if (_photoEditFlow) {
-      setTimeout(() => els.photoEditFileInput?.click(), 150);
+      if (modelVal.includes('/') && !STATE.settings.openRouterKey) {
+        showToast(`⚠️ Model ${displayName} aktif. Butuh OpenRouter Key di Pengaturan untuk menghasilkan gambar.`, 'warning');
+      } else {
+        showToast(`🎨 Model Gambar Aktif: ${displayName}`);
+      }
     }
   }
 
@@ -17644,18 +17663,29 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       openImageModelDropdown();
       AudioEngine.click();
     });
-    // Mode Edit Foto AI (Img2Img): ALURNYA = pengguna MEMILIH MODEL dulu lewat
-    // popup (tab OpenRouter), baru dialog pemilihan foto terbuka — pengguna yang
-    // menentukan model, bukan otomatis sistem.
+    // Mode Edit Foto AI (Img2Img): Langsung buka pemilih file foto secara sinkron
+    // dalam event klik agar tidak diblokir oleh kebijakan keamanan browser (user activation token).
     els.attachOptionEditPhoto?.addEventListener('click', (e) => {
       e.stopPropagation();
       closeAttachmentDropdown();
-      STATE.photoEditAwaitingModel = true;
-      openImageModelDropdown();
-      switchImageModelTab('openrouter');
-      showToast('🧩 Pilih dulu model image untuk Edit Foto — setelah dipilih, dialog foto akan otomatis terbuka.');
+      els.photoEditFileInput?.click();
     });
     els.photoEditFileInput?.addEventListener('change', handlePhotoEditFileSelect);
+    els.btnChangePhotoEditImage?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      els.photoEditFileInput?.click();
+      AudioEngine.click();
+    });
+    els.photoEditRefThumbWrap?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      els.photoEditFileInput?.click();
+      AudioEngine.click();
+    });
+    els.btnChangePhotoEditModel?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleImageModelDropdown(e);
+      AudioEngine.click();
+    });
     els.btnCancelPhotoEdit?.addEventListener('click', (e) => {
       e.stopPropagation();
       clearPhotoEdit();
@@ -17720,7 +17750,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         }
       }
       if (els.imageModelDropdown && els.imageModelDropdown.style.display !== 'none') {
-        if (!els.imageModelMenuWrapper?.contains(e.target)) {
+        if (!els.imageModelMenuWrapper?.contains(e.target) && !els.photoEditReferenceCard?.contains(e.target)) {
           closeImageModelDropdown();
         }
       }

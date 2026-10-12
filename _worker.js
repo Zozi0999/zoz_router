@@ -609,9 +609,12 @@ export default {
         let seed = null;
         let openRouterKey = null;
 
+        let referenceImage = null;
+
         if (request.method === 'POST') {
           const body = await request.json().catch(() => ({}));
           prompt = body.prompt || body.q || '';
+          referenceImage = body.referenceImage || body.image || body.initImage || null;
           model = body.model || model;
           width = parseInt(body.width, 10) || width;
           height = parseInt(body.height, 10) || height;
@@ -619,6 +622,7 @@ export default {
           openRouterKey = body.openRouterKey || body.apiKey || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
         } else {
           prompt = url.searchParams.get('prompt') || url.searchParams.get('q') || '';
+          referenceImage = url.searchParams.get('referenceImage') || url.searchParams.get('image') || null;
           model = url.searchParams.get('model') || model;
           width = parseInt(url.searchParams.get('width'), 10) || width;
           height = parseInt(url.searchParams.get('height'), 10) || height;
@@ -675,7 +679,8 @@ export default {
               body: JSON.stringify({
                 model: effectiveModel,
                 prompt: cleanPrompt,
-                aspect_ratio: '1:1'
+                aspect_ratio: '1:1',
+                ...(referenceImage ? { input_references: [{ type: 'image_url', image_url: { url: referenceImage } }] } : {})
               })
             });
 
@@ -701,6 +706,12 @@ export default {
           // 1B. Secondary: Fallback ke Multimodal Chat Completions
           if (!finalImageUrl) {
             try {
+              const userContent = [
+                { type: 'text', text: referenceImage ? `Please edit, modify or transform this image according to the instructions: ${cleanPrompt}` : `Please generate an image: ${cleanPrompt}` }
+              ];
+              if (referenceImage) {
+                userContent.push({ type: 'image_url', image_url: { url: referenceImage } });
+              }
               const chatRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -711,7 +722,7 @@ export default {
                 },
                 body: JSON.stringify({
                   model: effectiveModel,
-                  messages: [{ role: 'user', content: `Please generate an image: ${cleanPrompt}` }],
+                  messages: [{ role: 'user', content: userContent }],
                   modalities: ['image', 'text']
                 })
               });
@@ -766,8 +777,10 @@ export default {
             const lastSpace = cut.lastIndexOf(' ');
             urlPrompt = (lastSpace > 600 ? cut.slice(0, lastSpace) : cut).trim();
           }
-          const encodedPrompt = encodeURIComponent(urlPrompt);
           finalImageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=${encodeURIComponent(effectiveModel)}&seed=${actualSeed}&nologo=true&enhance=true`;
+          if (referenceImage && /^https?:\/\//i.test(referenceImage)) {
+            finalImageUrl += `&image=${encodeURIComponent(referenceImage)}`;
+          }
         }
 
         const duration = ((Date.now() - startTime) / 1000).toFixed(2);

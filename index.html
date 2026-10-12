@@ -338,16 +338,27 @@
 
         <!-- AI Photo Edit Reference Card (Img2Img) -->
         <div class="photo-edit-ref-card" id="photoEditReferenceCard" style="display: none;">
-          <div class="photo-edit-ref-thumb-wrap">
+          <div class="photo-edit-ref-thumb-wrap" id="photoEditRefThumbWrap" title="Klik untuk ganti foto">
             <img id="photoEditRefThumb" src="" alt="Foto Referensi">
+            <div class="photo-edit-thumb-overlay"><i class="fa-solid fa-camera"></i></div>
           </div>
           <div class="photo-edit-ref-info">
             <div class="photo-edit-ref-header">
               <i class="fa-solid fa-wand-magic-sparkles"></i>
-              <span>Mode Edit Foto AI (Img2Img)</span>
-              <span class="photo-edit-tag">Foto Aktif</span>
+              <span>Edit Foto AI</span>
+              <span class="photo-edit-live-badge" title="Model AI Aktif untuk Edit Foto">
+                <span class="photo-edit-live-dot"></span>
+                <span id="photoEditActiveModelLabel">Flux.1 Schnell</span>
+              </span>
+              <div class="photo-edit-header-actions">
+                <button type="button" class="photo-edit-change-photo-btn" id="btnChangePhotoEditImage" title="Pilih / Ganti Foto Referensi Baru">
+                  <i class="fa-solid fa-image"></i> <span>Ganti Foto</span>
+                </button>
+                <button type="button" class="photo-edit-change-model-btn" id="btnChangePhotoEditModel" title="Pilih / Ganti Model AI untuk Mengedit Foto">
+                  <i class="fa-solid fa-sliders"></i> <span>Ganti Model</span>
+                </button>
+              </div>
             </div>
-            <div class="photo-edit-ref-tip">Ketik instruksi editan di prompt (misal: "ganti latar jadi pantai", "ubah gaya jadi kartun/anime", "tambah kacamata hitam")</div>
           </div>
           <button type="button" class="photo-edit-cancel-btn" id="btnCancelPhotoEdit" title="Batalkan Mode Edit Foto">
             <i class="fa-solid fa-xmark"></i>
