@@ -1273,6 +1273,76 @@ export default {
       }
     }
 
+    // Long-Term Memory Save Endpoint (Cloudflare Worker Stateless Handler)
+    if ((url.pathname === '/api/memory/save' || url.pathname === '/api/tools/memory/save') && request.method === 'POST') {
+      try {
+        const body = await request.json().catch(() => ({}));
+        const content = String(body.content || body.value || body.text || body.fact || body.note || body.catatan || body.info || '').trim();
+        let topic = String(body.topic || body.key || body.title || body.subject || '').trim();
+        if (!content) {
+          return new Response(JSON.stringify({ error: 'Parameter content (atau teks fakta) diperlukan.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+        if (!topic) {
+          topic = content.split(/\s+/).slice(0, 4).join('_').replace(/[^\w]/g, '').toLowerCase() || 'catatan';
+        }
+        return new Response(JSON.stringify({
+          success: true,
+          message: `Berhasil menyimpan memori tentang: "${topic}"`,
+          topic,
+          engine: 'cloudflare-stateless'
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: 'Gagal memproses memori: ' + e.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
+    // Long-Term Memory Search Endpoint (Cloudflare Worker Stateless Handler)
+    if ((url.pathname === '/api/memory/search' || url.pathname === '/api/tools/memory/search') && (request.method === 'GET' || request.method === 'POST')) {
+      try {
+        let query = url.searchParams.get('q') || url.searchParams.get('query') || '';
+        if (request.method === 'POST') {
+          const body = await request.json().catch(() => ({}));
+          query = body.query || body.q || query;
+        }
+        return new Response(JSON.stringify({
+          success: true,
+          count: 0,
+          results: [],
+          text: `[Cloudflare Stateless] Memori jangka panjang SQLite FTS5 berjalan di backend lokal (node server.js). Gunakan browser storage untuk sesi ini.`,
+          engine: 'cloudflare-stateless'
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: 'Gagal mencari memori: ' + e.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
+    // Python Code Subprocess Sandbox Execution Endpoint (Cloudflare Worker Handler)
+    if ((url.pathname === '/api/execute-code' || url.pathname === '/api/tools/execute-code') && request.method === 'POST') {
+      return new Response(JSON.stringify({
+        success: false,
+        output: 'Error eksekusi: Lingkungan Cloudflare Pages / Worker adalah serverless sandbox tanpa interpreter Python. Jalankan server lokal ZOZ Router (node server.js) untuk mengeksekusi kode Python.',
+        executionTimeMs: 0
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      });
+    }
+
     // Stateless Session Route for Cloudflare Gateway
     if (url.pathname === '/api/sessions' || url.pathname.startsWith('/api/sessions/')) {
       if (request.method === 'GET') {

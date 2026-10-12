@@ -14,6 +14,7 @@ const zlib = require('zlib');
 const crypto = require('crypto');
 const dns = require('dns');
 const net = require('net');
+const os = require('os');
 const { spawn } = require('child_process');
 const textSafety = require('./text-safety');
 
@@ -3170,6 +3171,273 @@ function fallbackJinaReader(targetUrl, maxChars = 5000) {
   });
 }
 
+// ==================== ENGINE MEMORI JANGKA PANJANG LOKAL (SQLITE FTS5) ====================
+let zozMemoryDb = null;
+let zozMemoryAvailable = false;
+
+function initZozMemoryDb() {
+  if (zozMemoryDb) return zozMemoryDb;
+  try {
+    const { DatabaseSync } = require('node:sqlite');
+    if (!fs.existsSync(DATA_DIR)) {
+      try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (_) {}
+    }
+    const memoryDbPath = path.join(DATA_DIR, 'zoz_memory.db');
+    const db = new DatabaseSync(memoryDbPath);
+    // Inisialisasi tabel FTS5 virtual table dengan user_id unindexed untuk isolasi privasi
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS memories USING fts5(
+        user_id UNINDEXED,
+        topic,
+        content
+      );
+    `);
+    zozMemoryDb = db;
+    zozMemoryAvailable = true;
+    return zozMemoryDb;
+  } catch (err) {
+    zozMemoryAvailable = false;
+    return null;
+  }
+}
+
+// Fallback in-memory jika SQLite belum terinisialisasi
+const memoryFallbackStore = [];
+
+function saveMemoryRecord(userId, topic, content) {
+  const cleanUid = sanitizeUserId(userId);
+  const cleanTopic = String(topic || '').trim();
+  const cleanContent = String(content || '').trim();
+  if (!cleanTopic || !cleanContent) {
+    throw new Error('Parameter topic dan content tidak boleh kosong.');
+  }
+
+  const db = initZozMemoryDb();
+  if (db && zozMemoryAvailable) {
+    try {
+      const stmt = db.prepare('INSERT INTO memories (user_id, topic, content) VALUES (?, ?, ?)');
+      stmt.run(cleanUid, cleanTopic, cleanContent);
+      return { success: true, topic: cleanTopic, engine: 'sqlite-fts5' };
+    } catch (e) {
+      console.warn('[ZOZ Memory] Gagal simpan ke SQLite, menggunakan fallback:', e.message);
+    }
+  }
+
+  memoryFallbackStore.unshift({ user_id: cleanUid, topic: cleanTopic, content: cleanContent, time: Date.now() });
+  if (memoryFallbackStore.length > 500) memoryFallbackStore.pop();
+  return { success: true, topic: cleanTopic, engine: 'memory-fallback' };
+}
+
+function cleanFts5Query(query) {
+  if (!query || typeof query !== 'string') return '';
+  const words = query.replace(/[^\p{L}\p{N}_]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '';
+  return words.map(w => `"${w}"*`).join(' OR ');
+}
+
+function searchMemoryRecords(userId, query, limit = 5) {
+  const cleanUid = sanitizeUserId(userId);
+  const cleanQ = String(query || '').trim();
+  if (!cleanQ) {
+    return { success: true, count: 0, results: [], text: 'Kata kunci pencarian memori kosong.' };
+  }
+
+  const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 5, 1), 20);
+  const db = initZozMemoryDb();
+
+  if (db && zozMemoryAvailable) {
+    try {
+      const ftsQuery = cleanFts5Query(cleanQ);
+      if (ftsQuery) {
+        const stmt = db.prepare(`
+          SELECT topic, content 
+          FROM memories 
+          WHERE memories MATCH ? AND (user_id = ? OR user_id = 'default') 
+          ORDER BY rank 
+          LIMIT ?
+        `);
+        const rows = stmt.all(ftsQuery, cleanUid, safeLimit);
+        if (rows && rows.length > 0) {
+          const results = rows.map(r => ({ topic: r.topic, content: r.content }));
+          const text = results.map(r => `[${r.topic}] : ${r.content}`).join('\n\n');
+          return { success: true, count: results.length, results, text, engine: 'sqlite-fts5' };
+        }
+      }
+    } catch (e) {
+      console.warn('[ZOZ Memory] FTS5 search error:', e.message);
+    }
+  }
+
+  const terms = cleanQ.toLowerCase().split(/\s+/).filter(Boolean);
+  const matched = memoryFallbackStore.filter(m => {
+    if (m.user_id !== cleanUid && m.user_id !== 'default') return false;
+    const combined = `${m.topic} ${m.content}`.toLowerCase();
+    return terms.some(t => combined.includes(t));
+  }).slice(0, safeLimit);
+
+  if (matched.length > 0) {
+    const text = matched.map(r => `[${r.topic}] : ${r.content}`).join('\n\n');
+    return { success: true, count: matched.length, results: matched, text, engine: 'memory-fallback' };
+  }
+
+  return {
+    success: true,
+    count: 0,
+    results: [],
+    text: `Tidak ada catatan memori yang relevan untuk kata kunci: "${cleanQ}".`,
+    engine: zozMemoryAvailable ? 'sqlite-fts5' : 'memory-fallback'
+  };
+}
+
+// ==================== ENGINE EKSEKUSI PYTHON SUBPROCESS (SANDBOX) ====================
+const PYTHON_SANDBOX_DIR = path.join(os.tmpdir(), 'zoz_python_sandbox');
+try {
+  if (!fs.existsSync(PYTHON_SANDBOX_DIR)) {
+    fs.mkdirSync(PYTHON_SANDBOX_DIR, { recursive: true });
+  }
+} catch (_) {}
+
+function executePythonSandbox(code, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    if (!code || typeof code !== 'string' || !code.trim()) {
+      return resolve({
+        success: false,
+        output: 'Error: Kode Python tidak boleh kosong.',
+        executionTimeMs: 0
+      });
+    }
+
+    const cleanCode = code.trim();
+    // Safety guard untuk pencegahan eksekusi destruktif & kebocoran kredensial host
+    const dangerousPatterns = [
+      { regex: /\b(?:import\s+shutil|from\s+shutil\s+import)\b/i, label: 'shutil (manipulasi sistem berkas luas)' },
+      { regex: /\b(?:import\s+subprocess|from\s+subprocess\s+import)\b/i, label: 'subprocess (eksekusi program sistem luar)' },
+      { regex: /\b(?:import\s+socket|from\s+socket\s+import)\b/i, label: 'socket (akses jaringan mentah)' },
+      { regex: /\b(?:import\s+pty|from\s+pty\s+import)\b/i, label: 'pty' },
+      { regex: /\b(?:import\s+ctypes|from\s+ctypes\s+import)\b/i, label: 'ctypes (akses memori tingkat rendah)' },
+      { regex: /\b(?:import\s+winreg|from\s+winreg\s+import)\b/i, label: 'winreg (modifikasi registry OS)' },
+      { regex: /\b(?:import\s+multiprocessing|from\s+multiprocessing\s+import)\b/i, label: 'multiprocessing' },
+      { regex: /\b__import__\s*\(\s*["'](?:shutil|subprocess|socket|pty|ctypes|winreg|os|sys)\b/i, label: '__import__ modul terbatas' },
+      { regex: /\bos\.(?:system|popen|spawn|exec|remove|unlink|rmdir|environ|chdir)\b/i, label: 'fungsi os berisiko tinggi' },
+      { regex: /\b(?:rmtree|format|del\s+\/[fq]|shutdown)\b/i, label: 'perintah penghapusan sistem' }
+    ];
+    for (const pat of dangerousPatterns) {
+      if (pat.regex.test(cleanCode)) {
+        return resolve({
+          success: false,
+          output: `Error Keamanan: Penggunaan ${pat.label} diblokir oleh sandbox keamanan ZOZ Router. Gunakan modul pemrosesan data murni (math, statistics, re, json, datetime, itertools, collections, dll).`,
+          executionTimeMs: 0
+        });
+      }
+    }
+
+    const startTime = Date.now();
+    const pythonExec = process.env.PYTHON_EXEC || 'python';
+    let stdoutData = '';
+    let stderrData = '';
+    let isFinished = false;
+
+    try {
+      if (!fs.existsSync(PYTHON_SANDBOX_DIR)) {
+        fs.mkdirSync(PYTHON_SANDBOX_DIR, { recursive: true });
+      }
+    } catch (_) {}
+
+    // Lingkungan terisolasi tanpa kunci API atau token sensitif server
+    const safeEnv = {
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUNBUFFERED: '1',
+      PATH: process.env.PATH || process.env.Path || '',
+      Path: process.env.Path || process.env.PATH || '',
+      SYSTEMROOT: process.env.SYSTEMROOT || 'C:\\Windows',
+      WINDIR: process.env.WINDIR || 'C:\\Windows',
+      TEMP: PYTHON_SANDBOX_DIR,
+      TMP: PYTHON_SANDBOX_DIR
+    };
+
+    let proc;
+    try {
+      proc = spawn(pythonExec, ['-u', '-'], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: PYTHON_SANDBOX_DIR,
+        windowsHide: true,
+        env: safeEnv
+      });
+    } catch (spawnErr) {
+      return resolve({
+        success: false,
+        output: `Error: Gagal menjalankan interpreter Python (${spawnErr.message}). Pastikan Python terinstal di sistem.`,
+        executionTimeMs: Date.now() - startTime
+      });
+    }
+
+    if (proc.stdin) {
+      proc.stdin.on('error', () => {});
+      try {
+        proc.stdin.write(cleanCode);
+        proc.stdin.end();
+      } catch (_) {}
+    }
+
+    const timer = setTimeout(() => {
+      if (!isFinished) {
+        isFinished = true;
+        try {
+          proc.kill();
+        } catch (_) {
+          try { proc.kill('SIGKILL'); } catch (_) {}
+        }
+        resolve({
+          success: false,
+          output: `Error: Waktu eksekusi melebihi batas (Timeout ${timeoutMs / 1000} detik). Pastikan kode tidak memiliki infinite loop atau operasi pemblokir.`,
+          executionTimeMs: Date.now() - startTime
+        });
+      }
+    }, timeoutMs);
+
+    proc.stdout.on('data', (chunk) => {
+      if (stdoutData.length < 8000) stdoutData += chunk.toString('utf-8');
+    });
+
+    proc.stderr.on('data', (chunk) => {
+      if (stderrData.length < 4000) stderrData += chunk.toString('utf-8');
+    });
+
+    proc.on('error', (err) => {
+      if (isFinished) return;
+      isFinished = true;
+      clearTimeout(timer);
+      resolve({
+        success: false,
+        output: `Error eksekusi subprocess Python: ${err.message}`,
+        executionTimeMs: Date.now() - startTime
+      });
+    });
+
+    proc.on('close', (code) => {
+      if (isFinished) return;
+      isFinished = true;
+      clearTimeout(timer);
+      const executionTimeMs = Date.now() - startTime;
+      if (code !== 0) {
+        const errText = stderrData.trim() || `Proses keluar dengan status kode error ${code}`;
+        resolve({
+          success: false,
+          output: `Error eksekusi:\n${errText}\n\nSaran: Periksa traceback di atas untuk memperbaiki sintaks atau logika kode Anda.`,
+          executionTimeMs
+        });
+      } else {
+        const out = stdoutData.trim();
+        resolve({
+          success: true,
+          output: out || 'Kode berhasil dijalankan tanpa output (Gunakan fungsi print() untuk mencetak hasil keluaran).',
+          executionTimeMs
+        });
+      }
+    });
+  });
+}
+
 // Fungsi Logika Agen: Penganalisis Web Kustom URL Mendalam (Deep Custom URL Web Content Analyzer)
 async function jalankanRisetOtonom(taskId, topik, config = {}) {
   const task = dbTugasRiset[taskId];
@@ -4212,6 +4480,68 @@ async function requestHandler(req, res) {
       return sendJSON(res, 200, { success: true, ...data });
     } catch (e) {
       return sendJSON(res, 500, { error: 'Gagal membaca halaman web: ' + e.message });
+    }
+  }
+
+  // Long-Term Memory Save Tool Endpoint (SQLite FTS5)
+  if ((pathname === '/api/memory/save' || pathname === '/api/tools/memory/save') && method === 'POST') {
+    try {
+      const body = await safeParseBody(req);
+      if (!body) return;
+      const content = String(body.content || body.value || body.text || body.fact || body.note || body.catatan || body.info || '').trim();
+      let topic = String(body.topic || body.key || body.title || body.subject || '').trim();
+      if (!content) {
+        return sendJSON(res, 400, { error: 'Parameter `content` (atau teks fakta) diperlukan untuk menyimpan memori.' });
+      }
+      if (!topic) {
+        topic = content.split(/\s+/).slice(0, 4).join('_').replace(/[^\w]/g, '').toLowerCase() || 'catatan';
+      }
+      const saveRes = saveMemoryRecord(reqUserId, topic, content);
+      return sendJSON(res, 200, {
+        success: true,
+        message: `Berhasil menyimpan memori tentang: "${topic}"`,
+        ...saveRes
+      });
+    } catch (e) {
+      return sendJSON(res, 500, { error: 'Gagal menyimpan memori: ' + e.message });
+    }
+  }
+
+  // Long-Term Memory Search Tool Endpoint (SQLite FTS5)
+  if ((pathname === '/api/memory/search' || pathname === '/api/tools/memory/search') && (method === 'GET' || method === 'POST')) {
+    try {
+      let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
+      let limit = parseInt(reqUrl.searchParams.get('limit') || '5', 10);
+      if (method === 'POST') {
+        const body = await safeParseBody(req);
+        if (!body) return;
+        query = body.query || body.q || body.topic || query;
+        if (body.limit) limit = parseInt(body.limit, 10);
+      }
+      if (!query || !query.trim()) {
+        return sendJSON(res, 400, { error: 'Parameter `query` atau `q` diperlukan untuk mencari memori.' });
+      }
+      const searchRes = searchMemoryRecords(reqUserId, query, limit);
+      return sendJSON(res, 200, searchRes);
+    } catch (e) {
+      return sendJSON(res, 500, { error: 'Gagal mencari memori: ' + e.message });
+    }
+  }
+
+  // Local Python Code Subprocess Sandbox Execution Endpoint
+  if ((pathname === '/api/execute-code' || pathname === '/api/tools/execute-code') && method === 'POST') {
+    try {
+      const body = await safeParseBody(req);
+      if (!body) return;
+      const code = body.code || body.script || body.python || '';
+      const timeoutMs = Math.min(Math.max(parseInt(body.timeoutMs || '5000', 10) || 5000, 1000), 10000);
+      if (!code || !code.trim()) {
+        return sendJSON(res, 400, { error: 'Parameter `code` diperlukan untuk eksekusi kode.' });
+      }
+      const execRes = await executePythonSandbox(code, timeoutMs);
+      return sendJSON(res, 200, execRes);
+    } catch (e) {
+      return sendJSON(res, 500, { error: 'Gagal mengeksekusi kode: ' + e.message });
     }
   }
 
