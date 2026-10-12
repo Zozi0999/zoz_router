@@ -2296,10 +2296,20 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     const sanitized = isStreaming ? fastSanitizeHtml(contentHtml) : sanitizeHtmlSafe(contentHtml);
 
     // Pastikan seluruh tautan eksternal (http/https) membuka di tab baru agar tidak memutus sesi obrolan
-    return sanitized.replace(/<a\b([^>]*?href=["']https?:\/\/[^"']+["'][^>]*)>/gi, (match, attrs) => {
+    let result = sanitized.replace(/<a\b([^>]*?href=["']https?:\/\/[^"']+["'][^>]*)>/gi, (match, attrs) => {
       const cleanAttrs = attrs.replace(/\s*(?:target|rel)=["'][^"']*["']/gi, '');
       return `<a${cleanAttrs} target="_blank" rel="noopener noreferrer">`;
     });
+
+    // Otomatis pasang loading="lazy" dan decoding="async" pada seluruh gambar agar hemat RAM & decode di latar belakang
+    result = result.replace(/<img\b([^>]*?)>/gi, (match, attrs) => {
+      let updated = attrs;
+      if (!/\bloading=/i.test(updated)) updated += ' loading="lazy"';
+      if (!/\bdecoding=/i.test(updated)) updated += ' decoding="async"';
+      return `<img${updated}>`;
+    });
+
+    return result;
   }
 
   // Init opsi marked SEKALI di module scope (marked.min.js dimuat sebelum app.js di index.html).
@@ -2392,6 +2402,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     images.forEach(img => {
       if (img.classList.contains('chat-zoomable-img') || img.classList.contains('image-result-img')) return;
       img.classList.add('chat-zoomable-img');
+      img.loading = 'lazy';
+      img.decoding = 'async';
       img.style.cursor = 'zoom-in';
       img.style.maxWidth = '100%';
       img.style.borderRadius = 'var(--radius-md, 8px)';
@@ -3877,7 +3889,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     return `
       <div class="image-result-card" data-prompt="${escapeHtml(prompt)}" data-img-url="${escapeHtml(imgUrl)}" data-model="${escapeHtml(model)}" tabindex="0">
         <div class="image-result-display-wrap" title="Klik untuk membuka layar penuh (Lightbox)">
-          <img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(prompt)}" class="image-result-img chat-zoomable-img">
+          <img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(prompt)}" class="image-result-img chat-zoomable-img" loading="lazy" decoding="async">
           <div class="image-result-overlay">
             <button class="image-action-btn btn-open-lightbox" title="Buka Layar Penuh">
               <i class="fa-solid fa-expand"></i>
@@ -7110,40 +7122,6 @@ ${organicBlock}
     {
       type: 'function',
       function: {
-        name: 'extract_web',
-        description: 'Ekstrak dan baca seluruh isi teks artikel atau dokumen dari sebuah URL website secara penuh untuk dipelajari, diringkas, atau dianalisis mendalam.',
-        parameters: {
-          type: 'object',
-          properties: {
-            url: {
-              type: 'string',
-              description: 'Alamat URL website yang ingin diekstrak (misal: https://example.com/artikel)'
-            }
-          },
-          required: ['url']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'read_url',
-        description: 'Kunjungi dan baca isi teks konten sebuah tautan/URL web secara lengkap.',
-        parameters: {
-          type: 'object',
-          properties: {
-            url: {
-              type: 'string',
-              description: 'Alamat URL web yang ingin dibaca'
-            }
-          },
-          required: ['url']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
         name: 'search_youtube',
         description: 'Cari video YouTube berdasarkan kata kunci. Mengembalikan daftar video (judul, channel, durasi, jumlah tayangan, URL, thumbnail) yang bisa langsung diputar di dalam percakapan atau dibuka di YouTube. Gunakan kapan pun pengguna meminta mencarikan, menemukan, atau menonton sebuah video/tutorial/klip musik.',
         parameters: {
@@ -7212,9 +7190,12 @@ ${organicBlock}
     } catch (_) {
       raw = String(call.function.arguments || '');
     }
-    if (toolName === 'search_web' || toolName === 'web_search' || toolName === 'search') return 'search_web';
+    if (toolName === 'search_web' || toolName === 'web_search' || toolName === 'search') {
+      const q = (raw && typeof raw === 'object') ? (raw.query || raw.q || raw.keyword || raw.search || '') : String(raw || '');
+      return `search:${String(q).trim().toLowerCase()}`;
+    }
     if (toolName === 'search_youtube') {
-      const q = (raw && typeof raw === 'object') ? (raw.query || raw.q || '') : String(raw || '');
+      const q = (raw && typeof raw === 'object') ? (raw.query || raw.q || raw.keyword || '') : String(raw || '');
       return `youtube:${String(q).trim().toLowerCase()}`;
     }
     let url = '';
@@ -7442,6 +7423,12 @@ ${organicBlock}
     return payload;
   }
 
+  // ==================== AUTONOMOUS TOOL RESPONSE CACHE ====================
+  // Cache in-memory berbatas waktu (TTL 10 menit) untuk mencegah pemanggilan berulang
+  // pada query pencarian atau URL ekstraksi yang sama, menghemat kuota dan memangkas latensi ke 0ms.
+  const AUTONOMOUS_TOOL_CACHE = new Map();
+  const TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
+
   async function executeAutonomousWebTool(toolName, rawArgs, promptContext = '', session = null) {
     try {
       let args = {};
@@ -7468,6 +7455,52 @@ ${organicBlock}
         else if (args.parameters && typeof args.parameters === 'object') args = args.parameters;
         else if (args.input && typeof args.input === 'object') args = args.input;
       }
+
+      // Bangun cacheKey kanonikal: satukan alias tool & parameter esensial
+      let canonicalTool = toolName;
+      let canonicalArg = '';
+      if (['search_web', 'web_search', 'search'].includes(toolName)) {
+        canonicalTool = 'search_web';
+        canonicalArg = String(args.query || args.q || args.keyword || args.search || args.topic || args.text || (typeof args === 'string' ? args : '') || promptContext || '').trim().toLowerCase();
+      } else if (toolName === 'search_youtube') {
+        canonicalTool = 'search_youtube';
+        const q = String(args.query || args.q || args.keyword || args.search || args.topic || args.title || args.text || (typeof args === 'string' ? args : '') || promptContext || '').trim().toLowerCase();
+        const max = Math.max(1, Math.min(10, parseInt(args.max_results || args.maxResults || args.limit, 10) || 6));
+        canonicalArg = `${q}:${max}`;
+      } else if (['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(toolName)) {
+        canonicalTool = 'browse_web_page';
+        let u = String(args.url || args.target || args.link || args.href || args.targetUrl || (typeof args === 'string' ? args : '')).trim().toLowerCase();
+        if (u && !/^https?:\/\//i.test(u)) u = 'https://' + u;
+        canonicalArg = u.replace(/\/+$/, '');
+      } else {
+        canonicalArg = JSON.stringify(args);
+      }
+
+      const cacheKey = `${canonicalTool}:${canonicalArg}`;
+      const cachedEntry = AUTONOMOUS_TOOL_CACHE.get(cacheKey);
+      if (cachedEntry && cachedEntry.expiresAt > Date.now()) {
+        return cachedEntry.data;
+      }
+
+      const cacheAndReturn = (data) => {
+        if (data && data.text && !data.text.startsWith('Error:')) {
+          AUTONOMOUS_TOOL_CACHE.set(cacheKey, {
+            data,
+            expiresAt: Date.now() + TOOL_CACHE_TTL_MS
+          });
+          if (AUTONOMOUS_TOOL_CACHE.size > 120) {
+            const now = Date.now();
+            for (const [k, v] of AUTONOMOUS_TOOL_CACHE.entries()) {
+              if (v.expiresAt <= now) AUTONOMOUS_TOOL_CACHE.delete(k);
+            }
+            if (AUTONOMOUS_TOOL_CACHE.size > 120) {
+              const oldestKey = AUTONOMOUS_TOOL_CACHE.keys().next().value;
+              if (oldestKey) AUTONOMOUS_TOOL_CACHE.delete(oldestKey);
+            }
+          }
+        }
+        return data;
+      };
       
       if (toolName === 'search_youtube') {
         let query = args.query || args.q || args.keyword || args.search || args.topic || args.title || args.text || (typeof args === 'string' ? args : '');
@@ -7500,7 +7533,7 @@ ${organicBlock}
         });
         output += `\nCatatan: video di atas dapat diputar langsung di dalam percakapan. Sertakan tautan video yang Anda rekomendasikan (format markdown [Judul](URL)) di dalam jawaban akhir.`;
 
-        return {
+        return cacheAndReturn({
           text: output,
           sources: list.map((v) => ({
             title: v.title,
@@ -7509,7 +7542,7 @@ ${organicBlock}
             snippet: `${v.channel ? `Video YouTube oleh ${v.channel}: ` : 'Video YouTube: '}${(v.description || v.title || '').slice(0, 160)}`
           })),
           videoIds: list.map((v) => v.videoId).filter(Boolean)
-        };
+        });
       }
 
       if (['search_web', 'web_search', 'search'].includes(toolName)) {
@@ -7793,7 +7826,7 @@ ${organicBlock}
         results.forEach((item, idx) => {
           output += `\n[${idx + 1}] [${item.sourceProvider || 'Web'}] ${item.title}\nURL: ${item.url}\nSumber/Domain: ${item.domain}\nRingkasan: ${item.snippet}\n`;
         });
-        return { text: output, sources: results };
+        return cacheAndReturn({ text: output, sources: results });
       }
       
       if (['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(toolName)) {
@@ -7810,10 +7843,10 @@ ${organicBlock}
           try {
             const ytInfo = await fetchYouTubeInfoClient(ytIds[0]);
             if (ytInfo && ytInfo.success && ytInfo.title) {
-              return {
+              return cacheAndReturn({
                 text: `[INFORMASI TERVERIFIKASI VIDEO YOUTUBE]:\n- Judul: "${ytInfo.title}"\n- Channel / Pembuat: "${ytInfo.channel}" (${ytInfo.channel_url || 'N/A'})\n- URL: ${ytInfo.url}\n- Thumbnail: ${ytInfo.thumbnail}\n(Diambil secara real-time via YouTube oEmbed)`,
                 sources: [{ title: ytInfo.title, url: ytInfo.url, domain: 'youtube.com', snippet: `Video YouTube oleh ${ytInfo.channel}: ${ytInfo.title}` }]
-              };
+              });
             }
           } catch (_) {}
         }
@@ -7834,10 +7867,10 @@ ${organicBlock}
                 if (extData && extData.success && extData.content && extData.content.length > 40) {
                   clearTimeout(browseTimeout);
                   const docTitle = extData.title || (extractDomainSafe ? extractDomainSafe(url) : 'Halaman Web');
-                  return {
+                  return cacheAndReturn({
                     text: `KONTEN HALAMAN WEB "${docTitle}" (${url}):\n\n${extData.content}`,
                     sources: [{ title: docTitle, url: url, domain: extData.domain || 'web', snippet: extData.content.substring(0, 160) }]
-                  };
+                  });
                 }
               }
             } catch (_) {}
@@ -7862,10 +7895,10 @@ ${organicBlock}
                   });
                 }
                 const foundDomain = extractDomainSafe ? extractDomainSafe(url) : 'web';
-                return {
+                return cacheAndReturn({
                   text: output,
                   sources: [{ title: data.title || url, url: url, domain: foundDomain, snippet: (data.text || '').substring(0, 160) }]
-                };
+                });
               }
             }
           } catch (_) {}
@@ -7886,10 +7919,10 @@ ${organicBlock}
               const cleanMarkdown = markdown.substring(0, 5000);
               const titleMatch = markdown.match(/^Title:\s*(.+)$/m) || markdown.match(/^#\s+(.+)$/m);
               const docTitle = titleMatch ? titleMatch[1].trim() : (extractDomainSafe ? extractDomainSafe(url) : 'Halaman Web');
-              return {
+              return cacheAndReturn({
                 text: `KONTEN HALAMAN WEB "${docTitle}" (${url}):\n\n${cleanMarkdown}`,
                 sources: [{ title: docTitle, url: url, domain: extractDomainSafe ? extractDomainSafe(url) : 'web', snippet: cleanMarkdown.substring(0, 160) }]
-              };
+              });
             }
           }
         } catch (_) {}
@@ -7910,10 +7943,10 @@ ${organicBlock}
               if (wikiRes.ok) {
                 const wData = await wikiRes.json();
                 const extract = wData.extract || wData.description || 'Halaman Wikipedia';
-                return {
+                return cacheAndReturn({
                   text: `KONTEN ARTIKEL WIKIPEDIA "${wData.title || pageTitle}" (${url}):\n\n${extract}`,
                   sources: [{ title: wData.title || pageTitle, url: url, domain: `${lang}.wikipedia.org`, snippet: extract.substring(0, 160) }]
-                };
+                });
               }
             }
           } catch (_) {}
@@ -8817,10 +8850,12 @@ Format teks (untuk model tanpa function calling):
         }
 
         // Filter out duplicate or loop tool calls
+        const roundSignatures = new Set();
         const detectedAutonomousCalls = rawAutonomousCalls.filter(call => {
           if (!call || !call.function || !AUTONOMOUS_TOOL_NAMES.includes(call.function.name)) return false;
           const sig = getAutonomousToolSignature(call);
-          if (executedToolSignatures.has(sig)) return false; // Cegah pemanggilan tool berulang (loop)
+          if (executedToolSignatures.has(sig) || roundSignatures.has(sig)) return false; // Cegah pemanggilan tool berulang (loop / duplicate)
+          roundSignatures.add(sig);
           return true;
         });
 
@@ -8838,8 +8873,7 @@ Format teks (untuk model tanpa function calling):
           preambleHtml = `<div class="autonomous-preamble-text" style="margin-bottom:8px;">${renderMarkdown(cleanAssistant)}</div>`;
         }
 
-        for (const call of detectedAutonomousCalls) {
-          if (STATE.abortController?.signal?.aborted) break;
+        const toolTaskItems = detectedAutonomousCalls.map(call => {
           const toolName = call.function.name;
           let previewArg = '';
           try {
@@ -8856,14 +8890,26 @@ Format teks (untuk model tanpa function calling):
           }
 
           executedToolSignatures.add(getAutonomousToolSignature(call));
-          toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
+          const summary = `${toolName}("${previewArg.substring(0, 40)}")`;
+          return { call, toolName, previewArg, summary };
+        });
 
-          // Visual status loading di gelembung obrolan (Preamble teks dipertahankan)
-          bubbleText.innerHTML = preambleHtml + executedHudHtml + createAutonomousToolHudHtml(toolName, previewArg, 'loading');
-          smartScrollChatToBottom(true);
+        toolTaskItems.forEach(item => toolSummaryList.push(item.summary));
 
-          // Eksekusi tool Zero-API Live News & Tech Wire
-          const toolExecRes = await executeAutonomousWebTool(toolName, call.function.arguments, promptText, session);
+        // Tampilkan visual status loading untuk seluruh tool secara simultan
+        bubbleText.innerHTML = preambleHtml + executedHudHtml + toolTaskItems.map(item => createAutonomousToolHudHtml(item.toolName, item.previewArg, 'loading')).join('');
+        smartScrollChatToBottom(true);
+
+        // Eksekusi seluruh tool secara paralel (Promise.all) untuk memangkas latensi jaringan
+        const toolExecResults = await Promise.all(
+          toolTaskItems.map(async (item) => {
+            const toolExecRes = await executeAutonomousWebTool(item.toolName, item.call.function.arguments, promptText, session);
+            return { ...item, toolExecRes };
+          })
+        );
+
+        for (const resItem of toolExecResults) {
+          const { toolName, previewArg, toolExecRes } = resItem;
           if (toolExecRes.sources && Array.isArray(toolExecRes.sources)) {
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
@@ -9776,10 +9822,12 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
         }
 
         // Filter out duplicate or loop tool calls
+        const roundSignatures = new Set();
         const detectedAutonomousCalls = rawAutonomousCalls.filter(call => {
           if (!call || !call.function || !AUTONOMOUS_TOOL_NAMES.includes(call.function.name)) return false;
           const sig = getAutonomousToolSignature(call);
-          if (executedToolSignatures.has(sig)) return false; // Cegah pemanggilan tool berulang (loop)
+          if (executedToolSignatures.has(sig) || roundSignatures.has(sig)) return false; // Cegah pemanggilan tool berulang (loop / duplicate)
+          roundSignatures.add(sig);
           return true;
         });
 
@@ -9797,8 +9845,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           preambleHtml = `<div class="autonomous-preamble-text" style="margin-bottom:8px;">${renderMarkdown(cleanAssistant)}</div>`;
         }
 
-        for (const call of detectedAutonomousCalls) {
-          if (STATE.abortController?.signal?.aborted) break;
+        const toolTaskItems = detectedAutonomousCalls.map(call => {
           const toolName = call.function.name;
           let previewArg = '';
           try {
@@ -9815,14 +9862,26 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
           }
 
           executedToolSignatures.add(getAutonomousToolSignature(call));
-          toolSummaryList.push(`${toolName}("${previewArg.substring(0, 40)}")`);
+          const summary = `${toolName}("${previewArg.substring(0, 40)}")`;
+          return { call, toolName, previewArg, summary };
+        });
 
-          // Visual status loading di gelembung obrolan (Preamble teks dipertahankan)
-          bubbleText.innerHTML = preambleHtml + executedHudHtml + createAutonomousToolHudHtml(toolName, previewArg, 'loading');
-          smartScrollChatToBottom(true);
+        toolTaskItems.forEach(item => toolSummaryList.push(item.summary));
 
-          // Eksekusi tool Zero-API Live News & Tech Wire (Bebas Wikipedia)
-          const toolExecRes = await executeAutonomousWebTool(toolName, call.function.arguments, promptText, session);
+        // Tampilkan visual status loading untuk seluruh tool secara simultan
+        bubbleText.innerHTML = preambleHtml + executedHudHtml + toolTaskItems.map(item => createAutonomousToolHudHtml(item.toolName, item.previewArg, 'loading')).join('');
+        smartScrollChatToBottom(true);
+
+        // Eksekusi seluruh tool secara paralel (Promise.all) untuk memangkas latensi jaringan
+        const toolExecResults = await Promise.all(
+          toolTaskItems.map(async (item) => {
+            const toolExecRes = await executeAutonomousWebTool(item.toolName, item.call.function.arguments, promptText, session);
+            return { ...item, toolExecRes };
+          })
+        );
+
+        for (const resItem of toolExecResults) {
+          const { toolName, previewArg, toolExecRes } = resItem;
           if (toolExecRes.sources && Array.isArray(toolExecRes.sources)) {
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
@@ -14163,12 +14222,22 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       function stopWaveAnim() {
         if (audio._waveAnimId) {
           cancelAnimationFrame(audio._waveAnimId);
+          clearTimeout(audio._waveAnimId);
           audio._waveAnimId = null;
         }
       }
       function drawWaveform(isPlaying) {
         if (!canvas || typeof canvas.getContext !== 'function') return;
         stopWaveAnim(); // cegah penumpukan beberapa loop pada kartu yang sama
+
+        // Hemat daya: jika tab tersembunyi atau kartu audio berada di luar viewport, tunda render
+        if (isPlaying && (document.hidden || !canvas.offsetParent)) {
+          audio._waveAnimId = setTimeout(() => {
+            if (!audio.paused) drawWaveform(true);
+          }, 500);
+          return;
+        }
+
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
         const w = canvas.width;
@@ -14179,6 +14248,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         const barW = w / bars;
         const now = performance.now() * 0.005;
 
+        // Inisialisasi gradien SEKALI per frame, bukan 48 kali per frame (menghemat 5.600+ alokasi Skia/detik)
+        const grad = ctx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, '#00FFC2');
+        grad.addColorStop(1, '#00F0FF');
+        ctx.fillStyle = grad;
+
         for (let b = 0; b < bars; b++) {
           let barHeight;
           if (isPlaying) {
@@ -14186,10 +14261,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           } else {
             barHeight = Math.sin(b * 0.3) * (h * 0.3) + (h * 0.35);
           }
-          const grad = ctx.createLinearGradient(0, h - barHeight, 0, h);
-          grad.addColorStop(0, '#00FFC2');
-          grad.addColorStop(1, '#00F0FF');
-          ctx.fillStyle = grad;
           ctx.fillRect(b * barW + 1, h - barHeight, barW - 2, barHeight);
         }
 
@@ -16512,7 +16583,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       window.addEventListener('resize', () => { cachedWidth = 0; });
 
       const draw = () => {
-        const isCanvasVisible = Boolean(canvas.offsetParent);
+        const isCanvasVisible = Boolean(canvas.offsetParent) && !document.hidden && document.visibilityState !== 'hidden';
         if (!isCanvasVisible) {
           // Canvas tersembunyi (modal BGM Deck ditutup) → hentikan loop rAF sepenuhnya.
           // Menghemat 60-120 frame/detik siklus CPU/GPU di latar belakang saat musik berjalan.
@@ -19189,6 +19260,11 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         document.body.classList.remove('page-paused');
         requestAnimationFrame(restoreChatScrollPosition);
         checkBackgroundChatTasksSync();
+        try {
+          if (typeof BGMEngine !== 'undefined' && BGMEngine.isPlaying) {
+            BGMEngine.ensureVisualizerRunning();
+          }
+        } catch (_) {}
       }
     });
 
