@@ -2053,10 +2053,12 @@ html, body {
 
 @keyframes cyberImagePulse {
   0%, 100% {
-    box-shadow: 0 8px 26px rgba(255, 0, 127, 0.18), inset 0 0 10px rgba(255, 0, 127, 0.05);
+    opacity: 0.94;
+    border-color: rgba(255, 0, 127, 0.7);
   }
   50% {
-    box-shadow: 0 8px 36px rgba(255, 0, 127, 0.35), inset 0 0 18px rgba(255, 0, 127, 0.15);
+    opacity: 1;
+    border-color: #FF007F;
   }
 }
 
@@ -2085,10 +2087,12 @@ html, body {
 
 @keyframes cyberMusicPulse {
   0%, 100% {
-    box-shadow: 0 8px 26px rgba(0, 255, 194, 0.18), inset 0 0 10px rgba(0, 255, 194, 0.05);
+    opacity: 0.94;
+    border-color: rgba(0, 255, 194, 0.7);
   }
   50% {
-    box-shadow: 0 8px 36px rgba(0, 255, 194, 0.35), inset 0 0 18px rgba(0, 255, 194, 0.15);
+    opacity: 1;
+    border-color: #00FFC2;
   }
 }
 
@@ -2697,12 +2701,12 @@ html, body {
 
 @keyframes cyberWandPulse {
   from {
-    box-shadow: 0 0 10px rgba(255, 0, 127, 0.4);
-    transform: scale(1);
+    transform: scale(0.98);
+    opacity: 0.85;
   }
   to {
-    box-shadow: 0 0 20px rgba(255, 0, 127, 0.8), 0 0 8px rgba(157, 78, 221, 0.6);
     transform: scale(1.05);
+    opacity: 1;
   }
 }
 
@@ -4313,13 +4317,7 @@ body.modal-open {
   }
 
   /* Hardware Performance & Thermal Optimization for Mobile (Helio/Mali GPU Cooling) */
-  .top-nav,
-  .composer-container,
-  .composer-box,
-  .sidebar,
-  .model-dropdown-menu,
-  .modal-card,
-  .message-bubble {
+  *, *::before, *::after {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
   }
@@ -6387,18 +6385,15 @@ body.modal-open {
 @keyframes quantumHoloPulse {
   0% {
     transform: scale(0.92) rotate(0deg);
-    opacity: 0.7;
-    filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.4));
+    opacity: 0.75;
   }
   50% {
-    transform: scale(1.08) rotate(180deg);
+    transform: scale(1.06) rotate(180deg);
     opacity: 1;
-    filter: drop-shadow(0 0 24px rgba(255, 0, 127, 0.85));
   }
   100% {
     transform: scale(0.92) rotate(360deg);
-    opacity: 0.7;
-    filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.4));
+    opacity: 0.75;
   }
 }
 
@@ -6537,8 +6532,10 @@ body.modal-open {
   position: absolute;
   inset: 0;
   border: 2px dashed rgba(0, 240, 255, 0.5);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.4);
   border-radius: 50%;
   animation: quantumHoloPulse 4s linear infinite;
+  will-change: transform;
 }
 
 .image-gen-holo-core {
@@ -8827,7 +8824,7 @@ body.modal-open {
 /* Chat Message Row Performance Containment (Only renders visible messages on screen) */
 .message-row {
   content-visibility: auto;
-  contain-intrinsic-size: 0 80px;
+  contain-intrinsic-size: auto 90px;
 }
 
 /* Page Visibility Optimization (Zero battery & GPU drain when tab/app hidden) */

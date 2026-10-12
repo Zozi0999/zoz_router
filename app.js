@@ -2772,7 +2772,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
     };
 
-    els.chatViewport?.addEventListener('scroll', () => handleScrollEvent(els.chatViewport), { passive: true });
+    let scrollRafId = null;
+    els.chatViewport?.addEventListener('scroll', () => {
+      if (scrollRafId) return;
+      scrollRafId = requestAnimationFrame(() => {
+        scrollRafId = null;
+        handleScrollEvent(els.chatViewport);
+      });
+    }, { passive: true });
     
     // User touch start, move, and end on mobile devices (ChatGPT Elastic Pull & Hold)
     els.chatViewport?.addEventListener('touchstart', (e) => {
@@ -19173,6 +19180,11 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       if (document.hidden || document.visibilityState === 'hidden') {
         preserveChatScrollPosition();
         document.body.classList.add('page-paused');
+        try {
+          if (AudioEngine.ctx && AudioEngine.ctx.state === 'running') {
+            AudioEngine.ctx.suspend().catch(() => {});
+          }
+        } catch (_) {}
       } else if (document.visibilityState === 'visible') {
         document.body.classList.remove('page-paused');
         requestAnimationFrame(restoreChatScrollPosition);
