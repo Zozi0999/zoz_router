@@ -422,6 +422,10 @@ export default {
             top_p: body.top_p ?? 0.9,
             max_tokens: body.max_tokens ?? 4096,
             ...(body.plugins ? { plugins: body.plugins } : {}),
+            ...(body.provider ? { provider: body.provider } : {}),
+            ...(body.modalities ? { modalities: body.modalities } : {}),
+            ...(body.reasoning ? { reasoning: body.reasoning } : {}),
+            ...(body.response_format ? { response_format: body.response_format } : {}),
             ...(body.tools && Array.isArray(body.tools) && (!body.model || (!body.model.includes(':free') && body.model !== 'openrouter/free')) ? { tools: body.tools } : {})
           })
         });
@@ -438,6 +442,32 @@ export default {
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
       }
+    }
+
+    // Stop Active Chat Task acknowledgement
+    if ((url.pathname === '/api/chat/stop' || url.pathname.startsWith('/api/chat/stop/')) && (request.method === 'POST' || request.method === 'GET')) {
+      return new Response(JSON.stringify({ success: true, stopped: true, message: 'Chat stop acknowledged.' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      });
+    }
+
+    // Chat Status Endpoint for Cloudflare Gateway (Stateless)
+    if ((url.pathname === '/api/chat/status' || url.pathname.startsWith('/api/chat/status/')) && (request.method === 'GET' || request.method === 'POST')) {
+      return new Response(JSON.stringify({
+        success: true,
+        stateless: true,
+        active: false,
+        status: 'none',
+        activeSessions: [],
+        recentlyCompletedSessions: []
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
     }
 
     // Proxy OpenRouter Models
@@ -599,6 +629,31 @@ export default {
       }
     }
 
+    // Proxy OpenRouter Image Models List
+    if ((url.pathname === '/api/openrouter/images/models' || url.pathname === '/api/openrouter/image-models') && request.method === 'GET') {
+      try {
+        let authHeader = request.headers.get('Authorization');
+        if (!authHeader) {
+          const qKey = request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
+          if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
+        }
+        const headers = { 'User-Agent': 'ZozRouter/1.0' };
+        if (authHeader) headers['Authorization'] = authHeader;
+
+        const res = await fetch('https://openrouter.ai/api/v1/images/models', { headers });
+        const rawText = await res.text();
+        return new Response(rawText, {
+          status: res.status,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ success: false, data: [], error: e.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
     // Proxy Generate Image
     if (url.pathname === '/api/generate-image' || url.pathname === '/api/image/generate') {
       try {
@@ -618,7 +673,7 @@ export default {
           model = body.model || model;
           width = parseInt(body.width, 10) || width;
           height = parseInt(body.height, 10) || height;
-          seed = body.seed || null;
+          seed = (body.seed !== undefined && body.seed !== null && body.seed !== '') ? (parseInt(body.seed, 10) || 0) : null;
           openRouterKey = body.openRouterKey || body.apiKey || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
         } else {
           prompt = url.searchParams.get('prompt') || url.searchParams.get('q') || '';
@@ -626,7 +681,8 @@ export default {
           model = url.searchParams.get('model') || model;
           width = parseInt(url.searchParams.get('width'), 10) || width;
           height = parseInt(url.searchParams.get('height'), 10) || height;
-          seed = url.searchParams.get('seed') || null;
+          const rawSeed = url.searchParams.get('seed');
+          seed = (rawSeed !== null && rawSeed !== '') ? (parseInt(rawSeed, 10) || 0) : null;
           openRouterKey = (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
         }
 
@@ -642,7 +698,7 @@ export default {
         }
 
         const cleanPrompt = prompt.trim();
-        const actualSeed = seed || Math.floor(Math.random() * 100000000);
+        const actualSeed = (seed !== null && !isNaN(seed)) ? seed : Math.floor(Math.random() * 100000000);
         const startTime = Date.now();
         width = Math.min(Math.max(width, 256), 2048);
         height = Math.min(Math.max(height, 256), 2048);
@@ -735,7 +791,7 @@ export default {
                   if (imgItem) {
                     finalImageUrl = imgItem.image_url?.url || imgItem.url || '';
                   } else if (msg.content) {
-                    const mdMatch = msg.content.match(/!\[.*?\]\((https?:\/\/[^\s\)]+)\)/);
+                    const mdMatch = msg.content.match(/!\[.*?\]\(((?:https?:\/\/|data:image\/)[^\s\)]+)\)/);
                     if (mdMatch) finalImageUrl = mdMatch[1];
                   }
                 }
@@ -758,28 +814,70 @@ export default {
 
         // 2. Default (Pollinations AI Multi-Style) - HANYA untuk model lokal/Pollinations
         if (!isCloudModel && !finalImageUrl) {
-          let styledPrompt = cleanPrompt;
-          if (effectiveModel === 'flux-realism' && !/photo|realis|cinematic/i.test(cleanPrompt)) {
-            styledPrompt = `${cleanPrompt}, photorealistic, ultra-detailed 8k photography, cinematic lighting`;
-          } else if (effectiveModel === 'flux-anime' && !/anime|manga|2d/i.test(cleanPrompt)) {
-            styledPrompt = `${cleanPrompt}, anime aesthetic, high quality Japanese manga style, vibrant colors, detailed line art`;
-          } else if (effectiveModel === 'flux-3d' && !/3d|cgi|render/i.test(cleanPrompt)) {
-            styledPrompt = `${cleanPrompt}, 3d digital render, octane render, unreal engine 5, 3d cgi volumetric lighting`;
-          } else if (effectiveModel === 'midjourney' && !/artistic|midjourney/i.test(cleanPrompt)) {
-            styledPrompt = `${cleanPrompt}, midjourney aesthetic, artistic concept art, dramatic composition, breathtaking detail`;
-          } else if (effectiveModel === 'flux-pro' && !/masterpiece|pro/i.test(cleanPrompt)) {
-            styledPrompt = `${cleanPrompt}, masterpiece, professional award-winning composition, ultra sharp details`;
+          // 2A. Jika mode edit foto dan foto referensi adalah data URL Base64, panggil endpoint POST Pollinations img2img
+          if (referenceImage && typeof referenceImage === 'string' && referenceImage.startsWith('data:')) {
+            try {
+              const pollRes = await fetch('https://image.pollinations.ai/', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                },
+                body: JSON.stringify({
+                  prompt: cleanPrompt,
+                  model: effectiveModel,
+                  image: referenceImage,
+                  width: width,
+                  height: height,
+                  nologo: true,
+                  seed: actualSeed
+                })
+              });
+              if (pollRes.ok) {
+                const buf = await pollRes.arrayBuffer();
+                if (buf && buf.byteLength > 0) {
+                  const mime = pollRes.headers.get('content-type') || 'image/jpeg';
+                  let binary = '';
+                  const bytes = new Uint8Array(buf);
+                  const len = bytes.byteLength;
+                  const CHUNK_SIZE = 0x8000; // 32KB chunking
+                  for (let i = 0; i < len; i += CHUNK_SIZE) {
+                    binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + CHUNK_SIZE, len)));
+                  }
+                  finalImageUrl = `data:${mime};base64,${btoa(binary)}`;
+                }
+              }
+            } catch (editErr) {
+              console.warn('Pollinations POST Img2Img error in worker:', editErr);
+            }
           }
 
-          let urlPrompt = styledPrompt;
-          if (urlPrompt.length > 800) {
-            const cut = urlPrompt.slice(0, 800);
-            const lastSpace = cut.lastIndexOf(' ');
-            urlPrompt = (lastSpace > 600 ? cut.slice(0, lastSpace) : cut).trim();
-          }
-          finalImageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=${encodeURIComponent(effectiveModel)}&seed=${actualSeed}&nologo=true&enhance=true`;
-          if (referenceImage && /^https?:\/\//i.test(referenceImage)) {
-            finalImageUrl += `&image=${encodeURIComponent(referenceImage)}`;
+          // 2B. Standar text-to-image (atau fallback GET jika POST gagal / foto berupa URL HTTP)
+          if (!finalImageUrl) {
+            let styledPrompt = cleanPrompt;
+            if (effectiveModel === 'flux-realism' && !/photo|realis|cinematic/i.test(cleanPrompt)) {
+              styledPrompt = `${cleanPrompt}, photorealistic, ultra-detailed 8k photography, cinematic lighting`;
+            } else if (effectiveModel === 'flux-anime' && !/anime|manga|2d/i.test(cleanPrompt)) {
+              styledPrompt = `${cleanPrompt}, anime aesthetic, high quality Japanese manga style, vibrant colors, detailed line art`;
+            } else if (effectiveModel === 'flux-3d' && !/3d|cgi|render/i.test(cleanPrompt)) {
+              styledPrompt = `${cleanPrompt}, 3d digital render, octane render, unreal engine 5, 3d cgi volumetric lighting`;
+            } else if (effectiveModel === 'midjourney' && !/artistic|midjourney/i.test(cleanPrompt)) {
+              styledPrompt = `${cleanPrompt}, midjourney aesthetic, artistic concept art, dramatic composition, breathtaking detail`;
+            } else if (effectiveModel === 'flux-pro' && !/masterpiece|pro/i.test(cleanPrompt)) {
+              styledPrompt = `${cleanPrompt}, masterpiece, professional award-winning composition, ultra sharp details`;
+            }
+
+            let urlPrompt = styledPrompt;
+            if (urlPrompt.length > 800) {
+              const cut = urlPrompt.slice(0, 800);
+              const lastSpace = cut.lastIndexOf(' ');
+              urlPrompt = (lastSpace > 600 ? cut.slice(0, lastSpace) : cut).trim();
+            }
+            const encodedPrompt = encodeURIComponent(urlPrompt);
+            finalImageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=${encodeURIComponent(effectiveModel)}&seed=${actualSeed}&nologo=true&enhance=true`;
+            if (referenceImage && /^https?:\/\//i.test(referenceImage)) {
+              finalImageUrl += `&image=${encodeURIComponent(referenceImage)}`;
+            }
           }
         }
 
@@ -807,8 +905,116 @@ export default {
       }
     }
 
-    // Proxy Web Search (Serper Google API)
-    if (url.pathname === '/api/web-search') {
+    // Proxy Generate Music (AI Music Studio via OpenRouter Audio API)
+    if ((url.pathname === '/api/generate-music' || url.pathname === '/api/music/generate') && (request.method === 'POST' || request.method === 'GET')) {
+      try {
+        let prompt = '';
+        let musicModel = 'google/lyria-3';
+        let openRouterKey = null;
+
+        if (request.method === 'POST') {
+          const body = await request.json().catch(() => ({}));
+          prompt = body.prompt || body.q || '';
+          musicModel = body.musicModel || body.model || musicModel;
+          openRouterKey = body.openRouterKey || body.apiKey || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-openrouter-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
+        } else {
+          prompt = url.searchParams.get('prompt') || url.searchParams.get('q') || '';
+          musicModel = url.searchParams.get('musicModel') || url.searchParams.get('model') || musicModel;
+          openRouterKey = (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-openrouter-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
+        }
+
+        if (openRouterKey) {
+          openRouterKey = String(openRouterKey).replace(/^Bearer\s+/i, '').trim();
+        }
+
+        if (!prompt || !prompt.trim()) {
+          return new Response(JSON.stringify({ success: false, error: 'Prompt musik kosong.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        if (!openRouterKey) {
+          return new Response(JSON.stringify({
+            success: false,
+            code: 'NO_KEY',
+            error: 'OpenRouter API Key diperlukan untuk membuat musik AI.'
+          }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        const cleanPrompt = prompt.trim();
+        const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openRouterKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://github.com/Zozi0999/zoz_router',
+            'X-Title': 'Zoz Router Music Studio'
+          },
+          body: JSON.stringify({
+            model: musicModel,
+            modalities: ['audio', 'text'],
+            messages: [{ role: 'user', content: cleanPrompt }]
+          })
+        });
+
+        const orData = await orRes.json().catch(() => ({}));
+        if (!orRes.ok || orData.error) {
+          const msg = typeof orData.error === 'object' ? (orData.error.message || JSON.stringify(orData.error)) : (orData.error || `HTTP ${orRes.status}`);
+          return new Response(JSON.stringify({ success: false, error: msg }), {
+            status: orRes.status || 500,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        let audioBase64 = '';
+        let audioMime = 'audio/wav';
+        const msg = orData.choices?.[0]?.message;
+        if (msg) {
+          const a = msg.audio || msg.output_audio;
+          if (a && typeof a.data === 'string') audioBase64 = a.data;
+          else if (Array.isArray(msg.content)) {
+            for (const part of msg.content) {
+              if (part?.audio?.data) { audioBase64 = part.audio.data; break; }
+              if (typeof part?.data === 'string' && /audio/i.test(part.type || '')) { audioBase64 = part.data; break; }
+            }
+          }
+        }
+
+        if (!audioBase64) {
+          return new Response(JSON.stringify({ success: false, error: 'Model OpenRouter tidak mengembalikan audio musik.' }), {
+            status: 502,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        const dataUrl = `data:${audioMime};base64,${audioBase64}`;
+        return new Response(JSON.stringify({
+          success: true,
+          url: dataUrl,
+          title: 'Singularity Cyber Audio',
+          genre: 'Cyberpunk',
+          duration: 15,
+          aiComposed: true,
+          aiModel: musicModel,
+          aiProvider: 'openrouter'
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ success: false, error: 'Gagal membuat musik: ' + e.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
+    // Proxy Web Search (Serper Google API & Autonomous Search Aliases)
+    if (url.pathname === '/api/web-search' || url.pathname === '/api/tools/search-web' || url.pathname === '/api/autonomous/search') {
       try {
         let query = url.searchParams.get('q') || url.searchParams.get('query') || '';
         let apiKey = request.headers.get('x-serper-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.SERPER_API_KEY : null);
@@ -828,6 +1034,13 @@ export default {
         const targetNum = Math.min(Math.max(isNaN(num) ? 15 : num, 1), 30);
         const serperKey = apiKey || (envKeyAllowed(request, env) ? env?.SERPER_API_KEY : null);
         if (!serperKey) {
+          const isAutonomousTool = url.pathname === '/api/tools/search-web' || url.pathname === '/api/autonomous/search';
+          if (isAutonomousTool) {
+            return new Response(JSON.stringify({ success: true, count: 0, query: query, results: [] }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            });
+          }
           return new Response(JSON.stringify({ success: false, error: 'Serper API key diperlukan. Setel SERPER_API_KEY atau kirim header x-serper-key.' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
@@ -968,6 +1181,80 @@ export default {
         });
       } catch (e) {
         return new Response(JSON.stringify({ success: false, error: e.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
+    // Web Page Content Extractor / Autonomous Browse Tool API (via Jina Reader & Direct Fetch)
+    if ((url.pathname === '/api/extract-web' || url.pathname === '/api/read-url' || url.pathname === '/api/scrape-url' || url.pathname === '/api/tools/browse-page' || url.pathname === '/api/autonomous/browse') && (request.method === 'GET' || request.method === 'POST')) {
+      try {
+        let targetUrl = '';
+        let maxChars = 8000;
+        if (request.method === 'GET') {
+          targetUrl = url.searchParams.get('url') || url.searchParams.get('link') || url.searchParams.get('target') || '';
+          if (url.searchParams.get('maxChars')) maxChars = parseInt(url.searchParams.get('maxChars'), 10) || 8000;
+        } else {
+          const body = await request.json().catch(() => ({}));
+          targetUrl = body.url || body.link || body.targetUrl || body.target || '';
+          if (body.maxChars) maxChars = parseInt(body.maxChars, 10) || 8000;
+        }
+        if (!targetUrl || !targetUrl.trim()) {
+          return new Response(JSON.stringify({ success: false, error: 'Parameter url diperlukan.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+        const cleanTarget = targetUrl.trim();
+        let content = '';
+        let title = cleanTarget;
+
+        // 1. Prioritaskan Jina Reader untuk ekstraksi halaman penuh bebas blokir
+        try {
+          const jinaRes = await fetch(`https://r.jina.ai/${cleanTarget}`, {
+            headers: { 'Accept': 'text/plain', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+            signal: AbortSignal.timeout(15000)
+          });
+          if (jinaRes.ok) {
+            content = await jinaRes.text();
+            const titleMatch = content.match(/^Title:\s*(.+)$/m);
+            if (titleMatch) title = titleMatch[1].trim();
+          }
+        } catch (_) {}
+
+        // 2. Fallback direct fetch jika Jina gagal
+        if (!content) {
+          try {
+            const directRes = await fetch(cleanTarget, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+              signal: AbortSignal.timeout(10000)
+            });
+            if (directRes.ok) {
+              const html = await directRes.text();
+              const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+              if (titleMatch) title = titleMatch[1].trim();
+              content = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                            .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+                            .replace(/<[^>]+>/g, ' ')
+                            .replace(/\s+/g, ' ').trim();
+            }
+          } catch (_) {}
+        }
+
+        const trimmedContent = (content || '').slice(0, maxChars);
+        return new Response(JSON.stringify({
+          success: true,
+          url: cleanTarget,
+          title: title || cleanTarget,
+          content: trimmedContent,
+          charCount: trimmedContent.length
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ success: false, error: 'Gagal mengekstrak web: ' + e.message }), {
           status: 500,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });

@@ -486,12 +486,25 @@ function hashUserToken(token) {
   return crypto.createHash('sha256').update(String(token), 'utf8').digest('hex');
 }
 
+function safeAtomicRenameSync(src, dst) {
+  try {
+    fs.renameSync(src, dst);
+  } catch (err) {
+    if (err && (err.code === 'EBUSY' || err.code === 'EPERM' || err.code === 'EXDEV' || err.code === 'EACCES')) {
+      fs.copyFileSync(src, dst);
+      try { fs.unlinkSync(src); } catch (_) {}
+    } else {
+      throw err;
+    }
+  }
+}
+
 function persistIdentityRegistry() {
   try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
     const tmp = IDENTITY_FILE + '.tmp-' + process.pid;
     fs.writeFileSync(tmp, JSON.stringify(identityRegistry || {}, null, 2), 'utf8');
-    fs.renameSync(tmp, IDENTITY_FILE);
+    safeAtomicRenameSync(tmp, IDENTITY_FILE);
   } catch (_) {}
 }
 
@@ -1859,7 +1872,7 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
         const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
         try {
           await fsp.writeFile(tempFile, JSON.stringify(sessData, null, 2), 'utf8');
-          fs.renameSync(tempFile, sessFile);
+          safeAtomicRenameSync(tempFile, sessFile);
         } catch (err) {
           try { fs.unlinkSync(tempFile); } catch {}
           throw err;
@@ -1897,7 +1910,7 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
     const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     try {
       await fsp.writeFile(tempFile, JSON.stringify(sessData, null, 2), 'utf8');
-      fs.renameSync(tempFile, sessFile);
+      safeAtomicRenameSync(tempFile, sessFile);
     } catch (err) {
       try { fs.unlinkSync(tempFile); } catch {}
       throw err;
@@ -3476,14 +3489,14 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     task.liveInspection = {
       ...(task.liveInspection || {}),
       synthesizer: {
-        name: 'Model 3 (Lead Corrector & Enhancer)',
+        name: 'Relazione Esecutiva Integrale & Matrice Comparativa',
         model: masterResearchModel,
         status: 'selesai',
         text: laporanAkhir,
         length: (laporanAkhir || '').length
       },
       model4: {
-        name: 'Model 4 (Executive Chat Summarizer)',
+        name: 'Sommario Esecutivo per la Conversazione Chat',
         model: masterResearchModel,
         status: 'selesai',
         text: chatSummary,
@@ -3755,7 +3768,7 @@ async function requestHandler(req, res) {
       const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       try {
         await fsp.writeFile(tempFile, JSON.stringify(body, null, 2), 'utf8');
-        fs.renameSync(tempFile, sessFile);
+        safeAtomicRenameSync(tempFile, sessFile);
       } catch (err) {
         try { fs.unlinkSync(tempFile); } catch {}
         throw err;
@@ -3791,7 +3804,7 @@ async function requestHandler(req, res) {
       const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       try {
         await fsp.writeFile(tempFile, JSON.stringify(updated, null, 2), 'utf8');
-        fs.renameSync(tempFile, sessFile);
+        safeAtomicRenameSync(tempFile, sessFile);
       } catch (err) {
         try { fs.unlinkSync(tempFile); } catch {}
         throw err;
@@ -4461,7 +4474,7 @@ async function requestHandler(req, res) {
         model = body.model || model;
         width = parseInt(body.width, 10) || width;
         height = parseInt(body.height, 10) || height;
-        seed = body.seed || null;
+        seed = (body.seed !== undefined && body.seed !== null && body.seed !== '') ? (parseInt(body.seed, 10) || 0) : null;
         openRouterKey = body.openRouterKey || body.apiKey || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       } else {
         prompt = reqUrl.searchParams.get('prompt') || reqUrl.searchParams.get('q') || '';
@@ -4471,7 +4484,8 @@ async function requestHandler(req, res) {
         model = reqUrl.searchParams.get('model') || model;
         width = parseInt(reqUrl.searchParams.get('width'), 10) || width;
         height = parseInt(reqUrl.searchParams.get('height'), 10) || height;
-        seed = reqUrl.searchParams.get('seed') || null;
+        const rawSeed = reqUrl.searchParams.get('seed');
+        seed = (rawSeed !== null && rawSeed !== '') ? (parseInt(rawSeed, 10) || 0) : null;
         openRouterKey = (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
       }
 
@@ -4501,7 +4515,7 @@ async function requestHandler(req, res) {
       const isEdit = Boolean(resolvedRefDataUrl);
 
       const cleanPrompt = prompt.trim();
-      const actualSeed = seed || Math.floor(Math.random() * 100000000);
+      const actualSeed = (seed !== null && !isNaN(seed)) ? seed : Math.floor(Math.random() * 100000000);
       const startTime = Date.now();
 
       // Sanitasi dimensi gambar (min 256, max 2048)
@@ -4674,9 +4688,16 @@ async function requestHandler(req, res) {
                         }
                       }
                       const content = msg.content || '';
-                      const mdMatch = content.match(/!\[.*?\]\((https?:\/\/[^\s\)]+)\)/);
+                      const mdMatch = content.match(/!\[.*?\]\(((?:https?:\/\/|data:image\/)[^\s\)]+)\)/);
                       if (mdMatch) {
-                        return safeResolve({ remoteUrl: mdMatch[1] });
+                        const matchUrl = mdMatch[1];
+                        if (matchUrl.startsWith('data:')) {
+                          const mimeMatch = matchUrl.match(/^data:(image\/[a-zA-Z0-9.+_-]+);base64,/);
+                          const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+                          const base64Data = matchUrl.split(',')[1];
+                          return safeResolve({ buffer: Buffer.from(base64Data, 'base64'), contentType: mime });
+                        }
+                        return safeResolve({ remoteUrl: matchUrl });
                       }
                     }
                     safeReject(new Error('OpenRouter Chat tidak mengembalikan data gambar'));

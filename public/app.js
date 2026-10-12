@@ -1437,7 +1437,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         if (validDbSessions.length >= STATE.sessions.length) {
           STATE.sessions = validDbSessions;
           renderChatHistory();
-          if (STATE.currentSessionId) renderCurrentSession();
+          if (STATE.currentSessionId) renderCurrentSession(false);
         }
       }
 
@@ -1489,7 +1489,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
                   delete activeSess._isLazyDisk;
                   activeSess.userId = STATE.userId;
                   await ChatDB.saveSession(activeSess);
-                  renderCurrentSession();
+                  renderCurrentSession(false);
                   renderChatHistory();
                 }
               }
@@ -1543,7 +1543,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       activeSession.messages = diskMsgs;
       delete activeSession._isLazyDisk;
       savePersistedState();
-      renderCurrentSession();
+      renderCurrentSession(false);
       renderChatHistory();
       AudioEngine.success();
       showToast('✨ AI telah selesai menjawab di latar belakang saat Anda keluar.');
@@ -1565,7 +1565,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           }
           activeSession.updatedAt = new Date().toISOString();
           savePersistedState();
-          renderCurrentSession();
+          renderCurrentSession(false);
           renderChatHistory();
           AudioEngine.success();
           showToast('✨ AI telah selesai menjawab di latar belakang saat Anda keluar.');
@@ -1583,7 +1583,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         });
         activeSession.updatedAt = new Date().toISOString();
         savePersistedState();
-        renderCurrentSession();
+        renderCurrentSession(false);
         renderChatHistory();
         AudioEngine.success();
         showToast('✨ AI telah selesai menjawab di latar belakang saat Anda keluar.');
@@ -3672,7 +3672,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     });
   }
 
-  function renderCurrentSession() {
+  function renderCurrentSession(forceScroll = true) {
+    const prevScrollTop = els.chatViewport ? els.chatViewport.scrollTop : 0;
+    const wasScrolledUp = userScrolledUp;
+
     // If no session is actively selected -> Land on TAMPILAN UTAMA (Welcome Hero)!
     if (!STATE.currentSessionId) {
       if (els.welcomeHero) els.welcomeHero.style.display = 'flex';
@@ -3681,7 +3684,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         els.pullUpNewChatWrapper.classList.remove('visible');
         els.pullUpNewChatWrapper.style.display = 'none';
       }
-      smartScrollChatToBottom(true);
+      smartScrollChatToBottom(forceScroll);
       return;
     }
 
@@ -3693,7 +3696,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         els.pullUpNewChatWrapper.classList.remove('visible');
         els.pullUpNewChatWrapper.style.display = 'none';
       }
-      smartScrollChatToBottom(true);
+      smartScrollChatToBottom(forceScroll);
       return;
     }
 
@@ -3721,7 +3724,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             delete session._isLazyDisk;
             ChatDB.saveSession(session);
             if (STATE.currentSessionId === session.id) {
-              renderCurrentSession();
+              renderCurrentSession(forceScroll);
             }
           }
         }).catch(err => {
@@ -3729,7 +3732,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           console.warn('Notice hydrating session:', err);
         });
       }
-      smartScrollChatToBottom(true);
+      smartScrollChatToBottom(forceScroll);
       return;
     }
 
@@ -3740,7 +3743,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         els.pullUpNewChatWrapper.classList.remove('visible');
         els.pullUpNewChatWrapper.style.display = 'none';
       }
-      smartScrollChatToBottom(true);
+      smartScrollChatToBottom(forceScroll);
       return;
     }
 
@@ -3764,7 +3767,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     });
 
     enhanceCodeBlocks(els.messagesList);
-    smartScrollChatToBottom(true);
+    if (!forceScroll && wasScrolledUp && els.chatViewport) {
+      userScrolledUp = true;
+      els.chatViewport.scrollTop = prevScrollTop;
+    } else {
+      smartScrollChatToBottom(forceScroll);
+    }
   }
 
   function createGeneratedImageCardHtml(item) {
@@ -3852,7 +3860,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
   }
 
-  function attachImageCardListeners(row, promptText, imageUrl, cardModel = null) {
+  function attachImageCardListeners(row, promptText, imageUrl, cardModel = null, refImage = null) {
     const card = row.querySelector('.image-result-card');
     if (!card) return;
 
@@ -3885,13 +3893,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       });
     });
 
-    // Regenerate variation
+    // Regenerate variation (mempertahankan foto referensi Img2Img bila ada)
     const regenBtn = card.querySelector('.btn-regen-img');
     regenBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
       const currentSession = getActiveSession();
       if (currentSession) {
-        runImageGeneration(currentSession, promptText, cardModel || STATE.settings.imageModel);
+        const effectiveRefImage = refImage || (STATE.photoEditImage || null);
+        runImageGeneration(currentSession, promptText, cardModel || STATE.settings.imageModel, effectiveRefImage);
       }
     });
   }
@@ -3921,7 +3930,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       </div>
     `;
 
-    attachImageCardListeners(row, msg.prompt, msg.imageUrl || msg.url, msg.model);
+    attachImageCardListeners(row, msg.prompt, msg.imageUrl || msg.url, msg.model, msg.referenceImage || null);
     els.messagesList.appendChild(row);
   }
 
@@ -6626,6 +6635,9 @@ ${organicBlock}
     // di dalam try tanpa catch sehingga pesan tidak pernah terkirim.
     let rawText = els.promptInput ? els.promptInput.value.trim() : '';
     const images = [...(STATE.attachedImages || [])];
+    if (images.length === 0 && STATE.photoEditImage) {
+      images.push(STATE.photoEditImage);
+    }
     const image = images.length > 0 ? images[0] : null;
     const docs = [...(STATE.attachedDocs || [])];
 
@@ -6867,7 +6879,8 @@ ${organicBlock}
       const cleanImgPrompt = extractImagePrompt(text);
       // Foto referensi aktif → kirim sebagai referenceImage (img2img). Server yang
       // memilih jalur Pollinations img2img / OpenRouter input_references otomatis.
-      await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel, STATE.photoEditImage || null);
+      const effectiveRefPhoto = STATE.photoEditImage || (images.length > 0 ? images[0] : null);
+      await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel, effectiveRefPhoto);
       // Mode Edit Foto tetap aktif jika pengguna belum membatalkannya (bukan hanya sekali pakai)
     } else if (isExplicitDeepResearch || STATE.isDeepResearch) {
       // Deep Research dieksekusi jika pengguna mengaktifkan mode Deep Research (Premium) dari UI atau mengetik slash command
@@ -10335,6 +10348,7 @@ Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi roboti
     try {
       // Kompres dulu agar payload base64 ke server tidak membengkak (foto HP bisa 10MB+)
       const dataUrl = await compressImageToWebP(file, 1280, 0.85);
+      clearAttachedImages(); // Bersihkan lampiran gambar biasa agar tidak ada kartu ganda
       setPhotoEditImage(dataUrl);
       STATE.isImageGenMode = true;
       updateImageGenModeUI();
@@ -13585,7 +13599,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
             body: JSON.stringify({
               model: activeImageModel,
               prompt: cleanPrompt,
-              aspect_ratio: '1:1'
+              aspect_ratio: '1:1',
+              ...(isImgEdit && referenceImage ? { input_references: [{ type: 'image_url', image_url: { url: referenceImage } }] } : {})
             }),
             signal: STATE.abortController?.signal
           });
@@ -13624,14 +13639,47 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           styledPrompt = `${cleanPrompt}, masterpiece, professional award-winning composition, ultra sharp details`;
         }
 
-        let urlPrompt = styledPrompt;
-        if (urlPrompt.length > 800) {
-          const cut = urlPrompt.slice(0, 800);
-          const lastSpace = cut.lastIndexOf(' ');
-          urlPrompt = (lastSpace > 600 ? cut.slice(0, lastSpace) : cut).trim();
+        // Direct Pollinations POST jika mode edit foto dengan data URI base64
+        if (isImgEdit && referenceImage && referenceImage.startsWith('data:')) {
+          try {
+            const pollPostRes = await fetch('https://image.pollinations.ai/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                prompt: styledPrompt,
+                model: activeImageModel,
+                image: referenceImage,
+                width: 1024,
+                height: 1024,
+                nologo: true,
+                seed: actualSeed
+              }),
+              signal: STATE.abortController?.signal
+            });
+            if (pollPostRes.ok) {
+              const blob = await pollPostRes.blob();
+              if (blob && blob.size > 0) {
+                finalImageUrl = URL.createObjectURL(blob);
+              }
+            }
+          } catch (pollErr) {
+            console.warn('Client direct Pollinations POST Img2Img notice:', pollErr);
+          }
         }
-        const encoded = encodeURIComponent(urlPrompt);
-        finalImageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&model=${encodeURIComponent(activeImageModel)}&seed=${actualSeed}&nologo=true&enhance=true`;
+
+        if (!finalImageUrl) {
+          let urlPrompt = styledPrompt;
+          if (urlPrompt.length > 800) {
+            const cut = urlPrompt.slice(0, 800);
+            const lastSpace = cut.lastIndexOf(' ');
+            urlPrompt = (lastSpace > 600 ? cut.slice(0, lastSpace) : cut).trim();
+          }
+          const encoded = encodeURIComponent(urlPrompt);
+          finalImageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&model=${encodeURIComponent(activeImageModel)}&seed=${actualSeed}&nologo=true&enhance=true`;
+          if (isImgEdit && referenceImage && /^https?:\/\//i.test(referenceImage)) {
+            finalImageUrl += `&image=${encodeURIComponent(referenceImage)}`;
+          }
+        }
       }
       // Preload image to ensure 100% materialization animation (with 25s safety timeout to prevent infinite UI hang)
       await new Promise((resolve, reject) => {
@@ -13682,7 +13730,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       };
 
       bubbleText.innerHTML = createGeneratedImageCardHtml(cardItem);
-      attachImageCardListeners(assistantRow, cleanPrompt, finalImageUrl);
+      attachImageCardListeners(assistantRow, cleanPrompt, finalImageUrl, resultModel, referenceImage || null);
 
       if (metaBox) {
         metaBox.innerHTML = `
@@ -13703,6 +13751,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           url: finalImageUrl,
           prompt: cleanPrompt,
           model: resultModel,
+          referenceImage: referenceImage || null,
+          isPhotoEdit: isImgEdit,
           width: 1024,
           height: 1024,
           seed: actualSeed,
@@ -17694,6 +17744,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     els.attachOptionGenMusic?.addEventListener('click', (e) => {
       e.stopPropagation();
       closeAttachmentDropdown();
+      clearPhotoEdit(); // Bersihkan kartu edit foto agar tidak bocor ke mode musik
       STATE.isMusicGenMode = true;
       STATE.isImageGenMode = false;
       updateImageGenModeUI();
@@ -18167,12 +18218,21 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       } else if (e.altKey && (e.key === 'm' || e.key === 'M')) {
         e.preventDefault();
         toggleMusicModelDropdown();
-      } else if (e.key === 'Escape' && STATE.isImageGenMode && !els.promptInput?.value.trim()) {
-        closeImageModelDropdown();
-      } else if (e.key === 'Escape' && STATE.photoEditImage && !els.promptInput?.value.trim()) {
-        clearPhotoEdit(); // lepas foto referensi saat prompt kosong
-      } else if (e.key === 'Escape' && STATE.isMusicGenMode && !els.promptInput?.value.trim()) {
-        closeMusicModelDropdown();
+      } else if (e.key === 'Escape' && !els.promptInput?.value.trim()) {
+        const isImgDropdownOpen = Boolean(els.imageModelDropdown && els.imageModelDropdown.style.display !== 'none');
+        const isMusicDropdownOpen = Boolean(els.musicModelDropdown && els.musicModelDropdown.style.display !== 'none');
+        if (isImgDropdownOpen) {
+          closeImageModelDropdown();
+        } else if (isMusicDropdownOpen) {
+          closeMusicModelDropdown();
+        } else if (STATE.photoEditImage) {
+          clearPhotoEdit(); // lepas foto referensi saat prompt kosong
+          AudioEngine.click();
+        } else if (STATE.isImageGenMode) {
+          closeImageModelDropdown();
+        } else if (STATE.isMusicGenMode) {
+          closeMusicModelDropdown();
+        }
       }
     });
 
@@ -18806,22 +18866,73 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     const appContainer = $('.app-container');
     const chatViewport = els.chatViewport;
 
+    // Proteksi posisi scroll percakapan saat jendela diminimize, keluar jendela/tab, atau beralih fokus
+    let savedScrollBeforeHide = null;
+    let savedUserScrolledUp = false;
+
+    const preserveChatScrollPosition = () => {
+      if (chatViewport) {
+        savedScrollBeforeHide = chatViewport.scrollTop;
+        savedUserScrolledUp = userScrolledUp;
+      }
+    };
+
+    const restoreChatScrollPosition = () => {
+      if (savedUserScrolledUp && savedScrollBeforeHide !== null && chatViewport) {
+        userScrolledUp = true;
+        chatViewport.scrollTop = savedScrollBeforeHide;
+        // Jamin posisi scroll tetap tertahan setelah siklus reflow rendering browser selesai
+        setTimeout(() => {
+          if (savedUserScrolledUp && savedScrollBeforeHide !== null && chatViewport) {
+            chatViewport.scrollTop = savedScrollBeforeHide;
+          }
+        }, 60);
+      }
+    };
+
+    // Saat window blur atau diminimize: kunci posisi scroll yang sedang dibaca pengguna
+    window.addEventListener('blur', preserveChatScrollPosition);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden || document.visibilityState === 'hidden') {
+        preserveChatScrollPosition();
+      } else if (document.visibilityState === 'visible') {
+        requestAnimationFrame(restoreChatScrollPosition);
+        checkBackgroundChatTasksSync();
+      }
+    });
+
+    window.addEventListener('focus', () => {
+      requestAnimationFrame(restoreChatScrollPosition);
+      checkBackgroundChatTasksSync();
+    });
+
     if (window.visualViewport) {
       const handleResize = () => {
+        // JANGAN proses jika dokumen sedang diminimize atau tersembunyi
+        if (document.hidden || document.visibilityState === 'hidden') return;
+
         const vh = window.visualViewport.height;
-        if (appContainer) {
+        // Abaikan geometri cacat/0 saat jendela diminimize ke taskbar
+        if (vh <= 120) return;
+
+        const isTouchMobile = window.innerWidth <= 768 || ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
+        // HANYA adapt inline container height untuk perangkat mobile touch screen (pada PC biarkan CSS 100dvh yang murni)
+        if (isTouchMobile && appContainer) {
           appContainer.style.height = `${vh}px`;
         }
         autoResizeTextarea(els.promptInput);
 
-        // If keyboard opened (visual viewport significantly smaller than innerHeight)
-        if (window.innerHeight - vh > 100) {
+        // Jika keyboard virtual mobile terbuka (visual viewport berkurang signifikan)
+        if (isTouchMobile && (window.innerHeight - vh > 100)) {
           setTimeout(() => {
+            if (document.hidden || document.visibilityState === 'hidden') return;
             const active = document.activeElement;
             if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) {
               active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
             }
-            if (chatViewport) {
+            // HANYA gulir ke dasar jika pengguna TIDAK sedang membaca pesan di atas
+            if (chatViewport && !userScrolledUp) {
               chatViewport.scrollTop = chatViewport.scrollHeight;
             }
           }, 60);
@@ -18830,6 +18941,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
       window.visualViewport.addEventListener('resize', handleResize);
       window.visualViewport.addEventListener('scroll', () => {
+        if (document.hidden || document.visibilityState === 'hidden') return;
         if (window.visualViewport.offsetTop > 0) {
           window.scrollTo(0, 0);
         }
@@ -18838,39 +18950,38 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
     // Adapt textarea sizing on window resize
     window.addEventListener('resize', () => {
+      if (document.hidden || document.visibilityState === 'hidden') return;
       autoResizeTextarea(els.promptInput);
     });
 
-    // Auto-scroll on textarea focus for all inputs
-    const inputs = [els.promptInput, els.modelSearchInput, els.customModelInput];
-    inputs.forEach(input => {
-      if (!input) return;
-      input.addEventListener('focus', () => {
+    // Auto-scroll on textarea focus HANYA untuk prompt input dan HANYA jika pengguna tidak sedang scroll ke atas
+    if (els.promptInput) {
+      els.promptInput.addEventListener('focus', () => {
+        if (document.hidden || document.visibilityState === 'hidden') return;
         setTimeout(() => {
-          if (window.visualViewport && appContainer) {
+          if (document.hidden || document.visibilityState === 'hidden') return;
+          const isTouchMobile = window.innerWidth <= 768 || ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+          if (isTouchMobile && window.visualViewport && appContainer && window.visualViewport.height > 120) {
             appContainer.style.height = `${window.visualViewport.height}px`;
           }
-          smartScrollChatToBottom(true);
+          // HINDARI menarik percakapan ke bawah jika pengguna sedang menggulir ke atas membaca pesan lama
+          if (!userScrolledUp) {
+            smartScrollChatToBottom(false);
+          }
         }, 120);
       });
-      input.addEventListener('blur', () => {
+
+      els.promptInput.addEventListener('blur', () => {
+        if (document.hidden || document.visibilityState === 'hidden') return;
         setTimeout(() => {
-          if (window.visualViewport && appContainer) {
+          if (document.hidden || document.visibilityState === 'hidden') return;
+          const isTouchMobile = window.innerWidth <= 768 || ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+          if (isTouchMobile && window.visualViewport && appContainer && window.visualViewport.height > 120) {
             appContainer.style.height = `${window.visualViewport.height}px`;
           }
         }, 100);
       });
-    });
-
-    // Claude AI resilience: sinkronisasi respons latar belakang saat pengguna kembali membuka aplikasi atau tab
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        checkBackgroundChatTasksSync();
-      }
-    });
-    window.addEventListener('focus', () => {
-      checkBackgroundChatTasksSync();
-    });
+    }
 
     // Flush persistensi saat tab ditutup/navigasi: semua savePersistedState() lain
     // kini di-debounce 700ms, jadi tanpa flush sinkron ini perubahan terakhir
