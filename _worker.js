@@ -2,13 +2,19 @@ function isPrivateHostname(hostname) {
   if (!hostname) return true;
   const h = String(hostname).toLowerCase().replace(/^\[|\]$/g, '');
   if (['localhost','127.0.0.1','::1','0.0.0.0','::','0'].includes(h)) return true;
+  if (/^0\./.test(h)) return true; // 0.0.0.0/8 "this network" (RFC 1122)
   if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h)) return true;
   if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return true;
   if (/^169\.254\./.test(h)) return true;
   // Rentang reserved yang dulu terlewat (cocokkan proteksi server-side)
   if (/^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./.test(h)) return true; // 100.64.0.0/10 CGNAT (RFC 6598)
   if (/^192\.0\.0\./.test(h)) return true; // 192.0.0.0/24 IETF protocol assignments (RFC 6890)
+  if (/^192\.0\.2\./.test(h)) return true; // 192.0.2.0/24 TEST-NET-1 (RFC 5737)
+  if (/^192\.88\.99\./.test(h)) return true; // 192.88.99.0/24 6to4 relay anycast (RFC 3068)
   if (/^198\.(18|19)\./.test(h)) return true; // 198.18.0.0/15 benchmarking (RFC 2544)
+  if (/^198\.51\.100\./.test(h)) return true; // 198.51.100.0/24 TEST-NET-2 (RFC 5737)
+  if (/^203\.0\.113\./.test(h)) return true; // 203.0.113.0/24 TEST-NET-3 (RFC 5737)
+  if (/^(22[4-9]|23[0-9]|24[0-9]|25[0-5])\./.test(h)) return true; // 224.0.0.0/4 multicast & 240.0.0.0/4 reserved (RFC 1112)
   if (/^fc00:|^fe80:/i.test(h)) return true; // IPv6 Unique Local & Link-Local
   if (h.startsWith('::ffff:')) return true; // Block all IPv4-mapped IPv6
   if (h.startsWith('::7f00:') || h.startsWith('::a9fe:') || h.startsWith('::c0a8:') || h.startsWith('::0a')) return true; // Block mapped hex variants
@@ -1033,7 +1039,7 @@ export default {
         let num = parseInt(url.searchParams.get('num') || url.searchParams.get('limit') || '15', 10);
         if (request.method === 'POST') {
           const body = await request.json().catch(() => ({}));
-          query = body.query || body.q || query;
+          query = body.query || body.q || body.search || body.keyword || body.topic || body.text || query;
           apiKey = body.apiKey || body.serperApiKey || apiKey || (envKeyAllowed(request, env) ? env?.SERPER_API_KEY : null);
           if (body.num || body.limit) num = parseInt(body.num || body.limit, 10);
         }
@@ -1175,7 +1181,7 @@ export default {
           maxResults = parseInt(url.searchParams.get('limit') || '6', 10) || 6;
         } else {
           const body = await request.json().catch(() => ({}));
-          query = body.q || body.query || body.keyword || '';
+          query = body.q || body.query || body.keyword || body.search || body.topic || body.title || body.text || '';
           maxResults = parseInt(body.limit || body.max_results, 10) || 6;
         }
 
@@ -1218,7 +1224,36 @@ export default {
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
           });
         }
-        const cleanTarget = targetUrl.trim();
+        let cleanTarget = targetUrl.trim();
+        if (!/^https?:\/\//i.test(cleanTarget)) {
+          cleanTarget = 'https://' + cleanTarget;
+        }
+
+        // Intersep khusus untuk URL YouTube agar mengembalikan data judul & channel resmi via oEmbed
+        const ytMatch = cleanTarget.match(/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+        if (ytMatch && ytMatch[1]) {
+          try {
+            const ytInfoRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${ytMatch[1]}`)}&format=json`, {
+              signal: AbortSignal.timeout(8000),
+              headers: { 'User-Agent': YT_SEARCH_UA }
+            });
+            if (ytInfoRes.ok) {
+              const ytData = await ytInfoRes.json();
+              return new Response(JSON.stringify({
+                success: true,
+                url: `https://www.youtube.com/watch?v=${ytMatch[1]}`,
+                title: ytData.title || cleanTarget,
+                content: `[INFORMASI TERVERIFIKASI VIDEO YOUTUBE]\n- Judul: "${ytData.title}"\n- Channel / Pembuat: "${ytData.author_name || 'Kreator YouTube'}" (${ytData.author_url || 'N/A'})\n- URL: https://www.youtube.com/watch?v=${ytMatch[1]}\n- Thumbnail: ${ytData.thumbnail_url || `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg`}\n(Diambil secara real-time via YouTube oEmbed)`,
+                videoIds: [ytMatch[1]],
+                charCount: 200
+              }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+              });
+            }
+          } catch (_) {}
+        }
+
         let content = '';
         let title = cleanTarget;
 
@@ -1286,7 +1321,7 @@ export default {
           });
         }
         if (!topic) {
-          topic = content.split(/\s+/).slice(0, 4).join('_').replace(/[^\w]/g, '').toLowerCase() || 'catatan';
+          topic = content.split(/\s+/).slice(0, 4).join('_').replace(/[^\p{L}\p{N}_]/gu, '').toLowerCase() || 'catatan';
         }
         return new Response(JSON.stringify({
           success: true,
@@ -1338,6 +1373,35 @@ export default {
         output: 'Error eksekusi: Lingkungan Cloudflare Pages / Worker adalah serverless sandbox tanpa interpreter Python. Jalankan server lokal ZOZ Router (node server.js) untuk mengeksekusi kode Python.',
         executionTimeMs: 0
       }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      });
+    }
+
+    // Deep Research Endpoint (Cloudflare Worker Stateless Handler)
+    if ((url.pathname === '/api/mulai-riset' || url.pathname === '/api/deep-research/start') && request.method === 'POST') {
+      return new Response(JSON.stringify({
+        success: false,
+        fallbackToClient: true,
+        message: 'Cloudflare Worker serverless mode: beralih ke analisis riset peramban klien.'
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      });
+    }
+
+    if (url.pathname.startsWith('/api/status-riset/') || url.pathname.startsWith('/api/deep-research/status/')) {
+      return new Response(JSON.stringify({
+        status: 'gagal',
+        error: 'Cloudflare Worker serverless mode: status riset tidak dikelola di edge.'
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      });
+    }
+
+    if (url.pathname.startsWith('/api/batal-riset/') || url.pathname.startsWith('/api/deep-research/stop/')) {
+      return new Response(JSON.stringify({ success: true, message: 'Dibatalkan.' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
       });

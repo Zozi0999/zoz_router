@@ -7386,7 +7386,7 @@ ${organicBlock}
   const LOCAL_UTILITY_TOOL_NAMES = [
     'save_memory', 'simpan_memori',
     'search_memory', 'cari_memori',
-    'execute_python_code', 'execute_code', 'run_code', 'python_code'
+    'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python'
   ];
 
   // Daftar nama tool otonom yang dikenal sistem (native call maupun parse teks)
@@ -7396,8 +7396,21 @@ ${organicBlock}
     'search_youtube', 'youtube_search', 'cari_youtube', 'search_yt', 'youtube',
     'save_memory', 'simpan_memori',
     'search_memory', 'cari_memori',
-    'execute_python_code', 'execute_code', 'run_code', 'python_code'
+    'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python'
   ];
+
+  function normalizeToolName(name) {
+    if (!name) return '';
+    const n = String(name).toLowerCase().trim();
+    if (['web_search', 'search', 'pencarian_web', 'cari_web'].includes(n)) return 'search_web';
+    if (['browse_web', 'browse_page', 'baca_web', 'scrape_url'].includes(n)) return 'browse_web_page';
+    if (['baca_url', 'ambil_web'].includes(n)) return 'extract_web';
+    if (['search_youtube', 'youtube_search', 'cari_youtube', 'search_yt', 'youtube'].includes(n)) return 'search_youtube';
+    if (['save_memory', 'simpan_memori', 'store_memory'].includes(n)) return 'save_memory';
+    if (['search_memory', 'cari_memori', 'query_memory'].includes(n)) return 'search_memory';
+    if (['execute_python_code', 'execute_code', 'run_python', 'run_code', 'python_code', 'python'].includes(n)) return 'execute_python_code';
+    return n;
+  }
 
   // Keluarga tool ekstraksi/baca URL: diizinkan SELALU (bukan "pencarian"),
   // sehingga tetap bisa dipakai saat pengguna menempel URL dan memintanya dibaca,
@@ -7490,7 +7503,7 @@ ${organicBlock}
     // Bersihkan karakter berlebih / HTML
     let cleanQuery = rawQuery
       .replace(/<[^>]+>/g, ' ')
-      .replace(/[^\w\s\.\-]/g, ' ')
+      .replace(/[^\p{L}\p{N}\s\.\-]/gu, ' ')
       .replace(/\s+/g, ' ')
       .trim();
 
@@ -7709,7 +7722,7 @@ ${organicBlock}
   function searchLocalBrowserMemories(query, limit = 5) {
     const list = getLocalBrowserMemories();
     const qTerms = String(query || '').toLowerCase().replace(/[^\p{L}\p{N}_]/gu, ' ').trim().split(/\s+/).filter(Boolean);
-    if (qTerms.length === 0) return list.slice(0, limit);
+    if (qTerms.length === 0) return [];
     const scored = [];
     for (const m of list) {
       const topLower = String(m.topic || '').toLowerCase();
@@ -7731,12 +7744,13 @@ ${organicBlock}
   const AUTONOMOUS_TOOL_CACHE = new Map();
   const TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
 
-  async function executeAutonomousWebTool(toolName, rawArgs, promptContext = '', session = null) {
+  async function executeAutonomousWebTool(rawToolName, rawArgs, promptContext = '', session = null) {
     if (STATE.abortController?.signal?.aborted) {
       const abortErr = new Error('The operation was aborted');
       abortErr.name = 'AbortError';
       throw abortErr;
     }
+    const toolName = normalizeToolName(rawToolName) || rawToolName;
     try {
       let args = {};
       if (typeof rawArgs === 'string') {
@@ -7745,11 +7759,11 @@ ${organicBlock}
           args = JSON.parse(trimmed);
         } catch (_) {
           // If string is raw text (not JSON), use it directly
-          if (['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(toolName)) {
+          if (toolName === 'browse_web_page' || toolName === 'extract_web') {
             args = { url: trimmed };
-          } else if (['execute_python_code', 'execute_code', 'run_code', 'python_code'].includes(toolName)) {
+          } else if (toolName === 'execute_python_code') {
             args = { code: trimmed };
-          } else if (['save_memory', 'simpan_memori'].includes(toolName)) {
+          } else if (toolName === 'save_memory') {
             args = { topic: 'catatan', content: trimmed };
           } else {
             // search_web & search_youtube & search_memory memakai query
@@ -7770,19 +7784,22 @@ ${organicBlock}
       // Bangun cacheKey kanonikal: satukan alias tool & parameter esensial
       let canonicalTool = toolName;
       let canonicalArg = '';
-      if (['search_web', 'web_search', 'search'].includes(toolName)) {
+      if (toolName === 'search_web') {
         canonicalTool = 'search_web';
         canonicalArg = String(args.query || args.q || args.keyword || args.search || args.topic || args.text || (typeof args === 'string' ? args : '') || promptContext || '').trim().toLowerCase();
-      } else if (['search_youtube', 'youtube_search', 'cari_youtube', 'search_yt', 'youtube'].includes(toolName)) {
+      } else if (toolName === 'search_youtube') {
         canonicalTool = 'search_youtube';
         const q = String(args.query || args.q || args.keyword || args.search || args.topic || args.title || args.text || (typeof args === 'string' ? args : '') || promptContext || '').trim().toLowerCase();
         const max = Math.max(1, Math.min(10, parseInt(args.max_results || args.maxResults || args.limit, 10) || 6));
         canonicalArg = `${q}:${max}`;
-      } else if (['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(toolName)) {
+      } else if (toolName === 'browse_web_page' || toolName === 'extract_web') {
         canonicalTool = 'browse_web_page';
         let u = String(args.url || args.target || args.link || args.href || args.targetUrl || (typeof args === 'string' ? args : '')).trim().toLowerCase();
         if (u && !/^https?:\/\//i.test(u)) u = 'https://' + u;
         canonicalArg = u.replace(/\/+$/, '');
+      } else if (toolName === 'execute_python_code') {
+        canonicalTool = 'execute_python_code';
+        canonicalArg = String(args.code || args.script || args.python || (typeof args === 'string' ? args : '')).trim();
       } else {
         canonicalArg = JSON.stringify(args);
       }
@@ -7883,7 +7900,7 @@ ${organicBlock}
         const addCandidate = (item) => {
           if (!item || !item.url || !item.title) return;
           const normUrl = item.url.trim().toLowerCase().replace(/\/$/, '');
-          const normTitle = item.title.trim().toLowerCase().replace(/[^\w\s]/g, '');
+          const normTitle = item.title.trim().toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '');
 
           // Filter Wikipedia HANYA jika sudah ada cukup sumber web/berita non-Wikipedia (>= 3)
           if (normUrl.includes('wikipedia.org') || normTitle.includes('wikipedia') || (item.domain && item.domain.includes('wikipedia.org'))) {
@@ -8181,6 +8198,7 @@ ${organicBlock}
                   return cacheAndReturn({
                     text: `KONTEN HALAMAN WEB "${docTitle}" (${url}):\n\n${extData.content}`,
                     sources: [{ title: docTitle, url: url, domain: extData.domain || 'web', snippet: extData.content.substring(0, 160) }],
+                    videoIds: Array.isArray(extData.videoIds) ? extData.videoIds : extractYouTubeVideoIdsClient(url),
                     success: true
                   });
                 }
@@ -8209,6 +8227,7 @@ ${organicBlock}
                 return cacheAndReturn({
                   text: output,
                   sources: [{ title: data.title || url, url: url, domain: foundDomain, snippet: (data.text || '').substring(0, 160) }],
+                  videoIds: Array.isArray(data.videoIds) ? data.videoIds : extractYouTubeVideoIdsClient(url),
                   success: true
                 });
               }
@@ -8231,6 +8250,7 @@ ${organicBlock}
               return cacheAndReturn({
                 text: `KONTEN HALAMAN WEB "${docTitle}" (${url}):\n\n${cleanMarkdown}`,
                 sources: [{ title: docTitle, url: url, domain: extractDomainSafe ? extractDomainSafe(url) : 'web', snippet: cleanMarkdown.substring(0, 160) }],
+                videoIds: extractYouTubeVideoIdsClient(url),
                 success: true
               });
             }
@@ -8270,7 +8290,7 @@ ${organicBlock}
         }
         let topic = String(args.topic || args.title || args.key || args.subject || args.kategori || '').trim();
         if (!topic) {
-          topic = content.split(/\s+/).slice(0, 4).join('_').replace(/[^\w]/g, '').toLowerCase() || 'catatan';
+          topic = content.split(/\s+/).slice(0, 4).join('_').replace(/[^\p{L}\p{N}_]/gu, '').toLowerCase() || 'catatan';
         }
 
         // Simpan juga di browser storage sebagai fallback instan
@@ -8302,8 +8322,8 @@ ${organicBlock}
         };
       }
 
-      if (['search_memory', 'cari_memori'].includes(toolName)) {
-        let query = String(args.query || args.q || args.keyword || args.topic || (typeof args === 'string' ? args : '')).trim();
+      if (toolName === 'search_memory') {
+        let query = String(args.query || args.q || args.search || args.keyword || args.topic || args.text || (typeof args === 'string' ? args : '')).trim();
         if (!query) {
           query = promptContext || '';
         }
@@ -8357,7 +8377,7 @@ ${organicBlock}
         };
       }
 
-      if (['execute_python_code', 'execute_code', 'run_code', 'python_code'].includes(toolName)) {
+      if (toolName === 'execute_python_code') {
         const code = String(args.code || args.script || args.python || (typeof args === 'string' ? args : '')).trim();
         if (!code) {
           return { text: 'Error: Parameter `code` tidak boleh kosong. Sertakan kode Python yang valid dengan perintah print() untuk melihat output.', sources: [], success: false };
@@ -8369,7 +8389,7 @@ ${organicBlock}
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ code }),
-              signal: AbortSignal.timeout(10000)
+              signal: AbortSignal.timeout(12000)
             });
             if (res.ok) {
               const data = await res.json();
@@ -8378,6 +8398,13 @@ ${organicBlock}
                 text: `[HASIL EKSEKUSI PYTHON SUBPROCESS SANDBOX]:\n\`\`\`\n${outText}\n\`\`\``,
                 sources: [],
                 success: data.success !== false
+              };
+            } else {
+              const errData = await res.json().catch(() => ({}));
+              return {
+                text: `Error eksekusi Python (${res.status}): ${errData.error || errData.output || 'Gagal menjalankan subprocess Python di server.'}`,
+                sources: [],
+                success: false
               };
             }
           } catch (_) {}
@@ -8653,7 +8680,7 @@ ${organicBlock}
     }
 
     // 6. Function call with JSON argument: search_web({"query": "..."}) or browse_web_page({"url": "..."})
-    const funcJsonRegex = /(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code|run_code|python_code)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
+    const funcJsonRegex = /(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube|youtube_search|cari_youtube|search_yt|youtube|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code|run_code|python_code|run_python|python)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
     let fjm;
     while ((fjm = funcJsonRegex.exec(textWithoutCode)) !== null) {
       if (isLongCompleteText && fjm.index > 220) continue;
@@ -8665,9 +8692,10 @@ ${organicBlock}
       } catch (_) {
         const qMatch = fjm[2].match(/["'](?:query|q|keyword|search|url|link|target|code|topic|content)["']\s*:\s*["']([^"']+)["']/i);
         if (qMatch) {
-          const isUrlTool = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(name.toLowerCase());
-          const isCodeTool = ['execute_python_code', 'execute_code', 'run_code', 'python_code'].includes(name.toLowerCase());
-          const isSaveMem = ['save_memory', 'simpan_memori'].includes(name.toLowerCase());
+          const normName = normalizeToolName(name);
+          const isUrlTool = ['browse_web_page', 'extract_web'].includes(normName);
+          const isCodeTool = normName === 'execute_python_code';
+          const isSaveMem = normName === 'save_memory';
           if (isUrlTool) addCall(name, { url: qMatch[1] }, fjm[0]);
           else if (isCodeTool) addCall(name, { code: qMatch[1] }, fjm[0]);
           else if (isSaveMem) addCall(name, { topic: 'catatan', content: qMatch[1] }, fjm[0]);
@@ -8678,16 +8706,17 @@ ${organicBlock}
 
     // 7. Function call syntax: search_web("query") or browse_web_page("url")
     // Jika teks sangat panjang (> 300 kata), hanya izinkan jika pemanggilan ada di awal teks (< 200 karakter)
-    const funcRegex = /(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code|run_code|python_code)\s*\(\s*(?:(?:query|url|q|link|target|code|topic)\s*[:=]\s*)?(["'`])([\s\S]*?)\2\s*\)/gi;
+    const funcRegex = /(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube|youtube_search|cari_youtube|search_yt|youtube|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code|run_code|python_code|run_python|python)\s*\(\s*(?:(?:query|url|q|link|target|code|topic)\s*[:=]\s*)?(["'`])([\s\S]*?)\2\s*\)/gi;
     let fm;
     while ((fm = funcRegex.exec(textWithoutCode)) !== null) {
       if (isLongCompleteText && fm.index > 220) continue;
       const name = fm[1];
       const val = fm[3].trim();
       if (val) {
-        const isUrlTool = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(name.toLowerCase());
-        const isCodeTool = ['execute_python_code', 'execute_code', 'run_code', 'python_code'].includes(name.toLowerCase());
-        const isSaveMem = ['save_memory', 'simpan_memori'].includes(name.toLowerCase());
+        const normName = normalizeToolName(name);
+        const isUrlTool = ['browse_web_page', 'extract_web'].includes(normName);
+        const isCodeTool = normName === 'execute_python_code';
+        const isSaveMem = normName === 'save_memory';
         if (isUrlTool) addCall(name, { url: val }, fm[0]);
         else if (isCodeTool) addCall(name, { code: val }, fm[0]);
         else if (isSaveMem) addCall(name, { topic: 'catatan', content: val }, fm[0]);
@@ -8697,16 +8726,17 @@ ${organicBlock}
 
     // 8. Conversational triggers: "We will call search_web for <query>"
     // Hanya picu jika berada di awal generasi (bukan teks penutup di akhir pesan panjang)
-    const convRegex = /(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari|menjelajahi|ekstrak)\s+(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code)(?:\s+(?:for|with|tentang|query|url|code|topic|:))?\s*(["'`])([^\n]+?)\2/gi;
+    const convRegex = /(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari|menjelajahi|ekstrak)\s+(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube|youtube_search|cari_youtube|search_yt|youtube|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code|run_code|python_code|run_python|python)(?:\s+(?:for|with|tentang|query|url|code|topic|:))?\s*(["'`])([^\n]+?)\2/gi;
     let cvm;
     while ((cvm = convRegex.exec(textWithoutCode)) !== null) {
       if (isLongCompleteText && cvm.index > 220) continue;
       const name = cvm[1];
       const val = cvm[3].trim();
       if (val) {
-        const isUrlTool = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(name.toLowerCase());
-        const isCodeTool = ['execute_python_code', 'execute_code', 'run_code', 'python_code'].includes(name.toLowerCase());
-        const isSaveMem = ['save_memory', 'simpan_memori'].includes(name.toLowerCase());
+        const normName = normalizeToolName(name);
+        const isUrlTool = ['browse_web_page', 'extract_web'].includes(normName);
+        const isCodeTool = normName === 'execute_python_code';
+        const isSaveMem = normName === 'save_memory';
         if (isUrlTool) addCall(name, { url: val }, cvm[0]);
         else if (isCodeTool) addCall(name, { code: val }, cvm[0]);
         else if (isSaveMem) addCall(name, { topic: 'catatan', content: val }, cvm[0]);
@@ -8773,11 +8803,12 @@ Format teks (untuk model tanpa function calling):
   }
 
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
-    const isYouTube = ['search_youtube', 'youtube_search', 'cari_youtube', 'search_yt', 'youtube'].includes(toolName);
-    const isBrowse = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(toolName);
-    const isSaveMem = ['save_memory', 'simpan_memori'].includes(toolName);
-    const isSearchMem = ['search_memory', 'cari_memori'].includes(toolName);
-    const isCode = ['execute_python_code', 'execute_code', 'run_code', 'python_code'].includes(toolName);
+    const norm = normalizeToolName(toolName);
+    const isYouTube = norm === 'search_youtube';
+    const isBrowse = norm === 'browse_web_page' || norm === 'extract_web';
+    const isSaveMem = norm === 'save_memory';
+    const isSearchMem = norm === 'search_memory';
+    const isCode = norm === 'execute_python_code';
 
     // iconClass sudah memuat prefiks family-nya (fa-solid / fa-brands) agar tidak
     // bentrok dengan aturan font-family bila digabung dengan fa-solid.
@@ -8788,7 +8819,7 @@ Format teks (untuk model tanpa function calling):
       title = 'PENCARIAN VIDEO YOUTUBE LIVE';
       iconClass = status === 'loading' ? 'fa-brands fa-youtube fa-spin' : 'fa-brands fa-youtube';
     } else if (isBrowse) {
-      title = (toolName === 'extract_web' || toolName === 'read_url') ? 'EKSTRAKSI KONTEN WEB' : 'PENJELAJAHAN HALAMAN WEB';
+      title = (norm === 'extract_web' || toolName === 'read_url') ? 'EKSTRAKSI KONTEN WEB' : 'PENJELAJAHAN HALAMAN WEB';
       iconClass = status === 'loading' ? 'fa-solid fa-compass fa-spin' : 'fa-solid fa-circle-check';
     } else if (isSaveMem) {
       title = 'PENYIMPANAN MEMORI JANGKA PANJANG (SQLITE FTS5)';
@@ -9440,7 +9471,7 @@ Format teks (untuk model tanpa function calling):
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
           }
-          if (['search_youtube', 'youtube_search', 'cari_youtube', 'search_yt', 'youtube'].includes(toolName) && Array.isArray(toolExecRes.videoIds)) {
+          if (Array.isArray(toolExecRes.videoIds)) {
             toolExecRes.videoIds.forEach((vid) => {
               if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
             });
@@ -10477,7 +10508,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
           }
-          if (['search_youtube', 'youtube_search', 'cari_youtube', 'search_yt', 'youtube'].includes(toolName) && Array.isArray(toolExecRes.videoIds)) {
+          if (Array.isArray(toolExecRes.videoIds)) {
             toolExecRes.videoIds.forEach((vid) => {
               if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
             });

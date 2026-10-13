@@ -2025,9 +2025,9 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
       ? [
           rawModel,
           'openrouter/free',
-          'google/gemma-4-31b-it:free',
-          'google/gemma-4-26b-a4b-it:free',
-          'nvidia/nemotron-3.5-lightning:free'
+          'meta-llama/llama-3.3-70b-instruct:free',
+          'nvidia/nemotron-3-super-120b-a12b:free',
+          'google/gemini-2.0-flash-exp:free'
         ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free')
       : [rawModel || 'google/gemini-2.0-flash-001'];
 
@@ -2252,18 +2252,22 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
 
 // Helper untuk melakukan web scraping / pemindaian konten artikel mendalam dari URL dengan proteksi redirect loop & SSRF
 function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
+  let cleanTarget = String(targetUrl || '').trim();
+  if (cleanTarget && !/^https?:\/\//i.test(cleanTarget)) {
+    cleanTarget = 'https://' + cleanTarget;
+  }
   // M23: guard DNS anti-rebinding (juga diulang untuk tiap hop redirect rekursif).
-  return assertResolvesPublic(targetUrl).then((verdict) => {
+  return assertResolvesPublic(cleanTarget).then((verdict) => {
     if (!verdict.ok) return { success: false, error: verdict.msg };
     return new Promise((resolve) => {
     try {
       if (redirectCount > 3) {
         return resolve({ success: false, error: 'Batas maksimal 3 hop redirect tercapai.' });
       }
-      if (!targetUrl || typeof targetUrl !== 'string' || !/^https?:\/\//i.test(targetUrl)) {
+      if (!cleanTarget || !/^https?:\/\//i.test(cleanTarget)) {
         return resolve({ success: false, error: 'URL target tidak valid.' });
       }
-      const parsedUrl = new URL(targetUrl);
+      const parsedUrl = new URL(cleanTarget);
       if (isPrivateHost(parsedUrl.hostname, parsedUrl.port)) {
         return resolve({ success: false, error: 'Akses ke host lokal / intranet diblokir (SSRF Protection).' });
       }
@@ -2323,7 +2327,7 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
 
           resolve({
             success: true,
-            url: targetUrl,
+            url: cleanTarget,
             domain: parsedUrl.hostname,
             title: pageTitle || parsedUrl.hostname,
             charCount: Math.min(clean.length, maxChars),
@@ -2339,7 +2343,7 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
           try {
             res.resume();
             resolved = true;
-            const redirectUrl = new URL(res.headers.location, targetUrl).toString();
+            const redirectUrl = new URL(res.headers.location, cleanTarget).toString();
             return fetchPageDetails(redirectUrl, maxChars, redirectCount + 1).then(resolve);
           } catch (e) {
             resolved = true;
@@ -2351,11 +2355,11 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
           res.resume();
           resolved = true;
           if (redirectCount === 0) {
-            return fallbackJinaReader(targetUrl, maxChars).then(jinaRes => {
+            return fallbackJinaReader(cleanTarget, maxChars).then(jinaRes => {
               if (jinaRes && jinaRes.text && jinaRes.text.length > 30) {
                 return resolve({
                   success: true,
-                  url: targetUrl,
+                  url: cleanTarget,
                   domain: parsedUrl.hostname,
                   title: jinaRes.title || parsedUrl.hostname,
                   charCount: Math.min(jinaRes.text.length, maxChars),
@@ -2609,7 +2613,7 @@ function deriveBroadSearchQueries(rawQuery, contextText = '') {
   // Bersihkan karakter berlebih / HTML
   let cleanQuery = rawQuery
     .replace(/<[^>]+>/g, ' ')
-    .replace(/[^\w\s\.\-]/g, ' ')
+    .replace(/[^\p{L}\p{N}\s\.\-]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -2923,7 +2927,7 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   for (const item of candidatePool) {
     if (!item.url || !item.title) continue;
     const normUrl = item.url.trim().toLowerCase().replace(/\/$/, '');
-    const normTitle = item.title.trim().toLowerCase().replace(/[^\w\s]/g, '');
+    const normTitle = item.title.trim().toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '');
 
     // Filter Wikipedia HANYA jika sudah ada cukup sumber web/berita non-Wikipedia (>= 3)
     if (normUrl.includes('wikipedia.org') || (item.domain && item.domain.includes('wikipedia.org')) || normTitle.includes('wikipedia')) {
@@ -2983,7 +2987,8 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
               url: ytInfo.url || cleanTarget,
               title: ytInfo.title,
               text: `[INFORMASI TERVERIFIKASI VIDEO YOUTUBE]\n- Judul: "${ytInfo.title}"\n- Channel / Pembuat: "${ytInfo.channel}" (${ytInfo.channel_url || 'N/A'})\n- URL: ${ytInfo.url}\n- Thumbnail: ${ytInfo.thumbnail}\n(Diambil secara real-time via YouTube oEmbed)`,
-              links: ytInfo.channel_url ? [{ title: ytInfo.channel, url: ytInfo.channel_url }] : []
+              links: ytInfo.channel_url ? [{ title: ytInfo.channel, url: ytInfo.channel_url }] : [],
+              videoIds: ytInfo.videoId ? [ytInfo.videoId] : []
             });
           }
           return fallbackJinaReader(cleanTarget, maxChars).then(resolve);
@@ -3321,10 +3326,12 @@ function validatePythonCodeSafety(code) {
   // 0. Normalisasi Unicode (NFKC) untuk mencegah bypass dengan karakter fullwidth/homoglyph (misal ｉｍｐｏｒｔ ｏｓ)
   const normalizedCode = code.normalize('NFKC');
 
-  // 1. Bersihkan komentar (# ...) dan docstring agar tidak memicu false positive pada teks dokumentasi
-  const strippedCode = normalizedCode
-    .replace(/#.*$/gm, ' ')
-    .replace(/("""[\s\S]*?"""|'''[\s\S]*?''')/g, ' ');
+  // 1. Bersihkan komentar (# ...) dan docstring agar tidak memicu false positive pada teks dokumentasi.
+  // Gunakan token-aware single pass regex untuk string dan komentar agar string kutip tunggal/ganda yang memuat """ tidak membajak docstring span
+  const strippedCode = normalizedCode.replace(
+    /(?:#.*$|"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/gm,
+    (match) => (match.startsWith('#') || match.startsWith('"""') || match.startsWith("'''")) ? ' ' : match
+  );
 
   const blockedModules = [
     'os', 'sys', 'shutil', 'subprocess', 'socket', 'pty', 'ctypes', 'winreg',
@@ -3347,16 +3354,16 @@ function validatePythonCodeSafety(code) {
     return { safe: false, reason: 'Impor modul sistem/jaringan terlarang terdeteksi pada pernyataan `from ... import`.' };
   }
 
-  // Pola C: Dynamic import / built-ins code execution
-  const dynamicExecRegex = /\b(?:__import__|importlib|eval|exec|compile|breakpoint)\s*\(/i;
+  // Pola C: Dynamic import / built-ins code execution & runtime reflection (langsung maupun indirect alias assignment)
+  const dynamicExecRegex = /\b(?:__import__|importlib|eval|exec|compile|breakpoint|getattr|setattr|delattr|hasattr|globals|locals|vars|__getattribute__)\b/i;
   if (dynamicExecRegex.test(strippedCode)) {
-    return { safe: false, reason: 'Fungsi eksekusi dinamis atau refleksi runtime (__import__, eval, exec, compile) diblokir.' };
+    return { safe: false, reason: 'Fungsi eksekusi dinamis atau refleksi runtime (__import__, eval, exec, compile, breakpoint, getattr, globals, vars) diblokir.' };
   }
 
-  // Pola D: Dunder reflection sandbox escape (__subclasses__, __builtins__, __globals__, dll)
-  const dunderReflectionRegex = /\b(?:__subclasses__|__builtins__|__globals__|__bases__|__mro__)\b/i;
+  // Pola D: Dunder reflection sandbox escape (__subclasses__, __builtins__, __globals__, __bases__, __base__, dll)
+  const dunderReflectionRegex = /\b(?:__subclasses__|__builtins__|__globals__|__bases__|__base__|__mro__)\b/i;
   if (dunderReflectionRegex.test(strippedCode)) {
-    return { safe: false, reason: 'Refleksi hierarki objek internal (__subclasses__, __builtins__, __globals__) diblokir.' };
+    return { safe: false, reason: 'Refleksi hierarki objek internal (__subclasses__, __builtins__, __globals__, __base__) diblokir.' };
   }
 
   // Pola E: Input interaktif yang memblokir proses
@@ -3365,8 +3372,8 @@ function validatePythonCodeSafety(code) {
     return { safe: false, reason: 'Fungsi input interaktif `input()` diblokir. Jalankan kode non-interaktif.' };
   }
 
-  // Pola F: Akses sistem berkas via open()
-  const fileAccessRegex = /\bopen\s*\(/i;
+  // Pola F: Akses sistem berkas via bare open (mencegah alias o = open tanpa memblokir method objek)
+  const fileAccessRegex = /(?<!\.)\bopen\b/i;
   if (fileAccessRegex.test(strippedCode)) {
     return { safe: false, reason: 'Akses sistem berkas via `open()` diblokir. Gunakan struktur data dalam memori.' };
   }
@@ -4532,13 +4539,13 @@ async function requestHandler(req, res) {
   // Autonomous Web Search Tool Endpoint (Built from 0, Zero-API, No Serper API)
   if ((pathname === '/api/tools/search-web' || pathname === '/api/autonomous/search') && (method === 'GET' || method === 'POST')) {
     try {
-      let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
+      let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || reqUrl.searchParams.get('search') || reqUrl.searchParams.get('keyword') || reqUrl.searchParams.get('topic') || reqUrl.searchParams.get('text') || '';
       let context = reqUrl.searchParams.get('context') || '';
       let maxResults = parseInt(reqUrl.searchParams.get('maxResults') || '8', 10);
       if (method === 'POST') {
         const body = await safeParseBody(req);
         if (!body) return;
-        query = body.query || body.q || query;
+        query = body.query || body.q || body.search || body.keyword || body.topic || body.text || query;
         context = body.context || body.conversationContext || context;
         if (body.maxResults) maxResults = parseInt(body.maxResults, 10);
       }
@@ -4556,12 +4563,12 @@ async function requestHandler(req, res) {
   // Autonomous Web Browse & Page Reading Tool Endpoint (Built from 0)
   if ((pathname === '/api/tools/browse-page' || pathname === '/api/autonomous/browse') && (method === 'GET' || method === 'POST')) {
     try {
-      let targetUrl = reqUrl.searchParams.get('url') || reqUrl.searchParams.get('target') || '';
+      let targetUrl = reqUrl.searchParams.get('url') || reqUrl.searchParams.get('target') || reqUrl.searchParams.get('targetUrl') || reqUrl.searchParams.get('link') || '';
       let maxChars = parseInt(reqUrl.searchParams.get('maxChars') || '5000', 10);
       if (method === 'POST') {
         const body = await safeParseBody(req);
         if (!body) return;
-        targetUrl = body.url || body.targetUrl || targetUrl;
+        targetUrl = body.url || body.targetUrl || body.link || body.target || targetUrl;
         if (body.maxChars) maxChars = parseInt(body.maxChars, 10);
       }
       if (!targetUrl || !targetUrl.trim()) {
@@ -4586,7 +4593,7 @@ async function requestHandler(req, res) {
         return sendJSON(res, 400, { error: 'Parameter `content` (atau teks fakta) diperlukan untuk menyimpan memori.' });
       }
       if (!topic) {
-        topic = content.split(/\s+/).slice(0, 4).join('_').replace(/[^\w]/g, '').toLowerCase() || 'catatan';
+        topic = content.split(/\s+/).slice(0, 4).join('_').replace(/[^\p{L}\p{N}_]/gu, '').toLowerCase() || 'catatan';
       }
       const saveRes = saveMemoryRecord(reqUserId, topic, content);
       return sendJSON(res, 200, {
@@ -4828,7 +4835,7 @@ async function requestHandler(req, res) {
       } else {
         const body = await safeParseBody(req);
         if (!body) return;
-        query = body.q || body.query || body.keyword || '';
+        query = body.q || body.query || body.keyword || body.search || body.topic || body.title || body.text || '';
         const parsedLimit = parseInt(body.limit || body.max_results || '6', 10);
         maxResults = Math.min(Math.max(isNaN(parsedLimit) ? 6 : parsedLimit, 1), 20);
       }
@@ -4852,12 +4859,12 @@ async function requestHandler(req, res) {
     let maxChars = 8000;
     try {
       if (method === 'GET') {
-        targetUrl = reqUrl.searchParams.get('url') || reqUrl.searchParams.get('link') || '';
+        targetUrl = reqUrl.searchParams.get('url') || reqUrl.searchParams.get('link') || reqUrl.searchParams.get('target') || reqUrl.searchParams.get('targetUrl') || '';
         if (reqUrl.searchParams.get('maxChars')) maxChars = parseInt(reqUrl.searchParams.get('maxChars'), 10) || 8000;
       } else {
         const body = await safeParseBody(req);
         if (!body) return;
-        targetUrl = body.url || body.link || '';
+        targetUrl = body.url || body.link || body.targetUrl || body.target || '';
         if (body.maxChars) maxChars = parseInt(body.maxChars, 10) || 8000;
       }
 
