@@ -705,8 +705,17 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
   });
 }
 
-// Official Ollama Cloud Flagship Models (Included Free Usage & Usage Credits)
+// Official Ollama Cloud Flagship & Popular Standard Models (Included Free Usage & Usage Credits)
 const OFFICIAL_OLLAMA_CLOUD_MODELS = [
+  { name: 'qwen2.5:1.5b', model: 'qwen2.5:1.5b', tag: 'Fast • Lightweight', isFree: true, cat: 'fast', details: { family: 'qwen2.5' } },
+  { name: 'qwen2.5:7b', model: 'qwen2.5:7b', tag: 'General Intelligence', isFree: true, cat: 'flagship', details: { family: 'qwen2.5' } },
+  { name: 'qwen2.5-coder:7b', model: 'qwen2.5-coder:7b', tag: 'Coding Expert', isFree: true, cat: 'coding', details: { family: 'qwen2.5' } },
+  { name: 'llama3.2:latest', model: 'llama3.2:latest', tag: 'Llama 3.2 3B', isFree: true, cat: 'fast', details: { family: 'llama' } },
+  { name: 'llama3.1:8b', model: 'llama3.1:8b', tag: 'Meta Llama 3.1', isFree: true, cat: 'flagship', details: { family: 'llama' } },
+  { name: 'deepseek-r1:latest', model: 'deepseek-r1:latest', tag: 'Reasoning Engine', isFree: true, cat: 'reasoning', details: { family: 'deepseek' } },
+  { name: 'mistral:latest', model: 'mistral:latest', tag: 'Mistral 7B', isFree: true, cat: 'fast', details: { family: 'mistral' } },
+  { name: 'phi4:latest', model: 'phi4:latest', tag: 'Microsoft Phi-4', isFree: true, cat: 'flagship', details: { family: 'phi' } },
+  { name: 'gemma2:9b', model: 'gemma2:9b', tag: 'Google Gemma 2', isFree: true, cat: 'flagship', details: { family: 'gemma' } },
   { name: 'gemma4:31b', model: 'gemma4:31b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gemma4' } },
   { name: 'gpt-oss:120b', model: 'gpt-oss:120b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gpt-oss' } },
   { name: 'gpt-oss:20b', model: 'gpt-oss:20b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'gpt-oss' } },
@@ -1117,7 +1126,7 @@ const YOUTUBE_ALLOWED_HOSTS = new Set([
   'music.youtube.com'
 ]);
 
-const YOUTUBE_URL_REGEX = /(?:https?:\/\/)?(?:www\.|m\.|music\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:[^\s]*)?/gi;
+const YOUTUBE_URL_REGEX = /(?:https?:\/\/)?(?:www\.|m\.|music\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:[^\s]*)?/gi;
 
 const YOUTUBE_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 jam TTL
 const youtubeInfoCache = new Map();
@@ -1293,10 +1302,18 @@ async function enrichTextWithYouTubeContext(text) {
 - Judul Video: "${v.title}"
 - Nama Channel / Pembuat: "${v.channel}" (${v.channel_url || 'N/A'})
 - Thumbnail: ${v.thumbnail}
+- Status Transkrip: Tidak tersedia dalam metadata oEmbed.
 (Informasi resmi ini diambil secara real-time via endpoint YouTube oEmbed)`;
   }).join('\n\n');
 
-  const groundingPrompt = `\n\n### REAL-TIME YOUTUBE VIDEO GROUNDING DATA:\n${contextBlocks}\n\nInstruksi untuk AI: Gunakan informasi metadata resmi di atas untuk menjawab dan menganalisis video YouTube yang ditanyakan pengguna secara tepat, akurat, dan tanpa halusinasi.`;
+  const groundingPrompt = `\n\n### DATA METADATA RESMI YOUTUBE (VERIFIED GROUNDING):
+${contextBlocks}
+
+### PANDUAN INTEGRITAS & ANTI-HALUSINASI UNTUK ASISTEN AI:
+1. Informasi di atas adalah metadata resmi terverifikasi real-time via YouTube oEmbed.
+2. BATASAN DATA: Data di atas HANYA memuat judul dan nama channel/kreator, dan TIDAK MEMUAT transkrip/rekaman isi suara video.
+3. DILARANG BERHALUSINASI: Dilarang mengarang, menebak, atau mereka-reka isi dialog, kesimpulan, atau alur adegan detail dari video di atas semata-mata berdasarkan judulnya.
+4. JAWABAN JUJUR: Jika pengguna meminta "Rangkum isi video ini" atau "Apa kesimpulan video ini?", jelaskan fakta judul dan kreatornya, lalu sampaikan secara transparan kepada pengguna bahwa transkrip penuh percakapan di dalam video tidak tersedia.`;
 
   return {
     text: text + groundingPrompt,
@@ -6005,17 +6022,22 @@ async function requestHandler(req, res) {
     }
 
     // Fast-Path Serverless (Vercel / Lambda):
-    // Jika berjalan di container serverless cloud dan endpoint mengarah ke loopback (127.0.0.1/localhost) tanpa API key,
-    // segera kembalikan katalog resmi Ollama Cloud (< 5ms) tanpa menahan latensi 12s connection timeout.
-    const isServerlessEnv = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION);
+    // Jika berjalan di container serverless cloud dan endpoint mengarah ke loopback (127.0.0.1/localhost):
+    // - Jika ada API key: alihkan target loopback ke ollama.com resmi
+    // - Jika tanpa API key: segera kembalikan katalog resmi Ollama Cloud (< 5ms) tanpa menahan latensi 12s connection timeout.
+    const isServerlessEnv = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION || req.headers['x-vercel-id']);
     const isLoopbackTarget = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(rawEndpoint);
-    if (isServerlessEnv && isLoopbackTarget && !authHeader) {
-      return sendJSON(res, 200, {
-        models: OFFICIAL_OLLAMA_CLOUD_MODELS,
-        server_running: true,
-        cloud_ready: true,
-        note: 'Loaded from official Ollama Cloud catalog (fast-path serverless)'
-      });
+    if (isServerlessEnv && isLoopbackTarget) {
+      if (authHeader) {
+        rawEndpoint = 'https://ollama.com';
+      } else {
+        return sendJSON(res, 200, {
+          models: OFFICIAL_OLLAMA_CLOUD_MODELS,
+          server_running: true,
+          cloud_ready: true,
+          note: 'Loaded from official Ollama Cloud catalog (fast-path serverless)'
+        });
+      }
     }
 
     const tryFetchTags = (endpointUrl) => {
@@ -6094,7 +6116,21 @@ async function requestHandler(req, res) {
       }
 
       if (result && result.models && result.models.length > 0) {
-        return sendJSON(res, 200, result);
+        // Gabungkan model discovery live dengan model resmi agar model populer (qwen2.5:1.5b, dll.) tidak hilang
+        const mergedModels = [...result.models];
+        const existingNames = new Set(mergedModels.map(m => (m.name || m.model || m.id || '').toLowerCase()));
+        OFFICIAL_OLLAMA_CLOUD_MODELS.forEach(om => {
+          const omName = (om.name || om.model || om.id || '').toLowerCase();
+          if (!existingNames.has(omName)) {
+            mergedModels.push(om);
+            existingNames.add(omName);
+          }
+        });
+        return sendJSON(res, 200, {
+          models: mergedModels,
+          server_running: true,
+          cloud_ready: true
+        });
       }
 
       // If remote returned empty or failed, fallback to official Ollama Cloud catalog
@@ -6241,6 +6277,12 @@ async function requestHandler(req, res) {
       const rawKey = clientSuppliedKey ||
         (isTrustedOllamaEndpoint(customEndpoint) ? process.env.OLLAMA_API_KEY : null);
       const authHeader = rawKey ? `Bearer ${rawKey}` : (req.headers['authorization'] || null);
+
+      if (customEndpoint.includes('ollama.com') && !rawKey) {
+        return sendJSON(res, 401, {
+          error: 'Ollama Cloud memerlukan Ollama API Key. Masukkan Ollama API Key di Pengaturan Zoz Router, atau gunakan mode Auto-Router / OpenRouter untuk model gratis tanpa setup.'
+        });
+      }
 
       if (!body.model) {
         body.model = 'qwen2.5:1.5b';

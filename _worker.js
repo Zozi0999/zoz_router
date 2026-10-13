@@ -54,8 +54,17 @@ function isOllamaEndpointForbidden(endpointUrl) {
   return checkOllamaEndpoint(endpointUrl).forbidden;
 }
 
-// Official Ollama Cloud Flagship Models (Included Free Usage & Usage Credits)
+// Official Ollama Cloud Flagship & Popular Standard Models (Included Free Usage & Usage Credits)
 const OFFICIAL_OLLAMA_CLOUD_MODELS = [
+  { name: 'qwen2.5:1.5b', model: 'qwen2.5:1.5b', tag: 'Fast • Lightweight', isFree: true, cat: 'fast', details: { family: 'qwen2.5' } },
+  { name: 'qwen2.5:7b', model: 'qwen2.5:7b', tag: 'General Intelligence', isFree: true, cat: 'flagship', details: { family: 'qwen2.5' } },
+  { name: 'qwen2.5-coder:7b', model: 'qwen2.5-coder:7b', tag: 'Coding Expert', isFree: true, cat: 'coding', details: { family: 'qwen2.5' } },
+  { name: 'llama3.2:latest', model: 'llama3.2:latest', tag: 'Llama 3.2 3B', isFree: true, cat: 'fast', details: { family: 'llama' } },
+  { name: 'llama3.1:8b', model: 'llama3.1:8b', tag: 'Meta Llama 3.1', isFree: true, cat: 'flagship', details: { family: 'llama' } },
+  { name: 'deepseek-r1:latest', model: 'deepseek-r1:latest', tag: 'Reasoning Engine', isFree: true, cat: 'reasoning', details: { family: 'deepseek' } },
+  { name: 'mistral:latest', model: 'mistral:latest', tag: 'Mistral 7B', isFree: true, cat: 'fast', details: { family: 'mistral' } },
+  { name: 'phi4:latest', model: 'phi4:latest', tag: 'Microsoft Phi-4', isFree: true, cat: 'flagship', details: { family: 'phi' } },
+  { name: 'gemma2:9b', model: 'gemma2:9b', tag: 'Google Gemma 2', isFree: true, cat: 'flagship', details: { family: 'gemma' } },
   { name: 'gemma4:31b', model: 'gemma4:31b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gemma4' } },
   { name: 'gpt-oss:120b', model: 'gpt-oss:120b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gpt-oss' } },
   { name: 'gpt-oss:20b', model: 'gpt-oss:20b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'gpt-oss' } },
@@ -619,6 +628,15 @@ export default {
         if (!cleanEndpoint.startsWith('http://') && !cleanEndpoint.startsWith('https://')) {
           cleanEndpoint = (authHeader ? 'https://' : 'http://') + cleanEndpoint;
         }
+
+        if (cleanEndpoint.includes('ollama.com') && !authHeader) {
+          return new Response(JSON.stringify({
+            error: 'Ollama Cloud memerlukan Ollama API Key. Masukkan Ollama API Key di Pengaturan Zoz Router, atau gunakan mode Auto-Router / OpenRouter untuk model gratis tanpa setup.'
+          }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
         const parsedBase = new URL(cleanEndpoint);
         const endpointCheck = checkOllamaEndpoint(cleanEndpoint);
         if (endpointCheck.forbidden) {
@@ -683,17 +701,23 @@ export default {
         if (authHeader) headers['Authorization'] = authHeader;
 
         let cleanEndpoint = (endpoint || '').trim();
-        // Pada Cloudflare Edge, jika endpoint loopback diminta, alihkan ke katalog resmi Ollama Cloud
+        // Pada Cloudflare Edge, jika endpoint loopback diminta:
+        // - Jika ada authHeader: alihkan ke https://ollama.com resmi
+        // - Jika tanpa authHeader: segera kembalikan katalog resmi Ollama Cloud
         if (cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1')) {
-          return new Response(JSON.stringify({
-            models: OFFICIAL_OLLAMA_CLOUD_MODELS,
-            server_running: true,
-            cloud_ready: true,
-            note: 'Loaded from official Ollama Cloud catalog'
-          }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-          });
+          if (authHeader) {
+            cleanEndpoint = 'https://ollama.com';
+          } else {
+            return new Response(JSON.stringify({
+              models: OFFICIAL_OLLAMA_CLOUD_MODELS,
+              server_running: true,
+              cloud_ready: true,
+              note: 'Loaded from official Ollama Cloud catalog'
+            }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            });
+          }
         }
 
         if (!cleanEndpoint.startsWith('http://') && !cleanEndpoint.startsWith('https://')) {
@@ -728,7 +752,20 @@ export default {
           try {
             const parsed = JSON.parse(rawText);
             if (Array.isArray(parsed.models) && parsed.models.length > 0) {
-              return new Response(rawText, {
+              const mergedModels = [...parsed.models];
+              const existingNames = new Set(mergedModels.map(m => (m.name || m.model || m.id || '').toLowerCase()));
+              OFFICIAL_OLLAMA_CLOUD_MODELS.forEach(om => {
+                const omName = (om.name || om.model || om.id || '').toLowerCase();
+                if (!existingNames.has(omName)) {
+                  mergedModels.push(om);
+                  existingNames.add(omName);
+                }
+              });
+              return new Response(JSON.stringify({
+                models: mergedModels,
+                server_running: true,
+                cloud_ready: true
+              }), {
                 status: 200,
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
               });
@@ -1710,7 +1747,7 @@ export default {
         }
 
         // Intersep khusus untuk URL YouTube agar mengembalikan data judul & channel resmi via oEmbed
-        const ytMatch = cleanTarget.match(/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+        const ytMatch = cleanTarget.match(/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|v\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
         if (ytMatch && ytMatch[1]) {
           try {
             const ytInfoRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${ytMatch[1]}`)}&format=json`, {
@@ -1721,11 +1758,9 @@ export default {
               const ytData = await ytInfoRes.json();
               return new Response(JSON.stringify({
                 success: true,
-                url: `https://www.youtube.com/watch?v=${ytMatch[1]}`,
-                title: ytData.title || cleanTarget,
-                content: `[INFORMASI TERVERIFIKASI VIDEO YOUTUBE]\n- Judul: "${ytData.title}"\n- Channel / Pembuat: "${ytData.author_name || 'Kreator YouTube'}" (${ytData.author_url || 'N/A'})\n- URL: https://www.youtube.com/watch?v=${ytMatch[1]}\n- Thumbnail: ${ytData.thumbnail_url || `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg`}\n(Diambil secara real-time via YouTube oEmbed)`,
+                content: `[DATA TERVERIFIKASI VIDEO YOUTUBE]\n- URL: https://www.youtube.com/watch?v=${ytMatch[1]}\n- Judul Video: "${ytData.title}"\n- Nama Channel / Pembuat: "${ytData.author_name || 'Kreator YouTube'}" (${ytData.author_url || 'N/A'})\n- Thumbnail: ${ytData.thumbnail_url || `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg`}\n- Status Transkrip: Tidak tersedia dalam metadata oEmbed.\n\n### PANDUAN INTEGRITAS & ANTI-HALUSINASI UNTUK ASISTEN AI:\n1. Informasi di atas adalah metadata resmi terverifikasi real-time via YouTube oEmbed.\n2. BATASAN DATA: Data di atas HANYA memuat judul dan nama channel/kreator, dan TIDAK MEMUAT transkrip/rekaman isi suara video.\n3. DILARANG BERHALUSINASI: Dilarang mengarang, menebak, atau mereka-reka isi dialog, kesimpulan, atau alur adegan detail dari video di atas semata-mata berdasarkan judulnya.\n4. JAWABAN JUJUR: Jika pengguna meminta "Rangkum isi video ini" atau "Apa kesimpulan video ini?", jelaskan fakta judul dan kreatornya, lalu sampaikan secara transparan kepada pengguna bahwa transkrip penuh percakapan di dalam video tidak tersedia.`,
                 videoIds: [ytMatch[1]],
-                charCount: 200
+                charCount: 650
               }), {
                 status: 200,
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }

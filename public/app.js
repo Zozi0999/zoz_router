@@ -123,6 +123,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
   // Official Ollama Cloud Flagship Models (Included Free Usage & Usage Credits)
   const OFFICIAL_OLLAMA_CLOUD_MODELS = [
+    { name: 'qwen2.5:1.5b', model: 'qwen2.5:1.5b', tag: 'Fast • Lightweight', isFree: true, cat: 'fast', details: { family: 'qwen2.5' } },
+    { name: 'qwen2.5:7b', model: 'qwen2.5:7b', tag: 'General Intelligence', isFree: true, cat: 'flagship', details: { family: 'qwen2.5' } },
+    { name: 'qwen2.5-coder:7b', model: 'qwen2.5-coder:7b', tag: 'Coding Expert', isFree: true, cat: 'coding', details: { family: 'qwen2.5' } },
+    { name: 'llama3.2:latest', model: 'llama3.2:latest', tag: 'Llama 3.2 3B', isFree: true, cat: 'fast', details: { family: 'llama' } },
+    { name: 'llama3.1:8b', model: 'llama3.1:8b', tag: 'Meta Llama 3.1', isFree: true, cat: 'flagship', details: { family: 'llama' } },
+    { name: 'deepseek-r1:latest', model: 'deepseek-r1:latest', tag: 'Reasoning Engine', isFree: true, cat: 'reasoning', details: { family: 'deepseek' } },
+    { name: 'mistral:latest', model: 'mistral:latest', tag: 'Mistral 7B', isFree: true, cat: 'fast', details: { family: 'mistral' } },
+    { name: 'phi4:latest', model: 'phi4:latest', tag: 'Microsoft Phi-4', isFree: true, cat: 'flagship', details: { family: 'phi' } },
+    { name: 'gemma2:9b', model: 'gemma2:9b', tag: 'Google Gemma 2', isFree: true, cat: 'flagship', details: { family: 'gemma' } },
     { name: 'gemma4:31b', model: 'gemma4:31b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gemma4' } },
     { name: 'gpt-oss:120b', model: 'gpt-oss:120b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gpt-oss' } },
     { name: 'gpt-oss:20b', model: 'gpt-oss:20b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'gpt-oss' } },
@@ -1288,12 +1297,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         STATE.settings.ollamaEndpoint = 'http://127.0.0.1:11434';
       }
 
-      // Pastikan model Ollama valid (jika di lokal dan model masih gemma4:31b/lama, arahkan ke qwen2.5:1.5b)
-      const isLocalOllama = STATE.settings.ollamaEndpoint.includes('127.0.0.1') || 
-                            STATE.settings.ollamaEndpoint.includes('localhost') || 
-                            STATE.settings.ollamaEndpoint.includes('11434');
-      if (!STATE.settings.ollamaModel || 
-          (isLocalOllama && (STATE.settings.ollamaModel === 'gemma4:31b' || STATE.settings.ollamaModel === 'nemotron-mini:latest' || STATE.settings.ollamaModel === 'llama3:latest'))) {
+      // Pastikan model Ollama valid
+      if (!STATE.settings.ollamaModel) {
         STATE.settings.ollamaModel = 'qwen2.5:1.5b';
       }
 
@@ -5725,7 +5730,7 @@ ${organicBlock}
   }
 
   // ==================== UNIVERSAL YOUTUBE OEMBED ENGINE (CLIENT) ====================
-  const YOUTUBE_URL_REGEX_CLIENT = /(?:https?:\/\/)?(?:www\.|m\.|music\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:[^\s]*)?/gi;
+  const YOUTUBE_URL_REGEX_CLIENT = /(?:https?:\/\/)?(?:www\.|m\.|music\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:[^\s]*)?/gi;
   const clientYouTubeCache = new Map();
 
   function extractYouTubeVideoIdsClient(text) {
@@ -5854,10 +5859,18 @@ ${organicBlock}
 - Judul Video: "${v.title}"
 - Nama Channel / Pembuat: "${v.channel}" (${v.channel_url || 'N/A'})
 - Thumbnail: ${v.thumbnail}
+- Status Transkrip: Tidak tersedia dalam metadata oEmbed.
 (Informasi resmi ini diambil secara real-time via YouTube oEmbed)`;
     }).join('\n\n');
 
-    const groundingContext = `### REAL-TIME YOUTUBE VIDEO GROUNDING DATA:\n${blocks}\n\nInstruksi untuk AI: Gunakan informasi metadata resmi di atas untuk menjawab dan menganalisis video YouTube yang ditanyakan pengguna secara tepat, akurat, dan tanpa halusinasi.`;
+    const groundingContext = `### DATA METADATA RESMI YOUTUBE (VERIFIED GROUNDING):
+${blocks}
+
+### PANDUAN INTEGRITAS & ANTI-HALUSINASI UNTUK ASISTEN AI:
+1. Informasi di atas adalah metadata resmi terverifikasi real-time via YouTube oEmbed.
+2. BATASAN DATA: Data di atas HANYA memuat judul dan nama channel/kreator, dan TIDAK MEMUAT transkrip/rekaman isi suara video.
+3. DILARANG BERHALUSINASI: Dilarang mengarang, menebak, atau mereka-reka isi dialog, kesimpulan, atau alur adegan detail dari video di atas semata-mata berdasarkan judulnya.
+4. JAWABAN JUJUR: Jika pengguna meminta "Rangkum isi video ini" atau "Apa kesimpulan video ini?", jelaskan fakta judul dan kreatornya, lalu sampaikan secara transparan kepada pengguna bahwa transkrip penuh percakapan di dalam video tidak tersedia.`;
 
     return {
       groundingContext,
@@ -6185,7 +6198,16 @@ ${organicBlock}
           if (gwRes && gwRes.ok) {
             const gwData = await gwRes.json();
             if (Array.isArray(gwData.models) && gwData.models.length > 0) {
-              rawModels = gwData.models;
+              const merged = [...gwData.models];
+              const existingNames = new Set(merged.map(m => (m.name || m.model || m.id || '').toLowerCase()));
+              OFFICIAL_OLLAMA_CLOUD_MODELS.forEach(om => {
+                const omName = (om.name || om.model || om.id || '').toLowerCase();
+                if (!existingNames.has(omName)) {
+                  merged.push(om);
+                  existingNames.add(omName);
+                }
+              });
+              rawModels = merged;
               isRunning = gwData.server_running !== false;
             }
           }
@@ -6200,9 +6222,7 @@ ${organicBlock}
           isRunning = true;
         }
         // Daftar model dari gateway / fallback tersedia — lanjut ke blok render di bawah.
-      }
-
-      if (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) {
+      } else if (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) {
         // Direct browser fetch
         try {
           // 1. Try /api/tags
@@ -6244,8 +6264,19 @@ ${organicBlock}
         const res = await fetch(url, { headers }).catch(() => null);
         if (res && res.ok) {
           const data = await res.json();
-          rawModels = data.models || [];
-          isRunning = data.server_running !== false;
+          if (Array.isArray(data.models) && data.models.length > 0) {
+            const merged = [...data.models];
+            const existingNames = new Set(merged.map(m => (m.name || m.model || m.id || '').toLowerCase()));
+            OFFICIAL_OLLAMA_CLOUD_MODELS.forEach(om => {
+              const omName = (om.name || om.model || om.id || '').toLowerCase();
+              if (!existingNames.has(omName)) {
+                merged.push(om);
+                existingNames.add(omName);
+              }
+            });
+            rawModels = merged;
+            isRunning = data.server_running !== false;
+          }
         }
       }
 
@@ -6258,9 +6289,15 @@ ${organicBlock}
       if (rawModels.length > 0) {
         STATE.ollamaModels = rawModels;
         const isCloudMode = Boolean(STATE.settings.ollamaApiKey || ep.includes('ollama.com') || location.protocol === 'https:' || IS_GITHUB_PAGES);
-        els.ollamaStatusVal.innerText = isCloudMode 
-          ? `Ollama Cloud (${rawModels.length} Model Siap)` 
-          : (isRunning ? `${rawModels.length} Model Aktif` : `${rawModels.length} Model Terpasang`);
+        let statusText = '';
+        if (isCloudMode) {
+          statusText = STATE.settings.ollamaApiKey 
+            ? `Ollama Cloud (${rawModels.length} Model Siap)` 
+            : `Ollama Cloud (${rawModels.length} Model)`;
+        } else {
+          statusText = isRunning ? `${rawModels.length} Model Aktif` : `${rawModels.length} Model Terpasang`;
+        }
+        els.ollamaStatusVal.innerText = statusText;
         els.ollamaIndicator.className = 'status-indicator online';
 
         // Auto-select first real installed/cloud model if current model is invalid or default
@@ -6660,10 +6697,12 @@ ${organicBlock}
           return;
         }
         const isOllamaTab = STATE.dropdownModelTab === 'ollama';
-        if (isOllamaTab && STATE.mode !== 'ollama') {
-          setEngineMode('ollama');
-        } else if (!isOllamaTab && STATE.mode !== 'openrouter') {
-          setEngineMode('openrouter');
+        if (STATE.mode !== 'auto') {
+          if (isOllamaTab && STATE.mode !== 'ollama') {
+            setEngineMode('ollama');
+          } else if (!isOllamaTab && STATE.mode !== 'openrouter') {
+            setEngineMode('openrouter');
+          }
         }
         selectModel(modelId);
         els.modelDropdownMenu.classList.remove('show');
@@ -9286,6 +9325,8 @@ Format teks (untuk model tanpa function calling):
       validList.push({ role: 'user', content: 'Halo', images: [] });
     }
 
+    const activePersona = (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
+
     if (systemContent && systemContent.trim()) {
       if (supportsSystem) {
         messagesPayload.push({ role: 'system', content: systemContent.trim() });
@@ -9297,6 +9338,15 @@ Format teks (untuk model tanpa function calling):
         } else {
           validList.unshift({ role: 'user', content: `[Instruksi Sistem & Konteks:\n${systemContent.trim()}]`, images: [] });
         }
+      }
+    }
+
+    // Penguat persona multi-turn & continuity: pastikan persona tidak luntur pada giliran obrolan lanjutan
+    if (activePersona && validList.length > 1) {
+      const lastUserMsg = [...validList].reverse().find(m => m.role === 'user');
+      if (lastUserMsg && typeof lastUserMsg.content === 'string' && !lastUserMsg.content.includes('[Pengingat Persona:')) {
+        const personaReminderText = activePersona.length > 800 ? activePersona.slice(0, 800) + '...' : activePersona;
+        lastUserMsg.content = `[Pengingat Persona: Tetap adopsi identitas persona yang ditetapkan]:\n"${personaReminderText}"\n\n${lastUserMsg.content}`;
       }
     }
 
@@ -9391,7 +9441,7 @@ Format teks (untuk model tanpa function calling):
   }
 
   // --- OLLAMA STREAMING EXECUTION ---
-  async function runOllamaStreaming(session, promptText, image, modelName) {
+  async function runOllamaStreaming(session, promptText, image, modelName, runOptions = {}) {
     setGeneratingState(true);
     STATE.abortController = new AbortController();
 
@@ -9465,6 +9515,10 @@ Format teks (untuk model tanpa function calling):
         } catch (searchErr) {
           console.warn('Default web search grounding error:', searchErr);
         }
+      }
+
+      if (personaPrompt) {
+        systemContent = `${systemContent}\n\n### MANDAT MUTLAK PERSONA (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi pencarian web, tool, atau format di atas, Anda WAJIB TETAP MENGADOPSI IDENTITAS DAN KARAKTER PERSONA BERIKUT DALAM SETIAP RESPON]:\n${personaPrompt}\n----------------------------------------`;
       }
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
@@ -9991,6 +10045,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       }
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + modelName, fullText);
+      return true;
 
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -10031,7 +10086,14 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           assistantRow.remove();
         }
         showToast('Generasi dihentikan oleh pengguna.');
+        return false;
       } else {
+        // Auto-Router fallback: bersihkan gelembung sementara dan kembalikan false agar caller langsung beralih ke OpenRouter
+        if (runOptions && runOptions.autoFallback) {
+          try { assistantRow.remove(); } catch (_) {}
+          return false;
+        }
+
         // render:false → bubbleText.innerHTML diganti tanpa syarat beberapa baris
         // di bawah (kartu error), jadi render dari finish hanya akan dibuang.
         const rescuePartial = sanitizePartialResponseWithFiles(streamRenderer ? streamRenderer.finish({ render: false }) : '');
@@ -10117,6 +10179,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         });
 
         AudioEngine.error();
+        return false;
       }
     } finally {
       setGeneratingState(false);
@@ -10260,6 +10323,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         } catch (searchErr) {
           console.warn('Default web search grounding error:', searchErr);
         }
+      }
+
+      if (personaPrompt) {
+        systemContent = `${systemContent}\n\n### MANDAT MUTLAK PERSONA (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi pencarian web, tool, atau format di atas, Anda WAJIB TETAP MENGADOPSI IDENTITAS DAN KARAKTER PERSONA BERIKUT DALAM SETIAP RESPON]:\n${personaPrompt}\n----------------------------------------`;
       }
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
@@ -11319,20 +11386,29 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
   async function runAutoRouterStreaming(session, promptText, image) {
     try {
       setGeneratingState(true);
-      // Check if Ollama is online
+      // Check if Ollama is online & runnable on current deployment
       const isOllamaOnline = await checkOllamaHealth();
+      const hasOllamaCloudKey = Boolean(STATE.settings.ollamaApiKey);
+      const isLoopbackEndpoint = /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(STATE.settings.ollamaEndpoint);
+      const isCloudHosted = Boolean(IS_CLOUD_HOSTED || location.protocol === 'https:');
+      const isOllamaRunnable = isOllamaOnline && (!isCloudHosted || !isLoopbackEndpoint || hasOllamaCloudKey);
       
       // Policy check
       const isLongOrHeavy = (promptText.length > 800) || (promptText.toLowerCase().includes('buatkan sistem') || promptText.toLowerCase().includes('arsitektur kompleks'));
 
-      if (STATE.settings.autoPolicy === 'cloud_heavy' && isLongOrHeavy && (STATE.settings.openRouterKey || DeviceStorage.isDeviceBackendAvailable)) {
+      if (STATE.settings.autoPolicy === 'cloud_heavy' && isLongOrHeavy && (STATE.settings.openRouterKey || DeviceStorage.isDeviceBackendAvailable || isCloudHosted)) {
         showToast('🔀 Auto-Router: Mengarahkan tugas kompleks ke OpenRouter Cloud...', 'info');
         await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free');
-      } else if (isOllamaOnline) {
-        showToast('🔀 Auto-Router: Mengeksekusi via Ollama Engine...', 'info');
-        await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel);
-      } else if (STATE.settings.openRouterKey || DeviceStorage.isDeviceBackendAvailable) {
-        showToast('🔀 Auto-Router: Ollama offline, fallback ke OpenRouter Cloud...', 'info');
+      } else if (isOllamaRunnable && STATE.settings.autoPolicy !== 'cloud_heavy') {
+        showToast('🔀 Auto-Router: Menghubungi Ollama Engine...', 'info');
+        const ollamaOk = await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel, { autoFallback: true });
+        if (!ollamaOk) {
+          console.warn('Auto-Router: Ollama gagal / tidak merespons, otomatis beralih ke OpenRouter Cloud...');
+          showToast('🔀 Auto-Router: Ollama tidak tersedia, beralih ke OpenRouter Cloud...', 'info');
+          await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free');
+        }
+      } else if (STATE.settings.openRouterKey || DeviceStorage.isDeviceBackendAvailable || isCloudHosted) {
+        showToast('🔀 Auto-Router: Menggunakan OpenRouter Cloud...', 'info');
         await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free');
       } else {
         // Kedua engine tidak siap: tampilkan kartu bantuan interaktif dan pulihkan composer
@@ -15879,7 +15955,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     }
     updatePresetBanner();
     updatePresetPillUI();
-    savePersistedState();
+    savePersistedState({ immediate: true });
     AudioEngine.click();
   }
 
@@ -16196,7 +16272,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         let tag = m.tag || 'Ollama Cloud';
         if (tag === 'Lokal') tag = 'Ollama Cloud';
 
-        const isFree = Boolean(m.isFree || FREE_OLLAMA_CLOUD_PREFIXES.some(pre => idLower.includes(pre)));
+        const isFree = Boolean(m.isFree || FREE_OLLAMA_CLOUD_PREFIXES.some(pre => idLower.includes(pre)) || idLower.includes('qwen2.5') || idLower.includes('llama3') || idLower.includes('mistral') || idLower.includes('phi4') || idLower.includes('gemma2') || tag.toLowerCase().includes('lokal'));
 
         // Auto-assign smart badge kategori cloud jika tag masih bawaan umum
         if (tag === 'Ollama Cloud') {
@@ -18039,6 +18115,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       });
     });
 
+    let promptDebounceTimer = null;
     els.settingSystemPrompt?.addEventListener('input', () => {
       const currentVal = els.settingSystemPrompt.value;
       const trimmed = currentVal.trim();
@@ -18057,10 +18134,28 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         // Pertahankan STATE.settings.customSystemPrompt agar persona kustom tidak terhapus saat textarea dikosongkan sementara
       }
       updatePresetPillUI();
+      updatePresetBanner();
+      clearTimeout(promptDebounceTimer);
+      promptDebounceTimer = setTimeout(() => {
+        savePersistedState();
+      }, 350);
     });
 
-    els.clearPresetBtn?.addEventListener('click', () => {
+    els.clearPresetBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
       applySystemPreset('default');
+    });
+
+    els.activePresetBanner?.addEventListener('click', (e) => {
+      if (e.target.closest && e.target.closest('#clearPresetBtn')) return;
+      syncSettingsModalFields();
+      const modal = els.settingsModal;
+      if (modal) {
+        modal.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.target === 'tabSystem'));
+        modal.querySelectorAll('.settings-tab-pane').forEach(pane => pane.classList.toggle('active', pane.id === 'tabSystem'));
+      }
+      openModal('settingsModal');
+      AudioEngine.click();
     });
 
     // Settings Actions
@@ -18314,7 +18409,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       }
       if (els.settingAutoPolicy) STATE.settings.autoPolicy = els.settingAutoPolicy.value;
       
-      savePersistedState();
+      savePersistedState({ immediate: true });
       checkOllamaHealth();
       updateOllamaStatusUI();
       checkOpenRouterStatus();
