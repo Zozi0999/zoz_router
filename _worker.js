@@ -1229,6 +1229,23 @@ export default {
           cleanTarget = 'https://' + cleanTarget;
         }
 
+        let parsedTarget;
+        try {
+          parsedTarget = new URL(cleanTarget);
+        } catch (_) {
+          return new Response(JSON.stringify({ success: false, error: 'Format URL tidak valid.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        if (!['http:', 'https:'].includes(parsedTarget.protocol) || isPrivateHostname(parsedTarget.hostname)) {
+          return new Response(JSON.stringify({ success: false, error: 'Akses ke host lokal/privat diblokir demi keamanan.' }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
         // Intersep khusus untuk URL YouTube agar mengembalikan data judul & channel resmi via oEmbed
         const ytMatch = cleanTarget.match(/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
         if (ytMatch && ytMatch[1]) {

@@ -2519,12 +2519,28 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
   });
 }
 
+// Pembersih tanda baca URL yang memperhitungkan keseimbangan tanda kurung (misal: artikel Wikipedia)
+function cleanExtractedUrlPunctuation(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  let clean = rawUrl.trim().replace(/[.,!?;:]+$/, '');
+  while (clean.endsWith(')')) {
+    const openCount = (clean.match(/\(/g) || []).length;
+    const closeCount = (clean.match(/\)/g) || []).length;
+    if (closeCount > openCount) {
+      clean = clean.slice(0, -1).replace(/[.,!?;:]+$/, '');
+    } else {
+      break;
+    }
+  }
+  return clean;
+}
+
 // Ekstraktor URL web publik (mengecualikan YouTube karena sudah ada oEmbed khusus)
 function extractWebUrls(text) {
   if (!text || typeof text !== 'string') return [];
   const urlRegex = /https?:\/\/[^\s<>"'{}|\\^`\[\]]+/gi;
   const matches = text.match(urlRegex) || [];
-  return matches.map(u => u.replace(/[.,!?;:)]+$/, '')).filter(u => {
+  return matches.map(u => cleanExtractedUrlPunctuation(u)).filter(u => {
     try {
       const p = new URL(u);
       const h = p.hostname.toLowerCase();
@@ -2542,7 +2558,7 @@ function extractCustomAnalysisUrls(text) {
   const urlRegex = /(?:https?:\/\/[^\s<>"'{}|\\^`\[\]]+|www\.[^\s<>"'{}|\\^`\[\]]+)/gi;
   const matches = text.match(urlRegex) || [];
   return matches.map(u => {
-    let clean = u.replace(/[.,!?;:)]+$/, '');
+    let clean = cleanExtractedUrlPunctuation(u);
     if (/^www\./i.test(clean)) clean = 'https://' + clean;
     return clean;
   }).filter(u => {
@@ -3355,21 +3371,21 @@ function validatePythonCodeSafety(code) {
   }
 
   // Pola C: Dynamic import / built-ins code execution & runtime reflection (langsung maupun indirect alias assignment)
-  const dynamicExecRegex = /\b(?:__import__|importlib|eval|exec|compile|breakpoint|getattr|setattr|delattr|hasattr|globals|locals|vars|__getattribute__)\b/i;
+  const dynamicExecRegex = /\b(?:__import__|importlib|eval|exec|compile|breakpoint|getattr|setattr|delattr|hasattr|globals|locals|vars|__getattribute__|load_module)\b/i;
   if (dynamicExecRegex.test(strippedCode)) {
-    return { safe: false, reason: 'Fungsi eksekusi dinamis atau refleksi runtime (__import__, eval, exec, compile, breakpoint, getattr, globals, vars) diblokir.' };
+    return { safe: false, reason: 'Fungsi eksekusi dinamis atau refleksi runtime (__import__, eval, exec, compile, breakpoint, getattr, globals, vars, load_module) diblokir.' };
   }
 
-  // Pola D: Dunder reflection sandbox escape (__subclasses__, __builtins__, __globals__, __bases__, __base__, dll)
-  const dunderReflectionRegex = /\b(?:__subclasses__|__builtins__|__globals__|__bases__|__base__|__mro__)\b/i;
+  // Pola D: Dunder reflection sandbox escape (__subclasses__, __builtins__, __globals__, __bases__, __base__, __loader__, __spec__, dll)
+  const dunderReflectionRegex = /\b(?:__subclasses__|__builtins__|__globals__|__bases__|__base__|__mro__|__loader__|__spec__)\b/i;
   if (dunderReflectionRegex.test(strippedCode)) {
-    return { safe: false, reason: 'Refleksi hierarki objek internal (__subclasses__, __builtins__, __globals__, __base__) diblokir.' };
+    return { safe: false, reason: 'Refleksi hierarki objek internal (__subclasses__, __builtins__, __globals__, __base__, __loader__, __spec__) diblokir.' };
   }
 
   // Pola E: Input interaktif yang memblokir proses
-  const interactiveInputRegex = /\binput\s*\(/i;
+  const interactiveInputRegex = /\b(?:input|help)\s*\(/i;
   if (interactiveInputRegex.test(strippedCode)) {
-    return { safe: false, reason: 'Fungsi input interaktif `input()` diblokir. Jalankan kode non-interaktif.' };
+    return { safe: false, reason: 'Fungsi input interaktif `input()` atau `help()` diblokir. Jalankan kode non-interaktif.' };
   }
 
   // Pola F: Akses sistem berkas via bare open (mencegah alias o = open tanpa memblokir method objek)
@@ -3430,7 +3446,9 @@ function executePythonSandbox(code, timeoutMs = 5000) {
       SYSTEMROOT: process.env.SYSTEMROOT || 'C:\\Windows',
       WINDIR: process.env.WINDIR || 'C:\\Windows',
       TEMP: PYTHON_SANDBOX_DIR,
-      TMP: PYTHON_SANDBOX_DIR
+      TMP: PYTHON_SANDBOX_DIR,
+      HOME: PYTHON_SANDBOX_DIR,
+      USERPROFILE: PYTHON_SANDBOX_DIR
     };
 
     let proc;
@@ -3649,7 +3667,7 @@ async function jalankanRisetOtonom(taskId, topik, config = {}) {
           analysis: `Berhasil mengekstrak ${scrapedPages.length} halaman web kustom utuh untuk telaah mendalam.`
         },
         scraper: {
-          status: 'completato',
+          status: 'selesai',
           totalScraped: scrapedPages.length,
           temporalAnalysis: '',
           articles: scrapedPages.map(p => ({
@@ -3734,7 +3752,7 @@ Tuliskan telaah analitis mendalam dalam 3-5 paragraf berbobot teknis tinggi, pad
         analysis: hasilBedahAnalisis
       },
       scraper: {
-        status: 'completato',
+        status: 'selesai',
         totalScraped: scrapedPages.length,
         temporalAnalysis: hasilBedahAnalisis,
         articles: scrapedPages.map(p => ({
@@ -3857,14 +3875,14 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     task.liveInspection = {
       ...(task.liveInspection || {}),
       synthesizer: {
-        name: 'Relazione Esecutiva Integrale & Matrice Comparativa',
+        name: 'Laporan Analisis Eksekutif Komprehensif & Matriks Komparasi',
         model: masterResearchModel,
         status: 'selesai',
         text: laporanAkhir,
         length: (laporanAkhir || '').length
       },
       model4: {
-        name: 'Sommario Esecutivo per la Conversazione Chat',
+        name: 'Rangkuman Eksekutif Percakapan Chat',
         model: masterResearchModel,
         status: 'selesai',
         text: chatSummary,

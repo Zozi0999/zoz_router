@@ -332,22 +332,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     isPromptHidden: false
   };
 
-  // H9: label tombol tampil/sembunyikan pemutar YouTube selalu mencerminkan
-  // kondisi wrap. Dipanggil dari handler toggle DAN dari setiap jalur yang
-  // mengubah wrap.style.display (playYouTube/playDirectUrl/playTrack) — dulu
-  // label hanya diganti oleh handler sehingga basi ("Tampilkan" saat video
-  // terlihat, atau tombol terkubur karena berada di dalam wrap yang disembunyikan).
-  function syncYtPlayerVisibilityBtn() {
-    try {
-      const btn = els.toggleYtPlayerVisibilityBtn;
-      const wrap = els.ytPlayerContainerWrap;
-      if (!btn || !wrap) return;
-      const hidden = !wrap.style.display || wrap.style.display === 'none';
-      btn.innerHTML = hidden
-        ? '<i class="fa-solid fa-eye"></i> Tampilkan Video'
-        : '<i class="fa-solid fa-eye-slash"></i> Sembunyikan Video';
-    } catch (_) {}
-  }
 
   // ===== IDENTITAS OTOMATIS PADA SEMUA REQUEST SAME-ORIGIN =====
   // Dipasang SEKALI di sini sehingga setiap fetch('/api/...') — termasuk yang
@@ -679,46 +663,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     settingSystemPrompt: $('#settingSystemPrompt'),
     saveSettingsBtn: $('#saveSettingsBtn'),
 
-    // Cyber BGM & Audio Deck
-    musicPlayerModalBtn: $('#musicPlayerModalBtn'),
-    musicHeaderPulse: $('#musicHeaderPulse'),
-    musicDeckModal: $('#musicDeckModal'),
-    sidebarBgmWidget: $('#sidebarBgmWidget'),
-    bgmAnimBars: $('#bgmAnimBars'),
-    bgmTrackTitle: $('#bgmTrackTitle'),
-    openMusicModalFromWidget: $('#openMusicModalFromWidget'),
-    bgmPrevBtn: $('#bgmPrevBtn'),
-    bgmPlayPauseBtn: $('#bgmPlayPauseBtn'),
-    bgmNextBtn: $('#bgmNextBtn'),
-    bgmMiniVolume: $('#bgmMiniVolume'),
-    audioDropzone: $('#audioDropzone'),
-    localAudioFileInput: $('#localAudioFileInput'),
-    triggerAudioUploadBtn: $('#triggerAudioUploadBtn'),
-    playlistCountBadge: $('#playlistCountBadge'),
-    playlistItemsList: $('#playlistItemsList'),
-    clearPlaylistBtn: $('#clearPlaylistBtn'),
-    ambientCardsGrid: $('#ambientCardsGrid'),
-    audioVisualizerCanvas: $('#audioVisualizerCanvas'),
-    deckCurrentTrackName: $('#deckCurrentTrackName'),
-    deckCurrentTrackMeta: $('#deckCurrentTrackMeta'),
-    deckLoopBtn: $('#deckLoopBtn'),
-    deckShuffleBtn: $('#deckShuffleBtn'),
-    deckProgressSlider: $('#deckProgressSlider'),
-    deckPrevBtn: $('#deckPrevBtn'),
-    deckPlayPauseBtn: $('#deckPlayPauseBtn'),
-    deckNextBtn: $('#deckNextBtn'),
-    deckMasterVolume: $('#deckMasterVolume'),
-    valMasterVolume: $('#valMasterVolume'),
-    
-    // Online Audio & YouTube
-    onlineAudioUrlInput: $('#onlineAudioUrlInput'),
-    onlineAudioTitleInput: $('#onlineAudioTitleInput'),
-    playOnlineUrlBtn: $('#playOnlineUrlBtn'),
-    saveOnlineUrlBtn: $('#saveOnlineUrlBtn'),
-    ytPlayerContainerWrap: $('#ytPlayerContainerWrap'),
-    ytPlayerContainer: $('#ytPlayerContainer'),
-    toggleYtPlayerVisibilityBtn: $('#toggleYtPlayerVisibilityBtn'),
-    ytFsBtn: $('#ytFsBtn'),
 
     // Floating scroll to bottom button
     scrollBottomBtn: $('#scrollBottomBtn'),
@@ -5927,7 +5871,6 @@ ${organicBlock}
           <div class="yt-card-channel"><i class="fa-solid fa-circle-user"></i> ${safeChannel}</div>
           <div class="yt-card-actions">
             ${vidId ? `<button type="button" class="yt-card-btn play-chat-btn" data-action="play-in-chat" data-video-id="${vidId}" data-title="${safeTitle}"><i class="fa-solid fa-play"></i> Putar di Chat</button>` : ''}
-            ${vidId ? `<button type="button" class="yt-card-btn play-yt-btn" data-video-id="${vidId}" data-title="${safeTitle}"><i class="fa-solid fa-headphones"></i> Putar di BGM</button>` : ''}
             <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="yt-card-btn open-yt-btn"><i class="fa-brands fa-youtube"></i> Tonton Langsung di YouTube</a>
           </div>
         </div>
@@ -5982,19 +5925,7 @@ ${organicBlock}
     }
   }
 
-  // Delegasi klik tombol putar YouTube di bubble chat
-  document.addEventListener('click', (e) => {
-    const playBtn = e.target.closest ? e.target.closest('.play-yt-btn') : null;
-    if (playBtn) {
-      const vidId = playBtn.dataset.videoId;
-      const title = playBtn.dataset.title || 'Video YouTube';
-      if (vidId && typeof BGMEngine !== 'undefined' && BGMEngine.playYouTube) {
-        BGMEngine.playYouTube(vidId, title);
-        showToast(`🎵 Memutar "${title}" di Cyber Deck...`);
-        AudioEngine.click();
-      }
-    }
-  });
+
 
   // Delegasi klik: putar video YouTube langsung DI DALAM percakapan (embed iframe)
   document.addEventListener('click', (e) => {
@@ -7384,18 +7315,18 @@ ${organicBlock}
 
   // Tool utility lokal (Memori SQLite & Eksekusi Python): diizinkan SELALU
   const LOCAL_UTILITY_TOOL_NAMES = [
-    'save_memory', 'simpan_memori',
-    'search_memory', 'cari_memori',
+    'save_memory', 'simpan_memori', 'store_memory',
+    'search_memory', 'cari_memori', 'query_memory',
     'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python'
   ];
 
   // Daftar nama tool otonom yang dikenal sistem (native call maupun parse teks)
   const AUTONOMOUS_TOOL_NAMES = [
-    'search_web', 'web_search', 'search',
-    'browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url',
+    'search_web', 'web_search', 'search', 'pencarian_web', 'cari_web',
+    'browse_web_page', 'browse_web', 'browse_page', 'baca_web', 'extract_web', 'read_url', 'scrape_url', 'baca_url', 'ambil_web',
     'search_youtube', 'youtube_search', 'cari_youtube', 'search_yt', 'youtube',
-    'save_memory', 'simpan_memori',
-    'search_memory', 'cari_memori',
+    'save_memory', 'simpan_memori', 'store_memory',
+    'search_memory', 'cari_memori', 'query_memory',
     'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python'
   ];
 
@@ -7415,7 +7346,7 @@ ${organicBlock}
   // Keluarga tool ekstraksi/baca URL: diizinkan SELALU (bukan "pencarian"),
   // sehingga tetap bisa dipakai saat pengguna menempel URL dan memintanya dibaca,
   // bahkan bila Mode Pencarian Web sedang nonaktif.
-  const EXTRACTION_TOOL_NAMES = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'];
+  const EXTRACTION_TOOL_NAMES = ['browse_web_page', 'browse_web', 'browse_page', 'baca_web', 'extract_web', 'read_url', 'scrape_url', 'baca_url', 'ambil_web'];
 
   // Aturan izin (dipakai saat EKSEKUSI call): search_youtube bila toggle YouTube aktif;
   // ekstraksi web URL & tool utility lokal selalu diizinkan; tool search bila Mode Pencarian Web aktif.
@@ -8385,11 +8316,14 @@ ${organicBlock}
 
         if (!IS_GITHUB_PAGES) {
           try {
+            const execSignal = (typeof AbortSignal.any === 'function' && STATE.abortController?.signal)
+              ? AbortSignal.any([AbortSignal.timeout(12000), STATE.abortController.signal])
+              : (STATE.abortController?.signal || AbortSignal.timeout(12000));
             const res = await fetch('/api/execute-code', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ code }),
-              signal: AbortSignal.timeout(12000)
+              signal: execSignal
             });
             if (res.ok) {
               const data = await res.json();
@@ -8407,7 +8341,15 @@ ${organicBlock}
                 success: false
               };
             }
-          } catch (_) {}
+          } catch (err) {
+            if (STATE.abortController?.signal?.aborted) {
+              return {
+                text: 'Eksekusi Python dihentikan oleh pengguna.',
+                sources: [],
+                success: false
+              };
+            }
+          }
         }
 
         return {
@@ -8484,7 +8426,8 @@ ${organicBlock}
     const jsonCodeBlockRegex = new RegExp(`\`\`\`(?:tool_call|json)?\\s*\\{[\\s\\S]*?"(?:name|function|tool)"\\s*:\\s*"(?:${toolPattern})"[\\s\\S]*?\\}\\s*\`\`\``, 'gi');
     const callPreambleRegex = new RegExp(`(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\\s+(?:${toolPattern})[\\s\\S]*?(?:\\.|\\n|$)`, 'gi');
     const funcCallRegex = new RegExp(`(?:${toolPattern})\\s*\\(\\s*\\{[\\s\\S]*?\\}\\s*\\)`, 'gi');
-    const funcCallArgsRegex = new RegExp(`(?:${toolPattern})\\s*\\(\\s*(?:(?:query|url|q|code|topic|content|script|link|target)\\s*[:=]\\s*)?(["'\`])[\\s\\S]*?\\1\\s*\\)`, 'gi');
+    const funcCallArgsRegex = new RegExp(`(?:${toolPattern})\\s*\\(\\s*(?:(?:query|url|q|code|topic|content|script|link|target|isi|kata_kunci|topik)\\s*[:=]\\s*)?(["'\`])[\\s\\S]*?\\1\\s*\\)`, 'gi');
+    const funcCallTwoArgsRegex = /(?:save_memory|simpan_memori|store_memory)\s*\(\s*(?:[a-zA-Z_]+\s*[:=]\s*)?(["'`])[\s\S]*?\1\s*,\s*(?:[a-zA-Z_]+\s*[:=]\s*)?(["'`])[\s\S]*?\2\s*\)/gi;
 
     let cleaned = text
       .replace(/<(?:tool_call|function_call)>[\s\S]*?<\/(?:tool_call|function_call)>/gi, '')
@@ -8509,6 +8452,7 @@ ${organicBlock}
       .replace(callPreambleRegex, '')
       .replace(funcCallRegex, '')
       .replace(funcCallArgsRegex, '')
+      .replace(funcCallTwoArgsRegex, '')
       .trim();
 
     return cleaned;
@@ -8627,7 +8571,8 @@ ${organicBlock}
     }
 
     // 3. Anthropic XML format: <invoke name="search_web"><parameter name="query">...</parameter></invoke>
-    const invokeRegex = /<invoke\s+name=["'](search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code|run_code|python_code)["']>([\s\S]*?)<\/invoke>/gi;
+    const toolPattern = AUTONOMOUS_TOOL_NAMES.join('|');
+    const invokeRegex = new RegExp(`<invoke\\s+name=["'](${toolPattern})["']>([\\s\\S]*?)<\\/invoke>`, 'gi');
     let ivm;
     while ((ivm = invokeRegex.exec(text)) !== null) {
       const name = ivm[1];
@@ -8636,8 +8581,8 @@ ${organicBlock}
       const val = paramMatch ? paramMatch[1].trim() : inner.replace(/<[^>]+>/g, '').trim();
       if (val) {
         const isUrlTool = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(name.toLowerCase());
-        const isCodeTool = ['execute_python_code', 'execute_code', 'run_code', 'python_code'].includes(name.toLowerCase());
-        const isSaveMem = ['save_memory', 'simpan_memori'].includes(name.toLowerCase());
+        const isCodeTool = ['execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python'].includes(name.toLowerCase());
+        const isSaveMem = ['save_memory', 'simpan_memori', 'store_memory'].includes(name.toLowerCase());
         if (isUrlTool) addCall(name, { url: val }, ivm[0]);
         else if (isCodeTool) addCall(name, { code: val }, ivm[0]);
         else if (isSaveMem) addCall(name, { topic: 'catatan', content: val }, ivm[0]);
@@ -8646,7 +8591,7 @@ ${organicBlock}
     }
 
     // 4. Fenced codeblock ```json ... ``` or ```tool_call ... ```
-    const codeBlockRegex = /```(?:json|tool_call)?\s*(\{\s*"(?:name|function|tool)"\s*:\s*"(?:search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code|run_code|python_code)"[\s\S]*?\})\s*```/gi;
+    const codeBlockRegex = new RegExp(`\`\`\`(?:json|tool_call)?\\s*(\\{\\s*"(?:name|function|tool)"\\s*:\\s*"(?:${toolPattern})"[\\s\\S]*?\\})\\s*\`\`\``, 'gi');
     let cm;
     while ((cm = codeBlockRegex.exec(text)) !== null) {
       try {
@@ -8659,7 +8604,7 @@ ${organicBlock}
 
     // Strip fenced code blocks dan inline code sebelum menjalankan regex teks biasa (5, 6, 7, 8)
     // agar kode pemrograman / tutorial yang menyebut search_web TIDAK PERNAH terintersepsi keliru sebagai tool hidup
-    const textWithoutCode = text
+    let textWithoutCode = text
       .replace(/```[\s\S]*?```/g, ' ')
       .replace(/`[^`\n]+`/g, ' ');
 
@@ -8704,9 +8649,31 @@ ${organicBlock}
       }
     }
 
-    // 7. Function call syntax: search_web("query") or browse_web_page("url")
+    // 7a. Two-argument function call syntax: save_memory("topik", "konten fakta") or save_memory(topic="...", content="...")
+    const funcTwoArgsRegex = /(save_memory|simpan_memori|store_memory)\s*\(\s*(?:([a-zA-Z_]+)\s*[:=]\s*)?(["'`])([\s\S]*?)\3\s*,\s*(?:([a-zA-Z_]+)\s*[:=]\s*)?(["'`])([\s\S]*?)\6\s*\)/gi;
+    let ftm;
+    while ((ftm = funcTwoArgsRegex.exec(textWithoutCode)) !== null) {
+      if (isLongCompleteText && ftm.index > 220) continue;
+      const name = ftm[1];
+      const k1 = (ftm[2] || '').toLowerCase();
+      const v1 = ftm[4].trim();
+      const k2 = (ftm[5] || '').toLowerCase();
+      const v2 = ftm[7].trim();
+      let topicVal = v1;
+      let contentVal = v2;
+      if (['content', 'konten', 'isi', 'value', 'text', 'data'].includes(k1)) {
+        contentVal = v1;
+        topicVal = v2;
+      }
+      if (topicVal || contentVal) {
+        addCall(name, { topic: topicVal || 'catatan', content: contentVal || topicVal }, ftm[0]);
+        textWithoutCode = textWithoutCode.replace(ftm[0], ' '.repeat(ftm[0].length));
+      }
+    }
+
+    // 7b. Single-argument function call syntax: search_web("query") or browse_web_page("url")
     // Jika teks sangat panjang (> 300 kata), hanya izinkan jika pemanggilan ada di awal teks (< 200 karakter)
-    const funcRegex = /(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube|youtube_search|cari_youtube|search_yt|youtube|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code|run_code|python_code|run_python|python)\s*\(\s*(?:(?:query|url|q|link|target|code|topic)\s*[:=]\s*)?(["'`])([\s\S]*?)\2\s*\)/gi;
+    const funcRegex = new RegExp(`(${toolPattern})\\s*\\(\\s*(?:(?:query|url|q|link|target|code|topic|content|isi|kata_kunci|topik|script)\\s*[:=]\\s*)?(["'\`])([\\s\\S]*?)\\2\\s*\\)`, 'gi');
     let fm;
     while ((fm = funcRegex.exec(textWithoutCode)) !== null) {
       if (isLongCompleteText && fm.index > 220) continue;
@@ -8715,7 +8682,7 @@ ${organicBlock}
       if (val) {
         const normName = normalizeToolName(name);
         const isUrlTool = ['browse_web_page', 'extract_web'].includes(normName);
-        const isCodeTool = normName === 'execute_python_code';
+        const isCodeTool = ['execute_python_code', 'run_python', 'python'].includes(normName);
         const isSaveMem = normName === 'save_memory';
         if (isUrlTool) addCall(name, { url: val }, fm[0]);
         else if (isCodeTool) addCall(name, { code: val }, fm[0]);
@@ -8726,7 +8693,7 @@ ${organicBlock}
 
     // 8. Conversational triggers: "We will call search_web for <query>"
     // Hanya picu jika berada di awal generasi (bukan teks penutup di akhir pesan panjang)
-    const convRegex = /(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari|menjelajahi|ekstrak)\s+(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube|youtube_search|cari_youtube|search_yt|youtube|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code|run_code|python_code|run_python|python)(?:\s+(?:for|with|tentang|query|url|code|topic|:))?\s*(["'`])([^\n]+?)\2/gi;
+    const convRegex = new RegExp(`(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari|menjelajahi|ekstrak)\\s+(${toolPattern})(?:\\s+(?:for|with|tentang|query|url|code|topic|isi|kata_kunci|topik|:))?\\s*(["'\`])([^\\n]+?)\\2`, 'gi');
     let cvm;
     while ((cvm = convRegex.exec(textWithoutCode)) !== null) {
       if (isLongCompleteText && cvm.index > 220) continue;
@@ -12995,7 +12962,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
                       synthesizer: {
                         name: 'Model 3 (Lead Corrector & Enhancer)',
                         model: masterResearchModel,
-                        status: 'completato',
+                        status: 'selesai',
                         text: finalReportText,
                         length: (finalReportText || '').length
                       }
@@ -13008,7 +12975,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
                       model4: {
                         name: 'Model 4 (Executive Chat Summarizer)',
                         model: masterResearchModel,
-                        status: 'completato',
+                        status: 'selesai',
                         text: chatSummary,
                         length: (chatSummary || '').length
                       }
@@ -13108,7 +13075,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             analysis: `Berhasil mengekstrak ${scrapedPages.length} halaman web kustom utuh untuk telaah mendalam.`
           },
           scraper: {
-            status: 'completato',
+            status: 'selesai',
             totalScraped: scrapedPages.length,
             temporalAnalysis: '',
             articles: scrapedPages.map(p => ({
@@ -13181,7 +13148,7 @@ TUGAS ANDA:
             analysis: hasilBedahAnalisis
           },
           scraper: {
-            status: 'completato',
+            status: 'selesai',
             totalScraped: scrapedPages.length,
             temporalAnalysis: hasilBedahAnalisis,
             articles: scrapedPages.map(p => ({
@@ -13268,14 +13235,14 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           synthesizer: {
             name: 'Model 3 (Lead Corrector & Enhancer)',
             model: masterResearchModel,
-            status: 'completato',
+            status: 'selesai',
             text: finalReportText,
             length: (finalReportText || '').length
           },
           model4: {
             name: 'Model 4 (Executive Chat Summarizer)',
             model: masterResearchModel,
-            status: 'completato',
+            status: 'selesai',
             text: chatSummary,
             length: (chatSummary || '').length
           }
@@ -14854,9 +14821,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
             <span class="image-meta-badge" style="color:var(--neon-teal); border-color:rgba(0,255,194,0.3);"><i class="fa-solid fa-microchip"></i> ${isAiComposed ? 'AI Neural Music Architect' : 'Neural Audio Synth'}</span>
           </div>
           <div class="image-actions-bar">
-            <button type="button" class="btn btn-xs btn-outline add-gen-to-bgm-btn" data-url="${safeUrl}" data-title="${safeTitle}">
-              <i class="fa-solid fa-plus"></i> Tambah ke BGM Deck
-            </button>
             <a href="${safeUrl}" download="${safeTitle}.mp3" class="btn btn-xs btn-outline">
               <i class="fa-solid fa-download"></i> Unduh Audio
             </a>
@@ -14880,7 +14844,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       const currTimeEl = card.querySelector('.curr-time');
       const totalTimeEl = card.querySelector('.total-time');
       const canvas = card.querySelector('.cyber-audio-wave-canvas');
-      const addBgmBtn = card.querySelector('.add-gen-to-bgm-btn');
       const copyPromptBtn = card.querySelector('.copy-audio-prompt-btn');
 
       if (!audio || !playBtn) return;
@@ -15012,17 +14975,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         audio.currentTime = (scrubber.value / 100) * audio.duration;
       });
 
-      addBgmBtn?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const url = addBgmBtn.dataset.url;
-        const title = addBgmBtn.dataset.title || 'Musik AI';
-        if (typeof BGMEngine !== 'undefined' && BGMEngine.saveOnlineToPlaylist) {
-          BGMEngine.saveOnlineToPlaylist(url, title);
-          showToast(`🎵 "${title}" disimpan ke playlist BGM Deck!`);
-        } else {
-          showToast(`Audio URL: ${url}`, 'info');
-        }
-      });
 
       copyPromptBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -15755,14 +15707,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     } else {
       document.body.classList.remove('modal-open');
     }
-    // Deck BGM baru saja dibuka (jalur tombol ATAU popstate history) → hidupkan lagi
-    // loop visualisasi yang otomatis mati saat canvas tersembunyi.
-    const deckModal = document.getElementById('musicDeckModal');
-    if (deckModal && deckModal.classList.contains('show')) {
-      try {
-        BGMEngine.ensureVisualizerRunning();
-      } catch (_) {}
-    }
   }
 
   function openModal(modalId) {
@@ -15822,1514 +15766,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       }
     }
   }
-
-  // ==================== INDEXEDDB AUDIO VAULT ====================
-  const MusicDB = {
-    db: null,
-    async init() {
-      return new Promise((resolve) => {
-        try {
-          const req = indexedDB.open('ZozRouterMusicDB_v1', 1);
-          req.onupgradeneeded = (e) => {
-            const db = e.target.result;
-            if (!db.objectStoreNames.contains('tracks')) {
-              db.createObjectStore('tracks', { keyPath: 'id' });
-            }
-          };
-          req.onsuccess = (e) => {
-            this.db = e.target.result;
-            resolve(this.db);
-          };
-          req.onerror = () => resolve(null);
-        } catch (e) {
-          resolve(null);
-        }
-      });
-    },
-    async saveTrack(track) {
-      if (!this.db) await this.init();
-      if (!this.db) return false;
-      return new Promise((resolve) => {
-        try {
-          const tx = this.db.transaction('tracks', 'readwrite');
-          const req = tx.objectStore('tracks').put(track);
-          req.onerror = () => resolve(false);
-          tx.oncomplete = () => resolve(true);
-          tx.onerror = () => resolve(false);
-          tx.onabort = () => resolve(false);
-        } catch (e) {
-          resolve(false);
-        }
-      });
-    },
-    async getAllTracks() {
-      if (!this.db) await this.init();
-      if (!this.db) return [];
-      return new Promise((resolve) => {
-        try {
-          const tx = this.db.transaction('tracks', 'readonly');
-          const req = tx.objectStore('tracks').getAll();
-          req.onsuccess = () => resolve(req.result || []);
-          req.onerror = () => resolve([]);
-          // F11: transaksi yang di-abort (tekanan storage / tab lain menutup DB)
-          // kini menyelesaikan Promise — dulu gantung selamanya dan init() playlist
-          // tak pernah selesai (UI playlist/ambient tak pernah terinisialisasi).
-          tx.onabort = () => resolve([]);
-        } catch (e) {
-          resolve([]);
-        }
-      });
-    },
-    async deleteTrack(id) {
-      if (!this.db) await this.init();
-      if (!this.db) return false;
-      return new Promise((resolve) => {
-        try {
-          const tx = this.db.transaction('tracks', 'readwrite');
-          tx.objectStore('tracks').delete(id);
-          tx.oncomplete = () => resolve(true);
-          tx.onerror = () => resolve(false);
-          tx.onabort = () => resolve(false); // F11: jangan gantung
-        } catch (e) {
-          resolve(false);
-        }
-      });
-    },
-    async clearAll() {
-      if (!this.db) await this.init();
-      if (!this.db) return false;
-      return new Promise((resolve) => {
-        try {
-          const tx = this.db.transaction('tracks', 'readwrite');
-          tx.objectStore('tracks').clear();
-          tx.oncomplete = () => resolve(true);
-          tx.onerror = () => resolve(false);
-          tx.onabort = () => resolve(false); // F11: jangan gantung
-        } catch (e) {
-          resolve(false);
-        }
-      });
-    }
-  };
-
-  // ==================== PROCEDURAL AMBIENT SOUNDSCAPES ====================
-  const AMBIENT_PRESETS = [
-    {
-      id: 'ambient_space',
-      name: '🌌 Deep Space Neural Drone',
-      desc: 'Sintesis frekuensi 432Hz meditatif & resonansi sub-bass ruang hampa untuk ketenangan pikiran.',
-      icon: 'fa-brain'
-    },
-    {
-      id: 'ambient_synthwave',
-      name: '⚡ Cyberpunk Synthwave Pulse',
-      desc: 'Arpeggio neon 80s dengan filter cutoff analog dan modulasi binaural berenergi tinggi.',
-      icon: 'fa-bolt'
-    },
-    {
-      id: 'ambient_rain',
-      name: '🌧️ Neo-Tokyo Rain & Lo-Fi Vinyl',
-      desc: 'Deru hujan malam kota cyberpunk yang disaring dengan pad chord lo-fi bernuansa hangat.',
-      icon: 'fa-cloud-rain'
-    },
-    {
-      id: 'ambient_quantum',
-      name: '🧠 Quantum Focus Alpha Waves',
-      desc: 'Gelombang otak Alpha 10Hz binaural beats terkalibrasi khusus untuk deep coding & konsentrasi tajam.',
-      icon: 'fa-microchip'
-    }
-  ];
-
-  // ==================== CYBER BGM AUDIO ENGINE ====================
-  const BGMEngine = {
-    audio: null,
-    audioCtx: null,
-    analyser: null,
-    sourceNode: null,
-    masterGainNode: null,
-    ambientGainNode: null,
-    ambientNodes: [],
-    ambientTimer: null,
-    playlist: [],
-    currentIndex: -1,
-    isPlaying: false,
-    currentMode: null, // 'file' | 'ambient'
-    activeAmbientId: null,
-    volume: 0.5,
-    volumeSaveTimer: null, // debounce tulisan localStorage volume (lihat setVolume)
-    loopMode: 'all', // 'all' | 'one' | 'none'
-    isShuffle: false,
-    animFrameId: null,
-    // Niat pemutaran pengguna: tetap true walau browser men-suspend audio saat tab
-    // disembunyikan/di-minimize. Dipakai guardian untuk membangunkan playback lagi.
-    wantsPlayback: false,
-    guardianTimer: null,
-
-    async init() {
-      this.audio = new Audio();
-      this.audio.crossOrigin = 'anonymous';
-
-      // Load volume from storage
-      try {
-        const savedVol = localStorage.getItem('zoz_bgm_volume');
-        if (savedVol !== null) {
-          const parsedVol = parseFloat(savedVol);
-          if (!isNaN(parsedVol) && isFinite(parsedVol)) {
-            this.volume = Math.max(0, Math.min(1, parsedVol));
-          }
-        }
-      } catch (_) {}
-      this.audio.volume = this.volume;
-      if (els.bgmMiniVolume) els.bgmMiniVolume.value = this.volume;
-      if (els.deckMasterVolume) els.deckMasterVolume.value = this.volume;
-      if (els.valMasterVolume) els.valMasterVolume.innerText = `${Math.round(this.volume * 100)}%`;
-
-      // Audio Event Handlers
-      this.audio.addEventListener('timeupdate', () => this.onTimeUpdate());
-      this.audio.addEventListener('ended', () => this.onTrackEnded());
-      // Sumber file yang BARU sudah benar-benar berbunyi → tutup jendela abaikan-
-      // pause (dipakai hanya saat ganti track) lebih awal. Akibatnya pause pengguna
-      // sesaat setelah lagu berganti TETAP dihormati (dulu kejebak 800ms penuh).
-      this.audio.addEventListener('playing', () => {
-        this._ignorePauseUntil = 0;
-        this._reviveAttempts = 0;
-      });
-      // Pause di luar jendela pergantian = niat pengguna/SISTEM (tombol app sudah
-      // menandai wantsPlayback sendiri; ini untuk media key OS, headphone Bluetooth
-      // yang dilepas, dll.) — HORMATI tanpa memandang tab terlihat atau tidak.
-      // Dulu pause saat tab tersembunyi diabaikan → guardian "membangunkan" musik
-      // beberapa detik kemudian dan suara meledak dari speaker tanpa diminta.
-      this.audio.addEventListener('pause', () => {
-        if (this._ignorePauseUntil && performance.now() < this._ignorePauseUntil) return;
-        if (this.currentMode === 'file' && this.audio.paused && this.wantsPlayback) {
-          this.wantsPlayback = false;
-          this.stopGuardian();
-          this.setPlayingState(false);
-        }
-      });
-      // Resume di LUAR tombol app (media key OS, elemen media lain dilepas) →
-      // samakan state dengan kenyataan: wantsPlayback + indikator playing +
-      // armen ulang loop visualisasi (setPlayingState menanganinya).
-      this.audio.addEventListener('play', () => {
-        if (this._ignorePauseUntil && performance.now() < this._ignorePauseUntil) return;
-        if (this.currentMode === 'file' && !this.audio.paused) {
-          this.wantsPlayback = true;
-          this.setPlayingState(true);
-        }
-      });
-      this.audio.addEventListener('error', () => {
-        // Sumber mati (404 / codec tak didukung / URL stream habis) → matikan
-        // guardian SEKALIGUS, jangan retry play() ke src rusak tiap 4 detik selamanya.
-        this.wantsPlayback = false;
-        this.stopGuardian();
-        showToast('Gagal memutar file audio.', 'error');
-        this.setPlayingState(false);
-      });
-
-      // Load saved playlist from IndexedDB
-      await this.loadPlaylistFromDB();
-      this.renderPlaylistUI();
-      this.renderAmbientGridUI();
-
-      // Start Visualizer Canvas Loop
-      this.setupVisualizer();
-    },
-
-    initAudioContext() {
-      if (!this.audioCtx) {
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if (AudioContextClass) {
-          try {
-            this.audioCtx = new AudioContextClass();
-            this.analyser = this.audioCtx.createAnalyser();
-            this.analyser.fftSize = 64;
-
-            this.masterGainNode = this.audioCtx.createGain();
-            this.masterGainNode.gain.setValueAtTime(this.volume, this.audioCtx.currentTime);
-            this.masterGainNode.connect(this.audioCtx.destination);
-
-            // Connect HTML Audio source to Web Audio analyser
-            try {
-              this.sourceNode = this.audioCtx.createMediaElementSource(this.audio);
-              this.sourceNode.connect(this.analyser);
-              this.analyser.connect(this.masterGainNode);
-            } catch (e) {}
-          } catch (e) {
-            this.audioCtx = null;
-          }
-        }
-      }
-      if (this.audioCtx && this.audioCtx.state === 'suspended') {
-        try {
-          this.audioCtx.resume().catch(() => {});
-        } catch (e) {}
-      }
-    },
-
-    ytPlayer: null,
-    ytReady: false,
-    currentOnlineTrack: null,
-
-    async loadPlaylistFromDB() {
-      if (Array.isArray(this.playlist)) {
-        this.playlist.forEach(t => {
-          if (t && t.blob && t.url) {
-            try { URL.revokeObjectURL(t.url); } catch (_) {}
-          }
-        });
-      }
-      const records = await MusicDB.getAllTracks();
-      this.playlist = records.map(r => ({
-        id: r.id,
-        name: r.name,
-        size: r.size || (r.isOnline ? 'Online' : 'Local'),
-        type: r.type,
-        isOnline: r.isOnline || false,
-        youtubeId: r.youtubeId || null,
-        onlineUrl: r.onlineUrl || null,
-        // Object URL dibuat LAZILY lewat ensureTrackUrl() saat lagu benar-benar
-        // diputar — dulu URL dibuat untuk SEMUA lagu saat startup.
-        url: r.onlineUrl || '',
-        blob: r.blob || null
-      }));
-    },
-
-    // Bangun object URL saat dibutuhkan (baru dipanggil dari jalur play).
-    // Blob tetap disimpan di memori karena MusicDB belum punya getTrack(id);
-    // hanya URL-nya yang ditunda pembuatannya.
-    ensureTrackUrl(track) {
-      if (!track) return '';
-      if (!track.url && track.blob) {
-        try {
-          track.url = URL.createObjectURL(track.blob);
-        } catch (_) {
-          track.url = '';
-        }
-      }
-      return track.url;
-    },
-
-    initYouTube(callback) {
-      if (window.YT && window.YT.Player) {
-        this.ytReady = true;
-        if (callback) callback();
-        return;
-      }
-      const existing = document.getElementById('ytIframeApiScript');
-      if (!existing) {
-        window.onYouTubeIframeAPIReady = () => {
-          this.ytReady = true;
-          if (callback) callback();
-        };
-        const tag = document.createElement('script');
-        tag.id = 'ytIframeApiScript';
-        tag.src = 'https://www.youtube.com/iframe_api';
-        tag.onerror = () => {
-          console.warn('Gagal memuat skrip YouTube Iframe API (kemungkinan terblokir oleh peramban/adblocker).');
-        };
-        document.body.appendChild(tag);
-      } else {
-        let attempts = 0;
-        const maxAttempts = 60; // Maksimal 6 detik batas timeout
-        const check = setInterval(() => {
-          attempts++;
-          if (window.YT && window.YT.Player) {
-            clearInterval(check);
-            this.ytReady = true;
-            if (callback) callback();
-          } else if (attempts >= maxAttempts) {
-            clearInterval(check);
-            console.warn('YouTube Iframe API load timed out.');
-          }
-        }, 100);
-      }
-    },
-
-    extractYouTubeId(url) {
-      if (!url || typeof url !== 'string') return null;
-      const trimmed = url.trim();
-      if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return trimmed;
-      const match = trimmed.match(/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
-      if (match && match[1]) return match[1];
-      const fallbackReg = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/|youtube\.com\/live\/)([^"&?\/\s]{11})/i;
-      const fallbackMatch = trimmed.match(fallbackReg);
-      return fallbackMatch ? fallbackMatch[1] : null;
-    },
-
-    playYouTube(videoId, customTitle = null) {
-      this.initAudioContext();
-      this._ignorePauseUntil = performance.now() + 800;
-      if (this.audio) this.audio.pause();
-      this.stopAmbient();
-
-      this.wantsPlayback = true;
-      this.startGuardian();
-      this.currentMode = 'youtube';
-      this.activeAmbientId = null;
-      this.currentOnlineTrack = {
-        type: 'youtube',
-        videoId,
-        title: customTitle || `YouTube Stream (${videoId})`
-      };
-
-      const containerWrap = els.ytPlayerContainerWrap;
-      if (containerWrap) containerWrap.style.display = 'block';
-      syncYtPlayerVisibilityBtn();
-
-      const createOrLoad = () => {
-        try {
-          if (!this.ytPlayer) {
-            this.ytPlayer = new YT.Player('ytPlayerContainer', {
-              videoId: videoId,
-              playerVars: {
-                autoplay: 1,
-                controls: 1,
-                modestbranding: 1,
-                playsinline: 1,
-                origin: window.location.origin
-              },
-              events: {
-                onReady: (e) => {
-                  try {
-                    e.target.setVolume(Math.round(this.volume * 100));
-                    e.target.playVideo();
-                  } catch (_) {}
-                  this.setPlayingState(true);
-
-                  // Tambahkan allow="fullscreen" ke iframe YouTube agar fullscreen
-                  // berfungsi di mobile (YouTube IFrame API tidak menambahkannya otomatis)
-                  try {
-                    const container = document.getElementById('ytPlayerContainer');
-                    if (container) {
-                      const ytIframe = container.querySelector('iframe');
-                      if (ytIframe && !ytIframe.hasAttribute('allow')) {
-                        ytIframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen');
-                      } else if (ytIframe && ytIframe.hasAttribute('allow')) {
-                        const currentAllow = ytIframe.getAttribute('allow');
-                        if (!currentAllow.includes('fullscreen')) {
-                          ytIframe.setAttribute('allow', currentAllow + '; fullscreen');
-                        }
-                      }
-                    }
-                  } catch (_) {}
-                },
-                onStateChange: (e) => {
-                  if (e.data === YT.PlayerState.PLAYING) {
-                    this._ignorePauseUntil = 0;
-                    this._reviveAttempts = 0;
-                    this.setPlayingState(true);
-                    if (!customTitle && this.ytPlayer.getVideoData) {
-                      const d = this.ytPlayer.getVideoData();
-                      if (d && d.title) {
-                        this.currentOnlineTrack.title = d.title;
-                        this.updateUI();
-                      }
-                    }
-                  } else if (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.ENDED) {
-                    // H4: event PAUSED/ENDED bisa datang TERLAMBAT setelah pengguna
-                    // sudah pindah ke lagu/mode lain (pauseVideo saat beralih memicu
-                    // event asinkron). Tanpa guard ini, event basi membajak state:
-                    // guardian lagu baru dimatikan & UI dipaksa "paused".
-                    if (this.currentMode !== 'youtube') return;
-
-                    if (e.data === YT.PlayerState.PAUSED) {
-                      // Masih dalam jendela pergantian (loadVideoById / pindah mode):
-                      // pause ini berasal dari SWAP buatan kita, bukan pengguna.
-                      if (this._ignorePauseUntil && performance.now() < this._ignorePauseUntil) return;
-                      // Pause iframe YouTube = niat pengguna/system (tombol app sudah
-                      // menandai wantsPlayback sendiri sebelum pauseVideo) — hormati
-                      // tanpa memandang tab terlihat; jangan biarkan guardian kembali.
-                      if (this.isPlaying) {
-                        this.wantsPlayback = false;
-                        this.stopGuardian();
-                      }
-                      this.setPlayingState(false);
-                      return;
-                    }
-
-                    // ENDED
-                    this.setPlayingState(false);
-                    if (this.loopMode === 'one') {
-                      if (e.target && typeof e.target.seekTo === 'function' && typeof e.target.playVideo === 'function') {
-                        e.target.seekTo(0);
-                        e.target.playVideo();
-                        this.setPlayingState(true);
-                      }
-                      return;
-                    }
-                    if (this.loopMode === 'all' && this.playlist.length > 0) {
-                      this.nextTrack(); // wrap ke awal playlist
-                      return;
-                    }
-                    // Loop mati, ATAU loop-all tanpa playlist (video dari kotak URL):
-                    // akhiri bersih — matikan guardian agar interval/listener 4 detik
-                    // tidak hidup percuma sampai reload halaman (M13).
-                    this.wantsPlayback = false;
-                    this.stopGuardian();
-                  }
-                },
-                onError: (e) => {
-                  console.warn('YouTube Player error code:', e.data);
-                  // Pemutar rusak/dibatasi → jangan biarkan guardian memanggil
-                  // playVideo() ulang tiap 4 detik ke video yang sama-sama error.
-                  this.wantsPlayback = false;
-                  this.stopGuardian();
-                  showToast('Video YouTube tidak dapat diputar atau dibatasi oleh pemilik video.', 'error');
-                  this.setPlayingState(false);
-                }
-              }
-            });
-          } else {
-            this.ytPlayer.loadVideoById(videoId);
-            if (typeof this.ytPlayer.setVolume === 'function') {
-              try {
-                this.ytPlayer.setVolume(Math.round(this.volume * 100));
-              } catch (_) {}
-            }
-            if (typeof this.ytPlayer.playVideo === 'function') {
-              try {
-                this.ytPlayer.playVideo();
-              } catch (_) {}
-            }
-            this.setPlayingState(true);
-          }
-          this.updateUI();
-          showToast(`▶️ Memutar YouTube: ${this.currentOnlineTrack.title}`);
-        } catch (err) {
-          console.error('Error starting YouTube Player:', err);
-        }
-      };
-
-      this.initYouTube(() => {
-        createOrLoad();
-      });
-    },
-
-    playDirectUrl(url, title = 'Online Stream') {
-      this.initAudioContext();
-      this.stopAmbient();
-      if (this.ytPlayer && this.ytPlayer.pauseVideo) {
-        this.ytPlayer.pauseVideo();
-      }
-      const containerWrap = els.ytPlayerContainerWrap;
-      if (containerWrap) containerWrap.style.display = 'none';
-      syncYtPlayerVisibilityBtn();
-
-      this.wantsPlayback = true;
-      this.startGuardian();
-      this.currentMode = 'file';
-      this.activeAmbientId = null;
-      this.currentOnlineTrack = { type: 'stream', url, title };
-
-      this._ignorePauseUntil = performance.now() + 800;
-      this.audio.src = url;
-      this.audio.currentTime = 0;
-      this.audio.play()
-        .then(() => {
-          this.setPlayingState(true);
-          this.updateUI();
-          showToast(`▶️ Memutar Stream: ${title}`);
-        })
-        .catch((e) => {
-          showToast('Gagal memutar stream audio: ' + e.message, 'error');
-          this.setPlayingState(false);
-        });
-    },
-
-    async saveOnlineToPlaylist(url, customTitle) {
-      if (!url || !url.trim()) {
-        showToast('Masukkan URL audio atau YouTube terlebih dahulu.', 'error');
-        return;
-      }
-      const trimmed = url.trim();
-      const ytId = this.extractYouTubeId(trimmed);
-      const title = (customTitle && customTitle.trim()) || (ytId ? `YouTube (${ytId})` : 'Online Audio Stream');
-      const id = `online_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-
-      const trackRecord = {
-        id,
-        name: title,
-        size: ytId ? 'YouTube' : 'Stream',
-        type: ytId ? 'youtube' : 'audio/stream',
-        isOnline: true,
-        youtubeId: ytId,
-        onlineUrl: trimmed,
-        addedAt: new Date().toISOString()
-      };
-
-      const saved = await MusicDB.saveTrack(trackRecord);
-      this.playlist.push({
-        id,
-        name: trackRecord.name,
-        size: trackRecord.size,
-        type: trackRecord.type,
-        isOnline: true,
-        youtubeId: ytId,
-        onlineUrl: trimmed,
-        url: trimmed
-      });
-
-      this.renderPlaylistUI();
-      if (!saved) {
-        showToast(`⚠️ "${title}" ditambahkan, namun penyimpanan offline dibatasi (hanya aktif di sesi ini).`, 'warning');
-      } else {
-        showToast(`✅ "${title}" berhasil disimpan ke Playlist!`);
-      }
-      AudioEngine.click();
-    },
-
-    async handleUploadFiles(fileList) {
-      if (!fileList || fileList.length === 0) return;
-      let addedCount = 0;
-      let quotaWarning = false;
-
-      for (let i = 0; i < fileList.length; i++) {
-        const file = fileList[i];
-        if (!file || typeof file.size !== 'number' || file.size <= 0) continue;
-        if (!file.type.startsWith('audio/') && !file.name.match(/\.(mp3|wav|ogg|flac|m4a|aac)$/i)) {
-          continue;
-        }
-
-        const id = `track_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        const trackRecord = {
-          id,
-          name: file.name.replace(/\.[^/.]+$/, ''),
-          size: (file.size / (1024 * 1024)).toFixed(1),
-          type: file.type || 'audio/mpeg',
-          blob: file,
-          addedAt: new Date().toISOString()
-        };
-
-        const saved = await MusicDB.saveTrack(trackRecord);
-        if (!saved) {
-          quotaWarning = true;
-        }
-
-        this.playlist.push({
-          id,
-          name: trackRecord.name,
-          size: trackRecord.size,
-          type: trackRecord.type,
-          url: URL.createObjectURL(file),
-          blob: file
-        });
-        addedCount++;
-      }
-
-      if (addedCount > 0) {
-        if (quotaWarning) {
-          showToast(`⚠️ ${addedCount} lagu ditambahkan ke sesi, namun penyimpanan offline browser penuh/dibatasi (hanya aktif di sesi ini).`, 'warning');
-        } else {
-          showToast(`✅ ${addedCount} lagu berhasil diupload ke Playlist Lokal!`);
-        }
-        this.renderPlaylistUI();
-        AudioEngine.click();
-        
-        // Auto play the first uploaded track if idle
-        if (!this.isPlaying) {
-          this.playTrack(this.playlist.length - addedCount);
-        }
-      } else {
-        showToast('Format file tidak didukung. Pilih format audio (MP3, WAV, FLAC, OGG, M4A).', 'error');
-      }
-    },
-
-    async deleteTrack(id, e) {
-      if (e) e.stopPropagation();
-      await MusicDB.deleteTrack(id);
-      
-      const idx = this.playlist.findIndex(t => t.id === id);
-      if (idx !== -1) {
-        const wasCurrent = (this.currentIndex === idx);
-        if (this.playlist[idx].blob && this.playlist[idx].url) {
-          URL.revokeObjectURL(this.playlist[idx].url);
-        }
-        this.playlist.splice(idx, 1);
-        
-        if (wasCurrent) {
-          this.stop();
-          if (this.playlist.length > 0) {
-            this.playTrack(Math.min(idx, this.playlist.length - 1));
-          } else {
-            this.currentIndex = -1;
-          }
-        } else if (this.currentIndex > idx) {
-          this.currentIndex--;
-        }
-      }
-
-      this.renderPlaylistUI();
-      showToast('Lagu dihapus dari playlist.');
-      AudioEngine.click();
-    },
-
-    async clearAllTracks() {
-      if (this.playlist.length === 0) return;
-      if (!confirm('Hapus semua lagu dari playlist?')) return;
-      
-      this.stop();
-      this.playlist.forEach(t => {
-        if (t.blob && t.url) URL.revokeObjectURL(t.url);
-      });
-      this.playlist = [];
-      this.currentIndex = -1;
-      await MusicDB.clearAll();
-      this.renderPlaylistUI();
-      showToast('Playlist telah dikosongkan.');
-      AudioEngine.click();
-    },
-
-    playTrack(index) {
-      if (index < 0 || index >= this.playlist.length) return;
-      this.currentIndex = index;
-      const track = this.playlist[index];
-
-      if (track.isOnline && track.youtubeId) {
-        this.playYouTube(track.youtubeId, track.name);
-      } else if (track.isOnline && track.onlineUrl) {
-        this.playDirectUrl(track.onlineUrl, track.name);
-      } else {
-        if (this.ytPlayer && this.ytPlayer.pauseVideo) {
-          this.ytPlayer.pauseVideo();
-        }
-        const containerWrap = els.ytPlayerContainerWrap;
-        if (containerWrap) containerWrap.style.display = 'none';
-        syncYtPlayerVisibilityBtn();
-
-        this.initAudioContext();
-        this.stopAmbient();
-        this.wantsPlayback = true;
-        this.startGuardian();
-        this.currentMode = 'file';
-        this.activeAmbientId = null;
-        this.currentOnlineTrack = null;
-
-        this._ignorePauseUntil = performance.now() + 800;
-        this.audio.src = this.ensureTrackUrl(track);
-        this.audio.currentTime = 0;
-        
-        const playPromise = this.audio.play();
-        if (playPromise !== undefined) {
-          playPromise
-            .then(() => {
-              this.setPlayingState(true);
-              this.updateUI();
-            })
-            .catch(() => {
-              this.setPlayingState(false);
-            });
-        }
-      }
-    },
-
-    togglePlayPause() {
-      this.initAudioContext();
-
-      if (this.isPlaying) {
-        // Pause eksplisit dari pengguna: hentikan guardian agar tidak "membangunkan" lagi
-        this.wantsPlayback = false;
-        this.stopGuardian();
-        if (this.currentMode === 'youtube' && this.ytPlayer && this.ytPlayer.pauseVideo) {
-          this.ytPlayer.pauseVideo();
-        } else if (this.currentMode === 'file') {
-          this.audio.pause();
-        } else if (this.currentMode === 'ambient') {
-          this.stopAmbient();
-        }
-        this.setPlayingState(false);
-      } else {
-        this.wantsPlayback = true;
-        this.startGuardian();
-        if (this.currentMode === 'youtube' && this.ytPlayer && this.ytPlayer.playVideo) {
-          this.ytPlayer.playVideo();
-          this.setPlayingState(true);
-        } else if (this.currentMode === 'file' && ((this.currentIndex >= 0 && this.currentIndex < this.playlist.length) || (this.currentOnlineTrack && this.audio.src))) {
-          const playPromise = this.audio.play();
-          if (playPromise !== undefined) {
-            playPromise
-              .then(() => {
-                this.setPlayingState(true);
-                this.updateUI();
-              })
-              .catch((err) => {
-                console.warn('Audio play failed:', err?.message || err);
-                this.setPlayingState(false);
-                this.updateUI();
-              });
-          } else {
-            this.setPlayingState(true);
-          }
-        } else if (this.currentMode === 'ambient' && this.activeAmbientId) {
-          this.startAmbient(this.activeAmbientId);
-        } else if (this.playlist.length > 0) {
-          this.playTrack(0);
-        } else {
-          this.startAmbient('ambient_space');
-        }
-      }
-      this.updateUI();
-      AudioEngine.click();
-    },
-
-    nextTrack() {
-      if (this.playlist.length === 0) return;
-      let nextIdx = this.currentIndex + 1;
-      if (this.isShuffle) {
-        nextIdx = Math.floor(Math.random() * this.playlist.length);
-      } else if (nextIdx >= this.playlist.length) {
-        nextIdx = 0;
-      }
-      this.playTrack(nextIdx);
-      AudioEngine.click();
-    },
-
-    prevTrack() {
-      if (this.playlist.length === 0) return;
-      if (this.audio && this.audio.currentTime > 3) {
-        this.audio.currentTime = 0;
-        return;
-      }
-      let prevIdx = this.currentIndex - 1;
-      if (prevIdx < 0) prevIdx = this.playlist.length - 1;
-      this.playTrack(prevIdx);
-      AudioEngine.click();
-    },
-
-    ytProgressTimer: null,
-
-    startYouTubeProgressTimer() {
-      this.stopYouTubeProgressTimer();
-      this.ytProgressTimer = setInterval(() => {
-        if (this.currentMode === 'youtube' && this.ytPlayer && typeof this.ytPlayer.getCurrentTime === 'function' && typeof this.ytPlayer.getDuration === 'function') {
-          try {
-            const cur = this.ytPlayer.getCurrentTime() || 0;
-            const dur = this.ytPlayer.getDuration() || 0;
-            if (dur > 0 && els.deckProgressSlider) {
-              els.deckProgressSlider.value = (cur / dur) * 100;
-            }
-            if (els.deckCurrentTrackMeta) {
-              const curStr = this.formatTime(cur);
-              const durStr = dur ? this.formatTime(dur) : '--:--';
-              els.deckCurrentTrackMeta.innerText = `${curStr} / ${durStr}`;
-            }
-          } catch (_) {}
-        }
-      }, 500);
-    },
-
-    stopYouTubeProgressTimer() {
-      if (this.ytProgressTimer) {
-        clearInterval(this.ytProgressTimer);
-        this.ytProgressTimer = null;
-      }
-    },
-
-    stop() {
-      this.stopYouTubeProgressTimer();
-      this.wantsPlayback = false;
-      this.stopGuardian();
-      if (this.audio) {
-        this.audio.pause();
-        this.audio.currentTime = 0;
-      }
-      if (this.ytPlayer && this.ytPlayer.pauseVideo) {
-        this.ytPlayer.pauseVideo();
-      }
-      this.stopAmbient();
-      this.setPlayingState(false);
-      this.updateUI();
-    },
-
-    setPlayingState(isPlaying) {
-      this.isPlaying = isPlaying;
-      if (this.isPlaying && this.currentMode === 'youtube') {
-        this.startYouTubeProgressTimer();
-      } else {
-        this.stopYouTubeProgressTimer();
-      }
-      // Loop visualisasi bisa sudah mati (canvas tersembunyi + sebelumnya pause) →
-      // armen ulang tiap mulai play agar bar langsung beranimasi lagi.
-      if (this.isPlaying) this.ensureVisualizerRunning();
-      this.updateUI();
-    },
-
-    updateMediaSession(title) {
-      try {
-        if (!('mediaSession' in navigator)) return;
-        const cleanTitle = String(title || 'Cyber BGM').replace(/^[^\w(#]+\s/, '');
-        if (this._msTitle === cleanTitle && this._msState === this.isPlaying) return;
-        this._msTitle = cleanTitle;
-        this._msState = this.isPlaying;
-
-        if (typeof MediaMetadata !== 'undefined') {
-          navigator.mediaSession.metadata = new MediaMetadata({
-            title: cleanTitle,
-            artist: 'Cyber BGM Deck',
-            album: 'ZOZ Router • Musik Latar Belakang'
-          });
-        }
-        navigator.mediaSession.playbackState = this.isPlaying ? 'playing' : 'paused';
-
-        const safeSet = (action, fn) => {
-          try { navigator.mediaSession.setActionHandler(action, fn); } catch (_) {}
-        };
-        safeSet('play', () => { if (!this.isPlaying) this.togglePlayPause(); });
-        safeSet('pause', () => { if (this.isPlaying) this.togglePlayPause(); });
-        safeSet('nexttrack', () => this.nextTrack());
-        safeSet('previoustrack', () => this.prevTrack());
-        safeSet('stop', () => this.stop());
-      } catch (_) {}
-    },
-
-    // ==================== BACKGROUND PLAYBACK GUARDIAN ====================
-    // Musik "Latar Belakang" harus tetap hidup saat tab disembunyikan, window
-    // di-minimize, atau pengguna pindah aplikasi. Browser sering men-suspend
-    // AudioContext / media element saat halaman jadi tidak terlihat — guardian
-    // ini membangunkan playback kembali sesuai NIAT pengguna (wantsPlayback),
-    // tanpa pernah menghidupkan lagi musik yang sengaja di-pause pengguna.
-    startGuardian() {
-      if (this.guardianTimer) return;
-      this.guardianTimer = setInterval(() => this.revivePlayback(), 4000);
-      document.addEventListener('visibilitychange', this._visHandler = () => this.revivePlayback());
-      window.addEventListener('focus', this._focusHandler = () => this.revivePlayback());
-      window.addEventListener('pagehide', this._pageHandler = () => this.revivePlayback());
-      this.revivePlayback();
-    },
-
-    stopGuardian() {
-      if (this.guardianTimer) {
-        clearInterval(this.guardianTimer);
-        this.guardianTimer = null;
-      }
-      if (this._visHandler) { document.removeEventListener('visibilitychange', this._visHandler); this._visHandler = null; }
-      if (this._focusHandler) { window.removeEventListener('focus', this._focusHandler); this._focusHandler = null; }
-      if (this._pageHandler) { window.removeEventListener('pagehide', this._pageHandler); this._pageHandler = null; }
-    },
-
-    revivePlayback() {
-      if (!this.wantsPlayback) return;
-      try {
-        // 1. Bangunkan AudioContext yang di-suspend browser
-        if (this.audioCtx && this.audioCtx.state === 'suspended') {
-          this.audioCtx.resume().catch(() => {});
-        }
-
-        // 2. Mode file/stream lokal: audio element yang dipaksa pause browser
-        if (this.currentMode === 'file' && this.audio && this.audio.paused && this.audio.src) {
-          const p = this.audio.play();
-          if (p && typeof p.catch === 'function') p.catch(() => {});
-        }
-
-        // 3. Mode YouTube: player yang di-pause browser saat tab hidden
-        if (this.currentMode === 'youtube' && this.ytPlayer && typeof this.ytPlayer.getPlayerState === 'function') {
-          const st = this.ytPlayer.getPlayerState();
-          // 2 = PAUSED, -1 = cued (belum main), 5 = ended tapi loop masih aktif
-          if (st === 2 || st === -1) {
-            if (typeof this.ytPlayer.playVideo === 'function') this.ytPlayer.playVideo();
-          }
-        }
-
-        // 4. Mode ambient synth: oscillator sudah mati → nyalakan ulang preset yang sama
-        if (this.currentMode === 'ambient' && this.activeAmbientId && this.ambientNodes.length === 0) {
-          this.startAmbient(this.activeAmbientId);
-        }
-      } catch (_) {}
-
-      // BATAS PERCOBAAN BANGKIT (M12): bila setelah 4 siklus berturut-turut audio
-      // tetap tidak berbunyi (sumber mati, AudioContext gagal dibuat, kebijakan
-      // autoplay), menyerah dan matikan guardian — daripada memanggil play() ke
-      // sumber rusak tanpa henti sampai halaman ditutup. Sukses 'playing'/PLAYING
-      // me-reset penghitung ke 0.
-      try {
-        const stillSilent =
-          (this.currentMode === 'file' && this.audio && this.audio.src && this.audio.paused) ||
-          (this.currentMode === 'youtube' && this.ytPlayer && typeof this.ytPlayer.getPlayerState === 'function' && (this.ytPlayer.getPlayerState() === 2 || this.ytPlayer.getPlayerState() === -1)) ||
-          (this.currentMode === 'ambient' && (!this.audioCtx || this.audioCtx.state !== 'running') && this.ambientNodes.length === 0);
-        if (stillSilent) {
-          // Separate attempt counters per mode to prevent ambient failures from
-          // affecting file/youtube playback recovery (M12)
-          const attemptKey = this.currentMode === 'ambient' ? '_reviveAttemptsAmbient' : '_reviveAttempts';
-          this[attemptKey] = (this[attemptKey] || 0) + 1;
-          if (this[attemptKey] >= 4) {
-            this.wantsPlayback = false;
-            this.stopGuardian();
-          }
-        } else {
-          const attemptKey = this.currentMode === 'ambient' ? '_reviveAttemptsAmbient' : '_reviveAttempts';
-          this[attemptKey] = 0;
-        }
-      } catch (_) {}
-    },
-
-    onTrackEnded() {
-      if (this.loopMode === 'one') {
-        this.audio.currentTime = 0;
-        const playPromise = this.audio.play();
-        if (playPromise !== undefined) {
-          playPromise
-            .then(() => {
-              this.setPlayingState(true);
-              this.updateUI();
-            })
-            .catch((err) => {
-              console.warn('Audio loop replay failed:', err?.message || err);
-              this.setPlayingState(false);
-              this.updateUI();
-            });
-        }
-      } else if (this.loopMode === 'all') {
-        if (this.playlist.length > 0) {
-          this.nextTrack();
-        } else {
-          // Loop-all tapi playlist kosong (stream URL tunggal): tak ada lagu yang
-          // bisa diputar lagi → AKHIRI. Tanpa ini guardian terus membangunkan
-          // stream yang sudah habis dari atas tiap 4 detik di tab tersembunyi —
-          // loop tak berujung yang membakar CPU/jaringan (M14).
-          this.wantsPlayback = false;
-          this.stopGuardian();
-          this.setPlayingState(false);
-        }
-      } else {
-        if (this.currentIndex < this.playlist.length - 1) {
-          this.nextTrack();
-        } else {
-          // Playlist habis & loop nonaktif: ini akhir pemutaran — matikan guardian
-          // supaya tidak membangunkan audio yang sudah ended (diputar ulang dari 0).
-          this.wantsPlayback = false;
-          this.stopGuardian();
-          this.setPlayingState(false);
-        }
-      }
-    },
-
-    onTimeUpdate() {
-      if (!this.audio || this.currentMode !== 'file') return;
-      const cur = this.audio.currentTime || 0;
-      const dur = this.audio.duration || 0;
-      
-      if (isFinite(dur) && dur > 0 && els.deckProgressSlider) {
-        els.deckProgressSlider.value = (cur / dur) * 100;
-      }
-
-      if (els.deckCurrentTrackMeta) {
-        const curStr = this.formatTime(cur);
-        const durStr = (isFinite(dur) && dur > 0) ? this.formatTime(dur) : '--:--';
-        els.deckCurrentTrackMeta.innerText = `${curStr} / ${durStr}`;
-      }
-    },
-
-    seek(percent) {
-      if (this.currentMode === 'file' && this.audio && isFinite(this.audio.duration) && this.audio.duration > 0) {
-        this.audio.currentTime = (percent / 100) * this.audio.duration;
-      } else if (this.currentMode === 'youtube' && this.ytPlayer && typeof this.ytPlayer.getDuration === 'function' && typeof this.ytPlayer.seekTo === 'function') {
-        try {
-          const dur = this.ytPlayer.getDuration() || 0;
-          if (isFinite(dur) && dur > 0) {
-            this.ytPlayer.seekTo((percent / 100) * dur, true);
-          }
-        } catch (_) {}
-      }
-    },
-
-    setVolume(val) {
-      const num = parseFloat(val);
-      this.volume = isNaN(num) ? 0.7 : Math.max(0, Math.min(1, num));
-      // Debounce 300ms: event 'input' slider membanjiri localStorage di tiap frame drag
-      if (this.volumeSaveTimer) clearTimeout(this.volumeSaveTimer);
-      this.volumeSaveTimer = setTimeout(() => {
-        this.volumeSaveTimer = null;
-        this.persistVolume();
-      }, 300);
-
-      if (this.audio) this.audio.volume = this.volume;
-      if (this.ytPlayer && typeof this.ytPlayer.setVolume === 'function') {
-        try {
-          this.ytPlayer.setVolume(Math.round(this.volume * 100));
-        } catch (_) {}
-      }
-      if (this.masterGainNode && this.audioCtx) {
-        this.masterGainNode.gain.setValueAtTime(this.volume, this.audioCtx.currentTime);
-      }
-      if (this.ambientGainNode && this.audioCtx) {
-        this.ambientGainNode.gain.setValueAtTime(this.volume * 0.45, this.audioCtx.currentTime);
-      }
-
-      if (els.bgmMiniVolume) els.bgmMiniVolume.value = this.volume;
-      if (els.deckMasterVolume) els.deckMasterVolume.value = this.volume;
-      if (els.valMasterVolume) els.valMasterVolume.innerText = `${Math.round(this.volume * 100)}%`;
-    },
-
-    // Tulis volume ke localStorage sekarang juga (membatalkan debounce yang tertunda).
-    persistVolume() {
-      if (this.volumeSaveTimer) {
-        clearTimeout(this.volumeSaveTimer);
-        this.volumeSaveTimer = null;
-      }
-      try {
-        localStorage.setItem('zoz_bgm_volume', this.volume.toString());
-      } catch (_) {}
-    },
-
-    // Dipanggil saat tab ditutup agar perubahan volume terakhir tidak hilang
-    // bersama debounce 300ms yang masih tertunda.
-    flushVolume() {
-      if (this.volumeSaveTimer) this.persistVolume();
-    },
-
-    // --- PROCEDURAL SYNTHESIZER GENERATOR ---
-    startAmbient(presetId) {
-      this.initAudioContext();
-      // M18: VALIDASI AudioContext SEBELUM commit state. Dulu wantsPlayback/
-      // guardian diset lebih dulu; bila audioCtx null (peramban tanpa Web Audio)
-      // ctx.createGain() melempar di tengah → guardian terus memanggil startAmbient
-      // tiap 4 detik dalam siklus error abadi tanpa suara.
-      if (!this.audioCtx) {
-        showToast('Web Audio API tidak tersedia — preset ambient tidak dapat dijalankan.', 'error');
-        return;
-      }
-      if (this.audioCtx.state === 'suspended') {
-        this.audioCtx.resume().catch(() => {});
-      }
-      this._ignorePauseUntil = performance.now() + 800;
-      if (this.audio) this.audio.pause();
-      this.stopAmbient();
-
-      this.wantsPlayback = true;
-      this.startGuardian();
-      this.currentMode = 'ambient';
-      this.activeAmbientId = presetId;
-      this.currentIndex = -1;
-
-      const ctx = this.audioCtx;
-      this.ambientGainNode = ctx.createGain();
-      this.ambientGainNode.gain.setValueAtTime(this.volume * 0.45, ctx.currentTime);
-      
-      // Route ambient synth to analyser and master destination
-      if (this.analyser) {
-        this.ambientGainNode.connect(this.analyser);
-      } else {
-        this.ambientGainNode.connect(ctx.destination);
-      }
-
-      if (presetId === 'ambient_space') {
-        // 🌌 Deep Space Neural Drone (432Hz sine + 108Hz sub-bass + slow LFO)
-        const osc1 = ctx.createOscillator();
-        const osc2 = ctx.createOscillator();
-        const sub = ctx.createOscillator();
-        const filter = ctx.createBiquadFilter();
-        const lfo = ctx.createOscillator();
-        const lfoGain = ctx.createGain();
-
-        osc1.type = 'sine';
-        osc1.frequency.setValueAtTime(432, ctx.currentTime);
-        osc2.type = 'triangle';
-        osc2.frequency.setValueAtTime(216, ctx.currentTime);
-        sub.type = 'sine';
-        sub.frequency.setValueAtTime(108, ctx.currentTime);
-
-        filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(320, ctx.currentTime);
-
-        lfo.type = 'sine';
-        lfo.frequency.setValueAtTime(0.08, ctx.currentTime);
-        lfoGain.gain.setValueAtTime(120, ctx.currentTime);
-        lfo.connect(lfoGain);
-        lfoGain.connect(filter.frequency);
-
-        osc1.connect(filter);
-        osc2.connect(filter);
-        sub.connect(filter);
-        filter.connect(this.ambientGainNode);
-
-        osc1.start();
-        osc2.start();
-        sub.start();
-        lfo.start();
-        this.ambientNodes.push(osc1, osc2, sub, lfo, filter, lfoGain);
-
-      } else if (presetId === 'ambient_synthwave') {
-        // ⚡ Cyberpunk Synthwave Pulse (Arp Chords + Resonant Lowpass)
-        const notes = [130.81, 164.81, 196.00, 261.63, 196.00, 164.81];
-        let noteIdx = 0;
-        
-        const filter = ctx.createBiquadFilter();
-        filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(800, ctx.currentTime);
-        filter.Q.setValueAtTime(4, ctx.currentTime);
-        filter.connect(this.ambientGainNode);
-
-        const pad = ctx.createOscillator();
-        pad.type = 'sawtooth';
-        pad.frequency.setValueAtTime(65.41, ctx.currentTime);
-        pad.connect(filter);
-        pad.start();
-        this.ambientNodes.push(pad, filter);
-
-        this.ambientTimer = setInterval(() => {
-          if (!this.isPlaying || this.activeAmbientId !== 'ambient_synthwave') return;
-          try {
-            const arp = ctx.createOscillator();
-            const arpGain = ctx.createGain();
-            arp.type = 'sawtooth';
-            arp.frequency.setValueAtTime(notes[noteIdx % notes.length], ctx.currentTime);
-            arpGain.gain.setValueAtTime(0.08, ctx.currentTime);
-            arpGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
-            arp.connect(arpGain);
-            arpGain.connect(filter);
-            arp.start();
-            arp.stop(ctx.currentTime + 0.35);
-            noteIdx++;
-          } catch (e) {}
-        }, 320);
-
-      } else if (presetId === 'ambient_rain') {
-        // 🌧️ Neo-Tokyo Rain & Lo-Fi Vinyl (Filtered White Noise + Warm Chords)
-        const bufferSize = ctx.sampleRate * 2;
-        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-          output[i] = Math.random() * 2 - 1;
-        }
-
-        const whiteNoise = ctx.createBufferSource();
-        whiteNoise.buffer = noiseBuffer;
-        whiteNoise.loop = true;
-
-        const rainFilter = ctx.createBiquadFilter();
-        rainFilter.type = 'bandpass';
-        rainFilter.frequency.setValueAtTime(1000, ctx.currentTime);
-        rainFilter.Q.setValueAtTime(0.5, ctx.currentTime);
-
-        const chord1 = ctx.createOscillator();
-        const chord2 = ctx.createOscillator();
-        chord1.type = 'sine';
-        chord1.frequency.setValueAtTime(220, ctx.currentTime);
-        chord2.type = 'sine';
-        chord2.frequency.setValueAtTime(277.18, ctx.currentTime);
-
-        const chordGain = ctx.createGain();
-        chordGain.gain.setValueAtTime(0.04, ctx.currentTime);
-
-        chord1.connect(chordGain);
-        chord2.connect(chordGain);
-        chordGain.connect(this.ambientGainNode);
-
-        whiteNoise.connect(rainFilter);
-        rainFilter.connect(this.ambientGainNode);
-
-        whiteNoise.start();
-        chord1.start();
-        chord2.start();
-        this.ambientNodes.push(whiteNoise, rainFilter, chord1, chord2, chordGain);
-
-      } else if (presetId === 'ambient_quantum') {
-        // 🧠 Quantum Focus Alpha Waves (10Hz Binaural Beats + Sub Pad)
-        const leftOsc = ctx.createOscillator();
-        const rightOsc = ctx.createOscillator();
-        const leftPanner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
-        const rightPanner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
-
-        leftOsc.type = 'sine';
-        leftOsc.frequency.setValueAtTime(200, ctx.currentTime);
-        rightOsc.type = 'sine';
-        rightOsc.frequency.setValueAtTime(210, ctx.currentTime); // 10Hz Alpha difference
-
-        if (leftPanner && rightPanner) {
-          leftPanner.pan.setValueAtTime(-1, ctx.currentTime);
-          rightPanner.pan.setValueAtTime(1, ctx.currentTime);
-          leftOsc.connect(leftPanner);
-          rightOsc.connect(rightPanner);
-          leftPanner.connect(this.ambientGainNode);
-          rightPanner.connect(this.ambientGainNode);
-          this.ambientNodes.push(leftPanner, rightPanner);
-        } else {
-          leftOsc.connect(this.ambientGainNode);
-          rightOsc.connect(this.ambientGainNode);
-        }
-
-        leftOsc.start();
-        rightOsc.start();
-        this.ambientNodes.push(leftOsc, rightOsc);
-      }
-
-      this.setPlayingState(true);
-      this.updateUI();
-    },
-
-    stopAmbient() {
-      if (this.ambientTimer) {
-        clearInterval(this.ambientTimer);
-        this.ambientTimer = null;
-      }
-      this.ambientNodes.forEach(node => {
-        try {
-          if (node.stop) node.stop();
-          if (node.disconnect) node.disconnect();
-        } catch (e) {}
-      });
-      this.ambientNodes = [];
-      // M17: lepaskan JUGA gain node pembawa — dulu hanya nodes yang dilepas sementara
-      // gain lama tetap menempel di graph analyser dan menumpuk tiap ganti preset.
-      if (this.ambientGainNode) {
-        try { this.ambientGainNode.disconnect(); } catch (_) {}
-        this.ambientGainNode = null;
-      }
-    },
-
-    // --- UI RENDERING & SYNCHRONIZATION ---
-    renderPlaylistUI() {
-      if (els.playlistCountBadge) els.playlistCountBadge.innerText = this.playlist.length;
-      if (!els.playlistItemsList) return;
-
-      if (this.playlist.length === 0) {
-        els.playlistItemsList.innerHTML = `
-          <div style="text-align: center; padding: 24px; color: var(--text-dim); font-size: 0.82rem;">
-            <i class="fa-solid fa-music" style="font-size: 1.8rem; color: rgba(0, 240, 255, 0.25); margin-bottom: 8px; display: block;"></i>
-            Belum ada lagu. Upload file musik lokal atau masukkan link YouTube pada tab Custom URL!
-          </div>
-        `;
-        return;
-      }
-
-      els.playlistItemsList.innerHTML = '';
-      this.playlist.forEach((track, idx) => {
-        const isCurrent = (this.currentMode === 'file' && this.currentIndex === idx) ||
-                          (this.currentMode === 'youtube' && this.currentOnlineTrack && this.currentOnlineTrack.videoId === track.youtubeId);
-        const item = document.createElement('div');
-        item.className = `playlist-item ${isCurrent ? 'active' : ''}`;
-        const icon = track.youtubeId ? '<i class="fa-brands fa-youtube" style="color:#FF0033;"></i>' : (track.isOnline ? '<i class="fa-solid fa-globe" style="color:var(--neon-teal);"></i>' : '<i class="fa-solid fa-music"></i>');
-        const sizeLabel = track.size ? (track.isOnline ? track.size : `${track.size} MB`) : '';
-
-        item.innerHTML = `
-          <div class="playlist-item-info">
-            <span style="font-family: var(--font-code); color: var(--neon-cyan); font-size: 0.72rem; min-width: 20px;">${icon}</span>
-            <span class="playlist-item-title">${escapeHtml(track.name)}</span>
-            <span class="playlist-item-size">${sizeLabel}</span>
-          </div>
-          <div class="playlist-item-actions">
-            <button class="btn btn-xs btn-outline play-track-btn" title="Putar Lagu"><i class="fa-solid ${isCurrent && this.isPlaying ? 'fa-pause' : 'fa-play'}"></i></button>
-            <button class="btn btn-xs btn-outline del-track-btn" style="border-color: rgba(255,82,0,0.4); color: var(--neon-amber);" title="Hapus Lagu"><i class="fa-solid fa-trash-can"></i></button>
-          </div>
-        `;
-
-        item.querySelector('.play-track-btn').addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (isCurrent) {
-            this.togglePlayPause();
-          } else {
-            this.playTrack(idx);
-          }
-        });
-
-        item.querySelector('.del-track-btn').addEventListener('click', (e) => this.deleteTrack(track.id, e));
-
-        item.addEventListener('click', () => {
-          if (isCurrent) {
-            this.togglePlayPause();
-          } else {
-            this.playTrack(idx);
-          }
-        });
-
-        els.playlistItemsList.appendChild(item);
-      });
-    },
-
-    renderAmbientGridUI() {
-      if (!els.ambientCardsGrid) return;
-      els.ambientCardsGrid.innerHTML = '';
-
-      AMBIENT_PRESETS.forEach(p => {
-        const card = document.createElement('div');
-        const isActive = this.currentMode === 'ambient' && this.activeAmbientId === p.id && this.isPlaying;
-        card.className = `ambient-card ${isActive ? 'active' : ''}`;
-        card.innerHTML = `
-          <div>
-            <div class="ambient-card-header">
-              <div class="ambient-card-icon"><i class="fa-solid ${p.icon}"></i></div>
-              <div class="ambient-card-title">${escapeHtml(p.name)}</div>
-            </div>
-            <div class="ambient-card-desc">${escapeHtml(p.desc)}</div>
-          </div>
-          <button class="btn btn-sm ${isActive ? 'btn-primary' : 'btn-outline'} toggle-ambient-btn">
-            <i class="fa-solid ${isActive ? 'fa-stop' : 'fa-play'}"></i> ${isActive ? 'Hentikan Soundscape' : 'Aktifkan Ambient'}
-          </button>
-        `;
-
-        card.querySelector('.toggle-ambient-btn').addEventListener('click', () => {
-          if (this.currentMode === 'ambient' && this.activeAmbientId === p.id && this.isPlaying) {
-            this.stop();
-          } else {
-            this.startAmbient(p.id);
-          }
-          this.renderAmbientGridUI();
-        });
-
-        els.ambientCardsGrid.appendChild(card);
-      });
-    },
-
-    updateUI() {
-      // Header Pulse Indicator
-      if (els.musicHeaderPulse) {
-        els.musicHeaderPulse.style.display = this.isPlaying ? 'block' : 'none';
-      }
-
-      // Sidebar Widget Equalizer Animation
-      if (els.bgmAnimBars) {
-        els.bgmAnimBars.classList.toggle('playing', this.isPlaying);
-      }
-
-      // Title String
-      let title = 'Cyber BGM: Siap';
-      if (this.currentMode === 'youtube' && this.currentOnlineTrack) {
-        title = `🔴 ${this.currentOnlineTrack.title}`;
-      } else if (this.currentMode === 'file' && this.currentIndex >= 0 && this.currentIndex < this.playlist.length) {
-        const tr = this.playlist[this.currentIndex];
-        title = `${tr.isOnline ? (tr.youtubeId ? '🔴' : '🌐') : '🎵'} ${tr.name}`;
-      } else if (this.currentMode === 'ambient' && this.activeAmbientId) {
-        const preset = AMBIENT_PRESETS.find(p => p.id === this.activeAmbientId);
-        title = preset ? preset.name : 'Cyber Ambient';
-      }
-
-      if (els.bgmTrackTitle) els.bgmTrackTitle.innerText = title;
-      if (els.deckCurrentTrackName) els.deckCurrentTrackName.innerText = title;
-
-      // Media Session API: daftarkan metadata ke OS agar playback diakui sebagai
-      // "media latar belakang" (muncul di media overlay Windows/macOS/Android dan
-      // sinyal kuat ke browser untuk MENGHENTIKAN auto-suspend tab yang bermusik).
-      this.updateMediaSession(title);
-
-      // Play / Pause Icons
-      const playIcon = this.isPlaying ? '<i class="fa-solid fa-pause"></i>' : '<i class="fa-solid fa-play"></i>';
-      if (els.bgmPlayPauseBtn) els.bgmPlayPauseBtn.innerHTML = playIcon;
-      if (els.deckPlayPauseBtn) els.deckPlayPauseBtn.innerHTML = playIcon;
-
-      // Update active rows in playlist & ambient grid
-      this.renderPlaylistUI();
-      this.renderAmbientGridUI();
-    },
-
-    setupVisualizer() {
-      // Sudah pernah di-setup? Cukup hidupkan lagi loop-nya — mengulang seluruh
-      // fungsi akan mendaftarkan listener resize ganda dan menutupi loop lama.
-      if (this._visualizerDraw) {
-        this.ensureVisualizerRunning();
-        return;
-      }
-      const canvas = els.audioVisualizerCanvas;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      const bufferLength = 32;
-      const dataArray = new Uint8Array(bufferLength);
-
-      // Cache gradient bar (dibulatkan 4px) — dulu 32× createLinearGradient PER FRAME.
-      // Gradient bergantung pada tinggi bar (ujungnya di h - barHeight), jadi tidak
-      // bisa dipakai satu objek untuk semua bar; kuantisasi 4px praktis tak terlihat.
-      let gradCacheHeight = -1;
-      const gradCache = new Map();
-      const getBarGradient = (h, barHeight) => {
-        if (gradCacheHeight !== h) {
-          gradCache.clear();
-          gradCacheHeight = h;
-        }
-        const bucket = Math.min(Math.max(4, Math.round(barHeight / 4) * 4), h);
-        let gradient = gradCache.get(bucket);
-        if (!gradient) {
-          gradient = ctx.createLinearGradient(0, h, 0, h - bucket);
-          gradient.addColorStop(0, 'rgba(0, 240, 255, 0.25)');
-          gradient.addColorStop(0.6, 'rgba(0, 255, 194, 0.8)');
-          gradient.addColorStop(1, '#00F0FF');
-          gradCache.set(bucket, gradient);
-        }
-        return gradient;
-      };
-
-      // Lebar container tidak berubah tiap frame → baca dari cache, refresh saat
-      // resize (event) atau maksimal tiap 30 frame.
-      let cachedWidth = 0;
-      let frameTick = 0;
-      window.addEventListener('resize', () => { cachedWidth = 0; });
-
-      const draw = () => {
-        const isCanvasVisible = Boolean(canvas.offsetParent) && !document.hidden && document.visibilityState !== 'hidden';
-        if (!isCanvasVisible) {
-          // Canvas tersembunyi (modal BGM Deck ditutup) → hentikan loop rAF sepenuhnya.
-          // Menghemat 60-120 frame/detik siklus CPU/GPU di latar belakang saat musik berjalan.
-          // Loop dihidupkan lagi oleh ensureVisualizerRunning() saat modal deck dibuka.
-          this.animFrameId = null;
-          return;
-        }
-
-        this.animFrameId = requestAnimationFrame(draw);
-
-        if (!cachedWidth || frameTick % 30 === 0) {
-          cachedWidth = canvas.parentElement ? canvas.parentElement.clientWidth : 400;
-        }
-        frameTick++;
-        const targetW = cachedWidth || 400;
-        const targetH = 110;
-        if (canvas.width !== targetW) canvas.width = targetW;
-        if (canvas.height !== targetH) canvas.height = targetH;
-        const w = canvas.width;
-        const h = canvas.height;
-
-        ctx.clearRect(0, 0, w, h);
-
-        // shadowBlur per bar = rasterisasi blur untuk SETIAP fill (32× per frame).
-        // Glow diganti cap putih tipis tanpa bayangan agar tampilan tetap neon.
-        ctx.shadowBlur = 0;
-        ctx.shadowColor = 'transparent';
-
-        if (this.analyser && this.isPlaying) {
-          this.analyser.getByteFrequencyData(dataArray);
-        } else {
-          dataArray.fill(0);
-        }
-
-        const barWidth = (w / bufferLength) * 0.75;
-        const barSpacing = (w / bufferLength) * 0.25;
-        let x = barSpacing / 2;
-
-        for (let i = 0; i < bufferLength; i++) {
-          const val = dataArray[i];
-          const percent = val / 255;
-          const barHeight = Math.max(4, percent * (h - 15));
-
-          ctx.fillStyle = getBarGradient(h, barHeight);
-          ctx.fillRect(x, h - barHeight, barWidth, barHeight);
-
-          // Neon top cap (tanpa shadow, alpha rendah)
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
-          ctx.fillRect(x, h - barHeight - 2, barWidth, 2);
-
-          x += barWidth + barSpacing;
-        }
-      };
-
-      this._visualizerDraw = draw;
-      draw();
-    },
-
-    // Loop visualisasi mati otomatis saat canvas tersembunyi & musik berhenti.
-    // Metode ini menghidupkannya lagi; no-op bila loop masih berjalan.
-    ensureVisualizerRunning() {
-      if (this.animFrameId) return;
-      if (this._visualizerDraw) {
-        this._visualizerDraw();
-      } else {
-        this.setupVisualizer();
-      }
-    },
-
-    formatTime(sec) {
-      if (!isFinite(sec) || isNaN(sec) || sec < 0) return '--:--';
-      const m = Math.floor(sec / 60);
-      const s = Math.floor(sec % 60);
-      return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    }
-  };
 
   // ==================== LIVE REAL-TIME MODEL CATALOG ====================
   function openLiveModelCatalog(targetInputId = null, targetLabelName = 'Model Obrolan') {
@@ -17932,7 +16368,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
                 </div>
                 <div style="font-size:0.68rem; color:var(--text-dim); margin-bottom:6px; font-family:var(--font-code);">${escapeHtml(art.url)}</div>
                 <div class="inspector-source-snippet" style="background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:4px; font-size:0.74rem;">
-                  <strong style="color:var(--text-muted); display:block; margin-bottom:2px; font-size:0.68rem;">Campione di Testo Estratto:</strong>
+                  <strong style="color:var(--text-muted); display:block; margin-bottom:2px; font-size:0.68rem;">Sampel Teks Terekstraksi:</strong>
                   ${escapeHtml(art.sample || art.preview || art.content || '')}
                 </div>
               </div>
@@ -17956,7 +16392,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
                 Model: ${escapeHtml(syn.model || STATE.activeModel || (STATE.currentEngine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel) || 'Lead Corrector')}
               </span>
               <span class="catalog-badge" style="background:rgba(0,255,194,0.1); color:var(--neon-teal);">
-                ${syn.status === 'selesai' ? '<i class="fa-solid fa-check"></i> Selesai' : (synText ? '<i class="fa-solid fa-spinner fa-spin"></i> Mengoreksi...' : 'Menunggu')}
+                ${isComplete ? '<i class="fa-solid fa-check"></i> Selesai' : (synText ? '<i class="fa-solid fa-spinner fa-spin"></i> Mengoreksi...' : 'Menunggu')}
               </span>
             </div>
           </div>
@@ -17990,13 +16426,13 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
                 Model: ${escapeHtml(m4.model || STATE.activeModel || (STATE.currentEngine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel) || 'Executive Summarizer')}
               </span>
               <span class="catalog-badge" style="background:rgba(0,255,194,0.1); color:var(--neon-teal);">
-                ${m4.status === 'selesai' ? '<i class="fa-solid fa-check"></i> Selesai' : (m4Text ? '<i class="fa-solid fa-spinner fa-spin"></i> Merumuskan...' : 'Menunggu')}
+                ${isComplete ? '<i class="fa-solid fa-check"></i> Selesai' : (m4Text ? '<i class="fa-solid fa-spinner fa-spin"></i> Merumuskan...' : 'Menunggu')}
               </span>
             </div>
           </div>
 
           <p style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 12px; line-height: 1.45;">
-            Menyusun rangkuman eksekutif ringkas & profesional (2-3 paragrafi) hasil olahan dari laporan lengkap, siap dikirim langsung ke percakapan chat.
+            Menyusun rangkuman eksekutif ringkas & profesional (2-3 paragraf) hasil olahan dari laporan lengkap, siap dikirim langsung ke percakapan chat.
           </p>
 
           <div>
@@ -18540,100 +16976,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       }
     });
 
-    // Online & YouTube Music Handlers
-    els.playOnlineUrlBtn?.addEventListener('click', () => {
-      const url = els.onlineAudioUrlInput ? els.onlineAudioUrlInput.value.trim() : '';
-      const title = els.onlineAudioTitleInput ? els.onlineAudioTitleInput.value.trim() : '';
-      if (!url) {
-        showToast('Masukkan URL audio atau YouTube terlebih dahulu.', 'error');
-        return;
-      }
-      const ytId = BGMEngine.extractYouTubeId(url);
-      if (ytId) {
-        BGMEngine.playYouTube(ytId, title || null);
-      } else {
-        BGMEngine.playDirectUrl(url, title || 'Online Stream');
-      }
-      AudioEngine.click();
-    });
-
-    els.saveOnlineUrlBtn?.addEventListener('click', () => {
-      const url = els.onlineAudioUrlInput ? els.onlineAudioUrlInput.value.trim() : '';
-      const title = els.onlineAudioTitleInput ? els.onlineAudioTitleInput.value.trim() : '';
-      BGMEngine.saveOnlineToPlaylist(url, title);
-    });
-
-    els.toggleYtPlayerVisibilityBtn?.addEventListener('click', () => {
-      const wrap = els.ytPlayerContainerWrap;
-      if (wrap) {
-        const isHidden = wrap.style.display === 'none';
-        wrap.style.display = isHidden ? 'block' : 'none';
-        syncYtPlayerVisibilityBtn();
-      }
-      AudioEngine.click();
-    });
-
-    // Tombol "Layar Penuh": fullscreen-kan iframe YouTube ASLI (bukan container wrap).
-    // YouTube IFrame API menciptakan iframe di dalam #ytPlayerContainer.
-    // Di mobile, iframe ITU yang harus requestFullscreen(), bukan wrap-nya.
-    els.ytFsBtn?.addEventListener('click', () => {
-      const wrap = els.ytPlayerContainerWrap;
-      const container = els.ytPlayerContainer;
-      if (!wrap || !container) return;
-
-      // Cari iframe YouTube asli yang dibuat oleh YouTube IFrame API
-      const ytIframe = container.querySelector('iframe');
-
-      try {
-        if (document.fullscreenElement || document.webkitFullscreenElement) {
-          (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-        } else {
-          // Prioritas: fullscreen iframe YouTube asli (diperlukan di mobile)
-          const targetEl = ytIframe || wrap;
-          const req = targetEl.requestFullscreen || targetEl.webkitRequestFullscreen || targetEl.mozRequestFullScreen || targetEl.msRequestFullscreen;
-          if (req) {
-            const p = req.call(targetEl);
-            if (p && typeof p.catch === 'function') {
-              p.catch((err) => {
-                // Fallback: coba fullscreen wrap jika iframe gagal
-                if (targetEl === ytIframe && wrap !== ytIframe) {
-                  const wrapReq = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
-                  if (wrapReq) wrapReq.call(wrap).catch(() => showToast('Fullscreen diblokir oleh browser.', 'error'));
-                } else {
-                  showToast('Fullscreen diblokir oleh browser.', 'error');
-                }
-              });
-            }
-          } else {
-            showToast('Browser ini tidak mendukung Fullscreen API.', 'error');
-          }
-        }
-      } catch (err) {
-        showToast('Gagal memasuk layar penuh: ' + (err && err.message ? err.message : err), 'error');
-      }
-      AudioEngine.click();
-    });
-
-    // Curated 1-Click Stream Cards
-    $$('.curated-stream-card').forEach(card => {
-      card.addEventListener('click', () => {
-        const src = card.dataset.url || card.dataset.src || '';
-        const title = card.dataset.title || 'Online Stream';
-        if (!src) return;
-
-        const ytId = BGMEngine.extractYouTubeId(src);
-        const type = card.dataset.type || (ytId ? 'youtube' : 'stream');
-
-        if (type === 'youtube' && ytId) {
-          BGMEngine.playYouTube(ytId, title);
-        } else {
-          BGMEngine.playDirectUrl(src, title);
-        }
-        if (els.onlineAudioUrlInput) els.onlineAudioUrlInput.value = src;
-        if (els.onlineAudioTitleInput) els.onlineAudioTitleInput.value = title;
-        AudioEngine.click();
-      });
-    });
 
     // Status Buttons
     els.refreshOllamaBtn?.addEventListener('click', () => {
@@ -19806,79 +18148,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       AudioEngine.click();
     });
 
-    // ==================== BGM & AUDIO LISTENERS ====================
-    els.musicPlayerModalBtn?.addEventListener('click', () => {
-      openModal('musicDeckModal');
-      AudioEngine.click();
-    });
-
-    els.openMusicModalFromWidget?.addEventListener('click', () => {
-      openModal('musicDeckModal');
-      AudioEngine.click();
-    });
-
-    els.bgmPlayPauseBtn?.addEventListener('click', () => BGMEngine.togglePlayPause());
-    els.deckPlayPauseBtn?.addEventListener('click', () => BGMEngine.togglePlayPause());
-
-    els.bgmNextBtn?.addEventListener('click', () => BGMEngine.nextTrack());
-    els.deckNextBtn?.addEventListener('click', () => BGMEngine.nextTrack());
-
-    els.bgmPrevBtn?.addEventListener('click', () => BGMEngine.prevTrack());
-    els.deckPrevBtn?.addEventListener('click', () => BGMEngine.prevTrack());
-
-    els.bgmMiniVolume?.addEventListener('input', (e) => BGMEngine.setVolume(e.target.value));
-    els.deckMasterVolume?.addEventListener('input', (e) => BGMEngine.setVolume(e.target.value));
-
-    els.deckProgressSlider?.addEventListener('input', (e) => BGMEngine.seek(e.target.value));
-
-    els.deckLoopBtn?.addEventListener('click', () => {
-      if (BGMEngine.loopMode === 'all') {
-        BGMEngine.loopMode = 'one';
-        els.deckLoopBtn.innerHTML = '<i class="fa-solid fa-repeat"></i> Loop 1';
-        showToast('Mode Loop: Ulang 1 Lagu');
-      } else if (BGMEngine.loopMode === 'one') {
-        BGMEngine.loopMode = 'none';
-        els.deckLoopBtn.innerHTML = '<i class="fa-solid fa-repeat"></i> Loop: Off';
-        showToast('Mode Loop: Nonaktif');
-      } else {
-        BGMEngine.loopMode = 'all';
-        els.deckLoopBtn.innerHTML = '<i class="fa-solid fa-repeat"></i> Loop All';
-        showToast('Mode Loop: Ulang Semua Playlist');
-      }
-      AudioEngine.click();
-    });
-
-    els.deckShuffleBtn?.addEventListener('click', () => {
-      BGMEngine.isShuffle = !BGMEngine.isShuffle;
-      els.deckShuffleBtn.innerHTML = `<i class="fa-solid fa-shuffle"></i> Acak: ${BGMEngine.isShuffle ? 'On' : 'Off'}`;
-      els.deckShuffleBtn.classList.toggle('active', BGMEngine.isShuffle);
-      showToast(BGMEngine.isShuffle ? 'Mode Acak: Aktif' : 'Mode Acak: Nonaktif');
-      AudioEngine.click();
-    });
-
-    // Audio Upload Handlers
-    els.triggerAudioUploadBtn?.addEventListener('click', () => els.localAudioFileInput?.click());
-    els.localAudioFileInput?.addEventListener('change', (e) => {
-      BGMEngine.handleUploadFiles(e.target.files);
-    });
-
-    // Dropzone Drag & Drop
-    if (els.audioDropzone) {
-      els.audioDropzone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        els.audioDropzone.classList.add('dragover');
-      });
-      els.audioDropzone.addEventListener('dragleave', () => {
-        els.audioDropzone.classList.remove('dragover');
-      });
-      els.audioDropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        els.audioDropzone.classList.remove('dragover');
-        if (e.dataTransfer?.files) {
-          BGMEngine.handleUploadFiles(e.dataTransfer.files);
-        }
-      });
-    }
 
     // Mobile Keyboard & Visual Viewport Handler
     setupMobileKeyboardHandler();
@@ -19928,11 +18197,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         document.body.classList.remove('page-paused');
         requestAnimationFrame(restoreChatScrollPosition);
         checkBackgroundChatTasksSync();
-        try {
-          if (typeof BGMEngine !== 'undefined' && BGMEngine.isPlaying) {
-            BGMEngine.ensureVisualizerRunning();
-          }
-        } catch (_) {}
       }
     });
 
@@ -20023,9 +18287,6 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     // (mis. pesan yang barusan dikirim) bisa hilang saat tab ditutup mendadak.
     const flushPersistenceOnHide = () => {
       savePersistedState({ immediate: true });
-      try {
-        if (BGMEngine && typeof BGMEngine.flushVolume === 'function') BGMEngine.flushVolume();
-      } catch (_) {}
     };
     window.addEventListener('pagehide', flushPersistenceOnHide);
     window.addEventListener('beforeunload', flushPersistenceOnHide);
@@ -20100,7 +18361,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
     console.log('⚡ ZOZ ROUTER INITIALIZED // READY IN 0MS');
 
-    // 4. NON-BLOCKING ASYNCHRONOUS BACKGROUND TASKS (Storage sync, BGM engine & health checks)
+    // 4. NON-BLOCKING ASYNCHRONOUS BACKGROUND TASKS (Storage sync & health checks)
     initBackgroundTasks(isTabReload, savedActiveId);
   }
 
@@ -20110,12 +18371,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       console.warn('Background storage sync notice:', err);
     });
 
-    // B. Initialize Cyber BGM Engine in background
-    BGMEngine.init().catch(bgmErr => {
-      console.warn('BGM Engine background init notice:', bgmErr);
-    });
-
-    // C. Non-blocking Network Health Checks
+    // B. Non-blocking Network Health Checks
     checkOllamaHealth().catch(() => {});
     checkOpenRouterStatus().catch(() => {});
     fetchOpenRouterModelsList().catch(() => {});
