@@ -4142,6 +4142,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
 // Main HTTP Request Handler & Server
 async function requestHandler(req, res) {
+  if (!req) return;
+  if (!req.headers || typeof req.headers !== 'object') req.headers = {};
   let reqUrl;
   try {
     reqUrl = new URL(req.url, `http://${req.headers.host || 'localhost:4040'}`);
@@ -4246,6 +4248,18 @@ async function requestHandler(req, res) {
       uptime: process.uptime(),
       lastUncaught: lastUncaughtInfo, // F19: exception di luar request terlihat di sini
       timestamp: new Date().toISOString()
+    });
+  }
+
+  if (pathname === '/api/ping' && method === 'GET') {
+    return sendJSON(res, 200, {
+      ok: true,
+      status: 'healthy',
+      time: new Date().toISOString(),
+      node: process.version,
+      mode: 'standalone-engine',
+      uptime: process.uptime(),
+      memoryRssMb: Math.round(process.memoryUsage().rss / 1024 / 1024)
     });
   }
 

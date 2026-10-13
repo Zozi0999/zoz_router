@@ -5,3 +5,5 @@ Thumbs.db
 *.log
 data/
 scratch/
+__pycache__/
+*.pyc
