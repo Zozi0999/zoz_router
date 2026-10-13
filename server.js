@@ -6249,7 +6249,7 @@ async function requestHandler(req, res) {
       }
 
       customEndpoint = customEndpoint.trim();
-      const isServerlessChat = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION);
+      const isServerlessChat = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION || req.headers['x-vercel-id']);
       if (isServerlessChat && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(customEndpoint)) {
         customEndpoint = 'https://ollama.com';
       }
@@ -6866,6 +6866,22 @@ async function requestHandler(req, res) {
           startedAt: Date.now(),
           proxyReq: null
         };
+      }
+
+      // Defense-in-depth: Normalisasi model jika format tanpa slash (misal format Ollama gemma4:31b) dikirim ke OpenRouter
+      if (body.model && !body.model.includes('/')) {
+        const mLower = body.model.toLowerCase();
+        if (mLower.includes('gemma4') || mLower.includes('gemma-4')) body.model = 'google/gemma-4-31b-it:free';
+        else if (mLower.includes('gemma2') || mLower.includes('gemma')) body.model = 'google/gemma-4-26b-a4b-it:free';
+        else if (mLower.includes('nemotron-3-super')) body.model = 'nvidia/nemotron-3-super-120b-a12b:free';
+        else if (mLower.includes('nemotron-3-ultra')) body.model = 'nvidia/nemotron-3-ultra-550b-a55b:free';
+        else if (mLower.includes('nemotron-3-nano') || mLower.includes('nemotron-3.5')) body.model = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
+        else if (mLower.includes('gpt-oss')) body.model = 'nvidia/nemotron-3-super-120b-a12b:free';
+        else if (mLower.includes('deepseek-r1') || mLower.includes('deepseek-v4-pro')) body.model = 'deepseek/deepseek-r1:free';
+        else if (mLower.includes('deepseek')) body.model = 'deepseek/deepseek-chat';
+        else if (mLower.includes('llama')) body.model = 'meta-llama/llama-3.3-70b-instruct';
+        else if (mLower.includes('coder')) body.model = 'cohere/north-mini-code:free';
+        else body.model = 'openrouter/free';
       }
 
       // Defense-in-depth: Cegah konflik mutlak parameter model dan models pada OpenRouter

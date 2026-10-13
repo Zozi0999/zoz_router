@@ -97,12 +97,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   // Fallback resmi model gratis OpenRouter yang aktif dan terverifikasi live
   const LIVE_FREE_OPENROUTER_FALLBACKS = [
     'openrouter/free',
+    'google/gemma-4-31b-it:free',
+    'google/gemma-4-26b-a4b-it:free',
     'nvidia/nemotron-3-super-120b-a12b:free',
     'nvidia/nemotron-3.5-lightning:free',
     'nvidia/nemotron-3-ultra-550b-a55b:free',
+    'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
     'dots-studio/dots-3-note-preview:free',
     'cohere/north-mini-code:free',
-    'google/gemma-4-31b-it:free',
     'liquid/lfm-2.5-2.6b:free'
   ];
 
@@ -110,11 +112,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   const DEFAULT_OPENROUTER_MODELS = [
     { id: 'openrouter/free', name: 'OpenRouter Free Router', tag: 'Free', cat: 'free', desc: 'Rute otomatis cerdas model gratis OpenRouter.' },
     { id: 'openrouter/auto', name: 'OpenRouter Auto Router', tag: 'Auto', cat: 'free', desc: 'Rute otomatis cerdas OpenRouter.' },
+    { id: 'google/gemma-4-31b-it:free', name: 'Google Gemma 4 31B (Free)', tag: 'Free', cat: 'free' },
+    { id: 'google/gemma-4-26b-a4b-it:free', name: 'Google Gemma 4 26B MoE (Free)', tag: 'Free', cat: 'free' },
     { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'NVIDIA Nemotron 3 Super 120B (Free)', tag: 'Free', cat: 'free' },
     { id: 'nvidia/nemotron-3.5-lightning:free', name: 'NVIDIA Nemotron 3.5 Lightning (Free)', tag: 'Free', cat: 'free' },
+    { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', name: 'NVIDIA Nemotron 3 Ultra 550B (Free)', tag: 'Free', cat: 'free' },
+    { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', name: 'NVIDIA Nemotron 3 Nano Reasoning (Free)', tag: 'Free', cat: 'free' },
     { id: 'dots-studio/dots-3-note-preview:free', name: 'Dots 3 Note Preview (Free)', tag: 'Free', cat: 'free' },
-    { id: 'google/gemma-4-31b-it:free', name: 'Google Gemma 4 31B (Free)', tag: 'Free', cat: 'free' },
     { id: 'liquid/lfm-2.5-2.6b:free', name: 'Liquid LFM 2.5 2.6B (Free)', tag: 'Free', cat: 'free' },
+    { id: 'cohere/north-mini-code:free', name: 'Cohere North Mini Code (Free)', tag: 'Free', cat: 'free' },
     { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Meta Llama 3.3 70B', tag: 'Flagship', cat: 'flagship' },
     { id: 'anthropic/claude-sonnet-4.6', name: 'Anthropic Claude Sonnet 4.6', tag: 'Coding', cat: 'coding' },
     { id: 'openai/gpt-4o', name: 'OpenAI GPT-4o', tag: 'Vision', cat: 'flagship' },
@@ -150,6 +156,60 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     { name: 'glm-5.3-flash', model: 'glm-5.3-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'glm' } },
     { name: 'glm-5.2', model: 'glm-5.2', tag: 'Cloud', isFree: false, cat: 'flagship', details: { family: 'glm' } }
   ];
+
+  // Universal Model Mapper: Memetakan model Ollama/Cloud ke ekuivalen OpenRouter Cloud resmi
+  function mapOllamaModelToOpenRouter(modelId) {
+    if (!modelId || typeof modelId !== 'string') return 'openrouter/free';
+    const id = modelId.toLowerCase().trim();
+    if (id.includes('/')) return modelId;
+
+    if (id.includes('gemma4') || id.includes('gemma-4') || id.includes('gemma:4') || id.includes('gemma_4')) {
+      return 'google/gemma-4-31b-it:free';
+    }
+    if (id.includes('gemma2') || id.includes('gemma-2') || id.includes('gemma')) {
+      return 'google/gemma-4-26b-a4b-it:free';
+    }
+    if (id.includes('nemotron-3-super')) {
+      return 'nvidia/nemotron-3-super-120b-a12b:free';
+    }
+    if (id.includes('nemotron-3-ultra')) {
+      return 'nvidia/nemotron-3-ultra-550b-a55b:free';
+    }
+    if (id.includes('nemotron-3-nano') || id.includes('nemotron-3.5')) {
+      return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
+    }
+    if (id.includes('nemotron')) {
+      return 'nvidia/nemotron-3.5-lightning:free';
+    }
+    if (id.includes('gpt-oss')) {
+      return 'nvidia/nemotron-3-super-120b-a12b:free';
+    }
+    if (id.includes('deepseek-r1') || id.includes('reasoning') || id.includes('deepseek-v4-pro')) {
+      return 'deepseek/deepseek-r1:free';
+    }
+    if (id.includes('deepseek')) {
+      return 'deepseek/deepseek-chat';
+    }
+    if (id.includes('llama3.2') || id.includes('llama-3.2') || id.includes('llama3.3') || id.includes('llama-3.3') || id.includes('llama')) {
+      return 'meta-llama/llama-3.3-70b-instruct';
+    }
+    if (id.includes('qwen2.5-coder') || id.includes('coder')) {
+      return 'cohere/north-mini-code:free';
+    }
+    if (id.includes('qwen')) {
+      return 'openrouter/free';
+    }
+    if (id.includes('mistral')) {
+      return 'openrouter/free';
+    }
+    if (id.includes('phi')) {
+      return 'openrouter/free';
+    }
+    if (id.includes('dots')) return 'dots-studio/dots-3-note-preview:free';
+    if (id.includes('lfm') || id.includes('liquid')) return 'liquid/lfm-2.5-2.6b:free';
+
+    return 'openrouter/free';
+  }
 
   // Dedicated Image Synthesis Models (Pollinations Multi-Style & OpenRouter Image Engines)
   const DEFAULT_IMAGE_MODELS = [
@@ -6303,7 +6363,8 @@ ${blocks}
         // Auto-select first real installed/cloud model if current model is invalid or default
         const modelNames = rawModels.map(m => m.name || m.model || m.id);
         if (!modelNames.includes(STATE.settings.ollamaModel)) {
-          STATE.settings.ollamaModel = modelNames[0];
+          const preferredModel = modelNames.find(n => n.includes('qwen2.5:1.5b') || n.includes('qwen2.5') || n.includes('llama3.2') || n.includes('llama3')) || modelNames[0];
+          STATE.settings.ollamaModel = preferredModel;
           savePersistedState();
         }
 
@@ -6704,7 +6765,7 @@ ${blocks}
             setEngineMode('openrouter');
           }
         }
-        selectModel(modelId);
+        selectModel(modelId, isOllamaTab ? 'ollama' : 'openrouter');
         els.modelDropdownMenu.classList.remove('show');
         AudioEngine.click();
       });
@@ -6834,11 +6895,12 @@ ${blocks}
     return STATE.settings.ollamaModel || 'Default';
   }
 
-  function selectModel(modelId) {
+  function selectModel(modelId, forcedProvider = null) {
     if (!modelId) return;
-    const isOR = modelId.includes('/');
+    const isOR = forcedProvider ? (forcedProvider === 'openrouter') : (modelId.includes('/') || STATE.mode === 'openrouter');
     if (isOR) {
-      STATE.settings.openRouterModel = modelId;
+      const cleanORModel = modelId.includes('/') ? modelId : (mapOllamaModelToOpenRouter(modelId) || 'openrouter/free');
+      STATE.settings.openRouterModel = cleanORModel;
       if (STATE.mode !== 'openrouter' && STATE.mode !== 'auto') {
         setEngineMode('openrouter');
       }
@@ -7166,16 +7228,16 @@ ${blocks}
       if (STATE.mode === 'auto') {
         await runAutoRouterStreaming(session, text, effectiveImages);
       } else if (STATE.mode === 'openrouter') {
-        if (!targetModel.includes('/')) {
-          await runOllamaStreaming(session, text, effectiveImages, targetModel);
-        } else {
-          await runOpenRouterStreaming(session, text, effectiveImages, targetModel);
+        let effectiveORModel = targetModel;
+        if (!effectiveORModel.includes('/')) {
+          effectiveORModel = mapOllamaModelToOpenRouter(effectiveORModel) || STATE.settings.openRouterModel || 'openrouter/free';
         }
+        await runOpenRouterStreaming(session, text, effectiveImages, effectiveORModel);
       } else {
         if (targetModel.includes('/')) {
           await runOpenRouterStreaming(session, text, effectiveImages, targetModel);
         } else {
-          await runOllamaStreaming(session, text, effectiveImages, targetModel);
+          await runOllamaStreaming(session, text, effectiveImages, targetModel, { autoCloudFallback: true });
         }
       }
     }
@@ -10094,6 +10156,25 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           return false;
         }
 
+        // Auto Cloud Fallback (jika model belum di-pull di server Ollama lokal, 404, 401, atau Ollama offline):
+        const errLower = (err?.message || String(err || '')).toLowerCase();
+        const isNotFoundOrOffline = errLower.includes('404') || 
+                                    errLower.includes('not found') || 
+                                    errLower.includes('failed to fetch') || 
+                                    errLower.includes('networkerror') || 
+                                    errLower.includes('mixed_content') ||
+                                    errLower.includes('unauthorized') ||
+                                    errLower.includes('401') ||
+                                    err?.name === 'TypeError';
+
+        if (runOptions && runOptions.autoCloudFallback && isNotFoundOrOffline) {
+          try { assistantRow.remove(); } catch (_) {}
+          const fallbackModel = mapOllamaModelToOpenRouter(modelName);
+          console.warn(`[Ollama Failover] Model ${modelName} tidak tersedia di server Ollama (${err?.message}). Mengalihkan otomatis ke Cloud OpenRouter (${fallbackModel})...`);
+          showToast(`🔀 Model ${modelName} dialihkan otomatis ke Cloud (${fallbackModel})...`, 'info');
+          return await runOpenRouterStreaming(session, promptText, image, fallbackModel);
+        }
+
         // render:false → bubbleText.innerHTML diganti tanpa syarat beberapa baris
         // di bawah (kartu error), jadi render dari finish hanya akan dibuang.
         const rescuePartial = sanitizePartialResponseWithFiles(streamRenderer ? streamRenderer.finish({ render: false }) : '');
@@ -10164,7 +10245,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           if (STATE.isGenerating || STATE.isSending) return;
           assistantRow.remove();
           setEngineMode('openrouter');
-          runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel);
+          const targetFallback = mapOllamaModelToOpenRouter(modelName) || STATE.settings.openRouterModel || 'openrouter/free';
+          selectModel(targetFallback, 'openrouter');
+          runOpenRouterStreaming(session, promptText, image, targetFallback);
         });
 
         bubbleText.querySelector('.retry-send-btn')?.addEventListener('click', () => {
@@ -10188,8 +10271,14 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
   // --- OPENROUTER STREAMING EXECUTION ---
   async function runOpenRouterStreaming(session, promptText, image, modelName) {
-    if (!STATE.settings.openRouterKey && !DeviceStorage.isDeviceBackendAvailable) {
-      const assistantRow = appendMessageElement('assistant', '', null, modelName || 'OpenRouter Gateway');
+    const effectiveTargetModel = (modelName && modelName.includes('/'))
+      ? modelName
+      : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
+
+    const hasClientKey = Boolean(STATE.settings.openRouterKey);
+    const hasBackendKey = Boolean(DeviceStorage.isDeviceBackendAvailable || !IS_GITHUB_PAGES);
+    if (!hasClientKey && !hasBackendKey) {
+      const assistantRow = appendMessageElement('assistant', '', null, effectiveTargetModel || 'OpenRouter Gateway');
       const bubbleText = assistantRow.querySelector('.msg-text-content');
       
       bubbleText.innerHTML = `
@@ -10331,21 +10420,24 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
       const resolvedImgs = await Promise.all(rawImgs.map(resolveImageToDataUrlSafe));
-      const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, modelName);
+      const effectiveInitialModel = (modelName && modelName.includes('/'))
+        ? modelName
+        : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
+      const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, effectiveInitialModel);
 
       // Deteksi apakah model gratis atau berbayar
       const isFreeModel = Boolean(
-        modelName.includes(':free') ||
-        modelName.endsWith('/free') ||
-        modelName === 'openrouter/free' ||
-        (STATE.openRouterModels || []).some(m => m.id === modelName && (m.cat === 'free' || m.tag === 'Free'))
+        effectiveInitialModel.includes(':free') ||
+        effectiveInitialModel.endsWith('/free') ||
+        effectiveInitialModel === 'openrouter/free' ||
+        (STATE.openRouterModels || []).some(m => m.id === effectiveInitialModel && (m.cat === 'free' || m.tag === 'Free'))
       );
 
       // Siapkan pool kandidat model:
       // - Selalu sertakan fallback gratis terverifikasi agar saat model pilihan kehabisan kredit (HTTP 402)
       //   atau mengalami gangguan upstream (404/429/502/503), sistem dapat melakukan Smart Failover secara otomatis.
       const candidateModels = [
-        modelName,
+        effectiveInitialModel,
         ...LIVE_FREE_OPENROUTER_FALLBACKS
       ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free');
 
@@ -16553,7 +16645,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       STATE.settings.ollamaModel = modelId;
     } else {
       setEngineMode('openrouter');
-      STATE.settings.openRouterModel = modelId;
+      const cleanORModel = modelId.includes('/') ? modelId : (mapOllamaModelToOpenRouter(modelId) || 'openrouter/free');
+      STATE.settings.openRouterModel = cleanORModel;
     }
     savePersistedState();
     updateModelUI();

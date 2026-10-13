@@ -817,7 +817,21 @@ export default {
             'X-Title': 'ZOZ Router'
           },
           body: JSON.stringify((() => {
-            const reqModel = body.model || 'openrouter/free';
+            let reqModel = body.model || 'openrouter/free';
+            if (reqModel && !reqModel.includes('/')) {
+              const mLower = reqModel.toLowerCase();
+              if (mLower.includes('gemma4') || mLower.includes('gemma-4')) reqModel = 'google/gemma-4-31b-it:free';
+              else if (mLower.includes('gemma2') || mLower.includes('gemma')) reqModel = 'google/gemma-4-26b-a4b-it:free';
+              else if (mLower.includes('nemotron-3-super')) reqModel = 'nvidia/nemotron-3-super-120b-a12b:free';
+              else if (mLower.includes('nemotron-3-ultra')) reqModel = 'nvidia/nemotron-3-ultra-550b-a55b:free';
+              else if (mLower.includes('nemotron-3-nano') || mLower.includes('nemotron-3.5')) reqModel = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
+              else if (mLower.includes('gpt-oss')) reqModel = 'nvidia/nemotron-3-super-120b-a12b:free';
+              else if (mLower.includes('deepseek-r1') || mLower.includes('deepseek-v4-pro')) reqModel = 'deepseek/deepseek-r1:free';
+              else if (mLower.includes('deepseek')) reqModel = 'deepseek/deepseek-chat';
+              else if (mLower.includes('llama')) reqModel = 'meta-llama/llama-3.3-70b-instruct';
+              else if (mLower.includes('coder')) reqModel = 'cohere/north-mini-code:free';
+              else reqModel = 'openrouter/free';
+            }
             const isLiquid = reqModel.includes('liquid') || reqModel.includes('lfm-');
             const isReasoning = reqModel.includes('/o1') || reqModel.includes('/o3');
             const out = {
