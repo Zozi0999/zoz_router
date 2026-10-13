@@ -2960,7 +2960,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
       try {
         let appendedText = '';
-        if (engine === 'openrouter') {
+        const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+        const hasCustomExternalEndpoint = Boolean(STATE.settings.ollamaApiKey && !ep.includes('ollama.com') && !ep.includes('127.0.0.1') && !ep.includes('localhost'));
+        if (engine === 'openrouter' || !hasCustomExternalEndpoint) {
           appendedText = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, previousText);
         } else {
           appendedText = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, previousText);
@@ -3011,7 +3013,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   }
 
   async function streamContinuationOpenRouter(session, modelName, promptInstruction, bubbleText, currentFullText) {
-    const supportsSystem = doesModelSupportSystemRole(modelName);
+    const effectiveModel = (modelName && modelName.includes('/'))
+      ? modelName
+      : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
+    const supportsSystem = doesModelSupportSystemRole(effectiveModel);
     const messagesPayload = [];
     if (STATE.settings.systemPrompt && supportsSystem) {
       messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
@@ -3025,11 +3030,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       : promptInstruction;
     messagesPayload.push({ role: 'user', content: userInstruction });
 
-    const isLiquid = Boolean(modelName && (modelName.includes('liquid') || modelName.includes('lfm-')));
-    const isReasoning = Boolean(modelName && (modelName.includes('/o1') || modelName.includes('/o3')));
+    const isLiquid = Boolean(effectiveModel && (effectiveModel.includes('liquid') || effectiveModel.includes('lfm-')));
+    const isReasoning = Boolean(effectiveModel && (effectiveModel.includes('/o1') || effectiveModel.includes('/o3')));
 
     const basePayload = {
-      model: modelName,
+      model: effectiveModel,
       messages: messagesPayload,
       stream: true,
       provider: { allow_fallbacks: true }
@@ -5545,9 +5550,9 @@ Aturan wajib:
     return finalQuery.replace(/\s+/g, ' ').trim();
   }
 
-  async function getWebSearchContext(query, session = null, hudElement = null) {
+  async function getWebSearchContext(query, session = null, hudElement = null, forceRun = false) {
     if (!query || !query.trim()) return null;
-    if (STATE.searchMode === 'autonomous') {
+    if (STATE.searchMode === 'autonomous' && !forceRun) {
       // Mode Autonomous Web Explorer menggunakan eksekusi tool dinamis on-demand oleh AI tanpa Serper API!
       return null;
     }
@@ -10322,10 +10327,25 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         console.warn('YouTube client grounding error:', ytErr);
       }
 
-      // DEFAULT WEB SEARCH MODE (Pencarian Kilat Google / Multi-source Grounding)
-      if (STATE.searchMode === 'default') {
+      const effectiveInitialModel = (modelName && modelName.includes('/'))
+        ? modelName
+        : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
+
+      // Deteksi apakah model gratis atau berbayar
+      const isFreeModel = Boolean(
+        effectiveInitialModel.includes(':free') ||
+        effectiveInitialModel.endsWith('/free') ||
+        effectiveInitialModel === 'openrouter/free' ||
+        (STATE.openRouterModels || []).some(m => m.id === effectiveInitialModel && (m.cat === 'free' || m.tag === 'Free'))
+      );
+
+      // WEB SEARCH GROUNDING:
+      // Aktif pada mode default search, atau sebagai fallback otomatis ketika mode autonomous search
+      // berjalan pada model gratis / model tanpa dukungan tools (agar tetap mendapat data internet terkini).
+      const needsGroundingFallback = STATE.searchMode === 'autonomous' && (isFreeModel || !STATE.settings.openRouterKey || !doesModelSupportTools(effectiveInitialModel));
+      if (STATE.searchMode === 'default' || (STATE.webSearchEnabled && needsGroundingFallback)) {
         try {
-          const searchRes = await getWebSearchContext(promptText, session, bubbleText);
+          const searchRes = await getWebSearchContext(promptText, session, bubbleText, needsGroundingFallback);
           if (searchRes && searchRes.systemPromptContext) {
             systemContent = systemContent
               ? `${systemContent}\n\n${searchRes.systemPromptContext}`
@@ -10337,7 +10357,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             bubbleText.innerHTML = '<span class="typing-cursor"></span>';
           }
         } catch (searchErr) {
-          console.warn('Default web search grounding error:', searchErr);
+          console.warn('Web search grounding error:', searchErr);
         }
       }
 
@@ -10347,18 +10367,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
       const resolvedImgs = await Promise.all(rawImgs.map(resolveImageToDataUrlSafe));
-      const effectiveInitialModel = (modelName && modelName.includes('/'))
-        ? modelName
-        : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
       const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, effectiveInitialModel);
-
-      // Deteksi apakah model gratis atau berbayar
-      const isFreeModel = Boolean(
-        effectiveInitialModel.includes(':free') ||
-        effectiveInitialModel.endsWith('/free') ||
-        effectiveInitialModel === 'openrouter/free' ||
-        (STATE.openRouterModels || []).some(m => m.id === effectiveInitialModel && (m.cat === 'free' || m.tag === 'Free'))
-      );
 
       // Siapkan pool kandidat model:
       // - Selalu sertakan fallback gratis terverifikasi agar saat model pilihan kehabisan kredit (HTTP 402)
@@ -10563,7 +10572,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         if (res && res.ok) {
           response = res;
           activeMessagesPayload = currentMessagesPayload;
-          if (currentModel !== modelName) {
+          if (i > 0) {
             actualModelUsed = currentModel;
           }
           break;
@@ -10636,9 +10645,6 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
             const rawUpstream = parsed.error?.metadata?.raw;
             throw new Error(rawUpstream ? `${errStr} (${rawUpstream})` : errStr);
-          }
-          if (parsed.model && parsed.model !== modelName && !actualModelUsed) {
-            actualModelUsed = parsed.model;
           }
           if (parsed.choices?.[0]?.finish_reason) {
             finishReason = parsed.choices[0].finish_reason;
@@ -11225,7 +11231,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       }
       renderYouTubeCardsForMessage(assistantRow, fullText, foundYouTubeIds);
       renderMessageFiles(assistantRow, generatedFiles);
-      const effectiveDisplay = actualModelUsed ? `${actualModelUsed} (Failover)` : displayModel;
+      const effectiveDisplay = (actualModelUsed && actualModelUsed !== displayModel && actualModelUsed !== modelName) ? `${displayModel} → ${actualModelUsed} (Failover)` : displayModel;
       metaBox.innerHTML = `
         <strong title="${actualModelUsed ? escapeHtml('Model dialihkan ke ' + actualModelUsed) : escapeHtml(displayModel)}">${escapeHtml(effectiveDisplay)}</strong>
         <span class="meta-model-badge" style="${engineLabel === 'Ollama Cloud' ? 'background:rgba(0,242,254,0.15); color:var(--neon-cyan);' : 'background:rgba(255,82,0,0.15); color:var(--neon-amber);'}">${engineLabel}</span>
@@ -11378,7 +11384,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         bubbleText.querySelector('.retry-send-btn')?.addEventListener('click', () => {
           if (STATE.isGenerating || STATE.isSending) return;
           assistantRow.remove();
-          runOpenRouterStreaming(session, promptText, image, modelName);
+          runOpenRouterStreaming(session, promptText, image, modelName, runOptions);
         });
 
         bubbleText.querySelector('.switch-free-model-btn')?.addEventListener('click', (e) => {

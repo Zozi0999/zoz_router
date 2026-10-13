@@ -703,7 +703,7 @@ export default {
 
         if (!authHeader) {
           // 100% Pure Cloud Bridge: Jika dipanggil tanpa dedicated Ollama key, teruskan via Cloud AI (OpenRouter)
-          let orKey = request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
+          let orKey = body.openRouterKey || (body.apiKey && String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
           if (orKey) orKey = String(orKey).replace(/^Bearer\s+/i, '').trim();
           const targetModel = mapOllamaModelToOpenRouter(body.model || 'gemma4:31b');
           const isStream = body.stream !== false;
