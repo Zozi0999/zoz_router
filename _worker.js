@@ -596,6 +596,44 @@ export default {
       });
     }
 
+    // Gateway root info
+    if ((url.pathname === '/api' || url.pathname === '/api/') && request.method === 'GET') {
+      return new Response(JSON.stringify({
+        status: 'online',
+        name: 'ZOZ ROUTER Neural Gateway (Cloudflare Edge)',
+        version: '1.0.0',
+        cloud: true,
+        edge: true,
+        timestamp: new Date().toISOString()
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+
+    // Fast Diagnostic Probe Ping (Zero-Dependency)
+    if (url.pathname === '/api/ping' && (request.method === 'GET' || request.method === 'HEAD')) {
+      return new Response(JSON.stringify({
+        ok: true,
+        status: 'healthy',
+        mode: 'edge-worker',
+        time: new Date().toISOString(),
+        colo: request.cf?.colo || null,
+        country: request.cf?.country || null,
+        version: '1.0.0'
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+
     // Health Check Endpoint
     if (url.pathname === '/api/health' && request.method === 'GET') {
       return new Response(JSON.stringify({
@@ -829,7 +867,9 @@ export default {
               else if (mLower.includes('deepseek-r1') || mLower.includes('deepseek-v4-pro')) reqModel = 'deepseek/deepseek-r1:free';
               else if (mLower.includes('deepseek')) reqModel = 'deepseek/deepseek-chat';
               else if (mLower.includes('llama')) reqModel = 'meta-llama/llama-3.3-70b-instruct';
-              else if (mLower.includes('coder')) reqModel = 'cohere/north-mini-code:free';
+              else if (mLower.includes('coder') || mLower.includes('code')) reqModel = 'cohere/north-mini-code:free';
+              else if (mLower.includes('dots')) reqModel = 'dots-studio/dots-3-note-preview:free';
+              else if (mLower.includes('lfm') || mLower.includes('liquid')) reqModel = 'liquid/lfm-2.5-2.6b:free';
               else reqModel = 'openrouter/free';
             }
             const isLiquid = reqModel.includes('liquid') || reqModel.includes('lfm-');
@@ -852,7 +892,10 @@ export default {
             }
             if (body.tools && Array.isArray(body.tools) && (!reqModel.includes(':free') && !reqModel.endsWith('/free') && reqModel !== 'openrouter/free')) {
               const clean = body.tools.filter(t => t && t.type === 'function' && t.function && t.function.name);
-              if (clean.length > 0) out.tools = clean;
+              if (clean.length > 0) {
+                out.tools = clean;
+                if (body.tool_choice) out.tool_choice = body.tool_choice;
+              }
             }
             return out;
           })())

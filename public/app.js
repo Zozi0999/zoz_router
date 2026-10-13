@@ -193,7 +193,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (id.includes('llama3.2') || id.includes('llama-3.2') || id.includes('llama3.3') || id.includes('llama-3.3') || id.includes('llama')) {
       return 'meta-llama/llama-3.3-70b-instruct';
     }
-    if (id.includes('qwen2.5-coder') || id.includes('coder')) {
+    if (id.includes('qwen2.5-coder') || id.includes('coder') || id.includes('code')) {
       return 'cohere/north-mini-code:free';
     }
     if (id.includes('qwen')) {
@@ -6895,19 +6895,19 @@ ${blocks}
     return STATE.settings.ollamaModel || 'Default';
   }
 
-  function selectModel(modelId, forcedProvider = null) {
+  function selectModel(modelId, forcedProvider = null, forceSwitch = false) {
     if (!modelId) return;
     const isOR = forcedProvider ? (forcedProvider === 'openrouter') : (modelId.includes('/') || STATE.mode === 'openrouter');
     if (isOR) {
       const cleanORModel = modelId.includes('/') ? modelId : (mapOllamaModelToOpenRouter(modelId) || 'openrouter/free');
       STATE.settings.openRouterModel = cleanORModel;
       if (STATE.mode !== 'openrouter' && STATE.mode !== 'auto') {
-        setEngineMode('openrouter');
+        setEngineMode('openrouter', forceSwitch, forceSwitch);
       }
     } else {
       STATE.settings.ollamaModel = modelId;
       if (STATE.mode !== 'ollama' && STATE.mode !== 'auto') {
-        setEngineMode('ollama');
+        setEngineMode('ollama', forceSwitch, forceSwitch);
       }
     }
 
@@ -6926,8 +6926,8 @@ ${blocks}
   }
 
   // ==================== MODE SWITCHING ====================
-  function setEngineMode(mode) {
-    if (STATE.isGenerating) {
+  function setEngineMode(mode, force = false, silent = false) {
+    if (STATE.isGenerating && !force) {
       showToast('Harap tunggu atau hentikan generasi respons saat ini.', 'error');
       return;
     }
@@ -6948,9 +6948,11 @@ ${blocks}
 
     updateModelUI();
     populateModelDropdown();
-    renderChatHistory();
-    renderCurrentSession();
-    AudioEngine.click();
+    if (!silent) {
+      renderChatHistory();
+      renderCurrentSession();
+      AudioEngine.click();
+    }
   }
 
   // ==================== DISPATCH / STREAMING ENGINE ====================
@@ -10172,6 +10174,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           const fallbackModel = mapOllamaModelToOpenRouter(modelName);
           console.warn(`[Ollama Failover] Model ${modelName} tidak tersedia di server Ollama (${err?.message}). Mengalihkan otomatis ke Cloud OpenRouter (${fallbackModel})...`);
           showToast(`🔀 Model ${modelName} dialihkan otomatis ke Cloud (${fallbackModel})...`, 'info');
+          selectModel(fallbackModel, 'openrouter', true);
           return await runOpenRouterStreaming(session, promptText, image, fallbackModel);
         }
 

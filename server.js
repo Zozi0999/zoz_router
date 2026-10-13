@@ -6880,7 +6880,9 @@ async function requestHandler(req, res) {
         else if (mLower.includes('deepseek-r1') || mLower.includes('deepseek-v4-pro')) body.model = 'deepseek/deepseek-r1:free';
         else if (mLower.includes('deepseek')) body.model = 'deepseek/deepseek-chat';
         else if (mLower.includes('llama')) body.model = 'meta-llama/llama-3.3-70b-instruct';
-        else if (mLower.includes('coder')) body.model = 'cohere/north-mini-code:free';
+        else if (mLower.includes('coder') || mLower.includes('code')) body.model = 'cohere/north-mini-code:free';
+        else if (mLower.includes('dots')) body.model = 'dots-studio/dots-3-note-preview:free';
+        else if (mLower.includes('lfm') || mLower.includes('liquid')) body.model = 'liquid/lfm-2.5-2.6b:free';
         else body.model = 'openrouter/free';
       }
 
@@ -6893,9 +6895,16 @@ async function requestHandler(req, res) {
       const isFree = body.model && (body.model.includes(':free') || body.model.endsWith('/free') || body.model === 'openrouter/free');
       if (isFree && Array.isArray(body.tools)) {
         delete body.tools;
+        delete body.tool_choice;
       } else if (Array.isArray(body.tools)) {
         body.tools = body.tools.filter(t => t && t.type === 'function' && t.function && t.function.name);
-        if (body.tools.length === 0) delete body.tools;
+        if (body.tools.length === 0) {
+          delete body.tools;
+          delete body.tool_choice;
+        }
+      }
+      if (!body.tools && body.tool_choice) {
+        delete body.tool_choice;
       }
 
       // Defense-in-depth: Hapus parameter yang tidak didukung pada model tertentu (misal: top_p pada Liquid AI / reasoning)
