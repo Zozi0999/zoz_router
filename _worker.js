@@ -84,6 +84,40 @@ const OFFICIAL_OLLAMA_CLOUD_MODELS = [
   { name: 'glm-5.2', model: 'glm-5.2', tag: 'Cloud', isFree: false, cat: 'flagship', details: { family: 'glm' } }
 ];
 
+function mapOllamaModelToOpenRouter(modelId) {
+  if (!modelId || typeof modelId !== 'string') return 'openrouter/free';
+  const id = modelId.toLowerCase().trim();
+  if (id.includes('/')) return modelId;
+
+  if (id.includes('gemma4') || id.includes('gemma-4') || id.includes('gemma:4') || id.includes('gemma_4')) {
+    return 'google/gemma-4-31b-it:free';
+  }
+  if (id.includes('gemma2') || id.includes('gemma-2') || id.includes('gemma')) {
+    return 'google/gemma-4-26b-a4b-it:free';
+  }
+  if (id.includes('nemotron-3-super') || id.includes('gpt-oss:120b') || id.includes('nemotron-3-ultra')) {
+    return 'nvidia/nemotron-3-super-120b-a12b:free';
+  }
+  if (id.includes('nemotron-3-nano') || id.includes('reasoning') || id.includes('deepseek-r1') || id.includes('deepseek-v4-pro')) {
+    return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
+  }
+  if (id.includes('nemotron-3.5') || id.includes('nemotron')) {
+    return 'nvidia/nemotron-3.5-lightning:free';
+  }
+  if (id.includes('gpt-oss')) {
+    return 'nvidia/nemotron-3-super-120b-a12b:free';
+  }
+  if (id.includes('qwen2.5-coder') || id.includes('coder') || id.includes('code') || id.includes('kimi-k2.7-code')) {
+    return 'cohere/north-mini-code:free';
+  }
+  if (id.includes('dots')) return 'dots-studio/dots-3-note-preview:free';
+  if (id.includes('liquid') || id.includes('lfm')) return 'liquid/lfm-2.5-2.6b:free';
+  if (id.includes('apodex')) return 'apodex/apodex-1.1-mini:free';
+  if (id.includes('laguna')) return 'poolside/laguna-s-2.1:free';
+
+  return 'openrouter/free';
+}
+
 // ==================== YOUTUBE LIVE SEARCH (ZERO API KEY) ====================
 const YT_SEARCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const YT_INVIDIOUS = ['https://inv.nadeko.net', 'https://yewtu.be', 'https://invidious.nerdvpn.de'];
@@ -667,12 +701,113 @@ export default {
           cleanEndpoint = (authHeader ? 'https://' : 'http://') + cleanEndpoint;
         }
 
-        if (cleanEndpoint.includes('ollama.com') && !authHeader) {
-          return new Response(JSON.stringify({
-            error: 'Ollama Cloud memerlukan Ollama API Key. Masukkan Ollama API Key di Pengaturan Zoz Router, atau gunakan mode Auto-Router / OpenRouter untuk model gratis tanpa setup.'
-          }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        if (!authHeader) {
+          // 100% Pure Cloud Bridge: Jika dipanggil tanpa dedicated Ollama key, teruskan via Cloud AI (OpenRouter)
+          let orKey = request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
+          if (orKey) orKey = String(orKey).replace(/^Bearer\s+/i, '').trim();
+          const targetModel = mapOllamaModelToOpenRouter(body.model || 'gemma4:31b');
+          const isStream = body.stream !== false;
+          const openRouterPayload = {
+            model: targetModel,
+            messages: body.messages || [],
+            stream: isStream,
+            provider: { allow_fallbacks: true }
+          };
+          if (body.options?.temperature !== undefined) openRouterPayload.temperature = body.options.temperature;
+          if (body.options?.top_p !== undefined) openRouterPayload.top_p = body.options.top_p;
+
+          const orHeaders = {
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://zoz-router.pages.dev',
+            'X-Title': 'ZOZ Router Ollama Cloud Bridge'
+          };
+          if (orKey) orHeaders['Authorization'] = `Bearer ${orKey}`;
+
+          const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: orHeaders,
+            body: JSON.stringify(openRouterPayload)
+          });
+
+          if (!orRes.ok) {
+            const errJson = await orRes.json().catch(() => ({}));
+            return new Response(JSON.stringify({
+              error: errJson?.error?.message || errJson?.error || `OpenRouter upstream error: HTTP ${orRes.status}`
+            }), {
+              status: orRes.status,
+              headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            });
+          }
+
+          if (!isStream) {
+            const data = await orRes.json().catch(() => ({}));
+            const textContent = data.choices?.[0]?.message?.content || '';
+            return new Response(JSON.stringify({
+              model: body.model || 'gemma4:31b',
+              created_at: new Date().toISOString(),
+              message: { role: 'assistant', content: textContent },
+              done: true
+            }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            });
+          }
+
+          const { readable, writable } = new TransformStream();
+          const writer = writable.getWriter();
+          const reader = orRes.body.getReader();
+          const decoder = new TextDecoder();
+          const encoder = new TextEncoder();
+
+          (async () => {
+            let buffer = '';
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                for (const line of lines) {
+                  const trimmed = line.trim();
+                  if (!trimmed.startsWith('data:')) continue;
+                  const dataStr = trimmed.slice(5).trim();
+                  if (dataStr === '[DONE]') {
+                    await writer.write(encoder.encode(JSON.stringify({
+                      model: body.model || 'gemma4:31b',
+                      created_at: new Date().toISOString(),
+                      message: { role: 'assistant', content: '' },
+                      done: true
+                    }) + '\n'));
+                    continue;
+                  }
+                  try {
+                    const parsed = JSON.parse(dataStr);
+                    const deltaContent = parsed.choices?.[0]?.delta?.content || '';
+                    if (deltaContent) {
+                      await writer.write(encoder.encode(JSON.stringify({
+                        model: body.model || 'gemma4:31b',
+                        created_at: new Date().toISOString(),
+                        message: { role: 'assistant', content: deltaContent },
+                        done: false
+                      }) + '\n'));
+                    }
+                  } catch (_) {}
+                }
+              }
+            } catch (err) {
+              console.error('Error in Ollama cloud streaming proxy:', err);
+            } finally {
+              await writer.close();
+            }
+          })();
+
+          return new Response(readable, {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/x-ndjson',
+              'Access-Control-Allow-Origin': '*'
+            }
           });
         }
         const parsedBase = new URL(cleanEndpoint);
@@ -739,13 +874,13 @@ export default {
         if (authHeader) headers['Authorization'] = authHeader;
 
         let cleanEndpoint = (endpoint || '').trim();
-        // Pada Cloudflare Edge, jika endpoint loopback diminta:
+        // Pada Cloudflare Edge, jika endpoint loopback atau ollama.com default diminta:
         // - Jika ada authHeader: alihkan ke https://ollama.com resmi
-        // - Jika tanpa authHeader: segera kembalikan katalog resmi Ollama Cloud
-        if (cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1')) {
-          if (authHeader) {
+        // - Jika tanpa authHeader: segera kembalikan katalog resmi Ollama Cloud (< 5ms)
+        if (cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1') || cleanEndpoint.includes('ollama.com')) {
+          if (authHeader && !cleanEndpoint.includes('ollama.com')) {
             cleanEndpoint = 'https://ollama.com';
-          } else {
+          } else if (!authHeader) {
             return new Response(JSON.stringify({
               models: OFFICIAL_OLLAMA_CLOUD_MODELS,
               server_running: true,
@@ -857,20 +992,7 @@ export default {
           body: JSON.stringify((() => {
             let reqModel = body.model || 'openrouter/free';
             if (reqModel && !reqModel.includes('/')) {
-              const mLower = reqModel.toLowerCase();
-              if (mLower.includes('gemma4') || mLower.includes('gemma-4')) reqModel = 'google/gemma-4-31b-it:free';
-              else if (mLower.includes('gemma2') || mLower.includes('gemma')) reqModel = 'google/gemma-4-26b-a4b-it:free';
-              else if (mLower.includes('nemotron-3-super')) reqModel = 'nvidia/nemotron-3-super-120b-a12b:free';
-              else if (mLower.includes('nemotron-3-ultra')) reqModel = 'nvidia/nemotron-3-ultra-550b-a55b:free';
-              else if (mLower.includes('nemotron-3-nano') || mLower.includes('nemotron-3.5')) reqModel = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
-              else if (mLower.includes('gpt-oss')) reqModel = 'nvidia/nemotron-3-super-120b-a12b:free';
-              else if (mLower.includes('deepseek-r1') || mLower.includes('deepseek-v4-pro')) reqModel = 'deepseek/deepseek-r1:free';
-              else if (mLower.includes('deepseek')) reqModel = 'deepseek/deepseek-chat';
-              else if (mLower.includes('llama')) reqModel = 'meta-llama/llama-3.3-70b-instruct';
-              else if (mLower.includes('coder') || mLower.includes('code')) reqModel = 'cohere/north-mini-code:free';
-              else if (mLower.includes('dots')) reqModel = 'dots-studio/dots-3-note-preview:free';
-              else if (mLower.includes('lfm') || mLower.includes('liquid')) reqModel = 'liquid/lfm-2.5-2.6b:free';
-              else reqModel = 'openrouter/free';
+              reqModel = mapOllamaModelToOpenRouter(reqModel);
             }
             const isLiquid = reqModel.includes('liquid') || reqModel.includes('lfm-');
             const isReasoning = reqModel.includes('/o1') || reqModel.includes('/o3');

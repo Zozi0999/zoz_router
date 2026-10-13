@@ -735,6 +735,40 @@ const OFFICIAL_OLLAMA_CLOUD_MODELS = [
   { name: 'glm-5.2', model: 'glm-5.2', tag: 'Cloud', isFree: false, cat: 'flagship', details: { family: 'glm' } }
 ];
 
+function mapOllamaModelToOpenRouter(modelId) {
+  if (!modelId || typeof modelId !== 'string') return 'openrouter/free';
+  const id = modelId.toLowerCase().trim();
+  if (id.includes('/')) return modelId;
+
+  if (id.includes('gemma4') || id.includes('gemma-4') || id.includes('gemma:4') || id.includes('gemma_4')) {
+    return 'google/gemma-4-31b-it:free';
+  }
+  if (id.includes('gemma2') || id.includes('gemma-2') || id.includes('gemma')) {
+    return 'google/gemma-4-26b-a4b-it:free';
+  }
+  if (id.includes('nemotron-3-super') || id.includes('gpt-oss:120b') || id.includes('nemotron-3-ultra')) {
+    return 'nvidia/nemotron-3-super-120b-a12b:free';
+  }
+  if (id.includes('nemotron-3-nano') || id.includes('reasoning') || id.includes('deepseek-r1') || id.includes('deepseek-v4-pro')) {
+    return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
+  }
+  if (id.includes('nemotron-3.5') || id.includes('nemotron')) {
+    return 'nvidia/nemotron-3.5-lightning:free';
+  }
+  if (id.includes('gpt-oss')) {
+    return 'nvidia/nemotron-3-super-120b-a12b:free';
+  }
+  if (id.includes('qwen2.5-coder') || id.includes('coder') || id.includes('code') || id.includes('kimi-k2.7-code')) {
+    return 'cohere/north-mini-code:free';
+  }
+  if (id.includes('dots')) return 'dots-studio/dots-3-note-preview:free';
+  if (id.includes('liquid') || id.includes('lfm')) return 'liquid/lfm-2.5-2.6b:free';
+  if (id.includes('apodex')) return 'apodex/apodex-1.1-mini:free';
+  if (id.includes('laguna')) return 'poolside/laguna-s-2.1:free';
+
+  return 'openrouter/free';
+}
+
 // ==================== GLOBAL SEARCH & ENGLISH QUERY ADAPTER ====================
 // Memastikan kueri pencarian otonom menjangkau indeks internasional/global
 // dan mengonversi topik pengguna berbahasa Indonesia menjadi kata kunci pencarian bahasa Inggris global.
@@ -6021,23 +6055,22 @@ async function requestHandler(req, res) {
       if (!dnsVerdict.ok) return sendJSON(res, 400, { error: dnsVerdict.msg });
     }
 
-    // Fast-Path Serverless (Vercel / Lambda):
-    // Jika berjalan di container serverless cloud dan endpoint mengarah ke loopback (127.0.0.1/localhost):
+    // Fast-Path Cloud Architecture:
+    // Jika endpoint mengarah ke loopback (127.0.0.1/localhost) atau ollama.com tanpa auth header khusus:
     // - Jika ada API key: alihkan target loopback ke ollama.com resmi
-    // - Jika tanpa API key: segera kembalikan katalog resmi Ollama Cloud (< 5ms) tanpa menahan latensi 12s connection timeout.
+    // - Jika tanpa API key: segera kembalikan katalog resmi Ollama Cloud (< 5ms) tanpa menahan latensi connection timeout.
     const isServerlessEnv = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION || req.headers['x-vercel-id']);
     const isLoopbackTarget = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(rawEndpoint);
-    if (isServerlessEnv && isLoopbackTarget) {
-      if (authHeader) {
-        rawEndpoint = 'https://ollama.com';
-      } else {
-        return sendJSON(res, 200, {
-          models: OFFICIAL_OLLAMA_CLOUD_MODELS,
-          server_running: true,
-          cloud_ready: true,
-          note: 'Loaded from official Ollama Cloud catalog (fast-path serverless)'
-        });
-      }
+    if (!authHeader && (isLoopbackTarget || rawEndpoint.includes('ollama.com'))) {
+      return sendJSON(res, 200, {
+        models: OFFICIAL_OLLAMA_CLOUD_MODELS,
+        server_running: true,
+        cloud_ready: true,
+        note: 'Loaded from official Ollama Cloud catalog'
+      });
+    }
+    if (authHeader && isLoopbackTarget) {
+      rawEndpoint = 'https://ollama.com';
     }
 
     const tryFetchTags = (endpointUrl) => {
@@ -6278,10 +6311,162 @@ async function requestHandler(req, res) {
         (isTrustedOllamaEndpoint(customEndpoint) ? process.env.OLLAMA_API_KEY : null);
       const authHeader = rawKey ? `Bearer ${rawKey}` : (req.headers['authorization'] || null);
 
-      if (customEndpoint.includes('ollama.com') && !rawKey) {
-        return sendJSON(res, 401, {
-          error: 'Ollama Cloud memerlukan Ollama API Key. Masukkan Ollama API Key di Pengaturan Zoz Router, atau gunakan mode Auto-Router / OpenRouter untuk model gratis tanpa setup.'
+      const isLoopbackTarget = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(customEndpoint);
+      const isCloudWithoutKey = customEndpoint.includes('ollama.com') && !rawKey;
+
+      if (!clientSuppliedKey && (isLoopbackTarget || isCloudWithoutKey)) {
+        // Pure Cloud Architecture Bridge:
+        // Ketika tidak ada daemon lokal atau key khusus Ollama, alihkan secara transparan ke OpenRouter Cloud AI
+        // dan konversikan stream SSE OpenRouter ke format newline-delimited JSON Ollama.
+        const targetCloudModel = mapOllamaModelToOpenRouter(body.model || 'gemma4:31b');
+        const rawOrKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || body.openRouterKey || process.env.OPENROUTER_API_KEY;
+        const openRouterKey = rawOrKey ? `Bearer ${String(rawOrKey).replace(/^Bearer\s+/i, '').trim()}` : '';
+
+        const orPayload = {
+          model: targetCloudModel,
+          messages: body.messages || [],
+          stream: body.stream !== false,
+          provider: { allow_fallbacks: true }
+        };
+        if (body.options?.temperature !== undefined) orPayload.temperature = body.options.temperature;
+        if (body.options?.top_p !== undefined) orPayload.top_p = body.options.top_p;
+
+        const orPostData = JSON.stringify(orPayload);
+        const orHeaders = {
+          'Content-Type': 'application/json',
+          'HTTP-Referer': req.headers.origin || req.headers.referer || process.env.ZOX_APP_URL || 'https://github.com/Zozi0999/zoz_router',
+          'X-Title': 'ZOZ ROUTER Ollama Cloud Bridge',
+          'Content-Length': Buffer.byteLength(orPostData)
+        };
+        if (openRouterKey) orHeaders['Authorization'] = openRouterKey;
+
+        const orReqOptions = {
+          hostname: 'openrouter.ai',
+          port: 443,
+          path: '/api/v1/chat/completions',
+          method: 'POST',
+          headers: orHeaders,
+          timeout: 120000
+        };
+
+        const isStream = body.stream !== false;
+        if (isStream) {
+          res.writeHead(200, {
+            'Content-Type': 'application/x-ndjson; charset=utf-8',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*'
+          });
+        }
+
+        const bridgeReq = https.request(orReqOptions, (bridgeRes) => {
+          const bStatus = bridgeRes.statusCode || 200;
+          if (bStatus >= 400) {
+            let errBuf = '';
+            bridgeRes.on('data', chunk => errBuf += chunk);
+            bridgeRes.on('end', () => {
+              if (res.writableEnded) return;
+              try {
+                const parsed = JSON.parse(errBuf);
+                const msg = parsed?.error?.message || parsed?.error || `OpenRouter bridge error: HTTP ${bStatus}`;
+                if (isStream) {
+                  res.write(JSON.stringify({ error: msg }) + '\n');
+                  res.end();
+                } else {
+                  sendJSON(res, bStatus, { error: msg });
+                }
+              } catch (_) {
+                if (isStream) {
+                  res.write(JSON.stringify({ error: errBuf || `HTTP ${bStatus}` }) + '\n');
+                  res.end();
+                } else {
+                  sendJSON(res, bStatus, { error: errBuf || `HTTP ${bStatus}` });
+                }
+              }
+            });
+            return;
+          }
+
+          if (!isStream) {
+            let rawResp = '';
+            bridgeRes.on('data', chunk => rawResp += chunk);
+            bridgeRes.on('end', () => {
+              try {
+                const parsed = JSON.parse(rawResp);
+                const txt = parsed.choices?.[0]?.message?.content || '';
+                sendJSON(res, 200, {
+                  model: body.model || 'gemma4:31b',
+                  created_at: new Date().toISOString(),
+                  message: { role: 'assistant', content: txt },
+                  done: true
+                });
+              } catch (e) {
+                sendJSON(res, 500, { error: 'Gagal memproses respon bridge: ' + e.message });
+              }
+            });
+            return;
+          }
+
+          let sseBuffer = '';
+          bridgeRes.on('data', chunk => {
+            sseBuffer += chunk.toString();
+            const lines = sseBuffer.split('\n');
+            sseBuffer = lines.pop() || '';
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith('data:')) continue;
+              const dataStr = trimmed.slice(5).trim();
+              if (dataStr === '[DONE]') {
+                res.write(JSON.stringify({
+                  model: body.model || 'gemma4:31b',
+                  created_at: new Date().toISOString(),
+                  message: { role: 'assistant', content: '' },
+                  done: true
+                }) + '\n');
+                continue;
+              }
+              try {
+                const parsed = JSON.parse(dataStr);
+                const delta = parsed.choices?.[0]?.delta?.content || '';
+                if (delta) {
+                  res.write(JSON.stringify({
+                    model: body.model || 'gemma4:31b',
+                    created_at: new Date().toISOString(),
+                    message: { role: 'assistant', content: delta },
+                    done: false
+                  }) + '\n');
+                }
+              } catch (_) {}
+            }
+          });
+
+          bridgeRes.on('end', () => {
+            if (!res.writableEnded) {
+              res.write(JSON.stringify({
+                model: body.model || 'gemma4:31b',
+                created_at: new Date().toISOString(),
+                message: { role: 'assistant', content: '' },
+                done: true
+              }) + '\n');
+              res.end();
+            }
+          });
         });
+
+        bridgeReq.on('error', (err) => {
+          if (!res.writableEnded) {
+            if (isStream) {
+              res.write(JSON.stringify({ error: 'Bridge network error: ' + err.message }) + '\n');
+              res.end();
+            } else {
+              sendJSON(res, 500, { error: 'Bridge network error: ' + err.message });
+            }
+          }
+        });
+
+        bridgeReq.write(orPostData);
+        bridgeReq.end();
+        return;
       }
 
       if (!body.model) {
@@ -6870,20 +7055,7 @@ async function requestHandler(req, res) {
 
       // Defense-in-depth: Normalisasi model jika format tanpa slash (misal format Ollama gemma4:31b) dikirim ke OpenRouter
       if (body.model && !body.model.includes('/')) {
-        const mLower = body.model.toLowerCase();
-        if (mLower.includes('gemma4') || mLower.includes('gemma-4')) body.model = 'google/gemma-4-31b-it:free';
-        else if (mLower.includes('gemma2') || mLower.includes('gemma')) body.model = 'google/gemma-4-26b-a4b-it:free';
-        else if (mLower.includes('nemotron-3-super')) body.model = 'nvidia/nemotron-3-super-120b-a12b:free';
-        else if (mLower.includes('nemotron-3-ultra')) body.model = 'nvidia/nemotron-3-ultra-550b-a55b:free';
-        else if (mLower.includes('nemotron-3-nano') || mLower.includes('nemotron-3.5')) body.model = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
-        else if (mLower.includes('gpt-oss')) body.model = 'nvidia/nemotron-3-super-120b-a12b:free';
-        else if (mLower.includes('deepseek-r1') || mLower.includes('deepseek-v4-pro')) body.model = 'deepseek/deepseek-r1:free';
-        else if (mLower.includes('deepseek')) body.model = 'deepseek/deepseek-chat';
-        else if (mLower.includes('llama')) body.model = 'meta-llama/llama-3.3-70b-instruct';
-        else if (mLower.includes('coder') || mLower.includes('code')) body.model = 'cohere/north-mini-code:free';
-        else if (mLower.includes('dots')) body.model = 'dots-studio/dots-3-note-preview:free';
-        else if (mLower.includes('lfm') || mLower.includes('liquid')) body.model = 'liquid/lfm-2.5-2.6b:free';
-        else body.model = 'openrouter/free';
+        body.model = mapOllamaModelToOpenRouter(body.model);
       }
 
       // Defense-in-depth: Cegah konflik mutlak parameter model dan models pada OpenRouter

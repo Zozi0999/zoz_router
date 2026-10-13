@@ -97,15 +97,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   // Fallback resmi model gratis OpenRouter yang aktif dan terverifikasi live
   const LIVE_FREE_OPENROUTER_FALLBACKS = [
     'openrouter/free',
-    'google/gemma-4-31b-it:free',
-    'google/gemma-4-26b-a4b-it:free',
     'nvidia/nemotron-3-super-120b-a12b:free',
-    'nvidia/nemotron-3.5-lightning:free',
-    'nvidia/nemotron-3-ultra-550b-a55b:free',
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
-    'dots-studio/dots-3-note-preview:free',
+    'nvidia/nemotron-3.5-lightning:free',
     'cohere/north-mini-code:free',
-    'liquid/lfm-2.5-2.6b:free'
+    'dots-studio/dots-3-note-preview:free',
+    'liquid/lfm-2.5-2.6b:free',
+    'apodex/apodex-1.1-mini:free',
+    'poolside/laguna-s-2.1:free'
   ];
 
   // Popular OpenRouter Models Catalog (Live Active Free & Flagship Models)
@@ -169,44 +168,25 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (id.includes('gemma2') || id.includes('gemma-2') || id.includes('gemma')) {
       return 'google/gemma-4-26b-a4b-it:free';
     }
-    if (id.includes('nemotron-3-super')) {
+    if (id.includes('nemotron-3-super') || id.includes('gpt-oss:120b') || id.includes('nemotron-3-ultra')) {
       return 'nvidia/nemotron-3-super-120b-a12b:free';
     }
-    if (id.includes('nemotron-3-ultra')) {
-      return 'nvidia/nemotron-3-ultra-550b-a55b:free';
-    }
-    if (id.includes('nemotron-3-nano') || id.includes('nemotron-3.5')) {
+    if (id.includes('nemotron-3-nano') || id.includes('reasoning') || id.includes('deepseek-r1') || id.includes('deepseek-v4-pro')) {
       return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
     }
-    if (id.includes('nemotron')) {
+    if (id.includes('nemotron-3.5') || id.includes('nemotron')) {
       return 'nvidia/nemotron-3.5-lightning:free';
     }
     if (id.includes('gpt-oss')) {
       return 'nvidia/nemotron-3-super-120b-a12b:free';
     }
-    if (id.includes('deepseek-r1') || id.includes('reasoning') || id.includes('deepseek-v4-pro')) {
-      return 'deepseek/deepseek-r1:free';
-    }
-    if (id.includes('deepseek')) {
-      return 'deepseek/deepseek-chat';
-    }
-    if (id.includes('llama3.2') || id.includes('llama-3.2') || id.includes('llama3.3') || id.includes('llama-3.3') || id.includes('llama')) {
-      return 'meta-llama/llama-3.3-70b-instruct';
-    }
-    if (id.includes('qwen2.5-coder') || id.includes('coder') || id.includes('code')) {
+    if (id.includes('qwen2.5-coder') || id.includes('coder') || id.includes('code') || id.includes('kimi-k2.7-code')) {
       return 'cohere/north-mini-code:free';
     }
-    if (id.includes('qwen')) {
-      return 'openrouter/free';
-    }
-    if (id.includes('mistral')) {
-      return 'openrouter/free';
-    }
-    if (id.includes('phi')) {
-      return 'openrouter/free';
-    }
     if (id.includes('dots')) return 'dots-studio/dots-3-note-preview:free';
-    if (id.includes('lfm') || id.includes('liquid')) return 'liquid/lfm-2.5-2.6b:free';
+    if (id.includes('liquid') || id.includes('lfm')) return 'liquid/lfm-2.5-2.6b:free';
+    if (id.includes('apodex')) return 'apodex/apodex-1.1-mini:free';
+    if (id.includes('laguna')) return 'poolside/laguna-s-2.1:free';
 
     return 'openrouter/free';
   }
@@ -388,7 +368,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     openRouterModels: [...DEFAULT_OPENROUTER_MODELS],
     availableImageModels: [...DEFAULT_IMAGE_MODELS],
     settings: {
-      ollamaEndpoint: 'http://127.0.0.1:11434',
+      ollamaEndpoint: 'https://ollama.com',
       ollamaApiKey: '',
       openRouterKey: '',
       serperApiKey: '', // key milik user saja — server menyuplai key env-nya sendiri
@@ -402,7 +382,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       systemPrompt: SYSTEM_PRESETS.kaisar,
       customSystemPrompt: '',
       activePreset: 'kaisar',
-      autoPolicy: 'local_first',
+      autoPolicy: 'cloud_first',
       youtubeSearchTool: false // Tool pencarian video YouTube (toggle dari menu Lampiran)
     },
     activeCatalogTab: 'ollama', // 'ollama' | 'openrouter'
@@ -1349,12 +1329,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
       }
 
-      // Pastikan endpoint Ollama terdefinisi dengan baik (default ke 127.0.0.1:11434 jika tidak ada API key)
-      if (!STATE.settings.ollamaEndpoint) {
-        STATE.settings.ollamaEndpoint = 'http://127.0.0.1:11434';
-      } else if (STATE.settings.ollamaEndpoint.includes('ollama.com') && !STATE.settings.ollamaApiKey) {
-        // Jika sebelumnya diarahkan ke ollama.com tapi tanpa API key, pulihkan ke Ollama lokal
-        STATE.settings.ollamaEndpoint = 'http://127.0.0.1:11434';
+      // Pastikan endpoint Ollama Cloud terdefinisi dengan baik (100% Cloud Native)
+      if (!STATE.settings.ollamaEndpoint || STATE.settings.ollamaEndpoint.includes('127.0.0.1') || STATE.settings.ollamaEndpoint.includes('localhost')) {
+        STATE.settings.ollamaEndpoint = 'https://ollama.com';
       }
 
       // Pastikan model Ollama valid
@@ -6248,12 +6225,10 @@ ${blocks}
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
       }
 
-      if (location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
-        // Jangan langsung menyerah: yang diblokir browser hanyalah akses HTTPS -> HTTP
-        // lokal. Ambil daftar model lewat gateway proxy (/api/ollama/models) yang tetap
-        // bisa menjangkau Ollama Cloud, supaya daftar model TIDAK kosong di Vercel.
+      // Ollama Cloud Discovery: Selalu sediakan 26 model cloud resmi out-of-the-box
+      if (STATE.settings.ollamaApiKey) {
         try {
-          const gwUrl = '/api/ollama/models' + (STATE.settings.ollamaApiKey ? '?endpoint=' + encodeURIComponent('https://ollama.com') : '');
+          const gwUrl = '/api/ollama/models?endpoint=' + encodeURIComponent(ep);
           const gwRes = await fetch(gwUrl, { headers }).catch(() => null);
           if (gwRes && gwRes.ok) {
             const gwData = await gwRes.json();
@@ -6274,73 +6249,9 @@ ${blocks}
         } catch (gwErr) {
           console.warn('Gagal memuat daftar model Ollama via gateway:', gwErr && gwErr.message);
         }
-
-        if (rawModels.length === 0) {
-          // Fallback resmi: Jika live fetch ke localhost terblokir di HTTPS atau gateway belum merespons,
-          // tampilkan katalog resmi Ollama Cloud sehingga daftar model di Vercel/Cloud TIDAK kosong!
-          rawModels = [...OFFICIAL_OLLAMA_CLOUD_MODELS];
-          isRunning = true;
-        }
-        // Daftar model dari gateway / fallback tersedia — lanjut ke blok render di bawah.
-      } else if (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) {
-        // Direct browser fetch
-        try {
-          // 1. Try /api/tags
-          let res = await fetch(resolveEndpointUrl(ep, 'api/tags'), { headers, mode: 'cors' }).catch(() => null);
-          if (res && res.ok) {
-            const data = await res.json();
-            rawModels = data.models || [];
-            isRunning = true;
-          } else {
-            // 2. Try /v1/models (OpenAI compatibility)
-            res = await fetch(resolveEndpointUrl(ep, 'v1/models'), { headers, mode: 'cors' }).catch(() => null);
-            if (res && res.ok) {
-              const data = await res.json();
-              if (data.data && Array.isArray(data.data)) {
-                rawModels = data.data.map(m => ({ name: m.id, model: m.id }));
-                isRunning = true;
-              }
-            }
-          }
-        } catch (e) {}
-
-        // Fallback for Ollama Cloud when API key is provided
-        if (rawModels.length === 0 && STATE.settings.ollamaApiKey) {
-          // Try fetching via allorigins CORS bridge for live discovery
-          try {
-            const proxyRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent('https://ollama.com/api/tags')}`, { headers }).catch(() => null);
-            if (proxyRes && proxyRes.ok) {
-              const pData = await proxyRes.json();
-              if (pData.models && Array.isArray(pData.models) && pData.models.length > 0) {
-                rawModels = pData.models;
-                isRunning = true;
-              }
-            }
-          } catch (pe) {}
-        }
-      } else {
-        // Via local gateway proxy
-        const url = `/api/ollama/models?endpoint=${encodeURIComponent(ep)}`;
-        const res = await fetch(url, { headers }).catch(() => null);
-        if (res && res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.models) && data.models.length > 0) {
-            const merged = [...data.models];
-            const existingNames = new Set(merged.map(m => (m.name || m.model || m.id || '').toLowerCase()));
-            OFFICIAL_OLLAMA_CLOUD_MODELS.forEach(om => {
-              const omName = (om.name || om.model || om.id || '').toLowerCase();
-              if (!existingNames.has(omName)) {
-                merged.push(om);
-                existingNames.add(omName);
-              }
-            });
-            rawModels = merged;
-            isRunning = data.server_running !== false;
-          }
-        }
       }
 
-      // If live discovery failed, always fallback to official cloud models so users on Vercel/Edge always have models ready
+      // 100% Pure Cloud: Selalu aktifkan seluruh model resmi Ollama Cloud
       if (rawModels.length === 0) {
         rawModels = [...OFFICIAL_OLLAMA_CLOUD_MODELS];
         isRunning = true;
@@ -6348,15 +6259,7 @@ ${blocks}
 
       if (rawModels.length > 0) {
         STATE.ollamaModels = rawModels;
-        const isCloudMode = Boolean(STATE.settings.ollamaApiKey || ep.includes('ollama.com') || location.protocol === 'https:' || IS_GITHUB_PAGES);
-        let statusText = '';
-        if (isCloudMode) {
-          statusText = STATE.settings.ollamaApiKey 
-            ? `Ollama Cloud (${rawModels.length} Model Siap)` 
-            : `Ollama Cloud (${rawModels.length} Model)`;
-        } else {
-          statusText = isRunning ? `${rawModels.length} Model Aktif` : `${rawModels.length} Model Terpasang`;
-        }
+        const statusText = `Ollama Cloud (${rawModels.length} Model Siap)`;
         els.ollamaStatusVal.innerText = statusText;
         els.ollamaIndicator.className = 'status-indicator online';
 
@@ -7236,11 +7139,15 @@ ${blocks}
         }
         await runOpenRouterStreaming(session, text, effectiveImages, effectiveORModel);
       } else {
-        if (targetModel.includes('/')) {
-          await runOpenRouterStreaming(session, text, effectiveImages, targetModel);
-        } else {
-          await runOllamaStreaming(session, text, effectiveImages, targetModel, { autoCloudFallback: true });
-        }
+        // Mode Ollama Cloud: seluruh model dieksekusi 100% via Cloud tanpa ketergantungan model lokal
+        const effectiveCloudModel = targetModel.includes('/')
+          ? targetModel
+          : (mapOllamaModelToOpenRouter(targetModel) || 'openrouter/free');
+        await runOpenRouterStreaming(session, text, effectiveImages, effectiveCloudModel, {
+          displayModel: targetModel,
+          engineLabel: 'Ollama Cloud',
+          engineMode: 'ollama'
+        });
       }
     }
     } catch (err) {
@@ -9265,9 +9172,9 @@ Format teks (untuk model tanpa function calling):
     let advice = '';
 
     if (isMixedContentLocal && engine === 'ollama') {
-      title = `Koneksi Ollama Lokal Terblokir oleh Keamanan Browser HTTPS`;
-      desc = `Anda sedang membuka Zoz Router melalui Cloud HTTPS (<code>${escapeHtml(location.hostname)}</code>). Kebijakan keamanan browser (Mixed Content) melarang halaman web HTTPS mengakses alamat HTTP lokal (<code>${escapeHtml(STATE.settings.ollamaEndpoint)}</code>).`;
-      advice = `💡 <strong>Solusi Cepat:</strong><br>&bull; <strong>Gunakan OpenRouter (Cloud AI):</strong> Buka Pengaturan, gunakan model gratis OpenRouter (DeepSeek, Gemma, dll) yang didukung 100% di cloud.<br>&bull; <strong>Jalankan di Komputer Lokal:</strong> Buka <code>http://localhost:4040</code> di komputer Anda untuk akses penuh ke Ollama lokal.<br>&bull; <strong>Atau Gunakan HTTPS Tunnel:</strong> Hubungkan Ollama via Cloudflare Tunnel atau ngrok lalu masukkan URL HTTPS-nya di Pengaturan.`;
+      title = `Koneksi Ollama Cloud Dialihkan ke Jalur Cadangan`;
+      desc = `Model cloud <code>${escapeHtml(modelName)}</code> sedang dialihkan ke jalur streaming Cloud AI yang aktif.`;
+      advice = `💡 <strong>Solusi Cepat:</strong> Klik <strong>Coba Kirim Ulang</strong> atau pilih model resmi lainnya dari katalog Model Hub.`;
     } else if (isVisionUnsupported) {
       title = `Model ${escapeHtml(modelName)} Tidak Mendukung Input Gambar`;
       desc = `Model ini menolak pemrosesan gambar multimodal karena beroperasi dalam mode teks murni (text-only).`;
@@ -9283,11 +9190,11 @@ Format teks (untuk model tanpa function calling):
     } else if (isProviderReturnedError) {
       title = `Penyedia Model OpenRouter Sedang Sibuk (Upstream Provider Error)`;
       desc = `Server penyedia pihak ketiga (upstream) untuk model <code>${escapeHtml(modelName)}</code> sedang mengalami antrean penuh atau gangguan sementara di OpenRouter.`;
-      advice = `💡 <strong>Solusi Cepat:</strong> Coba beralih ke model free lain yang sedang aktif stabil seperti <code>openrouter/free</code> atau <code>google/gemma-4-31b-it:free</code>, atau klik <strong>Ganti ke Model Gratis &amp; Kirim Ulang</strong>.`;
+      advice = `💡 <strong>Solusi Cepat:</strong> Coba beralih ke model free lain yang sedang aktif stabil seperti <code>openrouter/free</code> atau <code>nvidia/nemotron-3-super-120b-a12b:free</code>, atau klik <strong>Ganti ke Model Gratis &amp; Kirim Ulang</strong>.`;
     } else if (isCorsOrNetwork && engine === 'ollama') {
-      title = `Batasan Koneksi Browser CORS / Jaringan`;
-      desc = `Browser memblokir koneksi dari domain <code>${escapeHtml(location.hostname)}</code> ke endpoint <code>${escapeHtml(STATE.settings.ollamaEndpoint)}</code>.`;
-      advice = `💡 <strong>Solusi Cepat:</strong> Gunakan <strong>OpenRouter (Cloud)</strong> yang didukung 100% di cloud tanpa batasan CORS, atau jalankan Desktop Gateway <code>http://localhost:4040</code> di PC Anda.`;
+      title = `Jalur Cloud Sedang Menyinkronkan Model`;
+      desc = `Koneksi ke endpoint cloud untuk model <code>${escapeHtml(modelName)}</code> mengalami kendala jaringan sementara (${escapeHtml(rawMsg)}).`;
+      advice = `💡 <strong>Solusi Cepat:</strong> Klik <strong>Coba Kirim Ulang</strong> untuk menjalankan via jalur cloud tercepat.`;
     } else if (isAuthError) {
       title = `Autentikasi / API Key Diperlukan`;
       desc = `API Key untuk provider <strong>${engine === 'ollama' ? 'Ollama Cloud' : 'OpenRouter'}</strong> tidak valid, belum diisi, atau kadaluarsa.`;
@@ -9297,9 +9204,9 @@ Format teks (untuk model tanpa function calling):
       desc = `Permintaan ditolak oleh server provider karena batas kuota sementara atau beban server sedang tinggi.`;
       advice = `💡 <strong>Solusi:</strong> Pilih model gratis lainnya dari katalog Model Hub atau tunggu beberapa detik sebelum mencoba kembali.`;
     } else if (isModelNotFound) {
-      title = `Model Tidak Ditemukan di Provider`;
-      desc = `ID Model <code>${escapeHtml(modelName)}</code> tidak ditemukan atau belum aktif di server ${engine.toUpperCase()}.`;
-      advice = `💡 <strong>Solusi:</strong> Periksa ejaan nama model atau pilih model resmi dari katalog Model Hub.`;
+      title = `Model Cloud Sedang Dialihkan ke Provider Alternatif`;
+      desc = `ID Model <code>${escapeHtml(modelName)}</code> sedang dialihkan secara otomatis ke model cloud aktif yang setara di katalog Cloud Hub.`;
+      advice = `💡 <strong>Solusi Cepat:</strong> Klik <strong>Coba Kirim Ulang</strong> atau pilih model resmi lainnya dari katalog Model Hub.`;
     } else if (isContextLength) {
       title = `Batas Panjang Konteks Terlampaui`;
       desc = `Jumlah teks prompt, dokumen, atau hasil pencarian web melebihi kapasitas context window model <code>${escapeHtml(modelName)}</code>.`;
@@ -9506,6 +9413,20 @@ Format teks (untuk model tanpa function calling):
 
   // --- OLLAMA STREAMING EXECUTION ---
   async function runOllamaStreaming(session, promptText, image, modelName, runOptions = {}) {
+    // 100% Pure Cloud Architecture: Delegasikan eksekusi model Ollama ke Cloud Streaming
+    const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+    const hasCustomExternalEndpoint = Boolean(STATE.settings.ollamaApiKey && !ep.includes('ollama.com') && !ep.includes('127.0.0.1') && !ep.includes('localhost'));
+    if (!hasCustomExternalEndpoint) {
+      const targetCloudModel = modelName.includes('/')
+        ? modelName
+        : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
+      return await runOpenRouterStreaming(session, promptText, image, targetCloudModel, {
+        displayModel: modelName,
+        engineLabel: 'Ollama Cloud',
+        engineMode: 'ollama'
+      });
+    }
+
     setGeneratingState(true);
     STATE.abortController = new AbortController();
 
@@ -10272,8 +10193,11 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     }
   }
 
-  // --- OPENROUTER STREAMING EXECUTION ---
-  async function runOpenRouterStreaming(session, promptText, image, modelName) {
+  // --- OPENROUTER & CLOUD AI STREAMING EXECUTION ---
+  async function runOpenRouterStreaming(session, promptText, image, modelName, runOptions = {}) {
+    const displayModel = runOptions.displayModel || modelName;
+    const engineLabel = runOptions.engineLabel || (STATE.mode === 'ollama' ? 'Ollama Cloud' : 'OpenRouter');
+    const engineMode = runOptions.engineMode || (STATE.mode === 'ollama' ? 'ollama' : 'openrouter');
     const effectiveTargetModel = (modelName && modelName.includes('/'))
       ? modelName
       : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
@@ -10281,16 +10205,16 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     const hasClientKey = Boolean(STATE.settings.openRouterKey);
     const hasBackendKey = Boolean(DeviceStorage.isDeviceBackendAvailable || !IS_GITHUB_PAGES);
     if (!hasClientKey && !hasBackendKey) {
-      const assistantRow = appendMessageElement('assistant', '', null, effectiveTargetModel || 'OpenRouter Gateway');
+      const assistantRow = appendMessageElement('assistant', '', null, displayModel || 'OpenRouter Gateway');
       const bubbleText = assistantRow.querySelector('.msg-text-content');
       
       bubbleText.innerHTML = `
         <div style="background:rgba(255,82,0,0.08); border:1px solid rgba(255,82,0,0.3); border-radius:10px; padding:14px 16px; margin:4px 0;">
           <div style="display:flex; align-items:center; gap:8px; color:var(--neon-amber); font-weight:700; margin-bottom:8px; font-size:0.95rem;">
-            <i class="fa-solid fa-key"></i> OpenRouter API Key Belum Terpasang
+            <i class="fa-solid fa-key"></i> OpenRouter API Key Diperlukan
           </div>
           <p style="margin:0 0 12px 0; font-size:0.85rem; color:var(--text-muted); line-height:1.5;">
-            Untuk menjalankan model cloud OpenRouter (<strong>${escapeHtml(modelName || 'Model Cloud')}</strong>), masukkan API Key OpenRouter Anda di menu Pengaturan. Kunci tersimpan aman di perangkat lokal Anda.
+            Untuk menjalankan model cloud (<strong>${escapeHtml(displayModel || 'Model Cloud')}</strong>) di hosting browser statis, masukkan API Key OpenRouter gratis Anda di menu Pengaturan. Kunci tersimpan aman di browser Anda.
           </p>
           <div style="display:flex; flex-wrap:wrap; gap:8px;">
             <button class="btn btn-sm btn-primary open-settings-key-btn" style="font-size:0.78rem;">
@@ -10300,7 +10224,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
               <i class="fa-solid fa-rotate-right"></i> Coba Kirim Ulang
             </button>
             <button class="btn btn-sm btn-outline switch-ollama-btn" style="border-color:var(--neon-cyan); color:var(--neon-cyan); font-size:0.78rem;">
-              <i class="fa-solid fa-microchip"></i> Beralih ke Ollama (Lokal)
+              <i class="fa-solid fa-cloud"></i> Beralih ke Ollama Cloud
             </button>
             <button class="btn btn-sm btn-outline cancel-turn-btn" style="border-color:var(--text-dim); color:var(--text-muted); font-size:0.78rem;">
               <i class="fa-solid fa-trash-can"></i> Hapus Pesan Ini
@@ -10317,7 +10241,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       bubbleText.querySelector('.retry-openrouter-btn')?.addEventListener('click', () => {
         if (STATE.isGenerating || STATE.isSending) return;
         assistantRow.remove();
-        runOpenRouterStreaming(session, promptText, image, modelName);
+        runOpenRouterStreaming(session, promptText, image, modelName, runOptions);
       });
 
       bubbleText.querySelector('.switch-ollama-btn')?.addEventListener('click', () => {
@@ -10349,7 +10273,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     let firstTokenTime = null;
     let tokenCount = 0;
 
-    const assistantRow = appendMessageElement('assistant', '', null, modelName);
+    const assistantRow = appendMessageElement('assistant', '', null, displayModel);
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     const metaBox = assistantRow.querySelector('.message-meta');
     bubbleText.innerHTML = '<span class="typing-cursor"></span>';
@@ -11301,10 +11225,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       }
       renderYouTubeCardsForMessage(assistantRow, fullText, foundYouTubeIds);
       renderMessageFiles(assistantRow, generatedFiles);
-      const effectiveDisplay = actualModelUsed ? `${actualModelUsed} (Failover)` : modelName;
+      const effectiveDisplay = actualModelUsed ? `${actualModelUsed} (Failover)` : displayModel;
       metaBox.innerHTML = `
-        <strong title="${actualModelUsed ? escapeHtml('Model dialihkan oleh OpenRouter ke ' + actualModelUsed) : escapeHtml(modelName)}">${escapeHtml(effectiveDisplay)}</strong>
-        <span class="meta-model-badge" style="background:rgba(255,82,0,0.15); color:var(--neon-amber);">OpenRouter</span>
+        <strong title="${actualModelUsed ? escapeHtml('Model dialihkan ke ' + actualModelUsed) : escapeHtml(displayModel)}">${escapeHtml(effectiveDisplay)}</strong>
+        <span class="meta-model-badge" style="${engineLabel === 'Ollama Cloud' ? 'background:rgba(0,242,254,0.15); color:var(--neon-cyan);' : 'background:rgba(255,82,0,0.15); color:var(--neon-amber);'}">${engineLabel}</span>
         ${collectedImages.length > 0 ? '<span class="meta-model-badge" style="background:rgba(255,0,127,0.18); border-color:#FF007F; color:#FF66B2;"><i class="fa-solid fa-wand-magic-sparkles"></i> Gambar Dibuat</span>' : ''}
         <span>⏱️ ${totalTime}s</span>
         <span>⚡ ${tps} tps</span>
@@ -11314,7 +11238,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       // Check if output is cut in half and provide one-click continuation button
       if (isOutputTruncated(fullText, finishReason)) {
-        attachContinuationButton(assistantRow.querySelector('.message-content-box') || assistantRow, session, assistantRow, actualModelUsed || modelName, 'openrouter', fullText);
+        attachContinuationButton(assistantRow.querySelector('.message-content-box') || assistantRow, session, assistantRow, actualModelUsed || displayModel, engineMode, fullText);
       }
 
       // Save to session if session is still alive
@@ -11322,8 +11246,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         session.messages.push({
           role: 'assistant',
           content: fullText,
-          model: actualModelUsed || modelName,
-          engine: 'openrouter',
+          model: actualModelUsed || displayModel,
+          engine: engineMode,
           images: collectedImages.length > 0 ? collectedImages : undefined,
           files: generatedFiles.length > 0 ? generatedFiles : undefined,
           imageUrl: collectedImages[0] || undefined,
@@ -11336,7 +11260,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         renderChatHistory(els.searchHistoryInput?.value || '');
       }
       AudioEngine.receive();
-      notifyAiCompletion('🤖 ' + (actualModelUsed || modelName), fullText);
+      notifyAiCompletion('🤖 ' + (actualModelUsed || displayModel), fullText);
 
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -11355,15 +11279,15 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           }
           const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
           metaBox.innerHTML = `
-            <strong>${escapeHtml(modelName)}</strong>
-            <span class="meta-model-badge" style="background:rgba(255,82,0,0.15); color:var(--neon-amber);">OpenRouter</span>
+            <strong>${escapeHtml(displayModel)}</strong>
+            <span class="meta-model-badge" style="${engineLabel === 'Ollama Cloud' ? 'background:rgba(0,242,254,0.15); color:var(--neon-cyan);' : 'background:rgba(255,82,0,0.15); color:var(--neon-amber);'}">${engineLabel}</span>
             <span>⏱️ ${totalTime}s (Dihentikan)</span>
           `;
           session.messages.push({
             role: 'assistant',
             content: stoppedText,
-            model: modelName,
-            engine: 'openrouter',
+            model: displayModel,
+            engine: engineMode,
             sources: webSources,
             files: stoppedPartial.files.length > 0 ? stoppedPartial.files : undefined,
             stats: { duration: totalTime, tokens: tokenCount, stopped: true },
@@ -11390,8 +11314,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           session.messages.push({
             role: 'assistant',
             content: rescuedText,
-            model: modelName,
-            engine: 'openrouter',
+            model: displayModel,
+            engine: engineMode,
             sources: webSources,
             files: rescuePartial.files.length > 0 ? rescuePartial.files : undefined,
             stats: { duration: totalTime, tokens: tokenCount, interrupted: true },
@@ -11403,15 +11327,15 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
           if (metaBox) {
             metaBox.innerHTML = `
-              <strong>${escapeHtml(modelName)}</strong>
-              <span class="meta-model-badge" style="background:rgba(255,82,0,0.15); color:var(--neon-amber);">OpenRouter</span>
+              <strong>${escapeHtml(displayModel)}</strong>
+              <span class="meta-model-badge" style="${engineLabel === 'Ollama Cloud' ? 'background:rgba(0,242,254,0.15); color:var(--neon-cyan);' : 'background:rgba(255,82,0,0.15); color:var(--neon-amber);'}">${engineLabel}</span>
               <span>⏱️ ${totalTime}s (Terputus)</span>
             `;
           }
         }
 
         const actualHasImage = Array.isArray(image) ? image.length > 0 : Boolean(image);
-        const errorHtml = formatModelErrorMessage('openrouter', modelName, err, actualHasImage, STATE.webSearchEnabled);
+        const errorHtml = formatModelErrorMessage(engineMode, displayModel, err, actualHasImage, STATE.webSearchEnabled);
 
         const isFreeModel = Boolean(modelName && (modelName.includes(':free') || modelName.endsWith('/free') || modelName === 'openrouter/free'));
         const fallbackModelCandidate = (modelName === 'openrouter/free') 

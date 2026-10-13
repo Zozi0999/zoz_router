@@ -675,17 +675,17 @@
                   <span class="music-model-header-tag" id="musicModelHeaderTag">Neural Composer</span>
                 </div>
 
-                <!-- Tab Switcher Nav: Ollama (Lokal) vs OpenRouter (Cloud) -->
+                <!-- Tab Switcher Nav: Ollama Cloud vs OpenRouter (Cloud) -->
                 <div class="music-model-tabs-nav" id="musicModelTabsNav">
                   <button class="music-model-tab-btn active" id="tabBtnMusicOllama" type="button" data-tab="ollama">
-                    <i class="fa-solid fa-microchip"></i> Ollama (Lokal)
+                    <i class="fa-solid fa-cloud"></i> Ollama Cloud
                   </button>
                   <button class="music-model-tab-btn" id="tabBtnMusicOpenRouter" type="button" data-tab="openrouter">
                     <i class="fa-solid fa-cloud"></i> OpenRouter (Cloud)
                   </button>
                 </div>
 
-                <!-- PANE 1: OLLAMA (LOKAL) -->
+                <!-- PANE 1: OLLAMA CLOUD -->
                 <div class="music-model-tab-pane" id="paneMusicOllama">
                   <!-- Nonaktif (Mode Obrolan Biasa) -->
                   <button class="music-model-item" id="musicModelOptionOff" type="button" data-model="off">
@@ -700,13 +700,13 @@
                   </button>
 
                   <div class="music-model-section-divider">
-                    <span>Model Resmi Ollama (<span id="musicOllamaCountText">Memuat...</span>)</span>
+                    <span>Model Resmi Ollama Cloud (<span id="musicOllamaCountText">Memuat...</span>)</span>
                   </div>
 
-                  <!-- Pencarian Model Ollama -->
+                  <!-- Pencarian Model Ollama Cloud -->
                   <div class="music-model-search-box">
                     <i class="fa-solid fa-magnifying-glass search-box-icon"></i>
-                    <input type="text" id="musicOllamaSearchInput" class="music-model-search-input" placeholder="Cari model Ollama lokal..." autocomplete="off" />
+                    <input type="text" id="musicOllamaSearchInput" class="music-model-search-input" placeholder="Cari model Ollama Cloud..." autocomplete="off" />
                   </div>
 
                   <!-- Dynamic list of Ollama installed models -->
@@ -914,7 +914,7 @@
           <div class="form-group">
             <label for="settingMusicModel"><i class="fa-solid fa-music"></i> Model AI Musik Studio (Default)</label>
             <input type="text" id="settingMusicModel" placeholder="qwen2.5:1.5b atau vendor/model..." value="qwen2.5:1.5b">
-            <small class="form-hint">Model Ollama lokal (misal: <code>qwen2.5:1.5b</code>) atau OpenRouter cloud (misal: <code>google/gemini-2.0-flash-exp:free</code>).</small>
+            <small class="form-hint">Model Ollama Cloud (misal: <code>qwen2.5:1.5b</code>) atau OpenRouter cloud (misal: <code>google/gemini-2.0-flash-exp:free</code>).</small>
           </div>
         </div>
 
@@ -1408,8 +1408,8 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261013_v232" defer></script>
+  <script src="text-safety.js?v=20261013_v233" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261013_v232" defer></script>
+  <script src="app.js?v=20261013_v233" defer></script>
 </body>
 </html>
