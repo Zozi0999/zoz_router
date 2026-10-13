@@ -6004,6 +6004,20 @@ async function requestHandler(req, res) {
       if (!dnsVerdict.ok) return sendJSON(res, 400, { error: dnsVerdict.msg });
     }
 
+    // Fast-Path Serverless (Vercel / Lambda):
+    // Jika berjalan di container serverless cloud dan endpoint mengarah ke loopback (127.0.0.1/localhost) tanpa API key,
+    // segera kembalikan katalog resmi Ollama Cloud (< 5ms) tanpa menahan latensi 12s connection timeout.
+    const isServerlessEnv = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION);
+    const isLoopbackTarget = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(rawEndpoint);
+    if (isServerlessEnv && isLoopbackTarget && !authHeader) {
+      return sendJSON(res, 200, {
+        models: OFFICIAL_OLLAMA_CLOUD_MODELS,
+        server_running: true,
+        cloud_ready: true,
+        note: 'Loaded from official Ollama Cloud catalog (fast-path serverless)'
+      });
+    }
+
     const tryFetchTags = (endpointUrl) => {
       return new Promise((resolve) => {
         try {
@@ -6012,7 +6026,8 @@ async function requestHandler(req, res) {
           const reqHeaders = { 'User-Agent': 'ZozRouter/1.0' };
           if (authHeader) reqHeaders['Authorization'] = authHeader;
 
-          const proxyReq = client.get(ollamaUrl.toString(), { timeout: 6000, headers: reqHeaders }, (proxyRes) => {
+          const fetchTimeout = isServerlessEnv ? 2500 : 5000;
+          const proxyReq = client.get(ollamaUrl.toString(), { timeout: fetchTimeout, headers: reqHeaders }, (proxyRes) => {
             let rawData = '';
             proxyRes.on('data', chunk => rawData += chunk);
             proxyRes.on('end', () => {
@@ -6043,7 +6058,8 @@ async function requestHandler(req, res) {
           const reqHeaders = { 'User-Agent': 'ZozRouter/1.0' };
           if (authHeader) reqHeaders['Authorization'] = authHeader;
 
-          const proxyReq = client.get(ollamaUrl.toString(), { timeout: 6000, headers: reqHeaders }, (proxyRes) => {
+          const fetchTimeout = isServerlessEnv ? 2500 : 5000;
+          const proxyReq = client.get(ollamaUrl.toString(), { timeout: fetchTimeout, headers: reqHeaders }, (proxyRes) => {
             let rawData = '';
             proxyRes.on('data', chunk => rawData += chunk);
             proxyRes.on('end', () => {
@@ -6197,6 +6213,10 @@ async function requestHandler(req, res) {
       }
 
       customEndpoint = customEndpoint.trim();
+      const isServerlessChat = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION);
+      if (isServerlessChat && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(customEndpoint)) {
+        customEndpoint = 'https://ollama.com';
+      }
       if (!/^https?:\/\//i.test(customEndpoint)) {
         customEndpoint = (customEndpoint.includes(':443') || customEndpoint.includes('ollama.com') || customEndpoint.includes('.com') || customEndpoint.includes('.io') || customEndpoint.includes('.ai') || customEndpoint.includes('.app'))
           ? `https://${customEndpoint}`

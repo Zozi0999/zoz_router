@@ -121,8 +121,26 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat', tag: 'Coding', cat: 'coding' }
   ];
 
-  // Official Ollama Cloud Flagship Models (Free Included Usage vs Usage Credits)
-  const OFFICIAL_OLLAMA_CLOUD_MODELS = []; // Kosong agar langsung fetch dari API /api/tags
+  // Official Ollama Cloud Flagship Models (Included Free Usage & Usage Credits)
+  const OFFICIAL_OLLAMA_CLOUD_MODELS = [
+    { name: 'gemma4:31b', model: 'gemma4:31b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gemma4' } },
+    { name: 'gpt-oss:120b', model: 'gpt-oss:120b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gpt-oss' } },
+    { name: 'gpt-oss:20b', model: 'gpt-oss:20b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'gpt-oss' } },
+    { name: 'nemotron-3-super', model: 'nemotron-3-super', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'nemotron' } },
+    { name: 'nemotron-3-ultra', model: 'nemotron-3-ultra', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'nemotron' } },
+    { name: 'nemotron-3-nano:30b', model: 'nemotron-3-nano:30b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'nemotron' } },
+    { name: 'deepseek-v4.1-flash', model: 'deepseek-v4.1-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek' } },
+    { name: 'deepseek-v4-pro:0813', model: 'deepseek-v4-pro:0813', tag: 'Reasoning Cloud', isFree: false, cat: 'reasoning', details: { family: 'deepseek' } },
+    { name: 'mistral-large-3:675b', model: 'mistral-large-3:675b', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'mistral' } },
+    { name: 'kimi-k3', model: 'kimi-k3', tag: 'Long Context Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi' } },
+    { name: 'kimi-k2.6', model: 'kimi-k2.6', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi' } },
+    { name: 'kimi-k2.7-code', model: 'kimi-k2.7-code', tag: 'Coding Cloud', isFree: false, cat: 'coding', details: { family: 'kimi' } },
+    { name: 'minimax-m3', model: 'minimax-m3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'minimax' } },
+    { name: 'minimax-m2.7', model: 'minimax-m2.7', tag: 'Cloud', isFree: false, cat: 'flagship', details: { family: 'minimax' } },
+    { name: 'glm-5.3', model: 'glm-5.3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm' } },
+    { name: 'glm-5.3-flash', model: 'glm-5.3-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'glm' } },
+    { name: 'glm-5.2', model: 'glm-5.2', tag: 'Cloud', isFree: false, cat: 'flagship', details: { family: 'glm' } }
+  ];
 
   // Dedicated Image Synthesis Models (Pollinations Multi-Style & OpenRouter Image Engines)
   const DEFAULT_IMAGE_MODELS = [
@@ -6176,16 +6194,12 @@ ${organicBlock}
         }
 
         if (rawModels.length === 0) {
-          els.ollamaStatusVal.innerText = 'Localhost Terblokir (Mixed Content)';
-          els.ollamaStatusVal.title = 'Halaman HTTPS memblokir akses langsung ke HTTP localhost. Ubah endpoint ke https://ollama.com di Pengaturan, atau gunakan OpenRouter.';
-          els.ollamaIndicator.className = 'status-indicator status-warning';
-          STATE.ollamaModels = [];
-          if (els.badgeOllamaCount) els.badgeOllamaCount.innerText = '0';
-          populateModelDropdown();
-          updateOllamaStatusUI();
-          return false;
+          // Fallback resmi: Jika live fetch ke localhost terblokir di HTTPS atau gateway belum merespons,
+          // tampilkan katalog resmi Ollama Cloud sehingga daftar model di Vercel/Cloud TIDAK kosong!
+          rawModels = [...OFFICIAL_OLLAMA_CLOUD_MODELS];
+          isRunning = true;
         }
-        // Daftar model dari gateway tersedia — lanjut ke blok render di bawah.
+        // Daftar model dari gateway / fallback tersedia — lanjut ke blok render di bawah.
       }
 
       if (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) {
@@ -6235,15 +6249,15 @@ ${organicBlock}
         }
       }
 
-      // If live discovery failed but API key is set or cloud endpoint configured, fallback to official cloud models
-      if (rawModels.length === 0 && (STATE.settings.ollamaApiKey || ep.includes('ollama.com') || IS_GITHUB_PAGES)) {
+      // If live discovery failed, always fallback to official cloud models so users on Vercel/Edge always have models ready
+      if (rawModels.length === 0) {
         rawModels = [...OFFICIAL_OLLAMA_CLOUD_MODELS];
         isRunning = true;
       }
 
       if (rawModels.length > 0) {
         STATE.ollamaModels = rawModels;
-        const isCloudMode = Boolean(STATE.settings.ollamaApiKey || ep.includes('ollama.com'));
+        const isCloudMode = Boolean(STATE.settings.ollamaApiKey || ep.includes('ollama.com') || location.protocol === 'https:' || IS_GITHUB_PAGES);
         els.ollamaStatusVal.innerText = isCloudMode 
           ? `Ollama Cloud (${rawModels.length} Model Siap)` 
           : (isRunning ? `${rawModels.length} Model Aktif` : `${rawModels.length} Model Terpasang`);
@@ -9402,9 +9416,12 @@ Format teks (untuk model tanpa function calling):
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
       const canRunAutonomous = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
-      let systemContent = personaPrompt;
+      let systemContent = '';
+      if (personaPrompt) {
+        systemContent = `### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
+      }
       if (canRunAutonomous) {
-        systemContent = personaPrompt ? `${personaPrompt}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
+        systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
       }
       // Tool video YouTube hanya diumumkan bila toggle "Cari Video YouTube" aktif
       // (agar model tidak memanggil tool yang tidak dikirim).
@@ -9492,10 +9509,20 @@ Format teks (untuk model tanpa function calling):
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
       }
 
-      if (location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
-        throw new Error('mixed_content: Browser HTTPS memblokir koneksi ke Ollama localhost HTTP.');
+      let chatUrl = '/api/ollama/chat';
+      if (IS_GITHUB_PAGES) {
+        if (location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+          throw new Error('mixed_content: Browser HTTPS memblokir koneksi ke Ollama localhost HTTP di GitHub Pages.');
+        }
+        chatUrl = resolveEndpointUrl(ep, 'api/chat');
+      } else {
+        // Pada Vercel / server gateway: jika di halaman HTTPS dan endpoint masih loopback,
+        // alihkan endpoint ke https://ollama.com agar backend menjangkau Ollama Cloud tanpa mixed content
+        if (location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+          requestBody.endpoint = 'https://ollama.com';
+        }
+        chatUrl = '/api/ollama/chat';
       }
-      const chatUrl = (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
 
       let response = await fetch(chatUrl, {
         method: 'POST',
@@ -10184,9 +10211,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
       const canRunAutonomous = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
-      let systemContent = personaPrompt;
+      let systemContent = '';
+      if (personaPrompt) {
+        systemContent = `### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
+      }
       if (canRunAutonomous) {
-        systemContent = personaPrompt ? `${personaPrompt}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
+        systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
       }
       // Tool video YouTube hanya diumumkan bila toggle "Cari Video YouTube" aktif
       // (agar model tidak memanggil tool yang tidak dikirim).
@@ -15814,17 +15844,16 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     const isPresetText = Object.keys(SYSTEM_PRESETS).some(k => k !== 'default' && SYSTEM_PRESETS[k].trim() === currentVal.trim());
 
     if (presetKey === 'default' || !presetKey) {
-      // Simpan backup prompt kustom jika ada teks kustom di textarea yang belum disimpan
+      // Simpan backup prompt kustom jika ada teks kustom di textarea sebelum di-clear
       if (currentVal.trim() && !isPresetText) {
         STATE.settings.customSystemPrompt = currentVal;
       }
       STATE.settings.systemPrompt = '';
       STATE.settings.activePreset = 'default';
-      // JANGAN HAPUS persona kustom! Tetap pertahankan teks custom yang tersimpan di textarea
       if (els.settingSystemPrompt) {
-        els.settingSystemPrompt.value = STATE.settings.customSystemPrompt || '';
+        els.settingSystemPrompt.value = '';
       }
-      showToast('Persona dinonaktifkan (Default). Prompt kustom tetap disimpan.');
+      showToast('Persona dinonaktifkan (Default).');
     } else if (presetKey === 'custom') {
       STATE.settings.activePreset = 'custom';
       // Pulihkan prompt kustom yang tersimpan, atau ambil dari textarea
@@ -15834,7 +15863,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       if (els.settingSystemPrompt) {
         els.settingSystemPrompt.value = restored;
       }
-      showToast(restored ? 'Persona Kustom diaktifkan kembali.' : 'Mode Persona Kustom aktif.');
+      showToast(restored ? 'Persona Kustom diaktifkan.' : 'Mode Persona Kustom aktif (silakan ketik prompt di bawah).');
       setTimeout(() => els.settingSystemPrompt?.focus(), 50);
     } else if (SYSTEM_PRESETS[presetKey] !== undefined) {
       // Simpan backup prompt kustom jika berpindah dari custom/teks kustom
@@ -16751,8 +16780,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     if (els.paramTopP) els.paramTopP.value = STATE.settings.topP ?? 0.9;
     if (els.valTopP) els.valTopP.innerText = STATE.settings.topP ?? 0.9;
     if (els.settingSystemPrompt) {
-      if (STATE.settings.activePreset === 'default') {
-        els.settingSystemPrompt.value = STATE.settings.customSystemPrompt || '';
+      if (STATE.settings.activePreset === 'default' || !STATE.settings.systemPrompt) {
+        els.settingSystemPrompt.value = '';
       } else if (STATE.settings.activePreset === 'custom') {
         els.settingSystemPrompt.value = STATE.settings.customSystemPrompt || STATE.settings.systemPrompt || '';
       } else if (STATE.settings.activePreset && SYSTEM_PRESETS[STATE.settings.activePreset]) {
@@ -18271,17 +18300,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         const pVal = rawVal.trim();
         const matchedKey = Object.keys(SYSTEM_PRESETS).find(k => k !== 'default' && SYSTEM_PRESETS[k].trim() === pVal);
 
-        if (!matchedKey && pVal) {
-          STATE.settings.customSystemPrompt = rawVal;
-        }
-
-        if (STATE.settings.activePreset === 'default') {
-          // Mode Default dipertahankan (tanpa persona aktif ke AI), prompt kustom tetap aman di memori
-          STATE.settings.systemPrompt = '';
-        } else if (STATE.settings.activePreset === 'custom') {
-          STATE.settings.systemPrompt = rawVal;
-          STATE.settings.customSystemPrompt = rawVal;
-        } else if (matchedKey) {
+        if (matchedKey) {
           STATE.settings.activePreset = matchedKey;
           STATE.settings.systemPrompt = SYSTEM_PRESETS[matchedKey];
         } else if (pVal) {

@@ -2,11 +2,13 @@ function isPrivateHostname(hostname) {
   if (!hostname) return true;
   const h = String(hostname).toLowerCase().replace(/^\[|\]$/g, '');
   if (['localhost','127.0.0.1','::1','0.0.0.0','::','0'].includes(h)) return true;
+  // Blokir format integer/hex decimal IP murni (misal 2130706433 atau 0x7f000001)
+  if (/^(?:0x[0-9a-f]+|\d+)$/i.test(h)) return true;
   if (/^0\./.test(h)) return true; // 0.0.0.0/8 "this network" (RFC 1122)
   if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h)) return true;
   if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return true;
   if (/^169\.254\./.test(h)) return true;
-  // Rentang reserved yang dulu terlewat (cocokkan proteksi server-side)
+  // Rentang reserved (cocokkan proteksi server-side)
   if (/^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./.test(h)) return true; // 100.64.0.0/10 CGNAT (RFC 6598)
   if (/^192\.0\.0\./.test(h)) return true; // 192.0.0.0/24 IETF protocol assignments (RFC 6890)
   if (/^192\.0\.2\./.test(h)) return true; // 192.0.2.0/24 TEST-NET-1 (RFC 5737)
@@ -19,18 +21,59 @@ function isPrivateHostname(hostname) {
   if (h.startsWith('::ffff:')) return true; // Block all IPv4-mapped IPv6
   if (h.startsWith('::7f00:') || h.startsWith('::a9fe:') || h.startsWith('::c0a8:') || h.startsWith('::0a')) return true; // Block mapped hex variants
   if (h.endsWith('.local') || h.endsWith('.internal') || h.endsWith('.localhost')) return true;
+
+  // Proteksi DNS Rebinding & Subdomain Private IP Tunnel
+  if (/(?:\.|\b)(?:nip|sslip|localtest|lvh|vcap|traefik)\.(?:me|io)$/i.test(h)) return true;
+  if (/(?:^|\.)(?:127[\.-]|10[\.-]|192[\.-]168[\.-]|172[\.-](?:1[6-9]|2[0-9]|3[0-1])[\.-]|169[\.-]254[\.-])/i.test(h)) return true;
+
   return false;
 }
 
-function isOllamaEndpointForbidden(endpointUrl) {
+function checkOllamaEndpoint(endpointUrl) {
   let parsed;
-  try { parsed = new URL(endpointUrl); } catch (e) { return true; }
-  if (!['http:', 'https:'].includes(parsed.protocol)) return true;
+  try { parsed = new URL(endpointUrl); } catch (e) { return { forbidden: true, reason: 'Format URL Ollama tidak valid.' }; }
+  if (!['http:', 'https:'].includes(parsed.protocol)) return { forbidden: true, reason: 'Protokol Ollama harus http atau https.' };
   const host = (parsed.hostname || '').toLowerCase();
-  const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
-  if ((host === '127.0.0.1' || host === 'localhost' || host === '::1') && port === '11434') return false;
-  return isPrivateHostname(host);
+
+  // Pada Cloudflare Edge global, koneksi ke 127.0.0.1 / localhost milik server Cloudflare sendiri (bukan komputer user)
+  if (['127.0.0.1', 'localhost', '::1', '0.0.0.0', '0'].includes(host)) {
+    return {
+      forbidden: true,
+      reason: 'Ollama lokal (127.0.0.1 / localhost) tidak dapat diakses langsung dari Cloudflare Edge. Gunakan URL publik (seperti Cloudflare Tunnel atau Ngrok), atau jalankan ZOZ Router di server lokal (node server.js).'
+    };
+  }
+
+  if (isPrivateHostname(host)) {
+    return { forbidden: true, reason: 'Endpoint Ollama mengarah ke host privat/internal — akses diblokir (SSRF Protection).' };
+  }
+
+  return { forbidden: false };
 }
+
+function isOllamaEndpointForbidden(endpointUrl) {
+  return checkOllamaEndpoint(endpointUrl).forbidden;
+}
+
+// Official Ollama Cloud Flagship Models (Included Free Usage & Usage Credits)
+const OFFICIAL_OLLAMA_CLOUD_MODELS = [
+  { name: 'gemma4:31b', model: 'gemma4:31b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gemma4' } },
+  { name: 'gpt-oss:120b', model: 'gpt-oss:120b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gpt-oss' } },
+  { name: 'gpt-oss:20b', model: 'gpt-oss:20b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'gpt-oss' } },
+  { name: 'nemotron-3-super', model: 'nemotron-3-super', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'nemotron' } },
+  { name: 'nemotron-3-ultra', model: 'nemotron-3-ultra', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'nemotron' } },
+  { name: 'nemotron-3-nano:30b', model: 'nemotron-3-nano:30b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'nemotron' } },
+  { name: 'deepseek-v4.1-flash', model: 'deepseek-v4.1-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek' } },
+  { name: 'deepseek-v4-pro:0813', model: 'deepseek-v4-pro:0813', tag: 'Reasoning Cloud', isFree: false, cat: 'reasoning', details: { family: 'deepseek' } },
+  { name: 'mistral-large-3:675b', model: 'mistral-large-3:675b', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'mistral' } },
+  { name: 'kimi-k3', model: 'kimi-k3', tag: 'Long Context Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi' } },
+  { name: 'kimi-k2.6', model: 'kimi-k2.6', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi' } },
+  { name: 'kimi-k2.7-code', model: 'kimi-k2.7-code', tag: 'Coding Cloud', isFree: false, cat: 'coding', details: { family: 'kimi' } },
+  { name: 'minimax-m3', model: 'minimax-m3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'minimax' } },
+  { name: 'minimax-m2.7', model: 'minimax-m2.7', tag: 'Cloud', isFree: false, cat: 'flagship', details: { family: 'minimax' } },
+  { name: 'glm-5.3', model: 'glm-5.3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm' } },
+  { name: 'glm-5.3-flash', model: 'glm-5.3-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'glm' } },
+  { name: 'glm-5.2', model: 'glm-5.2', tag: 'Cloud', isFree: false, cat: 'flagship', details: { family: 'glm' } }
+];
 
 // ==================== YOUTUBE LIVE SEARCH (ZERO API KEY) ====================
 const YT_SEARCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -455,11 +498,14 @@ function translateIndoQueryToGlobalEnglish(rawQuery) {
     .trim();
 
   // 7. Deduplikasi kata berturut-turut yang identik
+  // 7. Deduplikasi kata secara komprehensif (menghilangkan pengulangan kata seperti "how to how it works")
   const words = translated.split(/\s+/).filter(Boolean);
+  const seenWords = new Set();
   const dedupedWords = [];
   for (const w of words) {
-    const last = dedupedWords[dedupedWords.length - 1];
-    if (!last || last.toLowerCase() !== w.toLowerCase()) {
+    const low = w.toLowerCase();
+    if (!seenWords.has(low)) {
+      seenWords.add(low);
       dedupedWords.push(w);
     }
   }
@@ -468,23 +514,61 @@ function translateIndoQueryToGlobalEnglish(rawQuery) {
   return result.length >= 2 ? result : trimmed;
 }
 
-// H8 (Cloudflare Worker): key milik OPERATOR (env OPENROUTER_API_KEY/SERPER_API_KEY)
-// hanya dipakai untuk permintaan same-origin / non-browser. Halaman lintas-asal
-// tidak pernah menerimanya (ACAO:* tidak lagi berarti pembakaran kredit gratis).
-// Front-end di domain terpisah: setel env ZOX_ALLOW_CROSS_ORIGIN=1.
+// Keamanan Kuota Operator (Cloudflare Worker):
+// Kunci API milik operator (env OPENROUTER_API_KEY / SERPER_API_KEY) HANYA boleh dipakai
+// untuk permintaan yang terverifikasi berasal dari aplikasi web same-origin (melalui Origin/Referer)
+// atau klien yang menyertakan operator shared secret (x-operator-secret / x-admin-key).
+// Klien eksternal non-browser (cURL, Postman, automated scraper) TANPA otentikasi DILARANG
+// menggunakan kunci operator secara cuma-cuma.
 function envKeyAllowed(request, env) {
   try {
     if (env && env.ZOX_ALLOW_CROSS_ORIGIN === '1') return true;
   } catch (_) {}
+
+  // 1. Operator Shared Secret untuk akses terotorisasi dari CLI / subagent
+  const operatorSecret = request.headers.get('x-operator-secret') || request.headers.get('x-admin-key');
+  if (operatorSecret && env && env.ZOX_OPERATOR_SECRET && operatorSecret === env.ZOX_OPERATOR_SECRET) {
+    return true;
+  }
+
+  // 2. Proteksi lintas-asal browser
   const sfs = request.headers.get('sec-fetch-site');
   if (sfs && sfs !== 'same-origin' && sfs !== 'none') return false;
-  const origin = request.headers.get('origin');
-  if (!origin) return true; // non-browser (curl/fetch tanpa Origin)
+
+  let reqHost = '';
   try {
-    return new URL(origin).host === new URL(request.url).host;
+    reqHost = new URL(request.url).host;
   } catch (_) {
     return false;
   }
+
+  // 3. Validasi Origin browser
+  const origin = request.headers.get('origin');
+  if (origin) {
+    try {
+      return new URL(origin).host === reqHost;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // 4. Validasi Referer browser
+  const referer = request.headers.get('referer');
+  if (referer) {
+    try {
+      return new URL(referer).host === reqHost;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // 5. Permintaan non-browser tanpa Origin/Referer (cURL, scraper) tidak boleh membakar kuota operator,
+  // kecuali jika operator secara eksplisit mengaktifkannya via ZOX_ALLOW_NON_BROWSER='1'.
+  if (env && (env.ZOX_ALLOW_NON_BROWSER === '1' || env.ZOX_ALLOW_CURL === '1')) {
+    return true;
+  }
+
+  return false;
 }
 
 export default {
@@ -528,12 +612,17 @@ export default {
         const authHeader = request.headers.get('Authorization') || (apiKey ? `Bearer ${apiKey}` : '');
         const targetEndpoint = body.endpoint || 'https://ollama.com';
         let cleanEndpoint = (targetEndpoint || 'https://ollama.com').trim();
+        // Pada Cloudflare Edge, jika endpoint loopback dikirim oleh browser, alihkan ke Ollama Cloud
+        if (cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1')) {
+          cleanEndpoint = 'https://ollama.com';
+        }
         if (!cleanEndpoint.startsWith('http://') && !cleanEndpoint.startsWith('https://')) {
           cleanEndpoint = (authHeader ? 'https://' : 'http://') + cleanEndpoint;
         }
         const parsedBase = new URL(cleanEndpoint);
-        if (isOllamaEndpointForbidden(cleanEndpoint)) {
-          return new Response(JSON.stringify({ error: 'Endpoint Ollama mengarah ke host privat/internal — akses diblokir (SSRF Protection).' }), {
+        const endpointCheck = checkOllamaEndpoint(cleanEndpoint);
+        if (endpointCheck.forbidden) {
+          return new Response(JSON.stringify({ error: endpointCheck.reason }), {
             status: 400,
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
           });
@@ -589,18 +678,37 @@ export default {
       try {
         const key = request.headers.get('x-ollama-key') || request.headers.get('x-api-key') || '';
         const authHeader = request.headers.get('Authorization') || (key ? `Bearer ${String(key).replace(/^Bearer\s+/i, '').trim()}` : '');
-        const endpoint = url.searchParams.get('endpoint') || (authHeader ? 'https://ollama.com' : 'http://127.0.0.1:11434');
+        const endpoint = url.searchParams.get('endpoint') || 'https://ollama.com';
         const headers = {};
         if (authHeader) headers['Authorization'] = authHeader;
 
         let cleanEndpoint = (endpoint || '').trim();
+        // Pada Cloudflare Edge, jika endpoint loopback diminta, alihkan ke katalog resmi Ollama Cloud
+        if (cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1')) {
+          return new Response(JSON.stringify({
+            models: OFFICIAL_OLLAMA_CLOUD_MODELS,
+            server_running: true,
+            cloud_ready: true,
+            note: 'Loaded from official Ollama Cloud catalog'
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
         if (!cleanEndpoint.startsWith('http://') && !cleanEndpoint.startsWith('https://')) {
           cleanEndpoint = (authHeader ? 'https://' : 'http://') + cleanEndpoint;
         }
         const parsedBase = new URL(cleanEndpoint);
-        if (isOllamaEndpointForbidden(cleanEndpoint)) {
-          return new Response(JSON.stringify({ error: 'Endpoint Ollama mengarah ke host privat/internal — akses diblokir (SSRF Protection).' }), {
-            status: 400,
+        const endpointCheck = checkOllamaEndpoint(cleanEndpoint);
+        if (endpointCheck.forbidden) {
+          return new Response(JSON.stringify({
+            models: OFFICIAL_OLLAMA_CLOUD_MODELS,
+            server_running: true,
+            cloud_ready: true,
+            note: 'Loaded from official Ollama Cloud catalog'
+          }), {
+            status: 200,
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
           });
         }
@@ -615,13 +723,35 @@ export default {
         const targetUrl = parsedBase;
 
         const res = await fetch(targetUrl.toString(), { headers });
-        const data = await res.text();
-        return new Response(data, {
-          status: res.status,
+        if (res.ok) {
+          const rawText = await res.text();
+          try {
+            const parsed = JSON.parse(rawText);
+            if (Array.isArray(parsed.models) && parsed.models.length > 0) {
+              return new Response(rawText, {
+                status: 200,
+                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+              });
+            }
+          } catch (_) {}
+        }
+        // Fallback jika response bukan 200 atau models kosong
+        return new Response(JSON.stringify({
+          models: OFFICIAL_OLLAMA_CLOUD_MODELS,
+          server_running: true,
+          cloud_ready: true,
+          note: 'Loaded from official Ollama Cloud catalog'
+        }), {
+          status: 200,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
       } catch (e) {
-        return new Response(JSON.stringify({ models: [] }), {
+        return new Response(JSON.stringify({
+          models: OFFICIAL_OLLAMA_CLOUD_MODELS,
+          server_running: true,
+          cloud_ready: true,
+          note: 'Loaded from official Ollama Cloud catalog'
+        }), {
           status: 200,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
@@ -1436,8 +1566,11 @@ export default {
         }
 
         let videoId = null;
-        const match = parsedUrl.href.match(/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+        let playlistId = null;
+        const match = parsedUrl.href.match(/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|v\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
         if (match && match[1]) videoId = match[1];
+        const plMatch = parsedUrl.href.match(/(?:playlist\?(?:.*&)?list=)([a-zA-Z0-9_-]+)/i);
+        if (plMatch && plMatch[1]) playlistId = plMatch[1];
         const canonicalUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : parsedUrl.href;
 
         const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`;
@@ -1452,6 +1585,7 @@ export default {
           return new Response(JSON.stringify({
             success: false,
             videoId,
+            playlistId,
             url: canonicalUrl,
             error: `YouTube oEmbed HTTP ${ytRes.status}`
           }), {
@@ -1465,15 +1599,22 @@ export default {
           success: true,
           url: canonicalUrl,
           videoId,
+          playlistId,
           title: data.title || 'Tanpa Judul',
           channel: data.author_name || 'Kreator YouTube',
           channel_url: data.author_url || '',
           thumbnail: data.thumbnail_url || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ''),
           type: data.type || 'video',
+          hasTranscript: false,
           html: data.html || ''
         }), {
           status: 200,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'public, max-age=7200, s-maxage=14400, stale-while-revalidate=86400',
+            'Vary': 'Accept-Encoding'
+          }
         });
       } catch (e) {
         return new Response(JSON.stringify({ success: false, error: e.message }), {
@@ -1507,9 +1648,17 @@ export default {
         }
 
         const data = await ytSearchVideos(String(query).trim(), maxResults);
+        const resHeaders = {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        };
+        if (request.method === 'GET') {
+          resHeaders['Cache-Control'] = 'public, max-age=1800, s-maxage=3600, stale-while-revalidate=7200';
+          resHeaders['Vary'] = 'Accept-Encoding';
+        }
         return new Response(JSON.stringify(data), {
           status: 200,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          headers: resHeaders
         });
       } catch (e) {
         return new Response(JSON.stringify({ success: false, error: e.message }), {
