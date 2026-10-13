@@ -247,6 +247,227 @@ async function ytSearchVideos(query, maxResults) {
   return payload;
 }
 
+// ==================== GLOBAL SEARCH & ENGLISH QUERY ADAPTER ====================
+// Memastikan kueri pencarian otonom menjangkau indeks internasional/global
+// dan mengonversi topik pengguna berbahasa Indonesia menjadi kata kunci pencarian bahasa Inggris global.
+const INDO_DOMESTIC_PATTERN = /\b(indonesia|indonesian|jakarta|jabar|jatim|jateng|bandung|surabaya|medan|semarang|yogyakarta|jogja|bali|denpasar|aceh|sumatera|papua|kalimantan|sulawesi|nusantara|ikn\b|rupiah|idr\b|bmkg|pilkada|pemilu|kpu\b|bawaslu|prabowo|gibran|jokowi|bansos|bpjs|kominfo|menkominfo|kemendagri|kemenkes|kemendikbud|bumn|kemenkeu|sri mulyani|tni\b|polri|polda|polres|kapolri|dpr\b|mpr\b|dpd\b|kpk\b|kejagung|bca\b|mandiri\b|bri\b|bni\b|pertamina|pln\b)\b/i;
+
+function isExplicitDomesticIndoQuery(str) {
+  if (!str || typeof str !== 'string') return false;
+  return INDO_DOMESTIC_PATTERN.test(str);
+}
+
+const INDO_WORDS_PATTERN = /\b(apa|apakah|siapa|siapakah|bagaimana|bagaimanakah|gimana|gimanakah|mengapa|kenapa|kapan|dimana|ke mana|di mana|dari mana|mana|yang|dan|atau|tetapi|namun|dengan|untuk|bagi|pada|di|ke|dari|tentang|mengenai|soal|terkait|adalah|ialah|yaitu|yakni|merupakan|bisa|dapat|terbaru|terkini|berita|warta|kabar|hari ini|minggu ini|bulan ini|tahun ini|sekarang|saat ini|kemarin|besok|perkembangan|kemajuan|penelitian|riset|penemuan|fitur|pembaruan|rilis|peluncuran|ulasan|panduan|cara|tips|trik|harga|biaya|pasar|saham|uang|bursa|ekonomi|keuangan|teknologi|sains|ilmiah|kesehatan|medis|kedokteran|penyakit|obat|perang|senjata|militer|dunia|internasional|luar angkasa|mobil|listrik|cuaca|gempa|keamanan|jaringan|kinerja|kecepatan|terbaik|tercepat|terbesar|faktor|penyebab|dampak|alasan|penjelasan|analisis|tolong|carikan|cari|bantu|coba|berapa|seperti|kayak|fungsi|arti|maksud|contoh)\b/i;
+
+function hasIndonesianWords(str) {
+  if (!str || typeof str !== 'string') return false;
+  return INDO_WORDS_PATTERN.test(str);
+}
+
+const GLOBAL_SEARCH_PHRASE_DICT = [
+  [/\bkecerdasan umum buatan(?:nya)?\b/gi, 'artificial general intelligence'],
+  [/\bkecerdasan buatan(?:nya)?\b/gi, 'artificial intelligence'],
+  [/\bpembelajaran mesin(?:nya)?\b/gi, 'machine learning'],
+  [/\bjaringan saraf(?:nya)?\b/gi, 'neural networks'],
+  [/\bpemrosesan bahasa alami(?:nya)?\b/gi, 'natural language processing'],
+  [/\bmodel bahasa besar(?:nya)?\b/gi, 'large language models'],
+  [/\bmodel bahasa(?:nya)?\b/gi, 'language models'],
+  [/\brekayasa prompt(?:nya)?\b/gi, 'prompt engineering'],
+  [/\bbursa saham(?:nya)?\b/gi, 'stock market'],
+  [/\bpasar saham(?:nya)?\b/gi, 'stock market'],
+  [/\bpasar modal(?:nya)?\b/gi, 'capital market'],
+  [/\bnilai tukar mata uang(?:nya)?\b/gi, 'currency exchange rate'],
+  [/\bnilai tukar(?:nya)?\b/gi, 'exchange rate'],
+  [/\bmata uang(?:nya)?\b/gi, 'currency'],
+  [/\bsuku bunga(?:nya)?\b/gi, 'interest rates'],
+  [/\bminyak bumi(?:nya)?\b/gi, 'crude oil'],
+  [/\bmobil listrik(?:nya)?\b/gi, 'electric vehicles'],
+  [/\bluar angkasa(?:nya)?\b/gi, 'space exploration'],
+  [/\btimur tengah(?:nya)?\b/gi, 'middle east'],
+  [/\bperang dunia(?:nya)?\b/gi, 'world war'],
+  [/\bperubahan iklim(?:nya)?\b/gi, 'climate change'],
+  [/\bpemanasan global(?:nya)?\b/gi, 'global warming'],
+  [/\benergi terbarukan(?:nya)?\b/gi, 'renewable energy'],
+  [/\btenaga nuklir(?:nya)?\b/gi, 'nuclear energy'],
+  [/\bdunia nyata(?:nya)?\b/gi, 'real world'],
+  [/\bgaya hidup(?:nya)?\b/gi, 'lifestyle'],
+  [/\bfitur baru(?:nya)?\b/gi, 'new features'],
+  [/\bberita terbaru(?:nya)?\b/gi, 'latest news'],
+  [/\bberita terkini(?:nya)?\b/gi, 'breaking news'],
+  [/\bberita dunia(?:nya)?\b/gi, 'world news'],
+  [/\bkabar terbaru(?:nya)?\b/gi, 'latest updates'],
+  [/\bhari ini\b/gi, 'today'],
+  [/\bminggu ini\b/gi, 'this week'],
+  [/\bbulan ini\b/gi, 'this month'],
+  [/\btahun ini\b/gi, 'this year'],
+  [/\bsaat ini\b/gi, 'current'],
+  [/\bcara kerja(?:nya)?\b/gi, 'how it works'],
+  [/\bcara menggunakan(?:nya)?\b/gi, 'how to use'],
+  [/\brekayasa perangkat lunak(?:nya)?\b/gi, 'software engineering'],
+  [/\bsistem operasi(?:nya)?\b/gi, 'operating system'],
+  [/\bkomputasi awan(?:nya)?\b/gi, 'cloud computing'],
+  [/\bkomputasi kuantum(?:nya)?\b/gi, 'quantum computing'],
+  [/\bkeamanan siber(?:nya)?\b/gi, 'cybersecurity'],
+  [/\buji coba(?:nya)?\b/gi, 'trial test'],
+  [/\bdampak negatif(?:nya)?\b/gi, 'negative impacts'],
+  [/\bdampak positif(?:nya)?\b/gi, 'positive impacts'],
+  [/\bkurs dollar(?:nya)?\b/gi, 'usd exchange rate'],
+  [/\bkurs euro(?:nya)?\b/gi, 'eur exchange rate'],
+  [/\bliga champions\b/gi, 'champions league'],
+  [/\bliga inggris\b/gi, 'premier league'],
+  [/\bsepak bola\b/gi, 'football soccer']
+];
+
+const GLOBAL_SEARCH_WORD_DICT = [
+  [/\bterbaru(?:nya)?\b/gi, 'latest'],
+  [/\bterkini(?:nya)?\b/gi, 'latest'],
+  [/\bmutakhir(?:nya)?\b/gi, 'state of the art'],
+  [/\bberita(?:nya)?\b/gi, 'news'],
+  [/\bwarta(?:nya)?\b/gi, 'news'],
+  [/\bkabar(?:nya)?\b/gi, 'news'],
+  [/\bperkembangan(?:nya)?\b/gi, 'developments'],
+  [/\bkemajuan(?:nya)?\b/gi, 'advancements'],
+  [/\bpenelitian(?:nya)?\b/gi, 'research'],
+  [/\briset(?:nya)?\b/gi, 'research'],
+  [/\bpenemuan(?:nya)?\b/gi, 'discoveries'],
+  [/\bpeluncuran(?:nya)?\b/gi, 'launch'],
+  [/\brilis(?:nya)?\b/gi, 'release'],
+  [/\bpembaruan(?:nya)?\b/gi, 'update'],
+  [/\bfitur(?:nya)?\b/gi, 'features'],
+  [/\bspesifikasi(?:nya)?\b/gi, 'specifications'],
+  [/\bkelebihan(?:nya)?\b/gi, 'advantages'],
+  [/\bkekurangan(?:nya)?\b/gi, 'limitations'],
+  [/\bperbandingan(?:nya)?\b/gi, 'comparison'],
+  [/\bulasan(?:nya)?\b/gi, 'review'],
+  [/\bpanduan(?:nya)?\b/gi, 'guide'],
+  [/\btutorial(?:nya)?\b/gi, 'tutorial'],
+  [/\bbelajar(?:nya)?\b/gi, 'learn'],
+  [/\bcara(?:nya)?\b/gi, 'how to'],
+  [/\bharga(?:nya)?\b/gi, 'price'],
+  [/\bbiaya(?:nya)?\b/gi, 'cost'],
+  [/\btarif(?:nya)?\b/gi, 'rates'],
+  [/\bsaham(?:nya)?\b/gi, 'stocks'],
+  [/\bkeuangan(?:nya)?\b/gi, 'finance'],
+  [/\bekonomi(?:nya)?\b/gi, 'economy'],
+  [/\bkripto(?:nya)?\b/gi, 'crypto'],
+  [/\bkoin(?:nya)?\b/gi, 'coins'],
+  [/\bemas(?:nya)?\b/gi, 'gold price'],
+  [/\bperak(?:nya)?\b/gi, 'silver price'],
+  [/\bminyak(?:nya)?\b/gi, 'oil price'],
+  [/\bkesehatan(?:nya)?\b/gi, 'health'],
+  [/\bmedis(?:nya)?\b/gi, 'medical'],
+  [/\bkedokteran(?:nya)?\b/gi, 'medicine'],
+  [/\bpenyakit(?:nya)?\b/gi, 'disease'],
+  [/\bvaksin(?:nya)?\b/gi, 'vaccine'],
+  [/\bobat(?:nya)?\b/gi, 'treatment medication'],
+  [/\bkanker(?:nya)?\b/gi, 'cancer treatment'],
+  [/\bteknologi(?:nya)?\b/gi, 'technology'],
+  [/\bsains(?:nya)?\b/gi, 'science'],
+  [/\bilmiah(?:nya)?\b/gi, 'scientific'],
+  [/\bcuaca(?:nya)?\b/gi, 'weather'],
+  [/\bbadai(?:nya)?\b/gi, 'storm'],
+  [/\bgempa(?:nya)?\b/gi, 'earthquake'],
+  [/\bbanjir(?:nya)?\b/gi, 'flood'],
+  [/\btsunami(?:nya)?\b/gi, 'tsunami'],
+  [/\bperang(?:nya)?\b/gi, 'war conflict'],
+  [/\bsenjata(?:nya)?\b/gi, 'weapons'],
+  [/\bmiliter(?:nya)?\b/gi, 'military'],
+  [/\bpemerintah(?:nya)?\b/gi, 'government'],
+  [/\bkebijakan(?:nya)?\b/gi, 'policy'],
+  [/\bhukum(?:nya)?\b/gi, 'law'],
+  [/\baturan(?:nya)?\b/gi, 'regulations'],
+  [/\bputusan(?:nya)?\b/gi, 'ruling'],
+  [/\bdunia(?:nya)?\b/gi, 'world'],
+  [/\bglobal(?:nya)?\b/gi, 'global'],
+  [/\binternasional(?:nya)?\b/gi, 'international'],
+  [/\bindustri(?:nya)?\b/gi, 'industry'],
+  [/\bperusahaan(?:nya)?\b/gi, 'companies'],
+  [/\bpasar(?:nya)?\b/gi, 'market'],
+  [/\bmobil(?:nya)?\b/gi, 'cars'],
+  [/\bkendaraan(?:nya)?\b/gi, 'vehicles'],
+  [/\bpesawat(?:nya)?\b/gi, 'aircraft'],
+  [/\brobot(?:nya)?\b/gi, 'robotics'],
+  [/\brobotika(?:nya)?\b/gi, 'robotics'],
+  [/\bfaktor(?:nya)?\b/gi, 'factors'],
+  [/\bpenyebab(?:nya)?\b/gi, 'causes'],
+  [/\bdampak(?:nya)?\b/gi, 'impacts'],
+  [/\balasan(?:nya)?\b/gi, 'reasons'],
+  [/\bpenjelasan(?:nya)?\b/gi, 'explanation'],
+  [/\banalisis(?:nya)?\b/gi, 'analysis'],
+  [/\bkeamanan(?:nya)?\b/gi, 'security'],
+  [/\bkecepatan(?:nya)?\b/gi, 'speed'],
+  [/\bkinerja(?:nya)?\b/gi, 'performance'],
+  [/\bterbaik(?:nya)?\b/gi, 'best'],
+  [/\btercepat(?:nya)?\b/gi, 'fastest'],
+  [/\bterbesar(?:nya)?\b/gi, 'biggest'],
+  [/\bpemenang(?:nya)?\b/gi, 'winner'],
+  [/\bjuara(?:nya)?\b/gi, 'champion'],
+  [/\bkondisi(?:nya)?\b/gi, 'conditions'],
+  [/\bkeadaan(?:nya)?\b/gi, 'state condition'],
+  [/\bbaterai(?:nya)?\b/gi, 'battery'],
+  [/\benergi(?:nya)?\b/gi, 'energy'],
+  [/\bliga(?:nya)?\b/gi, 'league'],
+  [/\bfungsi(?:nya)?\b/gi, 'functionality'],
+  [/\barti(?:nya)?\b/gi, 'meaning definition'],
+  [/\bmaksud(?:nya)?\b/gi, 'definition'],
+  [/\bcontoh(?:nya)?\b/gi, 'examples'],
+  [/\bpenggunaan(?:nya)?\b/gi, 'usage'],
+  [/\bpenerapan(?:nya)?\b/gi, 'application'],
+  [/\bsekarang\b/gi, 'now']
+];
+
+const GLOBAL_SEARCH_STOPWORDS = /\b(apa|apakah|siapa|siapakah|bagaimana|bagaimanakah|gimana|gimanakah|mengapa|kenapa|kapan|dimana|ke mana|di mana|dari mana|mana|berapa|seperti|kayak|yang|dan|atau|tetapi|namun|dengan|untuk|bagi|pada|di|ke|dari|tentang|mengenai|soal|terkait|adalah|ialah|yaitu|yakni|merupakan|bisa|dapat|tolong|coba|carikan|cari|bantu|tampilkan|berikan|sebutkan|jelaskan|paparkan|terangkan|ceritakan|nya|kah|lah|saja|pun|dong|sih|kok|deh|ya|kan|ada|sudah|telah|sedang|lagi|akan|pernah|kalian|kamu|anda|kita|saya|nih|tuh|lho|loh|kira|kira-kira)\b/gi;
+
+function translateIndoQueryToGlobalEnglish(rawQuery) {
+  if (!rawQuery || typeof rawQuery !== 'string') return '';
+  const trimmed = rawQuery.trim();
+  if (!trimmed) return '';
+
+  // 1. Jika query eksplisit meminta data domestik Indonesia, jangan diterjemahkan ke kueri global
+  if (isExplicitDomesticIndoQuery(trimmed)) {
+    return trimmed;
+  }
+
+  // 2. Jika tidak ada kata bahasa Indonesia sama sekali, pertahankan kueri asli
+  if (!hasIndonesianWords(trimmed)) {
+    return trimmed;
+  }
+
+  let translated = trimmed;
+
+  // 3. Ganti frasa majemuk terlebih dahulu
+  for (const [regex, replacement] of GLOBAL_SEARCH_PHRASE_DICT) {
+    translated = translated.replace(regex, replacement);
+  }
+
+  // 4. Ganti kata-kata individual
+  for (const [regex, replacement] of GLOBAL_SEARCH_WORD_DICT) {
+    translated = translated.replace(regex, replacement);
+  }
+
+  // 5. Bersihkan stopwords / partikel bahasa Indonesia
+  translated = translated.replace(GLOBAL_SEARCH_STOPWORDS, ' ');
+
+  // 6. Normalisasi spasi dan tanda baca
+  translated = translated
+    .replace(/[^\p{L}\p{N}\s\.\-]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // 7. Deduplikasi kata berturut-turut yang identik
+  const words = translated.split(/\s+/).filter(Boolean);
+  const dedupedWords = [];
+  for (const w of words) {
+    const last = dedupedWords[dedupedWords.length - 1];
+    if (!last || last.toLowerCase() !== w.toLowerCase()) {
+      dedupedWords.push(w);
+    }
+  }
+  const result = dedupedWords.join(' ').trim();
+
+  return result.length >= 2 ? result : trimmed;
+}
+
 // H8 (Cloudflare Worker): key milik OPERATOR (env OPENROUTER_API_KEY/SERPER_API_KEY)
 // hanya dipakai untuk permintaan same-origin / non-browser. Halaman lintas-asal
 // tidak pernah menerimanya (ACAO:* tidak lagi berarti pembakaran kredit gratis).
@@ -330,15 +551,23 @@ export default {
         const headers = { 'Content-Type': 'application/json' };
         if (authHeader) headers['Authorization'] = authHeader;
 
+        const outBody = {
+          model: body.model || 'gemma4:31b',
+          messages: body.messages || [],
+          stream: body.stream !== false,
+          options: body.options || {}
+        };
+        if (body.tools && Array.isArray(body.tools)) {
+          outBody.tools = body.tools;
+        }
+        if (body.format) {
+          outBody.format = body.format;
+        }
+
         const res = await fetch(targetUrl.toString(), {
           method: 'POST',
           headers,
-          body: JSON.stringify({
-            model: body.model || 'gemma4:31b',
-            messages: body.messages || [],
-            stream: body.stream !== false,
-            options: body.options || {}
-          })
+          body: JSON.stringify(outBody)
         });
 
         const newHeaders = new Headers(res.headers);
@@ -641,31 +870,6 @@ export default {
         });
       } catch (e) {
         return new Response(JSON.stringify({ error: e.message }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-        });
-      }
-    }
-
-    // Proxy OpenRouter Image Models List
-    if ((url.pathname === '/api/openrouter/images/models' || url.pathname === '/api/openrouter/image-models') && request.method === 'GET') {
-      try {
-        let authHeader = request.headers.get('Authorization');
-        if (!authHeader) {
-          const qKey = request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
-          if (qKey) authHeader = `Bearer ${String(qKey).replace(/^Bearer\s+/i, '').trim()}`;
-        }
-        const headers = { 'User-Agent': 'ZozRouter/1.0' };
-        if (authHeader) headers['Authorization'] = authHeader;
-
-        const res = await fetch('https://openrouter.ai/api/v1/images/models', { headers });
-        const rawText = await res.text();
-        return new Response(rawText, {
-          status: res.status,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-        });
-      } catch (e) {
-        return new Response(JSON.stringify({ success: false, data: [], error: e.message }), {
           status: 500,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
@@ -1034,12 +1238,12 @@ export default {
     // Proxy Web Search (Serper Google API & Autonomous Search Aliases)
     if (url.pathname === '/api/web-search' || url.pathname === '/api/tools/search-web' || url.pathname === '/api/autonomous/search') {
       try {
-        let query = url.searchParams.get('q') || url.searchParams.get('query') || '';
+        let query = url.searchParams.get('q') || url.searchParams.get('query') || url.searchParams.get('search') || url.searchParams.get('keyword') || url.searchParams.get('topic') || url.searchParams.get('topik') || url.searchParams.get('text') || url.searchParams.get('cari') || url.searchParams.get('kata_kunci') || '';
         let apiKey = request.headers.get('x-serper-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.SERPER_API_KEY : null);
         let num = parseInt(url.searchParams.get('num') || url.searchParams.get('limit') || '15', 10);
         if (request.method === 'POST') {
           const body = await request.json().catch(() => ({}));
-          query = body.query || body.q || body.search || body.keyword || body.topic || body.text || query;
+          query = body.query || body.q || body.search || body.keyword || body.topic || body.topik || body.text || body.cari || body.kata_kunci || query;
           apiKey = body.apiKey || body.serperApiKey || apiKey || (envKeyAllowed(request, env) ? env?.SERPER_API_KEY : null);
           if (body.num || body.limit) num = parseInt(body.num || body.limit, 10);
         }
@@ -1051,10 +1255,76 @@ export default {
         }
         const targetNum = Math.min(Math.max(isNaN(num) ? 15 : num, 1), 30);
         const serperKey = apiKey || (envKeyAllowed(request, env) ? env?.SERPER_API_KEY : null);
+        const cleanQuery = query.trim();
+        const isDomestic = isExplicitDomesticIndoQuery(cleanQuery);
+        const englishQuery = translateIndoQueryToGlobalEnglish(cleanQuery);
+        const targetSearchQ = (!isDomestic && englishQuery) ? englishQuery : cleanQuery;
+
         if (!serperKey) {
           const isAutonomousTool = url.pathname === '/api/tools/search-web' || url.pathname === '/api/autonomous/search';
           if (isAutonomousTool) {
-            return new Response(JSON.stringify({ success: true, count: 0, query: query, results: [] }), {
+            const fallbackResults = [];
+            // 1. DuckDuckGo Instant API
+            try {
+              const ddgRes = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(targetSearchQ)}&format=json&no_html=1&skip_disambig=1`, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+                signal: AbortSignal.timeout(4500)
+              });
+              if (ddgRes.ok) {
+                const ddgData = await ddgRes.json();
+                if (ddgData.AbstractText && ddgData.AbstractURL) {
+                  fallbackResults.push({
+                    title: ddgData.Heading || targetSearchQ,
+                    url: ddgData.AbstractURL,
+                    snippet: ddgData.AbstractText,
+                    sourceProvider: 'DuckDuckGo Instant Answer'
+                  });
+                }
+                if (Array.isArray(ddgData.RelatedTopics)) {
+                  ddgData.RelatedTopics.slice(0, 5).forEach(t => {
+                    if (t.Text && t.FirstURL) {
+                      fallbackResults.push({
+                        title: t.Text.split(' - ')[0] || t.Text.slice(0, 60),
+                        url: t.FirstURL,
+                        snippet: t.Text,
+                        sourceProvider: 'DuckDuckGo'
+                      });
+                    }
+                  });
+                }
+              }
+            } catch (_) {}
+
+            // 2. Wikipedia Full-text Search
+            try {
+              const wikiLang = isDomestic ? 'id' : 'en';
+              const wikiRes = await fetch(`https://${wikiLang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(targetSearchQ)}&format=json&srlimit=4&utf8=1`, {
+                headers: { 'User-Agent': 'ZozRouter/1.0' },
+                signal: AbortSignal.timeout(4500)
+              });
+              if (wikiRes.ok) {
+                const wikiData = await wikiRes.json();
+                if (wikiData?.query?.search) {
+                  wikiData.query.search.forEach(s => {
+                    const cleanSnip = (s.snippet || '').replace(/<[^>]+>/g, '');
+                    fallbackResults.push({
+                      title: s.title,
+                      url: `https://${wikiLang}.wikipedia.org/wiki/${encodeURIComponent(s.title.replace(/\s+/g, '_'))}`,
+                      snippet: cleanSnip,
+                      sourceProvider: 'Wikipedia'
+                    });
+                  });
+                }
+              }
+            } catch (_) {}
+
+            return new Response(JSON.stringify({
+              success: true,
+              count: fallbackResults.length,
+              query: targetSearchQ,
+              originalQuery: cleanQuery,
+              results: fallbackResults
+            }), {
               status: 200,
               headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
             });
@@ -1070,11 +1340,53 @@ export default {
             'X-API-KEY': serperKey,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ q: query, num: targetNum, gl: 'us', hl: 'en' })
+          body: JSON.stringify({ q: targetSearchQ, num: targetNum, gl: isDomestic ? 'id' : 'us', hl: isDomestic ? 'id' : 'en' })
         });
-        const serperData = await serperRes.text();
-        return new Response(serperData, {
-          status: serperRes.status,
+        const parsedSerper = await serperRes.json().catch(() => null);
+        if (parsedSerper && typeof parsedSerper === 'object') {
+          const results = [];
+          if (parsedSerper.answerBox) {
+            results.push({
+              title: parsedSerper.answerBox.title || 'Jawaban Teratas',
+              url: parsedSerper.answerBox.link || 'https://google.com',
+              snippet: parsedSerper.answerBox.answer || parsedSerper.answerBox.snippet || '',
+              sourceProvider: 'Google AnswerBox'
+            });
+          }
+          if (parsedSerper.knowledgeGraph) {
+            results.push({
+              title: parsedSerper.knowledgeGraph.title || 'Knowledge Graph Fact',
+              url: parsedSerper.knowledgeGraph.website || parsedSerper.knowledgeGraph.descriptionUrl || 'https://google.com',
+              snippet: parsedSerper.knowledgeGraph.description || '',
+              sourceProvider: 'Google Knowledge Graph'
+            });
+          }
+          if (Array.isArray(parsedSerper.organic)) {
+            parsedSerper.organic.forEach((it, idx) => {
+              if (it && (it.link || it.url)) {
+                results.push({
+                  title: it.title || `Hasil ${idx + 1}`,
+                  url: it.link || it.url,
+                  snippet: it.snippet || '',
+                  sourceProvider: 'Google'
+                });
+              }
+            });
+          }
+          return new Response(JSON.stringify({
+            success: true,
+            query: targetSearchQ,
+            originalQuery: cleanQuery,
+            count: results.length,
+            results: results,
+            ...parsedSerper
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+        return new Response(JSON.stringify({ success: false, error: 'Gagal mendapatkan data pencarian dari Serper.' }), {
+          status: 502,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
       } catch (e) {
@@ -1177,12 +1489,14 @@ export default {
         let query = '';
         let maxResults = 6;
         if (request.method === 'GET') {
-          query = url.searchParams.get('q') || url.searchParams.get('query') || '';
-          maxResults = parseInt(url.searchParams.get('limit') || '6', 10) || 6;
+          query = url.searchParams.get('q') || url.searchParams.get('query') || url.searchParams.get('keyword') || url.searchParams.get('search') || url.searchParams.get('topic') || url.searchParams.get('title') || url.searchParams.get('text') || url.searchParams.get('cari') || url.searchParams.get('kata_kunci') || url.searchParams.get('judul') || '';
+          const parsedLimit = parseInt(url.searchParams.get('limit') || url.searchParams.get('max_results') || '6', 10);
+          maxResults = Math.min(Math.max(isNaN(parsedLimit) ? 6 : parsedLimit, 1), 20);
         } else {
           const body = await request.json().catch(() => ({}));
-          query = body.q || body.query || body.keyword || body.search || body.topic || body.title || body.text || '';
-          maxResults = parseInt(body.limit || body.max_results, 10) || 6;
+          query = body.q || body.query || body.keyword || body.search || body.topic || body.title || body.text || body.cari || body.kata_kunci || body.judul || '';
+          const parsedLimit = parseInt(body.limit || body.max_results || '6', 10);
+          maxResults = Math.min(Math.max(isNaN(parsedLimit) ? 6 : parsedLimit, 1), 20);
         }
 
         if (!query || !String(query).trim()) {
@@ -1211,11 +1525,11 @@ export default {
         let targetUrl = '';
         let maxChars = 8000;
         if (request.method === 'GET') {
-          targetUrl = url.searchParams.get('url') || url.searchParams.get('link') || url.searchParams.get('target') || '';
+          targetUrl = url.searchParams.get('url') || url.searchParams.get('link') || url.searchParams.get('target') || url.searchParams.get('targetUrl') || url.searchParams.get('tautan') || '';
           if (url.searchParams.get('maxChars')) maxChars = parseInt(url.searchParams.get('maxChars'), 10) || 8000;
         } else {
           const body = await request.json().catch(() => ({}));
-          targetUrl = body.url || body.link || body.targetUrl || body.target || '';
+          targetUrl = body.url || body.link || body.targetUrl || body.target || body.tautan || '';
           if (body.maxChars) maxChars = parseInt(body.maxChars, 10) || 8000;
         }
         if (!targetUrl || !targetUrl.trim()) {
@@ -1329,8 +1643,8 @@ export default {
     if ((url.pathname === '/api/memory/save' || url.pathname === '/api/tools/memory/save') && request.method === 'POST') {
       try {
         const body = await request.json().catch(() => ({}));
-        const content = String(body.content || body.value || body.text || body.fact || body.note || body.catatan || body.info || body.data || '').trim();
-        let topic = String(body.topic || body.key || body.title || body.subject || body.kategori || '').trim();
+        const content = String(body.content || body.value || body.text || body.fact || body.note || body.catatan || body.info || body.data || body.isi || body.konten || '').trim();
+        let topic = String(body.topic || body.key || body.title || body.subject || body.kategori || body.topik || '').trim();
         if (!content) {
           return new Response(JSON.stringify({ error: 'Parameter content (atau teks fakta) diperlukan.' }), {
             status: 400,
@@ -1360,10 +1674,10 @@ export default {
     // Long-Term Memory Search Endpoint (Cloudflare Worker Stateless Handler)
     if ((url.pathname === '/api/memory/search' || url.pathname === '/api/tools/memory/search') && (request.method === 'GET' || request.method === 'POST')) {
       try {
-        let query = url.searchParams.get('q') || url.searchParams.get('query') || '';
+        let query = url.searchParams.get('q') || url.searchParams.get('query') || url.searchParams.get('cari') || url.searchParams.get('kata_kunci') || url.searchParams.get('topik') || '';
         if (request.method === 'POST') {
           const body = await request.json().catch(() => ({}));
-          query = body.query || body.q || body.keyword || body.topic || query;
+          query = body.query || body.cari || body.kata_kunci || body.keyword || body.topik || body.topic || body.q || query;
         }
         return new Response(JSON.stringify({
           success: true,

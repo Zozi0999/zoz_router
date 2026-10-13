@@ -4869,42 +4869,6 @@ body.modal-open {
   color: #ff5252;
 }
 
-/* Research URL Manager Button */
-.research-manage-urls-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: rgba(255, 170, 0, 0.12);
-  border: 1px solid rgba(255, 170, 0, 0.35);
-  border-radius: var(--radius-sm);
-  color: var(--neon-amber);
-  font-size: 0.76rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  width: 100%;
-  justify-content: center;
-}
-
-.research-manage-urls-btn:hover {
-  background: rgba(255, 170, 0, 0.25);
-  border-color: var(--neon-amber);
-  box-shadow: 0 0 12px rgba(255, 170, 0, 0.4);
-  color: #fff;
-  transform: translateY(-1px);
-}
-
-#researchUrlCountBadge {
-  background: var(--neon-amber);
-  color: #08090D;
-  padding: 1px 6px;
-  border-radius: 999px;
-  font-size: 0.65rem;
-  font-weight: 800;
-  min-width: 20px;
-  text-align: center;
-}
 
 /* Research URL Manager Modal */
 .research-url-manager-list {
@@ -8008,11 +7972,7 @@ body.modal-open {
    iframe tetap berukuran seukuran kartu/container (mis. 200px) di atas layar hitam.
    Paksa ulang dimensi fullscreen ke viewport. */
 .yt-embed-frame iframe:fullscreen,
-.yt-embed-frame iframe:-webkit-full-screen,
-#ytPlayerContainer iframe:fullscreen,
-#ytPlayerContainer iframe:-webkit-full-screen,
-#ytPlayerContainer > iframe:fullscreen,
-#ytPlayerContainer > iframe:-webkit-full-screen {
+.yt-embed-frame iframe:-webkit-full-screen {
   position: fixed !important;
   top: 0 !important;
   left: 0 !important;
@@ -8023,38 +7983,6 @@ body.modal-open {
   border: 0 !important;
   margin: 0 !important;
   z-index: 2147483647;
-}
-
-/* Tombol "Layar Penuh" khusus deck player: fullscreen-kan container, bukan iframe */
-#ytPlayerContainerWrap:fullscreen,
-#ytPlayerContainerWrap:-webkit-full-screen {
-  border-radius: 0;
-  border: none;
-  background: #000;
-  display: flex;
-  flex-direction: column;
-  max-width: none;
-  max-height: none;
-}
-
-#ytPlayerContainerWrap:fullscreen #ytPlayerContainer,
-#ytPlayerContainerWrap:-webkit-full-screen #ytPlayerContainer {
-  height: auto !important;
-  flex: 1 1 auto !important;
-  min-height: 0;
-}
-
-#ytPlayerContainerWrap:fullscreen iframe,
-#ytPlayerContainerWrap:-webkit-full-screen iframe {
-  width: 100% !important;
-  height: 100% !important;
-}
-
-/* Header bar tetap di atas saat fullscreen container */
-#ytPlayerContainerWrap:fullscreen > div:first-child,
-#ytPlayerContainerWrap:-webkit-full-screen > div:first-child {
-  flex: 0 0 auto;
-  order: -1;
 }
 
 @media (max-width: 600px) {

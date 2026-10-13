@@ -726,6 +726,227 @@ const OFFICIAL_OLLAMA_CLOUD_MODELS = [
   { name: 'glm-5.2', model: 'glm-5.2', tag: 'Cloud', isFree: false, cat: 'flagship', details: { family: 'glm' } }
 ];
 
+// ==================== GLOBAL SEARCH & ENGLISH QUERY ADAPTER ====================
+// Memastikan kueri pencarian otonom menjangkau indeks internasional/global
+// dan mengonversi topik pengguna berbahasa Indonesia menjadi kata kunci pencarian bahasa Inggris global.
+const INDO_DOMESTIC_PATTERN = /\b(indonesia|indonesian|jakarta|jabar|jatim|jateng|bandung|surabaya|medan|semarang|yogyakarta|jogja|bali|denpasar|aceh|sumatera|papua|kalimantan|sulawesi|nusantara|ikn\b|rupiah|idr\b|bmkg|pilkada|pemilu|kpu\b|bawaslu|prabowo|gibran|jokowi|bansos|bpjs|kominfo|menkominfo|kemendagri|kemenkes|kemendikbud|bumn|kemenkeu|sri mulyani|tni\b|polri|polda|polres|kapolri|dpr\b|mpr\b|dpd\b|kpk\b|kejagung|bca\b|mandiri\b|bri\b|bni\b|pertamina|pln\b)\b/i;
+
+function isExplicitDomesticIndoQuery(str) {
+  if (!str || typeof str !== 'string') return false;
+  return INDO_DOMESTIC_PATTERN.test(str);
+}
+
+const INDO_WORDS_PATTERN = /\b(apa|apakah|siapa|siapakah|bagaimana|bagaimanakah|gimana|gimanakah|mengapa|kenapa|kapan|dimana|ke mana|di mana|dari mana|mana|yang|dan|atau|tetapi|namun|dengan|untuk|bagi|pada|di|ke|dari|tentang|mengenai|soal|terkait|adalah|ialah|yaitu|yakni|merupakan|bisa|dapat|terbaru|terkini|berita|warta|kabar|hari ini|minggu ini|bulan ini|tahun ini|sekarang|saat ini|kemarin|besok|perkembangan|kemajuan|penelitian|riset|penemuan|fitur|pembaruan|rilis|peluncuran|ulasan|panduan|cara|tips|trik|harga|biaya|pasar|saham|uang|bursa|ekonomi|keuangan|teknologi|sains|ilmiah|kesehatan|medis|kedokteran|penyakit|obat|perang|senjata|militer|dunia|internasional|luar angkasa|mobil|listrik|cuaca|gempa|keamanan|jaringan|kinerja|kecepatan|terbaik|tercepat|terbesar|faktor|penyebab|dampak|alasan|penjelasan|analisis|tolong|carikan|cari|bantu|coba|berapa|seperti|kayak|fungsi|arti|maksud|contoh)\b/i;
+
+function hasIndonesianWords(str) {
+  if (!str || typeof str !== 'string') return false;
+  return INDO_WORDS_PATTERN.test(str);
+}
+
+const GLOBAL_SEARCH_PHRASE_DICT = [
+  [/\bkecerdasan umum buatan(?:nya)?\b/gi, 'artificial general intelligence'],
+  [/\bkecerdasan buatan(?:nya)?\b/gi, 'artificial intelligence'],
+  [/\bpembelajaran mesin(?:nya)?\b/gi, 'machine learning'],
+  [/\bjaringan saraf(?:nya)?\b/gi, 'neural networks'],
+  [/\bpemrosesan bahasa alami(?:nya)?\b/gi, 'natural language processing'],
+  [/\bmodel bahasa besar(?:nya)?\b/gi, 'large language models'],
+  [/\bmodel bahasa(?:nya)?\b/gi, 'language models'],
+  [/\brekayasa prompt(?:nya)?\b/gi, 'prompt engineering'],
+  [/\bbursa saham(?:nya)?\b/gi, 'stock market'],
+  [/\bpasar saham(?:nya)?\b/gi, 'stock market'],
+  [/\bpasar modal(?:nya)?\b/gi, 'capital market'],
+  [/\bnilai tukar mata uang(?:nya)?\b/gi, 'currency exchange rate'],
+  [/\bnilai tukar(?:nya)?\b/gi, 'exchange rate'],
+  [/\bmata uang(?:nya)?\b/gi, 'currency'],
+  [/\bsuku bunga(?:nya)?\b/gi, 'interest rates'],
+  [/\bminyak bumi(?:nya)?\b/gi, 'crude oil'],
+  [/\bmobil listrik(?:nya)?\b/gi, 'electric vehicles'],
+  [/\bluar angkasa(?:nya)?\b/gi, 'space exploration'],
+  [/\btimur tengah(?:nya)?\b/gi, 'middle east'],
+  [/\bperang dunia(?:nya)?\b/gi, 'world war'],
+  [/\bperubahan iklim(?:nya)?\b/gi, 'climate change'],
+  [/\bpemanasan global(?:nya)?\b/gi, 'global warming'],
+  [/\benergi terbarukan(?:nya)?\b/gi, 'renewable energy'],
+  [/\btenaga nuklir(?:nya)?\b/gi, 'nuclear energy'],
+  [/\bdunia nyata(?:nya)?\b/gi, 'real world'],
+  [/\bgaya hidup(?:nya)?\b/gi, 'lifestyle'],
+  [/\bfitur baru(?:nya)?\b/gi, 'new features'],
+  [/\bberita terbaru(?:nya)?\b/gi, 'latest news'],
+  [/\bberita terkini(?:nya)?\b/gi, 'breaking news'],
+  [/\bberita dunia(?:nya)?\b/gi, 'world news'],
+  [/\bkabar terbaru(?:nya)?\b/gi, 'latest updates'],
+  [/\bhari ini\b/gi, 'today'],
+  [/\bminggu ini\b/gi, 'this week'],
+  [/\bbulan ini\b/gi, 'this month'],
+  [/\btahun ini\b/gi, 'this year'],
+  [/\bsaat ini\b/gi, 'current'],
+  [/\bcara kerja(?:nya)?\b/gi, 'how it works'],
+  [/\bcara menggunakan(?:nya)?\b/gi, 'how to use'],
+  [/\brekayasa perangkat lunak(?:nya)?\b/gi, 'software engineering'],
+  [/\bsistem operasi(?:nya)?\b/gi, 'operating system'],
+  [/\bkomputasi awan(?:nya)?\b/gi, 'cloud computing'],
+  [/\bkomputasi kuantum(?:nya)?\b/gi, 'quantum computing'],
+  [/\bkeamanan siber(?:nya)?\b/gi, 'cybersecurity'],
+  [/\buji coba(?:nya)?\b/gi, 'trial test'],
+  [/\bdampak negatif(?:nya)?\b/gi, 'negative impacts'],
+  [/\bdampak positif(?:nya)?\b/gi, 'positive impacts'],
+  [/\bkurs dollar(?:nya)?\b/gi, 'usd exchange rate'],
+  [/\bkurs euro(?:nya)?\b/gi, 'eur exchange rate'],
+  [/\bliga champions\b/gi, 'champions league'],
+  [/\bliga inggris\b/gi, 'premier league'],
+  [/\bsepak bola\b/gi, 'football soccer']
+];
+
+const GLOBAL_SEARCH_WORD_DICT = [
+  [/\bterbaru(?:nya)?\b/gi, 'latest'],
+  [/\bterkini(?:nya)?\b/gi, 'latest'],
+  [/\bmutakhir(?:nya)?\b/gi, 'state of the art'],
+  [/\bberita(?:nya)?\b/gi, 'news'],
+  [/\bwarta(?:nya)?\b/gi, 'news'],
+  [/\bkabar(?:nya)?\b/gi, 'news'],
+  [/\bperkembangan(?:nya)?\b/gi, 'developments'],
+  [/\bkemajuan(?:nya)?\b/gi, 'advancements'],
+  [/\bpenelitian(?:nya)?\b/gi, 'research'],
+  [/\briset(?:nya)?\b/gi, 'research'],
+  [/\bpenemuan(?:nya)?\b/gi, 'discoveries'],
+  [/\bpeluncuran(?:nya)?\b/gi, 'launch'],
+  [/\brilis(?:nya)?\b/gi, 'release'],
+  [/\bpembaruan(?:nya)?\b/gi, 'update'],
+  [/\bfitur(?:nya)?\b/gi, 'features'],
+  [/\bspesifikasi(?:nya)?\b/gi, 'specifications'],
+  [/\bkelebihan(?:nya)?\b/gi, 'advantages'],
+  [/\bkekurangan(?:nya)?\b/gi, 'limitations'],
+  [/\bperbandingan(?:nya)?\b/gi, 'comparison'],
+  [/\bulasan(?:nya)?\b/gi, 'review'],
+  [/\bpanduan(?:nya)?\b/gi, 'guide'],
+  [/\btutorial(?:nya)?\b/gi, 'tutorial'],
+  [/\bbelajar(?:nya)?\b/gi, 'learn'],
+  [/\bcara(?:nya)?\b/gi, 'how to'],
+  [/\bharga(?:nya)?\b/gi, 'price'],
+  [/\bbiaya(?:nya)?\b/gi, 'cost'],
+  [/\btarif(?:nya)?\b/gi, 'rates'],
+  [/\bsaham(?:nya)?\b/gi, 'stocks'],
+  [/\bkeuangan(?:nya)?\b/gi, 'finance'],
+  [/\bekonomi(?:nya)?\b/gi, 'economy'],
+  [/\bkripto(?:nya)?\b/gi, 'crypto'],
+  [/\bkoin(?:nya)?\b/gi, 'coins'],
+  [/\bemas(?:nya)?\b/gi, 'gold price'],
+  [/\bperak(?:nya)?\b/gi, 'silver price'],
+  [/\bminyak(?:nya)?\b/gi, 'oil price'],
+  [/\bkesehatan(?:nya)?\b/gi, 'health'],
+  [/\bmedis(?:nya)?\b/gi, 'medical'],
+  [/\bkedokteran(?:nya)?\b/gi, 'medicine'],
+  [/\bpenyakit(?:nya)?\b/gi, 'disease'],
+  [/\bvaksin(?:nya)?\b/gi, 'vaccine'],
+  [/\bobat(?:nya)?\b/gi, 'treatment medication'],
+  [/\bkanker(?:nya)?\b/gi, 'cancer treatment'],
+  [/\bteknologi(?:nya)?\b/gi, 'technology'],
+  [/\bsains(?:nya)?\b/gi, 'science'],
+  [/\bilmiah(?:nya)?\b/gi, 'scientific'],
+  [/\bcuaca(?:nya)?\b/gi, 'weather'],
+  [/\bbadai(?:nya)?\b/gi, 'storm'],
+  [/\bgempa(?:nya)?\b/gi, 'earthquake'],
+  [/\bbanjir(?:nya)?\b/gi, 'flood'],
+  [/\btsunami(?:nya)?\b/gi, 'tsunami'],
+  [/\bperang(?:nya)?\b/gi, 'war conflict'],
+  [/\bsenjata(?:nya)?\b/gi, 'weapons'],
+  [/\bmiliter(?:nya)?\b/gi, 'military'],
+  [/\bpemerintah(?:nya)?\b/gi, 'government'],
+  [/\bkebijakan(?:nya)?\b/gi, 'policy'],
+  [/\bhukum(?:nya)?\b/gi, 'law'],
+  [/\baturan(?:nya)?\b/gi, 'regulations'],
+  [/\bputusan(?:nya)?\b/gi, 'ruling'],
+  [/\bdunia(?:nya)?\b/gi, 'world'],
+  [/\bglobal(?:nya)?\b/gi, 'global'],
+  [/\binternasional(?:nya)?\b/gi, 'international'],
+  [/\bindustri(?:nya)?\b/gi, 'industry'],
+  [/\bperusahaan(?:nya)?\b/gi, 'companies'],
+  [/\bpasar(?:nya)?\b/gi, 'market'],
+  [/\bmobil(?:nya)?\b/gi, 'cars'],
+  [/\bkendaraan(?:nya)?\b/gi, 'vehicles'],
+  [/\bpesawat(?:nya)?\b/gi, 'aircraft'],
+  [/\brobot(?:nya)?\b/gi, 'robotics'],
+  [/\brobotika(?:nya)?\b/gi, 'robotics'],
+  [/\bfaktor(?:nya)?\b/gi, 'factors'],
+  [/\bpenyebab(?:nya)?\b/gi, 'causes'],
+  [/\bdampak(?:nya)?\b/gi, 'impacts'],
+  [/\balasan(?:nya)?\b/gi, 'reasons'],
+  [/\bpenjelasan(?:nya)?\b/gi, 'explanation'],
+  [/\banalisis(?:nya)?\b/gi, 'analysis'],
+  [/\bkeamanan(?:nya)?\b/gi, 'security'],
+  [/\bkecepatan(?:nya)?\b/gi, 'speed'],
+  [/\bkinerja(?:nya)?\b/gi, 'performance'],
+  [/\bterbaik(?:nya)?\b/gi, 'best'],
+  [/\btercepat(?:nya)?\b/gi, 'fastest'],
+  [/\bterbesar(?:nya)?\b/gi, 'biggest'],
+  [/\bpemenang(?:nya)?\b/gi, 'winner'],
+  [/\bjuara(?:nya)?\b/gi, 'champion'],
+  [/\bkondisi(?:nya)?\b/gi, 'conditions'],
+  [/\bkeadaan(?:nya)?\b/gi, 'state condition'],
+  [/\bbaterai(?:nya)?\b/gi, 'battery'],
+  [/\benergi(?:nya)?\b/gi, 'energy'],
+  [/\bliga(?:nya)?\b/gi, 'league'],
+  [/\bfungsi(?:nya)?\b/gi, 'functionality'],
+  [/\barti(?:nya)?\b/gi, 'meaning definition'],
+  [/\bmaksud(?:nya)?\b/gi, 'definition'],
+  [/\bcontoh(?:nya)?\b/gi, 'examples'],
+  [/\bpenggunaan(?:nya)?\b/gi, 'usage'],
+  [/\bpenerapan(?:nya)?\b/gi, 'application'],
+  [/\bsekarang\b/gi, 'now']
+];
+
+const GLOBAL_SEARCH_STOPWORDS = /\b(apa|apakah|siapa|siapakah|bagaimana|bagaimanakah|gimana|gimanakah|mengapa|kenapa|kapan|dimana|ke mana|di mana|dari mana|mana|berapa|seperti|kayak|yang|dan|atau|tetapi|namun|dengan|untuk|bagi|pada|di|ke|dari|tentang|mengenai|soal|terkait|adalah|ialah|yaitu|yakni|merupakan|bisa|dapat|tolong|coba|carikan|cari|bantu|tampilkan|berikan|sebutkan|jelaskan|paparkan|terangkan|ceritakan|nya|kah|lah|saja|pun|dong|sih|kok|deh|ya|kan|ada|sudah|telah|sedang|lagi|akan|pernah|kalian|kamu|anda|kita|saya|nih|tuh|lho|loh|kira|kira-kira)\b/gi;
+
+function translateIndoQueryToGlobalEnglish(rawQuery) {
+  if (!rawQuery || typeof rawQuery !== 'string') return '';
+  const trimmed = rawQuery.trim();
+  if (!trimmed) return '';
+
+  // 1. Jika query eksplisit meminta data domestik Indonesia, jangan diterjemahkan ke kueri global
+  if (isExplicitDomesticIndoQuery(trimmed)) {
+    return trimmed;
+  }
+
+  // 2. Jika tidak ada kata bahasa Indonesia sama sekali, pertahankan kueri asli
+  if (!hasIndonesianWords(trimmed)) {
+    return trimmed;
+  }
+
+  let translated = trimmed;
+
+  // 3. Ganti frasa majemuk terlebih dahulu
+  for (const [regex, replacement] of GLOBAL_SEARCH_PHRASE_DICT) {
+    translated = translated.replace(regex, replacement);
+  }
+
+  // 4. Ganti kata-kata individual
+  for (const [regex, replacement] of GLOBAL_SEARCH_WORD_DICT) {
+    translated = translated.replace(regex, replacement);
+  }
+
+  // 5. Bersihkan stopwords / partikel bahasa Indonesia
+  translated = translated.replace(GLOBAL_SEARCH_STOPWORDS, ' ');
+
+  // 6. Normalisasi spasi dan tanda baca
+  translated = translated
+    .replace(/[^\p{L}\p{N}\s\.\-]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // 7. Deduplikasi kata berturut-turut yang identik
+  const words = translated.split(/\s+/).filter(Boolean);
+  const dedupedWords = [];
+  for (const w of words) {
+    const last = dedupedWords[dedupedWords.length - 1];
+    if (!last || last.toLowerCase() !== w.toLowerCase()) {
+      dedupedWords.push(w);
+    }
+  }
+  const result = dedupedWords.join(' ').trim();
+
+  return result.length >= 2 ? result : trimmed;
+}
+
 // Helper to perform quick web search via Serper Google Search API
 function performWebSearch(query, apiKey = null, num = 15) {
   return new Promise((resolve) => {
@@ -741,16 +962,20 @@ function performWebSearch(query, apiKey = null, num = 15) {
       return safeResolve({ query: '', count: 0, results: [] });
     }
     const cleanQuery = query.trim();
+    const isDomestic = isExplicitDomesticIndoQuery(cleanQuery);
+    const englishQuery = translateIndoQueryToGlobalEnglish(cleanQuery);
+    const targetSearchQuery = (!isDomestic && englishQuery) ? englishQuery : cleanQuery;
+
     const targetNum = Math.min(Math.max(parseInt(num, 10) || 15, 1), 30);
     const serperKey = apiKey || process.env.SERPER_API_KEY || null;
     if (!serperKey) {
-      return safeResolve({ query: cleanQuery, count: 0, results: [], error: 'SERPER_API_KEY belum dikonfigurasi di server. Set env SERPER_API_KEY atau masukkan key di Pengaturan.' });
+      return safeResolve({ query: targetSearchQuery, count: 0, results: [], error: 'SERPER_API_KEY belum dikonfigurasi di server. Set env SERPER_API_KEY atau masukkan key di Pengaturan.' });
     }
     const postData = JSON.stringify({
-      q: cleanQuery,
+      q: targetSearchQuery,
       num: targetNum,
-      gl: 'us', // Global Worldwide Search (Universal - Tidak terisolasi di satu negara)
-      hl: 'en'  // Global Language Ranking
+      gl: isDomestic ? 'id' : 'us', // Prioritaskan domain/region Indonesia HANYA jika kueri eksplisit domestik
+      hl: isDomestic ? 'id' : 'en'  // Global Language Ranking default
     });
 
     const options = {
@@ -2522,7 +2747,7 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
 // Pembersih tanda baca URL yang memperhitungkan keseimbangan tanda kurung (misal: artikel Wikipedia)
 function cleanExtractedUrlPunctuation(rawUrl) {
   if (!rawUrl || typeof rawUrl !== 'string') return '';
-  let clean = rawUrl.trim().replace(/[.,!?;:]+$/, '');
+  let clean = rawUrl.trim().replace(/^[<(\[]+/, '').replace(/[.,!?;:>\]]+$/, '');
   while (clean.endsWith(')')) {
     const openCount = (clean.match(/\(/g) || []).length;
     const closeCount = (clean.match(/\)/g) || []).length;
@@ -2645,17 +2870,15 @@ function deriveBroadSearchQueries(rawQuery, contextText = '') {
   coreQuery = coreQuery.replace(/\s+/g, ' ').trim();
   if (coreQuery.length < 2) coreQuery = cleanQuery;
 
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonthId = now.toLocaleString('id-ID', { month: 'long' });
+  const isDomestic = isExplicitDomesticIndoQuery(cleanQuery) || isExplicitDomesticIndoQuery(contextText);
 
   return {
     primary: cleanQuery,
     core: coreQuery,
     news: `${coreQuery} news`,
-    recentNews: `${coreQuery} berita`,
-    recentNewsId: `${coreQuery} berita terbaru`,
-    weeklyNews: `${coreQuery} update`,
+    recentNews: isDomestic ? `${coreQuery} berita terbaru` : `${coreQuery} latest news`,
+    recentNewsId: isDomestic ? `${coreQuery} berita terkini` : `${coreQuery} breaking news`,
+    weeklyNews: `${coreQuery} updates`,
     tech: coreQuery
   };
 }
@@ -2878,40 +3101,43 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
     return { query: '', count: 0, results: [] };
   }
   const cleanDateQuery = stripDateNoise(query.trim());
-  const qPlan = deriveBroadSearchQueries(query.trim(), contextText);
+  const isDomestic = isExplicitDomesticIndoQuery(query.trim()) || isExplicitDomesticIndoQuery(contextText);
+  const englishQuery = translateIndoQueryToGlobalEnglish(query.trim());
+  const targetPrimaryQuery = (!isDomestic && englishQuery) ? englishQuery : query.trim();
+
+  const qPlan = deriveBroadSearchQueries(targetPrimaryQuery, contextText);
   const cleanQuery = qPlan.primary;
   const techQuery = qPlan.tech;
   const newsQuery = qPlan.news;
   const recentQuery = qPlan.recentNews;
-  const recentQueryId = qPlan.recentNewsId || `${cleanQuery} berita terbaru`;
+  const recentQueryId = qPlan.recentNewsId;
   const weeklyQuery = qPlan.weeklyNews;
   const coreQuery = qPlan.core;
-
-  // Deteksi apakah kueri relevan dengan konteks bahasa Indonesia / nasional
-  const combinedLower = (cleanQuery + ' ' + (contextText || '')).toLowerCase();
-  const isIndoQuery = /\b(terbaru|terkini|berita|apa|siapa|bagaimana|mengapa|kapan|di|ke|dari|hari ini|minggu ini|bulan ini|tahun ini|presiden|indonesia|jakarta|pemerintah|bbm|gempa|harga|bansos|pilkada|narkoba|polisi|pasar saham)\b/i.test(combinedLower);
 
   const serperCalls = [
     performWebSearch(cleanQuery, null, maxResults)
   ];
-  if (cleanDateQuery && cleanDateQuery.length >= 3 && cleanDateQuery.toLowerCase() !== cleanQuery.toLowerCase()) {
+  if (!isDomestic && cleanQuery.toLowerCase() !== query.trim().toLowerCase()) {
+    serperCalls.push(performWebSearch(query.trim(), null, maxResults));
+  } else if (cleanDateQuery && cleanDateQuery.length >= 3 && cleanDateQuery.toLowerCase() !== cleanQuery.toLowerCase()) {
     serperCalls.push(performWebSearch(cleanDateQuery, null, maxResults));
   }
 
+  const combinedLower = (cleanQuery + ' ' + query.trim() + ' ' + (contextText || '')).toLowerCase();
   const isTechQuery = /\b(ai|llm|software|github|code|linux|python|developer|api|tech|crypto|bitcoin|model|chip|gpu|nvidia|programming|framework)\b/i.test(combinedLower);
 
-  // Eksekusi seluruh provider: Google Serper Global, Google News RSS Global, Tech Wire / HackerNews (jika tech), DuckDuckGo Instant, & Wikipedia Global
+  // Eksekusi seluruh provider: Google Serper Global, Google News RSS Global (US/EN), Tech Wire / HackerNews, DuckDuckGo Instant, & Wikipedia Global (EN)
   const [serperRes1, serperRes2, gnewsPrimary, gnewsCore, gnewsIndo, gnewsNews, hnTech, hnCore, ddgInstant, wikiRes] = await Promise.allSettled([
     serperCalls[0],
     serperCalls[1] || Promise.resolve({ results: [] }),
     fetchGoogleNewsRss(cleanQuery, 'en', 10),
     fetchGoogleNewsRss(coreQuery, 'en', 8),
-    isIndoQuery ? fetchGoogleNewsRss(`${coreQuery} berita terbaru`, 'id', 6) : Promise.resolve([]),
+    isDomestic ? fetchGoogleNewsRss(`${coreQuery} berita terbaru`, 'id', 6) : Promise.resolve([]),
     fetchGoogleNewsRss(newsQuery, 'en', 6),
     isTechQuery ? fetchHackerNewsTech(techQuery, 8) : Promise.resolve([]),
     isTechQuery ? fetchHackerNewsTech(coreQuery, 6) : Promise.resolve([]),
     fetchDuckDuckGoInstant(coreQuery),
-    fetchWikipediaFullText(coreQuery, 'en', 4)
+    fetchWikipediaFullText(coreQuery, isDomestic ? 'id' : 'en', 4)
   ]);
 
   const candidatePool = [];
@@ -2952,6 +3178,12 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
 
     // Filter out irrelevant disambiguation or unrelated codenames
     if (normTitle.includes('listofapplecodenames') && !cleanQuery.toLowerCase().includes('apple')) continue;
+
+    // Bila BUKAN pencarian domestik eksplisit, deprioritaskan domain portal/agregator berita lokal clickbait jika hasil non-agregator sudah cukup
+    if (!isDomestic && results.length >= 3) {
+      const isRegionalAggregator = /\b(tribunnews|detik|kompas|liputan6|suara|merdeka|sindonews|viva|inews|kumparan|jpnn|kapanlagi|idntimes)\.co(m|\.id)\b/i.test(normUrl) || /\.(id|co\.id)$/i.test(item.domain || '');
+      if (isRegionalAggregator) continue;
+    }
 
     if (seenUrls.has(normUrl)) continue;
     seenUrls.add(normUrl);
@@ -4291,7 +4523,7 @@ async function requestHandler(req, res) {
       let base64Content = rawData;
 
       // Match standard Data URL format: data:<mediatype>[;charset=utf-8][;base64],<data>
-      const dataUrlMatch = rawData.match(/^data:([a-zA-Z0-9.+_-]+\/[a-zA-Z0-9.+_-]+)(?:;[^,]+)*;base64,(.*)$/s);
+      const dataUrlMatch = rawData.match(/^data:([a-zA-Z0-9.+_-]+\/[a-zA-Z0-9.+_-]+)(?:;[a-zA-Z0-9=._-]+)*;base64,(.*)$/s);
       if (dataUrlMatch) {
         const mime = dataUrlMatch[1].toLowerCase();
         base64Content = dataUrlMatch[2];
@@ -4524,13 +4756,13 @@ async function requestHandler(req, res) {
 // Web Search API Endpoint (Serper Google Search Engine)
   if (pathname === '/api/web-search' && (method === 'GET' || method === 'POST')) {
     try {
-      let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
+      let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || reqUrl.searchParams.get('search') || reqUrl.searchParams.get('keyword') || reqUrl.searchParams.get('topic') || reqUrl.searchParams.get('topik') || reqUrl.searchParams.get('text') || reqUrl.searchParams.get('cari') || reqUrl.searchParams.get('kata_kunci') || '';
       let apiKey = req.headers['x-serper-key'] || req.headers['x-api-key'] || '';
       let num = parseInt(reqUrl.searchParams.get('num') || reqUrl.searchParams.get('limit') || '15', 10);
       if (method === 'POST') {
         const body = await safeParseBody(req);
         if (!body) return;
-        query = body.query || body.q || query;
+        query = body.query || body.q || body.search || body.keyword || body.topic || body.topik || body.text || body.cari || body.kata_kunci || query;
         apiKey = body.apiKey || body.serperApiKey || body.key || apiKey;
         if (body.num || body.limit) num = parseInt(body.num || body.limit, 10);
       }
@@ -4557,13 +4789,13 @@ async function requestHandler(req, res) {
   // Autonomous Web Search Tool Endpoint (Built from 0, Zero-API, No Serper API)
   if ((pathname === '/api/tools/search-web' || pathname === '/api/autonomous/search') && (method === 'GET' || method === 'POST')) {
     try {
-      let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || reqUrl.searchParams.get('search') || reqUrl.searchParams.get('keyword') || reqUrl.searchParams.get('topic') || reqUrl.searchParams.get('text') || '';
+      let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || reqUrl.searchParams.get('search') || reqUrl.searchParams.get('keyword') || reqUrl.searchParams.get('topic') || reqUrl.searchParams.get('topik') || reqUrl.searchParams.get('text') || reqUrl.searchParams.get('cari') || reqUrl.searchParams.get('kata_kunci') || '';
       let context = reqUrl.searchParams.get('context') || '';
       let maxResults = parseInt(reqUrl.searchParams.get('maxResults') || '8', 10);
       if (method === 'POST') {
         const body = await safeParseBody(req);
         if (!body) return;
-        query = body.query || body.q || body.search || body.keyword || body.topic || body.text || query;
+        query = body.query || body.q || body.search || body.keyword || body.topic || body.topik || body.text || body.cari || body.kata_kunci || query;
         context = body.context || body.conversationContext || context;
         if (body.maxResults) maxResults = parseInt(body.maxResults, 10);
       }
@@ -4581,12 +4813,12 @@ async function requestHandler(req, res) {
   // Autonomous Web Browse & Page Reading Tool Endpoint (Built from 0)
   if ((pathname === '/api/tools/browse-page' || pathname === '/api/autonomous/browse') && (method === 'GET' || method === 'POST')) {
     try {
-      let targetUrl = reqUrl.searchParams.get('url') || reqUrl.searchParams.get('target') || reqUrl.searchParams.get('targetUrl') || reqUrl.searchParams.get('link') || '';
+      let targetUrl = reqUrl.searchParams.get('url') || reqUrl.searchParams.get('target') || reqUrl.searchParams.get('targetUrl') || reqUrl.searchParams.get('link') || reqUrl.searchParams.get('tautan') || '';
       let maxChars = parseInt(reqUrl.searchParams.get('maxChars') || '5000', 10);
       if (method === 'POST') {
         const body = await safeParseBody(req);
         if (!body) return;
-        targetUrl = body.url || body.targetUrl || body.link || body.target || targetUrl;
+        targetUrl = body.url || body.targetUrl || body.link || body.target || body.tautan || targetUrl;
         if (body.maxChars) maxChars = parseInt(body.maxChars, 10);
       }
       if (!targetUrl || !targetUrl.trim()) {
@@ -4605,8 +4837,8 @@ async function requestHandler(req, res) {
     try {
       const body = await safeParseBody(req);
       if (!body) return;
-      const content = String(body.content || body.value || body.text || body.fact || body.note || body.catatan || body.info || body.data || '').trim();
-      let topic = String(body.topic || body.key || body.title || body.subject || body.kategori || '').trim();
+      const content = String(body.content || body.value || body.text || body.fact || body.note || body.catatan || body.info || body.data || body.isi || body.konten || '').trim();
+      let topic = String(body.topic || body.key || body.title || body.subject || body.kategori || body.topik || '').trim();
       if (!content) {
         return sendJSON(res, 400, { error: 'Parameter `content` (atau teks fakta) diperlukan untuk menyimpan memori.' });
       }
@@ -4627,12 +4859,12 @@ async function requestHandler(req, res) {
   // Long-Term Memory Search Tool Endpoint (SQLite FTS5)
   if ((pathname === '/api/memory/search' || pathname === '/api/tools/memory/search') && (method === 'GET' || method === 'POST')) {
     try {
-      let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
+      let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || reqUrl.searchParams.get('cari') || reqUrl.searchParams.get('kata_kunci') || reqUrl.searchParams.get('topik') || '';
       let limit = parseInt(reqUrl.searchParams.get('limit') || '5', 10);
       if (method === 'POST') {
         const body = await safeParseBody(req);
         if (!body) return;
-        query = body.query || body.q || body.keyword || body.topic || query;
+        query = body.query || body.cari || body.kata_kunci || body.keyword || body.topik || body.topic || body.q || query;
         if (body.limit) limit = parseInt(body.limit, 10);
       }
       if (!query || !query.trim()) {
@@ -4847,13 +5079,13 @@ async function requestHandler(req, res) {
       let query = '';
       let maxResults = 6;
       if (method === 'GET') {
-        query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || '';
-        const parsedLimit = parseInt(reqUrl.searchParams.get('limit') || '6', 10);
+        query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || reqUrl.searchParams.get('keyword') || reqUrl.searchParams.get('search') || reqUrl.searchParams.get('topic') || reqUrl.searchParams.get('title') || reqUrl.searchParams.get('text') || reqUrl.searchParams.get('cari') || reqUrl.searchParams.get('kata_kunci') || reqUrl.searchParams.get('judul') || '';
+        const parsedLimit = parseInt(reqUrl.searchParams.get('limit') || reqUrl.searchParams.get('max_results') || '6', 10);
         maxResults = Math.min(Math.max(isNaN(parsedLimit) ? 6 : parsedLimit, 1), 20);
       } else {
         const body = await safeParseBody(req);
         if (!body) return;
-        query = body.q || body.query || body.keyword || body.search || body.topic || body.title || body.text || '';
+        query = body.q || body.query || body.keyword || body.search || body.topic || body.title || body.text || body.cari || body.kata_kunci || body.judul || '';
         const parsedLimit = parseInt(body.limit || body.max_results || '6', 10);
         maxResults = Math.min(Math.max(isNaN(parsedLimit) ? 6 : parsedLimit, 1), 20);
       }
@@ -4877,12 +5109,12 @@ async function requestHandler(req, res) {
     let maxChars = 8000;
     try {
       if (method === 'GET') {
-        targetUrl = reqUrl.searchParams.get('url') || reqUrl.searchParams.get('link') || reqUrl.searchParams.get('target') || reqUrl.searchParams.get('targetUrl') || '';
+        targetUrl = reqUrl.searchParams.get('url') || reqUrl.searchParams.get('link') || reqUrl.searchParams.get('target') || reqUrl.searchParams.get('targetUrl') || reqUrl.searchParams.get('tautan') || '';
         if (reqUrl.searchParams.get('maxChars')) maxChars = parseInt(reqUrl.searchParams.get('maxChars'), 10) || 8000;
       } else {
         const body = await safeParseBody(req);
         if (!body) return;
-        targetUrl = body.url || body.link || body.targetUrl || body.target || '';
+        targetUrl = body.url || body.link || body.targetUrl || body.target || body.tautan || '';
         if (body.maxChars) maxChars = parseInt(body.maxChars, 10) || 8000;
       }
 

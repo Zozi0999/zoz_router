@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261013_v219">
+  <link rel="stylesheet" href="style.css?v=20261013_v225">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -421,8 +421,8 @@
 
             <!-- Web Search & Deep Research Mode Menu -->
             <div class="search-menu-wrapper" id="searchMenuWrapper">
-              <button class="composer-btn web-search-toggle mode-default active" id="webSearchToggleBtn" type="button" title="Mode Penelusuran Web & Deep Research (Mode Default: Aktif)" aria-expanded="false">
-                <i class="fa-solid fa-globe" id="webSearchIcon"></i>
+              <button class="composer-btn web-search-toggle mode-autonomous active" id="webSearchToggleBtn" type="button" title="Autonomous Web Explorer: Aktif (Klik untuk ubah / matikan)" aria-expanded="false">
+                <i class="fa-solid fa-compass" id="webSearchIcon"></i>
                 <span class="search-badge" id="searchBadge" style="display: none;">PRO</span>
               </button>
 
@@ -443,7 +443,7 @@
                     <i class="fa-solid fa-check search-item-check" style="display: none;"></i>
                   </div>
                 </button>
-                <button class="search-menu-item active" id="searchOptionDefault" type="button" data-mode="default">
+                <button class="search-menu-item" id="searchOptionDefault" type="button" data-mode="default">
                   <div class="search-item-icon-box default-accent">
                     <i class="fa-solid fa-globe"></i>
                   </div>
@@ -452,7 +452,7 @@
                     <span class="search-item-desc">Pencarian kilat Google real-time</span>
                   </div>
                   <div class="search-item-action-area">
-                    <i class="fa-solid fa-check search-item-check"></i>
+                    <i class="fa-solid fa-check search-item-check" style="display: none;"></i>
                     <span class="search-item-close-btn" role="button" tabindex="0" title="Matikan mode ini (Kembali ke Nonaktif)" style="display: none;" aria-label="Matikan mode">
                       <i class="fa-solid fa-xmark"></i>
                     </span>
@@ -478,7 +478,7 @@
                     </span>
                   </div>
                 </button>
-                <button class="search-menu-item" id="searchOptionAutonomous" type="button" data-mode="autonomous">
+                <button class="search-menu-item active" id="searchOptionAutonomous" type="button" data-mode="autonomous">
                   <div class="search-item-icon-box auto-accent">
                     <i class="fa-solid fa-compass"></i>
                   </div>
@@ -487,8 +487,8 @@
                     <span class="search-item-desc">Tool mandiri dari nol (Tanpa Serper, dipanggil bebas oleh AI)</span>
                   </div>
                   <div class="search-item-action-area">
-                    <i class="fa-solid fa-check search-item-check" style="display: none;"></i>
-                    <span class="search-item-close-btn" role="button" tabindex="0" title="Matikan mode ini (Kembali ke Nonaktif)" style="display: none;" aria-label="Matikan mode">
+                    <i class="fa-solid fa-check search-item-check"></i>
+                    <span class="search-item-close-btn" role="button" tabindex="0" title="Matikan mode ini (Kembali ke Nonaktif)" style="display: inline-flex;" aria-label="Matikan mode">
                       <i class="fa-solid fa-xmark"></i>
                     </span>
                   </div>
@@ -1408,8 +1408,8 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261013_v219" defer></script>
+  <script src="text-safety.js?v=20261013_v225" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261013_v219" defer></script>
+  <script src="app.js?v=20261013_v225" defer></script>
 </body>
 </html>
