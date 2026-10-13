@@ -7393,7 +7393,7 @@ ${organicBlock}
   const AUTONOMOUS_TOOL_NAMES = [
     'search_web', 'web_search', 'search',
     'browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url',
-    'search_youtube',
+    'search_youtube', 'youtube_search', 'cari_youtube', 'search_yt', 'youtube',
     'save_memory', 'simpan_memori',
     'search_memory', 'cari_memori',
     'execute_python_code', 'execute_code', 'run_code', 'python_code'
@@ -7407,7 +7407,7 @@ ${organicBlock}
   // Aturan izin (dipakai saat EKSEKUSI call): search_youtube bila toggle YouTube aktif;
   // ekstraksi web URL & tool utility lokal selalu diizinkan; tool search bila Mode Pencarian Web aktif.
   function isAutonomousToolAllowed(toolName, webToolsAllowed) {
-    if (toolName === 'search_youtube') return Boolean(STATE.isYouTubeSearchMode);
+    if (['search_youtube', 'youtube_search', 'cari_youtube', 'search_yt', 'youtube'].includes(toolName)) return Boolean(STATE.isYouTubeSearchMode);
     if (EXTRACTION_TOOL_NAMES.includes(toolName)) return true;
     if (LOCAL_UTILITY_TOOL_NAMES.includes(toolName)) return true;
     return Boolean(webToolsAllowed);
@@ -7692,8 +7692,13 @@ ${organicBlock}
   function saveLocalBrowserMemory(topic, content) {
     try {
       const list = getLocalBrowserMemories();
-      list.unshift({ topic, content, timestamp: Date.now() });
-      if (list.length > 200) list.pop();
+      const existingIdx = list.findIndex(m => m.topic === topic && m.content === content);
+      if (existingIdx !== -1) {
+        list[existingIdx].timestamp = Date.now();
+      } else {
+        list.unshift({ topic, content, timestamp: Date.now() });
+        if (list.length > 200) list.pop();
+      }
       localStorage.setItem('zoz_local_memories', JSON.stringify(list));
       return true;
     } catch (_) {
@@ -7703,7 +7708,7 @@ ${organicBlock}
 
   function searchLocalBrowserMemories(query, limit = 5) {
     const list = getLocalBrowserMemories();
-    const qTerms = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+    const qTerms = String(query || '').toLowerCase().replace(/[^\p{L}\p{N}_]/gu, ' ').trim().split(/\s+/).filter(Boolean);
     if (qTerms.length === 0) return list.slice(0, limit);
     const scored = [];
     for (const m of list) {
@@ -7768,7 +7773,7 @@ ${organicBlock}
       if (['search_web', 'web_search', 'search'].includes(toolName)) {
         canonicalTool = 'search_web';
         canonicalArg = String(args.query || args.q || args.keyword || args.search || args.topic || args.text || (typeof args === 'string' ? args : '') || promptContext || '').trim().toLowerCase();
-      } else if (toolName === 'search_youtube') {
+      } else if (['search_youtube', 'youtube_search', 'cari_youtube', 'search_yt', 'youtube'].includes(toolName)) {
         canonicalTool = 'search_youtube';
         const q = String(args.query || args.q || args.keyword || args.search || args.topic || args.title || args.text || (typeof args === 'string' ? args : '') || promptContext || '').trim().toLowerCase();
         const max = Math.max(1, Math.min(10, parseInt(args.max_results || args.maxResults || args.limit, 10) || 6));
@@ -7808,7 +7813,7 @@ ${organicBlock}
         return data;
       };
       
-      if (toolName === 'search_youtube') {
+      if (['search_youtube', 'youtube_search', 'cari_youtube', 'search_yt', 'youtube'].includes(toolName)) {
         let query = args.query || args.q || args.keyword || args.search || args.topic || args.title || args.text || (typeof args === 'string' ? args : '');
         if (!query || !String(query).trim()) {
           query = promptContext || 'video populer hari ini';
@@ -7822,7 +7827,8 @@ ${organicBlock}
           return {
             text: `Hasil pencarian video YouTube untuk "${query}": tidak ditemukan video. Coba kata kunci alternatif yang lebih spesifik.`,
             sources: [],
-            videoIds: []
+            videoIds: [],
+            success: false
           };
         }
 
@@ -7847,7 +7853,8 @@ ${organicBlock}
             domain: 'youtube.com',
             snippet: `${v.channel ? `Video YouTube oleh ${v.channel}: ` : 'Video YouTube: '}${(v.description || v.title || '').slice(0, 160)}`
           })),
-          videoIds: list.map((v) => v.videoId).filter(Boolean)
+          videoIds: list.map((v) => v.videoId).filter(Boolean),
+          success: true
         });
       }
 
@@ -8124,7 +8131,7 @@ ${organicBlock}
         }
         
         if (results.length === 0) {
-          return { text: `Hasil pencarian untuk "${query}": Tidak ditemukan hasil spesifik. Coba gunakan kata kunci alternatif.`, sources: [] };
+          return { text: `Hasil pencarian untuk "${query}": Tidak ditemukan hasil spesifik. Coba gunakan kata kunci alternatif.`, sources: [], success: false };
         }
         
         let output = `HASIL PENCARIAN WEB MULTI-SUMBER UNTUK "${query}":\n`;
@@ -8132,12 +8139,12 @@ ${organicBlock}
         results.forEach((item, idx) => {
           output += `\n[${idx + 1}] [${item.sourceProvider || 'Web'}] ${item.title}\nURL: ${item.url}\nSumber/Domain: ${item.domain}\nRingkasan: ${item.snippet}\n`;
         });
-        return cacheAndReturn({ text: output, sources: results });
+        return cacheAndReturn({ text: output, sources: results, success: true });
       }
       
       if (['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(toolName)) {
         let url = args.url || args.target || args.link || args.href || args.targetUrl || (typeof args === 'string' ? args : '');
-        if (!url || !url.trim()) return { text: 'Error: Parameter `url` tidak boleh kosong.', sources: [] };
+        if (!url || !url.trim()) return { text: 'Error: Parameter `url` tidak boleh kosong.', sources: [], success: false };
         url = url.trim();
         if (!/^https?:\/\//i.test(url)) {
           url = 'https://' + url;
@@ -8151,7 +8158,9 @@ ${organicBlock}
             if (ytInfo && ytInfo.success && ytInfo.title) {
               return cacheAndReturn({
                 text: `[INFORMASI TERVERIFIKASI VIDEO YOUTUBE]:\n- Judul: "${ytInfo.title}"\n- Channel / Pembuat: "${ytInfo.channel}" (${ytInfo.channel_url || 'N/A'})\n- URL: ${ytInfo.url}\n- Thumbnail: ${ytInfo.thumbnail}\n(Diambil secara real-time via YouTube oEmbed)`,
-                sources: [{ title: ytInfo.title, url: ytInfo.url, domain: 'youtube.com', snippet: `Video YouTube oleh ${ytInfo.channel}: ${ytInfo.title}` }]
+                sources: [{ title: ytInfo.title, url: ytInfo.url, domain: 'youtube.com', snippet: `Video YouTube oleh ${ytInfo.channel}: ${ytInfo.title}` }],
+                videoIds: ytIds,
+                success: true
               });
             }
           } catch (_) {}
@@ -8171,7 +8180,8 @@ ${organicBlock}
                   const docTitle = extData.title || (extractDomainSafe ? extractDomainSafe(url) : 'Halaman Web');
                   return cacheAndReturn({
                     text: `KONTEN HALAMAN WEB "${docTitle}" (${url}):\n\n${extData.content}`,
-                    sources: [{ title: docTitle, url: url, domain: extData.domain || 'web', snippet: extData.content.substring(0, 160) }]
+                    sources: [{ title: docTitle, url: url, domain: extData.domain || 'web', snippet: extData.content.substring(0, 160) }],
+                    success: true
                   });
                 }
               }
@@ -8198,7 +8208,8 @@ ${organicBlock}
                 const foundDomain = extractDomainSafe ? extractDomainSafe(url) : 'web';
                 return cacheAndReturn({
                   text: output,
-                  sources: [{ title: data.title || url, url: url, domain: foundDomain, snippet: (data.text || '').substring(0, 160) }]
+                  sources: [{ title: data.title || url, url: url, domain: foundDomain, snippet: (data.text || '').substring(0, 160) }],
+                  success: true
                 });
               }
             }
@@ -8219,7 +8230,8 @@ ${organicBlock}
               const docTitle = titleMatch ? titleMatch[1].trim() : (extractDomainSafe ? extractDomainSafe(url) : 'Halaman Web');
               return cacheAndReturn({
                 text: `KONTEN HALAMAN WEB "${docTitle}" (${url}):\n\n${cleanMarkdown}`,
-                sources: [{ title: docTitle, url: url, domain: extractDomainSafe ? extractDomainSafe(url) : 'web', snippet: cleanMarkdown.substring(0, 160) }]
+                sources: [{ title: docTitle, url: url, domain: extractDomainSafe ? extractDomainSafe(url) : 'web', snippet: cleanMarkdown.substring(0, 160) }],
+                success: true
               });
             }
           }
@@ -8240,20 +8252,21 @@ ${organicBlock}
                 const extract = wData.extract || wData.description || 'Halaman Wikipedia';
                 return cacheAndReturn({
                   text: `KONTEN ARTIKEL WIKIPEDIA "${wData.title || pageTitle}" (${url}):\n\n${extract}`,
-                  sources: [{ title: wData.title || pageTitle, url: url, domain: `${lang}.wikipedia.org`, snippet: extract.substring(0, 160) }]
+                  sources: [{ title: wData.title || pageTitle, url: url, domain: `${lang}.wikipedia.org`, snippet: extract.substring(0, 160) }],
+                  success: true
                 });
               }
             }
           } catch (_) {}
         }
 
-        return { text: `Error: Tidak dapat membaca URL ${url} (Koneksi gagal atau halaman tidak dapat diakses). Saran: Coba gunakan search_web untuk mencari ringkasan/informasi alternatif tentang topik ini, atau beri tahu pengguna bahwa tautan tersebut tidak dapat dibuka.`, sources: [] };
+        return { text: `Error: Tidak dapat membaca URL ${url} (Koneksi gagal atau halaman tidak dapat diakses). Saran: Coba gunakan search_web untuk mencari ringkasan/informasi alternatif tentang topik ini, atau beri tahu pengguna bahwa tautan tersebut tidak dapat dibuka.`, sources: [], success: false };
       }
 
       if (['save_memory', 'simpan_memori'].includes(toolName)) {
         const content = String(args.content || args.value || args.text || args.fact || args.note || args.catatan || args.info || args.data || (typeof args === 'string' ? args : '')).trim();
         if (!content) {
-          return { text: 'Error: Konten fakta/catatan memori tidak boleh kosong.', sources: [] };
+          return { text: 'Error: Konten fakta/catatan memori tidak boleh kosong.', sources: [], success: false };
         }
         let topic = String(args.topic || args.title || args.key || args.subject || args.kategori || '').trim();
         if (!topic) {
@@ -8275,7 +8288,8 @@ ${organicBlock}
               const data = await res.json();
               return {
                 text: `[MEMORI JANGKA PANJANG TERSIMPAN]: Berhasil menyimpan fakta ke dalam database lokal (SQLite FTS5):\n- Topik: "${topic}"\n- Konten: ${content}\n(Catatan: Informasi ini tersimpan secara permanen dan dapat dicari di sesi mana pun menggunakan tool \`search_memory\`).`,
-                sources: []
+                sources: [],
+                success: true
               };
             }
           } catch (_) {}
@@ -8283,7 +8297,8 @@ ${organicBlock}
 
         return {
           text: `[MEMORI JANGKA PANJANG TERSIMPAN (BROWSER)]: Berhasil menyimpan fakta ke dalam memori browser lokal:\n- Topik: "${topic}"\n- Konten: ${content}\n(Catatan: Informasi ini tersimpan dan dapat dicari di sesi mana pun menggunakan tool \`search_memory\`).`,
-          sources: []
+          sources: [],
+          success: true
         };
       }
 
@@ -8293,10 +8308,11 @@ ${organicBlock}
           query = promptContext || '';
         }
         if (!query) {
-          return { text: 'Error: Parameter `query` pencarian memori tidak boleh kosong.', sources: [] };
+          return { text: 'Error: Parameter `query` pencarian memori tidak boleh kosong.', sources: [], success: false };
         }
         const limit = Math.max(1, Math.min(15, parseInt(args.limit || args.max_results || 5, 10) || 5));
 
+        let serverMatches = [];
         if (!IS_GITHUB_PAGES) {
           try {
             const res = await fetch(`/api/memory/search?q=${encodeURIComponent(query)}&userId=${encodeURIComponent(STATE.userId || 'default')}&limit=${limit}`, {
@@ -8305,36 +8321,46 @@ ${organicBlock}
             });
             if (res.ok) {
               const data = await res.json();
-              if (data && data.count > 0 && data.text) {
-                return {
-                  text: `[HASIL PENCARIAN MEMORI JANGKA PANJANG UNTUK "${query}"]:\n${data.text}`,
-                  sources: []
-                };
+              if (data && data.count > 0 && Array.isArray(data.results)) {
+                serverMatches = data.results;
               }
             }
           } catch (_) {}
         }
 
-        // Fallback pencarian memori di browser storage
+        // Gabungkan dengan catatan di browser storage untuk mencegah data silo
         const localMatches = searchLocalBrowserMemories(query, limit);
-        if (localMatches && localMatches.length > 0) {
-          const formatted = localMatches.map(m => `[${m.topic}] : ${m.content}`).join('\n\n');
+        const combined = [...serverMatches];
+        const seen = new Set(combined.map(r => `${String(r.topic || '').toLowerCase()}:::${String(r.content || '').toLowerCase()}`));
+        for (const lm of localMatches) {
+          const key = `${String(lm.topic || '').toLowerCase()}:::${String(lm.content || '').toLowerCase()}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            combined.push(lm);
+          }
+        }
+
+        if (combined.length > 0) {
+          const selected = combined.slice(0, limit);
+          const formatted = selected.map(m => `[${m.topic}] : ${m.content}`).join('\n\n');
           return {
-            text: `[HASIL PENCARIAN MEMORI JANGKA PANJANG (BROWSER) UNTUK "${query}"]:\n${formatted}`,
-            sources: []
+            text: `[HASIL PENCARIAN MEMORI JANGKA PANJANG UNTUK "${query}"]:\n${formatted}`,
+            sources: [],
+            success: true
           };
         }
 
         return {
           text: `[HASIL PENCARIAN MEMORI JANGKA PANJANG UNTUK "${query}"]:\nTidak ada catatan memori masa lalu yang cocok dengan kata kunci tersebut.`,
-          sources: []
+          sources: [],
+          success: true
         };
       }
 
       if (['execute_python_code', 'execute_code', 'run_code', 'python_code'].includes(toolName)) {
         const code = String(args.code || args.script || args.python || (typeof args === 'string' ? args : '')).trim();
         if (!code) {
-          return { text: 'Error: Parameter `code` tidak boleh kosong. Sertakan kode Python yang valid dengan perintah print() untuk melihat output.', sources: [] };
+          return { text: 'Error: Parameter `code` tidak boleh kosong. Sertakan kode Python yang valid dengan perintah print() untuk melihat output.', sources: [], success: false };
         }
 
         if (!IS_GITHUB_PAGES) {
@@ -8350,7 +8376,8 @@ ${organicBlock}
               const outText = data.output || 'Kode berhasil dijalankan tanpa output.';
               return {
                 text: `[HASIL EKSEKUSI PYTHON SUBPROCESS SANDBOX]:\n\`\`\`\n${outText}\n\`\`\``,
-                sources: []
+                sources: [],
+                success: data.success !== false
               };
             }
           } catch (_) {}
@@ -8358,16 +8385,17 @@ ${organicBlock}
 
         return {
           text: 'Error eksekusi: Tidak dapat menghubungi server lokal ZOZ Router. Pastikan server lokal aktif (`node server.js`) untuk mengeksekusi kode Python dalam subprocess sandbox.',
-          sources: []
+          sources: [],
+          success: false
         };
       }
       
-      return { text: `Error: Tool "${toolName}" tidak dikenal.`, sources: [] };
+      return { text: `Error: Tool "${toolName}" tidak dikenal.`, sources: [], success: false };
     } catch (err) {
       if (err && (err.name === 'AbortError' || STATE.abortController?.signal?.aborted)) {
         throw err;
       }
-      return { text: `Error menjalankan tool ${toolName}: ${err.message}`, sources: [] };
+      return { text: `Error menjalankan tool ${toolName}: ${err.message}`, sources: [], success: false };
     }
   }
 
@@ -8424,11 +8452,18 @@ ${organicBlock}
 
   function scrubRawToolCallArtifacts(text) {
     if (!text || typeof text !== 'string') return '';
+    const toolPattern = AUTONOMOUS_TOOL_NAMES.join('|');
+    const invokeRegex = new RegExp(`<invoke\\s+name=["'](?:${toolPattern})["']>[\\s\\S]*?<\\/invoke>`, 'gi');
+    const jsonCodeBlockRegex = new RegExp(`\`\`\`(?:tool_call|json)?\\s*\\{[\\s\\S]*?"(?:name|function|tool)"\\s*:\\s*"(?:${toolPattern})"[\\s\\S]*?\\}\\s*\`\`\``, 'gi');
+    const callPreambleRegex = new RegExp(`(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\\s+(?:${toolPattern})[\\s\\S]*?(?:\\.|\\n|$)`, 'gi');
+    const funcCallRegex = new RegExp(`(?:${toolPattern})\\s*\\(\\s*\\{[\\s\\S]*?\\}\\s*\\)`, 'gi');
+    const funcCallArgsRegex = new RegExp(`(?:${toolPattern})\\s*\\(\\s*(?:(?:query|url|q|code|topic|content|script|link|target)\\s*[:=]\\s*)?(["'\`])[\\s\\S]*?\\1\\s*\\)`, 'gi');
+
     let cleaned = text
       .replace(/<(?:tool_call|function_call)>[\s\S]*?<\/(?:tool_call|function_call)>/gi, '')
-      .replace(/<invoke\s+name=["'](?:search_web|browse_web_page|search_youtube|save_memory|search_memory|execute_python_code|execute_code)["']>[\s\S]*?<\/invoke>/gi, '')
+      .replace(invokeRegex, '')
       .replace(/\[TOOL_CALLS\][\s\S]*?(?:\[\/TOOL_CALLS\]|(?=\n\n)|$)/gi, '')
-      .replace(/```(?:tool_call|json)?\s*\{[\s\S]*?"(?:name|function|tool)"\s*:\s*"(?:search_web|browse_web_page|search_youtube|save_memory|search_memory|execute_python_code|execute_code)"[\s\S]*?\}\s*```/gi, '');
+      .replace(jsonCodeBlockRegex, '');
 
     // Hapus blok JSON seimbang yang merepresentasikan pemanggilan tool mentah
     const jsonBlocks = extractBalancedJsonObjects(cleaned);
@@ -8444,9 +8479,9 @@ ${organicBlock}
 
     // Bersihkan residu teks bocor seperti "We will call search_web for ..."
     cleaned = cleaned
-      .replace(/(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\s+(?:search_web|browse_web_page|search_youtube|save_memory|search_memory|execute_python_code|execute_code)[\s\S]*?(?:\.|\n|$)/gi, '')
-      .replace(/(?:search_web|browse_web_page|search_youtube|save_memory|search_memory|execute_python_code|execute_code)\s*\(\s*\{[\s\S]*?\}\s*\)/gi, '')
-      .replace(/(?:search_web|browse_web_page|search_youtube|save_memory|search_memory|execute_python_code|execute_code)\s*\(\s*(?:(?:query|url|q|code|topic|content|script)\s*[:=]\s*)?(["'`])[\s\S]*?\1\s*\)/gi, '')
+      .replace(callPreambleRegex, '')
+      .replace(funcCallRegex, '')
+      .replace(funcCallArgsRegex, '')
       .trim();
 
     return cleaned;
@@ -8463,6 +8498,7 @@ ${organicBlock}
       if (['web_search', 'search', 'pencarian_web', 'cari_web'].includes(n)) return 'search_web';
       if (['browse_web', 'browse_page', 'baca_web', 'scrape_url'].includes(n)) return 'browse_web_page';
       if (['baca_url', 'ambil_web'].includes(n)) return 'extract_web';
+      if (['search_youtube', 'youtube_search', 'cari_youtube', 'search_yt', 'youtube'].includes(n)) return 'search_youtube';
       if (['save_memory', 'simpan_memori', 'store_memory'].includes(n)) return 'save_memory';
       if (['search_memory', 'cari_memori', 'query_memory'].includes(n)) return 'search_memory';
       if (['execute_python_code', 'execute_code', 'run_python', 'run_code', 'python_code', 'python'].includes(n)) return 'execute_python_code';
@@ -8737,7 +8773,7 @@ Format teks (untuk model tanpa function calling):
   }
 
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
-    const isYouTube = toolName === 'search_youtube';
+    const isYouTube = ['search_youtube', 'youtube_search', 'cari_youtube', 'search_yt', 'youtube'].includes(toolName);
     const isBrowse = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(toolName);
     const isSaveMem = ['save_memory', 'simpan_memori'].includes(toolName);
     const isSearchMem = ['search_memory', 'cari_memori'].includes(toolName);
@@ -9404,7 +9440,7 @@ Format teks (untuk model tanpa function calling):
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
           }
-          if (toolName === 'search_youtube' && Array.isArray(toolExecRes.videoIds)) {
+          if (['search_youtube', 'youtube_search', 'cari_youtube', 'search_yt', 'youtube'].includes(toolName) && Array.isArray(toolExecRes.videoIds)) {
             toolExecRes.videoIds.forEach((vid) => {
               if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
             });
@@ -9430,8 +9466,12 @@ Format teks (untuk model tanpa function calling):
         }
 
         const allToolsInRoundFailed = toolExecResults.length > 0 && toolExecResults.every(r => {
+          if (r.toolExecRes && r.toolExecRes.success === false) return true;
           const t = String(r.toolExecRes?.text || '').trim();
-          return t.startsWith('Error:') || t.startsWith('Error eksekusi:') || t.includes('Gagal membaca URL');
+          if (t.startsWith('Error:') || t.startsWith('Error eksekusi:') || t.startsWith('Error Keamanan:') || t.includes('Gagal membaca URL')) return true;
+          if (t.includes('Error eksekusi:') || t.includes('Error Keamanan:') || t.includes('Error:')) return true;
+          if (t.includes('tidak ditemukan video') || t.includes('Tidak ditemukan hasil spesifik')) return true;
+          return false;
         });
 
         if (allToolsInRoundFailed) {
@@ -10437,7 +10477,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
           }
-          if (toolName === 'search_youtube' && Array.isArray(toolExecRes.videoIds)) {
+          if (['search_youtube', 'youtube_search', 'cari_youtube', 'search_yt', 'youtube'].includes(toolName) && Array.isArray(toolExecRes.videoIds)) {
             toolExecRes.videoIds.forEach((vid) => {
               if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
             });
@@ -10463,8 +10503,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         }
 
         const allToolsInRoundFailed = toolExecResults.length > 0 && toolExecResults.every(r => {
+          if (r.toolExecRes && r.toolExecRes.success === false) return true;
           const t = String(r.toolExecRes?.text || '').trim();
-          return t.startsWith('Error:') || t.startsWith('Error eksekusi:') || t.includes('Gagal membaca URL');
+          if (t.startsWith('Error:') || t.startsWith('Error eksekusi:') || t.startsWith('Error Keamanan:') || t.includes('Gagal membaca URL')) return true;
+          if (t.includes('Error eksekusi:') || t.includes('Error Keamanan:') || t.includes('Error:')) return true;
+          if (t.includes('tidak ditemukan video') || t.includes('Tidak ditemukan hasil spesifik')) return true;
+          return false;
         });
 
         if (allToolsInRoundFailed) {

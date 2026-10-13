@@ -1277,8 +1277,8 @@ export default {
     if ((url.pathname === '/api/memory/save' || url.pathname === '/api/tools/memory/save') && request.method === 'POST') {
       try {
         const body = await request.json().catch(() => ({}));
-        const content = String(body.content || body.value || body.text || body.fact || body.note || body.catatan || body.info || '').trim();
-        let topic = String(body.topic || body.key || body.title || body.subject || '').trim();
+        const content = String(body.content || body.value || body.text || body.fact || body.note || body.catatan || body.info || body.data || '').trim();
+        let topic = String(body.topic || body.key || body.title || body.subject || body.kategori || '').trim();
         if (!content) {
           return new Response(JSON.stringify({ error: 'Parameter content (atau teks fakta) diperlukan.' }), {
             status: 400,
@@ -1311,7 +1311,7 @@ export default {
         let query = url.searchParams.get('q') || url.searchParams.get('query') || '';
         if (request.method === 'POST') {
           const body = await request.json().catch(() => ({}));
-          query = body.query || body.q || query;
+          query = body.query || body.q || body.keyword || body.topic || query;
         }
         return new Response(JSON.stringify({
           success: true,
