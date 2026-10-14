@@ -355,7 +355,29 @@ function hasIndonesianWords(str) {
   return INDO_WORDS_PATTERN.test(str);
 }
 
+const REPUTABLE_TECH_DOMAINS = new Set([
+  'reuters.com', 'bloomberg.com', 'axios.com', 'apnews.com', 'wsj.com',
+  'techcrunch.com', 'theverge.com', 'wired.com', 'arstechnica.com', 'venturebeat.com',
+  'engadget.com', 'zdnet.com', 'tomshardware.com', 'anandtech.com',
+  'openai.com', 'anthropic.com', 'deepmind.google', 'ai.meta.com', 'blog.google',
+  'microsoft.com', 'nvidia.com', 'huggingface.co', 'github.com',
+  'arxiv.org', 'nature.com', 'science.org', 'technologyreview.com',
+  'mit.edu', 'stanford.edu', 'bbc.com', 'cnbc.com', 'ft.com'
+]);
+
 const GLOBAL_SEARCH_PHRASE_DICT = [
+  [/\bberita besar(?:nya)?\b/gi, 'major news headlines'],
+  [/\bmodel(?:-model)? ai\b/gi, 'ai models'],
+  [/\bmodel(?:-model)? llm\b/gi, 'llm models'],
+  [/\bmodel penalaran(?:nya)?\b/gi, 'reasoning models'],
+  [/\bmodel multimodal(?:nya)?\b/gi, 'multimodal models'],
+  [/\bmodel terbuka(?:nya)?\b/gi, 'open source ai models'],
+  [/\bperkembangan ai(?:nya)?\b/gi, 'ai developments'],
+  [/\bterobosan ai(?:nya)?\b/gi, 'ai breakthroughs'],
+  [/\bagen ai(?:nya)?\b/gi, 'ai agents'],
+  [/\braksasa teknologi\b/gi, 'big tech companies'],
+  [/\bperusahaan teknologi\b/gi, 'tech companies'],
+  [/\bkecerdasan buatan generatif\b/gi, 'generative ai'],
   [/\bkecerdasan umum buatan(?:nya)?\b/gi, 'artificial general intelligence'],
   [/\bkecerdasan buatan(?:nya)?\b/gi, 'artificial intelligence'],
   [/\bpembelajaran mesin(?:nya)?\b/gi, 'machine learning'],
@@ -413,6 +435,17 @@ const GLOBAL_SEARCH_WORD_DICT = [
   [/\bterbaru(?:nya)?\b/gi, 'latest'],
   [/\bterkini(?:nya)?\b/gi, 'latest'],
   [/\bmutakhir(?:nya)?\b/gi, 'state of the art'],
+  [/\bbesar(?:nya)?\b/gi, 'major'],
+  [/\bmodel(?:nya)?\b/gi, 'model'],
+  [/\btercanggih(?:nya)?\b/gi, 'most advanced'],
+  [/\bcanggih(?:nya)?\b/gi, 'advanced'],
+  [/\bterobosan(?:nya)?\b/gi, 'breakthrough'],
+  [/\bbocoran(?:nya)?\b/gi, 'leak rumor'],
+  [/\bsaingan(?:nya)?\b/gi, 'competitor alternative'],
+  [/\bpopuler(?:nya)?\b/gi, 'popular trending'],
+  [/\btren(?:nya)?\b/gi, 'trends'],
+  [/\blaboratorium(?:nya)?\b/gi, 'lab research'],
+  [/\bkemampuan(?:nya)?\b/gi, 'capabilities performance'],
   [/\bberita(?:nya)?\b/gi, 'news'],
   [/\bwarta(?:nya)?\b/gi, 'news'],
   [/\bkabar(?:nya)?\b/gi, 'news'],
@@ -1857,13 +1890,33 @@ export default {
           if (Array.isArray(parsedSerper.organic)) {
             parsedSerper.organic.forEach((it, idx) => {
               if (it && (it.link || it.url)) {
+                const itemUrl = it.link || it.url;
+                const normUrl = itemUrl.trim().toLowerCase().replace(/\/$/, '');
+                const normTitle = (it.title || '').trim().toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '');
+
+                if (!isDomestic) {
+                  const isSpamOrClickbait = /\b(pluang|riaugreen|inforiau|riaupos|tribunnews|detik|kompas|liputan6|suara|merdeka|sindonews|viva|inews|kumparan|jpnn|kapanlagi|idntimes)\b/i.test(normUrl) || /\b(pluang|riaugreen)\b/i.test(it.domain || '');
+                  if (isSpamOrClickbait) return;
+                }
+                if (normTitle.includes('listofapplecodenames') && !cleanQuery.toLowerCase().includes('apple')) return;
+                if (normTitle.includes('jalanbesar') && !cleanQuery.toLowerCase().includes('jalan')) return;
+
+                let domain = '';
+                try { domain = new URL(itemUrl).hostname.replace(/^www\./, ''); } catch (_) {}
+
                 results.push({
                   title: it.title || `Hasil ${idx + 1}`,
-                  url: it.link || it.url,
+                  url: itemUrl,
                   snippet: it.snippet || '',
+                  domain,
                   sourceProvider: 'Google'
                 });
               }
+            });
+            results.sort((a, b) => {
+              const aRep = REPUTABLE_TECH_DOMAINS.has(a.domain) ? 1 : 0;
+              const bRep = REPUTABLE_TECH_DOMAINS.has(b.domain) ? 1 : 0;
+              return bRep - aRep;
             });
           }
           return new Response(JSON.stringify({

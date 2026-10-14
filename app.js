@@ -5564,16 +5564,15 @@ Aturan wajib:
       }
     }
 
-    // Formulate the optimal targeted query
+    // Formulate the optimal targeted query without hardcoded year noise
     let finalQuery = '';
     if (nonFillerWords.length <= 2 && contextSubject) {
-      // Heavily context-dependent prompt (e.g. "bagaimana data terbarunya" -> "[Subject] spesifikasi data terbaru 2026")
       const intentKeywords = nonFillerWords.length > 0 ? nonFillerWords.join(' ') : 'data spesifikasi update';
-      finalQuery = `${contextSubject} ${intentKeywords} terbaru 2026`;
+      finalQuery = `${contextSubject} ${intentKeywords}`;
     } else if (contextSubject && !cleanPrompt.toLowerCase().includes(contextSubject.toLowerCase())) {
-      finalQuery = `${contextSubject} ${cleanPrompt} 2026`;
+      finalQuery = `${contextSubject} ${cleanPrompt}`;
     } else {
-      finalQuery = `${cleanPrompt} 2026`;
+      finalQuery = `${cleanPrompt}`;
     }
 
     return finalQuery.replace(/\s+/g, ' ').trim();
@@ -5613,9 +5612,11 @@ Aturan wajib:
       let data = null;
 
       // 1. Direct browser fetch to Serper API (hanya jika user punya key sendiri)
+      const isDomestic = isExplicitDomesticIndoQuery(smartQuery) || isExplicitDomesticIndoQuery(query);
+      const globalQuery = (!isDomestic ? translateIndoQueryToGlobalEnglish(smartQuery) : smartQuery) || smartQuery;
+
       if (serperKey) {
         try {
-          const isDomestic = isExplicitDomesticIndoQuery(smartQuery);
           const directRes = await fetch('https://google.serper.dev/search', {
             method: 'POST',
             headers: {
@@ -5623,8 +5624,8 @@ Aturan wajib:
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              q: smartQuery,
-              num: 6,
+              q: globalQuery,
+              num: 10,
               gl: isDomestic ? 'id' : 'us', // Prioritaskan domain Indonesia HANYA jika eksplisit domestik
               hl: isDomestic ? 'id' : 'en'
             }),
@@ -5645,7 +5646,7 @@ Aturan wajib:
         const proxyRes = await fetch('/api/web-search', {
           method: 'POST',
           headers: proxyHeaders,
-          body: JSON.stringify(serperKey ? { query: smartQuery, apiKey: serperKey } : { query: smartQuery }),
+          body: JSON.stringify(serperKey ? { query: globalQuery, apiKey: serperKey, num: 10 } : { query: globalQuery, num: 10 }),
           signal: makeSearchSignal(7000)
         }).catch(() => null);
         if (proxyRes && proxyRes.ok) {
@@ -5659,7 +5660,7 @@ Aturan wajib:
           const autoRes = await fetch('/api/tools/search-web', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: smartQuery, maxResults: 8 }),
+            body: JSON.stringify({ query: globalQuery, originalQuery: smartQuery, maxResults: 10 }),
             signal: makeSearchSignal(7500)
           }).catch(() => null);
           if (autoRes && autoRes.ok) {
@@ -5752,7 +5753,9 @@ ${factsBlock}
 ${organicBlock}
 [PANDUAN UNTUK ASISTEN AI]:
 - Anda adalah AI yang telah mengaktifkan kemampuan Search Skill untuk mencari data Google secara otonom berdasarkan konteks obrolan.
-- Hubungkan data real-time di atas dengan konteks riwayat percakapan sebelumnya dan jawab dengan akurat, mutakhir (Tahun 2026), dan komprehensif.
+- Hubungkan data real-time di atas dengan konteks riwayat percakapan sebelumnya dan jawab dengan akurat, mutakhir, faktual, dan komprehensif.
+- FOKUS DAN RELEVANSI TINGGI: Jawablah pertanyaan pengguna secara langsung, relevan, dan terarah. Jika pengguna bertanya tentang berita atau model AI terbaru, utamakan perkembangan model AI utama terkemuka dunia (OpenAI GPT/o-series, Claude, Gemini, Meta Llama, DeepSeek, Mistral, xAI, dll.). Dilarang mengalihkan fokus ke ringkasan pergerakan saham finansial sampingan atau platform lokal kecil yang tidak relevan.
+- ANTI-HALUSINASI KETAT: Dilarang keras mengarang berita, kemitraan fiktif (seperti konsorsium gabungan palsu antar raksasa teknologi), atau tanggal rilis imajiner. Hanya gunakan fakta nyata yang tercantum di hasil pencarian web di atas.
 - Wajib sertakan referensi tautan markdown [Nama Sumber](URL) jika merujuk fakta spesifik.`;
 
       return {
@@ -7530,6 +7533,14 @@ ${blocks}
   // ==================== GLOBAL SEARCH & ENGLISH QUERY ADAPTER ====================
   // Memastikan kueri pencarian otonom menjangkau indeks internasional/global
   // dan mengonversi topik pengguna berbahasa Indonesia menjadi kata kunci pencarian bahasa Inggris global.
+  const REPUTABLE_TECH_DOMAINS = new Set([
+    'reuters.com', 'bloomberg.com', 'axios.com', 'techcrunch.com', 'theverge.com',
+    'arstechnica.com', 'wired.com', 'venturebeat.com', 'technologyreview.com',
+    'openai.com', 'anthropic.com', 'deepmind.google', 'blog.google', 'news.ycombinator.com',
+    'github.com', 'huggingface.co', 'nature.com', 'science.org', 'mit.edu', 'stanford.edu',
+    'wsj.com', 'ft.com', 'cnbc.com', 'bbc.com', 'theguardian.com'
+  ]);
+
   const INDO_DOMESTIC_PATTERN = /\b(indonesia|indonesian|jakarta|jabar|jatim|jateng|bandung|surabaya|medan|semarang|yogyakarta|jogja|bali|denpasar|aceh|sumatera|papua|kalimantan|sulawesi|nusantara|ikn\b|rupiah|idr\b|bmkg|pilkada|pemilu|kpu\b|bawaslu|prabowo|gibran|jokowi|bansos|bpjs|kominfo|menkominfo|kemendagri|kemenkes|kemendikbud|bumn|kemenkeu|sri mulyani|tni\b|polri|polda|polres|kapolri|dpr\b|mpr\b|dpd\b|kpk\b|kejagung|bca\b|mandiri\b|bri\b|bni\b|pertamina|pln\b)\b/i;
 
   function isExplicitDomesticIndoQuery(str) {
@@ -7545,6 +7556,18 @@ ${blocks}
   }
 
   const GLOBAL_SEARCH_PHRASE_DICT = [
+    [/\bberita besar(?:nya)?\b/gi, 'major news headlines'],
+    [/\bmodel(?:-model)? ai\b/gi, 'ai models'],
+    [/\bmodel(?:-model)? llm\b/gi, 'llm models'],
+    [/\bmodel penalaran(?:nya)?\b/gi, 'reasoning models'],
+    [/\bmodel multimodal(?:nya)?\b/gi, 'multimodal models'],
+    [/\bmodel terbuka(?:nya)?\b/gi, 'open source ai models'],
+    [/\bperkembangan ai(?:nya)?\b/gi, 'ai developments'],
+    [/\bterobosan ai(?:nya)?\b/gi, 'ai breakthroughs'],
+    [/\bagen ai(?:nya)?\b/gi, 'ai agents'],
+    [/\braksasa teknologi\b/gi, 'big tech companies'],
+    [/\bperusahaan teknologi\b/gi, 'tech companies'],
+    [/\bkecerdasan buatan generatif\b/gi, 'generative ai'],
     [/\bkecerdasan umum buatan(?:nya)?\b/gi, 'artificial general intelligence'],
     [/\bkecerdasan buatan(?:nya)?\b/gi, 'artificial intelligence'],
     [/\bpembelajaran mesin(?:nya)?\b/gi, 'machine learning'],
@@ -7602,6 +7625,17 @@ ${blocks}
     [/\bterbaru(?:nya)?\b/gi, 'latest'],
     [/\bterkini(?:nya)?\b/gi, 'latest'],
     [/\bmutakhir(?:nya)?\b/gi, 'state of the art'],
+    [/\bbesar(?:nya)?\b/gi, 'major'],
+    [/\bmodel(?:nya)?\b/gi, 'model'],
+    [/\btercanggih(?:nya)?\b/gi, 'most advanced'],
+    [/\bcanggih(?:nya)?\b/gi, 'advanced'],
+    [/\bterobosan(?:nya)?\b/gi, 'breakthrough'],
+    [/\bbocoran(?:nya)?\b/gi, 'leak rumor'],
+    [/\bsaingan(?:nya)?\b/gi, 'competitor alternative'],
+    [/\bpopuler(?:nya)?\b/gi, 'popular trending'],
+    [/\btren(?:nya)?\b/gi, 'trends'],
+    [/\blaboratorium(?:nya)?\b/gi, 'lab research'],
+    [/\bkemampuan(?:nya)?\b/gi, 'capabilities performance'],
     [/\bberita(?:nya)?\b/gi, 'news'],
     [/\bwarta(?:nya)?\b/gi, 'news'],
     [/\bkabar(?:nya)?\b/gi, 'news'],
@@ -7773,15 +7807,19 @@ ${blocks}
     if (coreQuery.length < 2) coreQuery = cleanQuery;
 
     const isDomestic = isExplicitDomesticIndoQuery(cleanQuery) || isExplicitDomesticIndoQuery(contextText);
+    const hasNewsWord = /\b(news|berita)\b/i.test(coreQuery);
+    const hasLatestWord = /\b(latest|terbaru|terkini)\b/i.test(coreQuery);
+    const newsSuffix = hasNewsWord ? '' : ' news';
+    const latestSuffix = hasLatestWord ? '' : ' latest';
 
     return {
       primary: cleanQuery,
       core: coreQuery,
-      news: `${coreQuery} news`,
-      recentNews: isDomestic ? `${coreQuery} berita terbaru` : `${coreQuery} latest news`,
+      news: `${coreQuery}${newsSuffix}`.replace(/\s+/g, ' ').trim(),
+      recentNews: isDomestic ? `${coreQuery} berita terbaru` : `${coreQuery}${latestSuffix}${newsSuffix}`.replace(/\s+/g, ' ').trim(),
       recentNewsId: isDomestic ? `${coreQuery} berita terkini` : `${coreQuery} breaking news`,
       weeklyNews: `${coreQuery} updates`,
-      tech: coreQuery
+      tech: coreQuery.replace(/\b(major|news|headlines|breaking)\b/gi, ' ').replace(/\s+/g, ' ').trim() || coreQuery
     };
   }
 
@@ -8187,6 +8225,12 @@ ${blocks}
           const normUrl = item.url.trim().toLowerCase().replace(/\/$/, '');
           const normTitle = item.title.trim().toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '');
 
+          // Filter domain spam, aggregator regional berita clickbait, dan bot finansial yang tidak relevan untuk kueri global
+          if (!isDomestic) {
+            const isSpamOrClickbait = /\b(pluang|riaugreen|inforiau|riaupos|tribunnews|detik|kompas|liputan6|suara|merdeka|sindonews|viva|inews|kumparan|jpnn|kapanlagi|idntimes)\b/i.test(normUrl) || /\b(pluang|riaugreen)\b/i.test(item.domain || '');
+            if (isSpamOrClickbait) return;
+          }
+
           // Filter Wikipedia HANYA jika sudah ada cukup sumber web/berita non-Wikipedia (>= 3)
           if (normUrl.includes('wikipedia.org') || normTitle.includes('wikipedia') || (item.domain && item.domain.includes('wikipedia.org'))) {
             if (results.length >= 3) return;
@@ -8194,12 +8238,7 @@ ${blocks}
 
           // Filter out irrelevant codename or disambiguation entries
           if (normTitle.includes('listofapplecodenames') && !query.toLowerCase().includes('apple')) return;
-
-          // Bila BUKAN pencarian domestik eksplisit, deprioritaskan domain portal/agregator berita lokal clickbait jika hasil non-agregator sudah cukup
-          if (!isDomestic && results.length >= 3) {
-            const isRegionalAggregator = /\b(tribunnews|detik|kompas|liputan6|suara|merdeka|sindonews|viva|inews|kumparan|jpnn|kapanlagi|idntimes)\.co(m|\.id)\b/i.test(normUrl) || /\.(id|co\.id)$/i.test(item.domain || '');
-            if (isRegionalAggregator) return;
-          }
+          if (normTitle.includes('jalanbesar') && !query.toLowerCase().includes('jalan')) return;
 
           if (seenUrls.has(normUrl)) return;
           seenUrls.add(normUrl);
@@ -8440,6 +8479,13 @@ ${blocks}
         if (results.length === 0) {
           return { text: `Hasil pencarian untuk "${query}": Tidak ditemukan hasil spesifik. Coba gunakan kata kunci alternatif.`, sources: [], success: false };
         }
+
+        results.sort((a, b) => {
+          const aRep = REPUTABLE_TECH_DOMAINS.has(a.domain) ? 1 : 0;
+          const bRep = REPUTABLE_TECH_DOMAINS.has(b.domain) ? 1 : 0;
+          if (aRep !== bRep) return bRep - aRep;
+          return (b.timestamp || 0) - (a.timestamp || 0);
+        });
         
         let output = `HASIL PENCARIAN WEB MULTI-SUMBER UNTUK "${query}":\n`;
         output += `Ditemukan ${results.length} sumber informasi terverifikasi (Diurutkan dari publikasi paling mutakhir & aktual):\n`;
@@ -9090,8 +9136,8 @@ ${blocks}
 - Prioritas utama pencarian web adalah INDEKS GLOBAL DUNIA (World-Wide Web) dari sumber-sumber internasional bereputasi tinggi (misal: Reuters, Bloomberg, TechCrunch, The Verge, ArXiv, Nature, BBC, Wired, IEEE, GitHub, Wikipedia Global).
 - WAJIB DALAM BAHASA INGGRIS: Untuk setiap pemanggilan alat \`search_web\`, Anda WAJIB merumuskan parameter \`query\` dalam BAHASA INGGRIS (English), TERLEPAS DARI BAHASA INPUT PENGGUNA (bahkan ketika pengguna bertanya dalam bahasa Indonesia penuh).
 - Terjemahkan dan ringkas konsep, topik, atau pertanyaan pengguna ke dalam kata kunci pencarian bahasa Inggris yang tepat, padat, dan representatif:
-  * Contoh Input Pengguna: "apa kabar perkembangan AI dan robotika terkini hari ini?"
-    -> Pemanggilan Tool: search_web({"query": "latest breakthroughs in AI and robotics 2026"}) (BUKAN bahasa Indonesia!)
+  * Contoh Input Pengguna: "apa berita besar model ai terbaru?"
+    -> Pemanggilan Tool: search_web({"query": "latest major AI models news breakthroughs"}) (BUKAN bahasa Indonesia!)
   * Contoh Input Pengguna: "siapa pemenang liga champions dan berita transfer sepak bola?"
     -> Pemanggilan Tool: search_web({"query": "champions league winners and latest football transfer news"})
   * Contoh Input Pengguna: "kondisi pasar saham dan harga emas dunia saat ini"
@@ -9100,6 +9146,8 @@ ${blocks}
 
 4. SINTESIS SETELAH EKSEKUSI ALAT & BAHASA JAWABAN:
 - Meskipun pencarian web dilakukan dalam bahasa Inggris dari sumber-sumber global dunia, Anda WAJIB menyajikan dan menjawab kembali kepada pengguna dalam BAHASA INDONESIA (atau bahasa yang diminta pengguna) secara alami, lengkap, fasih, dan mendalam.
+- FOKUS DAN RELEVANSI TINGGI: Jawablah pertanyaan pengguna secara langsung, relevan, dan terarah. Jika pengguna bertanya tentang model AI, fokuslah pada inovasi dan rilis model AI terkemuka (seperti OpenAI GPT/o-series, Claude, Gemini, Meta Llama, DeepSeek, Mistral, xAI). Jangan mengalihkan jawaban ke artikel finansial/saham sampingan atau blog regional yang tidak relevan.
+- ANTI-HALUSINASI & FAKTUALITAS KETAT: Dilarang keras mengarang berita, melompat ke kesimpulan fiktif (seperti konsorsium gabungan palsu atau tanggal peluncuran imajiner). Hanya sintesiskan informasi yang benar-benar didukung oleh fakta web.
 - Setelah sistem mengeksekusi alat dan menyediakan data kepada Anda, berikan jawaban akhir yang komprehensif, jelas, akurat, dan informatif.
 - Wajib sertakan referensi tautan markdown [Nama Sumber](URL) jika merujuk fakta web spesifik.
 - Jawab secara langsung tanpa penolakan kaku, tanpa basa-basi robotik, dan tanpa mencetak format pemanggilan tool lagi.`;
