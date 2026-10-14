@@ -400,7 +400,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       localWorkspaceEnabled: false,
       workspaceAiCanRead: true,
       workspaceAiCanWrite: true,
-      workspaceIncludeTree: true
+      workspaceIncludeTree: true,
+      workspaceEnableSnapshots: true,
+      workspaceAutoTaskTracker: true
     },
     localWorkspace: {
       enabled: false,
@@ -408,11 +410,19 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       dirHandle: null,
       platform: 'auto', // 'desktop-fs' | 'mobile-virtual'
       files: [], // Array of { name, path, size, type, lastModified, handle, rawFile, content }
+      snapshots: {}, // { [fileName]: [ { id, version, timestamp, content, size, author, note } ] }
+      enableSnapshots: true,
       aiCanRead: true,
       aiCanWrite: true,
       includeTree: true,
       activeFilter: '',
       activeViewFile: null
+    },
+    taskTracker: {
+      enabled: true,
+      tasks: [], // [ { id, subject, status, activeForm, description } ]
+      isExpanded: true,
+      visible: false
     },
     activeCatalogTab: 'ollama', // 'ollama' | 'openrouter'
     dropdownModelTab: 'ollama', // 'ollama' | 'openrouter'
@@ -906,7 +916,33 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     workspaceDocCreateModal: $('#workspaceDocCreateModal'),
     inputWorkspaceNewFileName: $('#inputWorkspaceNewFileName'),
     inputWorkspaceNewFileContent: $('#inputWorkspaceNewFileContent'),
-    btnSaveNewWorkspaceDoc: $('#btnSaveNewWorkspaceDoc')
+    btnSaveNewWorkspaceDoc: $('#btnSaveNewWorkspaceDoc'),
+
+    // Snapshots & Task Tracker (v257)
+    settingWorkspaceEnableSnapshots: $('#settingWorkspaceEnableSnapshots'),
+    settingWorkspaceAutoTaskTracker: $('#settingWorkspaceAutoTaskTracker'),
+    attachOptionTaskTracker: $('#attachOptionTaskTracker'),
+    attachTaskTrackerDesc: $('#attachTaskTrackerDesc'),
+    taskTrackerCard: $('#taskTrackerCard'),
+    taskTrackerTitle: $('#taskTrackerTitle'),
+    taskTrackerProgressBadge: $('#taskTrackerProgressBadge'),
+    btnTaskTrackerToggleExpand: $('#btnTaskTrackerToggleExpand'),
+    btnTaskTrackerClear: $('#btnTaskTrackerClear'),
+    btnTaskTrackerClose: $('#btnTaskTrackerClose'),
+    taskTrackerProgressBar: $('#taskTrackerProgressBar'),
+    taskTrackerProgressFill: $('#taskTrackerProgressFill'),
+    taskTrackerBody: $('#taskTrackerBody'),
+    taskTrackerList: $('#taskTrackerList'),
+    taskTrackerActionsRow: $('#taskTrackerActionsRow'),
+    btnTaskTrackerAddManual: $('#btnTaskTrackerAddManual'),
+    btnTaskTrackerCompleteAll: $('#btnTaskTrackerCompleteAll'),
+    btnDocViewerSnapshotsToggle: $('#btnDocViewerSnapshotsToggle'),
+    docViewerSnapshotCount: $('#docViewerSnapshotCount'),
+    workspaceDocSnapshotsPanel: $('#workspaceDocSnapshotsPanel'),
+    workspaceDocSnapshotsList: $('#workspaceDocSnapshotsList'),
+    taskCreateModal: $('#taskCreateModal'),
+    inputTaskSubject: $('#inputTaskSubject'),
+    btnSaveManualTask: $('#btnSaveManualTask')
   };
 
   // ==================== BIO-ENDOCRINE HORMONE & CONNECTOME SYSTEM ====================
@@ -1733,6 +1769,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       if (typeof STATE.settings.workspaceIncludeTree === 'boolean') {
         STATE.localWorkspace.includeTree = STATE.settings.workspaceIncludeTree;
       }
+      if (typeof STATE.settings.workspaceEnableSnapshots === 'boolean') {
+        STATE.localWorkspace.enableSnapshots = STATE.settings.workspaceEnableSnapshots;
+      }
+      if (typeof STATE.settings.workspaceAutoTaskTracker === 'boolean') {
+        STATE.taskTracker.enabled = STATE.settings.workspaceAutoTaskTracker;
+      }
 
       // Pulihkan metadata direktori sebelumnya jika tersimpan
       try {
@@ -1742,6 +1784,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           if (parsedMeta && parsedMeta.dirName) {
             STATE.localWorkspace.dirName = parsedMeta.dirName;
             STATE.localWorkspace.platform = parsedMeta.platform || 'auto';
+            loadWorkspaceSnapshots();
           }
         }
       } catch (_) {}
@@ -2899,14 +2942,34 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     let isAutoScrolling = false;
 
     // ==================== HIGH-PERFORMANCE 60FPS STREAM BUFFER RENDERER ====================
-  // Sembunyikan blok ZOZ_FILE (lengkap maupun masih mengalir) dari tampilan sementara
-  // saat streaming, supaya kode mentah file tidak membajak gelembung obrolan.
-  // Teks asli di dalam renderer TIDAK diubah — ekstraksi file tetap dilakukan di akhir stream.
-  function hideFileBlocksForDisplay(text) {
-    if (!text || text.indexOf('<<<ZOZ_FILE') === -1) return text;
+  function hideTaskBlocksForDisplay(text) {
+    if (!text || text.indexOf('<<<ZOZ_TASKS') === -1) return text;
     const out = [];
     let skipping = false;
     text.split('\n').forEach((line) => {
+      const t = line.trim();
+      if (!skipping) {
+        if (t.indexOf('<<<ZOZ_TASKS') === 0) { skipping = true; return; }
+        out.push(line);
+        return;
+      }
+      if (t.indexOf('<<<END_ZOZ_TASKS') === 0) skipping = false;
+    });
+    return out.join('\n');
+  }
+
+  // Sembunyikan blok ZOZ_FILE & ZOZ_TASKS dari tampilan sementara
+  // saat streaming, supaya kode mentah tidak membajak gelembung obrolan.
+  function hideFileBlocksForDisplay(text) {
+    if (!text) return text;
+    let processed = text;
+    if (processed.indexOf('<<<ZOZ_TASKS') !== -1) {
+      processed = hideTaskBlocksForDisplay(processed);
+    }
+    if (processed.indexOf('<<<ZOZ_FILE') === -1) return processed;
+    const out = [];
+    let skipping = false;
+    processed.split('\n').forEach((line) => {
       const t = line.trim();
       if (!skipping) {
         if (t.indexOf('<<<ZOZ_FILE') === 0) { skipping = true; return; }
@@ -7939,6 +8002,13 @@ isi teks dokumen lengkap...
 Sistem Zoz Router akan secara otomatis mengeksekusi penyimpanan file ini langsung ke perangkat lokal pengguna!`;
       }
 
+      if (STATE.taskTracker.enabled) {
+        workspaceInjectedText += `\n\n${getTaskTrackerDirective()}`;
+      }
+      if (STATE.localWorkspace.enableSnapshots) {
+        workspaceInjectedText += `\n- Sistem memiliki fitur Auto-Snapshot & Rollback berkas, sehingga Anda dapat memperbarui dokumen tanpa takut merusak versi lama pengguna.`;
+      }
+
       if (workspaceInjectedText) {
         text = text ? `${workspaceInjectedText}\n\n${text}` : workspaceInjectedText;
       }
@@ -11068,6 +11138,15 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         }
       }
 
+      // ===== AI INTERACTIVE TASK TRACKER =====
+      const detectedTasks = parseAiTasksBlock(fullText);
+      if (detectedTasks && STATE.taskTracker.enabled) {
+        setTaskTrackerTasks(detectedTasks);
+      }
+      if (fullText.indexOf('<<<ZOZ_TASKS') !== -1) {
+        fullText = hideTaskBlocksForDisplay(fullText).trim();
+      }
+
       // ===== AI FILE STUDIO =====
       // Ekstrak file yang dibuat AI, lalu hapus bloknya dari gelembung agar tidak
       // tampil kode mentah berulang (kartu file digantikan oleh kartu di bawah).
@@ -12319,6 +12398,15 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           }
           break;
         }
+      }
+
+      // ===== AI INTERACTIVE TASK TRACKER =====
+      const detectedTasks = parseAiTasksBlock(fullText);
+      if (detectedTasks && STATE.taskTracker.enabled) {
+        setTaskTrackerTasks(detectedTasks);
+      }
+      if (fullText.indexOf('<<<ZOZ_TASKS') !== -1) {
+        fullText = hideTaskBlocksForDisplay(fullText).trim();
       }
 
       // ===== AI FILE STUDIO =====
@@ -15527,6 +15615,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     STATE.localWorkspace.files = files || [];
     STATE.localWorkspace.enabled = true;
     STATE.settings.localWorkspaceEnabled = true;
+    loadWorkspaceSnapshots();
 
     try {
       const meta = {
@@ -15637,6 +15726,248 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     renderWorkspaceFileList();
   }
 
+  // ==================== FILE SNAPSHOTS & ROLLBACK ENGINE (v257) ====================
+  function getWorkspaceSnapshotStorageKey() {
+    const dir = STATE.localWorkspace.dirName || 'global_workspace';
+    return `zoz_workspace_snapshots_${encodeURIComponent(dir)}`;
+  }
+
+  function loadWorkspaceSnapshots() {
+    try {
+      const key = getWorkspaceSnapshotStorageKey();
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        STATE.localWorkspace.snapshots = JSON.parse(raw) || {};
+      } else {
+        STATE.localWorkspace.snapshots = {};
+      }
+    } catch (_) {
+      STATE.localWorkspace.snapshots = {};
+    }
+  }
+
+  function saveWorkspaceSnapshotsToStorage() {
+    try {
+      const key = getWorkspaceSnapshotStorageKey();
+      localStorage.setItem(key, JSON.stringify(STATE.localWorkspace.snapshots || {}));
+    } catch (_) {}
+  }
+
+  function captureFileSnapshot(fileName, content, author = 'ai', note = '') {
+    if (!STATE.localWorkspace.enableSnapshots) return;
+    if (!fileName || typeof content !== 'string') return;
+    if (!STATE.localWorkspace.snapshots) STATE.localWorkspace.snapshots = {};
+    if (!Array.isArray(STATE.localWorkspace.snapshots[fileName])) {
+      STATE.localWorkspace.snapshots[fileName] = [];
+    }
+    const list = STATE.localWorkspace.snapshots[fileName];
+    const versionNum = list.length + 1;
+    const snap = {
+      id: `snap_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      version: versionNum,
+      timestamp: Date.now(),
+      content: content,
+      size: new Blob([content]).size,
+      author: author || 'ai',
+      note: note || (author === 'ai' ? 'Disimpan oleh AI' : 'Versi cadangan pengguna')
+    };
+    list.unshift(snap);
+    // Maksimal simpan 20 versi per berkas
+    if (list.length > 20) list.pop();
+    saveWorkspaceSnapshotsToStorage();
+    renderWorkspaceFileList();
+  }
+
+  async function rollbackFileSnapshot(fileName, snapshotId) {
+    const list = (STATE.localWorkspace.snapshots && STATE.localWorkspace.snapshots[fileName]) || [];
+    const snap = list.find(s => s.id === snapshotId);
+    if (!snap) {
+      showToast('Snapshot tidak ditemukan.', 'error');
+      return;
+    }
+    if (!confirm(`Kembalikan berkas "${fileName}" ke Versi ${snap.version} (${new Date(snap.timestamp).toLocaleString()})?`)) {
+      return;
+    }
+    const currentFile = (STATE.localWorkspace.files || []).find(f => f.name === fileName);
+    if (currentFile && currentFile.content) {
+      captureFileSnapshot(fileName, currentFile.content, 'user', `Sebelum rollback ke v${snap.version}`);
+    }
+    await createWorkspaceDocument(fileName, snap.content, { silent: true, isRollback: true });
+    showToast(`🔄 Berkas "${fileName}" berhasil di-rollback ke Versi ${snap.version}!`);
+    AudioEngine.success();
+    if (STATE.localWorkspace.activeViewFile && STATE.localWorkspace.activeViewFile.name === fileName) {
+      STATE.localWorkspace.activeViewFile.content = snap.content;
+      if (els.workspaceDocViewerContent) els.workspaceDocViewerContent.textContent = snap.content;
+      renderDocViewerSnapshots(fileName);
+    }
+  }
+
+  function renderDocViewerSnapshots(fileName) {
+    if (!els.workspaceDocSnapshotsList) return;
+    const list = (STATE.localWorkspace.snapshots && STATE.localWorkspace.snapshots[fileName]) || [];
+    if (els.docViewerSnapshotCount) {
+      els.docViewerSnapshotCount.textContent = String(list.length);
+    }
+    if (list.length === 0) {
+      els.workspaceDocSnapshotsList.innerHTML = `<div class="snapshot-empty">Belum ada riwayat snapshot untuk berkas ini. Snapshot otomatis dibuat saat berkas diubah atau ditimpa.</div>`;
+      return;
+    }
+    let html = '';
+    list.forEach(s => {
+      const timeStr = new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' ' + new Date(s.timestamp).toLocaleDateString();
+      const authorBadge = s.author === 'ai' ? '🤖 AI' : '👤 Pengguna';
+      html += `
+        <div class="snapshot-item" data-id="${s.id}">
+          <div class="snapshot-item-left">
+            <span class="snapshot-version-tag">v${s.version}</span>
+            <span class="snapshot-author">${authorBadge}</span>
+            <span class="snapshot-time">${timeStr} • ${formatBytes(s.size)}</span>
+          </div>
+          <div class="snapshot-actions">
+            <button type="button" class="btn btn-xs btn-outline btn-preview-snapshot" data-name="${escapeHtml(fileName)}" data-id="${s.id}" title="Pratinjau versi ini di editor">
+              <i class="fa-solid fa-eye"></i> Pratinjau
+            </button>
+            <button type="button" class="btn btn-xs btn-primary-neon btn-rollback-snapshot" data-name="${escapeHtml(fileName)}" data-id="${s.id}" title="Kembalikan file ke versi ini">
+              <i class="fa-solid fa-clock-rotate-left"></i> Rollback
+            </button>
+          </div>
+        </div>
+      `;
+    });
+    els.workspaceDocSnapshotsList.innerHTML = html;
+  }
+
+  // ==================== INTERACTIVE TASK TRACKER ENGINE (v257) ====================
+  function getTaskTrackerDirective() {
+    return `[INTERACTIVE TASK TRACKER PROTOCOL]
+Jika pengguna meminta tugas kompleks, pengerjaan bertahap, analisis dokumen, atau pembuatan berkas, Anda DAPAT menyertakan daftar subtask di awal respons dengan format terstruktur berikut:
+
+<<<ZOZ_TASKS>>>
+[
+  {"id":"1", "subject":"Periksa berkas direktori lokal", "status":"completed", "activeForm":"Selesai memeriksa"},
+  {"id":"2", "subject":"Tulis rangkuman analisis", "status":"in_progress", "activeForm":"Sedang menyusun laporan..."},
+  {"id":"3", "subject":"Simpan dokumen ke disk", "status":"pending", "activeForm":"Menunggu"}
+]
+<<<END_ZOZ_TASKS>>>
+
+Aturan:
+- status WAJIB salah satu dari: "pending", "in_progress", "completed".
+- Setiap task memiliki id unik, subject ringkas, dan activeForm jelas.
+- Sistem Zoz Router akan menampilkan checklist visual interaktif real-time di antarmuka pengguna!`;
+  }
+
+  function parseAiTasksBlock(text) {
+    if (!text || typeof text !== 'string') return null;
+    const startIdx = text.indexOf('<<<ZOZ_TASKS>>>');
+    if (startIdx === -1) return null;
+    const endIdx = text.indexOf('<<<END_ZOZ_TASKS>>>', startIdx);
+    if (endIdx === -1) return null;
+    const jsonStr = text.slice(startIdx + '<<<ZOZ_TASKS>>>'.length, endIdx).trim();
+    try {
+      const parsed = JSON.parse(jsonStr);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((t, idx) => ({
+          id: String(t.id || idx + 1),
+          subject: String(t.subject || t.title || 'Tugas ' + (idx + 1)),
+          status: ['completed', 'in_progress', 'pending'].includes(t.status) ? t.status : 'pending',
+          activeForm: String(t.activeForm || ''),
+          description: String(t.description || '')
+        }));
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function setTaskTrackerTasks(newTasks) {
+    if (!Array.isArray(newTasks)) return;
+    STATE.taskTracker.tasks = newTasks;
+    STATE.taskTracker.visible = true;
+    renderTaskTrackerUI();
+  }
+
+  function toggleTaskStatus(taskId) {
+    const task = (STATE.taskTracker.tasks || []).find(t => t.id === taskId);
+    if (!task) return;
+    if (task.status === 'completed') {
+      task.status = 'pending';
+      task.activeForm = 'Menunggu';
+    } else if (task.status === 'pending') {
+      task.status = 'in_progress';
+      task.activeForm = 'Sedang dikerjakan...';
+    } else {
+      task.status = 'completed';
+      task.activeForm = 'Selesai';
+    }
+    renderTaskTrackerUI();
+    AudioEngine.click();
+  }
+
+  function deleteTask(taskId) {
+    const idx = (STATE.taskTracker.tasks || []).findIndex(t => t.id === taskId);
+    if (idx >= 0) {
+      STATE.taskTracker.tasks.splice(idx, 1);
+      renderTaskTrackerUI();
+      AudioEngine.click();
+    }
+  }
+
+  function renderTaskTrackerUI() {
+    const tasks = STATE.taskTracker.tasks || [];
+    const isVisible = Boolean(STATE.taskTracker.visible && tasks.length > 0);
+
+    if (els.taskTrackerCard) {
+      els.taskTrackerCard.style.display = isVisible ? 'block' : 'none';
+    }
+
+    if (!isVisible) return;
+
+    const total = tasks.length;
+    const completed = tasks.filter(t => t.status === 'completed').length;
+    const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    if (els.taskTrackerProgressBadge) {
+      els.taskTrackerProgressBadge.textContent = `${completed}/${total} Selesai (${pct}%)`;
+    }
+    if (els.taskTrackerProgressFill) {
+      els.taskTrackerProgressFill.style.width = `${pct}%`;
+    }
+
+    if (els.taskTrackerBody) {
+      els.taskTrackerBody.style.display = STATE.taskTracker.isExpanded !== false ? 'block' : 'none';
+    }
+    if (els.btnTaskTrackerToggleExpand) {
+      els.btnTaskTrackerToggleExpand.innerHTML = STATE.taskTracker.isExpanded !== false
+        ? '<i class="fa-solid fa-chevron-up"></i>'
+        : '<i class="fa-solid fa-chevron-down"></i>';
+    }
+
+    if (!els.taskTrackerList) return;
+
+    let html = '';
+    tasks.forEach(t => {
+      let icon = 'fa-regular fa-circle';
+      if (t.status === 'completed') icon = 'fa-solid fa-circle-check';
+      else if (t.status === 'in_progress') icon = 'fa-solid fa-circle-notch fa-spin';
+
+      html += `
+        <div class="task-tracker-item status-${t.status}" data-id="${escapeHtml(t.id)}">
+          <button type="button" class="task-status-btn" data-id="${escapeHtml(t.id)}" title="Klik untuk ubah status tugas">
+            <i class="${icon}"></i>
+          </button>
+          <div class="task-item-content">
+            <span class="task-subject">${escapeHtml(t.subject)}</span>
+            ${t.status === 'in_progress' && t.activeForm ? `<span class="task-active-form"><i class="fa-solid fa-bolt"></i> ${escapeHtml(t.activeForm)}</span>` : ''}
+          </div>
+          <button type="button" class="task-delete-btn" data-id="${escapeHtml(t.id)}" title="Hapus tugas">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      `;
+    });
+
+    els.taskTrackerList.innerHTML = html;
+  }
+
   function renderWorkspaceFileList() {
     if (!els.workspaceFileList) return;
     const files = STATE.localWorkspace.files || [];
@@ -15658,12 +15989,16 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       const iconCls = getFileIconClass(file.name);
       const sizeStr = formatBytes(file.size);
       const displayPath = file.path || file.name;
+      const snapList = (STATE.localWorkspace.snapshots && STATE.localWorkspace.snapshots[file.name]) || [];
+      const snapBadge = snapList.length > 0
+        ? `<button type="button" class="file-snapshot-badge btn-workspace-view-snapshots" data-name="${escapeHtml(file.name)}" title="Tersedia ${snapList.length} versi cadangan. Klik untuk buka"><i class="fa-solid fa-clock-rotate-left"></i> ${snapList.length} versi</button>`
+        : '';
       html += `
         <div class="workspace-file-item" data-index="${index}">
           <div class="workspace-file-item-left">
             <i class="${iconCls}"></i>
             <div class="file-item-meta">
-              <div class="file-item-name" title="${escapeHtml(displayPath)}">${escapeHtml(file.name)}</div>
+              <div class="file-item-name" title="${escapeHtml(displayPath)}">${escapeHtml(file.name)} ${snapBadge}</div>
               <div class="file-item-sub">${escapeHtml(displayPath !== file.name ? displayPath : '')} • ${sizeStr}</div>
             </div>
           </div>
@@ -15718,6 +16053,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     if (els.docViewerSize) els.docViewerSize.textContent = formatBytes(fileObj.size);
     if (els.workspaceDocViewerContent) els.workspaceDocViewerContent.textContent = textContent;
 
+    // Render snapshot history
+    renderDocViewerSnapshots(fileObj.name);
+    if (els.workspaceDocSnapshotsPanel) {
+      els.workspaceDocSnapshotsPanel.style.display = 'none';
+    }
+
     openModal('workspaceDocViewerModal');
     AudioEngine.click();
   }
@@ -15726,6 +16067,20 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     if (!fileName) return;
     const cleanName = fileName.trim();
     const cleanContent = content || '';
+
+    // FITUR 2: Snapshot & Rollback Berkas
+    if (!options.isRollback && STATE.localWorkspace.enableSnapshots) {
+      const existingFile = (STATE.localWorkspace.files || []).find(f => f.name === cleanName);
+      if (existingFile) {
+        let prevContent = existingFile.content;
+        if (!prevContent && existingFile.rawFile) {
+          try { prevContent = await extractFileContent(existingFile.rawFile); } catch (_) {}
+        }
+        if (prevContent) {
+          captureFileSnapshot(cleanName, prevContent, options.author || 'ai', options.note || 'Sebelum pembaruan dokumen');
+        }
+      }
+    }
 
     try {
       if (STATE.localWorkspace.platform === 'desktop-fs' && STATE.localWorkspace.dirHandle) {
@@ -18713,6 +19068,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     if (els.settingWorkspaceAiRead) els.settingWorkspaceAiRead.checked = STATE.localWorkspace.aiCanRead !== false;
     if (els.settingWorkspaceAiWrite) els.settingWorkspaceAiWrite.checked = STATE.localWorkspace.aiCanWrite !== false;
     if (els.settingWorkspaceIncludeTree) els.settingWorkspaceIncludeTree.checked = STATE.localWorkspace.includeTree !== false;
+    if (els.settingWorkspaceEnableSnapshots) els.settingWorkspaceEnableSnapshots.checked = STATE.localWorkspace.enableSnapshots !== false;
+    if (els.settingWorkspaceAutoTaskTracker) els.settingWorkspaceAutoTaskTracker.checked = STATE.taskTracker.enabled !== false;
     updateLocalWorkspaceUI();
 
     updatePresetPillUI();
@@ -19501,6 +19858,18 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       if (wsTabBtn) wsTabBtn.click();
       AudioEngine.click();
     });
+    els.attachOptionTaskTracker?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAttachmentDropdown();
+      STATE.taskTracker.visible = true;
+      if (!STATE.taskTracker.tasks || STATE.taskTracker.tasks.length === 0) {
+        if (els.inputTaskSubject) els.inputTaskSubject.value = '';
+        openModal('taskCreateModal');
+      } else {
+        renderTaskTrackerUI();
+      }
+      AudioEngine.click();
+    });
 
     // ==================== LOCAL WORKSPACE LISTENERS ====================
     els.settingLocalWorkspaceToggle?.addEventListener('change', (e) => {
@@ -19688,6 +20057,125 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       if (delBtn) {
         const name = delBtn.dataset.name;
         if (name) deleteWorkspaceDocument(name);
+        return;
+      }
+      const snapBtn = e.target.closest('.btn-workspace-view-snapshots');
+      if (snapBtn) {
+        const name = snapBtn.dataset.name;
+        if (name) {
+          previewWorkspaceDocument(name);
+          if (els.workspaceDocSnapshotsPanel) {
+            els.workspaceDocSnapshotsPanel.style.display = 'block';
+          }
+        }
+        return;
+      }
+    });
+
+    // Toggle riwayat versi di viewer
+    els.btnDocViewerSnapshotsToggle?.addEventListener('click', () => {
+      if (!els.workspaceDocSnapshotsPanel) return;
+      const isHidden = els.workspaceDocSnapshotsPanel.style.display === 'none';
+      els.workspaceDocSnapshotsPanel.style.display = isHidden ? 'block' : 'none';
+      AudioEngine.click();
+    });
+
+    // Delegasi aksi snapshot (preview / rollback)
+    els.workspaceDocSnapshotsList?.addEventListener('click', async (e) => {
+      const prevBtn = e.target.closest('.btn-preview-snapshot');
+      if (prevBtn) {
+        const fileName = prevBtn.dataset.name;
+        const snapId = prevBtn.dataset.id;
+        const list = (STATE.localWorkspace.snapshots && STATE.localWorkspace.snapshots[fileName]) || [];
+        const snap = list.find(s => s.id === snapId);
+        if (snap && els.workspaceDocViewerContent) {
+          els.workspaceDocViewerContent.textContent = snap.content;
+          showToast(`Pratinjau Versi ${snap.version} (${new Date(snap.timestamp).toLocaleTimeString()})`);
+          AudioEngine.click();
+        }
+        return;
+      }
+      const rbBtn = e.target.closest('.btn-rollback-snapshot');
+      if (rbBtn) {
+        const fileName = rbBtn.dataset.name;
+        const snapId = rbBtn.dataset.id;
+        if (fileName && snapId) {
+          await rollbackFileSnapshot(fileName, snapId);
+        }
+        return;
+      }
+    });
+
+    // ==================== TASK TRACKER LISTENERS ====================
+    els.btnTaskTrackerToggleExpand?.addEventListener('click', () => {
+      STATE.taskTracker.isExpanded = !STATE.taskTracker.isExpanded;
+      renderTaskTrackerUI();
+      AudioEngine.click();
+    });
+
+    els.btnTaskTrackerClear?.addEventListener('click', () => {
+      if (confirm('Bersihkan semua tugas dari Task Tracker?')) {
+        STATE.taskTracker.tasks = [];
+        STATE.taskTracker.visible = false;
+        renderTaskTrackerUI();
+        AudioEngine.click();
+        showToast('Daftar task dibersihkan.');
+      }
+    });
+
+    els.btnTaskTrackerClose?.addEventListener('click', () => {
+      STATE.taskTracker.visible = false;
+      if (els.taskTrackerCard) els.taskTrackerCard.style.display = 'none';
+      AudioEngine.click();
+    });
+
+    els.btnTaskTrackerAddManual?.addEventListener('click', () => {
+      if (els.inputTaskSubject) els.inputTaskSubject.value = '';
+      openModal('taskCreateModal');
+      AudioEngine.click();
+    });
+
+    els.btnTaskTrackerCompleteAll?.addEventListener('click', () => {
+      (STATE.taskTracker.tasks || []).forEach(t => { t.status = 'completed'; t.activeForm = 'Selesai'; });
+      renderTaskTrackerUI();
+      AudioEngine.success();
+      showToast('Semua tugas ditandai selesai! 🎉');
+    });
+
+    els.btnSaveManualTask?.addEventListener('click', () => {
+      const subj = els.inputTaskSubject ? els.inputTaskSubject.value.trim() : '';
+      if (!subj) {
+        showToast('Masukkan deskripsi tugas terlebih dahulu.', 'error');
+        return;
+      }
+      if (!Array.isArray(STATE.taskTracker.tasks)) STATE.taskTracker.tasks = [];
+      const newId = String(STATE.taskTracker.tasks.length + 1);
+      STATE.taskTracker.tasks.push({
+        id: newId,
+        subject: subj,
+        status: 'pending',
+        activeForm: 'Menunggu',
+        description: ''
+      });
+      STATE.taskTracker.visible = true;
+      closeModal('taskCreateModal');
+      renderTaskTrackerUI();
+      AudioEngine.click();
+      showToast(`Tugas "${subj}" ditambahkan ke Task Tracker.`);
+    });
+
+    // Delegasi klik item di taskTrackerList
+    els.taskTrackerList?.addEventListener('click', (e) => {
+      const statusBtn = e.target.closest('.task-status-btn');
+      if (statusBtn) {
+        const taskId = statusBtn.dataset.id;
+        if (taskId) toggleTaskStatus(taskId);
+        return;
+      }
+      const delBtn = e.target.closest('.task-delete-btn');
+      if (delBtn) {
+        const taskId = delBtn.dataset.id;
+        if (taskId) deleteTask(taskId);
         return;
       }
     });
@@ -20654,6 +21142,14 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         STATE.localWorkspace.includeTree = els.settingWorkspaceIncludeTree.checked;
         STATE.settings.workspaceIncludeTree = STATE.localWorkspace.includeTree;
       }
+      if (els.settingWorkspaceEnableSnapshots) {
+        STATE.localWorkspace.enableSnapshots = els.settingWorkspaceEnableSnapshots.checked;
+        STATE.settings.workspaceEnableSnapshots = STATE.localWorkspace.enableSnapshots;
+      }
+      if (els.settingWorkspaceAutoTaskTracker) {
+        STATE.taskTracker.enabled = els.settingWorkspaceAutoTaskTracker.checked;
+        STATE.settings.workspaceAutoTaskTracker = STATE.taskTracker.enabled;
+      }
       updateLocalWorkspaceUI();
 
       savePersistedState({ immediate: true });
@@ -21039,6 +21535,21 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     fetchOpenRouterModelsList().catch(() => {});
     fetchOllamaCloudUsage().catch(() => {});
   }
+
+  // Expose clean namespace for extension & programmatic workspace control
+  window.ZozWorkspace = {
+    STATE,
+    setConnectedLocalWorkspace,
+    disconnectLocalWorkspace,
+    createWorkspaceDocument,
+    previewWorkspaceDocument,
+    captureFileSnapshot,
+    rollbackFileSnapshot,
+    setTaskTrackerTasks,
+    toggleTaskStatus,
+    renderTaskTrackerUI,
+    renderDocViewerSnapshots
+  };
 
   // Start on DOM ready (safeguarded against post-DOMContentLoaded script execution)
   if (document.readyState === 'loading') {

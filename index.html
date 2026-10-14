@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261014_v256">
+  <link rel="stylesheet" href="style.css?v=20261014_v257">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -563,6 +563,44 @@
           </div>
         </div>
 
+        <!-- Interactive Task Tracker Card (Floating checklist for AI multi-step tasks) -->
+        <div class="task-tracker-card" id="taskTrackerCard" style="display: none;">
+          <div class="task-tracker-header">
+            <div class="task-tracker-title-wrap">
+              <i class="fa-solid fa-list-check" style="color: var(--neon-purple);"></i>
+              <span class="task-tracker-title" id="taskTrackerTitle">Task Tracker AI</span>
+              <span class="task-progress-badge" id="taskTrackerProgressBadge">0/0 Selesai (0%)</span>
+            </div>
+            <div class="task-tracker-header-actions">
+              <button type="button" class="btn-task-header-action" id="btnTaskTrackerToggleExpand" title="Perluas / Perkecil Checklist">
+                <i class="fa-solid fa-chevron-up"></i>
+              </button>
+              <button type="button" class="btn-task-header-action" id="btnTaskTrackerClear" title="Bersihkan Semua Task">
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+              <button type="button" class="btn-task-header-action" id="btnTaskTrackerClose" title="Sembunyikan Task Tracker">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+          </div>
+          <div class="task-progress-bar-wrap" id="taskTrackerProgressBar">
+            <div class="task-progress-bar-fill" id="taskTrackerProgressFill" style="width: 0%;"></div>
+          </div>
+          <div class="task-tracker-body" id="taskTrackerBody">
+            <div class="task-tracker-list" id="taskTrackerList">
+              <!-- Task items rendered dynamically -->
+            </div>
+            <div class="task-tracker-actions-row" id="taskTrackerActionsRow">
+              <button type="button" class="btn btn-xs btn-outline" id="btnTaskTrackerAddManual">
+                <i class="fa-solid fa-plus"></i> Tambah Tugas
+              </button>
+              <button type="button" class="btn btn-xs btn-outline" id="btnTaskTrackerCompleteAll">
+                <i class="fa-solid fa-check-double"></i> Tandai Semua Selesai
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- BOLA NEUTRON QUANTUM -->
         <div class="composer-crown-row" id="composerCrownRow">
           <button class="neutron-crown-btn state-red" id="neutronCrownBtn" type="button" aria-label="Sembunyikan kolom prompt" title="Sembunyikan / tampilkan kolom prompt">
@@ -770,6 +808,15 @@
                     <div class="attach-item-info">
                       <span class="attach-item-title">Direktori & Dokumen Lokal</span>
                       <span class="attach-item-desc" id="attachWorkspaceDesc">Hubungkan folder HP/Laptop untuk dikelola AI</span>
+                    </div>
+                  </button>
+                  <button class="attachment-menu-item" id="attachOptionTaskTracker" type="button">
+                    <div class="attach-item-icon-box task-tracker-accent" style="background: rgba(168, 85, 247, 0.15); border-color: rgba(168, 85, 247, 0.4); color: var(--neon-purple);">
+                      <i class="fa-solid fa-list-check"></i>
+                    </div>
+                    <div class="attach-item-info">
+                      <span class="attach-item-title">Interactive Task Tracker</span>
+                      <span class="attach-item-desc" id="attachTaskTrackerDesc">Checklist visual tahapan tugas AI</span>
                     </div>
                   </button>
                 </div>
@@ -1161,6 +1208,22 @@
                 <span class="checkbox-text">
                   <strong>Sertakan Struktur Pohon File ke Konteks AI</strong>
                   <small>AI otomatis mengetahui daftar nama file yang ada di direktori Anda saat obrolan</small>
+                </span>
+              </label>
+              <label class="workspace-checkbox-label">
+                <input type="checkbox" id="settingWorkspaceEnableSnapshots" checked>
+                <span class="checkbox-custom"></span>
+                <span class="checkbox-text">
+                  <strong>Aktifkan Auto-Snapshot & Riwayat Versi Berkas</strong>
+                  <small>Otomatis mencadangkan versi berkas sebelum ditimpa AI/pengguna agar dapat di-rollback</small>
+                </span>
+              </label>
+              <label class="workspace-checkbox-label">
+                <input type="checkbox" id="settingWorkspaceAutoTaskTracker" checked>
+                <span class="checkbox-custom"></span>
+                <span class="checkbox-text">
+                  <strong>Aktifkan Interactive Task Tracker AI</strong>
+                  <small>AI otomatis memecah tugas kompleks menjadi subtask terencana dengan visual checklist</small>
                 </span>
               </label>
             </div>
@@ -1733,8 +1796,23 @@
       </div>
       <div class="modal-body">
         <div class="doc-viewer-meta" id="workspaceDocViewerMeta">
-          <span id="docViewerPath"></span> • <span id="docViewerSize"></span>
+          <div><span id="docViewerPath"></span> • <span id="docViewerSize"></span></div>
+          <button type="button" class="btn btn-xs btn-outline" id="btnDocViewerSnapshotsToggle">
+            <i class="fa-solid fa-clock-rotate-left"></i> Riwayat Versi (<span id="docViewerSnapshotCount">0</span>)
+          </button>
         </div>
+
+        <!-- Collapsible Snapshots Panel -->
+        <div class="doc-snapshots-panel" id="workspaceDocSnapshotsPanel" style="display: none;">
+          <div class="snapshots-panel-header">
+            <span><i class="fa-solid fa-clock-rotate-left"></i> Riwayat Versi / Snapshot Tersimpan</span>
+            <small>Pilih versi untuk pratinjau atau rollback</small>
+          </div>
+          <div class="snapshots-list" id="workspaceDocSnapshotsList">
+            <!-- Dynamic snapshots list -->
+          </div>
+        </div>
+
         <pre class="doc-viewer-content" id="workspaceDocViewerContent"></pre>
       </div>
       <div class="modal-footer">
@@ -1771,6 +1849,28 @@
     </div>
   </div>
 
+  <!-- MODAL: Tambah Tugas Manual ke Task Tracker -->
+  <div class="modal-backdrop" id="taskCreateModal">
+    <div class="modal-card" style="max-width: 440px;">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="fa-solid fa-list-check" style="color: var(--neon-purple);"></i> Tambah Tugas ke Task Tracker
+        </div>
+        <button class="modal-close-btn" data-close="taskCreateModal" aria-label="Tutup form" title="Tutup form"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="inputTaskSubject">Deskripsi / Judul Tugas:</label>
+          <input type="text" id="inputTaskSubject" placeholder="contoh: Analisis berkas dan buat kesimpulan...">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close="taskCreateModal">Batal</button>
+        <button class="btn btn-primary" id="btnSaveManualTask"><i class="fa-solid fa-plus"></i> Tambah Tugas</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
@@ -1786,8 +1886,8 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261014_v256" defer></script>
+  <script src="text-safety.js?v=20261014_v257" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261014_v256" defer></script>
+  <script src="app.js?v=20261014_v257" defer></script>
 </body>
 </html>
