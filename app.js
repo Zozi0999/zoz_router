@@ -10236,7 +10236,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         // render:false → bubbleText.innerHTML diganti tanpa syarat beberapa baris
         // di bawah (kartu error), jadi render dari finish hanya akan dibuang.
         const rescuePartial = sanitizePartialResponseWithFiles(streamRenderer ? streamRenderer.finish({ render: false }) : '');
-        const partialText = rescuePartial.text;
+        const partialText = scrubRawToolCallArtifacts(rescuePartial.text);
         const hasPartialText = Boolean(partialText && partialText.trim());
 
         if (hasPartialText && STATE.sessions.some(s => s.id === session.id)) {
@@ -10512,6 +10512,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       let activeEndpoint = '';
       let activeHeaders = {};
       let activeRouteType = '';
+      const selectedAutonomousTools = getSelectableAutonomousTools(canRunAutonomous);
 
       for (let i = 0; i < candidateModels.length; i++) {
         const currentModel = candidateModels[i];
@@ -10550,7 +10551,6 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         // Pasang tools HANYA jika bukan model gratis, API key ada, dan model mendukung tools
         const canUseTools = doesModelSupportTools(currentModel);
         if (!currentIsFree && canUseTools && STATE.settings.openRouterKey) {
-          const selectedAutonomousTools = getSelectableAutonomousTools(canRunAutonomous);
           const validFunctionTools = (selectedAutonomousTools || []).filter(t => t && t.type === 'function' && t.function && t.function.name);
           if (validFunctionTools.length > 0) {
             basePayload.tools = validFunctionTools;
@@ -11078,7 +11078,14 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             allow_fallbacks: true
           }
         };
-        if (!isLastRound && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
+        const canDigestionUseTools = doesModelSupportTools(activeDigestionModel);
+        const isDigestionFree = Boolean(
+          activeDigestionModel.includes(':free') ||
+          activeDigestionModel.endsWith('/free') ||
+          activeDigestionModel === 'openrouter/free' ||
+          (STATE.openRouterModels || []).some(m => m.id === activeDigestionModel && (m.cat === 'free' || m.tag === 'Free'))
+        );
+        if (!isLastRound && !isDigestionFree && canDigestionUseTools && STATE.settings.openRouterKey && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
           const validFunctionTools = selectedAutonomousTools.filter(t => t && t.type === 'function' && t.function && t.function.name);
           if (validFunctionTools.length > 0) {
             digestionRequestBody.tools = validFunctionTools;
@@ -11439,7 +11446,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         // render:false → bubbleText.innerHTML diganti tanpa syarat beberapa baris
         // di bawah (kartu error), jadi render dari finish hanya akan dibuang.
         const rescuePartial = sanitizePartialResponseWithFiles(streamRenderer ? streamRenderer.finish({ render: false }) : '');
-        const partialText = rescuePartial.text;
+        const partialText = scrubRawToolCallArtifacts(rescuePartial.text);
         const hasPartialText = Boolean(partialText && partialText.trim());
 
         if (hasPartialText && STATE.sessions.some(s => s.id === session.id)) {
