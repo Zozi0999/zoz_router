@@ -6424,9 +6424,13 @@ async function requestHandler(req, res) {
               try {
                 const parsed = JSON.parse(rawResp);
                 const txt = parsed.choices?.[0]?.message?.content || '';
+                const reasoning = parsed.choices?.[0]?.message?.reasoning || parsed.choices?.[0]?.message?.reasoning_content || '';
                 const msgPayload = { role: 'assistant', content: txt };
                 if (parsed.choices?.[0]?.message?.tool_calls) {
                   msgPayload.tool_calls = parsed.choices[0].message.tool_calls;
+                }
+                if (reasoning) {
+                  msgPayload.reasoning = reasoning;
                 }
                 sendJSON(res, 200, {
                   model: body.model || 'gemma4:31b',
@@ -6463,9 +6467,11 @@ async function requestHandler(req, res) {
                 const parsed = JSON.parse(dataStr);
                 const delta = parsed.choices?.[0]?.delta?.content || '';
                 const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
-                if (delta || deltaToolCalls) {
+                const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
+                if (delta || deltaToolCalls || deltaReasoning) {
                   const msgPayload = { role: 'assistant', content: delta };
                   if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
+                  if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
                   res.write(JSON.stringify({
                     model: body.model || 'gemma4:31b',
                     created_at: new Date().toISOString(),

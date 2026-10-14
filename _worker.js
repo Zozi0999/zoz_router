@@ -760,9 +760,13 @@ export default {
           if (!isStream) {
             const data = await orRes.json().catch(() => ({}));
             const textContent = data.choices?.[0]?.message?.content || '';
+            const reasoning = data.choices?.[0]?.message?.reasoning || data.choices?.[0]?.message?.reasoning_content || '';
             const msgPayload = { role: 'assistant', content: textContent };
             if (data.choices?.[0]?.message?.tool_calls) {
               msgPayload.tool_calls = data.choices[0].message.tool_calls;
+            }
+            if (reasoning) {
+              msgPayload.reasoning = reasoning;
             }
             return new Response(JSON.stringify({
               model: body.model || 'gemma4:31b',
@@ -807,9 +811,11 @@ export default {
                     const parsed = JSON.parse(dataStr);
                     const deltaContent = parsed.choices?.[0]?.delta?.content || '';
                     const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
-                    if (deltaContent || deltaToolCalls) {
+                    const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
+                    if (deltaContent || deltaToolCalls || deltaReasoning) {
                       const msgPayload = { role: 'assistant', content: deltaContent };
                       if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
+                      if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
                       await writer.write(encoder.encode(JSON.stringify({
                         model: body.model || 'gemma4:31b',
                         created_at: new Date().toISOString(),
@@ -947,8 +953,12 @@ export default {
         }
         const targetUrl = parsedBase;
 
-        const res = await fetch(targetUrl.toString(), { headers });
-        if (res.ok) {
+        let res = null;
+        try {
+          res = await fetch(targetUrl.toString(), { headers, signal: AbortSignal.timeout(5000) });
+        } catch (_) {}
+
+        if (res && res.ok) {
           const rawText = await res.text();
           try {
             const parsed = JSON.parse(rawText);
@@ -973,6 +983,49 @@ export default {
             }
           } catch (_) {}
         }
+
+        // Secondary probe: Coba endpoint /v1/models (kompatibel OpenAI / vLLM / Ollama v1)
+        try {
+          const v1Url = new URL(cleanEndpoint);
+          let v1Path = v1Url.pathname.replace(/\/+$/, '');
+          if (v1Path.endsWith('/v1/models')) {
+            // already ends with /v1/models
+          } else if (v1Path.endsWith('/v1')) {
+            v1Url.pathname = v1Path + '/models';
+          } else {
+            v1Url.pathname = (v1Path ? v1Path : '') + '/v1/models';
+          }
+          const v1Res = await fetch(v1Url.toString(), { headers, signal: AbortSignal.timeout(3500) }).catch(() => null);
+          if (v1Res && v1Res.ok) {
+            const v1Text = await v1Res.text();
+            const v1Parsed = JSON.parse(v1Text);
+            if (Array.isArray(v1Parsed.data) && v1Parsed.data.length > 0) {
+              const mappedModels = v1Parsed.data.map(m => ({
+                name: m.id,
+                model: m.id,
+                details: { family: m.id }
+              }));
+              const mergedModels = [...mappedModels];
+              const existingNames = new Set(mergedModels.map(m => (m.name || m.model || m.id || '').toLowerCase()));
+              OFFICIAL_OLLAMA_CLOUD_MODELS.forEach(om => {
+                const omName = (om.name || om.model || om.id || '').toLowerCase();
+                if (!existingNames.has(omName)) {
+                  mergedModels.push(om);
+                  existingNames.add(omName);
+                }
+              });
+              return new Response(JSON.stringify({
+                models: mergedModels,
+                server_running: true,
+                cloud_ready: true
+              }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+              });
+            }
+          }
+        } catch (_) {}
+
         // Fallback jika response bukan 200 atau models kosong
         return new Response(JSON.stringify({
           models: OFFICIAL_OLLAMA_CLOUD_MODELS,
@@ -1012,7 +1065,8 @@ export default {
             'x-ollama-key': rawKey,
             'User-Agent': 'ZozRouter/1.0 (Cloudflare Edge)',
             'Cache-Control': 'no-cache, no-store, must-revalidate'
-          }
+          },
+          signal: AbortSignal.timeout(6000)
         });
         const usageData = await usageRes.json().catch(() => ({}));
         return new Response(JSON.stringify(usageData), {

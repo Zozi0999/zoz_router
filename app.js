@@ -6272,8 +6272,8 @@ ${blocks}
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
       }
 
-      // Ollama Cloud Discovery: Selalu sediakan 26 model cloud resmi out-of-the-box
-      if (STATE.settings.ollamaApiKey) {
+      // Ollama Discovery: Ambil daftar model lewat gateway proxy atau direct endpoint
+      if (!IS_GITHUB_PAGES) {
         try {
           const gwUrl = '/api/ollama/models?endpoint=' + encodeURIComponent(ep);
           const gwRes = await fetch(gwUrl, { headers }).catch(() => null);
@@ -6295,6 +6295,32 @@ ${blocks}
           }
         } catch (gwErr) {
           console.warn('Gagal memuat daftar model Ollama via gateway:', gwErr && gwErr.message);
+        }
+      } else if (ep.startsWith('https://') || !/^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+        try {
+          let directRes = await fetch(resolveEndpointUrl(ep, 'api/tags'), { headers, signal: AbortSignal.timeout(4000) }).catch(() => null);
+          if (!directRes || !directRes.ok) {
+            directRes = await fetch(resolveEndpointUrl(ep, 'v1/models'), { headers, signal: AbortSignal.timeout(3000) }).catch(() => null);
+          }
+          if (directRes && directRes.ok) {
+            const directData = await directRes.json();
+            const list = Array.isArray(directData.models) ? directData.models : (Array.isArray(directData.data) ? directData.data.map(m => ({ name: m.id, model: m.id })) : []);
+            if (list.length > 0) {
+              const merged = [...list];
+              const existingNames = new Set(merged.map(m => (m.name || m.model || m.id || '').toLowerCase()));
+              OFFICIAL_OLLAMA_CLOUD_MODELS.forEach(om => {
+                const omName = (om.name || om.model || om.id || '').toLowerCase();
+                if (!existingNames.has(omName)) {
+                  merged.push(om);
+                  existingNames.add(omName);
+                }
+              });
+              rawModels = merged;
+              isRunning = true;
+            }
+          }
+        } catch (dErr) {
+          console.warn('Gagal memuat daftar model Ollama langsung di GitHub Pages:', dErr && dErr.message);
         }
       }
 
@@ -9724,6 +9750,10 @@ Format teks (untuk model tanpa function calling):
           }
           if (parsed.done_reason) doneReason = parsed.done_reason;
           const chunk = parsed.message?.content || parsed.response || '';
+          const reasoningChunk = parsed.message?.reasoning || parsed.reasoning || '';
+          if (reasoningChunk) {
+            streamRenderer.appendReasoning(reasoningChunk);
+          }
           if (chunk) {
             if (!firstTokenTime) firstTokenTime = performance.now();
             tokenCount++;
@@ -9744,6 +9774,10 @@ Format teks (untuk model tanpa function calling):
           }
           if (parsed.done_reason) doneReason = parsed.done_reason;
           const chunk = parsed.message?.content || parsed.response || '';
+          const reasoningChunk = parsed.message?.reasoning || parsed.reasoning || '';
+          if (reasoningChunk) {
+            streamRenderer.appendReasoning(reasoningChunk);
+          }
           if (chunk) {
             if (!firstTokenTime) firstTokenTime = performance.now();
             tokenCount++;
@@ -9983,6 +10017,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
               try {
                 const dParsed = JSON.parse(dLine);
                 const chunk = dParsed.message?.content || dParsed.response || '';
+                const dReasoning = dParsed.message?.reasoning || dParsed.reasoning || '';
+                if (dReasoning) {
+                  digestionRenderer.appendReasoning(dReasoning);
+                }
                 if (chunk) {
                   tokenCount++;
                   digestionRenderer.append(chunk);
@@ -9999,6 +10037,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             try {
               const dParsed = JSON.parse(digestionBuffer.trim());
               const chunk = dParsed.message?.content || dParsed.response || '';
+              const dReasoning = dParsed.message?.reasoning || dParsed.reasoning || '';
+              if (dReasoning) {
+                digestionRenderer.appendReasoning(dReasoning);
+              }
               if (chunk) {
                 tokenCount++;
                 digestionRenderer.append(chunk);
@@ -12186,8 +12228,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
               continue;
             }
             const data = await res.json();
-            modelSuccessText = data.choices?.[0]?.message?.content || '';
-            break;
+            const rawContent = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning || data.choices?.[0]?.message?.reasoning_content || '';
+            if (rawContent && rawContent.trim()) {
+              modelSuccessText = rawContent;
+              break;
+            }
+            lastErr = new Error(`OpenRouter mengembalikan balasan kosong untuk model ${curModel}`);
           } catch (callErr) {
             if (STATE.abortController?.signal?.aborted) throw callErr;
             lastErr = callErr;
@@ -12223,7 +12269,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         endpoint: ep
       };
       if (STATE.settings.ollamaApiKey) requestBody.apiKey = STATE.settings.ollamaApiKey;
-      const chatUrl = (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+      const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
 
       const res = await fetch(chatUrl, {
         method: 'POST',
@@ -12233,7 +12279,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       });
       if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
       const data = await res.json();
-      return data.message?.content || data.response || data.choices?.[0]?.message?.content || '';
+      return data.message?.content || data.message?.reasoning || data.response || data.choices?.[0]?.message?.content || '';
     }
   }
 
@@ -12432,7 +12478,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       };
       if (STATE.settings.ollamaApiKey) requestBody.apiKey = STATE.settings.ollamaApiKey;
 
-      const chatUrl = (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+      const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
       const response = await fetch(chatUrl, {
         method: 'POST',
         headers,
@@ -18345,8 +18391,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           headers['x-ollama-key'] = key;
         }
 
-        if (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) {
-          // Direct browser testing
+        if (IS_GITHUB_PAGES) {
+          if (location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+            showToast('⚠️ Di GitHub Pages HTTPS, browser memblokir koneksi HTTP localhost (mixed-content). Gunakan Ollama Cloud atau URL HTTPS publik.', 'error');
+            return;
+          }
+          // Direct browser testing (GitHub Pages)
           let res = await fetch(resolveEndpointUrl(ep, 'api/tags'), { headers, mode: 'cors' }).catch(() => null);
           if (!res || !res.ok) {
             res = await fetch(resolveEndpointUrl(ep, 'v1/models'), { headers, mode: 'cors' }).catch(() => null);
