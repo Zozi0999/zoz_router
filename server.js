@@ -1652,11 +1652,84 @@ async function enrichYouTubeSearchResults(results) {
  * @param {number} maxResults jumlah hasil (1-10)
  * @returns {Promise<{success:boolean, query:string, count:number, results:Array, error?:string}>}
  */
-async function searchYouTubeVideos(query, maxResults = 6) {
+async function searchViaCustomVideoUrl(query, limit, customUrl) {
+  if (!customUrl || typeof customUrl !== 'string') return [];
+  let targetUrl = customUrl.replace(/\{query\}|\{q\}/gi, encodeURIComponent(query));
+  if (!targetUrl.includes(encodeURIComponent(query))) {
+    const sep = targetUrl.includes('?') ? '&' : '?';
+    targetUrl += `${sep}q=${encodeURIComponent(query)}`;
+  }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const resp = await fetch(targetUrl, {
+      signal: ctrl.signal,
+      headers: {
+        'User-Agent': YOUTUBE_SEARCH_UA,
+        'Accept': 'application/json,text/html,*/*'
+      }
+    });
+    if (!resp.ok) return [];
+    const cType = resp.headers.get('content-type') || '';
+    if (cType.includes('application/json')) {
+      const data = await resp.json();
+      if (Array.isArray(data)) {
+        return data.slice(0, limit).map(it => ({
+          videoId: it.videoId || it.id || '',
+          title: it.title || 'Video',
+          channel: it.author || it.uploaderName || it.channelTitle || '',
+          channelUrl: it.authorUrl || '',
+          durationText: it.lengthSeconds ? `${Math.floor(it.lengthSeconds / 60)}:${String(it.lengthSeconds % 60).padStart(2, '0')}` : '',
+          durationSeconds: Number(it.lengthSeconds) || 0,
+          viewText: Number(it.viewCount) > 0 ? `${Number(it.viewCount).toLocaleString('en-US')} views` : '',
+          publishedText: it.publishedText || '',
+          description: String(it.description || '').slice(0, 260),
+          url: it.videoId ? `https://www.youtube.com/watch?v=${it.videoId}` : (it.url || ''),
+          thumbnail: it.videoThumbnails?.[0]?.url || (it.videoId ? `https://i.ytimg.com/vi/${it.videoId}/hqdefault.jpg` : ''),
+          source: 'Custom Video Provider'
+        })).filter(v => v.title && (v.videoId || v.url));
+      }
+    }
+    const html = await resp.text();
+    const jsonStr = extractJsonAfterMarker(html, 'ytInitialData');
+    if (jsonStr) {
+      try {
+        const data = JSON.parse(jsonStr);
+        const results = [];
+        collectYouTubeSearchResults(data, results, limit);
+        if (results.length > 0) return results;
+      } catch (_) {}
+    }
+    const vidMatches = [...html.matchAll(/(?:\/watch\?v=|youtu\.be\/|data-video-id=["'])([a-zA-Z0-9_-]{11})/g)];
+    const seen = new Set();
+    const fallbackResults = [];
+    for (const m of vidMatches) {
+      const vid = m[1];
+      if (seen.has(vid)) continue;
+      seen.add(vid);
+      fallbackResults.push({
+        videoId: vid,
+        title: `Video (${vid})`,
+        url: `https://www.youtube.com/watch?v=${vid}`,
+        thumbnail: `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,
+        source: 'Custom URL Scraper'
+      });
+      if (fallbackResults.length >= limit) break;
+    }
+    return fallbackResults;
+  } catch (err) {
+    console.warn('[Custom Video Search] Error fetching custom video search URL:', err.message);
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function searchYouTubeVideos(query, maxResults = 6, customSearchUrl = '') {
   const q = String(query || '').trim();
   if (!q) throw new Error('Parameter query tidak boleh kosong.');
   const limit = Math.max(1, Math.min(10, parseInt(maxResults, 10) || 6));
-  const cacheKey = `${q.toLowerCase()}::${limit}`;
+  const cacheKey = `${q.toLowerCase()}::${limit}::${customSearchUrl || 'default'}`;
   if (youtubeSearchCache.has(cacheKey)) {
     const cached = youtubeSearchCache.get(cacheKey);
     if (cached && (Date.now() - cached.cachedAt < YOUTUBE_CACHE_TTL)) {
@@ -1665,7 +1738,13 @@ async function searchYouTubeVideos(query, maxResults = 6) {
     youtubeSearchCache.delete(cacheKey);
   }
 
-  let results = await searchViaYouTubeResultsPage(q, limit);
+  let results = [];
+  if (customSearchUrl && typeof customSearchUrl === 'string' && /^https?:\/\//i.test(customSearchUrl.trim())) {
+    results = await searchViaCustomVideoUrl(q, limit, customSearchUrl.trim());
+  }
+  if (results.length === 0) {
+    results = await searchViaYouTubeResultsPage(q, limit);
+  }
   if (results.length === 0) {
     results = await searchViaInvidious(q, limit);
   }
@@ -1678,6 +1757,7 @@ async function searchYouTubeVideos(query, maxResults = 6) {
     query: q,
     count: results.length,
     results,
+    customSearchUrl: customSearchUrl || undefined,
     error: results.length > 0 ? undefined : 'Tidak ditemukan hasil video. Coba kata kunci lain.'
   };
   if (results.length > 0) {
@@ -5228,23 +5308,26 @@ async function requestHandler(req, res) {
     try {
       let query = '';
       let maxResults = 6;
+      let customSearchUrl = '';
       if (method === 'GET') {
         query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || reqUrl.searchParams.get('keyword') || reqUrl.searchParams.get('search') || reqUrl.searchParams.get('topic') || reqUrl.searchParams.get('title') || reqUrl.searchParams.get('text') || reqUrl.searchParams.get('cari') || reqUrl.searchParams.get('kata_kunci') || reqUrl.searchParams.get('judul') || '';
         const parsedLimit = parseInt(reqUrl.searchParams.get('limit') || reqUrl.searchParams.get('max_results') || '6', 10);
         maxResults = Math.min(Math.max(isNaN(parsedLimit) ? 6 : parsedLimit, 1), 20);
+        customSearchUrl = reqUrl.searchParams.get('customSearchUrl') || reqUrl.searchParams.get('customUrl') || '';
       } else {
         const body = await safeParseBody(req);
         if (!body) return;
         query = body.q || body.query || body.keyword || body.search || body.topic || body.title || body.text || body.cari || body.kata_kunci || body.judul || '';
         const parsedLimit = parseInt(body.limit || body.max_results || '6', 10);
         maxResults = Math.min(Math.max(isNaN(parsedLimit) ? 6 : parsedLimit, 1), 20);
+        customSearchUrl = body.customSearchUrl || body.customUrl || '';
       }
 
       if (!query || !String(query).trim()) {
         return sendJSON(res, 400, { success: false, error: 'Parameter query diperlukan.' });
       }
 
-      const data = await searchYouTubeVideos(String(query).trim(), maxResults);
+      const data = await searchYouTubeVideos(String(query).trim(), maxResults, customSearchUrl);
       return sendJSON(res, 200, data);
     } catch (err) {
       return sendJSON(res, 500, { success: false, error: err.message });

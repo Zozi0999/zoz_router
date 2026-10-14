@@ -363,7 +363,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     isMusicGenMode: false,
     photoEditImage: null, // dataURL foto referensi untuk mode Edit Foto AI (Img2Img)
     photoEditAwaitingModel: false, // true = pengguna sedang memilih model untuk edit foto (popup dulu, file picker sesudahnya)
-    isYouTubeSearchMode: false, // Tool "Cari Video YouTube" (toggle dari menu Lampiran)
+    isYouTubeSearchMode: false, // Tool Pencarian YouTube AI (toggle dari menu Lampiran / Composer)
     isGenerating: false,
     isSending: false, // Guard anti pengiriman ganda (Enter berulang saat masih ada await)
     abortController: null,
@@ -388,7 +388,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       customSystemPrompt: '',
       activePreset: 'kaisar',
       autoPolicy: 'cloud_first',
-      youtubeSearchTool: false // Tool pencarian video YouTube (toggle dari menu Lampiran)
+      youtubeSearchTool: false // Tool pencarian YouTube (toggle dari menu Lampiran / Composer)
     },
     activeCatalogTab: 'ollama', // 'ollama' | 'openrouter'
     dropdownModelTab: 'ollama', // 'ollama' | 'openrouter'
@@ -602,6 +602,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     webSearchIcon: $('#webSearchIcon'),
     searchBadge: $('#searchBadge'),
     searchDropdown: $('#searchDropdown'),
+    videoSearchMenuWrapper: $('#videoSearchMenuWrapper'),
+    videoSearchToggleBtn: $('#videoSearchToggleBtn'),
+    videoSearchIcon: $('#videoSearchIcon'),
+    videoSearchBadge: $('#videoSearchBadge'),
     imageModelMenuWrapper: $('#imageModelMenuWrapper'),
     imageModelDropdown: $('#imageModelDropdown'),
     imageModelBadge: $('#imageModelBadge'),
@@ -1321,7 +1325,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
       }
 
-      // Sinkronkan tool "Cari Video YouTube" dari preferensi tersimpan
+      // Sinkronkan preferensi tool pencarian YouTube
       STATE.isYouTubeSearchMode = Boolean(STATE.settings.youtubeSearchTool);
 
       // Pastikan customSystemPrompt terinisialisasi jika user sebelumnya sudah punya persona kustom
@@ -2516,6 +2520,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       this.renderTimer = null; // handle setTimeout render terjadwal (coalesced)
       this.lastRenderTime = 0;
       this.isDone = false;
+      this.isLoopTerminated = false;
     }
 
     setPrefixHtml(prefix) {
@@ -2526,11 +2531,59 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       // Fail closed: kanal reasoning sengaja tidak disimpan/render di transkrip.
     }
 
+    detectRepetitionLoop() {
+      if (!this.text || this.text.length < 32) return false;
+      const tail = this.text.slice(-320);
+
+      // 1. Single character repetition: e.g. '&&&&&&&&&&&&&&&&&&&&' (>= 18 kali beruntun)
+      const singleCharMatch = /(.)\1{17,}$/.exec(tail);
+      if (singleCharMatch) {
+        const char = singleCharMatch[1];
+        const isWhitespace = /\s/.test(char);
+        if (!isWhitespace || singleCharMatch[0].length >= 35) {
+          const excessLen = singleCharMatch[0].length - 3;
+          if (excessLen > 0) {
+            this.text = this.text.slice(0, -excessLen);
+          }
+          return true;
+        }
+      }
+
+      // 2. Multi-character pattern repetition: pola berulang (2 s.d. 30 karakter)
+      for (let L = 2; L <= 30; L++) {
+        if (tail.length < L * 5) continue;
+        const pattern = tail.slice(-L);
+        let count = 0;
+        let pos = tail.length;
+        while (pos >= L && tail.slice(pos - L, pos) === pattern) {
+          count++;
+          pos -= L;
+        }
+        const minRepeats = L <= 3 ? 8 : (L <= 10 ? 6 : 4);
+        if (count >= minRepeats) {
+          const excessRepeats = count - 2;
+          if (excessRepeats > 0) {
+            this.text = this.text.slice(0, -(excessRepeats * L));
+          }
+          return true;
+        }
+      }
+      return false;
+    }
+
     append(delta) {
       if (delta === null || delta === undefined) return;
+      if (this.isLoopTerminated || this.isDone) return;
       const str = String(delta);
       if (!str) return;
       this.text += str;
+
+      if (this.detectRepetitionLoop()) {
+        this.isLoopTerminated = true;
+        this.scheduleRender();
+        return;
+      }
+
       if (this.isDone) return;
       this.scheduleRender();
     }
@@ -5818,17 +5871,17 @@ ${organicBlock}
   function buildSourcesSectionHtml(sources, collapsed = true) {
     return `
       <div class="msg-sources-section${collapsed ? ' collapsed' : ''}">
-        <button type="button" class="msg-sources-title msg-sources-toggle" aria-expanded="${collapsed ? 'false' : 'true'}" title="Πηγαὶ Ἀναφορᾶς Δικτύου (Ἀποκάλυψις / Ἀπόκρυψις)">
+        <button type="button" class="msg-sources-title msg-sources-toggle" aria-expanded="${collapsed ? 'false' : 'true'}" title="Sumber Referensi Web (Tampilkan / Sembunyikan)">
           <i class="fa-solid fa-earth-americas" style="color:var(--neon-cyan);"></i>
-          <span>Πηγαὶ Ἀναφορᾶς Δικτύου (${sources.length})</span>
-          <span class="sources-toggle-label">${collapsed ? 'Ἀποκάλυψις' : 'Ἀπόκρυψις'}</span>
+          <span>Sumber Referensi Web (${sources.length})</span>
+          <span class="sources-toggle-label">${collapsed ? 'Tampilkan' : 'Sembunyikan'}</span>
           <i class="fa-solid fa-chevron-down sources-toggle-chevron"></i>
         </button>
         <div class="msg-sources-grid">
           ${sources.map((s, i) => `
             <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" class="msg-source-chip" title="${escapeHtml((s.title || '') + (s.snippet ? ' - ' + s.snippet : ''))}">
               <span class="source-index">${i + 1}</span>
-              <span class="source-title">${escapeHtml(s.title || s.domain || 'Πηγὴ Δικτύου')}</span>
+              <span class="source-title">${escapeHtml(s.title || s.domain || 'Sumber Web')}</span>
               <span class="source-domain">${escapeHtml(s.domain || '')}</span>
             </a>
           `).join('')}
@@ -5837,7 +5890,7 @@ ${organicBlock}
     `;
   }
 
-  // Delegasi klik: buka / tutup daftar referensi web di bubble chat (Ancient Greek)
+  // Delegasi klik: buka / tutup daftar referensi web di bubble chat
   document.addEventListener('click', (e) => {
     const toggle = e.target.closest ? e.target.closest('.msg-sources-toggle') : null;
     if (!toggle) return;
@@ -5846,7 +5899,7 @@ ${organicBlock}
     const isCollapsed = section.classList.toggle('collapsed');
     toggle.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
     const label = toggle.querySelector('.sources-toggle-label');
-    if (label) label.textContent = isCollapsed ? 'Ἀποκάλυψις' : 'Ἀπόκρυψις';
+    if (label) label.textContent = isCollapsed ? 'Tampilkan' : 'Sembunyikan';
     AudioEngine.click();
   });
 
@@ -5862,21 +5915,42 @@ ${organicBlock}
     if (sourcesEl) bubble.appendChild(sourcesEl);
   }
 
-  // ==================== UNIVERSAL YOUTUBE OEMBED ENGINE (CLIENT) ====================
-  const YOUTUBE_URL_REGEX_CLIENT = /(?:https?:\/\/)?(?:www\.|m\.|music\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:[^\s]*)?/gi;
+  // ==================== UNIVERSAL YOUTUBE OEMBED & CUSTOM VIDEO PLAYER ENGINE ====================
+  const YOUTUBE_URL_REGEX_CLIENT = /(?:https?:\/\/)?(?:www\.|m\.|music\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|v\/)|youtu\.be\/|(?:yewtu\.be|piped\.video|[a-z0-9.-]+\.invidious\.[a-z]+)\/(?:watch\?(?:.*&)?v=|embed\/))([a-zA-Z0-9_-]{11})(?:[^\s]*)?/gi;
   const clientYouTubeCache = new Map();
 
   function extractYouTubeVideoIdsClient(text) {
     if (!text || typeof text !== 'string') return [];
     const ids = [];
-    const re = new RegExp(YOUTUBE_URL_REGEX_CLIENT.source, 'gi');
-    let match;
-    while ((match = re.exec(text)) !== null) {
-      if (match[1] && !ids.includes(match[1])) {
-        ids.push(match[1]);
+    const patterns = [
+      /(?:https?:\/\/)?(?:www\.|m\.|music\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|v\/)|youtu\.be\/|(?:yewtu\.be|piped\.video)\/(?:watch\?(?:.*&)?v=|embed\/))([a-zA-Z0-9_-]{11})/gi,
+      /[?&]v=([a-zA-Z0-9_-]{11})/gi,
+      /(?:https?:\/\/)?(?:[a-z0-9.-]+\/)?(?:watch\?v=|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/gi
+    ];
+    for (const re of patterns) {
+      let match;
+      while ((match = re.exec(text)) !== null) {
+        const id = match[1];
+        if (id && id.length === 11 && !ids.includes(id)) {
+          ids.push(id);
+        }
       }
     }
     return ids;
+  }
+
+  function extractDirectVideoUrlsClient(text) {
+    if (!text || typeof text !== 'string') return [];
+    const urls = [];
+    const re = /https?:\/\/[^\s<>"'`]+?\.(?:mp4|webm|ogv|mov)(?:\?[^\s<>"'`]*)?/gi;
+    let match;
+    while ((match = re.exec(text)) !== null) {
+      let u = match[0].replace(/[.,;:!?)]+$/, '');
+      if (u && !urls.includes(u)) {
+        urls.push(u);
+      }
+    }
+    return urls;
   }
 
   async function fetchYouTubeInfoClient(rawUrlOrId) {
@@ -5972,11 +6046,11 @@ ${organicBlock}
     const ids = extractYouTubeVideoIdsClient(promptText);
     if (ids.length === 0) return null;
 
-    if (hudElement) {
+    if (hudElement && ids.length > 0) {
       hudElement.innerHTML = `
         <div class="web-search-hud">
           <i class="fa-brands fa-youtube" style="color:#ff0033; font-size:1.1rem;"></i>
-          <span><strong>YouTube Grounding:</strong> Mengambil metadata ${ids.length} video via oEmbed...</span>
+          <span><strong>Video Grounding:</strong> Mengambil metadata ${ids.length} video via oEmbed...</span>
         </div>
       `;
     }
@@ -5996,19 +6070,49 @@ ${organicBlock}
 (Informasi resmi ini diambil secara real-time via YouTube oEmbed)`;
     }).join('\n\n');
 
-    const groundingContext = `### DATA METADATA RESMI YOUTUBE (VERIFIED GROUNDING):
+    const groundingContext = `### DATA METADATA RESMI VIDEO (VERIFIED GROUNDING):
 ${blocks}
 
 ### PANDUAN INTEGRITAS & ANTI-HALUSINASI UNTUK ASISTEN AI:
-1. Informasi di atas adalah metadata resmi terverifikasi real-time via YouTube oEmbed.
-2. BATASAN DATA: Data di atas HANYA memuat judul dan nama channel/kreator, dan TIDAK MEMUAT transkrip/rekaman isi suara video.
-3. DILARANG BERHALUSINASI: Dilarang mengarang, menebak, atau mereka-reka isi dialog, kesimpulan, atau alur adegan detail dari video di atas semata-mata berdasarkan judulnya.
-4. JAWABAN JUJUR: Jika pengguna meminta "Rangkum isi video ini" atau "Apa kesimpulan video ini?", jelaskan fakta judul dan kreatornya, lalu sampaikan secara transparan kepada pengguna bahwa transkrip penuh percakapan di dalam video tidak tersedia.`;
+1. Informasi di atas adalah metadata resmi terverifikasi real-time via video grounding.
+2. BATASAN DATA: Data di atas HANYA memuat judul dan nama channel/kreator/URL, dan TIDAK MEMUAT transkrip/rekaman isi suara video lengkap kecuali disediakan pengguna.
+3. DILARANG BERHALUSINASI: Dilarang mengarang atau mereka-reka isi dialog atau kesimpulan detail dari video di atas semata-mata berdasarkan judulnya.
+4. JAWABAN JUJUR: Jika pengguna meminta "Rangkum isi video ini" atau "Apa kesimpulan video ini?", jelaskan fakta judul dan kreator/tautannya, lalu sampaikan secara transparan kepada pengguna jika transkrip penuh percakapan di dalam video belum disertakan.`;
 
     return {
       groundingContext,
       videos: validVideos
     };
+  }
+
+  function buildDirectVideoPreviewCardHtml(videoUrl) {
+    if (!videoUrl) return '';
+    const safeUrl = escapeHtml(videoUrl);
+    let fileName = 'Video Kustom';
+    try {
+      const parsed = new URL(videoUrl);
+      const name = parsed.pathname.split('/').filter(Boolean).pop();
+      if (name) fileName = decodeURIComponent(name);
+    } catch (_) {}
+    const safeTitle = escapeHtml(fileName);
+
+    return `
+      <div class="youtube-preview-card custom-direct-video-card yt-card-playing" style="flex-direction: column; max-width: 500px;">
+        <div class="yt-embed-frame" style="background:#000; display:flex; align-items:center; justify-content:center;">
+          <video controls preload="metadata" playsinline style="width:100%; height:100%; max-height:280px; object-fit:contain; background:#000;">
+            <source src="${safeUrl}">
+            Browser Anda tidak mendukung pemutar video HTML5.
+          </video>
+        </div>
+        <div class="yt-card-info" style="padding: 10px 14px;">
+          <h4 class="yt-card-title" title="${safeTitle}" style="font-size:0.85rem;"><i class="fa-solid fa-file-video" style="color:var(--neon-cyan);"></i> ${safeTitle}</h4>
+          <div class="yt-card-channel" style="font-size:0.75rem;"><i class="fa-solid fa-link"></i> Video Kustom URL</div>
+          <div class="yt-card-actions" style="margin-top:6px;">
+            <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="yt-card-btn open-yt-btn" style="font-size:0.75rem;"><i class="fa-solid fa-arrow-up-right-from-square"></i> Buka File Video Asli</a>
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   function buildYouTubePreviewCardHtml(video) {
@@ -6021,7 +6125,7 @@ ${blocks}
 
     return `
       <div class="youtube-preview-card" data-video-id="${vidId}">
-        <div class="yt-card-thumb-wrap">
+        <div class="yt-card-thumb-wrap" data-action="play-in-chat" data-video-id="${vidId}" data-title="${safeTitle}" style="cursor: pointer;" title="Klik untuk putar langsung di percakapan">
           <img src="${safeThumb}" alt="${safeTitle}" class="yt-card-thumb" loading="lazy" decoding="async">
           <div class="yt-card-badge"><i class="fa-brands fa-youtube"></i> YouTube</div>
           ${vidId ? `<button type="button" class="yt-thumb-play" data-action="play-in-chat" data-video-id="${vidId}" data-title="${safeTitle}" title="Putar langsung di percakapan"><i class="fa-solid fa-play"></i></button>` : ''}
@@ -6044,7 +6148,8 @@ ${blocks}
     if (typeof text === 'string' && text) {
       extractYouTubeVideoIdsClient(text).forEach((id) => { if (id && !ids.includes(id)) ids.push(id); });
     }
-    if (ids.length === 0) return;
+    const directVideoUrls = (typeof text === 'string' && text) ? extractDirectVideoUrlsClient(text) : [];
+    if (ids.length === 0 && directVideoUrls.length === 0) return;
     const bubble = row.querySelector('.message-bubble');
     if (!bubble) return;
     if (bubble.querySelector('.msg-youtube-cards-wrap')) return;
@@ -6072,9 +6177,18 @@ ${blocks}
 
     const cardsContainer = document.createElement('div');
     cardsContainer.className = 'msg-youtube-cards-wrap';
+
     for (const cardData of cardResults) {
       const cardWrapper = document.createElement('div');
       cardWrapper.innerHTML = buildYouTubePreviewCardHtml(cardData);
+      if (cardWrapper.firstElementChild) {
+        cardsContainer.appendChild(cardWrapper.firstElementChild);
+      }
+    }
+
+    for (const directUrl of directVideoUrls) {
+      const cardWrapper = document.createElement('div');
+      cardWrapper.innerHTML = buildDirectVideoPreviewCardHtml(directUrl);
       if (cardWrapper.firstElementChild) {
         cardsContainer.appendChild(cardWrapper.firstElementChild);
       }
@@ -8013,8 +8127,38 @@ ${blocks}
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`;
       const resp2 = await fetch(proxyUrl, { signal: combinedSignal });
       if (resp2.ok) {
-        const html = await resp2.text();
-        const results = ytClientParseHtml(html, limit);
+        const rawText = await resp2.text();
+        // Cek jika response adalah JSON (misal Invidious / Piped / custom REST API)
+        try {
+          const parsed = JSON.parse(rawText);
+          const out = [];
+          const items = Array.isArray(parsed) ? parsed : (parsed.items || parsed.results || []);
+          if (Array.isArray(items)) {
+            for (const item of items) {
+              if (out.length >= limit) break;
+              if (item.videoId || item.title || item.url) {
+                out.push({
+                  title: item.title || 'Video',
+                  url: item.videoId ? `https://www.youtube.com/watch?v=${item.videoId}` : (item.url || ''),
+                  videoId: item.videoId || '',
+                  channel: item.author || item.uploaderName || item.channel || '',
+                  duration: item.lengthSeconds ? `${Math.floor(item.lengthSeconds / 60)}:${String(item.lengthSeconds % 60).padStart(2, '0')}` : (item.duration || ''),
+                  views: item.viewCountText || (item.views ? `${item.views} views` : ''),
+                  description: item.description || ''
+                });
+              }
+            }
+          }
+          if (out.length > 0) {
+            payload.success = true;
+            payload.results = out;
+            payload.count = out.length;
+            payload.error = undefined;
+            return payload;
+          }
+        } catch (_) {}
+
+        const results = ytClientParseHtml(rawText, limit);
         payload.success = results.length > 0;
         payload.results = results;
         payload.count = results.length;
@@ -9199,12 +9343,12 @@ ${blocks}
   const AUTONOMOUS_SYSTEM_DIRECTIVE = getAutonomousSystemDirective();
 
   function getYouTubeToolDirective() {
-    return `### INSTRUKSI SISTEM: TOOL PENCARIAN VIDEO YOUTUBE (search_youtube)
+    return `### INSTRUKSI SISTEM: TOOL PENCARIAN YOUTUBE (search_youtube)
 
-Tool \`search_youtube\` selalu aktif untuk SEMUA model, terlepas dari status Mode Pencarian Web.
+Tool \`search_youtube\` aktif untuk mencari video resmi di YouTube.
 
 1. KAPAN WAJIB DIPAKAI:
-- Pengguna meminta mencarikan/menemukan/mencari/memutar/menonton sebuah video (YouTube, tutorial, klip musik, film, pertandingan, podcast, vlog, review, dsb).
+- Pengguna meminta mencarikan/menemukan/mencari/memutar/menonton sebuah video (YouTube, video tutorial, klip musik, podcast, vlog, review, dsb).
 - Argumen \`query\` berisi kata kunci alami hasil ekstraksi dari permintaan pengguna (misal: "tutorial React JS untuk pemula").
 - Argumen \`max_results\` opsional (1-10, default 6).
 
@@ -9217,7 +9361,7 @@ Format teks (untuk model tanpa function calling):
 
 3. SETELAH SISTEM MENGEMBALIKAN HASIL:
 - Jelaskan dan rekomendasikan video yang paling relevan secara jelas (judul, channel, durasi, jumlah tayangan).
-- WAJIB menyertakan tautan video pilihan Anda secara langsung di dalam jawaban akhir dengan format markdown, misal [Judul Video](https://www.youtube.com/watch?v=ID), agar kartu video dapat ditampilkan dan diputar langsung di dalam percakapan.
+- WAJIB menyertakan tautan video pilihan Anda secara langsung di dalam jawaban akhir dengan format markdown, misal [Judul Video](URL_VIDEO), agar kartu video dapat ditampilkan dan diputar langsung di dalam percakapan.
 - Jangan mengarang data video; gunakan hanya hasil yang diberikan sistem.`;
   }
 
@@ -9851,6 +9995,11 @@ Format teks (untuk model tanpa function calling):
             if (!firstTokenTime) firstTokenTime = performance.now();
             tokenCount++;
             streamRenderer.append(chunk);
+            if (streamRenderer.isLoopTerminated) {
+              console.warn('[Ollama] Model token degeneration loop detected and gracefully halted.');
+              try { await reader.cancel(); } catch (_) {}
+              break;
+            }
           }
           if (parsed.message?.tool_calls && Array.isArray(parsed.message.tool_calls)) {
             mergeToolCallsInto(accumulatedToolCalls, parsed.message.tool_calls);
@@ -10122,6 +10271,11 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
                   tokenCount++;
                   digestionRenderer.append(chunk);
                   currentRoundText += chunk;
+                  if (digestionRenderer.isLoopTerminated) {
+                    console.warn('[Ollama Digestion] Degeneration loop detected and gracefully halted.');
+                    try { await digestionReader.cancel(); } catch (_) {}
+                    break;
+                  }
                 }
                 if (dParsed.message?.tool_calls && Array.isArray(dParsed.message.tool_calls)) {
                   mergeToolCallsInto(currentRoundNativeCalls, dParsed.message.tool_calls);
@@ -10638,6 +10792,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
         if (!isReasoning) {
           basePayload.temperature = parseFloat(STATE.settings.temperature) || 0.7;
+          basePayload.repetition_penalty = 1.05;
         }
         if (!isLiquid && !isReasoning) {
           basePayload.top_p = parseFloat(STATE.settings.topP) || 0.9;
@@ -10733,6 +10888,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
                 console.warn(`[OpenRouter] Model ${currentModel} mengembalikan HTTP 400. Menghapus top_p dan mengulang...`);
                 delete targetBody.top_p;
                 delete basePayload.top_p;
+                shouldRetry = true;
+              }
+              if (targetBody.repetition_penalty) {
+                console.warn(`[OpenRouter] Model ${currentModel} mengembalikan HTTP 400. Menghapus repetition_penalty dan mengulang...`);
+                delete targetBody.repetition_penalty;
+                delete basePayload.repetition_penalty;
                 shouldRetry = true;
               }
               if (targetBody.temperature && isReasoning) {
@@ -10935,6 +11096,11 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             if (!firstTokenTime) firstTokenTime = performance.now();
             tokenCount++;
             streamRenderer.append(delta);
+            if (streamRenderer.isLoopTerminated) {
+              console.warn('[OpenRouter] Model token degeneration loop detected and gracefully halted.');
+              try { await reader.cancel(); } catch (_) {}
+              break;
+            }
           }
         }
       }
@@ -11298,6 +11464,11 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
                 if (dDelta) {
                   tokenCount++;
                   digestionRenderer.append(dDelta);
+                  if (digestionRenderer.isLoopTerminated) {
+                    console.warn('[OpenRouter Digestion] Degeneration loop detected and gracefully halted.');
+                    try { await digestionReader.cancel(); } catch (_) {}
+                    break;
+                  }
                 }
                 const deltaTc = dParsed.choices?.[0]?.delta?.tool_calls;
                 if (Array.isArray(deltaTc)) {
@@ -12537,7 +12708,13 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
               const delta = parsed.choices?.[0]?.delta?.content;
               if (delta) {
                 fullText += delta;
-                if (streamRenderer) streamRenderer.append(delta);
+                if (streamRenderer) {
+                  streamRenderer.append(delta);
+                  if (streamRenderer.isLoopTerminated) {
+                    try { await reader.cancel(); } catch (_) {}
+                    break;
+                  }
+                }
                 if (typeof onChunk === 'function') {
                   try { onChunk(delta, fullText); } catch (e) {}
                 }
@@ -14303,21 +14480,34 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     });
   }
 
-  // ==================== AI YOUTUBE SEARCH TOOL (TOGGLE) ====================
-  // Tool pencarian video yang dapat dipakai semua model AI (native tool calling
-  // maupun format teks). Diaktifkan/dinonaktifkan dari menu Lampiran; indikatornya
-  // muncul di kiri kolom prompt dan dapat dimatikan lewat klik (ikon silang saat hover).
+  // ==================== AI YOUTUBE SEARCH TOOL ====================
   function updateYouTubeModeUI() {
+    updateVideoSearchUI();
+  }
+
+  function updateVideoSearchUI() {
     const isOn = Boolean(STATE.isYouTubeSearchMode);
 
+    // 1. Tombol & Badge di Composer
+    if (els.videoSearchToggleBtn) {
+      els.videoSearchToggleBtn.classList.toggle('active', isOn);
+      els.videoSearchToggleBtn.setAttribute('aria-pressed', String(isOn));
+      els.videoSearchToggleBtn.title = isOn
+        ? 'Pencarian YouTube: Aktif (Klik untuk matikan)'
+        : 'Pencarian YouTube: Nonaktif (Klik untuk aktifkan)';
+    }
+    if (els.videoSearchBadge) {
+      els.videoSearchBadge.style.display = isOn ? 'inline-block' : 'none';
+      els.videoSearchBadge.textContent = 'YT';
+    }
+
+    // 2. Indikator di Composer bar
     if (els.youtubeModeIndicator) {
       els.youtubeModeIndicator.style.display = isOn ? 'flex' : 'none';
       els.youtubeModeIndicator.setAttribute('aria-pressed', String(isOn));
-      // Selalu reset ikon agar tidak menyimpan silang sisa hover.
-      const indicatorIcon = els.youtubeModeIndicator.querySelector('i');
-      if (indicatorIcon) indicatorIcon.className = 'fa-brands fa-youtube';
     }
 
+    // 3. Opsi di menu Lampiran
     if (els.attachOptionYouTubeSearch) {
       els.attachOptionYouTubeSearch.classList.toggle('active', isOn);
       els.attachOptionYouTubeSearch.setAttribute('aria-pressed', String(isOn));
@@ -14326,19 +14516,25 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     }
   }
 
-  function setYouTubeSearchMode(enabled) {
+  function setYouTubeSearchMode(enabled, silent = false) {
+    setVideoSearchMode(enabled, silent);
+  }
+
+  function setVideoSearchMode(enabled, silent = false) {
     const on = Boolean(enabled);
     STATE.isYouTubeSearchMode = on;
     STATE.settings.youtubeSearchTool = on;
-    updateYouTubeModeUI();
+    updateVideoSearchUI();
     savePersistedState();
     AudioEngine.click();
-    showToast(
-      on
-        ? '🔎 Tool "Cari Video YouTube" aktif. Model AI akan otomatis memanggilnya saat Anda meminta video.'
-        : '🔎 Tool "Cari Video YouTube" nonaktif. Model AI tidak akan mencari video.',
-      'info'
-    );
+    if (!silent) {
+      showToast(
+        on
+          ? '🎬 Tool Pencarian YouTube aktif. Model AI dapat mencari dan mereferensikan video YouTube.'
+          : '🎬 Tool Pencarian YouTube dinonaktifkan.',
+        'info'
+      );
+    }
   }
 
   const MUSIC_AUDIO_RE = /lyria|musicgen|suno|udio|stable-audio|gpt-audio/i;
@@ -17775,7 +17971,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     els.attachOptionYouTubeSearch?.addEventListener('click', (e) => {
       e.stopPropagation();
       closeAttachmentDropdown();
-      setYouTubeSearchMode(!STATE.isYouTubeSearchMode);
+      setVideoSearchMode(!STATE.isYouTubeSearchMode);
     });
     els.attachOptionDoc?.addEventListener('click', () => {
       closeAttachmentDropdown();
@@ -17787,7 +17983,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     els.removeImageBtn?.addEventListener('click', clearAttachedImage);
     els.docFileInput?.addEventListener('change', handleDocUpload);
 
-    // Dismiss attachment, search & image model dropdowns when clicking outside
+    // Dismiss attachment, search, video search & image model dropdowns when clicking outside
     document.addEventListener('click', (e) => {
       // If clicking inside an active modal, cleanly close dropdowns without interfering with modal interaction
       if (e.target && e.target.closest && e.target.closest('.modal-backdrop.show')) {
@@ -17869,6 +18065,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       e.preventDefault();
       e.stopPropagation();
       toggleSearchDropdown(e);
+    });
+
+    // ==================== YOUTUBE SEARCH TOOL CONTROLS ====================
+    els.videoSearchToggleBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setVideoSearchMode(!STATE.isYouTubeSearchMode);
     });
 
     // Modal: Matikan Mode Riset
