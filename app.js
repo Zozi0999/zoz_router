@@ -802,10 +802,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   // Mengetahui bug, error, dan kode yang tidak berhubungan / terisolasi secara seketika!
   const BioEndocrine = {
     hormones: {
-      dopamine: 94,
-      cortisol: 6,
-      serotonin: 92,
-      adrenaline: 10
+      dopamine: 100,
+      cortisol: 0,
+      serotonin: 100,
+      adrenaline: 0
     },
     history: [],
     isolatedNodes: [],
@@ -834,14 +834,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
       // 3. Metabolisme berkala: homeostatik setiap 15 detik
       setInterval(() => {
-        if (this.hormones.cortisol > 6) {
-          this.hormones.cortisol = Math.max(6, this.hormones.cortisol - 2);
+        if (this.hormones.cortisol > 0) {
+          this.hormones.cortisol = Math.max(0, Math.round((this.hormones.cortisol - 2) * 10) / 10);
         }
-        if (this.hormones.dopamine < 90 && this.hormones.cortisol <= 15) {
-          this.hormones.dopamine = Math.min(95, this.hormones.dopamine + 1);
+        if (this.hormones.dopamine < 100 && this.hormones.cortisol <= 10) {
+          this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 1);
         }
-        if (this.hormones.adrenaline > 10) {
-          this.hormones.adrenaline = Math.max(10, this.hormones.adrenaline - 3);
+        if (this.hormones.adrenaline > 0) {
+          this.hormones.adrenaline = Math.max(0, this.hormones.adrenaline - 3);
         }
         this.hormones.serotonin = Math.round((this.hormones.dopamine * 0.7) + ((100 - this.hormones.cortisol) * 0.3));
         this.updateUI();
@@ -905,10 +905,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     },
 
     purgeStress() {
-      this.hormones.cortisol = 5;
-      this.hormones.dopamine = 98;
-      this.hormones.serotonin = 96;
-      this.hormones.adrenaline = 10;
+      this.hormones.cortisol = 0;
+      this.hormones.dopamine = 100;
+      this.hormones.serotonin = 100;
+      this.hormones.adrenaline = 0;
       this.isolatedNodes = [];
       this.log('endorphin', 50, 'Suntikan Endorfin: Keseimbangan & kestabilan dipulihkan penuh');
       this.updateUI();
@@ -919,7 +919,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
       } catch (_) {}
       if (typeof showToast === 'function') {
-        showToast('🌿 Endorfin disuntikkan: Stres netral (5%), Dopamin 98%!', 'success');
+        showToast('🌿 Endorfin disuntikkan: Stres netral (0%), Dopamin 100%!', 'success');
       }
     },
 
@@ -953,7 +953,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           btn.title = `Stres Kode Meningkat (${c}%): Ada gangguan atau peringatan. Klik untuk cek telemetri.`;
         } else {
           btn.classList.add('status-happy');
-          badge.innerText = `🧠 ${d}%`;
+          badge.innerText = c === 0 ? `🧠 0% Stres` : `🧠 ${d}%`;
           btn.title = `Kondisi Kode Sangat Kuat & Prima (Dopamin ${d}%, Stres ${c}%). Klik untuk melihat bio-telemetri.`;
         }
       }
@@ -981,10 +981,28 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
       if (dVal) dVal.innerText = `${d}%`;
       if (dBar) dBar.style.width = `${d}%`;
-      if (cVal) cVal.innerText = `${c}%`;
+      if (cVal) {
+        if (c === 0) {
+          cVal.innerHTML = `<span style="color:#00FFC2; font-weight:700;">0%</span> <span style="font-size:0.75rem; color:#00FFC2; font-weight:600;">(Bebas Bug / 0% Kerusakan)</span>`;
+        } else if (c < 30) {
+          cVal.innerHTML = `<span style="color:#FFD166; font-weight:700;">${c}%</span> <span style="font-size:0.75rem; color:#FFD166; font-weight:600;">(Stres Ringan)</span>`;
+        } else {
+          cVal.innerHTML = `<span style="color:#FF4D4D; font-weight:700;">${c}%</span> <span style="font-size:0.75rem; color:#FF4D4D; font-weight:bold;">(Peringatan Bug Aktif!)</span>`;
+        }
+      }
       if (cBar) cBar.style.width = `${c}%`;
       if (sVal) sVal.innerText = `${s}%`;
       if (aVal) aVal.innerText = `${a}%`;
+
+      const cDesc = document.getElementById('endocrineCortisolDesc');
+      if (cDesc) {
+        if (c === 0) {
+          cDesc.innerHTML = `<span style="color:#00FFC2; font-weight:600;">● Kondisi Prima:</span> Tidak ada bug, jaringan stabil, dan seluruh ${this.connectedCount || 249} simpul kode terhubung harmonis.`;
+        } else {
+          const lastCortisol = this.history.find(h => h.type === 'cortisol');
+          cDesc.innerHTML = `<span style="color:#FFB703; font-weight:600;">⚠️ Pemicu Stres Terakhir:</span> ${esc(lastCortisol?.reason || 'Terdeteksi anomali pada alur kode/jaringan.')}`;
+        }
+      }
 
       const isolatedBox = document.getElementById('endocrineIsolatedBox');
       const isolatedTag = document.getElementById('endocrineIsolatedTag');
