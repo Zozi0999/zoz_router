@@ -2588,18 +2588,10 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
             .replace(/<aside\b[\s\S]*?<\/aside>/gi, ' ')
             .replace(/<form\b[\s\S]*?<\/form>/gi, ' ')
             .replace(/<svg\b[\s\S]*?<\/svg>/gi, ' ')
-            .replace(/<!--[\s\S]*?-->/g, ' ')
-            .replace(/<[^>]+>/g, ' ');
+            .replace(/<!--[\s\S]*?-->/g, ' ');
 
-          clean = clean
-            .replace(/&amp;/g, '&')
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&quot;/g, '"')
-            .replace(/&#39;/g, "'")
-            .replace(/&nbsp;/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
+          clean = cleanHtmlText(clean);
+
 
           resolve({
             success: true,
@@ -2945,13 +2937,15 @@ function cleanHtmlText(str) {
     .replace(/&#39;/g, "'")
     .replace(/&#x27;/g, "'")
     .replace(/&apos;/g, "'")
+    .replace(/&#x2F;/gi, '/')
     .replace(/&nbsp;/g, ' ')
     .replace(/&mdash;/g, '—')
     .replace(/&ndash;/g, '–')
-    .replace(/&#8216;/g, "‘")
-    .replace(/&#8217;/g, "’")
-    .replace(/&#8220;/g, "“")
-    .replace(/&#8221;/g, "”")
+    .replace(/&hellip;|&#8230;/g, '...')
+    .replace(/&lsquo;|&#8216;/g, "‘")
+    .replace(/&rsquo;|&#8217;/g, "’")
+    .replace(/&ldquo;|&#8220;/g, "“")
+    .replace(/&rdquo;|&#8221;/g, "”")
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -6427,15 +6421,19 @@ async function requestHandler(req, res) {
               try {
                 const parsed = JSON.parse(dataStr);
                 const delta = parsed.choices?.[0]?.delta?.content || '';
-                if (delta) {
+                const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
+                if (delta || deltaToolCalls) {
+                  const msgPayload = { role: 'assistant', content: delta };
+                  if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
                   res.write(JSON.stringify({
                     model: body.model || 'gemma4:31b',
                     created_at: new Date().toISOString(),
-                    message: { role: 'assistant', content: delta },
+                    message: msgPayload,
                     done: false
                   }) + '\n');
                 }
               } catch (_) {}
+
             }
           });
 

@@ -5362,12 +5362,13 @@ Aturan wajib:
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = file.name || 'file.txt';
+      const safeFileName = (file.name || 'file.txt').replace(/[/\\?%*:|"<>]/g, '_').trim() || 'file.txt';
+      a.download = safeFileName;
       document.body.appendChild(a);
       a.click();
       a.remove();
       setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 4000);
-      showToast('⬇ File ' + file.name + ' berhasil diunduh.', 'success');
+      showToast('⬇ File ' + safeFileName + ' berhasil diunduh.', 'success');
       AudioEngine.click();
     } catch (err) {
       showToast('Gagal mengunduh file: ' + (err && err.message ? err.message : err), 'error');

@@ -784,11 +784,14 @@ export default {
                   try {
                     const parsed = JSON.parse(dataStr);
                     const deltaContent = parsed.choices?.[0]?.delta?.content || '';
-                    if (deltaContent) {
+                    const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
+                    if (deltaContent || deltaToolCalls) {
+                      const msgPayload = { role: 'assistant', content: deltaContent };
+                      if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
                       await writer.write(encoder.encode(JSON.stringify({
                         model: body.model || 'gemma4:31b',
                         created_at: new Date().toISOString(),
-                        message: { role: 'assistant', content: deltaContent },
+                        message: msgPayload,
                         done: false
                       }) + '\n'));
                     }
@@ -851,6 +854,9 @@ export default {
         });
 
         const newHeaders = new Headers(res.headers);
+        newHeaders.delete('content-encoding');
+        newHeaders.delete('content-length');
+        newHeaders.delete('transfer-encoding');
         newHeaders.set('Access-Control-Allow-Origin', '*');
         return new Response(res.body, {
           status: res.status,
@@ -968,6 +974,41 @@ export default {
       }
     }
 
+    // Proxy Ollama Cloud Usage Check
+    if (url.pathname === '/api/ollama/usage' && request.method === 'GET') {
+      try {
+        const rawKey = request.headers.get('x-ollama-key') || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '').trim() : '') || (envKeyAllowed(request, env) ? env?.OLLAMA_API_KEY : null);
+        if (!rawKey) {
+          return new Response(JSON.stringify({ error: 'Ollama API key is required' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+        const usageRes = await fetch('https://ollama.com/api/usage', {
+          headers: {
+            'Authorization': `Bearer ${rawKey}`,
+            'x-ollama-key': rawKey,
+            'User-Agent': 'ZozRouter/1.0 (Cloudflare Edge)',
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
+          }
+        });
+        const usageData = await usageRes.json().catch(() => ({}));
+        return new Response(JSON.stringify(usageData), {
+          status: usageRes.status,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Access-Control-Allow-Origin': '*'
+          }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: 'Failed to fetch Ollama usage: ' + e.message }), {
+          status: 502,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
     // Proxy OpenRouter Chat
     if (url.pathname === '/api/openrouter/chat' && request.method === 'POST') {
       try {
@@ -1024,6 +1065,9 @@ export default {
         });
 
         const newHeaders = new Headers(res.headers);
+        newHeaders.delete('content-encoding');
+        newHeaders.delete('content-length');
+        newHeaders.delete('transfer-encoding');
         newHeaders.set('Access-Control-Allow-Origin', '*');
         return new Response(res.body, {
           status: res.status,
@@ -1581,6 +1625,33 @@ export default {
       }
     }
 
+    // Stateless Media / File Upload Handler
+    if (url.pathname === '/api/upload' && request.method === 'POST') {
+      try {
+        const body = await request.json().catch(() => ({}));
+        if (!body.data) {
+          return new Response(JSON.stringify({ error: 'Data gambar atau file diperlukan.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+        return new Response(JSON.stringify({
+          success: true,
+          url: body.data,
+          stateless: true,
+          message: 'Uploaded to stateless edge buffer.'
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: 'Upload failed: ' + e.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
     // Proxy Web Search (Serper Google API & Autonomous Search Aliases)
     if (url.pathname === '/api/web-search' || url.pathname === '/api/tools/search-web' || url.pathname === '/api/autonomous/search') {
       try {
@@ -1975,9 +2046,21 @@ export default {
               const html = await directRes.text();
               const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
               if (titleMatch) title = titleMatch[1].trim();
-              content = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-                            .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+              content = html.replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+                            .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+                            .replace(/<nav\b[\s\S]*?<\/nav>/gi, ' ')
+                            .replace(/<header\b[\s\S]*?<\/header>/gi, ' ')
+                            .replace(/<footer\b[\s\S]*?<\/footer>/gi, ' ')
+                            .replace(/<aside\b[\s\S]*?<\/aside>/gi, ' ')
+                            .replace(/<!--[\s\S]*?-->/g, ' ')
                             .replace(/<[^>]+>/g, ' ')
+                            .replace(/&amp;/g, '&')
+                            .replace(/&lt;/g, '<')
+                            .replace(/&gt;/g, '>')
+                            .replace(/&quot;/g, '"')
+                            .replace(/&#39;/g, "'")
+                            .replace(/&#x27;/g, "'")
+                            .replace(/&nbsp;/g, ' ')
                             .replace(/\s+/g, ' ').trim();
             }
           } catch (_) {}
