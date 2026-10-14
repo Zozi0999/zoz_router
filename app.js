@@ -539,6 +539,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     modeTabs: $$('.mode-tab'),
     currentModelLabel: $('#currentModelLabel'),
     modelPickerChip: $('#modelPickerChip'),
+    sidebarBrandLogoBtn: $('#sidebarBrandLogoBtn'),
+    modeAuto: $('#modeAuto'),
+    sidebarAutoRouterIndicator: $('#sidebarAutoRouterIndicator'),
     modelDropdownMenu: $('#modelDropdownMenu'),
     dropdownTabOllama: $('#dropdownTabOllama'),
     dropdownTabOpenRouter: $('#dropdownTabOpenRouter'),
@@ -7606,12 +7609,29 @@ ${blocks}
 
   function updateModelUI() {
     const current = getCurrentModel();
-    if (els.currentModelLabel) els.currentModelLabel.innerText = current;
+    if (els.currentModelLabel) {
+      if (STATE.mode === 'auto') {
+        const shortModel = (STATE.settings.ollamaModel || 'Cloud').split(':')[0];
+        els.currentModelLabel.innerText = `Auto (${shortModel})`;
+        els.currentModelLabel.title = `Auto Router: ${STATE.settings.ollamaModel} ➔ ${STATE.settings.openRouterModel}`;
+      } else {
+        els.currentModelLabel.innerText = current;
+        els.currentModelLabel.title = current;
+      }
+    }
+  }
+
+  function updateAutoRouterIndicatorUI() {
+    const isAuto = STATE.mode === 'auto';
+    if (els.sidebarAutoRouterIndicator) {
+      els.sidebarAutoRouterIndicator.style.display = isAuto ? 'block' : 'none';
+    }
   }
 
   function updateModeLayout(mode) {
     if (els.singleModelPickerWrap) els.singleModelPickerWrap.style.display = 'block';
     if (els.singleChatContainer) els.singleChatContainer.style.display = 'flex';
+    updateAutoRouterIndicatorUI();
   }
 
   // ==================== MODE SWITCHING ====================
@@ -18076,7 +18096,9 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
   function setupEventListeners() {
     // Mode Switchers (Auto Router Toggle & Switch)
     els.modeTabs.forEach(tab => {
-      tab.addEventListener('click', () => {
+      tab.addEventListener('click', (e) => {
+        e.stopPropagation();
+        AudioEngine.click();
         const targetMode = tab.dataset.mode;
         if (targetMode === 'auto') {
           if (STATE.mode === 'auto') {
@@ -20109,6 +20131,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     els.modeTabs.forEach(tab => {
       tab.classList.toggle('active', tab.dataset.mode === STATE.mode);
     });
+    updateAutoRouterIndicatorUI();
     updateSearchModeUI();
     updateImageGenModeUI();
     updateMusicGenModeUI();

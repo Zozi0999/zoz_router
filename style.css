@@ -111,23 +111,56 @@ html, body {
 }
 
 .sidebar-header {
-  padding: 16px 18px;
+  padding: 14px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--border-subtle);
+  position: relative;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
 }
 
-.brand-logo-wrap {
+.brand-logo-wrap,
+button.brand-logo-wrap {
   position: relative;
   width: 38px;
   height: 38px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  outline: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+}
+
+button.brand-logo-wrap:hover {
+  transform: scale(1.08);
+}
+
+button.brand-logo-wrap:active {
+  transform: scale(0.94);
+}
+
+button.brand-logo-wrap.active .pulse-ring {
+  border-color: var(--neon-teal);
+  box-shadow: 0 0 12px var(--neon-teal), inset 0 0 8px var(--neon-cyan);
+  opacity: 0.85;
+  animation: pulseTeal 1.5s infinite alternate;
+}
+
+button.brand-logo-wrap.active .brand-logo {
+  filter: drop-shadow(0 0 8px var(--neon-cyan)) drop-shadow(0 0 14px var(--neon-teal));
 }
 
 .brand-logo {
@@ -151,14 +184,91 @@ html, body {
   100% { transform: scale(1.08); opacity: 0.6; }
 }
 
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.brand-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
 .brand-text h2 {
   font-family: var(--font-display);
-  font-size: 1.15rem;
+  font-size: 1.05rem;
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 0.8px;
+  margin: 0;
+  white-space: nowrap;
   background: linear-gradient(135deg, #FFF 20%, var(--neon-cyan) 80%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+}
+
+/* Auto Router Sidebar Chip (Pill di sebelah ZOZ ROUTER) */
+.auto-router-sidebar-chip {
+  background: linear-gradient(135deg, rgba(14, 20, 36, 0.88), rgba(20, 28, 52, 0.94));
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  color: var(--text-main);
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 8px rgba(0, 240, 255, 0.12);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.auto-router-sidebar-chip:hover {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.18), rgba(20, 32, 60, 0.96));
+  border-color: var(--neon-cyan);
+  box-shadow: 0 4px 14px rgba(0, 240, 255, 0.35);
+  transform: translateY(-1px);
+}
+
+.auto-router-sidebar-chip.active {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.25), rgba(0, 255, 194, 0.18));
+  border-color: var(--neon-cyan);
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(0, 240, 255, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+}
+
+.auto-router-sidebar-chip.active .auto-router-mini-badge {
+  background: var(--neon-cyan);
+  color: #060a12;
+  font-weight: 900;
+  box-shadow: 0 0 8px var(--neon-cyan);
+}
+
+.auto-router-sidebar-chip .auto-router-logo-wrap {
+  width: 13px;
+  height: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.auto-router-sidebar-chip .auto-router-logo-svg {
+  width: 13px;
+  height: 13px;
+}
+
+.auto-router-sidebar-chip .auto-router-text {
+  font-size: 0.68rem;
+}
+
+.auto-router-sidebar-chip .auto-router-mini-badge {
+  font-size: 0.52rem;
+  padding: 0 4px;
 }
 
 .version-tag {
@@ -780,6 +890,7 @@ html, body {
 }
 
 .toggle-sidebar-btn {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -793,6 +904,19 @@ html, body {
   transition: all 0.2s ease;
   font-size: 0.9rem;
   flex-shrink: 0;
+}
+
+.sidebar-auto-router-indicator {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--neon-teal);
+  box-shadow: 0 0 8px var(--neon-teal), 0 0 12px var(--neon-cyan);
+  animation: pulseTeal 1.6s infinite alternate;
+  pointer-events: none;
 }
 
 .toggle-sidebar-btn:hover {
@@ -4128,12 +4252,14 @@ body.modal-open {
 
 @media (max-width: 768px) {
   .toast-container {
-    top: 14px;
+    top: auto;
+    bottom: 80px;
     left: 50%;
     transform: translateX(-50%);
     right: auto;
     width: auto;
     max-width: 90vw;
+    z-index: 1200;
   }
   .toast {
     font-size: 0.75rem;
@@ -8778,17 +8904,52 @@ body.modal-open {
     display: none;
   }
   .top-nav-tool-model-badge {
-    max-width: 105px;
+    max-width: 95px;
     font-size: 0.68rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .top-nav-active-tool-chip {
+    padding: 3px 8px;
+    gap: 5px;
+    max-width: 140px;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+  .top-nav-active-tool-wrap {
+    flex-shrink: 1;
+    min-width: 0;
+    margin-left: 2px;
   }
   .top-nav-active-tool-wrap .image-model-dropdown-popup,
   .top-nav-active-tool-wrap .music-model-dropdown-popup {
-    left: -50px;
+    left: 0;
     max-width: calc(100vw - 20px);
   }
   .photo-edit-change-photo-btn span,
   .photo-edit-change-model-btn span {
     display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .top-nav-right {
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .model-picker-chip {
+    padding: 3px 6px;
+    gap: 4px;
+  }
+  .current-model-name {
+    max-width: 65px;
+    font-size: 0.7rem;
+  }
+  .top-action-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 0.75rem;
   }
 }
 
