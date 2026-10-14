@@ -724,6 +724,15 @@ export default {
           if (body.options?.temperature !== undefined) openRouterPayload.temperature = body.options.temperature;
           if (body.options?.top_p !== undefined) openRouterPayload.top_p = body.options.top_p;
 
+          const isFreeModel = targetModel.includes(':free') || targetModel.endsWith('/free') || targetModel === 'openrouter/free';
+          if (!isFreeModel && Array.isArray(body.tools) && body.tools.length > 0) {
+            const clean = body.tools.filter(t => t && t.type === 'function' && t.function && t.function.name);
+            if (clean.length > 0) {
+              openRouterPayload.tools = clean;
+              if (body.tool_choice) openRouterPayload.tool_choice = body.tool_choice;
+            }
+          }
+
           const orHeaders = {
             'Content-Type': 'application/json',
             'HTTP-Referer': 'https://zoz-router.pages.dev',
@@ -734,7 +743,8 @@ export default {
           const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: orHeaders,
-            body: JSON.stringify(openRouterPayload)
+            body: JSON.stringify(openRouterPayload),
+            signal: request.signal
           });
 
           if (!orRes.ok) {
@@ -750,10 +760,14 @@ export default {
           if (!isStream) {
             const data = await orRes.json().catch(() => ({}));
             const textContent = data.choices?.[0]?.message?.content || '';
+            const msgPayload = { role: 'assistant', content: textContent };
+            if (data.choices?.[0]?.message?.tool_calls) {
+              msgPayload.tool_calls = data.choices[0].message.tool_calls;
+            }
             return new Response(JSON.stringify({
               model: body.model || 'gemma4:31b',
               created_at: new Date().toISOString(),
-              message: { role: 'assistant', content: textContent },
+              message: msgPayload,
               done: true
             }), {
               status: 200,

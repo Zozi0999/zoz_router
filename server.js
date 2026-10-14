@@ -2442,18 +2442,23 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   // 100% Pure Cloud Architecture: Jika tidak ada custom endpoint Ollama eksternal dengan API key valid,
   // alihkan secara transparan ke OpenRouter Cloud AI menggunakan model mapping resmi.
   const hasCustomOllama = Boolean(activeOllamaKey && rawEp && !rawEp.includes('127.0.0.1') && !rawEp.includes('localhost') && !rawEp.includes('ollama.com'));
-  if (!isOpenRouter && !hasCustomOllama) {
-    const mappedModel = mapOllamaModelToOpenRouter(rawModel);
-    return await callLLMBackend({
-      prompt,
-      system,
-      messages,
-      model: mappedModel,
-      provider: 'openrouter',
-      endpoint,
-      apiKey: openRouterKey || apiKey,
-      openRouterKey: openRouterKey || (apiKey && apiKey.startsWith('sk-or-') ? apiKey : null) || process.env.OPENROUTER_API_KEY
-    });
+  const hasOpenRouterKey = Boolean(openRouterKey || (apiKey && apiKey.startsWith('sk-or-')) || process.env.OPENROUTER_API_KEY);
+  if (!isOpenRouter && !hasCustomOllama && hasOpenRouterKey) {
+    try {
+      const mappedModel = mapOllamaModelToOpenRouter(rawModel);
+      return await callLLMBackend({
+        prompt,
+        system,
+        messages,
+        model: mappedModel,
+        provider: 'openrouter',
+        endpoint,
+        apiKey: openRouterKey || apiKey,
+        openRouterKey: openRouterKey || (apiKey && apiKey.startsWith('sk-or-') ? apiKey : null) || process.env.OPENROUTER_API_KEY
+      });
+    } catch (bridgeErr) {
+      console.warn('[callLLMBackend] OpenRouter pure cloud bridge gagal, fallback ke Ollama:', bridgeErr.message);
+    }
   }
 
   // Jika activeOllamaKey ada dan endpoint tidak dispesifikasi, gunakan Ollama Cloud
@@ -6347,6 +6352,15 @@ async function requestHandler(req, res) {
         if (body.options?.temperature !== undefined) orPayload.temperature = body.options.temperature;
         if (body.options?.top_p !== undefined) orPayload.top_p = body.options.top_p;
 
+        const isFreeModel = targetCloudModel.includes(':free') || targetCloudModel.endsWith('/free') || targetCloudModel === 'openrouter/free';
+        if (!isFreeModel && Array.isArray(body.tools) && body.tools.length > 0) {
+          const cleanTools = body.tools.filter(t => t && t.type === 'function' && t.function && t.function.name);
+          if (cleanTools.length > 0) {
+            orPayload.tools = cleanTools;
+            if (body.tool_choice) orPayload.tool_choice = body.tool_choice;
+          }
+        }
+
         const orPostData = JSON.stringify(orPayload);
         const orHeaders = {
           'Content-Type': 'application/json',
@@ -6410,10 +6424,14 @@ async function requestHandler(req, res) {
               try {
                 const parsed = JSON.parse(rawResp);
                 const txt = parsed.choices?.[0]?.message?.content || '';
+                const msgPayload = { role: 'assistant', content: txt };
+                if (parsed.choices?.[0]?.message?.tool_calls) {
+                  msgPayload.tool_calls = parsed.choices[0].message.tool_calls;
+                }
                 sendJSON(res, 200, {
                   model: body.model || 'gemma4:31b',
                   created_at: new Date().toISOString(),
-                  message: { role: 'assistant', content: txt },
+                  message: msgPayload,
                   done: true
                 });
               } catch (e) {
@@ -6481,6 +6499,12 @@ async function requestHandler(req, res) {
             } else {
               sendJSON(res, 500, { error: 'Bridge network error: ' + err.message });
             }
+          }
+        });
+
+        req.on('close', () => {
+          if (!res.writableEnded) {
+            try { bridgeReq.destroy(); } catch (_) {}
           }
         });
 

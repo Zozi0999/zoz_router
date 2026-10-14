@@ -2970,7 +2970,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         if (engine === 'openrouter' || !hasCustomExternalEndpoint) {
           appendedText = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, previousText);
         } else {
-          appendedText = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, previousText);
+          try {
+            appendedText = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, previousText);
+          } catch (ollamaContErr) {
+            console.warn('[streamContinuation] Ollama gagal, failover otomatis ke OpenRouter Cloud:', ollamaContErr?.message);
+            appendedText = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, previousText);
+          }
         }
 
         const needsNewline = previousText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(previousText) || /```\w*$/.test(previousText);
@@ -3210,6 +3215,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
       headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
     }
+    if (STATE.settings.openRouterKey) {
+      headers['x-openrouter-key'] = STATE.settings.openRouterKey;
+    }
 
     const messagesPayload = [];
     if (STATE.settings.systemPrompt) {
@@ -3221,7 +3229,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }));
     messagesPayload.push({ role: 'user', content: promptInstruction });
 
-    const chatUrl = (IS_GITHUB_PAGES || /localhost|127\.0\.0\.1|\[::1\]/i.test(ep)) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+    const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
     const res = await fetch(chatUrl, {
       method: 'POST',
       headers,
@@ -3233,7 +3241,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           temperature: parseFloat(STATE.settings.temperature)
         },
         endpoint: ep,
-        ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {})
+        ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {}),
+        ...(STATE.settings.openRouterKey ? { openRouterKey: STATE.settings.openRouterKey } : {})
       }),
       signal: STATE.abortController?.signal
     });
@@ -5590,6 +5599,16 @@ Aturan wajib:
       `;
     }
 
+    const makeSearchSignal = (timeoutMs = 6500) => {
+      const timeoutSig = AbortSignal.timeout(timeoutMs);
+      if (typeof STATE !== 'undefined' && STATE?.abortController?.signal) {
+        return (typeof AbortSignal.any === 'function')
+          ? AbortSignal.any([timeoutSig, STATE.abortController.signal])
+          : (STATE.abortController.signal || timeoutSig);
+      }
+      return timeoutSig;
+    };
+
     try {
       let data = null;
 
@@ -5608,7 +5627,8 @@ Aturan wajib:
               num: 6,
               gl: isDomestic ? 'id' : 'us', // Prioritaskan domain Indonesia HANYA jika eksplisit domestik
               hl: isDomestic ? 'id' : 'en'
-            })
+            }),
+            signal: makeSearchSignal(6500)
           });
           if (directRes.ok) {
             data = await directRes.json();
@@ -5625,7 +5645,8 @@ Aturan wajib:
         const proxyRes = await fetch('/api/web-search', {
           method: 'POST',
           headers: proxyHeaders,
-          body: JSON.stringify(serperKey ? { query: smartQuery, apiKey: serperKey } : { query: smartQuery })
+          body: JSON.stringify(serperKey ? { query: smartQuery, apiKey: serperKey } : { query: smartQuery }),
+          signal: makeSearchSignal(7000)
         }).catch(() => null);
         if (proxyRes && proxyRes.ok) {
           data = await proxyRes.json();
@@ -5638,7 +5659,8 @@ Aturan wajib:
           const autoRes = await fetch('/api/tools/search-web', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: smartQuery, maxResults: 8 })
+            body: JSON.stringify({ query: smartQuery, maxResults: 8 }),
+            signal: makeSearchSignal(7500)
           }).catch(() => null);
           if (autoRes && autoRes.ok) {
             const autoData = await autoRes.json().catch(() => null);
@@ -8163,8 +8185,6 @@ ${blocks}
           try {
             for (const q of queriesToSearch) {
               if (results.length >= 10) break;
-              const serperCtrl = new AbortController();
-              const serperTimeout = setTimeout(() => serperCtrl.abort(), 6500);
               const sRes = await fetch('https://google.serper.dev/search', {
                 method: 'POST',
                 headers: {
@@ -8177,9 +8197,8 @@ ${blocks}
                   gl: isDomestic ? 'id' : 'us', // Prioritaskan domain/region Indonesia HANYA jika kueri eksplisit domestik
                   hl: isDomestic ? 'id' : 'en'  // Global Language Ranking default
                 }),
-                signal: serperCtrl.signal
+                signal: makeToolSignal(6500)
               });
-              clearTimeout(serperTimeout);
               if (sRes.ok) {
                 const sData = await sRes.json();
                 if (sData.answerBox) {
@@ -8262,7 +8281,8 @@ ${blocks}
               const sRes = await fetch('https://google.serper.dev/search', {
                 method: 'POST',
                 headers: { 'X-API-KEY': serperApiKey, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ q: enrichedQ, num: 8, gl: isDomestic ? 'id' : 'us', hl: isDomestic ? 'id' : 'en' })
+                body: JSON.stringify({ q: enrichedQ, num: 8, gl: isDomestic ? 'id' : 'us', hl: isDomestic ? 'id' : 'en' }),
+                signal: makeToolSignal(6500)
               });
               if (sRes.ok) {
                 const sData = await sRes.json();
@@ -9508,10 +9528,19 @@ Format teks (untuk model tanpa function calling):
         console.warn('YouTube client grounding error:', ytErr);
       }
 
-      // DEFAULT WEB SEARCH MODE (Pencarian Kilat Google / Multi-source Grounding)
-      if (STATE.searchMode === 'default') {
+      // WEB SEARCH GROUNDING:
+      // Aktif pada mode default search, atau sebagai fallback otomatis ketika mode autonomous search
+      // berjalan pada model tanpa dukungan tools atau model gratis (agar tetap mendapat data internet terkini).
+      const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+      const hasCustomExternalEndpoint = Boolean(STATE.settings.ollamaApiKey && !ep.includes('ollama.com') && !ep.includes('127.0.0.1') && !ep.includes('localhost'));
+      const effectiveCloudModel = mapOllamaModelToOpenRouter(modelName) || 'openrouter/free';
+      const isCloudFree = effectiveCloudModel.includes(':free') || effectiveCloudModel.endsWith('/free') || effectiveCloudModel === 'openrouter/free';
+      const needsGroundingFallback = STATE.searchMode === 'autonomous' && (
+        !hasCustomExternalEndpoint ? (isCloudFree || !STATE.settings.openRouterKey || !doesModelSupportTools(effectiveCloudModel)) : !doesModelSupportTools(modelName)
+      );
+      if (STATE.searchMode === 'default' || (STATE.webSearchEnabled && needsGroundingFallback)) {
         try {
-          const searchRes = await getWebSearchContext(promptText, session, bubbleText);
+          const searchRes = await getWebSearchContext(promptText, session, bubbleText, needsGroundingFallback);
           if (searchRes && searchRes.systemPromptContext) {
             systemContent = systemContent
               ? `${systemContent}\n\n${searchRes.systemPromptContext}`
@@ -9523,7 +9552,7 @@ Format teks (untuk model tanpa function calling):
             bubbleText.innerHTML = '<span class="typing-cursor"></span>';
           }
         } catch (searchErr) {
-          console.warn('Default web search grounding error:', searchErr);
+          console.warn('Web search grounding error:', searchErr);
         }
       }
 
@@ -9535,7 +9564,6 @@ Format teks (untuk model tanpa function calling):
       const resolvedImgs = await Promise.all(rawImgs.map(resolveImageToDataUrlSafe));
       const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'ollama', systemContent, modelName);
 
-      const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
       const requestBody = {
         model: modelName,
         sessionId: session?.id || null,
@@ -9560,6 +9588,9 @@ Format teks (untuk model tanpa function calling):
       if (STATE.settings.ollamaApiKey) {
         requestBody.apiKey = STATE.settings.ollamaApiKey;
       }
+      if (STATE.settings.openRouterKey) {
+        requestBody.openRouterKey = STATE.settings.openRouterKey;
+      }
 
       const headers = { 'Content-Type': 'application/json' };
       if (session?.id) {
@@ -9571,6 +9602,9 @@ Format teks (untuk model tanpa function calling):
       if (STATE.settings.ollamaApiKey) {
         headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
+      }
+      if (STATE.settings.openRouterKey) {
+        headers['x-openrouter-key'] = STATE.settings.openRouterKey;
       }
 
       let chatUrl = '/api/ollama/chat';
@@ -9630,6 +9664,41 @@ Format teks (untuk model tanpa function calling):
       const accumulatedToolCalls = [];
       streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml);
 
+      function mergeToolCallsInto(targetArr, toolCallsArray) {
+        if (!Array.isArray(toolCallsArray)) return;
+        toolCallsArray.forEach((tc, defaultIdx) => {
+          const idx = tc.index ?? defaultIdx;
+          if (!targetArr[idx]) {
+            targetArr[idx] = {
+              id: tc.id || `call_${Date.now()}_${idx}`,
+              type: tc.type || 'function',
+              function: {
+                name: tc.function?.name || '',
+                arguments: typeof tc.function?.arguments === 'object' ? tc.function.arguments : (tc.function?.arguments || '')
+              }
+            };
+          } else {
+            if (tc.id) targetArr[idx].id = tc.id;
+            if (tc.function?.name) {
+              if (!targetArr[idx].function.name) {
+                targetArr[idx].function.name = tc.function.name;
+              } else if (targetArr[idx].function.name !== tc.function.name && !targetArr[idx].function.name.endsWith(tc.function.name)) {
+                targetArr[idx].function.name += tc.function.name;
+              }
+            }
+            if (tc.function?.arguments) {
+              if (typeof tc.function.arguments === 'object') {
+                targetArr[idx].function.arguments = tc.function.arguments;
+              } else if (typeof targetArr[idx].function.arguments === 'string') {
+                targetArr[idx].function.arguments += tc.function.arguments;
+              } else {
+                targetArr[idx].function.arguments = tc.function.arguments;
+              }
+            }
+          }
+        });
+      }
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
@@ -9661,9 +9730,7 @@ Format teks (untuk model tanpa function calling):
             streamRenderer.append(chunk);
           }
           if (parsed.message?.tool_calls && Array.isArray(parsed.message.tool_calls)) {
-            parsed.message.tool_calls.forEach(tc => {
-              accumulatedToolCalls.push(tc);
-            });
+            mergeToolCallsInto(accumulatedToolCalls, parsed.message.tool_calls);
           }
         }
       }
@@ -9683,9 +9750,7 @@ Format teks (untuk model tanpa function calling):
             streamRenderer.append(chunk);
           }
           if (parsed.message?.tool_calls && Array.isArray(parsed.message.tool_calls)) {
-            parsed.message.tool_calls.forEach(tc => {
-              accumulatedToolCalls.push(tc);
-            });
+            mergeToolCallsInto(accumulatedToolCalls, parsed.message.tool_calls);
           }
         } catch (_) {}
       }
@@ -9866,6 +9931,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         }
         if (session?.id) digestionBody.sessionId = session.id;
         if (STATE.settings.ollamaApiKey) digestionBody.apiKey = STATE.settings.ollamaApiKey;
+        if (STATE.settings.openRouterKey) digestionBody.openRouterKey = STATE.settings.openRouterKey;
 
         currentRoundText = '';
         currentRoundNativeCalls = [];
@@ -9923,7 +9989,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
                   currentRoundText += chunk;
                 }
                 if (dParsed.message?.tool_calls && Array.isArray(dParsed.message.tool_calls)) {
-                  dParsed.message.tool_calls.forEach(tc => currentRoundNativeCalls.push(tc));
+                  mergeToolCallsInto(currentRoundNativeCalls, dParsed.message.tool_calls);
                 }
               } catch (_) {}
             }
@@ -9939,7 +10005,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
                 currentRoundText += chunk;
               }
               if (dParsed.message?.tool_calls && Array.isArray(dParsed.message.tool_calls)) {
-                dParsed.message.tool_calls.forEach(tc => currentRoundNativeCalls.push(tc));
+                mergeToolCallsInto(currentRoundNativeCalls, dParsed.message.tool_calls);
               }
             } catch (_) {}
           }
@@ -10115,7 +10181,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
                                     errLower.includes('401') ||
                                     err?.name === 'TypeError';
 
-        if (runOptions && runOptions.autoCloudFallback && isNotFoundOrOffline) {
+        const allowCloudFallback = runOptions ? (runOptions.autoCloudFallback !== false) : true;
+        if (allowCloudFallback && isNotFoundOrOffline) {
           try { assistantRow.remove(); } catch (_) {}
           const fallbackModel = mapOllamaModelToOpenRouter(modelName);
           console.warn(`[Ollama Failover] Model ${modelName} tidak tersedia di server Ollama (${err?.message}). Mengalihkan otomatis ke Cloud OpenRouter (${fallbackModel})...`);
@@ -12137,10 +12204,14 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           continue;
         }
       }
-      throw lastErr || new Error('Gagal memanggil model OpenRouter');
-    } else {
-      const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
-      const headers = { 'Content-Type': 'application/json' };
+      if (resolvedEngine !== 'openrouter') {
+        console.warn('[callClientLLMDirect] Seluruh kandidat OpenRouter gagal, fallback ke Ollama:', lastErr?.message);
+      } else {
+        throw lastErr || new Error('Gagal memanggil model OpenRouter');
+      }
+    }
+
+    const headers = { 'Content-Type': 'application/json' };
       if (STATE.settings.ollamaApiKey) {
         headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
@@ -12169,7 +12240,6 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       const data = await res.json();
       return data.message?.content || data.response || data.choices?.[0]?.message?.content || '';
     }
-  }
 
   async function streamLLMSynthesis(engine, modelName, systemPrompt, session, bubbleText = null, onChunk = null) {
     const streamRenderer = bubbleText ? new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false)) : null;
@@ -12277,14 +12347,14 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         if (i < candidateModels.length - 1) {
           console.warn(`[streamLLMSynthesis] Failover dari ${curModel} ke ${candidateModels[i + 1]} (${lastErrDetail})`);
           continue;
-        } else {
+        } else if (resolvedEngine === 'openrouter') {
           throw new Error(lastErrDetail || 'Gagal memulai streaming sintesis OpenRouter');
+        } else {
+          console.warn('[streamLLMSynthesis] Seluruh kandidat OpenRouter gagal, fallback ke Ollama:', lastErrDetail);
         }
       }
 
-      if (!response || !response.ok) {
-        throw new Error(lastErrDetail || 'Gagal memulai streaming sintesis OpenRouter');
-      }
+      if (response && response.ok) {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -12347,11 +12417,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         }
       }
 
-      const renderedText = streamRenderer ? streamRenderer.finish() : fullText;
-      return fullText || renderedText;
-    } else {
-      const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
-      const headers = { 'Content-Type': 'application/json' };
+        const renderedText = streamRenderer ? streamRenderer.finish() : fullText;
+        return fullText || renderedText;
+      }
+    }
+
+    const headers = { 'Content-Type': 'application/json' };
       if (STATE.settings.ollamaApiKey) {
         headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
@@ -12443,7 +12514,6 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       const renderedText = streamRenderer ? streamRenderer.finish() : fullText;
       return fullText || renderedText;
     }
-  }
 
   // ==================== DEEP RESEARCH REPORT & EXPORT SUITE ====================
   let currentActiveReport = {
