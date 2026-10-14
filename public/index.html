@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261014_v250">
+  <link rel="stylesheet" href="style.css?v=20261014_v251">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -335,20 +335,23 @@
           </div>
         </div>
 
-        <!-- AI Photo Edit Reference Card (Img2Img) -->
+        <!-- AI Photo Edit Reference Card (Img2Img Mode) -->
         <div class="photo-edit-ref-card" id="photoEditReferenceCard" style="display: none;">
-          <div class="photo-edit-ref-thumb-wrap" id="photoEditRefThumbWrap" title="Klik untuk ganti foto">
+          <div class="photo-edit-ref-thumb-wrap" id="photoEditRefThumbWrap" title="Klik untuk ganti foto referensi">
             <img id="photoEditRefThumb" src="" alt="Foto Referensi">
             <div class="photo-edit-thumb-overlay"><i class="fa-solid fa-camera"></i></div>
           </div>
           <div class="photo-edit-ref-info">
             <div class="photo-edit-ref-header">
-              <i class="fa-solid fa-wand-magic-sparkles"></i>
-              <span>Edit Foto AI</span>
-              <span class="photo-edit-live-badge" title="Model AI Aktif untuk Edit Foto">
-                <span class="photo-edit-live-dot"></span>
-                <span id="photoEditActiveModelLabel">Flux.1 Schnell</span>
-              </span>
+              <div class="photo-edit-title-wrap">
+                <i class="fa-solid fa-paintbrush" style="color:#c084fc;"></i>
+                <span>Edit Foto AI</span>
+              </div>
+              <button type="button" class="mode-card-model-chip photo-edit-model-chip" id="btnActivePhotoEditModelChip" title="Model AI Aktif. Klik untuk ganti model edit foto">
+                <span class="mode-live-dot dot-purple"></span>
+                <span class="mode-active-model-name" id="photoEditActiveModelLabel">Flux.1 Schnell</span>
+                <i class="fa-solid fa-chevron-down mode-chevron"></i>
+              </button>
               <div class="photo-edit-header-actions">
                 <button type="button" class="photo-edit-change-photo-btn" id="btnChangePhotoEditImage" title="Pilih / Ganti Foto Referensi Baru">
                   <i class="fa-solid fa-image"></i> <span>Ganti Foto</span>
@@ -362,6 +365,60 @@
           <button type="button" class="photo-edit-cancel-btn" id="btnCancelPhotoEdit" title="Batalkan Mode Edit Foto">
             <i class="fa-solid fa-xmark"></i>
           </button>
+        </div>
+
+        <!-- AI Image Generation Mode Active Card (Buat Gambar AI) -->
+        <div class="composer-active-mode-card image-mode-card" id="imageGenActiveCard" style="display: none;">
+          <div class="mode-card-left">
+            <div class="mode-card-icon-box image-accent-box">
+              <i class="fa-solid fa-wand-magic-sparkles"></i>
+            </div>
+            <div class="mode-card-details">
+              <div class="mode-card-title-row">
+                <span class="mode-card-title">Buat Gambar AI</span>
+              </div>
+              <button type="button" class="mode-card-model-chip image-model-chip" id="btnActiveImageModelChip" title="Model AI Aktif. Klik untuk ganti model gambar">
+                <span class="mode-live-dot dot-magenta"></span>
+                <span class="mode-active-model-name" id="imageGenActiveModelLabel">Flux.1 Schnell</span>
+                <i class="fa-solid fa-chevron-down mode-chevron"></i>
+              </button>
+            </div>
+          </div>
+          <div class="mode-card-actions">
+            <button type="button" class="mode-change-model-btn image-change-btn" id="btnChangeImageGenModel" title="Pilih / Ganti Model AI Gambar">
+              <i class="fa-solid fa-sliders"></i> <span>Ganti Model</span>
+            </button>
+            <button type="button" class="mode-cancel-btn" id="btnCancelImageGenMode" title="Keluar dari Mode Buat Gambar">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- AI Music Generation Mode Active Card (Buat Musik AI) -->
+        <div class="composer-active-mode-card music-mode-card" id="musicGenActiveCard" style="display: none;">
+          <div class="mode-card-left">
+            <div class="mode-card-icon-box music-accent-box">
+              <i class="fa-solid fa-music"></i>
+            </div>
+            <div class="mode-card-details">
+              <div class="mode-card-title-row">
+                <span class="mode-card-title">Buat Musik AI</span>
+              </div>
+              <button type="button" class="mode-card-model-chip music-model-chip" id="btnActiveMusicModelChip" title="Model AI Aktif. Klik untuk ganti model musik">
+                <span class="mode-live-dot dot-teal"></span>
+                <span class="mode-active-model-name" id="musicGenActiveModelLabel">Lyria 3 Clip Preview</span>
+                <i class="fa-solid fa-chevron-down mode-chevron"></i>
+              </button>
+            </div>
+          </div>
+          <div class="mode-card-actions">
+            <button type="button" class="mode-change-model-btn music-change-btn" id="btnChangeMusicGenModel" title="Pilih / Ganti Model Musik AI">
+              <i class="fa-solid fa-sliders"></i> <span>Ganti Model</span>
+            </button>
+            <button type="button" class="mode-cancel-btn" id="btnCancelMusicGenMode" title="Keluar dari Mode Buat Musik">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
         </div>
 
         <div class="composer-box">
@@ -1566,8 +1623,8 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261014_v250" defer></script>
+  <script src="text-safety.js?v=20261014_v251" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261014_v250" defer></script>
+  <script src="app.js?v=20261014_v251" defer></script>
 </body>
 </html>

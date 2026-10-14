@@ -601,9 +601,20 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     photoEditRefThumb: $('#photoEditRefThumb'),
     photoEditRefThumbWrap: $('#photoEditRefThumbWrap'),
     photoEditActiveModelLabel: $('#photoEditActiveModelLabel'),
+    btnActivePhotoEditModelChip: $('#btnActivePhotoEditModelChip'),
     btnChangePhotoEditImage: $('#btnChangePhotoEditImage'),
     btnChangePhotoEditModel: $('#btnChangePhotoEditModel'),
     btnCancelPhotoEdit: $('#btnCancelPhotoEdit'),
+    imageGenActiveCard: $('#imageGenActiveCard'),
+    imageGenActiveModelLabel: $('#imageGenActiveModelLabel'),
+    btnActiveImageModelChip: $('#btnActiveImageModelChip'),
+    btnChangeImageGenModel: $('#btnChangeImageGenModel'),
+    btnCancelImageGenMode: $('#btnCancelImageGenMode'),
+    musicGenActiveCard: $('#musicGenActiveCard'),
+    musicGenActiveModelLabel: $('#musicGenActiveModelLabel'),
+    btnActiveMusicModelChip: $('#btnActiveMusicModelChip'),
+    btnChangeMusicGenModel: $('#btnChangeMusicGenModel'),
+    btnCancelMusicGenMode: $('#btnCancelMusicGenMode'),
     attachOptionEditPhoto: $('#attachOptionEditPhoto'),
     attachmentTabsNav: $('#attachmentTabsNav'),
     tabAttachFiles: $('#tabAttachFiles'),
@@ -12661,6 +12672,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     if (els.photoEditActiveModelLabel) {
       els.photoEditActiveModelLabel.textContent = getImageModelDisplayName(STATE.settings.imageModel || 'flux');
     }
+    updateActiveModeCardsState();
     if (els.promptInput) els.promptInput.focus();
   }
 
@@ -12670,6 +12682,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     if (els.photoEditRefThumb) els.photoEditRefThumb.removeAttribute('src');
     if (els.photoEditReferenceCard) els.photoEditReferenceCard.style.display = 'none';
     if (els.photoEditFileInput) els.photoEditFileInput.value = '';
+    updateActiveModeCardsState();
   }
 
   async function handlePhotoEditFileSelect(e) {
@@ -12701,6 +12714,17 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       console.warn('Photo edit compress failed:', compErr);
       showToast('Gagal memproses foto referensi.', 'error');
       clearPhotoEdit();
+    }
+  }
+
+  function updateActiveModeCardsState() {
+    const hasCard = Boolean(
+      (STATE.isImageGenMode && !STATE.photoEditImage) ||
+      STATE.photoEditImage ||
+      STATE.isMusicGenMode
+    );
+    if (els.mainComposerContainer) {
+      els.mainComposerContainer.classList.toggle('has-active-mode-card', hasCard);
     }
   }
 
@@ -15063,6 +15087,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     if (els.photoEditActiveModelLabel) {
       els.photoEditActiveModelLabel.textContent = displayName;
     }
+    if (els.imageGenActiveModelLabel) {
+      els.imageGenActiveModelLabel.textContent = displayName;
+    }
+    if (els.imageGenActiveCard) {
+      els.imageGenActiveCard.style.display = (isImageMode && !STATE.photoEditImage) ? 'flex' : 'none';
+    }
     if (els.sendPromptBtn) {
       if (isImageMode) {
         els.sendPromptBtn.setAttribute('title', `Generate Gambar dengan ${displayName} (Enter) | Tahan 450ms untuk Mode Percakapan`);
@@ -15097,6 +15127,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       if (checkIcon) checkIcon.style.display = isSelected ? 'block' : 'none';
     });
     updateToolActiveDot();
+    updateActiveModeCardsState();
   }
 
   // ==================== AI YOUTUBE SEARCH TOOL ====================
@@ -15267,6 +15298,13 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       }
     }
 
+    if (els.musicGenActiveModelLabel) {
+      els.musicGenActiveModelLabel.textContent = displayName;
+    }
+    if (els.musicGenActiveCard) {
+      els.musicGenActiveCard.style.display = isMusicMode ? 'flex' : 'none';
+    }
+
     // Sinkronisasi status checked pada popup modal/dropdown musik
     $$('.music-model-item').forEach(item => {
       const itemModel = item.dataset.model;
@@ -15276,6 +15314,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       if (checkIcon) checkIcon.style.display = isSelected ? 'block' : 'none';
     });
     updateToolActiveDot();
+    updateActiveModeCardsState();
   }
 
   function switchMusicModelTab(tabName) {
@@ -18647,6 +18686,11 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       els.photoEditFileInput?.click();
       AudioEngine.click();
     });
+    els.btnActivePhotoEditModelChip?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleImageModelDropdown(e);
+      AudioEngine.click();
+    });
     els.btnChangePhotoEditModel?.addEventListener('click', (e) => {
       e.stopPropagation();
       toggleImageModelDropdown(e);
@@ -18657,6 +18701,46 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       clearPhotoEdit();
       AudioEngine.click();
     });
+
+    // Pinned Active Mode Card Listeners: Buat Gambar AI
+    els.btnActiveImageModelChip?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleImageModelDropdown(e);
+      AudioEngine.click();
+    });
+    els.btnChangeImageGenModel?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleImageModelDropdown(e);
+      AudioEngine.click();
+    });
+    els.btnCancelImageGenMode?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      STATE.isImageGenMode = false;
+      clearPhotoEdit();
+      updateImageGenModeUI();
+      closeImageModelDropdown();
+      AudioEngine.click();
+    });
+
+    // Pinned Active Mode Card Listeners: Buat Musik AI
+    els.btnActiveMusicModelChip?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleMusicModelDropdown(e);
+      AudioEngine.click();
+    });
+    els.btnChangeMusicGenModel?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleMusicModelDropdown(e);
+      AudioEngine.click();
+    });
+    els.btnCancelMusicGenMode?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      STATE.isMusicGenMode = false;
+      updateMusicGenModeUI();
+      closeMusicModelDropdown();
+      AudioEngine.click();
+    });
+
     els.attachOptionGenMusic?.addEventListener('click', (e) => {
       e.stopPropagation();
       closeAttachmentDropdown();
@@ -18717,12 +18801,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         }
       }
       if (els.imageModelDropdown && els.imageModelDropdown.style.display !== 'none') {
-        if (!els.imageModelMenuWrapper?.contains(e.target) && !els.photoEditReferenceCard?.contains(e.target)) {
+        if (!els.imageModelMenuWrapper?.contains(e.target) && !els.photoEditReferenceCard?.contains(e.target) && !els.imageGenActiveCard?.contains(e.target)) {
           closeImageModelDropdown();
         }
       }
       if (els.musicModelDropdown && els.musicModelDropdown.style.display !== 'none') {
-        if (!els.musicModelMenuWrapper?.contains(e.target)) {
+        if (!els.musicModelMenuWrapper?.contains(e.target) && !els.musicGenActiveCard?.contains(e.target)) {
           closeMusicModelDropdown();
         }
       }
