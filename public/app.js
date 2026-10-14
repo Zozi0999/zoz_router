@@ -205,10 +205,21 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   ];
 
   // Dedicated OpenRouter Curated Image Engines
-  const CURATED_OPENROUTER_IMAGE_MODELS = []; // Kosongkan karena OpenRouter tidak mendistribusikan model gambar secara default
+  const CURATED_OPENROUTER_IMAGE_MODELS = [
+    { id: 'black-forest-labs/flux-1-schnell', name: 'Flux.1 Schnell (Cloud)', provider: 'openrouter', cat: 'cloud', tag: 'Fast • High Quality', desc: 'Black Forest Labs Flux 1 Schnell via OpenRouter' },
+    { id: 'black-forest-labs/flux-1-dev', name: 'Flux.1 Dev', provider: 'openrouter', cat: 'cloud', tag: 'Pro • Dev', desc: 'Kualitas fotorealistik tertinggi dari Black Forest Labs' },
+    { id: 'recraft-ai/recraft-v3', name: 'Recraft v3', provider: 'openrouter', cat: 'cloud', tag: 'Vector • Design', desc: 'Desain grafis, vektor, ikon dan ilustrasi resolusi tinggi' },
+    { id: 'google/imagen-3', name: 'Google Imagen 3', provider: 'openrouter', cat: 'cloud', tag: 'Google • Photorealism', desc: 'Model generasi visual tercanggih dari Google DeepMind' },
+    { id: 'openai/dall-e-3', name: 'OpenAI DALL-E 3', provider: 'openrouter', cat: 'cloud', tag: 'OpenAI • Detailed', desc: 'Generasi gambar berbasis pemahaman teks detail OpenAI' },
+    { id: 'stabilityai/stable-diffusion-3.5-large', name: 'SD 3.5 Large', provider: 'openrouter', cat: 'cloud', tag: 'Stability • Photoreal', desc: 'Stable Diffusion 3.5 Large multi-gaya resolusi tinggi' },
+    { id: 'tencent/hunyuan-image-v3.5', name: 'Hunyuan Image v3.5', provider: 'openrouter', cat: 'cloud', tag: 'Tencent • Anime/Photo', desc: 'Tencent Hunyuan Image v3.5 visual synthesis' }
+  ];
 
-  // Model pembuat musik/audio ASLI (output audio) di OpenRouter. Model teks tidak bisa membuat suara.
-  const CURATED_OPENROUTER_MUSIC_MODELS = []; // Kosongkan karena model seperti Lyria/Suno tidak ada di OpenRouter (hanya halusinasi AI sebelumnya)
+  // Model pembuat musik/audio ASLI (output audio) di OpenRouter & Ollama
+  const CURATED_OPENROUTER_MUSIC_MODELS = [
+    { id: 'google/lyria-3-clip-preview', name: 'Lyria 3 Clip Preview', provider: 'ollama', cat: 'audio', tag: 'Google • Music', desc: 'Google DeepMind Lyria generative music & audio' },
+    { id: 'meta-llama/musicgen-large', name: 'Meta MusicGen Large', provider: 'openrouter', cat: 'audio', tag: 'Meta • Audio', desc: 'Meta Audiocraft MusicGen sintesis instrumen & harmoni' }
+  ];
 
   // Persistent Unique Client / User Identity Token for Strict User Isolation
   function getOrCreateUserId() {
@@ -15363,10 +15374,11 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     if (isOR) {
       updateMusicOpenRouterStatusBar();
       populateMusicOpenRouterModels(els.musicModelSearchInput?.value || '');
-      setTimeout(() => els.musicModelSearchInput?.focus(), 60);
     } else {
       populateMusicOllamaModels(els.musicOllamaSearchInput?.value || '');
-      setTimeout(() => els.musicOllamaSearchInput?.focus(), 60);
+    }
+    if (els.musicModelDropdown) {
+      els.musicModelDropdown.scrollTop = 0;
     }
   }
 
@@ -15616,6 +15628,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     closeSearchDropdown();
     closeImageModelDropdown();
     els.musicModelDropdown.style.display = 'flex';
+    els.musicModelDropdown.scrollTop = 0;
     els.musicGenToggleBtn?.setAttribute('aria-expanded', 'true');
 
     // Auto-fetch model resmi OpenRouter jika belum di-cache
@@ -15686,10 +15699,13 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     if (els.panePollinations) els.panePollinations.style.display = isOR ? 'none' : 'flex';
     if (els.paneOpenRouter) els.paneOpenRouter.style.display = isOR ? 'flex' : 'none';
 
+    if (els.imageModelDropdown) {
+      els.imageModelDropdown.scrollTop = 0;
+    }
+
     if (isOR) {
       updateImageModelStatusBar();
       populateOpenRouterImageModels(els.imageModelSearchInput?.value || '');
-      setTimeout(() => els.imageModelSearchInput?.focus(), 60);
     }
   }
 
@@ -15829,6 +15845,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     closeSearchDropdown();
     closeMusicModelDropdown();
     els.imageModelDropdown.style.display = 'flex';
+    els.imageModelDropdown.scrollTop = 0;
     els.imageGenToggleBtn?.setAttribute('aria-expanded', 'true');
 
     // Auto switch ke tab OpenRouter jika model saat ini adalah model cloud OpenRouter
