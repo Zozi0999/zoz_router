@@ -345,6 +345,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     currentSessionId: null,
     historySelectMode: false,
     selectedSessionIds: new Set(),
+    activeAttachmentTab: 'files', // 'files' | 'tools'
     attachedImages: [], // Array of Base64 data URLs
     get attachedImage() { return (this.attachedImages && this.attachedImages.length > 0) ? this.attachedImages[0] : null; },
     set attachedImage(val) { this.attachedImages = val ? (Array.isArray(val) ? val : [val]) : []; },
@@ -604,6 +605,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     btnChangePhotoEditModel: $('#btnChangePhotoEditModel'),
     btnCancelPhotoEdit: $('#btnCancelPhotoEdit'),
     attachOptionEditPhoto: $('#attachOptionEditPhoto'),
+    attachmentTabsNav: $('#attachmentTabsNav'),
+    tabAttachFiles: $('#tabAttachFiles'),
+    tabAttachTools: $('#tabAttachTools'),
+    attachPaneFiles: $('#attachPaneFiles'),
+    attachPaneTools: $('#attachPaneTools'),
+    toolActiveDot: $('#toolActiveDot'),
     docFileInput: $('#docFileInput'),
     searchMenuWrapper: $('#searchMenuWrapper'),
     webSearchToggleBtn: $('#webSearchToggleBtn'),
@@ -12709,6 +12716,31 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     }
   }
 
+  function switchAttachmentTab(targetTab = 'files') {
+    STATE.activeAttachmentTab = targetTab;
+    const isFiles = targetTab === 'files';
+
+    if (els.tabAttachFiles) {
+      els.tabAttachFiles.classList.toggle('active', isFiles);
+      els.tabAttachFiles.setAttribute('aria-selected', String(isFiles));
+    }
+    if (els.tabAttachTools) {
+      els.tabAttachTools.classList.toggle('active', !isFiles);
+      els.tabAttachTools.setAttribute('aria-selected', String(!isFiles));
+    }
+
+    if (els.attachPaneFiles) els.attachPaneFiles.style.display = isFiles ? 'flex' : 'none';
+    if (els.attachPaneTools) els.attachPaneTools.style.display = isFiles ? 'none' : 'flex';
+
+    updateToolActiveDot();
+  }
+
+  function updateToolActiveDot() {
+    if (!els.toolActiveDot) return;
+    const hasActiveTool = Boolean(STATE.isImageGenMode || STATE.isMusicGenMode || STATE.isYouTubeSearchMode);
+    els.toolActiveDot.style.display = hasActiveTool ? 'inline-block' : 'none';
+  }
+
   function openAttachmentDropdown() {
     if (!els.attachmentDropdown) return;
     closeSearchDropdown();
@@ -12717,6 +12749,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     els.attachmentDropdown.style.display = 'flex';
     els.attachToggleBtn?.classList.add('active');
     els.attachToggleBtn?.setAttribute('aria-expanded', 'true');
+
+    // Auto switch ke tab Tools bila salah satu mode tool AI sedang aktif; jika tidak, buka tab terakhir atau 'files'
+    const hasActiveTool = Boolean(STATE.isImageGenMode || STATE.isMusicGenMode || STATE.isYouTubeSearchMode);
+    const targetTab = hasActiveTool ? 'tools' : (STATE.activeAttachmentTab || 'files');
+    switchAttachmentTab(targetTab);
+    updateToolActiveDot();
     AudioEngine.click();
   }
 
@@ -15058,6 +15096,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       const checkIcon = item.querySelector('.image-model-check');
       if (checkIcon) checkIcon.style.display = isSelected ? 'block' : 'none';
     });
+    updateToolActiveDot();
   }
 
   // ==================== AI YOUTUBE SEARCH TOOL ====================
@@ -15094,6 +15133,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       const checkIcon = els.attachOptionYouTubeSearch.querySelector('.attach-yt-check');
       if (checkIcon) checkIcon.style.display = isOn ? 'block' : 'none';
     }
+    updateToolActiveDot();
   }
 
   function setYouTubeSearchMode(enabled, silent = false) {
@@ -15235,6 +15275,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       const checkIcon = item.querySelector('.music-model-check');
       if (checkIcon) checkIcon.style.display = isSelected ? 'block' : 'none';
     });
+    updateToolActiveDot();
   }
 
   function switchMusicModelTab(tabName) {
@@ -18557,8 +18598,18 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       BioEndocrine.purgeStress();
     });
 
-    // Unified Composer Attachments (ChatGPT & Gemini Style Plus Menu)
+    // Unified Composer Attachments (ChatGPT & Gemini Style Plus Menu with Tabs)
     els.attachToggleBtn?.addEventListener('click', toggleAttachmentDropdown);
+    els.tabAttachFiles?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      switchAttachmentTab('files');
+      AudioEngine.click();
+    });
+    els.tabAttachTools?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      switchAttachmentTab('tools');
+      AudioEngine.click();
+    });
 
     els.attachOptionCamera?.addEventListener('click', () => {
       closeAttachmentDropdown();

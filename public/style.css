@@ -4540,10 +4540,11 @@ body.modal-open {
   position: absolute;
   bottom: calc(100% + 14px);
   left: 0;
-  min-width: 270px;
+  min-width: 280px;
+  max-width: 320px;
   background: rgba(13, 16, 26, 0.96);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid rgba(0, 240, 255, 0.35);
   border-radius: var(--radius-md);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7), 0 0 24px rgba(0, 240, 255, 0.18);
@@ -4551,7 +4552,7 @@ body.modal-open {
   z-index: 700;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   animation: attachMenuPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   transform-origin: bottom left;
 }
@@ -4564,6 +4565,82 @@ body.modal-open {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+/* Attachment & Tools Segmented Tab Switcher */
+.attachment-tabs-nav {
+  display: flex;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  gap: 4px;
+}
+
+.attachment-tab-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.attachment-tab-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.attachment-tab-btn.active {
+  background: rgba(0, 240, 255, 0.14);
+  border-color: rgba(0, 240, 255, 0.45);
+  color: var(--neon-cyan);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.22);
+}
+
+.attachment-tab-btn#tabAttachTools.active {
+  background: rgba(168, 85, 247, 0.16);
+  border-color: rgba(168, 85, 247, 0.45);
+  color: #c084fc;
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.25);
+}
+
+.tool-active-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c084fc;
+  box-shadow: 0 0 6px #c084fc;
+  display: inline-block;
+  margin-left: 2px;
+}
+
+.attachment-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: attachPaneFade 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes attachPaneFade {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
