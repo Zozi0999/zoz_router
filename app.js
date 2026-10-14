@@ -876,7 +876,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       if (typeof els === 'object') {
         for (const [key, val] of Object.entries(els)) {
           total++;
-          if (!val && !key.includes('Option') && !key.includes('Badge') && !key.includes('Hint') && !key.includes('Thumb')) {
+          let isNodeConnected = false;
+          if (val instanceof NodeList || Array.isArray(val)) {
+            isNodeConnected = val.length > 0;
+          } else {
+            isNodeConnected = Boolean(val);
+          }
+
+          if (!isNodeConnected) {
             issues.push(`Reseptor DOM terisolasi: els.${key} tidak ditemukan di DOM`);
           } else {
             connected++;
@@ -1033,6 +1040,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
     }
   };
+
+  // Expose to window for global bio-telemetry, console inspection, and diagnostic audit
+  window.BioEndocrine = BioEndocrine;
 
   // ==================== FULL-SCREEN IMAGE LIGHTBOX (ChatGPT & Gemini Style) ====================
   const ImageLightbox = {
@@ -19636,6 +19646,10 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     fetchOllamaCloudUsage().catch(() => {});
   }
 
-  // Start on DOM loaded
-  document.addEventListener('DOMContentLoaded', init);
+  // Start on DOM ready (safeguarded against post-DOMContentLoaded script execution)
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 })();
