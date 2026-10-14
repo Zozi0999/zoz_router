@@ -8032,6 +8032,27 @@ body.modal-open {
   background: rgba(0, 255, 194, 0.25);
 }
 
+@media (max-width: 768px) {
+  .ai-file-card {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .ai-file-info {
+    min-width: calc(100% - 56px);
+  }
+  .ai-file-actions {
+    width: 100%;
+    justify-content: flex-start;
+    margin-top: 6px;
+    gap: 8px;
+  }
+  .ai-file-btn {
+    flex: 1;
+    justify-content: center;
+    padding: 7px 12px;
+  }
+}
+
 /* ==================== AI FILE STUDIO MODAL ==================== */
 .ai-file-studio-body {
   display: flex;
@@ -9845,6 +9866,18 @@ body.page-paused *::after {
   color: #F59E0B;
 }
 
+.file-workspace-tag.file-edit-tag {
+  background: rgba(168, 85, 247, 0.15);
+  border-color: rgba(168, 85, 247, 0.4);
+  color: var(--neon-purple);
+}
+
+.file-workspace-tag.file-edited-tag {
+  background: rgba(0, 255, 194, 0.15);
+  border-color: rgba(0, 255, 194, 0.4);
+  color: var(--neon-teal);
+}
+
 .ai-file-btn.allow-pending {
   background: rgba(0, 255, 194, 0.15) !important;
   border-color: rgba(0, 255, 194, 0.4) !important;
@@ -9855,6 +9888,17 @@ body.page-paused *::after {
 .ai-file-btn.allow-pending:hover {
   background: rgba(0, 255, 194, 0.3) !important;
   box-shadow: 0 0 8px rgba(0, 255, 194, 0.3);
+}
+
+.ai-file-btn.open-workspace-doc {
+  background: rgba(168, 85, 247, 0.15) !important;
+  border-color: rgba(168, 85, 247, 0.4) !important;
+  color: #c084fc !important;
+}
+
+.ai-file-btn.open-workspace-doc:hover {
+  background: rgba(168, 85, 247, 0.3) !important;
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.3);
 }
 
 /* ==================== INTERACTIVE TASK TRACKER & FILE SNAPSHOTS (v257) ==================== */

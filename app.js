@@ -1517,6 +1517,103 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
   };
 
+  // ==================== INDEXEDDB WORKSPACE VAULT (v260) ====================
+  const WorkspaceDB = {
+    db: null,
+    async init() {
+      return new Promise((resolve) => {
+        try {
+          const req = indexedDB.open('ZozRouterWorkspaceDB_v1', 1);
+          req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('workspace')) {
+              db.createObjectStore('workspace', { keyPath: 'key' });
+            }
+          };
+          req.onsuccess = (e) => {
+            this.db = e.target.result;
+            resolve(this.db);
+          };
+          req.onerror = () => resolve(null);
+        } catch (_) {
+          resolve(null);
+        }
+      });
+    },
+    async saveWorkspace(workspaceState) {
+      if (!this.db) await this.init();
+      if (!this.db) return false;
+      return new Promise((resolve) => {
+        try {
+          const tx = this.db.transaction('workspace', 'readwrite');
+          const cleanFiles = (workspaceState.files || []).map(f => ({
+            name: f.name,
+            path: f.path || f.name,
+            size: f.size,
+            type: f.type || 'text/plain',
+            lastModified: f.lastModified || Date.now(),
+            content: f.content || ''
+          }));
+          tx.objectStore('workspace').put({
+            key: 'current_workspace',
+            dirName: workspaceState.dirName || '',
+            platform: workspaceState.platform || 'auto',
+            enabled: Boolean(workspaceState.enabled),
+            files: cleanFiles,
+            snapshots: workspaceState.snapshots || {},
+            timestamp: Date.now()
+          });
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+        } catch (_) {
+          resolve(false);
+        }
+      });
+    },
+    async loadWorkspace() {
+      if (!this.db) await this.init();
+      if (!this.db) return null;
+      return new Promise((resolve) => {
+        try {
+          const tx = this.db.transaction('workspace', 'readonly');
+          const req = tx.objectStore('workspace').get('current_workspace');
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => resolve(null);
+        } catch (_) {
+          resolve(null);
+        }
+      });
+    },
+    async clearWorkspace() {
+      if (!this.db) await this.init();
+      if (!this.db) return false;
+      return new Promise((resolve) => {
+        try {
+          const tx = this.db.transaction('workspace', 'readwrite');
+          tx.objectStore('workspace').delete('current_workspace');
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+        } catch (_) {
+          resolve(false);
+        }
+      });
+    }
+  };
+
+  function findWorkspaceFile(targetName) {
+    if (!targetName || !STATE.localWorkspace || !Array.isArray(STATE.localWorkspace.files) || STATE.localWorkspace.files.length === 0) return null;
+    const clean = String(targetName).trim().toLowerCase();
+    const norm = clean.replace(/^[./\\]+/, '').replace(/\\/g, '/');
+    const base = norm.split('/').pop();
+
+    return STATE.localWorkspace.files.find(f => {
+      const fn = (f.name || '').toLowerCase();
+      const fp = (f.path || '').toLowerCase().replace(/^[./\\]+/, '').replace(/\\/g, '/');
+      const fb = fn.split('/').pop();
+      return fn === clean || fp === clean || fn === norm || fp === norm || fb === base || fp.endsWith('/' + base);
+    }) || null;
+  }
+
   // ==================== DEVICE-FIRST NATIVE STORAGE & PERSISTENCE ====================
   const DeviceStorage = {
     isDeviceBackendAvailable: false,
@@ -1989,7 +2086,24 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
       }
 
-      // 4. Periksa apakah ada tugas chat latar belakang yang sedang berjalan atau baru selesai
+      // 4. Sinkronisasi Direktori Lokal Pengguna dari WorkspaceDB Vault (IndexedDB)
+      try {
+        const savedWs = await WorkspaceDB.loadWorkspace();
+        if (savedWs && Array.isArray(savedWs.files) && savedWs.files.length > 0) {
+          STATE.localWorkspace.dirName = savedWs.dirName || STATE.localWorkspace.dirName || 'Direktori Dokumen';
+          STATE.localWorkspace.platform = savedWs.platform || STATE.localWorkspace.platform || (isDesktopFileSystemSupported() ? 'desktop-fs' : 'mobile-virtual');
+          STATE.localWorkspace.files = savedWs.files;
+          STATE.localWorkspace.enabled = (savedWs.enabled !== undefined) ? savedWs.enabled : true;
+          STATE.localWorkspace.snapshots = savedWs.snapshots || STATE.localWorkspace.snapshots || {};
+          STATE.settings.localWorkspaceEnabled = STATE.localWorkspace.enabled;
+          loadWorkspaceSnapshots();
+          updateLocalWorkspaceUI();
+        }
+      } catch (wsErr) {
+        console.warn('Notice restoring workspace from WorkspaceDB:', wsErr);
+      }
+
+      // 5. Periksa apakah ada tugas chat latar belakang yang sedang berjalan atau baru selesai
       await checkBackgroundChatTasksSync();
     } catch (err) {
       console.warn('Background storage sync notice:', err);
@@ -6218,13 +6332,28 @@ Aturan wajib:
       const langMatch = header.match(/lang=["']?([^"'\s>]+)["']?/i);
       const descMatch = header.match(/desc=["']([^"']*)["']/i);
       const content = lines.slice(idx + 1, end).join('\n');
-      out.files.push(buildAIFile(
-        nameMatch ? nameMatch[1] : 'file.txt',
+
+      const rawFileName = nameMatch ? nameMatch[1] : 'file.txt';
+      const isExplicitEdit = header.indexOf('<<<ZOZ_EDIT') === 0 || header.indexOf('<<<ZOZ_MODIFY') === 0;
+      const matchedWorkspaceFile = findWorkspaceFile(rawFileName);
+      const isWorkspaceEdit = isExplicitEdit || Boolean(matchedWorkspaceFile);
+
+      const resolvedFileName = matchedWorkspaceFile ? matchedWorkspaceFile.name : rawFileName;
+      const resolvedFilePath = matchedWorkspaceFile ? (matchedWorkspaceFile.path || matchedWorkspaceFile.name) : rawFileName;
+
+      const fileObj = buildAIFile(
+        resolvedFileName,
         mimeMatch ? mimeMatch[1] : '',
         langMatch ? langMatch[1] : '',
         content,
-        descMatch ? descMatch[1] : ''
-      ));
+        descMatch ? descMatch[1] : (isWorkspaceEdit ? 'Modifikasi berkas direktori' : '')
+      );
+      fileObj.isEdit = isWorkspaceEdit;
+      fileObj.path = resolvedFilePath;
+      if (matchedWorkspaceFile) {
+        fileObj.existingFile = matchedWorkspaceFile;
+      }
+      out.files.push(fileObj);
       out.rawBlocks.push(lines.slice(idx, end + 1).join('\n'));
       idx = end + 1;
     }
@@ -6310,7 +6439,9 @@ Aturan wajib:
   // Kartu file di dalam gelembung obrolan (dipanggil saat render live & riwayat)
   function renderMessageFiles(row, files) {
     if (!row || !Array.isArray(files) || files.length === 0) return;
-    const bubble = row.querySelector('.message-bubble');
+    const bubble = (row.classList && row.classList.contains('message-bubble'))
+      ? row
+      : row.querySelector('.message-bubble');
     if (!bubble) return;
     if (bubble.querySelector('.msg-file-cards-wrap')) return;
 
@@ -6321,22 +6452,31 @@ Aturan wajib:
       card.className = 'ai-file-card';
       card._aiFile = file;
 
+      const existingFile = findWorkspaceFile(file.name) || file.existingFile;
+      const isWorkspace = STATE.localWorkspace.enabled && Boolean(existingFile || file.isEdit);
       const isPending = Boolean(file.pendingApproval || (STATE.localWorkspace.pendingChanges && (STATE.localWorkspace.pendingChanges[file.name] || STATE.localWorkspace.pendingChanges[file.path])));
-      const isWorkspace = STATE.localWorkspace.enabled && (STATE.localWorkspace.files || []).some(f => f.name === file.name || f.path === file.name);
+      const isEdit = Boolean(file.isEdit || existingFile);
 
       let workspaceBadge = '';
       if (isPending) {
-        workspaceBadge = '<span class="file-workspace-tag file-approval-pending-tag"><i class="fa-solid fa-shield-halved"></i> Menunggu Izin Task Tracker</span>';
+        workspaceBadge = isEdit
+          ? '<span class="file-workspace-tag file-approval-pending-tag"><i class="fa-solid fa-pen-to-square"></i> Modifikasi Direktori: Menunggu Izin</span>'
+          : '<span class="file-workspace-tag file-approval-pending-tag"><i class="fa-solid fa-shield-halved"></i> Berkas Baru: Menunggu Izin</span>';
       } else if (isWorkspace) {
-        workspaceBadge = '<span class="file-workspace-tag"><i class="fa-solid fa-folder-check"></i> Direktori Lokal</span>';
+        workspaceBadge = isEdit
+          ? '<span class="file-workspace-tag file-edited-tag"><i class="fa-solid fa-folder-check"></i> Berkas Direktori Telah Diperbarui</span>'
+          : '<span class="file-workspace-tag"><i class="fa-solid fa-folder-check"></i> Direktori Lokal</span>';
       }
 
       let actionsHtml = '';
       if (isPending) {
         actionsHtml =
-          '  <button class="ai-file-btn allow-pending" type="button" data-act="allow-pending" data-name="' + escapeHtml(file.name) + '"><i class="fa-solid fa-check"></i> Izinkan & Simpan</button>' +
+          '  <button class="ai-file-btn allow-pending" type="button" data-act="allow-pending" data-name="' + escapeHtml(file.name) + '"><i class="fa-solid fa-check"></i> ' + (isEdit ? 'Izinkan & Simpan Edit' : 'Izinkan & Simpan') + '</button>' +
+          '  <button class="ai-file-btn preview" type="button" data-act="preview"><i class="fa-solid fa-eye"></i> Pratinjau Perubahan</button>';
+      } else if (isWorkspace) {
+        actionsHtml =
           '  <button class="ai-file-btn preview" type="button" data-act="preview"><i class="fa-solid fa-eye"></i> Pratinjau</button>' +
-          '  <button class="ai-file-btn download" type="button" data-act="download"><i class="fa-solid fa-download"></i> Unduh</button>';
+          '  <button class="ai-file-btn open-workspace-doc" type="button" data-act="open-workspace-doc" data-name="' + escapeHtml(file.name) + '"><i class="fa-solid fa-folder-open"></i> Buka di Direktori</button>';
       } else {
         actionsHtml =
           '  <button class="ai-file-btn preview" type="button" data-act="preview"><i class="fa-solid fa-eye"></i> Pratinjau</button>' +
@@ -6347,7 +6487,7 @@ Aturan wajib:
         '<div class="ai-file-icon"><i class="' + getFileIconClass(file.name) + '"></i></div>' +
         '<div class="ai-file-info">' +
         '  <div class="ai-file-name" title="' + escapeHtml(file.name) + '">' + escapeHtml(file.name) + ' ' + workspaceBadge + '</div>' +
-        '  <div class="ai-file-meta">' + escapeHtml(file.size || '') + '</div>' +
+        '  <div class="ai-file-meta">' + escapeHtml(file.size || '') + (isEdit ? ' • Modifikasi Berkas' : '') + '</div>' +
         (file.desc ? '  <div class="ai-file-desc" title="' + escapeHtml(file.desc) + '">' + escapeHtml(file.desc) + '</div>' : '') +
         '</div>' +
         '<div class="ai-file-actions">' + actionsHtml + '</div>';
@@ -7006,7 +7146,7 @@ ${blocks}
     showToast(`▶ Memutar "${title}" di dalam percakapan`);
   });
 
-  // Delegasi klik: tombol Pratinjau / Unduh / Izinkan & Simpan pada kartu file buatan AI
+  // Delegasi klik: tombol Pratinjau / Unduh / Izinkan & Simpan / Buka di Direktori pada kartu file buatan AI
   document.addEventListener('click', (e) => {
     const btn = e.target.closest ? e.target.closest('.ai-file-btn') : null;
     if (!btn) return;
@@ -7017,6 +7157,8 @@ ${blocks}
       downloadAIFile(file);
     } else if (btn.dataset.act === 'allow-pending') {
       approveWorkspacePendingChange(file.name);
+    } else if (btn.dataset.act === 'open-workspace-doc') {
+      previewWorkspaceDocument(file.name);
     } else {
       openAIFileStudio(file);
     }
@@ -8031,6 +8173,21 @@ ${blocks}
     }
 
     // Injeksi Akses & Dokumen Direktori Lokal ke Konteks Prompt
+    if (!STATE.localWorkspace.enabled || !STATE.localWorkspace.files || STATE.localWorkspace.files.length === 0) {
+      try {
+        const savedWs = await WorkspaceDB.loadWorkspace();
+        if (savedWs && Array.isArray(savedWs.files) && savedWs.files.length > 0) {
+          STATE.localWorkspace.dirName = savedWs.dirName || 'Direktori Dokumen';
+          STATE.localWorkspace.platform = savedWs.platform || 'mobile-virtual';
+          STATE.localWorkspace.files = savedWs.files;
+          STATE.localWorkspace.enabled = (savedWs.enabled !== undefined) ? savedWs.enabled : true;
+          STATE.localWorkspace.snapshots = savedWs.snapshots || {};
+          STATE.settings.localWorkspaceEnabled = true;
+          updateLocalWorkspaceUI();
+        }
+      } catch (_) {}
+    }
+
     if (STATE.localWorkspace.enabled && STATE.localWorkspace.files && STATE.localWorkspace.files.length > 0) {
       let workspaceInjectedText = '';
 
@@ -8099,17 +8256,24 @@ ${fileListSummary}${extraNote}
 
 PANDUAN MANAJEMEN & MODIFIKASI BERKAS DIREKTORI LOKAL:
 Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI, dan MEMBUAT berkas dalam direktori lokal ini.
-- JIKA PENGGUNA MEMINTA MENGEDIT, MENGUBAH, MEMPERBAIKI, ATAU MEMPERBARUI BERKAS:
-  1. Anda DAPAT dan HARUS langsung memodifikasinya!
-  2. Keluarkan SELURUH isi berkas yang telah Anda modifikasi ke dalam blok penanda:
-<<<ZOZ_FILE name="path/atau/nama_file.ext" mime="tipe_mime" desc="Ringkasan modifikasi">>>
+- JIKA PENGGUNA MEMINTA MENGEDIT, MENGUBAH, ATAU MEMPERBARUI BERKAS YANG SUDAH ADA DI DIREKTORI:
+  1. Anda WAJIB memodifikasi berkas yang sudah ada tersebut, BUKAN membuat file baru!
+  2. Keluarkan SELURUH isi berkas hasil modifikasi ke dalam blok penanda:
+<<<ZOZ_FILE name="nama_file_yang_ada.ext" mime="tipe_mime" desc="Ringkasan modifikasi">>>
 ...seluruh isi berkas yang sudah dimodifikasi secara lengkap tanpa potongan...
 <<<END_ZOZ_FILE>>>
-  3. Sistem Zoz Router akan secara OTOMATIS menimpa berkas di direktori lokal pengguna, menyimpannya ke perangkat, dan mencadangkan versi sebelumnya ke Snapshot Riwayat!
-  4. WAJIB: Tuliskan penjelasan ringkas di luar blok penanda tentang apa saja yang telah Anda ubah agar pengguna mendapat laporan jelas di gelembung obrolan.
+     Atau blok:
+<<<ZOZ_EDIT name="nama_file_yang_ada.ext" desc="Ringkasan modifikasi">>>
+...seluruh isi berkas yang sudah dimodifikasi secara lengkap...
+<<<END_ZOZ_EDIT>>>
+  3. Dalam Task Tracker, gunakan subtask dengan status "waiting_approval" untuk izin menyimpan perubahan ke direktori:
+     {"id":"X", "subject":"Izin modifikasi berkas \\"nama_file.ext\\" di direktori lokal", "status":"waiting_approval", "activeForm":"Menunggu Izin Pengguna..."}
+     dan pastikan subtask pengerjaan teks sebelumnya berstatus "completed" (bukan "in_progress").
+  4. Sistem Zoz Router akan secara OTOMATIS memperbarui berkas langsung di direktori lokal (in-place update tanpa mengunduh berkas baru), dan mencadangkan versi sebelumnya ke Snapshot Riwayat!
+  5. Tuliskan penjelasan ringkas di luar blok penanda tentang apa saja yang telah Anda ubah.
 
-- JIKA PENGGUNA MEMINTA MEMBUAT BERKAS BARU:
-  Gunakan format <<<ZOZ_FILE name="nama_file.ext" ...>>> yang sama.
+- JIKA PENGGUNA MEMINTA MEMBUAT BERKAS BARU (belum ada di direktori):
+  Gunakan format <<<ZOZ_FILE name="nama_file_baru.ext" ...>>>.
 
 - JIKA PENGGUNA MEMINTA MENGHAPUS BERKAS:
   Sertakan blok: <<<ZOZ_DELETE name="nama_file.ext">>>`;
@@ -11271,12 +11435,28 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         if (STATE.localWorkspace.enabled && STATE.localWorkspace.aiCanWrite) {
           const requireApproval = STATE.localWorkspace.requireApproval !== false;
           for (const gf of generatedFiles) {
+            const matchedWorkspaceFile = findWorkspaceFile(gf.name) || gf.existingFile;
+            const isEdit = Boolean(gf.isEdit || matchedWorkspaceFile);
+            if (matchedWorkspaceFile) {
+              gf.name = matchedWorkspaceFile.name;
+              gf.path = matchedWorkspaceFile.path || matchedWorkspaceFile.name;
+              gf.isEdit = true;
+            }
+
             if (requireApproval) {
               if (!STATE.localWorkspace.pendingChanges) STATE.localWorkspace.pendingChanges = {};
 
+              // Selesaikan semua subtask AI sebelumnya yang tertinggal in_progress
+              (STATE.taskTracker.tasks || []).forEach(t => {
+                if (t.status === 'in_progress') {
+                  t.status = 'completed';
+                  t.activeForm = 'Selesai';
+                }
+              });
+
               let matchedTask = (STATE.taskTracker.tasks || []).find(t =>
                 (t.status === 'waiting_approval' || t.status === 'pending' || t.status === 'in_progress') &&
-                (t.subject.toLowerCase().includes('simpan') || t.subject.toLowerCase().includes('save') || t.subject.toLowerCase().includes('tulis') || t.subject.toLowerCase().includes(gf.name.toLowerCase()))
+                (t.subject.toLowerCase().includes('simpan') || t.subject.toLowerCase().includes('save') || t.subject.toLowerCase().includes('tulis') || t.subject.toLowerCase().includes('modifikasi') || t.subject.toLowerCase().includes('edit') || t.subject.toLowerCase().includes(gf.name.toLowerCase()))
               );
 
               const approvalTaskId = matchedTask ? matchedTask.id : ('task-approval-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4));
@@ -11285,11 +11465,14 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
                 matchedTask.status = 'waiting_approval';
                 matchedTask.activeForm = 'Menunggu Izin Pengguna...';
                 matchedTask.fileName = gf.name;
+                if (isEdit) {
+                  matchedTask.subject = `Izin modifikasi berkas "${gf.name}" di direktori lokal`;
+                }
               } else {
                 if (!Array.isArray(STATE.taskTracker.tasks)) STATE.taskTracker.tasks = [];
                 STATE.taskTracker.tasks.push({
                   id: approvalTaskId,
-                  subject: `Izin simpan perubahan berkas "${gf.name}" ke direktori lokal`,
+                  subject: isEdit ? `Izin modifikasi berkas "${gf.name}" di direktori lokal` : `Izin simpan perubahan berkas "${gf.name}" ke direktori lokal`,
                   status: 'waiting_approval',
                   activeForm: 'Menunggu Izin Pengguna...',
                   fileName: gf.name
@@ -11301,22 +11484,24 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
               STATE.localWorkspace.pendingChanges[gf.name] = {
                 name: gf.name,
-                path: gf.name,
+                path: gf.path || gf.name,
                 content: gf.content,
                 desc: gf.desc || '',
                 author: 'ai',
-                note: gf.desc || 'Dimodifikasi oleh AI',
+                isEdit: isEdit,
+                note: gf.desc || (isEdit ? 'Dimodifikasi oleh AI' : 'Dibuat oleh AI'),
                 taskId: approvalTaskId,
                 timestamp: Date.now()
               };
 
               gf.pendingApproval = true;
-              showToast(`⚠️ AI meminta izin Anda via Task Tracker untuk menyimpan "${gf.name}"`, 'info');
+              showToast(isEdit ? `⚠️ AI meminta izin Anda via Task Tracker untuk memodifikasi "${gf.name}"` : `⚠️ AI meminta izin Anda via Task Tracker untuk menyimpan "${gf.name}"`, 'info');
             } else {
               await createWorkspaceDocument(gf.name, gf.content, {
                 silent: false,
                 author: 'ai',
-                note: gf.desc || 'Dimodifikasi oleh AI'
+                note: gf.desc || (isEdit ? 'Dimodifikasi oleh AI' : 'Dibuat oleh AI'),
+                isEdit: isEdit
               });
             }
           }
@@ -12604,12 +12789,28 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         if (STATE.localWorkspace.enabled && STATE.localWorkspace.aiCanWrite) {
           const requireApproval = STATE.localWorkspace.requireApproval !== false;
           for (const gf of generatedFiles) {
+            const matchedWorkspaceFile = findWorkspaceFile(gf.name) || gf.existingFile;
+            const isEdit = Boolean(gf.isEdit || matchedWorkspaceFile);
+            if (matchedWorkspaceFile) {
+              gf.name = matchedWorkspaceFile.name;
+              gf.path = matchedWorkspaceFile.path || matchedWorkspaceFile.name;
+              gf.isEdit = true;
+            }
+
             if (requireApproval) {
               if (!STATE.localWorkspace.pendingChanges) STATE.localWorkspace.pendingChanges = {};
 
+              // Selesaikan semua subtask AI sebelumnya yang tertinggal in_progress
+              (STATE.taskTracker.tasks || []).forEach(t => {
+                if (t.status === 'in_progress') {
+                  t.status = 'completed';
+                  t.activeForm = 'Selesai';
+                }
+              });
+
               let matchedTask = (STATE.taskTracker.tasks || []).find(t =>
                 (t.status === 'waiting_approval' || t.status === 'pending' || t.status === 'in_progress') &&
-                (t.subject.toLowerCase().includes('simpan') || t.subject.toLowerCase().includes('save') || t.subject.toLowerCase().includes('tulis') || t.subject.toLowerCase().includes(gf.name.toLowerCase()))
+                (t.subject.toLowerCase().includes('simpan') || t.subject.toLowerCase().includes('save') || t.subject.toLowerCase().includes('tulis') || t.subject.toLowerCase().includes('modifikasi') || t.subject.toLowerCase().includes('edit') || t.subject.toLowerCase().includes(gf.name.toLowerCase()))
               );
 
               const approvalTaskId = matchedTask ? matchedTask.id : ('task-approval-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4));
@@ -12618,11 +12819,14 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
                 matchedTask.status = 'waiting_approval';
                 matchedTask.activeForm = 'Menunggu Izin Pengguna...';
                 matchedTask.fileName = gf.name;
+                if (isEdit) {
+                  matchedTask.subject = `Izin modifikasi berkas "${gf.name}" di direktori lokal`;
+                }
               } else {
                 if (!Array.isArray(STATE.taskTracker.tasks)) STATE.taskTracker.tasks = [];
                 STATE.taskTracker.tasks.push({
                   id: approvalTaskId,
-                  subject: `Izin simpan perubahan berkas "${gf.name}" ke direktori lokal`,
+                  subject: isEdit ? `Izin modifikasi berkas "${gf.name}" di direktori lokal` : `Izin simpan perubahan berkas "${gf.name}" ke direktori lokal`,
                   status: 'waiting_approval',
                   activeForm: 'Menunggu Izin Pengguna...',
                   fileName: gf.name
@@ -12634,22 +12838,24 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
               STATE.localWorkspace.pendingChanges[gf.name] = {
                 name: gf.name,
-                path: gf.name,
+                path: gf.path || gf.name,
                 content: gf.content,
                 desc: gf.desc || '',
                 author: 'ai',
-                note: gf.desc || 'Dimodifikasi oleh AI',
+                isEdit: isEdit,
+                note: gf.desc || (isEdit ? 'Dimodifikasi oleh AI' : 'Dibuat oleh AI'),
                 taskId: approvalTaskId,
                 timestamp: Date.now()
               };
 
               gf.pendingApproval = true;
-              showToast(`⚠️ AI meminta izin Anda via Task Tracker untuk menyimpan "${gf.name}"`, 'info');
+              showToast(isEdit ? `⚠️ AI meminta izin Anda via Task Tracker untuk memodifikasi "${gf.name}"` : `⚠️ AI meminta izin Anda via Task Tracker untuk menyimpan "${gf.name}"`, 'info');
             } else {
               await createWorkspaceDocument(gf.name, gf.content, {
                 silent: false,
                 author: 'ai',
-                note: gf.desc || 'Dimodifikasi oleh AI'
+                note: gf.desc || (isEdit ? 'Dimodifikasi oleh AI' : 'Dibuat oleh AI'),
+                isEdit: isEdit
               });
             }
           }
@@ -15866,6 +16072,15 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     STATE.settings.localWorkspaceEnabled = true;
     loadWorkspaceSnapshots();
 
+    // Pastikan konten teks terbaca ke dalam memori untuk berkas umum (mis. README, file kode, dsb)
+    for (const f of STATE.localWorkspace.files) {
+      if (!f.content && f.rawFile && (f.size || 0) < 500000) {
+        try {
+          f.content = await extractFileContent(f.rawFile);
+        } catch (_) {}
+      }
+    }
+
     try {
       const meta = {
         dirName: STATE.localWorkspace.dirName,
@@ -15875,6 +16090,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       };
       localStorage.setItem('zoz_local_workspace_meta', JSON.stringify(meta));
       localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings));
+      await WorkspaceDB.saveWorkspace(STATE.localWorkspace);
     } catch (_) {}
 
     updateLocalWorkspaceUI();
@@ -15882,7 +16098,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     AudioEngine.click();
   }
 
-  function disconnectLocalWorkspace() {
+  async function disconnectLocalWorkspace() {
     STATE.localWorkspace.enabled = false;
     STATE.localWorkspace.dirName = '';
     STATE.localWorkspace.dirHandle = null;
@@ -15893,6 +16109,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     try {
       localStorage.removeItem('zoz_local_workspace_meta');
       localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings));
+      await WorkspaceDB.clearWorkspace();
     } catch (_) {}
 
     updateLocalWorkspaceUI();
@@ -16278,11 +16495,13 @@ Aturan:
     }
 
     const saveName = pending.path || pending.name;
+    const isEdit = Boolean(pending.isEdit || findWorkspaceFile(pending.name) || findWorkspaceFile(pending.path));
     try {
       await createWorkspaceDocument(saveName, pending.content, {
         silent: false,
         author: pending.author || 'ai',
-        note: pending.note || 'Disetujui pengguna via Task Tracker'
+        note: pending.note || (isEdit ? 'Modifikasi berkas via Task Tracker' : 'Disetujui pengguna via Task Tracker'),
+        isEdit: isEdit
       });
 
       // Hapus dari pendingChanges
@@ -16298,7 +16517,7 @@ Aturan:
         STATE.taskTracker.tasks.forEach(t => {
           if (t.id === pending.taskId || t.fileName === pending.name || (t.status === 'waiting_approval' && t.subject.includes(pending.name))) {
             t.status = 'completed';
-            t.activeForm = 'Disetujui & Disimpan';
+            t.activeForm = isEdit ? 'Selesai Dimodifikasi' : 'Disetujui & Disimpan';
           }
         });
         renderTaskTrackerUI();
@@ -16308,19 +16527,32 @@ Aturan:
       document.querySelectorAll('.ai-file-card').forEach(card => {
         if (card._aiFile && (card._aiFile.name === pending.name || card._aiFile.name === targetKey)) {
           card._aiFile.pendingApproval = false;
+          card._aiFile.isEdit = isEdit;
           const badge = card.querySelector('.file-approval-pending-tag');
           if (badge) {
-            badge.className = 'file-workspace-tag';
-            badge.innerHTML = '<i class="fa-solid fa-folder-check"></i> Direktori Lokal';
+            badge.className = isEdit ? 'file-workspace-tag file-edited-tag' : 'file-workspace-tag';
+            badge.innerHTML = isEdit
+              ? '<i class="fa-solid fa-folder-check"></i> Berkas Direktori Telah Diperbarui'
+              : '<i class="fa-solid fa-folder-check"></i> Direktori Lokal';
           }
           const allowBtn = card.querySelector('.ai-file-btn.allow-pending');
           if (allowBtn) {
             allowBtn.remove();
           }
+          const actions = card.querySelector('.ai-file-actions');
+          if (actions && !actions.querySelector('.open-workspace-doc')) {
+            const openBtn = document.createElement('button');
+            openBtn.className = 'ai-file-btn open-workspace-doc';
+            openBtn.type = 'button';
+            openBtn.dataset.act = 'open-workspace-doc';
+            openBtn.dataset.name = pending.name;
+            openBtn.innerHTML = '<i class="fa-solid fa-folder-open"></i> Buka di Direktori';
+            actions.appendChild(openBtn);
+          }
         }
       });
 
-      showToast(`✅ Perubahan "${pending.name}" berhasil diizinkan dan disimpan ke direktori lokal!`);
+      showToast(isEdit ? `✅ Berkas "${pending.name}" berhasil diedit dan diperbarui di direktori!` : `✅ Perubahan "${pending.name}" berhasil diizinkan dan disimpan ke direktori lokal!`);
       AudioEngine.success();
     } catch (err) {
       console.error('Gagal menyetujui perubahan workspace:', err);
@@ -16542,19 +16774,17 @@ Aturan:
     const parts = normalizedPath.split(/[/\\]/);
     const baseFileName = parts[parts.length - 1];
 
+    const existingFile = findWorkspaceFile(cleanName) || findWorkspaceFile(normalizedPath) || findWorkspaceFile(baseFileName);
+    const isEdit = Boolean(options.isEdit || existingFile);
+
     // FITUR 2: Snapshot & Rollback Berkas
-    if (!options.isRollback && STATE.localWorkspace.enableSnapshots) {
-      const existingFile = (STATE.localWorkspace.files || []).find(f =>
-        f.name === cleanName || f.path === cleanName || f.name === baseFileName || f.path === normalizedPath
-      );
-      if (existingFile) {
-        let prevContent = existingFile.content;
-        if (!prevContent && existingFile.rawFile) {
-          try { prevContent = await extractFileContent(existingFile.rawFile); } catch (_) {}
-        }
-        if (prevContent) {
-          captureFileSnapshot(existingFile.name, prevContent, options.author || 'ai', options.note || 'Sebelum pembaruan dokumen');
-        }
+    if (!options.isRollback && STATE.localWorkspace.enableSnapshots && existingFile) {
+      let prevContent = existingFile.content;
+      if (!prevContent && existingFile.rawFile) {
+        try { prevContent = await extractFileContent(existingFile.rawFile); } catch (_) {}
+      }
+      if (prevContent) {
+        captureFileSnapshot(existingFile.name, prevContent, options.author || 'ai', options.note || (isEdit ? 'Sebelum modifikasi berkas' : 'Sebelum pembaruan dokumen'));
       }
     }
 
@@ -16585,14 +16815,15 @@ Aturan:
           } else {
             STATE.localWorkspace.files.unshift(newEntry);
           }
+          await WorkspaceDB.saveWorkspace(STATE.localWorkspace);
           updateLocalWorkspaceUI();
           if (!options.silent) {
-            showToast(`✅ Berkas "${normalizedPath}" berhasil disimpan ke direktori lokal!`);
+            showToast(isEdit ? `✅ Berkas "${normalizedPath}" berhasil diperbarui di direktori!` : `✅ Berkas "${normalizedPath}" berhasil disimpan ke direktori lokal!`);
             AudioEngine.success();
           }
           return;
         } catch (fsErr) {
-          console.warn('Gagal menulis langsung ke disk, beralih ke download virtual:', fsErr);
+          console.warn('Gagal menulis langsung ke disk, beralih ke penyimpanan virtual:', fsErr);
         }
       }
 
@@ -16617,10 +16848,20 @@ Aturan:
         STATE.localWorkspace.files.unshift(newEntry);
       }
 
-      downloadBlob(blob, baseFileName);
+      await WorkspaceDB.saveWorkspace(STATE.localWorkspace);
       updateLocalWorkspaceUI();
+
+      // PENTING: JANGAN PERNAH MENDOWNLOAD BERKAS DUPLIKAT BARU JIKA INI MERUPAKAN MODIFIKASI BERKAS YANG SUDAH ADA!
+      if (!isEdit && existingIdx < 0 && !options.noDownload) {
+        downloadBlob(blob, baseFileName);
+      }
+
       if (!options.silent) {
-        showToast(`✅ Berkas "${normalizedPath}" dibuat dan disimpan ke perangkat Anda!`);
+        if (isEdit || existingIdx >= 0) {
+          showToast(`✅ Berkas "${normalizedPath}" berhasil diedit dan diperbarui di direktori!`);
+        } else {
+          showToast(`✅ Berkas "${normalizedPath}" dibuat dan disimpan ke direktori!`);
+        }
         AudioEngine.success();
       }
     } catch (err) {
@@ -22125,7 +22366,11 @@ Aturan:
     renderTaskTrackerUI,
     renderDocViewerSnapshots,
     approveWorkspacePendingChange,
-    rejectWorkspacePendingChange
+    rejectWorkspacePendingChange,
+    findWorkspaceFile,
+    WorkspaceDB,
+    extractGeneratedFiles,
+    renderMessageFiles
   };
 
   // Start on DOM ready (safeguarded against post-DOMContentLoaded script execution)
