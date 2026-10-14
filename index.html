@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261014_v257">
+  <link rel="stylesheet" href="style.css?v=20261014_v258">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -1814,9 +1814,12 @@
         </div>
 
         <pre class="doc-viewer-content" id="workspaceDocViewerContent"></pre>
+        <textarea class="doc-viewer-editor" id="workspaceDocViewerEditor" style="display: none;" spellcheck="false" placeholder="Ketik atau edit isi dokumen di sini..."></textarea>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-close="workspaceDocViewerModal">Tutup</button>
+        <button class="btn btn-outline" id="btnEditDocViewerContent"><i class="fa-solid fa-pen-to-square"></i> Edit Berkas</button>
+        <button class="btn btn-primary" id="btnSaveDocViewerContent" style="display: none;"><i class="fa-solid fa-floppy-disk"></i> Simpan Perubahan</button>
         <button class="btn btn-outline" id="btnCopyDocViewerContent"><i class="fa-solid fa-copy"></i> Salin Teks</button>
         <button class="btn btn-primary" id="btnDownloadDocViewerFile"><i class="fa-solid fa-download"></i> Unduh File</button>
       </div>
@@ -1886,8 +1889,8 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261014_v257" defer></script>
+  <script src="text-safety.js?v=20261014_v258" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261014_v257" defer></script>
+  <script src="app.js?v=20261014_v258" defer></script>
 </body>
 </html>

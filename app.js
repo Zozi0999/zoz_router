@@ -911,6 +911,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     docViewerPath: $('#docViewerPath'),
     docViewerSize: $('#docViewerSize'),
     workspaceDocViewerContent: $('#workspaceDocViewerContent'),
+    workspaceDocViewerEditor: $('#workspaceDocViewerEditor'),
+    btnEditDocViewerContent: $('#btnEditDocViewerContent'),
+    btnSaveDocViewerContent: $('#btnSaveDocViewerContent'),
     btnCopyDocViewerContent: $('#btnCopyDocViewerContent'),
     btnDownloadDocViewerFile: $('#btnDownloadDocViewerFile'),
     workspaceDocCreateModal: $('#workspaceDocCreateModal'),
@@ -2958,7 +2961,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     return out.join('\n');
   }
 
-  // Sembunyikan blok ZOZ_FILE & ZOZ_TASKS dari tampilan sementara
+  // Sembunyikan blok ZOZ_FILE, ZOZ_EDIT, ZOZ_MODIFY, ZOZ_DELETE, & ZOZ_TASKS dari tampilan sementara
   // saat streaming, supaya kode mentah tidak membajak gelembung obrolan.
   function hideFileBlocksForDisplay(text) {
     if (!text) return text;
@@ -2966,18 +2969,31 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (processed.indexOf('<<<ZOZ_TASKS') !== -1) {
       processed = hideTaskBlocksForDisplay(processed);
     }
-    if (processed.indexOf('<<<ZOZ_FILE') === -1) return processed;
+    const hasFileMarkers = processed.indexOf('<<<ZOZ_FILE') !== -1 ||
+                           processed.indexOf('<<<ZOZ_EDIT') !== -1 ||
+                           processed.indexOf('<<<ZOZ_MODIFY') !== -1 ||
+                           processed.indexOf('<<<ZOZ_DELETE') !== -1;
+    if (!hasFileMarkers) return processed;
+
     const out = [];
     let skipping = false;
     processed.split('\n').forEach((line) => {
       const t = line.trim();
       if (!skipping) {
-        if (t.indexOf('<<<ZOZ_FILE') === 0) { skipping = true; return; }
+        if (t.indexOf('<<<ZOZ_FILE') === 0 || t.indexOf('<<<ZOZ_EDIT') === 0 || t.indexOf('<<<ZOZ_MODIFY') === 0) {
+          skipping = true;
+          return;
+        }
+        if (t.indexOf('<<<ZOZ_DELETE') === 0) {
+          return; // single line directive
+        }
         out.push(line);
         return;
       }
       // Masih di dalam blok file: buang sampai penanda tutup (atau sampai stream berakhir)
-      if (t.indexOf('<<<END_ZOZ_FILE') === 0) skipping = false;
+      if (t.indexOf('<<<END_ZOZ_FILE') === 0 || t.indexOf('<<<END_ZOZ_EDIT') === 0 || t.indexOf('<<<END_ZOZ_MODIFY') === 0) {
+        skipping = false;
+      }
     });
     return out.join('\n');
   }
@@ -5945,13 +5961,18 @@ Aturan wajib:
 - Jangan menyalin ulang isi file di luar blok penanda, agar tampilan obrolan tetap rapi.`;
   }
 
-  // Deteksi niat pengguna meminta pembuatan file (Bahasa Indonesia + Inggris)
+  // Deteksi niat pengguna meminta pembuatan atau pengeditan/modifikasi file (Bahasa Indonesia + Inggris)
   function isFileGenerationRequest(text) {
     if (!text || typeof text !== 'string') return false;
     const t = text.toLowerCase();
-    const wants = /\b(?:buatkan|buat|bikin|bikinkan|tolong buat|generate|create|write|tulis|simpan sebagai|unduh|download|export|ekspor|saya butuh file|saya minta file|butuh file|perlukan file|bikinkan file)\b/i.test(t);
-    const target = /\b(?:file|berkas|dokumen|script|skrip|kode program|program|website|situs|halaman web|landing|aplikasi|utilitas|tool|bot|konfigurasi|template|lampiran)\b|\.(?:html?|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|xlsx|ipynb)\b/i.test(t);
-    return wants && target;
+    const wants = /\b(?:buatkan|buat|bikin|bikinkan|tolong buat|generate|create|write|tulis|simpan sebagai|unduh|download|export|ekspor|saya butuh file|saya minta file|butuh file|perlukan file|bikinkan file|edit|mengedit|mengdit|modifikasi|memodifikasi|ubah|mengubah|perbarui|memperbarui|update|revisi|merevisi|perbaiki|memperbaiki|tambahkan ke|tambah|ganti)\b/i.test(t);
+    const target = /\b(?:file|berkas|dokumen|script|skrip|kode program|program|website|situs|halaman web|landing|aplikasi|utilitas|tool|bot|konfigurasi|template|lampiran|readme|kodenya|skripnya|filenya|dokumennya)\b|\.(?:html?|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|xlsx|ipynb)\b/i.test(t);
+    // Jika direktori lokal aktif dan pengguna menyebut nama berkas yang ada di direktori
+    const workspaceMatch = STATE.localWorkspace.enabled && (STATE.localWorkspace.files || []).some(f => {
+      const baseName = f.name.replace(/\.[^/.]+$/, '').toLowerCase();
+      return t.includes(f.name.toLowerCase()) || (baseName.length >= 3 && t.includes(baseName));
+    });
+    return (wants && target) || (wants && workspaceMatch);
   }
 
   function formatFileSize(bytes) {
@@ -6159,27 +6180,36 @@ Aturan wajib:
     }
   }
 
-  // Ekstrak file buatan AI dari teks respons -> { files, rawBlocks }
+  // Ekstrak file buatan / editan AI dari teks respons -> { files, rawBlocks }
   function extractGeneratedFiles(text, allowFallback) {
     const out = { files: [], rawBlocks: [] };
     if (!text || typeof text !== 'string') return out;
     const lines = text.split('\n');
 
-    // --- Format utama: blok penanda ZOZ_FILE ---
+    // --- Format utama: blok penanda ZOZ_FILE, ZOZ_EDIT, atau ZOZ_MODIFY ---
     let idx = 0;
     while (idx < lines.length) {
       const header = lines[idx].trim();
-      if (header.indexOf('<<<ZOZ_FILE') !== 0) { idx++; continue; }
+      const isFileHeader = header.indexOf('<<<ZOZ_FILE') === 0 ||
+                           header.indexOf('<<<ZOZ_EDIT') === 0 ||
+                           header.indexOf('<<<ZOZ_MODIFY') === 0;
+      if (!isFileHeader) { idx++; continue; }
       let end = -1;
       for (let j = idx + 1; j < lines.length; j++) {
-        if (lines[j].trim().indexOf('<<<END_ZOZ_FILE') === 0) { end = j; break; }
+        const curLine = lines[j].trim();
+        if (curLine.indexOf('<<<END_ZOZ_FILE') === 0 ||
+            curLine.indexOf('<<<END_ZOZ_EDIT') === 0 ||
+            curLine.indexOf('<<<END_ZOZ_MODIFY') === 0) {
+          end = j;
+          break;
+        }
       }
       if (end < 0) { idx++; continue; }
 
-      const nameMatch = header.match(/name="([^"]*)"/);
-      const mimeMatch = header.match(/mime="([^"]*)"/);
-      const langMatch = header.match(/lang="([^"]*)"/);
-      const descMatch = header.match(/desc="([^"]*)"/);
+      const nameMatch = header.match(/(?:name|file|path)=["']?([^"'\s>]+)["']?/i);
+      const mimeMatch = header.match(/mime=["']?([^"'\s>]+)["']?/i);
+      const langMatch = header.match(/lang=["']?([^"'\s>]+)["']?/i);
+      const descMatch = header.match(/desc=["']([^"']*)["']/i);
       const content = lines.slice(idx + 1, end).join('\n');
       out.files.push(buildAIFile(
         nameMatch ? nameMatch[1] : 'file.txt',
@@ -6206,7 +6236,7 @@ Aturan wajib:
         }
         if (end <= i) continue;
         const body = lines.slice(i + 1, end).join('\n');
-        if (body.length < 400) continue;
+        if (body.length < 300) continue;
         out.files.push(buildAIFile(guessFileNameFromLang(langTag), '', langTag, body, ''));
         out.rawBlocks.push(lines.slice(i, end + 1).join('\n'));
         break;
@@ -6226,7 +6256,10 @@ Aturan wajib:
     }
     const kept = out.split('\n').filter((line) => {
       const t = line.trim();
-      return t.indexOf('<<<ZOZ_FILE') !== 0 && t.indexOf('<<<END_ZOZ_FILE') !== 0;
+      return t.indexOf('<<<ZOZ_FILE') !== 0 && t.indexOf('<<<END_ZOZ_FILE') !== 0 &&
+             t.indexOf('<<<ZOZ_EDIT') !== 0 && t.indexOf('<<<END_ZOZ_EDIT') !== 0 &&
+             t.indexOf('<<<ZOZ_MODIFY') !== 0 && t.indexOf('<<<END_ZOZ_MODIFY') !== 0 &&
+             t.indexOf('<<<ZOZ_DELETE') !== 0;
     });
     const cleaned = [];
     let prevEmpty = false;
@@ -6237,6 +6270,23 @@ Aturan wajib:
       prevEmpty = isEmpty;
     });
     return cleaned.join('\n').trim();
+  }
+
+  // Ekstrak berkas yang diminta dihapus oleh AI (<<<ZOZ_DELETE name="..." ...>>>)
+  function extractDeletedFiles(text) {
+    const deleted = [];
+    if (!text || typeof text !== 'string') return deleted;
+    const regex = /<<<ZOZ_DELETE\s+(?:name|path|file)=["']?([^"'\s>]+)["']?\s*(?:\/?>|>>>)/gi;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      if (match[1]) deleted.push(match[1].trim());
+    }
+    return deleted;
+  }
+
+  function stripDeletedFileBlocks(text) {
+    if (!text || typeof text !== 'string') return text;
+    return text.replace(/<<<ZOZ_DELETE\s+[^>]+>>>/gi, '').trim();
   }
 
   // Sanitasi teks parsial (jalur Abort / Koneksi Terputus): ekstrak blok ZOZ_FILE
@@ -6263,10 +6313,16 @@ Aturan wajib:
       const card = document.createElement('div');
       card.className = 'ai-file-card';
       card._aiFile = file;
+
+      const isWorkspace = STATE.localWorkspace.enabled && (STATE.localWorkspace.files || []).some(f => f.name === file.name || f.path === file.name);
+      const workspaceBadge = isWorkspace 
+        ? '<span class="file-workspace-tag"><i class="fa-solid fa-folder-check"></i> Direktori Lokal</span>' 
+        : '';
+
       card.innerHTML =
         '<div class="ai-file-icon"><i class="' + getFileIconClass(file.name) + '"></i></div>' +
         '<div class="ai-file-info">' +
-        '  <div class="ai-file-name" title="' + escapeHtml(file.name) + '">' + escapeHtml(file.name) + '</div>' +
+        '  <div class="ai-file-name" title="' + escapeHtml(file.name) + '">' + escapeHtml(file.name) + ' ' + workspaceBadge + '</div>' +
         '  <div class="ai-file-meta">' + escapeHtml(file.size || '') + '</div>' +
         (file.desc ? '  <div class="ai-file-desc" title="' + escapeHtml(file.desc) + '">' + escapeHtml(file.desc) + '</div>' : '') +
         '</div>' +
@@ -6276,6 +6332,7 @@ Aturan wajib:
         '</div>';
       wrap.appendChild(card);
     });
+    bubble.appendChild(wrap);
   }
 
   const REPUTABLE_TECH_DOMAINS = new Set([
@@ -7954,52 +8011,85 @@ ${blocks}
     if (STATE.localWorkspace.enabled && STATE.localWorkspace.files && STATE.localWorkspace.files.length > 0) {
       let workspaceInjectedText = '';
 
-      // 1. Baca otomatis berkas jika ditanyakan oleh pengguna secara spesifik
+      // 1. Baca otomatis berkas jika ditanyakan atau diminta untuk diedit/dibaca oleh pengguna
       if (STATE.localWorkspace.aiCanRead) {
+        const lowerPrompt = rawText.toLowerCase();
+        const matchedFiles = [];
+
         for (const fileObj of STATE.localWorkspace.files) {
-          const baseName = fileObj.name.replace(/\.[^/.]+$/, '');
+          const fName = fileObj.name.toLowerCase();
+          const fPath = (fileObj.path || fileObj.name).toLowerCase();
+          const baseName = fileObj.name.replace(/\.[^/.]+$/, '').toLowerCase();
+
+          // Regex kata fleksibel yang mendukung variasi & akhiran Indonesia (misal: readmenya, readme-nya, readme nya, filenya, kodenya)
           const escName = fileObj.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           const escBase = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          const regex = new RegExp(`(?:\\b|_)(${escName}|${escBase})(?:\\b|_)`, 'i');
-          if (regex.test(rawText)) {
-            try {
-              let fContent = fileObj.content;
-              if (!fContent) {
-                let raw = fileObj.rawFile;
-                if (!raw && fileObj.handle) raw = await fileObj.handle.getFile();
-                if (raw) fContent = await extractFileContent(raw);
-              }
-              if (fContent && typeof fContent === 'string' && fContent.trim()) {
-                fileObj.content = fContent;
-                workspaceInjectedText += `\n\n--- [DOKUMEN DARI DIREKTORI LOKAL: ${fileObj.name} (${formatBytes(fileObj.size)})] ---\n${fContent.slice(0, 10000)}\n--- [AKHIR DOKUMEN: ${fileObj.name}] ---\n`;
-              }
-            } catch (readErr) {
-              console.warn('Gagal membaca dokumen untuk AI context:', fileObj.name, readErr);
+          const flexibleRegex = new RegExp(`(?:\\b|_|\\/|\\\\)(${escName}|${escBase})(?:nya|kan|an|mu|ku)?(?:\\b|_|\\s|\\?|\\!|\\.|,|$)`, 'i');
+
+          const isMentioned = flexibleRegex.test(rawText) ||
+                              lowerPrompt.includes(fPath) ||
+                              lowerPrompt.includes(fName) ||
+                              (baseName.length >= 3 && lowerPrompt.includes(baseName));
+
+          if (isMentioned && !matchedFiles.includes(fileObj)) {
+            matchedFiles.push(fileObj);
+          }
+        }
+
+        // Baca berkas yang cocok (maksimal 5 berkas sekaligus agar konteks token proporsional)
+        for (const fileObj of matchedFiles.slice(0, 5)) {
+          try {
+            let fContent = fileObj.content;
+            if (!fContent) {
+              let raw = fileObj.rawFile;
+              if (!raw && fileObj.handle) raw = await fileObj.handle.getFile();
+              if (raw) fContent = await extractFileContent(raw);
             }
+            if (fContent && typeof fContent === 'string' && fContent.trim()) {
+              fileObj.content = fContent;
+              workspaceInjectedText += `\n\n--- [KONTEN BERKAS DIREKTORI LOKAL UNTUK DIEDIT / DIBACA: ${fileObj.path || fileObj.name} (${formatBytes(fileObj.size)})] ---\n${fContent.slice(0, 35000)}\n--- [AKHIR BERKAS: ${fileObj.path || fileObj.name}] ---\n`;
+            }
+          } catch (readErr) {
+            console.warn('Gagal membaca dokumen untuk AI context:', fileObj.name, readErr);
           }
         }
       }
 
       // 2. Sertakan pohon berkas direktori lokal
       if (STATE.localWorkspace.includeTree) {
-        const fileListSummary = STATE.localWorkspace.files
-          .slice(0, 30)
+        // Saring direktori berisik/internal seperti sessions internal, .git, node_modules agar file penting tetap terlihat
+        const cleanFiles = STATE.localWorkspace.files.filter(f => {
+          const p = (f.path || f.name).toLowerCase();
+          return !p.includes('/sessions/') && !p.startsWith('.git') && !p.includes('node_modules');
+        });
+        const displayFiles = cleanFiles.length > 0 ? cleanFiles : STATE.localWorkspace.files;
+        const fileListSummary = displayFiles
+          .slice(0, 60)
           .map(f => `- ${f.path || f.name} (${formatBytes(f.size)})`)
           .join('\n');
-        const extraNote = STATE.localWorkspace.files.length > 30 ? `\n...dan ${STATE.localWorkspace.files.length - 30} berkas lainnya` : '';
+        const extraNote = displayFiles.length > 60 ? `\n...dan ${displayFiles.length - 60} berkas lainnya` : '';
         workspaceInjectedText += `\n\n[DIREKTORI LOKAL PENGGUNA TERHUBUNG]
-Folder: "${STATE.localWorkspace.dirName}" (${STATE.localWorkspace.platform === 'desktop-fs' ? 'Laptop/Desktop Disk' : 'HP/Ponsel Penyimpanan'})
+Folder: "${STATE.localWorkspace.dirName}" (${STATE.localWorkspace.platform === 'desktop-fs' ? 'Laptop/Desktop Disk Langsung' : 'HP/Ponsel Penyimpanan Virtual'})
 Total Berkas: ${STATE.localWorkspace.files.length}
 Daftar Berkas:
 ${fileListSummary}${extraNote}
 
-PANDUAN MANAJEMEN DOKUMEN:
-Pengguna telah mengizinkan Anda untuk mendeteksi dan mengelola dokumen dalam direktori lokal ini.
-- Jika pengguna meminta membuat atau menyimpan dokumen baru ke direktori lokalnya, sertakan blok kode khusus:
-<<<ZOZ_FILE name="nama_file.ext" mime="text/plain" desc="Deskripsi file">>>
-isi teks dokumen lengkap...
+PANDUAN MANAJEMEN & MODIFIKASI BERKAS DIREKTORI LOKAL:
+Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI, dan MEMBUAT berkas dalam direktori lokal ini.
+- JIKA PENGGUNA MEMINTA MENGEDIT, MENGUBAH, MEMPERBAIKI, ATAU MEMPERBARUI BERKAS:
+  1. Anda DAPAT dan HARUS langsung memodifikasinya!
+  2. Keluarkan SELURUH isi berkas yang telah Anda modifikasi ke dalam blok penanda:
+<<<ZOZ_FILE name="path/atau/nama_file.ext" mime="tipe_mime" desc="Ringkasan modifikasi">>>
+...seluruh isi berkas yang sudah dimodifikasi secara lengkap tanpa potongan...
 <<<END_ZOZ_FILE>>>
-Sistem Zoz Router akan secara otomatis mengeksekusi penyimpanan file ini langsung ke perangkat lokal pengguna!`;
+  3. Sistem Zoz Router akan secara OTOMATIS menimpa berkas di direktori lokal pengguna, menyimpannya ke perangkat, dan mencadangkan versi sebelumnya ke Snapshot Riwayat!
+  4. WAJIB: Tuliskan penjelasan ringkas di luar blok penanda tentang apa saja yang telah Anda ubah agar pengguna mendapat laporan jelas di gelembung obrolan.
+
+- JIKA PENGGUNA MEMINTA MEMBUAT BERKAS BARU:
+  Gunakan format <<<ZOZ_FILE name="nama_file.ext" ...>>> yang sama.
+
+- JIKA PENGGUNA MEMINTA MENGHAPUS BERKAS:
+  Sertakan blok: <<<ZOZ_DELETE name="nama_file.ext">>>`;
       }
 
       if (STATE.taskTracker.enabled) {
@@ -11147,20 +11237,47 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         fullText = hideTaskBlocksForDisplay(fullText).trim();
       }
 
-      // ===== AI FILE STUDIO =====
-      // Ekstrak file yang dibuat AI, lalu hapus bloknya dari gelembung agar tidak
+      // ===== AI FILE STUDIO & WORKSPACE AUTO-SAVE =====
+      // Ekstrak file yang dibuat/diedit AI, lalu hapus bloknya dari gelembung agar tidak
       // tampil kode mentah berulang (kartu file digantikan oleh kartu di bawah).
       const extractedAiFiles = extractGeneratedFiles(fullText, wantsFile);
       const generatedFiles = extractedAiFiles.files;
       if (generatedFiles.length > 0) {
         fullText = stripGeneratedFileBlocks(fullText, extractedAiFiles.rawBlocks);
-      } else if (fullText.indexOf('<<<ZOZ_FILE') !== -1 || fullText.indexOf('<<<END_ZOZ_FILE') !== -1) {
+        // Otomatis simpan / modifikasi berkas di direktori lokal pengguna jika izin tulis aktif
+        if (STATE.localWorkspace.enabled && STATE.localWorkspace.aiCanWrite) {
+          for (const gf of generatedFiles) {
+            await createWorkspaceDocument(gf.name, gf.content, {
+              silent: false,
+              author: 'ai',
+              note: gf.desc || 'Dimodifikasi oleh AI'
+            });
+          }
+        }
+      } else if (fullText.indexOf('<<<ZOZ_FILE') !== -1 || fullText.indexOf('<<<END_ZOZ_FILE') !== -1 || fullText.indexOf('<<<ZOZ_EDIT') !== -1) {
         // M2: ada marker tapi TIDAK ada blok utuh (stream terputus sebelum
         // <<<END_ZOZ_FILE / END yatim). Dulu marker + isi blok tampil mentah di
         // gelembung final dan persist ke riwayat — padahal saat streaming barisnya
         // disembunyikan. Buang sisa blok (hideFileBlocksForDisplay memangkas dari
         // marker terbuka sampai akhir teks — tak ada isi setelah blok tak tertutup).
         fullText = stripGeneratedFileBlocks(hideFileBlocksForDisplay(fullText), []);
+      }
+
+      // Ekstrak permintaan hapus berkas oleh AI jika ada
+      const filesToDelete = extractDeletedFiles(fullText);
+      if (filesToDelete.length > 0) {
+        fullText = stripDeletedFileBlocks(fullText);
+        if (STATE.localWorkspace.enabled && STATE.localWorkspace.aiCanWrite) {
+          for (const delName of filesToDelete) {
+            await deleteWorkspaceDocumentSilent(delName, { author: 'ai', note: 'Dihapus oleh AI' });
+          }
+        }
+      }
+
+      // Pastikan tidak ada gelembung obrolan kosong saat file dimodifikasi/dibuat
+      if (!fullText.trim() && generatedFiles.length > 0) {
+        const names = generatedFiles.map(f => `**${escapeHtml(f.name)}**`).join(', ');
+        fullText = `✅ **Pembaruan Berkas Berhasil!** AI telah memodifikasi dan menyimpan berkas ${names} ke direktori lokal Anda. Versi cadangan otomatis dicatat di Riwayat Versi.`;
       }
 
       // Bersihkan sisa tag tool_call dan residu raw JSON jika ada sebelum render markdown final
@@ -12409,26 +12526,47 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         fullText = hideTaskBlocksForDisplay(fullText).trim();
       }
 
-      // ===== AI FILE STUDIO =====
-      // Ekstrak file yang dibuat AI, lalu hapus bloknya dari gelembung agar tidak
+      // ===== AI FILE STUDIO & WORKSPACE AUTO-SAVE =====
+      // Ekstrak file yang dibuat/diedit AI, lalu hapus bloknya dari gelembung agar tidak
       // tampil kode mentah berulang (kartu file digantikan oleh kartu di bawah).
       const extractedAiFiles = extractGeneratedFiles(fullText, wantsFile);
       const generatedFiles = extractedAiFiles.files;
       if (generatedFiles.length > 0) {
         fullText = stripGeneratedFileBlocks(fullText, extractedAiFiles.rawBlocks);
-        // Otomatis simpan ke direktori lokal pengguna jika akses direktori aktif
+        // Otomatis simpan / modifikasi berkas di direktori lokal pengguna jika izin tulis aktif
         if (STATE.localWorkspace.enabled && STATE.localWorkspace.aiCanWrite) {
-          generatedFiles.forEach(gf => {
-            createWorkspaceDocument(gf.name, gf.content, { silent: false });
-          });
+          for (const gf of generatedFiles) {
+            await createWorkspaceDocument(gf.name, gf.content, {
+              silent: false,
+              author: 'ai',
+              note: gf.desc || 'Dimodifikasi oleh AI'
+            });
+          }
         }
-      } else if (fullText.indexOf('<<<ZOZ_FILE') !== -1 || fullText.indexOf('<<<END_ZOZ_FILE') !== -1) {
+      } else if (fullText.indexOf('<<<ZOZ_FILE') !== -1 || fullText.indexOf('<<<END_ZOZ_FILE') !== -1 || fullText.indexOf('<<<ZOZ_EDIT') !== -1) {
         // M2: ada marker tapi TIDAK ada blok utuh (stream terputus sebelum
         // <<<END_ZOZ_FILE / END yatim). Dulu marker + isi blok tampil mentah di
         // gelembung final dan persist ke riwayat — padahal saat streaming barisnya
         // disembunyikan. Buang sisa blok (hideFileBlocksForDisplay memangkas dari
         // marker terbuka sampai akhir teks — tak ada isi setelah blok tak tertutup).
         fullText = stripGeneratedFileBlocks(hideFileBlocksForDisplay(fullText), []);
+      }
+
+      // Ekstrak permintaan hapus berkas oleh AI jika ada
+      const filesToDelete = extractDeletedFiles(fullText);
+      if (filesToDelete.length > 0) {
+        fullText = stripDeletedFileBlocks(fullText);
+        if (STATE.localWorkspace.enabled && STATE.localWorkspace.aiCanWrite) {
+          for (const delName of filesToDelete) {
+            await deleteWorkspaceDocumentSilent(delName, { author: 'ai', note: 'Dihapus oleh AI' });
+          }
+        }
+      }
+
+      // Pastikan tidak ada gelembung obrolan kosong saat file dimodifikasi/dibuat
+      if (!fullText.trim() && generatedFiles.length > 0) {
+        const names = generatedFiles.map(f => `**${escapeHtml(f.name)}**`).join(', ');
+        fullText = `✅ **Pembaruan Berkas Berhasil!** AI telah memodifikasi dan menyimpan berkas ${names} ke direktori lokal Anda. Versi cadangan otomatis dicatat di Riwayat Versi.`;
       }
 
       // Bersihkan sisa tag tool_call dan residu raw JSON jika ada sebelum render markdown final
@@ -16006,6 +16144,9 @@ Aturan:
             <button type="button" class="btn btn-xs btn-outline btn-workspace-view-file" data-name="${escapeHtml(file.name)}" title="Pratinjau Dokumen">
               <i class="fa-solid fa-eye"></i>
             </button>
+            <button type="button" class="btn btn-xs btn-outline btn-workspace-edit-file" data-name="${escapeHtml(file.name)}" title="Edit Berkas Langsung">
+              <i class="fa-solid fa-pen-to-square"></i>
+            </button>
             <button type="button" class="btn btn-xs btn-outline btn-workspace-download-file" data-name="${escapeHtml(file.name)}" title="Unduh Berkas">
               <i class="fa-solid fa-download"></i>
             </button>
@@ -16020,8 +16161,52 @@ Aturan:
     els.workspaceFileList.innerHTML = html;
   }
 
-  async function previewWorkspaceDocument(fileName) {
-    const fileObj = (STATE.localWorkspace.files || []).find(f => f.name === fileName);
+  function setDocViewerEditMode(isEditing) {
+    if (!els.workspaceDocViewerContent || !els.workspaceDocViewerEditor) return;
+    if (isEditing) {
+      els.workspaceDocViewerContent.style.display = 'none';
+      els.workspaceDocViewerEditor.style.display = 'block';
+      if (els.btnSaveDocViewerContent) els.btnSaveDocViewerContent.style.display = 'inline-flex';
+      if (els.btnEditDocViewerContent) {
+        els.btnEditDocViewerContent.innerHTML = '<i class="fa-solid fa-eye"></i> Mode Pratinjau';
+      }
+      els.workspaceDocViewerEditor.focus();
+    } else {
+      els.workspaceDocViewerContent.style.display = 'block';
+      els.workspaceDocViewerEditor.style.display = 'none';
+      if (els.btnSaveDocViewerContent) els.btnSaveDocViewerContent.style.display = 'none';
+      if (els.btnEditDocViewerContent) {
+        els.btnEditDocViewerContent.innerHTML = '<i class="fa-solid fa-pen-to-square"></i> Edit Berkas';
+      }
+    }
+  }
+
+  async function resolveFileHandleFromPath(rootDirHandle, fullPath, create = true) {
+    const normalized = fullPath.replace(/^[./\\]+/, '').trim();
+    const parts = normalized.split(/[/\\]/);
+    const fileName = parts.pop();
+    let current = rootDirHandle;
+    for (const part of parts) {
+      if (!part || part === '.') continue;
+      current = await current.getDirectoryHandle(part, { create: !!create });
+    }
+    return await current.getFileHandle(fileName, { create: !!create });
+  }
+
+  async function removeFileFromWorkspaceHandle(rootDirHandle, fullPath) {
+    const normalized = fullPath.replace(/^[./\\]+/, '').trim();
+    const parts = normalized.split(/[/\\]/);
+    const fileName = parts.pop();
+    let current = rootDirHandle;
+    for (const part of parts) {
+      if (!part || part === '.') continue;
+      current = await current.getDirectoryHandle(part, { create: false });
+    }
+    await current.removeEntry(fileName);
+  }
+
+  async function previewWorkspaceDocument(fileName, startInEditMode = false) {
+    const fileObj = (STATE.localWorkspace.files || []).find(f => f.name === fileName || f.path === fileName);
     if (!fileObj) {
       showToast(`Berkas "${fileName}" tidak ditemukan.`);
       return;
@@ -16052,6 +16237,9 @@ Aturan:
     if (els.docViewerPath) els.docViewerPath.textContent = fileObj.path || fileObj.name;
     if (els.docViewerSize) els.docViewerSize.textContent = formatBytes(fileObj.size);
     if (els.workspaceDocViewerContent) els.workspaceDocViewerContent.textContent = textContent;
+    if (els.workspaceDocViewerEditor) els.workspaceDocViewerEditor.value = textContent;
+
+    setDocViewerEditMode(startInEditMode);
 
     // Render snapshot history
     renderDocViewerSnapshots(fileObj.name);
@@ -16067,17 +16255,22 @@ Aturan:
     if (!fileName) return;
     const cleanName = fileName.trim();
     const cleanContent = content || '';
+    const normalizedPath = cleanName.replace(/^[./\\]+/, '');
+    const parts = normalizedPath.split(/[/\\]/);
+    const baseFileName = parts[parts.length - 1];
 
     // FITUR 2: Snapshot & Rollback Berkas
     if (!options.isRollback && STATE.localWorkspace.enableSnapshots) {
-      const existingFile = (STATE.localWorkspace.files || []).find(f => f.name === cleanName);
+      const existingFile = (STATE.localWorkspace.files || []).find(f =>
+        f.name === cleanName || f.path === cleanName || f.name === baseFileName || f.path === normalizedPath
+      );
       if (existingFile) {
         let prevContent = existingFile.content;
         if (!prevContent && existingFile.rawFile) {
           try { prevContent = await extractFileContent(existingFile.rawFile); } catch (_) {}
         }
         if (prevContent) {
-          captureFileSnapshot(cleanName, prevContent, options.author || 'ai', options.note || 'Sebelum pembaruan dokumen');
+          captureFileSnapshot(existingFile.name, prevContent, options.author || 'ai', options.note || 'Sebelum pembaruan dokumen');
         }
       }
     }
@@ -16085,16 +16278,18 @@ Aturan:
     try {
       if (STATE.localWorkspace.platform === 'desktop-fs' && STATE.localWorkspace.dirHandle) {
         try {
-          const fileHandle = await STATE.localWorkspace.dirHandle.getFileHandle(cleanName, { create: true });
+          const fileHandle = await resolveFileHandleFromPath(STATE.localWorkspace.dirHandle, normalizedPath, true);
           const writable = await fileHandle.createWritable();
           await writable.write(cleanContent);
           await writable.close();
 
           const newFile = await fileHandle.getFile();
-          const existingIdx = (STATE.localWorkspace.files || []).findIndex(f => f.name === cleanName);
+          const existingIdx = (STATE.localWorkspace.files || []).findIndex(f =>
+            f.name === cleanName || f.path === cleanName || f.name === baseFileName || f.path === normalizedPath
+          );
           const newEntry = {
-            name: cleanName,
-            path: cleanName,
+            name: baseFileName,
+            path: normalizedPath,
             size: newFile.size,
             type: newFile.type || 'text/plain',
             lastModified: Date.now(),
@@ -16109,7 +16304,7 @@ Aturan:
           }
           updateLocalWorkspaceUI();
           if (!options.silent) {
-            showToast(`✅ Berkas "${cleanName}" berhasil disimpan ke direktori lokal!`);
+            showToast(`✅ Berkas "${normalizedPath}" berhasil disimpan ke direktori lokal!`);
             AudioEngine.success();
           }
           return;
@@ -16119,11 +16314,13 @@ Aturan:
       }
 
       const blob = new Blob([cleanContent], { type: 'text/plain;charset=utf-8' });
-      const rawFile = new File([blob], cleanName, { type: 'text/plain', lastModified: Date.now() });
-      const existingIdx = (STATE.localWorkspace.files || []).findIndex(f => f.name === cleanName);
+      const rawFile = new File([blob], baseFileName, { type: 'text/plain', lastModified: Date.now() });
+      const existingIdx = (STATE.localWorkspace.files || []).findIndex(f =>
+        f.name === cleanName || f.path === cleanName || f.name === baseFileName || f.path === normalizedPath
+      );
       const newEntry = {
-        name: cleanName,
-        path: cleanName,
+        name: baseFileName,
+        path: normalizedPath,
         size: blob.size,
         type: 'text/plain',
         lastModified: Date.now(),
@@ -16137,28 +16334,39 @@ Aturan:
         STATE.localWorkspace.files.unshift(newEntry);
       }
 
-      downloadBlob(blob, cleanName);
+      downloadBlob(blob, baseFileName);
       updateLocalWorkspaceUI();
       if (!options.silent) {
-        showToast(`✅ Berkas "${cleanName}" dibuat dan disimpan ke perangkat Anda!`);
+        showToast(`✅ Berkas "${normalizedPath}" dibuat dan disimpan ke perangkat Anda!`);
         AudioEngine.success();
       }
     } catch (err) {
       console.error('Gagal membuat dokumen:', err);
-      showToast(`Gagal membuat dokumen: ${err.message}`, 'error');
+      showToast(`Gagal membuat/mengedit dokumen: ${err.message}`, 'error');
     }
   }
 
   async function deleteWorkspaceDocument(fileName) {
-    const idx = (STATE.localWorkspace.files || []).findIndex(f => f.name === fileName);
+    const idx = (STATE.localWorkspace.files || []).findIndex(f => f.name === fileName || f.path === fileName);
     if (idx < 0) return;
+    const fileObj = STATE.localWorkspace.files[idx];
 
     if (!confirm(`Hapus berkas "${fileName}" dari direktori lokal?`)) return;
+
+    if (STATE.localWorkspace.enableSnapshots) {
+      let prevContent = fileObj.content;
+      if (!prevContent && fileObj.rawFile) {
+        try { prevContent = await extractFileContent(fileObj.rawFile); } catch (_) {}
+      }
+      if (prevContent) {
+        captureFileSnapshot(fileObj.name, prevContent, 'user', 'Sebelum penghapusan berkas');
+      }
+    }
 
     try {
       if (STATE.localWorkspace.platform === 'desktop-fs' && STATE.localWorkspace.dirHandle) {
         try {
-          await STATE.localWorkspace.dirHandle.removeEntry(fileName, { recursive: false });
+          await removeFileFromWorkspaceHandle(STATE.localWorkspace.dirHandle, fileObj.path || fileObj.name);
         } catch (delErr) {
           console.warn('Gagal menghapus via handle:', delErr);
         }
@@ -16169,6 +16377,37 @@ Aturan:
       AudioEngine.click();
     } catch (err) {
       showToast(`Gagal menghapus berkas: ${err.message}`, 'error');
+    }
+  }
+
+  async function deleteWorkspaceDocumentSilent(fileName, options = {}) {
+    const idx = (STATE.localWorkspace.files || []).findIndex(f => f.name === fileName || f.path === fileName);
+    if (idx < 0) return;
+    const fileObj = STATE.localWorkspace.files[idx];
+
+    if (STATE.localWorkspace.enableSnapshots) {
+      let prevContent = fileObj.content;
+      if (!prevContent && fileObj.rawFile) {
+        try { prevContent = await extractFileContent(fileObj.rawFile); } catch (_) {}
+      }
+      if (prevContent) {
+        captureFileSnapshot(fileObj.name, prevContent, options.author || 'ai', options.note || 'Sebelum penghapusan oleh AI');
+      }
+    }
+
+    try {
+      if (STATE.localWorkspace.platform === 'desktop-fs' && STATE.localWorkspace.dirHandle) {
+        try {
+          await removeFileFromWorkspaceHandle(STATE.localWorkspace.dirHandle, fileObj.path || fileObj.name);
+        } catch (delErr) {
+          console.warn('Gagal menghapus via handle:', delErr);
+        }
+      }
+      STATE.localWorkspace.files.splice(idx, 1);
+      updateLocalWorkspaceUI();
+      showToast(`🗑️ Berkas "${fileName}" telah dihapus.`);
+    } catch (err) {
+      console.warn('Gagal menghapus berkas silent:', err);
     }
   }
 
@@ -20007,8 +20246,32 @@ Aturan:
       AudioEngine.click();
     });
 
+    els.btnEditDocViewerContent?.addEventListener('click', () => {
+      const isCurrentlyEditing = els.workspaceDocViewerEditor?.style.display !== 'none';
+      setDocViewerEditMode(!isCurrentlyEditing);
+      AudioEngine.click();
+    });
+
+    els.btnSaveDocViewerContent?.addEventListener('click', async () => {
+      const activeFile = STATE.localWorkspace.activeViewFile;
+      if (!activeFile) return;
+      const newContent = els.workspaceDocViewerEditor?.value || '';
+      await createWorkspaceDocument(activeFile.path || activeFile.name, newContent, {
+        author: 'user',
+        note: 'Diedit manual oleh pengguna'
+      });
+      activeFile.content = newContent;
+      if (els.workspaceDocViewerContent) els.workspaceDocViewerContent.textContent = newContent;
+      setDocViewerEditMode(false);
+      showToast(`✅ Perubahan pada "${activeFile.name}" berhasil disimpan!`);
+      AudioEngine.success();
+    });
+
     els.btnCopyDocViewerContent?.addEventListener('click', async () => {
-      const text = els.workspaceDocViewerContent ? els.workspaceDocViewerContent.textContent : '';
+      const isEditing = els.workspaceDocViewerEditor?.style.display !== 'none';
+      const text = isEditing 
+        ? (els.workspaceDocViewerEditor ? els.workspaceDocViewerEditor.value : '')
+        : (els.workspaceDocViewerContent ? els.workspaceDocViewerContent.textContent : '');
       if (!text) return;
       try {
         await navigator.clipboard.writeText(text);
@@ -20022,7 +20285,8 @@ Aturan:
     els.btnDownloadDocViewerFile?.addEventListener('click', () => {
       if (!STATE.localWorkspace.activeViewFile) return;
       const fileObj = STATE.localWorkspace.activeViewFile;
-      const content = fileObj.content || '';
+      const isEditing = els.workspaceDocViewerEditor?.style.display !== 'none';
+      const content = isEditing ? (els.workspaceDocViewerEditor?.value || '') : (fileObj.content || '');
       const blob = new Blob([content], { type: fileObj.type || 'text/plain;charset=utf-8' });
       downloadBlob(blob, fileObj.name || 'document.txt');
       showToast(`⬇️ Mengunduh "${fileObj.name}"...`);
@@ -20034,7 +20298,13 @@ Aturan:
       const viewBtn = e.target.closest('.btn-workspace-view-file');
       if (viewBtn) {
         const name = viewBtn.dataset.name;
-        if (name) previewWorkspaceDocument(name);
+        if (name) previewWorkspaceDocument(name, false);
+        return;
+      }
+      const editBtn = e.target.closest('.btn-workspace-edit-file');
+      if (editBtn) {
+        const name = editBtn.dataset.name;
+        if (name) previewWorkspaceDocument(name, true);
         return;
       }
       const dlBtn = e.target.closest('.btn-workspace-download-file');
@@ -21542,7 +21812,10 @@ Aturan:
     setConnectedLocalWorkspace,
     disconnectLocalWorkspace,
     createWorkspaceDocument,
+    deleteWorkspaceDocument,
+    deleteWorkspaceDocumentSilent,
     previewWorkspaceDocument,
+    setDocViewerEditMode,
     captureFileSnapshot,
     rollbackFileSnapshot,
     setTaskTrackerTasks,

@@ -9800,6 +9800,45 @@ body.page-paused *::after {
   word-break: break-word;
 }
 
+.doc-viewer-editor {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 320px;
+  max-height: 55vh;
+  padding: 12px;
+  background: rgba(4, 8, 18, 0.95);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  border-radius: var(--radius-sm);
+  color: #E0E7FF;
+  font-family: var(--font-code);
+  font-size: 0.82rem;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.6);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.doc-viewer-editor:focus {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.25), inset 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+.file-workspace-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  border-radius: 4px;
+  background: rgba(0, 240, 255, 0.15);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  color: var(--neon-cyan);
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 /* ==================== INTERACTIVE TASK TRACKER & FILE SNAPSHOTS (v257) ==================== */
 
 /* Task Tracker Floating Card */
