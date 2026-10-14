@@ -12204,14 +12204,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           continue;
         }
       }
-      if (resolvedEngine !== 'openrouter') {
-        console.warn('[callClientLLMDirect] Seluruh kandidat OpenRouter gagal, fallback ke Ollama:', lastErr?.message);
-      } else {
-        throw lastErr || new Error('Gagal memanggil model OpenRouter');
-      }
-    }
-
-    const headers = { 'Content-Type': 'application/json' };
+      throw lastErr || new Error('Gagal memanggil model OpenRouter');
+    } else {
+      const headers = { 'Content-Type': 'application/json' };
       if (STATE.settings.ollamaApiKey) {
         headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
@@ -12240,6 +12235,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       const data = await res.json();
       return data.message?.content || data.response || data.choices?.[0]?.message?.content || '';
     }
+  }
 
   async function streamLLMSynthesis(engine, modelName, systemPrompt, session, bubbleText = null, onChunk = null) {
     const streamRenderer = bubbleText ? new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false)) : null;
@@ -12347,14 +12343,15 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         if (i < candidateModels.length - 1) {
           console.warn(`[streamLLMSynthesis] Failover dari ${curModel} ke ${candidateModels[i + 1]} (${lastErrDetail})`);
           continue;
-        } else if (resolvedEngine === 'openrouter') {
-          throw new Error(lastErrDetail || 'Gagal memulai streaming sintesis OpenRouter');
         } else {
-          console.warn('[streamLLMSynthesis] Seluruh kandidat OpenRouter gagal, fallback ke Ollama:', lastErrDetail);
+          throw new Error(lastErrDetail || 'Gagal memulai streaming sintesis OpenRouter');
         }
       }
 
-      if (response && response.ok) {
+      if (!response || !response.ok) {
+        throw new Error(lastErrDetail || 'Gagal memulai streaming sintesis OpenRouter');
+      }
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -12419,10 +12416,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
         const renderedText = streamRenderer ? streamRenderer.finish() : fullText;
         return fullText || renderedText;
-      }
-    }
-
-    const headers = { 'Content-Type': 'application/json' };
+    } else {
+      const headers = { 'Content-Type': 'application/json' };
       if (STATE.settings.ollamaApiKey) {
         headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
         headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
@@ -12514,6 +12509,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       const renderedText = streamRenderer ? streamRenderer.finish() : fullText;
       return fullText || renderedText;
     }
+  }
 
   // ==================== DEEP RESEARCH REPORT & EXPORT SUITE ====================
   let currentActiveReport = {
