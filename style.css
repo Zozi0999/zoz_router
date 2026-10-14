@@ -8432,92 +8432,79 @@ body.page-paused *::after {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px !important;
-  border-radius: 999px !important;
-  font-size: 0.78rem;
-  font-weight: 700;
+  justify-content: center;
   cursor: pointer;
   transition: all 0.25s ease;
   user-select: none;
 }
 
-.endocrine-pulse-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+.endocrine-pulse-btn #endocrineHeartIcon {
+  font-size: 0.96rem;
+  color: #00FFC2;
+  transition: all 0.25s ease;
   display: inline-block;
-  transition: all 0.3s ease;
+  transform-origin: center center;
 }
 
-.endocrine-rate-badge {
-  font-family: var(--font-code);
-  font-size: 0.72rem;
-  letter-spacing: -0.3px;
-}
-
-/* Happy / High Dopamine State (Healthy & Strong Code) */
+/* Happy / High Dopamine State (Healthy Green Heart Pulse) */
 .endocrine-pulse-btn.status-happy {
   border: 1px solid rgba(0, 255, 194, 0.4) !important;
   background: rgba(0, 255, 194, 0.08) !important;
-  color: #00FFC2 !important;
 }
 .endocrine-pulse-btn.status-happy:hover {
   background: rgba(0, 255, 194, 0.18) !important;
   box-shadow: 0 0 12px rgba(0, 255, 194, 0.4) !important;
 }
-.endocrine-pulse-btn.status-happy .endocrine-pulse-dot {
-  background: #00FFC2;
-  box-shadow: 0 0 8px #00FFC2;
+.endocrine-pulse-btn.status-happy #endocrineHeartIcon {
+  color: #00FFC2 !important;
   animation: organicPulseHappy 2.2s infinite ease-in-out;
+  filter: drop-shadow(0 0 4px rgba(0, 255, 194, 0.6));
 }
 
-/* Stressed State (Elevated Cortisol / Warning) */
+/* Stressed State (Elevated Cortisol / Amber Warning) */
 .endocrine-pulse-btn.status-stressed {
   border: 1px solid rgba(255, 183, 3, 0.5) !important;
   background: rgba(255, 183, 3, 0.12) !important;
-  color: #FFB703 !important;
 }
 .endocrine-pulse-btn.status-stressed:hover {
   background: rgba(255, 183, 3, 0.22) !important;
   box-shadow: 0 0 14px rgba(255, 183, 3, 0.5) !important;
 }
-.endocrine-pulse-btn.status-stressed .endocrine-pulse-dot {
-  background: #FFB703;
-  box-shadow: 0 0 10px #FFB703;
+.endocrine-pulse-btn.status-stressed #endocrineHeartIcon {
+  color: #FFB703 !important;
   animation: organicPulseStressed 1.1s infinite ease-in-out;
+  filter: drop-shadow(0 0 6px rgba(255, 183, 3, 0.7));
 }
 
-/* Critical / Severe Stress State (Bug / Exception / Isolated Code Spike) */
+/* Critical / Severe Stress State (Bug / Crimson Heart Warning) */
 .endocrine-pulse-btn.status-critical {
   border: 1px solid rgba(255, 0, 85, 0.7) !important;
   background: rgba(255, 0, 85, 0.18) !important;
-  color: #FF0055 !important;
   animation: criticalVibration 0.35s infinite alternate ease-in-out;
 }
 .endocrine-pulse-btn.status-critical:hover {
   background: rgba(255, 0, 85, 0.28) !important;
   box-shadow: 0 0 18px rgba(255, 0, 85, 0.7) !important;
 }
-.endocrine-pulse-btn.status-critical .endocrine-pulse-dot {
-  background: #FF0055;
-  box-shadow: 0 0 14px #FF0055;
+.endocrine-pulse-btn.status-critical #endocrineHeartIcon {
+  color: #FF0055 !important;
   animation: organicPulseCritical 0.55s infinite ease-in-out;
+  filter: drop-shadow(0 0 8px rgba(255, 0, 85, 0.8));
 }
 
 @keyframes organicPulseHappy {
-  0%, 100% { transform: scale(0.9); opacity: 0.75; }
-  50% { transform: scale(1.2); opacity: 1; box-shadow: 0 0 12px #00FFC2; }
+  0%, 100% { transform: scale(1); opacity: 0.88; filter: drop-shadow(0 0 3px rgba(0, 255, 194, 0.5)); }
+  50% { transform: scale(1.24); opacity: 1; filter: drop-shadow(0 0 10px #00FFC2); }
 }
 
 @keyframes organicPulseStressed {
-  0%, 100% { transform: scale(0.85); opacity: 0.7; }
-  50% { transform: scale(1.35); opacity: 1; box-shadow: 0 0 14px #FFB703; }
+  0%, 100% { transform: scale(0.95); opacity: 0.8; filter: drop-shadow(0 0 4px rgba(255, 183, 3, 0.6)); }
+  50% { transform: scale(1.3); opacity: 1; filter: drop-shadow(0 0 12px #FFB703); }
 }
 
 @keyframes organicPulseCritical {
-  0%, 100% { transform: scale(0.8); opacity: 0.6; }
-  50% { transform: scale(1.5); opacity: 1; box-shadow: 0 0 18px #FF0055; }
+  0%, 100% { transform: scale(0.9); opacity: 0.7; filter: drop-shadow(0 0 6px rgba(255, 0, 85, 0.7)); }
+  50% { transform: scale(1.4); opacity: 1; filter: drop-shadow(0 0 16px #FF0055); }
 }
 
 @keyframes criticalVibration {

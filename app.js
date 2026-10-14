@@ -790,8 +790,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     // Bio-Endocrine Hormone & Connectome
     endocrineMonitorBtn: $('#endocrineMonitorBtn'),
-    endocrineRateBadge: $('#endocrineRateBadge'),
-    endocrinePulseDot: $('#endocrinePulseDot'),
+    endocrineHeartIcon: $('#endocrineHeartIcon'),
     endocrineTelemetryModal: $('#endocrineTelemetryModal'),
     btnAuditConnectomeNow: $('#btnAuditConnectomeNow'),
     btnPurgeStressEndorphin: $('#btnPurgeStressEndorphin')
@@ -937,24 +936,24 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     updateUI() {
       const btn = document.getElementById('endocrineMonitorBtn');
-      const badge = document.getElementById('endocrineRateBadge');
-      if (btn && badge) {
+      const heartIcon = document.getElementById('endocrineHeartIcon');
+      if (btn) {
         const d = Math.round(this.hormones.dopamine);
         const c = Math.round(this.hormones.cortisol);
 
         btn.classList.remove('status-happy', 'status-stressed', 'status-critical');
         if (c >= 60) {
           btn.classList.add('status-critical');
-          badge.innerText = `🚨 Stres ${c}%`;
+          if (heartIcon) heartIcon.style.color = '#FF0055';
           btn.title = `⚠️ PERINGATAN STRES KODE TINGGI (${c}%): Terdeteksi bug atau komponen terisolasi! Klik untuk cek telemetri.`;
         } else if (c >= 30) {
           btn.classList.add('status-stressed');
-          badge.innerText = `⚠️ Stres ${c}%`;
+          if (heartIcon) heartIcon.style.color = '#FFB703';
           btn.title = `Stres Kode Meningkat (${c}%): Ada gangguan atau peringatan. Klik untuk cek telemetri.`;
         } else {
           btn.classList.add('status-happy');
-          badge.innerText = c === 0 ? `🧠 0% Stres` : `🧠 ${d}%`;
-          btn.title = `Kondisi Kode Sangat Kuat & Prima (Dopamin ${d}%, Stres ${c}%). Klik untuk melihat bio-telemetri.`;
+          if (heartIcon) heartIcon.style.color = '#00FFC2';
+          btn.title = `Kondisi Kode Sangat Kuat & Prima (Dopamin ${d}%, Bebas Bug). Klik untuk melihat bio-telemetri.`;
         }
       }
 
