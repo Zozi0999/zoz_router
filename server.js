@@ -802,6 +802,22 @@ const REPUTABLE_TECH_DOMAINS = new Set([
 ]);
 
 const GLOBAL_SEARCH_PHRASE_DICT = [
+  [/\bbotol minuman termostatik(?:nya)?\b/gi, 'thermos vacuum flask thermostatic bottle'],
+  [/\bbotol termostatik(?:nya)?\b/gi, 'thermos vacuum flask bottle'],
+  [/\bbotol minum(?:an)?(?:nya)?\b/gi, 'water bottle flask'],
+  [/\bgempa bumi(?:nya)?\b/gi, 'earthquake'],
+  [/\bangin topan(?:nya)?\b/gi, 'typhoon hurricane'],
+  [/\bgunung berapi(?:nya)?\b/gi, 'volcano eruption'],
+  [/\btanah longsor(?:nya)?\b/gi, 'landslide'],
+  [/\bpanel surya(?:nya)?\b/gi, 'solar panels'],
+  [/\bbaterai litium(?:nya)?\b/gi, 'lithium battery'],
+  [/\bkartu grafis(?:nya)?\b/gi, 'graphics card gpu'],
+  [/\bprosesor komputer(?:nya)?\b/gi, 'cpu processor'],
+  [/\blubang hitam(?:nya)?\b/gi, 'black hole'],
+  [/\bteori relativitas(?:nya)?\b/gi, 'theory of relativity'],
+  [/\btata surya(?:nya)?\b/gi, 'solar system'],
+  [/\brekayasa genetika(?:nya)?\b/gi, 'genetic engineering'],
+  [/\bpembangkit listrik(?:nya)?\b/gi, 'power plant generator'],
   [/\bberita besar(?:nya)?\b/gi, 'major news headlines'],
   [/\bmodel(?:-model)? ai\b/gi, 'ai models'],
   [/\bmodel(?:-model)? llm\b/gi, 'llm models'],
@@ -868,6 +884,12 @@ const GLOBAL_SEARCH_PHRASE_DICT = [
 ];
 
 const GLOBAL_SEARCH_WORD_DICT = [
+  [/\btermostatik(?:nya)?\b/gi, 'thermostatic vacuum flask'],
+  [/\btermos(?:nya)?\b/gi, 'thermos flask'],
+  [/\bbotol(?:nya)?\b/gi, 'bottle'],
+  [/\bminuman(?:nya)?\b/gi, 'beverage'],
+  [/\bpemula(?:nya)?\b/gi, 'beginners'],
+  [/\bbumi\b/gi, 'earth'],
   [/\bterbaru(?:nya)?\b/gi, 'latest'],
   [/\bterkini(?:nya)?\b/gi, 'latest'],
   [/\bmutakhir(?:nya)?\b/gi, 'state of the art'],

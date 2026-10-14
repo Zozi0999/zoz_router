@@ -343,11 +343,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     mode: 'ollama', // 'ollama' | 'openrouter' | 'auto'
     sessions: [],
     currentSessionId: null,
-    activeSessionPerMode: {
-      ollama: null,
-      openrouter: null,
-      auto: null
-    },
     attachedImages: [], // Array of Base64 data URLs
     get attachedImage() { return (this.attachedImages && this.attachedImages.length > 0) ? this.attachedImages[0] : null; },
     set attachedImage(val) { this.attachedImages = val ? (Array.isArray(val) ? val : [val]) : []; },
@@ -1310,6 +1305,19 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
   };
 
+  // Safe Local Storage Helper (absorbs Safari Private Browsing QuotaExceededError & SecurityError)
+  const safeLocalStorage = {
+    getItem(key) {
+      try { return localStorage.getItem(key); } catch (_) { return null; }
+    },
+    setItem(key, val) {
+      try { localStorage.setItem(key, String(val)); } catch (_) {}
+    },
+    removeItem(key) {
+      try { localStorage.removeItem(key); } catch (_) {}
+    }
+  };
+
   function loadPersistedStateSync() {
     try {
       const savedSettings = localStorage.getItem('zoz_router_settings_v1');
@@ -1376,34 +1384,30 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         STATE.settings.imageModel = 'flux';
       }
 
-      const savedSound = localStorage.getItem('zoz_router_sound_v1');
+      const savedSound = safeLocalStorage.getItem('zoz_router_sound_v1');
       if (savedSound !== null) {
         STATE.soundEnabled = savedSound === 'true';
       }
-      const savedSearchMode = localStorage.getItem('zoz_router_search_mode_v1');
-      const searchModeAutonomousMigrated = localStorage.getItem('zoz_router_search_mode_autonomous_v2') === 'true';
+      const savedSearchMode = safeLocalStorage.getItem('zoz_router_search_mode_v1');
+      const searchModeAutonomousMigrated = safeLocalStorage.getItem('zoz_router_search_mode_autonomous_v2') === 'true';
       if (!searchModeAutonomousMigrated) {
         // Migrasi: Jadikan Autonomous Web Explorer sebagai default awal
         STATE.searchMode = 'autonomous';
-        try {
-          localStorage.setItem('zoz_router_search_mode_v1', 'autonomous');
-          localStorage.setItem('zoz_router_search_mode_autonomous_v2', 'true');
-        } catch (_) {}
+        safeLocalStorage.setItem('zoz_router_search_mode_v1', 'autonomous');
+        safeLocalStorage.setItem('zoz_router_search_mode_autonomous_v2', 'true');
       } else if (savedSearchMode && ['off', 'default', 'premium', 'autonomous'].includes(savedSearchMode)) {
         STATE.searchMode = savedSearchMode;
       } else {
         STATE.searchMode = 'autonomous';
-        try {
-          localStorage.setItem('zoz_router_search_mode_v1', 'autonomous');
-        } catch (_) {}
+        safeLocalStorage.setItem('zoz_router_search_mode_v1', 'autonomous');
       }
-      const savedPromptHidden = localStorage.getItem('zoz_prompt_hidden');
+      const savedPromptHidden = safeLocalStorage.getItem('zoz_prompt_hidden');
       if (savedPromptHidden !== null) {
         STATE.isPromptHidden = savedPromptHidden === 'true';
       }
 
       // Fast synchronous load from localStorage (0ms startup)
-      const savedSessions = localStorage.getItem('zoz_router_sessions_v1');
+      const savedSessions = safeLocalStorage.getItem('zoz_router_sessions_v1');
       if (savedSessions) {
         try {
           const parsed = JSON.parse(savedSessions);
@@ -1536,7 +1540,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (STATE.currentSessionId) {
       return STATE.sessions.find(s => s.id === STATE.currentSessionId) || null;
     }
-    const lastSid = safeSessionStorage.getItem('zoz_active_session_id') || localStorage.getItem('zoz_last_active_session_id');
+    const lastSid = safeSessionStorage.getItem('zoz_active_session_id') || safeLocalStorage.getItem('zoz_last_active_session_id');
     if (lastSid) {
       return STATE.sessions.find(s => s.id === lastSid) || null;
     }
@@ -1662,7 +1666,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
 
         if (globalData && globalData.recentlyCompletedSessions && globalData.recentlyCompletedSessions.length > 0) {
-          const lastActiveId = safeSessionStorage.getItem('zoz_active_session_id') || localStorage.getItem('zoz_last_active_session_id');
+          const lastActiveId = safeSessionStorage.getItem('zoz_active_session_id') || safeLocalStorage.getItem('zoz_last_active_session_id');
           // KEAMANAN KETAT: Hanya sinkronkan tugas milik user saat ini
           const matchedTask = globalData.recentlyCompletedSessions.find(s => s.sessionId === lastActiveId && STATE.sessions.some(sess => sess.id === s.sessionId)) ||
                               globalData.recentlyCompletedSessions.find(s => STATE.sessions.some(sess => sess.id === s.sessionId));
@@ -6419,8 +6423,8 @@ ${blocks}
 
   // ==================== MODEL DISCOVERY & HEALTH CHECKS ====================
   async function checkOllamaHealth() {
-    els.ollamaStatusVal.innerText = 'Memeriksa...';
-    els.ollamaIndicator.className = 'status-indicator';
+    if (els.ollamaStatusVal) els.ollamaStatusVal.innerText = 'Memeriksa...';
+    if (els.ollamaIndicator) els.ollamaIndicator.className = 'status-indicator';
     // WAJIB dideklarasikan: tanpa ini, bila semua fetch gagal, baris
     // `if (rawModels.length === 0 ...)` akan melempar ReferenceError (senyap,
     // tertangkap try luar) sehingga daftar model terlihat kosong.
@@ -6495,8 +6499,8 @@ ${blocks}
       if (rawModels.length > 0) {
         STATE.ollamaModels = rawModels;
         const statusText = `Ollama Cloud (${rawModels.length} Model Siap)`;
-        els.ollamaStatusVal.innerText = statusText;
-        els.ollamaIndicator.className = 'status-indicator online';
+        if (els.ollamaStatusVal) els.ollamaStatusVal.innerText = statusText;
+        if (els.ollamaIndicator) els.ollamaIndicator.className = 'status-indicator online';
 
         // Auto-select first real installed/cloud model if current model is invalid or default
         const modelNames = rawModels.map(m => m.name || m.model || m.id);
@@ -6522,8 +6526,8 @@ ${blocks}
       } else {
         STATE.ollamaModels = [];
         if (els.badgeOllamaCount) els.badgeOllamaCount.innerText = '0';
-        els.ollamaStatusVal.innerText = 'Offline (Cek Ollama)';
-        els.ollamaIndicator.className = 'status-indicator error';
+        if (els.ollamaStatusVal) els.ollamaStatusVal.innerText = 'Offline (Cek Ollama)';
+        if (els.ollamaIndicator) els.ollamaIndicator.className = 'status-indicator error';
         populateModelDropdown();
         if (STATE.activeCatalogTab === 'ollama') {
           renderLiveModelCatalog();
@@ -6532,8 +6536,8 @@ ${blocks}
         return false;
       }
     } catch (e) {
-      els.ollamaStatusVal.innerText = 'Tidak Terhubung';
-      els.ollamaIndicator.className = 'status-indicator error';
+      if (els.ollamaStatusVal) els.ollamaStatusVal.innerText = 'Tidak Terhubung';
+      if (els.ollamaIndicator) els.ollamaIndicator.className = 'status-indicator error';
       if (els.badgeOllamaCount) els.badgeOllamaCount.innerText = '0';
       updateOllamaStatusUI();
       return false;
@@ -7707,6 +7711,22 @@ ${blocks}
   }
 
   const GLOBAL_SEARCH_PHRASE_DICT = [
+    [/\bbotol minuman termostatik(?:nya)?\b/gi, 'thermos vacuum flask thermostatic bottle'],
+    [/\bbotol termostatik(?:nya)?\b/gi, 'thermos vacuum flask bottle'],
+    [/\bbotol minum(?:an)?(?:nya)?\b/gi, 'water bottle flask'],
+    [/\bgempa bumi(?:nya)?\b/gi, 'earthquake'],
+    [/\bangin topan(?:nya)?\b/gi, 'typhoon hurricane'],
+    [/\bgunung berapi(?:nya)?\b/gi, 'volcano eruption'],
+    [/\btanah longsor(?:nya)?\b/gi, 'landslide'],
+    [/\bpanel surya(?:nya)?\b/gi, 'solar panels'],
+    [/\bbaterai litium(?:nya)?\b/gi, 'lithium battery'],
+    [/\bkartu grafis(?:nya)?\b/gi, 'graphics card gpu'],
+    [/\bprosesor komputer(?:nya)?\b/gi, 'cpu processor'],
+    [/\blubang hitam(?:nya)?\b/gi, 'black hole'],
+    [/\bteori relativitas(?:nya)?\b/gi, 'theory of relativity'],
+    [/\btata surya(?:nya)?\b/gi, 'solar system'],
+    [/\brekayasa genetika(?:nya)?\b/gi, 'genetic engineering'],
+    [/\bpembangkit listrik(?:nya)?\b/gi, 'power plant generator'],
     [/\bberita besar(?:nya)?\b/gi, 'major news headlines'],
     [/\bmodel(?:-model)? ai\b/gi, 'ai models'],
     [/\bmodel(?:-model)? llm\b/gi, 'llm models'],
@@ -7773,6 +7793,12 @@ ${blocks}
   ];
 
   const GLOBAL_SEARCH_WORD_DICT = [
+    [/\btermostatik(?:nya)?\b/gi, 'thermostatic vacuum flask'],
+    [/\btermos(?:nya)?\b/gi, 'thermos flask'],
+    [/\bbotol(?:nya)?\b/gi, 'bottle'],
+    [/\bminuman(?:nya)?\b/gi, 'beverage'],
+    [/\bpemula(?:nya)?\b/gi, 'beginners'],
+    [/\bbumi\b/gi, 'earth'],
     [/\bterbaru(?:nya)?\b/gi, 'latest'],
     [/\bterkini(?:nya)?\b/gi, 'latest'],
     [/\bmutakhir(?:nya)?\b/gi, 'state of the art'],
@@ -10048,7 +10074,7 @@ Format teks (untuk model tanpa function calling):
 
       // Loop tetap dijalankan walau Mode Pencarian Web mati: filter izin di bawah
       // yang memblokir tool web, sementara search_youtube selalu diperbolehkan.
-      while (autonomousRound < maxAutonomousRounds) {
+      while (autonomousRound < maxAutonomousRounds && !streamRenderer.isLoopTerminated) {
         if (STATE.abortController?.signal?.aborted) {
           const abortErr = new Error('The operation was aborted');
           abortErr.name = 'AbortError';
@@ -10304,6 +10330,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           const finishedDigestion = digestionRenderer.finish({ render: false });
           if (finishedDigestion) currentRoundText = finishedDigestion;
           fullText = currentRoundText;
+          if (digestionRenderer.isLoopTerminated) {
+            break;
+          }
           if (!fullText.trim() && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))) {
             fullText = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
           }
@@ -10591,6 +10620,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     const hasClientKey = Boolean(STATE.settings.openRouterKey);
     const hasBackendKey = Boolean(DeviceStorage.isDeviceBackendAvailable || !IS_GITHUB_PAGES);
     if (!hasClientKey && !hasBackendKey) {
+      if (runOptions && runOptions.autoFallback) {
+        return false;
+      }
       const assistantRow = appendMessageElement('assistant', '', null, displayModel || 'OpenRouter Gateway');
       const bubbleText = assistantRow.querySelector('.msg-text-content');
       
@@ -11183,7 +11215,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       // Loop tetap dijalankan walau Mode Pencarian Web mati: filter izin di bawah
       // yang memblokir tool web, sementara search_youtube selalu diperbolehkan.
-      while (autonomousRound < maxAutonomousRounds) {
+      while (autonomousRound < maxAutonomousRounds && !streamRenderer.isLoopTerminated) {
         if (STATE.abortController?.signal?.aborted) {
           const abortErr = new Error('The operation was aborted');
           abortErr.name = 'AbortError';
@@ -11548,6 +11580,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           }
           currentRoundText = digestionRenderer.finish({ render: false });
           fullText = currentRoundText;
+          if (digestionRenderer.isLoopTerminated) {
+            break;
+          }
           if (!fullText.trim() && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))) {
             fullText = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
           }
@@ -11678,6 +11713,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       }
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + (actualModelUsed || displayModel), fullText);
+      return true;
 
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -11717,7 +11753,14 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           assistantRow.remove();
         }
         showToast('Generasi dihentikan.');
+        return false;
       } else {
+        // Auto-Router fallback: bersihkan gelembung sementara dan kembalikan false agar caller langsung beralih ke engine lain
+        if (runOptions && runOptions.autoFallback) {
+          try { assistantRow.remove(); } catch (_) {}
+          return false;
+        }
+
         // render:false → bubbleText.innerHTML diganti tanpa syarat beberapa baris
         // di bawah (kartu error), jadi render dari finish hanya akan dibuang.
         const rescuePartial = sanitizePartialResponseWithFiles(streamRenderer ? streamRenderer.finish({ render: false }) : '');
@@ -11812,6 +11855,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         });
 
         AudioEngine.error();
+        return false;
       }
     } finally {
       setGeneratingState(false);
@@ -11830,20 +11874,35 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       const isOllamaRunnable = isOllamaOnline && (!isCloudHosted || !isLoopbackEndpoint || hasOllamaCloudKey);
       
       // Policy check
+      const policy = STATE.settings.autoPolicy || 'cloud_first';
       const isLongOrHeavy = (promptText.length > 800) || (promptText.toLowerCase().includes('buatkan sistem') || promptText.toLowerCase().includes('arsitektur kompleks'));
+      const canRunOpenRouter = Boolean(STATE.settings.openRouterKey || DeviceStorage.isDeviceBackendAvailable || !IS_GITHUB_PAGES);
 
-      if (STATE.settings.autoPolicy === 'cloud_heavy' && isLongOrHeavy && (STATE.settings.openRouterKey || DeviceStorage.isDeviceBackendAvailable || isCloudHosted)) {
+      if (policy === 'cloud_heavy' && isLongOrHeavy && canRunOpenRouter) {
         showToast('🔀 Auto-Router: Mengarahkan tugas kompleks ke OpenRouter Cloud...', 'info');
-        await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free');
-      } else if (isOllamaRunnable && STATE.settings.autoPolicy !== 'cloud_heavy') {
+        const orOk = await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free', { autoFallback: true });
+        if (!orOk && isOllamaRunnable) {
+          console.warn('Auto-Router: OpenRouter gagal / tidak merespons, beralih ke Ollama Engine...');
+          showToast('🔀 Auto-Router: OpenRouter tidak tersedia, beralih ke Ollama...', 'info');
+          await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel);
+        }
+      } else if (policy === 'cloud_first' && canRunOpenRouter) {
+        showToast('🔀 Auto-Router: Menggunakan OpenRouter Cloud...', 'info');
+        const orOk = await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free', { autoFallback: true });
+        if (!orOk && isOllamaRunnable) {
+          console.warn('Auto-Router: OpenRouter gagal / tidak merespons, beralih ke Ollama Engine...');
+          showToast('🔀 Auto-Router: OpenRouter tidak tersedia, beralih ke Ollama...', 'info');
+          await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel);
+        }
+      } else if (isOllamaRunnable) {
         showToast('🔀 Auto-Router: Menghubungi Ollama Engine...', 'info');
         const ollamaOk = await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel, { autoFallback: true });
-        if (!ollamaOk) {
+        if (!ollamaOk && canRunOpenRouter) {
           console.warn('Auto-Router: Ollama gagal / tidak merespons, otomatis beralih ke OpenRouter Cloud...');
           showToast('🔀 Auto-Router: Ollama tidak tersedia, beralih ke OpenRouter Cloud...', 'info');
           await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free');
         }
-      } else if (STATE.settings.openRouterKey || DeviceStorage.isDeviceBackendAvailable || isCloudHosted) {
+      } else if (canRunOpenRouter) {
         showToast('🔀 Auto-Router: Menggunakan OpenRouter Cloud...', 'info');
         await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free');
       } else {

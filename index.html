@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261014_v246">
+  <link rel="stylesheet" href="style.css?v=20261014_v247">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -916,6 +916,7 @@
           <div class="form-group">
             <label for="settingAutoPolicy"><i class="fa-solid fa-shield-virus"></i> Auto-Router Policy</label>
             <select id="settingAutoPolicy" class="custom-select">
+              <option value="cloud_first">OpenRouter Cloud First (Prioritas OpenRouter Cloud, fallback Ollama bila offline)</option>
               <option value="local_first">Ollama Cloud First (Prioritas Ollama Cloud, fallback OpenRouter bila offline)</option>
               <option value="cloud_heavy">Smart Task (Prompt panjang &gt; 500 kata / Coding sulit ke OpenRouter)</option>
             </select>
@@ -923,8 +924,8 @@
 
           <div class="form-group">
             <label for="settingMusicModel"><i class="fa-solid fa-music"></i> Model AI Musik Studio (Default)</label>
-            <input type="text" id="settingMusicModel" placeholder="qwen2.5:1.5b atau vendor/model..." value="qwen2.5:1.5b">
-            <small class="form-hint">Model Ollama Cloud (misal: <code>qwen2.5:1.5b</code>) atau OpenRouter cloud (misal: <code>google/gemini-2.0-flash-exp:free</code>).</small>
+            <input type="text" id="settingMusicModel" placeholder="google/lyria-3-clip-preview atau vendor/model..." value="google/lyria-3-clip-preview">
+            <small class="form-hint">Model musik AI resmi (misal: <code>google/lyria-3-clip-preview</code>) atau model audio cloud lainnya.</small>
           </div>
         </div>
 
@@ -1418,8 +1419,8 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261014_v246" defer></script>
+  <script src="text-safety.js?v=20261014_v247" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261014_v246" defer></script>
+  <script src="app.js?v=20261014_v247" defer></script>
 </body>
 </html>
