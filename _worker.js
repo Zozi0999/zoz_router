@@ -1920,12 +1920,13 @@ export default {
             });
           }
           return new Response(JSON.stringify({
+            ...parsedSerper,
             success: true,
             query: targetSearchQ,
             originalQuery: cleanQuery,
             count: results.length,
             results: results,
-            ...parsedSerper
+            organic: results
           }), {
             status: 200,
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }

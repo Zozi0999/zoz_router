@@ -5520,8 +5520,17 @@ Aturan wajib:
         '</div>';
       wrap.appendChild(card);
     });
-    bubble.insertBefore(wrap, bubble.firstChild);
   }
+
+  const REPUTABLE_TECH_DOMAINS = new Set([
+    'reuters.com', 'bloomberg.com', 'axios.com', 'apnews.com', 'wsj.com',
+    'techcrunch.com', 'theverge.com', 'wired.com', 'arstechnica.com', 'venturebeat.com',
+    'engadget.com', 'zdnet.com', 'tomshardware.com', 'anandtech.com',
+    'openai.com', 'anthropic.com', 'deepmind.google', 'ai.meta.com', 'blog.google',
+    'microsoft.com', 'nvidia.com', 'huggingface.co', 'github.com',
+    'arxiv.org', 'nature.com', 'science.org', 'technologyreview.com',
+    'mit.edu', 'stanford.edu', 'bbc.com', 'cnbc.com', 'ft.com'
+  ]);
 
   // ==================== AUTONOMOUS AI WEB SEARCH SKILL ENGINE ====================
   function synthesizeAutonomousSearchQuery(session, rawPrompt) {
@@ -5564,13 +5573,12 @@ Aturan wajib:
       }
     }
 
-    // Formulate the optimal targeted query without hardcoded year noise
+    // Formulate the optimal targeted query without hardcoded year noise or topic poisoning
     let finalQuery = '';
-    if (nonFillerWords.length <= 2 && contextSubject) {
+    const isAnaphoricFollowUp = nonFillerWords.length <= 2 || /\b(itu|tersebut|dia|ini|nya|it|they|them|this|that)\b/i.test(cleanPrompt);
+    if (isAnaphoricFollowUp && contextSubject && !cleanPrompt.toLowerCase().includes(contextSubject.toLowerCase())) {
       const intentKeywords = nonFillerWords.length > 0 ? nonFillerWords.join(' ') : 'data spesifikasi update';
       finalQuery = `${contextSubject} ${intentKeywords}`;
-    } else if (contextSubject && !cleanPrompt.toLowerCase().includes(contextSubject.toLowerCase())) {
-      finalQuery = `${contextSubject} ${cleanPrompt}`;
     } else {
       finalQuery = `${cleanPrompt}`;
     }
@@ -5715,17 +5723,55 @@ Aturan wajib:
         }
       }
 
-      // Organic search results
-      const organicList = data.organic || data.results || [];
-      let organicBlock = '';
+      // Organic search results: utamakan data.results yang sudah difilter backend, fallback ke data.organic
+      const rawList = (Array.isArray(data.results) && data.results.length > 0)
+        ? data.results
+        : (Array.isArray(data.organic) ? data.organic : []);
 
-      if (Array.isArray(organicList) && organicList.length > 0) {
-        organicList.slice(0, 6).forEach((item, idx) => {
-          const title = item.title || `Sumber ${idx + 1}`;
-          const link = item.link || item.url || '';
-          const snippet = item.snippet || '';
+      const cleanOrganicList = [];
+      const seenOrganicUrls = new Set();
+      for (const item of rawList) {
+        const link = item.link || item.url || '';
+        if (!link) continue;
+        const normUrl = link.trim().toLowerCase().replace(/\/$/, '');
+        const normTitle = (item.title || '').trim().toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '');
+
+        if (!isDomestic) {
+          const isSpam = /\b(pluang|riaugreen|inforiau|riaupos|tribunnews|detik|kompas|liputan6|suara|merdeka|sindonews|viva|inews|kumparan|jpnn|kapanlagi|idntimes)\b/i.test(normUrl) || /\b(pluang|riaugreen)\b/i.test(item.domain || '');
+          if (isSpam) continue;
+        }
+        if (normTitle.includes('listofapplecodenames') && !query.toLowerCase().includes('apple')) continue;
+        if (normTitle.includes('jalanbesar') && !query.toLowerCase().includes('jalan')) continue;
+        if (seenOrganicUrls.has(normUrl)) continue;
+        seenOrganicUrls.add(normUrl);
+
+        let domain = item.domain || '';
+        try { domain = new URL(link).hostname.replace(/^www\./, ''); } catch (_) {}
+
+        cleanOrganicList.push({
+          title: item.title || `Sumber ${cleanOrganicList.length + 1}`,
+          url: link,
+          snippet: item.snippet || '',
+          date: item.date || item.pubDate || null,
+          domain,
+          timestamp: item.timestamp || (item.date ? (Date.parse(item.date) || Date.now()) : Date.now())
+        });
+      }
+
+      cleanOrganicList.sort((a, b) => {
+        const aRep = REPUTABLE_TECH_DOMAINS.has(a.domain) ? 1 : 0;
+        const bRep = REPUTABLE_TECH_DOMAINS.has(b.domain) ? 1 : 0;
+        if (aRep !== bRep) return bRep - aRep;
+        return (b.timestamp || 0) - (a.timestamp || 0);
+      });
+
+      let organicBlock = '';
+      if (cleanOrganicList.length > 0) {
+        cleanOrganicList.slice(0, 8).forEach((item, idx) => {
+          const title = item.title;
+          const link = item.url;
+          const snippet = item.snippet;
           const date = item.date ? ` (Dipublikasikan: ${item.date})` : '';
-          const domain = link ? link.replace(/^https?:\/\//i, '').split('/')[0] : 'google.com';
 
           organicBlock += `\n${idx + 1}. **[${title}](${link})**${date}\n   ${snippet}\n`;
           
@@ -5735,7 +5781,7 @@ Aturan wajib:
               url: link,
               snippet,
               date: item.date || null,
-              domain
+              domain: item.domain
             });
           }
         });
@@ -7533,14 +7579,6 @@ ${blocks}
   // ==================== GLOBAL SEARCH & ENGLISH QUERY ADAPTER ====================
   // Memastikan kueri pencarian otonom menjangkau indeks internasional/global
   // dan mengonversi topik pengguna berbahasa Indonesia menjadi kata kunci pencarian bahasa Inggris global.
-  const REPUTABLE_TECH_DOMAINS = new Set([
-    'reuters.com', 'bloomberg.com', 'axios.com', 'techcrunch.com', 'theverge.com',
-    'arstechnica.com', 'wired.com', 'venturebeat.com', 'technologyreview.com',
-    'openai.com', 'anthropic.com', 'deepmind.google', 'blog.google', 'news.ycombinator.com',
-    'github.com', 'huggingface.co', 'nature.com', 'science.org', 'mit.edu', 'stanford.edu',
-    'wsj.com', 'ft.com', 'cnbc.com', 'bbc.com', 'theguardian.com'
-  ]);
-
   const INDO_DOMESTIC_PATTERN = /\b(indonesia|indonesian|jakarta|jabar|jatim|jateng|bandung|surabaya|medan|semarang|yogyakarta|jogja|bali|denpasar|aceh|sumatera|papua|kalimantan|sulawesi|nusantara|ikn\b|rupiah|idr\b|bmkg|pilkada|pemilu|kpu\b|bawaslu|prabowo|gibran|jokowi|bansos|bpjs|kominfo|menkominfo|kemendagri|kemenkes|kemendikbud|bumn|kemenkeu|sri mulyani|tni\b|polri|polda|polres|kapolri|dpr\b|mpr\b|dpd\b|kpk\b|kejagung|bca\b|mandiri\b|bri\b|bni\b|pertamina|pln\b)\b/i;
 
   function isExplicitDomesticIndoQuery(str) {
@@ -8122,8 +8160,12 @@ ${blocks}
 
       const cacheKey = `${canonicalTool}:${canonicalArg}`;
       const cachedEntry = AUTONOMOUS_TOOL_CACHE.get(cacheKey);
-      if (cachedEntry && cachedEntry.expiresAt > Date.now()) {
-        return cachedEntry.data;
+      if (cachedEntry) {
+        if (cachedEntry.expiresAt > Date.now()) {
+          return cachedEntry.data;
+        } else {
+          AUTONOMOUS_TOOL_CACHE.delete(cacheKey);
+        }
       }
 
       const cacheAndReturn = (data) => {
@@ -9024,20 +9066,22 @@ ${blocks}
       if (isLongCompleteText && fjm.index > 220) continue;
       const name = fjm[1];
       try {
-        let cleanJson = fjm[2].replace(/'/g, '"');
+        let cleanJson = fjm[2]
+          .replace(/'/g, '"')
+          .replace(/,\s*([}\]])/g, '$1');
         const p = JSON.parse(cleanJson);
         addCall(name, p, fjm[0]);
       } catch (_) {
-        const qMatch = fjm[2].match(/["'](?:query|q|keyword|search|url|link|target|code|topic|content|isi|konten|catatan|topik|script|cari|kata_kunci|tautan)["']\s*:\s*["']([^"']+)["']/i);
-        if (qMatch) {
-          const normName = normalizeToolName(name);
-          const isUrlTool = ['browse_web_page', 'extract_web'].includes(normName);
-          const isCodeTool = normName === 'execute_python_code';
-          const isSaveMem = normName === 'save_memory';
-          if (isUrlTool) addCall(name, { url: qMatch[1] }, fjm[0]);
-          else if (isCodeTool) addCall(name, { code: qMatch[1] }, fjm[0]);
-          else if (isSaveMem) addCall(name, { topic: 'catatan', content: qMatch[1] }, fjm[0]);
-          else addCall(name, { query: qMatch[1] }, fjm[0]);
+        const extracted = {};
+        const kvRegex = /["']?([a-zA-Z0-9_]+)["']?\s*:\s*(?:["']([^"']*)["']|(\d+(?:\.\d+)?)|(true|false)|null)/g;
+        let km;
+        while ((km = kvRegex.exec(fjm[2])) !== null) {
+          const k = km[1];
+          const v = km[2] !== undefined ? km[2] : (km[3] !== undefined ? Number(km[3]) : (km[4] !== undefined ? km[4] === 'true' : null));
+          extracted[k] = v;
+        }
+        if (Object.keys(extracted).length > 0) {
+          addCall(name, extracted, fjm[0]);
         }
       }
     }

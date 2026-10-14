@@ -1115,8 +1115,19 @@ function performWebSearch(query, apiKey = null, num = 15) {
           }
 
           if (Array.isArray(parsed.organic)) {
-            parsed.organic.slice(0, targetNum).forEach((item, idx) => {
+            parsed.organic.forEach((item, idx) => {
+              if (!item || !item.link) return;
               const dom = extractDomainSafe(item.link);
+              const normUrl = item.link.trim().toLowerCase().replace(/\/$/, '');
+              const normTitle = (item.title || '').trim().toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '');
+
+              if (!isDomestic) {
+                const isSpam = /\b(pluang|riaugreen|inforiau|riaupos|tribunnews|detik|kompas|liputan6|suara|merdeka|sindonews|viva|inews|kumparan|jpnn|kapanlagi|idntimes)\b/i.test(normUrl) || /\b(pluang|riaugreen)\b/i.test(dom || '');
+                if (isSpam) return;
+              }
+              if (normTitle.includes('listofapplecodenames') && !cleanQuery.toLowerCase().includes('apple')) return;
+              if (normTitle.includes('jalanbesar') && !cleanQuery.toLowerCase().includes('jalan')) return;
+
               results.push({
                 title: item.title || `Hasil ${idx + 1}`,
                 url: item.link || '',
@@ -1128,6 +1139,13 @@ function performWebSearch(query, apiKey = null, num = 15) {
                 timestamp: item.date ? (Date.parse(item.date) || Date.now()) : Date.now()
               });
             });
+
+            results.sort((a, b) => {
+              const aRep = REPUTABLE_TECH_DOMAINS.has(a.domain) ? 1 : 0;
+              const bRep = REPUTABLE_TECH_DOMAINS.has(b.domain) ? 1 : 0;
+              if (aRep !== bRep) return bRep - aRep;
+              return (b.timestamp || 0) - (a.timestamp || 0);
+            });
           }
 
           safeResolve({
@@ -1135,7 +1153,7 @@ function performWebSearch(query, apiKey = null, num = 15) {
             count: results.length,
             knowledgeGraph: parsed.knowledgeGraph || null,
             answerBox: parsed.answerBox || null,
-            organic: parsed.organic || [],
+            organic: results,
             results: results
           });
         } catch (e) {
