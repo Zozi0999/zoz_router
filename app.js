@@ -396,7 +396,23 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       customSystemPrompt: '',
       activePreset: 'kaisar',
       autoPolicy: 'cloud_first',
-      youtubeSearchTool: false // Tool pencarian YouTube (toggle dari menu Lampiran / Composer)
+      youtubeSearchTool: false, // Tool pencarian YouTube (toggle dari menu Lampiran / Composer)
+      localWorkspaceEnabled: false,
+      workspaceAiCanRead: true,
+      workspaceAiCanWrite: true,
+      workspaceIncludeTree: true
+    },
+    localWorkspace: {
+      enabled: false,
+      dirName: '',
+      dirHandle: null,
+      platform: 'auto', // 'desktop-fs' | 'mobile-virtual'
+      files: [], // Array of { name, path, size, type, lastModified, handle, rawFile, content }
+      aiCanRead: true,
+      aiCanWrite: true,
+      includeTree: true,
+      activeFilter: '',
+      activeViewFile: null
     },
     activeCatalogTab: 'ollama', // 'ollama' | 'openrouter'
     dropdownModelTab: 'ollama', // 'ollama' | 'openrouter'
@@ -845,7 +861,52 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     endocrineHeartIcon: $('#endocrineHeartIcon'),
     endocrineTelemetryModal: $('#endocrineTelemetryModal'),
     btnAuditConnectomeNow: $('#btnAuditConnectomeNow'),
-    btnPurgeStressEndorphin: $('#btnPurgeStressEndorphin')
+    btnPurgeStressEndorphin: $('#btnPurgeStressEndorphin'),
+
+    // Local Workspace & Document Management
+    tabBtnLocalWorkspace: $('#tabBtnLocalWorkspace'),
+    tabLocalWorkspace: $('#tabLocalWorkspace'),
+    settingLocalWorkspaceToggle: $('#settingLocalWorkspaceToggle'),
+    workspaceDirConnectionCard: $('#workspaceDirConnectionCard'),
+    workspacePlatformBadge: $('#workspacePlatformBadge'),
+    workspaceFolderStatus: $('#workspaceFolderStatus'),
+    workspaceConnectedDirName: $('#workspaceConnectedDirName'),
+    workspaceConnectedDirDetails: $('#workspaceConnectedDirDetails'),
+    btnSelectLocalWorkspace: $('#btnSelectLocalWorkspace'),
+    btnSelectLocalWorkspaceText: $('#btnSelectLocalWorkspaceText'),
+    btnRefreshLocalWorkspace: $('#btnRefreshLocalWorkspace'),
+    btnDisconnectLocalWorkspace: $('#btnDisconnectLocalWorkspace'),
+    inputLocalWorkspaceFolderMobile: $('#inputLocalWorkspaceFolderMobile'),
+    inputLocalWorkspaceFilesMobile: $('#inputLocalWorkspaceFilesMobile'),
+    workspacePermissionsCard: $('#workspacePermissionsCard'),
+    settingWorkspaceAiRead: $('#settingWorkspaceAiRead'),
+    settingWorkspaceAiWrite: $('#settingWorkspaceAiWrite'),
+    settingWorkspaceIncludeTree: $('#settingWorkspaceIncludeTree'),
+    workspaceFileExplorerCard: $('#workspaceFileExplorerCard'),
+    workspaceFileCount: $('#workspaceFileCount'),
+    btnWorkspaceCreateDoc: $('#btnWorkspaceCreateDoc'),
+    btnWorkspaceExportZip: $('#btnWorkspaceExportZip'),
+    workspaceSearchInput: $('#workspaceSearchInput'),
+    workspaceFileList: $('#workspaceFileList'),
+    attachOptionLocalWorkspace: $('#attachOptionLocalWorkspace'),
+    attachWorkspaceDesc: $('#attachWorkspaceDesc'),
+    workspaceComposerPill: $('#workspaceComposerPill'),
+    workspaceComposerPillName: $('#workspaceComposerPillName'),
+    workspaceComposerPillBadge: $('#workspaceComposerPillBadge'),
+    workspacePillManageBtn: $('#workspacePillManageBtn'),
+    workspacePillCloseBtn: $('#workspacePillCloseBtn'),
+    workspaceDocViewerModal: $('#workspaceDocViewerModal'),
+    workspaceDocViewerTitle: $('#workspaceDocViewerTitle'),
+    workspaceDocViewerMeta: $('#workspaceDocViewerMeta'),
+    docViewerPath: $('#docViewerPath'),
+    docViewerSize: $('#docViewerSize'),
+    workspaceDocViewerContent: $('#workspaceDocViewerContent'),
+    btnCopyDocViewerContent: $('#btnCopyDocViewerContent'),
+    btnDownloadDocViewerFile: $('#btnDownloadDocViewerFile'),
+    workspaceDocCreateModal: $('#workspaceDocCreateModal'),
+    inputWorkspaceNewFileName: $('#inputWorkspaceNewFileName'),
+    inputWorkspaceNewFileContent: $('#inputWorkspaceNewFileContent'),
+    btnSaveNewWorkspaceDoc: $('#btnSaveNewWorkspaceDoc')
   };
 
   // ==================== BIO-ENDOCRINE HORMONE & CONNECTOME SYSTEM ====================
@@ -1658,6 +1719,32 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
       // Sinkronkan preferensi tool pencarian YouTube
       STATE.isYouTubeSearchMode = Boolean(STATE.settings.youtubeSearchTool);
+
+      // Sinkronkan preferensi direktori lokal pengguna
+      if (typeof STATE.settings.localWorkspaceEnabled === 'boolean') {
+        STATE.localWorkspace.enabled = STATE.settings.localWorkspaceEnabled;
+      }
+      if (typeof STATE.settings.workspaceAiCanRead === 'boolean') {
+        STATE.localWorkspace.aiCanRead = STATE.settings.workspaceAiCanRead;
+      }
+      if (typeof STATE.settings.workspaceAiCanWrite === 'boolean') {
+        STATE.localWorkspace.aiCanWrite = STATE.settings.workspaceAiCanWrite;
+      }
+      if (typeof STATE.settings.workspaceIncludeTree === 'boolean') {
+        STATE.localWorkspace.includeTree = STATE.settings.workspaceIncludeTree;
+      }
+
+      // Pulihkan metadata direktori sebelumnya jika tersimpan
+      try {
+        const rawMeta = localStorage.getItem('zoz_local_workspace_meta');
+        if (rawMeta) {
+          const parsedMeta = JSON.parse(rawMeta);
+          if (parsedMeta && parsedMeta.dirName) {
+            STATE.localWorkspace.dirName = parsedMeta.dirName;
+            STATE.localWorkspace.platform = parsedMeta.platform || 'auto';
+          }
+        }
+      } catch (_) {}
 
       // Pastikan customSystemPrompt terinisialisasi jika user sebelumnya sudah punya persona kustom
       if (typeof STATE.settings.customSystemPrompt !== 'string') {
@@ -7800,6 +7887,63 @@ ${blocks}
       text = text ? `${docsContext}\n\n${text}` : `${docsContext}\n\nTolong baca, pahami, dan analisis isi dokumen lampiran di atas secara komprehensif.`;
     }
 
+    // Injeksi Akses & Dokumen Direktori Lokal ke Konteks Prompt
+    if (STATE.localWorkspace.enabled && STATE.localWorkspace.files && STATE.localWorkspace.files.length > 0) {
+      let workspaceInjectedText = '';
+
+      // 1. Baca otomatis berkas jika ditanyakan oleh pengguna secara spesifik
+      if (STATE.localWorkspace.aiCanRead) {
+        for (const fileObj of STATE.localWorkspace.files) {
+          const baseName = fileObj.name.replace(/\.[^/.]+$/, '');
+          const escName = fileObj.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const escBase = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(`(?:\\b|_)(${escName}|${escBase})(?:\\b|_)`, 'i');
+          if (regex.test(rawText)) {
+            try {
+              let fContent = fileObj.content;
+              if (!fContent) {
+                let raw = fileObj.rawFile;
+                if (!raw && fileObj.handle) raw = await fileObj.handle.getFile();
+                if (raw) fContent = await extractFileContent(raw);
+              }
+              if (fContent && typeof fContent === 'string' && fContent.trim()) {
+                fileObj.content = fContent;
+                workspaceInjectedText += `\n\n--- [DOKUMEN DARI DIREKTORI LOKAL: ${fileObj.name} (${formatBytes(fileObj.size)})] ---\n${fContent.slice(0, 10000)}\n--- [AKHIR DOKUMEN: ${fileObj.name}] ---\n`;
+              }
+            } catch (readErr) {
+              console.warn('Gagal membaca dokumen untuk AI context:', fileObj.name, readErr);
+            }
+          }
+        }
+      }
+
+      // 2. Sertakan pohon berkas direktori lokal
+      if (STATE.localWorkspace.includeTree) {
+        const fileListSummary = STATE.localWorkspace.files
+          .slice(0, 30)
+          .map(f => `- ${f.path || f.name} (${formatBytes(f.size)})`)
+          .join('\n');
+        const extraNote = STATE.localWorkspace.files.length > 30 ? `\n...dan ${STATE.localWorkspace.files.length - 30} berkas lainnya` : '';
+        workspaceInjectedText += `\n\n[DIREKTORI LOKAL PENGGUNA TERHUBUNG]
+Folder: "${STATE.localWorkspace.dirName}" (${STATE.localWorkspace.platform === 'desktop-fs' ? 'Laptop/Desktop Disk' : 'HP/Ponsel Penyimpanan'})
+Total Berkas: ${STATE.localWorkspace.files.length}
+Daftar Berkas:
+${fileListSummary}${extraNote}
+
+PANDUAN MANAJEMEN DOKUMEN:
+Pengguna telah mengizinkan Anda untuk mendeteksi dan mengelola dokumen dalam direktori lokal ini.
+- Jika pengguna meminta membuat atau menyimpan dokumen baru ke direktori lokalnya, sertakan blok kode khusus:
+<<<ZOZ_FILE name="nama_file.ext" mime="text/plain" desc="Deskripsi file">>>
+isi teks dokumen lengkap...
+<<<END_ZOZ_FILE>>>
+Sistem Zoz Router akan secara otomatis mengeksekusi penyimpanan file ini langsung ke perangkat lokal pengguna!`;
+      }
+
+      if (workspaceInjectedText) {
+        text = text ? `${workspaceInjectedText}\n\n${text}` : workspaceInjectedText;
+      }
+    }
+
     // Resolve sesi dari id yang ditangkap SEBELUM await — jangan pakai
     // getActiveSession() yang membaca STATE.currentSessionId yang bisa sudah berubah.
     const session = promptTargetSessionId ? getSessionById(promptTargetSessionId) : getActiveSession();
@@ -12184,6 +12328,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       const generatedFiles = extractedAiFiles.files;
       if (generatedFiles.length > 0) {
         fullText = stripGeneratedFileBlocks(fullText, extractedAiFiles.rawBlocks);
+        // Otomatis simpan ke direktori lokal pengguna jika akses direktori aktif
+        if (STATE.localWorkspace.enabled && STATE.localWorkspace.aiCanWrite) {
+          generatedFiles.forEach(gf => {
+            createWorkspaceDocument(gf.name, gf.content, { silent: false });
+          });
+        }
       } else if (fullText.indexOf('<<<ZOZ_FILE') !== -1 || fullText.indexOf('<<<END_ZOZ_FILE') !== -1) {
         // M2: ada marker tapi TIDAK ada blok utuh (stream terputus sebelum
         // <<<END_ZOZ_FILE / END yatim). Dulu marker + isi blok tampil mentah di
@@ -15262,6 +15412,468 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     }
   }
 
+  // ==================== LOCAL WORKSPACE & USER DOCUMENT MANAGEMENT ENGINE ====================
+  // Mendukung deteksi direktori lokal lintas platform:
+  // 1. Laptop/Desktop (Chrome/Edge/Brave/Opera): File System Access API (showDirectoryPicker) dengan akses baca/tulis langsung ke disk.
+  // 2. Ponsel/HP (Android/iOS & browser mobile): HTML5 Directory Input (webkitdirectory) & File Provider Virtual Workspace.
+  // 3. AI Autonomous Document Management: AI bisa membaca dokumen, membuat dokumen baru, dan mengelola berkas lokal.
+
+  function isDesktopFileSystemSupported() {
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    return typeof window.showDirectoryPicker === 'function' && !isMobileDevice;
+  }
+
+  function formatBytes(bytes, decimals = 1) {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+  }
+
+  function getFileIconClass(fileName = '') {
+    const ext = fileName.split('.').pop().toLowerCase();
+    switch (ext) {
+      case 'pdf': return 'fa-solid fa-file-pdf';
+      case 'doc':
+      case 'docx': return 'fa-solid fa-file-word';
+      case 'xls':
+      case 'xlsx':
+      case 'csv': return 'fa-solid fa-file-excel';
+      case 'ppt':
+      case 'pptx': return 'fa-solid fa-file-powerpoint';
+      case 'js':
+      case 'ts':
+      case 'jsx':
+      case 'tsx':
+      case 'html':
+      case 'css':
+      case 'py':
+      case 'java':
+      case 'c':
+      case 'cpp':
+      case 'json':
+      case 'xml':
+      case 'yaml':
+      case 'yml':
+      case 'sql': return 'fa-solid fa-file-code';
+      case 'md':
+      case 'markdown': return 'fa-brands fa-markdown';
+      case 'zip':
+      case 'rar':
+      case '7z':
+      case 'tar':
+      case 'gz': return 'fa-solid fa-file-zipper';
+      case 'png':
+      case 'jpg':
+      case 'jpeg':
+      case 'gif':
+      case 'webp':
+      case 'svg': return 'fa-solid fa-file-image';
+      default: return 'fa-solid fa-file-lines';
+    }
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 200);
+  }
+
+  async function scanDirectoryHandle(dirHandle, path = '') {
+    const results = [];
+    try {
+      for await (const entry of dirHandle.values()) {
+        const curPath = path ? `${path}/${entry.name}` : entry.name;
+        if (entry.kind === 'file') {
+          try {
+            const file = await entry.getFile();
+            results.push({
+              name: entry.name,
+              path: curPath,
+              size: file.size,
+              type: file.type || 'application/octet-stream',
+              lastModified: file.lastModified,
+              handle: entry,
+              rawFile: file,
+              content: null
+            });
+          } catch (fileErr) {
+            console.warn('Gagal membaca file dari handle:', entry.name, fileErr);
+          }
+        } else if (entry.kind === 'directory' && !entry.name.startsWith('.')) {
+          const subResults = await scanDirectoryHandle(entry, curPath);
+          results.push(...subResults);
+        }
+      }
+    } catch (scanErr) {
+      console.warn('Error saat scan direktori handle:', scanErr);
+    }
+    return results;
+  }
+
+  async function setConnectedLocalWorkspace(dirName, dirHandle, platform, files = []) {
+    STATE.localWorkspace.dirName = dirName || 'Direktori Dokumen';
+    STATE.localWorkspace.dirHandle = dirHandle || null;
+    STATE.localWorkspace.platform = platform || (isDesktopFileSystemSupported() ? 'desktop-fs' : 'mobile-virtual');
+    STATE.localWorkspace.files = files || [];
+    STATE.localWorkspace.enabled = true;
+    STATE.settings.localWorkspaceEnabled = true;
+
+    try {
+      const meta = {
+        dirName: STATE.localWorkspace.dirName,
+        platform: STATE.localWorkspace.platform,
+        fileCount: STATE.localWorkspace.files.length,
+        fileNames: STATE.localWorkspace.files.slice(0, 50).map(f => ({ name: f.name, path: f.path, size: f.size }))
+      };
+      localStorage.setItem('zoz_local_workspace_meta', JSON.stringify(meta));
+      localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings));
+    } catch (_) {}
+
+    updateLocalWorkspaceUI();
+    showToast(`📁 Direktori "${STATE.localWorkspace.dirName}" berhasil terhubung (${STATE.localWorkspace.files.length} berkas).`);
+    AudioEngine.click();
+  }
+
+  function disconnectLocalWorkspace() {
+    STATE.localWorkspace.enabled = false;
+    STATE.localWorkspace.dirName = '';
+    STATE.localWorkspace.dirHandle = null;
+    STATE.localWorkspace.files = [];
+    STATE.settings.localWorkspaceEnabled = false;
+
+    try {
+      localStorage.removeItem('zoz_local_workspace_meta');
+      localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings));
+    } catch (_) {}
+
+    updateLocalWorkspaceUI();
+    showToast('Akses direktori lokal telah diputuskan.');
+    AudioEngine.click();
+  }
+
+  function updateLocalWorkspaceUI() {
+    const isSupported = isDesktopFileSystemSupported();
+    const isEnabled = Boolean(STATE.localWorkspace.enabled);
+    const hasFiles = STATE.localWorkspace.files && STATE.localWorkspace.files.length > 0;
+    const dirName = STATE.localWorkspace.dirName || 'Belum Ada Direktori Terhubung';
+    const totalCount = STATE.localWorkspace.files ? STATE.localWorkspace.files.length : 0;
+    let totalSize = 0;
+    if (STATE.localWorkspace.files) {
+      STATE.localWorkspace.files.forEach(f => { totalSize += (f.size || 0); });
+    }
+
+    if (els.settingLocalWorkspaceToggle) {
+      els.settingLocalWorkspaceToggle.checked = isEnabled;
+    }
+
+    if (els.workspacePlatformBadge) {
+      if (isSupported) {
+        els.workspacePlatformBadge.innerHTML = '<i class="fa-solid fa-laptop"></i> Laptop / Native File System';
+        els.workspacePlatformBadge.style.color = 'var(--neon-cyan)';
+        els.workspacePlatformBadge.style.borderColor = 'rgba(0, 240, 255, 0.4)';
+      } else {
+        els.workspacePlatformBadge.innerHTML = '<i class="fa-solid fa-mobile-screen"></i> Ponsel / Universal Mobile Storage';
+        els.workspacePlatformBadge.style.color = 'var(--neon-teal)';
+        els.workspacePlatformBadge.style.borderColor = 'rgba(0, 255, 194, 0.4)';
+      }
+    }
+
+    if (els.workspaceConnectedDirName) {
+      els.workspaceConnectedDirName.textContent = isEnabled && STATE.localWorkspace.dirName
+        ? `📁 ${STATE.localWorkspace.dirName}`
+        : 'Belum Ada Direktori Terhubung';
+    }
+    if (els.workspaceConnectedDirDetails) {
+      els.workspaceConnectedDirDetails.textContent = isEnabled && STATE.localWorkspace.dirName
+        ? `${totalCount} berkas terdeteksi • Total ukuran: ${formatBytes(totalSize)} • Mode: ${STATE.localWorkspace.platform === 'desktop-fs' ? 'Akses Langsung Disk' : 'Virtual Storage HP'}`
+        : 'Pilih folder dari HP atau laptop Anda untuk mulai dikelola AI';
+    }
+
+    if (els.btnRefreshLocalWorkspace) {
+      els.btnRefreshLocalWorkspace.style.display = (isEnabled && STATE.localWorkspace.dirName) ? 'inline-flex' : 'none';
+    }
+    if (els.btnDisconnectLocalWorkspace) {
+      els.btnDisconnectLocalWorkspace.style.display = (isEnabled && STATE.localWorkspace.dirName) ? 'inline-flex' : 'none';
+    }
+    if (els.btnSelectLocalWorkspaceText) {
+      els.btnSelectLocalWorkspaceText.textContent = (isEnabled && STATE.localWorkspace.dirName)
+        ? 'Ganti Direktori'
+        : 'Pilih / Hubungkan Folder';
+    }
+
+    if (els.workspaceFileExplorerCard) {
+      els.workspaceFileExplorerCard.style.display = (isEnabled && hasFiles) ? 'block' : 'none';
+    }
+    if (els.workspaceFileCount) {
+      els.workspaceFileCount.textContent = String(totalCount);
+    }
+
+    if (els.workspaceComposerPill) {
+      els.workspaceComposerPill.style.display = (isEnabled && STATE.localWorkspace.dirName) ? 'flex' : 'none';
+    }
+    if (els.workspaceComposerPillName) {
+      els.workspaceComposerPillName.textContent = `Direktori: ${dirName}`;
+    }
+    if (els.workspaceComposerPillBadge) {
+      els.workspaceComposerPillBadge.textContent = `${totalCount} berkas`;
+    }
+
+    if (els.attachWorkspaceDesc) {
+      els.attachWorkspaceDesc.textContent = (isEnabled && STATE.localWorkspace.dirName)
+        ? `Terhubung: ${dirName} (${totalCount} berkas)`
+        : 'Hubungkan folder HP/Laptop untuk dikelola AI';
+    }
+
+    renderWorkspaceFileList();
+  }
+
+  function renderWorkspaceFileList() {
+    if (!els.workspaceFileList) return;
+    const files = STATE.localWorkspace.files || [];
+    const filter = (STATE.localWorkspace.activeFilter || '').toLowerCase().trim();
+
+    const filtered = filter
+      ? files.filter(f => (f.name && f.name.toLowerCase().includes(filter)) || (f.path && f.path.toLowerCase().includes(filter)))
+      : files;
+
+    if (filtered.length === 0) {
+      els.workspaceFileList.innerHTML = filter
+        ? `<div class="workspace-empty-list">Tidak ada berkas yang cocok dengan "${escapeHtml(filter)}".</div>`
+        : `<div class="workspace-empty-list">Tidak ada berkas di dalam direktori ini.</div>`;
+      return;
+    }
+
+    let html = '';
+    filtered.forEach((file, index) => {
+      const iconCls = getFileIconClass(file.name);
+      const sizeStr = formatBytes(file.size);
+      const displayPath = file.path || file.name;
+      html += `
+        <div class="workspace-file-item" data-index="${index}">
+          <div class="workspace-file-item-left">
+            <i class="${iconCls}"></i>
+            <div class="file-item-meta">
+              <div class="file-item-name" title="${escapeHtml(displayPath)}">${escapeHtml(file.name)}</div>
+              <div class="file-item-sub">${escapeHtml(displayPath !== file.name ? displayPath : '')} • ${sizeStr}</div>
+            </div>
+          </div>
+          <div class="workspace-file-item-actions">
+            <button type="button" class="btn btn-xs btn-outline btn-workspace-view-file" data-name="${escapeHtml(file.name)}" title="Pratinjau Dokumen">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+            <button type="button" class="btn btn-xs btn-outline btn-workspace-download-file" data-name="${escapeHtml(file.name)}" title="Unduh Berkas">
+              <i class="fa-solid fa-download"></i>
+            </button>
+            <button type="button" class="btn btn-xs btn-outline btn-danger-hover btn-workspace-delete-file" data-name="${escapeHtml(file.name)}" title="Hapus Berkas">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
+          </div>
+        </div>
+      `;
+    });
+
+    els.workspaceFileList.innerHTML = html;
+  }
+
+  async function previewWorkspaceDocument(fileName) {
+    const fileObj = (STATE.localWorkspace.files || []).find(f => f.name === fileName);
+    if (!fileObj) {
+      showToast(`Berkas "${fileName}" tidak ditemukan.`);
+      return;
+    }
+
+    let textContent = fileObj.content || '';
+    if (!textContent) {
+      showToast('Membaca isi berkas...');
+      try {
+        let rawFile = fileObj.rawFile;
+        if (!rawFile && fileObj.handle) {
+          rawFile = await fileObj.handle.getFile();
+        }
+        if (rawFile) {
+          textContent = await extractFileContent(rawFile);
+          fileObj.content = textContent;
+        } else {
+          textContent = '[Konten file tidak dapat dibaca atau file kosong]';
+        }
+      } catch (readErr) {
+        textContent = `[Gagal membaca file: ${readErr.message}]`;
+      }
+    }
+
+    STATE.localWorkspace.activeViewFile = { ...fileObj, content: textContent };
+
+    if (els.workspaceDocViewerTitle) els.workspaceDocViewerTitle.textContent = fileObj.name;
+    if (els.docViewerPath) els.docViewerPath.textContent = fileObj.path || fileObj.name;
+    if (els.docViewerSize) els.docViewerSize.textContent = formatBytes(fileObj.size);
+    if (els.workspaceDocViewerContent) els.workspaceDocViewerContent.textContent = textContent;
+
+    openModal('workspaceDocViewerModal');
+    AudioEngine.click();
+  }
+
+  async function createWorkspaceDocument(fileName, content, options = {}) {
+    if (!fileName) return;
+    const cleanName = fileName.trim();
+    const cleanContent = content || '';
+
+    try {
+      if (STATE.localWorkspace.platform === 'desktop-fs' && STATE.localWorkspace.dirHandle) {
+        try {
+          const fileHandle = await STATE.localWorkspace.dirHandle.getFileHandle(cleanName, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(cleanContent);
+          await writable.close();
+
+          const newFile = await fileHandle.getFile();
+          const existingIdx = (STATE.localWorkspace.files || []).findIndex(f => f.name === cleanName);
+          const newEntry = {
+            name: cleanName,
+            path: cleanName,
+            size: newFile.size,
+            type: newFile.type || 'text/plain',
+            lastModified: Date.now(),
+            handle: fileHandle,
+            rawFile: newFile,
+            content: cleanContent
+          };
+          if (existingIdx >= 0) {
+            STATE.localWorkspace.files[existingIdx] = newEntry;
+          } else {
+            STATE.localWorkspace.files.unshift(newEntry);
+          }
+          updateLocalWorkspaceUI();
+          if (!options.silent) {
+            showToast(`✅ Berkas "${cleanName}" berhasil disimpan ke direktori lokal!`);
+            AudioEngine.success();
+          }
+          return;
+        } catch (fsErr) {
+          console.warn('Gagal menulis langsung ke disk, beralih ke download virtual:', fsErr);
+        }
+      }
+
+      const blob = new Blob([cleanContent], { type: 'text/plain;charset=utf-8' });
+      const rawFile = new File([blob], cleanName, { type: 'text/plain', lastModified: Date.now() });
+      const existingIdx = (STATE.localWorkspace.files || []).findIndex(f => f.name === cleanName);
+      const newEntry = {
+        name: cleanName,
+        path: cleanName,
+        size: blob.size,
+        type: 'text/plain',
+        lastModified: Date.now(),
+        handle: null,
+        rawFile: rawFile,
+        content: cleanContent
+      };
+      if (existingIdx >= 0) {
+        STATE.localWorkspace.files[existingIdx] = newEntry;
+      } else {
+        STATE.localWorkspace.files.unshift(newEntry);
+      }
+
+      downloadBlob(blob, cleanName);
+      updateLocalWorkspaceUI();
+      if (!options.silent) {
+        showToast(`✅ Berkas "${cleanName}" dibuat dan disimpan ke perangkat Anda!`);
+        AudioEngine.success();
+      }
+    } catch (err) {
+      console.error('Gagal membuat dokumen:', err);
+      showToast(`Gagal membuat dokumen: ${err.message}`, 'error');
+    }
+  }
+
+  async function deleteWorkspaceDocument(fileName) {
+    const idx = (STATE.localWorkspace.files || []).findIndex(f => f.name === fileName);
+    if (idx < 0) return;
+
+    if (!confirm(`Hapus berkas "${fileName}" dari direktori lokal?`)) return;
+
+    try {
+      if (STATE.localWorkspace.platform === 'desktop-fs' && STATE.localWorkspace.dirHandle) {
+        try {
+          await STATE.localWorkspace.dirHandle.removeEntry(fileName, { recursive: false });
+        } catch (delErr) {
+          console.warn('Gagal menghapus via handle:', delErr);
+        }
+      }
+      STATE.localWorkspace.files.splice(idx, 1);
+      updateLocalWorkspaceUI();
+      showToast(`Berkas "${fileName}" telah dihapus.`);
+      AudioEngine.click();
+    } catch (err) {
+      showToast(`Gagal menghapus berkas: ${err.message}`, 'error');
+    }
+  }
+
+  async function exportWorkspaceAsZip() {
+    if (!STATE.localWorkspace.files || STATE.localWorkspace.files.length === 0) {
+      showToast('Tidak ada berkas untuk diekspor.');
+      return;
+    }
+    if (typeof JSZip === 'undefined') {
+      showToast('Pustaka JSZip belum siap.', 'error');
+      return;
+    }
+
+    showToast('Mengemas seluruh berkas ke ZIP...');
+    try {
+      const zip = new JSZip();
+      for (const item of STATE.localWorkspace.files) {
+        let contentToZip = null;
+        if (item.content) {
+          contentToZip = item.content;
+        } else if (item.rawFile) {
+          contentToZip = await item.rawFile.arrayBuffer();
+        } else if (item.handle) {
+          const f = await item.handle.getFile();
+          contentToZip = await f.arrayBuffer();
+        }
+        if (contentToZip !== null) {
+          zip.file(item.path || item.name, contentToZip);
+        }
+      }
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const zipName = `${STATE.localWorkspace.dirName || 'dokumen_lokal'}_bundle.zip`;
+      downloadBlob(zipBlob, zipName);
+      showToast(`📦 Berhasil mengunduh "${zipName}"!`);
+      AudioEngine.success();
+    } catch (zipErr) {
+      console.error('Gagal membuat ZIP:', zipErr);
+      showToast(`Gagal membuat ZIP: ${zipErr.message}`, 'error');
+    }
+  }
+
+  async function refreshLocalWorkspace() {
+    if (STATE.localWorkspace.platform === 'desktop-fs' && STATE.localWorkspace.dirHandle) {
+      showToast('Memindai ulang direktori lokal...');
+      try {
+        const files = await scanDirectoryHandle(STATE.localWorkspace.dirHandle);
+        STATE.localWorkspace.files = files;
+        updateLocalWorkspaceUI();
+        showToast(`Sinkronisasi selesai: ${files.length} berkas.`);
+        AudioEngine.click();
+        return;
+      } catch (err) {
+        console.warn('Refresh handle error:', err);
+      }
+    }
+    showToast('Silakan pilih folder lagi untuk memindai pembaruan berkas di HP.');
+    els.btnSelectLocalWorkspace?.click();
+  }
+
   const MUSIC_AUDIO_RE = /lyria|musicgen|suno|udio|stable-audio|gpt-audio/i;
   const DEFAULT_MUSIC_MODEL = 'google/lyria-3-clip-preview';
   function isAudioMusicModel(id) { 
@@ -18096,6 +18708,13 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     }
     if (els.settingAutoPolicy) els.settingAutoPolicy.value = STATE.settings.autoPolicy || 'local_first';
     
+    // Sinkronisasi status tab Direktori Lokal
+    if (els.settingLocalWorkspaceToggle) els.settingLocalWorkspaceToggle.checked = Boolean(STATE.localWorkspace.enabled);
+    if (els.settingWorkspaceAiRead) els.settingWorkspaceAiRead.checked = STATE.localWorkspace.aiCanRead !== false;
+    if (els.settingWorkspaceAiWrite) els.settingWorkspaceAiWrite.checked = STATE.localWorkspace.aiCanWrite !== false;
+    if (els.settingWorkspaceIncludeTree) els.settingWorkspaceIncludeTree.checked = STATE.localWorkspace.includeTree !== false;
+    updateLocalWorkspaceUI();
+
     updatePresetPillUI();
   }
 
@@ -18872,6 +19491,231 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     els.attachOptionDoc?.addEventListener('click', () => {
       closeAttachmentDropdown();
       els.docFileInput?.click();
+    });
+    els.attachOptionLocalWorkspace?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAttachmentDropdown();
+      syncSettingsModalFields();
+      openModal('settingsModal');
+      const wsTabBtn = els.tabBtnLocalWorkspace;
+      if (wsTabBtn) wsTabBtn.click();
+      AudioEngine.click();
+    });
+
+    // ==================== LOCAL WORKSPACE LISTENERS ====================
+    els.settingLocalWorkspaceToggle?.addEventListener('change', (e) => {
+      STATE.localWorkspace.enabled = e.target.checked;
+      STATE.settings.localWorkspaceEnabled = e.target.checked;
+      savePersistedState({ immediate: true });
+      updateLocalWorkspaceUI();
+      AudioEngine.click();
+      showToast(
+        e.target.checked
+          ? '📁 Akses direktori lokal diaktifkan. Silakan hubungkan folder dokumen Anda.'
+          : '📁 Akses direktori lokal dinonaktifkan.'
+      );
+    });
+
+    els.btnSelectLocalWorkspace?.addEventListener('click', async () => {
+      AudioEngine.click();
+      if (isDesktopFileSystemSupported()) {
+        try {
+          const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+          if (handle) {
+            showToast('Memindai direktori lokal...');
+            const files = await scanDirectoryHandle(handle);
+            await setConnectedLocalWorkspace(handle.name, handle, 'desktop-fs', files);
+            return;
+          }
+        } catch (err) {
+          if (err.name === 'AbortError') return;
+          console.warn('showDirectoryPicker gagal / ditolak, beralih ke mobile folder picker:', err);
+        }
+      }
+
+      if (els.inputLocalWorkspaceFolderMobile) {
+        els.inputLocalWorkspaceFolderMobile.click();
+      } else if (els.inputLocalWorkspaceFilesMobile) {
+        els.inputLocalWorkspaceFilesMobile.click();
+      }
+    });
+
+    els.inputLocalWorkspaceFolderMobile?.addEventListener('change', async (e) => {
+      const fileList = Array.from(e.target.files || []);
+      if (fileList.length === 0) return;
+
+      let dirName = 'Dokumen HP';
+      if (fileList[0].webkitRelativePath) {
+        const parts = fileList[0].webkitRelativePath.split('/');
+        if (parts.length > 1) dirName = parts[0];
+      }
+
+      const files = fileList.map(file => ({
+        name: file.name,
+        path: file.webkitRelativePath || file.name,
+        size: file.size,
+        type: file.type || 'application/octet-stream',
+        lastModified: file.lastModified,
+        handle: null,
+        rawFile: file,
+        content: null
+      }));
+
+      await setConnectedLocalWorkspace(dirName, null, 'mobile-virtual', files);
+      e.target.value = '';
+    });
+
+    els.inputLocalWorkspaceFilesMobile?.addEventListener('change', async (e) => {
+      const fileList = Array.from(e.target.files || []);
+      if (fileList.length === 0) return;
+
+      const files = fileList.map(file => ({
+        name: file.name,
+        path: file.name,
+        size: file.size,
+        type: file.type || 'application/octet-stream',
+        lastModified: file.lastModified,
+        handle: null,
+        rawFile: file,
+        content: null
+      }));
+
+      await setConnectedLocalWorkspace('Koleksi Dokumen HP', null, 'mobile-virtual', files);
+      e.target.value = '';
+    });
+
+    els.btnRefreshLocalWorkspace?.addEventListener('click', () => {
+      refreshLocalWorkspace();
+    });
+
+    els.btnDisconnectLocalWorkspace?.addEventListener('click', () => {
+      if (confirm('Putuskan sambungan direktori lokal dari Zoz Router?')) {
+        disconnectLocalWorkspace();
+      }
+    });
+
+    els.workspaceSearchInput?.addEventListener('input', (e) => {
+      STATE.localWorkspace.activeFilter = e.target.value;
+      renderWorkspaceFileList();
+    });
+
+    els.btnWorkspaceCreateDoc?.addEventListener('click', () => {
+      if (els.inputWorkspaceNewFileName) els.inputWorkspaceNewFileName.value = '';
+      if (els.inputWorkspaceNewFileContent) els.inputWorkspaceNewFileContent.value = '';
+      openModal('workspaceDocCreateModal');
+      AudioEngine.click();
+    });
+
+    els.btnSaveNewWorkspaceDoc?.addEventListener('click', async () => {
+      const name = els.inputWorkspaceNewFileName ? els.inputWorkspaceNewFileName.value.trim() : '';
+      const body = els.inputWorkspaceNewFileContent ? els.inputWorkspaceNewFileContent.value : '';
+      if (!name) {
+        showToast('Masukkan nama file dan ekstensinya (misal: catatan.md)', 'error');
+        return;
+      }
+      await createWorkspaceDocument(name, body);
+      closeModal('workspaceDocCreateModal');
+    });
+
+    els.btnWorkspaceExportZip?.addEventListener('click', () => {
+      exportWorkspaceAsZip();
+    });
+
+    els.workspacePillManageBtn?.addEventListener('click', () => {
+      syncSettingsModalFields();
+      openModal('settingsModal');
+      const wsTabBtn = els.tabBtnLocalWorkspace;
+      if (wsTabBtn) wsTabBtn.click();
+      AudioEngine.click();
+    });
+
+    els.workspacePillCloseBtn?.addEventListener('click', () => {
+      STATE.localWorkspace.enabled = false;
+      STATE.settings.localWorkspaceEnabled = false;
+      savePersistedState({ immediate: true });
+      updateLocalWorkspaceUI();
+      showToast('Akses direktori lokal dinonaktifkan.');
+      AudioEngine.click();
+    });
+
+    els.btnCopyDocViewerContent?.addEventListener('click', async () => {
+      const text = els.workspaceDocViewerContent ? els.workspaceDocViewerContent.textContent : '';
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast('📋 Teks dokumen disalin ke clipboard!');
+        AudioEngine.click();
+      } catch (_) {
+        showToast('Gagal menyalin teks ke clipboard.', 'error');
+      }
+    });
+
+    els.btnDownloadDocViewerFile?.addEventListener('click', () => {
+      if (!STATE.localWorkspace.activeViewFile) return;
+      const fileObj = STATE.localWorkspace.activeViewFile;
+      const content = fileObj.content || '';
+      const blob = new Blob([content], { type: fileObj.type || 'text/plain;charset=utf-8' });
+      downloadBlob(blob, fileObj.name || 'document.txt');
+      showToast(`⬇️ Mengunduh "${fileObj.name}"...`);
+      AudioEngine.click();
+    });
+
+    // Delegasi klik daftar file di explorer
+    els.workspaceFileList?.addEventListener('click', (e) => {
+      const viewBtn = e.target.closest('.btn-workspace-view-file');
+      if (viewBtn) {
+        const name = viewBtn.dataset.name;
+        if (name) previewWorkspaceDocument(name);
+        return;
+      }
+      const dlBtn = e.target.closest('.btn-workspace-download-file');
+      if (dlBtn) {
+        const name = dlBtn.dataset.name;
+        const fileObj = (STATE.localWorkspace.files || []).find(f => f.name === name);
+        if (fileObj) {
+          if (fileObj.content) {
+            const blob = new Blob([fileObj.content], { type: fileObj.type || 'text/plain;charset=utf-8' });
+            downloadBlob(blob, fileObj.name);
+          } else if (fileObj.rawFile) {
+            downloadBlob(fileObj.rawFile, fileObj.name);
+          }
+          showToast(`⬇️ Mengunduh "${name}"...`);
+          AudioEngine.click();
+        }
+        return;
+      }
+      const delBtn = e.target.closest('.btn-workspace-delete-file');
+      if (delBtn) {
+        const name = delBtn.dataset.name;
+        if (name) deleteWorkspaceDocument(name);
+        return;
+      }
+    });
+
+    // Global delegation for inline chat workspace actions
+    document.addEventListener('click', (e) => {
+      const inlineView = e.target.closest('.btn-inline-view-doc');
+      if (inlineView) {
+        const name = inlineView.dataset.name;
+        if (name) previewWorkspaceDocument(name);
+        return;
+      }
+      const inlineDl = e.target.closest('.btn-inline-download-doc');
+      if (inlineDl) {
+        const name = inlineDl.dataset.name;
+        const fileObj = (STATE.localWorkspace.files || []).find(f => f.name === name);
+        if (fileObj) {
+          if (fileObj.content) {
+            const blob = new Blob([fileObj.content], { type: fileObj.type || 'text/plain;charset=utf-8' });
+            downloadBlob(blob, fileObj.name);
+          } else if (fileObj.rawFile) {
+            downloadBlob(fileObj.rawFile, fileObj.name);
+          }
+          showToast(`⬇️ Mengunduh "${name}"...`);
+          AudioEngine.click();
+        }
+        return;
+      }
     });
 
     els.imageFileInput?.addEventListener('change', handleImageUpload);
@@ -19793,6 +20637,25 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       }
       if (els.settingAutoPolicy) STATE.settings.autoPolicy = els.settingAutoPolicy.value;
       
+      // Simpan preferensi Direktori Lokal
+      if (els.settingLocalWorkspaceToggle) {
+        STATE.localWorkspace.enabled = els.settingLocalWorkspaceToggle.checked;
+        STATE.settings.localWorkspaceEnabled = STATE.localWorkspace.enabled;
+      }
+      if (els.settingWorkspaceAiRead) {
+        STATE.localWorkspace.aiCanRead = els.settingWorkspaceAiRead.checked;
+        STATE.settings.workspaceAiCanRead = STATE.localWorkspace.aiCanRead;
+      }
+      if (els.settingWorkspaceAiWrite) {
+        STATE.localWorkspace.aiCanWrite = els.settingWorkspaceAiWrite.checked;
+        STATE.settings.workspaceAiWrite = STATE.localWorkspace.aiCanWrite;
+      }
+      if (els.settingWorkspaceIncludeTree) {
+        STATE.localWorkspace.includeTree = els.settingWorkspaceIncludeTree.checked;
+        STATE.settings.workspaceIncludeTree = STATE.localWorkspace.includeTree;
+      }
+      updateLocalWorkspaceUI();
+
       savePersistedState({ immediate: true });
       checkOllamaHealth();
       updateOllamaStatusUI();
@@ -20143,6 +21006,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     updateImageGenModeUI();
     updateMusicGenModeUI();
     updateYouTubeModeUI();
+    updateLocalWorkspaceUI();
     autoResizeTextarea(els.promptInput);
     updatePromptVisibilityUI(true);
 

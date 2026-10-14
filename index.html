@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261014_v255">
+  <link rel="stylesheet" href="style.css?v=20261014_v256">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -546,6 +546,23 @@
           <button class="clear-preset-btn" id="clearPresetBtn" type="button" aria-label="Hapus preset kustom" title="Hapus preset kustom"><i class="fa-solid fa-xmark"></i></button>
         </div>
 
+        <!-- Active Local Workspace Pill -->
+        <div class="workspace-composer-pill" id="workspaceComposerPill" style="display: none;">
+          <div class="workspace-pill-left">
+            <i class="fa-solid fa-folder-tree"></i>
+            <span class="workspace-pill-name" id="workspaceComposerPillName">Direktori: Belum Dipilih</span>
+            <span class="workspace-pill-badge" id="workspaceComposerPillBadge">0 berkas</span>
+          </div>
+          <div class="workspace-pill-actions">
+            <button class="workspace-pill-btn" id="workspacePillManageBtn" type="button" title="Kelola Direktori Dokumen">
+              <i class="fa-solid fa-sliders"></i>
+            </button>
+            <button class="workspace-pill-btn" id="workspacePillCloseBtn" type="button" title="Tutup Akses Direktori Sesi Ini">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+
         <!-- BOLA NEUTRON QUANTUM -->
         <div class="composer-crown-row" id="composerCrownRow">
           <button class="neutron-crown-btn state-red" id="neutronCrownBtn" type="button" aria-label="Sembunyikan kolom prompt" title="Sembunyikan / tampilkan kolom prompt">
@@ -746,6 +763,15 @@
                       <i class="fa-solid fa-check attach-yt-check" aria-hidden="true" style="display:none;"></i>
                     </div>
                   </button>
+                  <button class="attachment-menu-item" id="attachOptionLocalWorkspace" type="button">
+                    <div class="attach-item-icon-box workspace-accent" style="background: rgba(0, 240, 255, 0.15); border-color: rgba(0, 240, 255, 0.4); color: var(--neon-cyan);">
+                      <i class="fa-solid fa-folder-tree"></i>
+                    </div>
+                    <div class="attach-item-info">
+                      <span class="attach-item-title">Direktori & Dokumen Lokal</span>
+                      <span class="attach-item-desc" id="attachWorkspaceDesc">Hubungkan folder HP/Laptop untuk dikelola AI</span>
+                    </div>
+                  </button>
                 </div>
               </div>
             </div>
@@ -900,6 +926,9 @@
           <button class="settings-tab-btn active" data-target="tabProviders">Providers & API</button>
           <button class="settings-tab-btn" data-target="tabParameters">Parameter LLM</button>
           <button class="settings-tab-btn" data-target="tabSystem">System Persona</button>
+          <button class="settings-tab-btn" data-target="tabLocalWorkspace" id="tabBtnLocalWorkspace">
+            <i class="fa-solid fa-folder-tree"></i> Direktori Lokal
+          </button>
         </div>
 
         <!-- Tab 1: Providers -->
@@ -1046,6 +1075,123 @@
             <label for="settingSystemPrompt">Instruksi Prompt Sistem (System Prompt):</label>
             <textarea id="settingSystemPrompt" rows="6" placeholder="Ketik instruksi persona AI kustom di sini..."></textarea>
             <div class="form-hint" style="font-size: 11px; color: var(--text-muted); margin-top: 5px;"><i class="fa-solid fa-circle-info"></i> Persona kustom Anda akan selalu tersimpan aman meskipun beralih ke Default atau preset lain.</div>
+          </div>
+        </div>
+
+        <!-- Tab 4: Local Directory & Workspace -->
+        <div class="settings-tab-pane" id="tabLocalWorkspace">
+          <!-- Master Switch Card -->
+          <div class="workspace-card workspace-master-card">
+            <div class="workspace-switch-row">
+              <div class="workspace-switch-info">
+                <div class="workspace-switch-title">
+                  <i class="fa-solid fa-folder-tree" style="color: var(--neon-cyan);"></i>
+                  <strong>Akses & Manajemen Direktori Lokal</strong>
+                </div>
+                <div class="workspace-switch-desc">
+                  Izinkan AI mendeteksi, membaca, dan mengelola dokumen lokal di HP atau laptop Anda secara langsung.
+                </div>
+              </div>
+              <label class="toggle-switch-ios" for="settingLocalWorkspaceToggle">
+                <input type="checkbox" id="settingLocalWorkspaceToggle">
+                <span class="slider-ios"></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Directory Connection Card -->
+          <div class="workspace-card" id="workspaceDirConnectionCard">
+            <div class="workspace-section-header">
+              <span><i class="fa-solid fa-hard-drive"></i> Status Direktori Lokal</span>
+              <span class="platform-badge" id="workspacePlatformBadge"><i class="fa-solid fa-mobile-screen"></i> Deteksi HP / Universal</span>
+            </div>
+
+            <!-- Connected Directory Info Box -->
+            <div class="workspace-folder-status" id="workspaceFolderStatus">
+              <div class="folder-status-icon"><i class="fa-solid fa-folder-open"></i></div>
+              <div class="folder-status-info">
+                <div class="folder-status-name" id="workspaceConnectedDirName">Belum Ada Direktori Terhubung</div>
+                <div class="folder-status-details" id="workspaceConnectedDirDetails">Pilih folder dari HP atau laptop Anda untuk mulai dikelola AI</div>
+              </div>
+            </div>
+
+            <!-- Action Buttons for Directory Selection -->
+            <div class="workspace-dir-actions">
+              <button type="button" class="btn btn-sm btn-primary-neon" id="btnSelectLocalWorkspace">
+                <i class="fa-solid fa-folder-plus"></i> <span id="btnSelectLocalWorkspaceText">Pilih / Hubungkan Folder</span>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline" id="btnRefreshLocalWorkspace" style="display: none;" title="Pindai ulang berkas di direktori">
+                <i class="fa-solid fa-arrows-rotate"></i> Sinkronkan
+              </button>
+              <button type="button" class="btn btn-sm btn-outline btn-danger-hover" id="btnDisconnectLocalWorkspace" style="display: none;" title="Putuskan sambungan direktori ini">
+                <i class="fa-solid fa-link-slash"></i> Putuskan
+              </button>
+            </div>
+
+            <!-- Hidden File / Directory Inputs for Mobile & Universal Fallback -->
+            <input type="file" id="inputLocalWorkspaceFolderMobile" webkitdirectory directory multiple style="display: none;">
+            <input type="file" id="inputLocalWorkspaceFilesMobile" multiple accept="*/*" style="display: none;">
+          </div>
+
+          <!-- AI Permissions & Capabilities Card -->
+          <div class="workspace-card" id="workspacePermissionsCard">
+            <div class="workspace-section-header">
+              <span><i class="fa-solid fa-shield-halved"></i> Izin & Perilaku Pengelolaan AI</span>
+            </div>
+            <div class="workspace-checkbox-group">
+              <label class="workspace-checkbox-label">
+                <input type="checkbox" id="settingWorkspaceAiRead" checked>
+                <span class="checkbox-custom"></span>
+                <span class="checkbox-text">
+                  <strong>Izinkan AI Membaca Dokumen</strong>
+                  <small>AI dapat mengekstrak isi teks berkas (PDF, DOCX, TXT, Kode, CSV) saat ditanya</small>
+                </span>
+              </label>
+              <label class="workspace-checkbox-label">
+                <input type="checkbox" id="settingWorkspaceAiWrite" checked>
+                <span class="checkbox-custom"></span>
+                <span class="checkbox-text">
+                  <strong>Izinkan AI Membuat & Menulis Dokumen</strong>
+                  <small>AI dapat membuat berkas baru langsung ke direktori Anda saat diminta</small>
+                </span>
+              </label>
+              <label class="workspace-checkbox-label">
+                <input type="checkbox" id="settingWorkspaceIncludeTree" checked>
+                <span class="checkbox-custom"></span>
+                <span class="checkbox-text">
+                  <strong>Sertakan Struktur Pohon File ke Konteks AI</strong>
+                  <small>AI otomatis mengetahui daftar nama file yang ada di direktori Anda saat obrolan</small>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <!-- File Explorer & Management Card -->
+          <div class="workspace-card" id="workspaceFileExplorerCard" style="display: none;">
+            <div class="workspace-explorer-header">
+              <div class="explorer-title">
+                <i class="fa-solid fa-folder-tree"></i> Daftar Berkas (<span id="workspaceFileCount">0</span>)
+              </div>
+              <div class="explorer-actions">
+                <button type="button" class="btn btn-xs btn-outline" id="btnWorkspaceCreateDoc" title="Buat dokumen teks/markdown baru">
+                  <i class="fa-solid fa-plus"></i> Buat Dokumen
+                </button>
+                <button type="button" class="btn btn-xs btn-outline" id="btnWorkspaceExportZip" title="Unduh seluruh folder sebagai file ZIP">
+                  <i class="fa-solid fa-file-zipper"></i> Ekspor ZIP
+                </button>
+              </div>
+            </div>
+
+            <!-- Search Filter -->
+            <div class="workspace-search-box">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="text" id="workspaceSearchInput" placeholder="Cari nama file dalam direktori...">
+            </div>
+
+            <!-- File List Container -->
+            <div class="workspace-file-list" id="workspaceFileList">
+              <div class="workspace-empty-list">Tidak ada berkas yang ditemukan di direktori ini.</div>
+            </div>
           </div>
         </div>
       </div>
@@ -1575,6 +1721,56 @@
     </div>
   </div>
 
+  <!-- MODAL: Pratinjau Dokumen Workspace -->
+  <div class="modal-backdrop" id="workspaceDocViewerModal">
+    <div class="modal-card modal-doc-viewer-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="fa-solid fa-file-lines" style="color: var(--neon-cyan);"></i>
+          <span id="workspaceDocViewerTitle">Pratinjau Dokumen</span>
+        </div>
+        <button class="modal-close-btn" data-close="workspaceDocViewerModal" aria-label="Tutup pratinjau" title="Tutup pratinjau"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="doc-viewer-meta" id="workspaceDocViewerMeta">
+          <span id="docViewerPath"></span> • <span id="docViewerSize"></span>
+        </div>
+        <pre class="doc-viewer-content" id="workspaceDocViewerContent"></pre>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close="workspaceDocViewerModal">Tutup</button>
+        <button class="btn btn-outline" id="btnCopyDocViewerContent"><i class="fa-solid fa-copy"></i> Salin Teks</button>
+        <button class="btn btn-primary" id="btnDownloadDocViewerFile"><i class="fa-solid fa-download"></i> Unduh File</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Buat Dokumen Baru di Workspace -->
+  <div class="modal-backdrop" id="workspaceDocCreateModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="fa-solid fa-file-circle-plus" style="color: var(--neon-teal);"></i> Buat Dokumen Baru di Direktori
+        </div>
+        <button class="modal-close-btn" data-close="workspaceDocCreateModal" aria-label="Tutup form" title="Tutup form"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="inputWorkspaceNewFileName">Nama File & Ekstensi:</label>
+          <input type="text" id="inputWorkspaceNewFileName" placeholder="contoh: catatan.md, rencana.txt, skrip.py, data.json">
+        </div>
+        <div class="form-group">
+          <label for="inputWorkspaceNewFileContent">Isi Dokumen:</label>
+          <textarea id="inputWorkspaceNewFileContent" rows="8" placeholder="Tulis atau tempel konten teks dokumen di sini..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close="workspaceDocCreateModal">Batal</button>
+        <button class="btn btn-primary" id="btnSaveNewWorkspaceDoc"><i class="fa-solid fa-floppy-disk"></i> Simpan ke Direktori</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
@@ -1590,8 +1786,8 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261014_v255" defer></script>
+  <script src="text-safety.js?v=20261014_v256" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261014_v255" defer></script>
+  <script src="app.js?v=20261014_v256" defer></script>
 </body>
 </html>
