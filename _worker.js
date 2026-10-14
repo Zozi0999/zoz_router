@@ -313,87 +313,14 @@ async function ytEnrich(results) {
   return results;
 }
 
-async function ytSearchViaCustomVideoUrl(query, limit, customUrl) {
-  if (!customUrl || typeof customUrl !== 'string') return [];
-  let targetUrl = customUrl.replace(/\{query\}|\{q\}/gi, encodeURIComponent(query));
-  if (!targetUrl.includes(encodeURIComponent(query))) {
-    const sep = targetUrl.includes('?') ? '&' : '?';
-    targetUrl += `${sep}q=${encodeURIComponent(query)}`;
-  }
-  try {
-    const resp = await fetch(targetUrl, {
-      signal: AbortSignal.timeout(8000),
-      headers: {
-        'User-Agent': YOUTUBE_SEARCH_UA,
-        'Accept': 'application/json,text/html,*/*'
-      }
-    });
-    if (!resp.ok) return [];
-    const cType = resp.headers.get('content-type') || '';
-    if (cType.includes('application/json')) {
-      const data = await resp.json();
-      if (Array.isArray(data)) {
-        return data.slice(0, limit).map(it => ({
-          videoId: it.videoId || it.id || '',
-          title: it.title || 'Video',
-          channel: it.author || it.uploaderName || it.channelTitle || '',
-          channelUrl: it.authorUrl || '',
-          durationText: it.lengthSeconds ? `${Math.floor(it.lengthSeconds / 60)}:${String(it.lengthSeconds % 60).padStart(2, '0')}` : '',
-          durationSeconds: Number(it.lengthSeconds) || 0,
-          viewText: Number(it.viewCount) > 0 ? `${Number(it.viewCount).toLocaleString('en-US')} views` : '',
-          publishedText: it.publishedText || '',
-          description: String(it.description || '').slice(0, 260),
-          url: it.videoId ? `https://www.youtube.com/watch?v=${it.videoId}` : (it.url || ''),
-          thumbnail: it.videoThumbnails?.[0]?.url || (it.videoId ? `https://i.ytimg.com/vi/${it.videoId}/hqdefault.jpg` : ''),
-          source: 'Custom Video Provider'
-        })).filter(v => v.title && (v.videoId || v.url));
-      }
-    }
-    const html = await resp.text();
-    const jsonStr = ytExtractJson(html, 'ytInitialData');
-    if (jsonStr) {
-      try {
-        const data = JSON.parse(jsonStr);
-        const results = [];
-        ytCollectResults(data, results, limit);
-        if (results.length > 0) return results;
-      } catch (_) {}
-    }
-    const vidMatches = [...html.matchAll(/(?:\/watch\?v=|youtu\.be\/|data-video-id=["'])([a-zA-Z0-9_-]{11})/g)];
-    const seen = new Set();
-    const fallbackResults = [];
-    for (const m of vidMatches) {
-      const vid = m[1];
-      if (seen.has(vid)) continue;
-      seen.add(vid);
-      fallbackResults.push({
-        videoId: vid,
-        title: `Video (${vid})`,
-        url: `https://www.youtube.com/watch?v=${vid}`,
-        thumbnail: `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,
-        source: 'Custom URL Scraper'
-      });
-      if (fallbackResults.length >= limit) break;
-    }
-    return fallbackResults;
-  } catch (err) {
-    console.warn('[Custom Video Search Edge] Error fetching custom video search URL:', err.message);
-    return [];
-  }
-}
-
-async function ytSearchVideos(query, maxResults, customSearchUrl = '') {
+async function ytSearchVideos(query, maxResults) {
   const q = String(query || '').trim();
   if (!q) throw new Error('Parameter query tidak boleh kosong.');
   const limit = Math.max(1, Math.min(10, parseInt(maxResults, 10) || 6));
-  const key = `${q.toLowerCase()}::${limit}::${customSearchUrl || 'default'}`;
+  const key = `${q.toLowerCase()}::${limit}`;
   if (ytSearchCache.has(key)) return ytSearchCache.get(key);
 
-  let results = [];
-  if (customSearchUrl && typeof customSearchUrl === 'string' && /^https?:\/\//i.test(customSearchUrl.trim())) {
-    results = await ytSearchViaCustomVideoUrl(q, limit, customSearchUrl.trim());
-  }
-  if (results.length === 0) results = await ytSearchViaYouTubePage(q, limit);
+  let results = await ytSearchViaYouTubePage(q, limit);
   if (results.length === 0) results = await ytSearchViaInvidious(q, limit);
   if (results.length > 0) results = await ytEnrich(results);
 
@@ -402,7 +329,6 @@ async function ytSearchVideos(query, maxResults, customSearchUrl = '') {
     query: q,
     count: results.length,
     results,
-    customSearchUrl: customSearchUrl || undefined,
     error: results.length > 0 ? undefined : 'Tidak ditemukan hasil video. Coba kata kunci lain.'
   };
   if (results.length > 0) {
@@ -820,7 +746,7 @@ export default {
           // 100% Pure Cloud Bridge: Jika dipanggil tanpa dedicated Ollama key / server khusus, teruskan via Cloud AI (OpenRouter)
           let orKey = body.openRouterKey || (body.apiKey && String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (request.headers.get('Authorization') && request.headers.get('Authorization').includes('sk-or-') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
           if (orKey) orKey = String(orKey).replace(/^Bearer\s+/i, '').trim();
-          const targetModel = mapOllamaModelToOpenRouter(body.model || 'gemma4:31b');
+          const targetModel = mapOllamaModelToOpenRouter(body.model || 'qwen2.5:1.5b');
           const isStream = body.stream !== false;
           const openRouterPayload = {
             model: targetModel,
@@ -876,7 +802,7 @@ export default {
               msgPayload.reasoning = reasoning;
             }
             return new Response(JSON.stringify({
-              model: body.model || 'gemma4:31b',
+              model: body.model || 'qwen2.5:1.5b',
               created_at: new Date().toISOString(),
               message: msgPayload,
               done: true
@@ -907,7 +833,7 @@ export default {
                   const dataStr = trimmed.slice(5).trim();
                   if (dataStr === '[DONE]') {
                     await writer.write(encoder.encode(JSON.stringify({
-                      model: body.model || 'gemma4:31b',
+                      model: body.model || 'qwen2.5:1.5b',
                       created_at: new Date().toISOString(),
                       message: { role: 'assistant', content: '' },
                       done: true
@@ -924,7 +850,7 @@ export default {
                       if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
                       if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
                       await writer.write(encoder.encode(JSON.stringify({
-                        model: body.model || 'gemma4:31b',
+                        model: body.model || 'qwen2.5:1.5b',
                         created_at: new Date().toISOString(),
                         message: msgPayload,
                         done: false
@@ -970,7 +896,7 @@ export default {
         if (rawOllamaKey) headers['Authorization'] = `Bearer ${rawOllamaKey}`;
 
         const outBody = {
-          model: body.model || 'gemma4:31b',
+          model: body.model || 'qwen2.5:1.5b',
           messages: body.messages || [],
           stream: body.stream !== false,
           options: body.options || {}
@@ -1219,7 +1145,7 @@ export default {
               reqModel = mapOllamaModelToOpenRouter(reqModel);
             }
             const isLiquid = reqModel.includes('liquid') || reqModel.includes('lfm-');
-            const isReasoning = reqModel.includes('/o1') || reqModel.includes('/o3');
+            const isReasoning = Boolean(reqModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r)\b/i.test(reqModel) || reqModel.toLowerCase().includes('reasoning') || reqModel.toLowerCase().includes('-r1')));
             const out = {
               model: reqModel,
               messages: body.messages || [],
@@ -2120,18 +2046,15 @@ export default {
       try {
         let query = '';
         let maxResults = 6;
-        let customSearchUrl = '';
         if (request.method === 'GET') {
           query = url.searchParams.get('q') || url.searchParams.get('query') || url.searchParams.get('keyword') || url.searchParams.get('search') || url.searchParams.get('topic') || url.searchParams.get('title') || url.searchParams.get('text') || url.searchParams.get('cari') || url.searchParams.get('kata_kunci') || url.searchParams.get('judul') || '';
           const parsedLimit = parseInt(url.searchParams.get('limit') || url.searchParams.get('max_results') || '6', 10);
           maxResults = Math.min(Math.max(isNaN(parsedLimit) ? 6 : parsedLimit, 1), 20);
-          customSearchUrl = url.searchParams.get('customSearchUrl') || url.searchParams.get('customUrl') || '';
         } else {
           const body = await request.json().catch(() => ({}));
           query = body.q || body.query || body.keyword || body.search || body.topic || body.title || body.text || body.cari || body.kata_kunci || body.judul || '';
           const parsedLimit = parseInt(body.limit || body.max_results || '6', 10);
           maxResults = Math.min(Math.max(isNaN(parsedLimit) ? 6 : parsedLimit, 1), 20);
-          customSearchUrl = body.customSearchUrl || body.customUrl || '';
         }
 
         if (!query || !String(query).trim()) {
@@ -2141,7 +2064,7 @@ export default {
           });
         }
 
-        const data = await ytSearchVideos(String(query).trim(), maxResults, customSearchUrl);
+        const data = await ytSearchVideos(String(query).trim(), maxResults);
         const resHeaders = {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*'

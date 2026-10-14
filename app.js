@@ -103,7 +103,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     'cohere/north-mini-code:free',
     'dots-studio/dots-3-note-preview:free',
     'liquid/lfm-2.5-2.6b:free',
-    'apodex/apodex-1.1-mini:free',
     'poolside/laguna-s-2.1:free'
   ];
 
@@ -185,7 +184,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
     if (id.includes('dots')) return 'dots-studio/dots-3-note-preview:free';
     if (id.includes('liquid') || id.includes('lfm')) return 'liquid/lfm-2.5-2.6b:free';
-    if (id.includes('apodex')) return 'apodex/apodex-1.1-mini:free';
+    if (id.includes('apodex')) return 'openrouter/free';
     if (id.includes('laguna')) return 'poolside/laguna-s-2.1:free';
     if (id.includes('deepseek')) return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
     if (id.includes('llama')) return 'nvidia/nemotron-3.5-lightning:free';
@@ -380,7 +379,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       ollamaModel: 'qwen2.5:1.5b',
       openRouterModel: 'openrouter/free',
       imageModel: 'flux',
-      musicModel: 'qwen2.5:1.5b',
+      musicModel: 'google/lyria-3-clip-preview',
       temperature: 0.7,
       topP: 0.9,
       maxTokens: 8192,
@@ -6946,15 +6945,15 @@ ${blocks}
       }));
     }
 
-    const currentActive = getCurrentModel();
+    const activeModelForTab = isOllamaTab ? STATE.settings.ollamaModel : STATE.settings.openRouterModel;
 
     // Filter pencarian
     let filtered = models.filter(m => !q || (m.id && m.id.toLowerCase().includes(q)) || (m.name && m.name.toLowerCase().includes(q)));
 
     // Urutkan model dengan rapi: Model aktif di paling atas, disusul model favorit pengguna, lalu sisanya alfabetis
     filtered.sort((a, b) => {
-      if (a.id === currentActive) return -1;
-      if (b.id === currentActive) return 1;
+      if (a.id === activeModelForTab) return -1;
+      if (b.id === activeModelForTab) return 1;
       const aFav = isModelFavorite(a.id);
       const bFav = isModelFavorite(b.id);
       if (aFav && !bFav) return -1;
@@ -6991,7 +6990,7 @@ ${blocks}
     displayList.forEach(m => {
       const item = document.createElement('div');
       const isFav = isModelFavorite(m.id);
-      item.className = `model-option-item ${m.id === currentActive ? 'selected' : ''} ${isFav ? 'is-fav' : ''}`;
+      item.className = `model-option-item ${m.id === activeModelForTab ? 'selected' : ''} ${isFav ? 'is-fav' : ''}`;
       const tagLower = (m.tag || '').toLowerCase();
       const isFree = tagLower.includes('free');
       const isCloud = tagLower.includes('cloud');
@@ -9486,7 +9485,7 @@ Format teks (untuk model tanpa function calling):
     } else if (isVisionUnsupported) {
       title = `Model ${escapeHtml(modelName)} Tidak Mendukung Input Gambar`;
       desc = `Model ini menolak pemrosesan gambar multimodal karena beroperasi dalam mode teks murni (text-only).`;
-      advice = `💡 <strong>Saran:</strong> Beralihlah ke model multimodal seperti <code>google/gemini-2.0-flash-exp:free</code>, <code>openai/gpt-4o</code>, <code>gemma4:31b</code>, atau kirim prompt Anda tanpa lampiran gambar.`;
+      advice = `💡 <strong>Saran:</strong> Beralihlah ke model multimodal aktif seperti <code>google/gemma-4-31b-it:free</code>, <code>google/gemini-2.5-flash</code>, <code>openai/gpt-4o</code>, atau kirim prompt Anda tanpa lampiran gambar.`;
     } else if (engine === 'openrouter' && (msg.includes('402') || msg.includes('insufficient') || msg.includes('payment required') || msg.includes('credit'))) {
       title = `Model Berbayar Memerlukan Saldo OpenRouter (HTTP 402)`;
       desc = `Model <code>${escapeHtml(modelName)}</code> adalah model cloud berbayar (paid tier) dan saldo kredit OpenRouter Anda belum mencukupi untuk memproses permintaan ini.`;
@@ -10779,7 +10778,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         const currentMessagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, currentModel);
 
         const isLiquid = Boolean(currentModel && (currentModel.includes('liquid') || currentModel.includes('lfm-')));
-        const isReasoning = Boolean(currentModel && (currentModel.includes('/o1') || currentModel.includes('/o3')));
+        const isReasoning = Boolean(currentModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r)\b/i.test(currentModel) || currentModel.toLowerCase().includes('reasoning') || currentModel.toLowerCase().includes('-r1')));
 
         const basePayload = {
           model: currentModel,
@@ -14539,9 +14538,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
   const MUSIC_AUDIO_RE = /lyria|musicgen|suno|udio|stable-audio|gpt-audio/i;
   const DEFAULT_MUSIC_MODEL = 'google/lyria-3-clip-preview';
-  function isAudioMusicModel(id) { return MUSIC_AUDIO_RE.test(String(id || '')); }
+  function isAudioMusicModel(id) { 
+    const s = String(id || '').trim();
+    return s === 'off' || MUSIC_AUDIO_RE.test(s); 
+  }
   function normalizeMusicModelSetting() {
-    if (!isAudioMusicModel(STATE.settings.musicModel)) {
+    if (!STATE.settings.musicModel || !isAudioMusicModel(STATE.settings.musicModel)) {
       STATE.settings.musicModel = DEFAULT_MUSIC_MODEL;
       try { localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings)); } catch (_) {}
       if (els.settingMusicModel) els.settingMusicModel.value = DEFAULT_MUSIC_MODEL;
@@ -16727,11 +16729,8 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           toggleModelFavorite(modelId, e); // sudah preventDefault + stopPropagation di dalamnya
           return;
         }
-        if (e.target.closest && e.target.closest('.catalog-select-btn')) {
-          e.preventDefault();
-          e.stopPropagation();
-          applySelectedModelFromCatalog(modelId, STATE.activeCatalogTab === 'ollama' ? 'ollama' : 'openrouter');
-        }
+        e.preventDefault();
+        applySelectedModelFromCatalog(modelId, STATE.activeCatalogTab === 'ollama' ? 'ollama' : 'openrouter');
       });
     }
     const previousScrollTop = container.scrollTop;
@@ -17015,8 +17014,13 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       if (catModal) catModal.classList.remove('show');
 
       try {
+        const isSettingsOpen = document.getElementById('settingsModal')?.classList.contains('show');
         if (window.history && history.replaceState) {
-          history.replaceState({ modal: 'settingsModal' }, '');
+          if (isSettingsOpen) {
+            history.replaceState({ modal: 'settingsModal' }, '');
+          } else {
+            history.replaceState(null, '');
+          }
         }
       } catch (e) {}
 
@@ -17026,15 +17030,20 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
     // Model Obrolan Utama
     if (provider === 'ollama') {
-      setEngineMode('ollama');
       STATE.settings.ollamaModel = modelId;
+      if (STATE.mode !== 'auto') {
+        setEngineMode('ollama');
+      }
     } else {
-      setEngineMode('openrouter');
       const cleanORModel = modelId.includes('/') ? modelId : (mapOllamaModelToOpenRouter(modelId) || 'openrouter/free');
       STATE.settings.openRouterModel = cleanORModel;
+      if (STATE.mode !== 'auto') {
+        setEngineMode('openrouter');
+      }
     }
     savePersistedState();
     updateModelUI();
+    populateModelDropdown();
 
     closeModal('liveModelCatalogModal');
   }
@@ -17264,7 +17273,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
               <span class="catalog-badge" style="background:rgba(255,0,127,0.1); color:#FF007F; border-color:rgba(255,0,127,0.3);">
-                Model: ${escapeHtml(syn.model || STATE.activeModel || (STATE.currentEngine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel) || 'Lead Corrector')}
+                Model: ${escapeHtml(syn.model || (STATE.mode === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel) || 'Lead Corrector')}
               </span>
               <span class="catalog-badge" style="background:rgba(0,255,194,0.1); color:var(--neon-teal);">
                 ${isComplete ? '<i class="fa-solid fa-check"></i> Selesai' : (synText ? '<i class="fa-solid fa-spinner fa-spin"></i> Mengoreksi...' : 'Menunggu')}
@@ -17298,7 +17307,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
               <span class="catalog-badge" style="background:rgba(0,240,255,0.08); color:var(--neon-cyan); border-color:rgba(0,240,255,0.3);">
-                Model: ${escapeHtml(m4.model || STATE.activeModel || (STATE.currentEngine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel) || 'Executive Summarizer')}
+                Model: ${escapeHtml(m4.model || (STATE.mode === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel) || 'Executive Summarizer')}
               </span>
               <span class="catalog-badge" style="background:rgba(0,255,194,0.1); color:var(--neon-teal);">
                 ${isComplete ? '<i class="fa-solid fa-check"></i> Selesai' : (m4Text ? '<i class="fa-solid fa-spinner fa-spin"></i> Merumuskan...' : 'Menunggu')}
@@ -17470,12 +17479,23 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       modelSearchDebounceTimer = setTimeout(() => populateModelDropdown(value), 150);
     });
 
-    els.useCustomModelBtn?.addEventListener('click', () => {
+    const applyCustomModel = () => {
       const val = els.customModelInput ? els.customModelInput.value.trim() : '';
       if (val) {
-        selectModel(val);
+        const targetProvider = (STATE.dropdownModelTab === 'openrouter' || STATE.dropdownModelTab === 'ollama')
+          ? STATE.dropdownModelTab
+          : null;
+        selectModel(val, targetProvider);
         if (els.customModelInput) els.customModelInput.value = '';
         els.modelDropdownMenu?.classList.remove('show');
+      }
+    };
+
+    els.useCustomModelBtn?.addEventListener('click', applyCustomModel);
+    els.customModelInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        applyCustomModel();
       }
     });
 
