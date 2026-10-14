@@ -15205,23 +15205,30 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
   function updateVideoSearchUI() {
     const isOn = Boolean(STATE.isYouTubeSearchMode);
 
-    // 1. Tombol & Badge di Composer
+    // 1. Tombol & Badge di Composer (Disembunyikan dari bar utama agar prompt menu bersih)
+    if (els.videoSearchMenuWrapper) {
+      els.videoSearchMenuWrapper.style.display = 'none';
+    }
     if (els.videoSearchToggleBtn) {
+      els.videoSearchToggleBtn.style.display = 'none';
       els.videoSearchToggleBtn.classList.toggle('active', isOn);
       els.videoSearchToggleBtn.setAttribute('aria-pressed', String(isOn));
-      els.videoSearchToggleBtn.title = isOn
-        ? 'Pencarian YouTube: Aktif (Klik untuk matikan)'
-        : 'Pencarian YouTube: Nonaktif (Klik untuk aktifkan)';
     }
     if (els.videoSearchBadge) {
-      els.videoSearchBadge.style.display = isOn ? 'inline-block' : 'none';
-      els.videoSearchBadge.textContent = 'YT';
+      els.videoSearchBadge.style.display = 'none';
     }
 
-    // 2. Indikator di Composer bar
+    // 2. Indikator di Composer bar (Hanya muncul saat mode aktif digunakan)
     if (els.youtubeModeIndicator) {
       els.youtubeModeIndicator.style.display = isOn ? 'flex' : 'none';
       els.youtubeModeIndicator.setAttribute('aria-pressed', String(isOn));
+      els.youtubeModeIndicator.title = isOn
+        ? 'Pencarian YouTube Aktif (Klik untuk nonaktifkan)'
+        : 'Pencarian YouTube: Nonaktif';
+      const icon = els.youtubeModeIndicator.querySelector('i');
+      if (icon) {
+        icon.className = 'fa-brands fa-youtube';
+      }
     }
 
     // 3. Opsi di menu Lampiran

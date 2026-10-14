@@ -8969,7 +8969,7 @@ body.page-paused *::after {
 /* ==================== VIDEO SEARCH & CUSTOM URL MENU ==================== */
 .video-search-menu-wrapper {
   position: relative;
-  display: inline-flex;
+  display: none !important;
   align-items: center;
 }
 
