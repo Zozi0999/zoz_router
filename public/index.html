@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261014_v248">
+  <link rel="stylesheet" href="style.css?v=20261014_v249">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -68,23 +68,36 @@
         </div>
       </div>
 
-      <!-- Search History -->
-      <div class="search-history-box">
+      <!-- Search History Box -->
+      <div class="search-history-box" id="searchHistoryBox">
         <i class="fa-solid fa-magnifying-glass"></i>
         <input type="text" id="searchHistoryInput" placeholder="Cari riwayat percakapan...">
       </div>
 
+      <!-- DeepSeek-Style Multi-Select Top Bar -->
+      <div class="history-select-topbar" id="historySelectTopBar" style="display: none;">
+        <span class="select-count-text" id="historySelectCountText">1 chat selected</span>
+        <div class="select-top-actions">
+          <button class="select-text-action-btn" id="btnSelectAllHistory" title="Pilih Semua Percakapan">Semua</button>
+          <button class="select-close-circle-btn" id="btnCloseHistorySelectMode" title="Batalkan Pilihan"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+      </div>
+
       <!-- Chat History List -->
       <div class="history-section">
-        <div class="history-label">RIWAYAT SESI</div>
+        <div class="history-label-row" id="historyLabelRow">
+          <div class="history-label">RIWAYAT PERCAKAPAN</div>
+          <button class="history-select-toggle-btn" id="btnToggleHistorySelectMode" title="Pilih Beberapa Percakapan (Multi-Select)">
+            <i class="fa-solid fa-list-check"></i>
+          </button>
+        </div>
         <div class="chat-history-list" id="chatHistoryList">
           <!-- Populated by JavaScript -->
         </div>
       </div>
 
-
-      <!-- Sidebar Footer -->
-      <div class="sidebar-footer">
+      <!-- Sidebar Footer (Normal Mode) -->
+      <div class="sidebar-footer" id="sidebarNormalFooter">
         <button class="sidebar-footer-btn" id="modelHubBtn" title="Buka Katalog Model Layar Lebar Real-Time">
           <i class="fa-solid fa-shapes"></i> Katalog Model
         </button>
@@ -93,6 +106,16 @@
         </button>
         <button class="sidebar-footer-btn" id="clearAllHistoryBtn" title="Hapus Semua Riwayat">
           <i class="fa-solid fa-trash-can"></i>
+        </button>
+      </div>
+
+      <!-- DeepSeek-Style Multi-Select Bottom Bar -->
+      <div class="history-select-bottom-bar" id="historySelectBottomBar" style="display: none;">
+        <button class="select-bottom-btn select-pin-btn" id="btnPinSelectedHistory" title="Sematkan / Lepas Sematan Percakapan Terpilih">
+          <i class="fa-solid fa-thumbtack"></i> <span id="pinSelectedText">Pin</span>
+        </button>
+        <button class="select-bottom-btn select-delete-btn" id="btnDeleteSelectedHistory" title="Hapus Percakapan Terpilih">
+          <i class="fa-solid fa-trash-can"></i> <span>Delete</span>
         </button>
       </div>
     </aside>
@@ -1523,8 +1546,8 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261014_v248" defer></script>
+  <script src="text-safety.js?v=20261014_v249" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261014_v248" defer></script>
+  <script src="app.js?v=20261014_v249" defer></script>
 </body>
 </html>

@@ -343,6 +343,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     mode: 'ollama', // 'ollama' | 'openrouter' | 'auto'
     sessions: [],
     currentSessionId: null,
+    historySelectMode: false,
+    selectedSessionIds: new Set(),
     attachedImages: [], // Array of Base64 data URLs
     get attachedImage() { return (this.attachedImages && this.attachedImages.length > 0) ? this.attachedImages[0] : null; },
     set attachedImage(val) { this.attachedImages = val ? (Array.isArray(val) ? val : [val]) : []; },
@@ -554,7 +556,19 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     pullUpNewChatBtn: $('#pullUpNewChatBtn'),
     pullUpNewChatWrapper: $('#pullUpNewChatWrapper'),
     chatHistoryList: $('#chatHistoryList'),
+    searchHistoryBox: $('#searchHistoryBox'),
     searchHistoryInput: $('#searchHistoryInput'),
+    historySelectTopBar: $('#historySelectTopBar'),
+    historySelectCountText: $('#historySelectCountText'),
+    btnSelectAllHistory: $('#btnSelectAllHistory'),
+    btnCloseHistorySelectMode: $('#btnCloseHistorySelectMode'),
+    historyLabelRow: $('#historyLabelRow'),
+    btnToggleHistorySelectMode: $('#btnToggleHistorySelectMode'),
+    sidebarNormalFooter: $('#sidebarNormalFooter'),
+    historySelectBottomBar: $('#historySelectBottomBar'),
+    btnPinSelectedHistory: $('#btnPinSelectedHistory'),
+    pinSelectedText: $('#pinSelectedText'),
+    btnDeleteSelectedHistory: $('#btnDeleteSelectedHistory'),
     clearAllHistoryBtn: $('#clearAllHistoryBtn'),
     toggleSidebarBtn: $('#toggleSidebarBtn'),
     closeSidebarBtn: $('#closeSidebarBtn'),
@@ -3961,6 +3975,182 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     AudioEngine.click();
   }
 
+  function getSessionTimeGroup(session) {
+    if (session.isPinned) return 'Pinned';
+    const ts = getSessionTimestamp(session);
+    if (!ts || isNaN(ts)) return '30 Hari Terakhir';
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOfYesterday = startOfToday - 86400000;
+    const startOf7Days = startOfToday - (6 * 86400000);
+    const startOf30Days = startOfToday - (29 * 86400000);
+
+    if (ts >= startOfToday) return 'Hari Ini';
+    if (ts >= startOfYesterday) return 'Kemarin';
+    if (ts >= startOf7Days) return '7 Hari Terakhir';
+    if (ts >= startOf30Days) return '30 Hari Terakhir';
+    return 'Lebih Lama';
+  }
+
+  function enterHistorySelectMode(initialSessionId = null) {
+    STATE.historySelectMode = true;
+    STATE.selectedSessionIds.clear();
+    if (initialSessionId) {
+      STATE.selectedSessionIds.add(initialSessionId);
+    }
+    updateHistorySelectUI();
+    renderChatHistory(els.searchHistoryInput?.value || '');
+    AudioEngine.click();
+  }
+
+  function exitHistorySelectMode() {
+    STATE.historySelectMode = false;
+    STATE.selectedSessionIds.clear();
+    updateHistorySelectUI();
+    renderChatHistory(els.searchHistoryInput?.value || '');
+    AudioEngine.click();
+  }
+
+  function updateHistorySelectUI() {
+    if (STATE.historySelectMode) {
+      if (els.searchHistoryBox) els.searchHistoryBox.style.display = 'none';
+      if (els.historySelectTopBar) els.historySelectTopBar.style.display = 'flex';
+      if (els.sidebarNormalFooter) els.sidebarNormalFooter.style.display = 'none';
+      if (els.historySelectBottomBar) els.historySelectBottomBar.style.display = 'flex';
+
+      const count = STATE.selectedSessionIds.size;
+      const countStr = count === 1 ? '1 chat selected' : (count === 0 ? 'Pilih percakapan' : `${count} chats selected`);
+      if (els.historySelectCountText) els.historySelectCountText.innerText = countStr;
+
+      const selectedSessions = STATE.sessions.filter(s => STATE.selectedSessionIds.has(s.id));
+      const allPinned = selectedSessions.length > 0 && selectedSessions.every(s => s.isPinned);
+      if (els.pinSelectedText) {
+        els.pinSelectedText.innerText = allPinned ? 'Unpin' : 'Pin';
+      }
+      if (els.btnPinSelectedHistory) {
+        const pinIcon = els.btnPinSelectedHistory.querySelector('i');
+        if (pinIcon) pinIcon.style.transform = allPinned ? 'rotate(45deg)' : 'none';
+      }
+    } else {
+      if (els.searchHistoryBox) els.searchHistoryBox.style.display = '';
+      if (els.historySelectTopBar) els.historySelectTopBar.style.display = 'none';
+      if (els.sidebarNormalFooter) els.sidebarNormalFooter.style.display = '';
+      if (els.historySelectBottomBar) els.historySelectBottomBar.style.display = 'none';
+    }
+  }
+
+  function toggleSessionSelection(sessionId) {
+    if (STATE.selectedSessionIds.has(sessionId)) {
+      STATE.selectedSessionIds.delete(sessionId);
+    } else {
+      STATE.selectedSessionIds.add(sessionId);
+    }
+    updateHistorySelectUI();
+    const item = els.chatHistoryList?.querySelector(`.history-item[data-id="${sessionId}"]`);
+    if (item) {
+      const isSelected = STATE.selectedSessionIds.has(sessionId);
+      item.classList.toggle('is-selected', isSelected);
+      const circle = item.querySelector('.history-select-circle');
+      if (circle) {
+        circle.className = `history-select-circle ${isSelected ? 'selected' : ''}`;
+        circle.innerHTML = `<i class="${isSelected ? 'fa-solid fa-circle-check' : 'fa-regular fa-circle'}"></i>`;
+      }
+    }
+    AudioEngine.click();
+  }
+
+  function toggleSelectAllHistory() {
+    const q = els.searchHistoryInput?.value?.toLowerCase()?.trim() || '';
+    const validSessions = STATE.sessions.filter(s => {
+      const hasMsg = s._isLazyDisk 
+        ? ((typeof s.messageCount === 'number' && s.messageCount > 0) || (Array.isArray(s.messages) && s.messages.length > 0))
+        : (Array.isArray(s.messages) && s.messages.length > 0);
+      if (!hasMsg) return false;
+      return !q || (s.title || '').toLowerCase().includes(q) || (s.mode && s.mode.toLowerCase().includes(q));
+    });
+
+    const allSelected = validSessions.length > 0 && validSessions.every(s => STATE.selectedSessionIds.has(s.id));
+    if (allSelected) {
+      STATE.selectedSessionIds.clear();
+    } else {
+      validSessions.forEach(s => STATE.selectedSessionIds.add(s.id));
+    }
+    updateHistorySelectUI();
+    renderChatHistory(q);
+    AudioEngine.click();
+  }
+
+  async function pinOrUnpinSelectedHistory() {
+    if (STATE.selectedSessionIds.size === 0) {
+      showToast('Pilih percakapan yang ingin di-pin / unpin terlebih dahulu');
+      return;
+    }
+    const selectedSessions = STATE.sessions.filter(s => STATE.selectedSessionIds.has(s.id));
+    const allPinned = selectedSessions.every(s => s.isPinned);
+    const targetPin = !allPinned;
+
+    for (const session of selectedSessions) {
+      session.isPinned = targetPin;
+      session.updatedAt = new Date().toISOString();
+      if (session._isLazyDisk && (!session.messages || session.messages.length === 0)) {
+        await DeviceStorage.updateSessionMetadata(session.id, { isPinned: session.isPinned, updatedAt: session.updatedAt });
+      } else {
+        await DeviceStorage.saveSession(session);
+      }
+    }
+
+    savePersistedState();
+    exitHistorySelectMode();
+    showToast(targetPin ? `📌 ${selectedSessions.length} percakapan disematkan ke atas` : `${selectedSessions.length} percakapan dilepas dari sematan`, 'success');
+    AudioEngine.click();
+  }
+
+  async function deleteSelectedHistory() {
+    if (STATE.selectedSessionIds.size === 0) {
+      showToast('Pilih percakapan yang ingin dihapus terlebih dahulu');
+      return;
+    }
+    const count = STATE.selectedSessionIds.size;
+    if (!confirm(`Hapus ${count} percakapan yang dipilih secara permanen?\n\nSeluruh pesan di dalamnya akan dihapus dan tidak bisa dikembalikan.`)) {
+      return;
+    }
+
+    const idsToDelete = Array.from(STATE.selectedSessionIds);
+    let activeDeleted = false;
+
+    for (const sessionId of idsToDelete) {
+      if (STATE.isGenerating && STATE.currentSessionId === sessionId) {
+        stopGeneration();
+      }
+      if (STATE.currentSessionId === sessionId) {
+        activeDeleted = true;
+      }
+      const idx = STATE.sessions.findIndex(s => s.id === sessionId);
+      if (idx !== -1) {
+        STATE.sessions.splice(idx, 1);
+      }
+      await DeviceStorage.deleteSession(sessionId);
+    }
+
+    if (activeDeleted) {
+      if (STATE.sessions.length > 0) {
+        STATE.currentSessionId = STATE.sessions[0].id;
+        safeSessionStorage.setItem('zoz_active_session_id', STATE.currentSessionId);
+        try { localStorage.setItem('zoz_last_active_session_id', STATE.currentSessionId); } catch (_) {}
+      } else {
+        createNewSession();
+      }
+    }
+
+    savePersistedState({ immediate: true });
+    exitHistorySelectMode();
+    if (activeDeleted && STATE.currentSessionId) {
+      switchSession(STATE.currentSessionId);
+    }
+    showToast(`🗑️ ${count} percakapan berhasil dihapus`, 'success');
+    AudioEngine.click();
+  }
+
   function renderChatHistory(filterQuery = '') {
     if (!els.chatHistoryList) return;
     els.chatHistoryList.innerHTML = '';
@@ -4003,136 +4193,184 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       return;
     }
 
+    // Grouping by time categories (DeepSeek style: Pinned, Hari Ini, Kemarin, 7 Hari Terakhir, etc.)
+    const groups = {};
+    const groupOrder = ['Pinned', 'Hari Ini', 'Kemarin', '7 Hari Terakhir', '30 Hari Terakhir', 'Lebih Lama'];
+    groupOrder.forEach(g => { groups[g] = []; });
+
     filtered.forEach(session => {
-      const item = document.createElement('div');
-      item.className = `history-item ${session.id === STATE.currentSessionId ? 'active' : ''} ${session.isPinned ? 'is-pinned' : ''}`;
-      item.dataset.id = session.id;
-      item.tabIndex = 0;
-      
-      let modeIcon = 'fa-server';
-      let modeColor = 'var(--neon-cyan)';
-      let modeTag = 'Ollama';
-      if (session.mode === 'openrouter') {
-        modeIcon = 'fa-bolt';
-        modeColor = 'var(--neon-amber)';
-        modeTag = 'OpenRouter';
-      } else if (session.mode === 'auto') {
-        modeIcon = 'fa-route';
-        modeColor = 'var(--neon-teal)';
-        modeTag = 'Auto';
-      }
+      const g = getSessionTimeGroup(session);
+      if (!groups[g]) groups[g] = [];
+      groups[g].push(session);
+    });
 
-      item.innerHTML = `
-        <div class="history-title-wrap">
-          ${session.isPinned ? '<i class="fa-solid fa-thumbtack history-pin-icon" title="Disematkan di Atas"></i>' : ''}
-          <i class="fa-solid ${modeIcon}" style="color:${modeColor}; font-size:0.8rem;" title="Engine: ${modeTag}"></i>
-          <span class="history-title" title="${escapeHtml(session.title)}">${escapeHtml(session.title)}</span>
-        </div>
-        <div class="history-item-actions">
-          <button class="history-menu-btn" title="Opsi Percakapan (Sematkan / Ganti Nama / Hapus)" aria-label="Opsi Percakapan">
-            <i class="fa-solid fa-ellipsis-vertical"></i>
-          </button>
-        </div>
-      `;
+    groupOrder.forEach(groupName => {
+      const groupSessions = groups[groupName];
+      if (!groupSessions || groupSessions.length === 0) return;
 
-      const titleSpan = item.querySelector('.history-title');
-      const menuBtn = item.querySelector('.history-menu-btn');
+      const groupHeader = document.createElement('div');
+      groupHeader.className = 'history-group-title';
+      groupHeader.innerText = groupName;
+      els.chatHistoryList.appendChild(groupHeader);
 
-      // Double-click on title to rename
-      titleSpan.addEventListener('dblclick', (e) => {
-        e.stopPropagation();
-        renameSessionPrompt(session.id, titleSpan);
-      });
+      groupSessions.forEach(session => {
+        const item = document.createElement('div');
+        const inSelect = STATE.historySelectMode;
+        const isSelected = STATE.selectedSessionIds.has(session.id);
 
-      // Switch session on item click
-      item.addEventListener('click', (e) => {
-        if (e.target.closest('.history-menu-btn') || e.target.closest('.history-dropdown-menu') || e.target.closest('.history-rename-input')) {
-          return;
+        item.className = `history-item ${session.id === STATE.currentSessionId ? 'active' : ''} ${session.isPinned ? 'is-pinned' : ''} ${inSelect ? 'in-select-mode' : ''} ${isSelected ? 'is-selected' : ''}`;
+        item.dataset.id = session.id;
+        item.tabIndex = 0;
+        
+        let modeIcon = 'fa-server';
+        let modeColor = 'var(--neon-cyan)';
+        let modeTag = 'Ollama';
+        if (session.mode === 'openrouter') {
+          modeIcon = 'fa-bolt';
+          modeColor = 'var(--neon-amber)';
+          modeTag = 'OpenRouter';
+        } else if (session.mode === 'auto') {
+          modeIcon = 'fa-route';
+          modeColor = 'var(--neon-teal)';
+          modeTag = 'Auto';
         }
-        closeAllHistoryDropdowns();
-        switchSession(session.id);
-      });
 
-      // 3-Dots Menu Click Trigger
-      menuBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const isOpen = item.classList.contains('menu-open');
-        closeAllHistoryDropdowns();
+        const selectCircleHtml = inSelect ? `
+          <div class="history-select-circle ${isSelected ? 'selected' : ''}" title="${isSelected ? 'Batal Pilih' : 'Pilih'}">
+            <i class="${isSelected ? 'fa-solid fa-circle-check' : 'fa-regular fa-circle'}"></i>
+          </div>
+        ` : '';
 
-        if (isOpen) return;
-
-        item.classList.add('menu-open');
-        const dropdown = document.createElement('div');
-        dropdown.className = 'history-dropdown-menu';
-        dropdown.innerHTML = `
-          <button class="history-dropdown-item pin-opt">
-            <i class="fa-solid fa-thumbtack" style="${session.isPinned ? 'color:var(--neon-cyan); transform:rotate(45deg);' : ''}"></i>
-            <span>${session.isPinned ? 'Lepas Sematan' : 'Sematkan di Atas'}</span>
-          </button>
-          <button class="history-dropdown-item rename-opt">
-            <i class="fa-solid fa-pen-to-square"></i>
-            <span>Ganti Nama</span>
-          </button>
-          <button class="history-dropdown-item export-opt">
-            <i class="fa-solid fa-file-arrow-down"></i>
-            <span>Unduh Chat (.md)</span>
-          </button>
-          <button class="history-dropdown-item delete-item delete-opt">
-            <i class="fa-solid fa-trash-can"></i>
-            <span>Hapus Percakapan</span>
-          </button>
+        item.innerHTML = `
+          ${selectCircleHtml}
+          <div class="history-title-wrap">
+            ${session.isPinned ? '<i class="fa-solid fa-thumbtack history-pin-icon" title="Disematkan di Atas"></i>' : ''}
+            <i class="fa-solid ${modeIcon}" style="color:${modeColor}; font-size:0.8rem;" title="Engine: ${modeTag}"></i>
+            <span class="history-title" title="${escapeHtml(session.title)}">${escapeHtml(session.title)}</span>
+          </div>
+          ${!inSelect ? `
+            <div class="history-item-actions">
+              <button class="history-menu-btn" title="Opsi Percakapan (Sematkan / Ganti Nama / Hapus)" aria-label="Opsi Percakapan">
+                <i class="fa-solid fa-ellipsis-vertical"></i>
+              </button>
+            </div>
+          ` : ''}
         `;
 
-        dropdown.querySelector('.pin-opt').addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          closeAllHistoryDropdowns();
-          togglePinSession(session.id);
-        });
+        if (inSelect) {
+          item.addEventListener('click', () => {
+            toggleSessionSelection(session.id);
+          });
+          els.chatHistoryList.appendChild(item);
+          return;
+        }
 
-        dropdown.querySelector('.rename-opt').addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          closeAllHistoryDropdowns();
+        const titleSpan = item.querySelector('.history-title');
+        const menuBtn = item.querySelector('.history-menu-btn');
+
+        // Double-click on title to rename
+        titleSpan.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
           renameSessionPrompt(session.id, titleSpan);
         });
 
-        dropdown.querySelector('.export-opt').addEventListener('click', (ev) => {
-          ev.stopPropagation();
+        // Switch session on item click
+        item.addEventListener('click', (e) => {
+          if (e.target.closest('.history-menu-btn') || e.target.closest('.history-dropdown-menu') || e.target.closest('.history-rename-input')) {
+            return;
+          }
           closeAllHistoryDropdowns();
-          exportSessionData(session.id);
+          switchSession(session.id);
         });
 
-        dropdown.querySelector('.delete-opt').addEventListener('click', (ev) => {
-          ev.stopPropagation();
+        // 3-Dots Menu Click Trigger
+        menuBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const isOpen = item.classList.contains('menu-open');
           closeAllHistoryDropdowns();
-          deleteSession(session.id);
+
+          if (isOpen) return;
+
+          item.classList.add('menu-open');
+          const dropdown = document.createElement('div');
+          dropdown.className = 'history-dropdown-menu';
+          dropdown.innerHTML = `
+            <button class="history-dropdown-item select-opt">
+              <i class="fa-solid fa-list-check"></i>
+              <span>Pilih Percakapan</span>
+            </button>
+            <button class="history-dropdown-item pin-opt">
+              <i class="fa-solid fa-thumbtack" style="${session.isPinned ? 'color:var(--neon-cyan); transform:rotate(45deg);' : ''}"></i>
+              <span>${session.isPinned ? 'Lepas Sematan' : 'Sematkan di Atas'}</span>
+            </button>
+            <button class="history-dropdown-item rename-opt">
+              <i class="fa-solid fa-pen-to-square"></i>
+              <span>Ganti Nama</span>
+            </button>
+            <button class="history-dropdown-item export-opt">
+              <i class="fa-solid fa-file-arrow-down"></i>
+              <span>Unduh Chat (.md)</span>
+            </button>
+            <button class="history-dropdown-item delete-item delete-opt">
+              <i class="fa-solid fa-trash-can"></i>
+              <span>Hapus Percakapan</span>
+            </button>
+          `;
+
+          dropdown.querySelector('.select-opt').addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            closeAllHistoryDropdowns();
+            enterHistorySelectMode(session.id);
+          });
+
+          dropdown.querySelector('.pin-opt').addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            closeAllHistoryDropdowns();
+            togglePinSession(session.id);
+          });
+
+          dropdown.querySelector('.rename-opt').addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            closeAllHistoryDropdowns();
+            renameSessionPrompt(session.id, titleSpan);
+          });
+
+          dropdown.querySelector('.export-opt').addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            closeAllHistoryDropdowns();
+            exportSessionData(session.id);
+          });
+
+          dropdown.querySelector('.delete-opt').addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            closeAllHistoryDropdowns();
+            deleteSession(session.id);
+          });
+
+          document.body.appendChild(dropdown);
+          const anchor = e.currentTarget.getBoundingClientRect();
+          dropdown.style.position = 'fixed';
+          dropdown.style.zIndex = '1200';
+          dropdown.style.right = '0px';
+          dropdown.style.top = '0px';
+          const menuW = dropdown.offsetWidth;
+          const menuH = dropdown.offsetHeight;
+          let menuTop = anchor.bottom + 4;
+          if (menuTop + menuH > window.innerHeight - 8) {
+            menuTop = Math.max(8, anchor.top - menuH - 4);
+          }
+          let menuRight = Math.max(8, window.innerWidth - anchor.right);
+          if (menuRight + menuW > window.innerWidth - 8) {
+            menuRight = Math.max(8, window.innerWidth - menuW - 8);
+          }
+          dropdown.style.top = menuTop + 'px';
+          dropdown.style.right = menuRight + 'px';
+          activeHistoryDropdown = dropdown;
+          AudioEngine.click();
         });
 
-        // Pasang FIXED di root: dulu dropdown adalah child absolut di dalam
-        // .history-section (overflow-y:auto) sehingga menu pada item dekat dasar
-        // daftar terpotong tepi scroll dan item "Hapus" jadi tak terjangkau.
-        document.body.appendChild(dropdown);
-        const anchor = e.currentTarget.getBoundingClientRect();
-        dropdown.style.position = 'fixed';
-        dropdown.style.zIndex = '1200';
-        dropdown.style.right = '0px'; // fallback saat pengukuran
-        dropdown.style.top = '0px';
-        const menuW = dropdown.offsetWidth;
-        const menuH = dropdown.offsetHeight;
-        let menuTop = anchor.bottom + 4;
-        if (menuTop + menuH > window.innerHeight - 8) {
-          menuTop = Math.max(8, anchor.top - menuH - 4); // flip ke atas bila melewati dasar layar
-        }
-        let menuRight = Math.max(8, window.innerWidth - anchor.right);
-        if (menuRight + menuW > window.innerWidth - 8) {
-          menuRight = Math.max(8, window.innerWidth - menuW - 8);
-        }
-        dropdown.style.top = menuTop + 'px';
-        dropdown.style.right = menuRight + 'px';
-        activeHistoryDropdown = dropdown;
-        AudioEngine.click();
+        els.chatHistoryList.appendChild(item);
       });
-
-      els.chatHistoryList.appendChild(item);
     });
   }
 
@@ -18116,6 +18354,37 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       const value = e.target.value;
       clearTimeout(historySearchDebounceTimer);
       historySearchDebounceTimer = setTimeout(() => renderChatHistory(value), 150);
+    });
+
+    // DeepSeek-Style History Multi-Select Mode Event Listeners
+    els.btnToggleHistorySelectMode?.addEventListener('click', () => {
+      if (STATE.historySelectMode) {
+        exitHistorySelectMode();
+      } else {
+        enterHistorySelectMode();
+      }
+    });
+
+    els.btnCloseHistorySelectMode?.addEventListener('click', () => {
+      exitHistorySelectMode();
+    });
+
+    els.btnSelectAllHistory?.addEventListener('click', () => {
+      toggleSelectAllHistory();
+    });
+
+    els.btnPinSelectedHistory?.addEventListener('click', async () => {
+      await pinOrUnpinSelectedHistory();
+    });
+
+    els.btnDeleteSelectedHistory?.addEventListener('click', async () => {
+      await deleteSelectedHistory();
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && STATE.historySelectMode) {
+        exitHistorySelectMode();
+      }
     });
     
     els.clearAllHistoryBtn?.addEventListener('click', async () => {

@@ -560,6 +560,195 @@ html, body {
   flex: 0 0 36px;
 }
 
+/* ==================== DEEPSEEK-STYLE HISTORY MULTI-SELECT & TIME GROUPING ==================== */
+.history-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 6px 4px;
+}
+
+.history-label-row .history-label {
+  padding: 0;
+}
+
+.history-select-toggle-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.history-select-toggle-btn:hover {
+  color: var(--neon-cyan);
+  background: rgba(0, 240, 255, 0.1);
+  border-color: rgba(0, 240, 255, 0.25);
+}
+
+/* Multi-Select Top Bar */
+.history-select-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  margin: 4px 12px 8px;
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  border-radius: var(--radius-sm);
+  animation: fadeIn 0.2s ease;
+}
+
+.select-count-text {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--neon-cyan);
+  letter-spacing: 0.2px;
+}
+
+.select-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.select-text-action-btn {
+  background: transparent;
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  color: var(--neon-cyan);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.select-text-action-btn:hover {
+  background: rgba(0, 240, 255, 0.2);
+}
+
+.select-close-circle-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  color: var(--text-muted);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.select-close-circle-btn:hover {
+  background: rgba(255, 0, 85, 0.25);
+  color: #FF0055;
+}
+
+/* Time Group Title (DeepSeek Style: Pinned, Hari Ini, Kemarin, 7 Hari Terakhir, etc.) */
+.history-group-title {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  padding: 10px 8px 3px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+/* Selection Circle Indicator */
+.history-select-circle {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-right: 8px;
+  color: var(--text-dim);
+  font-size: 1rem;
+  transition: all 0.2s ease;
+}
+
+.history-select-circle.selected {
+  color: var(--neon-cyan);
+  filter: drop-shadow(0 0 5px rgba(0, 240, 255, 0.6));
+}
+
+.history-item.in-select-mode {
+  user-select: none;
+}
+
+.history-item.in-select-mode:hover {
+  background: rgba(0, 240, 255, 0.05);
+}
+
+.history-item.in-select-mode .history-item-actions {
+  display: none !important;
+}
+
+.history-item.is-selected {
+  background: rgba(0, 240, 255, 0.09) !important;
+  border-color: rgba(0, 240, 255, 0.35) !important;
+}
+
+/* Multi-Select Bottom Action Bar */
+.history-select-bottom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  gap: 10px;
+  animation: slideUp 0.2s ease;
+}
+
+.select-bottom-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--text-main);
+}
+
+.select-bottom-btn.select-pin-btn:hover {
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+  background: rgba(0, 240, 255, 0.1);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.2);
+}
+
+.select-bottom-btn.select-delete-btn {
+  color: #FF4D4D;
+  border-color: rgba(255, 77, 77, 0.3);
+  background: rgba(255, 77, 77, 0.06);
+}
+
+.select-bottom-btn.select-delete-btn:hover {
+  background: rgba(255, 77, 77, 0.2);
+  border-color: #FF4D4D;
+  box-shadow: 0 0 12px rgba(255, 77, 77, 0.35);
+}
+
 /* ==================== MAIN CONTENT ==================== */
 .main-content {
   flex: 1 1 auto;
