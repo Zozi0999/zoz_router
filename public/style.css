@@ -8450,20 +8450,183 @@ body.modal-open {
 }
 
 
-/* ==================== COMPOSER ACTIVE MODE CARDS (IMAGE / PHOTO EDIT / MUSIC) ==================== */
+/* ==================== TOP NAV ACTIVE TOOL SELECTOR PILL ==================== */
+.top-nav-active-tool-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  animation: fadeInToolPill 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+}
+
+@keyframes fadeInToolPill {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateX(0);
+  }
+}
+
+.top-nav-active-tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(14, 20, 36, 0.95), rgba(20, 28, 52, 0.98));
+  border: 1px solid rgba(255, 0, 127, 0.45);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), 0 0 10px rgba(255, 0, 127, 0.15);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  max-width: 280px;
+}
+
+.top-nav-active-tool-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 0 16px rgba(255, 0, 127, 0.3);
+}
+
+.top-nav-active-tool-wrap.tool-theme-image .top-nav-active-tool-chip {
+  border-color: rgba(255, 0, 127, 0.5);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), 0 0 10px rgba(255, 0, 127, 0.2);
+}
+.top-nav-active-tool-wrap.tool-theme-image .top-nav-active-tool-chip:hover {
+  border-color: #FF007F;
+  box-shadow: 0 6px 18px rgba(255, 0, 127, 0.35);
+}
+.top-nav-active-tool-wrap.tool-theme-image .top-nav-tool-icon-wrap {
+  color: #FF007F;
+}
+
+.top-nav-active-tool-wrap.tool-theme-photo .top-nav-active-tool-chip {
+  border-color: rgba(168, 85, 247, 0.5);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), 0 0 10px rgba(168, 85, 247, 0.2);
+}
+.top-nav-active-tool-wrap.tool-theme-photo .top-nav-active-tool-chip:hover {
+  border-color: #c084fc;
+  box-shadow: 0 6px 18px rgba(168, 85, 247, 0.35);
+}
+.top-nav-active-tool-wrap.tool-theme-photo .top-nav-tool-icon-wrap {
+  color: #c084fc;
+}
+
+.top-nav-active-tool-wrap.tool-theme-music .top-nav-active-tool-chip {
+  border-color: rgba(0, 255, 194, 0.5);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), 0 0 10px rgba(0, 255, 194, 0.2);
+}
+.top-nav-active-tool-wrap.tool-theme-music .top-nav-active-tool-chip:hover {
+  border-color: var(--neon-teal);
+  box-shadow: 0 6px 18px rgba(0, 255, 194, 0.35);
+}
+.top-nav-active-tool-wrap.tool-theme-music .top-nav-tool-icon-wrap {
+  color: var(--neon-teal);
+}
+
+.top-nav-tool-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+}
+
+.top-nav-tool-name {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text-main);
+  white-space: nowrap;
+}
+
+.top-nav-tool-model-badge {
+  font-family: var(--font-code);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.top-nav-tool-chevron {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  transition: transform 0.2s ease;
+}
+
+.top-nav-active-tool-chip[aria-expanded="true"] .top-nav-tool-chevron {
+  transform: rotate(180deg);
+}
+
+.top-nav-tool-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.65rem;
+}
+
+.top-nav-tool-close-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+  color: #ef4444;
+  transform: scale(1.1);
+}
+
+/* Dropdown popups dropping down from top navbar */
+.top-nav-active-tool-wrap .image-model-dropdown-popup,
+.top-nav-active-tool-wrap .music-model-dropdown-popup {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  bottom: auto;
+  z-index: 950;
+  min-width: 320px;
+  max-width: 380px;
+  max-height: min(520px, calc(86vh - 60px));
+}
+
+/* Hidden composer mode cards (model changer moved to top nav to avoid crowding prompt) */
 .composer-active-mode-card {
+  display: none !important;
+}
+
+/* Compact Partial-Width Floating Mini-Card for Photo Edit Reference */
+.photo-edit-ref-card {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0 0 6px 0;
-  padding: 8px 14px;
+  width: fit-content;
+  max-width: min(360px, 92vw);
+  align-self: flex-start;
+  gap: 10px;
+  margin: 0 0 8px 4px;
+  padding: 5px 10px;
+  border: 1px solid rgba(168, 85, 247, 0.45);
   border-radius: var(--radius-md, 12px);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(14, 18, 32, 0.94);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 12px rgba(168, 85, 247, 0.18);
   animation: modeCardSlideDown 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
-  z-index: 50;
+  z-index: 10;
 }
 
 @keyframes modeCardSlideDown {
@@ -8477,36 +8640,9 @@ body.modal-open {
   }
 }
 
-.composer-active-mode-card.image-mode-card {
-  background: rgba(255, 0, 127, 0.08);
-  border: 1px solid rgba(255, 0, 127, 0.45);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 16px rgba(255, 0, 127, 0.15);
-}
-
-.composer-active-mode-card.music-mode-card {
-  background: rgba(0, 255, 194, 0.08);
-  border: 1px solid rgba(0, 255, 194, 0.45);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 16px rgba(0, 255, 194, 0.15);
-}
-
-.photo-edit-ref-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin: 0 0 6px 0;
-  padding: 8px 12px;
-  border: 1px solid rgba(168, 85, 247, 0.5);
-  border-radius: var(--radius-md, 12px);
-  background: rgba(168, 85, 247, 0.09);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 16px rgba(168, 85, 247, 0.18);
-  animation: modeCardSlideDown 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-  position: relative;
-  z-index: 50;
-}
-
 .photo-edit-ref-thumb-wrap {
-  width: 50px;
-  height: 50px;
+  width: 38px;
+  height: 38px;
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid rgba(168, 85, 247, 0.5);
@@ -8538,7 +8674,7 @@ body.modal-open {
   opacity: 0;
   transition: opacity 0.2s ease;
   color: #38bdf8;
-  font-size: 0.95rem;
+  font-size: 0.8rem;
 }
 
 .photo-edit-ref-thumb-wrap:hover .photo-edit-thumb-overlay {
@@ -8546,220 +8682,39 @@ body.modal-open {
 }
 
 .photo-edit-ref-info {
-  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   min-width: 0;
 }
 
-.photo-edit-ref-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.photo-edit-title-wrap {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.84rem;
+.photo-edit-title-text {
+  font-size: 0.74rem;
   font-weight: 700;
   color: #c084fc;
-}
-
-.mode-card-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  flex: 1;
-}
-
-.mode-card-icon-box {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1rem;
-  flex-shrink: 0;
-}
-
-.image-accent-box {
-  background: rgba(255, 0, 127, 0.18);
-  color: #FF007F;
-  border: 1px solid rgba(255, 0, 127, 0.5);
-  box-shadow: 0 0 10px rgba(255, 0, 127, 0.3);
-}
-
-.music-accent-box {
-  background: rgba(0, 255, 194, 0.18);
-  color: #00FFC2;
-  border: 1px solid rgba(0, 255, 194, 0.5);
-  box-shadow: 0 0 10px rgba(0, 255, 194, 0.3);
-}
-
-.mode-card-details {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
-.mode-card-title {
-  font-size: 0.84rem;
-  font-weight: 700;
   letter-spacing: 0.02em;
-}
-
-.image-mode-card .mode-card-title {
-  color: #ff3399;
-}
-
-.music-mode-card .mode-card-title {
-  color: #00FFC2;
-}
-
-/* Clickable Active Model Chips */
-.mode-card-model-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 0.74rem;
-  font-weight: 700;
-  cursor: pointer;
-  background: rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  color: #FFF;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  user-select: none;
-}
-
-.mode-card-model-chip:hover {
-  transform: translateY(-1px);
-}
-
-.mode-card-model-chip.image-model-chip {
-  border-color: rgba(255, 0, 127, 0.55);
-  color: #ff66b2;
-}
-.mode-card-model-chip.image-model-chip:hover {
-  background: rgba(255, 0, 127, 0.2);
-  box-shadow: 0 0 12px rgba(255, 0, 127, 0.4);
-}
-
-.mode-card-model-chip.photo-edit-model-chip {
-  border-color: rgba(168, 85, 247, 0.55);
-  color: #d8b4fe;
-}
-.mode-card-model-chip.photo-edit-model-chip:hover {
-  background: rgba(168, 85, 247, 0.22);
-  box-shadow: 0 0 12px rgba(168, 85, 247, 0.45);
-}
-
-.mode-card-model-chip.music-model-chip {
-  border-color: rgba(0, 255, 194, 0.55);
-  color: #5eead4;
-}
-.mode-card-model-chip.music-model-chip:hover {
-  background: rgba(0, 255, 194, 0.2);
-  box-shadow: 0 0 12px rgba(0, 255, 194, 0.4);
-}
-
-.mode-live-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  animation: pulseLiveDot 1.5s infinite ease-in-out;
-}
-
-.dot-magenta {
-  background: #FF007F;
-  box-shadow: 0 0 8px #FF007F;
-}
-
-.dot-purple {
-  background: #c084fc;
-  box-shadow: 0 0 8px #c084fc;
-}
-
-.dot-teal {
-  background: #00FFC2;
-  box-shadow: 0 0 8px #00FFC2;
-}
-
-.mode-chevron {
-  font-size: 0.65rem;
-  opacity: 0.7;
-}
-
-.mode-card-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.mode-change-model-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 0.74rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  user-select: none;
-}
-
-.mode-change-model-btn.image-change-btn {
-  background: rgba(255, 0, 127, 0.16);
-  border: 1px solid rgba(255, 0, 127, 0.5);
-  color: #ff66b2;
-}
-.mode-change-model-btn.image-change-btn:hover {
-  background: rgba(255, 0, 127, 0.3);
-  color: #FFF;
-  box-shadow: 0 0 10px rgba(255, 0, 127, 0.45);
-}
-
-.mode-change-model-btn.music-change-btn {
-  background: rgba(0, 255, 194, 0.16);
-  border: 1px solid rgba(0, 255, 194, 0.5);
-  color: #00FFC2;
-}
-.mode-change-model-btn.music-change-btn:hover {
-  background: rgba(0, 255, 194, 0.3);
-  color: #FFF;
-  box-shadow: 0 0 10px rgba(0, 255, 194, 0.45);
 }
 
 .photo-edit-header-actions {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  flex-wrap: wrap;
+  gap: 5px;
 }
 
 .photo-edit-change-photo-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   background: rgba(56, 189, 248, 0.16);
   border: 1px solid rgba(56, 189, 248, 0.45);
   color: #38bdf8;
-  padding: 4px 9px;
+  padding: 3px 8px;
   border-radius: 6px;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
+  white-space: nowrap;
 }
 
 .photo-edit-change-photo-btn:hover {
@@ -8772,16 +8727,17 @@ body.modal-open {
 .photo-edit-change-model-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   background: rgba(168, 85, 247, 0.18);
   border: 1px solid rgba(168, 85, 247, 0.5);
   color: #c084fc;
-  padding: 4px 9px;
+  padding: 3px 8px;
   border-radius: 6px;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
+  white-space: nowrap;
 }
 
 .photo-edit-change-model-btn:hover {
@@ -8791,24 +8747,23 @@ body.modal-open {
   box-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
 }
 
-.mode-cancel-btn,
 .photo-edit-cancel-btn {
   background: transparent;
   border: 1px solid rgba(255, 85, 85, 0.35);
   color: var(--text-dim);
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: 0.72rem;
   transition: all 0.18s ease;
   flex-shrink: 0;
+  margin-left: 2px;
 }
 
-.mode-cancel-btn:hover,
 .photo-edit-cancel-btn:hover {
   background: rgba(255, 85, 85, 0.2);
   border-color: #ff5555;
@@ -8816,41 +8771,22 @@ body.modal-open {
   box-shadow: 0 0 8px rgba(255, 85, 85, 0.4);
 }
 
-/* Adjust dropdown position when active mode card is visible on top of composer */
-.composer-container.has-active-mode-card .image-model-dropdown-popup,
-.composer-container.has-active-mode-card .music-model-dropdown-popup {
-  bottom: calc(100% + 56px);
-}
-
 @media (max-width: 768px) {
-  .composer-active-mode-card,
-  .photo-edit-ref-card {
-    padding: 6px 10px;
-    gap: 8px;
+  .top-nav-tool-name {
+    display: none;
   }
-  .mode-card-title,
-  .photo-edit-title-wrap {
-    font-size: 0.78rem;
+  .top-nav-tool-model-badge {
+    max-width: 105px;
+    font-size: 0.68rem;
   }
-  .mode-card-model-chip {
-    padding: 3px 8px;
-    font-size: 0.7rem;
-    max-width: 140px;
+  .top-nav-active-tool-wrap .image-model-dropdown-popup,
+  .top-nav-active-tool-wrap .music-model-dropdown-popup {
+    left: -50px;
+    max-width: calc(100vw - 20px);
   }
-  .mode-active-model-name {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .mode-change-model-btn span,
   .photo-edit-change-photo-btn span,
   .photo-edit-change-model-btn span {
-    display: none; /* Icon-only on narrow mobile screens */
-  }
-  .composer-container.has-active-mode-card .image-model-dropdown-popup,
-  .composer-container.has-active-mode-card .music-model-dropdown-popup {
-    bottom: calc(100% + 52px);
-    max-height: 52vh;
+    display: none;
   }
 }
 

@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261014_v251">
+  <link rel="stylesheet" href="style.css?v=20261014_v252">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -156,6 +156,278 @@
               <span class="auto-router-text">Auto Router</span>
               <span class="auto-router-mini-badge">AI</span>
             </button>
+          </div>
+
+          <!-- Active Tool Model Selector (Buat Gambar / Edit Foto / Buat Musik) -->
+          <div class="top-nav-active-tool-wrap" id="topNavActiveToolWrap" style="display: none;">
+            <div class="top-nav-active-tool-chip" id="topNavActiveToolChip" title="Ganti Model Tool AI Aktif">
+              <span class="top-nav-tool-icon-wrap" id="topNavActiveToolIconWrap">
+                <i class="fa-solid fa-wand-magic-sparkles" id="topNavActiveToolIcon"></i>
+              </span>
+              <span class="top-nav-tool-name" id="topNavActiveToolTitle">Buat Gambar</span>
+              <span class="top-nav-tool-model-badge" id="topNavActiveToolModel">Flux.1 Schnell</span>
+              <i class="fa-solid fa-chevron-down top-nav-tool-chevron"></i>
+            </div>
+            <button type="button" class="top-nav-tool-close-btn" id="btnTopNavCancelTool" title="Keluar dari mode tool">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+
+            <!-- Dropdown Popups for Image & Music Models (Top Navigation) -->
+            <div class="image-model-dropdown-popup" id="imageModelDropdown" style="display: none;">
+                <div class="image-model-dropdown-header">
+                  <span><i class="fa-solid fa-wand-magic-sparkles"></i> AI Image Studio Engine</span>
+                  <span class="image-model-header-tag" id="imageModelHeaderTag">Multi-Style AI</span>
+                </div>
+
+                <!-- Tab Switcher Nav: Pollinations vs OpenRouter -->
+                <div class="image-model-tabs-nav" id="imageModelTabsNav">
+                  <button class="image-model-tab-btn active" id="tabBtnPollinations" type="button" data-tab="pollinations">
+                    <i class="fa-solid fa-bolt-lightning"></i> Pollinations (Gratis)
+                  </button>
+                  <button class="image-model-tab-btn" id="tabBtnOpenRouter" type="button" data-tab="openrouter">
+                    <i class="fa-solid fa-cloud"></i> OpenRouter (Cloud)
+                  </button>
+                </div>
+
+                <!-- PANE 1: POLLINATIONS (GRATIS & KILAT) -->
+                <div class="image-model-tab-pane" id="panePollinations">
+                  <!-- Nonaktif (Mode Obrolan Biasa) -->
+                  <button class="image-model-item" id="imageModelOptionOff" type="button" data-model="off">
+                    <div class="image-model-icon-box off-accent">
+                      <i class="fa-solid fa-ban"></i>
+                    </div>
+                    <div class="image-model-info">
+                      <span class="image-model-title">Nonaktif (Mode Obrolan)</span>
+                      <span class="image-model-desc">Kembali ke pesan teks & penalaran AI</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
+                  </button>
+
+                  <div class="image-model-section-divider">
+                    <span>Model Gratis & Kilat (Pollinations AI)</span>
+                  </div>
+
+                  <button class="image-model-item active" type="button" data-model="flux">
+                    <div class="image-model-icon-box flux-accent">
+                      <i class="fa-solid fa-bolt-lightning"></i>
+                    </div>
+                    <div class="image-model-info">
+                      <div class="image-model-title-row">
+                        <span class="image-model-title">Flux.1 Schnell</span>
+                        <span class="image-model-tag">Gratis • Kilat</span>
+                      </div>
+                      <span class="image-model-desc">Standar gambar cepat, tajam & serbaguna</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check"></i>
+                  </button>
+
+                  <button class="image-model-item" type="button" data-model="flux-realism">
+                    <div class="image-model-icon-box realism-accent">
+                      <i class="fa-solid fa-camera"></i>
+                    </div>
+                    <div class="image-model-info">
+                      <div class="image-model-title-row">
+                        <span class="image-model-title">Flux Realism</span>
+                        <span class="image-model-tag">Foto • HD</span>
+                      </div>
+                      <span class="image-model-desc">Fotografi realistis, sinematik & tekstur nyata</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
+                  </button>
+
+                  <button class="image-model-item" type="button" data-model="flux-anime">
+                    <div class="image-model-icon-box anime-accent">
+                      <i class="fa-solid fa-paintbrush"></i>
+                    </div>
+                    <div class="image-model-info">
+                      <div class="image-model-title-row">
+                        <span class="image-model-title">Flux Anime & Manga</span>
+                        <span class="image-model-tag">Anime • 2D</span>
+                      </div>
+                      <span class="image-model-desc">Ilustrasi anime Jepang, manhwa & webtoon</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
+                  </button>
+
+                  <button class="image-model-item" type="button" data-model="flux-3d">
+                    <div class="image-model-icon-box cgi-accent">
+                      <i class="fa-solid fa-cubes"></i>
+                    </div>
+                    <div class="image-model-info">
+                      <div class="image-model-title-row">
+                        <span class="image-model-title">Flux 3D CGI</span>
+                        <span class="image-model-tag">3D • Render</span>
+                      </div>
+                      <span class="image-model-desc">Render 3D animasi, Octane CGI & Sci-Fi digital</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
+                  </button>
+
+                  <button class="image-model-item" type="button" data-model="turbo">
+                    <div class="image-model-icon-box turbo-accent">
+                      <i class="fa-solid fa-gauge-high"></i>
+                    </div>
+                    <div class="image-model-info">
+                      <div class="image-model-title-row">
+                        <span class="image-model-title">SDXL Turbo</span>
+                        <span class="image-model-tag">Fast • Realtime</span>
+                      </div>
+                      <span class="image-model-desc">Generasi super cepat dalam hitungan detik</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
+                  </button>
+
+                  <button class="image-model-item" type="button" data-model="flux-pro">
+                    <div class="image-model-icon-box pro-accent">
+                      <i class="fa-solid fa-gem"></i>
+                    </div>
+                    <div class="image-model-info">
+                      <div class="image-model-title-row">
+                        <span class="image-model-title">Flux.1 Pro</span>
+                        <span class="image-model-tag">Pro • Detail</span>
+                      </div>
+                      <span class="image-model-desc">Komposisi tingkat lanjut & estetika profesional</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
+                  </button>
+
+                  <button class="image-model-item" type="button" data-model="midjourney">
+                    <div class="image-model-icon-box mj-accent">
+                      <i class="fa-solid fa-palette"></i>
+                    </div>
+                    <div class="image-model-info">
+                      <div class="image-model-title-row">
+                        <span class="image-model-title">Midjourney Style</span>
+                        <span class="image-model-tag">Art • Dramatic</span>
+                      </div>
+                      <span class="image-model-desc">Komposisi artistik, dramatis & wallpaper estetik</span>
+                    </div>
+                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
+                  </button>
+                </div>
+
+                <!-- PANE 2: OPENROUTER (CLOUD IMAGE ENGINES) -->
+                <div class="image-model-tab-pane" id="paneOpenRouter" style="display: none;">
+                  <!-- Status Bar API Key -->
+                  <div class="image-model-status-bar" id="openRouterStatusBar">
+                    <span class="status-text"><i class="fa-solid fa-circle-notch fa-spin"></i> Memeriksa API Key...</span>
+                    <button class="status-action-btn" id="openRouterConfigBtn" type="button">Pengaturan</button>
+                  </div>
+
+                  <!-- Pencarian Model OpenRouter -->
+                  <div class="image-model-search-box">
+                    <i class="fa-solid fa-magnifying-glass search-box-icon"></i>
+                    <input type="text" id="imageModelSearchInput" class="image-model-search-input" placeholder="Cari model OpenRouter (Flux, Gemini, GPT, Recraft...)" autocomplete="off" />
+                  </div>
+
+                  <!-- Custom Model Input Row -->
+                  <div class="image-model-custom-row">
+                    <input type="text" id="customOpenRouterImageModelInput" class="image-model-custom-input" placeholder="ID model kustom (misal: vendor/model)..." autocomplete="off" />
+                    <button class="image-model-custom-btn" id="btnApplyCustomImageModel" type="button">Pilih</button>
+                  </div>
+
+                  <!-- Scrollable Container of OpenRouter Models -->
+                  <div class="image-model-openrouter-list" id="imageModelOpenRouterList">
+                    <!-- Populated dynamically via JS -->
+                  </div>
+                </div>
+              </div>
+
+            <div class="music-model-dropdown-popup" id="musicModelDropdown" style="display: none;">
+                <div class="music-model-dropdown-header">
+                  <span><i class="fa-solid fa-music"></i> AI Music Studio Engine</span>
+                  <span class="music-model-header-tag" id="musicModelHeaderTag">Neural Composer</span>
+                </div>
+
+                <!-- Tab Switcher Nav: Ollama Cloud vs OpenRouter (Cloud) -->
+                <div class="music-model-tabs-nav" id="musicModelTabsNav">
+                  <button class="music-model-tab-btn active" id="tabBtnMusicOllama" type="button" data-tab="ollama">
+                    <i class="fa-solid fa-cloud"></i> Ollama Cloud
+                  </button>
+                  <button class="music-model-tab-btn" id="tabBtnMusicOpenRouter" type="button" data-tab="openrouter">
+                    <i class="fa-solid fa-cloud"></i> OpenRouter (Cloud)
+                  </button>
+                </div>
+
+                <!-- PANE 1: OLLAMA CLOUD -->
+                <div class="music-model-tab-pane" id="paneMusicOllama">
+                  <!-- Nonaktif (Mode Obrolan Biasa) -->
+                  <button class="music-model-item" id="musicModelOptionOff" type="button" data-model="off">
+                    <div class="music-model-icon-box off-accent">
+                      <i class="fa-solid fa-ban"></i>
+                    </div>
+                    <div class="music-model-info">
+                      <span class="music-model-title">Nonaktif (Mode Obrolan)</span>
+                      <span class="music-model-desc">Kembali ke obrolan teks & penalaran AI standar</span>
+                    </div>
+                    <i class="fa-solid fa-check music-model-check" style="display: none;"></i>
+                  </button>
+
+                  <div class="music-model-section-divider">
+                    <span>Model Resmi Ollama Cloud (<span id="musicOllamaCountText">Memuat...</span>)</span>
+                  </div>
+
+                  <!-- Pencarian Model Ollama Cloud -->
+                  <div class="music-model-search-box">
+                    <i class="fa-solid fa-magnifying-glass search-box-icon"></i>
+                    <input type="text" id="musicOllamaSearchInput" class="music-model-search-input" placeholder="Cari model Ollama Cloud..." autocomplete="off" />
+                  </div>
+
+                  <!-- Dynamic list of Ollama installed models -->
+                  <div class="music-model-ollama-list" id="musicModelOllamaList">
+                    <!-- Populated dynamically via JS -->
+                  </div>
+
+                  <!-- Custom Local Model Input Row -->
+                  <div class="music-model-custom-row">
+                    <input type="text" id="customOllamaMusicModelInput" class="music-model-custom-input" placeholder="ID model Ollama kustom..." autocomplete="off" />
+                    <button class="music-model-custom-btn" id="btnApplyCustomMusicOllamaModel" type="button">Pilih</button>
+                  </div>
+                </div>
+
+                <!-- PANE 2: OPENROUTER (CLOUD) -->
+                <div class="music-model-tab-pane" id="paneMusicOpenRouter" style="display: none;">
+                  <!-- Status Bar API Key -->
+                  <div class="music-model-status-bar" id="musicOpenRouterStatusBar">
+                    <span class="status-text"><i class="fa-solid fa-circle-notch fa-spin"></i> Memeriksa API Key...</span>
+                    <button class="status-action-btn" id="musicOpenRouterConfigBtn" type="button">Pengaturan</button>
+                  </div>
+
+                  <!-- Pencarian Model OpenRouter -->
+                  <div class="music-model-search-box">
+                    <i class="fa-solid fa-magnifying-glass search-box-icon"></i>
+                    <input type="text" id="musicModelSearchInput" class="music-model-search-input" placeholder="Cari model musik AI (Google Lyria 3, dll)..." autocomplete="off" />
+                  </div>
+
+                  <!-- Kategori Filter Cepat OpenRouter -->
+                  <div class="music-model-filter-pills" id="musicOpenRouterFilterPills">
+                    <button class="music-filter-pill active" type="button" data-cat="all">Semua</button>
+                    <button class="music-filter-pill" type="button" data-cat="free"><i class="fa-solid fa-bolt"></i> Gratis</button>
+                    <button class="music-filter-pill" type="button" data-cat="google"><i class="fa-brands fa-google"></i> Google</button>
+                    <button class="music-filter-pill" type="button" data-cat="openai"><i class="fa-solid fa-microchip"></i> OpenAI</button>
+                    <button class="music-filter-pill" type="button" data-cat="anthropic"><i class="fa-solid fa-brain"></i> Anthropic</button>
+                    <button class="music-filter-pill" type="button" data-cat="meta"><i class="fa-solid fa-infinity"></i> Meta</button>
+                    <button class="music-filter-pill" type="button" data-cat="deepseek"><i class="fa-solid fa-eye"></i> DeepSeek</button>
+                    <button class="music-filter-pill" type="button" data-cat="qwen"><i class="fa-solid fa-dragon"></i> Qwen</button>
+                    <button class="music-filter-pill" type="button" data-cat="mistral"><i class="fa-solid fa-wind"></i> Mistral</button>
+                  </div>
+
+                  <!-- Custom Model Input Row -->
+                  <div class="music-model-custom-row">
+                    <input type="text" id="customOpenRouterMusicModelInput" class="music-model-custom-input" placeholder="ID model kustom (misal: vendor/model)..." autocomplete="off" />
+                    <button class="music-model-custom-btn" id="btnApplyCustomMusicOpenRouterModel" type="button">Pilih</button>
+                  </div>
+
+                  <div class="music-model-section-divider">
+                    <span>Katalog Resmi OpenRouter (<span id="musicOpenRouterCountText">468 Model</span>)</span>
+                  </div>
+
+                  <!-- Scrollable Container of OpenRouter Models -->
+                  <div class="music-model-openrouter-list" id="musicModelOpenRouterList">
+                    <!-- Populated dynamically via JS -->
+                  </div>
+                </div>
+              </div>
           </div>
         </div>
 
@@ -336,89 +608,43 @@
         </div>
 
         <!-- AI Photo Edit Reference Card (Img2Img Mode) -->
+        <!-- Photo Reference Preview Card for Img2Img (Sleek Compact Mini-Card, NOT Full Width) -->
         <div class="photo-edit-ref-card" id="photoEditReferenceCard" style="display: none;">
           <div class="photo-edit-ref-thumb-wrap" id="photoEditRefThumbWrap" title="Klik untuk ganti foto referensi">
             <img id="photoEditRefThumb" src="" alt="Foto Referensi">
             <div class="photo-edit-thumb-overlay"><i class="fa-solid fa-camera"></i></div>
           </div>
           <div class="photo-edit-ref-info">
-            <div class="photo-edit-ref-header">
-              <div class="photo-edit-title-wrap">
-                <i class="fa-solid fa-paintbrush" style="color:#c084fc;"></i>
-                <span>Edit Foto AI</span>
-              </div>
-              <button type="button" class="mode-card-model-chip photo-edit-model-chip" id="btnActivePhotoEditModelChip" title="Model AI Aktif. Klik untuk ganti model edit foto">
-                <span class="mode-live-dot dot-purple"></span>
-                <span class="mode-active-model-name" id="photoEditActiveModelLabel">Flux.1 Schnell</span>
-                <i class="fa-solid fa-chevron-down mode-chevron"></i>
+            <span class="photo-edit-title-text">Edit Foto AI</span>
+            <div class="photo-edit-header-actions">
+              <button type="button" class="photo-edit-change-photo-btn" id="btnChangePhotoEditImage" title="Ganti Foto Referensi">
+                <i class="fa-solid fa-image"></i> <span>Ganti Foto</span>
               </button>
-              <div class="photo-edit-header-actions">
-                <button type="button" class="photo-edit-change-photo-btn" id="btnChangePhotoEditImage" title="Pilih / Ganti Foto Referensi Baru">
-                  <i class="fa-solid fa-image"></i> <span>Ganti Foto</span>
-                </button>
-                <button type="button" class="photo-edit-change-model-btn" id="btnChangePhotoEditModel" title="Pilih / Ganti Model AI untuk Mengedit Foto">
-                  <i class="fa-solid fa-sliders"></i> <span>Ganti Model</span>
-                </button>
-              </div>
+              <button type="button" class="photo-edit-change-model-btn" id="btnChangePhotoEditModel" title="Ganti Model AI">
+                <i class="fa-solid fa-sliders"></i> <span>Ganti Model</span>
+              </button>
             </div>
           </div>
           <button type="button" class="photo-edit-cancel-btn" id="btnCancelPhotoEdit" title="Batalkan Mode Edit Foto">
             <i class="fa-solid fa-xmark"></i>
           </button>
+          <!-- Preserved element for connectome safety -->
+          <button type="button" id="btnActivePhotoEditModelChip" style="display: none;"><span id="photoEditActiveModelLabel"></span></button>
         </div>
 
-        <!-- AI Image Generation Mode Active Card (Buat Gambar AI) -->
+        <!-- Preserved dummy elements for connectome safety, hidden by default -->
         <div class="composer-active-mode-card image-mode-card" id="imageGenActiveCard" style="display: none;">
-          <div class="mode-card-left">
-            <div class="mode-card-icon-box image-accent-box">
-              <i class="fa-solid fa-wand-magic-sparkles"></i>
-            </div>
-            <div class="mode-card-details">
-              <div class="mode-card-title-row">
-                <span class="mode-card-title">Buat Gambar AI</span>
-              </div>
-              <button type="button" class="mode-card-model-chip image-model-chip" id="btnActiveImageModelChip" title="Model AI Aktif. Klik untuk ganti model gambar">
-                <span class="mode-live-dot dot-magenta"></span>
-                <span class="mode-active-model-name" id="imageGenActiveModelLabel">Flux.1 Schnell</span>
-                <i class="fa-solid fa-chevron-down mode-chevron"></i>
-              </button>
-            </div>
-          </div>
-          <div class="mode-card-actions">
-            <button type="button" class="mode-change-model-btn image-change-btn" id="btnChangeImageGenModel" title="Pilih / Ganti Model AI Gambar">
-              <i class="fa-solid fa-sliders"></i> <span>Ganti Model</span>
-            </button>
-            <button type="button" class="mode-cancel-btn" id="btnCancelImageGenMode" title="Keluar dari Mode Buat Gambar">
-              <i class="fa-solid fa-xmark"></i>
-            </button>
-          </div>
+          <span id="imageGenActiveModelLabel" style="display: none;"></span>
+          <button type="button" id="btnActiveImageModelChip" style="display: none;"></button>
+          <button type="button" id="btnChangeImageGenModel" style="display: none;"></button>
+          <button type="button" id="btnCancelImageGenMode" style="display: none;"></button>
         </div>
 
-        <!-- AI Music Generation Mode Active Card (Buat Musik AI) -->
         <div class="composer-active-mode-card music-mode-card" id="musicGenActiveCard" style="display: none;">
-          <div class="mode-card-left">
-            <div class="mode-card-icon-box music-accent-box">
-              <i class="fa-solid fa-music"></i>
-            </div>
-            <div class="mode-card-details">
-              <div class="mode-card-title-row">
-                <span class="mode-card-title">Buat Musik AI</span>
-              </div>
-              <button type="button" class="mode-card-model-chip music-model-chip" id="btnActiveMusicModelChip" title="Model AI Aktif. Klik untuk ganti model musik">
-                <span class="mode-live-dot dot-teal"></span>
-                <span class="mode-active-model-name" id="musicGenActiveModelLabel">Lyria 3 Clip Preview</span>
-                <i class="fa-solid fa-chevron-down mode-chevron"></i>
-              </button>
-            </div>
-          </div>
-          <div class="mode-card-actions">
-            <button type="button" class="mode-change-model-btn music-change-btn" id="btnChangeMusicGenModel" title="Pilih / Ganti Model Musik AI">
-              <i class="fa-solid fa-sliders"></i> <span>Ganti Model</span>
-            </button>
-            <button type="button" class="mode-cancel-btn" id="btnCancelMusicGenMode" title="Keluar dari Mode Buat Musik">
-              <i class="fa-solid fa-xmark"></i>
-            </button>
-          </div>
+          <span id="musicGenActiveModelLabel" style="display: none;"></span>
+          <button type="button" id="btnActiveMusicModelChip" style="display: none;"></button>
+          <button type="button" id="btnChangeMusicGenModel" style="display: none;"></button>
+          <button type="button" id="btnCancelMusicGenMode" style="display: none;"></button>
         </div>
 
         <div class="composer-box">
@@ -610,274 +836,16 @@
               </button>
             </div>
 
-            <!-- AI Image Studio Mode & Model Selector Dropdown -->
-            <div class="image-model-menu-wrapper" id="imageModelMenuWrapper">
-              <button class="composer-btn image-gen-toggle" id="imageGenToggleBtn" type="button" title="Pilih Model AI Image Studio (Buat Gambar)" aria-label="Pilih Model Buat Gambar AI" aria-haspopup="true" aria-expanded="false" aria-pressed="false">
-                <i class="fa-solid fa-wand-magic-sparkles"></i>
+            <!-- Retained hidden elements for connectome safety -->
+            <div class="image-model-menu-wrapper" id="imageModelMenuWrapper" style="display: none;">
+              <button class="composer-btn image-gen-toggle" id="imageGenToggleBtn" type="button" style="display: none;">
                 <span class="image-model-badge" id="imageModelBadge" style="display: none;">Flux</span>
               </button>
-              <div class="image-model-dropdown-popup" id="imageModelDropdown" style="display: none;">
-                <div class="image-model-dropdown-header">
-                  <span><i class="fa-solid fa-wand-magic-sparkles"></i> AI Image Studio Engine</span>
-                  <span class="image-model-header-tag" id="imageModelHeaderTag">Multi-Style AI</span>
-                </div>
-
-                <!-- Tab Switcher Nav: Pollinations vs OpenRouter -->
-                <div class="image-model-tabs-nav" id="imageModelTabsNav">
-                  <button class="image-model-tab-btn active" id="tabBtnPollinations" type="button" data-tab="pollinations">
-                    <i class="fa-solid fa-bolt-lightning"></i> Pollinations (Gratis)
-                  </button>
-                  <button class="image-model-tab-btn" id="tabBtnOpenRouter" type="button" data-tab="openrouter">
-                    <i class="fa-solid fa-cloud"></i> OpenRouter (Cloud)
-                  </button>
-                </div>
-
-                <!-- PANE 1: POLLINATIONS (GRATIS & KILAT) -->
-                <div class="image-model-tab-pane" id="panePollinations">
-                  <!-- Nonaktif (Mode Obrolan Biasa) -->
-                  <button class="image-model-item" id="imageModelOptionOff" type="button" data-model="off">
-                    <div class="image-model-icon-box off-accent">
-                      <i class="fa-solid fa-ban"></i>
-                    </div>
-                    <div class="image-model-info">
-                      <span class="image-model-title">Nonaktif (Mode Obrolan)</span>
-                      <span class="image-model-desc">Kembali ke pesan teks & penalaran AI</span>
-                    </div>
-                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                  </button>
-
-                  <div class="image-model-section-divider">
-                    <span>Model Gratis & Kilat (Pollinations AI)</span>
-                  </div>
-
-                  <button class="image-model-item active" type="button" data-model="flux">
-                    <div class="image-model-icon-box flux-accent">
-                      <i class="fa-solid fa-bolt-lightning"></i>
-                    </div>
-                    <div class="image-model-info">
-                      <div class="image-model-title-row">
-                        <span class="image-model-title">Flux.1 Schnell</span>
-                        <span class="image-model-tag">Gratis • Kilat</span>
-                      </div>
-                      <span class="image-model-desc">Standar gambar cepat, tajam & serbaguna</span>
-                    </div>
-                    <i class="fa-solid fa-check image-model-check"></i>
-                  </button>
-
-                  <button class="image-model-item" type="button" data-model="flux-realism">
-                    <div class="image-model-icon-box realism-accent">
-                      <i class="fa-solid fa-camera"></i>
-                    </div>
-                    <div class="image-model-info">
-                      <div class="image-model-title-row">
-                        <span class="image-model-title">Flux Realism</span>
-                        <span class="image-model-tag">Foto • HD</span>
-                      </div>
-                      <span class="image-model-desc">Fotografi realistis, sinematik & tekstur nyata</span>
-                    </div>
-                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                  </button>
-
-                  <button class="image-model-item" type="button" data-model="flux-anime">
-                    <div class="image-model-icon-box anime-accent">
-                      <i class="fa-solid fa-paintbrush"></i>
-                    </div>
-                    <div class="image-model-info">
-                      <div class="image-model-title-row">
-                        <span class="image-model-title">Flux Anime & Manga</span>
-                        <span class="image-model-tag">Anime • 2D</span>
-                      </div>
-                      <span class="image-model-desc">Ilustrasi anime Jepang, manhwa & webtoon</span>
-                    </div>
-                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                  </button>
-
-                  <button class="image-model-item" type="button" data-model="flux-3d">
-                    <div class="image-model-icon-box cgi-accent">
-                      <i class="fa-solid fa-cubes"></i>
-                    </div>
-                    <div class="image-model-info">
-                      <div class="image-model-title-row">
-                        <span class="image-model-title">Flux 3D CGI</span>
-                        <span class="image-model-tag">3D • Render</span>
-                      </div>
-                      <span class="image-model-desc">Render 3D animasi, Octane CGI & Sci-Fi digital</span>
-                    </div>
-                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                  </button>
-
-                  <button class="image-model-item" type="button" data-model="turbo">
-                    <div class="image-model-icon-box turbo-accent">
-                      <i class="fa-solid fa-gauge-high"></i>
-                    </div>
-                    <div class="image-model-info">
-                      <div class="image-model-title-row">
-                        <span class="image-model-title">SDXL Turbo</span>
-                        <span class="image-model-tag">Fast • Realtime</span>
-                      </div>
-                      <span class="image-model-desc">Generasi super cepat dalam hitungan detik</span>
-                    </div>
-                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                  </button>
-
-                  <button class="image-model-item" type="button" data-model="flux-pro">
-                    <div class="image-model-icon-box pro-accent">
-                      <i class="fa-solid fa-gem"></i>
-                    </div>
-                    <div class="image-model-info">
-                      <div class="image-model-title-row">
-                        <span class="image-model-title">Flux.1 Pro</span>
-                        <span class="image-model-tag">Pro • Detail</span>
-                      </div>
-                      <span class="image-model-desc">Komposisi tingkat lanjut & estetika profesional</span>
-                    </div>
-                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                  </button>
-
-                  <button class="image-model-item" type="button" data-model="midjourney">
-                    <div class="image-model-icon-box mj-accent">
-                      <i class="fa-solid fa-palette"></i>
-                    </div>
-                    <div class="image-model-info">
-                      <div class="image-model-title-row">
-                        <span class="image-model-title">Midjourney Style</span>
-                        <span class="image-model-tag">Art • Dramatic</span>
-                      </div>
-                      <span class="image-model-desc">Komposisi artistik, dramatis & wallpaper estetik</span>
-                    </div>
-                    <i class="fa-solid fa-check image-model-check" style="display: none;"></i>
-                  </button>
-                </div>
-
-                <!-- PANE 2: OPENROUTER (CLOUD IMAGE ENGINES) -->
-                <div class="image-model-tab-pane" id="paneOpenRouter" style="display: none;">
-                  <!-- Status Bar API Key -->
-                  <div class="image-model-status-bar" id="openRouterStatusBar">
-                    <span class="status-text"><i class="fa-solid fa-circle-notch fa-spin"></i> Memeriksa API Key...</span>
-                    <button class="status-action-btn" id="openRouterConfigBtn" type="button">Pengaturan</button>
-                  </div>
-
-                  <!-- Pencarian Model OpenRouter -->
-                  <div class="image-model-search-box">
-                    <i class="fa-solid fa-magnifying-glass search-box-icon"></i>
-                    <input type="text" id="imageModelSearchInput" class="image-model-search-input" placeholder="Cari model OpenRouter (Flux, Gemini, GPT, Recraft...)" autocomplete="off" />
-                  </div>
-
-                  <!-- Custom Model Input Row -->
-                  <div class="image-model-custom-row">
-                    <input type="text" id="customOpenRouterImageModelInput" class="image-model-custom-input" placeholder="ID model kustom (misal: vendor/model)..." autocomplete="off" />
-                    <button class="image-model-custom-btn" id="btnApplyCustomImageModel" type="button">Pilih</button>
-                  </div>
-
-                  <!-- Scrollable Container of OpenRouter Models -->
-                  <div class="image-model-openrouter-list" id="imageModelOpenRouterList">
-                    <!-- Populated dynamically via JS -->
-                  </div>
-                </div>
-              </div>
             </div>
-
-            <!-- AI Music Studio Mode & Model Selector Dropdown -->
-            <div class="music-model-menu-wrapper" id="musicModelMenuWrapper">
-              <button class="composer-btn music-gen-toggle" id="musicGenToggleBtn" type="button" title="Pilih Model AI Music Studio (Buat Musik)" aria-label="Pilih Model Buat Musik AI" aria-haspopup="true" aria-expanded="false" aria-pressed="false">
-                <i class="fa-solid fa-music"></i>
+            <div class="music-model-menu-wrapper" id="musicModelMenuWrapper" style="display: none;">
+              <button class="composer-btn music-gen-toggle" id="musicGenToggleBtn" type="button" style="display: none;">
                 <span class="music-model-badge" id="musicModelBadge" style="display: none;">Music</span>
               </button>
-              <div class="music-model-dropdown-popup" id="musicModelDropdown" style="display: none;">
-                <div class="music-model-dropdown-header">
-                  <span><i class="fa-solid fa-music"></i> AI Music Studio Engine</span>
-                  <span class="music-model-header-tag" id="musicModelHeaderTag">Neural Composer</span>
-                </div>
-
-                <!-- Tab Switcher Nav: Ollama Cloud vs OpenRouter (Cloud) -->
-                <div class="music-model-tabs-nav" id="musicModelTabsNav">
-                  <button class="music-model-tab-btn active" id="tabBtnMusicOllama" type="button" data-tab="ollama">
-                    <i class="fa-solid fa-cloud"></i> Ollama Cloud
-                  </button>
-                  <button class="music-model-tab-btn" id="tabBtnMusicOpenRouter" type="button" data-tab="openrouter">
-                    <i class="fa-solid fa-cloud"></i> OpenRouter (Cloud)
-                  </button>
-                </div>
-
-                <!-- PANE 1: OLLAMA CLOUD -->
-                <div class="music-model-tab-pane" id="paneMusicOllama">
-                  <!-- Nonaktif (Mode Obrolan Biasa) -->
-                  <button class="music-model-item" id="musicModelOptionOff" type="button" data-model="off">
-                    <div class="music-model-icon-box off-accent">
-                      <i class="fa-solid fa-ban"></i>
-                    </div>
-                    <div class="music-model-info">
-                      <span class="music-model-title">Nonaktif (Mode Obrolan)</span>
-                      <span class="music-model-desc">Kembali ke obrolan teks & penalaran AI standar</span>
-                    </div>
-                    <i class="fa-solid fa-check music-model-check" style="display: none;"></i>
-                  </button>
-
-                  <div class="music-model-section-divider">
-                    <span>Model Resmi Ollama Cloud (<span id="musicOllamaCountText">Memuat...</span>)</span>
-                  </div>
-
-                  <!-- Pencarian Model Ollama Cloud -->
-                  <div class="music-model-search-box">
-                    <i class="fa-solid fa-magnifying-glass search-box-icon"></i>
-                    <input type="text" id="musicOllamaSearchInput" class="music-model-search-input" placeholder="Cari model Ollama Cloud..." autocomplete="off" />
-                  </div>
-
-                  <!-- Dynamic list of Ollama installed models -->
-                  <div class="music-model-ollama-list" id="musicModelOllamaList">
-                    <!-- Populated dynamically via JS -->
-                  </div>
-
-                  <!-- Custom Local Model Input Row -->
-                  <div class="music-model-custom-row">
-                    <input type="text" id="customOllamaMusicModelInput" class="music-model-custom-input" placeholder="ID model Ollama kustom..." autocomplete="off" />
-                    <button class="music-model-custom-btn" id="btnApplyCustomMusicOllamaModel" type="button">Pilih</button>
-                  </div>
-                </div>
-
-                <!-- PANE 2: OPENROUTER (CLOUD) -->
-                <div class="music-model-tab-pane" id="paneMusicOpenRouter" style="display: none;">
-                  <!-- Status Bar API Key -->
-                  <div class="music-model-status-bar" id="musicOpenRouterStatusBar">
-                    <span class="status-text"><i class="fa-solid fa-circle-notch fa-spin"></i> Memeriksa API Key...</span>
-                    <button class="status-action-btn" id="musicOpenRouterConfigBtn" type="button">Pengaturan</button>
-                  </div>
-
-                  <!-- Pencarian Model OpenRouter -->
-                  <div class="music-model-search-box">
-                    <i class="fa-solid fa-magnifying-glass search-box-icon"></i>
-                    <input type="text" id="musicModelSearchInput" class="music-model-search-input" placeholder="Cari model musik AI (Google Lyria 3, dll)..." autocomplete="off" />
-                  </div>
-
-                  <!-- Kategori Filter Cepat OpenRouter -->
-                  <div class="music-model-filter-pills" id="musicOpenRouterFilterPills">
-                    <button class="music-filter-pill active" type="button" data-cat="all">Semua</button>
-                    <button class="music-filter-pill" type="button" data-cat="free"><i class="fa-solid fa-bolt"></i> Gratis</button>
-                    <button class="music-filter-pill" type="button" data-cat="google"><i class="fa-brands fa-google"></i> Google</button>
-                    <button class="music-filter-pill" type="button" data-cat="openai"><i class="fa-solid fa-microchip"></i> OpenAI</button>
-                    <button class="music-filter-pill" type="button" data-cat="anthropic"><i class="fa-solid fa-brain"></i> Anthropic</button>
-                    <button class="music-filter-pill" type="button" data-cat="meta"><i class="fa-solid fa-infinity"></i> Meta</button>
-                    <button class="music-filter-pill" type="button" data-cat="deepseek"><i class="fa-solid fa-eye"></i> DeepSeek</button>
-                    <button class="music-filter-pill" type="button" data-cat="qwen"><i class="fa-solid fa-dragon"></i> Qwen</button>
-                    <button class="music-filter-pill" type="button" data-cat="mistral"><i class="fa-solid fa-wind"></i> Mistral</button>
-                  </div>
-
-                  <!-- Custom Model Input Row -->
-                  <div class="music-model-custom-row">
-                    <input type="text" id="customOpenRouterMusicModelInput" class="music-model-custom-input" placeholder="ID model kustom (misal: vendor/model)..." autocomplete="off" />
-                    <button class="music-model-custom-btn" id="btnApplyCustomMusicOpenRouterModel" type="button">Pilih</button>
-                  </div>
-
-                  <div class="music-model-section-divider">
-                    <span>Katalog Resmi OpenRouter (<span id="musicOpenRouterCountText">468 Model</span>)</span>
-                  </div>
-
-                  <!-- Scrollable Container of OpenRouter Models -->
-                  <div class="music-model-openrouter-list" id="musicModelOpenRouterList">
-                    <!-- Populated dynamically via JS -->
-                  </div>
-                </div>
-              </div>
             </div>
 
             <!-- AI Music Mode Indicator -->
@@ -1623,8 +1591,8 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261014_v251" defer></script>
+  <script src="text-safety.js?v=20261014_v252" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261014_v251" defer></script>
+  <script src="app.js?v=20261014_v252" defer></script>
 </body>
 </html>

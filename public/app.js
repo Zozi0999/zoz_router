@@ -615,6 +615,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     btnActiveMusicModelChip: $('#btnActiveMusicModelChip'),
     btnChangeMusicGenModel: $('#btnChangeMusicGenModel'),
     btnCancelMusicGenMode: $('#btnCancelMusicGenMode'),
+    topNavActiveToolWrap: $('#topNavActiveToolWrap'),
+    topNavActiveToolChip: $('#topNavActiveToolChip'),
+    topNavActiveToolIcon: $('#topNavActiveToolIcon'),
+    topNavActiveToolTitle: $('#topNavActiveToolTitle'),
+    topNavActiveToolModel: $('#topNavActiveToolModel'),
+    btnTopNavCancelTool: $('#btnTopNavCancelTool'),
     attachOptionEditPhoto: $('#attachOptionEditPhoto'),
     attachmentTabsNav: $('#attachmentTabsNav'),
     tabAttachFiles: $('#tabAttachFiles'),
@@ -12672,6 +12678,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     if (els.photoEditActiveModelLabel) {
       els.photoEditActiveModelLabel.textContent = getImageModelDisplayName(STATE.settings.imageModel || 'flux');
     }
+    updateTopNavActiveToolUI();
     updateActiveModeCardsState();
     if (els.promptInput) els.promptInput.focus();
   }
@@ -12682,6 +12689,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     if (els.photoEditRefThumb) els.photoEditRefThumb.removeAttribute('src');
     if (els.photoEditReferenceCard) els.photoEditReferenceCard.style.display = 'none';
     if (els.photoEditFileInput) els.photoEditFileInput.value = '';
+    updateTopNavActiveToolUI();
     updateActiveModeCardsState();
   }
 
@@ -12717,12 +12725,40 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     }
   }
 
+  function updateTopNavActiveToolUI() {
+    if (!els.topNavActiveToolWrap) return;
+
+    if (STATE.photoEditImage) {
+      els.topNavActiveToolWrap.style.display = 'inline-flex';
+      els.topNavActiveToolWrap.className = 'top-nav-active-tool-wrap tool-theme-photo';
+      if (els.topNavActiveToolIcon) els.topNavActiveToolIcon.className = 'fa-solid fa-paintbrush';
+      if (els.topNavActiveToolTitle) els.topNavActiveToolTitle.textContent = 'Edit Foto';
+      const modelName = getImageModelDisplayName(STATE.settings.imageModel || 'flux');
+      if (els.topNavActiveToolModel) els.topNavActiveToolModel.textContent = modelName;
+    } else if (STATE.isImageGenMode) {
+      els.topNavActiveToolWrap.style.display = 'inline-flex';
+      els.topNavActiveToolWrap.className = 'top-nav-active-tool-wrap tool-theme-image';
+      if (els.topNavActiveToolIcon) els.topNavActiveToolIcon.className = 'fa-solid fa-wand-magic-sparkles';
+      if (els.topNavActiveToolTitle) els.topNavActiveToolTitle.textContent = 'Buat Gambar';
+      const modelName = getImageModelDisplayName(STATE.settings.imageModel || 'flux');
+      if (els.topNavActiveToolModel) els.topNavActiveToolModel.textContent = modelName;
+    } else if (STATE.isMusicGenMode) {
+      els.topNavActiveToolWrap.style.display = 'inline-flex';
+      els.topNavActiveToolWrap.className = 'top-nav-active-tool-wrap tool-theme-music';
+      if (els.topNavActiveToolIcon) els.topNavActiveToolIcon.className = 'fa-solid fa-music';
+      if (els.topNavActiveToolTitle) els.topNavActiveToolTitle.textContent = 'Buat Musik';
+      const modelName = getMusicModelDisplayName(STATE.settings.musicModel || 'lyria');
+      if (els.topNavActiveToolModel) els.topNavActiveToolModel.textContent = modelName;
+    } else {
+      els.topNavActiveToolWrap.style.display = 'none';
+      closeImageModelDropdown();
+      closeMusicModelDropdown();
+    }
+  }
+
   function updateActiveModeCardsState() {
-    const hasCard = Boolean(
-      (STATE.isImageGenMode && !STATE.photoEditImage) ||
-      STATE.photoEditImage ||
-      STATE.isMusicGenMode
-    );
+    updateTopNavActiveToolUI();
+    const hasCard = Boolean(STATE.photoEditImage);
     if (els.mainComposerContainer) {
       els.mainComposerContainer.classList.toggle('has-active-mode-card', hasCard);
     }
@@ -15091,7 +15127,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       els.imageGenActiveModelLabel.textContent = displayName;
     }
     if (els.imageGenActiveCard) {
-      els.imageGenActiveCard.style.display = (isImageMode && !STATE.photoEditImage) ? 'flex' : 'none';
+      els.imageGenActiveCard.style.display = 'none';
     }
     if (els.sendPromptBtn) {
       if (isImageMode) {
@@ -15302,7 +15338,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       els.musicGenActiveModelLabel.textContent = displayName;
     }
     if (els.musicGenActiveCard) {
-      els.musicGenActiveCard.style.display = isMusicMode ? 'flex' : 'none';
+      els.musicGenActiveCard.style.display = 'none';
     }
 
     // Sinkronisasi status checked pada popup modal/dropdown musik
@@ -18702,6 +18738,32 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       AudioEngine.click();
     });
 
+    // Top-Nav Active Tool Model Selector Listeners (Sebelah Auto Router)
+    els.topNavActiveToolChip?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (STATE.isMusicGenMode) {
+        toggleMusicModelDropdown(e);
+      } else {
+        toggleImageModelDropdown(e);
+      }
+      AudioEngine.click();
+    });
+
+    els.btnTopNavCancelTool?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (STATE.isMusicGenMode) {
+        STATE.isMusicGenMode = false;
+        updateMusicGenModeUI();
+        closeMusicModelDropdown();
+      } else {
+        STATE.isImageGenMode = false;
+        clearPhotoEdit();
+        updateImageGenModeUI();
+        closeImageModelDropdown();
+      }
+      AudioEngine.click();
+    });
+
     // Pinned Active Mode Card Listeners: Buat Gambar AI
     els.btnActiveImageModelChip?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -18801,12 +18863,12 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         }
       }
       if (els.imageModelDropdown && els.imageModelDropdown.style.display !== 'none') {
-        if (!els.imageModelMenuWrapper?.contains(e.target) && !els.photoEditReferenceCard?.contains(e.target) && !els.imageGenActiveCard?.contains(e.target)) {
+        if (!els.topNavActiveToolWrap?.contains(e.target) && !els.photoEditReferenceCard?.contains(e.target) && !els.attachmentDropdown?.contains(e.target) && !els.imageModelMenuWrapper?.contains(e.target) && !els.imageGenActiveCard?.contains(e.target)) {
           closeImageModelDropdown();
         }
       }
       if (els.musicModelDropdown && els.musicModelDropdown.style.display !== 'none') {
-        if (!els.musicModelMenuWrapper?.contains(e.target) && !els.musicGenActiveCard?.contains(e.target)) {
+        if (!els.topNavActiveToolWrap?.contains(e.target) && !els.attachmentDropdown?.contains(e.target) && !els.musicModelMenuWrapper?.contains(e.target) && !els.musicGenActiveCard?.contains(e.target)) {
           closeMusicModelDropdown();
         }
       }
