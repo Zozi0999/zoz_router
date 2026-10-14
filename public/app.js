@@ -8954,7 +8954,8 @@ ${blocks}
       .replace(/```[\s\S]*?```/g, ' ')
       .replace(/`[^`\n]+`/g, ' ');
 
-    const isLongCompleteText = textWithoutCode.trim().length > 350;
+    const remainingProse = scrubRawToolCallArtifacts(textWithoutCode).trim();
+    const isLongCompleteText = textWithoutCode.trim().length > 350 && remainingProse.length > 150;
 
     // 5. Raw balanced JSON objects anywhere in text (di luar blok kode)
     const jsonBlocks = extractBalancedJsonObjects(textWithoutCode);
@@ -9803,6 +9804,7 @@ Format teks (untuk model tanpa function calling):
       let currentRoundText = fullText;
       let currentRoundNativeCalls = accumulatedToolCalls;
       const executedToolSignatures = new Set();
+      let allAccumulatedToolResponsesText = '';
 
       // Loop tetap dijalankan walau Mode Pencarian Web mati: filter izin di bawah
       // yang memblokir tool web, sementara search_youtube selalu diperbolehkan.
@@ -9902,6 +9904,7 @@ Format teks (untuk model tanpa function calling):
           roundToolResponsesText += `\n[HASIL PENGUMPULAN DATA OTONOM (${toolName})]:\n${toolExecRes.text}\n`;
           executedHudHtml += createAutonomousToolHudHtml(toolName, previewArg, 'done');
         }
+        allAccumulatedToolResponsesText += roundToolResponsesText;
 
         if (STATE.abortController?.signal?.aborted) {
           const abortErr = new Error('The operation was aborted');
@@ -9986,7 +9989,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             } catch (_) {}
             console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Error: ${errDetail}`);
             if (!fullText.trim()) {
-              fullText = cleanAssistant || `[Pencarian selesai: ${toolSummaryList.join(', ')}. Sistem menyelesaikan penelusuran].`;
+              fullText = (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))
+                ? synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources)
+                : (cleanAssistant || `[Pencarian selesai: ${toolSummaryList.join(', ')}. Sistem menyelesaikan penelusuran].`);
             }
             break;
           }
@@ -10054,8 +10059,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           const finishedDigestion = digestionRenderer.finish({ render: false });
           if (finishedDigestion) currentRoundText = finishedDigestion;
           fullText = currentRoundText;
-          if (!fullText.trim() && (roundToolResponsesText || (webSources && webSources.length > 0))) {
-            fullText = synthesizeAutonomousWebSummary(roundToolResponsesText, webSources);
+          if (!fullText.trim() && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))) {
+            fullText = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
           }
         } catch (digestionErr) {
           // H3: AbortError JANGAN ditelan oleh catch tool-round ini. Dulu abort saat
@@ -10067,8 +10072,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           }
           console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Fetch error:`, digestionErr);
           if (!fullText.trim()) {
-            fullText = (roundToolResponsesText || (webSources && webSources.length > 0))
-              ? synthesizeAutonomousWebSummary(roundToolResponsesText, webSources)
+            fullText = (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))
+              ? synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources)
               : (cleanAssistant || '');
           }
           break;
@@ -10099,10 +10104,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         fullText = 'Model mencoba melakukan penelusuran web untuk menjawab pertanyaan ini, namun fitur **Pencarian Web** saat ini sedang nonaktif. Silakan aktifkan ikon bola dunia (🌐 Pencarian Web) pada bilah kontrol di bawah untuk mengizinkan penelusuran data langsung.';
       }
 
-      if (!fullText.trim() && preambleHtml) {
-        fullText = (webSources && webSources.length > 0)
-          ? synthesizeAutonomousWebSummary('', webSources)
-          : 'Model menyelesaikan penelusuran namun tidak menghasilkan respon teks tambahan.';
+      if (!fullText.trim()) {
+        if (webSources && webSources.length > 0) {
+          fullText = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
+        } else if (preambleHtml) {
+          fullText = 'Model menyelesaikan penelusuran namun tidak menghasilkan respon teks tambahan.';
+        }
       }
 
       if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml) {
@@ -10915,6 +10922,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       let currentRoundText = fullText;
       let currentRoundNativeCalls = accumulatedToolCalls;
       const executedToolSignatures = new Set();
+      let allAccumulatedToolResponsesText = '';
 
       // Loop tetap dijalankan walau Mode Pencarian Web mati: filter izin di bawah
       // yang memblokir tool web, sementara search_youtube selalu diperbolehkan.
@@ -11014,6 +11022,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           roundToolResponsesText += `\n[HASIL PENGUMPULAN DATA OTONOM (${toolName})]:\n${toolExecRes.text}\n`;
           executedHudHtml += createAutonomousToolHudHtml(toolName, previewArg, 'done');
         }
+        allAccumulatedToolResponsesText += roundToolResponsesText;
 
         if (STATE.abortController?.signal?.aborted) {
           const abortErr = new Error('The operation was aborted');
@@ -11152,7 +11161,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             } catch (_) {}
             console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Error:`, errDetail);
             if (!fullText.trim()) {
-              fullText = cleanAssistant || `[Pencarian selesai: ${toolSummaryList.join(', ')}. Sistem menyelesaikan penelusuran].`;
+              fullText = (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))
+                ? synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources)
+                : (cleanAssistant || `[Pencarian selesai: ${toolSummaryList.join(', ')}. Sistem menyelesaikan penelusuran].`);
             }
             break;
           }
@@ -11275,8 +11286,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           }
           currentRoundText = digestionRenderer.finish({ render: false });
           fullText = currentRoundText;
-          if (!fullText.trim() && (roundToolResponsesText || (webSources && webSources.length > 0))) {
-            fullText = synthesizeAutonomousWebSummary(roundToolResponsesText, webSources);
+          if (!fullText.trim() && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))) {
+            fullText = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
           }
         } catch (digestionErr) {
           // H3: sama seperti jalur Ollama — AbortError diteruskan ke catch luar,
@@ -11286,8 +11297,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           }
           console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Fetch error:`, digestionErr);
           if (!fullText.trim()) {
-            fullText = (roundToolResponsesText || (webSources && webSources.length > 0))
-              ? synthesizeAutonomousWebSummary(roundToolResponsesText, webSources)
+            fullText = (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))
+              ? synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources)
               : (cleanAssistant || '');
           }
           break;
@@ -11318,10 +11329,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         fullText = 'Model mencoba melakukan penelusuran web untuk menjawab pertanyaan ini, namun fitur **Pencarian Web** saat ini sedang nonaktif. Silakan aktifkan ikon bola dunia (🌐 Pencarian Web) pada bilah kontrol di bawah untuk mengizinkan penelusuran data langsung.';
       }
 
-      if (!fullText.trim() && preambleHtml) {
-        fullText = (webSources && webSources.length > 0)
-          ? synthesizeAutonomousWebSummary('', webSources)
-          : 'Model menyelesaikan penelusuran namun tidak menghasilkan respon teks tambahan.';
+      if (!fullText.trim()) {
+        if (webSources && webSources.length > 0) {
+          fullText = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
+        } else if (preambleHtml) {
+          fullText = 'Model menyelesaikan penelusuran namun tidak menghasilkan respon teks tambahan.';
+        }
       }
 
       if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && collectedImages.length === 0) {
