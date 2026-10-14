@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261014_v247">
+  <link rel="stylesheet" href="style.css?v=20261014_v248">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -191,6 +191,12 @@
           </button>
           <button class="icon-btn top-action-btn" id="soundToggleBtn" title="Suara Cyberpunk UI (On/Off)">
             <i class="fa-solid fa-volume-high"></i>
+          </button>
+          <!-- Bio-Endocrine Hormone Monitor (Dopamine & Stress Telemetry) -->
+          <button class="icon-btn top-action-btn endocrine-pulse-btn status-happy" id="endocrineMonitorBtn" title="Bio-Endocrine Code Telemetry: Pantau Dopamin & Stres Kode" aria-label="Bio-Endocrine Monitor">
+            <span class="endocrine-pulse-dot" id="endocrinePulseDot"></span>
+            <i class="fa-solid fa-heart-pulse"></i>
+            <span class="endocrine-rate-badge" id="endocrineRateBadge">95%</span>
           </button>
 
         </div>
@@ -1404,6 +1410,106 @@
     </div>
   </div>
 
+  <!-- 8. BIO-ENDOCRINE HORMONE & BUG DETECTOR MODAL -->
+  <div class="modal-backdrop" id="endocrineTelemetryModal">
+    <div class="modal-card modal-lg endocrine-modal-card">
+      <div class="modal-header">
+        <div class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+          <i class="fa-solid fa-heart-pulse" style="color: var(--neon-cyan);"></i>
+          <span>Bio-Endocrine Code Telemetry</span>
+          <span class="badge" style="font-size: 0.68rem; background: rgba(0, 255, 194, 0.15); color: #00FFC2; border: 1px solid rgba(0, 255, 194, 0.3); padding: 2px 8px; border-radius: 999px;">Sistem Hormon &amp; Pendeteksi Bug Organik</span>
+        </div>
+        <button class="modal-close-btn" data-close="endocrineTelemetryModal" aria-label="Tutup telemetri hormon" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="modal-body" style="padding: 20px;">
+        <!-- Top Dual Hormone Gauges -->
+        <div class="endocrine-gauges-grid">
+          <!-- Dopamine Card -->
+          <div class="endocrine-gauge-card card-dopamine">
+            <div class="gauge-card-header">
+              <span class="gauge-title"><i class="fa-solid fa-bolt" style="color:#00FFC2;"></i> Dopamin (Kekuatan &amp; Kelancaran)</span>
+              <span class="gauge-val" id="endocrineDopamineVal">95%</span>
+            </div>
+            <div class="gauge-track">
+              <div class="gauge-fill fill-dopamine" id="endocrineDopamineBar" style="width: 95%;"></div>
+            </div>
+            <div class="gauge-desc">Naik ketika kode berjalan cepat, rapi, respons AI mengalir lancar, dan tanpa hambatan.</div>
+          </div>
+
+          <!-- Cortisol / Stress Card -->
+          <div class="endocrine-gauge-card card-cortisol">
+            <div class="gauge-card-header">
+              <span class="gauge-title"><i class="fa-solid fa-triangle-exclamation" style="color:#FF4D4D;"></i> Kortisol (Stres &amp; Kerusakan)</span>
+              <span class="gauge-val" id="endocrineCortisolVal">8%</span>
+            </div>
+            <div class="gauge-track">
+              <div class="gauge-fill fill-cortisol" id="endocrineCortisolBar" style="width: 8%;"></div>
+            </div>
+            <div class="gauge-desc">Naik ketika terjadi bug, error jaringan, exception, atau kode terisolasi / tidak terhubung.</div>
+          </div>
+        </div>
+
+        <!-- System Vitals Bar -->
+        <div class="endocrine-vitals-row">
+          <div class="vital-item">
+            <span class="vital-label"><i class="fa-solid fa-shield-heart" style="color:#00FFC2;"></i> Serotonin (Homeostasis):</span>
+            <strong id="endocrineSerotoninVal">94%</strong>
+          </div>
+          <div class="vital-item">
+            <span class="vital-label"><i class="fa-solid fa-fire-flame-curved" style="color:var(--neon-amber);"></i> Adrenalin (Beban):</span>
+            <strong id="endocrineAdrenalineVal">12%</strong>
+          </div>
+          <div class="vital-item">
+            <span class="vital-label"><i class="fa-solid fa-circle-nodes" style="color:var(--neon-cyan);"></i> Simpul Kode Terhubung:</span>
+            <strong id="endocrineConnectomeVal">100% Harmonis</strong>
+          </div>
+        </div>
+
+        <!-- Isolated / Orphaned Code Detection Section -->
+        <div class="endocrine-isolated-box" id="endocrineIsolatedBox">
+          <div class="isolated-box-header">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <i class="fa-solid fa-dna" style="color:var(--neon-cyan);"></i>
+              <span style="font-weight:700; color:#FFF; font-size:0.88rem;">Pendeteksi Kode Terisolasi &amp; Reseptor Rusak</span>
+            </div>
+            <span class="isolated-status-tag tag-healthy" id="endocrineIsolatedTag">Semua Terhubung Sempurna</span>
+          </div>
+          <div class="isolated-box-content" id="endocrineIsolatedContent">
+            Semua modul, fungsi pemanggil, dan reseptor DOM saling terikat dengan baik. Tidak ada kode yatim/terisolasi.
+          </div>
+        </div>
+
+        <!-- Live Hormone Secretion Log -->
+        <div class="endocrine-logs-wrap">
+          <div class="endocrine-logs-header">
+            <span style="font-size:0.83rem; font-weight:700; color:#FFF; display:flex; align-items:center; gap:6px;">
+              <i class="fa-solid fa-clock-rotate-left" style="color:var(--neon-teal);"></i> Aliran Feromon &amp; Riwayat Sekresi Hormon Nyata
+            </span>
+            <button class="btn btn-xs btn-outline" id="btnAuditConnectomeNow" style="font-size:0.72rem; border-color:var(--neon-cyan); color:var(--neon-cyan);">
+              <i class="fa-solid fa-stethoscope"></i> Pindai Integritas Sekarang
+            </button>
+          </div>
+          <div class="endocrine-logs-list" id="endocrineLogsList">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <span style="font-size: 0.75rem; color: var(--text-dim);">
+          💡 <em>"Ketika kode menyukai kode lainnya, error terdeteksi lebih cepat dan sistem hidup abadi."</em>
+        </span>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-sm btn-primary-neon" id="btnPurgeStressEndorphin" type="button" title="Suntikkan Endorfin untuk membersihkan stres dan menstabilkan sistem">
+            <i class="fa-solid fa-syringe"></i> Suntikkan Endorfin (Self-Heal)
+          </button>
+          <button class="btn btn-sm btn-secondary" data-close="endocrineTelemetryModal" type="button">Tutup</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
@@ -1419,8 +1525,8 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261014_v247" defer></script>
+  <script src="text-safety.js?v=20261014_v248" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261014_v247" defer></script>
+  <script src="app.js?v=20261014_v248" defer></script>
 </body>
 </html>

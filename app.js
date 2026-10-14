@@ -786,7 +786,252 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     inspectCountScraper: $('#inspectCountScraper'),
     inspectCountSynthesizer: $('#inspectCountSynthesizer'),
     inspectCountModel4: $('#inspectCountModel4'),
-    inspectTabContent: $('#inspectTabContent')
+    inspectTabContent: $('#inspectTabContent'),
+
+    // Bio-Endocrine Hormone & Connectome
+    endocrineMonitorBtn: $('#endocrineMonitorBtn'),
+    endocrineRateBadge: $('#endocrineRateBadge'),
+    endocrinePulseDot: $('#endocrinePulseDot'),
+    endocrineTelemetryModal: $('#endocrineTelemetryModal'),
+    btnAuditConnectomeNow: $('#btnAuditConnectomeNow'),
+    btnPurgeStressEndorphin: $('#btnPurgeStressEndorphin')
+  };
+
+  // ==================== BIO-ENDOCRINE HORMONE & CONNECTOME SYSTEM ====================
+  // Mengadaptasi sistem hormon mahluk hidup: Dopamin vs Kortisol (Stres)
+  // Mengetahui bug, error, dan kode yang tidak berhubungan / terisolasi secara seketika!
+  const BioEndocrine = {
+    hormones: {
+      dopamine: 94,
+      cortisol: 6,
+      serotonin: 92,
+      adrenaline: 10
+    },
+    history: [],
+    isolatedNodes: [],
+    connectedCount: 0,
+    totalAudited: 0,
+
+    init() {
+      // 1. Tangkap seluruh unhandled error / promise rejection di browser secara global
+      window.addEventListener('error', (evt) => {
+        const errorMsg = evt.message || (evt.error && evt.error.message) || 'Script exception';
+        const file = evt.filename ? evt.filename.split('/').pop() : 'script';
+        const line = evt.lineno || '?';
+        this.secreteStress(30, `Exception di ${file}:${line} (${errorMsg})`);
+      });
+
+      window.addEventListener('unhandledrejection', (evt) => {
+        const reason = evt.reason ? (evt.reason.message || String(evt.reason)) : 'Unhandled Promise';
+        this.secreteStress(25, `Unhandled Promise Rejection: ${reason}`);
+      });
+
+      // 2. Pasang audit connectome awal setelah DOM stabil
+      setTimeout(() => {
+        this.auditConnectome(true);
+        this.updateUI();
+      }, 1200);
+
+      // 3. Metabolisme berkala: homeostatik setiap 15 detik
+      setInterval(() => {
+        if (this.hormones.cortisol > 6) {
+          this.hormones.cortisol = Math.max(6, this.hormones.cortisol - 2);
+        }
+        if (this.hormones.dopamine < 90 && this.hormones.cortisol <= 15) {
+          this.hormones.dopamine = Math.min(95, this.hormones.dopamine + 1);
+        }
+        if (this.hormones.adrenaline > 10) {
+          this.hormones.adrenaline = Math.max(10, this.hormones.adrenaline - 3);
+        }
+        this.hormones.serotonin = Math.round((this.hormones.dopamine * 0.7) + ((100 - this.hormones.cortisol) * 0.3));
+        this.updateUI();
+      }, 15000);
+    },
+
+    secreteDopamine(amount, reason) {
+      this.hormones.dopamine = Math.min(100, Math.round((this.hormones.dopamine + amount) * 10) / 10);
+      this.hormones.cortisol = Math.max(0, Math.round((this.hormones.cortisol - (amount * 0.35)) * 10) / 10);
+      this.log('dopamine', amount, reason);
+      this.updateUI();
+    },
+
+    secreteStress(amount, reason, isIsolatedCode = false) {
+      this.hormones.cortisol = Math.min(100, Math.round((this.hormones.cortisol + amount) * 10) / 10);
+      this.hormones.dopamine = Math.max(5, Math.round((this.hormones.dopamine - (amount * 0.5)) * 10) / 10);
+      this.hormones.adrenaline = Math.min(100, Math.round((this.hormones.adrenaline + (amount * 0.6)) * 10) / 10);
+      this.log('cortisol', amount, reason);
+      this.updateUI();
+      try {
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.playBeep && STATE.soundEnabled && amount >= 25) {
+          AudioEngine.playBeep(220, 'sawtooth', 0.12, 0.04);
+        }
+      } catch (_) {}
+    },
+
+    auditConnectome(silent = false) {
+      const issues = [];
+      let connected = 0;
+      let total = 0;
+
+      if (typeof els === 'object') {
+        for (const [key, val] of Object.entries(els)) {
+          total++;
+          if (!val && !key.includes('Option') && !key.includes('Badge') && !key.includes('Hint') && !key.includes('Thumb')) {
+            issues.push(`Reseptor DOM terisolasi: els.${key} tidak ditemukan di DOM`);
+          } else {
+            connected++;
+          }
+        }
+      }
+
+      this.connectedCount = connected;
+      this.totalAudited = total;
+      this.isolatedNodes = issues;
+
+      if (issues.length > 0) {
+        this.secreteStress(issues.length * 12, `Terdeteksi ${issues.length} simpul kode terisolasi / reseptor hilang!`, true);
+      } else if (!silent) {
+        this.secreteDopamine(12, `Audit connectome: Semua ${connected} simpul kode terhubung harmonis (0 terisolasi)`);
+      }
+      this.updateUI();
+      return { connected, total, issues };
+    },
+
+    purgeStress() {
+      this.hormones.cortisol = 5;
+      this.hormones.dopamine = 98;
+      this.hormones.serotonin = 96;
+      this.hormones.adrenaline = 10;
+      this.isolatedNodes = [];
+      this.log('endorphin', 50, 'Suntikan Endorfin: Keseimbangan & kestabilan dipulihkan penuh');
+      this.updateUI();
+      try {
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.playBeep && STATE.soundEnabled) {
+          AudioEngine.playBeep(880, 'sine', 0.18, 0.06);
+          setTimeout(() => AudioEngine.playBeep(1320, 'triangle', 0.22, 0.05), 120);
+        }
+      } catch (_) {}
+      if (typeof showToast === 'function') {
+        showToast('🌿 Endorfin disuntikkan: Stres netral (5%), Dopamin 98%!', 'success');
+      }
+    },
+
+    log(type, amount, reason) {
+      this.history.unshift({
+        time: new Date().toLocaleTimeString(),
+        type,
+        amount: Math.round(amount),
+        reason,
+        dopamine: Math.round(this.hormones.dopamine),
+        cortisol: Math.round(this.hormones.cortisol)
+      });
+      if (this.history.length > 40) this.history.pop();
+    },
+
+    updateUI() {
+      const btn = document.getElementById('endocrineMonitorBtn');
+      const badge = document.getElementById('endocrineRateBadge');
+      if (btn && badge) {
+        const d = Math.round(this.hormones.dopamine);
+        const c = Math.round(this.hormones.cortisol);
+
+        btn.classList.remove('status-happy', 'status-stressed', 'status-critical');
+        if (c >= 60) {
+          btn.classList.add('status-critical');
+          badge.innerText = `🚨 Stres ${c}%`;
+          btn.title = `⚠️ PERINGATAN STRES KODE TINGGI (${c}%): Terdeteksi bug atau komponen terisolasi! Klik untuk cek telemetri.`;
+        } else if (c >= 30) {
+          btn.classList.add('status-stressed');
+          badge.innerText = `⚠️ Stres ${c}%`;
+          btn.title = `Stres Kode Meningkat (${c}%): Ada gangguan atau peringatan. Klik untuk cek telemetri.`;
+        } else {
+          btn.classList.add('status-happy');
+          badge.innerText = `🧠 ${d}%`;
+          btn.title = `Kondisi Kode Sangat Kuat & Prima (Dopamin ${d}%, Stres ${c}%). Klik untuk melihat bio-telemetri.`;
+        }
+      }
+
+      const modal = document.getElementById('endocrineTelemetryModal');
+      if (modal && modal.classList.contains('show')) {
+        this.renderModalContent();
+      }
+    },
+
+    renderModalContent() {
+      const esc = (s) => (typeof escapeHtml === 'function' ? escapeHtml(s) : String(s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])));
+      const d = Math.round(this.hormones.dopamine);
+      const c = Math.round(this.hormones.cortisol);
+      const s = Math.round(this.hormones.serotonin);
+      const a = Math.round(this.hormones.adrenaline);
+
+      const dVal = document.getElementById('endocrineDopamineVal');
+      const dBar = document.getElementById('endocrineDopamineBar');
+      const cVal = document.getElementById('endocrineCortisolVal');
+      const cBar = document.getElementById('endocrineCortisolBar');
+      const sVal = document.getElementById('endocrineSerotoninVal');
+      const aVal = document.getElementById('endocrineAdrenalineVal');
+      const connVal = document.getElementById('endocrineConnectomeVal');
+
+      if (dVal) dVal.innerText = `${d}%`;
+      if (dBar) dBar.style.width = `${d}%`;
+      if (cVal) cVal.innerText = `${c}%`;
+      if (cBar) cBar.style.width = `${c}%`;
+      if (sVal) sVal.innerText = `${s}%`;
+      if (aVal) aVal.innerText = `${a}%`;
+
+      const isolatedBox = document.getElementById('endocrineIsolatedBox');
+      const isolatedTag = document.getElementById('endocrineIsolatedTag');
+      const isolatedContent = document.getElementById('endocrineIsolatedContent');
+
+      if (this.isolatedNodes.length > 0) {
+        if (connVal) connVal.innerText = `${this.connectedCount}/${this.totalAudited} Simpul (${this.isolatedNodes.length} Terisolasi)`;
+        if (isolatedBox) isolatedBox.classList.add('has-issues');
+        if (isolatedTag) {
+          isolatedTag.className = 'isolated-status-tag tag-warning';
+          isolatedTag.innerText = `⚠️ ${this.isolatedNodes.length} Terisolasi`;
+        }
+        if (isolatedContent) {
+          isolatedContent.innerHTML = `
+            <div style="color:#FFB703; font-weight:700; margin-bottom:4px;">Terdeteksi komponen kode/DOM yang tidak terhubung:</div>
+            <ul style="margin:0; padding-left:18px; color:var(--text-main);">
+              ${this.isolatedNodes.map(err => `<li><code>${esc(err)}</code></li>`).join('')}
+            </ul>
+          `;
+        }
+      } else {
+        if (connVal) connVal.innerText = `100% Harmonis (${this.connectedCount} Simpul)`;
+        if (isolatedBox) isolatedBox.classList.remove('has-issues');
+        if (isolatedTag) {
+          isolatedTag.className = 'isolated-status-tag tag-healthy';
+          isolatedTag.innerText = 'Semua Terhubung Sempurna';
+        }
+        if (isolatedContent) {
+          isolatedContent.innerHTML = `Semua modul logika, pemanggil antarmuka, dan reseptor DOM saling terikat dengan harmonis. Tidak ditemukan kode terisolasi atau bug struktural.`;
+        }
+      }
+
+      const logsList = document.getElementById('endocrineLogsList');
+      if (logsList) {
+        if (this.history.length === 0) {
+          logsList.innerHTML = `<div style="color:var(--text-dim); font-size:0.75rem; text-align:center; padding:12px;">Belum ada fluktuasi hormon tercatat.</div>`;
+        } else {
+          logsList.innerHTML = this.history.map(item => {
+            const isDop = item.type === 'dopamine';
+            const isEnd = item.type === 'endorphin';
+            const cls = isDop ? 'log-dopamine' : (isEnd ? 'log-endorphin' : 'log-cortisol');
+            const sign = (isDop || isEnd) ? `+${item.amount}%` : `+${item.amount}% Stres`;
+            const label = isDop ? 'Dopamin' : (isEnd ? 'Endorfin' : 'Kortisol');
+            return `
+              <div class="endocrine-log-entry ${cls}">
+                <span class="log-time">${item.time}</span>
+                <span class="log-badge">${sign} ${label}</span>
+                <span class="log-msg" title="${esc(item.reason)}">${esc(item.reason)}</span>
+              </div>
+            `;
+          }).join('');
+        }
+      }
+    }
   };
 
   // ==================== FULL-SCREEN IMAGE LIGHTBOX (ChatGPT & Gemini Style) ====================
@@ -2146,8 +2391,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           }, 5 * 60 * 1000);
         }
       }
+      BioEndocrine.secreteDopamine(0.8, 'Sinkronisasi status persisten sukses');
     } catch (err) {
       console.error('Error saving persisted state:', err);
+      BioEndocrine.secreteStress(15, 'Gagal menyimpan status persisten: ' + (err.message || 'Storage error'));
     }
   }
 
@@ -10019,6 +10266,9 @@ Format teks (untuk model tanpa function calling):
           if (chunk) {
             if (!firstTokenTime) firstTokenTime = performance.now();
             tokenCount++;
+            if (tokenCount % 25 === 0) {
+              BioEndocrine.secreteDopamine(0.3, 'Ollama streaming aktif');
+            }
             streamRenderer.append(chunk);
             if (streamRenderer.isLoopTerminated) {
               console.warn('[Ollama] Model token degeneration loop detected and gracefully halted.');
@@ -10444,6 +10694,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       }
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + modelName, fullText);
+      BioEndocrine.secreteDopamine(12, `Ollama inferensi sukses: ${modelName}`);
       return true;
 
     } catch (err) {
@@ -10487,6 +10738,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         showToast('Generasi dihentikan oleh pengguna.');
         return false;
       } else {
+        BioEndocrine.secreteStress(22, `Ollama error: ${err?.message || 'Engine exception'}`);
         // Auto-Router fallback: bersihkan gelembung sementara dan kembalikan false agar caller langsung beralih ke OpenRouter
         if (runOptions && runOptions.autoFallback) {
           try { assistantRow.remove(); } catch (_) {}
@@ -11165,6 +11417,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
                 if (!firstTokenTime) firstTokenTime = performance.now();
                 tokenCount++;
                 streamRenderer.append(delta);
+                if (tokenCount % 25 === 0) {
+                  BioEndocrine.secreteDopamine(0.3, 'Streaming token lancar');
+                }
               }
               const deltaTc = parsed.choices?.[0]?.delta?.tool_calls;
               if (Array.isArray(deltaTc)) {
@@ -11713,6 +11968,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       }
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + (actualModelUsed || displayModel), fullText);
+      BioEndocrine.secreteDopamine(12, `OpenRouter inferensi sukses: ${actualModelUsed || displayModel}`);
       return true;
 
     } catch (err) {
@@ -11755,6 +12011,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         showToast('Generasi dihentikan.');
         return false;
       } else {
+        BioEndocrine.secreteStress(22, `OpenRouter error: ${err?.message || 'Stream exception'}`);
         // Auto-Router fallback: bersihkan gelembung sementara dan kembalikan false agar caller langsung beralih ke engine lain
         if (runOptions && runOptions.autoFallback) {
           try { assistantRow.remove(); } catch (_) {}
@@ -17983,6 +18240,27 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       if (STATE.soundEnabled) AudioEngine.click();
     });
 
+    // Bio-Endocrine Hormone Monitor Controls
+    els.endocrineMonitorBtn?.addEventListener('click', () => {
+      BioEndocrine.updateUI();
+      openModal('endocrineTelemetryModal');
+      AudioEngine.click();
+    });
+
+    els.btnAuditConnectomeNow?.addEventListener('click', () => {
+      AudioEngine.click();
+      const res = BioEndocrine.auditConnectome();
+      if (res.issues.length === 0) {
+        showToast(`✨ Semua ${res.connected} simpul kode terhubung harmonis!`, 'success');
+      } else {
+        showToast(`⚠️ Terdeteksi ${res.issues.length} simpul kode terisolasi!`, 'warning');
+      }
+    });
+
+    els.btnPurgeStressEndorphin?.addEventListener('click', () => {
+      BioEndocrine.purgeStress();
+    });
+
     // Unified Composer Attachments (ChatGPT & Gemini Style Plus Menu)
     els.attachToggleBtn?.addEventListener('click', toggleAttachmentDropdown);
 
@@ -19280,6 +19558,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     setupEventListeners();
     setupSmartScrolling();
     ImageLightbox.init();
+    BioEndocrine.init();
     
     // Set sound toggle button icon
     if (els.soundToggleBtn) {
