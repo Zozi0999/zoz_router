@@ -114,6 +114,11 @@ function mapOllamaModelToOpenRouter(modelId) {
   if (id.includes('liquid') || id.includes('lfm')) return 'liquid/lfm-2.5-2.6b:free';
   if (id.includes('apodex')) return 'apodex/apodex-1.1-mini:free';
   if (id.includes('laguna')) return 'poolside/laguna-s-2.1:free';
+  if (id.includes('deepseek')) return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
+  if (id.includes('llama')) return 'nvidia/nemotron-3.5-lightning:free';
+  if (id.includes('qwen')) return 'openrouter/free';
+  if (id.includes('mistral')) return 'nvidia/nemotron-3.5-lightning:free';
+  if (id.includes('phi')) return 'openrouter/free';
 
   return 'openrouter/free';
 }
@@ -689,8 +694,7 @@ export default {
     if (url.pathname === '/api/ollama/chat' && request.method === 'POST') {
       try {
         const body = await request.json();
-        const apiKey = body.apiKey ? String(body.apiKey).replace(/^Bearer\s+/i, '').trim() : (body.ollamaApiKey ? String(body.ollamaApiKey).replace(/^Bearer\s+/i, '').trim() : (request.headers.get('x-ollama-key') ? String(request.headers.get('x-ollama-key')).replace(/^Bearer\s+/i, '').trim() : ''));
-        const authHeader = request.headers.get('Authorization') || (apiKey ? `Bearer ${apiKey}` : '');
+        const rawOllamaKey = (body.ollamaApiKey ? String(body.ollamaApiKey).replace(/^Bearer\s+/i, '').trim() : (request.headers.get('x-ollama-key') ? String(request.headers.get('x-ollama-key')).replace(/^Bearer\s+/i, '').trim() : ((body.apiKey && !String(body.apiKey).startsWith('sk-or-')) ? String(body.apiKey).replace(/^Bearer\s+/i, '').trim() : null)));
         const targetEndpoint = body.endpoint || 'https://ollama.com';
         let cleanEndpoint = (targetEndpoint || 'https://ollama.com').trim();
         // Pada Cloudflare Edge, jika endpoint loopback dikirim oleh browser, alihkan ke Ollama Cloud
@@ -698,12 +702,16 @@ export default {
           cleanEndpoint = 'https://ollama.com';
         }
         if (!cleanEndpoint.startsWith('http://') && !cleanEndpoint.startsWith('https://')) {
-          cleanEndpoint = (authHeader ? 'https://' : 'http://') + cleanEndpoint;
+          cleanEndpoint = (rawOllamaKey ? 'https://' : 'http://') + cleanEndpoint;
         }
 
-        if (!authHeader) {
-          // 100% Pure Cloud Bridge: Jika dipanggil tanpa dedicated Ollama key, teruskan via Cloud AI (OpenRouter)
-          let orKey = body.openRouterKey || (body.apiKey && String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
+        const isLoopback = cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1');
+        const isCustomRemote = cleanEndpoint && !isLoopback && !cleanEndpoint.includes('ollama.com');
+        const shouldUseCloudBridge = !rawOllamaKey || !isCustomRemote;
+
+        if (shouldUseCloudBridge) {
+          // 100% Pure Cloud Bridge: Jika dipanggil tanpa dedicated Ollama key / server khusus, teruskan via Cloud AI (OpenRouter)
+          let orKey = body.openRouterKey || (body.apiKey && String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (request.headers.get('Authorization') && request.headers.get('Authorization').includes('sk-or-') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
           if (orKey) orKey = String(orKey).replace(/^Bearer\s+/i, '').trim();
           const targetModel = mapOllamaModelToOpenRouter(body.model || 'gemma4:31b');
           const isStream = body.stream !== false;
@@ -832,7 +840,7 @@ export default {
         const targetUrl = parsedBase;
 
         const headers = { 'Content-Type': 'application/json' };
-        if (authHeader) headers['Authorization'] = authHeader;
+        if (rawOllamaKey) headers['Authorization'] = `Bearer ${rawOllamaKey}`;
 
         const outBody = {
           model: body.model || 'gemma4:31b',

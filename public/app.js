@@ -187,6 +187,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (id.includes('liquid') || id.includes('lfm')) return 'liquid/lfm-2.5-2.6b:free';
     if (id.includes('apodex')) return 'apodex/apodex-1.1-mini:free';
     if (id.includes('laguna')) return 'poolside/laguna-s-2.1:free';
+    if (id.includes('deepseek')) return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
+    if (id.includes('llama')) return 'nvidia/nemotron-3.5-lightning:free';
+    if (id.includes('qwen')) return 'openrouter/free';
+    if (id.includes('mistral')) return 'nvidia/nemotron-3.5-lightning:free';
+    if (id.includes('phi')) return 'openrouter/free';
 
     return 'openrouter/free';
   }
@@ -3016,35 +3021,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     const effectiveModel = (modelName && modelName.includes('/'))
       ? modelName
       : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
-    const supportsSystem = doesModelSupportSystemRole(effectiveModel);
-    const messagesPayload = [];
-    if (STATE.settings.systemPrompt && supportsSystem) {
-      messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
-    }
-    session.messages.forEach(m => messagesPayload.push({
-      role: m.role,
-      content: m.role === 'assistant' ? safeAssistantText(m.content || '') : (m.content || '')
-    }));
-    const userInstruction = (!supportsSystem && STATE.settings.systemPrompt)
-      ? `[Instruksi Sistem: ${STATE.settings.systemPrompt}]\n\n${promptInstruction}`
-      : promptInstruction;
-    messagesPayload.push({ role: 'user', content: userInstruction });
 
-    const isLiquid = Boolean(effectiveModel && (effectiveModel.includes('liquid') || effectiveModel.includes('lfm-')));
-    const isReasoning = Boolean(effectiveModel && (effectiveModel.includes('/o1') || effectiveModel.includes('/o3')));
-
-    const basePayload = {
-      model: effectiveModel,
-      messages: messagesPayload,
-      stream: true,
-      provider: { allow_fallbacks: true }
-    };
-    if (!isReasoning) {
-      basePayload.temperature = parseFloat(STATE.settings.temperature) || 0.7;
-    }
-    if (!isLiquid && !isReasoning) {
-      basePayload.top_p = parseFloat(STATE.settings.topP) || 0.9;
-    }
+    const candidateModels = [
+      effectiveModel,
+      ...LIVE_FREE_OPENROUTER_FALLBACKS
+    ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free');
 
     const tryDirectFirst = IS_GITHUB_PAGES;
     const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
@@ -3052,57 +3033,95 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     let res = null;
     let lastErrDetail = '';
 
-    for (const routeType of routesToTry) {
-      if (STATE.abortController?.signal?.aborted) break;
-      const isDirect = routeType === 'direct';
-      const endpoint = isDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
-      const headers = { 'Content-Type': 'application/json' };
-      if (STATE.settings.openRouterKey) {
-        headers['Authorization'] = `Bearer ${STATE.settings.openRouterKey}`;
+    for (let c = 0; c < candidateModels.length; c++) {
+      const curModel = candidateModels[c];
+      const supportsSystem = doesModelSupportSystemRole(curModel);
+      const messagesPayload = [];
+      if (STATE.settings.systemPrompt && supportsSystem) {
+        messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
       }
-      if (isDirect) {
-        headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
-        headers['X-Title'] = 'ZOZ Router';
-      }
+      session.messages.forEach(m => messagesPayload.push({
+        role: m.role,
+        content: m.role === 'assistant' ? safeAssistantText(m.content || '') : (m.content || '')
+      }));
+      const userInstruction = (!supportsSystem && STATE.settings.systemPrompt)
+        ? `[Instruksi Sistem: ${STATE.settings.systemPrompt}]\n\n${promptInstruction}`
+        : promptInstruction;
+      messagesPayload.push({ role: 'user', content: userInstruction });
 
-      const body = {
-        ...basePayload,
-        ...(isDirect ? {} : {
-          sessionId: session?.id || null,
-          userId: STATE.userId || null,
-          apiKey: STATE.settings.openRouterKey || undefined
-        })
+      const isLiquid = Boolean(curModel && (curModel.includes('liquid') || curModel.includes('lfm-')));
+      const isReasoning = Boolean(curModel && (curModel.includes('/o1') || curModel.includes('/o3')));
+
+      const basePayload = {
+        model: curModel,
+        messages: messagesPayload,
+        stream: true,
+        provider: { allow_fallbacks: true }
       };
+      if (!isReasoning) {
+        basePayload.temperature = parseFloat(STATE.settings.temperature) || 0.7;
+      }
+      if (!isLiquid && !isReasoning) {
+        basePayload.top_p = parseFloat(STATE.settings.topP) || 0.9;
+      }
 
-      try {
-        const attemptRes = await fetch(endpoint, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(body),
-          signal: STATE.abortController?.signal
-        });
-        if (routeType === 'proxy' && attemptRes.status === 404) {
+      for (const routeType of routesToTry) {
+        if (STATE.abortController?.signal?.aborted) break;
+        const isDirect = routeType === 'direct';
+        const endpoint = isDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
+        const headers = { 'Content-Type': 'application/json' };
+        if (STATE.settings.openRouterKey) {
+          headers['Authorization'] = `Bearer ${STATE.settings.openRouterKey}`;
+        }
+        if (isDirect) {
+          headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
+          headers['X-Title'] = 'ZOZ Router Continuation';
+        }
+
+        const body = {
+          ...basePayload,
+          ...(isDirect ? {} : {
+            sessionId: session?.id || null,
+            userId: STATE.userId || null,
+            apiKey: STATE.settings.openRouterKey || undefined
+          })
+        };
+
+        try {
+          const attemptRes = await fetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+            signal: STATE.abortController?.signal
+          });
+          if (routeType === 'proxy' && attemptRes.status === 404) {
+            continue;
+          }
+          if (attemptRes.ok) {
+            res = attemptRes;
+            break;
+          }
+          let attemptErr = `HTTP ${attemptRes.status}`;
+          try {
+            const errJson = await attemptRes.json();
+            if (errJson && errJson.error) {
+              attemptErr = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
+            }
+          } catch (_) {}
+          lastErrDetail = attemptErr;
+          if (attemptRes.status === 401 || attemptRes.status === 403 || attemptRes.status === 402) {
+            break;
+          }
+        } catch (err) {
+          if (STATE.abortController?.signal?.aborted) throw err;
+          lastErrDetail = err.message || String(err);
           continue;
         }
-        if (attemptRes.ok) {
-          res = attemptRes;
-          break;
-        }
-        let attemptErr = `HTTP ${attemptRes.status}`;
-        try {
-          const errJson = await attemptRes.json();
-          if (errJson && errJson.error) {
-            attemptErr = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
-          }
-        } catch (_) {}
-        lastErrDetail = attemptErr;
-        if (attemptRes.status === 401 || attemptRes.status === 403 || attemptRes.status === 402) {
-          break;
-        }
-      } catch (err) {
-        if (STATE.abortController?.signal?.aborted) throw err;
-        lastErrDetail = err.message || String(err);
-        continue;
+      }
+
+      if (res && res.ok) break;
+      if (c < candidateModels.length - 1) {
+        console.warn(`[streamContinuationOpenRouter] Failover dari ${curModel} ke ${candidateModels[c + 1]}:`, lastErrDetail);
       }
     }
 
@@ -12006,13 +12025,19 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
   // Helper non-streaming untuk eksekusi telaah mandiri Model Agen 1 & Agen 2 di browser
   async function callClientLLMDirect(modelName, prompt, system = '', engine = '') {
     if (!prompt || !modelName) return '';
+    const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+    const hasCustomExternalEndpoint = Boolean(STATE.settings.ollamaApiKey && !ep.includes('ollama.com') && !ep.includes('127.0.0.1') && !ep.includes('localhost'));
     const isModelOpenRouter = Boolean(modelName && modelName.includes('/'));
     const isModelOllama = Boolean(modelName && (modelName.includes(':') || (!modelName.includes('/') && (STATE.ollamaModels || []).some(m => (m.name || m.model || m.id) === modelName))));
     const resolvedEngine = isModelOpenRouter ? 'openrouter' : (isModelOllama ? 'ollama' : (engine || (STATE.settings.openRouterKey ? 'openrouter' : 'ollama')));
 
-    if (resolvedEngine === 'openrouter' || (STATE.settings.openRouterKey && !isModelOllama)) {
+    if (resolvedEngine === 'openrouter' || !hasCustomExternalEndpoint) {
+      const effectiveCloudModel = isModelOpenRouter
+        ? modelName
+        : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
+
       const candidateModels = [
-        modelName,
+        effectiveCloudModel,
         ...LIVE_FREE_OPENROUTER_FALLBACKS
       ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free');
 
@@ -12151,13 +12176,19 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     let fullText = '';
 
     // Auto-resolve actual engine based on modelName pattern
+    const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+    const hasCustomExternalEndpoint = Boolean(STATE.settings.ollamaApiKey && !ep.includes('ollama.com') && !ep.includes('127.0.0.1') && !ep.includes('localhost'));
     const isModelOpenRouter = Boolean(modelName && modelName.includes('/'));
     const isModelOllama = Boolean(modelName && (modelName.includes(':') || (!modelName.includes('/') && (STATE.ollamaModels || []).some(m => (m.name || m.model || m.id) === modelName))));
     const resolvedEngine = isModelOpenRouter ? 'openrouter' : (isModelOllama ? 'ollama' : (engine || 'ollama'));
 
-    if (resolvedEngine === 'openrouter' || (!STATE.settings.ollamaModel && STATE.settings.openRouterKey && !isModelOllama)) {
+    if (resolvedEngine === 'openrouter' || !hasCustomExternalEndpoint) {
+      const effectiveCloudModel = isModelOpenRouter
+        ? modelName
+        : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
+
       const candidateModels = [
-        modelName,
+        effectiveCloudModel,
         ...LIVE_FREE_OPENROUTER_FALLBACKS
       ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free');
 

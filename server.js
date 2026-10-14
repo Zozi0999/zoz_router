@@ -765,6 +765,11 @@ function mapOllamaModelToOpenRouter(modelId) {
   if (id.includes('liquid') || id.includes('lfm')) return 'liquid/lfm-2.5-2.6b:free';
   if (id.includes('apodex')) return 'apodex/apodex-1.1-mini:free';
   if (id.includes('laguna')) return 'poolside/laguna-s-2.1:free';
+  if (id.includes('deepseek')) return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
+  if (id.includes('llama')) return 'nvidia/nemotron-3.5-lightning:free';
+  if (id.includes('qwen')) return 'openrouter/free';
+  if (id.includes('mistral')) return 'nvidia/nemotron-3.5-lightning:free';
+  if (id.includes('phi')) return 'openrouter/free';
 
   return 'openrouter/free';
 }
@@ -2433,6 +2438,23 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   const activeOllamaKey = ollamaApiKey || (apiKey && !apiKey.startsWith('sk-or-') ? apiKey : null) ||
     (ollamaEpIsCustom ? null : process.env.OLLAMA_API_KEY);
   let rawEp = (endpoint || '').trim();
+
+  // 100% Pure Cloud Architecture: Jika tidak ada custom endpoint Ollama eksternal dengan API key valid,
+  // alihkan secara transparan ke OpenRouter Cloud AI menggunakan model mapping resmi.
+  const hasCustomOllama = Boolean(activeOllamaKey && rawEp && !rawEp.includes('127.0.0.1') && !rawEp.includes('localhost') && !rawEp.includes('ollama.com'));
+  if (!isOpenRouter && !hasCustomOllama) {
+    const mappedModel = mapOllamaModelToOpenRouter(rawModel);
+    return await callLLMBackend({
+      prompt,
+      system,
+      messages,
+      model: mappedModel,
+      provider: 'openrouter',
+      endpoint,
+      apiKey: openRouterKey || apiKey,
+      openRouterKey: openRouterKey || (apiKey && apiKey.startsWith('sk-or-') ? apiKey : null) || process.env.OPENROUTER_API_KEY
+    });
+  }
 
   // Jika activeOllamaKey ada dan endpoint tidak dispesifikasi, gunakan Ollama Cloud
   if (activeOllamaKey && (!rawEp || rawEp.includes('127.0.0.1') || rawEp.includes('localhost'))) {
@@ -6303,15 +6325,16 @@ async function requestHandler(req, res) {
       // klien tetap boleh memakai key miliknya sendiri via x-ollama-key.
       const rawKey = clientSuppliedKey ||
         (isTrustedOllamaEndpoint(customEndpoint) ? process.env.OLLAMA_API_KEY : null);
-      const authHeader = rawKey ? `Bearer ${rawKey}` : (req.headers['authorization'] || null);
-
+      const rawOllamaKey = body.ollamaApiKey || req.headers['x-ollama-key'] || (body.apiKey && !String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || (req.headers['authorization'] && !req.headers['authorization'].includes('sk-or-') ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null);
       const isLoopbackTarget = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(customEndpoint);
-      const isCloudWithoutKey = customEndpoint.includes('ollama.com') && !rawKey;
+      const isCustomRemoteEndpoint = customEndpoint && !isLoopbackTarget && !customEndpoint.includes('ollama.com');
+      const shouldUseCloudBridge = !rawOllamaKey || !isCustomRemoteEndpoint;
 
-      if (!clientSuppliedKey && (isLoopbackTarget || isCloudWithoutKey)) {
+      if (shouldUseCloudBridge) {
         // Pure Cloud Architecture Bridge:
         // Ketika tidak ada daemon lokal atau key khusus Ollama, alihkan secara transparan ke OpenRouter Cloud AI
         // dan konversikan stream SSE OpenRouter ke format newline-delimited JSON Ollama.
+        const targetCloudModel = mapOllamaModelToOpenRouter(body.model || 'gemma4:31b');
         const rawOrKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || body.openRouterKey || (body.apiKey && body.apiKey.startsWith('sk-or-') ? body.apiKey : null) || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || process.env.OPENROUTER_API_KEY;
         const openRouterKey = rawOrKey ? `Bearer ${String(rawOrKey).replace(/^Bearer\s+/i, '').trim()}` : '';
 
