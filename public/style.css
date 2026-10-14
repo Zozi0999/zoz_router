@@ -9839,6 +9839,24 @@ body.page-paused *::after {
   vertical-align: middle;
 }
 
+.file-workspace-tag.file-approval-pending-tag {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #F59E0B;
+}
+
+.ai-file-btn.allow-pending {
+  background: rgba(0, 255, 194, 0.15) !important;
+  border-color: rgba(0, 255, 194, 0.4) !important;
+  color: var(--neon-teal) !important;
+  font-weight: 600;
+}
+
+.ai-file-btn.allow-pending:hover {
+  background: rgba(0, 255, 194, 0.3) !important;
+  box-shadow: 0 0 8px rgba(0, 255, 194, 0.3);
+}
+
 /* ==================== INTERACTIVE TASK TRACKER & FILE SNAPSHOTS (v257) ==================== */
 
 /* Task Tracker Floating Card */
@@ -9973,6 +9991,13 @@ body.page-paused *::after {
   box-shadow: 0 0 10px rgba(168, 85, 247, 0.1);
 }
 
+.task-tracker-item.status-waiting_approval {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.08);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+  flex-wrap: wrap;
+}
+
 .task-status-btn {
   background: transparent;
   border: none;
@@ -9992,6 +10017,11 @@ body.page-paused *::after {
 
 .task-tracker-item.status-in_progress .task-status-btn {
   color: var(--neon-cyan);
+  animation: pulse-glow 1.5s infinite;
+}
+
+.task-tracker-item.status-waiting_approval .task-status-btn {
+  color: #F59E0B;
   animation: pulse-glow 1.5s infinite;
 }
 
@@ -10016,6 +10046,62 @@ body.page-paused *::after {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.task-active-form.approval-wait-tag {
+  color: #F59E0B !important;
+  font-weight: 600;
+}
+
+.task-approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding-top: 5px;
+  margin-top: 4px;
+  border-top: 1px dashed rgba(245, 158, 11, 0.25);
+}
+
+.btn-approval-allow {
+  background: rgba(0, 255, 194, 0.15);
+  border: 1px solid rgba(0, 255, 194, 0.4);
+  color: var(--neon-teal);
+  font-size: 0.72rem;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-approval-allow:hover {
+  background: rgba(0, 255, 194, 0.3);
+  border-color: var(--neon-teal);
+  box-shadow: 0 0 8px rgba(0, 255, 194, 0.3);
+}
+
+.btn-approval-reject {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #ff6b6b;
+  font-size: 0.72rem;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-approval-reject:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: #ff4d4d;
+  color: #fff;
 }
 
 .task-delete-btn {
