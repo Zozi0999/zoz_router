@@ -2426,35 +2426,29 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
-  background: rgba(0, 240, 255, 0.04);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .slash-menu-title {
-  font-family: var(--font-code);
+  font-family: var(--font-main, inherit);
   font-size: 0.76rem;
   font-weight: 700;
-  color: var(--neon-cyan);
+  color: #94a3b8;
   text-transform: uppercase;
   letter-spacing: 0.8px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.slash-menu-hint {
-  font-size: 0.7rem;
-  color: var(--text-muted);
 }
 
 .slash-menu-list {
-  max-height: 320px;
+  max-height: 280px;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 240, 255, 0.3) transparent;
 }
@@ -2463,7 +2457,8 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 9px 12px;
+  padding: 10px 12px;
+  min-height: 48px;
   border-radius: 8px;
   background: transparent;
   border: 1px solid transparent;
@@ -2471,15 +2466,28 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   cursor: pointer;
   text-align: left;
   width: 100%;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
   user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: pan-y;
 }
 
-.slash-menu-item:hover,
+@media (hover: hover) {
+  .slash-menu-item:hover {
+    background: rgba(0, 240, 255, 0.1);
+    border-color: rgba(0, 240, 255, 0.25);
+  }
+}
+
+.slash-menu-item:active {
+  background: rgba(0, 240, 255, 0.18);
+  border-color: rgba(0, 240, 255, 0.35);
+}
+
 .slash-menu-item.active {
   background: rgba(0, 240, 255, 0.12);
   border-color: rgba(0, 240, 255, 0.3);
-  transform: translateX(2px);
 }
 
 .slash-menu-item-icon {
@@ -2531,26 +2539,6 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* Slash Command Button in Composer Tools */
-.slash-cmd-btn {
-  font-family: var(--font-code);
-  font-weight: 800;
-  font-size: 1.15rem;
-  color: var(--neon-cyan);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  user-select: none;
-}
-
-.slash-cmd-btn:hover {
-  background: rgba(0, 240, 255, 0.15);
-  border-color: rgba(0, 240, 255, 0.5);
-  box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
-  transform: scale(1.05);
 }
 
 .composer-box:hover {

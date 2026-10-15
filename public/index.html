@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261015_v278">
+  <link rel="stylesheet" href="style.css?v=20261015_v279">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -679,10 +679,9 @@
 
         <div class="composer-box">
           <!-- Slash Commands / Quick Tools Autocomplete Menu -->
-          <div class="slash-commands-menu" id="slashCommandsMenu" style="display: none;" role="listbox" aria-label="Menu Perintah & Alat Cepat">
+          <div class="slash-commands-menu" id="slashCommandsMenu" style="display: none;" role="listbox" aria-label="Skills">
             <div class="slash-menu-header">
-              <span class="slash-menu-title"><i class="fa-solid fa-bolt"></i> Alat & Perintah Cepat</span>
-              <span class="slash-menu-hint">Ketik untuk menyaring • Klik atau Enter untuk memilih</span>
+              <span class="slash-menu-title">Skills</span>
             </div>
             <div class="slash-menu-list" id="slashMenuList"></div>
           </div>
@@ -694,11 +693,6 @@
             <input type="file" id="cameraFileInput" accept="image/*" capture="environment" style="display: none;">
             <input type="file" id="photoEditFileInput" accept="image/*" style="display: none;">
             <input type="file" id="docFileInput" accept=".txt,.pdf,.csv,.json,.md,.js,.py,.html,.css,.ts,.java,.cpp,.c,.go,.rs,.sql,.sh,.yaml,.yml,.xml,.doc,.docx" multiple style="display: none;">
-
-            <!-- Slash Commands Trigger Button -->
-            <button class="composer-btn slash-cmd-btn" id="slashCmdBtn" type="button" title="Perintah & Alat Cepat (/)" aria-label="Buka menu perintah cepat">
-              <span class="slash-btn-char">/</span>
-            </button>
 
             <!-- Unified Attachment Menu (ChatGPT & Gemini Style) -->
             <div class="attachment-menu-wrapper" id="attachmentMenuWrapper">
@@ -752,24 +746,6 @@
 
                 <!-- Pane 2: AI Tools & Creation Studio -->
                 <div class="attachment-pane" id="attachPaneTools" role="tabpanel" style="display: none;">
-                  <button class="attachment-menu-item" id="attachOptionDiagram" type="button">
-                    <div class="attach-item-icon-box diagram-accent" style="background: rgba(0, 240, 255, 0.15); border-color: rgba(0, 240, 255, 0.4); color: #00f0ff;">
-                      <i class="fa-solid fa-diagram-project"></i>
-                    </div>
-                    <div class="attach-item-info">
-                      <span class="attach-item-title">Diagram & Flowchart (Mermaid)</span>
-                      <span class="attach-item-desc">Alur sistem, flowchart, sequence, ERD live</span>
-                    </div>
-                  </button>
-                  <button class="attachment-menu-item" id="attachOptionWebsite" type="button">
-                    <div class="attach-item-icon-box web-studio-accent" style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: #10b981;">
-                      <i class="fa-solid fa-code"></i>
-                    </div>
-                    <div class="attach-item-info">
-                      <span class="attach-item-title">Website & App Studio</span>
-                      <span class="attach-item-desc">Landing page, simulator, game, Three.js live</span>
-                    </div>
-                  </button>
                   <button class="attachment-menu-item" id="attachOptionGenImage" type="button">
                     <div class="attach-item-icon-box image-gen-accent" style="background: rgba(255, 0, 127, 0.15); border-color: rgba(255, 0, 127, 0.4); color: #FF007F;">
                       <i class="fa-solid fa-wand-magic-sparkles"></i>
@@ -1927,12 +1903,12 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" defer></script>
   <!-- Mermaid.js for Interactive Visual Diagram Rendering (Local 0ms Instant Load) -->
-  <script src="mermaid.min.js?v=20261015_v278" defer></script>
+  <script src="mermaid.min.js?v=20261015_v279" defer></script>
   <!-- jsPDF for Client-side Autonomous PDF Document Generation (Local 0ms Instant Load) -->
-  <script src="jspdf.umd.min.js?v=20261015_v278" defer></script>
+  <script src="jspdf.umd.min.js?v=20261015_v279" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261015_v278" defer></script>
+  <script src="text-safety.js?v=20261015_v279" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261015_v278" defer></script>
+  <script src="app.js?v=20261015_v279" defer></script>
 </body>
 </html>

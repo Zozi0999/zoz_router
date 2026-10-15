@@ -650,7 +650,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     promptInput: $('#promptInput'),
     slashCommandsMenu: $('#slashCommandsMenu'),
     slashMenuList: $('#slashMenuList'),
-    slashCmdBtn: $('#slashCmdBtn'),
     sendPromptBtn: $('#sendPromptBtn'),
     stopGenerationBtn: $('#stopGenerationBtn'),
     attachToggleBtn: $('#attachToggleBtn'),
@@ -658,8 +657,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     attachmentMenuWrapper: $('#attachmentMenuWrapper'),
     attachOptionCamera: $('#attachOptionCamera'),
     attachOptionImage: $('#attachOptionImage'),
-    attachOptionDiagram: $('#attachOptionDiagram'),
-    attachOptionWebsite: $('#attachOptionWebsite'),
     attachOptionGenImage: $('#attachOptionGenImage'),
     attachOptionGenMusic: $('#attachOptionGenMusic'),
     attachOptionDoc: $('#attachOptionDoc'),
@@ -22396,8 +22393,9 @@ Aturan:
   ];
 
   let slashFilteredCommands = [...SLASH_COMMANDS];
-  let slashCommandSelectedIndex = 0;
+  let slashCommandSelectedIndex = -1;
   let isSlashMenuOpen = false;
+  let slashMenuOpenTimestamp = 0;
 
   function renderSlashCommandsMenu(list) {
     if (!els.slashMenuList) return;
@@ -22409,7 +22407,7 @@ Aturan:
       emptyItem.style.fontSize = '0.78rem';
       emptyItem.style.color = 'var(--text-muted)';
       emptyItem.style.textAlign = 'center';
-      emptyItem.textContent = 'Tidak ada perintah atau alat yang cocok.';
+      emptyItem.textContent = 'Tidak ada skill atau perintah yang cocok.';
       els.slashMenuList.appendChild(emptyItem);
       return;
     }
@@ -22435,8 +22433,38 @@ Aturan:
         </div>
       `;
 
-      itemEl.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
+      // Deteksi sentuhan mobile yang bersih: jangan pernah auto-pilih saat pengguna menggeser/menggulir menu!
+      let touchMoved = false;
+      let startTouchX = 0;
+      let startTouchY = 0;
+
+      itemEl.addEventListener('touchstart', (e) => {
+        touchMoved = false;
+        if (e.touches && e.touches[0]) {
+          startTouchX = e.touches[0].clientX;
+          startTouchY = e.touches[0].clientY;
+        }
+      }, { passive: true });
+
+      itemEl.addEventListener('touchmove', (e) => {
+        if (e.touches && e.touches[0]) {
+          const dx = Math.abs(e.touches[0].clientX - startTouchX);
+          const dy = Math.abs(e.touches[0].clientY - startTouchY);
+          if (dx > 8 || dy > 8) {
+            touchMoved = true;
+          }
+        }
+      }, { passive: true });
+
+      itemEl.addEventListener('touchend', (e) => {
+        if (!touchMoved) {
+          e.preventDefault();
+          selectSlashCommand(cmd);
+        }
+      });
+
+      itemEl.addEventListener('click', (e) => {
+        e.stopPropagation();
         selectSlashCommand(cmd);
       });
 
@@ -22470,10 +22498,11 @@ Aturan:
       });
     }
 
-    slashCommandSelectedIndex = 0;
+    slashCommandSelectedIndex = -1; // Default tanpa active highlight di awal agar mobile tidak ter-highlight otomatis
     renderSlashCommandsMenu(slashFilteredCommands);
     els.slashCommandsMenu.style.display = 'block';
     isSlashMenuOpen = true;
+    slashMenuOpenTimestamp = Date.now();
   }
 
   function hideSlashCommandsMenu() {
@@ -22485,7 +22514,11 @@ Aturan:
   function navigateSlashCommands(direction) {
     if (!isSlashMenuOpen || slashFilteredCommands.length === 0) return;
     const total = slashFilteredCommands.length;
-    slashCommandSelectedIndex = (slashCommandSelectedIndex + direction + total) % total;
+    if (slashCommandSelectedIndex === -1) {
+      slashCommandSelectedIndex = direction > 0 ? 0 : total - 1;
+    } else {
+      slashCommandSelectedIndex = (slashCommandSelectedIndex + direction + total) % total;
+    }
 
     if (els.slashMenuList) {
       const items = els.slashMenuList.querySelectorAll('.slash-menu-item');
@@ -22500,7 +22533,8 @@ Aturan:
 
   function selectCurrentSlashCommand() {
     if (!isSlashMenuOpen || slashFilteredCommands.length === 0) return;
-    const cmd = slashFilteredCommands[slashCommandSelectedIndex];
+    const idx = slashCommandSelectedIndex >= 0 ? slashCommandSelectedIndex : 0;
+    const cmd = slashFilteredCommands[idx];
     if (cmd) {
       selectSlashCommand(cmd);
     }
@@ -22508,6 +22542,8 @@ Aturan:
 
   function selectSlashCommand(cmd) {
     if (!cmd) return;
+    // Cegah sentuhan/klik instan tak sengaja selama menu baru muncul
+    if (Date.now() - slashMenuOpenTimestamp < 200) return;
 
     if (cmd.action === 'image_mode') {
       STATE.isImageGenMode = true;
@@ -23244,40 +23280,6 @@ Aturan:
       BioEndocrine.purgeStress();
     });
 
-    // Tombol Cepat Perintah Slash (/)
-    els.slashCmdBtn?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      AudioEngine.click();
-      if (isSlashMenuOpen) {
-        hideSlashCommandsMenu();
-      } else {
-        closeAttachmentDropdown();
-        closeSearchDropdown();
-        closeImageModelDropdown();
-        closeMusicModelDropdown();
-        if (els.promptInput && !els.promptInput.value.startsWith('/')) {
-          els.promptInput.value = '/' + els.promptInput.value;
-          autoResizeTextarea(els.promptInput);
-        }
-        showSlashCommandsMenu('');
-        els.promptInput?.focus();
-      }
-    });
-
-    els.attachOptionDiagram?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeAttachmentDropdown();
-      const diagramCmd = SLASH_COMMANDS.find(c => c.id === 'diagram');
-      if (diagramCmd) selectSlashCommand(diagramCmd);
-    });
-
-    els.attachOptionWebsite?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeAttachmentDropdown();
-      const websiteCmd = SLASH_COMMANDS.find(c => c.id === 'website');
-      if (websiteCmd) selectSlashCommand(websiteCmd);
-    });
-
     // Unified Composer Attachments (ChatGPT & Gemini Style Plus Menu with Tabs)
     els.attachToggleBtn?.addEventListener('click', toggleAttachmentDropdown);
     els.tabAttachFiles?.addEventListener('click', (e) => {
@@ -23890,7 +23892,7 @@ Aturan:
         }
       }
       if (isSlashMenuOpen) {
-        if (!els.slashCommandsMenu?.contains(e.target) && !els.slashCmdBtn?.contains(e.target) && !els.promptInput?.contains(e.target)) {
+        if (!els.slashCommandsMenu?.contains(e.target) && !els.promptInput?.contains(e.target)) {
           hideSlashCommandsMenu();
         }
       }
