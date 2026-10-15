@@ -2207,12 +2207,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           STATE.localWorkspace.dirName = savedWs.dirName || STATE.localWorkspace.dirName || 'Direktori Dokumen';
           STATE.localWorkspace.platform = savedWs.platform || (serverAvailable ? 'server-fs' : (isDesktopFileSystemSupported() ? 'desktop-fs' : 'mobile-virtual'));
           STATE.localWorkspace.files = savedWs.files;
-          STATE.localWorkspace.enabled = (savedWs.enabled !== undefined) ? savedWs.enabled : true;
+          STATE.localWorkspace.enabled = Boolean(STATE.settings.localWorkspaceEnabled && savedWs.enabled);
           STATE.localWorkspace.snapshots = savedWs.snapshots || STATE.localWorkspace.snapshots || {};
           STATE.settings.localWorkspaceEnabled = STATE.localWorkspace.enabled;
 
-          // Jika platform server-fs, refresh berkas dari disk server agar selalu terkini
-          if (STATE.localWorkspace.platform === 'server-fs' && serverAvailable) {
+          // Jika platform server-fs dan workspace aktif, refresh berkas dari disk server agar selalu terkini
+          if (STATE.localWorkspace.platform === 'server-fs' && serverAvailable && STATE.localWorkspace.enabled) {
             ServerWorkspaceAPI.getFiles().then(latestFiles => {
               if (Array.isArray(latestFiles) && latestFiles.length > 0) {
                 STATE.localWorkspace.files = latestFiles;
@@ -2224,9 +2224,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
           loadWorkspaceSnapshots();
           updateLocalWorkspaceUI();
-        } else if (serverAvailable) {
-          // CLAUDE-CODE PARITY: Jika terhubung ke server lokal dan belum ada workspace terpasang,
-          // otomatis pasang direktori kerja proyek server secara seamless!
+        } else if (serverAvailable && STATE.settings.localWorkspaceEnabled) {
+          // Hanya pasang jika pengguna memang mengaktifkan preferensi direktori lokal
           const serverFiles = await ServerWorkspaceAPI.getFiles();
           if (Array.isArray(serverFiles) && serverFiles.length > 0) {
             STATE.localWorkspace.dirName = ServerWorkspaceAPI.dirName || 'zoz-router';
@@ -3700,6 +3699,78 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   <div class="pdf-sheet">
     <div class="pdf-header-badge">📑 Pratinjau Dokumen Adobe PDF (.pdf) • ${escapeHtml(fileName || 'Dokumen')}</div>
     ${parsedBody}
+  </div>
+</body>
+</html>`;
+  }
+
+  function generateMermaidDocPreviewHtml(fileName, svgHtml) {
+    return `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      background: #0d1117;
+      color: #e6edf3;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 24px 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      box-sizing: border-box;
+    }
+    .mermaid-sheet {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 24px;
+      width: 100%;
+      max-width: 960px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      box-sizing: border-box;
+    }
+    .mermaid-header-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(56, 189, 248, 0.12);
+      color: #38bdf8;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 20px;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+    .mermaid-svg-container {
+      width: 100%;
+      overflow-x: auto;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 16px 0;
+    }
+    .mermaid-svg-container svg {
+      max-width: 100%;
+      height: auto;
+      display: block;
+    }
+    @media (max-width: 600px) {
+      body { padding: 8px; }
+      .mermaid-sheet { padding: 16px 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="mermaid-sheet">
+    <div class="mermaid-header-badge">📊 Pratinjau Diagram Visual • ${escapeHtml(fileName || 'Diagram')}</div>
+    <div class="mermaid-svg-container">
+      ${svgHtml}
+    </div>
   </div>
 </body>
 </html>`;
@@ -7128,32 +7199,39 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     return `### INSTRUKSI SISTEM: AI FILE STUDIO & DIAGRAM VISUAL OTONOM
 
 1. PEMBUATAN & PENGEDITAN BERKAS / DOKUMEN:
-Saat pengguna meminta sebuah berkas — website, script (.bat/.py/.sh/.ps1), konfigurasi, atau dokumen:
-<<<ZOZ_FILE name="nama-file.ekstensi" mime="tipe/mime" lang="bahasa">
+Saat pengguna meminta sebuah berkas — website, script (.bat/.py/.sh/.ps1), konfigurasi, dokumen, atau diagram:
+<<<ZOZ_FILE name="Nama_Berkas_Spesifik.ekstensi" mime="tipe/mime" lang="bahasa">
 isi lengkap file, siap pakai, tanpa potongan
 <<<END_ZOZ_FILE>>>
 
+ATURAN WAJIB PENAMAAN BERKAS (AI HARUS MENENTUKAN NAMA SPESIFIK & DESKRIPTIF):
+- AI HARUS menentukan nama berkas yang spesifik, relevan, dan sangat deskriptif sesuai topik/isi yang diminta pengguna!
+- Untuk Diagram Mermaid: Tentukan nama spesifik seperti "Alur_Verifikasi_Email.mermaid", "Arsitektur_Sistem_Microservices.mermaid", "ERD_Database_Toko.mermaid", "Alur_Registrasi_Pengguna.mermaid". DILARANG KERAS menggunakan nama generik seperti "file.mermaid" atau "diagram.mermaid"!
+- Untuk Dokumen Word/PDF: Tentukan nama spesifik seperti "Panduan_Implementasi_API.docx", "Laporan_Analisis_Sistem.pdf", "Rencana_Proyek_2026.docx". DILARANG KERAS menggunakan nama generik seperti "file.docx", "file.pdf", "Dokumen.docx"!
+- Jangan gunakan spasi pada nama file, gunakan underscore (_) atau dash (-).
+
 KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
 - Jika pengguna meminta berkas Word (.docx) atau PDF (.pdf), gunakan:
-  <<<ZOZ_FILE name="Dokumen.docx" mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document" lang="markdown">>>
+  <<<ZOZ_FILE name="Nama_Dokumen_Spesifik.docx" mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document" lang="markdown">>>
   atau
-  <<<ZOZ_FILE name="Dokumen.pdf" mime="application/pdf" lang="markdown">>>
-- Tulis isinya dalam format Markdown terstruktur yang rapi (judul #, ##, ###, bullet points -, bold **teks**, pemisah ---).
+  <<<ZOZ_FILE name="Nama_Dokumen_Spesifik.pdf" mime="application/pdf" lang="markdown">>>
+- Tulis isinya dalam format Markdown terstruktur yang rapi (judul #, ##, ###, bullet points -, bold **teks**, tabel, pemisah ---).
 - Mesin ZOZ Document Compiler akan secara otomatis mengompilasi teks Markdown ini menjadi berkas biner murni .docx (Office Open XML) atau .pdf (Adobe Acrobat) yang valid dan siap langsung dibuka di Microsoft Word / Acrobat Reader di laptop maupun HP pengguna!
 
 2. PEMBUATAN DIAGRAM VISUAL INTERAKTIF (MERMAID):
-- Saat pengguna meminta diagram alur (flowchart), alur logika, urutan proses (sequence diagram), struktur kelas (class diagram), ERD basis data, atau diagram arsitektur sistem:
-- Gunakan blok kode standar Mermaid:
-` + TICK3 + `mermaid
+- Saat pengguna meminta diagram alur (flowchart), alur logika, urutan proses (sequence diagram), struktur kelas (class diagram), ERD basis data, mindmap, atau diagram arsitektur sistem:
+- AI WAJIB menyertakan baris judul diagram pada baris pertama/kedua (contoh: "title Alur Verifikasi Email" atau "accTitle: Alur Verifikasi Email") dan membungkusnya dalam blok ZOZ_FILE dengan nama berkas spesifik:
+<<<ZOZ_FILE name="Alur_Verifikasi_Email.mermaid" mime="text/vnd.mermaid" lang="mermaid">
 flowchart TD
-    A[Mulai] --> B{Validasi}
-    B -- Ya --> C[Selesai]
-    B -- Tidak --> D[Perbaiki]
-` + TICK3 + `
-- Sistem ZOZ Router akan secara instan merender kode Mermaid tersebut menjadi Diagram Visual Interaktif dengan kontrol Zoom In/Out, Panning Drag/Touch, Tombol Unduh SVG, dan Switch Kode Sumber.
+    title Alur Verifikasi Email
+    A[Mulai: Pengguna Daftar] --> B{Validasi Data}
+    B -- Valid --> C[Kirim Email Verifikasi]
+    B -- Tidak Valid --> D[Tampilkan Pesan Error]
+<<<END_ZOZ_FILE>>>
+- Pengguna juga dapat menerima blok standar Mermaid ` + TICK3 + `mermaid ... ` + TICK3 + `. Sistem ZOZ Router akan secara instan merender visual diagram interaktif dengan zoom, pan, switch kode sumber, dan tombol unduh.
 
 Aturan wajib:
-- name : nama file final yang bisa diunduh atau ditulis langsung ke direktori pengguna.
+- name : nama file final yang deskriptif dan spesifik.
 - Isi berkas HARUS lengkap, valid, dan langsung bisa dijalankan/dibuka — bukan pseudocode atau potongan.
 - Jangan menyalin ulang isi file di luar blok penanda, agar tampilan obrolan tetap rapi.`;
   }
@@ -7180,19 +7258,74 @@ Aturan wajib:
 
   function guessMimeFromName(name) {
     const ext = (String(name).split('.').pop() || '').toLowerCase();
-    const map = { html: 'text/html', htm: 'text/html', css: 'text/css', js: 'text/javascript', mjs: 'text/javascript', jsx: 'text/plain', ts: 'text/plain', py: 'text/x-python', bat: 'application/bat', cmd: 'application/bat', ps1: 'text/plain', sh: 'application/x-sh', bash: 'application/x-sh', json: 'application/json', yaml: 'text/yaml', yml: 'text/yaml', xml: 'application/xml', sql: 'text/plain', csv: 'text/csv', md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', log: 'text/plain', php: 'text/x-php', java: 'text/plain', c: 'text/plain', cpp: 'text/plain', go: 'text/plain', toml: 'text/plain', ini: 'text/plain', conf: 'text/plain' };
+    const map = { html: 'text/html', htm: 'text/html', css: 'text/css', js: 'text/javascript', mjs: 'text/javascript', jsx: 'text/plain', ts: 'text/plain', py: 'text/x-python', bat: 'application/bat', cmd: 'application/bat', ps1: 'text/plain', sh: 'application/x-sh', bash: 'application/x-sh', json: 'application/json', yaml: 'text/yaml', yml: 'text/yaml', xml: 'application/xml', sql: 'text/plain', csv: 'text/csv', md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', log: 'text/plain', php: 'text/x-php', java: 'text/plain', c: 'text/plain', cpp: 'text/plain', go: 'text/plain', toml: 'text/plain', ini: 'text/plain', conf: 'text/plain', mermaid: 'text/vnd.mermaid', mmd: 'text/vnd.mermaid', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pdf: 'application/pdf' };
     return map[ext] || 'text/plain';
   }
 
   function guessLangFromName(name) {
     const ext = (String(name).split('.').pop() || '').toLowerCase();
-    const map = { html: 'html', htm: 'html', css: 'css', js: 'javascript', mjs: 'javascript', jsx: 'javascript', ts: 'typescript', py: 'python', bat: 'batch', ps1: 'powershell', sh: 'shell', bash: 'shell', json: 'json', yaml: 'yaml', yml: 'yaml', xml: 'xml', sql: 'sql', md: 'markdown', markdown: 'markdown', php: 'php', java: 'java', c: 'c', cpp: 'cpp', go: 'go', csv: 'csv', txt: 'text' };
+    const map = { html: 'html', htm: 'html', css: 'css', js: 'javascript', mjs: 'javascript', jsx: 'javascript', ts: 'typescript', py: 'python', bat: 'batch', ps1: 'powershell', sh: 'shell', bash: 'shell', json: 'json', yaml: 'yaml', yml: 'yaml', xml: 'xml', sql: 'sql', md: 'markdown', markdown: 'markdown', php: 'php', java: 'java', c: 'c', cpp: 'cpp', go: 'go', csv: 'csv', txt: 'text', mermaid: 'mermaid', mmd: 'mermaid', docx: 'markdown', pdf: 'markdown' };
     return map[ext] || (ext || 'text');
   }
 
-  function guessFileNameFromLang(lang) {
-    const map = { html: 'index.html', css: 'styles.css', javascript: 'script.js', js: 'script.js', typescript: 'main.ts', ts: 'main.ts', python: 'main.py', py: 'main.py', bash: 'run.sh', sh: 'run.sh', shell: 'run.sh', batch: 'run.bat', bat: 'run.bat', powershell: 'script.ps1', ps1: 'script.ps1', json: 'data.json', yaml: 'config.yaml', yml: 'config.yaml', xml: 'data.xml', sql: 'query.sql', php: 'index.php', java: 'Main.java', c: 'main.c', cpp: 'main.cpp', go: 'main.go', csv: 'data.csv', markdown: 'README.md', md: 'README.md', text: 'notes.txt', txt: 'notes.txt' };
-    return map[lang] || ('file.' + (lang || 'txt'));
+  function guessFileNameFromLang(lang, body = '') {
+    const cleanLang = String(lang || '').toLowerCase().trim();
+    const isMermaid = cleanLang === 'mermaid' || cleanLang === 'mmd' || (body && (body.includes('flowchart') || body.includes('sequenceDiagram') || body.includes('classDiagram') || body.includes('stateDiagram') || body.includes('erDiagram') || body.includes('graph ') || body.includes('gitGraph') || body.includes('mindmap')));
+
+    if (isMermaid) {
+      const lines = String(body || '').split('\n');
+      for (const line of lines) {
+        const t = line.trim();
+        const m = t.match(/^(?:accTitle|title)[:\s]+(.+)$/i);
+        if (m && m[1]) {
+          const safe = m[1].replace(/[^a-zA-Z0-9_\-\s]/g, '').trim().replace(/\s+/g, '_');
+          if (safe.length >= 3) return safe + '.mermaid';
+        }
+      }
+      // Ekstrak konteks dari kata kunci di dalam diagram
+      const bLow = String(body || '').toLowerCase();
+      let topic = '';
+      if (bLow.includes('email') && (bLow.includes('verif') || bLow.includes('token') || bLow.includes('aktivasi'))) topic = 'Alur_Verifikasi_Email';
+      else if (bLow.includes('login') || bLow.includes('auth') || bLow.includes('masuk')) topic = 'Alur_Autentikasi_Login';
+      else if (bLow.includes('daftar') || bLow.includes('regist') || bLow.includes('signup')) topic = 'Alur_Registrasi_Pengguna';
+      else if (bLow.includes('bayar') || bLow.includes('payment') || bLow.includes('checkout') || bLow.includes('transaksi')) topic = 'Alur_Pembayaran_Checkout';
+      else if (bLow.includes('database') || bLow.includes('tabel') || bLow.includes('entity') || bLow.includes('erd')) topic = 'Diagram_Relasi_Database';
+      else if (bLow.includes('arsitektur') || bLow.includes('microservice') || bLow.includes('server') || bLow.includes('gateway')) topic = 'Arsitektur_Sistem';
+      else if (bLow.includes('sequencediagram')) topic = 'Diagram_Interaksi_Sequence';
+      else if (bLow.includes('classdiagram')) topic = 'Diagram_Struktur_Class';
+      else if (bLow.includes('flowchart') || bLow.includes('graph')) topic = 'Diagram_Alur_Logika';
+      else topic = 'Diagram_Alur_' + Date.now().toString(36).slice(-4).toUpperCase();
+      return topic + '.mermaid';
+    }
+
+    const map = {
+      html: 'index.html', css: 'styles.css', javascript: 'script.js', js: 'script.js',
+      typescript: 'main.ts', ts: 'main.ts', python: 'main.py', py: 'main.py',
+      bash: 'run.sh', sh: 'run.sh', shell: 'run.sh', batch: 'run.bat', bat: 'run.bat',
+      powershell: 'script.ps1', ps1: 'script.ps1', json: 'data.json', yaml: 'config.yaml',
+      yml: 'config.yaml', xml: 'data.xml', sql: 'query.sql', php: 'index.php',
+      java: 'Main.java', c: 'main.c', cpp: 'main.cpp', go: 'main.go', csv: 'data.csv',
+      markdown: 'README.md', md: 'README.md', text: 'catatan.txt', txt: 'catatan.txt',
+      docx: 'Dokumen_Laporan.docx', pdf: 'Dokumen_Laporan.pdf',
+      mermaid: 'Diagram_Alur_Sistem.mermaid'
+    };
+    return map[cleanLang] || ('berkas_' + Date.now().toString(36).slice(-4) + '.' + (cleanLang || 'txt'));
+  }
+
+  function sanitizeSmartFileName(name, lang, content) {
+    let cleanName = String(name || '').trim();
+    const lower = cleanName.toLowerCase();
+    const isGeneric = !cleanName ||
+      lower === 'file.mermaid' || lower === 'diagram.mermaid' || lower === 'chart.mermaid' || lower === 'untitled.mermaid' ||
+      lower === 'file.docx' || lower === 'dokumen.docx' || lower === 'document.docx' ||
+      lower === 'file.pdf' || lower === 'dokumen.pdf' || lower === 'document.pdf' ||
+      lower === 'file.txt' || lower === 'untitled.txt';
+
+    if (isGeneric) {
+      const ext = lower.split('.').pop() || lang || 'txt';
+      cleanName = guessFileNameFromLang(ext, content);
+    }
+    return cleanName || 'berkas.txt';
   }
 
   function getFileIconClass(name) {
@@ -7208,13 +7341,14 @@ Aturan wajib:
       md: 'fa-brands fa-markdown', markdown: 'fa-brands fa-markdown',
       txt: 'fa-solid fa-file-lines', log: 'fa-solid fa-file-lines', csv: 'fa-solid fa-table',
       php: 'fa-brands fa-php', java: 'fa-brands fa-java', go: 'fa-solid fa-microchip',
-      docx: 'fa-solid fa-file-word', pdf: 'fa-solid fa-file-pdf'
+      docx: 'fa-solid fa-file-word', pdf: 'fa-solid fa-file-pdf',
+      mermaid: 'fa-solid fa-diagram-project', mmd: 'fa-solid fa-diagram-project'
     };
     return map[ext] || 'fa-solid fa-file-code';
   }
 
   function buildAIFile(name, mime, lang, content, desc) {
-    const cleanName = String(name || 'file.txt').trim() || 'file.txt';
+    const cleanName = sanitizeSmartFileName(name, lang, content);
     let bytes = 0;
     try { bytes = new Blob([content]).size; } catch (_) { bytes = String(content).length; }
     const lineCount = String(content).split('\n').length;
@@ -7305,9 +7439,9 @@ Aturan wajib:
     if (!file) return false;
     const name = String(file.name || '').toLowerCase();
     const mime = String(file.mime || '').toLowerCase();
-    if (mime.includes('text/html') || mime.includes('application/pdf') || mime.includes('wordprocessingml') || mime.includes('text/markdown')) return true;
+    if (mime.includes('text/html') || mime.includes('application/pdf') || mime.includes('wordprocessingml') || mime.includes('text/markdown') || mime.includes('mermaid')) return true;
     const ext = name.split('.').pop() || '';
-    return ['html', 'htm', 'xhtml', 'svg', 'docx', 'pdf', 'md', 'markdown', 'txt'].includes(ext);
+    return ['html', 'htm', 'xhtml', 'svg', 'docx', 'pdf', 'md', 'markdown', 'txt', 'mermaid', 'mmd'].includes(ext);
   }
 
   function isPreviewableHtmlFile(file) {
@@ -7342,6 +7476,7 @@ Aturan wajib:
     const isPdf = ext === 'pdf';
     const isMarkdown = ext === 'md' || ext === 'markdown';
     const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml' || ext === 'svg';
+    const isMermaid = ext === 'mermaid' || ext === 'mmd' || file.lang === 'mermaid';
 
     setAIFileStudioTab(previewable ? 'preview' : 'code');
 
@@ -7355,20 +7490,48 @@ Aturan wajib:
       } catch (_) {}
     }
     if (els.aiFileStudioFrame) {
-      if (isDocx || isMarkdown) {
+      if (isMermaid) {
+        els.aiFileStudioFrame.removeAttribute('src');
+        const cleanMermaid = getCleanMermaidCode(rawContent);
+        const tempId = 'aiStudioMermaid_' + Date.now();
+        if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
+          try {
+            initMermaidEngine();
+            window.mermaid.render(tempId, cleanMermaid).then(res => {
+              if (res && res.svg) {
+                els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, res.svg);
+              }
+            }).catch(err => {
+              console.warn('Gagal merender diagram di file studio:', err);
+              els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, `
+                <div style="color:#f87171; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); padding:16px; border-radius:6px; font-size:13px; text-align:center;">
+                  ⚠️ Diagram memerlukan penyesuaian sintaks untuk dirender secara visual.<br>
+                  <small style="color:#94a3b8; margin-top:8px; display:inline-block;">Buka tab "Kode Sumber" untuk melihat dan mengedit kode diagram Mermaid.</small>
+                </div>
+              `);
+            });
+          } catch (err) {
+            els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, `
+              <div style="color:#f87171; padding:16px; text-align:center;">
+                ⚠️ Mesin visualisasi Mermaid belum siap. Silakan lihat tab Kode Sumber.
+              </div>
+            `);
+          }
+        } else {
+          els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, `
+            <div style="color:#f87171; padding:16px; text-align:center;">
+              ⚠️ Mesin visualisasi Mermaid belum termuat. Silakan lihat tab Kode Sumber.
+            </div>
+          `);
+        }
+      } else if (isDocx || isMarkdown) {
         const parsedBody = (window.marked && window.marked.parse) ? window.marked.parse(rawContent) : escapeHtml(rawContent);
         els.aiFileStudioFrame.removeAttribute('src');
         els.aiFileStudioFrame.srcdoc = generateWordDocPreviewHtml(file.name, parsedBody);
       } else if (isPdf) {
-        compileMarkdownToPdfBlob(rawContent, file.name).then(pdfBlob => {
-          const pdfUrl = URL.createObjectURL(pdfBlob);
-          els.aiFileStudioFrame.removeAttribute('srcdoc');
-          els.aiFileStudioFrame.src = pdfUrl;
-        }).catch(() => {
-          const parsedBody = (window.marked && window.marked.parse) ? window.marked.parse(rawContent) : escapeHtml(rawContent);
-          els.aiFileStudioFrame.removeAttribute('src');
-          els.aiFileStudioFrame.srcdoc = generatePdfDocPreviewHtml(file.name, parsedBody);
-        });
+        const parsedBody = (window.marked && window.marked.parse) ? window.marked.parse(rawContent) : escapeHtml(rawContent);
+        els.aiFileStudioFrame.removeAttribute('src');
+        els.aiFileStudioFrame.srcdoc = generatePdfDocPreviewHtml(file.name, parsedBody);
       } else if (isHtml) {
         els.aiFileStudioFrame.removeAttribute('src');
         els.aiFileStudioFrame.srcdoc = rawContent;
@@ -7382,7 +7545,7 @@ Aturan wajib:
     }
 
     const existingFile = findWorkspaceFile(file.name) || file.existingFile;
-    const isWorkspace = STATE.localWorkspace.enabled || Boolean(existingFile || file.isEdit || (ServerWorkspaceAPI && ServerWorkspaceAPI.isAvailable));
+    const isWorkspace = Boolean(STATE.localWorkspace.enabled) && Boolean(existingFile || file.isEdit);
     if (els.aiFileStudioSaveDiskBtn) {
       if (isWorkspace) {
         els.aiFileStudioSaveDiskBtn.style.display = 'inline-flex';
@@ -7502,7 +7665,7 @@ Aturan wajib:
         if (end <= i) continue;
         const body = lines.slice(i + 1, end).join('\n');
         if (body.length < 300) continue;
-        out.files.push(buildAIFile(guessFileNameFromLang(langTag), '', langTag, body, ''));
+        out.files.push(buildAIFile(guessFileNameFromLang(langTag, body), '', langTag, body, ''));
         out.rawBlocks.push(lines.slice(i, end + 1).join('\n'));
         break;
       }
@@ -7678,9 +7841,9 @@ Aturan wajib:
       card.className = 'ai-file-card';
       card._aiFile = file;
 
-      const existingFile = findWorkspaceFile(file.name) || file.existingFile;
+      const existingFile = STATE.localWorkspace.enabled ? (findWorkspaceFile(file.name) || file.existingFile) : null;
       const isWorkspace = Boolean(STATE.localWorkspace.enabled) && Boolean(existingFile || file.isEdit);
-      const isPending = Boolean(file.pendingApproval || (STATE.localWorkspace.enabled && STATE.localWorkspace.pendingChanges && (STATE.localWorkspace.pendingChanges[file.name] || STATE.localWorkspace.pendingChanges[file.path])));
+      const isPending = Boolean(STATE.localWorkspace.enabled) && Boolean(file.pendingApproval || (STATE.localWorkspace.pendingChanges && (STATE.localWorkspace.pendingChanges[file.name] || STATE.localWorkspace.pendingChanges[file.path])));
       const isEdit = Boolean(file.isEdit || existingFile);
 
       let workspaceBadge = '';
@@ -9426,9 +9589,9 @@ ${blocks}
           STATE.localWorkspace.dirName = savedWs.dirName || 'Direktori Dokumen';
           STATE.localWorkspace.platform = savedWs.platform || 'mobile-virtual';
           STATE.localWorkspace.files = savedWs.files;
-          STATE.localWorkspace.enabled = (savedWs.enabled !== undefined) ? savedWs.enabled : true;
+          STATE.localWorkspace.enabled = Boolean(STATE.settings.localWorkspaceEnabled && savedWs.enabled);
           STATE.localWorkspace.snapshots = savedWs.snapshots || {};
-          STATE.settings.localWorkspaceEnabled = true;
+          STATE.settings.localWorkspaceEnabled = STATE.localWorkspace.enabled;
           updateLocalWorkspaceUI();
         }
       } catch (_) {}
