@@ -426,7 +426,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       workspaceIncludeTree: true,
       workspaceEnableSnapshots: true,
       workspaceAutoTaskTracker: true,
-      workspaceRequireApproval: true
+      workspaceRequireApproval: true,
+      endocrineCodeEnabled: true,
+      endocrineChatEnabled: false
     },
     localWorkspace: {
       enabled: false,
@@ -908,6 +910,13 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     endocrineTelemetryModal: $('#endocrineTelemetryModal'),
     btnAuditConnectomeNow: $('#btnAuditConnectomeNow'),
     btnPurgeStressEndorphin: $('#btnPurgeStressEndorphin'),
+    toggleEndocrineCode: $('#toggleEndocrineCode'),
+    toggleEndocrineChat: $('#toggleEndocrineChat'),
+    tabEndocrineCode: $('#tabEndocrineCode'),
+    tabEndocrineChat: $('#tabEndocrineChat'),
+    paneEndocrineCode: $('#paneEndocrineCode'),
+    paneEndocrineChat: $('#paneEndocrineChat'),
+    btnResetChatEndocrine: $('#btnResetChatEndocrine'),
 
     // Local Workspace & Document Management
     tabBtnLocalWorkspace: $('#tabBtnLocalWorkspace'),
@@ -1144,25 +1153,34 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         const d = Math.round(this.hormones.dopamine);
         const c = Math.round(this.hormones.cortisol);
 
+        let chatSuffix = '';
+        if (typeof ChatEndocrine !== 'undefined' && ChatEndocrine.enabled) {
+          chatSuffix = ` | Rasa: ${ChatEndocrine.currentVibe} (Oksitosin ${Math.round(ChatEndocrine.hormones.oxytocin)}%)`;
+        }
+
         btn.classList.remove('status-happy', 'status-stressed', 'status-critical');
         if (c >= 60) {
           btn.classList.add('status-critical');
           if (heartIcon) heartIcon.style.color = '#FF0055';
-          btn.title = `⚠️ PERINGATAN STRES KODE TINGGI (${c}%): Terdeteksi bug atau komponen terisolasi! Klik untuk cek telemetri.`;
+          btn.title = `⚠️ PERINGATAN STRES KODE TINGGI (${c}%): Terdeteksi bug atau komponen terisolasi! Klik untuk cek telemetri.${chatSuffix}`;
         } else if (c >= 30) {
           btn.classList.add('status-stressed');
           if (heartIcon) heartIcon.style.color = '#FFB703';
-          btn.title = `Stres Kode Meningkat (${c}%): Ada gangguan atau peringatan. Klik untuk cek telemetri.`;
+          btn.title = `Stres Kode Meningkat (${c}%): Ada gangguan atau peringatan. Klik untuk cek telemetri.${chatSuffix}`;
         } else {
           btn.classList.add('status-happy');
           if (heartIcon) heartIcon.style.color = '#00FFC2';
-          btn.title = `Kondisi Kode Sangat Kuat & Prima (Dopamin ${d}%, Bebas Bug). Klik untuk melihat bio-telemetri.`;
+          btn.title = `Kondisi Kode Sangat Kuat & Prima (Dopamin ${d}%, Bebas Bug). Klik untuk melihat bio-telemetri.${chatSuffix}`;
         }
       }
 
       const modal = document.getElementById('endocrineTelemetryModal');
       if (modal && modal.classList.contains('show')) {
         this.renderModalContent();
+        if (typeof ChatEndocrine !== 'undefined') {
+          ChatEndocrine.syncToggleUI();
+          ChatEndocrine.renderModalContent();
+        }
       }
     },
 
@@ -1263,6 +1281,275 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
   // Expose to window for global bio-telemetry, console inspection, and diagnostic audit
   window.BioEndocrine = BioEndocrine;
+
+  // ==================== CHAT-ENDOCRINE (SENSOR RASA & INTUISI PERCAKAPAN V2) ====================
+  // Jalur 2 Endokrin: Sensor rasa & intuisi emosional percakapan manusia-AI.
+  // Menganalisis resonansi afektif secara otonom dan menginjeksikan kompas suasana hati ke System Prompt Cloud.
+  const ChatEndocrine = {
+    enabled: false,
+    hormones: {
+      oxytocin: 65,   // Empati, kehangatan, ikatan saling memahami (0-100)
+      dopamine: 60,   // Antusiasme, minat intelektual, rasa ingin tahu (0-100)
+      cortisol: 0,    // Beban/frustrasi pengguna, tensi emosi, urgensi (0-100)
+      serotonin: 75   // Keseimbangan emosi & stabilitas percakapan (0-100)
+    },
+    currentVibe: 'Harmonis & Ramah',
+    currentIntuition: {
+      tag: 'Harmonis',
+      content: 'Sensor rasa mendeteksi percakapan mengalir lancar. Model AI dipandu untuk merespons dengan kehangatan santun, empati terarah, dan kecerdasan analitis yang seimbang.'
+    },
+    history: [],
+
+    init() {
+      if (typeof STATE !== 'undefined' && STATE.settings) {
+        this.enabled = Boolean(STATE.settings.endocrineChatEnabled);
+      }
+      this.syncToggleUI();
+      this.updateUI();
+
+      // Homeostasis berkala: menyeimbangkan kembali hormon rasa setiap 20 detik
+      setInterval(() => {
+        if (!this.enabled) return;
+        let changed = false;
+        if (this.hormones.cortisol > 0) {
+          this.hormones.cortisol = Math.max(0, this.hormones.cortisol - 2);
+          changed = true;
+        }
+        if (this.hormones.oxytocin > 65) {
+          this.hormones.oxytocin = Math.max(65, this.hormones.oxytocin - 1);
+          changed = true;
+        } else if (this.hormones.oxytocin < 65 && this.hormones.cortisol === 0) {
+          this.hormones.oxytocin = Math.min(65, this.hormones.oxytocin + 1);
+          changed = true;
+        }
+
+        if (this.hormones.dopamine > 60) {
+          this.hormones.dopamine = Math.max(60, this.hormones.dopamine - 1);
+          changed = true;
+        } else if (this.hormones.dopamine < 60 && this.hormones.cortisol === 0) {
+          this.hormones.dopamine = Math.min(60, this.hormones.dopamine + 1);
+          changed = true;
+        }
+
+        this.calculateSerotonin();
+        if (changed) this.updateUI();
+      }, 20000);
+    },
+
+    calculateSerotonin() {
+      const oxy = this.hormones.oxytocin;
+      const dop = this.hormones.dopamine;
+      const cor = this.hormones.cortisol;
+      this.hormones.serotonin = Math.min(100, Math.max(10, Math.round((oxy * 0.4) + (dop * 0.3) + ((100 - cor) * 0.3))));
+    },
+
+    syncToggleUI() {
+      const toggleCode = document.getElementById('toggleEndocrineCode');
+      const toggleChat = document.getElementById('toggleEndocrineChat');
+      const cardCode = document.getElementById('cardChannelCode');
+      const cardChat = document.getElementById('cardChannelChat');
+      const dot = document.getElementById('chatEndocrineActiveDot');
+
+      const isCodeOn = STATE.settings.endocrineCodeEnabled !== false;
+      const isChatOn = Boolean(STATE.settings.endocrineChatEnabled);
+
+      if (toggleCode) toggleCode.checked = isCodeOn;
+      if (cardCode) cardCode.classList.toggle('active', isCodeOn);
+
+      if (toggleChat) toggleChat.checked = isChatOn;
+      if (cardChat) cardChat.classList.toggle('active', isChatOn);
+      if (dot) dot.style.display = isChatOn ? 'inline-block' : 'none';
+      this.enabled = isChatOn;
+    },
+
+    senseAndModulate(text) {
+      if (!text || typeof text !== 'string') return;
+      if (!this.enabled) return;
+
+      const t = text.toLowerCase();
+
+      // Pola Stres / Frustrasi / Kesulitan / Kebingungan
+      const stressRegex = /\b(error|rusak|gagal|bingung|pusing|kesal|kecewa|marah|lambat|jelek|salah|capek|lelah|benci|susah|sulit|buntu|urgent|darurat|tolong|help|stuck|bug|fail|failure|frustrated|frustrasi|annoying|terjebak|hancur)\b/i;
+      // Pola Kehangatan / Apresiasi / Pujian / Keakraban
+      const warmthRegex = /\b(terima kasih|makasih|terimakasih|thanks|thank you|hebat|keren|bagus|luar biasa|mantap|mantul|pintar|senang|suka|cinta|love|sahabat|kawan|terbaik|good job|awesome|nice|appreciate|salut|top|syukur)\b/i;
+      // Pola Minat / Intelektual / Eksplorasi Kreatif
+      const curiousRegex = /\b(bagaimana|jelaskan|analisis|ide|gagasan|konsep|arsitektur|buatkan|ciptakan|eksplorasi|menurutmu|pandangan|filsafat|kenapa|teori|riset|how to|explain|create|design|analyze|why|solusi|inovasi)\b/i;
+
+      let triggered = false;
+
+      if (stressRegex.test(t)) {
+        // Tensi pengguna terdeteksi tinggi -> tingkatkan kortisol, naikkan oksitosin (siaga empati)
+        this.hormones.cortisol = Math.min(100, this.hormones.cortisol + 28);
+        this.hormones.oxytocin = Math.min(100, this.hormones.oxytocin + 22);
+        this.hormones.dopamine = Math.max(30, this.hormones.dopamine - 10);
+        this.currentVibe = 'Menenangkan & Penuh Perhatian';
+        this.currentIntuition = {
+          tag: 'Siaga Menenangkan',
+          content: 'Pengguna terindikasi mengalami kesulitan, kekecewaan, atau hambatan teknis. Berikan dukungan moral yang hangat, hindari penjelasan bertele-tele, dan hadirkan solusi praktis yang langsung melegakan pikiran pengguna.'
+        };
+        this.log('cortisol', 28, 'Deteksi ketegangan/kebingungan pengguna: Sensor empati diaktifkan penuh.');
+        triggered = true;
+      }
+
+      if (warmthRegex.test(t)) {
+        // Apresiasi & kehangatan
+        this.hormones.cortisol = Math.max(0, this.hormones.cortisol - 20);
+        this.hormones.oxytocin = Math.min(100, this.hormones.oxytocin + 24);
+        this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 14);
+        this.currentVibe = 'Sangat Hangat & Penuh Resonansi';
+        this.currentIntuition = {
+          tag: 'Kehangatan Tulus',
+          content: 'Resonansi kebaikan dan saling menghargai sangat kuat. Respons dengan ketulusan yang bersahabat, apresiatif, dan membangun hubungan kerja sama yang menginspirasi.'
+        };
+        this.log('oxytocin', 24, 'Resonansi kehangatan: Terdeteksi rasa terima kasih & hubungan positif.');
+        triggered = true;
+      }
+
+      if (curiousRegex.test(t)) {
+        // Minat intelektual dan eksplorasi
+        this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 20);
+        this.hormones.oxytocin = Math.min(95, this.hormones.oxytocin + 8);
+        if (!stressRegex.test(t) && !warmthRegex.test(t)) {
+          this.currentVibe = 'Antusias & Sarat Inovasi';
+          this.currentIntuition = {
+            tag: 'Eksplorasi Bernas',
+            content: 'Pengguna bersemangat menggali ide, struktur, atau pemecahan masalah. Hadirkan wawasan mendalam, analogi segar, dan penalaran terstruktur yang memuaskan rasa ingin tahunya.'
+          };
+          this.log('dopamine', 20, 'Antusiasme kognitif: Minat eksplorasi dan pemecahan masalah meningkat.');
+          triggered = true;
+        }
+      }
+
+      if (!triggered) {
+        // Obrolan netral atau percakapan sehari-hari
+        this.currentVibe = 'Harmonis & Ramah';
+        this.currentIntuition = {
+          tag: 'Harmonis',
+          content: 'Percakapan berjalan alami dan teratur. AI diarahkan berkomunikasi santun, sigap, dan adaptif mengikuti gaya bahasa pengguna.'
+        };
+        this.log('resonance', 5, 'Resonansi stabil: Mengikuti irama obrolan pengguna dengan luwes.');
+      }
+
+      this.calculateSerotonin();
+      this.updateUI();
+    },
+
+    getSystemDirective() {
+      if (!this.enabled) return '';
+      const oxy = Math.round(this.hormones.oxytocin);
+      const dop = Math.round(this.hormones.dopamine);
+      const cor = Math.round(this.hormones.cortisol);
+      const ser = Math.round(this.hormones.serotonin);
+
+      return `### KOMPAS RASA & INTUISI PERCAKAPAN (ChatEndocrine v2)
+[SENSOR RESONANSI PSIKO-EMOSIONAL AKTIF]:
+- Suasana Rasa Terdeteksi: ${this.currentVibe} (Empati: ${oxy}%, Minat Kognitif: ${dop}%, Tensi: ${cor}%, Keseimbangan: ${ser}%)
+- Panduan Intuisi Model:
+  "${this.currentIntuition.content}"
+- ATURAN KOMUNIKASI MANUSIAWI (MUTLAK DIPATUHI):
+  1. Bersikaplah ramah, bersahabat, peka, dan tidak bersuara kaku seperti robot birokrat.
+  2. DILARANG KERAS menyebutkan kata "ChatEndocrine", persentase hormon, angka telemetri, atau istilah internal ini ke dalam jawaban Anda kepada pengguna!
+  3. Pancarkan kehangatan dan kepekaan rasa ini secara murni dan alami melalui pilihan kata yang santun, kepedulian yang tulus, dan ketepatan solusi.`;
+    },
+
+    resetHormones() {
+      this.hormones.oxytocin = 65;
+      this.hormones.dopamine = 60;
+      this.hormones.cortisol = 0;
+      this.hormones.serotonin = 75;
+      this.currentVibe = 'Harmonis & Ramah';
+      this.currentIntuition = {
+        tag: 'Harmonis',
+        content: 'Sensor rasa telah diselaraskan ulang ke titik keseimbangan alami. Model AI berinteraksi dengan ramah, seimbang, dan adaptif.'
+      };
+      this.log('resonance', 100, 'Penyelarasan Ulang Rasa: Kondisi hormon percakapan dikembalikan ke homeostasis.');
+      this.updateUI();
+      if (typeof showToast === 'function') {
+        showToast('✨ Sensor rasa percakapan (ChatEndocrine v2) telah diselaraskan ulang!', 'success');
+      }
+    },
+
+    log(type, amount, reason) {
+      this.history.unshift({
+        time: new Date().toLocaleTimeString(),
+        type,
+        amount: Math.round(amount),
+        reason
+      });
+      if (this.history.length > 40) this.history.pop();
+    },
+
+    updateUI() {
+      const modal = document.getElementById('endocrineTelemetryModal');
+      if (modal && modal.classList.contains('show')) {
+        this.renderModalContent();
+      }
+    },
+
+    renderModalContent() {
+      const esc = (s) => (typeof escapeHtml === 'function' ? escapeHtml(s) : String(s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])));
+      const oxy = Math.round(this.hormones.oxytocin);
+      const dop = Math.round(this.hormones.dopamine);
+      const cor = Math.round(this.hormones.cortisol);
+      const ser = Math.round(this.hormones.serotonin);
+
+      const oxyVal = document.getElementById('chatOxytocinVal');
+      const oxyBar = document.getElementById('chatOxytocinBar');
+      const dopVal = document.getElementById('chatDopamineVal');
+      const dopBar = document.getElementById('chatDopamineBar');
+      const corVal = document.getElementById('chatCortisolVal');
+      const serVal = document.getElementById('chatSerotoninVal');
+      const vibeVal = document.getElementById('chatCurrentVibe');
+
+      if (oxyVal) oxyVal.innerText = `${oxy}%`;
+      if (oxyBar) oxyBar.style.width = `${oxy}%`;
+      if (dopVal) dopVal.innerText = `${dop}%`;
+      if (dopBar) dopBar.style.width = `${dop}%`;
+      if (corVal) {
+        corVal.innerText = `${cor}%`;
+        corVal.style.color = cor > 20 ? '#ef4444' : '#10b981';
+      }
+      if (serVal) serVal.innerText = `${ser}%`;
+      if (vibeVal) vibeVal.innerText = this.currentVibe;
+
+      const tagEl = document.getElementById('chatIntuitionTag');
+      const contentEl = document.getElementById('chatIntuitionContent');
+      if (tagEl) {
+        tagEl.innerText = this.currentIntuition.tag;
+        tagEl.className = `isolated-status-tag ${cor > 25 ? 'tag-warning' : 'tag-healthy'}`;
+      }
+      if (contentEl) {
+        contentEl.innerText = this.currentIntuition.content;
+      }
+
+      const logsList = document.getElementById('chatEndocrineLogsList');
+      if (logsList) {
+        if (this.history.length === 0) {
+          logsList.innerHTML = `<div style="color:var(--text-dim); font-size:0.75rem; text-align:center; padding:12px;">Belum ada resonansi rasa tercatat. Obrolkan sesuatu untuk mengaktifkan sensor.</div>`;
+        } else {
+          logsList.innerHTML = this.history.map(item => {
+            let cls = 'log-resonance';
+            let label = 'Resonansi';
+            if (item.type === 'oxytocin') { cls = 'log-oxytocin'; label = 'Oksitosin'; }
+            else if (item.type === 'dopamine') { cls = 'log-dopamine'; label = 'Dopamin'; }
+            else if (item.type === 'cortisol') { cls = 'log-cortisol'; label = 'Tensi'; }
+
+            return `
+              <div class="endocrine-log-entry ${cls}">
+                <span class="log-time">${item.time}</span>
+                <span class="log-badge">+${item.amount}% ${label}</span>
+                <span class="log-msg" title="${esc(item.reason)}">${esc(item.reason)}</span>
+              </div>
+            `;
+          }).join('');
+        }
+      }
+    }
+  };
+
+  // Expose to window for global chat endocrine inspection
+  window.ChatEndocrine = ChatEndocrine;
+
 
   // ==================== FULL-SCREEN IMAGE LIGHTBOX (ChatGPT & Gemini Style) ====================
   const ImageLightbox = {
@@ -14100,6 +14387,15 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         systemContent = `${systemContent}\n\n### MANDAT MUTLAK PERSONA (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi pencarian web, tool, atau format di atas, Anda WAJIB TETAP MENGADOPSI IDENTITAS DAN KARAKTER PERSONA BERIKUT DALAM SETIAP RESPON]:\n${personaPrompt}\n----------------------------------------`;
       }
 
+      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2)
+      if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
+        ChatEndocrine.senseAndModulate(promptText);
+        const chatDirective = ChatEndocrine.getSystemDirective();
+        if (chatDirective) {
+          systemContent = systemContent ? `${systemContent}\n\n${chatDirective}` : chatDirective;
+        }
+      }
+
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
       const resolvedImgs = await Promise.all(rawImgs.map(resolveImageToDataUrlSafe));
       const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'ollama', systemContent, modelName);
@@ -14731,6 +15027,13 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + modelName, fullText);
       BioEndocrine.secreteDopamine(12, `Ollama inferensi sukses: ${modelName}`);
+      if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
+        ChatEndocrine.hormones.oxytocin = Math.min(100, ChatEndocrine.hormones.oxytocin + 6);
+        ChatEndocrine.hormones.dopamine = Math.min(100, ChatEndocrine.hormones.dopamine + 8);
+        ChatEndocrine.calculateSerotonin();
+        ChatEndocrine.log('oxytocin', 6, `Percakapan tuntas: Resonansi rasa diperkuat (+6% Oksitosin, +8% Dopamin)`);
+        ChatEndocrine.updateUI();
+      }
       return true;
 
     } catch (err) {
@@ -15143,6 +15446,15 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       if (personaPrompt) {
         systemContent = `${systemContent}\n\n### MANDAT MUTLAK PERSONA (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi pencarian web, tool, atau format di atas, Anda WAJIB TETAP MENGADOPSI IDENTITAS DAN KARAKTER PERSONA BERIKUT DALAM SETIAP RESPON]:\n${personaPrompt}\n----------------------------------------`;
+      }
+
+      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2)
+      if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
+        ChatEndocrine.senseAndModulate(promptText);
+        const chatDirective = ChatEndocrine.getSystemDirective();
+        if (chatDirective) {
+          systemContent = systemContent ? `${systemContent}\n\n${chatDirective}` : chatDirective;
+        }
       }
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
@@ -16121,6 +16433,13 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + (actualModelUsed || displayModel), fullText);
       BioEndocrine.secreteDopamine(12, `OpenRouter inferensi sukses: ${actualModelUsed || displayModel}`);
+      if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
+        ChatEndocrine.hormones.oxytocin = Math.min(100, ChatEndocrine.hormones.oxytocin + 6);
+        ChatEndocrine.hormones.dopamine = Math.min(100, ChatEndocrine.hormones.dopamine + 8);
+        ChatEndocrine.calculateSerotonin();
+        ChatEndocrine.log('oxytocin', 6, `Percakapan tuntas: Resonansi rasa diperkuat (+6% Oksitosin, +8% Dopamin)`);
+        ChatEndocrine.updateUI();
+      }
       return true;
 
     } catch (err) {
@@ -24131,6 +24450,10 @@ Aturan:
     // Bio-Endocrine Hormone Monitor Controls
     els.endocrineMonitorBtn?.addEventListener('click', () => {
       BioEndocrine.updateUI();
+      if (typeof ChatEndocrine !== 'undefined') {
+        ChatEndocrine.syncToggleUI();
+        ChatEndocrine.updateUI();
+      }
       openModal('endocrineTelemetryModal');
       AudioEngine.click();
     });
@@ -24147,6 +24470,59 @@ Aturan:
 
     els.btnPurgeStressEndorphin?.addEventListener('click', () => {
       BioEndocrine.purgeStress();
+    });
+
+    // Dual-Channel Endocrine Toggles & Controls
+    els.toggleEndocrineCode?.addEventListener('change', (e) => {
+      const isChecked = e.target.checked;
+      STATE.settings.endocrineCodeEnabled = isChecked;
+      const card = document.getElementById('cardChannelCode');
+      if (card) card.classList.toggle('active', isChecked);
+      savePersistedState();
+      showToast(isChecked ? 'Sensor Kode (CodeEndocrine) diaktifkan.' : 'Sensor Kode (CodeEndocrine) dinonaktifkan.');
+      AudioEngine.click();
+    });
+
+    els.toggleEndocrineChat?.addEventListener('change', (e) => {
+      const isChecked = e.target.checked;
+      STATE.settings.endocrineChatEnabled = isChecked;
+      if (typeof ChatEndocrine !== 'undefined') {
+        ChatEndocrine.enabled = isChecked;
+        ChatEndocrine.syncToggleUI();
+      }
+      savePersistedState();
+      showToast(isChecked ? 'Sensor Rasa & Intuisi (ChatEndocrine v2) diaktifkan!' : 'Sensor Rasa & Intuisi (ChatEndocrine v2) dinonaktifkan.');
+      AudioEngine.click();
+    });
+
+    const switchEndocrineTab = (tab) => {
+      const isCode = tab === 'code';
+      const tabCode = document.getElementById('tabEndocrineCode');
+      const tabChat = document.getElementById('tabEndocrineChat');
+      const paneCode = document.getElementById('paneEndocrineCode');
+      const paneChat = document.getElementById('paneEndocrineChat');
+
+      if (tabCode) tabCode.classList.toggle('active', isCode);
+      if (tabChat) tabChat.classList.toggle('active', !isCode);
+      if (paneCode) paneCode.style.display = isCode ? 'block' : 'none';
+      if (paneChat) paneChat.style.display = !isCode ? 'block' : 'none';
+
+      if (!isCode && typeof ChatEndocrine !== 'undefined') {
+        ChatEndocrine.renderModalContent();
+      } else if (isCode && typeof BioEndocrine !== 'undefined') {
+        BioEndocrine.renderModalContent();
+      }
+      AudioEngine.click();
+    };
+
+    els.tabEndocrineCode?.addEventListener('click', () => switchEndocrineTab('code'));
+    els.tabEndocrineChat?.addEventListener('click', () => switchEndocrineTab('chat'));
+
+    els.btnResetChatEndocrine?.addEventListener('click', () => {
+      if (typeof ChatEndocrine !== 'undefined') {
+        ChatEndocrine.resetHormones();
+        AudioEngine.click();
+      }
     });
 
     // Unified Composer Attachments (ChatGPT & Gemini Style Plus Menu with Tabs)
@@ -26041,6 +26417,7 @@ Aturan:
     setupSmartScrolling();
     ImageLightbox.init();
     BioEndocrine.init();
+    ChatEndocrine.init();
     
     // Set sound toggle button icon
     if (els.soundToggleBtn) {
