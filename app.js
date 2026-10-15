@@ -3588,6 +3588,53 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     return doc.output('blob');
   }
 
+  // Daftar bahasa pemrograman, markup, dan teks yang 100% PASTI BUKAN diagram Mermaid
+  const NON_DIAGRAM_LANGUAGES = new Set([
+    'JAVASCRIPT', 'JS', 'JSX', 'TYPESCRIPT', 'TS', 'TSX',
+    'PYTHON', 'PY', 'PYW',
+    'HTML', 'HTM', 'XHTML', 'XML', 'SVG',
+    'CSS', 'SCSS', 'SASS', 'LESS',
+    'JSON', 'JSON5', 'JSONC',
+    'YAML', 'YML', 'TOML', 'INI', 'ENV', 'PROPERTIES', 'CONF', 'CONFIG',
+    'SQL', 'MYSQL', 'PGSQL', 'POSTGRESQL', 'PLSQL', 'SQLITE',
+    'BASH', 'SH', 'SHELL', 'ZSH', 'POWERSHELL', 'PS1', 'BAT', 'BATCH', 'CMD',
+    'C', 'H', 'CPP', 'HPP', 'CC', 'CXX', 'C++', 'CS', 'CSHARP', 'C#',
+    'JAVA', 'KOTLIN', 'KT', 'KTS', 'SCALA', 'GROOVY',
+    'GO', 'GOLANG', 'RUST', 'RS',
+    'PHP', 'RUBY', 'RB', 'LUA', 'PERL', 'PL', 'R', 'DART', 'SWIFT',
+    'TEXT', 'TXT', 'PLAINTEXT', 'MARKDOWN', 'MD', 'DIFF', 'PATCH',
+    'LOG', 'DOCKERFILE', 'MAKEFILE', 'CMAKE', 'GRAPHQL', 'GQL',
+    'LATEX', 'TEX', 'VUE', 'SVELTE', 'SOLID', 'ASTRO',
+    'HASKELL', 'ELIXIR', 'ERLANG', 'CLOJURE', 'LISP', 'SCHEME',
+    'ASSEMBLY', 'ASM', 'NASM', 'WASM', 'WAT', 'OBJECTIVEC', 'OBJC', 'M', 'MM'
+  ]);
+
+  // Deteksi otentik apakah sebuah string benar-benar merupakan kode diagram Mermaid yang valid
+  function isAuthenticMermaidSyntax(rawText) {
+    if (!rawText || typeof rawText !== 'string') return false;
+    let trimmed = rawText.trim();
+    if (trimmed.length < 5) return false;
+
+    // Buang code fence markdown jika ada
+    trimmed = trimmed.replace(/^```(?:mermaid|mmd)?\s*/i, '').replace(/```\s*$/i, '').trim();
+
+    // Buang frontmatter YAML opsional: --- title: "..." ---
+    const stripped = trimmed.replace(/^---[\s\S]*?---\s*/, '').trim();
+
+    // 1. Cek deklarasi diagram Mermaid standar (wajib memiliki arah TD/TB/BT/RL/LR untuk flowchart & graph)
+    const hasDiagramHeader = /^(?:flowchart\s+(?:TD|TB|BT|RL|LR)|graph\s+(?:TD|TB|BT|RL|LR)|sequenceDiagram|classDiagram(?:-v2)?|stateDiagram(?:-v2)?|erDiagram|gantt|pie(?:\s+title|\s+showData|[\r\n])|gitGraph|mindmap|timeline|quadrantChart|C4Context|C4Container|C4Component|journey|xychart-beta)\b/i.test(stripped);
+
+    if (!hasDiagramHeader) return false;
+
+    // 2. Untuk flowchart/graph, pastikan memiliki sintaks panah atau struktur node diagram yang valid, bukan sekadar kalimat atau paragraf teks biasa
+    if (/^(?:flowchart|graph)\b/i.test(stripped)) {
+      const hasArrowsOrNodes = /(-->|---|-.->|==>|->>|\b[a-zA-Z0-9_-]+\s*(?:\[[^\]\n]+\]|\([^\)\n]+\)|\{[^\}\n]+\}))/.test(stripped);
+      if (!hasArrowsOrNodes) return false;
+    }
+
+    return true;
+  }
+
   function getCleanMermaidCode(raw) {
     if (!raw) return '';
     let code = String(raw).trim();
@@ -3622,11 +3669,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     }
     code = filteredLines.join('\n').trim();
 
-    // 4. Pastikan header jenis diagram valid (default: flowchart TD jika tanpa header)
+    // 4. Pastikan header jenis diagram valid (hanya sematkan flowchart TD jika kode benar-benar memiliki koneksi panah diagram Mermaid)
     const trimmedCode = code.trim();
     const hasHeader = /^(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|mindmap|timeline|quadrantChart|C4Context|journey)\b/i.test(trimmedCode);
     if (!hasHeader) {
-      code = 'flowchart TD\n' + code;
+      // HANYA sematkan flowchart TD jika terdapat sintaks panah Mermaid nyata (misal: A --> B atau A[teks] --> B)
+      // JANGAN PERNAH sematkan ke teks biasa, kode pemrograman, atau teks tanpa panah alur!
+      const hasDiagramArrows = /(-->|---|-.->|==>|->>)/.test(trimmedCode);
+      if (hasDiagramArrows) {
+        code = 'flowchart TD\n' + code;
+      }
     }
 
     // 5. Sematkan frontmatter resmi jika ada judul diagram
@@ -4023,7 +4075,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       <div class="mermaid-actions">
         <button class="mermaid-tool-btn mermaid-fullscreen-btn" data-action="fullscreen" title="Layar Penuh (Full Screen)"><i class="fa-solid fa-expand"></i> <span>Layar Penuh</span></button>
         <button class="mermaid-tool-btn" data-action="toggle-code" title="Lihat Sumber Mermaid"><i class="fa-solid fa-code"></i></button>
-        <button class="mermaid-tool-btn" data-action="copy-code" title="Salin Kode Mermaid"><i class="fa-solid fa-clipboard"></i></button>
+        <button class="mermaid-tool-btn" data-action="copy-code" title="Salin Kode Mermaid"><i class="fa-solid fa-clipboard"></i> <span>Salin</span></button>
         <div class="mermaid-dropdown-wrap">
           <button class="mermaid-tool-btn mermaid-download-toggle-btn" data-action="toggle-download-menu" title="Unduh Diagram (Pilih Format)"><i class="fa-solid fa-download"></i> <span>Unduh</span> <i class="fa-solid fa-chevron-down" style="font-size:0.65em; margin-left:3px;"></i></button>
           <div class="mermaid-dropdown-menu" style="display:none;">
@@ -4323,9 +4375,47 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
                 <div>
                   <strong>Visualisasi Diagram:</strong> Sintaks Mermaid memerlukan penyesuaian.
                   <div style="font-size:11px; margin-top:4px; opacity:0.85;">Klik tombol &lt;/&gt; di toolbar atas untuk melihat atau menyalin kode sumber diagram.</div>
+                  <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+                    <button type="button" class="mermaid-err-copy-btn" style="background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.2); color:#f8fafc; border-radius:6px; padding:5px 12px; font-size:11px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+                      <i class="fa-solid fa-clipboard"></i> Salin Teks / Sumber
+                    </button>
+                    <button type="button" class="mermaid-err-view-btn" style="background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.2); color:#f8fafc; border-radius:6px; padding:5px 12px; font-size:11px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+                      <i class="fa-solid fa-code"></i> Tampilkan Sebagai Kode/Teks
+                    </button>
+                  </div>
                 </div>
               </div>
             `;
+            const copyBtn = stage.querySelector('.mermaid-err-copy-btn');
+            if (copyBtn) {
+              copyBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                copyTextToClipboard(cleanCode, () => {
+                  copyBtn.innerHTML = '<i class="fa-solid fa-check" style="color:var(--neon-teal);"></i> <span style="color:var(--neon-teal);">Disalin!</span>';
+                  showToast('Teks sumber berhasil disalin!');
+                  AudioEngine.snap();
+                  setTimeout(() => {
+                    copyBtn.innerHTML = '<i class="fa-solid fa-clipboard"></i> Salin Teks / Sumber';
+                  }, 2000);
+                });
+              });
+            }
+            const viewBtn = stage.querySelector('.mermaid-err-view-btn');
+            if (viewBtn) {
+              viewBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                codeView.style.display = 'block';
+                viewport.style.display = 'none';
+                const codeBtn = toolbar.querySelector('[data-action="toggle-code"]');
+                if (codeBtn) {
+                  codeBtn.classList.add('active');
+                  codeBtn.title = 'Lihat Diagram Visual';
+                }
+                if (window.hljs) {
+                  try { hljs.highlightElement(codeInner); } catch (_) {}
+                }
+              });
+            }
           }
         } catch (callErr) {
           console.warn('Mermaid render exception:', callErr);
@@ -4375,14 +4465,23 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         rawText = (pre.textContent || pre.innerText || '').trim();
       }
 
-      // Deteksi Diagram Mermaid Visual SEBELUM Highlight.js agar kode tidak terpecah oleh syntax highlighter!
-      const cleanCode = getCleanMermaidCode(rawText);
-      const isMermaid = lang === 'MERMAID' || (
-        !pre.dataset.mermaidRendered &&
-        /^(?:---[\s\S]*?---\s*)?(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|mindmap|timeline|quadrantChart|C4Context|journey)\b/i.test(cleanCode)
-      );
+      // Pisahkan secara tegas antara Diagram Mermaid vs Kode Pemrograman / Teks Biasa yang siap disalin
+      let isMermaid = false;
+      let cleanCode = '';
 
-      if (isMermaid) {
+      if (lang === 'MERMAID' || lang === 'MMD') {
+        // Blok secara eksplisit dideklarasikan sebagai diagram Mermaid (```mermaid / ```mmd)
+        isMermaid = true;
+        cleanCode = getCleanMermaidCode(rawText);
+      } else if (!NON_DIAGRAM_LANGUAGES.has(lang)) {
+        // Blok tanpa bahasa (lang === 'CODE') HANYA dijadikan diagram jika memenuhi sintaks otentik Mermaid
+        if (!pre.dataset.mermaidRendered && isAuthenticMermaidSyntax(rawText)) {
+          isMermaid = true;
+          cleanCode = getCleanMermaidCode(rawText);
+        }
+      }
+
+      if (isMermaid && cleanCode) {
         renderInteractiveMermaidCard(pre, cleanCode);
         return;
       }
@@ -7608,7 +7707,7 @@ Aturan wajib:
 
   function guessFileNameFromLang(lang, body = '') {
     const cleanLang = String(lang || '').toLowerCase().trim();
-    const isMermaid = cleanLang === 'mermaid' || cleanLang === 'mmd' || cleanLang === 'svg' || (body && (body.includes('flowchart') || body.includes('sequenceDiagram') || body.includes('classDiagram') || body.includes('stateDiagram') || body.includes('erDiagram') || body.includes('graph ') || body.includes('gitGraph') || body.includes('mindmap')));
+    const isMermaid = cleanLang === 'mermaid' || cleanLang === 'mmd' || (cleanLang === 'svg' && isAuthenticMermaidSyntax(body));
 
     if (isMermaid) {
       return generateUniqueDiagramFilename(body, null, 'svg');
@@ -7646,15 +7745,11 @@ Aturan wajib:
     }
 
     const cleanLang = String(lang || '').toLowerCase().trim();
-    const isDiagramContent = (content && typeof content === 'string') &&
-      (!content.trim().startsWith('<svg') && (
-        content.includes('flowchart') || content.includes('sequenceDiagram') ||
-        content.includes('classDiagram') || content.includes('stateDiagram') ||
-        content.includes('erDiagram') || content.includes('graph ') ||
-        content.includes('-->')
-      ));
+    // Berkas HANYA dianggap diagram jika bahasa eksplisit mermaid/mmd atau berkas .svg dengan sintaks Mermaid otentik
+    const isMermaid = cleanLang === 'mermaid' || cleanLang === 'mmd' ||
+      (cleanName.toLowerCase().endsWith('.svg') && isAuthenticMermaidSyntax(content));
 
-    if ((cleanLang === 'mermaid' || cleanLang === 'mmd' || cleanLang === 'svg' || isDiagramContent) && !cleanName.toLowerCase().endsWith('.svg')) {
+    if (isMermaid && !cleanName.toLowerCase().endsWith('.svg')) {
       cleanName = cleanName.replace(/\.[a-z0-9]+$/i, '') + '.svg';
     }
 
@@ -7668,7 +7763,7 @@ Aturan wajib:
       lower === 'file.txt' || lower === 'untitled.txt' || lower === 'catatan.txt' || lower === 'readme.md';
 
     if (isGeneric) {
-      const ext = lower.split('.').pop() || lang || (isDiagramContent ? 'svg' : 'txt');
+      const ext = lower.split('.').pop() || lang || (isMermaid ? 'svg' : 'txt');
       cleanName = guessFileNameFromLang(ext, content);
     }
     return cleanName || 'berkas.svg';
@@ -7825,15 +7920,8 @@ Aturan wajib:
     const isPdf = ext === 'pdf';
     const isMarkdown = ext === 'md' || ext === 'markdown';
     const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml';
-    const isMermaid = ext === 'mermaid' || ext === 'mmd' || file.lang === 'mermaid' ||
-      (!rawContent.trim().startsWith('<svg') && (
-        ext === 'svg' ||
-        file.lang === 'mermaid' ||
-        file.mime === 'image/svg+xml' ||
-        /^(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|mindmap)\b/m.test(rawContent.trim()) ||
-        rawContent.includes('-->') ||
-        rawContent.includes('subgraph ')
-      ));
+    const isMermaid = ext === 'mermaid' || ext === 'mmd' || file.lang === 'mermaid' || file.lang === 'mmd' ||
+      (ext === 'svg' && !rawContent.trim().startsWith('<svg') && !rawContent.trim().startsWith('<?xml') && isAuthenticMermaidSyntax(rawContent));
     const isPureSvg = ext === 'svg' && !isMermaid;
     const isDiagram = isDiagramFile(file);
 
@@ -7948,13 +8036,13 @@ Aturan wajib:
     if (!file) return false;
     const n = (file.name || '').toLowerCase();
     const raw = file.rawContent || file.content || '';
-    return n.endsWith('.svg') || n.endsWith('.mermaid') || n.endsWith('.mmd') || file.lang === 'mermaid' ||
-      file.mime === 'image/svg+xml' ||
-      (!raw.trim().startsWith('<svg') && (
-        raw.includes('flowchart') || raw.includes('graph ') || raw.includes('sequenceDiagram') ||
-        raw.includes('classDiagram') || raw.includes('stateDiagram') || raw.includes('erDiagram') ||
-        raw.includes('-->')
-      ));
+    const l = (file.lang || '').toLowerCase();
+    if (n.endsWith('.mermaid') || n.endsWith('.mmd') || l === 'mermaid' || l === 'mmd') return true;
+    if (n.endsWith('.svg') || file.mime === 'image/svg+xml') {
+      if (raw.trim().startsWith('<svg') || raw.trim().startsWith('<?xml')) return false; // Pure vector SVG
+      return isAuthenticMermaidSyntax(raw);
+    }
+    return false;
   }
 
   async function convertSvgToJpegBlob(svgInput, options = {}) {
@@ -8311,33 +8399,41 @@ Aturan wajib:
     if (Array.isArray(rawBlocks)) {
       rawBlocks.forEach((b) => {
         if (!b) return;
-        const bLower = b.toLowerCase();
-        const isDiagram = bLower.includes('lang="mermaid"') || bLower.includes("lang='mermaid'") ||
-                          bLower.includes('mime="image/svg+xml"') || bLower.includes('.svg') ||
-                          bLower.includes('flowchart') || bLower.includes('graph ') ||
-                          bLower.includes('sequencediagram') || bLower.includes('classdiagram') ||
-                          bLower.includes('statediagram') || bLower.includes('erdiagram');
-        if (isDiagram) {
-          const lines = b.split('\n');
-          const innerLines = [];
-          let started = false;
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const t = line.trim();
-            if (!started) {
-              if (t.startsWith('<<<ZOZ_FILE') || t.startsWith('<<<ZOZ_EDIT') || t.startsWith('<<<ZOZ_MODIFY')) {
-                started = true;
-              }
-              continue;
+
+        // Ekstrak header blok ZOZ_FILE untuk mengetahui nama berkas dan bahasanya secara akurat
+        const headerMatch = b.match(/<<<ZOZ_FILE\s+name=["']?([^"'\s>]+)["']?(?:\s+mime=["']?([^"'\s>]+)["']?)?(?:\s+lang=["']?([^"'\s>]+)["']?)?/i);
+        const fileName = (headerMatch && headerMatch[1]) ? headerMatch[1].toLowerCase() : '';
+        const fileLang = (headerMatch && headerMatch[3]) ? headerMatch[3].toLowerCase() : '';
+
+        const lines = b.split('\n');
+        const innerLines = [];
+        let started = false;
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          const t = line.trim();
+          if (!started) {
+            if (t.startsWith('<<<ZOZ_FILE') || t.startsWith('<<<ZOZ_EDIT') || t.startsWith('<<<ZOZ_MODIFY')) {
+              started = true;
             }
-            if (t.startsWith('<<<END_ZOZ_FILE') || t.startsWith('<<<END_ZOZ_EDIT') || t.startsWith('<<<END_ZOZ_MODIFY')) {
-              break;
-            }
-            innerLines.push(line);
+            continue;
           }
-          const cleanDiagram = getCleanMermaidCode(innerLines.join('\n'));
+          if (t.startsWith('<<<END_ZOZ_FILE') || t.startsWith('<<<END_ZOZ_EDIT') || t.startsWith('<<<END_ZOZ_MODIFY')) {
+            break;
+          }
+          innerLines.push(line);
+        }
+        const innerContent = innerLines.join('\n');
+
+        // Berkas dianggap Diagram Mermaid HANYA jika secara eksplisit ditandai mermaid atau berekstensi .svg/.mermaid dengan sintaks otentik
+        const isDiagram = fileLang === 'mermaid' || fileLang === 'mmd' ||
+                          fileName.endsWith('.mermaid') || fileName.endsWith('.mmd') ||
+                          (fileName.endsWith('.svg') && isAuthenticMermaidSyntax(innerContent));
+
+        if (isDiagram) {
+          const cleanDiagram = getCleanMermaidCode(innerContent);
           out = out.split(b).join(`\n\n\`\`\`mermaid\n${cleanDiagram}\n\`\`\`\n\n`);
         } else {
+          // File kode/dokumen non-diagram dihilangkan dari teks gelembung karena sudah memiliki kartu di AI File Studio
           out = out.split(b).join('');
         }
       });
@@ -8495,8 +8591,9 @@ Aturan wajib:
     const diagramFile = files.find(f => {
       const n = (f.name || '').toLowerCase();
       const raw = f.rawContent || f.content || '';
-      return n.endsWith('.svg') || n.endsWith('.mermaid') || n.endsWith('.mmd') || f.lang === 'mermaid' ||
-        (!raw.trim().startsWith('<svg') && (raw.includes('flowchart') || raw.includes('graph ') || raw.includes('sequenceDiagram')));
+      const l = (f.lang || '').toLowerCase();
+      return n.endsWith('.mermaid') || n.endsWith('.mmd') || l === 'mermaid' || l === 'mmd' ||
+        (n.endsWith('.svg') && !raw.trim().startsWith('<svg') && !raw.trim().startsWith('<?xml') && isAuthenticMermaidSyntax(raw));
     });
 
     if (diagramFile) {
@@ -24533,7 +24630,9 @@ Aturan:
     enhanceCodeBlocks,
     renderInteractiveMermaidCard,
     convertSvgToJpegBlob,
-    isDiagramFile
+    isDiagramFile,
+    isAuthenticMermaidSyntax,
+    NON_DIAGRAM_LANGUAGES
   };
 
   // Start on DOM ready (safeguarded against post-DOMContentLoaded script execution)
