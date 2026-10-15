@@ -779,7 +779,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     settingsModal: $('#settingsModal'),
     modelHubBtn: $('#modelHubBtn'),
     systemPromptModalBtn: $('#systemPromptModalBtn'),
-    exportChatBtn: $('#exportChatBtn'),
     exportConfirmModal: $('#exportConfirmModal'),
     exportConfirmTitle: $('#exportConfirmTitle'),
     exportConfirmMsgCount: $('#exportConfirmMsgCount'),
@@ -22373,8 +22372,6 @@ Aturan:
       openModal('settingsModal');
       AudioEngine.click();
     });
-
-    els.exportChatBtn?.addEventListener('click', exportChatHistory);
 
     els.btnExecuteExportChat?.addEventListener('click', () => {
       if (pendingExportSession) {
