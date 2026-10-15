@@ -85,15 +85,12 @@ const OFFICIAL_OLLAMA_CLOUD_MODELS = [
 ];
 
 function mapOllamaModelToOpenRouter(modelId) {
-  if (!modelId || typeof modelId !== 'string') return 'openrouter/free';
+  if (!modelId || typeof modelId !== 'string') return 'nvidia/nemotron-3.5-lightning:free';
   const id = modelId.toLowerCase().trim();
   if (id.includes('/')) return modelId;
 
-  if (id.includes('gemma4') || id.includes('gemma-4') || id.includes('gemma:4') || id.includes('gemma_4')) {
-    return 'google/gemma-4-31b-it:free';
-  }
-  if (id.includes('gemma2') || id.includes('gemma-2') || id.includes('gemma')) {
-    return 'google/gemma-4-26b-a4b-it:free';
+  if (id.includes('gemma')) {
+    return 'nvidia/nemotron-3.5-lightning:free';
   }
   if (id.includes('nemotron-3-super') || id.includes('gpt-oss:120b') || id.includes('nemotron-3-ultra')) {
     return 'nvidia/nemotron-3-super-120b-a12b:free';
@@ -112,15 +109,13 @@ function mapOllamaModelToOpenRouter(modelId) {
   }
   if (id.includes('dots')) return 'dots-studio/dots-3-note-preview:free';
   if (id.includes('liquid') || id.includes('lfm')) return 'liquid/lfm-2.5-2.6b:free';
-  if (id.includes('apodex')) return 'apodex/apodex-1.1-mini:free';
-  if (id.includes('laguna')) return 'poolside/laguna-s-2.1:free';
   if (id.includes('deepseek')) return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
   if (id.includes('llama')) return 'nvidia/nemotron-3.5-lightning:free';
-  if (id.includes('qwen')) return 'openrouter/free';
+  if (id.includes('qwen')) return 'nvidia/nemotron-3.5-lightning:free';
   if (id.includes('mistral')) return 'nvidia/nemotron-3.5-lightning:free';
   if (id.includes('phi')) return 'openrouter/free';
 
-  return 'openrouter/free';
+  return 'nvidia/nemotron-3.5-lightning:free';
 }
 
 // ==================== YOUTUBE LIVE SEARCH (ZERO API KEY) ====================
