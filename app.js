@@ -3611,7 +3611,26 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       code = code.replace(/([a-zA-Z0-9_\)\]\}])\s*->\s*([a-zA-Z0-9_\[\(\{])/g, '$1 --> $2');
     }
 
+    // 8. Perbaiki label panah yang ditulis dengan kurung siku "[teks]" tepat setelah panah tanpa pipe
+    // Contoh: User([Pengguna]) --> [Input Query] Interface  =>  User([Pengguna]) -->|"Input Query"| Interface
+    code = code.replace(/(-->|---|<-+>|<-+|-\.->|==>)\s*\[([^\]\r\n]+)\]\s*([a-zA-Z0-9_\[\(\{\"])/g, (m, arrow, label, next) => {
+      return `${arrow}|"${label.replace(/"/g, "'")}"| ${next}`;
+    });
+    code = code.replace(/--\s*\[([^\]\r\n]+)\]\s*-->/g, '-- "$1" -->');
+
     return code;
+  }
+
+  function getAggressiveMermaidCleaner(code) {
+    if (!code) return '';
+    let stripped = code;
+    // Hapus deklarasi style jika bermasalah
+    stripped = stripped.replace(/^\s*style\s+.*$/gim, '');
+    // Hapus classDef dan class
+    stripped = stripped.replace(/^\s*(?:classDef|class)\s+.*$/gim, '');
+    // Hapus baris komentar
+    stripped = stripped.replace(/^\s*%%.*$/gim, '');
+    return stripped.trim();
   }
 
   function generateWordDocPreviewHtml(fileName, parsedBody) {
@@ -7363,10 +7382,21 @@ Aturan wajib:
     let cleanName = String(name || '').trim();
 
     // Pastikan berkas diagram menggunakan ekstensi .svg, bukan .mermaid atau .mmd
-    if (cleanName.endsWith('.mermaid')) {
-      cleanName = cleanName.slice(0, -8) + '.svg';
-    } else if (cleanName.endsWith('.mmd')) {
-      cleanName = cleanName.slice(0, -4) + '.svg';
+    if (/\.(?:mermaid|mmd)$/i.test(cleanName)) {
+      cleanName = cleanName.replace(/\.(?:mermaid|mmd)$/i, '.svg');
+    }
+
+    const cleanLang = String(lang || '').toLowerCase().trim();
+    const isDiagramContent = (content && typeof content === 'string') &&
+      (!content.trim().startsWith('<svg') && (
+        content.includes('flowchart') || content.includes('sequenceDiagram') ||
+        content.includes('classDiagram') || content.includes('stateDiagram') ||
+        content.includes('erDiagram') || content.includes('graph ') ||
+        content.includes('-->')
+      ));
+
+    if ((cleanLang === 'mermaid' || cleanLang === 'mmd' || cleanLang === 'svg' || isDiagramContent) && !cleanName.toLowerCase().endsWith('.svg')) {
+      cleanName = cleanName.replace(/\.[a-z0-9]+$/i, '') + '.svg';
     }
 
     const lower = cleanName.toLowerCase();
@@ -7378,7 +7408,7 @@ Aturan wajib:
       lower === 'file.txt' || lower === 'untitled.txt';
 
     if (isGeneric) {
-      const ext = lower.split('.').pop() || lang || 'svg';
+      const ext = lower.split('.').pop() || lang || (isDiagramContent ? 'svg' : 'txt');
       cleanName = guessFileNameFromLang(ext, content);
     }
     return cleanName || 'berkas.svg';
@@ -7517,6 +7547,9 @@ Aturan wajib:
 
   function openAIFileStudio(file) {
     if (!file) return;
+    if (file.name && /\.(?:mermaid|mmd)$/i.test(file.name)) {
+      file.name = file.name.replace(/\.(?:mermaid|mmd)$/i, '.svg');
+    }
     activeAIFile = file;
     if (els.aiFileStudioTitle) {
       els.aiFileStudioTitle.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(file.name)}`;
@@ -7533,7 +7566,14 @@ Aturan wajib:
     const isMarkdown = ext === 'md' || ext === 'markdown';
     const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml';
     const isMermaid = ext === 'mermaid' || ext === 'mmd' || file.lang === 'mermaid' ||
-      (ext === 'svg' && !rawContent.trim().startsWith('<svg') && (rawContent.includes('-->') || rawContent.includes('flowchart') || rawContent.includes('graph') || rawContent.includes('sequenceDiagram')));
+      (!rawContent.trim().startsWith('<svg') && (
+        ext === 'svg' ||
+        file.lang === 'mermaid' ||
+        file.mime === 'image/svg+xml' ||
+        /^(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|mindmap)\b/m.test(rawContent.trim()) ||
+        rawContent.includes('-->') ||
+        rawContent.includes('subgraph ')
+      ));
     const isPureSvg = ext === 'svg' && !isMermaid;
 
     setAIFileStudioTab(previewable ? 'preview' : 'code');
@@ -7560,7 +7600,18 @@ Aturan wajib:
                 file.svgContent = res.svg;
                 els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, res.svg);
               }
-            }).catch(err => {
+            }).catch(async (err) => {
+              console.warn('Percobaan pertama render mermaid gagal, mencoba pembersih sekunder:', err);
+              try {
+                const cleanSecondary = getAggressiveMermaidCleaner(cleanMermaid);
+                const res2 = await window.mermaid.render(tempId + '_sec', cleanSecondary);
+                if (res2 && res2.svg) {
+                  file.svgContent = res2.svg;
+                  els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, res2.svg);
+                  return;
+                }
+              } catch (_) {}
+
               console.warn('Gagal merender diagram di file studio:', err);
               els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, `
                 <div style="color:#f87171; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); padding:16px; border-radius:6px; font-size:13px; text-align:center;">
@@ -7629,42 +7680,79 @@ Aturan wajib:
       const rawText = file.rawContent || file.content || '';
       let blob;
 
+      const isDiagram = fileNameLower.endsWith('.svg') ||
+                        fileNameLower.endsWith('.mermaid') ||
+                        fileNameLower.endsWith('.mmd') ||
+                        file.lang === 'mermaid' ||
+                        file.mime === 'image/svg+xml' ||
+                        (!rawText.trim().startsWith('<svg') && (
+                          rawText.includes('flowchart') ||
+                          rawText.includes('graph ') ||
+                          rawText.includes('sequenceDiagram') ||
+                          rawText.includes('classDiagram') ||
+                          rawText.includes('stateDiagram') ||
+                          rawText.includes('erDiagram') ||
+                          rawText.includes('-->')
+                        ));
+
       if (fileNameLower.endsWith('.docx')) {
         showToast('⚙ Mengompilasi dokumen Word (.docx)...', 'info');
         blob = await compileMarkdownToDocxBlob(rawText, file.name);
       } else if (fileNameLower.endsWith('.pdf')) {
         showToast('⚙ Mengompilasi dokumen PDF (.pdf)...', 'info');
         blob = await compileMarkdownToPdfBlob(rawText, file.name);
-      } else if (fileNameLower.endsWith('.svg')) {
+      } else if (isDiagram) {
+        showToast('⚙ Mengompilasi gambar vektor SVG...', 'info');
         let svgText = file.svgContent || '';
         if (!svgText && (rawText.includes('<svg') || rawText.trim().startsWith('<svg'))) {
           svgText = rawText;
         } else if (!svgText && typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
-          showToast('⚙ Mengompilasi gambar vektor SVG...', 'info');
           const cleanCode = getCleanMermaidCode(rawText);
           const tempId = 'downloadSvg_' + Date.now();
-          const res = await window.mermaid.render(tempId, cleanCode);
-          if (res && res.svg) svgText = res.svg;
+          try {
+            initMermaidEngine();
+            const res = await window.mermaid.render(tempId, cleanCode);
+            if (res && res.svg) svgText = res.svg;
+          } catch (mErr) {
+            console.warn('Gagal render mermaid saat unduh, mencoba pembersih sekunder:', mErr);
+            try {
+              const res2 = await window.mermaid.render(tempId + '_sec', getAggressiveMermaidCleaner(cleanCode));
+              if (res2 && res2.svg) svgText = res2.svg;
+            } catch (_) {}
+          }
         }
-        if (!svgText) svgText = rawText;
+        if (!svgText) {
+          svgText = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 600" width="100%" height="100%">
+  <rect width="100%" height="100%" fill="#0d1117"/>
+  <text x="24" y="44" fill="#38bdf8" font-family="monospace" font-size="16" font-weight="bold">${escapeHtml(file.name || 'Diagram_Visual.svg')}</text>
+  <foreignObject x="24" y="64" width="852" height="512">
+    <pre xmlns="http://www.w3.org/1999/xhtml" style="color:#e2e8f0; font-family:monospace; font-size:12px; white-space:pre-wrap; word-break:break-word; margin:0;">${escapeHtml(rawText)}</pre>
+  </foreignObject>
+</svg>`;
+        }
         blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
       } else {
         blob = new Blob([file.content || ''], { type: (String(file.mime || 'text/plain')) + ';charset=utf-8' });
       }
 
+      let safeFileName = (file.name || 'berkas.txt').replace(/[/\\?%*:|"<>]/g, '_').trim() || 'berkas.txt';
+      if (isDiagram && !safeFileName.toLowerCase().endsWith('.svg')) {
+        safeFileName = safeFileName.replace(/\.(?:mermaid|mmd|txt)$/i, '') + '.svg';
+      }
+
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const safeFileName = (file.name || 'file.txt').replace(/[/\\?%*:|"<>]/g, '_').trim() || 'file.txt';
       a.download = safeFileName;
       document.body.appendChild(a);
       a.click();
       a.remove();
       setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 4000);
-      showToast('⬇ File ' + safeFileName + ' berhasil diunduh.', 'success');
+      showToast('⬇ Berkas ' + safeFileName + ' berhasil diunduh.', 'success');
       AudioEngine.click();
     } catch (err) {
-      showToast('Gagal mengunduh file: ' + (err && err.message ? err.message : err), 'error');
+      showToast('Gagal mengunduh berkas: ' + (err && err.message ? err.message : err), 'error');
     }
   }
 
@@ -7912,6 +8000,9 @@ Aturan wajib:
     const wrap = document.createElement('div');
     wrap.className = 'msg-file-cards-wrap';
     files.forEach((file) => {
+      if (file && file.name && /\.(?:mermaid|mmd)$/i.test(file.name)) {
+        file.name = file.name.replace(/\.(?:mermaid|mmd)$/i, '.svg');
+      }
       const card = document.createElement('div');
       card.className = 'ai-file-card';
       card._aiFile = file;
@@ -23840,7 +23931,10 @@ Aturan:
     renderMessageFiles,
     compileMarkdownToDocxBlob,
     compileMarkdownToPdfBlob,
-    initMermaidEngine
+    initMermaidEngine,
+    openAIFileStudio,
+    downloadAIFile,
+    getCleanMermaidCode
   };
 
   // Start on DOM ready (safeguarded against post-DOMContentLoaded script execution)
