@@ -657,8 +657,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     attachmentMenuWrapper: $('#attachmentMenuWrapper'),
     attachOptionCamera: $('#attachOptionCamera'),
     attachOptionImage: $('#attachOptionImage'),
-    attachOptionGenWebsite: $('#attachOptionGenWebsite'),
-    attachOptionGenDoc: $('#attachOptionGenDoc'),
     attachOptionGenImage: $('#attachOptionGenImage'),
     attachOptionGenMusic: $('#attachOptionGenMusic'),
     attachOptionDoc: $('#attachOptionDoc'),
@@ -787,6 +785,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     aiFileStudioDownloadMenu: $('#aiFileStudioDownloadMenu'),
     btnStudioDownloadSvg: $('#btnStudioDownloadSvg'),
     btnStudioDownloadJpeg: $('#btnStudioDownloadJpeg'),
+    btnStudioDownloadPdf: $('#btnStudioDownloadPdf'),
+    btnStudioDownloadDocx: $('#btnStudioDownloadDocx'),
     btnToggleStudioFullscreen: $('#btnToggleStudioFullscreen'),
     imagePreviewImg: $('#imagePreviewImg'),
     removeImageBtn: $('#removeImageBtn'),
@@ -5015,12 +5015,28 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     let insideFileBlock = false;
     let insideHtmlBlock = false;
     let insideRawHtmlBlock = false;
+    let insideDocBlock = false;
     let insideIsolatedBlock = false;
     let fileBlockLang = 'code';
     let currentFileName = '';
+    const isDocMode = Boolean(options && (options.isDocCreation || options.docFormat));
 
     processed.split('\n').forEach((line) => {
       const t = line.trim();
+
+      // Penanganan khusus isolasi dokumen (agar teks pembuatannya tertutup dan tidak membanjiri chat)
+      if (!insideFileBlock && !insideDocBlock && (isDocMode || t.startsWith(TICK3 + 'docx') || t.startsWith(TICK3 + 'pdf'))) {
+        if (t.startsWith(TICK3 + 'markdown') || t.startsWith(TICK3 + 'md') || t.startsWith(TICK3 + 'docx') || t.startsWith(TICK3 + 'pdf') || t.startsWith(TICK3 + 'doc')) {
+          insideDocBlock = true;
+          out.push('\n> 📄 *Sedang menyusun dan memformat dokumen... (terisolasi di Studio Dokumen)*\n');
+          return;
+        }
+      } else if (insideDocBlock) {
+        if (t === TICK3) {
+          insideDocBlock = false;
+        }
+        return;
+      }
 
       // Penanganan khusus blok markdown ```html atau dokumen HTML saat opsi terisolasi
       if (!isExplicitCodeInChat) {
@@ -5057,7 +5073,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           fileBlockLang = langMatch ? langMatch[1] : (currentFileName ? guessLangFromName(currentFileName) : 'code');
           const isDiagram = fileBlockLang === 'mermaid' || fileBlockLang === 'mmd' || currentFileName.endsWith('.mermaid') || currentFileName.endsWith('.mmd');
           const fnLower = currentFileName.toLowerCase();
-          const isDoc = fnLower.endsWith('.docx') || fnLower.endsWith('.pdf') || fnLower.endsWith('.doc') || fileBlockLang === 'docx' || fileBlockLang === 'pdf' || (fileBlockLang === 'markdown' && (fnLower.includes('makalah') || fnLower.includes('laporan') || fnLower.includes('proposal') || fnLower.includes('dokumen') || fnLower.includes('jurnal') || Boolean(options && (options.docFormat || options.isDocCreation))));
+          const isDoc = fnLower.endsWith('.docx') || fnLower.endsWith('.pdf') || fnLower.endsWith('.doc') || fnLower.endsWith('.md') ||
+                        fileBlockLang === 'docx' || fileBlockLang === 'pdf' || 
+                        ((fileBlockLang === 'markdown' || fileBlockLang === 'md') && (!isDiagram && !fnLower.endsWith('.html') && !fnLower.endsWith('.svg') || isDocMode));
           const isWeb = fnLower.endsWith('.html') || fnLower.endsWith('.htm') || fileBlockLang === 'html' || fileBlockLang === 'htm';
 
           if (isDiagram) {
@@ -8424,15 +8442,22 @@ Aturan wajib:
       (!rawContent.trim().startsWith('<svg') && !rawContent.trim().startsWith('<?xml') && isAuthenticMermaidSyntax(rawContent));
     const isPureSvg = (ext === 'svg' || (rawContent.trim().startsWith('<svg') || rawContent.trim().startsWith('<?xml'))) && !isMermaid;
     const isDiagram = isDiagramFile(file);
+    const isDoc = isDocx || isPdf || ext === 'doc' || file.lang === 'docx' || file.lang === 'pdf' ||
+                  ((isMarkdown || file.lang === 'markdown') && !isDiagram && !isHtml);
 
     if (els.aiFileStudioDownloadCaret) {
-      els.aiFileStudioDownloadCaret.style.display = isDiagram ? 'inline-block' : 'none';
+      els.aiFileStudioDownloadCaret.style.display = (isDiagram || isDoc) ? 'inline-block' : 'none';
     }
     if (els.aiFileStudioDownloadMenu) {
       els.aiFileStudioDownloadMenu.style.display = 'none';
     }
+    if (els.btnStudioDownloadSvg) els.btnStudioDownloadSvg.style.display = isDiagram ? 'flex' : 'none';
+    if (els.btnStudioDownloadJpeg) els.btnStudioDownloadJpeg.style.display = isDiagram ? 'flex' : 'none';
+    if (els.btnStudioDownloadPdf) els.btnStudioDownloadPdf.style.display = isDoc ? 'flex' : 'none';
+    if (els.btnStudioDownloadDocx) els.btnStudioDownloadDocx.style.display = isDoc ? 'flex' : 'none';
+
     if (els.aiFileStudioDownloadText) {
-      els.aiFileStudioDownloadText.textContent = isDiagram ? 'Unduh Diagram' : 'Unduh File';
+      els.aiFileStudioDownloadText.textContent = isDiagram ? 'Unduh Diagram' : (isDoc ? 'Unduh Dokumen' : 'Unduh File');
     }
 
     setAIFileStudioTab(initialTab || (previewable ? 'preview' : 'code'));
@@ -9050,7 +9075,9 @@ Aturan wajib:
                           fileName.endsWith('.mermaid') || fileName.endsWith('.mmd') ||
                           (fileName.endsWith('.svg') && isAuthenticMermaidSyntax(innerContent));
 
-        const isDoc = fileName.endsWith('.docx') || fileName.endsWith('.pdf') || fileName.endsWith('.doc') || fileLang === 'docx' || fileLang === 'pdf' || (fileLang === 'markdown' && (fileName.includes('makalah') || fileName.includes('laporan') || fileName.includes('proposal') || fileName.includes('dokumen') || fileName.includes('jurnal') || Boolean(options && (options.docFormat || options.isDocCreation))));
+        const isDoc = fileName.endsWith('.docx') || fileName.endsWith('.pdf') || fileName.endsWith('.doc') || fileName.endsWith('.md') ||
+                      fileLang === 'docx' || fileLang === 'pdf' || 
+                      ((fileLang === 'markdown' || fileLang === 'md') && (!isDiagram && !isWeb || Boolean(options && (options.docFormat || options.isDocCreation))));
         const isWeb = fileName.endsWith('.html') || fileName.endsWith('.htm') || fileLang === 'html' || fileLang === 'htm';
 
         if (isDiagram) {
@@ -9078,7 +9105,7 @@ Aturan wajib:
       });
     }
 
-    if (hasStrippedDoc || hasStrippedWeb || shouldHideCode || (!isExplicitCodeInChat && (options && (options.websiteMode === 'preview' || options.isWebCreation)))) {
+    if (hasStrippedDoc || hasStrippedWeb || shouldHideCode || (!isExplicitCodeInChat && (options && (options.websiteMode === 'preview' || options.isWebCreation))) || (options && (options.docFormat || options.isDocCreation))) {
       // Bersihkan sisa marker jika stream sempat terputus
       out = out.replace(/<<<ZOZ_(?:FILE|EDIT|MODIFY)[\s\S]*?(?:<<<END_ZOZ_(?:FILE|EDIT|MODIFY)>>>|$)/gi, '');
       // Bersihkan sisa blok kode HTML utuh atau unclosed jika mode terisolasi
@@ -9086,6 +9113,9 @@ Aturan wajib:
         out = out.replace(/```(?:html|htm)[\s\S]*?(?:```|$)/gi, '');
         out = out.replace(/<!DOCTYPE\s+html[\s\S]*?(?:<\/html>|$)/gi, '');
         out = out.replace(/<html\b[\s\S]*?(?:<\/html>|$)/gi, '');
+      }
+      if (hasStrippedDoc || (options && (options.docFormat || options.isDocCreation))) {
+        out = out.replace(/```(?:markdown|md|docx|doc|pdf)[\s\S]*?(?:```|$)/gi, '');
       }
       // Bersihkan sisa catatan sementara streaming jika ada
       out = out.replace(/>\s*🌐\s*\*Sedang meracik dan menyiapkan berkas website[^*]*\*/gi, '');
@@ -9310,9 +9340,9 @@ Aturan wajib:
       // TOMBOL UNDUH SELALU ADA DI SEMUA KONDISI AGAR PENGGUNA BISA MENGUNDUH KAPAN SAJA
       const isFileDiagram = isDiagramFile(file);
       const fnLower = (file.name || '').toLowerCase();
-      const flLower = (file.lang || '').toLowerCase();
-      const isFileDoc = fnLower.endsWith('.docx') || fnLower.endsWith('.pdf') || fnLower.endsWith('.doc') || flLower === 'docx' || flLower === 'pdf' || (flLower === 'markdown' && (fnLower.includes('makalah') || fnLower.includes('laporan') || fnLower.includes('proposal') || fnLower.includes('dokumen') || fnLower.includes('jurnal') || fnLower.includes('karya_tulis')));
-      const isFileWeb = fnLower.endsWith('.html') || fnLower.endsWith('.htm') || flLower === 'html' || flLower === 'htm';
+      const isFileDoc = fnLower.endsWith('.docx') || fnLower.endsWith('.pdf') || fnLower.endsWith('.doc') || 
+                        flLower === 'docx' || flLower === 'pdf' || 
+                        ((flLower === 'markdown' || flLower === 'md' || fnLower.endsWith('.md') || fnLower.endsWith('.markdown')) && !isFileDiagram && !isFileWeb);
 
       let downloadButtonsHtml = '';
       if (isFileDiagram) {
@@ -10082,7 +10112,10 @@ ${blocks}
   els.aiFileStudioDownloadBtn?.addEventListener('click', (e) => {
     if (!activeAIFile) return;
     const isDiagram = isDiagramFile(activeAIFile);
-    if (isDiagram && els.aiFileStudioDownloadMenu) {
+    const ext = (activeAIFile.name || '').split('.').pop().toLowerCase();
+    const isDoc = ext === 'docx' || ext === 'pdf' || ext === 'doc' || ext === 'md' || ext === 'markdown' ||
+                  activeAIFile.lang === 'docx' || activeAIFile.lang === 'pdf' || (activeAIFile.lang === 'markdown' && !isDiagram);
+    if ((isDiagram || isDoc) && els.aiFileStudioDownloadMenu) {
       e.stopPropagation();
       const isVisible = els.aiFileStudioDownloadMenu.style.display !== 'none';
       els.aiFileStudioDownloadMenu.style.display = isVisible ? 'none' : 'flex';
@@ -10101,6 +10134,18 @@ ${blocks}
     e.stopPropagation();
     if (els.aiFileStudioDownloadMenu) els.aiFileStudioDownloadMenu.style.display = 'none';
     if (activeAIFile) downloadAIFile(activeAIFile, 'jpeg');
+  });
+
+  els.btnStudioDownloadPdf?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (els.aiFileStudioDownloadMenu) els.aiFileStudioDownloadMenu.style.display = 'none';
+    if (activeAIFile) downloadAIFile(activeAIFile, 'pdf');
+  });
+
+  els.btnStudioDownloadDocx?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (els.aiFileStudioDownloadMenu) els.aiFileStudioDownloadMenu.style.display = 'none';
+    if (activeAIFile) downloadAIFile(activeAIFile, 'docx');
   });
 
   document.addEventListener('click', (e) => {
@@ -13913,8 +13958,8 @@ Format teks (untuk model tanpa function calling):
     const isExplicitDiagramCmd = /^\/diagram\b/i.test(promptText.trim());
     const isExplicitWebCmd = /^\/(?:website|web|pratinjau)\b/i.test(promptText.trim());
     const isExplicitCleanCodeCmd = /^\/(?:kodenya-saja|code)\b/i.test(promptText.trim()) || Boolean(runOptions.isExplicitCleanCode);
-    const isExplicitDocCmd = /^\/(?:dokumen|doc|docx|pdf|word|makalah)\b/i.test(promptText.trim());
     const isDocRequest = (isExplicitDocCmd || Boolean(runOptions.docFormat) || runOptions.isDocCreation || isDocCreationPrompt(promptText)) && !isExplicitCleanCodeCmd;
+    if (isDocRequest && !hasNegativePreview) runOptions.isDocCreation = true;
 
     const isDiagramRequest = isExplicitDiagramCmd ||
                              /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(promptText);
@@ -13967,23 +14012,25 @@ atau di dalam blok kode standar \`\`\`mermaid\n...\n\`\`\`.
 4. DILARANG HANYA memberikan teks ASCII art atau LaTeX TikZ!
 Sistem antarmuka Zoz Router memiliki visualizer Mermaid interaktif otomatis yang langsung memvisualisasikan kode Anda menjadi diagram nyata di layar pengguna.`;
       } else if (isDocRequest && !hasNegativePreview) {
-        const chosenFormat = runOptions.docFormat || (/\bpdf\b/i.test(promptText) ? 'pdf' : 'docx');
-        const ext = chosenFormat === 'pdf' ? 'pdf' : 'docx';
-        const mime = chosenFormat === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        runOptions.isDocCreation = true;
         const cleanTitle = (sanitizeTitle(promptText).substring(0, 32) || 'Dokumen_Resmi').replace(/\s+/g, '_');
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DOKUMEN (${chosenFormat.toUpperCase()}) - KONTEN LENGKAP & TANPA BATAS
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN DOKUMEN TERTULIS (MAKALAH / PROPOSAL / LAPORAN / KARYA TULIS / DOKUMEN).
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DOKUMEN OTONOM (PDF & WORD .DOCX) - KONTEN LENGKAP & TERISOLASI
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN DOKUMEN TERTULIS (MAKALAH / PROPOSAL / LAPORAN / KARYA TULIS / SURAT / DOKUMEN).
 Aturan Wajib:
-1. Anda WAJIB membungkus seluruh isi teks dokumen lengkap terstruktur (judul, bab, sub-bab, pembahasan mendalam, tabel data bila perlu, dan kesimpulan dalam format Markdown profesional) di dalam SATU blok protokol:
-<<<ZOZ_FILE name="${cleanTitle}.${ext}" mime="${mime}" lang="markdown">
+1. Anda WAJIB membungkus SELURUH ISI TEKS DOKUMEN LENGKAP di dalam SATU blok protokol:
+<<<ZOZ_FILE name="${cleanTitle}.docx" mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document" lang="markdown">
 # Judul Dokumen
-...isi materi lengkap, komprehensif, dan terstruktur rapi...
+...isi materi lengkap, komprehensif, bab, sub-bab, dan pembahasan mendalam dalam format Markdown profesional...
 <<<END_ZOZ_FILE>>>
-2. MANDAT KELENGKAPAN DOKUMEN (UNLIMITED FULL CONTENT - DILARANG TERPOTONG SEPARUH):
+2. MANDAT KELENGKAPAN DOKUMEN (UNLIMITED FULL CONTENT - DILARANG MEMOTONG TEKS):
    - Anda WAJIB menyusun seluruh materi dokumen secara mendalam, lengkap, dan tuntas tanpa batasan baris.
    - DILARANG MEMOTONG TEKS SEPARUH JALAN atau hanya membuat kerangka kosong/ringkasan pendek! Uraikan setiap bab dan sub-bab dengan analisis mendalam.
-3. DILARANG KERAS mencetak, mengulang, atau membocorkan isi teks dokumen di luar blok ZOZ_FILE di dalam percakapan! Seluruh isi dokumen harus terisolasi di dalam blok berkas agar sistem dapat mengemasnya ke Studio Dokumen.
-4. Di luar blok ZOZ_FILE, berikan HANYA teks pengantar atau ringkasan singkat dan ramah yang menjelaskan bahwa dokumen telah selesai disusun dan siap dipratinjau atau diunduh.
+3. ISOLASI TOTAL DOKUMEN & RESPON HANYA KONFIRMASI (DILARANG KERAS BOCOR KE CHAT):
+   - DILARANG KERAS mencetak, mengulang, membocorkan, atau menuliskan isi teks dokumen di luar blok ZOZ_FILE di dalam percakapan!
+   - Di luar blok ZOZ_FILE, berikan HANYA 1-2 kalimat konfirmasi singkat dan profesional bahwa tugas penyusunan dokumen telah selesai dan dokumen siap diunduh dalam format PDF maupun Word (.docx). Contoh:
+     "Tugas penyusunan dokumen telah selesai. Seluruh materi dokumen telah disusun secara komprehensif dan terstruktur rapi. Anda dapat mengunduh dokumen dalam format PDF maupun Word (.docx) melalui kartu berkas di bawah ini."
+4. SISTEM DUA OPSI FORMAT UNDUH OTOMATIS:
+   - Sistem antarmuka Zoz Router otomatis menyediakan DUA OPSI FORMAT UNDUH SEKALIGUS (PDF & Word .docx) untuk dokumen ini. Pengguna dapat memilih dan mengunduh format yang diinginkan secara instan.
 5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.`;
       } else if (isWebRequest && !hasNegativePreview) {
         const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
@@ -14951,6 +14998,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     const isExplicitCleanCodeCmd = /^\/(?:kodenya-saja|code)\b/i.test(promptText.trim()) || Boolean(runOptions.isExplicitCleanCode);
     const isExplicitDocCmd = /^\/(?:dokumen|doc|docx|pdf|word|makalah)\b/i.test(promptText.trim());
     const isDocRequest = (isExplicitDocCmd || Boolean(runOptions.docFormat) || runOptions.isDocCreation || isDocCreationPrompt(promptText)) && !isExplicitCleanCodeCmd;
+    if (isDocRequest && !hasNegativePreview) runOptions.isDocCreation = true;
 
     const isDiagramRequest = isExplicitDiagramCmd ||
                              /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(promptText);
@@ -15003,23 +15051,25 @@ atau di dalam blok kode standar \`\`\`mermaid\n...\n\`\`\`.
 4. DILARANG HANYA memberikan teks ASCII art atau LaTeX TikZ!
 Sistem antarmuka Zoz Router memiliki visualizer Mermaid interaktif otomatis yang langsung memvisualisasikan kode Anda menjadi diagram nyata di layar pengguna.`;
       } else if (isDocRequest && !hasNegativePreview) {
-        const chosenFormat = runOptions.docFormat || (/\bpdf\b/i.test(promptText) ? 'pdf' : 'docx');
-        const ext = chosenFormat === 'pdf' ? 'pdf' : 'docx';
-        const mime = chosenFormat === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        runOptions.isDocCreation = true;
         const cleanTitle = (sanitizeTitle(promptText).substring(0, 32) || 'Dokumen_Resmi').replace(/\s+/g, '_');
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DOKUMEN (${chosenFormat.toUpperCase()}) - KONTEN LENGKAP & TANPA BATAS
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN DOKUMEN TERTULIS (MAKALAH / PROPOSAL / LAPORAN / KARYA TULIS / DOKUMEN).
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DOKUMEN OTONOM (PDF & WORD .DOCX) - KONTEN LENGKAP & TERISOLASI
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN DOKUMEN TERTULIS (MAKALAH / PROPOSAL / LAPORAN / KARYA TULIS / SURAT / DOKUMEN).
 Aturan Wajib:
-1. Anda WAJIB membungkus seluruh isi teks dokumen lengkap terstruktur (judul, bab, sub-bab, pembahasan mendalam, tabel data bila perlu, dan kesimpulan dalam format Markdown profesional) di dalam SATU blok protokol:
-<<<ZOZ_FILE name="${cleanTitle}.${ext}" mime="${mime}" lang="markdown">
+1. Anda WAJIB membungkus SELURUH ISI TEKS DOKUMEN LENGKAP di dalam SATU blok protokol:
+<<<ZOZ_FILE name="${cleanTitle}.docx" mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document" lang="markdown">
 # Judul Dokumen
-...isi materi lengkap, komprehensif, dan terstruktur rapi...
+...isi materi lengkap, komprehensif, bab, sub-bab, dan pembahasan mendalam dalam format Markdown profesional...
 <<<END_ZOZ_FILE>>>
-2. MANDAT KELENGKAPAN DOKUMEN (UNLIMITED FULL CONTENT - DILARANG TERPOTONG SEPARUH):
+2. MANDAT KELENGKAPAN DOKUMEN (UNLIMITED FULL CONTENT - DILARANG MEMOTONG TEKS):
    - Anda WAJIB menyusun seluruh materi dokumen secara mendalam, lengkap, dan tuntas tanpa batasan baris.
    - DILARANG MEMOTONG TEKS SEPARUH JALAN atau hanya membuat kerangka kosong/ringkasan pendek! Uraikan setiap bab dan sub-bab dengan analisis mendalam.
-3. DILARANG KERAS mencetak, mengulang, atau membocorkan isi teks dokumen di luar blok ZOZ_FILE di dalam percakapan! Seluruh isi dokumen harus terisolasi di dalam blok berkas agar sistem dapat mengemasnya ke Studio Dokumen.
-4. Di luar blok ZOZ_FILE, berikan HANYA teks pengantar atau ringkasan singkat dan ramah yang menjelaskan bahwa dokumen telah selesai disusun dan siap dipratinjau atau diunduh.
+3. ISOLASI TOTAL DOKUMEN & RESPON HANYA KONFIRMASI (DILARANG KERAS BOCOR KE CHAT):
+   - DILARANG KERAS mencetak, mengulang, membocorkan, atau menuliskan isi teks dokumen di luar blok ZOZ_FILE di dalam percakapan!
+   - Di luar blok ZOZ_FILE, berikan HANYA 1-2 kalimat konfirmasi singkat dan profesional bahwa tugas penyusunan dokumen telah selesai dan dokumen siap diunduh dalam format PDF maupun Word (.docx). Contoh:
+     "Tugas penyusunan dokumen telah selesai. Seluruh materi dokumen telah disusun secara komprehensif dan terstruktur rapi. Anda dapat mengunduh dokumen dalam format PDF maupun Word (.docx) melalui kartu berkas di bawah ini."
+4. SISTEM DUA OPSI FORMAT UNDUH OTOMATIS:
+   - Sistem antarmuka Zoz Router otomatis menyediakan DUA OPSI FORMAT UNDUH SEKALIGUS (PDF & Word .docx) untuk dokumen ini. Pengguna dapat memilih dan mengunduh format yang diinginkan secara instan.
 5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.`;
       } else if (isWebRequest && !hasNegativePreview) {
         const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
@@ -23064,28 +23114,28 @@ Aturan:
     {
       id: 'website',
       command: '/website',
-      title: 'Website & App Studio',
+      title: 'Pembuatan Website & App',
       badge: 'HTML / JS / 3D',
-      desc: 'Bikin landing page, simulator kalkulator, game, atau Three.js live',
+      desc: 'Bikin landing page, simulator interaktif, game, atau Three.js dengan pratinjau live',
       iconClass: 'fa-solid fa-code',
       iconColor: '#10b981',
       iconBg: 'rgba(16, 185, 129, 0.12)',
       template: '/website ',
-      placeholder: 'Deskripsikan web/aplikasi yang ingin dibuat (cth: kalkulator sains, game snake)...',
-      aliases: ['web', 'html', 'app', 'aplikasi']
+      placeholder: 'Deskripsikan website atau aplikasi web yang ingin dibuat...',
+      aliases: ['web', 'html', 'app', 'aplikasi', 'situs', 'landingpage', 'website']
     },
     {
       id: 'dokumen',
       command: '/dokumen',
-      title: 'Dokumen & Format',
-      badge: 'Markdown / PDF',
-      desc: 'Generate laporan terstruktur, artikel teknis, SOP, atau spesifikasi rapi',
+      title: 'Pembuatan Dokumen Resmi',
+      badge: 'PDF / Word .DOCX',
+      desc: 'Generate laporan, makalah, proposal & dokumen resmi siap unduh PDF & Word (.docx)',
       iconClass: 'fa-solid fa-file-lines',
       iconColor: '#6366f1',
       iconBg: 'rgba(99, 102, 241, 0.12)',
       template: '/dokumen ',
-      placeholder: 'Tulis topik dokumen atau laporan lengkap yang ingin dibuat...',
-      aliases: ['doc', 'laporan', 'pdf', 'sop']
+      placeholder: 'Tulis topik dokumen, makalah, atau laporan lengkap yang ingin dibuat...',
+      aliases: ['doc', 'laporan', 'pdf', 'word', 'docx', 'makalah', 'proposal', 'skripsi', 'jurnal', 'sop']
     },
     {
       id: 'deep-research',
@@ -24119,44 +24169,6 @@ Aturan:
     els.attachOptionImage?.addEventListener('click', () => {
       closeAttachmentDropdown();
       els.imageFileInput?.click();
-    });
-    els.attachOptionGenWebsite?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeAttachmentDropdown();
-      AudioEngine.click();
-      const currentVal = els.promptInput ? els.promptInput.value.trim() : '';
-      if (currentVal && isWebsiteCreationPrompt(currentVal)) {
-        openWebsiteModeModal(currentVal);
-      } else {
-        if (els.promptInput) {
-          if (!currentVal.startsWith('/website')) {
-            els.promptInput.value = currentVal ? `/website ${currentVal}` : '/website ';
-          }
-          els.promptInput.focus();
-          els.promptInput.setSelectionRange(els.promptInput.value.length, els.promptInput.value.length);
-          autoResizePromptInput();
-        }
-        showToast('🌐 Mode Pembuatan Website Aktif. Tuliskan deskripsi website/aplikasi yang ingin dibuat.');
-      }
-    });
-    els.attachOptionGenDoc?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeAttachmentDropdown();
-      AudioEngine.click();
-      const currentVal = els.promptInput ? els.promptInput.value.trim() : '';
-      if (currentVal && isDocCreationPrompt(currentVal)) {
-        openDocModeModal(currentVal);
-      } else {
-        if (els.promptInput) {
-          if (!currentVal.startsWith('/dokumen')) {
-            els.promptInput.value = currentVal ? `/dokumen ${currentVal}` : '/dokumen ';
-          }
-          els.promptInput.focus();
-          els.promptInput.setSelectionRange(els.promptInput.value.length, els.promptInput.value.length);
-          autoResizePromptInput();
-        }
-        showToast('📄 Mode Pembuatan Dokumen Aktif. Tuliskan topik atau judul dokumen yang ingin disusun.');
-      }
     });
     els.attachOptionGenImage?.addEventListener('click', (e) => {
       e.stopPropagation();

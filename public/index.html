@@ -23,7 +23,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261015_v285">
+  <link rel="stylesheet" href="style.css?v=20261015_v286">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -755,24 +755,6 @@
 
                 <!-- Pane 2: AI Tools & Creation Studio -->
                 <div class="attachment-pane" id="attachPaneTools" role="tabpanel" style="display: none;">
-                  <button class="attachment-menu-item" id="attachOptionGenWebsite" type="button">
-                    <div class="attach-item-icon-box website-gen-accent" style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: #10b981;">
-                      <i class="fa-solid fa-code"></i>
-                    </div>
-                    <div class="attach-item-info">
-                      <span class="attach-item-title">Pembuatan Website</span>
-                      <span class="attach-item-desc">Studio pembuatan website, landing page & aplikasi web interaktif</span>
-                    </div>
-                  </button>
-                  <button class="attachment-menu-item" id="attachOptionGenDoc" type="button">
-                    <div class="attach-item-icon-box doc-gen-accent" style="background: rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.4); color: #818cf8;">
-                      <i class="fa-solid fa-file-lines"></i>
-                    </div>
-                    <div class="attach-item-info">
-                      <span class="attach-item-title">Pembuatan Dokumen</span>
-                      <span class="attach-item-desc">Penyusunan dokumen resmi, laporan, makalah & format PDF / Word</span>
-                    </div>
-                  </button>
                   <button class="attachment-menu-item" id="attachOptionGenImage" type="button">
                     <div class="attach-item-icon-box image-gen-accent" style="background: rgba(255, 0, 127, 0.15); border-color: rgba(255, 0, 127, 0.4); color: #FF007F;">
                       <i class="fa-solid fa-wand-magic-sparkles"></i>
@@ -1584,6 +1566,20 @@
                   <span class="fmt-sub">Gambar raster HD, siap dibagikan ke mana saja</span>
                 </div>
               </button>
+              <button type="button" class="studio-download-item" id="btnStudioDownloadPdf" style="display: none;">
+                <i class="fa-solid fa-file-pdf" style="color: #ef4444;"></i>
+                <div class="menu-desc-text">
+                  <span class="fmt-title">Dokumen PDF (.pdf)</span>
+                  <span class="fmt-sub">Tata letak baku rapi & tajam, siap cetak & baca</span>
+                </div>
+              </button>
+              <button type="button" class="studio-download-item" id="btnStudioDownloadDocx" style="display: none;">
+                <i class="fa-solid fa-file-word" style="color: #3b82f6;"></i>
+                <div class="menu-desc-text">
+                  <span class="fmt-title">Dokumen Word (.docx)</span>
+                  <span class="fmt-sub">Office Open XML asli, fleksibel diedit di Word/Docs</span>
+                </div>
+              </button>
             </div>
           </div>
         </div>
@@ -2036,6 +2032,6 @@
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
   <script src="text-safety.js?v=20261015_v279" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261015_v285" defer></script>
+  <script src="app.js?v=20261015_v286" defer></script>
 </body>
 </html>
