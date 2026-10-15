@@ -1876,6 +1876,35 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   letter-spacing: 0.5px;
 }
 
+.code-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.code-preview-btn {
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  border-radius: 4px;
+  color: var(--neon-cyan);
+  padding: 3px 9px;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-family: var(--font-main);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.2s ease;
+}
+
+.code-preview-btn:hover {
+  background: rgba(0, 240, 255, 0.22);
+  border-color: var(--neon-cyan);
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.4);
+}
+
 .code-copy-btn {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);

@@ -4494,16 +4494,55 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         } catch (e) {}
       }
 
-      // Create code header bar with Copy Button
+      // Create code header bar with Copy Button & optional Preview Button
       const header = document.createElement('div');
       header.className = 'code-header';
+
+      const isPreviewableCode = (
+        lang === 'HTML' || lang === 'HTM' || lang === 'SVG' || lang === 'XML' ||
+        lang === 'MARKDOWN' || lang === 'MD' ||
+        rawText.includes('<!DOCTYPE html') || rawText.includes('<html') ||
+        (rawText.startsWith('<svg') && rawText.includes('</svg>'))
+      );
+
       header.innerHTML = `
         <span class="code-lang-label"><i class="fa-solid fa-code"></i> ${escapeHtml(lang)}</span>
-        <button class="code-copy-btn" title="Salin seluruh kode">
-          <i class="fa-solid fa-clipboard"></i>
-          <span class="copy-text">Salin Kode</span>
-        </button>
+        <div class="code-actions-group">
+          ${isPreviewableCode ? `
+          <button class="code-preview-btn" title="Buka Pratinjau Interaktif di AI File Studio" type="button">
+            <i class="fa-solid fa-eye"></i>
+            <span class="preview-text">Pratinjau</span>
+          </button>` : ''}
+          <button class="code-copy-btn" title="Salin seluruh kode" type="button">
+            <i class="fa-solid fa-clipboard"></i>
+            <span class="copy-text">Salin Kode</span>
+          </button>
+        </div>
       `;
+
+      if (isPreviewableCode) {
+        const prevBtn = header.querySelector('.code-preview-btn');
+        if (prevBtn) {
+          prevBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            let codeText = '';
+            if (codeBlock) {
+              codeText = codeBlock.innerText || codeBlock.textContent || '';
+            } else {
+              const clone = pre.cloneNode(true);
+              const oldHeader = clone.querySelector('.code-header');
+              if (oldHeader) oldHeader.remove();
+              codeText = clone.innerText || clone.textContent || '';
+            }
+
+            const docName = guessFileNameFromLang(lang.toLowerCase(), codeText);
+            const mime = guessMimeFromName(docName);
+            const aiFile = buildAIFile(docName, mime, lang.toLowerCase(), codeText, 'Pratinjau Langsung dari Kode');
+            openAIFileStudio(aiFile);
+            AudioEngine.click();
+          });
+        }
+      }
 
       const copyBtn = header.querySelector('.code-copy-btn');
       copyBtn.addEventListener('click', (e) => {
@@ -7712,10 +7751,11 @@ Aturan wajib:
     if (hasNegativeFileOrPreviewIntent(text)) return false;
 
     const t = text.toLowerCase();
-    const explicitFileWants = /\b(?:buatkan|buat|bikin|bikinkan|tolong buat|generate|create|write|tulis|simpan sebagai|unduh|download|export|ekspor|saya butuh file|saya minta file|butuh file|perlukan file|bikinkan file)\s+(?:sebuah\s+)?(?:file|berkas|dokumen|website|aplikasi|diagram|flowchart)\b/i.test(t);
+    const explicitFileWants = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong buat|generate|create|build|write|tulis|rancang|desain|simpan sebagai|unduh|download|export|ekspor|saya butuh file|saya minta file|butuh file|perlukan file|bikinkan file)\s+(?:sebuah\s+)?(?:file|berkas|dokumen|website|web|webpage|landing page|aplikasi|game|diagram|flowchart)\b/i.test(t);
     const hasExtension = /\b[a-zA-Z0-9_-]+\.(?:html?|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|pdf|xlsx|ipynb|svg)\b/i.test(t);
     const isDiagram = /\b(?:diagram|flowchart|alur sistem|arsitektur visual|erd|mindmap)\b/i.test(t);
     const isExport = /\b(?:simpan sebagai|ekspor ke|export to|unduh|download file)\b/i.test(t);
+    const isWebOrApp = /\b(?:website|webpage|landing page|halaman web|aplikasi web|game web|web app|portofolio web|simulasi 3d)\b/i.test(t);
 
     // Jika direktori lokal aktif dan pengguna menyebut nama berkas yang ada di direktori
     const workspaceMatch = STATE.localWorkspace.enabled && (STATE.localWorkspace.files || []).some(f => {
@@ -7723,7 +7763,7 @@ Aturan wajib:
       return t.includes(f.name.toLowerCase()) || (baseName.length >= 3 && t.includes(baseName));
     });
 
-    return explicitFileWants || hasExtension || isDiagram || isExport || workspaceMatch;
+    return explicitFileWants || isWebOrApp || hasExtension || isDiagram || isExport || workspaceMatch;
   }
 
   function formatFileSize(bytes) {
@@ -7758,6 +7798,14 @@ Aturan wajib:
         const cleanH = sanitizeTitle(hMatch[1]);
         const ext = cleanLang === 'docx' ? 'docx' : (cleanLang === 'pdf' ? 'pdf' : 'md');
         if (cleanH.length >= 3) return `${cleanH}.${ext}`;
+      }
+    }
+
+    if (cleanLang === 'html' || cleanLang === 'htm') {
+      const titleMatch = String(body || '').match(/<title>([^<]+)<\/title>/i);
+      if (titleMatch && titleMatch[1]) {
+        const cleanT = sanitizeTitle(titleMatch[1]);
+        if (cleanT.length >= 3) return `${cleanT}.html`;
       }
     }
 
@@ -8408,9 +8456,9 @@ Aturan wajib:
       idx = end + 1;
     }
 
-    // --- Fallback: blok kode besar saat pengguna meminta file/website tapi AI
-    //     tidak memakai penanda (umum terjadi pada model kecil/tanpa tool call) ---
-    if (allowFallback && out.files.length === 0) {
+    // --- Fallback: blok kode saat AI menghasilkan dokumen web (HTML/SVG) utuh
+    //     atau saat pengguna meminta file/website tapi AI memakai blok markdown biasa ---
+    if (out.files.length === 0) {
       for (let i = 0; i < lines.length; i++) {
         const t = lines[i].trim();
         if (t.length < 4 || t.slice(0, 3) !== TICK3) continue;
@@ -8422,7 +8470,10 @@ Aturan wajib:
         }
         if (end <= i) continue;
         const body = lines.slice(i + 1, end).join('\n');
-        if (body.length < 300) continue;
+        const isFullHtmlOrSvg = (langTag === 'html' || langTag === 'htm' || body.includes('<!DOCTYPE html') || body.includes('<html') || (body.includes('<svg') && body.includes('</svg>'))) && body.length >= 100;
+        const isEligibleFallback = (allowFallback && body.length >= 250) || isFullHtmlOrSvg;
+        if (!isEligibleFallback) continue;
+
         out.files.push(buildAIFile(guessFileNameFromLang(langTag, body), '', langTag, body, ''));
         out.rawBlocks.push(lines.slice(i, end + 1).join('\n'));
         break;
@@ -8439,6 +8490,12 @@ Aturan wajib:
     if (Array.isArray(rawBlocks)) {
       rawBlocks.forEach((b) => {
         if (!b) return;
+
+        // Jika blok sudah berupa blok markdown biasa (misal ```html ... ``` hasil fallback),
+        // jangan dimodifikasi atau dihapus dari chat — biarkan kode tetap utuh dan terbaca langsung oleh pengguna!
+        if (b.trim().startsWith(TICK3)) {
+          return;
+        }
 
         // Ekstrak header blok ZOZ_FILE untuk mengetahui nama berkas dan bahasanya secara akurat
         const nameMatch = b.match(/(?:name|file|path)=["']?([^"'\s>]+)["']?/i) ||
@@ -13810,7 +13867,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         renderMessageSources(assistantRow, webSources, true);
       }
       renderYouTubeCardsForMessage(assistantRow, fullText, foundYouTubeIds);
-      renderMessageFiles(assistantRow, generatedFiles, hasNegativePreview || !wantsFile);
+      renderMessageFiles(assistantRow, generatedFiles, hasNegativePreview);
       metaBox.innerHTML = `
         <strong>${escapeHtml(modelName)}</strong>
         <span class="meta-model-badge">Ollama</span>
@@ -13833,7 +13890,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           model: modelName,
           engine: 'ollama',
           sources: webSources,
-          files: (generatedFiles.length > 0 && !hasNegativePreview && wantsFile) ? generatedFiles : undefined,
+          files: (generatedFiles.length > 0 && !hasNegativePreview) ? generatedFiles : undefined,
           stats: { duration: totalTime, tps: tps, tokens: tokenCount },
           timestamp: new Date().toISOString()
         });
@@ -15110,7 +15167,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         renderMessageSources(assistantRow, webSources, true);
       }
       renderYouTubeCardsForMessage(assistantRow, fullText, foundYouTubeIds);
-      renderMessageFiles(assistantRow, generatedFiles, hasNegativePreview || !wantsFile);
+      renderMessageFiles(assistantRow, generatedFiles, hasNegativePreview);
       const effectiveDisplay = (actualModelUsed && actualModelUsed !== displayModel && actualModelUsed !== modelName) ? `${displayModel} → ${actualModelUsed} (Failover)` : displayModel;
       metaBox.innerHTML = `
         <strong title="${actualModelUsed ? escapeHtml('Model dialihkan ke ' + actualModelUsed) : escapeHtml(displayModel)}">${escapeHtml(effectiveDisplay)}</strong>
@@ -15135,7 +15192,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           model: actualModelUsed || displayModel,
           engine: engineMode,
           images: collectedImages.length > 0 ? collectedImages : undefined,
-          files: (generatedFiles.length > 0 && !hasNegativePreview && wantsFile) ? generatedFiles : undefined,
+          files: (generatedFiles.length > 0 && !hasNegativePreview) ? generatedFiles : undefined,
           imageUrl: collectedImages[0] || undefined,
           sources: webSources,
           stats: { duration: totalTime, tps: tps, tokens: tokenCount },
