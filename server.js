@@ -5066,6 +5066,210 @@ async function requestHandler(req, res) {
     }
   }
 
+  // =========================================================================
+  // NATIVE CLAUDE-CODE PARITY WORKSPACE FILE SYSTEM API
+  // Mengizinkan modifikasi langsung file fisik di direktori lokal tanpa unduh
+  // =========================================================================
+  const WORKSPACE_ROOT = process.env.ZOZ_WORKSPACE_ROOT
+    ? path.resolve(process.env.ZOZ_WORKSPACE_ROOT)
+    : path.resolve(__dirname);
+  const SNAPSHOTS_DIR = path.join(WORKSPACE_ROOT, '.zoz-snapshots');
+
+  function isSafeWorkspacePath(targetRelPath) {
+    if (!targetRelPath || typeof targetRelPath !== 'string') return false;
+    const clean = targetRelPath.trim().replace(/^[/\\]+/, '');
+    const resolved = path.resolve(WORKSPACE_ROOT, clean);
+    return resolved.startsWith(WORKSPACE_ROOT);
+  }
+
+  function getSafeWorkspaceFullPath(targetRelPath) {
+    if (!isSafeWorkspacePath(targetRelPath)) return null;
+    const clean = targetRelPath.trim().replace(/^[/\\]+/, '');
+    return path.resolve(WORKSPACE_ROOT, clean);
+  }
+
+  async function scanWorkspaceDirectory(dir, basePath = '', depth = 0) {
+    if (depth > 6) return [];
+    try {
+      const entries = await fsp.readdir(dir, { withFileTypes: true });
+      const files = [];
+      const IGNORE_SET = new Set(['node_modules', '.git', '.zoz-snapshots', '.gemini', 'data', 'dist', 'build', '.cache']);
+
+      for (const entry of entries) {
+        if (IGNORE_SET.has(entry.name) || (entry.name.startsWith('.') && entry.name !== '.env.example')) continue;
+        const relPath = basePath ? `${basePath}/${entry.name}` : entry.name;
+        const fullPath = path.join(dir, entry.name);
+
+        if (entry.isDirectory()) {
+          const sub = await scanWorkspaceDirectory(fullPath, relPath, depth + 1);
+          files.push(...sub);
+        } else if (entry.isFile()) {
+          try {
+            const stat = await fsp.stat(fullPath);
+            files.push({
+              name: entry.name,
+              path: relPath,
+              size: stat.size,
+              lastModified: stat.mtimeMs,
+              type: MIME_TYPES[path.extname(entry.name).toLowerCase()] || 'text/plain'
+            });
+          } catch (_) {}
+        }
+      }
+      return files;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // 1. Workspace Status
+  if ((pathname === '/api/workspace/status' || pathname === '/api/workspace') && method === 'GET') {
+    return sendJSON(res, 200, {
+      available: true,
+      root: WORKSPACE_ROOT,
+      dirName: path.basename(WORKSPACE_ROOT),
+      canWrite: true,
+      platform: 'server-fs'
+    });
+  }
+
+  // 2. Workspace Files Tree
+  if ((pathname === '/api/workspace/files' || pathname === '/api/workspace/tree') && method === 'GET') {
+    try {
+      const files = await scanWorkspaceDirectory(WORKSPACE_ROOT);
+      return sendJSON(res, 200, {
+        success: true,
+        root: WORKSPACE_ROOT,
+        dirName: path.basename(WORKSPACE_ROOT),
+        count: files.length,
+        files: files
+      });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Gagal memindai direktori proyek server: ' + err.message });
+    }
+  }
+
+  // 3. Workspace Read File
+  if ((pathname === '/api/workspace/read' || pathname === '/api/workspace/file') && method === 'GET') {
+    const targetPath = (reqUrl.searchParams && reqUrl.searchParams.get('path')) ||
+                       (reqUrl.searchParams && reqUrl.searchParams.get('name')) ||
+                       (reqUrl.query && reqUrl.query.path);
+    if (!targetPath) {
+      return sendJSON(res, 400, { error: 'Parameter query `path` diperlukan.' });
+    }
+    const fullPath = getSafeWorkspaceFullPath(targetPath);
+    if (!fullPath) {
+      return sendJSON(res, 403, { error: 'Akses ditolak: path di luar direktori kerja proyek.' });
+    }
+    try {
+      if (!fs.existsSync(fullPath)) {
+        return sendJSON(res, 404, { error: 'Berkas tidak ditemukan di direktori proyek: ' + targetPath });
+      }
+      const stat = await fsp.stat(fullPath);
+      if (stat.isDirectory()) {
+        return sendJSON(res, 400, { error: 'Target adalah direktori, bukan berkas.' });
+      }
+      const content = await fsp.readFile(fullPath, 'utf8');
+      return sendJSON(res, 200, {
+        success: true,
+        path: targetPath.replace(/^[/\\]+/, ''),
+        name: path.basename(fullPath),
+        size: stat.size,
+        lastModified: stat.mtimeMs,
+        content: content
+      });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Gagal membaca berkas: ' + err.message });
+    }
+  }
+
+  // 4. Workspace Write / Edit File (CLAUDE-CODE PARITY LIVE DISK MODIFICATION)
+  if ((pathname === '/api/workspace/write' || pathname === '/api/workspace/edit') && method === 'POST') {
+    const body = await safeParseBody(req);
+    if (!body) return;
+    const targetPath = body.path || body.name || body.fileName;
+    if (!targetPath || typeof targetPath !== 'string') {
+      return sendJSON(res, 400, { error: 'Parameter `path` atau `name` diperlukan.' });
+    }
+    const fullPath = getSafeWorkspaceFullPath(targetPath);
+    if (!fullPath) {
+      return sendJSON(res, 403, { error: 'Akses ditolak: path di luar direktori kerja proyek.' });
+    }
+    const cleanRelPath = targetPath.trim().replace(/^[/\\]+/, '');
+    const content = body.content !== undefined ? String(body.content) : '';
+    const shouldBackup = body.backup !== false;
+
+    try {
+      let backupCreated = false;
+      let prevContent = null;
+      if (fs.existsSync(fullPath)) {
+        if (shouldBackup) {
+          try {
+            if (!fs.existsSync(SNAPSHOTS_DIR)) {
+              await fsp.mkdir(SNAPSHOTS_DIR, { recursive: true });
+            }
+            prevContent = await fsp.readFile(fullPath, 'utf8');
+            const safeBase = path.basename(fullPath).replace(/[^a-zA-Z0-9._-]/g, '_');
+            const snapPath = path.join(SNAPSHOTS_DIR, `${Date.now()}_${safeBase}`);
+            await fsp.writeFile(snapPath, prevContent, 'utf8');
+            backupCreated = true;
+          } catch (bErr) {
+            console.warn('Gagal membuat backup snapshot berkas:', bErr.message);
+          }
+        }
+      } else {
+        // Buat folder induk jika belum ada
+        const parentDir = path.dirname(fullPath);
+        if (!fs.existsSync(parentDir)) {
+          await fsp.mkdir(parentDir, { recursive: true });
+        }
+      }
+
+      // Tulis langsung ke disk fisik (In-place edit tanpa unduh)
+      await fsp.writeFile(fullPath, content, 'utf8');
+      const stat = await fsp.stat(fullPath);
+
+      return sendJSON(res, 200, {
+        success: true,
+        message: `Berkas "${cleanRelPath}" berhasil dimodifikasi langsung di disk!`,
+        path: cleanRelPath,
+        name: path.basename(fullPath),
+        size: stat.size,
+        lastModified: stat.mtimeMs,
+        backupCreated: backupCreated
+      });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Gagal menulis berkas ke disk: ' + err.message });
+    }
+  }
+
+  // 5. Workspace Delete File
+  if ((pathname === '/api/workspace/delete' || pathname === '/api/workspace/remove') && method === 'POST') {
+    const body = await safeParseBody(req);
+    if (!body) return;
+    const targetPath = body.path || body.name || body.fileName;
+    if (!targetPath) {
+      return sendJSON(res, 400, { error: 'Parameter `path` diperlukan.' });
+    }
+    const fullPath = getSafeWorkspaceFullPath(targetPath);
+    if (!fullPath) {
+      return sendJSON(res, 403, { error: 'Akses ditolak: path di luar direktori kerja proyek.' });
+    }
+    try {
+      if (fs.existsSync(fullPath)) {
+        await fsp.unlink(fullPath);
+        return sendJSON(res, 200, {
+          success: true,
+          message: `Berkas "${targetPath}" berhasil dihapus dari direktori proyek.`
+        });
+      } else {
+        return sendJSON(res, 404, { error: 'Berkas tidak ditemukan.' });
+      }
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Gagal menghapus berkas: ' + err.message });
+    }
+  }
+
   // Deep Research: Start Custom URL Deep Analysis (Background Worker)
   if ((pathname === '/api/mulai-riset' || pathname === '/api/deep-research/start') && method === 'POST') {
     const body = await safeParseBody(req);
