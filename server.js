@@ -5225,8 +5225,13 @@ async function requestHandler(req, res) {
         }
       }
 
-      // Tulis langsung ke disk fisik (In-place edit tanpa unduh)
-      await fsp.writeFile(fullPath, content, 'utf8');
+      // Tulis langsung ke disk fisik (In-place edit tanpa unduh, mendukung teks & biner base64)
+      if (body.encoding === 'base64') {
+        const binBuf = Buffer.from(content, 'base64');
+        await fsp.writeFile(fullPath, binBuf);
+      } else {
+        await fsp.writeFile(fullPath, content, 'utf8');
+      }
       const stat = await fsp.stat(fullPath);
 
       return sendJSON(res, 200, {

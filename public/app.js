@@ -1681,7 +1681,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       return null;
     },
 
-    async writeFile(filePath, content, note = '') {
+    async writeFile(filePath, content, note = '', encoding = 'utf8') {
       try {
         const res = await fetch('/api/workspace/write', {
           method: 'POST',
@@ -1692,6 +1692,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           body: JSON.stringify({
             path: filePath,
             content: content,
+            encoding: encoding || 'utf8',
             backup: true,
             note: note
           })
@@ -3056,6 +3057,737 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   }
 
 
+  // ==================== AUTONOMOUS DOCUMENT COMPILER & MERMAID DIAGRAM ENGINE ====================
+  function initMermaidEngine() {
+    if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.initialize === 'function') {
+      try {
+        window.mermaid.initialize({
+          startOnLoad: false,
+          theme: 'dark',
+          securityLevel: 'loose',
+          fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+          themeVariables: {
+            darkMode: true,
+            background: '#0d1117',
+            primaryColor: '#1e293b',
+            primaryTextColor: '#f0f6fc',
+            primaryBorderColor: '#38bdf8',
+            lineColor: '#38bdf8',
+            secondaryColor: '#0f172a',
+            tertiaryColor: '#1e1e2e',
+            actorBkg: '#1e293b',
+            actorBorder: '#38bdf8',
+            actorTextColor: '#f0f6fc',
+            signalColor: '#38bdf8',
+            signalTextColor: '#f0f6fc'
+          }
+        });
+      } catch (err) {
+        console.warn('Inisialisasi Mermaid Engine info:', err);
+      }
+    }
+  }
+
+  function escapeXml(str) {
+    if (!str || typeof str !== 'string') return '';
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  }
+
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = reader.result || '';
+        const base64 = dataUrl.split(',')[1] || '';
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function parseMarkdownInlineToDocxRuns(text) {
+    if (!text) return '';
+    const tokens = [];
+    const regex = /(\*\*.*?\*\*|\*.*?\*|`.*?`)/g;
+    let lastIdx = 0;
+    let match;
+
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIdx) {
+        tokens.push({ text: text.substring(lastIdx, match.index) });
+      }
+      const raw = match[0];
+      if (raw.startsWith('**') && raw.endsWith('**')) {
+        tokens.push({ text: raw.slice(2, -2), bold: true });
+      } else if (raw.startsWith('*') && raw.endsWith('*')) {
+        tokens.push({ text: raw.slice(1, -1), italic: true });
+      } else if (raw.startsWith('`') && raw.endsWith('`')) {
+        tokens.push({ text: raw.slice(1, -1), code: true });
+      } else {
+        tokens.push({ text: raw });
+      }
+      lastIdx = regex.lastIndex;
+    }
+    if (lastIdx < text.length) {
+      tokens.push({ text: text.substring(lastIdx) });
+    }
+
+    return tokens.map(t => {
+      const boldTag = t.bold ? '<w:b/><w:bCs/>' : '';
+      const italicTag = t.italic ? '<w:i/><w:iCs/>' : '';
+      const codePr = t.code ? '<w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/><w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/><w:color w:val="0F172A"/>' : '';
+      return `<w:r><w:rPr>${boldTag}${italicTag}${codePr}</w:rPr><w:t xml:space="preserve">${escapeXml(t.text)}</w:t></w:r>`;
+    }).join('');
+  }
+
+  async function compileMarkdownToDocxBlob(markdownText, title = 'Dokumen ZOZ AI') {
+    if (typeof window.JSZip === 'undefined') {
+      return new Blob([markdownText || ''], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    }
+
+    const zip = new window.JSZip();
+    const cleanTitle = (title || 'Dokumen').replace(/\.docx$/i, '');
+
+    const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>`;
+
+    const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>`;
+
+    const wordRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+
+    const coreXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:title>${escapeXml(cleanTitle)}</dc:title>
+  <dc:creator>ZOZ AI Document Studio</dc:creator>
+  <cp:lastModifiedBy>ZOZ AI</cp:lastModifiedBy>
+  <dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created>
+  <dcterms:modified xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:modified>
+</cp:coreProperties>`;
+
+    const appXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>ZOZ AI Document Engine</Application>
+  <DocSecurity>0</DocSecurity>
+</Properties>`;
+
+    const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:docDefaults>
+    <w:rPrDefault>
+      <w:rPr>
+        <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/>
+        <w:sz w:val="22"/>
+        <w:szCs w:val="22"/>
+        <w:color w:val="1E293B"/>
+        <w:lang w:val="id-ID"/>
+      </w:rPr>
+    </w:rPrDefault>
+  </w:docDefaults>
+  <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+    <w:name w:val="Normal"/>
+    <w:pPr>
+      <w:spacing w:after="140" w:line="276" w:lineRule="auto"/>
+    </w:pPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading1">
+    <w:name w:val="heading 1"/>
+    <w:pPr>
+      <w:spacing w:before="280" w:after="140"/>
+    </w:pPr>
+    <w:rPr>
+      <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>
+      <w:b/><w:bCs/>
+      <w:sz w:val="36"/>
+      <w:color w:val="0F172A"/>
+    </w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading2">
+    <w:name w:val="heading 2"/>
+    <w:pPr>
+      <w:spacing w:before="220" w:after="100"/>
+    </w:pPr>
+    <w:rPr>
+      <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>
+      <w:b/><w:bCs/>
+      <w:sz w:val="28"/>
+      <w:color w:val="2563EB"/>
+    </w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading3">
+    <w:name w:val="heading 3"/>
+    <w:pPr>
+      <w:spacing w:before="160" w:after="80"/>
+    </w:pPr>
+    <w:rPr>
+      <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>
+      <w:b/><w:bCs/>
+      <w:sz w:val="24"/>
+      <w:color w:val="334155"/>
+    </w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="CodeBlock">
+    <w:name w:val="Code Block"/>
+    <w:pPr>
+      <w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/>
+      <w:spacing w:before="60" w:after="60"/>
+      <w:ind w:left="240" w:right="240"/>
+    </w:pPr>
+    <w:rPr>
+      <w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/>
+      <w:sz w:val="19"/>
+      <w:color w:val="0F172A"/>
+    </w:rPr>
+  </w:style>
+</w:styles>`;
+
+    const lines = (markdownText || '').split('\n');
+    let paragraphsXml = '';
+    let inCode = false;
+
+    paragraphsXml += `
+      <w:p>
+        <w:pPr>
+          <w:pStyle w:val="Heading1"/>
+          <w:pBdr><w:bottom w:val="single" w:sz="12" w:space="6" w:color="38BDF8"/></w:pBdr>
+        </w:pPr>
+        <w:r><w:t>${escapeXml(cleanTitle)}</w:t></w:r>
+      </w:p>
+    `;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (trimmed.startsWith('```')) {
+        inCode = !inCode;
+        continue;
+      }
+
+      if (inCode) {
+        paragraphsXml += `
+          <w:p>
+            <w:pPr><w:pStyle w:val="CodeBlock"/></w:pPr>
+            <w:r><w:rPr><w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/><w:sz w:val="19"/></w:rPr><w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r>
+          </w:p>
+        `;
+        continue;
+      }
+
+      if (!trimmed) {
+        paragraphsXml += `<w:p/>`;
+        continue;
+      }
+
+      if (trimmed.startsWith('# ')) {
+        const text = trimmed.substring(2).trim();
+        paragraphsXml += `
+          <w:p>
+            <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+            ${parseMarkdownInlineToDocxRuns(text)}
+          </w:p>
+        `;
+      } else if (trimmed.startsWith('## ')) {
+        const text = trimmed.substring(3).trim();
+        paragraphsXml += `
+          <w:p>
+            <w:pPr><w:pStyle w:val="Heading2"/></w:pPr>
+            ${parseMarkdownInlineToDocxRuns(text)}
+          </w:p>
+        `;
+      } else if (trimmed.startsWith('### ')) {
+        const text = trimmed.substring(4).trim();
+        paragraphsXml += `
+          <w:p>
+            <w:pPr><w:pStyle w:val="Heading3"/></w:pPr>
+            ${parseMarkdownInlineToDocxRuns(text)}
+          </w:p>
+        `;
+      } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || trimmed.startsWith('+ ')) {
+        const itemText = trimmed.replace(/^[-*+]\s+/, '');
+        paragraphsXml += `
+          <w:p>
+            <w:pPr>
+              <w:ind w:left="480" w:hanging="240"/>
+            </w:pPr>
+            <w:r><w:rPr><w:rFonts w:ascii="Symbol" w:hAnsi="Symbol"/><w:color w:val="38BDF8"/></w:rPr><w:t>• </w:t></w:r>
+            ${parseMarkdownInlineToDocxRuns(itemText)}
+          </w:p>
+        `;
+      } else if (/^\d+\.\s+/.test(trimmed)) {
+        const prefix = trimmed.match(/^\d+\./)[0];
+        const itemText = trimmed.replace(/^\d+\.\s+/, '');
+        paragraphsXml += `
+          <w:p>
+            <w:pPr>
+              <w:ind w:left="480" w:hanging="240"/>
+            </w:pPr>
+            <w:r><w:rPr><w:b/><w:color w:val="2563EB"/></w:rPr><w:t>${escapeXml(prefix)} </w:t></w:r>
+            ${parseMarkdownInlineToDocxRuns(itemText)}
+          </w:p>
+        `;
+      } else if (trimmed === '---' || trimmed === '***') {
+        paragraphsXml += `
+          <w:p>
+            <w:pPr>
+              <w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="CBD5E1"/></w:pBdr>
+              <w:spacing w:before="120" w:after="120"/>
+            </w:pPr>
+          </w:p>
+        `;
+      } else {
+        paragraphsXml += `
+          <w:p>
+            <w:pPr><w:pStyle w:val="Normal"/></w:pPr>
+            ${parseMarkdownInlineToDocxRuns(trimmed)}
+          </w:p>
+        `;
+      }
+    }
+
+    const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    ${paragraphsXml}
+    <w:sectPr>
+      <w:pgSz w:w="11906" w:h="16838"/>
+      <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
+    </w:sectPr>
+  </w:body>
+</w:document>`;
+
+    zip.file('[Content_Types].xml', contentTypesXml);
+    zip.folder('_rels').file('.rels', relsXml);
+    zip.folder('docProps').file('core.xml', coreXml);
+    zip.folder('docProps').file('app.xml', appXml);
+    const wordFolder = zip.folder('word');
+    wordFolder.folder('_rels').file('document.xml.rels', wordRelsXml);
+    wordFolder.file('styles.xml', stylesXml);
+    wordFolder.file('document.xml', documentXml);
+
+    return await zip.generateAsync({
+      type: 'blob',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    });
+  }
+
+  async function compileMarkdownToPdfBlob(markdownText, title = 'Dokumen ZOZ AI') {
+    const jsPDFClass = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : null;
+    if (!jsPDFClass) {
+      return new Blob([markdownText || ''], { type: 'application/pdf' });
+    }
+
+    const doc = new jsPDFClass({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 20;
+    const contentWidth = pageWidth - (margin * 2);
+    let cursorY = margin;
+
+    function ensurePageSpace(neededMm) {
+      if (cursorY + neededMm > pageHeight - margin - 10) {
+        doc.addPage();
+        cursorY = margin;
+      }
+    }
+
+    const cleanTitle = (title || 'Dokumen').replace(/\.pdf$/i, '');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.setTextColor(15, 23, 42);
+    doc.text(cleanTitle, margin, cursorY);
+    cursorY += 7;
+
+    doc.setDrawColor(56, 189, 248);
+    doc.setLineWidth(0.6);
+    doc.line(margin, cursorY, margin + contentWidth, cursorY);
+    cursorY += 8;
+
+    const lines = (markdownText || '').split('\n');
+    let inCode = false;
+    let codeBuffer = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (trimmed.startsWith('```')) {
+        if (inCode) {
+          doc.setFont('courier', 'normal');
+          doc.setFontSize(8.5);
+          doc.setTextColor(30, 41, 59);
+          for (const cLine of codeBuffer) {
+            ensurePageSpace(5);
+            doc.setFillColor(241, 245, 249);
+            doc.rect(margin, cursorY - 3.5, contentWidth, 5, 'F');
+            const splitC = doc.splitTextToSize(cLine, contentWidth - 4);
+            doc.text(splitC, margin + 2, cursorY);
+            cursorY += (splitC.length * 4.5);
+          }
+          cursorY += 3;
+          codeBuffer = [];
+          inCode = false;
+        } else {
+          inCode = true;
+          codeBuffer = [];
+        }
+        continue;
+      }
+
+      if (inCode) {
+        codeBuffer.push(line);
+        continue;
+      }
+
+      if (!trimmed) {
+        cursorY += 3;
+        continue;
+      }
+
+      if (trimmed.startsWith('# ')) {
+        ensurePageSpace(12);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.setTextColor(15, 23, 42);
+        const text = trimmed.substring(2).trim();
+        const split = doc.splitTextToSize(text, contentWidth);
+        doc.text(split, margin, cursorY);
+        cursorY += (split.length * 5.8) + 3;
+        continue;
+      }
+
+      if (trimmed.startsWith('## ')) {
+        ensurePageSpace(10);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(12);
+        doc.setTextColor(37, 99, 235);
+        const text = trimmed.substring(3).trim();
+        const split = doc.splitTextToSize(text, contentWidth);
+        doc.text(split, margin, cursorY);
+        cursorY += (split.length * 5.2) + 2.5;
+        continue;
+      }
+
+      if (trimmed.startsWith('### ')) {
+        ensurePageSpace(8);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10.5);
+        doc.setTextColor(51, 65, 85);
+        const text = trimmed.substring(4).trim();
+        const split = doc.splitTextToSize(text, contentWidth);
+        doc.text(split, margin, cursorY);
+        cursorY += (split.length * 4.8) + 2;
+        continue;
+      }
+
+      if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || trimmed.startsWith('+ ')) {
+        ensurePageSpace(6);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        doc.setTextColor(51, 65, 85);
+        const itemText = trimmed.replace(/^[-*+]\s+/, '').replace(/\*\*(.*?)\*\*/g, '$1');
+        doc.setFillColor(56, 189, 248);
+        doc.circle(margin + 2, cursorY - 1, 0.8, 'F');
+        const split = doc.splitTextToSize(itemText, contentWidth - 6);
+        doc.text(split, margin + 5, cursorY);
+        cursorY += (split.length * 4.8) + 1.5;
+        continue;
+      }
+
+      if (trimmed === '---' || trimmed === '***') {
+        ensurePageSpace(6);
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.3);
+        doc.line(margin, cursorY, margin + contentWidth, cursorY);
+        cursorY += 4;
+        continue;
+      }
+
+      ensurePageSpace(6);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(51, 65, 85);
+      const cleanPara = trimmed.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1').replace(/`([^`]+)`/g, '$1');
+      const split = doc.splitTextToSize(cleanPara, contentWidth);
+      doc.text(split, margin, cursorY);
+      cursorY += (split.length * 4.8) + 2;
+    }
+
+    const totalPages = doc.internal.getNumberOfPages();
+    for (let p = 1; p <= totalPages; p++) {
+      doc.setPage(p);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184);
+      doc.text(
+        `Dihasilkan secara otonom oleh ZOZ AI • Halaman ${p} dari ${totalPages}`,
+        pageWidth / 2,
+        pageHeight - 8,
+        { align: 'center' }
+      );
+    }
+
+    return doc.output('blob');
+  }
+
+  let mermaidDiagramCounter = 0;
+
+  function renderInteractiveMermaidCard(preElement, rawCode) {
+    if (!preElement || !rawCode) return;
+    if (preElement.dataset.mermaidRendered === 'true') return;
+    preElement.dataset.mermaidRendered = 'true';
+
+    mermaidDiagramCounter++;
+    const cardId = 'mermaid-card-' + mermaidDiagramCounter + '-' + Math.random().toString(36).substring(2, 7);
+    const diagramId = 'mermaid_svg_' + mermaidDiagramCounter + '_' + Math.random().toString(36).substring(2, 7);
+
+    let diagramTitle = 'Diagram Alur Visual';
+    const firstLine = rawCode.trim().split('\n')[0].toLowerCase();
+    if (firstLine.includes('sequencediagram')) diagramTitle = 'Sequence Diagram';
+    else if (firstLine.includes('classdiagram')) diagramTitle = 'Class Diagram';
+    else if (firstLine.includes('statediagram')) diagramTitle = 'State Diagram';
+    else if (firstLine.includes('erdiagram')) diagramTitle = 'Entity-Relationship Diagram';
+    else if (firstLine.includes('flowchart') || firstLine.includes('graph')) diagramTitle = 'Diagram Alur (Flowchart)';
+    else if (firstLine.includes('gantt')) diagramTitle = 'Gantt Chart';
+    else if (firstLine.includes('pie')) diagramTitle = 'Diagram Lingkaran (Pie Chart)';
+    else if (firstLine.includes('gitgraph')) diagramTitle = 'Git Graph';
+
+    const card = document.createElement('div');
+    card.className = 'mermaid-diagram-card';
+    card.id = cardId;
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'mermaid-toolbar';
+    toolbar.innerHTML = `
+      <div class="mermaid-title">
+        <i class="fa-solid fa-diagram-project"></i>
+        <span>${escapeHtml(diagramTitle)}</span>
+      </div>
+      <div class="mermaid-actions">
+        <button class="mermaid-tool-btn" data-action="toggle-code" title="Lihat Sumber Mermaid"><i class="fa-solid fa-code"></i></button>
+        <button class="mermaid-tool-btn" data-action="copy-code" title="Salin Kode Mermaid"><i class="fa-solid fa-clipboard"></i></button>
+        <button class="mermaid-tool-btn" data-action="download-svg" title="Unduh Gambar SVG"><i class="fa-solid fa-download"></i></button>
+        <button class="mermaid-tool-btn" data-action="zoom-out" title="Perkecil (-)"><i class="fa-solid fa-minus"></i></button>
+        <span class="mermaid-zoom-level">100%</span>
+        <button class="mermaid-tool-btn" data-action="zoom-in" title="Perbesar (+)"><i class="fa-solid fa-plus"></i></button>
+        <button class="mermaid-tool-btn" data-action="zoom-reset" title="Reset Zoom (100%)"><i class="fa-solid fa-compress"></i></button>
+      </div>
+    `;
+
+    const viewport = document.createElement('div');
+    viewport.className = 'mermaid-viewport';
+
+    const stage = document.createElement('div');
+    stage.className = 'mermaid-svg-stage';
+    stage.innerHTML = '<div style="padding:20px; color:var(--text-muted); font-size:12px;"><i class="fa-solid fa-circle-notch fa-spin"></i> Merender diagram visual...</div>';
+
+    viewport.appendChild(stage);
+
+    const codeView = document.createElement('div');
+    codeView.className = 'mermaid-code-view';
+    codeView.style.display = 'none';
+    const codePre = document.createElement('pre');
+    codePre.style.margin = '0';
+    codePre.style.borderRadius = '0';
+    const codeInner = document.createElement('code');
+    codeInner.className = 'language-mermaid';
+    codeInner.textContent = rawCode;
+    codePre.appendChild(codeInner);
+    codeView.appendChild(codePre);
+
+    card.appendChild(toolbar);
+    card.appendChild(viewport);
+    card.appendChild(codeView);
+
+    preElement.parentNode.replaceChild(card, preElement);
+
+    let zoomLevel = 1.0;
+    const zoomLabel = toolbar.querySelector('.mermaid-zoom-level');
+
+    function applyZoom(newZoom) {
+      zoomLevel = Math.max(0.4, Math.min(3.0, newZoom));
+      stage.style.transform = `scale(${zoomLevel})`;
+      if (zoomLabel) {
+        zoomLabel.textContent = Math.round(zoomLevel * 100) + '%';
+      }
+    }
+
+    let isPanning = false;
+    let startX = 0;
+    let startY = 0;
+    let scrollLeft = 0;
+    let scrollTop = 0;
+
+    viewport.addEventListener('mousedown', (e) => {
+      if (e.target.closest('.mermaid-toolbar') || e.target.closest('.mermaid-tool-btn')) return;
+      isPanning = true;
+      viewport.classList.add('panning');
+      startX = e.pageX - viewport.offsetLeft;
+      startY = e.pageY - viewport.offsetTop;
+      scrollLeft = viewport.scrollLeft;
+      scrollTop = viewport.scrollTop;
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (isPanning) {
+        isPanning = false;
+        viewport.classList.remove('panning');
+      }
+    });
+
+    viewport.addEventListener('mousemove', (e) => {
+      if (!isPanning) return;
+      e.preventDefault();
+      const x = e.pageX - viewport.offsetLeft;
+      const y = e.pageY - viewport.offsetTop;
+      viewport.scrollLeft = scrollLeft - (x - startX);
+      viewport.scrollTop = scrollTop - (y - startY);
+    });
+
+    viewport.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        isPanning = true;
+        startX = e.touches[0].pageX - viewport.offsetLeft;
+        startY = e.touches[0].pageY - viewport.offsetTop;
+        scrollLeft = viewport.scrollLeft;
+        scrollTop = viewport.scrollTop;
+      }
+    }, { passive: true });
+
+    viewport.addEventListener('touchmove', (e) => {
+      if (isPanning && e.touches.length === 1) {
+        const x = e.touches[0].pageX - viewport.offsetLeft;
+        const y = e.touches[0].pageY - viewport.offsetTop;
+        viewport.scrollLeft = scrollLeft - (x - startX);
+        viewport.scrollTop = scrollTop - (y - startY);
+      }
+    }, { passive: true });
+
+    viewport.addEventListener('touchend', () => {
+      isPanning = false;
+    });
+
+    toolbar.addEventListener('click', (e) => {
+      const btn = e.target.closest('.mermaid-tool-btn');
+      if (!btn) return;
+      e.stopPropagation();
+      const action = btn.dataset.action;
+
+      if (action === 'zoom-in') {
+        applyZoom(zoomLevel + 0.15);
+      } else if (action === 'zoom-out') {
+        applyZoom(zoomLevel - 0.15);
+      } else if (action === 'zoom-reset') {
+        applyZoom(1.0);
+        viewport.scrollLeft = Math.max(0, (stage.scrollWidth - viewport.clientWidth) / 2);
+        viewport.scrollTop = 0;
+      } else if (action === 'toggle-code') {
+        const isCodeVisible = codeView.style.display !== 'none';
+        if (isCodeVisible) {
+          codeView.style.display = 'none';
+          viewport.style.display = 'flex';
+          btn.classList.remove('active');
+          btn.title = 'Lihat Sumber Mermaid';
+        } else {
+          codeView.style.display = 'block';
+          viewport.style.display = 'none';
+          btn.classList.add('active');
+          btn.title = 'Lihat Diagram Visual';
+          if (window.hljs) {
+            try { hljs.highlightElement(codeInner); } catch (_) {}
+          }
+        }
+      } else if (action === 'copy-code') {
+        copyTextToClipboard(rawCode, () => {
+          showToast('Kode sumber diagram Mermaid berhasil disalin!');
+          AudioEngine.snap();
+        });
+      } else if (action === 'download-svg') {
+        const svgEl = stage.querySelector('svg');
+        if (!svgEl) {
+          showToast('Diagram belum siap diunduh.', 'warning');
+          return;
+        }
+        try {
+          const svgData = new XMLSerializer().serializeToString(svgEl);
+          const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+          const svgUrl = URL.createObjectURL(svgBlob);
+          const downloadLink = document.createElement('a');
+          downloadLink.href = svgUrl;
+          downloadLink.download = (diagramTitle.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'diagram') + '.svg';
+          document.body.appendChild(downloadLink);
+          downloadLink.click();
+          downloadLink.remove();
+          setTimeout(() => URL.revokeObjectURL(svgUrl), 2000);
+          showToast('Diagram SVG berhasil diunduh!');
+          AudioEngine.success();
+        } catch (err) {
+          showToast('Gagal mengunduh SVG: ' + err.message, 'error');
+        }
+      }
+    });
+
+    if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
+      window.mermaid.render(diagramId, rawCode).then((result) => {
+        if (result && result.svg) {
+          stage.innerHTML = result.svg;
+          const svgNode = stage.querySelector('svg');
+          if (svgNode) {
+            svgNode.style.maxWidth = '100%';
+            svgNode.style.height = 'auto';
+            svgNode.style.display = 'block';
+          }
+          setTimeout(() => {
+            viewport.scrollLeft = Math.max(0, (stage.scrollWidth - viewport.clientWidth) / 2);
+          }, 50);
+        }
+      }).catch((renderErr) => {
+        console.warn('Gagal merender diagram mermaid:', renderErr);
+        stage.innerHTML = `
+          <div class="mermaid-render-error">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            <div>
+              <strong>Gagal merender diagram:</strong> Sintaks Mermaid tidak valid.
+              <div style="font-size:11px; margin-top:4px; opacity:0.8;">Klik tombol &lt;/&gt; di atas untuk melihat atau mengedit kode sumber diagram.</div>
+            </div>
+          </div>
+        `;
+      });
+    } else {
+      stage.innerHTML = `
+        <div class="mermaid-render-error">
+          <i class="fa-solid fa-circle-exclamation"></i>
+          <div>Modul Mermaid belum dimuat di browser. Klik tombol &lt;/&gt; untuk melihat kode.</div>
+        </div>
+      `;
+    }
+  }
+
   // ==================== UNIVERSAL CODE BLOCK ENHANCER (Syntax & Copy Button) ====================
   function enhanceCodeBlocks(container = document) {
     if (!container) return;
@@ -3063,8 +3795,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // Process all PRE elements within container
     const preElements = container.querySelectorAll('pre');
     preElements.forEach(pre => {
-      // Avoid duplicate headers
-      if (pre.querySelector('.code-header')) return;
+      // Avoid duplicate headers or already rendered mermaid cards
+      if (pre.querySelector('.code-header') || pre.closest('.mermaid-diagram-card')) return;
 
       const codeBlock = pre.querySelector('code');
       let lang = 'CODE';
@@ -3081,6 +3813,20 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         if (langMatch && langMatch[1]) {
           lang = langMatch[1].toUpperCase();
         }
+      }
+
+      // Deteksi Diagram Mermaid Visual
+      const rawCode = (codeBlock ? (codeBlock.innerText || codeBlock.textContent || '') : (pre.innerText || '')).trim();
+      const isMermaid = lang === 'MERMAID' || (
+        !pre.dataset.mermaidRendered &&
+        (rawCode.startsWith('graph ') || rawCode.startsWith('flowchart ') || rawCode.startsWith('sequenceDiagram') ||
+         rawCode.startsWith('classDiagram') || rawCode.startsWith('stateDiagram') || rawCode.startsWith('erDiagram') ||
+         rawCode.startsWith('gantt') || rawCode.startsWith('pie ') || rawCode.startsWith('gitGraph'))
+      );
+
+      if (isMermaid) {
+        renderInteractiveMermaidCard(pre, rawCode);
+        return;
       }
 
       // Create code header bar with Copy Button
@@ -6204,20 +6950,36 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   const TICK3 = String.fromCharCode(96).repeat(3);
 
   function getFileStudioDirective() {
-    return `### INSTRUKSI SISTEM: AI FILE STUDIO (Pembuatan & Pengunduhan File)
+    return `### INSTRUKSI SISTEM: AI FILE STUDIO & DIAGRAM VISUAL OTONOM
 
-Saat pengguna meminta sebuah berkas — website, script (.bat/.py/.sh/.ps1), konfigurasi, dokumen, atau file apa pun — tulis isinya di dalam blok penanda ini:
-
+1. PEMBUATAN & PENGEDITAN BERKAS / DOKUMEN:
+Saat pengguna meminta sebuah berkas — website, script (.bat/.py/.sh/.ps1), konfigurasi, atau dokumen:
 <<<ZOZ_FILE name="nama-file.ekstensi" mime="tipe/mime" lang="bahasa">
 isi lengkap file, siap pakai, tanpa potongan
 <<<END_ZOZ_FILE>>>
 
+KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
+- Jika pengguna meminta berkas Word (.docx) atau PDF (.pdf), gunakan:
+  <<<ZOZ_FILE name="Dokumen.docx" mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document" lang="markdown">>>
+  atau
+  <<<ZOZ_FILE name="Dokumen.pdf" mime="application/pdf" lang="markdown">>>
+- Tulis isinya dalam format Markdown terstruktur yang rapi (judul #, ##, ###, bullet points -, bold **teks**, pemisah ---).
+- Mesin ZOZ Document Compiler akan secara otomatis mengompilasi teks Markdown ini menjadi berkas biner murni .docx (Office Open XML) atau .pdf (Adobe Acrobat) yang valid dan siap langsung dibuka di Microsoft Word / Acrobat Reader di laptop maupun HP pengguna!
+
+2. PEMBUATAN DIAGRAM VISUAL INTERAKTIF (MERMAID):
+- Saat pengguna meminta diagram alur (flowchart), alur logika, urutan proses (sequence diagram), struktur kelas (class diagram), ERD basis data, atau diagram arsitektur sistem:
+- Gunakan blok kode standar Mermaid:
+` + TICK3 + `mermaid
+flowchart TD
+    A[Mulai] --> B{Validasi}
+    B -- Ya --> C[Selesai]
+    B -- Tidak --> D[Perbaiki]
+` + TICK3 + `
+- Sistem ZOZ Router akan secara instan merender kode Mermaid tersebut menjadi Diagram Visual Interaktif dengan kontrol Zoom In/Out, Panning Drag/Touch, Tombol Unduh SVG, dan Switch Kode Sumber.
+
 Aturan wajib:
-- name : nama file final yang bisa diunduh (contoh: index.html, hapus-sampah.bat, backup.ps1, app.py)
-- mime : text/html, text/plain, text/x-python, application/json, text/css, text/javascript, dll.
-- lang : html, python, batch, powershell, javascript, css, json, dll. (untuk syntax highlight)
-- Isi file HARUS lengkap, valid, dan langsung bisa dijalankan/dibuka — bukan pseudocode atau potongan.
-- SETELAH blok file, tulis penjelasan singkat dalam Bahasa Indonesia: tujuan program, cara kerja tiap bagian, dan cara memakainya.
+- name : nama file final yang bisa diunduh atau ditulis langsung ke direktori pengguna.
+- Isi berkas HARUS lengkap, valid, dan langsung bisa dijalankan/dibuka — bukan pseudocode atau potongan.
 - Jangan menyalin ulang isi file di luar blok penanda, agar tampilan obrolan tetap rapi.`;
   }
 
@@ -6226,7 +6988,7 @@ Aturan wajib:
     if (!text || typeof text !== 'string') return false;
     const t = text.toLowerCase();
     const wants = /\b(?:buatkan|buat|bikin|bikinkan|tolong buat|generate|create|write|tulis|simpan sebagai|unduh|download|export|ekspor|saya butuh file|saya minta file|butuh file|perlukan file|bikinkan file|edit|mengedit|mengdit|modifikasi|memodifikasi|ubah|mengubah|perbarui|memperbarui|update|revisi|merevisi|perbaiki|memperbaiki|tambahkan ke|tambah|ganti)\b/i.test(t);
-    const target = /\b(?:file|berkas|dokumen|script|skrip|kode program|program|website|situs|halaman web|landing|aplikasi|utilitas|tool|bot|konfigurasi|template|lampiran|readme|kodenya|skripnya|filenya|dokumennya)\b|\.(?:html?|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|xlsx|ipynb)\b/i.test(t);
+    const target = /\b(?:file|berkas|dokumen|script|skrip|kode program|program|website|situs|halaman web|landing|aplikasi|utilitas|tool|bot|konfigurasi|template|lampiran|readme|kodenya|skripnya|filenya|dokumennya|diagram|flowchart|alur|arsitektur visual)\b|\.(?:html?|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|pdf|xlsx|ipynb)\b/i.test(t);
     // Jika direktori lokal aktif dan pengguna menyebut nama berkas yang ada di direktori
     const workspaceMatch = STATE.localWorkspace.enabled && (STATE.localWorkspace.files || []).some(f => {
       const baseName = f.name.replace(/\.[^/.]+$/, '').toLowerCase();
@@ -6433,10 +7195,23 @@ Aturan wajib:
     openModal('aiFileStudioModal');
   }
 
-  function downloadAIFile(file) {
+  async function downloadAIFile(file) {
     if (!file) return;
     try {
-      const blob = new Blob([file.content || ''], { type: (String(file.mime || 'text/plain')) + ';charset=utf-8' });
+      const fileNameLower = (file.name || '').toLowerCase();
+      const rawText = file.rawContent || file.content || '';
+      let blob;
+
+      if (fileNameLower.endsWith('.docx')) {
+        showToast('⚙ Mengompilasi dokumen Word (.docx)...', 'info');
+        blob = await compileMarkdownToDocxBlob(rawText, file.name);
+      } else if (fileNameLower.endsWith('.pdf')) {
+        showToast('⚙ Mengompilasi dokumen PDF (.pdf)...', 'info');
+        blob = await compileMarkdownToPdfBlob(rawText, file.name);
+      } else {
+        blob = new Blob([file.content || ''], { type: (String(file.mime || 'text/plain')) + ';charset=utf-8' });
+      }
+
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -16905,6 +17680,27 @@ Aturan:
     const normalizedPath = cleanName.replace(/^[./\\]+/, '');
     const parts = normalizedPath.split(/[/\\]/);
     const baseFileName = parts[parts.length - 1];
+    const isDocx = baseFileName.toLowerCase().endsWith('.docx');
+    const isPdf = baseFileName.toLowerCase().endsWith('.pdf');
+
+    let binaryBlob = null;
+    let base64Payload = null;
+
+    if (isDocx) {
+      try {
+        binaryBlob = await compileMarkdownToDocxBlob(cleanContent, baseFileName);
+        base64Payload = await blobToBase64(binaryBlob);
+      } catch (compileErr) {
+        console.warn('Gagal kompilasi DOCX blob:', compileErr);
+      }
+    } else if (isPdf) {
+      try {
+        binaryBlob = await compileMarkdownToPdfBlob(cleanContent, baseFileName);
+        base64Payload = await blobToBase64(binaryBlob);
+      } catch (compileErr) {
+        console.warn('Gagal kompilasi PDF blob:', compileErr);
+      }
+    }
 
     const existingFile = findWorkspaceFile(cleanName) || findWorkspaceFile(normalizedPath) || findWorkspaceFile(baseFileName);
     const isEdit = Boolean(options.isEdit || existingFile);
@@ -16924,7 +17720,9 @@ Aturan:
       // 1. CLAUDE-CODE PARITY: Tulis Langsung ke Disk Fisik Server Proyek jika Backend Tersedia
       if (STATE.localWorkspace.platform === 'server-fs' || (ServerWorkspaceAPI && ServerWorkspaceAPI.isAvailable)) {
         try {
-          const res = await ServerWorkspaceAPI.writeFile(normalizedPath, cleanContent, options.note || (isEdit ? 'Modifikasi berkas oleh AI' : 'Dokumen baru'));
+          const writeContent = base64Payload || cleanContent;
+          const writeEncoding = base64Payload ? 'base64' : 'utf8';
+          const res = await ServerWorkspaceAPI.writeFile(normalizedPath, writeContent, options.note || (isEdit ? 'Modifikasi berkas oleh AI' : 'Dokumen baru'), writeEncoding);
           if (res && res.success) {
             const existingIdx = (STATE.localWorkspace.files || []).findIndex(f =>
               f.name === cleanName || f.path === cleanName || f.name === baseFileName || f.path === normalizedPath
@@ -16932,11 +17730,11 @@ Aturan:
             const newEntry = {
               name: baseFileName,
               path: normalizedPath,
-              size: res.size || cleanContent.length,
-              type: 'text/plain',
+              size: res.size || (binaryBlob ? binaryBlob.size : cleanContent.length),
+              type: isDocx ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : (isPdf ? 'application/pdf' : 'text/plain'),
               lastModified: res.lastModified || Date.now(),
               handle: null,
-              rawFile: null,
+              rawFile: binaryBlob ? new File([binaryBlob], baseFileName, { type: binaryBlob.type }) : null,
               content: cleanContent
             };
             if (existingIdx >= 0) {
@@ -16964,7 +17762,11 @@ Aturan:
         try {
           const fileHandle = await resolveFileHandleFromPath(STATE.localWorkspace.dirHandle, normalizedPath, true);
           const writable = await fileHandle.createWritable();
-          await writable.write(cleanContent);
+          if (binaryBlob) {
+            await writable.write(binaryBlob);
+          } else {
+            await writable.write(cleanContent);
+          }
           await writable.close();
 
           const newFile = await fileHandle.getFile();
@@ -16975,7 +17777,7 @@ Aturan:
             name: baseFileName,
             path: normalizedPath,
             size: newFile.size,
-            type: newFile.type || 'text/plain',
+            type: newFile.type || (isDocx ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : (isPdf ? 'application/pdf' : 'text/plain')),
             lastModified: Date.now(),
             handle: fileHandle,
             rawFile: newFile,
@@ -16998,8 +17800,8 @@ Aturan:
         }
       }
 
-      const blob = new Blob([cleanContent], { type: 'text/plain;charset=utf-8' });
-      const rawFile = new File([blob], baseFileName, { type: 'text/plain', lastModified: Date.now() });
+      const blob = binaryBlob || new Blob([cleanContent], { type: 'text/plain;charset=utf-8' });
+      const rawFile = new File([blob], baseFileName, { type: blob.type || 'text/plain', lastModified: Date.now() });
       const existingIdx = (STATE.localWorkspace.files || []).findIndex(f =>
         f.name === cleanName || f.path === cleanName || f.name === baseFileName || f.path === normalizedPath
       );
@@ -17007,7 +17809,7 @@ Aturan:
         name: baseFileName,
         path: normalizedPath,
         size: blob.size,
-        type: 'text/plain',
+        type: blob.type || 'text/plain',
         lastModified: Date.now(),
         handle: null,
         rawFile: rawFile,
@@ -22542,6 +23344,9 @@ Aturan:
 
     console.log('⚡ ZOZ ROUTER INITIALIZED // READY IN 0MS');
 
+    // Inisialisasi engine Mermaid untuk diagram visual interaktif
+    initMermaidEngine();
+
     // 4. NON-BLOCKING ASYNCHRONOUS BACKGROUND TASKS (Storage sync & health checks)
     initBackgroundTasks(isTabReload, savedActiveId);
   }
@@ -22580,7 +23385,10 @@ Aturan:
     findWorkspaceFile,
     WorkspaceDB,
     extractGeneratedFiles,
-    renderMessageFiles
+    renderMessageFiles,
+    compileMarkdownToDocxBlob,
+    compileMarkdownToPdfBlob,
+    initMermaidEngine
   };
 
   // Start on DOM ready (safeguarded against post-DOMContentLoaded script execution)

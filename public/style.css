@@ -9919,6 +9919,129 @@ body.page-paused *::after {
   color: #f87171;
 }
 
+/* ==================== INTERACTIVE MERMAID DIAGRAM VIEWER ==================== */
+.mermaid-diagram-card {
+  margin: 14px 0;
+  background: rgba(13, 17, 23, 0.95);
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mermaid-diagram-card:hover {
+  border-color: rgba(0, 240, 255, 0.5);
+  box-shadow: 0 6px 24px rgba(0, 240, 255, 0.15);
+}
+
+.mermaid-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: rgba(22, 27, 34, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.8rem;
+  color: var(--text-main);
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mermaid-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--neon-cyan);
+}
+
+.mermaid-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mermaid-zoom-level {
+  font-family: var(--font-code);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  min-width: 44px;
+  text-align: center;
+}
+
+.mermaid-tool-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-main);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.mermaid-tool-btn:hover {
+  background: rgba(0, 240, 255, 0.2);
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+}
+
+.mermaid-viewport {
+  position: relative;
+  overflow: auto;
+  max-height: 480px;
+  min-height: 160px;
+  padding: 20px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: radial-gradient(circle at center, rgba(16, 24, 39, 0.8) 0%, rgba(10, 14, 20, 0.98) 100%);
+  cursor: grab;
+  user-select: none;
+}
+
+.mermaid-viewport:active {
+  cursor: grabbing;
+}
+
+.mermaid-svg-stage {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  transition: transform 0.15s ease-out;
+  transform-origin: center center;
+  max-width: 100%;
+}
+
+.mermaid-svg-stage svg {
+  max-width: none;
+  height: auto;
+  display: block;
+}
+
+.mermaid-raw-code {
+  margin: 0 !important;
+  border-radius: 0 !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.mermaid-render-error {
+  padding: 16px;
+  color: #f87171;
+  font-size: 0.82rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(239, 68, 68, 0.1);
+}
+
 /* ==================== INTERACTIVE TASK TRACKER & FILE SNAPSHOTS (v257) ==================== */
 
 /* Task Tracker Floating Card */
