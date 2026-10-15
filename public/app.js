@@ -3557,15 +3557,60 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   function getCleanMermaidCode(raw) {
     if (!raw) return '';
     let code = String(raw).trim();
-    // Unescape HTML entities yang dihasilkan oleh Markdown parser
+
+    // 1. Unescape HTML entities yang dihasilkan oleh Markdown parser
     code = code
       .replace(/&gt;/g, '>')
       .replace(/&lt;/g, '<')
       .replace(/&amp;/g, '&')
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'");
-    // Buang code fence markdown jika ikut terbawa
-    code = code.replace(/^```(?:mermaid)?\s*/i, '').replace(/```\s*$/i, '').trim();
+
+    // 2. Buang code fence markdown jika ikut terbawa
+    code = code.replace(/^```(?:mermaid|svg)?\s*/i, '').replace(/```\s*$/i, '').trim();
+
+    // 3. Ekstrak dan bersihkan baris title agar tidak merusak parser flowchart/graph
+    let extractedTitle = '';
+    const lines = code.split('\n');
+    const filteredLines = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      const titleMatch = trimmed.match(/^(?:accTitle|title)[:\s]+(.+)$/i);
+      if (titleMatch && titleMatch[1]) {
+        if (!extractedTitle) {
+          extractedTitle = titleMatch[1].replace(/["']/g, '').trim();
+        }
+        continue; // Buang baris title mentah dari badan diagram
+      }
+      filteredLines.push(line);
+    }
+    code = filteredLines.join('\n').trim();
+
+    // 4. Pastikan header jenis diagram valid (default: flowchart TD jika tanpa header)
+    const trimmedCode = code.trim();
+    const hasHeader = /^(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|mindmap|timeline|quadrantChart|C4Context|journey)\b/i.test(trimmedCode);
+    if (!hasHeader) {
+      code = 'flowchart TD\n' + code;
+    }
+
+    // 5. Sematkan frontmatter resmi jika ada judul diagram
+    if (extractedTitle && !code.startsWith('---')) {
+      code = `---\ntitle: "${extractedTitle}"\n---\n` + code;
+    }
+
+    // 6. Otomatis beri tanda kutip pada label node yang memuat tanda kurung atau simbol tanpa kutip
+    // Contoh: A[Persepsi Lingkungan (Sensor/Input)] -> A["Persepsi Lingkungan (Sensor/Input)"]
+    code = code.replace(/(\[|\(\[|\{\{|\{)([^"\[\]\(\)\{\}\n]*\([^\n"\[\]\(\)\{\}]+\)[^"\[\]\(\)\{\}\n]*)(\]|\)\]|\}\}|\})/g, (m, open, text, close) => {
+      return `${open}"${text.replace(/"/g, "'")}"${close}`;
+    });
+
+    // 7. Perbaiki panah tunggal " -> " menjadi " --> " pada flowchart
+    if (/^(?:---\s*\ntitle:[\s\S]*?---\s*\n)?(?:flowchart|graph)\b/i.test(code)) {
+      code = code.replace(/([a-zA-Z0-9_\)\]\}])\s*->\s*([a-zA-Z0-9_\[\(\{])/g, '$1 --> $2');
+    }
+
     return code;
   }
 
@@ -7206,8 +7251,8 @@ isi lengkap file, siap pakai, tanpa potongan
 
 ATURAN WAJIB PENAMAAN BERKAS (AI HARUS MENENTUKAN NAMA SPESIFIK & DESKRIPTIF):
 - AI HARUS menentukan nama berkas yang spesifik, relevan, dan sangat deskriptif sesuai topik/isi yang diminta pengguna!
-- Untuk Diagram Mermaid: Tentukan nama spesifik seperti "Alur_Verifikasi_Email.mermaid", "Arsitektur_Sistem_Microservices.mermaid", "ERD_Database_Toko.mermaid", "Alur_Registrasi_Pengguna.mermaid". DILARANG KERAS menggunakan nama generik seperti "file.mermaid" atau "diagram.mermaid"!
-- Untuk Dokumen Word/PDF: Tentukan nama spesifik seperti "Panduan_Implementasi_API.docx", "Laporan_Analisis_Sistem.pdf", "Rencana_Proyek_2026.docx". DILARANG KERAS menggunakan nama generik seperti "file.docx", "file.pdf", "Dokumen.docx"!
+- Untuk Diagram Visual: Gunakan ekstensi .svg seperti "Alur_Verifikasi_Email.svg", "Arsitektur_Logika_AI_Agent.svg", "Arsitektur_Sistem.svg", "ERD_Database_Toko.svg". DILARANG KERAS menggunakan ekstensi .mermaid atau nama generik seperti "file.svg" atau "diagram.svg"!
+- Untuk Dokumen Word/PDF: Gunakan "Panduan_Implementasi_API.docx", "Laporan_Analisis_Sistem.pdf", "Rencana_Proyek_2026.docx". DILARANG KERAS menggunakan nama generik seperti "file.docx", "file.pdf", "Dokumen.docx"!
 - Jangan gunakan spasi pada nama file, gunakan underscore (_) atau dash (-).
 
 KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
@@ -7218,20 +7263,21 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
 - Tulis isinya dalam format Markdown terstruktur yang rapi (judul #, ##, ###, bullet points -, bold **teks**, tabel, pemisah ---).
 - Mesin ZOZ Document Compiler akan secara otomatis mengompilasi teks Markdown ini menjadi berkas biner murni .docx (Office Open XML) atau .pdf (Adobe Acrobat) yang valid dan siap langsung dibuka di Microsoft Word / Acrobat Reader di laptop maupun HP pengguna!
 
-2. PEMBUATAN DIAGRAM VISUAL INTERAKTIF (MERMAID):
+2. PEMBUATAN DIAGRAM VISUAL INTERAKTIF (.SVG):
 - Saat pengguna meminta diagram alur (flowchart), alur logika, urutan proses (sequence diagram), struktur kelas (class diagram), ERD basis data, mindmap, atau diagram arsitektur sistem:
-- AI WAJIB menyertakan baris judul diagram pada baris pertama/kedua (contoh: "title Alur Verifikasi Email" atau "accTitle: Alur Verifikasi Email") dan membungkusnya dalam blok ZOZ_FILE dengan nama berkas spesifik:
-<<<ZOZ_FILE name="Alur_Verifikasi_Email.mermaid" mime="text/vnd.mermaid" lang="mermaid">
+- AI membungkusnya dalam blok ZOZ_FILE berekstensi .svg:
+<<<ZOZ_FILE name="Arsitektur_Logika_AI_Agent.svg" mime="image/svg+xml" lang="mermaid">
 flowchart TD
-    title Alur Verifikasi Email
-    A[Mulai: Pengguna Daftar] --> B{Validasi Data}
-    B -- Valid --> C[Kirim Email Verifikasi]
-    B -- Tidak Valid --> D[Tampilkan Pesan Error]
+    A["Mulai: Input Pengguna"] --> B{"Validasi Data"}
+    B -- Valid --> C["Proses Logika AI Agent"]
+    B -- Tidak Valid --> D["Tampilkan Pesan Error"]
 <<<END_ZOZ_FILE>>>
-- Pengguna juga dapat menerima blok standar Mermaid ` + TICK3 + `mermaid ... ` + TICK3 + `. Sistem ZOZ Router akan secara instan merender visual diagram interaktif dengan zoom, pan, switch kode sumber, dan tombol unduh.
+- Format penulisan teks Mermaid:
+  * Selalu gunakan tanda kutip dua ["..."] pada label teks kotak yang memuat tanda kurung, tanda titik dua, atau garis miring.
+- Pengguna juga dapat menerima blok standar Mermaid ` + TICK3 + `mermaid ... ` + TICK3 + `. Sistem ZOZ Router akan secara instan merender visual diagram interaktif dengan zoom, pan, switch kode sumber, dan tombol unduh SVG.
 
 Aturan wajib:
-- name : nama file final yang deskriptif dan spesifik.
+- name : nama file final yang deskriptif dan spesifik berakhiran .svg / .docx / .pdf / .html / .js / dsb.
 - Isi berkas HARUS lengkap, valid, dan langsung bisa dijalankan/dibuka — bukan pseudocode atau potongan.
 - Jangan menyalin ulang isi file di luar blok penanda, agar tampilan obrolan tetap rapi.`;
   }
@@ -7241,7 +7287,7 @@ Aturan wajib:
     if (!text || typeof text !== 'string') return false;
     const t = text.toLowerCase();
     const wants = /\b(?:buatkan|buat|bikin|bikinkan|tolong buat|generate|create|write|tulis|simpan sebagai|unduh|download|export|ekspor|saya butuh file|saya minta file|butuh file|perlukan file|bikinkan file|edit|mengedit|mengdit|modifikasi|memodifikasi|ubah|mengubah|perbarui|memperbarui|update|revisi|merevisi|perbaiki|memperbaiki|tambahkan ke|tambah|ganti)\b/i.test(t);
-    const target = /\b(?:file|berkas|dokumen|script|skrip|kode program|program|website|situs|halaman web|landing|aplikasi|utilitas|tool|bot|konfigurasi|template|lampiran|readme|kodenya|skripnya|filenya|dokumennya|diagram|flowchart|alur|arsitektur visual)\b|\.(?:html?|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|pdf|xlsx|ipynb)\b/i.test(t);
+    const target = /\b(?:file|berkas|dokumen|script|skrip|kode program|program|website|situs|halaman web|landing|aplikasi|utilitas|tool|bot|konfigurasi|template|lampiran|readme|kodenya|skripnya|filenya|dokumennya|diagram|flowchart|alur|arsitektur visual)\b|\.(?:html?|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|pdf|xlsx|ipynb|svg)\b/i.test(t);
     // Jika direktori lokal aktif dan pengguna menyebut nama berkas yang ada di direktori
     const workspaceMatch = STATE.localWorkspace.enabled && (STATE.localWorkspace.files || []).some(f => {
       const baseName = f.name.replace(/\.[^/.]+$/, '').toLowerCase();
@@ -7258,19 +7304,19 @@ Aturan wajib:
 
   function guessMimeFromName(name) {
     const ext = (String(name).split('.').pop() || '').toLowerCase();
-    const map = { html: 'text/html', htm: 'text/html', css: 'text/css', js: 'text/javascript', mjs: 'text/javascript', jsx: 'text/plain', ts: 'text/plain', py: 'text/x-python', bat: 'application/bat', cmd: 'application/bat', ps1: 'text/plain', sh: 'application/x-sh', bash: 'application/x-sh', json: 'application/json', yaml: 'text/yaml', yml: 'text/yaml', xml: 'application/xml', sql: 'text/plain', csv: 'text/csv', md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', log: 'text/plain', php: 'text/x-php', java: 'text/plain', c: 'text/plain', cpp: 'text/plain', go: 'text/plain', toml: 'text/plain', ini: 'text/plain', conf: 'text/plain', mermaid: 'text/vnd.mermaid', mmd: 'text/vnd.mermaid', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pdf: 'application/pdf' };
+    const map = { html: 'text/html', htm: 'text/html', css: 'text/css', js: 'text/javascript', mjs: 'text/javascript', jsx: 'text/plain', ts: 'text/plain', py: 'text/x-python', bat: 'application/bat', cmd: 'application/bat', ps1: 'text/plain', sh: 'application/x-sh', bash: 'application/x-sh', json: 'application/json', yaml: 'text/yaml', yml: 'text/yaml', xml: 'application/xml', sql: 'text/plain', csv: 'text/csv', md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', log: 'text/plain', php: 'text/x-php', java: 'text/plain', c: 'text/plain', cpp: 'text/plain', go: 'text/plain', toml: 'text/plain', ini: 'text/plain', conf: 'text/plain', svg: 'image/svg+xml', mermaid: 'image/svg+xml', mmd: 'image/svg+xml', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pdf: 'application/pdf' };
     return map[ext] || 'text/plain';
   }
 
   function guessLangFromName(name) {
     const ext = (String(name).split('.').pop() || '').toLowerCase();
-    const map = { html: 'html', htm: 'html', css: 'css', js: 'javascript', mjs: 'javascript', jsx: 'javascript', ts: 'typescript', py: 'python', bat: 'batch', ps1: 'powershell', sh: 'shell', bash: 'shell', json: 'json', yaml: 'yaml', yml: 'yaml', xml: 'xml', sql: 'sql', md: 'markdown', markdown: 'markdown', php: 'php', java: 'java', c: 'c', cpp: 'cpp', go: 'go', csv: 'csv', txt: 'text', mermaid: 'mermaid', mmd: 'mermaid', docx: 'markdown', pdf: 'markdown' };
+    const map = { html: 'html', htm: 'html', css: 'css', js: 'javascript', mjs: 'javascript', jsx: 'javascript', ts: 'typescript', py: 'python', bat: 'batch', ps1: 'powershell', sh: 'shell', bash: 'shell', json: 'json', yaml: 'yaml', yml: 'yaml', xml: 'xml', sql: 'sql', md: 'markdown', markdown: 'markdown', php: 'php', java: 'java', c: 'c', cpp: 'cpp', go: 'go', csv: 'csv', txt: 'text', svg: 'mermaid', mermaid: 'mermaid', mmd: 'mermaid', docx: 'markdown', pdf: 'markdown' };
     return map[ext] || (ext || 'text');
   }
 
   function guessFileNameFromLang(lang, body = '') {
     const cleanLang = String(lang || '').toLowerCase().trim();
-    const isMermaid = cleanLang === 'mermaid' || cleanLang === 'mmd' || (body && (body.includes('flowchart') || body.includes('sequenceDiagram') || body.includes('classDiagram') || body.includes('stateDiagram') || body.includes('erDiagram') || body.includes('graph ') || body.includes('gitGraph') || body.includes('mindmap')));
+    const isMermaid = cleanLang === 'mermaid' || cleanLang === 'mmd' || cleanLang === 'svg' || (body && (body.includes('flowchart') || body.includes('sequenceDiagram') || body.includes('classDiagram') || body.includes('stateDiagram') || body.includes('erDiagram') || body.includes('graph ') || body.includes('gitGraph') || body.includes('mindmap')));
 
     if (isMermaid) {
       const lines = String(body || '').split('\n');
@@ -7279,7 +7325,7 @@ Aturan wajib:
         const m = t.match(/^(?:accTitle|title)[:\s]+(.+)$/i);
         if (m && m[1]) {
           const safe = m[1].replace(/[^a-zA-Z0-9_\-\s]/g, '').trim().replace(/\s+/g, '_');
-          if (safe.length >= 3) return safe + '.mermaid';
+          if (safe.length >= 3) return safe + '.svg';
         }
       }
       // Ekstrak konteks dari kata kunci di dalam diagram
@@ -7291,11 +7337,12 @@ Aturan wajib:
       else if (bLow.includes('bayar') || bLow.includes('payment') || bLow.includes('checkout') || bLow.includes('transaksi')) topic = 'Alur_Pembayaran_Checkout';
       else if (bLow.includes('database') || bLow.includes('tabel') || bLow.includes('entity') || bLow.includes('erd')) topic = 'Diagram_Relasi_Database';
       else if (bLow.includes('arsitektur') || bLow.includes('microservice') || bLow.includes('server') || bLow.includes('gateway')) topic = 'Arsitektur_Sistem';
+      else if (bLow.includes('agent') || bLow.includes('logika')) topic = 'Arsitektur_Logika_AI_Agent';
       else if (bLow.includes('sequencediagram')) topic = 'Diagram_Interaksi_Sequence';
       else if (bLow.includes('classdiagram')) topic = 'Diagram_Struktur_Class';
       else if (bLow.includes('flowchart') || bLow.includes('graph')) topic = 'Diagram_Alur_Logika';
-      else topic = 'Diagram_Alur_' + Date.now().toString(36).slice(-4).toUpperCase();
-      return topic + '.mermaid';
+      else topic = 'Diagram_Visual_' + Date.now().toString(36).slice(-4).toUpperCase();
+      return topic + '.svg';
     }
 
     const map = {
@@ -7307,25 +7354,34 @@ Aturan wajib:
       java: 'Main.java', c: 'main.c', cpp: 'main.cpp', go: 'main.go', csv: 'data.csv',
       markdown: 'README.md', md: 'README.md', text: 'catatan.txt', txt: 'catatan.txt',
       docx: 'Dokumen_Laporan.docx', pdf: 'Dokumen_Laporan.pdf',
-      mermaid: 'Diagram_Alur_Sistem.mermaid'
+      svg: 'Diagram_Alur_Sistem.svg', mermaid: 'Diagram_Alur_Sistem.svg'
     };
     return map[cleanLang] || ('berkas_' + Date.now().toString(36).slice(-4) + '.' + (cleanLang || 'txt'));
   }
 
   function sanitizeSmartFileName(name, lang, content) {
     let cleanName = String(name || '').trim();
+
+    // Pastikan berkas diagram menggunakan ekstensi .svg, bukan .mermaid atau .mmd
+    if (cleanName.endsWith('.mermaid')) {
+      cleanName = cleanName.slice(0, -8) + '.svg';
+    } else if (cleanName.endsWith('.mmd')) {
+      cleanName = cleanName.slice(0, -4) + '.svg';
+    }
+
     const lower = cleanName.toLowerCase();
     const isGeneric = !cleanName ||
+      lower === 'file.svg' || lower === 'diagram.svg' || lower === 'chart.svg' || lower === 'untitled.svg' ||
       lower === 'file.mermaid' || lower === 'diagram.mermaid' || lower === 'chart.mermaid' || lower === 'untitled.mermaid' ||
       lower === 'file.docx' || lower === 'dokumen.docx' || lower === 'document.docx' ||
       lower === 'file.pdf' || lower === 'dokumen.pdf' || lower === 'document.pdf' ||
       lower === 'file.txt' || lower === 'untitled.txt';
 
     if (isGeneric) {
-      const ext = lower.split('.').pop() || lang || 'txt';
+      const ext = lower.split('.').pop() || lang || 'svg';
       cleanName = guessFileNameFromLang(ext, content);
     }
-    return cleanName || 'berkas.txt';
+    return cleanName || 'berkas.svg';
   }
 
   function getFileIconClass(name) {
@@ -7342,7 +7398,7 @@ Aturan wajib:
       txt: 'fa-solid fa-file-lines', log: 'fa-solid fa-file-lines', csv: 'fa-solid fa-table',
       php: 'fa-brands fa-php', java: 'fa-brands fa-java', go: 'fa-solid fa-microchip',
       docx: 'fa-solid fa-file-word', pdf: 'fa-solid fa-file-pdf',
-      mermaid: 'fa-solid fa-diagram-project', mmd: 'fa-solid fa-diagram-project'
+      svg: 'fa-solid fa-diagram-project', mermaid: 'fa-solid fa-diagram-project', mmd: 'fa-solid fa-diagram-project'
     };
     return map[ext] || 'fa-solid fa-file-code';
   }
@@ -7475,8 +7531,10 @@ Aturan wajib:
     const isDocx = ext === 'docx';
     const isPdf = ext === 'pdf';
     const isMarkdown = ext === 'md' || ext === 'markdown';
-    const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml' || ext === 'svg';
-    const isMermaid = ext === 'mermaid' || ext === 'mmd' || file.lang === 'mermaid';
+    const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml';
+    const isMermaid = ext === 'mermaid' || ext === 'mmd' || file.lang === 'mermaid' ||
+      (ext === 'svg' && !rawContent.trim().startsWith('<svg') && (rawContent.includes('-->') || rawContent.includes('flowchart') || rawContent.includes('graph') || rawContent.includes('sequenceDiagram')));
+    const isPureSvg = ext === 'svg' && !isMermaid;
 
     setAIFileStudioTab(previewable ? 'preview' : 'code');
 
@@ -7493,12 +7551,13 @@ Aturan wajib:
       if (isMermaid) {
         els.aiFileStudioFrame.removeAttribute('src');
         const cleanMermaid = getCleanMermaidCode(rawContent);
-        const tempId = 'aiStudioMermaid_' + Date.now();
+        const tempId = 'aiStudioMermaid_' + Math.random().toString(36).substr(2, 6);
         if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
           try {
             initMermaidEngine();
             window.mermaid.render(tempId, cleanMermaid).then(res => {
               if (res && res.svg) {
+                file.svgContent = res.svg;
                 els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, res.svg);
               }
             }).catch(err => {
@@ -7524,6 +7583,9 @@ Aturan wajib:
             </div>
           `);
         }
+      } else if (isPureSvg) {
+        els.aiFileStudioFrame.removeAttribute('src');
+        els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, rawContent);
       } else if (isDocx || isMarkdown) {
         const parsedBody = (window.marked && window.marked.parse) ? window.marked.parse(rawContent) : escapeHtml(rawContent);
         els.aiFileStudioFrame.removeAttribute('src');
@@ -7573,6 +7635,19 @@ Aturan wajib:
       } else if (fileNameLower.endsWith('.pdf')) {
         showToast('⚙ Mengompilasi dokumen PDF (.pdf)...', 'info');
         blob = await compileMarkdownToPdfBlob(rawText, file.name);
+      } else if (fileNameLower.endsWith('.svg')) {
+        let svgText = file.svgContent || '';
+        if (!svgText && (rawText.includes('<svg') || rawText.trim().startsWith('<svg'))) {
+          svgText = rawText;
+        } else if (!svgText && typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
+          showToast('⚙ Mengompilasi gambar vektor SVG...', 'info');
+          const cleanCode = getCleanMermaidCode(rawText);
+          const tempId = 'downloadSvg_' + Date.now();
+          const res = await window.mermaid.render(tempId, cleanCode);
+          if (res && res.svg) svgText = res.svg;
+        }
+        if (!svgText) svgText = rawText;
+        blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
       } else {
         blob = new Blob([file.content || ''], { type: (String(file.mime || 'text/plain')) + ';charset=utf-8' });
       }
