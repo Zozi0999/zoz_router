@@ -5060,6 +5060,30 @@ body.modal-open {
   box-shadow: 0 0 14px rgba(255, 0, 127, 0.6);
 }
 
+.attach-item-icon-box.website-gen-accent {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.attachment-menu-item:hover .attach-item-icon-box.website-gen-accent {
+  background: rgba(16, 185, 129, 0.28);
+  border-color: #10b981;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.6);
+}
+
+.attach-item-icon-box.doc-gen-accent {
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+}
+
+.attachment-menu-item:hover .attach-item-icon-box.doc-gen-accent {
+  background: rgba(99, 102, 241, 0.28);
+  border-color: #818cf8;
+  box-shadow: 0 0 14px rgba(99, 102, 241, 0.6);
+}
+
 .attach-item-icon-box.doc-accent {
   background: rgba(255, 170, 0, 0.15);
   color: var(--neon-amber);
@@ -11004,14 +11028,40 @@ body.mermaid-has-fullscreen {
 .ai-file-btn.download-jpeg:hover {
   background: rgba(255, 183, 3, 0.25) !important;
 }
+.ai-file-btn.download-pdf {
+  background: rgba(239, 68, 68, 0.12) !important;
+  color: #f87171 !important;
+  border: 1px solid rgba(239, 68, 68, 0.35) !important;
+}
+.ai-file-btn.download-pdf:hover {
+  background: rgba(239, 68, 68, 0.25) !important;
+}
+.ai-file-btn.download-docx {
+  background: rgba(59, 130, 246, 0.12) !important;
+  color: #60a5fa !important;
+  border: 1px solid rgba(59, 130, 246, 0.35) !important;
+}
+.ai-file-btn.download-docx:hover {
+  background: rgba(59, 130, 246, 0.25) !important;
+}
+.ai-file-btn.view-code {
+  background: rgba(168, 85, 247, 0.12) !important;
+  color: #c084fc !important;
+  border: 1px solid rgba(168, 85, 247, 0.35) !important;
+}
+.ai-file-btn.view-code:hover {
+  background: rgba(168, 85, 247, 0.25) !important;
+}
 
 /* ==========================================================================
-   WEBSITE OUTPUT MODE SELECTION MODAL
+   WEBSITE & DOCUMENT OUTPUT MODE SELECTION MODALS
    ========================================================================== */
-.website-mode-card {
+.website-mode-card,
+.doc-mode-card {
   user-select: none;
 }
-.website-mode-card:hover {
+.website-mode-card:hover,
+.doc-mode-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
 }
@@ -11023,7 +11073,16 @@ body.mermaid-has-fullscreen {
   border-color: #c084fc !important;
   background: rgba(168, 85, 247, 0.12) !important;
 }
-.website-mode-card:active {
+#optDocModePdf:hover {
+  border-color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.14) !important;
+}
+#optDocModeDocx:hover {
+  border-color: #3b82f6 !important;
+  background: rgba(59, 130, 246, 0.14) !important;
+}
+.website-mode-card:active,
+.doc-mode-card:active {
   transform: translateY(0);
 }
 

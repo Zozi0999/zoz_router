@@ -23,7 +23,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261015_v283">
+  <link rel="stylesheet" href="style.css?v=20261015_v285">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -755,6 +755,24 @@
 
                 <!-- Pane 2: AI Tools & Creation Studio -->
                 <div class="attachment-pane" id="attachPaneTools" role="tabpanel" style="display: none;">
+                  <button class="attachment-menu-item" id="attachOptionGenWebsite" type="button">
+                    <div class="attach-item-icon-box website-gen-accent" style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: #10b981;">
+                      <i class="fa-solid fa-code"></i>
+                    </div>
+                    <div class="attach-item-info">
+                      <span class="attach-item-title">Pembuatan Website</span>
+                      <span class="attach-item-desc">Studio pembuatan website, landing page & aplikasi web interaktif</span>
+                    </div>
+                  </button>
+                  <button class="attachment-menu-item" id="attachOptionGenDoc" type="button">
+                    <div class="attach-item-icon-box doc-gen-accent" style="background: rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.4); color: #818cf8;">
+                      <i class="fa-solid fa-file-lines"></i>
+                    </div>
+                    <div class="attach-item-info">
+                      <span class="attach-item-title">Pembuatan Dokumen</span>
+                      <span class="attach-item-desc">Penyusunan dokumen resmi, laporan, makalah & format PDF / Word</span>
+                    </div>
+                  </button>
                   <button class="attachment-menu-item" id="attachOptionGenImage" type="button">
                     <div class="attach-item-icon-box image-gen-accent" style="background: rgba(255, 0, 127, 0.15); border-color: rgba(255, 0, 127, 0.4); color: #FF007F;">
                       <i class="fa-solid fa-wand-magic-sparkles"></i>
@@ -1947,6 +1965,56 @@
     </div>
   </div>
 
+  <!-- MODAL: Pemilihan Format Output Pembuatan Dokumen (PDF vs Word .DOCX) -->
+  <div class="modal-backdrop" id="docModeModal">
+    <div class="modal-card" style="max-width: 520px;">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="fa-solid fa-file-lines" style="color: var(--neon-cyan);"></i> Format Output Dokumen
+        </div>
+        <button class="modal-close-btn" data-close="docModeModal" id="btnCloseDocModeModal" aria-label="Tutup form" title="Tutup form"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body" style="padding: 16px 20px;">
+        <p style="margin: 0 0 16px 0; font-size: 0.88rem; color: var(--text-muted); line-height: 1.5;">
+          Pilih format berkas dokumen yang ingin Anda hasilkan dari AI:
+        </p>
+
+        <div class="doc-mode-options" style="display: flex; flex-direction: column; gap: 12px;">
+          <!-- Opsi 1: Format PDF (Standar Publikasi & Siap Cetak) -->
+          <div class="doc-mode-card" id="optDocModePdf" style="cursor: pointer; border: 1.5px solid var(--neon-cyan); background: rgba(56, 189, 248, 0.08); border-radius: 10px; padding: 14px 16px; transition: all 0.2s ease;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+              <div style="display: flex; align-items: center; gap: 10px; font-weight: 700; color: #FFF; font-size: 0.95rem;">
+                <i class="fa-solid fa-file-pdf" style="color: #ef4444; font-size: 1.1rem;"></i>
+                <span>Dokumen PDF (.pdf)</span>
+              </div>
+              <span style="background: rgba(239, 68, 68, 0.2); color: #f87171; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 12px; border: 1px solid rgba(239, 68, 68, 0.4);">Siap Cetak & Baca</span>
+            </div>
+            <p style="margin: 0; font-size: 0.82rem; color: var(--text-dim); line-height: 1.45;">
+              Format tata letak baku beresolusi tinggi, cocok untuk dokumen resmi, makalah, laporan, atau bahan presentasi yang langsung siap dibagikan dan dicetak.
+            </p>
+          </div>
+
+          <!-- Opsi 2: Format Word (.docx) (Bisa Diedit) -->
+          <div class="doc-mode-card" id="optDocModeDocx" style="cursor: pointer; border: 1.5px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.03); border-radius: 10px; padding: 14px 16px; transition: all 0.2s ease;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+              <div style="display: flex; align-items: center; gap: 10px; font-weight: 700; color: #FFF; font-size: 0.95rem;">
+                <i class="fa-solid fa-file-word" style="color: #3b82f6; font-size: 1.1rem;"></i>
+                <span>Dokumen Microsoft Word (.docx)</span>
+              </div>
+              <span style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 12px; border: 1px solid rgba(59, 130, 246, 0.4);">Dapat Diedit</span>
+            </div>
+            <p style="margin: 0; font-size: 0.82rem; color: var(--text-dim); line-height: 1.45;">
+              Format berkas dokumen Word lengkap dengan struktur heading, paragraf, dan tabel yang fleksibel untuk disunting lebih lanjut di Microsoft Word, Google Docs, atau LibreOffice.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button class="btn btn-secondary" id="btnCancelDocMode" data-close="docModeModal">Batal</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
@@ -1968,6 +2036,6 @@
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
   <script src="text-safety.js?v=20261015_v279" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261015_v283" defer></script>
+  <script src="app.js?v=20261015_v285" defer></script>
 </body>
 </html>

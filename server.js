@@ -6638,6 +6638,7 @@ async function requestHandler(req, res) {
           model: targetCloudModel,
           messages: body.messages || [],
           stream: body.stream !== false,
+          max_tokens: 32768,
           provider: { allow_fallbacks: true }
         };
         if (body.options?.temperature !== undefined) orPayload.temperature = body.options.temperature;
@@ -6831,6 +6832,10 @@ async function requestHandler(req, res) {
       delete body.endpoint; // Don't send custom field to Ollama
       delete body.apiKey;
       delete body.ollamaApiKey;
+
+      if (!body.options || typeof body.options !== 'object') body.options = {};
+      if (body.options.num_predict === undefined) body.options.num_predict = -1;
+      if (body.options.num_ctx === undefined) body.options.num_ctx = 32768;
 
       // Defense-in-depth: Resolusi dan sanitasi gambar lokal (/uploads/) menjadi raw Base64 untuk endpoint Ollama
       if (Array.isArray(body.messages)) {
@@ -7402,6 +7407,11 @@ async function requestHandler(req, res) {
       // Defense-in-depth: Cegah konflik mutlak parameter model dan models pada OpenRouter
       if (body.model && body.models) {
         delete body.models;
+      }
+
+      // Pastikan kuota token output memadai (32768) agar website dan dokumen panjang tidak terpotong separuh
+      if (!body.max_tokens && !body.max_completion_tokens) {
+        body.max_tokens = 32768;
       }
 
       // Defense-in-depth: Hapus tool jika model gratis, atau filter tool agar hanya fungsi bertipe 'function'
