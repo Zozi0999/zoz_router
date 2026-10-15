@@ -569,7 +569,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     currentModelLabel: $('#currentModelLabel'),
     modelPickerChip: $('#modelPickerChip'),
     sidebarBrandLogoBtn: $('#sidebarBrandLogoBtn'),
-    modeAuto: $('#modeAuto'),
     sidebarAutoRouterIndicator: $('#sidebarAutoRouterIndicator'),
     modelDropdownMenu: $('#modelDropdownMenu'),
     dropdownTabOllama: $('#dropdownTabOllama'),
@@ -9911,6 +9910,12 @@ ${blocks}
     const isAuto = STATE.mode === 'auto';
     if (els.sidebarAutoRouterIndicator) {
       els.sidebarAutoRouterIndicator.style.display = isAuto ? 'block' : 'none';
+    }
+    if (els.sidebarBrandLogoBtn) {
+      els.sidebarBrandLogoBtn.title = isAuto
+        ? 'Auto Router AI: AKTIF (Klik logo ZOZ Router untuk beralih ke mode manual)'
+        : 'Auto Router AI: NONAKTIF (Klik logo ZOZ Router untuk mengaktifkan Auto Router)';
+      els.sidebarBrandLogoBtn.setAttribute('aria-label', isAuto ? 'Nonaktifkan Auto Router via Logo' : 'Aktifkan Auto Router via Logo');
     }
   }
 

@@ -148,6 +148,16 @@ button.brand-logo-wrap:hover {
   transform: scale(1.08);
 }
 
+button.brand-logo-wrap:hover .brand-logo {
+  filter: drop-shadow(0 0 10px var(--neon-cyan)) drop-shadow(0 0 16px rgba(0, 240, 255, 0.4));
+}
+
+button.brand-logo-wrap:hover .pulse-ring {
+  opacity: 0.7;
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.35);
+}
+
 button.brand-logo-wrap:active {
   transform: scale(0.94);
 }
@@ -1019,12 +1029,21 @@ button.brand-logo-wrap.active .brand-logo {
   position: absolute;
   bottom: -2px;
   right: -2px;
-  width: 5px;
-  height: 5px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
+  background: rgba(148, 163, 184, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  box-shadow: none;
+  transition: all 0.25s ease;
+  pointer-events: none;
+}
+
+button.brand-logo-wrap.active .auto-router-quantum-dot {
   background: var(--neon-teal);
-  box-shadow: 0 0 8px var(--neon-teal);
-  animation: pulseTeal 1.6s infinite alternate;
+  border-color: #ffffff;
+  box-shadow: 0 0 8px var(--neon-teal), 0 0 14px var(--neon-cyan);
+  animation: pulseTeal 1.4s infinite alternate;
 }
 
 .auto-router-text {
