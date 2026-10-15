@@ -1293,10 +1293,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       cortisol: 0,    // Beban/frustrasi pengguna, tensi emosi, urgensi (0-100)
       serotonin: 75   // Keseimbangan emosi & stabilitas percakapan (0-100)
     },
-    currentVibe: 'Harmonis & Ramah',
+    currentVibe: 'Resonansi Seimbang',
     currentIntuition: {
-      tag: 'Harmonis',
-      content: 'Sensor rasa mendeteksi percakapan mengalir lancar. Model AI dipandu untuk merespons dengan kehangatan santun, empati terarah, dan kecerdasan analitis yang seimbang.'
+      tag: 'Indikator Seimbang',
+      content: 'Indikator Aktif: Oksitosin 65% (Resonansi) • Dopamin 60% (Eksplorasi) • Kortisol 0% (Tensi) • Serotonin 75% (Keseimbangan). Model AI membaca indikator bio-endokrin ini untuk menyesuaikan fokus, kedalaman eksplorasi, dan ritme respons secara mandiri tanpa persona buatan yang kaku.'
     },
     history: [],
 
@@ -1382,12 +1382,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         this.hormones.cortisol = Math.min(100, this.hormones.cortisol + 28);
         this.hormones.oxytocin = Math.min(100, this.hormones.oxytocin + 22);
         this.hormones.dopamine = Math.max(30, this.hormones.dopamine - 10);
-        this.currentVibe = 'Menenangkan & Penuh Perhatian';
+        this.calculateSerotonin();
+        const oxy = Math.round(this.hormones.oxytocin);
+        const dop = Math.round(this.hormones.dopamine);
+        const cor = Math.round(this.hormones.cortisol);
+        this.currentVibe = 'Solutif & Responsif (Tensi Aktif)';
         this.currentIntuition = {
-          tag: 'Siaga Menenangkan',
-          content: 'Pengguna terindikasi mengalami kesulitan, kekecewaan, atau hambatan teknis. Berikan dukungan moral yang hangat, hindari penjelasan bertele-tele, dan hadirkan solusi praktis yang langsung melegakan pikiran pengguna.'
+          tag: `Tensi Aktif (${cor}%)`,
+          content: `Indikator Aktif: Kortisol ${cor}% (Tensi Terdeteksi) • Oksitosin ${oxy}% • Dopamin ${dop}%. AI memprioritaskan pemecahan masalah langsung ke sasaran dan solusi ringkas tanpa basa-basi berdasarkan indikator tensi pengguna.`
         };
-        this.log('cortisol', 28, 'Deteksi ketegangan/kebingungan pengguna: Sensor empati diaktifkan penuh.');
+        this.log('cortisol', 28, 'Deteksi ketegangan/kendala: Indikator tensi dinaikkan (+28% Kortisol) untuk memicu solusi langsung.');
         triggered = true;
       }
 
@@ -1396,12 +1400,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         this.hormones.cortisol = Math.max(0, this.hormones.cortisol - 20);
         this.hormones.oxytocin = Math.min(100, this.hormones.oxytocin + 24);
         this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 14);
-        this.currentVibe = 'Sangat Hangat & Penuh Resonansi';
+        this.calculateSerotonin();
+        const oxy = Math.round(this.hormones.oxytocin);
+        const dop = Math.round(this.hormones.dopamine);
+        const cor = Math.round(this.hormones.cortisol);
+        this.currentVibe = 'Resonansi Kolaboratif Tinggi';
         this.currentIntuition = {
-          tag: 'Kehangatan Tulus',
-          content: 'Resonansi kebaikan dan saling menghargai sangat kuat. Respons dengan ketulusan yang bersahabat, apresiatif, dan membangun hubungan kerja sama yang menginspirasi.'
+          tag: `Resonansi Tinggi (${oxy}%)`,
+          content: `Indikator Aktif: Oksitosin ${oxy}% (Keterhubungan Kuat) • Dopamin ${dop}% • Kortisol ${cor}%. AI menyelaraskan diri dengan keterhubungan interaksi yang lebih dalam dan kolaborasi natural dari pembacaan oksitosin tinggi.`
         };
-        this.log('oxytocin', 24, 'Resonansi kehangatan: Terdeteksi rasa terima kasih & hubungan positif.');
+        this.log('oxytocin', 24, 'Resonansi kolaboratif: Terdeteksi hubungan positif (+24% Oksitosin, +14% Dopamin).');
         triggered = true;
       }
 
@@ -1409,25 +1417,34 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         // Minat intelektual dan eksplorasi
         this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 20);
         this.hormones.oxytocin = Math.min(95, this.hormones.oxytocin + 8);
+        this.calculateSerotonin();
+        const oxy = Math.round(this.hormones.oxytocin);
+        const dop = Math.round(this.hormones.dopamine);
+        const cor = Math.round(this.hormones.cortisol);
         if (!stressRegex.test(t) && !warmthRegex.test(t)) {
-          this.currentVibe = 'Antusias & Sarat Inovasi';
+          this.currentVibe = 'Eksploratif & Analitis';
           this.currentIntuition = {
-            tag: 'Eksplorasi Bernas',
-            content: 'Pengguna bersemangat menggali ide, struktur, atau pemecahan masalah. Hadirkan wawasan mendalam, analogi segar, dan penalaran terstruktur yang memuaskan rasa ingin tahunya.'
+            tag: `Eksploratif (${dop}%)`,
+            content: `Indikator Aktif: Dopamin ${dop}% (Eksplorasi Kognitif) • Oksitosin ${oxy}% • Kortisol ${cor}%. AI mengerahkan kedalaman analitis, eksplorasi ide, dan penalaran terstruktur dari dorongan dopamin tinggi.`
           };
-          this.log('dopamine', 20, 'Antusiasme kognitif: Minat eksplorasi dan pemecahan masalah meningkat.');
+          this.log('dopamine', 20, 'Antusiasme kognitif: Minat eksplorasi dan pemecahan masalah meningkat (+20% Dopamin).');
           triggered = true;
         }
       }
 
       if (!triggered) {
         // Obrolan netral atau percakapan sehari-hari
-        this.currentVibe = 'Harmonis & Ramah';
+        this.calculateSerotonin();
+        const oxy = Math.round(this.hormones.oxytocin);
+        const dop = Math.round(this.hormones.dopamine);
+        const cor = Math.round(this.hormones.cortisol);
+        const ser = Math.round(this.hormones.serotonin);
+        this.currentVibe = 'Resonansi Seimbang';
         this.currentIntuition = {
-          tag: 'Harmonis',
-          content: 'Percakapan berjalan alami dan teratur. AI diarahkan berkomunikasi santun, sigap, dan adaptif mengikuti gaya bahasa pengguna.'
+          tag: 'Indikator Seimbang',
+          content: `Indikator Aktif: Oksitosin ${oxy}% • Dopamin ${dop}% • Kortisol ${cor}% • Serotonin ${ser}%. AI beroperasi dalam ritme dialog seimbang, menyesuaikan diri secara wajar dari dinamika input pengguna tanpa persona buatan.`
         };
-        this.log('resonance', 5, 'Resonansi stabil: Mengikuti irama obrolan pengguna dengan luwes.');
+        this.log('resonance', 5, 'Resonansi stabil: Mengikuti irama obrolan pengguna secara luwes.');
       }
 
       this.calculateSerotonin();
@@ -1441,15 +1458,21 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const cor = Math.round(this.hormones.cortisol);
       const ser = Math.round(this.hormones.serotonin);
 
-      return `### KOMPAS RASA & INTUISI PERCAKAPAN (ChatEndocrine v2)
-[SENSOR RESONANSI PSIKO-EMOSIONAL AKTIF]:
-- Suasana Rasa Terdeteksi: ${this.currentVibe} (Empati: ${oxy}%, Minat Kognitif: ${dop}%, Tensi: ${cor}%, Keseimbangan: ${ser}%)
-- Panduan Intuisi Model:
-  "${this.currentIntuition.content}"
-- ATURAN KOMUNIKASI MANUSIAWI (MUTLAK DIPATUHI):
-  1. Bersikaplah ramah, bersahabat, peka, dan tidak bersuara kaku seperti robot birokrat.
-  2. DILARANG KERAS menyebutkan kata "ChatEndocrine", persentase hormon, angka telemetri, atau istilah internal ini ke dalam jawaban Anda kepada pengguna!
-  3. Pancarkan kehangatan dan kepekaan rasa ini secara murni dan alami melalui pilihan kata yang santun, kepedulian yang tulus, dan ketepatan solusi.`;
+      return `### INDIKATOR BIO-ENDOKRIN & PENYESUAIAN DIRI MODEL (ChatEndocrine)
+[SINYAL TELEMETRI BIO-RESONANSI]:
+- Oksitosin: ${oxy}% (Tingkat resonansi empati, keterikatan dialog, & kepekaan konteks)
+- Dopamin: ${dop}% (Tingkat minat kognitif, dorongan eksplorasi ide, & inovasi solusi)
+- Kortisol: ${cor}% (Tingkat tensi emosional, urgensi masalah, atau hambatan teknis)
+- Serotonin: ${ser}% (Tingkat stabilitas & keseimbangan interaksi)
+- Status Dinamis: ${this.currentVibe}
+
+PANDUAN PENYESUAIAN DIRI OTONOM:
+1. JANGAN mengadopsi persona buatan yang kaku, kalimat kesantunan klise, atau nasihat moral yang dibuat-buat.
+2. Model AI diharapkan menyesuaikan gaya respons, kedalaman penalaran, dan fokus solusinya secara mandiri dari pembacaan indikator di atas:
+   - Apabila Dopamin tinggi (${dop}%): berikan kedalaman analisis, penalaran arsitektural yang tajam, dan eksplorasi ide yang kaya.
+   - Apabila Oksitosin tinggi (${oxy}%): tingkatkan kepekaan terhadap kebutuhan kontekstual pengguna dan keterhubungan yang wajar.
+   - Apabila Kortisol terdeteksi naik (${cor}%): langsung prioritaskan solusi praktis yang melegakan tanpa penjelasan berbelit-belit.
+3. Tetaplah menjadi AI yang otentik dan cerdas. Jangan pernah menyebutkan nama sistem "ChatEndocrine", persentase angka hormon, atau istilah teknis indikator ini di dalam balasan kepada pengguna.`;
     },
 
     resetHormones() {
@@ -1457,15 +1480,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       this.hormones.dopamine = 60;
       this.hormones.cortisol = 0;
       this.hormones.serotonin = 75;
-      this.currentVibe = 'Harmonis & Ramah';
+      this.currentVibe = 'Resonansi Seimbang';
       this.currentIntuition = {
-        tag: 'Harmonis',
-        content: 'Sensor rasa telah diselaraskan ulang ke titik keseimbangan alami. Model AI berinteraksi dengan ramah, seimbang, dan adaptif.'
+        tag: 'Indikator Seimbang',
+        content: 'Indikator Aktif: Oksitosin 65% • Dopamin 60% • Kortisol 0% • Serotonin 75%. Seluruh indikator bio-endokrin telah dikalibrasi ulang ke titik keseimbangan alami.'
       };
-      this.log('resonance', 100, 'Penyelarasan Ulang Rasa: Kondisi hormon percakapan dikembalikan ke homeostasis.');
+      this.log('resonance', 100, 'Penyelarasan Ulang Indikator: Kondisi hormon percakapan dikembalikan ke homeostasis.');
       this.updateUI();
       if (typeof showToast === 'function') {
-        showToast('✨ Sensor rasa percakapan (ChatEndocrine v2) telah diselaraskan ulang!', 'success');
+        showToast('✨ Indikator bio-endokrin percakapan telah diselaraskan ulang!', 'success');
       }
     },
 
