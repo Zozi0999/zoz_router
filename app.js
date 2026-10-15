@@ -648,6 +648,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     composerCrownRow: $('#composerCrownRow'),
     neutronCrownBtn: $('#neutronCrownBtn'),
     promptInput: $('#promptInput'),
+    slashCommandsMenu: $('#slashCommandsMenu'),
+    slashMenuList: $('#slashMenuList'),
+    slashCmdBtn: $('#slashCmdBtn'),
     sendPromptBtn: $('#sendPromptBtn'),
     stopGenerationBtn: $('#stopGenerationBtn'),
     attachToggleBtn: $('#attachToggleBtn'),
@@ -655,6 +658,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     attachmentMenuWrapper: $('#attachmentMenuWrapper'),
     attachOptionCamera: $('#attachOptionCamera'),
     attachOptionImage: $('#attachOptionImage'),
+    attachOptionDiagram: $('#attachOptionDiagram'),
+    attachOptionWebsite: $('#attachOptionWebsite'),
     attachOptionGenImage: $('#attachOptionGenImage'),
     attachOptionGenMusic: $('#attachOptionGenMusic'),
     attachOptionDoc: $('#attachOptionDoc'),
@@ -4473,6 +4478,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         // Blok secara eksplisit dideklarasikan sebagai diagram Mermaid (```mermaid / ```mmd)
         isMermaid = true;
         cleanCode = getCleanMermaidCode(rawText);
+      } else if (lang === 'SVG') {
+        // Jika lang adalah SVG tapi isinya bukan XML/SVG murni melainkan sintaks Mermaid
+        if (!rawText.trim().startsWith('<svg') && !rawText.trim().startsWith('<?xml') && isAuthenticMermaidSyntax(rawText)) {
+          isMermaid = true;
+          cleanCode = getCleanMermaidCode(rawText);
+        }
       } else if (!NON_DIAGRAM_LANGUAGES.has(lang)) {
         // Blok tanpa bahasa (lang === 'CODE') HANYA dijadikan diagram jika memenuhi sintaks otentik Mermaid
         if (!pre.dataset.mermaidRendered && isAuthenticMermaidSyntax(rawText)) {
@@ -7751,9 +7762,10 @@ Aturan wajib:
     if (hasNegativeFileOrPreviewIntent(text)) return false;
 
     const t = text.toLowerCase();
-    const explicitFileWants = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong buat|generate|create|build|write|tulis|rancang|desain|simpan sebagai|unduh|download|export|ekspor|saya butuh file|saya minta file|butuh file|perlukan file|bikinkan file)\s+(?:sebuah\s+)?(?:file|berkas|dokumen|website|web|webpage|landing page|aplikasi|game|diagram|flowchart)\b/i.test(t);
+    const isSlashFileCmd = /^\/(?:diagram|website|web|pratinjau|dokumen|docx|pdf)\b/i.test(t);
+    const explicitFileWants = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong buat|generate|create|build|write|tulis|rancang|desain|simpan sebagai|unduh|download|export|ekspor|saya butuh file|saya minta file|butuh file|perlukan file|bikinkan file)\s+(?:sebuah\s+)?(?:file|berkas|dokumen|website|web|webpage|landing page|aplikasi|game|diagram|digram|flowchart)\b/i.test(t);
     const hasExtension = /\b[a-zA-Z0-9_-]+\.(?:html?|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|pdf|xlsx|ipynb|svg)\b/i.test(t);
-    const isDiagram = /\b(?:diagram|flowchart|alur sistem|arsitektur visual|erd|mindmap)\b/i.test(t);
+    const isDiagram = /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|arsitektur sistem|arsitektur|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(t);
     const isExport = /\b(?:simpan sebagai|ekspor ke|export to|unduh|download file)\b/i.test(t);
     const isWebOrApp = /\b(?:website|webpage|landing page|halaman web|aplikasi web|game web|web app|portofolio web|simulasi 3d)\b/i.test(t);
 
@@ -7763,7 +7775,7 @@ Aturan wajib:
       return t.includes(f.name.toLowerCase()) || (baseName.length >= 3 && t.includes(baseName));
     });
 
-    return explicitFileWants || isWebOrApp || hasExtension || isDiagram || isExport || workspaceMatch;
+    return isSlashFileCmd || explicitFileWants || isWebOrApp || hasExtension || isDiagram || isExport || workspaceMatch;
   }
 
   function formatFileSize(bytes) {
@@ -8008,8 +8020,9 @@ Aturan wajib:
     const isMarkdown = ext === 'md' || ext === 'markdown';
     const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml';
     const isMermaid = ext === 'mermaid' || ext === 'mmd' || file.lang === 'mermaid' || file.lang === 'mmd' ||
-      (ext === 'svg' && !rawContent.trim().startsWith('<svg') && !rawContent.trim().startsWith('<?xml') && isAuthenticMermaidSyntax(rawContent));
-    const isPureSvg = ext === 'svg' && !isMermaid;
+      (ext === 'svg' && !rawContent.trim().startsWith('<svg') && !rawContent.trim().startsWith('<?xml') && isAuthenticMermaidSyntax(rawContent)) ||
+      (!rawContent.trim().startsWith('<svg') && !rawContent.trim().startsWith('<?xml') && isAuthenticMermaidSyntax(rawContent));
+    const isPureSvg = (ext === 'svg' || (rawContent.trim().startsWith('<svg') || rawContent.trim().startsWith('<?xml'))) && !isMermaid;
     const isDiagram = isDiagramFile(file);
 
     if (els.aiFileStudioDownloadCaret) {
@@ -8129,6 +8142,7 @@ Aturan wajib:
       if (raw.trim().startsWith('<svg') || raw.trim().startsWith('<?xml')) return false; // Pure vector SVG
       return isAuthenticMermaidSyntax(raw);
     }
+    if (isAuthenticMermaidSyntax(raw)) return true;
     return false;
   }
 
@@ -10450,6 +10464,16 @@ ${blocks}
       }
       showToast('Mode AI Image Studio aktif. Silakan ketik deskripsi visual!');
       AudioEngine.click();
+      return;
+    }
+    if (trimmedLow === '/diagram' || trimmedLow === '/website' || trimmedLow === '/web' || trimmedLow === '/dokumen' || trimmedLow === '/kodenya-saja') {
+      showToast(`Silakan ketik deskripsi setelah ${trimmedLow} (contoh: ${trimmedLow} alur sistem)`, 'info');
+      if (els.promptInput) {
+        els.promptInput.value = trimmedLow + ' ';
+        autoResizeTextarea(els.promptInput);
+        els.promptInput.focus();
+        els.promptInput.setSelectionRange(trimmedLow.length + 1, trimmedLow.length + 1);
+      }
       return;
     }
 
@@ -13202,8 +13226,20 @@ Format teks (untuk model tanpa function calling):
     let streamRenderer = null;
     let executedHudHtml = '';
     const foundYouTubeIds = []; // ID video hasil tool search_youtube (dipakai render kartu)
-    const wantsFile = isFileGenerationRequest(promptText); // niat "buatkan file/website" untuk AI File Studio
-    const hasNegativePreview = hasNegativeFileOrPreviewIntent(promptText);
+
+    // Deteksi perintah slash eksplisit & jenis permintaan interaktif
+    const isExplicitDiagramCmd = /^\/diagram\b/i.test(promptText.trim());
+    const isExplicitWebCmd = /^\/(?:website|web|pratinjau)\b/i.test(promptText.trim());
+    const isExplicitCleanCodeCmd = /^\/(?:kodenya-saja|code)\b/i.test(promptText.trim());
+    const isExplicitDocCmd = /^\/(?:dokumen|docx|pdf)\b/i.test(promptText.trim());
+
+    const isDiagramRequest = isExplicitDiagramCmd ||
+                             /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(promptText);
+    const isWebRequest = isExplicitWebCmd ||
+                         /\b(?:website|web|webpage|landing page|halaman web|aplikasi web|game web|simulasi 3d)\b/i.test(promptText);
+
+    const wantsFile = (isDiagramRequest || isWebRequest || isExplicitDocCmd || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
+    const hasNegativePreview = isExplicitCleanCodeCmd || hasNegativeFileOrPreviewIntent(promptText);
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -13229,6 +13265,39 @@ Format teks (untuk model tanpa function calling):
         systemContent = systemContent
           ? `${systemContent}\n\n${getFileStudioDirective()}`
           : getFileStudioDirective();
+      }
+
+      // MANDAT KHUSUS DIAGRAM / WEBSITE / KODE BERSIH BERDASARKAN PERINTAH / INTENT
+      if (isDiagramRequest && !hasNegativePreview) {
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DIAGRAM VISUAL (WAJIB FORMAT MERMAID)
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta DIAGRAM VISUAL.
+Aturan Wajib:
+1. Anda WAJIB membuat diagram visual terstruktur menggunakan sintaks Mermaid (seperti flowchart TD, flowchart LR, sequenceDiagram, classDiagram, stateDiagram, erDiagram, atau mindmap).
+2. Tuliskan kode Mermaid di dalam blok protokol:
+<<<ZOZ_FILE name="Diagram_Visual.svg" mime="image/svg+xml" lang="mermaid">
+flowchart TD
+    ... (tuliskan struktur alur node dan panah secara lengkap) ...
+<<<END_ZOZ_FILE>>>
+atau di dalam blok kode standar \`\`\`mermaid\n...\n\`\`\`.
+3. DILARANG KERAS menyatakan "saya tidak bisa menampilkan gambar langsung" atau sejenisnya!
+4. DILARANG HANYA memberikan teks ASCII art atau LaTeX TikZ!
+Sistem antarmuka Zoz Router memiliki visualizer Mermaid interaktif otomatis yang langsung memvisualisasikan kode Anda menjadi diagram nyata di layar pengguna.`;
+      } else if (isWebRequest && !hasNegativePreview) {
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS WEBSITE & PRATINJAU INTERAKTIF
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta APLIKASI WEB / HALAMAN HTML INTERAKTIF.
+Aturan Wajib:
+1. Tuliskan kode HTML5 lengkap yang fungsional dan siap jalan (termasuk tag <!DOCTYPE html>, <html>, <head>, <style>, <body>, dan <script> dalam satu berkas mandiri).
+2. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js), sertakan tag <script src="..."> resmi dari CDN publik.
+3. Tuliskan dalam blok protokol:
+<<<ZOZ_FILE name="Aplikasi_Web.html" mime="text/html" lang="html">
+<!DOCTYPE html>
+... (kode html, css, dan javascript lengkap) ...
+<<<END_ZOZ_FILE>>>
+atau di dalam blok kode standar \`\`\`html\n...\n\`\`\`.
+Kode ini akan langsung dijalankan secara interaktif di pratinjau live pengguna!`;
+      } else if (isExplicitCleanCodeCmd) {
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
+Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
       }
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
@@ -14161,8 +14230,20 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     let actualModelUsed = null;
     let executedHudHtml = '';
     const foundYouTubeIds = []; // ID video hasil tool search_youtube (dipakai render kartu)
-    const wantsFile = isFileGenerationRequest(promptText); // niat "buatkan file/website" untuk AI File Studio
-    const hasNegativePreview = hasNegativeFileOrPreviewIntent(promptText);
+
+    // Deteksi perintah slash eksplisit & jenis permintaan interaktif
+    const isExplicitDiagramCmd = /^\/diagram\b/i.test(promptText.trim());
+    const isExplicitWebCmd = /^\/(?:website|web|pratinjau)\b/i.test(promptText.trim());
+    const isExplicitCleanCodeCmd = /^\/(?:kodenya-saja|code)\b/i.test(promptText.trim());
+    const isExplicitDocCmd = /^\/(?:dokumen|docx|pdf)\b/i.test(promptText.trim());
+
+    const isDiagramRequest = isExplicitDiagramCmd ||
+                             /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(promptText);
+    const isWebRequest = isExplicitWebCmd ||
+                         /\b(?:website|web|webpage|landing page|halaman web|aplikasi web|game web|simulasi 3d)\b/i.test(promptText);
+
+    const wantsFile = (isDiagramRequest || isWebRequest || isExplicitDocCmd || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
+    const hasNegativePreview = isExplicitCleanCodeCmd || hasNegativeFileOrPreviewIntent(promptText);
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -14188,6 +14269,39 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         systemContent = systemContent
           ? `${systemContent}\n\n${getFileStudioDirective()}`
           : getFileStudioDirective();
+      }
+
+      // MANDAT KHUSUS DIAGRAM / WEBSITE / KODE BERSIH BERDASARKAN PERINTAH / INTENT
+      if (isDiagramRequest && !hasNegativePreview) {
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DIAGRAM VISUAL (WAJIB FORMAT MERMAID)
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta DIAGRAM VISUAL.
+Aturan Wajib:
+1. Anda WAJIB membuat diagram visual terstruktur menggunakan sintaks Mermaid (seperti flowchart TD, flowchart LR, sequenceDiagram, classDiagram, stateDiagram, erDiagram, atau mindmap).
+2. Tuliskan kode Mermaid di dalam blok protokol:
+<<<ZOZ_FILE name="Diagram_Visual.svg" mime="image/svg+xml" lang="mermaid">
+flowchart TD
+    ... (tuliskan struktur alur node dan panah secara lengkap) ...
+<<<END_ZOZ_FILE>>>
+atau di dalam blok kode standar \`\`\`mermaid\n...\n\`\`\`.
+3. DILARANG KERAS menyatakan "saya tidak bisa menampilkan gambar langsung" atau sejenisnya!
+4. DILARANG HANYA memberikan teks ASCII art atau LaTeX TikZ!
+Sistem antarmuka Zoz Router memiliki visualizer Mermaid interaktif otomatis yang langsung memvisualisasikan kode Anda menjadi diagram nyata di layar pengguna.`;
+      } else if (isWebRequest && !hasNegativePreview) {
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS WEBSITE & PRATINJAU INTERAKTIF
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta APLIKASI WEB / HALAMAN HTML INTERAKTIF.
+Aturan Wajib:
+1. Tuliskan kode HTML5 lengkap yang fungsional dan siap jalan (termasuk tag <!DOCTYPE html>, <html>, <head>, <style>, <body>, dan <script> dalam satu berkas mandiri).
+2. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js), sertakan tag <script src="..."> resmi dari CDN publik.
+3. Tuliskan dalam blok protokol:
+<<<ZOZ_FILE name="Aplikasi_Web.html" mime="text/html" lang="html">
+<!DOCTYPE html>
+... (kode html, css, dan javascript lengkap) ...
+<<<END_ZOZ_FILE>>>
+atau di dalam blok kode standar \`\`\`html\n...\n\`\`\`.
+Kode ini akan langsung dijalankan secara interaktif di pratinjau live pengguna!`;
+      } else if (isExplicitCleanCodeCmd) {
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
+Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
       }
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
@@ -22181,6 +22295,311 @@ Aturan:
     updatePresetPillUI();
   }
 
+  // ==================== SLASH COMMANDS & QUICK TOOLS AUTOCOMPLETE ENGINE ====================
+  const SLASH_COMMANDS = [
+    {
+      id: 'diagram',
+      command: '/diagram',
+      title: 'Diagram & Arsitektur',
+      badge: 'Mermaid / SVG',
+      desc: 'Bikin flowchart, sequence, ERD, arsitektur, atau mindmap interaktif live',
+      iconClass: 'fa-solid fa-diagram-project',
+      iconColor: '#00f0ff',
+      iconBg: 'rgba(0, 240, 255, 0.12)',
+      template: '/diagram ',
+      placeholder: 'Deskripsikan alur sistem atau diagram yang ingin dibuat...'
+    },
+    {
+      id: 'website',
+      command: '/website',
+      title: 'Website & App Studio',
+      badge: 'HTML / JS / 3D',
+      desc: 'Bikin landing page, simulator kalkulator, game, atau Three.js live',
+      iconClass: 'fa-solid fa-code',
+      iconColor: '#10b981',
+      iconBg: 'rgba(16, 185, 129, 0.12)',
+      template: '/website ',
+      placeholder: 'Deskripsikan web/aplikasi yang ingin dibuat (cth: kalkulator sains, game snake)...'
+    },
+    {
+      id: 'dokumen',
+      command: '/dokumen',
+      title: 'Dokumen & Format',
+      badge: 'Markdown / PDF',
+      desc: 'Generate laporan terstruktur, artikel teknis, SOP, atau spesifikasi rapi',
+      iconClass: 'fa-solid fa-file-lines',
+      iconColor: '#6366f1',
+      iconBg: 'rgba(99, 102, 241, 0.12)',
+      template: '/dokumen ',
+      placeholder: 'Tulis topik dokumen atau laporan lengkap yang ingin dibuat...'
+    },
+    {
+      id: 'penelitian',
+      command: '/penelitian',
+      title: 'Deep Research & Web',
+      badge: 'Web Search',
+      desc: 'Riset mendalam multi-sumber dengan pencarian web dan sintesis kritis',
+      iconClass: 'fa-solid fa-globe',
+      iconColor: '#38bdf8',
+      iconBg: 'rgba(56, 189, 248, 0.12)',
+      action: 'search_mode',
+      template: ''
+    },
+    {
+      id: 'gambar',
+      command: '/gambar',
+      title: 'AI Image Studio',
+      badge: 'Flux / SDXL',
+      desc: 'Bikin gambar & ilustrasi visual beresolusi tinggi dengan prompt AI',
+      iconClass: 'fa-solid fa-image',
+      iconColor: '#f59e0b',
+      iconBg: 'rgba(245, 158, 11, 0.12)',
+      action: 'image_mode',
+      template: ''
+    },
+    {
+      id: 'musik',
+      command: '/musik',
+      title: 'AI Music Studio',
+      badge: 'Audio / Suno',
+      desc: 'Komposisi musik & instrumen audio orisinal berbasis prompt',
+      iconClass: 'fa-solid fa-music',
+      iconColor: '#ec4899',
+      iconBg: 'rgba(236, 72, 153, 0.12)',
+      action: 'music_mode',
+      template: ''
+    },
+    {
+      id: 'youtube',
+      command: '/youtube',
+      title: 'YouTube Intel & Summary',
+      badge: 'Video / Transkrip',
+      desc: 'Ekstrak intisari, analisis transkrip, & wawasan video YouTube',
+      iconClass: 'fa-brands fa-youtube',
+      iconColor: '#ef4444',
+      iconBg: 'rgba(239, 68, 68, 0.12)',
+      template: '/youtube ',
+      placeholder: 'Tempel link video YouTube untuk dianalisis...'
+    },
+    {
+      id: 'kodenya-saja',
+      command: '/kodenya-saja',
+      title: 'Hanya Kode Murni',
+      badge: 'Clean Code',
+      desc: 'Keluaran kode murni tanpa basa-basi atau penjelasan pendahuluan',
+      iconClass: 'fa-solid fa-terminal',
+      iconColor: '#a855f7',
+      iconBg: 'rgba(168, 85, 247, 0.12)',
+      template: '/kodenya-saja ',
+      placeholder: 'Perintah kode yang ingin dibuat tanpa teks pembuka...'
+    }
+  ];
+
+  let slashFilteredCommands = [...SLASH_COMMANDS];
+  let slashCommandSelectedIndex = 0;
+  let isSlashMenuOpen = false;
+
+  function renderSlashCommandsMenu(list) {
+    if (!els.slashMenuList) return;
+    els.slashMenuList.innerHTML = '';
+
+    if (!list || list.length === 0) {
+      const emptyItem = document.createElement('div');
+      emptyItem.style.padding = '12px 14px';
+      emptyItem.style.fontSize = '0.78rem';
+      emptyItem.style.color = 'var(--text-muted)';
+      emptyItem.style.textAlign = 'center';
+      emptyItem.textContent = 'Tidak ada perintah atau alat yang cocok.';
+      els.slashMenuList.appendChild(emptyItem);
+      return;
+    }
+
+    list.forEach((cmd, idx) => {
+      const itemEl = document.createElement('div');
+      itemEl.className = 'slash-menu-item' + (idx === slashCommandSelectedIndex ? ' active' : '');
+      itemEl.setAttribute('role', 'option');
+      itemEl.setAttribute('aria-selected', idx === slashCommandSelectedIndex ? 'true' : 'false');
+      itemEl.dataset.index = idx;
+      itemEl.dataset.cmdId = cmd.id;
+
+      itemEl.innerHTML = `
+        <div class="slash-menu-item-icon" style="background: ${cmd.iconBg}; color: ${cmd.iconColor};">
+          <i class="${cmd.iconClass}"></i>
+        </div>
+        <div class="slash-menu-item-info">
+          <div class="slash-menu-item-top">
+            <span class="slash-menu-item-name">${escapeHtml(cmd.command)}</span>
+            <span class="slash-menu-item-badge">${escapeHtml(cmd.badge)}</span>
+          </div>
+          <div class="slash-menu-item-desc">${escapeHtml(cmd.desc)}</div>
+        </div>
+      `;
+
+      itemEl.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        selectSlashCommand(cmd);
+      });
+
+      els.slashMenuList.appendChild(itemEl);
+    });
+
+    scrollSelectedSlashItemIntoView();
+  }
+
+  function scrollSelectedSlashItemIntoView() {
+    if (!els.slashMenuList) return;
+    const activeEl = els.slashMenuList.querySelector('.slash-menu-item.active');
+    if (activeEl) {
+      activeEl.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function showSlashCommandsMenu(query = '') {
+    if (!els.slashCommandsMenu) return;
+    const q = (query || '').toLowerCase().trim();
+
+    if (!q) {
+      slashFilteredCommands = [...SLASH_COMMANDS];
+    } else {
+      slashFilteredCommands = SLASH_COMMANDS.filter(cmd => {
+        const cmdName = cmd.command.toLowerCase().replace('/', '');
+        const title = cmd.title.toLowerCase();
+        const desc = cmd.desc.toLowerCase();
+        const id = cmd.id.toLowerCase();
+        return cmdName.startsWith(q) || cmdName.includes(q) || id.includes(q) || title.includes(q) || desc.includes(q);
+      });
+    }
+
+    slashCommandSelectedIndex = 0;
+    renderSlashCommandsMenu(slashFilteredCommands);
+    els.slashCommandsMenu.style.display = 'block';
+    isSlashMenuOpen = true;
+  }
+
+  function hideSlashCommandsMenu() {
+    if (!els.slashCommandsMenu) return;
+    els.slashCommandsMenu.style.display = 'none';
+    isSlashMenuOpen = false;
+  }
+
+  function navigateSlashCommands(direction) {
+    if (!isSlashMenuOpen || slashFilteredCommands.length === 0) return;
+    const total = slashFilteredCommands.length;
+    slashCommandSelectedIndex = (slashCommandSelectedIndex + direction + total) % total;
+
+    if (els.slashMenuList) {
+      const items = els.slashMenuList.querySelectorAll('.slash-menu-item');
+      items.forEach((item, idx) => {
+        const isActive = idx === slashCommandSelectedIndex;
+        item.classList.toggle('active', isActive);
+        item.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
+      scrollSelectedSlashItemIntoView();
+    }
+  }
+
+  function selectCurrentSlashCommand() {
+    if (!isSlashMenuOpen || slashFilteredCommands.length === 0) return;
+    const cmd = slashFilteredCommands[slashCommandSelectedIndex];
+    if (cmd) {
+      selectSlashCommand(cmd);
+    }
+  }
+
+  function selectSlashCommand(cmd) {
+    if (!cmd) return;
+
+    if (cmd.action === 'image_mode') {
+      STATE.isImageGenMode = true;
+      STATE.isMusicGenMode = false;
+      updateImageGenModeUI();
+      updateMusicGenModeUI();
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+        els.promptInput.focus();
+      }
+      hideSlashCommandsMenu();
+      showToast('🎨 Mode AI Image Studio Aktif!');
+      AudioEngine.success();
+      return;
+    }
+
+    if (cmd.action === 'music_mode') {
+      STATE.isMusicGenMode = true;
+      STATE.isImageGenMode = false;
+      updateMusicGenModeUI();
+      updateImageGenModeUI();
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+        els.promptInput.focus();
+      }
+      hideSlashCommandsMenu();
+      showToast('🎵 Mode AI Music Studio Aktif!');
+      AudioEngine.success();
+      return;
+    }
+
+    if (cmd.action === 'search_mode') {
+      if (els.webSearchToggleBtn) {
+        setSearchMode('autonomous');
+      }
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+        els.promptInput.focus();
+      }
+      hideSlashCommandsMenu();
+      showToast('🌐 Mode Autonomous Deep Research & Pencarian Web Aktif!');
+      AudioEngine.success();
+      return;
+    }
+
+    // Default template insert (e.g. '/diagram ', '/website ', '/dokumen ')
+    if (els.promptInput) {
+      els.promptInput.value = cmd.template;
+      autoResizeTextarea(els.promptInput);
+      els.promptInput.focus();
+      els.promptInput.setSelectionRange(cmd.template.length, cmd.template.length);
+    }
+
+    hideSlashCommandsMenu();
+    AudioEngine.click();
+
+    if (cmd.id === 'diagram') {
+      showToast('📐 Mode Diagram Mermaid Aktif — Ketik alur yang Anda inginkan!');
+    } else if (cmd.id === 'website') {
+      showToast('💻 Mode Website & App Studio Aktif — Ketik aplikasi yang ingin dibuat!');
+    } else if (cmd.id === 'dokumen') {
+      showToast('📄 Mode Dokumen & Laporan Aktif!');
+    } else if (cmd.id === 'kodenya-saja') {
+      showToast('⚡ Mode Hanya Kode Aktif!');
+    }
+  }
+
+  function handleSlashCommandInput(val) {
+    if (!val || typeof val !== 'string') {
+      hideSlashCommandsMenu();
+      return;
+    }
+
+    const trimmedStart = val.trimStart();
+    if (trimmedStart.startsWith('/')) {
+      const spaceIdx = trimmedStart.indexOf(' ');
+      if (spaceIdx === -1) {
+        // Sedang mengetik perintah (contoh: "/" atau "/dia")
+        const query = trimmedStart.slice(1);
+        showSlashCommandsMenu(query);
+      } else {
+        // Sudah ada spasi setelah perintah (cth: "/diagram ") -> tutup menu otomatis
+        hideSlashCommandsMenu();
+      }
+    } else {
+      hideSlashCommandsMenu();
+    }
+  }
+
   // ==================== EVENT LISTENERS SETUP ====================
   function setupEventListeners() {
     // Mode Switchers (Auto Router Toggle & Switch)
@@ -22387,6 +22806,29 @@ Aturan:
     els.neutronCrownBtn?.addEventListener('click', () => togglePromptVisibility());
 
     els.promptInput?.addEventListener('keydown', (e) => {
+      if (isSlashMenuOpen) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          navigateSlashCommands(1);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          navigateSlashCommands(-1);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault();
+          selectCurrentSlashCommand();
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          hideSlashCommandsMenu();
+          return;
+        }
+      }
+
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
         e.preventDefault();
         handleSendPrompt().catch((err) => {
@@ -22471,6 +22913,9 @@ Aturan:
       autoResizeTextarea(els.promptInput);
 
       const val = els.promptInput ? els.promptInput.value : '';
+
+      // Tampilkan popup menu slash command saat mengetik /
+      handleSlashCommandInput(val);
 
       // Tampilkan tombol pill konversi jika ada teks yang cocok dikonversi
       if (els.autoConvertDocRow) {
@@ -22797,6 +23242,40 @@ Aturan:
 
     els.btnPurgeStressEndorphin?.addEventListener('click', () => {
       BioEndocrine.purgeStress();
+    });
+
+    // Tombol Cepat Perintah Slash (/)
+    els.slashCmdBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      AudioEngine.click();
+      if (isSlashMenuOpen) {
+        hideSlashCommandsMenu();
+      } else {
+        closeAttachmentDropdown();
+        closeSearchDropdown();
+        closeImageModelDropdown();
+        closeMusicModelDropdown();
+        if (els.promptInput && !els.promptInput.value.startsWith('/')) {
+          els.promptInput.value = '/' + els.promptInput.value;
+          autoResizeTextarea(els.promptInput);
+        }
+        showSlashCommandsMenu('');
+        els.promptInput?.focus();
+      }
+    });
+
+    els.attachOptionDiagram?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAttachmentDropdown();
+      const diagramCmd = SLASH_COMMANDS.find(c => c.id === 'diagram');
+      if (diagramCmd) selectSlashCommand(diagramCmd);
+    });
+
+    els.attachOptionWebsite?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAttachmentDropdown();
+      const websiteCmd = SLASH_COMMANDS.find(c => c.id === 'website');
+      if (websiteCmd) selectSlashCommand(websiteCmd);
     });
 
     // Unified Composer Attachments (ChatGPT & Gemini Style Plus Menu with Tabs)
@@ -23410,11 +23889,19 @@ Aturan:
           closeMusicModelDropdown();
         }
       }
+      if (isSlashMenuOpen) {
+        if (!els.slashCommandsMenu?.contains(e.target) && !els.slashCmdBtn?.contains(e.target) && !els.promptInput?.contains(e.target)) {
+          hideSlashCommandsMenu();
+        }
+      }
     });
 
     // Dismiss dropdowns & open modals on Escape key
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
+        if (isSlashMenuOpen) {
+          hideSlashCommandsMenu();
+        }
         closeAttachmentDropdown();
         closeSearchDropdown();
         closeImageModelDropdown();
