@@ -10051,6 +10051,151 @@ body.page-paused *::after {
   background: rgba(239, 68, 68, 0.1);
 }
 
+/* Fullscreen mode for Mermaid Diagram (v267) */
+.message-row.has-mermaid-fullscreen,
+.message-row:has(.mermaid-fullscreen),
+.message-bubble.has-mermaid-fullscreen,
+.message-bubble:has(.mermaid-fullscreen),
+.chat-messages:has(.mermaid-fullscreen),
+.chat-viewport:has(.mermaid-fullscreen),
+.chat-main:has(.mermaid-fullscreen),
+.app-container:has(.mermaid-fullscreen) {
+  content-visibility: visible !important;
+  contain: none !important;
+  transform: none !important;
+  filter: none !important;
+  z-index: 9999999 !important;
+}
+
+.mermaid-diagram-card.mermaid-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  z-index: 10000000 !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  border: none !important;
+  background: #090d16 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  box-shadow: none !important;
+}
+
+.mermaid-diagram-card.mermaid-fullscreen .mermaid-toolbar {
+  background: #111827 !important;
+  padding: 12px 18px !important;
+  border-bottom: 1px solid rgba(0, 240, 255, 0.25) !important;
+}
+
+.mermaid-diagram-card.mermaid-fullscreen .mermaid-viewport {
+  flex: 1 1 auto !important;
+  height: calc(100vh - 58px) !important;
+  max-height: none !important;
+  padding: 30px !important;
+  background: radial-gradient(circle at center, #0f172a 0%, #030712 100%) !important;
+}
+
+.mermaid-diagram-card.mermaid-fullscreen .mermaid-code-view {
+  flex: 1 1 auto !important;
+  height: calc(100vh - 58px) !important;
+  overflow: auto !important;
+}
+
+.mermaid-fullscreen-btn {
+  background: rgba(0, 240, 255, 0.12) !important;
+  border-color: rgba(0, 240, 255, 0.4) !important;
+  color: var(--neon-cyan) !important;
+  font-weight: 600 !important;
+  gap: 5px;
+}
+
+.mermaid-fullscreen-btn:hover {
+  background: rgba(0, 240, 255, 0.25) !important;
+}
+
+body.mermaid-has-fullscreen {
+  overflow: hidden !important;
+}
+
+/* Fullscreen mode for AI File Studio */
+.ai-file-studio-card.is-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  border: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+  z-index: 1000000 !important;
+}
+
+.ai-file-studio-card.is-fullscreen .modal-body {
+  flex: 1 1 auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 12px 16px !important;
+}
+
+.ai-file-studio-card.is-fullscreen .ai-file-studio-pane {
+  flex: 1 1 auto !important;
+  height: 100% !important;
+  max-height: none !important;
+}
+
+.ai-file-studio-card.is-fullscreen .ai-file-studio-code {
+  flex: 1 1 auto !important;
+  height: 100% !important;
+  max-height: none !important;
+}
+
+/* Inline Mermaid Container inside chat bubble */
+.inline-mermaid-chat-container {
+  width: 100%;
+  margin: 12px 0 16px 0;
+}
+
+/* Mobile full screen optimization for Studio */
+@media (max-width: 768px) {
+  .ai-file-studio-card {
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  .ai-file-studio-card .modal-body {
+    flex: 1 1 auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    padding: 10px !important;
+  }
+  .ai-file-studio-card .ai-file-studio-pane {
+    flex: 1 1 auto !important;
+    height: 100% !important;
+    max-height: none !important;
+    min-height: 280px !important;
+  }
+  .ai-file-studio-card .ai-file-studio-code {
+    flex: 1 1 auto !important;
+    height: 100% !important;
+    max-height: none !important;
+  }
+}
+
 /* ==================== INTERACTIVE TASK TRACKER & FILE SNAPSHOTS (v257) ==================== */
 
 /* Task Tracker Floating Card */

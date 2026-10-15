@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261014_v266">
+  <link rel="stylesheet" href="style.css?v=20261014_v267">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -1532,7 +1532,10 @@
     <div class="modal-card modal-lg ai-file-studio-card">
       <div class="modal-header">
         <div class="modal-title" id="aiFileStudioTitle"><i class="fa-solid fa-wand-magic-sparkles"></i> AI File Studio</div>
-        <button class="modal-close-btn" data-close="aiFileStudioModal" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <button class="modal-close-btn" id="btnToggleStudioFullscreen" type="button" aria-label="Layar Penuh" title="Layar Penuh (Full Screen)"><i class="fa-solid fa-expand"></i></button>
+          <button class="modal-close-btn" data-close="aiFileStudioModal" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button>
+        </div>
       </div>
       <div class="modal-body ai-file-studio-body">
         <div class="ai-file-studio-tabs" id="aiFileStudioTabs">
@@ -1898,12 +1901,12 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" defer></script>
   <!-- Mermaid.js for Interactive Visual Diagram Rendering (Local 0ms Instant Load) -->
-  <script src="mermaid.min.js?v=20261014_v266" defer></script>
+  <script src="mermaid.min.js?v=20261014_v267" defer></script>
   <!-- jsPDF for Client-side Autonomous PDF Document Generation (Local 0ms Instant Load) -->
-  <script src="jspdf.umd.min.js?v=20261014_v266" defer></script>
+  <script src="jspdf.umd.min.js?v=20261014_v267" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261014_v266" defer></script>
+  <script src="text-safety.js?v=20261014_v267" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261014_v266" defer></script>
+  <script src="app.js?v=20261014_v267" defer></script>
 </body>
 </html>

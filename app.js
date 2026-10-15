@@ -755,6 +755,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     aiFileStudioCopyBtn: $('#aiFileStudioCopyBtn'),
     aiFileStudioSaveDiskBtn: $('#aiFileStudioSaveDiskBtn'),
     aiFileStudioDownloadBtn: $('#aiFileStudioDownloadBtn'),
+    btnToggleStudioFullscreen: $('#btnToggleStudioFullscreen'),
     imagePreviewImg: $('#imagePreviewImg'),
     removeImageBtn: $('#removeImageBtn'),
     activePresetBanner: $('#activePresetBanner'),
@@ -3775,57 +3776,61 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body {
-      background: #0d1117;
+    html, body {
+      background: #090d16;
       color: #e6edf3;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       margin: 0;
-      padding: 24px 16px;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      box-sizing: border-box;
+      overflow: auto;
+    }
+    .mermaid-sheet {
+      width: 100%;
+      min-height: 100%;
+      padding: 20px 16px;
+      box-sizing: border-box;
       display: flex;
       flex-direction: column;
       align-items: center;
-      min-height: 100vh;
-      box-sizing: border-box;
-    }
-    .mermaid-sheet {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 8px;
-      padding: 24px;
-      width: 100%;
-      max-width: 960px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-      box-sizing: border-box;
+      justify-content: center;
     }
     .mermaid-header-badge {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      background: rgba(56, 189, 248, 0.12);
-      color: #38bdf8;
-      padding: 6px 12px;
-      border-radius: 4px;
-      font-size: 12px;
+      background: rgba(0, 240, 255, 0.12);
+      color: #00f0ff;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 13px;
       font-weight: 700;
-      margin-bottom: 20px;
-      border: 1px solid rgba(56, 189, 248, 0.3);
+      margin-bottom: 16px;
+      border: 1px solid rgba(0, 240, 255, 0.35);
+      letter-spacing: 0.5px;
     }
     .mermaid-svg-container {
       width: 100%;
-      overflow-x: auto;
+      flex: 1;
       display: flex;
       justify-content: center;
       align-items: center;
-      padding: 16px 0;
+      overflow: auto;
+      padding: 8px 0;
     }
     .mermaid-svg-container svg {
       max-width: 100%;
       height: auto;
+      max-height: 84vh;
       display: block;
+      filter: drop-shadow(0 8px 32px rgba(0, 0, 0, 0.5));
     }
     @media (max-width: 600px) {
-      body { padding: 8px; }
-      .mermaid-sheet { padding: 16px 12px; }
+      .mermaid-sheet { padding: 12px 6px; }
+      .mermaid-header-badge { font-size: 11px; padding: 4px 10px; margin-bottom: 10px; }
+      .mermaid-svg-container svg { max-height: 88vh; }
     }
   </style>
 </head>
@@ -3876,6 +3881,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         <span>${escapeHtml(diagramTitle)}</span>
       </div>
       <div class="mermaid-actions">
+        <button class="mermaid-tool-btn mermaid-fullscreen-btn" data-action="fullscreen" title="Layar Penuh (Full Screen)"><i class="fa-solid fa-expand"></i> <span>Layar Penuh</span></button>
         <button class="mermaid-tool-btn" data-action="toggle-code" title="Lihat Sumber Mermaid"><i class="fa-solid fa-code"></i></button>
         <button class="mermaid-tool-btn" data-action="copy-code" title="Salin Kode Mermaid"><i class="fa-solid fa-clipboard"></i></button>
         <button class="mermaid-tool-btn" data-action="download-svg" title="Unduh Gambar SVG"><i class="fa-solid fa-download"></i></button>
@@ -3979,13 +3985,47 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       isPanning = false;
     });
 
+    viewport.addEventListener('dblclick', (e) => {
+      if (e.target.closest('.mermaid-toolbar') || e.target.closest('.mermaid-tool-btn')) return;
+      const fsBtn = toolbar.querySelector('[data-action="fullscreen"]');
+      if (fsBtn) fsBtn.click();
+    });
+
+    const escMermaidFullscreen = (e) => {
+      if (e.key === 'Escape' && card.classList.contains('mermaid-fullscreen')) {
+        const fsBtn = toolbar.querySelector('[data-action="fullscreen"]');
+        if (fsBtn) fsBtn.click();
+      }
+    };
+    window.addEventListener('keydown', escMermaidFullscreen);
+
     toolbar.addEventListener('click', (e) => {
       const btn = e.target.closest('.mermaid-tool-btn');
       if (!btn) return;
       e.stopPropagation();
       const action = btn.dataset.action;
 
-      if (action === 'zoom-in') {
+      if (action === 'fullscreen') {
+        const isFs = card.classList.toggle('mermaid-fullscreen');
+        const parentRow = card.closest('.message-row');
+        if (parentRow) parentRow.classList.toggle('has-mermaid-fullscreen', isFs);
+        const parentBubble = card.closest('.message-bubble');
+        if (parentBubble) parentBubble.classList.toggle('has-mermaid-fullscreen', isFs);
+        const fsIcon = btn.querySelector('i');
+        const fsText = btn.querySelector('span');
+        if (isFs) {
+          if (fsIcon) fsIcon.className = 'fa-solid fa-compress';
+          if (fsText) fsText.textContent = 'Kecilkan';
+          btn.title = 'Keluar Layar Penuh (Esc)';
+          document.body.classList.add('mermaid-has-fullscreen');
+          applyZoom(1.0);
+        } else {
+          if (fsIcon) fsIcon.className = 'fa-solid fa-expand';
+          if (fsText) fsText.textContent = 'Layar Penuh';
+          btn.title = 'Layar Penuh (Full Screen)';
+          document.body.classList.remove('mermaid-has-fullscreen');
+        }
+      } else if (action === 'zoom-in') {
         applyZoom(zoomLevel + 0.15);
       } else if (action === 'zoom-out') {
         applyZoom(zoomLevel - 0.15);
@@ -7287,18 +7327,22 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
 - AI membungkusnya dalam blok ZOZ_FILE berekstensi .svg:
 <<<ZOZ_FILE name="Arsitektur_Logika_AI_Agent.svg" mime="image/svg+xml" lang="mermaid">
 flowchart TD
-    A["Mulai: Input Pengguna"] --> B{"Validasi Data"}
-    B -- Valid --> C["Proses Logika AI Agent"]
-    B -- Tidak Valid --> D["Tampilkan Pesan Error"]
+    A["Input Pengguna"] --> B["LLM (Otak Agen)"]
+    B <--> C["Memori"]
+    B --> D["Pemilihan Alat"]
+    D --> E["Observasi"]
+    E --> F["Jawaban Akhir"]
 <<<END_ZOZ_FILE>>>
 - Format penulisan teks Mermaid:
   * Selalu gunakan tanda kutip dua ["..."] pada label teks kotak yang memuat tanda kurung, tanda titik dua, atau garis miring.
-- Pengguna juga dapat menerima blok standar Mermaid ` + TICK3 + `mermaid ... ` + TICK3 + `. Sistem ZOZ Router akan secara instan merender visual diagram interaktif dengan zoom, pan, switch kode sumber, dan tombol unduh SVG.
+  * Untuk panah berlabel gunakan format: A -->|"Teks Label"| B atau A -- "Teks" --> B.
+- Sistem ZOZ Router akan secara instan merender visual diagram interaktif langsung di tengah obrolan chat (seperti Claude/Gemini) lengkap dengan tombol Layar Penuh (Fullscreen), zoom, pan, switch kode sumber, dan unduh SVG.
+- SETELAH blok diagram, berikan uraian penjelasan yang ramah dan terstruktur mengenai alur serta komponen diagram tersebut (seperti penjelasan tiap tahapan atau fungsi komponen).
 
 Aturan wajib:
 - name : nama file final yang deskriptif dan spesifik berakhiran .svg / .docx / .pdf / .html / .js / dsb.
 - Isi berkas HARUS lengkap, valid, dan langsung bisa dijalankan/dibuka — bukan pseudocode atau potongan.
-- Jangan menyalin ulang isi file di luar blok penanda, agar tampilan obrolan tetap rapi.`;
+- Jangan menyalin ulang kode diagram di luar blok penanda, cukup berikan teks penjelasan yang informatif.`;
   }
 
   // Deteksi niat pengguna meminta pembuatan atau pengeditan/modifikasi file (Bahasa Indonesia + Inggris)
@@ -7838,11 +7882,41 @@ Aturan wajib:
   }
 
   // Hapus blok file dari teks respons agar tampilan gelembung tetap rapi
+  // Khusus diagram Mermaid: pertahankan sebagai blok ```mermaid``` agar langsung dirender visual di obrolan chat!
   function stripGeneratedFileBlocks(text, rawBlocks) {
     let out = String(text);
     if (Array.isArray(rawBlocks)) {
       rawBlocks.forEach((b) => {
-        if (b) out = out.split(b).join('');
+        if (!b) return;
+        const bLower = b.toLowerCase();
+        const isDiagram = bLower.includes('lang="mermaid"') || bLower.includes("lang='mermaid'") ||
+                          bLower.includes('mime="image/svg+xml"') || bLower.includes('.svg') ||
+                          bLower.includes('flowchart') || bLower.includes('graph ') ||
+                          bLower.includes('sequencediagram') || bLower.includes('classdiagram') ||
+                          bLower.includes('statediagram') || bLower.includes('erdiagram');
+        if (isDiagram) {
+          const lines = b.split('\n');
+          const innerLines = [];
+          let started = false;
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const t = line.trim();
+            if (!started) {
+              if (t.startsWith('<<<ZOZ_FILE') || t.startsWith('<<<ZOZ_EDIT') || t.startsWith('<<<ZOZ_MODIFY')) {
+                started = true;
+              }
+              continue;
+            }
+            if (t.startsWith('<<<END_ZOZ_FILE') || t.startsWith('<<<END_ZOZ_EDIT') || t.startsWith('<<<END_ZOZ_MODIFY')) {
+              break;
+            }
+            innerLines.push(line);
+          }
+          const cleanDiagram = getCleanMermaidCode(innerLines.join('\n'));
+          out = out.split(b).join(`\n\n\`\`\`mermaid\n${cleanDiagram}\n\`\`\`\n\n`);
+        } else {
+          out = out.split(b).join('');
+        }
       });
     }
     const kept = out.split('\n').filter((line) => {
@@ -7994,7 +8068,31 @@ Aturan wajib:
     const bubble = (row.classList && row.classList.contains('message-bubble'))
       ? row
       : row.querySelector('.message-bubble');
-    if (!bubble) return;
+    // Render visual diagram inline di dalam gelembung pesan jika ada file diagram Mermaid dan belum dirender
+    const diagramFile = files.find(f => {
+      const n = (f.name || '').toLowerCase();
+      const raw = f.rawContent || f.content || '';
+      return n.endsWith('.svg') || n.endsWith('.mermaid') || n.endsWith('.mmd') || f.lang === 'mermaid' ||
+        (!raw.trim().startsWith('<svg') && (raw.includes('flowchart') || raw.includes('graph ') || raw.includes('sequenceDiagram')));
+    });
+
+    if (diagramFile) {
+      const msgTextEl = bubble.querySelector('.msg-text-content');
+      const alreadyHasDiagram = bubble.querySelector('.mermaid-diagram-card');
+      if (!alreadyHasDiagram && msgTextEl) {
+        const diagramHolder = document.createElement('div');
+        diagramHolder.className = 'inline-mermaid-chat-container';
+        const preEl = document.createElement('pre');
+        const codeEl = document.createElement('code');
+        codeEl.className = 'language-mermaid';
+        codeEl.textContent = diagramFile.rawContent || diagramFile.content || '';
+        preEl.appendChild(codeEl);
+        diagramHolder.appendChild(preEl);
+        msgTextEl.insertBefore(diagramHolder, msgTextEl.firstChild);
+        enhanceCodeBlocks(diagramHolder);
+      }
+    }
+
     if (bubble.querySelector('.msg-file-cards-wrap')) return;
 
     const wrap = document.createElement('div');
@@ -8707,19 +8805,22 @@ ${blocks}
 
   // Delegasi klik: tombol Pratinjau / Unduh / Konfirmasi / Tolak / Buka di Direktori pada kartu file buatan AI
   document.addEventListener('click', (e) => {
-    const btn = e.target.closest ? e.target.closest('.ai-file-btn') : null;
-    if (!btn) return;
-    const card = btn.closest('.ai-file-card');
+    const card = e.target.closest ? e.target.closest('.ai-file-card') : null;
     if (!card || !card._aiFile) return;
     const file = card._aiFile;
-    if (btn.dataset.act === 'download') {
-      downloadAIFile(file);
-    } else if (btn.dataset.act === 'allow-pending') {
-      approveWorkspacePendingChange(file.name, file);
-    } else if (btn.dataset.act === 'reject-pending') {
-      rejectWorkspacePendingChange(file.name);
-    } else if (btn.dataset.act === 'open-workspace-doc') {
-      previewWorkspaceDocument(file.name);
+    const btn = e.target.closest ? e.target.closest('.ai-file-btn') : null;
+    if (btn) {
+      if (btn.dataset.act === 'download') {
+        downloadAIFile(file);
+      } else if (btn.dataset.act === 'allow-pending') {
+        approveWorkspacePendingChange(file.name, file);
+      } else if (btn.dataset.act === 'reject-pending') {
+        rejectWorkspacePendingChange(file.name);
+      } else if (btn.dataset.act === 'open-workspace-doc') {
+        previewWorkspaceDocument(file.name);
+      } else {
+        openAIFileStudio(file);
+      }
     } else {
       openAIFileStudio(file);
     }
@@ -8759,6 +8860,13 @@ ${blocks}
   });
   els.aiFileStudioDownloadBtn?.addEventListener('click', () => {
     if (activeAIFile) downloadAIFile(activeAIFile);
+  });
+  els.btnToggleStudioFullscreen?.addEventListener('click', () => {
+    const card = els.aiFileStudioModal?.querySelector('.ai-file-studio-card');
+    if (!card) return;
+    const isFs = card.classList.toggle('is-fullscreen');
+    els.btnToggleStudioFullscreen.innerHTML = isFs ? '<i class="fa-solid fa-compress"></i>' : '<i class="fa-solid fa-expand"></i>';
+    els.btnToggleStudioFullscreen.title = isFs ? 'Keluar Layar Penuh (Esc)' : 'Layar Penuh (Full Screen)';
   });
 
   // ==================== UNIVERSAL WEB CONTENT EXTRACTOR & READER TOOL ====================
@@ -23934,7 +24042,9 @@ Aturan:
     initMermaidEngine,
     openAIFileStudio,
     downloadAIFile,
-    getCleanMermaidCode
+    getCleanMermaidCode,
+    enhanceCodeBlocks,
+    renderInteractiveMermaidCard
   };
 
   // Start on DOM ready (safeguarded against post-DOMContentLoaded script execution)
