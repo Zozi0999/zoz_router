@@ -14,7 +14,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261014_v267">
+  <link rel="stylesheet" href="style.css?v=20261014_v268">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -1556,7 +1556,25 @@
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
           <button class="btn btn-secondary btn-sm" id="aiFileStudioCopyBtn" type="button" title="Salin seluruh isi file ke clipboard"><i class="fa-solid fa-copy"></i> Salin Kode</button>
           <button class="btn btn-primary btn-sm" id="aiFileStudioSaveDiskBtn" type="button" style="display: none;" title="Simpan langsung ke direktori lokal proyek tanpa unduh"><i class="fa-solid fa-floppy-disk"></i> Simpan ke Direktori</button>
-          <button class="btn btn-primary btn-sm" id="aiFileStudioDownloadBtn" type="button" title="Unduh file ini"><i class="fa-solid fa-download"></i> Unduh File</button>
+          <div class="studio-download-wrap" id="aiFileStudioDownloadWrap" style="position: relative; display: inline-flex;">
+            <button class="btn btn-primary btn-sm" id="aiFileStudioDownloadBtn" type="button" title="Unduh file ini"><i class="fa-solid fa-download"></i> <span id="aiFileStudioDownloadText">Unduh File</span> <i class="fa-solid fa-caret-down" id="aiFileStudioDownloadCaret" style="display: none; font-size: 0.75em; margin-left: 4px;"></i></button>
+            <div class="studio-download-menu" id="aiFileStudioDownloadMenu" style="display: none;">
+              <button type="button" class="studio-download-item" id="btnStudioDownloadSvg">
+                <i class="fa-solid fa-bezier-curve" style="color: var(--neon-cyan);"></i>
+                <div class="menu-desc-text">
+                  <span class="fmt-title">Vektor SVG (.svg)</span>
+                  <span class="fmt-sub">Resolusi tajam tak terbatas, format vektor</span>
+                </div>
+              </button>
+              <button type="button" class="studio-download-item" id="btnStudioDownloadJpeg">
+                <i class="fa-solid fa-file-image" style="color: var(--neon-amber);"></i>
+                <div class="menu-desc-text">
+                  <span class="fmt-title">Gambar JPEG (.jpeg)</span>
+                  <span class="fmt-sub">Gambar raster HD, siap dibagikan ke mana saja</span>
+                </div>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1901,12 +1919,12 @@
   <!-- JSZip for DOCX Document Extraction -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous" defer></script>
   <!-- Mermaid.js for Interactive Visual Diagram Rendering (Local 0ms Instant Load) -->
-  <script src="mermaid.min.js?v=20261014_v267" defer></script>
+  <script src="mermaid.min.js?v=20261014_v268" defer></script>
   <!-- jsPDF for Client-side Autonomous PDF Document Generation (Local 0ms Instant Load) -->
-  <script src="jspdf.umd.min.js?v=20261014_v267" defer></script>
+  <script src="jspdf.umd.min.js?v=20261014_v268" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261014_v267" defer></script>
+  <script src="text-safety.js?v=20261014_v268" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261014_v267" defer></script>
+  <script src="app.js?v=20261014_v268" defer></script>
 </body>
 </html>

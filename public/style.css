@@ -10594,6 +10594,127 @@ body.mermaid-has-fullscreen {
   font-style: italic;
 }
 
+/* ==================== DUAL FORMAT DIAGRAM DOWNLOAD DROPDOWN (v268: SVG & JPEG) ==================== */
+.mermaid-dropdown-wrap,
+.studio-download-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.mermaid-download-toggle-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+}
+
+.mermaid-dropdown-menu,
+.studio-download-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 250px;
+  background: rgba(10, 15, 29, 0.96);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 240, 255, 0.15);
+  padding: 6px;
+  z-index: 10000005;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: dropdownFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.studio-download-menu {
+  bottom: calc(100% + 6px);
+  top: auto;
+}
+
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.mermaid-download-item,
+.studio-download-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-main, #e2e8f0);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.mermaid-download-item:hover,
+.studio-download-item:hover {
+  background: rgba(0, 240, 255, 0.1);
+  border-color: rgba(0, 240, 255, 0.3);
+  transform: translateX(2px);
+}
+
+.mermaid-download-item i,
+.studio-download-item i {
+  font-size: 1.15rem;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+}
+
+.mermaid-download-item .menu-desc-text,
+.studio-download-item .menu-desc-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mermaid-download-item .fmt-title,
+.studio-download-item .fmt-title {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.mermaid-download-item .fmt-sub,
+.studio-download-item .fmt-sub {
+  font-size: 0.72rem;
+  color: var(--text-muted, #94a3b8);
+  line-height: 1.25;
+}
+
+/* Dual download buttons on .ai-file-card */
+.ai-file-btn.download-svg {
+  background: rgba(0, 240, 255, 0.12) !important;
+  color: var(--neon-cyan) !important;
+  border: 1px solid rgba(0, 240, 255, 0.35) !important;
+}
+.ai-file-btn.download-svg:hover {
+  background: rgba(0, 240, 255, 0.25) !important;
+}
+.ai-file-btn.download-jpeg {
+  background: rgba(255, 183, 3, 0.12) !important;
+  color: var(--neon-amber) !important;
+  border: 1px solid rgba(255, 183, 3, 0.35) !important;
+}
+.ai-file-btn.download-jpeg:hover {
+  background: rgba(255, 183, 3, 0.25) !important;
+}
+
 
 
 

@@ -755,6 +755,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     aiFileStudioCopyBtn: $('#aiFileStudioCopyBtn'),
     aiFileStudioSaveDiskBtn: $('#aiFileStudioSaveDiskBtn'),
     aiFileStudioDownloadBtn: $('#aiFileStudioDownloadBtn'),
+    aiFileStudioDownloadWrap: $('#aiFileStudioDownloadWrap'),
+    aiFileStudioDownloadText: $('#aiFileStudioDownloadText'),
+    aiFileStudioDownloadCaret: $('#aiFileStudioDownloadCaret'),
+    aiFileStudioDownloadMenu: $('#aiFileStudioDownloadMenu'),
+    btnStudioDownloadSvg: $('#btnStudioDownloadSvg'),
+    btnStudioDownloadJpeg: $('#btnStudioDownloadJpeg'),
     btnToggleStudioFullscreen: $('#btnToggleStudioFullscreen'),
     imagePreviewImg: $('#imagePreviewImg'),
     removeImageBtn: $('#removeImageBtn'),
@@ -3884,7 +3890,25 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         <button class="mermaid-tool-btn mermaid-fullscreen-btn" data-action="fullscreen" title="Layar Penuh (Full Screen)"><i class="fa-solid fa-expand"></i> <span>Layar Penuh</span></button>
         <button class="mermaid-tool-btn" data-action="toggle-code" title="Lihat Sumber Mermaid"><i class="fa-solid fa-code"></i></button>
         <button class="mermaid-tool-btn" data-action="copy-code" title="Salin Kode Mermaid"><i class="fa-solid fa-clipboard"></i></button>
-        <button class="mermaid-tool-btn" data-action="download-svg" title="Unduh Gambar SVG"><i class="fa-solid fa-download"></i></button>
+        <div class="mermaid-dropdown-wrap">
+          <button class="mermaid-tool-btn mermaid-download-toggle-btn" data-action="toggle-download-menu" title="Unduh Diagram (Pilih Format)"><i class="fa-solid fa-download"></i> <span>Unduh</span> <i class="fa-solid fa-chevron-down" style="font-size:0.65em; margin-left:3px;"></i></button>
+          <div class="mermaid-dropdown-menu" style="display:none;">
+            <button type="button" class="mermaid-download-item" data-action="download-svg">
+              <i class="fa-solid fa-bezier-curve" style="color:var(--neon-cyan);"></i>
+              <div class="menu-desc-text">
+                <span class="fmt-title">Vektor SVG (.svg)</span>
+                <span class="fmt-sub">Resolusi tajam tak terbatas, format vektor</span>
+              </div>
+            </button>
+            <button type="button" class="mermaid-download-item" data-action="download-jpeg">
+              <i class="fa-solid fa-file-image" style="color:var(--neon-amber);"></i>
+              <div class="menu-desc-text">
+                <span class="fmt-title">Gambar JPEG (.jpeg)</span>
+                <span class="fmt-sub">Gambar raster HD, siap dibagikan ke mana saja</span>
+              </div>
+            </button>
+          </div>
+        </div>
         <button class="mermaid-tool-btn" data-action="zoom-out" title="Perkecil (-)"><i class="fa-solid fa-minus"></i></button>
         <span class="mermaid-zoom-level">100%</span>
         <button class="mermaid-tool-btn" data-action="zoom-in" title="Perbesar (+)"><i class="fa-solid fa-plus"></i></button>
@@ -3999,8 +4023,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     };
     window.addEventListener('keydown', escMermaidFullscreen);
 
-    toolbar.addEventListener('click', (e) => {
-      const btn = e.target.closest('.mermaid-tool-btn');
+    toolbar.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.mermaid-tool-btn, .mermaid-download-item');
       if (!btn) return;
       e.stopPropagation();
       const action = btn.dataset.action;
@@ -4054,7 +4078,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           showToast('Kode sumber diagram Mermaid berhasil disalin!');
           AudioEngine.snap();
         });
+      } else if (action === 'toggle-download-menu') {
+        const menu = toolbar.querySelector('.mermaid-dropdown-menu');
+        if (menu) {
+          const isVisible = menu.style.display !== 'none';
+          document.querySelectorAll('.mermaid-dropdown-menu').forEach(m => m.style.display = 'none');
+          menu.style.display = isVisible ? 'none' : 'flex';
+        }
       } else if (action === 'download-svg') {
+        const menu = toolbar.querySelector('.mermaid-dropdown-menu');
+        if (menu) menu.style.display = 'none';
         const svgEl = stage.querySelector('svg');
         if (!svgEl) {
           showToast('Diagram belum siap diunduh.', 'warning');
@@ -4071,10 +4104,34 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           downloadLink.click();
           downloadLink.remove();
           setTimeout(() => URL.revokeObjectURL(svgUrl), 2000);
-          showToast('Diagram SVG berhasil diunduh!');
+          showToast('Diagram SVG (.svg) berhasil diunduh!');
           AudioEngine.success();
         } catch (err) {
           showToast('Gagal mengunduh SVG: ' + err.message, 'error');
+        }
+      } else if (action === 'download-jpeg') {
+        const menu = toolbar.querySelector('.mermaid-dropdown-menu');
+        if (menu) menu.style.display = 'none';
+        const svgEl = stage.querySelector('svg');
+        if (!svgEl) {
+          showToast('Diagram belum siap diunduh.', 'warning');
+          return;
+        }
+        try {
+          showToast('⚙ Merasterisasi gambar JPEG resolusi tinggi...', 'info');
+          const jpegBlob = await convertSvgToJpegBlob(svgEl, { mermaidCode: cleanCode });
+          const jpegUrl = URL.createObjectURL(jpegBlob);
+          const downloadLink = document.createElement('a');
+          downloadLink.href = jpegUrl;
+          downloadLink.download = (diagramTitle.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'diagram') + '.jpeg';
+          document.body.appendChild(downloadLink);
+          downloadLink.click();
+          downloadLink.remove();
+          setTimeout(() => URL.revokeObjectURL(jpegUrl), 2000);
+          showToast('Diagram JPEG (.jpeg) berhasil diunduh!', 'success');
+          AudioEngine.success();
+        } catch (err) {
+          showToast('Gagal mengunduh JPEG: ' + err.message, 'error');
         }
       }
     });
@@ -4160,10 +4217,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const cleanCode = getCleanMermaidCode(rawText);
       const isMermaid = lang === 'MERMAID' || (
         !pre.dataset.mermaidRendered &&
-        (cleanCode.startsWith('graph ') || cleanCode.startsWith('flowchart ') || cleanCode.startsWith('sequenceDiagram') ||
-         cleanCode.startsWith('classDiagram') || cleanCode.startsWith('stateDiagram') || cleanCode.startsWith('erDiagram') ||
-         cleanCode.startsWith('gantt') || cleanCode.startsWith('pie ') || cleanCode.startsWith('gitGraph') ||
-         cleanCode.startsWith('mindmap') || cleanCode.startsWith('timeline') || cleanCode.startsWith('quadrantChart'))
+        /^(?:---[\s\S]*?---\s*)?(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|mindmap|timeline|quadrantChart|C4Context|journey)\b/i.test(cleanCode)
       );
 
       if (isMermaid) {
@@ -7619,6 +7673,17 @@ Aturan wajib:
         rawContent.includes('subgraph ')
       ));
     const isPureSvg = ext === 'svg' && !isMermaid;
+    const isDiagram = isDiagramFile(file);
+
+    if (els.aiFileStudioDownloadCaret) {
+      els.aiFileStudioDownloadCaret.style.display = isDiagram ? 'inline-block' : 'none';
+    }
+    if (els.aiFileStudioDownloadMenu) {
+      els.aiFileStudioDownloadMenu.style.display = 'none';
+    }
+    if (els.aiFileStudioDownloadText) {
+      els.aiFileStudioDownloadText.textContent = isDiagram ? 'Unduh Diagram' : 'Unduh File';
+    }
 
     setAIFileStudioTab(previewable ? 'preview' : 'code');
 
@@ -7717,27 +7782,138 @@ Aturan wajib:
     openModal('aiFileStudioModal');
   }
 
-  async function downloadAIFile(file) {
+  function isDiagramFile(file) {
+    if (!file) return false;
+    const n = (file.name || '').toLowerCase();
+    const raw = file.rawContent || file.content || '';
+    return n.endsWith('.svg') || n.endsWith('.mermaid') || n.endsWith('.mmd') || file.lang === 'mermaid' ||
+      file.mime === 'image/svg+xml' ||
+      (!raw.trim().startsWith('<svg') && (
+        raw.includes('flowchart') || raw.includes('graph ') || raw.includes('sequenceDiagram') ||
+        raw.includes('classDiagram') || raw.includes('stateDiagram') || raw.includes('erDiagram') ||
+        raw.includes('-->')
+      ));
+  }
+
+  async function convertSvgToJpegBlob(svgInput, options = {}) {
+    let svgStr = typeof svgInput === 'string' ? svgInput : new XMLSerializer().serializeToString(svgInput);
+    const rawMermaidCode = options.mermaidCode || null;
+
+    // Render untainted SVG with htmlLabels: false if mermaid code is available (eliminates foreignObject tainted canvas)
+    if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
+      try {
+        if (rawMermaidCode) {
+          window.mermaid.initialize({
+            startOnLoad: false,
+            theme: 'dark',
+            securityLevel: 'loose',
+            flowchart: { htmlLabels: false, useMaxWidth: true }
+          });
+          const cleanDiagram = getCleanMermaidCode(rawMermaidCode);
+          const rasterRes = await window.mermaid.render('raster_jpeg_' + Date.now(), cleanDiagram);
+          if (rasterRes && rasterRes.svg) {
+            svgStr = rasterRes.svg;
+          }
+          initMermaidEngine();
+        }
+      } catch (mErr) {
+        console.warn('Gagal merender SVG htmlLabels:false, menggunakan pembersih fallback:', mErr);
+        try { initMermaidEngine(); } catch (_) {}
+      }
+    }
+
+    // Safety sanitize: If SVG still has <foreignObject>, convert to pure SVG text to prevent canvas tainting
+    if (svgStr.includes('<foreignObject')) {
+      svgStr = svgStr.replace(/<foreignObject\b([^>]*)>[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>[\s\S]*?<\/foreignObject>/gi, (m, attrs, text) => {
+        const xMatch = attrs.match(/x=["']([^"']*)["']/i);
+        const yMatch = attrs.match(/y=["']([^"']*)["']/i);
+        const x = xMatch ? parseFloat(xMatch[1]) : 0;
+        const y = yMatch ? parseFloat(yMatch[1]) : 0;
+        const cleanText = text.replace(/<[^>]+>/g, '').trim();
+        return `<text x="${x}" y="${y + 16}" fill="#e2e8f0" font-size="14" font-family="sans-serif" text-anchor="middle">${cleanText}</text>`;
+      });
+      svgStr = svgStr.replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '');
+    }
+
+    // Dimensions
+    let width = options.width || 0;
+    let height = options.height || 0;
+    const viewBoxMatch = svgStr.match(/viewBox=["']([0-9.\s-]+)["']/i);
+    if (viewBoxMatch && viewBoxMatch[1]) {
+      const parts = viewBoxMatch[1].trim().split(/[\s,]+/).map(Number);
+      if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+        width = parts[2];
+        height = parts[3];
+      }
+    }
+    if (!width || !height) {
+      const wMatch = svgStr.match(/width=["']([0-9.]+)(?:px)?["']/i);
+      const hMatch = svgStr.match(/height=["']([0-9.]+)(?:px)?["']/i);
+      if (wMatch && wMatch[1]) width = parseFloat(wMatch[1]);
+      if (hMatch && hMatch[1]) height = parseFloat(hMatch[1]);
+    }
+    if (!width || !height || isNaN(width) || isNaN(height)) {
+      width = 900;
+      height = 650;
+    }
+
+    const padding = 28;
+    const totalWidth = width + (padding * 2);
+    const totalHeight = height + (padding * 2);
+
+    if (!svgStr.includes('xmlns=')) {
+      svgStr = svgStr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+    }
+    svgStr = svgStr.replace(/<svg\b([^>]*)>/i, (m, attrs) => {
+      let cleanAttrs = attrs
+        .replace(/\bwidth=["'][^"']*["']/gi, '')
+        .replace(/\bheight=["'][^"']*["']/gi, '');
+      return `<svg width="${totalWidth}" height="${totalHeight}" ${cleanAttrs}>`;
+    });
+
+    const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgStr);
+
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const scale = options.scale || 2;
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(totalWidth * scale);
+          canvas.height = Math.round(totalHeight * scale);
+          const ctx = canvas.getContext('2d');
+
+          ctx.fillStyle = options.backgroundColor || '#0a0f1d';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, padding * scale, padding * scale, width * scale, height * scale);
+
+          canvas.toBlob((blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Gagal merender kanvas ke JPEG'));
+            }
+          }, 'image/jpeg', options.quality || 0.95);
+        } catch (e) {
+          reject(e);
+        }
+      };
+      img.onerror = () => reject(new Error('Gagal memuat gambar SVG untuk konversi JPEG'));
+      img.src = svgDataUrl;
+    });
+  }
+
+  async function downloadAIFile(file, format = 'svg') {
     if (!file) return;
     try {
       const fileNameLower = (file.name || '').toLowerCase();
       const rawText = file.rawContent || file.content || '';
       let blob;
 
-      const isDiagram = fileNameLower.endsWith('.svg') ||
-                        fileNameLower.endsWith('.mermaid') ||
-                        fileNameLower.endsWith('.mmd') ||
-                        file.lang === 'mermaid' ||
-                        file.mime === 'image/svg+xml' ||
-                        (!rawText.trim().startsWith('<svg') && (
-                          rawText.includes('flowchart') ||
-                          rawText.includes('graph ') ||
-                          rawText.includes('sequenceDiagram') ||
-                          rawText.includes('classDiagram') ||
-                          rawText.includes('stateDiagram') ||
-                          rawText.includes('erDiagram') ||
-                          rawText.includes('-->')
-                        ));
+      const isDiagram = isDiagramFile(file);
 
       if (fileNameLower.endsWith('.docx')) {
         showToast('⚙ Mengompilasi dokumen Word (.docx)...', 'info');
@@ -7746,7 +7922,6 @@ Aturan wajib:
         showToast('⚙ Mengompilasi dokumen PDF (.pdf)...', 'info');
         blob = await compileMarkdownToPdfBlob(rawText, file.name);
       } else if (isDiagram) {
-        showToast('⚙ Mengompilasi gambar vektor SVG...', 'info');
         let svgText = file.svgContent || '';
         if (!svgText && (rawText.includes('<svg') || rawText.trim().startsWith('<svg'))) {
           svgText = rawText;
@@ -7775,14 +7950,25 @@ Aturan wajib:
   </foreignObject>
 </svg>`;
         }
-        blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+
+        if (format === 'jpeg' || format === 'jpg') {
+          showToast('⚙ Merasterisasi gambar JPEG resolusi tinggi...', 'info');
+          blob = await convertSvgToJpegBlob(svgText, { mermaidCode: rawText });
+        } else {
+          showToast('⚙ Mengompilasi gambar vektor SVG...', 'info');
+          blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+        }
       } else {
         blob = new Blob([file.content || ''], { type: (String(file.mime || 'text/plain')) + ';charset=utf-8' });
       }
 
       let safeFileName = (file.name || 'berkas.txt').replace(/[/\\?%*:|"<>]/g, '_').trim() || 'berkas.txt';
-      if (isDiagram && !safeFileName.toLowerCase().endsWith('.svg')) {
-        safeFileName = safeFileName.replace(/\.(?:mermaid|mmd|txt)$/i, '') + '.svg';
+      if (isDiagram) {
+        if (format === 'jpeg' || format === 'jpg') {
+          safeFileName = safeFileName.replace(/\.(?:svg|mermaid|mmd|txt)$/i, '') + '.jpeg';
+        } else if (!safeFileName.toLowerCase().endsWith('.svg')) {
+          safeFileName = safeFileName.replace(/\.(?:mermaid|mmd|txt)$/i, '') + '.svg';
+        }
       }
 
       const url = URL.createObjectURL(blob);
@@ -7793,7 +7979,8 @@ Aturan wajib:
       a.click();
       a.remove();
       setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 4000);
-      showToast('⬇ Berkas ' + safeFileName + ' berhasil diunduh.', 'success');
+      const formatLabel = (format === 'jpeg' || format === 'jpg') ? 'JPEG' : (isDiagram ? 'SVG' : 'berkas');
+      showToast(`⬇ Berkas ${safeFileName} (${formatLabel}) berhasil diunduh.`, 'success');
       AudioEngine.click();
     } catch (err) {
       showToast('Gagal mengunduh berkas: ' + (err && err.message ? err.message : err), 'error');
@@ -8122,22 +8309,33 @@ Aturan wajib:
       }
 
       // TOMBOL UNDUH SELALU ADA DI SEMUA KONDISI AGAR PENGGUNA BISA MENGUNDUH KAPAN SAJA
+      const isFileDiagram = isDiagramFile(file);
+      let downloadButtonsHtml = '';
+      if (isFileDiagram) {
+        downloadButtonsHtml =
+          '  <button class="ai-file-btn download download-svg" type="button" data-act="download-svg" title="Unduh gambar vektor SVG (.svg)"><i class="fa-solid fa-bezier-curve"></i> SVG</button>' +
+          '  <button class="ai-file-btn download download-jpeg" type="button" data-act="download-jpeg" title="Unduh gambar foto JPEG (.jpeg)"><i class="fa-solid fa-image"></i> JPEG</button>';
+      } else {
+        downloadButtonsHtml =
+          '  <button class="ai-file-btn download" type="button" data-act="download"><i class="fa-solid fa-download"></i> Unduh</button>';
+      }
+
       let actionsHtml = '';
       if (isPending) {
         actionsHtml =
           '  <button class="ai-file-btn allow-pending" type="button" data-act="allow-pending" data-name="' + escapeHtml(file.name) + '"><i class="fa-solid fa-check"></i> ' + (isEdit ? 'Konfirmasi & Tulis' : 'Konfirmasi & Simpan') + '</button>' +
           '  <button class="ai-file-btn reject-pending" type="button" data-act="reject-pending" data-name="' + escapeHtml(file.name) + '"><i class="fa-solid fa-xmark"></i> Tolak</button>' +
           '  <button class="ai-file-btn preview" type="button" data-act="preview"><i class="fa-solid fa-eye"></i> Pratinjau</button>' +
-          '  <button class="ai-file-btn download" type="button" data-act="download"><i class="fa-solid fa-download"></i> Unduh</button>';
+          downloadButtonsHtml;
       } else if (isWorkspace) {
         actionsHtml =
           '  <button class="ai-file-btn preview" type="button" data-act="preview"><i class="fa-solid fa-eye"></i> Pratinjau</button>' +
           '  <button class="ai-file-btn open-workspace-doc" type="button" data-act="open-workspace-doc" data-name="' + escapeHtml(file.name) + '"><i class="fa-solid fa-folder-open"></i> Buka di Direktori</button>' +
-          '  <button class="ai-file-btn download" type="button" data-act="download"><i class="fa-solid fa-download"></i> Unduh</button>';
+          downloadButtonsHtml;
       } else {
         actionsHtml =
           '  <button class="ai-file-btn preview" type="button" data-act="preview"><i class="fa-solid fa-eye"></i> Pratinjau</button>' +
-          '  <button class="ai-file-btn download" type="button" data-act="download"><i class="fa-solid fa-download"></i> Unduh</button>';
+          downloadButtonsHtml;
       }
 
       card.innerHTML =
@@ -8810,7 +9008,11 @@ ${blocks}
     const file = card._aiFile;
     const btn = e.target.closest ? e.target.closest('.ai-file-btn') : null;
     if (btn) {
-      if (btn.dataset.act === 'download') {
+      if (btn.dataset.act === 'download-svg') {
+        downloadAIFile(file, 'svg');
+      } else if (btn.dataset.act === 'download-jpeg') {
+        downloadAIFile(file, 'jpeg');
+      } else if (btn.dataset.act === 'download') {
         downloadAIFile(file);
       } else if (btn.dataset.act === 'allow-pending') {
         approveWorkspacePendingChange(file.name, file);
@@ -8858,8 +9060,37 @@ ${blocks}
     });
     closeModal('aiFileStudioModal');
   });
-  els.aiFileStudioDownloadBtn?.addEventListener('click', () => {
-    if (activeAIFile) downloadAIFile(activeAIFile);
+  els.aiFileStudioDownloadBtn?.addEventListener('click', (e) => {
+    if (!activeAIFile) return;
+    const isDiagram = isDiagramFile(activeAIFile);
+    if (isDiagram && els.aiFileStudioDownloadMenu) {
+      e.stopPropagation();
+      const isVisible = els.aiFileStudioDownloadMenu.style.display !== 'none';
+      els.aiFileStudioDownloadMenu.style.display = isVisible ? 'none' : 'flex';
+    } else {
+      downloadAIFile(activeAIFile);
+    }
+  });
+
+  els.btnStudioDownloadSvg?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (els.aiFileStudioDownloadMenu) els.aiFileStudioDownloadMenu.style.display = 'none';
+    if (activeAIFile) downloadAIFile(activeAIFile, 'svg');
+  });
+
+  els.btnStudioDownloadJpeg?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (els.aiFileStudioDownloadMenu) els.aiFileStudioDownloadMenu.style.display = 'none';
+    if (activeAIFile) downloadAIFile(activeAIFile, 'jpeg');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#aiFileStudioDownloadWrap')) {
+      if (els.aiFileStudioDownloadMenu) els.aiFileStudioDownloadMenu.style.display = 'none';
+    }
+    if (!e.target.closest('.mermaid-dropdown-wrap')) {
+      document.querySelectorAll('.mermaid-dropdown-menu').forEach(m => m.style.display = 'none');
+    }
   });
   els.btnToggleStudioFullscreen?.addEventListener('click', () => {
     const card = els.aiFileStudioModal?.querySelector('.ai-file-studio-card');
@@ -24044,7 +24275,9 @@ Aturan:
     downloadAIFile,
     getCleanMermaidCode,
     enhanceCodeBlocks,
-    renderInteractiveMermaidCard
+    renderInteractiveMermaidCard,
+    convertSvgToJpegBlob,
+    isDiagramFile
   };
 
   // Start on DOM ready (safeguarded against post-DOMContentLoaded script execution)
