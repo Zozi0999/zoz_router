@@ -16255,12 +16255,16 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     }
 
     if (els.workspacePlatformBadge) {
-      if (isSupported) {
+      if (STATE.localWorkspace.platform === 'server-fs') {
+        els.workspacePlatformBadge.innerHTML = '<i class="fa-solid fa-bolt"></i> Server Proyek / Mode Claude Code';
+        els.workspacePlatformBadge.style.color = '#38bdf8';
+        els.workspacePlatformBadge.style.borderColor = 'rgba(56, 189, 248, 0.4)';
+      } else if (isSupported) {
         els.workspacePlatformBadge.innerHTML = '<i class="fa-solid fa-laptop"></i> Laptop / Native File System';
         els.workspacePlatformBadge.style.color = 'var(--neon-cyan)';
         els.workspacePlatformBadge.style.borderColor = 'rgba(0, 240, 255, 0.4)';
       } else {
-        els.workspacePlatformBadge.innerHTML = '<i class="fa-solid fa-mobile-screen"></i> Ponsel / Universal Mobile Storage';
+        els.workspacePlatformBadge.innerHTML = '<i class="fa-solid fa-mobile-screen"></i> Ponsel / Browser Mobile Storage';
         els.workspacePlatformBadge.style.color = 'var(--neon-teal)';
         els.workspacePlatformBadge.style.borderColor = 'rgba(0, 255, 194, 0.4)';
       }
@@ -16272,8 +16276,14 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         : 'Belum Ada Direktori Terhubung';
     }
     if (els.workspaceConnectedDirDetails) {
+      let platformModeText = 'Virtual Storage HP';
+      if (STATE.localWorkspace.platform === 'server-fs') {
+        platformModeText = 'Claude Code Live Disk I/O (Tanpa Unduh)';
+      } else if (STATE.localWorkspace.platform === 'desktop-fs') {
+        platformModeText = 'Akses Langsung Hard Disk Laptop (Tanpa Unduh)';
+      }
       els.workspaceConnectedDirDetails.textContent = isEnabled && STATE.localWorkspace.dirName
-        ? `${totalCount} berkas terdeteksi • Total ukuran: ${formatBytes(totalSize)} • Mode: ${STATE.localWorkspace.platform === 'desktop-fs' ? 'Akses Langsung Disk' : 'Virtual Storage HP'}`
+        ? `${totalCount} berkas terdeteksi • Total ukuran: ${formatBytes(totalSize)} • Mode: ${platformModeText}`
         : 'Pilih folder dari HP atau laptop Anda untuk mulai dikelola AI';
     }
 
