@@ -3688,14 +3688,18 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'");
 
-    // 2. Buang tag HTML pemformatan teks (<b>, <strong>, <i>, <em>, <u>, <span>, <font>, dll.)
-    code = code.replace(/<\/?(?:b|strong|i|em|u|span|font)(?:\s+[^>]*)?>/gi, '');
+    // 2. Buang tag HTML pemformatan teks KHUSUS tag format HTML (JANGAN gunakan /<[^>]+>/g rakus yang menghapus panah <--> atau tag token <token>)
+    code = code.replace(/<\/?(?:b|strong|i|em|u|span|font|div|p|small|sub|sup)(?:\s+[^>]*)?>/gi, '');
 
-    // 3. Konversi tag <br/> atau <br> menjadi literal \n agar Mermaid membaginya ke <tspan> murni
+    // 3. Pastikan node dengan tag <br> yang tidak memiliki tanda kutip otomatis diberi tanda kutip agar \n valid di Mermaid
+    // Contoh: A[Input<br/>Token] -> A["Input\nToken"]
+    code = code.replace(/(\[|\(\[|\{\{|\{|\(\(|\/|\\)([^"\[\]\(\)\{\}\n]*<br\s*\/?>[^"\[\]\(\)\{\}\n]*)(\]|\)\]|\}\}|\}|\)\)|\/|\\)/gi, (m, open, text, close) => {
+      const withNl = text.replace(/<br\s*\/?>/gi, '\\n');
+      return `${open}"${withNl}"${close}`;
+    });
+
+    // 4. Konversi sisa tag <br/> atau <br> menjadi literal \n
     code = code.replace(/<br\s*\/?>/gi, '\\n');
-
-    // 4. Buang tag HTML lainnya yang mungkin masih bersisa
-    code = code.replace(/<[^>]+>/g, '');
 
     // 5. Bersihkan entitas ampersand ganda
     code = code.replace(/&amp;/gi, '&');
@@ -3914,6 +3918,81 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 </html>`;
   }
 
+  function sanitizeTitle(str) {
+    return String(str || '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/[^\w\s-]/g, '')
+      .trim()
+      .replace(/\s+/g, '_')
+      .slice(0, 50);
+  }
+
+  function extractSmartDiagramTitle(code, preElement = null) {
+    if (!code) return 'diagram';
+
+    // 1. Cek heading markdown terdekat sebelum elemen diagram di DOM
+    if (preElement && preElement.parentElement) {
+      let prev = preElement.previousElementSibling;
+      let attempts = 0;
+      while (prev && attempts < 5) {
+        if (prev.matches('h1, h2, h3, h4, h5, h6, strong, b, .markdown-heading')) {
+          const hText = (prev.textContent || '').replace(/[#*`_~]/g, '').trim();
+          if (hText.length >= 3 && hText.length <= 60) return sanitizeTitle(hText);
+        }
+        prev = prev.previousElementSibling;
+        attempts++;
+      }
+    }
+
+    // 2. Cek frontmatter title: --- title: "..." ---
+    const fmMatch = code.match(/^---\s*[\r\n]+(?:[\s\S]*?\n)?title:\s*["']?([^"'\r\n]+)["']?/i);
+    if (fmMatch && fmMatch[1] && fmMatch[1].trim().length >= 3) {
+      return sanitizeTitle(fmMatch[1]);
+    }
+
+    // 3. Cek direktif title atau accTitle: title: "..."
+    const titleMatch = code.match(/^(?:accTitle|title)[:\s]+["']?([^"'\r\n]+)["']?/im);
+    if (titleMatch && titleMatch[1] && titleMatch[1].trim().length >= 3) {
+      return sanitizeTitle(titleMatch[1]);
+    }
+
+    // 4. Cek judul subgraph pertama: subgraph Enc["<b>ENCODER STACK</b>"]
+    const subMatch = code.match(/subgraph\s+[a-zA-Z0-9_-]+\s*\["([^"\r\n]+)"\]/i);
+    if (subMatch && subMatch[1]) {
+      const cleanSub = subMatch[1].replace(/<[^>]+>/g, '').trim();
+      if (cleanSub.length >= 3) return sanitizeTitle(cleanSub);
+    }
+
+    // 5. Cek label node pertama yang bermakna
+    const nodeMatch = code.match(/[a-zA-Z0-9_-]+\s*\["([^"\r\n]+)"\]/);
+    if (nodeMatch && nodeMatch[1]) {
+      const cleanNode = nodeMatch[1].replace(/<[^>]+>/g, '').replace(/\\n/g, ' ').trim();
+      if (cleanNode.length >= 3 && cleanNode.length <= 40) return sanitizeTitle(cleanNode);
+    }
+
+    // 6. Jenis diagram fallback
+    const firstLine = code.trim().split('\n')[0].toLowerCase();
+    if (firstLine.includes('sequencediagram')) return 'sequence_diagram';
+    if (firstLine.includes('classdiagram')) return 'class_diagram';
+    if (firstLine.includes('statediagram')) return 'state_diagram';
+    if (firstLine.includes('erdiagram')) return 'er_diagram';
+    if (firstLine.includes('flowchart') || firstLine.includes('graph')) return 'diagram_alur';
+    if (firstLine.includes('mindmap')) return 'mindmap_diagram';
+    return 'diagram_visual';
+  }
+
+  function generateUniqueDiagramFilename(code, preElement = null, ext = 'jpeg') {
+    const base = extractSmartDiagramTitle(code, preElement);
+    const now = new Date();
+    const dateStr = now.getFullYear().toString() +
+      String(now.getMonth() + 1).padStart(2, '0') +
+      String(now.getDate()).padStart(2, '0');
+    const timeStr = String(now.getHours()).padStart(2, '0') +
+      String(now.getMinutes()).padStart(2, '0') +
+      String(now.getSeconds()).padStart(2, '0');
+    return `${base}_${dateStr}_${timeStr}.${ext}`;
+  }
+
   let mermaidDiagramCounter = 0;
 
   function renderInteractiveMermaidCard(preElement, rawCode) {
@@ -3926,17 +4005,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     const cardId = 'mermaidCard_' + mermaidDiagramCounter + '_' + Math.random().toString(36).substring(2, 7);
     const diagramId = 'mermaidSvg_' + mermaidDiagramCounter + '_' + Math.random().toString(36).substring(2, 7);
 
-    let diagramTitle = 'Diagram Alur Visual';
-    const firstLine = cleanCode.trim().split('\n')[0].toLowerCase();
-    if (firstLine.includes('sequencediagram')) diagramTitle = 'Sequence Diagram';
-    else if (firstLine.includes('classdiagram')) diagramTitle = 'Class Diagram';
-    else if (firstLine.includes('statediagram')) diagramTitle = 'State Diagram';
-    else if (firstLine.includes('erdiagram')) diagramTitle = 'Entity-Relationship Diagram';
-    else if (firstLine.includes('flowchart') || firstLine.includes('graph')) diagramTitle = 'Diagram Alur (Flowchart)';
-    else if (firstLine.includes('gantt')) diagramTitle = 'Gantt Chart';
-    else if (firstLine.includes('pie')) diagramTitle = 'Diagram Lingkaran (Pie Chart)';
-    else if (firstLine.includes('gitgraph')) diagramTitle = 'Git Graph';
-    else if (firstLine.includes('mindmap')) diagramTitle = 'Mindmap Visual';
+    const smartBaseTitle = extractSmartDiagramTitle(cleanCode, preElement);
+    let diagramTitle = smartBaseTitle.replace(/_/g, ' ');
+    if (diagramTitle.length > 40) diagramTitle = diagramTitle.slice(0, 40) + '...';
 
     const card = document.createElement('div');
     card.className = 'mermaid-diagram-card';
@@ -4162,12 +4233,13 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           const svgUrl = URL.createObjectURL(svgBlob);
           const downloadLink = document.createElement('a');
           downloadLink.href = svgUrl;
-          downloadLink.download = (diagramTitle.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'diagram') + '.svg';
+          const finalSvgName = generateUniqueDiagramFilename(cleanCode, card, 'svg');
+          downloadLink.download = finalSvgName;
           document.body.appendChild(downloadLink);
           downloadLink.click();
           downloadLink.remove();
           setTimeout(() => URL.revokeObjectURL(svgUrl), 2000);
-          showToast('Diagram SVG (.svg) berhasil diunduh!');
+          showToast(`Diagram SVG (${finalSvgName}) berhasil diunduh!`);
           AudioEngine.success();
         } catch (err) {
           showToast('Gagal mengunduh SVG: ' + err.message, 'error');
@@ -4186,12 +4258,13 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           const jpegUrl = URL.createObjectURL(jpegBlob);
           const downloadLink = document.createElement('a');
           downloadLink.href = jpegUrl;
-          downloadLink.download = (diagramTitle.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'diagram') + '.jpeg';
+          const finalJpegName = generateUniqueDiagramFilename(cleanCode, card, 'jpeg');
+          downloadLink.download = finalJpegName;
           document.body.appendChild(downloadLink);
           downloadLink.click();
           downloadLink.remove();
           setTimeout(() => URL.revokeObjectURL(jpegUrl), 2000);
-          showToast('Diagram JPEG (.jpeg) berhasil diunduh!', 'success');
+          showToast(`Diagram JPEG (${finalJpegName}) berhasil diunduh!`, 'success');
           AudioEngine.success();
         } catch (err) {
           showToast('Gagal mengunduh JPEG: ' + err.message, 'error');
@@ -7538,30 +7611,16 @@ Aturan wajib:
     const isMermaid = cleanLang === 'mermaid' || cleanLang === 'mmd' || cleanLang === 'svg' || (body && (body.includes('flowchart') || body.includes('sequenceDiagram') || body.includes('classDiagram') || body.includes('stateDiagram') || body.includes('erDiagram') || body.includes('graph ') || body.includes('gitGraph') || body.includes('mindmap')));
 
     if (isMermaid) {
-      const lines = String(body || '').split('\n');
-      for (const line of lines) {
-        const t = line.trim();
-        const m = t.match(/^(?:accTitle|title)[:\s]+(.+)$/i);
-        if (m && m[1]) {
-          const safe = m[1].replace(/[^a-zA-Z0-9_\-\s]/g, '').trim().replace(/\s+/g, '_');
-          if (safe.length >= 3) return safe + '.svg';
-        }
+      return generateUniqueDiagramFilename(body, null, 'svg');
+    }
+
+    if (cleanLang === 'docx' || cleanLang === 'pdf' || cleanLang === 'md' || cleanLang === 'markdown') {
+      const hMatch = String(body || '').match(/^#\s+([^\r\n]+)/m);
+      if (hMatch && hMatch[1]) {
+        const cleanH = sanitizeTitle(hMatch[1]);
+        const ext = cleanLang === 'docx' ? 'docx' : (cleanLang === 'pdf' ? 'pdf' : 'md');
+        if (cleanH.length >= 3) return `${cleanH}.${ext}`;
       }
-      // Ekstrak konteks dari kata kunci di dalam diagram
-      const bLow = String(body || '').toLowerCase();
-      let topic = '';
-      if (bLow.includes('email') && (bLow.includes('verif') || bLow.includes('token') || bLow.includes('aktivasi'))) topic = 'Alur_Verifikasi_Email';
-      else if (bLow.includes('login') || bLow.includes('auth') || bLow.includes('masuk')) topic = 'Alur_Autentikasi_Login';
-      else if (bLow.includes('daftar') || bLow.includes('regist') || bLow.includes('signup')) topic = 'Alur_Registrasi_Pengguna';
-      else if (bLow.includes('bayar') || bLow.includes('payment') || bLow.includes('checkout') || bLow.includes('transaksi')) topic = 'Alur_Pembayaran_Checkout';
-      else if (bLow.includes('database') || bLow.includes('tabel') || bLow.includes('entity') || bLow.includes('erd')) topic = 'Diagram_Relasi_Database';
-      else if (bLow.includes('arsitektur') || bLow.includes('microservice') || bLow.includes('server') || bLow.includes('gateway')) topic = 'Arsitektur_Sistem';
-      else if (bLow.includes('agent') || bLow.includes('logika')) topic = 'Arsitektur_Logika_AI_Agent';
-      else if (bLow.includes('sequencediagram')) topic = 'Diagram_Interaksi_Sequence';
-      else if (bLow.includes('classdiagram')) topic = 'Diagram_Struktur_Class';
-      else if (bLow.includes('flowchart') || bLow.includes('graph')) topic = 'Diagram_Alur_Logika';
-      else topic = 'Diagram_Visual_' + Date.now().toString(36).slice(-4).toUpperCase();
-      return topic + '.svg';
     }
 
     const map = {
@@ -7602,10 +7661,11 @@ Aturan wajib:
     const lower = cleanName.toLowerCase();
     const isGeneric = !cleanName ||
       lower === 'file.svg' || lower === 'diagram.svg' || lower === 'chart.svg' || lower === 'untitled.svg' ||
+      lower === 'diagram_alur_sistem.svg' || lower === 'diagram_alur_logika.svg' || lower === 'arsitektur_sistem.svg' ||
       lower === 'file.mermaid' || lower === 'diagram.mermaid' || lower === 'chart.mermaid' || lower === 'untitled.mermaid' ||
-      lower === 'file.docx' || lower === 'dokumen.docx' || lower === 'document.docx' ||
-      lower === 'file.pdf' || lower === 'dokumen.pdf' || lower === 'document.pdf' ||
-      lower === 'file.txt' || lower === 'untitled.txt';
+      lower === 'file.docx' || lower === 'dokumen.docx' || lower === 'document.docx' || lower === 'dokumen_laporan.docx' ||
+      lower === 'file.pdf' || lower === 'dokumen.pdf' || lower === 'document.pdf' || lower === 'dokumen_laporan.pdf' ||
+      lower === 'file.txt' || lower === 'untitled.txt' || lower === 'catatan.txt' || lower === 'readme.md';
 
     if (isGeneric) {
       const ext = lower.split('.').pop() || lang || (isDiagramContent ? 'svg' : 'txt');
@@ -7901,7 +7961,7 @@ Aturan wajib:
     let svgStr = typeof svgInput === 'string' ? svgInput : new XMLSerializer().serializeToString(svgInput);
     const rawMermaidCode = options.mermaidCode || null;
 
-    // Render untainted SVG with htmlLabels: false if mermaid code is available (eliminates foreignObject tainted canvas)
+    // Render untainted SVG dengan htmlLabels: false jika kode mermaid tersedia (mencegah foreignObject tainted canvas)
     if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
       try {
         if (rawMermaidCode) {
@@ -7909,13 +7969,26 @@ Aturan wajib:
             startOnLoad: false,
             theme: 'dark',
             securityLevel: 'loose',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+            themeVariables: {
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+              fontSize: '14px',
+              primaryTextColor: '#f8fafc',
+              textColor: '#f8fafc'
+            },
             flowchart: {
               htmlLabels: false,
-              useMaxWidth: true,
+              useMaxWidth: false,
               curve: 'basis',
               nodeSpacing: 50,
               rankSpacing: 55,
-              padding: 16
+              padding: 24
+            },
+            sequence: {
+              useMaxWidth: false,
+              actorFontSize: 14,
+              noteFontSize: 13,
+              messageFontSize: 13
             }
           });
           const cleanDiagram = getCleanMermaidCodeForRaster(rawMermaidCode);
@@ -7931,17 +8004,42 @@ Aturan wajib:
       }
     }
 
-    // Safety sanitize: If SVG still has <foreignObject>, convert to pure SVG text to prevent canvas tainting
+    // Safety sanitize fallback: Jika SVG masih memiliki <foreignObject>, konversi ke elemen teks SVG murni multiline yang terpusat
     if (svgStr.includes('<foreignObject')) {
-      svgStr = svgStr.replace(/<foreignObject\b([^>]*)>[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>[\s\S]*?<\/foreignObject>/gi, (m, attrs, text) => {
+      svgStr = svgStr.replace(/<foreignObject\b([^>]*)>([\s\S]*?)<\/foreignObject>/gi, (m, attrs, body) => {
         const xMatch = attrs.match(/x=["']([^"']*)["']/i);
         const yMatch = attrs.match(/y=["']([^"']*)["']/i);
+        const wMatch = attrs.match(/width=["']([^"']*)["']/i);
+        const hMatch = attrs.match(/height=["']([^"']*)["']/i);
         const x = xMatch ? parseFloat(xMatch[1]) : 0;
         const y = yMatch ? parseFloat(yMatch[1]) : 0;
-        const cleanText = text.replace(/<[^>]+>/g, '').trim();
-        return `<text x="${x}" y="${y + 16}" fill="#e2e8f0" font-size="14" font-family="sans-serif" text-anchor="middle">${cleanText}</text>`;
+        const w = wMatch ? parseFloat(wMatch[1]) : 120;
+        const h = hMatch ? parseFloat(hMatch[1]) : 40;
+
+        let cleanText = body
+          .replace(/<br\s*\/?>/gi, '\n')
+          .replace(/<\/p>|<\/div>/gi, '\n')
+          .replace(/<[^>]+>/g, '')
+          .replace(/&gt;/g, '>')
+          .replace(/&lt;/g, '<')
+          .replace(/&amp;/g, '&')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .trim();
+
+        const lines = cleanText.split('\n').map(l => l.trim()).filter(Boolean);
+        if (lines.length === 0) return '';
+
+        const centerX = x + (w / 2);
+        const startY = y + (h / 2) - ((lines.length - 1) * 8) + 4;
+        const tspans = lines.map((line, idx) => {
+          const dy = idx === 0 ? '0' : '16';
+          const weight = idx === 0 ? 'font-weight="600"' : '';
+          return `<tspan x="${centerX}" dy="${dy}" ${weight}>${escapeHtml(line)}</tspan>`;
+        }).join('');
+
+        return `<text x="${centerX}" y="${startY}" fill="#e2e8f0" font-size="13" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" text-anchor="middle">${tspans}</text>`;
       });
-      svgStr = svgStr.replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '');
     }
 
     // Post-sanitize SVG: hilangkan artefak kode HTML mentah atau entitas lolos dalam elemen teks/tspan SVG
@@ -7955,6 +8053,10 @@ Aturan wajib:
       .replace(/<br\s*\/?>/gi, ' ')
       .replace(/<\/?(?:strong|i|em|u|span|font)(?:\s+[^>]*)?>/gi, '')
       .replace(/&amp;amp;/g, '&amp;');
+
+    // Suntikkan font keluarga sistem universal agar rendering canvas Image() konsisten di desktop dan mobile
+    const fontInject = '<style>text, tspan, .node text, .cluster text, .edgeLabel { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; }</style>';
+    svgStr = svgStr.replace(/<svg\b([^>]*)>/i, '$&' + fontInject);
 
     // Dimensions
     let width = options.width || 0;
@@ -7978,7 +8080,7 @@ Aturan wajib:
       height = 650;
     }
 
-    const padding = 28;
+    const padding = 32;
     const totalWidth = width + (padding * 2);
     const totalHeight = height + (padding * 2);
 
@@ -7988,7 +8090,8 @@ Aturan wajib:
     svgStr = svgStr.replace(/<svg\b([^>]*)>/i, (m, attrs) => {
       let cleanAttrs = attrs
         .replace(/\bwidth=["'][^"']*["']/gi, '')
-        .replace(/\bheight=["'][^"']*["']/gi, '');
+        .replace(/\bheight=["'][^"']*["']/gi, '')
+        .replace(/\bstyle=["'][^"']*max-width:[^;"']*(?:;)?/gi, 'style="');
       return `<svg width="${width}" height="${height}" ${cleanAttrs}>`;
     });
 
@@ -8084,11 +8187,23 @@ Aturan wajib:
       }
 
       let safeFileName = (file.name || 'berkas.txt').replace(/[/\\?%*:|"<>]/g, '_').trim() || 'berkas.txt';
+      const lowerName = safeFileName.toLowerCase();
       if (isDiagram) {
-        if (format === 'jpeg' || format === 'jpg') {
-          safeFileName = safeFileName.replace(/\.(?:svg|mermaid|mmd|txt)$/i, '') + '.jpeg';
-        } else if (!safeFileName.toLowerCase().endsWith('.svg')) {
-          safeFileName = safeFileName.replace(/\.(?:mermaid|mmd|txt)$/i, '') + '.svg';
+        if (lowerName.startsWith('berkas') || lowerName.startsWith('diagram') || lowerName.includes('alur_sistem') || lowerName.includes('alur_logika') || lowerName.includes('arsitektur_sistem')) {
+          safeFileName = generateUniqueDiagramFilename(rawText, null, (format === 'jpeg' || format === 'jpg') ? 'jpeg' : 'svg');
+        } else {
+          if (format === 'jpeg' || format === 'jpg') {
+            safeFileName = safeFileName.replace(/\.(?:svg|mermaid|mmd|txt)$/i, '') + '.jpeg';
+          } else if (!safeFileName.toLowerCase().endsWith('.svg')) {
+            safeFileName = safeFileName.replace(/\.(?:mermaid|mmd|txt)$/i, '') + '.svg';
+          }
+        }
+      } else if (lowerName.startsWith('dokumen_laporan') || lowerName.startsWith('berkas_') || lowerName.startsWith('catatan') || lowerName === 'readme.md') {
+        const hMatch = String(rawText || '').match(/^#\s+([^\r\n]+)/m);
+        if (hMatch && hMatch[1]) {
+          const cleanH = sanitizeTitle(hMatch[1]);
+          const ext = safeFileName.split('.').pop() || 'txt';
+          if (cleanH.length >= 3) safeFileName = `${cleanH}.${ext}`;
         }
       }
 
@@ -24410,6 +24525,9 @@ Aturan:
     initMermaidEngine,
     openAIFileStudio,
     downloadAIFile,
+    extractSmartDiagramTitle,
+    generateUniqueDiagramFilename,
+    sanitizeTitle,
     getCleanMermaidCode,
     getCleanMermaidCodeForRaster,
     enhanceCodeBlocks,
