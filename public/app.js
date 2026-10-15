@@ -2957,13 +2957,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       return DOMPurify.sanitize(dirtyHtml, {
         ADD_TAGS: ['details', 'summary'],
         ADD_ATTR: ['target', 'rel', 'open'],
-        FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form'],
+        FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'nav', 'header', 'footer', 'section', 'main', 'aside', 'html', 'head', 'body', 'title', 'meta', 'link'],
         FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover']
       });
     }
     // Fallback native sanitizer jika DOMPurify belum termuat atau offline
     return dirtyHtml
       .replace(/<script\b[\s\S]*?<\/script>/gi, '')
+      .replace(/<style\b[\s\S]*?<\/style>/gi, '')
       .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, '')
       .replace(/<object\b[\s\S]*?<\/object>/gi, '')
       .replace(/<embed\b[\s\S]*?<\/embed>/gi, '')
@@ -3009,11 +3010,153 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (!dirtyHtml || typeof dirtyHtml !== 'string') return '';
     return dirtyHtml
       .replace(/<script\b[\s\S]*?<\/script>/gi, '')
+      .replace(/<style\b[\s\S]*?<\/style>/gi, '')
       .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, '')
       .replace(/<object\b[\s\S]*?<\/object>/gi, '')
       .replace(/<embed\b[\s\S]*?<\/embed>/gi, '')
       .replace(/<form\b[\s\S]*?<\/form>/gi, '')
       .replace(/\bon\w+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '');
+  }
+
+  // Mengamankan dan merapikan output HTML dari AI:
+  // 1. Mencegah HTML/CSS website un-fenced bocor ke tampilan gelembung obrolan chat.
+  // 2. Menggabungkan potongan HTML un-fenced sebelum blok kode (seperti <header>...<nav>) ke dalam blok ```html.
+  // 3. Membungkus dokumen HTML utuh (<!DOCTYPE html... / <html...) yang tidak difence menjadi ```html.
+  function normalizeHtmlCodeBlocksInMarkdown(text) {
+    if (!text || typeof text !== 'string') return text;
+
+    let normalized = text;
+    // Jika ada dokumen HTML utuh yang sama sekali tidak dibungkus dalam blok kode ```
+    if (!normalized.includes('```') && (normalized.includes('<!DOCTYPE html') || normalized.includes('<html'))) {
+      const docStart = normalized.search(/<!DOCTYPE\s+html|<html/i);
+      if (docStart !== -1) {
+        const prefix = normalized.slice(0, docStart).trim();
+        const htmlBody = normalized.slice(docStart).trim();
+        return (prefix ? prefix + '\n\n' : '') + '```html\n' + htmlBody + '\n```';
+      }
+    }
+
+    const lines = normalized.split('\n');
+    const result = [];
+    let inCodeBlock = false;
+    let codeBlockLang = '';
+    let unfencedHtmlBuffer = [];
+    let inUnfencedSpecial = ''; // 'style' | 'script'
+    let openStructuralTags = 0;
+
+    const isStructuralHtmlLine = (l) => {
+      const trimmed = l.trim();
+      if (!trimmed) return false;
+      return /^<(?:\/)?(?:header|nav|section|article|aside|footer|main|style|script|div|head|body|table|form|html|!DOCTYPE)\b/i.test(trimmed) ||
+             /^<(?:h[1-6]|p|a|span|button|input|label)\b[^>]*\bstyle=/i.test(trimmed) ||
+             /^<\/(?:header|nav|section|article|aside|footer|main|style|script|div|head|body|html)>/i.test(trimmed);
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (trimmed.startsWith('```')) {
+        if (!inCodeBlock) {
+          inCodeBlock = true;
+          codeBlockLang = trimmed.slice(3).trim().toLowerCase();
+
+          if (unfencedHtmlBuffer.length > 0) {
+            const bufferedHtml = unfencedHtmlBuffer.join('\n');
+            unfencedHtmlBuffer = [];
+            inUnfencedSpecial = '';
+            openStructuralTags = 0;
+            result.push('```' + (codeBlockLang || 'html'));
+            result.push(bufferedHtml);
+            continue;
+          } else {
+            result.push(line);
+            continue;
+          }
+        } else {
+          inCodeBlock = false;
+          codeBlockLang = '';
+          result.push(line);
+          continue;
+        }
+      }
+
+      if (inCodeBlock) {
+        result.push(line);
+        continue;
+      }
+
+      // Di luar blok kode: tangani konten khusus <style> atau <script> multiline
+      if (inUnfencedSpecial) {
+        unfencedHtmlBuffer.push(line);
+        if (inUnfencedSpecial === 'style' && /<\/style>/i.test(line)) {
+          inUnfencedSpecial = '';
+        } else if (inUnfencedSpecial === 'script' && /<\/script>/i.test(line)) {
+          inUnfencedSpecial = '';
+        }
+        continue;
+      }
+
+      // Deteksi pembukaan <style> atau <script>
+      if (/<style\b/i.test(line) && !/<\/style>/i.test(line)) {
+        inUnfencedSpecial = 'style';
+        unfencedHtmlBuffer.push(line);
+        continue;
+      }
+      if (/<script\b/i.test(line) && !/<\/script>/i.test(line)) {
+        inUnfencedSpecial = 'script';
+        unfencedHtmlBuffer.push(line);
+        continue;
+      }
+
+      // Hitung nest opening & closing tags
+      const openMatches = [...line.matchAll(/<(header|nav|section|article|aside|footer|main|div|table|form|html|head|body)\b[^>]*[^\/]>/gi)];
+      const closeMatches = [...line.matchAll(/<\/(header|nav|section|article|aside|footer|main|div|table|form|html|head|body)>/gi)];
+      if (openMatches.length > 0 || closeMatches.length > 0) {
+        openStructuralTags += (openMatches.length - closeMatches.length);
+        if (openStructuralTags < 0) openStructuralTags = 0;
+      }
+
+      const isHtml = isStructuralHtmlLine(line) || 
+                     openStructuralTags > 0 || 
+                     (unfencedHtmlBuffer.length > 0 && (trimmed.startsWith('<') || trimmed.endsWith('>')));
+
+      if (isHtml) {
+        unfencedHtmlBuffer.push(line);
+      } else {
+        if (unfencedHtmlBuffer.length > 0) {
+          let nextIsCodeOrHtml = false;
+          for (let k = i; k < lines.length; k++) {
+            const nl = lines[k].trim();
+            if (!nl) continue;
+            if (nl.startsWith('```') || isStructuralHtmlLine(lines[k]) || /<style\b|<script\b/i.test(lines[k])) {
+              nextIsCodeOrHtml = true;
+            }
+            break;
+          }
+
+          if (nextIsCodeOrHtml && trimmed === '') {
+            unfencedHtmlBuffer.push(line);
+            continue;
+          }
+
+          result.push('```html');
+          result.push(...unfencedHtmlBuffer);
+          result.push('```');
+          unfencedHtmlBuffer = [];
+          openStructuralTags = 0;
+        }
+        result.push(line);
+      }
+    }
+
+    if (unfencedHtmlBuffer.length > 0) {
+      result.push('```html');
+      result.push(...unfencedHtmlBuffer);
+      result.push('```');
+    }
+
+    return result.join('\n');
   }
 
   function renderMarkdown(rawText, isStreaming = false) {
@@ -3027,8 +3170,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // jawaban eksplisit, output sengaja tetap kosong (fail closed).
     let contentHtml = '';
     if (parsedBlocks.content) {
+      // Amankan dan bungkus blok HTML/website agar rapi di dalam blok kode, tidak bocor ke DOM obrolan
+      const safeContent = normalizeHtmlCodeBlocksInMarkdown(parsedBlocks.content);
       // Selama streaming, lewati reflowShreddedProse agar CPU hemat daya
-      const displayContent = isStreaming ? parsedBlocks.content : reflowShreddedProse(parsedBlocks.content);
+      const displayContent = isStreaming ? safeContent : reflowShreddedProse(safeContent);
       if (window.marked) {
         try {
           contentHtml = marked.parse(displayContent);
@@ -4506,10 +4651,21 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const header = document.createElement('div');
       header.className = 'code-header';
 
-      const isPreviewableCode = (
-        lang === 'HTML' || lang === 'HTM' || lang === 'SVG' || lang === 'XML' ||
-        lang === 'MARKDOWN' || lang === 'MD' ||
+      const isHtmlSignature = (
+        lang === 'HTML' || lang === 'HTM' ||
         rawText.includes('<!DOCTYPE html') || rawText.includes('<html') ||
+        (rawText.includes('<section') && rawText.includes('</section>')) ||
+        (rawText.includes('<div') && rawText.includes('</div>') && rawText.length > 80) ||
+        (rawText.includes('<style') && rawText.includes('</style>')) ||
+        (rawText.includes('<nav') && rawText.includes('</nav>')) ||
+        (rawText.includes('<header') && rawText.includes('</header>'))
+      );
+      if (lang === 'CODE' && isHtmlSignature) {
+        lang = 'HTML';
+      }
+      const isPreviewableCode = (
+        isHtmlSignature || lang === 'SVG' || lang === 'XML' ||
+        lang === 'MARKDOWN' || lang === 'MD' ||
         (rawText.startsWith('<svg') && rawText.includes('</svg>'))
       );
 
@@ -7816,6 +7972,11 @@ Aturan wajib:
         const cleanT = sanitizeTitle(titleMatch[1]);
         if (cleanT.length >= 3) return `${cleanT}.html`;
       }
+      const h1Match = String(body || '').match(/<h1[^>]*>([^<]+)<\/h1>/i);
+      if (h1Match && h1Match[1]) {
+        const cleanH1 = sanitizeTitle(h1Match[1]);
+        if (cleanH1.length >= 3) return `${cleanH1}.html`;
+      }
     }
 
     const map = {
@@ -8431,7 +8592,8 @@ Aturan wajib:
   function extractGeneratedFiles(text, allowFallback) {
     const out = { files: [], rawBlocks: [] };
     if (!text || typeof text !== 'string') return out;
-    const lines = text.split('\n');
+    const normalizedText = normalizeHtmlCodeBlocksInMarkdown(text);
+    const lines = normalizedText.split('\n');
 
     // --- Format utama: blok penanda ZOZ_FILE, ZOZ_EDIT, atau ZOZ_MODIFY ---
     let idx = 0;
@@ -8490,17 +8652,23 @@ Aturan wajib:
     if (out.files.length === 0) {
       for (let i = 0; i < lines.length; i++) {
         const t = lines[i].trim();
-        if (t.length < 4 || t.slice(0, 3) !== TICK3) continue;
-        const langTag = t.slice(3).trim().toLowerCase();
-        if (!langTag || langTag === TICK3) continue;
+        if (t.length < 3 || t.slice(0, 3) !== TICK3) continue;
         let end = -1;
         for (let j = i + 1; j < lines.length; j++) {
           if (lines[j].trim() === TICK3) { end = j; break; }
         }
         if (end <= i) continue;
         const body = lines.slice(i + 1, end).join('\n');
-        const isFullHtmlOrSvg = (langTag === 'html' || langTag === 'htm' || body.includes('<!DOCTYPE html') || body.includes('<html') || (body.includes('<svg') && body.includes('</svg>'))) && body.length >= 100;
-        const isEligibleFallback = (allowFallback && body.length >= 250) || isFullHtmlOrSvg;
+        let langTag = t.slice(3).trim().toLowerCase();
+        if (langTag === TICK3) langTag = '';
+        if (!langTag) {
+          if (body.includes('<!DOCTYPE html') || body.includes('<html') || body.includes('<section') || body.includes('<div') || body.includes('<header') || body.includes('<nav')) {
+            langTag = 'html';
+          }
+        }
+        if (!langTag) continue;
+        const isFullHtmlOrSvg = (langTag === 'html' || langTag === 'htm' || body.includes('<!DOCTYPE html') || body.includes('<html') || (body.includes('<svg') && body.includes('</svg>')) || (body.includes('<section') && body.includes('</section>'))) && body.length >= 80;
+        const isEligibleFallback = (allowFallback && body.length >= 200) || isFullHtmlOrSvg;
         if (!isEligibleFallback) continue;
 
         out.files.push(buildAIFile(guessFileNameFromLang(langTag, body), '', langTag, body, ''));
@@ -13335,13 +13503,14 @@ Sistem antarmuka Zoz Router memiliki visualizer Mermaid interaktif otomatis yang
 [PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta APLIKASI WEB / HALAMAN HTML INTERAKTIF.
 Aturan Wajib:
 1. Tuliskan kode HTML5 lengkap yang fungsional dan siap jalan (termasuk tag <!DOCTYPE html>, <html>, <head>, <style>, <body>, dan <script> dalam satu berkas mandiri).
-2. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js), sertakan tag <script src="..."> resmi dari CDN publik.
-3. Tuliskan dalam blok protokol:
+2. DILARANG KERAS menulis kode HTML atau CSS di luar blok kode markdown! JANGAN PERNAH memecah kode website menjadi beberapa potongan terpisah. Seluruh kode website dari <!DOCTYPE html> sampai </html> WAJIB berada dalam SATU blok kode utuh \`\`\`html\\n...\\n\`\`\` atau <<<ZOZ_FILE>>>.
+3. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js), sertakan tag <script src="..."> resmi dari CDN publik.
+4. Tuliskan dalam blok protokol:
 <<<ZOZ_FILE name="Aplikasi_Web.html" mime="text/html" lang="html">
 <!DOCTYPE html>
 ... (kode html, css, dan javascript lengkap) ...
 <<<END_ZOZ_FILE>>>
-atau di dalam blok kode standar \`\`\`html\n...\n\`\`\`.
+atau di dalam blok kode standar \`\`\`html\\n...\\n\`\`\`.
 Kode ini akan langsung dijalankan secara interaktif di pratinjau live pengguna!`;
       } else if (isExplicitCleanCodeCmd) {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
@@ -14339,13 +14508,14 @@ Sistem antarmuka Zoz Router memiliki visualizer Mermaid interaktif otomatis yang
 [PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta APLIKASI WEB / HALAMAN HTML INTERAKTIF.
 Aturan Wajib:
 1. Tuliskan kode HTML5 lengkap yang fungsional dan siap jalan (termasuk tag <!DOCTYPE html>, <html>, <head>, <style>, <body>, dan <script> dalam satu berkas mandiri).
-2. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js), sertakan tag <script src="..."> resmi dari CDN publik.
-3. Tuliskan dalam blok protokol:
+2. DILARANG KERAS menulis kode HTML atau CSS di luar blok kode markdown! JANGAN PERNAH memecah kode website menjadi beberapa potongan terpisah. Seluruh kode website dari <!DOCTYPE html> sampai </html> WAJIB berada dalam SATU blok kode utuh \`\`\`html\\n...\\n\`\`\` atau <<<ZOZ_FILE>>>.
+3. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js), sertakan tag <script src="..."> resmi dari CDN publik.
+4. Tuliskan dalam blok protokol:
 <<<ZOZ_FILE name="Aplikasi_Web.html" mime="text/html" lang="html">
 <!DOCTYPE html>
 ... (kode html, css, dan javascript lengkap) ...
 <<<END_ZOZ_FILE>>>
-atau di dalam blok kode standar \`\`\`html\n...\n\`\`\`.
+atau di dalam blok kode standar \`\`\`html\\n...\\n\`\`\`.
 Kode ini akan langsung dijalankan secara interaktif di pratinjau live pengguna!`;
       } else if (isExplicitCleanCodeCmd) {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
