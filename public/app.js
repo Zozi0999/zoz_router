@@ -3676,6 +3676,33 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     return stripped.trim();
   }
 
+  function getCleanMermaidCodeForRaster(raw) {
+    if (!raw) return '';
+    let code = getCleanMermaidCode(raw);
+
+    // 1. Unescape entitas HTML yang mungkin tersisa
+    code = code
+      .replace(/&gt;/g, '>')
+      .replace(/&lt;/g, '<')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+
+    // 2. Buang tag HTML pemformatan teks (<b>, <strong>, <i>, <em>, <u>, <span>, <font>, dll.)
+    code = code.replace(/<\/?(?:b|strong|i|em|u|span|font)(?:\s+[^>]*)?>/gi, '');
+
+    // 3. Konversi tag <br/> atau <br> menjadi literal \n agar Mermaid membaginya ke <tspan> murni
+    code = code.replace(/<br\s*\/?>/gi, '\\n');
+
+    // 4. Buang tag HTML lainnya yang mungkin masih bersisa
+    code = code.replace(/<[^>]+>/g, '');
+
+    // 5. Bersihkan entitas ampersand ganda
+    code = code.replace(/&amp;/gi, '&');
+
+    return code;
+  }
+
   function generateWordDocPreviewHtml(fileName, parsedBody) {
     return `<!DOCTYPE html>
 <html lang="id">
@@ -7891,7 +7918,7 @@ Aturan wajib:
               padding: 16
             }
           });
-          const cleanDiagram = getCleanMermaidCode(rawMermaidCode);
+          const cleanDiagram = getCleanMermaidCodeForRaster(rawMermaidCode);
           const rasterRes = await window.mermaid.render('raster_jpeg_' + Date.now(), cleanDiagram);
           if (rasterRes && rasterRes.svg) {
             svgStr = rasterRes.svg;
@@ -7916,6 +7943,18 @@ Aturan wajib:
       });
       svgStr = svgStr.replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '');
     }
+
+    // Post-sanitize SVG: hilangkan artefak kode HTML mentah atau entitas lolos dalam elemen teks/tspan SVG
+    svgStr = svgStr
+      .replace(/&lt;b&gt;/gi, '')
+      .replace(/&lt;\/b&gt;/gi, '')
+      .replace(/&lt;br\s*\/?&gt;/gi, ' ')
+      .replace(/&lt;\/?(?:strong|i|em|u|span|font)(?:\s+[^>]*)?&gt;/gi, '')
+      .replace(/<b\b[^>]*>/gi, '')
+      .replace(/<\/b>/gi, '')
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<\/?(?:strong|i|em|u|span|font)(?:\s+[^>]*)?>/gi, '')
+      .replace(/&amp;amp;/g, '&amp;');
 
     // Dimensions
     let width = options.width || 0;
@@ -7950,7 +7989,7 @@ Aturan wajib:
       let cleanAttrs = attrs
         .replace(/\bwidth=["'][^"']*["']/gi, '')
         .replace(/\bheight=["'][^"']*["']/gi, '');
-      return `<svg width="${totalWidth}" height="${totalHeight}" ${cleanAttrs}>`;
+      return `<svg width="${width}" height="${height}" ${cleanAttrs}>`;
     });
 
     const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgStr);
@@ -24372,6 +24411,7 @@ Aturan:
     openAIFileStudio,
     downloadAIFile,
     getCleanMermaidCode,
+    getCleanMermaidCodeForRaster,
     enhanceCodeBlocks,
     renderInteractiveMermaidCard,
     convertSvgToJpegBlob,
