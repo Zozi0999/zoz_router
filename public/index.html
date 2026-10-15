@@ -2,6 +2,15 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
+  <script>
+    // Frame-busting safety guard: Zoz Router tidak boleh pernah dimuat di dalam iframe (mencegah rekursi pratinjau studio)
+    if (window.self !== window.top) {
+      try {
+        window.stop();
+        document.documentElement.innerHTML = '<head><title>Isolated Preview</title></head><body style="background:#090d16;color:#64748b;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;"><div style="text-align:center;"><p style="font-size:13px;letter-spacing:0.5px;">Pratinjau Terisolasi • Zoz Router Frame Guard</p></div></body>';
+      } catch (_) {}
+    }
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <title>ZOZ ROUTER // Neural AI Multi-Engine Gateway</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
@@ -14,7 +23,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261015_v279">
+  <link rel="stylesheet" href="style.css?v=20261015_v280">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -785,7 +794,7 @@
                       <i class="fa-solid fa-check attach-yt-check" aria-hidden="true" style="display:none;"></i>
                     </div>
                   </button>
-                  <button class="attachment-menu-item" id="attachOptionLocalWorkspace" type="button">
+                  <button class="attachment-menu-item" id="attachOptionLocalWorkspace" type="button" style="display: none !important;">
                     <div class="attach-item-icon-box workspace-accent" style="background: rgba(0, 240, 255, 0.15); border-color: rgba(0, 240, 255, 0.4); color: var(--neon-cyan);">
                       <i class="fa-solid fa-folder-tree"></i>
                     </div>
@@ -794,7 +803,7 @@
                       <span class="attach-item-desc" id="attachWorkspaceDesc">Hubungkan folder HP/Laptop untuk dikelola AI</span>
                     </div>
                   </button>
-                  <button class="attachment-menu-item" id="attachOptionTaskTracker" type="button">
+                  <button class="attachment-menu-item" id="attachOptionTaskTracker" type="button" style="display: none !important;">
                     <div class="attach-item-icon-box task-tracker-accent" style="background: rgba(168, 85, 247, 0.15); border-color: rgba(168, 85, 247, 0.4); color: var(--neon-purple);">
                       <i class="fa-solid fa-list-check"></i>
                     </div>
@@ -809,13 +818,13 @@
 
             <!-- Web Search & Deep Research Mode Menu -->
             <div class="search-menu-wrapper" id="searchMenuWrapper">
-              <button class="composer-btn web-search-toggle mode-autonomous active" id="webSearchToggleBtn" type="button" title="Autonomous Web Explorer: Aktif (Klik untuk ubah / matikan)" aria-expanded="false">
+              <button class="composer-btn web-search-toggle mode-autonomous active" id="webSearchToggleBtn" type="button" title="Autonomous Web Explorer: Aktif (Klik untuk matikan)" aria-expanded="false">
                 <i class="fa-solid fa-compass" id="webSearchIcon"></i>
                 <span class="search-badge" id="searchBadge" style="display: none;">PRO</span>
               </button>
 
-              <!-- Search Mode Dropdown Popup -->
-              <div class="search-dropdown-popup" id="searchDropdown" style="display: none;">
+              <!-- Search Mode Dropdown Popup (Moved to Skills menu; kept hidden for connectome safety) -->
+              <div class="search-dropdown-popup" id="searchDropdown" style="display: none !important;">
                 <div class="search-dropdown-header">
                   <span><i class="fa-solid fa-satellite-dish"></i> Mode Penelusuran Web</span>
                 </div>

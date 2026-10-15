@@ -8103,7 +8103,25 @@ Aturan wajib:
         els.aiFileStudioFrame.srcdoc = generatePdfDocPreviewHtml(file.name, parsedBody);
       } else if (isHtml) {
         els.aiFileStudioFrame.removeAttribute('src');
-        els.aiFileStudioFrame.srcdoc = rawContent;
+        let safeHtml = rawContent;
+        // 1. Bersihkan iframe internal yang kosong atau mengarah ke root / atau relatif host
+        safeHtml = safeHtml.replace(/<iframe\b([^>]*)\bsrc=["'](?:|\/|\.\/|index\.html?)["']([^>]*)>/gi, '<iframe$1src="about:blank"$2>');
+        // 2. Cegah tag iframe tanpa atribut src agar tidak mewarisi URL parent (localhost:4040/)
+        safeHtml = safeHtml.replace(/<iframe\b((?:(?!src=)[^>])*)>/gi, (match, attrs) => {
+          if (!/\bsrc=/i.test(attrs)) {
+            return `<iframe src="about:blank" ${attrs}>`;
+          }
+          return match;
+        });
+        // 3. Pastikan ada <base href="about:blank"> agar browser tidak me-resolve link/aset relatif ke root host Zoz Router
+        if (!/<base\b/i.test(safeHtml)) {
+          if (/<head\b[^>]*>/i.test(safeHtml)) {
+            safeHtml = safeHtml.replace(/<head\b[^>]*>/i, '$&\n<base href="about:blank">');
+          } else {
+            safeHtml = '<base href="about:blank">\n' + safeHtml;
+          }
+        }
+        els.aiFileStudioFrame.srcdoc = safeHtml;
       } else {
         els.aiFileStudioFrame.removeAttribute('src');
         els.aiFileStudioFrame.srcdoc = '';
@@ -10473,6 +10491,39 @@ ${blocks}
       }
       return;
     }
+    if (trimmedLow === '/deep-research' || trimmedLow === '/deep' || trimmedLow === '/riset') {
+      setSearchMode('premium');
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+      }
+      const count = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls.length : 0;
+      if (count === 0) {
+        openResearchUrlManagerModal();
+        showToast('🔬 Mode Deep Research Aktif! Tambahkan URL sumber yang ingin dianalisis.');
+      } else {
+        showToast(`🔬 Mode Deep Research Aktif (${count} URL Sumber)`);
+      }
+      return;
+    }
+    if (trimmedLow === '/web-search' || trimmedLow === '/search' || trimmedLow === '/google') {
+      setSearchMode('default');
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+      }
+      showToast('🌐 Mode Default (Pencarian Kilat Google) Aktif!');
+      return;
+    }
+    if (trimmedLow === '/autonomous' || trimmedLow === '/penelitian') {
+      setSearchMode('autonomous');
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+      }
+      showToast('🧭 Mode Autonomous Web Explorer Aktif!');
+      return;
+    }
 
     // Simpan prompt teks asli pengguna untuk tampilan gelembung obrolan (displayContent)
     let originalUserPrompt = rawText;
@@ -10480,7 +10531,7 @@ ${blocks}
     // bawah menimpa rawText dengan instruksi singkat sehingga URL/perintah di dalamnya
     // hilang — bila divalidasi setelah lipat, Mode Deep Research menolak URL yang sah.
     const preFoldUrls = extractCustomAnalysisUrls(rawText);
-    const preFoldDeepCommand = /^\/(?:deep|research|riset)\s+/i.test(rawText.trim());
+    const preFoldDeepCommand = /^\/(?:deep|research|riset|deep-research)\s+/i.test(rawText.trim());
 
     // Claude / Grok AI Style: Jika prompt teks yang dikirim pengguna merupakan codingan atau laporan panjang
     // dan belum ada dokumen lampiran, otomatis konversi blok tersebut menjadi file markdown lampiran
@@ -10495,7 +10546,7 @@ ${blocks}
       }
     }
 
-    const isExplicitDeepResearch = preFoldDeepCommand || /^\/(?:deep|research|riset)\s+/i.test(rawText.trim());
+    const isExplicitDeepResearch = preFoldDeepCommand || /^\/(?:deep|research|riset|deep-research)\s+/i.test(rawText.trim());
     if (STATE.isDeepResearch || isExplicitDeepResearch) {
       // Validasi URL kustom untuk Mode Deep Research
       let targetUrls = Array.isArray(STATE.researchTargetUrls) ? [...STATE.researchTargetUrls] : [];
@@ -15901,12 +15952,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       els.webSearchToggleBtn.classList.add('mode-autonomous', 'active');
       if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-compass';
       if (els.searchBadge) els.searchBadge.style.display = 'none';
-      els.webSearchToggleBtn.title = 'Autonomous Web Explorer: Aktif (Klik untuk ubah / matikan)';
+      els.webSearchToggleBtn.title = 'Autonomous Web Explorer: Aktif (Klik untuk matikan)';
     } else if (mode === 'default') {
       els.webSearchToggleBtn.classList.add('mode-default', 'active');
       if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-globe';
       if (els.searchBadge) els.searchBadge.style.display = 'none';
-      els.webSearchToggleBtn.title = 'Pencarian Web Default: Aktif (Klik untuk ubah / matikan)';
+      els.webSearchToggleBtn.title = 'Pencarian Web Default: Aktif (Klik untuk matikan)';
     } else if (mode === 'premium') {
       els.webSearchToggleBtn.classList.add('mode-premium', 'active');
       if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-microscope';
@@ -15915,11 +15966,11 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         els.searchBadge.style.display = 'block';
         els.searchBadge.textContent = count > 0 ? `PRO • ${count}` : 'PRO';
       }
-      els.webSearchToggleBtn.title = `Deep Research: ${count} URL Sumber (Klik tombol untuk menu, klik badge PRO untuk kelola sumber)`;
+      els.webSearchToggleBtn.title = `Deep Research: ${count} URL Sumber (Klik tombol untuk matikan, klik badge PRO untuk kelola sumber)`;
     } else {
-      if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-globe';
+      if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-compass';
       if (els.searchBadge) els.searchBadge.style.display = 'none';
-      els.webSearchToggleBtn.title = 'Mode Pencarian Web (Nonaktif - Klik untuk aktifkan)';
+      els.webSearchToggleBtn.title = 'Autonomous Web Explorer: Nonaktif (Klik untuk aktifkan)';
     }
 
     if (mode === 'premium') {
@@ -15953,24 +16004,23 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
   }
 
   function toggleSearchDropdown(e) {
-    if (e) e.stopPropagation();
-    if (!els.searchDropdown) return;
-    const isHidden = els.searchDropdown.style.display === 'none' || !els.searchDropdown.style.display;
-    if (isHidden) {
-      openSearchDropdown();
+    if (e && e.stopPropagation) e.stopPropagation();
+    if (STATE.searchMode === 'autonomous') {
+      setSearchMode('off');
+      showToast('Autonomous Web Explorer dinonaktifkan.');
+    } else if (STATE.searchMode === 'premium' || STATE.searchMode === 'default') {
+      setSearchMode('off');
+      showToast('Pencarian web dinonaktifkan.');
     } else {
-      closeSearchDropdown();
+      setSearchMode('autonomous');
+      showToast('🧭 Autonomous Web Explorer aktif.');
     }
   }
 
   function openSearchDropdown() {
-    if (!els.searchDropdown) return;
-    closeAttachmentDropdown();
-    closeImageModelDropdown();
-    closeMusicModelDropdown();
-    els.searchDropdown.style.display = 'flex';
-    els.webSearchToggleBtn?.setAttribute('aria-expanded', 'true');
-    AudioEngine.click();
+    // Mode Deep Research dan Mode Default dipindahkan ke menu Skills (/)
+    // Tombol pencarian sekarang langsung mengaktifkan Autonomous Web Explorer
+    return;
   }
 
   function closeSearchDropdown() {
@@ -22304,7 +22354,8 @@ Aturan:
       iconColor: '#00f0ff',
       iconBg: 'rgba(0, 240, 255, 0.12)',
       template: '/diagram ',
-      placeholder: 'Deskripsikan alur sistem atau diagram yang ingin dibuat...'
+      placeholder: 'Deskripsikan alur sistem atau diagram yang ingin dibuat...',
+      aliases: ['flowchart', 'erd', 'mindmap', 'arsitektur']
     },
     {
       id: 'website',
@@ -22316,7 +22367,8 @@ Aturan:
       iconColor: '#10b981',
       iconBg: 'rgba(16, 185, 129, 0.12)',
       template: '/website ',
-      placeholder: 'Deskripsikan web/aplikasi yang ingin dibuat (cth: kalkulator sains, game snake)...'
+      placeholder: 'Deskripsikan web/aplikasi yang ingin dibuat (cth: kalkulator sains, game snake)...',
+      aliases: ['web', 'html', 'app', 'aplikasi']
     },
     {
       id: 'dokumen',
@@ -22328,19 +22380,47 @@ Aturan:
       iconColor: '#6366f1',
       iconBg: 'rgba(99, 102, 241, 0.12)',
       template: '/dokumen ',
-      placeholder: 'Tulis topik dokumen atau laporan lengkap yang ingin dibuat...'
+      placeholder: 'Tulis topik dokumen atau laporan lengkap yang ingin dibuat...',
+      aliases: ['doc', 'laporan', 'pdf', 'sop']
     },
     {
-      id: 'penelitian',
-      command: '/penelitian',
-      title: 'Deep Research & Web',
-      badge: 'Web Search',
-      desc: 'Riset mendalam multi-sumber dengan pencarian web dan sintesis kritis',
+      id: 'deep-research',
+      command: '/deep-research',
+      title: 'Mode Deep Research (URL Kustom)',
+      badge: 'URL Analyzer',
+      desc: 'Analisis mendalam isi & komparasi fakta dari URL kustom yang ditentukan',
+      iconClass: 'fa-solid fa-microscope',
+      iconColor: '#f43f5e',
+      iconBg: 'rgba(244, 63, 94, 0.12)',
+      action: 'deep_research_mode',
+      template: '',
+      aliases: ['deep', 'research', 'riset', 'url', 'analisis']
+    },
+    {
+      id: 'web-search',
+      command: '/web-search',
+      title: 'Mode Default (Pencarian Kilat)',
+      badge: 'Google Real-Time',
+      desc: 'Pencarian kilat Google real-time dengan sintesis jawaban ringkas cepat',
       iconClass: 'fa-solid fa-globe',
       iconColor: '#38bdf8',
       iconBg: 'rgba(56, 189, 248, 0.12)',
-      action: 'search_mode',
-      template: ''
+      action: 'default_search_mode',
+      template: '',
+      aliases: ['google', 'search', 'cari', 'kilat', 'default']
+    },
+    {
+      id: 'autonomous',
+      command: '/autonomous',
+      title: 'Autonomous Web Explorer',
+      badge: 'Multi-Step Agent',
+      desc: 'Penjelajah web mandiri dari nol tanpa Serper, dipanggil bebas oleh AI',
+      iconClass: 'fa-solid fa-compass',
+      iconColor: '#00f0ff',
+      iconBg: 'rgba(0, 240, 255, 0.12)',
+      action: 'autonomous_mode',
+      template: '',
+      aliases: ['penelitian', 'auto', 'explorer', 'kompas', 'mandiri']
     },
     {
       id: 'gambar',
@@ -22352,7 +22432,8 @@ Aturan:
       iconColor: '#f59e0b',
       iconBg: 'rgba(245, 158, 11, 0.12)',
       action: 'image_mode',
-      template: ''
+      template: '',
+      aliases: ['image', 'foto', 'ilustrasi', 'flux']
     },
     {
       id: 'musik',
@@ -22364,7 +22445,8 @@ Aturan:
       iconColor: '#ec4899',
       iconBg: 'rgba(236, 72, 153, 0.12)',
       action: 'music_mode',
-      template: ''
+      template: '',
+      aliases: ['music', 'audio', 'lagu', 'suno']
     },
     {
       id: 'youtube',
@@ -22376,7 +22458,8 @@ Aturan:
       iconColor: '#ef4444',
       iconBg: 'rgba(239, 68, 68, 0.12)',
       template: '/youtube ',
-      placeholder: 'Tempel link video YouTube untuk dianalisis...'
+      placeholder: 'Tempel link video YouTube untuk dianalisis...',
+      aliases: ['yt', 'video', 'transkrip']
     },
     {
       id: 'kodenya-saja',
@@ -22388,7 +22471,8 @@ Aturan:
       iconColor: '#a855f7',
       iconBg: 'rgba(168, 85, 247, 0.12)',
       template: '/kodenya-saja ',
-      placeholder: 'Perintah kode yang ingin dibuat tanpa teks pembuka...'
+      placeholder: 'Perintah kode yang ingin dibuat tanpa teks pembuka...',
+      aliases: ['code', 'kode', 'raw', 'clean']
     }
   ];
 
@@ -22494,7 +22578,8 @@ Aturan:
         const title = cmd.title.toLowerCase();
         const desc = cmd.desc.toLowerCase();
         const id = cmd.id.toLowerCase();
-        return cmdName.startsWith(q) || cmdName.includes(q) || id.includes(q) || title.includes(q) || desc.includes(q);
+        const aliases = Array.isArray(cmd.aliases) ? cmd.aliases.join(' ').toLowerCase() : '';
+        return cmdName.startsWith(q) || cmdName.includes(q) || id.includes(q) || title.includes(q) || desc.includes(q) || aliases.includes(q);
       });
     }
 
@@ -22577,17 +22662,47 @@ Aturan:
       return;
     }
 
-    if (cmd.action === 'search_mode') {
-      if (els.webSearchToggleBtn) {
-        setSearchMode('autonomous');
-      }
+    if (cmd.action === 'deep_research_mode') {
+      setSearchMode('premium');
       if (els.promptInput) {
         els.promptInput.value = '';
         autoResizeTextarea(els.promptInput);
         els.promptInput.focus();
       }
       hideSlashCommandsMenu();
-      showToast('🌐 Mode Autonomous Deep Research & Pencarian Web Aktif!');
+      const count = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls.length : 0;
+      if (count === 0) {
+        openResearchUrlManagerModal();
+        showToast('🔬 Mode Deep Research Aktif! Tambahkan URL sumber yang ingin dianalisis.');
+      } else {
+        showToast(`🔬 Mode Deep Research Aktif (${count} URL Sumber)`);
+      }
+      AudioEngine.success();
+      return;
+    }
+
+    if (cmd.action === 'default_search_mode') {
+      setSearchMode('default');
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+        els.promptInput.focus();
+      }
+      hideSlashCommandsMenu();
+      showToast('🌐 Mode Default (Pencarian Kilat Google) Aktif!');
+      AudioEngine.success();
+      return;
+    }
+
+    if (cmd.action === 'autonomous_mode' || cmd.action === 'search_mode') {
+      setSearchMode('autonomous');
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+        els.promptInput.focus();
+      }
+      hideSlashCommandsMenu();
+      showToast('🧭 Mode Autonomous Web Explorer Aktif!');
       AudioEngine.success();
       return;
     }
@@ -23937,11 +24052,11 @@ Aturan:
       }
     });
 
-    // Klik kanan / long-press membuka menu pilihan mode
+    // Klik kanan / long-press memberi tahu cara mengganti ke Deep Research atau Default via Skills
     els.webSearchToggleBtn?.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      toggleSearchDropdown(e);
+      showToast('Ketik / di prompt atau buka menu Skills untuk memilih Mode Deep Research atau Mode Default.');
     });
 
     // ==================== YOUTUBE SEARCH TOOL CONTROLS ====================
