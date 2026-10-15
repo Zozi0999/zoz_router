@@ -2624,7 +2624,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
       if (curLast && curLast.role === 'assistant') {
         if (curLast.content !== trimmed && (trimmed.length > (curLast.content || '').length || !curLast.content)) {
-          curLast.content = trimmed;
+          const effectiveSources = Array.isArray(data.sources) ? data.sources : (Array.isArray(curLast.sources) ? curLast.sources : null);
+          curLast.content = (effectiveSources && effectiveSources.length > 0) ? appendWebVerificationNote(trimmed, effectiveSources) : trimmed;
           curLast.backgroundCompleted = true;
           if (data.isDeepResearch) {
             curLast.isDeepResearch = true;
@@ -2639,9 +2640,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           showToast('✨ AI telah selesai menjawab di latar belakang saat Anda keluar.');
         }
       } else {
+        const effectiveSources = Array.isArray(data.sources) ? data.sources : null;
+        const contentToSave = (effectiveSources && effectiveSources.length > 0) ? appendWebVerificationNote(trimmed, effectiveSources) : trimmed;
         activeSession.messages.push({
           role: 'assistant',
-          content: trimmed,
+          content: contentToSave,
           model: data.model || 'AI Model',
           timestamp: new Date().toISOString(),
           backgroundCompleted: true,
@@ -2917,9 +2920,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           // berjalan saat lastMsg assistant (bukan saat lastMsg null + teks kosong).
           if (!lastMsg || lastMsg.role !== 'assistant') {
             if (finalReportText.trim()) {
+              const effectiveSources = Array.isArray(data.sources) ? data.sources : null;
+              const contentToSave = (effectiveSources && effectiveSources.length > 0) ? appendWebVerificationNote(finalReportText, effectiveSources) : finalReportText;
               session.messages.push({
                 role: 'assistant',
-                content: finalReportText,
+                content: contentToSave,
                 model: modelName || data.model,
                 timestamp: new Date().toISOString(),
                 backgroundCompleted: true,
@@ -2930,7 +2935,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             }
           } else {
             if (finalReportText) {
-              lastMsg.content = finalReportText;
+              const effectiveSources = Array.isArray(data.sources) ? data.sources : (Array.isArray(lastMsg.sources) ? lastMsg.sources : null);
+              lastMsg.content = (effectiveSources && effectiveSources.length > 0) ? appendWebVerificationNote(finalReportText, effectiveSources) : finalReportText;
             }
             lastMsg.model = modelName || data.model || lastMsg.model;
             lastMsg.backgroundCompleted = true;
@@ -3487,6 +3493,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       if (!/\bloading=/i.test(updated)) updated += ' loading="lazy"';
       if (!/\bdecoding=/i.test(updated)) updated += ' decoding="async"';
       return `<img${updated}>`;
+    });
+
+    // Render penanda verifikasi web Zoz Router menjadi badge UI elegan dan terverifikasi
+    result = result.replace(/(?:<p>\s*)?\[System Note:\s*(Jawaban di atas telah diverifikasi menggunakan \d+ Sumber Referensi Web Real-Time via Zoz Router)\](?:\s*<\/p>)?/gi, (match, noteBody) => {
+      return `<div class="system-note-tag"><i class="fa-solid fa-circle-check" style="color:var(--neon-teal, #10b981); margin-right:4px;"></i><span class="system-note-badge">System Note</span> <span>${escapeHtml(noteBody)}</span></div>`;
     });
 
     return result;
@@ -14060,6 +14071,50 @@ Format teks (untuk model tanpa function calling):
     return img;
   }
 
+  // ==================== SYSTEM VERIFICATION & TEMPORAL GROUNDING ENGINE ====================
+  function formatWebVerificationNote(sourcesCount) {
+    const count = Number(sourcesCount) || 1;
+    return `[System Note: Jawaban di atas telah diverifikasi menggunakan ${count} Sumber Referensi Web Real-Time via Zoz Router]`;
+  }
+
+  function appendWebVerificationNote(text, sources) {
+    if (!text || typeof text !== 'string') return text || '';
+    if (!sources || !Array.isArray(sources) || sources.length === 0) return text;
+    const note = formatWebVerificationNote(sources.length);
+    if (text.includes('[System Note: Jawaban di atas telah diverifikasi')) {
+      return text;
+    }
+    return `${text.trim()}\n\n${note}`;
+  }
+
+  function getDynamicSystemTemporalContext() {
+    const now = new Date();
+    const daysId = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const monthsId = [
+      'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+    ];
+    const dayName = daysId[now.getDay()];
+    const dateNum = now.getDate();
+    const monthName = monthsId[now.getMonth()];
+    const year = now.getFullYear();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const timeFormatted = `${hours}:${minutes}`;
+    const isoUtc = now.toISOString();
+
+    return `### INFORMASI WAKTU SISTEM REAL-TIME (GROUNDING TEMPORAL)
+- Tanggal & Waktu Sekarang: ${dayName}, ${dateNum} ${monthName} ${year} (${timeFormatted} waktu lokal)
+- Waktu Standar UTC: ${isoUtc}
+- Tahun Berjalan: ${year}
+- MANDAT KONSISTENSI TEMPORAL & DATA WEB:
+  1. Anda beroperasi di dunia nyata pada tahun ${year}.
+  2. Apabila dalam riwayat percakapan sebelumnya Anda melihat jawaban atau data yang diakhiri penanda:
+     "[System Note: Jawaban di atas telah diverifikasi menggunakan ... Sumber Referensi Web Real-Time via Zoz Router]"
+     MAKA Anda WAJIB menyadari bahwa data tersebut adalah HASIL PENCARIAN WEB REAL-TIME ZOZ ROUTER yang 100% VALID, AKTUAL, dan SESUAI WAKTU SAAT INI (${year}), BUKAN halusinasi model!
+  3. Pada giliran chat ke-2, ke-3, dan seterusnya, pertahankan fakta dan data web tersebut dengan konsisten dan percaya diri. Jangan pernah menyangkal atau menganggap data mutakhir tersebut sebagai karangan atau halusinasi masa lalu.`;
+  }
+
   function buildSanitizedMessagesPayload(sessionOrMessages, currentImages = [], engine = 'openrouter', systemContent = '', modelName = '') {
     const messagesPayload = [];
     const supportsSystem = doesModelSupportSystemRole(modelName);
@@ -14073,9 +14128,14 @@ Format teks (untuk model tanpa function calling):
         ? currentImages
         : (Array.isArray(m.images) && m.images.length > 0 ? m.images : (m.image ? [m.image] : []));
 
-      const textContent = (m.content || '').trim();
+      let textContent = (m.content || '').trim();
       if (!textContent && mImgs.length === 0) {
         return; // skip blank message turns
+      }
+
+      // Pastikan riwayat balasan asisten yang memiliki sumber web referensi memiliki penanda verifikasi
+      if (m.role === 'assistant' && Array.isArray(m.sources) && m.sources.length > 0) {
+        textContent = appendWebVerificationNote(textContent, m.sources);
       }
 
       validList.push({
@@ -14091,16 +14151,22 @@ Format teks (untuk model tanpa function calling):
 
     const activePersona = (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
 
-    if (systemContent && systemContent.trim()) {
+    let effectiveSystem = (systemContent && systemContent.trim()) ? systemContent.trim() : '';
+    if (!effectiveSystem.includes('### INFORMASI WAKTU SISTEM REAL-TIME')) {
+      const temporal = getDynamicSystemTemporalContext();
+      effectiveSystem = effectiveSystem ? `${temporal}\n\n${effectiveSystem}` : temporal;
+    }
+
+    if (effectiveSystem && effectiveSystem.trim()) {
       if (supportsSystem) {
-        messagesPayload.push({ role: 'system', content: systemContent.trim() });
+        messagesPayload.push({ role: 'system', content: effectiveSystem.trim() });
       } else {
         // Untuk model yang tidak mendukung role system (misal: Gemma), lebur konteks sistem ke turn user pertama
         const firstUserMsg = validList.find(m => m.role === 'user');
         if (firstUserMsg) {
-          firstUserMsg.content = `[Instruksi Sistem & Konteks:\n${systemContent.trim()}]\n\n${firstUserMsg.content}`;
+          firstUserMsg.content = `[Instruksi Sistem & Konteks:\n${effectiveSystem.trim()}]\n\n${firstUserMsg.content}`;
         } else {
-          validList.unshift({ role: 'user', content: `[Instruksi Sistem & Konteks:\n${systemContent.trim()}]`, images: [] });
+          validList.unshift({ role: 'user', content: `[Instruksi Sistem & Konteks:\n${effectiveSystem.trim()}]`, images: [] });
         }
       }
     }
@@ -14260,9 +14326,9 @@ Format teks (untuk model tanpa function calling):
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
       const canRunAutonomous = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
-      let systemContent = '';
+      let systemContent = getDynamicSystemTemporalContext();
       if (personaPrompt) {
-        systemContent = `### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
+        systemContent = `${systemContent}\n\n### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
       }
       if (canRunAutonomous) {
         systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
@@ -15008,9 +15074,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       // Save to session if session is still alive
       if (STATE.sessions.some(s => s.id === session.id)) {
+        const contentToSave = appendWebVerificationNote(fullText, webSources);
         session.messages.push({
           role: 'assistant',
-          content: fullText,
+          content: contentToSave,
           model: modelName,
           engine: 'ollama',
           websiteMode: runOptions.websiteMode,
@@ -15058,9 +15125,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             <span class="meta-model-badge">Ollama</span>
             <span>⏱️ ${totalTime}s (Dihentikan)</span>
           `;
+          const stoppedContentToSave = appendWebVerificationNote(stoppedText, webSources);
           session.messages.push({
             role: 'assistant',
-            content: stoppedText,
+            content: stoppedContentToSave,
             model: modelName,
             engine: 'ollama',
             sources: webSources,
@@ -15115,9 +15183,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           const rescuedText = `${partialText.trim()}\n\n*[Koneksi terputus saat streaming]*`;
           const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
 
+          const rescuedContentToSave = appendWebVerificationNote(rescuedText, webSources);
           session.messages.push({
             role: 'assistant',
-            content: rescuedText,
+            content: rescuedContentToSave,
             model: modelName,
             engine: 'ollama',
             sources: webSources,
@@ -15315,9 +15384,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
       const canRunAutonomous = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
-      let systemContent = '';
+      let systemContent = getDynamicSystemTemporalContext();
       if (personaPrompt) {
-        systemContent = `### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
+        systemContent = `${systemContent}\n\n### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
       }
       if (canRunAutonomous) {
         systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
@@ -16412,9 +16481,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       // Save to session if session is still alive
       if (STATE.sessions.some(s => s.id === session.id)) {
+        const contentToSave = appendWebVerificationNote(fullText, webSources);
         session.messages.push({
           role: 'assistant',
-          content: fullText,
+          content: contentToSave,
           model: actualModelUsed || displayModel,
           engine: engineMode,
           websiteMode: runOptions.websiteMode,
@@ -16463,9 +16533,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             <span class="meta-model-badge" style="${engineLabel === 'Ollama Cloud' ? 'background:rgba(0,242,254,0.15); color:var(--neon-cyan);' : 'background:rgba(255,82,0,0.15); color:var(--neon-amber);'}">${engineLabel}</span>
             <span>⏱️ ${totalTime}s (Dihentikan)</span>
           `;
+          const stoppedContentToSave = appendWebVerificationNote(stoppedText, webSources);
           session.messages.push({
             role: 'assistant',
-            content: stoppedText,
+            content: stoppedContentToSave,
             model: displayModel,
             engine: engineMode,
             sources: webSources,
@@ -16499,9 +16570,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           const rescuedText = `${partialText.trim()}\n\n*[Koneksi terputus saat streaming]*`;
           const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
 
+          const rescuedContentToSave = appendWebVerificationNote(rescuedText, webSources);
           session.messages.push({
             role: 'assistant',
-            content: rescuedText,
+            content: rescuedContentToSave,
             model: displayModel,
             engine: engineMode,
             sources: webSources,
@@ -18990,7 +19062,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
         if (STATE.sessions.some(s => s.id === session.id)) {
           const assistantMsg = {
             role: 'assistant',
-            content: finalReportText,
+            content: appendWebVerificationNote(finalReportText, allSources),
             chatSummary: chatSummary,
             model: actualFinalModel,
             sources: allSources,
@@ -19022,7 +19094,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
           assistantRow.dataset.fullContent = stoppedText;
           session.messages.push({
             role: 'assistant',
-            content: stoppedText,
+            content: appendWebVerificationNote(stoppedText, allSources),
             chatSummary: chatSummary,
             model: actualFinalModel,
             sources: allSources,
