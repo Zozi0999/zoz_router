@@ -980,7 +980,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     workspaceDocSnapshotsList: $('#workspaceDocSnapshotsList'),
     taskCreateModal: $('#taskCreateModal'),
     inputTaskSubject: $('#inputTaskSubject'),
-    btnSaveManualTask: $('#btnSaveManualTask')
+    btnSaveManualTask: $('#btnSaveManualTask'),
+
+    // Website Creation Mode Modal
+    websiteModeModal: $('#websiteModeModal'),
+    btnCloseWebsiteModeModal: $('#btnCloseWebsiteModeModal'),
+    optWebsiteModePreview: $('#optWebsiteModePreview'),
+    optWebsiteModeCode: $('#optWebsiteModeCode'),
+    btnCancelWebsiteMode: $('#btnCancelWebsiteMode')
   };
 
   // ==================== BIO-ENDOCRINE HORMONE & CONNECTOME SYSTEM ====================
@@ -3571,12 +3578,149 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     });
   }
 
+  function normalizePdfText(str) {
+    if (!str) return '';
+    return str
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2013\u2014]/g, '-')
+      .replace(/[\u2022\u25CF]/g, '-')
+      .replace(/\u2026/g, '...')
+      .replace(/\u00A0/g, ' ')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n');
+  }
+
+  function isPdfHeadingLine(line) {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    if (/^#{1,6}\s+/.test(trimmed)) return true;
+    if (/^\*\*[^*]+\*\*$/.test(trimmed)) return true;
+    if (trimmed.length >= 4 && trimmed.length <= 65 && /^[A-Z0-9][A-Za-z0-9\s:&/,'"-]+$/.test(trimmed) && !trimmed.endsWith('.') && !trimmed.endsWith(',')) {
+      return true;
+    }
+    return false;
+  }
+
+  function parseMarkdownBlocksForPdf(markdownText) {
+    const normalized = normalizePdfText(markdownText || '');
+    const lines = normalized.split('\n');
+    const blocks = [];
+
+    let currentPara = [];
+    let inCode = false;
+    let codeBuffer = [];
+    let codeLang = '';
+
+    const flushPara = () => {
+      if (currentPara.length > 0) {
+        const fullText = currentPara.join(' ').replace(/\s+/g, ' ').trim();
+        if (fullText) {
+          blocks.push({ type: 'p', text: fullText });
+        }
+        currentPara = [];
+      }
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const rawLine = lines[i];
+      const line = rawLine.trim();
+
+      if (line.startsWith('```')) {
+        if (inCode) {
+          blocks.push({ type: 'code', lines: codeBuffer, lang: codeLang });
+          codeBuffer = [];
+          inCode = false;
+        } else {
+          flushPara();
+          inCode = true;
+          codeLang = line.slice(3).trim();
+          codeBuffer = [];
+        }
+        continue;
+      }
+
+      if (inCode) {
+        codeBuffer.push(rawLine);
+        continue;
+      }
+
+      if (!line) {
+        flushPara();
+        continue;
+      }
+
+      if (line.startsWith('# ')) {
+        flushPara();
+        blocks.push({ type: 'h1', text: line.substring(2).trim() });
+        continue;
+      }
+
+      if (line.startsWith('## ')) {
+        flushPara();
+        blocks.push({ type: 'h2', text: line.substring(3).trim() });
+        continue;
+      }
+
+      if (line.startsWith('### ')) {
+        flushPara();
+        blocks.push({ type: 'h3', text: line.substring(4).trim() });
+        continue;
+      }
+
+      if (line.startsWith('#### ')) {
+        flushPara();
+        blocks.push({ type: 'h4', text: line.substring(5).trim() });
+        continue;
+      }
+
+      if (isPdfHeadingLine(line)) {
+        flushPara();
+        const cleanH = line.replace(/^\*\*|\*\*$/g, '').replace(/^#{1,6}\s+/, '').trim();
+        blocks.push({ type: 'h2', text: cleanH });
+        continue;
+      }
+
+      if (line.startsWith('- ') || line.startsWith('* ') || line.startsWith('+ ')) {
+        flushPara();
+        const itemText = line.replace(/^[-*+]\s+/, '').replace(/\*\*(.*?)\*\*/g, '$1').trim();
+        blocks.push({ type: 'list_item', text: itemText });
+        continue;
+      }
+
+      if (/^\d+\.\s+/.test(line)) {
+        flushPara();
+        const match = line.match(/^(\d+)\.\s+(.*)/);
+        blocks.push({ type: 'ordered_item', num: match[1], text: match[2].replace(/\*\*(.*?)\*\*/g, '$1').trim() });
+        continue;
+      }
+
+      if (line === '---' || line === '***' || line === '___') {
+        flushPara();
+        blocks.push({ type: 'hr' });
+        continue;
+      }
+
+      if (line.startsWith('>')) {
+        flushPara();
+        blocks.push({ type: 'quote', text: line.replace(/^>\s*/, '').replace(/\*\*(.*?)\*\*/g, '$1').trim() });
+        continue;
+      }
+
+      currentPara.push(line);
+    }
+
+    flushPara();
+    return blocks;
+  }
+
   async function compileMarkdownToPdfBlob(markdownText, title = 'Dokumen ZOZ AI') {
     const jsPDFClass = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : null;
     if (!jsPDFClass) {
       return new Blob([markdownText || ''], { type: 'application/pdf' });
     }
 
+    const blocks = parseMarkdownBlocksForPdf(markdownText);
     const doc = new jsPDFClass({
       orientation: 'portrait',
       unit: 'mm',
@@ -3590,116 +3734,116 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     let cursorY = margin;
 
     function ensurePageSpace(neededMm) {
-      if (cursorY + neededMm > pageHeight - margin - 10) {
+      if (cursorY + neededMm > pageHeight - margin - 15) {
         doc.addPage();
         cursorY = margin;
       }
     }
 
-    const cleanTitle = (title || 'Dokumen').replace(/\.pdf$/i, '');
+    // Tentukan judul utama dokumen (prioritaskan h1 dari markdown)
+    let mainTitle = '';
+    const firstH1Idx = blocks.findIndex(b => b.type === 'h1');
+    if (firstH1Idx !== -1) {
+      mainTitle = blocks[firstH1Idx].text;
+      blocks.splice(firstH1Idx, 1);
+    } else {
+      mainTitle = (title || 'Dokumen')
+        .replace(/\.(?:pdf|docx|md|txt)$/i, '')
+        .replace(/[_-]+/g, ' ')
+        .trim();
+    }
+
+    // Header badge atas
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(37, 99, 235);
+    doc.text('DOKUMEN RESMI | ZOZ AI ADVANCED ENGINE', margin, cursorY);
+    cursorY += 5;
+
+    // Judul utama
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(18);
     doc.setTextColor(15, 23, 42);
-    doc.text(cleanTitle, margin, cursorY);
+    const titleSplit = doc.splitTextToSize(mainTitle, contentWidth);
+    doc.text(titleSplit, margin, cursorY);
+    cursorY += (titleSplit.length * 7) + 2;
+
+    // Garis aksen cyan
+    doc.setDrawColor(56, 189, 248);
+    doc.setLineWidth(0.8);
+    doc.line(margin, cursorY, margin + contentWidth, cursorY);
     cursorY += 7;
 
-    doc.setDrawColor(56, 189, 248);
-    doc.setLineWidth(0.6);
-    doc.line(margin, cursorY, margin + contentWidth, cursorY);
-    cursorY += 8;
-
-    const lines = (markdownText || '').split('\n');
-    let inCode = false;
-    let codeBuffer = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const trimmed = line.trim();
-
-      if (trimmed.startsWith('```')) {
-        if (inCode) {
-          doc.setFont('courier', 'normal');
-          doc.setFontSize(8.5);
-          doc.setTextColor(30, 41, 59);
-          for (const cLine of codeBuffer) {
-            ensurePageSpace(5);
-            doc.setFillColor(241, 245, 249);
-            doc.rect(margin, cursorY - 3.5, contentWidth, 5, 'F');
-            const splitC = doc.splitTextToSize(cLine, contentWidth - 4);
-            doc.text(splitC, margin + 2, cursorY);
-            cursorY += (splitC.length * 4.5);
-          }
-          cursorY += 3;
-          codeBuffer = [];
-          inCode = false;
-        } else {
-          inCode = true;
-          codeBuffer = [];
-        }
-        continue;
-      }
-
-      if (inCode) {
-        codeBuffer.push(line);
-        continue;
-      }
-
-      if (!trimmed) {
+    for (const block of blocks) {
+      if (block.type === 'h2') {
+        ensurePageSpace(16);
         cursorY += 3;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(13);
+        doc.setTextColor(30, 58, 138); // #1e3a8a
+        const split = doc.splitTextToSize(block.text, contentWidth);
+        doc.text(split, margin, cursorY);
+        cursorY += (split.length * 5.6) + 2.5;
         continue;
       }
 
-      if (trimmed.startsWith('# ')) {
+      if (block.type === 'h3' || block.type === 'h4') {
         ensurePageSpace(12);
+        cursorY += 2;
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(14);
-        doc.setTextColor(15, 23, 42);
-        const text = trimmed.substring(2).trim();
-        const split = doc.splitTextToSize(text, contentWidth);
-        doc.text(split, margin, cursorY);
-        cursorY += (split.length * 5.8) + 3;
-        continue;
-      }
-
-      if (trimmed.startsWith('## ')) {
-        ensurePageSpace(10);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(12);
-        doc.setTextColor(37, 99, 235);
-        const text = trimmed.substring(3).trim();
-        const split = doc.splitTextToSize(text, contentWidth);
-        doc.text(split, margin, cursorY);
-        cursorY += (split.length * 5.2) + 2.5;
-        continue;
-      }
-
-      if (trimmed.startsWith('### ')) {
-        ensurePageSpace(8);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10.5);
+        doc.setFontSize(11);
         doc.setTextColor(51, 65, 85);
-        const text = trimmed.substring(4).trim();
-        const split = doc.splitTextToSize(text, contentWidth);
+        const split = doc.splitTextToSize(block.text, contentWidth);
         doc.text(split, margin, cursorY);
-        cursorY += (split.length * 4.8) + 2;
+        cursorY += (split.length * 5) + 2;
         continue;
       }
 
-      if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || trimmed.startsWith('+ ')) {
-        ensurePageSpace(6);
+      if (block.type === 'list_item') {
+        ensurePageSpace(7);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(10);
         doc.setTextColor(51, 65, 85);
-        const itemText = trimmed.replace(/^[-*+]\s+/, '').replace(/\*\*(.*?)\*\*/g, '$1');
         doc.setFillColor(56, 189, 248);
-        doc.circle(margin + 2, cursorY - 1, 0.8, 'F');
-        const split = doc.splitTextToSize(itemText, contentWidth - 6);
-        doc.text(split, margin + 5, cursorY);
-        cursorY += (split.length * 4.8) + 1.5;
+        doc.circle(margin + 2.5, cursorY - 1, 0.9, 'F');
+        const split = doc.splitTextToSize(block.text, contentWidth - 7);
+        doc.text(split, margin + 6, cursorY);
+        cursorY += (split.length * 4.9) + 1.8;
         continue;
       }
 
-      if (trimmed === '---' || trimmed === '***') {
+      if (block.type === 'ordered_item') {
+        ensurePageSpace(7);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(37, 99, 235);
+        doc.text(`${block.num}.`, margin + 1, cursorY);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(51, 65, 85);
+        const split = doc.splitTextToSize(block.text, contentWidth - 7);
+        doc.text(split, margin + 7, cursorY);
+        cursorY += (split.length * 4.9) + 1.8;
+        continue;
+      }
+
+      if (block.type === 'quote') {
+        ensurePageSpace(10);
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(9.5);
+        doc.setTextColor(71, 85, 105);
+        const split = doc.splitTextToSize(block.text, contentWidth - 8);
+        const boxHeight = (split.length * 4.7) + 3;
+        doc.setFillColor(248, 250, 252);
+        doc.rect(margin, cursorY - 3, contentWidth, boxHeight, 'F');
+        doc.setDrawColor(56, 189, 248);
+        doc.setLineWidth(1);
+        doc.line(margin, cursorY - 3, margin, cursorY - 3 + boxHeight);
+        doc.text(split, margin + 4, cursorY + 0.5);
+        cursorY += boxHeight + 3;
+        continue;
+      }
+
+      if (block.type === 'hr') {
         ensurePageSpace(6);
         doc.setDrawColor(226, 232, 240);
         doc.setLineWidth(0.3);
@@ -3708,26 +3852,52 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         continue;
       }
 
-      ensurePageSpace(6);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(10);
-      doc.setTextColor(51, 65, 85);
-      const cleanPara = trimmed.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1').replace(/`([^`]+)`/g, '$1');
-      const split = doc.splitTextToSize(cleanPara, contentWidth);
-      doc.text(split, margin, cursorY);
-      cursorY += (split.length * 4.8) + 2;
+      if (block.type === 'code') {
+        doc.setFont('courier', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor(30, 41, 59);
+        for (const cLine of block.lines) {
+          ensurePageSpace(5.5);
+          doc.setFillColor(241, 245, 249);
+          doc.rect(margin, cursorY - 3.5, contentWidth, 5.2, 'F');
+          doc.setDrawColor(226, 232, 240);
+          doc.setLineWidth(0.2);
+          doc.rect(margin, cursorY - 3.5, contentWidth, 5.2, 'S');
+          const splitC = doc.splitTextToSize(cLine, contentWidth - 4);
+          doc.text(splitC, margin + 2.5, cursorY);
+          cursorY += (splitC.length * 4.5);
+        }
+        cursorY += 3;
+        continue;
+      }
+
+      if (block.type === 'p') {
+        ensurePageSpace(8);
+        const cleanPara = block.text.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1').replace(/`([^`]+)`/g, '$1');
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        doc.setTextColor(51, 65, 85);
+        const split = doc.splitTextToSize(cleanPara, contentWidth);
+        doc.text(split, margin, cursorY);
+        cursorY += (split.length * 4.9) + 3.5;
+        continue;
+      }
     }
 
     const totalPages = doc.internal.getNumberOfPages();
     for (let p = 1; p <= totalPages; p++) {
       doc.setPage(p);
+      doc.setDrawColor(241, 245, 249);
+      doc.setLineWidth(0.3);
+      doc.line(margin, pageHeight - 12, margin + contentWidth, pageHeight - 12);
+
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
       doc.text(
-        `Dihasilkan secara otonom oleh ZOZ AI • Halaman ${p} dari ${totalPages}`,
+        `Dihasilkan secara otonom oleh ZOZ AI | Halaman ${p} dari ${totalPages}`,
         pageWidth / 2,
-        pageHeight - 8,
+        pageHeight - 7,
         { align: 'center' }
       );
     }
@@ -10598,12 +10768,39 @@ ${blocks}
     }
   }
 
+  // ==================== WEBSITE CREATION MODE SELECTION ====================
+  let pendingWebsitePrompt = null;
+
+  function isWebsiteCreationPrompt(text) {
+    if (!text || typeof text !== 'string') return false;
+    const t = text.trim().toLowerCase();
+    if (hasNegativeFileOrPreviewIntent(t) || /^\/(?:kodenya-saja|code)\b/i.test(t)) return false;
+
+    // Cek perintah slash /website atau /web
+    if (/^\/(?:website|web|webpage|landingpage)\b/i.test(t)) {
+      const rem = t.replace(/^\/(?:website|web|webpage|landingpage)\b/i, '').trim();
+      return rem.length > 0;
+    }
+
+    // Cek frasa pembuatan website/webpage
+    const hasWebKeyword = /\b(?:website|web|web\s+page|webpage|landing\s*page|halaman\s+web|aplikasi\s+web|game\s+web|portofolio\s+web)\b/i.test(t);
+    const hasCreationVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|tolong\s+bikin|generate|create|build|develop|rancang|desain)\b/i.test(t);
+
+    return hasWebKeyword && hasCreationVerb;
+  }
+
+  function openWebsiteModeModal(promptText) {
+    pendingWebsitePrompt = promptText;
+    openModal('websiteModeModal');
+    AudioEngine.click();
+  }
+
   // ==================== DISPATCH / STREAMING ENGINE ====================
-  async function handleSendPrompt() {
+  async function handleSendPrompt(options = {}) {
     // HARUS `let`: blok auto-convert saat kirim (lihat di bawah) dan jalur rewrite
     // URL me-assign ulang rawText. Pakai `const` akan melempar TypeError senyap
     // di dalam try tanpa catch sehingga pesan tidak pernah terkirim.
-    let rawText = els.promptInput ? els.promptInput.value.trim() : '';
+    let rawText = options.overrideText !== undefined ? options.overrideText : (els.promptInput ? els.promptInput.value.trim() : '');
     const images = [...(STATE.attachedImages || [])];
     if (images.length === 0 && STATE.photoEditImage) {
       images.push(STATE.photoEditImage);
@@ -10613,6 +10810,12 @@ ${blocks}
 
     if (!rawText && images.length === 0 && docs.length === 0) return;
     if (STATE.isGenerating || STATE.isSending) return;
+
+    // Intersepsi Pembuatan Website: Tampilkan dialog pilihan output (Pratinjau vs Kode di percakapan)
+    if (!options.skipWebsiteCheck && !options.websiteMode && isWebsiteCreationPrompt(rawText)) {
+      openWebsiteModeModal(rawText);
+      return;
+    }
 
     // Tutup celah await (hydrasi sesi lazy-disk) sebelum input dibersihkan,
     // agar Enter berulang tidak mengirim dua kali / memicu dua stream.
@@ -11032,14 +11235,18 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       await runImageGeneration(session, cleanImgPrompt, fallbackImgModel);
     } else {
       // MODE BIASA: Selalu jalankan streaming chat normal dengan pencarian web biasa otonom
+      const streamRunOptions = {
+        websiteMode: options.websiteMode,
+        isExplicitCleanCode: options.websiteMode === 'code_in_chat'
+      };
       if (STATE.mode === 'auto') {
-        await runAutoRouterStreaming(session, text, effectiveImages);
+        await runAutoRouterStreaming(session, text, effectiveImages, streamRunOptions);
       } else if (STATE.mode === 'openrouter') {
         let effectiveORModel = targetModel;
         if (!effectiveORModel.includes('/')) {
           effectiveORModel = mapOllamaModelToOpenRouter(effectiveORModel) || STATE.settings.openRouterModel || 'openrouter/free';
         }
-        await runOpenRouterStreaming(session, text, effectiveImages, effectiveORModel);
+        await runOpenRouterStreaming(session, text, effectiveImages, effectiveORModel, streamRunOptions);
       } else {
         // Mode Ollama Cloud: seluruh model dieksekusi 100% via Cloud tanpa ketergantungan model lokal
         const effectiveCloudModel = targetModel.includes('/')
@@ -11048,7 +11255,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         await runOpenRouterStreaming(session, text, effectiveImages, effectiveCloudModel, {
           displayModel: targetModel,
           engineLabel: 'Ollama Cloud',
-          engineMode: 'ollama'
+          engineMode: 'ollama',
+          ...streamRunOptions
         });
       }
     }
@@ -13419,7 +13627,8 @@ Format teks (untuk model tanpa function calling):
       return await runOpenRouterStreaming(session, promptText, image, targetCloudModel, {
         displayModel: modelName,
         engineLabel: 'Ollama Cloud',
-        engineMode: 'ollama'
+        engineMode: 'ollama',
+        ...runOptions
       });
     }
 
@@ -13446,13 +13655,14 @@ Format teks (untuk model tanpa function calling):
     // Deteksi perintah slash eksplisit & jenis permintaan interaktif
     const isExplicitDiagramCmd = /^\/diagram\b/i.test(promptText.trim());
     const isExplicitWebCmd = /^\/(?:website|web|pratinjau)\b/i.test(promptText.trim());
-    const isExplicitCleanCodeCmd = /^\/(?:kodenya-saja|code)\b/i.test(promptText.trim());
+    const isExplicitCleanCodeCmd = /^\/(?:kodenya-saja|code)\b/i.test(promptText.trim()) || Boolean(runOptions.isExplicitCleanCode);
     const isExplicitDocCmd = /^\/(?:dokumen|docx|pdf)\b/i.test(promptText.trim());
 
     const isDiagramRequest = isExplicitDiagramCmd ||
                              /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(promptText);
-    const isWebRequest = isExplicitWebCmd ||
-                         /\b(?:website|web|webpage|landing page|halaman web|aplikasi web|game web|simulasi 3d)\b/i.test(promptText);
+    const isWebRequest = (isExplicitWebCmd ||
+                         /\b(?:website|web|webpage|landing page|halaman web|aplikasi web|game web|simulasi 3d)\b/i.test(promptText) ||
+                         runOptions.websiteMode === 'preview') && !isExplicitCleanCodeCmd;
 
     const wantsFile = (isDiagramRequest || isWebRequest || isExplicitDocCmd || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
     const hasNegativePreview = isExplicitCleanCodeCmd || hasNegativeFileOrPreviewIntent(promptText);
@@ -14451,13 +14661,14 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     // Deteksi perintah slash eksplisit & jenis permintaan interaktif
     const isExplicitDiagramCmd = /^\/diagram\b/i.test(promptText.trim());
     const isExplicitWebCmd = /^\/(?:website|web|pratinjau)\b/i.test(promptText.trim());
-    const isExplicitCleanCodeCmd = /^\/(?:kodenya-saja|code)\b/i.test(promptText.trim());
+    const isExplicitCleanCodeCmd = /^\/(?:kodenya-saja|code)\b/i.test(promptText.trim()) || Boolean(runOptions.isExplicitCleanCode);
     const isExplicitDocCmd = /^\/(?:dokumen|docx|pdf)\b/i.test(promptText.trim());
 
     const isDiagramRequest = isExplicitDiagramCmd ||
                              /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(promptText);
-    const isWebRequest = isExplicitWebCmd ||
-                         /\b(?:website|web|webpage|landing page|halaman web|aplikasi web|game web|simulasi 3d)\b/i.test(promptText);
+    const isWebRequest = (isExplicitWebCmd ||
+                         /\b(?:website|web|webpage|landing page|halaman web|aplikasi web|game web|simulasi 3d)\b/i.test(promptText) ||
+                         runOptions.websiteMode === 'preview') && !isExplicitCleanCodeCmd;
 
     const wantsFile = (isDiagramRequest || isWebRequest || isExplicitDocCmd || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
     const hasNegativePreview = isExplicitCleanCodeCmd || hasNegativeFileOrPreviewIntent(promptText);
@@ -24074,6 +24285,37 @@ Aturan:
       renderTaskTrackerUI();
       AudioEngine.click();
       showToast(`Tugas "${subj}" ditambahkan ke Task Tracker.`);
+    });
+
+    // Modal Pilihan Format Output Website
+    els.optWebsiteModePreview?.addEventListener('click', () => {
+      closeModal('websiteModeModal');
+      if (!pendingWebsitePrompt) return;
+      const textToSend = pendingWebsitePrompt;
+      pendingWebsitePrompt = null;
+      AudioEngine.click();
+      handleSendPrompt({ websiteMode: 'preview', skipWebsiteCheck: true, overrideText: textToSend });
+    });
+
+    els.optWebsiteModeCode?.addEventListener('click', () => {
+      closeModal('websiteModeModal');
+      if (!pendingWebsitePrompt) return;
+      const textToSend = pendingWebsitePrompt;
+      pendingWebsitePrompt = null;
+      AudioEngine.click();
+      handleSendPrompt({ websiteMode: 'code_in_chat', skipWebsiteCheck: true, overrideText: textToSend });
+    });
+
+    els.btnCancelWebsiteMode?.addEventListener('click', () => {
+      closeModal('websiteModeModal');
+      pendingWebsitePrompt = null;
+      els.promptInput?.focus();
+    });
+
+    els.btnCloseWebsiteModeModal?.addEventListener('click', () => {
+      closeModal('websiteModeModal');
+      pendingWebsitePrompt = null;
+      els.promptInput?.focus();
     });
 
     // Delegasi klik item di taskTrackerList
