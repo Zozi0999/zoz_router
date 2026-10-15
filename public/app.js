@@ -3071,20 +3071,36 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           theme: 'dark',
           securityLevel: 'loose',
           fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+          flowchart: {
+            useMaxWidth: true,
+            htmlLabels: true,
+            curve: 'basis',        // Kurva halus melengkung elegan, tidak kaku atau zig-zag patah
+            nodeSpacing: 50,       // Jarak horizontal antar node lega
+            rankSpacing: 55,       // Jarak vertikal antar tingkatan proporsional
+            padding: 16            // Padding dalam kotak nyaman dibaca
+          },
           themeVariables: {
             darkMode: true,
-            background: '#0d1117',
-            primaryColor: '#1e293b',
-            primaryTextColor: '#f0f6fc',
+            background: '#090d16',
+            fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+            fontSize: '13px',
+            primaryColor: '#111827',
+            primaryTextColor: '#f8fafc',
             primaryBorderColor: '#38bdf8',
-            lineColor: '#38bdf8',
-            secondaryColor: '#0f172a',
-            tertiaryColor: '#1e1e2e',
-            actorBkg: '#1e293b',
-            actorBorder: '#38bdf8',
-            actorTextColor: '#f0f6fc',
-            signalColor: '#38bdf8',
-            signalTextColor: '#f0f6fc'
+            lineColor: '#00f0ff',
+            secondaryColor: '#1e1b4b',
+            secondaryTextColor: '#e0e7ff',
+            secondaryBorderColor: '#818cf8',
+            tertiaryColor: '#2d1515',
+            tertiaryTextColor: '#ffedd5',
+            tertiaryBorderColor: '#fb923c',
+            edgeLabelBackground: '#0b0f19',
+            clusterBkg: 'rgba(15, 23, 42, 0.65)',
+            clusterBorder: 'rgba(56, 189, 248, 0.3)',
+            titleColor: '#00f0ff',
+            nodeBorder: '#38bdf8',
+            nodeTextColor: '#f8fafc',
+            mainBkg: '#111827'
           }
         });
       } catch (err) {
@@ -3623,6 +3639,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       return `${arrow}|"${label.replace(/"/g, "'")}"| ${next}`;
     });
     code = code.replace(/--\s*\[([^\]\r\n]+)\]\s*-->/g, '-- "$1" -->');
+    // 9. Konversi baris baru (\n) di dalam label teks kotak menjadi <br/> agar menjadi kartu 2-baris yang rapi
+    code = code.replace(/(\[|\(\[|\{\{|\{)"([^"]+)"(\]|\)\]|\}\}|\})/g, (m, open, text, close) => {
+      const formatted = text.replace(/\\n|\r?\n/g, '<br/>');
+      return `${open}"${formatted}"${close}`;
+    });
+
+    // 10. Perhalus warna neon mentah jika model menghasilkan deklarasi style jadul
+    code = code.replace(/fill:#f9f\b/gi, 'fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#e0e7ff');
+    code = code.replace(/fill:#ff9d00\b/gi, 'fill:#2d1515,stroke:#fb923c,stroke-width:1.5px,color:#ffedd5');
 
     return code;
   }
@@ -4153,7 +4178,33 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
               }, 50);
             }
           }).catch((renderErr) => {
-            console.warn('Gagal merender diagram mermaid:', renderErr);
+            console.warn('Percobaan render diagram pertama gagal, mencoba pembersih sekunder:', renderErr);
+            const aggressiveCode = getAggressiveMermaidCleaner(cleanCode);
+            if (aggressiveCode && aggressiveCode !== cleanCode) {
+              window.mermaid.render(diagramId + '_clean', aggressiveCode).then((res2) => {
+                if (res2 && res2.svg) {
+                  stage.innerHTML = res2.svg;
+                  const svgNode = stage.querySelector('svg');
+                  if (svgNode) {
+                    svgNode.style.maxWidth = '100%';
+                    svgNode.style.height = 'auto';
+                    svgNode.style.display = 'block';
+                  }
+                  setTimeout(() => {
+                    viewport.scrollLeft = Math.max(0, (stage.scrollWidth - viewport.clientWidth) / 2);
+                  }, 50);
+                  return;
+                }
+                showDiagramError();
+              }).catch(() => {
+                showDiagramError();
+              });
+            } else {
+              showDiagramError();
+            }
+          });
+
+          function showDiagramError() {
             stage.innerHTML = `
               <div class="mermaid-render-error">
                 <i class="fa-solid fa-triangle-exclamation"></i>
@@ -4163,7 +4214,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
                 </div>
               </div>
             `;
-          });
+          }
         } catch (callErr) {
           console.warn('Mermaid render exception:', callErr);
           stage.innerHTML = `
@@ -7375,22 +7426,35 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
 - Tulis isinya dalam format Markdown terstruktur yang rapi (judul #, ##, ###, bullet points -, bold **teks**, tabel, pemisah ---).
 - Mesin ZOZ Document Compiler akan secara otomatis mengompilasi teks Markdown ini menjadi berkas biner murni .docx (Office Open XML) atau .pdf (Adobe Acrobat) yang valid dan siap langsung dibuka di Microsoft Word / Acrobat Reader di laptop maupun HP pengguna!
 
-2. PEMBUATAN DIAGRAM VISUAL INTERAKTIF (.SVG):
-- Saat pengguna meminta diagram alur (flowchart), alur logika, urutan proses (sequence diagram), struktur kelas (class diagram), ERD basis data, mindmap, atau diagram arsitektur sistem:
+2. PEMBUATAN DIAGRAM VISUAL INTERAKTIF (.SVG) (STANDAR KUALITAS CLAUDE AI - BERSIH, RAPI & MUDAH DIBACA):
+- Saat pengguna meminta diagram alur (flowchart), alur logika, urutan proses (sequence diagram), struktur kelas, ERD, mindmap, atau arsitektur sistem:
 - AI membungkusnya dalam blok ZOZ_FILE berekstensi .svg:
-<<<ZOZ_FILE name="Arsitektur_Logika_AI_Agent.svg" mime="image/svg+xml" lang="mermaid">
+<<<ZOZ_FILE name="Alur_Kerja_AI_Agent.svg" mime="image/svg+xml" lang="mermaid">
 flowchart TD
-    A["Input Pengguna"] --> B["LLM (Otak Agen)"]
-    B <--> C["Memori"]
-    B --> D["Pemilihan Alat"]
-    D --> E["Observasi"]
-    E --> F["Jawaban Akhir"]
+    A["<b>Input Pengguna</b><br/>Tujuan atau perintah"] --> B["<b>LLM (Otak Agen)</b><br/>Menalar dan merencanakan"]
+    B <--> C["<b>Memori</b><br/>Pendek dan panjang"]
+    B --> D["<b>Pemilihan Alat</b><br/>Pencarian, kode, API"]
+    D --> E["<b>Observasi</b><br/>Hasil dari alat"]
+    E -->|jika selesai| F["<b>Jawaban Akhir</b><br/>Solusi terverifikasi"]
+    E -.->|ulangi| B
+
+    classDef default fill:#111827,stroke:#38bdf8,stroke-width:1.5px,color:#f8fafc;
+    classDef brain fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#e0e7ff;
+    classDef action fill:#2d1515,stroke:#fb923c,stroke-width:1.5px,color:#ffedd5;
+    class B,C brain;
+    class D,E action;
 <<<END_ZOZ_FILE>>>
-- Format penulisan teks Mermaid:
-  * Selalu gunakan tanda kutip dua ["..."] pada label teks kotak yang memuat tanda kurung, tanda titik dua, atau garis miring.
-  * Untuk panah berlabel gunakan format: A -->|"Teks Label"| B atau A -- "Teks" --> B.
-- Sistem ZOZ Router akan secara instan merender visual diagram interaktif langsung di tengah obrolan chat (seperti Claude/Gemini) lengkap dengan tombol Layar Penuh (Fullscreen), zoom, pan, switch kode sumber, dan unduh SVG.
-- SETELAH blok diagram, berikan uraian penjelasan yang ramah dan terstruktur mengenai alur serta komponen diagram tersebut (seperti penjelasan tiap tahapan atau fungsi komponen).
+
+PRINSIP WAJIB DIAGRAM RAPI, BERSIH & JELAS (TIDAK BERANTAKAN):
+1. Fokus & Terarah (KISS Principle): Batasi diagram pada 4 - 8 kotak alur inti paling esensial. JANGAN membuat diagram laba-laba raksasa dengan puluhan kotak kecil bertumpuk yang membuat garis panah saling bertabrakan atau teks kekecilan.
+2. Format Kotak 2-Baris Elegan:
+   - Baris 1: Judul Komponen tebal: <b>Judul Utama</b>
+   - Baris 2: Deskripsi peran singkat: <br/>Peran atau tindakan singkat
+   - Selalu apit teks label kotak dengan tanda kutip dua: ["<b>...</b><br/>..."]
+3. Arah Alur Linier & Rapi: Gunakan "flowchart TD" (vertikal atas ke bawah). Tempatkan cabang pendukung (seperti Memori) di sisi samping node terkait, dan garis perulangan (loopback) berupa panah putus-putus rapi di sisi samping (-.->|ulangi|).
+4. Palet Warna Harmonis & Elegan: Gunakan classDef lembut sesuai peran (misal: Indigo untuk pemrosesan/otak, Amber untuk aksi/tool, Cyan untuk input/output). JANGAN gunakan warna neon keras atau warna-warni acak yang menyilaukan mata.
+5. Uraian Penjelasan Terstruktur Pasca-Diagram:
+   Setelah blok diagram, WAJIB berikan pengantar dan uraian bernomor yang ramah, mendalam, dan terstruktur mengenai fungsi tiap komponen (seperti format penjelasan Claude AI).
 
 Aturan wajib:
 - name : nama file final yang deskriptif dan spesifik berakhiran .svg / .docx / .pdf / .html / .js / dsb.
@@ -7806,7 +7870,14 @@ Aturan wajib:
             startOnLoad: false,
             theme: 'dark',
             securityLevel: 'loose',
-            flowchart: { htmlLabels: false, useMaxWidth: true }
+            flowchart: {
+              htmlLabels: false,
+              useMaxWidth: true,
+              curve: 'basis',
+              nodeSpacing: 50,
+              rankSpacing: 55,
+              padding: 16
+            }
           });
           const cleanDiagram = getCleanMermaidCode(rawMermaidCode);
           const rasterRes = await window.mermaid.render('raster_jpeg_' + Date.now(), cleanDiagram);

@@ -10048,10 +10048,102 @@ body.page-paused *::after {
   max-width: 100%;
 }
 
-.mermaid-svg-stage svg {
+.mermaid-svg-stage svg,
+.mermaid-sheet svg {
   max-width: none;
   height: auto;
   display: block;
+  font-family: var(--font-main), 'Space Grotesk', -apple-system, sans-serif !important;
+  letter-spacing: 0.02em;
+}
+
+/* Kotak Node: Sudut tumpul halus, drop shadow lembut, border tegas */
+.mermaid-svg-stage svg .node rect,
+.mermaid-svg-stage svg .node polygon,
+.mermaid-sheet svg .node rect,
+.mermaid-sheet svg .node polygon {
+  rx: 8px !important;
+  ry: 8px !important;
+  stroke-width: 1.5px !important;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45));
+  transition: all 0.2s ease;
+}
+
+.mermaid-svg-stage svg .node:hover rect,
+.mermaid-sheet svg .node:hover rect {
+  filter: drop-shadow(0 0 10px rgba(0, 240, 255, 0.4));
+  stroke-width: 2px !important;
+}
+
+/* Tipografi Teks di Dalam Kotak: Judul Tebal, Subtitle Rapi */
+.mermaid-svg-stage svg .node .label,
+.mermaid-sheet svg .node .label {
+  font-family: var(--font-main), 'Space Grotesk', -apple-system, sans-serif !important;
+  font-size: 13px !important;
+  line-height: 1.45 !important;
+  text-align: center !important;
+  color: #f8fafc !important;
+}
+
+.mermaid-svg-stage svg .node .label b,
+.mermaid-svg-stage svg .node .label strong,
+.mermaid-sheet svg .node .label b,
+.mermaid-sheet svg .node .label strong {
+  font-size: 13.5px !important;
+  font-weight: 700 !important;
+  color: #ffffff !important;
+  letter-spacing: 0.02em;
+}
+
+/* Garis Panah Konektor: Halus, bercahaya pendar halus, panah tajam */
+.mermaid-svg-stage svg .edgePath path,
+.mermaid-sheet svg .edgePath path {
+  stroke: #38bdf8 !important;
+  stroke-width: 1.8px !important;
+  filter: drop-shadow(0 1px 3px rgba(0, 240, 255, 0.2));
+}
+
+.mermaid-svg-stage svg .marker,
+.mermaid-sheet svg .marker {
+  fill: #38bdf8 !important;
+  stroke: #38bdf8 !important;
+}
+
+/* Label pada Panah: Badge Pill Gelap Kontras agar tidak tertimpa garis */
+.mermaid-svg-stage svg .edgeLabel,
+.mermaid-sheet svg .edgeLabel {
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  color: #94a3b8 !important;
+}
+
+.mermaid-svg-stage svg .edgeLabel rect,
+.mermaid-sheet svg .edgeLabel rect {
+  fill: #0b1120 !important;
+  stroke: rgba(56, 189, 248, 0.3) !important;
+  stroke-width: 1px !important;
+  rx: 4px !important;
+  ry: 4px !important;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
+}
+
+/* Kluster / Subgraph: Latar tembus pandang bergaris putus lembut */
+.mermaid-svg-stage svg .cluster rect,
+.mermaid-sheet svg .cluster rect {
+  rx: 12px !important;
+  ry: 12px !important;
+  fill: rgba(15, 23, 42, 0.6) !important;
+  stroke: rgba(56, 189, 248, 0.35) !important;
+  stroke-dasharray: 4, 4;
+}
+
+.mermaid-svg-stage svg .cluster .nodeLabel,
+.mermaid-sheet svg .cluster .nodeLabel {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  color: #38bdf8 !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .mermaid-raw-code {
