@@ -3555,6 +3555,156 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     return doc.output('blob');
   }
 
+  function getCleanMermaidCode(raw) {
+    if (!raw) return '';
+    let code = String(raw).trim();
+    // Unescape HTML entities yang dihasilkan oleh Markdown parser
+    code = code
+      .replace(/&gt;/g, '>')
+      .replace(/&lt;/g, '<')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+    // Buang code fence markdown jika ikut terbawa
+    code = code.replace(/^```(?:mermaid)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    return code;
+  }
+
+  function generateWordDocPreviewHtml(fileName, parsedBody) {
+    return `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      background: #0f172a;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 24px 12px;
+      display: flex;
+      justify-content: center;
+      color: #334155;
+    }
+    .word-sheet {
+      background: #ffffff;
+      width: 100%;
+      max-width: 820px;
+      min-height: 1050px;
+      padding: 56px 48px;
+      box-sizing: border-box;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      border-radius: 6px;
+      line-height: 1.65;
+      font-size: 15px;
+    }
+    .word-header-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #eff6ff;
+      color: #2563eb;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 24px;
+      border: 1px solid #bfdbfe;
+    }
+    h1, h2, h3, h4 { color: #0f172a; font-weight: 700; line-height: 1.3; }
+    h1 { font-size: 24px; border-bottom: 2px solid #38bdf8; padding-bottom: 10px; margin-top: 10px; }
+    h2 { font-size: 19px; color: #1e40af; margin-top: 28px; }
+    h3 { font-size: 16px; margin-top: 20px; }
+    p { margin: 12px 0; color: #334155; }
+    ul, ol { padding-left: 24px; margin: 12px 0; }
+    li { margin-bottom: 6px; }
+    pre { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #38bdf8; padding: 14px; border-radius: 4px; overflow-x: auto; font-family: 'Consolas', monospace; font-size: 13px; }
+    code { font-family: 'Consolas', monospace; background: #f1f5f9; padding: 2px 5px; border-radius: 3px; font-size: 13px; color: #0f172a; }
+    table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 14px; }
+    th, td { border: 1px solid #cbd5e1; padding: 10px 14px; text-align: left; }
+    th { background: #f8fafc; font-weight: 600; color: #0f172a; }
+    hr { border: none; border-top: 1px solid #e2e8f0; margin: 28px 0; }
+    @media (max-width: 600px) {
+      body { padding: 8px; }
+      .word-sheet { padding: 28px 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="word-sheet">
+    <div class="word-header-badge">📄 Pratinjau Dokumen Microsoft Word (.docx) • ${escapeHtml(fileName || 'Dokumen')}</div>
+    ${parsedBody}
+  </div>
+</body>
+</html>`;
+  }
+
+  function generatePdfDocPreviewHtml(fileName, parsedBody) {
+    return `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      background: #0b0f19;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 24px 12px;
+      display: flex;
+      justify-content: center;
+      color: #334155;
+    }
+    .pdf-sheet {
+      background: #ffffff;
+      width: 100%;
+      max-width: 800px;
+      min-height: 1100px;
+      padding: 60px 52px;
+      box-sizing: border-box;
+      box-shadow: 0 12px 36px rgba(0,0,0,0.6);
+      border-radius: 4px;
+      line-height: 1.6;
+      font-size: 14.5px;
+    }
+    .pdf-header-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #fef2f2;
+      color: #dc2626;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 24px;
+      border: 1px solid #fecaca;
+    }
+    h1, h2, h3, h4 { color: #0f172a; font-weight: 700; line-height: 1.3; }
+    h1 { font-size: 24px; border-bottom: 2px solid #ef4444; padding-bottom: 8px; margin-top: 10px; }
+    h2 { font-size: 18px; color: #1e3a8a; margin-top: 26px; }
+    h3 { font-size: 15px; margin-top: 18px; }
+    p { margin: 12px 0; color: #334155; }
+    ul, ol { padding-left: 24px; margin: 12px 0; }
+    li { margin-bottom: 6px; }
+    pre { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #ef4444; padding: 12px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 12.5px; }
+    code { font-family: 'Consolas', monospace; background: #f1f5f9; padding: 2px 4px; border-radius: 3px; font-size: 12.5px; }
+    hr { border: none; border-top: 1px solid #e2e8f0; margin: 26px 0; }
+    @media (max-width: 600px) {
+      body { padding: 8px; }
+      .pdf-sheet { padding: 24px 18px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="pdf-sheet">
+    <div class="pdf-header-badge">📑 Pratinjau Dokumen Adobe PDF (.pdf) • ${escapeHtml(fileName || 'Dokumen')}</div>
+    ${parsedBody}
+  </div>
+</body>
+</html>`;
+  }
+
   let mermaidDiagramCounter = 0;
 
   function renderInteractiveMermaidCard(preElement, rawCode) {
@@ -3562,12 +3712,13 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (preElement.dataset.mermaidRendered === 'true') return;
     preElement.dataset.mermaidRendered = 'true';
 
+    const cleanCode = getCleanMermaidCode(rawCode);
     mermaidDiagramCounter++;
-    const cardId = 'mermaid-card-' + mermaidDiagramCounter + '-' + Math.random().toString(36).substring(2, 7);
-    const diagramId = 'mermaid_svg_' + mermaidDiagramCounter + '_' + Math.random().toString(36).substring(2, 7);
+    const cardId = 'mermaidCard_' + mermaidDiagramCounter + '_' + Math.random().toString(36).substring(2, 7);
+    const diagramId = 'mermaidSvg_' + mermaidDiagramCounter + '_' + Math.random().toString(36).substring(2, 7);
 
     let diagramTitle = 'Diagram Alur Visual';
-    const firstLine = rawCode.trim().split('\n')[0].toLowerCase();
+    const firstLine = cleanCode.trim().split('\n')[0].toLowerCase();
     if (firstLine.includes('sequencediagram')) diagramTitle = 'Sequence Diagram';
     else if (firstLine.includes('classdiagram')) diagramTitle = 'Class Diagram';
     else if (firstLine.includes('statediagram')) diagramTitle = 'State Diagram';
@@ -3576,6 +3727,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     else if (firstLine.includes('gantt')) diagramTitle = 'Gantt Chart';
     else if (firstLine.includes('pie')) diagramTitle = 'Diagram Lingkaran (Pie Chart)';
     else if (firstLine.includes('gitgraph')) diagramTitle = 'Git Graph';
+    else if (firstLine.includes('mindmap')) diagramTitle = 'Mindmap Visual';
 
     const card = document.createElement('div');
     card.className = 'mermaid-diagram-card';
@@ -3604,7 +3756,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     const stage = document.createElement('div');
     stage.className = 'mermaid-svg-stage';
-    stage.innerHTML = '<div style="padding:20px; color:var(--text-muted); font-size:12px;"><i class="fa-solid fa-circle-notch fa-spin"></i> Merender diagram visual...</div>';
+    stage.innerHTML = '<div style="padding:24px; color:var(--text-muted); font-size:12px; display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-circle-notch fa-spin"></i> Merender visual diagram...</div>';
 
     viewport.appendChild(stage);
 
@@ -3616,7 +3768,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     codePre.style.borderRadius = '0';
     const codeInner = document.createElement('code');
     codeInner.className = 'language-mermaid';
-    codeInner.textContent = rawCode;
+    codeInner.textContent = cleanCode;
     codePre.appendChild(codeInner);
     codeView.appendChild(codePre);
 
@@ -3723,7 +3875,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           }
         }
       } else if (action === 'copy-code') {
-        copyTextToClipboard(rawCode, () => {
+        copyTextToClipboard(cleanCode, () => {
           showToast('Kode sumber diagram Mermaid berhasil disalin!');
           AudioEngine.snap();
         });
@@ -3752,40 +3904,57 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
     });
 
-    if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
-      window.mermaid.render(diagramId, rawCode).then((result) => {
-        if (result && result.svg) {
-          stage.innerHTML = result.svg;
-          const svgNode = stage.querySelector('svg');
-          if (svgNode) {
-            svgNode.style.maxWidth = '100%';
-            svgNode.style.height = 'auto';
-            svgNode.style.display = 'block';
-          }
-          setTimeout(() => {
-            viewport.scrollLeft = Math.max(0, (stage.scrollWidth - viewport.clientWidth) / 2);
-          }, 50);
+    function tryRenderSvg(retries = 8) {
+      if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
+        try {
+          initMermaidEngine();
+          window.mermaid.render(diagramId, cleanCode).then((result) => {
+            if (result && result.svg) {
+              stage.innerHTML = result.svg;
+              const svgNode = stage.querySelector('svg');
+              if (svgNode) {
+                svgNode.style.maxWidth = '100%';
+                svgNode.style.height = 'auto';
+                svgNode.style.display = 'block';
+              }
+              setTimeout(() => {
+                viewport.scrollLeft = Math.max(0, (stage.scrollWidth - viewport.clientWidth) / 2);
+              }, 50);
+            }
+          }).catch((renderErr) => {
+            console.warn('Gagal merender diagram mermaid:', renderErr);
+            stage.innerHTML = `
+              <div class="mermaid-render-error">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                <div>
+                  <strong>Visualisasi Diagram:</strong> Sintaks Mermaid memerlukan penyesuaian.
+                  <div style="font-size:11px; margin-top:4px; opacity:0.85;">Klik tombol &lt;/&gt; di toolbar atas untuk melihat atau menyalin kode sumber diagram.</div>
+                </div>
+              </div>
+            `;
+          });
+        } catch (callErr) {
+          console.warn('Mermaid render exception:', callErr);
+          stage.innerHTML = `
+            <div class="mermaid-render-error">
+              <i class="fa-solid fa-circle-exclamation"></i>
+              <div>Gagal memproses diagram visual. Klik &lt;/&gt; untuk melihat kode.</div>
+            </div>
+          `;
         }
-      }).catch((renderErr) => {
-        console.warn('Gagal merender diagram mermaid:', renderErr);
+      } else if (retries > 0) {
+        setTimeout(() => tryRenderSvg(retries - 1), 180);
+      } else {
         stage.innerHTML = `
           <div class="mermaid-render-error">
-            <i class="fa-solid fa-triangle-exclamation"></i>
-            <div>
-              <strong>Gagal merender diagram:</strong> Sintaks Mermaid tidak valid.
-              <div style="font-size:11px; margin-top:4px; opacity:0.8;">Klik tombol &lt;/&gt; di atas untuk melihat atau mengedit kode sumber diagram.</div>
-            </div>
+            <i class="fa-solid fa-circle-notch fa-spin"></i>
+            <div>Memuat modul visual diagram... Klik &lt;/&gt; untuk melihat kode sumber.</div>
           </div>
         `;
-      });
-    } else {
-      stage.innerHTML = `
-        <div class="mermaid-render-error">
-          <i class="fa-solid fa-circle-exclamation"></i>
-          <div>Modul Mermaid belum dimuat di browser. Klik tombol &lt;/&gt; untuk melihat kode.</div>
-        </div>
-      `;
+      }
     }
+
+    tryRenderSvg();
   }
 
   // ==================== UNIVERSAL CODE BLOCK ENHANCER (Syntax & Copy Button) ====================
@@ -3796,37 +3965,43 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     const preElements = container.querySelectorAll('pre');
     preElements.forEach(pre => {
       // Avoid duplicate headers or already rendered mermaid cards
-      if (pre.querySelector('.code-header') || pre.closest('.mermaid-diagram-card')) return;
+      if (pre.querySelector('.code-header') || pre.closest('.mermaid-diagram-card') || pre.dataset.mermaidRendered === 'true') return;
 
       const codeBlock = pre.querySelector('code');
       let lang = 'CODE';
+      let rawText = '';
 
       if (codeBlock) {
-        // Highlight syntax if hljs is present
-        if (window.hljs && !codeBlock.dataset.highlighted) {
-          try {
-            hljs.highlightElement(codeBlock);
-            codeBlock.dataset.highlighted = 'true';
-          } catch (e) {}
-        }
+        rawText = (codeBlock.textContent || codeBlock.innerText || '').trim();
         const langMatch = codeBlock.className.match(/language-([a-zA-Z0-9_\-#+]+)/);
         if (langMatch && langMatch[1]) {
           lang = langMatch[1].toUpperCase();
         }
+      } else {
+        rawText = (pre.textContent || pre.innerText || '').trim();
       }
 
-      // Deteksi Diagram Mermaid Visual
-      const rawCode = (codeBlock ? (codeBlock.innerText || codeBlock.textContent || '') : (pre.innerText || '')).trim();
+      // Deteksi Diagram Mermaid Visual SEBELUM Highlight.js agar kode tidak terpecah oleh syntax highlighter!
+      const cleanCode = getCleanMermaidCode(rawText);
       const isMermaid = lang === 'MERMAID' || (
         !pre.dataset.mermaidRendered &&
-        (rawCode.startsWith('graph ') || rawCode.startsWith('flowchart ') || rawCode.startsWith('sequenceDiagram') ||
-         rawCode.startsWith('classDiagram') || rawCode.startsWith('stateDiagram') || rawCode.startsWith('erDiagram') ||
-         rawCode.startsWith('gantt') || rawCode.startsWith('pie ') || rawCode.startsWith('gitGraph'))
+        (cleanCode.startsWith('graph ') || cleanCode.startsWith('flowchart ') || cleanCode.startsWith('sequenceDiagram') ||
+         cleanCode.startsWith('classDiagram') || cleanCode.startsWith('stateDiagram') || cleanCode.startsWith('erDiagram') ||
+         cleanCode.startsWith('gantt') || cleanCode.startsWith('pie ') || cleanCode.startsWith('gitGraph') ||
+         cleanCode.startsWith('mindmap') || cleanCode.startsWith('timeline') || cleanCode.startsWith('quadrantChart'))
       );
 
       if (isMermaid) {
-        renderInteractiveMermaidCard(pre, rawCode);
+        renderInteractiveMermaidCard(pre, cleanCode);
         return;
+      }
+
+      // Highlight syntax if hljs is present (HANYA untuk kode non-Mermaid)
+      if (codeBlock && window.hljs && !codeBlock.dataset.highlighted) {
+        try {
+          hljs.highlightElement(codeBlock);
+          codeBlock.dataset.highlighted = 'true';
+        } catch (e) {}
       }
 
       // Create code header bar with Copy Button
@@ -7126,12 +7301,17 @@ Aturan wajib:
     }
   }
 
-  function isPreviewableHtmlFile(file) {
+  function isPreviewableDoc(file) {
     if (!file) return false;
+    const name = String(file.name || '').toLowerCase();
     const mime = String(file.mime || '').toLowerCase();
-    if (mime.indexOf('text/html') >= 0) return true;
-    const ext = (String(file.name || '').split('.').pop() || '').toLowerCase();
-    return ext === 'html' || ext === 'htm' || ext === 'xhtml';
+    if (mime.includes('text/html') || mime.includes('application/pdf') || mime.includes('wordprocessingml') || mime.includes('text/markdown')) return true;
+    const ext = name.split('.').pop() || '';
+    return ['html', 'htm', 'xhtml', 'svg', 'docx', 'pdf', 'md', 'markdown', 'txt'].includes(ext);
+  }
+
+  function isPreviewableHtmlFile(file) {
+    return isPreviewableDoc(file);
   }
 
   function setAIFileStudioTab(tab) {
@@ -7155,11 +7335,18 @@ Aturan wajib:
       els.aiFileStudioMeta.textContent = file.name + ' • ' + (file.size || '') + (file.desc ? ' — ' + file.desc : '');
     }
 
-    const previewable = isPreviewableHtmlFile(file);
+    const previewable = isPreviewableDoc(file);
+    const ext = (file.name || '').split('.').pop().toLowerCase();
+    const rawContent = file.rawContent || file.content || '';
+    const isDocx = ext === 'docx';
+    const isPdf = ext === 'pdf';
+    const isMarkdown = ext === 'md' || ext === 'markdown';
+    const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml' || ext === 'svg';
+
     setAIFileStudioTab(previewable ? 'preview' : 'code');
 
     if (els.aiFileStudioCode) {
-      els.aiFileStudioCode.textContent = file.rawContent || file.content || '';
+      els.aiFileStudioCode.textContent = rawContent;
       try {
         if (window.hljs && els.aiFileStudioCode.removeAttribute) {
           els.aiFileStudioCode.removeAttribute('data-highlighted');
@@ -7168,10 +7355,25 @@ Aturan wajib:
       } catch (_) {}
     }
     if (els.aiFileStudioFrame) {
-      if (previewable) {
-        els.aiFileStudioFrame.srcdoc = file.content || '';
+      if (isDocx || isMarkdown) {
+        const parsedBody = (window.marked && window.marked.parse) ? window.marked.parse(rawContent) : escapeHtml(rawContent);
+        els.aiFileStudioFrame.removeAttribute('src');
+        els.aiFileStudioFrame.srcdoc = generateWordDocPreviewHtml(file.name, parsedBody);
+      } else if (isPdf) {
+        compileMarkdownToPdfBlob(rawContent, file.name).then(pdfBlob => {
+          const pdfUrl = URL.createObjectURL(pdfBlob);
+          els.aiFileStudioFrame.removeAttribute('srcdoc');
+          els.aiFileStudioFrame.src = pdfUrl;
+        }).catch(() => {
+          const parsedBody = (window.marked && window.marked.parse) ? window.marked.parse(rawContent) : escapeHtml(rawContent);
+          els.aiFileStudioFrame.removeAttribute('src');
+          els.aiFileStudioFrame.srcdoc = generatePdfDocPreviewHtml(file.name, parsedBody);
+        });
+      } else if (isHtml) {
+        els.aiFileStudioFrame.removeAttribute('src');
+        els.aiFileStudioFrame.srcdoc = rawContent;
       } else {
-        els.aiFileStudioFrame.removeAttribute('srcdoc');
+        els.aiFileStudioFrame.removeAttribute('src');
         els.aiFileStudioFrame.srcdoc = '';
       }
     }
@@ -7366,13 +7568,9 @@ Aturan wajib:
   // ==================== WORKSPACE AUTO-SAVE & APPROVAL PIPELINE ====================
   async function processAiGeneratedWorkspaceFiles(generatedFiles) {
     if (!Array.isArray(generatedFiles) || generatedFiles.length === 0) return;
-    const hasWorkspace = Boolean((STATE.localWorkspace.enabled || (ServerWorkspaceAPI && ServerWorkspaceAPI.isAvailable)) && STATE.localWorkspace.aiCanWrite !== false);
+    // Mode direktori lokal HANYA aktif jika pengguna memang mengaktifkannya secara eksplisit
+    const hasWorkspace = Boolean(STATE.localWorkspace.enabled && STATE.localWorkspace.aiCanWrite !== false);
     if (!hasWorkspace) return;
-
-    if (!STATE.localWorkspace.enabled) {
-      STATE.localWorkspace.enabled = true;
-      STATE.settings.localWorkspaceEnabled = true;
-    }
 
     const requireApproval = STATE.localWorkspace.requireApproval !== false;
     for (const gf of generatedFiles) {
@@ -7481,8 +7679,8 @@ Aturan wajib:
       card._aiFile = file;
 
       const existingFile = findWorkspaceFile(file.name) || file.existingFile;
-      const isWorkspace = Boolean(STATE.localWorkspace.enabled || (ServerWorkspaceAPI && ServerWorkspaceAPI.isAvailable)) && Boolean(existingFile || file.isEdit);
-      const isPending = Boolean(file.pendingApproval || (STATE.localWorkspace.pendingChanges && (STATE.localWorkspace.pendingChanges[file.name] || STATE.localWorkspace.pendingChanges[file.path])));
+      const isWorkspace = Boolean(STATE.localWorkspace.enabled) && Boolean(existingFile || file.isEdit);
+      const isPending = Boolean(file.pendingApproval || (STATE.localWorkspace.enabled && STATE.localWorkspace.pendingChanges && (STATE.localWorkspace.pendingChanges[file.name] || STATE.localWorkspace.pendingChanges[file.path])));
       const isEdit = Boolean(file.isEdit || existingFile);
 
       let workspaceBadge = '';
@@ -7496,16 +7694,19 @@ Aturan wajib:
           : '<span class="file-workspace-tag"><i class="fa-solid fa-folder-check"></i> Direktori Lokal</span>';
       }
 
+      // TOMBOL UNDUH SELALU ADA DI SEMUA KONDISI AGAR PENGGUNA BISA MENGUNDUH KAPAN SAJA
       let actionsHtml = '';
       if (isPending) {
         actionsHtml =
-          '  <button class="ai-file-btn allow-pending" type="button" data-act="allow-pending" data-name="' + escapeHtml(file.name) + '"><i class="fa-solid fa-check"></i> ' + (isEdit ? 'Konfirmasi & Tulis ke Disk' : 'Konfirmasi & Simpan') + '</button>' +
+          '  <button class="ai-file-btn allow-pending" type="button" data-act="allow-pending" data-name="' + escapeHtml(file.name) + '"><i class="fa-solid fa-check"></i> ' + (isEdit ? 'Konfirmasi & Tulis' : 'Konfirmasi & Simpan') + '</button>' +
           '  <button class="ai-file-btn reject-pending" type="button" data-act="reject-pending" data-name="' + escapeHtml(file.name) + '"><i class="fa-solid fa-xmark"></i> Tolak</button>' +
-          '  <button class="ai-file-btn preview" type="button" data-act="preview"><i class="fa-solid fa-eye"></i> Pratinjau Diff</button>';
+          '  <button class="ai-file-btn preview" type="button" data-act="preview"><i class="fa-solid fa-eye"></i> Pratinjau</button>' +
+          '  <button class="ai-file-btn download" type="button" data-act="download"><i class="fa-solid fa-download"></i> Unduh</button>';
       } else if (isWorkspace) {
         actionsHtml =
           '  <button class="ai-file-btn preview" type="button" data-act="preview"><i class="fa-solid fa-eye"></i> Pratinjau</button>' +
-          '  <button class="ai-file-btn open-workspace-doc" type="button" data-act="open-workspace-doc" data-name="' + escapeHtml(file.name) + '"><i class="fa-solid fa-folder-open"></i> Buka di Direktori</button>';
+          '  <button class="ai-file-btn open-workspace-doc" type="button" data-act="open-workspace-doc" data-name="' + escapeHtml(file.name) + '"><i class="fa-solid fa-folder-open"></i> Buka di Direktori</button>' +
+          '  <button class="ai-file-btn download" type="button" data-act="download"><i class="fa-solid fa-download"></i> Unduh</button>';
       } else {
         actionsHtml =
           '  <button class="ai-file-btn preview" type="button" data-act="preview"><i class="fa-solid fa-eye"></i> Pratinjau</button>' +
@@ -8185,7 +8386,7 @@ ${blocks}
     if (btn.dataset.act === 'download') {
       downloadAIFile(file);
     } else if (btn.dataset.act === 'allow-pending') {
-      approveWorkspacePendingChange(file.name);
+      approveWorkspacePendingChange(file.name, file);
     } else if (btn.dataset.act === 'reject-pending') {
       rejectWorkspacePendingChange(file.name);
     } else if (btn.dataset.act === 'open-workspace-doc') {
@@ -8200,8 +8401,8 @@ ${blocks}
     els.aiFileStudioTabs.querySelectorAll('.ai-file-tab').forEach((tab) => {
       tab.addEventListener('click', () => {
         const name = tab.dataset.tab === 'code' ? 'code' : 'preview';
-        if (name === 'preview' && !isPreviewableHtmlFile(activeAIFile)) {
-          showToast('File ini bukan halaman web — lihat tab Kode Sumber.', 'info');
+        if (name === 'preview' && !isPreviewableDoc(activeAIFile)) {
+          showToast('File ini tidak memiliki pratinjau visual — lihat tab Kode Sumber.', 'info');
           return;
         }
         setAIFileStudioTab(name);
@@ -17370,15 +17571,15 @@ Aturan:
   }
 
   // ==================== WORKSPACE USER APPROVAL ENGINE (v259) ====================
-  async function approveWorkspacePendingChange(fileNameOrTaskId) {
-    if (!fileNameOrTaskId) return;
+  async function approveWorkspacePendingChange(fileNameOrTaskId, fallbackFileObj = null) {
+    if (!fileNameOrTaskId && !fallbackFileObj) return;
     let targetKey = null;
     let pending = null;
 
-    if (STATE.localWorkspace.pendingChanges && STATE.localWorkspace.pendingChanges[fileNameOrTaskId]) {
+    if (fileNameOrTaskId && STATE.localWorkspace.pendingChanges && STATE.localWorkspace.pendingChanges[fileNameOrTaskId]) {
       targetKey = fileNameOrTaskId;
       pending = STATE.localWorkspace.pendingChanges[fileNameOrTaskId];
-    } else if (STATE.localWorkspace.pendingChanges) {
+    } else if (fileNameOrTaskId && STATE.localWorkspace.pendingChanges) {
       for (const [k, v] of Object.entries(STATE.localWorkspace.pendingChanges)) {
         if (v.taskId === fileNameOrTaskId || v.name === fileNameOrTaskId || v.path === fileNameOrTaskId || k === fileNameOrTaskId) {
           targetKey = k;
@@ -17388,12 +17589,25 @@ Aturan:
       }
     }
 
-    if (!pending && STATE.taskTracker.tasks) {
+    if (!pending && STATE.taskTracker.tasks && fileNameOrTaskId) {
       const task = STATE.taskTracker.tasks.find(t => t.id === fileNameOrTaskId);
       if (task && task.fileName && STATE.localWorkspace.pendingChanges && STATE.localWorkspace.pendingChanges[task.fileName]) {
         targetKey = task.fileName;
         pending = STATE.localWorkspace.pendingChanges[task.fileName];
       }
+    }
+
+    // FALLBACK CERDAS: Jika pending tidak ada di memori (misal riwayat/refresh), gunakan objek berkas dari kartu obrolan
+    if (!pending && fallbackFileObj) {
+      pending = {
+        name: fallbackFileObj.name,
+        path: fallbackFileObj.path || fallbackFileObj.name,
+        content: fallbackFileObj.rawContent || fallbackFileObj.content || '',
+        author: 'ai',
+        isEdit: Boolean(fallbackFileObj.isEdit || findWorkspaceFile(fallbackFileObj.name)),
+        note: 'Disetujui pengguna via kartu obrolan'
+      };
+      targetKey = fallbackFileObj.name;
     }
 
     if (!pending) {
