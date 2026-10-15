@@ -4632,8 +4632,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     return out.join('\n');
   }
 
-  // Sembunyikan blok ZOZ_FILE, ZOZ_EDIT, ZOZ_MODIFY, ZOZ_DELETE, & ZOZ_TASKS dari tampilan sementara
-  // saat streaming, supaya kode mentah tidak membajak gelembung obrolan.
+  // Konversi blok ZOZ_FILE, ZOZ_EDIT, ZOZ_MODIFY menjadi blok kode markdown bersih saat streaming
+  // agar kode tetap dapat dibaca secara live oleh pengguna tanpa membocorkan tag mentah <<<...
   function hideFileBlocksForDisplay(text) {
     if (!text) return text;
     let processed = text;
@@ -4647,12 +4647,24 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     if (!hasFileMarkers) return processed;
 
     const out = [];
-    let skipping = false;
+    let insideFileBlock = false;
+    let fileBlockLang = 'code';
+
     processed.split('\n').forEach((line) => {
       const t = line.trim();
-      if (!skipping) {
+      if (!insideFileBlock) {
         if (t.indexOf('<<<ZOZ_FILE') === 0 || t.indexOf('<<<ZOZ_EDIT') === 0 || t.indexOf('<<<ZOZ_MODIFY') === 0) {
-          skipping = true;
+          insideFileBlock = true;
+          const nameMatch = t.match(/(?:name|file|path)=["']?([^"'\s>]+)["']?/i);
+          const langMatch = t.match(/lang=["']?([^"'\s>]+)["']?/i);
+          const fileName = nameMatch ? nameMatch[1] : '';
+          fileBlockLang = langMatch ? langMatch[1] : (fileName ? guessLangFromName(fileName) : 'code');
+          if (fileBlockLang === 'mermaid' || fileBlockLang === 'mmd' || fileName.endsWith('.mermaid') || fileName.endsWith('.mmd')) {
+            out.push('\n```mermaid');
+          } else {
+            out.push('\n```' + fileBlockLang);
+            if (fileName) out.push('// Berkas: ' + fileName);
+          }
           return;
         }
         if (t.indexOf('<<<ZOZ_DELETE') === 0) {
@@ -4661,11 +4673,19 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         out.push(line);
         return;
       }
-      // Masih di dalam blok file: buang sampai penanda tutup (atau sampai stream berakhir)
+      // Masih di dalam blok file
       if (t.indexOf('<<<END_ZOZ_FILE') === 0 || t.indexOf('<<<END_ZOZ_EDIT') === 0 || t.indexOf('<<<END_ZOZ_MODIFY') === 0) {
-        skipping = false;
+        insideFileBlock = false;
+        out.push('```\n');
+        return;
       }
+      out.push(line);
     });
+
+    if (insideFileBlock) {
+      out.push('```\n');
+    }
+
     return out.join('\n');
   }
 
@@ -7617,6 +7637,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   function getFileStudioDirective() {
     return `### INSTRUKSI SISTEM: AI FILE STUDIO & DIAGRAM VISUAL OTONOM
 
+0. ATURAN KRUSIAL: CONTOH KODE PERCAKAPAN VS BERKAS UNDUHAN:
+- Jika pengguna meminta CONTOH KODE, SNIPPET, PENJELASAN SCRIPT, atau meminta "kodenya saja" / "jangan buatkan pratinjau" / "tanpa file":
+  WAJIB tampilkan kode LANGSUNG di dalam teks percakapan menggunakan blok Markdown standar (\`\`\`javascript, \`\`\`python, dll.).
+  DILARANG membungkusnya dalam blok <<<ZOZ_FILE jika pengguna hanya ingin melihat contoh kode di percakapan!
+- HANYA gunakan blok <<<ZOZ_FILE jika pengguna SECARA EKSPLISIT meminta pembuatan berkas/file utuh yang dapat diunduh, ekspor dokumen (.docx/.pdf), diagram visual (.svg), atau pengeditan berkas direktori lokal:
+
 1. PEMBUATAN & PENGEDITAN BERKAS / DOKUMEN:
 Saat pengguna meminta sebuah berkas — website, script (.bat/.py/.sh/.ps1), konfigurasi, dokumen, atau diagram:
 <<<ZOZ_FILE name="Nama_Berkas_Spesifik.ekstensi" mime="tipe/mime" lang="bahasa">
@@ -7673,18 +7699,31 @@ Aturan wajib:
 - Jangan menyalin ulang kode diagram di luar blok penanda, cukup berikan teks penjelasan yang informatif.`;
   }
 
+  // Deteksi niat pengguna yang menolak/melarang pembuatan berkas atau pratinjau (misal: "kodenya saja", "jangan buatkan pratinjau", dll.)
+  function hasNegativeFileOrPreviewIntent(text) {
+    if (!text || typeof text !== 'string') return false;
+    const t = text.toLowerCase();
+    return /\b(?:jangan\s+(?:\w+\s+){0,3}(?:file|berkas|pertinjau|pratinjau|preview|unduhan|download|diubah|dikonversi)|hanya\s+(?:kodenya|kode|code|teks|tulisan)|(?:kode|code|teks)\s*nya\s*saja|(?:kode|code)\s*saja|contoh\s*(?:kode|code|kodenya)\s*saja|tanpa\s+(?:\w+\s+){0,2}(?:file|berkas|pertinjau|pratinjau|preview|unduh|download)|di\s*(?:obrolan|chat|percakapan)\s*saja|tampilkan\s*(?:di\s*chat|di\s*sini|langsung)\s*kodenya)\b/i.test(t);
+  }
+
   // Deteksi niat pengguna meminta pembuatan atau pengeditan/modifikasi file (Bahasa Indonesia + Inggris)
   function isFileGenerationRequest(text) {
     if (!text || typeof text !== 'string') return false;
+    if (hasNegativeFileOrPreviewIntent(text)) return false;
+
     const t = text.toLowerCase();
-    const wants = /\b(?:buatkan|buat|bikin|bikinkan|tolong buat|generate|create|write|tulis|simpan sebagai|unduh|download|export|ekspor|saya butuh file|saya minta file|butuh file|perlukan file|bikinkan file|edit|mengedit|mengdit|modifikasi|memodifikasi|ubah|mengubah|perbarui|memperbarui|update|revisi|merevisi|perbaiki|memperbaiki|tambahkan ke|tambah|ganti)\b/i.test(t);
-    const target = /\b(?:file|berkas|dokumen|script|skrip|kode program|program|website|situs|halaman web|landing|aplikasi|utilitas|tool|bot|konfigurasi|template|lampiran|readme|kodenya|skripnya|filenya|dokumennya|diagram|flowchart|alur|arsitektur visual)\b|\.(?:html?|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|pdf|xlsx|ipynb|svg)\b/i.test(t);
+    const explicitFileWants = /\b(?:buatkan|buat|bikin|bikinkan|tolong buat|generate|create|write|tulis|simpan sebagai|unduh|download|export|ekspor|saya butuh file|saya minta file|butuh file|perlukan file|bikinkan file)\s+(?:sebuah\s+)?(?:file|berkas|dokumen|website|aplikasi|diagram|flowchart)\b/i.test(t);
+    const hasExtension = /\b[a-zA-Z0-9_-]+\.(?:html?|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|pdf|xlsx|ipynb|svg)\b/i.test(t);
+    const isDiagram = /\b(?:diagram|flowchart|alur sistem|arsitektur visual|erd|mindmap)\b/i.test(t);
+    const isExport = /\b(?:simpan sebagai|ekspor ke|export to|unduh|download file)\b/i.test(t);
+
     // Jika direktori lokal aktif dan pengguna menyebut nama berkas yang ada di direktori
     const workspaceMatch = STATE.localWorkspace.enabled && (STATE.localWorkspace.files || []).some(f => {
       const baseName = f.name.replace(/\.[^/.]+$/, '').toLowerCase();
       return t.includes(f.name.toLowerCase()) || (baseName.length >= 3 && t.includes(baseName));
     });
-    return (wants && target) || (wants && workspaceMatch);
+
+    return explicitFileWants || hasExtension || isDiagram || isExport || workspaceMatch;
   }
 
   function formatFileSize(bytes) {
@@ -8337,7 +8376,8 @@ Aturan wajib:
       }
       if (end < 0) { idx++; continue; }
 
-      const nameMatch = header.match(/(?:name|file|path)=["']?([^"'\s>]+)["']?/i);
+      const nameMatch = header.match(/(?:name|file|path)=["']?([^"'\s>]+)["']?/i) ||
+                        header.match(/<<<ZOZ_(?:FILE|EDIT|MODIFY)[:\s]+["']?([^"'\s>]+)["']?/i);
       const mimeMatch = header.match(/mime=["']?([^"'\s>]+)["']?/i);
       const langMatch = header.match(/lang=["']?([^"'\s>]+)["']?/i);
       const descMatch = header.match(/desc=["']([^"']*)["']/i);
@@ -8401,9 +8441,11 @@ Aturan wajib:
         if (!b) return;
 
         // Ekstrak header blok ZOZ_FILE untuk mengetahui nama berkas dan bahasanya secara akurat
-        const headerMatch = b.match(/<<<ZOZ_FILE\s+name=["']?([^"'\s>]+)["']?(?:\s+mime=["']?([^"'\s>]+)["']?)?(?:\s+lang=["']?([^"'\s>]+)["']?)?/i);
-        const fileName = (headerMatch && headerMatch[1]) ? headerMatch[1].toLowerCase() : '';
-        const fileLang = (headerMatch && headerMatch[3]) ? headerMatch[3].toLowerCase() : '';
+        const nameMatch = b.match(/(?:name|file|path)=["']?([^"'\s>]+)["']?/i) ||
+                          b.match(/<<<ZOZ_(?:FILE|EDIT|MODIFY)[:\s]+["']?([^"'\s>]+)["']?/i);
+        const langMatch = b.match(/lang=["']?([^"'\s>]+)["']?/i);
+        const fileName = (nameMatch && nameMatch[1]) ? nameMatch[1].toLowerCase() : '';
+        const fileLang = (langMatch && langMatch[1]) ? langMatch[1].toLowerCase() : '';
 
         const lines = b.split('\n');
         const innerLines = [];
@@ -8433,8 +8475,9 @@ Aturan wajib:
           const cleanDiagram = getCleanMermaidCode(innerContent);
           out = out.split(b).join(`\n\n\`\`\`mermaid\n${cleanDiagram}\n\`\`\`\n\n`);
         } else {
-          // File kode/dokumen non-diagram dihilangkan dari teks gelembung karena sudah memiliki kartu di AI File Studio
-          out = out.split(b).join('');
+          // Berkas kode/dokumen non-diagram: TAMPILKAN KODENYA DI DALAM OBROLAN agar pengguna bisa melihat dan membaca langsung kodenya!
+          const codeLang = fileLang || (fileName ? guessLangFromName(fileName) : 'code');
+          out = out.split(b).join(`\n\n\`\`\`${codeLang}\n${innerContent}\n\`\`\`\n\n`);
         }
       });
     }
@@ -8582,7 +8625,7 @@ Aturan wajib:
   }
 
   // Kartu file di dalam gelembung obrolan (dipanggil saat render live & riwayat)
-  function renderMessageFiles(row, files) {
+  function renderMessageFiles(row, files, suppressPreviewCards = false) {
     if (!row || !Array.isArray(files) || files.length === 0) return;
     const bubble = (row.classList && row.classList.contains('message-bubble'))
       ? row
@@ -8613,6 +8656,8 @@ Aturan wajib:
       }
     }
 
+    // Jika pengguna meminta kode saja atau melarang pratinjau, jangan tempel kartu berkas
+    if (suppressPreviewCards) return;
     if (bubble.querySelector('.msg-file-cards-wrap')) return;
 
     const wrap = document.createElement('div');
@@ -13101,6 +13146,7 @@ Format teks (untuk model tanpa function calling):
     let executedHudHtml = '';
     const foundYouTubeIds = []; // ID video hasil tool search_youtube (dipakai render kartu)
     const wantsFile = isFileGenerationRequest(promptText); // niat "buatkan file/website" untuk AI File Studio
+    const hasNegativePreview = hasNegativeFileOrPreviewIntent(promptText);
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -13120,11 +13166,13 @@ Format teks (untuk model tanpa function calling):
           : getYouTubeToolDirective();
       }
 
-      // AI File Studio: selalu diumumkan agar model tahu format blok ZOZ_FILE
-      // ketika pengguna meminta pembuatan file / website.
-      systemContent = systemContent
-        ? `${systemContent}\n\n${getFileStudioDirective()}`
-        : getFileStudioDirective();
+      // AI File Studio: hanya diumumkan bila pengguna memang meminta pembuatan file / dokumen / diagram,
+      // atau ketika direktori lokal aktif. JANGAN umumkan jika pengguna hanya meminta contoh kode atau meminta "jangan buatkan pratinjau"!
+      if (wantsFile || STATE.localWorkspace.enabled) {
+        systemContent = systemContent
+          ? `${systemContent}\n\n${getFileStudioDirective()}`
+          : getFileStudioDirective();
+      }
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
       try {
@@ -13762,7 +13810,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         renderMessageSources(assistantRow, webSources, true);
       }
       renderYouTubeCardsForMessage(assistantRow, fullText, foundYouTubeIds);
-      renderMessageFiles(assistantRow, generatedFiles);
+      renderMessageFiles(assistantRow, generatedFiles, hasNegativePreview || !wantsFile);
       metaBox.innerHTML = `
         <strong>${escapeHtml(modelName)}</strong>
         <span class="meta-model-badge">Ollama</span>
@@ -13785,7 +13833,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           model: modelName,
           engine: 'ollama',
           sources: webSources,
-          files: generatedFiles.length > 0 ? generatedFiles : undefined,
+          files: (generatedFiles.length > 0 && !hasNegativePreview && wantsFile) ? generatedFiles : undefined,
           stats: { duration: totalTime, tps: tps, tokens: tokenCount },
           timestamp: new Date().toISOString()
         });
@@ -14057,6 +14105,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     let executedHudHtml = '';
     const foundYouTubeIds = []; // ID video hasil tool search_youtube (dipakai render kartu)
     const wantsFile = isFileGenerationRequest(promptText); // niat "buatkan file/website" untuk AI File Studio
+    const hasNegativePreview = hasNegativeFileOrPreviewIntent(promptText);
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -14076,11 +14125,13 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           : getYouTubeToolDirective();
       }
 
-      // AI File Studio: selalu diumumkan agar model tahu format blok ZOZ_FILE
-      // ketika pengguna meminta pembuatan file / website.
-      systemContent = systemContent
-        ? `${systemContent}\n\n${getFileStudioDirective()}`
-        : getFileStudioDirective();
+      // AI File Studio: hanya diumumkan bila pengguna memang meminta pembuatan file / dokumen / diagram,
+      // atau ketika direktori lokal aktif. JANGAN umumkan jika pengguna hanya meminta contoh kode atau meminta "jangan buatkan pratinjau"!
+      if (wantsFile || STATE.localWorkspace.enabled) {
+        systemContent = systemContent
+          ? `${systemContent}\n\n${getFileStudioDirective()}`
+          : getFileStudioDirective();
+      }
 
       // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
       try {
@@ -15059,7 +15110,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         renderMessageSources(assistantRow, webSources, true);
       }
       renderYouTubeCardsForMessage(assistantRow, fullText, foundYouTubeIds);
-      renderMessageFiles(assistantRow, generatedFiles);
+      renderMessageFiles(assistantRow, generatedFiles, hasNegativePreview || !wantsFile);
       const effectiveDisplay = (actualModelUsed && actualModelUsed !== displayModel && actualModelUsed !== modelName) ? `${displayModel} → ${actualModelUsed} (Failover)` : displayModel;
       metaBox.innerHTML = `
         <strong title="${actualModelUsed ? escapeHtml('Model dialihkan ke ' + actualModelUsed) : escapeHtml(displayModel)}">${escapeHtml(effectiveDisplay)}</strong>
@@ -15084,7 +15135,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           model: actualModelUsed || displayModel,
           engine: engineMode,
           images: collectedImages.length > 0 ? collectedImages : undefined,
-          files: generatedFiles.length > 0 ? generatedFiles : undefined,
+          files: (generatedFiles.length > 0 && !hasNegativePreview && wantsFile) ? generatedFiles : undefined,
           imageUrl: collectedImages[0] || undefined,
           sources: webSources,
           stats: { duration: totalTime, tps: tps, tokens: tokenCount },
@@ -24632,7 +24683,11 @@ Aturan:
     convertSvgToJpegBlob,
     isDiagramFile,
     isAuthenticMermaidSyntax,
-    NON_DIAGRAM_LANGUAGES
+    NON_DIAGRAM_LANGUAGES,
+    hasNegativeFileOrPreviewIntent,
+    isFileGenerationRequest,
+    stripGeneratedFileBlocks,
+    hideFileBlocksForDisplay
   };
 
   // Start on DOM ready (safeguarded against post-DOMContentLoaded script execution)
