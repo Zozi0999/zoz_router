@@ -12,6 +12,17 @@
     }
   </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <script>
+    // Pastikan tidak ada Service Worker atau cache usang di peramban seluler pengguna
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(regs) {
+        for (var i = 0; i < regs.length; i++) regs[i].unregister();
+      }).catch(function() {});
+    }
+  </script>
   <title>ZOZ ROUTER // Neural AI Multi-Engine Gateway</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <!-- Fonts & CDN Preconnect -->
