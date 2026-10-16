@@ -16,6 +16,9 @@
  *    Mendukung respons real-time Server-Sent Events tanpa buffering proxy.
  */
 
+// Izinkan request lintas-asal dari domain Vercel / frontend secara default di Serverless
+process.env.ZOX_ALLOW_CROSS_ORIGIN = '1';
+
 // 1. Perhitungan Dinamis Watchdog Berdasarkan Environment Variable & vercel.json
 let configuredMaxDuration = 60;
 

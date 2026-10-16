@@ -4333,7 +4333,15 @@ async function requestHandler(req, res) {
     let crossSite = req.headers['sec-fetch-site'] === 'cross-site';
     if (!crossSite && req.headers.origin) {
       try {
-        crossSite = new URL(req.headers.origin).host !== (req.headers.host || '');
+        const originUrl = new URL(req.headers.origin);
+        const originHost = originUrl.host;
+        const forwardHost = req.headers['x-forwarded-host'] || '';
+        const reqHost = req.headers.host || '';
+        const isSameOrigin = (originHost === reqHost) ||
+                             (forwardHost && originHost === forwardHost) ||
+                             (originHost.endsWith('.vercel.app') && (forwardHost.endsWith('.vercel.app') || reqHost.endsWith('.vercel.app') || IS_VERCEL_ENV)) ||
+                             (IS_VERCEL_ENV && originHost.endsWith('.vercel.app'));
+        crossSite = !isSameOrigin;
       } catch (_) {
         crossSite = true;
       }

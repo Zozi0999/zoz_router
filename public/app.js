@@ -16259,7 +16259,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
 
     const hasClientKey = Boolean(STATE.settings.openRouterKey);
-    const hasBackendKey = Boolean(DeviceStorage.isDeviceBackendAvailable || !IS_GITHUB_PAGES);
+    const hasBackendKey = Boolean(DeviceStorage.isDeviceBackendAvailable && !IS_CLOUD_HOSTED && !IS_GITHUB_PAGES && !IS_VERCEL);
     if (!hasClientKey && !hasBackendKey) {
       if (runOptions && runOptions.autoFallback) {
         return false;
@@ -16608,7 +16608,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
 
         // DUAL-PATH RESILIENCE: Coba rute primer, jika terhambat CORS/network/404, otomatis coba rute sekunder
-        const tryDirectFirst = IS_GITHUB_PAGES;
+        const tryDirectFirst = Boolean(IS_CLOUD_HOSTED || IS_GITHUB_PAGES || IS_VERCEL || !DeviceStorage.isDeviceBackendAvailable);
         const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
 
         let routeErrDetail = '';
@@ -16758,6 +16758,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               routeErrDetail = attemptErr;
               if (attemptErr.toLowerCase().includes('resourceexhausted') || attemptErr.toLowerCase().includes('worker local total request limit reached')) {
                 markModelExhausted(currentModel, attemptErr);
+              }
+              if (routeType === 'proxy' && (attemptRes.status === 401 || attemptRes.status === 403)) {
+                // Jika rute proxy di Vercel/cloud mengembalikan 401/403 (karena cross-origin atau server API key kosong),
+                // JANGAN batalkan percobaan! Tetap coba rute 'direct' menggunakan API Key milik klien langsung di peramban.
+                continue;
               }
               if (attemptRes.status === 401 || attemptRes.status === 403 || attemptRes.status === 402) {
                 break;
@@ -18492,7 +18497,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         ...LIVE_FREE_OPENROUTER_FALLBACKS
       ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free');
 
-      const tryDirectFirst = IS_GITHUB_PAGES;
+      const tryDirectFirst = Boolean(IS_CLOUD_HOSTED || IS_GITHUB_PAGES || IS_VERCEL || !DeviceStorage.isDeviceBackendAvailable);
       const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
 
       let lastErr = null;
@@ -18647,7 +18652,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         ...LIVE_FREE_OPENROUTER_FALLBACKS
       ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free');
 
-      const tryDirectFirst = IS_GITHUB_PAGES;
+      const tryDirectFirst = Boolean(IS_CLOUD_HOSTED || IS_GITHUB_PAGES || IS_VERCEL || !DeviceStorage.isDeviceBackendAvailable);
       const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
 
       let response = null;
@@ -27196,7 +27201,7 @@ Aturan:
         return;
       }
       try {
-        const isDirectFirst = IS_GITHUB_PAGES;
+        const isDirectFirst = Boolean(IS_CLOUD_HOSTED || IS_GITHUB_PAGES || IS_VERCEL || !DeviceStorage.isDeviceBackendAvailable);
         const endpoints = isDirectFirst
           ? ['https://openrouter.ai/api/v1/auth/key', '/api/openrouter/auth-check']
           : ['/api/openrouter/auth-check', 'https://openrouter.ai/api/v1/auth/key'];
