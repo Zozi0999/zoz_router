@@ -777,7 +777,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     aiFileStudioFrame: $('#aiFileStudioFrame'),
     aiFileStudioPlaceholder: $('#aiFileStudioPlaceholder'),
     aiFileStudioCode: $('#aiFileStudioCode'),
-    aiFileStudioMeta: $('#aiFileStudioMeta'),
     aiFileStudioCopyBtn: $('#aiFileStudioCopyBtn'),
     aiFileStudioSaveDiskBtn: $('#aiFileStudioSaveDiskBtn'),
     aiFileStudioDownloadBtn: $('#aiFileStudioDownloadBtn'),
@@ -796,19 +795,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     inputStudioFollowup: $('#inputStudioFollowup'),
     btnStudioSendFollowup: $('#btnStudioSendFollowup'),
     btnStudioStopFollowup: $('#btnStudioStopFollowup'),
-    studioModelName: $('#studioModelName'),
-    studioModelChip: $('#studioModelChip'),
-    studioModelBadge: $('#studioModelChip') || $('#studioModelBadge'),
-    studioWebSearchBtn: $('#studioWebSearchBtn'),
-    studioWebSearchIcon: $('#studioWebSearchIcon'),
-    studioAttachBtn: $('#studioAttachBtn'),
     btnToggleStudioAssistant: $('#btnToggleStudioAssistant'),
     studioAssistantPanel: $('#studioAssistantPanel'),
     studioAssistantMessages: $('#studioAssistantMessages'),
     studioAssistantEmpty: $('#studioAssistantEmpty'),
     btnStudioCloseDrawer: $('#btnStudioCloseDrawer'),
     btnStudioClearChat: $('#btnStudioClearChat'),
-    studioEngineMeta: $('#studioEngineMeta'),
     btnToggleStudioFullscreen: $('#btnToggleStudioFullscreen'),
     imagePreviewImg: $('#imagePreviewImg'),
     removeImageBtn: $('#removeImageBtn'),
@@ -9299,9 +9291,6 @@ Aturan wajib:
     if (els.aiFileStudioTitle) {
       els.aiFileStudioTitle.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(docTitle)}`;
     }
-    if (els.aiFileStudioMeta) {
-      els.aiFileStudioMeta.textContent = file.name + ' • ' + (file.size || '') + (file.desc ? ' — ' + file.desc : '');
-    }
 
     const previewable = isPreviewableDoc(file);
     const ext = (file.name || '').split('.').pop().toLowerCase();
@@ -9320,14 +9309,6 @@ Aturan wajib:
 
     FileRevisionStore.pushRevision(file.name, rawContent);
     updateStudioRevisionBtns(file.name);
-    if (els.studioModelName) {
-      els.studioModelName.textContent = getCurrentModel();
-      els.studioModelName.title = `Model Aktif: ${getCurrentModel()}`;
-    }
-    if (els.studioEngineMeta) {
-      els.studioEngineMeta.textContent = STATE.mode === 'auto' ? 'Auto Router' : (STATE.mode === 'ollama' ? 'Ollama Cloud' : 'OpenRouter');
-    }
-    updateStudioWebSearchUI();
     if (els.inputStudioFollowup) {
       els.inputStudioFollowup.value = '';
       autoResizeTextarea(els.inputStudioFollowup);
@@ -10226,9 +10207,6 @@ Aturan wajib:
                 window.hljs.highlightElement(els.aiFileStudioCode);
               }
             } catch (_) {}
-          }
-          if (els.aiFileStudioMeta) {
-            els.aiFileStudioMeta.textContent = `${activeAIFile.name} • ${activeAIFile.size} — Diperbarui oleh AI`;
           }
           showToast('✨ Halaman website telah diperbarui langsung di pratinjau!', 'success');
         }
@@ -11172,20 +11150,6 @@ ${blocks}
   });
 
   // ==================== AUTHENTIC ZOZ ROUTER AI STUDIO COMPOSER & ASSISTANT ====================
-  function updateStudioWebSearchUI() {
-    if (!els.studioWebSearchBtn) return;
-    const isAuto = STATE.webSearchMode === 'autonomous';
-    const isDef = STATE.webSearchMode === 'default';
-    const isPrem = STATE.webSearchMode === 'premium';
-    const isActive = isAuto || isDef || isPrem;
-
-    els.studioWebSearchBtn.className = `composer-btn web-search-toggle ${isAuto ? 'mode-autonomous' : (isPrem ? 'mode-premium' : (isDef ? 'mode-default' : ''))} ${isActive ? 'active' : ''}`;
-    if (els.studioWebSearchIcon) {
-      els.studioWebSearchIcon.className = isAuto ? 'fa-solid fa-compass' : (isPrem ? 'fa-solid fa-microscope' : (isDef ? 'fa-solid fa-globe' : 'fa-solid fa-compass'));
-    }
-    els.studioWebSearchBtn.title = isActive ? `Penelusuran Web Aktif (${STATE.webSearchMode.toUpperCase()})` : 'Penelusuran Web Nonaktif (Klik untuk aktifkan)';
-  }
-
   function openStudioAssistantDrawer() {
     if (els.studioAssistantPanel) {
       els.studioAssistantPanel.style.display = 'flex';
@@ -11280,25 +11244,6 @@ ${blocks}
         </div>
       `;
       els.studioAssistantEmpty = $('#studioAssistantEmpty');
-    }
-  });
-
-  els.studioModelChip?.addEventListener('click', () => {
-    openLiveModelCatalog(null, 'Model Obrolan Utama');
-  });
-
-  els.studioWebSearchBtn?.addEventListener('click', () => {
-    if (els.webSearchToggleBtn) {
-      els.webSearchToggleBtn.click();
-    }
-    updateStudioWebSearchUI();
-  });
-
-  els.studioAttachBtn?.addEventListener('click', () => {
-    if (els.attachToggleBtn) {
-      els.attachToggleBtn.click();
-    } else if (els.docFileInput) {
-      els.docFileInput.click();
     }
   });
 
@@ -12154,13 +12099,6 @@ ${blocks}
         els.currentModelLabel.innerText = current;
         els.currentModelLabel.title = current;
       }
-    }
-    if (els.studioModelName) {
-      els.studioModelName.innerText = current;
-      els.studioModelName.title = `Model Aktif: ${current}`;
-    }
-    if (els.studioEngineMeta) {
-      els.studioEngineMeta.textContent = STATE.mode === 'auto' ? 'Auto Router' : (STATE.mode === 'ollama' ? 'Ollama Cloud' : 'OpenRouter');
     }
   }
 
