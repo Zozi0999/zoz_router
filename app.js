@@ -795,8 +795,20 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     btnStudioRedo: $('#btnStudioRedo'),
     inputStudioFollowup: $('#inputStudioFollowup'),
     btnStudioSendFollowup: $('#btnStudioSendFollowup'),
+    btnStudioStopFollowup: $('#btnStudioStopFollowup'),
     studioModelName: $('#studioModelName'),
-    studioModelBadge: $('#studioModelBadge'),
+    studioModelChip: $('#studioModelChip'),
+    studioModelBadge: $('#studioModelChip') || $('#studioModelBadge'),
+    studioWebSearchBtn: $('#studioWebSearchBtn'),
+    studioWebSearchIcon: $('#studioWebSearchIcon'),
+    studioAttachBtn: $('#studioAttachBtn'),
+    btnToggleStudioAssistant: $('#btnToggleStudioAssistant'),
+    studioAssistantPanel: $('#studioAssistantPanel'),
+    studioAssistantMessages: $('#studioAssistantMessages'),
+    studioAssistantEmpty: $('#studioAssistantEmpty'),
+    btnStudioCloseDrawer: $('#btnStudioCloseDrawer'),
+    btnStudioClearChat: $('#btnStudioClearChat'),
+    studioEngineMeta: $('#studioEngineMeta'),
     btnToggleStudioFullscreen: $('#btnToggleStudioFullscreen'),
     imagePreviewImg: $('#imagePreviewImg'),
     removeImageBtn: $('#removeImageBtn'),
@@ -5543,6 +5555,13 @@ RESONANSI: ${this.currentVibe}
     return TEXT_SAFETY ? TEXT_SAFETY.reflowShreddedProse(text) : text;
   }
 
+  let activeStudioAssistantBubble = null;
+  function scrollStudioAssistantToBottom() {
+    if (els.studioAssistantMessages) {
+      els.studioAssistantMessages.scrollTop = els.studioAssistantMessages.scrollHeight;
+    }
+  }
+
   class StreamBufferRenderer {
     constructor(bubbleElement, onScrollCallback, prefixHtml = '', options = {}) {
       this.el = bubbleElement;
@@ -5642,6 +5661,11 @@ RESONANSI: ${this.currentVibe}
       if (!this.el) return;
       this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(hideFileBlocksForDisplay(this.text, this.options), true) + '<span class="typing-cursor"></span>';
       if (this.onScroll && !userScrolledUp) this.onScroll();
+      if (activeStudioAssistantBubble && els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) {
+        const cleanStudioText = hideFileBlocksForDisplay(this.text, this.options);
+        activeStudioAssistantBubble.innerHTML = renderMarkdown(cleanStudioText || '*Sedang meracik kode website...*', true) + '<span class="typing-cursor"></span>';
+        scrollStudioAssistantToBottom();
+      }
     }
 
     finish(opts = {}) {
@@ -5658,6 +5682,13 @@ RESONANSI: ${this.currentVibe}
         enhanceCodeBlocks(this.el);
       }
       if (this.onScroll && !userScrolledUp) this.onScroll();
+      if (activeStudioAssistantBubble && els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) {
+        const cleanStudioText = hideFileBlocksForDisplay(this.text, this.options);
+        activeStudioAssistantBubble.innerHTML = renderMarkdown(cleanStudioText || '✅ Selesai.');
+        enhanceCodeBlocks(activeStudioAssistantBubble);
+        scrollStudioAssistantToBottom();
+        activeStudioAssistantBubble = null;
+      }
       return this.text;
     }
 
@@ -9283,7 +9314,22 @@ Aturan wajib:
     FileRevisionStore.pushRevision(file.name, rawContent);
     updateStudioRevisionBtns(file.name);
     if (els.studioModelName) {
-      els.studioModelName.textContent = STATE.activeModel ? STATE.activeModel.slice(0, 18) : 'Argon';
+      els.studioModelName.textContent = getCurrentModel();
+      els.studioModelName.title = `Model Aktif: ${getCurrentModel()}`;
+    }
+    if (els.studioEngineMeta) {
+      els.studioEngineMeta.textContent = STATE.mode === 'auto' ? 'Auto Router' : (STATE.mode === 'ollama' ? 'Ollama Cloud' : 'OpenRouter');
+    }
+    updateStudioWebSearchUI();
+    if (els.inputStudioFollowup) {
+      els.inputStudioFollowup.value = '';
+      autoResizeTextarea(els.inputStudioFollowup);
+    }
+    if (els.btnStudioStopFollowup) {
+      els.btnStudioStopFollowup.style.display = STATE.isGenerating ? 'inline-flex' : 'none';
+    }
+    if (els.btnStudioSendFollowup) {
+      els.btnStudioSendFollowup.style.display = STATE.isGenerating ? 'none' : 'inline-flex';
     }
 
     if (els.btnStudioDownloadHtml) els.btnStudioDownloadHtml.style.display = isHtml ? 'flex' : 'none';
@@ -10145,6 +10191,43 @@ Aturan wajib:
   // Kartu file di dalam gelembung obrolan (dipanggil saat render live & riwayat)
   function renderMessageFiles(row, files, suppressPreviewCards = false) {
     if (!row || !Array.isArray(files) || files.length === 0) return;
+
+    // Hot-reload studio jika studio modal sedang terbuka dan menerima update file
+    if (els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show') && activeAIFile) {
+      const matchFile = files.find(f => f.name === activeAIFile.name) ||
+        (activeAIFile.name.endsWith('.html') && files.find(f => (f.name || '').endsWith('.html'))) ||
+        files[0];
+      if (matchFile) {
+        const newRaw = matchFile.rawContent || matchFile.content || '';
+        if (newRaw && newRaw !== activeAIFile.rawContent) {
+          activeAIFile.rawContent = newRaw;
+          activeAIFile.content = newRaw;
+          activeAIFile.size = formatFileSize(newRaw.length);
+          FileRevisionStore.pushRevision(activeAIFile.name, newRaw);
+          updateStudioRevisionBtns(activeAIFile.name);
+          if (els.aiFileStudioFrame) {
+            els.aiFileStudioFrame.removeAttribute('srcdoc');
+            setTimeout(() => {
+              els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(newRaw);
+            }, 50);
+          }
+          if (els.aiFileStudioCode) {
+            els.aiFileStudioCode.textContent = newRaw;
+            try {
+              if (window.hljs) {
+                els.aiFileStudioCode.removeAttribute('data-highlighted');
+                window.hljs.highlightElement(els.aiFileStudioCode);
+              }
+            } catch (_) {}
+          }
+          if (els.aiFileStudioMeta) {
+            els.aiFileStudioMeta.textContent = `${activeAIFile.name} • ${activeAIFile.size} — Diperbarui oleh AI`;
+          }
+          showToast('✨ Halaman website telah diperbarui langsung di pratinjau!', 'success');
+        }
+      }
+    }
+
     const bubble = (row.classList && row.classList.contains('message-bubble'))
       ? row
       : row.querySelector('.message-bubble');
@@ -11074,24 +11157,151 @@ ${blocks}
     }
   });
 
-  // Floating Follow-up composer in AI File Studio (Tanya lebih lanjut)
-  function submitStudioFollowupPrompt() {
+  // ==================== AUTHENTIC ZOZ ROUTER AI STUDIO COMPOSER & ASSISTANT ====================
+  function updateStudioWebSearchUI() {
+    if (!els.studioWebSearchBtn) return;
+    const isAuto = STATE.webSearchMode === 'autonomous';
+    const isDef = STATE.webSearchMode === 'default';
+    const isPrem = STATE.webSearchMode === 'premium';
+    const isActive = isAuto || isDef || isPrem;
+
+    els.studioWebSearchBtn.className = `composer-btn web-search-toggle ${isAuto ? 'mode-autonomous' : (isPrem ? 'mode-premium' : (isDef ? 'mode-default' : ''))} ${isActive ? 'active' : ''}`;
+    if (els.studioWebSearchIcon) {
+      els.studioWebSearchIcon.className = isAuto ? 'fa-solid fa-compass' : (isPrem ? 'fa-solid fa-microscope' : (isDef ? 'fa-solid fa-globe' : 'fa-solid fa-compass'));
+    }
+    els.studioWebSearchBtn.title = isActive ? `Penelusuran Web Aktif (${STATE.webSearchMode.toUpperCase()})` : 'Penelusuran Web Nonaktif (Klik untuk aktifkan)';
+  }
+
+  function openStudioAssistantDrawer() {
+    if (els.studioAssistantPanel) {
+      els.studioAssistantPanel.style.display = 'flex';
+      if (els.btnToggleStudioAssistant) els.btnToggleStudioAssistant.classList.add('active');
+    }
+  }
+
+  function closeStudioAssistantDrawer() {
+    if (els.studioAssistantPanel) {
+      els.studioAssistantPanel.style.display = 'none';
+      if (els.btnToggleStudioAssistant) els.btnToggleStudioAssistant.classList.remove('active');
+    }
+  }
+
+  function toggleStudioAssistantDrawer() {
+    if (!els.studioAssistantPanel) return;
+    const isVisible = window.getComputedStyle(els.studioAssistantPanel).display !== 'none';
+    if (isVisible) {
+      closeStudioAssistantDrawer();
+    } else {
+      openStudioAssistantDrawer();
+    }
+  }
+
+  function appendStudioMessage(role, contentHtml) {
+    if (!els.studioAssistantMessages) return null;
+    if (els.studioAssistantEmpty) els.studioAssistantEmpty.style.display = 'none';
+    const row = document.createElement('div');
+    row.className = `studio-msg-row ${role}`;
+    const bubble = document.createElement('div');
+    bubble.className = 'studio-msg-bubble';
+    bubble.innerHTML = contentHtml;
+    row.appendChild(bubble);
+    els.studioAssistantMessages.appendChild(row);
+    scrollStudioAssistantToBottom();
+    return bubble;
+  }
+
+  async function submitStudioFollowupPrompt() {
     const val = els.inputStudioFollowup?.value?.trim();
     if (!val || !activeAIFile) return;
+    if (STATE.isGenerating || STATE.isSending) {
+      showToast('⚠️ Sedang memproses permintaan sebelumnya...', 'info');
+      return;
+    }
+
     const targetName = activeAIFile.name || 'index.html';
-    closeModal('aiFileStudioModal');
+    const ext = targetName.split('.').pop().toLowerCase();
+    const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml';
+    const lang = activeAIFile.lang || (isHtml ? 'html' : ext);
+    const currentCode = activeAIFile.rawContent || activeAIFile.content || '';
+
+    // Bersihkan input & reset tinggi textarea
     els.inputStudioFollowup.value = '';
-    showToast(`🚀 Mengirim permintaan revisi untuk "${targetName}"...`, 'info');
-    const followupPrompt = `Revisi website "${targetName}": ${val}\n\nHarap berikan kode lengkap website yang telah diperbarui di dalam blok:\n<<<ZOZ_FILE name="${targetName}" lang="html">>>\n<!DOCTYPE html>\n...\n<<<END_ZOZ_FILE>>>`;
+    autoResizeTextarea(els.inputStudioFollowup);
+
+    // Buka panel drawer asisten di sisi studio
+    openStudioAssistantDrawer();
+
+    // Tampilkan pesan pengguna di riwayat drawer studio
+    appendStudioMessage('user', escapeHtml(val));
+
+    // Siapkan gelembung respon untuk menerima streaming
+    activeStudioAssistantBubble = appendStudioMessage('assistant', `<span class="typing-cursor"></span> <em>Menghubungkan ke ${escapeHtml(getCurrentModel())}...</em>`);
+
+    // Ganti tombol kirim menjadi tombol stop generasi
+    if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'none';
+    if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'inline-flex';
+
+    // Rangkai prompt cerdas dengan konteks berkas aktif
+    const followupPrompt = `[Konteks Berkas Aktif: "${targetName}" (${lang})]\n\`\`\`${lang}\n${currentCode}\n\`\`\`\n\nPermintaan Pengguna: ${val}\n\nInstruksi untuk AI:\n1. Jika permintaan pengguna meminta perubahan, perbaikan, penambahan fitur, atau modifikasi pada website/berkas ini, berikan penjelasan singkat lalu cantumkan seluruh kode lengkap yang telah diperbarui di dalam blok:\n<<<ZOZ_FILE name="${targetName}" lang="${lang}">>>\n... seluruh kode lengkap ...\n<<<END_ZOZ_FILE>>>\n2. Jika pengguna hanya bertanya atau meminta penjelasan tentang website/kode ini, jelaskan secara mendalam, akurat, dan jelas.`;
+
+    // Kirim langsung ke handleSendPrompt TANPA menutup modal studio!
     handleSendPrompt({
       overrideText: followupPrompt,
+      displayPrompt: val,
       websiteMode: 'preview',
       isWebCreation: true,
-      skipWebsiteCheck: true
+      skipWebsiteCheck: true,
+      skipDocCheck: true
     });
   }
 
+  els.btnToggleStudioAssistant?.addEventListener('click', toggleStudioAssistantDrawer);
+  els.btnStudioCloseDrawer?.addEventListener('click', closeStudioAssistantDrawer);
+  els.btnStudioClearChat?.addEventListener('click', () => {
+    if (els.studioAssistantMessages) {
+      els.studioAssistantMessages.innerHTML = `
+        <div class="studio-assistant-empty" id="studioAssistantEmpty">
+          <i class="fa-solid fa-comments"></i>
+          <p>Tanya Zoz Router tentang struktur website ini, minta penjelasan kode, atau minta penambahan fitur baru di kolom prompt bawah.</p>
+        </div>
+      `;
+      els.studioAssistantEmpty = $('#studioAssistantEmpty');
+    }
+  });
+
+  els.studioModelChip?.addEventListener('click', () => {
+    openLiveModelCatalog(null, 'Model Obrolan Utama');
+  });
+
+  els.studioWebSearchBtn?.addEventListener('click', () => {
+    if (els.webSearchToggleBtn) {
+      els.webSearchToggleBtn.click();
+    }
+    updateStudioWebSearchUI();
+  });
+
+  els.studioAttachBtn?.addEventListener('click', () => {
+    if (els.attachToggleBtn) {
+      els.attachToggleBtn.click();
+    } else if (els.docFileInput) {
+      els.docFileInput.click();
+    }
+  });
+
+  els.btnStudioStopFollowup?.addEventListener('click', () => {
+    stopGeneration();
+    if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'none';
+    if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'inline-flex';
+    if (activeStudioAssistantBubble) {
+      activeStudioAssistantBubble.innerHTML += '<br><small style="color:var(--neon-amber);"><em>[Generasi dihentikan oleh pengguna]</em></small>';
+      activeStudioAssistantBubble = null;
+    }
+  });
+
   els.btnStudioSendFollowup?.addEventListener('click', submitStudioFollowupPrompt);
+  els.inputStudioFollowup?.addEventListener('input', () => {
+    autoResizeTextarea(els.inputStudioFollowup);
+  });
   els.inputStudioFollowup?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -11930,6 +12140,13 @@ ${blocks}
         els.currentModelLabel.innerText = current;
         els.currentModelLabel.title = current;
       }
+    }
+    if (els.studioModelName) {
+      els.studioModelName.innerText = current;
+      els.studioModelName.title = `Model Aktif: ${current}`;
+    }
+    if (els.studioEngineMeta) {
+      els.studioEngineMeta.textContent = STATE.mode === 'auto' ? 'Auto Router' : (STATE.mode === 'ollama' ? 'Ollama Cloud' : 'OpenRouter');
     }
   }
 
@@ -17634,6 +17851,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     }
     if (els.stopGenerationBtn) {
       els.stopGenerationBtn.style.display = isGen ? 'flex' : 'none';
+    }
+    if (els.btnStudioSendFollowup) {
+      els.btnStudioSendFollowup.style.display = isGen ? 'none' : 'inline-flex';
+    }
+    if (els.btnStudioStopFollowup) {
+      els.btnStudioStopFollowup.style.display = isGen ? 'inline-flex' : 'none';
     }
   }
 

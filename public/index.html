@@ -23,7 +23,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261015_v295">
+  <link rel="stylesheet" href="style.css?v=20261015_v296">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -1555,6 +1555,9 @@
         </div>
 
         <div class="gemini-studio-header-right">
+          <button class="gemini-pill-btn studio-chat-toggle-btn active" id="btnToggleStudioAssistant" type="button" title="Buka/Tutup Asisten Tanya & Revisi">
+            <i class="fa-solid fa-comments"></i> <span>Tanya AI</span>
+          </button>
           <div class="studio-download-wrap gemini-dropdown-wrap" id="aiFileStudioDownloadWrap">
             <button class="gemini-pill-btn" id="aiFileStudioDownloadBtn" type="button" title="Ekspor atau unduh file ini">
               <i class="fa-solid fa-arrow-down-to-bracket"></i> <span id="aiFileStudioDownloadText">Ekspor</span> <i class="fa-solid fa-chevron-down caret-icon" id="aiFileStudioDownloadCaret"></i>
@@ -1619,34 +1622,90 @@
         </div>
       </div>
 
-      <div class="modal-body ai-file-studio-body gemini-studio-stage">
-        <div class="ai-file-studio-pane gemini-studio-pane" id="aiFileStudioPreviewPane">
-          <iframe id="aiFileStudioFrame" title="Pratinjau langsung file" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"></iframe>
-          <div class="ai-file-studio-placeholder" id="aiFileStudioPlaceholder">
-            <i class="fa-solid fa-circle-info"></i>
-            <span>File ini tidak bisa ditampilkan sebagai halaman interaktif. Silakan buka tab <strong>Kode</strong> atau unduh filenya.</span>
+      <div class="modal-body ai-file-studio-body gemini-studio-stage" id="geminiStudioStage">
+        <div class="studio-workspace-area" id="studioWorkspaceArea">
+          <div class="ai-file-studio-pane gemini-studio-pane" id="aiFileStudioPreviewPane">
+            <iframe id="aiFileStudioFrame" title="Pratinjau langsung file" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"></iframe>
+            <div class="ai-file-studio-placeholder" id="aiFileStudioPlaceholder">
+              <i class="fa-solid fa-circle-info"></i>
+              <span>File ini tidak bisa ditampilkan sebagai halaman interaktif. Silakan buka tab <strong>Kode</strong> atau unduh filenya.</span>
+            </div>
+          </div>
+          <pre class="ai-file-studio-code gemini-studio-code" id="aiFileStudioCode"></pre>
+        </div>
+
+        <!-- Studio Assistant Drawer / Panel Tanya AI -->
+        <div class="studio-assistant-panel" id="studioAssistantPanel">
+          <div class="studio-assistant-header">
+            <div class="studio-assistant-title">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Asisten Zoz Router</span>
+            </div>
+            <div class="studio-assistant-controls">
+              <button class="gemini-icon-btn" id="btnStudioClearChat" type="button" title="Bersihkan Catatan Diskusi Studio">
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+              <button class="gemini-icon-btn" id="btnStudioCloseDrawer" type="button" title="Tutup Panel Asisten">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+          </div>
+          <div class="studio-assistant-messages" id="studioAssistantMessages">
+            <div class="studio-assistant-empty" id="studioAssistantEmpty">
+              <i class="fa-solid fa-comments"></i>
+              <p>Tanya Zoz Router tentang struktur website ini, minta penjelasan kode, atau minta penambahan fitur baru di kolom prompt bawah.</p>
+            </div>
           </div>
         </div>
-        <pre class="ai-file-studio-code gemini-studio-code" id="aiFileStudioCode"></pre>
       </div>
 
-      <!-- FLOATING PROMPT PILL DOCKED AT STUDIO BOTTOM (Gemini Canvas Composer) -->
-      <div class="gemini-studio-footer">
-        <div class="gemini-studio-composer" id="geminiStudioComposer">
-          <button class="composer-icon-btn" id="btnStudioAdd" type="button" title="Fitur Tambahan">
-            <i class="fa-solid fa-plus"></i>
-          </button>
-          <input type="text" class="gemini-studio-input" id="inputStudioFollowup" placeholder="Tanya lebih lanjut atau minta perubahan pada website ini..." />
-          <div class="gemini-studio-model-badge" id="studioModelBadge">
-            <span id="studioModelName">Argon</span>
-            <i class="fa-solid fa-chevron-down"></i>
+      <!-- AUTHENTIC ZOZ ROUTER PROMPT COMPOSER IN STUDIO -->
+      <div class="gemini-studio-footer" id="geminiStudioFooter">
+        <div class="composer-box studio-composer-box" id="studioComposerBox">
+          <!-- Action Buttons Left -->
+          <div class="composer-tools-left">
+            <!-- Authentic Model Chip -->
+            <button class="studio-model-chip" id="studioModelChip" type="button" title="Model AI Aktif (Klik untuk ganti model)">
+              <i class="fa-solid fa-microchip studio-chip-icon"></i>
+              <span class="studio-model-name" id="studioModelName">Auto Router</span>
+              <i class="fa-solid fa-chevron-down studio-chip-arrow"></i>
+            </button>
+
+            <!-- Authentic Web Search Toggle (Autonomous Web Explorer) -->
+            <button class="composer-btn web-search-toggle mode-autonomous active" id="studioWebSearchBtn" type="button" title="Autonomous Web Explorer (Aktif)">
+              <i class="fa-solid fa-compass" id="studioWebSearchIcon"></i>
+            </button>
+
+            <!-- Authentic Attachments Button -->
+            <button class="composer-btn attach-toggle-btn" id="studioAttachBtn" type="button" title="Lampirkan File / Gambar Acuan">
+              <i class="fa-solid fa-paperclip"></i>
+            </button>
           </div>
-          <button class="gemini-studio-send-btn" id="btnStudioSendFollowup" type="button" title="Kirim Permintaan Revisi">
-            <i class="fa-solid fa-arrow-up"></i>
-          </button>
+
+          <!-- Textarea Input (Genuine Zoz Router multi-line, auto-expand, Shift+Enter support) -->
+          <div class="input-field-wrap">
+            <textarea
+              id="inputStudioFollowup"
+              class="studio-prompt-textarea"
+              aria-label="Ketik instruksi atau pertanyaan untuk website ini"
+              placeholder="Tanya Zoz Router tentang website ini atau minta revisi kode... (Shift+Enter untuk baris baru)"
+              rows="1"
+            ></textarea>
+          </div>
+
+          <!-- Action Buttons Right -->
+          <div class="composer-tools-right">
+            <!-- Stop Generation Button (when streaming/generating) -->
+            <button class="composer-btn stop-btn" id="btnStudioStopFollowup" style="display: none;" title="Hentikan Generasi">
+              <i class="fa-solid fa-circle-stop"></i>
+            </button>
+            <!-- Send Button -->
+            <button class="send-btn studio-send-btn" id="btnStudioSendFollowup" title="Kirim Pertanyaan / Revisi (Enter)" aria-label="Kirim Permintaan">
+              <i class="fa-solid fa-paper-plane"></i>
+            </button>
+          </div>
         </div>
         <div class="gemini-studio-footnote">
-          <span class="ai-file-studio-meta" id="aiFileStudioMeta">-</span> • Zoz Router adalah AI dan dapat membuat kesalahan.
+          <span class="ai-file-studio-meta" id="aiFileStudioMeta">-</span> • <span id="studioEngineMeta">Zoz Router Neural Multi-Engine</span> • Zoz Router adalah AI dan dapat membuat kesalahan.
         </div>
       </div>
     </div>
@@ -2259,6 +2318,6 @@
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
   <script src="text-safety.js?v=20261015_v279" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261015_v295" defer></script>
+  <script src="app.js?v=20261015_v296" defer></script>
 </body>
 </html>
