@@ -8459,6 +8459,8 @@ div.msg-sources-section button.msg-sources-title span {
 
 .gemini-canvas-header,
 .gemini-studio-header {
+  position: relative !important;
+  z-index: 100 !important;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -8596,18 +8598,26 @@ div.msg-sources-section button.msg-sources-title span {
   color: #ffffff;
 }
 
-.gemini-pill-btn.canvas-card-fullscreen-btn {
-  background: rgba(0, 240, 255, 0.12);
-  border-color: rgba(0, 240, 255, 0.35);
-  color: var(--neon-cyan, #00f0ff);
+.gemini-pill-btn.canvas-card-fullscreen-btn,
+.gemini-pill-btn.gemini-primary-preview-btn {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.18) 0%, rgba(0, 255, 194, 0.22) 100%);
+  border: 1px solid rgba(0, 240, 255, 0.55);
+  color: #ffffff;
   font-weight: 600;
+  box-shadow: 0 0 14px rgba(0, 240, 255, 0.18);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
 }
 
-.gemini-pill-btn.canvas-card-fullscreen-btn:hover {
-  background: rgba(0, 240, 255, 0.22);
-  border-color: rgba(0, 240, 255, 0.7);
-  box-shadow: 0 0 12px rgba(0, 240, 255, 0.25);
+.gemini-pill-btn.canvas-card-fullscreen-btn:hover,
+.gemini-pill-btn.gemini-primary-preview-btn:hover {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.32) 0%, rgba(0, 255, 194, 0.38) 100%);
+  border-color: rgba(0, 240, 255, 0.85);
+  box-shadow: 0 0 18px rgba(0, 240, 255, 0.4);
   color: #ffffff;
+  transform: translateY(-1px);
 }
 
 .gemini-pill-btn .caret-icon {
@@ -8645,6 +8655,7 @@ div.msg-sources-section button.msg-sources-title span {
 .gemini-dropdown-wrap {
   position: relative;
   display: inline-block;
+  z-index: 120 !important;
 }
 
 .gemini-export-menu {
@@ -8661,8 +8672,9 @@ div.msg-sources-section button.msg-sources-title span {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  z-index: 1060;
+  z-index: 99999 !important;
   min-width: 220px;
+  max-width: calc(100vw - 32px);
 }
 
 .gemini-export-item {
@@ -8694,7 +8706,8 @@ div.msg-sources-section button.msg-sources-title span {
 
 /* Stage & Iframe */
 .gemini-canvas-stage {
-  position: relative;
+  position: relative !important;
+  z-index: 1 !important;
   width: 100%;
   height: 520px;
   min-height: 380px;
@@ -8751,6 +8764,7 @@ div.msg-sources-section button.msg-sources-title span {
 /* 2. Gemini Studio Modal Enhancements */
 .gemini-studio-backdrop {
   z-index: 1050;
+  padding: 0 !important;
 }
 
 .gemini-canvas-studio {
@@ -8792,13 +8806,14 @@ div.msg-sources-section button.msg-sources-title span {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding: 10px 20px 14px;
+  padding: 8px 16px max(10px, env(safe-area-inset-bottom, 10px));
   background: rgba(14, 17, 24, 0.98);
   border-top: 1px solid rgba(0, 240, 255, 0.18);
   box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.45);
   user-select: none;
   position: relative;
   z-index: 10;
+  margin-top: auto;
 }
 
 .studio-composer-box,
@@ -9202,6 +9217,29 @@ div.msg-sources-section button.msg-sources-title span {
   .gemini-segmented-toggle .seg-btn {
     padding: 4px 10px;
     font-size: 0.74rem;
+  }
+  .gemini-studio-backdrop {
+    padding: 0 !important;
+  }
+  .gemini-studio-footer {
+    padding: 6px 10px max(8px, env(safe-area-inset-bottom, 8px)) !important;
+    margin-top: auto !important;
+  }
+  .studio-composer-box {
+    max-width: 100% !important;
+    padding: 6px 10px !important;
+    margin: 0 !important;
+  }
+  .gemini-export-menu {
+    max-width: calc(100vw - 24px) !important;
+  }
+}
+
+@media (min-width: 769px) {
+  .gemini-canvas-header-right .gemini-export-menu,
+  .gemini-studio-header-right .gemini-export-menu {
+    left: auto;
+    right: 0;
   }
 }
 

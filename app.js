@@ -9125,6 +9125,14 @@ Aturan wajib:
     if ((safeHtml.match(/<script\b/gi) || []).length > (safeHtml.match(/<\/script>/gi) || []).length) {
       safeHtml += '\n</script>';
     }
+    // 5. Tambahkan padding/margin bawah pada area konten pratinjau agar seluruh elemen terbawah website terlihat jelas tanpa terhalang prompt input
+    const previewBottomSpacerStyle = '\n<style id="zoz-preview-bottom-spacer">html,body{box-sizing:border-box!important;}body{padding-bottom:100px!important;}</style>';
+    if (/<head\b[^>]*>/i.test(safeHtml) && /<\/head>/i.test(safeHtml)) {
+      safeHtml = safeHtml.replace(/<\/head>/i, previewBottomSpacerStyle + '\n</head>');
+    } else {
+      safeHtml = previewBottomSpacerStyle + '\n' + safeHtml;
+    }
+
     if (!/<\/body>/i.test(safeHtml)) {
       safeHtml += '\n</body>';
     }
@@ -9220,18 +9228,11 @@ Aturan wajib:
           </div>
         </div>
 
-        <div class="gemini-canvas-header-center">
-          <div class="gemini-segmented-toggle">
-            <button type="button" class="seg-btn seg-code" data-view="code">
-              <i class="fa-solid fa-code"></i> Kode
-            </button>
-            <button type="button" class="seg-btn seg-preview active" data-view="preview">
-              <i class="fa-solid fa-play"></i> Pratinjau
-            </button>
-          </div>
-        </div>
-
+        <!-- Note: Redundant segmented toggle (.gemini-segmented-toggle) and "Buka Studio" buttons were simplified per user specification: single primary [Pratinjau] button provides unified access to interactive preview studio. -->
         <div class="gemini-canvas-header-right">
+          <button class="gemini-pill-btn gemini-primary-preview-btn canvas-card-preview-btn canvas-card-fullscreen-btn" type="button" title="Buka Pratinjau Interaktif Website">
+            <i class="fa-solid fa-play"></i> <span>Pratinjau</span>
+          </button>
           <div class="gemini-dropdown-wrap">
             <button class="gemini-pill-btn gemini-card-export-btn" type="button" title="Ekspor atau unduh website ini">
               <i class="fa-solid fa-arrow-down-to-bracket"></i> <span>Ekspor</span> <i class="fa-solid fa-chevron-down caret-icon"></i>
@@ -9254,9 +9255,6 @@ Aturan wajib:
           </button>
           <button class="gemini-icon-btn canvas-card-reload-btn" type="button" title="Muat Ulang Pratinjau">
             <i class="fa-solid fa-rotate"></i>
-          </button>
-          <button class="gemini-pill-btn canvas-card-fullscreen-btn" type="button" title="Buka Studio Pratinjau Interaktif">
-            <i class="fa-solid fa-arrow-up-right-from-square"></i> <span>Buka Studio</span>
           </button>
         </div>
       </div>
@@ -9294,43 +9292,41 @@ Aturan wajib:
       } catch (_) {}
     }
 
-    // Setup Segmented Toggle & Preview Switcher
-    const segToggle = card.querySelector('.gemini-segmented-toggle');
     const previewPane = card.querySelector('.gemini-canvas-preview-pane');
     const codePane = card.querySelector('.gemini-canvas-code-pane');
 
-    // Title click to open studio directly
+    // Title click & Primary Preview button to open studio directly
     card.querySelector('.gemini-canvas-title')?.addEventListener('click', () => {
       openAIFileStudio(file, 'preview');
     });
 
-    segToggle?.querySelectorAll('.seg-btn').forEach(btn => {
+    card.querySelectorAll('.canvas-card-preview-btn, .canvas-card-fullscreen-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const view = btn.dataset.view;
-        segToggle.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-
-        if (view === 'code') {
-          previewPane.style.display = 'none';
-          codePane.style.display = 'block';
-        } else {
-          codePane.style.display = 'none';
-          previewPane.style.display = 'block';
-          // Klik Pratinjau langsung membuka studio interaktif penuh
-          openAIFileStudio(file, 'preview');
-        }
+        openAIFileStudio(file, 'preview');
         AudioEngine.click();
       });
     });
 
-    // Setup Export Dropdown
+    // Setup Export Dropdown (top layer stacking & smart boundary protection)
     const exportBtn = card.querySelector('.gemini-card-export-btn');
     const exportMenu = card.querySelector('.gemini-export-menu');
     exportBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
       const isVisible = exportMenu.style.display !== 'none';
       document.querySelectorAll('.gemini-export-menu').forEach(m => m.style.display = 'none');
-      exportMenu.style.display = isVisible ? 'none' : 'flex';
+      if (!isVisible) {
+        const rect = exportBtn.getBoundingClientRect();
+        if (rect.left + 230 > window.innerWidth) {
+          exportMenu.style.left = 'auto';
+          exportMenu.style.right = '0';
+        } else {
+          exportMenu.style.left = '0';
+          exportMenu.style.right = 'auto';
+        }
+        exportMenu.style.display = 'flex';
+      } else {
+        exportMenu.style.display = 'none';
+      }
     });
 
     card.querySelectorAll('.gemini-export-item').forEach(item => {
@@ -9360,12 +9356,6 @@ Aturan wajib:
         setTimeout(() => { iframe.srcdoc = prepareSafeHtmlForPreview(file.rawContent || file.content || ''); }, 50);
         showToast('Pratinjau website dimuat ulang.');
       }
-    });
-
-    // Fullscreen / Studio
-    card.querySelector('.canvas-card-fullscreen-btn')?.addEventListener('click', () => {
-      const activeView = codePane.style.display !== 'none' ? 'code' : 'preview';
-      openAIFileStudio(file, activeView);
     });
 
     // Undo / Redo
@@ -11211,7 +11201,20 @@ ${blocks}
     if ((isDiagram || isDoc || isHtml) && els.aiFileStudioDownloadMenu) {
       e.stopPropagation();
       const isVisible = els.aiFileStudioDownloadMenu.style.display !== 'none';
-      els.aiFileStudioDownloadMenu.style.display = isVisible ? 'none' : 'flex';
+      document.querySelectorAll('.gemini-export-menu').forEach(m => m.style.display = 'none');
+      if (!isVisible) {
+        const rect = els.aiFileStudioDownloadBtn.getBoundingClientRect();
+        if (rect.left + 230 > window.innerWidth) {
+          els.aiFileStudioDownloadMenu.style.left = 'auto';
+          els.aiFileStudioDownloadMenu.style.right = '0';
+        } else {
+          els.aiFileStudioDownloadMenu.style.left = '0';
+          els.aiFileStudioDownloadMenu.style.right = 'auto';
+        }
+        els.aiFileStudioDownloadMenu.style.display = 'flex';
+      } else {
+        els.aiFileStudioDownloadMenu.style.display = 'none';
+      }
     } else {
       downloadAIFile(activeAIFile);
     }
