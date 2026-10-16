@@ -120,15 +120,37 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     'apodex/apodex-1.1-mini:free'
   ]);
 
+  // Model OpenRouter yang terdeteksi sementara mengalami ResourceExhausted atau timeout upstream
+  const RUNTIME_EXHAUSTED_OPENROUTER_MODELS = new Set();
+  function markModelExhausted(modelId, reason = '') {
+    if (!modelId || typeof modelId !== 'string') return;
+    RUNTIME_EXHAUSTED_OPENROUTER_MODELS.add(modelId);
+    console.warn(`[OpenRouter Resiliency] Model ${modelId} ditandai ResourceExhausted/lambat (${reason}). Dialihkan sementara.`);
+    setTimeout(() => {
+      RUNTIME_EXHAUSTED_OPENROUTER_MODELS.delete(modelId);
+    }, 300000); // 5 menit
+  }
+
   // Fallback resmi model gratis OpenRouter yang 100% aktif, responsif, dan terverifikasi live
+  // openrouter/free diprioritaskan utama karena secara dinamis merutekan ke provider gratis yang sehat & berkapasitas
   const LIVE_FREE_OPENROUTER_FALLBACKS = [
+    'openrouter/free',
+    'dots-studio/dots-3-note-preview:free',
+    'cohere/north-mini-code:free',
+    'liquid/lfm-2.5-2.6b:free',
     'nvidia/nemotron-3.5-lightning:free',
     'nvidia/nemotron-3-super-120b-a12b:free',
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
-    'cohere/north-mini-code:free',
-    'dots-studio/dots-3-note-preview:free',
-    'liquid/lfm-2.5-2.6b:free',
-    'nvidia/nemotron-3-ultra-550b-a55b:free',
+    'nvidia/nemotron-3-ultra-550b-a55b:free'
+  ];
+
+  // Fallback resmi model kredit / pengguna API Key (High-Availability & Latensi Terendah dengan puluhan penyedia)
+  const HIGH_AVAILABILITY_OPENROUTER_FALLBACKS = [
+    'openrouter/auto',
+    'deepseek/deepseek-chat',
+    'meta-llama/llama-3.3-70b-instruct',
+    'google/gemini-2.0-flash-001',
+    'openai/gpt-4o-mini',
     'openrouter/free'
   ];
 
@@ -180,42 +202,35 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
   // Universal Model Mapper: Memetakan model Ollama/Cloud ke ekuivalen OpenRouter Cloud resmi
   function mapOllamaModelToOpenRouter(modelId) {
-    if (!modelId || typeof modelId !== 'string') return 'nvidia/nemotron-3.5-lightning:free';
+    if (!modelId || typeof modelId !== 'string') return 'openrouter/free';
     const id = modelId.toLowerCase().trim();
     if (id.includes('/')) {
-      if (DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(modelId)) {
-        return 'nvidia/nemotron-3.5-lightning:free';
+      if (DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(modelId) || RUNTIME_EXHAUSTED_OPENROUTER_MODELS.has(modelId)) {
+        return 'openrouter/free';
       }
       return modelId;
     }
 
-    if (id.includes('gemma')) {
-      return 'nvidia/nemotron-3.5-lightning:free';
-    }
-    if (id.includes('nemotron-3-super') || id.includes('gpt-oss:120b') || id.includes('nemotron-3-ultra')) {
-      return 'nvidia/nemotron-3-super-120b-a12b:free';
-    }
-    if (id.includes('nemotron-3-nano') || id.includes('reasoning') || id.includes('deepseek-r1') || id.includes('deepseek-v4-pro')) {
-      return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
-    }
-    if (id.includes('nemotron-3.5') || id.includes('nemotron')) {
-      return 'nvidia/nemotron-3.5-lightning:free';
-    }
-    if (id.includes('gpt-oss')) {
-      return 'nvidia/nemotron-3-super-120b-a12b:free';
-    }
     if (id.includes('qwen2.5-coder') || id.includes('coder') || id.includes('code') || id.includes('kimi-k2.7-code')) {
       return 'cohere/north-mini-code:free';
     }
     if (id.includes('dots')) return 'dots-studio/dots-3-note-preview:free';
     if (id.includes('liquid') || id.includes('lfm')) return 'liquid/lfm-2.5-2.6b:free';
-    if (id.includes('deepseek')) return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
-    if (id.includes('llama')) return 'nvidia/nemotron-3.5-lightning:free';
-    if (id.includes('qwen')) return 'nvidia/nemotron-3.5-lightning:free';
-    if (id.includes('mistral')) return 'nvidia/nemotron-3.5-lightning:free';
-    if (id.includes('phi')) return 'openrouter/free';
+    if (id.includes('reasoning') || id.includes('deepseek-r1') || id.includes('deepseek-v4-pro')) {
+      return RUNTIME_EXHAUSTED_OPENROUTER_MODELS.has('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free')
+        ? 'openrouter/free'
+        : 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
+    }
+    if (id.includes('nemotron-3-super') || id.includes('gpt-oss:120b') || id.includes('nemotron-3-ultra')) {
+      return RUNTIME_EXHAUSTED_OPENROUTER_MODELS.has('nvidia/nemotron-3-super-120b-a12b:free')
+        ? 'openrouter/free'
+        : 'nvidia/nemotron-3-super-120b-a12b:free';
+    }
+    if (id.includes('phi') || id.includes('gemma') || id.includes('llama') || id.includes('qwen') || id.includes('mistral')) {
+      return 'openrouter/free';
+    }
 
-    return 'nvidia/nemotron-3.5-lightning:free';
+    return 'openrouter/free';
   }
 
   // Dedicated Image Synthesis Models (Pollinations Multi-Style & OpenRouter Image Engines)
@@ -14821,8 +14836,13 @@ Format teks (untuk model tanpa function calling):
     const isAuthError = msg.includes('401') || msg.includes('unauthorized') || msg.includes('api key') || msg.includes('user not found');
     const isModelNotFound = msg.includes('404') || msg.includes('not found') || msg.includes('no endpoints') || msg.includes('does not exist');
     const isRateLimit = msg.includes('429') || msg.includes('rate limit') || msg.includes('quota') || msg.includes('credits') || msg.includes('free tier limit');
-    const isContextLength = msg.includes('context length') || msg.includes('token limit') || msg.includes('maximum context');
-    const isProviderReturnedError = msg.includes('provider returned error') || msg.includes('upstream error') || msg.includes('provider error') || msg.includes('provider rejected');
+    const isProviderReturnedError = msg.includes('provider returned error') || 
+      msg.includes('upstream error') || 
+      msg.includes('provider error') || 
+      msg.includes('provider rejected') || 
+      msg.includes('resourceexhausted') || 
+      msg.includes('worker local total request limit reached') ||
+      msg.includes('temporarily unavailable');
 
     let title = `Peringatan Model: ${escapeHtml(modelName)}`;
     let desc = escapeHtml(rawMsg);
@@ -14845,9 +14865,9 @@ Format teks (untuk model tanpa function calling):
       desc = `Koneksi browser ke API OpenRouter gagal dilakukan (${escapeHtml(rawMsg)}). Hal ini bisa disebabkan oleh kebijakan CORS, VPN, pemblokir iklan (adblocker), atau jaringan internet Anda.`;
       advice = `💡 <strong>Solusi Cepat:</strong> Coba klik <strong>Coba Kirim Ulang</strong> atau beralih ke model gratis stabil dengan klik <strong>Ganti ke Model Gratis &amp; Kirim Ulang</strong>.`;
     } else if (isProviderReturnedError) {
-      title = `Penyedia Model OpenRouter Sedang Sibuk (Upstream Provider Error)`;
-      desc = `Server penyedia pihak ketiga (upstream) untuk model <code>${escapeHtml(modelName)}</code> sedang mengalami antrean penuh atau gangguan sementara di OpenRouter.`;
-      advice = `💡 <strong>Solusi Cepat:</strong> Coba beralih ke model free lain yang sedang aktif stabil seperti <code>openrouter/free</code> atau <code>nvidia/nemotron-3-super-120b-a12b:free</code>, atau klik <strong>Ganti ke Model Gratis &amp; Kirim Ulang</strong>.`;
+      title = `Penyedia Model OpenRouter Sedang Sibuk / Kelelahan Kapasitas (ResourceExhausted)`;
+      desc = `Penyedia upstream untuk model <code>${escapeHtml(modelName)}</code> sedang mengalami antrean penuh atau limit kapasitas sementara di OpenRouter (${escapeHtml(rawMsg)}).`;
+      advice = `💡 <strong>Solusi Cepat:</strong> Gunakan rute otomatis cerdas <code>openrouter/free</code> (bebas biaya) atau <code>openrouter/auto</code> / <code>deepseek/deepseek-chat</code> (kredit berbayar) yang memiliki puluhan penyedia berlatensi kilat.`;
     } else if (isCorsOrNetwork && engine === 'ollama') {
       title = `Jalur Cloud Sedang Menyinkronkan Model`;
       desc = `Koneksi ke endpoint cloud untuk model <code>${escapeHtml(modelName)}</code> mengalami kendala jaringan sementara (${escapeHtml(rawMsg)}).`;
@@ -16506,22 +16526,36 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, effectiveInitialModel);
 
       // Siapkan pool kandidat model:
+      // - Jika pengguna memiliki API Key (kredit pengguna ada), sertakan fallback model cepat berkeandalan tinggi (HA)
       // - Selalu sertakan fallback gratis terverifikasi agar saat model pilihan kehabisan kredit (HTTP 402)
-      //   atau mengalami gangguan upstream (404/429/502/503), sistem dapat melakukan Smart Failover secara otomatis.
+      //   atau mengalami gangguan upstream (404/429/502/503/ResourceExhausted), sistem dapat melakukan Smart Failover secara otomatis.
+      const smartFallbacks = hasClientKey
+        ? [...HIGH_AVAILABILITY_OPENROUTER_FALLBACKS, ...LIVE_FREE_OPENROUTER_FALLBACKS]
+        : [...LIVE_FREE_OPENROUTER_FALLBACKS];
+
       const candidateModels = [
         effectiveInitialModel,
-        ...LIVE_FREE_OPENROUTER_FALLBACKS
-      ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(m));
+        ...smartFallbacks
+      ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(m) && !RUNTIME_EXHAUSTED_OPENROUTER_MODELS.has(m));
 
-      let response = null;
+      if (candidateModels.length === 0) {
+        candidateModels.push('openrouter/free');
+      }
+
       let lastErrDetail = '';
       let activeMessagesPayload = null;
       let activeEndpoint = '';
       let activeHeaders = {};
       let activeRouteType = '';
+      let finishReason = null;
+      let streamSucceeded = false;
+      const collectedImages = [];
+      const accumulatedToolCalls = [];
       const selectedAutonomousTools = getSelectableAutonomousTools(canRunAutonomous);
+      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, runOptions);
 
       for (let i = 0; i < candidateModels.length; i++) {
+        if (STATE.abortController?.signal?.aborted) break;
         const currentModel = candidateModels[i];
         const currentIsFree = Boolean(
           currentModel.includes(':free') ||
@@ -16538,12 +16572,15 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const configuredMaxTokens = parseInt(STATE.settings.maxTokens, 10) || 32768;
         const effectiveMaxTokens = (wantsFile || isWebRequest || isDocRequest) ? Math.max(configuredMaxTokens, 32768) : Math.max(configuredMaxTokens, 16384);
 
+        const fallbackSlice = candidateModels.slice(i + 1, i + 4);
         const basePayload = {
           model: currentModel,
+          ...(fallbackSlice.length > 0 ? { models: [currentModel, ...fallbackSlice] } : {}),
           messages: currentMessagesPayload,
           stream: true,
           max_tokens: effectiveMaxTokens,
           provider: {
+            sort: 'latency',
             allow_fallbacks: true
           }
         };
@@ -16578,7 +16615,6 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const tryDirectFirst = IS_GITHUB_PAGES;
         const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
 
-        let res = null;
         let routeErrDetail = '';
 
         for (const routeType of routesToTry) {
@@ -16589,7 +16625,6 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           let targetBody = {};
 
           if (routeType === 'direct') {
-            // Direct call ke OpenRouter API (CORS-compliant: JANGAN kirim X-User-ID/X-Session-ID agar lolos preflight)
             targetUrl = 'https://openrouter.ai/api/v1/chat/completions';
             targetHeaders = {
               'Content-Type': 'application/json',
@@ -16599,7 +16634,6 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             };
             targetBody = { ...basePayload };
           } else {
-            // Proxy backend (/api/openrouter/chat)
             targetUrl = '/api/openrouter/chat';
             targetHeaders = {
               'Content-Type': 'application/json'
@@ -16621,25 +16655,37 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             };
           }
 
+          // TTFT Watchdog & Per-Attempt Abort Controller
+          const attemptController = new AbortController();
+          const onParentAbort = () => {
+            try { attemptController.abort('USER_ABORT'); } catch (_) {}
+          };
+          STATE.abortController?.signal?.addEventListener('abort', onParentAbort, { once: true });
+
+          let ttftTimer = setTimeout(() => {
+            if (tokenCount === 0) {
+              console.warn(`[OpenRouter TTFT Watchdog] Model ${currentModel} (${routeType}) tidak merespons dalam 25 detik (stalled). Membatalkan...`);
+              try { attemptController.abort('TTFT_TIMEOUT'); } catch (_) {}
+            }
+          }, 25000);
+
           try {
             let attemptRes = await fetch(targetUrl, {
               method: 'POST',
               headers: targetHeaders,
               body: JSON.stringify(targetBody),
-              signal: STATE.abortController?.signal
+              signal: attemptController.signal
             });
 
-            // Resiliensi HTTP 400 & 404: Tangani penolakan tools, top_p, modalities, temperature, atau parameter upstream
+            // Resiliensi HTTP 400 & 404: Tangani penolakan tools, top_p, modalities, dsb.
             if (attemptRes.status === 400 || (attemptRes.status === 404 && targetBody.modalities)) {
               let shouldRetry = false;
               if (targetBody.modalities) {
-                console.warn(`[OpenRouter] Model ${currentModel} menolak parameter modalities. Menghapus modalities dan mengulang...`);
                 delete targetBody.modalities;
                 delete basePayload.modalities;
                 shouldRetry = true;
               }
               if (targetBody.tools) {
-                console.warn(`[OpenRouter] Model ${currentModel} mengembalikan HTTP 400 dengan tools. Mengulang langsung tanpa tools...`);
                 delete targetBody.tools;
                 delete targetBody.tool_choice;
                 delete basePayload.tools;
@@ -16647,13 +16693,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 shouldRetry = true;
               }
               if (targetBody.top_p) {
-                console.warn(`[OpenRouter] Model ${currentModel} mengembalikan HTTP 400. Menghapus top_p dan mengulang...`);
                 delete targetBody.top_p;
                 delete basePayload.top_p;
                 shouldRetry = true;
               }
               if (targetBody.repetition_penalty) {
-                console.warn(`[OpenRouter] Model ${currentModel} mengembalikan HTTP 400. Menghapus repetition_penalty dan mengulang...`);
                 delete targetBody.repetition_penalty;
                 delete basePayload.repetition_penalty;
                 shouldRetry = true;
@@ -16668,7 +16712,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                   method: 'POST',
                   headers: targetHeaders,
                   body: JSON.stringify(targetBody),
-                  signal: STATE.abortController?.signal
+                  signal: attemptController.signal
                 });
                 if (retryRes.ok) {
                   attemptRes = retryRes;
@@ -16676,56 +16720,227 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               }
             }
 
-            // Jika proxy mengembalikan 404 (misal static host tanpa server), fallback ke direct
             if (routeType === 'proxy' && attemptRes.status === 404) {
-              console.warn(`[OpenRouter Proxy 404] Backend proxy tidak tersedia di host ini. Beralih ke direct OpenRouter API...`);
+              clearTimeout(ttftTimer);
+              STATE.abortController?.signal?.removeEventListener('abort', onParentAbort);
               continue;
             }
 
-            if (attemptRes.ok) {
-              res = attemptRes;
-              activeEndpoint = targetUrl;
-              activeHeaders = targetHeaders;
-              activeRouteType = routeType;
-              break;
-            }
-
-            let attemptErr = `HTTP ${attemptRes.status}`;
-            try {
-              const errJson = await attemptRes.json();
-              if (errJson && errJson.error) {
-                const baseErr = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
-                const rawUpstream = errJson.details?.error?.metadata?.raw || errJson.error?.metadata?.raw;
-                attemptErr = rawUpstream ? `${baseErr} (${rawUpstream})` : baseErr;
-              }
-            } catch (je) {
+            if (!attemptRes.ok) {
+              clearTimeout(ttftTimer);
+              STATE.abortController?.signal?.removeEventListener('abort', onParentAbort);
+              let attemptErr = `HTTP ${attemptRes.status}`;
               try {
-                const raw = await attemptRes.text();
-                if (raw) attemptErr = raw.substring(0, 200);
-              } catch (_) {}
+                const errJson = await attemptRes.json();
+                if (errJson && errJson.error) {
+                  const baseErr = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
+                  const rawUpstream = errJson.details?.error?.metadata?.raw || errJson.error?.metadata?.raw;
+                  attemptErr = rawUpstream ? `${baseErr} (${rawUpstream})` : baseErr;
+                }
+              } catch (_) {
+                try {
+                  const raw = await attemptRes.text();
+                  if (raw) attemptErr = raw.substring(0, 200);
+                } catch (_) {}
+              }
+              routeErrDetail = attemptErr;
+              if (attemptErr.toLowerCase().includes('resourceexhausted') || attemptErr.toLowerCase().includes('worker local total request limit reached')) {
+                markModelExhausted(currentModel, attemptErr);
+              }
+              if (attemptRes.status === 401 || attemptRes.status === 403 || attemptRes.status === 402) {
+                break;
+              }
+              continue;
             }
 
-            routeErrDetail = attemptErr;
+            // attemptRes adalah 200 OK! Mulai membaca stream
+            activeEndpoint = targetUrl;
+            activeHeaders = targetHeaders;
+            activeRouteType = routeType;
+            activeMessagesPayload = currentMessagesPayload;
 
-            // Jika error adalah 401/403/402, jangan loop rute lain untuk model ini
-            if (attemptRes.status === 401 || attemptRes.status === 403 || attemptRes.status === 402) {
+            const reader = attemptRes.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                  buffer += decoder.decode();
+                  break;
+                }
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                  const trimmed = line.trim();
+                  if (!trimmed || !trimmed.startsWith('data:')) continue;
+                  const jsonStr = trimmed.replace(/^data:\s*/, '');
+                  if (jsonStr === '[DONE]') break;
+
+                  let parsed;
+                  try {
+                    parsed = JSON.parse(jsonStr);
+                  } catch (_) {
+                    continue;
+                  }
+                  if (parsed.error) {
+                    const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
+                    const rawUpstream = parsed.error?.metadata?.raw;
+                    const fullErrStr = rawUpstream ? `${errStr} (${rawUpstream})` : errStr;
+                    throw new Error(fullErrStr);
+                  }
+                  if (parsed.choices?.[0]?.finish_reason) {
+                    finishReason = parsed.choices[0].finish_reason;
+                  }
+
+                  const rawImgs = parsed.choices?.[0]?.delta?.images 
+                    || parsed.choices?.[0]?.message?.images 
+                    || parsed.choices?.[0]?.images
+                    || (parsed.data && Array.isArray(parsed.data) ? parsed.data : null);
+                  if (Array.isArray(rawImgs) && rawImgs.length > 0) {
+                    rawImgs.forEach(img => {
+                      const url = img?.image_url?.url || img?.url || (img?.b64_json ? `data:${img.media_type || 'image/png'};base64,${img.b64_json}` : (typeof img === 'string' ? img : null));
+                      if (url && !collectedImages.includes(url)) {
+                        collectedImages.push(url);
+                      }
+                    });
+                  }
+
+                  const deltaTc = parsed.choices?.[0]?.delta?.tool_calls;
+                  if (Array.isArray(deltaTc)) {
+                    deltaTc.forEach(tc => {
+                      const idx = tc.index ?? 0;
+                      if (!accumulatedToolCalls[idx]) {
+                        accumulatedToolCalls[idx] = {
+                          id: tc.id || `call_${Date.now()}_${idx}`,
+                          type: tc.type || 'function',
+                          function: {
+                            name: tc.function?.name || '',
+                            arguments: tc.function?.arguments || ''
+                          }
+                        };
+                      } else {
+                        if (tc.id) accumulatedToolCalls[idx].id = tc.id;
+                        if (tc.function?.name) {
+                          if (!accumulatedToolCalls[idx].function.name) {
+                            accumulatedToolCalls[idx].function.name = tc.function.name;
+                          } else if (accumulatedToolCalls[idx].function.name !== tc.function.name && !accumulatedToolCalls[idx].function.name.endsWith(tc.function.name)) {
+                            accumulatedToolCalls[idx].function.name += tc.function.name;
+                          }
+                        }
+                        if (tc.function?.arguments) accumulatedToolCalls[idx].function.arguments += tc.function.arguments;
+                      }
+                    });
+                  }
+
+                  const reasoningDelta = parsed.choices?.[0]?.delta?.reasoning 
+                    || parsed.choices?.[0]?.delta?.reasoning_content 
+                    || parsed.choices?.[0]?.delta?.thought 
+                    || '';
+                  if (reasoningDelta) {
+                    if (!firstTokenTime) firstTokenTime = performance.now();
+                    clearTimeout(ttftTimer);
+                    tokenCount++;
+                    streamRenderer.appendReasoning(reasoningDelta);
+                  }
+
+                  const delta = parsed.choices?.[0]?.delta?.content;
+                  if (delta) {
+                    if (!firstTokenTime) firstTokenTime = performance.now();
+                    clearTimeout(ttftTimer);
+                    tokenCount++;
+                    streamRenderer.append(delta);
+                    if (tokenCount % 25 === 0) {
+                      BioEndocrine.secreteDopamine(0.3, 'Streaming token lancar');
+                    }
+                    if (streamRenderer.isLoopTerminated) {
+                      console.warn('[OpenRouter] Model token degeneration loop detected and gracefully halted.');
+                      try { await reader.cancel(); } catch (_) {}
+                      break;
+                    }
+                  }
+                }
+              }
+
+              if (buffer && buffer.trim()) {
+                const trimmed = buffer.trim();
+                if (trimmed && trimmed.startsWith('data:')) {
+                  const jsonStr = trimmed.replace(/^data:\s*/, '');
+                  if (jsonStr !== '[DONE]') {
+                    try {
+                      const parsed = JSON.parse(jsonStr);
+                      if (parsed.error) {
+                        const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
+                        const rawUpstream = parsed.error?.metadata?.raw;
+                        throw new Error(rawUpstream ? `${errStr} (${rawUpstream})` : errStr);
+                      }
+                      if (parsed.choices?.[0]?.finish_reason) {
+                        finishReason = parsed.choices[0].finish_reason;
+                      }
+                      const delta = parsed.choices?.[0]?.delta?.content;
+                      if (delta) {
+                        if (!firstTokenTime) firstTokenTime = performance.now();
+                        clearTimeout(ttftTimer);
+                        tokenCount++;
+                        streamRenderer.append(delta);
+                      }
+                    } catch (_) {}
+                  }
+                }
+              }
+
+              clearTimeout(ttftTimer);
+              STATE.abortController?.signal?.removeEventListener('abort', onParentAbort);
+              actualModelUsed = currentModel;
+              streamSucceeded = true;
               break;
+
+            } catch (streamErr) {
+              clearTimeout(ttftTimer);
+              STATE.abortController?.signal?.removeEventListener('abort', onParentAbort);
+              try { await reader.cancel(); } catch (_) {}
+
+              if (STATE.abortController?.signal?.aborted) throw streamErr;
+
+              const sMsg = streamErr?.message || String(streamErr);
+              console.warn(`[OpenRouter Stream Error] Model ${currentModel} error saat streaming:`, sMsg);
+
+              if (tokenCount > 0) {
+                // Token sudah diterima dan terlihat oleh pengguna, jangan hapus
+                actualModelUsed = currentModel;
+                streamSucceeded = true;
+                break;
+              }
+
+              if (sMsg.toLowerCase().includes('resourceexhausted') || sMsg.toLowerCase().includes('worker local total request limit reached')) {
+                markModelExhausted(currentModel, sMsg);
+              }
+              routeErrDetail = sMsg;
+              continue;
             }
+
           } catch (netErr) {
+            clearTimeout(ttftTimer);
+            STATE.abortController?.signal?.removeEventListener('abort', onParentAbort);
+
             if (STATE.abortController?.signal?.aborted) throw netErr;
-            console.warn(`[OpenRouter Dual-Path] Jalur ${routeType} mengalami kendala:`, netErr.message);
-            routeErrDetail = netErr.message || String(netErr);
-            // Lanjut mencoba rute alternatif
+
+            const isTimeout = netErr?.name === 'AbortError' && attemptController.signal.reason === 'TTFT_TIMEOUT';
+            const netMsg = isTimeout ? 'Respons model terlalu lambat (timeout 25 detik tanpa token)' : (netErr.message || String(netErr));
+            console.warn(`[OpenRouter Attempt Failed] Model ${currentModel} (${routeType}):`, netMsg);
+            if (isTimeout) {
+              markModelExhausted(currentModel, 'TTFT Timeout 25s');
+            }
+            routeErrDetail = netMsg;
             continue;
           }
         }
 
-        if (res && res.ok) {
-          response = res;
-          activeMessagesPayload = currentMessagesPayload;
-          if (i > 0) {
-            actualModelUsed = currentModel;
-          }
+        if (streamSucceeded) {
           break;
         }
 
@@ -16736,8 +16951,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           throw new Error(`OpenRouter Authentication Error: API Key tidak valid atau belum dipasang.`);
         }
 
-        // Cek apakah bisa failover ke model berikutnya:
-        // Berlaku untuk semua kegagalan model (402, 404, 429, 400, 500, 502, 503, 504, network failure) selama bukan penolakan auth API Key
+        // Failover ke kandidat model berikutnya jika model ini gagal sebelum menghasilkan token
         const isAuthRejection = lastErrDetail.includes('401') || lastErrDetail.includes('403') || lastErrDetail.includes('API Key tidak valid');
         const canFailover = (i < candidateModels.length - 1) && !isAuthRejection;
 
@@ -16747,7 +16961,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             ? 'memerlukan saldo berbayar'
             : ((lastErrDetail.includes('429') || lastErrDetail.includes('rate limit'))
                 ? 'mencapai batas kuota sementara'
-                : 'sedang sibuk/gangguan');
+                : (lastErrDetail.includes('ResourceExhausted') || lastErrDetail.includes('lambat') || lastErrDetail.includes('timeout')
+                    ? 'sedang kelelahan kapasitas / lambat'
+                    : 'sedang mengalami gangguan upstream'));
           console.warn(`[OpenRouter Smart Failover] Model ${currentModel} ${reasonNotice} (${lastErrDetail}). Mengalihkan ke ${nextCandidate}...`);
           bubbleText.innerHTML = `<span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.8; font-style:italic;">Model <b>${escapeHtml(currentModel)}</b> ${reasonNotice}. Mengalihkan otomatis ke <b>${escapeHtml(nextCandidate)}</b>...</span>`;
           await new Promise(r => setTimeout(r, 600));
@@ -16757,178 +16973,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
       }
 
-      if (!response || !response.ok) {
+      if (!streamSucceeded && tokenCount === 0) {
         throw new Error(lastErrDetail || 'Gagal memanggil model OpenRouter.');
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let finishReason = null;
-      const collectedImages = [];
-      const accumulatedToolCalls = [];
-      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, runOptions);
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          buffer += decoder.decode();
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith('data:')) continue;
-          const jsonStr = trimmed.replace(/^data:\s*/, '');
-          if (jsonStr === '[DONE]') break;
-
-          let parsed;
-          try {
-            parsed = JSON.parse(jsonStr);
-          } catch (pe) {
-            continue;
-          }
-          if (parsed.error) {
-            const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
-            const rawUpstream = parsed.error?.metadata?.raw;
-            throw new Error(rawUpstream ? `${errStr} (${rawUpstream})` : errStr);
-          }
-          if (parsed.choices?.[0]?.finish_reason) {
-            finishReason = parsed.choices[0].finish_reason;
-          }
-
-          // Tangkap gambar yang dihasilkan model (seperti Gemini Flash Image / Nano Banana di OpenRouter)
-          const rawImgs = parsed.choices?.[0]?.delta?.images 
-            || parsed.choices?.[0]?.message?.images 
-            || parsed.choices?.[0]?.images
-            || (parsed.data && Array.isArray(parsed.data) ? parsed.data : null);
-          if (Array.isArray(rawImgs) && rawImgs.length > 0) {
-            rawImgs.forEach(img => {
-              const url = img?.image_url?.url || img?.url || (img?.b64_json ? `data:${img.media_type || 'image/png'};base64,${img.b64_json}` : (typeof img === 'string' ? img : null));
-              if (url && !collectedImages.includes(url)) {
-                collectedImages.push(url);
-              }
-            });
-          }
-
-          // Tangkap tool_calls delta inkremental
-          const deltaTc = parsed.choices?.[0]?.delta?.tool_calls;
-          if (Array.isArray(deltaTc)) {
-            deltaTc.forEach(tc => {
-              const idx = tc.index ?? 0;
-              if (!accumulatedToolCalls[idx]) {
-                accumulatedToolCalls[idx] = {
-                  id: tc.id || `call_${Date.now()}_${idx}`,
-                  type: tc.type || 'function',
-                  function: {
-                    name: tc.function?.name || '',
-                    arguments: tc.function?.arguments || ''
-                  }
-                };
-              } else {
-                if (tc.id) accumulatedToolCalls[idx].id = tc.id;
-                if (tc.function?.name) {
-                  if (!accumulatedToolCalls[idx].function.name) {
-                    accumulatedToolCalls[idx].function.name = tc.function.name;
-                  } else if (accumulatedToolCalls[idx].function.name !== tc.function.name && !accumulatedToolCalls[idx].function.name.endsWith(tc.function.name)) {
-                    accumulatedToolCalls[idx].function.name += tc.function.name;
-                  }
-                }
-                if (tc.function?.arguments) accumulatedToolCalls[idx].function.arguments += tc.function.arguments;
-              }
-            });
-          }
-
-          const reasoningDelta = parsed.choices?.[0]?.delta?.reasoning 
-            || parsed.choices?.[0]?.delta?.reasoning_content 
-            || parsed.choices?.[0]?.delta?.thought 
-            || '';
-          if (reasoningDelta) {
-            if (!firstTokenTime) firstTokenTime = performance.now();
-            tokenCount++;
-            streamRenderer.appendReasoning(reasoningDelta);
-          }
-
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (delta) {
-            if (!firstTokenTime) firstTokenTime = performance.now();
-            tokenCount++;
-            streamRenderer.append(delta);
-            if (streamRenderer.isLoopTerminated) {
-              console.warn('[OpenRouter] Model token degeneration loop detected and gracefully halted.');
-              try { await reader.cancel(); } catch (_) {}
-              break;
-            }
-          }
-        }
-      }
-
-      if (buffer && buffer.trim()) {
-        const trimmed = buffer.trim();
-        if (trimmed && trimmed.startsWith('data:')) {
-          const jsonStr = trimmed.replace(/^data:\s*/, '');
-          if (jsonStr !== '[DONE]') {
-            try {
-              const parsed = JSON.parse(jsonStr);
-              if (parsed.error) {
-                const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
-                const rawUpstream = parsed.error?.metadata?.raw;
-                throw new Error(rawUpstream ? `${errStr} (${rawUpstream})` : errStr);
-              }
-              if (parsed.choices?.[0]?.finish_reason) {
-                finishReason = parsed.choices[0].finish_reason;
-              }
-              const reasoningDelta = parsed.choices?.[0]?.delta?.reasoning 
-                || parsed.choices?.[0]?.delta?.reasoning_content 
-                || parsed.choices?.[0]?.delta?.thought 
-                || '';
-              if (reasoningDelta) {
-                if (!firstTokenTime) firstTokenTime = performance.now();
-                tokenCount++;
-                streamRenderer.appendReasoning(reasoningDelta);
-              }
-              const delta = parsed.choices?.[0]?.delta?.content;
-              if (delta) {
-                if (!firstTokenTime) firstTokenTime = performance.now();
-                tokenCount++;
-                streamRenderer.append(delta);
-                if (tokenCount % 25 === 0) {
-                  BioEndocrine.secreteDopamine(0.3, 'Streaming token lancar');
-                }
-              }
-              const deltaTc = parsed.choices?.[0]?.delta?.tool_calls;
-              if (Array.isArray(deltaTc)) {
-                deltaTc.forEach(tc => {
-                  const idx = tc.index ?? 0;
-                  if (!accumulatedToolCalls[idx]) {
-                    accumulatedToolCalls[idx] = {
-                      id: tc.id || `call_${Date.now()}_${idx}`,
-                      type: tc.type || 'function',
-                      function: {
-                        name: tc.function?.name || '',
-                        arguments: tc.function?.arguments || ''
-                      }
-                    };
-                  } else {
-                    if (tc.id) accumulatedToolCalls[idx].id = tc.id;
-                    if (tc.function?.name) {
-                      if (!accumulatedToolCalls[idx].function.name) {
-                        accumulatedToolCalls[idx].function.name = tc.function.name;
-                      } else if (accumulatedToolCalls[idx].function.name !== tc.function.name && !accumulatedToolCalls[idx].function.name.endsWith(tc.function.name)) {
-                        accumulatedToolCalls[idx].function.name += tc.function.name;
-                      }
-                    }
-                    if (tc.function?.arguments) accumulatedToolCalls[idx].function.arguments += tc.function.arguments;
-                  }
-                });
-              }
-            } catch (_) {}
-          }
-        }
       }
 
       // render:false → render final tunggal ada di bawah (finalRenderedContent),
@@ -18461,6 +18507,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           messages,
           stream: false,
           provider: {
+            sort: 'latency',
             allow_fallbacks: true
           }
         };
@@ -18604,6 +18651,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           messages: curMessagesPayload,
           stream: true,
           provider: {
+            sort: 'latency',
             allow_fallbacks: true
           }
         };

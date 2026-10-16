@@ -7483,7 +7483,7 @@ async function requestHandler(req, res) {
           'X-Title': 'ZOZ ROUTER Neural AI Gateway',
           'Content-Length': Buffer.byteLength(postData)
         },
-        timeout: 120000
+        timeout: 45000
       };
 
       let clientDisconnected = false;
