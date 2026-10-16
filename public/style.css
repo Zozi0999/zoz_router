@@ -4,6 +4,31 @@
    Neural Amber (#FF5200), Obsidian Surface (#08090D)
    ========================================================= */
 
+/* Visual Stability: FOIT Prevention with font-display: swap */
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: local('Plus Jakarta Sans'), local('PlusJakartaSans');
+}
+
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: local('Space Grotesk'), local('SpaceGrotesk');
+}
+
+@font-face {
+  font-family: 'Fira Code';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: local('Fira Code'), local('FiraCode');
+}
+
 :root {
   --bg-core: #07080c;
   --bg-surface: #0d0f17;
@@ -219,67 +244,6 @@ button.brand-logo-wrap.active .brand-logo {
   -webkit-text-fill-color: transparent;
 }
 
-/* Auto Router Sidebar Chip (Pill di sebelah ZOZ ROUTER) */
-.auto-router-sidebar-chip {
-  background: linear-gradient(135deg, rgba(14, 20, 36, 0.88), rgba(20, 28, 52, 0.94));
-  border: 1px solid rgba(0, 240, 255, 0.35);
-  color: var(--text-main);
-  font-size: 0.68rem;
-  font-weight: 600;
-  padding: 2px 7px;
-  border-radius: 999px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 8px rgba(0, 240, 255, 0.12);
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  user-select: none;
-  flex-shrink: 0;
-}
-
-.auto-router-sidebar-chip:hover {
-  background: linear-gradient(135deg, rgba(0, 240, 255, 0.18), rgba(20, 32, 60, 0.96));
-  border-color: var(--neon-cyan);
-  box-shadow: 0 4px 14px rgba(0, 240, 255, 0.35);
-  transform: translateY(-1px);
-}
-
-.auto-router-sidebar-chip.active {
-  background: linear-gradient(135deg, rgba(0, 240, 255, 0.25), rgba(0, 255, 194, 0.18));
-  border-color: var(--neon-cyan);
-  color: #ffffff;
-  box-shadow: 0 0 14px rgba(0, 240, 255, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.4);
-}
-
-.auto-router-sidebar-chip.active .auto-router-mini-badge {
-  background: var(--neon-cyan);
-  color: #060a12;
-  font-weight: 900;
-  box-shadow: 0 0 8px var(--neon-cyan);
-}
-
-.auto-router-sidebar-chip .auto-router-logo-wrap {
-  width: 13px;
-  height: 13px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.auto-router-sidebar-chip .auto-router-logo-svg {
-  width: 13px;
-  height: 13px;
-}
-
-.auto-router-sidebar-chip .auto-router-text {
-  font-size: 0.68rem;
-}
-
-.auto-router-sidebar-chip .auto-router-mini-badge {
-  font-size: 0.52rem;
-  padding: 0 4px;
-}
 
 .version-tag {
   font-size: 0.65rem;
@@ -9278,10 +9242,6 @@ div.msg-sources-section button.msg-sources-title span {
   max-width: min(350px, 90vw) !important;
   max-height: min(400px, 46vh) !important;
   z-index: 100 !important;
-}
-  .studio-model-chip .studio-model-name {
-    max-width: 90px;
-  }
 }
 
 @media (max-width: 768px) {

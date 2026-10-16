@@ -3656,7 +3656,8 @@ RESONANSI: ${this.currentVibe}
     if (mermaidLoadPromise) return mermaidLoadPromise;
     mermaidLoadPromise = new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = 'mermaid.min.js?v=20261016_v302';
+      s.src = 'mermaid.min.js?v=20261016_v307';
+      s.async = true;
       s.defer = true;
       s.onload = () => {
         initMermaidEngine();
@@ -9286,7 +9287,7 @@ Aturan wajib:
 
       <div class="gemini-canvas-stage">
         <div class="gemini-canvas-preview-pane">
-          <iframe class="gemini-canvas-iframe" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"></iframe>
+          <iframe class="gemini-canvas-iframe" title="Pratinjau ${escapeHtml(docTitle || file.name || 'Website')}" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"></iframe>
         </div>
         <div class="gemini-canvas-code-pane" style="display: none;">
           <pre class="gemini-canvas-code"><code class="language-html"></code></pre>
@@ -9305,6 +9306,7 @@ Aturan wajib:
     // Setup iframe preview
     const iframe = card.querySelector('.gemini-canvas-iframe');
     if (iframe) {
+      iframe.setAttribute('title', `Pratinjau ${docTitle || file.name || 'Website'}`);
       iframe.srcdoc = safeHtml;
     }
 
@@ -9505,7 +9507,7 @@ Aturan wajib:
         els.aiFileStudioFrame.removeAttribute('src');
         const cleanMermaid = getCleanMermaidCode(rawContent);
         const tempId = 'aiStudioMermaid_' + Math.random().toString(36).substr(2, 6);
-        if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
+        const renderMermaidPreview = () => {
           try {
             initMermaidEngine();
             window.mermaid.render(tempId, cleanMermaid).then(res => {
@@ -9540,12 +9542,18 @@ Aturan wajib:
               </div>
             `);
           }
+        };
+
+        if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
+          renderMermaidPreview();
         } else {
-          els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, `
-            <div style="color:#f87171; padding:16px; text-align:center;">
-              ⚠️ Mesin visualisasi Mermaid belum termuat. Silakan lihat tab Kode.
-            </div>
-          `);
+          ensureMermaidLoaded().then(renderMermaidPreview).catch(err => {
+            els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, `
+              <div style="color:#f87171; padding:16px; text-align:center;">
+                ⚠️ Gagal memuat pustaka visualisasi Mermaid: ${escapeHtml(err?.message || 'Network error')}. Silakan lihat tab Kode.
+              </div>
+            `);
+          });
         }
       } else if (isPureSvg) {
         els.aiFileStudioFrame.removeAttribute('src');
@@ -9605,6 +9613,11 @@ Aturan wajib:
     const rawMermaidCode = options.mermaidCode || null;
 
     // Render untainted SVG dengan htmlLabels: false jika kode mermaid tersedia (mencegah foreignObject tainted canvas)
+    if (rawMermaidCode) {
+      if (typeof window.mermaid === 'undefined' || typeof window.mermaid.render !== 'function') {
+        try { await ensureMermaidLoaded(); } catch (_) {}
+      }
+    }
     if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
       try {
         if (rawMermaidCode) {
@@ -28070,16 +28083,17 @@ Aturan:
   }
 
   async function initBackgroundTasks(isTabReload, savedActiveId) {
-    // A. Sync storage in background (IndexedDB & Device Disk Storage)
-    syncPersistedStorageBackground(isTabReload, savedActiveId).catch(err => {
-      console.warn('Background storage sync notice:', err);
-    });
-
-    // B. Non-blocking Network Health Checks (Scheduled via requestIdleCallback to maximize FCP & TTI)
-    checkOllamaHealth().catch(() => {});
-    checkOpenRouterStatus().catch(() => {});
-    const scheduleIdle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1500));
+    // Non-blocking deferred background tasks via requestIdleCallback to reduce Total Blocking Time (TBT) to 0ms
+    const scheduleIdle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1200));
     scheduleIdle(() => {
+      // A. Sync storage in background (IndexedDB & Device Disk Storage)
+      syncPersistedStorageBackground(isTabReload, savedActiveId).catch(err => {
+        console.warn('Background storage sync notice:', err);
+      });
+
+      // B. Non-blocking Network Health Checks
+      checkOllamaHealth().catch(() => {});
+      checkOpenRouterStatus().catch(() => {});
       fetchOpenRouterModelsList().catch(() => {});
       fetchOllamaCloudUsage().catch(() => {});
     });
