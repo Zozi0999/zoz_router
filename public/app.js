@@ -3426,25 +3426,57 @@ RESONANSI: ${this.currentVibe}
     return { reasoning: rawText.slice(open + 7, close), content: content.trim(), isThinking: false };
   }
 
+  function cleanWebExtractedContent(text) {
+    if (!text || typeof text !== 'string') return '';
+    return text
+      .replace(/\{\{[\s\S]*?\}\}/g, ' ')
+      .replace(/<ref\b[\s\S]*?<\/ref>/gi, ' ')
+      .replace(/<ref\b[^>]*\/>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/^={2,6}\s*(?:Rujukan|Pranala luar|Referensi|Daftar pustaka|Catatan kaki|Lihat pula|References|External links|See also)[\s\S]*$/gmi, '')
+      .replace(/^={2,6}\s*(.+?)\s*={2,6}$/gm, '### $1')
+      .replace(/\[\[(?:Berkas|File|Kategori|Category):[^\]]+\]\]/gi, ' ')
+      .replace(/\[\[(?:[^|\]]+\|)?([^\]]+)\]\]/g, '$1')
+      .replace(/\{\s*"[a-zA-Z0-9_-]+"\s*:\s*[\s\S]*?\}/g, ' ')
+      .replace(/^KONTEN HALAMAN WEB[^\n]*\n+/gmi, '')
+      .replace(/^\[HASIL PENGUMPULAN DATA OTONOM[^\n]*\n+/gmi, '')
+      .replace(/^HASIL PENCARIAN WEB MULTI-SUMBER[^\n]*\n+/gmi, '')
+      .replace(/^Ditemukan \d+ sumber informasi[^\n]*\n+/gmi, '')
+      .replace(/^\[\d+\]\s*\[[^\]]+\]\s*(.+)$/gm, '$1')
+      .replace(/^URL:\s*https?:\/\/[^\n]+/gmi, '')
+      .replace(/^Sumber\/Domain:[^\n]+/gmi, '')
+      .replace(/^Ringkasan:\s*/gmi, '')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n\s*\n\s*\n+/g, '\n\n')
+      .trim();
+  }
+
   function synthesizeAutonomousWebSummary(rawToolResponsesText, sources) {
-    if (!rawToolResponsesText && (!sources || sources.length === 0)) {
-      return 'Penelusuran data web telah selesai dilaksanakan.';
+    const cleanRaw = cleanWebExtractedContent(rawToolResponsesText || '');
+    const validSentences = [];
+    const rawParagraphs = cleanRaw.split('\n');
+    for (const para of rawParagraphs) {
+      const trimmed = para.trim();
+      if (!trimmed || trimmed.length < 30) continue;
+      if (/^[\[\{\<\#\*\-\_\=\+\@]/.test(trimmed)) continue;
+      if (/^(?:URL|Title|Judul|KONTEN|HASIL|Sumber|Source|Domain|Tautan|Error|Warning|Page)\b/i.test(trimmed)) continue;
+      if (trimmed.includes('{{') || trimmed.includes('}}') || trimmed.includes('{ "') || trimmed.includes('": "')) continue;
+      if (/https?:\/\//i.test(trimmed)) continue;
+      validSentences.push(trimmed);
+      if (validSentences.length >= 3) break;
     }
-    const lines = (rawToolResponsesText || '').split('\n')
-      .map(l => l.trim())
-      .filter(l => l && !l.startsWith('[HASIL PENGUMPULAN') && !l.startsWith('Sumber:'));
-    
-    const summaryPoints = lines.slice(0, 8);
-    let summary = '### 🌐 Ringkasan Hasil Penelusuran Web Terkini\n\n';
-    if (summaryPoints.length > 0) {
-      summary += summaryPoints.map(p => `- ${p}`).join('\n') + '\n\n';
-    } else {
-      summary += 'Informasi dan fakta terkait topik berhasil dikumpulkan secara langsung dari web.\n\n';
+
+    if (validSentences.length > 0) {
+      return validSentences.join('\n\n');
     }
+
     if (sources && sources.length > 0) {
-      summary += `*Tersedia ${sources.length} tautan sumber referensi di bawah yang dapat Anda telusuri.*`;
+      const topSource = sources[0];
+      const title = topSource.title || 'sumber terverifikasi';
+      return `Informasi telah berhasil dikumpulkan dari ${title}. Silakan tinjau rincian sumber pada tautan referensi di bawah.`;
     }
-    return summary.trim();
+
+    return 'Informasi terkait telah berhasil ditelusuri. Rincian referensi dapat dilihat pada daftar sumber di bawah.';
   }
 
   function fastSanitizeHtml(dirtyHtml) {
@@ -3656,7 +3688,7 @@ RESONANSI: ${this.currentVibe}
     if (mermaidLoadPromise) return mermaidLoadPromise;
     mermaidLoadPromise = new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = 'mermaid.min.js?v=20261016_v307';
+      s.src = 'mermaid.min.js?v=20261016_v308';
       s.async = true;
       s.defer = true;
       s.onload = () => {
@@ -14366,9 +14398,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
                 const extData = await extRes.json();
                 if (extData && extData.success && extData.content && extData.content.length > 40) {
                   const docTitle = extData.title || (extractDomainSafe ? extractDomainSafe(url) : 'Halaman Web');
+                  const cleanContent = cleanWebExtractedContent(extData.content).substring(0, 3500);
                   return cacheAndReturn({
-                    text: `KONTEN HALAMAN WEB "${docTitle}" (${url}):\n\n${extData.content}`,
-                    sources: [{ title: docTitle, url: url, domain: extData.domain || 'web', snippet: extData.content.substring(0, 160) }],
+                    text: `[INFORMASI DARI ${docTitle} (${url})]:\n${cleanContent}`,
+                    sources: [{ title: docTitle, url: url, domain: extData.domain || 'web', snippet: cleanContent.substring(0, 160) }],
                     videoIds: Array.isArray(extData.videoIds) ? extData.videoIds : extractYouTubeVideoIdsClient(url),
                     success: true
                   });
@@ -14386,8 +14419,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             if (res.ok) {
               const data = await res.json();
               if (data && data.text && data.text.length > 50) {
-                let output = `KONTEN HALAMAN WEB "${data.title || url}" (${url}):\n\n`;
-                output += data.text || '(Konten teks bersih tidak ditemukan)';
+                const cleanContent = cleanWebExtractedContent(data.text || '').substring(0, 3500);
+                let output = `[INFORMASI DARI ${data.title || url} (${url})]:\n\n` + (cleanContent || '(Konten bersih tidak ditemukan)');
                 if (Array.isArray(data.links) && data.links.length > 0) {
                   output += '\n\nTautan Terkait Di Halaman:\n';
                   data.links.slice(0, 5).forEach(l => {
@@ -14397,7 +14430,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
                 const foundDomain = extractDomainSafe ? extractDomainSafe(url) : 'web';
                 return cacheAndReturn({
                   text: output,
-                  sources: [{ title: data.title || url, url: url, domain: foundDomain, snippet: (data.text || '').substring(0, 160) }],
+                  sources: [{ title: data.title || url, url: url, domain: foundDomain, snippet: cleanContent.substring(0, 160) }],
                   videoIds: Array.isArray(data.videoIds) ? data.videoIds : extractYouTubeVideoIdsClient(url),
                   success: true
                 });
@@ -14415,12 +14448,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           if (jinaRes.ok) {
             const markdown = await jinaRes.text();
             if (markdown && markdown.length > 80) {
-              const cleanMarkdown = markdown.substring(0, 5000);
+              const cleanContent = cleanWebExtractedContent(markdown).substring(0, 3500);
               const titleMatch = markdown.match(/^Title:\s*(.+)$/m) || markdown.match(/^#\s+(.+)$/m);
               const docTitle = titleMatch ? titleMatch[1].trim() : (extractDomainSafe ? extractDomainSafe(url) : 'Halaman Web');
               return cacheAndReturn({
-                text: `KONTEN HALAMAN WEB "${docTitle}" (${url}):\n\n${cleanMarkdown}`,
-                sources: [{ title: docTitle, url: url, domain: extractDomainSafe ? extractDomainSafe(url) : 'web', snippet: cleanMarkdown.substring(0, 160) }],
+                text: `[INFORMASI DARI ${docTitle} (${url})]:\n\n${cleanContent}`,
+                sources: [{ title: docTitle, url: url, domain: extractDomainSafe ? extractDomainSafe(url) : 'web', snippet: cleanContent.substring(0, 160) }],
                 videoIds: extractYouTubeVideoIdsClient(url),
                 success: true
               });
@@ -14440,10 +14473,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
               const wikiRes = await fetch(restApiUrl, { signal: makeToolSignal(6000) });
               if (wikiRes.ok) {
                 const wData = await wikiRes.json();
-                const extract = wData.extract || wData.description || 'Halaman Wikipedia';
+                const cleanExtract = cleanWebExtractedContent(wData.extract || wData.description || 'Halaman Wikipedia').substring(0, 3500);
                 return cacheAndReturn({
-                  text: `KONTEN ARTIKEL WIKIPEDIA "${wData.title || pageTitle}" (${url}):\n\n${extract}`,
-                  sources: [{ title: wData.title || pageTitle, url: url, domain: `${lang}.wikipedia.org`, snippet: extract.substring(0, 160) }],
+                  text: `[INFORMASI DARI ${wData.title || pageTitle} (${url})]:\n\n${cleanExtract}`,
+                  sources: [{ title: wData.title || pageTitle, url: url, domain: `${lang}.wikipedia.org`, snippet: cleanExtract.substring(0, 160) }],
                   success: true
                 });
               }
@@ -15017,72 +15050,12 @@ Format teks (untuk model tanpa function calling):
   }
 
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
-    const norm = normalizeToolName(toolName);
-    const isYouTube = norm === 'search_youtube';
-    const isBrowse = norm === 'browse_web_page' || norm === 'extract_web';
-    const isSaveMem = norm === 'save_memory';
-    const isSearchMem = norm === 'search_memory';
-    const isCode = norm === 'execute_python_code';
-
-    // iconClass sudah memuat prefiks family-nya (fa-solid / fa-brands) agar tidak
-    // bentrok dengan aturan font-family bila digabung dengan fa-solid.
-    let iconClass = status === 'loading' ? 'fa-solid fa-magnifying-glass fa-spin' : 'fa-solid fa-circle-check';
-    let title = 'PENCARIAN WEB LIVE (ZERO-API)';
-
-    if (isYouTube) {
-      title = 'PENCARIAN VIDEO YOUTUBE LIVE';
-      iconClass = status === 'loading' ? 'fa-brands fa-youtube fa-spin' : 'fa-brands fa-youtube';
-    } else if (isBrowse) {
-      title = (norm === 'extract_web' || toolName === 'read_url') ? 'EKSTRAKSI KONTEN WEB' : 'PENJELAJAHAN HALAMAN WEB';
-      iconClass = status === 'loading' ? 'fa-solid fa-compass fa-spin' : 'fa-solid fa-circle-check';
-    } else if (isSaveMem) {
-      title = 'PENYIMPANAN MEMORI JANGKA PANJANG (SQLITE FTS5)';
-      iconClass = status === 'loading' ? 'fa-solid fa-floppy-disk fa-spin' : 'fa-solid fa-floppy-disk';
-    } else if (isSearchMem) {
-      title = 'PENCARIAN MEMORI JANGKA PANJANG (SQLITE FTS5)';
-      iconClass = status === 'loading' ? 'fa-solid fa-brain fa-spin' : 'fa-solid fa-brain';
-    } else if (isCode) {
-      title = 'EKSEKUSI PYTHON SANDBOX (SUBPROCESS)';
-      iconClass = status === 'loading' ? 'fa-brands fa-python fa-spin' : 'fa-brands fa-python';
-    }
-
-    let actionText = '';
-    let subText = '';
-
-    if (isYouTube) {
-      actionText = status === 'loading' ? `Mencari video: "${escapeHtml(targetText)}"` : `Video ditemukan: "${escapeHtml(targetText)}"`;
-      subText = status === 'loading' ? 'Menelusuri katalog video YouTube secara langsung...' : 'Daftar video siap diputar langsung di percakapan...';
-    } else if (isBrowse) {
-      actionText = status === 'loading' ? `Mengekstrak URL: "${escapeHtml(targetText)}"` : `Halaman selesai diekstrak: "${escapeHtml(targetText)}"`;
-      subText = status === 'loading' ? 'Mengekstrak teks & konten halaman secara langsung...' : 'Konten halaman diserap & disintesis oleh AI...';
-    } else if (isSaveMem) {
-      actionText = status === 'loading' ? `Menyimpan memori: "${escapeHtml(targetText)}"` : `Memori tersimpan: "${escapeHtml(targetText)}"`;
-      subText = status === 'loading' ? 'Merekam fakta ke database lokal SQLite FTS5...' : 'Fakta tersimpan permanen di memori lokal...';
-    } else if (isSearchMem) {
-      actionText = status === 'loading' ? `Mencari memori: "${escapeHtml(targetText)}"` : `Pencarian memori selesai: "${escapeHtml(targetText)}"`;
-      subText = status === 'loading' ? 'Memindai riwayat memori lokal SQLite...' : 'Catatan masa lalu siap dicerna oleh AI...';
-    } else if (isCode) {
-      actionText = status === 'loading' ? `Menjalankan kode Python: "${escapeHtml(targetText)}"` : `Eksekusi kode selesai: "${escapeHtml(targetText)}"`;
-      subText = status === 'loading' ? 'Menjalankan kalkulasi di sandbox subprocess lokal...' : 'Hasil keluaran terminal siap disintesis oleh AI...';
-    } else {
-      actionText = status === 'loading' ? `Mencari web: "${escapeHtml(targetText)}"` : `Pencarian selesai: "${escapeHtml(targetText)}"`;
-      subText = status === 'loading' ? 'Mengumpulkan berita live & multi-sumber terkini...' : 'Data berita aktual diserap & disintesis oleh AI...';
-    }
-
+    if (status === 'done') return '';
     return `
-      <div class="autonomous-tool-hud${status === 'done' ? ' done' : ''}">
-        <div class="autonomous-tool-icon-wrap">
-          <i class="${iconClass}"></i>
-        </div>
-        <div class="autonomous-tool-content">
-          <div class="autonomous-tool-title">
-            <span>${title}</span>
-            <span style="font-size:0.75rem; font-weight:normal; opacity:0.8;">[${escapeHtml(toolName)}]</span>
-          </div>
-          <div class="autonomous-tool-subtext">
-            <strong>${actionText}</strong> &mdash; ${subText}
-          </div>
-        </div>
+      <div class="autonomous-search-status">
+        <span class="typing-cursor"></span>
+        <i class="fa-solid fa-compass fa-spin"></i>
+        <span>Membaca dan menelusuri data web terkini...</span>
       </div>
     `;
   }
@@ -15959,8 +15932,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
         toolTaskItems.forEach(item => toolSummaryList.push(item.summary));
 
-        // Tampilkan visual status loading untuk seluruh tool secara simultan
-        bubbleText.innerHTML = preambleHtml + executedHudHtml + toolTaskItems.map(item => createAutonomousToolHudHtml(item.toolName, item.previewArg, 'loading')).join('');
+        // Tampilkan status visual proses pencarian latar belakang secara bersih tanpa metadata teknis
+        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Membaca dan menelusuri data web terkini...</span></div>`;
         smartScrollChatToBottom(true);
 
         // Eksekusi seluruh tool secara paralel (Promise.all) untuk memangkas latensi jaringan
@@ -15972,7 +15945,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         );
 
         for (const resItem of toolExecResults) {
-          const { toolName, previewArg, toolExecRes } = resItem;
+          const { toolName, toolExecRes } = resItem;
           if (toolExecRes.sources && Array.isArray(toolExecRes.sources)) {
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
@@ -15982,8 +15955,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
             });
           }
-          roundToolResponsesText += `\n[HASIL PENGUMPULAN DATA OTONOM (${toolName})]:\n${toolExecRes.text}\n`;
-          executedHudHtml += createAutonomousToolHudHtml(toolName, previewArg, 'done');
+          const cleanText = cleanWebExtractedContent(toolExecRes.text);
+          roundToolResponsesText += `\n[Fakta internal dari ${toolName}]:\n${cleanText}\n`;
         }
         allAccumulatedToolResponsesText += roundToolResponsesText;
 
@@ -15993,8 +15966,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           throw abortErr;
         }
 
-        // Tampilkan HUD bahwa data berita live sedang disintesis oleh AI
-        bubbleText.innerHTML = preambleHtml + executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);"><i class="fa-solid fa-bolt"></i> Menyintesis hasil dan data otonom terbaru...</span></div>`;
+        // Tampilkan status sintesis bersih di latar belakang
+        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyintesis jawaban akhir...</span></div>`;
         smartScrollChatToBottom(true);
 
         if (cleanAssistant) {
@@ -16021,20 +15994,23 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         // CIRCUIT BREAKER: Jika seluruh tool gagal dalam 2 putaran berturut-turut,
         // putuskan siklus dan paksa sintesis jawaban akhir untuk mencegah pemborosan token / looping tanpa henti.
         const circuitBreakerTripped = consecutiveFailedRounds >= 2;
-        const isLastRound = circuitBreakerTripped || (autonomousRound >= maxAutonomousRounds - 1);
+        const hasBrowsedWeb = detectedAutonomousCalls.some(c => c && c.function && ['browse_web_page', 'browse_web', 'extract_web', 'read_url'].includes(c.function.name));
+        const isLastRound = circuitBreakerTripped || hasBrowsedWeb || (autonomousRound >= maxAutonomousRounds - 1);
         const roundInstruction = isLastRound
-          ? `[INFORMASI / DATA OTONOM TELAH TERSEDIA]:
-${circuitBreakerTripped ? 'PERINGATAN SISTEM (CIRCUIT BREAKER AKTIF): Pemanggilan tool berturut-turut mengalami kegagalan akses (kemungkinan kendala jaringan/lingkungan). JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : 'Gunakan seluruh data hasil di atas untuk menjawab pertanyaan pengguna secara komprehensif, jelas, faktual, dan akurat.'}
+          ? `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
+${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : 'Gunakan seluruh fakta di atas untuk langsung menjawab pertanyaan pengguna secara komprehensif, jelas, faktual, dan akurat dalam bahasa yang natural.'}
 Jika hasilnya berupa video YouTube: jelaskan dan rekomendasikan video yang paling relevan (judul, channel, durasi, tayangan), lalu WAJIB sisipkan tautan video pilihan Anda dengan format markdown [Judul Video](https://www.youtube.com/watch?v=ID) agar kartu video dapat ditampilkan dan diputar langsung di dalam percakapan.
-Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi robotik, dan tanpa format pemanggilan tool lagi.`
-          : `[INFORMASI / DATA OTONOM TELAH TERSEDIA]:
-Data hasil eksekusi tool di atas telah disediakan untuk Anda.
-Jika informasi sudah cukup lengkap, berikan jawaban akhir secara langsung dan tuntas kepada pengguna.
+PETUNJUK PENTING:
+- Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi robotik, dan tanpa format pemanggilan tool lagi.
+- JANGAN mencetak log teknis, jangan menampilkan data ekstraksi mentah atau format JSON/scraping. Berikan langsung hasil analisis dan jawaban akhir.`
+          : `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
+Data hasil eksekusi di atas telah disediakan secara internal.
+Jika informasi sudah cukup lengkap, berikan jawaban akhir secara langsung dan tuntas kepada pengguna tanpa menampilkan langkah ekstraksi atau data mentah.
 Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artikel lengkap dengan browse_web_page dari URL hasil pencarian, mencari memori tambahan, atau mengeksekusi kalkulasi kode Python), Anda dapat memanggil tool berikutnya yang relevan.`;
 
         conversationChain.push({
           role: 'user',
-          content: `[DATA HASIL EKSEKUSI TOOL OTONOM]:\n${roundToolResponsesText}\n\n${roundInstruction}`
+          content: `[DATA HASIL PENELUSURAN INTERNAL]:\n${cleanWebExtractedContent(roundToolResponsesText).substring(0, 8000)}\n\n${roundInstruction}`
         });
 
         const digestionBody = {
@@ -16044,7 +16020,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           options: requestBody.options,
           endpoint: ep
         };
-        if (!isLastRound && selectedOllamaTools && selectedOllamaTools.length > 0) {
+        if (!isLastRound && !hasBrowsedWeb && selectedOllamaTools && selectedOllamaTools.length > 0) {
           digestionBody.tools = selectedOllamaTools;
         }
         if (session?.id) digestionBody.sessionId = session.id;
@@ -16081,7 +16057,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           let digestionBuffer = '';
           const digestionContentBox = document.createElement('div');
           digestionContentBox.className = 'autonomous-digested-output';
-          bubbleText.innerHTML = preambleHtml + executedHudHtml;
+          bubbleText.innerHTML = (preambleHtml ? preambleHtml : '');
           bubbleText.appendChild(digestionContentBox);
 
           const digestionRenderer = new StreamBufferRenderer(digestionContentBox, () => smartScrollChatToBottom(false));
@@ -16322,7 +16298,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
       const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
 
-      const finalRenderedContent = (preambleHtml ? preambleHtml : '') + (executedHudHtml ? executedHudHtml + renderMarkdown(fullText) : renderMarkdown(fullText)).trim();
+      const finalRenderedContent = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
       bubbleText.innerHTML = finalRenderedContent.trim();
       enhanceCodeBlocks(bubbleText);
       enhanceChatImages(bubbleText);
@@ -17406,8 +17382,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
         toolTaskItems.forEach(item => toolSummaryList.push(item.summary));
 
-        // Tampilkan visual status loading untuk seluruh tool secara simultan
-        bubbleText.innerHTML = preambleHtml + executedHudHtml + toolTaskItems.map(item => createAutonomousToolHudHtml(item.toolName, item.previewArg, 'loading')).join('');
+        // Tampilkan status visual proses pencarian latar belakang secara bersih tanpa metadata teknis
+        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Membaca dan menelusuri data web terkini...</span></div>`;
         smartScrollChatToBottom(true);
 
         // Eksekusi seluruh tool secara paralel (Promise.all) untuk memangkas latensi jaringan
@@ -17419,7 +17395,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         );
 
         for (const resItem of toolExecResults) {
-          const { toolName, previewArg, toolExecRes } = resItem;
+          const { toolName, toolExecRes } = resItem;
           if (toolExecRes.sources && Array.isArray(toolExecRes.sources)) {
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
@@ -17429,8 +17405,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
             });
           }
-          roundToolResponsesText += `\n[HASIL PENGUMPULAN DATA OTONOM (${toolName})]:\n${toolExecRes.text}\n`;
-          executedHudHtml += createAutonomousToolHudHtml(toolName, previewArg, 'done');
+          const cleanText = cleanWebExtractedContent(toolExecRes.text);
+          roundToolResponsesText += `\n[Fakta internal dari ${toolName}]:\n${cleanText}\n`;
         }
         allAccumulatedToolResponsesText += roundToolResponsesText;
 
@@ -17440,8 +17416,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           throw abortErr;
         }
 
-        // Tampilkan HUD bahwa data berita live sedang disintesis oleh AI
-        bubbleText.innerHTML = preambleHtml + executedHudHtml + `<div class="autonomous-digesting-box" style="margin-top:8px;"><span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.85; font-style:italic; color:var(--neon-teal);"><i class="fa-solid fa-bolt"></i> Menyintesis hasil dan data otonom terbaru...</span></div>`;
+        // Tampilkan status sintesis bersih di latar belakang
+        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyintesis jawaban akhir...</span></div>`;
         smartScrollChatToBottom(true);
 
         if (cleanAssistant) {
@@ -17468,20 +17444,23 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         // CIRCUIT BREAKER: Jika seluruh tool gagal dalam 2 putaran berturut-turut,
         // putuskan siklus dan paksa sintesis jawaban akhir untuk mencegah pemborosan token / looping tanpa henti.
         const circuitBreakerTripped = consecutiveFailedRounds >= 2;
-        const isLastRound = circuitBreakerTripped || (autonomousRound >= maxAutonomousRounds - 1);
+        const hasBrowsedWeb = detectedAutonomousCalls.some(c => c && c.function && ['browse_web_page', 'browse_web', 'extract_web', 'read_url'].includes(c.function.name));
+        const isLastRound = circuitBreakerTripped || hasBrowsedWeb || (autonomousRound >= maxAutonomousRounds - 1);
         const roundInstruction = isLastRound
-          ? `[INFORMASI / DATA OTONOM TELAH TERSEDIA]:
-${circuitBreakerTripped ? 'PERINGATAN SISTEM (CIRCUIT BREAKER AKTIF): Pemanggilan tool berturut-turut mengalami kegagalan akses (kemungkinan kendala jaringan/lingkungan). JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : 'Gunakan seluruh data hasil di atas untuk menjawab pertanyaan pengguna secara komprehensif, jelas, faktual, dan akurat.'}
+          ? `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
+${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : 'Gunakan seluruh fakta di atas untuk langsung menjawab pertanyaan pengguna secara komprehensif, jelas, faktual, dan akurat dalam bahasa yang natural.'}
 Jika hasilnya berupa video YouTube: jelaskan dan rekomendasikan video yang paling relevan (judul, channel, durasi, tayangan), lalu WAJIB sisipkan tautan video pilihan Anda dengan format markdown [Judul Video](https://www.youtube.com/watch?v=ID) agar kartu video dapat ditampilkan dan diputar langsung di dalam percakapan.
-Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi robotik, dan tanpa format pemanggilan tool lagi.`
-          : `[INFORMASI / DATA OTONOM TELAH TERSEDIA]:
-Data hasil eksekusi tool di atas telah disediakan untuk Anda.
-Jika informasi sudah cukup lengkap, berikan jawaban akhir secara langsung dan tuntas kepada pengguna.
+PETUNJUK PENTING:
+- Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi robotik, dan tanpa format pemanggilan tool lagi.
+- JANGAN mencetak log teknis, jangan menampilkan data ekstraksi mentah atau format JSON/scraping. Berikan langsung hasil analisis dan jawaban akhir.`
+          : `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
+Data hasil eksekusi di atas telah disediakan secara internal.
+Jika informasi sudah cukup lengkap, berikan jawaban akhir secara langsung dan tuntas kepada pengguna tanpa menampilkan langkah ekstraksi atau data mentah.
 Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artikel lengkap dengan browse_web_page dari URL hasil pencarian, mencari memori tambahan, atau mengeksekusi kalkulasi kode Python), Anda dapat memanggil tool berikutnya yang relevan.`;
 
         conversationChain.push({
           role: 'user',
-          content: `[DATA HASIL EKSEKUSI TOOL OTONOM]:\n${roundToolResponsesText}\n\n${roundInstruction}`
+          content: `[DATA HASIL PENELUSURAN INTERNAL]:\n${cleanWebExtractedContent(roundToolResponsesText).substring(0, 8000)}\n\n${roundInstruction}`
         });
 
         // Jalankan panggilan streaming ke model untuk putaran berikutnya
@@ -17504,7 +17483,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           activeDigestionModel === 'openrouter/free' ||
           (STATE.openRouterModels || []).some(m => m.id === activeDigestionModel && (m.cat === 'free' || m.tag === 'Free'))
         );
-        if (!isLastRound && !isDigestionFree && canDigestionUseTools && STATE.settings.openRouterKey && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
+        if (!isLastRound && !hasBrowsedWeb && !isDigestionFree && canDigestionUseTools && STATE.settings.openRouterKey && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
           const validFunctionTools = selectedAutonomousTools.filter(t => t && t.type === 'function' && t.function && t.function.name);
           if (validFunctionTools.length > 0) {
             digestionRequestBody.tools = validFunctionTools;
@@ -17582,7 +17561,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           let digestionBuffer = '';
           const digestionContentBox = document.createElement('div');
           digestionContentBox.className = 'autonomous-digested-output';
-          bubbleText.innerHTML = preambleHtml + executedHudHtml;
+          bubbleText.innerHTML = (preambleHtml ? preambleHtml : '');
           bubbleText.appendChild(digestionContentBox);
 
           const digestionRenderer = new StreamBufferRenderer(digestionContentBox, () => smartScrollChatToBottom(false));
@@ -17885,7 +17864,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         `;
       }
 
-      const finalRenderedContent = (preambleHtml ? preambleHtml : '') + (executedHudHtml ? executedHudHtml + renderedMarkdown + imagesHtml : renderedMarkdown + imagesHtml);
+      const finalRenderedContent = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderedMarkdown + imagesHtml;
       bubbleText.innerHTML = finalRenderedContent.trim();
       enhanceCodeBlocks(bubbleText);
       enhanceChatImages(bubbleText);
