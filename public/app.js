@@ -9291,6 +9291,7 @@ Aturan wajib:
     if (els.aiFileStudioTitle) {
       els.aiFileStudioTitle.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(docTitle)}`;
     }
+    closeStudioAssistantDrawer();
 
     const previewable = isPreviewableDoc(file);
     const ext = (file.name || '').split('.').pop().toLowerCase();
@@ -11188,6 +11189,26 @@ ${blocks}
     return bubble;
   }
 
+  function isCodeRevisionRequest(text) {
+    if (!text || typeof text !== 'string') return false;
+    const t = text.trim().toLowerCase();
+
+    // 1. Pujian murni, apresiasi, sapaan, atau ungkapan santai
+    const pureChatRegex = /^(?:bagus|bagus\s+banget|bagus\s+sekali|mantap|mantap\s+banget|mantul|keren|keren\s+banget|hebat|luar\s+biasa|suka|suka\s+banget|cantik|rapi|jos|top|good|very\s+good|great|nice|cool|awesome|amazing|perfect|sip|oke|ok|baik|makasih|terima\s+kasih|thanks|thank\s+you|thx|halo|hai|p|hi|hello|wah|asik|siap|yup|ya|yes|wkwk|haha)(?:[\s!.,:;~]*)$/i;
+    if (pureChatRegex.test(t)) return false;
+
+    // 2. Pertanyaan penjelasan / analisis murni tanpa instruksi perubahan
+    const pureQuestionRegex = /^(?:kenapa|mengapa|apa|apakah|bagaimana|gimana|siapa|font\s+apa|warna\s+apa|library\s+apa|bisa\s+jelaskan|tolong\s+jelaskan|jelaskan|terangkan|tanya)\b/i;
+    const changeVerbsRegex = /\b(?:ubah|ganti|tambah|tambahkan|masukkan|sisipkan|hapus|hilangkan|buang|perbaiki|benahi|bikin|buatkan|modifikasi|revisi|update|edit|pasang|atur|bikin\s+jadi|ubah\s+jadi|ganti\s+warna|change|add|remove|fix|modify|revise|update|redesign|replace)\b/i;
+
+    if (pureQuestionRegex.test(t) && !changeVerbsRegex.test(t)) {
+      return false;
+    }
+
+    // 3. Jika pengguna secara eksplisit meminta perubahan atau aksi modifikasi
+    return changeVerbsRegex.test(t);
+  }
+
   async function submitStudioFollowupPrompt() {
     const val = els.inputStudioFollowup?.value?.trim();
     if (!val || !activeAIFile) return;
@@ -11206,7 +11227,7 @@ ${blocks}
     els.inputStudioFollowup.value = '';
     autoResizeTextarea(els.inputStudioFollowup);
 
-    // Buka panel drawer asisten di sisi studio
+    // Buka panel floating asisten di sisi kiri studio jika belum terbuka
     openStudioAssistantDrawer();
 
     // Tampilkan pesan pengguna di riwayat drawer studio
@@ -11219,15 +11240,22 @@ ${blocks}
     if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'none';
     if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'inline-flex';
 
-    // Rangkai prompt cerdas dengan konteks berkas aktif
-    const followupPrompt = `[Konteks Berkas Aktif: "${targetName}" (${lang})]\n\`\`\`${lang}\n${currentCode}\n\`\`\`\n\nPermintaan Pengguna: ${val}\n\nInstruksi untuk AI:\n1. Jika permintaan pengguna meminta perubahan, perbaikan, penambahan fitur, atau modifikasi pada website/berkas ini, berikan penjelasan singkat lalu cantumkan seluruh kode lengkap yang telah diperbarui di dalam blok:\n<<<ZOZ_FILE name="${targetName}" lang="${lang}">>>\n... seluruh kode lengkap ...\n<<<END_ZOZ_FILE>>>\n2. Jika pengguna hanya bertanya atau meminta penjelasan tentang website/kode ini, jelaskan secara mendalam, akurat, dan jelas.`;
+    // Cek apakah pengguna mengarahkan revisi kode secara spesifik atau sekadar chat/pujian/pertanyaan
+    const wantsRevision = isCodeRevisionRequest(val);
+
+    let followupPrompt = '';
+    if (wantsRevision) {
+      followupPrompt = `[Konteks Berkas Aktif: "${targetName}" (${lang})]\n\`\`\`${lang}\n${currentCode}\n\`\`\`\n\nInstruksi Perubahan dari Pengguna: ${val}\n\nInstruksi Khusus untuk AI:\nPengguna secara spesifik meminta revisi atau modifikasi pada website ini.\n1. Berikan penjelasan singkat tentang perubahan yang Anda lakukan.\n2. Cantumkan SELURUH KODE LENGKAP YANG TELAH DIPERBARUI (termasuk HTML, CSS, dan JavaScript) di dalam blok:\n<<<ZOZ_FILE name="${targetName}" lang="${lang}">>>\n... seluruh kode lengkap ...\n<<<END_ZOZ_FILE>>>`;
+    } else {
+      followupPrompt = `[Konteks: Pengguna sedang melihat pratinjau website "${targetName}"]\nPermintaan / Obrolan Pengguna: "${val}"\n\nATURAN SANGAT KETAT UNTUK AI:\n- Pengguna TIDAK meminta perubahan kode. Pengguna hanya sedang mengobrol santai, memuji, berkomentar, atau bertanya tentang website ini.\n- JANGAN PERNAH merombak, merevisi, atau membuat ulang kode website!\n- DILARANG KERAS mengeluarkan blok kode atau blok <<<ZOZ_FILE!\n- Jawablah secara ramah, santun, dan ringkas dalam teks biasa. Jika pengguna memuji ("bagus", "good", dsb.), ucapkan terima kasih dengan hangat dan tanyakan apakah ada bagian website yang ingin diubah. Jika pengguna bertanya, jelaskan dengan jelas tanpa mengubah kode apa pun.`;
+    }
 
     // Kirim langsung ke handleSendPrompt TANPA menutup modal studio!
     handleSendPrompt({
       overrideText: followupPrompt,
       displayPrompt: val,
-      websiteMode: 'preview',
-      isWebCreation: true,
+      websiteMode: wantsRevision ? 'preview' : null,
+      isWebCreation: wantsRevision,
       skipWebsiteCheck: true,
       skipDocCheck: true
     });
@@ -26332,6 +26360,17 @@ Aturan:
         els.modelDropdownMenu?.classList.remove('show');
 
         if (ImageLightbox.isOpen()) {
+          return;
+        }
+
+        // Exit studio fullscreen on Escape if active
+        const studioCard = els.aiFileStudioModal?.querySelector('.ai-file-studio-card');
+        if (studioCard && studioCard.classList.contains('is-fullscreen')) {
+          studioCard.classList.remove('is-fullscreen');
+          if (els.btnToggleStudioFullscreen) {
+            els.btnToggleStudioFullscreen.innerHTML = '<i class="fa-solid fa-expand"></i>';
+            els.btnToggleStudioFullscreen.title = 'Layar Penuh (Full Screen)';
+          }
           return;
         }
 

@@ -23,7 +23,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261015_v297">
+  <link rel="stylesheet" href="style.css?v=20261015_v298">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -1554,8 +1554,8 @@
         </div>
 
         <div class="gemini-studio-header-right">
-          <button class="gemini-pill-btn studio-chat-toggle-btn active" id="btnToggleStudioAssistant" type="button" title="Buka/Tutup Asisten Tanya & Revisi">
-            <i class="fa-solid fa-comments"></i> <span>Tanya AI</span>
+          <button class="gemini-pill-btn studio-chat-toggle-btn" id="btnToggleStudioAssistant" type="button" title="Tanya AI tentang Website (Popup Melayang)">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Tanya AI</span>
           </button>
           <div class="studio-download-wrap gemini-dropdown-wrap" id="aiFileStudioDownloadWrap">
             <button class="gemini-pill-btn" id="aiFileStudioDownloadBtn" type="button" title="Ekspor atau unduh file ini">
@@ -1633,8 +1633,8 @@
           <pre class="ai-file-studio-code gemini-studio-code" id="aiFileStudioCode"></pre>
         </div>
 
-        <!-- Studio Assistant Drawer / Panel Tanya AI -->
-        <div class="studio-assistant-panel" id="studioAssistantPanel">
+        <!-- Studio Assistant Floating Popup on Left -->
+        <div class="studio-assistant-panel" id="studioAssistantPanel" style="display: none;">
           <div class="studio-assistant-header">
             <div class="studio-assistant-title">
               <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Asisten Zoz Router</span>
@@ -2294,6 +2294,6 @@
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
   <script src="text-safety.js?v=20261015_v279" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261015_v297" defer></script>
+  <script src="app.js?v=20261015_v298" defer></script>
 </body>
 </html>
