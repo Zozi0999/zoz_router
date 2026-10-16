@@ -7405,13 +7405,21 @@ async function requestHandler(req, res) {
       }
 
       // Defense-in-depth: Cegah konflik mutlak parameter model dan models pada OpenRouter
+      if (Array.isArray(body.models)) {
+        if (body.models.length > 3) {
+          body.models = body.models.slice(0, 3);
+        }
+      }
       if (body.model && body.models) {
         delete body.models;
       }
+      if (body.repetition_penalty !== undefined) {
+        delete body.repetition_penalty;
+      }
 
-      // Pastikan kuota token output memadai (32768) agar website dan dokumen panjang tidak terpotong separuh
+      // Pastikan kuota token output memadai (default normal chat ke 4096 agar tidak memicu HTTP 402/ResourceExhausted)
       if (!body.max_tokens && !body.max_completion_tokens) {
-        body.max_tokens = 32768;
+        body.max_tokens = 4096;
       }
 
       // Defense-in-depth: Hapus tool jika model gratis, atau filter tool agar hanya fungsi bertipe 'function'

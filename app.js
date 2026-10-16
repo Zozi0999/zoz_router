@@ -16526,20 +16526,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, effectiveInitialModel);
 
       // Siapkan pool kandidat model:
-      // - Jika pengguna memiliki API Key (kredit pengguna ada), sertakan fallback model cepat berkeandalan tinggi (HA)
-      // - Selalu sertakan fallback gratis terverifikasi agar saat model pilihan kehabisan kredit (HTTP 402)
-      //   atau mengalami gangguan upstream (404/429/502/503/ResourceExhausted), sistem dapat melakukan Smart Failover secara otomatis.
-      const smartFallbacks = hasClientKey
-        ? [...HIGH_AVAILABILITY_OPENROUTER_FALLBACKS, ...LIVE_FREE_OPENROUTER_FALLBACKS]
-        : [...LIVE_FREE_OPENROUTER_FALLBACKS];
-
-      const candidateModels = [
-        effectiveInitialModel,
-        ...smartFallbacks
-      ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(m) && !RUNTIME_EXHAUSTED_OPENROUTER_MODELS.has(m));
-
-      if (candidateModels.length === 0) {
-        candidateModels.push('openrouter/free');
+      // - Prioritaskan model pilihan pengguna secara penuh agar pengguna mendapatkan model yang dipilih.
+      // - JANGAN melompat antar model berkali-kali (redirection loop) yang membuat pengguna bingung/frustrasi.
+      // - Sediakan maksimal 1 cadangan darurat (smart backup) jika model utama mengalami 404/402/kematian total.
+      const candidateModels = [effectiveInitialModel];
+      const emergencyBackup = hasClientKey ? 'openrouter/auto' : 'openrouter/free';
+      if (effectiveInitialModel !== emergencyBackup && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(emergencyBackup)) {
+        candidateModels.push(emergencyBackup);
       }
 
       let lastErrDetail = '';
@@ -16569,13 +16562,15 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const isLiquid = Boolean(currentModel && (currentModel.includes('liquid') || currentModel.includes('lfm-')));
         const isReasoning = Boolean(currentModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r)\b/i.test(currentModel) || currentModel.toLowerCase().includes('reasoning') || currentModel.toLowerCase().includes('-r1')));
 
-        const configuredMaxTokens = parseInt(STATE.settings.maxTokens, 10) || 32768;
-        const effectiveMaxTokens = (wantsFile || isWebRequest || isDocRequest) ? Math.max(configuredMaxTokens, 32768) : Math.max(configuredMaxTokens, 16384);
+        const configuredMaxTokens = parseInt(STATE.settings.maxTokens, 10) || 4096;
+        const effectiveMaxTokens = (wantsFile || isWebRequest || isDocRequest) ? Math.min(configuredMaxTokens, 16384) : Math.min(configuredMaxTokens, 4096);
 
-        const fallbackSlice = candidateModels.slice(i + 1, i + 4);
+        // PAYLOAD BERSIH RESMI OPENROUTER:
+        // - Gunakan HANYA 'model: currentModel'.
+        // - JANGAN kirim array 'models: [...]' karena OpenRouter membatasi maksimal 3 item
+        //   dan dapat memicu HTTP 400 "'models' array must have 3 items or fewer." serta pergantian model tak terkontrol.
         const basePayload = {
           model: currentModel,
-          ...(fallbackSlice.length > 0 ? { models: [currentModel, ...fallbackSlice] } : {}),
           messages: currentMessagesPayload,
           stream: true,
           max_tokens: effectiveMaxTokens,
@@ -16591,7 +16586,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
         if (!isReasoning) {
           basePayload.temperature = parseFloat(STATE.settings.temperature) || 0.7;
-          basePayload.repetition_penalty = 1.05;
+          // CATATAN: DILARANG mengirim repetition_penalty di sini karena Google Gemini, OpenAI,
+          // dan model upstream tertentu akan menolaknya dengan HTTP 400.
         }
         if (!isLiquid && !isReasoning) {
           basePayload.top_p = parseFloat(STATE.settings.topP) || 0.9;
@@ -16664,10 +16660,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
           let ttftTimer = setTimeout(() => {
             if (tokenCount === 0) {
-              console.warn(`[OpenRouter TTFT Watchdog] Model ${currentModel} (${routeType}) tidak merespons dalam 25 detik (stalled). Membatalkan...`);
+              console.warn(`[OpenRouter TTFT Watchdog] Model ${currentModel} (${routeType}) tidak merespons dalam 45 detik (stalled). Membatalkan...`);
               try { attemptController.abort('TTFT_TIMEOUT'); } catch (_) {}
             }
-          }, 25000);
+          }, 45000);
 
           try {
             let attemptRes = await fetch(targetUrl, {
@@ -16680,6 +16676,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             // Resiliensi HTTP 400 & 404: Tangani penolakan tools, top_p, modalities, dsb.
             if (attemptRes.status === 400 || (attemptRes.status === 404 && targetBody.modalities)) {
               let shouldRetry = false;
+              if (targetBody.models) {
+                delete targetBody.models;
+                delete basePayload.models;
+                shouldRetry = true;
+              }
               if (targetBody.modalities) {
                 delete targetBody.modalities;
                 delete basePayload.modalities;
@@ -16702,12 +16703,23 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 delete basePayload.repetition_penalty;
                 shouldRetry = true;
               }
+              if (targetBody.max_completion_tokens) {
+                delete targetBody.max_completion_tokens;
+                delete basePayload.max_completion_tokens;
+                shouldRetry = true;
+              }
               if (targetBody.temperature && isReasoning) {
                 delete targetBody.temperature;
                 delete basePayload.temperature;
                 shouldRetry = true;
               }
+              if (targetBody.max_tokens && targetBody.max_tokens > 4096) {
+                targetBody.max_tokens = 4096;
+                basePayload.max_tokens = 4096;
+                shouldRetry = true;
+              }
               if (shouldRetry) {
+                console.warn(`[OpenRouter HTTP 400 Auto-Recovery] Membersihkan parameter ditolak pada model ${currentModel} dan mencoba ulang langsung...`);
                 const retryRes = await fetch(targetUrl, {
                   method: 'POST',
                   headers: targetHeaders,
@@ -16930,10 +16942,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             if (STATE.abortController?.signal?.aborted) throw netErr;
 
             const isTimeout = netErr?.name === 'AbortError' && attemptController.signal.reason === 'TTFT_TIMEOUT';
-            const netMsg = isTimeout ? 'Respons model terlalu lambat (timeout 25 detik tanpa token)' : (netErr.message || String(netErr));
+            const netMsg = isTimeout ? 'Respons model terlalu lambat (timeout 45 detik tanpa token)' : (netErr.message || String(netErr));
             console.warn(`[OpenRouter Attempt Failed] Model ${currentModel} (${routeType}):`, netMsg);
             if (isTimeout) {
-              markModelExhausted(currentModel, 'TTFT Timeout 25s');
+              markModelExhausted(currentModel, 'TTFT Timeout 45s');
             }
             routeErrDetail = netMsg;
             continue;
@@ -16951,7 +16963,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           throw new Error(`OpenRouter Authentication Error: API Key tidak valid atau belum dipasang.`);
         }
 
-        // Failover ke kandidat model berikutnya jika model ini gagal sebelum menghasilkan token
+        // Failover ke cadangan darurat jika model utama gagal total sebelum menghasilkan token
         const isAuthRejection = lastErrDetail.includes('401') || lastErrDetail.includes('403') || lastErrDetail.includes('API Key tidak valid');
         const canFailover = (i < candidateModels.length - 1) && !isAuthRejection;
 
@@ -16964,8 +16976,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 : (lastErrDetail.includes('ResourceExhausted') || lastErrDetail.includes('lambat') || lastErrDetail.includes('timeout')
                     ? 'sedang kelelahan kapasitas / lambat'
                     : 'sedang mengalami gangguan upstream'));
-          console.warn(`[OpenRouter Smart Failover] Model ${currentModel} ${reasonNotice} (${lastErrDetail}). Mengalihkan ke ${nextCandidate}...`);
-          bubbleText.innerHTML = `<span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.8; font-style:italic;">Model <b>${escapeHtml(currentModel)}</b> ${reasonNotice}. Mengalihkan otomatis ke <b>${escapeHtml(nextCandidate)}</b>...</span>`;
+          console.warn(`[OpenRouter Smart Failover] Model ${currentModel} ${reasonNotice} (${lastErrDetail}). Mengalihkan ke cadangan darurat ${nextCandidate}...`);
+          bubbleText.innerHTML = `<span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.8; font-style:italic;">Model <b>${escapeHtml(currentModel)}</b> ${reasonNotice}. Mengalihkan ke cadangan darurat <b>${escapeHtml(nextCandidate)}</b>...</span>`;
           await new Promise(r => setTimeout(r, 600));
           continue;
         } else {
