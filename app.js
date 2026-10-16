@@ -789,6 +789,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     btnStudioDownloadJpeg: $('#btnStudioDownloadJpeg'),
     btnStudioDownloadPdf: $('#btnStudioDownloadPdf'),
     btnStudioDownloadDocx: $('#btnStudioDownloadDocx'),
+    btnStudioDownloadHtml: $('#btnStudioDownloadHtml'),
+    btnStudioDownloadZip: $('#btnStudioDownloadZip'),
+    btnStudioUndo: $('#btnStudioUndo'),
+    btnStudioRedo: $('#btnStudioRedo'),
+    inputStudioFollowup: $('#inputStudioFollowup'),
+    btnStudioSendFollowup: $('#btnStudioSendFollowup'),
+    studioModelName: $('#studioModelName'),
+    studioModelBadge: $('#studioModelBadge'),
     btnToggleStudioFullscreen: $('#btnToggleStudioFullscreen'),
     imagePreviewImg: $('#imagePreviewImg'),
     removeImageBtn: $('#removeImageBtn'),
@@ -8887,6 +8895,351 @@ Aturan wajib:
     return isPreviewableDoc(file);
   }
 
+  // ==================== GEMINI CANVAS CORE ENGINE & REVISION SYSTEM ====================
+  const FileRevisionStore = {
+    history: new Map(),
+    currentIndex: new Map(),
+
+    pushRevision(name, content) {
+      if (!name || typeof content !== 'string') return;
+      const list = this.history.get(name) || [];
+      const idx = this.currentIndex.has(name) ? this.currentIndex.get(name) : -1;
+      const trimmed = list.slice(0, idx + 1);
+      if (trimmed.length > 0 && trimmed[trimmed.length - 1] === content) {
+        this.currentIndex.set(name, trimmed.length - 1);
+        return;
+      }
+      trimmed.push(content);
+      this.history.set(name, trimmed);
+      this.currentIndex.set(name, trimmed.length - 1);
+    },
+
+    canUndo(name) {
+      const idx = this.currentIndex.get(name) || 0;
+      return idx > 0;
+    },
+
+    canRedo(name) {
+      const list = this.history.get(name) || [];
+      const idx = this.currentIndex.get(name) || 0;
+      return idx < list.length - 1;
+    },
+
+    undo(name) {
+      if (!this.canUndo(name)) return null;
+      const idx = this.currentIndex.get(name) - 1;
+      this.currentIndex.set(name, idx);
+      return this.history.get(name)[idx];
+    },
+
+    redo(name) {
+      if (!this.canRedo(name)) return null;
+      const idx = this.currentIndex.get(name) + 1;
+      this.currentIndex.set(name, idx);
+      return this.history.get(name)[idx];
+    }
+  };
+
+  function prepareSafeHtmlForPreview(rawContent) {
+    if (!rawContent || typeof rawContent !== 'string') return '';
+    let safeHtml = rawContent;
+    safeHtml = safeHtml.replace(/^\s*```(?:html|htm)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+    // 1. Bersihkan iframe internal yang kosong atau mengarah ke root / atau relatif host
+    safeHtml = safeHtml.replace(/<iframe\b([^>]*)\bsrc=["'](?:|\/|\.\/|index\.html?)["']([^>]*)>/gi, '<iframe$1src="about:blank"$2>');
+    // 2. Cegah tag iframe tanpa atribut src agar tidak mewarisi URL parent (localhost:4040/)
+    safeHtml = safeHtml.replace(/<iframe\b((?:(?!src=)[^>])*)>/gi, (match, attrs) => {
+      if (!/\bsrc=/i.test(attrs)) {
+        return `<iframe src="about:blank" ${attrs}>`;
+      }
+      return match;
+    });
+    // 3. Pastikan ada <base href="about:blank"> agar browser tidak me-resolve link/aset relatif ke root host Zoz Router
+    if (!/<base\b/i.test(safeHtml)) {
+      if (/<head\b[^>]*>/i.test(safeHtml)) {
+        safeHtml = safeHtml.replace(/<head\b[^>]*>/i, '$&\n<base href="about:blank">');
+      } else {
+        safeHtml = '<base href="about:blank">\n' + safeHtml;
+      }
+    }
+    // 4. Auto-healing tag yang belum tertutup agar live preview tetap tampil sempurna
+    if ((safeHtml.match(/<style\b/gi) || []).length > (safeHtml.match(/<\/style>/gi) || []).length) {
+      safeHtml += '\n</style>';
+    }
+    if ((safeHtml.match(/<script\b/gi) || []).length > (safeHtml.match(/<\/script>/gi) || []).length) {
+      safeHtml += '\n</script>';
+    }
+    if (!/<\/body>/i.test(safeHtml)) {
+      safeHtml += '\n</body>';
+    }
+    if (!/<\/html>/i.test(safeHtml)) {
+      safeHtml += '\n</html>';
+    }
+    return safeHtml;
+  }
+
+  function getGeminiDocTitle(file) {
+    if (!file) return 'Website Studio';
+    const content = file.rawContent || file.content || '';
+    const titleMatch = content.match(/<title\b[^>]*>([^<]+)<\/title>/i);
+    if (titleMatch && titleMatch[1] && titleMatch[1].trim()) {
+      const extracted = titleMatch[1].trim();
+      if (extracted.length >= 2 && extracted.length <= 60) return extracted;
+    }
+    let base = (file.name || 'Website').replace(/\.(?:html?|xhtml|docx?|pdf|md|markdown|svg|mermaid|mmd)$/i, '');
+    base = base.replace(/[-_]+/g, ' ').trim();
+    base = base.replace(/\b\w/g, c => c.toUpperCase());
+    return base || 'Website Studio';
+  }
+
+  async function downloadAIFileAsZip(file) {
+    if (!file) return;
+    try {
+      if (typeof window.JSZip === 'undefined') {
+        downloadAIFile(file, 'html');
+        return;
+      }
+      const zip = new window.JSZip();
+      const content = file.rawContent || file.content || '';
+      const name = file.name || 'index.html';
+      zip.file(name, content);
+      zip.file('README.md', `# ${getGeminiDocTitle(file)}\n\nDihasilkan oleh Zoz Router Gemini Canvas Studio.\nBuka berkas \`${name}\` di browser modern Anda.`);
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const zipName = name.replace(/\.(?:html?|xhtml)$/i, '') + '.zip';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = zipName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 4000);
+      showToast(`⬇ Berkas arsip ZIP ${zipName} berhasil diunduh.`, 'success');
+      AudioEngine.click();
+    } catch (err) {
+      showToast('Gagal membuat berkas ZIP, mengunduh HTML langsung...', 'info');
+      downloadAIFile(file, 'html');
+    }
+  }
+
+  function updateStudioRevisionBtns(fileName) {
+    if (els.btnStudioUndo) {
+      els.btnStudioUndo.disabled = !FileRevisionStore.canUndo(fileName);
+    }
+    if (els.btnStudioRedo) {
+      els.btnStudioRedo.disabled = !FileRevisionStore.canRedo(fileName);
+    }
+  }
+
+  // ==================== INLINE GEMINI CANVAS CARD RENDERER ====================
+  function renderGeminiCanvasCard(file, parentWrap) {
+    if (!file || !parentWrap) return;
+    const card = document.createElement('div');
+    card.className = 'gemini-canvas-card';
+    card._aiFile = file;
+
+    const docTitle = getGeminiDocTitle(file);
+    const rawContent = file.rawContent || file.content || '';
+    const safeHtml = prepareSafeHtmlForPreview(rawContent);
+    const isFileIncomplete = Boolean(file.isIncomplete);
+
+    FileRevisionStore.pushRevision(file.name, rawContent);
+
+    card.innerHTML = `
+      <div class="gemini-canvas-header">
+        <div class="gemini-canvas-header-left">
+          <div class="gemini-canvas-title" title="${escapeHtml(file.name)}">${escapeHtml(docTitle)}</div>
+          <span class="gemini-canvas-status" title="Tersimpan di Zoz Router">
+            <i class="fa-solid fa-cloud"></i>
+            <i class="fa-solid fa-check gemini-status-check"></i>
+          </span>
+          <div class="gemini-history-nav">
+            <button class="gemini-icon-btn canvas-card-undo-btn" type="button" title="Urungkan (Undo)" ${FileRevisionStore.canUndo(file.name) ? '' : 'disabled'}>
+              <i class="fa-solid fa-rotate-left"></i>
+            </button>
+            <button class="gemini-icon-btn canvas-card-redo-btn" type="button" title="Ulangi (Redo)" ${FileRevisionStore.canRedo(file.name) ? '' : 'disabled'}>
+              <i class="fa-solid fa-rotate-right"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="gemini-canvas-header-center">
+          <div class="gemini-segmented-toggle">
+            <button type="button" class="seg-btn seg-code" data-view="code">
+              <i class="fa-solid fa-code"></i> Kode
+            </button>
+            <button type="button" class="seg-btn seg-preview active" data-view="preview">
+              <i class="fa-solid fa-play"></i> Pratinjau
+            </button>
+          </div>
+        </div>
+
+        <div class="gemini-canvas-header-right">
+          <div class="gemini-dropdown-wrap">
+            <button class="gemini-pill-btn gemini-card-export-btn" type="button" title="Ekspor atau unduh website ini">
+              <i class="fa-solid fa-arrow-down-to-bracket"></i> <span>Ekspor</span> <i class="fa-solid fa-chevron-down caret-icon"></i>
+            </button>
+            <div class="gemini-export-menu" style="display: none;">
+              <button type="button" class="gemini-export-item" data-act="download-html">
+                <i class="fa-solid fa-file-code" style="color: var(--neon-cyan);"></i> Unduh Berkas HTML (.html)
+              </button>
+              <button type="button" class="gemini-export-item" data-act="copy-code">
+                <i class="fa-solid fa-copy" style="color: var(--neon-teal);"></i> Salin Seluruh Kode
+              </button>
+              <button type="button" class="gemini-export-item" data-act="download-zip">
+                <i class="fa-solid fa-file-zipper" style="color: var(--neon-amber);"></i> Unduh Arsip ZIP (.zip)
+              </button>
+            </div>
+          </div>
+
+          <button class="gemini-icon-btn canvas-card-share-btn" type="button" title="Salin Kode / Bagikan">
+            <i class="fa-solid fa-share-nodes"></i>
+          </button>
+          <button class="gemini-icon-btn canvas-card-reload-btn" type="button" title="Muat Ulang Pratinjau">
+            <i class="fa-solid fa-rotate"></i>
+          </button>
+          <button class="gemini-icon-btn canvas-card-fullscreen-btn" type="button" title="Buka di Layar Penuh / AI File Studio">
+            <i class="fa-solid fa-expand"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="gemini-canvas-stage">
+        <div class="gemini-canvas-preview-pane">
+          <iframe class="gemini-canvas-iframe" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"></iframe>
+        </div>
+        <div class="gemini-canvas-code-pane" style="display: none;">
+          <pre class="gemini-canvas-code"><code class="language-html"></code></pre>
+        </div>
+      </div>
+
+      ${isFileIncomplete ? `
+        <div class="gemini-canvas-warning-strip">
+          <i class="fa-solid fa-triangle-exclamation"></i> Pembuatan kode website terputus di tengah jalan. Anda dapat meneruskannya dengan tombol lanjutan di bawah.
+        </div>
+      ` : ''}
+    `;
+
+    parentWrap.appendChild(card);
+
+    // Setup iframe preview
+    const iframe = card.querySelector('.gemini-canvas-iframe');
+    if (iframe) {
+      iframe.srcdoc = safeHtml;
+    }
+
+    // Setup code viewer
+    const codeEl = card.querySelector('.gemini-canvas-code code');
+    if (codeEl) {
+      codeEl.textContent = rawContent;
+      try {
+        if (window.hljs) window.hljs.highlightElement(codeEl);
+      } catch (_) {}
+    }
+
+    // Setup Segmented Toggle
+    const segToggle = card.querySelector('.gemini-segmented-toggle');
+    const previewPane = card.querySelector('.gemini-canvas-preview-pane');
+    const codePane = card.querySelector('.gemini-canvas-code-pane');
+
+    segToggle?.querySelectorAll('.seg-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const view = btn.dataset.view;
+        segToggle.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        if (view === 'code') {
+          previewPane.style.display = 'none';
+          codePane.style.display = 'block';
+        } else {
+          codePane.style.display = 'none';
+          previewPane.style.display = 'block';
+        }
+        AudioEngine.click();
+      });
+    });
+
+    // Setup Export Dropdown
+    const exportBtn = card.querySelector('.gemini-card-export-btn');
+    const exportMenu = card.querySelector('.gemini-export-menu');
+    exportBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isVisible = exportMenu.style.display !== 'none';
+      document.querySelectorAll('.gemini-export-menu').forEach(m => m.style.display = 'none');
+      exportMenu.style.display = isVisible ? 'none' : 'flex';
+    });
+
+    card.querySelectorAll('.gemini-export-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        exportMenu.style.display = 'none';
+        const act = item.dataset.act;
+        if (act === 'download-html') {
+          downloadAIFile(file, 'html');
+        } else if (act === 'copy-code') {
+          copyTextToClipboard(file.rawContent || file.content || '', null, 'Kode HTML disalin ke clipboard!');
+        } else if (act === 'download-zip') {
+          downloadAIFileAsZip(file);
+        }
+      });
+    });
+
+    // Share button
+    card.querySelector('.canvas-card-share-btn')?.addEventListener('click', () => {
+      copyTextToClipboard(file.rawContent || file.content || '', null, 'Kode website disalin ke clipboard!');
+    });
+
+    // Reload button
+    card.querySelector('.canvas-card-reload-btn')?.addEventListener('click', () => {
+      if (iframe) {
+        iframe.removeAttribute('srcdoc');
+        setTimeout(() => { iframe.srcdoc = prepareSafeHtmlForPreview(file.rawContent || file.content || ''); }, 50);
+        showToast('Pratinjau website dimuat ulang.');
+      }
+    });
+
+    // Fullscreen / Studio
+    card.querySelector('.canvas-card-fullscreen-btn')?.addEventListener('click', () => {
+      const activeView = codePane.style.display !== 'none' ? 'code' : 'preview';
+      openAIFileStudio(file, activeView);
+    });
+
+    // Undo / Redo
+    const undoBtn = card.querySelector('.canvas-card-undo-btn');
+    const redoBtn = card.querySelector('.canvas-card-redo-btn');
+
+    undoBtn?.addEventListener('click', () => {
+      const prev = FileRevisionStore.undo(file.name);
+      if (prev !== null) {
+        file.rawContent = prev;
+        file.content = prev;
+        if (iframe) iframe.srcdoc = prepareSafeHtmlForPreview(prev);
+        if (codeEl) {
+          codeEl.textContent = prev;
+          try { if (window.hljs) { codeEl.removeAttribute('data-highlighted'); window.hljs.highlightElement(codeEl); } } catch (_) {}
+        }
+        undoBtn.disabled = !FileRevisionStore.canUndo(file.name);
+        redoBtn.disabled = !FileRevisionStore.canRedo(file.name);
+        showToast('↩️ Mengembalikan ke revisi sebelumnya.', 'info');
+      }
+    });
+
+    redoBtn?.addEventListener('click', () => {
+      const next = FileRevisionStore.redo(file.name);
+      if (next !== null) {
+        file.rawContent = next;
+        file.content = next;
+        if (iframe) iframe.srcdoc = prepareSafeHtmlForPreview(next);
+        if (codeEl) {
+          codeEl.textContent = next;
+          try { if (window.hljs) { codeEl.removeAttribute('data-highlighted'); window.hljs.highlightElement(codeEl); } } catch (_) {}
+        }
+        undoBtn.disabled = !FileRevisionStore.canUndo(file.name);
+        redoBtn.disabled = !FileRevisionStore.canRedo(file.name);
+        showToast('↪️ Mengembalikan ke revisi berikutnya.', 'info');
+      }
+    });
+  }
+
   function setAIFileStudioTab(tab) {
     const isPreview = tab === 'preview';
     if (els.aiFileStudioPreviewPane) els.aiFileStudioPreviewPane.classList.toggle('hidden', !isPreview);
@@ -8904,8 +9257,9 @@ Aturan wajib:
       file.name = file.name.replace(/\.(?:mermaid|mmd)$/i, '.svg');
     }
     activeAIFile = file;
+    const docTitle = getGeminiDocTitle(file);
     if (els.aiFileStudioTitle) {
-      els.aiFileStudioTitle.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(file.name)}`;
+      els.aiFileStudioTitle.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(docTitle)}`;
     }
     if (els.aiFileStudioMeta) {
       els.aiFileStudioMeta.textContent = file.name + ' • ' + (file.size || '') + (file.desc ? ' — ' + file.desc : '');
@@ -8926,19 +9280,28 @@ Aturan wajib:
     const isDoc = isDocx || isPdf || ext === 'doc' || file.lang === 'docx' || file.lang === 'pdf' ||
                   ((isMarkdown || file.lang === 'markdown') && !isDiagram && !isHtml);
 
-    if (els.aiFileStudioDownloadCaret) {
-      els.aiFileStudioDownloadCaret.style.display = (isDiagram || isDoc) ? 'inline-block' : 'none';
+    FileRevisionStore.pushRevision(file.name, rawContent);
+    updateStudioRevisionBtns(file.name);
+    if (els.studioModelName) {
+      els.studioModelName.textContent = STATE.activeModel ? STATE.activeModel.slice(0, 18) : 'Argon';
     }
-    if (els.aiFileStudioDownloadMenu) {
-      els.aiFileStudioDownloadMenu.style.display = 'none';
-    }
+
+    if (els.btnStudioDownloadHtml) els.btnStudioDownloadHtml.style.display = isHtml ? 'flex' : 'none';
+    if (els.btnStudioDownloadZip) els.btnStudioDownloadZip.style.display = isHtml ? 'flex' : 'none';
     if (els.btnStudioDownloadSvg) els.btnStudioDownloadSvg.style.display = isDiagram ? 'flex' : 'none';
     if (els.btnStudioDownloadJpeg) els.btnStudioDownloadJpeg.style.display = isDiagram ? 'flex' : 'none';
     if (els.btnStudioDownloadPdf) els.btnStudioDownloadPdf.style.display = isDoc ? 'flex' : 'none';
     if (els.btnStudioDownloadDocx) els.btnStudioDownloadDocx.style.display = isDoc ? 'flex' : 'none';
 
+    if (els.aiFileStudioDownloadCaret) {
+      els.aiFileStudioDownloadCaret.style.display = (isDiagram || isDoc || isHtml) ? 'inline-block' : 'none';
+    }
+    if (els.aiFileStudioDownloadMenu) {
+      els.aiFileStudioDownloadMenu.style.display = 'none';
+    }
+
     if (els.aiFileStudioDownloadText) {
-      els.aiFileStudioDownloadText.textContent = isDiagram ? 'Unduh Diagram' : (isDoc ? 'Unduh Dokumen' : 'Unduh File');
+      els.aiFileStudioDownloadText.textContent = isHtml ? 'Ekspor' : (isDiagram ? 'Unduh Diagram' : (isDoc ? 'Unduh Dokumen' : 'Unduh File'));
     }
 
     setAIFileStudioTab(initialTab || (previewable ? 'preview' : 'code'));
@@ -8981,21 +9344,21 @@ Aturan wajib:
               els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, `
                 <div style="color:#f87171; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); padding:16px; border-radius:6px; font-size:13px; text-align:center;">
                   ⚠️ Diagram memerlukan penyesuaian sintaks untuk dirender secara visual.<br>
-                  <small style="color:#94a3b8; margin-top:8px; display:inline-block;">Buka tab "Kode Sumber" untuk melihat dan mengedit kode diagram Mermaid.</small>
+                  <small style="color:#94a3b8; margin-top:8px; display:inline-block;">Buka tab "Kode" untuk melihat dan mengedit kode diagram Mermaid.</small>
                 </div>
               `);
             });
           } catch (err) {
             els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, `
               <div style="color:#f87171; padding:16px; text-align:center;">
-                ⚠️ Mesin visualisasi Mermaid belum siap. Silakan lihat tab Kode Sumber.
+                ⚠️ Mesin visualisasi Mermaid belum siap. Silakan lihat tab Kode.
               </div>
             `);
           }
         } else {
           els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, `
             <div style="color:#f87171; padding:16px; text-align:center;">
-              ⚠️ Mesin visualisasi Mermaid belum termuat. Silakan lihat tab Kode Sumber.
+              ⚠️ Mesin visualisasi Mermaid belum termuat. Silakan lihat tab Kode.
             </div>
           `);
         }
@@ -9012,40 +9375,7 @@ Aturan wajib:
         els.aiFileStudioFrame.srcdoc = generatePdfDocPreviewHtml(file.name, parsedBody);
       } else if (isHtml) {
         els.aiFileStudioFrame.removeAttribute('src');
-        let safeHtml = rawContent;
-        // Bersihkan pembungkus markdown fence jika ada agar tidak merusak rendering dokumen HTML
-        safeHtml = safeHtml.replace(/^\s*```(?:html|htm)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
-        // 1. Bersihkan iframe internal yang kosong atau mengarah ke root / atau relatif host
-        safeHtml = safeHtml.replace(/<iframe\b([^>]*)\bsrc=["'](?:|\/|\.\/|index\.html?)["']([^>]*)>/gi, '<iframe$1src="about:blank"$2>');
-        // 2. Cegah tag iframe tanpa atribut src agar tidak mewarisi URL parent (localhost:4040/)
-        safeHtml = safeHtml.replace(/<iframe\b((?:(?!src=)[^>])*)>/gi, (match, attrs) => {
-          if (!/\bsrc=/i.test(attrs)) {
-            return `<iframe src="about:blank" ${attrs}>`;
-          }
-          return match;
-        });
-        // 3. Pastikan ada <base href="about:blank"> agar browser tidak me-resolve link/aset relatif ke root host Zoz Router
-        if (!/<base\b/i.test(safeHtml)) {
-          if (/<head\b[^>]*>/i.test(safeHtml)) {
-            safeHtml = safeHtml.replace(/<head\b[^>]*>/i, '$&\n<base href="about:blank">');
-          } else {
-            safeHtml = '<base href="about:blank">\n' + safeHtml;
-          }
-        }
-        // 4. Auto-healing tag yang belum tertutup agar live preview tetap tampil sempurna
-        if ((safeHtml.match(/<style\b/gi) || []).length > (safeHtml.match(/<\/style>/gi) || []).length) {
-          safeHtml += '\n</style>';
-        }
-        if ((safeHtml.match(/<script\b/gi) || []).length > (safeHtml.match(/<\/script>/gi) || []).length) {
-          safeHtml += '\n</script>';
-        }
-        if (!/<\/body>/i.test(safeHtml)) {
-          safeHtml += '\n</body>';
-        }
-        if (!/<\/html>/i.test(safeHtml)) {
-          safeHtml += '\n</html>';
-        }
-        els.aiFileStudioFrame.srcdoc = safeHtml;
+        els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(rawContent);
       } else {
         els.aiFileStudioFrame.removeAttribute('src');
         els.aiFileStudioFrame.srcdoc = '';
@@ -9882,6 +10212,10 @@ Aturan wajib:
       const fnLower = (file.name || '').toLowerCase();
       const flLower = (file.lang || '').toLowerCase();
       const isFileWeb = fnLower.endsWith('.html') || fnLower.endsWith('.htm') || flLower === 'html' || flLower === 'htm';
+      if (isFileWeb) {
+        renderGeminiCanvasCard(file, wrap);
+        return;
+      }
       const isFileDoc = fnLower.endsWith('.docx') || fnLower.endsWith('.pdf') || fnLower.endsWith('.doc') || 
                         flLower === 'docx' || flLower === 'pdf' || 
                         ((flLower === 'markdown' || flLower === 'md' || fnLower.endsWith('.md') || fnLower.endsWith('.markdown')) && !isFileDiagram && !isFileWeb);
@@ -10657,13 +10991,26 @@ ${blocks}
     const ext = (activeAIFile.name || '').split('.').pop().toLowerCase();
     const isDoc = ext === 'docx' || ext === 'pdf' || ext === 'doc' || ext === 'md' || ext === 'markdown' ||
                   activeAIFile.lang === 'docx' || activeAIFile.lang === 'pdf' || (activeAIFile.lang === 'markdown' && !isDiagram);
-    if ((isDiagram || isDoc) && els.aiFileStudioDownloadMenu) {
+    const isHtml = ext === 'html' || ext === 'htm' || activeAIFile.lang === 'html' || activeAIFile.lang === 'htm';
+    if ((isDiagram || isDoc || isHtml) && els.aiFileStudioDownloadMenu) {
       e.stopPropagation();
       const isVisible = els.aiFileStudioDownloadMenu.style.display !== 'none';
       els.aiFileStudioDownloadMenu.style.display = isVisible ? 'none' : 'flex';
     } else {
       downloadAIFile(activeAIFile);
     }
+  });
+
+  els.btnStudioDownloadHtml?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (els.aiFileStudioDownloadMenu) els.aiFileStudioDownloadMenu.style.display = 'none';
+    if (activeAIFile) downloadAIFile(activeAIFile, 'html');
+  });
+
+  els.btnStudioDownloadZip?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (els.aiFileStudioDownloadMenu) els.aiFileStudioDownloadMenu.style.display = 'none';
+    if (activeAIFile) downloadAIFileAsZip(activeAIFile);
   });
 
   els.btnStudioDownloadSvg?.addEventListener('click', (e) => {
@@ -10690,9 +11037,72 @@ ${blocks}
     if (activeAIFile) downloadAIFile(activeAIFile, 'docx');
   });
 
+  // Undo / Redo in AI File Studio
+  els.btnStudioUndo?.addEventListener('click', () => {
+    if (!activeAIFile) return;
+    const prev = FileRevisionStore.undo(activeAIFile.name);
+    if (prev !== null) {
+      activeAIFile.rawContent = prev;
+      activeAIFile.content = prev;
+      if (els.aiFileStudioFrame) {
+        els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(prev);
+      }
+      if (els.aiFileStudioCode) {
+        els.aiFileStudioCode.textContent = prev;
+        try { if (window.hljs) { els.aiFileStudioCode.removeAttribute('data-highlighted'); window.hljs.highlightElement(els.aiFileStudioCode); } } catch (_) {}
+      }
+      updateStudioRevisionBtns(activeAIFile.name);
+      showToast('↩️ Mengembalikan ke revisi sebelumnya.', 'info');
+    }
+  });
+
+  els.btnStudioRedo?.addEventListener('click', () => {
+    if (!activeAIFile) return;
+    const next = FileRevisionStore.redo(activeAIFile.name);
+    if (next !== null) {
+      activeAIFile.rawContent = next;
+      activeAIFile.content = next;
+      if (els.aiFileStudioFrame) {
+        els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(next);
+      }
+      if (els.aiFileStudioCode) {
+        els.aiFileStudioCode.textContent = next;
+        try { if (window.hljs) { els.aiFileStudioCode.removeAttribute('data-highlighted'); window.hljs.highlightElement(els.aiFileStudioCode); } } catch (_) {}
+      }
+      updateStudioRevisionBtns(activeAIFile.name);
+      showToast('↪️ Mengembalikan ke revisi berikutnya.', 'info');
+    }
+  });
+
+  // Floating Follow-up composer in AI File Studio (Tanya lebih lanjut)
+  function submitStudioFollowupPrompt() {
+    const val = els.inputStudioFollowup?.value?.trim();
+    if (!val || !activeAIFile) return;
+    const targetName = activeAIFile.name || 'index.html';
+    closeModal('aiFileStudioModal');
+    els.inputStudioFollowup.value = '';
+    showToast(`🚀 Mengirim permintaan revisi untuk "${targetName}"...`, 'info');
+    const followupPrompt = `Revisi website "${targetName}": ${val}\n\nHarap berikan kode lengkap website yang telah diperbarui di dalam blok:\n<<<ZOZ_FILE name="${targetName}" lang="html">>>\n<!DOCTYPE html>\n...\n<<<END_ZOZ_FILE>>>`;
+    handleSendPrompt({
+      overrideText: followupPrompt,
+      websiteMode: 'preview',
+      isWebCreation: true,
+      skipWebsiteCheck: true
+    });
+  }
+
+  els.btnStudioSendFollowup?.addEventListener('click', submitStudioFollowupPrompt);
+  els.inputStudioFollowup?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submitStudioFollowupPrompt();
+    }
+  });
+
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('#aiFileStudioDownloadWrap')) {
+    if (!e.target.closest('#aiFileStudioDownloadWrap') && !e.target.closest('.gemini-dropdown-wrap')) {
       if (els.aiFileStudioDownloadMenu) els.aiFileStudioDownloadMenu.style.display = 'none';
+      document.querySelectorAll('.gemini-export-menu').forEach(m => m.style.display = 'none');
     }
     if (!e.target.closest('.mermaid-dropdown-wrap')) {
       document.querySelectorAll('.mermaid-dropdown-menu').forEach(m => m.style.display = 'none');

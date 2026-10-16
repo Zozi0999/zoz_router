@@ -8430,6 +8430,500 @@ body.modal-open {
   display: none;
 }
 
+/* ==================== GOOGLE GEMINI CANVAS STUDIO & INLINE CARDS ==================== */
+/* 1. Inline Gemini Canvas Card in Chat Stream */
+.gemini-canvas-card {
+  width: 100%;
+  max-width: 960px;
+  margin: 14px 0 16px 0;
+  background: #131418;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5), 0 0 1px rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.25s, box-shadow 0.25s;
+  box-sizing: border-box;
+}
+
+.gemini-canvas-card:hover {
+  border-color: rgba(0, 240, 255, 0.35);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6), 0 0 18px rgba(0, 240, 255, 0.12);
+}
+
+.gemini-canvas-header,
+.gemini-studio-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: #181a20;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 12px;
+  flex-wrap: wrap;
+  user-select: none;
+}
+
+.gemini-canvas-header-left,
+.gemini-studio-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.gemini-canvas-title,
+.gemini-studio-title {
+  font-size: 0.94rem;
+  font-weight: 600;
+  color: #f1f5f9;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+
+.gemini-canvas-status {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  color: #38bdf8;
+  font-size: 0.88rem;
+  cursor: help;
+  margin-right: 2px;
+}
+
+.gemini-canvas-status .gemini-status-check {
+  font-size: 0.55rem;
+  position: absolute;
+  bottom: -2px;
+  right: -3px;
+  background: #131418;
+  border-radius: 50%;
+  padding: 1px;
+  color: #22c55e;
+}
+
+.gemini-history-nav {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Gemini Segmented Toggle [ Kode | Pratinjau ] */
+.gemini-segmented-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: #23252b;
+  border-radius: 9999px;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.gemini-segmented-toggle .seg-btn {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 0.80rem;
+  font-weight: 500;
+  padding: 5px 14px;
+  border-radius: 9999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+}
+
+.gemini-segmented-toggle .seg-btn:hover {
+  color: #f8fafc;
+}
+
+.gemini-segmented-toggle .seg-btn.active {
+  background: #373a43;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.gemini-canvas-header-right,
+.gemini-studio-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.gemini-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+  font-size: 0.80rem;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  outline: none;
+  text-decoration: none;
+}
+
+.gemini-pill-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.gemini-pill-btn .caret-icon {
+  font-size: 0.70rem;
+  opacity: 0.75;
+}
+
+.gemini-icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 0.86rem;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  outline: none;
+}
+
+.gemini-icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.gemini-icon-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Gemini Export Dropdown */
+.gemini-dropdown-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.gemini-export-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: rgba(20, 22, 28, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7), 0 0 18px rgba(0, 240, 255, 0.1);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  z-index: 1060;
+  min-width: 220px;
+}
+
+.gemini-export-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #e2e8f0;
+  font-size: 0.80rem;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+  width: 100%;
+}
+
+.gemini-export-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #00f0ff;
+}
+
+.gemini-export-item i {
+  font-size: 0.92rem;
+  width: 18px;
+  text-align: center;
+}
+
+/* Stage & Iframe */
+.gemini-canvas-stage {
+  position: relative;
+  width: 100%;
+  height: 520px;
+  min-height: 380px;
+  background: #090a0d;
+  overflow: hidden;
+}
+
+.gemini-canvas-preview-pane {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.gemini-canvas-iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #ffffff;
+}
+
+.gemini-canvas-code-pane {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  padding: 16px 20px;
+  background: #0e1015;
+  box-sizing: border-box;
+}
+
+.gemini-canvas-code {
+  margin: 0;
+  font-family: var(--font-code);
+  font-size: 0.80rem;
+  line-height: 1.6;
+  color: #9ad7ff;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.gemini-canvas-warning-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(255, 183, 3, 0.12);
+  border-top: 1px solid rgba(255, 183, 3, 0.25);
+  color: #ffb703;
+  font-size: 0.78rem;
+}
+
+/* 2. Gemini Studio Modal Enhancements */
+.gemini-studio-backdrop {
+  z-index: 1050;
+}
+
+.gemini-canvas-studio {
+  background: #131418;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+}
+
+.gemini-studio-stage {
+  padding: 0 !important;
+  margin: 0 !important;
+  flex: 1 1 auto;
+  position: relative;
+  min-height: 480px;
+  background: #090a0d;
+}
+
+.gemini-studio-pane {
+  height: 520px;
+  border: none;
+  border-radius: 0;
+}
+
+.gemini-studio-code {
+  height: 520px;
+  border: none;
+  border-radius: 0;
+  background: #0e1015;
+}
+
+/* Studio Bottom Floating Composer (Tanya lebih lanjut) */
+.gemini-studio-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 20px 16px;
+  background: rgba(18, 20, 24, 0.98);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  user-select: none;
+}
+
+.gemini-studio-composer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 760px;
+  background: #1b1d23;
+  border: 1.5px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9999px;
+  padding: 6px 10px 6px 14px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
+}
+
+.gemini-studio-composer:focus-within {
+  border-color: #00f0ff;
+  box-shadow: 0 0 0 3px rgba(0, 240, 255, 0.22), 0 6px 24px rgba(0, 0, 0, 0.5);
+  background: #1e2027;
+}
+
+.gemini-studio-composer .composer-icon-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 0.95rem;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  outline: none;
+}
+
+.gemini-studio-composer .composer-icon-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.gemini-studio-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #f8fafc;
+  font-size: 0.88rem;
+  font-family: inherit;
+}
+
+.gemini-studio-input::placeholder {
+  color: #64748b;
+}
+
+.gemini-studio-model-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 3px 9px;
+  border-radius: 9999px;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.gemini-studio-send-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: #00f0ff;
+  color: #080a0f;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+  flex-shrink: 0;
+}
+
+.gemini-studio-send-btn:hover {
+  transform: scale(1.08);
+  background: #38bdf8;
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.5);
+}
+
+.gemini-studio-footnote {
+  font-size: 0.72rem;
+  color: #64748b;
+  text-align: center;
+}
+
+/* Chat Footnote */
+.composer-gemini-footnote {
+  font-size: 0.72rem;
+  color: #64748b;
+  text-align: center;
+  margin-top: 6px;
+  user-select: none;
+}
+
+/* Fullscreen studio expansions */
+.ai-file-studio-card.gemini-canvas-studio.is-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  border: none !important;
+  z-index: 1000000 !important;
+}
+
+.ai-file-studio-card.gemini-canvas-studio.is-fullscreen .gemini-studio-stage {
+  height: calc(100vh - 126px) !important;
+}
+
+.ai-file-studio-card.gemini-canvas-studio.is-fullscreen .gemini-studio-pane,
+.ai-file-studio-card.gemini-canvas-studio.is-fullscreen .gemini-studio-code {
+  height: 100% !important;
+  max-height: none !important;
+}
+
+@media (max-width: 768px) {
+  .gemini-canvas-header,
+  .gemini-studio-header {
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  .gemini-canvas-title,
+  .gemini-studio-title {
+    max-width: 160px;
+    font-size: 0.86rem;
+  }
+  .gemini-canvas-stage {
+    height: 380px;
+  }
+  .gemini-studio-composer {
+    padding: 5px 8px 5px 12px;
+  }
+  .gemini-segmented-toggle .seg-btn {
+    padding: 4px 10px;
+    font-size: 0.74rem;
+  }
+}
+
 .youtube-preview-card {
   display: flex;
   background: rgba(14, 17, 27, 0.92);

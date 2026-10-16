@@ -23,7 +23,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261015_v294">
+  <link rel="stylesheet" href="style.css?v=20261015_v295">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -947,6 +947,7 @@
             </button>
           </div>
         </div>
+        <div class="composer-gemini-footnote" id="composerGeminiFootnote">Zoz Router adalah AI dan dapat membuat kesalahan. Periksa informasi penting.</div>
       </footer>
     </main>
   </div>
@@ -1520,60 +1521,81 @@
     </div>
   </div>
 
-  <!-- 6.5b. AI FILE STUDIO MODAL (Preview Langsung + Kode + Unduh File Buatan AI) -->
-  <div class="modal-backdrop" id="aiFileStudioModal">
-    <div class="modal-card modal-lg ai-file-studio-card">
-      <div class="modal-header">
-        <div class="modal-title" id="aiFileStudioTitle"><i class="fa-solid fa-wand-magic-sparkles"></i> AI File Studio</div>
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <button class="modal-close-btn" id="btnToggleStudioFullscreen" type="button" aria-label="Layar Penuh" title="Layar Penuh (Full Screen)"><i class="fa-solid fa-expand"></i></button>
-          <button class="modal-close-btn" data-close="aiFileStudioModal" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button>
-        </div>
-      </div>
-      <div class="modal-body ai-file-studio-body">
-        <div class="ai-file-studio-tabs" id="aiFileStudioTabs">
-          <button type="button" class="ai-file-tab active" data-tab="preview"><i class="fa-solid fa-eye"></i> Pratinjau</button>
-          <button type="button" class="ai-file-tab" data-tab="code"><i class="fa-solid fa-code"></i> Kode Sumber</button>
-        </div>
-        <div class="ai-file-studio-pane" id="aiFileStudioPreviewPane">
-          <iframe id="aiFileStudioFrame" title="Pratinjau langsung file" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"></iframe>
-          <div class="ai-file-studio-placeholder" id="aiFileStudioPlaceholder">
-            <i class="fa-solid fa-circle-info"></i>
-            <span>File ini tidak bisa ditampilkan sebagai halaman interaktif. Silakan buka tab <strong>Kode Sumber</strong> atau unduh filenya.</span>
+  <!-- 6.5b. AI FILE STUDIO MODAL (Gemini Canvas Studio Mode) -->
+  <div class="modal-backdrop gemini-studio-backdrop" id="aiFileStudioModal">
+    <div class="modal-card modal-lg ai-file-studio-card gemini-canvas-studio">
+      <div class="modal-header gemini-studio-header">
+        <div class="gemini-studio-header-left">
+          <div class="modal-title gemini-studio-title" id="aiFileStudioTitle">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> AI File Studio
+          </div>
+          <span class="gemini-canvas-status" title="Tersimpan di Zoz Router">
+            <i class="fa-solid fa-cloud"></i>
+            <i class="fa-solid fa-check gemini-status-check"></i>
+          </span>
+          <div class="gemini-history-nav">
+            <button class="gemini-icon-btn" id="btnStudioUndo" type="button" title="Urungkan (Undo)" disabled>
+              <i class="fa-solid fa-rotate-left"></i>
+            </button>
+            <button class="gemini-icon-btn" id="btnStudioRedo" type="button" title="Ulangi (Redo)" disabled>
+              <i class="fa-solid fa-rotate-right"></i>
+            </button>
           </div>
         </div>
-        <pre class="ai-file-studio-code" id="aiFileStudioCode"></pre>
-      </div>
-      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;">
-        <span class="ai-file-studio-meta" id="aiFileStudioMeta">-</span>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn-secondary btn-sm" id="aiFileStudioCopyBtn" type="button" title="Salin seluruh isi file ke clipboard"><i class="fa-solid fa-copy"></i> Salin Kode</button>
-          <button class="btn btn-primary btn-sm" id="aiFileStudioSaveDiskBtn" type="button" style="display: none;" title="Simpan langsung ke direktori lokal proyek tanpa unduh"><i class="fa-solid fa-floppy-disk"></i> Simpan ke Direktori</button>
-          <div class="studio-download-wrap" id="aiFileStudioDownloadWrap" style="position: relative; display: inline-flex;">
-            <button class="btn btn-primary btn-sm" id="aiFileStudioDownloadBtn" type="button" title="Unduh file ini"><i class="fa-solid fa-download"></i> <span id="aiFileStudioDownloadText">Unduh File</span> <i class="fa-solid fa-caret-down" id="aiFileStudioDownloadCaret" style="display: none; font-size: 0.75em; margin-left: 4px;"></i></button>
-            <div class="studio-download-menu" id="aiFileStudioDownloadMenu" style="display: none;">
-              <button type="button" class="studio-download-item" id="btnStudioDownloadSvg">
+
+        <div class="gemini-studio-header-center">
+          <div class="gemini-segmented-toggle" id="aiFileStudioTabs">
+            <button type="button" class="seg-btn ai-file-tab" data-tab="code">
+              <i class="fa-solid fa-code"></i> Kode
+            </button>
+            <button type="button" class="seg-btn ai-file-tab active" data-tab="preview">
+              <i class="fa-solid fa-play"></i> Pratinjau
+            </button>
+          </div>
+        </div>
+
+        <div class="gemini-studio-header-right">
+          <div class="studio-download-wrap gemini-dropdown-wrap" id="aiFileStudioDownloadWrap">
+            <button class="gemini-pill-btn" id="aiFileStudioDownloadBtn" type="button" title="Ekspor atau unduh file ini">
+              <i class="fa-solid fa-arrow-down-to-bracket"></i> <span id="aiFileStudioDownloadText">Ekspor</span> <i class="fa-solid fa-chevron-down caret-icon" id="aiFileStudioDownloadCaret"></i>
+            </button>
+            <div class="studio-download-menu gemini-export-menu" id="aiFileStudioDownloadMenu" style="display: none;">
+              <button type="button" class="studio-download-item gemini-export-item" id="btnStudioDownloadHtml">
+                <i class="fa-solid fa-file-code" style="color: var(--neon-cyan);"></i>
+                <div class="menu-desc-text">
+                  <span class="fmt-title">Berkas HTML (.html)</span>
+                  <span class="fmt-sub">Siap dibuka langsung di browser atau di-hosting</span>
+                </div>
+              </button>
+              <button type="button" class="studio-download-item gemini-export-item" id="btnStudioDownloadZip">
+                <i class="fa-solid fa-file-zipper" style="color: var(--neon-teal);"></i>
+                <div class="menu-desc-text">
+                  <span class="fmt-title">Paket Arsip ZIP (.zip)</span>
+                  <span class="fmt-sub">Arsip proyek lengkap siap diekstraksi</span>
+                </div>
+              </button>
+              <button type="button" class="studio-download-item gemini-export-item" id="btnStudioDownloadSvg" style="display: none;">
                 <i class="fa-solid fa-bezier-curve" style="color: var(--neon-cyan);"></i>
                 <div class="menu-desc-text">
                   <span class="fmt-title">Vektor SVG (.svg)</span>
                   <span class="fmt-sub">Resolusi tajam tak terbatas, format vektor</span>
                 </div>
               </button>
-              <button type="button" class="studio-download-item" id="btnStudioDownloadJpeg">
+              <button type="button" class="studio-download-item gemini-export-item" id="btnStudioDownloadJpeg" style="display: none;">
                 <i class="fa-solid fa-file-image" style="color: var(--neon-amber);"></i>
                 <div class="menu-desc-text">
                   <span class="fmt-title">Gambar JPEG (.jpeg)</span>
                   <span class="fmt-sub">Gambar raster HD, siap dibagikan ke mana saja</span>
                 </div>
               </button>
-              <button type="button" class="studio-download-item" id="btnStudioDownloadPdf" style="display: none;">
+              <button type="button" class="studio-download-item gemini-export-item" id="btnStudioDownloadPdf" style="display: none;">
                 <i class="fa-solid fa-file-pdf" style="color: #ef4444;"></i>
                 <div class="menu-desc-text">
                   <span class="fmt-title">Dokumen PDF (.pdf)</span>
                   <span class="fmt-sub">Tata letak baku rapi & tajam, siap cetak & baca</span>
                 </div>
               </button>
-              <button type="button" class="studio-download-item" id="btnStudioDownloadDocx" style="display: none;">
+              <button type="button" class="studio-download-item gemini-export-item" id="btnStudioDownloadDocx" style="display: none;">
                 <i class="fa-solid fa-file-word" style="color: #3b82f6;"></i>
                 <div class="menu-desc-text">
                   <span class="fmt-title">Dokumen Word (.docx)</span>
@@ -1582,6 +1604,49 @@
               </button>
             </div>
           </div>
+          <button class="gemini-icon-btn" id="aiFileStudioCopyBtn" type="button" title="Salin seluruh isi file ke clipboard">
+            <i class="fa-solid fa-copy"></i>
+          </button>
+          <button class="gemini-pill-btn gemini-save-disk-btn" id="aiFileStudioSaveDiskBtn" type="button" style="display: none;" title="Simpan langsung ke direktori lokal proyek tanpa unduh">
+            <i class="fa-solid fa-floppy-disk"></i> Direktori
+          </button>
+          <button class="gemini-icon-btn" id="btnToggleStudioFullscreen" type="button" aria-label="Layar Penuh" title="Layar Penuh (Full Screen)">
+            <i class="fa-solid fa-expand"></i>
+          </button>
+          <button class="gemini-icon-btn studio-close-btn" data-close="aiFileStudioModal" type="button" aria-label="Tutup" title="Tutup Studio">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="modal-body ai-file-studio-body gemini-studio-stage">
+        <div class="ai-file-studio-pane gemini-studio-pane" id="aiFileStudioPreviewPane">
+          <iframe id="aiFileStudioFrame" title="Pratinjau langsung file" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"></iframe>
+          <div class="ai-file-studio-placeholder" id="aiFileStudioPlaceholder">
+            <i class="fa-solid fa-circle-info"></i>
+            <span>File ini tidak bisa ditampilkan sebagai halaman interaktif. Silakan buka tab <strong>Kode</strong> atau unduh filenya.</span>
+          </div>
+        </div>
+        <pre class="ai-file-studio-code gemini-studio-code" id="aiFileStudioCode"></pre>
+      </div>
+
+      <!-- FLOATING PROMPT PILL DOCKED AT STUDIO BOTTOM (Gemini Canvas Composer) -->
+      <div class="gemini-studio-footer">
+        <div class="gemini-studio-composer" id="geminiStudioComposer">
+          <button class="composer-icon-btn" id="btnStudioAdd" type="button" title="Fitur Tambahan">
+            <i class="fa-solid fa-plus"></i>
+          </button>
+          <input type="text" class="gemini-studio-input" id="inputStudioFollowup" placeholder="Tanya lebih lanjut atau minta perubahan pada website ini..." />
+          <div class="gemini-studio-model-badge" id="studioModelBadge">
+            <span id="studioModelName">Argon</span>
+            <i class="fa-solid fa-chevron-down"></i>
+          </div>
+          <button class="gemini-studio-send-btn" id="btnStudioSendFollowup" type="button" title="Kirim Permintaan Revisi">
+            <i class="fa-solid fa-arrow-up"></i>
+          </button>
+        </div>
+        <div class="gemini-studio-footnote">
+          <span class="ai-file-studio-meta" id="aiFileStudioMeta">-</span> • Zoz Router adalah AI dan dapat membuat kesalahan.
         </div>
       </div>
     </div>
@@ -2194,6 +2259,6 @@
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
   <script src="text-safety.js?v=20261015_v279" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261015_v294" defer></script>
+  <script src="app.js?v=20261015_v295" defer></script>
 </body>
 </html>
