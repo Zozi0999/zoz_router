@@ -652,7 +652,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     btnPinSelectedHistory: $('#btnPinSelectedHistory'),
     pinSelectedText: $('#pinSelectedText'),
     btnDeleteSelectedHistory: $('#btnDeleteSelectedHistory'),
-    clearAllHistoryBtn: $('#clearAllHistoryBtn'),
     toggleSidebarBtn: $('#toggleSidebarBtn'),
     closeSidebarBtn: $('#closeSidebarBtn'),
     sidebar: $('#sidebar'),
@@ -3688,7 +3687,7 @@ RESONANSI: ${this.currentVibe}
     if (mermaidLoadPromise) return mermaidLoadPromise;
     mermaidLoadPromise = new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = 'mermaid.min.js?v=20261016_v308';
+      s.src = 'mermaid.min.js?v=20261016_v309';
       s.async = true;
       s.defer = true;
       s.onload = () => {
@@ -18149,7 +18148,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           </div>
           <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
             <button class="btn btn-sm btn-primary open-settings-btn" style="font-size:0.75rem;">
-              <i class="fa-solid fa-sliders"></i> Buka Pengaturan & Masukkan API Key
+              <i class="fa-solid fa-gear"></i> Buka Pengaturan & Masukkan API Key
             </button>
             <button class="btn btn-sm btn-outline retry-router-btn" style="border-color:var(--neon-cyan); color:var(--neon-cyan); font-size:0.75rem;">
               <i class="fa-solid fa-rotate-right"></i> Cek Ulang Status Ollama Cloud
@@ -25821,22 +25820,6 @@ Aturan:
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && STATE.historySelectMode) {
         exitHistorySelectMode();
-      }
-    });
-    
-    els.clearAllHistoryBtn?.addEventListener('click', async () => {
-      if (confirm('Apakah Anda yakin ingin menghapus semua riwayat sesi obrolan?')) {
-        if (STATE.isGenerating) {
-          stopGeneration();
-        }
-        STATE.sessions = [];
-        STATE.currentSessionId = null;
-        safeSessionStorage.removeItem('zoz_active_session_id');
-        try { localStorage.removeItem('zoz_last_active_session_id'); } catch (_) {}
-        await DeviceStorage.clearAllSessions();
-        savePersistedState({ immediate: true });
-        createNewSession();
-        AudioEngine.click();
       }
     });
 

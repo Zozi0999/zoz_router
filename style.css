@@ -640,8 +640,12 @@ button.brand-logo-wrap.active .brand-logo {
   background: var(--bg-card-hover);
 }
 
-.sidebar-footer-btn:last-child {
-  flex: 0 0 36px;
+.sidebar-footer-btn i {
+  transition: transform 0.3s ease;
+}
+
+.sidebar-footer-btn:hover i.fa-gear {
+  transform: rotate(45deg);
 }
 
 /* ==================== DEEPSEEK-STYLE HISTORY MULTI-SELECT & TIME GROUPING ==================== */
