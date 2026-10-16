@@ -8486,6 +8486,16 @@ body.modal-open {
   max-width: 280px;
 }
 
+.gemini-canvas-title {
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+
+.gemini-canvas-title:hover {
+  color: var(--neon-cyan, #00f0ff);
+  text-decoration: underline;
+}
+
 .gemini-canvas-status {
   display: inline-flex;
   align-items: center;
@@ -8578,6 +8588,20 @@ body.modal-open {
 
 .gemini-pill-btn:hover {
   background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.gemini-pill-btn.canvas-card-fullscreen-btn {
+  background: rgba(0, 240, 255, 0.12);
+  border-color: rgba(0, 240, 255, 0.35);
+  color: var(--neon-cyan, #00f0ff);
+  font-weight: 600;
+}
+
+.gemini-pill-btn.canvas-card-fullscreen-btn:hover {
+  background: rgba(0, 240, 255, 0.22);
+  border-color: rgba(0, 240, 255, 0.7);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.25);
   color: #ffffff;
 }
 
@@ -9053,19 +9077,9 @@ body.modal-open {
   color: #ffffff;
 }
 
-.gemini-studio-footnote {
-  font-size: 0.72rem;
-  color: #64748b;
-  text-align: center;
-}
-
-/* Chat Footnote */
+.gemini-studio-footnote,
 .composer-gemini-footnote {
-  font-size: 0.72rem;
-  color: #64748b;
-  text-align: center;
-  margin-top: 6px;
-  user-select: none;
+  display: none !important;
 }
 
 /* Fullscreen studio expansions */

@@ -9128,8 +9128,8 @@ Aturan wajib:
           <button class="gemini-icon-btn canvas-card-reload-btn" type="button" title="Muat Ulang Pratinjau">
             <i class="fa-solid fa-rotate"></i>
           </button>
-          <button class="gemini-icon-btn canvas-card-fullscreen-btn" type="button" title="Buka di Layar Penuh / AI File Studio">
-            <i class="fa-solid fa-expand"></i>
+          <button class="gemini-pill-btn canvas-card-fullscreen-btn" type="button" title="Buka Studio Pratinjau Interaktif">
+            <i class="fa-solid fa-arrow-up-right-from-square"></i> <span>Buka Studio</span>
           </button>
         </div>
       </div>
@@ -9167,10 +9167,15 @@ Aturan wajib:
       } catch (_) {}
     }
 
-    // Setup Segmented Toggle
+    // Setup Segmented Toggle & Preview Switcher
     const segToggle = card.querySelector('.gemini-segmented-toggle');
     const previewPane = card.querySelector('.gemini-canvas-preview-pane');
     const codePane = card.querySelector('.gemini-canvas-code-pane');
+
+    // Title click to open studio directly
+    card.querySelector('.gemini-canvas-title')?.addEventListener('click', () => {
+      openAIFileStudio(file, 'preview');
+    });
 
     segToggle?.querySelectorAll('.seg-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -9184,6 +9189,8 @@ Aturan wajib:
         } else {
           codePane.style.display = 'none';
           previewPane.style.display = 'block';
+          // Klik Pratinjau langsung membuka studio interaktif penuh
+          openAIFileStudio(file, 'preview');
         }
         AudioEngine.click();
       });
@@ -11005,9 +11012,16 @@ ${blocks}
 
   // Delegasi klik: tombol Pratinjau / Unduh / Konfirmasi / Tolak / Buka di Direktori pada kartu file buatan AI
   document.addEventListener('click', (e) => {
-    const card = e.target.closest ? e.target.closest('.ai-file-card') : null;
+    const card = e.target.closest ? (e.target.closest('.ai-file-card') || e.target.closest('.gemini-canvas-card')) : null;
     if (!card || !card._aiFile) return;
     const file = card._aiFile;
+    if (card.classList.contains('gemini-canvas-card')) {
+      const isControl = e.target.closest ? e.target.closest('button, a, input, textarea, pre, code, .gemini-export-menu') : null;
+      if (!isControl) {
+        openAIFileStudio(file, 'preview');
+      }
+      return;
+    }
     const btn = e.target.closest ? e.target.closest('.ai-file-btn') : null;
     if (btn) {
       if (btn.dataset.act === 'download-svg') {
@@ -12592,7 +12606,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
 
     // Tampilan gelembung obrolan
-    let displayPrompt = originalUserPrompt || '';
+    let displayPrompt = (options && options.displayPrompt !== undefined) ? options.displayPrompt : (originalUserPrompt || '');
     if (displayPrompt && docs.length > 0) {
       if (/^\[File:\s*[^\]]+\]$/i.test(displayPrompt.trim())) {
         displayPrompt = '';
