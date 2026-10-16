@@ -5472,10 +5472,10 @@ RESONANSI: ${this.currentVibe}
           fileBlockLang = langMatch ? langMatch[1] : (currentFileName ? guessLangFromName(currentFileName) : 'code');
           const isDiagram = fileBlockLang === 'mermaid' || fileBlockLang === 'mmd' || currentFileName.endsWith('.mermaid') || currentFileName.endsWith('.mmd');
           const fnLower = currentFileName.toLowerCase();
+          const isWeb = fnLower.endsWith('.html') || fnLower.endsWith('.htm') || fileBlockLang === 'html' || fileBlockLang === 'htm';
           const isDoc = fnLower.endsWith('.docx') || fnLower.endsWith('.pdf') || fnLower.endsWith('.doc') || fnLower.endsWith('.md') ||
                         fileBlockLang === 'docx' || fileBlockLang === 'pdf' || 
-                        ((fileBlockLang === 'markdown' || fileBlockLang === 'md') && (!isDiagram && !fnLower.endsWith('.html') && !fnLower.endsWith('.svg') || isDocMode));
-          const isWeb = fnLower.endsWith('.html') || fnLower.endsWith('.htm') || fileBlockLang === 'html' || fileBlockLang === 'htm';
+                        ((fileBlockLang === 'markdown' || fileBlockLang === 'md') && (!isDiagram && !isWeb && !fnLower.endsWith('.svg') || isDocMode));
 
           if (isDiagram) {
             out.push('\n```mermaid');
@@ -9474,10 +9474,10 @@ Aturan wajib:
                           fileName.endsWith('.mermaid') || fileName.endsWith('.mmd') ||
                           (fileName.endsWith('.svg') && isAuthenticMermaidSyntax(innerContent));
 
+        const isWeb = fileName.endsWith('.html') || fileName.endsWith('.htm') || fileLang === 'html' || fileLang === 'htm';
         const isDoc = fileName.endsWith('.docx') || fileName.endsWith('.pdf') || fileName.endsWith('.doc') || fileName.endsWith('.md') ||
                       fileLang === 'docx' || fileLang === 'pdf' || 
                       ((fileLang === 'markdown' || fileLang === 'md') && (!isDiagram && !isWeb || Boolean(options && (options.docFormat || options.isDocCreation))));
-        const isWeb = fileName.endsWith('.html') || fileName.endsWith('.htm') || fileLang === 'html' || fileLang === 'htm';
 
         if (isDiagram) {
           const cleanDiagram = getCleanMermaidCode(innerContent);
@@ -9512,6 +9512,7 @@ Aturan wajib:
         out = out.replace(/```(?:html|htm)[\s\S]*?(?:```|$)/gi, '');
         out = out.replace(/<!DOCTYPE\s+html[\s\S]*?(?:<\/html>|$)/gi, '');
         out = out.replace(/<html\b[\s\S]*?(?:<\/html>|$)/gi, '');
+        out = out.replace(/```[a-z0-9_-]*\s*```/gi, '');
       }
       if (hasStrippedDoc || (options && (options.docFormat || options.isDocCreation))) {
         out = out.replace(/```(?:markdown|md|docx|doc|pdf)[\s\S]*?(?:```|$)/gi, '');
@@ -9520,6 +9521,10 @@ Aturan wajib:
       out = out.replace(/>\s*🌐\s*\*Sedang meracik dan menyiapkan berkas website[^*]*\*/gi, '');
       out = out.replace(/>\s*🌐\s*\*Sedang merancang kode website[^*]*\*/gi, '');
       out = out.replace(/>\s*📄\s*\*Sedang menyusun dan memformat dokumen[^*]*\*/gi, '');
+
+      // Bersihkan sisa kalimat permintaan maaf teknis semu dari model tentang pembungkus berkas jika berkas berhasil diekstrak
+      out = out.replace(/(?:Mohon\s+maaf,?\s*)?tampaknya\s+ada\s+kendala\s+teknis\s+singkat\s+dengan\s+pembungkus\s+berkas[^\n.]*[\n.]*/gi, '');
+      out = out.replace(/Saya\s+akan\s+tulis\s+ulang\s+seluruh\s+website\s+lengkapnya[^\n.]*[\n.]*/gi, '');
     }
 
     const kept = out.split('\n').filter((line) => {
@@ -9739,6 +9744,8 @@ Aturan wajib:
       // TOMBOL UNDUH SELALU ADA DI SEMUA KONDISI AGAR PENGGUNA BISA MENGUNDUH KAPAN SAJA
       const isFileDiagram = isDiagramFile(file);
       const fnLower = (file.name || '').toLowerCase();
+      const flLower = (file.lang || '').toLowerCase();
+      const isFileWeb = fnLower.endsWith('.html') || fnLower.endsWith('.htm') || flLower === 'html' || flLower === 'htm';
       const isFileDoc = fnLower.endsWith('.docx') || fnLower.endsWith('.pdf') || fnLower.endsWith('.doc') || 
                         flLower === 'docx' || flLower === 'pdf' || 
                         ((flLower === 'markdown' || flLower === 'md' || fnLower.endsWith('.md') || fnLower.endsWith('.markdown')) && !isFileDiagram && !isFileWeb);
@@ -13777,9 +13784,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       } catch (_) {}
     }
 
-    // Strip fenced code blocks dan inline code sebelum menjalankan regex teks biasa (5, 6, 7, 8)
-    // agar kode pemrograman / tutorial yang menyebut search_web TIDAK PERNAH terintersepsi keliru sebagai tool hidup
+    // Strip file blocks, raw HTML dokumen, fenced code blocks dan inline code sebelum menjalankan regex teks biasa (5, 6, 7, 8)
+    // agar kode pemrograman / tutorial / website yang menyebut search_web TIDAK PERNAH terintersepsi keliru sebagai tool hidup
     let textWithoutCode = text
+      .replace(/<<<ZOZ_(?:FILE|EDIT|MODIFY)[\s\S]*?(?:<<<END_ZOZ_(?:FILE|EDIT|MODIFY)>>>|$)/gi, ' ')
+      .replace(/<!DOCTYPE\s+html[\s\S]*?(?:<\/html>|$)/gi, ' ')
       .replace(/```[\s\S]*?```/g, ' ')
       .replace(/`[^`\n]+`/g, ' ');
 
@@ -14488,24 +14497,38 @@ Aturan Wajib:
 5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.`;
       } else if (isWebRequest && !hasNegativePreview) {
         const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS WEBSITE & PRATINJAU TERISOLASI (KONTEN PENUH & LENGKAP TANPA BATAS)
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE LENGKAP & PRATINJAU LANGSUNG
 [PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta APLIKASI WEB / HALAMAN HTML INTERAKTIF LENGKAP.
-${isPreviewOnly ? `[MODE EKSPLISIT: PRATINJAU LANGSUNG TERISOLASI (KODE TIDAK BOLEH BOCOR KE CHAT)]
-Aturan Wajib:
-1. Anda WAJIB membungkus seluruh kode website (HTML5 lengkap mandiri <!DOCTYPE html>...</html>) dalam SATU blok protokol:
+${isPreviewOnly ? `[MODE EKSPLISIT: PRATINJAU LANGSUNG TERISOLASI]
+Panduan Pembungkus Berkas (PILIH SALAH SATU FORMAT BERIKUT):
+1. Format Protokol (Direkomendasikan):
 <<<ZOZ_FILE name="index.html" mime="text/html" lang="html">
+<!DOCTYPE html>
+<html lang="id">
 ...seluruh kode HTML, CSS, JavaScript lengkap...
+</html>
 <<<END_ZOZ_FILE>>>
-2. DILARANG KERAS menuliskan atau membocorkan kode HTML di luar blok ZOZ_FILE di dalam percakapan! Kode harus terisolasi di dalam pratinjau.
-3. Di luar blok ZOZ_FILE, berikan HANYA teks pengantar atau ringkasan fitur website yang singkat, ramah, dan elegan yang menjelaskan bahwa website telah selesai dirancang dan siap diuji.` : `Aturan Wajib:
-1. Tuliskan kode HTML5 lengkap yang fungsional dan siap jalan dalam SATU blok protokol ZOZ_FILE.
-2. DILARANG KERAS menulis kode HTML atau CSS di luar blok kode markdown!`}
-4. MANDAT KELENGKAPAN PENUH (UNLIMITED CODE - DILARANG MEMOTONG KODE):
+
+2. Atau Format Blok Kode Standar (Juga Didukung Penuh & Otomatis Diisolasi oleh Zoz Router):
+\`\`\`html
+<!DOCTYPE html>
+<html lang="id">
+...seluruh kode HTML, CSS, JavaScript lengkap...
+</html>
+\`\`\`
+
+CATATAN TEKNIS SISTEM:
+- Kedua format pembungkus di atas 100% didukung dan secara otomatis diisolasi oleh Zoz Router menjadi kartu berkas dengan tombol "Pratinjau Live" dan "Unduh HTML".
+- Di luar blok berkas kode, berikan HANYA teks pengantar atau ringkasan fitur website yang singkat, ramah, dan percaya diri.
+- JANGAN meminta maaf atau mencemaskan pembungkus berkas.` : `Panduan Pembungkus Berkas:
+Tuliskan kode HTML5 lengkap yang fungsional dan siap jalan dalam SATU blok protokol ZOZ_FILE atau blok kode markdown \`\`\`html ... \`\`\`.`}
+3. MANDAT KELENGKAPAN KONTEN & KODE PENUH (DILARANG MEMOTONG KODE):
    - Anda WAJIB menuliskan SELURUH KODE SECARA UTUH DAN TUNTAS dari <!DOCTYPE html> hingga </html>.
-   - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan sebanyak mungkin baris kode yang dibutuhkan (ratusan atau ribuan baris tanpa batas) agar seluruh fitur, styling visual, layout responsif, dan interaksi JavaScript berfungsi nyata.
+   - Jika website memuat artikel atau konten materi (misalnya artikel sejarah, edukasi, profil tokoh, atau panduan), tuliskan seluruh isi teks artikel secara komprehensif, menarik, dan berbobot langsung di dalam elemen HTML (<article>, <section>, <p>, dsb.) menggunakan pengetahuan kaya Anda tanpa perlu memanggil alat pencarian tambahan.
+   - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan sebanyak mungkin baris kode yang dibutuhkan (ratusan atau ribuan baris) agar seluruh fitur, styling visual, layout responsif, dan interaksi JavaScript berfungsi nyata.
    - DILARANG MENGGUNAKAN PLACEHOLDER PEMOTONG seperti '// kode CSS lainnya di sini...', '// tambahkan fungsi di sini...', atau '<!-- sisa konten -->'.
-5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.
-6. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js), sertakan tag <script src="..."> resmi dari CDN publik.`;
+4. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.
+5. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js), sertakan tag <script src="..."> resmi dari CDN publik.`;
       } else if (isExplicitCleanCodeCmd) {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
 Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
@@ -14830,7 +14853,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         // Amankan teks pembuka yang telah digenerasi model sebelum pemanggilan tool agar tidak terhapus
         const cleanAssistant = scrubRawToolCallArtifacts(currentRoundText).trim();
         if (!preambleHtml && cleanAssistant && cleanAssistant.length > 20) {
-          preambleHtml = `<div class="autonomous-preamble-text" style="margin-bottom:8px;">${renderMarkdown(cleanAssistant)}</div>`;
+          let sanitizedPreamble = hideFileBlocksForDisplay(cleanAssistant, runOptions);
+          if (runOptions && (runOptions.websiteMode === 'preview' || runOptions.isWebCreation)) {
+            sanitizedPreamble = stripGeneratedFileBlocks(sanitizedPreamble, [], runOptions);
+          }
+          if (sanitizedPreamble && sanitizedPreamble.trim()) {
+            preambleHtml = `<div class="autonomous-preamble-text" style="margin-bottom:8px;">${renderMarkdown(sanitizedPreamble.trim())}</div>`;
+          }
         }
 
         const toolTaskItems = detectedAutonomousCalls.map(call => {
@@ -15548,24 +15577,38 @@ Aturan Wajib:
 5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.`;
       } else if (isWebRequest && !hasNegativePreview) {
         const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS WEBSITE & PRATINJAU TERISOLASI (KONTEN PENUH & LENGKAP TANPA BATAS)
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE LENGKAP & PRATINJAU LANGSUNG
 [PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta APLIKASI WEB / HALAMAN HTML INTERAKTIF LENGKAP.
-${isPreviewOnly ? `[MODE EKSPLISIT: PRATINJAU LANGSUNG TERISOLASI (KODE TIDAK BOLEH BOCOR KE CHAT)]
-Aturan Wajib:
-1. Anda WAJIB membungkus seluruh kode website (HTML5 lengkap mandiri <!DOCTYPE html>...</html>) dalam SATU blok protokol:
+${isPreviewOnly ? `[MODE EKSPLISIT: PRATINJAU LANGSUNG TERISOLASI]
+Panduan Pembungkus Berkas (PILIH SALAH SATU FORMAT BERIKUT):
+1. Format Protokol (Direkomendasikan):
 <<<ZOZ_FILE name="index.html" mime="text/html" lang="html">
+<!DOCTYPE html>
+<html lang="id">
 ...seluruh kode HTML, CSS, JavaScript lengkap...
+</html>
 <<<END_ZOZ_FILE>>>
-2. DILARANG KERAS menuliskan atau membocorkan kode HTML di luar blok ZOZ_FILE di dalam percakapan! Kode harus terisolasi di dalam pratinjau.
-3. Di luar blok ZOZ_FILE, berikan HANYA teks pengantar atau ringkasan fitur website yang singkat, ramah, dan elegan yang menjelaskan bahwa website telah selesai dirancang dan siap diuji.` : `Aturan Wajib:
-1. Tuliskan kode HTML5 lengkap yang fungsional dan siap jalan dalam SATU blok protokol ZOZ_FILE.
-2. DILARANG KERAS menulis kode HTML atau CSS di luar blok kode markdown!`}
-4. MANDAT KELENGKAPAN PENUH (UNLIMITED CODE - DILARANG MEMOTONG KODE):
+
+2. Atau Format Blok Kode Standar (Juga Didukung Penuh & Otomatis Diisolasi oleh Zoz Router):
+\`\`\`html
+<!DOCTYPE html>
+<html lang="id">
+...seluruh kode HTML, CSS, JavaScript lengkap...
+</html>
+\`\`\`
+
+CATATAN TEKNIS SISTEM:
+- Kedua format pembungkus di atas 100% didukung dan secara otomatis diisolasi oleh Zoz Router menjadi kartu berkas dengan tombol "Pratinjau Live" dan "Unduh HTML".
+- Di luar blok berkas kode, berikan HANYA teks pengantar atau ringkasan fitur website yang singkat, ramah, dan percaya diri.
+- JANGAN meminta maaf atau mencemaskan pembungkus berkas.` : `Panduan Pembungkus Berkas:
+Tuliskan kode HTML5 lengkap yang fungsional dan siap jalan dalam SATU blok protokol ZOZ_FILE atau blok kode markdown \`\`\`html ... \`\`\`.`}
+3. MANDAT KELENGKAPAN KONTEN & KODE PENUH (DILARANG MEMOTONG KODE):
    - Anda WAJIB menuliskan SELURUH KODE SECARA UTUH DAN TUNTAS dari <!DOCTYPE html> hingga </html>.
-   - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan sebanyak mungkin baris kode yang dibutuhkan (ratusan atau ribuan baris tanpa batas) agar seluruh fitur, styling visual, layout responsif, dan interaksi JavaScript berfungsi nyata.
+   - Jika website memuat artikel atau konten materi (misalnya artikel sejarah, edukasi, profil tokoh, atau panduan), tuliskan seluruh isi teks artikel secara komprehensif, menarik, dan berbobot langsung di dalam elemen HTML (<article>, <section>, <p>, dsb.) menggunakan pengetahuan kaya Anda tanpa perlu memanggil alat pencarian tambahan.
+   - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan sebanyak mungkin baris kode yang dibutuhkan (ratusan atau ribuan baris) agar seluruh fitur, styling visual, layout responsif, dan interaksi JavaScript berfungsi nyata.
    - DILARANG MENGGUNAKAN PLACEHOLDER PEMOTONG seperti '// kode CSS lainnya di sini...', '// tambahkan fungsi di sini...', atau '<!-- sisa konten -->'.
-5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.
-6. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js), sertakan tag <script src="..."> resmi dari CDN publik.`;
+4. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.
+5. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js), sertakan tag <script src="..."> resmi dari CDN publik.`;
       } else if (isExplicitCleanCodeCmd) {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
 Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
@@ -16113,7 +16156,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         // Amankan teks pembuka yang telah digenerasi model sebelum pemanggilan tool agar tidak terhapus
         const cleanAssistant = scrubRawToolCallArtifacts(currentRoundText).trim();
         if (!preambleHtml && cleanAssistant && cleanAssistant.length > 20) {
-          preambleHtml = `<div class="autonomous-preamble-text" style="margin-bottom:8px;">${renderMarkdown(cleanAssistant)}</div>`;
+          let sanitizedPreamble = hideFileBlocksForDisplay(cleanAssistant, runOptions);
+          if (runOptions && (runOptions.websiteMode === 'preview' || runOptions.isWebCreation)) {
+            sanitizedPreamble = stripGeneratedFileBlocks(sanitizedPreamble, [], runOptions);
+          }
+          if (sanitizedPreamble && sanitizedPreamble.trim()) {
+            preambleHtml = `<div class="autonomous-preamble-text" style="margin-bottom:8px;">${renderMarkdown(sanitizedPreamble.trim())}</div>`;
+          }
         }
 
         const toolTaskItems = detectedAutonomousCalls.map(call => {
