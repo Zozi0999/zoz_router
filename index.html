@@ -38,8 +38,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
-  <link rel="preload" as="style" href="style.css?v=20261016_v304">
-  <link rel="stylesheet" href="style.css?v=20261016_v304">
+  <link rel="preload" as="style" href="style.css?v=20261016_v305">
+  <link rel="stylesheet" href="style.css?v=20261016_v305">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -1649,13 +1649,16 @@
           <pre class="ai-file-studio-code gemini-studio-code" id="aiFileStudioCode"></pre>
         </div>
 
-        <!-- Studio Assistant Floating Popup on Left -->
+        <!-- Studio Assistant Floating Mini Popup on Left -->
         <div class="studio-assistant-panel" id="studioAssistantPanel" style="display: none;">
-          <div class="studio-assistant-header">
+          <div class="studio-assistant-header" id="studioAssistantHeader">
             <div class="studio-assistant-title">
-              <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Asisten Zoz Router</span>
+              <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Asisten Zoz</span>
             </div>
             <div class="studio-assistant-controls">
+              <button class="gemini-icon-btn assistant-min-btn" id="btnStudioMinAssistant" type="button" title="Kecilkan / Perluas Asisten (Minimize/Expand)">
+                <i class="fa-solid fa-minus" id="iconStudioMin"></i>
+              </button>
               <button class="gemini-icon-btn" id="btnStudioClearChat" type="button" title="Bersihkan Catatan Diskusi Studio">
                 <i class="fa-solid fa-trash-can"></i>
               </button>
@@ -1664,10 +1667,12 @@
               </button>
             </div>
           </div>
-          <div class="studio-assistant-messages" id="studioAssistantMessages">
-            <div class="studio-assistant-empty" id="studioAssistantEmpty">
-              <i class="fa-solid fa-comments"></i>
-              <p>Tanya Zoz Router tentang struktur website ini, minta penjelasan kode, atau minta penambahan fitur baru di kolom prompt bawah.</p>
+          <div class="studio-assistant-body" id="studioAssistantBody">
+            <div class="studio-assistant-messages" id="studioAssistantMessages">
+              <div class="studio-assistant-empty" id="studioAssistantEmpty">
+                <i class="fa-solid fa-comments"></i>
+                <p>Tanya Zoz Router tentang struktur website ini, minta penjelasan kode, atau minta penambahan fitur baru di kolom prompt bawah.</p>
+              </div>
             </div>
           </div>
         </div>
@@ -2301,8 +2306,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous" defer></script>
   <!-- Heavy libraries (Mermaid, jsPDF, PDF.js, JSZip) are dynamically loaded on-demand to optimize FCP, TBT & LCP -->
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261016_v304" defer></script>
+  <script src="text-safety.js?v=20261016_v305" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261016_v304" defer></script>
+  <script src="app.js?v=20261016_v305" defer></script>
 </body>
 </html>

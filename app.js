@@ -811,6 +811,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     btnStudioSendFollowup: $('#btnStudioSendFollowup'),
     btnStudioStopFollowup: $('#btnStudioStopFollowup'),
     btnToggleStudioAssistant: $('#btnToggleStudioAssistant'),
+    btnStudioMinAssistant: $('#btnStudioMinAssistant'),
     studioAssistantPanel: $('#studioAssistantPanel'),
     studioAssistantMessages: $('#studioAssistantMessages'),
     studioAssistantEmpty: $('#studioAssistantEmpty'),
@@ -11297,8 +11298,24 @@ ${blocks}
   function openStudioAssistantDrawer() {
     if (els.studioAssistantPanel) {
       els.studioAssistantPanel.style.display = 'flex';
+      els.studioAssistantPanel.classList.remove('is-minimized');
+      const icon = $('#iconStudioMin');
+      if (icon) icon.className = 'fa-solid fa-minus';
+      const btn = els.btnStudioMinAssistant || $('#btnStudioMinAssistant');
+      if (btn) btn.title = 'Kecilkan Asisten (Minimize)';
       if (els.btnToggleStudioAssistant) els.btnToggleStudioAssistant.classList.add('active');
     }
+  }
+
+  function toggleStudioAssistantMinimize() {
+    if (!els.studioAssistantPanel) return;
+    els.studioAssistantPanel.classList.toggle('is-minimized');
+    const isMin = els.studioAssistantPanel.classList.contains('is-minimized');
+    const icon = $('#iconStudioMin');
+    if (icon) icon.className = isMin ? 'fa-solid fa-plus' : 'fa-solid fa-minus';
+    const btn = els.btnStudioMinAssistant || $('#btnStudioMinAssistant');
+    if (btn) btn.title = isMin ? 'Perluas Asisten (Expand)' : 'Kecilkan Asisten (Minimize)';
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
   }
 
   function closeStudioAssistantDrawer() {
@@ -11406,6 +11423,17 @@ ${blocks}
 
   els.btnToggleStudioAssistant?.addEventListener('click', toggleStudioAssistantDrawer);
   els.btnStudioCloseDrawer?.addEventListener('click', closeStudioAssistantDrawer);
+  els.btnStudioMinAssistant?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleStudioAssistantMinimize();
+  });
+  const studioAssistantHeaderEl = $('#studioAssistantHeader');
+  studioAssistantHeaderEl?.addEventListener('click', (e) => {
+    if (e.target.closest('button')) return;
+    if (els.studioAssistantPanel?.classList.contains('is-minimized')) {
+      toggleStudioAssistantMinimize();
+    }
+  });
   els.btnStudioClearChat?.addEventListener('click', () => {
     if (els.studioAssistantMessages) {
       els.studioAssistantMessages.innerHTML = `
