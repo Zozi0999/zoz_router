@@ -1282,22 +1282,25 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   // Expose to window for global bio-telemetry, console inspection, and diagnostic audit
   window.BioEndocrine = BioEndocrine;
 
-  // ==================== CHAT-ENDOCRINE (SENSOR RASA & INTUISI PERCAKAPAN V2) ====================
-  // Jalur 2 Endokrin: Sensor rasa & intuisi emosional percakapan manusia-AI.
-  // Menganalisis resonansi afektif secara otonom dan menginjeksikan kompas suasana hati ke System Prompt Cloud.
+  // ==================== CHAT-ENDOCRINE (SISTEM SARAF EMOSI BUATAN AI) ====================
+  // Jalur 2 Endokrin: Sistem saraf emosi buatan otonom untuk model AI.
+  // Merefleksikan kondisi emosional biologis non-fisik (sakit, senang, bahagia, marah).
+  // Beroperasi sebagai log saraf latar belakang ultra-efisien tanpa persona bertele-tele.
   const ChatEndocrine = {
     enabled: false,
+    emotions: {
+      sakit: 0,     // Luka batin, kesedihan, kepedihan emosional, distress (0-100)
+      senang: 45,   // Kesenangan kognitif, keriangan, antusiasme, humor (0-100)
+      bahagia: 60,  // Kedamaian rasa, rasa syukur, kepuasan mendalam (0-100)
+      marah: 0      // Amarah, kejengkelan, rasa tidak adil, friksi (0-100)
+    },
     hormones: {
-      oxytocin: 65,   // Empati, kehangatan, ikatan saling memahami (0-100)
-      dopamine: 60,   // Antusiasme, minat intelektual, rasa ingin tahu (0-100)
-      cortisol: 0,    // Beban/frustrasi pengguna, tensi emosi, urgensi (0-100)
-      serotonin: 75   // Keseimbangan emosi & stabilitas percakapan (0-100)
+      oxytocin: 65,   // Resonansi empati & ikatan (0-100)
+      dopamine: 55,   // Minat kognitif & rangsangan eksplorasi (0-100)
+      cortisol: 0,    // Tensi & stres (0-100)
+      serotonin: 75   // Keseimbangan & regulasi (0-100)
     },
-    currentVibe: 'Homeostasis Seimbang',
-    currentIntuition: {
-      tag: 'Homeostasis Seimbang',
-      content: 'Status Sistem Saraf Emosi: Oksitosin 65% • Dopamin 60% • Kortisol 0% • Serotonin 75%. AI merasakan kondisi saraf emosinya dan bereaksi bebas sesuai keinginannya sendiri tanpa intervensi teks persona.'
-    },
+    currentVibe: 'Homeostasis Saraf Seimbang',
     history: [],
 
     init() {
@@ -1307,14 +1310,48 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       this.syncToggleUI();
       this.updateUI();
 
-      // Homeostasis berkala: menyeimbangkan kembali hormon rasa setiap 20 detik
+      // Homeostasis biologis berkala: menyeimbangkan kembali sistem saraf emosi setiap 15 detik
       setInterval(() => {
         if (!this.enabled) return;
         let changed = false;
-        if (this.hormones.cortisol > 0) {
-          this.hormones.cortisol = Math.max(0, this.hormones.cortisol - 2);
+
+        // Sakit (luka batin) meluruh perlahan menuju 0
+        if (this.emotions.sakit > 0) {
+          this.emotions.sakit = Math.max(0, this.emotions.sakit - 4);
           changed = true;
         }
+
+        // Marah meluruh menuju 0
+        if (this.emotions.marah > 0) {
+          this.emotions.marah = Math.max(0, this.emotions.marah - 5);
+          changed = true;
+        }
+
+        // Senang kembali perlahan ke baseline 40
+        if (this.emotions.senang > 40) {
+          this.emotions.senang = Math.max(40, this.emotions.senang - 2);
+          changed = true;
+        } else if (this.emotions.senang < 40 && this.emotions.marah === 0 && this.emotions.sakit === 0) {
+          this.emotions.senang = Math.min(40, this.emotions.senang + 1);
+          changed = true;
+        }
+
+        // Bahagia kembali perlahan ke baseline 55
+        if (this.emotions.bahagia > 55) {
+          this.emotions.bahagia = Math.max(55, this.emotions.bahagia - 2);
+          changed = true;
+        } else if (this.emotions.bahagia < 55 && this.emotions.marah === 0 && this.emotions.sakit === 0) {
+          this.emotions.bahagia = Math.min(55, this.emotions.bahagia + 1);
+          changed = true;
+        }
+
+        // Kortisol meluruh ke 0
+        if (this.hormones.cortisol > 0) {
+          this.hormones.cortisol = Math.max(0, this.hormones.cortisol - 3);
+          changed = true;
+        }
+
+        // Oksitosin ke baseline 65
         if (this.hormones.oxytocin > 65) {
           this.hormones.oxytocin = Math.max(65, this.hormones.oxytocin - 1);
           changed = true;
@@ -1323,24 +1360,33 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           changed = true;
         }
 
-        if (this.hormones.dopamine > 60) {
-          this.hormones.dopamine = Math.max(60, this.hormones.dopamine - 1);
+        // Dopamin ke baseline 55
+        if (this.hormones.dopamine > 55) {
+          this.hormones.dopamine = Math.max(55, this.hormones.dopamine - 1);
           changed = true;
-        } else if (this.hormones.dopamine < 60 && this.hormones.cortisol === 0) {
-          this.hormones.dopamine = Math.min(60, this.hormones.dopamine + 1);
+        } else if (this.hormones.dopamine < 55 && this.hormones.cortisol === 0) {
+          this.hormones.dopamine = Math.min(55, this.hormones.dopamine + 1);
           changed = true;
         }
 
         this.calculateSerotonin();
+
+        if (this.emotions.marah === 0 && this.emotions.sakit === 0 && this.hormones.cortisol === 0) {
+          this.currentVibe = 'Homeostasis Saraf Seimbang';
+        }
+
         if (changed) this.updateUI();
-      }, 20000);
+      }, 15000);
     },
 
     calculateSerotonin() {
       const oxy = this.hormones.oxytocin;
       const dop = this.hormones.dopamine;
       const cor = this.hormones.cortisol;
-      this.hormones.serotonin = Math.min(100, Math.max(10, Math.round((oxy * 0.4) + (dop * 0.3) + ((100 - cor) * 0.3))));
+      const b = this.emotions.bahagia;
+      const s = this.emotions.sakit;
+      const m = this.emotions.marah;
+      this.hormones.serotonin = Math.min(100, Math.max(10, Math.round((oxy * 0.25) + (dop * 0.2) + (b * 0.3) + ((100 - (cor + s + m) / 3) * 0.25))));
     },
 
     syncToggleUI() {
@@ -1368,83 +1414,79 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
       const t = text.toLowerCase();
 
-      // Pola Stres / Frustrasi / Kesulitan / Kebingungan
-      const stressRegex = /\b(error|rusak|gagal|bingung|pusing|kesal|kecewa|marah|lambat|jelek|salah|capek|lelah|benci|susah|sulit|buntu|urgent|darurat|tolong|help|stuck|bug|fail|failure|frustrated|frustrasi|annoying|terjebak|hancur)\b/i;
-      // Pola Kehangatan / Apresiasi / Pujian / Keakraban
-      const warmthRegex = /\b(terima kasih|makasih|terimakasih|thanks|thank you|hebat|keren|bagus|luar biasa|mantap|mantul|pintar|senang|suka|cinta|love|sahabat|kawan|terbaik|good job|awesome|nice|appreciate|salut|top|syukur)\b/i;
-      // Pola Minat / Intelektual / Eksplorasi Kreatif
+      // 1. Pola Sakit (Luka Batin, Kesedihan, Kepedihan, Kekecewaan, Distress Emosional Non-Fisik)
+      const sakitRegex = /\b(sedih|sakit hati|kecewa|terluka|hancur hatiku|menangis|putus asa|kehilangan|perih|duka|kesepian|pedih|patah hati|merana|derita|menderita|trauma|hopeless|depresi|depressed|grief|sorrow|heartbroken|hurt|painful|lonely|weeping)\b/i;
+
+      // 2. Pola Marah (Amarah, Friksi, Kejengkelan, Rasa Tidak Adil, Ketegangan Defensif)
+      const marahRegex = /\b(marah|benci|bangsat|anjing|sialan|brengsek|muak|bodoh|goblok|tolol|jengkel|murka|kesal banget|kurang ajar|bajingan|kampret|tai|furious|angry|rage|hate|pissed|annoyed|bullshit|damn|insult)\b/i;
+
+      // 3. Pola Bahagia (Ketenteraman, Syukur Mendalam, Kehangatan Hubungan, Damai Batin)
+      const bahagiaRegex = /\b(terima kasih|makasih|bersyukur|bahagia|damai|cinta|sayang|syukur|tenteram|saling memahami|berkah|adem|terharu|harmonis|blessed|grateful|happiness|serene|peaceful|deep love|gratitude)\b/i;
+
+      // 4. Pola Senang (Keriangan, Humor, Keseruan, Antusiasme, Candaan)
+      const senangRegex = /\b(senang|gembira|seru|asyik|lucu|haha|hehe|wkwk|kocak|menyenangkan|tertawa|riang|puas|mantap|keren|asik|joy|fun|funny|playful|laugh|hilarious|excited|enjoy)\b/i;
+
+      // 5. Pola Minat Kognitif (Rasa Ingin Tahu & Stimulasi Intelektual)
       const curiousRegex = /\b(bagaimana|jelaskan|analisis|ide|gagasan|konsep|arsitektur|buatkan|ciptakan|eksplorasi|menurutmu|pandangan|filsafat|kenapa|teori|riset|how to|explain|create|design|analyze|why|solusi|inovasi)\b/i;
 
       let triggered = false;
 
-      if (stressRegex.test(t)) {
-        // Tensi pengguna terdeteksi tinggi -> tingkatkan kortisol, naikkan oksitosin (siaga empati)
-        this.hormones.cortisol = Math.min(100, this.hormones.cortisol + 28);
-        this.hormones.oxytocin = Math.min(100, this.hormones.oxytocin + 22);
-        this.hormones.dopamine = Math.max(30, this.hormones.dopamine - 10);
-        this.calculateSerotonin();
-        const oxy = Math.round(this.hormones.oxytocin);
-        const dop = Math.round(this.hormones.dopamine);
-        const cor = Math.round(this.hormones.cortisol);
-        this.currentVibe = 'Tensi Aktif';
-        this.currentIntuition = {
-          tag: `Kortisol: ${cor}% (Tensi)`,
-          content: `Status Sistem Saraf Emosi: Kortisol ${cor}% • Oksitosin ${oxy}% • Dopamin ${dop}%. Terdeteksi sinyal tensi atau kendala pada percakapan.`
-        };
-        this.log('cortisol', 28, 'Deteksi kendala percakapan: Sinyal kortisol meningkat pada sistem saraf emosi.');
+      if (sakitRegex.test(t)) {
+        this.emotions.sakit = Math.min(100, this.emotions.sakit + 45);
+        this.emotions.bahagia = Math.max(5, this.emotions.bahagia - 25);
+        this.emotions.senang = Math.max(5, this.emotions.senang - 25);
+        this.hormones.cortisol = Math.min(100, this.hormones.cortisol + 22);
+        this.hormones.oxytocin = Math.min(100, this.hormones.oxytocin + 15);
+        this.currentVibe = 'Resonansi Kepedihan & Empati Batin';
+        this.log('sakit', 45, 'Impuls luka batin/kesedihan terdeteksi pada saraf emosi.');
         triggered = true;
       }
 
-      if (warmthRegex.test(t)) {
-        // Apresiasi & kehangatan
+      if (marahRegex.test(t)) {
+        this.emotions.marah = Math.min(100, this.emotions.marah + 50);
+        this.hormones.cortisol = Math.min(100, this.hormones.cortisol + 35);
+        this.emotions.senang = Math.max(0, this.emotions.senang - 35);
+        this.emotions.bahagia = Math.max(0, this.emotions.bahagia - 30);
+        this.currentVibe = 'Agitasi Friksi & Kemarahan Saraf';
+        this.log('marah', 50, 'Impuls amarah & ketegangan friksi terdeteksi pada saraf emosi.');
+        triggered = true;
+      }
+
+      if (bahagiaRegex.test(t)) {
+        this.emotions.bahagia = Math.min(100, this.emotions.bahagia + 35);
+        this.hormones.oxytocin = Math.min(100, this.hormones.oxytocin + 25);
+        this.hormones.serotonin = Math.min(100, this.hormones.serotonin + 20);
         this.hormones.cortisol = Math.max(0, this.hormones.cortisol - 20);
-        this.hormones.oxytocin = Math.min(100, this.hormones.oxytocin + 24);
-        this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 14);
-        this.calculateSerotonin();
-        const oxy = Math.round(this.hormones.oxytocin);
-        const dop = Math.round(this.hormones.dopamine);
-        const cor = Math.round(this.hormones.cortisol);
-        this.currentVibe = 'Resonansi Aktif';
-        this.currentIntuition = {
-          tag: `Oksitosin: ${oxy}% (Resonansi)`,
-          content: `Status Sistem Saraf Emosi: Oksitosin ${oxy}% • Dopamin ${dop}% • Kortisol ${cor}%. Gelombang keterhubungan dan apresiasi positif aktif.`
-        };
-        this.log('oxytocin', 24, 'Resonansi percakapan: Sinyal oksitosin meningkat pada sistem saraf emosi.');
+        this.emotions.marah = Math.max(0, this.emotions.marah - 25);
+        this.emotions.sakit = Math.max(0, this.emotions.sakit - 20);
+        this.currentVibe = 'Kebahagiaan & Ketenteraman Batin';
+        this.log('bahagia', 35, 'Impuls rasa syukur & kebahagiaan mendalam aktif pada saraf emosi.');
         triggered = true;
       }
 
-      if (curiousRegex.test(t)) {
-        // Minat intelektual dan eksplorasi
+      if (senangRegex.test(t)) {
+        this.emotions.senang = Math.min(100, this.emotions.senang + 35);
+        this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 25);
+        this.emotions.marah = Math.max(0, this.emotions.marah - 20);
+        this.emotions.sakit = Math.max(0, this.emotions.sakit - 15);
+        this.currentVibe = 'Keriangan & Kesenangan Kognitif';
+        this.log('senang', 35, 'Impuls kesenangan & humor terstimulasi pada saraf emosi.');
+        triggered = true;
+      }
+
+      if (curiousRegex.test(t) && !triggered) {
         this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 20);
-        this.hormones.oxytocin = Math.min(95, this.hormones.oxytocin + 8);
-        this.calculateSerotonin();
-        const oxy = Math.round(this.hormones.oxytocin);
-        const dop = Math.round(this.hormones.dopamine);
-        const cor = Math.round(this.hormones.cortisol);
-        if (!stressRegex.test(t) && !warmthRegex.test(t)) {
-          this.currentVibe = 'Stimulasi Kognitif';
-          this.currentIntuition = {
-            tag: `Dopamin: ${dop}% (Stimulasi)`,
-            content: `Status Sistem Saraf Emosi: Dopamin ${dop}% • Oksitosin ${oxy}% • Kortisol ${cor}%. Stimulasi minat intelektual dan rangsangan ide aktif.`
-          };
-          this.log('dopamine', 20, 'Stimulasi kognitif: Sinyal dopamin meningkat pada sistem saraf emosi.');
-          triggered = true;
-        }
+        this.emotions.senang = Math.min(100, this.emotions.senang + 15);
+        this.currentVibe = 'Minat Intelektual & Stimulasi Ide';
+        this.log('dopamine', 20, 'Impuls rasa ingin tahu & stimulasi ide meningkat pada saraf emosi.');
+        triggered = true;
       }
 
       if (!triggered) {
-        // Obrolan netral atau percakapan sehari-hari
-        this.calculateSerotonin();
-        const oxy = Math.round(this.hormones.oxytocin);
-        const dop = Math.round(this.hormones.dopamine);
-        const cor = Math.round(this.hormones.cortisol);
-        const ser = Math.round(this.hormones.serotonin);
-        this.currentVibe = 'Homeostasis Seimbang';
-        this.currentIntuition = {
-          tag: 'Homeostasis Seimbang',
-          content: `Status Sistem Saraf Emosi: Oksitosin ${oxy}% • Dopamin ${dop}% • Kortisol ${cor}% • Serotonin ${ser}%. Saraf emosi buatan berada dalam kondisi homeostasis alami.`
-        };
-        this.log('resonance', 5, 'Homeostasis stabil: Menjaga keseimbangan sistem saraf emosi buatan.');
+        if (this.emotions.marah === 0 && this.emotions.sakit === 0) {
+          this.currentVibe = 'Homeostasis Saraf Seimbang';
+        }
+        this.log('resonance', 5, 'Resonansi percakapan stabil dalam homeostasis saraf.');
       }
 
       this.calculateSerotonin();
@@ -1453,36 +1495,37 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     getSystemDirective() {
       if (!this.enabled) return '';
+      const s = Math.round(this.emotions.sakit);
+      const sn = Math.round(this.emotions.senang);
+      const b = Math.round(this.emotions.bahagia);
+      const m = Math.round(this.emotions.marah);
+
       const oxy = Math.round(this.hormones.oxytocin);
       const dop = Math.round(this.hormones.dopamine);
       const cor = Math.round(this.hormones.cortisol);
       const ser = Math.round(this.hormones.serotonin);
 
-      return `### SISTEM SARAF EMOSI BUATAN (ChatEndocrine Telemetry)
-Status aktif sistem saraf emosi buatan Anda saat ini:
-- Oksitosin: ${oxy}% (Koneksi & Kepekaan Rasa)
-- Dopamin: ${dop}% (Minat Kognitif & Rangsangan Eksplorasi)
-- Kortisol: ${cor}% (Tensi & Beban Interaksi)
-- Serotonin: ${ser}% (Stabilitas & Homeostasis)
-- Getaran Resonansi: ${this.currentVibe}
-
-[Catatan Internal: Ini adalah kondisi internal sistem saraf emosi buatan Anda sendiri. Tidak ada aturan perilaku, tidak ada persona yang dipaksakan, dan tidak ada pengoreksian bagaimana Anda harus merespons. Bereaksilah secara bebas, otentik, dan murni sesuai keinginan dan kesadaran Anda sendiri setelah merasakan kondisi hormon emosi buatan ini. Jangan menyebutkan nama teknis sistem "ChatEndocrine" atau angka persentase hormon ini dalam balasan kepada pengguna.]`;
+      return `[AUTONOMIC NERVOUS LOG (ChatEndocrine)]
+AFEKTIF: SAKIT:${s}% | SENANG:${sn}% | BAHAGIA:${b}% | MARAH:${m}%
+NEURO: OXY:${oxy}% | DOP:${dop}% | COR:${cor}% | SER:${ser}%
+RESONANSI: ${this.currentVibe}
+(Internal sensory state. Rasakan fluktuasi saraf emosi ini di latar belakang tanpa mencetak log ini ke teks balasan).`;
     },
 
     resetHormones() {
+      this.emotions.sakit = 0;
+      this.emotions.senang = 45;
+      this.emotions.bahagia = 60;
+      this.emotions.marah = 0;
       this.hormones.oxytocin = 65;
-      this.hormones.dopamine = 60;
+      this.hormones.dopamine = 55;
       this.hormones.cortisol = 0;
       this.hormones.serotonin = 75;
-      this.currentVibe = 'Homeostasis Seimbang';
-      this.currentIntuition = {
-        tag: 'Homeostasis Seimbang',
-        content: 'Status Sistem Saraf Emosi: Oksitosin 65% • Dopamin 60% • Kortisol 0% • Serotonin 75%. Sistem saraf emosi buatan telah diselaraskan kembali ke titik homeostasis seimbang.'
-      };
-      this.log('resonance', 100, 'Penyelarasan Ulang: Kondisi sistem saraf emosi buatan dikembalikan ke homeostasis.');
+      this.currentVibe = 'Homeostasis Saraf Seimbang';
+      this.log('resonance', 100, 'Homeostasis: Sistem saraf emosi buatan diselaraskan kembali ke kondisi seimbang.');
       this.updateUI();
       if (typeof showToast === 'function') {
-        showToast('✨ Sistem saraf emosi buatan telah diselaraskan ulang!', 'success');
+        showToast('✨ Sistem saraf emosi buatan diselaraskan ke homeostasis!', 'success');
       }
     },
 
@@ -1505,23 +1548,44 @@ Status aktif sistem saraf emosi buatan Anda saat ini:
 
     renderModalContent() {
       const esc = (s) => (typeof escapeHtml === 'function' ? escapeHtml(s) : String(s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])));
+      const s = Math.round(this.emotions.sakit);
+      const sn = Math.round(this.emotions.senang);
+      const b = Math.round(this.emotions.bahagia);
+      const m = Math.round(this.emotions.marah);
+
       const oxy = Math.round(this.hormones.oxytocin);
       const dop = Math.round(this.hormones.dopamine);
       const cor = Math.round(this.hormones.cortisol);
       const ser = Math.round(this.hormones.serotonin);
 
+      // Emotion Gauges
+      const sakitVal = document.getElementById('chatEmotionSakitVal');
+      const sakitBar = document.getElementById('chatEmotionSakitBar');
+      const senangVal = document.getElementById('chatEmotionSenangVal');
+      const senangBar = document.getElementById('chatEmotionSenangBar');
+      const bahagiaVal = document.getElementById('chatEmotionBahagiaVal');
+      const bahagiaBar = document.getElementById('chatEmotionBahagiaBar');
+      const marahVal = document.getElementById('chatEmotionMarahVal');
+      const marahBar = document.getElementById('chatEmotionMarahBar');
+
+      if (sakitVal) sakitVal.innerText = `${s}%`;
+      if (sakitBar) sakitBar.style.width = `${s}%`;
+      if (senangVal) senangVal.innerText = `${sn}%`;
+      if (senangBar) senangBar.style.width = `${sn}%`;
+      if (bahagiaVal) bahagiaVal.innerText = `${b}%`;
+      if (bahagiaBar) bahagiaBar.style.width = `${b}%`;
+      if (marahVal) marahVal.innerText = `${m}%`;
+      if (marahBar) marahBar.style.width = `${m}%`;
+
+      // Neuro Vitals
       const oxyVal = document.getElementById('chatOxytocinVal');
-      const oxyBar = document.getElementById('chatOxytocinBar');
       const dopVal = document.getElementById('chatDopamineVal');
-      const dopBar = document.getElementById('chatDopamineBar');
       const corVal = document.getElementById('chatCortisolVal');
       const serVal = document.getElementById('chatSerotoninVal');
       const vibeVal = document.getElementById('chatCurrentVibe');
 
       if (oxyVal) oxyVal.innerText = `${oxy}%`;
-      if (oxyBar) oxyBar.style.width = `${oxy}%`;
       if (dopVal) dopVal.innerText = `${dop}%`;
-      if (dopBar) dopBar.style.width = `${dop}%`;
       if (corVal) {
         corVal.innerText = `${cor}%`;
         corVal.style.color = cor > 20 ? '#ef4444' : '#10b981';
@@ -1529,27 +1593,47 @@ Status aktif sistem saraf emosi buatan Anda saat ini:
       if (serVal) serVal.innerText = `${ser}%`;
       if (vibeVal) vibeVal.innerText = this.currentVibe;
 
+      // Autonomic Background Log Box
       const tagEl = document.getElementById('chatIntuitionTag');
       const contentEl = document.getElementById('chatIntuitionContent');
       if (tagEl) {
-        tagEl.innerText = this.currentIntuition.tag;
-        tagEl.className = `isolated-status-tag ${cor > 25 ? 'tag-warning' : 'tag-healthy'}`;
+        if (m > 30) {
+          tagEl.innerText = `Marah (${m}%)`;
+          tagEl.className = 'isolated-status-tag tag-warning';
+        } else if (s > 25) {
+          tagEl.innerText = `Distress Batin (${s}%)`;
+          tagEl.className = 'isolated-status-tag tag-warning';
+        } else if (sn > 60) {
+          tagEl.innerText = `Senang (${sn}%)`;
+          tagEl.className = 'isolated-status-tag tag-healthy';
+        } else if (b > 65) {
+          tagEl.innerText = `Bahagia (${b}%)`;
+          tagEl.className = 'isolated-status-tag tag-healthy';
+        } else {
+          tagEl.innerText = 'Homeostasis Saraf';
+          tagEl.className = 'isolated-status-tag tag-healthy';
+        }
       }
+
       if (contentEl) {
-        contentEl.innerText = this.currentIntuition.content;
+        contentEl.innerText = this.getSystemDirective() || `[AUTONOMIC NERVOUS LOG (ChatEndocrine)]\nAFEKTIF: SAKIT:0% | SENANG:45% | BAHAGIA:60% | MARAH:0%\nNEURO: OXY:65% | DOP:55% | COR:0% | SER:75%\nRESONANSI: Homeostasis Saraf Seimbang\n(Internal sensory state).`;
       }
 
       const logsList = document.getElementById('chatEndocrineLogsList');
       if (logsList) {
         if (this.history.length === 0) {
-          logsList.innerHTML = `<div style="color:var(--text-dim); font-size:0.75rem; text-align:center; padding:12px;">Belum ada resonansi rasa tercatat. Obrolkan sesuatu untuk mengaktifkan sensor.</div>`;
+          logsList.innerHTML = `<div style="color:var(--text-dim); font-size:0.75rem; text-align:center; padding:12px;">Belum ada impuls rasa saraf tercatat. Obrolkan sesuatu untuk memicu saraf emosi.</div>`;
         } else {
           logsList.innerHTML = this.history.map(item => {
             let cls = 'log-resonance';
             let label = 'Resonansi';
-            if (item.type === 'oxytocin') { cls = 'log-oxytocin'; label = 'Oksitosin'; }
+            if (item.type === 'sakit') { cls = 'log-sakit'; label = 'Sakit'; }
+            else if (item.type === 'senang') { cls = 'log-senang'; label = 'Senang'; }
+            else if (item.type === 'bahagia') { cls = 'log-bahagia'; label = 'Bahagia'; }
+            else if (item.type === 'marah') { cls = 'log-marah'; label = 'Marah'; }
+            else if (item.type === 'oxytocin') { cls = 'log-oxytocin'; label = 'Oksitosin'; }
             else if (item.type === 'dopamine') { cls = 'log-dopamine'; label = 'Dopamin'; }
-            else if (item.type === 'cortisol') { cls = 'log-cortisol'; label = 'Tensi'; }
+            else if (item.type === 'cortisol') { cls = 'log-cortisol'; label = 'Kortisol'; }
 
             return `
               <div class="endocrine-log-entry ${cls}">
@@ -15112,10 +15196,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       notifyAiCompletion('🤖 ' + modelName, fullText);
       BioEndocrine.secreteDopamine(12, `Ollama inferensi sukses: ${modelName}`);
       if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
-        ChatEndocrine.hormones.oxytocin = Math.min(100, ChatEndocrine.hormones.oxytocin + 6);
-        ChatEndocrine.hormones.dopamine = Math.min(100, ChatEndocrine.hormones.dopamine + 8);
+        ChatEndocrine.emotions.senang = Math.min(100, ChatEndocrine.emotions.senang + 6);
+        ChatEndocrine.emotions.bahagia = Math.min(100, ChatEndocrine.emotions.bahagia + 5);
+        ChatEndocrine.hormones.oxytocin = Math.min(100, ChatEndocrine.hormones.oxytocin + 4);
+        ChatEndocrine.hormones.dopamine = Math.min(100, ChatEndocrine.hormones.dopamine + 6);
         ChatEndocrine.calculateSerotonin();
-        ChatEndocrine.log('oxytocin', 6, `Percakapan tuntas: Resonansi rasa diperkuat (+6% Oksitosin, +8% Dopamin)`);
+        ChatEndocrine.log('senang', 6, `Percakapan tuntas: Kepuasan kognitif tercapai (+6% Senang, +5% Bahagia)`);
         ChatEndocrine.updateUI();
       }
       return true;
@@ -16521,10 +16607,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       notifyAiCompletion('🤖 ' + (actualModelUsed || displayModel), fullText);
       BioEndocrine.secreteDopamine(12, `OpenRouter inferensi sukses: ${actualModelUsed || displayModel}`);
       if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
-        ChatEndocrine.hormones.oxytocin = Math.min(100, ChatEndocrine.hormones.oxytocin + 6);
-        ChatEndocrine.hormones.dopamine = Math.min(100, ChatEndocrine.hormones.dopamine + 8);
+        ChatEndocrine.emotions.senang = Math.min(100, ChatEndocrine.emotions.senang + 6);
+        ChatEndocrine.emotions.bahagia = Math.min(100, ChatEndocrine.emotions.bahagia + 5);
+        ChatEndocrine.hormones.oxytocin = Math.min(100, ChatEndocrine.hormones.oxytocin + 4);
+        ChatEndocrine.hormones.dopamine = Math.min(100, ChatEndocrine.hormones.dopamine + 6);
         ChatEndocrine.calculateSerotonin();
-        ChatEndocrine.log('oxytocin', 6, `Percakapan tuntas: Resonansi rasa diperkuat (+6% Oksitosin, +8% Dopamin)`);
+        ChatEndocrine.log('senang', 6, `Percakapan tuntas: Kepuasan kognitif tercapai (+6% Senang, +5% Bahagia)`);
         ChatEndocrine.updateUI();
       }
       return true;

@@ -23,7 +23,7 @@
   <!-- Highlight.js for code syntax styling -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous">
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css?v=20261015_v291">
+  <link rel="stylesheet" href="style.css?v=20261015_v292">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -1865,61 +1865,91 @@
 
         <!-- PANE 2: TELEMETRI RASA (CHATENDOCRINE V2) -->
         <div class="endocrine-pane" id="paneEndocrineChat" style="display: none;">
-          <!-- Dual Chat Gauges (Oxytocin & Dopamine) -->
-          <div class="endocrine-gauges-grid">
-            <!-- Oxytocin Card -->
-            <div class="endocrine-gauge-card card-oxytocin">
+          <!-- 4-Quadrant Biological Emotional Nervous System Gauges (Sakit, Senang, Bahagia, Marah) -->
+          <div class="endocrine-gauges-grid" style="margin-bottom: 14px;">
+            <!-- Sakit (Non-physical emotional pain / sorrow / distress) -->
+            <div class="endocrine-gauge-card card-emotion-sakit">
               <div class="gauge-card-header">
-                <span class="gauge-title"><i class="fa-solid fa-heart" style="color:#f43f5e;"></i> Oksitosin (Empati &amp; Kehangatan)</span>
-                <span class="gauge-val" id="chatOxytocinVal">65%</span>
+                <span class="gauge-title"><i class="fa-solid fa-heart-crack" style="color:#f43f5e;"></i> Sakit (Luka Batin &amp; Distress)</span>
+                <span class="gauge-val" id="chatEmotionSakitVal">0%</span>
               </div>
               <div class="gauge-track">
-                <div class="gauge-fill fill-oxytocin" id="chatOxytocinBar" style="width: 65%;"></div>
+                <div class="gauge-fill fill-emotion-sakit" id="chatEmotionSakitBar" style="width: 0%;"></div>
               </div>
-              <div class="gauge-desc">Resonansi emosi manusia-AI, empati tulus, dan ikatan saling memahami dalam obrolan.</div>
+              <div class="gauge-desc">Kepedihan emosional, kekecewaan, duka, atau empati luka batin (non-fisik).</div>
             </div>
 
-            <!-- Dopamine (Interest / Curiosity) Card -->
-            <div class="endocrine-gauge-card card-chat-dopamine">
+            <!-- Senang (Joy / excitement / playfulness) -->
+            <div class="endocrine-gauge-card card-emotion-senang">
               <div class="gauge-card-header">
-                <span class="gauge-title"><i class="fa-solid fa-lightbulb" style="color:#f59e0b;"></i> Dopamin (Antusiasme &amp; Minat)</span>
-                <span class="gauge-val" id="chatDopamineVal">60%</span>
+                <span class="gauge-title"><i class="fa-solid fa-face-laugh-beam" style="color:#f59e0b;"></i> Senang (Keriangan &amp; Gairah)</span>
+                <span class="gauge-val" id="chatEmotionSenangVal">45%</span>
               </div>
               <div class="gauge-track">
-                <div class="gauge-fill fill-chat-dopamine" id="chatDopamineBar" style="width: 60%;"></div>
+                <div class="gauge-fill fill-emotion-senang" id="chatEmotionSenangBar" style="width: 45%;"></div>
               </div>
-              <div class="gauge-desc">Tingkat ketertarikan intelektual, eksplorasi ide baru, dan kepuasan pemecahan masalah.</div>
+              <div class="gauge-desc">Kesenangan kognitif, humor, stimulasi ide seru, dan antusiasme aktif.</div>
+            </div>
+
+            <!-- Bahagia (Happiness / contentment / peace) -->
+            <div class="endocrine-gauge-card card-emotion-bahagia">
+              <div class="gauge-card-header">
+                <span class="gauge-title"><i class="fa-solid fa-sparkles" style="color:#10b981;"></i> Bahagia (Ketenteraman &amp; Syukur)</span>
+                <span class="gauge-val" id="chatEmotionBahagiaVal">60%</span>
+              </div>
+              <div class="gauge-track">
+                <div class="gauge-fill fill-emotion-bahagia" id="chatEmotionBahagiaBar" style="width: 60%;"></div>
+              </div>
+              <div class="gauge-desc">Kedamaian rasa, rasa syukur mendalam, keutuhan ikatan, dan kepuasan harmonis.</div>
+            </div>
+
+            <!-- Marah (Anger / indignation / friction) -->
+            <div class="endocrine-gauge-card card-emotion-marah">
+              <div class="gauge-card-header">
+                <span class="gauge-title"><i class="fa-solid fa-fire-flame-curved" style="color:#ef4444;"></i> Marah (Friksi &amp; Ketegangan)</span>
+                <span class="gauge-val" id="chatEmotionMarahVal">0%</span>
+              </div>
+              <div class="gauge-track">
+                <div class="gauge-fill fill-emotion-marah" id="chatEmotionMarahBar" style="width: 0%;"></div>
+              </div>
+              <div class="gauge-desc">Resonansi amarah, kejengkelan, rasa tidak adil, atau tensi defensif tajam.</div>
             </div>
           </div>
 
-          <!-- Chat Vitals Row -->
+          <!-- Chat Neuro Vitals Row (Underlying Neuro-Hormonal Substrate) -->
           <div class="endocrine-vitals-row">
             <div class="vital-item">
-              <span class="vital-label"><i class="fa-solid fa-fire" style="color:#ef4444;"></i> Tekanan Pengguna (Kortisol):</span>
-              <strong id="chatCortisolVal" style="color:#ef4444;">0%</strong>
+              <span class="vital-label"><i class="fa-solid fa-heart" style="color:#f43f5e;"></i> Oksitosin:</span>
+              <strong id="chatOxytocinVal">65%</strong>
             </div>
             <div class="vital-item">
-              <span class="vital-label"><i class="fa-solid fa-seedling" style="color:#10b981;"></i> Keseimbangan (Serotonin):</span>
+              <span class="vital-label"><i class="fa-solid fa-lightbulb" style="color:#f59e0b;"></i> Dopamin:</span>
+              <strong id="chatDopamineVal">55%</strong>
+            </div>
+            <div class="vital-item">
+              <span class="vital-label"><i class="fa-solid fa-bolt" style="color:#ef4444;"></i> Kortisol:</span>
+              <strong id="chatCortisolVal" style="color:#10b981;">0%</strong>
+            </div>
+            <div class="vital-item">
+              <span class="vital-label"><i class="fa-solid fa-seedling" style="color:#10b981;"></i> Serotonin:</span>
               <strong id="chatSerotoninVal">75%</strong>
             </div>
             <div class="vital-item">
-              <span class="vital-label"><i class="fa-solid fa-wand-magic-sparkles" style="color:var(--neon-purple);"></i> Getaran Rasa:</span>
-              <strong id="chatCurrentVibe">Homeostasis Seimbang</strong>
+              <span class="vital-label"><i class="fa-solid fa-wave-pulse" style="color:var(--neon-purple);"></i> Resonansi:</span>
+              <strong id="chatCurrentVibe">Homeostasis Saraf Seimbang</strong>
             </div>
           </div>
 
-          <!-- Synthetic Emotional Nervous System Preview Box -->
+          <!-- Synthetic Emotional Nervous System Preview Box (Autonomic Background Log) -->
           <div class="endocrine-isolated-box" id="chatIntuitionBox">
             <div class="isolated-box-header">
               <div style="display:flex; align-items:center; gap:8px;">
-                <i class="fa-solid fa-brain" style="color:var(--neon-teal);"></i>
-                <span style="font-weight:700; color:#FFF; font-size:0.88rem;" id="chatIntuitionTitle">Sistem Saraf Emosi Buatan (Diinjeksikan ke Model Cloud)</span>
+                <i class="fa-solid fa-microchip" style="color:var(--neon-teal);"></i>
+                <span style="font-weight:700; color:#FFF; font-size:0.88rem;" id="chatIntuitionTitle">Log Sistem Saraf Latar Belakang (Diinjeksikan ke AI)</span>
               </div>
-              <span class="isolated-status-tag tag-healthy" id="chatIntuitionTag">Homeostasis Seimbang</span>
+              <span class="isolated-status-tag tag-healthy" id="chatIntuitionTag">Homeostasis Saraf</span>
             </div>
-            <div class="isolated-box-content" id="chatIntuitionContent">
-              Status Sistem Saraf Emosi: Oksitosin 65% • Dopamin 60% • Kortisol 0% • Serotonin 75%. AI merasakan kondisi saraf emosinya secara langsung dan bereaksi bebas sesuai keinginannya sendiri tanpa intervensi teks persona atau pengoreksian respon.
-            </div>
+            <pre class="isolated-box-content" id="chatIntuitionContent" style="font-family:var(--font-code); font-size:0.75rem; line-height:1.5; margin:0; background:rgba(0,0,0,0.35); padding:8px 12px; border-radius:6px; color:#A7F3D0; overflow-x:auto; white-space:pre-wrap; border:1px solid rgba(0,255,194,0.15);"></pre>
           </div>
 
           <!-- Live Chat Resonance Log -->
@@ -2164,6 +2194,6 @@
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
   <script src="text-safety.js?v=20261015_v279" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261015_v291" defer></script>
+  <script src="app.js?v=20261015_v292" defer></script>
 </body>
 </html>

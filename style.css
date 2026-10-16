@@ -9859,7 +9859,84 @@ body.page-paused *::after {
   box-shadow: 0 0 10px rgba(245, 158, 11, 0.6);
 }
 
+/* Synthetic Biological Emotional Nervous System Gauges (Sakit, Senang, Bahagia, Marah) */
+.card-emotion-sakit {
+  border-color: rgba(244, 63, 94, 0.3);
+  background: linear-gradient(180deg, rgba(244, 63, 94, 0.08) 0%, rgba(0, 0, 0, 0.45) 100%);
+}
+.card-emotion-sakit .gauge-val { color: #f43f5e; }
+.fill-emotion-sakit {
+  background: linear-gradient(90deg, #fb7185, #f43f5e);
+  box-shadow: 0 0 10px rgba(244, 63, 94, 0.6);
+}
+
+.card-emotion-senang {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.08) 0%, rgba(0, 0, 0, 0.45) 100%);
+}
+.card-emotion-senang .gauge-val { color: #f59e0b; }
+.fill-emotion-senang {
+  background: linear-gradient(90deg, #fcd34d, #f59e0b);
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.6);
+}
+
+.card-emotion-bahagia {
+  border-color: rgba(16, 185, 129, 0.3);
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.08) 0%, rgba(0, 0, 0, 0.45) 100%);
+}
+.card-emotion-bahagia .gauge-val { color: #10b981; }
+.fill-emotion-bahagia {
+  background: linear-gradient(90deg, #6ee7b7, #10b981);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
+}
+
+.card-emotion-marah {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: linear-gradient(180deg, rgba(239, 68, 68, 0.08) 0%, rgba(0, 0, 0, 0.45) 100%);
+}
+.card-emotion-marah .gauge-val { color: #ef4444; }
+.fill-emotion-marah {
+  background: linear-gradient(90deg, #f87171, #ef4444);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
+}
+
 /* Log Entries for ChatEndocrine */
+.endocrine-log-entry.log-sakit {
+  border-left-color: #f43f5e;
+  background: rgba(244, 63, 94, 0.06);
+}
+.log-sakit .log-badge {
+  background: rgba(244, 63, 94, 0.2);
+  color: #f43f5e;
+}
+
+.endocrine-log-entry.log-senang {
+  border-left-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.06);
+}
+.log-senang .log-badge {
+  background: rgba(245, 158, 11, 0.2);
+  color: #f59e0b;
+}
+
+.endocrine-log-entry.log-bahagia {
+  border-left-color: #10b981;
+  background: rgba(16, 185, 129, 0.06);
+}
+.log-bahagia .log-badge {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+}
+
+.endocrine-log-entry.log-marah {
+  border-left-color: #ef4444;
+  background: rgba(239, 68, 68, 0.06);
+}
+.log-marah .log-badge {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
 .endocrine-log-entry.log-oxytocin {
   border-left-color: #f43f5e;
   background: rgba(244, 63, 94, 0.06);
