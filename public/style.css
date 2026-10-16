@@ -5701,7 +5701,12 @@ body.modal-open {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-dim);
+  color: #a3adc2; /* Adjusted from #5c657a for >4.5:1 WCAG AA contrast ratio */
+}
+
+/* Specific high-contrast override for button spans identified in Lighthouse audit */
+div.msg-sources-section button.msg-sources-title span {
+  color: #a3adc2;
 }
 
 .msg-sources-toggle {
@@ -5727,7 +5732,7 @@ body.modal-open {
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  color: var(--text-dim);
+  color: #a3adc2;
   text-transform: none;
   letter-spacing: normal;
   transition: all 0.2s ease;

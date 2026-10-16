@@ -3645,6 +3645,105 @@ RESONANSI: ${this.currentVibe}
   }
 
 
+  // ==================== ON-DEMAND DYNAMIC FEATURE MODULE LOADERS ====================
+  // Mengeliminasi 1.85MB JavaScript yang tidak terpakai saat initial load (FCP, TBT & LCP Optimization)
+  let mermaidLoadPromise = null;
+  function ensureMermaidLoaded() {
+    if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
+      return Promise.resolve(window.mermaid);
+    }
+    if (mermaidLoadPromise) return mermaidLoadPromise;
+    mermaidLoadPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'mermaid.min.js?v=20261016_v302';
+      s.defer = true;
+      s.onload = () => {
+        initMermaidEngine();
+        resolve(window.mermaid);
+      };
+      s.onerror = (e) => {
+        mermaidLoadPromise = null;
+        reject(new Error('Gagal memuat pustaka Mermaid: ' + (e?.message || 'Network error')));
+      };
+      document.head.appendChild(s);
+    });
+    return mermaidLoadPromise;
+  }
+
+  let jsPdfLoadPromise = null;
+  function ensureJsPdfLoaded() {
+    if (window.jspdf && window.jspdf.jsPDF) {
+      return Promise.resolve(window.jspdf.jsPDF);
+    }
+    if (jsPdfLoadPromise) return jsPdfLoadPromise;
+    jsPdfLoadPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'jspdf.umd.min.js?v=20261016_v302';
+      s.defer = true;
+      s.onload = () => {
+        if (window.jspdf && window.jspdf.jsPDF) {
+          resolve(window.jspdf.jsPDF);
+        } else {
+          resolve(window.jspdf);
+        }
+      };
+      s.onerror = (e) => {
+        jsPdfLoadPromise = null;
+        reject(new Error('Gagal memuat pustaka jsPDF: ' + (e?.message || 'Network error')));
+      };
+      document.head.appendChild(s);
+    });
+    return jsPdfLoadPromise;
+  }
+
+  let pdfJsLoadPromise = null;
+  function ensurePdfJsLoaded() {
+    if (typeof window.pdfjsLib !== 'undefined') {
+      return Promise.resolve(window.pdfjsLib);
+    }
+    if (pdfJsLoadPromise) return pdfJsLoadPromise;
+    pdfJsLoadPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      s.integrity = 'sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e';
+      s.crossOrigin = 'anonymous';
+      s.defer = true;
+      s.onload = () => {
+        resolve(window.pdfjsLib);
+      };
+      s.onerror = (e) => {
+        pdfJsLoadPromise = null;
+        reject(new Error('Gagal memuat pustaka PDF.js: ' + (e?.message || 'Network error')));
+      };
+      document.head.appendChild(s);
+    });
+    return pdfJsLoadPromise;
+  }
+
+  let jszipLoadPromise = null;
+  function ensureJSZipLoaded() {
+    if (typeof window.JSZip !== 'undefined') {
+      return Promise.resolve(window.JSZip);
+    }
+    if (jszipLoadPromise) return jszipLoadPromise;
+    jszipLoadPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+      s.integrity = 'sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG';
+      s.crossOrigin = 'anonymous';
+      s.defer = true;
+      s.onload = () => {
+        resolve(window.JSZip);
+      };
+      s.onerror = (e) => {
+        jszipLoadPromise = null;
+        reject(new Error('Gagal memuat pustaka JSZip: ' + (e?.message || 'Network error')));
+      };
+      document.head.appendChild(s);
+    });
+    return jszipLoadPromise;
+  }
+
   // ==================== AUTONOMOUS DOCUMENT COMPILER & MERMAID DIAGRAM ENGINE ====================
   function initMermaidEngine() {
     if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.initialize === 'function') {
@@ -3751,6 +3850,7 @@ RESONANSI: ${this.currentVibe}
   }
 
   async function compileMarkdownToDocxBlob(markdownText, title = 'Dokumen') {
+    await ensureJSZipLoaded().catch(() => null);
     if (typeof window.JSZip === 'undefined') {
       return new Blob([markdownText || ''], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
     }
@@ -4138,6 +4238,7 @@ RESONANSI: ${this.currentVibe}
   }
 
   async function compileMarkdownToPdfBlob(markdownText, title = 'Dokumen') {
+    await ensureJsPdfLoaded().catch(() => null);
     const jsPDFClass = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : null;
     if (!jsPDFClass) {
       return new Blob([markdownText || ''], { type: 'application/pdf' });
@@ -5057,7 +5158,12 @@ RESONANSI: ${this.currentVibe}
       }
     });
 
-    function tryRenderSvg(retries = 8) {
+    async function tryRenderSvg(retries = 8) {
+      if (typeof window.mermaid === 'undefined' || typeof window.mermaid.render !== 'function') {
+        try {
+          await ensureMermaidLoaded();
+        } catch (_) {}
+      }
       if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
         try {
           initMermaidEngine();
@@ -5739,6 +5845,7 @@ RESONANSI: ${this.currentVibe}
     }
   }
 
+  let smartScrollRafId = null;
   function smartScrollChatToBottom(force = false) {
     if (!els.chatViewport) return;
     if (force) {
@@ -5747,10 +5854,16 @@ RESONANSI: ${this.currentVibe}
     }
     if (userScrolledUp && !force) return;
 
-    isAutoScrolling = true;
-    els.chatViewport.scrollTop = els.chatViewport.scrollHeight;
-    requestAnimationFrame(() => {
-      isAutoScrolling = false;
+    if (smartScrollRafId) return;
+    smartScrollRafId = requestAnimationFrame(() => {
+      smartScrollRafId = null;
+      if (!els.chatViewport) return;
+      if (userScrolledUp && !force) return;
+      isAutoScrolling = true;
+      els.chatViewport.scrollTop = els.chatViewport.scrollHeight;
+      requestAnimationFrame(() => {
+        isAutoScrolling = false;
+      });
     });
   }
 
@@ -7221,24 +7334,28 @@ RESONANSI: ${this.currentVibe}
             deleteSession(session.id);
           });
 
-          document.body.appendChild(dropdown);
           const anchor = e.currentTarget.getBoundingClientRect();
           dropdown.style.position = 'fixed';
           dropdown.style.zIndex = '1200';
-          dropdown.style.right = '0px';
-          dropdown.style.top = '0px';
-          const menuW = dropdown.offsetWidth;
-          const menuH = dropdown.offsetHeight;
-          let menuTop = anchor.bottom + 4;
-          if (menuTop + menuH > window.innerHeight - 8) {
-            menuTop = Math.max(8, anchor.top - menuH - 4);
-          }
-          let menuRight = Math.max(8, window.innerWidth - anchor.right);
-          if (menuRight + menuW > window.innerWidth - 8) {
-            menuRight = Math.max(8, window.innerWidth - menuW - 8);
-          }
-          dropdown.style.top = menuTop + 'px';
-          dropdown.style.right = menuRight + 'px';
+          dropdown.style.visibility = 'hidden';
+          document.body.appendChild(dropdown);
+
+          requestAnimationFrame(() => {
+            if (!dropdown.parentNode) return;
+            const menuW = dropdown.offsetWidth || 180;
+            const menuH = dropdown.offsetHeight || 90;
+            let menuTop = anchor.bottom + 4;
+            if (menuTop + menuH > window.innerHeight - 8) {
+              menuTop = Math.max(8, anchor.top - menuH - 4);
+            }
+            let menuRight = Math.max(8, window.innerWidth - anchor.right);
+            if (menuRight + menuW > window.innerWidth - 8) {
+              menuRight = Math.max(8, window.innerWidth - menuW - 8);
+            }
+            dropdown.style.top = menuTop + 'px';
+            dropdown.style.right = menuRight + 'px';
+            dropdown.style.visibility = 'visible';
+          });
           activeHistoryDropdown = dropdown;
           AudioEngine.click();
         });
@@ -7977,6 +8094,7 @@ RESONANSI: ${this.currentVibe}
     // 1. PDF Documents (Extract text per page safely via PDF.js)
     if (ext === 'pdf' || file.type === 'application/pdf') {
       try {
+        await ensurePdfJsLoaded().catch(() => null);
         if (!window.pdfjsLib) {
           return `[Pustaka pembaca PDF (pdf.js) belum termuat atau diblokir peramban. Tidak dapat membaca file "${file.name}".]`;
         }
@@ -8006,8 +8124,9 @@ RESONANSI: ${this.currentVibe}
     // 2. DOCX Documents (Extract text safely via JSZip & DOMParser)
     if (ext === 'docx' || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
       try {
+        await ensureJSZipLoaded().catch(() => null);
         if (!window.JSZip) {
-          return Promise.resolve(`[Pustaka pembaca DOCX (JSZip) belum termuat atau diblokir peramban. Tidak dapat membaca file "${file.name}".]`);
+          return `[Pustaka pembaca DOCX (JSZip) belum termuat atau diblokir peramban. Tidak dapat membaca file "${file.name}".]`;
         }
         const arrayBuffer = await file.arrayBuffer();
         let zip;
@@ -9032,6 +9151,7 @@ Aturan wajib:
   async function downloadAIFileAsZip(file) {
     if (!file) return;
     try {
+      await ensureJSZipLoaded().catch(() => null);
       if (typeof window.JSZip === 'undefined') {
         downloadAIFile(file, 'html');
         return;
@@ -9657,19 +9777,24 @@ Aturan wajib:
         let svgText = file.svgContent || '';
         if (!svgText && (rawText.includes('<svg') || rawText.trim().startsWith('<svg'))) {
           svgText = rawText;
-        } else if (!svgText && typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
-          const cleanCode = getCleanMermaidCode(rawText);
-          const tempId = 'downloadSvg_' + Date.now();
-          try {
-            initMermaidEngine();
-            const res = await window.mermaid.render(tempId, cleanCode);
-            if (res && res.svg) svgText = res.svg;
-          } catch (mErr) {
-            console.warn('Gagal render mermaid saat unduh, mencoba pembersih sekunder:', mErr);
+        } else if (!svgText) {
+          if (typeof window.mermaid === 'undefined' || typeof window.mermaid.render !== 'function') {
+            await ensureMermaidLoaded().catch(() => null);
+          }
+          if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
+            const cleanCode = getCleanMermaidCode(rawText);
+            const tempId = 'downloadSvg_' + Date.now();
             try {
-              const res2 = await window.mermaid.render(tempId + '_sec', getAggressiveMermaidCleaner(cleanCode));
-              if (res2 && res2.svg) svgText = res2.svg;
-            } catch (_) {}
+              initMermaidEngine();
+              const res = await window.mermaid.render(tempId, cleanCode);
+              if (res && res.svg) svgText = res.svg;
+            } catch (mErr) {
+              console.warn('Gagal render mermaid saat unduh, mencoba pembersih sekunder:', mErr);
+              try {
+                const res2 = await window.mermaid.render(tempId + '_sec', getAggressiveMermaidCleaner(cleanCode));
+                if (res2 && res2.svg) svgText = res2.svg;
+              } catch (_) {}
+            }
           }
         }
         if (!svgText) {
@@ -18946,7 +19071,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     return clean || 'Deep-Research-Report';
   }
 
-  function downloadReportDOCX(title, markdownText) {
+  async function downloadReportDOCX(title, markdownText) {
     const renderedHtml = renderMarkdown(markdownText || '');
     const cleanFilename = sanitizeReportFilename(title);
     const currentDate = new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -19087,6 +19212,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       showToast(msg, 'success');
     };
 
+    await ensureJSZipLoaded().catch(() => null);
     if (typeof JSZip === 'undefined') {
       downloadWordBlob(new Blob(['\ufeff', wordContent], { type: 'application/msword;charset=utf-8' }), 'doc',
         'Laporan diunduh sebagai .doc (pustaka JSZip tidak tersedia).');
@@ -21707,6 +21833,7 @@ Aturan:
       showToast('Tidak ada berkas untuk diekspor.');
       return;
     }
+    await ensureJSZipLoaded().catch(() => null);
     if (typeof JSZip === 'undefined') {
       showToast('Pustaka JSZip belum siap.', 'error');
       return;
@@ -23878,21 +24005,39 @@ Aturan:
     }
   }
 
-  function autoResizeTextarea(textarea) {
+  let textareaResizeRaf = null;
+  function autoResizeTextarea(textarea, immediate = false) {
     if (!textarea) return;
-    textarea.style.height = 'auto';
-    const scrollH = textarea.scrollHeight;
-    const maxHeight = 180;
-    if (scrollH > maxHeight) {
-      textarea.style.height = `${maxHeight}px`;
-      textarea.style.overflowY = 'auto';
-    } else {
-      textarea.style.height = `${scrollH}px`;
-      textarea.style.overflowY = 'hidden';
-      if (!textarea.value) {
-        textarea.scrollTop = 0;
+    const performResize = () => {
+      textarea.style.height = 'auto';
+      const scrollH = textarea.scrollHeight;
+      const maxHeight = 180;
+      if (scrollH > maxHeight) {
+        textarea.style.height = `${maxHeight}px`;
+        textarea.style.overflowY = 'auto';
+      } else {
+        textarea.style.height = `${scrollH}px`;
+        textarea.style.overflowY = 'hidden';
+        if (!textarea.value) {
+          textarea.scrollTop = 0;
+        }
       }
+    };
+
+    if (immediate) {
+      if (textareaResizeRaf) {
+        cancelAnimationFrame(textareaResizeRaf);
+        textareaResizeRaf = null;
+      }
+      performResize();
+      return;
     }
+
+    if (textareaResizeRaf) cancelAnimationFrame(textareaResizeRaf);
+    textareaResizeRaf = requestAnimationFrame(() => {
+      textareaResizeRaf = null;
+      performResize();
+    });
   }
 
   // ==================== LIVE REAL-TIME MODEL CATALOG ====================
@@ -27711,11 +27856,14 @@ Aturan:
       console.warn('Background storage sync notice:', err);
     });
 
-    // B. Non-blocking Network Health Checks
+    // B. Non-blocking Network Health Checks (Scheduled via requestIdleCallback to maximize FCP & TTI)
     checkOllamaHealth().catch(() => {});
     checkOpenRouterStatus().catch(() => {});
-    fetchOpenRouterModelsList().catch(() => {});
-    fetchOllamaCloudUsage().catch(() => {});
+    const scheduleIdle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1500));
+    scheduleIdle(() => {
+      fetchOpenRouterModelsList().catch(() => {});
+      fetchOllamaCloudUsage().catch(() => {});
+    });
   }
 
   // Expose clean namespace for extension & programmatic workspace control
@@ -27742,6 +27890,10 @@ Aturan:
     renderMessageFiles,
     compileMarkdownToDocxBlob,
     compileMarkdownToPdfBlob,
+    ensureMermaidLoaded,
+    ensureJsPdfLoaded,
+    ensurePdfJsLoaded,
+    ensureJSZipLoaded,
     initMermaidEngine,
     openAIFileStudio,
     downloadAIFile,

@@ -7133,8 +7133,19 @@ async function requestHandler(req, res) {
     return;
   }
 
-  // OpenRouter: Get Model List
+  // OpenRouter Models In-Memory Optimization & CDN Cache
+  const OPENROUTER_MODELS_CACHE_TTL = 10 * 60 * 1000; // 10 menit
+  let cachedOpenRouterModelsPayload = null;
+  let cachedOpenRouterModelsAt = 0;
+
+  // OpenRouter: Get Model List (Optimized & Compacted)
   if (pathname === '/api/openrouter/models' && method === 'GET') {
+    // Return cached compact payload if fresh
+    const now = Date.now();
+    if (cachedOpenRouterModelsPayload && (now - cachedOpenRouterModelsAt < OPENROUTER_MODELS_CACHE_TTL)) {
+      return sendJSON(res, 200, cachedOpenRouterModelsPayload);
+    }
+
     let authHeader = req.headers['authorization'];
     if (!authHeader) {
       const qKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || process.env.OPENROUTER_API_KEY;
@@ -7159,6 +7170,9 @@ async function requestHandler(req, res) {
         try {
           const data = JSON.parse(rawData);
           if (proxyRes.statusCode < 200 || proxyRes.statusCode >= 300) {
+            if (cachedOpenRouterModelsPayload) {
+              return sendJSON(res, 200, cachedOpenRouterModelsPayload);
+            }
             return sendJSON(res, proxyRes.statusCode, {
               success: false,
               data: [],
@@ -7166,23 +7180,61 @@ async function requestHandler(req, res) {
               ...data
             });
           }
+
+          // Compact model payload down from ~780KB to ~40KB (strip internal schemas, route definitions, prompt templates)
+          if (data && Array.isArray(data.data)) {
+            const compactPayload = {
+              data: data.data.map(m => ({
+                id: m.id,
+                name: m.name || m.id,
+                description: typeof m.description === 'string' ? m.description.slice(0, 160) : '',
+                context_length: m.context_length || null,
+                pricing: m.pricing ? { prompt: m.pricing.prompt, completion: m.pricing.completion } : undefined,
+                supported_parameters: Array.isArray(m.supported_parameters) && m.supported_parameters.includes('tools') ? ['tools'] : [],
+                architecture: m.architecture ? {
+                  output_modalities: m.architecture.output_modalities,
+                  modality: m.architecture.modality
+                } : undefined
+              }))
+            };
+            cachedOpenRouterModelsPayload = compactPayload;
+            cachedOpenRouterModelsAt = Date.now();
+            return sendJSON(res, 200, compactPayload);
+          }
+
           return sendJSON(res, proxyRes.statusCode, data);
         } catch (e) {
+          if (cachedOpenRouterModelsPayload) {
+            return sendJSON(res, 200, cachedOpenRouterModelsPayload);
+          }
           return sendJSON(res, 502, { success: false, data: [], error: 'Failed to parse OpenRouter response' });
         }
       });
       proxyRes.on('error', (err) => {
-        if (!res.headersSent) sendJSON(res, 502, { success: false, data: [], error: 'OpenRouter models stream error: ' + err.message });
+        if (!res.headersSent) {
+          if (cachedOpenRouterModelsPayload) {
+            return sendJSON(res, 200, cachedOpenRouterModelsPayload);
+          }
+          sendJSON(res, 502, { success: false, data: [], error: 'OpenRouter models stream error: ' + err.message });
+        }
       });
     });
 
     proxyReq.on('timeout', () => {
       proxyReq.destroy();
-      if (!res.headersSent) sendJSON(res, 504, { error: 'OpenRouter models request timed out (15s)' });
+      if (!res.headersSent) {
+        if (cachedOpenRouterModelsPayload) {
+          return sendJSON(res, 200, cachedOpenRouterModelsPayload);
+        }
+        sendJSON(res, 504, { error: 'OpenRouter models request timed out (15s)' });
+      }
     });
 
     proxyReq.on('error', (err) => {
       if (res.headersSent) return;
+      if (cachedOpenRouterModelsPayload) {
+        return sendJSON(res, 200, cachedOpenRouterModelsPayload);
+      }
       return sendJSON(res, 503, { error: 'OpenRouter connection error: ' + err.message });
     });
 
