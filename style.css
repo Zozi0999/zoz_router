@@ -8321,20 +8321,27 @@ div.msg-sources-section button.msg-sources-title span {
 }
 
 .ai-file-studio-card {
-  max-width: 980px;
+  max-width: 1080px;
   width: 96vw;
+  height: 88vh;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
 }
 
 .ai-file-studio-pane {
-  position: relative;
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: 520px;
-  max-height: 70vh;
-  min-height: 380px;
-  border: 1px solid rgba(0, 240, 255, 0.25);
-  border-radius: var(--radius-sm, 6px);
+  height: 100%;
+  max-height: none;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.45);
+  background: #ffffff;
 }
 
 .ai-file-studio-pane iframe {
@@ -8343,7 +8350,7 @@ div.msg-sources-section button.msg-sources-title span {
   width: 100%;
   height: 100%;
   border: 0;
-  background: #fff;
+  background: #ffffff;
 }
 
 /* Masalah YANG SAMA dengan YouTube yang sudah diperbaiki: CSS author
@@ -8782,68 +8789,104 @@ div.msg-sources-section button.msg-sources-title span {
   margin: 0 !important;
   flex: 1 1 auto;
   position: relative;
-  min-height: 480px;
-  background: #090a0d;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  background: #ffffff;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.studio-workspace-area {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .gemini-studio-pane {
-  height: 520px;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  min-height: 0;
   border: none;
   border-radius: 0;
+  background: #ffffff;
+  overflow: hidden;
 }
 
 .gemini-studio-code {
-  height: 520px;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  min-height: 0;
+  margin: 0;
   border: none;
   border-radius: 0;
   background: #0e1015;
+  overflow: auto;
+  padding: 16px 20px 100px 20px;
+  box-sizing: border-box;
 }
 
-/* Studio Bottom Floating Composer (Tanya lebih lanjut) */
-/* Studio Bottom Composer (Authentic Zoz Router Architecture) */
+/* Studio Bottom Floating Composer (Glassmorphism & Floating Layout) */
 .gemini-studio-footer {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px max(10px, env(safe-area-inset-bottom, 10px));
-  background: rgba(14, 17, 24, 0.98);
-  border-top: 1px solid rgba(0, 240, 255, 0.18);
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.45);
-  user-select: none;
-  position: relative;
-  z-index: 10;
-  margin-top: auto;
+  position: absolute !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
+  padding: 0 16px max(16px, env(safe-area-inset-bottom, 16px)) !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  pointer-events: none !important;
+  z-index: 50 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  user-select: none !important;
 }
 
 .studio-composer-box,
 .gemini-studio-composer {
-  width: 100%;
-  max-width: 820px;
-  margin: 0 auto;
-  background: rgba(22, 26, 35, 0.96);
-  border: 1.5px solid rgba(0, 240, 255, 0.35);
-  border-radius: var(--radius-lg, 14px);
-  padding: 8px 12px;
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4), 0 0 14px rgba(0, 240, 255, 0.08);
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  box-sizing: border-box;
+  pointer-events: auto !important;
+  width: 100% !important;
+  max-width: 820px !important;
+  margin: 0 auto !important;
+  background: rgba(14, 18, 28, 0.72) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  border: 1.5px solid rgba(0, 240, 255, 0.35) !important;
+  border-radius: 18px !important;
+  padding: 8px 14px !important;
+  display: flex !important;
+  align-items: flex-end !important;
+  gap: 10px !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6), 0 0 24px rgba(0, 240, 255, 0.12) !important;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  box-sizing: border-box !important;
 }
 
 .studio-composer-box:hover,
 .gemini-studio-composer:hover {
-  border-color: rgba(0, 240, 255, 0.65);
-  box-shadow: 0 6px 28px rgba(0, 240, 255, 0.14);
+  background: rgba(18, 23, 36, 0.82) !important;
+  border-color: rgba(0, 240, 255, 0.65) !important;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.7), 0 0 28px rgba(0, 240, 255, 0.22) !important;
 }
 
 .studio-composer-box:focus-within,
 .gemini-studio-composer:focus-within {
-  border-color: var(--neon-cyan, #00f0ff);
-  background: rgba(24, 28, 38, 0.98);
-  box-shadow: 0 0 0 3px rgba(0, 240, 255, 0.2), 0 8px 30px rgba(0, 0, 0, 0.6);
+  background: rgba(18, 24, 38, 0.90) !important;
+  border-color: var(--neon-cyan, #00f0ff) !important;
+  box-shadow: 0 0 0 3px rgba(0, 240, 255, 0.25), 0 16px 45px rgba(0, 0, 0, 0.75) !important;
 }
 
 .studio-model-chip {
@@ -9156,7 +9199,7 @@ div.msg-sources-section button.msg-sources-title span {
 .ai-file-studio-card.is-fullscreen .modal-body {
   flex: 1 1 auto !important;
   width: 100% !important;
-  height: calc(100vh - 128px) !important;
+  height: 100% !important;
   max-height: none !important;
   min-height: 0 !important;
   position: relative !important;
@@ -9222,13 +9265,25 @@ div.msg-sources-section button.msg-sources-title span {
     padding: 0 !important;
   }
   .gemini-studio-footer {
-    padding: 6px 10px max(8px, env(safe-area-inset-bottom, 8px)) !important;
-    margin-top: auto !important;
+    position: absolute !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    padding: 0 12px max(14px, env(safe-area-inset-bottom, 14px)) !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    pointer-events: none !important;
+    z-index: 50 !important;
+    margin: 0 !important;
   }
   .studio-composer-box {
     max-width: 100% !important;
-    padding: 6px 10px !important;
+    padding: 7px 12px !important;
+    border-radius: 16px !important;
     margin: 0 !important;
+    pointer-events: auto !important;
   }
   .gemini-export-menu {
     max-width: calc(100vw - 24px) !important;
