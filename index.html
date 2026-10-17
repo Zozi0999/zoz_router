@@ -41,9 +41,9 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="xterm.css?v=20261017_v345">
-  <link rel="preload" as="style" href="style.min.css?v=20261017_v345">
-  <link rel="stylesheet" href="style.min.css?v=20261017_v345">
+  <link rel="stylesheet" href="xterm.css?v=20261017_v346">
+  <link rel="preload" as="style" href="style.min.css?v=20261017_v346">
+  <link rel="stylesheet" href="style.min.css?v=20261017_v346">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -2572,6 +2572,10 @@
             <span class="pane-shell-tag" id="paneShellBadge1">PowerShell</span>
             <span class="pane-cwd-indicator" id="paneCwdBadge1">📁 C:\Users\user</span>
             <div class="pane-header-actions">
+              <button class="pane-mini-btn btn-pane-endorphin" id="btnPaneEndorphin1" data-pane="1" type="button" title="Suntik Endorfin: Diagnostik & Pemulihan Otomatis Terminal (Reset Trap, PTY Dimensi & Scroll)">
+                <span style="color: #00FFC2;">🌿</span>
+                <span>Endorfin</span>
+              </button>
               <button class="pane-mini-btn btn-pane-auto-enter" id="btnPaneAutoEnter1" data-pane="1" type="button" title="Auto Y/Enter otomatis untuk Panel 1">
                 <span style="color: var(--neon-amber);">⚡</span>
                 <span>Auto Y</span>
@@ -2615,6 +2619,10 @@
             <span class="pane-shell-tag" id="paneShellBadge2">PowerShell</span>
             <span class="pane-cwd-indicator" id="paneCwdBadge2">📁 C:\Users\user</span>
             <div class="pane-header-actions">
+              <button class="pane-mini-btn btn-pane-endorphin" id="btnPaneEndorphin2" data-pane="2" type="button" title="Suntik Endorfin: Diagnostik & Pemulihan Otomatis Terminal (Reset Trap, PTY Dimensi & Scroll)">
+                <span style="color: #00FFC2;">🌿</span>
+                <span>Endorfin</span>
+              </button>
               <button class="pane-mini-btn btn-pane-auto-enter" id="btnPaneAutoEnter2" data-pane="2" type="button" title="Auto Y/Enter otomatis untuk Panel 2">
                 <span style="color: var(--neon-amber);">⚡</span>
                 <span>Auto Y</span>
@@ -2701,6 +2709,7 @@
         <button type="button" class="term-touch-key" data-key="ctrl_d" title="Keluar / EOF (Ctrl+D)">^D</button>
         <button type="button" class="term-touch-key" data-key="ctrl_z" title="Tunda Perintah (Ctrl+Z)">^Z</button>
         <button type="button" class="term-touch-key" data-key="ctrl_l" title="Bersihkan Layar (Ctrl+L)">^L</button>
+        <button type="button" class="term-touch-key endorphin-key" data-cmd="endorfin" title="Suntik Endorfin: Diagnostik & Pulihkan Terminal" style="color: #00FFC2;">🌿</button>
         <button type="button" class="term-touch-key" data-key="PgUp" title="Gulir 1 Halaman ke Atas (Page Up)">PgUp</button>
         <button type="button" class="term-touch-key" data-key="PgDn" title="Gulir 1 Halaman ke Bawah (Page Down)">PgDn</button>
         <button type="button" class="term-touch-key" data-key="Home" title="Home (Awal Baris)">HOME</button>
@@ -2715,6 +2724,7 @@
       <!-- Quick Command Action Chips Bar -->
       <div class="terminal-quick-chips" id="termQuickChipsBar">
         <span class="quick-label"><i class="fa-solid fa-bolt" style="font-size:0.68rem; color:var(--neon-teal);"></i> Cepat:</span>
+        <button class="term-chip term-chip-endorphin" type="button" data-cmd="endorfin" title="Suntik Endorfin: Diagnostik & Pulihkan Terminal" style="color: #00FFC2; border-color: rgba(0, 255, 194, 0.4);"><i class="fa-solid fa-seedling"></i> Endorfin</button>
         <button class="term-chip" type="button" data-cmd="dir">dir</button>
         <button class="term-chip" type="button" data-cmd="git status">git status</button>
         <button class="term-chip" type="button" data-cmd="git log -n 5 --oneline">git log</button>
@@ -2868,11 +2878,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous" defer></script>
   <!-- Heavy libraries (Mermaid, jsPDF, PDF.js, JSZip) are dynamically loaded on-demand to optimize FCP, TBT & LCP -->
   <!-- Terminal In-Tab Xterm & FitAddon Engine -->
-  <script src="xterm.js?v=20261017_v345" defer></script>
-  <script src="addon-fit.js?v=20261017_v345" defer></script>
+  <script src="xterm.js?v=20261017_v346" defer></script>
+  <script src="addon-fit.js?v=20261017_v346" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261017_v345" defer></script>
+  <script src="text-safety.js?v=20261017_v346" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261017_v345" defer></script>
+  <script src="app.js?v=20261017_v346" defer></script>
 </body>
 </html>

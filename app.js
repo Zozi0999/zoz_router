@@ -1997,13 +1997,18 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       this.log('endorphin', 50, 'Suntikan Endorfin: Keseimbangan & kestabilan dipulihkan penuh (0% Stres)');
       this.updateUI();
       try {
+        if (typeof window !== 'undefined' && window.TerminalEndorphin && typeof window.TerminalEndorphin.healAll === 'function') {
+          window.TerminalEndorphin.healAll({ silent: true });
+        }
+      } catch (_) {}
+      try {
         if (typeof AudioEngine !== 'undefined' && AudioEngine.playBeep && STATE.soundEnabled) {
           AudioEngine.playBeep(880, 'sine', 0.18, 0.06);
           setTimeout(() => AudioEngine.playBeep(1320, 'triangle', 0.22, 0.05), 120);
         }
       } catch (_) {}
       if (typeof showToast === 'function') {
-        showToast('🌿 Endorfin disuntikkan: Stres netral (0%), Dopamin 100%!', 'success');
+        showToast('🌿 Endorfin disuntikkan: Stres netral (0%), Dopamin 100%, Terminal pulih penuh!', 'success');
       }
     },
 
@@ -32247,6 +32252,18 @@ Aturan:
             const cellHeight = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
             const lines = Math.trunc(accumulatedDeltaY / cellHeight);
             if (lines !== 0) {
+              const isMouseOrAlt = Boolean(
+                (term._core && term._core._coreMouseService && term._core._coreMouseService.areMouseEventsActive) ||
+                (term.modes && term.modes.mouseTrackingMode && term.modes.mouseTrackingMode !== 'none') ||
+                (term.buffer && term.buffer.active && term.buffer.active.type === 'alternate')
+              );
+              if (isMouseOrAlt && paneState.sessionId) {
+                const col = Math.max(1, Math.floor((term.cols || 80) / 2));
+                const row = Math.max(1, Math.floor((term.rows || 24) / 2));
+                const btn = lines > 0 ? 64 : 65; // 64 = wheel up, 65 = wheel down
+                const ticks = Math.min(5, Math.abs(lines));
+                this.sendPtyInput(paneState.sessionId, `\x1b[<${btn};${col};${row}M`.repeat(ticks));
+              }
               // Finger moving down (deltaY > 0) -> scroll UP into earlier history (negative lines)
               // Finger moving up (deltaY < 0) -> scroll DOWN towards live prompt (positive lines)
               if (lines > 0) {
@@ -32286,6 +32303,18 @@ Aturan:
             animAccum += (currentVelocity * dt);
             const lines = Math.trunc(animAccum / cellH);
             if (lines !== 0) {
+              const isMouseOrAlt = Boolean(
+                (term._core && term._core._coreMouseService && term._core._coreMouseService.areMouseEventsActive) ||
+                (term.modes && term.modes.mouseTrackingMode && term.modes.mouseTrackingMode !== 'none') ||
+                (term.buffer && term.buffer.active && term.buffer.active.type === 'alternate')
+              );
+              if (isMouseOrAlt && paneState.sessionId) {
+                const col = Math.max(1, Math.floor((term.cols || 80) / 2));
+                const row = Math.max(1, Math.floor((term.rows || 24) / 2));
+                const btn = lines > 0 ? 64 : 65;
+                const ticks = Math.min(3, Math.abs(lines));
+                this.sendPtyInput(paneState.sessionId, `\x1b[<${btn};${col};${row}M`.repeat(ticks));
+              }
               if (lines > 0) {
                 paneState._userScrolledUp = true;
               }
@@ -32747,12 +32776,15 @@ Aturan:
     },
 
     async sendPtyResize(sessionId, cols, rows) {
+      const minSafeCols = this.isMobileDevice() ? 48 : 80;
+      const safeCols = Math.max(minSafeCols, parseInt(cols, 10) || minSafeCols);
+      const safeRows = Math.max(20, parseInt(rows, 10) || 28);
       const tab = this.getActiveTab();
       const panes = [tab?.pane1, tab?.pane2].filter(p => p && p.sessionId === sessionId);
       const wsPane = panes.find(p => p.ws && p.ws.readyState === WebSocket.OPEN);
       if (wsPane && wsPane.ws) {
         try {
-          wsPane.ws.send(JSON.stringify({ type: 'resize', session: sessionId, cols, rows }));
+          wsPane.ws.send(JSON.stringify({ type: 'resize', session: sessionId, cols: safeCols, rows: safeRows }));
           return;
         } catch (_) {}
       }
@@ -32762,7 +32794,7 @@ Aturan:
         await fetch(this.getTerminalApiUrl('/api/terminal/resize'), {
           method: 'POST',
           headers,
-          body: JSON.stringify({ session: sessionId, cols, rows, pin: this.remotePin || undefined })
+          body: JSON.stringify({ session: sessionId, cols: safeCols, rows: safeRows, pin: this.remotePin || undefined })
         });
       } catch (_) {}
     },
@@ -33181,17 +33213,25 @@ Aturan:
         return;
       }
 
+      if (lower === 'endorfin' || lower === 'heal' || lower === 'selfheal' || lower === 'self-heal') {
+        if (window.TerminalEndorphin) {
+          window.TerminalEndorphin.heal(paneNum);
+        }
+        return;
+      }
+
       if (lower === 'help') {
         if (pane.term) {
           pane.term.write(`\r\n\x1b[36m=== PANDUAN ZOZ NEURAL TERMINAL ===\x1b[0m\r\n` +
             `\x1b[90mTerminal web terintegrasi dengan akses langsung subprocess OS & ConPTY PseudoConsole.\x1b[0m\r\n` +
             `Perintah cepat:\r\n` +
-            ` - cls / clear : Bersihkan layar terminal\r\n` +
-            ` - split       : Beralih mode 2 panel berdampingan\r\n` +
-            ` - theme       : Beralih tema Aura Es <-> Aura Api\r\n` +
-            ` - font <px>   : Ubah ukuran font (mis. font 14)\r\n` +
-            ` - shell <nama>: Ganti shell (powershell, cmd, wsl, node, python)\r\n` +
-            ` - exit        : Tutup panel atau terminal\r\n\r\n`);
+            ` - endorfin / heal : Suntik Endorfin (Self-heal terminal, reset trap & pulihkan dimensi)\r\n` +
+            ` - cls / clear     : Bersihkan layar terminal\r\n` +
+            ` - split           : Beralih mode 2 panel berdampingan\r\n` +
+            ` - theme           : Beralih tema Aura Es <-> Aura Api\r\n` +
+            ` - font <px>       : Ubah ukuran font (mis. font 14)\r\n` +
+            ` - shell <nama>    : Ganti shell (powershell, cmd, wsl, node, python)\r\n` +
+            ` - exit            : Tutup panel atau terminal\r\n\r\n`);
         } else {
           this.renderHelp(screenEl);
           screenEl.scrollTop = screenEl.scrollHeight;
@@ -33451,6 +33491,11 @@ Aturan:
           };
 
           if (cmdType) {
+            if (cmdType === 'endorfin' || cmdType === 'heal') {
+              if (window.TerminalEndorphin) window.TerminalEndorphin.heal(paneNum);
+              keepFocus();
+              return;
+            }
             if (paneState?.term && !paneState.isFallbackMode) {
               this.sendPtyInput(sId, `${cmdType}\r`);
             } else {
@@ -33510,21 +33555,43 @@ Aturan:
           else if (keyType === 'Backspace') ptySeq = '\x7f';
           else if (keyType === 'PgUp') {
             if (paneState?.term) {
-              paneState._userScrolledUp = true;
-              paneState.term.scrollPages(-1);
-              if (paneState.updateScrollUI) paneState.updateScrollUI();
+              const isMouseOrAlt = Boolean(
+                (paneState.term._core && paneState.term._core._coreMouseService && paneState.term._core._coreMouseService.areMouseEventsActive) ||
+                (paneState.term.modes && paneState.term.modes.mouseTrackingMode && paneState.term.modes.mouseTrackingMode !== 'none') ||
+                (paneState.term.buffer && paneState.term.buffer.active && paneState.term.buffer.active.type === 'alternate')
+              );
+              if (isMouseOrAlt && sId) {
+                const col = Math.max(1, Math.floor((paneState.term.cols || 80) / 2));
+                const row = Math.max(1, Math.floor((paneState.term.rows || 24) / 2));
+                this.sendPtyInput(sId, `\x1b[<64;${col};${row}M`.repeat(5) + '\x1b[5~');
+              } else {
+                paneState._userScrolledUp = true;
+                paneState.term.scrollPages(-1);
+                if (paneState.updateScrollUI) paneState.updateScrollUI();
+              }
             }
           }
           else if (keyType === 'PgDn') {
             if (paneState?.term) {
-              paneState.term.scrollPages(1);
-              if (paneState.term.buffer && paneState.term.buffer.active) {
-                const linesFromBottom = paneState.term.buffer.active.baseY - paneState.term.buffer.active.viewportY;
-                if (linesFromBottom <= 1) {
-                  paneState._userScrolledUp = false;
+              const isMouseOrAlt = Boolean(
+                (paneState.term._core && paneState.term._core._coreMouseService && paneState.term._core._coreMouseService.areMouseEventsActive) ||
+                (paneState.term.modes && paneState.term.modes.mouseTrackingMode && paneState.term.modes.mouseTrackingMode !== 'none') ||
+                (paneState.term.buffer && paneState.term.buffer.active && paneState.term.buffer.active.type === 'alternate')
+              );
+              if (isMouseOrAlt && sId) {
+                const col = Math.max(1, Math.floor((paneState.term.cols || 80) / 2));
+                const row = Math.max(1, Math.floor((paneState.term.rows || 24) / 2));
+                this.sendPtyInput(sId, `\x1b[<65;${col};${row}M`.repeat(5) + '\x1b[6~');
+              } else {
+                paneState.term.scrollPages(1);
+                if (paneState.term.buffer && paneState.term.buffer.active) {
+                  const linesFromBottom = paneState.term.buffer.active.baseY - paneState.term.buffer.active.viewportY;
+                  if (linesFromBottom <= 1) {
+                    paneState._userScrolledUp = false;
+                  }
                 }
+                if (paneState.updateScrollUI) paneState.updateScrollUI();
               }
-              if (paneState.updateScrollUI) paneState.updateScrollUI();
             }
           }
           else if (keyType === 'Escape') ptySeq = '\x1b';
@@ -33664,6 +33731,10 @@ Aturan:
       }
 
       // Per-pane header action buttons
+      document.getElementById('btnPaneEndorphin1')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.TerminalEndorphin) window.TerminalEndorphin.heal(1);
+      });
       document.getElementById('btnPaneAutoEnter1')?.addEventListener('click', (e) => {
         e.stopPropagation();
         this.toggleAutoEnter(1);
@@ -33671,6 +33742,10 @@ Aturan:
       document.getElementById('btnPaneEnter1')?.addEventListener('click', (e) => {
         e.stopPropagation();
         this.sendEnterToPane(1);
+      });
+      document.getElementById('btnPaneEndorphin2')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.TerminalEndorphin) window.TerminalEndorphin.heal(2);
       });
       document.getElementById('btnPaneAutoEnter2')?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -33842,7 +33917,11 @@ Aturan:
           chip.addEventListener('click', () => {
             const cmd = chip.getAttribute('data-cmd');
             if (cmd) {
-              this.executeInput(this.activePane, cmd);
+              if (cmd === 'endorfin' || cmd === 'heal') {
+                if (window.TerminalEndorphin) window.TerminalEndorphin.heal(this.activePane || 1);
+              } else {
+                this.executeInput(this.activePane, cmd);
+              }
             }
           });
         });
@@ -33958,15 +34037,37 @@ Aturan:
           else if (e.key === 'PageUp') {
             e.preventDefault();
             e.stopPropagation();
-            paneState.term.scrollPages(-1);
-            if (paneState.updateScrollUI) paneState.updateScrollUI();
+            const isMouseOrAlt = Boolean(
+              (paneState.term._core && paneState.term._core._coreMouseService && paneState.term._core._coreMouseService.areMouseEventsActive) ||
+              (paneState.term.modes && paneState.term.modes.mouseTrackingMode && paneState.term.modes.mouseTrackingMode !== 'none') ||
+              (paneState.term.buffer && paneState.term.buffer.active && paneState.term.buffer.active.type === 'alternate')
+            );
+            if (isMouseOrAlt && paneState.sessionId) {
+              const col = Math.max(1, Math.floor((paneState.term.cols || 80) / 2));
+              const row = Math.max(1, Math.floor((paneState.term.rows || 24) / 2));
+              this.sendPtyInput(paneState.sessionId, `\x1b[<64;${col};${row}M`.repeat(5) + '\x1b[5~');
+            } else {
+              paneState.term.scrollPages(-1);
+              if (paneState.updateScrollUI) paneState.updateScrollUI();
+            }
             return;
           }
           else if (e.key === 'PageDown') {
             e.preventDefault();
             e.stopPropagation();
-            paneState.term.scrollPages(1);
-            if (paneState.updateScrollUI) paneState.updateScrollUI();
+            const isMouseOrAlt = Boolean(
+              (paneState.term._core && paneState.term._core._coreMouseService && paneState.term._core._coreMouseService.areMouseEventsActive) ||
+              (paneState.term.modes && paneState.term.modes.mouseTrackingMode && paneState.term.modes.mouseTrackingMode !== 'none') ||
+              (paneState.term.buffer && paneState.term.buffer.active && paneState.term.buffer.active.type === 'alternate')
+            );
+            if (isMouseOrAlt && paneState.sessionId) {
+              const col = Math.max(1, Math.floor((paneState.term.cols || 80) / 2));
+              const row = Math.max(1, Math.floor((paneState.term.rows || 24) / 2));
+              this.sendPtyInput(paneState.sessionId, `\x1b[<65;${col};${row}M`.repeat(5) + '\x1b[6~');
+            } else {
+              paneState.term.scrollPages(1);
+              if (paneState.updateScrollUI) paneState.updateScrollUI();
+            }
             return;
           }
 
@@ -33986,6 +34087,194 @@ Aturan:
       });
     }
   };
+
+  // =========================================================================
+  // CODE ENDORFIN: TERMINAL SELF-HEALING & NEURAL DIAGNOSTIC ENGINE
+  // =========================================================================
+  const TerminalEndorphin = {
+    diagnose(paneNum = (MultiPaneTerminal.activePane || 1)) {
+      const tab = MultiPaneTerminal.getActiveTab();
+      const pane = MultiPaneTerminal.getPaneState(paneNum);
+      const term = pane?.term;
+      const issues = [];
+      const fixes = [];
+      const metrics = {
+        paneNum,
+        tabId: tab?.id || 'none',
+        sessionId: pane?.sessionId || 'none',
+        cols: term?.cols || 0,
+        rows: term?.rows || 0,
+        ptyCols: pane?.ptyCols || term?.cols || 0,
+        ptyRows: pane?.ptyRows || term?.rows || 0,
+        isMobile: MultiPaneTerminal.isMobileDevice(),
+        userScrolledUp: Boolean(pane?._userScrolledUp),
+        isTouchActive: Boolean(pane?._isTouchActive),
+        hasTouchInertia: Boolean(pane?._touchInertiaRaf),
+        isMouseActive: Boolean(
+          term && (
+            (term._core && term._core._coreMouseService && term._core._coreMouseService.areMouseEventsActive) ||
+            (term.modes && term.modes.mouseTrackingMode && term.modes.mouseTrackingMode !== 'none') ||
+            (term.buffer && term.buffer.active && term.buffer.active.type === 'alternate')
+          )
+        )
+      };
+
+      if (!pane || !term) {
+        return {
+          score: 0,
+          status: 'offline',
+          metrics,
+          issues: ['Terminal pane belum diinisialisasi atau sesi belum tersambung.'],
+          fixes: ['Buka terminal dan sambungkan sesi.']
+        };
+      }
+
+      // 1. Audit Dimensi PTY & ConPTY wrap trap (cols < 45)
+      const minSafeCols = metrics.isMobile ? 48 : 80;
+      if (metrics.cols < 45 || metrics.ptyCols < 45) {
+        issues.push(`Dimensi PTY Terjebak Terlalu Sempit (${metrics.cols}x${metrics.rows}, server: ${metrics.ptyCols}x${metrics.ptyRows})! Menyebabkan baris wrapping tangga (staircase indent).`);
+        fixes.push(`Normalkan lebar kolom ke minimum aman >= ${minSafeCols} cols.`);
+      }
+
+      // 2. Audit Scroll Lock / Stuck Trap
+      if (metrics.userScrolledUp && !metrics.isMouseActive) {
+        if (term.buffer && term.buffer.active) {
+          const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
+          if (linesFromBottom <= 1) {
+            issues.push('Scroll Trap: Flag _userScrolledUp terkunci padahal posisi kursor di dasar layar.');
+            fixes.push('Reset flag _userScrolledUp dan posisikan viewport ke dasar.');
+          }
+        }
+      }
+
+      // 3. Audit Alternate Screen / SGR Mouse Protocol (Claude Code / Htop / Nano)
+      if (metrics.isMouseActive) {
+        fixes.push('Mode SGR Mouse Tracking aktif: Touch drag dan PgUp/PgDn diarahkan via SGR wheel sequence.');
+      }
+
+      // 4. Audit IME Textarea Buffer (Virtual Keyboard Ghosting)
+      if (term.textarea && term.textarea.value && term.textarea.value.length > 20) {
+        issues.push(`IME Textarea Buffer Menumpuk (${term.textarea.value.length} karakter): Berpotensi menduplikasi ketikan.`);
+        fixes.push('Bersihkan textarea dan flush komposisi teks virtual.');
+      }
+
+      // 5. Audit Runaway Animation Frame
+      if (metrics.hasTouchInertia) {
+        issues.push('Runaway touch inertia RAF terdeteksi.');
+        fixes.push('Batalkan loop RAF inersia touch.');
+      }
+
+      const score = Math.max(0, 100 - (issues.length * 25));
+      const status = score >= 90 ? 'healthy' : (score >= 60 ? 'warning' : 'critical');
+
+      return { score, status, metrics, issues, fixes };
+    },
+
+    heal(paneNum = (MultiPaneTerminal.activePane || 1), options = {}) {
+      const tab = MultiPaneTerminal.getActiveTab();
+      const pane = MultiPaneTerminal.getPaneState(paneNum);
+      const term = pane?.term;
+      const paneName = `Panel ${paneNum}`;
+
+      if (!pane || !term) {
+        if (!options.silent) showToast(`🌿 Endorfin: ${paneName} belum aktif`, 'warning');
+        return null;
+      }
+
+      const diag = this.diagnose(paneNum);
+      const isMobile = MultiPaneTerminal.isMobileDevice();
+      const minSafeCols = isMobile ? 48 : 80;
+      const safeCols = Math.max(minSafeCols, term.cols || minSafeCols);
+      const safeRows = Math.max(20, term.rows || 28);
+
+      // A. Normalisasi Dimensi PTY Host & DOM xterm
+      try {
+        if (pane.fitAddon) {
+          pane.fitAddon.fit();
+        }
+        if (pane.sessionId) {
+          MultiPaneTerminal.sendPtyResize(pane.sessionId, safeCols, safeRows);
+        }
+      } catch (_) {}
+
+      // B. Lepaskan Scroll Trap & Batalkan Inersia Touch
+      pane._userScrolledUp = false;
+      pane._isTouchActive = false;
+      if (pane._touchInertiaRaf) {
+        cancelAnimationFrame(pane._touchInertiaRaf);
+        pane._touchInertiaRaf = null;
+      }
+      try {
+        term.scrollToBottom();
+        if (pane.updateScrollUI) pane.updateScrollUI();
+      } catch (_) {}
+
+      // C. Balas Sinkronisasi untuk Claude Code / TUI Mouse Mode
+      if (diag.metrics.isMouseActive && pane.sessionId) {
+        const col = Math.max(1, Math.floor(safeCols / 2));
+        const row = Math.max(1, Math.floor(safeRows / 2));
+        // Kirim wheel-down halus untuk mengunci bottom prompt
+        MultiPaneTerminal.sendPtyInput(pane.sessionId, `\x1b[<65;${col};${row}M`.repeat(3));
+      }
+
+      // D. Bersihkan IME Textarea Virtual Keyboard
+      if (term.textarea) {
+        try {
+          term.textarea.value = '';
+          term.textarea.blur();
+          setTimeout(() => {
+            try {
+              term.focus();
+              term.textarea.focus({ preventScroll: true });
+            } catch (_) {}
+          }, 35);
+        } catch (_) {}
+      }
+
+      // E. Redraw prompt dengan Ctrl+L bila bukan TUI interaktif
+      if (pane.sessionId && !diag.metrics.isMouseActive && !options.noRedraw) {
+        MultiPaneTerminal.sendPtyInput(pane.sessionId, '\x0c');
+      }
+
+      // F. Sinyal Endorfin ke EndocrineMonitor
+      if (typeof EndocrineMonitor !== 'undefined' && EndocrineMonitor.log) {
+        EndocrineMonitor.log('endorphin', 30, `Suntikan Endorfin Terminal [${paneName}]: Dimensi PTY dinormalkan ke ${safeCols}x${safeRows}, scroll & IME dipulihkan.`);
+        if (EndocrineMonitor.hormones) {
+          EndocrineMonitor.hormones.cortisol = Math.max(0, EndocrineMonitor.hormones.cortisol - 25);
+          EndocrineMonitor.hormones.dopamine = Math.min(100, EndocrineMonitor.hormones.dopamine + 30);
+          EndocrineMonitor.updateUI();
+        }
+      }
+
+      // G. Audio Feedback & Toast
+      try {
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.playBeep && STATE.soundEnabled) {
+          AudioEngine.playBeep(880, 'sine', 0.14, 0.05);
+          setTimeout(() => AudioEngine.playBeep(1320, 'triangle', 0.18, 0.04), 90);
+        }
+      } catch (_) {}
+
+      if (!options.silent) {
+        const fixedCount = diag.issues.length;
+        const note = fixedCount > 0 ? ` (${fixedCount} anomali dinormalkan)` : '';
+        showToast(`🌿 Endorfin Disuntikkan: ${paneName} pulih penuh (${safeCols}x${safeRows})${note}!`, 'success');
+      }
+
+      return { success: true, diag, safeCols, safeRows };
+    },
+
+    healAll(options = {}) {
+      const tab = MultiPaneTerminal.getActiveTab();
+      if (!tab) return;
+      this.heal(1, options);
+      if (tab.isSplit) {
+        this.heal(2, options);
+      }
+    }
+  };
+
+  window.TerminalEndorphin = TerminalEndorphin;
+  window.MultiPaneTerminal = MultiPaneTerminal;
 
   // Expose TerminalManager globally
   window.TerminalManager = TerminalManager;

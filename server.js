@@ -5415,8 +5415,8 @@ async function requestHandler(req, res) {
       reqCwd = reqCwd.slice(1, -1).trim();
     }
     const targetCwd = (reqCwd && fs.existsSync(reqCwd)) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
-    const cols = Math.max(20, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
-    const rows = Math.max(5, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
+    const cols = Math.max(45, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
+    const rows = Math.max(15, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -5626,8 +5626,8 @@ async function requestHandler(req, res) {
         return sendJSON(res, 401, { error: pinCheck.error });
       }
       const sessionId = (body.session || 'default').trim();
-      const cols = Math.max(20, Math.min(400, parseInt(body.cols || '100', 10)));
-      const rows = Math.max(5, Math.min(200, parseInt(body.rows || '28', 10)));
+      const cols = Math.max(45, Math.min(400, parseInt(body.cols || '100', 10)));
+      const rows = Math.max(15, Math.min(200, parseInt(body.rows || '28', 10)));
       const session = activeTerminalSessions.get(sessionId);
       if (session && session.pty && typeof session.pty.resize === 'function') {
         try {
@@ -9277,8 +9277,8 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
     reqCwd = reqCwd.slice(1, -1).trim();
   }
   const targetCwd = (reqCwd && fs.existsSync(reqCwd)) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
-  const cols = Math.max(20, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
-  const rows = Math.max(5, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
+  const cols = Math.max(45, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
+  const rows = Math.max(15, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
 
   let session = activeTerminalSessions.get(sessionId);
   if (!session || !session.pty) {
@@ -9409,8 +9409,8 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
           if (str.startsWith('{') && str.endsWith('}')) {
             const parsed = JSON.parse(str);
             if (parsed.type === 'resize' && session.pty) {
-              const c = Math.max(20, Math.min(300, parseInt(parsed.cols, 10) || cols));
-              const r = Math.max(5, Math.min(100, parseInt(parsed.rows, 10) || rows));
+              const c = Math.max(45, Math.min(300, parseInt(parsed.cols, 10) || cols));
+              const r = Math.max(15, Math.min(100, parseInt(parsed.rows, 10) || rows));
               if (session.cols !== c || session.rows !== r) {
                 session.pty.resize(c, r);
                 session.cols = c;

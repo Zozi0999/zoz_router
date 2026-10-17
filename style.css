@@ -13188,6 +13188,33 @@ body.mermaid-has-fullscreen {
   box-shadow: 0 0 10px rgba(245, 158, 11, 0.35);
 }
 
+.btn-pane-endorphin:hover {
+  background: rgba(0, 255, 194, 0.16);
+  border-color: rgba(0, 255, 194, 0.45);
+  color: #00FFC2;
+}
+
+.term-chip-endorphin {
+  background: rgba(0, 255, 194, 0.08) !important;
+  color: #00FFC2 !important;
+  border-color: rgba(0, 255, 194, 0.35) !important;
+}
+
+.term-chip-endorphin:hover {
+  background: rgba(0, 255, 194, 0.22) !important;
+  border-color: #00FFC2 !important;
+  box-shadow: 0 0 10px rgba(0, 255, 194, 0.35);
+}
+
+.endorphin-key {
+  color: #00FFC2 !important;
+  border-color: rgba(0, 255, 194, 0.3) !important;
+}
+
+.endorphin-key:active {
+  background: rgba(0, 255, 194, 0.25) !important;
+}
+
 .pane-status-wrap {
   display: flex;
   align-items: center;
