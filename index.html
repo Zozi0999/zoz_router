@@ -41,9 +41,9 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="xterm.css?v=20261017_v336">
-  <link rel="preload" as="style" href="style.min.css?v=20261017_v336">
-  <link rel="stylesheet" href="style.min.css?v=20261017_v336">
+  <link rel="stylesheet" href="xterm.css?v=20261017_v337">
+  <link rel="preload" as="style" href="style.min.css?v=20261017_v337">
+  <link rel="stylesheet" href="style.min.css?v=20261017_v337">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -2473,6 +2473,12 @@
             <span id="labelTermRemoteTunnel">☁️ Remote Tunnel</span>
           </button>
 
+          <!-- Scan QR Pairing Button -->
+          <button class="tb-btn" id="btnTermOpenQrScanner" type="button" title="Pindai QR Code untuk Pairing Remote">
+            <i class="fa-solid fa-qrcode" style="font-size: 0.75rem; color: #22d3ee;"></i>
+            <span id="labelTermOpenQrScanner">Scan QR</span>
+          </button>
+
           <!-- Split View Toggle -->
           <button class="tb-btn" id="btnTermSplit" type="button" title="Beralih Tampilan Split 2 Panel">
             <i class="fa-solid fa-table-columns" style="font-size: 0.75rem;"></i>
@@ -2548,8 +2554,8 @@
           <!-- Terminal Output Screen -->
           <div class="terminal-screen" id="termScreen1"></div>
 
-          <!-- Terminal Command Input Row -->
-          <div class="terminal-input-row" id="termInputRow1">
+          <!-- Terminal Command Input Row (Hidden - Pengetikan langsung di layar xterm) -->
+          <div class="terminal-input-row" id="termInputRow1" style="display: none !important;">
             <span class="term-prompt-cwd" id="termPromptPrefix1">PS C:\Users\user&gt;</span>
             <input type="text" class="term-cli-input" id="termCliInput1" placeholder="Ketik perintah (e.g. dir, git status, node -v)..." autocomplete="off" spellcheck="false">
             <button class="term-send-btn" id="btnTermSend1" type="button" title="Kirim Perintah (Enter)">
@@ -2591,8 +2597,8 @@
           <!-- Terminal Output Screen 2 -->
           <div class="terminal-screen" id="termScreen2"></div>
 
-          <!-- Terminal Command Input Row 2 -->
-          <div class="terminal-input-row" id="termInputRow2">
+          <!-- Terminal Command Input Row 2 (Hidden - Pengetikan langsung di layar xterm) -->
+          <div class="terminal-input-row" id="termInputRow2" style="display: none !important;">
             <span class="term-prompt-cwd" id="termPromptPrefix2">PS C:\Users\user&gt;</span>
             <input type="text" class="term-cli-input" id="termCliInput2" placeholder="Ketik perintah di Panel 2..." autocomplete="off" spellcheck="false">
             <button class="term-send-btn" id="btnTermSend2" type="button" title="Kirim Perintah (Enter)">
@@ -2614,6 +2620,11 @@
               </div>
             </div>
             <div class="term-remote-card-body">
+              <button type="button" class="term-remote-btn qr-scan" id="btnTermScanQr">
+                <i class="fa-solid fa-camera"></i> <span>📷 Scan QR Code dari Laptop</span>
+              </button>
+              <div class="term-remote-divider"><span>atau masukkan manual</span></div>
+
               <div class="term-remote-input-group">
                 <label for="inputTermRemoteHost"><i class="fa-solid fa-link"></i> URL Host Cloudflare Tunnel</label>
                 <input type="text" id="inputTermRemoteHost" class="term-remote-input" placeholder="https://xxxx.trycloudflare.com atau wss://..." autocomplete="off" spellcheck="false">
@@ -2741,6 +2752,43 @@
     </div>
   </div>
 
+  <!-- QR Code Camera Scanner Modal -->
+  <div class="modal-backdrop" id="termQrScannerModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="termQrScannerTitle">
+    <div class="modal-dialog term-qr-scanner-dialog">
+      <div class="modal-header">
+        <div class="term-tunnel-modal-title" id="termQrScannerTitle">
+          <i class="fa-solid fa-camera" style="color: #38bdf8;"></i>
+          <span>Pindai QR Code Remote Tunnel</span>
+        </div>
+        <button type="button" class="tb-btn icon-only" id="btnTermCloseQrScanner" title="Tutup Kamera">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body term-qr-scanner-body">
+        <div class="term-qr-video-wrap" id="termQrVideoWrap">
+          <video id="termQrVideo" playsinline autoplay muted></video>
+          <div class="term-qr-reticle">
+            <div class="term-qr-corner top-left"></div>
+            <div class="term-qr-corner top-right"></div>
+            <div class="term-qr-corner bottom-left"></div>
+            <div class="term-qr-corner bottom-right"></div>
+            <div class="term-qr-laser-line"></div>
+          </div>
+          <div class="term-qr-status-msg" id="termQrScannerStatus">Membuka kamera...</div>
+        </div>
+        <div class="term-qr-actions-row">
+          <label class="term-qr-file-btn" for="inputTermQrFile" title="Pilih foto QR dari galeri ponsel">
+            <i class="fa-solid fa-image"></i> <span>Pilih dari Galeri</span>
+          </label>
+          <input type="file" id="inputTermQrFile" accept="image/*" style="display: none;">
+          <button type="button" class="term-qr-action-btn" id="btnTermToggleTorch" title="Nyalakan / Matikan Senter Flash" style="display: none;">
+            <i class="fa-solid fa-bolt"></i> <span>Flash</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
@@ -2753,11 +2801,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous" defer></script>
   <!-- Heavy libraries (Mermaid, jsPDF, PDF.js, JSZip) are dynamically loaded on-demand to optimize FCP, TBT & LCP -->
   <!-- Terminal In-Tab Xterm & FitAddon Engine -->
-  <script src="xterm.js?v=20261017_v336" defer></script>
-  <script src="addon-fit.js?v=20261017_v336" defer></script>
+  <script src="xterm.js?v=20261017_v337" defer></script>
+  <script src="addon-fit.js?v=20261017_v337" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261017_v336" defer></script>
+  <script src="text-safety.js?v=20261017_v337" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261017_v336" defer></script>
+  <script src="app.js?v=20261017_v337" defer></script>
 </body>
 </html>

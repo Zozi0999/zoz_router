@@ -5453,7 +5453,7 @@ async function requestHandler(req, res) {
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor'
           },
-          useConpty: process.platform === 'win32'
+          useConpty: false
         });
 
         session = {
@@ -5503,6 +5503,12 @@ async function requestHandler(req, res) {
     if (session.buffer && session.buffer.length > 0) {
       const replay = session.buffer.join('');
       res.write(`data: ${JSON.stringify({ type: 'init', data: replay })}\n\n`);
+    } else {
+      setTimeout(() => {
+        if (session && session.pty && (!session.buffer || session.buffer.length === 0)) {
+          try { session.pty.write('\r'); } catch (_) {}
+        }
+      }, 500);
     }
 
     const heartbeat = setInterval(() => {

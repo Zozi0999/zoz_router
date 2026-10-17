@@ -31299,6 +31299,289 @@ Aturan:
       showToast('Link Pairing Remote WAN berhasil disalin!', 'success');
     },
 
+    playQrSuccessBeep() {
+      try {
+        if (navigator.vibrate) navigator.vibrate([50, 40, 50]);
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.12);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.12);
+      } catch (_) {}
+    },
+
+    openQrScannerModal() {
+      const modal = document.getElementById('termQrScannerModal');
+      if (!modal) return;
+      modal.classList.add('show');
+      modal.style.display = 'flex';
+      this.startQrScanner();
+    },
+
+    closeQrScannerModal() {
+      this.stopQrScanner();
+      const modal = document.getElementById('termQrScannerModal');
+      if (modal) {
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+      }
+    },
+
+    async startQrScanner() {
+      const video = document.getElementById('termQrVideo');
+      const statusEl = document.getElementById('termQrScannerStatus');
+      if (!video) return;
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        if (statusEl) statusEl.textContent = 'Kamera tidak didukung pada browser ini. Silakan pilih foto QR dari galeri.';
+        return;
+      }
+
+      if (statusEl) statusEl.textContent = 'Meminta izin kamera...';
+
+      try {
+        const constraints = {
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        this._qrStream = stream;
+        video.srcObject = stream;
+        await video.play();
+
+        if (statusEl) statusEl.textContent = 'Arahkan kamera ke QR Code di layar laptop Anda';
+
+        // Deteksi fitur senter/flash jika perangkat mendukung
+        const track = stream.getVideoTracks()[0];
+        const torchBtn = document.getElementById('btnTermToggleTorch');
+        if (track && torchBtn) {
+          const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+          if (capabilities.torch) {
+            torchBtn.style.display = 'inline-flex';
+          } else {
+            torchBtn.style.display = 'none';
+          }
+        }
+
+        this._startQrDetectionLoop();
+      } catch (err) {
+        if (statusEl) statusEl.textContent = 'Izin kamera ditolak atau kamera sedang digunakan aplikasi lain.';
+      }
+    },
+
+    stopQrScanner() {
+      if (this._qrScanInterval) {
+        clearInterval(this._qrScanInterval);
+        this._qrScanInterval = null;
+      }
+      if (this._qrStream) {
+        this._qrStream.getTracks().forEach(t => {
+          try { t.stop(); } catch (_) {}
+        });
+        this._qrStream = null;
+      }
+      const video = document.getElementById('termQrVideo');
+      if (video) video.srcObject = null;
+    },
+
+    async toggleTorch() {
+      if (!this._qrStream) return;
+      const track = this._qrStream.getVideoTracks()[0];
+      if (!track) return;
+      try {
+        this._torchActive = !this._torchActive;
+        await track.applyConstraints({
+          advanced: [{ torch: this._torchActive }]
+        });
+      } catch (_) {}
+    },
+
+    async ensureJsQRLoaded() {
+      if (typeof window.jsQR !== 'undefined') return true;
+      return new Promise((resolve) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
+        script.async = true;
+        script.onload = () => resolve(true);
+        script.onerror = () => resolve(false);
+        document.head.appendChild(script);
+      });
+    },
+
+    async _startQrDetectionLoop() {
+      const video = document.getElementById('termQrVideo');
+      if (!video || !this._qrStream) return;
+
+      let detector = null;
+      if ('BarcodeDetector' in window) {
+        try {
+          detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+        } catch (_) {}
+      }
+
+      const scanInterval = setInterval(async () => {
+        if (!this._qrStream || !video.srcObject) {
+          clearInterval(scanInterval);
+          return;
+        }
+        if (video.readyState < 2) return;
+
+        try {
+          if (detector) {
+            const barcodes = await detector.detect(video);
+            if (barcodes && barcodes.length > 0) {
+              clearInterval(scanInterval);
+              this.handleScannedQrData(barcodes[0].rawValue);
+              return;
+            }
+          } else {
+            await this.ensureJsQRLoaded();
+            if (typeof window.jsQR === 'function') {
+              if (!this._qrCanvas) {
+                this._qrCanvas = document.createElement('canvas');
+              }
+              const canvas = this._qrCanvas;
+              const ctx = canvas.getContext('2d', { willReadFrequently: true });
+              canvas.width = Math.min(480, video.videoWidth || 320);
+              canvas.height = Math.min(480, video.videoHeight || 320);
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const code = window.jsQR(imgData.data, canvas.width, canvas.height, {
+                inversionAttempts: 'dontInvert'
+              });
+              if (code && code.data) {
+                clearInterval(scanInterval);
+                this.handleScannedQrData(code.data);
+                return;
+              }
+            }
+          }
+        } catch (_) {}
+      }, 200);
+      this._qrScanInterval = scanInterval;
+    },
+
+    async handleQrFileSelection(file) {
+      if (!file) return;
+      const statusEl = document.getElementById('termQrScannerStatus');
+      if (statusEl) statusEl.textContent = 'Membaca gambar QR...';
+
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.src = url;
+      img.onload = async () => {
+        URL.revokeObjectURL(url);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+
+        // 1. Coba BarcodeDetector native
+        if ('BarcodeDetector' in window) {
+          try {
+            const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+            const barcodes = await detector.detect(canvas);
+            if (barcodes && barcodes.length > 0) {
+              this.handleScannedQrData(barcodes[0].rawValue);
+              return;
+            }
+          } catch (_) {}
+        }
+
+        // 2. Fallback jsQR
+        await this.ensureJsQRLoaded();
+        if (typeof window.jsQR === 'function') {
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = window.jsQR(imgData.data, canvas.width, canvas.height);
+          if (code && code.data) {
+            this.handleScannedQrData(code.data);
+            return;
+          }
+        }
+        if (statusEl) statusEl.textContent = 'QR Code tidak terdeteksi pada gambar.';
+        showToast('Tidak dapat menemukan QR Code pada foto yang dipilih.', 'warning');
+      };
+    },
+
+    handleScannedQrData(rawValue) {
+      if (!rawValue || typeof rawValue !== 'string') return;
+      const trimmed = rawValue.trim();
+      let remoteHost = '';
+      let pin = '';
+
+      try {
+        if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+          const u = new URL(trimmed);
+          remoteHost = u.searchParams.get('remote_host') || u.searchParams.get('host') || u.searchParams.get('url') || '';
+          pin = u.searchParams.get('pin') || '';
+          if (!remoteHost && (trimmed.includes('trycloudflare.com') || trimmed.includes(':4040'))) {
+            remoteHost = trimmed.split('?')[0];
+          }
+        } else if (trimmed.startsWith('wss://') || trimmed.startsWith('ws://')) {
+          const parts = trimmed.split('#');
+          remoteHost = parts[0];
+          if (parts[1] && parts[1].includes('pin=')) {
+            pin = new URLSearchParams(parts[1]).get('pin') || '';
+          }
+        } else if (trimmed.startsWith('{')) {
+          const parsed = JSON.parse(trimmed);
+          remoteHost = parsed.remoteHost || parsed.remote_host || parsed.url || '';
+          pin = parsed.pin || '';
+        }
+      } catch (_) {}
+
+      if (!remoteHost) {
+        const hostMatch = trimmed.match(/(?:remote_host|host)=([^&\s]+)/i);
+        if (hostMatch) remoteHost = decodeURIComponent(hostMatch[1]);
+      }
+      if (!pin) {
+        const pinMatch = trimmed.match(/(?:pin)=([0-9]{6})/i) || trimmed.match(/\b([0-9]{6})\b/);
+        if (pinMatch) pin = pinMatch[1];
+      }
+
+      if (!remoteHost && trimmed.includes('trycloudflare.com')) {
+        remoteHost = trimmed.replace(/[\?#].*$/, '');
+      }
+
+      this.playQrSuccessBeep();
+
+      if (remoteHost && pin) {
+        this.stopQrScanner();
+        this.closeQrScannerModal();
+        const hostInput = document.getElementById('inputTermRemoteHost');
+        const pinInput = document.getElementById('inputTermRemotePin');
+        if (hostInput) hostInput.value = remoteHost;
+        if (pinInput) pinInput.value = pin;
+        showToast(`🟢 QR Code terbaca! Menghubungkan ke ${remoteHost}...`, 'success');
+        this.connectRemoteTerminal(remoteHost, pin, true);
+      } else if (remoteHost) {
+        const hostInput = document.getElementById('inputTermRemoteHost');
+        if (hostInput) hostInput.value = remoteHost;
+        if (pin) {
+          const pinInput = document.getElementById('inputTermRemotePin');
+          if (pinInput) pinInput.value = pin;
+        }
+        this.stopQrScanner();
+        this.closeQrScannerModal();
+        showToast('QR Code terdeteksi. Silakan periksa PIN lalu klik Hubungkan.', 'info');
+      } else {
+        showToast('QR Code tidak mengandung link remote atau PIN yang valid.', 'warning');
+      }
+    },
+
     loadTheme() {
       const savedTheme = localStorage.getItem('zoz_term_theme') || 'aura-es';
       this.setTheme(savedTheme, false);
@@ -31453,17 +31736,13 @@ Aturan:
       setTimeout(() => {
         const paneNum = this.activePane || 1;
         const paneState = this.getPaneState(paneNum);
-        if (paneState && paneState.term && !this.isMobileDevice()) {
+        if (paneState && paneState.term) {
           try {
             paneState.term.focus();
-            return;
+            if (paneState.term.textarea) {
+              paneState.term.textarea.focus();
+            }
           } catch (_) {}
-        }
-        const input = document.getElementById(`termCliInput${paneNum}`);
-        if (input && input.offsetParent !== null) {
-          try { input.focus(); } catch (_) {}
-        } else if (paneState && paneState.term) {
-          try { paneState.term.focus(); } catch (_) {}
         }
       }, 50);
     },
@@ -31534,7 +31813,10 @@ Aturan:
         if (tab && tab.isSplit && this.activePane !== paneNum) {
           this.setActivePane(paneNum);
           if (paneState && paneState.term) {
-            try { paneState.term.focus(); } catch (_) {}
+            try {
+              paneState.term.focus();
+              if (paneState.term.textarea) paneState.term.textarea.focus();
+            } catch (_) {}
           }
         }
       });
@@ -31543,9 +31825,23 @@ Aturan:
           this.setActivePane(paneNum);
         }
         if (paneState && paneState.term) {
-          try { paneState.term.focus(); } catch (_) {}
+          try {
+            paneState.term.focus();
+            if (paneState.term.textarea) paneState.term.textarea.focus();
+          } catch (_) {}
         }
       });
+      container.addEventListener('touchstart', () => {
+        if (this.activePane !== paneNum) {
+          this.setActivePane(paneNum);
+        }
+        if (paneState && paneState.term) {
+          try {
+            paneState.term.focus();
+            if (paneState.term.textarea) paneState.term.textarea.focus();
+          } catch (_) {}
+        }
+      }, { passive: true });
       screenEl.appendChild(container);
       paneState.screenContainer = container;
 
@@ -32667,7 +32963,7 @@ Aturan:
       }
 
       // Hover-to-Focus / Focus-Follows-Mouse untuk Mode Split & Desktop Typing:
-      // Pengguna cukup mengarahkan kursor ke atas pane/tab atau klik untuk langsung mengetik di xterm PTY
+      // Pengguna cukup mengarahkan kursor ke atas pane/tab atau klik/sentuh untuk langsung mengetik di xterm PTY
       const activateAndFocusPane = (num) => {
         if (isResizerDragging) return;
         const tab = this.getActiveTab();
@@ -32676,13 +32972,12 @@ Aturan:
         }
         const pState = this.getPaneState(num);
         if (pState && pState.term) {
-          try { pState.term.focus(); } catch (_) {}
-        }
-        if (this.isMobileDevice()) {
-          const input = document.getElementById(`termCliInput${num}`);
-          if (input && input.offsetParent !== null) {
-            try { input.focus(); } catch (_) {}
-          }
+          try {
+            pState.term.focus();
+            if (pState.term.textarea) {
+              pState.term.textarea.focus();
+            }
+          } catch (_) {}
         }
       };
 
@@ -32691,7 +32986,8 @@ Aturan:
         const screen = document.getElementById(`termScreen${num}`);
 
         if (pane) {
-          // Klik manual & mousedown langsung memfokuskan xterm
+          // Klik manual & mousedown / touchstart langsung memfokuskan xterm
+          pane.addEventListener('touchstart', () => activateAndFocusPane(num), { passive: true });
           pane.addEventListener('mousedown', () => activateAndFocusPane(num));
           pane.addEventListener('click', () => activateAndFocusPane(num));
 
@@ -32713,6 +33009,7 @@ Aturan:
         }
 
         if (screen) {
+          screen.addEventListener('touchstart', () => activateAndFocusPane(num), { passive: true });
           screen.addEventListener('mousedown', () => activateAndFocusPane(num));
           screen.addEventListener('click', () => activateAndFocusPane(num));
           screen.addEventListener('mouseenter', () => {
@@ -32722,6 +33019,24 @@ Aturan:
             }
           });
         }
+
+      // QR Scanner event handlers
+      document.getElementById('btnTermScanQr')?.addEventListener('click', () => this.openQrScannerModal());
+      document.getElementById('btnTermOpenQrScanner')?.addEventListener('click', () => this.openQrScannerModal());
+      document.getElementById('btnTermCloseQrScanner')?.addEventListener('click', () => this.closeQrScannerModal());
+      document.getElementById('btnTermToggleTorch')?.addEventListener('click', () => this.toggleTorch());
+      document.getElementById('inputTermQrFile')?.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (file) this.handleQrFileSelection(file);
+      });
+      const qrScannerModal = document.getElementById('termQrScannerModal');
+      if (qrScannerModal) {
+        qrScannerModal.addEventListener('click', (e) => {
+          if (e.target === qrScannerModal) {
+            this.closeQrScannerModal();
+          }
+        });
+      }
 
         const input = document.getElementById(`termCliInput${num}`);
         if (input) {
