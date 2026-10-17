@@ -30602,9 +30602,7 @@ Aturan:
     },
     defaultCwd: 'C:\\Users\\user',
     fontSize: 13,
-    autoEnter: false,
     theme: 'aura-es', // 'aura-es' or 'aura-api'
-    isSplit: false,
     activePane: 1,
     activeTabId: 'tab-1',
     tabCounter: 1,
@@ -30614,6 +30612,9 @@ Aturan:
         title: 'Terminal 1',
         shell: 'powershell',
         cwd: 'C:\\Users\\user',
+        isSplit: false,
+        autoEnter: false,
+        activePane: 1,
         pane1: {
           shell: 'powershell',
           cwd: 'C:\\Users\\user',
@@ -30630,6 +30631,24 @@ Aturan:
         }
       }
     ],
+
+    get isSplit() {
+      const tab = this.getActiveTab();
+      return tab ? !!tab.isSplit : false;
+    },
+    set isSplit(val) {
+      const tab = this.getActiveTab();
+      if (tab) tab.isSplit = !!val;
+    },
+
+    get autoEnter() {
+      const tab = this.getActiveTab();
+      return tab ? !!tab.autoEnter : false;
+    },
+    set autoEnter(val) {
+      const tab = this.getActiveTab();
+      if (tab) tab.autoEnter = !!val;
+    },
 
     xtermThemes: {
       'aura-api': {
@@ -30756,13 +30775,44 @@ Aturan:
       this.setFontSize(this.fontSize + delta, true);
     },
 
-    toggleAutoEnter() {
-      this.autoEnter = !this.autoEnter;
+    updateAutoEnterUI() {
+      const tab = this.getActiveTab();
       const btn = document.getElementById('btnTermAutoEnter');
       if (btn) {
-        btn.classList.toggle('active', this.autoEnter);
+        btn.classList.toggle('active', !!tab?.autoEnter);
       }
-      showToast(this.autoEnter ? 'Auto Y/Enter: Aktif' : 'Auto Y/Enter: Nonaktif');
+    },
+
+    toggleAutoEnter() {
+      const tab = this.getActiveTab();
+      if (!tab) return;
+      tab.autoEnter = !tab.autoEnter;
+      this.updateAutoEnterUI();
+      showToast(tab.autoEnter ? `Auto Y/Enter: Aktif (${tab.title})` : `Auto Y/Enter: Nonaktif (${tab.title})`);
+    },
+
+    sendEnterToActivePane() {
+      const tab = this.getActiveTab();
+      if (!tab) return;
+      const paneNum = this.activePane || tab.activePane || 1;
+      const paneState = this.getPaneState(paneNum);
+      const inputEl = document.getElementById(`termCliInput${paneNum}`);
+      const val = inputEl ? inputEl.value : '';
+
+      // If typed text is present in the input box (e.g. mobile view), execute it
+      if (val && val.trim().length > 0) {
+        this.executeInput(paneNum);
+        return;
+      }
+
+      // In desktop xterm mode, send raw carriage return (\r) directly to the active pane's PTY
+      if (paneState && paneState.term && !paneState.isFallbackMode) {
+        const sessionId = paneState.sessionId || `${tab.id}-p${paneNum}`;
+        this.sendPtyInput(sessionId, '\r');
+        this.focusActiveInput();
+      } else {
+        this.executeInput(paneNum, '');
+      }
     },
 
     toggleFullscreen() {
@@ -30815,8 +30865,12 @@ Aturan:
     },
 
     initActiveTabPanes() {
+      const tab = this.getActiveTab();
+      if (!tab) return;
+      this.applySplitUI(tab.isSplit);
+      this.updateAutoEnterUI();
       this.initXtermPane(1);
-      if (this.isSplit) {
+      if (tab.isSplit) {
         this.initXtermPane(2);
       }
     },
@@ -30925,6 +30979,7 @@ Aturan:
           if (msg.type === 'data' || msg.type === 'init') {
             if (term && typeof msg.data === 'string') {
               term.write(msg.data);
+              this.handleAutoRespond(tab, paneState, paneNum, msg.data);
             }
           } else if (msg.type === 'connected') {
             if (statusLabel) statusLabel.textContent = 'Aktif (PTY)';
@@ -30952,6 +31007,26 @@ Aturan:
         if (statusLabel) statusLabel.textContent = 'Terputus';
         if (statusDot) statusDot.className = 'pane-status-dot offline';
       };
+    },
+
+    handleAutoRespond(tab, paneState, paneNum, chunk) {
+      if (!tab || !tab.autoEnter || !chunk || typeof chunk !== 'string') return;
+      const clean = chunk.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
+      if (!clean) return;
+
+      const promptRegex = /(?:\[[Yy]\/[Nn]\]|\([Yy]\/[Nn]\)|\[[yY]\/n\]|\([yY]\/n\)|\?.*\(Y\/n\)|\(yes\/no\)|\[yes\/no\]|Press (?:any key|ENTER) to continue|Terminate batch job \(Y\/N\)\?)/i;
+      if (promptRegex.test(clean)) {
+        const now = Date.now();
+        if (!paneState._lastAutoRespond || (now - paneState._lastAutoRespond) > 600) {
+          paneState._lastAutoRespond = now;
+          const sId = paneState.sessionId || `${tab.id}-p${paneNum}`;
+          setTimeout(() => {
+            if (tab.autoEnter && sId) {
+              this.sendPtyInput(sId, 'y\r');
+            }
+          }, 150);
+        }
+      }
     },
 
     async sendPtyInput(sessionId, data) {
@@ -30986,7 +31061,7 @@ Aturan:
             }
           } catch (_) {}
         }
-        if (this.isSplit && tab.pane2 && tab.pane2.fitAddon) {
+        if (tab.isSplit && tab.pane2 && tab.pane2.fitAddon) {
           try {
             tab.pane2.fitAddon.fit();
             if (tab.pane2.term) {
@@ -31005,6 +31080,9 @@ Aturan:
         title: `Terminal ${this.tabCounter}`,
         shell: 'powershell',
         cwd: this.defaultCwd,
+        isSplit: false,
+        autoEnter: false,
+        activePane: 1,
         pane1: {
           shell: 'powershell',
           cwd: this.defaultCwd,
@@ -31028,10 +31106,21 @@ Aturan:
 
     switchTab(tabId) {
       if (this.activeTabId === tabId) return;
+      const prevTab = this.getActiveTab();
+      if (prevTab) {
+        prevTab.activePane = this.activePane || 1;
+      }
       this.saveCurrentScreenState();
+
       this.activeTabId = tabId;
+      const currentTab = this.getActiveTab();
+      this.activePane = (currentTab && currentTab.activePane) ? currentTab.activePane : 1;
+
       this.renderTabs();
+      this.applySplitUI(currentTab.isSplit);
+      this.updateAutoEnterUI();
       this.restoreScreenState();
+      this.setActivePane(this.activePane);
       this.updateShellSelectorUI();
       this.updatePaneHeaders();
       this.focusActiveInput();
@@ -31072,7 +31161,11 @@ Aturan:
       if (this.activeTabId === tabId) {
         const nextTab = this.tabs[Math.max(0, idx - 1)];
         this.activeTabId = nextTab.id;
+        this.activePane = nextTab.activePane || 1;
+        this.applySplitUI(nextTab.isSplit);
+        this.updateAutoEnterUI();
         this.restoreScreenState();
+        this.setActivePane(this.activePane);
       }
       this.renderTabs();
       this.updateShellSelectorUI();
@@ -31122,7 +31215,7 @@ Aturan:
       const s2 = document.getElementById('termScreen2');
       if (s2) {
         s2.innerHTML = '';
-        if (this.isSplit) {
+        if (tab.isSplit) {
           if (tab.pane2?.screenContainer) {
             s2.classList.add('xterm-mode');
             s2.appendChild(tab.pane2.screenContainer);
@@ -31226,33 +31319,44 @@ Aturan:
       }
     },
 
-    toggleSplit() {
-      this.isSplit = !this.isSplit;
+    applySplitUI(isSplit) {
       const p1 = document.getElementById('termPane1');
       const p2 = document.getElementById('termPane2');
       const resizer = document.getElementById('termResizer');
       const btn = document.getElementById('btnTermSplit');
-      if (p2 && resizer) {
-        if (this.isSplit) {
-          p2.style.display = 'flex';
-          resizer.style.display = 'block';
-          if (p1) p1.style.flex = '1 1 50%';
-          if (p2) p2.style.flex = '1 1 50%';
-          if (btn) btn.classList.add('active');
-          this.initXtermPane(2);
-        } else {
-          p2.style.display = 'none';
-          resizer.style.display = 'none';
-          if (p1) p1.style.flex = '1 1 100%';
-          if (btn) btn.classList.remove('active');
-          this.setActivePane(1);
-        }
-        this.fitAllPanes();
+      if (!p2 || !resizer) return;
+
+      if (isSplit) {
+        p2.style.display = 'flex';
+        resizer.style.display = 'block';
+        if (p1) p1.style.flex = '1 1 50%';
+        if (p2) p2.style.flex = '1 1 50%';
+        if (btn) btn.classList.add('active');
+      } else {
+        p2.style.display = 'none';
+        resizer.style.display = 'none';
+        if (p1) p1.style.flex = '1 1 100%';
+        if (btn) btn.classList.remove('active');
       }
+    },
+
+    toggleSplit() {
+      const tab = this.getActiveTab();
+      if (!tab) return;
+      tab.isSplit = !tab.isSplit;
+      this.applySplitUI(tab.isSplit);
+      if (tab.isSplit) {
+        this.initXtermPane(2);
+      } else {
+        this.setActivePane(1);
+      }
+      this.fitAllPanes();
     },
 
     setActivePane(paneNum) {
       this.activePane = paneNum;
+      const tab = this.getActiveTab();
+      if (tab) tab.activePane = paneNum;
       const p1 = document.getElementById('termPane1');
       const p2 = document.getElementById('termPane2');
       if (p1) p1.classList.toggle('active', paneNum === 1);
@@ -31263,7 +31367,7 @@ Aturan:
 
     initScreenWelcome(paneNum) {
       const screen = document.getElementById(`termScreen${paneNum}`);
-      if (!screen || screen.children.length > 0) return;
+      if (!screen || (screen.children && screen.children.length > 0)) return;
       const pane = this.getPaneState(paneNum);
       const conf = this.shells[pane.shell] || this.shells.powershell;
       screen.innerHTML = `
@@ -31396,7 +31500,7 @@ Aturan:
       }
 
       if (lower === 'exit') {
-        if (this.isSplit && paneNum === 2) {
+        if (tab && tab.isSplit && paneNum === 2) {
           this.toggleSplit();
         } else {
           closeModal('terminalModal');
@@ -31439,7 +31543,7 @@ Aturan:
             command: trimmed,
             cwd: pane.cwd,
             shell: pane.shell,
-            autoEnter: this.autoEnter
+            autoEnter: tab ? !!tab.autoEnter : false
           })
         });
 
@@ -31549,7 +31653,7 @@ Aturan:
       document.getElementById('btnTermFontDec')?.addEventListener('click', () => this.adjustFontSize(-1));
       document.getElementById('btnTermFontInc')?.addEventListener('click', () => this.adjustFontSize(1));
       document.getElementById('btnTermAutoEnter')?.addEventListener('click', () => this.toggleAutoEnter());
-      document.getElementById('btnTermSendEnter')?.addEventListener('click', () => this.executeInput(this.activePane));
+      document.getElementById('btnTermSendEnter')?.addEventListener('click', () => this.sendEnterToActivePane());
       document.getElementById('btnTermSplit')?.addEventListener('click', () => this.toggleSplit());
       document.getElementById('btnTermClear')?.addEventListener('click', () => this.clearActiveScreen());
       document.getElementById('btnTermTheme')?.addEventListener('click', () => this.toggleTheme());
