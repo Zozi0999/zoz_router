@@ -1719,17 +1719,26 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const activeModal = document.querySelector('.modal-backdrop.show, .modal.show, .sidebar-backdrop.active, .lightbox-backdrop.active');
 
       for (const btn of buttons) {
-        // 1. Abaikan tombol yang memang sengaja tidak dirender di visual layout
+        // 1. Abaikan tombol internal riwayat log, item diagnosa, dan tombol utilitas mikro untuk mencegah loop sekresi
+        if (btn.classList?.contains('btn-copy-log-entry') || 
+            btn.classList?.contains('btn-copy-issue-entry') || 
+            btn.classList?.contains('copy-code-btn') || 
+            btn.classList?.contains('code-copy-btn') ||
+            (btn.closest && btn.closest('.endocrine-logs-list, .endocrine-diagnostic-list, #chatEndocrineLogsList, .code-copy-btn, .copy-code-btn'))) {
+          continue;
+        }
+
+        // 2. Abaikan tombol yang memang sengaja tidak dirender di visual layout
         if (btn.offsetParent === null) continue;
         if (typeof window.getComputedStyle !== 'function' || typeof btn.getBoundingClientRect !== 'function') continue;
         
-        // 2. Abaikan tombol di dalam modal tertutup, dropdown tertutup, atau tab non-aktif
-        if (btn.closest('.modal-backdrop:not(.show), .modal:not(.show), [hidden], .dropdown-menu:not(.show), .settings-tab-pane:not(.active), .endocrine-pane[style*="display: none"]')) continue;
+        // 3. Abaikan tombol di dalam modal tertutup, dropdown tertutup, atau tab non-aktif
+        if (btn.closest && btn.closest('.modal-backdrop:not(.show), .modal:not(.show), [hidden], .dropdown-menu:not(.show), .settings-tab-pane:not(.active), .endocrine-pane[style*="display: none"], .endocrine-pane[style*="display:none"]')) continue;
 
         const style = window.getComputedStyle(btn);
         if (style.display === 'none' || style.visibility === 'hidden') continue;
 
-        // 3. Jika ada modal yang sedang terbuka:
+        // 4. Jika ada modal yang sedang terbuka:
         // Tombol di latar belakang (luar modal) secara sengaja ditutup oleh backdrop modal.
         // Hanya audit tombol yang berada di dalam modal aktif tersebut!
         if (activeModal && !activeModal.contains(btn)) {
@@ -1739,17 +1748,22 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         const rect = btn.getBoundingClientRect();
         const btnId = btn.id ? `#${btn.id}` : (btn.className ? `.${String(btn.className).trim().split(/\s+/)[0]}` : '<button>');
         const btnText = (btn.innerText || btn.getAttribute('aria-label') || btn.title || '').trim().slice(0, 25);
+        const hasIconOrGraphic = !!(btn.querySelector && btn.querySelector('i, svg, img'));
+        
+        // Abaikan tombol tanpa teks, tanpa ikon, dan tanpa dimensi berarti (elemen non-render)
+        if (!btnText && !hasIconOrGraphic && rect.width <= 0 && rect.height <= 0) continue;
+
         const btnLabel = btnText ? `"${btnText}" (${btnId})` : btnId;
 
-        // a. Tombol kerdil / ukuran tidak wajar (< 14px)
-        if ((rect.width > 0 && rect.width < 14) || (rect.height > 0 && rect.height < 14)) {
+        // a. Tombol kerdil / ukuran kolaps (< 6px lebar atau tinggi saat dirender)
+        if ((rect.width > 0 && rect.width < 6) || (rect.height > 0 && rect.height < 6)) {
           issues.push({
             id: 'btn_dim_' + (btn.id || Math.random().toString(36).substr(2, 4)),
             type: 'squished_dimensions',
             severity: 'medium',
             selector: btnId,
             text: btnText,
-            reason: `Tombol ${btnLabel} memiliki dimensi terlalu kerdil (${Math.round(rect.width)}x${Math.round(rect.height)}px) sehingga hampir mustahil diklik/ditekan!`,
+            reason: `Tombol ${btnLabel} memiliki dimensi kolaps (< 6px: ${Math.round(rect.width)}x${Math.round(rect.height)}px).`,
             fixable: false
           });
           continue;
@@ -1783,13 +1797,39 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
 
         // d. Deteksi Tombol Terhalang Fisik (Obstruction Check via document.elementFromPoint)
+        // Cek apakah tombol berada di dalam kontainer yang memiliki scroll/overflow
+        // Jika tombol telah ter-scroll keluar dari batas pandang kontainer (scrolled out of view), abaikan!
+        let isClippedByScrollParent = false;
+        let parent = btn.parentElement;
+        while (parent && parent !== document.body && parent !== document.documentElement) {
+          const pStyle = window.getComputedStyle ? window.getComputedStyle(parent) : null;
+          if (pStyle) {
+            const overflowY = pStyle.overflowY;
+            const overflowX = pStyle.overflowX;
+            const hasScroll = overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden' ||
+                              overflowX === 'auto' || overflowX === 'scroll' || overflowX === 'hidden';
+            if (hasScroll && typeof parent.getBoundingClientRect === 'function') {
+              const pRect = parent.getBoundingClientRect();
+              if (rect.bottom < pRect.top || rect.top > pRect.bottom || rect.right < pRect.left || rect.left > pRect.right) {
+                isClippedByScrollParent = true;
+                break;
+              }
+            }
+          }
+          parent = parent.parentElement;
+        }
+        if (isClippedByScrollParent) continue;
+
         const cx = rect.left + (rect.width / 2);
         const cy = rect.top + (rect.height / 2);
         if (cx >= 0 && cx <= winW && cy >= 0 && cy <= winH && typeof document.elementFromPoint === 'function') {
           const topEl = document.elementFromPoint(cx, cy);
           if (topEl && topEl !== btn && !btn.contains(topEl) && !topEl.contains(btn)) {
             // Abaikan jika topEl adalah bagian internal tombol (misal wrapper span atau label)
-            if (topEl.closest('button, a.btn, [role="button"]') === btn) continue;
+            if (topEl.closest && topEl.closest('button, a.btn, [role="button"]') === btn) continue;
+
+            // Abaikan jika topEl adalah kontainer induk terdekat yang batas padding-nya bersentuhan
+            if (btn.closest && btn.closest('.modal-card, .modal-body, .modal-header, .modal-footer, .endocrine-logs-wrap') === topEl) continue;
 
             // Abaikan jika elemen penutup memiliki pointer-events: none (klik tembus ke tombol)
             const topStyle = window.getComputedStyle ? window.getComputedStyle(topEl) : null;
@@ -1821,7 +1861,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       this.buttonIssues = issues;
       if (issues.length > 0) {
         const stressAmt = Math.min(45, issues.length * 6);
-        this.secreteStress(stressAmt, `Terdeteksi ${issues.length} tombol terhalang atau tidak sesuai posisi!`);
+        const issueSummary = issues.map(i => `${i.selector || i.text || 'btn'}: ${i.type}`).slice(0, 3).join(', ');
+        this.secreteStress(stressAmt, `Terdeteksi ${issues.length} tombol terhalang atau tidak sesuai posisi (${issueSummary})!`);
       } else if (!silent) {
         this.secreteDopamine(10, 'Audit tombol: Semua tombol antarmuka berada pada posisi valid dan bebas halangan');
       }
