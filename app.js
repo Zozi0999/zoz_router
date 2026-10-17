@@ -241,16 +241,307 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     { id: 'turbo', name: 'SDXL Turbo', provider: 'pollinations', cat: 'fast', tag: 'Fast • Turbo' }
   ];
 
-  // Dedicated OpenRouter Curated Image Engines
+  // Dedicated OpenRouter Curated Image Engines (Official OpenRouter Images API)
   const CURATED_OPENROUTER_IMAGE_MODELS = [
-    { id: 'black-forest-labs/flux-1-schnell', name: 'Flux.1 Schnell (Cloud)', provider: 'openrouter', cat: 'cloud', tag: 'Fast • High Quality', desc: 'Black Forest Labs Flux 1 Schnell via OpenRouter' },
-    { id: 'black-forest-labs/flux-1-dev', name: 'Flux.1 Dev', provider: 'openrouter', cat: 'cloud', tag: 'Pro • Dev', desc: 'Kualitas fotorealistik tertinggi dari Black Forest Labs' },
-    { id: 'recraft-ai/recraft-v3', name: 'Recraft v3', provider: 'openrouter', cat: 'cloud', tag: 'Vector • Design', desc: 'Desain grafis, vektor, ikon dan ilustrasi resolusi tinggi' },
-    { id: 'google/imagen-3', name: 'Google Imagen 3', provider: 'openrouter', cat: 'cloud', tag: 'Google • Photorealism', desc: 'Model generasi visual tercanggih dari Google DeepMind' },
-    { id: 'openai/dall-e-3', name: 'OpenAI DALL-E 3', provider: 'openrouter', cat: 'cloud', tag: 'OpenAI • Detailed', desc: 'Generasi gambar berbasis pemahaman teks detail OpenAI' },
-    { id: 'stabilityai/stable-diffusion-3.5-large', name: 'SD 3.5 Large', provider: 'openrouter', cat: 'cloud', tag: 'Stability • Photoreal', desc: 'Stable Diffusion 3.5 Large multi-gaya resolusi tinggi' },
-    { id: 'tencent/hunyuan-image-v3.5', name: 'Hunyuan Image v3.5', provider: 'openrouter', cat: 'cloud', tag: 'Tencent • Anime/Photo', desc: 'Tencent Hunyuan Image v3.5 visual synthesis' }
+    {
+      id: 'qwen/qwen-image-2.1-pro',
+      name: 'Qwen: Qwen Image 2.1 Pro',
+      provider: 'openrouter',
+      cat: 'flagship',
+      tag: 'Qwen • Flagship Pro',
+      desc: 'Model generasi & edit visual presisi tinggi dari Qwen (resolusi 1K/2K, multi-referensi, render teks detail)'
+    },
+    {
+      id: 'qwen/qwen-image-2.1-turbo',
+      name: 'Qwen: Qwen Image 2.1 Turbo',
+      provider: 'openrouter',
+      cat: 'fast',
+      tag: 'Qwen • Ultra Fast',
+      desc: 'Varian cepat & efisien dari seri Qwen Image 2.1 untuk throughput tinggi dan generasi instan'
+    },
+    {
+      id: 'qwen/qwen-image-3-pro',
+      name: 'Qwen: Qwen Image 3 Pro',
+      provider: 'openrouter',
+      cat: 'flagship',
+      tag: 'Qwen • Image 3 Pro',
+      desc: 'Generasi visual generasi ke-3 dari Qwen dengan estetika fotorealistik tingkat lanjut'
+    },
+    {
+      id: 'qwen/qwen-image-3',
+      name: 'Qwen: Qwen Image 3',
+      provider: 'openrouter',
+      cat: 'flagship',
+      tag: 'Qwen • Image 3',
+      desc: 'Model terpadu text-to-image & image-to-image generasi ke-3 Qwen'
+    },
+    {
+      id: 'black-forest-labs/flux-3-image',
+      name: 'Black Forest Labs: FLUX 3 Image',
+      provider: 'openrouter',
+      cat: 'flagship',
+      tag: 'FLUX.3 • Flagship',
+      desc: 'Model generasi dan pengeditan gambar generasi baru paling mutakhir dari Black Forest Labs'
+    },
+    {
+      id: 'black-forest-labs/flux-3-image-klein',
+      name: 'Black Forest Labs: FLUX 3 Image Klein',
+      provider: 'openrouter',
+      cat: 'fast',
+      tag: 'FLUX.3 • Fast Klein',
+      desc: 'Varian cepat dan efisien dari keluarga FLUX.3 dengan latensi rendah'
+    },
+    {
+      id: 'black-forest-labs/flux.2-pro',
+      name: 'Black Forest Labs: FLUX.2 Pro',
+      provider: 'openrouter',
+      cat: 'flagship',
+      tag: 'FLUX.2 • Pro Studio',
+      desc: 'Model frontier dengan fidelitas visual tertinggi dan pemahaman prompt kompleks'
+    },
+    {
+      id: 'black-forest-labs/flux.2-max',
+      name: 'Black Forest Labs: FLUX.2 Max',
+      provider: 'openrouter',
+      cat: 'flagship',
+      tag: 'FLUX.2 • Max Quality',
+      desc: 'Model kualitas visual puncak FLUX.2 dengan rendering tipografi dan detail tinggi'
+    },
+    {
+      id: 'black-forest-labs/flux-1-schnell',
+      name: 'Flux.1 Schnell (Cloud)',
+      provider: 'openrouter',
+      cat: 'fast',
+      tag: 'Fast • High Quality',
+      desc: 'Black Forest Labs Flux 1 Schnell via OpenRouter'
+    },
+    {
+      id: 'black-forest-labs/flux-1-dev',
+      name: 'Flux.1 Dev',
+      provider: 'openrouter',
+      cat: 'cloud',
+      tag: 'Pro • Dev',
+      desc: 'Kualitas fotorealistik tinggi dari Black Forest Labs'
+    },
+    {
+      id: 'google/gemini-nano-banana-2.1',
+      name: 'Google: Nano Banana 2.1',
+      provider: 'openrouter',
+      cat: 'flagship',
+      tag: 'Google • Nano Banana 2.1',
+      desc: 'Model generasi dan editing visual mutakhir Gemini Nano Banana 2.1 dari Google'
+    },
+    {
+      id: 'google/gemini-3.1-flash-image',
+      name: 'Google: Gemini 3.1 Flash Image',
+      provider: 'openrouter',
+      cat: 'fast',
+      tag: 'Google • Nano Banana 2',
+      desc: 'Generasi gambar state-of-the-art berbasis Gemini 3.1 Flash'
+    },
+    {
+      id: 'google/gemini-3-pro-image',
+      name: 'Google: Gemini 3 Pro Image',
+      provider: 'openrouter',
+      cat: 'flagship',
+      tag: 'Google • Nano Banana Pro',
+      desc: 'Model generasi & editing visual tingkat pro berbasis Gemini 3 Pro'
+    },
+    {
+      id: 'openai/gpt-image-2',
+      name: 'OpenAI: GPT Image 2',
+      provider: 'openrouter',
+      cat: 'flagship',
+      tag: 'OpenAI • Flagship',
+      desc: 'Model generasi dan pengeditan visual terbaru resmi OpenAI Images API'
+    },
+    {
+      id: 'openai/gpt-image-2.5-sunburst',
+      name: 'OpenAI: GPT Image 2.5 Sunburst',
+      provider: 'openrouter',
+      cat: 'flagship',
+      tag: 'OpenAI • Sunburst',
+      desc: 'Generasi gambar berorientasi presisi fotorealistik tinggi dari OpenAI'
+    },
+    {
+      id: 'openai/gpt-image-2.5-flare',
+      name: 'OpenAI: GPT Image 2.5 Flare',
+      provider: 'openrouter',
+      cat: 'fast',
+      tag: 'OpenAI • Flare Speed',
+      desc: 'Model generasi gambar cepat & responsif dari OpenAI'
+    },
+    {
+      id: 'openai/gpt-image-1',
+      name: 'OpenAI: GPT Image 1',
+      provider: 'openrouter',
+      cat: 'cloud',
+      tag: 'OpenAI • Dedicated',
+      desc: 'Generasi visual resolusi tinggi dengan akurasi teks dan detail tinggi'
+    },
+    {
+      id: 'openai/gpt-image-1-mini',
+      name: 'OpenAI: GPT Image 1 Mini',
+      provider: 'openrouter',
+      cat: 'fast',
+      tag: 'OpenAI • Mini Fast',
+      desc: 'Varian efisien dan hemat latensi dari GPT Image 1'
+    },
+    {
+      id: 'bytedance-seed/seedream-5-0-pro',
+      name: 'ByteDance: Seedream 5.0 Pro',
+      provider: 'openrouter',
+      cat: 'flagship',
+      tag: 'ByteDance • Pro Visual',
+      desc: 'Generasi visual estetika tinggi dari tim ByteDance Seed'
+    },
+    {
+      id: 'bytedance-seed/seedream-5-0-flash',
+      name: 'ByteDance: Seedream 5.0 Flash',
+      provider: 'openrouter',
+      cat: 'fast',
+      tag: 'ByteDance • Flash Speed',
+      desc: 'Model generasi visual ultra-cepat ByteDance Seed'
+    },
+    {
+      id: 'recraft/recraft-v4.1',
+      name: 'Recraft: Recraft V4.1',
+      provider: 'openrouter',
+      cat: 'cloud',
+      tag: 'Recraft • High Aesthetics',
+      desc: 'Model generasi visual & ilustrasi estetika tinggi dari Recraft'
+    },
+    {
+      id: 'recraft/recraft-v4.1-pro',
+      name: 'Recraft: Recraft V4.1 Pro',
+      provider: 'openrouter',
+      cat: 'flagship',
+      tag: 'Recraft • Pro',
+      desc: 'Model profesional estetika grafis, rendering teks, dan komposisi'
+    },
+    {
+      id: 'recraft/recraft-v4.1-vector',
+      name: 'Recraft: Recraft V4.1 Vector',
+      provider: 'openrouter',
+      cat: 'cloud',
+      tag: 'Recraft • Vector SVG',
+      desc: 'Desain vektor SVG murni, ikon grafis, dan ilustrasi scalable'
+    },
+    {
+      id: 'x-ai/grok-imagine-image-quality',
+      name: 'xAI: Grok Imagine Image Quality',
+      provider: 'openrouter',
+      cat: 'flagship',
+      tag: 'xAI • Grok Quality',
+      desc: 'Model generasi & editing visual kecepatan tinggi & fidelity tinggi xAI'
+    },
+    {
+      id: 'krea/krea-2-large',
+      name: 'Krea: Krea 2 Large',
+      provider: 'openrouter',
+      cat: 'flagship',
+      tag: 'Krea • Large',
+      desc: 'Model generasi gambar berkapabilitas tinggi dari Krea'
+    },
+    {
+      id: 'krea/k3-edit',
+      name: 'Krea: K3 Edit',
+      provider: 'openrouter',
+      cat: 'cloud',
+      tag: 'Krea • Image-to-Image',
+      desc: 'Model editing foto berbasis multi-referensi dari Krea'
+    },
+    {
+      id: 'microsoft/mai-image-2.6',
+      name: 'Microsoft AI: MAI-Image-2.6',
+      provider: 'openrouter',
+      cat: 'flagship',
+      tag: 'Microsoft • Precision',
+      desc: 'Model generasi visual presisi tinggi dari Microsoft AI Azure'
+    },
+    {
+      id: 'meta/muse-image',
+      name: 'Meta: Muse Image',
+      provider: 'openrouter',
+      cat: 'cloud',
+      tag: 'Meta • Agentic Visual',
+      desc: 'Model generasi dan pengeditan gambar agentic dari Meta'
+    },
+    {
+      id: 'tencent/hy-image-v3.5-preview',
+      name: 'Tencent: Hy Image 3.5 Preview',
+      provider: 'openrouter',
+      cat: 'cloud',
+      tag: 'Tencent • Anime/Photo',
+      desc: 'Model terpadu text-to-image & image-to-image Tencent'
+    }
   ];
+
+  function normalizeImageModelId(rawId) {
+    if (!rawId || typeof rawId !== 'string') return 'flux';
+    const clean = rawId.trim();
+    const low = clean.toLowerCase();
+    if (low === 'off') return 'off';
+
+    // Qwen Image normalizations
+    if (low === 'qwen/qwen-image-2.1-pro' || low === 'qwen: qwen image 2.1 pro' || low === 'qwen-image-2.1-pro' || low === 'qwen image 2.1 pro' || low === 'qwen 2.1 pro') {
+      return 'qwen/qwen-image-2.1-pro';
+    }
+    if (low === 'qwen/qwen-image-2.1-turbo' || low === 'qwen: qwen image 2.1 turbo' || low === 'qwen-image-2.1-turbo' || low === 'qwen image 2.1 turbo' || low === 'qwen 2.1 turbo') {
+      return 'qwen/qwen-image-2.1-turbo';
+    }
+    if (low === 'qwen/qwen-image-3-pro' || low === 'qwen: qwen image 3 pro' || low === 'qwen-image-3-pro' || low === 'qwen image 3 pro') {
+      return 'qwen/qwen-image-3-pro';
+    }
+    if (low === 'qwen/qwen-image-3' || low === 'qwen: qwen image 3' || low === 'qwen-image-3' || low === 'qwen image 3') {
+      return 'qwen/qwen-image-3';
+    }
+
+    // Flux normalizations
+    if (low === 'flux-3' || low === 'flux.3' || low === 'flux 3 image' || low === 'black-forest-labs/flux-3-image') {
+      return 'black-forest-labs/flux-3-image';
+    }
+    if (low === 'flux-3-klein' || low === 'flux.3-klein' || low === 'black-forest-labs/flux-3-image-klein') {
+      return 'black-forest-labs/flux-3-image-klein';
+    }
+    if (low === 'flux.2-pro' || low === 'flux-2-pro' || low === 'black-forest-labs/flux.2-pro') {
+      return 'black-forest-labs/flux.2-pro';
+    }
+    if (low === 'flux.2-max' || low === 'flux-2-max' || low === 'black-forest-labs/flux.2-max') {
+      return 'black-forest-labs/flux.2-max';
+    }
+
+    // Google Gemini Nano Banana normalizations
+    if (low === 'nano-banana-2.1' || low === 'gemini-nano-banana-2.1' || low === 'nano banana 2.1' || low === 'google/gemini-nano-banana-2.1') {
+      return 'google/gemini-nano-banana-2.1';
+    }
+    if (low === 'gemini-3.1-flash-image' || low === 'google/gemini-3.1-flash-image') {
+      return 'google/gemini-3.1-flash-image';
+    }
+    if (low === 'gemini-3-pro-image' || low === 'google/gemini-3-pro-image') {
+      return 'google/gemini-3-pro-image';
+    }
+
+    // OpenAI image normalizations
+    if (low === 'gpt-image-2' || low === 'gpt image 2' || low === 'openai/gpt-image-2') {
+      return 'openai/gpt-image-2';
+    }
+    if (low === 'gpt-image-2.5-sunburst' || low === 'openai/gpt-image-2.5-sunburst') {
+      return 'openai/gpt-image-2.5-sunburst';
+    }
+    if (low === 'gpt-image-2.5-flare' || low === 'openai/gpt-image-2.5-flare') {
+      return 'openai/gpt-image-2.5-flare';
+    }
+    if (low === 'gpt-image-1' || low === 'openai/gpt-image-1') {
+      return 'openai/gpt-image-1';
+    }
+
+    // Legacy vendor alias fixes
+    if (low === 'recraft-ai/recraft-v3') return 'recraft/recraft-v3';
+    if (low === 'tencent/hunyuan-image-v3.5') return 'tencent/hy-image-v3.5-preview';
+
+    return clean;
+  }
 
   // Model pembuat musik/audio ASLI resmi terverifikasi di OpenRouter
   const CURATED_OPENROUTER_MUSIC_MODELS = [
@@ -13099,18 +13390,36 @@ ${blocks}
       // Ambil katalog model khusus Image Generation OpenRouter secara live
       try {
         const imgUrl = IS_GITHUB_PAGES ? 'https://openrouter.ai/api/v1/images/models' : '/api/openrouter/images/models';
-        const imgRes = await fetch(imgUrl, { headers }).catch(() => null);
+        let imgRes = await fetch(imgUrl, { headers }).catch(() => null);
+        if (!imgRes || !imgRes.ok) {
+          if (!IS_GITHUB_PAGES) {
+            imgRes = await fetch('https://openrouter.ai/api/v1/images/models', { headers }).catch(() => null);
+          }
+        }
         if (imgRes && imgRes.ok) {
           const imgData = await imgRes.json();
           if (imgData && Array.isArray(imgData.data)) {
-            const mappedImgModels = imgData.data.map(im => ({
-              id: im.id,
-              name: im.name || im.id,
-              provider: 'openrouter',
-              cat: 'flagship',
-              tag: 'OpenRouter • Image',
-              desc: im.description || 'OpenRouter Dedicated Image Synthesis Model'
-            }));
+            const mappedImgModels = imgData.data.map(im => {
+              const idLow = (im.id || '').toLowerCase();
+              let tag = 'OpenRouter • Image';
+              if (idLow.includes('qwen')) tag = 'Qwen • Image';
+              else if (idLow.includes('flux')) tag = 'FLUX • Image';
+              else if (idLow.includes('gemini') || idLow.includes('banana')) tag = 'Google • Image';
+              else if (idLow.includes('gpt') || idLow.includes('openai')) tag = 'OpenAI • Image';
+              else if (idLow.includes('seedream')) tag = 'ByteDance • Image';
+              else if (idLow.includes('recraft')) tag = 'Recraft • Image';
+              else if (idLow.includes('grok')) tag = 'xAI • Image';
+              else if (idLow.includes('krea')) tag = 'Krea • Image';
+              else if (idLow.includes('mai')) tag = 'Microsoft • Image';
+              return {
+                id: im.id,
+                name: im.name || im.id,
+                provider: 'openrouter',
+                cat: 'flagship',
+                tag: tag,
+                desc: im.description || 'OpenRouter Dedicated Image Synthesis Model'
+              };
+            });
             const pollinationsOnly = DEFAULT_IMAGE_MODELS.filter(dm => dm.provider === 'pollinations');
             STATE.availableImageModels = [...pollinationsOnly, ...mappedImgModels];
             if (els.paneOpenRouter && els.paneOpenRouter.style.display !== 'none') {
@@ -21762,6 +22071,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
   function getImageModelDisplayName(modelId) {
     if (!modelId || modelId === 'off') return 'Nonaktif (Mode Obrolan)';
+    modelId = normalizeImageModelId(modelId);
     const found = DEFAULT_IMAGE_MODELS.find(m => m.id === modelId) || 
                   CURATED_OPENROUTER_IMAGE_MODELS.find(m => m.id === modelId) ||
                   (STATE.availableImageModels && STATE.availableImageModels.find(m => m.id === modelId));
@@ -21774,6 +22084,10 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     if (m === 'turbo') return 'SDXL Turbo';
     if (m === 'flux-pro') return 'Flux.1 Pro';
     if (m === 'midjourney') return 'Midjourney Style';
+    if (m === 'qwen/qwen-image-2.1-pro' || m.includes('qwen-image-2.1-pro')) return 'Qwen: Qwen Image 2.1 Pro';
+    if (m === 'qwen/qwen-image-2.1-turbo' || m.includes('qwen-image-2.1-turbo')) return 'Qwen: Qwen Image 2.1 Turbo';
+    if (m === 'qwen/qwen-image-3-pro' || m.includes('qwen-image-3-pro')) return 'Qwen: Qwen Image 3 Pro';
+    if (m === 'qwen/qwen-image-3' || m.includes('qwen-image-3')) return 'Qwen: Qwen Image 3';
     if (m.includes('/')) {
       const parts = modelId.split('/');
       return parts[1] ? parts[1].replace(/[-_]/g, ' ') : modelId;
@@ -21783,6 +22097,7 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
 
   function getImageModelBadgeText(modelId) {
     if (!modelId || modelId === 'off') return 'Flux';
+    modelId = normalizeImageModelId(modelId);
     const m = String(modelId).toLowerCase();
     if (m === 'flux-realism') return 'Realism';
     if (m === 'flux-anime') return 'Anime';
@@ -21790,14 +22105,18 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     if (m === 'turbo') return 'Turbo';
     if (m === 'flux-pro') return 'Pro';
     if (m === 'midjourney') return 'MJ';
+    if (m.includes('qwen-image-2.1-pro') || m.includes('qwen-2.1-pro')) return 'Qwen Pro';
+    if (m.includes('qwen-image-2.1-turbo') || m.includes('qwen-2.1-turbo')) return 'Qwen Turbo';
+    if (m.includes('qwen-image-3-pro')) return 'Qwen 3 Pro';
+    if (m.includes('qwen-image-3')) return 'Qwen 3';
+    if (m.includes('qwen')) return 'Qwen';
     if (m.includes('flux-3') || m.includes('flux.3')) return 'FLUX-3';
     if (m.includes('flux.2') || m.includes('flux-2')) return 'FLUX-2';
-    if (m.includes('gemini')) return 'Gemini';
+    if (m.includes('banana') || m.includes('gemini')) return 'Gemini';
     if (m.includes('gpt')) return 'GPT';
     if (m.includes('recraft')) return 'Recraft';
     if (m.includes('seedream')) return 'Seedream';
     if (m.includes('grok')) return 'Grok';
-    if (m.includes('qwen')) return 'Qwen';
     if (m.includes('krea')) return 'Krea';
     if (m.includes('mai')) return 'MAI';
     if (m.includes('/')) {
@@ -23565,6 +23884,13 @@ Aturan:
     if (isOR) {
       updateImageModelStatusBar();
       populateOpenRouterImageModels(els.imageModelSearchInput?.value || '');
+      if (!STATE.availableImageModels || STATE.availableImageModels.length <= 10) {
+        fetchOpenRouterModelsList().then(() => {
+          if (els.paneOpenRouter && els.paneOpenRouter.style.display !== 'none') {
+            populateOpenRouterImageModels(els.imageModelSearchInput?.value || '');
+          }
+        }).catch(() => {});
+      }
     }
   }
 
@@ -23573,7 +23899,7 @@ Aturan:
     const hasKey = Boolean(STATE.settings.openRouterKey);
     els.openRouterStatusBar.className = `image-model-status-bar ${hasKey ? 'connected' : 'warning'}`;
     els.openRouterStatusBar.innerHTML = hasKey
-      ? `<span><i class="fa-solid fa-circle-check" style="color:var(--neon-teal);"></i> API Key Terhubung • 59+ Cloud Image Engines</span>
+      ? `<span><i class="fa-solid fa-circle-check" style="color:var(--neon-teal);"></i> API Key Terhubung • 60+ Cloud Image Engines</span>
          <button class="status-action-btn" id="openRouterConfigBtn" type="button">Pengaturan</button>`
       : `<span><i class="fa-solid fa-circle-exclamation" style="color:var(--neon-amber);"></i> Butuh OpenRouter Key untuk cloud models</span>
          <button class="status-action-btn" id="openRouterConfigBtn" type="button">Buka Pengaturan</button>`;
@@ -23644,18 +23970,20 @@ Aturan:
     const isImageMode = Boolean(STATE.isImageGenMode);
 
     els.imageModelOpenRouterList.innerHTML = list.map(m => {
-      const isSelected = isImageMode && (m.id === activeModel);
-      let icon = 'fa-cloud';
+      const isSelected = isImageMode && (normalizeImageModelId(m.id) === normalizeImageModelId(activeModel));
+      let icon = 'fa-solid fa-cloud';
       let accentClass = 'cloud-accent';
       const idLow = m.id.toLowerCase();
-      if (idLow.includes('flux')) { icon = 'fa-bolt-lightning'; accentClass = 'flux-accent'; }
-      else if (idLow.includes('gemini')) { icon = 'fa-brands fa-google'; accentClass = 'realism-accent'; }
-      else if (idLow.includes('gpt') || idLow.includes('openai')) { icon = 'fa-microchip'; accentClass = 'cloud-accent'; }
-      else if (idLow.includes('recraft')) { icon = 'fa-vector-square'; accentClass = 'anime-accent'; }
-      else if (idLow.includes('grok')) { icon = 'fa-rocket'; accentClass = 'turbo-accent'; }
-      else if (idLow.includes('seedream')) { icon = 'fa-seedling'; accentClass = 'cgi-accent'; }
-      else if (idLow.includes('qwen')) { icon = 'fa-dragon'; accentClass = 'mj-accent'; }
-      else if (idLow.includes('krea')) { icon = 'fa-palette'; accentClass = 'pro-accent'; }
+      if (idLow.includes('flux')) { icon = 'fa-solid fa-bolt-lightning'; accentClass = 'flux-accent'; }
+      else if (idLow.includes('gemini') || idLow.includes('banana')) { icon = 'fa-brands fa-google'; accentClass = 'realism-accent'; }
+      else if (idLow.includes('gpt') || idLow.includes('openai')) { icon = 'fa-solid fa-microchip'; accentClass = 'cloud-accent'; }
+      else if (idLow.includes('recraft')) { icon = 'fa-solid fa-vector-square'; accentClass = 'anime-accent'; }
+      else if (idLow.includes('grok')) { icon = 'fa-solid fa-rocket'; accentClass = 'turbo-accent'; }
+      else if (idLow.includes('seedream')) { icon = 'fa-solid fa-seedling'; accentClass = 'cgi-accent'; }
+      else if (idLow.includes('qwen')) { icon = 'fa-solid fa-dragon'; accentClass = 'mj-accent'; }
+      else if (idLow.includes('krea')) { icon = 'fa-solid fa-palette'; accentClass = 'pro-accent'; }
+      else if (idLow.includes('mai') || idLow.includes('microsoft')) { icon = 'fa-brands fa-microsoft'; accentClass = 'gemini-accent'; }
+      else if (idLow.includes('meta') || idLow.includes('muse')) { icon = 'fa-solid fa-infinity'; accentClass = 'llama-accent'; }
 
       return `
         <button class="image-model-item ${isSelected ? 'active' : ''}" type="button" data-model="${escapeHtml(m.id)}">
@@ -23707,6 +24035,14 @@ Aturan:
     els.imageModelDropdown.scrollTop = 0;
     els.imageGenToggleBtn?.setAttribute('aria-expanded', 'true');
 
+    if (!STATE.availableImageModels || STATE.availableImageModels.length <= 10) {
+      fetchOpenRouterModelsList().then(() => {
+        if (els.paneOpenRouter && els.paneOpenRouter.style.display !== 'none') {
+          populateOpenRouterImageModels(els.imageModelSearchInput?.value || '');
+        }
+      }).catch(() => {});
+    }
+
     // Auto switch ke tab OpenRouter jika model saat ini adalah model cloud OpenRouter
     const currentModel = STATE.settings.imageModel || 'flux';
     if (currentModel.includes('/')) {
@@ -23727,6 +24063,7 @@ Aturan:
 
   function setImageModel(modelVal) {
     STATE.photoEditAwaitingModel = false;
+    modelVal = normalizeImageModelId(modelVal);
     if (modelVal === 'off') {
       STATE.isImageGenMode = false;
       updateImageGenModeUI();
@@ -23810,7 +24147,7 @@ Aturan:
   async function runImageGeneration(session, promptText, customModel = null, referenceImage = null) {
     if (!promptText || !promptText.trim()) return;
     const cleanPrompt = promptText.trim();
-    const activeImageModel = (customModel && typeof customModel === 'string') ? customModel : (STATE.settings.imageModel || 'flux');
+    const activeImageModel = normalizeImageModelId((customModel && typeof customModel === 'string') ? customModel : (STATE.settings.imageModel || 'flux'));
     const isImgEdit = Boolean(referenceImage); // mode Edit Foto AI (img2img)
     
     setGeneratingState(true);
