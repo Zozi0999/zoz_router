@@ -13686,6 +13686,20 @@ body.mermaid-has-fullscreen {
 }
 
 /* Modal Cloudflare Tunnel Host Broadcaster (Desktop Mode) */
+#termRemoteTunnelModal {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 100050 !important;
+  background: rgba(3, 7, 18, 0.82) !important;
+  backdrop-filter: blur(10px) !important;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+#termRemoteTunnelModal.show {
+  display: flex !important;
+  animation: fadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
 .term-tunnel-dialog {
   max-width: 500px;
   width: 92%;

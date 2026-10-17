@@ -31151,13 +31151,48 @@ Aturan:
     async openRemoteTunnelModal() {
       const modal = document.getElementById('termRemoteTunnelModal');
       if (!modal) return;
+      modal.classList.add('show');
       modal.style.display = 'flex';
       await this.fetchTunnelInfo();
     },
 
     closeRemoteTunnelModal() {
       const modal = document.getElementById('termRemoteTunnelModal');
-      if (modal) modal.style.display = 'none';
+      if (modal) {
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+      }
+    },
+
+    async requestTunnelApi(endpoint, options = {}) {
+      const candidates = [];
+      if (this.activeLocalBridgeUrl) candidates.push(this.activeLocalBridgeUrl);
+      if (this.bridgeUrl) candidates.push(this.bridgeUrl.replace(/\/+$/, ''));
+      if (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin.includes(':4040')) {
+        candidates.push(window.location.origin);
+      }
+      candidates.push('http://127.0.0.1:4040');
+      candidates.push('http://localhost:4040');
+      candidates.push('');
+
+      const uniqueCandidates = [...new Set(candidates)];
+      let lastErr = null;
+      for (const base of uniqueCandidates) {
+        try {
+          const url = base ? `${base}${endpoint}` : endpoint;
+          const res = await fetch(url, { ...options, signal: options.signal || AbortSignal.timeout(6000) });
+          if (res.ok) {
+            this.activeLocalBridgeUrl = base;
+            return await res.json();
+          } else {
+            const errData = await res.json().catch(() => ({}));
+            lastErr = new Error(errData.error || `HTTP ${res.status}`);
+          }
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      throw lastErr || new Error('Tidak dapat terhubung ke server terminal port 4040');
     },
 
     async fetchTunnelInfo() {
@@ -31171,41 +31206,37 @@ Aturan:
       const qrPlaceholder = document.getElementById('termTunnelQrPlaceholder');
 
       try {
-        const apiUrl = this.bridgeUrl ? `${this.bridgeUrl.replace(/\/+$/, '')}/api/terminal/tunnel-info` : '/api/terminal/tunnel-info';
-        const res = await fetch(apiUrl, { signal: AbortSignal.timeout(3000) });
-        if (res.ok) {
-          const data = await res.json();
-          this.tunnelInfo = data;
-          const isActive = !!data.active && !!data.tunnelUrl;
+        const data = await this.requestTunnelApi('/api/terminal/tunnel-info');
+        this.tunnelInfo = data;
+        const isActive = !!data.active && !!data.tunnelUrl;
 
-          if (statusDot) statusDot.className = `term-tunnel-status-dot ${isActive ? 'active' : ''}`;
-          if (statusText) statusText.textContent = isActive ? '🟢 Tunnel Cloudflare Aktif' : '⚪ Tunnel Cloudflare Nonaktif';
-          if (toggleBtn) toggleBtn.className = `term-tunnel-btn ${isActive ? 'active' : ''}`;
-          if (toggleLabel) toggleLabel.textContent = isActive ? 'Matikan Tunnel' : 'Nyalakan Tunnel';
-          if (urlInput) urlInput.value = data.tunnelUrl ? `${data.tunnelUrl} (${data.wssUrl || data.tunnelUrl.replace(/^http/i, 'ws')})` : '';
-          if (pinDisplay) pinDisplay.textContent = data.pin || '------';
+        if (statusDot) statusDot.className = `term-tunnel-status-dot ${isActive ? 'active' : ''}`;
+        if (statusText) statusText.textContent = isActive ? '🟢 Tunnel Cloudflare Aktif' : '⚪ Tunnel Cloudflare Nonaktif';
+        if (toggleBtn) toggleBtn.className = `term-tunnel-btn ${isActive ? 'active' : ''}`;
+        if (toggleLabel) toggleLabel.textContent = isActive ? 'Matikan Tunnel' : 'Nyalakan Tunnel';
+        if (urlInput) urlInput.value = data.tunnelUrl ? `${data.tunnelUrl} (${data.wssUrl || data.tunnelUrl.replace(/^http/i, 'ws')})` : '';
+        if (pinDisplay) pinDisplay.textContent = data.pin || '------';
 
-          if (isActive && data.pin) {
-            const originBase = window.location.origin.includes('localhost') ? 'https://zoz-router.vercel.app' : window.location.origin;
-            const wss = data.wssUrl || data.tunnelUrl.replace(/^http/i, 'ws');
-            const pairingLink = `${originBase}?remote_host=${encodeURIComponent(wss)}&pin=${encodeURIComponent(data.pin)}`;
-            const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pairingLink)}`;
+        if (isActive && data.pin) {
+          const originBase = (window.location.origin && window.location.origin.includes('localhost')) ? 'https://zoz-router.vercel.app' : window.location.origin;
+          const wss = data.wssUrl || data.tunnelUrl.replace(/^http/i, 'ws');
+          const pairingLink = `${originBase}?remote_host=${encodeURIComponent(wss)}&pin=${encodeURIComponent(data.pin)}`;
+          const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pairingLink)}`;
 
-            if (qrImg) {
-              qrImg.src = qrSrc;
-              qrImg.style.display = 'block';
-            }
-            if (qrPlaceholder) qrPlaceholder.style.display = 'none';
-          } else {
-            if (qrImg) {
-              qrImg.style.display = 'none';
-              qrImg.src = '';
-            }
-            if (qrPlaceholder) qrPlaceholder.style.display = 'flex';
+          if (qrImg) {
+            qrImg.src = qrSrc;
+            qrImg.style.display = 'block';
           }
+          if (qrPlaceholder) qrPlaceholder.style.display = 'none';
+        } else {
+          if (qrImg) {
+            qrImg.style.display = 'none';
+            qrImg.src = '';
+          }
+          if (qrPlaceholder) qrPlaceholder.style.display = 'flex';
         }
       } catch (e) {
-        if (statusText) statusText.textContent = '⚠️ Gagal memeriksa server tunnel lokal';
+        if (statusText) statusText.textContent = '⚠️ Gagal memeriksa server tunnel lokal: ' + (e.message || 'Offline');
       }
     },
 
@@ -31216,9 +31247,7 @@ Aturan:
       if (toggleLabel) toggleLabel.textContent = isActive ? 'Mematikan...' : 'Memulai Tunnel...';
 
       try {
-        const apiUrl = this.bridgeUrl ? `${this.bridgeUrl.replace(/\/+$/, '')}${endpoint}` : endpoint;
-        const res = await fetch(apiUrl, { method: 'POST', signal: AbortSignal.timeout(30000) });
-        const data = await res.json();
+        const data = await this.requestTunnelApi(endpoint, { method: 'POST', signal: AbortSignal.timeout(35000) });
         if (data.error) {
           showToast(`Tunnel error: ${data.error}`, 'error');
         } else if (isActive) {
@@ -31234,15 +31263,13 @@ Aturan:
 
     async regenerateTunnelPin() {
       try {
-        const apiUrl = this.bridgeUrl ? `${this.bridgeUrl.replace(/\/+$/, '')}/api/terminal/tunnel-regenerate-pin` : '/api/terminal/tunnel-regenerate-pin';
-        const res = await fetch(apiUrl, { method: 'POST' });
-        const data = await res.json();
+        const data = await this.requestTunnelApi('/api/terminal/tunnel-regenerate-pin', { method: 'POST' });
         if (data && data.pin) {
           showToast(`PIN sesi baru dibuat: ${data.pin}`, 'success');
           await this.fetchTunnelInfo();
         }
       } catch (err) {
-        showToast('Gagal membuat PIN baru.', 'error');
+        showToast('Gagal membuat PIN baru: ' + (err.message || ''), 'error');
       }
     },
 
@@ -31426,13 +31453,19 @@ Aturan:
       setTimeout(() => {
         const paneNum = this.activePane || 1;
         const paneState = this.getPaneState(paneNum);
+        if (paneState && paneState.term && !this.isMobileDevice()) {
+          try {
+            paneState.term.focus();
+            return;
+          } catch (_) {}
+        }
         const input = document.getElementById(`termCliInput${paneNum}`);
         if (input && input.offsetParent !== null) {
-          input.focus();
+          try { input.focus(); } catch (_) {}
         } else if (paneState && paneState.term) {
           try { paneState.term.focus(); } catch (_) {}
         }
-      }, 60);
+      }, 50);
     },
 
     getActiveTab() {
@@ -31503,6 +31536,14 @@ Aturan:
           if (paneState && paneState.term) {
             try { paneState.term.focus(); } catch (_) {}
           }
+        }
+      });
+      container.addEventListener('mousedown', () => {
+        if (this.activePane !== paneNum) {
+          this.setActivePane(paneNum);
+        }
+        if (paneState && paneState.term) {
+          try { paneState.term.focus(); } catch (_) {}
         }
       });
       screenEl.appendChild(container);
@@ -31745,16 +31786,42 @@ Aturan:
       }
     },
 
-    async sendPtyInput(sessionId, data) {
+    sendPtyInput(sessionId, data) {
+      if (!data) return;
+      if (!this._inputQueues) this._inputQueues = new Map();
+      let q = this._inputQueues.get(sessionId);
+      if (!q) {
+        q = { queue: [], isSending: false };
+        this._inputQueues.set(sessionId, q);
+      }
+      q.queue.push(data);
+      this._flushInputQueue(sessionId);
+    },
+
+    async _flushInputQueue(sessionId) {
+      if (!this._inputQueues) return;
+      const q = this._inputQueues.get(sessionId);
+      if (!q || q.isSending || q.queue.length === 0) return;
+      q.isSending = true;
+
+      const batch = q.queue.join('');
+      q.queue = [];
+
       try {
         const headers = { 'Content-Type': 'application/json' };
         if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
         await fetch(this.getTerminalApiUrl('/api/terminal/input'), {
           method: 'POST',
           headers,
-          body: JSON.stringify({ session: sessionId, data, pin: this.remotePin || undefined })
+          body: JSON.stringify({ session: sessionId, data: batch, pin: this.remotePin || undefined })
         });
-      } catch (_) {}
+      } catch (_) {
+      } finally {
+        q.isSending = false;
+        if (q.queue && q.queue.length > 0) {
+          this._flushInputQueue(sessionId);
+        }
+      }
     },
 
     async sendPtyResize(sessionId, cols, rows) {
@@ -32515,6 +32582,14 @@ Aturan:
       document.getElementById('btnTermCopyTunnelUrl')?.addEventListener('click', () => this.copyTunnelUrl());
       document.getElementById('btnTermCopyTunnelPin')?.addEventListener('click', () => this.copyTunnelPin());
       document.getElementById('btnTermCopyRemoteFullUrl')?.addEventListener('click', () => this.copyRemoteFullUrl());
+      const tunnelModal = document.getElementById('termRemoteTunnelModal');
+      if (tunnelModal) {
+        tunnelModal.addEventListener('click', (e) => {
+          if (e.target === tunnelModal) {
+            this.closeRemoteTunnelModal();
+          }
+        });
+      }
 
       // Mobile Remote Overlay handlers
       document.getElementById('btnTermConnectRemote')?.addEventListener('click', () => this.connectRemoteFromOverlay());
@@ -32591,8 +32666,8 @@ Aturan:
         });
       }
 
-      // Hover-to-Focus / Focus-Follows-Mouse untuk Mode Split:
-      // Pengguna cukup mengarahkan kursor ke atas pane/tab tanpa perlu klik dulu untuk langsung mengetik
+      // Hover-to-Focus / Focus-Follows-Mouse untuk Mode Split & Desktop Typing:
+      // Pengguna cukup mengarahkan kursor ke atas pane/tab atau klik untuk langsung mengetik di xterm PTY
       const activateAndFocusPane = (num) => {
         if (isResizerDragging) return;
         const tab = this.getActiveTab();
@@ -32603,9 +32678,11 @@ Aturan:
         if (pState && pState.term) {
           try { pState.term.focus(); } catch (_) {}
         }
-        const input = document.getElementById(`termCliInput${num}`);
-        if (input && input.offsetParent !== null) {
-          try { input.focus(); } catch (_) {}
+        if (this.isMobileDevice()) {
+          const input = document.getElementById(`termCliInput${num}`);
+          if (input && input.offsetParent !== null) {
+            try { input.focus(); } catch (_) {}
+          }
         }
       };
 
@@ -32614,7 +32691,8 @@ Aturan:
         const screen = document.getElementById(`termScreen${num}`);
 
         if (pane) {
-          // Klik manual tetap berfungsi normal
+          // Klik manual & mousedown langsung memfokuskan xterm
+          pane.addEventListener('mousedown', () => activateAndFocusPane(num));
           pane.addEventListener('click', () => activateAndFocusPane(num));
 
           // Hover-to-Focus saat kursor masuk ke pane
@@ -32635,6 +32713,8 @@ Aturan:
         }
 
         if (screen) {
+          screen.addEventListener('mousedown', () => activateAndFocusPane(num));
+          screen.addEventListener('click', () => activateAndFocusPane(num));
           screen.addEventListener('mouseenter', () => {
             const tab = this.getActiveTab();
             if (tab && tab.isSplit) {
@@ -32694,6 +32774,38 @@ Aturan:
       window.addEventListener('resize', () => {
         this.fitAllPanes();
       });
+
+      // Capture-phase keydown: Pastikan ketikan keyboard desktop selalu diarahkan ke xterm PTY aktif tanpa hilang
+      window.addEventListener('keydown', (e) => {
+        const modal = document.getElementById('terminalModal');
+        if (!modal || !modal.classList.contains('show')) return;
+        if (this.isMobileDevice()) return;
+
+        // Jangan intervensi jika modal tunnel atau prompt remote sedang terbuka
+        const remoteModal = document.getElementById('termRemoteTunnelModal');
+        if (remoteModal && remoteModal.classList.contains('show')) return;
+        const remotePrompt = document.getElementById('termMobileRemotePrompt');
+        if (remotePrompt && remotePrompt.style.display !== 'none') return;
+
+        // Jangan intervensi jika fokus sudah berada di dalam input / textarea / editable
+        const activeEl = document.activeElement;
+        const tag = (activeEl?.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || activeEl?.isContentEditable) {
+          return;
+        }
+
+        // Izinkan pintasan browser standar
+        if (e.key === 'F5' || e.key === 'F12' || (e.ctrlKey && (e.key === 'r' || e.key === 'R' || e.key === 'w' || e.key === 'W'))) {
+          return;
+        }
+
+        const paneState = this.getPaneState(this.activePane || 1);
+        if (paneState && paneState.term) {
+          try {
+            paneState.term.focus();
+          } catch (_) {}
+        }
+      }, true);
 
       window.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
