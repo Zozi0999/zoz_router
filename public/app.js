@@ -31802,6 +31802,17 @@ Aturan:
       const inputEl = document.getElementById(`termCliInput${paneNum}`);
       const val = inputEl ? inputEl.value : '';
 
+      // Immediately anchor terminal viewport to bottom on user send
+      if (paneState && paneState.term) {
+        paneState._userScrolledUp = false;
+        if (paneState._touchInertiaRaf) {
+          cancelAnimationFrame(paneState._touchInertiaRaf);
+          paneState._touchInertiaRaf = null;
+        }
+        paneState.term.scrollToBottom();
+        if (paneState.updateScrollUI) paneState.updateScrollUI();
+      }
+
       // If typed text is present in the input box (e.g. mobile view), execute it
       if (val && val.trim().length > 0) {
         this.executeInput(paneNum);
@@ -31824,6 +31835,7 @@ Aturan:
       if (paneState && paneState.term && !paneState.isFallbackMode) {
         const sessionId = paneState.sessionId || `${tab.id}-p${paneNum}`;
         this.sendPtyInput(sessionId, '\r');
+        paneState.term.scrollToBottom();
         this.focusActiveInput();
       } else {
         this.executeInput(paneNum, '');
@@ -32065,6 +32077,15 @@ Aturan:
       container.addEventListener('compositionend', stopMobileComposition, true);
 
       container.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.keyCode === 13) {
+          paneState._userScrolledUp = false;
+          if (paneState._touchInertiaRaf) {
+            cancelAnimationFrame(paneState._touchInertiaRaf);
+            paneState._touchInertiaRaf = null;
+          }
+          term.scrollToBottom();
+          if (paneState.updateScrollUI) paneState.updateScrollUI();
+        }
         if (ev.keyCode === 229 && term.textarea) {
           if (term.textarea.value.length === 0) {
             term.textarea.value = ' ';
@@ -32078,14 +32099,42 @@ Aturan:
 
       container.addEventListener('input', (ev) => {
         if (!this.isMobileDevice() && !this.isCtrlActive && !this.isAltActive) return;
-        // Fallback for mobile virtual keyboards that fire 'input' (insertText / deleteContentBackward)
+        // Fallback for mobile virtual keyboards that fire 'input' (insertParagraph / insertText / deleteContentBackward)
         // without firing keydown(229) first (where xterm.js _inputEvent drops it due to e.composed === true).
-        const now = Date.now();
+        if (ev.inputType === 'insertParagraph' || ev.inputType === 'insertLineBreak') {
+          paneState._userScrolledUp = false;
+          if (paneState._touchInertiaRaf) {
+            cancelAnimationFrame(paneState._touchInertiaRaf);
+            paneState._touchInertiaRaf = null;
+          }
+          term.scrollToBottom();
+          if (paneState.updateScrollUI) paneState.updateScrollUI();
+          setTimeout(() => {
+            if (!paneState._lastDataEmitAt || (Date.now() - paneState._lastDataEmitAt) > 35) {
+              if (term._core && term._core.coreService) {
+                term._core.coreService.triggerDataEvent('\r', true);
+              } else {
+                this.sendPtyInput(paneState.sessionId || sessionId, '\r');
+              }
+            }
+          }, 12);
+          return;
+        }
         if (ev.inputType === 'insertText' && typeof ev.data === 'string' && ev.data.length > 0) {
           setTimeout(() => {
             if (!paneState._lastDataEmitAt || (Date.now() - paneState._lastDataEmitAt) > 35) {
               if (term._core && term._core.coreService) {
                 term._core.coreService.triggerDataEvent(ev.data, true);
+              }
+            }
+          }, 12);
+        } else if (ev.inputType === 'deleteContentBackward') {
+          setTimeout(() => {
+            if (!paneState._lastDataEmitAt || (Date.now() - paneState._lastDataEmitAt) > 35) {
+              if (term._core && term._core.coreService) {
+                term._core.coreService.triggerDataEvent('\x7f', true);
+              } else {
+                this.sendPtyInput(paneState.sessionId || sessionId, '\x7f');
               }
             }
           }, 12);
@@ -32120,8 +32169,25 @@ Aturan:
               const prevCols = paneState.term.cols;
               const prevRows = paneState.term.rows;
               paneState.fitAddon.fit();
-              if (!this.isMobileDevice() || prevCols !== paneState.term.cols || prevRows !== paneState.term.rows) {
-                this.sendPtyResize(paneState.sessionId, paneState.term.cols, paneState.term.rows);
+              const newCols = paneState.term.cols;
+              const newRows = paneState.term.rows;
+              if (this.isMobileDevice()) {
+                // On mobile, keyboard toggles viewport height rapidly. Only resize PTY immediately if cols changed.
+                if (prevCols !== newCols) {
+                  this.sendPtyResize(paneState.sessionId, newCols, Math.max(24, newRows));
+                } else if (prevRows !== newRows) {
+                  // Debounce row resize by 350ms to prevent ConPTY buffer thrashing during virtual keyboard popups
+                  if (paneState._resizeTimer) clearTimeout(paneState._resizeTimer);
+                  paneState._resizeTimer = setTimeout(() => {
+                    if (paneState.term && paneState.sessionId) {
+                      this.sendPtyResize(paneState.sessionId, paneState.term.cols, Math.max(24, paneState.term.rows));
+                    }
+                  }, 350);
+                }
+              } else {
+                if (prevCols !== newCols || prevRows !== newRows) {
+                  this.sendPtyResize(paneState.sessionId, newCols, newRows);
+                }
               }
             } catch (_) {}
           }
@@ -32144,20 +32210,27 @@ Aturan:
         const bottomBtn = document.getElementById('btnTermScrollBottom');
         if (!bottomBtn) return;
         if (term && term.buffer && term.buffer.active) {
-          const isAtBottom = term.buffer.active.viewportY >= term.buffer.active.baseY;
-          bottomBtn.style.display = isAtBottom ? 'none' : 'inline-flex';
+          const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
+          bottomBtn.style.display = linesFromBottom > 1 ? 'inline-flex' : 'none';
         }
       };
       paneState.updateScrollUI = updateScrollUI;
 
       if (term.onScroll) {
         term.onScroll(() => {
+          if (term && term.buffer && term.buffer.active) {
+            const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
+            if (linesFromBottom <= 1) {
+              paneState._userScrolledUp = false;
+            } else if (linesFromBottom > 3) {
+              paneState._userScrolledUp = true;
+            }
+          }
           updateScrollUI();
         });
       }
 
       container.addEventListener('click', () => {
-        this.ensureActivePtySize(paneState);
         if (paneState && paneState.sessionId && !paneState._hasReceivedData) {
           this.sendPtyInput(paneState.sessionId, '\r');
         }
@@ -32174,7 +32247,6 @@ Aturan:
       let accumulatedDeltaY = 0;
 
       container.addEventListener('touchstart', (e) => {
-        this.ensureActivePtySize(paneState);
         if (paneState && paneState.sessionId && !paneState._hasReceivedData) {
           this.sendPtyInput(paneState.sessionId, '\r');
         }
@@ -32274,6 +32346,15 @@ Aturan:
 
       term.onData((data) => {
         paneState._lastDataEmitAt = Date.now();
+        if (data === '\r' || data === '\n') {
+          paneState._userScrolledUp = false;
+          if (paneState._touchInertiaRaf) {
+            cancelAnimationFrame(paneState._touchInertiaRaf);
+            paneState._touchInertiaRaf = null;
+          }
+          term.scrollToBottom();
+          if (paneState.updateScrollUI) paneState.updateScrollUI();
+        }
         if (this.isMobileDevice() && term.textarea) {
           setTimeout(() => {
             try {
@@ -32354,7 +32435,17 @@ Aturan:
       if (!paneState || !paneState.term || !paneState.sessionId || paneState.isFallbackMode) return;
       const cols = paneState.term.cols;
       const rows = paneState.term.rows;
-      if (cols > 0 && rows > 0 && (paneState.ptyCols !== cols || paneState.ptyRows !== rows)) {
+      if (cols <= 0 || rows <= 0) return;
+      if (this.isMobileDevice()) {
+        // Soft keyboard triggers frequent height/row fluctuations on mobile.
+        // Only trigger immediate PTY resize if width (cols) changed.
+        if (paneState.ptyCols !== cols) {
+          paneState.ptyCols = cols;
+          this.sendPtyResize(paneState.sessionId, cols, Math.max(24, rows));
+        }
+        return;
+      }
+      if (paneState.ptyCols !== cols || paneState.ptyRows !== rows) {
         paneState.ptyCols = cols;
         paneState.ptyRows = rows;
         this.sendPtyResize(paneState.sessionId, cols, rows);
@@ -32529,12 +32620,16 @@ Aturan:
         if (currentTerm && typeof msg.data === 'string') {
           if (msg.type === 'init') {
             try { currentTerm.reset(); } catch (_) {}
+            paneState._userScrolledUp = false;
           }
-          const wasAtBottom = (currentTerm.buffer && currentTerm.buffer.active)
-            ? (currentTerm.buffer.active.viewportY >= currentTerm.buffer.active.baseY)
-            : true;
+          const activeBuf = currentTerm.buffer && currentTerm.buffer.active;
+          const linesFromBottom = activeBuf ? (activeBuf.baseY - activeBuf.viewportY) : 0;
+          // Auto-scroll to bottom if user is close to bottom (<= 3 lines) or hasn't manually scrolled up
+          const shouldAutoScroll = linesFromBottom <= 3 || !paneState._userScrolledUp;
+
           currentTerm.write(msg.data);
-          if (wasAtBottom) {
+
+          if (shouldAutoScroll) {
             currentTerm.scrollToBottom();
           }
           if (paneState.updateScrollUI) {
@@ -32593,6 +32688,11 @@ Aturan:
     handleAutoRespond(tab, paneState, paneNum, chunk) {
       if (!paneState || !paneState.autoEnter || !chunk || typeof chunk !== 'string') return;
 
+      // Do not auto-respond if user was actively typing/submitting in the last 2000ms
+      const now = Date.now();
+      if (paneState._lastDataEmitAt && (now - paneState._lastDataEmitAt) < 2000) return;
+      if (paneState._lastAutoRespond && (now - paneState._lastAutoRespond) < 1500) return;
+
       // Strip ANSI escape codes (CSI, OSC, etc.) and control characters
       const clean = chunk
         .replace(/\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\].*?(?:\x07|\x1b\\))/g, '')
@@ -32600,37 +32700,38 @@ Aturan:
 
       if (!clean.trim()) return;
 
-      // Sliding window buffer across fragmented chunks
-      paneState._recentText = ((paneState._recentText || '') + ' ' + clean).slice(-1500);
-      const textBuffer = paneState._recentText;
+      // Keep only recent active window (last 300 chars) to prevent triggering on old conversational text
+      paneState._recentText = ((paneState._recentText || '') + ' ' + clean).slice(-300);
+      const textBuffer = paneState._recentText.trim();
 
-      const now = Date.now();
-      if (paneState._lastAutoRespond && (now - paneState._lastAutoRespond) < 500) return;
+      // Guard: Never auto-respond if waiting at an active user input prompt
+      if (/(?:>|❯|\$|#|:\s*)$/.test(textBuffer)) return;
+      if (/(?:PS [A-Z]:\\[^>]*>)\s*$/i.test(textBuffer)) return;
 
-      // Type B: Simple Enter to proceed (e.g. AI CLI pagination, "Press Enter to continue", "Hit enter", "Accept this file edit?")
-      const enterOnlyRegex = /(?:press (?:any key|enter) to continue|hit enter|press \[?enter\]? to|\bpress enter\b|\baccept (?:this|the|all|these)?\s*(?:file|code|change|edit|diff|plan)?\b.*\?|>\s*1\.\s*yes\b|\b1\.\s*yes,\s*accept\b|\baccept this (?:file )?edit\b|\bshift\+tab to auto-approve\b|\bdo you want to accept\b|\baccept and continue\b)/i;
+      // Type A: Interactive batch confirmation dialogs (e.g. [y/n], [Y/n], (yes/no), Terminate batch job (Y/N)?)
+      const confirmYRegex = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\bdo you want to continue \([yY]\/[nN]\))/i;
 
-      // Type A: Interactive confirmations (e.g. AI CLI tool approval, [Y/n], [y/n], Approve?, Proceed?, Allow?)
-      const confirmYRegex = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\b(?:allow|approve|proceed|confirm|execute|run this command)\b.*\?|\bdo you want to continue\b|\bapply (?:these|the) changes\b)/i;
+      // Type B: Explicit "press enter to continue" prompts
+      const enterOnlyRegex = /(?:press (?:any key|enter) to continue|hit enter to continue|press \[enter\] to continue|\bpress enter to\b)/i;
 
       const sId = paneState.sessionId || `${tab.id}-p${paneNum}`;
 
-      if (enterOnlyRegex.test(textBuffer)) {
-        paneState._lastAutoRespond = now;
-        paneState._recentText = '';
-        setTimeout(() => {
-          if (paneState.autoEnter) {
-            this.sendEnterToPane(paneNum);
-          }
-        }, 120);
-      } else if (confirmYRegex.test(textBuffer)) {
+      if (confirmYRegex.test(textBuffer)) {
         paneState._lastAutoRespond = now;
         paneState._recentText = '';
         setTimeout(() => {
           if (paneState.autoEnter && sId) {
             this.sendPtyInput(sId, 'y\r');
           }
-        }, 120);
+        }, 150);
+      } else if (enterOnlyRegex.test(textBuffer)) {
+        paneState._lastAutoRespond = now;
+        paneState._recentText = '';
+        setTimeout(() => {
+          if (paneState.autoEnter) {
+            this.sendEnterToPane(paneNum);
+          }
+        }, 150);
       }
     },
 
@@ -33174,6 +33275,13 @@ Aturan:
 
       // Mode 1: Interaktif PTY streaming (Utama)
       if (pane.term && !pane.isFallbackMode) {
+        pane._userScrolledUp = false;
+        if (pane._touchInertiaRaf) {
+          cancelAnimationFrame(pane._touchInertiaRaf);
+          pane._touchInertiaRaf = null;
+        }
+        pane.term.scrollToBottom();
+        if (pane.updateScrollUI) pane.updateScrollUI();
         this.sendPtyInput(pane.sessionId, cmd + '\r');
         this.focusActiveInput();
         return;
@@ -33563,17 +33671,27 @@ Aturan:
       this.attachMobileTouchKeybar();
 
       // Floating Quick Scroll-to-Bottom Button Handler
-      document.getElementById('btnTermScrollBottom')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const tab = this.getActiveTab();
-        const paneNum = this.activePane || 1;
-        const paneState = this.getPaneState(paneNum);
-        if (paneState && paneState.term) {
-          paneState.term.scrollToBottom();
-          if (paneState.updateScrollUI) paneState.updateScrollUI();
-        }
-      });
+      const bottomBtnEl = document.getElementById('btnTermScrollBottom');
+      if (bottomBtnEl) {
+        const handleScrollToBottom = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const tab = this.getActiveTab();
+          const paneNum = this.activePane || 1;
+          const paneState = this.getPaneState(paneNum);
+          if (paneState && paneState.term) {
+            paneState._userScrolledUp = false;
+            if (paneState._touchInertiaRaf) {
+              cancelAnimationFrame(paneState._touchInertiaRaf);
+              paneState._touchInertiaRaf = null;
+            }
+            paneState.term.scrollToBottom();
+            if (paneState.updateScrollUI) paneState.updateScrollUI();
+          }
+        };
+        bottomBtnEl.addEventListener('click', handleScrollToBottom);
+        bottomBtnEl.addEventListener('touchstart', handleScrollToBottom, { passive: false });
+      }
 
       // Per-pane header action buttons
       document.getElementById('btnPaneAutoEnter1')?.addEventListener('click', (e) => {
