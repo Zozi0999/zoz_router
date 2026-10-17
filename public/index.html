@@ -2036,6 +2036,9 @@
                 <i class="fa-solid fa-clock-rotate-left" style="color:var(--neon-teal);"></i> Aliran Feromon &amp; Riwayat Sekresi Hormon Nyata
               </span>
               <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button class="btn btn-xs btn-outline" id="btnCopyEndocrineLogs" style="font-size:0.72rem; border-color:var(--neon-teal); color:var(--neon-teal);" title="Salin seluruh riwayat log hormon &amp; laporan error ke clipboard">
+                  <i class="fa-solid fa-copy"></i> Salin Log Error
+                </button>
                 <button class="btn btn-xs btn-outline" id="btnAutoHealLayoutNow" style="font-size:0.72rem; border-color:#00FFC2; color:#00FFC2;">
                   <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Heal Layar &amp; Tombol
                 </button>
@@ -2145,9 +2148,14 @@
               <span style="font-size:0.83rem; font-weight:700; color:#FFF; display:flex; align-items:center; gap:6px;">
                 <i class="fa-solid fa-wave-square" style="color:#f43f5e;"></i> Riwayat Resonansi Rasa &amp; Deteksi Sentimen
               </span>
-              <button class="btn btn-xs btn-outline" id="btnResetChatEndocrine" style="font-size:0.72rem; border-color:#f43f5e; color:#f43f5e;">
-                <i class="fa-solid fa-rotate-right"></i> Selaraskan Ulang Rasa
-              </button>
+              <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button class="btn btn-xs btn-outline" id="btnCopyChatEndocrineLogs" style="font-size:0.72rem; border-color:#f43f5e; color:#f43f5e;" title="Salin riwayat resonansi rasa ke clipboard">
+                  <i class="fa-solid fa-copy"></i> Salin Log Rasa
+                </button>
+                <button class="btn btn-xs btn-outline" id="btnResetChatEndocrine" style="font-size:0.72rem; border-color:#f43f5e; color:#f43f5e;">
+                  <i class="fa-solid fa-rotate-right"></i> Selaraskan Ulang Rasa
+                </button>
+              </div>
             </div>
             <div class="endocrine-logs-list" id="chatEndocrineLogsList">
               <!-- Populated dynamically -->

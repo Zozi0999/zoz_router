@@ -1274,6 +1274,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     btnAuditConnectomeNow: $('#btnAuditConnectomeNow'),
     btnAutoHealLayoutNow: $('#btnAutoHealLayoutNow'),
     btnPurgeStressEndorphin: $('#btnPurgeStressEndorphin'),
+    btnCopyEndocrineLogs: $('#btnCopyEndocrineLogs'),
+    btnCopyChatEndocrineLogs: $('#btnCopyChatEndocrineLogs'),
     toggleEndocrineCode: $('#toggleEndocrineCode'),
     toggleEndocrineChat: $('#toggleEndocrineChat'),
     tabEndocrineCode: $('#tabEndocrineCode'),
@@ -2221,6 +2223,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
               <div class="endocrine-issue-header">
                 <span class="endocrine-issue-badge ${issue.badgeClass}">${issue.badge}</span>
                 <span class="endocrine-issue-time">${issue.time}</span>
+                <button type="button" class="btn-copy-issue-entry" data-issue="[${esc(issue.badge)}] ${esc(issue.title)} - ${esc(issue.body)}${issue.snippet ? ' (' + esc(issue.snippet) + ')' : ''}" title="Salin rincian error ini"><i class="fa-solid fa-copy"></i> Salin</button>
               </div>
               <div style="font-weight:700; color:#FFF; font-size:0.8rem; margin:2px 0;">${issue.title}</div>
               <div class="endocrine-issue-body">${issue.body}</div>
@@ -2259,11 +2262,87 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
                 <span class="log-time">${item.time}</span>
                 <span class="log-badge">${sign} ${label}</span>
                 <span class="log-msg" title="${esc(item.reason)}">${esc(item.reason)}</span>
+                <button type="button" class="btn-copy-log-entry" data-log="[${item.time}] ${label} (${sign}): ${esc(item.reason)}" title="Salin baris ini"><i class="fa-solid fa-copy"></i></button>
               </div>
             `;
           }).join('');
         }
       }
+    },
+
+    exportLogsAsText() {
+      const now = new Date().toLocaleString();
+      let text = `=== ZOZ ROUTER - BIO-ENDOCRINE CODE TELEMETRY & ERROR LOG ===\n`;
+      text += `Waktu Ekspor : ${now}\n`;
+      text += `Status Hormon: Dopamin ${this.hormones.dopamine}% | Kortisol ${this.hormones.cortisol}% | Serotonin ${this.hormones.serotonin}% | Adrenalin ${this.hormones.adrenaline}%\n\n`;
+
+      text += `--- DAFTAR ISU AKTIF (5 PILAR DIAGNOSA) ---\n`;
+      let issueCount = 0;
+      if (this.isolatedNodes && this.isolatedNodes.length > 0) {
+        text += `[Pilar 1 - Simpul DOM Terisolasi (${this.isolatedNodes.length})]:\n`;
+        this.isolatedNodes.forEach((node, i) => {
+          text += `  ${i + 1}. ${node}\n`;
+          issueCount++;
+        });
+      }
+      if (this.modelErrors && this.modelErrors.length > 0) {
+        text += `[Pilar 2 - Kesalahan Panggil Model (${this.modelErrors.length})]:\n`;
+        this.modelErrors.forEach((err, i) => {
+          text += `  ${i + 1}. [${err.model} / ${err.endpoint}] ${err.errorType}: ${err.reason}\n`;
+          issueCount++;
+        });
+      }
+      if (this.textAnomalies && this.textAnomalies.length > 0) {
+        text += `[Pilar 3 - Anomali & Teks Pecah AI (${this.textAnomalies.length})]:\n`;
+        this.textAnomalies.forEach((txt, i) => {
+          text += `  ${i + 1}. [${txt.type}] ${txt.desc}\n`;
+          issueCount++;
+        });
+      }
+      if (this.viewportIssues && this.viewportIssues.length > 0) {
+        text += `[Pilar 4 - Dimensi Layar & Viewport Overflow (${this.viewportIssues.length})]:\n`;
+        this.viewportIssues.forEach((vp, i) => {
+          text += `  ${i + 1}. ${vp.reason || vp}\n`;
+          issueCount++;
+        });
+      }
+      if (this.buttonIssues && this.buttonIssues.length > 0) {
+        text += `[Pilar 5 - Posisi & Halangan Tombol (${this.buttonIssues.length})]:\n`;
+        this.buttonIssues.forEach((btn, i) => {
+          text += `  ${i + 1}. ${btn.reason || btn}\n`;
+          issueCount++;
+        });
+      }
+      if (issueCount === 0) {
+        text += `(Tidak ada isu aktif pada 5 pilar diagnosa - Semua modul & tombol sehat sempurna)\n`;
+      }
+      text += `\n`;
+
+      text += `--- RIWAYAT SEKRESI HORMON & LOG FLUKTUASI (${this.history.length}) ---\n`;
+      if (this.history && this.history.length > 0) {
+        this.history.forEach((h) => {
+          const isDop = h.type === 'dopamine';
+          const isEnd = h.type === 'endorphin';
+          const sign = (isDop || isEnd) ? `+${h.amount}%` : `+${h.amount}% Stres`;
+          const label = isDop ? 'Dopamin' : (isEnd ? 'Endorfin' : 'Kortisol');
+          text += `[${h.time}] ${label} (${sign}): ${h.reason}\n`;
+        });
+      } else {
+        text += `(Belum ada riwayat sekresi hormon)\n`;
+      }
+      text += `===============================================================\n`;
+      return text;
+    },
+
+    copyLogsToClipboard() {
+      const text = this.exportLogsAsText();
+      if (typeof copyTextToClipboard === 'function') {
+        copyTextToClipboard(text, null, '📋 Log error & telemetri berhasil disalin!');
+      } else if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text);
+        if (typeof showToast === 'function') showToast('📋 Log error & telemetri berhasil disalin!');
+      }
+      return text;
     }
   };
 
@@ -2629,11 +2708,42 @@ RESONANSI: ${this.currentVibe}
                 <span class="log-time">${item.time}</span>
                 <span class="log-badge">+${item.amount}% ${label}</span>
                 <span class="log-msg" title="${esc(item.reason)}">${esc(item.reason)}</span>
+                <button type="button" class="btn-copy-log-entry" data-log="[${item.time}] ${label} (+${item.amount}%): ${esc(item.reason)}" title="Salin impuls ini"><i class="fa-solid fa-copy"></i></button>
               </div>
             `;
           }).join('');
         }
       }
+    },
+
+    exportLogsAsText() {
+      const now = new Date().toLocaleString();
+      let text = `=== ZOZ ROUTER - CHAT-ENDOCRINE (SISTEM SARAF EMOSI) ===\n`;
+      text += `Waktu Ekspor : ${now}\n`;
+      text += `Status Emosi : Sakit: ${this.emotions.sakit}% | Senang: ${this.emotions.senang}% | Bahagia: ${this.emotions.bahagia}% | Marah: ${this.emotions.marah}%\n`;
+      text += `Status Neuro : Oksitosin: ${this.hormones.oxytocin}% | Dopamin: ${this.hormones.dopamine}% | Kortisol: ${this.hormones.cortisol}% | Serotonin: ${this.hormones.serotonin}%\n`;
+      text += `Resonansi    : ${this.currentVibe}\n\n`;
+      text += `--- RIWAYAT IMPULS RASA & DETEKSI SENTIMEN (${this.history.length}) ---\n`;
+      if (this.history && this.history.length > 0) {
+        this.history.forEach((h) => {
+          text += `[${h.time}] +${h.amount}% ${h.type.toUpperCase()}: ${h.reason}\n`;
+        });
+      } else {
+        text += `(Belum ada impuls rasa saraf tercatat)\n`;
+      }
+      text += `=========================================================\n`;
+      return text;
+    },
+
+    copyLogsToClipboard() {
+      const text = this.exportLogsAsText();
+      if (typeof copyTextToClipboard === 'function') {
+        copyTextToClipboard(text, null, '📋 Log impuls rasa saraf berhasil disalin!');
+      } else if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text);
+        if (typeof showToast === 'function') showToast('📋 Log impuls rasa saraf berhasil disalin!');
+      }
+      return text;
     }
   };
 
@@ -28406,6 +28516,45 @@ Aturan:
       if (typeof ChatEndocrine !== 'undefined') {
         ChatEndocrine.resetHormones();
         AudioEngine.click();
+      }
+    });
+
+    // Copy Log Handlers (Jalur 1 CodeEndocrine & Jalur 2 ChatEndocrine)
+    els.btnCopyEndocrineLogs?.addEventListener('click', () => {
+      BioEndocrine.copyLogsToClipboard();
+    });
+
+    els.btnCopyChatEndocrineLogs?.addEventListener('click', () => {
+      if (typeof ChatEndocrine !== 'undefined') {
+        ChatEndocrine.copyLogsToClipboard();
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      const copyLogBtn = e.target.closest('.btn-copy-log-entry');
+      if (copyLogBtn) {
+        e.stopPropagation();
+        const text = copyLogBtn.dataset.log || '';
+        if (text) {
+          copyTextToClipboard(text, null, '📋 Baris log disalin ke clipboard!');
+          const origHtml = copyLogBtn.innerHTML;
+          copyLogBtn.innerHTML = '<i class="fa-solid fa-check" style="color:#00FFC2;"></i>';
+          setTimeout(() => { copyLogBtn.innerHTML = origHtml; }, 1200);
+        }
+        return;
+      }
+
+      const copyIssueBtn = e.target.closest('.btn-copy-issue-entry');
+      if (copyIssueBtn) {
+        e.stopPropagation();
+        const text = copyIssueBtn.dataset.issue || '';
+        if (text) {
+          copyTextToClipboard(text, null, '📋 Rincian error disalin ke clipboard!');
+          const origHtml = copyIssueBtn.innerHTML;
+          copyIssueBtn.innerHTML = '<i class="fa-solid fa-check" style="color:#00FFC2;"></i> Tersalin';
+          setTimeout(() => { copyIssueBtn.innerHTML = origHtml; }, 1200);
+        }
+        return;
       }
     });
 
