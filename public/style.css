@@ -8973,7 +8973,10 @@ div.msg-sources-section button.msg-sources-title span {
   background: #ffffff !important;
 }
 
-.studio-workspace-area .ai-file-studio-code {
+.studio-workspace-area .ai-file-studio-code,
+.studio-workspace-area .ai-file-studio-code.hljs,
+#aiFileStudioCode,
+#aiFileStudioCode.hljs {
   position: absolute !important;
   inset: 0 !important;
   width: 100% !important;
@@ -8985,7 +8988,8 @@ div.msg-sources-section button.msg-sources-title span {
   margin: 0 !important;
   padding: 16px 20px !important;
   overflow: auto !important;
-  background: #0e1015;
+  background: #0e1015 !important;
+  color: #E6EDF8 !important;
 }
 
 /* Studio AI Assistant: Mini Popup Assistant / Floating Mini Card */
@@ -11673,13 +11677,16 @@ body.mermaid-has-fullscreen {
     min-height: 0 !important;
     background: #ffffff !important;
   }
-  .ai-file-studio-card .ai-file-studio-code {
+  .ai-file-studio-card .ai-file-studio-code,
+  .ai-file-studio-card .ai-file-studio-code.hljs {
     position: absolute !important;
     inset: 0 !important;
     width: 100% !important;
     height: 100% !important;
     max-height: none !important;
     min-height: 0 !important;
+    background: #0e1015 !important;
+    color: #E6EDF8 !important;
   }
   .studio-assistant-panel {
     position: absolute !important;

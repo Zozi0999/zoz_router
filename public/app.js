@@ -5627,10 +5627,11 @@ RESONANSI: ${this.currentVibe}
         return;
       }
 
-      // Penanganan khusus blok markdown ```html atau dokumen HTML saat opsi terisolasi
+      // Penanganan khusus blok markdown ```html / ```jsx / ```tsx atau dokumen HTML saat opsi terisolasi
       if (!isExplicitCodeInChat) {
+        const isWebPreviewMode = Boolean(options && (options.websiteMode === 'preview' || options.isWebCreation || options.hideCodeInChat));
         if (!insideFileBlock && !insideHtmlBlock && !insideRawHtmlBlock) {
-          if (t.startsWith(TICK3 + 'html') || t.startsWith(TICK3 + 'htm')) {
+          if (t.startsWith(TICK3 + 'html') || t.startsWith(TICK3 + 'htm') || (isWebPreviewMode && (t.startsWith(TICK3 + 'jsx') || t.startsWith(TICK3 + 'tsx') || t.startsWith(TICK3 + 'react')))) {
             insideHtmlBlock = true;
             out.push('\n> 🌐 *Sedang merancang kode website... (terisolasi di pratinjau live)*\n');
             return;
@@ -5662,7 +5663,8 @@ RESONANSI: ${this.currentVibe}
           fileBlockLang = langMatch ? langMatch[1] : (currentFileName ? guessLangFromName(currentFileName) : 'code');
           const isDiagram = fileBlockLang === 'mermaid' || fileBlockLang === 'mmd' || currentFileName.endsWith('.mermaid') || currentFileName.endsWith('.mmd');
           const fnLower = currentFileName.toLowerCase();
-          const isWeb = fnLower.endsWith('.html') || fnLower.endsWith('.htm') || fileBlockLang === 'html' || fileBlockLang === 'htm';
+          const isWeb = fnLower.endsWith('.html') || fnLower.endsWith('.htm') || fnLower.endsWith('.jsx') || fnLower.endsWith('.tsx') ||
+                        fileBlockLang === 'html' || fileBlockLang === 'htm' || fileBlockLang === 'jsx' || fileBlockLang === 'tsx' || fileBlockLang === 'react';
           const isDoc = fnLower.endsWith('.docx') || fnLower.endsWith('.pdf') || fnLower.endsWith('.doc') || fnLower.endsWith('.md') ||
                         fileBlockLang === 'docx' || fileBlockLang === 'pdf' || 
                         ((fileBlockLang === 'markdown' || fileBlockLang === 'md') && (!isDiagram && !isWeb && !fnLower.endsWith('.svg') || isDocMode));
@@ -8859,9 +8861,10 @@ PRINSIP WAJIB DIAGRAM RAPI, BERSIH & JELAS (TIDAK BERANTAKAN):
 - Seluruh isi berkas (baik Dokumen Word/PDF, Aplikasi Web HTML, Skrip, maupun Diagram) harus 100% murni konten pengguna tanpa atribut branding buatan AI.
 
 Aturan wajib:
-- name : nama file final yang deskriptif dan spesifik berakhiran .svg / .docx / .pdf / .html / .js / dsb.
-- KELENGKAPAN PENUH & TANPA BATAS (UNLIMITED / NO CUT-OFF): Tuliskan seluruh kode website, skrip, atau teks dokumen secara LENGKAP, PENUH, dan TUNTAS dari baris pertama hingga baris terakhir. DILARANG KERAS membatasi hanya 100 baris atau memotong kode di tengah jalan. Dilarang menggunakan placeholder seperti '// sisa kode...', '// lanjutkan di sini...', atau '<!-- konten lainnya -->'.
-- Seluruh tag HTML, styling CSS, skrip JS, dan elemen UI harus tertulis 100% utuh sampai tag penutup dan <<<END_ZOZ_FILE>>> agar file dapat langsung dijalankan dan dipratinjau secara nyata.
+- name : nama file final yang deskriptif dan spesifik berakhiran .svg / .docx / .pdf / .html / .jsx / .tsx / .js / dsb.
+- DUKUNGAN PRATINJAU NEXT.JS / REACT (JSX/TSX) LANGSUNG: Zoz Router mendukung pratinjau langsung berkas .jsx / .tsx dan proyek Next.js (App Router) di browser (otomatis dikompilasi menjadi HTML mandiri dengan React 18, Babel Standalone, Tailwind CSS, dan Lucide React). Jika membuat kode Next.js/React, pastikan semua komponen (page.jsx, layout.jsx, komponen pendukung) tersusun lengkap dan saling terhubung, setiap import/export valid, dan komponen utama memiliki export default yang siap dirender tanpa error.
+- KELENGKAPAN PENUH & TANPA BATAS (UNLIMITED / NO CUT-OFF): Tuliskan seluruh kode website, komponen React/Next.js, skrip, atau teks dokumen secara LENGKAP, PENUH, dan TUNTAS dari baris pertama hingga baris terakhir. DILARANG KERAS membatasi hanya 100 baris atau memotong kode di tengah jalan. Dilarang menggunakan placeholder seperti '// sisa kode...', '// lanjutkan di sini...', atau '<!-- konten lainnya -->'.
+- Seluruh tag HTML/JSX, styling CSS, skrip JS, dan elemen UI harus tertulis 100% utuh sampai tag/kurung penutup dan <<<END_ZOZ_FILE>>> agar file dapat langsung dijalankan dan dipratinjau secara nyata.
 - Jangan menyalin ulang kode diagram di luar blok penanda, cukup berikan teks penjelasan yang informatif.`;
   }
 
@@ -8879,11 +8882,11 @@ Aturan wajib:
 
     const t = text.toLowerCase();
     const isSlashFileCmd = /^\/(?:diagram|website|web|pratinjau|dokumen|docx|pdf)\b/i.test(t);
-    const explicitFileWants = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong buat|generate|create|build|write|tulis|rancang|desain|simpan sebagai|unduh|download|export|ekspor|saya butuh file|saya minta file|butuh file|perlukan file|bikinkan file)\s+(?:sebuah\s+)?(?:file|berkas|dokumen|website|web|webpage|landing page|aplikasi|game|diagram|digram|flowchart)\b/i.test(t);
-    const hasExtension = /\b[a-zA-Z0-9_-]+\.(?:html?|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|pdf|xlsx|ipynb|svg)\b/i.test(t);
+    const explicitFileWants = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|generate|create|build|write|tulis|rancang|desain|simpan\s+sebagai|unduh|download|export|ekspor|saya\s+butuh\s+file|saya\s+minta\s+file|butuh\s+file|perlukan\s+file|bikinkan\s+file)\s+(?:sebuah\s+|satu\s+)?(?:file|berkas|dokumen|website|websit|wbsite|webiste|web|webpage|landing\s*page|landingpage|aplikasi|app|dashboard|game|diagram|digram|flowchart|komponen)\b/i.test(t);
+    const hasExtension = /\b[a-zA-Z0-9_-]+\.(?:html?|jsx|tsx|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|pdf|xlsx|ipynb|svg)\b/i.test(t);
     const isDiagram = /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|arsitektur sistem|arsitektur|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(t);
     const isExport = /\b(?:simpan sebagai|ekspor ke|export to|unduh|download file)\b/i.test(t);
-    const isWebOrApp = /\b(?:website|webpage|landing page|halaman web|aplikasi web|game web|web app|portofolio web|simulasi 3d)\b/i.test(t);
+    const isWebOrApp = /\b(?:website|websit|wbsite|webiste|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|game\s+web|web\s+app|portofolio\s+web|simulasi\s+3d|next\.?js|react\.?js|page\.jsx|page\.tsx)\b/i.test(t);
 
     // Jika direktori lokal aktif dan pengguna menyebut nama berkas yang ada di direktori
     const workspaceMatch = STATE.localWorkspace.enabled && (STATE.localWorkspace.files || []).some(f => {
@@ -8902,13 +8905,13 @@ Aturan wajib:
 
   function guessMimeFromName(name) {
     const ext = (String(name).split('.').pop() || '').toLowerCase();
-    const map = { html: 'text/html', htm: 'text/html', css: 'text/css', js: 'text/javascript', mjs: 'text/javascript', jsx: 'text/plain', ts: 'text/plain', py: 'text/x-python', bat: 'application/bat', cmd: 'application/bat', ps1: 'text/plain', sh: 'application/x-sh', bash: 'application/x-sh', json: 'application/json', yaml: 'text/yaml', yml: 'text/yaml', xml: 'application/xml', sql: 'text/plain', csv: 'text/csv', md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', log: 'text/plain', php: 'text/x-php', java: 'text/plain', c: 'text/plain', cpp: 'text/plain', go: 'text/plain', toml: 'text/plain', ini: 'text/plain', conf: 'text/plain', svg: 'image/svg+xml', mermaid: 'image/svg+xml', mmd: 'image/svg+xml', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pdf: 'application/pdf' };
+    const map = { html: 'text/html', htm: 'text/html', css: 'text/css', js: 'text/javascript', mjs: 'text/javascript', jsx: 'text/jsx', ts: 'text/typescript', tsx: 'text/tsx', py: 'text/x-python', bat: 'application/bat', cmd: 'application/bat', ps1: 'text/plain', sh: 'application/x-sh', bash: 'application/x-sh', json: 'application/json', yaml: 'text/yaml', yml: 'text/yaml', xml: 'application/xml', sql: 'text/plain', csv: 'text/csv', md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', log: 'text/plain', php: 'text/x-php', java: 'text/plain', c: 'text/plain', cpp: 'text/plain', go: 'text/plain', toml: 'text/plain', ini: 'text/plain', conf: 'text/plain', svg: 'image/svg+xml', mermaid: 'image/svg+xml', mmd: 'image/svg+xml', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pdf: 'application/pdf' };
     return map[ext] || 'text/plain';
   }
 
   function guessLangFromName(name) {
     const ext = (String(name).split('.').pop() || '').toLowerCase();
-    const map = { html: 'html', htm: 'html', css: 'css', js: 'javascript', mjs: 'javascript', jsx: 'javascript', ts: 'typescript', py: 'python', bat: 'batch', ps1: 'powershell', sh: 'shell', bash: 'shell', json: 'json', yaml: 'yaml', yml: 'yaml', xml: 'xml', sql: 'sql', md: 'markdown', markdown: 'markdown', php: 'php', java: 'java', c: 'c', cpp: 'cpp', go: 'go', csv: 'csv', txt: 'text', svg: 'mermaid', mermaid: 'mermaid', mmd: 'mermaid', docx: 'markdown', pdf: 'markdown' };
+    const map = { html: 'html', htm: 'html', css: 'css', js: 'javascript', mjs: 'javascript', jsx: 'jsx', ts: 'typescript', tsx: 'tsx', py: 'python', bat: 'batch', ps1: 'powershell', sh: 'shell', bash: 'shell', json: 'json', yaml: 'yaml', yml: 'yaml', xml: 'xml', sql: 'sql', md: 'markdown', markdown: 'markdown', php: 'php', java: 'java', c: 'c', cpp: 'cpp', go: 'go', csv: 'csv', txt: 'text', svg: 'mermaid', mermaid: 'mermaid', mmd: 'mermaid', docx: 'markdown', pdf: 'markdown' };
     return map[ext] || (ext || 'text');
   }
 
@@ -8929,6 +8932,21 @@ Aturan wajib:
       }
     }
 
+    if (cleanLang === 'jsx' || cleanLang === 'tsx' || cleanLang === 'react') {
+      const ext = cleanLang === 'tsx' ? 'tsx' : 'jsx';
+      const fileCommentMatch = String(body || '').match(/^\s*\/\/\s*(?:File|Berkas|Path)?\s*:?\s*([a-zA-Z0-9_./-]+\.(?:jsx|tsx))\b/im);
+      if (fileCommentMatch && fileCommentMatch[1]) {
+        return fileCommentMatch[1].trim().split('/').pop();
+      }
+      const compMatch = String(body || '').match(/export\s+default\s+function\s+([A-Z][a-zA-Z0-9_]*)/);
+      if (compMatch && compMatch[1]) {
+        if (/^(?:Page|Home|Index)$/i.test(compMatch[1])) return `page.${ext}`;
+        if (/^RootLayout|Layout$/i.test(compMatch[1])) return `layout.${ext}`;
+        return `${compMatch[1]}.${ext}`;
+      }
+      return `page.${ext}`;
+    }
+
     if (cleanLang === 'html' || cleanLang === 'htm') {
       const titleMatch = String(body || '').match(/<title>([^<]+)<\/title>/i);
       if (titleMatch && titleMatch[1]) {
@@ -8944,6 +8962,7 @@ Aturan wajib:
 
     const map = {
       html: 'index.html', css: 'styles.css', javascript: 'script.js', js: 'script.js',
+      jsx: 'page.jsx', tsx: 'page.tsx', react: 'page.jsx',
       typescript: 'main.ts', ts: 'main.ts', python: 'main.py', py: 'main.py',
       bash: 'run.sh', sh: 'run.sh', shell: 'run.sh', batch: 'run.bat', bat: 'run.bat',
       powershell: 'script.ps1', ps1: 'script.ps1', json: 'data.json', yaml: 'config.yaml',
@@ -8993,7 +9012,7 @@ Aturan wajib:
     const ext = (String(name || '').split('.').pop() || '').toLowerCase();
     const map = {
       html: 'fa-brands fa-html5', htm: 'fa-brands fa-html5',
-      css: 'fa-brands fa-css3-alt', js: 'fa-brands fa-js', mjs: 'fa-brands fa-js', jsx: 'fa-brands fa-react',
+      css: 'fa-brands fa-css3-alt', js: 'fa-brands fa-js', mjs: 'fa-brands fa-js', jsx: 'fa-brands fa-react', tsx: 'fa-brands fa-react',
       ts: 'fa-solid fa-code', py: 'fa-brands fa-python',
       bat: 'fa-solid fa-terminal', cmd: 'fa-solid fa-terminal', ps1: 'fa-solid fa-terminal',
       sh: 'fa-solid fa-terminal', bash: 'fa-solid fa-terminal',
@@ -9071,7 +9090,7 @@ Aturan wajib:
     // Append Doc Chips
     if (hasDocs) {
       STATE.attachedDocs.forEach((doc, idx) => {
-        const isMarkdownOrCode = Boolean(doc.isAutoConvertedMarkdown || (doc.name && /\.(?:md|markdown|js|ts|py|html|css|json|sql|sh|txt)$/i.test(doc.name)));
+        const isMarkdownOrCode = Boolean(doc.isAutoConvertedMarkdown || (doc.name && /\.(?:md|markdown|js|jsx|ts|tsx|py|html|css|json|sql|sh|txt)$/i.test(doc.name)));
         const iconClass = isMarkdownOrCode ? 'fa-solid fa-file-code' : 'fa-solid fa-file-lines';
         const chip = document.createElement('div');
         chip.className = 'doc-preview-chip';
@@ -9096,13 +9115,39 @@ Aturan wajib:
     }
   }
 
+  function isRawJsxOrReactCode(rawContent, fileObj = null) {
+    if (!rawContent || typeof rawContent !== 'string') return false;
+    const trimmed = rawContent.replace(/^\s*```[a-zA-Z0-9_-]*\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+    if (!trimmed) return false;
+    if (/^(?:<!DOCTYPE\s+html|<html\b|<svg\b|<\?xml\b)/i.test(trimmed)) return false;
+
+    if (fileObj) {
+      const name = String(fileObj.name || '').toLowerCase();
+      const lang = String(fileObj.lang || '').toLowerCase();
+      if (name.endsWith('.jsx') || name.endsWith('.tsx') || lang === 'jsx' || lang === 'tsx' || lang === 'react') {
+        return true;
+      }
+    }
+
+    const hasReactImport = /\bimport\s+[\s\S]*?from\s+['"](?:react|lucide-react|next\/|framer-motion|@\/|\.\.?\/)/i.test(trimmed);
+    const hasExportComp = /\bexport\s+(?:default\s+)?function\s+[A-Z][a-zA-Z0-9_]*/.test(trimmed) || /\bexport\s+default\s+[A-Z][a-zA-Z0-9_]*/.test(trimmed);
+    const hasJsxSyntax = /\bclassName\s*=\s*["'{]/.test(trimmed) || /<\/(?:div|section|header|footer|nav|main|button|span|h[1-6]|p|ul|li|a)>/i.test(trimmed);
+    const hasReactHooks = /\b(?:useState|useEffect|useRef|useMemo|useCallback)\s*\(/.test(trimmed);
+
+    return (hasReactImport && (hasJsxSyntax || hasExportComp)) || (hasExportComp && hasJsxSyntax) || (hasReactHooks && hasJsxSyntax);
+  }
+
   function isPreviewableDoc(file) {
     if (!file) return false;
     const name = String(file.name || '').toLowerCase();
     const mime = String(file.mime || '').toLowerCase();
-    if (mime.includes('text/html') || mime.includes('application/pdf') || mime.includes('wordprocessingml') || mime.includes('text/markdown') || mime.includes('mermaid')) return true;
+    const lang = String(file.lang || '').toLowerCase();
+    if (mime.includes('text/html') || mime.includes('application/pdf') || mime.includes('wordprocessingml') || mime.includes('text/markdown') || mime.includes('mermaid') || mime.includes('jsx') || mime.includes('tsx')) return true;
+    if (lang === 'jsx' || lang === 'tsx' || lang === 'react' || lang === 'html' || lang === 'htm') return true;
     const ext = name.split('.').pop() || '';
-    return ['html', 'htm', 'xhtml', 'svg', 'docx', 'pdf', 'md', 'markdown', 'txt', 'mermaid', 'mmd'].includes(ext);
+    if (['html', 'htm', 'xhtml', 'jsx', 'tsx', 'svg', 'docx', 'pdf', 'md', 'markdown', 'txt', 'mermaid', 'mmd'].includes(ext)) return true;
+    const raw = file.rawContent || file.content || '';
+    return isRawJsxOrReactCode(raw, file);
   }
 
   function isPreviewableHtmlFile(file) {
@@ -9154,10 +9199,539 @@ Aturan wajib:
     }
   };
 
-  function prepareSafeHtmlForPreview(rawContent) {
+  function validateAndRepairReactCode(rawCode) {
+    if (!rawCode || typeof rawCode !== 'string') return '';
+    let code = rawCode
+      .replace(/^\s*```[a-zA-Z0-9_-]*\s*\n?/i, '')
+      .replace(/\n?```\s*$/i, '')
+      .replace(/^<<<ZOZ_(?:FILE|EDIT|MODIFY)[^\n]*\n?/gim, '')
+      .replace(/\n?<<<END_ZOZ_(?:FILE|EDIT|MODIFY)>>>\s*$/gim, '')
+      .trim();
+
+    // Hapus direktif Next.js RSC ('use client' / 'use server') yang tidak diperlukan di browser runtime
+    code = code.replace(/^\s*['"]use (?:client|server)['"]\s*;?\s*$/gm, '');
+
+    // Perbaikan otomatis jika ada kurung atau blok yang belum tertutup akibat pemotongan stream
+    let openBraces = 0;
+    let openParens = 0;
+    let openBrackets = 0;
+    let inString = null;
+    let escaped = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+
+    for (let i = 0; i < code.length; i++) {
+      const ch = code[i];
+      const next = code[i + 1];
+      if (inLineComment) {
+        if (ch === '\n') inLineComment = false;
+        continue;
+      }
+      if (inBlockComment) {
+        if (ch === '*' && next === '/') { inBlockComment = false; i++; }
+        continue;
+      }
+      if (inString) {
+        if (escaped) { escaped = false; continue; }
+        if (ch === '\\') { escaped = true; continue; }
+        if (ch === inString) inString = null;
+        continue;
+      }
+      if (ch === '/' && next === '/') { inLineComment = true; i++; continue; }
+      if (ch === '/' && next === '*') { inBlockComment = true; i++; continue; }
+      if (ch === '"' || ch === "'" || ch === '`') { inString = ch; continue; }
+      if (ch === '{') openBraces++;
+      else if (ch === '}') openBraces = Math.max(0, openBraces - 1);
+      else if (ch === '(') openParens++;
+      else if (ch === ')') openParens = Math.max(0, openParens - 1);
+      else if (ch === '[') openBrackets++;
+      else if (ch === ']') openBrackets = Math.max(0, openBrackets - 1);
+    }
+
+    if (inString) code += inString;
+    while (openBrackets > 0) { code += ']'; openBrackets--; }
+    while (openParens > 0) { code += ')'; openParens--; }
+    while (openBraces > 0) { code += '\n}'; openBraces--; }
+
+    // Pastikan ada export default jika komponen utama sudah didefinisikan tetapi belum di-export
+    if (!/\bexport\s+default\b/.test(code) && !/\bmodule\.exports\b/.test(code)) {
+      const funcMatches = [...code.matchAll(/\bfunction\s+([A-Z][a-zA-Z0-9_]*)\s*\(/g)];
+      const constMatches = [...code.matchAll(/\bconst\s+([A-Z][a-zA-Z0-9_]*)\s*=\s*(?:\([^)]*\)|[a-zA-Z0-9_]+)\s*=>/g)];
+      const preferredNames = ['Page', 'Home', 'App', 'LandingPage', 'Dashboard', 'Main', 'RootLayout'];
+      const allFound = [...funcMatches.map(m => m[1]), ...constMatches.map(m => m[1])];
+      const preferred = allFound.find(n => preferredNames.includes(n)) || allFound[allFound.length - 1];
+      if (preferred) {
+        code += `\nexport default ${preferred};\n`;
+      }
+    }
+
+    return code;
+  }
+
+  function splitConcatenatedReactFiles(rawCode, defaultFileName = 'page.jsx') {
+    const cleaned = String(rawCode || '').trim();
+    const headerRegex = /(?:^|\n)\s*\/\/\s*(?:={2,}\s*)?(?:File|Berkas|Path|Component)?\s*:?\s*([a-zA-Z0-9_./-]+\.(?:jsx|tsx|js|ts|css))\s*(?:={2,})?\s*\n/gi;
+    const matches = [...cleaned.matchAll(headerRegex)];
+    if (matches.length <= 1) {
+      return [{ name: defaultFileName, path: defaultFileName, content: cleaned }];
+    }
+    const parts = [];
+    for (let i = 0; i < matches.length; i++) {
+      const m = matches[i];
+      const filePath = m[1].trim();
+      const fileName = filePath.split('/').pop();
+      const startIdx = m.index + m[0].length;
+      const endIdx = (i + 1 < matches.length) ? matches[i + 1].index : cleaned.length;
+      const body = cleaned.slice(startIdx, endIdx).trim();
+      if (body) {
+        parts.push({ name: fileName, path: filePath, content: body });
+      }
+    }
+    return parts.length > 0 ? parts : [{ name: defaultFileName, path: defaultFileName, content: cleaned }];
+  }
+
+  function compileReactNextToStandaloneHtml(rawCode, fileObj = null) {
+    const activeName = (fileObj && fileObj.name) ? fileObj.name : 'page.jsx';
+    const docTitle = getGeminiDocTitle(fileObj || { name: activeName, content: rawCode });
+
+    // Kumpulkan semua modul proyek (page.jsx, layout.jsx, komponen pendukung, CSS)
+    let rawFiles = [];
+    if (fileObj && Array.isArray(fileObj.projectFiles) && fileObj.projectFiles.length > 0) {
+      rawFiles = fileObj.projectFiles.map(pf => ({
+        name: pf.name || 'Component.jsx',
+        path: pf.path || pf.name || 'Component.jsx',
+        content: (pf.name === activeName && rawCode) ? rawCode : (pf.rawContent || pf.content || '')
+      }));
+      if (!rawFiles.some(pf => pf.name === activeName)) {
+        rawFiles.push({ name: activeName, path: (fileObj && fileObj.path) || activeName, content: rawCode });
+      }
+    } else {
+      rawFiles = splitConcatenatedReactFiles(rawCode, activeName);
+    }
+
+    const cssBlocks = [];
+    const jsModules = [];
+
+    rawFiles.forEach((f) => {
+      const lower = (f.name || '').toLowerCase();
+      if (lower.endsWith('.css')) {
+        const cleanCss = String(f.content || '')
+          .replace(/@tailwind\s+(?:base|components|utilities)\s*;/gi, '')
+          .replace(/@import\s+['"]tailwindcss[^'"]*['"]\s*;/gi, '');
+        cssBlocks.push(cleanCss);
+      } else if (/\.(?:jsx|tsx|js|ts)$/i.test(lower) || isRawJsxOrReactCode(f.content, f)) {
+        const isLayout = /(?:^|\/)layout\.(?:jsx|tsx|js|ts)$/i.test(f.path || f.name);
+        const isPageOrEntry = /(?:^|\/)(?:page|app|index|main)\.(?:jsx|tsx|js|ts)$/i.test(f.path || f.name) || f.name === activeName;
+        jsModules.push({
+          name: f.name || 'page.jsx',
+          path: f.path || f.name || 'page.jsx',
+          code: validateAndRepairReactCode(f.content || ''),
+          isLayout,
+          isEntry: isPageOrEntry && !isLayout
+        });
+      }
+    });
+
+    if (jsModules.length === 0 && rawCode) {
+      jsModules.push({
+        name: activeName,
+        path: activeName,
+        code: validateAndRepairReactCode(rawCode),
+        isLayout: false,
+        isEntry: true
+      });
+    }
+
+    // Urutkan agar komponen pendukung dieksekusi terlebih dahulu, lalu layout.jsx, lalu page.jsx / entry utama
+    jsModules.sort((a, b) => {
+      const rank = (m) => {
+        if (m.name === activeName && !m.isLayout) return 3;
+        if (m.isEntry) return 2;
+        if (m.isLayout) return 1;
+        return 0;
+      };
+      return rank(a) - rank(b);
+    });
+
+    const serializedModules = JSON.stringify(jsModules).replace(/<\//g, '<\\/');
+    const customCss = cssBlocks.join('\n').replace(/<\/style>/gi, '<\\/style>');
+
+    return `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(docTitle)}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" onerror="this.onerror=null;this.src='https://unpkg.com/react@18/umd/react.production.min.js'"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" onerror="this.onerror=null;this.src='https://unpkg.com/react-dom@18/umd/react-dom.production.min.js'"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js" onerror="this.onerror=null;this.src='https://unpkg.com/@babel/standalone/babel.min.js'"></script>
+  <script crossorigin src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <style id="zoz-nextjs-standalone-styles">
+    html { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; scroll-behavior: smooth; }
+    body { margin: 0; padding: 0; min-height: 100vh; }
+    ${customCss}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+  (function() {
+    var PROJECT_MODULES = ${serializedModules};
+
+    function bootReactNextSandbox() {
+      if (!window.React || !window.ReactDOM || !window.Babel) {
+        setTimeout(bootReactNextSandbox, 60);
+        return;
+      }
+
+      var React = window.React;
+      var ReactDOM = window.ReactDOM;
+      var origCreateElement = React.createElement;
+
+      // Bungkus tag <html>, <head>, <body> milik Next.js RootLayout agar valid di dalam #root
+      React.createElement = function(type, props) {
+        var args = Array.prototype.slice.call(arguments);
+        if (type === 'html') {
+          args[0] = 'div';
+          args[1] = Object.assign({}, props || {}, { 'data-nextjs-html': 'true' });
+        } else if (type === 'body') {
+          args[0] = 'div';
+          var mergedStyle = Object.assign({ minHeight: '100vh' }, (props && props.style) || {});
+          args[1] = Object.assign({}, props || {}, { 'data-nextjs-body': 'true', style: mergedStyle });
+        } else if (type === 'head') {
+          return null;
+        }
+        return origCreateElement.apply(React, args);
+      };
+
+      // Built-in SVG paths untuk ikon Lucide React populer agar instan & tahan offline
+      var BUILTIN_ICONS = {
+        Clock: [['circle', { cx: 12, cy: 12, r: 10 }], ['polyline', { points: '12 6 12 12 16 14' }]],
+        BarChart3: [['path', { d: 'M3 3v18h18' }], ['path', { d: 'M18 17V9' }], ['path', { d: 'M13 17V5' }], ['path', { d: 'M8 17v-3' }]],
+        BarChart2: [['line', { x1: 18, y1: 20, x2: 18, y2: 10 }], ['line', { x1: 12, y1: 20, x2: 12, y2: 4 }], ['line', { x1: 6, y1: 20, x2: 6, y2: 14 }]],
+        BarChart: [['line', { x1: 12, y1: 20, x2: 12, y2: 10 }], ['line', { x1: 18, y1: 20, x2: 18, y2: 4 }], ['line', { x1: 6, y1: 20, x2: 6, y2: 16 }]],
+        CalendarDays: [['rect', { width: 18, height: 18, x: 3, y: 4, rx: 2, ry: 2 }], ['line', { x1: 16, y1: 2, x2: 16, y2: 6 }], ['line', { x1: 8, y1: 2, x2: 8, y2: 6 }], ['line', { x1: 3, y1: 10, x2: 21, y2: 10 }], ['path', { d: 'M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01' }]],
+        Calendar: [['rect', { width: 18, height: 18, x: 3, y: 4, rx: 2, ry: 2 }], ['line', { x1: 16, y1: 2, x2: 16, y2: 6 }], ['line', { x1: 8, y1: 2, x2: 8, y2: 6 }], ['line', { x1: 3, y1: 10, x2: 21, y2: 10 }]],
+        Zap: [['polygon', { points: '13 2 3 14 12 14 11 22 21 10 12 10 13 2' }]],
+        Check: [['polyline', { points: '20 6 9 17 4 12' }]],
+        CheckCircle: [['path', { d: 'M22 11.08V12a10 10 0 1 1-5.93-9.14' }], ['polyline', { points: '22 4 12 14.01 9 11.01' }]],
+        CheckCircle2: [['circle', { cx: 12, cy: 12, r: 10 }], ['path', { d: 'm9 12 2 2 4-4' }]],
+        X: [['path', { d: 'M18 6 6 18' }], ['path', { d: 'm6 6 12 12' }]],
+        Menu: [['line', { x1: 4, y1: 12, x2: 20, y2: 12 }], ['line', { x1: 4, y1: 6, x2: 20, y2: 6 }], ['line', { x1: 4, y1: 18, x2: 20, y2: 18 }]],
+        ArrowRight: [['path', { d: 'M5 12h14' }], ['path', { d: 'm12 5 7 7-7 7' }]],
+        ArrowLeft: [['path', { d: 'm12 19-7-7 7-7' }], ['path', { d: 'M19 12H5' }]],
+        ArrowUpRight: [['path', { d: 'M7 7h10v10' }], ['path', { d: 'M7 17 17 7' }]],
+        ChevronRight: [['path', { d: 'm9 18 6-6-6-6' }]],
+        ChevronLeft: [['path', { d: 'm15 18-6-6 6-6' }]],
+        ChevronDown: [['path', { d: 'm6 9 6 6 6-6' }]],
+        ChevronUp: [['path', { d: 'm18 15-6-6-6 6' }]],
+        Star: [['polygon', { points: '12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2' }]],
+        Shield: [['path', { d: 'M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z' }]],
+        ShieldCheck: [['path', { d: 'M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z' }], ['path', { d: 'm9 12 2 2 4-4' }]],
+        Users: [['path', { d: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2' }], ['circle', { cx: 9, cy: 7, r: 4 }], ['path', { d: 'M22 21v-2a4 4 0 0 0-3-3.87' }], ['path', { d: 'M16 3.13a4 4 0 0 1 0 7.75' }]],
+        User: [['path', { d: 'M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2' }], ['circle', { cx: 12, cy: 7, r: 4 }]],
+        Sparkles: [['path', { d: 'm12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z' }]],
+        Play: [['polygon', { points: '6 3 20 12 6 21 6 3' }]],
+        Mail: [['rect', { width: 20, height: 16, x: 2, y: 4, rx: 2 }], ['path', { d: 'm22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7' }]],
+        Phone: [['path', { d: 'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z' }]],
+        MapPin: [['path', { d: 'M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z' }], ['circle', { cx: 12, cy: 10, r: 3 }]],
+        Globe: [['circle', { cx: 12, cy: 12, r: 10 }], ['path', { d: 'M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20' }], ['path', { d: 'M2 12h20' }]],
+        Search: [['circle', { cx: 11, cy: 11, r: 8 }], ['path', { d: 'm21 21-4.3-4.3' }]],
+        Bell: [['path', { d: 'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9' }], ['path', { d: 'M10.3 21a1.94 1.94 0 0 0 3.4 0' }]],
+        Settings: [['circle', { cx: 12, cy: 12, r: 3 }], ['path', { d: 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' }]],
+        Home: [['path', { d: 'm3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' }], ['polyline', { points: '9 22 9 12 15 12 15 22' }]],
+        TrendingUp: [['polyline', { points: '22 7 13.5 15.5 8.5 10.5 2 17' }], ['polyline', { points: '16 7 22 7 22 13' }]],
+        Award: [['circle', { cx: 12, cy: 8, r: 6 }], ['path', { d: 'M15.477 12.89 17 22l-5-3-5 3 1.523-9.11' }]],
+        Heart: [['path', { d: 'M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z' }]],
+        Rocket: [['path', { d: 'M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z' }], ['path', { d: 'm12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z' }]],
+        Layers: [['polygon', { points: '12 2 2 7 12 12 22 7 12 2' }], ['polyline', { points: '2 17 12 22 22 17' }], ['polyline', { points: '2 12 12 17 22 12' }]],
+        Lock: [['rect', { width: 18, height: 11, x: 3, y: 11, rx: 2, ry: 2 }], ['path', { d: 'M7 11V7a5 5 0 0 1 10 0v4' }]]
+      };
+
+      var iconCache = {};
+      function createLucideIconComponent(iconName) {
+        if (iconCache[iconName]) return iconCache[iconName];
+        var Comp = function(props) {
+          var p = props || {};
+          var size = p.size || 24;
+          var strokeWidth = p.strokeWidth || 2;
+          var color = p.color || 'currentColor';
+          var className = p.className || '';
+          var style = p.style || {};
+          var shapes = BUILTIN_ICONS[iconName];
+          if (!shapes && window.lucide && window.lucide.icons) {
+            var lucideDef = window.lucide.icons[iconName];
+            if (Array.isArray(lucideDef)) {
+              if (Array.isArray(lucideDef[2])) shapes = lucideDef[2];
+              else if (Array.isArray(lucideDef[0])) shapes = lucideDef;
+            }
+          }
+          if (!shapes) {
+            shapes = [['circle', { cx: 12, cy: 12, r: 9 }], ['path', { d: 'M12 8v4l2.5 2.5' }]];
+          }
+          var children = shapes.map(function(s, idx) {
+            return origCreateElement(s[0], Object.assign({ key: idx }, s[1] || {}));
+          });
+          return origCreateElement('svg', {
+            xmlns: 'http://www.w3.org/2000/svg',
+            width: size,
+            height: size,
+            viewBox: '0 0 24 24',
+            fill: 'none',
+            stroke: color,
+            strokeWidth: strokeWidth,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+            className: className,
+            style: style,
+            'aria-hidden': 'true'
+          }, children);
+        };
+        Comp.displayName = iconName;
+        iconCache[iconName] = Comp;
+        return Comp;
+      }
+
+      var LucideProxy = new Proxy({ __esModule: true }, {
+        get: function(target, prop) {
+          if (prop in target) return target[prop];
+          if (typeof prop !== 'string' || prop === 'default') return LucideProxy;
+          return createLucideIconComponent(prop);
+        }
+      });
+
+      // Next.js & Framer Motion & Shadcn UI Shims
+      var NextLink = function(props) {
+        var p = Object.assign({}, props || {});
+        var children = p.children;
+        delete p.children;
+        delete p.legacyBehavior;
+        delete p.passHref;
+        delete p.prefetch;
+        return origCreateElement('a', Object.assign({ href: p.href || '#' }, p), children);
+      };
+      var NextImage = function(props) {
+        var p = Object.assign({}, props || {});
+        var fill = p.fill;
+        delete p.fill;
+        delete p.priority;
+        delete p.unoptimized;
+        delete p.quality;
+        delete p.placeholder;
+        delete p.blurDataURL;
+        var st = Object.assign({}, fill ? { width: '100%', height: '100%', objectFit: 'cover' } : {}, p.style || {});
+        return origCreateElement('img', Object.assign({ alt: p.alt || '' }, p, { style: st }));
+      };
+      var NextHead = function(props) { return null; };
+      var NextNavigation = {
+        __esModule: true,
+        useRouter: function() {
+          return {
+            push: function(u) { if (typeof u === 'string' && u.startsWith('#')) location.hash = u; },
+            replace: function() {},
+            back: function() {},
+            forward: function() {},
+            refresh: function() {},
+            prefetch: function() {},
+            pathname: '/',
+            query: {}
+          };
+        },
+        usePathname: function() { return '/'; },
+        useSearchParams: function() { return new URLSearchParams(); },
+        useParams: function() { return {}; },
+        redirect: function() {},
+        notFound: function() {}
+      };
+      var NextFontGoogle = new Proxy({ __esModule: true }, {
+        get: function(t, prop) {
+          if (prop in t) return t[prop];
+          return function() { return { className: 'font-sans', style: { fontFamily: 'Inter, sans-serif' }, variable: '--font-sans' }; };
+        }
+      });
+
+      var MotionProxy = new Proxy({}, {
+        get: function(t, tag) {
+          if (typeof tag !== 'string') return 'div';
+          return function(props) {
+            var p = Object.assign({}, props || {});
+            var children = p.children;
+            ['initial', 'animate', 'exit', 'transition', 'variants', 'whileHover', 'whileTap', 'whileInView', 'whileFocus', 'whileDrag', 'viewport', 'layout', 'layoutId', 'drag', 'dragConstraints'].forEach(function(k) { delete p[k]; });
+            return origCreateElement(tag, p, children);
+          };
+        }
+      });
+
+      var cnHelper = function() {
+        return Array.prototype.slice.call(arguments).flat(Infinity).filter(Boolean).join(' ');
+      };
+
+      var MODULE_REGISTRY = {};
+      window.__ZOZ_MODULES__ = MODULE_REGISTRY;
+
+      function normalizeKey(k) {
+        return String(k || '')
+          .replace(/^@\/|^~\/|^\.\.?\/+/g, '')
+          .replace(/^(?:src\/|app\/|pages\/|components\/)+/i, '')
+          .replace(/\.(?:jsx|tsx|js|ts|mjs)$/i, '')
+          .toLowerCase();
+      }
+
+      // Fallback UI primitives (Shadcn / custom UI components)
+      var UI_PRIMITIVES = {
+        Button: function(p) { return origCreateElement('button', Object.assign({ type: 'button', className: cnHelper('inline-flex items-center justify-center rounded-lg px-4 py-2 font-medium transition-colors', p && p.className) }, p), p && p.children); },
+        Card: function(p) { return origCreateElement('div', Object.assign({ className: cnHelper('rounded-xl border border-slate-800 bg-slate-900/60 text-slate-100 shadow-sm', p && p.className) }, p), p && p.children); },
+        CardHeader: function(p) { return origCreateElement('div', Object.assign({ className: cnHelper('flex flex-col space-y-1.5 p-6', p && p.className) }, p), p && p.children); },
+        CardTitle: function(p) { return origCreateElement('h3', Object.assign({ className: cnHelper('text-xl font-semibold leading-none tracking-tight', p && p.className) }, p), p && p.children); },
+        CardDescription: function(p) { return origCreateElement('p', Object.assign({ className: cnHelper('text-sm text-slate-400', p && p.className) }, p), p && p.children); },
+        CardContent: function(p) { return origCreateElement('div', Object.assign({ className: cnHelper('p-6 pt-0', p && p.className) }, p), p && p.children); },
+        CardFooter: function(p) { return origCreateElement('div', Object.assign({ className: cnHelper('flex items-center p-6 pt-0', p && p.className) }, p), p && p.children); },
+        Badge: function(p) { return origCreateElement('span', Object.assign({ className: cnHelper('inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold', p && p.className) }, p), p && p.children); },
+        Input: function(p) { return origCreateElement('input', Object.assign({ className: cnHelper('flex h-10 w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm', p && p.className) }, p)); },
+        Textarea: function(p) { return origCreateElement('textarea', Object.assign({ className: cnHelper('flex min-h-[80px] w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm', p && p.className) }, p)); }
+      };
+
+      function customRequire(spec) {
+        var s = String(spec || '').trim();
+        if (s === 'react') return Object.assign({ __esModule: true, default: React }, React);
+        if (s === 'react-dom' || s === 'react-dom/client') return Object.assign({ __esModule: true, default: ReactDOM }, ReactDOM);
+        if (s === 'lucide-react' || s === 'react-feather' || s.indexOf('react-icons') === 0 || s.indexOf('@heroicons') === 0) return LucideProxy;
+        if (s === 'next/link') return { __esModule: true, default: NextLink, Link: NextLink };
+        if (s === 'next/image') return { __esModule: true, default: NextImage, Image: NextImage };
+        if (s === 'next/head' || s === 'next/script') return { __esModule: true, default: NextHead };
+        if (s === 'next/navigation' || s === 'next/router') return NextNavigation;
+        if (s === 'next/font/google' || s === 'next/font/local') return NextFontGoogle;
+        if (s === 'framer-motion') return { __esModule: true, motion: MotionProxy, AnimatePresence: function(p) { return p && p.children || null; }, useAnimation: function() { return { start: function() {} }; }, useInView: function() { return true; } };
+        if (s === 'clsx' || s === 'classnames' || s === 'tailwind-merge' || s.indexOf('lib/utils') !== -1) {
+          return { __esModule: true, default: cnHelper, clsx: cnHelper, twMerge: cnHelper, cn: cnHelper };
+        }
+        if (s.endsWith('.css') || s.endsWith('.scss')) return {};
+
+        var norm = normalizeKey(s);
+        var base = norm.split('/').pop();
+        if (MODULE_REGISTRY[s]) return MODULE_REGISTRY[s];
+        if (MODULE_REGISTRY[norm]) return MODULE_REGISTRY[norm];
+        if (MODULE_REGISTRY[base]) return MODULE_REGISTRY[base];
+
+        return new Proxy(Object.assign({ __esModule: true, default: UI_PRIMITIVES[base] || function(p) { return origCreateElement('div', p, p && p.children); } }, UI_PRIMITIVES), {
+          get: function(t, prop) {
+            if (prop in t) return t[prop];
+            if (typeof prop !== 'string') return undefined;
+            if (MODULE_REGISTRY[prop.toLowerCase()]) return MODULE_REGISTRY[prop.toLowerCase()].default || MODULE_REGISTRY[prop.toLowerCase()];
+            return createLucideIconComponent(prop);
+          }
+        });
+      }
+
+      window.__ZOZ_RESOLVE_IDENT__ = function(name) {
+        var low = String(name || '').toLowerCase();
+        if (MODULE_REGISTRY[low]) return MODULE_REGISTRY[low].default || MODULE_REGISTRY[low][name] || MODULE_REGISTRY[low];
+        if (UI_PRIMITIVES[name]) return UI_PRIMITIVES[name];
+        return createLucideIconComponent(name);
+      };
+
+      var LayoutComp = null;
+      var EntryComp = null;
+
+      PROJECT_MODULES.forEach(function(mod) {
+        try {
+          var compiled = window.Babel.transform(mod.code, {
+            presets: [
+              ['env', { modules: 'commonjs' }],
+              'react',
+              'typescript'
+            ],
+            filename: mod.name.endsWith('.tsx') || mod.name.endsWith('.ts') ? mod.name : (mod.name + '.tsx')
+          }).code;
+
+          var mObj = { exports: {} };
+          var fn = new Function(
+            'require', 'module', 'exports', 'React', 'ReactDOM',
+            'useState', 'useEffect', 'useRef', 'useMemo', 'useCallback', 'useReducer', 'useContext', 'createContext', 'Fragment', 'forwardRef', 'memo',
+            compiled
+          );
+          fn(
+            customRequire, mObj, mObj.exports, React, ReactDOM,
+            React.useState, React.useEffect, React.useRef, React.useMemo, React.useCallback, React.useReducer, React.useContext, React.createContext, React.Fragment, React.forwardRef, React.memo
+          );
+
+          var exp = mObj.exports;
+          var primaryExport = exp.default || Object.keys(exp).map(function(k) { return exp[k]; }).find(function(v) { return typeof v === 'function'; });
+
+          MODULE_REGISTRY[mod.path] = exp;
+          MODULE_REGISTRY[mod.name] = exp;
+          MODULE_REGISTRY[normalizeKey(mod.path)] = exp;
+          MODULE_REGISTRY[normalizeKey(mod.name)] = exp;
+          Object.keys(exp).forEach(function(k) {
+            if (typeof exp[k] === 'function' && k !== 'default') {
+              MODULE_REGISTRY[k.toLowerCase()] = { __esModule: true, default: exp[k] };
+            }
+          });
+
+          if (mod.isLayout && primaryExport) {
+            LayoutComp = primaryExport;
+          } else if (primaryExport) {
+            EntryComp = primaryExport;
+          }
+        } catch (compileErr) {
+          console.error('[Zoz Next.js/React Compiler Error in ' + mod.name + ']:', compileErr);
+          if (!EntryComp) {
+            EntryComp = function() {
+              return origCreateElement('div', { style: { padding: '24px', color: '#f87171', background: '#0f172a', minHeight: '100vh', fontFamily: 'monospace' } },
+                origCreateElement('h3', { style: { marginBottom: '8px' } }, '⚠️ Kendala Kompilasi JSX (' + mod.name + ')'),
+                origCreateElement('pre', { style: { whiteSpace: 'pre-wrap', fontSize: '13px', color: '#cbd5e1' } }, String(compileErr && compileErr.message || compileErr))
+              );
+            };
+          }
+        }
+      });
+
+      if (EntryComp || LayoutComp) {
+        var rootEl = document.getElementById('root');
+        var tree = EntryComp ? origCreateElement(EntryComp) : null;
+        if (LayoutComp) {
+          tree = origCreateElement(LayoutComp, null, tree);
+        }
+        if (ReactDOM.createRoot) {
+          ReactDOM.createRoot(rootEl).render(tree);
+        } else if (ReactDOM.render) {
+          ReactDOM.render(tree, rootEl);
+        }
+      }
+    }
+
+    bootReactNextSandbox();
+  })();
+  <\/script>
+</body>
+</html>`;
+  }
+
+  function prepareSafeHtmlForPreview(rawContent, fileObj = null) {
     if (!rawContent || typeof rawContent !== 'string') return '';
     let safeHtml = rawContent;
-    safeHtml = safeHtml.replace(/^\s*```(?:html|htm)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+
+    // Jika berkas adalah komponen React / JSX / TSX atau proyek Next.js, kompilasi otomatis menjadi berkas HTML mandiri
+    if (isRawJsxOrReactCode(safeHtml, fileObj)) {
+      safeHtml = compileReactNextToStandaloneHtml(safeHtml, fileObj);
+    }
+
+    safeHtml = safeHtml.replace(/^\s*```(?:html|htm|jsx|tsx)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+
+    // Jika berkas HTML memiliki <script type="text/babel"> atau <script type="text/jsx"> namun belum memuat Babel/React CDN, suntikkan otomatis
+    if (/<script\b[^>]*type=["']text\/(?:babel|jsx)["']/i.test(safeHtml) && !/babel(?:\.min)?\.js|@babel\/standalone/i.test(safeHtml)) {
+      const babelInject = '<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>\n<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>\n<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>';
+      if (/<head\b[^>]*>/i.test(safeHtml)) {
+        safeHtml = safeHtml.replace(/<head\b[^>]*>/i, '$&\n' + babelInject);
+      } else {
+        safeHtml = babelInject + '\n' + safeHtml;
+      }
+    }
+
     // 1. Bersihkan iframe internal yang kosong atau mengarah ke root / atau relatif host
     safeHtml = safeHtml.replace(/<iframe\b([^>]*)\bsrc=["'](?:|\/|\.\/|index\.html?)["']([^>]*)>/gi, '<iframe$1src="about:blank"$2>');
     // 2. Cegah tag iframe tanpa atribut src agar tidak mewarisi URL parent (localhost:4040/)
@@ -9207,7 +9781,7 @@ Aturan wajib:
       const extracted = titleMatch[1].trim();
       if (extracted.length >= 2 && extracted.length <= 60) return extracted;
     }
-    let base = (file.name || 'Website').replace(/\.(?:html?|xhtml|docx?|pdf|md|markdown|svg|mermaid|mmd)$/i, '');
+    let base = (file.name || 'Website').replace(/\.(?:html?|xhtml|jsx|tsx|js|ts|docx?|pdf|md|markdown|svg|mermaid|mmd)$/i, '');
     base = base.replace(/[-_]+/g, ' ').trim();
     base = base.replace(/\b\w/g, c => c.toUpperCase());
     return base || 'Website Studio';
@@ -9224,10 +9798,22 @@ Aturan wajib:
       const zip = new window.JSZip();
       const content = file.rawContent || file.content || '';
       const name = file.name || 'index.html';
-      zip.file(name, content);
-      zip.file('README.md', `# ${getGeminiDocTitle(file)}\n\nDihasilkan oleh Zoz Router Gemini Canvas Studio.\nBuka berkas \`${name}\` di browser modern Anda.`);
+      if (Array.isArray(file.projectFiles) && file.projectFiles.length > 0) {
+        file.projectFiles.forEach(pf => {
+          const pfPath = pf.path || pf.name || 'file.jsx';
+          const pfContent = (pf.name === file.name && content) ? content : (pf.rawContent || pf.content || '');
+          zip.file(pfPath, pfContent);
+        });
+      } else {
+        zip.file(name, content);
+      }
+      if (isRawJsxOrReactCode(content, file)) {
+        const standaloneHtml = compileReactNextToStandaloneHtml(content, file);
+        zip.file('index.html', standaloneHtml);
+      }
+      zip.file('README.md', `# ${getGeminiDocTitle(file)}\n\nDihasilkan oleh Zoz Router Gemini Canvas Studio.\nBuka berkas \`index.html\` di browser modern Anda untuk pratinjau langsung tanpa server build.`);
       const blob = await zip.generateAsync({ type: 'blob' });
-      const zipName = name.replace(/\.(?:html?|xhtml)$/i, '') + '.zip';
+      const zipName = name.replace(/\.(?:html?|xhtml|jsx|tsx|js|ts)$/i, '') + '.zip';
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -9262,7 +9848,7 @@ Aturan wajib:
 
     const docTitle = getGeminiDocTitle(file);
     const rawContent = file.rawContent || file.content || '';
-    const safeHtml = prepareSafeHtmlForPreview(rawContent);
+    const safeHtml = prepareSafeHtmlForPreview(rawContent, file);
     const isFileIncomplete = Boolean(file.isIncomplete);
 
     FileRevisionStore.pushRevision(file.name, rawContent);
@@ -9395,7 +9981,7 @@ Aturan wajib:
         if (act === 'download-html') {
           downloadAIFile(file, 'html');
         } else if (act === 'copy-code') {
-          copyTextToClipboard(file.rawContent || file.content || '', null, 'Kode HTML disalin ke clipboard!');
+          copyTextToClipboard(file.rawContent || file.content || '', null, 'Kode disalin ke clipboard!');
         } else if (act === 'download-zip') {
           downloadAIFileAsZip(file);
         }
@@ -9411,7 +9997,7 @@ Aturan wajib:
     card.querySelector('.canvas-card-reload-btn')?.addEventListener('click', () => {
       if (iframe) {
         iframe.removeAttribute('srcdoc');
-        setTimeout(() => { iframe.srcdoc = prepareSafeHtmlForPreview(file.rawContent || file.content || ''); }, 50);
+        setTimeout(() => { iframe.srcdoc = prepareSafeHtmlForPreview(file.rawContent || file.content || '', file); }, 50);
         showToast('Pratinjau website dimuat ulang.');
       }
     });
@@ -9425,7 +10011,7 @@ Aturan wajib:
       if (prev !== null) {
         file.rawContent = prev;
         file.content = prev;
-        if (iframe) iframe.srcdoc = prepareSafeHtmlForPreview(prev);
+        if (iframe) iframe.srcdoc = prepareSafeHtmlForPreview(prev, file);
         if (codeEl) {
           codeEl.textContent = prev;
           try { if (window.hljs) { codeEl.removeAttribute('data-highlighted'); window.hljs.highlightElement(codeEl); } } catch (_) {}
@@ -9441,7 +10027,7 @@ Aturan wajib:
       if (next !== null) {
         file.rawContent = next;
         file.content = next;
-        if (iframe) iframe.srcdoc = prepareSafeHtmlForPreview(next);
+        if (iframe) iframe.srcdoc = prepareSafeHtmlForPreview(next, file);
         if (codeEl) {
           codeEl.textContent = next;
           try { if (window.hljs) { codeEl.removeAttribute('data-highlighted'); window.hljs.highlightElement(codeEl); } } catch (_) {}
@@ -9482,7 +10068,8 @@ Aturan wajib:
     const isDocx = ext === 'docx';
     const isPdf = ext === 'pdf';
     const isMarkdown = ext === 'md' || ext === 'markdown';
-    const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml';
+    const isReactJsx = ext === 'jsx' || ext === 'tsx' || file.lang === 'jsx' || file.lang === 'tsx' || file.lang === 'react' || isRawJsxOrReactCode(rawContent, file);
+    const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml' || isReactJsx;
     const isMermaid = ext === 'mermaid' || ext === 'mmd' || file.lang === 'mermaid' || file.lang === 'mmd' ||
       (ext === 'svg' && !rawContent.trim().startsWith('<svg') && !rawContent.trim().startsWith('<?xml') && isAuthenticMermaidSyntax(rawContent)) ||
       (!rawContent.trim().startsWith('<svg') && !rawContent.trim().startsWith('<?xml') && isAuthenticMermaidSyntax(rawContent));
@@ -9599,7 +10186,7 @@ Aturan wajib:
         els.aiFileStudioFrame.srcdoc = generatePdfDocPreviewHtml(file.name, parsedBody);
       } else if (isHtml) {
         els.aiFileStudioFrame.removeAttribute('src');
-        els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(rawContent);
+        els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(rawContent, file);
       } else {
         els.aiFileStudioFrame.removeAttribute('src');
         els.aiFileStudioFrame.srcdoc = '';
@@ -9825,6 +10412,7 @@ Aturan wajib:
       let blob;
 
       const isDiagram = isDiagramFile(file);
+      const isJsxReact = isRawJsxOrReactCode(rawText, file);
 
       if (format === 'docx' || (fileNameLower.endsWith('.docx') && format !== 'pdf' && format !== 'jpeg' && format !== 'jpg' && format !== 'svg')) {
         showToast('📄 Mengompilasi dokumen Word (.docx)...', 'info');
@@ -9874,6 +10462,9 @@ Aturan wajib:
           showToast('⚙ Mengompilasi gambar vektor SVG...', 'info');
           blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
         }
+      } else if (format === 'html' && isJsxReact) {
+        const standaloneHtml = compileReactNextToStandaloneHtml(rawText, file);
+        blob = new Blob([standaloneHtml], { type: 'text/html;charset=utf-8' });
       } else {
         blob = new Blob([file.content || ''], { type: (String(file.mime || 'text/plain')) + ';charset=utf-8' });
       }
@@ -9886,6 +10477,9 @@ Aturan wajib:
       } else if (format === 'docx') {
         safeFileName = safeFileName.replace(/\.(?:pdf|doc|txt|md|markdown|html|docx)$/i, '') + '.docx';
         if (!safeFileName.endsWith('.docx')) safeFileName += '.docx';
+      } else if (format === 'html' && isJsxReact) {
+        safeFileName = safeFileName.replace(/\.(?:jsx|tsx|js|ts|html?)$/i, '') + '.html';
+        if (!safeFileName.toLowerCase().endsWith('.html')) safeFileName += '.html';
       } else if (isDiagram) {
         if (lowerName.startsWith('berkas') || lowerName.startsWith('diagram') || lowerName.includes('alur_sistem') || lowerName.includes('alur_logika') || lowerName.includes('arsitektur_sistem')) {
           safeFileName = generateUniqueDiagramFilename(rawText, null, (format === 'jpeg' || format === 'jpg') ? 'jpeg' : 'svg');
@@ -9913,7 +10507,7 @@ Aturan wajib:
       a.click();
       a.remove();
       setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 4000);
-      const formatLabel = (format === 'jpeg' || format === 'jpg') ? 'JPEG' : (format === 'pdf' ? 'PDF' : (format === 'docx' ? 'Word .docx' : (isDiagram ? 'SVG' : 'berkas')));
+      const formatLabel = (format === 'jpeg' || format === 'jpg') ? 'JPEG' : (format === 'pdf' ? 'PDF' : (format === 'docx' ? 'Word .docx' : (format === 'html' ? 'HTML Mandiri' : (isDiagram ? 'SVG' : 'berkas'))));
       showToast(`⬇ Berkas ${safeFileName} (${formatLabel}) berhasil diunduh.`, 'success');
       AudioEngine.click();
     } catch (err) {
@@ -9986,7 +10580,10 @@ Aturan wajib:
       const resolvedFileName = matchedWorkspaceFile ? matchedWorkspaceFile.name : rawFileName;
       const resolvedFilePath = matchedWorkspaceFile ? (matchedWorkspaceFile.path || matchedWorkspaceFile.name) : rawFileName;
 
-      const isWebFile = resolvedFileName.toLowerCase().endsWith('.html') || resolvedFileName.toLowerCase().endsWith('.htm') || (langMatch && langMatch[1] && (langMatch[1].toLowerCase() === 'html' || langMatch[1].toLowerCase() === 'htm'));
+      const lowerFileName = resolvedFileName.toLowerCase();
+      const lowerLang = (langMatch && langMatch[1]) ? langMatch[1].toLowerCase() : '';
+      const isReactFile = lowerFileName.endsWith('.jsx') || lowerFileName.endsWith('.tsx') || lowerLang === 'jsx' || lowerLang === 'tsx' || lowerLang === 'react';
+      const isWebFile = lowerFileName.endsWith('.html') || lowerFileName.endsWith('.htm') || isReactFile || lowerLang === 'html' || lowerLang === 'htm';
       if (isWebFile && (cleanContent.includes('<!DOCTYPE html') || cleanContent.includes('<html')) && !cleanContent.includes('</html>')) {
         isUnclosed = true;
         out.hasIncompleteFile = true;
@@ -9997,7 +10594,9 @@ Aturan wajib:
       }
 
       let finalContent = cleanContent;
-      if (isUnclosed && isWebFile) {
+      if (isReactFile) {
+        finalContent = validateAndRepairReactCode(finalContent);
+      } else if (isUnclosed && isWebFile) {
         if (finalContent.includes('<script') && !finalContent.includes('</script>')) finalContent += '\n</script>';
         if (finalContent.includes('<style') && !finalContent.includes('</style>')) finalContent += '\n</style>';
         if (finalContent.includes('<body') && !finalContent.includes('</body>')) finalContent += '\n</body>';
@@ -10047,7 +10646,7 @@ Aturan wajib:
       ? 'application/pdf'
       : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-    // --- Fallback 1: blok kode saat AI menghasilkan dokumen web (HTML/SVG) atau dokumen (Markdown/PDF/DOCX) ---
+    // --- Fallback 1: blok kode saat AI menghasilkan dokumen web (HTML/JSX/TSX/SVG) atau dokumen (Markdown/PDF/DOCX) ---
     if (out.files.length === 0) {
       for (let i = 0; i < lines.length; i++) {
         const t = lines[i].trim();
@@ -10062,19 +10661,25 @@ Aturan wajib:
         let langTag = t.slice(3).trim().toLowerCase();
         if (langTag === TICK3) langTag = '';
         if (!langTag) {
-          if (body.includes('<!DOCTYPE html') || body.includes('<html') || body.includes('<section') || body.includes('<div') || body.includes('<header') || body.includes('<nav')) {
+          if (isRawJsxOrReactCode(body)) {
+            langTag = 'jsx';
+          } else if (body.includes('<!DOCTYPE html') || body.includes('<html') || body.includes('<section') || body.includes('<div') || body.includes('<header') || body.includes('<nav')) {
             langTag = 'html';
           } else if (isDocMode) {
             langTag = 'markdown';
           }
+        } else if ((langTag === 'javascript' || langTag === 'js' || langTag === 'typescript' || langTag === 'ts') && isRawJsxOrReactCode(body)) {
+          langTag = (langTag === 'typescript' || langTag === 'ts') ? 'tsx' : 'jsx';
         }
         if (!langTag) continue;
         const isDocFence = isDocMode && (langTag === 'markdown' || langTag === 'md' || langTag === 'docx' || langTag === 'pdf' || langTag === 'doc' || langTag === 'text' || langTag === 'txt');
-        const isFullHtmlOrSvg = (langTag === 'html' || langTag === 'htm' || body.includes('<!DOCTYPE html') || body.includes('<html') || (body.includes('<svg') && body.includes('</svg>')) || (body.includes('<section') && body.includes('</section>'))) && body.length >= 40;
+        const isReactFence = (langTag === 'jsx' || langTag === 'tsx' || langTag === 'react') && isRawJsxOrReactCode(body, { lang: langTag });
+        const isFullHtmlOrSvg = isReactFence || ((langTag === 'html' || langTag === 'htm' || body.includes('<!DOCTYPE html') || body.includes('<html') || (body.includes('<svg') && body.includes('</svg>')) || (body.includes('<section') && body.includes('</section>'))) && body.length >= 40);
         const isEligibleFallback = (allowFallback && body.length >= 200) || isFullHtmlOrSvg || (isDocFence && body.trim().length >= 30);
         if (!isEligibleFallback) continue;
 
         const isUnclosed = !hasClosingFence || (
+          !isReactFence &&
           (langTag === 'html' || langTag === 'htm' || body.includes('<!DOCTYPE html') || body.includes('<html')) &&
           !body.includes('</html>')
         );
@@ -10088,7 +10693,9 @@ Aturan wajib:
         }
 
         let repairedBody = body;
-        if (isUnclosed && (langTag === 'html' || langTag === 'htm' || repairedBody.includes('<html'))) {
+        if (isReactFence) {
+          repairedBody = validateAndRepairReactCode(repairedBody);
+        } else if (isUnclosed && (langTag === 'html' || langTag === 'htm' || repairedBody.includes('<html'))) {
           if (repairedBody.includes('<script') && !repairedBody.includes('</script>')) repairedBody += '\n</script>';
           if (repairedBody.includes('<style') && !repairedBody.includes('</style>')) repairedBody += '\n</style>';
           if (repairedBody.includes('<body') && !repairedBody.includes('</body>')) repairedBody += '\n</body>';
@@ -10111,7 +10718,12 @@ Aturan wajib:
         fallbackFile.rawBlock = rawFenceBlock;
         out.files.push(fallbackFile);
         out.rawBlocks.push(rawFenceBlock);
-        break;
+        if (hasClosingFence) {
+          i = end;
+        }
+        if (!isReactFence) {
+          break;
+        }
       }
     }
 
@@ -10187,12 +10799,42 @@ Aturan wajib:
       }
     }
 
+    // Jika terdapat proyek multi-berkas React / Next.js (.jsx / .tsx / .css), hubungkan semua komponen pendukung ke projectFiles
+    if (out.files.length > 0) {
+      const reactOrWebFiles = out.files.filter(f => {
+        const n = (f.name || '').toLowerCase();
+        const l = (f.lang || '').toLowerCase();
+        return n.endsWith('.jsx') || n.endsWith('.tsx') || n.endsWith('.css') || l === 'jsx' || l === 'tsx' || l === 'react' || isRawJsxOrReactCode(f.content, f);
+      });
+      if (reactOrWebFiles.some(f => isRawJsxOrReactCode(f.content, f))) {
+        const sharedProjectSnapshot = reactOrWebFiles.map(pf => ({
+          name: pf.name,
+          path: pf.path || pf.name,
+          lang: pf.lang,
+          content: pf.content
+        }));
+        let primaryAssigned = false;
+        const preferredEntry = reactOrWebFiles.find(f => /(?:^|\/)(?:page|app|index|main)\.(?:jsx|tsx)$/i.test(f.path || f.name)) ||
+                               reactOrWebFiles.find(f => !/(?:^|\/)layout\.(?:jsx|tsx)$/i.test(f.path || f.name) && /\.(?:jsx|tsx)$/i.test(f.name)) ||
+                               reactOrWebFiles[0];
+        reactOrWebFiles.forEach(f => {
+          f.projectFiles = sharedProjectSnapshot;
+          if (!primaryAssigned && f === preferredEntry) {
+            f.isPrimaryWebEntry = true;
+            primaryAssigned = true;
+          } else {
+            f.isPrimaryWebEntry = false;
+          }
+        });
+      }
+    }
+
     return out;
   }
 
   // Hapus blok file dari teks respons agar tampilan gelembung tetap rapi
   // Khusus diagram Mermaid: pertahankan sebagai blok ```mermaid``` agar langsung dirender visual di obrolan chat!
-  // Dokumen (.docx, .pdf) & Website (.html): hapus seluruh kode dari gelembung chat (terisolasi di studio & pratinjau)
+  // Dokumen (.docx, .pdf) & Website (.html / .jsx / .tsx): hapus seluruh kode dari gelembung chat (terisolasi di studio & pratinjau)
   function stripGeneratedFileBlocks(text, rawBlocks, options = {}) {
     let out = String(text || '');
     const isExplicitCodeInChat = Boolean(options && options.websiteMode === 'code_in_chat');
@@ -10255,7 +10897,8 @@ Aturan wajib:
                           fileName.endsWith('.mermaid') || fileName.endsWith('.mmd') ||
                           (fileName.endsWith('.svg') && isAuthenticMermaidSyntax(innerContent));
 
-        const isWeb = fileName.endsWith('.html') || fileName.endsWith('.htm') || fileLang === 'html' || fileLang === 'htm';
+        const isWeb = fileName.endsWith('.html') || fileName.endsWith('.htm') || fileName.endsWith('.jsx') || fileName.endsWith('.tsx') ||
+                      fileLang === 'html' || fileLang === 'htm' || fileLang === 'jsx' || fileLang === 'tsx' || fileLang === 'react';
         const isDoc = fileName.endsWith('.docx') || fileName.endsWith('.pdf') || fileName.endsWith('.doc') || fileName.endsWith('.md') ||
                       fileLang === 'docx' || fileLang === 'pdf' || 
                       ((fileLang === 'markdown' || fileLang === 'md') && (!isDiagram && !isWeb || Boolean(options && (options.docFormat || options.isDocCreation))));
@@ -10288,9 +10931,9 @@ Aturan wajib:
     if (hasStrippedDoc || hasStrippedWeb || shouldHideCode || (!isExplicitCodeInChat && (options && (options.websiteMode === 'preview' || options.isWebCreation))) || (options && (options.docFormat || options.isDocCreation))) {
       // Bersihkan sisa marker jika stream sempat terputus
       out = out.replace(/<<<ZOZ_(?:FILE|EDIT|MODIFY)[\s\S]*?(?:<<<END_ZOZ_(?:FILE|EDIT|MODIFY)>>>|$)/gi, '');
-      // Bersihkan sisa blok kode HTML utuh atau unclosed jika mode terisolasi
+      // Bersihkan sisa blok kode HTML/JSX utuh atau unclosed jika mode terisolasi
       if (!isExplicitCodeInChat) {
-        out = out.replace(/```(?:html|htm)[\s\S]*?(?:```|$)/gi, '');
+        out = out.replace(/```(?:html|htm|jsx|tsx|react)[\s\S]*?(?:```|$)/gi, '');
         out = out.replace(/<!DOCTYPE\s+html[\s\S]*?(?:<\/html>|$)/gi, '');
         out = out.replace(/<html\b[\s\S]*?(?:<\/html>|$)/gi, '');
         out = out.replace(/```[a-z0-9_-]*\s*```/gi, '');
@@ -10471,7 +11114,7 @@ Aturan wajib:
     // Hot-reload studio jika studio modal sedang terbuka dan menerima update file
     if (els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show') && activeAIFile) {
       const matchFile = files.find(f => f.name === activeAIFile.name) ||
-        (activeAIFile.name.endsWith('.html') && files.find(f => (f.name || '').endsWith('.html'))) ||
+        files.find(f => f.isPrimaryWebEntry !== false && /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) ||
         files[0];
       if (matchFile) {
         const newRaw = matchFile.rawContent || matchFile.content || '';
@@ -10479,12 +11122,13 @@ Aturan wajib:
           activeAIFile.rawContent = newRaw;
           activeAIFile.content = newRaw;
           activeAIFile.size = formatFileSize(newRaw.length);
+          if (matchFile.projectFiles) activeAIFile.projectFiles = matchFile.projectFiles;
           FileRevisionStore.pushRevision(activeAIFile.name, newRaw);
           updateStudioRevisionBtns(activeAIFile.name);
           if (els.aiFileStudioFrame) {
             els.aiFileStudioFrame.removeAttribute('srcdoc');
             setTimeout(() => {
-              els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(newRaw);
+              els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(newRaw, activeAIFile);
             }, 50);
           }
           if (els.aiFileStudioCode) {
@@ -10567,7 +11211,10 @@ Aturan wajib:
       const isFileDiagram = isDiagramFile(file);
       const fnLower = (file.name || '').toLowerCase();
       const flLower = (file.lang || '').toLowerCase();
-      const isFileWeb = fnLower.endsWith('.html') || fnLower.endsWith('.htm') || flLower === 'html' || flLower === 'htm';
+      const isWebExtOrReact = fnLower.endsWith('.html') || fnLower.endsWith('.htm') || fnLower.endsWith('.jsx') || fnLower.endsWith('.tsx') ||
+                              flLower === 'html' || flLower === 'htm' || flLower === 'jsx' || flLower === 'tsx' || flLower === 'react' ||
+                              isRawJsxOrReactCode(file.rawContent || file.content || '', file);
+      const isFileWeb = isWebExtOrReact && (file.isPrimaryWebEntry !== false);
       if (isFileWeb) {
         renderGeminiCanvasCard(file, wrap);
         return;
@@ -11354,7 +12001,9 @@ ${blocks}
     const ext = (activeAIFile.name || '').split('.').pop().toLowerCase();
     const isDoc = ext === 'docx' || ext === 'pdf' || ext === 'doc' || ext === 'md' || ext === 'markdown' ||
                   activeAIFile.lang === 'docx' || activeAIFile.lang === 'pdf' || (activeAIFile.lang === 'markdown' && !isDiagram);
-    const isHtml = ext === 'html' || ext === 'htm' || activeAIFile.lang === 'html' || activeAIFile.lang === 'htm';
+    const isHtml = ext === 'html' || ext === 'htm' || ext === 'jsx' || ext === 'tsx' ||
+                   activeAIFile.lang === 'html' || activeAIFile.lang === 'htm' || activeAIFile.lang === 'jsx' || activeAIFile.lang === 'tsx' || activeAIFile.lang === 'react' ||
+                   isRawJsxOrReactCode(activeAIFile.rawContent || activeAIFile.content || '', activeAIFile);
     if ((isDiagram || isDoc || isHtml) && els.aiFileStudioDownloadMenu) {
       e.stopPropagation();
       const isVisible = els.aiFileStudioDownloadMenu.style.display !== 'none';
@@ -11421,7 +12070,7 @@ ${blocks}
       activeAIFile.rawContent = prev;
       activeAIFile.content = prev;
       if (els.aiFileStudioFrame) {
-        els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(prev);
+        els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(prev, activeAIFile);
       }
       if (els.aiFileStudioCode) {
         els.aiFileStudioCode.textContent = prev;
@@ -11439,7 +12088,7 @@ ${blocks}
       activeAIFile.rawContent = next;
       activeAIFile.content = next;
       if (els.aiFileStudioFrame) {
-        els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(next);
+        els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(next, activeAIFile);
       }
       if (els.aiFileStudioCode) {
         els.aiFileStudioCode.textContent = next;
@@ -11536,7 +12185,8 @@ ${blocks}
     const targetName = activeAIFile.name || 'index.html';
     const ext = targetName.split('.').pop().toLowerCase();
     const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml';
-    const lang = activeAIFile.lang || (isHtml ? 'html' : ext);
+    const isJsx = ext === 'jsx' || ext === 'tsx' || activeAIFile.lang === 'jsx' || activeAIFile.lang === 'tsx' || activeAIFile.lang === 'react';
+    const lang = activeAIFile.lang || (isHtml ? 'html' : (isJsx ? 'jsx' : ext));
     const currentCode = activeAIFile.rawContent || activeAIFile.content || '';
 
     // Bersihkan input & reset tinggi textarea
@@ -11561,9 +12211,9 @@ ${blocks}
 
     let followupPrompt = '';
     if (wantsRevision) {
-      followupPrompt = `[Konteks Berkas Aktif: "${targetName}" (${lang})]\n\`\`\`${lang}\n${currentCode}\n\`\`\`\n\nInstruksi Perubahan dari Pengguna: ${val}\n\nInstruksi Khusus untuk AI:\nPengguna secara spesifik meminta revisi atau modifikasi pada website ini.\n1. Berikan penjelasan singkat tentang perubahan yang Anda lakukan.\n2. Cantumkan SELURUH KODE LENGKAP YANG TELAH DIPERBARUI (termasuk HTML, CSS, dan JavaScript) di dalam blok:\n<<<ZOZ_FILE name="${targetName}" lang="${lang}">>>\n... seluruh kode lengkap ...\n<<<END_ZOZ_FILE>>>`;
+      followupPrompt = `[Konteks Berkas Aktif: "${targetName}" (${lang})]\n\`\`\`${lang}\n${currentCode}\n\`\`\`\n\nInstruksi Perubahan dari Pengguna: ${val}\n\nInstruksi Khusus untuk AI:\nPengguna secara spesifik meminta revisi atau modifikasi pada aplikasi/website ini.\n1. Berikan penjelasan singkat tentang perubahan yang Anda lakukan.\n2. Cantumkan SELURUH KODE LENGKAP YANG TELAH DIPERBARUI (pastikan semua komponen lengkap, import/export valid, tanpa ada kode terpotong, dan siap dirender di pratinjau langsung Zoz Router) di dalam blok:\n<<<ZOZ_FILE name="${targetName}" lang="${lang}">>>\n... seluruh kode lengkap ...\n<<<END_ZOZ_FILE>>>`;
     } else {
-      followupPrompt = `[Konteks: Pengguna sedang melihat pratinjau website "${targetName}"]\nPermintaan / Obrolan Pengguna: "${val}"\n\nATURAN SANGAT KETAT UNTUK AI:\n- Pengguna TIDAK meminta perubahan kode. Pengguna hanya sedang mengobrol santai, memuji, berkomentar, atau bertanya tentang website ini.\n- JANGAN PERNAH merombak, merevisi, atau membuat ulang kode website!\n- DILARANG KERAS mengeluarkan blok kode atau blok <<<ZOZ_FILE!\n- Jawablah secara ramah, santun, dan ringkas dalam teks biasa. Jika pengguna memuji ("bagus", "good", dsb.), ucapkan terima kasih dengan hangat dan tanyakan apakah ada bagian website yang ingin diubah. Jika pengguna bertanya, jelaskan dengan jelas tanpa mengubah kode apa pun.`;
+      followupPrompt = `[Konteks: Pengguna sedang melihat pratinjau langsung "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan / Obrolan Pengguna: "${val}"\n\nATURAN SANGAT KETAT UNTUK AI:\n- Zoz Router SUDAH menampilkan pratinjau langsung untuk berkas ini (termasuk React/JSX/Next.js melalui kompilator Babel Standalone + Tailwind CSS di browser).\n- Pengguna TIDAK meminta perubahan kode. Pengguna hanya sedang mengobrol santai, memuji, berkomentar, atau bertanya tentang aplikasi/website ini.\n- JANGAN PERNAH merombak, merevisi, atau membuat ulang kode!\n- DILARANG KERAS mengeluarkan blok kode atau blok <<<ZOZ_FILE!\n- Jawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
     }
 
     // Kirim langsung ke handleSendPrompt TANPA menutup modal studio!
@@ -12506,29 +13156,100 @@ ${blocks}
     }
   }
 
-  // ==================== DOCUMENT CREATION MODE SELECTION (PDF vs DOCX) ====================
+  // ==================== INTENT CLASSIFICATION: WEBSITE VS DOCUMENT ====================
   let pendingDocPrompt = null;
 
   function isDocCreationPrompt(text) {
-    if (!text || typeof text !== 'string') return false;
+    return classifyCreationIntent(text) === 'document';
+  }
+
+  // Klasifikasi intent pembuatan sebelum modal/tool dipanggil:
+  // Memisahkan secara tegas antara permintaan pembuatan Website/Aplikasi/UI ('website')
+  // vs Dokumen/Laporan/PDF/Word ('document') vs Diagram ('diagram') vs Kode Murni ('clean_code').
+  function classifyCreationIntent(text) {
+    if (!text || typeof text !== 'string') return 'none';
     const t = text.trim().toLowerCase();
-    if (hasNegativeFileOrPreviewIntent(t) || /^\/(?:kodenya-saja|code)\b/i.test(t)) return false;
-    if (/^(?:apa\s+itu|pengertian|definisi|arti|bagaimana\s+cara)\b/i.test(t)) return false;
+    if (!t) return 'none';
 
-    // Jangan tangkap jika ini permintaan website eksplisit atau diagram
-    if (/^\/(?:website|web|webpage|landingpage|diagram)\b/i.test(t)) return false;
-
-    // Cek perintah slash dokumen
-    if (/^\/(?:dokumen|doc|docx|pdf|word|makalah)\b/i.test(t)) {
-      const rem = t.replace(/^\/(?:dokumen|doc|docx|pdf|word|makalah)\b/i, '').trim();
-      return rem.length > 0;
+    // 1. Tolak jika pengguna secara eksplisit meminta kode saja / menolak file atau pratinjau
+    if (hasNegativeFileOrPreviewIntent(t) || /^\/(?:kodenya-saja|code)\b/i.test(t)) {
+      return 'clean_code';
     }
 
-    // Cek frasa pembuatan dokumen / makalah / proposal / dokumentasi / file word / pdf
-    const hasDocKeyword = /\b(?:makalah|laporan|proposal|dokumen|dokumentasi|jurnal|karya\s+tulis|paper|skripsi|tesis|surat\s+resmi|surat\s+tugas|berkas\s+word|berkas\s+pdf|file\s+word|file\s+docx|file\s+pdf|file\s+doc|berbentuk\s+pdf|berbentuk\s+word|berbentuk\s+docx|format\s+pdf|format\s+word|format\s+docx)\b/i.test(t);
-    const hasDocVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|tolong\s+bikin|susun|susunkan|tuliskan|tulis|rangkumkan|rancang|generate|create|draft)\b/i.test(t);
+    // 2. Tolak pertanyaan definisi/teori murni di awal kalimat tanpa perintah pembuatan
+    if (/^(?:apa\s+itu|pengertian|definisi|arti|bagaimana\s+cara|jelaskan\s+apa)\b/i.test(t) &&
+        !/\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|susun|rancang)\b/i.test(t)) {
+      return 'none';
+    }
 
-    return hasDocKeyword && hasDocVerb;
+    // 3. Perintah Slash Eksplisit (Prioritas Tertinggi)
+    if (/^\/(?:website|web|webpage|landingpage|pratinjau)\b/i.test(t)) {
+      const rem = t.replace(/^\/(?:website|web|webpage|landingpage|pratinjau)\b/i, '').trim();
+      return rem.length > 0 ? 'website' : 'none';
+    }
+    if (/^\/(?:dokumen|doc|docx|pdf|word|makalah)\b/i.test(t)) {
+      const rem = t.replace(/^\/(?:dokumen|doc|docx|pdf|word|makalah)\b/i, '').trim();
+      return rem.length > 0 ? 'document' : 'none';
+    }
+    if (/^\/diagram\b/i.test(t)) {
+      const rem = t.replace(/^\/diagram\b/i, '').trim();
+      return rem.length > 0 ? 'diagram' : 'none';
+    }
+
+    // Ambil klausa pembuka (baris pertama atau 180 karakter pertama) untuk mendeteksi objek utama setelah kata kerja
+    const firstLine = (t.split(/\r?\n/)[0] || '').trim();
+    const openingClause = firstLine.slice(0, 180);
+
+    // 4. Deteksi Sinyal Kuat Pembuatan Website / Landing Page / Aplikasi / Next.js / React
+    // Termasuk variasi typo umum seperti "websit", "wbsite", "webiste", "wesbite"
+    const webTargetAfterVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat(?:kan)?|tolong\s+bikin(?:kan)?|rancang(?:kan)?|desain(?:kan)?|bangun|develop|build|create|generate|kodingkan|coding)\s+(?:sebuah\s+|satu\s+|kode\s+|project\s+|proyek\s+|tampilan\s+|halaman\s+|sistem\s+|platform\s+|produk\s+)?(?:website|websit|wbsite|webiste|wesbite|web\s*page|webpage|web\s*app|webapp|web|landing\s*page|landingpage|halaman\s+web|halaman\s+landing|aplikasi\s+web|aplikasi|app|dashboard|situs\s+web|situs|portofolio\s+web|portofolio|toko\s+online|e-commerce|company\s+profile|antarmuka|ui\/ux|ui|komponen|component|simulasi\s+3d|game\s+web|next\.?js|react\.?js|react|html)\b/i;
+
+    const hasWebFrameworkOrCodeSignal = /\b(?:next\.?js|nextjs|react\.?js|reactjs|tailwind\s*css|tailwindcss|app\s+router|lucide-react|shadcn|framer-motion|vite|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx|index\.html|[a-z0-9_-]+\.(?:jsx|tsx|html|htm|vue|svelte))\b/i.test(t);
+
+    const hasWebSectionStructure = /\b(?:navbar|hero\s+section|features?\s+section|pricing\s+section|footer\s+section|cta\s+section|tombol\s+cta)\b/i.test(t);
+
+    // Deteksi format dokumen eksplisit (PDF / Word / DOCX) atau objek dokumen langsung setelah kata kerja
+    const explicitDocFormatSignal = /\b(?:file\s+pdf|file\s+word|file\s+docx|file\s+doc|berkas\s+pdf|berkas\s+word|berkas\s+docx|format\s+pdf|format\s+word|format\s+docx|berbentuk\s+pdf|berbentuk\s+word|berbentuk\s+docx|bentuk\s+pdf|bentuk\s+word|bentuk\s+docx|dalam\s+format\s+(?:pdf|word|docx)|ekspor\s+ke\s+(?:pdf|word|docx)|[a-z0-9_-]+\.(?:pdf|docx))\b/i.test(t);
+
+    const docTargetAfterVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat(?:kan)?|tolong\s+bikin(?:kan)?|susun(?:kan)?|tulis(?:kan)?|rangkumkan|draft|generate|create)\s+(?:sebuah\s+|satu\s+|file\s+|berkas\s+|naskah\s+|draf\s+)?(?:dokumen|dokumentasi|makalah|laporan|proposal|jurnal|karya\s+tulis|paper|skripsi|tesis|disertasi|surat\s+resmi|surat\s+tugas|surat\s+lamaran|modul\s+ajar|pdf|word|docx)\b/i;
+
+    // Jika klausa pembuka secara eksplisit meminta pembuatan dokumen/makalah/laporan/proposal/PDF/Word
+    // (contoh: "Buatkan dokumen dokumentasi berbentuk pdf hasil pembuatan website kita tadi")
+    // DAN tidak meminta file kode (.jsx/.tsx/.html) atau struktur UI komponen website:
+    if (docTargetAfterVerb.test(openingClause) && !hasWebFrameworkOrCodeSignal && !hasWebSectionStructure) {
+      return 'document';
+    }
+    if (explicitDocFormatSignal && !webTargetAfterVerb.test(openingClause) && !hasWebFrameworkOrCodeSignal && !hasWebSectionStructure) {
+      return 'document';
+    }
+
+    // Jika klausa pembuka meminta pembuatan website / landing page / aplikasi, ATAU memiliki sinyal framework/struktur web:
+    // LANGSUNG klasifikasikan sebagai 'website' (meskipun di dalam deskripsi fitur ada kata "Laporan Otomatis" atau "Dokumen")!
+    if (webTargetAfterVerb.test(openingClause) || webTargetAfterVerb.test(t)) {
+      return 'website';
+    }
+    if ((hasWebFrameworkOrCodeSignal || hasWebSectionStructure) && !explicitDocFormatSignal) {
+      return 'website';
+    }
+
+    const hasWebKeyword = /\b(?:website|websit|wbsite|webiste|wesbite|web\s+page|webpage|web\s+app|webapp|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|aplikasi|game\s+web|portofolio\s+web|tampilan\s+web|desain\s+web|antarmuka\s+web|situs\s+web|situs|dashboard)\b/i.test(t);
+    const hasCreationVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|tolong\s+bikin|generate|create|build|develop|rancang|desain|susun|kodingkan|coding|program|pembuatan)\b/i.test(t);
+
+    if (((hasWebKeyword && hasCreationVerb) || /\b(?:pembuatan\s+website|pembuatan\s+web|pembuatan\s+aplikasi)\b/i.test(t)) && !explicitDocFormatSignal && !docTargetAfterVerb.test(openingClause)) {
+      return 'website';
+    }
+
+    // 5. Deteksi Diagram Visual
+    if (/\b(?:diagram|digram|flowchart|alur\s+sistem|arsitektur\s+visual|erd|mindmap|skema|bagan|hasse\s+diagram|sequence\s+diagram|class\s+diagram)\b/i.test(t) && hasCreationVerb) {
+      return 'diagram';
+    }
+
+    // 6. Deteksi Dokumen Eksplisit (hanya jika kata kerja pembuatan diikuti objek dokumen di kalimat yang sama, bukan kata "laporan" di dalam daftar fitur)
+    if (docTargetAfterVerb.test(t) || explicitDocFormatSignal) {
+      return 'document';
+    }
+
+    return 'none';
   }
 
   function openDocModeModal(promptText) {
@@ -12541,25 +13262,7 @@ ${blocks}
   let pendingWebsitePrompt = null;
 
   function isWebsiteCreationPrompt(text) {
-    if (!text || typeof text !== 'string') return false;
-    const t = text.trim().toLowerCase();
-    if (hasNegativeFileOrPreviewIntent(t) || /^\/(?:kodenya-saja|code)\b/i.test(t)) return false;
-
-    // Cek perintah slash /website atau /web
-    if (/^\/(?:website|web|webpage|landingpage)\b/i.test(t)) {
-      const rem = t.replace(/^\/(?:website|web|webpage|landingpage)\b/i, '').trim();
-      return rem.length > 0;
-    }
-
-    // Jika ini adalah permintaan pembuatan dokumen (misal: "buatkan dokumen dokumentasi hasil pembuatan website"),
-    // jangan tangkap sebagai pembuatan website!
-    if (isDocCreationPrompt(text)) return false;
-
-    // Cek frasa pembuatan website/webpage
-    const hasWebKeyword = /\b(?:website|web|web\s+page|webpage|landing\s*page|halaman\s+web|aplikasi\s+web|game\s+web|portofolio\s+web|tampilan\s+web|desain\s+web|antarmuka\s+web|situs\s+web|situs)\b/i.test(t);
-    const hasCreationVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|tolong\s+bikin|generate|create|build|develop|rancang|desain|susun|kodingkan|coding|program|pembuatan)\b/i.test(t);
-
-    return (hasWebKeyword && hasCreationVerb) || /\b(?:pembuatan\s+website|pembuatan\s+web)\b/i.test(t);
+    return classifyCreationIntent(text) === 'website';
   }
 
   function openWebsiteModeModal(promptText) {
@@ -12584,15 +13287,19 @@ ${blocks}
     if (!rawText && images.length === 0 && docs.length === 0) return;
     if (STATE.isGenerating || STATE.isSending) return;
 
-    // Intersepsi Pembuatan Dokumen: Tampilkan dialog pilihan format (PDF vs Word .DOCX)
-    if (!options.skipDocCheck && !options.docFormat && isDocCreationPrompt(rawText)) {
-      openDocModeModal(rawText);
+    // Klasifikasi Intent Pembuatan sebelum tool/modal dipanggil:
+    // Pastikan permintaan website/landing page/aplikasi TIDAK PERNAH memicu modal dokumen!
+    const creationIntent = classifyCreationIntent(rawText);
+
+    // Intersepsi Pembuatan Website: arahkan ke alur pembuatan kode website
+    if (!options.skipWebsiteCheck && !options.websiteMode && creationIntent === 'website') {
+      openWebsiteModeModal(rawText);
       return;
     }
 
-    // Intersepsi Pembuatan Website: Tampilkan dialog pilihan output (Pratinjau vs Kode di percakapan)
-    if (!options.skipWebsiteCheck && !options.websiteMode && isWebsiteCreationPrompt(rawText)) {
-      openWebsiteModeModal(rawText);
+    // Intersepsi Pembuatan Dokumen: HANYA muncul ketika pengguna secara eksplisit meminta dokumen/laporan/PDF/Word
+    if (!options.skipDocCheck && !options.docFormat && creationIntent === 'document') {
+      openDocModeModal(rawText);
       return;
     }
 
@@ -15439,21 +16146,23 @@ Format teks (untuk model tanpa function calling):
     let executedHudHtml = '';
     const foundYouTubeIds = []; // ID video hasil tool search_youtube (dipakai render kartu)
 
-    // Deteksi perintah slash eksplisit & jenis permintaan interaktif
+    // Deteksi perintah slash eksplisit & klasifikasi intent pembuatan (Website vs Dokumen)
     const isExplicitDiagramCmd = /^\/diagram\b/i.test(promptText.trim());
     const isExplicitWebCmd = /^\/(?:website|web|pratinjau)\b/i.test(promptText.trim());
     const isExplicitCleanCodeCmd = /^\/(?:kodenya-saja|code)\b/i.test(promptText.trim()) || Boolean(runOptions.isExplicitCleanCode);
     const isExplicitDocCmd = /^\/(?:dokumen|doc|docx|pdf|word|makalah)\b/i.test(promptText.trim());
     const hasNegativePreview = isExplicitCleanCodeCmd || hasNegativeFileOrPreviewIntent(promptText);
+    const creationIntent = classifyCreationIntent(promptText);
 
-    const isDocRequest = (isExplicitDocCmd || Boolean(runOptions.docFormat) || runOptions.isDocCreation || isDocCreationPrompt(promptText)) && !isExplicitCleanCodeCmd;
+    const isDocRequest = (isExplicitDocCmd || Boolean(runOptions.docFormat) || runOptions.isDocCreation || (creationIntent === 'document' && isDocCreationPrompt(promptText))) &&
+                         creationIntent !== 'website' && !runOptions.websiteMode && !runOptions.isWebCreation && !isExplicitCleanCodeCmd;
     if (isDocRequest && !hasNegativePreview) runOptions.isDocCreation = true;
 
-    const isDiagramRequest = !isDocRequest && (isExplicitDiagramCmd ||
-                             /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(promptText));
-    const isWebRequest = !isDocRequest && (isExplicitWebCmd ||
-                         /\b(?:website|web|webpage|landing page|halaman web|aplikasi web|game web|simulasi 3d)\b/i.test(promptText) ||
-                         runOptions.websiteMode === 'preview') && !isExplicitCleanCodeCmd;
+    const isDiagramRequest = !isDocRequest && (isExplicitDiagramCmd || creationIntent === 'diagram' ||
+                             (creationIntent !== 'website' && /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(promptText)));
+    const isWebRequest = !isDocRequest && (isExplicitWebCmd || creationIntent === 'website' ||
+                         /\b(?:website|websit|wbsite|webiste|web|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|aplikasi|game\s+web|simulasi\s+3d|next\.?js|react\.?js|page\.jsx|page\.tsx)\b/i.test(promptText) ||
+                         runOptions.websiteMode === 'preview' || runOptions.websiteMode === 'code_in_chat' || Boolean(runOptions.isWebCreation)) && !isExplicitCleanCodeCmd;
 
     const wantsFile = (isDiagramRequest || isWebRequest || isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
 
@@ -15524,17 +16233,36 @@ atau di dalam blok kode standar \`\`\`mermaid\n...\n\`\`\`.
 Sistem antarmuka Zoz Router memiliki visualizer Mermaid interaktif otomatis yang langsung memvisualisasikan kode Anda menjadi diagram nyata di layar pengguna.`;
       } else if (isWebRequest && !hasNegativePreview) {
         const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE LENGKAP & PRATINJAU LANGSUNG
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta APLIKASI WEB / HALAMAN HTML INTERAKTIF LENGKAP.
-${isPreviewOnly ? `[MODE EKSPLISIT: PRATINJAU LANGSUNG TERISOLASI]
+        const isReactNextPrompt = /\b(?:next\.?js|nextjs|react\.?js|reactjs|jsx|tsx|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(promptText);
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI NEXT.JS & REACT LENGKAP & PRATINJAU LANGSUNG
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN WEBSITE / LANDING PAGE / APLIKASI WEB INTERAKTIF LENGKAP.
+- DILARANG KERAS mengalihkan permintaan ini menjadi pembuatan dokumen PDF/Word!
+${isReactNextPrompt ? `[ARSITEKTUR NEXT.JS / REACT (JSX/TSX) DENGAN PRATINJAU LANGSUNG DI BROWSER]
+Zoz Router memiliki mesin kompilator React 18 + Next.js App Router + Tailwind CSS + Lucide React terintegrasi (Babel Standalone Sandbox) yang menjalankan berkas .jsx / .tsx secara langsung di Pratinjau Live tanpa memerlukan server build eksternal.
+Aturan Struktur Kode Next.js / React yang WAJIB Dipatuhi:
+1. Pembungkus Berkas Utama:
+<<<ZOZ_FILE name="page.jsx" mime="text/jsx" lang="jsx">
+import React, { useState } from 'react';
+import { ... } from 'lucide-react';
+...seluruh komponen pendukung (Navbar, Hero, Features, Pricing, Footer, dsb.) & export default function Page()...
+<<<END_ZOZ_FILE>>>
+(Jika proyek membutuhkan pemisahan file seperti page.jsx, layout.jsx, dan komponen pendukung, pastikan semua berkas ditulis dalam blok <<<ZOZ_FILE>>> masing-masing DAN saling terhubung dengan path import yang valid, ATAU susun seluruh komponen pendukung secara lengkap dan terhubung di dalam page.jsx agar 100% bebas dari masalah resolusi modul).
+2. Validitas Import & Export (100% Bebas Error):
+   - Pastikan setiap pernyataan import (seperti 'react', 'lucide-react', 'next/link', 'next/image', atau komponen lokal) dan export valid.
+   - Komponen utama WAJIB diekspor dengan \`export default function ...\` agar dapat dirender langsung tanpa error di pratinjau.
+   - Pastikan semua komponen yang dipanggil di JSX (misalnya <Navbar />, <Hero />, <Features />, <Pricing />, <Footer />) benar-benar telah didefinisikan secara utuh di dalam kode.
+3. Kelengkapan Kode Tanpa Terpotong (Zero Truncation):
+   - Tuliskan seluruh kode dari baris pertama hingga kurung kurawal penutup terakhir secara UTUH dan TUNTAS.
+   - DILARANG KERAS memotong kode atau menulis komentar placeholder seperti '// komponen lainnya...' atau '// tambahkan fitur di sini...'.` : `${isPreviewOnly ? `[MODE EKSPLISIT: PRATINJAU LANGSUNG TERISOLASI]
 Panduan Pembungkus Berkas (PILIH SALAH SATU FORMAT BERIKUT):
-1. Format Protokol (Direkomendasikan):
+1. Format Protokol HTML5 atau JSX (Direkomendasikan):
 <<<ZOZ_FILE name="index.html" mime="text/html" lang="html">
 <!DOCTYPE html>
 <html lang="id">
 ...seluruh kode HTML, CSS, JavaScript lengkap...
 </html>
 <<<END_ZOZ_FILE>>>
+(Atau gunakan name="page.jsx" lang="jsx" jika pengguna meminta React / Next.js).
 
 2. Atau Format Blok Kode Standar (Juga Didukung Penuh & Otomatis Diisolasi oleh Zoz Router):
 \`\`\`html
@@ -15545,17 +16273,16 @@ Panduan Pembungkus Berkas (PILIH SALAH SATU FORMAT BERIKUT):
 \`\`\`
 
 CATATAN TEKNIS SISTEM:
-- Kedua format pembungkus di atas 100% didukung dan secara otomatis diisolasi oleh Zoz Router menjadi kartu berkas dengan tombol "Pratinjau Live" dan "Unduh HTML".
+- Kedua format pembungkus di atas (maupun berkas .jsx React/Next.js) 100% didukung dan secara otomatis dikompilasi oleh Zoz Router menjadi kartu berkas interaktif dengan tombol "Pratinjau Live" dan "Unduh HTML".
 - Di luar blok berkas kode, berikan HANYA teks pengantar atau ringkasan fitur website yang singkat, ramah, dan percaya diri.
 - JANGAN meminta maaf atau mencemaskan pembungkus berkas.` : `Panduan Pembungkus Berkas:
-Tuliskan kode HTML5 lengkap yang fungsional dan siap jalan dalam SATU blok protokol ZOZ_FILE atau blok kode markdown \`\`\`html ... \`\`\`.`}
-3. MANDAT KELENGKAPAN KONTEN & KODE PENUH (DILARANG MEMOTONG KODE):
-   - Anda WAJIB menuliskan SELURUH KODE SECARA UTUH DAN TUNTAS dari <!DOCTYPE html> hingga </html>.
-   - Jika website memuat artikel atau konten materi (misalnya artikel sejarah, edukasi, profil tokoh, atau panduan), tuliskan seluruh isi teks artikel secara komprehensif, menarik, dan berbobot langsung di dalam elemen HTML (<article>, <section>, <p>, dsb.) menggunakan pengetahuan kaya Anda tanpa perlu memanggil alat pencarian tambahan.
-   - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan sebanyak mungkin baris kode yang dibutuhkan (ratusan atau ribuan baris) agar seluruh fitur, styling visual, layout responsif, dan interaksi JavaScript berfungsi nyata.
+Tuliskan kode HTML5 atau React/Next.js (.jsx) lengkap yang fungsional dan siap jalan dalam blok protokol ZOZ_FILE atau blok kode markdown.`}`}
+4. MANDAT KELENGKAPAN KONTEN & KODE PENUH (DILARANG MEMOTONG KODE):
+   - Anda WAJIB menuliskan SELURUH KODE SECARA UTUH DAN TUNTAS dari awal hingga akhir tanpa ada tag atau kurung kurawal yang belum ditutup.
+   - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan seluruh bagian halaman (Navbar, Hero Section, Features Section, Pricing Section, CTA, Footer, state interaktif) secara lengkap dan fungsional.
    - DILARANG MENGGUNAKAN PLACEHOLDER PEMOTONG seperti '// kode CSS lainnya di sini...', '// tambahkan fungsi di sini...', atau '<!-- sisa konten -->'.
-4. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.
-5. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js), sertakan tag <script src="..."> resmi dari CDN publik.`;
+5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.
+6. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js, Lucide), sertakan tag CDN resmi atau import standar yang valid.`;
       } else if (isExplicitCleanCodeCmd) {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
 Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
@@ -16623,21 +17350,23 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     let executedHudHtml = '';
     const foundYouTubeIds = []; // ID video hasil tool search_youtube (dipakai render kartu)
 
-    // Deteksi perintah slash eksplisit & jenis permintaan interaktif
+    // Deteksi perintah slash eksplisit & klasifikasi intent pembuatan (Website vs Dokumen)
     const isExplicitDiagramCmd = /^\/diagram\b/i.test(promptText.trim());
     const isExplicitWebCmd = /^\/(?:website|web|pratinjau)\b/i.test(promptText.trim());
     const isExplicitCleanCodeCmd = /^\/(?:kodenya-saja|code)\b/i.test(promptText.trim()) || Boolean(runOptions.isExplicitCleanCode);
     const isExplicitDocCmd = /^\/(?:dokumen|doc|docx|pdf|word|makalah)\b/i.test(promptText.trim());
     const hasNegativePreview = isExplicitCleanCodeCmd || hasNegativeFileOrPreviewIntent(promptText);
+    const creationIntent = classifyCreationIntent(promptText);
 
-    const isDocRequest = (isExplicitDocCmd || Boolean(runOptions.docFormat) || runOptions.isDocCreation || isDocCreationPrompt(promptText)) && !isExplicitCleanCodeCmd;
+    const isDocRequest = (isExplicitDocCmd || Boolean(runOptions.docFormat) || runOptions.isDocCreation || (creationIntent === 'document' && isDocCreationPrompt(promptText))) &&
+                         creationIntent !== 'website' && !runOptions.websiteMode && !runOptions.isWebCreation && !isExplicitCleanCodeCmd;
     if (isDocRequest && !hasNegativePreview) runOptions.isDocCreation = true;
 
-    const isDiagramRequest = !isDocRequest && (isExplicitDiagramCmd ||
-                             /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(promptText));
-    const isWebRequest = !isDocRequest && (isExplicitWebCmd ||
-                         /\b(?:website|web|webpage|landing page|halaman web|aplikasi web|game web|simulasi 3d)\b/i.test(promptText) ||
-                         runOptions.websiteMode === 'preview') && !isExplicitCleanCodeCmd;
+    const isDiagramRequest = !isDocRequest && (isExplicitDiagramCmd || creationIntent === 'diagram' ||
+                             (creationIntent !== 'website' && /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(promptText)));
+    const isWebRequest = !isDocRequest && (isExplicitWebCmd || creationIntent === 'website' ||
+                         /\b(?:website|websit|wbsite|webiste|web|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|aplikasi|game\s+web|simulasi\s+3d|next\.?js|react\.?js|page\.jsx|page\.tsx)\b/i.test(promptText) ||
+                         runOptions.websiteMode === 'preview' || runOptions.websiteMode === 'code_in_chat' || Boolean(runOptions.isWebCreation)) && !isExplicitCleanCodeCmd;
 
     const wantsFile = (isDiagramRequest || isWebRequest || isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
 
@@ -16708,17 +17437,36 @@ atau di dalam blok kode standar \`\`\`mermaid\n...\n\`\`\`.
 Sistem antarmuka Zoz Router memiliki visualizer Mermaid interaktif otomatis yang langsung memvisualisasikan kode Anda menjadi diagram nyata di layar pengguna.`;
       } else if (isWebRequest && !hasNegativePreview) {
         const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE LENGKAP & PRATINJAU LANGSUNG
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta APLIKASI WEB / HALAMAN HTML INTERAKTIF LENGKAP.
-${isPreviewOnly ? `[MODE EKSPLISIT: PRATINJAU LANGSUNG TERISOLASI]
+        const isReactNextPrompt = /\b(?:next\.?js|nextjs|react\.?js|reactjs|jsx|tsx|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(promptText);
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI NEXT.JS & REACT LENGKAP & PRATINJAU LANGSUNG
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN WEBSITE / LANDING PAGE / APLIKASI WEB INTERAKTIF LENGKAP.
+- DILARANG KERAS mengalihkan permintaan ini menjadi pembuatan dokumen PDF/Word!
+${isReactNextPrompt ? `[ARSITEKTUR NEXT.JS / REACT (JSX/TSX) DENGAN PRATINJAU LANGSUNG DI BROWSER]
+Zoz Router memiliki mesin kompilator React 18 + Next.js App Router + Tailwind CSS + Lucide React terintegrasi (Babel Standalone Sandbox) yang menjalankan berkas .jsx / .tsx secara langsung di Pratinjau Live tanpa memerlukan server build eksternal.
+Aturan Struktur Kode Next.js / React yang WAJIB Dipatuhi:
+1. Pembungkus Berkas Utama:
+<<<ZOZ_FILE name="page.jsx" mime="text/jsx" lang="jsx">
+import React, { useState } from 'react';
+import { ... } from 'lucide-react';
+...seluruh komponen pendukung (Navbar, Hero, Features, Pricing, Footer, dsb.) & export default function Page()...
+<<<END_ZOZ_FILE>>>
+(Jika proyek membutuhkan pemisahan file seperti page.jsx, layout.jsx, dan komponen pendukung, pastikan semua berkas ditulis dalam blok <<<ZOZ_FILE>>> masing-masing DAN saling terhubung dengan path import yang valid, ATAU susun seluruh komponen pendukung secara lengkap dan terhubung di dalam page.jsx agar 100% bebas dari masalah resolusi modul).
+2. Validitas Import & Export (100% Bebas Error):
+   - Pastikan setiap pernyataan import (seperti 'react', 'lucide-react', 'next/link', 'next/image', atau komponen lokal) dan export valid.
+   - Komponen utama WAJIB diekspor dengan \`export default function ...\` agar dapat dirender langsung tanpa error di pratinjau.
+   - Pastikan semua komponen yang dipanggil di JSX (misalnya <Navbar />, <Hero />, <Features />, <Pricing />, <Footer />) benar-benar telah didefinisikan secara utuh di dalam kode.
+3. Kelengkapan Kode Tanpa Terpotong (Zero Truncation):
+   - Tuliskan seluruh kode dari baris pertama hingga kurung kurawal penutup terakhir secara UTUH dan TUNTAS.
+   - DILARANG KERAS memotong kode atau menulis komentar placeholder seperti '// komponen lainnya...' atau '// tambahkan fitur di sini...'.` : `${isPreviewOnly ? `[MODE EKSPLISIT: PRATINJAU LANGSUNG TERISOLASI]
 Panduan Pembungkus Berkas (PILIH SALAH SATU FORMAT BERIKUT):
-1. Format Protokol (Direkomendasikan):
+1. Format Protokol HTML5 atau JSX (Direkomendasikan):
 <<<ZOZ_FILE name="index.html" mime="text/html" lang="html">
 <!DOCTYPE html>
 <html lang="id">
 ...seluruh kode HTML, CSS, JavaScript lengkap...
 </html>
 <<<END_ZOZ_FILE>>>
+(Atau gunakan name="page.jsx" lang="jsx" jika pengguna meminta React / Next.js).
 
 2. Atau Format Blok Kode Standar (Juga Didukung Penuh & Otomatis Diisolasi oleh Zoz Router):
 \`\`\`html
@@ -16729,17 +17477,16 @@ Panduan Pembungkus Berkas (PILIH SALAH SATU FORMAT BERIKUT):
 \`\`\`
 
 CATATAN TEKNIS SISTEM:
-- Kedua format pembungkus di atas 100% didukung dan secara otomatis diisolasi oleh Zoz Router menjadi kartu berkas dengan tombol "Pratinjau Live" dan "Unduh HTML".
+- Kedua format pembungkus di atas (maupun berkas .jsx React/Next.js) 100% didukung dan secara otomatis dikompilasi oleh Zoz Router menjadi kartu berkas interaktif dengan tombol "Pratinjau Live" dan "Unduh HTML".
 - Di luar blok berkas kode, berikan HANYA teks pengantar atau ringkasan fitur website yang singkat, ramah, dan percaya diri.
 - JANGAN meminta maaf atau mencemaskan pembungkus berkas.` : `Panduan Pembungkus Berkas:
-Tuliskan kode HTML5 lengkap yang fungsional dan siap jalan dalam SATU blok protokol ZOZ_FILE atau blok kode markdown \`\`\`html ... \`\`\`.`}
-3. MANDAT KELENGKAPAN KONTEN & KODE PENUH (DILARANG MEMOTONG KODE):
-   - Anda WAJIB menuliskan SELURUH KODE SECARA UTUH DAN TUNTAS dari <!DOCTYPE html> hingga </html>.
-   - Jika website memuat artikel atau konten materi (misalnya artikel sejarah, edukasi, profil tokoh, atau panduan), tuliskan seluruh isi teks artikel secara komprehensif, menarik, dan berbobot langsung di dalam elemen HTML (<article>, <section>, <p>, dsb.) menggunakan pengetahuan kaya Anda tanpa perlu memanggil alat pencarian tambahan.
-   - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan sebanyak mungkin baris kode yang dibutuhkan (ratusan atau ribuan baris) agar seluruh fitur, styling visual, layout responsif, dan interaksi JavaScript berfungsi nyata.
+Tuliskan kode HTML5 atau React/Next.js (.jsx) lengkap yang fungsional dan siap jalan dalam blok protokol ZOZ_FILE atau blok kode markdown.`}`}
+4. MANDAT KELENGKAPAN KONTEN & KODE PENUH (DILARANG MEMOTONG KODE):
+   - Anda WAJIB menuliskan SELURUH KODE SECARA UTUH DAN TUNTAS dari awal hingga akhir tanpa ada tag atau kurung kurawal yang belum ditutup.
+   - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan seluruh bagian halaman (Navbar, Hero Section, Features Section, Pricing Section, CTA, Footer, state interaktif) secara lengkap dan fungsional.
    - DILARANG MENGGUNAKAN PLACEHOLDER PEMOTONG seperti '// kode CSS lainnya di sini...', '// tambahkan fungsi di sini...', atau '<!-- sisa konten -->'.
-4. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.
-5. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js), sertakan tag <script src="..."> resmi dari CDN publik.`;
+5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.
+6. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js, Lucide), sertakan tag CDN resmi atau import standar yang valid.`;
       } else if (isExplicitCleanCodeCmd) {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
 Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
@@ -28105,8 +28852,13 @@ Aturan:
     NON_DIAGRAM_LANGUAGES,
     hasNegativeFileOrPreviewIntent,
     isFileGenerationRequest,
+    classifyCreationIntent,
     isDocCreationPrompt,
     isWebsiteCreationPrompt,
+    isRawJsxOrReactCode,
+    validateAndRepairReactCode,
+    splitConcatenatedReactFiles,
+    compileReactNextToStandaloneHtml,
     stripGeneratedFileBlocks,
     hideFileBlocksForDisplay
   };
