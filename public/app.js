@@ -1275,6 +1275,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     btnAutoHealLayoutNow: $('#btnAutoHealLayoutNow'),
     btnPurgeStressEndorphin: $('#btnPurgeStressEndorphin'),
     btnCopyEndocrineLogs: $('#btnCopyEndocrineLogs'),
+    btnCopyEndocrineLogsHeader: $('#btnCopyEndocrineLogsHeader'),
+    btnCopyEndocrineLogsFooter: $('#btnCopyEndocrineLogsFooter'),
     btnCopyChatEndocrineLogs: $('#btnCopyChatEndocrineLogs'),
     toggleEndocrineCode: $('#toggleEndocrineCode'),
     toggleEndocrineChat: $('#toggleEndocrineChat'),
@@ -28521,6 +28523,14 @@ Aturan:
 
     // Copy Log Handlers (Jalur 1 CodeEndocrine & Jalur 2 ChatEndocrine)
     els.btnCopyEndocrineLogs?.addEventListener('click', () => {
+      BioEndocrine.copyLogsToClipboard();
+    });
+
+    els.btnCopyEndocrineLogsHeader?.addEventListener('click', () => {
+      BioEndocrine.copyLogsToClipboard();
+    });
+
+    els.btnCopyEndocrineLogsFooter?.addEventListener('click', () => {
       BioEndocrine.copyLogsToClipboard();
     });
 

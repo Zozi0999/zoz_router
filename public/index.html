@@ -38,8 +38,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
-  <link rel="preload" as="style" href="style.min.css?v=20261017_v317">
-  <link rel="stylesheet" href="style.min.css?v=20261017_v317">
+  <link rel="preload" as="style" href="style.min.css?v=20261017_v318">
+  <link rel="stylesheet" href="style.min.css?v=20261017_v318">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -1848,7 +1848,12 @@
           <span>Bio-Endocrine Code Telemetry</span>
           <span class="badge" style="font-size: 0.68rem; background: rgba(0, 255, 194, 0.15); color: #00FFC2; border: 1px solid rgba(0, 255, 194, 0.3); padding: 2px 8px; border-radius: 999px;">Sistem Hormon &amp; Pendeteksi Bug Organik</span>
         </div>
-        <button class="modal-close-btn" data-close="endocrineTelemetryModal" aria-label="Tutup telemetri hormon" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button class="btn btn-xs btn-outline" id="btnCopyEndocrineLogsHeader" type="button" style="border-color: #00FFC2; color: #00FFC2; font-size: 0.72rem;" title="Salin seluruh riwayat log hormon &amp; laporan error ke clipboard">
+            <i class="fa-solid fa-copy"></i> Salin Log Error
+          </button>
+          <button class="modal-close-btn" data-close="endocrineTelemetryModal" aria-label="Tutup telemetri hormon" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
+        </div>
       </div>
 
       <div class="modal-body" style="padding: 20px;">
@@ -2168,7 +2173,10 @@
         <span style="font-size: 0.75rem; color: var(--text-dim);">
           💡 <em>"Ketika kode menyukai kode lainnya, error terdeteksi lebih cepat dan sistem hidup abadi."</em>
         </span>
-        <div style="display: flex; gap: 8px;">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-sm btn-outline" id="btnCopyEndocrineLogsFooter" type="button" style="border-color: var(--neon-teal); color: var(--neon-teal); font-weight: 600;" title="Salin seluruh riwayat log hormon &amp; laporan error ke clipboard">
+            <i class="fa-solid fa-copy"></i> Salin Log Error
+          </button>
           <button class="btn btn-sm btn-primary-neon" id="btnPurgeStressEndorphin" type="button" title="Suntikkan Endorfin untuk membersihkan stres dan menstabilkan sistem">
             <i class="fa-solid fa-syringe"></i> Suntikkan Endorfin (Self-Heal)
           </button>
@@ -2380,8 +2388,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous" defer></script>
   <!-- Heavy libraries (Mermaid, jsPDF, PDF.js, JSZip) are dynamically loaded on-demand to optimize FCP, TBT & LCP -->
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261017_v317" defer></script>
+  <script src="text-safety.js?v=20261017_v318" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261017_v317" defer></script>
+  <script src="app.js?v=20261017_v318" defer></script>
 </body>
 </html>
