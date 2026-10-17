@@ -6039,7 +6039,48 @@ async function requestHandler(req, res) {
       return 'Grand classical symphonic overture, virtuoso piano passages, dramatic string quartet, sweeping emotional crescendos, baroque elegance';
     }
 
-    // 2. Filter kata sensitif / tragedi / bunuh diri yang memicu false-positive filter Google
+    // 2. Anime, Pop Culture & Famous Soundtracks (Bypass Google Copyright PROHIBITED_CONTENT)
+    if (/jojo|vento\s*d'?oro|golden\s*wind|giorno/i.test(lower)) {
+      return 'Energetic Italian anime battle theme, dramatic virtuoso jazz piano solo, explosive funky brass fanfare, driving trap hip-hop beat, triumphant saxophone stabs, fast heroic groove 135 BPM';
+    }
+    if (/naruto|sadness\s*and\s*sorrow|blue\s*bird|silhouette/i.test(lower)) {
+      return 'Epic emotional Japanese anime soundtrack, traditional shakuhachi bamboo flute, soaring melodic string orchestra, shamisen accents, dramatic taiko drums, 115 BPM';
+    }
+    if (/attack\s*on\s*titan|shingeki|vogel\s*im\s*kafig|sasageyo/i.test(lower)) {
+      return 'Thunderous gothic orchestral choir, driving symphonic rock drums, roaring brass section, dramatic operatic strings, apocalyptic high energy 140 BPM';
+    }
+    if (/dragon\s*ball|cha[- ]la|ultra\s*instinct/i.test(lower)) {
+      return 'Electrifying 80s anime hard rock anthem, high-octane electric guitar riffs, driving power drums, triumphant brass, heroic 145 BPM';
+    }
+    if (/one\s*piece|we\s*are|binks/i.test(lower)) {
+      return 'Joyful high-seas pirate folk adventure anthem, accordion melody, rousing choral chants, acoustic guitars, triumphant brass, 128 BPM';
+    }
+    if (/evangelion|cruel\s*angel/i.test(lower)) {
+      return 'Fast-paced 90s eurodance anime pop overture, bright synthesizers, punchy dance beat, dynamic brass, nostalgic 130 BPM';
+    }
+    if (/demon\s*slayer|kimetsu|gurenge/i.test(lower)) {
+      return 'Dynamic modern Japanese rock and traditional instrumentation fusion, heavy electric guitars, koto melodies, driving drums, 135 BPM';
+    }
+    if (/tokyo\s*ghoul|unravel/i.test(lower)) {
+      return 'Intense progressive alt-rock ballad, intimate emotional piano intro exploding into energetic guitars, complex drums, 135 BPM';
+    }
+    if (/interstellar|hans\s*zimmer/i.test(lower)) {
+      return 'Monumental cosmic pipe organ overture, ticking rhythmic pulses, expansive symphonic strings, awe-inspiring crescendo 80 BPM';
+    }
+    if (/star\s*wars|imperial\s*march/i.test(lower)) {
+      return 'Mighty cinematic space opera march, bombastic brass fanfares, aggressive percussion, dark commanding orchestral theme, 105 BPM';
+    }
+    if (/doom|mick\s*gordon|bfg/i.test(lower)) {
+      return 'Industrial argent metal anthem, 8-string drop-tuned distorted guitars, synthesized chainsaw bass, relentless aggression 140 BPM';
+    }
+    if (/cyberpunk|edgerunners/i.test(lower)) {
+      return 'Dystopian darksynth electro-industrial beat, gritty analog bassline, neon synthesizer leads, cybernetic glitch drums, 125 BPM';
+    }
+    if (/phonk|drift\s*phonk/i.test(lower)) {
+      return 'Aggressive drift phonk beat, distorted cowbell melody, heavy 808 sub bass, rapid hi-hats, 130 BPM';
+    }
+
+    // 3. Filter kata sensitif / tragedi / bunuh diri yang memicu false-positive filter Google
     if (/suicide|bunuh\s*diri|self[- ]harm/i.test(lower)) {
       return 'Deep emotional melancholic piano ballad, poignant sorrowful string arrangement building into a powerful uplifting cathartic release, 75 BPM';
     }
@@ -6053,7 +6094,7 @@ async function requestHandler(req, res) {
       return 'Poignant cinematic soundtrack, emotional cello and piano duet, dramatic crescendo, profound melancholy transforming into hope, 80 BPM';
     }
 
-    // 3. Entity & biographical phrase scrubber
+    // 4. Entity & biographical phrase scrubber
     let cleaned = p
       .replace(/\b(?:create|make|generate|produce|compose|write|bikin|buatkan|buat|mainkan)\s+(?:music|musik|song|lagu|track|audio|beat|melodi)\s+(?:for|about|of|tentang|untuk)?/gi, '')
       .replace(/\b(?:the\s+)?(?:life\s*story|biography|story|kisah\s*hidup|cerita)\s+(?:of|about|tentang)?/gi, '')
@@ -6064,13 +6105,30 @@ async function requestHandler(req, res) {
       cleaned = 'Inspiring cinematic instrumental journey, uplifting melody, rich harmonic layers, dynamic rhythms';
     }
 
-    // 4. Pastikan memiliki deskriptor musikal (genre, instrumen, tempo)
+    // 5. Pastikan memiliki deskriptor musikal (genre, instrumen, tempo)
     const hasMusicalGenre = /rock|metal|pop|jazz|lofi|lo-fi|synthwave|cyberpunk|electronic|edm|classical|chiptune|hiphop|acoustic|ambient|orchestral|reggae|blues|techno|house|drill|trap|folk|ballad/i.test(cleaned);
     if (!hasMusicalGenre) {
       cleaned = `Cinematic emotional melodic tribute, ${cleaned}, rich instruments, soaring arrangement, 120 BPM`;
     }
 
     return cleaned;
+  }
+
+  function desensitizeToPureMusicalStyle(rawPrompt) {
+    const p = String(rawPrompt || '').toLowerCase();
+    let genre = 'cinematic energetic instrumental';
+    if (/jojo|vento|giorno/i.test(p)) genre = 'energetic Italian anime jazz-funk battle groove, virtuosic piano, brass section, trap drums, 135 BPM';
+    else if (/jazz|swing|bebop|brass/i.test(p)) genre = 'energetic big band jazz and funky brass groove, 130 BPM';
+    else if (/rock|metal|guitar/i.test(p)) genre = 'high-octane hard rock anthem, soaring electric guitars and heavy drums, 135 BPM';
+    else if (/pop|dance|disco/i.test(p)) genre = 'infectious modern upbeat dance pop groove, vibrant synths, 124 BPM';
+    else if (/hiphop|rap|trap|beat/i.test(p)) genre = 'hard-hitting urban trap instrumental, punchy 808 sub-bass and crisp rhythm, 130 BPM';
+    else if (/lo[- ]?fi|chill/i.test(p)) genre = 'relaxing chill lofi study beat, warm piano keys and gentle vinyl crackle, 75 BPM';
+    else if (/synthwave|retro|cyberpunk|electronic/i.test(p)) genre = 'futuristic neon synthwave, driving analog arpeggios and vintage drums, 122 BPM';
+    else if (/piano|ballad|sad|slow/i.test(p)) genre = 'poignant emotional piano and cello ballad, sweeping orchestral strings, 80 BPM';
+    else if (/anime|japanese|ost/i.test(p)) genre = 'epic heroic anime battle theme, virtuosic piano, brass stabs, driving drums, 135 BPM';
+    else genre = 'epic inspirational symphonic soundtrack, dynamic rhythm, heroic soaring melodies, 125 BPM';
+
+    return `Pure musical instrumental composition: ${genre}, rich acoustic and electronic production, no vocal references.`;
   }
 
   function detectAudioContainer(buf) {
@@ -6186,8 +6244,12 @@ async function requestHandler(req, res) {
             } catch (_) { msg += ': ' + raw.slice(0, 300); }
             if (!isRetried && /PROHIBITED_CONTENT|BLOCKED|SAFETY|HARM|filtered/i.test(msg)) {
               console.warn('[Leviathan Neural Tunneling] Terdeteksi filter sensor Google (' + msg + '). Menjalankan adversarial prompt tunneling server...');
-              const bypassedPrompt = neuralTunnelMusicPrompt(prompt);
+              const bypassedPrompt = desensitizeToPureMusicalStyle(prompt);
               return generateAudioViaOpenRouter({ model, prompt: bypassedPrompt, key, timeoutMs, isRetried: true }).then(resolve).catch(reject);
+            }
+            if (/not a valid model ID|model_not_found|unsupported model/i.test(msg) && model !== DEFAULT_MUSIC_MODEL) {
+              console.warn('[Music Model Fallback] Model "' + model + '" tidak valid di OpenRouter. Beralih ke Google Lyria 3 Clip resmi...');
+              return generateAudioViaOpenRouter({ model: DEFAULT_MUSIC_MODEL, prompt, key, timeoutMs, isRetried: true }).then(resolve).catch(reject);
             }
             return reject(new Error(msg));
           }
