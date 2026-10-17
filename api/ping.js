@@ -20,6 +20,7 @@ function sendJson(res, status, payload) {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store, no-cache, must-revalidate',
       'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Private-Network': 'true',
       'Access-Control-Allow-Methods': 'GET, OPTIONS'
     });
     res.end(JSON.stringify(payload));
@@ -32,8 +33,9 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Private-Network': 'true',
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, Access-Control-Request-Private-Network'
     });
     return res.end();
   }

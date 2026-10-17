@@ -143,8 +143,9 @@ function sendJSON(res, statusCode, data) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Private-Network': 'true',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, Access-Control-Request-Private-Network'
   });
   res.end(JSON.stringify(data));
 }
@@ -4356,8 +4357,9 @@ async function requestHandler(req, res) {
   if (method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Private-Network': 'true',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, Access-Control-Request-Private-Network'
     });
     return res.end();
   }
@@ -4379,8 +4381,9 @@ async function requestHandler(req, res) {
         const reqHost = req.headers.host || '';
         const isSameOrigin = (originHost === reqHost) ||
                              (forwardHost && originHost === forwardHost) ||
-                             (originHost.endsWith('.vercel.app') && (forwardHost.endsWith('.vercel.app') || reqHost.endsWith('.vercel.app') || IS_VERCEL_ENV)) ||
-                             (IS_VERCEL_ENV && originHost.endsWith('.vercel.app'));
+                             originHost.endsWith('.vercel.app') ||
+                             originHost.endsWith('localhost') ||
+                             originHost.startsWith('127.0.0.1');
         crossSite = !isSameOrigin;
       } catch (_) {
         crossSite = true;
@@ -5404,14 +5407,36 @@ async function requestHandler(req, res) {
             exitCode: 0
           });
         } else if (IS_VERCEL_ENV) {
-          // Vercel Cloud Sandbox (dukungan navigasi direktori virtual di lingkungan cloud)
+          // Vercel Cloud Sandbox (dukungan navigasi direktori di lingkungan cloud Linux)
+          if (/^[a-zA-Z]:[\\\/]/i.test(cleanDest) || /^[a-zA-Z]:$/i.test(cleanDest) || /^\\[\\\/]/i.test(cleanDest)) {
+            return sendJSON(res, 200, {
+              success: false,
+              output: `[Vercel Cloud Sandbox] Path Windows "${cleanDest}" tidak ada di Linux cloud container (/var/task).\r\n` +
+                      `💡 Untuk mengakses drive Windows (C:\\Users\\user) dan tools Windows (agy), sinkronkan dengan Zoz Bridge Lokal (http://127.0.0.1:4040).`,
+              stdout: '',
+              stderr: `[Vercel Cloud Sandbox] Path Windows tidak valid di Linux cloud container.`,
+              cwd: targetCwd,
+              exitCode: 1
+            });
+          }
+          let resolved = path.resolve(targetCwd, cleanDest);
+          if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+            return sendJSON(res, 200, {
+              success: true,
+              output: `[Vercel Cloud Sandbox] Direktori aktif diubah ke: ${resolved}`,
+              stdout: `[Vercel Cloud Sandbox] Direktori aktif diubah ke: ${resolved}`,
+              stderr: '',
+              cwd: resolved,
+              exitCode: 0
+            });
+          }
           return sendJSON(res, 200, {
-            success: true,
-            output: `[Vercel Cloud Sandbox] Direktori aktif diubah ke: ${cleanDest}`,
-            stdout: `[Vercel Cloud Sandbox] Direktori aktif diubah ke: ${cleanDest}`,
-            stderr: '',
-            cwd: cleanDest,
-            exitCode: 0
+            success: false,
+            output: `[Vercel Cloud Sandbox] Direktori tidak ditemukan: "${cleanDest}"`,
+            stdout: '',
+            stderr: `[Vercel Cloud Sandbox] Direktori tidak ditemukan: "${cleanDest}"`,
+            cwd: targetCwd,
+            exitCode: 1
           });
         } else {
           return sendJSON(res, 200, {
@@ -5465,11 +5490,33 @@ async function requestHandler(req, res) {
         args = ['-c', cmd];
       }
 
-      const proc = spawn(executable, args, {
-        cwd: targetCwd,
-        env: { ...process.env, TERM: 'xterm-256color' },
-        windowsHide: true
-      });
+      // Validasi CWD agar aman dan tidak memicu ENOENT di Linux Cloud container
+      let safeCwd = targetCwd;
+      try {
+        if (!safeCwd || !fs.existsSync(safeCwd) || !fs.statSync(safeCwd).isDirectory()) {
+          safeCwd = process.cwd();
+        }
+      } catch (_) {
+        safeCwd = process.cwd();
+      }
+
+      let proc;
+      try {
+        proc = spawn(executable, args, {
+          cwd: safeCwd,
+          env: { ...process.env, TERM: 'xterm-256color' },
+          windowsHide: true
+        });
+      } catch (err) {
+        return sendJSON(res, 200, {
+          success: false,
+          output: `Gagal menjalankan shell: ${err.message || err}`,
+          stdout: '',
+          stderr: `Gagal menjalankan shell: ${err.message || err}`,
+          cwd: safeCwd,
+          exitCode: 1
+        });
+      }
 
       let stdout = '';
       let stderr = '';
@@ -5529,6 +5576,15 @@ async function requestHandler(req, res) {
         if (timedOut) {
           finalOut += '\n[Eksekusi dibatalkan: batas waktu 15 detik tercapai]';
         }
+
+        if (IS_VERCEL_ENV && /^\s*agy\b/i.test(cmd)) {
+          const agyNote = `\r\n\x1b[33m💡 Catatan: 'agy' (Antigravity CLI) terpasang di OS Windows lokal Anda (C:\\Users\\user).\x1b[0m\r\n` +
+                          `\x1b[36mTerminal saat ini berjalan di Cloud Sandbox Linux (/var/task).\x1b[0m\r\n` +
+                          `\x1b[32mUntuk mengeksekusi 'agy', buka terminal di Windows atau aktifkan Zoz Bridge di port 4040.\x1b[0m\r\n`;
+          stderr += agyNote;
+          finalOut += agyNote;
+        }
+
         return sendJSON(res, 200, {
           success: code === 0,
           output: finalOut || (code === 0 ? '' : '(gagal tanpa output)'),

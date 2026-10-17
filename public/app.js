@@ -30693,17 +30693,117 @@ Aturan:
       return this.xtermThemes[this.theme] || this.xtermThemes['aura-es'];
     },
 
-    init() {
+    bridgeUrl: localStorage.getItem('zoz_term_bridge_url') || '',
+    isWindowsSynced: false,
+    bridgeProbed: false,
+
+    getTerminalApiUrl(endpoint) {
+      if (this.bridgeUrl) {
+        return `${this.bridgeUrl.replace(/\/+$/, '')}${endpoint}`;
+      }
+      return endpoint;
+    },
+
+    async detectWindowsBridge(forceToast = false) {
+      const candidates = [
+        this.bridgeUrl,
+        'http://127.0.0.1:4040',
+        'http://localhost:4040'
+      ].filter(Boolean);
+
+      for (const cand of candidates) {
+        try {
+          const res = await fetch(`${cand.replace(/\/+$/, '')}/api/ping`, {
+            method: 'GET',
+            signal: AbortSignal.timeout(900)
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && (data.platform === 'win32' || data.platform || data.ok)) {
+              const prevUrl = this.bridgeUrl;
+              this.bridgeUrl = cand;
+              this.isWindowsSynced = (data.platform === 'win32');
+              this.bridgeProbed = true;
+              localStorage.setItem('zoz_term_bridge_url', cand);
+              if (forceToast || prevUrl !== cand) {
+                showToast(`⚡ Terminal Terhubung ke Windows Sync (${cand})`, 'success');
+              }
+              this.updatePaneHeaders();
+              this.updateSyncButtonUI();
+              return true;
+            }
+          }
+        } catch (_) {}
+      }
+
+      this.bridgeUrl = '';
+      this.isWindowsSynced = false;
+      this.bridgeProbed = true;
+      if (forceToast) {
+        showToast('Bridge lokal tidak terdeteksi. Jalankan "start.bat" di folder zoz-router pada Windows Anda.', 'info');
+      }
+      this.updatePaneHeaders();
+      this.updateSyncButtonUI();
+      return false;
+    },
+
+    async trySyncWindows(manualClick = false) {
+      const found = await this.detectWindowsBridge(manualClick);
+      if (found) {
+        await this.syncServerCwd();
+        const tab = this.getActiveTab();
+        if (tab) {
+          if (tab.pane1) {
+            tab.pane1.isFallbackMode = false;
+            this.connectStream(tab, tab.pane1, 1);
+          }
+          if (tab.isSplit && tab.pane2) {
+            tab.pane2.isFallbackMode = false;
+            this.connectStream(tab, tab.pane2, 2);
+          }
+        }
+      }
+    },
+
+    updateSyncButtonUI() {
+      const btn = document.getElementById('btnTermSyncWindows');
+      const icon = document.getElementById('iconTermSyncWindows');
+      const label = document.getElementById('labelTermSyncWindows');
+      if (!btn) return;
+      if (this.isWindowsSynced) {
+        btn.classList.add('active');
+        btn.style.borderColor = 'var(--neon-teal, #22d3ee)';
+        btn.title = `Terminal Tersinkronisasi dengan Windows Lokal (${this.bridgeUrl})`;
+        if (icon) {
+          icon.className = 'fa-solid fa-bolt';
+          icon.style.color = 'var(--neon-teal, #22d3ee)';
+        }
+        if (label) label.textContent = 'Win Sync ⚡';
+      } else {
+        btn.classList.remove('active');
+        btn.style.borderColor = '';
+        btn.title = 'Klik untuk menghubungkan terminal ke Windows lokal (port 4040)';
+        if (icon) {
+          icon.className = 'fa-solid fa-link';
+          icon.style.color = 'var(--neon-amber, #fbbf24)';
+        }
+        if (label) label.textContent = 'Sync Windows';
+      }
+    },
+
+    async init() {
       this.attachListeners();
       this.loadTheme();
       this.renderTabs();
       this.updatePaneHeaders();
-      this.syncServerCwd();
+      await this.detectWindowsBridge(false);
+      await this.syncServerCwd();
     },
 
     async syncServerCwd() {
       try {
-        const response = await fetch('/api/terminal/exec', {
+        const url = this.getTerminalApiUrl('/api/terminal/exec');
+        const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ command: '' })
@@ -30861,10 +30961,12 @@ Aturan:
         closeModal('terminalModal');
       } else {
         openModal('terminalModal');
+        this.detectWindowsBridge(false).then(() => {
+          this.syncServerCwd();
+        });
         this.updatePaneHeaders();
         this.initActiveTabPanes();
         this.focusActiveInput();
-        this.syncServerCwd();
         [50, 150, 300, 600].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
       }
     },
@@ -31045,7 +31147,8 @@ Aturan:
       const term = paneState.term;
       const cols = (term && term.cols) ? term.cols : 100;
       const rows = (term && term.rows) ? term.rows : 28;
-      const streamUrl = `/api/terminal/stream?session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}`;
+      const endpoint = `/api/terminal/stream?session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}`;
+      const streamUrl = this.getTerminalApiUrl(endpoint);
 
       const es = new EventSource(streamUrl);
       paneState.eventSource = es;
@@ -31064,8 +31167,13 @@ Aturan:
               this.handleAutoRespond(tab, paneState, paneNum, msg.data);
             }
           } else if (msg.type === 'connected') {
-            const isCloud = Boolean(IS_CLOUD_HOSTED || paneState.isFallbackMode);
-            if (statusLabel) statusLabel.textContent = isCloud ? 'Aktif (Cloud)' : 'Aktif (PTY)';
+            if (this.isWindowsSynced) {
+              if (statusLabel) statusLabel.textContent = 'Aktif (Windows ⚡)';
+              paneState.isFallbackMode = false;
+            } else {
+              const isCloud = Boolean(IS_CLOUD_HOSTED || paneState.isFallbackMode);
+              if (statusLabel) statusLabel.textContent = isCloud ? 'Aktif (Cloud Linux)' : 'Aktif (PTY)';
+            }
             if (statusDot) statusDot.className = 'pane-status-dot online';
             if (msg.cwd && msg.cwd !== paneState.cwd) {
               paneState.cwd = msg.cwd;
@@ -31079,23 +31187,24 @@ Aturan:
             if (statusLabel) statusLabel.textContent = 'Selesai';
             if (statusDot) statusDot.className = 'pane-status-dot offline';
           } else if (msg.type === 'fallback') {
-            paneState.isFallbackMode = true;
-            if (statusLabel) statusLabel.textContent = 'Aktif (Cloud)';
-            if (statusDot) statusDot.className = 'pane-status-dot online';
-            const conf = this.shells[paneState.shell] || this.shells.powershell;
-            if (term && (!paneState._promptRendered || term.rows > 0)) {
-              paneState._promptRendered = true;
-              term.write(`\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
+            if (!this.isWindowsSynced) {
+              paneState.isFallbackMode = true;
+              if (statusLabel) statusLabel.textContent = 'Aktif (Cloud Linux)';
+              if (statusDot) statusDot.className = 'pane-status-dot online';
+              const conf = this.shells[paneState.shell] || this.shells.powershell;
+              if (term && (!paneState._promptRendered || term.rows > 0)) {
+                paneState._promptRendered = true;
+                term.write(`\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
+              }
             }
           }
         } catch (_) {}
       };
 
       es.onerror = () => {
-        // Pada lingkungan cloud / Vercel atau mode fallback, terminal tetap AKTIF via Mode Command-Exec
-        if (IS_CLOUD_HOSTED || paneState.isFallbackMode) {
+        if (!this.isWindowsSynced && (IS_CLOUD_HOSTED || paneState.isFallbackMode)) {
           paneState.isFallbackMode = true;
-          if (statusLabel) statusLabel.textContent = 'Aktif (Cloud)';
+          if (statusLabel) statusLabel.textContent = 'Aktif (Cloud Linux)';
           if (statusDot) statusDot.className = 'pane-status-dot online';
           const conf = this.shells[paneState.shell] || this.shells.powershell;
           if (term && !paneState._promptRendered) {
@@ -31155,7 +31264,7 @@ Aturan:
 
     async sendPtyInput(sessionId, data) {
       try {
-        await fetch('/api/terminal/input', {
+        await fetch(this.getTerminalApiUrl('/api/terminal/input'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ session: sessionId, data })
@@ -31165,7 +31274,7 @@ Aturan:
 
     async sendPtyResize(sessionId, cols, rows) {
       try {
-        await fetch('/api/terminal/resize', {
+        await fetch(this.getTerminalApiUrl('/api/terminal/resize'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ session: sessionId, cols, rows })
@@ -31271,7 +31380,7 @@ Aturan:
           p.eventSource = null;
         }
         if (p.sessionId) {
-          fetch('/api/terminal/kill', {
+          fetch(this.getTerminalApiUrl('/api/terminal/kill'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ session: p.sessionId })
@@ -31385,7 +31494,7 @@ Aturan:
 
       if (pane.term) {
         if (pane.sessionId) {
-          fetch('/api/terminal/kill', {
+          fetch(this.getTerminalApiUrl('/api/terminal/kill'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ session: pane.sessionId })
@@ -31677,7 +31786,7 @@ Aturan:
       }
 
       try {
-        const response = await fetch('/api/terminal/exec', {
+        const response = await fetch(this.getTerminalApiUrl('/api/terminal/exec'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -31824,6 +31933,7 @@ Aturan:
 
       document.getElementById('btnTermFontDec')?.addEventListener('click', () => this.adjustFontSize(-1));
       document.getElementById('btnTermFontInc')?.addEventListener('click', () => this.adjustFontSize(1));
+      document.getElementById('btnTermSyncWindows')?.addEventListener('click', () => this.trySyncWindows(true));
       document.getElementById('btnTermSplit')?.addEventListener('click', () => this.toggleSplit());
       document.getElementById('btnTermClear')?.addEventListener('click', () => this.clearActiveScreen());
       document.getElementById('btnTermTheme')?.addEventListener('click', () => this.toggleTheme());
