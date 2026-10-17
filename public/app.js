@@ -2062,8 +2062,8 @@ RESONANSI: ${this.currentVibe}
     }
   };
 
-  // ==================== INDEXEDDB AUDIO VAULT (v312) ====================
-  // Menyimpan blob audio musik AI hasil gubahan secara persisten di IndexedDB
+  // ==================== INDEXEDDB AUDIO VAULT (v313) ====================
+  // Menyimpan blob audio musik AI hasil gubahan secara persisten di IndexedDB (dalam bentuk ArrayBuffer)
   // agar musik TIDAK mati / hilang saat pengguna keluar dari aplikasi atau me-reload browser.
   const AudioVault = {
     db: null,
@@ -2094,14 +2094,23 @@ RESONANSI: ${this.currentVibe}
       try {
         if (!this.db) await this.init();
         if (!this.db) return false;
+        let buffer = null;
+        if (blob instanceof ArrayBuffer) {
+          buffer = blob;
+        } else if (blob && typeof blob.arrayBuffer === 'function') {
+          buffer = await blob.arrayBuffer();
+        }
+        const mime = (blob && blob.type) ? blob.type : 'audio/wav';
+        const size = buffer ? buffer.byteLength : (blob.size || 0);
+
         return new Promise((resolve) => {
           try {
             const tx = this.db.transaction('tracks', 'readwrite');
             tx.objectStore('tracks').put({
               id,
-              blob,
-              mime: blob.type || 'audio/wav',
-              size: blob.size,
+              buffer,
+              mime,
+              size,
               title: meta.title || '',
               prompt: meta.prompt || '',
               genre: meta.genre || '',
@@ -2131,13 +2140,65 @@ RESONANSI: ${this.currentVibe}
             const req = tx.objectStore('tracks').get(id);
             req.onsuccess = () => {
               const item = req.result;
-              if (item && item.blob) {
-                const freshUrl = URL.createObjectURL(item.blob);
-                this._urlCache.set(id, freshUrl);
-                resolve(freshUrl);
-              } else {
-                resolve(null);
+              if (item) {
+                const blobToUse = item.buffer
+                  ? new Blob([item.buffer], { type: item.mime || 'audio/wav' })
+                  : item.blob;
+                if (blobToUse) {
+                  const freshUrl = URL.createObjectURL(blobToUse);
+                  this._urlCache.set(id, freshUrl);
+                  resolve(freshUrl);
+                  return;
+                }
               }
+              resolve(null);
+            };
+            req.onerror = () => resolve(null);
+          } catch (_) {
+            resolve(null);
+          }
+        });
+      } catch (_) {
+        return null;
+      }
+    },
+    async findTrackByTitleOrPrompt(title, prompt) {
+      try {
+        if (!this.db) await this.init();
+        if (!this.db) return null;
+        return new Promise((resolve) => {
+          try {
+            const tx = this.db.transaction('tracks', 'readonly');
+            const store = tx.objectStore('tracks');
+            const req = store.getAll ? store.getAll() : null;
+            if (!req) return resolve(null);
+            req.onsuccess = () => {
+              const list = req.result || [];
+              if (!list.length) return resolve(null);
+              let match = null;
+              const cleanTitle = (title || '').trim().toLowerCase();
+              const cleanP = (prompt || '').trim().toLowerCase();
+              if (cleanTitle) {
+                match = list.find(t => t.title && t.title.toLowerCase() === cleanTitle);
+              }
+              if (!match && cleanP) {
+                match = list.find(t => t.prompt && (t.prompt.toLowerCase().includes(cleanP) || cleanP.includes(t.prompt.toLowerCase())));
+              }
+              if (!match) {
+                list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                match = list[0];
+              }
+              if (match) {
+                const blobToUse = match.buffer
+                  ? new Blob([match.buffer], { type: match.mime || 'audio/wav' })
+                  : match.blob;
+                if (blobToUse) {
+                  const freshUrl = URL.createObjectURL(blobToUse);
+                  if (match.id) this._urlCache.set(match.id, freshUrl);
+                  return resolve(freshUrl);
+                }
+              }
+              resolve(null);
             };
             req.onerror = () => resolve(null);
           } catch (_) {
@@ -2153,7 +2214,7 @@ RESONANSI: ${this.currentVibe}
         const res = await fetch(url);
         if (!res.ok) return false;
         const blob = await res.blob();
-        return this.saveTrack(id, blob, meta);
+        return await this.saveTrack(id, blob, meta);
       } catch (_) {
         return false;
       }
@@ -24065,7 +24126,7 @@ Aturan:
   // AI MUSIC STUDIO & CYBER AUDIO PLAYER ENGINE
   // ====================================================
   function buildCyberAudioPlayerCardHtml(track) {
-    const safeUrl = escapeHtml(track.url || track.audioUrl || '');
+    const rawUrl = track.url || track.audioUrl || '';
     const safeVaultId = escapeHtml(track.audioVaultId || track.vaultId || '');
     const safeTitle = escapeHtml(track.title || 'Singularity Cyber Audio');
     const safeGenre = escapeHtml(track.genre || 'Cyberpunk');
@@ -24076,8 +24137,16 @@ Aturan:
     const isAiComposed = Boolean(track.aiComposed);
     const trackId = 'cyber_audio_' + Math.random().toString(36).substring(2, 9);
 
+    // Jika URL adalah blob lama (saat session di-load ulang setelah keluar aplikasi),
+    // jangan masukkan src dead-blob langsung ke tag <audio> untuk mencegah 404 console error.
+    // AudioVault akan menghidrasi URL live baru secara asinkron saat listener terpasang.
+    const isDeadBlob = typeof rawUrl === 'string' && rawUrl.startsWith('blob:');
+    const initialSrc = isDeadBlob ? '' : rawUrl;
+    const safeUrl = escapeHtml(rawUrl);
+    const safeInitialSrc = escapeHtml(initialSrc);
+
     return `
-      <div class="cyber-audio-card" id="${trackId}" data-vault-id="${safeVaultId}" data-url="${safeUrl}">
+      <div class="cyber-audio-card" id="${trackId}" data-vault-id="${safeVaultId}" data-url="${safeUrl}" data-title="${safeTitle}" data-prompt="${safePrompt}">
         <div class="cyber-audio-body">
           <div class="cyber-audio-title-row">
             <div class="cyber-audio-title"><i class="fa-solid fa-headphones" style="color:var(--neon-teal); margin-right:6px;"></i> ${safeTitle}</div>
@@ -24090,7 +24159,7 @@ Aturan:
             <canvas class="cyber-audio-wave-canvas" width="480" height="48"></canvas>
           </div>
           <div class="cyber-audio-controls-row">
-            <button type="button" class="cyber-audio-play-btn" data-url="${safeUrl}" title="Putar / Jeda Audio"><i class="fa-solid fa-play"></i></button>
+            <button type="button" class="cyber-audio-play-btn" data-url="${safeInitialSrc}" title="Putar / Jeda Audio"><i class="fa-solid fa-play"></i></button>
             <div class="cyber-audio-scrubber-wrap">
               <input type="range" class="cyber-audio-scrubber" min="0" max="100" value="0" step="0.1">
               <div class="cyber-audio-time-row">
@@ -24099,7 +24168,7 @@ Aturan:
               </div>
             </div>
             <button type="button" class="cyber-audio-loop-btn" title="Ulangi Musik Otomatis (Loop)"><i class="fa-solid fa-repeat"></i></button>
-            <audio preload="metadata" src="${safeUrl}" style="display:none;"></audio>
+            <audio preload="metadata" src="${safeInitialSrc}" style="display:none;"></audio>
           </div>
           <div class="image-meta-badges">
             ${bpm ? `<span class="image-meta-badge"><i class="fa-solid fa-gauge-high"></i> ${bpm} BPM</span>` : ''}
@@ -24134,25 +24203,76 @@ Aturan:
       const copyPromptBtn = card.querySelector('.copy-audio-prompt-btn');
       const dlLink = card.querySelector('a[download]');
       const vaultId = card.dataset.vaultId;
+      const cardTitle = card.dataset.title || '';
+      const cardPrompt = card.dataset.prompt || '';
 
       if (!audio || !playBtn) return;
 
       // Hidrasi audio dari AudioVault jika tersedia (memulihkan blob URL yang kedaluwarsa setelah reload/exit app)
-      if (vaultId && typeof AudioVault !== 'undefined') {
-        const cachedUrl = AudioVault._urlCache.get(vaultId);
-        if (cachedUrl) {
-          audio.src = cachedUrl;
-          playBtn.dataset.url = cachedUrl;
-          if (dlLink) dlLink.href = cachedUrl;
-        } else {
-          AudioVault.getTrackUrl(vaultId).then(revivedUrl => {
-            if (revivedUrl) {
-              audio.src = revivedUrl;
-              playBtn.dataset.url = revivedUrl;
-              if (dlLink) dlLink.href = revivedUrl;
+      async function hydrateAudioUrl() {
+        if (!audio) return null;
+        if (typeof AudioVault === 'undefined') return null;
+
+        // 1. Cek cache memori AudioVault
+        if (vaultId && AudioVault._urlCache.has(vaultId)) {
+          const cached = AudioVault._urlCache.get(vaultId);
+          if (cached) {
+            if (audio.src !== cached) {
+              audio.src = cached;
+              try { audio.load(); } catch (_) {}
             }
-          }).catch(() => {});
+            playBtn.dataset.url = cached;
+            if (dlLink) dlLink.href = cached;
+            return cached;
+          }
         }
+
+        // 2. Ambil dari IndexedDB AudioVault via vaultId
+        if (vaultId) {
+          try {
+            const revived = await AudioVault.getTrackUrl(vaultId);
+            if (revived) {
+              if (audio.src !== revived) {
+                audio.src = revived;
+                try { audio.load(); } catch (_) {}
+              }
+              playBtn.dataset.url = revived;
+              if (dlLink) dlLink.href = revived;
+              return revived;
+            }
+          } catch (_) {}
+        }
+
+        // 3. Fallback recovery: cari berdasarkan judul atau prompt
+        try {
+          const fallback = await AudioVault.findTrackByTitleOrPrompt(cardTitle, cardPrompt);
+          if (fallback) {
+            if (audio.src !== fallback) {
+              audio.src = fallback;
+              try { audio.load(); } catch (_) {}
+            }
+            playBtn.dataset.url = fallback;
+            if (dlLink) dlLink.href = fallback;
+            return fallback;
+          }
+        } catch (_) {}
+
+        // 4. Jika masih ada URL non-blob pada playBtn (misalnya file /uploads/ dari server)
+        const currentBtnUrl = playBtn.dataset.url;
+        if (currentBtnUrl && !currentBtnUrl.startsWith('blob:')) {
+          if (audio.src !== currentBtnUrl) {
+            audio.src = currentBtnUrl;
+            try { audio.load(); } catch (_) {}
+          }
+          return currentBtnUrl;
+        }
+
+        return null;
+      }
+
+      // Jalankan hidrasi URL segera
+      if (typeof AudioVault !== 'undefined') {
+        hydrateAudioUrl().catch(() => {});
       }
 
       // ID rAF disimpan pada ELEMEN AUDIO (bukan variabel lokal per-kartu) supaya
@@ -24210,88 +24330,82 @@ Aturan:
       }
       drawWaveform(false);
 
-      playBtn.addEventListener('click', (e) => {
+      playBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (audio.paused) {
-          // 1. Pastikan sumber audio terpasang
-          if (!audio.src && playBtn.dataset.url) {
-            audio.src = playBtn.dataset.url;
-          }
-
-          // 2. Jika sumber kosong atau error dari blob lama, coba sinkronkan dari AudioVault
-          if ((!audio.src || audio.error) && vaultId && typeof AudioVault !== 'undefined') {
-            const syncUrl = AudioVault._urlCache.get(vaultId);
-            if (syncUrl) {
-              audio.src = syncUrl;
-              playBtn.dataset.url = syncUrl;
-              if (dlLink) dlLink.href = syncUrl;
+          // 1. Pastikan audio siap dengan live URL
+          if (!audio.src || audio.error || audio.src.startsWith('blob:')) {
+            let isDead = !audio.src || Boolean(audio.error);
+            if (!isDead && audio.src.startsWith('blob:')) {
+              try {
+                const checkRes = await fetch(audio.src, { method: 'HEAD' });
+                if (!checkRes.ok) isDead = true;
+              } catch (_) {
+                isDead = true;
+              }
+            }
+            if (isDead) {
+              await hydrateAudioUrl();
             }
           }
 
+          if (!audio.src && playBtn.dataset.url) {
+            audio.src = playBtn.dataset.url;
+            try { audio.load(); } catch (_) {}
+          }
+
           if (!audio.src) {
-            showToast('⚠️ Berkas audio tidak ditemukan atau telah kedaluwarsa.', 'warning');
-            return;
+            const lastRevived = await hydrateAudioUrl();
+            if (!lastRevived) {
+              showToast('⚠️ Berkas audio tidak ditemukan atau telah kedaluwarsa.', 'warning');
+              return;
+            }
           }
 
           document.querySelectorAll('.cyber-audio-card audio').forEach(a => { if (a !== audio) a.pause(); });
           document.querySelectorAll('.cyber-audio-card .cyber-audio-play-btn').forEach(b => { if (b !== playBtn) b.innerHTML = '<i class="fa-solid fa-play"></i>'; });
 
-          // Reload jika audio sebelumnya berada dalam kondisi error/idle di mobile
-          if (audio.error) {
-            try { audio.load(); } catch (_) {}
-          }
+          try {
+            await audio.play();
+            playBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+            drawWaveform(true);
 
-          const playPromise = audio.play();
-          if (playPromise !== undefined) {
-            playPromise.then(() => {
-              playBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
-              drawWaveform(true);
-
-              // Dukungan MediaSession API untuk kontrol latar belakang & lock screen
-              if ('mediaSession' in navigator && window.MediaMetadata) {
-                try {
-                  const trackTitle = card.querySelector('.cyber-audio-title')?.textContent?.trim() || 'Singularity Cyber Audio';
-                  navigator.mediaSession.metadata = new MediaMetadata({
-                    title: trackTitle,
-                    artist: 'Zoz Router AI Music Studio',
-                    album: 'Cyberdeck Audio Player'
-                  });
-                  navigator.mediaSession.setActionHandler('play', () => audio.play().catch(() => {}));
-                  navigator.mediaSession.setActionHandler('pause', () => audio.pause());
-                } catch (_) {}
-              }
-            }).catch(err => {
-              console.warn('Audio play error:', err);
-              playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
-              stopWaveAnim();
-              drawWaveform(false);
-
-              if (vaultId && typeof AudioVault !== 'undefined') {
-                AudioVault.getTrackUrl(vaultId).then(revivedUrl => {
-                  if (revivedUrl && revivedUrl !== audio.src) {
-                    audio.src = revivedUrl;
-                    playBtn.dataset.url = revivedUrl;
-                    if (dlLink) dlLink.href = revivedUrl;
-                    audio.play().then(() => {
-                      playBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
-                      drawWaveform(true);
-                    }).catch(() => {});
-                    return;
-                  }
-                  showToast('⚠️ Berkas audio sesi ini sudah kedaluwarsa setelah peramban ditutup. Silakan buat lagu baru di Music Studio.', 4000);
-                }).catch(() => {
-                  showToast('⚠️ Berkas audio sesi ini sudah kedaluwarsa setelah peramban ditutup. Silakan buat lagu baru di Music Studio.', 4000);
+            // Dukungan MediaSession API untuk kontrol latar belakang & lock screen
+            if ('mediaSession' in navigator && window.MediaMetadata) {
+              try {
+                const trackTitle = card.querySelector('.cyber-audio-title')?.textContent?.trim() || 'Singularity Cyber Audio';
+                navigator.mediaSession.metadata = new MediaMetadata({
+                  title: trackTitle,
+                  artist: 'Zoz Router AI Music Studio',
+                  album: 'Cyberdeck Audio Player'
                 });
-              } else {
-                if (err.name === 'NotSupportedError' || audio.error) {
-                  showToast('⚠️ Berkas audio sesi ini sudah kedaluwarsa setelah peramban ditutup. Silakan buat lagu baru di Music Studio.', 4000);
-                } else if (err.name === 'NotAllowedError') {
-                  showToast('⚠️ Peramban memerlukan interaksi pengguna untuk memutar audio.', 3000);
-                } else {
-                  showToast('Gagal memutar audio: ' + (err.message || 'Periksa berkas audio'), 'warning');
-                }
+                navigator.mediaSession.setActionHandler('play', () => audio.play().catch(() => {}));
+                navigator.mediaSession.setActionHandler('pause', () => audio.pause());
+              } catch (_) {}
+            }
+          } catch (err) {
+            console.warn('Audio play error, attempting recovery:', err);
+            const retryRevived = await hydrateAudioUrl();
+            if (retryRevived) {
+              try {
+                await audio.play();
+                playBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+                drawWaveform(true);
+                return;
+              } catch (innerErr) {
+                console.warn('Audio retry play failed:', innerErr);
               }
-            });
+            }
+
+            playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
+            stopWaveAnim();
+            drawWaveform(false);
+
+            if (err.name === 'NotAllowedError') {
+              showToast('⚠️ Klik tombol play untuk mengizinkan peramban memutar audio.', 3000);
+            } else {
+              showToast('⚠️ Gagal memutar audio: ' + (err.message || 'Periksa berkas audio'), 'warning');
+            }
           }
         } else {
           audio.pause();
@@ -24708,6 +24822,7 @@ Aturan:
 
     try {
       let finalAudioUrl = '';
+      let generatedAudioBlob = null;
       let trackTitle = 'AI Track';
       let trackGenre = 'ai';
       let trackBpm = null;
@@ -24788,6 +24903,7 @@ Aturan:
         });
 
         finalAudioUrl = clientAudio.url;
+        generatedAudioBlob = clientAudio.blob || null;
         trackDuration = /clip/i.test(targetMusicModel) ? 30 : 0;
         trackAiSummary = clientAudio.text || `Dihasilkan langsung oleh model AI ${targetModelDisplayName}`;
         trackAiModel = clientAudio.model;
@@ -24812,22 +24928,22 @@ Aturan:
 
       // Simpan salinan biner audio secara permanen di IndexedDB AudioVault
       const audioVaultId = 'vault_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
-      if (typeof clientAudio !== 'undefined' && clientAudio && clientAudio.blob && typeof AudioVault !== 'undefined') {
+      if (typeof AudioVault !== 'undefined') {
         AudioVault._urlCache.set(audioVaultId, finalAudioUrl);
         AudioVault._urlCache.set(finalAudioUrl, finalAudioUrl);
-        AudioVault.saveTrack(audioVaultId, clientAudio.blob, {
-          title: trackTitle,
-          prompt: cleanPrompt,
-          genre: trackGenre
-        });
-      } else if (finalAudioUrl && finalAudioUrl.startsWith('/uploads/') && typeof AudioVault !== 'undefined') {
-        AudioVault._urlCache.set(audioVaultId, finalAudioUrl);
-        AudioVault._urlCache.set(finalAudioUrl, finalAudioUrl);
-        AudioVault.saveTrackFromUrl(audioVaultId, finalAudioUrl, {
-          title: trackTitle,
-          prompt: cleanPrompt,
-          genre: trackGenre
-        });
+        if (generatedAudioBlob) {
+          await AudioVault.saveTrack(audioVaultId, generatedAudioBlob, {
+            title: trackTitle,
+            prompt: cleanPrompt,
+            genre: trackGenre
+          });
+        } else if (finalAudioUrl) {
+          await AudioVault.saveTrackFromUrl(audioVaultId, finalAudioUrl, {
+            title: trackTitle,
+            prompt: cleanPrompt,
+            genre: trackGenre
+          });
+        }
       }
 
       const trackData = {
