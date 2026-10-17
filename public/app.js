@@ -30936,20 +30936,102 @@ Aturan:
       const isMobile = this.isMobileDevice();
       const hasSaved = Boolean(this.remoteHost && this.remotePin);
 
+      if (isMobile && (!localStorage.getItem('zoz_term_fontsize') || this.fontSize < 14)) {
+        this.setFontSize(15, false);
+      }
+
       const keybar = document.getElementById('termMobileTouchKeybar');
       if (keybar && (isMobile || this.isRemoteConnected)) {
         keybar.style.display = 'flex';
       }
 
+      this.updateMobileBannerUI();
+
       if (this.isRemoteConnected) return;
 
-      if (isMobile || !this.isWindowsSynced) {
+      if (isMobile) {
         if (hasSaved) {
-          this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
-        } else if (isMobile) {
+          this.connectRemoteTerminal(this.remoteHost, this.remotePin, false).then(success => {
+            if (!success) {
+              this.showRemoteOverlay();
+              this.updateMobileBannerUI();
+            }
+          });
+        } else {
           this.showRemoteOverlay();
         }
+      } else if (!this.isWindowsSynced && hasSaved) {
+        this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
       }
+    },
+
+    updateMobileBannerUI() {
+      const banner = document.getElementById('termMobileConnectBanner');
+      if (!banner) return;
+      const isMobile = this.isMobileDevice();
+      const dot = document.getElementById('termBannerPulseDot');
+      const title = document.getElementById('termBannerTitle');
+      const sub = document.getElementById('termBannerSub');
+      const actions = document.getElementById('termBannerActions');
+
+      if (!isMobile && this.isWindowsSynced && !this.isRemoteConnected) {
+        banner.style.display = 'none';
+        return;
+      }
+
+      banner.style.display = 'block';
+
+      if (this.isRemoteConnected) {
+        banner.classList.add('connected');
+        if (dot) dot.className = 'term-banner-pulse-dot connected';
+        const lat = this.remotePingMs !== null ? ` • ${this.remotePingMs}ms` : '';
+        if (title) title.innerHTML = `<i class="fa-solid fa-cloud-bolt" style="color: #4ade80;"></i> <span>Terhubung: Laptop Rumah (WAN)${lat}</span>`;
+        if (sub) sub.textContent = 'PowerShell laptop aktif via Cloudflare Tunnel';
+        if (actions) {
+          actions.innerHTML = `
+            <button type="button" class="term-banner-btn secondary" id="btnBannerDisconnect" title="Putuskan koneksi remote">
+              <i class="fa-solid fa-power-off"></i> <span>Putus</span>
+            </button>
+          `;
+          document.getElementById('btnBannerDisconnect')?.addEventListener('click', () => {
+            this.disconnectRemoteTerminal();
+          });
+        }
+      } else {
+        banner.classList.remove('connected');
+        if (dot) dot.className = 'term-banner-pulse-dot disconnected';
+        if (title) title.innerHTML = '<i class="fa-solid fa-laptop-code" style="color: #38bdf8;"></i> <span>Belum Terhubung ke Laptop</span>';
+        if (sub) sub.textContent = 'Pindai QR di laptop untuk akses PowerShell HP';
+        if (actions) {
+          actions.innerHTML = `
+            <button type="button" class="term-banner-btn primary" id="btnBannerScanQr" title="Scan QR Code dari laptop">
+              <i class="fa-solid fa-camera"></i> <span>Scan QR</span>
+            </button>
+            <button type="button" class="term-banner-btn secondary" id="btnBannerManual" title="Masukkan URL dan PIN manual">
+              <i class="fa-solid fa-link"></i> <span>Sambungkan</span>
+            </button>
+          `;
+          document.getElementById('btnBannerScanQr')?.addEventListener('click', () => this.openQrScannerModal());
+          document.getElementById('btnBannerManual')?.addEventListener('click', () => this.showRemoteOverlay());
+        }
+      }
+    },
+
+    disconnectRemoteTerminal() {
+      if (this.remotePingTimer) {
+        clearInterval(this.remotePingTimer);
+        this.remotePingTimer = null;
+      }
+      this.isRemoteConnected = false;
+      this.remotePingMs = null;
+      try {
+        localStorage.removeItem('zoz_remote_terminal_config');
+      } catch (_) {}
+      this.updateSyncButtonUI();
+      this.updatePaneHeaders();
+      this.updateRemoteStatusUI(false);
+      this.updateMobileBannerUI();
+      showToast('Koneksi remote diputuskan. Kembali ke mode lokal.', 'info');
     },
 
     showRemoteOverlay() {
@@ -31067,6 +31149,7 @@ Aturan:
           this.startRemotePingProbe();
           this.updateSyncButtonUI();
           this.updatePaneHeaders();
+          this.updateMobileBannerUI();
 
           const tab = this.getActiveTab();
           if (tab) {
@@ -31146,6 +31229,7 @@ Aturan:
           }
         }
       });
+      this.updateMobileBannerUI();
     },
 
     async openRemoteTunnelModal() {
@@ -31588,6 +31672,8 @@ Aturan:
       const savedSize = parseInt(localStorage.getItem('zoz_term_fontsize'), 10);
       if (savedSize && savedSize >= 10 && savedSize <= 24) {
         this.setFontSize(savedSize, false);
+      } else if (this.isMobileDevice()) {
+        this.setFontSize(15, false);
       }
     },
 
@@ -32775,7 +32861,8 @@ Aturan:
           e.preventDefault();
           e.stopPropagation();
           const keyType = btn.getAttribute('data-key');
-          if (!keyType) return;
+          const cmdType = btn.getAttribute('data-cmd');
+          if (!keyType && !cmdType) return;
 
           try {
             if (navigator.vibrate) navigator.vibrate(15);
@@ -32785,6 +32872,15 @@ Aturan:
           const paneNum = this.activePane || 1;
           const paneState = this.getPaneState(paneNum);
           const sId = paneState?.sessionId || `${tab?.id}-p${paneNum}`;
+
+          if (cmdType) {
+            if (paneState?.term && !paneState.isFallbackMode) {
+              this.sendPtyInput(sId, `${cmdType}\r`);
+            } else {
+              this.executeCommand(cmdType);
+            }
+            return;
+          }
 
           if (keyType === 'Enter') {
             this.sendEnterToPane(paneNum);
@@ -32864,6 +32960,15 @@ Aturan:
       document.getElementById('btnTermFontInc')?.addEventListener('click', () => this.adjustFontSize(1));
       document.getElementById('btnTermSyncWindows')?.addEventListener('click', () => this.trySyncWindows(true));
       document.getElementById('btnTermRemoteTunnel')?.addEventListener('click', () => this.openRemoteTunnelModal());
+      document.getElementById('btnTermMobileConnect')?.addEventListener('click', () => {
+        if (this.isRemoteConnected) {
+          this.showRemoteOverlay();
+        } else {
+          this.openQrScannerModal();
+        }
+      });
+      document.getElementById('btnBannerScanQr')?.addEventListener('click', () => this.openQrScannerModal());
+      document.getElementById('btnBannerManual')?.addEventListener('click', () => this.showRemoteOverlay());
       document.getElementById('btnTermSplit')?.addEventListener('click', () => this.toggleSplit());
       document.getElementById('btnTermClear')?.addEventListener('click', () => this.clearActiveScreen());
       document.getElementById('btnTermTheme')?.addEventListener('click', () => this.toggleTheme());

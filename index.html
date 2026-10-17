@@ -41,9 +41,9 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="xterm.css?v=20261017_v337">
-  <link rel="preload" as="style" href="style.min.css?v=20261017_v337">
-  <link rel="stylesheet" href="style.min.css?v=20261017_v337">
+  <link rel="stylesheet" href="xterm.css?v=20261017_v338">
+  <link rel="preload" as="style" href="style.min.css?v=20261017_v338">
+  <link rel="stylesheet" href="style.min.css?v=20261017_v338">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -2479,6 +2479,12 @@
             <span id="labelTermOpenQrScanner">Scan QR</span>
           </button>
 
+          <!-- Mobile Direct Connect Button (Always visible on mobile devices) -->
+          <button class="tb-btn tb-btn-mobile-connect" id="btnTermMobileConnect" type="button" title="Sambungkan ke Laptop (Scan QR / Tunnel)">
+            <i class="fa-solid fa-laptop-code" style="color: var(--neon-cyan);"></i>
+            <span class="mobile-connect-label">Sambungkan</span>
+          </button>
+
           <!-- Split View Toggle -->
           <button class="tb-btn" id="btnTermSplit" type="button" title="Beralih Tampilan Split 2 Panel">
             <i class="fa-solid fa-table-columns" style="font-size: 0.75rem;"></i>
@@ -2520,6 +2526,31 @@
           <i class="fa-solid fa-plus" style="font-size: 0.75rem;"></i>
           <span>Tab Baru</span>
         </button>
+      </div>
+
+      <!-- Mobile Connection Prompt Banner (Muncul langsung jika belum terhubung ke laptop) -->
+      <div class="term-mobile-connect-banner" id="termMobileConnectBanner" style="display: none;">
+        <div class="term-banner-inner">
+          <div class="term-banner-left">
+            <span class="term-banner-pulse-dot disconnected" id="termBannerPulseDot"></span>
+            <div class="term-banner-info">
+              <div class="term-banner-title" id="termBannerTitle">
+                <i class="fa-solid fa-laptop-code"></i> <span>Belum Terhubung ke Laptop</span>
+              </div>
+              <div class="term-banner-sub" id="termBannerSub">
+                Hubungkan ke PowerShell di laptop via Cloudflare Tunnel
+              </div>
+            </div>
+          </div>
+          <div class="term-banner-actions" id="termBannerActions">
+            <button type="button" class="term-banner-btn primary" id="btnBannerScanQr" title="Scan QR Code dari laptop">
+              <i class="fa-solid fa-camera"></i> <span>Scan QR</span>
+            </button>
+            <button type="button" class="term-banner-btn secondary" id="btnBannerManual" title="Masukkan URL dan PIN manual">
+              <i class="fa-solid fa-link"></i> <span>Sambungkan</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Terminal Workspace: Single or Split Panes -->
@@ -2661,6 +2692,10 @@
         <button type="button" class="term-touch-key" data-key="ArrowRight" title="Kanan">→</button>
         <button type="button" class="term-touch-key" data-key="paste" title="Tempel Clipboard">Paste</button>
         <button type="button" class="term-touch-key primary" data-key="Enter" title="Kirim Enter">↵ Enter</button>
+        <button type="button" class="term-touch-key chip-key" data-cmd="dir" title="Jalankan dir">dir</button>
+        <button type="button" class="term-touch-key chip-key" data-cmd="git status" title="Jalankan git status">git status</button>
+        <button type="button" class="term-touch-key chip-key" data-cmd="node -v" title="Jalankan node -v">node -v</button>
+        <button type="button" class="term-touch-key chip-key" data-cmd="cls" title="Jalankan cls">cls</button>
       </div>
 
       <!-- Quick Command Action Chips Bar -->
@@ -2801,11 +2836,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous" defer></script>
   <!-- Heavy libraries (Mermaid, jsPDF, PDF.js, JSZip) are dynamically loaded on-demand to optimize FCP, TBT & LCP -->
   <!-- Terminal In-Tab Xterm & FitAddon Engine -->
-  <script src="xterm.js?v=20261017_v337" defer></script>
-  <script src="addon-fit.js?v=20261017_v337" defer></script>
+  <script src="xterm.js?v=20261017_v338" defer></script>
+  <script src="addon-fit.js?v=20261017_v338" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261017_v337" defer></script>
+  <script src="text-safety.js?v=20261017_v338" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261017_v337" defer></script>
+  <script src="app.js?v=20261017_v338" defer></script>
 </body>
 </html>

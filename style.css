@@ -13437,21 +13437,106 @@ body.mermaid-has-fullscreen {
 
 /* Mobile Responsiveness - Dipertahankan untuk perangkat seluler / handphone */
 @media (max-width: 768px) {
+  .terminal-modal-backdrop {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    height: 100vh !important;
+  }
   .terminal-modal-card {
-    width: 100vw;
-    height: 100vh;
-    max-height: 100vh;
-    border-radius: 0;
-    border: none;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100dvh !important;
+    height: 100vh !important;
+    max-height: 100dvh !important;
+    border-radius: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+  }
+  /* Sleek Toolbar for Mobile (No horizontal overflow) */
+  .terminal-toolbar {
+    height: 42px !important;
+    padding: 0 8px !important;
+    gap: 6px !important;
+  }
+  .terminal-title .term-title-text {
+    display: none !important;
+  }
+  .terminal-title::after {
+    content: 'Terminal';
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #fff;
+  }
+  .tb-divider {
+    margin: 0 2px !important;
+  }
+  .terminal-shell-wrap button#btnTerminalShell {
+    padding: 4px 8px !important;
+    font-size: 0.74rem !important;
+    gap: 4px !important;
+  }
+  /* Hide desktop-only controls to prevent horizontal squeeze */
+  .terminal-toolbar-right .tb-group,
+  #btnTermSyncWindows,
+  #btnTermSplit,
+  #btnTermFullscreen,
+  #btnTermTheme {
+    display: none !important;
+  }
+  /* Show prominent mobile connect button */
+  .tb-btn-mobile-connect {
+    display: inline-flex !important;
+    background: linear-gradient(135deg, rgba(14, 165, 233, 0.28), rgba(56, 189, 248, 0.2)) !important;
+    border: 1px solid rgba(56, 189, 248, 0.65) !important;
+    color: #38bdf8 !important;
+    font-weight: 700 !important;
+    padding: 5px 10px !important;
+    font-size: 0.76rem !important;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.35) !important;
+  }
+  .terminal-toolbar-right {
+    gap: 5px !important;
+    margin-left: auto !important;
+  }
+  /* Compact tab strip */
+  .terminal-tabs-strip {
+    height: 30px !important;
+    padding: 0 6px !important;
+    gap: 4px !important;
+  }
+  .terminal-tab-item {
+    padding: 3px 8px !important;
+    font-size: 0.72rem !important;
+    height: 26px !important;
+  }
+  .terminal-add-tab-btn {
+    padding: 3px 6px !important;
+    font-size: 0.7rem !important;
+    height: 24px !important;
+  }
+  /* Compact pane header */
+  .terminal-pane-header {
+    height: 28px !important;
+    padding: 0 8px !important;
+    font-size: 0.72rem !important;
+  }
+  .terminal-pane-header .traffic-lights {
+    display: none !important;
   }
   .pane-cwd-indicator {
-    display: none;
+    display: none !important;
+  }
+  .pane-shell-tag {
+    display: none !important;
   }
   .terminal-input-row {
     display: none !important;
   }
+  /* Hide separate quick chips row on mobile to give terminal maximum vertical height */
   .terminal-quick-chips {
-    display: flex;
+    display: none !important;
   }
   .term-prompt-cwd {
     max-width: 110px;
@@ -13466,6 +13551,127 @@ body.mermaid-has-fullscreen {
     height: 4px;
     cursor: row-resize;
   }
+  .terminal-screen {
+    padding: 0 !important;
+  }
+  .xterm-pane-container {
+    padding: 2px !important;
+  }
+}
+
+/* Mobile Connection Prompt Banner */
+.term-mobile-connect-banner {
+  position: relative;
+  z-index: 15;
+  background: linear-gradient(90deg, rgba(14, 165, 233, 0.14), rgba(15, 23, 42, 0.96), rgba(14, 165, 233, 0.08));
+  border-bottom: 1px solid rgba(56, 189, 248, 0.35);
+  padding: 8px 12px;
+  flex-shrink: 0;
+  transition: all 0.25s ease;
+}
+.term-mobile-connect-banner.connected {
+  background: linear-gradient(90deg, rgba(34, 197, 94, 0.14), rgba(15, 23, 42, 0.96), rgba(34, 197, 94, 0.08));
+  border-bottom-color: rgba(34, 197, 94, 0.35);
+}
+.term-banner-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.term-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.term-banner-pulse-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.term-banner-pulse-dot.disconnected {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.85);
+  animation: bannerDotPulse 1.8s infinite ease-in-out;
+}
+.term-banner-pulse-dot.connected {
+  background: #22c55e;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.85);
+}
+@keyframes bannerDotPulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.25); }
+}
+.term-banner-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.term-banner-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.term-banner-sub {
+  font-size: 0.67rem;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.term-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.term-banner-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 6px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+  touch-action: manipulation;
+}
+.term-banner-btn.primary {
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  border: 1px solid #38bdf8;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
+}
+.term-banner-btn.primary:active {
+  transform: scale(0.95);
+  background: #0284c7;
+}
+.term-banner-btn.secondary {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #cbd5e1;
+}
+.term-banner-btn.secondary:active {
+  transform: scale(0.95);
+  background: rgba(51, 65, 85, 0.9);
+}
+.term-touch-key.chip-key {
+  background: rgba(14, 165, 233, 0.12);
+  border-color: rgba(56, 189, 248, 0.25);
+  color: #7dd3fc;
+  font-style: italic;
 }
 
 /* =========================================================================
