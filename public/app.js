@@ -31063,6 +31063,15 @@ Aturan:
       container.className = 'xterm-pane-container';
       container.style.width = '100%';
       container.style.height = '100%';
+      container.addEventListener('mouseenter', () => {
+        const tab = this.getActiveTab();
+        if (tab && tab.isSplit && this.activePane !== paneNum) {
+          this.setActivePane(paneNum);
+          if (paneState && paneState.term) {
+            try { paneState.term.focus(); } catch (_) {}
+          }
+        }
+      });
       screenEl.appendChild(container);
       paneState.screenContainer = container;
 
@@ -32009,39 +32018,77 @@ Aturan:
       const resizer = document.getElementById('termResizer');
       const ws = document.getElementById('termWorkspace');
       const p1 = document.getElementById('termPane1');
+      let isResizerDragging = false;
       if (resizer && ws && p1) {
-        let isDragging = false;
         resizer.addEventListener('mousedown', (e) => {
-          isDragging = true;
+          isResizerDragging = true;
           document.body.style.cursor = 'col-resize';
           e.preventDefault();
         });
         window.addEventListener('mousemove', (e) => {
-          if (!isDragging) return;
+          if (!isResizerDragging) return;
           const rect = ws.getBoundingClientRect();
           const offset = e.clientX - rect.left;
           const pct = Math.max(20, Math.min(80, (offset / rect.width) * 100));
           p1.style.flex = `0 0 ${pct}%`;
         });
         window.addEventListener('mouseup', () => {
-          if (isDragging) {
-            isDragging = false;
+          if (isResizerDragging) {
+            isResizerDragging = false;
             document.body.style.cursor = '';
             this.fitAllPanes();
           }
         });
       }
 
+      // Hover-to-Focus / Focus-Follows-Mouse untuk Mode Split:
+      // Pengguna cukup mengarahkan kursor ke atas pane/tab tanpa perlu klik dulu untuk langsung mengetik
+      const activateAndFocusPane = (num) => {
+        if (isResizerDragging) return;
+        const tab = this.getActiveTab();
+        if (tab && tab.isSplit && this.activePane !== num) {
+          this.setActivePane(num);
+        }
+        const pState = this.getPaneState(num);
+        if (pState && pState.term) {
+          try { pState.term.focus(); } catch (_) {}
+        }
+        const input = document.getElementById(`termCliInput${num}`);
+        if (input && input.offsetParent !== null) {
+          try { input.focus(); } catch (_) {}
+        }
+      };
+
       [1, 2].forEach(num => {
         const pane = document.getElementById(`termPane${num}`);
+        const screen = document.getElementById(`termScreen${num}`);
+
         if (pane) {
-          pane.addEventListener('click', () => {
-            if (this.activePane !== num) {
-              this.setActivePane(num);
+          // Klik manual tetap berfungsi normal
+          pane.addEventListener('click', () => activateAndFocusPane(num));
+
+          // Hover-to-Focus saat kursor masuk ke pane
+          pane.addEventListener('mouseenter', () => {
+            const tab = this.getActiveTab();
+            if (tab && tab.isSplit) {
+              activateAndFocusPane(num);
             }
-            const pState = this.getPaneState(num);
-            if (pState && pState.term) {
-              try { pState.term.focus(); } catch (_) {}
+          });
+
+          // Pointermove fallback agar saat kursor digeser melintasi divider langsung beralih fokus
+          pane.addEventListener('pointermove', () => {
+            const tab = this.getActiveTab();
+            if (tab && tab.isSplit && this.activePane !== num) {
+              activateAndFocusPane(num);
+            }
+          }, { passive: true });
+        }
+
+        if (screen) {
+          screen.addEventListener('mouseenter', () => {
+            const tab = this.getActiveTab();
+            if (tab && tab.isSplit) {
+              activateAndFocusPane(num);
             }
           });
         }
