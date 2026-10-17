@@ -1712,7 +1712,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const winH = window.innerHeight || 768;
 
       // Cek apakah ada modal yang sedang aktif terbuka di layar
-      const activeModal = document.querySelector('.modal-backdrop.show, .modal.show');
+      const activeModal = document.querySelector('.modal-backdrop.show, .modal.show, .sidebar-backdrop.active, .lightbox-backdrop.active');
 
       for (const btn of buttons) {
         // 1. Abaikan tombol yang memang sengaja tidak dirender di visual layout
@@ -1751,8 +1751,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           continue;
         }
 
-        // b. Tombol berada di luar koordinat pandang (Misplaced offscreen)
-        if (rect.right < 0 || rect.bottom < 0 || rect.left > winW || rect.top > winH * 20) {
+        // b. Tombol berada di luar koordinat pandang ekstrim / hilang akibat CSS styling error
+        if (rect.right < -1000 || rect.left < -1000 || rect.left > (winW + 2000) || rect.top > (winH * 50)) {
           issues.push({
             id: 'btn_off_' + (btn.id || Math.random().toString(36).substr(2, 4)),
             type: 'misplaced_offscreen',
@@ -1791,8 +1791,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             const topStyle = window.getComputedStyle ? window.getComputedStyle(topEl) : null;
             if (topStyle && topStyle.pointerEvents === 'none') continue;
 
-            // Abaikan jika topEl adalah modal backdrop sementara tombol berada di luar modal
-            if (topEl.classList?.contains('modal-backdrop') && !btn.closest('.modal-backdrop')) continue;
+            // Abaikan jika topEl adalah modal backdrop, dialog, atau drawer overlay sementara tombol berada di luar overlay tersebut
+            const topOverlay = topEl.closest ? topEl.closest('.modal-backdrop, .modal, .sidebar-backdrop, .lightbox-backdrop, [role="dialog"]') : null;
+            if (topOverlay && !topOverlay.contains(btn)) continue;
 
             const blockerTag = (topEl.tagName || 'div').toLowerCase();
             const blockerClass = topEl.className ? `.${String(topEl.className).trim().split(/\s+/).join('.')}` : '';
