@@ -30984,15 +30984,30 @@ Aturan:
       if (this.isRemoteConnected) {
         banner.classList.add('connected');
         if (dot) dot.className = 'term-banner-pulse-dot connected';
-        const lat = this.remotePingMs !== null ? ` • ${this.remotePingMs}ms` : '';
+        const lat = this.remotePingMs !== null ? ` • ⚡ ${this.remotePingMs}ms` : '';
         if (title) title.innerHTML = `<i class="fa-solid fa-cloud-bolt" style="color: #4ade80;"></i> <span>Terhubung: Laptop Rumah (WAN)${lat}</span>`;
         if (sub) sub.textContent = 'PowerShell laptop aktif via Cloudflare Tunnel';
         if (actions) {
           actions.innerHTML = `
+            <button type="button" class="term-banner-btn primary" id="btnBannerWake" title="Segarkan layar / kirim Enter">
+              <i class="fa-solid fa-arrows-rotate"></i> <span>Refresh</span>
+            </button>
             <button type="button" class="term-banner-btn secondary" id="btnBannerDisconnect" title="Putuskan koneksi remote">
               <i class="fa-solid fa-power-off"></i> <span>Putus</span>
             </button>
           `;
+          document.getElementById('btnBannerWake')?.addEventListener('click', () => {
+            const tab = this.getActiveTab();
+            const sId = tab?.pane1?.sessionId;
+            if (sId) {
+              if (tab.pane1?.term) {
+                this.sendPtyResize(sId, tab.pane1.term.cols, tab.pane1.term.rows);
+              }
+              this.sendPtyInput(sId, '\r');
+            }
+            this.fitAllPanes();
+            showToast('Layar terminal diperbarui.', 'info');
+          });
           document.getElementById('btnBannerDisconnect')?.addEventListener('click', () => {
             this.disconnectRemoteTerminal();
           });
@@ -31807,12 +31822,12 @@ Aturan:
         closeModal('terminalModal');
       } else {
         openModal('terminalModal');
+        this.initActiveTabPanes();
         this.checkAndPromptRemoteIfMobileOrUnreachable();
         this.detectWindowsBridge(false).then(() => {
           this.syncServerCwd();
         });
         this.updatePaneHeaders();
-        this.initActiveTabPanes();
         this.focusActiveInput();
         [50, 150, 300, 600].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
       }
@@ -31850,6 +31865,16 @@ Aturan:
       this.initXtermPane(1);
       if (tab.isSplit) {
         this.initXtermPane(2);
+      }
+      if (this.isRemoteConnected || this.isWindowsSynced) {
+        if (!tab.pane1?.eventSource) {
+          this.connectStream(tab, tab.pane1, 1);
+        } else if (tab.pane1?.term) {
+          this.sendPtyResize(tab.pane1.sessionId, tab.pane1.term.cols, tab.pane1.term.rows);
+          if (!tab.pane1._hasReceivedData) {
+            this.sendPtyInput(tab.pane1.sessionId, '\r');
+          }
+        }
       }
     },
 
@@ -31983,6 +32008,24 @@ Aturan:
       paneState.term = term;
       paneState.fitAddon = fitAddon;
 
+      // Flush any pending buffer that arrived while xterm was mounting!
+      if (paneState._pendingBuffer && term) {
+        term.write(paneState._pendingBuffer);
+        paneState._pendingBuffer = '';
+        paneState._hasReceivedData = true;
+      }
+
+      container.addEventListener('click', () => {
+        if (paneState && paneState.sessionId && !paneState._hasReceivedData) {
+          this.sendPtyInput(paneState.sessionId, '\r');
+        }
+      });
+      container.addEventListener('touchstart', () => {
+        if (paneState && paneState.sessionId && !paneState._hasReceivedData) {
+          this.sendPtyInput(paneState.sessionId, '\r');
+        }
+      }, { passive: true });
+
       term.onData((data) => {
         // Mode Live PTY (Local Server)
         if (!paneState.isFallbackMode) {
@@ -32022,14 +32065,19 @@ Aturan:
 
     connectStream(tab, paneState, paneNum) {
       const sessionId = paneState.sessionId || `${tab.id}-p${paneNum}`;
+      paneState.sessionId = sessionId;
       if (paneState.eventSource) {
         try { paneState.eventSource.close(); } catch (_) {}
         paneState.eventSource = null;
       }
 
-      const term = paneState.term;
-      const cols = (term && term.cols) ? term.cols : 100;
-      const rows = (term && term.rows) ? term.rows : 28;
+      if (!paneState.term) {
+        this.initXtermPane(paneNum);
+      }
+
+      const activeTerm = paneState.term;
+      const cols = (activeTerm && activeTerm.cols) ? activeTerm.cols : (this.isMobileDevice() ? 45 : 100);
+      const rows = (activeTerm && activeTerm.rows) ? activeTerm.rows : (this.isMobileDevice() ? 30 : 28);
       let endpoint = `/api/terminal/stream?session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}`;
       if (this.remotePin) {
         endpoint += `&pin=${encodeURIComponent(this.remotePin)}`;
@@ -32047,10 +32095,14 @@ Aturan:
       es.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
+          const currentTerm = paneState.term;
           if (msg.type === 'data' || msg.type === 'init') {
-            if (term && typeof msg.data === 'string') {
-              term.write(msg.data);
+            paneState._hasReceivedData = true;
+            if (currentTerm && typeof msg.data === 'string') {
+              currentTerm.write(msg.data);
               this.handleAutoRespond(tab, paneState, paneNum, msg.data);
+            } else if (typeof msg.data === 'string') {
+              paneState._pendingBuffer = (paneState._pendingBuffer || '') + msg.data;
             }
           } else if (msg.type === 'connected') {
             if (this.isRemoteConnected) {
@@ -32070,9 +32122,17 @@ Aturan:
               if (paneNum === 1) tab.cwd = msg.cwd;
               this.updatePaneHeaders();
             }
+            if (currentTerm) {
+              this.sendPtyResize(sessionId, currentTerm.cols, currentTerm.rows);
+              setTimeout(() => {
+                if (!paneState._hasReceivedData && (this.isRemoteConnected || this.isWindowsSynced)) {
+                  this.sendPtyInput(sessionId, '\r');
+                }
+              }, 250);
+            }
           } else if (msg.type === 'exit') {
-            if (term) {
-              term.write(`\r\n\x1b[33m[Proses shell keluar dengan kode ${msg.exitCode || 0}]\x1b[0m\r\n`);
+            if (currentTerm) {
+              currentTerm.write(`\r\n\x1b[33m[Proses shell keluar dengan kode ${msg.exitCode || 0}]\x1b[0m\r\n`);
             }
             if (statusLabel) statusLabel.textContent = 'Selesai';
             if (statusDot) statusDot.className = 'pane-status-dot offline';
@@ -32082,9 +32142,9 @@ Aturan:
               if (statusLabel) statusLabel.textContent = 'Aktif (Cloud Linux)';
               if (statusDot) statusDot.className = 'pane-status-dot online';
               const conf = this.shells[paneState.shell] || this.shells.powershell;
-              if (term && (!paneState._promptRendered || term.rows > 0)) {
+              if (currentTerm && (!paneState._promptRendered || currentTerm.rows > 0)) {
                 paneState._promptRendered = true;
-                term.write(`\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
+                currentTerm.write(`\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
               }
             }
           }
@@ -32227,6 +32287,9 @@ Aturan:
             pane.fitAddon.fit();
             if (pane.sessionId) {
               this.sendPtyResize(pane.sessionId, pane.term.cols, pane.term.rows);
+              if (!pane._hasReceivedData && (this.isRemoteConnected || this.isWindowsSynced)) {
+                this.sendPtyInput(pane.sessionId, '\r');
+              }
             }
           } catch (_) {}
         }

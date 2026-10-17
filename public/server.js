@@ -5421,6 +5421,8 @@ async function requestHandler(req, res) {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Private-Network': 'true'
     });
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+    res.write(': sse-init-pad\n\n');
 
     if (!nodePty) {
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
@@ -5503,13 +5505,13 @@ async function requestHandler(req, res) {
     if (session.buffer && session.buffer.length > 0) {
       const replay = session.buffer.join('');
       res.write(`data: ${JSON.stringify({ type: 'init', data: replay })}\n\n`);
-    } else {
-      setTimeout(() => {
-        if (session && session.pty && (!session.buffer || session.buffer.length === 0)) {
-          try { session.pty.write('\r'); } catch (_) {}
-        }
-      }, 500);
     }
+    // Always trigger a prompt redraw upon client connect so client is never stuck on a blank screen
+    setTimeout(() => {
+      if (session && session.pty) {
+        try { session.pty.write('\r'); } catch (_) {}
+      }
+    }, 150);
 
     const heartbeat = setInterval(() => {
       if (!res.writableEnded) {
