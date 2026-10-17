@@ -1267,11 +1267,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     inspectCountModel4: $('#inspectCountModel4'),
     inspectTabContent: $('#inspectTabContent'),
 
-    // Bio-Endocrine Hormone & Connectome
+    // Bio-Endocrine Hormone & Connectome (Jalur 1: CodeEndocrine v2)
     endocrineMonitorBtn: $('#endocrineMonitorBtn'),
     endocrineHeartIcon: $('#endocrineHeartIcon'),
     endocrineTelemetryModal: $('#endocrineTelemetryModal'),
     btnAuditConnectomeNow: $('#btnAuditConnectomeNow'),
+    btnAutoHealLayoutNow: $('#btnAutoHealLayoutNow'),
     btnPurgeStressEndorphin: $('#btnPurgeStressEndorphin'),
     toggleEndocrineCode: $('#toggleEndocrineCode'),
     toggleEndocrineChat: $('#toggleEndocrineChat'),
@@ -1280,6 +1281,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     paneEndocrineCode: $('#paneEndocrineCode'),
     paneEndocrineChat: $('#paneEndocrineChat'),
     btnResetChatEndocrine: $('#btnResetChatEndocrine'),
+    cardPillarConnectome: $('#cardPillarConnectome'),
+    cardPillarModel: $('#cardPillarModel'),
+    cardPillarText: $('#cardPillarText'),
+    cardPillarViewport: $('#cardPillarViewport'),
+    cardPillarButton: $('#cardPillarButton'),
+    endocrineDiagnosticList: $('#endocrineDiagnosticList'),
 
     // Local Workspace & Document Management
     tabBtnLocalWorkspace: $('#tabBtnLocalWorkspace'),
@@ -1371,9 +1378,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     btnCancelDocMode: $('#btnCancelDocMode')
   };
 
-  // ==================== BIO-ENDOCRINE HORMONE & CONNECTOME SYSTEM ====================
+  // ==================== BIO-ENDOCRINE HORMONE & CONNECTOME SYSTEM (JALUR 1: CODE-ENDOCRINE v2) ====================
   // Mengadaptasi sistem hormon mahluk hidup: Dopamin vs Kortisol (Stres)
-  // Mengetahui bug, error, dan kode yang tidak berhubungan / terisolasi secara seketika!
+  // Mengetahui bug, error, kesalahan panggil model, teks rusak, kerusakan layout/layar,
+  // tombol tidak sesuai / terhalang, serta kode yang terisolasi secara seketika!
   const BioEndocrine = {
     hormones: {
       dopamine: 100,
@@ -1383,43 +1391,51 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     },
     history: [],
     isolatedNodes: [],
+    modelErrors: [],
+    textAnomalies: [],
+    viewportIssues: [],
+    buttonIssues: [],
+    activeSubTab: 'all',
     connectedCount: 0,
     totalAudited: 0,
+    lastAuditTimestamp: null,
 
     init() {
       // 1. Tangkap seluruh unhandled error / promise rejection di browser secara global
-      window.addEventListener('error', (evt) => {
-        const errorMsg = evt.message || (evt.error && evt.error.message) || 'Script exception';
-        const file = evt.filename ? evt.filename.split('/').pop() : 'script';
-        const line = evt.lineno || '?';
-        this.secreteStress(30, `Exception di ${file}:${line} (${errorMsg})`);
-      });
+      if (typeof window !== 'undefined') {
+        window.addEventListener('error', (evt) => {
+          const errorMsg = evt.message || (evt.error && evt.error.message) || 'Script exception';
+          const file = evt.filename ? evt.filename.split('/').pop() : 'script';
+          const line = evt.lineno || '?';
+          this.secreteStress(30, `Exception di ${file}:${line} (${errorMsg})`);
+        });
 
-      window.addEventListener('unhandledrejection', (evt) => {
-        const reason = evt.reason ? (evt.reason.message || String(evt.reason)) : 'Unhandled Promise';
-        this.secreteStress(25, `Unhandled Promise Rejection: ${reason}`);
-      });
+        window.addEventListener('unhandledrejection', (evt) => {
+          const reason = evt.reason ? (evt.reason.message || String(evt.reason)) : 'Unhandled Promise';
+          this.secreteStress(25, `Unhandled Promise Rejection: ${reason}`);
+        });
 
-      // 2. Pasang audit connectome awal setelah DOM stabil
-      setTimeout(() => {
-        this.auditConnectome(true);
-        this.updateUI();
-      }, 1200);
+        // 2. Pasang audit komprehensif awal setelah DOM stabil
+        setTimeout(() => {
+          this.auditComprehensive(true);
+          this.updateUI();
+        }, 1400);
 
-      // 3. Metabolisme berkala: homeostatik setiap 15 detik
-      setInterval(() => {
-        if (this.hormones.cortisol > 0) {
-          this.hormones.cortisol = Math.max(0, Math.round((this.hormones.cortisol - 2) * 10) / 10);
-        }
-        if (this.hormones.dopamine < 100 && this.hormones.cortisol <= 10) {
-          this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 1);
-        }
-        if (this.hormones.adrenaline > 0) {
-          this.hormones.adrenaline = Math.max(0, this.hormones.adrenaline - 3);
-        }
-        this.hormones.serotonin = Math.round((this.hormones.dopamine * 0.7) + ((100 - this.hormones.cortisol) * 0.3));
-        this.updateUI();
-      }, 15000);
+        // 3. Metabolisme berkala: homeostatik setiap 15 detik
+        setInterval(() => {
+          if (this.hormones.cortisol > 0) {
+            this.hormones.cortisol = Math.max(0, Math.round((this.hormones.cortisol - 2) * 10) / 10);
+          }
+          if (this.hormones.dopamine < 100 && this.hormones.cortisol <= 10) {
+            this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 1);
+          }
+          if (this.hormones.adrenaline > 0) {
+            this.hormones.adrenaline = Math.max(0, this.hormones.adrenaline - 3);
+          }
+          this.hormones.serotonin = Math.round((this.hormones.dopamine * 0.7) + ((100 - this.hormones.cortisol) * 0.3));
+          this.updateUI();
+        }, 15000);
+      }
     },
 
     secreteDopamine(amount, reason) {
@@ -1442,26 +1458,28 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       } catch (_) {}
     },
 
+    // 1. Audit Connectome (Simpul DOM & Reseptor Terisolasi)
     auditConnectome(silent = false) {
       const issues = [];
       let connected = 0;
       let total = 0;
 
-      if (typeof els === 'object') {
-        for (const [key, val] of Object.entries(els)) {
-          total++;
-          let isNodeConnected = false;
-          if (val instanceof NodeList || Array.isArray(val)) {
-            isNodeConnected = val.length > 0;
-          } else {
-            isNodeConnected = Boolean(val);
-          }
+      const elsMap = (typeof els === 'object' && els !== null) ? els : (typeof window !== 'undefined' && window.els ? window.els : {});
+      for (const [key, val] of Object.entries(elsMap)) {
+        total++;
+        let isNodeConnected = false;
+        if (typeof NodeList !== 'undefined' && val instanceof NodeList) {
+          isNodeConnected = val.length > 0;
+        } else if (Array.isArray(val)) {
+          isNodeConnected = val.length > 0;
+        } else {
+          isNodeConnected = Boolean(val);
+        }
 
-          if (!isNodeConnected) {
-            issues.push(`Reseptor DOM terisolasi: els.${key} tidak ditemukan di DOM`);
-          } else {
-            connected++;
-          }
+        if (!isNodeConnected) {
+          issues.push(`Reseptor DOM terisolasi: els.${key} tidak ditemukan di DOM`);
+        } else {
+          connected++;
         }
       }
 
@@ -1478,13 +1496,413 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       return { connected, total, issues };
     },
 
+    // 2. Detektor Kesalahan Panggil Model & Error Inferensi
+    registerModelCallError(errorData = {}) {
+      const model = errorData.model || 'Unknown Model';
+      const endpoint = errorData.endpoint || (model.includes('/') ? 'OpenRouter' : 'Ollama');
+      const rawMsg = errorData.error ? (errorData.error.message || String(errorData.error)) : (errorData.reason || 'Unknown error');
+      const status = errorData.status || (rawMsg.match(/\b([45]\d\d)\b/)?.[1]) || 500;
+      
+      let errorType = 'Inference Failure';
+      let severity = 25;
+
+      const lower = rawMsg.toLowerCase();
+      if (status == 400 || lower.includes('invalid argument') || lower.includes('bad request') || lower.includes('schema')) {
+        errorType = '400 Bad Request / Invalid Parameter';
+        severity = 20;
+      } else if (status == 401 || lower.includes('unauthorized') || lower.includes('api key') || lower.includes('authentication')) {
+        errorType = '401 Unauthorized / Invalid API Key';
+        severity = 30;
+      } else if (status == 402 || lower.includes('insufficient_quota') || lower.includes('credits') || lower.includes('payment')) {
+        errorType = '402 Quota / Saldo Model Habis';
+        severity = 28;
+      } else if (status == 403 || lower.includes('forbidden') || lower.includes('permission')) {
+        errorType = '403 Forbidden / Akses Ditolak';
+        severity = 24;
+      } else if (status == 404 || lower.includes('not found') || lower.includes('unknown model') || lower.includes('deprecated')) {
+        errorType = '404 Model Tidak Ditemukan / Deprecated';
+        severity = 26;
+      } else if (status == 429 || lower.includes('rate limit') || lower.includes('too many requests')) {
+        errorType = '429 Rate Limit Terlampaui';
+        severity = 25;
+      } else if (lower.includes('content policy') || lower.includes('moderation') || lower.includes('safety') || lower.includes('blocked')) {
+        errorType = 'Safety Block / Kebijakan Konten Terpicu';
+        severity = 20;
+      } else if (lower.includes('context length') || lower.includes('maximum context') || lower.includes('tokens exceeds')) {
+        errorType = 'Context Window Overflow (Prompt Terlalu Panjang)';
+        severity = 22;
+      } else if (lower.includes('timeout') || lower.includes('abort') || lower.includes('aborted') || lower.includes('networkerror')) {
+        errorType = 'Koneksi Terputus / Timeout';
+        severity = 20;
+      } else if (status >= 500) {
+        errorType = `${status} Provider Engine Outage / Server Error`;
+        severity = 28;
+      }
+
+      const item = {
+        id: 'merr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+        time: new Date().toLocaleTimeString(),
+        model,
+        endpoint,
+        errorType,
+        status,
+        reason: rawMsg,
+        promptPreview: errorData.promptPreview ? String(errorData.promptPreview).slice(0, 100) : ''
+      };
+
+      this.modelErrors.unshift(item);
+      if (this.modelErrors.length > 30) this.modelErrors.pop();
+
+      this.secreteStress(severity, `[Error Model] ${model} (${errorType}): ${rawMsg.slice(0, 75)}`);
+      return item;
+    },
+
+    // 3. Detektor Teks Rusak / Pecah dari Output Model
+    inspectModelText(text, modelContext = {}) {
+      if (!text || typeof text !== 'string') return [];
+      const model = modelContext.model || (typeof STATE !== 'undefined' ? (STATE.mode === 'ollama' ? STATE.settings.ollamaModel : STATE.settings.openrouterModel) : 'AI Model');
+      const anomalies = [];
+
+      // a. Tag internal thinking / reasoning yang bocor ke output
+      const thinkingTagMatch = text.match(/<\/?(?:think|thought|reasoning|internal_reasoning|ant_thought|thought_process)\b[^>]*>/i);
+      if (thinkingTagMatch) {
+        anomalies.push({
+          type: 'thinking_tag_leak',
+          label: 'Kebocoran Tag Pemikiran AI',
+          reason: `Tag proses internal "${thinkingTagMatch[0]}" bocor langsung ke gelembung teks pengguna.`,
+          snippet: thinkingTagMatch[0]
+        });
+      }
+
+      // b. Mojibake / Kerusakan encoding UTF-8
+      const mojibakeMatches = text.match(/(?:[\uFFFD]|Ã©|â€™|â€œ|â€\x9d|Ã |Ã¨|Ã±|Ã§|â€“|ï¿½)/g);
+      if (mojibakeMatches && mojibakeMatches.length >= 2) {
+        anomalies.push({
+          type: 'mojibake_encoding',
+          label: 'Kerusakan Encoding Teks (Mojibake)',
+          reason: `Terdeteksi ${mojibakeMatches.length} karakter rusak (mojibake / UTF-8 artifact) pada respons model.`,
+          snippet: mojibakeMatches.slice(0, 5).join(' ')
+        });
+      }
+
+      // c. Degenerasi perulangan kata tanpa henti (Infinite Token Repetition Loop)
+      const repeatWordMatch = text.match(/\b([a-zA-Z0-9_\u00C0-\u024F]{2,})\b(?:\s+\1\b){7,}/i);
+      if (repeatWordMatch) {
+        anomalies.push({
+          type: 'repetition_loop',
+          label: 'Degenerasi Perulangan Kata (Token Loop)',
+          reason: `Model terjebak mengulang kata "${repeatWordMatch[1]}" secara beruntun.`,
+          snippet: repeatWordMatch[0].slice(0, 80)
+        });
+      }
+
+      // d. Untaian karakter masif tanpa spasi yang berisiko memecahkan layout wadah
+      const blowoutMatch = text.match(/(?:^|\s)([^\s]{150,})(?:\s|$)/);
+      if (blowoutMatch && !blowoutMatch[1].startsWith('http') && !blowoutMatch[1].startsWith('data:') && !blowoutMatch[1].includes('base64')) {
+        anomalies.push({
+          type: 'container_blowout',
+          label: 'Teks Super Panjang Tanpa Spasi (Blowout)',
+          reason: `String sepanjang ${blowoutMatch[1].length} karakter tanpa spasi berpotensi memecahkan batas kolom layout.`,
+          snippet: blowoutMatch[1].slice(0, 50) + '...'
+        });
+      }
+
+      if (anomalies.length > 0) {
+        for (const anom of anomalies) {
+          const record = {
+            id: 'txt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+            time: new Date().toLocaleTimeString(),
+            model,
+            ...anom
+          };
+          this.textAnomalies.unshift(record);
+          if (this.textAnomalies.length > 30) this.textAnomalies.pop();
+          this.secreteStress(18, `[Teks Rusak Model] ${model}: ${anom.label} - ${anom.reason.slice(0, 60)}`);
+        }
+      }
+
+      return anomalies;
+    },
+
+    // 4. Detektor Kerusakan Dimensi Layar & Viewport Overflow
+    auditViewportAndLayout(silent = false) {
+      const issues = [];
+      if (typeof window === 'undefined' || typeof document === 'undefined') return issues;
+
+      const docEl = document.documentElement;
+      const body = document.body;
+      const winW = window.innerWidth || 1024;
+      const winH = window.innerHeight || 768;
+      const scrollW = Math.max(docEl ? docEl.scrollWidth : 0, body ? body.scrollWidth : 0);
+
+      // a. Viewport Horizontal Overflow
+      if (scrollW > winW + 3) {
+        const diff = Math.round(scrollW - winW);
+        issues.push({
+          id: 'vp_' + Date.now() + '_overflow',
+          type: 'horizontal_overflow',
+          severity: 'high',
+          selector: 'window.viewport',
+          reason: `Layar bocor ke samping kanan sebesar ${diff}px (scrollWidth ${scrollW}px > window ${winW}px), memicu scroll horizontal yang merusak estetika!`,
+          fixable: true
+        });
+      }
+
+      // b. Periksa kontainer kritis terhadap overflow lebar
+      const criticalSelectors = [
+        '#chatContainer', '#messagesList', '.message-bubble', '.input-container-wrapper',
+        '#sidebar', '.composer-container', '.gemini-canvas-studio', '.chat-viewport'
+      ];
+      for (const sel of criticalSelectors) {
+        const el = typeof document.querySelector === 'function' ? document.querySelector(sel) : null;
+        if (el && el.offsetParent !== null && typeof el.getBoundingClientRect === 'function') {
+          const rect = el.getBoundingClientRect();
+          if (rect.right > winW + 4) {
+            issues.push({
+              id: 'vp_el_' + sel.replace(/[^a-zA-Z0-9]/g, '_'),
+              type: 'element_overflow',
+              severity: 'medium',
+              selector: sel,
+              reason: `Elemen ${sel} melebihi batas layar kanan (${Math.round(rect.right)}px > ${winW}px).`,
+              fixable: true
+            });
+          }
+        }
+      }
+
+      // c. Deteksi elemen fixed overlay yang menutupi layar tanpa transparansi klik
+      if (typeof document.querySelectorAll === 'function') {
+        const rogueOverlays = document.querySelectorAll('.modal:not(.show), .overlay:not(.active)');
+        for (const ov of rogueOverlays) {
+          if (typeof window.getComputedStyle === 'function') {
+            const style = window.getComputedStyle(ov);
+            if (style.display !== 'none' && style.visibility !== 'hidden' && style.pointerEvents !== 'none' && parseFloat(style.opacity || '1') === 0) {
+              issues.push({
+                id: 'vp_overlay_' + (ov.id || ov.className),
+                type: 'invisible_blocking_overlay',
+                severity: 'high',
+                selector: `#${ov.id || ov.className}`,
+                reason: `Overlay tidak terlihat tapi aktif memblokir interaksi sentuhan/klik pengguna pada seluruh layar.`,
+                fixable: true
+              });
+            }
+          }
+        }
+      }
+
+      this.viewportIssues = issues;
+      if (issues.length > 0) {
+        this.secreteStress(issues.length * 15, `Terdeteksi ${issues.length} kerusakan dimensi layar / layout overflow!`);
+      } else if (!silent) {
+        this.secreteDopamine(10, 'Audit layout: Dimensi layar stabil, tidak ditemukan kebocoran horizontal');
+      }
+      this.updateUI();
+      return issues;
+    },
+
+    // 5. Detektor Posisi Tombol Tidak Sesuai atau Terhalang (Obstruction & Placement)
+    auditButtonPlacementAndObstruction(silent = false) {
+      const issues = [];
+      if (typeof window === 'undefined' || typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return issues;
+
+      const buttons = document.querySelectorAll('button, a.btn, [role="button"], input[type="button"], input[type="submit"]');
+      const winW = window.innerWidth || 1024;
+      const winH = window.innerHeight || 768;
+
+      for (const btn of buttons) {
+        // Abaikan tombol yang memang sengaja disembunyikan (display: none / hidden parent)
+        if (btn.offsetParent === null && !btn.classList?.contains('active')) continue;
+        if (typeof window.getComputedStyle !== 'function' || typeof btn.getBoundingClientRect !== 'function') continue;
+        const style = window.getComputedStyle(btn);
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+
+        const rect = btn.getBoundingClientRect();
+        const btnId = btn.id ? `#${btn.id}` : (btn.className ? `.${String(btn.className).trim().split(/\s+/)[0]}` : '<button>');
+        const btnText = (btn.innerText || btn.getAttribute('aria-label') || btn.title || '').trim().slice(0, 25);
+        const btnLabel = btnText ? `"${btnText}" (${btnId})` : btnId;
+
+        // a. Tombol kerdil / ukuran tidak wajar (< 14px)
+        if ((rect.width > 0 && rect.width < 14) || (rect.height > 0 && rect.height < 14)) {
+          issues.push({
+            id: 'btn_dim_' + (btn.id || Math.random().toString(36).substr(2, 4)),
+            type: 'squished_dimensions',
+            severity: 'medium',
+            selector: btnId,
+            text: btnText,
+            reason: `Tombol ${btnLabel} memiliki dimensi terlalu kerdil (${Math.round(rect.width)}x${Math.round(rect.height)}px) sehingga hampir mustahil diklik/ditekan!`,
+            fixable: false
+          });
+          continue;
+        }
+
+        // b. Tombol berada di luar koordinat pandang (Misplaced offscreen)
+        if (rect.right < 0 || rect.bottom < 0 || rect.left > winW || rect.top > winH * 20) {
+          issues.push({
+            id: 'btn_off_' + (btn.id || Math.random().toString(36).substr(2, 4)),
+            type: 'misplaced_offscreen',
+            severity: 'medium',
+            selector: btnId,
+            text: btnText,
+            reason: `Tombol ${btnLabel} tergeser keluar dari area pandang pengguna (X: ${Math.round(rect.left)}, Y: ${Math.round(rect.top)}).`,
+            fixable: false
+          });
+          continue;
+        }
+
+        // c. Pointer-events trap (tombol aktif tetapi dinonaktifkan secara klik CSS tanpa attribute disabled)
+        if (style.pointerEvents === 'none' && !btn.hasAttribute('disabled') && !btn.classList?.contains('disabled')) {
+          issues.push({
+            id: 'btn_trap_' + (btn.id || Math.random().toString(36).substr(2, 4)),
+            type: 'pointer_events_trap',
+            severity: 'high',
+            selector: btnId,
+            text: btnText,
+            reason: `Tombol ${btnLabel} tampak aktif tetapi memiliki pointer-events: none sehingga mengabaikan semua klik pengguna.`,
+            fixable: true
+          });
+        }
+
+        // d. Deteksi Tombol Terhalang Fisik (Obstruction Check via document.elementFromPoint)
+        const cx = rect.left + (rect.width / 2);
+        const cy = rect.top + (rect.height / 2);
+        if (cx >= 0 && cx <= winW && cy >= 0 && cy <= winH && typeof document.elementFromPoint === 'function') {
+          const topEl = document.elementFromPoint(cx, cy);
+          if (topEl && topEl !== btn && !btn.contains(topEl) && !topEl.contains(btn)) {
+            const blockerTag = (topEl.tagName || 'div').toLowerCase();
+            const blockerClass = topEl.className ? `.${String(topEl.className).trim().split(/\s+/).join('.')}` : '';
+            const blockerId = topEl.id ? `#${topEl.id}` : '';
+            const blockerDesc = `<${blockerTag}${blockerId}${blockerClass}>`;
+            
+            issues.push({
+              id: 'btn_obs_' + (btn.id || Math.random().toString(36).substr(2, 4)),
+              type: 'button_obstructed',
+              severity: 'high',
+              selector: btnId,
+              text: btnText,
+              blocker: blockerDesc,
+              reason: `Tombol ${btnLabel} terhalang fisik oleh elemen ${blockerDesc} yang menimpanya di titik klik (${Math.round(cx)}, ${Math.round(cy)})!`,
+              fixable: true
+            });
+          }
+        }
+      }
+
+      this.buttonIssues = issues;
+      if (issues.length > 0) {
+        this.secreteStress(issues.length * 12, `Terdeteksi ${issues.length} tombol terhalang atau tidak sesuai posisi!`);
+      } else if (!silent) {
+        this.secreteDopamine(10, 'Audit tombol: Semua tombol antarmuka berada pada posisi valid dan bebas halangan');
+      }
+      this.updateUI();
+      return issues;
+    },
+
+    // 6. Audit Komprehensif (Menjalankan seluruh 5 pilar diagnosa)
+    auditComprehensive(silent = false) {
+      this.lastAuditTimestamp = new Date().toLocaleTimeString();
+      const conn = this.auditConnectome(true);
+      const vp = this.auditViewportAndLayout(true);
+      const btns = this.auditButtonPlacementAndObstruction(true);
+
+      const totalIssues = (conn.issues?.length || 0) + (vp?.length || 0) + (btns?.length || 0) + (this.modelErrors?.length || 0) + (this.textAnomalies?.length || 0);
+      
+      if (totalIssues === 0 && !silent) {
+        this.secreteDopamine(20, `Audit komprehensif selesai: 5 Pilar Kode sehat sempurna (0 bug, 0 tombol terhalang, 0 kebocoran layout)!`);
+      }
+      this.updateUI();
+      return {
+        timestamp: this.lastAuditTimestamp,
+        connectome: conn,
+        viewport: vp,
+        buttons: btns,
+        modelErrors: this.modelErrors,
+        textAnomalies: this.textAnomalies,
+        totalIssues
+      };
+    },
+
+    // 7. Penyembuh Otomatis (Auto-Heal Layout & Halangan Tombol)
+    autoFixLayoutAndButtons() {
+      let healedCount = 0;
+      if (typeof window === 'undefined' || typeof document === 'undefined') return healedCount;
+      try {
+        // a. Sembuhkan horizontal overflow viewport
+        if (document.documentElement) {
+          document.documentElement.style.overflowX = 'hidden';
+          document.documentElement.style.maxWidth = '100vw';
+        }
+        if (document.body) {
+          document.body.style.overflowX = 'hidden';
+          document.body.style.maxWidth = '100vw';
+        }
+
+        // Cari elemen penyebab overflow horizontal
+        const winW = window.innerWidth || 1024;
+        if (typeof document.querySelectorAll === 'function') {
+          const allElements = document.querySelectorAll('*');
+          allElements.forEach(el => {
+            if (el.offsetParent !== null && typeof el.getBoundingClientRect === 'function') {
+              const r = el.getBoundingClientRect();
+              if (r.right > winW + 5 && !el.classList?.contains('gemini-canvas-studio')) {
+                el.style.maxWidth = '100%';
+                el.style.boxSizing = 'border-box';
+                healedCount++;
+              }
+            }
+          });
+
+          // b. Sembuhkan modal backdrop atau overlay liar yang tidak tertutup rapi
+          const allModals = document.querySelectorAll('.modal');
+          allModals.forEach(m => {
+            if (!m.classList?.contains('show')) {
+              m.style.display = 'none';
+            }
+          });
+
+          // c. Hilangkan pointer-events none yang nyangkut pada tombol aktif
+          const trappedButtons = document.querySelectorAll('button[style*="pointer-events: none"]:not([disabled])');
+          trappedButtons.forEach(btn => {
+            btn.style.pointerEvents = 'auto';
+            healedCount++;
+          });
+        }
+
+        // Audit ulang komprehensif
+        this.auditComprehensive(true);
+        this.secreteDopamine(25, `Auto-Heal berhasil: Memperbaiki ${healedCount} anomali layout & halangan tombol!`);
+        if (typeof showToast === 'function') {
+          showToast(`⚡ Auto-Heal berhasil! Memperbaiki ${healedCount} anomali layout & membuka akses tombol.`, 'success');
+        }
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.success) AudioEngine.success();
+      } catch (e) {
+        console.warn('Auto-heal error:', e);
+      }
+      return healedCount;
+    },
+
+    // 8. Filter Subtab
+    setSubTabFilter(filter = 'all') {
+      this.activeSubTab = filter;
+      if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
+        const subtabs = document.querySelectorAll('.endocrine-subtab-btn');
+        subtabs.forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.subtab === filter);
+        });
+      }
+      this.renderModalContent();
+    },
+
     purgeStress() {
       this.hormones.cortisol = 0;
       this.hormones.dopamine = 100;
       this.hormones.serotonin = 100;
       this.hormones.adrenaline = 0;
       this.isolatedNodes = [];
-      this.log('endorphin', 50, 'Suntikan Endorfin: Keseimbangan & kestabilan dipulihkan penuh');
+      this.modelErrors = [];
+      this.textAnomalies = [];
+      this.viewportIssues = [];
+      this.buttonIssues = [];
+      this.log('endorphin', 50, 'Suntikan Endorfin: Keseimbangan & kestabilan dipulihkan penuh (0% Stres)');
       this.updateUI();
       try {
         if (typeof AudioEngine !== 'undefined' && AudioEngine.playBeep && STATE.soundEnabled) {
@@ -1510,6 +1928,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     },
 
     updateUI() {
+      if (typeof document === 'undefined') return;
       const btn = document.getElementById('endocrineMonitorBtn');
       const heartIcon = document.getElementById('endocrineHeartIcon');
       if (btn) {
@@ -1517,8 +1936,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         const c = Math.round(this.hormones.cortisol);
 
         let chatSuffix = '';
-        if (typeof ChatEndocrine !== 'undefined' && ChatEndocrine.enabled) {
-          chatSuffix = ` | Rasa: ${ChatEndocrine.currentVibe} (Oksitosin ${Math.round(ChatEndocrine.hormones.oxytocin)}%)`;
+        if (typeof window !== 'undefined' && window.ChatEndocrine && window.ChatEndocrine.enabled) {
+          chatSuffix = ` | Rasa: ${window.ChatEndocrine.currentVibe} (Oksitosin ${Math.round(window.ChatEndocrine.hormones.oxytocin)}%)`;
         }
 
         btn.classList.remove('status-happy', 'status-stressed', 'status-critical');
@@ -1540,14 +1959,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const modal = document.getElementById('endocrineTelemetryModal');
       if (modal && modal.classList.contains('show')) {
         this.renderModalContent();
-        if (typeof ChatEndocrine !== 'undefined') {
-          ChatEndocrine.syncToggleUI();
-          ChatEndocrine.renderModalContent();
+        if (typeof window !== 'undefined' && window.ChatEndocrine) {
+          window.ChatEndocrine.syncToggleUI();
+          window.ChatEndocrine.renderModalContent();
         }
       }
     },
 
     renderModalContent() {
+      if (typeof document === 'undefined') return;
       const esc = (s) => (typeof escapeHtml === 'function' ? escapeHtml(s) : String(s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])));
       const d = Math.round(this.hormones.dopamine);
       const c = Math.round(this.hormones.cortisol);
@@ -1587,37 +2007,214 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
       }
 
+      // Update 5-Pillar Cards
+      const cardConn = document.getElementById('cardPillarConnectome');
+      const statConn = document.getElementById('pillarConnectomeStatus');
+      const cardModel = document.getElementById('cardPillarModel');
+      const statModel = document.getElementById('pillarModelStatus');
+      const cardText = document.getElementById('cardPillarText');
+      const statText = document.getElementById('pillarTextStatus');
+      const cardVp = document.getElementById('cardPillarViewport');
+      const statVp = document.getElementById('pillarViewportStatus');
+      const cardBtn = document.getElementById('cardPillarButton');
+      const statBtn = document.getElementById('pillarButtonStatus');
+
+      // Pillar 1: Connectome
+      const isolatedCount = this.isolatedNodes ? this.isolatedNodes.length : 0;
+      if (cardConn) {
+        cardConn.className = `endocrine-pillar-card ${isolatedCount > 0 ? 'status-critical' : 'status-healthy'}`;
+      }
+      if (statConn) {
+        statConn.innerText = isolatedCount > 0 ? `${isolatedCount} Terisolasi` : '100% Harmonis';
+        statConn.style.color = isolatedCount > 0 ? '#FF4D4D' : '#00FFC2';
+      }
+      if (connVal) {
+        connVal.innerText = isolatedCount > 0 ? `${this.connectedCount}/${this.totalAudited} (${isolatedCount} Terisolasi)` : `100% Harmonis (${this.connectedCount} Simpul)`;
+      }
+
+      // Pillar 2: Model Errors
+      const modelErrCount = this.modelErrors ? this.modelErrors.length : 0;
+      if (cardModel) {
+        cardModel.className = `endocrine-pillar-card ${modelErrCount > 0 ? 'status-critical' : 'status-healthy'}`;
+      }
+      if (statModel) {
+        statModel.innerText = modelErrCount > 0 ? `${modelErrCount} Error Panggil` : '0 Error';
+        statModel.style.color = modelErrCount > 0 ? '#FF4D4D' : '#00FFC2';
+      }
+
+      // Pillar 3: Text Anomalies
+      const textAnomCount = this.textAnomalies ? this.textAnomalies.length : 0;
+      if (cardText) {
+        cardText.className = `endocrine-pillar-card ${textAnomCount > 0 ? 'status-warning' : 'status-healthy'}`;
+      }
+      if (statText) {
+        statText.innerText = textAnomCount > 0 ? `${textAnomCount} Anomali Teks` : '0 Pecah / Bocor';
+        statText.style.color = textAnomCount > 0 ? '#FFB703' : '#00FFC2';
+      }
+
+      // Pillar 4: Viewport Issues
+      const vpIssuesCount = this.viewportIssues ? this.viewportIssues.length : 0;
+      if (cardVp) {
+        cardVp.className = `endocrine-pillar-card ${vpIssuesCount > 0 ? 'status-warning' : 'status-healthy'}`;
+      }
+      if (statVp) {
+        statVp.innerText = vpIssuesCount > 0 ? `${vpIssuesCount} Overflow` : 'Stabil 100%';
+        statVp.style.color = vpIssuesCount > 0 ? '#FFB703' : '#00FFC2';
+      }
+
+      // Pillar 5: Button Placement / Obstruction
+      const btnIssuesCount = this.buttonIssues ? this.buttonIssues.length : 0;
+      if (cardBtn) {
+        cardBtn.className = `endocrine-pillar-card ${btnIssuesCount > 0 ? 'status-critical' : 'status-healthy'}`;
+      }
+      if (statBtn) {
+        statBtn.innerText = btnIssuesCount > 0 ? `${btnIssuesCount} Terhalang/Rusak` : 'Bebas Halangan';
+        statBtn.style.color = btnIssuesCount > 0 ? '#FF4D4D' : '#00FFC2';
+      }
+
+      // Diagnostic Center / Issues List
       const isolatedBox = document.getElementById('endocrineIsolatedBox');
       const isolatedTag = document.getElementById('endocrineIsolatedTag');
       const isolatedContent = document.getElementById('endocrineIsolatedContent');
+      const diagList = document.getElementById('endocrineDiagnosticList');
 
-      if (this.isolatedNodes.length > 0) {
-        if (connVal) connVal.innerText = `${this.connectedCount}/${this.totalAudited} Simpul (${this.isolatedNodes.length} Terisolasi)`;
+      // Aggregate all active issues according to activeSubTab
+      const allActiveIssues = [];
+
+      // 1. Connectome
+      if (this.activeSubTab === 'all' || this.activeSubTab === 'connectome') {
+        (this.isolatedNodes || []).forEach(err => {
+          allActiveIssues.push({
+            type: 'connectome',
+            badge: 'Simpul DOM',
+            badgeClass: 'badge-connectome',
+            severity: 'high',
+            time: 'Aktif',
+            title: 'Reseptor DOM Terisolasi',
+            body: `<code>${esc(err)}</code>`,
+            snippet: err.slice(0, 60),
+            fixable: false
+          });
+        });
+      }
+
+      // 2. Model Errors
+      if (this.activeSubTab === 'all' || this.activeSubTab === 'model') {
+        (this.modelErrors || []).forEach(err => {
+          allActiveIssues.push({
+            type: 'model',
+            badge: 'Model Call',
+            badgeClass: 'badge-model',
+            severity: err.status >= 500 || err.status == 401 ? 'high' : 'medium',
+            time: err.time,
+            title: `[${esc(err.endpoint || 'API')}] ${esc(err.model)} (${esc(err.errorType)})`,
+            body: esc(err.reason),
+            snippet: `Status: ${err.status} | Model: ${err.model}`,
+            fixable: false
+          });
+        });
+      }
+
+      // 3. Text Anomalies
+      if (this.activeSubTab === 'all' || this.activeSubTab === 'text') {
+        (this.textAnomalies || []).forEach(anom => {
+          allActiveIssues.push({
+            type: 'text',
+            badge: 'Teks Rusak',
+            badgeClass: 'badge-text',
+            severity: 'medium',
+            time: anom.time,
+            title: `${esc(anom.label)} (${esc(anom.model)})`,
+            body: esc(anom.reason),
+            snippet: anom.snippet ? `Snippet: "${esc(anom.snippet)}"` : '',
+            fixable: false
+          });
+        });
+      }
+
+      // 4. Viewport Issues
+      if (this.activeSubTab === 'all' || this.activeSubTab === 'viewport') {
+        (this.viewportIssues || []).forEach(vp => {
+          allActiveIssues.push({
+            type: 'viewport',
+            badge: 'Layar & Layout',
+            badgeClass: 'badge-viewport',
+            severity: vp.severity || 'high',
+            time: 'Aktif',
+            title: `Layout Overflow pada ${esc(vp.selector)}`,
+            body: esc(vp.reason),
+            snippet: vp.selector,
+            fixable: vp.fixable
+          });
+        });
+      }
+
+      // 5. Button Issues
+      if (this.activeSubTab === 'all' || this.activeSubTab === 'button') {
+        (this.buttonIssues || []).forEach(btn => {
+          allActiveIssues.push({
+            type: 'button',
+            badge: 'Tombol Terhalang',
+            badgeClass: 'badge-button',
+            severity: btn.severity || 'high',
+            time: 'Aktif',
+            title: `Akses Terhalang: ${esc(btn.selector)}`,
+            body: esc(btn.reason),
+            snippet: btn.blocker ? `Penghalang: ${esc(btn.blocker)}` : btn.selector,
+            fixable: btn.fixable
+          });
+        });
+      }
+
+      const totalDiscoveredIssues = (this.isolatedNodes?.length || 0) + (this.modelErrors?.length || 0) + (this.textAnomalies?.length || 0) + (this.viewportIssues?.length || 0) + (this.buttonIssues?.length || 0);
+
+      if (totalDiscoveredIssues > 0) {
         if (isolatedBox) isolatedBox.classList.add('has-issues');
         if (isolatedTag) {
           isolatedTag.className = 'isolated-status-tag tag-warning';
-          isolatedTag.innerText = `⚠️ ${this.isolatedNodes.length} Terisolasi`;
-        }
-        if (isolatedContent) {
-          isolatedContent.innerHTML = `
-            <div style="color:#FFB703; font-weight:700; margin-bottom:4px;">Terdeteksi komponen kode/DOM yang tidak terhubung:</div>
-            <ul style="margin:0; padding-left:18px; color:var(--text-main);">
-              ${this.isolatedNodes.map(err => `<li><code>${esc(err)}</code></li>`).join('')}
-            </ul>
-          `;
+          isolatedTag.innerText = `⚠️ ${totalDiscoveredIssues} Isu Terdeteksi`;
         }
       } else {
-        if (connVal) connVal.innerText = `100% Harmonis (${this.connectedCount} Simpul)`;
         if (isolatedBox) isolatedBox.classList.remove('has-issues');
         if (isolatedTag) {
           isolatedTag.className = 'isolated-status-tag tag-healthy';
           isolatedTag.innerText = 'Semua Terhubung Sempurna';
         }
+      }
+
+      if (allActiveIssues.length > 0) {
         if (isolatedContent) {
-          isolatedContent.innerHTML = `Semua modul logika, pemanggil antarmuka, dan reseptor DOM saling terikat dengan harmonis. Tidak ditemukan kode terisolasi atau bug struktural.`;
+          isolatedContent.innerHTML = `<span style="color:#FFB703; font-weight:700;">Ditemukan ${allActiveIssues.length} temuan pada kategori ini:</span> Periksa detail di bawah atau gunakan Auto-Heal untuk memperbaiki anomali yang dapat disembuhkan otomatis.`;
+        }
+        if (diagList) {
+          diagList.style.display = 'flex';
+          diagList.innerHTML = allActiveIssues.map(issue => `
+            <div class="endocrine-issue-item severity-${issue.severity}">
+              <div class="endocrine-issue-header">
+                <span class="endocrine-issue-badge ${issue.badgeClass}">${issue.badge}</span>
+                <span class="endocrine-issue-time">${issue.time}</span>
+              </div>
+              <div style="font-weight:700; color:#FFF; font-size:0.8rem; margin:2px 0;">${issue.title}</div>
+              <div class="endocrine-issue-body">${issue.body}</div>
+              ${issue.snippet ? `<div class="endocrine-issue-snippet">${issue.snippet}</div>` : ''}
+            </div>
+          `).join('');
+        }
+      } else {
+        if (diagList) {
+          diagList.style.display = 'none';
+          diagList.innerHTML = '';
+        }
+        if (isolatedContent) {
+          if (totalDiscoveredIssues === 0) {
+            isolatedContent.innerHTML = `Semua 5 pilar kode berjalan harmonis: Bebas kesalahan panggil model, tidak ada teks pecah/bocor, ukuran layar presisi tanpa overflow, dan seluruh tombol bebas dari halangan fisik.`;
+          } else {
+            isolatedContent.innerHTML = `Tidak ada isu pada kategori filter saat ini (<strong>${esc(this.activeSubTab)}</strong>). Pilih tab "Semua Diagnosa" untuk melihat isu di pilar lain.`;
+          }
         }
       }
 
+      // Hormone logs history
       const logsList = document.getElementById('endocrineLogsList');
       if (logsList) {
         if (this.history.length === 0) {
@@ -1644,6 +2241,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
   // Expose to window for global bio-telemetry, console inspection, and diagnostic audit
   window.BioEndocrine = BioEndocrine;
+  window.CodeEndocrine = BioEndocrine; // Official Alias Jalur 1: CodeEndocrine
 
   // ==================== CHAT-ENDOCRINE (SISTEM SARAF EMOSI BUATAN AI) ====================
   // Jalur 2 Endokrin: Sistem saraf emosi buatan otonom untuk model AI.
@@ -6367,6 +6965,9 @@ RESONANSI: ${this.currentVibe}
         enhanceCodeBlocks(activeStudioAssistantBubble);
         scrollStudioAssistantToBottom();
         activeStudioAssistantBubble = null;
+      }
+      if (this.text && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.inspectModelText === 'function') {
+        BioEndocrine.inspectModelText(this.text, { source: 'StreamBufferRenderer' });
       }
       return this.text;
     }
@@ -17604,6 +18205,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + modelName, fullText);
       BioEndocrine.secreteDopamine(12, `Ollama inferensi sukses: ${modelName}`);
+      if (typeof BioEndocrine.inspectModelText === 'function') {
+        BioEndocrine.inspectModelText(fullText, { model: modelName, endpoint: 'Ollama' });
+      }
       if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
         ChatEndocrine.emotions.senang = Math.min(100, ChatEndocrine.emotions.senang + 6);
         ChatEndocrine.emotions.bahagia = Math.min(100, ChatEndocrine.emotions.bahagia + 5);
@@ -17657,7 +18261,11 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         showToast('Generasi dihentikan oleh pengguna.');
         return false;
       } else {
-        BioEndocrine.secreteStress(22, `Ollama error: ${err?.message || 'Engine exception'}`);
+        if (typeof BioEndocrine.registerModelCallError === 'function') {
+          BioEndocrine.registerModelCallError({ model: modelName, error: err, status: err.status || 500, endpoint: 'Ollama' });
+        } else {
+          BioEndocrine.secreteStress(22, `Ollama error: ${err?.message || 'Engine exception'}`);
+        }
         // Auto-Router fallback: bersihkan gelembung sementara dan kembalikan false agar caller langsung beralih ke OpenRouter
         if (runOptions && runOptions.autoFallback) {
           try { assistantRow.remove(); } catch (_) {}
@@ -19197,6 +19805,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + (actualModelUsed || displayModel), fullText);
       BioEndocrine.secreteDopamine(12, `OpenRouter inferensi sukses: ${actualModelUsed || displayModel}`);
+      if (typeof BioEndocrine.inspectModelText === 'function') {
+        BioEndocrine.inspectModelText(fullText, { model: actualModelUsed || displayModel, endpoint: 'OpenRouter' });
+      }
       if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
         ChatEndocrine.emotions.senang = Math.min(100, ChatEndocrine.emotions.senang + 6);
         ChatEndocrine.emotions.bahagia = Math.min(100, ChatEndocrine.emotions.bahagia + 5);
@@ -19249,7 +19860,11 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         showToast('Generasi dihentikan.');
         return false;
       } else {
-        BioEndocrine.secreteStress(22, `OpenRouter error: ${err?.message || 'Stream exception'}`);
+        if (typeof BioEndocrine.registerModelCallError === 'function') {
+          BioEndocrine.registerModelCallError({ model: actualModelUsed || displayModel, error: err, status: err.status || 500, endpoint: 'OpenRouter' });
+        } else {
+          BioEndocrine.secreteStress(22, `OpenRouter error: ${err?.message || 'Stream exception'}`);
+        }
         // Auto-Router fallback: bersihkan gelembung sementara dan kembalikan false agar caller langsung beralih ke engine lain
         if (runOptions && runOptions.autoFallback) {
           try { assistantRow.remove(); } catch (_) {}
@@ -24520,6 +25135,9 @@ Aturan:
         showToast('Generasi gambar dibatalkan oleh pengguna.');
       } else {
         console.error('Image gen error:', err);
+        if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerModelCallError === 'function') {
+          BioEndocrine.registerModelCallError({ model: activeImageModel, error: err, status: err.status || 500, endpoint: 'ImageStudio' });
+        }
         const isKeyOrCloudErr = isCloudModel || (err.message && (err.message.includes('API Key') || err.message.includes('OpenRouter') || err.message.includes('kredit')));
         bubbleText.innerHTML = `
           <div style="background:rgba(255,0,127,0.08); border:1px solid rgba(255,0,127,0.4); border-radius:10px; padding:14px; line-height:1.5;">
@@ -25601,6 +26219,9 @@ Aturan:
         showToast('Generasi musik dibatalkan.');
       } else {
         console.error('Music gen error:', err);
+        if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerModelCallError === 'function') {
+          BioEndocrine.registerModelCallError({ model: activeMusicModel, error: err, status: err.status || 500, endpoint: 'MusicStudio' });
+        }
         const isKeyError = err.message && (err.message.includes('NO_KEY') || err.message.includes('API Key') || err.message.includes('OpenRouter API Key'));
         const cleanErrMsg = (err.message || 'Terjadi gangguan saat memproses aransemen musik.').replace(/^NO_KEY:\s*/, '');
 
@@ -27670,12 +28291,37 @@ Aturan:
 
     els.btnAuditConnectomeNow?.addEventListener('click', () => {
       AudioEngine.click();
-      const res = BioEndocrine.auditConnectome();
-      if (res.issues.length === 0) {
-        showToast(`✨ Semua ${res.connected} simpul kode terhubung harmonis!`, 'success');
+      const res = BioEndocrine.auditComprehensive();
+      if (res.totalIssues === 0) {
+        showToast(`✨ Semua 5 pilar kode sehat sempurna (0 bug, 0 halangan)!`, 'success');
       } else {
-        showToast(`⚠️ Terdeteksi ${res.issues.length} simpul kode terisolasi!`, 'warning');
+        showToast(`⚠️ Terdeteksi ${res.totalIssues} isu pada telemetri kode!`, 'warning');
       }
+    });
+
+    els.btnAutoHealLayoutNow?.addEventListener('click', () => {
+      AudioEngine.click();
+      BioEndocrine.autoFixLayoutAndButtons();
+    });
+
+    // Subtab filter buttons for CodeEndocrine
+    document.querySelectorAll('.endocrine-subtab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        AudioEngine.click();
+        const tab = btn.dataset.subtab || 'all';
+        BioEndocrine.setSubTabFilter(tab);
+      });
+    });
+
+    // Pillar cards clicking switches subtab filter
+    document.querySelectorAll('.endocrine-pillar-card').forEach(card => {
+      card.addEventListener('click', () => {
+        AudioEngine.click();
+        const pillar = card.dataset.pillar;
+        if (pillar) {
+          BioEndocrine.setSubTabFilter(pillar);
+        }
+      });
     });
 
     els.btnPurgeStressEndorphin?.addEventListener('click', () => {

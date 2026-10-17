@@ -10358,6 +10358,199 @@ body.page-paused *::after {
 .vital-label { color: var(--text-dim); }
 .vital-item strong { color: #FFF; font-family: var(--font-code); }
 
+/* ==================== BIO-ENDOCRINE 5-PILLAR DIAGNOSTIC SYSTEM ==================== */
+.endocrine-pillars-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.endocrine-pillar-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.endocrine-pillar-card:hover {
+  background: rgba(255, 255, 255, 0.04);
+  transform: translateY(-1px);
+}
+
+.endocrine-pillar-card .pillar-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.endocrine-pillar-card.status-healthy {
+  border-color: rgba(0, 255, 194, 0.25);
+}
+.endocrine-pillar-card.status-healthy .pillar-icon {
+  background: rgba(0, 255, 194, 0.12);
+  color: #00FFC2;
+}
+
+.endocrine-pillar-card.status-warning {
+  border-color: rgba(255, 183, 3, 0.35);
+}
+.endocrine-pillar-card.status-warning .pillar-icon {
+  background: rgba(255, 183, 3, 0.15);
+  color: #FFB703;
+}
+
+.endocrine-pillar-card.status-critical {
+  border-color: rgba(255, 77, 77, 0.45);
+}
+.endocrine-pillar-card.status-critical .pillar-icon {
+  background: rgba(255, 77, 77, 0.15);
+  color: #FF4D4D;
+}
+
+.endocrine-pillar-card .pillar-label {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  line-height: 1.2;
+}
+
+.endocrine-pillar-card .pillar-val {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #FFF;
+}
+
+.endocrine-subtabs-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.endocrine-subtab-btn {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  padding: 4px 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+}
+
+.endocrine-subtab-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #FFF;
+}
+
+.endocrine-subtab-btn.active {
+  background: rgba(0, 255, 194, 0.12);
+  border-color: rgba(0, 255, 194, 0.4);
+  color: #00FFC2;
+  font-weight: 600;
+}
+
+.endocrine-diagnostic-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.endocrine-issue-item {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.76rem;
+}
+
+.endocrine-issue-item.severity-high {
+  border-left: 3px solid #FF4D4D;
+  background: rgba(255, 77, 77, 0.05);
+}
+
+.endocrine-issue-item.severity-medium {
+  border-left: 3px solid #FFB703;
+  background: rgba(255, 183, 3, 0.05);
+}
+
+.endocrine-issue-item.severity-low {
+  border-left: 3px solid var(--neon-cyan);
+  background: rgba(0, 242, 254, 0.05);
+}
+
+.endocrine-issue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.endocrine-issue-badge {
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.badge-model { background: rgba(255, 82, 0, 0.2); color: var(--neon-amber); }
+.badge-text { background: rgba(168, 85, 247, 0.2); color: #C084FC; }
+.badge-viewport { background: rgba(59, 130, 246, 0.2); color: #60A5FA; }
+.badge-button { background: rgba(244, 63, 94, 0.2); color: #FB7185; }
+.badge-connectome { background: rgba(20, 184, 166, 0.2); color: #2DD4BF; }
+
+.endocrine-issue-time {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+}
+
+.endocrine-issue-body {
+  color: var(--text-main);
+  line-height: 1.4;
+}
+
+.endocrine-issue-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.endocrine-issue-snippet {
+  font-family: var(--font-code);
+  font-size: 0.7rem;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #FFD166;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 .endocrine-isolated-box {
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid var(--border-subtle);

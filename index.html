@@ -38,8 +38,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
-  <link rel="preload" as="style" href="style.min.css?v=20261016_v315">
-  <link rel="stylesheet" href="style.min.css?v=20261016_v315">
+  <link rel="preload" as="style" href="style.min.css?v=20261016_v316">
+  <link rel="stylesheet" href="style.min.css?v=20261016_v316">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -1951,29 +1951,98 @@
             </div>
           </div>
 
-          <!-- Isolated / Orphaned Code Detection Section -->
+          <!-- 5-PILLAR DIAGNOSTIC MATRIX GRID -->
+          <div class="endocrine-pillars-grid">
+            <div class="endocrine-pillar-card status-healthy" id="cardPillarConnectome" data-pillar="connectome">
+              <div class="pillar-icon"><i class="fa-solid fa-circle-nodes"></i></div>
+              <div class="pillar-info">
+                <div class="pillar-label">Simpul &amp; Reseptor DOM</div>
+                <div class="pillar-val" id="pillarConnectomeStatus">100% Harmonis</div>
+              </div>
+            </div>
+            <div class="endocrine-pillar-card status-healthy" id="cardPillarModel" data-pillar="model">
+              <div class="pillar-icon"><i class="fa-solid fa-server"></i></div>
+              <div class="pillar-info">
+                <div class="pillar-label">Panggilan Model &amp; API</div>
+                <div class="pillar-val" id="pillarModelStatus">0 Error</div>
+              </div>
+            </div>
+            <div class="endocrine-pillar-card status-healthy" id="cardPillarText" data-pillar="text">
+              <div class="pillar-icon"><i class="fa-solid fa-spell-check"></i></div>
+              <div class="pillar-info">
+                <div class="pillar-label">Integritas Teks AI</div>
+                <div class="pillar-val" id="pillarTextStatus">0 Pecah / Bocor</div>
+              </div>
+            </div>
+            <div class="endocrine-pillar-card status-healthy" id="cardPillarViewport" data-pillar="viewport">
+              <div class="pillar-icon"><i class="fa-solid fa-mobile-screen-button"></i></div>
+              <div class="pillar-info">
+                <div class="pillar-label">Dimensi Layar &amp; Layout</div>
+                <div class="pillar-val" id="pillarViewportStatus">Stabil 100%</div>
+              </div>
+            </div>
+            <div class="endocrine-pillar-card status-healthy" id="cardPillarButton" data-pillar="button">
+              <div class="pillar-icon"><i class="fa-solid fa-hand-pointer"></i></div>
+              <div class="pillar-info">
+                <div class="pillar-label">Posisi &amp; Akses Tombol</div>
+                <div class="pillar-val" id="pillarButtonStatus">Bebas Halangan</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Subtab Filter Bar -->
+          <div class="endocrine-subtabs-bar">
+            <button type="button" class="endocrine-subtab-btn active" id="subtabAllIssues" data-subtab="all">
+              Semua Diagnosa
+            </button>
+            <button type="button" class="endocrine-subtab-btn" id="subtabModelIssues" data-subtab="model">
+              <i class="fa-solid fa-server"></i> Error Model
+            </button>
+            <button type="button" class="endocrine-subtab-btn" id="subtabTextIssues" data-subtab="text">
+              <i class="fa-solid fa-spell-check"></i> Teks Pecah
+            </button>
+            <button type="button" class="endocrine-subtab-btn" id="subtabViewportIssues" data-subtab="viewport">
+              <i class="fa-solid fa-mobile-screen-button"></i> Layar &amp; Layout
+            </button>
+            <button type="button" class="endocrine-subtab-btn" id="subtabButtonIssues" data-subtab="button">
+              <i class="fa-solid fa-hand-pointer"></i> Tombol Terhalang
+            </button>
+            <button type="button" class="endocrine-subtab-btn" id="subtabConnectomeIssues" data-subtab="connectome">
+              <i class="fa-solid fa-circle-nodes"></i> Simpul DOM
+            </button>
+          </div>
+
+          <!-- Diagnostic Issue Deck / Enhanced Isolated Box -->
           <div class="endocrine-isolated-box" id="endocrineIsolatedBox">
             <div class="isolated-box-header">
               <div style="display:flex; align-items:center; gap:8px;">
                 <i class="fa-solid fa-dna" style="color:var(--neon-cyan);"></i>
-                <span style="font-weight:700; color:#FFF; font-size:0.88rem;">Pendeteksi Kode Terisolasi &amp; Reseptor Rusak</span>
+                <span style="font-weight:700; color:#FFF; font-size:0.88rem;">Pusat Diagnosa Integritas 5-Pilar</span>
               </div>
               <span class="isolated-status-tag tag-healthy" id="endocrineIsolatedTag">Semua Terhubung Sempurna</span>
             </div>
             <div class="isolated-box-content" id="endocrineIsolatedContent">
               Semua modul, fungsi pemanggil, dan reseptor DOM saling terikat dengan baik. Tidak ada kode yatim/terisolasi.
             </div>
+            <div class="endocrine-diagnostic-list" id="endocrineDiagnosticList" style="display:none;">
+              <!-- Dynamic issue cards populated by BioEndocrine.renderModalContent() -->
+            </div>
           </div>
 
-          <!-- Live Hormone Secretion Log -->
+          <!-- Live Hormone Secretion Log & Action Toolbar -->
           <div class="endocrine-logs-wrap">
             <div class="endocrine-logs-header">
               <span style="font-size:0.83rem; font-weight:700; color:#FFF; display:flex; align-items:center; gap:6px;">
                 <i class="fa-solid fa-clock-rotate-left" style="color:var(--neon-teal);"></i> Aliran Feromon &amp; Riwayat Sekresi Hormon Nyata
               </span>
-              <button class="btn btn-xs btn-outline" id="btnAuditConnectomeNow" style="font-size:0.72rem; border-color:var(--neon-cyan); color:var(--neon-cyan);">
-                <i class="fa-solid fa-stethoscope"></i> Pindai Integritas Sekarang
-              </button>
+              <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button class="btn btn-xs btn-outline" id="btnAutoHealLayoutNow" style="font-size:0.72rem; border-color:#00FFC2; color:#00FFC2;">
+                  <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Heal Layar &amp; Tombol
+                </button>
+                <button class="btn btn-xs btn-outline" id="btnAuditConnectomeNow" style="font-size:0.72rem; border-color:var(--neon-cyan); color:var(--neon-cyan);">
+                  <i class="fa-solid fa-stethoscope"></i> Pindai Menyeluruh
+                </button>
+              </div>
             </div>
             <div class="endocrine-logs-list" id="endocrineLogsList">
               <!-- Populated dynamically -->
@@ -2303,8 +2372,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous" defer></script>
   <!-- Heavy libraries (Mermaid, jsPDF, PDF.js, JSZip) are dynamically loaded on-demand to optimize FCP, TBT & LCP -->
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261016_v315" defer></script>
+  <script src="text-safety.js?v=20261016_v316" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261016_v315" defer></script>
+  <script src="app.js?v=20261016_v316" defer></script>
 </body>
 </html>
