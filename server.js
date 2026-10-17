@@ -36,6 +36,181 @@ try {
 // Session store untuk persistent PTY sessions (ConPTY / PseudoConsole)
 const activeTerminalSessions = new Map();
 
+// =========================================================================
+// CLOUDFLARE TUNNEL REMOTE ACCESS (WAN Mobile-to-Desktop) STATE & ENGINE
+// =========================================================================
+let cloudflareTunnelProcess = null;
+let cloudflareTunnelUrl = '';
+let cloudflareTunnelActive = false;
+let cloudflareTunnelError = '';
+let cloudflareTunnelPin = generateSixDigitPin();
+let cloudflareTunnelStartedAt = null;
+
+function generateSixDigitPin() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function getCloudflaredBinaryPath() {
+  const localBin = path.join(__dirname, 'bin', 'cloudflared.exe');
+  if (fs.existsSync(localBin)) return localBin;
+  const localBinNoExt = path.join(__dirname, 'bin', 'cloudflared');
+  if (fs.existsSync(localBinNoExt)) return localBinNoExt;
+  return 'cloudflared';
+}
+
+function startCloudflareTunnel(customPort) {
+  return new Promise((resolve) => {
+    if (cloudflareTunnelProcess && cloudflareTunnelActive && cloudflareTunnelUrl) {
+      return resolve({
+        active: true,
+        tunnelUrl: cloudflareTunnelUrl,
+        wssUrl: cloudflareTunnelUrl.replace(/^http/, 'ws'),
+        pin: cloudflareTunnelPin,
+        startedAt: cloudflareTunnelStartedAt
+      });
+    }
+
+    if (cloudflareTunnelProcess) {
+      try { cloudflareTunnelProcess.kill(); } catch (_) {}
+      cloudflareTunnelProcess = null;
+    }
+
+    cloudflareTunnelActive = false;
+    cloudflareTunnelUrl = '';
+    cloudflareTunnelError = '';
+
+    const binPath = getCloudflaredBinaryPath();
+    const targetPort = customPort || process.env.PORT || 4040;
+    const args = ['tunnel', '--url', `http://localhost:${targetPort}`, '--no-autoupdate'];
+
+    try {
+      cloudflareTunnelProcess = spawn(binPath, args, {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+    } catch (err) {
+      cloudflareTunnelError = `Gagal menjalankan cloudflared: ${err.message}.`;
+      return resolve({
+        active: false,
+        tunnelUrl: '',
+        wssUrl: '',
+        pin: cloudflareTunnelPin,
+        error: cloudflareTunnelError
+      });
+    }
+
+    let resolved = false;
+    const timeoutTimer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        if (cloudflareTunnelUrl) {
+          resolve({
+            active: true,
+            tunnelUrl: cloudflareTunnelUrl,
+            wssUrl: cloudflareTunnelUrl.replace(/^http/, 'ws'),
+            pin: cloudflareTunnelPin,
+            startedAt: cloudflareTunnelStartedAt
+          });
+        } else {
+          resolve({
+            active: false,
+            tunnelUrl: '',
+            wssUrl: '',
+            pin: cloudflareTunnelPin,
+            error: cloudflareTunnelError || 'Waktu tunggu pembuatan tunnel Cloudflare habis.'
+          });
+        }
+      }
+    }, 25000);
+
+    const onDataChunk = (chunk) => {
+      const text = chunk.toString();
+      const match = text.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/i);
+      if (match && !cloudflareTunnelUrl) {
+        cloudflareTunnelUrl = match[0].trim();
+        cloudflareTunnelActive = true;
+        cloudflareTunnelStartedAt = new Date().toISOString();
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeoutTimer);
+          resolve({
+            active: true,
+            tunnelUrl: cloudflareTunnelUrl,
+            wssUrl: cloudflareTunnelUrl.replace(/^http/, 'ws'),
+            pin: cloudflareTunnelPin,
+            startedAt: cloudflareTunnelStartedAt
+          });
+        }
+      }
+    };
+
+    if (cloudflareTunnelProcess.stdout) {
+      cloudflareTunnelProcess.stdout.on('data', onDataChunk);
+    }
+    if (cloudflareTunnelProcess.stderr) {
+      cloudflareTunnelProcess.stderr.on('data', onDataChunk);
+    }
+
+    cloudflareTunnelProcess.on('error', (err) => {
+      cloudflareTunnelError = err.message;
+      cloudflareTunnelActive = false;
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeoutTimer);
+        resolve({ active: false, error: err.message, pin: cloudflareTunnelPin });
+      }
+    });
+
+    cloudflareTunnelProcess.on('exit', (code) => {
+      cloudflareTunnelActive = false;
+      cloudflareTunnelProcess = null;
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeoutTimer);
+        resolve({ active: false, error: `Cloudflared keluar dengan kode ${code}`, pin: cloudflareTunnelPin });
+      }
+    });
+  });
+}
+
+function stopCloudflareTunnel() {
+  if (cloudflareTunnelProcess) {
+    try { cloudflareTunnelProcess.kill(); } catch (_) {}
+    cloudflareTunnelProcess = null;
+  }
+  cloudflareTunnelActive = false;
+  cloudflareTunnelUrl = '';
+  return { active: false, message: 'Cloudflare Tunnel dimatikan.' };
+}
+
+function isRemoteTunnelRequest(req) {
+  const host = (req.headers.host || '').toLowerCase();
+  const cfIp = req.headers['cf-connecting-ip'];
+  const cfRay = req.headers['cf-ray'];
+  const xfHost = (req.headers['x-forwarded-host'] || '').toLowerCase();
+  if (cfIp || cfRay || host.includes('trycloudflare.com') || xfHost.includes('trycloudflare.com')) {
+    return true;
+  }
+  return false;
+}
+
+function validateRemoteTerminalPin(req, reqUrl, body) {
+  if (!isRemoteTunnelRequest(req)) {
+    return { valid: true };
+  }
+  const clientPin = (reqUrl && reqUrl.searchParams.get('pin')) ||
+                    req.headers['x-terminal-pin'] ||
+                    (body && body.pin);
+  if (!clientPin || String(clientPin).trim() !== String(cloudflareTunnelPin).trim()) {
+    return {
+      valid: false,
+      status: 401,
+      error: 'PIN autentikasi remote tidak valid. Masukkan PIN 6-digit dari laptop host.'
+    };
+  }
+  return { valid: true };
+}
+
 function resolveHostShell(shellType) {
   const isWin = process.platform === 'win32';
   const type = (shellType || 'powershell').toLowerCase();
@@ -4359,18 +4534,11 @@ async function requestHandler(req, res) {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Private-Network': 'true',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, Access-Control-Request-Private-Network'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, x-terminal-pin, X-Terminal-Pin, Access-Control-Request-Private-Network'
     });
     return res.end();
   }
 
-  // ===== GERBANG LINTAS-ASAL UNTUK /api (SEBELUM registrasi identitas) =====
-  // Sebagian endpoint memakai key milik SERVER (env OPENROUTER_API_KEY/SERPER_API_KEY
-  // /OLLAMA_API_KEY) sebagai fallback. Tanpa gerbang ini, halaman web jahat mana pun
-  // bisa memanggil API dari browser korban (ACAO:*) dan membakar kredit API operator.
-  // Browser SELALU mengirim Origin/Sec-Fetch-Site lintas-asal → diblokir (403);
-  // curl/klien lokal (tanpa Origin) dan front-end same-origin tetap diizinkan.
-  // Front-end di domain terpisah: setel ZOX_ALLOW_CROSS_ORIGIN=1 untuk mengizinkan.
   // ===== GERBANG LINTAS-ASAL UNTUK /api (SEBELUM registrasi identitas) =====
   // Sebagian endpoint memakai key milik SERVER (env OPENROUTER_API_KEY/SERPER_API_KEY
   // /OLLAMA_API_KEY) sebagai fallback. Tanpa gerbang ini, halaman web jahat mana pun
@@ -4391,7 +4559,10 @@ async function requestHandler(req, res) {
                           originHost.endsWith('.vercel.app') ||
                           originHost.endsWith('localhost') ||
                           originHost.startsWith('127.0.0.1') ||
-                          originHost.startsWith('[::1]');
+                          originHost.startsWith('[::1]') ||
+                          originHost.endsWith('.trycloudflare.com') ||
+                          reqHost.endsWith('.trycloudflare.com') ||
+                          pathname.startsWith('/api/terminal/tunnel');
         crossSite = !isTrusted;
       } catch (_) {
         crossSite = true;
@@ -4467,6 +4638,8 @@ async function requestHandler(req, res) {
   }
 
   if (pathname === '/api/ping' && method === 'GET') {
+    const isRemote = isRemoteTunnelRequest(req);
+    const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
     return sendJSON(res, 200, {
       ok: true,
       status: 'healthy',
@@ -4477,7 +4650,10 @@ async function requestHandler(req, res) {
       cwd: process.cwd(),
       mode: 'standalone-engine',
       uptime: process.uptime(),
-      memoryRssMb: Math.round(process.memoryUsage().rss / 1024 / 1024)
+      memoryRssMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+      isRemote,
+      tunnelActive: cloudflareTunnelActive,
+      authenticated: pinCheck.valid
     });
   }
 
@@ -5138,10 +5314,95 @@ async function requestHandler(req, res) {
   const DEFAULT_TERMINAL_CWD = (!IS_VERCEL_ENV && fs.existsSync(USER_HOME)) ? USER_HOME : WORKSPACE_ROOT;
 
   // =========================================================================
+  // CLOUDFLARE TUNNEL REMOTE ACCESS MANAGEMENT API
+  // =========================================================================
+  if (pathname === '/api/terminal/tunnel-info' && method === 'GET') {
+    const isRemote = isRemoteTunnelRequest(req);
+    const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
+    return sendJSON(res, 200, {
+      active: cloudflareTunnelActive,
+      tunnelUrl: cloudflareTunnelUrl,
+      wssUrl: cloudflareTunnelUrl ? cloudflareTunnelUrl.replace(/^http/i, 'ws') : '',
+      pin: (!isRemote || pinCheck.valid) ? cloudflareTunnelPin : undefined,
+      requiresPin: isRemote && !pinCheck.valid,
+      authenticated: !isRemote || pinCheck.valid,
+      startedAt: cloudflareTunnelStartedAt,
+      error: cloudflareTunnelError
+    });
+  }
+
+  if (pathname === '/api/terminal/tunnel-start' && method === 'POST') {
+    const isRemote = isRemoteTunnelRequest(req);
+    if (isRemote) {
+      const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
+      if (!pinCheck.valid) {
+        return sendJSON(res, 401, { error: 'Akses ditolak: Hanya host lokal atau klien dengan PIN valid yang dapat memulai tunnel.' });
+      }
+    }
+    const result = await startCloudflareTunnel();
+    return sendJSON(res, 200, result);
+  }
+
+  if (pathname === '/api/terminal/tunnel-stop' && method === 'POST') {
+    const isRemote = isRemoteTunnelRequest(req);
+    if (isRemote) {
+      const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
+      if (!pinCheck.valid) {
+        return sendJSON(res, 401, { error: 'Akses ditolak: Hanya host lokal atau klien dengan PIN valid yang dapat mematikan tunnel.' });
+      }
+    }
+    const result = stopCloudflareTunnel();
+    return sendJSON(res, 200, result);
+  }
+
+  if (pathname === '/api/terminal/tunnel-regenerate-pin' && method === 'POST') {
+    const isRemote = isRemoteTunnelRequest(req);
+    if (isRemote) {
+      return sendJSON(res, 403, { error: 'Hanya host lokal di laptop yang dapat meregenerasi PIN keamanan sesi.' });
+    }
+    cloudflareTunnelPin = generateSixDigitPin();
+    return sendJSON(res, 200, {
+      success: true,
+      pin: cloudflareTunnelPin,
+      message: 'PIN keamanan sesi baru berhasil dibuat.'
+    });
+  }
+
+  if (pathname === '/api/terminal/tunnel-set-url' && method === 'POST') {
+    const isRemote = isRemoteTunnelRequest(req);
+    if (isRemote) {
+      return sendJSON(res, 403, { error: 'Hanya host lokal yang dapat menyetel URL tunnel manual.' });
+    }
+    const body = await safeParseBody(req);
+    if (!body) return;
+    if (body.url && typeof body.url === 'string') {
+      cloudflareTunnelUrl = body.url.trim().replace(/\/+$/, '');
+      cloudflareTunnelActive = true;
+      cloudflareTunnelStartedAt = new Date().toISOString();
+      return sendJSON(res, 200, {
+        success: true,
+        tunnelUrl: cloudflareTunnelUrl,
+        wssUrl: cloudflareTunnelUrl.replace(/^http/i, 'ws'),
+        pin: cloudflareTunnelPin
+      });
+    }
+    return sendJSON(res, 400, { error: 'URL Cloudflare Tunnel tidak valid.' });
+  }
+
+  // =========================================================================
   // NEURAL TERMINAL REAL-TIME STREAMING & CONPTY / PSEUDOCONSOLE API
   // Mengizinkan sesi terminal interaktif nyata (node-pty + SSE duplex streaming)
   // =========================================================================
   if (pathname === '/api/terminal/stream' && method === 'GET') {
+    const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
+    if (!pinCheck.valid) {
+      res.writeHead(401, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return res.end(pinCheck.error || 'Akses ditolak: PIN keamanan remote salah.');
+    }
+
     const sessionId = (reqUrl.searchParams.get('session') || 'default').trim();
     const shellType = (reqUrl.searchParams.get('shell') || 'powershell').toLowerCase();
     let reqCwd = (reqUrl.searchParams.get('cwd') || '').trim();
@@ -5272,6 +5533,10 @@ async function requestHandler(req, res) {
     try {
       const body = await safeParseBody(req);
       if (!body) return;
+      const pinCheck = validateRemoteTerminalPin(req, reqUrl, body);
+      if (!pinCheck.valid) {
+        return sendJSON(res, 401, { error: pinCheck.error });
+      }
       const sessionId = (body.session || 'default').trim();
       const data = typeof body.data === 'string' ? body.data : '';
       const session = activeTerminalSessions.get(sessionId);
@@ -5291,6 +5556,10 @@ async function requestHandler(req, res) {
     try {
       const body = await safeParseBody(req);
       if (!body) return;
+      const pinCheck = validateRemoteTerminalPin(req, reqUrl, body);
+      if (!pinCheck.valid) {
+        return sendJSON(res, 401, { error: pinCheck.error });
+      }
       const sessionId = (body.session || 'default').trim();
       const cols = Math.max(20, Math.min(400, parseInt(body.cols || '100', 10)));
       const rows = Math.max(5, Math.min(200, parseInt(body.rows || '28', 10)));
@@ -5314,6 +5583,10 @@ async function requestHandler(req, res) {
     try {
       const body = await safeParseBody(req);
       if (!body) return;
+      const pinCheck = validateRemoteTerminalPin(req, reqUrl, body);
+      if (!pinCheck.valid) {
+        return sendJSON(res, 401, { error: pinCheck.error });
+      }
       const sessionId = (body.session || 'default').trim();
       const session = activeTerminalSessions.get(sessionId);
       if (session) {
@@ -5334,6 +5607,10 @@ async function requestHandler(req, res) {
     try {
       const body = await safeParseBody(req);
       if (!body) return;
+      const pinCheck = validateRemoteTerminalPin(req, reqUrl, body);
+      if (!pinCheck.valid) {
+        return sendJSON(res, 401, { error: pinCheck.error });
+      }
       const cmd = (body.command || body.cmd || '').trim();
       const shellType = (body.shell || 'powershell').toLowerCase();
 

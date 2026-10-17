@@ -30697,7 +30697,59 @@ Aturan:
     isWindowsSynced: false,
     bridgeProbed: false,
 
+    // Cloudflare Remote Tunnel & Mobile WAN State (v335)
+    remoteHost: '',
+    remotePin: '',
+    isRemoteConnected: false,
+    remotePingMs: null,
+    remotePingTimer: null,
+    tunnelInfo: { active: false, tunnelUrl: '', wssUrl: '', pin: '' },
+
+    isMobileDevice() {
+      const ua = navigator.userAgent || navigator.vendor || window.opera || '';
+      const isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+      const isNarrow = (window.innerWidth <= 768);
+      const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+      return (isMobileUA || (isNarrow && isTouch));
+    },
+
+    normalizeRemoteHost(input) {
+      if (!input || typeof input !== 'string') return { httpUrl: '', wssUrl: '' };
+      let trimmed = input.trim().replace(/\/+$/, '');
+      if (/^wss:\/\//i.test(trimmed)) {
+        return {
+          httpUrl: trimmed.replace(/^wss:\/\//i, 'https://'),
+          wssUrl: trimmed
+        };
+      }
+      if (/^ws:\/\//i.test(trimmed)) {
+        return {
+          httpUrl: trimmed.replace(/^ws:\/\//i, 'http://'),
+          wssUrl: trimmed
+        };
+      }
+      if (/^https:\/\//i.test(trimmed)) {
+        return {
+          httpUrl: trimmed,
+          wssUrl: trimmed.replace(/^https:\/\//i, 'wss://')
+        };
+      }
+      if (/^http:\/\//i.test(trimmed)) {
+        return {
+          httpUrl: trimmed,
+          wssUrl: trimmed.replace(/^http:\/\//i, 'ws://')
+        };
+      }
+      return {
+        httpUrl: `https://${trimmed}`,
+        wssUrl: `wss://${trimmed}`
+      };
+    },
+
     getTerminalApiUrl(endpoint) {
+      if (this.isRemoteConnected && this.remoteHost) {
+        return `${this.remoteHost.replace(/\/+$/, '')}${endpoint}`;
+      }
       if (this.bridgeUrl) {
         return `${this.bridgeUrl.replace(/\/+$/, '')}${endpoint}`;
       }
@@ -30788,7 +30840,16 @@ Aturan:
       const icon = document.getElementById('iconTermSyncWindows');
       const label = document.getElementById('labelTermSyncWindows');
       if (!btn) return;
-      if (this.isWindowsSynced) {
+      if (this.isRemoteConnected) {
+        btn.classList.add('active');
+        btn.style.borderColor = '#38bdf8';
+        btn.title = `Terminal Terhubung via Cloudflare Tunnel (${this.remoteHost})`;
+        if (icon) {
+          icon.className = 'fa-solid fa-cloud';
+          icon.style.color = '#38bdf8';
+        }
+        if (label) label.textContent = 'WAN Remote ☁️';
+      } else if (this.isWindowsSynced) {
         btn.classList.add('active');
         btn.style.borderColor = 'var(--neon-teal, #22d3ee)';
         btn.title = `Terminal Tersinkronisasi dengan Windows Lokal (${this.bridgeUrl})`;
@@ -30814,6 +30875,7 @@ Aturan:
       this.loadTheme();
       this.renderTabs();
       this.updatePaneHeaders();
+      this.initRemoteConfigFromUrlOrStorage();
       await this.detectWindowsBridge(false);
       await this.syncServerCwd();
     },
@@ -30821,10 +30883,12 @@ Aturan:
     async syncServerCwd() {
       try {
         const url = this.getTerminalApiUrl('/api/terminal/exec');
+        const headers = { 'Content-Type': 'application/json' };
+        if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
         const response = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ command: '' })
+          headers,
+          body: JSON.stringify({ command: '', pin: this.remotePin || undefined })
         });
         const data = await response.json();
         if (data && data.cwd) {
@@ -30838,6 +30902,374 @@ Aturan:
           this.updatePaneHeaders();
         }
       } catch (_) {}
+    },
+
+    initRemoteConfigFromUrlOrStorage() {
+      const params = new URLSearchParams(window.location.search);
+      const qHost = params.get('remote_host');
+      const qPin = params.get('pin');
+
+      if (qHost) {
+        const norm = this.normalizeRemoteHost(qHost);
+        this.remoteHost = norm.httpUrl;
+        this.remotePin = qPin ? qPin.trim() : '';
+        try {
+          localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
+            remoteHost: this.remoteHost,
+            pin: this.remotePin
+          }));
+        } catch (_) {}
+        this.connectRemoteTerminal(this.remoteHost, this.remotePin, true);
+        return;
+      }
+
+      try {
+        const saved = JSON.parse(localStorage.getItem('zoz_remote_terminal_config') || '{}');
+        if (saved && saved.remoteHost) {
+          this.remoteHost = saved.remoteHost;
+          this.remotePin = saved.pin || '';
+        }
+      } catch (_) {}
+    },
+
+    checkAndPromptRemoteIfMobileOrUnreachable() {
+      const isMobile = this.isMobileDevice();
+      const hasSaved = Boolean(this.remoteHost && this.remotePin);
+
+      const keybar = document.getElementById('termMobileTouchKeybar');
+      if (keybar && (isMobile || this.isRemoteConnected)) {
+        keybar.style.display = 'flex';
+      }
+
+      if (this.isRemoteConnected) return;
+
+      if (isMobile || !this.isWindowsSynced) {
+        if (hasSaved) {
+          this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
+        } else if (isMobile) {
+          this.showRemoteOverlay();
+        }
+      }
+    },
+
+    showRemoteOverlay() {
+      const overlay = document.getElementById('termRemoteOverlay');
+      if (!overlay) return;
+      overlay.style.display = 'flex';
+      const inputHost = document.getElementById('inputTermRemoteHost');
+      const inputPin = document.getElementById('inputTermRemotePin');
+      if (inputHost && this.remoteHost) inputHost.value = this.remoteHost;
+      if (inputPin && this.remotePin) inputPin.value = this.remotePin;
+    },
+
+    dismissRemoteOverlay() {
+      const overlay = document.getElementById('termRemoteOverlay');
+      if (overlay) overlay.style.display = 'none';
+      showToast('Beralih ke mode terminal sandbox cloud.', 'info');
+    },
+
+    async connectRemoteFromOverlay() {
+      const inputHost = document.getElementById('inputTermRemoteHost');
+      const inputPin = document.getElementById('inputTermRemotePin');
+      const msgBox = document.getElementById('termRemoteOverlayMsg');
+      const connectBtn = document.getElementById('btnTermConnectRemote');
+
+      const rawHost = inputHost ? inputHost.value.trim() : '';
+      const pin = inputPin ? inputPin.value.trim() : '';
+
+      if (!rawHost) {
+        if (msgBox) {
+          msgBox.textContent = 'Masukkan alamat URL Cloudflare Tunnel.';
+          msgBox.className = 'term-remote-msg';
+          msgBox.style.display = 'block';
+        }
+        return;
+      }
+      if (!pin || pin.length !== 6) {
+        if (msgBox) {
+          msgBox.textContent = 'Masukkan 6-digit PIN keamanan dari laptop.';
+          msgBox.className = 'term-remote-msg';
+          msgBox.style.display = 'block';
+        }
+        return;
+      }
+
+      if (connectBtn) {
+        connectBtn.disabled = true;
+        connectBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Menghubungkan...';
+      }
+      if (msgBox) msgBox.style.display = 'none';
+
+      const norm = this.normalizeRemoteHost(rawHost);
+      const success = await this.connectRemoteTerminal(norm.httpUrl, pin, true);
+
+      if (connectBtn) {
+        connectBtn.disabled = false;
+        connectBtn.innerHTML = '<i class="fa-solid fa-bolt"></i> Hubungkan ke Terminal Laptop Rumah';
+      }
+
+      if (success) {
+        const overlay = document.getElementById('termRemoteOverlay');
+        if (overlay) overlay.style.display = 'none';
+      } else {
+        if (msgBox) {
+          msgBox.textContent = 'Gagal menghubungkan. Pastikan URL Cloudflare Tunnel aktif dan PIN benar.';
+          msgBox.className = 'term-remote-msg';
+          msgBox.style.display = 'block';
+        }
+      }
+    },
+
+    async connectRemoteTerminal(httpHost, pin, notify = true) {
+      const norm = this.normalizeRemoteHost(httpHost);
+      const testUrl = `${norm.httpUrl}/api/ping`;
+
+      try {
+        const headers = pin ? { 'x-terminal-pin': pin } : {};
+        const res = await fetch(testUrl, {
+          method: 'GET',
+          headers,
+          signal: AbortSignal.timeout(6000)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.isRemote && !data.authenticated) {
+            if (notify) showToast('PIN keamanan remote salah atau ditolak server.', 'error');
+            return false;
+          }
+
+          this.remoteHost = norm.httpUrl;
+          this.remotePin = pin;
+          this.isRemoteConnected = true;
+          this.bridgeUrl = norm.httpUrl;
+          this.isWindowsSynced = true;
+
+          try {
+            localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
+              remoteHost: this.remoteHost,
+              pin: this.remotePin
+            }));
+            localStorage.setItem('zoz_term_bridge_url', this.remoteHost);
+          } catch (_) {}
+
+          if (data.cwd) {
+            this.defaultCwd = data.cwd;
+            this.tabs.forEach(t => {
+              if (t.pane1) t.pane1.cwd = data.cwd;
+              if (t.pane2) t.pane2.cwd = data.cwd;
+              t.cwd = data.cwd;
+            });
+          }
+
+          const keybar = document.getElementById('termMobileTouchKeybar');
+          if (keybar) keybar.style.display = 'flex';
+
+          this.startRemotePingProbe();
+          this.updateSyncButtonUI();
+          this.updatePaneHeaders();
+
+          const tab = this.getActiveTab();
+          if (tab) {
+            if (tab.pane1) {
+              tab.pane1.isFallbackMode = false;
+              this.connectStream(tab, tab.pane1, 1);
+            }
+            if (tab.isSplit && tab.pane2) {
+              tab.pane2.isFallbackMode = false;
+              this.connectStream(tab, tab.pane2, 2);
+            }
+          }
+
+          if (notify) {
+            showToast('☁️ Terhubung ke PowerShell Laptop via Cloudflare WAN!', 'success');
+          }
+          return true;
+        }
+      } catch (err) {
+        if (notify) showToast(`Gagal koneksi remote: ${err.message}`, 'error');
+      }
+      return false;
+    },
+
+    startRemotePingProbe() {
+      if (this.remotePingTimer) {
+        clearInterval(this.remotePingTimer);
+        this.remotePingTimer = null;
+      }
+      const doProbe = async () => {
+        if (!this.isRemoteConnected || !this.remoteHost) return;
+        const t0 = performance.now();
+        try {
+          const res = await fetch(`${this.remoteHost}/api/ping`, {
+            method: 'GET',
+            headers: this.remotePin ? { 'x-terminal-pin': this.remotePin } : {},
+            signal: AbortSignal.timeout(4000)
+          });
+          if (res.ok) {
+            this.remotePingMs = Math.round(performance.now() - t0);
+            this.updateRemoteStatusUI(true);
+          } else {
+            this.updateRemoteStatusUI(false);
+          }
+        } catch (_) {
+          this.updateRemoteStatusUI(false);
+        }
+      };
+
+      doProbe();
+      this.remotePingTimer = setInterval(doProbe, 8000);
+    },
+
+    stopRemotePingProbe() {
+      if (this.remotePingTimer) {
+        clearInterval(this.remotePingTimer);
+        this.remotePingTimer = null;
+      }
+      this.remotePingMs = null;
+    },
+
+    updateRemoteStatusUI(isOnline = true) {
+      const paneNums = [1, 2];
+      paneNums.forEach(num => {
+        const statusLabel = document.querySelector(`#termPane${num} .pane-status-label`);
+        const statusDot = document.querySelector(`#termPane${num} .pane-status-dot`);
+        if (!statusLabel || !statusDot) return;
+
+        if (this.isRemoteConnected) {
+          if (isOnline) {
+            const lat = this.remotePingMs !== null ? ` • ${this.remotePingMs}ms` : '';
+            statusLabel.textContent = `☁️ Remote WAN (PTY)${lat}`;
+            statusDot.className = 'pane-status-dot online';
+          } else {
+            statusLabel.textContent = '☁️ Remote (Terputus)';
+            statusDot.className = 'pane-status-dot offline';
+          }
+        }
+      });
+    },
+
+    async openRemoteTunnelModal() {
+      const modal = document.getElementById('termRemoteTunnelModal');
+      if (!modal) return;
+      modal.style.display = 'flex';
+      await this.fetchTunnelInfo();
+    },
+
+    closeRemoteTunnelModal() {
+      const modal = document.getElementById('termRemoteTunnelModal');
+      if (modal) modal.style.display = 'none';
+    },
+
+    async fetchTunnelInfo() {
+      const statusDot = document.getElementById('termTunnelStatusDot');
+      const statusText = document.getElementById('termTunnelStatusText');
+      const toggleBtn = document.getElementById('btnTermToggleTunnel');
+      const toggleLabel = document.getElementById('labelTermToggleTunnel');
+      const urlInput = document.getElementById('termTunnelUrlInput');
+      const pinDisplay = document.getElementById('termTunnelPinDisplay');
+      const qrImg = document.getElementById('termTunnelQrImg');
+      const qrPlaceholder = document.getElementById('termTunnelQrPlaceholder');
+
+      try {
+        const apiUrl = this.bridgeUrl ? `${this.bridgeUrl.replace(/\/+$/, '')}/api/terminal/tunnel-info` : '/api/terminal/tunnel-info';
+        const res = await fetch(apiUrl, { signal: AbortSignal.timeout(3000) });
+        if (res.ok) {
+          const data = await res.json();
+          this.tunnelInfo = data;
+          const isActive = !!data.active && !!data.tunnelUrl;
+
+          if (statusDot) statusDot.className = `term-tunnel-status-dot ${isActive ? 'active' : ''}`;
+          if (statusText) statusText.textContent = isActive ? '🟢 Tunnel Cloudflare Aktif' : '⚪ Tunnel Cloudflare Nonaktif';
+          if (toggleBtn) toggleBtn.className = `term-tunnel-btn ${isActive ? 'active' : ''}`;
+          if (toggleLabel) toggleLabel.textContent = isActive ? 'Matikan Tunnel' : 'Nyalakan Tunnel';
+          if (urlInput) urlInput.value = data.tunnelUrl ? `${data.tunnelUrl} (${data.wssUrl || data.tunnelUrl.replace(/^http/i, 'ws')})` : '';
+          if (pinDisplay) pinDisplay.textContent = data.pin || '------';
+
+          if (isActive && data.pin) {
+            const originBase = window.location.origin.includes('localhost') ? 'https://zoz-router.vercel.app' : window.location.origin;
+            const wss = data.wssUrl || data.tunnelUrl.replace(/^http/i, 'ws');
+            const pairingLink = `${originBase}?remote_host=${encodeURIComponent(wss)}&pin=${encodeURIComponent(data.pin)}`;
+            const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pairingLink)}`;
+
+            if (qrImg) {
+              qrImg.src = qrSrc;
+              qrImg.style.display = 'block';
+            }
+            if (qrPlaceholder) qrPlaceholder.style.display = 'none';
+          } else {
+            if (qrImg) {
+              qrImg.style.display = 'none';
+              qrImg.src = '';
+            }
+            if (qrPlaceholder) qrPlaceholder.style.display = 'flex';
+          }
+        }
+      } catch (e) {
+        if (statusText) statusText.textContent = '⚠️ Gagal memeriksa server tunnel lokal';
+      }
+    },
+
+    async toggleCloudflareTunnel() {
+      const toggleLabel = document.getElementById('labelTermToggleTunnel');
+      const isActive = this.tunnelInfo && this.tunnelInfo.active;
+      const endpoint = isActive ? '/api/terminal/tunnel-stop' : '/api/terminal/tunnel-start';
+      if (toggleLabel) toggleLabel.textContent = isActive ? 'Mematikan...' : 'Memulai Tunnel...';
+
+      try {
+        const apiUrl = this.bridgeUrl ? `${this.bridgeUrl.replace(/\/+$/, '')}${endpoint}` : endpoint;
+        const res = await fetch(apiUrl, { method: 'POST', signal: AbortSignal.timeout(30000) });
+        const data = await res.json();
+        if (data.error) {
+          showToast(`Tunnel error: ${data.error}`, 'error');
+        } else if (isActive) {
+          showToast('Cloudflare Tunnel berhasil dimatikan.', 'info');
+        } else {
+          showToast(`⚡ Cloudflare Tunnel Aktif: ${data.tunnelUrl}`, 'success');
+        }
+      } catch (err) {
+        showToast(`Gagal mengontrol tunnel: ${err.message}`, 'error');
+      }
+      await this.fetchTunnelInfo();
+    },
+
+    async regenerateTunnelPin() {
+      try {
+        const apiUrl = this.bridgeUrl ? `${this.bridgeUrl.replace(/\/+$/, '')}/api/terminal/tunnel-regenerate-pin` : '/api/terminal/tunnel-regenerate-pin';
+        const res = await fetch(apiUrl, { method: 'POST' });
+        const data = await res.json();
+        if (data && data.pin) {
+          showToast(`PIN sesi baru dibuat: ${data.pin}`, 'success');
+          await this.fetchTunnelInfo();
+        }
+      } catch (err) {
+        showToast('Gagal membuat PIN baru.', 'error');
+      }
+    },
+
+    copyTunnelUrl() {
+      const val = this.tunnelInfo?.tunnelUrl || '';
+      if (!val) return showToast('Tunnel belum aktif.', 'warning');
+      navigator.clipboard.writeText(val);
+      showToast('URL Cloudflare Tunnel berhasil disalin!', 'success');
+    },
+
+    copyTunnelPin() {
+      const pin = this.tunnelInfo?.pin || '';
+      if (!pin) return showToast('PIN belum tersedia.', 'warning');
+      navigator.clipboard.writeText(pin);
+      showToast(`PIN Keamanan (${pin}) berhasil disalin!`, 'success');
+    },
+
+    copyRemoteFullUrl() {
+      const data = this.tunnelInfo;
+      if (!data || !data.tunnelUrl || !data.pin) {
+        return showToast('Nyalakan tunnel terlebih dahulu.', 'warning');
+      }
+      const originBase = window.location.origin.includes('localhost') ? 'https://zoz-router.vercel.app' : window.location.origin;
+      const wss = data.wssUrl || data.tunnelUrl.replace(/^http/i, 'ws');
+      const pairingLink = `${originBase}?remote_host=${encodeURIComponent(wss)}&pin=${encodeURIComponent(data.pin)}`;
+      navigator.clipboard.writeText(pairingLink);
+      showToast('Link Pairing Remote WAN berhasil disalin!', 'success');
     },
 
     loadTheme() {
@@ -30979,6 +31411,7 @@ Aturan:
         closeModal('terminalModal');
       } else {
         openModal('terminalModal');
+        this.checkAndPromptRemoteIfMobileOrUnreachable();
         this.detectWindowsBridge(false).then(() => {
           this.syncServerCwd();
         });
@@ -31174,7 +31607,10 @@ Aturan:
       const term = paneState.term;
       const cols = (term && term.cols) ? term.cols : 100;
       const rows = (term && term.rows) ? term.rows : 28;
-      const endpoint = `/api/terminal/stream?session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}`;
+      let endpoint = `/api/terminal/stream?session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}`;
+      if (this.remotePin) {
+        endpoint += `&pin=${encodeURIComponent(this.remotePin)}`;
+      }
       const streamUrl = this.getTerminalApiUrl(endpoint);
 
       const es = new EventSource(streamUrl);
@@ -31194,7 +31630,11 @@ Aturan:
               this.handleAutoRespond(tab, paneState, paneNum, msg.data);
             }
           } else if (msg.type === 'connected') {
-            if (this.isWindowsSynced) {
+            if (this.isRemoteConnected) {
+              const lat = this.remotePingMs !== null ? ` • ${this.remotePingMs}ms` : '';
+              if (statusLabel) statusLabel.textContent = `☁️ Remote WAN (PTY)${lat}`;
+              paneState.isFallbackMode = false;
+            } else if (this.isWindowsSynced) {
               if (statusLabel) statusLabel.textContent = 'Aktif (Windows ⚡)';
               paneState.isFallbackMode = false;
             } else {
@@ -31214,7 +31654,7 @@ Aturan:
             if (statusLabel) statusLabel.textContent = 'Selesai';
             if (statusDot) statusDot.className = 'pane-status-dot offline';
           } else if (msg.type === 'fallback') {
-            if (!this.isWindowsSynced) {
+            if (!this.isWindowsSynced && !this.isRemoteConnected) {
               paneState.isFallbackMode = true;
               if (statusLabel) statusLabel.textContent = 'Aktif (Cloud Linux)';
               if (statusDot) statusDot.className = 'pane-status-dot online';
@@ -31229,6 +31669,11 @@ Aturan:
       };
 
       es.onerror = () => {
+        if (this.isRemoteConnected) {
+          if (statusLabel) statusLabel.textContent = '☁️ Remote (Terputus)';
+          if (statusDot) statusDot.className = 'pane-status-dot offline';
+          return;
+        }
         if (!this.isWindowsSynced && (IS_CLOUD_HOSTED || paneState.isFallbackMode)) {
           paneState.isFallbackMode = true;
           if (statusLabel) statusLabel.textContent = 'Aktif (Cloud Linux)';
@@ -31302,20 +31747,24 @@ Aturan:
 
     async sendPtyInput(sessionId, data) {
       try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
         await fetch(this.getTerminalApiUrl('/api/terminal/input'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session: sessionId, data })
+          headers,
+          body: JSON.stringify({ session: sessionId, data, pin: this.remotePin || undefined })
         });
       } catch (_) {}
     },
 
     async sendPtyResize(sessionId, cols, rows) {
       try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
         await fetch(this.getTerminalApiUrl('/api/terminal/resize'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session: sessionId, cols, rows })
+          headers,
+          body: JSON.stringify({ session: sessionId, cols, rows, pin: this.remotePin || undefined })
         });
       } catch (_) {}
     },
@@ -31418,10 +31867,12 @@ Aturan:
           p.eventSource = null;
         }
         if (p.sessionId) {
+          const headers = { 'Content-Type': 'application/json' };
+          if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
           fetch(this.getTerminalApiUrl('/api/terminal/kill'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session: p.sessionId })
+            headers,
+            body: JSON.stringify({ session: p.sessionId, pin: this.remotePin || undefined })
           }).catch(() => {});
         }
         if (p.term) {
@@ -31532,10 +31983,12 @@ Aturan:
 
       if (pane.term) {
         if (pane.sessionId) {
+          const headers = { 'Content-Type': 'application/json' };
+          if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
           fetch(this.getTerminalApiUrl('/api/terminal/kill'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session: pane.sessionId })
+            headers,
+            body: JSON.stringify({ session: pane.sessionId, pin: this.remotePin || undefined })
           }).catch(() => {});
         }
         pane.sessionId = `${tab.id}-p${paneNum}-${Date.now()}`;
@@ -31824,14 +32277,17 @@ Aturan:
       }
 
       try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
         const response = await fetch(this.getTerminalApiUrl('/api/terminal/exec'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             command: trimmed,
             cwd: pane.cwd,
             shell: pane.shell,
-            autoEnter: pane ? !!pane.autoEnter : (tab ? !!tab.autoEnter : false)
+            autoEnter: pane ? !!pane.autoEnter : (tab ? !!tab.autoEnter : false),
+            pin: this.remotePin || undefined
           })
         });
 
@@ -31947,6 +32403,78 @@ Aturan:
       screenEl.appendChild(helpEl);
     },
 
+    attachMobileTouchKeybar() {
+      const keybar = document.getElementById('termMobileTouchKeybar');
+      if (!keybar) return;
+
+      keybar.querySelectorAll('.term-touch-key').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const keyType = btn.getAttribute('data-key');
+          if (!keyType) return;
+
+          try {
+            if (navigator.vibrate) navigator.vibrate(15);
+          } catch (_) {}
+
+          const tab = this.getActiveTab();
+          const paneNum = this.activePane || 1;
+          const paneState = this.getPaneState(paneNum);
+          const sId = paneState?.sessionId || `${tab?.id}-p${paneNum}`;
+
+          if (keyType === 'Enter') {
+            this.sendEnterToPane(paneNum);
+            return;
+          }
+
+          if (keyType === 'paste') {
+            try {
+              const text = await navigator.clipboard.readText();
+              if (text) {
+                if (paneState?.term && !paneState.isFallbackMode) {
+                  this.sendPtyInput(sId, text);
+                } else {
+                  const input = document.getElementById(`termCliInput${paneNum}`);
+                  if (input) {
+                    input.value += text;
+                    input.focus();
+                  }
+                }
+              }
+            } catch (err) {
+              showToast('Gagal membaca clipboard. Izinkan akses clipboard di browser.', 'warning');
+            }
+            return;
+          }
+
+          let ptySeq = '';
+          if (keyType === 'Escape') ptySeq = '\x1b';
+          else if (keyType === 'Tab') ptySeq = '\t';
+          else if (keyType === 'ctrl_c') ptySeq = '\x03';
+          else if (keyType === 'ctrl_l') ptySeq = '\x0c';
+          else if (keyType === 'ArrowUp') ptySeq = '\x1b[A';
+          else if (keyType === 'ArrowDown') ptySeq = '\x1b[B';
+          else if (keyType === 'ArrowLeft') ptySeq = '\x1b[D';
+          else if (keyType === 'ArrowRight') ptySeq = '\x1b[C';
+
+          if (ptySeq) {
+            if (paneState?.term && !paneState.isFallbackMode) {
+              this.sendPtyInput(sId, ptySeq);
+            } else {
+              if (keyType === 'ctrl_c') {
+                if (paneState?.term) paneState.term.write('^C\r\n');
+                const conf = this.shells[paneState?.shell] || this.shells.powershell;
+                if (paneState?.term) paneState.term.write(`\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
+              } else if (keyType === 'ctrl_l') {
+                this.clearActiveScreen();
+              }
+            }
+          }
+        });
+      });
+    },
+
     attachListeners() {
       const shellBtn = document.getElementById('btnTerminalShell');
       const dropdown = document.getElementById('terminalShellDropdown');
@@ -31972,12 +32500,34 @@ Aturan:
       document.getElementById('btnTermFontDec')?.addEventListener('click', () => this.adjustFontSize(-1));
       document.getElementById('btnTermFontInc')?.addEventListener('click', () => this.adjustFontSize(1));
       document.getElementById('btnTermSyncWindows')?.addEventListener('click', () => this.trySyncWindows(true));
+      document.getElementById('btnTermRemoteTunnel')?.addEventListener('click', () => this.openRemoteTunnelModal());
       document.getElementById('btnTermSplit')?.addEventListener('click', () => this.toggleSplit());
       document.getElementById('btnTermClear')?.addEventListener('click', () => this.clearActiveScreen());
       document.getElementById('btnTermTheme')?.addEventListener('click', () => this.toggleTheme());
       document.getElementById('btnTermFullscreen')?.addEventListener('click', () => this.toggleFullscreen());
       document.getElementById('btnClosePane2')?.addEventListener('click', () => this.toggleSplit());
       document.getElementById('btnTermAddTab')?.addEventListener('click', () => this.addTab());
+
+      // Remote Tunnel Modal handlers
+      document.getElementById('btnTermRemoteTunnelClose')?.addEventListener('click', () => this.closeRemoteTunnelModal());
+      document.getElementById('btnTermToggleTunnel')?.addEventListener('click', () => this.toggleCloudflareTunnel());
+      document.getElementById('btnTermRegenTunnelPin')?.addEventListener('click', () => this.regenerateTunnelPin());
+      document.getElementById('btnTermCopyTunnelUrl')?.addEventListener('click', () => this.copyTunnelUrl());
+      document.getElementById('btnTermCopyTunnelPin')?.addEventListener('click', () => this.copyTunnelPin());
+      document.getElementById('btnTermCopyRemoteFullUrl')?.addEventListener('click', () => this.copyRemoteFullUrl());
+
+      // Mobile Remote Overlay handlers
+      document.getElementById('btnTermConnectRemote')?.addEventListener('click', () => this.connectRemoteFromOverlay());
+      document.getElementById('btnTermDismissRemoteOverlay')?.addEventListener('click', () => this.dismissRemoteOverlay());
+      document.getElementById('inputTermRemotePin')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') this.connectRemoteFromOverlay();
+      });
+      document.getElementById('inputTermRemoteHost')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('inputTermRemotePin')?.focus();
+      });
+
+      // Mobile Touch Keybar
+      this.attachMobileTouchKeybar();
 
       // Per-pane header action buttons
       document.getElementById('btnPaneAutoEnter1')?.addEventListener('click', (e) => {

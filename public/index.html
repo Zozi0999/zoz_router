@@ -41,9 +41,9 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="xterm.css?v=20261017_v334">
-  <link rel="preload" as="style" href="style.min.css?v=20261017_v334">
-  <link rel="stylesheet" href="style.min.css?v=20261017_v334">
+  <link rel="stylesheet" href="xterm.css?v=20261017_v335">
+  <link rel="preload" as="style" href="style.min.css?v=20261017_v335">
+  <link rel="stylesheet" href="style.min.css?v=20261017_v335">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -2467,6 +2467,12 @@
             <span id="labelTermSyncWindows">Sync Windows</span>
           </button>
 
+          <!-- Cloudflare Remote Tunnel Access Button -->
+          <button class="tb-btn" id="btnTermRemoteTunnel" type="button" title="Akses Remote WAN via Cloudflare Tunnel (Mobile-to-Desktop)">
+            <i class="fa-solid fa-cloud" id="iconTermRemoteTunnel" style="font-size: 0.75rem; color: #38bdf8;"></i>
+            <span id="labelTermRemoteTunnel">☁️ Remote Tunnel</span>
+          </button>
+
           <!-- Split View Toggle -->
           <button class="tb-btn" id="btnTermSplit" type="button" title="Beralih Tampilan Split 2 Panel">
             <i class="fa-solid fa-table-columns" style="font-size: 0.75rem;"></i>
@@ -2594,6 +2600,56 @@
             </button>
           </div>
         </div>
+
+        <!-- Mobile Remote Connection Overlay Card (Untuk Akses dari HP / Luar Jaringan Rumah) -->
+        <div class="term-remote-overlay" id="termRemoteOverlay" style="display: none;">
+          <div class="term-remote-card" id="termRemoteOverlayCard">
+            <div class="term-remote-card-header">
+              <div class="term-remote-badge-icon">
+                <i class="fa-solid fa-mobile-screen-button"></i>
+              </div>
+              <div class="term-remote-card-titles">
+                <h4 class="term-remote-card-title">📱 Mode Remote Seluler (Cloudflare WAN)</h4>
+                <p class="term-remote-card-sub">Hubungkan terminal HP ke PowerShell di laptop rumah melalui Cloudflare Tunnel.</p>
+              </div>
+            </div>
+            <div class="term-remote-card-body">
+              <div class="term-remote-input-group">
+                <label for="inputTermRemoteHost"><i class="fa-solid fa-link"></i> URL Host Cloudflare Tunnel</label>
+                <input type="text" id="inputTermRemoteHost" class="term-remote-input" placeholder="https://xxxx.trycloudflare.com atau wss://..." autocomplete="off" spellcheck="false">
+                <span class="term-remote-hint">Otomatis menormalisasi https:// dan wss://</span>
+              </div>
+              <div class="term-remote-input-group">
+                <label for="inputTermRemotePin"><i class="fa-solid fa-key"></i> PIN Keamanan Laptop (6 Digit)</label>
+                <input type="text" id="inputTermRemotePin" class="term-remote-input pin-input" placeholder="6-digit PIN" maxlength="6" autocomplete="off" inputmode="numeric">
+                <span class="term-remote-hint">PIN ditampilkan di menu '☁️ Remote Tunnel' pada laptop host.</span>
+              </div>
+              <div id="termRemoteOverlayMsg" class="term-remote-msg" style="display: none;"></div>
+              <div class="term-remote-actions">
+                <button type="button" class="term-remote-btn primary" id="btnTermConnectRemote">
+                  <i class="fa-solid fa-bolt"></i> Hubungkan ke Terminal Laptop Rumah
+                </button>
+                <button type="button" class="term-remote-btn secondary" id="btnTermDismissRemoteOverlay">
+                  <i class="fa-solid fa-cloud"></i> Buka Mode Cloud Sandbox
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mobile Touch Keybar for PowerShell (Ergonomi sentuh HP) -->
+      <div class="terminal-mobile-keybar" id="termMobileTouchKeybar" style="display: none;">
+        <button type="button" class="term-touch-key" data-key="Escape" title="Escape">ESC</button>
+        <button type="button" class="term-touch-key" data-key="Tab" title="Tab Autocomplete">TAB</button>
+        <button type="button" class="term-touch-key" data-key="ctrl_c" title="Interupsi Perintah (Ctrl+C)">^C</button>
+        <button type="button" class="term-touch-key" data-key="ctrl_l" title="Bersihkan Layar (Ctrl+L)">^L</button>
+        <button type="button" class="term-touch-key" data-key="ArrowUp" title="Riwayat Sebelumnya">↑</button>
+        <button type="button" class="term-touch-key" data-key="ArrowDown" title="Riwayat Selanjutnya">↓</button>
+        <button type="button" class="term-touch-key" data-key="ArrowLeft" title="Kiri">←</button>
+        <button type="button" class="term-touch-key" data-key="ArrowRight" title="Kanan">→</button>
+        <button type="button" class="term-touch-key" data-key="paste" title="Tempel Clipboard">Paste</button>
+        <button type="button" class="term-touch-key primary" data-key="Enter" title="Kirim Enter">↵ Enter</button>
       </div>
 
       <!-- Quick Command Action Chips Bar -->
@@ -2610,6 +2666,81 @@
     </div>
   </div>
 
+  <!-- Modal Cloudflare Tunnel Host Broadcaster (Desktop Mode) -->
+  <div class="modal-backdrop" id="termRemoteTunnelModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="termTunnelModalTitle">
+    <div class="modal-dialog term-tunnel-dialog">
+      <div class="modal-header">
+        <div class="term-tunnel-modal-title" id="termTunnelModalTitle">
+          <i class="fa-solid fa-cloud" style="color: #38bdf8;"></i>
+          <span>Akses Remote WAN // Cloudflare Tunnel</span>
+        </div>
+        <button type="button" class="tb-btn icon-only" id="btnTermRemoteTunnelClose" title="Tutup Modal Tunnel">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body term-tunnel-body">
+        <!-- Tunnel Status Row -->
+        <div class="term-tunnel-status-row">
+          <div class="term-tunnel-status-info">
+            <span class="term-tunnel-status-dot" id="termTunnelStatusDot"></span>
+            <span class="term-tunnel-status-text" id="termTunnelStatusText">⚪ Tunnel Cloudflare Nonaktif</span>
+          </div>
+          <button type="button" class="term-tunnel-btn" id="btnTermToggleTunnel">
+            <i class="fa-solid fa-power-off"></i> <span id="labelTermToggleTunnel">Nyalakan Tunnel</span>
+          </button>
+        </div>
+
+        <!-- Tunnel URL Section -->
+        <div class="term-tunnel-section">
+          <label class="term-tunnel-label"><i class="fa-solid fa-globe"></i> Alamat Publik Cloudflare Tunnel (HTTPS / WSS)</label>
+          <div class="term-tunnel-input-copy">
+            <input type="text" id="termTunnelUrlInput" readonly placeholder="Tunnel belum aktif (Klik 'Nyalakan Tunnel')" spellcheck="false">
+            <button type="button" class="term-tunnel-copy-btn" id="btnTermCopyTunnelUrl" title="Salin URL Tunnel">
+              <i class="fa-solid fa-copy"></i> Salin
+            </button>
+          </div>
+        </div>
+
+        <!-- Session PIN Section -->
+        <div class="term-tunnel-section">
+          <div class="term-tunnel-section-header">
+            <label class="term-tunnel-label"><i class="fa-solid fa-shield-halved"></i> 6-Digit PIN Keamanan Sesi</label>
+            <button type="button" class="term-tunnel-mini-btn" id="btnTermRegenTunnelPin" title="Generate ulang PIN keamanan">
+              <i class="fa-solid fa-rotate-right"></i> PIN Baru
+            </button>
+          </div>
+          <div class="term-tunnel-pin-row">
+            <div class="term-tunnel-pin-digits" id="termTunnelPinDisplay">------</div>
+            <button type="button" class="term-tunnel-copy-btn" id="btnTermCopyTunnelPin" title="Salin PIN">
+              <i class="fa-solid fa-copy"></i> Salin PIN
+            </button>
+          </div>
+          <p class="term-tunnel-note">Koneksi dari luar jaringan lokal (HP di sekolah) wajib memasukkan PIN ini untuk mengamankan PowerShell laptop Anda.</p>
+        </div>
+
+        <!-- QR Code Pairing Section -->
+        <div class="term-tunnel-section qr-section">
+          <label class="term-tunnel-label"><i class="fa-solid fa-qrcode"></i> Scan QR Code dari HP (Auto-Pairing)</label>
+          <div class="term-tunnel-qr-wrap">
+            <div class="term-tunnel-qr-box" id="termTunnelQrContainer">
+              <img id="termTunnelQrImg" src="" alt="QR Code Remote Tunnel" style="display: none;">
+              <div id="termTunnelQrPlaceholder" class="term-tunnel-qr-placeholder">
+                <i class="fa-solid fa-qrcode" style="font-size: 2.2rem; opacity: 0.35;"></i>
+                <span>Nyalakan tunnel untuk membuat QR pairing</span>
+              </div>
+            </div>
+            <div class="term-tunnel-qr-desc">
+              <p>Scan menggunakan kamera HP Anda sebelum berangkat. HP akan otomatis membuka terminal dan terhubung ke PowerShell di laptop rumah.</p>
+              <button type="button" class="term-tunnel-btn small" id="btnTermCopyRemoteFullUrl">
+                <i class="fa-solid fa-link"></i> Salin Link Lengkap Remote
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
@@ -2622,11 +2753,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous" defer></script>
   <!-- Heavy libraries (Mermaid, jsPDF, PDF.js, JSZip) are dynamically loaded on-demand to optimize FCP, TBT & LCP -->
   <!-- Terminal In-Tab Xterm & FitAddon Engine -->
-  <script src="xterm.js?v=20261017_v334" defer></script>
-  <script src="addon-fit.js?v=20261017_v334" defer></script>
+  <script src="xterm.js?v=20261017_v335" defer></script>
+  <script src="addon-fit.js?v=20261017_v335" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261017_v334" defer></script>
+  <script src="text-safety.js?v=20261017_v335" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261017_v334" defer></script>
+  <script src="app.js?v=20261017_v335" defer></script>
 </body>
 </html>

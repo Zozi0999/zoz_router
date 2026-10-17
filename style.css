@@ -13468,6 +13468,445 @@ body.mermaid-has-fullscreen {
   }
 }
 
+/* =========================================================================
+   CLOUDFLARE TUNNEL REMOTE ACCESS & MOBILE ERGONOMICS (v335)
+   ========================================================================= */
+
+/* Mobile Touch Keybar */
+.terminal-mobile-keybar {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 5px;
+  padding: 6px 10px;
+  background: rgba(10, 15, 28, 0.95);
+  border-top: 1px solid rgba(56, 189, 248, 0.2);
+  align-items: center;
+  z-index: 10;
+  -webkit-overflow-scrolling: touch;
+}
+.terminal-mobile-keybar::-webkit-scrollbar {
+  height: 3px;
+}
+.terminal-mobile-keybar::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.3);
+  border-radius: 2px;
+}
+.term-touch-key {
+  flex: 0 0 auto;
+  min-width: 38px;
+  height: 32px;
+  padding: 0 10px;
+  background: rgba(30, 41, 59, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 5px;
+  color: #e2e8f0;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  touch-action: manipulation;
+  transition: all 0.12s ease;
+}
+.term-touch-key:hover {
+  background: rgba(51, 65, 85, 0.95);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+}
+.term-touch-key:active {
+  transform: scale(0.94);
+  background: #0284c7;
+  border-color: #38bdf8;
+  color: #ffffff;
+}
+.term-touch-key.primary {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(2, 132, 199, 0.4));
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #38bdf8;
+  font-weight: 700;
+}
+.term-touch-key.primary:active {
+  background: #0284c7;
+  color: #fff;
+}
+
+/* Mobile Remote Connection Overlay Card */
+.term-remote-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 12, 22, 0.85);
+  backdrop-filter: blur(8px);
+  padding: 16px;
+}
+.term-remote-card {
+  width: 100%;
+  max-width: 480px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(10, 15, 28, 0.98));
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65), 0 0 24px rgba(56, 189, 248, 0.15);
+  padding: 22px;
+  color: #f1f5f9;
+}
+.term-remote-card-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+}
+.term-remote-badge-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  color: #38bdf8;
+  flex-shrink: 0;
+}
+.term-remote-card-title {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+.term-remote-card-sub {
+  margin: 4px 0 0 0;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  line-height: 1.35;
+}
+.term-remote-input-group {
+  margin-bottom: 14px;
+}
+.term-remote-input-group label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #cbd5e1;
+  margin-bottom: 6px;
+}
+.term-remote-input-group label i {
+  color: #38bdf8;
+  margin-right: 4px;
+}
+.term-remote-input {
+  width: 100%;
+  padding: 9px 12px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 6px;
+  color: #f8fafc;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.term-remote-input:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+}
+.term-remote-input.pin-input {
+  letter-spacing: 6px;
+  font-size: 1.15rem;
+  text-align: center;
+  font-weight: 700;
+}
+.term-remote-hint {
+  display: block;
+  font-size: 0.7rem;
+  color: #64748b;
+  margin-top: 4px;
+}
+.term-remote-msg {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  margin-bottom: 14px;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+}
+.term-remote-msg.success {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.35);
+  color: #86efac;
+}
+.term-remote-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+.term-remote-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 7px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: none;
+}
+.term-remote-btn.primary {
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  color: #ffffff;
+  border: 1px solid #38bdf8;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35);
+}
+.term-remote-btn.primary:hover {
+  background: linear-gradient(135deg, #0369a1, #075985);
+  transform: translateY(-1px);
+}
+.term-remote-btn.secondary {
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: #94a3b8;
+}
+.term-remote-btn.secondary:hover {
+  background: rgba(51, 65, 85, 0.8);
+  color: #e2e8f0;
+}
+
+/* Modal Cloudflare Tunnel Host Broadcaster (Desktop Mode) */
+.term-tunnel-dialog {
+  max-width: 500px;
+  width: 92%;
+  background: rgba(15, 23, 42, 0.98);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 30px rgba(56, 189, 248, 0.2);
+  border-radius: 12px;
+  color: #f1f5f9;
+}
+.term-tunnel-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+.term-tunnel-body {
+  padding: 18px;
+}
+.term-tunnel-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+.term-tunnel-status-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.term-tunnel-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #94a3b8;
+  display: inline-block;
+}
+.term-tunnel-status-dot.active {
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+}
+.term-tunnel-status-text {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+.term-tunnel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: rgba(14, 165, 233, 0.2);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  color: #38bdf8;
+  transition: all 0.15s ease;
+}
+.term-tunnel-btn:hover {
+  background: rgba(14, 165, 233, 0.35);
+  border-color: #38bdf8;
+}
+.term-tunnel-btn.active {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #f87171;
+}
+.term-tunnel-btn.small {
+  padding: 5px 10px;
+  font-size: 0.74rem;
+}
+.term-tunnel-section {
+  margin-bottom: 14px;
+}
+.term-tunnel-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.term-tunnel-label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #cbd5e1;
+  margin-bottom: 6px;
+}
+.term-tunnel-label i {
+  color: #38bdf8;
+  margin-right: 4px;
+}
+.term-tunnel-input-copy {
+  display: flex;
+  gap: 6px;
+}
+.term-tunnel-input-copy input {
+  flex: 1;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+  color: #f8fafc;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  outline: none;
+}
+.term-tunnel-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.term-tunnel-copy-btn:hover {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: #38bdf8;
+  color: #38bdf8;
+}
+.term-tunnel-mini-btn {
+  background: none;
+  border: none;
+  color: #38bdf8;
+  font-size: 0.74rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.term-tunnel-mini-btn:hover {
+  background: rgba(56, 189, 248, 0.15);
+}
+.term-tunnel-pin-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.term-tunnel-pin-digits {
+  flex: 1;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 1.4rem;
+  letter-spacing: 8px;
+  font-weight: 700;
+  color: #38bdf8;
+  text-align: center;
+  padding: 8px 14px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px dashed rgba(56, 189, 248, 0.4);
+  border-radius: 6px;
+}
+.term-tunnel-note {
+  font-size: 0.71rem;
+  color: #94a3b8;
+  margin: 6px 0 0 0;
+  line-height: 1.35;
+}
+.term-tunnel-qr-wrap {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 10px;
+  background: rgba(30, 41, 59, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+}
+.term-tunnel-qr-box {
+  width: 130px;
+  height: 130px;
+  background: #ffffff;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+.term-tunnel-qr-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.term-tunnel-qr-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 6px;
+  color: #64748b;
+  font-size: 0.65rem;
+  padding: 4px;
+}
+.term-tunnel-qr-desc {
+  flex: 1;
+}
+.term-tunnel-qr-desc p {
+  font-size: 0.74rem;
+  color: #cbd5e1;
+  margin: 0 0 10px 0;
+  line-height: 1.4;
+}
+
+
 
 
 
