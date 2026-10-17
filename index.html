@@ -2506,8 +2506,13 @@
             <i class="fa-solid fa-expand" id="iconTermFullscreen" style="font-size: 0.8rem;"></i>
           </button>
 
+          <!-- Minimize Terminal Button -->
+          <button class="tb-btn icon-only tb-btn-minimize" id="btnTermMinimize" type="button" aria-label="Minimize Terminal" title="Ciutkan / Minimize Terminal">
+            <i class="fa-solid fa-minus" style="font-size: 0.85rem;"></i>
+          </button>
+
           <!-- Close Modal -->
-          <button class="tb-btn icon-only" id="btnTermClose" type="button" data-close="terminalModal" aria-label="Tutup Terminal" title="Tutup Terminal (Esc)">
+          <button class="tb-btn icon-only tb-btn-close" id="btnTermClose" type="button" data-close="terminalModal" aria-label="Tutup Terminal" title="Tutup Terminal (Esc)">
             <i class="fa-solid fa-xmark" style="font-size: 0.9rem;"></i>
           </button>
         </div>
@@ -2682,10 +2687,18 @@
 
       <!-- Mobile Touch Keybar for PowerShell (Ergonomi sentuh HP) -->
       <div class="terminal-mobile-keybar" id="termMobileTouchKeybar" style="display: none;">
+        <button type="button" class="term-touch-key term-mod-key ctrl-modifier-key" id="btnTouchCtrl" data-key="ctrl_toggle" title="Ctrl Modifier Toggle (Termux style)">CTRL</button>
+        <button type="button" class="term-touch-key term-mod-key alt-modifier-key" id="btnTouchAlt" data-key="alt_toggle" title="Alt Modifier Toggle">ALT</button>
         <button type="button" class="term-touch-key" data-key="Escape" title="Escape">ESC</button>
         <button type="button" class="term-touch-key" data-key="Tab" title="Tab Autocomplete">TAB</button>
         <button type="button" class="term-touch-key" data-key="ctrl_c" title="Interupsi Perintah (Ctrl+C)">^C</button>
+        <button type="button" class="term-touch-key" data-key="ctrl_d" title="Keluar / EOF (Ctrl+D)">^D</button>
+        <button type="button" class="term-touch-key" data-key="ctrl_z" title="Tunda Perintah (Ctrl+Z)">^Z</button>
         <button type="button" class="term-touch-key" data-key="ctrl_l" title="Bersihkan Layar (Ctrl+L)">^L</button>
+        <button type="button" class="term-touch-key" data-key="ctrl_a" title="Awal Baris (Ctrl+A)">^A</button>
+        <button type="button" class="term-touch-key" data-key="ctrl_e" title="Akhir Baris (Ctrl+E)">^E</button>
+        <button type="button" class="term-touch-key" data-key="Home" title="Home (Awal Baris)">HOME</button>
+        <button type="button" class="term-touch-key" data-key="End" title="End (Akhir Baris)">END</button>
         <button type="button" class="term-touch-key" data-key="ArrowUp" title="Riwayat Sebelumnya">↑</button>
         <button type="button" class="term-touch-key" data-key="ArrowDown" title="Riwayat Selanjutnya">↓</button>
         <button type="button" class="term-touch-key" data-key="ArrowLeft" title="Kiri">←</button>
@@ -2709,6 +2722,24 @@
         <button class="term-chip" type="button" data-cmd="help">help</button>
         <button class="term-chip" type="button" data-cmd="cls">cls</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Floating Minimized Terminal Dock Badge (Restore Anytime) -->
+  <div class="terminal-minimized-dock" id="termMinimizedDock" style="display: none;" title="Terminal terminimize. Klik untuk membuka kembali.">
+    <div class="dock-inner">
+      <span class="dock-pulse-dot online"></span>
+      <i class="fa-solid fa-terminal dock-icon"></i>
+      <div class="dock-info">
+        <span class="dock-title">Terminal</span>
+        <span class="dock-sub" id="termDockSub">PowerShell Aktif</span>
+      </div>
+      <button type="button" class="dock-action-btn restore" id="btnTermDockRestore" aria-label="Buka Terminal" title="Buka Kembali Terminal">
+        <i class="fa-solid fa-arrow-up-right-from-square"></i>
+      </button>
+      <button type="button" class="dock-action-btn close" id="btnTermDockClose" aria-label="Tutup Terminal" title="Tutup Terminal">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
     </div>
   </div>
 

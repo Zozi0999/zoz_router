@@ -30704,6 +30704,8 @@ Aturan:
     remotePingMs: null,
     remotePingTimer: null,
     tunnelInfo: { active: false, tunnelUrl: '', wssUrl: '', pin: '' },
+    isCtrlActive: false,
+    isAltActive: false,
 
     isMobileDevice() {
       const ua = navigator.userAgent || navigator.vendor || window.opera || '';
@@ -31165,6 +31167,35 @@ Aturan:
           this.updateSyncButtonUI();
           this.updatePaneHeaders();
           this.updateMobileBannerUI();
+
+          // Attempt to attach to laptop host's active session (e.g. Antigravity CLI)
+          try {
+            const sessRes = await fetch(`${norm.httpUrl}/api/terminal/sessions`, {
+              headers: pin ? { 'x-terminal-pin': pin } : {},
+              signal: AbortSignal.timeout(3000)
+            });
+            if (sessRes.ok) {
+              const sessData = await sessRes.json();
+              if (sessData && Array.isArray(sessData.sessions) && sessData.sessions.length > 0) {
+                const sorted = sessData.sessions.sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0));
+                const hostSession = sorted[0];
+                if (hostSession && hostSession.id) {
+                  const t = this.getActiveTab();
+                  if (t && t.pane1) {
+                    t.pane1.sessionId = hostSession.id;
+                    if (hostSession.cwd) {
+                      t.pane1.cwd = hostSession.cwd;
+                      t.cwd = hostSession.cwd;
+                    }
+                    if (hostSession.shell) {
+                      t.pane1.shell = hostSession.shell;
+                      t.shell = hostSession.shell;
+                    }
+                  }
+                }
+              }
+            }
+          } catch (_) {}
 
           const tab = this.getActiveTab();
           if (tab) {
@@ -31833,6 +31864,36 @@ Aturan:
       }
     },
 
+    minimize() {
+      const modal = document.getElementById('terminalModal');
+      if (modal) {
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+      }
+      const dock = document.getElementById('termMinimizedDock');
+      if (dock) {
+        dock.style.display = 'block';
+        const sub = document.getElementById('termDockSub');
+        const activeTab = this.getActiveTab();
+        if (sub && activeTab) {
+          sub.textContent = `${activeTab.title} • ${this.isRemoteConnected ? 'WAN ☁️' : 'Lokal ⚡'}`;
+        }
+      }
+      showToast('Terminal diminimize ke dok mengambang.', 'info');
+    },
+
+    restoreFromDock() {
+      const dock = document.getElementById('termMinimizedDock');
+      if (dock) dock.style.display = 'none';
+      const modal = document.getElementById('terminalModal');
+      if (modal) {
+        modal.classList.add('show');
+        modal.style.display = 'flex';
+        this.focusActiveInput();
+        [50, 150, 300].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
+      }
+    },
+
     focusActiveInput() {
       setTimeout(() => {
         const paneNum = this.activePane || 1;
@@ -32027,7 +32088,31 @@ Aturan:
       }, { passive: true });
 
       term.onData((data) => {
-        // Mode Live PTY (Local Server)
+        // Sticky CTRL Modifier from Mobile Touch Keybar
+        if (this.isCtrlActive) {
+          this.isCtrlActive = false;
+          const ctrlBtn = document.getElementById('btnTouchCtrl');
+          if (ctrlBtn) ctrlBtn.classList.remove('active');
+          if (typeof data === 'string' && data.length === 1) {
+            const code = data.charCodeAt(0);
+            if (code >= 65 && code <= 90) { // A-Z
+              data = String.fromCharCode(code - 64);
+            } else if (code >= 97 && code <= 122) { // a-z
+              data = String.fromCharCode(code - 96);
+            } else if (data === ' ' || data === '@') {
+              data = '\x00';
+            }
+          }
+        }
+        // Sticky ALT Modifier from Mobile Touch Keybar
+        if (this.isAltActive) {
+          this.isAltActive = false;
+          const altBtn = document.getElementById('btnTouchAlt');
+          if (altBtn) altBtn.classList.remove('active');
+          data = '\x1b' + data;
+        }
+
+        // Mode Live PTY (Local Server & Remote WAN)
         if (!paneState.isFallbackMode) {
           this.sendPtyInput(sessionId, data);
           return;
@@ -32070,6 +32155,10 @@ Aturan:
         try { paneState.eventSource.close(); } catch (_) {}
         paneState.eventSource = null;
       }
+      if (paneState.ws) {
+        try { paneState.ws.close(); } catch (_) {}
+        paneState.ws = null;
+      }
 
       if (!paneState.term) {
         this.initXtermPane(paneNum);
@@ -32078,76 +32167,104 @@ Aturan:
       const activeTerm = paneState.term;
       const cols = (activeTerm && activeTerm.cols) ? activeTerm.cols : (this.isMobileDevice() ? 45 : 100);
       const rows = (activeTerm && activeTerm.rows) ? activeTerm.rows : (this.isMobileDevice() ? 30 : 28);
-      let endpoint = `/api/terminal/stream?session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}`;
+      let queryParams = `session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}`;
       if (this.remotePin) {
-        endpoint += `&pin=${encodeURIComponent(this.remotePin)}`;
+        queryParams += `&pin=${encodeURIComponent(this.remotePin)}`;
       }
-      const streamUrl = this.getTerminalApiUrl(endpoint);
-
-      const es = new EventSource(streamUrl);
-      paneState.eventSource = es;
 
       const statusLabel = document.querySelector(`#termPane${paneNum} .pane-status-label`);
       const statusDot = document.querySelector(`#termPane${paneNum} .pane-status-dot`);
       if (statusLabel) statusLabel.textContent = 'Menghubungkan…';
       if (statusDot) statusDot.className = 'pane-status-dot connecting';
 
+      // 1. Prioritas Utama: RFC 6455 WebSocket (0ms latency, anti-buffering Cloudflare Edge)
+      let wsConnected = false;
+      try {
+        let wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        let wsHost = window.location.host;
+
+        if (this.isRemoteConnected && this.remoteHost) {
+          try {
+            const u = new URL(this.remoteHost);
+            wsProto = u.protocol === 'https:' ? 'wss:' : 'ws:';
+            wsHost = u.host;
+          } catch (_) {
+            if (this.remoteHost.startsWith('https://')) {
+              wsProto = 'wss:';
+              wsHost = this.remoteHost.replace(/^https:\/\//, '').split('/')[0];
+            } else if (this.remoteHost.startsWith('http://')) {
+              wsProto = 'ws:';
+              wsHost = this.remoteHost.replace(/^http:\/\//, '').split('/')[0];
+            }
+          }
+        }
+
+        const wsUrl = `${wsProto}//${wsHost}/api/terminal/ws?${queryParams}`;
+        const ws = new WebSocket(wsUrl);
+        paneState.ws = ws;
+
+        ws.onopen = () => {
+          wsConnected = true;
+          paneState.isFallbackMode = false;
+          if (statusDot) statusDot.className = 'pane-status-dot online';
+          if (this.isRemoteConnected) {
+            const lat = this.remotePingMs !== null ? ` • ${this.remotePingMs}ms` : '';
+            if (statusLabel) statusLabel.textContent = `☁️ Remote WAN (PTY)${lat}`;
+          } else if (this.isWindowsSynced) {
+            if (statusLabel) statusLabel.textContent = 'Aktif (Windows ⚡)';
+          } else {
+            if (statusLabel) statusLabel.textContent = 'Aktif (PTY)';
+          }
+          if (paneState.term) {
+            this.sendPtyResize(sessionId, paneState.term.cols, paneState.term.rows);
+            setTimeout(() => {
+              if (!paneState._hasReceivedData) {
+                this.sendPtyInput(sessionId, '\r');
+              }
+            }, 100);
+          }
+        };
+
+        ws.onmessage = (evt) => {
+          try {
+            const msg = JSON.parse(evt.data);
+            this._handleStreamMessage(tab, paneState, paneNum, msg, statusLabel, statusDot, sessionId);
+          } catch (_) {}
+        };
+
+        ws.onerror = () => {
+          if (!wsConnected) {
+            this.connectSseStream(tab, paneState, paneNum, queryParams, statusLabel, statusDot, sessionId);
+          }
+        };
+
+        ws.onclose = () => {
+          if (paneState.ws === ws) paneState.ws = null;
+          if (!wsConnected) {
+            this.connectSseStream(tab, paneState, paneNum, queryParams, statusLabel, statusDot, sessionId);
+          } else {
+            if (statusLabel) statusLabel.textContent = this.isRemoteConnected ? '☁️ Remote (Terputus)' : 'Terputus';
+            if (statusDot) statusDot.className = 'pane-status-dot offline';
+          }
+        };
+      } catch (_) {
+        this.connectSseStream(tab, paneState, paneNum, queryParams, statusLabel, statusDot, sessionId);
+      }
+    },
+
+    connectSseStream(tab, paneState, paneNum, queryParams, statusLabel, statusDot, sessionId) {
+      if (paneState.eventSource) {
+        try { paneState.eventSource.close(); } catch (_) {}
+        paneState.eventSource = null;
+      }
+      const streamUrl = this.getTerminalApiUrl(`/api/terminal/stream?${queryParams}`);
+      const es = new EventSource(streamUrl);
+      paneState.eventSource = es;
+
       es.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          const currentTerm = paneState.term;
-          if (msg.type === 'data' || msg.type === 'init') {
-            paneState._hasReceivedData = true;
-            if (currentTerm && typeof msg.data === 'string') {
-              currentTerm.write(msg.data);
-              this.handleAutoRespond(tab, paneState, paneNum, msg.data);
-            } else if (typeof msg.data === 'string') {
-              paneState._pendingBuffer = (paneState._pendingBuffer || '') + msg.data;
-            }
-          } else if (msg.type === 'connected') {
-            if (this.isRemoteConnected) {
-              const lat = this.remotePingMs !== null ? ` • ${this.remotePingMs}ms` : '';
-              if (statusLabel) statusLabel.textContent = `☁️ Remote WAN (PTY)${lat}`;
-              paneState.isFallbackMode = false;
-            } else if (this.isWindowsSynced) {
-              if (statusLabel) statusLabel.textContent = 'Aktif (Windows ⚡)';
-              paneState.isFallbackMode = false;
-            } else {
-              const isCloud = Boolean(IS_CLOUD_HOSTED || paneState.isFallbackMode);
-              if (statusLabel) statusLabel.textContent = isCloud ? 'Aktif (Cloud Linux)' : 'Aktif (PTY)';
-            }
-            if (statusDot) statusDot.className = 'pane-status-dot online';
-            if (msg.cwd && msg.cwd !== paneState.cwd) {
-              paneState.cwd = msg.cwd;
-              if (paneNum === 1) tab.cwd = msg.cwd;
-              this.updatePaneHeaders();
-            }
-            if (currentTerm) {
-              this.sendPtyResize(sessionId, currentTerm.cols, currentTerm.rows);
-              setTimeout(() => {
-                if (!paneState._hasReceivedData && (this.isRemoteConnected || this.isWindowsSynced)) {
-                  this.sendPtyInput(sessionId, '\r');
-                }
-              }, 250);
-            }
-          } else if (msg.type === 'exit') {
-            if (currentTerm) {
-              currentTerm.write(`\r\n\x1b[33m[Proses shell keluar dengan kode ${msg.exitCode || 0}]\x1b[0m\r\n`);
-            }
-            if (statusLabel) statusLabel.textContent = 'Selesai';
-            if (statusDot) statusDot.className = 'pane-status-dot offline';
-          } else if (msg.type === 'fallback') {
-            if (!this.isWindowsSynced && !this.isRemoteConnected) {
-              paneState.isFallbackMode = true;
-              if (statusLabel) statusLabel.textContent = 'Aktif (Cloud Linux)';
-              if (statusDot) statusDot.className = 'pane-status-dot online';
-              const conf = this.shells[paneState.shell] || this.shells.powershell;
-              if (currentTerm && (!paneState._promptRendered || currentTerm.rows > 0)) {
-                paneState._promptRendered = true;
-                currentTerm.write(`\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
-              }
-            }
-          }
+          this._handleStreamMessage(tab, paneState, paneNum, msg, statusLabel, statusDot, sessionId);
         } catch (_) {}
       };
 
@@ -32162,9 +32279,9 @@ Aturan:
           if (statusLabel) statusLabel.textContent = 'Aktif (Cloud Linux)';
           if (statusDot) statusDot.className = 'pane-status-dot online';
           const conf = this.shells[paneState.shell] || this.shells.powershell;
-          if (term && !paneState._promptRendered) {
+          if (paneState.term && !paneState._promptRendered) {
             paneState._promptRendered = true;
-            term.write(`\r\n\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
+            paneState.term.write(`\r\n\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
           }
           return;
         }
@@ -32173,15 +32290,71 @@ Aturan:
           if (statusLabel) statusLabel.textContent = 'Aktif (Win Exec ⚡)';
           if (statusDot) statusDot.className = 'pane-status-dot online';
           const conf = this.shells[paneState.shell] || this.shells.powershell;
-          if (term && !paneState._promptRendered) {
+          if (paneState.term && !paneState._promptRendered) {
             paneState._promptRendered = true;
-            term.write(`\r\n\x1b[32m⚡ [WINDOWS BRIDGE EXEC MODE AKTIF]\x1b[0m\r\n\x1b[90m(Perintah dieksekusi langsung pada Windows lokal via ${this.bridgeUrl})\x1b[0m\r\n\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
+            paneState.term.write(`\r\n\x1b[32m⚡ [WINDOWS BRIDGE EXEC MODE AKTIF]\x1b[0m\r\n\x1b[90m(Perintah dieksekusi langsung pada Windows lokal via ${this.bridgeUrl})\x1b[0m\r\n\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
           }
           return;
         }
         if (statusLabel) statusLabel.textContent = 'Terputus';
         if (statusDot) statusDot.className = 'pane-status-dot offline';
       };
+    },
+
+    _handleStreamMessage(tab, paneState, paneNum, msg, statusLabel, statusDot, sessionId) {
+      const currentTerm = paneState.term;
+      if (msg.type === 'data' || msg.type === 'init') {
+        paneState._hasReceivedData = true;
+        if (currentTerm && typeof msg.data === 'string') {
+          currentTerm.write(msg.data);
+          this.handleAutoRespond(tab, paneState, paneNum, msg.data);
+        } else if (typeof msg.data === 'string') {
+          paneState._pendingBuffer = (paneState._pendingBuffer || '') + msg.data;
+        }
+      } else if (msg.type === 'connected') {
+        if (this.isRemoteConnected) {
+          const lat = this.remotePingMs !== null ? ` • ${this.remotePingMs}ms` : '';
+          if (statusLabel) statusLabel.textContent = `☁️ Remote WAN (PTY)${lat}`;
+          paneState.isFallbackMode = false;
+        } else if (this.isWindowsSynced) {
+          if (statusLabel) statusLabel.textContent = 'Aktif (Windows ⚡)';
+          paneState.isFallbackMode = false;
+        } else {
+          const isCloud = Boolean(IS_CLOUD_HOSTED || paneState.isFallbackMode);
+          if (statusLabel) statusLabel.textContent = isCloud ? 'Aktif (Cloud Linux)' : 'Aktif (PTY)';
+        }
+        if (statusDot) statusDot.className = 'pane-status-dot online';
+        if (msg.cwd && msg.cwd !== paneState.cwd) {
+          paneState.cwd = msg.cwd;
+          if (paneNum === 1) tab.cwd = msg.cwd;
+          this.updatePaneHeaders();
+        }
+        if (currentTerm) {
+          this.sendPtyResize(sessionId, currentTerm.cols, currentTerm.rows);
+          setTimeout(() => {
+            if (!paneState._hasReceivedData && (this.isRemoteConnected || this.isWindowsSynced)) {
+              this.sendPtyInput(sessionId, '\r');
+            }
+          }, 250);
+        }
+      } else if (msg.type === 'exit') {
+        if (currentTerm) {
+          currentTerm.write(`\r\n\x1b[33m[Proses shell keluar dengan kode ${msg.exitCode || 0}]\x1b[0m\r\n`);
+        }
+        if (statusLabel) statusLabel.textContent = 'Selesai';
+        if (statusDot) statusDot.className = 'pane-status-dot offline';
+      } else if (msg.type === 'fallback') {
+        if (!this.isWindowsSynced && !this.isRemoteConnected) {
+          paneState.isFallbackMode = true;
+          if (statusLabel) statusLabel.textContent = 'Aktif (Cloud Linux)';
+          if (statusDot) statusDot.className = 'pane-status-dot online';
+          const conf = this.shells[paneState.shell] || this.shells.powershell;
+          if (currentTerm && (!paneState._promptRendered || currentTerm.rows > 0)) {
+            paneState._promptRendered = true;
+            currentTerm.write(`\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
+          }
+        }
+      }
     },
 
     handleAutoRespond(tab, paneState, paneNum, chunk) {
@@ -32230,6 +32403,16 @@ Aturan:
 
     sendPtyInput(sessionId, data) {
       if (!data) return;
+      const tab = this.getActiveTab();
+      const panes = [tab?.pane1, tab?.pane2].filter(p => p && p.sessionId === sessionId);
+      const wsPane = panes.find(p => p.ws && p.ws.readyState === WebSocket.OPEN);
+      if (wsPane && wsPane.ws) {
+        try {
+          wsPane.ws.send(JSON.stringify({ type: 'input', session: sessionId, data }));
+          return;
+        } catch (_) {}
+      }
+
       if (!this._inputQueues) this._inputQueues = new Map();
       let q = this._inputQueues.get(sessionId);
       if (!q) {
@@ -32267,6 +32450,15 @@ Aturan:
     },
 
     async sendPtyResize(sessionId, cols, rows) {
+      const tab = this.getActiveTab();
+      const panes = [tab?.pane1, tab?.pane2].filter(p => p && p.sessionId === sessionId);
+      const wsPane = panes.find(p => p.ws && p.ws.readyState === WebSocket.OPEN);
+      if (wsPane && wsPane.ws) {
+        try {
+          wsPane.ws.send(JSON.stringify({ type: 'resize', session: sessionId, cols, rows }));
+          return;
+        } catch (_) {}
+      }
       try {
         const headers = { 'Content-Type': 'application/json' };
         if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
@@ -32945,6 +33137,22 @@ Aturan:
             return;
           }
 
+          if (keyType === 'ctrl_toggle') {
+            this.isCtrlActive = !this.isCtrlActive;
+            const ctrlBtn = document.getElementById('btnTouchCtrl');
+            if (ctrlBtn) ctrlBtn.classList.toggle('active', this.isCtrlActive);
+            showToast(this.isCtrlActive ? 'CTRL aktif (Tekan tombol huruf berikutnya)' : 'CTRL nonaktif', 'info');
+            return;
+          }
+
+          if (keyType === 'alt_toggle') {
+            this.isAltActive = !this.isAltActive;
+            const altBtn = document.getElementById('btnTouchAlt');
+            if (altBtn) altBtn.classList.toggle('active', this.isAltActive);
+            showToast(this.isAltActive ? 'ALT aktif (Tekan tombol huruf berikutnya)' : 'ALT nonaktif', 'info');
+            return;
+          }
+
           if (keyType === 'Enter') {
             this.sendEnterToPane(paneNum);
             return;
@@ -32974,7 +33182,13 @@ Aturan:
           if (keyType === 'Escape') ptySeq = '\x1b';
           else if (keyType === 'Tab') ptySeq = '\t';
           else if (keyType === 'ctrl_c') ptySeq = '\x03';
+          else if (keyType === 'ctrl_d') ptySeq = '\x04';
+          else if (keyType === 'ctrl_z') ptySeq = '\x1a';
           else if (keyType === 'ctrl_l') ptySeq = '\x0c';
+          else if (keyType === 'ctrl_a') ptySeq = '\x01';
+          else if (keyType === 'ctrl_e') ptySeq = '\x05';
+          else if (keyType === 'Home') ptySeq = '\x1b[H';
+          else if (keyType === 'End') ptySeq = '\x1b[F';
           else if (keyType === 'ArrowUp') ptySeq = '\x1b[A';
           else if (keyType === 'ArrowDown') ptySeq = '\x1b[B';
           else if (keyType === 'ArrowLeft') ptySeq = '\x1b[D';
@@ -33250,9 +33464,32 @@ Aturan:
         });
       }
 
+      document.getElementById('btnTermMinimize')?.addEventListener('click', () => {
+        this.minimize();
+      });
+
       document.getElementById('btnTermClose')?.addEventListener('click', () => {
         closeModal('terminalModal');
       });
+
+      document.getElementById('btnTermDockRestore')?.addEventListener('click', () => {
+        this.restoreFromDock();
+      });
+
+      document.getElementById('btnTermDockClose')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const dock = document.getElementById('termMinimizedDock');
+        if (dock) dock.style.display = 'none';
+      });
+
+      const minDock = document.getElementById('termMinimizedDock');
+      if (minDock) {
+        minDock.addEventListener('click', (e) => {
+          if (!e.target.closest('#btnTermDockClose')) {
+            this.restoreFromDock();
+          }
+        });
+      }
 
       window.addEventListener('resize', () => {
         this.fitAllPanes();

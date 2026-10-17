@@ -12663,7 +12663,9 @@ body.mermaid-has-fullscreen {
   background: rgba(4, 7, 13, 0.88);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
-  padding: 16px;
+  padding: 10px;
+  box-sizing: border-box;
+  overflow: hidden;
   overscroll-behavior: contain;
 }
 
@@ -12674,13 +12676,14 @@ body.mermaid-has-fullscreen {
 
 .terminal-modal-card {
   position: relative;
-  width: 96vw;
-  max-width: 1240px;
-  height: 90vh;
-  max-height: 860px;
+  width: min(96vw, 1260px);
+  max-width: 96vw;
+  height: min(91vh, 840px);
+  max-height: 91vh;
+  box-sizing: border-box;
   background: #070c14;
   border: 1px solid rgba(0, 240, 255, 0.35);
-  border-radius: 16px;
+  border-radius: 14px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -13482,7 +13485,10 @@ body.mermaid-has-fullscreen {
   #btnTermSyncWindows,
   #btnTermSplit,
   #btnTermFullscreen,
-  #btnTermTheme {
+  #btnTermTheme,
+  #btnTermRemoteTunnel,
+  #btnTermOpenQrScanner,
+  #btnTermClear {
     display: none !important;
   }
   /* Show prominent mobile connect button */
@@ -13495,6 +13501,28 @@ body.mermaid-has-fullscreen {
     padding: 5px 10px !important;
     font-size: 0.76rem !important;
     box-shadow: 0 0 10px rgba(56, 189, 248, 0.35) !important;
+  }
+  .tb-btn-minimize,
+  .tb-btn-close {
+    display: inline-flex !important;
+    padding: 6px 10px !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+    border: 1px solid rgba(255, 255, 255, 0.22) !important;
+    border-radius: 8px !important;
+    color: #f1f5f9 !important;
+    font-size: 0.85rem !important;
+  }
+  .tb-btn-minimize:hover,
+  .tb-btn-minimize:active {
+    background: rgba(56, 189, 248, 0.25) !important;
+    border-color: #38bdf8 !important;
+    color: #38bdf8 !important;
+  }
+  .tb-btn-close:hover,
+  .tb-btn-close:active {
+    background: rgba(239, 68, 68, 0.3) !important;
+    border-color: #ef4444 !important;
+    color: #fca5a5 !important;
   }
   .terminal-toolbar-right {
     gap: 5px !important;
@@ -13738,6 +13766,138 @@ body.mermaid-has-fullscreen {
 .term-touch-key.primary:active {
   background: #0284c7;
   color: #fff;
+}
+
+/* Touch Keybar Modifiers (CTRL, ALT sticky latch) */
+.term-touch-key.term-mod-key {
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #94a3b8;
+  transition: all 0.15s ease;
+}
+
+.term-touch-key.ctrl-modifier-key.active {
+  background: rgba(0, 240, 255, 0.35) !important;
+  border-color: var(--neon-cyan, #00f0ff) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.7) !important;
+  animation: ctrlPulse 1.2s infinite ease-in-out;
+}
+
+.term-touch-key.alt-modifier-key.active {
+  background: rgba(245, 158, 11, 0.35) !important;
+  border-color: var(--neon-amber, #fbbf24) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.7) !important;
+  animation: ctrlPulse 1.2s infinite ease-in-out;
+}
+
+@keyframes ctrlPulse {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.05); filter: brightness(1.25); }
+}
+
+/* Floating Minimized Terminal Dock Badge (Restore Anytime) */
+.terminal-minimized-dock {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  cursor: pointer;
+  animation: slideUpFade 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.terminal-minimized-dock .dock-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: rgba(10, 16, 26, 0.95);
+  border: 1px solid rgba(0, 240, 255, 0.5);
+  border-radius: 30px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 240, 255, 0.35);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: all 0.2s ease;
+}
+
+.terminal-minimized-dock:hover .dock-inner {
+  transform: translateY(-2px);
+  border-color: var(--neon-cyan, #00f0ff);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.9), 0 0 28px rgba(0, 240, 255, 0.55);
+}
+
+.dock-pulse-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 10px #22c55e;
+  animation: termPulseDot 1.8s infinite;
+  flex-shrink: 0;
+}
+
+.dock-icon {
+  font-size: 0.9rem;
+  color: var(--neon-cyan, #00f0ff);
+  filter: drop-shadow(0 0 6px var(--neon-cyan));
+}
+
+.dock-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.dock-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.3px;
+  line-height: 1.1;
+}
+
+.dock-sub {
+  font-size: 0.65rem;
+  color: #94a3b8;
+  font-family: var(--font-code);
+  line-height: 1.1;
+}
+
+.dock-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: #cbd5e1;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.15s ease;
+}
+
+.dock-action-btn.restore:hover {
+  background: rgba(0, 240, 255, 0.25);
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+}
+
+.dock-action-btn.close:hover {
+  background: rgba(239, 68, 68, 0.3);
+  border-color: #ef4444;
+  color: #fca5a5;
+}
+
+@media (max-width: 768px) {
+  .terminal-minimized-dock {
+    bottom: 80px;
+    right: 14px;
+  }
 }
 
 /* Mobile Remote Connection Overlay Card */

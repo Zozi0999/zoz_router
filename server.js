@@ -35,6 +35,11 @@ try {
 
 // Session store untuk persistent PTY sessions (ConPTY / PseudoConsole)
 const activeTerminalSessions = new Map();
+const WORKSPACE_ROOT = (process.env.ZOZ_WORKSPACE_ROOT && fs.existsSync(process.env.ZOZ_WORKSPACE_ROOT))
+  ? path.resolve(process.env.ZOZ_WORKSPACE_ROOT)
+  : path.resolve(__dirname);
+const USER_HOME = process.env.USERPROFILE || os.homedir() || WORKSPACE_ROOT;
+const DEFAULT_TERMINAL_CWD = (!Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) && fs.existsSync(USER_HOME)) ? USER_HOME : WORKSPACE_ROOT;
 
 // =========================================================================
 // CLOUDFLARE TUNNEL REMOTE ACCESS (WAN Mobile-to-Desktop) STATE & ENGINE
@@ -5421,8 +5426,11 @@ async function requestHandler(req, res) {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Private-Network': 'true'
     });
+    // Cloudflare Tunnel / Edge Proxy chunk buffer bypass:
+    // Cloudflare buffers initial HTTP/2 stream until >= 8192 bytes of data payload arrive.
+    // Sending an 8KB data event immediately unlocks the stream and forces instant chunk delivery to mobile clients over WAN.
+    res.write(`data: ${JSON.stringify({ type: 'stream-pad', pad: ' '.repeat(32768) })}\n\n`);
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
-    res.write(': sse-init-pad\n\n');
 
     if (!nodePty) {
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
@@ -5464,6 +5472,7 @@ async function requestHandler(req, res) {
           cwd: targetCwd,
           pty: ptyProcess,
           clients: new Set(),
+          wsClients: new Set(),
           buffer: [],
           createdAt: Date.now(),
           lastActivity: Date.now()
@@ -5477,12 +5486,24 @@ async function requestHandler(req, res) {
           for (const client of session.clients) {
             try { if (!client.writableEnded) client.write(payload); } catch (_) {}
           }
+          if (session.wsClients && session.wsClients.size > 0) {
+            const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data }));
+            for (const ws of session.wsClients) {
+              try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+            }
+          }
         });
 
         ptyProcess.onExit(({ exitCode, signal }) => {
           const payload = `data: ${JSON.stringify({ type: 'exit', exitCode, signal })}\n\n`;
           for (const client of session.clients) {
             try { if (!client.writableEnded) client.write(payload); } catch (_) {}
+          }
+          if (session.wsClients && session.wsClients.size > 0) {
+            const wsFrame = encodeWsFrame(JSON.stringify({ type: 'exit', exitCode, signal }));
+            for (const ws of session.wsClients) {
+              try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+            }
           }
           activeTerminalSessions.delete(sessionId);
         });
@@ -5534,6 +5555,27 @@ async function requestHandler(req, res) {
     });
 
     return;
+  }
+
+  // Daftar sesi terminal aktif pada laptop host (memungkinkan klien mobile langsung menyambung ke Antigravity CLI laptop)
+  if (pathname === '/api/terminal/sessions' && method === 'GET') {
+    const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
+    if (!pinCheck.valid) {
+      return sendJSON(res, 401, { error: pinCheck.error });
+    }
+    const sessions = [];
+    for (const [id, s] of activeTerminalSessions.entries()) {
+      sessions.push({
+        id,
+        shell: s.shell,
+        cwd: s.cwd,
+        clientsCount: s.clients ? s.clients.size : 0,
+        createdAt: s.createdAt,
+        lastActivity: s.lastActivity,
+        bufferLength: s.buffer ? s.buffer.length : 0
+      });
+    }
+    return sendJSON(res, 200, { sessions });
   }
 
   // Kirim keystroke / input mentah ke PTY session
@@ -9086,7 +9128,271 @@ async function requestHandler(req, res) {
   });
 }
 
+// =========================================================================
+// PURE NODE.JS RFC 6455 WEBSOCKET ENGINE (Zero-Dependency Full Duplex)
+// Digunakan khusus untuk terminal streaming berlatensi nol melalui Cloudflare Tunnel / WAN
+// =========================================================================
+function encodeWsFrame(str) {
+  const buf = Buffer.from(str, 'utf8');
+  let header;
+  if (buf.length < 126) {
+    header = Buffer.from([0x81, buf.length]);
+  } else if (buf.length <= 65535) {
+    header = Buffer.alloc(4);
+    header[0] = 0x81;
+    header[1] = 126;
+    header.writeUInt16BE(buf.length, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x81;
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(buf.length), 2);
+  }
+  return Buffer.concat([header, buf]);
+}
+
+function parseWsFrames(chunk, onMessage) {
+  let offset = 0;
+  while (offset + 2 <= chunk.length) {
+    const firstByte = chunk[offset];
+    const secondByte = chunk[offset + 1];
+    const opcode = firstByte & 0x0f;
+    const isMasked = (secondByte & 0x80) !== 0;
+    let payloadLen = secondByte & 0x7f;
+    offset += 2;
+
+    if (payloadLen === 126) {
+      if (offset + 2 > chunk.length) break;
+      payloadLen = chunk.readUInt16BE(offset);
+      offset += 2;
+    } else if (payloadLen === 127) {
+      if (offset + 8 > chunk.length) break;
+      payloadLen = Number(chunk.readBigUInt64BE(offset));
+      offset += 8;
+    }
+
+    let mask = null;
+    if (isMasked) {
+      if (offset + 4 > chunk.length) break;
+      mask = chunk.slice(offset, offset + 4);
+      offset += 4;
+    }
+
+    if (offset + payloadLen > chunk.length) break;
+    const payload = chunk.slice(offset, offset + payloadLen);
+    offset += payloadLen;
+
+    if (isMasked && mask) {
+      for (let i = 0; i < payload.length; i++) {
+        payload[i] ^= mask[i % 4];
+      }
+    }
+
+    if (opcode === 0x08) {
+      return 'close';
+    } else if (opcode === 0x09) {
+      const pong = Buffer.from([0x8a, 0x00]);
+      onMessage({ type: 'ping', pong });
+    } else if (opcode === 0x01 || opcode === 0x02) {
+      onMessage({ type: 'data', payload: payload.toString('utf8') });
+    }
+  }
+}
+
+function handleTerminalWebSocketUpgrade(req, socket, head) {
+  let reqUrl;
+  try {
+    reqUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  } catch (_) {
+    socket.destroy();
+    return;
+  }
+
+  if (reqUrl.pathname !== '/api/terminal/ws') {
+    socket.destroy();
+    return;
+  }
+
+  const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
+  if (!pinCheck.valid) {
+    try {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nContent-Type: text/plain\r\n\r\nPIN Invalid');
+    } catch (_) {}
+    socket.destroy();
+    return;
+  }
+
+  const key = req.headers['sec-websocket-key'];
+  if (!key) {
+    socket.destroy();
+    return;
+  }
+
+  const digest = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+  try {
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\n' +
+      'Upgrade: websocket\r\n' +
+      'Connection: Upgrade\r\n' +
+      'Sec-WebSocket-Accept: ' + digest + '\r\n\r\n'
+    );
+  } catch (_) {
+    socket.destroy();
+    return;
+  }
+
+  const sessionId = (reqUrl.searchParams.get('session') || 'default').trim();
+  const shellType = (reqUrl.searchParams.get('shell') || 'powershell').toLowerCase();
+  let reqCwd = (reqUrl.searchParams.get('cwd') || '').trim();
+  while ((reqCwd.startsWith('"') && reqCwd.endsWith('"')) || (reqCwd.startsWith("'") && reqCwd.endsWith("'"))) {
+    reqCwd = reqCwd.slice(1, -1).trim();
+  }
+  const targetCwd = (reqCwd && fs.existsSync(reqCwd)) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
+  const cols = Math.max(20, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
+  const rows = Math.max(5, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
+
+  let session = activeTerminalSessions.get(sessionId);
+  if (!session || !session.pty) {
+    if (!nodePty) {
+      try {
+        socket.write(encodeWsFrame(JSON.stringify({ type: 'connected', session: sessionId, shell: shellType, cwd: targetCwd })));
+        socket.write(encodeWsFrame(JSON.stringify({
+          type: 'data',
+          data: `\r\n\x1b[36m⚡ [ZOZ NEURAL TERMINAL // CLOUD RUNTIME]\x1b[0m\r\n\x1b[90mMode Command-Exec siap menerima perintah.\x1b[0m\r\n\r\n`
+        })));
+      } catch (_) {}
+      return;
+    }
+
+    const shellInfo = resolveHostShell(shellType);
+    try {
+      const ptyProcess = nodePty.spawn(shellInfo.exe, shellInfo.args, {
+        name: 'xterm-256color',
+        cols,
+        rows,
+        cwd: targetCwd,
+        env: {
+          ...process.env,
+          TERM: 'xterm-256color',
+          COLORTERM: 'truecolor'
+        },
+        useConpty: false
+      });
+
+      session = {
+        id: sessionId,
+        shell: shellType,
+        cwd: targetCwd,
+        pty: ptyProcess,
+        clients: new Set(),
+        wsClients: new Set(),
+        buffer: [],
+        createdAt: Date.now(),
+        lastActivity: Date.now()
+      };
+
+      ptyProcess.onData((data) => {
+        session.lastActivity = Date.now();
+        if (session.buffer.length > 500) session.buffer.shift();
+        session.buffer.push(data);
+        const payload = `data: ${JSON.stringify({ type: 'data', data })}\n\n`;
+        for (const client of session.clients) {
+          try { if (!client.writableEnded) client.write(payload); } catch (_) {}
+        }
+        if (session.wsClients && session.wsClients.size > 0) {
+          const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data }));
+          for (const ws of session.wsClients) {
+            try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+          }
+        }
+      });
+
+      ptyProcess.onExit(({ exitCode, signal }) => {
+        const payload = `data: ${JSON.stringify({ type: 'exit', exitCode, signal })}\n\n`;
+        for (const client of session.clients) {
+          try { if (!client.writableEnded) client.write(payload); } catch (_) {}
+        }
+        if (session.wsClients && session.wsClients.size > 0) {
+          const wsFrame = encodeWsFrame(JSON.stringify({ type: 'exit', exitCode, signal }));
+          for (const ws of session.wsClients) {
+            try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+          }
+        }
+        activeTerminalSessions.delete(sessionId);
+      });
+
+      activeTerminalSessions.set(sessionId, session);
+    } catch (spawnErr) {
+      try {
+        socket.write(encodeWsFrame(JSON.stringify({ type: 'error', message: spawnErr.message })));
+      } catch (_) {}
+      socket.destroy();
+      return;
+    }
+  } else if (session && session.pty && typeof session.pty.resize === 'function') {
+    try {
+      session.pty.resize(cols, rows);
+    } catch (_) {}
+  }
+
+  if (!session.wsClients) session.wsClients = new Set();
+  session.wsClients.add(socket);
+
+  // Kirim frame connected dan buffer historis (replay)
+  try {
+    socket.write(encodeWsFrame(JSON.stringify({ type: 'connected', session: sessionId, shell: session.shell, cwd: session.cwd })));
+    if (session.buffer && session.buffer.length > 0) {
+      socket.write(encodeWsFrame(JSON.stringify({ type: 'init', data: session.buffer.join('') })));
+    }
+  } catch (_) {}
+
+  // Redraw prompt segera agar xterm tidak kosong
+  setTimeout(() => {
+    if (session && session.pty) {
+      try { session.pty.write('\r'); } catch (_) {}
+    }
+  }, 100);
+
+  socket.on('data', (chunk) => {
+    session.lastActivity = Date.now();
+    parseWsFrames(chunk, (msg) => {
+      if (msg.type === 'ping' && msg.pong) {
+        try { socket.write(msg.pong); } catch (_) {}
+      } else if (msg.type === 'data') {
+        let str = msg.payload;
+        try {
+          if (str.startsWith('{') && str.endsWith('}')) {
+            const parsed = JSON.parse(str);
+            if (parsed.type === 'resize' && session.pty) {
+              const c = Math.max(20, Math.min(300, parseInt(parsed.cols, 10) || cols));
+              const r = Math.max(5, Math.min(100, parseInt(parsed.rows, 10) || rows));
+              session.pty.resize(c, r);
+              return;
+            } else if (parsed.type === 'input' && typeof parsed.data === 'string' && session.pty) {
+              session.pty.write(parsed.data);
+              return;
+            }
+          }
+        } catch (_) {}
+        if (session.pty) {
+          session.pty.write(str);
+        }
+      }
+    });
+  });
+
+  const cleanup = () => {
+    if (session && session.wsClients) {
+      session.wsClients.delete(socket);
+    }
+  };
+  socket.on('close', cleanup);
+  socket.on('end', cleanup);
+  socket.on('error', cleanup);
+}
+
 const server = http.createServer(requestHandler);
+server.on('upgrade', handleTerminalWebSocketUpgrade);
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
