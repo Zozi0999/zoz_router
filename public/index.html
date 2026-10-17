@@ -41,8 +41,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
-  <link rel="preload" as="style" href="style.min.css?v=20261017_v321">
-  <link rel="stylesheet" href="style.min.css?v=20261017_v321">
+  <link rel="preload" as="style" href="style.min.css?v=20261017_v322">
+  <link rel="stylesheet" href="style.min.css?v=20261017_v322">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -484,8 +484,9 @@
           <button class="icon-btn top-action-btn" id="systemPromptModalBtn" title="Preset Karakter / System Prompt">
             <i class="fa-solid fa-user-gear"></i>
           </button>
-          <button class="icon-btn top-action-btn" id="soundToggleBtn" title="Suara Cyberpunk UI (On/Off)">
-            <i class="fa-solid fa-volume-high"></i>
+          <!-- Terminal Neural CLI Console -->
+          <button class="icon-btn top-action-btn" id="terminalToggleBtn" title="Terminal Neural // CLI Console (Buka Shell)" aria-label="Buka Terminal">
+            <i class="fa-solid fa-terminal"></i>
           </button>
           <!-- Bio-Endocrine Hormone Monitor (Hanya Logo Hati Hijau Sehat) -->
           <button class="icon-btn top-action-btn endocrine-pulse-btn status-happy" id="endocrineMonitorBtn" title="Bio-Endocrine Code Telemetry: Kondisi Kode 100% Prima (Dopamin 100%, Bebas Bug)" aria-label="Bio-Endocrine Monitor">
@@ -2377,6 +2378,218 @@
         <button class="btn btn-secondary" id="btnCancelDocMode" data-close="docModeModal">Batal</button>
       </div>
     </div>
+  <!-- MODAL: Terminal Neural // CLI Console (In-Tab Interactive Multi-Shell Console) -->
+  <div class="modal-backdrop terminal-modal-backdrop" id="terminalModal" style="display: none;">
+    <div class="modal-card terminal-modal-card" id="terminalModalCard">
+      <!-- Ambient Cyberpunk Flame Aura (inspired by terminal-extension) -->
+      <div class="term-ambient-aura" id="termAmbientAura">
+        <div class="term-flame tl"></div>
+        <div class="term-flame tr"></div>
+        <div class="term-flame bl"></div>
+        <div class="term-flame br"></div>
+      </div>
+
+      <!-- Terminal Top Toolbar -->
+      <div class="terminal-toolbar" id="terminalToolbar">
+        <div class="terminal-title">
+          <span class="bolt">⚡</span>
+          <span class="term-title-text">Terminal Neural // CLI</span>
+        </div>
+
+        <div class="tb-divider"></div>
+
+        <!-- Shell Selector Dropdown Button -->
+        <div class="terminal-shell-wrap" style="position: relative;">
+          <button class="tb-btn" id="btnTerminalShell" type="button" title="Ganti Shell (PowerShell, CMD, WSL, Node)">
+            <i class="fa-solid fa-terminal" style="font-size: 0.8rem; color: var(--neon-cyan);"></i>
+            <span id="labelTerminalShell">PowerShell 🪟</span>
+            <i class="fa-solid fa-chevron-down" style="font-size: 0.65rem; opacity: 0.7;"></i>
+          </button>
+          <div class="terminal-shell-dropdown" id="terminalShellDropdown" style="display: none;">
+            <div class="shell-opt active" data-shell="powershell">
+              <span class="shell-opt-icon">🪟</span>
+              <div class="shell-opt-info">
+                <span class="shell-opt-name">PowerShell</span>
+                <span class="shell-opt-desc">Windows PowerShell (powershell.exe)</span>
+              </div>
+            </div>
+            <div class="shell-opt" data-shell="cmd">
+              <span class="shell-opt-icon">⬛</span>
+              <div class="shell-opt-info">
+                <span class="shell-opt-name">Command Prompt</span>
+                <span class="shell-opt-desc">Windows CMD (cmd.exe)</span>
+              </div>
+            </div>
+            <div class="shell-opt" data-shell="wsl">
+              <span class="shell-opt-icon">🐧</span>
+              <div class="shell-opt-info">
+                <span class="shell-opt-name">Ubuntu (WSL)</span>
+                <span class="shell-opt-desc">Linux Bash Shell (wsl.exe)</span>
+              </div>
+            </div>
+            <div class="shell-opt" data-shell="node">
+              <span class="shell-opt-icon">🟩</span>
+              <div class="shell-opt-info">
+                <span class="shell-opt-name">Node.js REPL</span>
+                <span class="shell-opt-desc">Node.js Runtime Evaluator</span>
+              </div>
+            </div>
+            <div class="shell-opt" data-shell="python">
+              <span class="shell-opt-icon">🐍</span>
+              <div class="shell-opt-info">
+                <span class="shell-opt-name">Python Sandbox</span>
+                <span class="shell-opt-desc">Python Subprocess Evaluator</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Toolbar Actions -->
+        <div class="terminal-toolbar-right" id="terminalToolbarRight">
+          <!-- Font Size Adjustment Group -->
+          <div class="tb-group" title="Ukuran font terminal">
+            <button class="tb-btn icon-only" id="btnTermFontDec" type="button" title="Perkecil font">
+              <i class="fa-solid fa-minus" style="font-size: 0.7rem;"></i>
+            </button>
+            <span id="termFontSizeLabel">13px</span>
+            <button class="tb-btn icon-only" id="btnTermFontInc" type="button" title="Perbesar font">
+              <i class="fa-solid fa-plus" style="font-size: 0.7rem;"></i>
+            </button>
+          </div>
+
+          <!-- Auto Enter/Y Prompt Toggle -->
+          <button class="tb-btn" id="btnTermAutoEnter" type="button" title="Auto Enter/Y untuk prompt CLI">
+            <span style="color: var(--neon-amber);">⚡</span>
+            <span>Auto Y</span>
+          </button>
+
+          <!-- Send Enter Button -->
+          <button class="tb-btn" id="btnTermSendEnter" type="button" title="Kirim Enter ke panel aktif">
+            <span>🌊</span>
+            <span>Enter</span>
+          </button>
+
+          <!-- Split View Toggle -->
+          <button class="tb-btn" id="btnTermSplit" type="button" title="Beralih Tampilan Split 2 Panel">
+            <i class="fa-solid fa-table-columns" style="font-size: 0.75rem;"></i>
+            <span>Split</span>
+          </button>
+
+          <!-- Clear Terminal -->
+          <button class="tb-btn icon-only" id="btnTermClear" type="button" title="Bersihkan riwayat terminal (cls)">
+            <i class="fa-solid fa-trash-can" style="font-size: 0.8rem;"></i>
+          </button>
+
+          <!-- Aura Theme Toggle (Aura Es <-> Aura Api) -->
+          <button class="tb-btn icon-only" id="btnTermTheme" type="button" title="Ganti Tema Aura (Aura Es / Aura Api)">
+            <i class="fa-solid fa-palette" style="font-size: 0.8rem;"></i>
+          </button>
+
+          <!-- Fullscreen Toggle -->
+          <button class="tb-btn icon-only" id="btnTermFullscreen" type="button" title="Layar Penuh Terminal (F11)">
+            <i class="fa-solid fa-expand" id="iconTermFullscreen" style="font-size: 0.8rem;"></i>
+          </button>
+
+          <!-- Close Modal -->
+          <button class="tb-btn icon-only" id="btnTermClose" type="button" data-close="terminalModal" aria-label="Tutup Terminal" title="Tutup Terminal (Esc)">
+            <i class="fa-solid fa-xmark" style="font-size: 0.9rem;"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab Strip (Multi-Tab Terminal Sessions) -->
+      <div class="terminal-tabs-strip" id="termTabStrip">
+        <div class="terminal-tabs-list" id="termTabList">
+          <div class="terminal-tab-item active" data-tab-id="tab-1">
+            <span class="tab-shell-icon">🪟</span>
+            <span class="tab-title">Terminal 1</span>
+            <button class="tab-close-btn" data-close-tab="tab-1" title="Tutup Tab" type="button">&times;</button>
+          </div>
+        </div>
+        <button class="terminal-add-tab-btn" id="btnTermAddTab" type="button" title="Buka Tab Terminal Baru">
+          <i class="fa-solid fa-plus" style="font-size: 0.75rem;"></i>
+          <span>Tab Baru</span>
+        </button>
+      </div>
+
+      <!-- Terminal Workspace: Single or Split Panes -->
+      <div class="terminal-workspace" id="termWorkspace">
+        <!-- Panel 1 (Primary Pane) -->
+        <div class="terminal-pane active" id="termPane1" data-pane="1">
+          <div class="terminal-pane-header">
+            <div class="traffic-lights">
+              <span class="tl-dot red disabled" title="Panel utama aktif"></span>
+              <span class="tl-dot yellow disabled"></span>
+              <span class="tl-dot green disabled"></span>
+            </div>
+            <span class="pane-title-badge">Panel 1</span>
+            <span class="pane-shell-tag" id="paneShellBadge1">PowerShell</span>
+            <span class="pane-cwd-indicator" id="paneCwdBadge1">📁 C:\Users\user\zoz-router</span>
+            <div class="pane-status-wrap">
+              <span class="pane-status-dot online"></span>
+              <span class="pane-status-label">Siap</span>
+            </div>
+          </div>
+
+          <!-- Terminal Output Screen -->
+          <div class="terminal-screen" id="termScreen1"></div>
+
+          <!-- Terminal Command Input Row -->
+          <div class="terminal-input-row" id="termInputRow1">
+            <span class="term-prompt-cwd" id="termPromptPrefix1">PS C:\Users\user\zoz-router&gt;</span>
+            <input type="text" class="term-cli-input" id="termCliInput1" placeholder="Ketik perintah (e.g. dir, git status, node -v)..." autocomplete="off" spellcheck="false">
+            <button class="term-send-btn" id="btnTermSend1" type="button" title="Kirim Perintah (Enter)">
+              <i class="fa-solid fa-arrow-turn-down"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Resizer Divider for Split Mode -->
+        <div class="terminal-resizer" id="termResizer" style="display: none;"></div>
+
+        <!-- Panel 2 (Secondary Split Pane, initially hidden) -->
+        <div class="terminal-pane" id="termPane2" data-pane="2" style="display: none;">
+          <div class="terminal-pane-header">
+            <div class="traffic-lights">
+              <span class="tl-dot red clickable" id="btnClosePane2" title="Tutup Panel 2"></span>
+              <span class="tl-dot yellow disabled"></span>
+              <span class="tl-dot green disabled"></span>
+            </div>
+            <span class="pane-title-badge">Panel 2</span>
+            <span class="pane-shell-tag" id="paneShellBadge2">PowerShell</span>
+            <span class="pane-cwd-indicator" id="paneCwdBadge2">📁 C:\Users\user\zoz-router</span>
+            <div class="pane-status-wrap">
+              <span class="pane-status-dot online"></span>
+              <span class="pane-status-label">Siap</span>
+            </div>
+          </div>
+
+          <!-- Terminal Output Screen 2 -->
+          <div class="terminal-screen" id="termScreen2"></div>
+
+          <!-- Terminal Command Input Row 2 -->
+          <div class="terminal-input-row" id="termInputRow2">
+            <span class="term-prompt-cwd" id="termPromptPrefix2">PS C:\Users\user\zoz-router&gt;</span>
+            <input type="text" class="term-cli-input" id="termCliInput2" placeholder="Ketik perintah di Panel 2..." autocomplete="off" spellcheck="false">
+            <button class="term-send-btn" id="btnTermSend2" type="button" title="Kirim Perintah (Enter)">
+              <i class="fa-solid fa-arrow-turn-down"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Command Action Chips Bar -->
+      <div class="terminal-quick-chips" id="termQuickChipsBar">
+        <span class="quick-label"><i class="fa-solid fa-bolt" style="font-size:0.68rem; color:var(--neon-teal);"></i> Cepat:</span>
+        <button class="term-chip" type="button" data-cmd="dir">dir</button>
+        <button class="term-chip" type="button" data-cmd="git status">git status</button>
+        <button class="term-chip" type="button" data-cmd="git log -n 5 --oneline">git log</button>
+        <button class="term-chip" type="button" data-cmd="node -v">node -v</button>
+        <button class="term-chip" type="button" data-cmd="whoami">whoami</button>
+        <button class="term-chip" type="button" data-cmd="help">help</button>
+        <button class="term-chip" type="button" data-cmd="cls">cls</button>
+      </div>
+    </div>
   </div>
 
   <!-- Toast Notification Container -->
@@ -2391,8 +2604,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous" defer></script>
   <!-- Heavy libraries (Mermaid, jsPDF, PDF.js, JSZip) are dynamically loaded on-demand to optimize FCP, TBT & LCP -->
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261017_v321" defer></script>
+  <script src="text-safety.js?v=20261017_v322" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261017_v321" defer></script>
+  <script src="app.js?v=20261017_v322" defer></script>
 </body>
 </html>

@@ -1176,7 +1176,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     exportConfirmMsgCount: $('#exportConfirmMsgCount'),
     exportConfirmImgCount: $('#exportConfirmImgCount'),
     btnExecuteExportChat: $('#btnExecuteExportChat'),
-    soundToggleBtn: $('#soundToggleBtn'),
+    terminalToggleBtn: $('#terminalToggleBtn'),
+    terminalModal: $('#terminalModal'),
     toastContainer: $('#toastContainer'),
     
     // Settings fields
@@ -28487,16 +28488,8 @@ Aturan:
       }
     });
 
-    els.soundToggleBtn?.addEventListener('click', () => {
-      STATE.soundEnabled = !STATE.soundEnabled;
-      savePersistedState();
-      if (els.soundToggleBtn) {
-        els.soundToggleBtn.innerHTML = STATE.soundEnabled 
-          ? '<i class="fa-solid fa-volume-high"></i>' 
-          : '<i class="fa-solid fa-volume-xmark"></i>';
-      }
-      showToast(STATE.soundEnabled ? 'Suara UI diaktifkan.' : 'Suara UI dibisukan.');
-      if (STATE.soundEnabled) AudioEngine.click();
+    els.terminalToggleBtn?.addEventListener('click', () => {
+      TerminalManager.toggle();
     });
 
     // Bio-Endocrine Hormone Monitor Controls
@@ -30598,6 +30591,718 @@ Aturan:
     window.addEventListener('beforeunload', flushPersistenceOnHide);
   }
 
+  // ==================== NEURAL TERMINAL ENGINE ====================
+  const TerminalManager = {
+    shells: {
+      powershell: { name: 'PowerShell', icon: '🪟', prompt: 'PS {cwd}> ' },
+      cmd: { name: 'Command Prompt', icon: '⚡', prompt: '{cwd}> ' },
+      wsl: { name: 'WSL Bash', icon: '🐧', prompt: 'user@zoz:{cwd}$ ' },
+      node: { name: 'Node.js Sandbox', icon: '🟢', prompt: 'node> ' },
+      python: { name: 'Python Sandbox', icon: '🐍', prompt: '>>> ' }
+    },
+    defaultCwd: 'C:\\Users\\user\\zoz-router',
+    fontSize: 13,
+    autoEnter: false,
+    theme: 'aura-es', // 'aura-es' or 'aura-api'
+    isSplit: false,
+    activePane: 1,
+    activeTabId: 'tab-1',
+    tabCounter: 1,
+    tabs: [
+      {
+        id: 'tab-1',
+        title: 'Terminal 1',
+        shell: 'powershell',
+        cwd: 'C:\\Users\\user\\zoz-router',
+        pane1: {
+          shell: 'powershell',
+          cwd: 'C:\\Users\\user\\zoz-router',
+          history: [],
+          historyIdx: -1,
+          outputHtml: ''
+        },
+        pane2: {
+          shell: 'powershell',
+          cwd: 'C:\\Users\\user\\zoz-router',
+          history: [],
+          historyIdx: -1,
+          outputHtml: ''
+        }
+      }
+    ],
+
+    init() {
+      this.attachListeners();
+      this.loadTheme();
+      this.renderTabs();
+      this.updatePaneHeaders();
+      this.initScreenWelcome(1);
+    },
+
+    loadTheme() {
+      const savedTheme = localStorage.getItem('zoz_term_theme') || 'aura-es';
+      this.setTheme(savedTheme, false);
+      const savedSize = parseInt(localStorage.getItem('zoz_term_fontsize'), 10);
+      if (savedSize && savedSize >= 10 && savedSize <= 24) {
+        this.setFontSize(savedSize, false);
+      }
+    },
+
+    setTheme(themeName, persist = true) {
+      this.theme = themeName === 'aura-api' ? 'aura-api' : 'aura-es';
+      const modal = document.getElementById('terminalModal');
+      if (modal) {
+        modal.classList.remove('theme-es', 'theme-api');
+        modal.classList.add(this.theme === 'aura-api' ? 'theme-api' : 'theme-es');
+        modal.setAttribute('data-theme', this.theme);
+      }
+      if (persist) {
+        localStorage.setItem('zoz_term_theme', this.theme);
+        showToast(this.theme === 'aura-api' ? 'Tema Terminal: Aura Api (Fire/Ember)' : 'Tema Terminal: Aura Es (Ice/Cyan)');
+      }
+    },
+
+    toggleTheme() {
+      this.setTheme(this.theme === 'aura-es' ? 'aura-api' : 'aura-es', true);
+    },
+
+    setFontSize(size, persist = true) {
+      this.fontSize = Math.max(10, Math.min(24, size));
+      const label = document.getElementById('termFontSizeLabel');
+      if (label) label.textContent = `${this.fontSize}px`;
+      const screens = document.querySelectorAll('.terminal-screen, .term-cli-input, .term-prompt-cwd');
+      screens.forEach(el => {
+        el.style.fontSize = `${this.fontSize}px`;
+      });
+      if (persist) {
+        localStorage.setItem('zoz_term_fontsize', this.fontSize);
+      }
+    },
+
+    adjustFontSize(delta) {
+      this.setFontSize(this.fontSize + delta, true);
+    },
+
+    toggleAutoEnter() {
+      this.autoEnter = !this.autoEnter;
+      const btn = document.getElementById('btnTermAutoEnter');
+      if (btn) {
+        btn.classList.toggle('active', this.autoEnter);
+      }
+      showToast(this.autoEnter ? 'Auto Y/Enter: Aktif' : 'Auto Y/Enter: Nonaktif');
+    },
+
+    toggleFullscreen() {
+      const modal = document.getElementById('terminalModal');
+      const icon = document.getElementById('iconTermFullscreen');
+      if (modal) {
+        const isFull = modal.classList.toggle('fullscreen');
+        if (icon) {
+          icon.className = isFull ? 'fa-solid fa-compress' : 'fa-solid fa-expand';
+        }
+      }
+    },
+
+    toggle() {
+      const modal = document.getElementById('terminalModal');
+      if (!modal) return;
+      if (modal.classList.contains('show')) {
+        closeModal('terminalModal');
+      } else {
+        openModal('terminalModal');
+        this.focusActiveInput();
+      }
+    },
+
+    focusActiveInput() {
+      setTimeout(() => {
+        const input = document.getElementById(`termCliInput${this.activePane}`);
+        if (input) input.focus();
+      }, 50);
+    },
+
+    getActiveTab() {
+      return this.tabs.find(t => t.id === this.activeTabId) || this.tabs[0];
+    },
+
+    getPaneState(paneNum = this.activePane) {
+      const tab = this.getActiveTab();
+      return paneNum === 2 ? tab.pane2 : tab.pane1;
+    },
+
+    addTab() {
+      this.tabCounter++;
+      const id = `tab-${this.tabCounter}`;
+      const newTab = {
+        id,
+        title: `Terminal ${this.tabCounter}`,
+        shell: 'powershell',
+        cwd: this.defaultCwd,
+        pane1: {
+          shell: 'powershell',
+          cwd: this.defaultCwd,
+          history: [],
+          historyIdx: -1,
+          outputHtml: ''
+        },
+        pane2: {
+          shell: 'powershell',
+          cwd: this.defaultCwd,
+          history: [],
+          historyIdx: -1,
+          outputHtml: ''
+        }
+      };
+      this.tabs.push(newTab);
+      this.renderTabs();
+      this.switchTab(id);
+      this.initScreenWelcome(1);
+      if (typeof AudioEngine !== 'undefined') AudioEngine.click();
+    },
+
+    switchTab(tabId) {
+      if (this.activeTabId === tabId) return;
+      this.saveCurrentScreenState();
+      this.activeTabId = tabId;
+      this.renderTabs();
+      this.restoreScreenState();
+      this.updateShellSelectorUI();
+      this.updatePaneHeaders();
+      this.focusActiveInput();
+      if (typeof AudioEngine !== 'undefined') AudioEngine.click();
+    },
+
+    closeTab(tabId, e) {
+      if (e) e.stopPropagation();
+      if (this.tabs.length <= 1) {
+        showToast('Minimal satu tab terminal harus tetap terbuka.');
+        return;
+      }
+      const idx = this.tabs.findIndex(t => t.id === tabId);
+      if (idx === -1) return;
+      this.tabs.splice(idx, 1);
+      if (this.activeTabId === tabId) {
+        const nextTab = this.tabs[Math.max(0, idx - 1)];
+        this.activeTabId = nextTab.id;
+        this.restoreScreenState();
+      }
+      this.renderTabs();
+      this.updateShellSelectorUI();
+      this.updatePaneHeaders();
+      this.focusActiveInput();
+    },
+
+    saveCurrentScreenState() {
+      const tab = this.getActiveTab();
+      if (!tab) return;
+      const s1 = document.getElementById('termScreen1');
+      if (s1) tab.pane1.outputHtml = s1.innerHTML;
+      const s2 = document.getElementById('termScreen2');
+      if (s2) tab.pane2.outputHtml = s2.innerHTML;
+    },
+
+    restoreScreenState() {
+      const tab = this.getActiveTab();
+      if (!tab) return;
+      const s1 = document.getElementById('termScreen1');
+      if (s1) {
+        s1.innerHTML = tab.pane1.outputHtml || '';
+        s1.scrollTop = s1.scrollHeight;
+      }
+      const s2 = document.getElementById('termScreen2');
+      if (s2) {
+        s2.innerHTML = tab.pane2.outputHtml || '';
+        s2.scrollTop = s2.scrollHeight;
+      }
+    },
+
+    renderTabs() {
+      const list = document.getElementById('termTabList');
+      if (!list) return;
+      list.innerHTML = this.tabs.map(tab => {
+        const isActive = tab.id === this.activeTabId;
+        const shellConf = this.shells[tab.shell] || this.shells.powershell;
+        return `
+          <div class="terminal-tab-item ${isActive ? 'active' : ''}" data-tab-id="${tab.id}">
+            <span class="tab-shell-icon">${shellConf.icon}</span>
+            <span class="tab-title">${escapeHtml(tab.title)}</span>
+            <button class="tab-close-btn" data-close-tab="${tab.id}" title="Tutup Tab" type="button">&times;</button>
+          </div>
+        `;
+      }).join('');
+    },
+
+    setShell(shellKey, paneNum = this.activePane) {
+      if (!this.shells[shellKey]) return;
+      const tab = this.getActiveTab();
+      const pane = this.getPaneState(paneNum);
+      pane.shell = shellKey;
+      if (paneNum === 1) tab.shell = shellKey;
+      
+      this.updateShellSelectorUI();
+      this.updatePaneHeaders();
+      this.renderTabs();
+
+      const screen = document.getElementById(`termScreen${paneNum}`);
+      if (screen) {
+        const conf = this.shells[shellKey];
+        const banner = document.createElement('div');
+        banner.className = 'term-line term-system-notice';
+        banner.innerHTML = `<span style="color:var(--neon-teal);">⚡ Berpindah ke shell: <strong>${conf.name}</strong> [${shellKey}]</span>`;
+        screen.appendChild(banner);
+        screen.scrollTop = screen.scrollHeight;
+      }
+      this.focusActiveInput();
+      showToast(`Shell ${this.shells[shellKey].name} diaktifkan.`);
+    },
+
+    updateShellSelectorUI() {
+      const pane = this.getPaneState(this.activePane);
+      const conf = this.shells[pane.shell] || this.shells.powershell;
+      const iconEl = document.getElementById('termCurrentShellIcon');
+      const nameEl = document.getElementById('termCurrentShellName');
+      if (iconEl) iconEl.textContent = conf.icon;
+      if (nameEl) nameEl.textContent = conf.name;
+    },
+
+    updatePaneHeaders() {
+      const tab = this.getActiveTab();
+      // Pane 1
+      const p1 = tab.pane1;
+      const conf1 = this.shells[p1.shell] || this.shells.powershell;
+      const badge1 = document.getElementById('paneShellBadge1');
+      if (badge1) badge1.textContent = conf1.name;
+      const cwd1 = document.getElementById('paneCwdBadge1');
+      if (cwd1) cwd1.textContent = `📁 ${p1.cwd}`;
+      const prefix1 = document.getElementById('termPromptPrefix1');
+      if (prefix1) {
+        prefix1.textContent = conf1.prompt.replace('{cwd}', p1.cwd);
+      }
+
+      // Pane 2
+      const p2 = tab.pane2;
+      const conf2 = this.shells[p2.shell] || this.shells.powershell;
+      const badge2 = document.getElementById('paneShellBadge2');
+      if (badge2) badge2.textContent = conf2.name;
+      const cwd2 = document.getElementById('paneCwdBadge2');
+      if (cwd2) cwd2.textContent = `📁 ${p2.cwd}`;
+      const prefix2 = document.getElementById('termPromptPrefix2');
+      if (prefix2) {
+        prefix2.textContent = conf2.prompt.replace('{cwd}', p2.cwd);
+      }
+    },
+
+    toggleSplit() {
+      this.isSplit = !this.isSplit;
+      const p1 = document.getElementById('termPane1');
+      const p2 = document.getElementById('termPane2');
+      const resizer = document.getElementById('termResizer');
+      const btn = document.getElementById('btnTermSplit');
+      if (p2 && resizer) {
+        if (this.isSplit) {
+          p2.style.display = 'flex';
+          resizer.style.display = 'block';
+          if (p1) p1.style.flex = '1 1 50%';
+          if (p2) p2.style.flex = '1 1 50%';
+          if (btn) btn.classList.add('active');
+          this.initScreenWelcome(2);
+        } else {
+          p2.style.display = 'none';
+          resizer.style.display = 'none';
+          if (p1) p1.style.flex = '1 1 100%';
+          if (btn) btn.classList.remove('active');
+          this.setActivePane(1);
+        }
+      }
+    },
+
+    setActivePane(paneNum) {
+      this.activePane = paneNum;
+      const p1 = document.getElementById('termPane1');
+      const p2 = document.getElementById('termPane2');
+      if (p1) p1.classList.toggle('active', paneNum === 1);
+      if (p2) p2.classList.toggle('active', paneNum === 2);
+      this.updateShellSelectorUI();
+      this.focusActiveInput();
+    },
+
+    initScreenWelcome(paneNum) {
+      const screen = document.getElementById(`termScreen${paneNum}`);
+      if (!screen || screen.children.length > 0) return;
+      const pane = this.getPaneState(paneNum);
+      const conf = this.shells[pane.shell] || this.shells.powershell;
+      screen.innerHTML = `
+        <div class="term-welcome-banner">
+          <div class="banner-title"><i class="fa-solid fa-terminal" style="color:var(--neon-teal); margin-right:6px;"></i> ZOZ NEURAL TERMINAL // CLI ENGINE</div>
+          <div class="banner-subtitle">Interactive Dual-Shell Subprocess Environment &bull; ${conf.name}</div>
+          <div class="banner-help-hint">Ketik <span class="term-code-chip">help</span> untuk panduan, <span class="term-code-chip">cls</span> untuk membersihkan layar, atau klik tombol cepat di bawah.</div>
+        </div>
+      `;
+    },
+
+    clearActiveScreen() {
+      const screen = document.getElementById(`termScreen${this.activePane}`);
+      if (screen) {
+        screen.innerHTML = '';
+        this.initScreenWelcome(this.activePane);
+      }
+    },
+
+    formatAnsi(text) {
+      if (!text) return '';
+      const esc = escapeHtml(text);
+      const ansiMap = {
+        '1': 'font-weight:bold;',
+        '30': 'color:#4b5563;',
+        '31': 'color:#ef4444;',
+        '32': 'color:#10b981;',
+        '33': 'color:#f59e0b;',
+        '34': 'color:#3b82f6;',
+        '35': 'color:#ec4899;',
+        '36': 'color:#06b6d4;',
+        '37': 'color:#f3f4f6;',
+        '90': 'color:#6b7280;',
+        '91': 'color:#f87171;',
+        '92': 'color:#34d399;',
+        '93': 'color:#fbbf24;',
+        '94': 'color:#60a5fa;',
+        '95': 'color:#f472b6;',
+        '96': 'color:#22d3ee;',
+        '97': 'color:#ffffff;'
+      };
+      return esc.replace(/\x1b\[([0-9;]+)m/g, (match, p1) => {
+        if (p1 === '0') return '</span>';
+        const codes = p1.split(';');
+        let style = '';
+        for (const c of codes) {
+          if (ansiMap[c]) style += ansiMap[c];
+        }
+        return style ? `<span style="${style}">` : '';
+      });
+    },
+
+    async executeInput(paneNum = this.activePane, rawCommand = null) {
+      const inputEl = document.getElementById(`termCliInput${paneNum}`);
+      const screenEl = document.getElementById(`termScreen${paneNum}`);
+      if (!screenEl) return;
+
+      const cmd = rawCommand !== null ? rawCommand : (inputEl ? inputEl.value : '');
+      if (inputEl) inputEl.value = '';
+
+      const pane = this.getPaneState(paneNum);
+      const conf = this.shells[pane.shell] || this.shells.powershell;
+      const promptText = conf.prompt.replace('{cwd}', pane.cwd);
+
+      const promptLine = document.createElement('div');
+      promptLine.className = 'term-line term-prompt-line';
+      promptLine.innerHTML = `<span class="term-prompt">${escapeHtml(promptText)}</span><span class="term-cmd-text">${escapeHtml(cmd)}</span>`;
+      screenEl.appendChild(promptLine);
+
+      if (!cmd || !cmd.trim()) {
+        screenEl.scrollTop = screenEl.scrollHeight;
+        return;
+      }
+
+      const trimmed = cmd.trim();
+
+      if (pane.history[pane.history.length - 1] !== trimmed) {
+        pane.history.push(trimmed);
+      }
+      pane.historyIdx = pane.history.length;
+
+      const lower = trimmed.toLowerCase();
+      if (lower === 'cls' || lower === 'clear') {
+        screenEl.innerHTML = '';
+        return;
+      }
+
+      if (lower === 'help') {
+        this.renderHelp(screenEl);
+        screenEl.scrollTop = screenEl.scrollHeight;
+        return;
+      }
+
+      if (lower === 'split') {
+        this.toggleSplit();
+        return;
+      }
+
+      if (lower === 'theme') {
+        this.toggleTheme();
+        return;
+      }
+
+      if (lower.startsWith('font ')) {
+        const size = parseInt(trimmed.slice(5).trim(), 10);
+        if (size && !isNaN(size)) {
+          this.setFontSize(size, true);
+        }
+        return;
+      }
+
+      if (lower.startsWith('shell ')) {
+        const target = trimmed.slice(6).trim().toLowerCase();
+        if (this.shells[target]) {
+          this.setShell(target, paneNum);
+        } else {
+          const err = document.createElement('div');
+          err.className = 'term-line term-stderr';
+          err.textContent = `Shell '${target}' tidak dikenal. Pilihan: powershell, cmd, wsl, node, python`;
+          screenEl.appendChild(err);
+        }
+        screenEl.scrollTop = screenEl.scrollHeight;
+        return;
+      }
+
+      if (lower === 'exit') {
+        if (this.isSplit && paneNum === 2) {
+          this.toggleSplit();
+        } else {
+          closeModal('terminalModal');
+        }
+        return;
+      }
+
+      const spinnerId = `term_spin_${Date.now()}`;
+      const spinnerEl = document.createElement('div');
+      spinnerEl.className = 'term-line term-running';
+      spinnerEl.id = spinnerId;
+      spinnerEl.innerHTML = `<span class="term-spinner-icon">⠋</span> Menjalankan [${conf.name}] <em>${escapeHtml(trimmed)}</em>...`;
+      screenEl.appendChild(spinnerEl);
+      screenEl.scrollTop = screenEl.scrollHeight;
+
+      try {
+        const response = await fetch('/api/terminal/exec', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            command: trimmed,
+            cwd: pane.cwd,
+            shell: pane.shell,
+            autoEnter: this.autoEnter
+          })
+        });
+
+        const spin = document.getElementById(spinnerId);
+        if (spin) spin.remove();
+
+        const data = await response.json();
+
+        if (data.cwd && data.cwd !== pane.cwd) {
+          pane.cwd = data.cwd;
+          this.updatePaneHeaders();
+        }
+
+        if (data.stdout && data.stdout.trim()) {
+          const outEl = document.createElement('pre');
+          outEl.className = 'term-line term-stdout';
+          outEl.innerHTML = this.formatAnsi(data.stdout);
+          screenEl.appendChild(outEl);
+        }
+
+        if (data.stderr && data.stderr.trim()) {
+          const errEl = document.createElement('pre');
+          errEl.className = 'term-line term-stderr';
+          errEl.innerHTML = this.formatAnsi(data.stderr);
+          screenEl.appendChild(errEl);
+        }
+
+        if (data.exitCode !== 0 && data.exitCode !== undefined) {
+          const codeEl = document.createElement('div');
+          codeEl.className = 'term-line term-exit-code';
+          codeEl.innerHTML = `<span class="exit-badge error">Process exited with code ${data.exitCode}</span>`;
+          screenEl.appendChild(codeEl);
+        }
+      } catch (err) {
+        const spin = document.getElementById(spinnerId);
+        if (spin) spin.remove();
+
+        const errEl = document.createElement('div');
+        errEl.className = 'term-line term-stderr';
+        errEl.textContent = `[Terminal Engine Error]: ${err.message || err}`;
+        screenEl.appendChild(errEl);
+      }
+
+      screenEl.scrollTop = screenEl.scrollHeight;
+      this.focusActiveInput();
+    },
+
+    renderHelp(screenEl) {
+      const helpEl = document.createElement('div');
+      helpEl.className = 'term-line term-help-block';
+      helpEl.innerHTML = `
+        <div style="color:var(--neon-teal); font-weight:700; margin-bottom:4px;">=== PANDUAN ZOZ NEURAL TERMINAL ===</div>
+        <div style="color:var(--text-muted); margin-bottom:8px;">Terminal web terintegrasi dengan akses langsung subprocess OS & sandbox cloud environment.</div>
+        <table class="term-help-table">
+          <tr><th>Shell</th><th>Keterangan</th></tr>
+          <tr><td><strong>PowerShell</strong></td><td>Windows PowerShell 5.1/7 &bull; Cmdlet & script execution</td></tr>
+          <tr><td><strong>Command Prompt</strong></td><td>cmd.exe &bull; DOS batch execution</td></tr>
+          <tr><td><strong>WSL</strong></td><td>Windows Subsystem for Linux (Ubuntu/Bash)</td></tr>
+          <tr><td><strong>Node.js</strong></td><td>Node JavaScript sandbox evaluator</td></tr>
+          <tr><td><strong>Python</strong></td><td>Python 3 REPL & evaluator</td></tr>
+        </table>
+        <div style="margin-top:8px; color:var(--neon-amber); font-weight:600;">Perintah Bawaan:</div>
+        <div>&bull; <span class="term-code-chip">cls</span> / <span class="term-code-chip">clear</span> : Bersihkan riwayat layar</div>
+        <div>&bull; <span class="term-code-chip">help</span> : Tampilkan panduan ini</div>
+        <div>&bull; <span class="term-code-chip">split</span> : Beralih tampilan 2 panel berdampingan</div>
+        <div>&bull; <span class="term-code-chip">theme</span> : Beralih tema Aura Es &harr; Aura Api</div>
+        <div>&bull; <span class="term-code-chip">font &lt;px&gt;</span> : Ubah ukuran font (mis. font 14)</div>
+        <div>&bull; <span class="term-code-chip">shell &lt;name&gt;</span> : Ganti shell aktif (powershell, cmd, wsl, node, python)</div>
+        <div>&bull; <span class="term-code-chip">exit</span> : Tutup tab atau terminal</div>
+        <div style="margin-top:8px; color:var(--text-muted); font-size:0.75rem;">Shortcut: <kbd>Ctrl+\`</kbd> Buka/Tutup Terminal &bull; <kbd>&uarr;/&darr;</kbd> Riwayat Perintah &bull; <kbd>Esc</kbd> Tutup</div>
+      `;
+      screenEl.appendChild(helpEl);
+    },
+
+    attachListeners() {
+      const toggleBtn = document.getElementById('terminalToggleBtn');
+      if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => this.toggle());
+      }
+
+      const shellBtn = document.getElementById('btnTerminalShell');
+      const dropdown = document.getElementById('terminalShellDropdown');
+      if (shellBtn && dropdown) {
+        shellBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          dropdown.classList.toggle('show');
+        });
+        document.addEventListener('click', (e) => {
+          if (!shellBtn.contains(e.target) && !dropdown.contains(e.target)) {
+            dropdown.classList.remove('show');
+          }
+        });
+        dropdown.querySelectorAll('.shell-opt').forEach(opt => {
+          opt.addEventListener('click', () => {
+            const sh = opt.getAttribute('data-shell');
+            if (sh) this.setShell(sh);
+            dropdown.classList.remove('show');
+          });
+        });
+      }
+
+      document.getElementById('btnTermFontDec')?.addEventListener('click', () => this.adjustFontSize(-1));
+      document.getElementById('btnTermFontInc')?.addEventListener('click', () => this.adjustFontSize(1));
+      document.getElementById('btnTermAutoEnter')?.addEventListener('click', () => this.toggleAutoEnter());
+      document.getElementById('btnTermSendEnter')?.addEventListener('click', () => this.executeInput(this.activePane));
+      document.getElementById('btnTermSplit')?.addEventListener('click', () => this.toggleSplit());
+      document.getElementById('btnTermClear')?.addEventListener('click', () => this.clearActiveScreen());
+      document.getElementById('btnTermTheme')?.addEventListener('click', () => this.toggleTheme());
+      document.getElementById('btnTermFullscreen')?.addEventListener('click', () => this.toggleFullscreen());
+      document.getElementById('btnClosePane2')?.addEventListener('click', () => this.toggleSplit());
+      document.getElementById('btnTermAddTab')?.addEventListener('click', () => this.addTab());
+
+      const tabList = document.getElementById('termTabList');
+      if (tabList) {
+        tabList.addEventListener('click', (e) => {
+          const closeBtn = e.target.closest('[data-close-tab]');
+          if (closeBtn) {
+            const tabId = closeBtn.getAttribute('data-close-tab');
+            this.closeTab(tabId, e);
+            return;
+          }
+          const tabItem = e.target.closest('[data-tab-id]');
+          if (tabItem) {
+            const tabId = tabItem.getAttribute('data-tab-id');
+            this.switchTab(tabId);
+          }
+        });
+      }
+
+      // Split Resizer Drag
+      const resizer = document.getElementById('termResizer');
+      const ws = document.getElementById('termWorkspace');
+      const p1 = document.getElementById('termPane1');
+      if (resizer && ws && p1) {
+        let isDragging = false;
+        resizer.addEventListener('mousedown', (e) => {
+          isDragging = true;
+          document.body.style.cursor = 'col-resize';
+          e.preventDefault();
+        });
+        window.addEventListener('mousemove', (e) => {
+          if (!isDragging) return;
+          const rect = ws.getBoundingClientRect();
+          const offset = e.clientX - rect.left;
+          const pct = Math.max(20, Math.min(80, (offset / rect.width) * 100));
+          p1.style.flex = `0 0 ${pct}%`;
+        });
+        window.addEventListener('mouseup', () => {
+          if (isDragging) {
+            isDragging = false;
+            document.body.style.cursor = '';
+          }
+        });
+      }
+
+      [1, 2].forEach(num => {
+        const pane = document.getElementById(`termPane${num}`);
+        if (pane) {
+          pane.addEventListener('click', () => {
+            if (this.activePane !== num) {
+              this.setActivePane(num);
+            }
+          });
+        }
+
+        const input = document.getElementById(`termCliInput${num}`);
+        if (input) {
+          input.addEventListener('keydown', (e) => {
+            const pState = this.getPaneState(num);
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              this.executeInput(num);
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              if (pState.history.length > 0 && pState.historyIdx > 0) {
+                pState.historyIdx--;
+                input.value = pState.history[pState.historyIdx] || '';
+              }
+            } else if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              if (pState.historyIdx < pState.history.length - 1) {
+                pState.historyIdx++;
+                input.value = pState.history[pState.historyIdx] || '';
+              } else {
+                pState.historyIdx = pState.history.length;
+                input.value = '';
+              }
+            }
+          });
+        }
+
+        const sendBtn = document.getElementById(`btnTermSend${num}`);
+        if (sendBtn) {
+          sendBtn.addEventListener('click', () => this.executeInput(num));
+        }
+      });
+
+      const chipsBar = document.getElementById('termQuickChipsBar');
+      if (chipsBar) {
+        chipsBar.querySelectorAll('.term-chip').forEach(chip => {
+          chip.addEventListener('click', () => {
+            const cmd = chip.getAttribute('data-cmd');
+            if (cmd) {
+              this.executeInput(this.activePane, cmd);
+            }
+          });
+        });
+      }
+
+      window.addEventListener('keydown', (e) => {
+        if (e.ctrlKey && (e.key === '`' || e.code === 'Backquote')) {
+          e.preventDefault();
+          this.toggle();
+        }
+      });
+    }
+  };
+
+  // Expose TerminalManager globally
+  window.TerminalManager = TerminalManager;
+
   // ==================== BOOTSTRAP INITIALIZATION ====================
   function init() {
     // 1. FAST SYNCHRONOUS BOOTSTRAP (0ms - Instant UI & Interactivity)
@@ -30610,11 +31315,9 @@ Aturan:
     BioEndocrine.init();
     ChatEndocrine.init();
     
-    // Set sound toggle button icon
-    if (els.soundToggleBtn) {
-      els.soundToggleBtn.innerHTML = STATE.soundEnabled 
-        ? '<i class="fa-solid fa-volume-high"></i>' 
-        : '<i class="fa-solid fa-volume-xmark"></i>';
+    // Initialize Neural Terminal Engine
+    if (typeof TerminalManager !== 'undefined') {
+      TerminalManager.init();
     }
 
     // Distinguish Browser Refresh (same tab) vs Fresh App Entry

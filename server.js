@@ -5079,6 +5079,153 @@ async function requestHandler(req, res) {
     : path.resolve(__dirname);
   const SNAPSHOTS_DIR = path.join(WORKSPACE_ROOT, '.zoz-snapshots');
 
+  // =========================================================================
+  // NEURAL TERMINAL CLI EXECUTION API
+  // Mengizinkan eksekusi perintah shell interaktif (PowerShell, CMD, WSL, Node)
+  // =========================================================================
+  if ((pathname === '/api/terminal/exec' || pathname === '/api/terminal/run') && method === 'POST') {
+    try {
+      const body = await safeParseBody(req);
+      if (!body) return;
+      const cmd = (body.command || body.cmd || '').trim();
+      const shellType = (body.shell || 'powershell').toLowerCase();
+      let targetCwd = body.cwd ? path.resolve(body.cwd) : WORKSPACE_ROOT;
+
+      // Pastikan targetCwd ada atau fallback ke WORKSPACE_ROOT
+      if (!fs.existsSync(targetCwd)) {
+        targetCwd = WORKSPACE_ROOT;
+      }
+
+      if (!cmd) {
+        return sendJSON(res, 200, {
+          success: true,
+          output: '',
+          cwd: targetCwd,
+          exitCode: 0
+        });
+      }
+
+      // Khusus perintah internal cd (change directory)
+      if (/^cd(\s+|$)/i.test(cmd)) {
+        const dest = cmd.replace(/^cd\s*/i, '').trim();
+        let newCwd = targetCwd;
+        if (!dest || dest === '~') {
+          newCwd = os.homedir();
+        } else {
+          newCwd = path.resolve(targetCwd, dest);
+        }
+        if (fs.existsSync(newCwd)) {
+          return sendJSON(res, 200, {
+            success: true,
+            output: `Direktori aktif diubah ke: ${newCwd}`,
+            cwd: newCwd,
+            exitCode: 0
+          });
+        } else {
+          return sendJSON(res, 200, {
+            success: false,
+            output: `Tidak dapat menemukan jalur: ${dest}`,
+            cwd: targetCwd,
+            exitCode: 1
+          });
+        }
+      }
+
+      // Eksekusi pada Serverless Vercel (fallback virtual shell)
+      if (IS_VERCEL_ENV) {
+        if (/^(dir|ls)/i.test(cmd)) {
+          const files = await fsp.readdir(targetCwd).catch(() => []);
+          const output = files.map(f => `  ${f}`).join('\n') || '(direktori kosong)';
+          return sendJSON(res, 200, { success: true, output, cwd: targetCwd, exitCode: 0 });
+        }
+        if (/^(pwd)/i.test(cmd)) {
+          return sendJSON(res, 200, { success: true, output: targetCwd, cwd: targetCwd, exitCode: 0 });
+        }
+        if (/^(whoami)/i.test(cmd)) {
+          return sendJSON(res, 200, { success: true, output: 'zoz-router-cloud\\user', cwd: targetCwd, exitCode: 0 });
+        }
+        if (/^(node\s+-v|node\s+--version)/i.test(cmd)) {
+          return sendJSON(res, 200, { success: true, output: process.version, cwd: targetCwd, exitCode: 0 });
+        }
+      }
+
+      // Eksekusi Subprocess Shell Asli
+      let executable = 'powershell.exe';
+      let args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', cmd];
+
+      if (shellType === 'cmd' || shellType === 'cmd.exe') {
+        executable = 'cmd.exe';
+        args = ['/c', cmd];
+      } else if (shellType === 'wsl' || shellType === 'bash' || shellType === 'ubuntu-wsl') {
+        executable = 'wsl.exe';
+        args = ['-e', 'bash', '-c', cmd];
+      } else if (shellType === 'node') {
+        executable = process.execPath;
+        args = ['-e', cmd];
+      } else if (shellType === 'python') {
+        executable = process.platform === 'win32' ? 'python' : 'python3';
+        args = ['-c', cmd];
+      }
+
+      const proc = spawn(executable, args, {
+        cwd: targetCwd,
+        env: { ...process.env, TERM: 'xterm-256color' },
+        windowsHide: true
+      });
+
+      let stdout = '';
+      let stderr = '';
+      let timedOut = false;
+
+      const timer = setTimeout(() => {
+        timedOut = true;
+        try { proc.kill(); } catch (_) {}
+      }, 15000);
+
+      proc.stdout.on('data', chunk => {
+        stdout += chunk.toString();
+        if (stdout.length > 80000) {
+          stdout = stdout.slice(-80000);
+        }
+      });
+
+      proc.stderr.on('data', chunk => {
+        stderr += chunk.toString();
+      });
+
+      proc.on('error', err => {
+        clearTimeout(timer);
+        return sendJSON(res, 200, {
+          success: false,
+          output: `Gagal menjalankan shell: ${err.message}`,
+          cwd: targetCwd,
+          exitCode: 1
+        });
+      });
+
+      proc.on('close', code => {
+        clearTimeout(timer);
+        let finalOut = stdout;
+        if (stderr) {
+          finalOut += (finalOut ? '\n' : '') + stderr;
+        }
+        if (timedOut) {
+          finalOut += '\n[Eksekusi dibatalkan: batas waktu 15 detik tercapai]';
+        }
+        return sendJSON(res, 200, {
+          success: code === 0,
+          output: finalOut || '(selesai tanpa output)',
+          cwd: targetCwd,
+          exitCode: code !== null ? code : 1
+        });
+      });
+
+      return;
+    } catch (e) {
+      return sendJSON(res, 500, { error: 'Kesalahan internal terminal: ' + e.message });
+    }
+  }
+
   function isSafeWorkspacePath(targetRelPath) {
     if (!targetRelPath || typeof targetRelPath !== 'string') return false;
     const clean = targetRelPath.trim().replace(/^[/\\]+/, '');
