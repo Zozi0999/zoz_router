@@ -1439,20 +1439,22 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     },
 
     secreteDopamine(amount, reason) {
-      this.hormones.dopamine = Math.min(100, Math.round((this.hormones.dopamine + amount) * 10) / 10);
-      this.hormones.cortisol = Math.max(0, Math.round((this.hormones.cortisol - (amount * 0.35)) * 10) / 10);
-      this.log('dopamine', amount, reason);
+      const effectiveAmount = Math.min(100, Math.max(1, Math.round(amount)));
+      this.hormones.dopamine = Math.min(100, Math.round((this.hormones.dopamine + effectiveAmount) * 10) / 10);
+      this.hormones.cortisol = Math.max(0, Math.round((this.hormones.cortisol - (effectiveAmount * 0.35)) * 10) / 10);
+      this.log('dopamine', effectiveAmount, reason);
       this.updateUI();
     },
 
     secreteStress(amount, reason, isIsolatedCode = false) {
-      this.hormones.cortisol = Math.min(100, Math.round((this.hormones.cortisol + amount) * 10) / 10);
-      this.hormones.dopamine = Math.max(5, Math.round((this.hormones.dopamine - (amount * 0.5)) * 10) / 10);
-      this.hormones.adrenaline = Math.min(100, Math.round((this.hormones.adrenaline + (amount * 0.6)) * 10) / 10);
-      this.log('cortisol', amount, reason);
+      const effectiveAmount = Math.min(100, Math.max(1, Math.round(amount)));
+      this.hormones.cortisol = Math.min(100, Math.round((this.hormones.cortisol + effectiveAmount) * 10) / 10);
+      this.hormones.dopamine = Math.max(5, Math.round((this.hormones.dopamine - (effectiveAmount * 0.5)) * 10) / 10);
+      this.hormones.adrenaline = Math.min(100, Math.round((this.hormones.adrenaline + (effectiveAmount * 0.6)) * 10) / 10);
+      this.log('cortisol', effectiveAmount, reason);
       this.updateUI();
       try {
-        if (typeof AudioEngine !== 'undefined' && AudioEngine.playBeep && STATE.soundEnabled && amount >= 25) {
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.playBeep && STATE.soundEnabled && effectiveAmount >= 25) {
           AudioEngine.playBeep(220, 'sawtooth', 0.12, 0.04);
         }
       } catch (_) {}
@@ -1709,12 +1711,26 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const winW = window.innerWidth || 1024;
       const winH = window.innerHeight || 768;
 
+      // Cek apakah ada modal yang sedang aktif terbuka di layar
+      const activeModal = document.querySelector('.modal-backdrop.show, .modal.show');
+
       for (const btn of buttons) {
-        // Abaikan tombol yang memang sengaja disembunyikan (display: none / hidden parent)
-        if (btn.offsetParent === null && !btn.classList?.contains('active')) continue;
+        // 1. Abaikan tombol yang memang sengaja tidak dirender di visual layout
+        if (btn.offsetParent === null) continue;
         if (typeof window.getComputedStyle !== 'function' || typeof btn.getBoundingClientRect !== 'function') continue;
+        
+        // 2. Abaikan tombol di dalam modal tertutup, dropdown tertutup, atau tab non-aktif
+        if (btn.closest('.modal-backdrop:not(.show), .modal:not(.show), [hidden], .dropdown-menu:not(.show), .settings-tab-pane:not(.active), .endocrine-pane[style*="display: none"]')) continue;
+
         const style = window.getComputedStyle(btn);
         if (style.display === 'none' || style.visibility === 'hidden') continue;
+
+        // 3. Jika ada modal yang sedang terbuka:
+        // Tombol di latar belakang (luar modal) secara sengaja ditutup oleh backdrop modal.
+        // Hanya audit tombol yang berada di dalam modal aktif tersebut!
+        if (activeModal && !activeModal.contains(btn)) {
+          continue;
+        }
 
         const rect = btn.getBoundingClientRect();
         const btnId = btn.id ? `#${btn.id}` : (btn.className ? `.${String(btn.className).trim().split(/\s+/)[0]}` : '<button>');
@@ -1768,6 +1784,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         if (cx >= 0 && cx <= winW && cy >= 0 && cy <= winH && typeof document.elementFromPoint === 'function') {
           const topEl = document.elementFromPoint(cx, cy);
           if (topEl && topEl !== btn && !btn.contains(topEl) && !topEl.contains(btn)) {
+            // Abaikan jika topEl adalah bagian internal tombol (misal wrapper span atau label)
+            if (topEl.closest('button, a.btn, [role="button"]') === btn) continue;
+
+            // Abaikan jika elemen penutup memiliki pointer-events: none (klik tembus ke tombol)
+            const topStyle = window.getComputedStyle ? window.getComputedStyle(topEl) : null;
+            if (topStyle && topStyle.pointerEvents === 'none') continue;
+
+            // Abaikan jika topEl adalah modal backdrop sementara tombol berada di luar modal
+            if (topEl.classList?.contains('modal-backdrop') && !btn.closest('.modal-backdrop')) continue;
+
             const blockerTag = (topEl.tagName || 'div').toLowerCase();
             const blockerClass = topEl.className ? `.${String(topEl.className).trim().split(/\s+/).join('.')}` : '';
             const blockerId = topEl.id ? `#${topEl.id}` : '';
@@ -1789,7 +1815,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
       this.buttonIssues = issues;
       if (issues.length > 0) {
-        this.secreteStress(issues.length * 12, `Terdeteksi ${issues.length} tombol terhalang atau tidak sesuai posisi!`);
+        const stressAmt = Math.min(45, issues.length * 6);
+        this.secreteStress(stressAmt, `Terdeteksi ${issues.length} tombol terhalang atau tidak sesuai posisi!`);
       } else if (!silent) {
         this.secreteDopamine(10, 'Audit tombol: Semua tombol antarmuka berada pada posisi valid dan bebas halangan');
       }
@@ -1852,7 +1879,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           });
 
           // b. Sembuhkan modal backdrop atau overlay liar yang tidak tertutup rapi
-          const allModals = document.querySelectorAll('.modal');
+          const allModals = document.querySelectorAll('.modal-backdrop, .modal');
           allModals.forEach(m => {
             if (!m.classList?.contains('show')) {
               m.style.display = 'none';
