@@ -2062,6 +2062,104 @@ RESONANSI: ${this.currentVibe}
     }
   };
 
+  // ==================== INDEXEDDB AUDIO VAULT (v312) ====================
+  // Menyimpan blob audio musik AI hasil gubahan secara persisten di IndexedDB
+  // agar musik TIDAK mati / hilang saat pengguna keluar dari aplikasi atau me-reload browser.
+  const AudioVault = {
+    db: null,
+    _urlCache: new Map(),
+    async init() {
+      if (this.db) return this.db;
+      return new Promise((resolve) => {
+        try {
+          const req = indexedDB.open('ZozRouterAudioVault_v1', 1);
+          req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('tracks')) {
+              db.createObjectStore('tracks', { keyPath: 'id' });
+            }
+          };
+          req.onsuccess = (e) => {
+            this.db = e.target.result;
+            resolve(this.db);
+          };
+          req.onerror = () => resolve(null);
+        } catch (_) {
+          resolve(null);
+        }
+      });
+    },
+    async saveTrack(id, blob, meta = {}) {
+      if (!id || !blob) return false;
+      try {
+        if (!this.db) await this.init();
+        if (!this.db) return false;
+        return new Promise((resolve) => {
+          try {
+            const tx = this.db.transaction('tracks', 'readwrite');
+            tx.objectStore('tracks').put({
+              id,
+              blob,
+              mime: blob.type || 'audio/wav',
+              size: blob.size,
+              title: meta.title || '',
+              prompt: meta.prompt || '',
+              genre: meta.genre || '',
+              createdAt: Date.now()
+            });
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => resolve(false);
+          } catch (_) {
+            resolve(false);
+          }
+        });
+      } catch (_) {
+        return false;
+      }
+    },
+    async getTrackUrl(id) {
+      if (!id) return null;
+      if (this._urlCache.has(id)) {
+        return this._urlCache.get(id);
+      }
+      try {
+        if (!this.db) await this.init();
+        if (!this.db) return null;
+        return new Promise((resolve) => {
+          try {
+            const tx = this.db.transaction('tracks', 'readonly');
+            const req = tx.objectStore('tracks').get(id);
+            req.onsuccess = () => {
+              const item = req.result;
+              if (item && item.blob) {
+                const freshUrl = URL.createObjectURL(item.blob);
+                this._urlCache.set(id, freshUrl);
+                resolve(freshUrl);
+              } else {
+                resolve(null);
+              }
+            };
+            req.onerror = () => resolve(null);
+          } catch (_) {
+            resolve(null);
+          }
+        });
+      } catch (_) {
+        return null;
+      }
+    },
+    async saveTrackFromUrl(id, url, meta = {}) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return false;
+        const blob = await res.blob();
+        return this.saveTrack(id, blob, meta);
+      } catch (_) {
+        return false;
+      }
+    }
+  };
+
   function findWorkspaceFile(targetName) {
     if (!targetName || !STATE.localWorkspace || !Array.isArray(STATE.localWorkspace.files) || STATE.localWorkspace.files.length === 0) return null;
     const clean = String(targetName).trim().toLowerCase();
@@ -3276,7 +3374,19 @@ RESONANSI: ${this.currentVibe}
               stats: m.stats,
               isDeepResearch: !!m.isDeepResearch,
               latency: m.latency,
-              timestamp: m.timestamp
+              timestamp: m.timestamp,
+              isMusicGen: !!m.isMusicGen,
+              type: m.type,
+              audioUrl: m.audioUrl,
+              url: m.url,
+              title: m.title,
+              genre: m.genre,
+              bpm: m.bpm,
+              duration: m.duration,
+              prompt: m.prompt,
+              aiComposed: m.aiComposed,
+              aiSummary: m.aiSummary,
+              audioVaultId: m.audioVaultId
             };
           })
         }));
@@ -7831,14 +7941,15 @@ RESONANSI: ${this.currentVibe}
 
     let assistantMediaHtml = '';
     const safeMeta = (extraMeta && typeof extraMeta === 'object') ? extraMeta : {};
-    const audioUrl = safeMeta.audioUrl || safeMeta.url || (typeof content === 'string' && (content.match(/\[(?:Putar\s*\/\s*Unduh\s*Audio|Dengar\s*Audio)\]\((https?:\/\/[^\s\)]+|\/uploads\/[^\s\)]+)\)/i) || content.match(/\((https?:\/\/[^\s\)]+\.mp3|\/uploads\/[^\s\)]+\.mp3)\)/i))?.[1]);
+    const audioUrl = safeMeta.audioUrl || safeMeta.url || (typeof content === 'string' && (content.match(/\[(?:Putar\s*\/\s*Unduh\s*Audio|Dengar\s*Audio)\]\(([^\s\)]+)\)/i) || content.match(/\((https?:\/\/[^\s\)]+\.(?:mp3|wav|ogg|m4a|aac|flac)|\/uploads\/[^\s\)]+\.(?:mp3|wav|ogg|m4a|aac|flac)|blob:[^\s\)]+|data:audio\/[^\s\)]+)\)/i))?.[1]);
     const videoUrl = safeMeta.videoUrl || (safeMeta.type === 'video_generation' && safeMeta.url) || (typeof content === 'string' && (content.match(/\[(?:Tonton\s*\/\s*Unduh\s*Video|Lihat\s*Video)\]\((https?:\/\/[^\s\)]+|\/uploads\/[^\s\)]+)\)/i) || content.match(/\((https?:\/\/[^\s\)]+\.mp4|\/uploads\/[^\s\)]+\.mp4)\)/i))?.[1]);
 
-    if (role === 'assistant' && audioUrl && (safeMeta.isMusicGen || safeMeta.type === 'music_generation' || /\.mp3(?:$|\?)/i.test(audioUrl) || /Audio/i.test(content || ''))) {
+    if (role === 'assistant' && (audioUrl || safeMeta.audioVaultId) && (safeMeta.isMusicGen || safeMeta.type === 'music_generation' || /\.(?:mp3|wav|ogg|m4a)(?:$|\?)/i.test(audioUrl || '') || /Audio/i.test(content || ''))) {
       if (typeof buildCyberAudioPlayerCardHtml === 'function') {
         assistantMediaHtml += buildCyberAudioPlayerCardHtml({
           url: audioUrl,
           audioUrl: audioUrl,
+          audioVaultId: safeMeta.audioVaultId || '',
           title: safeMeta.title || 'Singularity Cyber Audio',
           genre: safeMeta.genre || 'Cyberpunk',
           bpm: safeMeta.bpm || null,
@@ -23955,6 +24066,7 @@ Aturan:
   // ====================================================
   function buildCyberAudioPlayerCardHtml(track) {
     const safeUrl = escapeHtml(track.url || track.audioUrl || '');
+    const safeVaultId = escapeHtml(track.audioVaultId || track.vaultId || '');
     const safeTitle = escapeHtml(track.title || 'Singularity Cyber Audio');
     const safeGenre = escapeHtml(track.genre || 'Cyberpunk');
     const bpm = track.bpm || null;
@@ -23965,7 +24077,7 @@ Aturan:
     const trackId = 'cyber_audio_' + Math.random().toString(36).substring(2, 9);
 
     return `
-      <div class="cyber-audio-card" id="${trackId}">
+      <div class="cyber-audio-card" id="${trackId}" data-vault-id="${safeVaultId}" data-url="${safeUrl}">
         <div class="cyber-audio-body">
           <div class="cyber-audio-title-row">
             <div class="cyber-audio-title"><i class="fa-solid fa-headphones" style="color:var(--neon-teal); margin-right:6px;"></i> ${safeTitle}</div>
@@ -24020,8 +24132,28 @@ Aturan:
       const totalTimeEl = card.querySelector('.total-time');
       const canvas = card.querySelector('.cyber-audio-wave-canvas');
       const copyPromptBtn = card.querySelector('.copy-audio-prompt-btn');
+      const dlLink = card.querySelector('a[download]');
+      const vaultId = card.dataset.vaultId;
 
       if (!audio || !playBtn) return;
+
+      // Hidrasi audio dari AudioVault jika tersedia (memulihkan blob URL yang kedaluwarsa setelah reload/exit app)
+      if (vaultId && typeof AudioVault !== 'undefined') {
+        const cachedUrl = AudioVault._urlCache.get(vaultId);
+        if (cachedUrl) {
+          audio.src = cachedUrl;
+          playBtn.dataset.url = cachedUrl;
+          if (dlLink) dlLink.href = cachedUrl;
+        } else {
+          AudioVault.getTrackUrl(vaultId).then(revivedUrl => {
+            if (revivedUrl) {
+              audio.src = revivedUrl;
+              playBtn.dataset.url = revivedUrl;
+              if (dlLink) dlLink.href = revivedUrl;
+            }
+          }).catch(() => {});
+        }
+      }
 
       // ID rAF disimpan pada ELEMEN AUDIO (bukan variabel lokal per-kartu) supaya
       // listener pause/ended/error bisa membatalkan loop dari mana pun — dulu hanya
@@ -24081,15 +24213,86 @@ Aturan:
       playBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         if (audio.paused) {
+          // 1. Pastikan sumber audio terpasang
+          if (!audio.src && playBtn.dataset.url) {
+            audio.src = playBtn.dataset.url;
+          }
+
+          // 2. Jika sumber kosong atau error dari blob lama, coba sinkronkan dari AudioVault
+          if ((!audio.src || audio.error) && vaultId && typeof AudioVault !== 'undefined') {
+            const syncUrl = AudioVault._urlCache.get(vaultId);
+            if (syncUrl) {
+              audio.src = syncUrl;
+              playBtn.dataset.url = syncUrl;
+              if (dlLink) dlLink.href = syncUrl;
+            }
+          }
+
+          if (!audio.src) {
+            showToast('⚠️ Berkas audio tidak ditemukan atau telah kedaluwarsa.', 'warning');
+            return;
+          }
+
           document.querySelectorAll('.cyber-audio-card audio').forEach(a => { if (a !== audio) a.pause(); });
           document.querySelectorAll('.cyber-audio-card .cyber-audio-play-btn').forEach(b => { if (b !== playBtn) b.innerHTML = '<i class="fa-solid fa-play"></i>'; });
 
-          audio.play().then(() => {
-            playBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
-            drawWaveform(true);
-          }).catch(err => {
-            console.warn('Audio play error:', err);
-          });
+          // Reload jika audio sebelumnya berada dalam kondisi error/idle di mobile
+          if (audio.error) {
+            try { audio.load(); } catch (_) {}
+          }
+
+          const playPromise = audio.play();
+          if (playPromise !== undefined) {
+            playPromise.then(() => {
+              playBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+              drawWaveform(true);
+
+              // Dukungan MediaSession API untuk kontrol latar belakang & lock screen
+              if ('mediaSession' in navigator && window.MediaMetadata) {
+                try {
+                  const trackTitle = card.querySelector('.cyber-audio-title')?.textContent?.trim() || 'Singularity Cyber Audio';
+                  navigator.mediaSession.metadata = new MediaMetadata({
+                    title: trackTitle,
+                    artist: 'Zoz Router AI Music Studio',
+                    album: 'Cyberdeck Audio Player'
+                  });
+                  navigator.mediaSession.setActionHandler('play', () => audio.play().catch(() => {}));
+                  navigator.mediaSession.setActionHandler('pause', () => audio.pause());
+                } catch (_) {}
+              }
+            }).catch(err => {
+              console.warn('Audio play error:', err);
+              playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
+              stopWaveAnim();
+              drawWaveform(false);
+
+              if (vaultId && typeof AudioVault !== 'undefined') {
+                AudioVault.getTrackUrl(vaultId).then(revivedUrl => {
+                  if (revivedUrl && revivedUrl !== audio.src) {
+                    audio.src = revivedUrl;
+                    playBtn.dataset.url = revivedUrl;
+                    if (dlLink) dlLink.href = revivedUrl;
+                    audio.play().then(() => {
+                      playBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+                      drawWaveform(true);
+                    }).catch(() => {});
+                    return;
+                  }
+                  showToast('⚠️ Berkas audio sesi ini sudah kedaluwarsa setelah peramban ditutup. Silakan buat lagu baru di Music Studio.', 4000);
+                }).catch(() => {
+                  showToast('⚠️ Berkas audio sesi ini sudah kedaluwarsa setelah peramban ditutup. Silakan buat lagu baru di Music Studio.', 4000);
+                });
+              } else {
+                if (err.name === 'NotSupportedError' || audio.error) {
+                  showToast('⚠️ Berkas audio sesi ini sudah kedaluwarsa setelah peramban ditutup. Silakan buat lagu baru di Music Studio.', 4000);
+                } else if (err.name === 'NotAllowedError') {
+                  showToast('⚠️ Peramban memerlukan interaksi pengguna untuk memutar audio.', 3000);
+                } else {
+                  showToast('Gagal memutar audio: ' + (err.message || 'Periksa berkas audio'), 'warning');
+                }
+              }
+            });
+          }
         } else {
           audio.pause();
           playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
@@ -24607,9 +24810,30 @@ Aturan:
       const isTokenSoup = /\[\[[A-G0-9#b\s\-\:]+\]\]/i.test(trackAiSummary) || /\[\s*(?:Verse|Chorus|Instrumental|Solo|Bridge|Drop|Beat|Vocal|Ooh|Aah|[A-G]\d?)\s*\]/i.test(trackAiSummary);
       const cleanAiSummary = (!isTokenSoup && trackAiSummary) ? trackAiSummary : 'Digubah oleh AI Neural Music Studio';
 
+      // Simpan salinan biner audio secara permanen di IndexedDB AudioVault
+      const audioVaultId = 'vault_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+      if (typeof clientAudio !== 'undefined' && clientAudio && clientAudio.blob && typeof AudioVault !== 'undefined') {
+        AudioVault._urlCache.set(audioVaultId, finalAudioUrl);
+        AudioVault._urlCache.set(finalAudioUrl, finalAudioUrl);
+        AudioVault.saveTrack(audioVaultId, clientAudio.blob, {
+          title: trackTitle,
+          prompt: cleanPrompt,
+          genre: trackGenre
+        });
+      } else if (finalAudioUrl && finalAudioUrl.startsWith('/uploads/') && typeof AudioVault !== 'undefined') {
+        AudioVault._urlCache.set(audioVaultId, finalAudioUrl);
+        AudioVault._urlCache.set(finalAudioUrl, finalAudioUrl);
+        AudioVault.saveTrackFromUrl(audioVaultId, finalAudioUrl, {
+          title: trackTitle,
+          prompt: cleanPrompt,
+          genre: trackGenre
+        });
+      }
+
       const trackData = {
         url: finalAudioUrl,
         audioUrl: finalAudioUrl,
+        audioVaultId: audioVaultId,
         title: trackTitle,
         genre: trackGenre,
         bpm: trackBpm,
@@ -24638,6 +24862,7 @@ Aturan:
           content: `[Musik AI: "${cleanPrompt}"]\n\n- Judul: ${trackTitle}\n- Engine: ${trackAiModel} (${trackAiProvider})\n- Aransemen: ${cleanAiSummary}\n- Audio: [Putar / Unduh Audio](${finalAudioUrl})`,
           type: 'music_generation',
           isMusicGen: true,
+          audioVaultId: audioVaultId,
           audioUrl: finalAudioUrl,
           url: finalAudioUrl,
           title: trackTitle,
@@ -28636,6 +28861,23 @@ Aturan:
         } catch (_) {}
       } else if (document.visibilityState === 'visible') {
         document.body.classList.remove('page-paused');
+        try {
+          if (AudioEngine.ctx && AudioEngine.ctx.state === 'suspended') {
+            AudioEngine.ctx.resume().catch(() => {});
+          }
+        } catch (_) {}
+        // Sinkronisasi status tombol kartu pemutar audio yang aktif saat pengguna kembali ke aplikasi
+        document.querySelectorAll('.cyber-audio-card').forEach(card => {
+          const a = card.querySelector('audio');
+          const btn = card.querySelector('.cyber-audio-play-btn');
+          if (a && btn) {
+            if (!a.paused && !a.ended) {
+              btn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+            } else if (a.paused && btn.innerHTML.includes('fa-pause')) {
+              btn.innerHTML = '<i class="fa-solid fa-play"></i>';
+            }
+          }
+        });
         requestAnimationFrame(restoreChatScrollPosition);
         checkBackgroundChatTasksSync();
       }

@@ -7084,6 +7084,9 @@ div.msg-sources-section button.msg-sources-title span {
   box-shadow: 0 0 12px rgba(0, 255, 194, 0.5);
   transition: all 0.2s ease;
   flex-shrink: 0;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .cyber-audio-play-btn:hover {
@@ -7141,6 +7144,9 @@ div.msg-sources-section button.msg-sources-title span {
   cursor: pointer;
   transition: all 0.2s ease;
   flex-shrink: 0;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .cyber-audio-loop-btn:hover {
