@@ -30618,6 +30618,7 @@ Aturan:
         pane1: {
           shell: 'powershell',
           cwd: 'C:\\Users\\user',
+          autoEnter: false,
           history: [],
           historyIdx: -1,
           outputHtml: ''
@@ -30625,6 +30626,7 @@ Aturan:
         pane2: {
           shell: 'powershell',
           cwd: 'C:\\Users\\user',
+          autoEnter: false,
           history: [],
           historyIdx: -1,
           outputHtml: ''
@@ -30643,11 +30645,15 @@ Aturan:
 
     get autoEnter() {
       const tab = this.getActiveTab();
-      return tab ? !!tab.autoEnter : false;
+      if (!tab) return false;
+      const p = this.getPaneState(this.activePane);
+      return p ? !!p.autoEnter : false;
     },
     set autoEnter(val) {
       const tab = this.getActiveTab();
-      if (tab) tab.autoEnter = !!val;
+      if (!tab) return;
+      const p = this.getPaneState(this.activePane);
+      if (p) p.autoEnter = !!val;
     },
 
     xtermThemes: {
@@ -30777,25 +30783,32 @@ Aturan:
 
     updateAutoEnterUI() {
       const tab = this.getActiveTab();
-      const btn = document.getElementById('btnTermAutoEnter');
-      if (btn) {
-        btn.classList.toggle('active', !!tab?.autoEnter);
-      }
+      const p1 = tab?.pane1;
+      const p2 = tab?.pane2;
+      const btn1 = document.getElementById('btnPaneAutoEnter1');
+      const btn2 = document.getElementById('btnPaneAutoEnter2');
+      const topBtn = document.getElementById('btnTermAutoEnter');
+      if (btn1) btn1.classList.toggle('active', !!p1?.autoEnter);
+      if (btn2) btn2.classList.toggle('active', !!p2?.autoEnter);
+      if (topBtn) topBtn.classList.toggle('active', !!this.autoEnter);
     },
 
-    toggleAutoEnter() {
+    toggleAutoEnter(paneNum = (this.activePane || 1)) {
       const tab = this.getActiveTab();
       if (!tab) return;
-      tab.autoEnter = !tab.autoEnter;
+      const pane = paneNum === 2 ? tab.pane2 : tab.pane1;
+      if (!pane) return;
+      pane.autoEnter = !pane.autoEnter;
+      if (paneNum === 1) tab.autoEnter = pane.autoEnter;
       this.updateAutoEnterUI();
-      showToast(tab.autoEnter ? `Auto Y/Enter: Aktif (${tab.title})` : `Auto Y/Enter: Nonaktif (${tab.title})`);
+      const paneName = paneNum === 2 ? 'Panel 2' : 'Panel 1';
+      showToast(pane.autoEnter ? `Auto Y/Enter: Aktif (${paneName} - ${tab.title})` : `Auto Y/Enter: Nonaktif (${paneName} - ${tab.title})`);
     },
 
-    sendEnterToActivePane() {
+    sendEnterToPane(paneNum = (this.activePane || 1)) {
       const tab = this.getActiveTab();
       if (!tab) return;
-      const paneNum = this.activePane || tab.activePane || 1;
-      const paneState = this.getPaneState(paneNum);
+      const paneState = paneNum === 2 ? tab.pane2 : tab.pane1;
       const inputEl = document.getElementById(`termCliInput${paneNum}`);
       const val = inputEl ? inputEl.value : '';
 
@@ -30805,7 +30818,7 @@ Aturan:
         return;
       }
 
-      // In desktop xterm mode, send raw carriage return (\r) directly to the active pane's PTY
+      // In desktop xterm mode, send raw carriage return (\r) directly to the pane's PTY
       if (paneState && paneState.term && !paneState.isFallbackMode) {
         const sessionId = paneState.sessionId || `${tab.id}-p${paneNum}`;
         this.sendPtyInput(sessionId, '\r');
@@ -30813,6 +30826,10 @@ Aturan:
       } else {
         this.executeInput(paneNum, '');
       }
+    },
+
+    sendEnterToActivePane() {
+      this.sendEnterToPane(this.activePane || 1);
     },
 
     toggleFullscreen() {
@@ -30838,7 +30855,7 @@ Aturan:
         this.initActiveTabPanes();
         this.focusActiveInput();
         this.syncServerCwd();
-        setTimeout(() => this.fitAllPanes(), 60);
+        [50, 150, 300, 600].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
       }
     },
 
@@ -30897,7 +30914,12 @@ Aturan:
           screenEl.appendChild(paneState.screenContainer);
           setTimeout(() => {
             if (paneState.fitAddon) {
-              try { paneState.fitAddon.fit(); } catch (_) {}
+              try {
+                paneState.fitAddon.fit();
+                if (paneState.term) {
+                  this.sendPtyResize(paneState.sessionId, paneState.term.cols, paneState.term.rows);
+                }
+              } catch (_) {}
             }
           }, 30);
         }
@@ -30919,9 +30941,10 @@ Aturan:
         theme: this.getXtermTheme(),
         fontFamily: '"JetBrains Mono", Cascadia Code, Fira Code, Consolas, "Courier New", monospace',
         fontSize: this.fontSize,
-        lineHeight: 1.25,
+        lineHeight: 1.2,
         scrollback: 5000,
-        allowTransparency: true
+        allowTransparency: true,
+        convertEol: true
       });
 
       const fitAddon = (typeof window.FitAddon !== 'undefined' && window.FitAddon.FitAddon)
@@ -30934,9 +30957,32 @@ Aturan:
 
       term.open(container);
       if (fitAddon) {
+        try {
+          fitAddon.fit();
+          this.sendPtyResize(sessionId, term.cols, term.rows);
+        } catch (_) {}
         setTimeout(() => {
-          try { fitAddon.fit(); } catch (_) {}
+          try {
+            fitAddon.fit();
+            this.sendPtyResize(sessionId, term.cols, term.rows);
+          } catch (_) {}
         }, 50);
+      }
+
+      // Attach ResizeObserver to auto-fit and sync PTY on any layout or animation change
+      if (typeof window.ResizeObserver !== 'undefined') {
+        if (paneState._resizeObserver) {
+          try { paneState._resizeObserver.disconnect(); } catch (_) {}
+        }
+        paneState._resizeObserver = new ResizeObserver(() => {
+          if (paneState.fitAddon && paneState.term) {
+            try {
+              paneState.fitAddon.fit();
+              this.sendPtyResize(paneState.sessionId, paneState.term.cols, paneState.term.rows);
+            } catch (_) {}
+          }
+        });
+        paneState._resizeObserver.observe(container);
       }
 
       paneState.term = term;
@@ -31010,22 +31056,46 @@ Aturan:
     },
 
     handleAutoRespond(tab, paneState, paneNum, chunk) {
-      if (!tab || !tab.autoEnter || !chunk || typeof chunk !== 'string') return;
-      const clean = chunk.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
-      if (!clean) return;
+      if (!paneState || !paneState.autoEnter || !chunk || typeof chunk !== 'string') return;
 
-      const promptRegex = /(?:\[[Yy]\/[Nn]\]|\([Yy]\/[Nn]\)|\[[yY]\/n\]|\([yY]\/n\)|\?.*\(Y\/n\)|\(yes\/no\)|\[yes\/no\]|Press (?:any key|ENTER) to continue|Terminate batch job \(Y\/N\)\?)/i;
-      if (promptRegex.test(clean)) {
-        const now = Date.now();
-        if (!paneState._lastAutoRespond || (now - paneState._lastAutoRespond) > 600) {
-          paneState._lastAutoRespond = now;
-          const sId = paneState.sessionId || `${tab.id}-p${paneNum}`;
-          setTimeout(() => {
-            if (tab.autoEnter && sId) {
-              this.sendPtyInput(sId, 'y\r');
-            }
-          }, 150);
-        }
+      // Strip ANSI escape codes (CSI, OSC, etc.) and control characters
+      const clean = chunk
+        .replace(/\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\].*?(?:\x07|\x1b\\))/g, '')
+        .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, ' ');
+
+      if (!clean.trim()) return;
+
+      // Sliding window buffer across fragmented chunks
+      paneState._recentText = ((paneState._recentText || '') + ' ' + clean).slice(-1200);
+      const textBuffer = paneState._recentText;
+
+      const now = Date.now();
+      if (paneState._lastAutoRespond && (now - paneState._lastAutoRespond) < 500) return;
+
+      // Type B: Simple Enter to proceed (e.g. AI CLI pagination, "Press Enter to continue", "Hit enter")
+      const enterOnlyRegex = /(?:press (?:any key|enter) to continue|hit enter|press \[?enter\]? to|\bpress enter\b)/i;
+
+      // Type A: Interactive confirmations (e.g. AI CLI tool approval, [Y/n], [y/n], Approve?, Proceed?, Allow?)
+      const confirmYRegex = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\b(?:allow|approve|proceed|confirm|execute|run this command)\b.*\?|\bdo you want to continue\b|\bapply (?:these|the) changes\b)/i;
+
+      const sId = paneState.sessionId || `${tab.id}-p${paneNum}`;
+
+      if (enterOnlyRegex.test(textBuffer)) {
+        paneState._lastAutoRespond = now;
+        paneState._recentText = '';
+        setTimeout(() => {
+          if (paneState.autoEnter && sId) {
+            this.sendPtyInput(sId, '\r');
+          }
+        }, 120);
+      } else if (confirmYRegex.test(textBuffer)) {
+        paneState._lastAutoRespond = now;
+        paneState._recentText = '';
+        setTimeout(() => {
+          if (paneState.autoEnter && sId) {
+            this.sendPtyInput(sId, 'y\r');
+          }
+        }, 120);
       }
     },
 
@@ -31052,24 +31122,20 @@ Aturan:
     fitAllPanes() {
       const tab = this.getActiveTab();
       if (!tab) return;
-      setTimeout(() => {
-        if (tab.pane1 && tab.pane1.fitAddon) {
+      const doFit = (pane) => {
+        if (pane && pane.fitAddon && pane.term) {
           try {
-            tab.pane1.fitAddon.fit();
-            if (tab.pane1.term) {
-              this.sendPtyResize(tab.pane1.sessionId, tab.pane1.term.cols, tab.pane1.term.rows);
+            pane.fitAddon.fit();
+            if (pane.sessionId) {
+              this.sendPtyResize(pane.sessionId, pane.term.cols, pane.term.rows);
             }
           } catch (_) {}
         }
-        if (tab.isSplit && tab.pane2 && tab.pane2.fitAddon) {
-          try {
-            tab.pane2.fitAddon.fit();
-            if (tab.pane2.term) {
-              this.sendPtyResize(tab.pane2.sessionId, tab.pane2.term.cols, tab.pane2.term.rows);
-            }
-          } catch (_) {}
-        }
-      }, 50);
+      };
+      doFit(tab.pane1);
+      if (tab.isSplit) {
+        doFit(tab.pane2);
+      }
     },
 
     addTab() {
@@ -31086,6 +31152,7 @@ Aturan:
         pane1: {
           shell: 'powershell',
           cwd: this.defaultCwd,
+          autoEnter: false,
           history: [],
           historyIdx: -1,
           outputHtml: ''
@@ -31093,6 +31160,7 @@ Aturan:
         pane2: {
           shell: 'powershell',
           cwd: this.defaultCwd,
+          autoEnter: false,
           history: [],
           historyIdx: -1,
           outputHtml: ''
@@ -31140,6 +31208,10 @@ Aturan:
 
       [closingTab.pane1, closingTab.pane2].forEach(p => {
         if (!p) return;
+        if (p._resizeObserver) {
+          try { p._resizeObserver.disconnect(); } catch (_) {}
+          p._resizeObserver = null;
+        }
         if (p.eventSource) {
           try { p.eventSource.close(); } catch (_) {}
           p.eventSource = null;
@@ -31362,6 +31434,7 @@ Aturan:
       if (p1) p1.classList.toggle('active', paneNum === 1);
       if (p2) p2.classList.toggle('active', paneNum === 2);
       this.updateShellSelectorUI();
+      this.updateAutoEnterUI();
       this.focusActiveInput();
     },
 
@@ -31543,7 +31616,7 @@ Aturan:
             command: trimmed,
             cwd: pane.cwd,
             shell: pane.shell,
-            autoEnter: tab ? !!tab.autoEnter : false
+            autoEnter: pane ? !!pane.autoEnter : (tab ? !!tab.autoEnter : false)
           })
         });
 
@@ -31660,6 +31733,24 @@ Aturan:
       document.getElementById('btnTermFullscreen')?.addEventListener('click', () => this.toggleFullscreen());
       document.getElementById('btnClosePane2')?.addEventListener('click', () => this.toggleSplit());
       document.getElementById('btnTermAddTab')?.addEventListener('click', () => this.addTab());
+
+      // Per-pane header action buttons
+      document.getElementById('btnPaneAutoEnter1')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleAutoEnter(1);
+      });
+      document.getElementById('btnPaneEnter1')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.sendEnterToPane(1);
+      });
+      document.getElementById('btnPaneAutoEnter2')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleAutoEnter(2);
+      });
+      document.getElementById('btnPaneEnter2')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.sendEnterToPane(2);
+      });
 
       const tabList = document.getElementById('termTabList');
       if (tabList) {

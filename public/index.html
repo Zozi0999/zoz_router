@@ -41,9 +41,9 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="xterm.css?v=20261017_v328">
-  <link rel="preload" as="style" href="style.min.css?v=20261017_v328">
-  <link rel="stylesheet" href="style.min.css?v=20261017_v328">
+  <link rel="stylesheet" href="xterm.css?v=20261017_v329">
+  <link rel="preload" as="style" href="style.min.css?v=20261017_v329">
+  <link rel="stylesheet" href="style.min.css?v=20261017_v329">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -2529,6 +2529,16 @@
             <span class="pane-title-badge">Panel 1</span>
             <span class="pane-shell-tag" id="paneShellBadge1">PowerShell</span>
             <span class="pane-cwd-indicator" id="paneCwdBadge1">📁 C:\Users\user</span>
+            <div class="pane-header-actions">
+              <button class="pane-mini-btn btn-pane-auto-enter" id="btnPaneAutoEnter1" data-pane="1" type="button" title="Auto Y/Enter otomatis untuk Panel 1">
+                <span style="color: var(--neon-amber);">⚡</span>
+                <span>Auto Y</span>
+              </button>
+              <button class="pane-mini-btn btn-pane-enter" id="btnPaneEnter1" data-pane="1" type="button" title="Kirim Enter (\r) ke Panel 1">
+                <span>🌊</span>
+                <span>Enter</span>
+              </button>
+            </div>
             <div class="pane-status-wrap">
               <span class="pane-status-dot online"></span>
               <span class="pane-status-label">Siap</span>
@@ -2562,6 +2572,16 @@
             <span class="pane-title-badge">Panel 2</span>
             <span class="pane-shell-tag" id="paneShellBadge2">PowerShell</span>
             <span class="pane-cwd-indicator" id="paneCwdBadge2">📁 C:\Users\user</span>
+            <div class="pane-header-actions">
+              <button class="pane-mini-btn btn-pane-auto-enter" id="btnPaneAutoEnter2" data-pane="2" type="button" title="Auto Y/Enter otomatis untuk Panel 2">
+                <span style="color: var(--neon-amber);">⚡</span>
+                <span>Auto Y</span>
+              </button>
+              <button class="pane-mini-btn btn-pane-enter" id="btnPaneEnter2" data-pane="2" type="button" title="Kirim Enter (\r) ke Panel 2">
+                <span>🌊</span>
+                <span>Enter</span>
+              </button>
+            </div>
             <div class="pane-status-wrap">
               <span class="pane-status-dot online"></span>
               <span class="pane-status-label">Siap</span>
@@ -2608,11 +2628,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous" defer></script>
   <!-- Heavy libraries (Mermaid, jsPDF, PDF.js, JSZip) are dynamically loaded on-demand to optimize FCP, TBT & LCP -->
   <!-- Terminal In-Tab Xterm & FitAddon Engine -->
-  <script src="xterm.js?v=20261017_v328" defer></script>
-  <script src="addon-fit.js?v=20261017_v328" defer></script>
+  <script src="xterm.js?v=20261017_v329" defer></script>
+  <script src="addon-fit.js?v=20261017_v329" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261017_v328" defer></script>
+  <script src="text-safety.js?v=20261017_v329" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261017_v328" defer></script>
+  <script src="app.js?v=20261017_v329" defer></script>
 </body>
 </html>

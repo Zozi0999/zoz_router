@@ -5204,6 +5204,10 @@ async function requestHandler(req, res) {
         res.write(`data: ${JSON.stringify({ type: 'error', message: spawnErr.message })}\n\n`);
         return res.end();
       }
+    } else if (session && session.pty && typeof session.pty.resize === 'function') {
+      try {
+        session.pty.resize(cols, rows);
+      } catch (_) {}
     }
 
     session.clients.add(res);
