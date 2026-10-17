@@ -32139,17 +32139,137 @@ Aturan:
         paneState._hasReceivedData = true;
       }
 
+      // Scroll State & Floating 'Scroll to Bottom' Manager
+      const updateScrollUI = () => {
+        const bottomBtn = document.getElementById('btnTermScrollBottom');
+        if (!bottomBtn) return;
+        if (term && term.buffer && term.buffer.active) {
+          const isAtBottom = term.buffer.active.viewportY >= term.buffer.active.baseY;
+          bottomBtn.style.display = isAtBottom ? 'none' : 'inline-flex';
+        }
+      };
+      paneState.updateScrollUI = updateScrollUI;
+
+      if (term.onScroll) {
+        term.onScroll(() => {
+          updateScrollUI();
+        });
+      }
+
       container.addEventListener('click', () => {
         this.ensureActivePtySize(paneState);
         if (paneState && paneState.sessionId && !paneState._hasReceivedData) {
           this.sendPtyInput(paneState.sessionId, '\r');
         }
       });
-      container.addEventListener('touchstart', () => {
+
+      // Smooth Mobile Touch Scrolling for xterm.js:
+      // Enables natural 1-finger drag up/down on the terminal screen to scroll through conversations with inertia momentum.
+      let touchStartY = 0;
+      let touchStartX = 0;
+      let touchLastY = 0;
+      let touchLastTime = 0;
+      let touchVelocity = 0;
+      let isTouchScrolling = false;
+      let accumulatedDeltaY = 0;
+
+      container.addEventListener('touchstart', (e) => {
         this.ensureActivePtySize(paneState);
         if (paneState && paneState.sessionId && !paneState._hasReceivedData) {
           this.sendPtyInput(paneState.sessionId, '\r');
         }
+        if (paneState._touchInertiaRaf) {
+          cancelAnimationFrame(paneState._touchInertiaRaf);
+          paneState._touchInertiaRaf = null;
+        }
+        if (e.touches.length === 1) {
+          touchStartY = e.touches[0].clientY;
+          touchStartX = e.touches[0].clientX;
+          touchLastY = touchStartY;
+          touchLastTime = performance.now();
+          touchVelocity = 0;
+          isTouchScrolling = false;
+          accumulatedDeltaY = 0;
+        }
+      }, { passive: true });
+
+      container.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 1 && term) {
+          const touch = e.touches[0];
+          const deltaY = touch.clientY - touchLastY;
+          const deltaX = touch.clientX - touchStartX;
+          const totalDistY = Math.abs(touch.clientY - touchStartY);
+          const totalDistX = Math.abs(touch.clientX - touchStartX);
+
+          if (!isTouchScrolling) {
+            if (totalDistY > 6 && totalDistY > (totalDistX * 1.1)) {
+              isTouchScrolling = true;
+            }
+          }
+
+          if (isTouchScrolling) {
+            if (e.cancelable) e.preventDefault();
+
+            const now = performance.now();
+            const dt = now - touchLastTime;
+            if (dt > 0) {
+              touchVelocity = deltaY / dt;
+            }
+            touchLastTime = now;
+            touchLastY = touch.clientY;
+
+            accumulatedDeltaY += deltaY;
+            const cellHeight = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
+            const lines = Math.trunc(accumulatedDeltaY / cellHeight);
+            if (lines !== 0) {
+              // Finger moving down (deltaY > 0) -> scroll UP into earlier conversation (negative lines)
+              // Finger moving up (deltaY < 0) -> scroll DOWN towards live prompt (positive lines)
+              term.scrollLines(-lines);
+              accumulatedDeltaY -= (lines * cellHeight);
+              updateScrollUI();
+            }
+          }
+        }
+      }, { passive: false });
+
+      container.addEventListener('touchend', () => {
+        if (isTouchScrolling && Math.abs(touchVelocity) > 0.2 && term) {
+          let currentVelocity = touchVelocity;
+          let lastAnimTime = performance.now();
+          let animAccum = 0;
+          const cellH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
+
+          const momentumStep = (t) => {
+            const dt = Math.min(32, t - lastAnimTime);
+            lastAnimTime = t;
+            currentVelocity *= Math.pow(0.92, dt / 16);
+            if (Math.abs(currentVelocity) < 0.04) {
+              paneState._touchInertiaRaf = null;
+              updateScrollUI();
+              return;
+            }
+            animAccum += (currentVelocity * dt);
+            const lines = Math.trunc(animAccum / cellH);
+            if (lines !== 0) {
+              term.scrollLines(-lines);
+              animAccum -= (lines * cellH);
+              updateScrollUI();
+            }
+            paneState._touchInertiaRaf = requestAnimationFrame(momentumStep);
+          };
+
+          paneState._touchInertiaRaf = requestAnimationFrame(momentumStep);
+        } else {
+          updateScrollUI();
+        }
+      }, { passive: true });
+
+      container.addEventListener('touchcancel', () => {
+        if (paneState._touchInertiaRaf) {
+          cancelAnimationFrame(paneState._touchInertiaRaf);
+          paneState._touchInertiaRaf = null;
+        }
+        updateScrollUI();
       }, { passive: true });
 
       term.onData((data) => {
@@ -32410,7 +32530,16 @@ Aturan:
           if (msg.type === 'init') {
             try { currentTerm.reset(); } catch (_) {}
           }
+          const wasAtBottom = (currentTerm.buffer && currentTerm.buffer.active)
+            ? (currentTerm.buffer.active.viewportY >= currentTerm.buffer.active.baseY)
+            : true;
           currentTerm.write(msg.data);
+          if (wasAtBottom) {
+            currentTerm.scrollToBottom();
+          }
+          if (paneState.updateScrollUI) {
+            paneState.updateScrollUI();
+          }
           this.handleAutoRespond(tab, paneState, paneNum, msg.data);
         } else if (typeof msg.data === 'string') {
           paneState._pendingBuffer = (paneState._pendingBuffer || '') + msg.data;
@@ -33308,6 +33437,18 @@ Aturan:
           let ptySeq = '';
           if (keyType === 'slash') ptySeq = '/';
           else if (keyType === 'Backspace') ptySeq = '\x7f';
+          else if (keyType === 'PgUp') {
+            if (paneState?.term) {
+              paneState.term.scrollPages(-1);
+              if (paneState.updateScrollUI) paneState.updateScrollUI();
+            }
+          }
+          else if (keyType === 'PgDn') {
+            if (paneState?.term) {
+              paneState.term.scrollPages(1);
+              if (paneState.updateScrollUI) paneState.updateScrollUI();
+            }
+          }
           else if (keyType === 'Escape') ptySeq = '\x1b';
           else if (keyType === 'Tab') ptySeq = '\t';
           else if (keyType === 'ctrl_c') {
@@ -33420,6 +33561,19 @@ Aturan:
 
       // Mobile Touch Keybar
       this.attachMobileTouchKeybar();
+
+      // Floating Quick Scroll-to-Bottom Button Handler
+      document.getElementById('btnTermScrollBottom')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const tab = this.getActiveTab();
+        const paneNum = this.activePane || 1;
+        const paneState = this.getPaneState(paneNum);
+        if (paneState && paneState.term) {
+          paneState.term.scrollToBottom();
+          if (paneState.updateScrollUI) paneState.updateScrollUI();
+        }
+      });
 
       // Per-pane header action buttons
       document.getElementById('btnPaneAutoEnter1')?.addEventListener('click', (e) => {
@@ -33713,6 +33867,20 @@ Aturan:
           else if (e.key === 'ArrowDown') seq = '\x1b[B';
           else if (e.key === 'ArrowRight') seq = '\x1b[C';
           else if (e.key === 'ArrowLeft') seq = '\x1b[D';
+          else if (e.key === 'PageUp') {
+            e.preventDefault();
+            e.stopPropagation();
+            paneState.term.scrollPages(-1);
+            if (paneState.updateScrollUI) paneState.updateScrollUI();
+            return;
+          }
+          else if (e.key === 'PageDown') {
+            e.preventDefault();
+            e.stopPropagation();
+            paneState.term.scrollPages(1);
+            if (paneState.updateScrollUI) paneState.updateScrollUI();
+            return;
+          }
 
           if (seq) {
             e.preventDefault();
