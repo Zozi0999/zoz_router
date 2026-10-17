@@ -7,6 +7,8 @@ echo    ⚡ ZOZ ROUTER - NEURAL AI MULTI-ENGINE GATEWAY ⚡
 echo             Ollama (Local) + OpenRouter (Cloud)
 echo ================================================================
 echo.
+set ZOX_ALLOW_CROSS_ORIGIN=1
+
 echo [1/3] Memeriksa dan menjalankan service Ollama di latar belakang...
 powershell -Command "if (-not (Get-Process -Name 'ollama' -ErrorAction SilentlyContinue)) { Start-Process 'ollama' -ArgumentList 'serve' -WindowStyle Hidden }"
 

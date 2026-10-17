@@ -30715,16 +30715,30 @@ Aturan:
         try {
           const res = await fetch(`${cand.replace(/\/+$/, '')}/api/ping`, {
             method: 'GET',
-            signal: AbortSignal.timeout(900)
+            signal: AbortSignal.timeout(1200)
           });
           if (res.ok) {
             const data = await res.json();
             if (data && (data.platform === 'win32' || data.platform || data.ok)) {
               const prevUrl = this.bridgeUrl;
               this.bridgeUrl = cand;
-              this.isWindowsSynced = (data.platform === 'win32');
+              this.isWindowsSynced = (data.platform === 'win32' || (!data.platform && Boolean(cand)));
               this.bridgeProbed = true;
               localStorage.setItem('zoz_term_bridge_url', cand);
+              if (data.cwd) {
+                this.defaultCwd = data.cwd;
+                this.tabs.forEach(t => {
+                  if (t.pane1 && (!t.pane1.cwd || t.pane1.cwd.startsWith('/var/task') || t.pane1.cwd === '/')) {
+                    t.pane1.cwd = data.cwd;
+                  }
+                  if (t.pane2 && (!t.pane2.cwd || t.pane2.cwd.startsWith('/var/task') || t.pane2.cwd === '/')) {
+                    t.pane2.cwd = data.cwd;
+                  }
+                  if (!t.cwd || t.cwd.startsWith('/var/task') || t.cwd === '/') {
+                    t.cwd = data.cwd;
+                  }
+                });
+              }
               if (forceToast || prevUrl !== cand) {
                 showToast(`⚡ Terminal Terhubung ke Windows Sync (${cand})`, 'success');
               }
@@ -30761,6 +30775,10 @@ Aturan:
             tab.pane2.isFallbackMode = false;
             this.connectStream(tab, tab.pane2, 2);
           }
+        }
+      } else if (manualClick) {
+        if (confirm('Bridge Windows Lokal di port 4040 belum terdeteksi.\n\nPastikan "start.bat" sudah dijalankan di PC Windows Anda.\nIngin membuka Web UI Lokal langsung (http://localhost:4040)?')) {
+          window.open('http://localhost:4040', '_blank');
         }
       }
     },
@@ -31210,6 +31228,17 @@ Aturan:
           if (term && !paneState._promptRendered) {
             paneState._promptRendered = true;
             term.write(`\r\n\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
+          }
+          return;
+        }
+        if (this.isWindowsSynced) {
+          paneState.isFallbackMode = true;
+          if (statusLabel) statusLabel.textContent = 'Aktif (Win Exec ⚡)';
+          if (statusDot) statusDot.className = 'pane-status-dot online';
+          const conf = this.shells[paneState.shell] || this.shells.powershell;
+          if (term && !paneState._promptRendered) {
+            paneState._promptRendered = true;
+            term.write(`\r\n\x1b[32m⚡ [WINDOWS BRIDGE EXEC MODE AKTIF]\x1b[0m\r\n\x1b[90m(Perintah dieksekusi langsung pada Windows lokal via ${this.bridgeUrl})\x1b[0m\r\n\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
           }
           return;
         }

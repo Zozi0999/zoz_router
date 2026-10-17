@@ -4371,23 +4371,33 @@ async function requestHandler(req, res) {
   // Browser SELALU mengirim Origin/Sec-Fetch-Site lintas-asal → diblokir (403);
   // curl/klien lokal (tanpa Origin) dan front-end same-origin tetap diizinkan.
   // Front-end di domain terpisah: setel ZOX_ALLOW_CROSS_ORIGIN=1 untuk mengizinkan.
-  if (pathname.startsWith('/api') && process.env.ZOX_ALLOW_CROSS_ORIGIN !== '1') {
-    let crossSite = req.headers['sec-fetch-site'] === 'cross-site';
-    if (!crossSite && req.headers.origin) {
+  // ===== GERBANG LINTAS-ASAL UNTUK /api (SEBELUM registrasi identitas) =====
+  // Sebagian endpoint memakai key milik SERVER (env OPENROUTER_API_KEY/SERPER_API_KEY
+  // /OLLAMA_API_KEY) sebagai fallback. Tanpa gerbang ini, halaman web jahat mana pun
+  // bisa memanggil API dari browser korban (ACAO:*) dan membakar kredit API operator.
+  // Pengecualian mutlak: /api/ping dan /api/health adalah status probe harmless.
+  // Front-end resmi (.vercel.app, localhost, loopback) atau ZOX_ALLOW_CROSS_ORIGIN=1 selalu diizinkan.
+  if (pathname.startsWith('/api') && pathname !== '/api/ping' && pathname !== '/api/health' && process.env.ZOX_ALLOW_CROSS_ORIGIN !== '1') {
+    let crossSite = false;
+    if (req.headers.origin) {
       try {
         const originUrl = new URL(req.headers.origin);
-        const originHost = originUrl.host;
-        const forwardHost = req.headers['x-forwarded-host'] || '';
-        const reqHost = req.headers.host || '';
-        const isSameOrigin = (originHost === reqHost) ||
-                             (forwardHost && originHost === forwardHost) ||
-                             originHost.endsWith('.vercel.app') ||
-                             originHost.endsWith('localhost') ||
-                             originHost.startsWith('127.0.0.1');
-        crossSite = !isSameOrigin;
+        const originHost = originUrl.host.toLowerCase();
+        const forwardHost = (req.headers['x-forwarded-host'] || '').toLowerCase();
+        const reqHost = (req.headers.host || '').toLowerCase();
+        const isTrusted = (originHost === reqHost) ||
+                          (forwardHost && originHost === forwardHost) ||
+                          originHost === 'zoz-router.vercel.app' ||
+                          originHost.endsWith('.vercel.app') ||
+                          originHost.endsWith('localhost') ||
+                          originHost.startsWith('127.0.0.1') ||
+                          originHost.startsWith('[::1]');
+        crossSite = !isTrusted;
       } catch (_) {
         crossSite = true;
       }
+    } else if (req.headers['sec-fetch-site'] === 'cross-site') {
+      crossSite = true;
     }
     if (crossSite) {
       return sendJSON(res, 403, { error: 'Akses API lintas-asal ditolak. Bila front-end Anda sengaja dihosting di domain berbeda, setel ZOX_ALLOW_CROSS_ORIGIN=1 di server.' });
@@ -4462,6 +4472,9 @@ async function requestHandler(req, res) {
       status: 'healthy',
       time: new Date().toISOString(),
       node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      cwd: process.cwd(),
       mode: 'standalone-engine',
       uptime: process.uptime(),
       memoryRssMb: Math.round(process.memoryUsage().rss / 1024 / 1024)
@@ -5144,7 +5157,8 @@ async function requestHandler(req, res) {
       'Cache-Control': 'no-cache, no-transform',
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no',
-      'Access-Control-Allow-Origin': '*'
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Private-Network': 'true'
     });
 
     if (!nodePty) {
