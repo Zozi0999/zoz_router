@@ -34088,13 +34088,15 @@ Aturan:
     }
   };
 
+  const MultiPaneTerminal = TerminalManager;
+
   // =========================================================================
   // CODE ENDORFIN: TERMINAL SELF-HEALING & NEURAL DIAGNOSTIC ENGINE
   // =========================================================================
   const TerminalEndorphin = {
-    diagnose(paneNum = (MultiPaneTerminal.activePane || 1)) {
-      const tab = MultiPaneTerminal.getActiveTab();
-      const pane = MultiPaneTerminal.getPaneState(paneNum);
+    diagnose(paneNum = (TerminalManager.activePane || 1)) {
+      const tab = TerminalManager.getActiveTab();
+      const pane = TerminalManager.getPaneState(paneNum);
       const term = pane?.term;
       const issues = [];
       const fixes = [];
@@ -34106,7 +34108,7 @@ Aturan:
         rows: term?.rows || 0,
         ptyCols: pane?.ptyCols || term?.cols || 0,
         ptyRows: pane?.ptyRows || term?.rows || 0,
-        isMobile: MultiPaneTerminal.isMobileDevice(),
+        isMobile: TerminalManager.isMobileDevice(),
         userScrolledUp: Boolean(pane?._userScrolledUp),
         isTouchActive: Boolean(pane?._isTouchActive),
         hasTouchInertia: Boolean(pane?._touchInertiaRaf),
@@ -34170,9 +34172,9 @@ Aturan:
       return { score, status, metrics, issues, fixes };
     },
 
-    heal(paneNum = (MultiPaneTerminal.activePane || 1), options = {}) {
-      const tab = MultiPaneTerminal.getActiveTab();
-      const pane = MultiPaneTerminal.getPaneState(paneNum);
+    heal(paneNum = (TerminalManager.activePane || 1), options = {}) {
+      const tab = TerminalManager.getActiveTab();
+      const pane = TerminalManager.getPaneState(paneNum);
       const term = pane?.term;
       const paneName = `Panel ${paneNum}`;
 
@@ -34182,7 +34184,7 @@ Aturan:
       }
 
       const diag = this.diagnose(paneNum);
-      const isMobile = MultiPaneTerminal.isMobileDevice();
+      const isMobile = TerminalManager.isMobileDevice();
       const minSafeCols = isMobile ? 48 : 80;
       const safeCols = Math.max(minSafeCols, term.cols || minSafeCols);
       const safeRows = Math.max(20, term.rows || 28);
@@ -34193,7 +34195,7 @@ Aturan:
           pane.fitAddon.fit();
         }
         if (pane.sessionId) {
-          MultiPaneTerminal.sendPtyResize(pane.sessionId, safeCols, safeRows);
+          TerminalManager.sendPtyResize(pane.sessionId, safeCols, safeRows);
         }
       } catch (_) {}
 
@@ -34214,7 +34216,7 @@ Aturan:
         const col = Math.max(1, Math.floor(safeCols / 2));
         const row = Math.max(1, Math.floor(safeRows / 2));
         // Kirim wheel-down halus untuk mengunci bottom prompt
-        MultiPaneTerminal.sendPtyInput(pane.sessionId, `\x1b[<65;${col};${row}M`.repeat(3));
+        TerminalManager.sendPtyInput(pane.sessionId, `\x1b[<65;${col};${row}M`.repeat(3));
       }
 
       // D. Bersihkan IME Textarea Virtual Keyboard
@@ -34233,7 +34235,7 @@ Aturan:
 
       // E. Redraw prompt dengan Ctrl+L bila bukan TUI interaktif
       if (pane.sessionId && !diag.metrics.isMouseActive && !options.noRedraw) {
-        MultiPaneTerminal.sendPtyInput(pane.sessionId, '\x0c');
+        TerminalManager.sendPtyInput(pane.sessionId, '\x0c');
       }
 
       // F. Sinyal Endorfin ke EndocrineMonitor
@@ -34264,7 +34266,7 @@ Aturan:
     },
 
     healAll(options = {}) {
-      const tab = MultiPaneTerminal.getActiveTab();
+      const tab = TerminalManager.getActiveTab();
       if (!tab) return;
       this.heal(1, options);
       if (tab.isSplit) {
@@ -34273,11 +34275,10 @@ Aturan:
     }
   };
 
-  window.TerminalEndorphin = TerminalEndorphin;
-  window.MultiPaneTerminal = MultiPaneTerminal;
-
-  // Expose TerminalManager globally
+  // Expose TerminalManager & TerminalEndorphin globally
   window.TerminalManager = TerminalManager;
+  window.MultiPaneTerminal = TerminalManager;
+  window.TerminalEndorphin = TerminalEndorphin;
 
   // ==================== BOOTSTRAP INITIALIZATION ====================
   function init() {
