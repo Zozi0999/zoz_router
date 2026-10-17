@@ -30710,15 +30710,20 @@ Aturan:
         closeModal('terminalModal');
       } else {
         openModal('terminalModal');
+        this.initScreenWelcome(1);
+        this.updatePaneHeaders();
         this.focusActiveInput();
       }
     },
 
     focusActiveInput() {
       setTimeout(() => {
-        const input = document.getElementById(`termCliInput${this.activePane}`);
-        if (input) input.focus();
-      }, 50);
+        const paneNum = this.activePane || 1;
+        const input = document.getElementById(`termCliInput${paneNum}`);
+        if (input) {
+          input.focus();
+        }
+      }, 60);
     },
 
     getActiveTab() {
