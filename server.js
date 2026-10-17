@@ -5145,10 +5145,18 @@ async function requestHandler(req, res) {
     });
 
     if (!nodePty) {
-      res.write(`data: ${JSON.stringify({ type: 'fallback', message: 'node-pty tidak tersedia di lingkungan ini. Terminal beroperasi dalam mode command-exec.' })}\n\n`);
+      if (typeof res.flushHeaders === 'function') res.flushHeaders();
+      res.write(`data: ${JSON.stringify({ type: 'connected', session: sessionId, shell: shellType, cwd: targetCwd })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'fallback', message: 'Mode command-exec aktif di lingkungan cloud sandbox.' })}\n\n`);
+      res.write(`data: ${JSON.stringify({
+        type: 'data',
+        data: `\r\n\x1b[36m⚡ [ZOZ NEURAL TERMINAL // CLOUD RUNTIME]\x1b[0m\r\n` +
+              `\x1b[90mServerless Cloud Sandbox aktif. Mode Command-Exec siap menerima perintah.\x1b[0m\r\n` +
+              `\x1b[33mKetik perintah shell secara langsung di terminal.\x1b[0m\r\n\r\n`
+      })}\n\n`);
       const hb = setInterval(() => {
         if (!res.writableEnded) res.write(': ping\n\n');
-      }, 25000);
+      }, 15000);
       req.on('close', () => clearInterval(hb));
       return;
     }
@@ -5437,20 +5445,23 @@ async function requestHandler(req, res) {
 
       // 4. Eksekusi Subprocess Shell Asli dengan Sentinel Pelacak CWD
       const sentinel = '---ZOZ_CWD_MARKER---';
-      let executable = 'powershell.exe';
-      let args = ['-ExecutionPolicy', 'Bypass', '-Command', `${cmd}\nWrite-Output '${sentinel}'\n(Get-Location).Path`];
+      const isWin = process.platform === 'win32';
+      let executable = isWin ? 'powershell.exe' : 'sh';
+      let args = isWin 
+        ? ['-ExecutionPolicy', 'Bypass', '-Command', `${cmd}\nWrite-Output '${sentinel}'\n(Get-Location).Path`]
+        : ['-c', `${cmd} ; echo "${sentinel}" ; pwd`];
 
       if (shellType === 'cmd' || shellType === 'cmd.exe') {
-        executable = 'cmd.exe';
-        args = ['/c', `${cmd} & echo ${sentinel} & cd`];
+        executable = isWin ? 'cmd.exe' : 'sh';
+        args = isWin ? ['/c', `${cmd} & echo ${sentinel} & cd`] : ['-c', `${cmd} ; echo "${sentinel}" ; pwd`];
       } else if (shellType === 'wsl' || shellType === 'bash' || shellType === 'ubuntu-wsl') {
-        executable = 'wsl.exe';
-        args = ['-e', 'bash', '-c', `${cmd} ; echo "${sentinel}" ; pwd`];
+        executable = isWin ? 'wsl.exe' : (fs.existsSync('/bin/bash') ? '/bin/bash' : 'sh');
+        args = isWin ? ['-e', 'bash', '-c', `${cmd} ; echo "${sentinel}" ; pwd`] : ['-c', `${cmd} ; echo "${sentinel}" ; pwd`];
       } else if (shellType === 'node') {
         executable = process.execPath;
         args = ['-e', cmd];
       } else if (shellType === 'python') {
-        executable = process.platform === 'win32' ? 'python' : 'python3';
+        executable = isWin ? 'python' : 'python3';
         args = ['-c', cmd];
       }
 

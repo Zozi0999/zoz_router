@@ -102,6 +102,22 @@ module.exports = async function handler(req, res) {
     return res.end();
   }
 
+  // 0. Pulihkan Path Asli jika di-rewrite oleh Vercel
+  let origPath = '';
+  if (req.headers && req.headers['x-matched-path'] && req.headers['x-matched-path'].startsWith('/api')) {
+    origPath = req.headers['x-matched-path'];
+  } else if (req.query && (req.query.path || req.query.slug)) {
+    const rawSlug = req.query.path || req.query.slug;
+    const parts = Array.isArray(rawSlug) ? rawSlug : String(rawSlug).split('/');
+    origPath = '/api/' + parts.filter(Boolean).join('/');
+  }
+
+  if (origPath) {
+    const qIdx = String(req.url || '').indexOf('?');
+    const qs = qIdx >= 0 ? String(req.url).slice(qIdx) : '';
+    req.url = origPath + qs;
+  }
+
   const rawUrl = String(req.url || '');
   const pathname = rawUrl.split('?')[0];
 

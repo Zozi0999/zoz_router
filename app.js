@@ -30816,7 +30816,19 @@ Aturan:
         return;
       }
 
-      // In desktop xterm mode, send raw carriage return (\r) directly to the pane's PTY
+      // If buffer text was typed in xterm during Cloud / fallback mode, execute it
+      if (paneState && paneState._inputLine && paneState._inputLine.trim().length > 0) {
+        const cmd = paneState._inputLine;
+        paneState._inputLine = '';
+        if (paneState.term) {
+          paneState.term.write('\r\n');
+        }
+        paneState._fromTermInput = true;
+        this.executeInput(paneNum, cmd);
+        return;
+      }
+
+      // In desktop xterm mode with active live PTY, send raw carriage return (\r) directly to the pane's PTY
       if (paneState && paneState.term && !paneState.isFallbackMode) {
         const sessionId = paneState.sessionId || `${tab.id}-p${paneNum}`;
         this.sendPtyInput(sessionId, '\r');
@@ -30987,7 +30999,33 @@ Aturan:
       paneState.fitAddon = fitAddon;
 
       term.onData((data) => {
-        this.sendPtyInput(sessionId, data);
+        // Mode Live PTY (Local Server)
+        if (!paneState.isFallbackMode) {
+          this.sendPtyInput(sessionId, data);
+          return;
+        }
+
+        // Mode Cloud Sandbox / Fallback Exec (Vercel / Cloud)
+        if (data === '\r' || data === '\n') {
+          term.write('\r\n');
+          const cmdToRun = paneState._inputLine || '';
+          paneState._inputLine = '';
+          paneState._fromTermInput = true;
+          this.executeInput(paneNum, cmdToRun);
+        } else if (data === '\x7f' || data === '\b') {
+          if (paneState._inputLine && paneState._inputLine.length > 0) {
+            paneState._inputLine = paneState._inputLine.slice(0, -1);
+            term.write('\b \b');
+          }
+        } else if (data === '\x03') {
+          term.write('^C\r\n');
+          paneState._inputLine = '';
+          const conf = this.shells[paneState.shell] || this.shells.powershell;
+          term.write(`\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
+        } else if (data.charCodeAt(0) >= 32) {
+          paneState._inputLine = (paneState._inputLine || '') + data;
+          term.write(data);
+        }
       });
 
       term.onResize(({ cols, rows }) => {
@@ -31026,7 +31064,8 @@ Aturan:
               this.handleAutoRespond(tab, paneState, paneNum, msg.data);
             }
           } else if (msg.type === 'connected') {
-            if (statusLabel) statusLabel.textContent = 'Aktif (PTY)';
+            const isCloud = Boolean(IS_CLOUD_HOSTED || paneState.isFallbackMode);
+            if (statusLabel) statusLabel.textContent = isCloud ? 'Aktif (Cloud)' : 'Aktif (PTY)';
             if (statusDot) statusDot.className = 'pane-status-dot online';
             if (msg.cwd && msg.cwd !== paneState.cwd) {
               paneState.cwd = msg.cwd;
@@ -31041,13 +31080,30 @@ Aturan:
             if (statusDot) statusDot.className = 'pane-status-dot offline';
           } else if (msg.type === 'fallback') {
             paneState.isFallbackMode = true;
-            if (statusLabel) statusLabel.textContent = 'Mode Exec';
+            if (statusLabel) statusLabel.textContent = 'Aktif (Cloud)';
             if (statusDot) statusDot.className = 'pane-status-dot online';
+            const conf = this.shells[paneState.shell] || this.shells.powershell;
+            if (term && (!paneState._promptRendered || term.rows > 0)) {
+              paneState._promptRendered = true;
+              term.write(`\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
+            }
           }
         } catch (_) {}
       };
 
       es.onerror = () => {
+        // Pada lingkungan cloud / Vercel atau mode fallback, terminal tetap AKTIF via Mode Command-Exec
+        if (IS_CLOUD_HOSTED || paneState.isFallbackMode) {
+          paneState.isFallbackMode = true;
+          if (statusLabel) statusLabel.textContent = 'Aktif (Cloud)';
+          if (statusDot) statusDot.className = 'pane-status-dot online';
+          const conf = this.shells[paneState.shell] || this.shells.powershell;
+          if (term && !paneState._promptRendered) {
+            paneState._promptRendered = true;
+            term.write(`\r\n\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
+          }
+          return;
+        }
         if (statusLabel) statusLabel.textContent = 'Terputus';
         if (statusDot) statusDot.className = 'pane-status-dot offline';
       };
@@ -31064,14 +31120,14 @@ Aturan:
       if (!clean.trim()) return;
 
       // Sliding window buffer across fragmented chunks
-      paneState._recentText = ((paneState._recentText || '') + ' ' + clean).slice(-1200);
+      paneState._recentText = ((paneState._recentText || '') + ' ' + clean).slice(-1500);
       const textBuffer = paneState._recentText;
 
       const now = Date.now();
       if (paneState._lastAutoRespond && (now - paneState._lastAutoRespond) < 500) return;
 
-      // Type B: Simple Enter to proceed (e.g. AI CLI pagination, "Press Enter to continue", "Hit enter")
-      const enterOnlyRegex = /(?:press (?:any key|enter) to continue|hit enter|press \[?enter\]? to|\bpress enter\b)/i;
+      // Type B: Simple Enter to proceed (e.g. AI CLI pagination, "Press Enter to continue", "Hit enter", "Accept this file edit?")
+      const enterOnlyRegex = /(?:press (?:any key|enter) to continue|hit enter|press \[?enter\]? to|\bpress enter\b|\baccept (?:this|the|all|these)?\s*(?:file|code|change|edit|diff|plan)?\b.*\?|>\s*1\.\s*yes\b|\b1\.\s*yes,\s*accept\b|\baccept this (?:file )?edit\b|\bshift\+tab to auto-approve\b|\bdo you want to accept\b|\baccept and continue\b)/i;
 
       // Type A: Interactive confirmations (e.g. AI CLI tool approval, [Y/n], [y/n], Approve?, Proceed?, Allow?)
       const confirmYRegex = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\b(?:allow|approve|proceed|confirm|execute|run this command)\b.*\?|\bdo you want to continue\b|\bapply (?:these|the) changes\b)/i;
@@ -31082,8 +31138,8 @@ Aturan:
         paneState._lastAutoRespond = now;
         paneState._recentText = '';
         setTimeout(() => {
-          if (paneState.autoEnter && sId) {
-            this.sendPtyInput(sId, '\r');
+          if (paneState.autoEnter) {
+            this.sendEnterToPane(paneNum);
           }
         }, 120);
       } else if (confirmYRegex.test(textBuffer)) {
@@ -31588,23 +31644,37 @@ Aturan:
 
       // Mode 2: Fallback Command Exec API
       const promptText = conf.prompt.replace('{cwd}', pane.cwd);
-      const promptLine = document.createElement('div');
-      promptLine.className = 'term-line term-prompt-line';
-      promptLine.innerHTML = `<span class="term-prompt">${escapeHtml(promptText)}</span><span class="term-cmd-text">${escapeHtml(cmd)}</span>`;
-      screenEl.appendChild(promptLine);
+      if (screenEl) {
+        const promptLine = document.createElement('div');
+        promptLine.className = 'term-line term-prompt-line';
+        promptLine.innerHTML = `<span class="term-prompt">${escapeHtml(promptText)}</span><span class="term-cmd-text">${escapeHtml(cmd)}</span>`;
+        screenEl.appendChild(promptLine);
+      }
+
+      if (pane.term) {
+        if (!pane._fromTermInput && trimmed) {
+          pane.term.write(`\x1b[36m${promptText}\x1b[0m ${cmd}\r\n`);
+        }
+        pane._fromTermInput = false;
+      }
 
       if (!trimmed) {
-        screenEl.scrollTop = screenEl.scrollHeight;
+        if (pane.term) {
+          pane.term.write(`\x1b[36m${promptText}\x1b[0m `);
+        }
+        if (screenEl) screenEl.scrollTop = screenEl.scrollHeight;
         return;
       }
 
       const spinnerId = `term_spin_${Date.now()}`;
-      const spinnerEl = document.createElement('div');
-      spinnerEl.className = 'term-line term-running';
-      spinnerEl.id = spinnerId;
-      spinnerEl.innerHTML = `<span class="term-spinner-icon">⠋</span> Menjalankan [${conf.name}] <em>${escapeHtml(trimmed)}</em>...`;
-      screenEl.appendChild(spinnerEl);
-      screenEl.scrollTop = screenEl.scrollHeight;
+      if (screenEl) {
+        const spinnerEl = document.createElement('div');
+        spinnerEl.className = 'term-line term-running';
+        spinnerEl.id = spinnerId;
+        spinnerEl.innerHTML = `<span class="term-spinner-icon">⠋</span> Menjalankan [${conf.name}] <em>${escapeHtml(trimmed)}</em>...`;
+        screenEl.appendChild(spinnerEl);
+        screenEl.scrollTop = screenEl.scrollHeight;
+      }
 
       try {
         const response = await fetch('/api/terminal/exec', {
@@ -31633,42 +31703,73 @@ Aturan:
         const stdoutText = data.stdout || (!data.stderr ? data.output : '');
         const stderrText = data.stderr || (data.exitCode !== 0 && !stdoutText ? data.output : '');
 
-        if (stdoutText && stdoutText.trim()) {
-          const outEl = document.createElement('pre');
-          outEl.className = 'term-line term-stdout';
-          outEl.innerHTML = this.formatAnsi(stdoutText);
-          screenEl.appendChild(outEl);
+        if (pane.term) {
+          if (stdoutText && stdoutText.trim()) {
+            pane.term.write(stdoutText.replace(/\r?\n/g, '\r\n') + '\r\n');
+          }
+          if (stderrText && stderrText.trim()) {
+            pane.term.write('\x1b[31m' + stderrText.replace(/\r?\n/g, '\r\n') + '\x1b[0m\r\n');
+          } else if (!stdoutText && data.output && data.output.trim()) {
+            const colorCode = data.exitCode === 0 ? '' : '\x1b[31m';
+            pane.term.write(colorCode + data.output.replace(/\r?\n/g, '\r\n') + '\x1b[0m\r\n');
+          }
+          if (data.exitCode !== 0 && data.exitCode !== undefined) {
+            pane.term.write(`\x1b[33m[Process exited with code ${data.exitCode}]\x1b[0m\r\n`);
+          }
+          const nextConf = this.shells[pane.shell] || this.shells.powershell;
+          pane.term.write(`\x1b[36m${nextConf.prompt.replace('{cwd}', pane.cwd)}\x1b[0m `);
         }
 
-        if (stderrText && stderrText.trim()) {
-          const errEl = document.createElement('pre');
-          errEl.className = 'term-line term-stderr';
-          errEl.innerHTML = this.formatAnsi(stderrText);
-          screenEl.appendChild(errEl);
-        } else if (!stdoutText && data.output && data.output.trim()) {
-          const outEl = document.createElement('pre');
-          outEl.className = data.exitCode === 0 ? 'term-line term-stdout' : 'term-line term-stderr';
-          outEl.innerHTML = this.formatAnsi(data.output);
-          screenEl.appendChild(outEl);
+        if (screenEl) {
+          if (stdoutText && stdoutText.trim()) {
+            const outEl = document.createElement('pre');
+            outEl.className = 'term-line term-stdout';
+            outEl.innerHTML = this.formatAnsi(stdoutText);
+            screenEl.appendChild(outEl);
+          }
+
+          if (stderrText && stderrText.trim()) {
+            const errEl = document.createElement('pre');
+            errEl.className = 'term-line term-stderr';
+            errEl.innerHTML = this.formatAnsi(stderrText);
+            screenEl.appendChild(errEl);
+          } else if (!stdoutText && data.output && data.output.trim()) {
+            const outEl = document.createElement('pre');
+            outEl.className = data.exitCode === 0 ? 'term-line term-stdout' : 'term-line term-stderr';
+            outEl.innerHTML = this.formatAnsi(data.output);
+            screenEl.appendChild(outEl);
+          }
+
+          if (data.exitCode !== 0 && data.exitCode !== undefined) {
+            const codeEl = document.createElement('div');
+            codeEl.className = 'term-line term-exit-code';
+            codeEl.innerHTML = `<span class="exit-badge error">Process exited with code ${data.exitCode}</span>`;
+            screenEl.appendChild(codeEl);
+          }
         }
 
-        if (data.exitCode !== 0 && data.exitCode !== undefined) {
-          const codeEl = document.createElement('div');
-          codeEl.className = 'term-line term-exit-code';
-          codeEl.innerHTML = `<span class="exit-badge error">Process exited with code ${data.exitCode}</span>`;
-          screenEl.appendChild(codeEl);
+        if (pane && pane.autoEnter) {
+          this.handleAutoRespond(tab, pane, paneNum, stdoutText || data.output || '');
         }
       } catch (err) {
         const spin = document.getElementById(spinnerId);
         if (spin) spin.remove();
 
-        const errEl = document.createElement('div');
-        errEl.className = 'term-line term-stderr';
-        errEl.textContent = `[Terminal Engine Error]: ${err.message || err}`;
-        screenEl.appendChild(errEl);
+        if (pane.term) {
+          pane.term.write(`\x1b[31m[Terminal Engine Error]: ${err.message || err}\x1b[0m\r\n`);
+          const nextConf = this.shells[pane.shell] || this.shells.powershell;
+          pane.term.write(`\x1b[36m${nextConf.prompt.replace('{cwd}', pane.cwd)}\x1b[0m `);
+        }
+
+        if (screenEl) {
+          const errEl = document.createElement('div');
+          errEl.className = 'term-line term-stderr';
+          errEl.textContent = `[Terminal Engine Error]: ${err.message || err}`;
+          screenEl.appendChild(errEl);
+        }
       }
 
-      screenEl.scrollTop = screenEl.scrollHeight;
+      if (screenEl) screenEl.scrollTop = screenEl.scrollHeight;
       this.focusActiveInput();
     },
 

@@ -12,6 +12,10 @@
       "maxDuration": 15
     }
   },
+  "rewrites": [
+    { "source": "/api/ping", "destination": "/api/ping" },
+    { "source": "/api/:path*", "destination": "/api/index" }
+  ],
   "headers": [
     {
       "source": "/api/(.*)",
