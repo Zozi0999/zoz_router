@@ -1419,11 +1419,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           this.secreteStress(25, `Unhandled Promise Rejection: ${reason}`);
         });
 
-        // 2. Pasang audit komprehensif awal setelah DOM stabil
-        setTimeout(() => {
+        // 2. Pasang audit komprehensif awal secara non-blocking di waktu idle browser (mencegah lonjakan TBT & main-thread lag saat initial load)
+        const scheduleInitialAudit = (typeof window !== 'undefined' && window.requestIdleCallback)
+          ? (fn) => window.requestIdleCallback(fn, { timeout: 8000 })
+          : (fn) => setTimeout(fn, 4500);
+
+        scheduleInitialAudit(() => {
           this.auditComprehensive(true);
           this.updateUI();
-        }, 1400);
+        });
 
         // 3. Metabolisme berkala: homeostatik setiap 15 detik
         setInterval(() => {
@@ -8542,16 +8546,22 @@ RESONANSI: ${this.currentVibe}
       return;
     }
 
+    // Batasi rendering riwayat awal jika daftar sangat panjang (mencegah inflasi DOM & style recalc)
+    const MAX_INITIAL_HISTORY = q ? 60 : 25;
+    const displaySessions = filtered.length > MAX_INITIAL_HISTORY ? filtered.slice(0, MAX_INITIAL_HISTORY) : filtered;
+
     // Grouping by time categories (DeepSeek style: Pinned, Hari Ini, Kemarin, 7 Hari Terakhir, etc.)
     const groups = {};
     const groupOrder = ['Pinned', 'Hari Ini', 'Kemarin', '7 Hari Terakhir', '30 Hari Terakhir', 'Lebih Lama'];
     groupOrder.forEach(g => { groups[g] = []; });
 
-    filtered.forEach(session => {
+    displaySessions.forEach(session => {
       const g = getSessionTimeGroup(session);
       if (!groups[g]) groups[g] = [];
       groups[g].push(session);
     });
+
+    const frag = document.createDocumentFragment();
 
     groupOrder.forEach(groupName => {
       const groupSessions = groups[groupName];
@@ -8560,7 +8570,7 @@ RESONANSI: ${this.currentVibe}
       const groupHeader = document.createElement('div');
       groupHeader.className = 'history-group-title';
       groupHeader.innerText = groupName;
-      els.chatHistoryList.appendChild(groupHeader);
+      frag.appendChild(groupHeader);
 
       groupSessions.forEach(session => {
         const item = document.createElement('div');
@@ -8610,7 +8620,7 @@ RESONANSI: ${this.currentVibe}
           item.addEventListener('click', () => {
             toggleSessionSelection(session.id);
           });
-          els.chatHistoryList.appendChild(item);
+          frag.appendChild(item);
           return;
         }
 
@@ -8722,9 +8732,19 @@ RESONANSI: ${this.currentVibe}
           AudioEngine.click();
         });
 
-        els.chatHistoryList.appendChild(item);
+        frag.appendChild(item);
       });
     });
+
+    els.chatHistoryList.appendChild(frag);
+
+    if (filtered.length > MAX_INITIAL_HISTORY) {
+      const moreRow = document.createElement('div');
+      moreRow.className = 'history-more-row';
+      moreRow.style.cssText = 'font-size:0.7rem; color:var(--text-dim); text-align:center; padding:10px 4px; opacity:0.8;';
+      moreRow.textContent = `Menampilkan ${displaySessions.length} dari ${filtered.length} percakapan — ketik di pencarian untuk melihat yang lain`;
+      els.chatHistoryList.appendChild(moreRow);
+    }
   }
 
   function renderCurrentSession(forceScroll = true) {
@@ -14349,6 +14369,8 @@ ${blocks}
       });
     }
 
+    const frag = document.createDocumentFragment();
+
     displayList.forEach(m => {
       const item = document.createElement('div');
       const isFav = isModelFavorite(m.id);
@@ -14376,7 +14398,7 @@ ${blocks}
 
       // Kunci identitas baris untuk delegated listener di atas (tanpa listener per-baris)
       if (m.id) item.dataset.modelId = m.id;
-      els.dropdownModelList.appendChild(item);
+      frag.appendChild(item);
     });
 
     if (totalFiltered > 80) {
@@ -14384,8 +14406,10 @@ ${blocks}
       infoRow.className = 'model-option-item';
       infoRow.style.cssText = 'cursor:default; pointer-events:none; justify-content:center; font-size:0.7rem; color:var(--text-dim);';
       infoRow.textContent = `Menampilkan ${displayList.length} dari ${totalFiltered} model — ketik untuk memfilter`;
-      els.dropdownModelList.appendChild(infoRow);
+      frag.appendChild(infoRow);
     }
+
+    els.dropdownModelList.appendChild(frag);
   }
 
   function getCurrentModel() {
@@ -30620,7 +30644,7 @@ Aturan:
     updatePresetBanner();
     updatePresetPillUI();
     updateModelUI();
-    populateModelDropdown();
+    // Lazy populate model dropdown: rendering 80 items is deferred until user opens the dropdown or on idle
     updateCatalogFavBadge();
     els.modeTabs.forEach(tab => {
       tab.classList.toggle('active', tab.dataset.mode === STATE.mode);
@@ -30668,6 +30692,11 @@ Aturan:
       checkOpenRouterStatus().catch(() => {});
       fetchOpenRouterModelsList().catch(() => {});
       fetchOllamaCloudUsage().catch(() => {});
+
+      // C. Pre-populate model dropdown during browser idle if user has not opened it yet
+      if (els.dropdownModelList && els.dropdownModelList.children.length === 0) {
+        populateModelDropdown();
+      }
     });
   }
 
