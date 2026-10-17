@@ -5078,6 +5078,8 @@ async function requestHandler(req, res) {
     ? path.resolve(process.env.ZOZ_WORKSPACE_ROOT)
     : path.resolve(__dirname);
   const SNAPSHOTS_DIR = path.join(WORKSPACE_ROOT, '.zoz-snapshots');
+  const USER_HOME = process.env.USERPROFILE || os.homedir() || WORKSPACE_ROOT;
+  const DEFAULT_TERMINAL_CWD = (!IS_VERCEL_ENV && fs.existsSync(USER_HOME)) ? USER_HOME : WORKSPACE_ROOT;
 
   // =========================================================================
   // NEURAL TERMINAL CLI EXECUTION API
@@ -5095,11 +5097,11 @@ async function requestHandler(req, res) {
       while ((rawCwd.startsWith('"') && rawCwd.endsWith('"')) || (rawCwd.startsWith("'") && rawCwd.endsWith("'"))) {
         rawCwd = rawCwd.slice(1, -1).trim();
       }
-      let targetCwd = rawCwd ? path.resolve(rawCwd) : WORKSPACE_ROOT;
+      let targetCwd = rawCwd ? path.resolve(rawCwd) : DEFAULT_TERMINAL_CWD;
 
-      // Pastikan targetCwd ada atau fallback ke WORKSPACE_ROOT (kecuali Vercel sandbox virtual)
+      // Pastikan targetCwd ada atau fallback ke DEFAULT_TERMINAL_CWD (kecuali Vercel sandbox virtual)
       if (!fs.existsSync(targetCwd) && !IS_VERCEL_ENV) {
-        targetCwd = WORKSPACE_ROOT;
+        targetCwd = DEFAULT_TERMINAL_CWD;
       }
 
       if (!cmd) {

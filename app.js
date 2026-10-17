@@ -30600,7 +30600,7 @@ Aturan:
       node: { name: 'Node.js Sandbox', icon: '🟢', prompt: 'node> ' },
       python: { name: 'Python Sandbox', icon: '🐍', prompt: '>>> ' }
     },
-    defaultCwd: 'C:\\Users\\user\\zoz-router',
+    defaultCwd: 'C:\\Users\\user',
     fontSize: 13,
     autoEnter: false,
     theme: 'aura-es', // 'aura-es' or 'aura-api'
@@ -30613,17 +30613,17 @@ Aturan:
         id: 'tab-1',
         title: 'Terminal 1',
         shell: 'powershell',
-        cwd: 'C:\\Users\\user\\zoz-router',
+        cwd: 'C:\\Users\\user',
         pane1: {
           shell: 'powershell',
-          cwd: 'C:\\Users\\user\\zoz-router',
+          cwd: 'C:\\Users\\user',
           history: [],
           historyIdx: -1,
           outputHtml: ''
         },
         pane2: {
           shell: 'powershell',
-          cwd: 'C:\\Users\\user\\zoz-router',
+          cwd: 'C:\\Users\\user',
           history: [],
           historyIdx: -1,
           outputHtml: ''
@@ -31019,6 +31019,7 @@ Aturan:
       const cmd = rawCommand !== null ? rawCommand : (inputEl ? inputEl.value : '');
       if (inputEl) inputEl.value = '';
 
+      const tab = this.getActiveTab();
       const pane = this.getPaneState(paneNum);
       const conf = this.shells[pane.shell] || this.shells.powershell;
       const promptText = conf.prompt.replace('{cwd}', pane.cwd);
