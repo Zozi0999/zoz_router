@@ -7127,6 +7127,41 @@ div.msg-sources-section button.msg-sources-title span {
   color: var(--text-dim);
 }
 
+.cyber-audio-loop-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(0, 255, 194, 0.25);
+  color: var(--text-dim);
+  font-size: 0.88rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.cyber-audio-loop-btn:hover {
+  background: rgba(0, 255, 194, 0.15);
+  color: #FFF;
+  border-color: rgba(0, 255, 194, 0.5);
+  transform: scale(1.06);
+}
+
+.cyber-audio-loop-btn.active {
+  background: rgba(0, 255, 194, 0.2);
+  border-color: var(--neon-teal);
+  color: var(--neon-teal);
+  box-shadow: 0 0 12px rgba(0, 255, 194, 0.45);
+}
+
+/* Sembunyikan ringkasan / lirik audio token sintetis Lyria yang tidak rapi */
+.cyber-audio-ai-summary {
+  display: none !important;
+}
+
 /* Video Player Card */
 .cyber-video-card {
   max-width: 540px;

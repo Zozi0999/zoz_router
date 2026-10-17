@@ -23974,7 +23974,6 @@ Aturan:
               ${isAiComposed ? `<span class="image-meta-badge" style="color:#00F0FF; border-color:rgba(0,240,255,0.4); background:rgba(0,240,255,0.1);"><i class="fa-solid fa-brain"></i> AI Composed</span>` : ''}
             </div>
           </div>
-          ${aiSummary ? `<div class="cyber-audio-ai-summary" style="font-size:0.75rem; color:var(--text-dim); margin-top:5px; margin-bottom:8px; line-height:1.45; display:flex; align-items:flex-start; gap:6px; border-left:2px solid var(--neon-teal); padding-left:8px; background:rgba(0,255,194,0.03); border-radius:0 6px 6px 0;"><i class="fa-solid fa-wand-magic-sparkles" style="color:var(--neon-teal); margin-top:2px; flex-shrink:0;"></i><span>${aiSummary}</span></div>` : ''}
           <div class="cyber-audio-wave-wrap">
             <canvas class="cyber-audio-wave-canvas" width="480" height="48"></canvas>
           </div>
@@ -23987,6 +23986,7 @@ Aturan:
                 <span class="total-time">0:${dur < 10 ? '0' + dur : dur}</span>
               </div>
             </div>
+            <button type="button" class="cyber-audio-loop-btn" title="Ulangi Musik Otomatis (Loop)"><i class="fa-solid fa-repeat"></i></button>
             <audio preload="metadata" src="${safeUrl}" style="display:none;"></audio>
           </div>
           <div class="image-meta-badges">
@@ -24014,6 +24014,7 @@ Aturan:
 
       const audio = card.querySelector('audio');
       const playBtn = card.querySelector('.cyber-audio-play-btn');
+      const loopBtn = card.querySelector('.cyber-audio-loop-btn');
       const scrubber = card.querySelector('.cyber-audio-scrubber');
       const currTimeEl = card.querySelector('.curr-time');
       const totalTimeEl = card.querySelector('.total-time');
@@ -24116,9 +24117,28 @@ Aturan:
       });
 
       audio.addEventListener('ended', () => {
-        playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
-        drawWaveform(false);
-        if (scrubber) scrubber.value = 0;
+        if (audio.loop) {
+          audio.currentTime = 0;
+          audio.play().catch(() => {});
+        } else {
+          playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
+          drawWaveform(false);
+          if (scrubber) scrubber.value = 0;
+        }
+      });
+
+      loopBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        audio.loop = !audio.loop;
+        if (audio.loop) {
+          loopBtn.classList.add('active');
+          loopBtn.setAttribute('title', 'Putar Berulang Aktif (Loop On)');
+          if (typeof showToast === 'function') showToast('🔁 Pemutaran berulang diaktifkan');
+        } else {
+          loopBtn.classList.remove('active');
+          loopBtn.setAttribute('title', 'Ulangi Musik Otomatis (Loop Off)');
+          if (typeof showToast === 'function') showToast('Pemutaran berulang dinonaktifkan');
+        }
       });
 
       // Resume dari LUAR tombol (media key OS, play() eksternal, kartu lain selesai
@@ -24148,7 +24168,6 @@ Aturan:
         if (!audio.duration) return;
         audio.currentTime = (scrubber.value / 100) * audio.duration;
       });
-
 
       copyPromptBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -24585,6 +24604,9 @@ Aturan:
       const endTime = performance.now();
       const totalDuration = ((endTime - startTime) / 1000).toFixed(2);
 
+      const isTokenSoup = /\[\[[A-G0-9#b\s\-\:]+\]\]/i.test(trackAiSummary) || /\[\s*(?:Verse|Chorus|Instrumental|Solo|Bridge|Drop|Beat|Vocal|Ooh|Aah|[A-G]\d?)\s*\]/i.test(trackAiSummary);
+      const cleanAiSummary = (!isTokenSoup && trackAiSummary) ? trackAiSummary : 'Digubah oleh AI Neural Music Studio';
+
       const trackData = {
         url: finalAudioUrl,
         audioUrl: finalAudioUrl,
@@ -24594,7 +24616,7 @@ Aturan:
         duration: trackDuration,
         prompt: cleanPrompt,
         aiComposed: trackAiComposed,
-        aiSummary: trackAiSummary,
+        aiSummary: cleanAiSummary,
         aiModel: trackAiModel,
         aiProvider: trackAiProvider
       };
@@ -24613,7 +24635,7 @@ Aturan:
       if (session) {
         session.messages.push({
           role: 'assistant',
-          content: `[Musik AI: "${cleanPrompt}"]\n\n- Judul: ${trackTitle}\n- Engine: ${trackAiModel} (${trackAiProvider})\n- Aransemen: ${trackAiSummary || 'Digubah oleh AI Neural Music Studio'}\n- Audio: [Putar / Unduh Audio](${finalAudioUrl})`,
+          content: `[Musik AI: "${cleanPrompt}"]\n\n- Judul: ${trackTitle}\n- Engine: ${trackAiModel} (${trackAiProvider})\n- Aransemen: ${cleanAiSummary}\n- Audio: [Putar / Unduh Audio](${finalAudioUrl})`,
           type: 'music_generation',
           isMusicGen: true,
           audioUrl: finalAudioUrl,
@@ -24624,7 +24646,7 @@ Aturan:
           duration: trackDuration,
           prompt: cleanPrompt,
           aiComposed: trackAiComposed,
-          aiSummary: trackAiSummary,
+          aiSummary: cleanAiSummary,
           model: `${trackAiModel} (${trackAiProvider})`,
           stats: { duration: totalDuration },
           timestamp: new Date().toISOString()
