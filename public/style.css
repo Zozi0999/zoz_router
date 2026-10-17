@@ -13280,7 +13280,7 @@ body.mermaid-has-fullscreen {
 
 .xterm-pane-container .xterm-screen {
   background-color: transparent !important;
-  touch-action: pan-y !important;
+  touch-action: none !important;
 }
 
 .terminal-screen::-webkit-scrollbar {

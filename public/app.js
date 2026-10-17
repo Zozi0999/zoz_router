@@ -32037,7 +32037,7 @@ Aturan:
         lineHeight: 1.2,
         scrollback: 5000,
         allowTransparency: true,
-        convertEol: false
+        convertEol: true
       });
 
       const fitAddon = (typeof window.FitAddon !== 'undefined' && window.FitAddon.FitAddon)
@@ -32050,31 +32050,14 @@ Aturan:
 
       term.open(container);
 
-      // Mobile / IME Instant Keystroke & Slash ('/') / CTRL+Key Fix:
-      // Disable browser IME composition buffering on container (capture phase) so xterm.js v5.3.0
-      // emits '/', 'c' (for CTRL+C), and Backspace in 0ms without waiting for word completion.
+      // Mobile / IME configuration for standard virtual keyboards
       if (term.textarea) {
         term.textarea.setAttribute('autocomplete', 'off');
         term.textarea.setAttribute('autocorrect', 'off');
         term.textarea.setAttribute('autocapitalize', 'none');
         term.textarea.setAttribute('spellcheck', 'false');
         term.textarea.setAttribute('enterkeyhint', 'enter');
-        if (this.isMobileDevice()) {
-          term.textarea.value = ' ';
-        }
       }
-
-      const stopMobileComposition = (ev) => {
-        if (this.isMobileDevice() || this.isCtrlActive || this.isAltActive) {
-          ev.stopImmediatePropagation();
-          if (term._core && term._core._compositionHelper) {
-            term._core._compositionHelper._isComposing = false;
-          }
-        }
-      };
-      container.addEventListener('compositionstart', stopMobileComposition, true);
-      container.addEventListener('compositionupdate', stopMobileComposition, true);
-      container.addEventListener('compositionend', stopMobileComposition, true);
 
       container.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter' || ev.keyCode === 13) {
@@ -32086,21 +32069,10 @@ Aturan:
           term.scrollToBottom();
           if (paneState.updateScrollUI) paneState.updateScrollUI();
         }
-        if (ev.keyCode === 229 && term.textarea) {
-          if (term.textarea.value.length === 0) {
-            term.textarea.value = ' ';
-            try { term.textarea.setSelectionRange(1, 1); } catch (_) {}
-          }
-          if (term._core && term._core._compositionHelper) {
-            term._core._compositionHelper._isComposing = false;
-          }
-        }
       }, true);
 
+      // Mobile virtual keyboard Enter / Paragraph insertion fallback
       container.addEventListener('input', (ev) => {
-        if (!this.isMobileDevice() && !this.isCtrlActive && !this.isAltActive) return;
-        // Fallback for mobile virtual keyboards that fire 'input' (insertParagraph / insertText / deleteContentBackward)
-        // without firing keydown(229) first (where xterm.js _inputEvent drops it due to e.composed === true).
         if (ev.inputType === 'insertParagraph' || ev.inputType === 'insertLineBreak') {
           paneState._userScrolledUp = false;
           if (paneState._touchInertiaRaf) {
@@ -32115,26 +32087,6 @@ Aturan:
                 term._core.coreService.triggerDataEvent('\r', true);
               } else {
                 this.sendPtyInput(paneState.sessionId || sessionId, '\r');
-              }
-            }
-          }, 12);
-          return;
-        }
-        if (ev.inputType === 'insertText' && typeof ev.data === 'string' && ev.data.length > 0) {
-          setTimeout(() => {
-            if (!paneState._lastDataEmitAt || (Date.now() - paneState._lastDataEmitAt) > 35) {
-              if (term._core && term._core.coreService) {
-                term._core.coreService.triggerDataEvent(ev.data, true);
-              }
-            }
-          }, 12);
-        } else if (ev.inputType === 'deleteContentBackward') {
-          setTimeout(() => {
-            if (!paneState._lastDataEmitAt || (Date.now() - paneState._lastDataEmitAt) > 35) {
-              if (term._core && term._core.coreService) {
-                term._core.coreService.triggerDataEvent('\x7f', true);
-              } else {
-                this.sendPtyInput(paneState.sessionId || sessionId, '\x7f');
               }
             }
           }, 12);
@@ -32247,6 +32199,7 @@ Aturan:
       let accumulatedDeltaY = 0;
 
       container.addEventListener('touchstart', (e) => {
+        paneState._isTouchActive = true;
         if (paneState && paneState.sessionId && !paneState._hasReceivedData) {
           this.sendPtyInput(paneState.sessionId, '\r');
         }
@@ -32294,10 +32247,19 @@ Aturan:
             const cellHeight = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
             const lines = Math.trunc(accumulatedDeltaY / cellHeight);
             if (lines !== 0) {
-              // Finger moving down (deltaY > 0) -> scroll UP into earlier conversation (negative lines)
+              // Finger moving down (deltaY > 0) -> scroll UP into earlier history (negative lines)
               // Finger moving up (deltaY < 0) -> scroll DOWN towards live prompt (positive lines)
+              if (lines > 0) {
+                paneState._userScrolledUp = true;
+              }
               term.scrollLines(-lines);
               accumulatedDeltaY -= (lines * cellHeight);
+              if (term.buffer && term.buffer.active) {
+                const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
+                if (linesFromBottom <= 1) {
+                  paneState._userScrolledUp = false;
+                }
+              }
               updateScrollUI();
             }
           }
@@ -32305,6 +32267,7 @@ Aturan:
       }, { passive: false });
 
       container.addEventListener('touchend', () => {
+        paneState._isTouchActive = false;
         if (isTouchScrolling && Math.abs(touchVelocity) > 0.2 && term) {
           let currentVelocity = touchVelocity;
           let lastAnimTime = performance.now();
@@ -32323,8 +32286,17 @@ Aturan:
             animAccum += (currentVelocity * dt);
             const lines = Math.trunc(animAccum / cellH);
             if (lines !== 0) {
+              if (lines > 0) {
+                paneState._userScrolledUp = true;
+              }
               term.scrollLines(-lines);
               animAccum -= (lines * cellH);
+              if (term.buffer && term.buffer.active) {
+                const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
+                if (linesFromBottom <= 1) {
+                  paneState._userScrolledUp = false;
+                }
+              }
               updateScrollUI();
             }
             paneState._touchInertiaRaf = requestAnimationFrame(momentumStep);
@@ -32337,6 +32309,7 @@ Aturan:
       }, { passive: true });
 
       container.addEventListener('touchcancel', () => {
+        paneState._isTouchActive = false;
         if (paneState._touchInertiaRaf) {
           cancelAnimationFrame(paneState._touchInertiaRaf);
           paneState._touchInertiaRaf = null;
@@ -32354,16 +32327,6 @@ Aturan:
           }
           term.scrollToBottom();
           if (paneState.updateScrollUI) paneState.updateScrollUI();
-        }
-        if (this.isMobileDevice() && term.textarea) {
-          setTimeout(() => {
-            try {
-              if (term.textarea && term.textarea.value !== ' ') {
-                term.textarea.value = ' ';
-                term.textarea.setSelectionRange(1, 1);
-              }
-            } catch (_) {}
-          }, 0);
         }
 
         // Sticky CTRL Modifier from Mobile Touch Keybar
@@ -32624,8 +32587,8 @@ Aturan:
           }
           const activeBuf = currentTerm.buffer && currentTerm.buffer.active;
           const linesFromBottom = activeBuf ? (activeBuf.baseY - activeBuf.viewportY) : 0;
-          // Auto-scroll to bottom if user is close to bottom (<= 3 lines) or hasn't manually scrolled up
-          const shouldAutoScroll = linesFromBottom <= 3 || !paneState._userScrolledUp;
+          // Auto-scroll to bottom ONLY if user is already at the bottom and has not scrolled up, and not touching
+          const shouldAutoScroll = (linesFromBottom <= 1) && !paneState._userScrolledUp && !paneState._isTouchActive;
 
           currentTerm.write(msg.data);
 
@@ -33547,6 +33510,7 @@ Aturan:
           else if (keyType === 'Backspace') ptySeq = '\x7f';
           else if (keyType === 'PgUp') {
             if (paneState?.term) {
+              paneState._userScrolledUp = true;
               paneState.term.scrollPages(-1);
               if (paneState.updateScrollUI) paneState.updateScrollUI();
             }
@@ -33554,6 +33518,12 @@ Aturan:
           else if (keyType === 'PgDn') {
             if (paneState?.term) {
               paneState.term.scrollPages(1);
+              if (paneState.term.buffer && paneState.term.buffer.active) {
+                const linesFromBottom = paneState.term.buffer.active.baseY - paneState.term.buffer.active.viewportY;
+                if (linesFromBottom <= 1) {
+                  paneState._userScrolledUp = false;
+                }
+              }
               if (paneState.updateScrollUI) paneState.updateScrollUI();
             }
           }
