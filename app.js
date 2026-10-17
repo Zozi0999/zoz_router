@@ -1507,12 +1507,18 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const model = errorData.model || 'Unknown Model';
       const endpoint = errorData.endpoint || (model.includes('/') ? 'OpenRouter' : 'Ollama');
       const rawMsg = errorData.error ? (errorData.error.message || String(errorData.error)) : (errorData.reason || 'Unknown error');
+      
+      const lower = rawMsg.toLowerCase();
+      // JANGAN catat jika error disebabkan oleh pembatalan sengaja oleh pengguna (Stop / User Abort)
+      if (lower.includes('user_abort') || lower.includes('dibatalkan oleh pengguna') || lower.includes('abort') && (lower.includes('user') || errorData.error?.name === 'AbortError') || errorData.isUserAbort) {
+        return null;
+      }
+
       const status = errorData.status || (rawMsg.match(/\b([45]\d\d)\b/)?.[1]) || 500;
       
       let errorType = 'Inference Failure';
       let severity = 25;
 
-      const lower = rawMsg.toLowerCase();
       if (status == 400 || lower.includes('invalid argument') || lower.includes('bad request') || lower.includes('schema')) {
         errorType = '400 Bad Request / Invalid Parameter';
         severity = 20;
@@ -1719,12 +1725,13 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const activeModal = document.querySelector('.modal-backdrop.show, .modal.show, .sidebar-backdrop.active, .lightbox-backdrop.active');
 
       for (const btn of buttons) {
-        // 1. Abaikan tombol internal riwayat log, item diagnosa, dan tombol utilitas mikro untuk mencegah loop sekresi
-        if (btn.classList?.contains('btn-copy-log-entry') || 
+        // 1. Abaikan seluruh tombol dan kontrol di dalam modal telemetri CodeEndocrine itu sendiri (mencegah loop diagnosa mandiri)
+        if (btn.id === 'tabEndocrineCode' || btn.id === 'tabEndocrineChat' || 
+            btn.classList?.contains('btn-copy-log-entry') || 
             btn.classList?.contains('btn-copy-issue-entry') || 
             btn.classList?.contains('copy-code-btn') || 
             btn.classList?.contains('code-copy-btn') ||
-            (btn.closest && btn.closest('.endocrine-logs-list, .endocrine-diagnostic-list, #chatEndocrineLogsList, .code-copy-btn, .copy-code-btn'))) {
+            (btn.closest && btn.closest('#endocrineTelemetryModal, .endocrine-logs-list, .endocrine-diagnostic-list, #chatEndocrineLogsList, .code-copy-btn, .copy-code-btn'))) {
           continue;
         }
 
@@ -1798,7 +1805,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
         // d. Deteksi Tombol Terhalang Fisik (Obstruction Check via document.elementFromPoint)
         // Cek apakah tombol berada di dalam kontainer yang memiliki scroll/overflow
-        // Jika tombol telah ter-scroll keluar dari batas pandang kontainer (scrolled out of view), abaikan!
+        // Jika tombol atau titik tengah kliknya telah ter-scroll keluar dari batas pandang kontainer (scrolled out of view), abaikan!
+        const cx = rect.left + (rect.width / 2);
+        const cy = rect.top + (rect.height / 2);
+
         let isClippedByScrollParent = false;
         let parent = btn.parentElement;
         while (parent && parent !== document.body && parent !== document.documentElement) {
@@ -1810,7 +1820,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
                               overflowX === 'auto' || overflowX === 'scroll' || overflowX === 'hidden';
             if (hasScroll && typeof parent.getBoundingClientRect === 'function') {
               const pRect = parent.getBoundingClientRect();
-              if (rect.bottom < pRect.top || rect.top > pRect.bottom || rect.right < pRect.left || rect.left > pRect.right) {
+              if (rect.bottom <= pRect.top || rect.top >= pRect.bottom || rect.right <= pRect.left || rect.left >= pRect.right ||
+                  cy <= pRect.top || cy >= pRect.bottom || cx <= pRect.left || cx >= pRect.right) {
                 isClippedByScrollParent = true;
                 break;
               }
@@ -1820,13 +1831,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
         if (isClippedByScrollParent) continue;
 
-        const cx = rect.left + (rect.width / 2);
-        const cy = rect.top + (rect.height / 2);
         if (cx >= 0 && cx <= winW && cy >= 0 && cy <= winH && typeof document.elementFromPoint === 'function') {
           const topEl = document.elementFromPoint(cx, cy);
           if (topEl && topEl !== btn && !btn.contains(topEl) && !topEl.contains(btn)) {
             // Abaikan jika topEl adalah bagian internal tombol (misal wrapper span atau label)
             if (topEl.closest && topEl.closest('button, a.btn, [role="button"]') === btn) continue;
+
+            // Abaikan jika topEl dan btn berada dalam modal atau card yang sama dan topEl adalah header/footer (efek scroll standar modal)
+            if (btn.closest && topEl.closest && btn.closest('.modal-card') && btn.closest('.modal-card') === topEl.closest('.modal-card')) {
+              if (topEl.closest('.modal-header, .modal-footer, .modal-title')) continue;
+            }
 
             // Abaikan jika topEl adalah kontainer induk terdekat yang batas padding-nya bersentuhan
             if (btn.closest && btn.closest('.modal-card, .modal-body, .modal-header, .modal-footer, .endocrine-logs-wrap') === topEl) continue;
@@ -18401,7 +18415,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       return true;
 
     } catch (err) {
-      if (err.name === 'AbortError') {
+      const isUserAborted = (err && (err.name === 'AbortError' || err === 'USER_ABORT' || err.message === 'USER_ABORT' || String(err).includes('USER_ABORT'))) || STATE.abortController?.signal?.aborted || !STATE.isGenerating;
+      if (isUserAborted) {
         // render:false → baris di bawah langsung mengganti innerHTML (atau baris
         // dihapus), jadi render dari finish hanya akan dibuang.
         const partialRaw = streamRenderer ? streamRenderer.finish({ render: false }) : '';
@@ -20001,7 +20016,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       return true;
 
     } catch (err) {
-      if (err.name === 'AbortError') {
+      const isUserAborted = (err && (err.name === 'AbortError' || err === 'USER_ABORT' || err.message === 'USER_ABORT' || String(err).includes('USER_ABORT'))) || STATE.abortController?.signal?.aborted || !STATE.isGenerating;
+      if (isUserAborted) {
         // render:false → baris di bawah langsung mengganti innerHTML (atau baris
         // dihapus), jadi render dari finish hanya akan dibuang.
         const partialRaw = streamRenderer ? streamRenderer.finish({ render: false }) : '';
