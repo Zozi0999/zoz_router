@@ -30787,10 +30787,8 @@ Aturan:
       const p2 = tab?.pane2;
       const btn1 = document.getElementById('btnPaneAutoEnter1');
       const btn2 = document.getElementById('btnPaneAutoEnter2');
-      const topBtn = document.getElementById('btnTermAutoEnter');
       if (btn1) btn1.classList.toggle('active', !!p1?.autoEnter);
       if (btn2) btn2.classList.toggle('active', !!p2?.autoEnter);
-      if (topBtn) topBtn.classList.toggle('active', !!this.autoEnter);
     },
 
     toggleAutoEnter(paneNum = (this.activePane || 1)) {
@@ -31725,8 +31723,6 @@ Aturan:
 
       document.getElementById('btnTermFontDec')?.addEventListener('click', () => this.adjustFontSize(-1));
       document.getElementById('btnTermFontInc')?.addEventListener('click', () => this.adjustFontSize(1));
-      document.getElementById('btnTermAutoEnter')?.addEventListener('click', () => this.toggleAutoEnter());
-      document.getElementById('btnTermSendEnter')?.addEventListener('click', () => this.sendEnterToActivePane());
       document.getElementById('btnTermSplit')?.addEventListener('click', () => this.toggleSplit());
       document.getElementById('btnTermClear')?.addEventListener('click', () => this.clearActiveScreen());
       document.getElementById('btnTermTheme')?.addEventListener('click', () => this.toggleTheme());
