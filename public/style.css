@@ -13166,6 +13166,28 @@ body.mermaid-has-fullscreen {
   word-break: break-all;
 }
 
+.terminal-screen.xterm-mode {
+  padding: 6px 10px;
+  overflow: hidden;
+  white-space: normal;
+  word-break: normal;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-screen.xterm-mode .xterm {
+  height: 100%;
+  width: 100%;
+}
+
+.terminal-screen.xterm-mode .xterm-viewport {
+  background-color: transparent !important;
+}
+
+.terminal-screen.xterm-mode .xterm-screen {
+  background-color: transparent !important;
+}
+
 .terminal-screen::-webkit-scrollbar {
   width: 6px;
 }

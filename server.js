@@ -18,6 +18,46 @@ const os = require('os');
 const { spawn } = require('child_process');
 const textSafety = require('./text-safety');
 
+// Loader node-pty opsional (dengan graceful fallback untuk Vercel / serverless)
+let nodePty = null;
+try {
+  nodePty = require('node-pty');
+} catch (_) {
+  try {
+    const extensionPtyPath = path.join(os.homedir(), 'Desktop', 'terminal-extension', 'host', 'node_modules', 'node-pty');
+    if (fs.existsSync(extensionPtyPath)) {
+      nodePty = require(extensionPtyPath);
+    }
+  } catch (_) {
+    nodePty = null;
+  }
+}
+
+// Session store untuk persistent PTY sessions (ConPTY / PseudoConsole)
+const activeTerminalSessions = new Map();
+
+function resolveHostShell(shellType) {
+  const isWin = process.platform === 'win32';
+  const type = (shellType || 'powershell').toLowerCase();
+  if (type === 'cmd' || type === 'cmd.exe') {
+    return { exe: isWin ? 'cmd.exe' : 'sh', args: [] };
+  }
+  if (type === 'wsl' || type === 'bash' || type === 'ubuntu-wsl') {
+    return { exe: isWin ? 'wsl.exe' : 'bash', args: isWin ? ['-e', 'bash'] : [] };
+  }
+  if (type === 'node') {
+    return { exe: process.execPath, args: [] };
+  }
+  if (type === 'python') {
+    return { exe: isWin ? 'python.exe' : 'python3', args: ['-i'] };
+  }
+  // Default: PowerShell dengan $PROFILE termuat utuh (tanpa -NoProfile)
+  return {
+    exe: isWin ? 'powershell.exe' : 'pwsh',
+    args: ['-ExecutionPolicy', 'Bypass']
+  };
+}
+
 // Loader .env minimal (TANPA dependensi eksternal — proyek zero-dep).
 // Baca file .env bila ada, parse baris KEY=VALUE (lewati komentar/baris kosong),
 // dan JANGAN pernah menimpa variabel yang sudah ada di process.env.
@@ -5082,6 +5122,182 @@ async function requestHandler(req, res) {
   const DEFAULT_TERMINAL_CWD = (!IS_VERCEL_ENV && fs.existsSync(USER_HOME)) ? USER_HOME : WORKSPACE_ROOT;
 
   // =========================================================================
+  // NEURAL TERMINAL REAL-TIME STREAMING & CONPTY / PSEUDOCONSOLE API
+  // Mengizinkan sesi terminal interaktif nyata (node-pty + SSE duplex streaming)
+  // =========================================================================
+  if (pathname === '/api/terminal/stream' && method === 'GET') {
+    const sessionId = (reqUrl.searchParams.get('session') || 'default').trim();
+    const shellType = (reqUrl.searchParams.get('shell') || 'powershell').toLowerCase();
+    let reqCwd = (reqUrl.searchParams.get('cwd') || '').trim();
+    while ((reqCwd.startsWith('"') && reqCwd.endsWith('"')) || (reqCwd.startsWith("'") && reqCwd.endsWith("'"))) {
+      reqCwd = reqCwd.slice(1, -1).trim();
+    }
+    const targetCwd = (reqCwd && fs.existsSync(reqCwd)) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
+    const cols = Math.max(20, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
+    const rows = Math.max(5, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+      'Access-Control-Allow-Origin': '*'
+    });
+
+    if (!nodePty) {
+      res.write(`data: ${JSON.stringify({ type: 'fallback', message: 'node-pty tidak tersedia di lingkungan ini. Terminal beroperasi dalam mode command-exec.' })}\n\n`);
+      const hb = setInterval(() => {
+        if (!res.writableEnded) res.write(': ping\n\n');
+      }, 25000);
+      req.on('close', () => clearInterval(hb));
+      return;
+    }
+
+    let session = activeTerminalSessions.get(sessionId);
+    if (!session || !session.pty) {
+      const shellInfo = resolveHostShell(shellType);
+      try {
+        const ptyProcess = nodePty.spawn(shellInfo.exe, shellInfo.args, {
+          name: 'xterm-256color',
+          cols,
+          rows,
+          cwd: targetCwd,
+          env: {
+            ...process.env,
+            TERM: 'xterm-256color',
+            COLORTERM: 'truecolor'
+          },
+          useConpty: process.platform === 'win32'
+        });
+
+        session = {
+          id: sessionId,
+          shell: shellType,
+          cwd: targetCwd,
+          pty: ptyProcess,
+          clients: new Set(),
+          buffer: [],
+          createdAt: Date.now(),
+          lastActivity: Date.now()
+        };
+
+        ptyProcess.onData((data) => {
+          session.lastActivity = Date.now();
+          if (session.buffer.length > 500) session.buffer.shift();
+          session.buffer.push(data);
+          const payload = `data: ${JSON.stringify({ type: 'data', data })}\n\n`;
+          for (const client of session.clients) {
+            try { if (!client.writableEnded) client.write(payload); } catch (_) {}
+          }
+        });
+
+        ptyProcess.onExit(({ exitCode, signal }) => {
+          const payload = `data: ${JSON.stringify({ type: 'exit', exitCode, signal })}\n\n`;
+          for (const client of session.clients) {
+            try { if (!client.writableEnded) client.write(payload); } catch (_) {}
+          }
+          activeTerminalSessions.delete(sessionId);
+        });
+
+        activeTerminalSessions.set(sessionId, session);
+      } catch (spawnErr) {
+        res.write(`data: ${JSON.stringify({ type: 'error', message: spawnErr.message })}\n\n`);
+        return res.end();
+      }
+    }
+
+    session.clients.add(res);
+
+    // Kirim konfirmasi terkoneksi dan buffer historis jika ada
+    res.write(`data: ${JSON.stringify({ type: 'connected', session: sessionId, shell: session.shell, cwd: session.cwd })}\n\n`);
+    if (session.buffer && session.buffer.length > 0) {
+      const replay = session.buffer.join('');
+      res.write(`data: ${JSON.stringify({ type: 'init', data: replay })}\n\n`);
+    }
+
+    const heartbeat = setInterval(() => {
+      if (!res.writableEnded) {
+        res.write(': heartbeat\n\n');
+      }
+    }, 20000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      session.clients.delete(res);
+      // Grace period 10 menit bila tidak ada client aktif
+      if (session.clients.size === 0) {
+        setTimeout(() => {
+          if (session.clients.size === 0 && activeTerminalSessions.get(sessionId) === session) {
+            try { session.pty.kill(); } catch (_) {}
+            activeTerminalSessions.delete(sessionId);
+          }
+        }, 10 * 60 * 1000);
+      }
+    });
+
+    return;
+  }
+
+  // Kirim keystroke / input mentah ke PTY session
+  if (pathname === '/api/terminal/input' && method === 'POST') {
+    try {
+      const body = await safeParseBody(req);
+      if (!body) return;
+      const sessionId = (body.session || 'default').trim();
+      const data = typeof body.data === 'string' ? body.data : '';
+      const session = activeTerminalSessions.get(sessionId);
+      if (session && session.pty) {
+        session.pty.write(data);
+        session.lastActivity = Date.now();
+        return sendJSON(res, 200, { success: true });
+      }
+      return sendJSON(res, 200, { success: false, reason: 'Session not found or PTY inactive', fallback: !nodePty });
+    } catch (e) {
+      return sendJSON(res, 500, { error: e.message });
+    }
+  }
+
+  // Resize dimensi baris & kolom terminal PTY
+  if (pathname === '/api/terminal/resize' && method === 'POST') {
+    try {
+      const body = await safeParseBody(req);
+      if (!body) return;
+      const sessionId = (body.session || 'default').trim();
+      const cols = Math.max(20, Math.min(400, parseInt(body.cols || '100', 10)));
+      const rows = Math.max(5, Math.min(200, parseInt(body.rows || '28', 10)));
+      const session = activeTerminalSessions.get(sessionId);
+      if (session && session.pty && typeof session.pty.resize === 'function') {
+        try {
+          session.pty.resize(cols, rows);
+          return sendJSON(res, 200, { success: true, cols, rows });
+        } catch (resizeErr) {
+          return sendJSON(res, 200, { success: false, error: resizeErr.message });
+        }
+      }
+      return sendJSON(res, 200, { success: true, warning: 'No active PTY to resize' });
+    } catch (e) {
+      return sendJSON(res, 500, { error: e.message });
+    }
+  }
+
+  // Matikan / bersihkan sesi terminal
+  if (pathname === '/api/terminal/kill' && method === 'POST') {
+    try {
+      const body = await safeParseBody(req);
+      if (!body) return;
+      const sessionId = (body.session || 'default').trim();
+      const session = activeTerminalSessions.get(sessionId);
+      if (session) {
+        try { if (session.pty) session.pty.kill(); } catch (_) {}
+        activeTerminalSessions.delete(sessionId);
+      }
+      return sendJSON(res, 200, { success: true });
+    } catch (e) {
+      return sendJSON(res, 500, { error: e.message });
+    }
+  }
+
+  // =========================================================================
   // NEURAL TERMINAL CLI EXECUTION API
   // Mengizinkan eksekusi perintah shell interaktif (PowerShell, CMD, WSL, Node)
   // =========================================================================
@@ -5218,7 +5434,7 @@ async function requestHandler(req, res) {
       // 4. Eksekusi Subprocess Shell Asli dengan Sentinel Pelacak CWD
       const sentinel = '---ZOZ_CWD_MARKER---';
       let executable = 'powershell.exe';
-      let args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `${cmd}\nWrite-Output '${sentinel}'\n(Get-Location).Path`];
+      let args = ['-ExecutionPolicy', 'Bypass', '-Command', `${cmd}\nWrite-Output '${sentinel}'\n(Get-Location).Path`];
 
       if (shellType === 'cmd' || shellType === 'cmd.exe') {
         executable = 'cmd.exe';

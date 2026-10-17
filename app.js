@@ -30631,12 +30631,48 @@ Aturan:
       }
     ],
 
+    xtermThemes: {
+      'aura-api': {
+        background: 'transparent',
+        foreground: '#fdf2f2',
+        cursor: '#ef4444',
+        cursorAccent: '#120707',
+        selectionBackground: '#5c1f1f',
+        black: '#1e293b', brightBlack: '#64748b',
+        red: '#ef4444', brightRed: '#f87171',
+        green: '#22c55e', brightGreen: '#4ade80',
+        yellow: '#eab308', brightYellow: '#facc15',
+        blue: '#3b82f6', brightBlue: '#60a5fa',
+        magenta: '#a855f7', brightMagenta: '#c084fc',
+        cyan: '#06b6d4', brightCyan: '#22d3ee',
+        white: '#cbd5e1', brightWhite: '#f1f5f9'
+      },
+      'aura-es': {
+        background: 'transparent',
+        foreground: '#eaf6ff',
+        cursor: '#38bdf8',
+        cursorAccent: '#050b14',
+        selectionBackground: '#1e3a5f',
+        black: '#0f172a', brightBlack: '#475569',
+        red: '#f87171', brightRed: '#fca5a5',
+        green: '#34d399', brightGreen: '#6ee7b7',
+        yellow: '#fbbf24', brightYellow: '#fde047',
+        blue: '#38bdf8', brightBlue: '#7dd3fc',
+        magenta: '#a78bfa', brightMagenta: '#c4b5fd',
+        cyan: '#22d3ee', brightCyan: '#67e8f9',
+        white: '#e2e8f0', brightWhite: '#f8fafc'
+      }
+    },
+
+    getXtermTheme() {
+      return this.xtermThemes[this.theme] || this.xtermThemes['aura-es'];
+    },
+
     init() {
       this.attachListeners();
       this.loadTheme();
       this.renderTabs();
       this.updatePaneHeaders();
-      this.initScreenWelcome(1);
       this.syncServerCwd();
     },
 
@@ -30678,6 +30714,11 @@ Aturan:
         modal.classList.add(this.theme === 'aura-api' ? 'theme-api' : 'theme-es');
         modal.setAttribute('data-theme', this.theme);
       }
+      const xtermTheme = this.getXtermTheme();
+      this.tabs.forEach(tab => {
+        if (tab.pane1?.term) tab.pane1.term.options.theme = xtermTheme;
+        if (tab.pane2?.term) tab.pane2.term.options.theme = xtermTheme;
+      });
       if (persist) {
         localStorage.setItem('zoz_term_theme', this.theme);
         showToast(this.theme === 'aura-api' ? 'Tema Terminal: Aura Api (Fire/Ember)' : 'Tema Terminal: Aura Es (Ice/Cyan)');
@@ -30695,6 +30736,16 @@ Aturan:
       const screens = document.querySelectorAll('.terminal-screen, .term-cli-input, .term-prompt-cwd');
       screens.forEach(el => {
         el.style.fontSize = `${this.fontSize}px`;
+      });
+      this.tabs.forEach(tab => {
+        if (tab.pane1?.term) {
+          tab.pane1.term.options.fontSize = this.fontSize;
+          try { tab.pane1.fitAddon?.fit(); } catch (_) {}
+        }
+        if (tab.pane2?.term) {
+          tab.pane2.term.options.fontSize = this.fontSize;
+          try { tab.pane2.fitAddon?.fit(); } catch (_) {}
+        }
       });
       if (persist) {
         localStorage.setItem('zoz_term_fontsize', this.fontSize);
@@ -30722,6 +30773,7 @@ Aturan:
         if (icon) {
           icon.className = isFull ? 'fa-solid fa-compress' : 'fa-solid fa-expand';
         }
+        this.fitAllPanes();
       }
     },
 
@@ -30732,10 +30784,11 @@ Aturan:
         closeModal('terminalModal');
       } else {
         openModal('terminalModal');
-        this.initScreenWelcome(1);
         this.updatePaneHeaders();
+        this.initActiveTabPanes();
         this.focusActiveInput();
         this.syncServerCwd();
+        setTimeout(() => this.fitAllPanes(), 60);
       }
     },
 
@@ -30756,6 +30809,189 @@ Aturan:
     getPaneState(paneNum = this.activePane) {
       const tab = this.getActiveTab();
       return paneNum === 2 ? tab.pane2 : tab.pane1;
+    },
+
+    initActiveTabPanes() {
+      this.initXtermPane(1);
+      if (this.isSplit) {
+        this.initXtermPane(2);
+      }
+    },
+
+    initXtermPane(paneNum) {
+      const tab = this.getActiveTab();
+      if (!tab) return;
+      const paneState = this.getPaneState(paneNum);
+      const screenEl = document.getElementById(`termScreen${paneNum}`);
+      if (!screenEl) return;
+
+      if (typeof window.Terminal === 'undefined') {
+        this.initScreenWelcome(paneNum);
+        return;
+      }
+
+      const sessionId = paneState.sessionId || `${tab.id}-p${paneNum}`;
+      paneState.sessionId = sessionId;
+
+      if (paneState.term && paneState.screenContainer) {
+        if (!screenEl.contains(paneState.screenContainer)) {
+          screenEl.innerHTML = '';
+          screenEl.classList.add('xterm-mode');
+          screenEl.appendChild(paneState.screenContainer);
+          setTimeout(() => {
+            if (paneState.fitAddon) {
+              try { paneState.fitAddon.fit(); } catch (_) {}
+            }
+          }, 30);
+        }
+        return;
+      }
+
+      screenEl.innerHTML = '';
+      screenEl.classList.add('xterm-mode');
+
+      const container = document.createElement('div');
+      container.className = 'xterm-pane-container';
+      container.style.width = '100%';
+      container.style.height = '100%';
+      screenEl.appendChild(container);
+      paneState.screenContainer = container;
+
+      const term = new window.Terminal({
+        cursorBlink: true,
+        theme: this.getXtermTheme(),
+        fontFamily: '"JetBrains Mono", Cascadia Code, Fira Code, Consolas, "Courier New", monospace',
+        fontSize: this.fontSize,
+        lineHeight: 1.25,
+        scrollback: 5000,
+        allowTransparency: true
+      });
+
+      const fitAddon = (typeof window.FitAddon !== 'undefined' && window.FitAddon.FitAddon)
+        ? new window.FitAddon.FitAddon()
+        : null;
+
+      if (fitAddon) {
+        term.loadAddon(fitAddon);
+      }
+
+      term.open(container);
+      if (fitAddon) {
+        setTimeout(() => {
+          try { fitAddon.fit(); } catch (_) {}
+        }, 50);
+      }
+
+      paneState.term = term;
+      paneState.fitAddon = fitAddon;
+
+      term.onData((data) => {
+        this.sendPtyInput(sessionId, data);
+      });
+
+      term.onResize(({ cols, rows }) => {
+        this.sendPtyResize(sessionId, cols, rows);
+      });
+
+      this.connectStream(tab, paneState, paneNum);
+    },
+
+    connectStream(tab, paneState, paneNum) {
+      const sessionId = paneState.sessionId || `${tab.id}-p${paneNum}`;
+      if (paneState.eventSource) {
+        try { paneState.eventSource.close(); } catch (_) {}
+        paneState.eventSource = null;
+      }
+
+      const term = paneState.term;
+      const cols = (term && term.cols) ? term.cols : 100;
+      const rows = (term && term.rows) ? term.rows : 28;
+      const streamUrl = `/api/terminal/stream?session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}`;
+
+      const es = new EventSource(streamUrl);
+      paneState.eventSource = es;
+
+      const statusLabel = document.querySelector(`#termPane${paneNum} .pane-status-label`);
+      const statusDot = document.querySelector(`#termPane${paneNum} .pane-status-dot`);
+      if (statusLabel) statusLabel.textContent = 'Menghubungkan…';
+      if (statusDot) statusDot.className = 'pane-status-dot connecting';
+
+      es.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'data' || msg.type === 'init') {
+            if (term && typeof msg.data === 'string') {
+              term.write(msg.data);
+            }
+          } else if (msg.type === 'connected') {
+            if (statusLabel) statusLabel.textContent = 'Aktif (PTY)';
+            if (statusDot) statusDot.className = 'pane-status-dot online';
+            if (msg.cwd && msg.cwd !== paneState.cwd) {
+              paneState.cwd = msg.cwd;
+              if (paneNum === 1) tab.cwd = msg.cwd;
+              this.updatePaneHeaders();
+            }
+          } else if (msg.type === 'exit') {
+            if (term) {
+              term.write(`\r\n\x1b[33m[Proses shell keluar dengan kode ${msg.exitCode || 0}]\x1b[0m\r\n`);
+            }
+            if (statusLabel) statusLabel.textContent = 'Selesai';
+            if (statusDot) statusDot.className = 'pane-status-dot offline';
+          } else if (msg.type === 'fallback') {
+            paneState.isFallbackMode = true;
+            if (statusLabel) statusLabel.textContent = 'Mode Exec';
+            if (statusDot) statusDot.className = 'pane-status-dot online';
+          }
+        } catch (_) {}
+      };
+
+      es.onerror = () => {
+        if (statusLabel) statusLabel.textContent = 'Terputus';
+        if (statusDot) statusDot.className = 'pane-status-dot offline';
+      };
+    },
+
+    async sendPtyInput(sessionId, data) {
+      try {
+        await fetch('/api/terminal/input', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: sessionId, data })
+        });
+      } catch (_) {}
+    },
+
+    async sendPtyResize(sessionId, cols, rows) {
+      try {
+        await fetch('/api/terminal/resize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: sessionId, cols, rows })
+        });
+      } catch (_) {}
+    },
+
+    fitAllPanes() {
+      const tab = this.getActiveTab();
+      if (!tab) return;
+      setTimeout(() => {
+        if (tab.pane1 && tab.pane1.fitAddon) {
+          try {
+            tab.pane1.fitAddon.fit();
+            if (tab.pane1.term) {
+              this.sendPtyResize(tab.pane1.sessionId, tab.pane1.term.cols, tab.pane1.term.rows);
+            }
+          } catch (_) {}
+        }
+        if (this.isSplit && tab.pane2 && tab.pane2.fitAddon) {
+          try {
+            tab.pane2.fitAddon.fit();
+            if (tab.pane2.term) {
+              this.sendPtyResize(tab.pane2.sessionId, tab.pane2.term.cols, tab.pane2.term.rows);
+            }
+          } catch (_) {}
+        }
+      }, 50);
     },
 
     addTab() {
@@ -30784,7 +31020,6 @@ Aturan:
       this.tabs.push(newTab);
       this.renderTabs();
       this.switchTab(id);
-      this.initScreenWelcome(1);
       if (typeof AudioEngine !== 'undefined') AudioEngine.click();
     },
 
@@ -30797,6 +31032,7 @@ Aturan:
       this.updateShellSelectorUI();
       this.updatePaneHeaders();
       this.focusActiveInput();
+      this.fitAllPanes();
       if (typeof AudioEngine !== 'undefined') AudioEngine.click();
     },
 
@@ -30808,6 +31044,27 @@ Aturan:
       }
       const idx = this.tabs.findIndex(t => t.id === tabId);
       if (idx === -1) return;
+      const closingTab = this.tabs[idx];
+
+      [closingTab.pane1, closingTab.pane2].forEach(p => {
+        if (!p) return;
+        if (p.eventSource) {
+          try { p.eventSource.close(); } catch (_) {}
+          p.eventSource = null;
+        }
+        if (p.sessionId) {
+          fetch('/api/terminal/kill', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session: p.sessionId })
+          }).catch(() => {});
+        }
+        if (p.term) {
+          try { p.term.dispose(); } catch (_) {}
+          p.term = null;
+        }
+      });
+
       this.tabs.splice(idx, 1);
       if (this.activeTabId === tabId) {
         const nextTab = this.tabs[Math.max(0, idx - 1)];
@@ -30818,15 +31075,28 @@ Aturan:
       this.updateShellSelectorUI();
       this.updatePaneHeaders();
       this.focusActiveInput();
+      this.fitAllPanes();
     },
 
     saveCurrentScreenState() {
       const tab = this.getActiveTab();
       if (!tab) return;
       const s1 = document.getElementById('termScreen1');
-      if (s1) tab.pane1.outputHtml = s1.innerHTML;
+      if (s1) {
+        if (tab.pane1?.screenContainer && s1.contains(tab.pane1.screenContainer)) {
+          s1.removeChild(tab.pane1.screenContainer);
+        } else {
+          tab.pane1.outputHtml = s1.innerHTML;
+        }
+      }
       const s2 = document.getElementById('termScreen2');
-      if (s2) tab.pane2.outputHtml = s2.innerHTML;
+      if (s2) {
+        if (tab.pane2?.screenContainer && s2.contains(tab.pane2.screenContainer)) {
+          s2.removeChild(tab.pane2.screenContainer);
+        } else {
+          tab.pane2.outputHtml = s2.innerHTML;
+        }
+      }
     },
 
     restoreScreenState() {
@@ -30834,13 +31104,33 @@ Aturan:
       if (!tab) return;
       const s1 = document.getElementById('termScreen1');
       if (s1) {
-        s1.innerHTML = tab.pane1.outputHtml || '';
-        s1.scrollTop = s1.scrollHeight;
+        s1.innerHTML = '';
+        if (tab.pane1?.screenContainer) {
+          s1.classList.add('xterm-mode');
+          s1.appendChild(tab.pane1.screenContainer);
+        } else if (typeof window.Terminal !== 'undefined') {
+          this.initXtermPane(1);
+        } else {
+          s1.classList.remove('xterm-mode');
+          s1.innerHTML = tab.pane1.outputHtml || '';
+          s1.scrollTop = s1.scrollHeight;
+        }
       }
       const s2 = document.getElementById('termScreen2');
       if (s2) {
-        s2.innerHTML = tab.pane2.outputHtml || '';
-        s2.scrollTop = s2.scrollHeight;
+        s2.innerHTML = '';
+        if (this.isSplit) {
+          if (tab.pane2?.screenContainer) {
+            s2.classList.add('xterm-mode');
+            s2.appendChild(tab.pane2.screenContainer);
+          } else if (typeof window.Terminal !== 'undefined') {
+            this.initXtermPane(2);
+          } else {
+            s2.classList.remove('xterm-mode');
+            s2.innerHTML = tab.pane2.outputHtml || '';
+            s2.scrollTop = s2.scrollHeight;
+          }
+        }
       }
     },
 
@@ -30871,14 +31161,27 @@ Aturan:
       this.updatePaneHeaders();
       this.renderTabs();
 
-      const screen = document.getElementById(`termScreen${paneNum}`);
-      if (screen) {
-        const conf = this.shells[shellKey];
-        const banner = document.createElement('div');
-        banner.className = 'term-line term-system-notice';
-        banner.innerHTML = `<span style="color:var(--neon-teal);">⚡ Berpindah ke shell: <strong>${conf.name}</strong> [${shellKey}]</span>`;
-        screen.appendChild(banner);
-        screen.scrollTop = screen.scrollHeight;
+      if (pane.term) {
+        if (pane.sessionId) {
+          fetch('/api/terminal/kill', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session: pane.sessionId })
+          }).catch(() => {});
+        }
+        pane.sessionId = `${tab.id}-p${paneNum}-${Date.now()}`;
+        pane.term.write(`\r\n\x1b[36m⚡ Berpindah ke shell: ${this.shells[shellKey].name} [${shellKey}]\x1b[0m\r\n`);
+        this.connectStream(tab, pane, paneNum);
+      } else {
+        const screen = document.getElementById(`termScreen${paneNum}`);
+        if (screen) {
+          const conf = this.shells[shellKey];
+          const banner = document.createElement('div');
+          banner.className = 'term-line term-system-notice';
+          banner.innerHTML = `<span style="color:var(--neon-teal);">⚡ Berpindah ke shell: <strong>${conf.name}</strong> [${shellKey}]</span>`;
+          screen.appendChild(banner);
+          screen.scrollTop = screen.scrollHeight;
+        }
       }
       this.focusActiveInput();
       showToast(`Shell ${this.shells[shellKey].name} diaktifkan.`);
@@ -30897,7 +31200,6 @@ Aturan:
 
     updatePaneHeaders() {
       const tab = this.getActiveTab();
-      // Pane 1
       const p1 = tab.pane1;
       const conf1 = this.shells[p1.shell] || this.shells.powershell;
       const badge1 = document.getElementById('paneShellBadge1');
@@ -30909,7 +31211,6 @@ Aturan:
         prefix1.textContent = conf1.prompt.replace('{cwd}', p1.cwd);
       }
 
-      // Pane 2
       const p2 = tab.pane2;
       const conf2 = this.shells[p2.shell] || this.shells.powershell;
       const badge2 = document.getElementById('paneShellBadge2');
@@ -30935,7 +31236,7 @@ Aturan:
           if (p1) p1.style.flex = '1 1 50%';
           if (p2) p2.style.flex = '1 1 50%';
           if (btn) btn.classList.add('active');
-          this.initScreenWelcome(2);
+          this.initXtermPane(2);
         } else {
           p2.style.display = 'none';
           resizer.style.display = 'none';
@@ -30943,6 +31244,7 @@ Aturan:
           if (btn) btn.classList.remove('active');
           this.setActivePane(1);
         }
+        this.fitAllPanes();
       }
     },
 
@@ -30971,6 +31273,11 @@ Aturan:
     },
 
     clearActiveScreen() {
+      const pane = this.getPaneState(this.activePane);
+      if (pane && pane.term) {
+        pane.term.clear();
+        return;
+      }
       const screen = document.getElementById(`termScreen${this.activePane}`);
       if (screen) {
         screen.innerHTML = '';
@@ -31022,34 +31329,38 @@ Aturan:
       const tab = this.getActiveTab();
       const pane = this.getPaneState(paneNum);
       const conf = this.shells[pane.shell] || this.shells.powershell;
-      const promptText = conf.prompt.replace('{cwd}', pane.cwd);
 
-      const promptLine = document.createElement('div');
-      promptLine.className = 'term-line term-prompt-line';
-      promptLine.innerHTML = `<span class="term-prompt">${escapeHtml(promptText)}</span><span class="term-cmd-text">${escapeHtml(cmd)}</span>`;
-      screenEl.appendChild(promptLine);
-
-      if (!cmd || !cmd.trim()) {
-        screenEl.scrollTop = screenEl.scrollHeight;
-        return;
-      }
-
+      if (!cmd && rawCommand === null) return;
       const trimmed = cmd.trim();
 
-      if (pane.history[pane.history.length - 1] !== trimmed) {
-        pane.history.push(trimmed);
+      if (trimmed) {
+        if (pane.history[pane.history.length - 1] !== trimmed) {
+          pane.history.push(trimmed);
+        }
+        pane.historyIdx = pane.history.length;
       }
-      pane.historyIdx = pane.history.length;
 
       const lower = trimmed.toLowerCase();
       if (lower === 'cls' || lower === 'clear') {
-        screenEl.innerHTML = '';
+        this.clearActiveScreen();
         return;
       }
 
       if (lower === 'help') {
-        this.renderHelp(screenEl);
-        screenEl.scrollTop = screenEl.scrollHeight;
+        if (pane.term) {
+          pane.term.write(`\r\n\x1b[36m=== PANDUAN ZOZ NEURAL TERMINAL ===\x1b[0m\r\n` +
+            `\x1b[90mTerminal web terintegrasi dengan akses langsung subprocess OS & ConPTY PseudoConsole.\x1b[0m\r\n` +
+            `Perintah cepat:\r\n` +
+            ` - cls / clear : Bersihkan layar terminal\r\n` +
+            ` - split       : Beralih mode 2 panel berdampingan\r\n` +
+            ` - theme       : Beralih tema Aura Es <-> Aura Api\r\n` +
+            ` - font <px>   : Ubah ukuran font (mis. font 14)\r\n` +
+            ` - shell <nama>: Ganti shell (powershell, cmd, wsl, node, python)\r\n` +
+            ` - exit        : Tutup panel atau terminal\r\n\r\n`);
+        } else {
+          this.renderHelp(screenEl);
+          screenEl.scrollTop = screenEl.scrollHeight;
+        }
         return;
       }
 
@@ -31076,12 +31387,8 @@ Aturan:
         if (this.shells[target]) {
           this.setShell(target, paneNum);
         } else {
-          const err = document.createElement('div');
-          err.className = 'term-line term-stderr';
-          err.textContent = `Shell '${target}' tidak dikenal. Pilihan: powershell, cmd, wsl, node, python`;
-          screenEl.appendChild(err);
+          showToast(`Shell '${target}' tidak dikenal. Pilihan: powershell, cmd, wsl, node, python`, 'error');
         }
-        screenEl.scrollTop = screenEl.scrollHeight;
         return;
       }
 
@@ -31091,6 +31398,25 @@ Aturan:
         } else {
           closeModal('terminalModal');
         }
+        return;
+      }
+
+      // Mode 1: Interaktif PTY streaming (Utama)
+      if (pane.term && !pane.isFallbackMode) {
+        this.sendPtyInput(pane.sessionId, cmd + '\r');
+        this.focusActiveInput();
+        return;
+      }
+
+      // Mode 2: Fallback Command Exec API
+      const promptText = conf.prompt.replace('{cwd}', pane.cwd);
+      const promptLine = document.createElement('div');
+      promptLine.className = 'term-line term-prompt-line';
+      promptLine.innerHTML = `<span class="term-prompt">${escapeHtml(promptText)}</span><span class="term-cmd-text">${escapeHtml(cmd)}</span>`;
+      screenEl.appendChild(promptLine);
+
+      if (!trimmed) {
+        screenEl.scrollTop = screenEl.scrollHeight;
         return;
       }
 
@@ -31105,9 +31431,7 @@ Aturan:
       try {
         const response = await fetch('/api/terminal/exec', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             command: trimmed,
             cwd: pane.cwd,
@@ -31269,6 +31593,7 @@ Aturan:
           if (isDragging) {
             isDragging = false;
             document.body.style.cursor = '';
+            this.fitAllPanes();
           }
         });
       }
@@ -31329,6 +31654,10 @@ Aturan:
 
       document.getElementById('btnTermClose')?.addEventListener('click', () => {
         closeModal('terminalModal');
+      });
+
+      window.addEventListener('resize', () => {
+        this.fitAllPanes();
       });
 
       window.addEventListener('keydown', (e) => {
