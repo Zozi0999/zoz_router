@@ -30637,6 +30637,28 @@ Aturan:
       this.renderTabs();
       this.updatePaneHeaders();
       this.initScreenWelcome(1);
+      this.syncServerCwd();
+    },
+
+    async syncServerCwd() {
+      try {
+        const response = await fetch('/api/terminal/exec', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: '' })
+        });
+        const data = await response.json();
+        if (data && data.cwd) {
+          const oldDefault = this.defaultCwd;
+          this.defaultCwd = data.cwd;
+          this.tabs.forEach(t => {
+            if (t.pane1 && (!t.pane1.cwd || t.pane1.cwd === oldDefault)) t.pane1.cwd = data.cwd;
+            if (t.pane2 && (!t.pane2.cwd || t.pane2.cwd === oldDefault)) t.pane2.cwd = data.cwd;
+            if (!t.cwd || t.cwd === oldDefault) t.cwd = data.cwd;
+          });
+          this.updatePaneHeaders();
+        }
+      } catch (_) {}
     },
 
     loadTheme() {
@@ -30713,6 +30735,7 @@ Aturan:
         this.initScreenWelcome(1);
         this.updatePaneHeaders();
         this.focusActiveInput();
+        this.syncServerCwd();
       }
     },
 
@@ -31099,6 +31122,8 @@ Aturan:
 
         if (data.cwd && data.cwd !== pane.cwd) {
           pane.cwd = data.cwd;
+          if (paneNum === 1) tab.cwd = data.cwd;
+          this.defaultCwd = data.cwd;
           this.updatePaneHeaders();
         }
 

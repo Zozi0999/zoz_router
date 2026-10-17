@@ -5089,10 +5089,16 @@ async function requestHandler(req, res) {
       if (!body) return;
       const cmd = (body.command || body.cmd || '').trim();
       const shellType = (body.shell || 'powershell').toLowerCase();
-      let targetCwd = body.cwd ? path.resolve(body.cwd) : WORKSPACE_ROOT;
 
-      // Pastikan targetCwd ada atau fallback ke WORKSPACE_ROOT
-      if (!fs.existsSync(targetCwd)) {
+      // Bersihkan dan normalisasi targetCwd dari petik berlebih
+      let rawCwd = (body.cwd || '').trim();
+      while ((rawCwd.startsWith('"') && rawCwd.endsWith('"')) || (rawCwd.startsWith("'") && rawCwd.endsWith("'"))) {
+        rawCwd = rawCwd.slice(1, -1).trim();
+      }
+      let targetCwd = rawCwd ? path.resolve(rawCwd) : WORKSPACE_ROOT;
+
+      // Pastikan targetCwd ada atau fallback ke WORKSPACE_ROOT (kecuali Vercel sandbox virtual)
+      if (!fs.existsSync(targetCwd) && !IS_VERCEL_ENV) {
         targetCwd = WORKSPACE_ROOT;
       }
 
@@ -5100,21 +5106,65 @@ async function requestHandler(req, res) {
         return sendJSON(res, 200, {
           success: true,
           output: '',
+          stdout: '',
+          stderr: '',
           cwd: targetCwd,
           exitCode: 0
         });
       }
 
-      // Khusus perintah internal cd (change directory)
-      if (/^cd(\s+|$)/i.test(cmd)) {
-        const dest = cmd.replace(/^cd\s*/i, '').trim();
-        let newCwd = targetCwd;
-        if (!dest || dest === '~') {
-          newCwd = os.homedir();
-        } else {
-          newCwd = path.resolve(targetCwd, dest);
+      // 1. Khusus alih drive Windows mandiri (e.g. "C:", "D:", "c:\", "d:\")
+      if (/^[a-zA-Z]:\\?$/i.test(cmd)) {
+        const driveLetter = cmd.slice(0, 2).toUpperCase() + '\\';
+        if (fs.existsSync(driveLetter)) {
+          return sendJSON(res, 200, {
+            success: true,
+            output: `Direktori aktif diubah ke: ${driveLetter}`,
+            stdout: `Direktori aktif diubah ke: ${driveLetter}`,
+            stderr: '',
+            cwd: driveLetter,
+            exitCode: 0
+          });
         }
+      }
+
+      // 2. Khusus perintah internal cd / chdir (change directory)
+      if (/^(cd|chdir)(\s+|$)/i.test(cmd) && !/[&|;]/.test(cmd)) {
+        let cleanDest = cmd.replace(/^(cd|chdir)(\s*)/i, '').trim();
+        cleanDest = cleanDest.replace(/^\/d\s*/i, '').trim();
+
+        // Bersihkan petik ganda maupun tunggal di sekitar target path
+        while ((cleanDest.startsWith('"') && cleanDest.endsWith('"')) || 
+               (cleanDest.startsWith("'") && cleanDest.endsWith("'"))) {
+          cleanDest = cleanDest.slice(1, -1).trim();
+        }
+
+        let newCwd = targetCwd;
+        if (!cleanDest || cleanDest === '~') {
+          newCwd = os.homedir();
+        } else if (cleanDest.startsWith('~/') || cleanDest.startsWith('~\\')) {
+          newCwd = path.resolve(os.homedir(), cleanDest.slice(2));
+        } else if (/^[a-zA-Z]:$/i.test(cleanDest)) {
+          newCwd = cleanDest.toUpperCase() + '\\';
+        } else {
+          newCwd = path.resolve(targetCwd, cleanDest);
+        }
+
         if (fs.existsSync(newCwd)) {
+          try {
+            const stat = fs.statSync(newCwd);
+            if (!stat.isDirectory()) {
+              return sendJSON(res, 200, {
+                success: false,
+                output: `Bukan sebuah direktori: ${cleanDest}`,
+                stdout: '',
+                stderr: `Bukan sebuah direktori: ${cleanDest}`,
+                cwd: targetCwd,
+                exitCode: 1
+              });
+            }
+          } catch (_) {}
+
           return sendJSON(res, 200, {
             success: true,
             output: `Direktori aktif diubah ke: ${newCwd}`,
@@ -5123,19 +5173,29 @@ async function requestHandler(req, res) {
             cwd: newCwd,
             exitCode: 0
           });
+        } else if (IS_VERCEL_ENV) {
+          // Vercel Cloud Sandbox (dukungan navigasi direktori virtual di lingkungan cloud)
+          return sendJSON(res, 200, {
+            success: true,
+            output: `[Vercel Cloud Sandbox] Direktori aktif diubah ke: ${cleanDest}`,
+            stdout: `[Vercel Cloud Sandbox] Direktori aktif diubah ke: ${cleanDest}`,
+            stderr: '',
+            cwd: cleanDest,
+            exitCode: 0
+          });
         } else {
           return sendJSON(res, 200, {
             success: false,
-            output: `Tidak dapat menemukan jalur: ${dest}`,
+            output: `Tidak dapat menemukan jalur: "${cleanDest}"`,
             stdout: '',
-            stderr: `Tidak dapat menemukan jalur: ${dest}`,
+            stderr: `Tidak dapat menemukan jalur: "${cleanDest}"`,
             cwd: targetCwd,
             exitCode: 1
           });
         }
       }
 
-      // Eksekusi pada Serverless Vercel (fallback virtual shell)
+      // 3. Eksekusi pada Serverless Vercel (fallback virtual shell)
       if (IS_VERCEL_ENV) {
         if (/^(dir|ls)/i.test(cmd)) {
           const files = await fsp.readdir(targetCwd).catch(() => []);
@@ -5153,16 +5213,17 @@ async function requestHandler(req, res) {
         }
       }
 
-      // Eksekusi Subprocess Shell Asli
+      // 4. Eksekusi Subprocess Shell Asli dengan Sentinel Pelacak CWD
+      const sentinel = '---ZOZ_CWD_MARKER---';
       let executable = 'powershell.exe';
-      let args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', cmd];
+      let args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `${cmd}\nWrite-Output '${sentinel}'\n(Get-Location).Path`];
 
       if (shellType === 'cmd' || shellType === 'cmd.exe') {
         executable = 'cmd.exe';
-        args = ['/c', cmd];
+        args = ['/c', `${cmd} & echo ${sentinel} & cd`];
       } else if (shellType === 'wsl' || shellType === 'bash' || shellType === 'ubuntu-wsl') {
         executable = 'wsl.exe';
-        args = ['-e', 'bash', '-c', cmd];
+        args = ['-e', 'bash', '-c', `${cmd} ; echo "${sentinel}" ; pwd`];
       } else if (shellType === 'node') {
         executable = process.execPath;
         args = ['-e', cmd];
@@ -5211,7 +5272,24 @@ async function requestHandler(req, res) {
 
       proc.on('close', code => {
         clearTimeout(timer);
-        let finalOut = stdout;
+
+        // Ekstraksi sentinel CWD agar direktori aktif selalu tersinkronisasi
+        let finalCwd = targetCwd;
+        let cleanStdout = stdout;
+        const markerIdx = stdout.lastIndexOf(sentinel);
+        if (markerIdx !== -1) {
+          cleanStdout = stdout.slice(0, markerIdx).trimEnd();
+          const afterMarker = stdout.slice(markerIdx + sentinel.length).trim();
+          const lines = afterMarker.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+          if (lines.length > 0) {
+            const detectedCwd = lines[lines.length - 1];
+            if (fs.existsSync(detectedCwd)) {
+              finalCwd = detectedCwd;
+            }
+          }
+        }
+
+        let finalOut = cleanStdout;
         if (stderr) {
           finalOut += (finalOut ? '\n' : '') + stderr;
         }
@@ -5220,10 +5298,10 @@ async function requestHandler(req, res) {
         }
         return sendJSON(res, 200, {
           success: code === 0,
-          output: finalOut || '(selesai tanpa output)',
-          stdout: stdout || (code === 0 ? finalOut : ''),
+          output: finalOut || (code === 0 ? '' : '(gagal tanpa output)'),
+          stdout: cleanStdout || (code === 0 ? finalOut : ''),
           stderr: stderr || (code !== 0 ? finalOut : ''),
-          cwd: targetCwd,
+          cwd: finalCwd,
           exitCode: code !== null ? code : 1
         });
       });
