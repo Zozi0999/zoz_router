@@ -30861,8 +30861,10 @@ Aturan:
       const conf = this.shells[pane.shell] || this.shells.powershell;
       const iconEl = document.getElementById('termCurrentShellIcon');
       const nameEl = document.getElementById('termCurrentShellName');
+      const labelEl = document.getElementById('labelTerminalShell');
       if (iconEl) iconEl.textContent = conf.icon;
       if (nameEl) nameEl.textContent = conf.name;
+      if (labelEl) labelEl.textContent = `${conf.name} ${conf.icon}`;
     },
 
     updatePaneHeaders() {
@@ -31095,18 +31097,26 @@ Aturan:
           this.updatePaneHeaders();
         }
 
-        if (data.stdout && data.stdout.trim()) {
+        const stdoutText = data.stdout || (!data.stderr ? data.output : '');
+        const stderrText = data.stderr || (data.exitCode !== 0 && !stdoutText ? data.output : '');
+
+        if (stdoutText && stdoutText.trim()) {
           const outEl = document.createElement('pre');
           outEl.className = 'term-line term-stdout';
-          outEl.innerHTML = this.formatAnsi(data.stdout);
+          outEl.innerHTML = this.formatAnsi(stdoutText);
           screenEl.appendChild(outEl);
         }
 
-        if (data.stderr && data.stderr.trim()) {
+        if (stderrText && stderrText.trim()) {
           const errEl = document.createElement('pre');
           errEl.className = 'term-line term-stderr';
-          errEl.innerHTML = this.formatAnsi(data.stderr);
+          errEl.innerHTML = this.formatAnsi(stderrText);
           screenEl.appendChild(errEl);
+        } else if (!stdoutText && data.output && data.output.trim()) {
+          const outEl = document.createElement('pre');
+          outEl.className = data.exitCode === 0 ? 'term-line term-stdout' : 'term-line term-stderr';
+          outEl.innerHTML = this.formatAnsi(data.output);
+          screenEl.appendChild(outEl);
         }
 
         if (data.exitCode !== 0 && data.exitCode !== undefined) {
@@ -31157,11 +31167,6 @@ Aturan:
     },
 
     attachListeners() {
-      const toggleBtn = document.getElementById('terminalToggleBtn');
-      if (toggleBtn) {
-        toggleBtn.addEventListener('click', () => this.toggle());
-      }
-
       const shellBtn = document.getElementById('btnTerminalShell');
       const dropdown = document.getElementById('terminalShellDropdown');
       if (shellBtn && dropdown) {
@@ -31291,7 +31296,17 @@ Aturan:
         });
       }
 
+      document.getElementById('btnTermClose')?.addEventListener('click', () => {
+        closeModal('terminalModal');
+      });
+
       window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          const modal = document.getElementById('terminalModal');
+          if (modal && modal.classList.contains('show')) {
+            closeModal('terminalModal');
+          }
+        }
         if (e.ctrlKey && (e.key === '`' || e.code === 'Backquote')) {
           e.preventDefault();
           this.toggle();

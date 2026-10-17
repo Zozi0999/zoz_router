@@ -2379,7 +2379,7 @@
       </div>
     </div>
   <!-- MODAL: Terminal Neural // CLI Console (In-Tab Interactive Multi-Shell Console) -->
-  <div class="modal-backdrop terminal-modal-backdrop" id="terminalModal" style="display: none;">
+  <div class="modal-backdrop terminal-modal-backdrop" id="terminalModal">
     <div class="modal-card terminal-modal-card" id="terminalModalCard">
       <!-- Ambient Cyberpunk Flame Aura (inspired by terminal-extension) -->
       <div class="term-ambient-aura" id="termAmbientAura">
@@ -2402,10 +2402,11 @@
         <div class="terminal-shell-wrap" style="position: relative;">
           <button class="tb-btn" id="btnTerminalShell" type="button" title="Ganti Shell (PowerShell, CMD, WSL, Node)">
             <i class="fa-solid fa-terminal" style="font-size: 0.8rem; color: var(--neon-cyan);"></i>
-            <span id="labelTerminalShell">PowerShell 🪟</span>
+            <span id="termCurrentShellIcon">🪟</span>
+            <span id="termCurrentShellName">PowerShell</span>
             <i class="fa-solid fa-chevron-down" style="font-size: 0.65rem; opacity: 0.7;"></i>
           </button>
-          <div class="terminal-shell-dropdown" id="terminalShellDropdown" style="display: none;">
+          <div class="terminal-shell-dropdown" id="terminalShellDropdown">
             <div class="shell-opt active" data-shell="powershell">
               <span class="shell-opt-icon">🪟</span>
               <div class="shell-opt-info">

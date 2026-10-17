@@ -12654,14 +12654,21 @@ body.mermaid-has-fullscreen {
    ========================================================================= */
 
 .terminal-modal-backdrop {
+  position: fixed;
+  inset: 0;
   z-index: 10000;
-  display: flex;
+  display: none;
   align-items: center;
   justify-content: center;
   background: rgba(4, 7, 13, 0.88);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   padding: 16px;
+  overscroll-behavior: contain;
+}
+
+.terminal-modal-backdrop.show {
+  display: flex !important;
   animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -12683,7 +12690,8 @@ body.mermaid-has-fullscreen {
 }
 
 /* Fullscreen Terminal Mode */
-.terminal-modal-card.is-fullscreen {
+.terminal-modal-card.is-fullscreen,
+.terminal-modal-backdrop.fullscreen .terminal-modal-card {
   width: 100vw !important;
   max-width: 100vw !important;
   height: 100vh !important;
@@ -12881,10 +12889,14 @@ body.mermaid-has-fullscreen {
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 240, 255, 0.15);
   padding: 6px;
   z-index: 1000;
-  display: flex;
+  display: none;
   flex-direction: column;
   gap: 3px;
   animation: dropdownFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.terminal-shell-dropdown.show {
+  display: flex !important;
 }
 
 .shell-opt {

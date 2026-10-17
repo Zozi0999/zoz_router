@@ -5118,6 +5118,8 @@ async function requestHandler(req, res) {
           return sendJSON(res, 200, {
             success: true,
             output: `Direktori aktif diubah ke: ${newCwd}`,
+            stdout: `Direktori aktif diubah ke: ${newCwd}`,
+            stderr: '',
             cwd: newCwd,
             exitCode: 0
           });
@@ -5125,6 +5127,8 @@ async function requestHandler(req, res) {
           return sendJSON(res, 200, {
             success: false,
             output: `Tidak dapat menemukan jalur: ${dest}`,
+            stdout: '',
+            stderr: `Tidak dapat menemukan jalur: ${dest}`,
             cwd: targetCwd,
             exitCode: 1
           });
@@ -5136,16 +5140,16 @@ async function requestHandler(req, res) {
         if (/^(dir|ls)/i.test(cmd)) {
           const files = await fsp.readdir(targetCwd).catch(() => []);
           const output = files.map(f => `  ${f}`).join('\n') || '(direktori kosong)';
-          return sendJSON(res, 200, { success: true, output, cwd: targetCwd, exitCode: 0 });
+          return sendJSON(res, 200, { success: true, output, stdout: output, stderr: '', cwd: targetCwd, exitCode: 0 });
         }
         if (/^(pwd)/i.test(cmd)) {
-          return sendJSON(res, 200, { success: true, output: targetCwd, cwd: targetCwd, exitCode: 0 });
+          return sendJSON(res, 200, { success: true, output: targetCwd, stdout: targetCwd, stderr: '', cwd: targetCwd, exitCode: 0 });
         }
         if (/^(whoami)/i.test(cmd)) {
-          return sendJSON(res, 200, { success: true, output: 'zoz-router-cloud\\user', cwd: targetCwd, exitCode: 0 });
+          return sendJSON(res, 200, { success: true, output: 'zoz-router-cloud\\user', stdout: 'zoz-router-cloud\\user', stderr: '', cwd: targetCwd, exitCode: 0 });
         }
         if (/^(node\s+-v|node\s+--version)/i.test(cmd)) {
-          return sendJSON(res, 200, { success: true, output: process.version, cwd: targetCwd, exitCode: 0 });
+          return sendJSON(res, 200, { success: true, output: process.version, stdout: process.version, stderr: '', cwd: targetCwd, exitCode: 0 });
         }
       }
 
@@ -5198,6 +5202,8 @@ async function requestHandler(req, res) {
         return sendJSON(res, 200, {
           success: false,
           output: `Gagal menjalankan shell: ${err.message}`,
+          stdout: '',
+          stderr: `Gagal menjalankan shell: ${err.message}`,
           cwd: targetCwd,
           exitCode: 1
         });
@@ -5215,6 +5221,8 @@ async function requestHandler(req, res) {
         return sendJSON(res, 200, {
           success: code === 0,
           output: finalOut || '(selesai tanpa output)',
+          stdout: stdout || (code === 0 ? finalOut : ''),
+          stderr: stderr || (code !== 0 ? finalOut : ''),
           cwd: targetCwd,
           exitCode: code !== null ? code : 1
         });
