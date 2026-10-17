@@ -13240,8 +13240,10 @@ body.mermaid-has-fullscreen {
 }
 
 /* ── Command Input Row ── */
+/* Disembunyikan di desktop agar layar terminal penuh dan bersih;
+   dipertahankan di perangkat seluler / handphone */
 .terminal-input-row {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
@@ -13311,8 +13313,9 @@ body.mermaid-has-fullscreen {
 }
 
 /* ── Quick Chips Bar ── */
+/* Disembunyikan di desktop, dipertahankan di perangkat seluler */
 .terminal-quick-chips {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 8px;
   padding: 6px 14px;
@@ -13355,7 +13358,7 @@ body.mermaid-has-fullscreen {
   color: var(--neon-cyan);
 }
 
-/* Mobile Responsiveness */
+/* Mobile Responsiveness - Dipertahankan untuk perangkat seluler / handphone */
 @media (max-width: 768px) {
   .terminal-modal-card {
     width: 100vw;
@@ -13366,6 +13369,12 @@ body.mermaid-has-fullscreen {
   }
   .pane-cwd-indicator {
     display: none;
+  }
+  .terminal-input-row {
+    display: flex;
+  }
+  .terminal-quick-chips {
+    display: flex;
   }
   .term-prompt-cwd {
     max-width: 110px;

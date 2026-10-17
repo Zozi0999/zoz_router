@@ -30795,9 +30795,12 @@ Aturan:
     focusActiveInput() {
       setTimeout(() => {
         const paneNum = this.activePane || 1;
+        const paneState = this.getPaneState(paneNum);
         const input = document.getElementById(`termCliInput${paneNum}`);
-        if (input) {
+        if (input && input.offsetParent !== null) {
           input.focus();
+        } else if (paneState && paneState.term) {
+          try { paneState.term.focus(); } catch (_) {}
         }
       }, 60);
     },
@@ -31604,6 +31607,10 @@ Aturan:
           pane.addEventListener('click', () => {
             if (this.activePane !== num) {
               this.setActivePane(num);
+            }
+            const pState = this.getPaneState(num);
+            if (pState && pState.term) {
+              try { pState.term.focus(); } catch (_) {}
             }
           });
         }
