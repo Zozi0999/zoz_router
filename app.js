@@ -30944,7 +30944,7 @@ Aturan:
 
       const keybar = document.getElementById('termMobileTouchKeybar');
       if (keybar && (isMobile || this.isRemoteConnected)) {
-        keybar.style.display = 'flex';
+        keybar.style.display = 'grid';
       }
 
       this.updateMobileBannerUI();
@@ -30991,7 +30991,7 @@ Aturan:
         if (sub) sub.textContent = 'PowerShell laptop aktif via Cloudflare Tunnel';
         if (actions) {
           actions.innerHTML = `
-            <button type="button" class="term-banner-btn primary" id="btnBannerWake" title="Segarkan layar / kirim Enter">
+            <button type="button" class="term-banner-btn primary" id="btnBannerWake" title="Segarkan layar & ukuran terminal">
               <i class="fa-solid fa-arrows-rotate"></i> <span>Refresh</span>
             </button>
             <button type="button" class="term-banner-btn secondary" id="btnBannerDisconnect" title="Putuskan koneksi remote">
@@ -31001,14 +31001,14 @@ Aturan:
           document.getElementById('btnBannerWake')?.addEventListener('click', () => {
             const tab = this.getActiveTab();
             const sId = tab?.pane1?.sessionId;
-            if (sId) {
-              if (tab.pane1?.term) {
-                this.sendPtyResize(sId, tab.pane1.term.cols, tab.pane1.term.rows);
+            if (sId && tab.pane1?.term) {
+              this.sendPtyResize(sId, tab.pane1.term.cols, tab.pane1.term.rows);
+              if (!tab.pane1._hasReceivedData) {
+                this.sendPtyInput(sId, '\r');
               }
-              this.sendPtyInput(sId, '\r');
             }
             this.fitAllPanes();
-            showToast('Layar terminal diperbarui.', 'info');
+            showToast('Layar terminal disesuaikan & diperbarui.', 'info');
           });
           document.getElementById('btnBannerDisconnect')?.addEventListener('click', () => {
             this.disconnectRemoteTerminal();
@@ -31161,7 +31161,7 @@ Aturan:
           }
 
           const keybar = document.getElementById('termMobileTouchKeybar');
-          if (keybar) keybar.style.display = 'flex';
+          if (keybar) keybar.style.display = 'grid';
 
           this.startRemotePingProbe();
           this.updateSyncButtonUI();
@@ -31177,7 +31177,7 @@ Aturan:
             if (sessRes.ok) {
               const sessData = await sessRes.json();
               if (sessData && Array.isArray(sessData.sessions) && sessData.sessions.length > 0) {
-                const sorted = sessData.sessions.sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0));
+                const sorted = sessData.sessions.sort((a, b) => ((b.lastInputAt || b.lastActivity || 0) - (a.lastInputAt || a.lastActivity || 0)));
                 const hostSession = sorted[0];
                 if (hostSession && hostSession.id) {
                   const t = this.getActiveTab();
@@ -32025,7 +32025,7 @@ Aturan:
         lineHeight: 1.2,
         scrollback: 5000,
         allowTransparency: true,
-        convertEol: true
+        convertEol: false
       });
 
       const fitAddon = (typeof window.FitAddon !== 'undefined' && window.FitAddon.FitAddon)
@@ -32037,15 +32037,74 @@ Aturan:
       }
 
       term.open(container);
+
+      // Mobile / IME Instant Keystroke & Slash ('/') / CTRL+Key Fix:
+      // Disable browser IME composition buffering on container (capture phase) so xterm.js v5.3.0
+      // emits '/', 'c' (for CTRL+C), and Backspace in 0ms without waiting for word completion.
+      if (term.textarea) {
+        term.textarea.setAttribute('autocomplete', 'off');
+        term.textarea.setAttribute('autocorrect', 'off');
+        term.textarea.setAttribute('autocapitalize', 'none');
+        term.textarea.setAttribute('spellcheck', 'false');
+        term.textarea.setAttribute('enterkeyhint', 'enter');
+        if (this.isMobileDevice()) {
+          term.textarea.value = ' ';
+        }
+      }
+
+      const stopMobileComposition = (ev) => {
+        if (this.isMobileDevice() || this.isCtrlActive || this.isAltActive) {
+          ev.stopImmediatePropagation();
+          if (term._core && term._core._compositionHelper) {
+            term._core._compositionHelper._isComposing = false;
+          }
+        }
+      };
+      container.addEventListener('compositionstart', stopMobileComposition, true);
+      container.addEventListener('compositionupdate', stopMobileComposition, true);
+      container.addEventListener('compositionend', stopMobileComposition, true);
+
+      container.addEventListener('keydown', (ev) => {
+        if (ev.keyCode === 229 && term.textarea) {
+          if (term.textarea.value.length === 0) {
+            term.textarea.value = ' ';
+            try { term.textarea.setSelectionRange(1, 1); } catch (_) {}
+          }
+          if (term._core && term._core._compositionHelper) {
+            term._core._compositionHelper._isComposing = false;
+          }
+        }
+      }, true);
+
+      container.addEventListener('input', (ev) => {
+        if (!this.isMobileDevice() && !this.isCtrlActive && !this.isAltActive) return;
+        // Fallback for mobile virtual keyboards that fire 'input' (insertText / deleteContentBackward)
+        // without firing keydown(229) first (where xterm.js _inputEvent drops it due to e.composed === true).
+        const now = Date.now();
+        if (ev.inputType === 'insertText' && typeof ev.data === 'string' && ev.data.length > 0) {
+          setTimeout(() => {
+            if (!paneState._lastDataEmitAt || (Date.now() - paneState._lastDataEmitAt) > 35) {
+              if (term._core && term._core.coreService) {
+                term._core.coreService.triggerDataEvent(ev.data, true);
+              }
+            }
+          }, 12);
+        }
+      }, true);
+
       if (fitAddon) {
         try {
           fitAddon.fit();
-          this.sendPtyResize(sessionId, term.cols, term.rows);
+          if (!this.isMobileDevice()) {
+            this.sendPtyResize(sessionId, term.cols, term.rows);
+          }
         } catch (_) {}
         setTimeout(() => {
           try {
             fitAddon.fit();
-            this.sendPtyResize(sessionId, term.cols, term.rows);
+            if (!this.isMobileDevice()) {
+              this.sendPtyResize(sessionId, term.cols, term.rows);
+            }
           } catch (_) {}
         }, 50);
       }
@@ -32058,8 +32117,12 @@ Aturan:
         paneState._resizeObserver = new ResizeObserver(() => {
           if (paneState.fitAddon && paneState.term) {
             try {
+              const prevCols = paneState.term.cols;
+              const prevRows = paneState.term.rows;
               paneState.fitAddon.fit();
-              this.sendPtyResize(paneState.sessionId, paneState.term.cols, paneState.term.rows);
+              if (!this.isMobileDevice() || prevCols !== paneState.term.cols || prevRows !== paneState.term.rows) {
+                this.sendPtyResize(paneState.sessionId, paneState.term.cols, paneState.term.rows);
+              }
             } catch (_) {}
           }
         });
@@ -32077,23 +32140,37 @@ Aturan:
       }
 
       container.addEventListener('click', () => {
+        this.ensureActivePtySize(paneState);
         if (paneState && paneState.sessionId && !paneState._hasReceivedData) {
           this.sendPtyInput(paneState.sessionId, '\r');
         }
       });
       container.addEventListener('touchstart', () => {
+        this.ensureActivePtySize(paneState);
         if (paneState && paneState.sessionId && !paneState._hasReceivedData) {
           this.sendPtyInput(paneState.sessionId, '\r');
         }
       }, { passive: true });
 
       term.onData((data) => {
+        paneState._lastDataEmitAt = Date.now();
+        if (this.isMobileDevice() && term.textarea) {
+          setTimeout(() => {
+            try {
+              if (term.textarea && term.textarea.value !== ' ') {
+                term.textarea.value = ' ';
+                term.textarea.setSelectionRange(1, 1);
+              }
+            } catch (_) {}
+          }, 0);
+        }
+
         // Sticky CTRL Modifier from Mobile Touch Keybar
         if (this.isCtrlActive) {
           this.isCtrlActive = false;
           const ctrlBtn = document.getElementById('btnTouchCtrl');
           if (ctrlBtn) ctrlBtn.classList.remove('active');
-          if (typeof data === 'string' && data.length === 1) {
+          if (typeof data === 'string' && data.length >= 1) {
             const code = data.charCodeAt(0);
             if (code >= 65 && code <= 90) { // A-Z
               data = String.fromCharCode(code - 64);
@@ -32112,9 +32189,12 @@ Aturan:
           data = '\x1b' + data;
         }
 
+        // Ensure the PTY matches the currently typing device's screen dimensions
+        this.ensureActivePtySize(paneState);
+
         // Mode Live PTY (Local Server & Remote WAN)
         if (!paneState.isFallbackMode) {
-          this.sendPtyInput(sessionId, data);
+          this.sendPtyInput(paneState.sessionId || sessionId, data);
           return;
         }
 
@@ -32142,21 +32222,41 @@ Aturan:
       });
 
       term.onResize(({ cols, rows }) => {
-        this.sendPtyResize(sessionId, cols, rows);
+        if (!this.isMobileDevice() || !paneState.ptyCols) {
+          this.sendPtyResize(paneState.sessionId || sessionId, cols, rows);
+        }
       });
 
       this.connectStream(tab, paneState, paneNum);
     },
 
+    ensureActivePtySize(paneState) {
+      if (!paneState || !paneState.term || !paneState.sessionId || paneState.isFallbackMode) return;
+      const cols = paneState.term.cols;
+      const rows = paneState.term.rows;
+      if (cols > 0 && rows > 0 && (paneState.ptyCols !== cols || paneState.ptyRows !== rows)) {
+        paneState.ptyCols = cols;
+        paneState.ptyRows = rows;
+        this.sendPtyResize(paneState.sessionId, cols, rows);
+      }
+    },
+
     connectStream(tab, paneState, paneNum) {
       const sessionId = paneState.sessionId || `${tab.id}-p${paneNum}`;
       paneState.sessionId = sessionId;
+      if (paneState._reconnectTimer) {
+        clearTimeout(paneState._reconnectTimer);
+        paneState._reconnectTimer = null;
+      }
       if (paneState.eventSource) {
         try { paneState.eventSource.close(); } catch (_) {}
         paneState.eventSource = null;
       }
       if (paneState.ws) {
-        try { paneState.ws.close(); } catch (_) {}
+        try {
+          paneState.ws._manualClose = true;
+          paneState.ws.close();
+        } catch (_) {}
         paneState.ws = null;
       }
 
@@ -32165,8 +32265,8 @@ Aturan:
       }
 
       const activeTerm = paneState.term;
-      const cols = (activeTerm && activeTerm.cols) ? activeTerm.cols : (this.isMobileDevice() ? 45 : 100);
-      const rows = (activeTerm && activeTerm.rows) ? activeTerm.rows : (this.isMobileDevice() ? 30 : 28);
+      const cols = (activeTerm && activeTerm.cols) ? activeTerm.cols : (this.isMobileDevice() ? 45 : 110);
+      const rows = (activeTerm && activeTerm.rows) ? activeTerm.rows : (this.isMobileDevice() ? 30 : 30);
       let queryParams = `session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}`;
       if (this.remotePin) {
         queryParams += `&pin=${encodeURIComponent(this.remotePin)}`;
@@ -32215,13 +32315,8 @@ Aturan:
           } else {
             if (statusLabel) statusLabel.textContent = 'Aktif (PTY)';
           }
-          if (paneState.term) {
+          if (paneState.term && !this.isMobileDevice()) {
             this.sendPtyResize(sessionId, paneState.term.cols, paneState.term.rows);
-            setTimeout(() => {
-              if (!paneState._hasReceivedData) {
-                this.sendPtyInput(sessionId, '\r');
-              }
-            }, 100);
           }
         };
 
@@ -32233,18 +32328,24 @@ Aturan:
         };
 
         ws.onerror = () => {
-          if (!wsConnected) {
+          if (!wsConnected && !ws._manualClose) {
             this.connectSseStream(tab, paneState, paneNum, queryParams, statusLabel, statusDot, sessionId);
           }
         };
 
         ws.onclose = () => {
           if (paneState.ws === ws) paneState.ws = null;
+          if (ws._manualClose) return;
           if (!wsConnected) {
             this.connectSseStream(tab, paneState, paneNum, queryParams, statusLabel, statusDot, sessionId);
           } else {
-            if (statusLabel) statusLabel.textContent = this.isRemoteConnected ? '☁️ Remote (Terputus)' : 'Terputus';
-            if (statusDot) statusDot.className = 'pane-status-dot offline';
+            if (statusLabel) statusLabel.textContent = this.isRemoteConnected ? '☁️ Menyambung ulang…' : 'Menyambung ulang…';
+            if (statusDot) statusDot.className = 'pane-status-dot connecting';
+            paneState._reconnectTimer = setTimeout(() => {
+              if (!paneState.ws && !paneState.eventSource) {
+                this.connectStream(tab, paneState, paneNum);
+              }
+            }, 1500);
           }
         };
       } catch (_) {
@@ -32306,12 +32407,20 @@ Aturan:
       if (msg.type === 'data' || msg.type === 'init') {
         paneState._hasReceivedData = true;
         if (currentTerm && typeof msg.data === 'string') {
+          if (msg.type === 'init') {
+            try { currentTerm.reset(); } catch (_) {}
+          }
           currentTerm.write(msg.data);
           this.handleAutoRespond(tab, paneState, paneNum, msg.data);
         } else if (typeof msg.data === 'string') {
           paneState._pendingBuffer = (paneState._pendingBuffer || '') + msg.data;
         }
+      } else if (msg.type === 'pty-resize') {
+        if (msg.cols) paneState.ptyCols = msg.cols;
+        if (msg.rows) paneState.ptyRows = msg.rows;
       } else if (msg.type === 'connected') {
+        if (msg.cols) paneState.ptyCols = msg.cols;
+        if (msg.rows) paneState.ptyRows = msg.rows;
         if (this.isRemoteConnected) {
           const lat = this.remotePingMs !== null ? ` • ${this.remotePingMs}ms` : '';
           if (statusLabel) statusLabel.textContent = `☁️ Remote WAN (PTY)${lat}`;
@@ -32329,13 +32438,8 @@ Aturan:
           if (paneNum === 1) tab.cwd = msg.cwd;
           this.updatePaneHeaders();
         }
-        if (currentTerm) {
-          this.sendPtyResize(sessionId, currentTerm.cols, currentTerm.rows);
-          setTimeout(() => {
-            if (!paneState._hasReceivedData && (this.isRemoteConnected || this.isWindowsSynced)) {
-              this.sendPtyInput(sessionId, '\r');
-            }
-          }, 250);
+        if (currentTerm && !this.isMobileDevice()) {
+          this.ensureActivePtySize(paneState);
         }
       } else if (msg.type === 'exit') {
         if (currentTerm) {
@@ -33112,6 +33216,11 @@ Aturan:
       if (!keybar) return;
 
       keybar.querySelectorAll('.term-touch-key').forEach(btn => {
+        // Prevent button tap from stealing focus from xterm's hidden textarea
+        btn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+        });
+
         btn.addEventListener('click', async (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -33128,12 +33237,26 @@ Aturan:
           const paneState = this.getPaneState(paneNum);
           const sId = paneState?.sessionId || `${tab?.id}-p${paneNum}`;
 
+          this.ensureActivePtySize(paneState);
+
+          const keepFocus = () => {
+            if (paneState?.term) {
+              try {
+                paneState.term.focus();
+                if (paneState.term.textarea) {
+                  paneState.term.textarea.focus({ preventScroll: true });
+                }
+              } catch (_) {}
+            }
+          };
+
           if (cmdType) {
             if (paneState?.term && !paneState.isFallbackMode) {
               this.sendPtyInput(sId, `${cmdType}\r`);
             } else {
               this.executeCommand(cmdType);
             }
+            keepFocus();
             return;
           }
 
@@ -33141,7 +33264,8 @@ Aturan:
             this.isCtrlActive = !this.isCtrlActive;
             const ctrlBtn = document.getElementById('btnTouchCtrl');
             if (ctrlBtn) ctrlBtn.classList.toggle('active', this.isCtrlActive);
-            showToast(this.isCtrlActive ? 'CTRL aktif (Tekan tombol huruf berikutnya)' : 'CTRL nonaktif', 'info');
+            showToast(this.isCtrlActive ? 'CTRL aktif (Tekan huruf di keyboard, misal c untuk Ctrl+C)' : 'CTRL nonaktif', 'info');
+            keepFocus();
             return;
           }
 
@@ -33150,11 +33274,13 @@ Aturan:
             const altBtn = document.getElementById('btnTouchAlt');
             if (altBtn) altBtn.classList.toggle('active', this.isAltActive);
             showToast(this.isAltActive ? 'ALT aktif (Tekan tombol huruf berikutnya)' : 'ALT nonaktif', 'info');
+            keepFocus();
             return;
           }
 
           if (keyType === 'Enter') {
             this.sendEnterToPane(paneNum);
+            keepFocus();
             return;
           }
 
@@ -33175,13 +33301,22 @@ Aturan:
             } catch (err) {
               showToast('Gagal membaca clipboard. Izinkan akses clipboard di browser.', 'warning');
             }
+            keepFocus();
             return;
           }
 
           let ptySeq = '';
-          if (keyType === 'Escape') ptySeq = '\x1b';
+          if (keyType === 'slash') ptySeq = '/';
+          else if (keyType === 'Backspace') ptySeq = '\x7f';
+          else if (keyType === 'Escape') ptySeq = '\x1b';
           else if (keyType === 'Tab') ptySeq = '\t';
-          else if (keyType === 'ctrl_c') ptySeq = '\x03';
+          else if (keyType === 'ctrl_c') {
+            ptySeq = '\x03';
+            if (this.isCtrlActive) {
+              this.isCtrlActive = false;
+              document.getElementById('btnTouchCtrl')?.classList.remove('active');
+            }
+          }
           else if (keyType === 'ctrl_d') ptySeq = '\x04';
           else if (keyType === 'ctrl_z') ptySeq = '\x1a';
           else if (keyType === 'ctrl_l') ptySeq = '\x0c';
@@ -33204,9 +33339,13 @@ Aturan:
                 if (paneState?.term) paneState.term.write(`\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
               } else if (keyType === 'ctrl_l') {
                 this.clearActiveScreen();
+              } else if (keyType === 'slash' && paneState?.term) {
+                paneState._inputLine = (paneState._inputLine || '') + '/';
+                paneState.term.write('/');
               }
             }
           }
+          keepFocus();
         });
       });
     },
@@ -33346,7 +33485,7 @@ Aturan:
 
       // Hover-to-Focus / Focus-Follows-Mouse untuk Mode Split & Desktop Typing:
       // Pengguna cukup mengarahkan kursor ke atas pane/tab atau klik/sentuh untuk langsung mengetik di xterm PTY
-      const activateAndFocusPane = (num) => {
+      const activateAndFocusPane = (num, syncSize = false) => {
         if (isResizerDragging) return;
         const tab = this.getActiveTab();
         if (tab && tab.isSplit && this.activePane !== num) {
@@ -33354,10 +33493,13 @@ Aturan:
         }
         const pState = this.getPaneState(num);
         if (pState && pState.term) {
+          if (syncSize) {
+            this.ensureActivePtySize(pState);
+          }
           try {
             pState.term.focus();
             if (pState.term.textarea) {
-              pState.term.textarea.focus();
+              pState.term.textarea.focus({ preventScroll: true });
             }
           } catch (_) {}
         }
@@ -33368,16 +33510,16 @@ Aturan:
         const screen = document.getElementById(`termScreen${num}`);
 
         if (pane) {
-          // Klik manual & mousedown / touchstart langsung memfokuskan xterm
-          pane.addEventListener('touchstart', () => activateAndFocusPane(num), { passive: true });
-          pane.addEventListener('mousedown', () => activateAndFocusPane(num));
-          pane.addEventListener('click', () => activateAndFocusPane(num));
+          // Klik manual & mousedown / touchstart langsung memfokuskan xterm & menyamakan ukuran PTY
+          pane.addEventListener('touchstart', () => activateAndFocusPane(num, true), { passive: true });
+          pane.addEventListener('mousedown', () => activateAndFocusPane(num, true));
+          pane.addEventListener('click', () => activateAndFocusPane(num, true));
 
           // Hover-to-Focus saat kursor masuk ke pane
           pane.addEventListener('mouseenter', () => {
             const tab = this.getActiveTab();
             if (tab && tab.isSplit) {
-              activateAndFocusPane(num);
+              activateAndFocusPane(num, false);
             }
           });
 
@@ -33385,19 +33527,19 @@ Aturan:
           pane.addEventListener('pointermove', () => {
             const tab = this.getActiveTab();
             if (tab && tab.isSplit && this.activePane !== num) {
-              activateAndFocusPane(num);
+              activateAndFocusPane(num, false);
             }
           }, { passive: true });
         }
 
         if (screen) {
-          screen.addEventListener('touchstart', () => activateAndFocusPane(num), { passive: true });
-          screen.addEventListener('mousedown', () => activateAndFocusPane(num));
-          screen.addEventListener('click', () => activateAndFocusPane(num));
+          screen.addEventListener('touchstart', () => activateAndFocusPane(num, true), { passive: true });
+          screen.addEventListener('mousedown', () => activateAndFocusPane(num, true));
+          screen.addEventListener('click', () => activateAndFocusPane(num, true));
           screen.addEventListener('mouseenter', () => {
             const tab = this.getActiveTab();
             if (tab && tab.isSplit) {
-              activateAndFocusPane(num);
+              activateAndFocusPane(num, false);
             }
           });
         }
@@ -33495,45 +33637,92 @@ Aturan:
         this.fitAllPanes();
       });
 
-      // Capture-phase keydown: Pastikan ketikan keyboard desktop selalu diarahkan ke xterm PTY aktif tanpa hilang
+      // Capture-phase keydown: Pastikan ketikan keyboard desktop (termasuk '/', Ctrl+C, Esc)
+      // selalu diarahkan ke xterm PTY aktif pada tekanan pertama meskipun fokus sempat di luar textarea
       window.addEventListener('keydown', (e) => {
         const modal = document.getElementById('terminalModal');
         if (!modal || !modal.classList.contains('show')) return;
         if (this.isMobileDevice()) return;
 
-        // Jangan intervensi jika modal tunnel atau prompt remote sedang terbuka
+        // Jangan intervensi jika modal tunnel, QR scanner, atau overlay remote sedang terbuka
         const remoteModal = document.getElementById('termRemoteTunnelModal');
         if (remoteModal && remoteModal.classList.contains('show')) return;
-        const remotePrompt = document.getElementById('termMobileRemotePrompt');
-        if (remotePrompt && remotePrompt.style.display !== 'none') return;
+        const qrModal = document.getElementById('termQrScannerModal');
+        if (qrModal && qrModal.classList.contains('show')) return;
+        const remoteOverlay = document.getElementById('termRemoteOverlay');
+        if (remoteOverlay && remoteOverlay.style.display !== 'none' && remoteOverlay.style.display !== '') return;
 
-        // Jangan intervensi jika fokus sudah berada di dalam input / textarea / editable
-        const activeEl = document.activeElement;
-        const tag = (activeEl?.tagName || '').toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || tag === 'select' || activeEl?.isContentEditable) {
-          return;
-        }
-
-        // Izinkan pintasan browser standar
-        if (e.key === 'F5' || e.key === 'F12' || (e.ctrlKey && (e.key === 'r' || e.key === 'R' || e.key === 'w' || e.key === 'W'))) {
+        // Izinkan pintasan browser standar & toggle terminal
+        if (e.key === 'F5' || e.key === 'F12' || (e.ctrlKey && (e.key === '`' || e.code === 'Backquote' || e.key === 'r' || e.key === 'R' || e.key === 'w' || e.key === 'W'))) {
           return;
         }
 
         const paneState = this.getPaneState(this.activePane || 1);
-        if (paneState && paneState.term) {
-          try {
-            paneState.term.focus();
-          } catch (_) {}
+        if (!paneState || !paneState.term) return;
+
+        const activeEl = document.activeElement;
+        const tag = (activeEl?.tagName || '').toLowerCase();
+        if (activeEl === paneState.term.textarea) {
+          this.ensureActivePtySize(paneState);
+          return;
+        }
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || activeEl?.isContentEditable) {
+          return;
+        }
+
+        // Fokus belum di term.textarea (mis. habis klik tombol toolbar/tab): fokuskan & teruskan ketikan pertama!
+        this.ensureActivePtySize(paneState);
+        try {
+          paneState.term.focus();
+          if (paneState.term.textarea) {
+            paneState.term.textarea.focus({ preventScroll: true });
+          }
+        } catch (_) {}
+
+        if (paneState.isFallbackMode || !paneState.sessionId) return;
+
+        if (e.ctrlKey && !e.altKey && !e.metaKey) {
+          if ((e.key === 'c' || e.key === 'C') && (!window.getSelection || !window.getSelection().toString())) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.sendPtyInput(paneState.sessionId, '\x03');
+          } else if (e.key === 'd' || e.key === 'D') {
+            e.preventDefault();
+            e.stopPropagation();
+            this.sendPtyInput(paneState.sessionId, '\x04');
+          } else if (e.key === 'l' || e.key === 'L') {
+            e.preventDefault();
+            e.stopPropagation();
+            this.sendPtyInput(paneState.sessionId, '\x0c');
+          } else if (e.key === 'z' || e.key === 'Z') {
+            e.preventDefault();
+            e.stopPropagation();
+            this.sendPtyInput(paneState.sessionId, '\x1a');
+          }
+          return;
+        }
+
+        if (!e.ctrlKey && !e.altKey && !e.metaKey) {
+          let seq = '';
+          if (e.key.length === 1) seq = e.key;
+          else if (e.key === 'Enter') seq = '\r';
+          else if (e.key === 'Backspace') seq = '\x7f';
+          else if (e.key === 'Escape') seq = '\x1b';
+          else if (e.key === 'Tab') seq = '\t';
+          else if (e.key === 'ArrowUp') seq = '\x1b[A';
+          else if (e.key === 'ArrowDown') seq = '\x1b[B';
+          else if (e.key === 'ArrowRight') seq = '\x1b[C';
+          else if (e.key === 'ArrowLeft') seq = '\x1b[D';
+
+          if (seq) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.sendPtyInput(paneState.sessionId, seq);
+          }
         }
       }, true);
 
       window.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-          const modal = document.getElementById('terminalModal');
-          if (modal && modal.classList.contains('show')) {
-            closeModal('terminalModal');
-          }
-        }
         if (e.ctrlKey && (e.key === '`' || e.code === 'Backquote')) {
           e.preventDefault();
           this.toggle();

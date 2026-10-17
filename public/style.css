@@ -12676,10 +12676,10 @@ body.mermaid-has-fullscreen {
 
 .terminal-modal-card {
   position: relative;
-  width: min(96vw, 1260px);
-  max-width: 96vw;
-  height: min(91vh, 840px);
-  max-height: 91vh;
+  width: min(98vw, 1520px);
+  max-width: 98vw;
+  height: min(93vh, 900px);
+  max-height: 93vh;
   box-sizing: border-box;
   background: #070c14;
   border: 1px solid rgba(0, 240, 255, 0.35);
@@ -13706,45 +13706,41 @@ body.mermaid-has-fullscreen {
    CLOUDFLARE TUNNEL REMOTE ACCESS & MOBILE ERGONOMICS (v335)
    ========================================================================= */
 
-/* Mobile Touch Keybar */
+/* Mobile Touch Keybar (2-Row 9-Column Always-Visible Grid) */
 .terminal-mobile-keybar {
-  display: flex;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  gap: 5px;
-  padding: 6px 10px;
-  background: rgba(10, 15, 28, 0.95);
-  border-top: 1px solid rgba(56, 189, 248, 0.2);
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 4px;
+  padding: 6px 6px;
+  background: rgba(10, 15, 28, 0.98);
+  border-top: 1px solid rgba(56, 189, 248, 0.28);
   align-items: center;
   z-index: 10;
-  -webkit-overflow-scrolling: touch;
-}
-.terminal-mobile-keybar::-webkit-scrollbar {
-  height: 3px;
-}
-.terminal-mobile-keybar::-webkit-scrollbar-thumb {
-  background: rgba(56, 189, 248, 0.3);
-  border-radius: 2px;
+  flex-shrink: 0;
 }
 .term-touch-key {
-  flex: 0 0 auto;
-  min-width: 38px;
+  min-width: 0;
+  width: 100%;
   height: 32px;
-  padding: 0 10px;
-  background: rgba(30, 41, 59, 0.85);
-  border: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 0 2px;
+  background: rgba(30, 41, 59, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 5px;
   color: #e2e8f0;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   font-weight: 600;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   user-select: none;
+  -webkit-user-select: none;
   touch-action: manipulation;
-  transition: all 0.12s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all 0.1s ease;
 }
 .term-touch-key:hover {
   background: rgba(51, 65, 85, 0.95);
@@ -13757,9 +13753,27 @@ body.mermaid-has-fullscreen {
   border-color: #38bdf8;
   color: #ffffff;
 }
-.term-touch-key.primary {
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(2, 132, 199, 0.4));
+.term-touch-key.slash-key {
+  background: rgba(14, 165, 233, 0.2);
   border-color: rgba(56, 189, 248, 0.55);
+  color: #38bdf8;
+  font-weight: 800;
+  font-size: 0.85rem;
+}
+.term-touch-key.danger-key {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fca5a5;
+  font-weight: 800;
+}
+.term-touch-key.danger-key:active {
+  background: #dc2626;
+  border-color: #f87171;
+  color: #ffffff;
+}
+.term-touch-key.primary {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.3), rgba(2, 132, 199, 0.45));
+  border-color: rgba(56, 189, 248, 0.65);
   color: #38bdf8;
   font-weight: 700;
 }
@@ -13771,10 +13785,10 @@ body.mermaid-has-fullscreen {
 /* Touch Keybar Modifiers (CTRL, ALT sticky latch) */
 .term-touch-key.term-mod-key {
   font-weight: 800;
-  letter-spacing: 0.5px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  color: #94a3b8;
+  letter-spacing: 0.2px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: #cbd5e1;
   transition: all 0.15s ease;
 }
 

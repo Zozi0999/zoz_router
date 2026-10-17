@@ -41,9 +41,9 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="xterm.css?v=20261017_v339">
-  <link rel="preload" as="style" href="style.min.css?v=20261017_v339">
-  <link rel="stylesheet" href="style.min.css?v=20261017_v339">
+  <link rel="stylesheet" href="xterm.css?v=20261017_v341">
+  <link rel="preload" as="style" href="style.min.css?v=20261017_v341">
+  <link rel="stylesheet" href="style.min.css?v=20261017_v341">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -2685,30 +2685,26 @@
         </div>
       </div>
 
-      <!-- Mobile Touch Keybar for PowerShell (Ergonomi sentuh HP) -->
+      <!-- Mobile Touch Keybar for PowerShell & Antigravity CLI (2-Row Termux Layout) -->
       <div class="terminal-mobile-keybar" id="termMobileTouchKeybar" style="display: none;">
         <button type="button" class="term-touch-key term-mod-key ctrl-modifier-key" id="btnTouchCtrl" data-key="ctrl_toggle" title="Ctrl Modifier Toggle (Termux style)">CTRL</button>
         <button type="button" class="term-touch-key term-mod-key alt-modifier-key" id="btnTouchAlt" data-key="alt_toggle" title="Alt Modifier Toggle">ALT</button>
-        <button type="button" class="term-touch-key" data-key="Escape" title="Escape">ESC</button>
+        <button type="button" class="term-touch-key slash-key" data-key="slash" title="Slash Command (/)">/</button>
+        <button type="button" class="term-touch-key" data-key="Escape" title="Escape (Tutup Menu/Batal)">ESC</button>
         <button type="button" class="term-touch-key" data-key="Tab" title="Tab Autocomplete">TAB</button>
-        <button type="button" class="term-touch-key" data-key="ctrl_c" title="Interupsi Perintah (Ctrl+C)">^C</button>
+        <button type="button" class="term-touch-key danger-key" data-key="ctrl_c" title="Interupsi Perintah (Ctrl+C)">^C</button>
         <button type="button" class="term-touch-key" data-key="ctrl_d" title="Keluar / EOF (Ctrl+D)">^D</button>
         <button type="button" class="term-touch-key" data-key="ctrl_z" title="Tunda Perintah (Ctrl+Z)">^Z</button>
         <button type="button" class="term-touch-key" data-key="ctrl_l" title="Bersihkan Layar (Ctrl+L)">^L</button>
-        <button type="button" class="term-touch-key" data-key="ctrl_a" title="Awal Baris (Ctrl+A)">^A</button>
-        <button type="button" class="term-touch-key" data-key="ctrl_e" title="Akhir Baris (Ctrl+E)">^E</button>
         <button type="button" class="term-touch-key" data-key="Home" title="Home (Awal Baris)">HOME</button>
         <button type="button" class="term-touch-key" data-key="End" title="End (Akhir Baris)">END</button>
-        <button type="button" class="term-touch-key" data-key="ArrowUp" title="Riwayat Sebelumnya">↑</button>
-        <button type="button" class="term-touch-key" data-key="ArrowDown" title="Riwayat Selanjutnya">↓</button>
+        <button type="button" class="term-touch-key" data-key="ArrowUp" title="Atas / Riwayat Sebelumnya">↑</button>
+        <button type="button" class="term-touch-key" data-key="ArrowDown" title="Bawah / Riwayat Selanjutnya">↓</button>
         <button type="button" class="term-touch-key" data-key="ArrowLeft" title="Kiri">←</button>
         <button type="button" class="term-touch-key" data-key="ArrowRight" title="Kanan">→</button>
         <button type="button" class="term-touch-key" data-key="paste" title="Tempel Clipboard">Paste</button>
+        <button type="button" class="term-touch-key" data-key="Backspace" title="Hapus Karakter (Backspace)">⌫</button>
         <button type="button" class="term-touch-key primary" data-key="Enter" title="Kirim Enter">↵ Enter</button>
-        <button type="button" class="term-touch-key chip-key" data-cmd="dir" title="Jalankan dir">dir</button>
-        <button type="button" class="term-touch-key chip-key" data-cmd="git status" title="Jalankan git status">git status</button>
-        <button type="button" class="term-touch-key chip-key" data-cmd="node -v" title="Jalankan node -v">node -v</button>
-        <button type="button" class="term-touch-key chip-key" data-cmd="cls" title="Jalankan cls">cls</button>
       </div>
 
       <!-- Quick Command Action Chips Bar -->
@@ -2867,11 +2863,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous" defer></script>
   <!-- Heavy libraries (Mermaid, jsPDF, PDF.js, JSZip) are dynamically loaded on-demand to optimize FCP, TBT & LCP -->
   <!-- Terminal In-Tab Xterm & FitAddon Engine -->
-  <script src="xterm.js?v=20261017_v339" defer></script>
-  <script src="addon-fit.js?v=20261017_v339" defer></script>
+  <script src="xterm.js?v=20261017_v341" defer></script>
+  <script src="addon-fit.js?v=20261017_v341" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261017_v339" defer></script>
+  <script src="text-safety.js?v=20261017_v341" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261017_v339" defer></script>
+  <script src="app.js?v=20261017_v341" defer></script>
 </body>
 </html>

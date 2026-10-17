@@ -5463,19 +5463,22 @@ async function requestHandler(req, res) {
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor'
           },
-          useConpty: false
+          useConpty: true
         });
 
         session = {
           id: sessionId,
           shell: shellType,
           cwd: targetCwd,
+          cols,
+          rows,
           pty: ptyProcess,
           clients: new Set(),
           wsClients: new Set(),
           buffer: [],
           createdAt: Date.now(),
-          lastActivity: Date.now()
+          lastActivity: Date.now(),
+          lastInputAt: Date.now()
         };
 
         ptyProcess.onData((data) => {
@@ -5514,25 +5517,31 @@ async function requestHandler(req, res) {
         return res.end();
       }
     } else if (session && session.pty && typeof session.pty.resize === 'function') {
-      try {
-        session.pty.resize(cols, rows);
-      } catch (_) {}
+      const isRemote = isRemoteTunnelRequest(req);
+      const hasActiveClients = (session.clients && session.clients.size > 0) || (session.wsClients && session.wsClients.size > 0);
+      if (!isRemote || !hasActiveClients) {
+        try {
+          session.pty.resize(cols, rows);
+          session.cols = cols;
+          session.rows = rows;
+        } catch (_) {}
+      }
     }
 
     session.clients.add(res);
 
     // Kirim konfirmasi terkoneksi dan buffer historis jika ada
-    res.write(`data: ${JSON.stringify({ type: 'connected', session: sessionId, shell: session.shell, cwd: session.cwd })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'connected', session: sessionId, shell: session.shell, cwd: session.cwd, cols: session.cols || cols, rows: session.rows || rows })}\n\n`);
     if (session.buffer && session.buffer.length > 0) {
       const replay = session.buffer.join('');
       res.write(`data: ${JSON.stringify({ type: 'init', data: replay })}\n\n`);
+    } else {
+      setTimeout(() => {
+        if (session && session.pty && (!session.buffer || session.buffer.length === 0)) {
+          try { session.pty.write('\r'); } catch (_) {}
+        }
+      }, 150);
     }
-    // Always trigger a prompt redraw upon client connect so client is never stuck on a blank screen
-    setTimeout(() => {
-      if (session && session.pty) {
-        try { session.pty.write('\r'); } catch (_) {}
-      }
-    }, 150);
 
     const heartbeat = setInterval(() => {
       if (!res.writableEnded) {
@@ -5543,10 +5552,11 @@ async function requestHandler(req, res) {
     req.on('close', () => {
       clearInterval(heartbeat);
       session.clients.delete(res);
-      // Grace period 10 menit bila tidak ada client aktif
-      if (session.clients.size === 0) {
+      const totalClients = (session.clients ? session.clients.size : 0) + (session.wsClients ? session.wsClients.size : 0);
+      if (totalClients === 0) {
         setTimeout(() => {
-          if (session.clients.size === 0 && activeTerminalSessions.get(sessionId) === session) {
+          const remClients = (session.clients ? session.clients.size : 0) + (session.wsClients ? session.wsClients.size : 0);
+          if (remClients === 0 && activeTerminalSessions.get(sessionId) === session) {
             try { session.pty.kill(); } catch (_) {}
             activeTerminalSessions.delete(sessionId);
           }
@@ -5565,13 +5575,17 @@ async function requestHandler(req, res) {
     }
     const sessions = [];
     for (const [id, s] of activeTerminalSessions.entries()) {
+      const cCount = (s.clients ? s.clients.size : 0) + (s.wsClients ? s.wsClients.size : 0);
       sessions.push({
         id,
         shell: s.shell,
         cwd: s.cwd,
-        clientsCount: s.clients ? s.clients.size : 0,
+        cols: s.cols || 100,
+        rows: s.rows || 28,
+        clientsCount: cCount,
         createdAt: s.createdAt,
         lastActivity: s.lastActivity,
+        lastInputAt: s.lastInputAt || s.createdAt,
         bufferLength: s.buffer ? s.buffer.length : 0
       });
     }
@@ -5593,6 +5607,7 @@ async function requestHandler(req, res) {
       if (session && session.pty) {
         session.pty.write(data);
         session.lastActivity = Date.now();
+        session.lastInputAt = Date.now();
         return sendJSON(res, 200, { success: true });
       }
       return sendJSON(res, 200, { success: false, reason: 'Session not found or PTY inactive', fallback: !nodePty });
@@ -5616,7 +5631,21 @@ async function requestHandler(req, res) {
       const session = activeTerminalSessions.get(sessionId);
       if (session && session.pty && typeof session.pty.resize === 'function') {
         try {
-          session.pty.resize(cols, rows);
+          if (session.cols !== cols || session.rows !== rows) {
+            session.pty.resize(cols, rows);
+            session.cols = cols;
+            session.rows = rows;
+            const resizePayload = JSON.stringify({ type: 'pty-resize', cols, rows });
+            for (const client of session.clients) {
+              try { if (!client.writableEnded) client.write(`data: ${resizePayload}\n\n`); } catch (_) {}
+            }
+            if (session.wsClients && session.wsClients.size > 0) {
+              const wsFrame = encodeWsFrame(resizePayload);
+              for (const ws of session.wsClients) {
+                try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+              }
+            }
+          }
           return sendJSON(res, 200, { success: true, cols, rows });
         } catch (resizeErr) {
           return sendJSON(res, 200, { success: false, error: resizeErr.message });
@@ -9276,19 +9305,22 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
           TERM: 'xterm-256color',
           COLORTERM: 'truecolor'
         },
-        useConpty: false
+        useConpty: true
       });
 
       session = {
         id: sessionId,
         shell: shellType,
         cwd: targetCwd,
+        cols,
+        rows,
         pty: ptyProcess,
         clients: new Set(),
         wsClients: new Set(),
         buffer: [],
         createdAt: Date.now(),
-        lastActivity: Date.now()
+        lastActivity: Date.now(),
+        lastInputAt: Date.now()
       };
 
       ptyProcess.onData((data) => {
@@ -9330,9 +9362,15 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       return;
     }
   } else if (session && session.pty && typeof session.pty.resize === 'function') {
-    try {
-      session.pty.resize(cols, rows);
-    } catch (_) {}
+    const isRemote = isRemoteTunnelRequest(req);
+    const hasActiveClients = (session.clients && session.clients.size > 0) || (session.wsClients && session.wsClients.size > 0);
+    if (!isRemote || !hasActiveClients) {
+      try {
+        session.pty.resize(cols, rows);
+        session.cols = cols;
+        session.rows = rows;
+      } catch (_) {}
+    }
   }
 
   if (!session.wsClients) session.wsClients = new Set();
@@ -9340,18 +9378,25 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
 
   // Kirim frame connected dan buffer historis (replay)
   try {
-    socket.write(encodeWsFrame(JSON.stringify({ type: 'connected', session: sessionId, shell: session.shell, cwd: session.cwd })));
+    socket.write(encodeWsFrame(JSON.stringify({
+      type: 'connected',
+      session: sessionId,
+      shell: session.shell,
+      cwd: session.cwd,
+      cols: session.cols || cols,
+      rows: session.rows || rows
+    })));
     if (session.buffer && session.buffer.length > 0) {
       socket.write(encodeWsFrame(JSON.stringify({ type: 'init', data: session.buffer.join('') })));
+    } else {
+      // Hanya kirim carriage return bila sesi baru dan buffer masih kosong
+      setTimeout(() => {
+        if (session && session.pty && (!session.buffer || session.buffer.length === 0)) {
+          try { session.pty.write('\r'); } catch (_) {}
+        }
+      }, 100);
     }
   } catch (_) {}
-
-  // Redraw prompt segera agar xterm tidak kosong
-  setTimeout(() => {
-    if (session && session.pty) {
-      try { session.pty.write('\r'); } catch (_) {}
-    }
-  }, 100);
 
   socket.on('data', (chunk) => {
     session.lastActivity = Date.now();
@@ -9366,15 +9411,31 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
             if (parsed.type === 'resize' && session.pty) {
               const c = Math.max(20, Math.min(300, parseInt(parsed.cols, 10) || cols));
               const r = Math.max(5, Math.min(100, parseInt(parsed.rows, 10) || rows));
-              session.pty.resize(c, r);
+              if (session.cols !== c || session.rows !== r) {
+                session.pty.resize(c, r);
+                session.cols = c;
+                session.rows = r;
+                const resizePayload = JSON.stringify({ type: 'pty-resize', cols: c, rows: r });
+                for (const client of session.clients) {
+                  try { if (!client.writableEnded) client.write(`data: ${resizePayload}\n\n`); } catch (_) {}
+                }
+                if (session.wsClients && session.wsClients.size > 0) {
+                  const wsFrame = encodeWsFrame(resizePayload);
+                  for (const ws of session.wsClients) {
+                    try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+                  }
+                }
+              }
               return;
             } else if (parsed.type === 'input' && typeof parsed.data === 'string' && session.pty) {
+              session.lastInputAt = Date.now();
               session.pty.write(parsed.data);
               return;
             }
           }
         } catch (_) {}
         if (session.pty) {
+          session.lastInputAt = Date.now();
           session.pty.write(str);
         }
       }
