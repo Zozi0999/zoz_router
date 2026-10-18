@@ -46,6 +46,7 @@ const SNAPSHOTS_DIR = path.join(WORKSPACE_ROOT, '.zoz-snapshots');
 // CLOUDFLARE TUNNEL REMOTE ACCESS (WAN Mobile-to-Desktop) STATE & ENGINE
 // =========================================================================
 const TUNNEL_STATE_FILE = path.join(__dirname, 'data', 'tunnel-state.json');
+const SYSTEM_BOOT_TIME = Math.round(Date.now() / 1000 - os.uptime());
 let persistedTunnel = null;
 try {
   if (fs.existsSync(TUNNEL_STATE_FILE)) {
@@ -54,11 +55,17 @@ try {
 } catch (_) {}
 
 let cloudflareTunnelProcess = null;
+let cloudflareTunnelPid = null;
 let cloudflareTunnelUrl = (persistedTunnel && persistedTunnel.url) || '';
-let cloudflareTunnelActive = Boolean(persistedTunnel && persistedTunnel.url);
+let cloudflareTunnelActive = false;
 let cloudflareTunnelError = '';
-let cloudflareTunnelPin = (persistedTunnel && persistedTunnel.pin) || generateSixDigitPin();
+// Persistent PIN: Keep identical PIN across server restarts for this laptop uptime
+let cloudflareTunnelPin = (persistedTunnel && persistedTunnel.pin)
+  ? String(persistedTunnel.pin).trim()
+  : generateSixDigitPin();
 let cloudflareTunnelStartedAt = (persistedTunnel && persistedTunnel.startedAt) || null;
+let isTunnelIntentionallyStopped = false;
+let globalAutoEnterEnabled = (persistedTunnel && typeof persistedTunnel.autoEnter === 'boolean') ? persistedTunnel.autoEnter : true;
 
 function savePersistedTunnelState() {
   try {
@@ -67,10 +74,17 @@ function savePersistedTunnelState() {
     fs.writeFileSync(TUNNEL_STATE_FILE, JSON.stringify({
       url: cloudflareTunnelUrl,
       pin: cloudflareTunnelPin,
-      startedAt: cloudflareTunnelStartedAt
+      pid: cloudflareTunnelPid,
+      startedAt: cloudflareTunnelStartedAt,
+      bootTime: SYSTEM_BOOT_TIME,
+      autoEnter: globalAutoEnterEnabled,
+      updatedAt: new Date().toISOString()
     }, null, 2));
   } catch (_) {}
 }
+
+// Initial state persistence ensuring PIN is locked to disk
+savePersistedTunnelState();
 
 function generateSixDigitPin() {
   return String(Math.floor(100000 + Math.random() * 900000));
@@ -85,12 +99,14 @@ function getCloudflaredBinaryPath() {
 }
 
 function startCloudflareTunnel(customPort) {
+  isTunnelIntentionallyStopped = false;
   return new Promise((resolve) => {
+    // If tunnel process is already running and active with URL, reuse it directly without changing URL
     if (cloudflareTunnelProcess && cloudflareTunnelActive && cloudflareTunnelUrl) {
       return resolve({
         active: true,
         tunnelUrl: cloudflareTunnelUrl,
-        wssUrl: cloudflareTunnelUrl.replace(/^http/, 'ws'),
+        wssUrl: cloudflareTunnelUrl.replace(/^http/i, 'ws'),
         pin: cloudflareTunnelPin,
         startedAt: cloudflareTunnelStartedAt
       });
@@ -102,7 +118,6 @@ function startCloudflareTunnel(customPort) {
     }
 
     cloudflareTunnelActive = false;
-    cloudflareTunnelUrl = '';
     cloudflareTunnelError = '';
 
     const binPath = getCloudflaredBinaryPath();
@@ -114,12 +129,13 @@ function startCloudflareTunnel(customPort) {
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe']
       });
+      cloudflareTunnelPid = cloudflareTunnelProcess.pid;
     } catch (err) {
       cloudflareTunnelError = `Gagal menjalankan cloudflared: ${err.message}.`;
       return resolve({
         active: false,
-        tunnelUrl: '',
-        wssUrl: '',
+        tunnelUrl: cloudflareTunnelUrl,
+        wssUrl: cloudflareTunnelUrl ? cloudflareTunnelUrl.replace(/^http/i, 'ws') : '',
         pin: cloudflareTunnelPin,
         error: cloudflareTunnelError
       });
@@ -133,7 +149,7 @@ function startCloudflareTunnel(customPort) {
           resolve({
             active: true,
             tunnelUrl: cloudflareTunnelUrl,
-            wssUrl: cloudflareTunnelUrl.replace(/^http/, 'ws'),
+            wssUrl: cloudflareTunnelUrl.replace(/^http/i, 'ws'),
             pin: cloudflareTunnelPin,
             startedAt: cloudflareTunnelStartedAt
           });
@@ -147,22 +163,25 @@ function startCloudflareTunnel(customPort) {
           });
         }
       }
-    }, 25000);
+    }, 30000);
 
     const onDataChunk = (chunk) => {
       const text = chunk.toString();
       const match = text.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/i);
-      if (match && !cloudflareTunnelUrl) {
-        cloudflareTunnelUrl = match[0].trim();
+      if (match) {
+        const detectedUrl = match[0].trim();
+        cloudflareTunnelUrl = detectedUrl;
         cloudflareTunnelActive = true;
         cloudflareTunnelStartedAt = new Date().toISOString();
+        savePersistedTunnelState();
+        console.log(`[Cloudflare] Tunnel Host Persistent: ${cloudflareTunnelUrl} (PIN: ${cloudflareTunnelPin})`);
         if (!resolved) {
           resolved = true;
           clearTimeout(timeoutTimer);
           resolve({
             active: true,
             tunnelUrl: cloudflareTunnelUrl,
-            wssUrl: cloudflareTunnelUrl.replace(/^http/, 'ws'),
+            wssUrl: cloudflareTunnelUrl.replace(/^http/i, 'ws'),
             pin: cloudflareTunnelPin,
             startedAt: cloudflareTunnelStartedAt
           });
@@ -195,17 +214,26 @@ function startCloudflareTunnel(customPort) {
         clearTimeout(timeoutTimer);
         resolve({ active: false, error: `Cloudflared keluar dengan kode ${code}`, pin: cloudflareTunnelPin });
       }
+      // Auto-restart tunnel watchdog: keep tunnel alive as long as laptop is powered on
+      if (!isTunnelIntentionallyStopped) {
+        setTimeout(() => {
+          if (!isTunnelIntentionallyStopped && !cloudflareTunnelProcess) {
+            console.log(`[Cloudflare] Menghubungkan kembali tunnel Cloudflare secara otomatis...`);
+            startCloudflareTunnel(targetPort);
+          }
+        }, 3000);
+      }
     });
   });
 }
 
 function stopCloudflareTunnel() {
+  isTunnelIntentionallyStopped = true;
   if (cloudflareTunnelProcess) {
     try { cloudflareTunnelProcess.kill(); } catch (_) {}
     cloudflareTunnelProcess = null;
   }
   cloudflareTunnelActive = false;
-  cloudflareTunnelUrl = '';
   return { active: false, message: 'Cloudflare Tunnel dimatikan.' };
 }
 
@@ -5483,10 +5511,11 @@ async function requestHandler(req, res) {
       return sendJSON(res, 403, { error: 'Hanya host lokal di laptop yang dapat meregenerasi PIN keamanan sesi.' });
     }
     cloudflareTunnelPin = generateSixDigitPin();
+    savePersistedTunnelState();
     return sendJSON(res, 200, {
       success: true,
       pin: cloudflareTunnelPin,
-      message: 'PIN keamanan sesi baru berhasil dibuat.'
+      message: 'PIN keamanan sesi baru berhasil dibuat dan disimpan.'
     });
   }
 
@@ -5501,6 +5530,7 @@ async function requestHandler(req, res) {
       cloudflareTunnelUrl = body.url.trim().replace(/\/+$/, '');
       cloudflareTunnelActive = true;
       cloudflareTunnelStartedAt = new Date().toISOString();
+      savePersistedTunnelState();
       return sendJSON(res, 200, {
         success: true,
         tunnelUrl: cloudflareTunnelUrl,
@@ -5677,20 +5707,7 @@ async function requestHandler(req, res) {
     req.on('close', () => {
       clearInterval(heartbeat);
       session.clients.delete(res);
-      const totalClients = (session.clients ? session.clients.size : 0) + (session.wsClients ? session.wsClients.size : 0);
-      if (totalClients === 0) {
-        setTimeout(() => {
-          const remClients = (session.clients ? session.clients.size : 0) + (session.wsClients ? session.wsClients.size : 0);
-          if (remClients === 0 && activeTerminalSessions.get(sessionId) === session) {
-            // Jangan matikan sesi bila autoEnter aktif agar proses latar belakang terus berjalan
-            if (session.autoEnter) {
-              return;
-            }
-            try { session.pty.kill(); } catch (_) {}
-            activeTerminalSessions.delete(sessionId);
-          }
-        }, 10 * 60 * 1000);
-      }
+      console.log(`[PTY] Client SSE disconnected from session ${sessionId}. Process persists in background on host laptop.`);
     });
 
     return;
@@ -5732,22 +5749,29 @@ async function requestHandler(req, res) {
         return sendJSON(res, 401, { error: pinCheck.error });
       }
       const sessionId = (body.session || 'default').trim();
-      const session = activeTerminalSessions.get(sessionId);
       const enabled = Boolean(body.enabled);
-      if (session) {
-        session.autoEnter = enabled;
-        console.log(`[PTY] Session ${sessionId} autoEnter set to ${enabled}`);
-        const autoPayload = JSON.stringify({ type: 'auto-enter-status', autoEnter: enabled, session: sessionId });
-        for (const client of session.clients) {
+      globalAutoEnterEnabled = enabled;
+      savePersistedTunnelState();
+
+      const targetSession = activeTerminalSessions.get(sessionId);
+      if (targetSession) {
+        targetSession.autoEnter = enabled;
+      }
+      // Sinkronisasi status Auto Enter ke seluruh sesi laptop aktif
+      for (const [id, s] of activeTerminalSessions.entries()) {
+        s.autoEnter = enabled;
+        const autoPayload = JSON.stringify({ type: 'auto-enter-status', autoEnter: enabled, session: id });
+        for (const client of s.clients) {
           try { if (!client.writableEnded) client.write(`data: ${autoPayload}\n\n`); } catch (_) {}
         }
-        if (session.wsClients && session.wsClients.size > 0) {
+        if (s.wsClients && s.wsClients.size > 0) {
           const wsFrame = encodeWsFrame(autoPayload);
-          for (const ws of session.wsClients) {
+          for (const ws of s.wsClients) {
             try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
           }
         }
       }
+      console.log(`[AutoEnter] Synchronized autoEnter=${enabled} across all laptop terminal sessions via HTTP.`);
       return sendJSON(res, 200, { success: true, session: sessionId, autoEnter: enabled });
     } catch (e) {
       return sendJSON(res, 500, { error: e.message });
@@ -9591,17 +9615,25 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
           if (str.startsWith('{') && str.endsWith('}')) {
             const parsed = JSON.parse(str);
             if (parsed.type === 'auto-enter') {
-              session.autoEnter = Boolean(parsed.enabled);
-              const autoPayload = JSON.stringify({ type: 'auto-enter-status', autoEnter: session.autoEnter, session: sessionId });
-              for (const client of session.clients) {
-                try { if (!client.writableEnded) client.write(`data: ${autoPayload}\n\n`); } catch (_) {}
-              }
-              if (session.wsClients && session.wsClients.size > 0) {
-                const wsFrame = encodeWsFrame(autoPayload);
-                for (const ws of session.wsClients) {
-                  try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+              const enabled = Boolean(parsed.enabled);
+              session.autoEnter = enabled;
+              globalAutoEnterEnabled = enabled;
+              savePersistedTunnelState();
+              // Sinkronisasi status Auto Enter ke seluruh sesi laptop aktif
+              for (const [id, s] of activeTerminalSessions.entries()) {
+                s.autoEnter = enabled;
+                const autoPayload = JSON.stringify({ type: 'auto-enter-status', autoEnter: enabled, session: id });
+                for (const client of s.clients) {
+                  try { if (!client.writableEnded) client.write(`data: ${autoPayload}\n\n`); } catch (_) {}
+                }
+                if (s.wsClients && s.wsClients.size > 0) {
+                  const wsFrame = encodeWsFrame(autoPayload);
+                  for (const ws of s.wsClients) {
+                    try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+                  }
                 }
               }
+              console.log(`[AutoEnter] Synchronized autoEnter=${enabled} across all laptop terminal sessions via WS.`);
               return;
             } else if (parsed.type === 'resize' && session.pty) {
               const c = Math.max(45, Math.min(300, parseInt(parsed.cols, 10) || cols));
@@ -9649,18 +9681,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
   const cleanup = () => {
     if (session && session.wsClients) {
       session.wsClients.delete(socket);
-      if ((!session.clients || session.clients.size === 0) && session.wsClients.size === 0) {
-        if (session.autoEnter) {
-          console.log(`[PTY] Sesi WS ${sessionId} tetap dipertahankan di latar belakang karena Auto-Enter aktif.`);
-        } else {
-          session._disconnectTimer = setTimeout(() => {
-            if ((!session.clients || session.clients.size === 0) && (!session.wsClients || session.wsClients.size === 0)) {
-              activeTerminalSessions.delete(sessionId);
-              try { session.pty.kill(); } catch (_) {}
-            }
-          }, 60000);
-        }
-      }
+      console.log(`[PTY] Client disconnected from session ${sessionId}. Process persists in background on host laptop.`);
     }
   };
   socket.on('close', cleanup);
@@ -9716,6 +9737,15 @@ if (require.main === module && !process.env.VERCEL) {
     console.log(`🦙 Ollama Gateway:  http://127.0.0.1:11434 (Local)`);
     console.log(`⚡ OpenRouter GW:   https://openrouter.ai/api/v1 (Cloud)`);
     console.log(`======================================================\n`);
+
+    // Auto-start persistent Cloudflare Tunnel on laptop host
+    startCloudflareTunnel().then(info => {
+      if (info && info.active) {
+        console.log(`[Cloudflare] Tunnel Host Active: ${info.tunnelUrl} (PIN: ${info.pin})`);
+      }
+    }).catch(err => {
+      console.warn('[Cloudflare] Tunnel auto-start deferred:', err && err.message);
+    });
   });
 }
 

@@ -30673,8 +30673,9 @@ Aturan:
               }
               TerminalManager.sendAutoEnterToServer(sId, pState.autoEnter);
               // Periksa jika koneksi WebSocket terputus atau tertidur saat HP keluar/background
-              if (!pState.isFallbackMode) {
-                if (!pState.ws || pState.ws.readyState === WebSocket.CLOSED || pState.ws.readyState === WebSocket.CLOSING) {
+              if (TerminalManager.isRemoteConnected || TerminalManager.isWindowsSynced || !pState.isFallbackMode) {
+                pState.isFallbackMode = false;
+                if (!pState.ws || pState.ws.readyState !== WebSocket.OPEN) {
                   TerminalManager.connectStream(tTab, pState, pNum);
                 } else if (pState.ws && pState.ws.readyState === WebSocket.OPEN) {
                   try {
@@ -31586,11 +31587,20 @@ Aturan:
           const res = await fetch(`${this.remoteHost}/api/ping`, {
             method: 'GET',
             headers: this.remotePin ? { 'x-terminal-pin': this.remotePin } : {},
-            signal: AbortSignal.timeout(4000)
+            signal: AbortSignal.timeout(4500)
           });
           if (res.ok) {
             this.remotePingMs = Math.round(performance.now() - t0);
             this.updateRemoteStatusUI(true);
+            const activeTab = this.getActiveTab();
+            if (activeTab) {
+              [1, 2].forEach(num => {
+                const p = this.getPaneState(num);
+                if (p && (!p.ws || p.ws.readyState !== WebSocket.OPEN) && !p._reconnectTimer) {
+                  this.connectStream(activeTab, p, num);
+                }
+              });
+            }
           } else {
             this.updateRemoteStatusUI(false);
           }
@@ -31600,7 +31610,7 @@ Aturan:
       };
 
       doProbe();
-      this.remotePingTimer = setInterval(doProbe, 8000);
+      this.remotePingTimer = setInterval(doProbe, 5000);
     },
 
     stopRemotePingProbe() {
@@ -31624,8 +31634,8 @@ Aturan:
             statusLabel.textContent = `☁️ Remote WAN (PTY)${lat}`;
             statusDot.className = 'pane-status-dot online';
           } else {
-            statusLabel.textContent = '☁️ Remote (Terputus)';
-            statusDot.className = 'pane-status-dot offline';
+            statusLabel.textContent = '☁️ Menyambung ulang…';
+            statusDot.className = 'pane-status-dot connecting';
           }
         }
       });
@@ -33142,23 +33152,31 @@ Aturan:
 
         ws.onerror = () => {
           if (!wsConnected && !ws._manualClose) {
-            this.connectSseStream(tab, paneState, paneNum, queryParams, statusLabel, statusDot, sessionId);
+            if (this.isRemoteConnected || this.isWindowsSynced) {
+              if (statusLabel) statusLabel.textContent = '☁️ Menyambung ulang…';
+              if (statusDot) statusDot.className = 'pane-status-dot connecting';
+              if (!paneState._reconnectTimer) {
+                paneState._reconnectTimer = setTimeout(() => {
+                  paneState._reconnectTimer = null;
+                  this.connectStream(tab, paneState, paneNum);
+                }, 2000);
+              }
+            } else {
+              this.connectSseStream(tab, paneState, paneNum, queryParams, statusLabel, statusDot, sessionId);
+            }
           }
         };
 
         ws.onclose = () => {
           if (paneState.ws === ws) paneState.ws = null;
           if (ws._manualClose) return;
-          if (!wsConnected) {
-            this.connectSseStream(tab, paneState, paneNum, queryParams, statusLabel, statusDot, sessionId);
-          } else {
-            if (statusLabel) statusLabel.textContent = this.isRemoteConnected ? '☁️ Menyambung ulang…' : 'Menyambung ulang…';
-            if (statusDot) statusDot.className = 'pane-status-dot connecting';
+          if (statusLabel) statusLabel.textContent = this.isRemoteConnected ? '☁️ Menyambung ulang…' : 'Menyambung ulang…';
+          if (statusDot) statusDot.className = 'pane-status-dot connecting';
+          if (!paneState._reconnectTimer) {
             paneState._reconnectTimer = setTimeout(() => {
-              if (!paneState.ws && !paneState.eventSource) {
-                this.connectStream(tab, paneState, paneNum);
-              }
-            }, 1500);
+              paneState._reconnectTimer = null;
+              this.connectStream(tab, paneState, paneNum);
+            }, 2000);
           }
         };
       } catch (_) {
@@ -33183,9 +33201,15 @@ Aturan:
       };
 
       es.onerror = () => {
-        if (this.isRemoteConnected) {
-          if (statusLabel) statusLabel.textContent = '☁️ Remote (Terputus)';
-          if (statusDot) statusDot.className = 'pane-status-dot offline';
+        if (this.isRemoteConnected || this.isWindowsSynced) {
+          if (statusLabel) statusLabel.textContent = '☁️ Menyambung ulang…';
+          if (statusDot) statusDot.className = 'pane-status-dot connecting';
+          if (!paneState._reconnectTimer) {
+            paneState._reconnectTimer = setTimeout(() => {
+              paneState._reconnectTimer = null;
+              this.connectStream(tab, paneState, paneNum);
+            }, 2500);
+          }
           return;
         }
         if (!this.isWindowsSynced && (IS_CLOUD_HOSTED || paneState.isFallbackMode)) {
@@ -33334,6 +33358,13 @@ Aturan:
 
     handleAutoRespond(tab, paneState, paneNum, chunk) {
       if (!paneState || !paneState.autoEnter || !chunk || typeof chunk !== 'string') return;
+
+      // Saat terhubung ke backend host laptop (PTY), Auto Enter ditangani langsung oleh server di laptop!
+      // Hal ini menjamin Auto Enter tetap menyala dan mengeksekusi konfirmasi di laptop meskipun
+      // pengguna menutup aplikasi HP, mematikan layar, atau keluar dari browser.
+      if (!paneState.isFallbackMode && (this.isRemoteConnected || this.isWindowsSynced || paneState.ws || paneState.eventSource)) {
+        return;
+      }
 
       // Do not auto-respond if user was actively typing/submitting in the last 1200ms
       const now = Date.now();
