@@ -30743,26 +30743,15 @@ Aturan:
     },
 
     syncMobileScreenPosition(paneState) {
-      if (!this.isMobileDevice() || !paneState || !paneState.term || !paneState.screenContainer) return;
+      if (!this.isMobileDevice() || !paneState || !paneState.term) return;
       const term = paneState.term;
-      const container = paneState.screenContainer;
-      const charH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
-      const totalScreenH = term.rows * charH;
-      const visibleH = container.clientHeight;
-      const xtermScreen = container.querySelector('.xterm-screen');
-      if (!xtermScreen) return;
-
-      if (totalScreenH <= visibleH || paneState._userScrolledUp) {
+      const xtermScreen = paneState.screenContainer ? paneState.screenContainer.querySelector('.xterm-screen') : null;
+      if (xtermScreen && xtermScreen.style.transform) {
         xtermScreen.style.transform = '';
-        return;
       }
-
-      // Pastikan baris kursor/prompt aktif & badge status Claude Code selalu terlihat utuh di atas keyboard
-      const cursorY = (term.buffer && term.buffer.active) ? term.buffer.active.cursorY : (term.rows - 1);
-      const cursorPx = (cursorY + 1) * charH;
-      let shiftY = cursorPx - visibleH + Math.round(charH * 3.2);
-      shiftY = Math.max(0, Math.min(totalScreenH - visibleH, Math.round(shiftY)));
-      xtermScreen.style.transform = shiftY > 0 ? `translateY(-${shiftY}px)` : '';
+      if (!paneState._userScrolledUp) {
+        try { term.scrollToBottom(); } catch (_) {}
+      }
     },
 
     syncTerminalFrameDisplay(paneState) {
@@ -30772,26 +30761,27 @@ Aturan:
       const xtermScreen = container.querySelector('.xterm-screen');
       const isMobile = this.isMobileDevice();
 
-      const charW = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.width) || 8.5;
-      const totalContentW = term.cols * charW;
-      const visibleW = container.clientWidth || window.innerWidth;
-
       if (isMobile) {
-        // PERBAIKAN BUG MEMBESAR/MENGECEIL:
-        // JANGAN PERNAH gunakan CSS transform: scale() pada .xterm-screen di perangkat mobile!
-        // Transform scale memicu animasi membesar dan mengecil saat mengetik karena bentrok
-        // berkala dengan translateY kursor di syncMobileScreenPosition serta merusak hit-testing.
-        // Terminal mobile selalu dirender pada rasio font native 1:1 yang tajam, stabil, dan presisi.
+        // Mode Mobile: Selalu 100% lebar layar, tanpa margin/box-shadow frame laptop, tanpa CSS transform
+        container.style.maxWidth = '100%';
+        container.style.margin = '0';
+        container.style.borderLeft = 'none';
+        container.style.borderRight = 'none';
+        container.style.boxShadow = 'none';
         if (xtermScreen) {
+          xtermScreen.style.transform = '';
           xtermScreen.style.transformOrigin = '';
         }
-        this.syncMobileScreenPosition(paneState);
+        if (!paneState._userScrolledUp) {
+          try { term.scrollToBottom(); } catch (_) {}
+        }
       } else {
         // Mode Layar Laptop (Desktop):
+        const charW = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.width) || 8.5;
+        const totalContentW = term.cols * charW;
         if (term.cols <= 65) {
           // Saat sesi disinkronkan dengan HP (48 kolom):
           // Pusatkan tampilan di tengah layar laptop dengan frame Termux OLED rapi.
-          // Mencegah teks lama di kolom 49-120 tetap menggantung dan saling bertumpuk!
           container.style.maxWidth = `${Math.ceil(totalContentW) + 28}px`;
           container.style.margin = '0 auto';
           container.style.borderLeft = '1px solid rgba(56, 189, 248, 0.3)';
@@ -30807,6 +30797,7 @@ Aturan:
         }
         if (xtermScreen) {
           xtermScreen.style.transform = '';
+          xtermScreen.style.transformOrigin = '';
         }
       }
 
@@ -32366,8 +32357,11 @@ Aturan:
       }
 
       container.addEventListener('click', () => {
-        if (paneState && paneState.sessionId && !paneState._hasReceivedData) {
-          this.sendPtyInput(paneState.sessionId, '\r');
+        if (paneState && paneState.term) {
+          try {
+            paneState.term.focus();
+            if (paneState.term.textarea) paneState.term.textarea.focus({ preventScroll: true });
+          } catch (_) {}
         }
       });
 
@@ -32383,9 +32377,6 @@ Aturan:
 
       container.addEventListener('touchstart', (e) => {
         paneState._isTouchActive = true;
-        if (paneState && paneState.sessionId && !paneState._hasReceivedData) {
-          this.sendPtyInput(paneState.sessionId, '\r');
-        }
         if (paneState._touchInertiaRaf) {
           cancelAnimationFrame(paneState._touchInertiaRaf);
           paneState._touchInertiaRaf = null;
@@ -32560,13 +32551,7 @@ Aturan:
           data = '\x1b' + data;
         }
 
-        // Ensure the PTY matches the currently typing device's screen dimensions
-        this.ensureActivePtySize(paneState);
-        if (this.isMobileDevice()) {
-          this.syncMobileScreenPosition(paneState);
-        }
-
-        // Mode Live PTY (Local Server & Remote WAN)
+        // Mode Live PTY (Local Server & Remote WAN) - Fast Path: Kirim instan tanpa layout reflow
         if (!paneState.isFallbackMode) {
           this.sendPtyInput(paneState.sessionId || sessionId, data);
           return;
@@ -32806,9 +32791,6 @@ Aturan:
 
           if (shouldAutoScroll) {
             currentTerm.scrollToBottom();
-            if (this.isMobileDevice()) {
-              this.syncMobileScreenPosition(paneState);
-            }
           }
           if (paneState.updateScrollUI) {
             paneState.updateScrollUI();
@@ -32838,14 +32820,6 @@ Aturan:
             currentTerm.resize(cCols, cRows);
           }
           this.syncTerminalFrameDisplay(paneState);
-        }
-        if (this.isMobileDevice() && !paneState._hasAutoAdaptedToMobile) {
-          paneState._hasAutoAdaptedToMobile = true;
-          if (cCols > 65) {
-            setTimeout(() => {
-              this.toggleTerminalDimension();
-            }, 80);
-          }
         }
         if (this.isRemoteConnected) {
           const lat = this.remotePingMs !== null ? ` • ${this.remotePingMs}ms` : '';

@@ -13670,16 +13670,20 @@ body.mermaid-has-fullscreen {
     flex: 1 1 0% !important;
     min-height: 0 !important;
   }
+  .terminal-screen.xterm-mode {
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+  }
   .xterm-pane-container {
-    padding: 0 !important;
+    padding: 0 0 8px 0 !important;
     background: #000000 !important;
     flex: 1 1 0% !important;
     min-height: 0 !important;
     overflow: hidden !important;
   }
   .xterm-pane-container .xterm-screen {
-    transition: transform 0.08s ease-out;
-    will-change: transform;
+    transition: none !important;
+    will-change: auto !important;
   }
   /* Mobile Keybar Termux 8-Kolom 2-Baris Presisi */
   .terminal-mobile-keybar {
