@@ -994,11 +994,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     sidebarBackdrop: $('#sidebarBackdrop'),
     mainContent: $('#mainContent'),
     appContainer: $('.app-container'),
+    sidebarTerminalBtn: $('#sidebarTerminalBtn'),
     
     // Input / Composer & Unified Attachments
     mainComposerContainer: $('#mainComposerContainer'),
+    promptDockWrapper: $('#promptDockWrapper'),
     composerCrownRow: $('#composerCrownRow'),
     neutronCrownBtn: $('#neutronCrownBtn'),
+    neutronToggleBtn: $('#neutronCrownBtn') || $('#neutronToggleBtn'),
     promptInput: $('#promptInput'),
     slashCommandsMenu: $('#slashCommandsMenu'),
     slashMenuList: $('#slashMenuList'),
@@ -28621,6 +28624,9 @@ Aturan:
     els.terminalToggleBtn?.addEventListener('click', () => {
       TerminalManager.toggle();
     });
+    els.sidebarTerminalBtn?.addEventListener('click', () => {
+      TerminalManager.toggle();
+    });
 
     // Bio-Endocrine Hormone Monitor Controls
     els.endocrineMonitorBtn?.addEventListener('click', () => {
@@ -35099,6 +35105,9 @@ Aturan:
     }
 
     console.log('⚡ ZOZ ROUTER INITIALIZED // READY IN 0MS');
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+      try { window.lucide.createIcons(); } catch (_) {}
+    }
 
     // Inisialisasi engine Mermaid untuk diagram visual interaktif
     initMermaidEngine();

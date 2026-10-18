@@ -87,7 +87,7 @@
   
   --shadow-glow-cyan: 0 0 20px rgba(0, 240, 255, 0.25);
   --shadow-glow-teal: 0 0 20px rgba(0, 255, 194, 0.25);
-  --sidebar-width: 300px;
+  --sidebar-width: 18rem;
 }
 
 * {
@@ -130,10 +130,11 @@ html, body {
 /* Layout Container */
 .app-container {
   display: flex;
+  flex: 1;
   width: 100%;
   max-width: 100vw;
-  height: 100%;
-  height: 100dvh;
+  height: calc(100% - 44px);
+  height: calc(100dvh - 44px);
   position: relative;
   overflow: hidden;
   background: radial-gradient(circle at 50% 0%, rgba(0, 240, 255, 0.04) 0%, transparent 60%),
@@ -876,14 +877,17 @@ button.brand-logo-wrap.active .brand-logo {
 
 /* Top Nav Bar */
 .top-nav {
-  height: 56px;
-  background: var(--bg-surface);
-  border-bottom: 1px solid var(--border-subtle);
+  height: 44px;
+  background: rgba(7, 9, 14, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 18px;
+  padding: 0 12px;
   z-index: 50;
+  flex-shrink: 0;
 }
 
 .top-nav-left {
@@ -15207,6 +15211,79 @@ body.mermaid-has-fullscreen {
 }
 .term-remote-divider span {
   padding: 0 10px;
+}
+
+/* ==================== Z21 NEW UI ENHANCEMENTS ==================== */
+/* Subtle radial backdrop ambient lighting */
+.bg-mesh-radial {
+  background-image: 
+    radial-gradient(circle at 50% 40%, rgba(0, 242, 254, 0.04) 0%, transparent 60%),
+    radial-gradient(circle at 10% 20%, rgba(0, 229, 163, 0.03) 0%, transparent 40%),
+    radial-gradient(circle at 90% 85%, rgba(138, 43, 226, 0.025) 0%, transparent 50%);
+}
+
+/* Glassmorphism panel styling */
+.glass-panel {
+  background: rgba(10, 13, 20, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 242, 254, 0.16);
+}
+
+/* Orbiting rings animation for neutron core */
+@keyframes spin-slow {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes spin-reverse {
+  0% { transform: rotate(360deg); }
+  100% { transform: rotate(0deg); }
+}
+@keyframes pulse-glow {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.12); opacity: 1; filter: drop-shadow(0 0 16px rgba(244, 63, 94, 0.9)); }
+}
+
+.animate-spin-orbit {
+  animation: spin-slow 8s linear infinite;
+}
+.animate-spin-orbit-rev {
+  animation: spin-reverse 6s linear infinite;
+}
+.animate-neutron-pulse {
+  animation: pulse-glow 3s ease-in-out infinite;
+}
+
+/* Glow Shadows */
+.shadow-glow-cyan {
+  box-shadow: 0 0 28px -5px rgba(0, 242, 254, 0.35);
+}
+.shadow-glow-emerald {
+  box-shadow: 0 0 24px -6px rgba(0, 229, 163, 0.35);
+}
+.shadow-glow-subtle {
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+}
+.shadow-glow-neutron {
+  box-shadow: 0 0 25px rgba(244, 63, 94, 0.7), 0 0 45px rgba(236, 72, 153, 0.4);
+}
+
+/* Smooth toggle animation for prompt bar */
+.dock-collapsed,
+.composer-container.composer-collapsed #promptDockWrapper,
+.composer-container.composer-collapsed .prompt-dock-wrapper {
+  max-height: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transform: translateY(28px) scale(0.97) !important;
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  overflow: hidden !important;
+}
+
+.prompt-dock-wrapper {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 

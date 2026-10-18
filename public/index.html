@@ -32,8 +32,42 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-  <noscript><link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet"></noscript>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet"></noscript>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'Plus Jakarta Sans', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+          },
+          colors: {
+            brand: {
+              teal: '#00f2fe',
+              emerald: '#00e5a3',
+              dark: '#07080c',
+              surface: '#0d0f17',
+              panel: 'rgba(15, 18, 28, 0.75)',
+              border: 'rgba(255, 255, 255, 0.07)',
+              borderActive: 'rgba(0, 242, 254, 0.28)'
+            }
+          },
+          boxShadow: {
+            'glow-cyan': '0 0 28px -5px rgba(0, 242, 254, 0.35)',
+            'glow-emerald': '0 0 24px -6px rgba(0, 229, 163, 0.35)',
+            'glow-subtle': '0 4px 20px -2px rgba(0, 0, 0, 0.5)',
+            'glow-neutron': '0 0 25px rgba(244, 63, 94, 0.7), 0 0 45px rgba(236, 72, 153, 0.4)',
+          }
+        }
+      }
+    }
+  </script>
   <!-- Icons (Font Awesome) - Asynchronous Non-blocking Load -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha384-t1nt8BQoYMLFN5p42tRAtuAAFQaCQODekUVeKKZrEnEyp4H2R0RHFz0KWpmj7i8g" crossorigin="anonymous" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"></noscript>
@@ -45,125 +79,19 @@
   <link rel="preload" as="style" href="style.css?v=20261018_v360">
   <link rel="stylesheet" href="style.css?v=20261018_v360">
 </head>
-<body class="theme-dark">
-  <div class="app-container">
-    <!-- SIDEBAR -->
-    <aside class="sidebar" id="sidebar">
-      <div class="sidebar-header">
-        <div class="brand">
-          <button class="brand-logo-wrap mode-tab" data-mode="auto" id="sidebarBrandLogoBtn" title="Auto Router AI: Klik logo untuk beralih mode otomatis" type="button" aria-label="Toggle Auto Router via Logo">
-            <img src="favicon.svg" alt="Zoz Router" class="brand-logo">
-            <span class="pulse-ring"></span>
-            <span class="auto-router-quantum-dot"></span>
-          </button>
-          <div class="brand-text">
-            <div class="brand-title-row">
-              <h2>ZOZ ROUTER</h2>
-            </div>
-            <span class="version-tag">ORBITAL v1.0</span>
-          </div>
-        </div>
-        <button class="icon-btn close-sidebar-btn" id="closeSidebarBtn" title="Tutup Sidebar">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
-      </div>
+<body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial select-none">
+    <!-- BEGIN: ApplicationWindowHeader -->
+  <header class="h-11 bg-[#07090e]/80 backdrop-blur-md flex items-center justify-between px-3 z-50 text-xs shrink-0 select-none border-b border-white/[0.06] top-nav" id="topNav">
+    <!-- Left: Window identifier -->
+    <div class="flex items-center space-x-3 top-nav-left">
+      <button class="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors toggle-sidebar-btn" id="toggleSidebarBtn" title="Buka / Tutup Sidebar" type="button">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="shield-check" aria-hidden="true" class="lucide lucide-shield-check w-3.5 h-3.5 text-teal-400"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="m9 12 2 2 4-4"></path></svg>
+        <span class="font-medium text-slate-300 tracking-wide text-xs">ZOZ ROUTER</span>
+        <span class="sidebar-auto-router-indicator" id="sidebarAutoRouterIndicator" style="display: none;" title="Auto Router Aktif"></span>
+      </button>
 
-      <!-- New Chat Button -->
-      <div class="sidebar-actions">
-        <button class="btn btn-primary new-chat-btn" id="newChatBtn">
-          <i class="fa-solid fa-plus"></i> Sesi Obrolan Baru
-        </button>
-      </div>
-
-      <!-- Engine Status Quick Card -->
-      <div class="engine-status-panel">
-        <div class="status-item" id="ollamaStatusItem">
-          <div class="status-indicator" id="ollamaIndicator"></div>
-          <div class="status-info">
-            <span class="status-label">OLLAMA CLOUD</span>
-            <span class="status-val" id="ollamaStatusVal">Memeriksa...</span>
-          </div>
-          <button class="status-refresh-btn" id="refreshOllamaBtn" title="Refresh Ollama Cloud">
-            <i class="fa-solid fa-rotate"></i>
-          </button>
-        </div>
-
-        <div class="status-item" id="openRouterStatusItem">
-          <div class="status-indicator" id="openRouterIndicator"></div>
-          <div class="status-info">
-            <span class="status-label">OPENROUTER</span>
-            <span class="status-val" id="openRouterStatusVal">Key Tersimpan</span>
-          </div>
-          <button class="status-refresh-btn" id="openSettingsKeyBtn" title="Edit API Key">
-            <i class="fa-solid fa-key"></i>
-          </button>
-        </div>
-      </div>
-
-      <!-- Search History Box -->
-      <div class="search-history-box" id="searchHistoryBox">
-        <i class="fa-solid fa-magnifying-glass"></i>
-        <input type="text" id="searchHistoryInput" placeholder="Cari riwayat percakapan...">
-      </div>
-
-      <!-- DeepSeek-Style Multi-Select Top Bar -->
-      <div class="history-select-topbar" id="historySelectTopBar" style="display: none;">
-        <span class="select-count-text" id="historySelectCountText">1 chat selected</span>
-        <div class="select-top-actions">
-          <button class="select-text-action-btn" id="btnSelectAllHistory" title="Pilih Semua Percakapan">Semua</button>
-          <button class="select-close-circle-btn" id="btnCloseHistorySelectMode" title="Batalkan Pilihan"><i class="fa-solid fa-xmark"></i></button>
-        </div>
-      </div>
-
-      <!-- Chat History List -->
-      <div class="history-section">
-        <div class="history-label-row" id="historyLabelRow">
-          <div class="history-label">RIWAYAT PERCAKAPAN</div>
-          <button class="history-select-toggle-btn" id="btnToggleHistorySelectMode" title="Pilih Beberapa Percakapan (Multi-Select)">
-            <i class="fa-solid fa-list-check"></i>
-          </button>
-        </div>
-        <div class="chat-history-list" id="chatHistoryList">
-          <!-- Populated by JavaScript -->
-        </div>
-      </div>
-
-      <!-- Sidebar Footer (Normal Mode) -->
-      <div class="sidebar-footer" id="sidebarNormalFooter">
-        <button class="sidebar-footer-btn" id="modelHubBtn" title="Buka Katalog Model Layar Lebar Real-Time">
-          <i class="fa-solid fa-shapes"></i> Katalog Model
-        </button>
-        <button class="sidebar-footer-btn" id="settingsBtn">
-          <i class="fa-solid fa-gear"></i> Pengaturan
-        </button>
-      </div>
-
-      <!-- DeepSeek-Style Multi-Select Bottom Bar -->
-      <div class="history-select-bottom-bar" id="historySelectBottomBar" style="display: none;">
-        <button class="select-bottom-btn select-pin-btn" id="btnPinSelectedHistory" title="Sematkan / Lepas Sematan Percakapan Terpilih">
-          <i class="fa-solid fa-thumbtack"></i> <span id="pinSelectedText">Pin</span>
-        </button>
-        <button class="select-bottom-btn select-delete-btn" id="btnDeleteSelectedHistory" title="Hapus Percakapan Terpilih">
-          <i class="fa-solid fa-trash-can"></i> <span>Delete</span>
-        </button>
-      </div>
-    </aside>
-
-    <!-- Sidebar Backdrop for Mobile/Offcanvas Click-to-Dismiss -->
-    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
-
-    <!-- MAIN CHAT & WORKSPACE -->
-    <main class="main-content" id="mainContent">
-      <!-- TOP NAVIGATION BAR -->
-      <header class="top-nav">
-        <div class="top-nav-left">
-          <button class="icon-btn toggle-sidebar-btn" id="toggleSidebarBtn" title="Buka Menu Navigasi Sidebar">
-            <i class="fa-solid fa-bars-staggered"></i>
-            <span class="sidebar-auto-router-indicator" id="sidebarAutoRouterIndicator" style="display: none;" title="Auto Router Aktif"></span>
-          </button>
-          
-          <!-- Active Tool Model Selector (Buat Gambar / Edit Foto / Buat Musik) -->
-          <div class="top-nav-active-tool-wrap" id="topNavActiveToolWrap" style="display: none;">
+      <!-- Active Tool Model Selector (Buat Gambar / Edit Foto / Buat Musik) -->
+<div class="top-nav-active-tool-wrap" id="topNavActiveToolWrap" style="display: none;">
             <div class="top-nav-active-tool-chip" id="topNavActiveToolChip" title="Ganti Model Tool AI Aktif">
               <span class="top-nav-tool-icon-wrap" id="topNavActiveToolIconWrap">
                 <i class="fa-solid fa-wand-magic-sparkles" id="topNavActiveToolIcon"></i>
@@ -433,19 +361,20 @@
                 </div>
               </div>
           </div>
-        </div>
+        
+      </div>
+    </div>
 
-        <div class="top-nav-right">
-          <!-- Model Selection Dropdown (For Single Mode) -->
-          <div class="model-picker-container" id="singleModelPickerWrap">
-            <div class="model-picker-chip" id="modelPickerChip">
-              <i class="fa-solid fa-microchip chip-icon"></i>
-              <span class="current-model-name" id="currentModelLabel">Auto Router</span>
-              <i class="fa-solid fa-chevron-down chip-arrow"></i>
-            </div>
+    <!-- Right: Model Quick Switcher & Action Icons -->
+    <div class="flex items-center space-x-2 top-nav-right">
+      <div class="relative group model-picker-container" id="singleModelPickerWrap">
+        <button class="flex items-center space-x-2 bg-white/[0.04] hover:bg-white/[0.08] hover:border-teal-500/30 border border-white/[0.08] text-slate-200 px-3 py-1 rounded-lg transition-all duration-150 text-[11.5px] font-mono cursor-pointer model-picker-chip" id="modelPickerChip" title="Pilih Model Utama" type="button">
+          <svg class="lucide lucide-cpu w-3.5 h-3.5 text-teal-400 chip-icon" data-lucide="cpu" fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M12 20v2"></path><path d="M12 2v2"></path><path d="M17 20v2"></path><path d="M17 2v2"></path><path d="M2 12h2"></path><path d="M2 17h2"></path><path d="M2 7h2"></path><path d="M20 12h2"></path><path d="M20 17h2"></path><path d="M20 7h2"></path><path d="M7 20v2"></path><path d="M7 2v2"></path><rect height="16" rx="2" width="16" x="4" y="4"></rect><rect height="8" rx="1" width="8" x="8" y="8"></rect></svg>
+          <span class="text-slate-200 font-medium current-model-name" id="currentModelLabel">Auto Router</span>
+          <svg class="lucide lucide-chevron-down w-3 h-3 text-slate-400 chip-arrow" data-lucide="chevron-down" fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="m6 9 6 6 6-6"></path></svg>
+        </button>
 
-            <!-- Model Dropdown Popup -->
-            <div class="model-dropdown-menu" id="modelDropdownMenu">
+        <div class="model-dropdown-menu" id="modelDropdownMenu">
               <!-- Mode Tabs: Ollama vs OpenRouter -->
               <div class="dropdown-mode-tabs" style="display: flex; gap: 4px; padding: 6px 10px; background: rgba(0,0,0,0.3); border-bottom: 1px solid var(--border-subtle);">
                 <button type="button" class="dropdown-tab-btn active" id="dropdownTabOllama" style="flex: 1;">
@@ -479,38 +408,192 @@
                 <button class="btn btn-sm btn-outline" id="useCustomModelBtn">Gunakan</button>
               </div>
             </div>
+      </div>
+
+      <!-- Action Button 1: Peers / Preset Persona -->
+      <button class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] transition-colors top-action-btn" id="systemPromptModalBtn" title="Workspace Peers / System Persona" type="button">
+        <svg class="lucide lucide-users w-3.5 h-3.5" data-lucide="users" fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><path d="M16 3.128a4 4 0 0 1 0 7.744"></path><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><circle cx="9" cy="7" r="4"></circle></svg>
+      </button>
+
+      <!-- Action Button 2: Z21 Shell Terminal Console -->
+      <button class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] transition-colors top-action-btn" id="terminalToggleBtn" title="Z21 Shell (Buka Console)" aria-label="Buka Terminal" type="button">
+        <svg class="lucide lucide-terminal w-3.5 h-3.5" data-lucide="terminal" fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M12 19h8"></path><path d="m4 17 6-6-6-6"></path></svg>
+      </button>
+
+      <!-- Action Button 3: Bio-Endocrine Hormone Monitor (Emerald Pulse Pill) -->
+      <button class="w-7 h-7 flex items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 shadow-glow-emerald transition-all top-action-btn endocrine-pulse-btn status-happy" id="endocrineMonitorBtn" title="Bio-Endocrine Code Telemetry: Kondisi Kode 100% Prima (Dopamin 100%, Bebas Bug)" aria-label="Bio-Endocrine Monitor" type="button">
+        <svg class="lucide lucide-heart w-3.5 h-3.5 fill-emerald-400 text-emerald-400" data-lucide="heart" fill="currentColor" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg" id="endocrineHeartIcon"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"></path></svg>
+      </button>
+    </div>
+  </header>
+  <!-- END: ApplicationWindowHeader -->
+
+  <!-- BEGIN: MainContentShell -->
+  <div class="app-container flex-1 flex overflow-hidden relative" id="appContainer">
+    <!-- LEFT SIDEBAR -->
+    <aside class="sidebar w-72 bg-[#080a11]/90 flex flex-col justify-between shrink-0 relative z-20 backdrop-blur-xl border-r border-white/[0.06]" id="sidebar">
+      <!-- Top Section: Brand + New Chat + Status Cards -->
+      <div class="p-3.5 space-y-4 flex-1 flex flex-col min-h-0 overflow-y-auto">
+        <!-- Brand identity line -->
+        <div class="flex items-center justify-between px-1.5 pt-1">
+          <div class="flex items-center space-x-2.5">
+            <button class="relative w-8 h-8 rounded-xl bg-gradient-to-br from-teal-400/20 via-emerald-500/10 to-transparent border border-teal-400/30 flex items-center justify-center shadow-glow-cyan/20 mode-tab brand-logo-wrap" data-mode="auto" id="sidebarBrandLogoBtn" title="Auto Router AI: Klik logo untuk beralih mode otomatis" type="button" aria-label="Toggle Auto Router via Logo">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="zap" aria-hidden="true" class="lucide lucide-zap w-4 h-4 text-teal-400"><path d="M15.914 4a1.5 1.5 0 00-2.474-1.561l-9 9A1.5 1.5 0 005.5 14h4.002a.5.5 0 01.471.666L8.086 20a1.5 1.5 0 002.475 1.56l9-9A1.5 1.5 0 0018.5 10h-3.997a.5.5 0 01-.472-.667z"></path></svg>
+              <span class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-teal-400 auto-router-quantum-dot"></span>
+            </button>
+            <div>
+              <h1 class="font-bold tracking-tight text-white text-sm flex items-center gap-1.5">
+                ZOZ ROUTER
+              </h1>
+            </div>
           </div>
-
-          <!-- Fast Quick Controls -->
-          <button class="icon-btn top-action-btn" id="systemPromptModalBtn" title="Preset Karakter / System Prompt">
-            <i class="fa-solid fa-user-gear"></i>
+          <!-- Collapse Toggle -->
+          <button class="w-7 h-7 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.06] flex items-center justify-center transition-colors close-sidebar-btn" id="closeSidebarBtn" title="Ciutkan Sidebar" type="button">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="panel-left-close" aria-hidden="true" class="lucide lucide-panel-left-close w-4 h-4"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path><path d="m16 15-3-3 3-3"></path></svg>
           </button>
-          <!-- Z21 Shell Console -->
-          <button class="icon-btn top-action-btn" id="terminalToggleBtn" title="Z21 Shell (Buka Console)" aria-label="Buka Terminal">
-            <i class="fa-solid fa-terminal"></i>
-          </button>
-          <!-- Bio-Endocrine Hormone Monitor (Hanya Logo Hati Hijau Sehat) -->
-          <button class="icon-btn top-action-btn endocrine-pulse-btn status-happy" id="endocrineMonitorBtn" title="Bio-Endocrine Code Telemetry: Kondisi Kode 100% Prima (Dopamin 100%, Bebas Bug)" aria-label="Bio-Endocrine Monitor">
-            <i class="fa-solid fa-heart" id="endocrineHeartIcon" style="color: #00FFC2;"></i>
-          </button>
-
         </div>
-      </header>
 
-      <!-- CHAT VIEW CONTAINER -->
-      <div class="chat-viewport" id="chatViewport">
-        
-        <!-- SINGLE MODE CHAT WRAPPER -->
-        <div class="chat-messages-container" id="singleChatContainer">
-          <!-- WELCOME HERO (Shown when chat is empty) -->
-          <div class="welcome-hero" id="welcomeHero">
-            <div class="hero-triangle-container">
-              <div class="hero-triangle-glow"></div>
-              <div class="hero-logo-box">
-                <img src="favicon.svg" alt="Zoz Router Logo" class="hero-logo" width="96" height="96" fetchpriority="high">
+        <!-- Sesi Obrolan Baru (Primary Action Button) -->
+        <button class="group w-full py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-teal-400 to-emerald-400 hover:from-teal-300 hover:to-emerald-300 text-slate-950 font-semibold text-xs tracking-wide shadow-glow-emerald flex items-center justify-center space-x-2 transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0 new-chat-btn" id="newChatBtn" type="button">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="plus" aria-hidden="true" class="lucide lucide-plus w-4 h-4 stroke-[2.5]"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+          <span>Sesi Obrolan Baru</span>
+        </button>
+
+        <!-- Engine Gateways Status Cards -->
+        <div class="space-y-2 pt-1 engine-status-panel">
+          <div class="text-[10px] font-mono font-medium text-slate-500 uppercase tracking-wider px-1">
+            Engine Gateways
+          </div>
+          <!-- Ollama Cloud Status Card -->
+          <div class="p-2.5 rounded-xl bg-white/[0.025] hover:bg-white/[0.045] border border-white/[0.06] hover:border-teal-500/20 transition-all group cursor-pointer flex items-center justify-between status-item" id="ollamaStatusItem">
+            <div class="flex items-center space-x-2.5">
+              <div class="w-2 h-2 rounded-full bg-emerald-400 ring-4 ring-emerald-500/20 status-indicator" id="ollamaIndicator"></div>
+              <div class="status-info">
+                <p class="text-[11px] font-medium text-slate-200 group-hover:text-teal-300 transition-colors status-label">Ollama Cloud</p>
+                <p class="text-[10px] text-emerald-400/90 font-mono status-val" id="ollamaStatusVal">Cloud Aktif</p>
               </div>
             </div>
-            <h1 class="hero-title">Z21 rOuTer</h1>
+            <button class="w-6 h-6 rounded-md hover:bg-white/[0.08] text-slate-400 hover:text-teal-300 flex items-center justify-center transition-colors status-refresh-btn" id="refreshOllamaBtn" title="Refresh Engine" type="button">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="refresh-cw" aria-hidden="true" class="lucide lucide-refresh-cw w-3.5 h-3.5"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>
+            </button>
+          </div>
+
+          <!-- OpenRouter Status Card -->
+          <div class="p-2.5 rounded-xl bg-white/[0.025] hover:bg-white/[0.045] border border-white/[0.06] hover:border-teal-500/20 transition-all group cursor-pointer flex items-center justify-between status-item" id="openRouterStatusItem">
+            <div class="flex items-center space-x-2.5">
+              <div class="w-2 h-2 rounded-full bg-teal-400 ring-4 ring-teal-500/20 status-indicator" id="openRouterIndicator"></div>
+              <div class="status-info">
+                <p class="text-[11px] font-medium text-slate-200 group-hover:text-teal-300 transition-colors status-label">OpenRouter</p>
+                <p class="text-[10px] text-slate-400 font-mono status-val" id="openRouterStatusVal">$2.08 USD</p>
+              </div>
+            </div>
+            <button class="w-6 h-6 rounded-md hover:bg-white/[0.08] text-slate-400 hover:text-amber-300 flex items-center justify-center transition-colors status-refresh-btn" id="openSettingsKeyBtn" title="Kelola API Key" type="button">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="key" aria-hidden="true" class="lucide lucide-key w-3.5 h-3.5"><path d="m2 21 9.6-9.6"></path><path d="m7.5 15.5 2.3 2.3a1 1 0 0 1 0 1.4l-2.1 2.1a1 1 0 0 1-1.4 0L4 19"></path><circle cx="15.5" cy="7.5" r="5.5"></circle></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Search Bar -->
+        <div class="relative pt-1 search-history-box" id="searchHistoryBox">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="search" aria-hidden="true" class="lucide lucide-search w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"><path d="m21 21-4.34-4.34"></path><circle cx="11" cy="11" r="8"></circle></svg>
+          <input class="w-full bg-white/[0.03] focus:bg-white/[0.06] border border-white/[0.06] focus:border-teal-500/40 rounded-xl py-2 pl-9 pr-3 text-xs text-slate-200 placeholder:text-slate-500 outline-none transition-all placeholder:text-[11px]" id="searchHistoryInput" placeholder="Cari riwayat percakapan..." type="text">
+        </div>
+
+        <!-- DeepSeek-Style Multi-Select Top Bar -->
+        <div class="history-select-topbar" id="historySelectTopBar" style="display: none;">
+          <span class="select-count-text" id="historySelectCountText">1 chat selected</span>
+          <div class="select-top-actions">
+            <button class="select-text-action-btn" id="btnSelectAllHistory" title="Pilih Semua Percakapan" type="button">Semua</button>
+            <button class="select-close-circle-btn" id="btnCloseHistorySelectMode" title="Batalkan Pilihan" type="button"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+        </div>
+
+        <!-- Conversation History Section -->
+        <div class="pt-2 flex-1 flex flex-col min-h-0 history-section">
+          <div class="flex items-center justify-between px-1 mb-2 history-label-row" id="historyLabelRow">
+            <div class="text-[10px] font-mono font-medium text-slate-500 uppercase tracking-wider history-label">Riwayat Percakapan</div>
+            <button class="text-slate-500 hover:text-slate-300 transition-colors history-select-toggle-btn" id="btnToggleHistorySelectMode" title="Pilih Beberapa Percakapan (Multi-Select)" type="button">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="sliders-horizontal" aria-hidden="true" class="lucide lucide-sliders-horizontal w-3 h-3"><path d="M10 5H3"></path><path d="M12 19H3"></path><path d="M14 3v4"></path><path d="M16 17v4"></path><path d="M21 12h-9"></path><path d="M21 19h-5"></path><path d="M21 5h-7"></path><path d="M8 10v4"></path><path d="M8 12H3"></path></svg>
+            </button>
+          </div>
+          <div class="chat-history-list flex-1 overflow-y-auto space-y-1" id="chatHistoryList">
+            <div class="py-10 px-4 text-center rounded-xl bg-white/[0.01]">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="message-square-dashed" aria-hidden="true" class="lucide lucide-message-square-dashed w-6 h-6 mx-auto text-slate-600 mb-2 stroke-[1.5]"><path d="M14 3h2"></path><path d="M16 19h-2"></path><path d="M2 12v-2"></path><path d="M2 16v5.286a.71.71 0 0 0 1.212.502l1.149-1.149"></path><path d="M20 19a2 2 0 0 0 2-2v-1"></path><path d="M22 10v2"></path><path d="M22 6V5a2 2 0 0 0-2-2"></path><path d="M4 3a2 2 0 0 0-2 2v1"></path><path d="M8 19h2"></path><path d="M8 3h2"></path></svg>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Utility Bar -->
+      <div class="p-3 bg-[#06070a]/60 space-y-2 border-t border-white/[0.06]" id="sidebarNormalFooter">
+        <!-- Centered TERMINAL pill launcher button -->
+        <div class="flex justify-center -mb-0.5 pt-1">
+          <button class="group flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-[#080a11] hover:bg-[#0c101d] border border-teal-400/60 hover:border-teal-400 shadow-glow-cyan/20 hover:shadow-glow-cyan text-white transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0 z-10" id="sidebarTerminalBtn" title="Buka Terminal CLI" type="button">
+            <div class="w-4 h-4 rounded-full bg-teal-500/20 border border-teal-400 flex items-center justify-center text-teal-300 group-hover:text-white group-hover:bg-teal-400/30 transition-colors shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-terminal w-2.5 h-2.5"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" x2="20" y1="19" y2="19"></line></svg>
+            </div>
+            <span class="text-[11px] font-mono tracking-wider font-bold text-teal-300 group-hover:text-white transition-colors">TERMINAL</span>
+          </button>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button class="flex items-center justify-center space-x-1.5 py-2 px-2.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] text-slate-300 hover:text-white transition-all text-xs font-medium sidebar-footer-btn" id="modelHubBtn" title="Buka Katalog Model" type="button">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="layers" aria-hidden="true" class="lucide lucide-layers w-3.5 h-3.5 text-teal-400"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"></path><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"></path><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"></path></svg>
+            <span>Katalog</span>
+          </button>
+          <button class="flex items-center justify-center space-x-1.5 py-2 px-2.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] text-slate-300 hover:text-white transition-all text-xs font-medium sidebar-footer-btn" id="settingsBtn" title="Pengaturan" type="button">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="settings" aria-hidden="true" class="lucide lucide-settings w-3.5 h-3.5 text-slate-400"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            <span>Pengaturan</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- DeepSeek-Style Multi-Select Bottom Bar -->
+      <div class="history-select-bottom-bar p-3 bg-[#06070a]/80 border-t border-white/[0.06]" id="historySelectBottomBar" style="display: none;">
+        <div class="grid grid-cols-2 gap-2">
+          <button class="select-bottom-btn select-pin-btn py-1.5 px-2 rounded-lg bg-teal-500/20 text-teal-300 border border-teal-500/30 text-xs flex items-center justify-center gap-1.5" id="btnPinSelectedHistory" title="Sematkan / Lepas Sematan Percakapan Terpilih" type="button">
+            <i class="fa-solid fa-thumbtack"></i> <span id="pinSelectedText">Pin</span>
+          </button>
+          <button class="select-bottom-btn select-delete-btn py-1.5 px-2 rounded-lg bg-red-500/20 text-red-300 border border-red-500/30 text-xs flex items-center justify-center gap-1.5" id="btnDeleteSelectedHistory" title="Hapus Percakapan Terpilih" type="button">
+            <i class="fa-solid fa-trash-can"></i> <span>Delete</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Sidebar Backdrop for Mobile/Offcanvas Click-to-Dismiss -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+    <!-- MAIN CHAT & WORKSPACE -->
+    <main class="main-content flex-1 flex flex-col justify-between relative overflow-hidden bg-gradient-to-b from-[#090b12] to-[#06070b]" id="mainContent">
+      <!-- CHAT VIEW CONTAINER -->
+      <div class="chat-viewport flex-1 overflow-y-auto relative w-full h-full flex flex-col" id="chatViewport">
+        <!-- SINGLE MODE CHAT WRAPPER -->
+        <div class="chat-messages-container flex-1 flex flex-col justify-between w-full" id="singleChatContainer">
+          <!-- WELCOME HERO (Center Logo & Pure Minimalist Title) -->
+          <div class="welcome-hero flex-1 flex flex-col items-center justify-center px-4 relative z-10" id="welcomeHero">
+            <!-- Terry A. Davis Radical Simplicity Emblem -->
+            <div class="flex flex-col items-center justify-center select-none font-mono tracking-tight text-center">
+              <!-- Raw 1-bit / Box-Drawing TempleOS-inspired wireframe glyph -->
+              <div class="mb-4 p-3 border border-emerald-500/30 bg-[#080a11] rounded-lg transition-all hover:border-emerald-400 group cursor-default">
+                <pre class="font-mono text-[13px] leading-[13px] text-emerald-400 select-none">┌──────────────┐
+│  ██████████  │
+│         ██   │
+│       ██     │
+│     ██       │
+│   ██         │
+│  ██████████  │
+└──────────────┘</pre>
+              </div>
+
+              <!-- Radical Pure Typography -->
+              <div class="space-y-1.5">
+                <h2 class="text-2xl font-bold tracking-wider font-mono text-white flex items-center justify-center space-x-2">
+                  <span class="text-emerald-400">Z21</span>
+                  <span class="text-slate-100">rOuTer</span>
+                </h2>
+                <p class="text-xs font-mono text-emerald-400/90 tracking-wider text-center select-none">3 33 ~ - ) 3 2 1</p>
+              </div>
+            </div>
           </div>
 
           <!-- Active Message Feed List -->
@@ -518,31 +601,26 @@
 
           <!-- PULL-UP TO TRIGGER NEW CHAT (Modern ChatGPT Style with Pull & Hold Loading) -->
           <div class="pull-up-new-chat-wrapper" id="pullUpNewChatWrapper" style="display: none;">
-            <!-- Stage 1: Loading Indicator on normal scroll / pull (Pure visual spinner) -->
             <div class="pull-up-loading-indicator" id="pullUpLoadingIndicator">
               <span class="pull-spinner"></span>
             </div>
-
-            <!-- Stage 2: Action Button after holding / threshold reached -->
-            <button class="pull-up-new-chat-btn" id="pullUpNewChatBtn" title="Klik untuk memulai obrolan baru">
+            <button class="pull-up-new-chat-btn" id="pullUpNewChatBtn" title="Klik untuk memulai obrolan baru" type="button">
               <i class="fa-solid fa-plus"></i>
               <span class="btn-text">Mulai Obrolan Baru</span>
               <span class="btn-badge"><i class="fa-solid fa-sparkles"></i> New Chat</span>
             </button>
           </div>
         </div>
-
       </div>
 
-      <!-- Floating Scroll to Bottom Indicator Button (Cyberpunk Glassmorphic Floating HUD) -->
-      <button class="scroll-bottom-btn" id="scrollBottomBtn" title="Gulir ke Pesan Terbaru" style="display: none;" aria-label="Gulir ke Pesan Terbaru">
-        <i class="fa-solid fa-chevron-down scroll-bottom-icon"></i>
+      <!-- Floating Scroll to Bottom Indicator Button -->
+      <button class="scroll-bottom-btn" id="scrollBottomBtn" title="Gulir ke Pesan Terbaru" style="display: none;" aria-label="Gulir ke Pesan Terbaru" type="button">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="chevron-down" class="lucide lucide-chevron-down w-4 h-4 scroll-bottom-icon"><path d="m6 9 6 6 6-6"></path></svg>
         <span class="scroll-btn-pulse"></span>
       </button>
 
       <!-- BOTTOM COMPOSER / INPUT SECTION (For Single / Auto Mode) -->
-      <footer class="composer-container" id="mainComposerContainer">
-        <!-- System Prompt Active Banner (if configured) -->
+      <footer class="composer-container w-full flex flex-col items-center justify-end pb-8 pt-2 z-20 relative" id="mainComposerContainer">
         <div class="active-preset-banner" id="activePresetBanner" style="display: none;">
           <i class="fa-solid fa-sparkles"></i>
           <span id="activePresetName">Persona: Default</span>
@@ -604,26 +682,24 @@
           </div>
         </div>
 
-        <!-- BOLA NEUTRON QUANTUM -->
+        <!-- BOLA NEUTRON QUANTUM / INTERACTIVE NEUTRON SPHERE -->
         <div class="composer-crown-row" id="composerCrownRow">
-          <button class="neutron-crown-btn state-red" id="neutronCrownBtn" type="button" aria-label="Sembunyikan kolom prompt" title="Sembunyikan / tampilkan kolom prompt">
-            <div class="neutron-orb">
-              <div class="neutron-core"></div>
-              <div class="neutron-ring-wrap ring-1-wrap">
-                <div class="neutron-ring-rotator">
-                  <span class="neutron-particle"></span>
-                </div>
-              </div>
-              <div class="neutron-ring-wrap ring-2-wrap">
-                <div class="neutron-ring-rotator">
-                  <span class="neutron-particle"></span>
-                </div>
-              </div>
-              <div class="neutron-ring-wrap ring-3-wrap">
-                <div class="neutron-ring-rotator">
-                  <span class="neutron-particle"></span>
-                </div>
-              </div>
+          <button aria-label="Toggle Prompt Menu" class="group relative flex items-center justify-center p-3 focus:outline-none transition-transform duration-300 hover:scale-125 mb-2 cursor-pointer z-30 neutron-crown-btn state-red" id="neutronCrownBtn" title="Klik untuk sembunyikan / tampilkan menu prompt" type="button">
+            <!-- Outer ambient orbital aura -->
+            <div class="absolute w-12 h-12 rounded-full bg-rose-500/25 blur-md group-hover:bg-rose-500/40 transition-all pointer-events-none"></div>
+            <!-- Orbit rings SVG -->
+            <svg class="w-10 h-10 pointer-events-none relative" viewBox="0 0 50 50">
+              <!-- Orbit ring 1 -->
+              <ellipse class="animate-spin-orbit origin-center" cx="25" cy="25" fill="none" rx="20" ry="7" stroke="rgba(244, 63, 94, 0.65)" stroke-dasharray="3 3" stroke-width="1.2" transform="rotate(30 25 25)"></ellipse>
+              <!-- Orbit ring 2 -->
+              <ellipse class="animate-spin-orbit-rev origin-center" cx="25" cy="25" fill="none" rx="20" ry="7" stroke="rgba(236, 72, 153, 0.65)" stroke-dasharray="2 4" stroke-width="1.2" transform="rotate(-40 25 25)"></ellipse>
+              <!-- Orbiting electrons -->
+              <circle cx="6" cy="25" fill="#f43f5e" r="1.5"></circle>
+              <circle cx="44" cy="25" fill="#ec4899" r="1.5"></circle>
+            </svg>
+            <!-- Pulsing Glowing Neutron Core -->
+            <div class="absolute w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-rose-600 via-pink-500 to-rose-300 shadow-glow-neutron flex items-center justify-center neutron-core">
+              <div class="w-1.5 h-1.5 rounded-full bg-white opacity-90"></div>
             </div>
           </button>
         </div>
@@ -704,31 +780,33 @@
           <button type="button" id="btnCancelMusicGenMode" style="display: none;"></button>
         </div>
 
-        <div class="composer-box">
-          <!-- Slash Commands / Quick Tools Autocomplete Menu -->
-          <div class="slash-commands-menu" id="slashCommandsMenu" style="display: none;" role="listbox" aria-label="Skills">
-            <div class="slash-menu-header">
-              <span class="slash-menu-title">Skills</span>
+        <!-- BEGIN: BottomTaskbarPromptDock (Animated expandable/collapsible dock) -->
+        <div class="w-full px-4 transition-all duration-300 ease-in-out overflow-visible max-h-48 opacity-100 transform translate-y-0 max-w-2xl mx-auto prompt-dock-wrapper" id="promptDockWrapper">
+          <div class="glass-panel rounded-2xl shadow-2xl border border-teal-500/20 hover:border-teal-500/35 transition-all duration-300 focus-within:border-teal-400/50 focus-within:ring-1 focus-within:ring-teal-400/20 py-1.5 px-2.5 relative composer-box">
+            <!-- Slash Commands / Quick Tools Autocomplete Menu -->
+            <div class="slash-commands-menu" id="slashCommandsMenu" style="display: none;" role="listbox" aria-label="Skills">
+              <div class="slash-menu-header">
+                <span class="slash-menu-title">Skills</span>
+              </div>
+              <div class="slash-menu-list" id="slashMenuList"></div>
             </div>
-            <div class="slash-menu-list" id="slashMenuList"></div>
-          </div>
 
-          <!-- Action Buttons Left -->
-          <div class="composer-tools-left">
-            <!-- Hidden file inputs -->
-            <input type="file" id="imageFileInput" accept="image/*" multiple style="display: none;">
-            <input type="file" id="cameraFileInput" accept="image/*" capture="environment" style="display: none;">
-            <input type="file" id="photoEditFileInput" accept="image/*" style="display: none;">
-            <input type="file" id="docFileInput" accept=".txt,.pdf,.csv,.json,.md,.js,.py,.html,.css,.ts,.java,.cpp,.c,.go,.rs,.sql,.sh,.yaml,.yml,.xml,.doc,.docx" multiple style="display: none;">
+            <div class="flex items-center space-x-2 px-1 py-0.5 w-full">
+              <!-- Action Buttons Left -->
+              <div class="flex items-center space-x-1 text-slate-400 shrink-0 composer-tools-left">
+                <!-- Hidden file inputs -->
+                <input type="file" id="imageFileInput" accept="image/*" multiple style="display: none;">
+                <input type="file" id="cameraFileInput" accept="image/*" capture="environment" style="display: none;">
+                <input type="file" id="photoEditFileInput" accept="image/*" style="display: none;">
+                <input type="file" id="docFileInput" accept=".txt,.pdf,.csv,.json,.md,.js,.py,.html,.css,.ts,.java,.cpp,.c,.go,.rs,.sql,.sh,.yaml,.yml,.xml,.doc,.docx" multiple style="display: none;">
 
-            <!-- Unified Attachment Menu (ChatGPT & Gemini Style) -->
-            <div class="attachment-menu-wrapper" id="attachmentMenuWrapper">
-              <button class="composer-btn attach-toggle-btn" id="attachToggleBtn" type="button" title="Lampirkan File, Foto, atau Kamera" aria-expanded="false">
-                <i class="fa-solid fa-paperclip"></i>
-              </button>
+                <!-- Unified Attachment Menu (Paperclip) -->
+                <div class="attachment-menu-wrapper relative" id="attachmentMenuWrapper">
+                  <button class="p-1.5 rounded-lg hover:text-teal-300 hover:bg-white/[0.05] transition-colors composer-btn attach-toggle-btn" id="attachToggleBtn" type="button" title="Lampirkan File, Foto, atau Kamera" aria-expanded="false">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="paperclip" aria-hidden="true" class="lucide lucide-paperclip w-4 h-4"><path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"></path></svg>
+                  </button>
 
-              <!-- Attachment & Tools Popup Menu (Grouped with Tabs) -->
-              <div class="attachment-dropdown-popup" id="attachmentDropdown" style="display: none;">
+                  <div class="attachment-dropdown-popup" id="attachmentDropdown" style="display: none;">
                 <!-- Tab Switcher Bar (Lampiran vs Tools) -->
                 <div class="attachment-tabs-nav" id="attachmentTabsNav" role="tablist">
                   <button type="button" class="attachment-tab-btn active" id="tabAttachFiles" data-tab="files" role="tab" aria-selected="true" title="Lampirkan File & Foto">
@@ -832,17 +910,16 @@
                   </button>
                 </div>
               </div>
-            </div>
+                </div>
 
-            <!-- Web Search & Deep Research Mode Menu -->
-            <div class="search-menu-wrapper" id="searchMenuWrapper">
-              <button class="composer-btn web-search-toggle mode-autonomous active" id="webSearchToggleBtn" type="button" title="Autonomous Web Explorer: Aktif (Klik untuk matikan)" aria-expanded="false">
-                <i class="fa-solid fa-compass" id="webSearchIcon"></i>
-                <span class="search-badge" id="searchBadge" style="display: none;">PRO</span>
-              </button>
+                <!-- Web Search Mode Toggle (Compass) -->
+                <div class="search-menu-wrapper relative" id="searchMenuWrapper">
+                  <button class="p-1.5 rounded-lg hover:text-teal-300 hover:bg-white/[0.05] transition-colors composer-btn web-search-toggle mode-autonomous active" id="webSearchToggleBtn" type="button" title="Autonomous Web Explorer (Orbital Navigation)" aria-expanded="false">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="compass" aria-hidden="true" class="lucide lucide-compass w-4 h-4 text-teal-400" id="webSearchIcon"><circle cx="12" cy="12" r="10"></circle><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"></path></svg>
+                    <span class="search-badge" id="searchBadge" style="display: none;">PRO</span>
+                  </button>
 
-              <!-- Search Mode Dropdown Popup (Moved to Skills menu; kept hidden for connectome safety) -->
-              <div class="search-dropdown-popup" id="searchDropdown" style="display: none !important;">
+                  <div class="search-dropdown-popup" id="searchDropdown" style="display: none !important;">
                 <div class="search-dropdown-header">
                   <span><i class="fa-solid fa-satellite-dish"></i> Mode Penelusuran Web</span>
                 </div>
@@ -909,67 +986,64 @@
                   </div>
                 </button>
               </div>
+                </div>
+
+                <!-- Hidden indicator elements for connectome safety -->
+                <div class="video-search-menu-wrapper" id="videoSearchMenuWrapper" style="display: none;">
+                  <button class="composer-btn video-search-toggle" id="videoSearchToggleBtn" type="button" style="display: none;" title="Pencarian YouTube" aria-label="Pencarian YouTube" aria-pressed="false">
+                    <i class="fa-brands fa-youtube" id="videoSearchIcon"></i>
+                    <span class="video-badge" id="videoSearchBadge" style="display: none;">YT</span>
+                  </button>
+                </div>
+                <div class="image-model-menu-wrapper" id="imageModelMenuWrapper" style="display: none;">
+                  <button class="composer-btn image-gen-toggle" id="imageGenToggleBtn" type="button" style="display: none;">
+                    <span class="image-model-badge" id="imageModelBadge" style="display: none;">Flux</span>
+                  </button>
+                </div>
+                <div class="music-model-menu-wrapper" id="musicModelMenuWrapper" style="display: none;">
+                  <button class="composer-btn music-gen-toggle" id="musicGenToggleBtn" type="button" style="display: none;">
+                    <span class="music-model-badge" id="musicModelBadge" style="display: none;">Music</span>
+                  </button>
+                </div>
+                <button class="composer-btn music-mode-indicator" id="musicModeIndicator" type="button" title="Mode Musik Aktif" aria-label="Mode Musik Aktif" style="display:none;">
+                  <i class="fa-solid fa-music"></i>
+                </button>
+                <button class="composer-btn image-mode-indicator" id="imageModeIndicator" type="button" title="Mode Gambar Aktif" aria-label="Mode Gambar Aktif" style="display:none;">
+                  <i class="fa-solid fa-image"></i>
+                </button>
+                <button class="composer-btn youtube-mode-indicator" id="youtubeModeIndicator" type="button" title="Mode Pencarian Video YouTube Aktif" aria-label="Mode Pencarian Video YouTube Aktif" style="display:none;">
+                  <i class="fa-brands fa-youtube"></i>
+                </button>
+              </div>
+
+              <!-- Textarea Input -->
+              <div class="flex-1 min-w-0 flex items-center input-field-wrap">
+                <textarea
+                  id="promptInput"
+                  class="w-full bg-transparent border-0 text-slate-100 placeholder:text-slate-500 focus:ring-0 focus:outline-none resize-none text-sm py-1.5 px-2 leading-relaxed tracking-normal h-8"
+                  placeholder=""
+                  rows="1"
+                  aria-label="Ketik prompt untuk AI"
+                ></textarea>
+              </div>
+
+              <!-- Action Buttons Right -->
+              <div class="flex items-center space-x-1 shrink-0 composer-tools-right">
+                <button class="composer-btn stop-btn p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors" id="stopGenerationBtn" style="display: none;" title="Hentikan Generasi" type="button">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="square" class="lucide lucide-square w-4 h-4 fill-current"><rect width="18" height="18" x="3" y="3" rx="2"></rect></svg>
+                </button>
+                <button class="w-8 h-8 rounded-xl bg-teal-400 hover:bg-teal-300 text-slate-950 flex items-center justify-center shadow-glow-cyan hover:scale-105 active:scale-95 transition-all duration-150 send-btn" id="sendPromptBtn" title="Kirim Prompt (Enter) | Tahan 450ms untuk Mode Gambar" aria-label="Kirim Prompt" type="button">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" data-lucide="send" aria-hidden="true" class="lucide lucide-send w-3.5 h-3.5"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"></path><path d="m21.854 2.147-10.94 10.939"></path></svg>
+                </button>
+              </div>
             </div>
-
-            <!-- YouTube Search Tool Toggle (Hidden from prompt menu; only active indicator shown when used) -->
-            <div class="video-search-menu-wrapper" id="videoSearchMenuWrapper" style="display: none;">
-              <button class="composer-btn video-search-toggle" id="videoSearchToggleBtn" type="button" style="display: none;" title="Pencarian YouTube: Nonaktif (Klik untuk aktifkan)" aria-label="Pencarian YouTube" aria-pressed="false">
-                <i class="fa-brands fa-youtube" id="videoSearchIcon"></i>
-                <span class="video-badge" id="videoSearchBadge" style="display: none;">YT</span>
-              </button>
-            </div>
-
-            <!-- Retained hidden elements for connectome safety -->
-            <div class="image-model-menu-wrapper" id="imageModelMenuWrapper" style="display: none;">
-              <button class="composer-btn image-gen-toggle" id="imageGenToggleBtn" type="button" style="display: none;">
-                <span class="image-model-badge" id="imageModelBadge" style="display: none;">Flux</span>
-              </button>
-            </div>
-            <div class="music-model-menu-wrapper" id="musicModelMenuWrapper" style="display: none;">
-              <button class="composer-btn music-gen-toggle" id="musicGenToggleBtn" type="button" style="display: none;">
-                <span class="music-model-badge" id="musicModelBadge" style="display: none;">Music</span>
-              </button>
-            </div>
-
-            <!-- AI Music Mode Indicator -->
-            <button class="composer-btn music-mode-indicator" id="musicModeIndicator" type="button" title="Mode Musik Aktif" aria-label="Mode Musik Aktif" style="display:none;">
-              <i class="fa-solid fa-music"></i>
-            </button>
-            <!-- AI Image Mode Indicator -->
-            <button class="composer-btn image-mode-indicator" id="imageModeIndicator" type="button" title="Mode Gambar Aktif" aria-label="Mode Gambar Aktif" style="display:none;">
-              <i class="fa-solid fa-image"></i>
-            </button>
-            <!-- AI YouTube Search Mode Indicator -->
-            <button class="composer-btn youtube-mode-indicator" id="youtubeModeIndicator" type="button" title="Mode Pencarian Video YouTube Aktif" aria-label="Mode Pencarian Video YouTube Aktif" style="display:none;">
-              <i class="fa-brands fa-youtube"></i>
-            </button>
-          </div>
-
-          <!-- Textarea Input -->
-          <div class="input-field-wrap">
-            <textarea
-              id="promptInput"
-              aria-label="Ketik prompt untuk AI"
-              placeholder=""
-              rows="1"
-            ></textarea>
-          </div>
-
-          <!-- Action Buttons Right -->
-          <div class="composer-tools-right">
-            <button class="composer-btn stop-btn" id="stopGenerationBtn" style="display: none;" title="Hentikan Generasi">
-              <i class="fa-solid fa-circle-stop"></i>
-            </button>
-            <button class="send-btn" id="sendPromptBtn" title="Kirim Prompt (Enter) | Tahan 450ms untuk Mode Gambar" aria-label="Kirim Prompt">
-              <i class="fa-solid fa-paper-plane"></i>
-            </button>
           </div>
         </div>
       </footer>
     </main>
   </div>
 
-  <!-- ==================== MODALS ==================== -->
+<!-- ==================== MODALS ==================== -->
 
   <!-- 1. SETTINGS MODAL -->
   <div class="modal-backdrop" id="settingsModal">
