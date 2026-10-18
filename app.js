@@ -30740,6 +30740,10 @@ Aturan:
         if (tab.pane1) this.syncMobileScreenPosition(tab.pane1);
         if (tab.pane2) this.syncMobileScreenPosition(tab.pane2);
       }
+      if (this._mobileVvTimer) clearTimeout(this._mobileVvTimer);
+      this._mobileVvTimer = setTimeout(() => {
+        this.fitAllPanes();
+      }, 60);
     },
 
     syncMobileScreenPosition(paneState) {
@@ -30811,8 +30815,12 @@ Aturan:
       const currentCols = paneState.ptyCols || (paneState.term ? paneState.term.cols : 80);
       const isNarrow = currentCols <= 65;
 
-      const targetCols = isNarrow ? 100 : 48;
-      const targetRows = isNarrow ? 32 : 28;
+      const dims = (paneState.fitAddon && paneState.fitAddon.proposeDimensions()) || null;
+      const fittedCols = dims ? Math.max(45, dims.cols) : 48;
+      const fittedRows = dims ? Math.max(15, dims.rows) : 25;
+
+      const targetCols = isNarrow ? 100 : fittedCols;
+      const targetRows = isNarrow ? 32 : fittedRows;
 
       paneState.ptyCols = targetCols;
       paneState.ptyRows = targetRows;
@@ -30829,9 +30837,9 @@ Aturan:
       this.sendPtyResize(paneState.sessionId, targetCols, targetRows);
       this.syncTerminalFrameDisplay(paneState);
 
-      const msg = targetCols === 48
-        ? '📱 Mode Layar: HP (48 Kolom Presisi)'
-        : '💻 Mode Layar: Laptop (100 Kolom Lebar)';
+      const msg = targetCols <= 65
+        ? `📱 Mode Layar: HP Presisi (${targetCols}c x ${targetRows}r)`
+        : '💻 Mode Layar: Laptop Lebar (100 Kolom)';
       showToast(msg, 'info');
 
       if (paneState.sessionId && !paneState.isFallbackMode) {
@@ -30852,11 +30860,11 @@ Aturan:
         icon.style.color = isNarrow ? '#4ade80' : '#38bdf8';
       }
       if (label) {
-        label.textContent = isNarrow ? 'HP 48c' : 'Laptop 100c';
+        label.textContent = isNarrow ? `HP ${cols || 48}c` : 'Laptop 100c';
       }
       btn.title = isNarrow
-        ? 'Sedang Mode HP (48 Kolom). Klik untuk beralih ke Mode Laptop (100 Kolom)'
-        : 'Sedang Mode Laptop (100 Kolom). Klik untuk beralih ke Mode HP (48 Kolom)';
+        ? `Sedang Mode HP (${cols || 48} Kolom). Klik untuk beralih ke Mode Laptop (100 Kolom)`
+        : 'Sedang Mode Laptop (100 Kolom). Klik untuk beralih ke Mode HP Presisi';
     },
 
     normalizeRemoteHost(input) {
@@ -31839,10 +31847,11 @@ Aturan:
       const savedTheme = localStorage.getItem('zoz_term_theme') || 'aura-es';
       this.setTheme(savedTheme, false);
       const savedSize = parseInt(localStorage.getItem('zoz_term_fontsize'), 10);
-      if (savedSize && savedSize >= 10 && savedSize <= 24) {
+      if (this.isMobileDevice()) {
+        const mobileSize = (savedSize && savedSize >= 14 && savedSize <= 24) ? savedSize : 15;
+        this.setFontSize(mobileSize, false);
+      } else if (savedSize && savedSize >= 10 && savedSize <= 24) {
         this.setFontSize(savedSize, false);
-      } else if (this.isMobileDevice()) {
-        this.setFontSize(15, false);
       }
     },
 
@@ -31880,11 +31889,11 @@ Aturan:
       this.tabs.forEach(tab => {
         if (tab.pane1?.term) {
           tab.pane1.term.options.fontSize = this.fontSize;
-          try { tab.pane1.fitAddon?.fit(); } catch (_) {}
+          this.fitPane(tab.pane1, true);
         }
         if (tab.pane2?.term) {
           tab.pane2.term.options.fontSize = this.fontSize;
-          try { tab.pane2.fitAddon?.fit(); } catch (_) {}
+          this.fitPane(tab.pane2, true);
         }
       });
       if (persist) {
@@ -32112,15 +32121,7 @@ Aturan:
           setTimeout(() => {
             if (paneState.fitAddon) {
               try {
-                if (this.isMobileDevice()) {
-                  this.syncMobileViewport();
-                  this.syncMobileScreenPosition(paneState);
-                } else {
-                  paneState.fitAddon.fit();
-                  if (paneState.term) {
-                    this.sendPtyResize(paneState.sessionId, paneState.term.cols, paneState.term.rows);
-                  }
-                }
+                this.fitPane(paneState, true);
               } catch (_) {}
             }
           }, 30);
@@ -32237,69 +32238,28 @@ Aturan:
       }, true);
 
       if (fitAddon) {
-        try {
-          if (this.isMobileDevice()) {
-            const containerW = container.clientWidth || window.innerWidth;
-            const fullH = Math.max(window.screen.availHeight ? window.screen.availHeight * 0.72 : 550, container.clientHeight);
-            const charW = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.width) || 8.5;
-            const charH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
-            const safeCols = Math.max(48, Math.floor(containerW / charW));
-            paneState._stableRows = Math.max(24, Math.floor(fullH / charH));
-            paneState._isRemoteResizing = true;
-            try {
-              term.resize(safeCols, paneState._stableRows);
-            } finally {
-              setTimeout(() => { paneState._isRemoteResizing = false; }, 120);
-            }
-            this.syncMobileScreenPosition(paneState);
-          } else {
-            fitAddon.fit();
-          }
-        } catch (_) {}
         setTimeout(() => {
           try {
             if (this.isMobileDevice()) {
               this.syncMobileViewport();
-              this.syncMobileScreenPosition(paneState);
             }
+            this.fitPane(paneState, true);
           } catch (_) {}
         }, 50);
       }
 
-      // Attach ResizeObserver: hanya untuk scroll/viewport check di mobile, debounced fit di desktop
+      // Attach ResizeObserver: debounced 200ms fit untuk desktop & mobile
       if (typeof window.ResizeObserver !== 'undefined') {
         if (paneState._resizeObserver) {
           try { paneState._resizeObserver.disconnect(); } catch (_) {}
         }
         paneState._resizeObserver = new ResizeObserver(() => {
-          if (!paneState.term) return;
-          try {
-            if (this.isMobileDevice()) {
-              // Di mobile: JANGAN PERNAH panggil sendPtyResize atau ubah ukuran PTY host secara sepihak!
-              // Cukup pastikan scroll viewport tetap di posisi terbawah jika user tidak sedang scroll ke atas.
-              if (!paneState._userScrolledUp) {
-                try { paneState.term.scrollToBottom(); } catch (_) {}
-              }
-              return;
-            }
-
-            // Mode Desktop: fitAddon.fit() dengan debounce 250ms dan perlindungan echo remote
-            if (paneState._isRemoteResizing) return;
-            if (paneState._desktopResizeTimer) clearTimeout(paneState._desktopResizeTimer);
-            paneState._desktopResizeTimer = setTimeout(() => {
-              if (!paneState.fitAddon || !paneState.term || paneState._isRemoteResizing) return;
-              try {
-                const prevCols = paneState.term.cols;
-                const prevRows = paneState.term.rows;
-                paneState.fitAddon.fit();
-                const newCols = paneState.term.cols;
-                const newRows = paneState.term.rows;
-                if ((prevCols !== newCols || prevRows !== newRows) && paneState.sessionId) {
-                  this.sendPtyResize(paneState.sessionId, newCols, newRows);
-                }
-              } catch (_) {}
-            }, 250);
-          } catch (_) {}
+          if (!paneState.term || paneState._isRemoteResizing) return;
+          if (paneState._desktopResizeTimer) clearTimeout(paneState._desktopResizeTimer);
+          paneState._desktopResizeTimer = setTimeout(() => {
+            if (!paneState.term || paneState._isRemoteResizing) return;
+            this.fitPane(paneState, true);
+          }, 200);
         });
         paneState._resizeObserver.observe(container);
       }
@@ -32565,9 +32525,7 @@ Aturan:
 
       term.onResize(({ cols, rows }) => {
         if (paneState._isRemoteResizing) return;
-        if (!this.isMobileDevice()) {
-          this.sendPtyResize(paneState.sessionId || sessionId, cols, rows);
-        }
+        this.sendPtyResize(paneState.sessionId || sessionId, cols, rows);
       });
 
       this.connectStream(tab, paneState, paneNum);
@@ -32622,8 +32580,9 @@ Aturan:
       }
 
       const activeTerm = paneState.term;
-      const cols = (activeTerm && activeTerm.cols) ? activeTerm.cols : (this.isMobileDevice() ? 48 : 100);
-      const rows = (activeTerm && activeTerm.rows) ? activeTerm.rows : (this.isMobileDevice() ? 28 : 28);
+      const dims = (paneState.fitAddon && paneState.fitAddon.proposeDimensions()) || null;
+      const cols = (dims && dims.cols >= 45) ? dims.cols : ((activeTerm && activeTerm.cols) ? activeTerm.cols : (this.isMobileDevice() ? 48 : 100));
+      const rows = (dims && dims.rows >= 15) ? dims.rows : ((activeTerm && activeTerm.rows) ? activeTerm.rows : (this.isMobileDevice() ? 25 : 28));
       let queryParams = `session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}`;
       if (this.remotePin) {
         queryParams += `&pin=${encodeURIComponent(this.remotePin)}`;
@@ -32672,7 +32631,7 @@ Aturan:
           } else {
             if (statusLabel) statusLabel.textContent = 'Aktif (PTY)';
           }
-          if (paneState.term && !this.isMobileDevice()) {
+          if (paneState.term) {
             this.sendPtyResize(sessionId, paneState.term.cols, paneState.term.rows);
           }
         };
@@ -32953,10 +32912,10 @@ Aturan:
     },
 
     async sendPtyResize(sessionId, cols, rows) {
-      const minSafeCols = this.isMobileDevice() ? 48 : 80;
-      const minSafeRows = this.isMobileDevice() ? 24 : 20;
+      const minSafeCols = this.isMobileDevice() ? 45 : 60;
+      const minSafeRows = this.isMobileDevice() ? 15 : 20;
       const safeCols = Math.max(minSafeCols, parseInt(cols, 10) || minSafeCols);
-      const safeRows = Math.max(minSafeRows, parseInt(rows, 10) || 28);
+      const safeRows = Math.max(minSafeRows, parseInt(rows, 10) || (this.isMobileDevice() ? 25 : 28));
       const tab = this.getActiveTab();
       const panes = [tab?.pane1, tab?.pane2].filter(p => p && p.sessionId === sessionId);
       const wsPane = panes.find(p => p.ws && p.ws.readyState === WebSocket.OPEN);
@@ -32977,24 +32936,70 @@ Aturan:
       } catch (_) {}
     },
 
+    fitPane(paneState, forcePtyResize = true) {
+      if (!paneState || !paneState.term || !paneState.screenContainer) return;
+      const term = paneState.term;
+      const container = paneState.screenContainer;
+      const isMobile = this.isMobileDevice();
+
+      if (paneState._isRemoteResizing) return;
+
+      let targetCols = term.cols || 80;
+      let targetRows = term.rows || 24;
+
+      if (paneState.fitAddon) {
+        try {
+          const dims = paneState.fitAddon.proposeDimensions();
+          if (dims && dims.cols > 10 && dims.rows > 5) {
+            targetCols = Math.max(isMobile ? 45 : 60, dims.cols);
+            targetRows = Math.max(isMobile ? 15 : 20, dims.rows);
+          }
+        } catch (_) {}
+      }
+
+      // Fallback penghitungan dimensi jika proposeDimensions belum siap
+      if (!targetCols || !targetRows || targetCols < 20 || targetRows < 10) {
+        const containerW = container.clientWidth || window.innerWidth;
+        const containerH = container.clientHeight || (window.innerHeight - 130);
+        const charW = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.width) || 8.5;
+        const charH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
+        targetCols = Math.max(isMobile ? 45 : 60, Math.floor(containerW / charW));
+        targetRows = Math.max(isMobile ? 15 : 20, Math.floor(containerH / charH));
+      }
+
+      paneState._stableRows = targetRows;
+      paneState.ptyCols = targetCols;
+      paneState.ptyRows = targetRows;
+
+      const prevCols = term.cols;
+      const prevRows = term.rows;
+
+      if (prevCols !== targetCols || prevRows !== targetRows) {
+        paneState._isRemoteResizing = true;
+        try {
+          term.resize(targetCols, targetRows);
+        } finally {
+          setTimeout(() => { paneState._isRemoteResizing = false; }, 120);
+        }
+      }
+
+      if (forcePtyResize && paneState.sessionId && !paneState.isFallbackMode) {
+        this.sendPtyResize(paneState.sessionId, targetCols, targetRows);
+      }
+
+      if (isMobile) {
+        this.syncMobileScreenPosition(paneState);
+      }
+      this.syncTerminalFrameDisplay(paneState);
+    },
+
     fitAllPanes() {
       const tab = this.getActiveTab();
       if (!tab) return;
-      const isMobile = this.isMobileDevice();
       const doFit = (pane) => {
         if (pane && pane.term) {
           try {
-            if (isMobile) {
-              if (!pane._userScrolledUp) {
-                try { pane.term.scrollToBottom(); } catch (_) {}
-              }
-            } else if (pane.fitAddon) {
-              if (pane._isRemoteResizing) return;
-              pane.fitAddon.fit();
-              if (pane.sessionId) {
-                this.sendPtyResize(pane.sessionId, pane.term.cols, pane.term.rows);
-              }
-            }
+            this.fitPane(pane, true);
           } catch (_) {}
         }
       };
@@ -34379,19 +34384,21 @@ Aturan:
 
       const diag = this.diagnose(paneNum);
       const isMobile = TerminalManager.isMobileDevice();
-      const minSafeCols = isMobile ? 48 : 80;
-      const minSafeRows = isMobile ? 24 : 20;
-      const safeCols = Math.max(minSafeCols, term.cols || minSafeCols);
-      const safeRows = Math.max(minSafeRows, pane._stableRows || term.rows || 28);
+      const dims = (pane.fitAddon && pane.fitAddon.proposeDimensions()) || null;
+      const minSafeCols = isMobile ? 45 : 80;
+      const minSafeRows = isMobile ? 15 : 20;
+      const safeCols = dims ? Math.max(minSafeCols, dims.cols) : Math.max(minSafeCols, term.cols || minSafeCols);
+      const safeRows = dims ? Math.max(minSafeRows, dims.rows) : Math.max(minSafeRows, pane._stableRows || term.rows || 25);
 
       // A. Normalisasi Dimensi PTY Host & DOM xterm (Termux Mobile Architecture)
       try {
+        pane.ptyCols = safeCols;
+        pane.ptyRows = safeRows;
+        pane._stableRows = safeRows;
+        term.resize(safeCols, safeRows);
         if (isMobile) {
-          term.resize(safeCols, safeRows);
           TerminalManager.syncMobileViewport();
           TerminalManager.syncMobileScreenPosition(pane);
-        } else if (pane.fitAddon) {
-          pane.fitAddon.fit();
         }
         if (pane.sessionId) {
           TerminalManager.sendPtyResize(pane.sessionId, safeCols, safeRows);

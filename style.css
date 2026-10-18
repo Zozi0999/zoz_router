@@ -13567,8 +13567,7 @@ body.mermaid-has-fullscreen {
     height: 24px !important;
     border-radius: 5px !important;
   }
-  /* Sembunyikan kontrol desktop berlebih pada mobile */
-  .terminal-toolbar-right .tb-group,
+  /* Sembunyikan kontrol desktop berlebih pada mobile, namun tampilkan kontrol ukuran font */
   #btnTermSyncWindows,
   #btnTermSplit,
   #btnTermFullscreen,
@@ -13577,6 +13576,31 @@ body.mermaid-has-fullscreen {
   #btnTermOpenQrScanner,
   #btnTermClear {
     display: none !important;
+  }
+  .terminal-toolbar-right .tb-group {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 1px !important;
+    background: rgba(15, 23, 42, 0.85) !important;
+    border: 1px solid rgba(56, 189, 248, 0.3) !important;
+    border-radius: 5px !important;
+    padding: 0 3px !important;
+    height: 24px !important;
+  }
+  .terminal-toolbar-right .tb-group .tb-btn {
+    padding: 1px 4px !important;
+    height: 20px !important;
+    font-size: 0.65rem !important;
+    background: transparent !important;
+    border: none !important;
+    color: #e2e8f0 !important;
+  }
+  .terminal-toolbar-right .tb-group span#termFontSizeLabel {
+    font-size: 0.68rem !important;
+    color: #38bdf8 !important;
+    font-weight: 700 !important;
+    min-width: 26px !important;
+    text-align: center !important;
   }
   /* Tombol Mobile Remote Connect di Toolbar */
   .tb-btn-mobile-connect {
@@ -13675,11 +13699,15 @@ body.mermaid-has-fullscreen {
     justify-content: flex-start !important;
   }
   .xterm-pane-container {
-    padding: 0 0 8px 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
     background: #000000 !important;
     flex: 1 1 0% !important;
     min-height: 0 !important;
+    height: 100% !important;
+    width: 100% !important;
     overflow: hidden !important;
+    position: relative !important;
   }
   .xterm-pane-container .xterm-screen {
     transition: none !important;
@@ -13690,6 +13718,7 @@ body.mermaid-has-fullscreen {
     grid-template-columns: repeat(8, minmax(0, 1fr)) !important;
     gap: 2px !important;
     padding: 3px 4px !important;
+    padding-bottom: max(3px, env(safe-area-inset-bottom, 3px)) !important;
     background: #000000 !important;
     border-top: 1px solid rgba(56, 189, 248, 0.25) !important;
   }
