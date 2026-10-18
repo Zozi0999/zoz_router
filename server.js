@@ -45,6 +45,16 @@ const SNAPSHOTS_DIR = path.join(WORKSPACE_ROOT, '.zoz-snapshots');
 // =========================================================================
 // CLOUDFLARE TUNNEL REMOTE ACCESS (WAN Mobile-to-Desktop) STATE & ENGINE
 // =========================================================================
+function isPidAlive(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 const TUNNEL_STATE_FILE = path.join(__dirname, 'data', 'tunnel-state.json');
 const SYSTEM_BOOT_TIME = Math.round(Date.now() / 1000 - os.uptime());
 let persistedTunnel = null;
@@ -55,9 +65,9 @@ try {
 } catch (_) {}
 
 let cloudflareTunnelProcess = null;
-let cloudflareTunnelPid = null;
+let cloudflareTunnelPid = (persistedTunnel && persistedTunnel.pid && isPidAlive(persistedTunnel.pid)) ? persistedTunnel.pid : null;
 let cloudflareTunnelUrl = (persistedTunnel && persistedTunnel.url) || '';
-let cloudflareTunnelActive = false;
+let cloudflareTunnelActive = Boolean(cloudflareTunnelPid && cloudflareTunnelUrl);
 let cloudflareTunnelError = '';
 // Persistent PIN: Keep identical PIN across server restarts for this laptop uptime
 let cloudflareTunnelPin = (persistedTunnel && persistedTunnel.pin)
@@ -90,6 +100,7 @@ function generateSixDigitPin() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
+
 function getCloudflaredBinaryPath() {
   const localBin = path.join(__dirname, 'bin', 'cloudflared.exe');
   if (fs.existsSync(localBin)) return localBin;
@@ -101,8 +112,26 @@ function getCloudflaredBinaryPath() {
 function startCloudflareTunnel(customPort) {
   isTunnelIntentionallyStopped = false;
   return new Promise((resolve) => {
-    // If tunnel process is already running and active with URL, reuse it directly without changing URL
-    if (cloudflareTunnelProcess && cloudflareTunnelActive && cloudflareTunnelUrl) {
+    // 1. Jika proses tunnel sudah aktif di instansi berjalan, gunakan kembali secara langsung
+    if (cloudflareTunnelActive && cloudflareTunnelUrl && cloudflareTunnelPid && isPidAlive(cloudflareTunnelPid)) {
+      return resolve({
+        active: true,
+        tunnelUrl: cloudflareTunnelUrl,
+        wssUrl: cloudflareTunnelUrl.replace(/^http/i, 'ws'),
+        pin: cloudflareTunnelPin,
+        startedAt: cloudflareTunnelStartedAt
+      });
+    }
+
+    // 2. Persistent Tunnel Guarantee: Jika proses cloudflared dari sesi sebelumnya masih hidup di Windows host,
+    // langsung sambungkan kembali! Menjamin URL publik trycloudflare dan PIN 100% PERSISTEN tanpa pernah berubah!
+    if (persistedTunnel && persistedTunnel.url && persistedTunnel.pid && isPidAlive(persistedTunnel.pid)) {
+      cloudflareTunnelPid = persistedTunnel.pid;
+      cloudflareTunnelUrl = persistedTunnel.url;
+      cloudflareTunnelActive = true;
+      cloudflareTunnelStartedAt = persistedTunnel.startedAt || new Date().toISOString();
+      savePersistedTunnelState();
+      console.log(`[Cloudflare] Detached Tunnel Reused (PID ${cloudflareTunnelPid}): ${cloudflareTunnelUrl} (PIN: ${cloudflareTunnelPin})`);
       return resolve({
         active: true,
         tunnelUrl: cloudflareTunnelUrl,
@@ -127,9 +156,11 @@ function startCloudflareTunnel(customPort) {
     try {
       cloudflareTunnelProcess = spawn(binPath, args, {
         windowsHide: true,
+        detached: true,
         stdio: ['ignore', 'pipe', 'pipe']
       });
       cloudflareTunnelPid = cloudflareTunnelProcess.pid;
+      cloudflareTunnelProcess.unref();
     } catch (err) {
       cloudflareTunnelError = `Gagal menjalankan cloudflared: ${err.message}.`;
       return resolve({
@@ -233,7 +264,13 @@ function stopCloudflareTunnel() {
     try { cloudflareTunnelProcess.kill(); } catch (_) {}
     cloudflareTunnelProcess = null;
   }
+  if (cloudflareTunnelPid && isPidAlive(cloudflareTunnelPid)) {
+    try { process.kill(cloudflareTunnelPid); } catch (_) {}
+  }
   cloudflareTunnelActive = false;
+  cloudflareTunnelPid = null;
+  cloudflareTunnelUrl = '';
+  savePersistedTunnelState();
   return { active: false, message: 'Cloudflare Tunnel dimatikan.' };
 }
 
@@ -337,7 +374,7 @@ function handleServerAutoEnter(session, data) {
   );
 
   // Pola 2: Konfirmasi batch / CLI [y/N], (y/n), (yes/no), [Y/n]
-  const isConfirmYPrompt = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\?.*\(y\/N\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\bdo you want to continue\s*\(?[yY]\/[nN]\)?|\bare you sure\s*\(?[yY]\/[nN]\)?|\bproceed with operation\s*\(?[yY]\/[nN]\)?|\bOk to proceed\? \([yY]\)|\bApakah Anda yakin|\bLanjutkan\?)/i.test(clean);
+  const isConfirmYPrompt = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\?.*\(y\/N\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\bdo you want to continue\s*\(?[yY]\/[nN]\)?|\bare you sure\s*\(?[yY]\/[nN]\)?|\bproceed with operation\s*\(?[yY]\/[nN]\)?|\bOk to proceed\? \([yY]\)|\bApakah Anda yakin|\bLanjutkan\?|\(yes\/no\/\[fingerprint\]\)|\bcontinue connecting\b)/i.test(clean);
 
   // Pola 3: Prompt "Press Enter to continue" / "Hit enter to continue"
   const isEnterOnlyPrompt = /(?:press (?:any key|enter) to continue|hit enter to continue|press \[enter\] to continue|\bpress enter to\b|\btekan enter untuk\b|\[enter\] to continue|\(enter to continue\))/i.test(clean);
@@ -5613,7 +5650,9 @@ async function requestHandler(req, res) {
           useConpty: true
         });
 
-        const autoEnterReq = reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true';
+        const autoEnterReq = reqUrl.searchParams.has('autoEnter')
+          ? (reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true')
+          : globalAutoEnterEnabled;
         session = {
           id: sessionId,
           shell: shellType,
@@ -9501,7 +9540,9 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
         useConpty: true
       });
 
-      const autoEnterReq = reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true';
+      const autoEnterReq = reqUrl.searchParams.has('autoEnter')
+        ? (reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true')
+        : globalAutoEnterEnabled;
       session = {
         id: sessionId,
         shell: shellType,

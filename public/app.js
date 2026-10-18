@@ -31137,6 +31137,7 @@ Aturan:
     async detectWindowsBridge(forceToast = false) {
       const candidates = [
         this.bridgeUrl,
+        (window.location.origin && !window.location.origin.includes('vercel.app')) ? window.location.origin : '',
         'http://127.0.0.1:4040',
         'http://localhost:4040'
       ].filter(Boolean);
@@ -31302,6 +31303,23 @@ Aturan:
         } catch (_) {}
         this.connectRemoteTerminal(this.remoteHost, this.remotePin, true);
         return;
+      }
+
+      // Deteksi otomatis jika peramban membuka URL tunnel Cloudflare secara langsung di HP
+      if (!qHost && (window.location.host.includes('trycloudflare.com') || window.location.host.includes('.loca.lt') || window.location.host.includes('.ngrok.io'))) {
+        const norm = this.normalizeRemoteHost(window.location.origin);
+        this.remoteHost = norm.httpUrl;
+        this.remotePin = qPin ? qPin.trim() : (this.remotePin || '');
+        if (this.remotePin) {
+          try {
+            localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
+              remoteHost: this.remoteHost,
+              pin: this.remotePin
+            }));
+          } catch (_) {}
+          this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
+          return;
+        }
       }
 
       try {
