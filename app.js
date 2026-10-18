@@ -1766,6 +1766,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         
         // 3. Abaikan tombol di dalam modal tertutup, dropdown tertutup, atau tab non-aktif
         if (btn.closest && btn.closest('.modal-backdrop:not(.show), .modal:not(.show), [hidden], .dropdown-menu:not(.show), .settings-tab-pane:not(.active), .endocrine-pane[style*="display: none"], .endocrine-pane[style*="display:none"]')) continue;
+        // Abaikan tombol di dalam mobile offcanvas sidebar jika sedang tertutup
+        if (window.innerWidth <= 768 && btn.closest && btn.closest('#sidebar:not(.open), .sidebar:not(.open)')) continue;
 
         const style = window.getComputedStyle(btn);
         if (style.display === 'none' || style.visibility === 'hidden') continue;

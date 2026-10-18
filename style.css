@@ -4335,13 +4335,11 @@ body.mobile-sidebar-open .sidebar-backdrop {
     transform: translateX(-100%) !important;
     box-shadow: 8px 0 32px rgba(0, 0, 0, 0.85);
     transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
-    pointer-events: none !important;
   }
   
   #sidebar.open,
   .sidebar.open {
     transform: translateX(0) !important;
-    pointer-events: auto !important;
   }
 
   /* Main container and chat MUST be 100% full width and never displaced by sidebar */
@@ -15253,13 +15251,11 @@ body.mermaid-has-fullscreen {
     margin: 0 !important;
     z-index: 1000 !important;
     transform: translateX(-100%) !important;
-    pointer-events: none !important;
   }
 
   #sidebar.open,
   .sidebar.open {
     transform: translateX(0) !important;
-    pointer-events: auto !important;
   }
 
   #appContainer,
