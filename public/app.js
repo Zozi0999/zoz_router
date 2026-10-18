@@ -31309,49 +31309,25 @@ Aturan:
           this.updatePaneHeaders();
           this.updateMobileBannerUI();
 
-          // Attempt to attach to laptop host's active session (e.g. Antigravity CLI)
-          try {
-            const sessRes = await fetch(`${norm.httpUrl}/api/terminal/sessions`, {
-              headers: pin ? { 'x-terminal-pin': pin } : {},
-              signal: AbortSignal.timeout(3000)
-            });
-            if (sessRes.ok) {
-              const sessData = await sessRes.json();
-              if (sessData && Array.isArray(sessData.sessions) && sessData.sessions.length > 0) {
-                const sorted = sessData.sessions.sort((a, b) => ((b.lastInputAt || b.lastActivity || 0) - (a.lastInputAt || a.lastActivity || 0)));
-                const hostSession = sorted[0];
-                if (hostSession && hostSession.id) {
-                  const t = this.getActiveTab();
-                  if (t && t.pane1) {
-                    t.pane1.sessionId = hostSession.id;
-                    if (hostSession.cwd) {
-                      t.pane1.cwd = hostSession.cwd;
-                      t.cwd = hostSession.cwd;
-                    }
-                    if (hostSession.shell) {
-                      t.pane1.shell = hostSession.shell;
-                      t.shell = hostSession.shell;
-                    }
-                  }
-                }
-              }
-            }
-          } catch (_) {}
-
+          // Sesi PTY Mandiri & Terisolasi (Termux Mobile Architecture):
+          // Setiap perangkat remote/HP mendapatkan sesi Windows PowerShell mandiri di laptop
+          // tanpa membajak atau mengganggu layar laptop host (seperti arsitektur terminal-extension).
           const tab = this.getActiveTab();
           if (tab) {
             if (tab.pane1) {
+              tab.pane1.sessionId = this.getEffectiveSessionId(tab, 1);
               tab.pane1.isFallbackMode = false;
               this.connectStream(tab, tab.pane1, 1);
             }
             if (tab.isSplit && tab.pane2) {
+              tab.pane2.sessionId = this.getEffectiveSessionId(tab, 2);
               tab.pane2.isFallbackMode = false;
               this.connectStream(tab, tab.pane2, 2);
             }
           }
 
           if (notify) {
-            showToast('☁️ Terhubung ke PowerShell Laptop via Cloudflare WAN!', 'success');
+            showToast('⚡ Terhubung: Sesi Windows PowerShell Mandiri Aktif!', 'success');
           }
           return true;
         }
@@ -32073,6 +32049,22 @@ Aturan:
       return paneNum === 2 ? tab.pane2 : tab.pane1;
     },
 
+    getEffectiveSessionId(tab, paneNum = 1) {
+      const tabId = (tab && tab.id) ? tab.id : 'tab-1';
+      // Pada perangkat mobile / koneksi remote: Buat sesi PTY Windows mandiri & terisolasi
+      // agar pengguna di HP mendapatkan terminal Windows asli miliknya sendiri tanpa
+      // membajak sesi laptop dan tanpa bentrok ukuran layar (seperti arsitektur terminal-extension).
+      if (this.isMobileDevice() || this.isRemoteConnected) {
+        let devId = localStorage.getItem('zoz_remote_device_id');
+        if (!devId) {
+          devId = 'mob-' + Math.random().toString(36).substring(2, 8);
+          localStorage.setItem('zoz_remote_device_id', devId);
+        }
+        return `${devId}-${tabId}-p${paneNum}`;
+      }
+      return `${tabId}-p${paneNum}`;
+    },
+
     initActiveTabPanes() {
       const tab = this.getActiveTab();
       if (!tab) return;
@@ -32083,7 +32075,7 @@ Aturan:
         this.initXtermPane(2);
       }
       if (this.isRemoteConnected || this.isWindowsSynced) {
-        if (!tab.pane1?.eventSource) {
+        if (!tab.pane1?.ws && !tab.pane1?.eventSource) {
           this.connectStream(tab, tab.pane1, 1);
         } else if (tab.pane1?.term && !this.isMobileDevice()) {
           this.sendPtyResize(tab.pane1.sessionId, tab.pane1.term.cols, tab.pane1.term.rows);
@@ -32103,7 +32095,7 @@ Aturan:
         return;
       }
 
-      const sessionId = paneState.sessionId || `${tab.id}-p${paneNum}`;
+      const sessionId = paneState.sessionId || this.getEffectiveSessionId(tab, paneNum);
       paneState.sessionId = sessionId;
 
       if (paneState.term && paneState.screenContainer) {
@@ -32601,7 +32593,7 @@ Aturan:
     },
 
     connectStream(tab, paneState, paneNum) {
-      const sessionId = paneState.sessionId || `${tab.id}-p${paneNum}`;
+      const sessionId = paneState.sessionId || this.getEffectiveSessionId(tab, paneNum);
       paneState.sessionId = sessionId;
       if (paneState._reconnectTimer) {
         clearTimeout(paneState._reconnectTimer);
