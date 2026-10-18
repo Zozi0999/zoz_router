@@ -32,8 +32,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-  <noscript><link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet"></noscript>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet"></noscript>
   <!-- Icons (Font Awesome) - Asynchronous Non-blocking Load -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha384-t1nt8BQoYMLFN5p42tRAtuAAFQaCQODekUVeKKZrEnEyp4H2R0RHFz0KWpmj7i8g" crossorigin="anonymous" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"></noscript>
@@ -485,8 +485,8 @@
           <button class="icon-btn top-action-btn" id="systemPromptModalBtn" title="Preset Karakter / System Prompt">
             <i class="fa-solid fa-user-gear"></i>
           </button>
-          <!-- Terminal Neural CLI Console -->
-          <button class="icon-btn top-action-btn" id="terminalToggleBtn" title="Terminal Neural // CLI Console (Buka Shell)" aria-label="Buka Terminal">
+          <!-- Z21 Shell Console -->
+          <button class="icon-btn top-action-btn" id="terminalToggleBtn" title="Z21 Shell (Buka Console)" aria-label="Buka Terminal">
             <i class="fa-solid fa-terminal"></i>
           </button>
           <!-- Bio-Endocrine Hormone Monitor (Hanya Logo Hati Hijau Sehat) -->
@@ -1847,347 +1847,325 @@
   <!-- 8. BIO-ENDOCRINE HORMONE & BUG DETECTOR MODAL -->
   <div class="modal-backdrop" id="endocrineTelemetryModal">
     <div class="modal-card modal-lg endocrine-modal-card">
-      <div class="modal-header">
-        <div class="modal-title" style="display: flex; align-items: center; gap: 8px;">
-          <i class="fa-solid fa-heart" style="color: #00FFC2;"></i>
-          <span>Bio-Endocrine Code Telemetry</span>
-          <span class="badge" style="font-size: 0.68rem; background: rgba(0, 255, 194, 0.15); color: #00FFC2; border: 1px solid rgba(0, 255, 194, 0.3); padding: 2px 8px; border-radius: 999px;">Sistem Hormon &amp; Pendeteksi Bug Organik</span>
+      <!-- 1. Header Ringkas & Terbaca -->
+      <header class="endocrine-util-header">
+        <div class="endocrine-util-header-left">
+          <span class="endocrine-util-title">BIO-ENDOCRINE TELEMETRY</span>
+          <span class="endocrine-util-sep">|</span>
+          <span class="endocrine-util-status" id="endocrineHeaderStatus">
+            <span class="endocrine-util-square" id="headerHealthSquare"></span>
+            <span id="headerHealthText">ALL SYSTEMS HEALTHY / <span id="headerSyncCount">408</span> NODES SYNCED</span>
+          </span>
         </div>
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <button class="btn btn-xs btn-outline" id="btnCopyEndocrineLogsHeader" type="button" style="border-color: #00FFC2; color: #00FFC2; font-size: 0.72rem;" title="Salin seluruh riwayat log hormon &amp; laporan error ke clipboard">
-            <i class="fa-solid fa-copy"></i> Salin Log Error
-          </button>
-          <button class="modal-close-btn" data-close="endocrineTelemetryModal" aria-label="Tutup telemetri hormon" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
-        </div>
-      </div>
+        <button aria-label="Tutup" class="endocrine-util-close-btn" data-close="endocrineTelemetryModal" type="button">
+          [X]
+        </button>
+      </header>
 
-      <div class="modal-body" style="padding: 20px;">
-        <!-- DUAL-CHANNEL ENDOCRINE TOGGLE SWITCH BAR -->
-        <div class="endocrine-channels-bar">
-          <!-- Jalur 1 Toggle: CodeEndocrine -->
-          <div class="endocrine-channel-card active" id="cardChannelCode">
-            <div class="channel-card-left">
-              <div class="channel-icon-box code-accent">
-                <i class="fa-solid fa-code"></i>
-              </div>
-              <div class="channel-info">
-                <div class="channel-title">
-                  <span>Jalur 1: CodeEndocrine</span>
-                  <span class="channel-badge badge-code">Integritas Kode</span>
+      <!-- Main Content: Pure Systems Engineering -->
+      <main class="endocrine-util-body">
+        <!-- Hidden Toggles for State Compatibility -->
+        <input type="checkbox" id="toggleEndocrineCode" checked style="display:none;">
+        <input type="checkbox" id="toggleEndocrineChat" style="display:none;">
+
+        <!-- 2. Jalur Telemetri Sederhana -->
+        <div class="endocrine-util-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected="true" class="endocrine-util-tab active" id="tabEndocrineCode">
+            <span class="endocrine-util-tab-dot active" id="dotTabCode"></span>
+            <span>Telemetri Kode (Bug &amp; Integritas)</span>
+          </button>
+          <button type="button" role="tab" aria-selected="false" class="endocrine-util-tab" id="tabEndocrineChat">
+            <span class="endocrine-util-tab-dot" id="dotTabChat"></span>
+            <span>Telemetri Rasa (ChatEndocrine v2)</span>
+            <span class="endocrine-util-tab-badge">Endorfin</span>
+          </button>
+        </div>
+
+        <!-- PANE 1: TELEMETRI KODE -->
+        <div class="endocrine-pane" id="paneEndocrineCode" style="display: flex; flex-direction: column; gap: 20px;">
+          <!-- Dual Pipeline Routing -->
+          <section aria-label="Jalur Sistem" class="endocrine-util-sec">
+            <div class="endocrine-util-sec-title">
+              &gt; DUAL PIPELINE ROUTING
+            </div>
+            <div class="endocrine-util-box divide-y">
+              <!-- Jalur 1 -->
+              <div class="endocrine-util-pipeline-row" id="pipelineRowCode">
+                <div class="pipeline-left">
+                  <span class="pipeline-num">#1</span>
+                  <span class="pipeline-name">Jalur 1: CodeEndocrine</span>
+                  <span class="pipeline-desc">(Engine v2.4)</span>
                 </div>
-                <div class="channel-desc">Detektor bug runtime, exception, dan simpul DOM terisolasi</div>
-              </div>
-            </div>
-            <label class="switch-toggle" title="Aktifkan/Nonaktifkan Sensor Kode">
-              <input type="checkbox" id="toggleEndocrineCode" checked>
-              <span class="slider-round"></span>
-            </label>
-          </div>
-
-          <!-- Jalur 2 Toggle: ChatEndocrine -->
-          <div class="endocrine-channel-card" id="cardChannelChat">
-            <div class="channel-card-left">
-              <div class="channel-icon-box chat-accent">
-                <i class="fa-solid fa-heart-pulse"></i>
-              </div>
-              <div class="channel-info">
-                <div class="channel-title">
-                  <span>Jalur 2: ChatEndocrine</span>
-                  <span class="channel-badge badge-chat">Sensor Rasa &amp; Intuisi</span>
+                <div class="pipeline-right">
+                  <span>Latensi: <strong id="valCodeLatency">24ms</strong></span>
+                  <span class="endocrine-util-sep">|</span>
+                  <span>Throughput: <strong id="valCodeThroughput">1.4k req/s</strong></span>
+                  <span class="endocrine-util-sep">|</span>
+                  <span class="pipeline-status" id="valCodeStatus">STATUS: ON</span>
                 </div>
-                <div class="channel-desc">Sensor rasa &amp; intuisi emosional percakapan manusia-AI</div>
+              </div>
+              <!-- Jalur 2 -->
+              <div class="endocrine-util-pipeline-row" id="pipelineRowChat">
+                <div class="pipeline-left">
+                  <span class="pipeline-num">#2</span>
+                  <span class="pipeline-name">Jalur 2: ChatEndocrine</span>
+                  <span class="pipeline-desc">(Reseptor Emosional)</span>
+                </div>
+                <div class="pipeline-right">
+                  <span>Afinitas: <strong id="valChatAffinity">Stabil</strong></span>
+                  <span class="endocrine-util-sep">|</span>
+                  <span>Resonansi: <strong id="valChatResonance">99.4%</strong></span>
+                  <span class="endocrine-util-sep">|</span>
+                  <span class="pipeline-status" id="valChatStatus">STATUS: ON</span>
+                </div>
               </div>
             </div>
-            <label class="switch-toggle" title="Aktifkan/Nonaktifkan Sensor Rasa Percakapan">
-              <input type="checkbox" id="toggleEndocrineChat">
-              <span class="slider-round"></span>
-            </label>
-          </div>
-        </div>
+          </section>
 
-        <!-- CHANNEL TAB SWITCHER NAV -->
-        <div class="endocrine-tabs-nav" role="tablist">
-          <button type="button" class="endocrine-tab-btn active" id="tabEndocrineCode" data-tab="code">
-            <i class="fa-solid fa-bug-slash"></i> <span>Telemetri Kode (Bug &amp; Integritas)</span>
-          </button>
-          <button type="button" class="endocrine-tab-btn" id="tabEndocrineChat" data-tab="chat">
-            <i class="fa-solid fa-brain"></i> <span>Telemetri Rasa (ChatEndocrine v2)</span>
-            <span class="chat-endocrine-dot" id="chatEndocrineActiveDot" style="display:none;"></span>
-          </button>
-        </div>
+          <!-- 3. Metrik Utama (Gauges ASCII-Style & Ringkasan Harmoni) -->
+          <section aria-label="Metrik Hormonal" class="endocrine-util-sec">
+            <div class="endocrine-util-sec-title">
+              &gt; ENDOCRINE GAUGES &amp; EQUILIBRIUM
+            </div>
+            <div class="endocrine-util-gauges-grid">
+              <!-- Dopamin -->
+              <div class="endocrine-util-gauge-card">
+                <div class="gauge-header">
+                  <span class="gauge-title">DOPAMIN (Kelancaran)</span>
+                  <span class="gauge-val-opt" id="endocrineDopamineVal">100% OPTIMAL</span>
+                </div>
+                <div class="ascii-gauge-bar text-emerald" id="endocrineDopamineAscii">
+                  [||||||||||||||||||||]
+                </div>
+                <p class="gauge-caption" id="endocrineDopamineDesc">Eksekusi lancar, seluruh instruksi selesai tanpa hambatan sintaks.</p>
+              </div>
+              <!-- Kortisol -->
+              <div class="endocrine-util-gauge-card">
+                <div class="gauge-header">
+                  <span class="gauge-title">KORTISOL (Stres/Kerusakan)</span>
+                  <span class="gauge-val-clear" id="endocrineCortisolVal">0% CLEAR</span>
+                </div>
+                <div class="ascii-gauge-bar text-zinc" id="endocrineCortisolAscii">
+                  [....................]
+                </div>
+                <p class="gauge-caption" id="endocrineCortisolDesc">Kondisi prima: 0 error terisolasi, jaringan stabil tanpa gangguan.</p>
+              </div>
+            </div>
+            <!-- Ringkasan Satu Baris -->
+            <div class="endocrine-util-vitals-summary">
+              <div>Serotonin: <span class="text-emerald" id="endocrineSerotoninVal">100% (Normal)</span></div>
+              <span class="endocrine-util-sep">|</span>
+              <div>Adrenalin: <span class="text-zinc" id="endocrineAdrenalineVal">0% (Idle)</span></div>
+              <span class="endocrine-util-sep">|</span>
+              <div>Simpul Kode: <span style="color:#ffffff;" id="endocrineConnectomeVal">408 / 408 Harmonis</span></div>
+            </div>
+          </section>
 
-        <!-- PANE 1: TELEMETRI KODE (EXISTING BIOENDOCRINE) -->
-        <div class="endocrine-pane" id="paneEndocrineCode">
-          <!-- Top Dual Hormone Gauges -->
-          <div class="endocrine-gauges-grid">
-            <!-- Dopamine Card -->
-            <div class="endocrine-gauge-card card-dopamine">
-              <div class="gauge-card-header">
-                <span class="gauge-title"><i class="fa-solid fa-bolt" style="color:#00FFC2;"></i> Dopamin (Kekuatan &amp; Kelancaran)</span>
-                <span class="gauge-val" id="endocrineDopamineVal">95%</span>
-              </div>
-              <div class="gauge-track">
-                <div class="gauge-fill fill-dopamine" id="endocrineDopamineBar" style="width: 95%;"></div>
-              </div>
-              <div class="gauge-desc">Naik ketika kode berjalan cepat, rapi, respons AI mengalir lancar, dan tanpa hambatan.</div>
+          <!-- 4. Status 5-Pilar (Daftar Terstruktur Bersih) -->
+          <section aria-label="Diagnosa 5-Pilar" class="endocrine-util-sec">
+            <div class="endocrine-util-sec-head">
+              <span class="endocrine-util-sec-title">&gt; 5-PILLAR INTEGRITY VERIFICATION</span>
+              <span class="pillar-pass-badge" id="pillarOverallPass">[PASS 5/5]</span>
             </div>
+            <div class="endocrine-util-box divide-y">
+              <div class="endocrine-pillar-row" id="cardPillarConnectome" data-pillar="connectome">
+                <span class="pillar-name">01. Simpul &amp; Reseptor DOM</span>
+                <div class="pillar-meta">
+                  <span class="pillar-metric" id="pillarConnectomeDesc">Integritas 100%</span>
+                  <span class="pillar-status" id="pillarConnectomeStatus">PASS</span>
+                </div>
+              </div>
+              <div class="endocrine-pillar-row" id="cardPillarModel" data-pillar="model">
+                <span class="pillar-name">02. Panggilan Model &amp; API</span>
+                <div class="pillar-meta">
+                  <span class="pillar-metric" id="pillarModelDesc">0 Error Terdeteksi</span>
+                  <span class="pillar-status" id="pillarModelStatus">PASS</span>
+                </div>
+              </div>
+              <div class="endocrine-pillar-row" id="cardPillarText" data-pillar="text">
+                <span class="pillar-name">03. Integritas Teks AI</span>
+                <div class="pillar-meta">
+                  <span class="pillar-metric" id="pillarTextDesc">0 Bocor / Pecah</span>
+                  <span class="pillar-status" id="pillarTextStatus">PASS</span>
+                </div>
+              </div>
+              <div class="endocrine-pillar-row" id="cardPillarViewport" data-pillar="viewport">
+                <span class="pillar-name">04. Dimensi &amp; Layout Layar</span>
+                <div class="pillar-meta">
+                  <span class="pillar-metric" id="pillarViewportDesc">100% Stabil</span>
+                  <span class="pillar-status" id="pillarViewportStatus">PASS</span>
+                </div>
+              </div>
+              <div class="endocrine-pillar-row" id="cardPillarButton" data-pillar="button">
+                <span class="pillar-name">05. Aksesibilitas Tombol</span>
+                <div class="pillar-meta">
+                  <span class="pillar-metric" id="pillarButtonDesc">Bebas Halangan</span>
+                  <span class="pillar-status" id="pillarButtonStatus">PASS</span>
+                </div>
+              </div>
+            </div>
+          </section>
 
-            <!-- Cortisol / Stress Card -->
-            <div class="endocrine-gauge-card card-cortisol">
-              <div class="gauge-card-header">
-                <span class="gauge-title"><i class="fa-solid fa-triangle-exclamation" style="color:#FF4D4D;"></i> Kortisol (Stres &amp; Kerusakan)</span>
-                <span class="gauge-val" id="endocrineCortisolVal">0% (Bebas Bug)</span>
-              </div>
-              <div class="gauge-track">
-                <div class="gauge-fill fill-cortisol" id="endocrineCortisolBar" style="width: 0%;"></div>
-              </div>
-              <div class="gauge-desc" id="endocrineCortisolDesc">0% Stres / Kerusakan. Naik hanya jika terjadi exception, error jaringan, atau kode terisolasi.</div>
-            </div>
-          </div>
-
-          <!-- System Vitals Bar -->
-          <div class="endocrine-vitals-row">
-            <div class="vital-item">
-              <span class="vital-label"><i class="fa-solid fa-shield-heart" style="color:#00FFC2;"></i> Serotonin (Homeostasis):</span>
-              <strong id="endocrineSerotoninVal">94%</strong>
-            </div>
-            <div class="vital-item">
-              <span class="vital-label"><i class="fa-solid fa-fire-flame-curved" style="color:var(--neon-amber);"></i> Adrenalin (Beban):</span>
-              <strong id="endocrineAdrenalineVal">12%</strong>
-            </div>
-            <div class="vital-item">
-              <span class="vital-label"><i class="fa-solid fa-circle-nodes" style="color:var(--neon-cyan);"></i> Simpul Kode Terhubung:</span>
-              <strong id="endocrineConnectomeVal">100% Harmonis</strong>
-            </div>
-          </div>
-
-          <!-- 5-PILLAR DIAGNOSTIC MATRIX GRID -->
-          <div class="endocrine-pillars-grid">
-            <div class="endocrine-pillar-card status-healthy" id="cardPillarConnectome" data-pillar="connectome">
-              <div class="pillar-icon"><i class="fa-solid fa-circle-nodes"></i></div>
-              <div class="pillar-info">
-                <div class="pillar-label">Simpul &amp; Reseptor DOM</div>
-                <div class="pillar-val" id="pillarConnectomeStatus">100% Harmonis</div>
+          <!-- Drawer Diagnosa & Log Tersembunyi Saat Sehat / Muncul Saat Ada Isu -->
+          <div class="endocrine-util-box" id="endocrineIsolatedBox" style="display: none; padding: 12px; gap: 10px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 8px;">
+              <span class="endocrine-util-sec-title" id="endocrineIsolatedTag">&gt; DIAGNOSTIC ISSUES</span>
+              <div style="display: flex; gap: 6px;">
+                <button type="button" class="endocrine-util-btn btn-util-heal" id="btnAutoHealLayoutNow" style="padding: 2px 8px; font-size: 10px;">Auto-Heal</button>
+                <button type="button" class="endocrine-util-btn btn-util-copy" id="btnAuditConnectomeNow" style="padding: 2px 8px; font-size: 10px;">Pindai</button>
               </div>
             </div>
-            <div class="endocrine-pillar-card status-healthy" id="cardPillarModel" data-pillar="model">
-              <div class="pillar-icon"><i class="fa-solid fa-server"></i></div>
-              <div class="pillar-info">
-                <div class="pillar-label">Panggilan Model &amp; API</div>
-                <div class="pillar-val" id="pillarModelStatus">0 Error</div>
+            <div id="endocrineIsolatedContent" style="font-size: 11px; color: #a1a1aa;">
+              Semua modul, fungsi pemanggil, dan reseptor DOM saling terikat dengan baik.
+            </div>
+            <div class="endocrine-subtabs-bar" style="display: flex; flex-wrap: wrap; gap: 4px;">
+              <button type="button" class="endocrine-subtab-btn active" id="subtabAllIssues" data-subtab="all">Semua</button>
+              <button type="button" class="endocrine-subtab-btn" id="subtabModelIssues" data-subtab="model">Model</button>
+              <button type="button" class="endocrine-subtab-btn" id="subtabTextIssues" data-subtab="text">Teks</button>
+              <button type="button" class="endocrine-subtab-btn" id="subtabViewportIssues" data-subtab="viewport">Layout</button>
+              <button type="button" class="endocrine-subtab-btn" id="subtabButtonIssues" data-subtab="button">Tombol</button>
+              <button type="button" class="endocrine-subtab-btn" id="subtabConnectomeIssues" data-subtab="connectome">DOM</button>
+            </div>
+            <div class="endocrine-diagnostic-list" id="endocrineDiagnosticList" style="display: none; max-height: 180px; overflow-y: auto;"></div>
+            <div style="border-top: 1px solid #27272a; padding-top: 8px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                <span class="endocrine-util-sec-title">&gt; HORMONE FLUCTUATION LOG</span>
+                <button type="button" class="endocrine-util-btn btn-util-copy" id="btnCopyEndocrineLogs" style="padding: 2px 8px; font-size: 10px;"><i class="fa-solid fa-copy"></i> Salin</button>
               </div>
-            </div>
-            <div class="endocrine-pillar-card status-healthy" id="cardPillarText" data-pillar="text">
-              <div class="pillar-icon"><i class="fa-solid fa-spell-check"></i></div>
-              <div class="pillar-info">
-                <div class="pillar-label">Integritas Teks AI</div>
-                <div class="pillar-val" id="pillarTextStatus">0 Pecah / Bocor</div>
-              </div>
-            </div>
-            <div class="endocrine-pillar-card status-healthy" id="cardPillarViewport" data-pillar="viewport">
-              <div class="pillar-icon"><i class="fa-solid fa-mobile-screen-button"></i></div>
-              <div class="pillar-info">
-                <div class="pillar-label">Dimensi Layar &amp; Layout</div>
-                <div class="pillar-val" id="pillarViewportStatus">Stabil 100%</div>
-              </div>
-            </div>
-            <div class="endocrine-pillar-card status-healthy" id="cardPillarButton" data-pillar="button">
-              <div class="pillar-icon"><i class="fa-solid fa-hand-pointer"></i></div>
-              <div class="pillar-info">
-                <div class="pillar-label">Posisi &amp; Akses Tombol</div>
-                <div class="pillar-val" id="pillarButtonStatus">Bebas Halangan</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Subtab Filter Bar -->
-          <div class="endocrine-subtabs-bar">
-            <button type="button" class="endocrine-subtab-btn active" id="subtabAllIssues" data-subtab="all">
-              Semua Diagnosa
-            </button>
-            <button type="button" class="endocrine-subtab-btn" id="subtabModelIssues" data-subtab="model">
-              <i class="fa-solid fa-server"></i> Error Model
-            </button>
-            <button type="button" class="endocrine-subtab-btn" id="subtabTextIssues" data-subtab="text">
-              <i class="fa-solid fa-spell-check"></i> Teks Pecah
-            </button>
-            <button type="button" class="endocrine-subtab-btn" id="subtabViewportIssues" data-subtab="viewport">
-              <i class="fa-solid fa-mobile-screen-button"></i> Layar &amp; Layout
-            </button>
-            <button type="button" class="endocrine-subtab-btn" id="subtabButtonIssues" data-subtab="button">
-              <i class="fa-solid fa-hand-pointer"></i> Tombol Terhalang
-            </button>
-            <button type="button" class="endocrine-subtab-btn" id="subtabConnectomeIssues" data-subtab="connectome">
-              <i class="fa-solid fa-circle-nodes"></i> Simpul DOM
-            </button>
-          </div>
-
-          <!-- Diagnostic Issue Deck / Enhanced Isolated Box -->
-          <div class="endocrine-isolated-box" id="endocrineIsolatedBox">
-            <div class="isolated-box-header">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <i class="fa-solid fa-dna" style="color:var(--neon-cyan);"></i>
-                <span style="font-weight:700; color:#FFF; font-size:0.88rem;">Pusat Diagnosa Integritas 5-Pilar</span>
-              </div>
-              <span class="isolated-status-tag tag-healthy" id="endocrineIsolatedTag">Semua Terhubung Sempurna</span>
-            </div>
-            <div class="isolated-box-content" id="endocrineIsolatedContent">
-              Semua modul, fungsi pemanggil, dan reseptor DOM saling terikat dengan baik. Tidak ada kode yatim/terisolasi.
-            </div>
-            <div class="endocrine-diagnostic-list" id="endocrineDiagnosticList" style="display:none;">
-              <!-- Dynamic issue cards populated by BioEndocrine.renderModalContent() -->
-            </div>
-          </div>
-
-          <!-- Live Hormone Secretion Log & Action Toolbar -->
-          <div class="endocrine-logs-wrap">
-            <div class="endocrine-logs-header">
-              <span style="font-size:0.83rem; font-weight:700; color:#FFF; display:flex; align-items:center; gap:6px;">
-                <i class="fa-solid fa-clock-rotate-left" style="color:var(--neon-teal);"></i> Aliran Feromon &amp; Riwayat Sekresi Hormon Nyata
-              </span>
-              <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                <button class="btn btn-xs btn-outline" id="btnCopyEndocrineLogs" style="font-size:0.72rem; border-color:var(--neon-teal); color:var(--neon-teal);" title="Salin seluruh riwayat log hormon &amp; laporan error ke clipboard">
-                  <i class="fa-solid fa-copy"></i> Salin Log Error
-                </button>
-                <button class="btn btn-xs btn-outline" id="btnAutoHealLayoutNow" style="font-size:0.72rem; border-color:#00FFC2; color:#00FFC2;">
-                  <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Heal Layar &amp; Tombol
-                </button>
-                <button class="btn btn-xs btn-outline" id="btnAuditConnectomeNow" style="font-size:0.72rem; border-color:var(--neon-cyan); color:var(--neon-cyan);">
-                  <i class="fa-solid fa-stethoscope"></i> Pindai Menyeluruh
-                </button>
-              </div>
-            </div>
-            <div class="endocrine-logs-list" id="endocrineLogsList">
-              <!-- Populated dynamically -->
+              <div class="endocrine-logs-list" id="endocrineLogsList" style="max-height: 140px; overflow-y: auto;"></div>
             </div>
           </div>
         </div>
 
         <!-- PANE 2: TELEMETRI RASA (CHATENDOCRINE V2) -->
-        <div class="endocrine-pane" id="paneEndocrineChat" style="display: none;">
-          <!-- 4-Quadrant Biological Emotional Nervous System Gauges (Sakit, Senang, Bahagia, Marah) -->
-          <div class="endocrine-gauges-grid" style="margin-bottom: 14px;">
-            <!-- Sakit (Non-physical emotional pain / sorrow / distress) -->
-            <div class="endocrine-gauge-card card-emotion-sakit">
-              <div class="gauge-card-header">
-                <span class="gauge-title"><i class="fa-solid fa-heart-crack" style="color:#f43f5e;"></i> Sakit (Luka Batin &amp; Distress)</span>
-                <span class="gauge-val" id="chatEmotionSakitVal">0%</span>
-              </div>
-              <div class="gauge-track">
-                <div class="gauge-fill fill-emotion-sakit" id="chatEmotionSakitBar" style="width: 0%;"></div>
-              </div>
-              <div class="gauge-desc">Kepedihan emosional, kekecewaan, duka, atau empati luka batin (non-fisik).</div>
+        <div class="endocrine-pane" id="paneEndocrineChat" style="display: none; flex-direction: column; gap: 20px;">
+          <!-- Dual Pipeline Focus -->
+          <section aria-label="Jalur ChatEndocrine" class="endocrine-util-sec">
+            <div class="endocrine-util-sec-title">
+              &gt; DUAL PIPELINE ROUTING (RECEPTOR ACTIVE)
             </div>
+            <div class="endocrine-util-box">
+              <div class="endocrine-util-pipeline-row">
+                <div class="pipeline-left">
+                  <span class="pipeline-num">#2</span>
+                  <span class="pipeline-name">Jalur 2: ChatEndocrine</span>
+                  <span class="pipeline-desc">(Reseptor Emosional Aktif)</span>
+                </div>
+                <div class="pipeline-right">
+                  <span>Afinitas: <strong id="chatPaneAffinity">Stabil</strong></span>
+                  <span class="endocrine-util-sep">|</span>
+                  <span>Resonansi: <strong id="chatPaneResonance">99.4%</strong></span>
+                  <span class="endocrine-util-sep">|</span>
+                  <span class="pipeline-status" id="chatPaneStatus">STATUS: ON</span>
+                </div>
+              </div>
+            </div>
+          </section>
 
-            <!-- Senang (Joy / excitement / playfulness) -->
-            <div class="endocrine-gauge-card card-emotion-senang">
-              <div class="gauge-card-header">
-                <span class="gauge-title"><i class="fa-solid fa-face-laugh-beam" style="color:#f59e0b;"></i> Senang (Keriangan &amp; Gairah)</span>
-                <span class="gauge-val" id="chatEmotionSenangVal">45%</span>
-              </div>
-              <div class="gauge-track">
-                <div class="gauge-fill fill-emotion-senang" id="chatEmotionSenangBar" style="width: 45%;"></div>
-              </div>
-              <div class="gauge-desc">Kesenangan kognitif, humor, stimulasi ide seru, dan antusiasme aktif.</div>
+          <!-- 4-Quadrant Emotional Gauges in ASCII -->
+          <section aria-label="Metrik Emosi" class="endocrine-util-sec">
+            <div class="endocrine-util-sec-title">
+              &gt; EMOTIONAL GAUGES &amp; EQUILIBRIUM (CHATENDOCRINE V2)
             </div>
+            <div class="endocrine-util-gauges-grid">
+              <!-- Sakit -->
+              <div class="endocrine-util-gauge-card">
+                <div class="gauge-header">
+                  <span class="gauge-title">SAKIT (Luka Batin &amp; Distress)</span>
+                  <span class="gauge-val-clear" id="chatEmotionSakitVal">0% CLEAR</span>
+                </div>
+                <div class="ascii-gauge-bar text-zinc" id="chatEmotionSakitAscii">[....................]</div>
+                <p class="gauge-caption">Kepedihan emosional, kekecewaan, duka, atau empati luka batin (non-fisik).</p>
+              </div>
+              <!-- Senang -->
+              <div class="endocrine-util-gauge-card">
+                <div class="gauge-header">
+                  <span class="gauge-title">SENANG (Keriangan &amp; Gairah)</span>
+                  <span class="gauge-val-warn" id="chatEmotionSenangVal">45% ACTIVE</span>
+                </div>
+                <div class="ascii-gauge-bar text-amber" id="chatEmotionSenangAscii">[|||||||||...........]</div>
+                <p class="gauge-caption">Kesenangan kognitif, humor, stimulasi ide seru, dan antusiasme aktif.</p>
+              </div>
+              <!-- Bahagia -->
+              <div class="endocrine-util-gauge-card">
+                <div class="gauge-header">
+                  <span class="gauge-title">BAHAGIA (Ketenteraman &amp; Syukur)</span>
+                  <span class="gauge-val-opt" id="chatEmotionBahagiaVal">60% ACTIVE</span>
+                </div>
+                <div class="ascii-gauge-bar text-emerald" id="chatEmotionBahagiaAscii">[||||||||||||........]</div>
+                <p class="gauge-caption">Kedamaian rasa, rasa syukur mendalam, keutuhan ikatan, dan kepuasan harmonis.</p>
+              </div>
+              <!-- Marah -->
+              <div class="endocrine-util-gauge-card">
+                <div class="gauge-header">
+                  <span class="gauge-title">MARAH (Friksi &amp; Ketegangan)</span>
+                  <span class="gauge-val-clear" id="chatEmotionMarahVal">0% CLEAR</span>
+                </div>
+                <div class="ascii-gauge-bar text-zinc" id="chatEmotionMarahAscii">[....................]</div>
+                <p class="gauge-caption">Resonansi amarah, kejengkelan, rasa tidak adil, atau tensi defensif tajam.</p>
+              </div>
+            </div>
+            <!-- Chat Vitals Summary Row -->
+            <div class="endocrine-util-vitals-summary">
+              <div>Oksitosin: <span style="color:#f43f5e; font-weight:600;" id="chatOxytocinVal">65%</span></div>
+              <span class="endocrine-util-sep">|</span>
+              <div>Dopamin: <span style="color:#fbbf24; font-weight:600;" id="chatDopamineVal">55%</span></div>
+              <span class="endocrine-util-sep">|</span>
+              <div>Kortisol: <span class="text-emerald" id="chatCortisolVal">0%</span></div>
+              <span class="endocrine-util-sep">|</span>
+              <div>Serotonin: <span class="text-emerald" id="chatSerotoninVal">75%</span></div>
+              <span class="endocrine-util-sep">|</span>
+              <div>Resonansi: <span style="color:#ffffff; font-weight:600;" id="chatCurrentVibe">Homeostasis Saraf Seimbang</span></div>
+            </div>
+          </section>
 
-            <!-- Bahagia (Happiness / contentment / peace) -->
-            <div class="endocrine-gauge-card card-emotion-bahagia">
-              <div class="gauge-card-header">
-                <span class="gauge-title"><i class="fa-solid fa-sparkles" style="color:#10b981;"></i> Bahagia (Ketenteraman &amp; Syukur)</span>
-                <span class="gauge-val" id="chatEmotionBahagiaVal">60%</span>
-              </div>
-              <div class="gauge-track">
-                <div class="gauge-fill fill-emotion-bahagia" id="chatEmotionBahagiaBar" style="width: 60%;"></div>
-              </div>
-              <div class="gauge-desc">Kedamaian rasa, rasa syukur mendalam, keutuhan ikatan, dan kepuasan harmonis.</div>
+          <!-- Autonomic Nervous System Log Box -->
+          <section aria-label="Log Sistem Saraf Latar Belakang" class="endocrine-util-sec">
+            <div class="endocrine-util-sec-head">
+              <span class="endocrine-util-sec-title">&gt; AUTONOMIC NERVOUS SYSTEM LOG (INJECTED INTO AI)</span>
+              <span class="text-emerald" style="font-size:11px; font-weight:600;" id="chatIntuitionTag">Homeostasis Saraf</span>
             </div>
-
-            <!-- Marah (Anger / indignation / friction) -->
-            <div class="endocrine-gauge-card card-emotion-marah">
-              <div class="gauge-card-header">
-                <span class="gauge-title"><i class="fa-solid fa-fire-flame-curved" style="color:#ef4444;"></i> Marah (Friksi &amp; Ketegangan)</span>
-                <span class="gauge-val" id="chatEmotionMarahVal">0%</span>
-              </div>
-              <div class="gauge-track">
-                <div class="gauge-fill fill-emotion-marah" id="chatEmotionMarahBar" style="width: 0%;"></div>
-              </div>
-              <div class="gauge-desc">Resonansi amarah, kejengkelan, rasa tidak adil, atau tensi defensif tajam.</div>
+            <div class="endocrine-util-box" style="padding: 12px;" id="chatIntuitionBox">
+              <pre class="isolated-box-content" id="chatIntuitionContent" style="font-family: inherit; font-size: 11px; line-height: 1.5; margin: 0; background: transparent; padding: 0; color: #34d399; overflow-x: auto; white-space: pre-wrap; border: none;"></pre>
             </div>
-          </div>
-
-          <!-- Chat Neuro Vitals Row (Underlying Neuro-Hormonal Substrate) -->
-          <div class="endocrine-vitals-row">
-            <div class="vital-item">
-              <span class="vital-label"><i class="fa-solid fa-heart" style="color:#f43f5e;"></i> Oksitosin:</span>
-              <strong id="chatOxytocinVal">65%</strong>
-            </div>
-            <div class="vital-item">
-              <span class="vital-label"><i class="fa-solid fa-lightbulb" style="color:#f59e0b;"></i> Dopamin:</span>
-              <strong id="chatDopamineVal">55%</strong>
-            </div>
-            <div class="vital-item">
-              <span class="vital-label"><i class="fa-solid fa-bolt" style="color:#ef4444;"></i> Kortisol:</span>
-              <strong id="chatCortisolVal" style="color:#10b981;">0%</strong>
-            </div>
-            <div class="vital-item">
-              <span class="vital-label"><i class="fa-solid fa-seedling" style="color:#10b981;"></i> Serotonin:</span>
-              <strong id="chatSerotoninVal">75%</strong>
-            </div>
-            <div class="vital-item">
-              <span class="vital-label"><i class="fa-solid fa-wave-pulse" style="color:var(--neon-purple);"></i> Resonansi:</span>
-              <strong id="chatCurrentVibe">Homeostasis Saraf Seimbang</strong>
-            </div>
-          </div>
-
-          <!-- Synthetic Emotional Nervous System Preview Box (Autonomic Background Log) -->
-          <div class="endocrine-isolated-box" id="chatIntuitionBox">
-            <div class="isolated-box-header">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <i class="fa-solid fa-microchip" style="color:var(--neon-teal);"></i>
-                <span style="font-weight:700; color:#FFF; font-size:0.88rem;" id="chatIntuitionTitle">Log Sistem Saraf Latar Belakang (Diinjeksikan ke AI)</span>
-              </div>
-              <span class="isolated-status-tag tag-healthy" id="chatIntuitionTag">Homeostasis Saraf</span>
-            </div>
-            <pre class="isolated-box-content" id="chatIntuitionContent" style="font-family:var(--font-code); font-size:0.75rem; line-height:1.5; margin:0; background:rgba(0,0,0,0.35); padding:8px 12px; border-radius:6px; color:#A7F3D0; overflow-x:auto; white-space:pre-wrap; border:1px solid rgba(0,255,194,0.15);"></pre>
-          </div>
+          </section>
 
           <!-- Live Chat Resonance Log -->
-          <div class="endocrine-logs-wrap">
-            <div class="endocrine-logs-header">
-              <span style="font-size:0.83rem; font-weight:700; color:#FFF; display:flex; align-items:center; gap:6px;">
-                <i class="fa-solid fa-wave-square" style="color:#f43f5e;"></i> Riwayat Resonansi Rasa &amp; Deteksi Sentimen
-              </span>
-              <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                <button class="btn btn-xs btn-outline" id="btnCopyChatEndocrineLogs" style="font-size:0.72rem; border-color:#f43f5e; color:#f43f5e;" title="Salin riwayat resonansi rasa ke clipboard">
-                  <i class="fa-solid fa-copy"></i> Salin Log Rasa
-                </button>
-                <button class="btn btn-xs btn-outline" id="btnResetChatEndocrine" style="font-size:0.72rem; border-color:#f43f5e; color:#f43f5e;">
-                  <i class="fa-solid fa-rotate-right"></i> Selaraskan Ulang Rasa
-                </button>
+          <section aria-label="Riwayat Resonansi Rasa" class="endocrine-util-sec">
+            <div class="endocrine-util-sec-head">
+              <span class="endocrine-util-sec-title">&gt; CHAT RESONANCE HISTORY</span>
+              <div style="display: flex; gap: 6px;">
+                <button class="endocrine-util-btn btn-util-copy" id="btnCopyChatEndocrineLogs" type="button" style="padding: 3px 8px; font-size: 10px;">Salin Log</button>
+                <button class="endocrine-util-btn btn-util-copy" id="btnResetChatEndocrine" type="button" style="padding: 3px 8px; font-size: 10px;">Reset Rasa</button>
               </div>
             </div>
-            <div class="endocrine-logs-list" id="chatEndocrineLogsList">
-              <!-- Populated dynamically -->
-            </div>
-          </div>
+            <div class="endocrine-util-box endocrine-logs-list" id="chatEndocrineLogsList" style="padding: 8px; max-height: 160px; overflow-y: auto;"></div>
+          </section>
         </div>
-      </div>
+      </main>
 
-      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-        <span style="font-size: 0.75rem; color: var(--text-dim);">
-          💡 <em>"Ketika kode menyukai kode lainnya, error terdeteksi lebih cepat dan sistem hidup abadi."</em>
-        </span>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn-sm btn-outline" id="btnCopyEndocrineLogsFooter" type="button" style="border-color: var(--neon-teal); color: var(--neon-teal); font-weight: 600;" title="Salin seluruh riwayat log hormon &amp; laporan error ke clipboard">
-            <i class="fa-solid fa-copy"></i> Salin Log Error
-          </button>
-          <button class="btn btn-sm btn-primary-neon" id="btnPurgeStressEndorphin" type="button" title="Suntikkan Endorfin untuk membersihkan stres dan menstabilkan sistem">
-            <i class="fa-solid fa-syringe"></i> Suntikkan Endorfin (Self-Heal)
-          </button>
-          <button class="btn btn-sm btn-secondary" data-close="endocrineTelemetryModal" type="button">Tutup</button>
+      <!-- 5. Footer Aksi Utilitarian -->
+      <footer class="endocrine-util-footer">
+        <!-- Status Minimalis di Kiri -->
+        <div class="endocrine-footer-status">
+          <span class="dot">●</span>
+          <span id="footerStatusText">STATUS: SISTEM OTONOM AKTIF</span>
+          <span class="endocrine-util-sep">|</span>
+          <span style="color:#71717a;">REFRESH: 1s</span>
         </div>
-      </div>
+        <!-- Tombol Aksi Fungsional Tanpa Efek Berlebihan -->
+        <div class="endocrine-footer-btns">
+          <button class="endocrine-util-btn btn-util-copy" id="btnCopyEndocrineLogsFooter" type="button">
+            Salin Log
+          </button>
+          <button class="endocrine-util-btn btn-util-heal" id="btnPurgeStressEndorphin" type="button">
+            Self-Heal (Endorfin)
+          </button>
+          <button class="endocrine-util-btn btn-util-close" data-close="endocrineTelemetryModal" type="button">
+            Tutup
+          </button>
+        </div>
+      </footer>
     </div>
   </div>
 
@@ -2396,7 +2374,7 @@
       <div class="terminal-toolbar" id="terminalToolbar">
         <div class="terminal-title">
           <span class="bolt">⚡</span>
-          <span class="term-title-text">Terminal Neural // CLI</span>
+          <span class="term-title-text">Z21 Shell</span>
         </div>
 
         <div class="tb-divider"></div>
@@ -2450,23 +2428,6 @@
 
         <!-- Right Toolbar Actions -->
         <div class="terminal-toolbar-right" id="terminalToolbarRight">
-          <!-- Font Size Adjustment Group -->
-          <div class="tb-group" title="Ukuran font terminal">
-            <button class="tb-btn icon-only" id="btnTermFontDec" type="button" title="Perkecil font">
-              <i class="fa-solid fa-minus" style="font-size: 0.7rem;"></i>
-            </button>
-            <span id="termFontSizeLabel">13px</span>
-            <button class="tb-btn icon-only" id="btnTermFontInc" type="button" title="Perbesar font">
-              <i class="fa-solid fa-plus" style="font-size: 0.7rem;"></i>
-            </button>
-          </div>
-
-          <!-- Dual-Device Dimension Sync Mode Toggle -->
-          <button class="tb-btn tb-btn-dimension-sync" id="btnTermSyncDimension" type="button" title="Ganti Mode Ukuran Layar: HP (48 Kolom) atau Laptop (100 Kolom)">
-            <i class="fa-solid fa-laptop" id="iconTermSyncDimension" style="font-size: 0.75rem; color: #38bdf8;"></i>
-            <span id="labelTermSyncDimension">Laptop 100c</span>
-          </button>
-
           <!-- Auto Y/Enter Automation Toggle (Mobile & Desktop) -->
           <button class="tb-btn tb-btn-auto-enter" id="btnTermToolbarAutoEnter" type="button" title="Auto Y: Otomatis konfirmasi Y/Enter saat prompt perintah Claude Code muncul">
             <span style="color: var(--neon-amber, #f59e0b);">⚡</span>
@@ -2501,16 +2462,6 @@
           <button class="tb-btn" id="btnTermSplit" type="button" title="Beralih Tampilan Split 2 Panel">
             <i class="fa-solid fa-table-columns" style="font-size: 0.75rem;"></i>
             <span>Split</span>
-          </button>
-
-          <!-- Clear Terminal -->
-          <button class="tb-btn icon-only" id="btnTermClear" type="button" title="Bersihkan riwayat terminal (cls)">
-            <i class="fa-solid fa-trash-can" style="font-size: 0.8rem;"></i>
-          </button>
-
-          <!-- Aura Theme Toggle (Aura Es / Aura Api) -->
-          <button class="tb-btn icon-only" id="btnTermTheme" type="button" title="Ganti Tema Aura (Aura Es / Aura Api)">
-            <i class="fa-solid fa-palette" style="font-size: 0.8rem;"></i>
           </button>
 
           <!-- Fullscreen Toggle -->
@@ -2575,19 +2526,8 @@
         <!-- Panel 1 (Primary Pane) -->
         <div class="terminal-pane active" id="termPane1" data-pane="1">
           <div class="terminal-pane-header">
-            <div class="traffic-lights">
-              <span class="tl-dot red disabled" title="Panel utama aktif"></span>
-              <span class="tl-dot yellow disabled"></span>
-              <span class="tl-dot green disabled"></span>
-            </div>
-            <span class="pane-title-badge">Panel 1</span>
-            <span class="pane-shell-tag" id="paneShellBadge1">PowerShell</span>
             <span class="pane-cwd-indicator" id="paneCwdBadge1">📁 C:\Users\user</span>
             <div class="pane-header-actions">
-              <button class="pane-mini-btn btn-pane-endorphin" id="btnPaneEndorphin1" data-pane="1" type="button" title="Suntik Endorfin: Diagnostik & Pemulihan Otomatis Terminal (Reset Trap, PTY Dimensi & Scroll)">
-                <span style="color: #00FFC2;">🌿</span>
-                <span>Endorfin</span>
-              </button>
               <button class="pane-mini-btn btn-pane-auto-enter" id="btnPaneAutoEnter1" data-pane="1" type="button" title="Auto Y/Enter otomatis untuk Panel 1">
                 <span style="color: var(--neon-amber);">⚡</span>
                 <span>Auto Y</span>
@@ -2622,19 +2562,8 @@
         <!-- Panel 2 (Secondary Split Pane, initially hidden) -->
         <div class="terminal-pane" id="termPane2" data-pane="2" style="display: none;">
           <div class="terminal-pane-header">
-            <div class="traffic-lights">
-              <span class="tl-dot red clickable" id="btnClosePane2" title="Tutup Panel 2"></span>
-              <span class="tl-dot yellow disabled"></span>
-              <span class="tl-dot green disabled"></span>
-            </div>
-            <span class="pane-title-badge">Panel 2</span>
-            <span class="pane-shell-tag" id="paneShellBadge2">PowerShell</span>
             <span class="pane-cwd-indicator" id="paneCwdBadge2">📁 C:\Users\user</span>
             <div class="pane-header-actions">
-              <button class="pane-mini-btn btn-pane-endorphin" id="btnPaneEndorphin2" data-pane="2" type="button" title="Suntik Endorfin: Diagnostik & Pemulihan Otomatis Terminal (Reset Trap, PTY Dimensi & Scroll)">
-                <span style="color: #00FFC2;">🌿</span>
-                <span>Endorfin</span>
-              </button>
               <button class="pane-mini-btn btn-pane-auto-enter" id="btnPaneAutoEnter2" data-pane="2" type="button" title="Auto Y/Enter otomatis untuk Panel 2">
                 <span style="color: var(--neon-amber);">⚡</span>
                 <span>Auto Y</span>

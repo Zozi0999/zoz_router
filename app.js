@@ -1276,7 +1276,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     btnAutoHealLayoutNow: $('#btnAutoHealLayoutNow'),
     btnPurgeStressEndorphin: $('#btnPurgeStressEndorphin'),
     btnCopyEndocrineLogs: $('#btnCopyEndocrineLogs'),
-    btnCopyEndocrineLogsHeader: $('#btnCopyEndocrineLogsHeader'),
     btnCopyEndocrineLogsFooter: $('#btnCopyEndocrineLogsFooter'),
     btnCopyChatEndocrineLogs: $('#btnCopyChatEndocrineLogs'),
     toggleEndocrineCode: $('#toggleEndocrineCode'),
@@ -2101,102 +2100,150 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const s = Math.round(this.hormones.serotonin);
       const a = Math.round(this.hormones.adrenaline);
 
+      const getAsciiBar = (pct, charFilled = '|', charEmpty = '.') => {
+        const total = 20;
+        const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+        const filled = Math.round((clamped / 100) * total);
+        return `[${charFilled.repeat(filled)}${charEmpty.repeat(total - filled)}]`;
+      };
+
       const dVal = document.getElementById('endocrineDopamineVal');
-      const dBar = document.getElementById('endocrineDopamineBar');
+      const dAscii = document.getElementById('endocrineDopamineAscii');
       const cVal = document.getElementById('endocrineCortisolVal');
-      const cBar = document.getElementById('endocrineCortisolBar');
+      const cAscii = document.getElementById('endocrineCortisolAscii');
       const sVal = document.getElementById('endocrineSerotoninVal');
       const aVal = document.getElementById('endocrineAdrenalineVal');
       const connVal = document.getElementById('endocrineConnectomeVal');
 
-      if (dVal) dVal.innerText = `${d}%`;
-      if (dBar) dBar.style.width = `${d}%`;
+      if (dVal) {
+        dVal.innerText = d >= 95 ? `${d}% OPTIMAL` : `${d}% ACTIVE`;
+        dVal.className = 'gauge-val-opt';
+      }
+      if (dAscii) {
+        dAscii.innerText = getAsciiBar(d, '|', '.');
+      }
+
       if (cVal) {
         if (c === 0) {
-          cVal.innerHTML = `<span style="color:#00FFC2; font-weight:700;">0%</span> <span style="font-size:0.75rem; color:#00FFC2; font-weight:600;">(Bebas Bug / 0% Kerusakan)</span>`;
+          cVal.innerText = '0% CLEAR';
+          cVal.className = 'gauge-val-clear';
         } else if (c < 30) {
-          cVal.innerHTML = `<span style="color:#FFD166; font-weight:700;">${c}%</span> <span style="font-size:0.75rem; color:#FFD166; font-weight:600;">(Stres Ringan)</span>`;
+          cVal.innerText = `${c}% STRESSED`;
+          cVal.className = 'gauge-val-warn';
         } else {
-          cVal.innerHTML = `<span style="color:#FF4D4D; font-weight:700;">${c}%</span> <span style="font-size:0.75rem; color:#FF4D4D; font-weight:bold;">(Peringatan Bug Aktif!)</span>`;
+          cVal.innerText = `${c}% CRITICAL`;
+          cVal.className = 'gauge-val-crit';
         }
       }
-      if (cBar) cBar.style.width = `${c}%`;
-      if (sVal) sVal.innerText = `${s}%`;
-      if (aVal) aVal.innerText = `${a}%`;
+      if (cAscii) {
+        cAscii.innerText = getAsciiBar(c, '|', '.');
+        if (c === 0) {
+          cAscii.className = 'ascii-gauge-bar text-zinc';
+        } else if (c < 30) {
+          cAscii.className = 'ascii-gauge-bar text-amber';
+        } else {
+          cAscii.className = 'ascii-gauge-bar text-rose';
+        }
+      }
+
+      if (sVal) sVal.innerText = `${s}% (Normal)`;
+      if (aVal) aVal.innerText = a === 0 ? '0% (Idle)' : `${a}% (Active)`;
 
       const cDesc = document.getElementById('endocrineCortisolDesc');
       if (cDesc) {
         if (c === 0) {
-          cDesc.innerHTML = `<span style="color:#00FFC2; font-weight:600;">● Kondisi Prima:</span> Tidak ada bug, jaringan stabil, dan seluruh ${this.connectedCount || 249} simpul kode terhubung harmonis.`;
+          cDesc.innerText = 'Kondisi prima: 0 error terisolasi, jaringan stabil tanpa gangguan.';
         } else {
           const lastCortisol = this.history.find(h => h.type === 'cortisol');
-          cDesc.innerHTML = `<span style="color:#FFB703; font-weight:600;">⚠️ Pemicu Stres Terakhir:</span> ${esc(lastCortisol?.reason || 'Terdeteksi anomali pada alur kode/jaringan.')}`;
+          cDesc.innerText = `Pemicu Stres: ${lastCortisol?.reason || 'Terdeteksi anomali pada alur kode/jaringan.'}`;
         }
       }
 
-      // Update 5-Pillar Cards
+      // Update 5-Pillar Rows
       const cardConn = document.getElementById('cardPillarConnectome');
       const statConn = document.getElementById('pillarConnectomeStatus');
+      const descConn = document.getElementById('pillarConnectomeDesc');
       const cardModel = document.getElementById('cardPillarModel');
       const statModel = document.getElementById('pillarModelStatus');
+      const descModel = document.getElementById('pillarModelDesc');
       const cardText = document.getElementById('cardPillarText');
       const statText = document.getElementById('pillarTextStatus');
+      const descText = document.getElementById('pillarTextDesc');
       const cardVp = document.getElementById('cardPillarViewport');
       const statVp = document.getElementById('pillarViewportStatus');
+      const descVp = document.getElementById('pillarViewportDesc');
       const cardBtn = document.getElementById('cardPillarButton');
       const statBtn = document.getElementById('pillarButtonStatus');
+      const descBtn = document.getElementById('pillarButtonDesc');
 
       // Pillar 1: Connectome
       const isolatedCount = this.isolatedNodes ? this.isolatedNodes.length : 0;
-      if (cardConn) {
-        cardConn.className = `endocrine-pillar-card ${isolatedCount > 0 ? 'status-critical' : 'status-healthy'}`;
-      }
+      if (descConn) descConn.innerText = isolatedCount > 0 ? `${isolatedCount} Terisolasi` : 'Integritas 100%';
       if (statConn) {
-        statConn.innerText = isolatedCount > 0 ? `${isolatedCount} Terisolasi` : '100% Harmonis';
-        statConn.style.color = isolatedCount > 0 ? '#FF4D4D' : '#00FFC2';
+        statConn.innerText = isolatedCount > 0 ? 'CRIT' : 'PASS';
+        statConn.className = `pillar-status ${isolatedCount > 0 ? 'status-crit' : ''}`;
       }
       if (connVal) {
-        connVal.innerText = isolatedCount > 0 ? `${this.connectedCount}/${this.totalAudited} (${isolatedCount} Terisolasi)` : `100% Harmonis (${this.connectedCount} Simpul)`;
+        connVal.innerText = isolatedCount > 0 ? `${this.connectedCount}/${this.totalAudited} (${isolatedCount} Terisolasi)` : `${this.connectedCount || 408} / ${this.totalAudited || 408} Harmonis`;
       }
 
       // Pillar 2: Model Errors
       const modelErrCount = this.modelErrors ? this.modelErrors.length : 0;
-      if (cardModel) {
-        cardModel.className = `endocrine-pillar-card ${modelErrCount > 0 ? 'status-critical' : 'status-healthy'}`;
-      }
+      if (descModel) descModel.innerText = modelErrCount > 0 ? `${modelErrCount} Error Terdeteksi` : '0 Error Terdeteksi';
       if (statModel) {
-        statModel.innerText = modelErrCount > 0 ? `${modelErrCount} Error Panggil` : '0 Error';
-        statModel.style.color = modelErrCount > 0 ? '#FF4D4D' : '#00FFC2';
+        statModel.innerText = modelErrCount > 0 ? 'CRIT' : 'PASS';
+        statModel.className = `pillar-status ${modelErrCount > 0 ? 'status-crit' : ''}`;
       }
 
       // Pillar 3: Text Anomalies
       const textAnomCount = this.textAnomalies ? this.textAnomalies.length : 0;
-      if (cardText) {
-        cardText.className = `endocrine-pillar-card ${textAnomCount > 0 ? 'status-warning' : 'status-healthy'}`;
-      }
+      if (descText) descText.innerText = textAnomCount > 0 ? `${textAnomCount} Bocor / Pecah` : '0 Bocor / Pecah';
       if (statText) {
-        statText.innerText = textAnomCount > 0 ? `${textAnomCount} Anomali Teks` : '0 Pecah / Bocor';
-        statText.style.color = textAnomCount > 0 ? '#FFB703' : '#00FFC2';
+        statText.innerText = textAnomCount > 0 ? 'WARN' : 'PASS';
+        statText.className = `pillar-status ${textAnomCount > 0 ? 'status-warn' : ''}`;
       }
 
       // Pillar 4: Viewport Issues
       const vpIssuesCount = this.viewportIssues ? this.viewportIssues.length : 0;
-      if (cardVp) {
-        cardVp.className = `endocrine-pillar-card ${vpIssuesCount > 0 ? 'status-warning' : 'status-healthy'}`;
-      }
+      if (descVp) descVp.innerText = vpIssuesCount > 0 ? `${vpIssuesCount} Overflow` : '100% Stabil';
       if (statVp) {
-        statVp.innerText = vpIssuesCount > 0 ? `${vpIssuesCount} Overflow` : 'Stabil 100%';
-        statVp.style.color = vpIssuesCount > 0 ? '#FFB703' : '#00FFC2';
+        statVp.innerText = vpIssuesCount > 0 ? 'WARN' : 'PASS';
+        statVp.className = `pillar-status ${vpIssuesCount > 0 ? 'status-warn' : ''}`;
       }
 
       // Pillar 5: Button Placement / Obstruction
       const btnIssuesCount = this.buttonIssues ? this.buttonIssues.length : 0;
-      if (cardBtn) {
-        cardBtn.className = `endocrine-pillar-card ${btnIssuesCount > 0 ? 'status-critical' : 'status-healthy'}`;
-      }
+      if (descBtn) descBtn.innerText = btnIssuesCount > 0 ? `${btnIssuesCount} Terhalang` : 'Bebas Halangan';
       if (statBtn) {
-        statBtn.innerText = btnIssuesCount > 0 ? `${btnIssuesCount} Terhalang/Rusak` : 'Bebas Halangan';
-        statBtn.style.color = btnIssuesCount > 0 ? '#FF4D4D' : '#00FFC2';
+        statBtn.innerText = btnIssuesCount > 0 ? 'CRIT' : 'PASS';
+        statBtn.className = `pillar-status ${btnIssuesCount > 0 ? 'status-crit' : ''}`;
+      }
+
+      const overallPass = document.getElementById('pillarOverallPass');
+      const pillarIssueCount = (isolatedCount > 0 ? 1 : 0) + (modelErrCount > 0 ? 1 : 0) + (textAnomCount > 0 ? 1 : 0) + (vpIssuesCount > 0 ? 1 : 0) + (btnIssuesCount > 0 ? 1 : 0);
+      if (overallPass) {
+        if (pillarIssueCount === 0) {
+          overallPass.innerText = '[PASS 5/5]';
+          overallPass.className = 'pillar-pass-badge';
+          overallPass.style.color = '#34d399';
+        } else {
+          overallPass.innerText = `[WARN ${5 - pillarIssueCount}/5]`;
+          overallPass.className = 'pillar-pass-badge';
+          overallPass.style.color = '#fbbf24';
+        }
+      }
+
+      // Update Pipeline values
+      const valChatStatus = document.getElementById('valChatStatus');
+      const chatPaneStatus = document.getElementById('chatPaneStatus');
+      const isChatOn = STATE.settings.endocrineChatEnabled;
+      if (valChatStatus) {
+        valChatStatus.innerText = isChatOn ? 'STATUS: ON' : 'STATUS: OFF';
+        valChatStatus.className = `pipeline-status ${isChatOn ? '' : 'off'}`;
+      }
+      if (chatPaneStatus) {
+        chatPaneStatus.innerText = isChatOn ? 'STATUS: ON' : 'STATUS: OFF';
+        chatPaneStatus.className = `pipeline-status ${isChatOn ? '' : 'off'}`;
       }
 
       // Diagnostic Center / Issues List
@@ -2295,17 +2342,32 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
       const totalDiscoveredIssues = (this.isolatedNodes?.length || 0) + (this.modelErrors?.length || 0) + (this.textAnomalies?.length || 0) + (this.viewportIssues?.length || 0) + (this.buttonIssues?.length || 0);
 
+      // Header Status Sync
+      const hdrHealthSquare = document.getElementById('headerHealthSquare');
+      const hdrHealthText = document.getElementById('headerHealthText');
+      const hdrSyncCount = document.getElementById('headerSyncCount');
+      if (hdrSyncCount) hdrSyncCount.innerText = String(this.totalAudited || 408);
       if (totalDiscoveredIssues > 0) {
+        if (hdrHealthSquare) hdrHealthSquare.style.background = '#f87171';
+        if (hdrHealthText) hdrHealthText.innerHTML = `<span style="color:#f87171;">${totalDiscoveredIssues} ISSUES DETECTED</span> / <span id="headerSyncCount">${this.totalAudited || 408}</span> NODES SYNCED`;
+      } else {
+        if (hdrHealthSquare) hdrHealthSquare.style.background = '#34d399';
+        if (hdrHealthText) hdrHealthText.innerHTML = `ALL SYSTEMS HEALTHY / <span id="headerSyncCount">${this.totalAudited || 408}</span> NODES SYNCED`;
+      }
+
+      if (totalDiscoveredIssues > 0 || this._forceShowDetails) {
+        if (isolatedBox) isolatedBox.style.display = 'flex';
         if (isolatedBox) isolatedBox.classList.add('has-issues');
         if (isolatedTag) {
-          isolatedTag.className = 'isolated-status-tag tag-warning';
-          isolatedTag.innerText = `⚠️ ${totalDiscoveredIssues} Isu Terdeteksi`;
+          isolatedTag.className = 'endocrine-util-sec-title';
+          isolatedTag.innerText = `> DIAGNOSTIC ISSUES (${totalDiscoveredIssues})`;
         }
       } else {
+        if (isolatedBox) isolatedBox.style.display = 'none';
         if (isolatedBox) isolatedBox.classList.remove('has-issues');
         if (isolatedTag) {
-          isolatedTag.className = 'isolated-status-tag tag-healthy';
-          isolatedTag.innerText = 'Semua Terhubung Sempurna';
+          isolatedTag.className = 'endocrine-util-sec-title';
+          isolatedTag.innerText = '> DIAGNOSTIC ISSUES';
         }
       }
 
@@ -2724,23 +2786,55 @@ RESONANSI: ${this.currentVibe}
       const ser = Math.round(this.hormones.serotonin);
 
       // Emotion Gauges
-      const sakitVal = document.getElementById('chatEmotionSakitVal');
-      const sakitBar = document.getElementById('chatEmotionSakitBar');
-      const senangVal = document.getElementById('chatEmotionSenangVal');
-      const senangBar = document.getElementById('chatEmotionSenangBar');
-      const bahagiaVal = document.getElementById('chatEmotionBahagiaVal');
-      const bahagiaBar = document.getElementById('chatEmotionBahagiaBar');
-      const marahVal = document.getElementById('chatEmotionMarahVal');
-      const marahBar = document.getElementById('chatEmotionMarahBar');
+      const getAsciiBar = (pct, charFilled = '|', charEmpty = '.') => {
+        const total = 20;
+        const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+        const filled = Math.round((clamped / 100) * total);
+        return `[${charFilled.repeat(filled)}${charEmpty.repeat(total - filled)}]`;
+      };
 
-      if (sakitVal) sakitVal.innerText = `${s}%`;
-      if (sakitBar) sakitBar.style.width = `${s}%`;
-      if (senangVal) senangVal.innerText = `${sn}%`;
-      if (senangBar) senangBar.style.width = `${sn}%`;
-      if (bahagiaVal) bahagiaVal.innerText = `${b}%`;
-      if (bahagiaBar) bahagiaBar.style.width = `${b}%`;
-      if (marahVal) marahVal.innerText = `${m}%`;
-      if (marahBar) marahBar.style.width = `${m}%`;
+      const sakitVal = document.getElementById('chatEmotionSakitVal');
+      const sakitAscii = document.getElementById('chatEmotionSakitAscii');
+      const senangVal = document.getElementById('chatEmotionSenangVal');
+      const senangAscii = document.getElementById('chatEmotionSenangAscii');
+      const bahagiaVal = document.getElementById('chatEmotionBahagiaVal');
+      const bahagiaAscii = document.getElementById('chatEmotionBahagiaAscii');
+      const marahVal = document.getElementById('chatEmotionMarahVal');
+      const marahAscii = document.getElementById('chatEmotionMarahAscii');
+
+      if (sakitVal) {
+        sakitVal.innerText = s === 0 ? '0% CLEAR' : `${s}% ACTIVE`;
+        sakitVal.className = s === 0 ? 'gauge-val-clear' : 'gauge-val-crit';
+      }
+      if (sakitAscii) {
+        sakitAscii.innerText = getAsciiBar(s, '|', '.');
+        sakitAscii.className = `ascii-gauge-bar ${s === 0 ? 'text-zinc' : 'text-rose'}`;
+      }
+
+      if (senangVal) {
+        senangVal.innerText = `${sn}% ACTIVE`;
+        senangVal.className = 'gauge-val-warn';
+      }
+      if (senangAscii) {
+        senangAscii.innerText = getAsciiBar(sn, '|', '.');
+      }
+
+      if (bahagiaVal) {
+        bahagiaVal.innerText = `${b}% ACTIVE`;
+        bahagiaVal.className = 'gauge-val-opt';
+      }
+      if (bahagiaAscii) {
+        bahagiaAscii.innerText = getAsciiBar(b, '|', '.');
+      }
+
+      if (marahVal) {
+        marahVal.innerText = m === 0 ? '0% CLEAR' : `${m}% ACTIVE`;
+        marahVal.className = m === 0 ? 'gauge-val-clear' : 'gauge-val-crit';
+      }
+      if (marahAscii) {
+        marahAscii.innerText = getAsciiBar(m, '|', '.');
+        marahAscii.className = `ascii-gauge-bar ${m === 0 ? 'text-zinc' : 'text-rose'}`;
+      }
 
       // Neuro Vitals
       const oxyVal = document.getElementById('chatOxytocinVal');
@@ -28563,12 +28657,17 @@ Aturan:
       });
     });
 
-    // Pillar cards clicking switches subtab filter
-    document.querySelectorAll('.endocrine-pillar-card').forEach(card => {
+    // Pillar cards clicking switches subtab filter and reveals diagnostics
+    document.querySelectorAll('.endocrine-pillar-row, .endocrine-pillar-card').forEach(card => {
       card.addEventListener('click', () => {
         AudioEngine.click();
         const pillar = card.dataset.pillar;
-        if (pillar) {
+        const box = document.getElementById('endocrineIsolatedBox');
+        if (box) {
+          box.style.display = 'flex';
+          if (typeof BioEndocrine !== 'undefined') BioEndocrine._forceShowDetails = true;
+        }
+        if (pillar && typeof BioEndocrine !== 'undefined') {
           BioEndocrine.setSubTabFilter(pillar);
         }
       });
@@ -28607,11 +28706,21 @@ Aturan:
       const tabChat = document.getElementById('tabEndocrineChat');
       const paneCode = document.getElementById('paneEndocrineCode');
       const paneChat = document.getElementById('paneEndocrineChat');
+      const dotCode = document.getElementById('dotTabCode');
+      const dotChat = document.getElementById('dotTabChat');
 
-      if (tabCode) tabCode.classList.toggle('active', isCode);
-      if (tabChat) tabChat.classList.toggle('active', !isCode);
-      if (paneCode) paneCode.style.display = isCode ? 'block' : 'none';
-      if (paneChat) paneChat.style.display = !isCode ? 'block' : 'none';
+      if (tabCode) {
+        tabCode.classList.toggle('active', isCode);
+        tabCode.setAttribute('aria-selected', isCode ? 'true' : 'false');
+      }
+      if (tabChat) {
+        tabChat.classList.toggle('active', !isCode);
+        tabChat.setAttribute('aria-selected', !isCode ? 'true' : 'false');
+      }
+      if (dotCode) dotCode.className = `endocrine-util-tab-dot ${isCode ? 'active' : ''}`;
+      if (dotChat) dotChat.className = `endocrine-util-tab-dot ${!isCode ? 'active' : ''}`;
+      if (paneCode) paneCode.style.display = isCode ? 'flex' : 'none';
+      if (paneChat) paneChat.style.display = !isCode ? 'flex' : 'none';
 
       if (!isCode && typeof ChatEndocrine !== 'undefined') {
         ChatEndocrine.renderModalContent();
@@ -28620,6 +28729,9 @@ Aturan:
       }
       AudioEngine.click();
     };
+
+    document.getElementById('pipelineRowChat')?.addEventListener('click', () => switchEndocrineTab('chat'));
+    document.getElementById('pipelineRowCode')?.addEventListener('click', () => switchEndocrineTab('code'));
 
     els.tabEndocrineCode?.addEventListener('click', () => switchEndocrineTab('code'));
     els.tabEndocrineChat?.addEventListener('click', () => switchEndocrineTab('chat'));
@@ -28633,10 +28745,6 @@ Aturan:
 
     // Copy Log Handlers (Jalur 1 CodeEndocrine & Jalur 2 ChatEndocrine)
     els.btnCopyEndocrineLogs?.addEventListener('click', () => {
-      BioEndocrine.copyLogsToClipboard();
-    });
-
-    els.btnCopyEndocrineLogsHeader?.addEventListener('click', () => {
       BioEndocrine.copyLogsToClipboard();
     });
 
@@ -32346,6 +32454,162 @@ Aturan:
             }
           }
         }
+
+        // =========================================================================
+        // Penanganan Presisi Pintasan Keyboard CTRL (Ctrl+C, Ctrl+V, Ctrl+L, Ctrl+Z, dll.)
+        // =========================================================================
+        if (ev.type === 'keydown' && (ev.ctrlKey || ev.metaKey) && !ev.altKey) {
+          const keyLower = (ev.key || '').toLowerCase();
+
+          // 1. Izinkan toggle terminal (Ctrl+` atau Backquote)
+          if (keyLower === '`' || ev.code === 'Backquote') {
+            return true;
+          }
+
+          // 2. Ctrl+C: Jika ada teks terseleksi, biarkan Copy; jika TIDAK ada seleksi, kirim SIGINT (\x03)
+          if (keyLower === 'c') {
+            const hasSel = (term.hasSelection && term.hasSelection()) || (window.getSelection && window.getSelection().toString());
+            if (hasSel) {
+              return true;
+            } else {
+              ev.preventDefault();
+              ev.stopPropagation();
+              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                this.sendPtyInput(paneState.sessionId || sessionId, '\x03');
+              } else if (paneState && paneState.isFallbackMode) {
+                term.write('^C\r\n');
+                paneState._inputLine = '';
+              }
+              return false;
+            }
+          }
+
+          // 3. Ctrl+V: Tempel (Paste) clipboard teks ke PTY terminal
+          if (keyLower === 'v') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+              navigator.clipboard.readText().then((clipText) => {
+                if (clipText) {
+                  if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                    this.sendPtyInput(paneState.sessionId || sessionId, clipText);
+                  } else if (paneState && paneState.isFallbackMode) {
+                    paneState._inputLine = (paneState._inputLine || '') + clipText;
+                    term.write(clipText);
+                  }
+                }
+              }).catch(() => {});
+            }
+            return false;
+          }
+
+          // 4. Ctrl+L: Clear screen (Form Feed \x0c) - Cegah browser membajak fokus ke Address Bar
+          if (keyLower === 'l') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\x0c');
+            } else if (paneState && paneState.isFallbackMode) {
+              term.clear();
+            }
+            return false;
+          }
+
+          // 5. Ctrl+Z: Suspend / Undo (\x1a)
+          if (keyLower === 'z') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\x1a');
+            }
+            return false;
+          }
+
+          // 6. Ctrl+D: EOF / Exit (\x04) - Cegah browser membuka Bookmark
+          if (keyLower === 'd') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\x04');
+            }
+            return false;
+          }
+
+          // 7. Ctrl+A: Pindah kursor ke awal baris (\x01) - Cegah browser Select All
+          if (keyLower === 'a' && !ev.shiftKey) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\x01');
+            }
+            return false;
+          }
+
+          // 8. Ctrl+E: Pindah kursor ke akhir baris (\x05)
+          if (keyLower === 'e') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\x05');
+            }
+            return false;
+          }
+
+          // 9. Ctrl+U: Hapus baris sebelum kursor (\x15) - Cegah browser membuka View Source
+          if (keyLower === 'u') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\x15');
+            }
+            return false;
+          }
+
+          // 10. Ctrl+K: Hapus baris setelah kursor (\x0b)
+          if (keyLower === 'k') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\x0b');
+            }
+            return false;
+          }
+
+          // 11. Ctrl+W: Hapus kata mundur (\x17) - Cegah browser menutup Tab
+          if (keyLower === 'w') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\x17');
+            }
+            return false;
+          }
+
+          // 12. Ctrl+R: Reverse history search (\x12) - Cegah browser me-reload halaman
+          if (keyLower === 'r') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\x12');
+            }
+            return false;
+          }
+
+          // 13. Karakter kontrol alfabetik universal A-Z (\x01 - \x1a)
+          if (ev.key && ev.key.length === 1) {
+            const charCode = ev.key.toUpperCase().charCodeAt(0);
+            if (charCode >= 65 && charCode <= 90) { // A-Z
+              ev.preventDefault();
+              ev.stopPropagation();
+              const ctrlSequence = String.fromCharCode(charCode - 64);
+              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                this.sendPtyInput(paneState.sessionId || sessionId, ctrlSequence);
+              }
+              return false;
+            }
+          }
+        }
+
         return true;
       });
 
@@ -34108,8 +34372,6 @@ Aturan:
         });
       }
 
-      document.getElementById('btnTermFontDec')?.addEventListener('click', () => this.adjustFontSize(-1));
-      document.getElementById('btnTermFontInc')?.addEventListener('click', () => this.adjustFontSize(1));
       const tbAutoEnterBtn = document.getElementById('btnTermToolbarAutoEnter');
       if (tbAutoEnterBtn) {
         let lastAutoToggle = 0;
@@ -34135,10 +34397,7 @@ Aturan:
       document.getElementById('btnBannerScanQr')?.addEventListener('click', () => this.openQrScannerModal());
       document.getElementById('btnBannerManual')?.addEventListener('click', () => this.showRemoteOverlay());
       document.getElementById('btnTermSplit')?.addEventListener('click', () => this.toggleSplit());
-      document.getElementById('btnTermClear')?.addEventListener('click', () => this.clearActiveScreen());
-      document.getElementById('btnTermTheme')?.addEventListener('click', () => this.toggleTheme());
       document.getElementById('btnTermFullscreen')?.addEventListener('click', () => this.toggleFullscreen());
-      document.getElementById('btnClosePane2')?.addEventListener('click', () => this.toggleSplit());
       document.getElementById('btnTermAddTab')?.addEventListener('click', () => this.addTab());
 
       // Remote Tunnel Modal handlers
@@ -34194,10 +34453,6 @@ Aturan:
       }
 
       // Per-pane header action buttons
-      document.getElementById('btnPaneEndorphin1')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (window.TerminalEndorphin) window.TerminalEndorphin.heal(1);
-      });
       document.getElementById('btnPaneAutoEnter1')?.addEventListener('click', (e) => {
         e.stopPropagation();
         this.toggleAutoEnter(1);
@@ -34205,10 +34460,6 @@ Aturan:
       document.getElementById('btnPaneEnter1')?.addEventListener('click', (e) => {
         e.stopPropagation();
         this.sendEnterToPane(1);
-      });
-      document.getElementById('btnPaneEndorphin2')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (window.TerminalEndorphin) window.TerminalEndorphin.heal(2);
       });
       document.getElementById('btnPaneAutoEnter2')?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -34489,6 +34740,14 @@ Aturan:
             e.preventDefault();
             e.stopPropagation();
             this.sendPtyInput(paneState.sessionId, '\x03');
+          } else if (e.key === 'v' || e.key === 'V') {
+            e.preventDefault();
+            e.stopPropagation();
+            if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+              navigator.clipboard.readText().then((clipText) => {
+                if (clipText && paneState.sessionId) this.sendPtyInput(paneState.sessionId, clipText);
+              }).catch(() => {});
+            }
           } else if (e.key === 'd' || e.key === 'D') {
             e.preventDefault();
             e.stopPropagation();

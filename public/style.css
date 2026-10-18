@@ -10293,12 +10293,487 @@ body.page-paused *::after {
   100% { transform: translateX(1px); }
 }
 
-/* Modal Telemetry Layout */
+/* ==================== BIO-ENDOCRINE TELEMETRY UTILITARIAN UI (v341) ==================== */
 .endocrine-modal-card {
-  max-width: 720px;
-  background: rgba(10, 12, 18, 0.95) !important;
-  border: 1px solid rgba(0, 240, 255, 0.3) !important;
-  box-shadow: 0 0 35px rgba(0, 240, 255, 0.15) !important;
+  max-width: 768px !important;
+  width: 100% !important;
+  background: #0e1117 !important;
+  border: 1px solid #27272a !important;
+  border-radius: 0 !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75) !important;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace !important;
+  font-size: 12px !important;
+  color: #d1d5db !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.endocrine-modal-card * {
+  box-sizing: border-box;
+}
+
+/* 1. Header */
+.endocrine-util-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #131720;
+  border-bottom: 1px solid #27272a;
+  user-select: none;
+}
+
+.endocrine-util-header-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.endocrine-util-title {
+  color: #f4f4f5;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  font-size: 13px;
+}
+
+.endocrine-util-sep {
+  color: #52525b;
+}
+
+.endocrine-util-status {
+  color: #34d399;
+  font-weight: 600;
+  letter-spacing: 0.025em;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.endocrine-util-square {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: #34d399;
+}
+
+.endocrine-util-close-btn {
+  background: transparent;
+  color: #a1a1aa;
+  border: 1px solid transparent;
+  padding: 2px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.endocrine-util-close-btn:hover {
+  color: #ffffff;
+  background: #27272a;
+  border-color: #3f3f46;
+}
+
+/* 2. Main Body */
+.endocrine-util-body {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: #0e1117;
+}
+
+/* Tabs */
+.endocrine-util-tabs {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid #27272a;
+  background: #0a0d12;
+  padding: 4px;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  user-select: none;
+}
+
+.endocrine-util-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: transparent;
+  color: #a1a1aa;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.endocrine-util-tab:hover {
+  color: #e4e4e7;
+  background: rgba(24, 24, 27, 0.6);
+}
+
+.endocrine-util-tab.active {
+  background: #27272a;
+  color: #f4f4f5;
+  border-color: rgba(63, 63, 70, 0.8);
+}
+
+.endocrine-util-tab-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: #52525b;
+}
+
+.endocrine-util-tab.active .endocrine-util-tab-dot {
+  background: #34d399;
+}
+
+.endocrine-util-tab-badge {
+  padding: 1px 6px;
+  font-size: 10px;
+  background: #18181b;
+  color: #fbbf24;
+  border: 1px solid rgba(217, 119, 6, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: normal;
+}
+
+/* Sections */
+.endocrine-util-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.endocrine-util-sec-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #71717a;
+  font-weight: 600;
+}
+
+.endocrine-util-box {
+  border: 1px solid #27272a;
+  background: #0a0d12;
+}
+
+.endocrine-util-box.divide-y > * + * {
+  border-top: 1px solid rgba(39, 39, 42, 0.8);
+}
+
+/* Pipeline Rows */
+.endocrine-util-pipeline-row {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  transition: background 0.15s ease;
+}
+
+@media (min-width: 640px) {
+  .endocrine-util-pipeline-row {
+    flex-direction: row;
+    align-items: center;
+  }
+}
+
+.endocrine-util-pipeline-row:hover {
+  background: rgba(24, 24, 27, 0.4);
+}
+
+.pipeline-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pipeline-num {
+  color: #34d399;
+  font-weight: 700;
+}
+
+.pipeline-name {
+  color: #e4e4e7;
+  font-weight: 600;
+}
+
+.pipeline-desc {
+  color: #71717a;
+}
+
+.pipeline-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  color: #a1a1aa;
+  font-size: 11px;
+}
+
+.pipeline-right strong {
+  color: #e4e4e7;
+  font-weight: normal;
+}
+
+.pipeline-status {
+  color: #34d399;
+  font-weight: 600;
+}
+
+.pipeline-status.off {
+  color: #71717a;
+}
+
+/* Gauges Grid */
+.endocrine-util-gauges-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+@media (min-width: 640px) {
+  .endocrine-util-gauges-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.endocrine-util-gauge-card {
+  padding: 12px;
+  background: #0a0d12;
+  border: 1px solid #27272a;
+}
+
+.gauge-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.gauge-title {
+  font-weight: 700;
+  color: #e4e4e7;
+}
+
+.gauge-val-opt {
+  color: #34d399;
+  font-weight: 700;
+}
+
+.gauge-val-clear {
+  color: #a1a1aa;
+  font-weight: 700;
+}
+
+.gauge-val-warn {
+  color: #fbbf24;
+  font-weight: 700;
+}
+
+.gauge-val-crit {
+  color: #f87171;
+  font-weight: 700;
+}
+
+.ascii-gauge-bar {
+  letter-spacing: 0.1em;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 0;
+  user-select: none;
+}
+
+.ascii-gauge-bar.text-emerald {
+  color: #34d399;
+}
+
+.ascii-gauge-bar.text-zinc {
+  color: #52525b;
+}
+
+.ascii-gauge-bar.text-amber {
+  color: #fbbf24;
+}
+
+.ascii-gauge-bar.text-rose {
+  color: #f87171;
+}
+
+.gauge-caption {
+  font-size: 11px;
+  color: #71717a;
+  margin-top: 4px;
+  margin-bottom: 0;
+  line-height: 1.4;
+}
+
+/* Vitals Summary */
+.endocrine-util-vitals-summary {
+  padding: 10px 14px;
+  background: #11141c;
+  border: 1px solid #27272a;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: #d1d5db;
+}
+
+.endocrine-util-vitals-summary strong,
+.endocrine-util-vitals-summary span {
+  font-weight: 600;
+}
+
+/* 5-Pillar List */
+.endocrine-util-sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pillar-pass-badge {
+  font-size: 11px;
+  color: #34d399;
+  font-weight: 600;
+}
+
+.endocrine-pillar-row {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.endocrine-pillar-row:hover {
+  background: rgba(24, 24, 27, 0.4);
+}
+
+.pillar-name {
+  color: #d1d5db;
+}
+
+.pillar-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pillar-metric {
+  color: #71717a;
+  font-size: 11px;
+}
+
+.pillar-status {
+  font-weight: 700;
+  color: #34d399;
+}
+
+.pillar-status.status-warn {
+  color: #fbbf24;
+}
+
+.pillar-status.status-crit {
+  color: #f87171;
+}
+
+/* Footer */
+.endocrine-util-footer {
+  padding: 12px 16px;
+  background: #131720;
+  border-top: 1px solid #27272a;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+  user-select: none;
+}
+
+@media (min-width: 640px) {
+  .endocrine-util-footer {
+    flex-direction: row;
+    align-items: center;
+  }
+}
+
+.endocrine-footer-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #a1a1aa;
+  font-size: 12px;
+}
+
+.endocrine-footer-status .dot {
+  color: #34d399;
+  font-weight: 700;
+}
+
+.endocrine-footer-btns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.endocrine-util-btn {
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.btn-util-copy {
+  background: #18181b;
+  color: #d1d5db;
+  border-color: #3f3f46;
+}
+
+.btn-util-copy:hover {
+  background: #27272a;
+  color: #ffffff;
+}
+
+.btn-util-heal {
+  background: #18181b;
+  color: #fbbf24;
+  border-color: rgba(217, 119, 6, 0.6);
+  font-weight: 600;
+}
+
+.btn-util-heal:hover {
+  background: #27272a;
+  color: #fef08a;
+}
+
+.btn-util-close {
+  background: #27272a;
+  color: #e4e4e7;
+  border-color: #52525b;
+}
+
+.btn-util-close:hover {
+  background: #3f3f46;
+  color: #ffffff;
 }
 
 .endocrine-gauges-grid {
