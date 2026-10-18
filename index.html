@@ -76,8 +76,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261018_v365">
-  <link rel="stylesheet" href="style.css?v=20261018_v365">
+  <link rel="preload" as="style" href="style.css?v=20261018_v366">
+  <link rel="stylesheet" href="style.css?v=20261018_v366">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial select-none">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -366,6 +366,24 @@
 
     <!-- Right: Model Quick Switcher & Action Icons -->
     <div class="flex items-center space-x-2 top-nav-right">
+      <!-- Minimized Terminal Dock Badge (To the Left of Model Menu) -->
+      <div class="terminal-minimized-dock" id="termMinimizedDock" style="display: none;" title="Terminal terminimize. Klik untuk membuka kembali.">
+        <div class="dock-inner">
+          <span class="dock-pulse-dot online"></span>
+          <i class="fa-solid fa-terminal dock-icon"></i>
+          <div class="dock-info">
+            <span class="dock-title">Terminal</span>
+            <span class="dock-sub" id="termDockSub">PowerShell</span>
+          </div>
+          <button type="button" class="dock-action-btn restore" id="btnTermDockRestore" aria-label="Buka Terminal" title="Buka Kembali Terminal">
+            <i class="fa-solid fa-arrow-up-right-from-square"></i>
+          </button>
+          <button type="button" class="dock-action-btn close" id="btnTermDockClose" aria-label="Tutup Terminal" title="Tutup Terminal">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+
       <div class="relative group model-picker-container" id="singleModelPickerWrap">
         <button class="flex items-center space-x-2 bg-white/[0.04] hover:bg-white/[0.08] hover:border-teal-500/30 border border-white/[0.08] text-slate-200 px-3 py-1 rounded-lg transition-all duration-150 text-[11.5px] font-mono cursor-pointer model-picker-chip" id="modelPickerChip" title="Pilih Model Utama" type="button">
           <svg class="lucide lucide-cpu w-3.5 h-3.5 text-teal-400 chip-icon" data-lucide="cpu" fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M12 20v2"></path><path d="M12 2v2"></path><path d="M17 20v2"></path><path d="M17 2v2"></path><path d="M2 12h2"></path><path d="M2 17h2"></path><path d="M2 7h2"></path><path d="M20 12h2"></path><path d="M20 17h2"></path><path d="M20 7h2"></path><path d="M7 20v2"></path><path d="M7 2v2"></path><rect height="16" rx="2" width="16" x="4" y="4"></rect><rect height="8" rx="1" width="8" x="8" y="8"></rect></svg>
@@ -2753,24 +2771,6 @@
     </div>
   </div>
 
-  <!-- Floating Minimized Terminal Dock Badge (Restore Anytime) -->
-  <div class="terminal-minimized-dock" id="termMinimizedDock" style="display: none;" title="Terminal terminimize. Klik untuk membuka kembali.">
-    <div class="dock-inner">
-      <span class="dock-pulse-dot online"></span>
-      <i class="fa-solid fa-terminal dock-icon"></i>
-      <div class="dock-info">
-        <span class="dock-title">Terminal</span>
-        <span class="dock-sub" id="termDockSub">PowerShell Aktif</span>
-      </div>
-      <button type="button" class="dock-action-btn restore" id="btnTermDockRestore" aria-label="Buka Terminal" title="Buka Kembali Terminal">
-        <i class="fa-solid fa-arrow-up-right-from-square"></i>
-      </button>
-      <button type="button" class="dock-action-btn close" id="btnTermDockClose" aria-label="Tutup Terminal" title="Tutup Terminal">
-        <i class="fa-solid fa-xmark"></i>
-      </button>
-    </div>
-  </div>
-
   <!-- Modal Cloudflare Tunnel Host Broadcaster (Desktop Mode) -->
   <div class="modal-backdrop" id="termRemoteTunnelModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="termTunnelModalTitle">
     <div class="modal-dialog term-tunnel-dialog">
@@ -2900,6 +2900,6 @@
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
   <script src="text-safety.js?v=20261017_v349" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261018_v365" defer></script>
+  <script src="app.js?v=20261018_v366" defer></script>
 </body>
 </html>

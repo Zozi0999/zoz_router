@@ -14578,86 +14578,96 @@ body.mermaid-has-fullscreen {
   50% { transform: translateY(-3px); }
 }
 
-/* Floating Minimized Terminal Dock Badge (Restore Anytime) */
+/* Minimized Terminal Dock Badge (In Header, to the Left of Model Picker) */
 .terminal-minimized-dock {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  z-index: 9999;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  z-index: 50;
   cursor: pointer;
-  animation: slideUpFade 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   user-select: none;
+  flex-shrink: 0;
+  margin: 0;
 }
 
 .terminal-minimized-dock .dock-inner {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
+  gap: 6px;
+  padding: 3px 8px;
+  height: 28px;
   background: rgba(10, 16, 26, 0.95);
-  border: 1px solid rgba(0, 240, 255, 0.5);
-  border-radius: 30px;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 240, 255, 0.35);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  border-radius: 8px;
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.2);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   transition: all 0.2s ease;
 }
 
 .terminal-minimized-dock:hover .dock-inner {
-  transform: translateY(-2px);
   border-color: var(--neon-cyan, #00f0ff);
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.9), 0 0 28px rgba(0, 240, 255, 0.55);
+  box-shadow: 0 0 18px rgba(0, 240, 255, 0.45);
+  background: rgba(14, 22, 36, 0.98);
 }
 
 .dock-pulse-dot {
-  width: 9px;
-  height: 9px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: #22c55e;
-  box-shadow: 0 0 10px #22c55e;
+  box-shadow: 0 0 8px #22c55e;
   animation: termPulseDot 1.8s infinite;
   flex-shrink: 0;
 }
 
 .dock-icon {
-  font-size: 0.9rem;
+  font-size: 0.72rem;
   color: var(--neon-cyan, #00f0ff);
-  filter: drop-shadow(0 0 6px var(--neon-cyan));
+  flex-shrink: 0;
 }
 
 .dock-info {
   display: flex;
   flex-direction: column;
+  justify-content: center;
+  line-height: 1;
 }
 
 .dock-title {
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   font-weight: 700;
   color: #ffffff;
-  letter-spacing: 0.3px;
-  line-height: 1.1;
+  letter-spacing: 0.2px;
+  line-height: 1;
 }
 
 .dock-sub {
-  font-size: 0.65rem;
+  font-size: 0.58rem;
   color: #94a3b8;
   font-family: var(--font-code);
-  line-height: 1.1;
+  line-height: 1;
+  max-width: 65px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
 }
 
 .dock-action-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.05);
   color: #cbd5e1;
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.65rem;
   transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
 .dock-action-btn.restore:hover {
@@ -14674,8 +14684,29 @@ body.mermaid-has-fullscreen {
 
 @media (max-width: 768px) {
   .terminal-minimized-dock {
-    bottom: 80px;
-    right: 14px;
+    position: relative !important;
+    bottom: auto !important;
+    right: auto !important;
+    margin: 0 !important;
+  }
+
+  .terminal-minimized-dock .dock-inner {
+    height: 26px !important;
+    padding: 2px 6px !important;
+    gap: 4px !important;
+  }
+
+  .terminal-minimized-dock .dock-sub {
+    display: none !important;
+  }
+
+  .terminal-minimized-dock .dock-action-btn.restore {
+    display: none !important;
+  }
+
+  .terminal-minimized-dock .dock-action-btn {
+    width: 16px !important;
+    height: 16px !important;
   }
 }
 

@@ -32277,7 +32277,7 @@ Aturan:
       }
       const dock = document.getElementById('termMinimizedDock');
       if (dock) {
-        dock.style.display = 'block';
+        dock.style.display = 'inline-flex';
         const sub = document.getElementById('termDockSub');
         const activeTab = this.getActiveTab();
         if (sub && activeTab) {
