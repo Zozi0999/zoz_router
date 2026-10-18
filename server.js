@@ -45,12 +45,32 @@ const SNAPSHOTS_DIR = path.join(WORKSPACE_ROOT, '.zoz-snapshots');
 // =========================================================================
 // CLOUDFLARE TUNNEL REMOTE ACCESS (WAN Mobile-to-Desktop) STATE & ENGINE
 // =========================================================================
+const TUNNEL_STATE_FILE = path.join(__dirname, 'data', 'tunnel-state.json');
+let persistedTunnel = null;
+try {
+  if (fs.existsSync(TUNNEL_STATE_FILE)) {
+    persistedTunnel = JSON.parse(fs.readFileSync(TUNNEL_STATE_FILE, 'utf8'));
+  }
+} catch (_) {}
+
 let cloudflareTunnelProcess = null;
-let cloudflareTunnelUrl = '';
-let cloudflareTunnelActive = false;
+let cloudflareTunnelUrl = (persistedTunnel && persistedTunnel.url) || '';
+let cloudflareTunnelActive = Boolean(persistedTunnel && persistedTunnel.url);
 let cloudflareTunnelError = '';
-let cloudflareTunnelPin = generateSixDigitPin();
-let cloudflareTunnelStartedAt = null;
+let cloudflareTunnelPin = (persistedTunnel && persistedTunnel.pin) || generateSixDigitPin();
+let cloudflareTunnelStartedAt = (persistedTunnel && persistedTunnel.startedAt) || null;
+
+function savePersistedTunnelState() {
+  try {
+    const dir = path.join(__dirname, 'data');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(TUNNEL_STATE_FILE, JSON.stringify({
+      url: cloudflareTunnelUrl,
+      pin: cloudflareTunnelPin,
+      startedAt: cloudflareTunnelStartedAt
+    }, null, 2));
+  } catch (_) {}
+}
 
 function generateSixDigitPin() {
   return String(Math.floor(100000 + Math.random() * 900000));
@@ -237,6 +257,91 @@ function resolveHostShell(shellType) {
     exe: isWin ? 'powershell.exe' : 'pwsh',
     args: ['-ExecutionPolicy', 'Bypass']
   };
+}
+
+/**
+ * Autonomous Server-Side Auto Y / Auto Enter Engine
+ * Memantau output PTY secara real-time di background Windows host.
+ * Ketika mendeteksi prompt perizinan (Claude Code, Antigravity CLI, Gemini CLI, PowerShell, npm),
+ * server langsung mengirimkan konfirmasi (Enter / 'y\r') secara mandiri ke proses PTY.
+ * Berjalan terus menerus bahkan jika pengguna mengunci HP, beralih aplikasi, atau terputus jaringan.
+ */
+function handleServerAutoEnter(session, data) {
+  if (!session || !session.autoEnter || !session.pty) return;
+  if (!data || typeof data !== 'string') return;
+
+  const now = Date.now();
+  // Jeda minimum antar auto-respond: 1000ms untuk mencegah spam / duplicate response
+  if (session.lastAutoRespondAt && (now - session.lastAutoRespondAt) < 1000) return;
+  // Jangan auto-respond jika ada user input manual dalam 1200ms terakhir
+  if (session.lastInputAt && (now - session.lastInputAt) < 1200) return;
+
+  // Akumulasikan buffer teks terbaru (maks 1500 karakter)
+  session.recentTextBuffer = ((session.recentTextBuffer || '') + ' ' + data).slice(-1500);
+
+  // Bersihkan ANSI escape sequence dan karakter kontrol
+  const clean = session.recentTextBuffer
+    .replace(/\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\].*?(?:\x07|\x1b\\))/g, '')
+    .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, ' ')
+    .replace(/\s+/g, ' ');
+
+  // Guard: Jangan pernah auto-respond pada password/secret/PIN prompt
+  if (/(?:password|passphrase|secret key|access token|pin):\s*$/i.test(clean)) return;
+
+  // Guard: Jangan auto-respond jika hanya berada di prompt shell biasa tanpa dialog interaktif
+  if (/(?:PS [A-Z]:\\[^>]*>\s*$|^[^>]*>\s*$)/i.test(clean) && !/(?:Run this command|permission for|allow|proceed|continue|\b[yY]\/[nN]\b)/i.test(clean)) {
+    return;
+  }
+
+  // Pola 1: Dialog permission Claude Code / Gemini CLI / Antigravity CLI
+  // "Requesting permission for: ... Run this command? > 1. Yes, run command ... esc to cancel"
+  // "Allow this command? > 1. Yes"
+  // "Do you want to run this command? 1. Yes"
+  const isCliPermissionMenu = (
+    /(?:Run this command\?|Requesting permission for|Allow this command\?|Do you want to run this command\?|Permission required)/i.test(clean) &&
+    /(?:>\s*1\.\s*Yes|1\.\s*Yes|Navigate|tab Amend|esc to cancel)/i.test(clean)
+  );
+
+  // Pola 2: Konfirmasi batch / CLI [y/N], (y/n), (yes/no), [Y/n]
+  const isConfirmYPrompt = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\bdo you want to continue\s*\(?[yY]\/[nN]\)?|\bare you sure\s*\(?[yY]\/[nN]\)?|\bproceed with operation\s*\(?[yY]\/[nN]\)?|\bOk to proceed\? \([yY]\))/i.test(clean);
+
+  // Pola 3: Prompt "Press Enter to continue" / "Hit enter to continue"
+  const isEnterOnlyPrompt = /(?:press (?:any key|enter) to continue|hit enter to continue|press \[enter\] to continue|\bpress enter to\b)/i;
+
+  if (isCliPermissionMenu) {
+    session.lastAutoRespondAt = now;
+    session.recentTextBuffer = '';
+    setTimeout(() => {
+      if (session && session.pty && session.autoEnter) {
+        try {
+          session.pty.write('\r');
+          console.log(`[AutoEnter] Session ${session.id}: Auto-approved CLI permission menu via Enter`);
+        } catch (_) {}
+      }
+    }, 200);
+  } else if (isConfirmYPrompt) {
+    session.lastAutoRespondAt = now;
+    session.recentTextBuffer = '';
+    setTimeout(() => {
+      if (session && session.pty && session.autoEnter) {
+        try {
+          session.pty.write('y\r');
+          console.log(`[AutoEnter] Session ${session.id}: Auto-approved Y/N prompt via 'y\\r'`);
+        } catch (_) {}
+      }
+    }, 200);
+  } else if (isEnterOnlyPrompt) {
+    session.lastAutoRespondAt = now;
+    session.recentTextBuffer = '';
+    setTimeout(() => {
+      if (session && session.pty && session.autoEnter) {
+        try {
+          session.pty.write('\r');
+          console.log(`[AutoEnter] Session ${session.id}: Auto-continued Enter prompt via '\\r'`);
+        } catch (_) {}
+      }
+    }, 200);
+  }
 }
 
 // Loader .env minimal (TANPA dependensi eksternal — proyek zero-dep).
@@ -5463,12 +5568,14 @@ async function requestHandler(req, res) {
           useConpty: true
         });
 
+        const autoEnterReq = reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true';
         session = {
           id: sessionId,
           shell: shellType,
           cwd: targetCwd,
           cols,
           rows,
+          autoEnter: autoEnterReq,
           pty: ptyProcess,
           clients: new Set(),
           wsClients: new Set(),
@@ -5482,6 +5589,7 @@ async function requestHandler(req, res) {
           session.lastActivity = Date.now();
           if (session.buffer.length > 500) session.buffer.shift();
           session.buffer.push(data);
+          handleServerAutoEnter(session, data);
           const payload = `data: ${JSON.stringify({ type: 'data', data })}\n\n`;
           for (const client of session.clients) {
             try { if (!client.writableEnded) client.write(payload); } catch (_) {}
@@ -5513,22 +5621,27 @@ async function requestHandler(req, res) {
         res.write(`data: ${JSON.stringify({ type: 'error', message: spawnErr.message })}\n\n`);
         return res.end();
       }
-    } else if (session && session.pty && typeof session.pty.resize === 'function') {
-      const isRemote = isRemoteTunnelRequest(req);
-      const hasActiveClients = (session.clients && session.clients.size > 0) || (session.wsClients && session.wsClients.size > 0);
-      if (!isRemote || !hasActiveClients) {
-        try {
-          session.pty.resize(cols, rows);
-          session.cols = cols;
-          session.rows = rows;
-        } catch (_) {}
+    } else {
+      if (reqUrl.searchParams.has('autoEnter')) {
+        session.autoEnter = (reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true');
+      }
+      if (session && session.pty && typeof session.pty.resize === 'function') {
+        const isRemote = isRemoteTunnelRequest(req);
+        const hasActiveClients = (session.clients && session.clients.size > 0) || (session.wsClients && session.wsClients.size > 0);
+        if (!isRemote || !hasActiveClients) {
+          try {
+            session.pty.resize(cols, rows);
+            session.cols = cols;
+            session.rows = rows;
+          } catch (_) {}
+        }
       }
     }
 
     session.clients.add(res);
 
     // Kirim konfirmasi terkoneksi dan buffer historis jika ada
-    res.write(`data: ${JSON.stringify({ type: 'connected', session: sessionId, shell: session.shell, cwd: session.cwd, cols: session.cols || cols, rows: session.rows || rows })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'connected', session: sessionId, shell: session.shell, cwd: session.cwd, cols: session.cols || cols, rows: session.rows || rows, autoEnter: Boolean(session.autoEnter) })}\n\n`);
     if (session.buffer && session.buffer.length > 0) {
       const replay = session.buffer.join('');
       res.write(`data: ${JSON.stringify({ type: 'init', data: replay })}\n\n`);
@@ -5554,6 +5667,10 @@ async function requestHandler(req, res) {
         setTimeout(() => {
           const remClients = (session.clients ? session.clients.size : 0) + (session.wsClients ? session.wsClients.size : 0);
           if (remClients === 0 && activeTerminalSessions.get(sessionId) === session) {
+            // Jangan matikan sesi bila autoEnter aktif agar proses latar belakang terus berjalan
+            if (session.autoEnter) {
+              return;
+            }
             try { session.pty.kill(); } catch (_) {}
             activeTerminalSessions.delete(sessionId);
           }
@@ -5583,10 +5700,43 @@ async function requestHandler(req, res) {
         createdAt: s.createdAt,
         lastActivity: s.lastActivity,
         lastInputAt: s.lastInputAt || s.createdAt,
-        bufferLength: s.buffer ? s.buffer.length : 0
+        bufferLength: s.buffer ? s.buffer.length : 0,
+        autoEnter: Boolean(s.autoEnter)
       });
     }
     return sendJSON(res, 200, { sessions });
+  }
+
+  // Toggle status Auto Y / Auto Enter untuk persistent PTY session di server
+  if (pathname === '/api/terminal/auto-enter' && method === 'POST') {
+    try {
+      const body = await safeParseBody(req);
+      if (!body) return;
+      const pinCheck = validateRemoteTerminalPin(req, reqUrl, body);
+      if (!pinCheck.valid) {
+        return sendJSON(res, 401, { error: pinCheck.error });
+      }
+      const sessionId = (body.session || 'default').trim();
+      const session = activeTerminalSessions.get(sessionId);
+      const enabled = Boolean(body.enabled);
+      if (session) {
+        session.autoEnter = enabled;
+        console.log(`[PTY] Session ${sessionId} autoEnter set to ${enabled}`);
+        const autoPayload = JSON.stringify({ type: 'auto-enter-status', autoEnter: enabled, session: sessionId });
+        for (const client of session.clients) {
+          try { if (!client.writableEnded) client.write(`data: ${autoPayload}\n\n`); } catch (_) {}
+        }
+        if (session.wsClients && session.wsClients.size > 0) {
+          const wsFrame = encodeWsFrame(autoPayload);
+          for (const ws of session.wsClients) {
+            try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+          }
+        }
+      }
+      return sendJSON(res, 200, { success: true, session: sessionId, autoEnter: enabled });
+    } catch (e) {
+      return sendJSON(res, 500, { error: e.message });
+    }
   }
 
   // Kirim keystroke / input mentah ke PTY session
@@ -9312,12 +9462,14 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
         useConpty: true
       });
 
+      const autoEnterReq = reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true';
       session = {
         id: sessionId,
         shell: shellType,
         cwd: targetCwd,
         cols,
         rows,
+        autoEnter: autoEnterReq,
         pty: ptyProcess,
         clients: new Set(),
         wsClients: new Set(),
@@ -9331,6 +9483,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
         session.lastActivity = Date.now();
         if (session.buffer.length > 500) session.buffer.shift();
         session.buffer.push(data);
+        handleServerAutoEnter(session, data);
         const payload = `data: ${JSON.stringify({ type: 'data', data })}\n\n`;
         for (const client of session.clients) {
           try { if (!client.writableEnded) client.write(payload); } catch (_) {}
@@ -9365,15 +9518,20 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       socket.destroy();
       return;
     }
-  } else if (session && session.pty && typeof session.pty.resize === 'function') {
-    const isRemote = isRemoteTunnelRequest(req);
-    const hasActiveClients = (session.clients && session.clients.size > 0) || (session.wsClients && session.wsClients.size > 0);
-    if (!isRemote || !hasActiveClients) {
-      try {
-        session.pty.resize(cols, rows);
-        session.cols = cols;
-        session.rows = rows;
-      } catch (_) {}
+  } else {
+    if (reqUrl.searchParams.has('autoEnter')) {
+      session.autoEnter = (reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true');
+    }
+    if (session && session.pty && typeof session.pty.resize === 'function') {
+      const isRemote = isRemoteTunnelRequest(req);
+      const hasActiveClients = (session.clients && session.clients.size > 0) || (session.wsClients && session.wsClients.size > 0);
+      if (!isRemote || !hasActiveClients) {
+        try {
+          session.pty.resize(cols, rows);
+          session.cols = cols;
+          session.rows = rows;
+        } catch (_) {}
+      }
     }
   }
 
@@ -9388,7 +9546,8 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       shell: session.shell,
       cwd: session.cwd,
       cols: session.cols || cols,
-      rows: session.rows || rows
+      rows: session.rows || rows,
+      autoEnter: Boolean(session.autoEnter)
     })));
     if (session.buffer && session.buffer.length > 0) {
       socket.write(encodeWsFrame(JSON.stringify({ type: 'init', data: session.buffer.join('') })));
@@ -9412,7 +9571,20 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
         try {
           if (str.startsWith('{') && str.endsWith('}')) {
             const parsed = JSON.parse(str);
-            if (parsed.type === 'resize' && session.pty) {
+            if (parsed.type === 'auto-enter') {
+              session.autoEnter = Boolean(parsed.enabled);
+              const autoPayload = JSON.stringify({ type: 'auto-enter-status', autoEnter: session.autoEnter, session: sessionId });
+              for (const client of session.clients) {
+                try { if (!client.writableEnded) client.write(`data: ${autoPayload}\n\n`); } catch (_) {}
+              }
+              if (session.wsClients && session.wsClients.size > 0) {
+                const wsFrame = encodeWsFrame(autoPayload);
+                for (const ws of session.wsClients) {
+                  try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+                }
+              }
+              return;
+            } else if (parsed.type === 'resize' && session.pty) {
               const c = Math.max(45, Math.min(300, parseInt(parsed.cols, 10) || cols));
               const r = Math.max(15, Math.min(100, parseInt(parsed.rows, 10) || rows));
               if (session.cols !== c || session.rows !== r) {

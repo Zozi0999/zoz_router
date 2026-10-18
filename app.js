@@ -31939,8 +31939,39 @@ Aturan:
       pane.autoEnter = !pane.autoEnter;
       if (paneNum === 1) tab.autoEnter = pane.autoEnter;
       this.updateAutoEnterUI();
+
+      const sessionId = pane.sessionId || this.getEffectiveSessionId(tab, paneNum);
+      try {
+        localStorage.setItem(`zoz_term_auto_enter_${sessionId}`, pane.autoEnter ? '1' : '0');
+        localStorage.setItem('zoz_term_auto_enter_last', pane.autoEnter ? '1' : '0');
+      } catch (_) {}
+
+      // 1. Sync ke WebSocket server jika terhubung
+      if (pane.ws && pane.ws.readyState === WebSocket.OPEN) {
+        try {
+          pane.ws.send(JSON.stringify({ type: 'auto-enter', enabled: pane.autoEnter, session: sessionId }));
+        } catch (_) {}
+      }
+
+      // 2. Sync via HTTP REST endpoint /api/terminal/auto-enter
+      this.sendAutoEnterToServer(sessionId, pane.autoEnter);
+
       const paneName = paneNum === 2 ? 'Panel 2' : 'Panel 1';
-      showToast(pane.autoEnter ? `Auto Y/Enter: Aktif (${paneName} - ${tab.title})` : `Auto Y/Enter: Nonaktif (${paneName} - ${tab.title})`);
+      showToast(pane.autoEnter ? `⚡ Auto Y/Enter: Aktif (${paneName} - ${tab.title})` : `Auto Y/Enter: Nonaktif (${paneName} - ${tab.title})`);
+    },
+
+    sendAutoEnterToServer(sessionId, enabled) {
+      if (!sessionId) return;
+      const headers = { 'Content-Type': 'application/json' };
+      if (this.remotePin) {
+        headers['x-terminal-pin'] = this.remotePin;
+      }
+      const url = this.getTerminalApiUrl('/api/terminal/auto-enter');
+      fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ session: sessionId, enabled: Boolean(enabled), pin: this.remotePin || undefined })
+      }).catch(() => {});
     },
 
     sendEnterToPane(paneNum = (this.activePane || 1)) {
@@ -32627,6 +32658,16 @@ Aturan:
     connectStream(tab, paneState, paneNum) {
       const sessionId = paneState.sessionId || this.getEffectiveSessionId(tab, paneNum);
       paneState.sessionId = sessionId;
+
+      try {
+        const savedAuto = localStorage.getItem(`zoz_term_auto_enter_${sessionId}`) || localStorage.getItem('zoz_term_auto_enter_last');
+        if (savedAuto !== null) {
+          paneState.autoEnter = (savedAuto === '1');
+          if (paneNum === 1 && tab) tab.autoEnter = paneState.autoEnter;
+          this.updateAutoEnterUI();
+        }
+      } catch (_) {}
+
       if (paneState._reconnectTimer) {
         clearTimeout(paneState._reconnectTimer);
         paneState._reconnectTimer = null;
@@ -32651,7 +32692,7 @@ Aturan:
       const dims = (paneState.fitAddon && paneState.fitAddon.proposeDimensions()) || null;
       const cols = (dims && dims.cols >= 45) ? dims.cols : ((activeTerm && activeTerm.cols) ? activeTerm.cols : (this.isMobileDevice() ? 48 : 100));
       const rows = (dims && dims.rows >= 15) ? dims.rows : ((activeTerm && activeTerm.rows) ? activeTerm.rows : (this.isMobileDevice() ? 25 : 28));
-      let queryParams = `session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}`;
+      let queryParams = `session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}&autoEnter=${paneState.autoEnter ? '1' : '0'}`;
       if (this.remotePin) {
         queryParams += `&pin=${encodeURIComponent(this.remotePin)}`;
       }
@@ -32861,6 +32902,17 @@ Aturan:
           if (paneNum === 1) tab.cwd = msg.cwd;
           this.updatePaneHeaders();
         }
+        if (typeof msg.autoEnter === 'boolean') {
+          paneState.autoEnter = msg.autoEnter;
+          if (paneNum === 1 && tab) tab.autoEnter = msg.autoEnter;
+          this.updateAutoEnterUI();
+        }
+      } else if (msg.type === 'auto-enter-status') {
+        if (typeof msg.autoEnter === 'boolean') {
+          paneState.autoEnter = msg.autoEnter;
+          if (paneNum === 1 && tab) tab.autoEnter = msg.autoEnter;
+          this.updateAutoEnterUI();
+        }
       } else if (msg.type === 'exit') {
         if (currentTerm) {
           currentTerm.write(`\r\n\x1b[33m[Proses shell keluar dengan kode ${msg.exitCode || 0}]\x1b[0m\r\n`);
@@ -32884,10 +32936,10 @@ Aturan:
     handleAutoRespond(tab, paneState, paneNum, chunk) {
       if (!paneState || !paneState.autoEnter || !chunk || typeof chunk !== 'string') return;
 
-      // Do not auto-respond if user was actively typing/submitting in the last 2000ms
+      // Do not auto-respond if user was actively typing/submitting in the last 1200ms
       const now = Date.now();
-      if (paneState._lastDataEmitAt && (now - paneState._lastDataEmitAt) < 2000) return;
-      if (paneState._lastAutoRespond && (now - paneState._lastAutoRespond) < 1500) return;
+      if (paneState._lastDataEmitAt && (now - paneState._lastDataEmitAt) < 1200) return;
+      if (paneState._lastAutoRespond && (now - paneState._lastAutoRespond) < 1000) return;
 
       // Strip ANSI escape codes (CSI, OSC, etc.) and control characters
       const clean = chunk
@@ -32896,30 +32948,47 @@ Aturan:
 
       if (!clean.trim()) return;
 
-      // Keep only recent active window (last 300 chars) to prevent triggering on old conversational text
-      paneState._recentText = ((paneState._recentText || '') + ' ' + clean).slice(-300);
+      // Keep recent active window (last 600 chars)
+      paneState._recentText = ((paneState._recentText || '') + ' ' + clean).slice(-600);
       const textBuffer = paneState._recentText.trim();
 
-      // Guard: Never auto-respond if waiting at an active user input prompt
-      if (/(?:>|❯|\$|#|:\s*)$/.test(textBuffer)) return;
-      if (/(?:PS [A-Z]:\\[^>]*>)\s*$/i.test(textBuffer)) return;
+      // Guard: Never auto-respond if waiting at password prompt
+      if (/(?:password|passphrase|secret key|access token|pin):\s*$/i.test(textBuffer)) return;
 
-      // Type A: Interactive batch confirmation dialogs (e.g. [y/n], [Y/n], (yes/no), Terminate batch job (Y/N)?)
-      const confirmYRegex = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\bdo you want to continue \([yY]\/[nN]\))/i;
+      // Guard: Never auto-respond if waiting at a bare PowerShell prompt without interactive prompt
+      if (/(?:PS [A-Z]:\\[^>]*>)\s*$/i.test(textBuffer) && !/(?:Run this command|permission for|allow|proceed|continue|\b[yY]\/[nN]\b)/i.test(textBuffer)) return;
 
-      // Type B: Explicit "press enter to continue" prompts
+      // Type 1: Interactive CLI Permission dialogs (Claude Code, Gemini CLI, Antigravity CLI)
+      // "Run this command? > 1. Yes, run command ... esc to cancel"
+      const isCliPermissionMenu = (
+        /(?:Run this command\?|Requesting permission for|Allow this command\?|Do you want to run this command\?|Permission required)/i.test(textBuffer) &&
+        /(?:>\s*1\.\s*Yes|1\.\s*Yes|Navigate|tab Amend|esc to cancel)/i.test(textBuffer)
+      );
+
+      // Type 2: Interactive batch confirmation dialogs (e.g. [y/n], [Y/n], (yes/no), Terminate batch job (Y/N)?)
+      const confirmYRegex = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\bdo you want to continue\s*\(?[yY]\/[nN]\)?|\bare you sure\s*\(?[yY]\/[nN]\)?|\bproceed with operation\s*\(?[yY]\/[nN]\)?|\bOk to proceed\? \([yY]\))/i;
+
+      // Type 3: Explicit "press enter to continue" prompts
       const enterOnlyRegex = /(?:press (?:any key|enter) to continue|hit enter to continue|press \[enter\] to continue|\bpress enter to\b)/i;
 
       const sId = paneState.sessionId || `${tab.id}-p${paneNum}`;
 
-      if (confirmYRegex.test(textBuffer)) {
+      if (isCliPermissionMenu) {
+        paneState._lastAutoRespond = now;
+        paneState._recentText = '';
+        setTimeout(() => {
+          if (paneState.autoEnter && sId) {
+            this.sendPtyInput(sId, '\r');
+          }
+        }, 180);
+      } else if (confirmYRegex.test(textBuffer)) {
         paneState._lastAutoRespond = now;
         paneState._recentText = '';
         setTimeout(() => {
           if (paneState.autoEnter && sId) {
             this.sendPtyInput(sId, 'y\r');
           }
-        }, 150);
+        }, 180);
       } else if (enterOnlyRegex.test(textBuffer)) {
         paneState._lastAutoRespond = now;
         paneState._recentText = '';
@@ -32927,7 +32996,7 @@ Aturan:
           if (paneState.autoEnter) {
             this.sendEnterToPane(paneNum);
           }
-        }, 150);
+        }, 180);
       }
     },
 
