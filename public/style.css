@@ -2163,53 +2163,6 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   transform: scale(1.1);
 }
 
-/* DeepSeek Smart Prompt Suggestions Row */
-.image-suggestion-pills-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-  margin-top: 10px;
-  margin-bottom: 2px;
-  padding-bottom: 2px;
-}
-
-.image-suggestion-pills-row::-webkit-scrollbar {
-  display: none;
-}
-
-.img-suggestion-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 14px;
-  border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #e2e8f0;
-  font-size: 0.8rem;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-  user-select: none;
-  transition: all 0.16s ease;
-  flex-shrink: 0;
-}
-
-.img-suggestion-pill:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(0, 240, 255, 0.4);
-  color: #ffffff;
-  transform: translateY(-1px);
-}
-
-.img-suggestion-pill:active {
-  transform: scale(0.96);
-}
-
 .deepseek-doc-chips-row {
   display: flex;
   align-items: center;

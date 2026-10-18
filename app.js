@@ -10540,8 +10540,8 @@ Aturan wajib:
       }
     }, 60);
 
-    // Clear existing dynamic preview cards, chips & suggestion pills (preserve Connectome template #imagePreviewCard)
-    els.attachmentPreviewBar.querySelectorAll('.dynamic-preview-card, .deepseek-img-cards-row, .doc-preview-chip, .deepseek-doc-chips-row, .image-suggestion-pills-row').forEach(c => c.remove());
+    // Clear existing dynamic preview cards & chips (preserve Connectome template #imagePreviewCard)
+    els.attachmentPreviewBar.querySelectorAll('.dynamic-preview-card, .deepseek-img-cards-row, .doc-preview-chip, .deepseek-doc-chips-row').forEach(c => c.remove());
 
     // Append Image Preview Cards (DeepSeek Style)
     if (hasImages) {
@@ -10567,37 +10567,6 @@ Aturan wajib:
         imgRow.appendChild(card);
       });
       els.attachmentPreviewBar.appendChild(imgRow);
-
-      // DeepSeek Smart Prompt Suggestions Row
-      const pillsRow = document.createElement('div');
-      pillsRow.className = 'image-suggestion-pills-row';
-      pillsRow.innerHTML = `
-        <button type="button" class="img-suggestion-pill" data-prompt="What's This" title="Tanyakan apa ini">
-          <span>What's This &rarr;</span>
-        </button>
-        <button type="button" class="img-suggestion-pill" data-prompt="Analyze" title="Minta AI menganalisis gambar ini">
-          <span>Analyze &rarr;</span>
-        </button>
-        <button type="button" class="img-suggestion-pill" data-prompt="Suggest a Solution" title="Minta AI memberikan solusi berdasarkan gambar">
-          <span>Suggest a Solution &rarr;</span>
-        </button>
-      `;
-
-      pillsRow.querySelectorAll('.img-suggestion-pill').forEach(pill => {
-        pill.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const promptText = pill.dataset.prompt;
-          if (els.promptInput) {
-            els.promptInput.value = promptText;
-            els.promptInput.focus();
-            autoResizeTextarea(els.promptInput);
-          }
-          AudioEngine.click();
-        });
-      });
-
-      els.attachmentPreviewBar.appendChild(pillsRow);
     }
 
     // Append Doc Chips
