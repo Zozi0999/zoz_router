@@ -30757,12 +30757,117 @@ Aturan:
         return;
       }
 
-      // Pastikan baris kursor/prompt aktif selalu berada di dalam viewport terlihat di atas keyboard
+      // Pastikan baris kursor/prompt aktif & badge status Claude Code selalu terlihat utuh di atas keyboard
       const cursorY = (term.buffer && term.buffer.active) ? term.buffer.active.cursorY : (term.rows - 1);
       const cursorPx = (cursorY + 1) * charH;
-      let shiftY = cursorPx - visibleH + Math.round(charH * 1.5);
+      let shiftY = cursorPx - visibleH + Math.round(charH * 3.2);
       shiftY = Math.max(0, Math.min(totalScreenH - visibleH, Math.round(shiftY)));
       xtermScreen.style.transform = shiftY > 0 ? `translateY(-${shiftY}px)` : '';
+    },
+
+    syncTerminalFrameDisplay(paneState) {
+      if (!paneState || !paneState.term || !paneState.screenContainer) return;
+      const term = paneState.term;
+      const container = paneState.screenContainer;
+      const xtermScreen = container.querySelector('.xterm-screen');
+      const isMobile = this.isMobileDevice();
+
+      const charW = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.width) || 8.5;
+      const totalContentW = term.cols * charW;
+      const visibleW = container.clientWidth || window.innerWidth;
+
+      if (isMobile) {
+        if (term.cols > 65 && totalContentW > visibleW) {
+          // PTY berukuran lebar desktop (80-100 kolom):
+          // Skalakan xterm-screen secara proporsional agar SELURUH lebar desktop muat utuh di layar HP tanpa kepotong!
+          const scale = Math.max(0.42, Math.min(1.0, (visibleW - 6) / totalContentW));
+          if (xtermScreen) {
+            xtermScreen.style.transformOrigin = 'top left';
+            xtermScreen.style.transform = `scale(${scale})`;
+          }
+        } else {
+          // PTY berukuran mobile (48 kolom): Skala 1.0 penuh Termux
+          if (xtermScreen) {
+            xtermScreen.style.transformOrigin = '';
+            this.syncMobileScreenPosition(paneState);
+          }
+        }
+      } else {
+        // Mode Layar Laptop (Desktop):
+        if (term.cols <= 65) {
+          // Saat sesi disinkronkan dengan HP (48 kolom):
+          // Pusatkan tampilan di tengah layar laptop dengan frame Termux OLED rapi.
+          // Mencegah teks lama di kolom 49-120 tetap menggantung dan saling bertumpuk!
+          container.style.maxWidth = `${Math.ceil(totalContentW) + 28}px`;
+          container.style.margin = '0 auto';
+          container.style.borderLeft = '1px solid rgba(56, 189, 248, 0.3)';
+          container.style.borderRight = '1px solid rgba(56, 189, 248, 0.3)';
+          container.style.boxShadow = '0 0 35px rgba(0, 0, 0, 0.9), 0 0 16px rgba(56, 189, 248, 0.18)';
+        } else {
+          // Mode Desktop Penuh (100 kolom):
+          container.style.maxWidth = '100%';
+          container.style.margin = '0';
+          container.style.borderLeft = 'none';
+          container.style.borderRight = 'none';
+          container.style.boxShadow = 'none';
+        }
+        if (xtermScreen) {
+          xtermScreen.style.transform = '';
+        }
+      }
+
+      this.updateDimensionButtonUI(term.cols);
+    },
+
+    toggleTerminalDimension() {
+      const paneState = this.getPaneState();
+      if (!paneState || !paneState.sessionId) return;
+
+      const currentCols = paneState.ptyCols || (paneState.term ? paneState.term.cols : 80);
+      const isNarrow = currentCols <= 65;
+
+      const targetCols = isNarrow ? 100 : 48;
+      const targetRows = isNarrow ? 32 : 28;
+
+      paneState.ptyCols = targetCols;
+      paneState.ptyRows = targetRows;
+
+      if (paneState.term) {
+        paneState.term.resize(targetCols, targetRows);
+        paneState.term.clear();
+      }
+
+      this.sendPtyResize(paneState.sessionId, targetCols, targetRows);
+      this.syncTerminalFrameDisplay(paneState);
+
+      const msg = targetCols === 48
+        ? '📱 Mode Layar: HP (48 Kolom Presisi)'
+        : '💻 Mode Layar: Laptop (100 Kolom Lebar)';
+      showToast(msg, 'info');
+
+      if (paneState.sessionId && !paneState.isFallbackMode) {
+        setTimeout(() => {
+          this.sendPtyInput(paneState.sessionId, '\x0c');
+        }, 80);
+      }
+    },
+
+    updateDimensionButtonUI(cols) {
+      const btn = document.getElementById('btnTermSyncDimension');
+      const label = document.getElementById('labelTermSyncDimension');
+      const icon = document.getElementById('iconTermSyncDimension');
+      if (!btn) return;
+      const isNarrow = (cols || 80) <= 65;
+      if (icon) {
+        icon.className = isNarrow ? 'fa-solid fa-mobile-screen-button' : 'fa-solid fa-laptop';
+        icon.style.color = isNarrow ? '#4ade80' : '#38bdf8';
+      }
+      if (label) {
+        label.textContent = isNarrow ? 'HP 48c' : 'Laptop 100c';
+      }
+      btn.title = isNarrow
+        ? 'Sedang Mode HP (48 Kolom). Klik untuk beralih ke Mode Laptop (100 Kolom)'
+        : 'Sedang Mode Laptop (100 Kolom). Klik untuk beralih ke Mode HP (48 Kolom)';
     },
 
     normalizeRemoteHost(input) {
@@ -32511,24 +32616,21 @@ Aturan:
 
     ensureActivePtySize(paneState) {
       if (!paneState || !paneState.term || !paneState.sessionId || paneState.isFallbackMode) return;
-      const cols = paneState.term.cols;
-      const rows = paneState.term.rows;
-      if (cols <= 0 || rows <= 0) return;
-      if (this.isMobileDevice()) {
-        const safeCols = Math.max(48, cols);
-        const safeRows = Math.max(24, paneState._stableRows || rows || 26);
-        if (paneState.ptyCols !== safeCols || paneState.ptyRows !== safeRows) {
-          paneState.ptyCols = safeCols;
-          paneState.ptyRows = safeRows;
-          this.sendPtyResize(paneState.sessionId, safeCols, safeRows);
+      // Jika dimensi PTY sesi bersama sudah aktif dari remote atau host, sinkronkan xterm lokal
+      // tanpa menimpa PTY backend secara sepihak agar tidak memicu resize war antar-perangkat
+      if (paneState.ptyCols && paneState.ptyRows) {
+        if (paneState.term.cols !== paneState.ptyCols || paneState.term.rows !== paneState.ptyRows) {
+          paneState.term.resize(paneState.ptyCols, paneState.ptyRows);
+          this.syncTerminalFrameDisplay(paneState);
         }
         return;
       }
-      if (paneState.ptyCols !== cols || paneState.ptyRows !== rows) {
-        paneState.ptyCols = cols;
-        paneState.ptyRows = rows;
-        this.sendPtyResize(paneState.sessionId, cols, rows);
-      }
+      const cols = paneState.term.cols || (this.isMobileDevice() ? 48 : 80);
+      const rows = paneState.term.rows || 24;
+      paneState.ptyCols = cols;
+      paneState.ptyRows = rows;
+      this.sendPtyResize(paneState.sessionId, cols, rows);
+      this.syncTerminalFrameDisplay(paneState);
     },
 
     connectStream(tab, paneState, paneNum) {
@@ -32722,11 +32824,27 @@ Aturan:
           paneState._pendingBuffer = (paneState._pendingBuffer || '') + msg.data;
         }
       } else if (msg.type === 'pty-resize') {
-        if (msg.cols) paneState.ptyCols = msg.cols;
-        if (msg.rows) paneState.ptyRows = msg.rows;
+        const newCols = parseInt(msg.cols, 10);
+        const newRows = parseInt(msg.rows, 10);
+        if (newCols && newRows) {
+          paneState.ptyCols = newCols;
+          paneState.ptyRows = newRows;
+          if (currentTerm && (currentTerm.cols !== newCols || currentTerm.rows !== newRows)) {
+            currentTerm.resize(newCols, newRows);
+            this.syncTerminalFrameDisplay(paneState);
+          }
+        }
       } else if (msg.type === 'connected') {
-        if (msg.cols) paneState.ptyCols = msg.cols;
-        if (msg.rows) paneState.ptyRows = msg.rows;
+        const cCols = parseInt(msg.cols, 10);
+        const cRows = parseInt(msg.rows, 10);
+        if (cCols) paneState.ptyCols = cCols;
+        if (cRows) paneState.ptyRows = cRows;
+        if (currentTerm && cCols && cRows) {
+          if (currentTerm.cols !== cCols || currentTerm.rows !== cRows) {
+            currentTerm.resize(cCols, cRows);
+          }
+          this.syncTerminalFrameDisplay(paneState);
+        }
         if (this.isRemoteConnected) {
           const lat = this.remotePingMs !== null ? ` • ${this.remotePingMs}ms` : '';
           if (statusLabel) statusLabel.textContent = `☁️ Remote WAN (PTY)${lat}`;
@@ -32743,9 +32861,6 @@ Aturan:
           paneState.cwd = msg.cwd;
           if (paneNum === 1) tab.cwd = msg.cwd;
           this.updatePaneHeaders();
-        }
-        if (currentTerm && !this.isMobileDevice()) {
-          this.ensureActivePtySize(paneState);
         }
       } else if (msg.type === 'exit') {
         if (currentTerm) {
@@ -33766,6 +33881,7 @@ Aturan:
 
       document.getElementById('btnTermFontDec')?.addEventListener('click', () => this.adjustFontSize(-1));
       document.getElementById('btnTermFontInc')?.addEventListener('click', () => this.adjustFontSize(1));
+      document.getElementById('btnTermSyncDimension')?.addEventListener('click', () => this.toggleTerminalDimension());
       document.getElementById('btnTermSyncWindows')?.addEventListener('click', () => this.trySyncWindows(true));
       document.getElementById('btnTermRemoteTunnel')?.addEventListener('click', () => this.openRemoteTunnelModal());
       document.getElementById('btnTermMobileConnect')?.addEventListener('click', () => {
