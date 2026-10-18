@@ -325,22 +325,24 @@ button.brand-logo-wrap.active .brand-logo {
   transform: translateY(-1px);
 }
 
-/* Engine Status Panel */
+/* Engine Status Panel (Zero Overlap, Clean Sleek Cards) */
 .engine-status-panel {
-  margin: 0 16px 12px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  margin: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
 }
 
 .status-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .status-indicator {
@@ -4501,9 +4503,12 @@ body.modal-open {
   transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.sidebar-backdrop.active {
-  opacity: 1;
-  pointer-events: auto;
+.sidebar-backdrop.active,
+.sidebar-backdrop.show,
+body.mobile-sidebar-open .sidebar-backdrop {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  cursor: pointer;
 }
 
 
@@ -15310,26 +15315,103 @@ body.mermaid-has-fullscreen {
   animation: pulseTeal 1.8s infinite alternate;
 }
 
-/* Responsive Mobile Enhancements for Prompt Dock & Popups */
+/* Responsive Mobile Enhancements (DeepSeek Style Chat Interface) */
 @media (max-width: 640px) {
-  #promptDockWrapper {
+  /* Header: Clean & Uncluttered like DeepSeek */
+  #systemPromptModalBtn,
+  #terminalToggleBtn {
+    display: none !important;
+  }
+
+  .top-nav {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+
+  .model-picker-chip {
+    max-width: 155px !important;
     padding-left: 8px !important;
     padding-right: 8px !important;
+  }
+
+  .model-picker-chip .current-model-name {
+    max-width: 95px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  /* Prompt Dock & Container */
+  #promptDockWrapper {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
     width: 100% !important;
     max-width: 100% !important;
   }
 
   .composer-container {
-    padding-bottom: 12px !important;
-    padding-left: 6px !important;
-    padding-right: 6px !important;
+    padding-bottom: max(14px, env(safe-area-inset-bottom, 14px)) !important;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
   }
 
-  /* Fixed popup above dock on small screens so it is never clipped or offscreen */
+  /* DeepSeek-style 2-row Composer Card */
+  .composer-box {
+    background: rgba(13, 16, 26, 0.94) !important;
+    border: 1px solid rgba(0, 242, 254, 0.28) !important;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 242, 254, 0.15) !important;
+    padding: 10px 12px !important;
+    border-radius: 20px !important;
+  }
+
+  .composer-box > .flex {
+    flex-wrap: wrap !important;
+    row-gap: 6px !important;
+  }
+
+  /* Top Row: Full-width Textarea with clear contrast */
+  .composer-box .input-field-wrap {
+    order: 1 !important;
+    width: 100% !important;
+    flex-basis: 100% !important;
+  }
+
+  .composer-box #promptInput {
+    font-size: 14.5px !important;
+    min-height: 44px !important;
+    line-height: 1.45 !important;
+    color: #f8fafc !important;
+    padding: 2px 2px !important;
+    width: 100% !important;
+  }
+
+  .composer-box #promptInput::placeholder {
+    color: #94a3b8 !important;
+    opacity: 1 !important;
+    font-size: 13.5px !important;
+  }
+
+  /* Bottom Row: Tools on Left, Send Button on Right */
+  .composer-box .composer-tools-left {
+    order: 2 !important;
+    flex: 1 1 auto !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+  }
+
+  .composer-box .composer-tools-right {
+    order: 3 !important;
+    margin-left: auto !important;
+    display: flex !important;
+    align-items: center !important;
+  }
+
+  /* Fixed popups above dock */
   .attachment-dropdown-popup,
   .search-dropdown-popup {
     position: fixed !important;
-    bottom: 74px !important;
+    bottom: 84px !important;
     left: 12px !important;
     right: 12px !important;
     width: auto !important;
@@ -15337,13 +15419,8 @@ body.mermaid-has-fullscreen {
     z-index: 99999 !important;
     box-shadow: 0 20px 48px rgba(0, 0, 0, 0.85), 0 0 24px rgba(0, 242, 254, 0.25) !important;
   }
-
-  /* Input touch target comfort */
-  #promptInput {
-    font-size: 14px !important;
-    min-height: 36px !important;
-  }
 }
+
 
 
 

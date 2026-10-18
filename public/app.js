@@ -28536,7 +28536,8 @@ Aturan:
 
     function openMobileSidebar() {
       els.sidebar?.classList.add('open');
-      els.sidebarBackdrop?.classList.add('show');
+      els.sidebarBackdrop?.classList.add('active', 'show');
+      document.body.classList.add('mobile-sidebar-open');
       history.pushState({ modal: 'sidebar' }, '');
       renderChatHistory(els.searchHistoryInput?.value || '');
       AudioEngine.click();
@@ -28544,7 +28545,8 @@ Aturan:
 
     function closeMobileSidebar(triggerHistoryBack = true) {
       els.sidebar?.classList.remove('open');
-      els.sidebarBackdrop?.classList.remove('show');
+      els.sidebarBackdrop?.classList.remove('active', 'show');
+      document.body.classList.remove('mobile-sidebar-open');
       if (triggerHistoryBack && history.state?.modal === 'sidebar') {
         history.back();
       }
@@ -28590,24 +28592,34 @@ Aturan:
     // Sidebar Toggle & Close Handlers
     els.toggleSidebarBtn?.addEventListener('click', toggleSidebar);
     els.closeSidebarBtn?.addEventListener('click', closeSidebar);
-    els.sidebarBackdrop?.addEventListener('click', () => {
-      if (isMobile()) closeMobileSidebar(true);
+    
+    // Backdrop click & touch to dismiss immediately (DeepSeek style)
+    els.sidebarBackdrop?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeMobileSidebar(true);
     });
+    els.sidebarBackdrop?.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeMobileSidebar(true);
+    }, { passive: false });
 
-    // Auto-dismiss sidebar on mobile when clicking on main content / chat area
-    els.mainContent?.addEventListener('click', (e) => {
+    // Global document capture listener: ANY click outside the open sidebar on mobile closes it immediately!
+    document.addEventListener('click', (e) => {
       if (isMobile() && els.sidebar?.classList.contains('open')) {
         if (!els.sidebar.contains(e.target) && !els.toggleSidebarBtn?.contains(e.target)) {
           closeMobileSidebar(true);
         }
       }
-    });
-
-    els.chatViewport?.addEventListener('click', () => {
+    }, true);
+    document.addEventListener('touchstart', (e) => {
       if (isMobile() && els.sidebar?.classList.contains('open')) {
-        closeMobileSidebar(true);
+        if (!els.sidebar.contains(e.target) && !els.toggleSidebarBtn?.contains(e.target)) {
+          closeMobileSidebar(true);
+        }
       }
-    });
+    }, { passive: true });
 
 
     // Status Buttons
