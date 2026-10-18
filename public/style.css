@@ -4514,23 +4514,65 @@ body.mobile-sidebar-open .sidebar-backdrop {
 
 /* ==================== RESPONSIVE (MOBILE & ANDROID CHROME) ==================== */
 @media (max-width: 768px) {
-  /* Off-canvas mobile sidebar */
+  /* Off-canvas mobile sidebar - completely detached from flex layout */
+  #sidebar,
   .sidebar {
-    position: fixed;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    width: 290px;
-    max-width: 85vw;
-    margin-left: 0 !important;
-    z-index: 1000;
-    transform: translateX(-100%);
+    position: fixed !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 290px !important;
+    max-width: 85vw !important;
+    height: 100% !important;
+    height: 100dvh !important;
+    margin: 0 !important;
+    padding: 0;
+    flex-shrink: 0 !important;
+    z-index: 1000 !important;
+    transform: translateX(-100%) !important;
     box-shadow: 8px 0 32px rgba(0, 0, 0, 0.85);
-    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    pointer-events: none !important;
   }
   
+  #sidebar.open,
   .sidebar.open {
-    transform: translateX(0);
+    transform: translateX(0) !important;
+    pointer-events: auto !important;
+  }
+
+  /* Main container and chat MUST be 100% full width and never displaced by sidebar */
+  #appContainer,
+  .app-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+  }
+
+  #mainContent,
+  .main-content {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 1 1 100% !important;
+    margin-left: 0 !important;
+    padding-left: 0 !important;
+    overflow-x: hidden !important;
+  }
+
+  #chatViewport,
+  .chat-viewport,
+  #singleChatContainer,
+  .chat-messages-container {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  #welcomeHero,
+  .welcome-hero {
+    width: 100% !important;
+    max-width: 100% !important;
   }
   
   .close-sidebar-btn {
@@ -15407,17 +15449,39 @@ body.mermaid-has-fullscreen {
     align-items: center !important;
   }
 
-  /* Fixed popups above dock */
-  .attachment-dropdown-popup,
-  .search-dropdown-popup {
+  /* Off-canvas mobile sidebar & full-width chat guarantee */
+  #sidebar,
+  .sidebar {
     position: fixed !important;
-    bottom: 84px !important;
-    left: 12px !important;
-    right: 12px !important;
-    width: auto !important;
-    max-width: calc(100vw - 24px) !important;
-    z-index: 99999 !important;
-    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.85), 0 0 24px rgba(0, 242, 254, 0.25) !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 288px !important;
+    max-width: 82vw !important;
+    height: 100% !important;
+    height: 100dvh !important;
+    margin: 0 !important;
+    z-index: 1000 !important;
+    transform: translateX(-100%) !important;
+    pointer-events: none !important;
+  }
+
+  #sidebar.open,
+  .sidebar.open {
+    transform: translateX(0) !important;
+    pointer-events: auto !important;
+  }
+
+  #appContainer,
+  #mainContent,
+  #chatViewport,
+  #singleChatContainer,
+  #welcomeHero {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 1 1 100% !important;
+    margin-left: 0 !important;
+    padding-left: 0 !important;
   }
 }
 

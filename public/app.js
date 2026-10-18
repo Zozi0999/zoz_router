@@ -35141,6 +35141,12 @@ Aturan:
           els.sidebar?.classList.add('collapsed');
         }
       } catch (_) {}
+    } else {
+      // Ensure mobile sidebar is cleanly closed and doesn't hold collapsed state
+      els.sidebar?.classList.remove('open', 'collapsed');
+      els.appContainer?.classList.remove('sidebar-collapsed');
+      els.sidebarBackdrop?.classList.remove('active', 'show');
+      document.body.classList.remove('mobile-sidebar-open');
     }
 
     console.log('⚡ ZOZ ROUTER INITIALIZED // READY IN 0MS');
