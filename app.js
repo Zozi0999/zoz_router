@@ -1577,7 +1577,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // 3. Detektor Teks Rusak / Pecah dari Output Model
     inspectModelText(text, modelContext = {}) {
       if (!text || typeof text !== 'string') return [];
-      const model = modelContext.model || (typeof STATE !== 'undefined' ? (STATE.mode === 'ollama' ? STATE.settings.ollamaModel : STATE.settings.openrouterModel) : 'AI Model');
+      const model = modelContext.model || (typeof STATE !== 'undefined' ? (STATE.mode === 'ollama' ? (STATE.settings.ollamaModel || 'Ollama Model') : (STATE.settings.openRouterModel || 'OpenRouter Model')) : 'AI Model');
       const anomalies = [];
 
       // a. Tag internal thinking / reasoning yang bocor ke output
@@ -1613,9 +1613,23 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         });
       }
 
-      // d. Untaian karakter masif tanpa spasi yang berisiko memecahkan layout wadah
-      const blowoutMatch = text.match(/(?:^|\s)([^\s]{150,})(?:\s|$)/);
-      if (blowoutMatch && !blowoutMatch[1].startsWith('http') && !blowoutMatch[1].startsWith('data:') && !blowoutMatch[1].includes('base64')) {
+      // d. Untaian karakter masif tanpa spasi pada teks prosa biasa yang berisiko memecahkan layout wadah
+      // Catatan Arsitektur: Abaikan blok kode markdown (```), tag file <<<ZOZ_FILE, tag HTML/SVG (<...>),
+      // inline code (`...`), URL web (http/https), data URIs (data:), dan payload base64.
+      // Kode dan markup tersebut ditampilkan di dalam container <pre><code> atau SVG yang memiliki
+      // overflow scroll horizontal atau word-break otomatis sehingga TIDAK merusak layout.
+      const proseOnly = text
+        .replace(/<<<ZOZ_FILE[\s\S]*?>>>/g, ' ')
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/`[^`]+`/g, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/https?:\/\/[^\s]+/g, ' ')
+        .replace(/data:[^\s]+/g, ' ')
+        .replace(/;base64,[a-zA-Z0-9+/=]+/gi, ' ')
+        .replace(/["'][a-zA-Z0-9+/=]{60,}["']/g, ' ');
+
+      const blowoutMatch = proseOnly.match(/(?:^|\s)([^\s]{250,})(?:\s|$)/);
+      if (blowoutMatch) {
         anomalies.push({
           type: 'container_blowout',
           label: 'Teks Super Panjang Tanpa Spasi (Blowout)',
@@ -1626,6 +1640,12 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
       if (anomalies.length > 0) {
         for (const anom of anomalies) {
+          // Cegah duplikasi stres berulang untuk anomali yang sama
+          const isDuplicate = (this.textAnomalies || []).some(existing => 
+            existing.type === anom.type && (existing.snippet === anom.snippet || existing.reason === anom.reason)
+          );
+          if (isDuplicate) continue;
+
           const record = {
             id: 'txt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
             time: new Date().toLocaleTimeString(),
@@ -1957,6 +1977,16 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             btn.style.pointerEvents = 'auto';
             healedCount++;
           });
+
+          // d. Bersihkan anomali teks dan pulihkan kortisol jika sempat naik akibat anomali yang telah diselesaikan
+          if (this.textAnomalies && this.textAnomalies.length > 0) {
+            const clearedCount = this.textAnomalies.length;
+            this.textAnomalies = [];
+            healedCount += clearedCount;
+          }
+          if (this.hormones && this.hormones.cortisol > 0) {
+            this.hormones.cortisol = Math.max(0, this.hormones.cortisol - 40);
+          }
         }
 
         // Audit ulang komprehensif
@@ -7172,7 +7202,8 @@ RESONANSI: ${this.currentVibe}
         activeStudioAssistantBubble = null;
       }
       if (this.text && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.inspectModelText === 'function') {
-        BioEndocrine.inspectModelText(this.text, { source: 'StreamBufferRenderer' });
+        const activeModel = this.options.model || (typeof STATE !== 'undefined' ? (STATE.mode === 'ollama' ? (STATE.settings.ollamaModel || 'Ollama Model') : (STATE.settings.openRouterModel || 'OpenRouter Model')) : 'AI Model');
+        BioEndocrine.inspectModelText(this.text, { source: 'StreamBufferRenderer', model: activeModel });
       }
       return this.text;
     }
@@ -30501,12 +30532,46 @@ Aturan:
         });
         requestAnimationFrame(restoreChatScrollPosition);
         checkBackgroundChatTasksSync();
+        if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.getActiveTab === 'function') {
+          const tTab = TerminalManager.getActiveTab();
+          if (tTab) {
+            TerminalManager.updateAutoEnterUI();
+            const pNum = TerminalManager.activePane || 1;
+            const pState = TerminalManager.getPaneState(pNum);
+            if (pState && pState.sessionId) {
+              const savedAuto = localStorage.getItem(`zoz_term_auto_enter_${pState.sessionId}`) || localStorage.getItem('zoz_term_auto_enter_last');
+              if (savedAuto === '1') {
+                pState.autoEnter = true;
+                if (pNum === 1 && tTab) tTab.autoEnter = true;
+                TerminalManager.sendAutoEnterToServer(pState.sessionId, true);
+                TerminalManager.updateAutoEnterUI();
+              }
+            }
+          }
+        }
       }
     });
 
     window.addEventListener('focus', () => {
       requestAnimationFrame(restoreChatScrollPosition);
       checkBackgroundChatTasksSync();
+      if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.getActiveTab === 'function') {
+        const tTab = TerminalManager.getActiveTab();
+        if (tTab) {
+          TerminalManager.updateAutoEnterUI();
+          const pNum = TerminalManager.activePane || 1;
+          const pState = TerminalManager.getPaneState(pNum);
+          if (pState && pState.sessionId) {
+            const savedAuto = localStorage.getItem(`zoz_term_auto_enter_${pState.sessionId}`) || localStorage.getItem('zoz_term_auto_enter_last');
+            if (savedAuto === '1') {
+              pState.autoEnter = true;
+              if (pNum === 1 && tTab) tTab.autoEnter = true;
+              TerminalManager.sendAutoEnterToServer(pState.sessionId, true);
+              TerminalManager.updateAutoEnterUI();
+            }
+          }
+        }
+      }
     });
 
     if (window.visualViewport) {
@@ -31929,6 +31994,12 @@ Aturan:
       if (chipBtn) {
         chipBtn.classList.toggle('active', isAutoActive);
       }
+
+      // Sinkronkan tombol Auto Y di touch keybar mobile
+      const touchBtn = document.getElementById('btnTouchAutoEnter');
+      if (touchBtn) {
+        touchBtn.classList.toggle('active', isAutoActive);
+      }
     },
 
     toggleAutoEnter(paneNum = (this.activePane || 1)) {
@@ -32903,8 +32974,15 @@ Aturan:
           this.updatePaneHeaders();
         }
         if (typeof msg.autoEnter === 'boolean') {
-          paneState.autoEnter = msg.autoEnter;
-          if (paneNum === 1 && tab) tab.autoEnter = msg.autoEnter;
+          const savedAuto = localStorage.getItem(`zoz_term_auto_enter_${sessionId}`) || localStorage.getItem('zoz_term_auto_enter_last');
+          if (savedAuto === '1' && !msg.autoEnter) {
+            paneState.autoEnter = true;
+            if (paneNum === 1 && tab) tab.autoEnter = true;
+            this.sendAutoEnterToServer(sessionId, true);
+          } else {
+            paneState.autoEnter = msg.autoEnter;
+            if (paneNum === 1 && tab) tab.autoEnter = msg.autoEnter;
+          }
           this.updateAutoEnterUI();
         }
       } else if (msg.type === 'auto-enter-status') {
@@ -32960,16 +33038,17 @@ Aturan:
 
       // Type 1: Interactive CLI Permission dialogs (Claude Code, Gemini CLI, Antigravity CLI)
       // "Run this command? > 1. Yes, run command ... esc to cancel"
+      // "Accept this file edit? > 1. Yes, accept this change ... (shift+tab to auto-approve)"
       const isCliPermissionMenu = (
-        /(?:Run this command\?|Requesting permission for|Allow this command\?|Do you want to run this command\?|Permission required)/i.test(textBuffer) &&
-        /(?:>\s*1\.\s*Yes|1\.\s*Yes|Navigate|tab Amend|esc to cancel)/i.test(textBuffer)
-      );
+        /(?:Run this command\?|Requesting permission for|Allow this command\?|Do you want to run this command\?|Permission required|Accept (?:this|the|all)?\s*(?:file|code|change|edit|diff|plan)?\b.*\?|shift\+tab to auto-approve)/i.test(textBuffer) &&
+        /(?:>\s*1\.\s*Yes|1\.\s*Yes|Navigate|tab Amend|esc to cancel|auto-approve)/i.test(textBuffer)
+      ) || /(?:>\s*1\.\s*Yes,\s*accept|>\s*1\.\s*Yes,\s*run)/i.test(textBuffer);
 
       // Type 2: Interactive batch confirmation dialogs (e.g. [y/n], [Y/n], (yes/no), Terminate batch job (Y/N)?)
-      const confirmYRegex = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\bdo you want to continue\s*\(?[yY]\/[nN]\)?|\bare you sure\s*\(?[yY]\/[nN]\)?|\bproceed with operation\s*\(?[yY]\/[nN]\)?|\bOk to proceed\? \([yY]\))/i;
+      const confirmYRegex = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\bdo you want to continue\s*\(?[yY]\/[nN]\)?|\bare you sure\s*\(?[yY]\/[nN]\)?|\bproceed with operation\s*\(?[yY]\/[nN]\)?|\bOk to proceed\? \([yY]\)|\bApakah Anda yakin|\bLanjutkan\?)/i;
 
       // Type 3: Explicit "press enter to continue" prompts
-      const enterOnlyRegex = /(?:press (?:any key|enter) to continue|hit enter to continue|press \[enter\] to continue|\bpress enter to\b)/i;
+      const enterOnlyRegex = /(?:press (?:any key|enter) to continue|hit enter to continue|press \[enter\] to continue|\bpress enter to\b|\btekan enter untuk\b)/i;
 
       const sId = paneState.sessionId || `${tab.id}-p${paneNum}`;
 
@@ -33824,11 +33903,22 @@ Aturan:
               keepFocus();
               return;
             }
+            if (cmdType === 'auto_enter' || cmdType === 'autoy') {
+              this.toggleAutoEnter(paneNum);
+              keepFocus();
+              return;
+            }
             if (paneState?.term && !paneState.isFallbackMode) {
               this.sendPtyInput(sId, `${cmdType}\r`);
             } else {
               this.executeCommand(cmdType);
             }
+            keepFocus();
+            return;
+          }
+
+          if (keyType === 'auto_enter' || keyType === 'autoy') {
+            this.toggleAutoEnter(paneNum);
             keepFocus();
             return;
           }
@@ -33988,8 +34078,19 @@ Aturan:
 
       document.getElementById('btnTermFontDec')?.addEventListener('click', () => this.adjustFontSize(-1));
       document.getElementById('btnTermFontInc')?.addEventListener('click', () => this.adjustFontSize(1));
-      document.getElementById('btnTermSyncDimension')?.addEventListener('click', () => this.toggleTerminalDimension());
-      document.getElementById('btnTermToolbarAutoEnter')?.addEventListener('click', () => this.toggleAutoEnter(this.activePane || 1));
+      const tbAutoEnterBtn = document.getElementById('btnTermToolbarAutoEnter');
+      if (tbAutoEnterBtn) {
+        let lastAutoToggle = 0;
+        const handleAutoToggle = (e) => {
+          const now = Date.now();
+          if (now - lastAutoToggle < 300) return;
+          lastAutoToggle = now;
+          if (e && e.cancelable) e.preventDefault();
+          this.toggleAutoEnter(this.activePane || 1);
+        };
+        tbAutoEnterBtn.addEventListener('click', handleAutoToggle);
+        tbAutoEnterBtn.addEventListener('touchend', handleAutoToggle);
+      }
       document.getElementById('btnTermSyncWindows')?.addEventListener('click', () => this.trySyncWindows(true));
       document.getElementById('btnTermRemoteTunnel')?.addEventListener('click', () => this.openRemoteTunnelModal());
       document.getElementById('btnTermMobileConnect')?.addEventListener('click', () => {

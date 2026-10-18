@@ -295,18 +295,17 @@ function handleServerAutoEnter(session, data) {
 
   // Pola 1: Dialog permission Claude Code / Gemini CLI / Antigravity CLI
   // "Requesting permission for: ... Run this command? > 1. Yes, run command ... esc to cancel"
-  // "Allow this command? > 1. Yes"
-  // "Do you want to run this command? 1. Yes"
+  // "Accept this file edit? > 1. Yes, accept this change ... (shift+tab to auto-approve)"
   const isCliPermissionMenu = (
-    /(?:Run this command\?|Requesting permission for|Allow this command\?|Do you want to run this command\?|Permission required)/i.test(clean) &&
-    /(?:>\s*1\.\s*Yes|1\.\s*Yes|Navigate|tab Amend|esc to cancel)/i.test(clean)
-  );
+    /(?:Run this command\?|Requesting permission for|Allow this command\?|Do you want to run this command\?|Permission required|Accept (?:this|the|all)?\s*(?:file|code|change|edit|diff|plan)?\b.*\?|shift\+tab to auto-approve)/i.test(clean) &&
+    /(?:>\s*1\.\s*Yes|1\.\s*Yes|Navigate|tab Amend|esc to cancel|auto-approve)/i.test(clean)
+  ) || /(?:>\s*1\.\s*Yes,\s*accept|>\s*1\.\s*Yes,\s*run)/i.test(clean);
 
   // Pola 2: Konfirmasi batch / CLI [y/N], (y/n), (yes/no), [Y/n]
-  const isConfirmYPrompt = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\bdo you want to continue\s*\(?[yY]\/[nN]\)?|\bare you sure\s*\(?[yY]\/[nN]\)?|\bproceed with operation\s*\(?[yY]\/[nN]\)?|\bOk to proceed\? \([yY]\))/i.test(clean);
+  const isConfirmYPrompt = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\bdo you want to continue\s*\(?[yY]\/[nN]\)?|\bare you sure\s*\(?[yY]\/[nN]\)?|\bproceed with operation\s*\(?[yY]\/[nN]\)?|\bOk to proceed\? \([yY]\)|\bApakah Anda yakin|\bLanjutkan\?)/i.test(clean);
 
   // Pola 3: Prompt "Press Enter to continue" / "Hit enter to continue"
-  const isEnterOnlyPrompt = /(?:press (?:any key|enter) to continue|hit enter to continue|press \[enter\] to continue|\bpress enter to\b)/i;
+  const isEnterOnlyPrompt = /(?:press (?:any key|enter) to continue|hit enter to continue|press \[enter\] to continue|\bpress enter to\b|\btekan enter untuk\b)/i.test(clean);
 
   if (isCliPermissionMenu) {
     session.lastAutoRespondAt = now;
@@ -315,10 +314,13 @@ function handleServerAutoEnter(session, data) {
       if (session && session.pty && session.autoEnter) {
         try {
           session.pty.write('\r');
+          setTimeout(() => {
+            try { if (session && session.pty) session.pty.write('\n'); } catch (_) {}
+          }, 40);
           console.log(`[AutoEnter] Session ${session.id}: Auto-approved CLI permission menu via Enter`);
         } catch (_) {}
       }
-    }, 200);
+    }, 150);
   } else if (isConfirmYPrompt) {
     session.lastAutoRespondAt = now;
     session.recentTextBuffer = '';
@@ -326,10 +328,13 @@ function handleServerAutoEnter(session, data) {
       if (session && session.pty && session.autoEnter) {
         try {
           session.pty.write('y\r');
+          setTimeout(() => {
+            try { if (session && session.pty) session.pty.write('\n'); } catch (_) {}
+          }, 40);
           console.log(`[AutoEnter] Session ${session.id}: Auto-approved Y/N prompt via 'y\\r'`);
         } catch (_) {}
       }
-    }, 200);
+    }, 150);
   } else if (isEnterOnlyPrompt) {
     session.lastAutoRespondAt = now;
     session.recentTextBuffer = '';
@@ -337,10 +342,13 @@ function handleServerAutoEnter(session, data) {
       if (session && session.pty && session.autoEnter) {
         try {
           session.pty.write('\r');
+          setTimeout(() => {
+            try { if (session && session.pty) session.pty.write('\n'); } catch (_) {}
+          }, 40);
           console.log(`[AutoEnter] Session ${session.id}: Auto-continued Enter prompt via '\\r'`);
         } catch (_) {}
       }
-    }, 200);
+    }, 150);
   }
 }
 
@@ -9519,6 +9527,10 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       return;
     }
   } else {
+    if (session._disconnectTimer) {
+      clearTimeout(session._disconnectTimer);
+      session._disconnectTimer = null;
+    }
     if (reqUrl.searchParams.has('autoEnter')) {
       session.autoEnter = (reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true');
     }
@@ -9630,6 +9642,18 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
   const cleanup = () => {
     if (session && session.wsClients) {
       session.wsClients.delete(socket);
+      if ((!session.clients || session.clients.size === 0) && session.wsClients.size === 0) {
+        if (session.autoEnter) {
+          console.log(`[PTY] Sesi WS ${sessionId} tetap dipertahankan di latar belakang karena Auto-Enter aktif.`);
+        } else {
+          session._disconnectTimer = setTimeout(() => {
+            if ((!session.clients || session.clients.size === 0) && (!session.wsClients || session.wsClients.size === 0)) {
+              activeTerminalSessions.delete(sessionId);
+              try { session.pty.kill(); } catch (_) {}
+            }
+          }, 60000);
+        }
+      }
     }
   };
   socket.on('close', cleanup);

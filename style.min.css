@@ -13987,6 +13987,24 @@ body.mermaid-has-fullscreen {
   background: #0284c7;
   color: #fff;
 }
+.term-touch-key.auto-enter-key {
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.5);
+  color: #f59e0b;
+  font-weight: 700;
+  font-size: 0.65rem;
+}
+.term-touch-key.auto-enter-key.active {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.35), rgba(217, 119, 6, 0.5)) !important;
+  border-color: #f59e0b !important;
+  color: #fef3c7 !important;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.6) !important;
+}
+.term-touch-key.auto-enter-key:active {
+  transform: scale(0.94);
+  background: #d97706 !important;
+  color: #ffffff !important;
+}
 
 /* Touch Keybar Modifiers (CTRL, ALT sticky latch) */
 .term-touch-key.term-mod-key {
