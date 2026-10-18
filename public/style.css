@@ -4038,20 +4038,86 @@ body.modal-open {
   margin-bottom: 6px;
 }
 
-.form-group input, .form-group textarea, .form-group select {
+.form-group input,
+.form-group textarea,
+.form-group select,
+#settingOllamaEndpoint,
+#settingOllamaApiKey,
+#settingOpenRouterKey,
+#settingSerperApiKey,
+#settingAutoPolicy,
+#settingMusicModel,
+#settingSystemPrompt,
+#inputWorkspaceNewFileName,
+#inputWorkspaceNewFileContent,
+#inputTaskSubject {
   width: 100%;
-  background: var(--bg-core);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  color: var(--text-main);
+  background-color: #0b0f19 !important;
+  background: #0b0f19 !important;
+  border: 1px solid rgba(0, 240, 255, 0.24) !important;
+  border-radius: var(--radius-sm) !important;
+  color: #f8fafc !important;
+  -webkit-text-fill-color: #f8fafc !important;
+  caret-color: #00f0ff !important;
   padding: 8px 12px;
   font-family: var(--font-main);
   font-size: 0.85rem;
-  outline: none;
+  outline: none !important;
+  color-scheme: dark;
 }
 
-.form-group input:focus, .form-group textarea:focus, .form-group select:focus {
-  border-color: var(--neon-cyan);
+.form-group input::placeholder,
+.form-group textarea::placeholder,
+#settingOllamaEndpoint::placeholder,
+#settingOllamaApiKey::placeholder,
+#settingOpenRouterKey::placeholder,
+#settingSerperApiKey::placeholder,
+#settingMusicModel::placeholder,
+#settingSystemPrompt::placeholder {
+  color: #64748b !important;
+  -webkit-text-fill-color: #64748b !important;
+  opacity: 1 !important;
+}
+
+.form-group input:focus,
+.form-group textarea:focus,
+.form-group select:focus,
+#settingOllamaEndpoint:focus,
+#settingOllamaApiKey:focus,
+#settingOpenRouterKey:focus,
+#settingSerperApiKey:focus,
+#settingAutoPolicy:focus,
+#settingMusicModel:focus,
+#settingSystemPrompt:focus,
+#inputWorkspaceNewFileName:focus,
+#inputWorkspaceNewFileContent:focus,
+#inputTaskSubject:focus {
+  background-color: #0f172a !important;
+  background: #0f172a !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border-color: var(--neon-cyan) !important;
+  box-shadow: 0 0 0 2px rgba(0, 240, 255, 0.18) !important;
+}
+
+.form-group select option,
+select.custom-select option {
+  background-color: #0b0f19 !important;
+  color: #f8fafc !important;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px #0b0f19 inset !important;
+  box-shadow: 0 0 0 1000px #0b0f19 inset !important;
+  -webkit-text-fill-color: #f8fafc !important;
+  color: #f8fafc !important;
+  caret-color: #00f0ff !important;
+  transition: background-color 5000s ease-in-out 0s;
 }
 
 .input-with-action {
@@ -4301,17 +4367,31 @@ body.modal-open {
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   z-index: 999;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.sidebar-backdrop.active,
-.sidebar-backdrop.show,
-body.mobile-sidebar-open .sidebar-backdrop {
+#sidebar.open + .sidebar-backdrop.active,
+#sidebar.open + .sidebar-backdrop.show,
+body.mobile-sidebar-open #sidebar.open + .sidebar-backdrop {
   opacity: 1 !important;
   pointer-events: auto !important;
   cursor: pointer;
+}
+
+#sidebar:not(.open) + .sidebar-backdrop {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+@media (min-width: 769px) {
+  .sidebar-backdrop,
+  #sidebarBackdrop {
+    display: none !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
 }
 
 
@@ -14586,27 +14666,49 @@ body.mermaid-has-fullscreen {
   color: #38bdf8;
   margin-right: 4px;
 }
-.term-remote-input {
+.term-remote-input,
+#inputTermRemoteHost,
+#inputTermRemotePin {
   width: 100%;
   padding: 9px 12px;
-  background: rgba(15, 23, 42, 0.9);
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  border-radius: 6px;
-  color: #f8fafc;
+  background-color: #0b1120 !important;
+  background: #0b1120 !important;
+  border: 1px solid rgba(56, 189, 248, 0.35) !important;
+  border-radius: 6px !important;
+  color: #f8fafc !important;
+  -webkit-text-fill-color: #f8fafc !important;
+  caret-color: #38bdf8 !important;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 0.85rem;
-  outline: none;
-  transition: border-color 0.15s ease;
+  outline: none !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  color-scheme: dark;
 }
-.term-remote-input:focus {
-  border-color: #38bdf8;
-  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+.term-remote-input::placeholder,
+#inputTermRemoteHost::placeholder,
+#inputTermRemotePin::placeholder {
+  color: #64748b !important;
+  -webkit-text-fill-color: #64748b !important;
+  opacity: 1 !important;
 }
-.term-remote-input.pin-input {
+.term-remote-input:focus,
+#inputTermRemoteHost:focus,
+#inputTermRemotePin:focus {
+  background-color: #0f172a !important;
+  background: #0f172a !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25) !important;
+}
+.term-remote-input.pin-input,
+#inputTermRemotePin {
   letter-spacing: 6px;
   font-size: 1.15rem;
   text-align: center;
   font-weight: 700;
+  color: #38bdf8 !important;
+  -webkit-text-fill-color: #38bdf8 !important;
 }
 .term-remote-hint {
   display: block;
@@ -14785,16 +14887,20 @@ body.mermaid-has-fullscreen {
   display: flex;
   gap: 6px;
 }
-.term-tunnel-input-copy input {
+.term-tunnel-input-copy input,
+#termTunnelUrlInput {
   flex: 1;
   padding: 8px 10px;
-  background: rgba(15, 23, 42, 0.85);
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  border-radius: 6px;
-  color: #f8fafc;
+  background-color: #0b1120 !important;
+  background: #0b1120 !important;
+  border: 1px solid rgba(56, 189, 248, 0.3) !important;
+  border-radius: 6px !important;
+  color: #f8fafc !important;
+  -webkit-text-fill-color: #f8fafc !important;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 0.8rem;
-  outline: none;
+  outline: none !important;
+  color-scheme: dark;
 }
 .term-tunnel-copy-btn {
   display: inline-flex;

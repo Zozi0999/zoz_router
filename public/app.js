@@ -8167,13 +8167,21 @@ RESONANSI: ${this.currentVibe}
     renderChatHistory();
     renderCurrentSession();
     AudioEngine.click();
-    if (window.innerWidth <= 768 && els.sidebar?.classList.contains('open')) {
-      els.sidebar.classList.remove('open');
-      els.sidebarBackdrop?.classList.remove('show');
-      // M15: pop entri {modal:'sidebar'} yang dipush saat sidebar dibuka — tanpa ini
-      // entri jadi yatim: tombol Back hardware ditelan, atau Back berikutnya
-      // memunculkan sidebar ghost & menutup modal yang sedang terbuka.
-      if (history.state?.modal === 'sidebar') history.back();
+    hideMobileSidebarAndBackdrop(true);
+  }
+
+  function hideMobileSidebarAndBackdrop(triggerHistoryBack = true) {
+    const hasOpenState = Boolean(
+      els.sidebar?.classList.contains('open') ||
+      els.sidebarBackdrop?.classList.contains('active') ||
+      els.sidebarBackdrop?.classList.contains('show') ||
+      document.body.classList.contains('mobile-sidebar-open')
+    );
+    els.sidebar?.classList.remove('open');
+    els.sidebarBackdrop?.classList.remove('active', 'show');
+    document.body.classList.remove('mobile-sidebar-open');
+    if (hasOpenState && triggerHistoryBack && history.state?.modal === 'sidebar') {
+      try { history.back(); } catch (_) {}
     }
   }
 
@@ -8219,6 +8227,11 @@ RESONANSI: ${this.currentVibe}
     const targetSession = STATE.sessions.find(s => s.id === sessionId);
     if (!targetSession) return;
     const switchToken = ++sessionSwitchToken;
+
+    // Tutup sidebar & backdrop redup seketika saat item riwayat diklik tanpa menunggu I/O disk
+    if (window.innerWidth <= 768 || els.sidebar?.classList.contains('open') || els.sidebarBackdrop?.classList.contains('active')) {
+      hideMobileSidebarAndBackdrop(true);
+    }
 
     if (activeChatPollTimer) {
       clearInterval(activeChatPollTimer);
@@ -8282,12 +8295,7 @@ RESONANSI: ${this.currentVibe}
     updateModelUI();
     AudioEngine.click();
 
-    if (window.innerWidth <= 768 && els.sidebar?.classList.contains('open')) {
-      els.sidebar.classList.remove('open');
-      els.sidebarBackdrop?.classList.remove('show');
-      // M15: sama seperti createNewSession — buang entri history sidebar yatim.
-      if (history.state?.modal === 'sidebar') history.back();
-    }
+    hideMobileSidebarAndBackdrop(false);
 
     // Periksa apakah sesi tujuan memiliki tugas aktif atau selesai di background
     checkBackgroundChatTasksSync();
@@ -26830,6 +26838,9 @@ Aturan:
   }
 
   function openModal(modalId) {
+    if (window.innerWidth <= 768 || els.sidebar?.classList.contains('open') || els.sidebarBackdrop?.classList.contains('active')) {
+      hideMobileSidebarAndBackdrop(false);
+    }
     if (modalId === 'modelHubModal') {
       openLiveModelCatalog(null, 'Model Obrolan Utama');
       return;
@@ -28531,12 +28542,7 @@ Aturan:
     }
 
     function closeMobileSidebar(triggerHistoryBack = true) {
-      els.sidebar?.classList.remove('open');
-      els.sidebarBackdrop?.classList.remove('active', 'show');
-      document.body.classList.remove('mobile-sidebar-open');
-      if (triggerHistoryBack && history.state?.modal === 'sidebar') {
-        history.back();
-      }
+      hideMobileSidebarAndBackdrop(triggerHistoryBack);
     }
 
     function toggleDesktopSidebar() {
@@ -28637,6 +28643,7 @@ Aturan:
       TerminalManager.toggle();
     });
     els.sidebarTerminalBtn?.addEventListener('click', () => {
+      if (isMobile()) closeMobileSidebar(false);
       TerminalManager.toggle();
     });
 
@@ -30077,7 +30084,12 @@ Aturan:
       }
 
       // 3. Close mobile sidebar if open
-      if (els.sidebar?.classList.contains('open')) {
+      if (
+        els.sidebar?.classList.contains('open') ||
+        els.sidebarBackdrop?.classList.contains('active') ||
+        els.sidebarBackdrop?.classList.contains('show') ||
+        document.body.classList.contains('mobile-sidebar-open')
+      ) {
         closeMobileSidebar(false);
         return;
       }
