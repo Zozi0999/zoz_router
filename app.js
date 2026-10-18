@@ -17483,6 +17483,7 @@ Format teks (untuk model tanpa function calling):
         } else {
           validList.unshift({ role: 'user', content: `[Instruksi Sistem & Konteks:\n${effectiveSystem.trim()}]`, images: [] });
         }
+      }
     }
 
     // Merge consecutive messages with the same role to strictly enforce alternating roles
@@ -35207,9 +35208,17 @@ Aturan:
   };
 
   // Start on DOM ready (safeguarded against post-DOMContentLoaded script execution)
+  const safeInit = () => {
+    try {
+      init();
+    } catch (err) {
+      console.error('[ZOZ ROUTER INIT ERROR]:', err);
+    }
+  };
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', safeInit);
   } else {
-    init();
+    safeInit();
   }
 })();
