@@ -946,6 +946,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     modelPickerChip: $('#modelPickerChip'),
     sidebarBrandLogoBtn: $('#sidebarBrandLogoBtn'),
     sidebarAutoRouterIndicator: $('#sidebarAutoRouterIndicator'),
+    heroAutoRouterBtn: $('#heroAutoRouterBtn'),
+    heroAutoRouterStatus: $('#heroAutoRouterStatus'),
     modelDropdownMenu: $('#modelDropdownMenu'),
     dropdownTabOllama: $('#dropdownTabOllama'),
     dropdownTabOpenRouter: $('#dropdownTabOpenRouter'),
@@ -14597,6 +14599,18 @@ ${blocks}
         ? 'Auto Router AI: AKTIF (Klik logo ZOZ Router untuk beralih ke mode manual)'
         : 'Auto Router AI: NONAKTIF (Klik logo ZOZ Router untuk mengaktifkan Auto Router)';
       els.sidebarBrandLogoBtn.setAttribute('aria-label', isAuto ? 'Nonaktifkan Auto Router via Logo' : 'Aktifkan Auto Router via Logo');
+    }
+    if (els.heroAutoRouterBtn) {
+      els.heroAutoRouterBtn.classList.toggle('active', isAuto);
+      els.heroAutoRouterBtn.title = isAuto
+        ? 'Auto Router AI: AKTIF (Ollama Cloud + OpenRouter fallback). Klik untuk beralih mode manual.'
+        : 'Auto Router AI: NONAKTIF. Klik untuk mengaktifkan Auto Router.';
+      if (els.heroAutoRouterStatus) {
+        els.heroAutoRouterStatus.textContent = isAuto ? 'AKTIF (Ollama + OpenRouter)' : 'NONAKTIF';
+        els.heroAutoRouterStatus.className = isAuto
+          ? 'text-[10px] text-teal-300 font-semibold ml-0.5'
+          : 'text-[10px] text-slate-500 font-normal ml-0.5';
+      }
     }
   }
 

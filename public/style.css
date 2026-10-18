@@ -15284,7 +15284,67 @@ body.mermaid-has-fullscreen {
 
 .prompt-dock-wrapper {
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: visible !important;
 }
+
+/* Auto Router Hero Button Styling */
+#heroAutoRouterBtn {
+  transition: all 0.25s ease;
+}
+
+#heroAutoRouterBtn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 20px rgba(0, 242, 254, 0.35);
+}
+
+#heroAutoRouterBtn.active {
+  background: rgba(0, 242, 254, 0.12) !important;
+  border-color: rgba(0, 242, 254, 0.6) !important;
+  box-shadow: 0 0 22px rgba(0, 242, 254, 0.45) !important;
+  color: #fff !important;
+}
+
+#heroAutoRouterBtn.active .auto-router-quantum-dot {
+  background-color: #22d3ee !important;
+  box-shadow: 0 0 10px #22d3ee, 0 0 20px #22d3ee !important;
+  animation: pulseTeal 1.8s infinite alternate;
+}
+
+/* Responsive Mobile Enhancements for Prompt Dock & Popups */
+@media (max-width: 640px) {
+  #promptDockWrapper {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .composer-container {
+    padding-bottom: 12px !important;
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+  }
+
+  /* Fixed popup above dock on small screens so it is never clipped or offscreen */
+  .attachment-dropdown-popup,
+  .search-dropdown-popup {
+    position: fixed !important;
+    bottom: 74px !important;
+    left: 12px !important;
+    right: 12px !important;
+    width: auto !important;
+    max-width: calc(100vw - 24px) !important;
+    z-index: 99999 !important;
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.85), 0 0 24px rgba(0, 242, 254, 0.25) !important;
+  }
+
+  /* Input touch target comfort */
+  #promptInput {
+    font-size: 14px !important;
+    min-height: 36px !important;
+  }
+}
+
 
 
 
