@@ -1293,31 +1293,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     cardPillarButton: $('#cardPillarButton'),
     endocrineDiagnosticList: $('#endocrineDiagnosticList'),
 
-    // Local Workspace & Document Management
-    tabBtnLocalWorkspace: $('#tabBtnLocalWorkspace'),
-    tabLocalWorkspace: $('#tabLocalWorkspace'),
-    settingLocalWorkspaceToggle: $('#settingLocalWorkspaceToggle'),
-    workspaceDirConnectionCard: $('#workspaceDirConnectionCard'),
-    workspacePlatformBadge: $('#workspacePlatformBadge'),
-    workspaceFolderStatus: $('#workspaceFolderStatus'),
-    workspaceConnectedDirName: $('#workspaceConnectedDirName'),
-    workspaceConnectedDirDetails: $('#workspaceConnectedDirDetails'),
-    btnSelectLocalWorkspace: $('#btnSelectLocalWorkspace'),
-    btnSelectLocalWorkspaceText: $('#btnSelectLocalWorkspaceText'),
-    btnRefreshLocalWorkspace: $('#btnRefreshLocalWorkspace'),
-    btnDisconnectLocalWorkspace: $('#btnDisconnectLocalWorkspace'),
-    inputLocalWorkspaceFolderMobile: $('#inputLocalWorkspaceFolderMobile'),
-    inputLocalWorkspaceFilesMobile: $('#inputLocalWorkspaceFilesMobile'),
-    workspacePermissionsCard: $('#workspacePermissionsCard'),
-    settingWorkspaceAiRead: $('#settingWorkspaceAiRead'),
-    settingWorkspaceAiWrite: $('#settingWorkspaceAiWrite'),
-    settingWorkspaceIncludeTree: $('#settingWorkspaceIncludeTree'),
-    workspaceFileExplorerCard: $('#workspaceFileExplorerCard'),
-    workspaceFileCount: $('#workspaceFileCount'),
-    btnWorkspaceCreateDoc: $('#btnWorkspaceCreateDoc'),
-    btnWorkspaceExportZip: $('#btnWorkspaceExportZip'),
-    workspaceSearchInput: $('#workspaceSearchInput'),
-    workspaceFileList: $('#workspaceFileList'),
+    // About Developer Tab & Redirect (v376)
+    tabBtnDeveloper: $('#tabBtnDeveloper'),
+    tabDeveloper: $('#tabDeveloper'),
+    developerRedirectLink: $('#developerRedirectLink'),
     attachOptionLocalWorkspace: $('#attachOptionLocalWorkspace'),
     attachWorkspaceDesc: $('#attachWorkspaceDesc'),
     workspaceComposerPill: $('#workspaceComposerPill'),
@@ -1341,10 +1320,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     inputWorkspaceNewFileContent: $('#inputWorkspaceNewFileContent'),
     btnSaveNewWorkspaceDoc: $('#btnSaveNewWorkspaceDoc'),
 
-    // Snapshots & Task Tracker (v257-v259)
-    settingWorkspaceEnableSnapshots: $('#settingWorkspaceEnableSnapshots'),
-    settingWorkspaceAutoTaskTracker: $('#settingWorkspaceAutoTaskTracker'),
-    settingWorkspaceRequireApproval: $('#settingWorkspaceRequireApproval'),
+    // Task Tracker (v257-v259)
     attachOptionTaskTracker: $('#attachOptionTaskTracker'),
     attachTaskTrackerDesc: $('#attachTaskTrackerDesc'),
     taskTrackerCard: $('#taskTrackerCard'),
@@ -28989,8 +28965,8 @@ Aturan:
       closeAttachmentDropdown();
       syncSettingsModalFields();
       openModal('settingsModal');
-      const wsTabBtn = els.tabBtnLocalWorkspace;
-      if (wsTabBtn) wsTabBtn.click();
+      const devTabBtn = els.tabBtnDeveloper;
+      if (devTabBtn) devTabBtn.click();
       AudioEngine.click();
     });
     els.attachOptionTaskTracker?.addEventListener('click', (e) => {
@@ -29006,141 +28982,20 @@ Aturan:
       AudioEngine.click();
     });
 
-    // ==================== LOCAL WORKSPACE LISTENERS ====================
-    els.settingLocalWorkspaceToggle?.addEventListener('change', (e) => {
-      STATE.localWorkspace.enabled = e.target.checked;
-      STATE.settings.localWorkspaceEnabled = e.target.checked;
-      savePersistedState({ immediate: true });
-      updateLocalWorkspaceUI();
-      AudioEngine.click();
-      showToast(
-        e.target.checked
-          ? '📁 Akses direktori lokal diaktifkan. Silakan hubungkan folder dokumen Anda.'
-          : '📁 Akses direktori lokal dinonaktifkan.'
-      );
-    });
-
-    els.btnSelectLocalWorkspace?.addEventListener('click', async () => {
-      AudioEngine.click();
-      if (ServerWorkspaceAPI && ServerWorkspaceAPI.isAvailable) {
-        const useServer = confirm(`⚡ Terdeteksi server lokal aktif!\nApakah Anda ingin menghubungkan direktori proyek "${ServerWorkspaceAPI.dirName || 'zoz-router'}" (Mode Claude Code: Tulis langsung ke disk tanpa unduh)?\n\nKlik OK untuk Mode Claude Code, atau Batal untuk memilih folder perangkat.`);
-        if (useServer) {
-          showToast('Menghubungkan direktori proyek server lokal...');
-          const files = await ServerWorkspaceAPI.getFiles();
-          await setConnectedLocalWorkspace(ServerWorkspaceAPI.dirName || 'zoz-router', null, 'server-fs', files);
-          showToast(`⚡ Direktori proyek "${ServerWorkspaceAPI.dirName || 'zoz-router'}" terhubung! Mode Claude Code aktif.`);
-          return;
-        }
-      }
-
-      if (isDesktopFileSystemSupported()) {
-        try {
-          const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
-          if (handle) {
-            showToast('Memindai direktori lokal...');
-            const files = await scanDirectoryHandle(handle);
-            await setConnectedLocalWorkspace(handle.name, handle, 'desktop-fs', files);
-            return;
-          }
-        } catch (err) {
-          if (err.name === 'AbortError') return;
-          console.warn('showDirectoryPicker gagal / ditolak, beralih ke mobile folder picker:', err);
-        }
-      }
-
-      if (els.inputLocalWorkspaceFolderMobile) {
-        els.inputLocalWorkspaceFolderMobile.click();
-      } else if (els.inputLocalWorkspaceFilesMobile) {
-        els.inputLocalWorkspaceFilesMobile.click();
-      }
-    });
-
-    els.inputLocalWorkspaceFolderMobile?.addEventListener('change', async (e) => {
-      const fileList = Array.from(e.target.files || []);
-      if (fileList.length === 0) return;
-
-      let dirName = 'Dokumen HP';
-      if (fileList[0].webkitRelativePath) {
-        const parts = fileList[0].webkitRelativePath.split('/');
-        if (parts.length > 1) dirName = parts[0];
-      }
-
-      const files = fileList.map(file => ({
-        name: file.name,
-        path: file.webkitRelativePath || file.name,
-        size: file.size,
-        type: file.type || 'application/octet-stream',
-        lastModified: file.lastModified,
-        handle: null,
-        rawFile: file,
-        content: null
-      }));
-
-      await setConnectedLocalWorkspace(dirName, null, 'mobile-virtual', files);
-      e.target.value = '';
-    });
-
-    els.inputLocalWorkspaceFilesMobile?.addEventListener('change', async (e) => {
-      const fileList = Array.from(e.target.files || []);
-      if (fileList.length === 0) return;
-
-      const files = fileList.map(file => ({
-        name: file.name,
-        path: file.name,
-        size: file.size,
-        type: file.type || 'application/octet-stream',
-        lastModified: file.lastModified,
-        handle: null,
-        rawFile: file,
-        content: null
-      }));
-
-      await setConnectedLocalWorkspace('Koleksi Dokumen HP', null, 'mobile-virtual', files);
-      e.target.value = '';
-    });
-
-    els.btnRefreshLocalWorkspace?.addEventListener('click', () => {
-      refreshLocalWorkspace();
-    });
-
-    els.btnDisconnectLocalWorkspace?.addEventListener('click', () => {
-      if (confirm('Putuskan sambungan direktori lokal dari Zoz Router?')) {
-        disconnectLocalWorkspace();
-      }
-    });
-
-    els.workspaceSearchInput?.addEventListener('input', (e) => {
-      STATE.localWorkspace.activeFilter = e.target.value;
-      renderWorkspaceFileList();
-    });
-
-    els.btnWorkspaceCreateDoc?.addEventListener('click', () => {
-      if (els.inputWorkspaceNewFileName) els.inputWorkspaceNewFileName.value = '';
-      if (els.inputWorkspaceNewFileContent) els.inputWorkspaceNewFileContent.value = '';
-      openModal('workspaceDocCreateModal');
+    // ==================== ABOUT DEVELOPER TAB & REDIRECT ====================
+    els.developerRedirectLink?.addEventListener('click', () => {
       AudioEngine.click();
     });
 
-    els.btnSaveNewWorkspaceDoc?.addEventListener('click', async () => {
-      const name = els.inputWorkspaceNewFileName ? els.inputWorkspaceNewFileName.value.trim() : '';
-      const body = els.inputWorkspaceNewFileContent ? els.inputWorkspaceNewFileContent.value : '';
-      if (!name) {
-        showToast('Masukkan nama file dan ekstensinya (misal: catatan.md)', 'error');
-        return;
-      }
-      await createWorkspaceDocument(name, body);
-      closeModal('workspaceDocCreateModal');
-    });
-
-    els.btnWorkspaceExportZip?.addEventListener('click', () => {
-      exportWorkspaceAsZip();
+    els.tabBtnDeveloper?.addEventListener('click', () => {
+      AudioEngine.click();
     });
 
     els.workspacePillManageBtn?.addEventListener('click', () => {
       syncSettingsModalFields();
       openModal('settingsModal');
-      const wsTabBtn = els.tabBtnLocalWorkspace;
-      if (wsTabBtn) wsTabBtn.click();
+      const devTabBtn = els.tabBtnDeveloper;
+      if (devTabBtn) devTabBtn.click();
       AudioEngine.click();
     });
 

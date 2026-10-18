@@ -75,8 +75,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261018_v374">
-  <link rel="stylesheet" href="style.css?v=20261018_v374">
+  <link rel="preload" as="style" href="style.css?v=20261018_v376">
+  <link rel="stylesheet" href="style.css?v=20261018_v376">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial select-none">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -1055,8 +1055,8 @@
           <button class="settings-tab-btn active" data-target="tabProviders">Providers & API</button>
           <button class="settings-tab-btn" data-target="tabParameters">Parameter LLM</button>
           <button class="settings-tab-btn" data-target="tabSystem">System Persona</button>
-          <button class="settings-tab-btn" data-target="tabLocalWorkspace" id="tabBtnLocalWorkspace">
-            <i class="fa-solid fa-folder-tree"></i> Direktori Lokal
+          <button class="settings-tab-btn" data-target="tabDeveloper" id="tabBtnDeveloper">
+            <i class="fa-solid fa-code"></i> About Developer
           </button>
         </div>
 
@@ -1207,144 +1207,60 @@
           </div>
         </div>
 
-        <!-- Tab 4: Local Directory & Workspace -->
-        <div class="settings-tab-pane" id="tabLocalWorkspace">
-          <!-- Master Switch Card -->
-          <div class="workspace-card workspace-master-card">
-            <div class="workspace-switch-row">
-              <div class="workspace-switch-info">
-                <div class="workspace-switch-title">
-                  <i class="fa-solid fa-folder-tree" style="color: var(--neon-cyan);"></i>
-                  <strong>Akses & Manajemen Direktori Lokal</strong>
+        <!-- Tab 4: About Developer -->
+        <div class="settings-tab-pane" id="tabDeveloper">
+          <div class="developer-about-card">
+            <!-- Brand & Logo Showcase with Z21 and ZOZ Router Logo -->
+            <div class="developer-hero-badge">
+              <div class="developer-logo-wrap">
+                <img src="favicon.svg" alt="ZOZ Router Logo" class="developer-logo-img">
+                <span class="developer-pulse-glow"></span>
+              </div>
+              <div class="developer-brand-meta">
+                <div class="developer-brand-title">
+                  <span class="z21-accent">Z21</span>
+                  <span class="z21-name">rOuTer</span>
                 </div>
-                <div class="workspace-switch-desc">
-                  Izinkan AI mendeteksi, membaca, dan mengelola dokumen lokal di HP atau laptop Anda secara langsung.
+                <div class="developer-brand-tag">Neural AI Multi-Engine Gateway</div>
+              </div>
+            </div>
+
+            <!-- Developer Information & Interactive Direct Link Card -->
+            <a href="https://zozdocs.com/#developer" target="_blank" rel="noopener noreferrer" class="developer-redirect-link" id="developerRedirectLink" title="Visit Developer Documentation at zozdocs.com/#developer">
+              <div class="developer-info-header">
+                <div class="developer-avatar-box">
+                  <i class="fa-solid fa-code"></i>
+                </div>
+                <div class="developer-info-meta">
+                  <div class="developer-label-row">
+                    <span class="developer-role-label">Creator & System Architect</span>
+                    <span class="developer-external-pill">
+                      <span>zozdocs.com/#developer</span>
+                      <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                    </span>
+                  </div>
+                  <h3 class="developer-name-heading">About the Developer</h3>
                 </div>
               </div>
-              <label class="toggle-switch-ios" for="settingLocalWorkspaceToggle">
-                <input type="checkbox" id="settingLocalWorkspaceToggle">
-                <span class="slider-ios"></span>
-              </label>
-            </div>
-          </div>
 
-          <!-- Directory Connection Card -->
-          <div class="workspace-card" id="workspaceDirConnectionCard">
-            <div class="workspace-section-header">
-              <span><i class="fa-solid fa-hard-drive"></i> Status Direktori Lokal</span>
-              <span class="platform-badge" id="workspacePlatformBadge"><i class="fa-solid fa-mobile-screen"></i> Deteksi HP / Universal</span>
-            </div>
-
-            <!-- Connected Directory Info Box -->
-            <div class="workspace-folder-status" id="workspaceFolderStatus">
-              <div class="folder-status-icon"><i class="fa-solid fa-folder-open"></i></div>
-              <div class="folder-status-info">
-                <div class="folder-status-name" id="workspaceConnectedDirName">Belum Ada Direktori Terhubung</div>
-                <div class="folder-status-details" id="workspaceConnectedDirDetails">Pilih folder dari HP atau laptop Anda untuk mulai dikelola AI</div>
+              <div class="developer-bio-text">
+                <p>
+                  Built with radical simplicity, uncompromising efficiency, and total privacy. Z21 rOuTer bridges local open-weight intelligence and ultra-fast cloud models into a singular, high-throughput autonomous neural environment.
+                </p>
+                <div class="developer-link-hint">
+                  <i class="fa-solid fa-circle-arrow-right"></i>
+                  <span>Click anywhere to explore the full developer biography, design philosophy, and system specifications on the official docs.</span>
+                </div>
               </div>
-            </div>
 
-            <!-- Action Buttons for Directory Selection -->
-            <div class="workspace-dir-actions">
-              <button type="button" class="btn btn-sm btn-primary-neon" id="btnSelectLocalWorkspace">
-                <i class="fa-solid fa-folder-plus"></i> <span id="btnSelectLocalWorkspaceText">Pilih / Hubungkan Folder</span>
-              </button>
-              <button type="button" class="btn btn-sm btn-outline" id="btnRefreshLocalWorkspace" style="display: none;" title="Pindai ulang berkas di direktori">
-                <i class="fa-solid fa-arrows-rotate"></i> Sinkronkan
-              </button>
-              <button type="button" class="btn btn-sm btn-outline btn-danger-hover" id="btnDisconnectLocalWorkspace" style="display: none;" title="Putuskan sambungan direktori ini">
-                <i class="fa-solid fa-link-slash"></i> Putuskan
-              </button>
-            </div>
-
-            <!-- Hidden File / Directory Inputs for Mobile & Universal Fallback -->
-            <input type="file" id="inputLocalWorkspaceFolderMobile" webkitdirectory directory multiple style="display: none;">
-            <input type="file" id="inputLocalWorkspaceFilesMobile" multiple accept="*/*" style="display: none;">
-          </div>
-
-          <!-- AI Permissions & Capabilities Card -->
-          <div class="workspace-card" id="workspacePermissionsCard">
-            <div class="workspace-section-header">
-              <span><i class="fa-solid fa-shield-halved"></i> Izin & Perilaku Pengelolaan AI</span>
-            </div>
-            <div class="workspace-checkbox-group">
-              <label class="workspace-checkbox-label">
-                <input type="checkbox" id="settingWorkspaceAiRead" checked>
-                <span class="checkbox-custom"></span>
-                <span class="checkbox-text">
-                  <strong>Izinkan AI Membaca Dokumen</strong>
-                  <small>AI dapat mengekstrak isi teks berkas (PDF, DOCX, TXT, Kode, CSV) saat ditanya</small>
+              <div class="developer-action-bar">
+                <span class="developer-action-btn">
+                  <i class="fa-solid fa-book-bookmark"></i>
+                  <span>Read About Developer on zozdocs.com</span>
+                  <i class="fa-solid fa-chevron-right arrow-icon"></i>
                 </span>
-              </label>
-              <label class="workspace-checkbox-label">
-                <input type="checkbox" id="settingWorkspaceAiWrite" checked>
-                <span class="checkbox-custom"></span>
-                <span class="checkbox-text">
-                  <strong>Izinkan AI Membuat & Menulis Dokumen</strong>
-                  <small>AI dapat membuat berkas baru langsung ke direktori Anda saat diminta</small>
-                </span>
-              </label>
-              <label class="workspace-checkbox-label">
-                <input type="checkbox" id="settingWorkspaceRequireApproval" checked>
-                <span class="checkbox-custom"></span>
-                <span class="checkbox-text">
-                  <strong>Minta Izin Pengguna via Task Tracker AI sebelum Menulis/Menimpa Berkas</strong>
-                  <small>AI akan menahan perubahan dan meminta persetujuan eksplisit Anda sebelum menyimpan ke direktori lokal</small>
-                </span>
-              </label>
-              <label class="workspace-checkbox-label">
-                <input type="checkbox" id="settingWorkspaceIncludeTree" checked>
-                <span class="checkbox-custom"></span>
-                <span class="checkbox-text">
-                  <strong>Sertakan Struktur Pohon File ke Konteks AI</strong>
-                  <small>AI otomatis mengetahui daftar nama file yang ada di direktori Anda saat obrolan</small>
-                </span>
-              </label>
-              <label class="workspace-checkbox-label">
-                <input type="checkbox" id="settingWorkspaceEnableSnapshots" checked>
-                <span class="checkbox-custom"></span>
-                <span class="checkbox-text">
-                  <strong>Aktifkan Auto-Snapshot & Riwayat Versi Berkas</strong>
-                  <small>Otomatis mencadangkan versi berkas sebelum ditimpa AI/pengguna agar dapat di-rollback</small>
-                </span>
-              </label>
-              <label class="workspace-checkbox-label">
-                <input type="checkbox" id="settingWorkspaceAutoTaskTracker" checked>
-                <span class="checkbox-custom"></span>
-                <span class="checkbox-text">
-                  <strong>Aktifkan Interactive Task Tracker AI</strong>
-                  <small>AI otomatis memecah tugas kompleks menjadi subtask terencana dengan visual checklist</small>
-                </span>
-              </label>
-            </div>
-          </div>
-
-          <!-- File Explorer & Management Card -->
-          <div class="workspace-card" id="workspaceFileExplorerCard" style="display: none;">
-            <div class="workspace-explorer-header">
-              <div class="explorer-title">
-                <i class="fa-solid fa-folder-tree"></i> Daftar Berkas (<span id="workspaceFileCount">0</span>)
               </div>
-              <div class="explorer-actions">
-                <button type="button" class="btn btn-xs btn-outline" id="btnWorkspaceCreateDoc" title="Buat dokumen teks/markdown baru">
-                  <i class="fa-solid fa-plus"></i> Buat Dokumen
-                </button>
-                <button type="button" class="btn btn-xs btn-outline" id="btnWorkspaceExportZip" title="Unduh seluruh folder sebagai file ZIP">
-                  <i class="fa-solid fa-file-zipper"></i> Ekspor ZIP
-                </button>
-              </div>
-            </div>
-
-            <!-- Search Filter -->
-            <div class="workspace-search-box">
-              <i class="fa-solid fa-magnifying-glass"></i>
-              <input type="text" id="workspaceSearchInput" placeholder="Cari nama file dalam direktori...">
-            </div>
-
-            <!-- File List Container -->
-            <div class="workspace-file-list" id="workspaceFileList">
-              <div class="workspace-empty-list">Tidak ada berkas yang ditemukan di direktori ini.</div>
-            </div>
+            </a>
           </div>
         </div>
       </div>
@@ -2878,6 +2794,6 @@
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
   <script src="text-safety.js?v=20261017_v349" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261018_v375" defer></script>
+  <script src="app.js?v=20261018_v376" defer></script>
 </body>
 </html>
