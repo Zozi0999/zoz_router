@@ -20764,20 +20764,33 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     const mode = STATE.searchMode || 'off';
     if (!els.webSearchToggleBtn) return;
 
+    const setWebSearchIconClass = (cls) => {
+      if (!els.webSearchIcon) return;
+      try {
+        if (typeof els.webSearchIcon.className === 'string') {
+          els.webSearchIcon.className = cls;
+        } else if (typeof els.webSearchIcon.setAttribute === 'function') {
+          els.webSearchIcon.setAttribute('class', cls);
+        }
+      } catch (_) {
+        try { els.webSearchIcon.setAttribute('class', cls); } catch (__) {}
+      }
+    };
+
     els.webSearchToggleBtn.classList.remove('mode-default', 'mode-premium', 'mode-autonomous', 'active');
     if (mode === 'autonomous') {
       els.webSearchToggleBtn.classList.add('mode-autonomous', 'active');
-      if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-compass';
+      setWebSearchIconClass('fa-solid fa-compass');
       if (els.searchBadge) els.searchBadge.style.display = 'none';
       els.webSearchToggleBtn.title = 'Autonomous Web Explorer: Aktif (Klik untuk matikan)';
     } else if (mode === 'default') {
       els.webSearchToggleBtn.classList.add('mode-default', 'active');
-      if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-globe';
+      setWebSearchIconClass('fa-solid fa-globe');
       if (els.searchBadge) els.searchBadge.style.display = 'none';
       els.webSearchToggleBtn.title = 'Pencarian Web Default: Aktif (Klik untuk matikan)';
     } else if (mode === 'premium') {
       els.webSearchToggleBtn.classList.add('mode-premium', 'active');
-      if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-microscope';
+      setWebSearchIconClass('fa-solid fa-microscope');
       const count = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls.length : 0;
       if (els.searchBadge) {
         els.searchBadge.style.display = 'block';
@@ -20785,7 +20798,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       }
       els.webSearchToggleBtn.title = `Deep Research: ${count} URL Sumber (Klik tombol untuk matikan, klik badge PRO untuk kelola sumber)`;
     } else {
-      if (els.webSearchIcon) els.webSearchIcon.className = 'fa-solid fa-compass';
+      setWebSearchIconClass('fa-solid fa-compass');
       if (els.searchBadge) els.searchBadge.style.display = 'none';
       els.webSearchToggleBtn.title = 'Autonomous Web Explorer: Nonaktif (Klik untuk aktifkan)';
     }
