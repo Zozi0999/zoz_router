@@ -991,7 +991,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     pinSelectedText: $('#pinSelectedText'),
     btnDeleteSelectedHistory: $('#btnDeleteSelectedHistory'),
     toggleSidebarBtn: $('#toggleSidebarBtn'),
-    closeSidebarBtn: $('#closeSidebarBtn'),
     sidebar: $('#sidebar'),
     sidebarBackdrop: $('#sidebarBackdrop'),
     mainContent: $('#mainContent'),
@@ -28576,22 +28575,8 @@ Aturan:
       }
     }
 
-    function closeSidebar() {
-      if (isMobile()) {
-        closeMobileSidebar(true);
-      } else {
-        els.appContainer?.classList.add('sidebar-collapsed');
-        els.sidebar?.classList.add('collapsed');
-        try {
-          localStorage.setItem('zoz_sidebar_collapsed', 'true');
-        } catch (e) {}
-        AudioEngine.click();
-      }
-    }
-
-    // Sidebar Toggle & Close Handlers
+    // Sidebar Toggle Handler
     els.toggleSidebarBtn?.addEventListener('click', toggleSidebar);
-    els.closeSidebarBtn?.addEventListener('click', closeSidebar);
     
     // Backdrop click & touch to dismiss immediately (DeepSeek style)
     els.sidebarBackdrop?.addEventListener('click', (e) => {

@@ -278,25 +278,6 @@ button.brand-logo-wrap.active .brand-logo {
   letter-spacing: 0.5px;
 }
 
-.close-sidebar-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  border: none;
-  color: var(--text-dim);
-  cursor: pointer;
-  transition: background-color 0.2s ease, color 0.2s ease;
-}
-
-.close-sidebar-btn:hover {
-  background: rgba(255, 0, 85, 0.15);
-  color: var(--neon-magenta);
-}
-
 /* Sidebar Actions */
 .sidebar-actions {
   padding: 14px 16px;
@@ -4573,10 +4554,6 @@ body.mobile-sidebar-open .sidebar-backdrop {
   .welcome-hero {
     width: 100% !important;
     max-width: 100% !important;
-  }
-  
-  .close-sidebar-btn {
-    display: block;
   }
   
   .toggle-sidebar-btn {
