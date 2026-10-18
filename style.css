@@ -13481,36 +13481,47 @@ body.mermaid-has-fullscreen {
 }
 
 /* Mobile Responsiveness - Dipertahankan untuk perangkat seluler / handphone */
+/* Mobile Responsiveness - Termux Native Layout Architecture */
 @media (max-width: 768px) {
   .terminal-modal-backdrop {
     padding: 0 !important;
     margin: 0 !important;
     width: 100vw !important;
-    height: 100dvh !important;
-    height: 100vh !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
+    overflow: hidden !important;
+    position: fixed !important;
+    inset: 0 !important;
   }
   .terminal-modal-card {
     width: 100vw !important;
     max-width: 100vw !important;
-    height: 100dvh !important;
-    height: 100vh !important;
-    max-height: 100dvh !important;
+    height: 100% !important;
+    max-height: 100% !important;
     border-radius: 0 !important;
     border: none !important;
     margin: 0 !important;
+    transition: none !important; /* CRITICAL: Meniadakan animasi 0.25s agar ResizeObserver tidak spam & keyboard stabil */
+    background: #000000 !important; /* Termux Pure OLED Black */
+    box-shadow: none !important;
   }
-  /* Sleek Toolbar for Mobile (No horizontal overflow) */
+  /* Ultra-Sleek Toolbar for Mobile (Termux style: ringkas, 32px) */
   .terminal-toolbar {
-    height: 42px !important;
+    height: 32px !important;
+    min-height: 32px !important;
     padding: 0 8px !important;
     gap: 6px !important;
+    background: #070c14 !important;
+    border-bottom: 1px solid rgba(56, 189, 248, 0.2) !important;
   }
   .terminal-title .term-title-text {
     display: none !important;
   }
   .terminal-title::after {
     content: 'Terminal';
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     font-weight: 700;
     color: #fff;
   }
@@ -13518,11 +13529,12 @@ body.mermaid-has-fullscreen {
     margin: 0 2px !important;
   }
   .terminal-shell-wrap button#btnTerminalShell {
-    padding: 4px 8px !important;
-    font-size: 0.74rem !important;
+    padding: 2px 6px !important;
+    font-size: 0.7rem !important;
     gap: 4px !important;
+    height: 24px !important;
   }
-  /* Hide desktop-only controls to prevent horizontal squeeze */
+  /* Sembunyikan kontrol desktop berlebih pada mobile */
   .terminal-toolbar-right .tb-group,
   #btnTermSyncWindows,
   #btnTermSplit,
@@ -13533,26 +13545,30 @@ body.mermaid-has-fullscreen {
   #btnTermClear {
     display: none !important;
   }
-  /* Show prominent mobile connect button */
+  /* Tombol Mobile Remote Connect di Toolbar */
   .tb-btn-mobile-connect {
     display: inline-flex !important;
     background: linear-gradient(135deg, rgba(14, 165, 233, 0.28), rgba(56, 189, 248, 0.2)) !important;
     border: 1px solid rgba(56, 189, 248, 0.65) !important;
     color: #38bdf8 !important;
     font-weight: 700 !important;
-    padding: 5px 10px !important;
-    font-size: 0.76rem !important;
+    padding: 3px 8px !important;
+    font-size: 0.72rem !important;
     box-shadow: 0 0 10px rgba(56, 189, 248, 0.35) !important;
+    height: 24px !important;
   }
   .tb-btn-minimize,
   .tb-btn-close {
     display: inline-flex !important;
-    padding: 6px 10px !important;
+    padding: 3px 8px !important;
     background: rgba(255, 255, 255, 0.08) !important;
     border: 1px solid rgba(255, 255, 255, 0.22) !important;
-    border-radius: 8px !important;
+    border-radius: 6px !important;
     color: #f1f5f9 !important;
-    font-size: 0.85rem !important;
+    font-size: 0.78rem !important;
+    height: 24px !important;
+    align-items: center;
+    justify-content: center;
   }
   .tb-btn-minimize:hover,
   .tb-btn-minimize:active {
@@ -13567,44 +13583,37 @@ body.mermaid-has-fullscreen {
     color: #fca5a5 !important;
   }
   .terminal-toolbar-right {
-    gap: 5px !important;
+    gap: 4px !important;
     margin-left: auto !important;
   }
   /* Compact tab strip */
   .terminal-tabs-strip {
-    height: 30px !important;
-    padding: 0 6px !important;
-    gap: 4px !important;
+    height: 26px !important;
+    min-height: 26px !important;
+    padding: 0 4px !important;
+    gap: 3px !important;
+    background: #04070e !important;
   }
   .terminal-tab-item {
-    padding: 3px 8px !important;
-    font-size: 0.72rem !important;
-    height: 26px !important;
+    padding: 2px 6px !important;
+    font-size: 0.68rem !important;
+    height: 22px !important;
   }
   .terminal-add-tab-btn {
-    padding: 3px 6px !important;
-    font-size: 0.7rem !important;
-    height: 24px !important;
+    padding: 2px 5px !important;
+    font-size: 0.68rem !important;
+    height: 20px !important;
   }
-  /* Compact pane header */
+  /* Sembunyikan header pane desktop & connect banner redundant pada layar mobile demi ruang vertikal maksimal Termux */
   .terminal-pane-header {
-    height: 28px !important;
-    padding: 0 8px !important;
-    font-size: 0.72rem !important;
-  }
-  .terminal-pane-header .traffic-lights {
     display: none !important;
   }
-  .pane-cwd-indicator {
-    display: none !important;
-  }
-  .pane-shell-tag {
+  .term-mobile-connect-banner {
     display: none !important;
   }
   .terminal-input-row {
     display: none !important;
   }
-  /* Hide separate quick chips row on mobile to give terminal maximum vertical height */
   .terminal-quick-chips {
     display: none !important;
   }
@@ -13615,17 +13624,43 @@ body.mermaid-has-fullscreen {
   }
   .terminal-workspace {
     flex-direction: column;
+    background: #000000 !important;
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
   }
   .terminal-resizer {
-    width: 100%;
-    height: 4px;
-    cursor: row-resize;
+    display: none !important;
   }
   .terminal-screen {
     padding: 0 !important;
+    background: #000000 !important;
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
   }
   .xterm-pane-container {
-    padding: 2px !important;
+    padding: 0 !important;
+    background: #000000 !important;
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+  .xterm-pane-container .xterm-screen {
+    transition: transform 0.08s ease-out;
+    will-change: transform;
+  }
+  /* Mobile Keybar Termux 8-Kolom 2-Baris Presisi */
+  .terminal-mobile-keybar {
+    grid-template-columns: repeat(8, minmax(0, 1fr)) !important;
+    gap: 2px !important;
+    padding: 3px 4px !important;
+    background: #000000 !important;
+    border-top: 1px solid rgba(56, 189, 248, 0.25) !important;
+  }
+  .term-touch-key {
+    height: 29px !important;
+    font-size: 0.7rem !important;
+    padding: 0 1px !important;
+    border-radius: 4px !important;
   }
 }
 
@@ -13748,13 +13783,13 @@ body.mermaid-has-fullscreen {
    CLOUDFLARE TUNNEL REMOTE ACCESS & MOBILE ERGONOMICS (v335)
    ========================================================================= */
 
-/* Mobile Touch Keybar (2-Row 9-Column Always-Visible Grid) */
+/* Mobile Touch Keybar (Termux Architecture: 2-Row 8-Column Grid) */
 .terminal-mobile-keybar {
   display: grid;
-  grid-template-columns: repeat(9, minmax(0, 1fr));
-  gap: 4px;
-  padding: 6px 6px;
-  background: rgba(10, 15, 28, 0.98);
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 3px;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.98);
   border-top: 1px solid rgba(56, 189, 248, 0.28);
   align-items: center;
   z-index: 10;

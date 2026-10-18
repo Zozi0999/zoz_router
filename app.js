@@ -30720,6 +30720,51 @@ Aturan:
       return (isMobileUA || (isNarrow && isTouch));
     },
 
+    syncMobileViewport() {
+      if (!this.isMobileDevice()) return;
+      const modal = document.getElementById('terminalModal');
+      const card = modal?.querySelector('.terminal-modal-card');
+      if (!modal || !modal.classList.contains('show') || !card) return;
+
+      if (window.visualViewport) {
+        const vv = window.visualViewport;
+        const vH = Math.floor(vv.height);
+        const vTop = Math.floor(vv.offsetTop);
+        card.style.height = `${vH}px`;
+        card.style.maxHeight = `${vH}px`;
+        card.style.top = `${vTop}px`;
+        card.style.position = 'fixed';
+      }
+      const tab = this.getActiveTab();
+      if (tab) {
+        if (tab.pane1) this.syncMobileScreenPosition(tab.pane1);
+        if (tab.pane2) this.syncMobileScreenPosition(tab.pane2);
+      }
+    },
+
+    syncMobileScreenPosition(paneState) {
+      if (!this.isMobileDevice() || !paneState || !paneState.term || !paneState.screenContainer) return;
+      const term = paneState.term;
+      const container = paneState.screenContainer;
+      const charH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
+      const totalScreenH = term.rows * charH;
+      const visibleH = container.clientHeight;
+      const xtermScreen = container.querySelector('.xterm-screen');
+      if (!xtermScreen) return;
+
+      if (totalScreenH <= visibleH || paneState._userScrolledUp) {
+        xtermScreen.style.transform = '';
+        return;
+      }
+
+      // Pastikan baris kursor/prompt aktif selalu berada di dalam viewport terlihat di atas keyboard
+      const cursorY = (term.buffer && term.buffer.active) ? term.buffer.active.cursorY : (term.rows - 1);
+      const cursorPx = (cursorY + 1) * charH;
+      let shiftY = cursorPx - visibleH + Math.round(charH * 1.5);
+      shiftY = Math.max(0, Math.min(totalScreenH - visibleH, Math.round(shiftY)));
+      xtermScreen.style.transform = shiftY > 0 ? `translateY(-${shiftY}px)` : '';
+    },
+
     normalizeRemoteHost(input) {
       if (!input || typeof input !== 'string') return { httpUrl: '', wssUrl: '' };
       let trimmed = input.trim().replace(/\/+$/, '');
@@ -31870,6 +31915,7 @@ Aturan:
         closeModal('terminalModal');
       } else {
         openModal('terminalModal');
+        this.syncMobileViewport();
         this.initActiveTabPanes();
         this.checkAndPromptRemoteIfMobileOrUnreachable();
         this.detectWindowsBridge(false).then(() => {
@@ -31906,6 +31952,7 @@ Aturan:
       if (modal) {
         modal.classList.add('show');
         modal.style.display = 'flex';
+        this.syncMobileViewport();
         this.focusActiveInput();
         [50, 150, 300].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
       }
@@ -31919,7 +31966,7 @@ Aturan:
           try {
             paneState.term.focus();
             if (paneState.term.textarea) {
-              paneState.term.textarea.focus();
+              paneState.term.textarea.focus({ preventScroll: true });
             }
           } catch (_) {}
         }
@@ -31979,9 +32026,14 @@ Aturan:
           setTimeout(() => {
             if (paneState.fitAddon) {
               try {
-                paneState.fitAddon.fit();
-                if (paneState.term) {
-                  this.sendPtyResize(paneState.sessionId, paneState.term.cols, paneState.term.rows);
+                if (this.isMobileDevice()) {
+                  this.syncMobileViewport();
+                  this.syncMobileScreenPosition(paneState);
+                } else {
+                  paneState.fitAddon.fit();
+                  if (paneState.term) {
+                    this.sendPtyResize(paneState.sessionId, paneState.term.cols, paneState.term.rows);
+                  }
                 }
               } catch (_) {}
             }
@@ -32004,7 +32056,7 @@ Aturan:
           if (paneState && paneState.term) {
             try {
               paneState.term.focus();
-              if (paneState.term.textarea) paneState.term.textarea.focus();
+              if (paneState.term.textarea) paneState.term.textarea.focus({ preventScroll: true });
             } catch (_) {}
           }
         }
@@ -32016,7 +32068,7 @@ Aturan:
         if (paneState && paneState.term) {
           try {
             paneState.term.focus();
-            if (paneState.term.textarea) paneState.term.textarea.focus();
+            if (paneState.term.textarea) paneState.term.textarea.focus({ preventScroll: true });
           } catch (_) {}
         }
       });
@@ -32027,7 +32079,7 @@ Aturan:
         if (paneState && paneState.term) {
           try {
             paneState.term.focus();
-            if (paneState.term.textarea) paneState.term.textarea.focus();
+            if (paneState.term.textarea) paneState.term.textarea.focus({ preventScroll: true });
           } catch (_) {}
         }
       }, { passive: true });
@@ -32100,15 +32152,28 @@ Aturan:
 
       if (fitAddon) {
         try {
-          fitAddon.fit();
-          if (!this.isMobileDevice()) {
+          if (this.isMobileDevice()) {
+            const containerW = container.clientWidth || window.innerWidth;
+            const fullH = Math.max(window.screen.availHeight ? window.screen.availHeight * 0.72 : 550, container.clientHeight);
+            const charW = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.width) || 8.5;
+            const charH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
+            const safeCols = Math.max(48, Math.floor(containerW / charW));
+            paneState._stableRows = Math.max(24, Math.floor(fullH / charH));
+            term.resize(safeCols, paneState._stableRows);
+            this.sendPtyResize(sessionId, safeCols, paneState._stableRows);
+            this.syncMobileScreenPosition(paneState);
+          } else {
+            fitAddon.fit();
             this.sendPtyResize(sessionId, term.cols, term.rows);
           }
         } catch (_) {}
         setTimeout(() => {
           try {
-            fitAddon.fit();
-            if (!this.isMobileDevice()) {
+            if (this.isMobileDevice()) {
+              this.syncMobileViewport();
+              this.syncMobileScreenPosition(paneState);
+            } else {
+              fitAddon.fit();
               this.sendPtyResize(sessionId, term.cols, term.rows);
             }
           } catch (_) {}
@@ -32121,33 +32186,47 @@ Aturan:
           try { paneState._resizeObserver.disconnect(); } catch (_) {}
         }
         paneState._resizeObserver = new ResizeObserver(() => {
-          if (paneState.fitAddon && paneState.term) {
-            try {
+          if (!paneState.term) return;
+          try {
+            if (this.isMobileDevice()) {
+              // Arsitektur Termux Mobile: Jangan pernah mengecilkan rows buffer xterm atau PTY
+              // saat keyboard virtual muncul. Jaga kestabilan grid (min 24 baris) agar AI CLI
+              // (Claude Code, Ollama, PSReadLine, Python REPL) tidak berantakan atau tertimpa teksnya.
+              const containerW = container.clientWidth || window.innerWidth;
+              const charW = (paneState.term._core && paneState.term._core._renderService && paneState.term._core._renderService.dimensions && paneState.term._core._renderService.dimensions.css.cell.width) || 8.5;
+              const charH = (paneState.term._core && paneState.term._core._renderService && paneState.term._core._renderService.dimensions && paneState.term._core._renderService.dimensions.css.cell.height) || 18;
+              const safeCols = Math.max(48, Math.floor(containerW / charW));
+
+              if (!paneState._stableRows || paneState._stableRows < 24) {
+                const fullH = Math.max(window.screen.availHeight ? window.screen.availHeight * 0.72 : 550, container.clientHeight);
+                paneState._stableRows = Math.max(24, Math.floor(fullH / charH));
+              }
+              const safeRows = paneState._stableRows;
+              const prevCols = paneState.term.cols;
+              const prevRows = paneState.term.rows;
+
+              if (prevCols !== safeCols || prevRows !== safeRows) {
+                paneState.term.resize(safeCols, safeRows);
+                if (paneState.sessionId) {
+                  this.sendPtyResize(paneState.sessionId, safeCols, safeRows);
+                }
+              }
+              this.syncMobileScreenPosition(paneState);
+              return;
+            }
+
+            // Mode Desktop: Standar fitAddon.fit()
+            if (paneState.fitAddon) {
               const prevCols = paneState.term.cols;
               const prevRows = paneState.term.rows;
               paneState.fitAddon.fit();
               const newCols = paneState.term.cols;
               const newRows = paneState.term.rows;
-              if (this.isMobileDevice()) {
-                // On mobile, keyboard toggles viewport height rapidly. Only resize PTY immediately if cols changed.
-                if (prevCols !== newCols) {
-                  this.sendPtyResize(paneState.sessionId, newCols, Math.max(24, newRows));
-                } else if (prevRows !== newRows) {
-                  // Debounce row resize by 350ms to prevent ConPTY buffer thrashing during virtual keyboard popups
-                  if (paneState._resizeTimer) clearTimeout(paneState._resizeTimer);
-                  paneState._resizeTimer = setTimeout(() => {
-                    if (paneState.term && paneState.sessionId) {
-                      this.sendPtyResize(paneState.sessionId, paneState.term.cols, Math.max(24, paneState.term.rows));
-                    }
-                  }, 350);
-                }
-              } else {
-                if (prevCols !== newCols || prevRows !== newRows) {
-                  this.sendPtyResize(paneState.sessionId, newCols, newRows);
-                }
+              if (prevCols !== newCols || prevRows !== newRows) {
+                this.sendPtyResize(paneState.sessionId, newCols, newRows);
               }
-            } catch (_) {}
-          }
+            }
+          } catch (_) {}
         });
         paneState._resizeObserver.observe(container);
       }
@@ -32384,6 +32463,9 @@ Aturan:
 
         // Ensure the PTY matches the currently typing device's screen dimensions
         this.ensureActivePtySize(paneState);
+        if (this.isMobileDevice()) {
+          this.syncMobileScreenPosition(paneState);
+        }
 
         // Mode Live PTY (Local Server & Remote WAN)
         if (!paneState.isFallbackMode) {
@@ -32415,8 +32497,12 @@ Aturan:
       });
 
       term.onResize(({ cols, rows }) => {
-        if (!this.isMobileDevice() || !paneState.ptyCols) {
+        if (!this.isMobileDevice()) {
           this.sendPtyResize(paneState.sessionId || sessionId, cols, rows);
+        } else {
+          const safeCols = Math.max(48, cols);
+          const safeRows = Math.max(24, paneState._stableRows || rows || 26);
+          this.sendPtyResize(paneState.sessionId || sessionId, safeCols, safeRows);
         }
       });
 
@@ -32429,11 +32515,12 @@ Aturan:
       const rows = paneState.term.rows;
       if (cols <= 0 || rows <= 0) return;
       if (this.isMobileDevice()) {
-        // Soft keyboard triggers frequent height/row fluctuations on mobile.
-        // Only trigger immediate PTY resize if width (cols) changed.
-        if (paneState.ptyCols !== cols) {
-          paneState.ptyCols = cols;
-          this.sendPtyResize(paneState.sessionId, cols, Math.max(24, rows));
+        const safeCols = Math.max(48, cols);
+        const safeRows = Math.max(24, paneState._stableRows || rows || 26);
+        if (paneState.ptyCols !== safeCols || paneState.ptyRows !== safeRows) {
+          paneState.ptyCols = safeCols;
+          paneState.ptyRows = safeRows;
+          this.sendPtyResize(paneState.sessionId, safeCols, safeRows);
         }
         return;
       }
@@ -32623,6 +32710,9 @@ Aturan:
 
           if (shouldAutoScroll) {
             currentTerm.scrollToBottom();
+            if (this.isMobileDevice()) {
+              this.syncMobileScreenPosition(paneState);
+            }
           }
           if (paneState.updateScrollUI) {
             paneState.updateScrollUI();
@@ -32777,8 +32867,9 @@ Aturan:
 
     async sendPtyResize(sessionId, cols, rows) {
       const minSafeCols = this.isMobileDevice() ? 48 : 80;
+      const minSafeRows = this.isMobileDevice() ? 24 : 20;
       const safeCols = Math.max(minSafeCols, parseInt(cols, 10) || minSafeCols);
-      const safeRows = Math.max(20, parseInt(rows, 10) || 28);
+      const safeRows = Math.max(minSafeRows, parseInt(rows, 10) || 28);
       const tab = this.getActiveTab();
       const panes = [tab?.pane1, tab?.pane2].filter(p => p && p.sessionId === sessionId);
       const wsPane = panes.find(p => p.ws && p.ws.readyState === WebSocket.OPEN);
@@ -32802,14 +32893,29 @@ Aturan:
     fitAllPanes() {
       const tab = this.getActiveTab();
       if (!tab) return;
+      const isMobile = this.isMobileDevice();
       const doFit = (pane) => {
-        if (pane && pane.fitAddon && pane.term) {
+        if (pane && pane.term) {
           try {
-            pane.fitAddon.fit();
-            if (pane.sessionId) {
-              this.sendPtyResize(pane.sessionId, pane.term.cols, pane.term.rows);
-              if (!pane._hasReceivedData && (this.isRemoteConnected || this.isWindowsSynced)) {
-                this.sendPtyInput(pane.sessionId, '\r');
+            if (isMobile) {
+              const container = pane.screenContainer || document.getElementById(`termScreen${pane.paneNum || 1}`);
+              const cW = (container && container.clientWidth) || window.innerWidth;
+              const charW = (pane.term._core && pane.term._core._renderService && pane.term._core._renderService.dimensions && pane.term._core._renderService.dimensions.css.cell.width) || 8.5;
+              const safeCols = Math.max(48, Math.floor(cW / charW));
+              const safeRows = Math.max(24, pane._stableRows || 26);
+              pane.term.resize(safeCols, safeRows);
+              if (pane.sessionId) {
+                this.sendPtyResize(pane.sessionId, safeCols, safeRows);
+              }
+              this.syncMobileScreenPosition(pane);
+              pane.term.scrollToBottom();
+            } else if (pane.fitAddon) {
+              pane.fitAddon.fit();
+              if (pane.sessionId) {
+                this.sendPtyResize(pane.sessionId, pane.term.cols, pane.term.rows);
+                if (!pane._hasReceivedData && (this.isRemoteConnected || this.isWindowsSynced)) {
+                  this.sendPtyInput(pane.sessionId, '\r');
+                }
               }
             }
           } catch (_) {}
@@ -33956,7 +34062,17 @@ Aturan:
 
       window.addEventListener('resize', () => {
         this.fitAllPanes();
+        this.syncMobileViewport();
       });
+
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => {
+          this.syncMobileViewport();
+        });
+        window.visualViewport.addEventListener('scroll', () => {
+          this.syncMobileViewport();
+        });
+      }
 
       // Capture-phase keydown: Pastikan ketikan keyboard desktop (termasuk '/', Ctrl+C, Esc)
       // selalu diarahkan ke xterm PTY aktif pada tekanan pertama meskipun fokus sempat di luar textarea
@@ -34186,12 +34302,17 @@ Aturan:
       const diag = this.diagnose(paneNum);
       const isMobile = TerminalManager.isMobileDevice();
       const minSafeCols = isMobile ? 48 : 80;
+      const minSafeRows = isMobile ? 24 : 20;
       const safeCols = Math.max(minSafeCols, term.cols || minSafeCols);
-      const safeRows = Math.max(20, term.rows || 28);
+      const safeRows = Math.max(minSafeRows, pane._stableRows || term.rows || 28);
 
-      // A. Normalisasi Dimensi PTY Host & DOM xterm
+      // A. Normalisasi Dimensi PTY Host & DOM xterm (Termux Mobile Architecture)
       try {
-        if (pane.fitAddon) {
+        if (isMobile) {
+          term.resize(safeCols, safeRows);
+          TerminalManager.syncMobileViewport();
+          TerminalManager.syncMobileScreenPosition(pane);
+        } else if (pane.fitAddon) {
           pane.fitAddon.fit();
         }
         if (pane.sessionId) {
@@ -34208,6 +34329,7 @@ Aturan:
       }
       try {
         term.scrollToBottom();
+        if (isMobile) TerminalManager.syncMobileScreenPosition(pane);
         if (pane.updateScrollUI) pane.updateScrollUI();
       } catch (_) {}
 
