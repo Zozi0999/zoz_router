@@ -40,6 +40,7 @@ const WORKSPACE_ROOT = (process.env.ZOZ_WORKSPACE_ROOT && fs.existsSync(process.
   : path.resolve(__dirname);
 const USER_HOME = process.env.USERPROFILE || os.homedir() || WORKSPACE_ROOT;
 const DEFAULT_TERMINAL_CWD = (!Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) && fs.existsSync(USER_HOME)) ? USER_HOME : WORKSPACE_ROOT;
+const SNAPSHOTS_DIR = path.join(WORKSPACE_ROOT, '.zoz-snapshots');
 
 // =========================================================================
 // CLOUDFLARE TUNNEL REMOTE ACCESS (WAN Mobile-to-Desktop) STATE & ENGINE
@@ -4651,8 +4652,9 @@ async function requestHandler(req, res) {
       time: new Date().toISOString(),
       node: process.version,
       platform: process.platform,
-      arch: process.arch,
-      cwd: process.cwd(),
+      cwd: DEFAULT_TERMINAL_CWD,
+      userHome: USER_HOME,
+      workspaceRoot: WORKSPACE_ROOT,
       mode: 'standalone-engine',
       uptime: process.uptime(),
       memoryRssMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
@@ -5311,12 +5313,7 @@ async function requestHandler(req, res) {
   // NATIVE CLAUDE-CODE PARITY WORKSPACE FILE SYSTEM API
   // Mengizinkan modifikasi langsung file fisik di direktori lokal tanpa unduh
   // =========================================================================
-  const WORKSPACE_ROOT = process.env.ZOZ_WORKSPACE_ROOT
-    ? path.resolve(process.env.ZOZ_WORKSPACE_ROOT)
-    : path.resolve(__dirname);
-  const SNAPSHOTS_DIR = path.join(WORKSPACE_ROOT, '.zoz-snapshots');
-  const USER_HOME = process.env.USERPROFILE || os.homedir() || WORKSPACE_ROOT;
-  const DEFAULT_TERMINAL_CWD = (!IS_VERCEL_ENV && fs.existsSync(USER_HOME)) ? USER_HOME : WORKSPACE_ROOT;
+  // (Top-level WORKSPACE_ROOT, USER_HOME, DEFAULT_TERMINAL_CWD, SNAPSHOTS_DIR inherited)
 
   // =========================================================================
   // CLOUDFLARE TUNNEL REMOTE ACCESS MANAGEMENT API
@@ -5414,7 +5411,7 @@ async function requestHandler(req, res) {
     while ((reqCwd.startsWith('"') && reqCwd.endsWith('"')) || (reqCwd.startsWith("'") && reqCwd.endsWith("'"))) {
       reqCwd = reqCwd.slice(1, -1).trim();
     }
-    const targetCwd = (reqCwd && fs.existsSync(reqCwd)) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
+    const targetCwd = (reqCwd && fs.existsSync(reqCwd) && path.resolve(reqCwd).toLowerCase() !== WORKSPACE_ROOT.toLowerCase()) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
     const cols = Math.max(45, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
     const rows = Math.max(15, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
 
@@ -5703,7 +5700,7 @@ async function requestHandler(req, res) {
       while ((rawCwd.startsWith('"') && rawCwd.endsWith('"')) || (rawCwd.startsWith("'") && rawCwd.endsWith("'"))) {
         rawCwd = rawCwd.slice(1, -1).trim();
       }
-      let targetCwd = rawCwd ? path.resolve(rawCwd) : DEFAULT_TERMINAL_CWD;
+      let targetCwd = (rawCwd && fs.existsSync(rawCwd) && path.resolve(rawCwd).toLowerCase() !== WORKSPACE_ROOT.toLowerCase()) ? path.resolve(rawCwd) : DEFAULT_TERMINAL_CWD;
 
       // Pastikan targetCwd ada atau fallback ke DEFAULT_TERMINAL_CWD (kecuali Vercel sandbox virtual)
       if (!fs.existsSync(targetCwd) && !IS_VERCEL_ENV) {
@@ -9281,7 +9278,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
   while ((reqCwd.startsWith('"') && reqCwd.endsWith('"')) || (reqCwd.startsWith("'") && reqCwd.endsWith("'"))) {
     reqCwd = reqCwd.slice(1, -1).trim();
   }
-  const targetCwd = (reqCwd && fs.existsSync(reqCwd)) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
+  const targetCwd = (reqCwd && fs.existsSync(reqCwd) && path.resolve(reqCwd).toLowerCase() !== WORKSPACE_ROOT.toLowerCase()) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
   const cols = Math.max(45, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
   const rows = Math.max(15, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
 

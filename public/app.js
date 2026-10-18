@@ -31038,12 +31038,15 @@ Aturan:
         });
         const data = await response.json();
         if (data && data.cwd) {
+          const resolvedCwd = (data.cwd.toLowerCase().endsWith('zoz-router') && data.userHome)
+            ? data.userHome
+            : (data.cwd.toLowerCase().endsWith('zoz-router') ? 'C:\\Users\\user' : data.cwd);
           const oldDefault = this.defaultCwd;
-          this.defaultCwd = data.cwd;
+          this.defaultCwd = resolvedCwd;
           this.tabs.forEach(t => {
-            if (t.pane1 && (!t.pane1.cwd || t.pane1.cwd === oldDefault)) t.pane1.cwd = data.cwd;
-            if (t.pane2 && (!t.pane2.cwd || t.pane2.cwd === oldDefault)) t.pane2.cwd = data.cwd;
-            if (!t.cwd || t.cwd === oldDefault) t.cwd = data.cwd;
+            if (t.pane1 && (!t.pane1.cwd || t.pane1.cwd === oldDefault || t.pane1.cwd.toLowerCase().endsWith('zoz-router'))) t.pane1.cwd = resolvedCwd;
+            if (t.pane2 && (!t.pane2.cwd || t.pane2.cwd === oldDefault || t.pane2.cwd.toLowerCase().endsWith('zoz-router'))) t.pane2.cwd = resolvedCwd;
+            if (!t.cwd || t.cwd === oldDefault || t.cwd.toLowerCase().endsWith('zoz-router')) t.cwd = resolvedCwd;
           });
           this.updatePaneHeaders();
         }
@@ -31293,11 +31296,14 @@ Aturan:
           } catch (_) {}
 
           if (data.cwd) {
-            this.defaultCwd = data.cwd;
+            const resolvedCwd = (data.cwd.toLowerCase().endsWith('zoz-router') && data.userHome)
+              ? data.userHome
+              : (data.cwd.toLowerCase().endsWith('zoz-router') ? 'C:\\Users\\user' : data.cwd);
+            this.defaultCwd = resolvedCwd;
             this.tabs.forEach(t => {
-              if (t.pane1) t.pane1.cwd = data.cwd;
-              if (t.pane2) t.pane2.cwd = data.cwd;
-              t.cwd = data.cwd;
+              if (t.pane1) t.pane1.cwd = resolvedCwd;
+              if (t.pane2) t.pane2.cwd = resolvedCwd;
+              t.cwd = resolvedCwd;
             });
           }
 
