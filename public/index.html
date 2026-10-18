@@ -75,8 +75,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261018_v369">
-  <link rel="stylesheet" href="style.css?v=20261018_v369">
+  <link rel="preload" as="style" href="style.css?v=20261018_v370">
+  <link rel="stylesheet" href="style.css?v=20261018_v370">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial select-none">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -700,16 +700,6 @@
           </div>
         </div>
 
-        <!-- Live Attachment Preview Area (Claude/Grok Style) -->
-        <div class="attachment-preview-bar" id="attachmentPreviewBar" style="display: none;">
-          <div class="preview-card" id="imagePreviewCard">
-            <img id="imagePreviewImg" src="" alt="Lampiran Gambar">
-            <button class="remove-attachment-btn" id="removeImageBtn" title="Hapus Gambar">
-              <i class="fa-solid fa-xmark"></i>
-            </button>
-          </div>
-        </div>
-
         <!-- Tombol Cepat Konversi Teks Panjang ke Markdown (Claude/Grok Style) -->
         <div class="auto-convert-doc-row" id="autoConvertDocRow" style="display: none;">
           <button class="convert-md-pill" id="convertToMdPillBtn" type="button" title="Konversi teks panjang di input menjadi file markdown (.md) agar tidak memenuhi prompt">
@@ -785,6 +775,17 @@
                 <span class="slash-menu-title">Skills</span>
               </div>
               <div class="slash-menu-list" id="slashMenuList"></div>
+            </div>
+
+            <!-- Live Attachment Preview Area (DeepSeek Style inside Composer Box) -->
+            <div class="attachment-preview-bar" id="attachmentPreviewBar" style="display: none;">
+              <!-- Preserved Connectome Template Elements (Hidden) -->
+              <div class="preview-card" id="imagePreviewCard" style="display: none;">
+                <img id="imagePreviewImg" src="" alt="Lampiran Gambar">
+                <button class="remove-attachment-btn" id="removeImageBtn" title="Hapus Gambar" type="button">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
             </div>
 
             <div class="flex items-center space-x-2 px-1 py-0.5 w-full">
@@ -2877,6 +2878,6 @@
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
   <script src="text-safety.js?v=20261017_v349" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261018_v369" defer></script>
+  <script src="app.js?v=20261018_v370" defer></script>
 </body>
 </html>

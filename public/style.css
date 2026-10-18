@@ -2088,44 +2088,135 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   z-index: 60;
 }
 
-/* Attachment Bar */
+/* DeepSeek Style Attachment Bar inside Composer */
 .attachment-preview-bar {
-  max-width: 920px;
-  margin: 0 auto 8px;
+  width: 100%;
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 6px 4px 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  order: 0;
+}
+
+.deepseek-img-cards-row {
+  display: flex;
+  align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  width: 100%;
 }
 
 .preview-card {
   position: relative;
-  width: 60px;
-  height: 60px;
-  border-radius: var(--radius-sm);
+  width: 58px;
+  height: 58px;
+  border-radius: 14px;
   overflow: hidden;
-  border: 1px solid var(--neon-cyan);
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.16s ease, border-color 0.16s ease;
+}
+
+.preview-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(0, 240, 255, 0.5);
 }
 
 .preview-card img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
+  border-radius: 13px;
 }
 
 .remove-attachment-btn {
   position: absolute;
-  top: 2px;
-  right: 2px;
-  background: rgba(0, 0, 0, 0.7);
-  border: none;
-  color: #FFF;
+  top: 3px;
+  right: 3px;
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #ffffff;
   border-radius: 50%;
-  width: 18px;
-  height: 18px;
+  width: 19px;
+  height: 19px;
   font-size: 0.65rem;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: all 0.15s ease;
+  z-index: 5;
+}
+
+.remove-attachment-btn:hover {
+  background: rgba(239, 68, 68, 0.9);
+  border-color: #ef4444;
+  color: #ffffff;
+  transform: scale(1.1);
+}
+
+/* DeepSeek Smart Prompt Suggestions Row */
+.image-suggestion-pills-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  margin-top: 10px;
+  margin-bottom: 2px;
+  padding-bottom: 2px;
+}
+
+.image-suggestion-pills-row::-webkit-scrollbar {
+  display: none;
+}
+
+.img-suggestion-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: all 0.16s ease;
+  flex-shrink: 0;
+}
+
+.img-suggestion-pill:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(0, 240, 255, 0.4);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.img-suggestion-pill:active {
+  transform: scale(0.96);
+}
+
+.deepseek-doc-chips-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+  margin-top: 6px;
 }
 
 /* Active Preset Banner */

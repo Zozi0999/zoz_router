@@ -10528,18 +10528,21 @@ Aturan wajib:
 
     els.attachmentPreviewBar.style.display = 'flex';
 
-    // Clear existing preview cards & chips
-    els.attachmentPreviewBar.querySelectorAll('.preview-card, .doc-preview-chip').forEach(c => c.remove());
+    // Clear existing dynamic preview cards, chips & suggestion pills (preserve Connectome template #imagePreviewCard)
+    els.attachmentPreviewBar.querySelectorAll('.dynamic-preview-card, .deepseek-img-cards-row, .doc-preview-chip, .deepseek-doc-chips-row, .image-suggestion-pills-row').forEach(c => c.remove());
 
-    // Append Image Preview Cards
+    // Append Image Preview Cards (DeepSeek Style)
     if (hasImages) {
+      const imgRow = document.createElement('div');
+      imgRow.className = 'deepseek-img-cards-row';
+
       STATE.attachedImages.forEach((imgSrc, idx) => {
         const card = document.createElement('div');
-        card.className = 'preview-card';
+        card.className = 'preview-card dynamic-preview-card deepseek-preview-card';
         card.title = 'Klik untuk melihat foto layar penuh';
         card.innerHTML = `
           <img src="${escapeHtml(imgSrc)}" alt="Lampiran Foto ${idx + 1}" loading="lazy" decoding="async">
-          <button class="remove-attachment-btn" data-img-idx="${idx}" title="Hapus Foto"><i class="fa-solid fa-xmark"></i></button>
+          <button class="remove-attachment-btn" data-img-idx="${idx}" title="Hapus Foto" type="button"><i class="fa-solid fa-xmark"></i></button>
         `;
         card.querySelector('img').addEventListener('click', (e) => {
           e.stopPropagation();
@@ -10549,12 +10552,46 @@ Aturan wajib:
           e.stopPropagation();
           removeAttachedImage(idx);
         });
-        els.attachmentPreviewBar.appendChild(card);
+        imgRow.appendChild(card);
       });
+      els.attachmentPreviewBar.appendChild(imgRow);
+
+      // DeepSeek Smart Prompt Suggestions Row
+      const pillsRow = document.createElement('div');
+      pillsRow.className = 'image-suggestion-pills-row';
+      pillsRow.innerHTML = `
+        <button type="button" class="img-suggestion-pill" data-prompt="What's This" title="Tanyakan apa ini">
+          <span>What's This &rarr;</span>
+        </button>
+        <button type="button" class="img-suggestion-pill" data-prompt="Analyze" title="Minta AI menganalisis gambar ini">
+          <span>Analyze &rarr;</span>
+        </button>
+        <button type="button" class="img-suggestion-pill" data-prompt="Suggest a Solution" title="Minta AI memberikan solusi berdasarkan gambar">
+          <span>Suggest a Solution &rarr;</span>
+        </button>
+      `;
+
+      pillsRow.querySelectorAll('.img-suggestion-pill').forEach(pill => {
+        pill.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const promptText = pill.dataset.prompt;
+          if (els.promptInput) {
+            els.promptInput.value = promptText;
+            els.promptInput.focus();
+            autoResizeTextarea(els.promptInput);
+          }
+          AudioEngine.click();
+        });
+      });
+
+      els.attachmentPreviewBar.appendChild(pillsRow);
     }
 
     // Append Doc Chips
     if (hasDocs) {
+      const docRow = document.createElement('div');
+      docRow.className = 'deepseek-doc-chips-row';
       STATE.attachedDocs.forEach((doc, idx) => {
         const isMarkdownOrCode = Boolean(doc.isAutoConvertedMarkdown || (doc.name && /\.(?:md|markdown|js|jsx|ts|tsx|py|html|css|json|sql|sh|txt)$/i.test(doc.name)));
         const iconClass = isMarkdownOrCode ? 'fa-solid fa-file-code' : 'fa-solid fa-file-lines';
@@ -10566,7 +10603,7 @@ Aturan wajib:
           <i class="${iconClass} doc-icon"></i>
           <span class="doc-name" title="${escapeHtml(doc.name)}">${escapeHtml(doc.name)}</span>
           <span class="doc-size">(${escapeHtml(doc.size)})</span>
-          <button class="remove-doc-btn" data-idx="${idx}" title="Hapus file"><i class="fa-solid fa-xmark"></i></button>
+          <button class="remove-doc-btn" data-idx="${idx}" title="Hapus file" type="button"><i class="fa-solid fa-xmark"></i></button>
         `;
         chip.addEventListener('click', (e) => {
           if (e.target.closest('.remove-doc-btn')) return;
@@ -10576,8 +10613,9 @@ Aturan wajib:
           e.stopPropagation();
           removeAttachedDoc(idx);
         });
-        els.attachmentPreviewBar.appendChild(chip);
+        docRow.appendChild(chip);
       });
+      els.attachmentPreviewBar.appendChild(docRow);
     }
   }
 
