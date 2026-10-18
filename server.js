@@ -5632,6 +5632,11 @@ async function requestHandler(req, res) {
       if (session && session.pty && typeof session.pty.resize === 'function') {
         try {
           if (session.cols !== cols || session.rows !== rows) {
+            const now = Date.now();
+            if (session._lastResizeTime && (now - session._lastResizeTime) < 200) {
+              return sendJSON(res, 200, { success: true, debounced: true, cols: session.cols, rows: session.rows });
+            }
+            session._lastResizeTime = now;
             session.pty.resize(cols, rows);
             session.cols = cols;
             session.rows = rows;
@@ -9412,6 +9417,11 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
               const c = Math.max(45, Math.min(300, parseInt(parsed.cols, 10) || cols));
               const r = Math.max(15, Math.min(100, parseInt(parsed.rows, 10) || rows));
               if (session.cols !== c || session.rows !== r) {
+                const now = Date.now();
+                if (session._lastResizeTime && (now - session._lastResizeTime) < 200) {
+                  return;
+                }
+                session._lastResizeTime = now;
                 session.pty.resize(c, r);
                 session.cols = c;
                 session.rows = r;
@@ -9422,7 +9432,9 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
                 if (session.wsClients && session.wsClients.size > 0) {
                   const wsFrame = encodeWsFrame(resizePayload);
                   for (const ws of session.wsClients) {
-                    try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+                    if (ws !== socket) {
+                      try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+                    }
                   }
                 }
               }

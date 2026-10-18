@@ -30818,8 +30818,12 @@ Aturan:
       paneState.ptyRows = targetRows;
 
       if (paneState.term) {
-        paneState.term.resize(targetCols, targetRows);
-        paneState.term.clear();
+        paneState._isRemoteResizing = true;
+        try {
+          paneState.term.resize(targetCols, targetRows);
+        } finally {
+          setTimeout(() => { paneState._isRemoteResizing = false; }, 120);
+        }
       }
 
       this.sendPtyResize(paneState.sessionId, targetCols, targetRows);
@@ -31141,11 +31145,8 @@ Aturan:
           document.getElementById('btnBannerWake')?.addEventListener('click', () => {
             const tab = this.getActiveTab();
             const sId = tab?.pane1?.sessionId;
-            if (sId && tab.pane1?.term) {
+            if (sId && tab.pane1?.term && !this.isMobileDevice()) {
               this.sendPtyResize(sId, tab.pane1.term.cols, tab.pane1.term.rows);
-              if (!tab.pane1._hasReceivedData) {
-                this.sendPtyInput(sId, '\r');
-              }
             }
             this.fitAllPanes();
             showToast('Layar terminal disesuaikan & diperbarui.', 'info');
@@ -32084,11 +32085,8 @@ Aturan:
       if (this.isRemoteConnected || this.isWindowsSynced) {
         if (!tab.pane1?.eventSource) {
           this.connectStream(tab, tab.pane1, 1);
-        } else if (tab.pane1?.term) {
+        } else if (tab.pane1?.term && !this.isMobileDevice()) {
           this.sendPtyResize(tab.pane1.sessionId, tab.pane1.term.cols, tab.pane1.term.rows);
-          if (!tab.pane1._hasReceivedData) {
-            this.sendPtyInput(tab.pane1.sessionId, '\r');
-          }
         }
       }
     },
@@ -32249,12 +32247,15 @@ Aturan:
             const charH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
             const safeCols = Math.max(48, Math.floor(containerW / charW));
             paneState._stableRows = Math.max(24, Math.floor(fullH / charH));
-            term.resize(safeCols, paneState._stableRows);
-            this.sendPtyResize(sessionId, safeCols, paneState._stableRows);
+            paneState._isRemoteResizing = true;
+            try {
+              term.resize(safeCols, paneState._stableRows);
+            } finally {
+              setTimeout(() => { paneState._isRemoteResizing = false; }, 120);
+            }
             this.syncMobileScreenPosition(paneState);
           } else {
             fitAddon.fit();
-            this.sendPtyResize(sessionId, term.cols, term.rows);
           }
         } catch (_) {}
         setTimeout(() => {
@@ -32262,15 +32263,12 @@ Aturan:
             if (this.isMobileDevice()) {
               this.syncMobileViewport();
               this.syncMobileScreenPosition(paneState);
-            } else {
-              fitAddon.fit();
-              this.sendPtyResize(sessionId, term.cols, term.rows);
             }
           } catch (_) {}
         }, 50);
       }
 
-      // Attach ResizeObserver to auto-fit and sync PTY on any layout or animation change
+      // Attach ResizeObserver: hanya untuk scroll/viewport check di mobile, debounced fit di desktop
       if (typeof window.ResizeObserver !== 'undefined') {
         if (paneState._resizeObserver) {
           try { paneState._resizeObserver.disconnect(); } catch (_) {}
@@ -32279,43 +32277,30 @@ Aturan:
           if (!paneState.term) return;
           try {
             if (this.isMobileDevice()) {
-              // Arsitektur Termux Mobile: Jangan pernah mengecilkan rows buffer xterm atau PTY
-              // saat keyboard virtual muncul. Jaga kestabilan grid (min 24 baris) agar AI CLI
-              // (Claude Code, Ollama, PSReadLine, Python REPL) tidak berantakan atau tertimpa teksnya.
-              const containerW = container.clientWidth || window.innerWidth;
-              const charW = (paneState.term._core && paneState.term._core._renderService && paneState.term._core._renderService.dimensions && paneState.term._core._renderService.dimensions.css.cell.width) || 8.5;
-              const charH = (paneState.term._core && paneState.term._core._renderService && paneState.term._core._renderService.dimensions && paneState.term._core._renderService.dimensions.css.cell.height) || 18;
-              const safeCols = Math.max(48, Math.floor(containerW / charW));
-
-              if (!paneState._stableRows || paneState._stableRows < 24) {
-                const fullH = Math.max(window.screen.availHeight ? window.screen.availHeight * 0.72 : 550, container.clientHeight);
-                paneState._stableRows = Math.max(24, Math.floor(fullH / charH));
+              // Di mobile: JANGAN PERNAH panggil sendPtyResize atau ubah ukuran PTY host secara sepihak!
+              // Cukup pastikan scroll viewport tetap di posisi terbawah jika user tidak sedang scroll ke atas.
+              if (!paneState._userScrolledUp) {
+                try { paneState.term.scrollToBottom(); } catch (_) {}
               }
-              const safeRows = paneState._stableRows;
-              const prevCols = paneState.term.cols;
-              const prevRows = paneState.term.rows;
-
-              if (prevCols !== safeCols || prevRows !== safeRows) {
-                paneState.term.resize(safeCols, safeRows);
-                if (paneState.sessionId) {
-                  this.sendPtyResize(paneState.sessionId, safeCols, safeRows);
-                }
-              }
-              this.syncMobileScreenPosition(paneState);
               return;
             }
 
-            // Mode Desktop: Standar fitAddon.fit()
-            if (paneState.fitAddon) {
-              const prevCols = paneState.term.cols;
-              const prevRows = paneState.term.rows;
-              paneState.fitAddon.fit();
-              const newCols = paneState.term.cols;
-              const newRows = paneState.term.rows;
-              if (prevCols !== newCols || prevRows !== newRows) {
-                this.sendPtyResize(paneState.sessionId, newCols, newRows);
-              }
-            }
+            // Mode Desktop: fitAddon.fit() dengan debounce 250ms dan perlindungan echo remote
+            if (paneState._isRemoteResizing) return;
+            if (paneState._desktopResizeTimer) clearTimeout(paneState._desktopResizeTimer);
+            paneState._desktopResizeTimer = setTimeout(() => {
+              if (!paneState.fitAddon || !paneState.term || paneState._isRemoteResizing) return;
+              try {
+                const prevCols = paneState.term.cols;
+                const prevRows = paneState.term.rows;
+                paneState.fitAddon.fit();
+                const newCols = paneState.term.cols;
+                const newRows = paneState.term.rows;
+                if ((prevCols !== newCols || prevRows !== newRows) && paneState.sessionId) {
+                  this.sendPtyResize(paneState.sessionId, newCols, newRows);
+                }
+              } catch (_) {}
+            }, 250);
           } catch (_) {}
         });
         paneState._resizeObserver.observe(container);
@@ -32581,12 +32566,9 @@ Aturan:
       });
 
       term.onResize(({ cols, rows }) => {
+        if (paneState._isRemoteResizing) return;
         if (!this.isMobileDevice()) {
           this.sendPtyResize(paneState.sessionId || sessionId, cols, rows);
-        } else {
-          const safeCols = Math.max(48, cols);
-          const safeRows = Math.max(24, paneState._stableRows || rows || 26);
-          this.sendPtyResize(paneState.sessionId || sessionId, safeCols, safeRows);
         }
       });
 
@@ -32599,12 +32581,18 @@ Aturan:
       // tanpa menimpa PTY backend secara sepihak agar tidak memicu resize war antar-perangkat
       if (paneState.ptyCols && paneState.ptyRows) {
         if (paneState.term.cols !== paneState.ptyCols || paneState.term.rows !== paneState.ptyRows) {
-          paneState.term.resize(paneState.ptyCols, paneState.ptyRows);
+          paneState._isRemoteResizing = true;
+          try {
+            paneState.term.resize(paneState.ptyCols, paneState.ptyRows);
+          } finally {
+            setTimeout(() => { paneState._isRemoteResizing = false; }, 120);
+          }
           this.syncTerminalFrameDisplay(paneState);
         }
         return;
       }
-      const cols = paneState.term.cols || (this.isMobileDevice() ? 48 : 80);
+      if (this.isMobileDevice()) return;
+      const cols = paneState.term.cols || 80;
       const rows = paneState.term.rows || 24;
       paneState.ptyCols = cols;
       paneState.ptyRows = rows;
@@ -32806,7 +32794,12 @@ Aturan:
           paneState.ptyCols = newCols;
           paneState.ptyRows = newRows;
           if (currentTerm && (currentTerm.cols !== newCols || currentTerm.rows !== newRows)) {
-            currentTerm.resize(newCols, newRows);
+            paneState._isRemoteResizing = true;
+            try {
+              currentTerm.resize(newCols, newRows);
+            } finally {
+              setTimeout(() => { paneState._isRemoteResizing = false; }, 120);
+            }
             this.syncTerminalFrameDisplay(paneState);
           }
         }
@@ -32817,7 +32810,12 @@ Aturan:
         if (cRows) paneState.ptyRows = cRows;
         if (currentTerm && cCols && cRows) {
           if (currentTerm.cols !== cCols || currentTerm.rows !== cRows) {
-            currentTerm.resize(cCols, cRows);
+            paneState._isRemoteResizing = true;
+            try {
+              currentTerm.resize(cCols, cRows);
+            } finally {
+              setTimeout(() => { paneState._isRemoteResizing = false; }, 120);
+            }
           }
           this.syncTerminalFrameDisplay(paneState);
         }
@@ -32989,24 +32987,14 @@ Aturan:
         if (pane && pane.term) {
           try {
             if (isMobile) {
-              const container = pane.screenContainer || document.getElementById(`termScreen${pane.paneNum || 1}`);
-              const cW = (container && container.clientWidth) || window.innerWidth;
-              const charW = (pane.term._core && pane.term._core._renderService && pane.term._core._renderService.dimensions && pane.term._core._renderService.dimensions.css.cell.width) || 8.5;
-              const safeCols = Math.max(48, Math.floor(cW / charW));
-              const safeRows = Math.max(24, pane._stableRows || 26);
-              pane.term.resize(safeCols, safeRows);
-              if (pane.sessionId) {
-                this.sendPtyResize(pane.sessionId, safeCols, safeRows);
+              if (!pane._userScrolledUp) {
+                try { pane.term.scrollToBottom(); } catch (_) {}
               }
-              this.syncMobileScreenPosition(pane);
-              pane.term.scrollToBottom();
             } else if (pane.fitAddon) {
+              if (pane._isRemoteResizing) return;
               pane.fitAddon.fit();
               if (pane.sessionId) {
                 this.sendPtyResize(pane.sessionId, pane.term.cols, pane.term.rows);
-                if (!pane._hasReceivedData && (this.isRemoteConnected || this.isWindowsSynced)) {
-                  this.sendPtyInput(pane.sessionId, '\r');
-                }
               }
             }
           } catch (_) {}
