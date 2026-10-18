@@ -30500,6 +30500,39 @@ Aturan:
       }
     };
 
+    const syncTerminalOnResume = () => {
+      if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.getActiveTab === 'function') {
+        const tTab = TerminalManager.getActiveTab();
+        if (tTab) {
+          [1, 2].forEach(pNum => {
+            const pState = TerminalManager.getPaneState(pNum);
+            if (pState) {
+              const sId = pState.sessionId || TerminalManager.getEffectiveSessionId(tTab, pNum);
+              pState.sessionId = sId;
+              const savedAuto = localStorage.getItem(`zoz_term_auto_enter_${sId}`) || localStorage.getItem('zoz_term_auto_enter_last');
+              if (savedAuto !== null) {
+                pState.autoEnter = (savedAuto === '1');
+                if (pNum === 1 && tTab) tTab.autoEnter = pState.autoEnter;
+              }
+              TerminalManager.sendAutoEnterToServer(sId, pState.autoEnter);
+              // Periksa jika koneksi WebSocket terputus atau tertidur saat HP keluar/background
+              if (!pState.isFallbackMode) {
+                if (!pState.ws || pState.ws.readyState === WebSocket.CLOSED || pState.ws.readyState === WebSocket.CLOSING) {
+                  TerminalManager.connectStream(tTab, pState, pNum);
+                } else if (pState.ws && pState.ws.readyState === WebSocket.OPEN) {
+                  try {
+                    pState.ws.send(JSON.stringify({ type: 'auto-enter', enabled: pState.autoEnter, session: sId }));
+                  } catch (_) {}
+                }
+              }
+            }
+          });
+          TerminalManager.updateAutoEnterUI();
+          TerminalManager.fitAllPanes();
+        }
+      }
+    };
+
     // Saat window blur atau diminimize: kunci posisi scroll yang sedang dibaca pengguna
     window.addEventListener('blur', preserveChatScrollPosition);
     document.addEventListener('visibilitychange', () => {
@@ -30532,46 +30565,14 @@ Aturan:
         });
         requestAnimationFrame(restoreChatScrollPosition);
         checkBackgroundChatTasksSync();
-        if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.getActiveTab === 'function') {
-          const tTab = TerminalManager.getActiveTab();
-          if (tTab) {
-            TerminalManager.updateAutoEnterUI();
-            const pNum = TerminalManager.activePane || 1;
-            const pState = TerminalManager.getPaneState(pNum);
-            if (pState && pState.sessionId) {
-              const savedAuto = localStorage.getItem(`zoz_term_auto_enter_${pState.sessionId}`) || localStorage.getItem('zoz_term_auto_enter_last');
-              if (savedAuto === '1') {
-                pState.autoEnter = true;
-                if (pNum === 1 && tTab) tTab.autoEnter = true;
-                TerminalManager.sendAutoEnterToServer(pState.sessionId, true);
-                TerminalManager.updateAutoEnterUI();
-              }
-            }
-          }
-        }
+        syncTerminalOnResume();
       }
     });
 
     window.addEventListener('focus', () => {
       requestAnimationFrame(restoreChatScrollPosition);
       checkBackgroundChatTasksSync();
-      if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.getActiveTab === 'function') {
-        const tTab = TerminalManager.getActiveTab();
-        if (tTab) {
-          TerminalManager.updateAutoEnterUI();
-          const pNum = TerminalManager.activePane || 1;
-          const pState = TerminalManager.getPaneState(pNum);
-          if (pState && pState.sessionId) {
-            const savedAuto = localStorage.getItem(`zoz_term_auto_enter_${pState.sessionId}`) || localStorage.getItem('zoz_term_auto_enter_last');
-            if (savedAuto === '1') {
-              pState.autoEnter = true;
-              if (pNum === 1 && tTab) tTab.autoEnter = true;
-              TerminalManager.sendAutoEnterToServer(pState.sessionId, true);
-              TerminalManager.updateAutoEnterUI();
-            }
-          }
-        }
-      }
+      syncTerminalOnResume();
     });
 
     if (window.visualViewport) {
@@ -32081,10 +32082,13 @@ Aturan:
         return;
       }
 
-      // In desktop xterm mode with active live PTY, send raw carriage return (\r) directly to the pane's PTY
+      // In desktop/mobile xterm mode with active live PTY, send carriage return (\r) and newline (\n) directly to the pane's PTY
       if (paneState && paneState.term && !paneState.isFallbackMode) {
         const sessionId = paneState.sessionId || `${tab.id}-p${paneNum}`;
         this.sendPtyInput(sessionId, '\r');
+        setTimeout(() => {
+          this.sendPtyInput(sessionId, '\n');
+        }, 30);
         paneState.term.scrollToBottom();
         this.focusActiveInput();
       } else {
@@ -32940,7 +32944,7 @@ Aturan:
             this.syncTerminalFrameDisplay(paneState);
           }
         }
-      } else if (msg.type === 'connected') {
+      } else if (msg.type === 'connected' || msg.type === 'session') {
         const cCols = parseInt(msg.cols, 10);
         const cRows = parseInt(msg.rows, 10);
         if (cCols) paneState.ptyCols = cCols;
@@ -32989,6 +32993,10 @@ Aturan:
         if (typeof msg.autoEnter === 'boolean') {
           paneState.autoEnter = msg.autoEnter;
           if (paneNum === 1 && tab) tab.autoEnter = msg.autoEnter;
+          try {
+            localStorage.setItem(`zoz_term_auto_enter_${sessionId}`, msg.autoEnter ? '1' : '0');
+            localStorage.setItem('zoz_term_auto_enter_last', msg.autoEnter ? '1' : '0');
+          } catch (_) {}
           this.updateAutoEnterUI();
         }
       } else if (msg.type === 'exit') {
@@ -33020,54 +33028,71 @@ Aturan:
       if (paneState._lastAutoRespond && (now - paneState._lastAutoRespond) < 1000) return;
 
       // Strip ANSI escape codes (CSI, OSC, etc.) and control characters
-      const clean = chunk
+      const cleanChunk = chunk
         .replace(/\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\].*?(?:\x07|\x1b\\))/g, '')
         .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, ' ');
 
-      if (!clean.trim()) return;
+      if (!cleanChunk.trim()) return;
 
-      // Keep recent active window (last 600 chars)
-      paneState._recentText = ((paneState._recentText || '') + ' ' + clean).slice(-600);
-      const textBuffer = paneState._recentText.trim();
+      // Keep recent active window (last 3000 chars to account for large file diffs and tool previews)
+      paneState._recentText = ((paneState._recentText || '') + ' ' + cleanChunk).slice(-3000);
+      const textBuffer = paneState._recentText.replace(/\s+/g, ' ').trim();
 
       // Guard: Never auto-respond if waiting at password prompt
-      if (/(?:password|passphrase|secret key|access token|pin):\s*$/i.test(textBuffer)) return;
+      if (/(?:password|passphrase|secret key|access token|api key|pin):\s*$/i.test(textBuffer)) return;
 
       // Guard: Never auto-respond if waiting at a bare PowerShell prompt without interactive prompt
-      if (/(?:PS [A-Z]:\\[^>]*>)\s*$/i.test(textBuffer) && !/(?:Run this command|permission for|allow|proceed|continue|\b[yY]\/[nN]\b)/i.test(textBuffer)) return;
+      if (/(?:PS [A-Z]:\\[^>]*>\s*$|^[^>]*>\s*$)/i.test(textBuffer) && !/(?:Run this command|permission|allow|accept|approve|proceed|continue|\b[yY]\/[nN]\b|[>❯›→*]\s*1\.)/i.test(textBuffer)) {
+        return;
+      }
 
-      // Type 1: Interactive CLI Permission dialogs (Claude Code, Gemini CLI, Antigravity CLI)
-      // "Run this command? > 1. Yes, run command ... esc to cancel"
-      // "Accept this file edit? > 1. Yes, accept this change ... (shift+tab to auto-approve)"
-      const isCliPermissionMenu = (
-        /(?:Run this command\?|Requesting permission for|Allow this command\?|Do you want to run this command\?|Permission required|Accept (?:this|the|all)?\s*(?:file|code|change|edit|diff|plan)?\b.*\?|shift\+tab to auto-approve)/i.test(textBuffer) &&
-        /(?:>\s*1\.\s*Yes|1\.\s*Yes|Navigate|tab Amend|esc to cancel|auto-approve)/i.test(textBuffer)
-      ) || /(?:>\s*1\.\s*Yes,\s*accept|>\s*1\.\s*Yes,\s*run)/i.test(textBuffer);
+      // Type 1: Universal Interactive CLI Affirmative Menus (AGY CLI, Gemini CLI, Claude Code, Inquirer, Enquirer, etc.)
+      // Matches any menu where Option 1 is pre-selected with cursor (>, ❯, ›, →, *) and offers affirmative action:
+      // Yes, Allow, Accept, Approve, Proceed, Continue, Confirm, Run, Always, Apply, Save, Overwrite, Keep, Create, Update, Execute, Ya, Izinkan, Setujui, Lanjutkan
+      // OR any prompt question ending with '?' followed by navigation/option indicators.
+      const isCliAffirmativeMenu = (
+        /(?:[>❯›→*]\s*(?:1\.|\(?1\)?|\[1\])?\s*(?:Yes|Allow|Accept|Approve|Proceed|Continue|Confirm|Run|Always|Apply|Save|Overwrite|Keep|Create|Update|Execute|Ya|Izinkan|Setujui|Lanjutkan)\b)/i.test(textBuffer) ||
+        (
+          /(?:\bAllow\b|\bAccept\b|\bApprove\b|\bRun\b|\bExecute\b|\bProceed\b|\bConfirm\b|\bPermission\b|\bRequesting permission\b|\bDo you want to\b|\bWould you like to\b).*\?/i.test(textBuffer) &&
+          /(?:[>❯›→*]\s*1\.|\bNavigate\b|\btab Amend\b|\besc to cancel\b|\bf full diff\b|\bctrl\+r Review\b|\bauto-approve\b|[>❯›→*]\s*Yes\b)/i.test(textBuffer)
+        )
+      );
 
       // Type 2: Interactive batch confirmation dialogs (e.g. [y/n], [Y/n], (yes/no), Terminate batch job (Y/N)?)
-      const confirmYRegex = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\bdo you want to continue\s*\(?[yY]\/[nN]\)?|\bare you sure\s*\(?[yY]\/[nN]\)?|\bproceed with operation\s*\(?[yY]\/[nN]\)?|\bOk to proceed\? \([yY]\)|\bApakah Anda yakin|\bLanjutkan\?)/i;
+      const confirmYRegex = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\?.*\(y\/N\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\bdo you want to continue\s*\(?[yY]\/[nN]\)?|\bare you sure\s*\(?[yY]\/[nN]\)?|\bproceed with operation\s*\(?[yY]\/[nN]\)?|\bOk to proceed\? \([yY]\)|\bApakah Anda yakin|\bLanjutkan\?)/i;
 
       // Type 3: Explicit "press enter to continue" prompts
-      const enterOnlyRegex = /(?:press (?:any key|enter) to continue|hit enter to continue|press \[enter\] to continue|\bpress enter to\b|\btekan enter untuk\b)/i;
+      const enterOnlyRegex = /(?:press (?:any key|enter) to continue|hit enter to continue|press \[enter\] to continue|\bpress enter to\b|\btekan enter untuk\b|\[enter\] to continue|\(enter to continue\))/i;
 
       const sId = paneState.sessionId || `${tab.id}-p${paneNum}`;
 
-      if (isCliPermissionMenu) {
+      if (isCliAffirmativeMenu) {
         paneState._lastAutoRespond = now;
         paneState._recentText = '';
         setTimeout(() => {
           if (paneState.autoEnter && sId) {
             this.sendPtyInput(sId, '\r');
+            // Dual-flush newline to ensure ConPTY interactive readline triggers
+            setTimeout(() => {
+              if (paneState.autoEnter && sId) {
+                this.sendPtyInput(sId, '\n');
+              }
+            }, 35);
           }
-        }, 180);
+        }, 120);
       } else if (confirmYRegex.test(textBuffer)) {
         paneState._lastAutoRespond = now;
         paneState._recentText = '';
         setTimeout(() => {
           if (paneState.autoEnter && sId) {
             this.sendPtyInput(sId, 'y\r');
+            setTimeout(() => {
+              if (paneState.autoEnter && sId) {
+                this.sendPtyInput(sId, '\n');
+              }
+            }, 35);
           }
-        }, 180);
+        }, 120);
       } else if (enterOnlyRegex.test(textBuffer)) {
         paneState._lastAutoRespond = now;
         paneState._recentText = '';
@@ -33075,7 +33100,7 @@ Aturan:
           if (paneState.autoEnter) {
             this.sendEnterToPane(paneNum);
           }
-        }, 180);
+        }, 120);
       }
     },
 
@@ -33868,8 +33893,12 @@ Aturan:
           e.preventDefault();
         });
 
-        btn.addEventListener('click', async (e) => {
-          e.preventDefault();
+        let lastTouchTap = 0;
+        const handleTouchKey = async (e) => {
+          const now = Date.now();
+          if (now - lastTouchTap < 200) return;
+          lastTouchTap = now;
+          if (e && e.cancelable) e.preventDefault();
           e.stopPropagation();
           const keyType = btn.getAttribute('data-key');
           const cmdType = btn.getAttribute('data-cmd');
@@ -34050,7 +34079,10 @@ Aturan:
             }
           }
           keepFocus();
-        });
+        };
+
+        btn.addEventListener('click', handleTouchKey);
+        btn.addEventListener('touchend', handleTouchKey, { passive: false });
       });
     },
 
@@ -34345,7 +34377,12 @@ Aturan:
       const chipsBar = document.getElementById('termQuickChipsBar');
       if (chipsBar) {
         chipsBar.querySelectorAll('.term-chip').forEach(chip => {
-          chip.addEventListener('click', () => {
+          let lastChipTap = 0;
+          const handleChipTap = (e) => {
+            const now = Date.now();
+            if (now - lastChipTap < 250) return;
+            lastChipTap = now;
+            if (e && e.cancelable) e.preventDefault();
             const cmd = chip.getAttribute('data-cmd');
             if (cmd) {
               if (cmd === 'endorfin' || cmd === 'heal') {
@@ -34356,7 +34393,9 @@ Aturan:
                 this.executeInput(this.activePane, cmd);
               }
             }
-          });
+          };
+          chip.addEventListener('click', handleChipTap);
+          chip.addEventListener('touchend', handleChipTap, { passive: false });
         });
       }
 

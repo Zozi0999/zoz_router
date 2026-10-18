@@ -276,8 +276,8 @@ function handleServerAutoEnter(session, data) {
   // Jangan auto-respond jika ada user input manual dalam 1200ms terakhir
   if (session.lastInputAt && (now - session.lastInputAt) < 1200) return;
 
-  // Akumulasikan buffer teks terbaru (maks 1500 karakter)
-  session.recentTextBuffer = ((session.recentTextBuffer || '') + ' ' + data).slice(-1500);
+  // Akumulasikan buffer teks terbaru (maks 3000 karakter)
+  session.recentTextBuffer = ((session.recentTextBuffer || '') + ' ' + data).slice(-3000);
 
   // Bersihkan ANSI escape sequence dan karakter kontrol
   const clean = session.recentTextBuffer
@@ -286,28 +286,35 @@ function handleServerAutoEnter(session, data) {
     .replace(/\s+/g, ' ');
 
   // Guard: Jangan pernah auto-respond pada password/secret/PIN prompt
-  if (/(?:password|passphrase|secret key|access token|pin):\s*$/i.test(clean)) return;
+  if (/(?:password|passphrase|secret key|access token|api key|pin):\s*$/i.test(clean)) return;
 
   // Guard: Jangan auto-respond jika hanya berada di prompt shell biasa tanpa dialog interaktif
-  if (/(?:PS [A-Z]:\\[^>]*>\s*$|^[^>]*>\s*$)/i.test(clean) && !/(?:Run this command|permission for|allow|proceed|continue|\b[yY]\/[nN]\b)/i.test(clean)) {
+  if (/(?:PS [A-Z]:\\[^>]*>\s*$|^[^>]*>\s*$)/i.test(clean) && !/(?:Run this command|permission|allow|accept|approve|proceed|continue|\b[yY]\/[nN]\b|>\s*1\.)/i.test(clean)) {
     return;
   }
 
-  // Pola 1: Dialog permission Claude Code / Gemini CLI / Antigravity CLI
-  // "Requesting permission for: ... Run this command? > 1. Yes, run command ... esc to cancel"
-  // "Accept this file edit? > 1. Yes, accept this change ... (shift+tab to auto-approve)"
-  const isCliPermissionMenu = (
-    /(?:Run this command\?|Requesting permission for|Allow this command\?|Do you want to run this command\?|Permission required|Accept (?:this|the|all)?\s*(?:file|code|change|edit|diff|plan)?\b.*\?|shift\+tab to auto-approve)/i.test(clean) &&
-    /(?:>\s*1\.\s*Yes|1\.\s*Yes|Navigate|tab Amend|esc to cancel|auto-approve)/i.test(clean)
-  ) || /(?:>\s*1\.\s*Yes,\s*accept|>\s*1\.\s*Yes,\s*run)/i.test(clean);
+  // Pola 1: Dialog menu / permission interaktif CLI (Claude Code, Gemini CLI, Antigravity CLI / AGY, Inquirer)
+  // Menangkap:
+  // - "Allow creation of this file? > 1. Yes, allow creation"
+  // - "Allow edit of this file? > 1. Yes, allow edit"
+  // - "Accept this file edit? > 1. Yes, accept this change"
+  // - "Run this command? > 1. Yes, run command"
+  // - Setiap menu pilihan yang memiliki cursor affirmative "> 1. Yes..." atau "> 1. Allow..." dsb.
+  const isCliAffirmativeMenu = (
+    /(?:[>❯›→*]\s*(?:1\.|\(?1\)?|\[1\])?\s*(?:Yes|Allow|Accept|Approve|Proceed|Continue|Confirm|Run|Always|Apply|Save|Overwrite|Keep|Create|Update|Execute|Ya|Izinkan|Setujui|Lanjutkan)\b)/i.test(clean) ||
+    (
+      /(?:\bAllow\b|\bAccept\b|\bApprove\b|\bRun\b|\bExecute\b|\bProceed\b|\bConfirm\b|\bPermission\b|\bRequesting permission\b|\bDo you want to\b|\bWould you like to\b).*\?/i.test(clean) &&
+      /(?:[>❯›→*]\s*1\.|\bNavigate\b|\btab Amend\b|\besc to cancel\b|\bf full diff\b|\bctrl\+r Review\b|\bauto-approve\b|[>❯›→*]\s*Yes\b)/i.test(clean)
+    )
+  );
 
   // Pola 2: Konfirmasi batch / CLI [y/N], (y/n), (yes/no), [Y/n]
-  const isConfirmYPrompt = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\bdo you want to continue\s*\(?[yY]\/[nN]\)?|\bare you sure\s*\(?[yY]\/[nN]\)?|\bproceed with operation\s*\(?[yY]\/[nN]\)?|\bOk to proceed\? \([yY]\)|\bApakah Anda yakin|\bLanjutkan\?)/i.test(clean);
+  const isConfirmYPrompt = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\?.*\(y\/N\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\bdo you want to continue\s*\(?[yY]\/[nN]\)?|\bare you sure\s*\(?[yY]\/[nN]\)?|\bproceed with operation\s*\(?[yY]\/[nN]\)?|\bOk to proceed\? \([yY]\)|\bApakah Anda yakin|\bLanjutkan\?)/i.test(clean);
 
   // Pola 3: Prompt "Press Enter to continue" / "Hit enter to continue"
-  const isEnterOnlyPrompt = /(?:press (?:any key|enter) to continue|hit enter to continue|press \[enter\] to continue|\bpress enter to\b|\btekan enter untuk\b)/i.test(clean);
+  const isEnterOnlyPrompt = /(?:press (?:any key|enter) to continue|hit enter to continue|press \[enter\] to continue|\bpress enter to\b|\btekan enter untuk\b|\[enter\] to continue|\(enter to continue\))/i.test(clean);
 
-  if (isCliPermissionMenu) {
+  if (isCliAffirmativeMenu) {
     session.lastAutoRespondAt = now;
     session.recentTextBuffer = '';
     setTimeout(() => {
@@ -316,11 +323,11 @@ function handleServerAutoEnter(session, data) {
           session.pty.write('\r');
           setTimeout(() => {
             try { if (session && session.pty) session.pty.write('\n'); } catch (_) {}
-          }, 40);
-          console.log(`[AutoEnter] Session ${session.id}: Auto-approved CLI permission menu via Enter`);
+          }, 35);
+          console.log(`[AutoEnter] Session ${session.id}: Auto-approved CLI menu via Enter`);
         } catch (_) {}
       }
-    }, 150);
+    }, 120);
   } else if (isConfirmYPrompt) {
     session.lastAutoRespondAt = now;
     session.recentTextBuffer = '';
@@ -330,11 +337,11 @@ function handleServerAutoEnter(session, data) {
           session.pty.write('y\r');
           setTimeout(() => {
             try { if (session && session.pty) session.pty.write('\n'); } catch (_) {}
-          }, 40);
+          }, 35);
           console.log(`[AutoEnter] Session ${session.id}: Auto-approved Y/N prompt via 'y\\r'`);
         } catch (_) {}
       }
-    }, 150);
+    }, 120);
   } else if (isEnterOnlyPrompt) {
     session.lastAutoRespondAt = now;
     session.recentTextBuffer = '';
@@ -344,11 +351,11 @@ function handleServerAutoEnter(session, data) {
           session.pty.write('\r');
           setTimeout(() => {
             try { if (session && session.pty) session.pty.write('\n'); } catch (_) {}
-          }, 40);
+          }, 35);
           console.log(`[AutoEnter] Session ${session.id}: Auto-continued Enter prompt via '\\r'`);
         } catch (_) {}
       }
-    }, 150);
+    }, 120);
   }
 }
 
