@@ -61,8 +61,7 @@
           boxShadow: {
             'glow-cyan': '0 0 28px -5px rgba(0, 242, 254, 0.35)',
             'glow-emerald': '0 0 24px -6px rgba(0, 229, 163, 0.35)',
-            'glow-subtle': '0 4px 20px -2px rgba(0, 0, 0, 0.5)',
-            'glow-neutron': '0 0 25px rgba(244, 63, 94, 0.7), 0 0 45px rgba(236, 72, 153, 0.4)',
+            'glow-subtle': '0 4px 20px -2px rgba(0, 0, 0, 0.5)'
           }
         }
       }
@@ -76,8 +75,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261018_v366">
-  <link rel="stylesheet" href="style.css?v=20261018_v366">
+  <link rel="preload" as="style" href="style.css?v=20261018_v367">
+  <link rel="stylesheet" href="style.css?v=20261018_v367">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial select-none">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -699,28 +698,6 @@
               </button>
             </div>
           </div>
-        </div>
-
-        <!-- BOLA NEUTRON QUANTUM / INTERACTIVE NEUTRON SPHERE -->
-        <div class="composer-crown-row" id="composerCrownRow">
-          <button aria-label="Toggle Prompt Menu" class="group relative flex items-center justify-center p-3 focus:outline-none transition-transform duration-300 hover:scale-125 mb-2 cursor-pointer z-30 neutron-crown-btn state-red" id="neutronCrownBtn" title="Klik untuk sembunyikan / tampilkan menu prompt" type="button">
-            <!-- Outer ambient orbital aura -->
-            <div class="absolute w-12 h-12 rounded-full bg-rose-500/25 blur-md group-hover:bg-rose-500/40 transition-all pointer-events-none"></div>
-            <!-- Orbit rings SVG -->
-            <svg class="w-10 h-10 pointer-events-none relative" viewBox="0 0 50 50">
-              <!-- Orbit ring 1 -->
-              <ellipse class="animate-spin-orbit origin-center" cx="25" cy="25" fill="none" rx="20" ry="7" stroke="rgba(244, 63, 94, 0.65)" stroke-dasharray="3 3" stroke-width="1.2" transform="rotate(30 25 25)"></ellipse>
-              <!-- Orbit ring 2 -->
-              <ellipse class="animate-spin-orbit-rev origin-center" cx="25" cy="25" fill="none" rx="20" ry="7" stroke="rgba(236, 72, 153, 0.65)" stroke-dasharray="2 4" stroke-width="1.2" transform="rotate(-40 25 25)"></ellipse>
-              <!-- Orbiting electrons -->
-              <circle cx="6" cy="25" fill="#f43f5e" r="1.5"></circle>
-              <circle cx="44" cy="25" fill="#ec4899" r="1.5"></circle>
-            </svg>
-            <!-- Pulsing Glowing Neutron Core -->
-            <div class="absolute w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-rose-600 via-pink-500 to-rose-300 shadow-glow-neutron flex items-center justify-center neutron-core">
-              <div class="w-1.5 h-1.5 rounded-full bg-white opacity-90"></div>
-            </div>
-          </button>
         </div>
 
         <!-- Live Attachment Preview Area (Claude/Grok Style) -->
@@ -2900,6 +2877,6 @@
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
   <script src="text-safety.js?v=20261017_v349" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261018_v366" defer></script>
+  <script src="app.js?v=20261018_v367" defer></script>
 </body>
 </html>

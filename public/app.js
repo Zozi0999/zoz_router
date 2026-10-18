@@ -1000,9 +1000,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     // Input / Composer & Unified Attachments
     mainComposerContainer: $('#mainComposerContainer'),
     promptDockWrapper: $('#promptDockWrapper'),
-    composerCrownRow: $('#composerCrownRow'),
-    neutronCrownBtn: $('#neutronCrownBtn'),
-    neutronToggleBtn: $('#neutronCrownBtn') || $('#neutronToggleBtn'),
     promptInput: $('#promptInput'),
     slashCommandsMenu: $('#slashCommandsMenu'),
     slashMenuList: $('#slashMenuList'),
@@ -25122,16 +25119,6 @@ Aturan:
       els.mainComposerContainer.classList.toggle('composer-collapsed', isHidden);
     }
 
-    if (els.neutronCrownBtn) {
-      els.neutronCrownBtn.classList.toggle('state-blue', isHidden);
-      els.neutronCrownBtn.classList.toggle('state-red', !isHidden);
-      // A11y: label DIPERBARUI sesuai state, bukan dihapus — dulu title/aria-label
-      // dibuang setiap toggle sehingga tombol permanen "tak bernama" di screen reader.
-      const crownLabel = isHidden ? 'Tampilkan kembali kolom prompt' : 'Sembunyikan kolom prompt';
-      els.neutronCrownBtn.setAttribute('title', crownLabel);
-      els.neutronCrownBtn.setAttribute('aria-label', crownLabel);
-    }
-
     if (!silent && !isHidden) {
       setTimeout(() => {
         els.promptInput?.focus();
@@ -28255,7 +28242,6 @@ Aturan:
     });
 
     els.stopGenerationBtn?.addEventListener('click', stopGeneration);
-    els.neutronCrownBtn?.addEventListener('click', () => togglePromptVisibility());
 
     els.promptInput?.addEventListener('keydown', (e) => {
       if (isSlashMenuOpen) {

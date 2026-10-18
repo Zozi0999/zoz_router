@@ -2151,185 +2151,7 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   margin-left: auto;
 }
 
-/* ==================== NEUTRON CROWN PROMPT TOGGLE ==================== */
-.composer-crown-row {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  max-width: 920px;
-  margin: 0 auto 6px;
-  position: relative;
-  z-index: 70;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.neutron-crown-btn {
-  position: relative;
-  width: 36px;
-  height: 36px;
-  background: var(--bg-surface);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  padding: 0;
-  outline: none;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
-}
-
-/* State RED: Prompt Visible / Normal (Siap disembunyikan) */
-.neutron-crown-btn.state-red {
-  border: 1px solid rgba(255, 0, 85, 0.55);
-  box-shadow: 0 0 14px rgba(255, 0, 85, 0.35), 0 4px 16px rgba(0, 0, 0, 0.6);
-}
-
-.neutron-crown-btn.state-red:hover {
-  transform: translateY(-2px) scale(1.15);
-  border-color: #FF0055;
-  box-shadow: 0 0 22px rgba(255, 0, 85, 0.75), 0 6px 20px rgba(0, 0, 0, 0.7);
-}
-
-/* State BLUE: Prompt Hidden / Minimized (Siap ditampilkan) */
-.neutron-crown-btn.state-blue {
-  border: 1px solid rgba(0, 240, 255, 0.55);
-  box-shadow: 0 0 14px rgba(0, 240, 255, 0.45), 0 4px 16px rgba(0, 0, 0, 0.6);
-}
-
-.neutron-crown-btn.state-blue:hover {
-  transform: translateY(-2px) scale(1.15);
-  border-color: var(--neon-cyan);
-  box-shadow: 0 0 24px rgba(0, 240, 255, 0.85), 0 6px 20px rgba(0, 0, 0, 0.7);
-}
-
-/* Neutron Orb 3D Scene */
-.neutron-orb {
-  position: relative;
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transform-style: preserve-3d;
-  perspective: 200px;
-}
-
-/* Central Nucleus Core */
-.neutron-core {
-  position: absolute;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  z-index: 5;
-  transition: all 0.3s ease;
-}
-
-.neutron-crown-btn.state-red .neutron-core {
-  background: radial-gradient(circle at 35% 35%, #FFAAC0 0%, #FF0055 55%, #880026 100%);
-  box-shadow: 0 0 10px #FF0055, 0 0 18px rgba(255, 0, 85, 0.75);
-  animation: neutronPulseRed 2.2s ease-in-out infinite alternate;
-  will-change: transform, opacity;
-}
-
-.neutron-crown-btn.state-blue .neutron-core {
-  background: radial-gradient(circle at 35% 35%, #B0FFFF 0%, #00F0FF 55%, #0044CC 100%);
-  box-shadow: 0 0 10px #00F0FF, 0 0 18px rgba(0, 240, 255, 0.85);
-  animation: neutronPulseBlue 2.2s ease-in-out infinite alternate;
-  will-change: transform, opacity;
-}
-
-@keyframes neutronPulseRed {
-  0% { transform: scale(0.92); opacity: 0.82; }
-  100% { transform: scale(1.12); opacity: 1; }
-}
-
-@keyframes neutronPulseBlue {
-  0% { transform: scale(0.92); opacity: 0.82; }
-  100% { transform: scale(1.12); opacity: 1; }
-}
-
-/* Orbital Rings */
-.neutron-ring-wrap {
-  position: absolute;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  pointer-events: none;
-  transition: border-color 0.3s ease;
-}
-
-.neutron-crown-btn.state-red .neutron-ring-wrap {
-  border: 1px dashed rgba(255, 0, 85, 0.5);
-}
-
-.neutron-crown-btn.state-blue .neutron-ring-wrap {
-  border: 1px dashed rgba(0, 240, 255, 0.55);
-}
-
-.neutron-ring-wrap.ring-1-wrap {
-  transform: rotateX(68deg) rotateY(15deg);
-}
-
-.neutron-ring-wrap.ring-2-wrap {
-  transform: rotateX(68deg) rotateY(-45deg);
-}
-
-.neutron-ring-wrap.ring-3-wrap {
-  transform: rotateX(68deg) rotateY(75deg);
-}
-
-/* Rotator & Orbiting Particles */
-.neutron-ring-rotator {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  will-change: transform;
-}
-
-.ring-1-wrap .neutron-ring-rotator {
-  animation: spinNeutron 2.8s linear infinite;
-}
-
-.ring-2-wrap .neutron-ring-rotator {
-  animation: spinNeutron 3.4s linear infinite reverse;
-}
-
-.ring-3-wrap .neutron-ring-rotator {
-  animation: spinNeutron 2.5s linear infinite;
-}
-
-@keyframes spinNeutron {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.neutron-particle {
-  position: absolute;
-  top: -2px;
-  left: calc(50% - 2px);
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  transition: all 0.3s ease;
-}
-
-.neutron-crown-btn.state-red .neutron-particle {
-  background: #FF0055;
-  box-shadow: 0 0 6px #FF0055, 0 0 10px #FF5588;
-}
-
-.neutron-crown-btn.state-blue .neutron-particle {
-  background: #00F0FF;
-  box-shadow: 0 0 6px #00F0FF, 0 0 10px #00FFFF;
-}
-
-
-
 /* Prompt Box Collapsed State */
-.composer-container.composer-collapsed .composer-crown-row {
-  margin-bottom: 0;
-}
 
 .composer-container.composer-collapsed .composer-box {
   max-height: 0;
@@ -4870,19 +4692,6 @@ body.mobile-sidebar-open .sidebar-backdrop {
   }
   .composer-box {
     background: rgba(13, 17, 28, 0.95) !important;
-  }
-  .neutron-orb {
-    perspective: none !important;
-    transform-style: flat !important;
-  }
-  .ring-2-wrap, .ring-3-wrap {
-    display: none !important;
-  }
-  .ring-1-wrap {
-    transform: none !important;
-  }
-  .ring-1-wrap .neutron-ring-rotator {
-    animation: spinNeutron 4.5s linear infinite !important;
   }
 }
 
@@ -15285,30 +15094,6 @@ body.mermaid-has-fullscreen {
   border: 1px solid rgba(0, 242, 254, 0.16);
 }
 
-/* Orbiting rings animation for neutron core */
-@keyframes spin-slow {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-@keyframes spin-reverse {
-  0% { transform: rotate(360deg); }
-  100% { transform: rotate(0deg); }
-}
-@keyframes pulse-glow {
-  0%, 100% { transform: scale(1); opacity: 0.9; }
-  50% { transform: scale(1.12); opacity: 1; filter: drop-shadow(0 0 16px rgba(244, 63, 94, 0.9)); }
-}
-
-.animate-spin-orbit {
-  animation: spin-slow 8s linear infinite;
-}
-.animate-spin-orbit-rev {
-  animation: spin-reverse 6s linear infinite;
-}
-.animate-neutron-pulse {
-  animation: pulse-glow 3s ease-in-out infinite;
-}
-
 /* Glow Shadows */
 .shadow-glow-cyan {
   box-shadow: 0 0 28px -5px rgba(0, 242, 254, 0.35);
@@ -15318,9 +15103,6 @@ body.mermaid-has-fullscreen {
 }
 .shadow-glow-subtle {
   box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
-}
-.shadow-glow-neutron {
-  box-shadow: 0 0 25px rgba(244, 63, 94, 0.7), 0 0 45px rgba(236, 72, 153, 0.4);
 }
 
 /* Smooth toggle animation for prompt bar */
