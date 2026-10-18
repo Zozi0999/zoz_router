@@ -31639,9 +31639,8 @@ Aturan:
         if (pinDisplay) pinDisplay.textContent = currentPin || '------';
 
         if (currentUrl && currentPin && currentPin !== '------') {
-          const originBase = (window.location.origin && window.location.origin.includes('localhost')) ? 'https://zoz-router.vercel.app' : window.location.origin;
           const wss = data.wssUrl || currentUrl.replace(/^http/i, 'ws');
-          const pairingLink = `${originBase}?remote_host=${encodeURIComponent(wss)}&pin=${encodeURIComponent(currentPin)}`;
+          const pairingLink = `${currentUrl}/?pin=${encodeURIComponent(currentPin)}&remote_host=${encodeURIComponent(wss)}`;
           const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pairingLink)}`;
 
           if (qrImg) {
@@ -31713,9 +31712,9 @@ Aturan:
       if (!data || !data.tunnelUrl || !data.pin) {
         return showToast('Nyalakan tunnel terlebih dahulu.', 'warning');
       }
-      const originBase = window.location.origin.includes('localhost') ? 'https://zoz-router.vercel.app' : window.location.origin;
-      const wss = data.wssUrl || data.tunnelUrl.replace(/^http/i, 'ws');
-      const pairingLink = `${originBase}?remote_host=${encodeURIComponent(wss)}&pin=${encodeURIComponent(data.pin)}`;
+      const targetHost = data.tunnelUrl || window.location.origin;
+      const wss = data.wssUrl || targetHost.replace(/^http/i, 'ws');
+      const pairingLink = `${targetHost}/?pin=${encodeURIComponent(data.pin)}&remote_host=${encodeURIComponent(wss)}`;
       navigator.clipboard.writeText(pairingLink);
       showToast('Link Pairing Remote WAN berhasil disalin!', 'success');
     },
