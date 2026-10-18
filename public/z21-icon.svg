@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 312 240" width="312" height="240">
+  <defs>
+    <filter id="z21-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Dark Rounded Container -->
+  <rect x="1" y="1" width="310" height="238" rx="18" ry="18" fill="#080a11" stroke="#0e3d32" stroke-width="1.5" />
+
+  <!-- Outer HUD Corner Brackets -->
+  <path d="M 31 43 L 31 34 L 283 34 L 283 43" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="square" />
+  <path d="M 31 197 L 31 206 L 283 206 L 283 197" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="square" />
+
+  <!-- Side Reticle Lines -->
+  <line x1="47.5" y1="68" x2="47.5" y2="171" stroke="#34d399" stroke-width="2" />
+  <line x1="267.5" y1="68" x2="267.5" y2="171" stroke="#34d399" stroke-width="2" />
+
+  <!-- Inner Reticle Tick Marks -->
+  <line x1="37" y1="44" x2="37" y2="73" stroke="#34d399" stroke-width="1.5" />
+  <line x1="278" y1="44" x2="278" y2="73" stroke="#34d399" stroke-width="1.5" />
+  <line x1="37" y1="167" x2="37" y2="196" stroke="#34d399" stroke-width="1.5" />
+  <line x1="278" y1="167" x2="278" y2="196" stroke="#34d399" stroke-width="1.5" />
+
+  <!-- Stepped Pixelated Z Glyph -->
+  <g fill="#34d399">
+    <!-- Top Horizontal Bar -->
+    <rect x="74" y="44" width="168" height="30" />
+    <!-- Diagonal Step 1 -->
+    <rect x="183" y="74" width="34" height="24" />
+    <!-- Diagonal Step 2 -->
+    <rect x="155" y="98" width="34" height="25" />
+    <!-- Diagonal Step 3 -->
+    <rect x="126" y="123" width="35" height="25" />
+    <!-- Diagonal Step 4 -->
+    <rect x="98" y="148" width="34" height="19" />
+    <!-- Bottom Horizontal Bar -->
+    <rect x="74" y="167" width="168" height="30" />
+  </g>
+</svg>
