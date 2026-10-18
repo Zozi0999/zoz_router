@@ -30777,21 +30777,15 @@ Aturan:
       const visibleW = container.clientWidth || window.innerWidth;
 
       if (isMobile) {
-        if (term.cols > 65 && totalContentW > visibleW) {
-          // PTY berukuran lebar desktop (80-100 kolom):
-          // Skalakan xterm-screen secara proporsional agar SELURUH lebar desktop muat utuh di layar HP tanpa kepotong!
-          const scale = Math.max(0.42, Math.min(1.0, (visibleW - 6) / totalContentW));
-          if (xtermScreen) {
-            xtermScreen.style.transformOrigin = 'top left';
-            xtermScreen.style.transform = `scale(${scale})`;
-          }
-        } else {
-          // PTY berukuran mobile (48 kolom): Skala 1.0 penuh Termux
-          if (xtermScreen) {
-            xtermScreen.style.transformOrigin = '';
-            this.syncMobileScreenPosition(paneState);
-          }
+        // PERBAIKAN BUG MEMBESAR/MENGECEIL:
+        // JANGAN PERNAH gunakan CSS transform: scale() pada .xterm-screen di perangkat mobile!
+        // Transform scale memicu animasi membesar dan mengecil saat mengetik karena bentrok
+        // berkala dengan translateY kursor di syncMobileScreenPosition serta merusak hit-testing.
+        // Terminal mobile selalu dirender pada rasio font native 1:1 yang tajam, stabil, dan presisi.
+        if (xtermScreen) {
+          xtermScreen.style.transformOrigin = '';
         }
+        this.syncMobileScreenPosition(paneState);
       } else {
         // Mode Layar Laptop (Desktop):
         if (term.cols <= 65) {
@@ -32657,8 +32651,8 @@ Aturan:
       }
 
       const activeTerm = paneState.term;
-      const cols = (activeTerm && activeTerm.cols) ? activeTerm.cols : (this.isMobileDevice() ? 45 : 110);
-      const rows = (activeTerm && activeTerm.rows) ? activeTerm.rows : (this.isMobileDevice() ? 30 : 30);
+      const cols = (activeTerm && activeTerm.cols) ? activeTerm.cols : (this.isMobileDevice() ? 48 : 100);
+      const rows = (activeTerm && activeTerm.rows) ? activeTerm.rows : (this.isMobileDevice() ? 28 : 28);
       let queryParams = `session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}`;
       if (this.remotePin) {
         queryParams += `&pin=${encodeURIComponent(this.remotePin)}`;
@@ -32844,6 +32838,14 @@ Aturan:
             currentTerm.resize(cCols, cRows);
           }
           this.syncTerminalFrameDisplay(paneState);
+        }
+        if (this.isMobileDevice() && !paneState._hasAutoAdaptedToMobile) {
+          paneState._hasAutoAdaptedToMobile = true;
+          if (cCols > 65) {
+            setTimeout(() => {
+              this.toggleTerminalDimension();
+            }, 80);
+          }
         }
         if (this.isRemoteConnected) {
           const lat = this.remotePingMs !== null ? ` • ${this.remotePingMs}ms` : '';
