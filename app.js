@@ -5026,16 +5026,14 @@ RESONANSI: ${this.currentVibe}
   function renderMarkdown(rawText, isStreaming = false) {
     if (!rawText) return '';
     
-    // Pisahkan blok pemikiran AI (<think>) dan konten jawaban utama secara deterministik (tanpa regex rentan)
+    // Pisahkan blok pemikiran AI (<think>) dan konten jawaban utama secara deterministik
     const parsedBlocks = splitReasoningAndContent(rawText);
+    const mainText = parsedBlocks.content || (parsedBlocks.reasoning && !parsedBlocks.isThinking ? parsedBlocks.reasoning : '');
     
-    // Reasoning dihapus dari proyeksi tampilan; hanya konten eksplisit di luar
-    // kanal/tag reasoning yang boleh dirender. Jika provider tidak mengirim
-    // jawaban eksplisit, output sengaja tetap kosong (fail closed).
     let contentHtml = '';
-    if (parsedBlocks.content) {
+    if (mainText) {
       // Amankan dan bungkus blok HTML/website agar rapi di dalam blok kode, tidak bocor ke DOM obrolan
-      const safeContent = normalizeHtmlCodeBlocksInMarkdown(parsedBlocks.content);
+      const safeContent = normalizeHtmlCodeBlocksInMarkdown(mainText);
       // Selama streaming, lewati reflowShreddedProse agar CPU hemat daya
       const displayContent = isStreaming ? safeContent : reflowShreddedProse(safeContent);
       if (window.marked) {
@@ -7154,6 +7152,7 @@ RESONANSI: ${this.currentVibe}
       this.prefixHtml = prefixHtml;
       this.options = options || {};
       this.text = '';
+      this.reasoningText = '';
       this.renderTimer = null; // handle setTimeout render terjadwal (coalesced)
       this.lastRenderTime = 0;
       this.isDone = false;
@@ -7164,8 +7163,15 @@ RESONANSI: ${this.currentVibe}
       this.prefixHtml = prefix || '';
     }
 
-    appendReasoning(_reasoningDelta) {
-      // Fail closed: kanal reasoning sengaja tidak disimpan/render di transkrip.
+    appendReasoning(reasoningDelta) {
+      if (reasoningDelta === null || reasoningDelta === undefined) return;
+      if (this.isLoopTerminated || this.isDone) return;
+      const str = String(reasoningDelta);
+      if (!str) return;
+      this.reasoningText += str;
+      if (!this.text) {
+        this.scheduleRender();
+      }
     }
 
     detectRepetitionLoop() {
@@ -7233,7 +7239,7 @@ RESONANSI: ${this.currentVibe}
       if (this.renderTimer !== null) return;
       const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
       const minInterval = isMobile ? 120 : 75;
-      const interval = Math.min(220, Math.max(minInterval, Math.floor(this.text.length / 120)));
+      const interval = Math.min(220, Math.max(minInterval, Math.floor((this.text || this.reasoningText).length / 120)));
       const delay = Math.max(0, this.lastRenderTime + interval - performance.now());
       this.renderTimer = setTimeout(() => {
         this.renderTimer = null;
@@ -7244,10 +7250,11 @@ RESONANSI: ${this.currentVibe}
 
     render() {
       if (!this.el) return;
-      this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(hideFileBlocksForDisplay(this.text, this.options), true) + '<span class="typing-cursor"></span>';
+      const displayText = this.text || (this.reasoningText && !this.isDone ? '*Sedang berpikir...*' : this.reasoningText);
+      this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(hideFileBlocksForDisplay(displayText, this.options), true) + '<span class="typing-cursor"></span>';
       if (this.onScroll && !userScrolledUp) this.onScroll();
       if (activeStudioAssistantBubble && els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) {
-        const cleanStudioText = hideFileBlocksForDisplay(this.text, this.options);
+        const cleanStudioText = hideFileBlocksForDisplay(displayText, this.options);
         activeStudioAssistantBubble.innerHTML = renderMarkdown(cleanStudioText || '*Sedang meracik kode website...*', true) + '<span class="typing-cursor"></span>';
         scrollStudioAssistantToBottom();
       }
@@ -7261,6 +7268,9 @@ RESONANSI: ${this.currentVibe}
       if (this.renderTimer !== null) {
         clearTimeout(this.renderTimer);
         this.renderTimer = null;
+      }
+      if (!this.text.trim() && this.reasoningText.trim()) {
+        this.text = this.reasoningText.trim();
       }
       if (shouldRender && this.el) {
         this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(hideFileBlocksForDisplay(this.text, this.options), false);
@@ -12798,6 +12808,25 @@ Aturan wajib:
     return finalQuery.replace(/\s+/g, ' ').trim();
   }
 
+  function cleanWebSnippetText(str) {
+    if (!str || typeof str !== 'string') return '';
+    return str
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&#x27;/g, "'")
+      .replace(/&apos;/g, "'")
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&mdash;/g, '—')
+      .replace(/&ndash;/g, '–')
+      .replace(/&hellip;|&#8230;/g, '...')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   async function getWebSearchContext(query, session = null, hudElement = null, forceRun = false) {
     if (!query || !query.trim()) return null;
     if (STATE.searchMode === 'autonomous' && !forceRun) {
@@ -12832,8 +12861,8 @@ Aturan wajib:
       let data = null;
 
       // 1. Direct browser fetch to Serper API (hanya jika user punya key sendiri)
-      const isDomestic = isExplicitDomesticIndoQuery(smartQuery) || isExplicitDomesticIndoQuery(query);
-      const globalQuery = (!isDomestic ? translateIndoQueryToGlobalEnglish(smartQuery) : smartQuery) || smartQuery;
+      const isIndo = hasIndonesianWords(smartQuery) || hasIndonesianWords(query) || isExplicitDomesticIndoQuery(smartQuery) || isExplicitDomesticIndoQuery(query);
+      const searchQuery = smartQuery || query;
 
       if (serperKey) {
         try {
@@ -12844,10 +12873,10 @@ Aturan wajib:
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              q: globalQuery,
+              q: searchQuery,
               num: 10,
-              gl: isDomestic ? 'id' : 'us', // Prioritaskan domain Indonesia HANYA jika eksplisit domestik
-              hl: isDomestic ? 'id' : 'en'
+              gl: isIndo ? 'id' : 'us',
+              hl: isIndo ? 'id' : 'en'
             }),
             signal: makeSearchSignal(6500)
           });
@@ -12866,7 +12895,7 @@ Aturan wajib:
         const proxyRes = await fetch('/api/web-search', {
           method: 'POST',
           headers: proxyHeaders,
-          body: JSON.stringify(serperKey ? { query: globalQuery, apiKey: serperKey, num: 10 } : { query: globalQuery, num: 10 }),
+          body: JSON.stringify(serperKey ? { query: searchQuery, apiKey: serperKey, num: 10 } : { query: searchQuery, num: 10 }),
           signal: makeSearchSignal(7000)
         }).catch(() => null);
         if (proxyRes && proxyRes.ok) {
@@ -12880,7 +12909,7 @@ Aturan wajib:
           const autoRes = await fetch('/api/tools/search-web', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: globalQuery, originalQuery: smartQuery, maxResults: 10 }),
+            body: JSON.stringify({ query: searchQuery, originalQuery: smartQuery, maxResults: 10 }),
             signal: makeSearchSignal(7500)
           }).catch(() => null);
           if (autoRes && autoRes.ok) {
@@ -12888,9 +12917,9 @@ Aturan wajib:
             if (autoData && Array.isArray(autoData.results) && autoData.results.length > 0) {
               data = {
                 organic: autoData.results.map(r => ({
-                  title: r.title,
+                  title: cleanWebSnippetText(r.title),
                   link: r.url,
-                  snippet: r.snippet,
+                  snippet: cleanWebSnippetText(r.snippet),
                   date: r.pubDate
                 }))
               };
@@ -12907,14 +12936,14 @@ Aturan wajib:
       // Knowledge graph
       if (data.knowledgeGraph) {
         const kg = data.knowledgeGraph;
-        const kgText = `${kg.title || ''} (${kg.type || 'Fakta Ringkas'}): ${kg.description || ''}`;
+        const kgText = `${cleanWebSnippetText(kg.title || '')} (${cleanWebSnippetText(kg.type || 'Fakta Ringkas')}): ${cleanWebSnippetText(kg.description || '')}`;
         factsBlock += `\n[KNOWLEDGE GRAPH]: ${kgText}\n`;
         const kgUrl = kg.website || kg.descriptionUrl;
         if (kgUrl) {
           sources.push({
-            title: kg.title || 'Knowledge Graph Fact',
+            title: cleanWebSnippetText(kg.title || 'Knowledge Graph Fact'),
             url: kgUrl,
-            snippet: kg.description || '',
+            snippet: cleanWebSnippetText(kg.description || ''),
             domain: kgUrl.replace(/^https?:\/\//i, '').split('/')[0]
           });
         }
@@ -12923,11 +12952,11 @@ Aturan wajib:
       // Answer Box
       if (data.answerBox) {
         const ab = data.answerBox;
-        const abText = ab.answer || ab.snippet || ab.title || '';
+        const abText = cleanWebSnippetText(ab.answer || ab.snippet || ab.title || '');
         factsBlock += `\n[JAWABAN UTAMA GOOGLE]: ${abText}\n`;
         if (ab.link) {
           sources.push({
-            title: ab.title || 'Jawaban Teratas',
+            title: cleanWebSnippetText(ab.title || 'Jawaban Teratas'),
             url: ab.link,
             snippet: abText,
             domain: ab.link.replace(/^https?:\/\//i, '').split('/')[0]
@@ -12948,10 +12977,9 @@ Aturan wajib:
         const normUrl = link.trim().toLowerCase().replace(/\/$/, '');
         const normTitle = (item.title || '').trim().toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '');
 
-        if (!isDomestic) {
-          const isSpam = /\b(pluang|riaugreen|inforiau|riaupos|tribunnews|detik|kompas|liputan6|suara|merdeka|sindonews|viva|inews|kumparan|jpnn|kapanlagi|idntimes)\b/i.test(normUrl) || /\b(pluang|riaugreen)\b/i.test(item.domain || '');
-          if (isSpam) continue;
-        }
+        const isSpam = /\b(pluang|riaugreen|inforiau|riaupos)\b/i.test(normUrl) || /\b(pluang|riaugreen)\b/i.test(item.domain || '');
+        if (isSpam) continue;
+
         if (normTitle.includes('listofapplecodenames') && !query.toLowerCase().includes('apple')) continue;
         if (normTitle.includes('jalanbesar') && !query.toLowerCase().includes('jalan')) continue;
         if (seenOrganicUrls.has(normUrl)) continue;
@@ -12961,9 +12989,9 @@ Aturan wajib:
         try { domain = new URL(link).hostname.replace(/^www\./, ''); } catch (_) {}
 
         cleanOrganicList.push({
-          title: item.title || `Sumber ${cleanOrganicList.length + 1}`,
+          title: cleanWebSnippetText(item.title) || `Sumber ${cleanOrganicList.length + 1}`,
           url: link,
-          snippet: item.snippet || '',
+          snippet: cleanWebSnippetText(item.snippet) || '',
           date: item.date || item.pubDate || null,
           domain,
           timestamp: item.timestamp || (item.date ? (Date.parse(item.date) || Date.now()) : Date.now())
@@ -15768,52 +15796,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
   function translateIndoQueryToGlobalEnglish(rawQuery) {
     if (!rawQuery || typeof rawQuery !== 'string') return '';
-    const trimmed = rawQuery.trim();
-    if (!trimmed) return '';
-
-    // 1. Jika query eksplisit meminta data domestik Indonesia, jangan diterjemahkan ke kueri global
-    if (isExplicitDomesticIndoQuery(trimmed)) {
-      return trimmed;
-    }
-
-    // 2. Jika tidak ada kata bahasa Indonesia sama sekali, pertahankan kueri asli
-    if (!hasIndonesianWords(trimmed)) {
-      return trimmed;
-    }
-
-    let translated = trimmed;
-
-    // 3. Ganti frasa majemuk terlebih dahulu
-    for (const [regex, replacement] of GLOBAL_SEARCH_PHRASE_DICT) {
-      translated = translated.replace(regex, replacement);
-    }
-
-    // 4. Ganti kata-kata individual
-    for (const [regex, replacement] of GLOBAL_SEARCH_WORD_DICT) {
-      translated = translated.replace(regex, replacement);
-    }
-
-    // 5. Bersihkan stopwords / partikel bahasa Indonesia
-    translated = translated.replace(GLOBAL_SEARCH_STOPWORDS, ' ');
-
-    // 6. Normalisasi spasi dan tanda baca
-    translated = translated
-      .replace(/[^\p{L}\p{N}\s\.\-]/gu, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    // 7. Deduplikasi kata berturut-turut yang identik
-    const words = translated.split(/\s+/).filter(Boolean);
-    const dedupedWords = [];
-    for (const w of words) {
-      const last = dedupedWords[dedupedWords.length - 1];
-      if (!last || last.toLowerCase() !== w.toLowerCase()) {
-        dedupedWords.push(w);
-      }
-    }
-    const result = dedupedWords.join(' ').trim();
-
-    return result.length >= 2 ? result : trimmed;
+    return rawQuery.trim();
   }
 
   function deriveBroadSearchQueries(rawQuery, contextText = '') {
@@ -16272,15 +16255,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
         const serperApiKey = (STATE.settings?.serperApiKey || '').trim() || null;
         const cleanDateQuery = stripDateNoise(query.trim());
-        const isDomestic = isExplicitDomesticIndoQuery(query.trim()) || isExplicitDomesticIndoQuery(effectiveContext);
-        const englishQuery = translateIndoQueryToGlobalEnglish(query.trim());
+        const isIndo = hasIndonesianWords(query.trim()) || isExplicitDomesticIndoQuery(query.trim()) || isExplicitDomesticIndoQuery(effectiveContext);
 
-        const queriesToSearch = [];
-        if (!isDomestic && englishQuery && englishQuery.toLowerCase() !== query.trim().toLowerCase()) {
-          queriesToSearch.push(englishQuery);
-        }
-        queriesToSearch.push(query.trim());
-        if (cleanDateQuery && cleanDateQuery.length >= 3 && !queriesToSearch.some(q => q.toLowerCase() === cleanDateQuery.toLowerCase())) {
+        const queriesToSearch = [query.trim()];
+        if (cleanDateQuery && cleanDateQuery.length >= 3 && cleanDateQuery.toLowerCase() !== query.trim().toLowerCase()) {
           queriesToSearch.push(cleanDateQuery);
         }
 
@@ -16293,11 +16271,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           const normUrl = item.url.trim().toLowerCase().replace(/\/$/, '');
           const normTitle = item.title.trim().toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '');
 
-          // Filter domain spam, aggregator regional berita clickbait, dan bot finansial yang tidak relevan untuk kueri global
-          if (!isDomestic) {
-            const isSpamOrClickbait = /\b(pluang|riaugreen|inforiau|riaupos|tribunnews|detik|kompas|liputan6|suara|merdeka|sindonews|viva|inews|kumparan|jpnn|kapanlagi|idntimes)\b/i.test(normUrl) || /\b(pluang|riaugreen)\b/i.test(item.domain || '');
-            if (isSpamOrClickbait) return;
-          }
+          // Filter domain spam dan bot clickbait
+          const isSpamOrClickbait = /\b(pluang|riaugreen|inforiau|riaupos)\b/i.test(normUrl) || /\b(pluang|riaugreen)\b/i.test(item.domain || '');
+          if (isSpamOrClickbait) return;
 
           // Filter Wikipedia HANYA jika sudah ada cukup sumber web/berita non-Wikipedia (>= 3)
           if (normUrl.includes('wikipedia.org') || normTitle.includes('wikipedia') || (item.domain && item.domain.includes('wikipedia.org'))) {
@@ -16310,7 +16286,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
           if (seenUrls.has(normUrl)) return;
           seenUrls.add(normUrl);
-          results.push(item);
+
+          results.push({
+            ...item,
+            title: cleanWebSnippetText(item.title),
+            snippet: cleanWebSnippetText(item.snippet)
+          });
         };
 
         // 1. Prioritas Utama: Google Serper API Langsung dari Browser (CORS Open, Super Cepat < 300ms, Akurat 100% untuk topik apa pun)
@@ -16327,8 +16308,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
                 body: JSON.stringify({
                   q: q,
                   num: 15,
-                  gl: isDomestic ? 'id' : 'us', // Prioritaskan domain/region Indonesia HANYA jika kueri eksplisit domestik
-                  hl: isDomestic ? 'id' : 'en'  // Global Language Ranking default
+                  gl: isIndo ? 'id' : 'us',
+                  hl: isIndo ? 'id' : 'en'
                 }),
                 signal: makeToolSignal(6500)
               });
@@ -16515,8 +16496,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
               // Wikipedia Open CORS API Fallback (origin=* diizinkan di seluruh peramban)
               (async () => {
-                const lang = isDomestic ? 'id' : 'en'; // Global Wikipedia (EN) atau Indonesia (ID) jika eksplisit domestik
-                const wikiQuery = (!isDomestic && englishQuery) ? englishQuery : (cleanDateQuery || query.trim());
+                const lang = isIndo ? 'id' : 'en';
+                const wikiQuery = cleanDateQuery || query.trim();
                 const wikiUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(wikiQuery)}&utf8=1&format=json&origin=*`;
                 const wRes = await fetch(wikiUrl, { signal: clientSignal }).catch(() => null);
                 if (wRes && wRes.ok) {
@@ -17502,16 +17483,6 @@ Format teks (untuk model tanpa function calling):
         } else {
           validList.unshift({ role: 'user', content: `[Instruksi Sistem & Konteks:\n${effectiveSystem.trim()}]`, images: [] });
         }
-      }
-    }
-
-    // Penguat persona multi-turn & continuity: pastikan persona tidak luntur pada giliran obrolan lanjutan
-    if (activePersona && validList.length > 1) {
-      const lastUserMsg = [...validList].reverse().find(m => m.role === 'user');
-      if (lastUserMsg && typeof lastUserMsg.content === 'string' && !lastUserMsg.content.includes('[Pengingat Persona:')) {
-        const personaReminderText = activePersona.length > 800 ? activePersona.slice(0, 800) + '...' : activePersona;
-        lastUserMsg.content = `[Pengingat Persona: Tetap adopsi identitas persona yang ditetapkan]:\n"${personaReminderText}"\n\n${lastUserMsg.content}`;
-      }
     }
 
     // Merge consecutive messages with the same role to strictly enforce alternating roles
@@ -17606,10 +17577,8 @@ Format teks (untuk model tanpa function calling):
 
   // --- OLLAMA STREAMING EXECUTION ---
   async function runOllamaStreaming(session, promptText, image, modelName, runOptions = {}) {
-    // 100% Pure Cloud Architecture: Delegasikan eksekusi model Ollama ke Cloud Streaming
     const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
-    const hasCustomExternalEndpoint = Boolean(STATE.settings.ollamaApiKey && !ep.includes('ollama.com') && !ep.includes('127.0.0.1') && !ep.includes('localhost'));
-    if (!hasCustomExternalEndpoint) {
+    if (IS_GITHUB_PAGES && location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
       const targetCloudModel = modelName.includes('/')
         ? modelName
         : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
@@ -17797,13 +17766,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // WEB SEARCH GROUNDING:
       // Aktif pada mode default search, atau sebagai fallback otomatis ketika mode autonomous search
       // berjalan pada model tanpa dukungan tools atau model gratis (agar tetap mendapat data internet terkini).
-      const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
-      const hasCustomExternalEndpoint = Boolean(STATE.settings.ollamaApiKey && !ep.includes('ollama.com') && !ep.includes('127.0.0.1') && !ep.includes('localhost'));
-      const effectiveCloudModel = mapOllamaModelToOpenRouter(modelName) || 'openrouter/free';
-      const isCloudFree = effectiveCloudModel.includes(':free') || effectiveCloudModel.endsWith('/free') || effectiveCloudModel === 'openrouter/free';
-      const needsGroundingFallback = STATE.searchMode === 'autonomous' && (
-        !hasCustomExternalEndpoint ? (isCloudFree || !STATE.settings.openRouterKey || !doesModelSupportTools(effectiveCloudModel)) : !doesModelSupportTools(modelName)
-      );
+      const needsGroundingFallback = STATE.searchMode === 'autonomous' && !doesModelSupportTools(modelName);
       if (STATE.searchMode === 'default' || (STATE.webSearchEnabled && needsGroundingFallback)) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, needsGroundingFallback);

@@ -1417,53 +1417,9 @@ const GLOBAL_SEARCH_STOPWORDS = /\b(apa|apakah|siapa|siapakah|bagaimana|bagaiman
 
 function translateIndoQueryToGlobalEnglish(rawQuery) {
   if (!rawQuery || typeof rawQuery !== 'string') return '';
-  const trimmed = rawQuery.trim();
-  if (!trimmed) return '';
-
-  // 1. Jika query eksplisit meminta data domestik Indonesia, jangan diterjemahkan ke kueri global
-  if (isExplicitDomesticIndoQuery(trimmed)) {
-    return trimmed;
-  }
-
-  // 2. Jika tidak ada kata bahasa Indonesia sama sekali, pertahankan kueri asli
-  if (!hasIndonesianWords(trimmed)) {
-    return trimmed;
-  }
-
-  let translated = trimmed;
-
-  // 3. Ganti frasa majemuk terlebih dahulu
-  for (const [regex, replacement] of GLOBAL_SEARCH_PHRASE_DICT) {
-    translated = translated.replace(regex, replacement);
-  }
-
-  // 4. Ganti kata-kata individual
-  for (const [regex, replacement] of GLOBAL_SEARCH_WORD_DICT) {
-    translated = translated.replace(regex, replacement);
-  }
-
-  // 5. Bersihkan stopwords / partikel bahasa Indonesia
-  translated = translated.replace(GLOBAL_SEARCH_STOPWORDS, ' ');
-
-  // 6. Normalisasi spasi dan tanda baca
-  translated = translated
-    .replace(/[^\p{L}\p{N}\s\.\-]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  // 7. Deduplikasi kata berturut-turut yang identik
-  const words = translated.split(/\s+/).filter(Boolean);
-  const dedupedWords = [];
-  for (const w of words) {
-    const last = dedupedWords[dedupedWords.length - 1];
-    if (!last || last.toLowerCase() !== w.toLowerCase()) {
-      dedupedWords.push(w);
-    }
-  }
-  const result = dedupedWords.join(' ').trim();
-
-  return result.length >= 2 ? result : trimmed;
+  return rawQuery.trim();
 }
+
 
 // Helper to perform quick web search via Serper Google Search API
 function performWebSearch(query, apiKey = null, num = 15) {
@@ -1480,9 +1436,8 @@ function performWebSearch(query, apiKey = null, num = 15) {
       return safeResolve({ query: '', count: 0, results: [] });
     }
     const cleanQuery = query.trim();
-    const isDomestic = isExplicitDomesticIndoQuery(cleanQuery);
-    const englishQuery = translateIndoQueryToGlobalEnglish(cleanQuery);
-    const targetSearchQuery = (!isDomestic && englishQuery) ? englishQuery : cleanQuery;
+    const isIndo = hasIndonesianWords(cleanQuery) || isExplicitDomesticIndoQuery(cleanQuery);
+    const targetSearchQuery = cleanQuery;
 
     const targetNum = Math.min(Math.max(parseInt(num, 10) || 15, 1), 30);
     const serperKey = apiKey || process.env.SERPER_API_KEY || null;
@@ -1492,8 +1447,8 @@ function performWebSearch(query, apiKey = null, num = 15) {
     const postData = JSON.stringify({
       q: targetSearchQuery,
       num: targetNum,
-      gl: isDomestic ? 'id' : 'us', // Prioritaskan domain/region Indonesia HANYA jika kueri eksplisit domestik
-      hl: isDomestic ? 'id' : 'en'  // Global Language Ranking default
+      gl: isIndo ? 'id' : 'us',
+      hl: isIndo ? 'id' : 'en'
     });
 
     const options = {
@@ -1526,9 +1481,9 @@ function performWebSearch(query, apiKey = null, num = 15) {
           if (parsed.knowledgeGraph) {
             const kgDom = extractDomainSafe(parsed.knowledgeGraph.website || parsed.knowledgeGraph.descriptionUrl || 'https://google.com');
             results.push({
-              title: parsed.knowledgeGraph.title || 'Knowledge Graph Fact',
+              title: cleanHtmlText(parsed.knowledgeGraph.title || 'Knowledge Graph Fact'),
               url: parsed.knowledgeGraph.website || parsed.knowledgeGraph.descriptionUrl || 'https://google.com',
-              snippet: `${parsed.knowledgeGraph.type ? '[' + parsed.knowledgeGraph.type + '] ' : ''}${parsed.knowledgeGraph.description || ''}`,
+              snippet: cleanHtmlText(`${parsed.knowledgeGraph.type ? '[' + parsed.knowledgeGraph.type + '] ' : ''}${parsed.knowledgeGraph.description || ''}`),
               domain: kgDom,
               sourceProvider: `Google KG (${kgDom})`,
               timestamp: Date.now(),
@@ -1540,9 +1495,9 @@ function performWebSearch(query, apiKey = null, num = 15) {
           if (parsed.answerBox) {
             const abDom = extractDomainSafe(parsed.answerBox.link || 'https://google.com');
             results.push({
-              title: parsed.answerBox.title || 'Jawaban Teratas',
+              title: cleanHtmlText(parsed.answerBox.title || 'Jawaban Teratas'),
               url: parsed.answerBox.link || 'https://google.com',
-              snippet: parsed.answerBox.answer || parsed.answerBox.snippet || '',
+              snippet: cleanHtmlText(parsed.answerBox.answer || parsed.answerBox.snippet || ''),
               domain: abDom,
               sourceProvider: `Google AnswerBox (${abDom})`,
               timestamp: Date.now(),
@@ -1558,17 +1513,15 @@ function performWebSearch(query, apiKey = null, num = 15) {
               const normUrl = item.link.trim().toLowerCase().replace(/\/$/, '');
               const normTitle = (item.title || '').trim().toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '');
 
-              if (!isDomestic) {
-                const isSpam = /\b(pluang|riaugreen|inforiau|riaupos|tribunnews|detik|kompas|liputan6|suara|merdeka|sindonews|viva|inews|kumparan|jpnn|kapanlagi|idntimes)\b/i.test(normUrl) || /\b(pluang|riaugreen)\b/i.test(dom || '');
-                if (isSpam) return;
-              }
+              const isSpam = /\b(pluang|riaugreen|inforiau|riaupos)\b/i.test(normUrl) || /\b(pluang|riaugreen)\b/i.test(dom || '');
+              if (isSpam) return;
               if (normTitle.includes('listofapplecodenames') && !cleanQuery.toLowerCase().includes('apple')) return;
               if (normTitle.includes('jalanbesar') && !cleanQuery.toLowerCase().includes('jalan')) return;
 
               results.push({
-                title: item.title || `Hasil ${idx + 1}`,
+                title: cleanHtmlText(item.title || `Hasil ${idx + 1}`),
                 url: item.link || '',
-                snippet: item.snippet || '',
+                snippet: cleanHtmlText(item.snippet || ''),
                 date: item.date || null,
                 pubDate: item.date || 'Terkini',
                 domain: dom,
@@ -3667,9 +3620,8 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
     return { query: '', count: 0, results: [] };
   }
   const cleanDateQuery = stripDateNoise(query.trim());
-  const isDomestic = isExplicitDomesticIndoQuery(query.trim()) || isExplicitDomesticIndoQuery(contextText);
-  const englishQuery = translateIndoQueryToGlobalEnglish(query.trim());
-  const targetPrimaryQuery = (!isDomestic && englishQuery) ? englishQuery : query.trim();
+  const isIndo = hasIndonesianWords(query.trim()) || isExplicitDomesticIndoQuery(query.trim()) || isExplicitDomesticIndoQuery(contextText);
+  const targetPrimaryQuery = query.trim();
 
   const qPlan = deriveBroadSearchQueries(targetPrimaryQuery, contextText);
   const cleanQuery = qPlan.primary;
@@ -3683,27 +3635,25 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   const serperCalls = [
     performWebSearch(cleanQuery, null, maxResults)
   ];
-  if (!isDomestic && cleanQuery.toLowerCase() !== query.trim().toLowerCase()) {
-    serperCalls.push(performWebSearch(query.trim(), null, maxResults));
-  } else if (cleanDateQuery && cleanDateQuery.length >= 3 && cleanDateQuery.toLowerCase() !== cleanQuery.toLowerCase()) {
+  if (cleanDateQuery && cleanDateQuery.length >= 3 && cleanDateQuery.toLowerCase() !== cleanQuery.toLowerCase()) {
     serperCalls.push(performWebSearch(cleanDateQuery, null, maxResults));
   }
 
   const combinedLower = (cleanQuery + ' ' + query.trim() + ' ' + (contextText || '')).toLowerCase();
   const isTechQuery = /\b(ai|llm|software|github|code|linux|python|developer|api|tech|crypto|bitcoin|model|chip|gpu|nvidia|programming|framework)\b/i.test(combinedLower);
 
-  // Eksekusi seluruh provider: Google Serper Global, Google News RSS Global (US/EN), Tech Wire / HackerNews, DuckDuckGo Instant, & Wikipedia Global (EN)
+  // Eksekusi seluruh provider: Google Serper, Google News RSS, Tech Wire / HackerNews, DuckDuckGo Instant, & Wikipedia
   const [serperRes1, serperRes2, gnewsPrimary, gnewsCore, gnewsIndo, gnewsNews, hnTech, hnCore, ddgInstant, wikiRes] = await Promise.allSettled([
     serperCalls[0],
     serperCalls[1] || Promise.resolve({ results: [] }),
-    fetchGoogleNewsRss(cleanQuery, 'en', 10),
-    fetchGoogleNewsRss(coreQuery, 'en', 8),
-    isDomestic ? fetchGoogleNewsRss(`${coreQuery} berita terbaru`, 'id', 6) : Promise.resolve([]),
-    fetchGoogleNewsRss(newsQuery, 'en', 6),
+    fetchGoogleNewsRss(cleanQuery, isIndo ? 'id' : 'en', 10),
+    fetchGoogleNewsRss(coreQuery, isIndo ? 'id' : 'en', 8),
+    isIndo ? fetchGoogleNewsRss(`${coreQuery} berita terbaru`, 'id', 6) : Promise.resolve([]),
+    fetchGoogleNewsRss(newsQuery, isIndo ? 'id' : 'en', 6),
     isTechQuery ? fetchHackerNewsTech(techQuery, 8) : Promise.resolve([]),
     isTechQuery ? fetchHackerNewsTech(coreQuery, 6) : Promise.resolve([]),
     fetchDuckDuckGoInstant(coreQuery),
-    fetchWikipediaFullText(coreQuery, isDomestic ? 'id' : 'en', 4)
+    fetchWikipediaFullText(coreQuery, isIndo ? 'id' : 'en', 4)
   ]);
 
   const candidatePool = [];
@@ -3737,11 +3687,9 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
     const normUrl = item.url.trim().toLowerCase().replace(/\/$/, '');
     const normTitle = item.title.trim().toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '');
 
-    // Filter domain spam, aggregator regional berita clickbait, dan bot finansial yang tidak relevan untuk kueri global
-    if (!isDomestic) {
-      const isSpamOrClickbait = /\b(pluang|riaugreen|inforiau|riaupos|tribunnews|detik|kompas|liputan6|suara|merdeka|sindonews|viva|inews|kumparan|jpnn|kapanlagi|idntimes)\b/i.test(normUrl) || /\b(pluang|riaugreen)\b/i.test(item.domain || '');
-      if (isSpamOrClickbait) continue;
-    }
+    // Filter domain spam dan bot clickbait
+    const isSpamOrClickbait = /\b(pluang|riaugreen|inforiau|riaupos)\b/i.test(normUrl) || /\b(pluang|riaugreen)\b/i.test(item.domain || '');
+    if (isSpamOrClickbait) continue;
 
     // Filter Wikipedia HANYA jika sudah ada cukup sumber web/berita non-Wikipedia (>= 3)
     if (normUrl.includes('wikipedia.org') || (item.domain && item.domain.includes('wikipedia.org')) || normTitle.includes('wikipedia')) {
@@ -3754,6 +3702,9 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
 
     if (seenUrls.has(normUrl)) continue;
     seenUrls.add(normUrl);
+
+    item.title = cleanHtmlText(item.title);
+    item.snippet = cleanHtmlText(item.snippet);
 
     results.push(item);
     if (results.length >= maxResults) break;
@@ -7871,10 +7822,11 @@ async function requestHandler(req, res) {
       // klien tetap boleh memakai key miliknya sendiri via x-ollama-key.
       const rawKey = clientSuppliedKey ||
         (isTrustedOllamaEndpoint(customEndpoint) ? process.env.OLLAMA_API_KEY : null);
+      const authHeader = rawKey ? `Bearer ${rawKey}` : (req.headers['authorization'] || null);
       const rawOllamaKey = body.ollamaApiKey || req.headers['x-ollama-key'] || (body.apiKey && !String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || (req.headers['authorization'] && !req.headers['authorization'].includes('sk-or-') ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null);
       const isLoopbackTarget = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(customEndpoint);
       const isCustomRemoteEndpoint = customEndpoint && !isLoopbackTarget && !customEndpoint.includes('ollama.com');
-      const shouldUseCloudBridge = !rawOllamaKey || !isCustomRemoteEndpoint;
+      const shouldUseCloudBridge = Boolean(isServerlessChat && !isCustomRemoteEndpoint);
 
       if (shouldUseCloudBridge) {
         // Pure Cloud Architecture Bridge:

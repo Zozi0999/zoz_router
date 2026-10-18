@@ -561,55 +561,7 @@ const GLOBAL_SEARCH_STOPWORDS = /\b(apa|apakah|siapa|siapakah|bagaimana|bagaiman
 
 function translateIndoQueryToGlobalEnglish(rawQuery) {
   if (!rawQuery || typeof rawQuery !== 'string') return '';
-  const trimmed = rawQuery.trim();
-  if (!trimmed) return '';
-
-  // 1. Jika query eksplisit meminta data domestik Indonesia, jangan diterjemahkan ke kueri global
-  if (isExplicitDomesticIndoQuery(trimmed)) {
-    return trimmed;
-  }
-
-  // 2. Jika tidak ada kata bahasa Indonesia sama sekali, pertahankan kueri asli
-  if (!hasIndonesianWords(trimmed)) {
-    return trimmed;
-  }
-
-  let translated = trimmed;
-
-  // 3. Ganti frasa majemuk terlebih dahulu
-  for (const [regex, replacement] of GLOBAL_SEARCH_PHRASE_DICT) {
-    translated = translated.replace(regex, replacement);
-  }
-
-  // 4. Ganti kata-kata individual
-  for (const [regex, replacement] of GLOBAL_SEARCH_WORD_DICT) {
-    translated = translated.replace(regex, replacement);
-  }
-
-  // 5. Bersihkan stopwords / partikel bahasa Indonesia
-  translated = translated.replace(GLOBAL_SEARCH_STOPWORDS, ' ');
-
-  // 6. Normalisasi spasi dan tanda baca
-  translated = translated
-    .replace(/[^\p{L}\p{N}\s\.\-]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  // 7. Deduplikasi kata berturut-turut yang identik
-  // 7. Deduplikasi kata secara komprehensif (menghilangkan pengulangan kata seperti "how to how it works")
-  const words = translated.split(/\s+/).filter(Boolean);
-  const seenWords = new Set();
-  const dedupedWords = [];
-  for (const w of words) {
-    const low = w.toLowerCase();
-    if (!seenWords.has(low)) {
-      seenWords.add(low);
-      dedupedWords.push(w);
-    }
-  }
-  const result = dedupedWords.join(' ').trim();
-
-  return result.length >= 2 ? result : trimmed;
+  return rawQuery.trim();
 }
 
 // Keamanan Kuota Operator (Cloudflare Worker):
@@ -1799,9 +1751,8 @@ export default {
         const targetNum = Math.min(Math.max(isNaN(num) ? 15 : num, 1), 30);
         const serperKey = apiKey || (envKeyAllowed(request, env) ? env?.SERPER_API_KEY : null);
         const cleanQuery = query.trim();
-        const isDomestic = isExplicitDomesticIndoQuery(cleanQuery);
-        const englishQuery = translateIndoQueryToGlobalEnglish(cleanQuery);
-        const targetSearchQ = (!isDomestic && englishQuery) ? englishQuery : cleanQuery;
+        const isIndo = hasIndonesianWords(cleanQuery) || isExplicitDomesticIndoQuery(cleanQuery);
+        const targetSearchQ = cleanQuery;
 
         if (!serperKey) {
           const isAutonomousTool = url.pathname === '/api/tools/search-web' || url.pathname === '/api/autonomous/search';
@@ -1840,7 +1791,7 @@ export default {
 
             // 2. Wikipedia Full-text Search
             try {
-              const wikiLang = isDomestic ? 'id' : 'en';
+              const wikiLang = isIndo ? 'id' : 'en';
               const wikiRes = await fetch(`https://${wikiLang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(targetSearchQ)}&format=json&srlimit=4&utf8=1`, {
                 headers: { 'User-Agent': 'ZozRouter/1.0' },
                 signal: AbortSignal.timeout(4500)
@@ -1883,7 +1834,7 @@ export default {
             'X-API-KEY': serperKey,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ q: targetSearchQ, num: targetNum, gl: isDomestic ? 'id' : 'us', hl: isDomestic ? 'id' : 'en' })
+          body: JSON.stringify({ q: targetSearchQ, num: targetNum, gl: isIndo ? 'id' : 'us', hl: isIndo ? 'id' : 'en' })
         });
         const parsedSerper = await serperRes.json().catch(() => null);
         if (parsedSerper && typeof parsedSerper === 'object') {
@@ -1911,10 +1862,8 @@ export default {
                 const normUrl = itemUrl.trim().toLowerCase().replace(/\/$/, '');
                 const normTitle = (it.title || '').trim().toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '');
 
-                if (!isDomestic) {
-                  const isSpamOrClickbait = /\b(pluang|riaugreen|inforiau|riaupos|tribunnews|detik|kompas|liputan6|suara|merdeka|sindonews|viva|inews|kumparan|jpnn|kapanlagi|idntimes)\b/i.test(normUrl) || /\b(pluang|riaugreen)\b/i.test(it.domain || '');
-                  if (isSpamOrClickbait) return;
-                }
+                const isSpamOrClickbait = /\b(pluang|riaugreen|inforiau|riaupos)\b/i.test(normUrl) || /\b(pluang|riaugreen)\b/i.test(it.domain || '');
+                if (isSpamOrClickbait) return;
                 if (normTitle.includes('listofapplecodenames') && !cleanQuery.toLowerCase().includes('apple')) return;
                 if (normTitle.includes('jalanbesar') && !cleanQuery.toLowerCase().includes('jalan')) return;
 

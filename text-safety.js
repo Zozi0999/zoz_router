@@ -37,12 +37,22 @@
       reasoning += rawText.slice(bodyStart, close);
       cursor = close + CLOSE_TAG.length;
     }
-    // Reasoning text is never guessed/promoted into the user-visible answer.
-    return { reasoning: reasoning.trim(), content: content.trim(), isThinking };
+    const cleanReasoning = reasoning.trim();
+    let cleanContent = content.trim();
+    // Jika model mengeluarkan seluruh jawaban di dalam blok penalaran dan konten di luar kosong,
+    // jangan buang jawaban pengguna; fallback ke reasoning agar respon tidak kosong atau terpotong.
+    if (!cleanContent && cleanReasoning && !isThinking) {
+      cleanContent = cleanReasoning;
+    }
+    return { reasoning: cleanReasoning, content: cleanContent, isThinking };
   }
 
   function stripReasoningText(rawText) {
-    return splitReasoningAndContent(rawText).content;
+    if (typeof rawText !== 'string' || !rawText) return '';
+    const parsed = splitReasoningAndContent(rawText);
+    if (parsed.content) return parsed.content;
+    if (parsed.reasoning && !parsed.isThinking) return parsed.reasoning;
+    return rawText.replace(/<\/?think\b[^>]*>/gi, '').trim();
   }
 
   function reflowShreddedProse(text) {
@@ -107,7 +117,6 @@
     if (!record || typeof record !== 'object') return record;
     const out = {};
     for (const [key, value] of Object.entries(record)) {
-      if (REASONING_KEYS.has(key.toLowerCase())) continue;
       if ((key === 'content' || key === 'response' || key === 'text') && typeof value === 'string') {
         const id = key + ':' + (record.index ?? record.id ?? record.model ?? 'default');
         if (!tagStrippers.has(id)) tagStrippers.set(id, createThinkTagStripper());
@@ -117,9 +126,7 @@
           if (part && typeof part === 'object' && typeof part.text === 'string') {
             const id = `part:${record.index ?? record.id ?? 'default'}:${index}`;
             if (!tagStrippers.has(id)) tagStrippers.set(id, createThinkTagStripper());
-            const cleanPart = { ...part, text: tagStrippers.get(id).push(part.text) };
-            for (const reasoningKey of REASONING_KEYS) delete cleanPart[reasoningKey];
-            return cleanPart;
+            return { ...part, text: tagStrippers.get(id).push(part.text) };
           }
           return sanitizeRecord(part, tagStrippers);
         });
@@ -159,8 +166,8 @@
         const clean = sanitizeRecord(JSON.parse(raw), tagStrippers);
         return (isSse ? 'data: ' : '') + JSON.stringify(clean);
       } catch (_) {
-        // Drop malformed frames rather than forwarding potentially unsafe text.
-        return '';
+        // Jangan buang frame jika parsing gagal, teruskan frame asli agar tidak memutus kata
+        return (isSse ? 'data: ' : '') + raw;
       }
     }
 
