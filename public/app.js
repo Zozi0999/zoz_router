@@ -31137,16 +31137,21 @@ Aturan:
     async detectWindowsBridge(forceToast = false) {
       const candidates = [
         this.bridgeUrl,
+        this.remoteHost,
         (window.location.origin && !window.location.origin.includes('vercel.app')) ? window.location.origin : '',
         'http://127.0.0.1:4040',
         'http://localhost:4040'
       ].filter(Boolean);
 
-      for (const cand of candidates) {
+      const uniqueCandidates = [...new Set(candidates)];
+      for (const cand of uniqueCandidates) {
         try {
+          const headers = {};
+          if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
           const res = await fetch(`${cand.replace(/\/+$/, '')}/api/ping`, {
             method: 'GET',
-            signal: AbortSignal.timeout(1200)
+            headers,
+            signal: AbortSignal.timeout(1800)
           });
           if (res.ok) {
             const data = await res.json();
@@ -31295,11 +31300,14 @@ Aturan:
         const norm = this.normalizeRemoteHost(qHost);
         this.remoteHost = norm.httpUrl;
         this.remotePin = qPin ? qPin.trim() : '';
+        this.bridgeUrl = norm.httpUrl;
         try {
           localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
             remoteHost: this.remoteHost,
             pin: this.remotePin
           }));
+          localStorage.setItem('zoz_last_tunnel_url', this.remoteHost);
+          if (this.remotePin) localStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
         } catch (_) {}
         this.connectRemoteTerminal(this.remoteHost, this.remotePin, true);
         return;
@@ -31309,14 +31317,24 @@ Aturan:
       if (!qHost && (window.location.host.includes('trycloudflare.com') || window.location.host.includes('.loca.lt') || window.location.host.includes('.ngrok.io'))) {
         const norm = this.normalizeRemoteHost(window.location.origin);
         this.remoteHost = norm.httpUrl;
-        this.remotePin = qPin ? qPin.trim() : (this.remotePin || '');
-        if (this.remotePin) {
+        this.bridgeUrl = norm.httpUrl;
+        let savedPin = qPin ? qPin.trim() : '';
+        if (!savedPin) {
           try {
-            localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
-              remoteHost: this.remoteHost,
-              pin: this.remotePin
-            }));
+            const saved = JSON.parse(localStorage.getItem('zoz_remote_terminal_config') || '{}');
+            if (saved && saved.pin) savedPin = saved.pin;
           } catch (_) {}
+        }
+        this.remotePin = savedPin || this.remotePin || '';
+        try {
+          localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
+            remoteHost: this.remoteHost,
+            pin: this.remotePin
+          }));
+          localStorage.setItem('zoz_last_tunnel_url', this.remoteHost);
+          if (this.remotePin) localStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
+        } catch (_) {}
+        if (this.remotePin) {
           this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
           return;
         }
@@ -31325,8 +31343,16 @@ Aturan:
       try {
         const saved = JSON.parse(localStorage.getItem('zoz_remote_terminal_config') || '{}');
         if (saved && saved.remoteHost) {
-          this.remoteHost = saved.remoteHost;
+          const norm = this.normalizeRemoteHost(saved.remoteHost);
+          this.remoteHost = norm.httpUrl;
           this.remotePin = saved.pin || '';
+          this.bridgeUrl = norm.httpUrl;
+          try {
+            localStorage.setItem('zoz_last_tunnel_url', this.remoteHost);
+            if (this.remotePin) localStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
+          } catch (_) {}
+          // Auto-reconnect quietly on application launch
+          this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
         }
       } catch (_) {}
     },
@@ -31352,7 +31378,6 @@ Aturan:
         if (hasSaved) {
           this.connectRemoteTerminal(this.remoteHost, this.remotePin, false).then(success => {
             if (!success) {
-              this.showRemoteOverlay();
               this.updateMobileBannerUI();
             }
           });
@@ -31391,7 +31416,7 @@ Aturan:
             <button type="button" class="term-banner-btn primary" id="btnBannerWake" title="Segarkan layar & ukuran terminal">
               <i class="fa-solid fa-arrows-rotate"></i> <span>Refresh</span>
             </button>
-            <button type="button" class="term-banner-btn secondary" id="btnBannerDisconnect" title="Putuskan koneksi remote">
+            <button type="button" class="term-banner-btn secondary" id="btnBannerDisconnect" title="Putuskan koneksi remote sementara">
               <i class="fa-solid fa-power-off"></i> <span>Putus</span>
             </button>
           `;
@@ -31405,8 +31430,28 @@ Aturan:
             showToast('Layar terminal disesuaikan & diperbarui.', 'info');
           });
           document.getElementById('btnBannerDisconnect')?.addEventListener('click', () => {
-            this.disconnectRemoteTerminal();
+            this.disconnectRemoteTerminal(false);
           });
+        }
+      } else if (this.remoteHost && this.remotePin) {
+        banner.classList.remove('connected');
+        if (dot) dot.className = 'term-banner-pulse-dot connecting';
+        const cleanHost = this.remoteHost.replace(/^https?:\/\//i, '').split('/')[0];
+        if (title) title.innerHTML = '<i class="fa-solid fa-cloud" style="color: #38bdf8;"></i> <span>Tersimpan: Laptop Rumah</span>';
+        if (sub) sub.textContent = `${cleanHost} • PIN Tersimpan`;
+        if (actions) {
+          actions.innerHTML = `
+            <button type="button" class="term-banner-btn primary" id="btnBannerReconnect" title="Hubungkan kembali ke laptop">
+              <i class="fa-solid fa-bolt"></i> <span>Sambungkan</span>
+            </button>
+            <button type="button" class="term-banner-btn secondary" id="btnBannerScanQr" title="Ganti host via scan QR baru">
+              <i class="fa-solid fa-camera"></i> <span>Scan Baru</span>
+            </button>
+          `;
+          document.getElementById('btnBannerReconnect')?.addEventListener('click', () => {
+            this.connectRemoteTerminal(this.remoteHost, this.remotePin, true);
+          });
+          document.getElementById('btnBannerScanQr')?.addEventListener('click', () => this.openQrScannerModal());
         }
       } else {
         banner.classList.remove('connected');
@@ -31428,21 +31473,30 @@ Aturan:
       }
     },
 
-    disconnectRemoteTerminal() {
+    disconnectRemoteTerminal(forceWipeStorage = false) {
       if (this.remotePingTimer) {
         clearInterval(this.remotePingTimer);
         this.remotePingTimer = null;
       }
       this.isRemoteConnected = false;
       this.remotePingMs = null;
-      try {
-        localStorage.removeItem('zoz_remote_terminal_config');
-      } catch (_) {}
+      if (forceWipeStorage) {
+        try {
+          localStorage.removeItem('zoz_remote_terminal_config');
+          localStorage.removeItem('zoz_term_bridge_url');
+          localStorage.removeItem('zoz_last_tunnel_url');
+          localStorage.removeItem('zoz_last_tunnel_pin');
+        } catch (_) {}
+        this.remoteHost = '';
+        this.remotePin = '';
+        showToast('Konfigurasi remote dihapus. Kembali ke mode lokal.', 'info');
+      } else {
+        showToast('Koneksi remote diputus sementara. Alamat URL & PIN tetap tersimpan.', 'info');
+      }
       this.updateSyncButtonUI();
       this.updatePaneHeaders();
       this.updateRemoteStatusUI(false);
       this.updateMobileBannerUI();
-      showToast('Koneksi remote diputuskan. Kembali ke mode lokal.', 'info');
     },
 
     showRemoteOverlay() {
@@ -31451,8 +31505,19 @@ Aturan:
       overlay.style.display = 'flex';
       const inputHost = document.getElementById('inputTermRemoteHost');
       const inputPin = document.getElementById('inputTermRemotePin');
-      if (inputHost && this.remoteHost) inputHost.value = this.remoteHost;
-      if (inputPin && this.remotePin) inputPin.value = this.remotePin;
+      let hostVal = this.remoteHost;
+      let pinVal = this.remotePin;
+      if (!hostVal || !pinVal) {
+        try {
+          const saved = JSON.parse(localStorage.getItem('zoz_remote_terminal_config') || '{}');
+          if (saved.remoteHost) hostVal = hostVal || saved.remoteHost;
+          if (saved.pin) pinVal = pinVal || saved.pin;
+        } catch (_) {}
+        hostVal = hostVal || localStorage.getItem('zoz_last_tunnel_url') || '';
+        pinVal = pinVal || localStorage.getItem('zoz_last_tunnel_pin') || '';
+      }
+      if (inputHost && hostVal) inputHost.value = hostVal;
+      if (inputPin && pinVal) inputPin.value = pinVal;
     },
 
     dismissRemoteOverlay() {
@@ -31678,8 +31743,9 @@ Aturan:
 
     async requestTunnelApi(endpoint, options = {}) {
       const candidates = [];
-      if (this.activeLocalBridgeUrl) candidates.push(this.activeLocalBridgeUrl);
+      if (this.remoteHost) candidates.push(this.remoteHost.replace(/\/+$/, ''));
       if (this.bridgeUrl) candidates.push(this.bridgeUrl.replace(/\/+$/, ''));
+      if (this.activeLocalBridgeUrl) candidates.push(this.activeLocalBridgeUrl);
       if (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin.includes(':4040')) {
         candidates.push(window.location.origin);
       }
@@ -31687,12 +31753,18 @@ Aturan:
       candidates.push('http://localhost:4040');
       candidates.push('');
 
+      const headers = { ...(options.headers || {}) };
+      if (this.remotePin && !headers['x-terminal-pin']) {
+        headers['x-terminal-pin'] = this.remotePin;
+      }
+      const fetchOpts = { ...options, headers };
+
       const uniqueCandidates = [...new Set(candidates)];
       let lastErr = null;
       for (const base of uniqueCandidates) {
         try {
           const url = base ? `${base}${endpoint}` : endpoint;
-          const res = await fetch(url, { ...options, signal: options.signal || AbortSignal.timeout(6000) });
+          const res = await fetch(url, { ...fetchOpts, signal: options.signal || AbortSignal.timeout(6000) });
           if (res.ok) {
             this.activeLocalBridgeUrl = base;
             return await res.json();
@@ -31722,17 +31794,36 @@ Aturan:
         this.tunnelInfo = data;
         const isActive = !!data.active && !!data.tunnelUrl;
 
+        const savedUrl = localStorage.getItem('zoz_last_tunnel_url') || '';
+        const savedPin = localStorage.getItem('zoz_last_tunnel_pin') || '';
+        const currentUrl = data.tunnelUrl || this.remoteHost || savedUrl;
+        const currentPin = data.pin || this.remotePin || savedPin;
+
+        if (data.tunnelUrl) {
+          try { localStorage.setItem('zoz_last_tunnel_url', data.tunnelUrl); } catch (_) {}
+        }
+        if (data.pin && data.pin !== '------') {
+          try { localStorage.setItem('zoz_last_tunnel_pin', data.pin); } catch (_) {}
+        }
+
         if (statusDot) statusDot.className = `term-tunnel-status-dot ${isActive ? 'active' : ''}`;
-        if (statusText) statusText.textContent = isActive ? '🟢 Tunnel Cloudflare Aktif' : '⚪ Tunnel Cloudflare Nonaktif';
+        if (statusText) statusText.textContent = isActive ? '🟢 Tunnel Cloudflare Aktif' : (currentUrl ? '☁️ Tunnel Tersimpan di Laptop' : '⚪ Tunnel Cloudflare Nonaktif');
         if (toggleBtn) toggleBtn.className = `term-tunnel-btn ${isActive ? 'active' : ''}`;
         if (toggleLabel) toggleLabel.textContent = isActive ? 'Matikan Tunnel' : 'Nyalakan Tunnel';
-        if (urlInput) urlInput.value = data.tunnelUrl ? `${data.tunnelUrl} (${data.wssUrl || data.tunnelUrl.replace(/^http/i, 'ws')})` : '';
-        if (pinDisplay) pinDisplay.textContent = data.pin || '------';
+        if (urlInput) {
+          if (currentUrl) {
+            const wss = data.wssUrl || currentUrl.replace(/^http/i, 'ws');
+            urlInput.value = `${currentUrl} (${wss})`;
+          } else {
+            urlInput.value = '';
+          }
+        }
+        if (pinDisplay) pinDisplay.textContent = currentPin || '------';
 
-        if (isActive && data.pin) {
+        if (currentUrl && currentPin && currentPin !== '------') {
           const originBase = (window.location.origin && window.location.origin.includes('localhost')) ? 'https://zoz-router.vercel.app' : window.location.origin;
-          const wss = data.wssUrl || data.tunnelUrl.replace(/^http/i, 'ws');
-          const pairingLink = `${originBase}?remote_host=${encodeURIComponent(wss)}&pin=${encodeURIComponent(data.pin)}`;
+          const wss = data.wssUrl || currentUrl.replace(/^http/i, 'ws');
+          const pairingLink = `${originBase}?remote_host=${encodeURIComponent(wss)}&pin=${encodeURIComponent(currentPin)}`;
           const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pairingLink)}`;
 
           if (qrImg) {
@@ -32305,7 +32396,14 @@ Aturan:
       } else {
         openModal('terminalModal');
         this.syncMobileViewport();
-        this.initActiveTabPanes();
+        if (this.remoteHost && this.remotePin && !this.isRemoteConnected) {
+          this.connectRemoteTerminal(this.remoteHost, this.remotePin, false).finally(() => {
+            this.initActiveTabPanes();
+            this.updatePaneHeaders();
+          });
+        } else {
+          this.initActiveTabPanes();
+        }
         this.checkAndPromptRemoteIfMobileOrUnreachable();
         this.detectWindowsBridge(false).then(() => {
           this.syncServerCwd();

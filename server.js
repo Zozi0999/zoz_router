@@ -64,9 +64,45 @@ try {
   }
 } catch (_) {}
 
+function extractLatestTunnelUrlFromLog() {
+  const logPaths = [
+    path.join(__dirname, 'data', 'cloudflared-service.log'),
+    path.join(__dirname, 'data', 'cloudflared.log')
+  ];
+  for (const lp of logPaths) {
+    try {
+      if (fs.existsSync(lp)) {
+        const content = fs.readFileSync(lp, 'utf8');
+        const matches = content.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/g);
+        if (matches && matches.length > 0) {
+          return matches[matches.length - 1].trim();
+        }
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
+function findRunningCloudflaredPid() {
+  if (persistedTunnel && persistedTunnel.pid && isPidAlive(persistedTunnel.pid)) {
+    return persistedTunnel.pid;
+  }
+  if (process.platform === 'win32') {
+    try {
+      const out = execSync('tasklist /FI "IMAGENAME eq cloudflared.exe" /FO CSV /NH', { encoding: 'utf8', timeout: 3000 });
+      const match = out.match(/"cloudflared\.exe","(\d+)"/i);
+      if (match && match[1]) {
+        const foundPid = parseInt(match[1], 10);
+        if (isPidAlive(foundPid)) return foundPid;
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
 let cloudflareTunnelProcess = null;
-let cloudflareTunnelPid = (persistedTunnel && persistedTunnel.pid && isPidAlive(persistedTunnel.pid)) ? persistedTunnel.pid : null;
-let cloudflareTunnelUrl = (persistedTunnel && persistedTunnel.url) || '';
+let cloudflareTunnelPid = findRunningCloudflaredPid();
+let cloudflareTunnelUrl = (persistedTunnel && persistedTunnel.url) || extractLatestTunnelUrlFromLog() || '';
 let cloudflareTunnelActive = Boolean(cloudflareTunnelPid && cloudflareTunnelUrl);
 let cloudflareTunnelError = '';
 // Persistent PIN: Keep identical PIN across server restarts for this laptop uptime
@@ -100,7 +136,6 @@ function generateSixDigitPin() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-
 function getCloudflaredBinaryPath() {
   const localBin = path.join(__dirname, 'bin', 'cloudflared.exe');
   if (fs.existsSync(localBin)) return localBin;
@@ -112,24 +147,15 @@ function getCloudflaredBinaryPath() {
 function startCloudflareTunnel(customPort) {
   isTunnelIntentionallyStopped = false;
   return new Promise((resolve) => {
-    // 1. Jika proses tunnel sudah aktif di instansi berjalan, gunakan kembali secara langsung
-    if (cloudflareTunnelActive && cloudflareTunnelUrl && cloudflareTunnelPid && isPidAlive(cloudflareTunnelPid)) {
-      return resolve({
-        active: true,
-        tunnelUrl: cloudflareTunnelUrl,
-        wssUrl: cloudflareTunnelUrl.replace(/^http/i, 'ws'),
-        pin: cloudflareTunnelPin,
-        startedAt: cloudflareTunnelStartedAt
-      });
-    }
+    // 1. Re-check running cloudflared process on Windows host
+    const runningPid = findRunningCloudflaredPid();
+    const existingUrl = cloudflareTunnelUrl || (persistedTunnel && persistedTunnel.url) || extractLatestTunnelUrlFromLog();
 
-    // 2. Persistent Tunnel Guarantee: Jika proses cloudflared dari sesi sebelumnya masih hidup di Windows host,
-    // langsung sambungkan kembali! Menjamin URL publik trycloudflare dan PIN 100% PERSISTEN tanpa pernah berubah!
-    if (persistedTunnel && persistedTunnel.url && persistedTunnel.pid && isPidAlive(persistedTunnel.pid)) {
-      cloudflareTunnelPid = persistedTunnel.pid;
-      cloudflareTunnelUrl = persistedTunnel.url;
+    if (runningPid && existingUrl) {
+      cloudflareTunnelPid = runningPid;
+      cloudflareTunnelUrl = existingUrl;
       cloudflareTunnelActive = true;
-      cloudflareTunnelStartedAt = persistedTunnel.startedAt || new Date().toISOString();
+      cloudflareTunnelStartedAt = (persistedTunnel && persistedTunnel.startedAt) || new Date().toISOString();
       savePersistedTunnelState();
       console.log(`[Cloudflare] Detached Tunnel Reused (PID ${cloudflareTunnelPid}): ${cloudflareTunnelUrl} (PIN: ${cloudflareTunnelPin})`);
       return resolve({
@@ -151,16 +177,31 @@ function startCloudflareTunnel(customPort) {
 
     const binPath = getCloudflaredBinaryPath();
     const targetPort = customPort || process.env.PORT || 4040;
-    const args = ['tunnel', '--url', `http://localhost:${targetPort}`, '--no-autoupdate'];
+    const logFilePath = path.join(__dirname, 'data', 'cloudflared-service.log');
+
+    try {
+      const dataDir = path.join(__dirname, 'data');
+      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    } catch (_) {}
+
+    let logFd = 'ignore';
+    try {
+      logFd = fs.openSync(logFilePath, 'a');
+    } catch (_) {}
+
+    const args = ['tunnel', '--url', `http://localhost:${targetPort}`, '--no-autoupdate', '--logfile', logFilePath];
 
     try {
       cloudflareTunnelProcess = spawn(binPath, args, {
         windowsHide: true,
         detached: true,
-        stdio: ['ignore', 'pipe', 'pipe']
+        stdio: ['ignore', logFd, logFd]
       });
       cloudflareTunnelPid = cloudflareTunnelProcess.pid;
       cloudflareTunnelProcess.unref();
+      if (typeof logFd === 'number') {
+        try { fs.closeSync(logFd); } catch (_) {}
+      }
     } catch (err) {
       cloudflareTunnelError = `Gagal menjalankan cloudflared: ${err.message}.`;
       return resolve({
@@ -173,10 +214,42 @@ function startCloudflareTunnel(customPort) {
     }
 
     let resolved = false;
+    let pollCount = 0;
+    const pollInterval = setInterval(() => {
+      pollCount++;
+      const detected = extractLatestTunnelUrlFromLog();
+      if (detected) {
+        clearInterval(pollInterval);
+        clearTimeout(timeoutTimer);
+        cloudflareTunnelUrl = detected;
+        cloudflareTunnelActive = true;
+        cloudflareTunnelStartedAt = new Date().toISOString();
+        savePersistedTunnelState();
+        console.log(`[Cloudflare] Tunnel Host Persistent: ${cloudflareTunnelUrl} (PIN: ${cloudflareTunnelPin})`);
+        if (!resolved) {
+          resolved = true;
+          resolve({
+            active: true,
+            tunnelUrl: cloudflareTunnelUrl,
+            wssUrl: cloudflareTunnelUrl.replace(/^http/i, 'ws'),
+            pin: cloudflareTunnelPin,
+            startedAt: cloudflareTunnelStartedAt
+          });
+        }
+      } else if (pollCount > 60) {
+        clearInterval(pollInterval);
+      }
+    }, 500);
+
     const timeoutTimer = setTimeout(() => {
+      clearInterval(pollInterval);
       if (!resolved) {
         resolved = true;
-        if (cloudflareTunnelUrl) {
+        const fallbackUrl = cloudflareTunnelUrl || (persistedTunnel && persistedTunnel.url) || extractLatestTunnelUrlFromLog();
+        if (fallbackUrl) {
+          cloudflareTunnelUrl = fallbackUrl;
+          cloudflareTunnelActive = true;
+          savePersistedTunnelState();
           resolve({
             active: true,
             tunnelUrl: cloudflareTunnelUrl,
@@ -195,66 +268,6 @@ function startCloudflareTunnel(customPort) {
         }
       }
     }, 30000);
-
-    const onDataChunk = (chunk) => {
-      const text = chunk.toString();
-      const match = text.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/i);
-      if (match) {
-        const detectedUrl = match[0].trim();
-        cloudflareTunnelUrl = detectedUrl;
-        cloudflareTunnelActive = true;
-        cloudflareTunnelStartedAt = new Date().toISOString();
-        savePersistedTunnelState();
-        console.log(`[Cloudflare] Tunnel Host Persistent: ${cloudflareTunnelUrl} (PIN: ${cloudflareTunnelPin})`);
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timeoutTimer);
-          resolve({
-            active: true,
-            tunnelUrl: cloudflareTunnelUrl,
-            wssUrl: cloudflareTunnelUrl.replace(/^http/i, 'ws'),
-            pin: cloudflareTunnelPin,
-            startedAt: cloudflareTunnelStartedAt
-          });
-        }
-      }
-    };
-
-    if (cloudflareTunnelProcess.stdout) {
-      cloudflareTunnelProcess.stdout.on('data', onDataChunk);
-    }
-    if (cloudflareTunnelProcess.stderr) {
-      cloudflareTunnelProcess.stderr.on('data', onDataChunk);
-    }
-
-    cloudflareTunnelProcess.on('error', (err) => {
-      cloudflareTunnelError = err.message;
-      cloudflareTunnelActive = false;
-      if (!resolved) {
-        resolved = true;
-        clearTimeout(timeoutTimer);
-        resolve({ active: false, error: err.message, pin: cloudflareTunnelPin });
-      }
-    });
-
-    cloudflareTunnelProcess.on('exit', (code) => {
-      cloudflareTunnelActive = false;
-      cloudflareTunnelProcess = null;
-      if (!resolved) {
-        resolved = true;
-        clearTimeout(timeoutTimer);
-        resolve({ active: false, error: `Cloudflared keluar dengan kode ${code}`, pin: cloudflareTunnelPin });
-      }
-      // Auto-restart tunnel watchdog: keep tunnel alive as long as laptop is powered on
-      if (!isTunnelIntentionallyStopped) {
-        setTimeout(() => {
-          if (!isTunnelIntentionallyStopped && !cloudflareTunnelProcess) {
-            console.log(`[Cloudflare] Menghubungkan kembali tunnel Cloudflare secara otomatis...`);
-            startCloudflareTunnel(targetPort);
-          }
-        }, 3000);
-      }
-    });
   });
 }
 
@@ -5506,10 +5519,13 @@ async function requestHandler(req, res) {
   if (pathname === '/api/terminal/tunnel-info' && method === 'GET') {
     const isRemote = isRemoteTunnelRequest(req);
     const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
+    const effectiveUrl = cloudflareTunnelUrl || (persistedTunnel && persistedTunnel.url) || extractLatestTunnelUrlFromLog() || '';
+    const runningPid = findRunningCloudflaredPid();
+    const isActive = Boolean(runningPid && effectiveUrl);
     return sendJSON(res, 200, {
-      active: cloudflareTunnelActive,
-      tunnelUrl: cloudflareTunnelUrl,
-      wssUrl: cloudflareTunnelUrl ? cloudflareTunnelUrl.replace(/^http/i, 'ws') : '',
+      active: isActive,
+      tunnelUrl: effectiveUrl,
+      wssUrl: effectiveUrl ? effectiveUrl.replace(/^http/i, 'ws') : '',
       pin: (!isRemote || pinCheck.valid) ? cloudflareTunnelPin : undefined,
       requiresPin: isRemote && !pinCheck.valid,
       authenticated: !isRemote || pinCheck.valid,
