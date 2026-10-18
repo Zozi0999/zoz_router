@@ -10523,10 +10523,22 @@ Aturan wajib:
 
     if (!hasImages && !hasDocs) {
       els.attachmentPreviewBar.style.display = 'none';
+      if (els.promptInput) {
+        els.promptInput.placeholder = 'Tanyakan apa saja atau ketik prompt...';
+      }
       return;
     }
 
     els.attachmentPreviewBar.style.display = 'flex';
+    if (hasImages && els.promptInput && !els.promptInput.value) {
+      els.promptInput.placeholder = 'Tulis pesan atau pertanyaan tentang foto ini...';
+    }
+    setTimeout(() => {
+      if (els.promptInput) {
+        els.promptInput.focus();
+        autoResizeTextarea(els.promptInput);
+      }
+    }, 60);
 
     // Clear existing dynamic preview cards, chips & suggestion pills (preserve Connectome template #imagePreviewCard)
     els.attachmentPreviewBar.querySelectorAll('.dynamic-preview-card, .deepseek-img-cards-row, .doc-preview-chip, .deepseek-doc-chips-row, .image-suggestion-pills-row').forEach(c => c.remove());

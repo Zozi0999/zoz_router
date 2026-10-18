@@ -2271,20 +2271,79 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   padding-bottom: 12px;
 }
 
-/* Composer Box */
+/* Composer Box (DeepSeek Vertical Card Architecture) */
 .composer-box {
   position: relative;
   max-width: 920px;
+  width: 100% !important;
   margin: 0 auto;
-  background: var(--bg-surface);
-  border: 1.5px solid rgba(0, 240, 255, 0.4);
-  border-radius: var(--radius-lg);
-  padding: 8px 12px;
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 10px rgba(0, 240, 255, 0.08);
-  transition: border-color 0.25s, box-shadow 0.25s, max-height 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease, transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  background: rgba(13, 16, 26, 0.95) !important;
+  border: 1.5px solid rgba(0, 240, 255, 0.35) !important;
+  border-radius: 20px !important;
+  padding: 10px 14px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 8px !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 242, 254, 0.12) !important;
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+/* Inner input flow: wrap into full-width textarea on top, toolbar on bottom */
+.composer-box > .flex {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  width: 100% !important;
+  row-gap: 8px !important;
+}
+
+/* Prompt typing area: Sits directly under photo & pills, spanning 100% width */
+.composer-box .input-field-wrap {
+  order: 1 !important;
+  width: 100% !important;
+  flex: 1 1 100% !important;
+  min-width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  padding: 0 !important;
+}
+
+.composer-box #promptInput {
+  width: 100% !important;
+  min-height: 44px !important;
+  max-height: 200px !important;
+  font-size: 14.5px !important;
+  line-height: 1.45 !important;
+  color: #f8fafc !important;
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  padding: 4px 6px !important;
+  resize: none !important;
+}
+
+.composer-box #promptInput::placeholder {
+  color: #94a3b8 !important;
+  opacity: 1 !important;
+  font-size: 14px !important;
+}
+
+/* Bottom Toolbar: Tools on Left, Send Button on Right */
+.composer-box .composer-tools-left {
+  order: 2 !important;
+  flex: 1 1 auto !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.composer-box .composer-tools-right {
+  order: 3 !important;
+  margin-left: auto !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
 }
 
 /* ==================== SLASH COMMANDS & QUICK TOOLS AUTOCOMPLETE MENU ==================== */
@@ -15369,11 +15428,14 @@ body.mermaid-has-fullscreen {
   }
 
   /* Prompt Dock & Container */
-  #promptDockWrapper {
+  #promptDockWrapper,
+  .prompt-dock-wrapper {
     padding-left: 10px !important;
     padding-right: 10px !important;
     width: 100% !important;
     max-width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
 
   .composer-container {
@@ -15389,6 +15451,11 @@ body.mermaid-has-fullscreen {
     box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 242, 254, 0.15) !important;
     padding: 10px 12px !important;
     border-radius: 20px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 6px !important;
+    width: 100% !important;
   }
 
   .composer-box > .flex {
