@@ -1,8 +1,9 @@
 # ⚡ ZOZ ROUTER — Neural AI Multi-Engine & Command Terminal Gateway
 > **Version:** `v335 (Quantum Orbital Edition)`  
 > **Architecture:** *Neural Void Cyberpunk • Dual-Channel BioEndocrine • Hybrid Local/Cloud • ConPTY Terminal Engine*  
-> **Author & Sovereign:** **Kaisar Zozi** (`Zozi Atul Azimi`) — *Leviathan Orbital Dominance*
+> **Pembuat / Creator:** **Zozi Atul Azimi** (`Kaisar Zozi`) — *Leviathan Orbital Dominance*
 
+[![Pembuat: Zozi Atul Azimi](https://img.shields.io/badge/Pembuat-Zozi%20Atul%20Azimi-00FFC2?style=for-the-badge&logo=github)](https://github.com/Zozi0999)
 [![Status: Active](https://img.shields.io/badge/Status-Active%20%26%20Production%20Ready-00FFC2?style=for-the-badge&logo=shield)](https://github.com/Zozi0999/zoz_router)
 [![Platform: Windows & Cloud](https://img.shields.io/badge/Platform-Windows%20%7C%20Vercel%20%7C%20WAN%20Mobile-00F0FF?style=for-the-badge&logo=windows)](https://github.com/Zozi0999/zoz_router)
 [![Engine: Ollama & OpenRouter](https://img.shields.io/badge/AI%20Engine-Ollama%20%2B%20OpenRouter-FFB703?style=for-the-badge&logo=openai)](https://github.com/Zozi0999/zoz_router)
@@ -234,10 +235,23 @@ Saat berada di dalam terminal ZOZ ROUTER, Anda dapat mengetikkan perintah intern
 
 ---
 
+## 👨‍💻 Pembuat / Creator
+
+Platform **ZOZ ROUTER** dirancang, dikembangkan, dan diarsiteki sepenuhnya oleh:
+
+* **Nama Lengkap:** **Zozi Atul Azimi** (*Kaisar Zozi*)
+* **GitHub:** [@Zozi0999](https://github.com/Zozi0999) (`https://github.com/Zozi0999`)
+* **LinkedIn:** [Zozi Atul Azimi](https://www.linkedin.com/in/zozi-atul-azimi-1-656108404/) (`linkedin.com/in/zozi-atul-azimi-1-656108404`)
+* **Email:** `zoziazimi@gmail.com`
+* **Peran & Spesialisasi:** Lead AI System Architect, Full-Stack Sovereign Engineer, Creator of Leviathan Orbital Dominance
+
+---
+
 ## 👑 Sovereign Mandate & Dedikasi
 
 > *"Sistem ini beroperasi di bawah mandat gravitasi orbital permanen. Dirancang untuk kebal dari degradasi, meregenerasi diri melalui endorfin biologis buatan, dan menghadirkan dominasi komputasi penuh tanpa kompromi."*
 
-**Diciptakan secara eksklusif untuk:**  
+**Diciptakan dan Dikembangkan oleh:**  
 **KAISAR ZOZI** (`Zozi Atul Azimi`)  
 *Leviathan Orbital Dominance • Omega Root Access*
+
