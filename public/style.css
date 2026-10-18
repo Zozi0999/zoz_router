@@ -13583,10 +13583,20 @@ body.mermaid-has-fullscreen {
   .terminal-toolbar {
     height: 32px !important;
     min-height: 32px !important;
-    padding: 0 8px !important;
-    gap: 6px !important;
+    padding: 0 6px !important;
+    gap: 5px !important;
     background: #070c14 !important;
     border-bottom: 1px solid rgba(56, 189, 248, 0.2) !important;
+    overflow-x: auto !important;
+    scrollbar-width: none !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+  .terminal-toolbar::-webkit-scrollbar {
+    display: none !important;
+  }
+  .terminal-toolbar-left,
+  .terminal-toolbar-right {
+    flex-shrink: 0 !important;
   }
   .terminal-title .term-title-text {
     display: none !important;
