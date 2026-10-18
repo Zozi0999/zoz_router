@@ -42,8 +42,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.min.css?v=20261017_v355">
-  <link rel="stylesheet" href="style.min.css?v=20261017_v355">
+  <link rel="preload" as="style" href="style.min.css?v=20261017_v356">
+  <link rel="stylesheet" href="style.min.css?v=20261017_v356">
 </head>
 <body class="theme-dark">
   <div class="app-container">
@@ -2467,6 +2467,12 @@
             <span id="labelTermSyncDimension">Laptop 100c</span>
           </button>
 
+          <!-- Auto Y/Enter Automation Toggle (Mobile & Desktop) -->
+          <button class="tb-btn tb-btn-auto-enter" id="btnTermToolbarAutoEnter" type="button" title="Auto Y: Otomatis konfirmasi Y/Enter saat prompt perintah Claude Code muncul">
+            <span style="color: var(--neon-amber, #f59e0b);">⚡</span>
+            <span class="auto-enter-label">Auto Y</span>
+          </button>
+
           <!-- Windows Local Sync Status & Reconnect Button -->
           <button class="tb-btn" id="btnTermSyncWindows" type="button" title="Sinkronkan Terminal dengan Windows lokal (port 4040)">
             <i class="fa-solid fa-bolt" id="iconTermSyncWindows" style="font-size: 0.75rem; color: var(--neon-teal, #22d3ee);"></i>
@@ -2731,6 +2737,7 @@
       <div class="terminal-quick-chips" id="termQuickChipsBar">
         <span class="quick-label"><i class="fa-solid fa-bolt" style="font-size:0.68rem; color:var(--neon-teal);"></i> Cepat:</span>
         <button class="term-chip term-chip-endorphin" type="button" data-cmd="endorfin" title="Suntik Endorfin: Diagnostik & Pulihkan Terminal" style="color: #00FFC2; border-color: rgba(0, 255, 194, 0.4);"><i class="fa-solid fa-seedling"></i> Endorfin</button>
+        <button class="term-chip term-chip-auto-enter" id="btnChipAutoEnter" type="button" data-cmd="auto_enter" title="Toggle Auto Y/Enter Otomatis" style="color: #f59e0b; border-color: rgba(245, 158, 11, 0.5);"><i class="fa-solid fa-bolt"></i> Auto Y</button>
         <button class="term-chip" type="button" data-cmd="dir">dir</button>
         <button class="term-chip" type="button" data-cmd="git status">git status</button>
         <button class="term-chip" type="button" data-cmd="git log -n 5 --oneline">git log</button>
@@ -2889,6 +2896,6 @@
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
   <script src="text-safety.js?v=20261017_v349" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261017_v355" defer></script>
+  <script src="app.js?v=20261017_v356" defer></script>
 </body>
 </html>

@@ -5599,7 +5599,9 @@ async function requestHandler(req, res) {
         return sendJSON(res, 401, { error: pinCheck.error });
       }
       const sessionId = (body.session || 'default').trim();
-      const data = typeof body.data === 'string' ? body.data : '';
+      const rawData = typeof body.data === 'string' ? body.data : '';
+      // Normalisasi sekuens escape Backspace (\x1b\x7f dan \x1b\x08) agar ConPTY Windows tidak menampilkan echo ^H
+      const data = rawData.replace(/\x1b\x7f/g, '\x7f').replace(/\x1b\x08/g, '\x7f');
       const session = activeTerminalSessions.get(sessionId);
       if (session && session.pty) {
         session.pty.write(data);
@@ -9438,14 +9440,16 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
               return;
             } else if (parsed.type === 'input' && typeof parsed.data === 'string' && session.pty) {
               session.lastInputAt = Date.now();
-              session.pty.write(parsed.data);
+              const safeData = parsed.data.replace(/\x1b\x7f/g, '\x7f').replace(/\x1b\x08/g, '\x7f');
+              session.pty.write(safeData);
               return;
             }
           }
         } catch (_) {}
         if (session.pty) {
           session.lastInputAt = Date.now();
-          session.pty.write(str);
+          const safeStr = typeof str === 'string' ? str.replace(/\x1b\x7f/g, '\x7f').replace(/\x1b\x08/g, '\x7f') : str;
+          session.pty.write(safeStr);
         }
       }
     });

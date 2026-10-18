@@ -31909,10 +31909,26 @@ Aturan:
       const tab = this.getActiveTab();
       const p1 = tab?.pane1;
       const p2 = tab?.pane2;
+      const activePaneNum = this.activePane || 1;
+      const activePane = activePaneNum === 2 ? p2 : p1;
+      const isAutoActive = !!activePane?.autoEnter;
+
       const btn1 = document.getElementById('btnPaneAutoEnter1');
       const btn2 = document.getElementById('btnPaneAutoEnter2');
       if (btn1) btn1.classList.toggle('active', !!p1?.autoEnter);
       if (btn2) btn2.classList.toggle('active', !!p2?.autoEnter);
+
+      // Sinkronkan tombol Auto Y di toolbar utama (mobile & desktop)
+      const tbBtn = document.getElementById('btnTermToolbarAutoEnter');
+      if (tbBtn) {
+        tbBtn.classList.toggle('active', isAutoActive);
+      }
+
+      // Sinkronkan tombol chip Auto Y di bilah aksi cepat
+      const chipBtn = document.getElementById('btnChipAutoEnter');
+      if (chipBtn) {
+        chipBtn.classList.toggle('active', isAutoActive);
+      }
     },
 
     toggleAutoEnter(paneNum = (this.activePane || 1)) {
@@ -32203,6 +32219,48 @@ Aturan:
         term.textarea.setAttribute('enterkeyhint', 'enter');
       }
 
+      // Cegah xterm menghasilkan \x1b\x7f atau \x1b\x08 (yang memicu echo ^H pada PowerShell/ConPTY)
+      // saat tombol Backspace ditekan di keyboard virtual Android (yang sering mengaktifkan flag ev.altKey secara otomatis)
+      term.attachCustomKeyEventHandler((ev) => {
+        if (ev.key === 'Backspace' || ev.keyCode === 8) {
+          if (ev.type === 'keydown') {
+            paneState._lastBackspaceTime = Date.now();
+            if (this.isMobileDevice() || ev.altKey) {
+              ev.preventDefault();
+              ev.stopPropagation();
+              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                this.sendPtyInput(paneState.sessionId || sessionId, '\x7f');
+              } else if (paneState && paneState.isFallbackMode) {
+                if (paneState._inputLine && paneState._inputLine.length > 0) {
+                  paneState._inputLine = paneState._inputLine.slice(0, -1);
+                  term.write('\b \b');
+                }
+              }
+              return false;
+            }
+          }
+        }
+        return true;
+      });
+
+      // Mobile IME / Gboard deleteContentBackward fallback (saat keyCode adalah 229 / IME composition)
+      container.addEventListener('beforeinput', (ev) => {
+        if (ev.inputType === 'deleteContentBackward' || ev.inputType === 'deleteWordBackward') {
+          const now = Date.now();
+          if (!paneState._lastBackspaceTime || (now - paneState._lastBackspaceTime) > 60) {
+            paneState._lastBackspaceTime = now;
+            if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+              this.sendPtyInput(paneState.sessionId || sessionId, ev.inputType === 'deleteWordBackward' ? '\x17' : '\x7f');
+            } else if (paneState && paneState.isFallbackMode) {
+              if (paneState._inputLine && paneState._inputLine.length > 0) {
+                paneState._inputLine = paneState._inputLine.slice(0, -1);
+                term.write('\b \b');
+              }
+            }
+          }
+        }
+      }, true);
+
       container.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter' || ev.keyCode === 13) {
           paneState._userScrolledUp = false;
@@ -32492,6 +32550,16 @@ Aturan:
           const altBtn = document.getElementById('btnTouchAlt');
           if (altBtn) altBtn.classList.remove('active');
           data = '\x1b' + data;
+        }
+
+        // Normalisasi sekuens escape Backspace agar tidak memicu echo ^H pada ConPTY/PowerShell
+        if (typeof data === 'string') {
+          if (data.includes('\x1b\x7f') || data.includes('\x1b\x08')) {
+            data = data.replace(/\x1b\x7f/g, '\x7f').replace(/\x1b\x08/g, '\x7f');
+          }
+          if (this.isMobileDevice() && (data === '\x08' || data.includes('\x08'))) {
+            data = data.replace(/\x08/g, '\x7f');
+          }
         }
 
         // Mode Live PTY (Local Server & Remote WAN) - Fast Path: Kirim instan tanpa layout reflow
@@ -32865,6 +32933,9 @@ Aturan:
 
     sendPtyInput(sessionId, data) {
       if (!data) return;
+      if (typeof data === 'string') {
+        data = data.replace(/\x1b\x7f/g, '\x7f').replace(/\x1b\x08/g, '\x7f');
+      }
       const tab = this.getActiveTab();
       const panes = [tab?.pane1, tab?.pane2].filter(p => p && p.sessionId === sessionId);
       const wsPane = panes.find(p => p.ws && p.ws.readyState === WebSocket.OPEN);
@@ -33849,6 +33920,7 @@ Aturan:
       document.getElementById('btnTermFontDec')?.addEventListener('click', () => this.adjustFontSize(-1));
       document.getElementById('btnTermFontInc')?.addEventListener('click', () => this.adjustFontSize(1));
       document.getElementById('btnTermSyncDimension')?.addEventListener('click', () => this.toggleTerminalDimension());
+      document.getElementById('btnTermToolbarAutoEnter')?.addEventListener('click', () => this.toggleAutoEnter(this.activePane || 1));
       document.getElementById('btnTermSyncWindows')?.addEventListener('click', () => this.trySyncWindows(true));
       document.getElementById('btnTermRemoteTunnel')?.addEventListener('click', () => this.openRemoteTunnelModal());
       document.getElementById('btnTermMobileConnect')?.addEventListener('click', () => {
@@ -34108,6 +34180,8 @@ Aturan:
             if (cmd) {
               if (cmd === 'endorfin' || cmd === 'heal') {
                 if (window.TerminalEndorphin) window.TerminalEndorphin.heal(this.activePane || 1);
+              } else if (cmd === 'auto_enter' || cmd === 'autoy') {
+                this.toggleAutoEnter(this.activePane || 1);
               } else {
                 this.executeInput(this.activePane, cmd);
               }
