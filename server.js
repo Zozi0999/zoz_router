@@ -9714,10 +9714,18 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
           try { if (!client.writableEnded) client.write(payload); } catch (_) {}
         }
         if (session.wsClients && session.wsClients.size > 0) {
-          pendingWsData += data;
-          if (!wsFlushScheduled) {
-            wsFlushScheduled = true;
-            setImmediate(flushWsBatch);
+          if (!wsFlushScheduled && data.length < 32) {
+            // Interactive keystroke fast-path: Zero-latency immediate transmission!
+            const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data }));
+            for (const ws of session.wsClients) {
+              try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+            }
+          } else {
+            pendingWsData += data;
+            if (!wsFlushScheduled) {
+              wsFlushScheduled = true;
+              setImmediate(flushWsBatch);
+            }
           }
         }
       });

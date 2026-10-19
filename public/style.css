@@ -13849,10 +13849,10 @@ body.mermaid-has-fullscreen {
   outline: none !important;
   background: transparent !important;
   color: transparent !important;
-  pointer-events: none !important;
+  pointer-events: auto !important;
   resize: none !important;
   overflow: hidden !important;
-  z-index: -10 !important;
+  z-index: 0 !important;
 }
 
 .terminal-screen::-webkit-scrollbar {
@@ -14354,10 +14354,10 @@ body.mermaid-has-fullscreen {
     outline: none !important;
     background: transparent !important;
     color: transparent !important;
-    pointer-events: none !important;
+    pointer-events: auto !important;
     resize: none !important;
     overflow: hidden !important;
-    z-index: -10 !important;
+    z-index: 0 !important;
   }
   /* Mobile Keybar Termux 8-Kolom 2-Baris Presisi */
   .terminal-mobile-keybar {

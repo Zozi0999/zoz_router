@@ -33965,10 +33965,10 @@ Aturan:
       if (term.textarea) {
         term.textarea.setAttribute('autocomplete', 'off');
         term.textarea.setAttribute('autocorrect', 'off');
-        term.textarea.setAttribute('autocapitalize', 'none');
+        term.textarea.setAttribute('autocapitalize', 'off');
         term.textarea.setAttribute('spellcheck', 'false');
         term.textarea.setAttribute('enterkeyhint', 'go');
-        term.textarea.setAttribute('inputmode', 'search');
+        term.textarea.setAttribute('inputmode', 'text');
         term.textarea.setAttribute('data-gramm', 'false');
         term.textarea.setAttribute('data-enable-grammarly', 'false');
         term.textarea.setAttribute('aria-autocomplete', 'none');
@@ -34760,18 +34760,9 @@ Aturan:
             try { currentTerm.reset(); } catch (_) {}
             paneState._userScrolledUp = false;
           }
-          const activeBuf = currentTerm.buffer && currentTerm.buffer.active;
-          const linesFromBottom = activeBuf ? (activeBuf.baseY - activeBuf.viewportY) : 0;
-          // Auto-scroll to bottom ONLY if user is already at the bottom and has not scrolled up, and not touching
-          const shouldAutoScroll = (linesFromBottom <= 1) && !paneState._userScrolledUp && !paneState._isTouchActive;
-
           currentTerm.write(msg.data);
-
-          if (shouldAutoScroll) {
-            currentTerm.scrollToBottom();
-          }
-          if (paneState.updateScrollUI) {
-            paneState.updateScrollUI();
+          if (msg.type === 'init') {
+            try { currentTerm.scrollToBottom(); } catch (_) {}
           }
           this.handleAutoRespond(tab, paneState, paneNum, msg.data);
         } else if (typeof msg.data === 'string') {
@@ -34966,11 +34957,18 @@ Aturan:
         data = data.replace(/\x1b\x7f/g, '\x7f').replace(/\x1b\x08/g, '\x7f');
       }
       const tab = this.getActiveTab();
-      const panes = [tab?.pane1, tab?.pane2].filter(p => p && p.sessionId === sessionId);
-      const wsPane = panes.find(p => p.ws && p.ws.readyState === WebSocket.OPEN);
-      if (wsPane && wsPane.ws) {
+      // Fast-path: Prioritaskan WebSocket pane aktif secara langsung
+      const targetPane = (this.activePane === 2 ? tab?.pane2 : tab?.pane1) || tab?.pane1;
+      if (targetPane && targetPane.ws && targetPane.ws.readyState === WebSocket.OPEN) {
         try {
-          wsPane.ws.send(JSON.stringify({ type: 'input', session: sessionId, data }));
+          targetPane.ws.send(JSON.stringify({ type: 'input', session: targetPane.sessionId || sessionId, data }));
+          return;
+        } catch (_) {}
+      }
+      const anyWsPane = [tab?.pane1, tab?.pane2].find(p => p && p.ws && p.ws.readyState === WebSocket.OPEN);
+      if (anyWsPane && anyWsPane.ws) {
+        try {
+          anyWsPane.ws.send(JSON.stringify({ type: 'input', session: anyWsPane.sessionId || sessionId, data }));
           return;
         } catch (_) {}
       }
