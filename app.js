@@ -31955,7 +31955,7 @@ Aturan:
           setTimeout(() => {
             if (document.hidden || document.visibilityState === 'hidden') return;
             const active = document.activeElement;
-            if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) {
+            if (active && active === els.promptInput) {
               active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
             }
             // HANYA gulir ke dasar jika pengguna TIDAK sedang membaca pesan di atas
@@ -32153,10 +32153,10 @@ Aturan:
       if (window.visualViewport) {
         const vv = window.visualViewport;
         const vH = Math.floor(vv.height);
-        const vTop = Math.floor(vv.offsetTop);
         card.style.height = `${vH}px`;
         card.style.maxHeight = `${vH}px`;
-        card.style.top = `${vTop}px`;
+        card.style.top = '0px';
+        card.style.left = '0px';
         card.style.position = 'fixed';
       }
       const tab = this.getActiveTab();
@@ -33964,11 +33964,13 @@ Aturan:
         term.textarea.setAttribute('data-gramm', 'false');
         term.textarea.setAttribute('aria-autocomplete', 'none');
 
-        // Flush IME composition value so Gboard/Android keyboard never accumulates ghost text buffer
+        // Flush IME composition value smoothly after composition commit
         term.textarea.addEventListener('compositionend', () => {
           setTimeout(() => {
-            if (term.textarea) term.textarea.value = '';
-          }, 15);
+            if (term.textarea && !term.textarea.matches(':focus')) {
+              term.textarea.value = '';
+            }
+          }, 80);
         });
       }
 
@@ -34178,6 +34180,7 @@ Aturan:
 
       container.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter' || ev.keyCode === 13) {
+          paneState._lastEnterSentAt = Date.now();
           paneState._userScrolledUp = false;
           if (paneState._touchInertiaRaf) {
             cancelAnimationFrame(paneState._touchInertiaRaf);
@@ -34188,9 +34191,14 @@ Aturan:
         }
       }, true);
 
-      // Mobile virtual keyboard Enter / Paragraph insertion fallback
+      // Mobile virtual keyboard Enter / Paragraph insertion fallback (anti duplicate Enter)
       container.addEventListener('input', (ev) => {
         if (ev.inputType === 'insertParagraph' || ev.inputType === 'insertLineBreak') {
+          const now = Date.now();
+          if (paneState._lastEnterSentAt && (now - paneState._lastEnterSentAt) < 250) {
+            return; // Redundant duplicate enter within 250ms, safely ignore
+          }
+          paneState._lastEnterSentAt = now;
           paneState._userScrolledUp = false;
           if (paneState._touchInertiaRaf) {
             cancelAnimationFrame(paneState._touchInertiaRaf);
@@ -34198,15 +34206,10 @@ Aturan:
           }
           term.scrollToBottom();
           if (paneState.updateScrollUI) paneState.updateScrollUI();
-          setTimeout(() => {
-            if (!paneState._lastDataEmitAt || (Date.now() - paneState._lastDataEmitAt) > 35) {
-              if (term._core && term._core.coreService) {
-                term._core.coreService.triggerDataEvent('\r', true);
-              } else {
-                this.sendPtyInput(paneState.sessionId || sessionId, '\r');
-              }
-            }
-          }, 12);
+          if (term.textarea) {
+            try { term.textarea.value = ''; } catch (_) {}
+          }
+          this.sendPtyInput(paneState.sessionId || sessionId, '\r');
         }
       }, true);
 
@@ -34434,6 +34437,7 @@ Aturan:
       term.onData((data) => {
         paneState._lastDataEmitAt = Date.now();
         if (data === '\r' || data === '\n') {
+          paneState._lastEnterSentAt = Date.now();
           paneState._userScrolledUp = false;
           if (paneState._touchInertiaRaf) {
             cancelAnimationFrame(paneState._touchInertiaRaf);
@@ -34441,6 +34445,9 @@ Aturan:
           }
           term.scrollToBottom();
           if (paneState.updateScrollUI) paneState.updateScrollUI();
+          if (term.textarea) {
+            try { term.textarea.value = ''; } catch (_) {}
+          }
         }
 
         // Sticky CTRL Modifier from Mobile Touch Keybar
@@ -34479,9 +34486,6 @@ Aturan:
 
         // Mode Live PTY (Local Server & Remote WAN) - Fast Path: Kirim instan tanpa layout reflow
         if (!paneState.isFallbackMode) {
-          if (this.isMobileDevice() && term.textarea && term.textarea.value.length > 0) {
-            term.textarea.value = '';
-          }
           this.sendPtyInput(paneState.sessionId || sessionId, data);
           return;
         }
@@ -35077,10 +35081,9 @@ Aturan:
         } finally {
           setTimeout(() => { paneState._isRemoteResizing = false; }, 120);
         }
-      }
-
-      if (forcePtyResize && paneState.sessionId && !paneState.isFallbackMode) {
-        this.sendPtyResize(paneState.sessionId, targetCols, targetRows);
+        if (forcePtyResize && paneState.sessionId && !paneState.isFallbackMode) {
+          this.sendPtyResize(paneState.sessionId, targetCols, targetRows);
+        }
       }
 
       if (isMobile) {
@@ -35576,7 +35579,7 @@ Aturan:
 
       // Mode 2: Fallback Command Exec API
       const promptText = conf.prompt.replace('{cwd}', pane.cwd);
-      if (screenEl) {
+      if (screenEl && !pane.term) {
         const promptLine = document.createElement('div');
         promptLine.className = 'term-line term-prompt-line';
         promptLine.innerHTML = `<span class="term-prompt">${escapeHtml(promptText)}</span><span class="term-cmd-text">${escapeHtml(cmd)}</span>`;
@@ -35594,12 +35597,12 @@ Aturan:
         if (pane.term) {
           pane.term.write(`\x1b[36m${promptText}\x1b[0m `);
         }
-        if (screenEl) screenEl.scrollTop = screenEl.scrollHeight;
+        if (screenEl && !pane.term) screenEl.scrollTop = screenEl.scrollHeight;
         return;
       }
 
       const spinnerId = `term_spin_${Date.now()}`;
-      if (screenEl) {
+      if (screenEl && !pane.term) {
         const spinnerEl = document.createElement('div');
         spinnerEl.className = 'term-line term-running';
         spinnerEl.id = spinnerId;
@@ -35655,7 +35658,7 @@ Aturan:
           pane.term.write(`\x1b[36m${nextConf.prompt.replace('{cwd}', pane.cwd)}\x1b[0m `);
         }
 
-        if (screenEl) {
+        if (screenEl && !pane.term) {
           if (stdoutText && stdoutText.trim()) {
             const outEl = document.createElement('pre');
             outEl.className = 'term-line term-stdout';
