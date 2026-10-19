@@ -2279,8 +2279,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
         // Cari elemen penyebab overflow horizontal
         const winW = window.innerWidth || 1024;
-        if (typeof document.querySelectorAll === 'function') {
-          const allElements = document.querySelectorAll('*');
+        const isTermOpen = document.getElementById('terminalModal')?.classList.contains('show');
+        if (!options.isAutoReflex && !isTermOpen && typeof document.querySelectorAll === 'function') {
+          const allElements = document.querySelectorAll('.chat-bubble, .message-bubble, .card, .container');
           allElements.forEach(el => {
             if (el.offsetParent !== null && typeof el.getBoundingClientRect === 'function') {
               const r = el.getBoundingClientRect();
@@ -2343,11 +2344,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             }
           }
 
-          // e. Pulihkan Terminal PTY jika ada anomali dimensi/scroll
+          // e. Pulihkan Terminal PTY HANYA jika instance terminal hilang / crash
           if (typeof window.TerminalEndorphin !== 'undefined' && typeof window.TerminalEndorphin.healAll === 'function') {
             const termModal = document.getElementById('terminalModal');
             if (termModal && termModal.classList.contains('show')) {
-              window.TerminalEndorphin.healAll({ silent: true, noRedraw: true });
+              const tab = window.TerminalManager && typeof window.TerminalManager.getActiveTab === 'function' && window.TerminalManager.getActiveTab();
+              const pane = tab && tab.pane1;
+              if (pane && !pane.term) {
+                window.TerminalEndorphin.healAll({ silent: true, noRedraw: true });
+              }
             }
           }
 
@@ -33948,8 +33953,13 @@ Aturan:
         lineHeight: 1.2,
         scrollback: 5000,
         allowTransparency: true,
-        convertEol: true
+        convertEol: true,
+        bellStyle: 'none'
       });
+
+      if (term.onBell) {
+        term.onBell(() => {});
+      }
 
       const fitAddon = (typeof window.FitAddon !== 'undefined' && window.FitAddon.FitAddon)
         ? new window.FitAddon.FitAddon()
@@ -34061,7 +34071,6 @@ Aturan:
                     this._coreService.triggerDataEvent(remaining, true);
                   }
                 }
-                try { this._textarea.value = ''; } catch (_) {}
               }
             }
           }, 0);
@@ -34858,7 +34867,8 @@ Aturan:
             try { currentTerm.reset(); } catch (_) {}
             paneState._userScrolledUp = false;
           }
-          currentTerm.write(msg.data);
+          const cleanData = msg.data.includes('\x07') ? msg.data.replace(/\x07/g, '') : msg.data;
+          currentTerm.write(cleanData);
           if (msg.type === 'init') {
             try { currentTerm.scrollToBottom(); } catch (_) {}
           }
@@ -36726,7 +36736,7 @@ Aturan:
 
       // G. Audio Feedback & Toast
       try {
-        if (typeof AudioEngine !== 'undefined' && AudioEngine.playBeep && STATE.soundEnabled) {
+        if (!options.silent && typeof AudioEngine !== 'undefined' && AudioEngine.playBeep && STATE.soundEnabled) {
           AudioEngine.playBeep(880, 'sine', 0.14, 0.05);
           setTimeout(() => AudioEngine.playBeep(1320, 'triangle', 0.18, 0.04), 90);
         }

@@ -5770,6 +5770,10 @@ async function requestHandler(req, res) {
 
         ptyProcess.onData((data) => {
           session.lastActivity = Date.now();
+          if (typeof data === 'string' && data.includes('\x07')) {
+            data = data.replace(/\x07/g, '');
+          }
+          if (!data) return;
           if (session.buffer.length > 500) session.buffer.shift();
           session.buffer.push(data);
           handleServerAutoEnter(session, data);
@@ -9706,6 +9710,10 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
 
       ptyProcess.onData((data) => {
         session.lastActivity = Date.now();
+        if (typeof data === 'string' && data.includes('\x07')) {
+          data = data.replace(/\x07/g, '');
+        }
+        if (!data) return;
         if (session.buffer.length > 500) session.buffer.shift();
         session.buffer.push(data);
         handleServerAutoEnter(session, data);
