@@ -31969,6 +31969,8 @@ Aturan:
       window.visualViewport.addEventListener('resize', handleResize);
       window.visualViewport.addEventListener('scroll', () => {
         if (document.hidden || document.visibilityState === 'hidden') return;
+        const modal = document.getElementById('terminalModal');
+        if (modal && modal.classList.contains('show')) return;
         if (window.visualViewport.offsetTop > 0) {
           window.scrollTo(0, 0);
         }
@@ -32153,11 +32155,14 @@ Aturan:
       if (window.visualViewport) {
         const vv = window.visualViewport;
         const vH = Math.floor(vv.height);
-        card.style.height = `${vH}px`;
-        card.style.maxHeight = `${vH}px`;
-        card.style.top = '0px';
-        card.style.left = '0px';
-        card.style.position = 'fixed';
+        const targetH = `${vH}px`;
+        if (card.style.height !== targetH) {
+          card.style.height = targetH;
+          card.style.maxHeight = targetH;
+        }
+        if (card.style.top !== '0px') card.style.top = '0px';
+        if (card.style.left !== '0px') card.style.left = '0px';
+        if (card.style.position !== 'fixed') card.style.position = 'fixed';
       }
       const tab = this.getActiveTab();
       if (tab) {
@@ -33933,7 +33938,8 @@ Aturan:
       paneState.screenContainer = container;
 
       const term = new window.Terminal({
-        cursorBlink: true,
+        cursorBlink: !this.isMobileDevice(),
+        cursorStyle: 'block',
         theme: this.getXtermTheme(),
         fontFamily: '"JetBrains Mono", Cascadia Code, Fira Code, Consolas, "Courier New", monospace',
         fontSize: this.fontSize,
@@ -33963,15 +33969,6 @@ Aturan:
         term.textarea.setAttribute('inputmode', 'text');
         term.textarea.setAttribute('data-gramm', 'false');
         term.textarea.setAttribute('aria-autocomplete', 'none');
-
-        // Flush IME composition value smoothly after composition commit
-        term.textarea.addEventListener('compositionend', () => {
-          setTimeout(() => {
-            if (term.textarea && !term.textarea.matches(':focus')) {
-              term.textarea.value = '';
-            }
-          }, 80);
-        });
       }
 
       // Cegah xterm menghasilkan \x1b\x7f atau \x1b\x08 (yang memicu echo ^H pada PowerShell/ConPTY)
@@ -36288,11 +36285,13 @@ Aturan:
       });
 
       if (window.visualViewport) {
+        let lastVvH = Math.floor(window.visualViewport.height);
         window.visualViewport.addEventListener('resize', () => {
-          this.syncMobileViewport();
-        });
-        window.visualViewport.addEventListener('scroll', () => {
-          this.syncMobileViewport();
+          const newH = Math.floor(window.visualViewport.height);
+          if (Math.abs(newH - lastVvH) > 20) {
+            lastVvH = newH;
+            this.syncMobileViewport();
+          }
         });
       }
 
