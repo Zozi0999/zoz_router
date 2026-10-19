@@ -33974,6 +33974,104 @@ Aturan:
         term.textarea.setAttribute('aria-autocomplete', 'none');
       }
 
+      // Real-time Mobile IME Composition Bridge (Gboard / Android virtual keyboards)
+      // Eliminasi tuntas bug "teks hanya muncul setelah spasi/enter":
+      // Setiap karakter yang sedang diketik di IME ponsel langsung di-stream karakter-per-karakter ke PTY tanpa menunggu compositionend
+      const helper = term._core && term._core._compositionHelper;
+      if (helper) {
+        const origStart = helper.compositionstart ? helper.compositionstart.bind(helper) : null;
+        helper.compositionstart = function() {
+          if (origStart) origStart();
+          this._lastComposed = '';
+          this._dataAlreadySent = '';
+          if (this._compositionView) {
+            this._compositionView.classList.remove('active');
+          }
+        };
+
+        helper.compositionupdate = function(e) {
+          if (this._compositionView) {
+            this._compositionView.classList.remove('active');
+          }
+          const text = (e && e.data) || '';
+          if (typeof this._lastComposed !== 'string') {
+            this._lastComposed = '';
+          }
+
+          if (text.startsWith(this._lastComposed)) {
+            // Huruf baru diketik
+            const delta = text.slice(this._lastComposed.length);
+            if (delta) {
+              this._coreService.triggerDataEvent(delta, true);
+              this._dataAlreadySent = (this._dataAlreadySent || '') + delta;
+            }
+          } else if (this._lastComposed.startsWith(text)) {
+            // Tombol backspace ditekan saat komposisi
+            const diff = this._lastComposed.length - text.length;
+            for (let i = 0; i < diff; i++) {
+              this._coreService.triggerDataEvent('\x7f', true);
+            }
+            this._dataAlreadySent = (this._dataAlreadySent || '').slice(0, -diff);
+            paneState._lastBackspaceHandled = Date.now();
+            paneState._lastBackspaceTime = Date.now();
+          } else {
+            // Penggantian kata atau koreksi teks Gboard
+            let common = 0;
+            while (common < this._lastComposed.length && common < text.length && this._lastComposed[common] === text[common]) {
+              common++;
+            }
+            const toDelete = this._lastComposed.length - common;
+            for (let i = 0; i < toDelete; i++) {
+              this._coreService.triggerDataEvent('\x7f', true);
+            }
+            const toAdd = text.slice(common);
+            if (toAdd) {
+              this._coreService.triggerDataEvent(toAdd, true);
+            }
+            this._dataAlreadySent = text;
+          }
+          this._lastComposed = text;
+          setTimeout(() => {
+            if (this._textarea) {
+              this._compositionPosition.end = this._textarea.value.length;
+            }
+          }, 0);
+        };
+
+        helper._finalizeComposition = function(e) {
+          if (this._compositionView) {
+            this._compositionView.classList.remove('active');
+          }
+          this._isComposing = false;
+          this._lastComposed = '';
+          this._isSendingComposition = true;
+          const startPos = this._compositionPosition ? this._compositionPosition.start : 0;
+          const alreadySent = this._dataAlreadySent || '';
+
+          setTimeout(() => {
+            if (this._isSendingComposition) {
+              this._isSendingComposition = false;
+              this._dataAlreadySent = '';
+              if (this._textarea) {
+                const textVal = this._textarea.value || '';
+                const effectiveStart = startPos + alreadySent.length;
+                if (textVal.length > effectiveStart) {
+                  const remaining = textVal.substring(effectiveStart);
+                  if (remaining.length > 0) {
+                    this._coreService.triggerDataEvent(remaining, true);
+                  }
+                }
+                try { this._textarea.value = ''; } catch (_) {}
+              }
+            }
+          }, 0);
+        };
+
+        helper.compositionend = function() {
+          this._finalizeComposition(true);
+        };
+      }
+
       // Cegah xterm menghasilkan \x1b\x7f atau \x1b\x08 (yang memicu echo ^H pada PowerShell/ConPTY)
       // saat tombol Backspace ditekan di keyboard virtual Android (yang sering mengaktifkan flag ev.altKey secara otomatis)
       term.attachCustomKeyEventHandler((ev) => {
