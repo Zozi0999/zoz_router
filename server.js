@@ -319,13 +319,21 @@ function isRemoteTunnelRequest(req) {
   return false;
 }
 
+function extractCookiePin(req) {
+  const cookieHeader = req && req.headers && req.headers.cookie;
+  if (!cookieHeader) return null;
+  const match = cookieHeader.match(/(?:^|;\s*)zoz_remote_pin=([0-9a-zA-Z_-]+)/);
+  return match ? decodeURIComponent(match[1]).trim() : null;
+}
+
 function validateRemoteTerminalPin(req, reqUrl, body) {
   if (!isRemoteTunnelRequest(req)) {
     return { valid: true };
   }
-  const clientPin = (reqUrl && reqUrl.searchParams.get('pin')) ||
-                    req.headers['x-terminal-pin'] ||
-                    (body && body.pin);
+  const clientPin = (reqUrl && reqUrl.searchParams && reqUrl.searchParams.get('pin')) ||
+                    (req && req.headers && req.headers['x-terminal-pin']) ||
+                    (body && body.pin) ||
+                    extractCookiePin(req);
   if (!clientPin || String(clientPin).trim() !== String(cloudflareTunnelPin).trim()) {
     return {
       valid: false,
@@ -3636,6 +3644,60 @@ function fetchDuckDuckGoInstant(query) {
   });
 }
 
+function fetchDuckDuckGoWeb(query, maxCount = 8) {
+  return new Promise((resolve) => {
+    try {
+      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      const req = https.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7'
+        },
+        timeout: 6000
+      }, (res) => {
+        let html = '';
+        res.on('data', chunk => {
+          html += chunk;
+          if (html.length > 500000) req.destroy();
+        });
+        res.on('end', () => {
+          try {
+            const results = [];
+            const regex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+            let m;
+            while ((m = regex.exec(html)) !== null && results.length < maxCount) {
+              let link = m[1];
+              if (link.includes('uddg=')) {
+                try {
+                  const uMatch = link.match(/uddg=([^&]+)/);
+                  if (uMatch) link = decodeURIComponent(uMatch[1]);
+                } catch (_) {}
+              }
+              const title = cleanHtmlText(m[2]);
+              const snippet = cleanHtmlText(m[3]);
+              if (title && link) {
+                results.push({
+                  title,
+                  url: link,
+                  domain: extractDomainSafe(link),
+                  snippet: snippet || title,
+                  sourceProvider: 'DuckDuckGo Web',
+                  timestamp: Date.now()
+                });
+              }
+            }
+            resolve(results);
+          } catch (_) { resolve([]); }
+        });
+        res.on('error', () => resolve([]));
+      });
+      req.on('timeout', () => { req.destroy(); resolve([]); });
+      req.on('error', () => resolve([]));
+    } catch (_) { resolve([]); }
+  });
+}
+
 async function performAutonomousSearch(query, maxResults = 15, contextText = '') {
   if (!query || typeof query !== 'string' || !query.trim()) {
     return { query: '', count: 0, results: [] };
@@ -3663,8 +3725,8 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   const combinedLower = (cleanQuery + ' ' + query.trim() + ' ' + (contextText || '')).toLowerCase();
   const isTechQuery = /\b(ai|llm|software|github|code|linux|python|developer|api|tech|crypto|bitcoin|model|chip|gpu|nvidia|programming|framework)\b/i.test(combinedLower);
 
-  // Eksekusi seluruh provider: Google Serper, Google News RSS, Tech Wire / HackerNews, DuckDuckGo Instant, & Wikipedia
-  const [serperRes1, serperRes2, gnewsPrimary, gnewsCore, gnewsIndo, gnewsNews, hnTech, hnCore, ddgInstant, wikiRes] = await Promise.allSettled([
+  // Eksekusi seluruh provider: Google Serper, Google News RSS, Tech Wire / HackerNews, DuckDuckGo Web, DuckDuckGo Instant, & Wikipedia
+  const [serperRes1, serperRes2, gnewsPrimary, gnewsCore, gnewsIndo, gnewsNews, hnTech, hnCore, ddgWeb1, ddgWeb2, ddgInstant, wikiRes] = await Promise.allSettled([
     serperCalls[0],
     serperCalls[1] || Promise.resolve({ results: [] }),
     fetchGoogleNewsRss(cleanQuery, isIndo ? 'id' : 'en', 10),
@@ -3673,6 +3735,8 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
     fetchGoogleNewsRss(newsQuery, isIndo ? 'id' : 'en', 6),
     isTechQuery ? fetchHackerNewsTech(techQuery, 8) : Promise.resolve([]),
     isTechQuery ? fetchHackerNewsTech(coreQuery, 6) : Promise.resolve([]),
+    fetchDuckDuckGoWeb(cleanQuery, 8),
+    fetchDuckDuckGoWeb(coreQuery, 6),
     fetchDuckDuckGoInstant(coreQuery),
     fetchWikipediaFullText(coreQuery, isIndo ? 'id' : 'en', 4)
   ]);
@@ -3684,6 +3748,8 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   if (serperRes2.status === 'fulfilled' && Array.isArray(serperRes2.value?.results)) {
     candidatePool.push(...serperRes2.value.results);
   }
+  if (ddgWeb1.status === 'fulfilled' && Array.isArray(ddgWeb1.value)) candidatePool.push(...ddgWeb1.value);
+  if (ddgWeb2.status === 'fulfilled' && Array.isArray(ddgWeb2.value)) candidatePool.push(...ddgWeb2.value);
   if (gnewsPrimary.status === 'fulfilled' && Array.isArray(gnewsPrimary.value)) candidatePool.push(...gnewsPrimary.value);
   if (gnewsCore.status === 'fulfilled' && Array.isArray(gnewsCore.value)) candidatePool.push(...gnewsCore.value);
   if (gnewsIndo.status === 'fulfilled' && Array.isArray(gnewsIndo.value)) candidatePool.push(...gnewsIndo.value);
@@ -3696,8 +3762,36 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
     candidatePool.push(...wikiRes.value);
   }
 
-  // Urutkan kandidat berdasarkan tanggal publikasi terbaru (Descending: yang paling baru di paling atas)
-  candidatePool.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  // Evaluasi skor kualitas & kedalaman informatif untuk memprioritaskan snippet bernilai guna tinggi
+  function evaluateSearchInformativeness(item) {
+    let score = 0;
+    const snip = (item.snippet || '').trim();
+    const title = (item.title || '').trim();
+    // Snippet yang panjang dan bukan sekadar duplikasi judul membawa fakta riil
+    if (snip.length >= 70 && !snip.toLowerCase().startsWith(title.toLowerCase().slice(0, 30))) {
+      score += 45;
+    } else if (snip.length >= 35) {
+      score += 20;
+    }
+    if (REPUTABLE_TECH_DOMAINS.has(item.domain)) {
+      score += 30;
+    }
+    if (item.sourceProvider === 'DuckDuckGo Web' || item.sourceProvider === 'Google Serper') {
+      score += 35;
+    }
+    if (item.timestamp && (Date.now() - item.timestamp < 172800000)) {
+      score += 15;
+    }
+    return score;
+  }
+
+  // Urutkan kandidat berdasarkan skor kedalaman informasi dan aktualitas waktu
+  candidatePool.sort((a, b) => {
+    const qA = evaluateSearchInformativeness(a);
+    const qB = evaluateSearchInformativeness(b);
+    if (Math.abs(qA - qB) >= 20) return qB - qA;
+    return (b.timestamp || 0) - (a.timestamp || 0);
+  });
 
   // Deduplikasi ketat berdasarkan URL kanonikal
   const results = [];
@@ -3732,9 +3826,9 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   }
 
   results.sort((a, b) => {
-    const aRep = REPUTABLE_TECH_DOMAINS.has(a.domain) ? 1 : 0;
-    const bRep = REPUTABLE_TECH_DOMAINS.has(b.domain) ? 1 : 0;
-    if (aRep !== bRep) return bRep - aRep;
+    const qA = evaluateSearchInformativeness(a);
+    const qB = evaluateSearchInformativeness(b);
+    if (Math.abs(qA - qB) >= 20) return qB - qA;
     return (b.timestamp || 0) - (a.timestamp || 0);
   });
 
@@ -4816,6 +4910,11 @@ async function requestHandler(req, res) {
   if (pathname === '/api/ping' && method === 'GET') {
     const isRemote = isRemoteTunnelRequest(req);
     const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
+    if (isRemote && pinCheck.valid) {
+      try {
+        res.setHeader('Set-Cookie', `zoz_remote_pin=${encodeURIComponent(cloudflareTunnelPin)}; Path=/; Max-Age=31536000; SameSite=Lax`);
+      } catch (_) {}
+    }
     return sendJSON(res, 200, {
       ok: true,
       status: 'healthy',
@@ -5500,6 +5599,11 @@ async function requestHandler(req, res) {
       cloudflareTunnelPid = runningPid;
       cloudflareTunnelActive = true;
       savePersistedTunnelState();
+    }
+    if (isRemote && pinCheck.valid) {
+      try {
+        res.setHeader('Set-Cookie', `zoz_remote_pin=${encodeURIComponent(cloudflareTunnelPin)}; Path=/; Max-Age=31536000; SameSite=Lax`);
+      } catch (_) {}
     }
     return sendJSON(res, 200, {
       active: isActive,
@@ -6578,7 +6682,7 @@ async function requestHandler(req, res) {
   // ----------------------------------------------------
   // YOUTUBE LIVE SEARCH (ZERO API KEY) — penunjang tool search_youtube
   // ----------------------------------------------------
-  if (pathname === '/api/youtube-search' && (method === 'GET' || method === 'POST')) {
+  if ((pathname === '/api/youtube-search' || pathname === '/api/autonomous/search_youtube') && (method === 'GET' || method === 'POST')) {
     try {
       let query = '';
       let maxResults = 6;
@@ -8663,7 +8767,12 @@ async function requestHandler(req, res) {
 
       if (sessionId) {
         if (dbActiveChatTasks[sessionId] && dbActiveChatTasks[sessionId].status === 'streaming') {
-          return sendJSON(res, 429, { error: 'Stream already active for this session' });
+          try {
+            if (dbActiveChatTasks[sessionId].proxyReq && !dbActiveChatTasks[sessionId].proxyReq.destroyed) {
+              dbActiveChatTasks[sessionId].proxyReq.destroy();
+            }
+          } catch (_) {}
+          delete dbActiveChatTasks[sessionId];
         }
         dbActiveChatTasks[sessionId] = {
           sessionId,
@@ -9262,6 +9371,15 @@ async function requestHandler(req, res) {
 
   const filePath = path.join(PUBLIC_DIR, safePath);
 
+  if (safePath === '/index.html' && isRemoteTunnelRequest(req)) {
+    const qPin = reqUrl && reqUrl.searchParams && reqUrl.searchParams.get('pin');
+    if (qPin && String(qPin).trim() === String(cloudflareTunnelPin).trim()) {
+      try {
+        res.setHeader('Set-Cookie', `zoz_remote_pin=${encodeURIComponent(cloudflareTunnelPin)}; Path=/; Max-Age=31536000; SameSite=Lax`);
+      } catch (_) {}
+    }
+  }
+
   // Security check: prevent path traversal outside public
   const relative = path.relative(PUBLIC_DIR, filePath);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
@@ -9408,36 +9526,48 @@ function encodeWsFrame(str) {
   return Buffer.concat([header, buf]);
 }
 
-function parseWsFrames(chunk, onMessage) {
+function processWsStream(socket, chunk, onMessage) {
+  if (chunk && chunk.length > 0) {
+    socket._wsBuffer = socket._wsBuffer ? Buffer.concat([socket._wsBuffer, chunk]) : chunk;
+  }
+  const buf = socket._wsBuffer;
+  if (!buf || buf.length < 2) return;
+
   let offset = 0;
-  while (offset + 2 <= chunk.length) {
-    const firstByte = chunk[offset];
-    const secondByte = chunk[offset + 1];
+  while (offset + 2 <= buf.length) {
+    const firstByte = buf[offset];
+    const secondByte = buf[offset + 1];
     const opcode = firstByte & 0x0f;
     const isMasked = (secondByte & 0x80) !== 0;
     let payloadLen = secondByte & 0x7f;
-    offset += 2;
+    let headerLen = 2;
 
     if (payloadLen === 126) {
-      if (offset + 2 > chunk.length) break;
-      payloadLen = chunk.readUInt16BE(offset);
-      offset += 2;
+      if (offset + 4 > buf.length) break;
+      payloadLen = buf.readUInt16BE(offset + 2);
+      headerLen = 4;
     } else if (payloadLen === 127) {
-      if (offset + 8 > chunk.length) break;
-      payloadLen = Number(chunk.readBigUInt64BE(offset));
-      offset += 8;
+      if (offset + 10 > buf.length) break;
+      payloadLen = Number(buf.readBigUInt64BE(offset + 2));
+      headerLen = 10;
+    }
+
+    if (isMasked) {
+      headerLen += 4;
+    }
+
+    if (offset + headerLen + payloadLen > buf.length) {
+      // Incomplete frame in accumulator buffer, await next TCP chunk
+      break;
     }
 
     let mask = null;
     if (isMasked) {
-      if (offset + 4 > chunk.length) break;
-      mask = chunk.slice(offset, offset + 4);
-      offset += 4;
+      mask = buf.slice(offset + headerLen - 4, offset + headerLen);
     }
 
-    if (offset + payloadLen > chunk.length) break;
-    const payload = chunk.slice(offset, offset + payloadLen);
-    offset += payloadLen;
+    const payload = buf.slice(offset + headerLen, offset + headerLen + payloadLen);
+    offset += headerLen + payloadLen;
 
     if (isMasked && mask) {
       for (let i = 0; i < payload.length; i++) {
@@ -9446,7 +9576,7 @@ function parseWsFrames(chunk, onMessage) {
     }
 
     if (opcode === 0x08) {
-      return 'close';
+      onMessage({ type: 'close' });
     } else if (opcode === 0x09) {
       const pong = Buffer.from([0x8a, 0x00]);
       onMessage({ type: 'ping', pong });
@@ -9454,6 +9584,8 @@ function parseWsFrames(chunk, onMessage) {
       onMessage({ type: 'data', payload: payload.toString('utf8') });
     }
   }
+
+  socket._wsBuffer = (offset > 0) ? buf.slice(offset) : buf;
 }
 
 function handleTerminalWebSocketUpgrade(req, socket, head) {
@@ -9487,6 +9619,8 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
 
   const digest = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
   try {
+    socket.setNoDelay(true);
+    socket.setKeepAlive(true, 15000);
     socket.write(
       'HTTP/1.1 101 Switching Protocols\r\n' +
       'Upgrade: websocket\r\n' +
@@ -9555,6 +9689,21 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
         lastInputAt: Date.now()
       };
 
+      let pendingWsData = '';
+      let wsFlushScheduled = false;
+      const flushWsBatch = () => {
+        wsFlushScheduled = false;
+        if (!pendingWsData) return;
+        const out = pendingWsData;
+        pendingWsData = '';
+        if (session.wsClients && session.wsClients.size > 0) {
+          const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data: out }));
+          for (const ws of session.wsClients) {
+            try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+          }
+        }
+      };
+
       ptyProcess.onData((data) => {
         session.lastActivity = Date.now();
         if (session.buffer.length > 500) session.buffer.shift();
@@ -9565,9 +9714,10 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
           try { if (!client.writableEnded) client.write(payload); } catch (_) {}
         }
         if (session.wsClients && session.wsClients.size > 0) {
-          const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data }));
-          for (const ws of session.wsClients) {
-            try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+          pendingWsData += data;
+          if (!wsFlushScheduled) {
+            wsFlushScheduled = true;
+            setImmediate(flushWsBatch);
           }
         }
       });
@@ -9643,7 +9793,11 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
 
   socket.on('data', (chunk) => {
     session.lastActivity = Date.now();
-    parseWsFrames(chunk, (msg) => {
+    processWsStream(socket, chunk, (msg) => {
+      if (msg.type === 'close') {
+        try { socket.destroy(); } catch (_) {}
+        return;
+      }
       if (msg.type === 'ping' && msg.pong) {
         try { socket.write(msg.pong); } catch (_) {}
       } else if (msg.type === 'data') {
@@ -9716,6 +9870,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
   });
 
   const cleanup = () => {
+    socket._wsBuffer = null;
     if (session && session.wsClients) {
       session.wsClients.delete(socket);
       console.log(`[PTY] Client disconnected from session ${sessionId}. Process persists in background on host laptop.`);

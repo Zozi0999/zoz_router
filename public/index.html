@@ -16,12 +16,25 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <script>
-    // Pastikan tidak ada Service Worker atau cache usang di peramban seluler pengguna
+    // 1. Musnahkan Service Worker aktif agar tidak melayani aset kadaluwarsa
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations().then(function(regs) {
         for (var i = 0; i < regs.length; i++) regs[i].unregister();
       }).catch(function() {});
     }
+    // 2. Bersihkan seluruh CacheStorage API
+    if ('caches' in window) {
+      caches.keys().then(function(keys) {
+        for (var j = 0; j < keys.length; j++) caches.delete(keys[j]);
+      }).catch(function() {});
+    }
+    // 3. Tangkal BFCache (Back-Forward Cache) seluler yang memulihkan DOM usang
+    window.addEventListener('pageshow', function(ev) {
+      if (ev.persisted) {
+        window.location.reload();
+      }
+    });
+    window.__ZOZ_VERSION__ = 'v20261019_v393';
   </script>
   <title>ZOZ ROUTER // Neural AI Multi-Engine Gateway</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
@@ -35,36 +48,38 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet"></noscript>
   <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://unpkg.com/lucide@latest" defer></script>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com?plugins=container-queries"></script>
   <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['Inter', 'Plus Jakarta Sans', 'sans-serif'],
-            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
-          },
-          colors: {
-            brand: {
-              teal: '#00f2fe',
-              emerald: '#00e5a3',
-              dark: '#07080c',
-              surface: '#0d0f17',
-              panel: 'rgba(15, 18, 28, 0.75)',
-              border: 'rgba(255, 255, 255, 0.07)',
-              borderActive: 'rgba(0, 242, 254, 0.28)'
+    if (typeof tailwind !== 'undefined') {
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'Plus Jakarta Sans', 'sans-serif'],
+              mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+            },
+            colors: {
+              brand: {
+                teal: '#00f2fe',
+                emerald: '#00e5a3',
+                dark: '#07080c',
+                surface: '#0d0f17',
+                panel: 'rgba(15, 18, 28, 0.75)',
+                border: 'rgba(255, 255, 255, 0.07)',
+                borderActive: 'rgba(0, 242, 254, 0.28)'
+              }
+            },
+            boxShadow: {
+              'glow-cyan': '0 0 28px -5px rgba(0, 242, 254, 0.35)',
+              'glow-emerald': '0 0 24px -6px rgba(0, 229, 163, 0.35)',
+              'glow-subtle': '0 4px 20px -2px rgba(0, 0, 0, 0.5)'
             }
-          },
-          boxShadow: {
-            'glow-cyan': '0 0 28px -5px rgba(0, 242, 254, 0.35)',
-            'glow-emerald': '0 0 24px -6px rgba(0, 229, 163, 0.35)',
-            'glow-subtle': '0 4px 20px -2px rgba(0, 0, 0, 0.5)'
           }
         }
-      }
+      };
     }
   </script>
   <!-- Icons (Font Awesome) - Asynchronous Non-blocking Load -->
@@ -75,8 +90,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261018_v380">
-  <link rel="stylesheet" href="style.css?v=20261018_v380">
+  <link rel="preload" as="style" href="style.css?v=20261019_v393">
+  <link rel="stylesheet" href="style.css?v=20261019_v393">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial select-none">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -434,6 +449,11 @@
       <!-- Action Button 2: Z21 Shell Terminal Console -->
       <button class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] transition-colors top-action-btn" id="terminalToggleBtn" title="Z21 Shell (Buka Console)" aria-label="Buka Terminal" type="button">
         <svg class="lucide lucide-terminal w-3.5 h-3.5" data-lucide="terminal" fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M12 19h8"></path><path d="m4 17 6-6-6-6"></path></svg>
+      </button>
+
+      <!-- Action Button 2b: Scan QR Remote Tunnel Terminal HP -->
+      <button class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-white/[0.06] transition-colors top-action-btn" id="btnTopBarRemoteQr" title="Tampilkan QR Code Pairing Terminal HP (Cloudflare Tunnel)" aria-label="QR Code Remote Terminal" type="button">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
       </button>
 
       <!-- Action Button 3: Bio-Endocrine Hormone Monitor (Emerald Pulse Pill) -->
@@ -1881,7 +1901,7 @@
                 <div class="pipeline-left">
                   <span class="pipeline-num">#1</span>
                   <span class="pipeline-name">Jalur 1: CodeEndocrine</span>
-                  <span class="pipeline-desc">(Engine v2.4)</span>
+                  <span class="pipeline-desc">(Engine v3.0 - Autonomous Endorfin)</span>
                 </div>
                 <div class="pipeline-right">
                   <span>Latensi: <strong id="valCodeLatency">24ms</strong></span>
@@ -1940,19 +1960,21 @@
             </div>
             <!-- Ringkasan Satu Baris -->
             <div class="endocrine-util-vitals-summary">
+              <div>Endorfin: <span class="text-emerald" id="endocrineEndorphinVal">100% (Kebal)</span></div>
+              <span class="endocrine-util-sep">|</span>
               <div>Serotonin: <span class="text-emerald" id="endocrineSerotoninVal">100% (Normal)</span></div>
               <span class="endocrine-util-sep">|</span>
               <div>Adrenalin: <span class="text-zinc" id="endocrineAdrenalineVal">0% (Idle)</span></div>
               <span class="endocrine-util-sep">|</span>
-              <div>Simpul Kode: <span style="color:#ffffff;" id="endocrineConnectomeVal">408 / 408 Harmonis</span></div>
+              <div>Simpul Kode: <span style="color:#ffffff;" id="endocrineConnectomeVal">409 / 409 Harmonis</span></div>
             </div>
           </section>
 
-          <!-- 4. Status 5-Pilar (Daftar Terstruktur Bersih) -->
-          <section aria-label="Diagnosa 5-Pilar" class="endocrine-util-sec">
+          <!-- 4. Status 6-Pilar (Daftar Terstruktur Bersih) -->
+          <section aria-label="Diagnosa 6-Pilar" class="endocrine-util-sec">
             <div class="endocrine-util-sec-head">
-              <span class="endocrine-util-sec-title">&gt; 5-PILLAR INTEGRITY VERIFICATION</span>
-              <span class="pillar-pass-badge" id="pillarOverallPass">[PASS 5/5]</span>
+              <span class="endocrine-util-sec-title">&gt; 6-PILLAR INTEGRITY VERIFICATION</span>
+              <span class="pillar-pass-badge" id="pillarOverallPass">[PASS 6/6]</span>
             </div>
             <div class="endocrine-util-box divide-y">
               <div class="endocrine-pillar-row" id="cardPillarConnectome" data-pillar="connectome">
@@ -1990,6 +2012,20 @@
                   <span class="pillar-status" id="pillarButtonStatus">PASS</span>
                 </div>
               </div>
+              <div class="endocrine-pillar-row" id="cardPillarGateway" data-pillar="gateway">
+                <span class="pillar-name">06. Gateway AI &amp; Tunnel WAN</span>
+                <div class="pillar-meta">
+                  <span class="pillar-metric" id="pillarGatewayDesc">Jaringan &amp; State Stabil</span>
+                  <span class="pillar-status" id="pillarGatewayStatus">PASS</span>
+                </div>
+              </div>
+              <div class="endocrine-pillar-row" id="cardPillarSkillUtility" data-pillar="skill">
+                <span class="pillar-name">07. Nilai Guna Skill &amp; Endorfin Agen</span>
+                <div class="pillar-meta">
+                  <span class="pillar-metric" id="pillarSkillUtilityDesc">Kualitas Prima (A+)</span>
+                  <span class="pillar-status" id="pillarSkillUtilityStatus">PASS</span>
+                </div>
+              </div>
             </div>
           </section>
 
@@ -2009,8 +2045,12 @@
               <button type="button" class="endocrine-subtab-btn active" id="subtabAllIssues" data-subtab="all">Semua</button>
               <button type="button" class="endocrine-subtab-btn" id="subtabModelIssues" data-subtab="model">Model</button>
               <button type="button" class="endocrine-subtab-btn" id="subtabTextIssues" data-subtab="text">Teks</button>
+              <button type="button" class="endocrine-subtab-btn" id="subtabToolIssues" data-subtab="tool">Tool</button>
+              <button type="button" class="endocrine-subtab-btn" id="subtabHallucinationIssues" data-subtab="hallucination">Halusinasi</button>
+              <button type="button" class="endocrine-subtab-btn" id="subtabSkillIssues" data-subtab="skill">Nilai Guna</button>
               <button type="button" class="endocrine-subtab-btn" id="subtabViewportIssues" data-subtab="viewport">Layout</button>
               <button type="button" class="endocrine-subtab-btn" id="subtabButtonIssues" data-subtab="button">Tombol</button>
+              <button type="button" class="endocrine-subtab-btn" id="subtabGatewayIssues" data-subtab="gateway">Gateway</button>
               <button type="button" class="endocrine-subtab-btn" id="subtabConnectomeIssues" data-subtab="connectome">DOM</button>
             </div>
             <div class="endocrine-diagnostic-list" id="endocrineDiagnosticList" style="display: none; max-height: 180px; overflow-y: auto;"></div>
@@ -2792,8 +2832,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261018_v380" defer></script>
+  <script src="text-safety.js?v=20261019_v391" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261018_v380" defer></script>
+  <script src="app.js?v=20261019_v393" defer></script>
 </body>
 </html>

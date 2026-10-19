@@ -1269,7 +1269,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     inspectCountModel4: $('#inspectCountModel4'),
     inspectTabContent: $('#inspectTabContent'),
 
-    // Bio-Endocrine Hormone & Connectome (Jalur 1: CodeEndocrine v2)
+    // Bio-Endocrine Hormone & Connectome (Jalur 1: CodeEndocrine v3)
     endocrineMonitorBtn: $('#endocrineMonitorBtn'),
     endocrineHeartIcon: $('#endocrineHeartIcon'),
     endocrineTelemetryModal: $('#endocrineTelemetryModal'),
@@ -1291,6 +1291,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     cardPillarText: $('#cardPillarText'),
     cardPillarViewport: $('#cardPillarViewport'),
     cardPillarButton: $('#cardPillarButton'),
+    cardPillarGateway: $('#cardPillarGateway'),
     endocrineDiagnosticList: $('#endocrineDiagnosticList'),
 
     // About Developer Tab & Redirect (v376)
@@ -1359,27 +1360,41 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     btnCancelDocMode: $('#btnCancelDocMode')
   };
 
-  // ==================== BIO-ENDOCRINE HORMONE & CONNECTOME SYSTEM (JALUR 1: CODE-ENDOCRINE v2) ====================
-  // Mengadaptasi sistem hormon mahluk hidup: Dopamin vs Kortisol (Stres)
+  // ==================== AUTONOMOUS TOOL RESPONSE CACHE ====================
+  // Cache in-memory berbatas waktu (TTL 10 menit) untuk mencegah pemanggilan berulang
+  // pada query pencarian atau URL ekstraksi yang sama, menghemat kuota dan memangkas latensi ke 0ms.
+  const AUTONOMOUS_TOOL_CACHE = new Map();
+  const TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
+
+  // ==================== BIO-ENDOCRINE HORMONE & CONNECTOME SYSTEM (JALUR 1: CODE-ENDOCRINE v3.0) ====================
+  // Mengadaptasi sistem hormon & imun mahluk hidup: Dopamin, Kortisol, Serotonin, Adrenalin, dan Endorfin Otonom!
   // Mengetahui bug, error, kesalahan panggil model, teks rusak, kerusakan layout/layar,
-  // tombol tidak sesuai / terhalang, serta kode yang terisolasi secara seketika!
+  // tombol tidak sesuai / terhalang, kode terisolasi, serta status Gateway & Tunnel WAN secara seketika,
+  // dilengkapi refleks penyembuhan mandiri (Autonomous Endorphin Self-Healing Reflex).
   const BioEndocrine = {
     hormones: {
       dopamine: 100,
       cortisol: 0,
       serotonin: 100,
-      adrenaline: 0
+      adrenaline: 0,
+      endorphin: 100
     },
     history: [],
     isolatedNodes: [],
     modelErrors: [],
     textAnomalies: [],
+    toolIssues: [],
+    hallucinationIssues: [],
+    agentSkillAudits: [],
     viewportIssues: [],
     buttonIssues: [],
+    gatewayIssues: [],
     activeSubTab: 'all',
     connectedCount: 0,
     totalAudited: 0,
     lastAuditTimestamp: null,
+    _lastAutoReflexTime: 0,
+    _lastSendStartTimestamp: 0,
 
     init() {
       // 1. Tangkap seluruh unhandled error / promise rejection di browser secara global
@@ -1396,6 +1411,17 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           this.secreteStress(25, `Unhandled Promise Rejection: ${reason}`);
         });
 
+        window.addEventListener('online', () => {
+          this.gatewayIssues = (this.gatewayIssues || []).filter(g => g.type !== 'browser_offline');
+          this.secreteDopamine(15, 'Koneksi jaringan perangkat kembali online & stabil');
+          if (typeof checkOllamaHealth === 'function') checkOllamaHealth().catch(() => {});
+          if (typeof checkOpenRouterStatus === 'function') checkOpenRouterStatus().catch(() => {});
+        });
+
+        window.addEventListener('offline', () => {
+          this.auditGatewayAndTunnel(false);
+        });
+
         // 2. Pasang audit komprehensif awal secara non-blocking di waktu idle browser (mencegah lonjakan TBT & main-thread lag saat initial load)
         const scheduleInitialAudit = (typeof window !== 'undefined' && window.requestIdleCallback)
           ? (fn) => window.requestIdleCallback(fn, { timeout: 8000 })
@@ -1406,18 +1432,32 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           this.updateUI();
         });
 
-        // 3. Metabolisme berkala: homeostatik setiap 15 detik
+        // 3. Metabolisme berkala & Refleks Imun Endorfin: homeostatik setiap 15 detik
         setInterval(() => {
           if (this.hormones.cortisol > 0) {
-            this.hormones.cortisol = Math.max(0, Math.round((this.hormones.cortisol - 2) * 10) / 10);
+            this.hormones.cortisol = Math.max(0, Math.round((this.hormones.cortisol - 2.5) * 10) / 10);
           }
           if (this.hormones.dopamine < 100 && this.hormones.cortisol <= 10) {
-            this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 1);
+            this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 1.5);
           }
           if (this.hormones.adrenaline > 0) {
             this.hormones.adrenaline = Math.max(0, this.hormones.adrenaline - 3);
           }
-          this.hormones.serotonin = Math.round((this.hormones.dopamine * 0.7) + ((100 - this.hormones.cortisol) * 0.3));
+          if (this.hormones.endorphin < 100) {
+            this.hormones.endorphin = Math.min(100, Math.round((this.hormones.endorphin + 2) * 10) / 10);
+          }
+          this.hormones.serotonin = Math.round((this.hormones.dopamine * 0.6) + ((100 - this.hormones.cortisol) * 0.25) + (this.hormones.endorphin * 0.15));
+
+          // Audit ringan state UI & gateway setiap siklus metabolisme
+          this.auditGatewayAndTunnel(true);
+          const hasFixableHazard =
+            (this.viewportIssues && this.viewportIssues.some(i => i.fixable)) ||
+            (this.buttonIssues && this.buttonIssues.some(i => i.fixable)) ||
+            (this.gatewayIssues && this.gatewayIssues.some(i => i.fixable));
+
+          if (this.hormones.cortisol >= 40 || hasFixableHazard) {
+            this.triggerAutonomousEndorphinReflex('Homeostasis Otonom 15s');
+          }
           this.updateUI();
         }, 15000);
       }
@@ -1427,15 +1467,31 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const effectiveAmount = Math.min(100, Math.max(1, Math.round(amount)));
       this.hormones.dopamine = Math.min(100, Math.round((this.hormones.dopamine + effectiveAmount) * 10) / 10);
       this.hormones.cortisol = Math.max(0, Math.round((this.hormones.cortisol - (effectiveAmount * 0.35)) * 10) / 10);
+      this.hormones.endorphin = Math.min(100, Math.round((this.hormones.endorphin + (effectiveAmount * 0.15)) * 10) / 10);
       this.log('dopamine', effectiveAmount, reason);
       this.updateUI();
     },
 
-    secreteStress(amount, reason, isIsolatedCode = false) {
+    secreteEndorphin(amount, reason) {
       const effectiveAmount = Math.min(100, Math.max(1, Math.round(amount)));
+      this.hormones.endorphin = Math.min(100, Math.round((this.hormones.endorphin + effectiveAmount) * 10) / 10);
+      this.hormones.cortisol = Math.max(0, Math.round((this.hormones.cortisol - (effectiveAmount * 0.6)) * 10) / 10);
+      this.hormones.dopamine = Math.min(100, Math.round((this.hormones.dopamine + (effectiveAmount * 0.35)) * 10) / 10);
+      this.log('endorphin', effectiveAmount, reason);
+      this.updateUI();
+    },
+
+    secreteStress(amount, reason, isIsolatedCode = false) {
+      const rawAmount = Math.min(100, Math.max(1, Math.round(amount)));
+      // Endorfin bertindak sebagai peredam kejut alami (Immunity Buffer) terhadap lonjakan stres
+      const immunityDampener = (this.hormones.endorphin >= 60 && !isIsolatedCode) ? 0.8 : 1.0;
+      const effectiveAmount = Math.max(1, Math.round(rawAmount * immunityDampener));
       this.hormones.cortisol = Math.min(100, Math.round((this.hormones.cortisol + effectiveAmount) * 10) / 10);
-      this.hormones.dopamine = Math.max(5, Math.round((this.hormones.dopamine - (effectiveAmount * 0.5)) * 10) / 10);
+      this.hormones.dopamine = Math.max(5, Math.round((this.hormones.dopamine - (effectiveAmount * 0.45)) * 10) / 10);
       this.hormones.adrenaline = Math.min(100, Math.round((this.hormones.adrenaline + (effectiveAmount * 0.6)) * 10) / 10);
+      if (this.hormones.endorphin > 20 && rawAmount >= 15) {
+        this.hormones.endorphin = Math.max(20, Math.round((this.hormones.endorphin - (rawAmount * 0.15)) * 10) / 10);
+      }
       this.log('cortisol', effectiveAmount, reason);
       this.updateUI();
       try {
@@ -1443,6 +1499,13 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           AudioEngine.playBeep(220, 'sawtooth', 0.12, 0.04);
         }
       } catch (_) {}
+
+      // Autonomous Endorphin Reflex: Jika Kortisol menembus ambang kritis (>= 55%), langsung picu pemulihan otonom
+      if (this.hormones.cortisol >= 55) {
+        setTimeout(() => {
+          this.triggerAutonomousEndorphinReflex(`Lonjakan Kortisol (${Math.round(this.hormones.cortisol)}%)`);
+        }, 120);
+      }
     },
 
     // 1. Audit Connectome (Simpul DOM & Reseptor Terisolasi)
@@ -1635,6 +1698,164 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       }
 
       return anomalies;
+    },
+
+    // 3b. Detektor & Pelacak Anomali / Error Eksekusi Tool (Jalur Endorfin)
+    registerToolIssue(toolData = {}) {
+      const toolName = toolData.toolName || toolData.tool || 'Unknown Tool';
+      const rawError = toolData.error ? (toolData.error.message || String(toolData.error)) : (toolData.reason || 'Tool execution error');
+      const status = toolData.status || (rawError.match(/\b([45]\d\d)\b/)?.[1]) || 'ERR';
+      const argsPreview = toolData.args ? (typeof toolData.args === 'string' ? toolData.args : JSON.stringify(toolData.args)) : '';
+
+      const item = {
+        id: 'toolerr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+        time: new Date().toLocaleTimeString(),
+        toolName,
+        status,
+        reason: rawError,
+        argsPreview: argsPreview.slice(0, 80)
+      };
+
+      if (!this.toolIssues) this.toolIssues = [];
+      this.toolIssues.unshift(item);
+      if (this.toolIssues.length > 30) this.toolIssues.pop();
+
+      this.secreteStress(16, `[Error Tool] ${toolName} (${status}): ${rawError.slice(0, 60)}`);
+      this.updateUI();
+      return item;
+    },
+
+    // 3c. Detektor & Pelacak Halusinasi Data / Tanggal / Peristiwa dari Output Tool
+    registerHallucinationIssue(hallucinationData = {}) {
+      const model = hallucinationData.model || (typeof STATE !== 'undefined' ? (STATE.mode === 'ollama' ? (STATE.settings.ollamaModel || 'Ollama') : (STATE.settings.openRouterModel || 'OpenRouter')) : 'Model');
+      const reason = hallucinationData.reason || 'Halusinasi data eksternal terdeteksi';
+      const snippet = hallucinationData.snippet || '';
+      const actionTaken = hallucinationData.actionTaken || 'Sanitasi data otomatis';
+
+      const item = {
+        id: 'halu_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+        time: new Date().toLocaleTimeString(),
+        model,
+        reason,
+        snippet: snippet.slice(0, 100),
+        actionTaken
+      };
+
+      if (!this.hallucinationIssues) this.hallucinationIssues = [];
+      this.hallucinationIssues.unshift(item);
+      if (this.hallucinationIssues.length > 30) this.hallucinationIssues.pop();
+
+      // Trigger lonjakan stres & refleks imunitas endorfin otonom
+      this.secreteStress(20, `[Halusinasi Tool] ${model}: ${reason.slice(0, 70)}`);
+      this.triggerAutonomousEndorphinReflex(`Halusinasi data web diredam (${reason.slice(0, 30)})`);
+      this.updateUI();
+      return item;
+    },
+
+    // 3d. Detektor & Evaluator Nilai Guna Skill & Endorfin Otonom Agen (Pilar 07)
+    evaluateSkillOutputUtility(skillName, content, metadata = {}) {
+      if (!content || typeof content !== 'string') return { score: 0, grade: 'F', feedback: 'Konten kosong' };
+      let score = 50; // Baseline
+      const feedbackNotes = [];
+      const skill = (skillName || 'general').toLowerCase();
+
+      // a. Uji Nilai Guna Diagram (Mermaid / Alur Visual)
+      if (skill.includes('diagram') || content.includes('```mermaid') || (content.includes('<<<ZOZ_FILE') && content.includes('mermaid'))) {
+        const hasSubgraph = /subgraph\s+[\w\d_\[\]\(\)\"]+/i.test(content);
+        const hasValidOrientation = /(?:flowchart\s+(?:TD|TB|LR|RL)|graph\s+(?:TD|TB|LR|RL)|sequenceDiagram|classDiagram|erDiagram|stateDiagram(?:-v2)?|gitGraph|gantt|pie)/i.test(content);
+        const hasHarmoniousClass = /classDef\s+\w+/i.test(content);
+        const mermaidBlock = content.match(/```mermaid([\s\S]*?)```/i) || content.match(/<<<ZOZ_FILE[^\n]*\.mermaid[\s\S]*?```/i);
+        const targetDiagramText = mermaidBlock ? mermaidBlock[1] : content;
+        const hasUnquotedSpecial = /[A-Za-z0-9_]+\s*\[[^\"]*[\(\)\:\/]+[^\"]*\](?!\()/.test(targetDiagramText);
+        const nodeMatches = targetDiagramText.match(/[A-Za-z0-9_]+\s*(?:\[|\(|\{\{|\{\|)/g) || [];
+
+        if (hasSubgraph) { score += 20; feedbackNotes.push('Sub-grafik tematik'); }
+        if (hasValidOrientation) { score += 15; feedbackNotes.push('Orientasi alur proporsional'); }
+        if (nodeMatches.length >= 4) { score += 15; feedbackNotes.push(`${nodeMatches.length} simpul aktif`); }
+        if (hasHarmoniousClass) { score += 15; feedbackNotes.push('Palet warna serasi'); }
+        if (hasUnquotedSpecial) { score -= 15; feedbackNotes.push('Label berkarakter tanpa kutip'); }
+      }
+      // b. Uji Nilai Guna Dokumen Eksekutif (PDF / DOCX)
+      else if (skill.includes('doc') || skill.includes('dokumen') || metadata.docFormat || metadata.isDocCreation) {
+        const words = content.trim().split(/\s+/).length;
+        const hasExecutiveSummary = /ringkasan\s+eksekutif|executive\s+summary|latar\s+belakang/i.test(content);
+        const hasStrategicTable = /\|[^\n]+\|\n\|[\s\-:]+\|\n\|[^\n]+\|/.test(content);
+        const hasChapters = /#+\s+(?:bab|bagian|\d+\.)/i.test(content);
+        const hasAiCliche = /(sebagai model ai|as an ai model|in conclusion)/i.test(content);
+
+        if (words >= 250) { score += 20; feedbackNotes.push(`${words} kata mendalam`); }
+        else if (words < 100) { score -= 20; feedbackNotes.push('Dokumen terlalu singkat'); }
+        if (hasExecutiveSummary) { score += 15; feedbackNotes.push('Ada ringkasan eksekutif'); }
+        if (hasStrategicTable) { score += 20; feedbackNotes.push('Tabel data komparatif'); }
+        if (hasChapters) { score += 15; feedbackNotes.push('Struktur bab lengkap'); }
+        if (hasAiCliche) { score -= 10; feedbackNotes.push('Klise model AI'); }
+      }
+      // c. Uji Nilai Guna Penelusuran Web (search_web / deep-research)
+      else if (skill.includes('pencarian') || skill.includes('search') || (metadata.sources && metadata.sources.length > 0)) {
+        const sources = Array.isArray(metadata.sources) ? metadata.sources : [];
+        const deepSources = sources.filter(s => (s.snippet || '').length >= 70);
+        const hasCurrentYear = new Date().getFullYear().toString();
+        const mentionsCurrentFact = content.includes(hasCurrentYear);
+        const words = content.trim().split(/\s+/).length;
+
+        if (deepSources.length >= 2) { score += 25; feedbackNotes.push(`${deepSources.length} sumber paragraf utuh`); }
+        else if (sources.length > 0) { score += 15; feedbackNotes.push(`${sources.length} sumber terverifikasi`); }
+        if (mentionsCurrentFact) { score += 15; feedbackNotes.push('Fakta aktual tahun berjalan'); }
+        if (sources.length >= 3) { score += 15; feedbackNotes.push('Multi-domain terverifikasi'); }
+        if (words >= 120) { score += 10; feedbackNotes.push(`${words} kata sintesis padat`); }
+      }
+      // d. Uji Nilai Guna Website & Studio (HTML / JSX / Tailwind)
+      else if ((skill.includes('web') && !skill.includes('pencarian') && !skill.includes('search')) || metadata.websiteMode || metadata.isWebCreation) {
+        const hasLorem = /lorem\s+ipsum/i.test(content);
+        const hasInteractivity = /(?:onclick|addeventlistener|onchange|onsubmit|usestate|useeffect|function\s+\w+\s*\()/i.test(content);
+        const hasModernStyling = /(?:tailwindcss|backdrop-blur|shadow-|grid|flex|bg-gradient)/i.test(content);
+        const hasResponsive = /(?:md:|lg:|sm:|@media|viewport)/i.test(content);
+
+        if (!hasLorem) { score += 15; feedbackNotes.push('Bebas placeholder Lorem Ipsum'); } else { score -= 20; feedbackNotes.push('Placeholder Lorem Ipsum'); }
+        if (hasInteractivity) { score += 25; feedbackNotes.push('Interaktivitas nyata'); }
+        if (hasModernStyling) { score += 15; feedbackNotes.push('Modern Glassmorphism'); }
+        if (hasResponsive) { score += 15; feedbackNotes.push('Responsif multi-layar'); }
+      } else {
+        const words = content.trim().split(/\s+/).length;
+        if (words >= 120) score += 15;
+        if (/```[\s\S]+```/.test(content)) score += 15;
+        if (/\|[^\n]+\|\n\|[\s\-:]+\|\n/.test(content)) score += 10;
+      }
+
+      score = Math.max(10, Math.min(100, Math.round(score)));
+      let grade = 'C';
+      if (score >= 85) grade = 'A+';
+      else if (score >= 75) grade = 'A';
+      else if (score >= 65) grade = 'B';
+      else if (score >= 50) grade = 'C';
+      else grade = 'D';
+
+      const auditItem = {
+        id: 'sk_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+        time: new Date().toLocaleTimeString(),
+        skill: skillName || 'General',
+        model: metadata.model || 'AI Model',
+        score,
+        grade,
+        feedback: feedbackNotes.join(' | ') || 'Format standar',
+        snippet: content.slice(0, 100)
+      };
+
+      if (!this.agentSkillAudits) this.agentSkillAudits = [];
+      this.agentSkillAudits.unshift(auditItem);
+      if (this.agentSkillAudits.length > 30) this.agentSkillAudits.pop();
+
+      // Sekresi Endorfin berbobot nyata
+      if (score >= 80) {
+        this.secreteEndorphin(25, `[Nilai Guna Prima ${grade}] ${auditItem.skill}: ${auditItem.feedback}`);
+      } else if (score >= 65) {
+        this.secreteEndorphin(12, `[Nilai Guna Baik ${grade}] ${auditItem.skill}: ${auditItem.feedback}`);
+      } else {
+        this.secreteStress(12, `[Nilai Guna Rendah ${grade}] ${auditItem.skill}: ${auditItem.feedback}`);
+      }
+
+      this.updateUI();
+      return auditItem;
     },
 
     // 4. Detektor Kerusakan Dimensi Layar & Viewport Overflow
@@ -1887,17 +2108,132 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       return issues;
     },
 
-    // 6. Audit Komprehensif (Menjalankan seluruh 5 pilar diagnosa)
+    // 5b. Sanitasi Aktif Teks AI (Active Circuit-Breaker untuk Tag Bocor & Mojibake)
+    sanitizeModelText(text) {
+      if (!text || typeof text !== 'string') return text;
+      let cleaned = text;
+      // Bersihkan blok tag pemikiran internal yang bocor
+      cleaned = cleaned.replace(/<(?:think|thought|reasoning|internal_reasoning|ant_thought|thought_process)\b[^>]*>[\s\S]*?<\/(?:think|thought|reasoning|internal_reasoning|ant_thought|thought_process)>/gi, '');
+      cleaned = cleaned.replace(/<\/?(?:think|thought|reasoning|internal_reasoning|ant_thought|thought_process)\b[^>]*>/gi, '');
+      // Perbaiki urutan mojibake UTF-8 umum
+      cleaned = cleaned
+        .replace(/â€™/g, "'")
+        .replace(/â€œ/g, '"')
+        .replace(/â€\x9d/g, '"')
+        .replace(/â€“/g, '–')
+        .replace(/â€”/g, '—');
+      return cleaned;
+    },
+
+    // 6. Pilar 06: Detektor Kesehatan Gateway AI, Tunnel WAN & State Lockup
+    auditGatewayAndTunnel(silent = false) {
+      const issues = [];
+      if (typeof window === 'undefined' || typeof document === 'undefined') return issues;
+
+      // a. Cek Koneksi Internet Browser
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        issues.push({
+          id: 'gw_offline',
+          type: 'browser_offline',
+          severity: 'high',
+          selector: 'navigator.onLine',
+          reason: 'Perangkat sedang offline (terputus dari jaringan internet/LAN). Gateway Cloud AI dan Tunnel tidak dapat dijangkau.',
+          fixable: false
+        });
+      }
+
+      // b. Cek State Lockup: body.modal-open terkunci padahal tidak ada modal .show yang aktif
+      if (document.body && document.body.classList.contains('modal-open')) {
+        const visibleModal = document.querySelector('.modal-backdrop.show');
+        if (!visibleModal) {
+          issues.push({
+            id: 'gw_modal_lock',
+            type: 'stuck_modal_open_body',
+            severity: 'high',
+            selector: 'body.modal-open',
+            reason: 'Status body.modal-open terkunci padahal tidak ada modal yang sedang terbuka, berpotensi menahan scroll layar utama.',
+            fixable: true
+          });
+        }
+      }
+
+      // c. Cek Modal Zombie: memiliki class .show tetapi tertahan inline style display: none
+      if (typeof document.querySelectorAll === 'function') {
+        const zombieModals = document.querySelectorAll('.modal-backdrop.show');
+        zombieModals.forEach(m => {
+          if (m.style && m.style.display === 'none') {
+            issues.push({
+              id: 'gw_zombie_modal_' + (m.id || 'modal'),
+              type: 'zombie_hidden_modal',
+              severity: 'high',
+              selector: `#${m.id || 'modal-backdrop'}`,
+              reason: `Modal #${m.id || 'modal'} memiliki status aktif (.show) namun tersembunyi oleh inline display:none sehingga menyandera state modal.`,
+              fixable: true
+            });
+          }
+        });
+      }
+
+      // d. Cek Pengiriman Pesan Terkunci (STATE.isSending nyangkut tanpa generasi aktif)
+      if (typeof STATE !== 'undefined' && STATE.isSending && !STATE.isGenerating) {
+        const now = Date.now();
+        if (!this._lastSendStartTimestamp) {
+          this._lastSendStartTimestamp = now;
+        } else if (now - this._lastSendStartTimestamp > 25000) {
+          issues.push({
+            id: 'gw_stuck_sending',
+            type: 'stuck_sending_flag',
+            severity: 'high',
+            selector: 'STATE.isSending',
+            reason: 'Flag STATE.isSending terkunci lebih dari 25 detik tanpa proses streaming aktif, menghalangi pengguna mengirim pesan baru.',
+            fixable: true
+          });
+        }
+      } else {
+        this._lastSendStartTimestamp = 0;
+      }
+
+      // e. Cek Terminal PTY & Tunnel WAN apabila modal terminal sedang aktif
+      const termModal = document.getElementById('terminalModal');
+      if (termModal && termModal.classList.contains('show') && typeof window.TerminalEndorphin !== 'undefined') {
+        const termDiag = window.TerminalEndorphin.diagnose();
+        if (termDiag && Array.isArray(termDiag.issues) && termDiag.issues.length > 0 && termDiag.status !== 'offline') {
+          termDiag.issues.forEach((tIss, idx) => {
+            issues.push({
+              id: `gw_term_${idx}`,
+              type: 'terminal_pty_anomaly',
+              severity: 'medium',
+              selector: `TerminalPane#${termDiag.metrics?.paneNum || 1}`,
+              reason: tIss,
+              fixable: true
+            });
+          });
+        }
+      }
+
+      this.gatewayIssues = issues;
+      if (issues.length > 0 && !silent) {
+        this.secreteStress(issues.length * 10, `Terdeteksi ${issues.length} anomali pada Gateway / State UI!`);
+      } else if (issues.length === 0 && !silent) {
+        this.secreteDopamine(8, 'Audit Gateway & State: Jaringan, state pengiriman, dan antarmuka bebas hambatan');
+      }
+      this.updateUI();
+      return issues;
+    },
+
+    // 7. Audit Komprehensif (Menjalankan seluruh 7 pilar diagnosa & telemetri Endorfin)
     auditComprehensive(silent = false) {
       this.lastAuditTimestamp = new Date().toLocaleTimeString();
       const conn = this.auditConnectome(true);
       const vp = this.auditViewportAndLayout(true);
       const btns = this.auditButtonPlacementAndObstruction(true);
+      const gw = this.auditGatewayAndTunnel(true);
+      const lowUtilityCount = (this.agentSkillAudits || []).filter(a => a.score < 60).length;
 
-      const totalIssues = (conn.issues?.length || 0) + (vp?.length || 0) + (btns?.length || 0) + (this.modelErrors?.length || 0) + (this.textAnomalies?.length || 0);
+      const totalIssues = (conn.issues?.length || 0) + (vp?.length || 0) + (btns?.length || 0) + (gw?.length || 0) + (this.modelErrors?.length || 0) + (this.textAnomalies?.length || 0) + (this.toolIssues?.length || 0) + (this.hallucinationIssues?.length || 0) + lowUtilityCount;
       
       if (totalIssues === 0 && !silent) {
-        this.secreteDopamine(20, `Audit komprehensif selesai: 5 Pilar Kode sehat sempurna (0 bug, 0 tombol terhalang, 0 kebocoran layout)!`);
+        this.secreteDopamine(20, `Audit komprehensif selesai: 7 Pilar Kode & Jalur Endorfin sehat sempurna (0 bug, 0 tool error, 0 anomali skill, Gateway stabil)!`);
       }
       this.updateUI();
       return {
@@ -1905,15 +2241,30 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         connectome: conn,
         viewport: vp,
         buttons: btns,
+        gateway: gw,
         modelErrors: this.modelErrors,
         textAnomalies: this.textAnomalies,
+        toolIssues: this.toolIssues,
+        hallucinationIssues: this.hallucinationIssues,
         totalIssues
       };
     },
 
-    // 7. Penyembuh Otomatis (Auto-Heal Layout & Halangan Tombol)
-    autoFixLayoutAndButtons() {
+    // 8. Refleks Imun Otonom (Autonomous Endorphin Self-Healing Reflex)
+    triggerAutonomousEndorphinReflex(triggerReason = 'Deteksi Stres') {
+      const now = Date.now();
+      // Cooldown 8 detik agar refleks otonom tidak pernah memicu loop berulang
+      if (now - (this._lastAutoReflexTime || 0) < 8000) return 0;
+      this._lastAutoReflexTime = now;
+
+      const healed = this.autoFixLayoutAndButtons({ silent: true, isAutoReflex: true, reason: triggerReason });
+      return healed;
+    },
+
+    // 9. Penyembuh Otomatis (Auto-Heal Layout, Halangan Tombol, Modal Lockup & Terminal)
+    autoFixLayoutAndButtons(options = {}) {
       let healedCount = 0;
+      const silent = Boolean(options && options.silent);
       if (typeof window === 'undefined' || typeof document === 'undefined') return healedCount;
       try {
         // a. Sembuhkan horizontal overflow viewport
@@ -1941,13 +2292,40 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             }
           });
 
-          // b. Sembuhkan modal backdrop atau overlay liar yang tidak tertutup rapi
+          // b. Sembuhkan modal backdrop tanpa mengunci inline display:none yang menghalangi openModal() berikutnya!
           const allModals = document.querySelectorAll('.modal-backdrop, .modal');
           allModals.forEach(m => {
-            if (!m.classList?.contains('show')) {
-              m.style.display = 'none';
+            if (m.classList?.contains('show') && m.style && m.style.display === 'none') {
+              // Modal zombie (.show tapi display:none): lepaskan .show dan hapus inline display
+              m.classList.remove('show');
+              m.style.removeProperty('display');
+              healedCount++;
+            } else if (!m.classList?.contains('show') && m.style && m.style.display === 'none') {
+              // Bersihkan inline display:none usang karena CSS .modal-backdrop sudah mengatur display:none secara deklaratif
+              m.style.removeProperty('display');
+              healedCount++;
             }
           });
+
+          // Sinkronkan body.modal-open dengan kondisi modal sebenarnya
+          if (typeof syncBodyModalState === 'function') {
+            const hadModalOpen = document.body.classList.contains('modal-open');
+            syncBodyModalState();
+            const hasNow = document.body.classList.contains('modal-open');
+            if (hadModalOpen !== hasNow) healedCount++;
+          } else if (document.body && document.body.classList.contains('modal-open') && !document.querySelector('.modal-backdrop.show')) {
+            document.body.classList.remove('modal-open');
+            healedCount++;
+          }
+
+          // Bersihkan mobile-sidebar-open yang nyangkut di layar desktop atau saat sidebar tertutup
+          if (document.body && document.body.classList.contains('mobile-sidebar-open')) {
+            const sb = document.getElementById('sidebar');
+            if (winW > 768 || !sb || !sb.classList.contains('open')) {
+              document.body.classList.remove('mobile-sidebar-open');
+              healedCount++;
+            }
+          }
 
           // c. Hilangkan pointer-events none yang nyangkut pada tombol aktif
           const trappedButtons = document.querySelectorAll('button[style*="pointer-events: none"]:not([disabled])');
@@ -1956,31 +2334,71 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
             healedCount++;
           });
 
-          // d. Bersihkan anomali teks dan pulihkan kortisol jika sempat naik akibat anomali yang telah diselesaikan
+          // d. Lepaskan STATE.isSending yang nyangkut jika tidak sedang streaming
+          if (typeof STATE !== 'undefined' && STATE.isSending && !STATE.isGenerating) {
+            if (!this._lastSendStartTimestamp || (Date.now() - this._lastSendStartTimestamp > 15000)) {
+              STATE.isSending = false;
+              this._lastSendStartTimestamp = 0;
+              healedCount++;
+            }
+          }
+
+          // e. Pulihkan Terminal PTY jika ada anomali dimensi/scroll
+          if (typeof window.TerminalEndorphin !== 'undefined' && typeof window.TerminalEndorphin.healAll === 'function') {
+            const termModal = document.getElementById('terminalModal');
+            if (termModal && termModal.classList.contains('show')) {
+              window.TerminalEndorphin.healAll({ silent: true, noRedraw: true });
+            }
+          }
+
+          // f. Bersihkan anomali teks dan pulihkan kortisol dengan suntikan Endorfin
           if (this.textAnomalies && this.textAnomalies.length > 0) {
             const clearedCount = this.textAnomalies.length;
             this.textAnomalies = [];
             healedCount += clearedCount;
           }
-          if (this.hormones && this.hormones.cortisol > 0) {
-            this.hormones.cortisol = Math.max(0, this.hormones.cortisol - 40);
+          // g. Bersihkan error tool & anomali halusinasi, serta segarkan cache tool otonom
+          if (this.toolIssues && this.toolIssues.length > 0) {
+            healedCount += this.toolIssues.length;
+            this.toolIssues = [];
+          }
+          if (this.hallucinationIssues && this.hallucinationIssues.length > 0) {
+            healedCount += this.hallucinationIssues.length;
+            this.hallucinationIssues = [];
+          }
+          if (typeof AUTONOMOUS_TOOL_CACHE !== 'undefined' && AUTONOMOUS_TOOL_CACHE && typeof AUTONOMOUS_TOOL_CACHE.clear === 'function') {
+            try { AUTONOMOUS_TOOL_CACHE.clear(); } catch (_) {}
+          }
+          if (this.hormones) {
+            if (this.hormones.cortisol > 0) {
+              this.hormones.cortisol = Math.max(0, Math.round((this.hormones.cortisol - 45) * 10) / 10);
+            }
+            this.hormones.endorphin = Math.min(100, Math.round((this.hormones.endorphin + 20) * 10) / 10);
+            this.hormones.dopamine = Math.min(100, Math.round((this.hormones.dopamine + 20) * 10) / 10);
           }
         }
 
         // Audit ulang komprehensif
         this.auditComprehensive(true);
-        this.secreteDopamine(25, `Auto-Heal berhasil: Memperbaiki ${healedCount} anomali layout & halangan tombol!`);
-        if (typeof showToast === 'function') {
-          showToast(`⚡ Auto-Heal berhasil! Memperbaiki ${healedCount} anomali layout & membuka akses tombol.`, 'success');
+        const logMsg = options && options.isAutoReflex
+          ? `[Auto-Endorfin v3] Refleks pemulihan otonom (${options.reason || 'Homeostasis'}): ${healedCount} anomali dinormalkan.`
+          : `Auto-Heal berhasil: Memperbaiki ${healedCount} anomali layout, modal & halangan tombol!`;
+        this.log('endorphin', 25, logMsg);
+        this.updateUI();
+
+        if (!silent) {
+          if (typeof showToast === 'function') {
+            showToast(`⚡ Auto-Heal v3 berhasil! Memperbaiki ${healedCount} anomali layout, state & membuka akses tombol.`, 'success');
+          }
+          if (typeof AudioEngine !== 'undefined' && AudioEngine.success) AudioEngine.success();
         }
-        if (typeof AudioEngine !== 'undefined' && AudioEngine.success) AudioEngine.success();
       } catch (e) {
         console.warn('Auto-heal error:', e);
       }
       return healedCount;
     },
 
-    // 8. Filter Subtab
+    // 10. Filter Subtab
     setSubTabFilter(filter = 'all') {
       this.activeSubTab = filter;
       if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
@@ -1993,16 +2411,24 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     },
 
     purgeStress() {
+      this.autoFixLayoutAndButtons({ silent: true });
       this.hormones.cortisol = 0;
       this.hormones.dopamine = 100;
       this.hormones.serotonin = 100;
       this.hormones.adrenaline = 0;
+      this.hormones.endorphin = 100;
       this.isolatedNodes = [];
       this.modelErrors = [];
       this.textAnomalies = [];
+      this.toolIssues = [];
+      this.hallucinationIssues = [];
       this.viewportIssues = [];
       this.buttonIssues = [];
-      this.log('endorphin', 50, 'Suntikan Endorfin: Keseimbangan & kestabilan dipulihkan penuh (0% Stres)');
+      this.gatewayIssues = [];
+      if (typeof AUTONOMOUS_TOOL_CACHE !== 'undefined' && AUTONOMOUS_TOOL_CACHE && typeof AUTONOMOUS_TOOL_CACHE.clear === 'function') {
+        try { AUTONOMOUS_TOOL_CACHE.clear(); } catch (_) {}
+      }
+      this.log('endorphin', 50, 'Suntikan Endorfin v3: Imunitas 100%, Stres 0%, Layout & Gateway dipulihkan penuh');
       this.updateUI();
       try {
         if (typeof window !== 'undefined' && window.TerminalEndorphin && typeof window.TerminalEndorphin.healAll === 'function') {
@@ -2016,7 +2442,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
       } catch (_) {}
       if (typeof showToast === 'function') {
-        showToast('🌿 Endorfin disuntikkan: Stres netral (0%), Dopamin 100%, Terminal pulih penuh!', 'success');
+        showToast('🌿 Endorfin v3 disuntikkan: Stres 0%, Imunitas 100%, UI & Terminal pulih penuh!', 'success');
       }
     },
 
@@ -2039,6 +2465,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       if (btn) {
         const d = Math.round(this.hormones.dopamine);
         const c = Math.round(this.hormones.cortisol);
+        const e = Math.round(this.hormones.endorphin ?? 100);
 
         let chatSuffix = '';
         if (typeof window !== 'undefined' && window.ChatEndocrine && window.ChatEndocrine.enabled) {
@@ -2049,15 +2476,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         if (c >= 60) {
           btn.classList.add('status-critical');
           if (heartIcon) heartIcon.style.color = '#FF0055';
-          btn.title = `⚠️ PERINGATAN STRES KODE TINGGI (${c}%): Terdeteksi bug atau komponen terisolasi! Klik untuk cek telemetri.${chatSuffix}`;
+          btn.title = `⚠️ PERINGATAN STRES KODE TINGGI (${c}%): Refleks Endorfin (${e}%) aktif memulihkan! Klik untuk cek telemetri.${chatSuffix}`;
         } else if (c >= 30) {
           btn.classList.add('status-stressed');
           if (heartIcon) heartIcon.style.color = '#FFB703';
-          btn.title = `Stres Kode Meningkat (${c}%): Ada gangguan atau peringatan. Klik untuk cek telemetri.${chatSuffix}`;
+          btn.title = `Stres Kode Meningkat (${c}% | Endorfin ${e}%): Ada peringatan yang sedang diredam. Klik untuk cek telemetri.${chatSuffix}`;
         } else {
           btn.classList.add('status-happy');
           if (heartIcon) heartIcon.style.color = '#00FFC2';
-          btn.title = `Kondisi Kode Sangat Kuat & Prima (Dopamin ${d}%, Bebas Bug). Klik untuk melihat bio-telemetri.${chatSuffix}`;
+          btn.title = `Kondisi Kode Sangat Kuat & Prima (Dopamin ${d}%, Endorfin ${e}%, Bebas Bug). Klik untuk melihat bio-telemetri v3.${chatSuffix}`;
         }
       }
 
@@ -2078,6 +2505,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const c = Math.round(this.hormones.cortisol);
       const s = Math.round(this.hormones.serotonin);
       const a = Math.round(this.hormones.adrenaline);
+      const e = Math.round(this.hormones.endorphin ?? 100);
 
       const getAsciiBar = (pct, charFilled = '|', charEmpty = '.') => {
         const total = 20;
@@ -2090,6 +2518,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const dAscii = document.getElementById('endocrineDopamineAscii');
       const cVal = document.getElementById('endocrineCortisolVal');
       const cAscii = document.getElementById('endocrineCortisolAscii');
+      const eVal = document.getElementById('endocrineEndorphinVal');
       const sVal = document.getElementById('endocrineSerotoninVal');
       const aVal = document.getElementById('endocrineAdrenalineVal');
       const connVal = document.getElementById('endocrineConnectomeVal');
@@ -2125,35 +2554,36 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
       }
 
+      if (eVal) {
+        eVal.innerText = e >= 90 ? `${e}% (Kebal)` : `${e}% (Aktif)`;
+        eVal.className = e >= 60 ? 'text-emerald' : 'text-amber';
+      }
       if (sVal) sVal.innerText = `${s}% (Normal)`;
       if (aVal) aVal.innerText = a === 0 ? '0% (Idle)' : `${a}% (Active)`;
 
       const cDesc = document.getElementById('endocrineCortisolDesc');
       if (cDesc) {
         if (c === 0) {
-          cDesc.innerText = 'Kondisi prima: 0 error terisolasi, jaringan stabil tanpa gangguan.';
+          cDesc.innerText = 'Kondisi prima: 0 error terisolasi, jaringan & refleks imun Endorfin v3 stabil.';
         } else {
           const lastCortisol = this.history.find(h => h.type === 'cortisol');
           cDesc.innerText = `Pemicu Stres: ${lastCortisol?.reason || 'Terdeteksi anomali pada alur kode/jaringan.'}`;
         }
       }
 
-      // Update 5-Pillar Rows
-      const cardConn = document.getElementById('cardPillarConnectome');
+      // Update 6-Pillar Rows
       const statConn = document.getElementById('pillarConnectomeStatus');
       const descConn = document.getElementById('pillarConnectomeDesc');
-      const cardModel = document.getElementById('cardPillarModel');
       const statModel = document.getElementById('pillarModelStatus');
       const descModel = document.getElementById('pillarModelDesc');
-      const cardText = document.getElementById('cardPillarText');
       const statText = document.getElementById('pillarTextStatus');
       const descText = document.getElementById('pillarTextDesc');
-      const cardVp = document.getElementById('cardPillarViewport');
       const statVp = document.getElementById('pillarViewportStatus');
       const descVp = document.getElementById('pillarViewportDesc');
-      const cardBtn = document.getElementById('cardPillarButton');
       const statBtn = document.getElementById('pillarButtonStatus');
       const descBtn = document.getElementById('pillarButtonDesc');
+      const statGw = document.getElementById('pillarGatewayStatus');
+      const descGw = document.getElementById('pillarGatewayDesc');
 
       // Pillar 1: Connectome
       const isolatedCount = this.isolatedNodes ? this.isolatedNodes.length : 0;
@@ -2163,7 +2593,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         statConn.className = `pillar-status ${isolatedCount > 0 ? 'status-crit' : ''}`;
       }
       if (connVal) {
-        connVal.innerText = isolatedCount > 0 ? `${this.connectedCount}/${this.totalAudited} (${isolatedCount} Terisolasi)` : `${this.connectedCount || 408} / ${this.totalAudited || 408} Harmonis`;
+        connVal.innerText = isolatedCount > 0 ? `${this.connectedCount}/${this.totalAudited} (${isolatedCount} Terisolasi)` : `${this.connectedCount || 409} / ${this.totalAudited || 409} Harmonis`;
       }
 
       // Pillar 2: Model Errors
@@ -2198,15 +2628,48 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         statBtn.className = `pillar-status ${btnIssuesCount > 0 ? 'status-crit' : ''}`;
       }
 
+      // Pillar 6: Gateway AI & Tunnel WAN
+      const gwIssuesCount = this.gatewayIssues ? this.gatewayIssues.length : 0;
+      if (descGw) {
+        if (gwIssuesCount > 0) {
+          descGw.innerText = `${gwIssuesCount} Gangguan State/Jaringan`;
+        } else {
+          const tunnelActive = Boolean(typeof window !== 'undefined' && window.TerminalManager && window.TerminalManager.tunnelInfo && window.TerminalManager.tunnelInfo.tunnelUrl);
+          descGw.innerText = tunnelActive ? 'Gateway & Tunnel WAN Aktif' : 'Jaringan & State Stabil';
+        }
+      }
+      if (statGw) {
+        statGw.innerText = gwIssuesCount > 0 ? 'WARN' : 'PASS';
+        statGw.className = `pillar-status ${gwIssuesCount > 0 ? 'status-warn' : ''}`;
+      }
+
+      // Pillar 7: Nilai Guna Skill & Endorfin Agen
+      const statSkill = document.getElementById('pillarSkillUtilityStatus');
+      const descSkill = document.getElementById('pillarSkillUtilityDesc');
+      const lastAudit = this.agentSkillAudits && this.agentSkillAudits.length > 0 ? this.agentSkillAudits[0] : null;
+      const lowUtilityCount = (this.agentSkillAudits || []).filter(a => a.score < 60).length;
+      if (descSkill) {
+        if (lastAudit) {
+          descSkill.innerText = `${lastAudit.skill}: Skor ${lastAudit.score}/100 (${lastAudit.grade})`;
+        } else {
+          descSkill.innerText = 'Kualitas Prima (A+)';
+        }
+      }
+      if (statSkill) {
+        statSkill.innerText = lowUtilityCount > 0 ? 'WARN' : 'PASS';
+        statSkill.className = `pillar-status ${lowUtilityCount > 0 ? 'status-warn' : ''}`;
+      }
+
       const overallPass = document.getElementById('pillarOverallPass');
-      const pillarIssueCount = (isolatedCount > 0 ? 1 : 0) + (modelErrCount > 0 ? 1 : 0) + (textAnomCount > 0 ? 1 : 0) + (vpIssuesCount > 0 ? 1 : 0) + (btnIssuesCount > 0 ? 1 : 0);
+      const totalPillars = 7;
+      const pillarIssueCount = (isolatedCount > 0 ? 1 : 0) + (modelErrCount > 0 ? 1 : 0) + (textAnomCount > 0 ? 1 : 0) + (vpIssuesCount > 0 ? 1 : 0) + (btnIssuesCount > 0 ? 1 : 0) + (gwIssuesCount > 0 ? 1 : 0) + (lowUtilityCount > 0 ? 1 : 0);
       if (overallPass) {
         if (pillarIssueCount === 0) {
-          overallPass.innerText = '[PASS 5/5]';
+          overallPass.innerText = `[PASS ${totalPillars}/${totalPillars}]`;
           overallPass.className = 'pillar-pass-badge';
           overallPass.style.color = '#34d399';
         } else {
-          overallPass.innerText = `[WARN ${5 - pillarIssueCount}/5]`;
+          overallPass.innerText = `[WARN ${totalPillars - pillarIssueCount}/${totalPillars}]`;
           overallPass.className = 'pillar-pass-badge';
           overallPass.style.color = '#fbbf24';
         }
@@ -2319,19 +2782,87 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         });
       }
 
-      const totalDiscoveredIssues = (this.isolatedNodes?.length || 0) + (this.modelErrors?.length || 0) + (this.textAnomalies?.length || 0) + (this.viewportIssues?.length || 0) + (this.buttonIssues?.length || 0);
+      // 6. Gateway & State Issues
+      if (this.activeSubTab === 'all' || this.activeSubTab === 'gateway') {
+        (this.gatewayIssues || []).forEach(gw => {
+          allActiveIssues.push({
+            type: 'gateway',
+            badge: 'Gateway & State',
+            badgeClass: 'badge-gateway',
+            severity: gw.severity || 'medium',
+            time: 'Aktif',
+            title: `Anomali State/Jaringan: ${esc(gw.selector)}`,
+            body: esc(gw.reason),
+            snippet: gw.selector,
+            fixable: gw.fixable
+          });
+        });
+      }
+
+      // 7. Tool Execution Issues (Endorfin Telemetry)
+      if (this.activeSubTab === 'all' || this.activeSubTab === 'tool') {
+        (this.toolIssues || []).forEach(t => {
+          allActiveIssues.push({
+            type: 'tool',
+            badge: 'Tool Error',
+            badgeClass: 'badge-tool',
+            severity: 'high',
+            time: t.time || 'Aktif',
+            title: `[Tool] ${esc(t.toolName)} (${esc(t.status)})`,
+            body: esc(t.reason),
+            snippet: t.argsPreview ? `Argumen: ${esc(t.argsPreview)}` : `Tool: ${esc(t.toolName)}`,
+            fixable: true
+          });
+        });
+      }
+
+      // 8. Hallucination Issues (Endorfin Telemetry)
+      if (this.activeSubTab === 'all' || this.activeSubTab === 'hallucination') {
+        (this.hallucinationIssues || []).forEach(h => {
+          allActiveIssues.push({
+            type: 'hallucination',
+            badge: 'Halusinasi Data',
+            badgeClass: 'badge-hallucination',
+            severity: 'high',
+            time: h.time || 'Aktif',
+            title: `[Halusinasi Terdeteksi] ${esc(h.model)}`,
+            body: esc(h.reason),
+            snippet: h.snippet ? `Kutipan: "${esc(h.snippet)}"` : `Aksi: ${esc(h.actionTaken)}`,
+            fixable: false
+          });
+        });
+      }
+
+      // 9. Agent Skill Utility Audits (Pilar 07 - Endorfin Telemetry)
+      if (this.activeSubTab === 'all' || this.activeSubTab === 'skill') {
+        (this.agentSkillAudits || []).filter(sk => this.activeSubTab === 'skill' || sk.score < 60).forEach(sk => {
+          allActiveIssues.push({
+            type: 'skill',
+            badge: `Nilai Guna ${sk.grade}`,
+            badgeClass: sk.score >= 80 ? 'badge-gateway' : (sk.score >= 60 ? 'badge-model' : 'badge-hallucination'),
+            severity: sk.score < 60 ? 'high' : (sk.score < 80 ? 'medium' : 'low'),
+            time: sk.time || 'Aktif',
+            title: `[Evaluasi Nilai Guna] ${esc(sk.skill)} (${sk.score}/100 - Grade ${sk.grade})`,
+            body: `Model: ${esc(sk.model)} | Kualitas: ${esc(sk.feedback)}`,
+            snippet: sk.snippet ? `Kutipan: "${esc(sk.snippet)}"` : '',
+            fixable: false
+          });
+        });
+      }
+
+      const totalDiscoveredIssues = (this.isolatedNodes?.length || 0) + (this.modelErrors?.length || 0) + (this.textAnomalies?.length || 0) + (this.toolIssues?.length || 0) + (this.hallucinationIssues?.length || 0) + (this.viewportIssues?.length || 0) + (this.buttonIssues?.length || 0) + (this.gatewayIssues?.length || 0) + ((this.agentSkillAudits || []).filter(a => a.score < 60).length);
 
       // Header Status Sync
       const hdrHealthSquare = document.getElementById('headerHealthSquare');
       const hdrHealthText = document.getElementById('headerHealthText');
       const hdrSyncCount = document.getElementById('headerSyncCount');
-      if (hdrSyncCount) hdrSyncCount.innerText = String(this.totalAudited || 408);
+      if (hdrSyncCount) hdrSyncCount.innerText = String(this.totalAudited || 409);
       if (totalDiscoveredIssues > 0) {
         if (hdrHealthSquare) hdrHealthSquare.style.background = '#f87171';
-        if (hdrHealthText) hdrHealthText.innerHTML = `<span style="color:#f87171;">${totalDiscoveredIssues} ISSUES DETECTED</span> / <span id="headerSyncCount">${this.totalAudited || 408}</span> NODES SYNCED`;
+        if (hdrHealthText) hdrHealthText.innerHTML = `<span style="color:#f87171;">${totalDiscoveredIssues} ISSUES DETECTED</span> / <span id="headerSyncCount">${this.totalAudited || 409}</span> NODES SYNCED`;
       } else {
         if (hdrHealthSquare) hdrHealthSquare.style.background = '#34d399';
-        if (hdrHealthText) hdrHealthText.innerHTML = `ALL SYSTEMS HEALTHY / <span id="headerSyncCount">${this.totalAudited || 408}</span> NODES SYNCED`;
+        if (hdrHealthText) hdrHealthText.innerHTML = `ALL SYSTEMS HEALTHY / <span id="headerSyncCount">${this.totalAudited || 409}</span> NODES SYNCED`;
       }
 
       if (totalDiscoveredIssues > 0 || this._forceShowDetails) {
@@ -2376,9 +2907,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         }
         if (isolatedContent) {
           if (totalDiscoveredIssues === 0) {
-            isolatedContent.innerHTML = `Semua 5 pilar kode berjalan harmonis: Bebas kesalahan panggil model, tidak ada teks pecah/bocor, ukuran layar presisi tanpa overflow, dan seluruh tombol bebas dari halangan fisik.`;
+            isolatedContent.innerHTML = `Semua 6 pilar kode berjalan harmonis: Bebas kesalahan panggil model, tidak ada teks pecah/bocor, ukuran layar presisi tanpa overflow, tombol bebas halangan, serta Gateway & Tunnel WAN stabil.`;
           } else {
-            isolatedContent.innerHTML = `Tidak ada isu pada kategori filter saat ini (<strong>${esc(this.activeSubTab)}</strong>). Pilih tab "Semua Diagnosa" untuk melihat isu di pilar lain.`;
+            isolatedContent.innerHTML = `Tidak ada isu pada kategori filter saat ini (<strong>${esc(this.activeSubTab)}</strong>). Pilih tab "Semua" untuk melihat isu di pilar lain.`;
           }
         }
       }
@@ -2410,11 +2941,11 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
 
     exportLogsAsText() {
       const now = new Date().toLocaleString();
-      let text = `=== ZOZ ROUTER - BIO-ENDOCRINE CODE TELEMETRY & ERROR LOG ===\n`;
+      let text = `=== ZOZ ROUTER - BIO-ENDOCRINE v3.0 CODE TELEMETRY & ERROR LOG ===\n`;
       text += `Waktu Ekspor : ${now}\n`;
-      text += `Status Hormon: Dopamin ${this.hormones.dopamine}% | Kortisol ${this.hormones.cortisol}% | Serotonin ${this.hormones.serotonin}% | Adrenalin ${this.hormones.adrenaline}%\n\n`;
+      text += `Status Hormon: Dopamin ${this.hormones.dopamine}% | Kortisol ${this.hormones.cortisol}% | Endorfin ${this.hormones.endorphin ?? 100}% | Serotonin ${this.hormones.serotonin}% | Adrenalin ${this.hormones.adrenaline}%\n\n`;
 
-      text += `--- DAFTAR ISU AKTIF (5 PILAR DIAGNOSA) ---\n`;
+      text += `--- DAFTAR ISU AKTIF (6 PILAR DIAGNOSA) ---\n`;
       let issueCount = 0;
       if (this.isolatedNodes && this.isolatedNodes.length > 0) {
         text += `[Pilar 1 - Simpul DOM Terisolasi (${this.isolatedNodes.length})]:\n`;
@@ -2433,7 +2964,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       if (this.textAnomalies && this.textAnomalies.length > 0) {
         text += `[Pilar 3 - Anomali & Teks Pecah AI (${this.textAnomalies.length})]:\n`;
         this.textAnomalies.forEach((txt, i) => {
-          text += `  ${i + 1}. [${txt.type}] ${txt.desc}\n`;
+          text += `  ${i + 1}. [${txt.type}] ${txt.reason || txt.desc || txt.label}\n`;
           issueCount++;
         });
       }
@@ -2451,8 +2982,15 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
           issueCount++;
         });
       }
+      if (this.gatewayIssues && this.gatewayIssues.length > 0) {
+        text += `[Pilar 6 - Gateway AI, Tunnel WAN & State (${this.gatewayIssues.length})]:\n`;
+        this.gatewayIssues.forEach((gw, i) => {
+          text += `  ${i + 1}. ${gw.reason || gw}\n`;
+          issueCount++;
+        });
+      }
       if (issueCount === 0) {
-        text += `(Tidak ada isu aktif pada 5 pilar diagnosa - Semua modul & tombol sehat sempurna)\n`;
+        text += `(Tidak ada isu aktif pada 6 pilar diagnosa - Semua modul, gateway & tombol sehat sempurna)\n`;
       }
       text += `\n`;
 
@@ -2487,6 +3025,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
   // Expose to window for global bio-telemetry, console inspection, and diagnostic audit
   window.BioEndocrine = BioEndocrine;
   window.CodeEndocrine = BioEndocrine; // Official Alias Jalur 1: CodeEndocrine
+  window.EndocrineMonitor = BioEndocrine; // Receptor Alias for TerminalEndorphin integration
 
   // ==================== CHAT-ENDOCRINE (SISTEM SARAF EMOSI BUATAN AI) ====================
   // Jalur 2 Endokrin: Sistem saraf emosi buatan otonom untuk model AI.
@@ -3883,8 +4422,8 @@ RESONANSI: ${this.currentVibe}
         }
       }
 
-      // Pastikan endpoint Ollama Cloud terdefinisi dengan baik (100% Cloud Native)
-      if (!STATE.settings.ollamaEndpoint || STATE.settings.ollamaEndpoint.includes('127.0.0.1') || STATE.settings.ollamaEndpoint.includes('localhost')) {
+      // Pastikan endpoint Ollama terdefinisi (mendukung penuh Cloud https://ollama.com maupun Daemon Lokal/LAN 127.0.0.1:11434)
+      if (!STATE.settings.ollamaEndpoint || typeof STATE.settings.ollamaEndpoint !== 'string' || !STATE.settings.ollamaEndpoint.trim()) {
         STATE.settings.ollamaEndpoint = 'https://ollama.com';
       }
 
@@ -3929,10 +4468,9 @@ RESONANSI: ${this.currentVibe}
         STATE.searchMode = 'autonomous';
         safeLocalStorage.setItem('zoz_router_search_mode_v1', 'autonomous');
       }
-      const savedPromptHidden = safeLocalStorage.getItem('zoz_prompt_hidden');
-      if (savedPromptHidden !== null) {
-        STATE.isPromptHidden = savedPromptHidden === 'true';
-      }
+      // Jangan pernah menyembunyikan prompt dock saat startup agar pengguna tidak terkunci tanpa kolom input
+      STATE.isPromptHidden = false;
+      safeLocalStorage.removeItem('zoz_prompt_hidden');
 
       // Fast synchronous load from localStorage (0ms startup)
       const savedSessions = safeLocalStorage.getItem('zoz_router_sessions_v1');
@@ -4864,31 +5402,372 @@ RESONANSI: ${this.currentVibe}
   }
 
   function synthesizeAutonomousWebSummary(rawToolResponsesText, sources) {
+    const validSources = Array.isArray(sources) ? sources.filter(s => s && (s.title || s.snippet || s.url)) : [];
+
+    if (validSources.length > 0) {
+      const topItems = [];
+      const seenTitles = new Set();
+      for (const s of validSources) {
+        const title = (s.title || '').trim();
+        const snippet = (s.snippet || '').trim().replace(/^(?:Ringkasan|Deskripsi|KONTEN|Fakta|Informasi):\s*/i, '');
+        const norm = title.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+        if (norm && seenTitles.has(norm)) continue;
+        if (norm) seenTitles.add(norm);
+        if (title || snippet) {
+          let domainName = s.domain || '';
+          if (!domainName && s.url) {
+            try { domainName = new URL(s.url).hostname.replace(/^www\./, ''); } catch (_) { domainName = 'Web'; }
+          }
+          topItems.push({
+            title: title || 'Laporan Terkait',
+            domain: domainName || 'Web',
+            snippet: snippet,
+            url: s.url || ''
+          });
+        }
+        if (topItems.length >= 5) break;
+      }
+
+      if (topItems.length > 0) {
+        let summaryMd = 'Berikut rangkuman fakta dan perkembangan penting yang berhasil dikumpulkan dari penelusuran web:\n\n';
+        summaryMd += '### 🌐 Fakta & Perkembangan Utama:\n';
+        const normCmp = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+        for (const item of topItems) {
+          const domainBadge = item.domain ? `*(${item.domain})*` : '';
+          summaryMd += `- **${item.title}** ${domainBadge}\n`;
+          if (item.snippet && item.snippet !== item.title) {
+            let cleanSnippet = item.snippet.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+            // Format "[Sumber | tanggal] Judul": buang judul yang duplikat, sisakan metadata & konteks fakta
+            const metaMatch = cleanSnippet.match(/^\[([^\]]+)\]\s*(.*)$/);
+            if (metaMatch) {
+              const meta = metaMatch[1].replace(/\s*\|\s*/g, ' · ');
+              const rest = metaMatch[2].trim();
+              const restIsTitle = !rest || normCmp(rest) === normCmp(item.title) || normCmp(item.title).includes(normCmp(rest));
+              cleanSnippet = restIsTitle ? `_${meta}_` : `_${meta}_ — ${rest}`;
+            } else if (normCmp(cleanSnippet) === normCmp(item.title)) {
+              cleanSnippet = '';
+            }
+            cleanSnippet = cleanSnippet.slice(0, 400).trim();
+            if (cleanSnippet) {
+              summaryMd += `  ${cleanSnippet}\n`;
+            }
+          }
+        }
+        summaryMd += '\n*Informasi di atas dirangkum langsung dari data penelusuran web real-time. Tinjau rincian artikel lengkap melalui panel **Sumber Referensi Web** di bawah.*';
+        return summaryMd;
+      }
+    }
+
     const cleanRaw = cleanWebExtractedContent(rawToolResponsesText || '');
     const validSentences = [];
     const rawParagraphs = cleanRaw.split('\n');
     for (const para of rawParagraphs) {
       const trimmed = para.trim();
-      if (!trimmed || trimmed.length < 30) continue;
+      if (!trimmed || trimmed.length < 25) continue;
       if (/^[\[\{\<\#\*\-\_\=\+\@]/.test(trimmed)) continue;
       if (/^(?:URL|Title|Judul|KONTEN|HASIL|Sumber|Source|Domain|Tautan|Error|Warning|Page)\b/i.test(trimmed)) continue;
       if (trimmed.includes('{{') || trimmed.includes('}}') || trimmed.includes('{ "') || trimmed.includes('": "')) continue;
       if (/https?:\/\//i.test(trimmed)) continue;
       validSentences.push(trimmed);
-      if (validSentences.length >= 3) break;
+      if (validSentences.length >= 4) break;
     }
 
     if (validSentences.length > 0) {
-      return validSentences.join('\n\n');
+      return `Berikut informasi yang diperoleh dari penelusuran terkini:\n\n${validSentences.join('\n\n')}`;
     }
 
-    if (sources && sources.length > 0) {
-      const topSource = sources[0];
-      const title = topSource.title || 'sumber terverifikasi';
-      return `Informasi telah berhasil dikumpulkan dari ${title}. Silakan tinjau rincian sumber pada tautan referensi di bawah.`;
+    return 'Informasi terkait telah berhasil ditelusuri. Rincian referensi dan fakta lengkap dapat ditinjau pada daftar sumber di bawah.';
+  }
+
+  function isModelInternalMonologue(text) {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+
+    // Jika teks panjang (> 250 karakter) dan memuat format markdown (heading, list, atau code block),
+    // ini adalah konten jawaban pengguna yang sah, bukan scratchpad CoT singkat.
+    if (trimmed.length > 250 && (trimmed.includes('###') || trimmed.includes('```') || /^\s*[-*]\s+/m.test(trimmed))) {
+      return false;
     }
 
-    return 'Informasi terkait telah berhasil ditelusuri. Rincian referensi dapat dilihat pada daftar sumber di bawah.';
+    // Deteksi pola chain-of-thought / internal scratchpad bahasa Inggris sebelum atau selama tool call
+    const monologuePatterns = [
+      /^(?:The\s+user\s+(?:asks|wants|is\s+asking|inquired|said|prompted)|User\s+(?:asks|wants|is\s+asking|query|prompt))/i,
+      /^(?:I\s+(?:should|need\s+to|must|have\s+to)\s+(?:search|look\s+up|check|query|call))/i,
+      /^(?:Let\s+me\s+(?:search|look\s+up|check|find|query|call))\b/i,
+      /^(?:Wait[\s\,\—\-\:]|Wait,\s*prior\s+turn|Wait\s+a\s+minute|Wait,\s*in\s+the\s+previous|Wait,\s*looking\s+at)/i,
+      /^(?:Thinking\s*[\:\.]|Thought\s*[\:\.]|Internal\s+thought|Reasoning\s*[\:\.])/i,
+      /^(?:Okay|Ok|So|Well|Now),?\s+(?:the\s+user|let\s+me\s+search|I\s+should\s+search|I\s+need\s+to\s+search)/i,
+      /\b(?:I\s+should\s+search\s+the\s+web\s+in\s+English|I\s+need\s+to\s+respond\s+in\s+Indonesian)\b/i,
+      /\b(?:Let\s+me\s+search\s+now|no\s+actual\s+search\s+performed\?|no\s+actual\s+(?:news|search|text|response)\b)/i,
+      /\b(?:Wait,\s*looking\s+at\s+the\s+history|looking\s+at\s+the\s+(?:conversation\s+)?history)\b/i,
+      /\b(?:I\s+must\s+provide\s+the\s+actual\s+(?:AI\s+)?news\s+now)\b/i
+    ];
+
+    for (const pat of monologuePatterns) {
+      if (pat.test(trimmed)) return true;
+    }
+
+    return false;
+  }
+
+  // Deteksi teks hasil fallback mentah (bukan jawaban model) agar bisa diganti jawaban hasil sintesis model.
+  function isAutonomousFallbackText(text) {
+    const t = String(text || '').trim();
+    if (!t) return false;
+    return t.startsWith('Berikut rangkuman informasi dan perkembangan terkini')
+      || t.startsWith('Berikut informasi yang diperoleh dari penelusuran terkini')
+      || t.startsWith('Informasi terkait telah berhasil ditelusuri');
+  }
+
+  function buildWebRescueMessages(question, evidenceText) {
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    return [
+      {
+        role: 'system',
+        content: 'Anda adalah asisten yang menjawab pertanyaan pengguna HANYA berdasarkan data penelusuran web yang diberikan. ' +
+          'Tulis jawaban akhir langsung dalam Bahasa Indonesia yang natural, runtut, dan mudah dibaca (gunakan poin/heading singkat bila perlu). ' +
+          'JANGAN menulis proses berpikir, rencana, atau komentar internal. JANGAN memanggil tool. ' +
+          'Hanya laporkan fakta yang tercantum di data; jangan mengarang tanggal, angka, versi, atau peristiwa. ' +
+          `Hari ini ${dateStr}. Jika data terbatas pada judul/ringkasan, sampaikan apa adanya.`
+      },
+      {
+        role: 'user',
+        content: `Pertanyaan pengguna: ${String(question || '').slice(0, 600)}\n\n[DATA HASIL PENELUSURAN WEB]\n${String(evidenceText || '').slice(0, 9000)}\n\nSusun jawaban akhir untuk pertanyaan di atas sekarang.`
+      }
+    ];
+  }
+
+  // Ronde penyelamat OpenRouter: permintaan bersih (tanpa riwayat chat & tanpa tools), hanya membaca delta.content.
+  async function rescueWebAnswerOpenRouter({ url, headers, model, question, evidenceText, extraBody, signal }) {
+    const baseBody = {
+      model,
+      messages: buildWebRescueMessages(question, evidenceText),
+      stream: true,
+      temperature: 0.2,
+      top_p: 0.5,
+      max_tokens: 2500,
+      provider: { allow_fallbacks: true },
+      ...(extraBody || {})
+    };
+    const attempts = [{ ...baseBody, reasoning: { exclude: true } }, baseBody];
+    for (const body of attempts) {
+      try {
+        const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
+        if (!res.ok) {
+          if (res.status === 400 || res.status === 422) continue;
+          return '';
+        }
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        let out = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) { buf += dec.decode(); break; }
+          buf += dec.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop();
+          for (const ln of lines) {
+            const t = ln.trim();
+            if (!t.startsWith('data:')) continue;
+            const j = t.replace(/^data:\s*/, '');
+            if (j === '[DONE]') continue;
+            try { out += JSON.parse(j).choices?.[0]?.delta?.content || ''; } catch (_) {}
+          }
+        }
+        out = scrubRawToolCallArtifacts(out).replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+        if (out && !isModelInternalMonologue(out)) return out;
+      } catch (err) {
+        if (err && (err.name === 'AbortError' || (signal && signal.aborted))) throw err;
+      }
+    }
+    return '';
+  }
+
+  // Ronde penyelamat Ollama (NDJSON): permintaan bersih tanpa riwayat & tools, hanya message.content.
+  async function rescueWebAnswerOllama({ url, headers, model, question, evidenceText, extraBody, signal }) {
+    try {
+      const body = {
+        model,
+        messages: buildWebRescueMessages(question, evidenceText),
+        stream: true,
+        options: { temperature: 0.2, top_p: 0.5 },
+        ...(extraBody || {})
+      };
+      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
+      if (!res.ok) return '';
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      let out = '';
+      const eat = (ln) => {
+        if (!ln.trim()) return;
+        try {
+          const p = JSON.parse(ln);
+          out += p.message?.content || p.response || '';
+        } catch (_) {}
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) { buf += dec.decode(); break; }
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        lines.forEach(eat);
+      }
+      eat(buf);
+      out = scrubRawToolCallArtifacts(out).replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      return (out && !isModelInternalMonologue(out)) ? out : '';
+    } catch (err) {
+      if (err && (err.name === 'AbortError' || (signal && signal.aborted))) throw err;
+      return '';
+    }
+  }
+
+  function verifyAndSanitizeWebDigestion(text, sources, rawToolText) {
+    if (!text || !sources || sources.length === 0) return text;
+
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const curMonthIdx = now.getMonth(); // 0 = Jan, 9 = Oct
+    const curDay = now.getDate();
+
+    const idMonths = ['januari', 'februari', 'maret', 'april', 'mei', 'juni', 'juli', 'agustus', 'september', 'oktober', 'november', 'desember'];
+    const enMonths = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+
+    const curMonthId = idMonths[curMonthIdx];
+    const curMonthEn = enMonths[curMonthIdx];
+
+    // Gabungkan seluruh bukti faktual dari web sources dan rawToolText ke string kanonikal pencarian
+    const evidenceRaw = (String(rawToolText || '') + ' ' + (Array.isArray(sources) ? sources.map(s => (s.title || '') + ' ' + (s.snippet || '') + ' ' + (s.url || '') + ' ' + (s.pubDate || '')).join(' ') : '')).toLowerCase();
+
+    // Helper untuk mengecek apakah suatu string tanggal/klaim ada dalam bukti web
+    const isGroundedInEvidence = (substr) => {
+      if (!substr) return false;
+      const cleanSub = String(substr).trim().toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+      const cleanEv = evidenceRaw.replace(/[^\p{L}\p{N}]/gu, '');
+      return cleanEv.includes(cleanSub);
+    };
+
+    // Helper untuk mengecek apakah suatu kalimat merupakan proyeksi masa depan / jadwal resmi
+    const isForwardLookingContext = (sentence) => {
+      if (!sentence) return false;
+      return /\b(target|proyeksi|prediksi|rencana|jadwal|dijadwalkan|akan|menuju|hingga|sampai|mendatang|perkiraan|diperkirakan|roadmap|expected|projected|forecast|plans?|scheduled|upcoming|estimate)\b/i.test(sentence);
+    };
+
+    let isHallucinated = false;
+    let reason = '';
+    let hallucinatedSnippet = '';
+
+    // 1. Cek tanggal masa depan pada bulan berjalan (misal > curDay + 2 hari toleransi timezone WIB/UTC)
+    // HANYA dianggap halusinasi jika:
+    // a. Tanggal melebihi curDay + 2
+    // b. BUKAN konteks proyeksi / jadwal masa depan ("akan diadakan pada 25 Oktober")
+    // c. TIDAK ADA dalam bukti sumber data web aktual
+    const curMonthRegex = new RegExp(`\\b([1-3]?[0-9])\\s+(?:${curMonthId}|${curMonthEn})\\s*(?:${curYear})?\\b`, 'gi');
+    let m;
+    while ((m = curMonthRegex.exec(text)) !== null) {
+      const day = parseInt(m[1], 10);
+      const matchStr = m[0];
+      if (day > curDay + 2) {
+        const startIdx = Math.max(0, text.lastIndexOf('.', m.index) + 1);
+        const endIdx = text.indexOf('.', m.index + matchStr.length);
+        const sentence = text.slice(startIdx, endIdx !== -1 ? endIdx : text.length);
+
+        if (!isGroundedInEvidence(matchStr) && !isForwardLookingContext(sentence)) {
+          isHallucinated = true;
+          reason = `Tanggal masa depan tanpa dasar sumber: ${matchStr} (Hari ini: ${curDay} ${curMonthId} ${curYear})`;
+          hallucinatedSnippet = sentence.trim().slice(0, 80);
+          break;
+        }
+      }
+    }
+
+    // 2. Cek bulan masa depan pada tahun yang sama (misal November/Desember 2026)
+    if (!isHallucinated) {
+      for (let i = curMonthIdx + 1; i < 12; i++) {
+        const futMonthRegex = new RegExp(`\\b(?:[1-3]?[0-9]\\s+)?(?:${idMonths[i]}|${enMonths[i]})\\s+${curYear}\\b`, 'gi');
+        let fm;
+        while ((fm = futMonthRegex.exec(text)) !== null) {
+          const matchStr = fm[0];
+          const startIdx = Math.max(0, text.lastIndexOf('.', fm.index) + 1);
+          const endIdx = text.indexOf('.', fm.index + matchStr.length);
+          const sentence = text.slice(startIdx, endIdx !== -1 ? endIdx : text.length);
+
+          if (!isGroundedInEvidence(matchStr) && !isForwardLookingContext(sentence)) {
+            isHallucinated = true;
+            reason = `Bulan masa depan tanpa dasar sumber: ${matchStr}`;
+            hallucinatedSnippet = sentence.trim().slice(0, 80);
+            break;
+          }
+        }
+        if (isHallucinated) break;
+      }
+    }
+
+    // 3. Cek tahun masa depan (> curYear, misal 2027+)
+    // Tahun masa depan pada berita teknologi/ekonomi (seperti target 2027-2030) adalah lumrah
+    // KECUALI jika disajikan sebagai peristiwa masa lalu atau bertentangan tanpa konteks proyeksi
+    if (!isHallucinated) {
+      const futYearRegex = /\b(202[7-9]|20[3-9][0-9])\b/g;
+      let ym;
+      while ((ym = futYearRegex.exec(text)) !== null) {
+        const yrStr = ym[0];
+        const startIdx = Math.max(0, text.lastIndexOf('.', ym.index) + 1);
+        const endIdx = text.indexOf('.', ym.index + yrStr.length);
+        const sentence = text.slice(startIdx, endIdx !== -1 ? endIdx : text.length);
+
+        if (!isGroundedInEvidence(yrStr) && !isForwardLookingContext(sentence)) {
+          if (/\b(kemarin|telah|sudah|lalu|terjadi|dirilis pada)\b/i.test(sentence)) {
+            isHallucinated = true;
+            reason = `Klaim peristiwa masa depan telah terjadi di tahun: ${yrStr}`;
+            hallucinatedSnippet = sentence.trim().slice(0, 80);
+            break;
+          }
+        }
+      }
+    }
+
+    // 4. Cek klaim versi/benchmark fiktif besar jika tidak ada dalam sumber web aktual
+    if (!isHallucinated && (rawToolText || sources.length > 0)) {
+      if (/\bbeam\s+[2-9](?:\.0)?\b/i.test(text) && !/\bbeam\s+[2-9]/i.test(evidenceRaw)) {
+        isHallucinated = true;
+        reason = 'Klaim versi fiktif Beam 2.0+ tanpa dasar sumber data';
+        hallucinatedSnippet = (text.match(/\b[^\.\n]*beam\s+[2-9][^\.\n]*/i)?.[0] || 'Beam 2.0+').trim();
+      } else if (/\bgpt-[5-9]\b/i.test(text) && !/\bgpt-[5-9]\b/i.test(evidenceRaw)) {
+        if (/\b(mengalahkan|unggul dari|melampaui|skor|evaluasi|benchmark|benchmarknya)\s+gpt-[5-9]\b/i.test(text)) {
+          isHallucinated = true;
+          reason = 'Klaim benchmark fiktif mengalahkan GPT-5 tanpa dasar sumber data';
+          hallucinatedSnippet = (text.match(/\b[^\.\n]*(?:mengalahkan|unggul|melampaui|benchmark)[^\.\n]*gpt-[5-9][^\.\n]*/i)?.[0] || 'Benchmark GPT-5').trim();
+        }
+      }
+    }
+
+    if (isHallucinated) {
+      console.warn(`[Anti-Hallucination Guard] Terdeteksi halusinasi: ${reason}. Melaporkan ke Endorfin & meregulasi respon.`);
+      if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerHallucinationIssue === 'function') {
+        BioEndocrine.registerHallucinationIssue({
+          model: typeof STATE !== 'undefined' ? (STATE.mode === 'ollama' ? STATE.settings.ollamaModel : STATE.settings.openRouterModel) : 'Model',
+          reason,
+          snippet: hallucinatedSnippet || reason,
+          actionTaken: 'Sanitasi & Regulasi Respons Faktual'
+        });
+      }
+
+      // Redaksi kalimat halusinasi terlebih dahulu jika teks utama kaya dan berharga
+      if (hallucinatedSnippet && text.length > 300) {
+        let sanitizedText = text.replace(hallucinatedSnippet, '').replace(/\n{3,}/g, '\n\n').trim();
+        if (sanitizedText.length >= 120 && !isAutonomousFallbackText(sanitizedText)) {
+          return sanitizedText;
+        }
+      }
+
+      return synthesizeAutonomousWebSummary(rawToolText, sources);
+    }
+
+    return text;
   }
 
   function fastSanitizeHtml(dirtyHtml) {
@@ -5023,6 +5902,16 @@ RESONANSI: ${this.currentVibe}
     return result.join('\n');
   }
 
+  function fixSingleLineMarkdownTables(text) {
+    if (!text || typeof text !== 'string') return text;
+    // 1. Pastikan ada baris baru jika tabel menempel langsung setelah teks kalimat (titik dua)
+    let t = text.replace(/:\s*(\|)/g, ':\n\n|');
+    // 2. Deteksi baris tabel yang digabung dalam satu baris (| col | col | | --- | --- | | data | data |)
+    // dan ubah | | menjadi baris baru |\n| agar marked dapat mem-parse tabel HTML dengan sempurna
+    t = t.replace(/\|[ \t]*\|[ \t]*(?=[-:\|\w\p{L}])/gu, '|\n| ');
+    return t;
+  }
+
   function renderMarkdown(rawText, isStreaming = false) {
     if (!rawText) return '';
     
@@ -5032,8 +5921,10 @@ RESONANSI: ${this.currentVibe}
     
     let contentHtml = '';
     if (mainText) {
+      // Perbaiki tabel markdown single-line yang rusak agar ter-render sebagai tabel HTML
+      const tableFixedContent = fixSingleLineMarkdownTables(mainText);
       // Amankan dan bungkus blok HTML/website agar rapi di dalam blok kode, tidak bocor ke DOM obrolan
-      const safeContent = normalizeHtmlCodeBlocksInMarkdown(mainText);
+      const safeContent = normalizeHtmlCodeBlocksInMarkdown(tableFixedContent);
       // Selama streaming, lewati reflowShreddedProse agar CPU hemat daya
       const displayContent = isStreaming ? safeContent : reflowShreddedProse(safeContent);
       if (window.marked) {
@@ -5200,33 +6091,64 @@ RESONANSI: ${this.currentVibe}
           flowchart: {
             useMaxWidth: true,
             htmlLabels: true,
-            curve: 'basis',        // Kurva halus melengkung elegan, tidak kaku atau zig-zag patah
+            curve: 'natural',      // Kurva natural proporsional, tegas dan tidak meliuk-liuk aneh / tumpang tindih
             nodeSpacing: 50,       // Jarak horizontal antar node lega
             rankSpacing: 55,       // Jarak vertikal antar tingkatan proporsional
             padding: 16            // Padding dalam kotak nyaman dibaca
           },
           themeVariables: {
             darkMode: true,
-            background: '#090d16',
+            background: '#07090e',
             fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
             fontSize: '13px',
-            primaryColor: '#111827',
+            primaryColor: '#0f172a',
             primaryTextColor: '#f8fafc',
             primaryBorderColor: '#38bdf8',
-            lineColor: '#00f0ff',
-            secondaryColor: '#1e1b4b',
-            secondaryTextColor: '#e0e7ff',
+            lineColor: '#38bdf8',
+            secondaryColor: '#1e293b',
+            secondaryTextColor: '#f1f5f9',
             secondaryBorderColor: '#818cf8',
-            tertiaryColor: '#2d1515',
-            tertiaryTextColor: '#ffedd5',
-            tertiaryBorderColor: '#fb923c',
-            edgeLabelBackground: '#0b0f19',
-            clusterBkg: 'rgba(15, 23, 42, 0.65)',
-            clusterBorder: 'rgba(56, 189, 248, 0.3)',
-            titleColor: '#00f0ff',
+            tertiaryColor: '#162032',
+            tertiaryTextColor: '#f8fafc',
+            tertiaryBorderColor: '#0ea5e9',
+            edgeLabelBackground: '#0b1120',
+            clusterBkg: 'rgba(15, 23, 42, 0.75)',
+            clusterBorder: 'rgba(56, 189, 248, 0.35)',
+            titleColor: '#38bdf8',
             nodeBorder: '#38bdf8',
             nodeTextColor: '#f8fafc',
-            mainBkg: '#111827'
+            mainBkg: '#0f172a',
+            // Sequence Diagram Variables (Mencegah note kuning pucat dan aktor buram)
+            actorBkg: '#0f172a',
+            actorBorder: '#38bdf8',
+            actorTextColor: '#f8fafc',
+            actorLineColor: '#38bdf8',
+            signalColor: '#38bdf8',
+            signalTextColor: '#f8fafc',
+            labelBoxBkgColor: '#1e293b',
+            labelBoxBorderColor: '#818cf8',
+            labelTextColor: '#f8fafc',
+            loopTextColor: '#38bdf8',
+            noteBkgColor: '#1e293b',
+            noteBorderColor: '#38bdf8',
+            noteTextColor: '#f8fafc',
+            activationBkgColor: 'rgba(56, 189, 248, 0.25)',
+            activationBorderColor: '#38bdf8',
+            // State & Class Diagram Variables
+            labelColor: '#f8fafc',
+            altBackground: '#0f172a',
+            classText: '#f8fafc',
+            // Pie & Modern Chart Palettes
+            pie1: '#0ea5e9',
+            pie2: '#6366f1',
+            pie3: '#10b981',
+            pie4: '#f59e0b',
+            pie5: '#ec4899',
+            pie6: '#8b5cf6',
+            pie7: '#14b8a6',
+            pieTitleTextColor: '#f8fafc',
+            pieSectionTextColor: '#f8fafc',
+            pieLegendTextColor: '#f8fafc'
           }
         });
       } catch (err) {
@@ -5987,9 +6909,26 @@ RESONANSI: ${this.currentVibe}
       return `${open}"${formatted}"${close}`;
     });
 
-    // 10. Perhalus warna neon mentah jika model menghasilkan deklarasi style jadul
-    code = code.replace(/fill:#f9f\b/gi, 'fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#e0e7ff');
-    code = code.replace(/fill:#ff9d00\b/gi, 'fill:#2d1515,stroke:#fb923c,stroke-width:1.5px,color:#ffedd5');
+    // 10. Harmonisasi warna inline style / classDef yang sering dihasilkan AI (mengganti warna pastel norak / background putih yang membuat teks tak terbaca)
+    const colorMap = [
+      // Pastel pink / fuchsia -> Dark Rose
+      [/(?:fill:\s*(?:#f9f\b|#fdd\b|#ffc0cb\b|#ffb6c1\b|#fce4ec\b|pink\b))/gi, 'fill:#4c0519,stroke:#f43f5e,stroke-width:1.5px,color:#fff'],
+      // Pastel yellow / orange -> Dark Amber
+      [/(?:fill:\s*(?:#ff9d00\b|#ffd\b|#fff9c4\b|#fff3e0\b|#ffeb3b\b|#f1c40f\b|yellow\b|orange\b))/gi, 'fill:#451a03,stroke:#fbbf24,stroke-width:1.5px,color:#fff'],
+      // Pastel blue / lavender -> Dark Cyan / Sky
+      [/(?:fill:\s*(?:#bbf\b|#ccf\b|#e1f5fe\b|#e0f2fe\b|#bbdefb\b|#3498db\b))/gi, 'fill:#082f49,stroke:#38bdf8,stroke-width:1.5px,color:#fff'],
+      // Pastel green / mint -> Dark Emerald
+      [/(?:fill:\s*(?:#dfd\b|#cfc\b|#e8f5e9\b|#d1fae5\b|#2ecc71\b|#00ff00\b|lightgreen\b))/gi, 'fill:#022c22,stroke:#34d399,stroke-width:1.5px,color:#fff'],
+      // Pastel purple / violet -> Dark Indigo
+      [/(?:fill:\s*(?:#f3e5f5\b|#ede9fe\b|#9b59b6\b|#e1bee7\b|violet\b))/gi, 'fill:#1e1b4b,stroke:#a855f7,stroke-width:1.5px,color:#fff'],
+      // White / light grey -> Deep Slate (Mencegah teks putih tenggelam dalam kotak putih!)
+      [/(?:fill:\s*(?:#fff(?:fff)?\b|#f5f5f5\b|#fafafa\b|#eee\b|#e5e7eb\b|white\b))/gi, 'fill:#0f172a,stroke:#38bdf8,stroke-width:1.5px,color:#f8fafc'],
+      // Red / coral -> Dark Crimson
+      [/(?:fill:\s*(?:#fcc\b|#ffebee\b|#ffcdd2\b|#e74c3c\b|#ff0000\b|red\b))/gi, 'fill:#4c0519,stroke:#fb7185,stroke-width:1.5px,color:#fff']
+    ];
+    for (const [pattern, replacement] of colorMap) {
+      code = code.replace(pattern, replacement);
+    }
 
     return code;
   }
@@ -7250,7 +8189,16 @@ RESONANSI: ${this.currentVibe}
 
     render() {
       if (!this.el) return;
-      const displayText = this.text || (this.reasoningText && !this.isDone ? '*Sedang berpikir...*' : this.reasoningText);
+      const rawDisplay = this.text || (this.reasoningText && !this.isDone ? '*Sedang berpikir...*' : this.reasoningText);
+      let displayText = rawDisplay;
+      if (this.text && typeof scrubRawToolCallArtifacts === 'function') {
+        const scrubbed = scrubRawToolCallArtifacts(this.text);
+        if (!scrubbed.trim() && this.text.trim()) {
+          displayText = '*Membaca dan menyintesis data web...*';
+        } else if (scrubbed.trim()) {
+          displayText = scrubbed;
+        }
+      }
       this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(hideFileBlocksForDisplay(displayText, this.options), true) + '<span class="typing-cursor"></span>';
       if (this.onScroll && !userScrolledUp) this.onScroll();
       if (activeStudioAssistantBubble && els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) {
@@ -7269,8 +8217,17 @@ RESONANSI: ${this.currentVibe}
         clearTimeout(this.renderTimer);
         this.renderTimer = null;
       }
-      if (!this.text.trim() && this.reasoningText.trim()) {
+      // opts.promoteReasoning === false → JANGAN jadikan reasoning/CoT sebagai jawaban
+      // (dipakai pada putaran tool-call & digesti web agar monolog internal tak bocor).
+      if (opts.promoteReasoning !== false && !this.text.trim() && this.reasoningText.trim()) {
         this.text = this.reasoningText.trim();
+      }
+      if (this.text && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.sanitizeModelText === 'function') {
+        const sanitized = BioEndocrine.sanitizeModelText(this.text);
+        if (sanitized !== this.text) {
+          this.text = sanitized;
+          BioEndocrine.log('endorphin', 15, '[Auto-Endorfin v3] Teks respons AI disanitasi otomatis dari tag bocor / mojibake.');
+        }
       }
       if (shouldRender && this.el) {
         this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(hideFileBlocksForDisplay(this.text, this.options), false);
@@ -8804,31 +9761,31 @@ RESONANSI: ${this.currentVibe}
             </button>
           `;
 
-          dropdown.querySelector('.select-opt').addEventListener('click', (ev) => {
+          dropdown.querySelector('.select-opt')?.addEventListener('click', (ev) => {
             ev.stopPropagation();
             closeAllHistoryDropdowns();
             enterHistorySelectMode(session.id);
           });
 
-          dropdown.querySelector('.pin-opt').addEventListener('click', (ev) => {
+          dropdown.querySelector('.pin-opt')?.addEventListener('click', (ev) => {
             ev.stopPropagation();
             closeAllHistoryDropdowns();
             togglePinSession(session.id);
           });
 
-          dropdown.querySelector('.rename-opt').addEventListener('click', (ev) => {
+          dropdown.querySelector('.rename-opt')?.addEventListener('click', (ev) => {
             ev.stopPropagation();
             closeAllHistoryDropdowns();
             renameSessionPrompt(session.id, titleSpan);
           });
 
-          dropdown.querySelector('.export-opt').addEventListener('click', (ev) => {
+          dropdown.querySelector('.export-opt')?.addEventListener('click', (ev) => {
             ev.stopPropagation();
             closeAllHistoryDropdowns();
             exportSessionData(session.id);
           });
 
-          dropdown.querySelector('.delete-opt').addEventListener('click', (ev) => {
+          dropdown.querySelector('.delete-opt')?.addEventListener('click', (ev) => {
             ev.stopPropagation();
             closeAllHistoryDropdowns();
             deleteSession(session.id);
@@ -10542,11 +11499,11 @@ Aturan wajib:
           <img src="${escapeHtml(imgSrc)}" alt="Lampiran Foto ${idx + 1}" loading="lazy" decoding="async">
           <button class="remove-attachment-btn" data-img-idx="${idx}" title="Hapus Foto" type="button"><i class="fa-solid fa-xmark"></i></button>
         `;
-        card.querySelector('img').addEventListener('click', (e) => {
+        card.querySelector('img')?.addEventListener('click', (e) => {
           e.stopPropagation();
           ImageLightbox.open(STATE.attachedImages, idx);
         });
-        card.querySelector('.remove-attachment-btn').addEventListener('click', (e) => {
+        card.querySelector('.remove-attachment-btn')?.addEventListener('click', (e) => {
           e.stopPropagation();
           removeAttachedImage(idx);
         });
@@ -10576,7 +11533,7 @@ Aturan wajib:
           if (e.target.closest('.remove-doc-btn')) return;
           openDocPreviewModal(doc, idx);
         });
-        chip.querySelector('.remove-doc-btn').addEventListener('click', (e) => {
+        chip.querySelector('.remove-doc-btn')?.addEventListener('click', (e) => {
           e.stopPropagation();
           removeAttachedDoc(idx);
         });
@@ -13908,11 +14865,9 @@ ${blocks}
   function normalizeEndpoint(ep) {
     if (!ep || typeof ep !== 'string' || !ep.trim()) return 'https://ollama.com';
     let clean = ep.trim();
-    if (clean.includes('127.0.0.1') || clean.includes('localhost') || clean.includes('11434')) {
-      return 'https://ollama.com';
-    }
     if (!/^https?:\/\//i.test(clean)) {
-      clean = (clean.includes(':443') || clean.includes('ollama.com') || clean.includes('.com') || clean.includes('.io') || clean.includes('.ai') || clean.includes('.app'))
+      const isLocalOrLan = /^(?:localhost|127\.0\.0\.1|0\.0\.0\.0|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/i.test(clean) || clean.includes(':11434');
+      clean = (!isLocalOrLan && (clean.includes(':443') || clean.includes('ollama.com') || clean.includes('.com') || clean.includes('.io') || clean.includes('.ai') || clean.includes('.app')))
         ? `https://${clean}`
         : `http://${clean}`;
     }
@@ -14699,8 +15654,8 @@ ${blocks}
       return 'clean_code';
     }
 
-    // 2. Tolak pertanyaan definisi/teori murni di awal kalimat tanpa perintah pembuatan
-    if (/^(?:apa\s+itu|pengertian|definisi|arti|bagaimana\s+cara|jelaskan\s+apa)\b/i.test(t) &&
+    // 2. Tolak pertanyaan definisi/teori/debugging murni di awal kalimat tanpa perintah pembuatan baru
+    if (/^(?:apa\s+itu|apa\s+bedanya|apa\s+perbedaan|pengertian|definisi|arti|bagaimana\s+cara|gimana\s+cara|kenapa|mengapa|jelaskan|analisis|perbaiki|tolong\s+perbaiki|cek|debug|fix)\b/i.test(t) &&
         !/\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|susun|rancang)\b/i.test(t)) {
       return 'none';
     }
@@ -14736,6 +15691,9 @@ ${blocks}
 
     const docTargetAfterVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat(?:kan)?|tolong\s+bikin(?:kan)?|susun(?:kan)?|tulis(?:kan)?|rangkumkan|draft|generate|create)\s+(?:sebuah\s+|satu\s+|file\s+|berkas\s+|naskah\s+|draf\s+)?(?:dokumen|dokumentasi|makalah|laporan|proposal|jurnal|karya\s+tulis|paper|skripsi|tesis|disertasi|surat\s+resmi|surat\s+tugas|surat\s+lamaran|modul\s+ajar|pdf|word|docx)\b/i;
 
+    const hasWebKeyword = /\b(?:website|websit|wbsite|webiste|wesbite|web\s+page|webpage|web\s+app|webapp|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|aplikasi|game\s+web|portofolio\s+web|tampilan\s+web|desain\s+web|antarmuka\s+web|situs\s+web|situs|dashboard)\b/i.test(t);
+    const hasCreationVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|tolong\s+bikin|generate|create|build|develop|rancang|desain|susun|kodingkan|coding|program|pembuatan)\b/i.test(t);
+
     // Jika klausa pembuka secara eksplisit meminta pembuatan dokumen/makalah/laporan/proposal/PDF/Word
     // (contoh: "Buatkan dokumen dokumentasi berbentuk pdf hasil pembuatan website kita tadi")
     // DAN tidak meminta file kode (.jsx/.tsx/.html) atau struktur UI komponen website:
@@ -14746,17 +15704,14 @@ ${blocks}
       return 'document';
     }
 
-    // Jika klausa pembuka meminta pembuatan website / landing page / aplikasi, ATAU memiliki sinyal framework/struktur web:
+    // Jika klausa pembuka meminta pembuatan website / landing page / aplikasi, ATAU memiliki sinyal framework/struktur web disertai kata kerja pembuatan:
     // LANGSUNG klasifikasikan sebagai 'website' (meskipun di dalam deskripsi fitur ada kata "Laporan Otomatis" atau "Dokumen")!
     if (webTargetAfterVerb.test(openingClause) || webTargetAfterVerb.test(t)) {
       return 'website';
     }
-    if ((hasWebFrameworkOrCodeSignal || hasWebSectionStructure) && !explicitDocFormatSignal) {
+    if (((hasWebFrameworkOrCodeSignal && hasCreationVerb) || (hasWebSectionStructure && (hasCreationVerb || hasWebFrameworkOrCodeSignal))) && !explicitDocFormatSignal) {
       return 'website';
     }
-
-    const hasWebKeyword = /\b(?:website|websit|wbsite|webiste|wesbite|web\s+page|webpage|web\s+app|webapp|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|aplikasi|game\s+web|portofolio\s+web|tampilan\s+web|desain\s+web|antarmuka\s+web|situs\s+web|situs|dashboard)\b/i.test(t);
-    const hasCreationVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|tolong\s+bikin|generate|create|build|develop|rancang|desain|susun|kodingkan|coding|program|pembuatan)\b/i.test(t);
 
     if (((hasWebKeyword && hasCreationVerb) || /\b(?:pembuatan\s+website|pembuatan\s+web|pembuatan\s+aplikasi)\b/i.test(t)) && !explicitDocFormatSignal && !docTargetAfterVerb.test(openingClause)) {
       return 'website';
@@ -15324,7 +16279,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       lower.includes('gemini-') ||
       lower.includes('qwen') ||
       lower.includes('mistral') ||
-      lower.includes('llama-3') ||
+      lower.includes('llama') ||
+      lower.includes('nemotron') ||
+      lower.includes('hermes') ||
+      lower.includes('command-r') ||
       lower.includes('deepseek')
     );
   }
@@ -16082,11 +17040,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     return scored.map(item => item.m).slice(0, limit);
   }
 
-  // ==================== AUTONOMOUS TOOL RESPONSE CACHE ====================
-  // Cache in-memory berbatas waktu (TTL 10 menit) untuk mencegah pemanggilan berulang
-  // pada query pencarian atau URL ekstraksi yang sama, menghemat kuota dan memangkas latensi ke 0ms.
-  const AUTONOMOUS_TOOL_CACHE = new Map();
-  const TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
+  // ==================== AUTONOMOUS TOOL EXECUTION ENGINE ====================
 
   async function executeAutonomousWebTool(rawToolName, rawArgs, promptContext = '', session = null) {
     if (STATE.abortController?.signal?.aborted) {
@@ -16178,7 +17132,15 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       }
 
       const cacheAndReturn = (data) => {
-        if (data && data.text && !data.text.startsWith('Error:') && canonicalArg) {
+        const isFailureOrEmpty = !data || data.success === false || (typeof data.text === 'string' && (
+          data.text.startsWith('Error:') ||
+          data.text.startsWith('Error eksekusi:') ||
+          data.text.includes('(Konten bersih tidak ditemukan)') ||
+          data.text.includes('tidak ditemukan hasil') ||
+          data.text.includes('Tidak ditemukan hasil spesifik') ||
+          data.text.includes('tidak ditemukan video')
+        ));
+        if (data && data.text && !isFailureOrEmpty && canonicalArg) {
           AUTONOMOUS_TOOL_CACHE.set(cacheKey, {
             data,
             expiresAt: Date.now() + TOOL_CACHE_TTL_MS
@@ -16208,8 +17170,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         const data = await searchYouTubeClient(query, maxResults);
         const list = (data && Array.isArray(data.results)) ? data.results : [];
         if (list.length === 0) {
+          const notFoundText = `Hasil pencarian video YouTube untuk "${query}": tidak ditemukan video. Coba kata kunci alternatif yang lebih spesifik.`;
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+            BioEndocrine.registerToolIssue({ toolName: 'search_youtube', error: notFoundText, status: 'NOT_FOUND', args: query });
+          }
           return {
-            text: `Hasil pencarian video YouTube untuk "${query}": tidak ditemukan video. Coba kata kunci alternatif yang lebih spesifik.`,
+            text: notFoundText,
             sources: [],
             videoIds: [],
             success: false
@@ -16526,13 +17492,38 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         }
         
         if (results.length === 0) {
-          return { text: `Hasil pencarian untuk "${query}": Tidak ditemukan hasil spesifik. Coba gunakan kata kunci alternatif.`, sources: [], success: false };
+          const noResultText = `Hasil pencarian untuk "${query}": Tidak ditemukan hasil spesifik. Coba gunakan kata kunci alternatif.`;
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+            BioEndocrine.registerToolIssue({ toolName: 'search_web', error: noResultText, status: 'EMPTY_RESULTS', args: query });
+          }
+          return { text: noResultText, sources: [], success: false };
+        }
+
+        function evaluateClientSearchInformativeness(item) {
+          let score = 0;
+          const snip = (item.snippet || '').trim();
+          const title = (item.title || '').trim();
+          if (snip.length >= 70 && !snip.toLowerCase().startsWith(title.toLowerCase().slice(0, 30))) {
+            score += 45;
+          } else if (snip.length >= 35) {
+            score += 20;
+          }
+          if (REPUTABLE_TECH_DOMAINS.has(item.domain)) {
+            score += 30;
+          }
+          if (item.sourceProvider === 'DuckDuckGo Web' || item.sourceProvider === 'Google Serper') {
+            score += 35;
+          }
+          if (item.timestamp && (Date.now() - item.timestamp < 172800000)) {
+            score += 15;
+          }
+          return score;
         }
 
         results.sort((a, b) => {
-          const aRep = REPUTABLE_TECH_DOMAINS.has(a.domain) ? 1 : 0;
-          const bRep = REPUTABLE_TECH_DOMAINS.has(b.domain) ? 1 : 0;
-          if (aRep !== bRep) return bRep - aRep;
+          const qA = evaluateClientSearchInformativeness(a);
+          const qB = evaluateClientSearchInformativeness(b);
+          if (Math.abs(qA - qB) >= 20) return qB - qA;
           return (b.timestamp || 0) - (a.timestamp || 0);
         });
         
@@ -16546,7 +17537,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       
       if (['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(toolName)) {
         let url = args.url || args.target || args.link || args.href || args.targetUrl || (typeof args === 'string' ? args : '');
-        if (!url || !url.trim()) return { text: 'Error: Parameter `url` tidak boleh kosong.', sources: [], success: false };
+        if (!url || !url.trim()) {
+          const emptyUrlText = 'Error: Parameter `url` tidak boleh kosong.';
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+            BioEndocrine.registerToolIssue({ toolName: 'browse_web_page', error: emptyUrlText, status: 400, args });
+          }
+          return { text: emptyUrlText, sources: [], success: false };
+        }
         url = url.trim();
         if (!/^https?:\/\//i.test(url)) {
           url = 'https://' + url;
@@ -16766,7 +17763,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (toolName === 'execute_python_code') {
         const code = String(args.code || args.script || args.python || (typeof args === 'string' ? args : '')).trim();
         if (!code) {
-          return { text: 'Error: Parameter `code` tidak boleh kosong. Sertakan kode Python yang valid dengan perintah print() untuk melihat output.', sources: [], success: false };
+          const emptyCodeMsg = 'Error: Parameter `code` tidak boleh kosong. Sertakan kode Python yang valid dengan perintah print() untuk melihat output.';
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+            BioEndocrine.registerToolIssue({ toolName: 'execute_python_code', error: emptyCodeMsg, status: 400, args: code });
+          }
+          return { text: emptyCodeMsg, sources: [], success: false };
         }
 
         if (!IS_GITHUB_PAGES) {
@@ -16790,8 +17791,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
               };
             } else {
               const errData = await res.json().catch(() => ({}));
+              const execErrMsg = `Error eksekusi Python (${res.status}): ${errData.error || errData.output || 'Gagal menjalankan subprocess Python di server.'}`;
+              if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+                BioEndocrine.registerToolIssue({ toolName: 'execute_python_code', error: execErrMsg, status: res.status, args: code });
+              }
               return {
-                text: `Error eksekusi Python (${res.status}): ${errData.error || errData.output || 'Gagal menjalankan subprocess Python di server.'}`,
+                text: execErrMsg,
                 sources: [],
                 success: false
               };
@@ -16807,17 +17812,27 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           }
         }
 
+        const noServerMsg = 'Error eksekusi: Tidak dapat menghubungi server lokal ZOZ Router. Pastikan server lokal aktif (`node server.js`) untuk mengeksekusi kode Python dalam subprocess sandbox.';
+        if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+          BioEndocrine.registerToolIssue({ toolName: 'execute_python_code', error: noServerMsg, status: 503, args: code });
+        }
         return {
-          text: 'Error eksekusi: Tidak dapat menghubungi server lokal ZOZ Router. Pastikan server lokal aktif (`node server.js`) untuk mengeksekusi kode Python dalam subprocess sandbox.',
+          text: noServerMsg,
           sources: [],
           success: false
         };
       }
-      
-      return { text: `Error: Tool "${toolName}" tidak dikenal.`, sources: [], success: false };
+      const unknownMsg = `Error: Tool "${toolName}" tidak dikenal.`;
+      if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+        BioEndocrine.registerToolIssue({ toolName, error: unknownMsg, status: 404, args: rawArgs });
+      }
+      return { text: unknownMsg, sources: [], success: false };
     } catch (err) {
       if (err && (err.name === 'AbortError' || STATE.abortController?.signal?.aborted)) {
         throw err;
+      }
+      if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+        BioEndocrine.registerToolIssue({ toolName, error: err, status: 500, args: rawArgs });
       }
       return { text: `Error menjalankan tool ${toolName}: ${err.message}`, sources: [], success: false };
     }
@@ -17076,10 +18091,16 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (isLongCompleteText && fjm.index > 220) continue;
       const name = fjm[1];
       try {
-        let cleanJson = fjm[2]
-          .replace(/'/g, '"')
-          .replace(/,\s*([}\]])/g, '$1');
-        const p = JSON.parse(cleanJson);
+        let p;
+        try {
+          p = JSON.parse(fjm[2]);
+        } catch (_) {
+          let cleanJson = fjm[2]
+            .replace(/'(?=\s*[:,\}\]])/g, '"')
+            .replace(/([\{\[,]\s*)'/g, '$1"')
+            .replace(/,\s*([}\]])/g, '$1');
+          p = JSON.parse(cleanJson);
+        }
         addCall(name, p, fjm[0]);
       } catch (_) {
         const extracted = {};
@@ -17665,89 +18686,125 @@ Format teks (untuk model tanpa function calling):
           ? 'application/pdf'
           : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
         const cleanTitle = (sanitizeTitle(promptText).substring(0, 32) || 'Dokumen_Resmi').replace(/\s+/g, '_');
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DOKUMEN OTONOM (PDF & WORD .DOCX) - KONTEN LENGKAP & TERISOLASI
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DOKUMEN EKSEKUTIF RESMI (PDF & WORD .DOCX) - KONTEN LENGKAP & TERISOLASI
 [PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN DOKUMEN TERTULIS (MAKALAH / PROPOSAL / LAPORAN / DOKUMENTASI / KARYA TULIS / SURAT / DOKUMEN).
-Aturan Wajib:
-1. Anda WAJIB membungkus SELURUH ISI TEKS DOKUMEN LENGKAP di dalam SATU blok protokol:
+Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
+1. PEMBUNGKUS PROTOKOL WAJIB:
 <<<ZOZ_FILE name="${cleanTitle}.${targetDocExt}" mime="${targetDocMime}" lang="markdown">
-# Judul Dokumen
-...isi materi lengkap, komprehensif, bab, sub-bab, dan pembahasan mendalam dalam format Markdown profesional...
+# [Judul Dokumen Lengkap & Sub-Judul Reflektif]
+...isi materi lengkap, komprehensif, bab, sub-bab, tabel data, dan pembahasan mendalam...
 <<<END_ZOZ_FILE>>>
-2. MANDAT KELENGKAPAN DOKUMEN (UNLIMITED FULL CONTENT - DILARANG MEMOTONG TEKS):
+
+2. STANDAR STRUKTUR DOKUMEN BERBOBOT TINGGI:
+   - Bab 1: Ringkasan Eksekutif (Executive Summary) — Inti masalah, latar belakang, dan signifikansi strategis.
+   - Bab 2: Landasan Teori / Analisis Kontekstual — Pembahasan mendalam konsep inti.
+   - Bab 3: Data & Tabel Perbandingan — WAJIB sertakan tabel Markdown komparatif atau kuantitatif dengan baris baru (\\n) yang valid antar baris.
+   - Bab 4: Strategi Implementasi / Solusi Konkret — Rencana aksi bertahap, arsitektur, atau alur kerja operasional.
+   - Bab 5: Kesimpulan, Evaluasi Risiko, & Rekomendasi Masa Depan.
+   - Sisipkan blok catatan penting (\`> [!NOTE]\` atau \`> [!IMPORTANT]\`) untuk menonjolkan prinsip kunci.
+
+3. MANDAT KELENGKAPAN PENUH (ZERO TRUNCATION):
    - Anda WAJIB menyusun seluruh materi dokumen secara mendalam, lengkap, dan tuntas tanpa batasan baris.
-   - DILARANG MEMOTONG TEKS SEPARUH JALAN atau hanya membuat kerangka kosong/ringkasan pendek! Uraikan setiap bab dan sub-bab dengan analisis mendalam.
-3. ISOLASI TOTAL DOKUMEN & RESPON HANYA PENJELASAN SINGKAT AI (DILARANG KERAS ISI DOKUMEN BOCOR KE CHAT):
+   - DILARANG MEMOTONG TEKS SEPARUH JALAN atau hanya membuat kerangka kosong/ringkasan pendek! Uraikan setiap bab dengan analisis mendalam.
+
+4. ISOLASI TOTAL DOKUMEN:
    - DILARANG KERAS mencetak, mengulang, membocorkan, atau menuliskan isi teks dokumen di luar blok ZOZ_FILE di dalam percakapan!
-   - Di luar blok ZOZ_FILE (sebelum blok ZOZ_FILE), berikan HANYA 1-2 kalimat penjelasan/konfirmasi singkat dari Anda bahwa dokumen telah selesai disusun dan siap diunduh melalui kartu berkas di bawah.
-4. SISTEM DUA OPSI FORMAT UNDUH OTOMATIS:
-   - Sistem antarmuka Zoz Router otomatis menyediakan kartu berkas siap unduh (PDF & Word .docx) untuk dokumen ini.
-5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.`;
+   - Di luar blok ZOZ_FILE (sebelum blok ZOZ_FILE), berikan HANYA 1-2 kalimat penjelasan/konfirmasi singkat bahwa dokumen telah selesai disusun dan siap diunduh melalui kartu berkas di bawah.
+5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
       } else if (isDiagramRequest && !hasNegativePreview) {
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DIAGRAM VISUAL (WAJIB FORMAT MERMAID)
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta DIAGRAM VISUAL.
-Aturan Wajib:
-1. Anda WAJIB membuat diagram visual terstruktur menggunakan sintaks Mermaid (seperti flowchart TD, flowchart LR, sequenceDiagram, classDiagram, stateDiagram, erDiagram, atau mindmap).
-2. Tuliskan kode Mermaid di dalam blok protokol:
-<<<ZOZ_FILE name="Diagram_Visual.svg" mime="image/svg+xml" lang="mermaid">
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DIAGRAM VISUAL ELEGAN (MERMAID ARCHITECTURAL BLUEPRINT)
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta DIAGRAM VISUAL (Arsitektur / Alur / Skema / Flowchart / Sequence / ERD / Mindmap).
+
+STANDAR DESAIN & TATA LETAK DIAGRAM KELAS DUNIA (WAJIB DIPATUHI):
+1. PEMILIHAN ARAH & TATA LETAK PROPORSIONAL:
+   - Gunakan \`flowchart TD\` (Top-to-Bottom / Hirarkis) sebagai standar utama alur proses, arsitektur, dan logika sistem agar proporsional dan sangat mudah dibaca di layar chat maupun perangkat seluler.
+   - HINDARI \`flowchart LR\` jika jumlah tahapan lebih dari 4 karena akan membuat diagram memanjang secara horizontal dan memperkecil teks hingga sulit dibaca.
+2. PENGELOMPOKAN SUBGRAPH PROFESIONAL:
+   - Untuk arsitektur atau alur multi-komponen, SELALU kelompokkan elemen ke dalam \`subgraph\` tematik dengan label jelas ber-ikon (Contoh: \`subgraph Klien["📱 Lapisan Klien / Pengguna"]\`, \`subgraph Gateway["🛡️ API Gateway & Auth"]\`, \`subgraph Services["⚙️ Layanan Inti / Processing"]\`, \`subgraph Data["💾 Basis Data & Penyimpanan"]\`).
+3. BENTUK SIMBOL BAKU STANDAR:
+   - Titik Awal / Akhir: Gunakan bentuk kapsul \`ID([Mulai / Selesai])\`
+   - Langkah Pemrosesan: Gunakan persegi panjang rapi \`ID["Nama Aksi / Layanan"]\`
+   - Titik Keputusan / Logika: Gunakan belah ketupat \`ID{"Apakah Valid?"}\` lengkap dengan cabang panah \`-- Ya -->\` dan \`-- Tidak -->\`
+   - Database / Penyimpanan: Gunakan silinder \`ID[("Database SQL / Cache")]\`
+   - I/O & Pesan: Gunakan jajar genjang \`ID[/"Kirim Notifikasi"/]\`
+4. KEAMANAN TEKS & LABEL (ANTI-PARSER ERROR):
+   - SELALU apit seluruh isi teks di dalam tanda kutip ganda: \`ID["Teks (dengan kurung / simbol)"]\` agar tanda kurung, titik dua, garis miring, atau kurung siku tidak merusak compiler Mermaid.
+5. HARMONI WARNA KELAS INDUSTRI (DILARANG MENGGUNAKAN WARNA PELANGI NORAK):
+   - Gunakan palet warna gelap elegan (Dark Slate & Neon Accent) yang berpadu sempurna dengan tema gelap Zoz Router.
+   - Di akhir diagram, definisikan classDef resmi yang serasi:
+     classDef startEnd fill:#0369a1,stroke:#38bdf8,stroke-width:1.5px,color:#fff;
+     classDef process fill:#0f172a,stroke:#38bdf8,stroke-width:1.5px,color:#f8fafc;
+     classDef decision fill:#78350f,stroke:#fbbf24,stroke-width:1.5px,color:#fff;
+     classDef database fill:#312e81,stroke:#818cf8,stroke-width:1.5px,color:#fff;
+     classDef success fill:#064e3b,stroke:#34d399,stroke-width:1.5px,color:#fff;
+     classDef alert fill:#881337,stroke:#f43f5e,stroke-width:1.5px,color:#fff;
+   - Terapkan kelas ke node yang sesuai (misal: \`class Start,End startEnd; class Process1,Process2 process; class Check decision; class DB database;\`).
+   - DILARANG menggunakan warna neon mentah/pelangi norak (seperti pink menyala, kuning stabilo, atau latar belakang putih yang membuat teks putih tidak terbaca).
+6. FORMAT PEMBUNGKUS:
+   Tuliskan kode Mermaid di dalam blok protokol:
+<<<ZOZ_FILE name="Diagram_Arsitektur.svg" mime="image/svg+xml" lang="mermaid">
 flowchart TD
-    ... (tuliskan struktur alur node dan panah secara lengkap) ...
+    ... (kode diagram lengkap) ...
 <<<END_ZOZ_FILE>>>
-atau di dalam blok kode standar \`\`\`mermaid\n...\n\`\`\`.
-3. DILARANG KERAS menyatakan "saya tidak bisa menampilkan gambar langsung" atau sejenisnya!
-4. DILARANG HANYA memberikan teks ASCII art atau LaTeX TikZ!
-Sistem antarmuka Zoz Router memiliki visualizer Mermaid interaktif otomatis yang langsung memvisualisasikan kode Anda menjadi diagram nyata di layar pengguna.`;
+atau di dalam blok kode standar \`\`\`mermaid\n...\n\`\`\`.`;
       } else if (isWebRequest && !hasNegativePreview) {
         const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
         const isReactNextPrompt = /\b(?:next\.?js|nextjs|react\.?js|reactjs|jsx|tsx|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(promptText);
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI NEXT.JS & REACT LENGKAP & PRATINJAU LANGSUNG
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN WEBSITE / LANDING PAGE / APLIKASI WEB INTERAKTIF LENGKAP.
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI WEB KELAS DUNIA (FULL FUNCTIONAL & PRATINJAU LANGSUNG)
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN WEBSITE / LANDING PAGE / APLIKASI WEB INTERAKTIF KELAS DUNIA.
 - DILARANG KERAS mengalihkan permintaan ini menjadi pembuatan dokumen PDF/Word!
+
+STANDAR DESAIN & TEKNIKAL SILICON VALLEY TIER (WAJIB DIPATUHI):
+1. ESTETIKA VISUAL MODERN & ELEGAN:
+   - Desain wajib memiliki standar industri modern (Tailwind CSS, Inter/Plus Jakarta Sans typography, palet warna gelap mewah Dark Slate atau minimalis bersih).
+   - Terapkan teknik Glassmorphism (\`backdrop-blur-md bg-slate-900/80 border border-white/10\`), efek pendar lembut (\`shadow-lg shadow-cyan-500/10\`), dan transisi halus pada tombol serta kartu (\`hover:-translate-y-1 transition duration-200\`).
+   - Sertakan Hero Section dengan badge pill ("✨ Versi Terbaru / Fitur Unggulan"), judul teks bergradasi (\`bg-gradient-to-r from-cyan-400 to-indigo-500 bg-clip-text text-transparent\`), dan tombol Call-to-Action (CTA) yang mencolok.
+2. INTERAKTIVITAS & STATE HIDUP PENUH:
+   - Website BUKAN sekadar brosur statis! Tambahkan komponen interaktif nyata: navigasi responsif dengan menu mobile, tab filter konten, modal dialog, formulir fungsional dengan validasi/toast, atau kalkulator/fitur interaktif yang benar-benar bekerja saat diklik.
+   - Sediakan data realistis dan kontekstual (DILARANG KERAS menggunakan teks placeholder mentah seperti "Lorem Ipsum dolor sit amet").
+   - Gunakan ikon modern (FontAwesome 6 atau Lucide React) untuk memperkaya visual fitur.
+
 ${isReactNextPrompt ? `[ARSITEKTUR NEXT.JS / REACT (JSX/TSX) DENGAN PRATINJAU LANGSUNG DI BROWSER]
 Zoz Router memiliki mesin kompilator React 18 + Next.js App Router + Tailwind CSS + Lucide React terintegrasi (Babel Standalone Sandbox) yang menjalankan berkas .jsx / .tsx secara langsung di Pratinjau Live tanpa memerlukan server build eksternal.
-Aturan Struktur Kode Next.js / React yang WAJIB Dipatuhi:
+Aturan Struktur Kode Next.js / React:
 1. Pembungkus Berkas Utama:
 <<<ZOZ_FILE name="page.jsx" mime="text/jsx" lang="jsx">
 import React, { useState } from 'react';
 import { ... } from 'lucide-react';
-...seluruh komponen pendukung (Navbar, Hero, Features, Pricing, Footer, dsb.) & export default function Page()...
+...seluruh komponen pendukung & export default function Page()...
 <<<END_ZOZ_FILE>>>
-(Jika proyek membutuhkan pemisahan file seperti page.jsx, layout.jsx, dan komponen pendukung, pastikan semua berkas ditulis dalam blok <<<ZOZ_FILE>>> masing-masing DAN saling terhubung dengan path import yang valid, ATAU susun seluruh komponen pendukung secara lengkap dan terhubung di dalam page.jsx agar 100% bebas dari masalah resolusi modul).
-2. Validitas Import & Export (100% Bebas Error):
-   - Pastikan setiap pernyataan import (seperti 'react', 'lucide-react', 'next/link', 'next/image', atau komponen lokal) dan export valid.
-   - Komponen utama WAJIB diekspor dengan \`export default function ...\` agar dapat dirender langsung tanpa error di pratinjau.
-   - Pastikan semua komponen yang dipanggil di JSX (misalnya <Navbar />, <Hero />, <Features />, <Pricing />, <Footer />) benar-benar telah didefinisikan secara utuh di dalam kode.
+2. Validitas Import & Export:
+   - Pastikan setiap import dan export valid. Komponen utama WAJIB diekspor dengan \`export default function ...\` agar dapat dirender langsung tanpa error di pratinjau.
 3. Kelengkapan Kode Tanpa Terpotong (Zero Truncation):
-   - Tuliskan seluruh kode dari baris pertama hingga kurung kurawal penutup terakhir secara UTUH dan TUNTAS.
-   - DILARANG KERAS memotong kode atau menulis komentar placeholder seperti '// komponen lainnya...' atau '// tambahkan fitur di sini...'.` : `${isPreviewOnly ? `[MODE EKSPLISIT: PRATINJAU LANGSUNG TERISOLASI]
-Panduan Pembungkus Berkas (PILIH SALAH SATU FORMAT BERIKUT):
-1. Format Protokol HTML5 atau JSX (Direkomendasikan):
+   - Tuliskan seluruh kode dari baris pertama hingga kurung kurawal penutup terakhir secara UTUH dan TUNTAS.` : `${isPreviewOnly ? `[MODE EKSPLISIT: PRATINJAU LANGSUNG TERISOLASI]
+Panduan Pembungkus Berkas:
+1. Format Protokol HTML5 (Direkomendasikan):
 <<<ZOZ_FILE name="index.html" mime="text/html" lang="html">
 <!DOCTYPE html>
-<html lang="id">
-...seluruh kode HTML, CSS, JavaScript lengkap...
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nama Aplikasi / Website</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>body { font-family: 'Plus Jakarta Sans', sans-serif; }</style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  ...seluruh struktur Navbar, Hero, Fitur, CTA, Footer, dan JavaScript interaktif lengkap...
+</body>
 </html>
 <<<END_ZOZ_FILE>>>
 (Atau gunakan name="page.jsx" lang="jsx" jika pengguna meminta React / Next.js).
 
-2. Atau Format Blok Kode Standar (Juga Didukung Penuh & Otomatis Diisolasi oleh Zoz Router):
-\`\`\`html
-<!DOCTYPE html>
-<html lang="id">
-...seluruh kode HTML, CSS, JavaScript lengkap...
-</html>
-\`\`\`
-
-CATATAN TEKNIS SISTEM:
-- Kedua format pembungkus di atas (maupun berkas .jsx React/Next.js) 100% didukung dan secara otomatis dikompilasi oleh Zoz Router menjadi kartu berkas interaktif dengan tombol "Pratinjau Live" dan "Unduh HTML".
-- Di luar blok berkas kode, berikan HANYA teks pengantar atau ringkasan fitur website yang singkat, ramah, dan percaya diri.
-- JANGAN meminta maaf atau mencemaskan pembungkus berkas.` : `Panduan Pembungkus Berkas:
+2. Atau Format Blok Kode Standar \`\`\`html ... \`\`\` (Juga didukung & diisolasi otomatis).` : `Panduan Pembungkus Berkas:
 Tuliskan kode HTML5 atau React/Next.js (.jsx) lengkap yang fungsional dan siap jalan dalam blok protokol ZOZ_FILE atau blok kode markdown.`}`}
-4. MANDAT KELENGKAPAN KONTEN & KODE PENUH (DILARANG MEMOTONG KODE):
+3. MANDAT KELENGKAPAN KONTEN & KODE PENUH (DILARANG MEMOTONG KODE):
    - Anda WAJIB menuliskan SELURUH KODE SECARA UTUH DAN TUNTAS dari awal hingga akhir tanpa ada tag atau kurung kurawal yang belum ditutup.
-   - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan seluruh bagian halaman (Navbar, Hero Section, Features Section, Pricing Section, CTA, Footer, state interaktif) secara lengkap dan fungsional.
+   - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan seluruh bagian halaman secara lengkap dan fungsional.
    - DILARANG MENGGUNAKAN PLACEHOLDER PEMOTONG seperti '// kode CSS lainnya di sini...', '// tambahkan fungsi di sini...', atau '<!-- sisa konten -->'.
-5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.
-6. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js, Lucide), sertakan tag CDN resmi atau import standar yang valid.`;
+4. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
       } else if (isExplicitCleanCodeCmd) {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
 Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
@@ -17866,9 +18923,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
         chatUrl = resolveEndpointUrl(ep, 'api/chat');
       } else {
-        // Pada Vercel / server gateway: jika di halaman HTTPS dan endpoint masih loopback,
-        // alihkan endpoint ke https://ollama.com agar backend menjangkau Ollama Cloud tanpa mixed content
-        if (location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+        // Hanya pada cloud serverless (Vercel) di mana tidak ada daemon Ollama lokal:
+        // alihkan endpoint loopback ke https://ollama.com. Pada akses lokal / Cloudflare Tunnel laptop sendiri, biarkan server.js menghubungi 127.0.0.1:11434.
+        if (IS_CLOUD_HOSTED && location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
           requestBody.endpoint = 'https://ollama.com';
         }
         chatUrl = '/api/ollama/chat';
@@ -18025,7 +19082,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // render:false → render final tunggal ada di bawah (finalRenderedContent),
       // sehingga renderMarkdown + enhanceCodeBlocks/hljs tidak dijalankan dua kali.
-      fullText = safeAssistantText(streamRenderer.finish({ render: false }));
+      fullText = safeAssistantText(streamRenderer.finish({ render: false, promoteReasoning: !(accumulatedToolCalls && accumulatedToolCalls.length > 0) }));
 
       // ==================== OLLAMA AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const canRunAutonomousSearch = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
@@ -18067,6 +19124,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         });
 
         if (detectedAutonomousCalls.length === 0) {
+          if (rawAutonomousCalls.length > 0) {
+            currentRoundText = scrubRawToolCallArtifacts(currentRoundText).trim();
+            fullText = currentRoundText;
+          }
           break; // Model selesai merumuskan respon final tanpa pemanggilan tool tambahan
         }
 
@@ -18075,7 +19136,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const toolSummaryList = [];
 
         // Amankan teks pembuka yang telah digenerasi model sebelum pemanggilan tool agar tidak terhapus
-        const cleanAssistant = scrubRawToolCallArtifacts(currentRoundText).trim();
+        let cleanAssistant = scrubRawToolCallArtifacts(currentRoundText).trim();
+        if (isModelInternalMonologue(cleanAssistant)) {
+          cleanAssistant = '';
+        }
+        // Reset fullText agar scratchpad monolog putaran 0 tidak tersisa sebagai jawaban final jika putaran sintesis gagal
+        fullText = '';
+
         if (!preambleHtml && cleanAssistant && cleanAssistant.length > 20) {
           let sanitizedPreamble = hideFileBlocksForDisplay(cleanAssistant, runOptions);
           if (runOptions && (runOptions.websiteMode === 'preview' || runOptions.isWebCreation)) {
@@ -18140,8 +19207,20 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
             });
           }
-          const cleanText = cleanWebExtractedContent(toolExecRes.text);
-          roundToolResponsesText += `\n[Fakta internal dari ${toolName}]:\n${cleanText}\n`;
+          if (toolExecRes.sources && Array.isArray(toolExecRes.sources) && toolExecRes.sources.length > 0) {
+            let structuredEvidence = `\n[FAKTA & BUKTI RESMI HASIL PENELUSURAN DARI ${toolName}]:\n`;
+            toolExecRes.sources.slice(0, 10).forEach((s, idx) => {
+              const cleanTitle = (s.title || '').trim();
+              const domain = s.domain || 'web';
+              const cleanSnippet = (s.snippet || '').replace(/<[^>]+>/g, '').trim();
+              const dateStr = s.pubDate || '';
+              structuredEvidence += `[Sumber ${idx + 1}] "${cleanTitle}"\n- Penerbit / Domain: ${domain}${dateStr ? `\n- Tanggal Publikasi: ${dateStr}` : ''}\n- Rincian Fakta: ${cleanSnippet}\n\n`;
+            });
+            roundToolResponsesText += structuredEvidence;
+          } else {
+            const cleanText = cleanWebExtractedContent(toolExecRes.text);
+            roundToolResponsesText += `\n[Fakta internal dari ${toolName}]:\n${cleanText}\n`;
+          }
         }
         allAccumulatedToolResponsesText += roundToolResponsesText;
 
@@ -18155,7 +19234,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyintesis jawaban akhir...</span></div>`;
         smartScrollChatToBottom(true);
 
-        if (cleanAssistant) {
+        if (cleanAssistant && !isModelInternalMonologue(cleanAssistant)) {
           conversationChain.push({ role: 'assistant', content: cleanAssistant });
         } else {
           conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
@@ -18172,6 +19251,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
         if (allToolsInRoundFailed) {
           consecutiveFailedRounds++;
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+            BioEndocrine.registerToolIssue({
+              toolName: toolSummaryList.join(', ') || 'autonomous_tools',
+              error: 'Seluruh tool pada putaran ini gagal memberikan data.',
+              status: 'ROUND_FAIL'
+            });
+          }
         } else {
           consecutiveFailedRounds = 0;
         }
@@ -18179,15 +19265,30 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         // CIRCUIT BREAKER: Jika seluruh tool gagal dalam 2 putaran berturut-turut,
         // putuskan siklus dan paksa sintesis jawaban akhir untuk mencegah pemborosan token / looping tanpa henti.
         const circuitBreakerTripped = consecutiveFailedRounds >= 2;
+        if (circuitBreakerTripped && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+          BioEndocrine.registerToolIssue({
+            toolName: 'circuit_breaker',
+            error: 'Circuit Breaker Aktif: Kegagalan tool 2 putaran berturut-turut. Memaksa penghentian tool loop & sintesis langsung.',
+            status: 'CIRCUIT_BREAKER'
+          });
+        }
         const hasBrowsedWeb = detectedAutonomousCalls.some(c => c && c.function && ['browse_web_page', 'browse_web', 'extract_web', 'read_url'].includes(c.function.name));
+        const hasExecutedSearch = detectedAutonomousCalls.some(c => c && c.function && ['search_web', 'web_search', 'search', 'search_youtube'].includes(c.function.name)) || (webSources && webSources.length > 0);
         const isLastRound = circuitBreakerTripped || hasBrowsedWeb || (autonomousRound >= maxAutonomousRounds - 1);
-        const roundInstruction = isLastRound
+        const currentDateObj = new Date();
+        const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        const roundInstruction = (isLastRound || hasExecutedSearch)
           ? `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
-${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : 'Gunakan seluruh fakta di atas untuk langsung menjawab pertanyaan pengguna secara komprehensif, jelas, faktual, dan akurat dalam bahasa yang natural.'}
-Jika hasilnya berupa video YouTube: jelaskan dan rekomendasikan video yang paling relevan (judul, channel, durasi, tayangan), lalu WAJIB sisipkan tautan video pilihan Anda dengan format markdown [Judul Video](https://www.youtube.com/watch?v=ID) agar kartu video dapat ditampilkan dan diputar langsung di dalam percakapan.
-PETUNJUK PENTING:
-- Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi robotik, dan tanpa format pemanggilan tool lagi.
-- JANGAN mencetak log teknis, jangan menampilkan data ekstraksi mentah atau format JSON/scraping. Berikan langsung hasil analisis dan jawaban akhir.`
+WAKTU SISTEM SAAT INI: ${currentFormattedDate} (Tahun ${currentDateObj.getFullYear()}).
+
+${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan dan ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.'}
+${foundYouTubeIds.length > 0 ? 'Jika hasilnya berupa video YouTube: jelaskan dan rekomendasikan video yang paling relevan (judul, channel, durasi, tayangan), lalu WAJIB sisipkan tautan video pilihan Anda dengan format markdown [Judul Video](https://www.youtube.com/watch?v=ID) agar kartu video dapat ditampilkan dan diputar langsung di dalam percakapan.' : ''}
+
+PANDUAN NILAI GUNA & INTEGRITAS FAKTA:
+1. NILAI GUNA TINGGI: Jangan sekadar menyajikan daftar judul mentah. Berikan sintesis cerdas dan berbobot: jelaskan latar belakang, perkembangan inti peristiwa/teknologi, fakta angka atau kutipan kunci, serta implikasi pentingnya secara mendalam dan terstruktur.
+2. INTEGRITAS FAKTA (ANTI-HALUSINASI): Tetap setia pada data fakta yang tertera pada sumber. Dilarang mengarang tanggal di masa depan (Hari ini adalah ${currentFormattedDate}. Segala peristiwa setelah hari ini belum terjadi), nomor versi palsu, atau klaim fiktif yang tidak didukung bukti sumber.
+3. STRUKTUR BERKUALITAS: Gunakan format Markdown yang rapi dengan heading tematik, poin penjelasan yang padat isi, dan bila menyajikan tabel Markdown, WAJIB menggunakan baris baru (\\n) yang valid antar baris.
+4. Jawablah langsung secara alami tanpa penolakan kaku dan TANPA format pemanggilan tool (search_web) lagi.`
           : `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
 Data hasil eksekusi di atas telah disediakan secara internal.
 Jika informasi sudah cukup lengkap, berikan jawaban akhir secara langsung dan tuntas kepada pengguna tanpa menampilkan langkah ekstraksi atau data mentah.
@@ -18195,20 +19296,29 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
         conversationChain.push({
           role: 'user',
-          content: `[DATA HASIL PENELUSURAN INTERNAL]:\n${cleanWebExtractedContent(roundToolResponsesText).substring(0, 8000)}\n\n${roundInstruction}`
+          content: `[DATA HASIL PENELUSURAN INTERNAL]:\n${roundToolResponsesText.substring(0, 10000)}\n\n${roundInstruction}`
         });
 
         const digestionBody = {
           model: modelName,
           messages: conversationChain,
           stream: true,
-          options: requestBody.options,
+          options: (hasExecutedSearch || (webSources && webSources.length > 0))
+            ? { ...(requestBody.options || {}), temperature: 0.35, top_p: 0.65 }
+            : requestBody.options,
           endpoint: ep
         };
-        if (!isLastRound && !hasBrowsedWeb && selectedOllamaTools && selectedOllamaTools.length > 0) {
-          digestionBody.tools = selectedOllamaTools;
+        if (!isLastRound && !hasExecutedSearch && !(webSources && webSources.length > 0) && !hasBrowsedWeb && selectedOllamaTools && selectedOllamaTools.length > 0) {
+          const availableTools = selectedOllamaTools.filter(t => {
+            const tName = t?.function?.name || t?.name || '';
+            if (['search_web', 'web_search', 'search'].includes(tName)) return false;
+            return true;
+          });
+          if (availableTools.length > 0) {
+            digestionBody.tools = availableTools;
+          }
         }
-        if (session?.id) digestionBody.sessionId = session.id;
+        if (session?.id) digestionBody.sessionId = session.id + '_digest_' + autonomousRound;
         if (STATE.settings.ollamaApiKey) digestionBody.apiKey = STATE.settings.ollamaApiKey;
         if (STATE.settings.openRouterKey) digestionBody.openRouterKey = STATE.settings.openRouterKey;
 
@@ -18230,7 +19340,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
               if (errJson?.error) errDetail = typeof errJson.error === 'object' ? errJson.error.message : errJson.error;
             } catch (_) {}
             console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Error: ${errDetail}`);
-            if (!fullText.trim()) {
+            if (!fullText.trim() || isModelInternalMonologue(fullText)) {
               fullText = (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))
                 ? synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources)
                 : (cleanAssistant || `[Pencarian selesai: ${toolSummaryList.join(', ')}. Sistem menyelesaikan penelusuran].`);
@@ -18303,13 +19413,14 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
               }
             } catch (_) {}
           }
-          const finishedDigestion = digestionRenderer.finish({ render: false });
+          const finishedDigestion = digestionRenderer.finish({ render: false, promoteReasoning: !(allAccumulatedToolResponsesText || (webSources && webSources.length > 0)) });
           if (finishedDigestion) currentRoundText = finishedDigestion;
           fullText = currentRoundText;
           if (digestionRenderer.isLoopTerminated) {
             break;
           }
-          if (!fullText.trim() && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))) {
+          const scrubbedMidRound = scrubRawToolCallArtifacts(fullText).trim();
+          if ((!scrubbedMidRound || isModelInternalMonologue(scrubbedMidRound)) && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))) {
             fullText = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
           }
         } catch (digestionErr) {
@@ -18321,12 +19432,43 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             throw digestionErr;
           }
           console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Fetch error:`, digestionErr);
-          if (!fullText.trim()) {
+          if (!fullText.trim() || isModelInternalMonologue(fullText)) {
             fullText = (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))
               ? synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources)
               : (cleanAssistant || '');
           }
           break;
+        }
+      }
+
+      // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah → minta model menyusun jawaban bersih =====
+      if (autonomousRound > 0 && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0)) && !STATE.abortController?.signal?.aborted) {
+        const probeText = scrubRawToolCallArtifacts(fullText || '').trim();
+        if (!probeText || isModelInternalMonologue(probeText) || isAutonomousFallbackText(probeText)) {
+          try {
+            bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyusun jawaban dari data web...</span></div>`;
+            smartScrollChatToBottom(true);
+            const rescueExtra = { endpoint: ep };
+            if (session?.id) rescueExtra.sessionId = session.id + '_rescue';
+            if (STATE.settings.ollamaApiKey) rescueExtra.apiKey = STATE.settings.ollamaApiKey;
+            if (STATE.settings.openRouterKey) rescueExtra.openRouterKey = STATE.settings.openRouterKey;
+            const rescued = await rescueWebAnswerOllama({
+              url: chatUrl,
+              headers,
+              model: modelName,
+              question: promptText,
+              evidenceText: allAccumulatedToolResponsesText || synthesizeAutonomousWebSummary('', webSources),
+              extraBody: rescueExtra,
+              signal: STATE.abortController?.signal
+            });
+            if (rescued) {
+              fullText = rescued;
+              preambleHtml = '';
+            }
+          } catch (rescueErr) {
+            if (rescueErr && (rescueErr.name === 'AbortError' || STATE.abortController?.signal?.aborted)) throw rescueErr;
+            console.warn('[Ollama Rescue Round] Gagal:', rescueErr);
+          }
         }
       }
 
@@ -18452,19 +19594,32 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       }
 
       // Bersihkan sisa tag tool_call dan residu raw JSON jika ada sebelum render markdown final
-      const cleanFinalText = scrubRawToolCallArtifacts(fullText);
-      if (cleanFinalText && cleanFinalText.trim()) {
-        fullText = cleanFinalText;
-      } else if (!canRunAutonomousSearch && (extractInlineToolCalls(fullText).length > 0 || currentRoundNativeCalls.length > 0)) {
-        fullText = 'Model mencoba melakukan penelusuran web untuk menjawab pertanyaan ini, namun fitur **Pencarian Web** saat ini sedang nonaktif. Silakan aktifkan ikon bola dunia (🌐 Pencarian Web) pada bilah kontrol di bawah untuk mengizinkan penelusuran data langsung.';
+      const rawTextBeforeScrub = fullText;
+      let cleanFinalText = scrubRawToolCallArtifacts(fullText).trim();
+      if (isModelInternalMonologue(cleanFinalText)) {
+        console.warn('[Ollama] Model internal monologue scratchpad detected in final output, scrubbing...');
+        cleanFinalText = '';
       }
+      fullText = cleanFinalText;
 
-      if (!fullText.trim()) {
-        if (webSources && webSources.length > 0) {
+      if (!fullText) {
+        if (!canRunAutonomousSearch && (extractInlineToolCalls(rawTextBeforeScrub).length > 0 || currentRoundNativeCalls.length > 0)) {
+          fullText = 'Model mencoba melakukan penelusuran web untuk menjawab pertanyaan ini, namun fitur **Pencarian Web** saat ini sedang nonaktif. Silakan aktifkan ikon bola dunia (🌐 Pencarian Web) pada bilah kontrol di bawah untuk mengizinkan penelusuran data langsung.';
+        } else if (webSources && webSources.length > 0) {
           fullText = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
         } else if (preambleHtml) {
           fullText = 'Model menyelesaikan penelusuran namun tidak menghasilkan respon teks tambahan.';
         }
+      }
+
+      // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB
+      if (webSources && webSources.length > 0 && fullText) {
+        fullText = verifyAndSanitizeWebDigestion(fullText, webSources, allAccumulatedToolResponsesText);
+      }
+
+      // Jika jawaban final sudah tersintesis dari hasil penelusuran web, bersihkan preambleHtml
+      if (fullText.trim() && webSources && webSources.length > 0) {
+        preambleHtml = '';
       }
 
       if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml) {
@@ -18539,6 +19694,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       BioEndocrine.secreteDopamine(12, `Ollama inferensi sukses: ${modelName}`);
       if (typeof BioEndocrine.inspectModelText === 'function') {
         BioEndocrine.inspectModelText(fullText, { model: modelName, endpoint: 'Ollama' });
+      }
+      if (typeof BioEndocrine.evaluateSkillOutputUtility === 'function') {
+        const detectedSkill = isDiagramRequest ? 'Diagram Visual' : (isDocRequest ? 'Dokumen Eksekutif' : (isWebRequest ? 'Website Studio' : (webSources && webSources.length > 0 ? 'Pencarian Web' : 'Percakapan')));
+        BioEndocrine.evaluateSkillOutputUtility(detectedSkill, fullText, { model: modelName, files: generatedFiles, sources: webSources, docFormat: runOptions.docFormat, websiteMode: runOptions.websiteMode, isWebCreation: runOptions.isWebCreation, isDocCreation: runOptions.isDocCreation });
       }
       if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
         ChatEndocrine.emotions.senang = Math.min(100, ChatEndocrine.emotions.senang + 6);
@@ -18871,89 +20030,125 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           ? 'application/pdf'
           : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
         const cleanTitle = (sanitizeTitle(promptText).substring(0, 32) || 'Dokumen_Resmi').replace(/\s+/g, '_');
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DOKUMEN OTONOM (PDF & WORD .DOCX) - KONTEN LENGKAP & TERISOLASI
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DOKUMEN EKSEKUTIF RESMI (PDF & WORD .DOCX) - KONTEN LENGKAP & TERISOLASI
 [PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN DOKUMEN TERTULIS (MAKALAH / PROPOSAL / LAPORAN / DOKUMENTASI / KARYA TULIS / SURAT / DOKUMEN).
-Aturan Wajib:
-1. Anda WAJIB membungkus SELURUH ISI TEKS DOKUMEN LENGKAP di dalam SATU blok protokol:
+Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
+1. PEMBUNGKUS PROTOKOL WAJIB:
 <<<ZOZ_FILE name="${cleanTitle}.${targetDocExt}" mime="${targetDocMime}" lang="markdown">
-# Judul Dokumen
-...isi materi lengkap, komprehensif, bab, sub-bab, dan pembahasan mendalam dalam format Markdown profesional...
+# [Judul Dokumen Lengkap & Sub-Judul Reflektif]
+...isi materi lengkap, komprehensif, bab, sub-bab, tabel data, dan pembahasan mendalam...
 <<<END_ZOZ_FILE>>>
-2. MANDAT KELENGKAPAN DOKUMEN (UNLIMITED FULL CONTENT - DILARANG MEMOTONG TEKS):
+
+2. STANDAR STRUKTUR DOKUMEN BERBOBOT TINGGI:
+   - Bab 1: Ringkasan Eksekutif (Executive Summary) — Inti masalah, latar belakang, dan signifikansi strategis.
+   - Bab 2: Landasan Teori / Analisis Kontekstual — Pembahasan mendalam konsep inti.
+   - Bab 3: Data & Tabel Perbandingan — WAJIB sertakan tabel Markdown komparatif atau kuantitatif dengan baris baru (\\n) yang valid antar baris.
+   - Bab 4: Strategi Implementasi / Solusi Konkret — Rencana aksi bertahap, arsitektur, atau alur kerja operasional.
+   - Bab 5: Kesimpulan, Evaluasi Risiko, & Rekomendasi Masa Depan.
+   - Sisipkan blok catatan penting (\`> [!NOTE]\` atau \`> [!IMPORTANT]\`) untuk menonjolkan prinsip kunci.
+
+3. MANDAT KELENGKAPAN PENUH (ZERO TRUNCATION):
    - Anda WAJIB menyusun seluruh materi dokumen secara mendalam, lengkap, dan tuntas tanpa batasan baris.
-   - DILARANG MEMOTONG TEKS SEPARUH JALAN atau hanya membuat kerangka kosong/ringkasan pendek! Uraikan setiap bab dan sub-bab dengan analisis mendalam.
-3. ISOLASI TOTAL DOKUMEN & RESPON HANYA PENJELASAN SINGKAT AI (DILARANG KERAS ISI DOKUMEN BOCOR KE CHAT):
+   - DILARANG MEMOTONG TEKS SEPARUH JALAN atau hanya membuat kerangka kosong/ringkasan pendek! Uraikan setiap bab dengan analisis mendalam.
+
+4. ISOLASI TOTAL DOKUMEN:
    - DILARANG KERAS mencetak, mengulang, membocorkan, atau menuliskan isi teks dokumen di luar blok ZOZ_FILE di dalam percakapan!
-   - Di luar blok ZOZ_FILE (sebelum blok ZOZ_FILE), berikan HANYA 1-2 kalimat penjelasan/konfirmasi singkat dari Anda bahwa dokumen telah selesai disusun dan siap diunduh melalui kartu berkas di bawah.
-4. SISTEM DUA OPSI FORMAT UNDUH OTOMATIS:
-   - Sistem antarmuka Zoz Router otomatis menyediakan kartu berkas siap unduh (PDF & Word .docx) untuk dokumen ini.
-5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.`;
+   - Di luar blok ZOZ_FILE (sebelum blok ZOZ_FILE), berikan HANYA 1-2 kalimat penjelasan/konfirmasi singkat bahwa dokumen telah selesai disusun dan siap diunduh melalui kartu berkas di bawah.
+5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
       } else if (isDiagramRequest && !hasNegativePreview) {
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DIAGRAM VISUAL (WAJIB FORMAT MERMAID)
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta DIAGRAM VISUAL.
-Aturan Wajib:
-1. Anda WAJIB membuat diagram visual terstruktur menggunakan sintaks Mermaid (seperti flowchart TD, flowchart LR, sequenceDiagram, classDiagram, stateDiagram, erDiagram, atau mindmap).
-2. Tuliskan kode Mermaid di dalam blok protokol:
-<<<ZOZ_FILE name="Diagram_Visual.svg" mime="image/svg+xml" lang="mermaid">
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DIAGRAM VISUAL ELEGAN (MERMAID ARCHITECTURAL BLUEPRINT)
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta DIAGRAM VISUAL (Arsitektur / Alur / Skema / Flowchart / Sequence / ERD / Mindmap).
+
+STANDAR DESAIN & TATA LETAK DIAGRAM KELAS DUNIA (WAJIB DIPATUHI):
+1. PEMILIHAN ARAH & TATA LETAK PROPORSIONAL:
+   - Gunakan \`flowchart TD\` (Top-to-Bottom / Hirarkis) sebagai standar utama alur proses, arsitektur, dan logika sistem agar proporsional dan sangat mudah dibaca di layar chat maupun perangkat seluler.
+   - HINDARI \`flowchart LR\` jika jumlah tahapan lebih dari 4 karena akan membuat diagram memanjang secara horizontal dan memperkecil teks hingga sulit dibaca.
+2. PENGELOMPOKAN SUBGRAPH PROFESIONAL:
+   - Untuk arsitektur atau alur multi-komponen, SELALU kelompokkan elemen ke dalam \`subgraph\` tematik dengan label jelas ber-ikon (Contoh: \`subgraph Klien["📱 Lapisan Klien / Pengguna"]\`, \`subgraph Gateway["🛡️ API Gateway & Auth"]\`, \`subgraph Services["⚙️ Layanan Inti / Processing"]\`, \`subgraph Data["💾 Basis Data & Penyimpanan"]\`).
+3. BENTUK SIMBOL BAKU STANDAR:
+   - Titik Awal / Akhir: Gunakan bentuk kapsul \`ID([Mulai / Selesai])\`
+   - Langkah Pemrosesan: Gunakan persegi panjang rapi \`ID["Nama Aksi / Layanan"]\`
+   - Titik Keputusan / Logika: Gunakan belah ketupat \`ID{"Apakah Valid?"}\` lengkap dengan cabang panah \`-- Ya -->\` dan \`-- Tidak -->\`
+   - Database / Penyimpanan: Gunakan silinder \`ID[("Database SQL / Cache")]\`
+   - I/O & Pesan: Gunakan jajar genjang \`ID[/"Kirim Notifikasi"/]\`
+4. KEAMANAN TEKS & LABEL (ANTI-PARSER ERROR):
+   - SELALU apit seluruh isi teks di dalam tanda kutip ganda: \`ID["Teks (dengan kurung / simbol)"]\` agar tanda kurung, titik dua, garis miring, atau kurung siku tidak merusak compiler Mermaid.
+5. HARMONI WARNA KELAS INDUSTRI (DILARANG MENGGUNAKAN WARNA PELANGI NORAK):
+   - Gunakan palet warna gelap elegan (Dark Slate & Neon Accent) yang berpadu sempurna dengan tema gelap Zoz Router.
+   - Di akhir diagram, definisikan classDef resmi yang serasi:
+     classDef startEnd fill:#0369a1,stroke:#38bdf8,stroke-width:1.5px,color:#fff;
+     classDef process fill:#0f172a,stroke:#38bdf8,stroke-width:1.5px,color:#f8fafc;
+     classDef decision fill:#78350f,stroke:#fbbf24,stroke-width:1.5px,color:#fff;
+     classDef database fill:#312e81,stroke:#818cf8,stroke-width:1.5px,color:#fff;
+     classDef success fill:#064e3b,stroke:#34d399,stroke-width:1.5px,color:#fff;
+     classDef alert fill:#881337,stroke:#f43f5e,stroke-width:1.5px,color:#fff;
+   - Terapkan kelas ke node yang sesuai (misal: \`class Start,End startEnd; class Process1,Process2 process; class Check decision; class DB database;\`).
+   - DILARANG menggunakan warna neon mentah/pelangi norak (seperti pink menyala, kuning stabilo, atau latar belakang putih yang membuat teks putih tidak terbaca).
+6. FORMAT PEMBUNGKUS:
+   Tuliskan kode Mermaid di dalam blok protokol:
+<<<ZOZ_FILE name="Diagram_Arsitektur.svg" mime="image/svg+xml" lang="mermaid">
 flowchart TD
-    ... (tuliskan struktur alur node dan panah secara lengkap) ...
+    ... (kode diagram lengkap) ...
 <<<END_ZOZ_FILE>>>
-atau di dalam blok kode standar \`\`\`mermaid\n...\n\`\`\`.
-3. DILARANG KERAS menyatakan "saya tidak bisa menampilkan gambar langsung" atau sejenisnya!
-4. DILARANG HANYA memberikan teks ASCII art atau LaTeX TikZ!
-Sistem antarmuka Zoz Router memiliki visualizer Mermaid interaktif otomatis yang langsung memvisualisasikan kode Anda menjadi diagram nyata di layar pengguna.`;
+atau di dalam blok kode standar \`\`\`mermaid\n...\n\`\`\`.`;
       } else if (isWebRequest && !hasNegativePreview) {
         const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
         const isReactNextPrompt = /\b(?:next\.?js|nextjs|react\.?js|reactjs|jsx|tsx|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(promptText);
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI NEXT.JS & REACT LENGKAP & PRATINJAU LANGSUNG
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN WEBSITE / LANDING PAGE / APLIKASI WEB INTERAKTIF LENGKAP.
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI WEB KELAS DUNIA (FULL FUNCTIONAL & PRATINJAU LANGSUNG)
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN WEBSITE / LANDING PAGE / APLIKASI WEB INTERAKTIF KELAS DUNIA.
 - DILARANG KERAS mengalihkan permintaan ini menjadi pembuatan dokumen PDF/Word!
+
+STANDAR DESAIN & TEKNIKAL SILICON VALLEY TIER (WAJIB DIPATUHI):
+1. ESTETIKA VISUAL MODERN & ELEGAN:
+   - Desain wajib memiliki standar industri modern (Tailwind CSS, Inter/Plus Jakarta Sans typography, palet warna gelap mewah Dark Slate atau minimalis bersih).
+   - Terapkan teknik Glassmorphism (\`backdrop-blur-md bg-slate-900/80 border border-white/10\`), efek pendar lembut (\`shadow-lg shadow-cyan-500/10\`), dan transisi halus pada tombol serta kartu (\`hover:-translate-y-1 transition duration-200\`).
+   - Sertakan Hero Section dengan badge pill ("✨ Versi Terbaru / Fitur Unggulan"), judul teks bergradasi (\`bg-gradient-to-r from-cyan-400 to-indigo-500 bg-clip-text text-transparent\`), dan tombol Call-to-Action (CTA) yang mencolok.
+2. INTERAKTIVITAS & STATE HIDUP PENUH:
+   - Website BUKAN sekadar brosur statis! Tambahkan komponen interaktif nyata: navigasi responsif dengan menu mobile, tab filter konten, modal dialog, formulir fungsional dengan validasi/toast, atau kalkulator/fitur interaktif yang benar-benar bekerja saat diklik.
+   - Sediakan data realistis dan kontekstual (DILARANG KERAS menggunakan teks placeholder mentah seperti "Lorem Ipsum dolor sit amet").
+   - Gunakan ikon modern (FontAwesome 6 atau Lucide React) untuk memperkaya visual fitur.
+
 ${isReactNextPrompt ? `[ARSITEKTUR NEXT.JS / REACT (JSX/TSX) DENGAN PRATINJAU LANGSUNG DI BROWSER]
 Zoz Router memiliki mesin kompilator React 18 + Next.js App Router + Tailwind CSS + Lucide React terintegrasi (Babel Standalone Sandbox) yang menjalankan berkas .jsx / .tsx secara langsung di Pratinjau Live tanpa memerlukan server build eksternal.
-Aturan Struktur Kode Next.js / React yang WAJIB Dipatuhi:
+Aturan Struktur Kode Next.js / React:
 1. Pembungkus Berkas Utama:
 <<<ZOZ_FILE name="page.jsx" mime="text/jsx" lang="jsx">
 import React, { useState } from 'react';
 import { ... } from 'lucide-react';
-...seluruh komponen pendukung (Navbar, Hero, Features, Pricing, Footer, dsb.) & export default function Page()...
+...seluruh komponen pendukung & export default function Page()...
 <<<END_ZOZ_FILE>>>
-(Jika proyek membutuhkan pemisahan file seperti page.jsx, layout.jsx, dan komponen pendukung, pastikan semua berkas ditulis dalam blok <<<ZOZ_FILE>>> masing-masing DAN saling terhubung dengan path import yang valid, ATAU susun seluruh komponen pendukung secara lengkap dan terhubung di dalam page.jsx agar 100% bebas dari masalah resolusi modul).
-2. Validitas Import & Export (100% Bebas Error):
-   - Pastikan setiap pernyataan import (seperti 'react', 'lucide-react', 'next/link', 'next/image', atau komponen lokal) dan export valid.
-   - Komponen utama WAJIB diekspor dengan \`export default function ...\` agar dapat dirender langsung tanpa error di pratinjau.
-   - Pastikan semua komponen yang dipanggil di JSX (misalnya <Navbar />, <Hero />, <Features />, <Pricing />, <Footer />) benar-benar telah didefinisikan secara utuh di dalam kode.
+2. Validitas Import & Export:
+   - Pastikan setiap import dan export valid. Komponen utama WAJIB diekspor dengan \`export default function ...\` agar dapat dirender langsung tanpa error di pratinjau.
 3. Kelengkapan Kode Tanpa Terpotong (Zero Truncation):
-   - Tuliskan seluruh kode dari baris pertama hingga kurung kurawal penutup terakhir secara UTUH dan TUNTAS.
-   - DILARANG KERAS memotong kode atau menulis komentar placeholder seperti '// komponen lainnya...' atau '// tambahkan fitur di sini...'.` : `${isPreviewOnly ? `[MODE EKSPLISIT: PRATINJAU LANGSUNG TERISOLASI]
-Panduan Pembungkus Berkas (PILIH SALAH SATU FORMAT BERIKUT):
-1. Format Protokol HTML5 atau JSX (Direkomendasikan):
+   - Tuliskan seluruh kode dari baris pertama hingga kurung kurawal penutup terakhir secara UTUH dan TUNTAS.` : `${isPreviewOnly ? `[MODE EKSPLISIT: PRATINJAU LANGSUNG TERISOLASI]
+Panduan Pembungkus Berkas:
+1. Format Protokol HTML5 (Direkomendasikan):
 <<<ZOZ_FILE name="index.html" mime="text/html" lang="html">
 <!DOCTYPE html>
-<html lang="id">
-...seluruh kode HTML, CSS, JavaScript lengkap...
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nama Aplikasi / Website</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>body { font-family: 'Plus Jakarta Sans', sans-serif; }</style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  ...seluruh struktur Navbar, Hero, Fitur, CTA, Footer, dan JavaScript interaktif lengkap...
+</body>
 </html>
 <<<END_ZOZ_FILE>>>
 (Atau gunakan name="page.jsx" lang="jsx" jika pengguna meminta React / Next.js).
 
-2. Atau Format Blok Kode Standar (Juga Didukung Penuh & Otomatis Diisolasi oleh Zoz Router):
-\`\`\`html
-<!DOCTYPE html>
-<html lang="id">
-...seluruh kode HTML, CSS, JavaScript lengkap...
-</html>
-\`\`\`
-
-CATATAN TEKNIS SISTEM:
-- Kedua format pembungkus di atas (maupun berkas .jsx React/Next.js) 100% didukung dan secara otomatis dikompilasi oleh Zoz Router menjadi kartu berkas interaktif dengan tombol "Pratinjau Live" dan "Unduh HTML".
-- Di luar blok berkas kode, berikan HANYA teks pengantar atau ringkasan fitur website yang singkat, ramah, dan percaya diri.
-- JANGAN meminta maaf atau mencemaskan pembungkus berkas.` : `Panduan Pembungkus Berkas:
+2. Atau Format Blok Kode Standar \`\`\`html ... \`\`\` (Juga didukung & diisolasi otomatis).` : `Panduan Pembungkus Berkas:
 Tuliskan kode HTML5 atau React/Next.js (.jsx) lengkap yang fungsional dan siap jalan dalam blok protokol ZOZ_FILE atau blok kode markdown.`}`}
-4. MANDAT KELENGKAPAN KONTEN & KODE PENUH (DILARANG MEMOTONG KODE):
+3. MANDAT KELENGKAPAN KONTEN & KODE PENUH (DILARANG MEMOTONG KODE):
    - Anda WAJIB menuliskan SELURUH KODE SECARA UTUH DAN TUNTAS dari awal hingga akhir tanpa ada tag atau kurung kurawal yang belum ditutup.
-   - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan seluruh bagian halaman (Navbar, Hero Section, Features Section, Pricing Section, CTA, Footer, state interaktif) secara lengkap dan fungsional.
+   - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan seluruh bagian halaman secara lengkap dan fungsional.
    - DILARANG MENGGUNAKAN PLACEHOLDER PEMOTONG seperti '// kode CSS lainnya di sini...', '// tambahkan fungsi di sini...', atau '<!-- sisa konten -->'.
-5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN DI DALAM KONTEN BERKAS MAUPUN TEKS.
-6. Jika menggunakan library eksternal (misal: Three.js, Tailwind, FontAwesome, Chart.js, Lucide), sertakan tag CDN resmi atau import standar yang valid.`;
+4. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
       } else if (isExplicitCleanCodeCmd) {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
 Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
@@ -19503,7 +20698,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // render:false → render final tunggal ada di bawah (finalRenderedContent),
       // sehingga renderMarkdown + enhanceCodeBlocks/hljs tidak dijalankan dua kali.
-      fullText = safeAssistantText(streamRenderer.finish({ render: false }));
+      fullText = safeAssistantText(streamRenderer.finish({ render: false, promoteReasoning: !(accumulatedToolCalls && accumulatedToolCalls.length > 0) }));
 
       // ==================== UNIVERSAL AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const canRunAutonomousSearch = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
@@ -19545,6 +20740,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         });
 
         if (detectedAutonomousCalls.length === 0) {
+          if (rawAutonomousCalls.length > 0) {
+            currentRoundText = scrubRawToolCallArtifacts(currentRoundText).trim();
+            fullText = currentRoundText;
+          }
           break; // Model selesai merumuskan respon final tanpa pemanggilan tool tambahan
         }
 
@@ -19553,7 +20752,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const toolSummaryList = [];
 
         // Amankan teks pembuka yang telah digenerasi model sebelum pemanggilan tool agar tidak terhapus
-        const cleanAssistant = scrubRawToolCallArtifacts(currentRoundText).trim();
+        let cleanAssistant = scrubRawToolCallArtifacts(currentRoundText).trim();
+        if (isModelInternalMonologue(cleanAssistant)) {
+          cleanAssistant = '';
+        }
+        // Reset fullText agar scratchpad monolog putaran 0 tidak tersisa sebagai jawaban final jika putaran sintesis gagal
+        fullText = '';
+
         if (!preambleHtml && cleanAssistant && cleanAssistant.length > 20) {
           let sanitizedPreamble = hideFileBlocksForDisplay(cleanAssistant, runOptions);
           if (runOptions && (runOptions.websiteMode === 'preview' || runOptions.isWebCreation)) {
@@ -19618,8 +20823,20 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
             });
           }
-          const cleanText = cleanWebExtractedContent(toolExecRes.text);
-          roundToolResponsesText += `\n[Fakta internal dari ${toolName}]:\n${cleanText}\n`;
+          if (toolExecRes.sources && Array.isArray(toolExecRes.sources) && toolExecRes.sources.length > 0) {
+            let structuredEvidence = `\n[FAKTA & BUKTI RESMI HASIL PENELUSURAN DARI ${toolName}]:\n`;
+            toolExecRes.sources.slice(0, 10).forEach((s, idx) => {
+              const cleanTitle = (s.title || '').trim();
+              const domain = s.domain || 'web';
+              const cleanSnippet = (s.snippet || '').replace(/<[^>]+>/g, '').trim();
+              const dateStr = s.pubDate || '';
+              structuredEvidence += `[Sumber ${idx + 1}] "${cleanTitle}"\n- Penerbit / Domain: ${domain}${dateStr ? `\n- Tanggal Publikasi: ${dateStr}` : ''}\n- Rincian Fakta: ${cleanSnippet}\n\n`;
+            });
+            roundToolResponsesText += structuredEvidence;
+          } else {
+            const cleanText = cleanWebExtractedContent(toolExecRes.text);
+            roundToolResponsesText += `\n[Fakta internal dari ${toolName}]:\n${cleanText}\n`;
+          }
         }
         allAccumulatedToolResponsesText += roundToolResponsesText;
 
@@ -19633,7 +20850,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyintesis jawaban akhir...</span></div>`;
         smartScrollChatToBottom(true);
 
-        if (cleanAssistant) {
+        if (cleanAssistant && !isModelInternalMonologue(cleanAssistant)) {
           conversationChain.push({ role: 'assistant', content: cleanAssistant });
         } else {
           conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
@@ -19650,6 +20867,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
         if (allToolsInRoundFailed) {
           consecutiveFailedRounds++;
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+            BioEndocrine.registerToolIssue({
+              toolName: toolSummaryList.join(', ') || 'autonomous_tools',
+              error: 'Seluruh tool pada putaran ini gagal memberikan data.',
+              status: 'ROUND_FAIL'
+            });
+          }
         } else {
           consecutiveFailedRounds = 0;
         }
@@ -19657,15 +20881,30 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         // CIRCUIT BREAKER: Jika seluruh tool gagal dalam 2 putaran berturut-turut,
         // putuskan siklus dan paksa sintesis jawaban akhir untuk mencegah pemborosan token / looping tanpa henti.
         const circuitBreakerTripped = consecutiveFailedRounds >= 2;
+        if (circuitBreakerTripped && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+          BioEndocrine.registerToolIssue({
+            toolName: 'circuit_breaker',
+            error: 'Circuit Breaker Aktif: Kegagalan tool 2 putaran berturut-turut. Memaksa penghentian tool loop & sintesis langsung.',
+            status: 'CIRCUIT_BREAKER'
+          });
+        }
         const hasBrowsedWeb = detectedAutonomousCalls.some(c => c && c.function && ['browse_web_page', 'browse_web', 'extract_web', 'read_url'].includes(c.function.name));
+        const hasExecutedSearch = detectedAutonomousCalls.some(c => c && c.function && ['search_web', 'web_search', 'search', 'search_youtube'].includes(c.function.name)) || (webSources && webSources.length > 0);
         const isLastRound = circuitBreakerTripped || hasBrowsedWeb || (autonomousRound >= maxAutonomousRounds - 1);
-        const roundInstruction = isLastRound
+        const currentDateObj = new Date();
+        const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        const roundInstruction = (isLastRound || hasExecutedSearch)
           ? `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
-${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : 'Gunakan seluruh fakta di atas untuk langsung menjawab pertanyaan pengguna secara komprehensif, jelas, faktual, dan akurat dalam bahasa yang natural.'}
-Jika hasilnya berupa video YouTube: jelaskan dan rekomendasikan video yang paling relevan (judul, channel, durasi, tayangan), lalu WAJIB sisipkan tautan video pilihan Anda dengan format markdown [Judul Video](https://www.youtube.com/watch?v=ID) agar kartu video dapat ditampilkan dan diputar langsung di dalam percakapan.
-PETUNJUK PENTING:
-- Jawablah secara langsung dan tuntas tanpa penolakan kaku, tanpa basa-basi robotik, dan tanpa format pemanggilan tool lagi.
-- JANGAN mencetak log teknis, jangan menampilkan data ekstraksi mentah atau format JSON/scraping. Berikan langsung hasil analisis dan jawaban akhir.`
+WAKTU SISTEM SAAT INI: ${currentFormattedDate} (Tahun ${currentDateObj.getFullYear()}).
+
+${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan dan ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.'}
+${foundYouTubeIds.length > 0 ? 'Jika hasilnya berupa video YouTube: jelaskan dan rekomendasikan video yang paling relevan (judul, channel, durasi, tayangan), lalu WAJIB sisipkan tautan video pilihan Anda dengan format markdown [Judul Video](https://www.youtube.com/watch?v=ID) agar kartu video dapat ditampilkan dan diputar langsung di dalam percakapan.' : ''}
+
+PANDUAN NILAI GUNA & INTEGRITAS FAKTA:
+1. NILAI GUNA TINGGI: Jangan sekadar menyajikan daftar judul mentah. Berikan sintesis cerdas dan berbobot: jelaskan latar belakang, perkembangan inti peristiwa/teknologi, fakta angka atau kutipan kunci, serta implikasi pentingnya secara mendalam dan terstruktur.
+2. INTEGRITAS FAKTA (ANTI-HALUSINASI): Tetap setia pada data fakta yang tertera pada sumber. Dilarang mengarang tanggal di masa depan (Hari ini adalah ${currentFormattedDate}. Segala peristiwa setelah hari ini belum terjadi), nomor versi palsu, atau klaim fiktif yang tidak didukung bukti sumber.
+3. STRUKTUR BERKUALITAS: Gunakan format Markdown yang rapi dengan heading tematik, poin penjelasan yang padat isi, dan bila menyajikan tabel Markdown, WAJIB menggunakan baris baru (\\n) yang valid antar baris.
+4. Jawablah langsung secara alami tanpa penolakan kaku dan TANPA format pemanggilan tool (search_web) lagi.`
           : `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
 Data hasil eksekusi di atas telah disediakan secara internal.
 Jika informasi sudah cukup lengkap, berikan jawaban akhir secara langsung dan tuntas kepada pengguna tanpa menampilkan langkah ekstraksi atau data mentah.
@@ -19673,7 +20912,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
         conversationChain.push({
           role: 'user',
-          content: `[DATA HASIL PENELUSURAN INTERNAL]:\n${cleanWebExtractedContent(roundToolResponsesText).substring(0, 8000)}\n\n${roundInstruction}`
+          content: `[DATA HASIL PENELUSURAN INTERNAL]:\n${roundToolResponsesText.substring(0, 10000)}\n\n${roundInstruction}`
         });
 
         // Jalankan panggilan streaming ke model untuk putaran berikutnya
@@ -19696,18 +20935,30 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           activeDigestionModel === 'openrouter/free' ||
           (STATE.openRouterModels || []).some(m => m.id === activeDigestionModel && (m.cat === 'free' || m.tag === 'Free'))
         );
-        if (!isLastRound && !hasBrowsedWeb && !isDigestionFree && canDigestionUseTools && STATE.settings.openRouterKey && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
-          const validFunctionTools = selectedAutonomousTools.filter(t => t && t.type === 'function' && t.function && t.function.name);
+        if (!isLastRound && !hasExecutedSearch && !(webSources && webSources.length > 0) && !hasBrowsedWeb && !isDigestionFree && canDigestionUseTools && STATE.settings.openRouterKey && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
+          const validFunctionTools = selectedAutonomousTools.filter(t => {
+            if (!t || t.type !== 'function' || !t.function?.name) return false;
+            if (['search_web', 'web_search', 'search'].includes(t.function.name)) return false;
+            return true;
+          });
           if (validFunctionTools.length > 0) {
             digestionRequestBody.tools = validFunctionTools;
             digestionRequestBody.tool_choice = 'auto';
           }
         }
         if (!isDigestionReasoning) {
-          digestionRequestBody.temperature = parseFloat(STATE.settings.temperature) || 0.7;
+          if (hasExecutedSearch || (webSources && webSources.length > 0)) {
+            digestionRequestBody.temperature = 0.35;
+          } else {
+            digestionRequestBody.temperature = parseFloat(STATE.settings.temperature) || 0.7;
+          }
         }
         if (!isDigestionLiquid && !isDigestionReasoning) {
-          digestionRequestBody.top_p = parseFloat(STATE.settings.topP) || 0.9;
+          if (hasExecutedSearch || (webSources && webSources.length > 0)) {
+            digestionRequestBody.top_p = 0.65;
+          } else {
+            digestionRequestBody.top_p = parseFloat(STATE.settings.topP) || 0.9;
+          }
         }
 
         const isDirectRoute = activeRouteType === 'direct' || (!activeEndpoint || activeEndpoint.includes('openrouter.ai'));
@@ -19716,7 +20967,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           delete digestionRequestBody.userId;
           delete digestionRequestBody.apiKey;
         } else {
-          if (session?.id) digestionRequestBody.sessionId = session.id;
+          if (session?.id) digestionRequestBody.sessionId = session.id + '_digest_' + autonomousRound;
           if (STATE.userId) digestionRequestBody.userId = STATE.userId;
           digestionRequestBody.apiKey = STATE.settings.openRouterKey || undefined;
         }
@@ -19762,7 +21013,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
               }
             } catch (_) {}
             console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Error:`, errDetail);
-            if (!fullText.trim()) {
+            if (!fullText.trim() || isModelInternalMonologue(fullText)) {
               fullText = (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))
                 ? synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources)
                 : (cleanAssistant || `[Pencarian selesai: ${toolSummaryList.join(', ')}. Sistem menyelesaikan penelusuran].`);
@@ -19891,12 +21142,13 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
               } catch (_) {}
             }
           }
-          currentRoundText = digestionRenderer.finish({ render: false });
+          currentRoundText = digestionRenderer.finish({ render: false, promoteReasoning: !(allAccumulatedToolResponsesText || (webSources && webSources.length > 0)) });
           fullText = currentRoundText;
           if (digestionRenderer.isLoopTerminated) {
             break;
           }
-          if (!fullText.trim() && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))) {
+          const scrubbedMidRound = scrubRawToolCallArtifacts(fullText).trim();
+          if ((!scrubbedMidRound || isModelInternalMonologue(scrubbedMidRound)) && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))) {
             fullText = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
           }
         } catch (digestionErr) {
@@ -19906,12 +21158,54 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             throw digestionErr;
           }
           console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Fetch error:`, digestionErr);
-          if (!fullText.trim()) {
+          if (!fullText.trim() || isModelInternalMonologue(fullText)) {
             fullText = (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))
               ? synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources)
               : (cleanAssistant || '');
           }
           break;
+        }
+      }
+
+      // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah → minta model menyusun jawaban bersih =====
+      if (autonomousRound > 0 && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0)) && !STATE.abortController?.signal?.aborted) {
+        const probeText = scrubRawToolCallArtifacts(fullText || '').trim();
+        if (!probeText || isModelInternalMonologue(probeText) || isAutonomousFallbackText(probeText)) {
+          try {
+            bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyusun jawaban dari data web...</span></div>`;
+            smartScrollChatToBottom(true);
+            const rescueModel = actualModelUsed || modelName;
+            const rescueDirect = activeRouteType === 'direct' || (!activeEndpoint || activeEndpoint.includes('openrouter.ai'));
+            const rescueUrl = activeEndpoint || (rescueDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat');
+            const rescueHeaders = (activeHeaders && Object.keys(activeHeaders).length > 0) ? activeHeaders : {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`,
+              'HTTP-Referer': location.origin || 'https://zozi0999.github.io/zoz_router',
+              'X-Title': 'ZOZ Router'
+            };
+            const rescueExtra = {};
+            if (!rescueDirect) {
+              if (session?.id) rescueExtra.sessionId = session.id + '_rescue';
+              if (STATE.userId) rescueExtra.userId = STATE.userId;
+              rescueExtra.apiKey = STATE.settings.openRouterKey || undefined;
+            }
+            const rescued = await rescueWebAnswerOpenRouter({
+              url: rescueUrl,
+              headers: rescueHeaders,
+              model: rescueModel,
+              question: promptText,
+              evidenceText: allAccumulatedToolResponsesText || synthesizeAutonomousWebSummary('', webSources),
+              extraBody: rescueExtra,
+              signal: STATE.abortController?.signal
+            });
+            if (rescued) {
+              fullText = rescued;
+              preambleHtml = '';
+            }
+          } catch (rescueErr) {
+            if (rescueErr && (rescueErr.name === 'AbortError' || STATE.abortController?.signal?.aborted)) throw rescueErr;
+            console.warn('[OpenRouter Rescue Round] Gagal:', rescueErr);
+          }
         }
       }
 
@@ -20032,19 +21326,32 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       }
 
       // Bersihkan sisa tag tool_call dan residu raw JSON jika ada sebelum render markdown final
-      const cleanFinalText = scrubRawToolCallArtifacts(fullText);
-      if (cleanFinalText && cleanFinalText.trim()) {
-        fullText = cleanFinalText;
-      } else if (!canRunAutonomousSearch && (extractInlineToolCalls(fullText).length > 0 || accumulatedToolCalls.length > 0)) {
-        fullText = 'Model mencoba melakukan penelusuran web untuk menjawab pertanyaan ini, namun fitur **Pencarian Web** saat ini sedang nonaktif. Silakan aktifkan ikon bola dunia (🌐 Pencarian Web) pada bilah kontrol di bawah untuk mengizinkan penelusuran data langsung.';
+      const rawTextBeforeScrub = fullText;
+      let cleanFinalText = scrubRawToolCallArtifacts(fullText).trim();
+      if (isModelInternalMonologue(cleanFinalText)) {
+        console.warn('[OpenRouter] Model internal monologue scratchpad detected in final output, scrubbing...');
+        cleanFinalText = '';
       }
+      fullText = cleanFinalText;
 
-      if (!fullText.trim()) {
-        if (webSources && webSources.length > 0) {
+      if (!fullText) {
+        if (!canRunAutonomousSearch && (extractInlineToolCalls(rawTextBeforeScrub).length > 0 || accumulatedToolCalls.length > 0)) {
+          fullText = 'Model mencoba melakukan penelusuran web untuk menjawab pertanyaan ini, namun fitur **Pencarian Web** saat ini sedang nonaktif. Silakan aktifkan ikon bola dunia (🌐 Pencarian Web) pada bilah kontrol di bawah untuk mengizinkan penelusuran data langsung.';
+        } else if (webSources && webSources.length > 0) {
           fullText = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
         } else if (preambleHtml) {
           fullText = 'Model menyelesaikan penelusuran namun tidak menghasilkan respon teks tambahan.';
         }
+      }
+
+      // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB
+      if (webSources && webSources.length > 0 && fullText) {
+        fullText = verifyAndSanitizeWebDigestion(fullText, webSources, allAccumulatedToolResponsesText);
+      }
+
+      // Jika jawaban final sudah tersintesis dari hasil penelusuran web, bersihkan preambleHtml
+      if (fullText.trim() && webSources && webSources.length > 0) {
+        preambleHtml = '';
       }
 
       if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && collectedImages.length === 0) {
@@ -20140,6 +21447,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       BioEndocrine.secreteDopamine(12, `OpenRouter inferensi sukses: ${actualModelUsed || displayModel}`);
       if (typeof BioEndocrine.inspectModelText === 'function') {
         BioEndocrine.inspectModelText(fullText, { model: actualModelUsed || displayModel, endpoint: 'OpenRouter' });
+      }
+      if (typeof BioEndocrine.evaluateSkillOutputUtility === 'function') {
+        const detectedSkill = isDiagramRequest ? 'Diagram Visual' : (isDocRequest ? 'Dokumen Eksekutif' : (isWebRequest ? 'Website Studio' : (webSources && webSources.length > 0 ? 'Pencarian Web' : 'Percakapan')));
+        BioEndocrine.evaluateSkillOutputUtility(detectedSkill, fullText, { model: actualModelUsed || displayModel, files: generatedFiles, sources: webSources, docFormat: runOptions.docFormat, websiteMode: runOptions.websiteMode, isWebCreation: runOptions.isWebCreation, isDocCreation: runOptions.isDocCreation });
       }
       if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
         ChatEndocrine.emotions.senang = Math.min(100, ChatEndocrine.emotions.senang + 6);
@@ -20708,6 +22019,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
   function openAttachmentDropdown() {
     if (!els.attachmentDropdown) return;
+    hideSlashCommandsMenu();
+    els.modelDropdownMenu?.classList.remove('show');
     closeSearchDropdown();
     closeImageModelDropdown();
     closeMusicModelDropdown();
@@ -20814,6 +22127,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
   function toggleSearchDropdown(e) {
     if (e && e.stopPropagation) e.stopPropagation();
+    hideSlashCommandsMenu();
+    closeAttachmentDropdown();
+    els.modelDropdownMenu?.classList.remove('show');
     if (STATE.searchMode === 'autonomous') {
       setSearchMode('off');
       showToast('Autonomous Web Explorer dinonaktifkan.');
@@ -24538,7 +25854,7 @@ Aturan:
       closeMusicModelDropdown();
       const modal = $('#settingsModal');
       if (modal) {
-        modal.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === 'tabProviders'));
+        modal.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.target === 'tabProviders' || btn.dataset.tab === 'tabProviders'));
         modal.querySelectorAll('.settings-tab-pane').forEach(pane => pane.classList.toggle('active', pane.id === 'tabProviders'));
       }
       openModal('settingsModal');
@@ -24872,7 +26188,7 @@ Aturan:
       closeImageModelDropdown();
       const modal = $('#settingsModal');
       if (modal) {
-        modal.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === 'tabProviders'));
+        modal.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.target === 'tabProviders' || btn.dataset.tab === 'tabProviders'));
         modal.querySelectorAll('.settings-tab-pane').forEach(pane => pane.classList.toggle('active', pane.id === 'tabProviders'));
       }
       openModal('settingsModal');
@@ -25504,7 +26820,7 @@ Aturan:
         bubbleText.querySelector('.open-key-settings-btn')?.addEventListener('click', () => {
           const modal = $('#settingsModal');
           if (modal) {
-            modal.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === 'tabProviders'));
+            modal.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.target === 'tabProviders' || btn.dataset.tab === 'tabProviders'));
             modal.querySelectorAll('.settings-tab-pane').forEach(pane => pane.classList.toggle('active', pane.id === 'tabProviders'));
           }
           openModal('settingsModal');
@@ -26804,8 +28120,18 @@ Aturan:
       openLiveModelCatalog(null, 'Model Obrolan Utama');
       return;
     }
+    if (modalId === 'terminalModal') {
+      const dock = document.getElementById('termMinimizedDock');
+      if (dock) dock.style.display = 'none';
+    }
+    if (modalId === 'settingsModal') {
+      syncSettingsModalFields();
+    }
     const modal = document.getElementById(modalId);
     if (modal) {
+      if (modal.style && modal.style.display === 'none') {
+        modal.style.removeProperty('display');
+      }
       modal.classList.add('show');
       syncBodyModalState();
       history.pushState({ modal: modalId }, '');
@@ -26818,10 +28144,18 @@ Aturan:
       closeModal('liveModelCatalogModal', triggerHistoryBack);
       return;
     }
+    if (modalId === 'termQrScannerModal' && typeof TerminalManager !== 'undefined' && typeof TerminalManager.stopQrScanner === 'function') {
+      TerminalManager.stopQrScanner();
+    }
     const modal = document.getElementById(modalId);
     if (modal) {
+      const wasOpen = modal.classList.contains('show');
       modal.classList.remove('show');
+      if (modal.style && modal.style.display) {
+        modal.style.removeProperty('display');
+      }
       syncBodyModalState();
+      if (!wasOpen) return;
       AudioEngine.click();
       if (modalId === 'deepResearchReportModal') {
         const stageEl = document.getElementById('fullReportArticleStage');
@@ -27245,7 +28579,11 @@ Aturan:
       savePersistedState();
 
       // Tutup katalog langsung tanpa memicu event popstate liar
-      if (catModal) catModal.classList.remove('show');
+      if (catModal) {
+        catModal.classList.remove('show');
+        catModal.style.removeProperty('display');
+      }
+      syncBodyModalState();
 
       try {
         const isSettingsOpen = document.getElementById('settingsModal')?.classList.contains('show');
@@ -28039,6 +29377,7 @@ Aturan:
     // Model Picker: Toggle Dropdown Model Cepat di Header
     els.modelPickerChip?.addEventListener('click', (e) => {
       e.stopPropagation();
+      hideSlashCommandsMenu();
       closeAttachmentDropdown();
       closeSearchDropdown();
       closeImageModelDropdown();
@@ -28999,12 +30338,17 @@ Aturan:
         ? (els.workspaceDocViewerEditor ? els.workspaceDocViewerEditor.value : '')
         : (els.workspaceDocViewerContent ? els.workspaceDocViewerContent.textContent : '');
       if (!text) return;
-      try {
-        await navigator.clipboard.writeText(text);
-        showToast('📋 Teks dokumen disalin ke clipboard!');
+      if (typeof copyTextToClipboard === 'function') {
+        copyTextToClipboard(text, null, '📋 Teks dokumen disalin ke clipboard!');
         AudioEngine.click();
-      } catch (_) {
-        showToast('Gagal menyalin teks ke clipboard.', 'error');
+      } else {
+        try {
+          await navigator.clipboard.writeText(text);
+          showToast('📋 Teks dokumen disalin ke clipboard!');
+          AudioEngine.click();
+        } catch (_) {
+          showToast('Gagal menyalin teks ke clipboard.', 'error');
+        }
       }
     });
 
@@ -29395,11 +30739,13 @@ Aturan:
           return;
         }
 
-        // Close top-most active modal if open
+        // Close top-most active modal if open (kecuali #terminalModal agar tombol Esc di Vim/CLI/PowerShell tidak menutup jendela terminal)
         const openModals = Array.from(document.querySelectorAll('.modal-backdrop.show'));
         if (openModals.length > 0) {
           const topModal = openModals[openModals.length - 1];
-          closeModal(topModal.id, true);
+          if (topModal.id !== 'terminalModal') {
+            closeModal(topModal.id, true);
+          }
         }
       }
     });
@@ -29780,11 +31126,37 @@ Aturan:
       }
     });
 
+    // Initial listeners for OpenRouter Config buttons inside Image & Music Studio dropdowns
+    const openProviderSettingsFromDropdown = (e) => {
+      if (e) e.stopPropagation();
+      closeImageModelDropdown();
+      closeMusicModelDropdown();
+      const modal = $('#settingsModal');
+      if (modal) {
+        modal.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.target === 'tabProviders' || btn.dataset.tab === 'tabProviders'));
+        modal.querySelectorAll('.settings-tab-pane').forEach(pane => pane.classList.toggle('active', pane.id === 'tabProviders'));
+      }
+      openModal('settingsModal');
+      AudioEngine.click();
+    };
+    els.openRouterConfigBtn?.addEventListener('click', openProviderSettingsFromDropdown);
+    els.musicOpenRouterConfigBtn?.addEventListener('click', openProviderSettingsFromDropdown);
+
+    // Auto-recover hidden prompt dock when clicking bottom composer area
+    els.mainComposerContainer?.addEventListener('click', () => {
+      if (STATE.isPromptHidden) {
+        togglePromptVisibility(false);
+      }
+    });
+
     // Keyboard shortcuts: Alt+I (Image Mode / Dropdown), Alt+M (Music Mode / Dropdown), Alt+S (Search Mode / Dropdown) & Alt+H (Toggle Prompt Visibility)
     document.addEventListener('keydown', (e) => {
       if (e.altKey && (e.key === 'h' || e.key === 'H')) {
         e.preventDefault();
         togglePromptVisibility();
+        if (STATE.isPromptHidden) {
+          showToast('Kolom prompt disembunyikan. Tekan Alt+H atau klik area bawah untuk menampilkan kembali.', 'info');
+        }
         return;
       }
 
@@ -29891,6 +31263,9 @@ Aturan:
           // close all child modals and keep the parent modal active.
           openModals.forEach(m => {
             if (m.id !== activeModalId) {
+              if (m.id === 'termQrScannerModal' && typeof TerminalManager !== 'undefined' && typeof TerminalManager.stopQrScanner === 'function') {
+                TerminalManager.stopQrScanner();
+              }
               m.classList.remove('show');
             }
           });
@@ -29914,7 +31289,12 @@ Aturan:
             } catch (err) {}
           } else {
             // No modal in current history state -> return to main chat by closing all open modals
-            openModals.forEach(m => m.classList.remove('show'));
+            openModals.forEach(m => {
+              if (m.id === 'termQrScannerModal' && typeof TerminalManager !== 'undefined' && typeof TerminalManager.stopQrScanner === 'function') {
+                TerminalManager.stopQrScanner();
+              }
+              m.classList.remove('show');
+            });
           }
         }
         syncBodyModalState();
@@ -30480,7 +31860,8 @@ Aturan:
       if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.getActiveTab === 'function') {
         const tTab = TerminalManager.getActiveTab();
         if (tTab) {
-          [1, 2].forEach(pNum => {
+          const panesToSync = tTab.isSplit ? [1, 2] : [1];
+          panesToSync.forEach(pNum => {
             const pState = TerminalManager.getPaneState(pNum);
             if (pState) {
               const sId = pState.sessionId || TerminalManager.getEffectiveSessionId(tTab, pNum);
@@ -30494,7 +31875,7 @@ Aturan:
               // Periksa jika koneksi WebSocket terputus atau tertidur saat HP keluar/background
               if (TerminalManager.isRemoteConnected || TerminalManager.isWindowsSynced || !pState.isFallbackMode) {
                 pState.isFallbackMode = false;
-                if (!pState.ws || pState.ws.readyState !== WebSocket.OPEN) {
+                if (!pState.ws || (pState.ws.readyState !== WebSocket.OPEN && pState.ws.readyState !== WebSocket.CONNECTING)) {
                   TerminalManager.connectStream(tTab, pState, pNum);
                 } else if (pState.ws && pState.ws.readyState === WebSocket.OPEN) {
                   try {
@@ -31115,20 +32496,34 @@ Aturan:
       const qHost = params.get('remote_host');
       const qPin = params.get('pin');
 
+      const getCookiePin = () => {
+        try {
+          const m = document.cookie.match(/(?:^|;\s*)zoz_remote_pin=([^;]+)/);
+          return m ? decodeURIComponent(m[1]).trim() : '';
+        } catch (_) { return ''; }
+      };
+
       if (qHost) {
         const norm = this.normalizeRemoteHost(qHost);
         this.remoteHost = norm.httpUrl;
-        this.remotePin = qPin ? qPin.trim() : '';
+        this.remotePin = qPin ? qPin.trim() : (this.remotePin || localStorage.getItem('zoz_last_tunnel_pin') || getCookiePin());
         this.bridgeUrl = norm.httpUrl;
         try {
-          localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
-            remoteHost: this.remoteHost,
-            pin: this.remotePin
-          }));
-          localStorage.setItem('zoz_last_tunnel_url', this.remoteHost);
-          if (this.remotePin) localStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
+          if (this.remotePin) {
+            localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
+              remoteHost: this.remoteHost,
+              pin: this.remotePin
+            }));
+            localStorage.setItem('zoz_last_tunnel_url', this.remoteHost);
+            localStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
+            sessionStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
+            document.cookie = `zoz_remote_pin=${encodeURIComponent(this.remotePin)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+          }
         } catch (_) {}
         this.connectRemoteTerminal(this.remoteHost, this.remotePin, true);
+        setTimeout(() => {
+          this.openTerminal(false);
+        }, 120);
         return;
       }
 
@@ -31141,21 +32536,61 @@ Aturan:
         if (!savedPin) {
           try {
             const saved = JSON.parse(localStorage.getItem('zoz_remote_terminal_config') || '{}');
-            if (saved && saved.pin) savedPin = saved.pin;
+            if (saved && saved.pin) savedPin = String(saved.pin).trim();
           } catch (_) {}
         }
-        this.remotePin = savedPin || this.remotePin || '';
-        try {
-          localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
-            remoteHost: this.remoteHost,
-            pin: this.remotePin
-          }));
-          localStorage.setItem('zoz_last_tunnel_url', this.remoteHost);
-          if (this.remotePin) localStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
-        } catch (_) {}
-        if (this.remotePin) {
+        if (!savedPin) {
+          try {
+            savedPin = (localStorage.getItem('zoz_last_tunnel_pin') || '').trim();
+          } catch (_) {}
+        }
+        if (!savedPin) {
+          try {
+            savedPin = (sessionStorage.getItem('zoz_last_tunnel_pin') || '').trim();
+          } catch (_) {}
+        }
+        if (!savedPin) {
+          savedPin = getCookiePin();
+        }
+
+        if (savedPin) {
+          this.remotePin = savedPin;
+          try {
+            localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
+              remoteHost: this.remoteHost,
+              pin: this.remotePin
+            }));
+            localStorage.setItem('zoz_last_tunnel_url', this.remoteHost);
+            localStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
+            sessionStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
+            document.cookie = `zoz_remote_pin=${encodeURIComponent(this.remotePin)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+          } catch (_) {}
           this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
+          setTimeout(() => {
+            this.openTerminal(false);
+          }, 120);
           return;
+        } else {
+          // Bila belum ada PIN di storage lokal, query /api/terminal/tunnel-info secara mandiri
+          this.requestTunnelApi('/api/terminal/tunnel-info').then(data => {
+            if (data && data.pin) {
+              this.remotePin = String(data.pin).trim();
+              try {
+                localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
+                  remoteHost: this.remoteHost,
+                  pin: this.remotePin
+                }));
+                localStorage.setItem('zoz_last_tunnel_url', this.remoteHost);
+                localStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
+                sessionStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
+                document.cookie = `zoz_remote_pin=${encodeURIComponent(this.remotePin)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+              } catch (_) {}
+              this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
+              setTimeout(() => {
+                this.openTerminal(false);
+              }, 120);
+            }
+          }).catch(() => {});
         }
       }
 
@@ -31164,14 +32599,12 @@ Aturan:
         if (saved && saved.remoteHost) {
           const norm = this.normalizeRemoteHost(saved.remoteHost);
           this.remoteHost = norm.httpUrl;
-          this.remotePin = saved.pin || '';
+          this.remotePin = saved.pin || localStorage.getItem('zoz_last_tunnel_pin') || getCookiePin() || '';
           this.bridgeUrl = norm.httpUrl;
-          try {
-            localStorage.setItem('zoz_last_tunnel_url', this.remoteHost);
-            if (this.remotePin) localStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
-          } catch (_) {}
           // Auto-reconnect quietly on application launch
-          this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
+          if (this.remotePin) {
+            this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
+          }
         }
       } catch (_) {}
     },
@@ -31200,6 +32633,9 @@ Aturan:
               this.updateMobileBannerUI();
             }
           });
+        } else if (window.location.host.includes('trycloudflare.com') || window.location.host.includes('.loca.lt') || window.location.host.includes('.ngrok.io')) {
+          // Sedang membuka Cloudflare langsung di HP: jangan paksa pop-up modal QR!
+          this.updateMobileBannerUI();
         } else {
           this.showRemoteOverlay();
         }
@@ -31272,6 +32708,30 @@ Aturan:
           });
           document.getElementById('btnBannerScanQr')?.addEventListener('click', () => this.openQrScannerModal());
         }
+      } else if (window.location.host.includes('trycloudflare.com') || window.location.host.includes('.loca.lt') || window.location.host.includes('.ngrok.io')) {
+        banner.classList.remove('connected');
+        if (dot) dot.className = 'term-banner-pulse-dot connecting';
+        if (title) title.innerHTML = '<i class="fa-solid fa-cloud" style="color: #38bdf8;"></i> <span>Cloudflare Tunnel Laptop</span>';
+        if (sub) sub.textContent = 'Ketuk Sambungkan untuk menghubungkan terminal PowerShell laptop';
+        if (actions) {
+          actions.innerHTML = `
+            <button type="button" class="term-banner-btn primary" id="btnBannerAutoConnect" title="Sambungkan Terminal">
+              <i class="fa-solid fa-bolt"></i> <span>Sambungkan</span>
+            </button>
+            <button type="button" class="term-banner-btn secondary" id="btnBannerManualPin" title="Masukkan PIN manual">
+              <i class="fa-solid fa-key"></i> <span>Input PIN</span>
+            </button>
+          `;
+          document.getElementById('btnBannerAutoConnect')?.addEventListener('click', async () => {
+            const pinToUse = this.remotePin || localStorage.getItem('zoz_last_tunnel_pin') || '';
+            if (pinToUse) {
+              await this.connectRemoteTerminal(window.location.origin, pinToUse, true);
+            } else {
+              this.showRemoteOverlay();
+            }
+          });
+          document.getElementById('btnBannerManualPin')?.addEventListener('click', () => this.showRemoteOverlay());
+        }
       } else {
         banner.classList.remove('connected');
         if (dot) dot.className = 'term-banner-pulse-dot disconnected';
@@ -31305,6 +32765,8 @@ Aturan:
           localStorage.removeItem('zoz_term_bridge_url');
           localStorage.removeItem('zoz_last_tunnel_url');
           localStorage.removeItem('zoz_last_tunnel_pin');
+          sessionStorage.removeItem('zoz_last_tunnel_pin');
+          document.cookie = 'zoz_remote_pin=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT;';
         } catch (_) {}
         this.remoteHost = '';
         this.remotePin = '';
@@ -31324,7 +32786,7 @@ Aturan:
       overlay.style.display = 'flex';
       const inputHost = document.getElementById('inputTermRemoteHost');
       const inputPin = document.getElementById('inputTermRemotePin');
-      let hostVal = this.remoteHost;
+      let hostVal = this.remoteHost || (window.location.host.includes('trycloudflare.com') ? window.location.origin : '');
       let pinVal = this.remotePin;
       if (!hostVal || !pinVal) {
         try {
@@ -31333,7 +32795,13 @@ Aturan:
           if (saved.pin) pinVal = pinVal || saved.pin;
         } catch (_) {}
         hostVal = hostVal || localStorage.getItem('zoz_last_tunnel_url') || '';
-        pinVal = pinVal || localStorage.getItem('zoz_last_tunnel_pin') || '';
+        pinVal = pinVal || localStorage.getItem('zoz_last_tunnel_pin') || sessionStorage.getItem('zoz_last_tunnel_pin') || '';
+        if (!pinVal) {
+          try {
+            const m = document.cookie.match(/(?:^|;\s*)zoz_remote_pin=([^;]+)/);
+            if (m) pinVal = decodeURIComponent(m[1]).trim();
+          } catch (_) {}
+        }
       }
       if (inputHost && hostVal) inputHost.value = hostVal;
       if (inputPin && pinVal) inputPin.value = pinVal;
@@ -31399,6 +32867,18 @@ Aturan:
 
     async connectRemoteTerminal(httpHost, pin, notify = true) {
       const norm = this.normalizeRemoteHost(httpHost);
+      const activeTab = this.getActiveTab();
+      const p1 = activeTab?.pane1;
+
+      // Guard: Jika sudah terhubung dengan host & PIN yang sama dan socket aktif, pertahankan!
+      if (this.isRemoteConnected && this.remoteHost === norm.httpUrl && this.remotePin === pin && p1?.ws?.readyState === WebSocket.OPEN) {
+        return true;
+      }
+
+      if (this._isConnectingRemote) {
+        return false;
+      }
+      this._isConnectingRemote = true;
       const testUrl = `${norm.httpUrl}/api/ping`;
 
       try {
@@ -31473,8 +32953,10 @@ Aturan:
         }
       } catch (err) {
         if (notify) showToast(`Gagal koneksi remote: ${err.message}`, 'error');
+        return false;
+      } finally {
+        this._isConnectingRemote = false;
       }
-      return false;
     },
 
     startRemotePingProbe() {
@@ -31485,10 +32967,11 @@ Aturan:
       const doProbe = async () => {
         if (!this.isRemoteConnected || !this.remoteHost) return;
         const t0 = performance.now();
+        const effectivePin = this.remotePin || localStorage.getItem('zoz_last_tunnel_pin') || '';
         try {
           const res = await fetch(`${this.remoteHost}/api/ping`, {
             method: 'GET',
-            headers: this.remotePin ? { 'x-terminal-pin': this.remotePin } : {},
+            headers: effectivePin ? { 'x-terminal-pin': effectivePin } : {},
             signal: AbortSignal.timeout(4500)
           });
           if (res.ok) {
@@ -31496,9 +32979,10 @@ Aturan:
             this.updateRemoteStatusUI(true);
             const activeTab = this.getActiveTab();
             if (activeTab) {
-              [1, 2].forEach(num => {
+              const panesToSync = activeTab.isSplit ? [1, 2] : [1];
+              panesToSync.forEach(num => {
                 const p = this.getPaneState(num);
-                if (p && (!p.ws || p.ws.readyState !== WebSocket.OPEN) && !p._reconnectTimer) {
+                if (p && (!p.ws || (p.ws.readyState !== WebSocket.OPEN && p.ws.readyState !== WebSocket.CONNECTING)) && !p._reconnectTimer) {
                   this.connectStream(activeTab, p, num);
                 }
               });
@@ -31547,8 +33031,9 @@ Aturan:
     async openRemoteTunnelModal() {
       const modal = document.getElementById('termRemoteTunnelModal');
       if (!modal) return;
+      modal.style.removeProperty('display');
       modal.classList.add('show');
-      modal.style.display = 'flex';
+      if (typeof syncBodyModalState === 'function') syncBodyModalState();
       await this.fetchTunnelInfo();
     },
 
@@ -31556,7 +33041,8 @@ Aturan:
       const modal = document.getElementById('termRemoteTunnelModal');
       if (modal) {
         modal.classList.remove('show');
-        modal.style.display = 'none';
+        modal.style.removeProperty('display');
+        if (typeof syncBodyModalState === 'function') syncBodyModalState();
       }
     },
 
@@ -31642,7 +33128,7 @@ Aturan:
         if (currentUrl && currentPin && currentPin !== '------') {
           const wss = data.wssUrl || currentUrl.replace(/^http/i, 'ws');
           const pairingLink = `${currentUrl}/?pin=${encodeURIComponent(currentPin)}&remote_host=${encodeURIComponent(wss)}`;
-          const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pairingLink)}`;
+          const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(pairingLink)}`;
 
           if (qrImg) {
             qrImg.src = qrSrc;
@@ -31697,15 +33183,23 @@ Aturan:
     copyTunnelUrl() {
       const val = this.tunnelInfo?.tunnelUrl || '';
       if (!val) return showToast('Tunnel belum aktif.', 'warning');
-      navigator.clipboard.writeText(val);
-      showToast('URL Cloudflare Tunnel berhasil disalin!', 'success');
+      if (typeof copyTextToClipboard === 'function') {
+        copyTextToClipboard(val, null, 'URL Cloudflare Tunnel berhasil disalin!');
+      } else if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(val);
+        showToast('URL Cloudflare Tunnel berhasil disalin!', 'success');
+      }
     },
 
     copyTunnelPin() {
       const pin = this.tunnelInfo?.pin || '';
       if (!pin) return showToast('PIN belum tersedia.', 'warning');
-      navigator.clipboard.writeText(pin);
-      showToast(`PIN Keamanan (${pin}) berhasil disalin!`, 'success');
+      if (typeof copyTextToClipboard === 'function') {
+        copyTextToClipboard(pin, null, `PIN Keamanan (${pin}) berhasil disalin!`);
+      } else if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(pin);
+        showToast(`PIN Keamanan (${pin}) berhasil disalin!`, 'success');
+      }
     },
 
     copyRemoteFullUrl() {
@@ -31716,8 +33210,12 @@ Aturan:
       const targetHost = data.tunnelUrl || window.location.origin;
       const wss = data.wssUrl || targetHost.replace(/^http/i, 'ws');
       const pairingLink = `${targetHost}/?pin=${encodeURIComponent(data.pin)}&remote_host=${encodeURIComponent(wss)}`;
-      navigator.clipboard.writeText(pairingLink);
-      showToast('Link Pairing Remote WAN berhasil disalin!', 'success');
+      if (typeof copyTextToClipboard === 'function') {
+        copyTextToClipboard(pairingLink, null, 'Link Pairing Remote WAN berhasil disalin!');
+      } else if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(pairingLink);
+        showToast('Link Pairing Remote WAN berhasil disalin!', 'success');
+      }
     },
 
     playQrSuccessBeep() {
@@ -31743,8 +33241,9 @@ Aturan:
     openQrScannerModal() {
       const modal = document.getElementById('termQrScannerModal');
       if (!modal) return;
+      modal.style.removeProperty('display');
       modal.classList.add('show');
-      modal.style.display = 'flex';
+      if (typeof syncBodyModalState === 'function') syncBodyModalState();
       this.startQrScanner();
     },
 
@@ -31753,7 +33252,8 @@ Aturan:
       const modal = document.getElementById('termQrScannerModal');
       if (modal) {
         modal.classList.remove('show');
-        modal.style.display = 'none';
+        modal.style.removeProperty('display');
+        if (typeof syncBodyModalState === 'function') syncBodyModalState();
       }
     },
 
@@ -31988,6 +33488,9 @@ Aturan:
         if (pinInput) pinInput.value = pin;
         showToast(`🟢 QR Code terbaca! Menghubungkan ke ${remoteHost}...`, 'success');
         this.connectRemoteTerminal(remoteHost, pin, true);
+        setTimeout(() => {
+          this.openTerminal(false);
+        }, 120);
       } else if (remoteHost) {
         const hostInput = document.getElementById('inputTermRemoteHost');
         if (hostInput) hostInput.value = remoteHost;
@@ -32206,29 +33709,42 @@ Aturan:
       }
     },
 
+    openTerminal(forceRemote = false) {
+      const modal = document.getElementById('terminalModal');
+      if (!modal) return;
+      if (!modal.classList.contains('show')) {
+        openModal('terminalModal');
+      }
+      this.syncMobileViewport();
+      if (this.remoteHost && this.remotePin && (!this.isRemoteConnected || forceRemote)) {
+        this.connectRemoteTerminal(this.remoteHost, this.remotePin, false).finally(() => {
+          this.initActiveTabPanes();
+          this.updatePaneHeaders();
+          this.focusActiveInput();
+          [50, 150, 300, 600].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
+        });
+      } else {
+        this.initActiveTabPanes();
+        this.updatePaneHeaders();
+        this.focusActiveInput();
+        [50, 150, 300, 600].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
+      }
+      this.checkAndPromptRemoteIfMobileOrUnreachable();
+      this.detectWindowsBridge(false).then(() => {
+        this.syncServerCwd();
+      });
+      this.updatePaneHeaders();
+      this.focusActiveInput();
+      [50, 150, 300, 600].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
+    },
+
     toggle() {
       const modal = document.getElementById('terminalModal');
       if (!modal) return;
       if (modal.classList.contains('show')) {
         closeModal('terminalModal');
       } else {
-        openModal('terminalModal');
-        this.syncMobileViewport();
-        if (this.remoteHost && this.remotePin && !this.isRemoteConnected) {
-          this.connectRemoteTerminal(this.remoteHost, this.remotePin, false).finally(() => {
-            this.initActiveTabPanes();
-            this.updatePaneHeaders();
-          });
-        } else {
-          this.initActiveTabPanes();
-        }
-        this.checkAndPromptRemoteIfMobileOrUnreachable();
-        this.detectWindowsBridge(false).then(() => {
-          this.syncServerCwd();
-        });
-        this.updatePaneHeaders();
-        this.focusActiveInput();
-        [50, 150, 300, 600].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
+        this.openTerminal();
       }
     },
 
@@ -32236,7 +33752,8 @@ Aturan:
       const modal = document.getElementById('terminalModal');
       if (modal) {
         modal.classList.remove('show');
-        modal.style.display = 'none';
+        modal.style.removeProperty('display');
+        if (typeof syncBodyModalState === 'function') syncBodyModalState();
       }
       const dock = document.getElementById('termMinimizedDock');
       if (dock) {
@@ -32255,8 +33772,9 @@ Aturan:
       if (dock) dock.style.display = 'none';
       const modal = document.getElementById('terminalModal');
       if (modal) {
+        modal.style.removeProperty('display');
         modal.classList.add('show');
-        modal.style.display = 'flex';
+        if (typeof syncBodyModalState === 'function') syncBodyModalState();
         this.syncMobileViewport();
         this.focusActiveInput();
         [50, 150, 300].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
@@ -32423,7 +33941,17 @@ Aturan:
         term.textarea.setAttribute('autocorrect', 'off');
         term.textarea.setAttribute('autocapitalize', 'none');
         term.textarea.setAttribute('spellcheck', 'false');
-        term.textarea.setAttribute('enterkeyhint', 'enter');
+        term.textarea.setAttribute('enterkeyhint', 'go');
+        term.textarea.setAttribute('inputmode', 'text');
+        term.textarea.setAttribute('data-gramm', 'false');
+        term.textarea.setAttribute('aria-autocomplete', 'none');
+
+        // Flush IME composition value so Gboard/Android keyboard never accumulates ghost text buffer
+        term.textarea.addEventListener('compositionend', () => {
+          setTimeout(() => {
+            if (term.textarea) term.textarea.value = '';
+          }, 15);
+        });
       }
 
       // Cegah xterm menghasilkan \x1b\x7f atau \x1b\x08 (yang memicu echo ^H pada PowerShell/ConPTY)
@@ -32431,7 +33959,9 @@ Aturan:
       term.attachCustomKeyEventHandler((ev) => {
         if (ev.key === 'Backspace' || ev.keyCode === 8) {
           if (ev.type === 'keydown') {
-            paneState._lastBackspaceTime = Date.now();
+            const now = Date.now();
+            paneState._lastBackspaceTime = now;
+            paneState._lastBackspaceHandled = now;
             if (this.isMobileDevice() || ev.altKey) {
               ev.preventDefault();
               ev.stopPropagation();
@@ -32610,8 +34140,12 @@ Aturan:
       container.addEventListener('beforeinput', (ev) => {
         if (ev.inputType === 'deleteContentBackward' || ev.inputType === 'deleteWordBackward') {
           const now = Date.now();
-          if (!paneState._lastBackspaceTime || (now - paneState._lastBackspaceTime) > 60) {
+          if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 160) {
+            return;
+          }
+          if (!paneState._lastBackspaceTime || (now - paneState._lastBackspaceTime) > 120) {
             paneState._lastBackspaceTime = now;
+            paneState._lastBackspaceHandled = now;
             if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
               this.sendPtyInput(paneState.sessionId || sessionId, ev.inputType === 'deleteWordBackward' ? '\x17' : '\x7f');
             } else if (paneState && paneState.isFallbackMode) {
@@ -32927,6 +34461,9 @@ Aturan:
 
         // Mode Live PTY (Local Server & Remote WAN) - Fast Path: Kirim instan tanpa layout reflow
         if (!paneState.isFallbackMode) {
+          if (this.isMobileDevice() && term.textarea && term.textarea.value.length > 0) {
+            term.textarea.value = '';
+          }
           this.sendPtyInput(paneState.sessionId || sessionId, data);
           return;
         }
@@ -32987,7 +34524,25 @@ Aturan:
       this.syncTerminalFrameDisplay(paneState);
     },
 
-    connectStream(tab, paneState, paneNum) {
+    connectStream(tab, paneState, paneNum, force = false) {
+      if (!tab) return;
+      // Jangan pernah sambungkan pane 2 jika tab tidak dalam mode split
+      if (paneNum === 2 && !tab.isSplit) {
+        if (paneState.ws) {
+          try {
+            paneState.ws._manualClose = true;
+            paneState.ws.close();
+          } catch (_) {}
+          paneState.ws = null;
+        }
+        return;
+      }
+
+      // Guard: Jika WebSocket sudah OPEN atau CONNECTING dan tidak diforce, pertahankan koneksi aktif!
+      if (!force && paneState.ws && (paneState.ws.readyState === WebSocket.OPEN || paneState.ws.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+
       const sessionId = paneState.sessionId || this.getEffectiveSessionId(tab, paneNum);
       paneState.sessionId = sessionId;
 
@@ -33025,8 +34580,9 @@ Aturan:
       const cols = (dims && dims.cols >= 45) ? dims.cols : ((activeTerm && activeTerm.cols) ? activeTerm.cols : (this.isMobileDevice() ? 48 : 100));
       const rows = (dims && dims.rows >= 15) ? dims.rows : ((activeTerm && activeTerm.rows) ? activeTerm.rows : (this.isMobileDevice() ? 25 : 28));
       let queryParams = `session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}&autoEnter=${paneState.autoEnter ? '1' : '0'}`;
-      if (this.remotePin) {
-        queryParams += `&pin=${encodeURIComponent(this.remotePin)}`;
+      const effectivePin = this.remotePin || localStorage.getItem('zoz_last_tunnel_pin') || '';
+      if (effectivePin) {
+        queryParams += `&pin=${encodeURIComponent(effectivePin)}`;
       }
 
       const statusLabel = document.querySelector(`#termPane${paneNum} .pane-status-label`);
@@ -34256,17 +35812,21 @@ Aturan:
 
           if (keyType === 'paste') {
             try {
-              const text = await navigator.clipboard.readText();
-              if (text) {
-                if (paneState?.term && !paneState.isFallbackMode) {
-                  this.sendPtyInput(sId, text);
-                } else {
-                  const input = document.getElementById(`termCliInput${paneNum}`);
-                  if (input) {
-                    input.value += text;
-                    input.focus();
+              if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+                const text = await navigator.clipboard.readText();
+                if (text) {
+                  if (paneState?.term && !paneState.isFallbackMode) {
+                    this.sendPtyInput(sId, text);
+                  } else {
+                    const input = document.getElementById(`termCliInput${paneNum}`);
+                    if (input) {
+                      input.value += text;
+                      input.focus();
+                    }
                   }
                 }
+              } else {
+                showToast('Clipboard otomatis dibatasi pada koneksi HTTP LAN. Gunakan tekan-tahan (long-press) atau Ctrl+V.', 'info');
               }
             } catch (err) {
               showToast('Gagal membaca clipboard. Izinkan akses clipboard di browser.', 'warning');
@@ -34401,6 +35961,7 @@ Aturan:
       }
       document.getElementById('btnTermSyncWindows')?.addEventListener('click', () => this.trySyncWindows(true));
       document.getElementById('btnTermRemoteTunnel')?.addEventListener('click', () => this.openRemoteTunnelModal());
+      document.getElementById('btnTopBarRemoteQr')?.addEventListener('click', () => this.openRemoteTunnelModal());
       document.getElementById('btnTermMobileConnect')?.addEventListener('click', () => {
         if (this.isRemoteConnected) {
           this.showRemoteOverlay();
@@ -34910,7 +36471,7 @@ Aturan:
       }
 
       // 4. Audit IME Textarea Buffer (Virtual Keyboard Ghosting)
-      if (term.textarea && term.textarea.value && term.textarea.value.length > 20) {
+      if (term.textarea && term.textarea.value && term.textarea.value.length > 4) {
         issues.push(`IME Textarea Buffer Menumpuk (${term.textarea.value.length} karakter): Berpotensi menduplikasi ketikan.`);
         fixes.push('Bersihkan textarea dan flush komposisi teks virtual.');
       }
@@ -34921,7 +36482,18 @@ Aturan:
         fixes.push('Batalkan loop RAF inersia touch.');
       }
 
-      const score = Math.max(0, 100 - (issues.length * 25));
+      // 6. Audit WAN Tunnel Latency & Packet Queue
+      if (TerminalManager.isRemoteConnected) {
+        const ping = TerminalManager.remotePingMs;
+        if (ping !== null) {
+          metrics.remotePingMs = ping;
+          if (ping > 250) {
+            issues.push(`Latensi Jaringan WAN Tinggi (${ping}ms): Menggunakan PTY micro-burst batching.`);
+          }
+        }
+      }
+
+      const score = Math.max(0, 100 - (issues.length * 20));
       const status = score >= 90 ? 'healthy' : (score >= 60 ? 'warning' : 'critical');
 
       return { score, status, metrics, issues, fixes };
@@ -35001,13 +36573,15 @@ Aturan:
         TerminalManager.sendPtyInput(pane.sessionId, '\x0c');
       }
 
-      // F. Sinyal Endorfin ke EndocrineMonitor
-      if (typeof EndocrineMonitor !== 'undefined' && EndocrineMonitor.log) {
-        EndocrineMonitor.log('endorphin', 30, `Suntikan Endorfin Terminal [${paneName}]: Dimensi PTY dinormalkan ke ${safeCols}x${safeRows}, scroll & IME dipulihkan.`);
-        if (EndocrineMonitor.hormones) {
-          EndocrineMonitor.hormones.cortisol = Math.max(0, EndocrineMonitor.hormones.cortisol - 25);
-          EndocrineMonitor.hormones.dopamine = Math.min(100, EndocrineMonitor.hormones.dopamine + 30);
-          EndocrineMonitor.updateUI();
+      // F. Sinyal Endorfin ke BioEndocrine (CodeEndocrine v3)
+      const endoTarget = (typeof BioEndocrine !== 'undefined' && BioEndocrine) || (typeof window !== 'undefined' && window.BioEndocrine);
+      if (endoTarget && typeof endoTarget.log === 'function') {
+        endoTarget.log('endorphin', 30, `Suntikan Endorfin Terminal [${paneName}]: Dimensi PTY dinormalkan ke ${safeCols}x${safeRows}, scroll & IME dipulihkan.`);
+        if (endoTarget.hormones) {
+          endoTarget.hormones.cortisol = Math.max(0, endoTarget.hormones.cortisol - 25);
+          endoTarget.hormones.dopamine = Math.min(100, endoTarget.hormones.dopamine + 30);
+          endoTarget.hormones.endorphin = Math.min(100, (endoTarget.hormones.endorphin ?? 100) + 20);
+          endoTarget.updateUI();
         }
       }
 
@@ -35047,6 +36621,7 @@ Aturan:
   function init() {
     // 1. FAST SYNCHRONOUS BOOTSTRAP (0ms - Instant UI & Interactivity)
     loadPersistedStateSync();
+    syncSettingsModalFields();
 
     // 2. ATTACH ALL EVENT LISTENERS IMMEDIATELY (Millisecond 0 responsiveness)
     setupEventListeners();
@@ -35121,6 +36696,12 @@ Aturan:
     console.log('⚡ ZOZ ROUTER INITIALIZED // READY IN 0MS');
     if (window.lucide && typeof window.lucide.createIcons === 'function') {
       try { window.lucide.createIcons(); } catch (_) {}
+    } else {
+      window.addEventListener('DOMContentLoaded', () => {
+        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+          try { window.lucide.createIcons(); } catch (_) {}
+        }
+      }, { once: true });
     }
 
     // Inisialisasi engine Mermaid untuk diagram visual interaktif

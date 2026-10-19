@@ -4005,7 +4005,7 @@ body.modal-open {
 }
 
 .modal-backdrop.show {
-  display: flex;
+  display: flex !important;
   animation: fadeIn 0.2s ease;
 }
 
@@ -11058,9 +11058,12 @@ body.page-paused *::after {
 
 .badge-model { background: rgba(255, 82, 0, 0.2); color: var(--neon-amber); }
 .badge-text { background: rgba(168, 85, 247, 0.2); color: #C084FC; }
+.badge-tool { background: rgba(0, 242, 254, 0.2); color: #00F2FE; }
+.badge-hallucination { background: rgba(244, 63, 94, 0.2); color: #FB7185; }
 .badge-viewport { background: rgba(59, 130, 246, 0.2); color: #60A5FA; }
 .badge-button { background: rgba(244, 63, 94, 0.2); color: #FB7185; }
 .badge-connectome { background: rgba(20, 184, 166, 0.2); color: #2DD4BF; }
+.badge-gateway { background: rgba(16, 185, 129, 0.2); color: #34D399; }
 
 .endocrine-issue-time {
   font-size: 0.68rem;
@@ -12259,11 +12262,19 @@ body.page-paused *::after {
   letter-spacing: 0.02em;
 }
 
-/* Kotak Node: Sudut tumpul halus, drop shadow lembut, border tegas */
+/* Kotak & Bentuk Node: Sudut tumpul halus, drop shadow lembut, border tegas */
 .mermaid-svg-stage svg .node rect,
 .mermaid-svg-stage svg .node polygon,
+.mermaid-svg-stage svg .node circle,
+.mermaid-svg-stage svg .node ellipse,
+.mermaid-svg-stage svg .node path,
+.mermaid-svg-stage svg .actor,
+.mermaid-svg-stage svg .note rect,
 .mermaid-sheet svg .node rect,
-.mermaid-sheet svg .node polygon {
+.mermaid-sheet svg .node polygon,
+.mermaid-sheet svg .node circle,
+.mermaid-sheet svg .node ellipse,
+.mermaid-sheet svg .node path {
   rx: 8px !important;
   ry: 8px !important;
   stroke-width: 1.5px !important;
@@ -12272,19 +12283,41 @@ body.page-paused *::after {
 }
 
 .mermaid-svg-stage svg .node:hover rect,
+.mermaid-svg-stage svg .node:hover polygon,
+.mermaid-svg-stage svg .node:hover circle,
+.mermaid-svg-stage svg .node:hover ellipse,
+.mermaid-svg-stage svg .node:hover path,
 .mermaid-sheet svg .node:hover rect {
-  filter: drop-shadow(0 0 10px rgba(0, 240, 255, 0.4));
+  filter: drop-shadow(0 0 12px rgba(56, 189, 248, 0.5));
   stroke-width: 2px !important;
 }
 
-/* Tipografi Teks di Dalam Kotak: Judul Tebal, Subtitle Rapi */
+/* Tipografi Teks di Dalam Kotak & Simbol */
 .mermaid-svg-stage svg .node .label,
+.mermaid-svg-stage svg .node text,
+.mermaid-svg-stage svg text.actor,
+.mermaid-svg-stage svg .labelText,
+.mermaid-svg-stage svg .messageText,
+.mermaid-svg-stage svg .noteText,
+.mermaid-svg-stage svg .loopText,
 .mermaid-sheet svg .node .label {
   font-family: var(--font-main), 'Space Grotesk', -apple-system, sans-serif !important;
   font-size: 13px !important;
   line-height: 1.45 !important;
   text-align: center !important;
   color: #f8fafc !important;
+  fill: #f8fafc !important;
+}
+
+.mermaid-svg-stage svg .actor-line {
+  stroke: rgba(56, 189, 248, 0.4) !important;
+  stroke-dasharray: 4, 4;
+}
+
+.mermaid-svg-stage svg .messageLine0,
+.mermaid-svg-stage svg .messageLine1 {
+  stroke: #38bdf8 !important;
+  stroke-width: 1.8px !important;
 }
 
 .mermaid-svg-stage svg .node .label b,
@@ -12294,6 +12327,7 @@ body.page-paused *::after {
   font-size: 13.5px !important;
   font-weight: 700 !important;
   color: #ffffff !important;
+  fill: #ffffff !important;
   letter-spacing: 0.02em;
 }
 
@@ -15049,24 +15083,27 @@ body.mermaid-has-fullscreen {
 }
 .term-tunnel-qr-wrap {
   display: flex;
-  gap: 14px;
+  flex-direction: column;
   align-items: center;
-  padding: 10px;
+  justify-content: center;
+  gap: 14px;
+  padding: 16px;
   background: rgba(30, 41, 59, 0.45);
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 8px;
+  text-align: center;
 }
 .term-tunnel-qr-box {
-  width: 130px;
-  height: 130px;
+  width: 240px;
+  height: 240px;
   background: #ffffff;
-  border-radius: 6px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 6px;
+  padding: 8px;
   flex-shrink: 0;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 15px rgba(56, 189, 248, 0.25);
 }
 .term-tunnel-qr-box img {
   width: 100%;
@@ -15296,19 +15333,6 @@ body.mermaid-has-fullscreen {
 }
 
 /* Smooth toggle animation for prompt bar */
-.dock-collapsed,
-.composer-container.composer-collapsed #promptDockWrapper,
-.composer-container.composer-collapsed .prompt-dock-wrapper {
-  max-height: 0 !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-  transform: translateY(28px) scale(0.97) !important;
-  margin-top: 0 !important;
-  padding-top: 0 !important;
-  padding-bottom: 0 !important;
-  overflow: hidden !important;
-}
-
 .prompt-dock-wrapper {
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   overflow: visible !important;
@@ -15373,6 +15397,23 @@ body.mermaid-has-fullscreen {
     max-height: none !important;
     overflow: visible !important;
   }
+}
+
+#promptDockWrapper.dock-collapsed,
+.prompt-dock-wrapper.dock-collapsed,
+.composer-container.composer-collapsed #promptDockWrapper,
+.composer-container.composer-collapsed .prompt-dock-wrapper {
+  max-height: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transform: translateY(28px) scale(0.97) !important;
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  overflow: hidden !important;
+}
+
+@media (max-width: 640px) {
 
   .composer-container {
     padding-bottom: max(14px, env(safe-area-inset-bottom, 14px)) !important;
