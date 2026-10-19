@@ -33025,6 +33025,24 @@ Aturan:
           }
         }
       });
+      const mobBtn = document.getElementById('btnTermMobileConnect');
+      if (mobBtn) {
+        if (this.isRemoteConnected) {
+          if (isOnline) {
+            mobBtn.className = 'tb-btn tb-btn-mobile-connect connected';
+            mobBtn.title = `Terhubung ke Host Laptop (${this.remoteHost || 'WAN'})${this.remotePingMs ? ' • ' + this.remotePingMs + 'ms' : ''}`;
+            mobBtn.innerHTML = `<i class="fa-solid fa-circle-check" style="color: #34d399;"></i> <span class="mobile-connect-label">${this.remotePingMs ? this.remotePingMs + 'ms' : 'Terhubung'}</span>`;
+          } else {
+            mobBtn.className = 'tb-btn tb-btn-mobile-connect connecting';
+            mobBtn.title = 'Menyambung ulang ke host laptop...';
+            mobBtn.innerHTML = `<i class="fa-solid fa-rotate fa-spin" style="color: #fbbf24;"></i> <span class="mobile-connect-label">Menyambung...</span>`;
+          }
+        } else {
+          mobBtn.className = 'tb-btn tb-btn-mobile-connect';
+          mobBtn.title = 'Sambungkan ke Laptop (Scan QR / Tunnel)';
+          mobBtn.innerHTML = `<i class="fa-solid fa-laptop-code" style="color: var(--neon-cyan);"></i> <span class="mobile-connect-label">Sambungkan</span>`;
+        }
+      }
       this.updateMobileBannerUI();
     },
 
@@ -35962,11 +35980,20 @@ Aturan:
       document.getElementById('btnTermSyncWindows')?.addEventListener('click', () => this.trySyncWindows(true));
       document.getElementById('btnTermRemoteTunnel')?.addEventListener('click', () => this.openRemoteTunnelModal());
       document.getElementById('btnTopBarRemoteQr')?.addEventListener('click', () => this.openRemoteTunnelModal());
-      document.getElementById('btnTermMobileConnect')?.addEventListener('click', () => {
+      document.getElementById('btnTermMobileConnect')?.addEventListener('click', async () => {
         if (this.isRemoteConnected) {
           this.showRemoteOverlay();
         } else {
-          this.openQrScannerModal();
+          const pin = this.remotePin || localStorage.getItem('zoz_last_tunnel_pin') || '';
+          if (this.remoteHost && pin) {
+            showToast('Menghubungkan ke host laptop tersimpan...', 'info');
+            const ok = await this.connectRemoteTerminal(this.remoteHost, pin, true);
+            if (!ok) {
+              this.openQrScannerModal();
+            }
+          } else {
+            this.openQrScannerModal();
+          }
         }
       });
       document.getElementById('btnBannerScanQr')?.addEventListener('click', () => this.openQrScannerModal());

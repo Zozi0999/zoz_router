@@ -14186,6 +14186,21 @@ body.mermaid-has-fullscreen {
     font-size: 0.72rem !important;
     box-shadow: 0 0 10px rgba(56, 189, 248, 0.35) !important;
     height: 24px !important;
+    align-items: center;
+    gap: 4px;
+    border-radius: 6px;
+  }
+  .tb-btn-mobile-connect.connected {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.28), rgba(52, 211, 153, 0.2)) !important;
+    border-color: rgba(52, 211, 153, 0.65) !important;
+    color: #34d399 !important;
+    box-shadow: 0 0 10px rgba(52, 211, 153, 0.35) !important;
+  }
+  .tb-btn-mobile-connect.connecting {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.28), rgba(251, 191, 36, 0.2)) !important;
+    border-color: rgba(251, 191, 36, 0.65) !important;
+    color: #fbbf24 !important;
+    box-shadow: 0 0 10px rgba(251, 191, 36, 0.35) !important;
   }
   .tb-btn-minimize,
   .tb-btn-close {
