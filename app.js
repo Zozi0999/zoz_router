@@ -32182,8 +32182,10 @@ Aturan:
       if (xtermScreen && xtermScreen.style.transform) {
         xtermScreen.style.transform = '';
       }
-      if (!paneState._userScrolledUp) {
-        try { term.scrollToBottom(); } catch (_) {}
+      if (!paneState._userScrolledUp && term.buffer && term.buffer.active) {
+        if (term.buffer.active.viewportY !== term.buffer.active.baseY) {
+          try { term.scrollToBottom(); } catch (_) {}
+        }
       }
     },
 
@@ -33966,8 +33968,9 @@ Aturan:
         term.textarea.setAttribute('autocapitalize', 'none');
         term.textarea.setAttribute('spellcheck', 'false');
         term.textarea.setAttribute('enterkeyhint', 'go');
-        term.textarea.setAttribute('inputmode', 'text');
+        term.textarea.setAttribute('inputmode', 'search');
         term.textarea.setAttribute('data-gramm', 'false');
+        term.textarea.setAttribute('data-enable-grammarly', 'false');
         term.textarea.setAttribute('aria-autocomplete', 'none');
       }
 
@@ -36279,7 +36282,18 @@ Aturan:
         });
       }
 
+      let lastWinW = window.innerWidth;
+      let lastWinH = window.innerHeight;
       window.addEventListener('resize', () => {
+        if (this.isMobileDevice()) {
+          const curW = window.innerWidth;
+          const curH = window.innerHeight;
+          if (Math.abs(curW - lastWinW) <= 20 && Math.abs(curH - lastWinH) <= 20) {
+            return;
+          }
+          lastWinW = curW;
+          lastWinH = curH;
+        }
         this.fitAllPanes();
         this.syncMobileViewport();
       });
