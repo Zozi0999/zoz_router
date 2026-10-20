@@ -1384,6 +1384,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     modelErrors: [],
     textAnomalies: [],
     toolIssues: [],
+    toolSuccesses: [],
     hallucinationIssues: [],
     agentSkillAudits: [],
     viewportIssues: [],
@@ -1707,25 +1708,54 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       const status = toolData.status || (rawError.match(/\b([45]\d\d)\b/)?.[1]) || 'ERR';
       const argsPreview = toolData.args ? (typeof toolData.args === 'string' ? toolData.args : JSON.stringify(toolData.args)) : '';
 
+      const isSoftMiss = status === 'EMPTY_RESULTS' || status === 'NOT_FOUND';
+      const stressAmount = isSoftMiss ? 3 : 16;
+
       const item = {
         id: 'toolerr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
         time: new Date().toLocaleTimeString(),
         toolName,
         status,
         reason: rawError,
-        argsPreview: argsPreview.slice(0, 80)
+        argsPreview: argsPreview.slice(0, 80),
+        isSoftMiss
       };
 
       if (!this.toolIssues) this.toolIssues = [];
       this.toolIssues.unshift(item);
       if (this.toolIssues.length > 30) this.toolIssues.pop();
 
-      this.secreteStress(16, `[Error Tool] ${toolName} (${status}): ${rawError.slice(0, 60)}`);
+      this.secreteStress(stressAmount, `[${isSoftMiss ? 'Info Tool' : 'Error Tool'}] ${toolName} (${status}): ${rawError.slice(0, 60)}`);
       this.updateUI();
       return item;
     },
 
-    // 3c. Detektor & Pelacak Halusinasi Data / Tanggal / Peristiwa dari Output Tool
+    // 3c. Detektor & Reward Sukses Eksekusi Tool (Jalur Endorfin & Dopamin Otonom)
+    registerToolSuccess(toolData = {}) {
+      const toolName = toolData.toolName || toolData.tool || 'Tool';
+      const count = toolData.count || 1;
+      const details = toolData.details || 'Eksekusi sukses';
+
+      const item = {
+        id: 'toolok_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+        time: new Date().toLocaleTimeString(),
+        toolName,
+        count,
+        details: String(details).slice(0, 100)
+      };
+
+      if (!this.toolSuccesses) this.toolSuccesses = [];
+      this.toolSuccesses.unshift(item);
+      if (this.toolSuccesses.length > 30) this.toolSuccesses.pop();
+
+      // Sekresi Endorfin (+15) dan Dopamin (+10) untuk homeostasis biologis agen
+      this.secreteEndorphin(15, `[Sukses Tool] ${toolName}: ${item.details.slice(0, 50)}`);
+      this.secreteDopamine(10, `Data tool otonom ${toolName} terverifikasi`);
+      this.updateUI();
+      return item;
+    },
+
+    // 3d. Detektor & Pelacak Halusinasi Data / Tanggal / Peristiwa dari Output Tool
     registerHallucinationIssue(hallucinationData = {}) {
       const model = hallucinationData.model || (typeof STATE !== 'undefined' ? (STATE.mode === 'ollama' ? (STATE.settings.ollamaModel || 'Ollama') : (STATE.settings.openRouterModel || 'OpenRouter')) : 'Model');
       const reason = hallucinationData.reason || 'Halusinasi data eksternal terdeteksi';
@@ -1752,7 +1782,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       return item;
     },
 
-    // 3d. Detektor & Evaluator Nilai Guna Skill & Endorfin Otonom Agen (Pilar 07)
+    // 3e. Detektor & Evaluator Nilai Guna Skill & Endorfin Otonom Agen (Pilar 07)
     evaluateSkillOutputUtility(skillName, content, metadata = {}) {
       if (!content || typeof content !== 'string') return { score: 0, grade: 'F', feedback: 'Konten kosong' };
       let score = 50; // Baseline
@@ -1766,7 +1796,9 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         const hasHarmoniousClass = /classDef\s+\w+/i.test(content);
         const mermaidBlock = content.match(/```mermaid([\s\S]*?)```/i) || content.match(/<<<ZOZ_FILE[^\n]*\.mermaid[\s\S]*?```/i);
         const targetDiagramText = mermaidBlock ? mermaidBlock[1] : content;
-        const hasUnquotedSpecial = /[A-Za-z0-9_]+\s*\[[^\"]*[\(\)\:\/]+[^\"]*\](?!\()/.test(targetDiagramText);
+        // Hanya tandai unquoted special character pada node flowchart [ ... ] tanpa tanda kutip di baris yang sama
+        const isFlowchart = /(?:flowchart|graph)\s+(?:TD|TB|LR|RL)/i.test(targetDiagramText);
+        const hasUnquotedSpecial = isFlowchart && /\b[A-Za-z0-9_]+\s*\[\s*[^"'\n\]]*[\(\)\:\/][^"'\n\]]*\]/.test(targetDiagramText);
         const nodeMatches = targetDiagramText.match(/[A-Za-z0-9_]+\s*(?:\[|\(|\{\{|\{\|)/g) || [];
 
         if (hasSubgraph) { score += 20; feedbackNotes.push('Sub-grafik tematik'); }
@@ -1784,7 +1816,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         const hasAiCliche = /(sebagai model ai|as an ai model|in conclusion)/i.test(content);
 
         if (words >= 250) { score += 20; feedbackNotes.push(`${words} kata mendalam`); }
-        else if (words < 100) { score -= 20; feedbackNotes.push('Dokumen terlalu singkat'); }
+        else if (words >= 100) { score += 10; feedbackNotes.push(`${words} kata terstruktur`); }
+        else if (words < 70 && !hasStrategicTable) { score -= 15; feedbackNotes.push('Dokumen terlalu singkat'); }
         if (hasExecutiveSummary) { score += 15; feedbackNotes.push('Ada ringkasan eksekutif'); }
         if (hasStrategicTable) { score += 20; feedbackNotes.push('Tabel data komparatif'); }
         if (hasChapters) { score += 15; feedbackNotes.push('Struktur bab lengkap'); }
@@ -1794,13 +1827,14 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       else if (skill.includes('pencarian') || skill.includes('search') || (metadata.sources && metadata.sources.length > 0)) {
         const sources = Array.isArray(metadata.sources) ? metadata.sources : [];
         const deepSources = sources.filter(s => (s.snippet || '').length >= 70);
-        const hasCurrentYear = new Date().getFullYear().toString();
-        const mentionsCurrentFact = content.includes(hasCurrentYear);
+        const currentYear = new Date().getFullYear();
+        const mentionsRecentYear = new RegExp(`\\b(202[3-${currentYear.toString().slice(-1)}]|${currentYear})\\b`).test(content);
+        const isHistorical = /\b(19\d\d|200\d|201\d|sejarah|history|kuno|perang|tempo\s+dulu)\b/i.test(skillName + ' ' + (metadata.query || '') + ' ' + content.slice(0, 200));
         const words = content.trim().split(/\s+/).length;
 
         if (deepSources.length >= 2) { score += 25; feedbackNotes.push(`${deepSources.length} sumber paragraf utuh`); }
         else if (sources.length > 0) { score += 15; feedbackNotes.push(`${sources.length} sumber terverifikasi`); }
-        if (mentionsCurrentFact) { score += 15; feedbackNotes.push('Fakta aktual tahun berjalan'); }
+        if (mentionsRecentYear || isHistorical) { score += 15; feedbackNotes.push(isHistorical ? 'Konteks historis akurat' : 'Fakta aktual tahun berjalan'); }
         if (sources.length >= 3) { score += 15; feedbackNotes.push('Multi-domain terverifikasi'); }
         if (words >= 120) { score += 10; feedbackNotes.push(`${words} kata sintesis padat`); }
       }
@@ -1815,6 +1849,30 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         if (hasInteractivity) { score += 25; feedbackNotes.push('Interaktivitas nyata'); }
         if (hasModernStyling) { score += 15; feedbackNotes.push('Modern Glassmorphism'); }
         if (hasResponsive) { score += 15; feedbackNotes.push('Responsif multi-layar'); }
+      }
+      // e. Uji Nilai Guna Skil Kode & Pemrograman (Python / JS / Full-Stack)
+      else if (skill.includes('kode') || skill.includes('code') || skill.includes('python') || skill.includes('skrip') || /```(?:python|py|javascript|js|typescript|ts|html|css|sql|rust|go|c|cpp)\b/i.test(content)) {
+        const hasCodeBlock = /```[a-zA-Z0-9_-]+\n[\s\S]+?\n```/.test(content);
+        const hasCommentsOrDocs = /(?:\/\/|#|\/\*|'''|""")\s*[\w\d]/i.test(content);
+        const hasErrorHandling = /(?:try\s*\{|try\s*:|catch|except|finally|assert|if\s+err\b)/i.test(content);
+        const hasFunctions = /(?:function\s+\w+|def\s+\w+|const\s+\w+\s*=\s*(?:\([^)]*\)|async\s*\([^)]*\))\s*=>|class\s+\w+)/i.test(content);
+        const words = content.trim().split(/\s+/).length;
+
+        if (hasCodeBlock) { score += 20; feedbackNotes.push('Blok kode bersih & tersintaksis'); }
+        if (hasCommentsOrDocs) { score += 15; feedbackNotes.push('Dokumentasi & komentar penjelas'); }
+        if (hasErrorHandling) { score += 15; feedbackNotes.push('Penanganan error / asersi aman'); }
+        if (hasFunctions) { score += 15; feedbackNotes.push('Struktur fungsi / modul modular'); }
+        if (words >= 100) { score += 10; feedbackNotes.push('Penjelasan implementasi mendalam'); }
+      }
+      // f. Uji Nilai Guna Skil Terminal & CLI (Bash / PowerShell)
+      else if (skill.includes('terminal') || skill.includes('cli') || /```(?:bash|sh|powershell|cmd|zsh)\b/i.test(content)) {
+        const hasCommandBlock = /```(?:bash|sh|powershell|cmd|zsh)\n[\s\S]+?\n```/.test(content);
+        const hasExplanation = /(?:keterangan|penjelasan|langkah|opsi|parameter|flag)/i.test(content);
+        const hasSafetyFlag = /(?:--help|-h|dry-run|--version|-v|grep|find|dir|ls)/i.test(content);
+
+        if (hasCommandBlock) { score += 25; feedbackNotes.push('Perintah terminal presisi'); }
+        if (hasExplanation) { score += 20; feedbackNotes.push('Langkah instruksi runtut'); }
+        if (hasSafetyFlag) { score += 15; feedbackNotes.push('Flag operasional terverifikasi'); }
       } else {
         const words = content.trim().split(/\s+/).length;
         if (words >= 120) score += 15;
@@ -2804,19 +2862,34 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         });
       }
 
-      // 7. Tool Execution Issues (Endorfin Telemetry)
+      // 7. Tool Execution Issues & Telemetry (Endorfin Telemetry)
       if (this.activeSubTab === 'all' || this.activeSubTab === 'tool') {
         (this.toolIssues || []).forEach(t => {
           allActiveIssues.push({
             type: 'tool',
-            badge: 'Tool Error',
-            badgeClass: 'badge-tool',
-            severity: 'high',
+            badge: t.isSoftMiss ? 'Info Tool' : 'Tool Error',
+            badgeClass: t.isSoftMiss ? 'badge-model' : 'badge-tool',
+            severity: t.isSoftMiss ? 'low' : 'high',
             time: t.time || 'Aktif',
             title: `[Tool] ${esc(t.toolName)} (${esc(t.status)})`,
             body: esc(t.reason),
             snippet: t.argsPreview ? `Argumen: ${esc(t.argsPreview)}` : `Tool: ${esc(t.toolName)}`,
-            fixable: true
+            fixable: !t.isSoftMiss
+          });
+        });
+
+        // Tampilkan juga eksekusi tool sukses (Dopamin & Endorfin terkonfirmasi)
+        (this.toolSuccesses || []).slice(0, 5).forEach(ts => {
+          allActiveIssues.push({
+            type: 'tool_success',
+            badge: 'Tool Terverifikasi',
+            badgeClass: 'badge-gateway',
+            severity: 'low',
+            time: ts.time || 'Baru saja',
+            title: `[Sukses Otonom] ${esc(ts.toolName)}`,
+            body: esc(ts.details),
+            snippet: `Eksekusi data bersih (+15% Endorfin, +10% Dopamin)`,
+            fixable: false
           });
         });
       }
@@ -2855,7 +2928,8 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         });
       }
 
-      const totalDiscoveredIssues = (this.isolatedNodes?.length || 0) + (this.modelErrors?.length || 0) + (this.textAnomalies?.length || 0) + (this.toolIssues?.length || 0) + (this.hallucinationIssues?.length || 0) + (this.viewportIssues?.length || 0) + (this.buttonIssues?.length || 0) + (this.gatewayIssues?.length || 0) + ((this.agentSkillAudits || []).filter(a => a.score < 60).length);
+      const activeToolErrorsCount = (this.toolIssues || []).filter(t => !t.isSoftMiss).length;
+      const totalDiscoveredIssues = (this.isolatedNodes?.length || 0) + (this.modelErrors?.length || 0) + (this.textAnomalies?.length || 0) + activeToolErrorsCount + (this.hallucinationIssues?.length || 0) + (this.viewportIssues?.length || 0) + (this.buttonIssues?.length || 0) + (this.gatewayIssues?.length || 0) + ((this.agentSkillAudits || []).filter(a => a.score < 60).length);
 
       // Header Status Sync
       const hdrHealthSquare = document.getElementById('headerHealthSquare');
@@ -17047,6 +17121,54 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
   // ==================== AUTONOMOUS TOOL EXECUTION ENGINE ====================
 
+  function evaluateSimplePythonMath(code) {
+    if (!code || typeof code !== 'string') return null;
+    const trimmed = code.trim();
+    
+    // Ekstrak argumen print(...) jika ada
+    const printMatch = trimmed.match(/print\s*\(([\s\S]+)\)\s*$/);
+    let expr = printMatch ? printMatch[1].trim() : trimmed;
+
+    // Bersihkan baris komentar python & import
+    expr = expr.split('\n').filter(line => !line.trim().startsWith('#') && !line.trim().startsWith('import ') && !line.trim().startsWith('from ')).join(' ').trim();
+    if (!expr) return null;
+
+    // Konversi operasi matematika umum Python ke JS Math
+    expr = expr
+      .replace(/\bmath\.factorial\((\d+)\)/g, (_, n) => {
+        let num = parseInt(n, 10);
+        if (num > 100) return 'Infinity';
+        let r = 1n;
+        for (let i = 2n; i <= BigInt(num); i++) r *= i;
+        return r.toString();
+      })
+      .replace(/\bmath\.pi\b/g, 'Math.PI')
+      .replace(/\bmath\.e\b/g, 'Math.E')
+      .replace(/\bmath\.sqrt\b/g, 'Math.sqrt')
+      .replace(/\bmath\.pow\b/g, 'Math.pow')
+      .replace(/\bmath\.floor\b/g, 'Math.floor')
+      .replace(/\bmath\.ceil\b/g, 'Math.ceil')
+      .replace(/\bmath\.sin\b/g, 'Math.sin')
+      .replace(/\bmath\.cos\b/g, 'Math.cos')
+      .replace(/\bmath\.tan\b/g, 'Math.tan')
+      .replace(/\bmath\.log\b/g, 'Math.log')
+      .replace(/\bmath\.log10\b/g, 'Math.log10')
+      .replace(/\bmath\.log2\b/g, 'Math.log2')
+      .replace(/\bmath\.abs\b/g, 'Math.abs')
+      .replace(/(\d+)\s*\/\/\s*(\d+)/g, 'Math.floor($1 / $2)')
+      .replace(/(\d+)\s*\*\*\s*(\d+)/g, 'Math.pow($1, $2)');
+
+    // Whitelist keamanan: hanya angka, konstanta Math, fungsi Math aman, tanda kurung & operator
+    if (/^[0-9\s\+\-\*\/\%\(\)\.\,Math\.PIEsqrtpowfloorceilsincostanlogabs_]+$/.test(expr)) {
+      try {
+        const fn = new Function(`return (${expr});`);
+        const val = fn();
+        return String(val);
+      } catch (_) {}
+    }
+    return null;
+  }
+
   async function executeAutonomousWebTool(rawToolName, rawArgs, promptContext = '', session = null) {
     if (STATE.abortController?.signal?.aborted) {
       const abortErr = new Error('The operation was aborted');
@@ -17150,6 +17272,16 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             data,
             expiresAt: Date.now() + TOOL_CACHE_TTL_MS
           });
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+            const srcCount = Array.isArray(data.sources) ? data.sources.length : (Array.isArray(data.videoIds) ? data.videoIds.length : 1);
+            BioEndocrine.registerToolSuccess({
+              toolName: canonicalTool,
+              count: srcCount,
+              details: Array.isArray(data.sources) && data.sources.length > 0
+                ? `${data.sources.length} sumber data terverifikasi`
+                : (Array.isArray(data.videoIds) && data.videoIds.length > 0 ? `${data.videoIds.length} video terverifikasi` : `Data tool ${canonicalTool} terverifikasi`)
+            });
+          }
           if (AUTONOMOUS_TOOL_CACHE.size > 120) {
             const now = Date.now();
             for (const [k, v] of AUTONOMOUS_TOOL_CACHE.entries()) {
@@ -17694,6 +17826,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             });
             if (res.ok) {
               const data = await res.json();
+              if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+                BioEndocrine.registerToolSuccess({
+                  toolName: 'save_memory',
+                  details: `Memori tersimpan permanen: [${topic}]`
+                });
+              }
               return {
                 text: `[MEMORI JANGKA PANJANG TERSIMPAN]: Berhasil menyimpan fakta ke dalam database lokal (SQLite FTS5):\n- Topik: "${topic}"\n- Konten: ${content}\n(Catatan: Informasi ini tersimpan secara permanen dan dapat dicari di sesi mana pun menggunakan tool \`search_memory\`).`,
                 sources: [],
@@ -17703,6 +17841,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           } catch (_) {}
         }
 
+        if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+          BioEndocrine.registerToolSuccess({
+            toolName: 'save_memory',
+            details: `Memori tersimpan (browser): [${topic}]`
+          });
+        }
         return {
           text: `[MEMORI JANGKA PANJANG TERSIMPAN (BROWSER)]: Berhasil menyimpan fakta ke dalam memori browser lokal:\n- Topik: "${topic}"\n- Konten: ${content}\n(Catatan: Informasi ini tersimpan dan dapat dicari di sesi mana pun menggunakan tool \`search_memory\`).`,
           sources: [],
@@ -17749,6 +17893,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         }
 
         if (combined.length > 0) {
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+            BioEndocrine.registerToolSuccess({
+              toolName: 'search_memory',
+              count: combined.length,
+              details: `${combined.length} catatan memori ditemukan untuk "${query.slice(0, 30)}"`
+            });
+          }
           const selected = combined.slice(0, limit);
           const formatted = selected.map(m => `[${m.topic}] : ${m.content}`).join('\n\n');
           return {
@@ -17789,6 +17940,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             if (res.ok) {
               const data = await res.json();
               const outText = data.output || 'Kode berhasil dijalankan tanpa output.';
+              if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+                BioEndocrine.registerToolSuccess({
+                  toolName: 'execute_python_code',
+                  details: `Python sandbox sukses (${outText.length} karakter output)`
+                });
+              }
               return {
                 text: `[HASIL EKSEKUSI PYTHON SUBPROCESS SANDBOX]:\n\`\`\`\n${outText}\n\`\`\``,
                 sources: [],
@@ -17797,6 +17954,23 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             } else {
               const errData = await res.json().catch(() => ({}));
               const execErrMsg = `Error eksekusi Python (${res.status}): ${errData.error || errData.output || 'Gagal menjalankan subprocess Python di server.'}`;
+              
+              // Coba fallback client math sebelum menyerah
+              const clientMath = evaluateSimplePythonMath(code);
+              if (clientMath !== null) {
+                if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+                  BioEndocrine.registerToolSuccess({
+                    toolName: 'execute_python_code',
+                    details: `Kalkulasi matematika client fallback sukses: ${clientMath.slice(0, 40)}`
+                  });
+                }
+                return {
+                  text: `[HASIL EKSEKUSI PYTHON (CLIENT SANDBOX FALLBACK)]:\n\`\`\`\n${clientMath}\n\`\`\``,
+                  sources: [],
+                  success: true
+                };
+              }
+
               if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
                 BioEndocrine.registerToolIssue({ toolName: 'execute_python_code', error: execErrMsg, status: res.status, args: code });
               }
@@ -17815,6 +17989,22 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
               };
             }
           }
+        }
+
+        // Fallback Client Math Evaluator: Eksekusi ekspresi matematika langsung di browser tanpa dependensi server
+        const clientMath = evaluateSimplePythonMath(code);
+        if (clientMath !== null) {
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+            BioEndocrine.registerToolSuccess({
+              toolName: 'execute_python_code',
+              details: `Kalkulasi matematika client fallback sukses: ${clientMath.slice(0, 40)}`
+            });
+          }
+          return {
+            text: `[HASIL EKSEKUSI PYTHON (CLIENT SANDBOX FALLBACK)]:\n\`\`\`\n${clientMath}\n\`\`\``,
+            sources: [],
+            success: true
+          };
         }
 
         const noServerMsg = 'Error eksekusi: Tidak dapat menghubungi server lokal ZOZ Router. Pastikan server lokal aktif (`node server.js`) untuk mengeksekusi kode Python dalam subprocess sandbox.';
@@ -19246,10 +19436,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
 
         const allToolsInRoundFailed = toolExecResults.length > 0 && toolExecResults.every(r => {
-          if (r.toolExecRes && r.toolExecRes.success === false) return true;
-          const t = String(r.toolExecRes?.text || '').trim();
+          if (!r || !r.toolExecRes) return true;
+          if (r.toolExecRes.success === false) return true;
+          if (r.toolExecRes.success === true) return false;
+          const t = String(r.toolExecRes.text || '').trim();
           if (t.startsWith('Error:') || t.startsWith('Error eksekusi:') || t.startsWith('Error Keamanan:') || t.includes('Gagal membaca URL')) return true;
-          if (t.includes('Error eksekusi:') || t.includes('Error Keamanan:') || t.includes('Error:')) return true;
           if (t.includes('tidak ditemukan video') || t.includes('Tidak ditemukan hasil spesifik')) return true;
           return false;
         });
@@ -19701,7 +19892,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         BioEndocrine.inspectModelText(fullText, { model: modelName, endpoint: 'Ollama' });
       }
       if (typeof BioEndocrine.evaluateSkillOutputUtility === 'function') {
-        const detectedSkill = isDiagramRequest ? 'Diagram Visual' : (isDocRequest ? 'Dokumen Eksekutif' : (isWebRequest ? 'Website Studio' : (webSources && webSources.length > 0 ? 'Pencarian Web' : 'Percakapan')));
+        const hasCodeBlock = /```(?:python|py|javascript|js|typescript|ts|html|css|sql|rust|go|c|cpp|bash|sh|powershell|cmd)\b/i.test(fullText);
+        const isCliScript = /```(?:bash|sh|powershell|cmd|zsh)\b/i.test(fullText);
+        const detectedSkill = isDiagramRequest ? 'Diagram Visual' : (isDocRequest ? 'Dokumen Eksekutif' : (isWebRequest ? 'Website Studio' : (webSources && webSources.length > 0 ? 'Pencarian Web' : (isCliScript ? 'Terminal CLI' : (hasCodeBlock ? 'Kode & Skrip' : 'Percakapan')))));
         BioEndocrine.evaluateSkillOutputUtility(detectedSkill, fullText, { model: modelName, files: generatedFiles, sources: webSources, docFormat: runOptions.docFormat, websiteMode: runOptions.websiteMode, isWebCreation: runOptions.isWebCreation, isDocCreation: runOptions.isDocCreation });
       }
       if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
@@ -20862,10 +21055,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
 
         const allToolsInRoundFailed = toolExecResults.length > 0 && toolExecResults.every(r => {
-          if (r.toolExecRes && r.toolExecRes.success === false) return true;
-          const t = String(r.toolExecRes?.text || '').trim();
+          if (!r || !r.toolExecRes) return true;
+          if (r.toolExecRes.success === false) return true;
+          if (r.toolExecRes.success === true) return false;
+          const t = String(r.toolExecRes.text || '').trim();
           if (t.startsWith('Error:') || t.startsWith('Error eksekusi:') || t.startsWith('Error Keamanan:') || t.includes('Gagal membaca URL')) return true;
-          if (t.includes('Error eksekusi:') || t.includes('Error Keamanan:') || t.includes('Error:')) return true;
           if (t.includes('tidak ditemukan video') || t.includes('Tidak ditemukan hasil spesifik')) return true;
           return false;
         });
@@ -21454,7 +21648,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         BioEndocrine.inspectModelText(fullText, { model: actualModelUsed || displayModel, endpoint: 'OpenRouter' });
       }
       if (typeof BioEndocrine.evaluateSkillOutputUtility === 'function') {
-        const detectedSkill = isDiagramRequest ? 'Diagram Visual' : (isDocRequest ? 'Dokumen Eksekutif' : (isWebRequest ? 'Website Studio' : (webSources && webSources.length > 0 ? 'Pencarian Web' : 'Percakapan')));
+        const hasCodeBlock = /```(?:python|py|javascript|js|typescript|ts|html|css|sql|rust|go|c|cpp|bash|sh|powershell|cmd)\b/i.test(fullText);
+        const isCliScript = /```(?:bash|sh|powershell|cmd|zsh)\b/i.test(fullText);
+        const detectedSkill = isDiagramRequest ? 'Diagram Visual' : (isDocRequest ? 'Dokumen Eksekutif' : (isWebRequest ? 'Website Studio' : (webSources && webSources.length > 0 ? 'Pencarian Web' : (isCliScript ? 'Terminal CLI' : (hasCodeBlock ? 'Kode & Skrip' : 'Percakapan')))));
         BioEndocrine.evaluateSkillOutputUtility(detectedSkill, fullText, { model: actualModelUsed || displayModel, files: generatedFiles, sources: webSources, docFormat: runOptions.docFormat, websiteMode: runOptions.websiteMode, isWebCreation: runOptions.isWebCreation, isDocCreation: runOptions.isDocCreation });
       }
       if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
