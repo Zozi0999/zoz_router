@@ -26644,11 +26644,7 @@ Aturan:
           <i class="${cmd.iconClass}"></i>
         </div>
         <div class="slash-menu-item-info">
-          <div class="slash-menu-item-top">
-            <span class="slash-menu-item-name">${escapeHtml(cmd.command)}</span>
-            <span class="slash-menu-item-badge">${escapeHtml(cmd.badge)}</span>
-          </div>
-          <div class="slash-menu-item-desc">${escapeHtml(cmd.desc)}</div>
+          <span class="slash-menu-item-name">${escapeHtml(cmd.command)}</span>
         </div>
       `;
 

@@ -2366,8 +2366,8 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px;
-  min-height: 48px;
+  padding: 8px 12px;
+  min-height: 44px;
   border-radius: 8px;
   background: transparent;
   border: 1px solid transparent;
@@ -2400,13 +2400,13 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 }
 
 .slash-menu-item-icon {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.05rem;
+  font-size: 0.95rem;
   flex-shrink: 0;
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
@@ -2415,8 +2415,7 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   flex-grow: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
 }
 
 .slash-menu-item-top {
@@ -2427,27 +2426,18 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 
 .slash-menu-item-name {
   font-family: var(--font-code);
-  font-size: 0.88rem;
+  font-size: 0.92rem;
   font-weight: 700;
   color: #ffffff;
+  letter-spacing: 0.2px;
 }
 
 .slash-menu-item-badge {
-  font-size: 0.68rem;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-muted);
-  font-family: var(--font-code);
+  display: none !important;
 }
 
 .slash-menu-item-desc {
-  font-size: 0.74rem;
-  color: var(--text-muted);
-  line-height: 1.35;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: none !important;
 }
 
 .composer-box:hover {
