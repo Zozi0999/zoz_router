@@ -2251,35 +2251,6 @@ export default {
       });
     }
 
-    // Deep Research Endpoint (Cloudflare Worker Stateless Handler)
-    if ((url.pathname === '/api/mulai-riset' || url.pathname === '/api/deep-research/start') && request.method === 'POST') {
-      return new Response(JSON.stringify({
-        success: false,
-        fallbackToClient: true,
-        message: 'Cloudflare Worker serverless mode: beralih ke analisis riset peramban klien.'
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-      });
-    }
-
-    if (url.pathname.startsWith('/api/status-riset/') || url.pathname.startsWith('/api/deep-research/status/')) {
-      return new Response(JSON.stringify({
-        status: 'gagal',
-        error: 'Cloudflare Worker serverless mode: status riset tidak dikelola di edge.'
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-      });
-    }
-
-    if (url.pathname.startsWith('/api/batal-riset/') || url.pathname.startsWith('/api/deep-research/stop/')) {
-      return new Response(JSON.stringify({ success: true, message: 'Dibatalkan.' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-      });
-    }
-
     // Stateless Session Route for Cloudflare Gateway
     if (url.pathname === '/api/sessions' || url.pathname.startsWith('/api/sessions/')) {
       if (request.method === 'GET') {

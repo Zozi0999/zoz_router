@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261020_v409';
+    window.__ZOZ_VERSION__ = 'v20261020_v410';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -93,8 +93,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261020_v409">
-  <link rel="stylesheet" href="style.css?v=20261020_v409">
+  <link rel="preload" as="style" href="style.css?v=20261020_v410">
+  <link rel="stylesheet" href="style.css?v=20261020_v410">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial select-none">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -950,26 +950,6 @@
                     </span>
                   </div>
                 </button>
-                <button class="search-menu-item" id="searchOptionPremium" type="button" data-mode="premium">
-                  <div class="search-item-icon-box premium-accent">
-                    <i class="fa-solid fa-microscope"></i>
-                  </div>
-                  <div class="search-item-info">
-                    <span class="search-item-title">Mode Deep Research (Penganalisis URL Kustom)</span>
-                    <span class="search-item-desc">Analisis mendalam isi, fakta terbaru vs lama dari URL kustom</span>
-                  </div>
-                  <div class="search-item-action-area">
-                    <span class="search-item-manage-btn" role="button" tabindex="0" title="Kelola URL Sumber Deep Research" style="display: none;" aria-label="Kelola URL Sumber">
-                      <i class="fa-solid fa-link"></i>
-                      <span class="manage-btn-text">Kelola URL</span>
-                    </span>
-                    <i class="fa-solid fa-check search-item-check" style="display: none;"></i>
-                    <span class="search-item-close-btn" role="button" tabindex="0" title="Matikan Deep Research (Kembali ke Nonaktif)" style="display: none;" aria-label="Matikan Deep Research">
-                      <i class="fa-solid fa-xmark"></i>
-                      <span class="close-btn-text">Matikan</span>
-                    </span>
-                  </div>
-                </button>
                 <button class="search-menu-item active" id="searchOptionAutonomous" type="button" data-mode="autonomous">
                   <div class="search-item-icon-box auto-accent">
                     <i class="fa-solid fa-compass"></i>
@@ -1393,63 +1373,6 @@
     </div>
   </div>
 
-  <!-- 5. LIVE RESEARCH INSPECTION MODAL (Pertinjau Nyata Deep Research) -->
-  <div class="modal-backdrop" id="liveResearchInspectionModal">
-    <div class="modal-card modal-lg inspector-modal-card">
-      <div class="modal-header">
-        <div class="modal-title" style="display: flex; align-items: center; gap: 8px;">
-          <i class="fa-solid fa-satellite-dish" style="color: var(--neon-cyan);"></i>
-          <span>Live Deep Research Inspector</span>
-          <span class="badge" style="font-size: 0.68rem; background: rgba(0, 240, 255, 0.15); color: var(--neon-cyan); border: 1px solid rgba(0, 240, 255, 0.3); padding: 2px 8px; border-radius: 999px;">Transparansi Multi-Agen Nyata</span>
-        </div>
-        <button class="modal-close-btn inspector-close-x-btn" data-close="liveResearchInspectionModal" aria-label="Tutup pertinjau deep research" title="Tutup Pertinjau"><i class="fa-solid fa-xmark"></i></button>
-      </div>
-
-      <!-- Live Inspector Header / Summary Bar -->
-      <div class="inspector-summary-bar" style="background: rgba(0, 0, 0, 0.35); border-bottom: 1px solid var(--border-subtle); padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between; font-size: 0.8rem;">
-        <div>
-          <span style="color: var(--text-dim);">Topik Riset:</span> <strong id="inspectTopik" style="color: #FFF;">-</strong>
-        </div>
-        <div style="display: flex; gap: 16px; align-items: center;">
-          <span><i class="fa-solid fa-magnifying-glass" style="color: var(--neon-cyan);"></i> Query Aktif: <code id="inspectCurrentQuery" style="color: var(--neon-teal);">-</code></span>
-          <span><i class="fa-solid fa-repeat" style="color: var(--neon-amber);"></i> Iterasi: <strong id="inspectIteration" style="color: #FFF;">-</strong></span>
-          <span><i class="fa-solid fa-clock" style="color: var(--text-dim);"></i> <span id="inspectTimestamp">-</span></span>
-        </div>
-      </div>
-
-      <!-- Inspector Tabs (Penganalisis Web Kustom URL) -->
-      <div class="settings-tabs inspector-tabs">
-        <button class="settings-tab-btn active" id="btnTabInspectAgent1" data-inspect-tab="agent1" style="white-space: nowrap; flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px;">
-          <i class="fa-solid fa-robot" style="color: #00F0FF;"></i> Ekstraksi Konten (<span id="inspectCountAgent1">0</span>)
-        </button>
-        <button class="settings-tab-btn" id="btnTabInspectAgent2" data-inspect-tab="agent2" style="white-space: nowrap; flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px;">
-          <i class="fa-solid fa-microchip" style="color: #00FFC2;"></i> Dekonstruksi Struktur (<span id="inspectCountAgent2">0</span>)
-        </button>
-        <button class="settings-tab-btn" id="btnTabInspectScraper" data-inspect-tab="scraper" style="white-space: nowrap; flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px;">
-          <i class="fa-solid fa-file-lines" style="color: #FFB703;"></i> Web Scraper (<span id="inspectCountScraper">0</span>)
-        </button>
-        <button class="settings-tab-btn" id="btnTabInspectSynthesizer" data-inspect-tab="synthesizer" style="white-space: nowrap; flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px;">
-          <i class="fa-solid fa-feather-pointed" style="color: #FF007F;"></i> Model 3: Pengoreksi (<span id="inspectCountSynthesizer">Laporan</span>)
-        </button>
-        <button class="settings-tab-btn" id="btnTabInspectModel4" data-inspect-tab="model4" style="white-space: nowrap; flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px;">
-          <i class="fa-solid fa-sparkles" style="color: var(--neon-cyan);"></i> Model 4: Rangkuman Chat (<span id="inspectCountModel4">Siap</span>)
-        </button>
-      </div>
-
-      <!-- Inspector Body -->
-      <div class="modal-body inspector-modal-body" id="inspectTabContent">
-        <!-- Dynamically rendered based on active inspection tab -->
-      </div>
-
-      <div class="modal-footer inspector-modal-footer">
-        <span style="font-size: 0.74rem; color: var(--text-dim);">
-          <i class="fa-solid fa-circle-check" style="color: var(--neon-teal);"></i> Data streaming langsung dari proses pencarian & inferensi AI nyata.
-        </span>
-        <button class="btn btn-secondary btn-close-inspector" data-close="liveResearchInspectionModal"><i class="fa-solid fa-xmark"></i> Tutup Pertinjau</button>
-      </div>
-    </div>
-  </div>
-
   <!-- 6. EXPORT CHAT CONFIRMATION MODAL -->
   <div class="modal-backdrop" id="exportConfirmModal">
     <div class="modal-card" style="max-width: 480px;">
@@ -1717,109 +1640,6 @@
         <button class="btn btn-primary" id="btnFoldModalConfirm" type="button">
           <i class="fa-solid fa-check"></i> Setuju, Ubah ke File .MD
         </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 7. FULL DEEP RESEARCH REPORT VIEWER (Ala Gemini Deep Research) -->
-  <div class="modal-backdrop full-report-modal-backdrop" id="deepResearchReportModal">
-    <div class="modal-card full-report-modal-card">
-      <!-- Top Action Bar -->
-      <div class="full-report-header">
-        <div class="full-report-title-box">
-          <div class="full-report-badge">
-            <i class="fa-solid fa-microscope"></i> DEEP RESEARCH REPORT
-          </div>
-          <h3 class="full-report-title" id="fullReportModalTitle">Judul Laporan Riset</h3>
-          <div class="full-report-meta" id="fullReportModalMeta">
-            <span class="report-meta-item"><i class="fa-regular fa-clock"></i> <span id="fullReportDate">-</span></span>
-            <span class="report-meta-item"><i class="fa-solid fa-globe"></i> <span id="fullReportSourcesCount">0</span> Dokumen</span>
-            <span class="report-meta-item"><i class="fa-solid fa-robot"></i> <span id="fullReportModelsUsed">Model 1, 2 &amp; 3</span></span>
-          </div>
-        </div>
-
-        <div class="full-report-actions">
-          <button class="btn btn-sm btn-outline report-action-btn" id="btnToggleReportSources" title="Sembunyikan / Tampilkan Referensi Web">
-            <i class="fa-solid fa-eye-slash"></i> <span>Sembunyikan Referensi</span>
-          </button>
-          <button class="btn btn-sm btn-outline report-action-btn" id="btnExportReportPDF" title="Unduh Laporan Format Dokumen PDF">
-            <i class="fa-solid fa-file-pdf" style="color: #FF4D4D;"></i> <span>PDF</span>
-          </button>
-          <button class="btn btn-sm btn-outline report-action-btn" id="btnExportReportDOCX" title="Unduh Laporan Format Microsoft Word (.docx)">
-            <i class="fa-solid fa-file-word" style="color: #2B579A;"></i> <span>DOCX</span>
-          </button>
-          <button class="btn btn-sm btn-outline report-action-btn" id="btnExportReportMD" title="Unduh Dokumen Asli Markdown (.md)">
-            <i class="fa-solid fa-file-lines" style="color: var(--neon-cyan);"></i> <span>MD</span>
-          </button>
-          <button class="btn btn-sm btn-outline report-action-btn" id="btnCopyFullReport" title="Salin Seluruh Isi Laporan">
-            <i class="fa-solid fa-copy"></i> <span>Salin</span>
-          </button>
-          <button class="modal-close-btn report-close-btn" data-close="deepResearchReportModal" aria-label="Tutup laporan riset" title="Tutup Laporan (Esc)">
-            <i class="fa-solid fa-xmark"></i>
-          </button>
-        </div>
-      </div>
-
-      <!-- Report Content Stage with Outline Sidebar -->
-      <div class="full-report-body">
-        <!-- Sticky Outline Navigation (Desktop) -->
-        <aside class="full-report-toc" id="fullReportTOC">
-          <div class="toc-header">
-            <i class="fa-solid fa-list-ol"></i> DAFTAR ISI LAPORAN
-          </div>
-          <nav class="toc-nav" id="fullReportTOCList">
-            <!-- Dynamically populated from report headings -->
-          </nav>
-        </aside>
-
-        <!-- Main Document Reading Canvas -->
-        <main class="full-report-article-stage" id="fullReportArticleStage">
-          <div class="full-report-markdown-content" id="fullReportContent">
-            <!-- Full rendered markdown document -->
-          </div>
-        </main>
-      </div>
-    </div>
-  </div>
-
-  <!-- Deep Research URL Manager Modal -->
-  <div class="modal-backdrop" id="researchUrlManagerModal">
-    <div class="modal-card modal-lg">
-      <div class="modal-header">
-        <div class="modal-title"><i class="fa-solid fa-microscope" style="color: var(--neon-amber);"></i> Kelola Sumber Deep Research</div>
-        <button class="modal-close-btn" data-close="researchUrlManagerModal" aria-label="Tutup kelola sumber Deep Research" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
-      </div>
-      <div class="modal-body">
-        <div style="margin-bottom: 16px; padding: 12px; background: rgba(255, 82, 0, 0.1); border: 1px solid rgba(255, 82, 0, 0.3); border-radius: var(--radius-md); color: var(--neon-amber); font-size: 0.8rem;">
-          <i class="fa-solid fa-circle-info"></i> Masukkan URL yang ingin dianalisis secara mendalam. Setiap URL akan diekstrak kontennya dan dibandingkan untuk mendeteksi fakta terbaru vs lama.
-        </div>
-        <div class="form-group">
-          <label for="researchUrlManagerInput"><i class="fa-solid fa-plus"></i> Tambah URL Baru</label>
-          <div class="input-with-action">
-            <input type="url" id="researchUrlManagerInput" placeholder="https://example.com/artikel..." autocomplete="off" spellcheck="false">
-            <button class="btn btn-sm btn-primary" id="researchUrlManagerAddBtn"><i class="fa-solid fa-plus"></i> Tambah</button>
-          </div>
-        </div>
-        <div class="research-url-manager-list" id="researchUrlManagerList" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
-          <!-- URLs rendered here -->
-        </div>
-        <div style="margin-top: 16px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: var(--radius-sm); font-size: 0.75rem; color: var(--text-dim);">
-          <i class="fa-solid fa-lightbulb"></i> Tip: Gunakan URL artikel, berita, dokumentasi, atau halaman web publik. Hindari URL yang memerlukan login.
-        </div>
-      </div>
-      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-        <div style="display: flex; gap: 8px;">
-          <button class="btn btn-sm btn-outline-danger" id="researchUrlManagerDisableBtn" type="button" title="Matikan Deep Research dan kembali ke Mode Default">
-            <i class="fa-solid fa-power-off"></i> Matikan Mode Riset
-          </button>
-          <button class="btn btn-sm btn-secondary" id="researchUrlManagerSwitchModeBtn" type="button" title="Ganti ke mode penelusuran web lain">
-            <i class="fa-solid fa-satellite-dish"></i> Ganti Mode
-          </button>
-        </div>
-        <div style="display: flex; gap: 8px;">
-          <button class="btn btn-sm btn-secondary" data-close="researchUrlManagerModal" type="button">Tutup</button>
-          <button class="btn btn-sm btn-primary" id="researchUrlManagerDoneBtn" type="button"><i class="fa-solid fa-check"></i> Selesai</button>
-        </div>
       </div>
     </div>
   </div>
@@ -2805,8 +2625,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261020_v409" defer></script>
+  <script src="text-safety.js?v=20261020_v410" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261020_v409" defer></script>
+  <script src="app.js?v=20261020_v410" defer></script>
 </body>
 </html>

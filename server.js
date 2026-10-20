@@ -1843,49 +1843,6 @@ function pruneYouTubeCaches() {
 }
 setInterval(pruneYouTubeCaches, 30 * 60 * 1000).unref();
 
-// ==================== DEEP RESEARCH AUTONOMOUS ENGINE (PREMIUM) ====================
-const dbTugasRiset = {};
-
-// Cleanup & Memory Management for Deep Research Tasks (LRU + TTL 1 hour)
-function pruneResearchTasks() {
-  try {
-    const MAX_TASKS = 40;
-    const ONE_HOUR_MS = 60 * 60 * 1000;
-    const now = Date.now();
-    const taskIds = Object.keys(dbTugasRiset);
-
-    // 1. Bersihkan tugas yang sudah lebih dari 1 jam
-    for (const id of taskIds) {
-      const task = dbTugasRiset[id];
-      if (task && task.createdAt) {
-        const age = now - new Date(task.createdAt).getTime();
-        if (age > ONE_HOUR_MS) {
-          delete dbTugasRiset[id];
-        }
-      }
-    }
-
-    // 2. Jika masih melebihi batas MAX_TASKS, buang tugas tertua
-    const remainingKeys = Object.keys(dbTugasRiset);
-    if (remainingKeys.length > MAX_TASKS) {
-      const sorted = remainingKeys
-        .map(id => dbTugasRiset[id])
-        .filter(Boolean)
-        .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
-
-      const toRemove = sorted.slice(0, remainingKeys.length - MAX_TASKS);
-      for (const t of toRemove) {
-        delete dbTugasRiset[t.taskId];
-      }
-    }
-  } catch (e) {
-    console.warn('Warning pruning research tasks:', e.message);
-  }
-}
-
-// Timer pembersihan berkala setiap 15 menit
-setInterval(pruneResearchTasks, 15 * 60 * 1000).unref();
-
 // ==================== BACKGROUND PERSISTENT CHAT ENGINE (CLAUDE AI RESILIENCE) ====================
 // Mengizinkan AI terus menyelesaikan respons dan menyimpan jawaban ke disk sesi
 // meskipun pengguna menutup tab peramban, meminimalkan aplikasi, atau keluar dari sesi (seperti Claude AI).
@@ -2198,15 +2155,7 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
     if (!effectiveUid && extraMeta && typeof extraMeta === 'object' && extraMeta.userId) {
       effectiveUid = extraMeta.userId;
     }
-    if (!effectiveUid) {
-      for (const rId of Object.keys(dbTugasRiset)) {
-        const r = dbTugasRiset[rId];
-        if (r && (r.sessionId === cleanSid || r.taskId === cleanSid) && r.userId) {
-          effectiveUid = r.userId;
-          break;
-        }
-      }
-    }
+
     const cleanUid = sanitizeUserId(effectiveUid || 'default');
     const userDir = getUserSessionsDir(cleanUid);
     const sessFile = path.join(userDir, `${cleanSid}.json`);
@@ -2218,15 +2167,7 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
     if (!userPrompt && extraMeta && typeof extraMeta === 'object' && extraMeta.prompt) {
       userPrompt = extraMeta.prompt;
     }
-    if (!userPrompt && sessionId) {
-      for (const rId of Object.keys(dbTugasRiset)) {
-        const r = dbTugasRiset[rId];
-        if (r && (r.sessionId === sessionId || r.taskId === sessionId) && r.topik) {
-          userPrompt = r.topik;
-          break;
-        }
-      }
-    }
+
 
     // ===== ANTREAN TULIS PER-SESI =====
     // Konteks (userPrompt & effectiveUid) sudah ditangkap sinkron DI ATAS — sebelum
@@ -2289,8 +2230,6 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
         const shortP = cleanP.length > 32 ? cleanP.substring(0, 32) + '...' : cleanP;
         if (extraMeta?.isImageGen) {
           dynamicTitle = `🎨 Gambar: ${shortP}`;
-        } else if (extraMeta?.isDeepResearch) {
-          dynamicTitle = `🔍 Riset: ${shortP}`;
         } else {
           dynamicTitle = shortP;
         }
@@ -2324,7 +2263,6 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
         lastMsg.model = modelName || lastMsg.model;
         lastMsg.backgroundCompleted = true;
         if (extraMeta && typeof extraMeta === 'object') {
-          if (extraMeta.isDeepResearch) lastMsg.isDeepResearch = true;
           if (extraMeta.chatSummary) lastMsg.chatSummary = extraMeta.chatSummary;
           if (Array.isArray(extraMeta.sources) && extraMeta.sources.length) lastMsg.sources = extraMeta.sources;
           if (extraMeta.latency) lastMsg.latency = extraMeta.latency;
@@ -2360,7 +2298,6 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
     };
 
     if (extraMeta && typeof extraMeta === 'object') {
-      if (extraMeta.isDeepResearch) newMsg.isDeepResearch = true;
       if (extraMeta.chatSummary) newMsg.chatSummary = extraMeta.chatSummary;
       if (Array.isArray(extraMeta.sources) && extraMeta.sources.length) newMsg.sources = extraMeta.sources;
       if (extraMeta.latency) newMsg.latency = extraMeta.latency;
@@ -3028,25 +2965,6 @@ function extractWebUrls(text) {
       const p = new URL(u);
       const h = p.hostname.toLowerCase();
       if (h.includes('youtube.com') || h.includes('youtu.be')) return false;
-      return true;
-    } catch (_) {
-      return false;
-    }
-  });
-}
-
-// Ekstraktor URL kustom komprehensif untuk Mode Deep Research (penganalisis web kustom URL)
-function extractCustomAnalysisUrls(text) {
-  if (!text || typeof text !== 'string') return [];
-  const urlRegex = /(?:https?:\/\/[^\s<>"'{}|\\^`\[\]]+|www\.[^\s<>"'{}|\\^`\[\]]+)/gi;
-  const matches = text.match(urlRegex) || [];
-  return matches.map(u => {
-    let clean = cleanExtractedUrlPunctuation(u);
-    if (/^www\./i.test(clean)) clean = 'https://' + clean;
-    return clean;
-  }).filter(u => {
-    try {
-      new URL(u);
       return true;
     } catch (_) {
       return false;
@@ -4151,359 +4069,6 @@ function executePythonSandbox(code, timeoutMs = 5000) {
   });
 }
 
-// Fungsi Logika Agen: Penganalisis Web Kustom URL Mendalam (Deep Custom URL Web Content Analyzer)
-async function jalankanRisetOtonom(taskId, topik, config = {}) {
-  const task = dbTugasRiset[taskId];
-  if (!task) return;
-
-  let allSources = [];
-  let scrapedPages = [];
-  const masterResearchModel = config.finalModel || config.model || config.agent1Model || 'openrouter/free';
-
-  // 1. Kumpulkan seluruh URL target kustom yang diberikan pengguna
-  let targetUrls = Array.isArray(config.targetUrls) ? config.targetUrls.filter(Boolean) : [];
-  if (config.urls && Array.isArray(config.urls)) {
-    config.urls.forEach(u => { if (!targetUrls.includes(u)) targetUrls.push(u); });
-  }
-  const textUrls = extractCustomAnalysisUrls(`${topik} ${config.prompt || ''}`);
-  textUrls.forEach(u => {
-    if (!targetUrls.includes(u)) targetUrls.push(u);
-  });
-
-  // Pastikan URL memiliki format protokol https:// atau http://
-  targetUrls = targetUrls.map(u => {
-    let clean = String(u).trim();
-    if (!/^https?:\/\//i.test(clean)) clean = 'https://' + clean;
-    return clean;
-  });
-
-  // Eliminasi duplikat
-  targetUrls = Array.from(new Set(targetUrls));
-
-  if (targetUrls.length === 0) {
-    task.status = 'gagal';
-    task.error = 'Deep Research kini berfungsi sebagai Penganalisis Web Kustom URL. Harap sertakan minimal 1 tautan URL kustom (misal: https://example.com/artikel) untuk dianalisis.';
-    task.currentStep = 'Gagal: Tidak ada URL kustom yang disediakan.';
-    task.completedAt = new Date().toISOString();
-    return;
-  }
-
-  try {
-    // ==========================================
-    // TAHAP 1/3: EKSTRAKSI KONTEN LENGKAP DARI URL KUSTOM
-    // ==========================================
-    task.currentStep = `[Langkah 1/3] Mengambil & mengekstrak konten lengkap dari ${targetUrls.length} URL kustom...`;
-    task.progressPercent = 20;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 1/3] Memulai ekstraksi web mendalam untuk ${targetUrls.length} URL: ${targetUrls.join(', ')}`);
-
-    for (let idx = 0; idx < targetUrls.length; idx++) {
-      if (task.aborted) break;
-      const targetUrl = targetUrls[idx];
-      let domain = targetUrl;
-      try {
-        const parsed = new URL(targetUrl);
-        domain = parsed.hostname;
-      } catch (_) {}
-
-      task.currentStep = `[Langkah 1/3] Mengunduh konten halaman (${idx + 1}/${targetUrls.length}): ${domain}...`;
-      task.progressPercent = 20 + Math.round(((idx + 1) / targetUrls.length) * 25);
-
-      try {
-        // Ekstraksi konten dengan browseWebPageContent dan fallback fetchPageDetails
-        let browseRes = await browseWebPageContent(targetUrl, 16000);
-        let contentText = (browseRes && browseRes.text && browseRes.text.length > 100) ? browseRes.text : '';
-        let pageTitle = (browseRes && browseRes.title) ? browseRes.title : domain;
-
-        if (!contentText || contentText.length < 100) {
-          const detailRes = await fetchPageDetails(targetUrl, 16000);
-          if (detailRes && detailRes.success && detailRes.content) {
-            contentText = detailRes.content;
-            pageTitle = detailRes.title || pageTitle;
-          }
-        }
-
-        if (contentText && contentText.length > 50) {
-          const pageItem = {
-            url: targetUrl,
-            domain: domain,
-            title: pageTitle || domain,
-            content: contentText,
-            charCount: contentText.length,
-            publishDate: browseRes?.publishDate || null
-          };
-          scrapedPages.push(pageItem);
-          allSources.push({
-            title: pageItem.title,
-            url: targetUrl,
-            domain: domain,
-            snippet: contentText.slice(0, 300) + '...',
-            sourceProvider: 'Custom URL Target'
-          });
-          task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Berhasil mengekstrak [${domain}]: "${pageItem.title.slice(0, 45)}" (${pageItem.charCount} karakter)`);
-        } else {
-          task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Konten dari [${domain}] terlalu minim atau terproteksi.`);
-        }
-      } catch (errScrape) {
-        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Gagal mengekstrak [${domain}]: ${errScrape.message}`);
-      }
-
-      // Update snapshot Live Inspection
-      task.liveInspection = {
-        topik,
-        mode: 'custom_url_analyzer',
-        targetUrls,
-        timestamp: new Date().toLocaleTimeString('id-ID'),
-        scrapedPagesCount: scrapedPages.length,
-        agent1: {
-          name: 'Penganalisis Web Kustom URL (Ekstraksi Konten)',
-          provider: 'Deep Web Extractor',
-          model: masterResearchModel,
-          resultsCount: scrapedPages.length,
-          results: scrapedPages.map(p => ({ title: p.title, link: p.url, snippet: p.content.slice(0, 250) + '...', charCount: p.charCount })),
-          analysis: `Berhasil mengekstrak ${scrapedPages.length} halaman web kustom utuh untuk telaah mendalam.`
-        },
-        scraper: {
-          status: 'selesai',
-          totalScraped: scrapedPages.length,
-          temporalAnalysis: '',
-          articles: scrapedPages.map(p => ({
-            title: p.title,
-            url: p.url,
-            domain: p.domain,
-            sourceProvider: 'URL Kustom Analisis',
-            length: p.charCount,
-            sample: p.content.slice(0, 300) + '...'
-          }))
-        },
-        analyzer: {
-          name: 'Penganalisis Web Kustom URL',
-          model: masterResearchModel,
-          urls: scrapedPages.map(p => ({
-            url: p.url,
-            domain: p.domain,
-            title: p.title,
-            charCount: p.charCount,
-            sample: p.content.slice(0, 300) + '...'
-          }))
-        }
-      };
-    }
-
-    if (scrapedPages.length === 0) {
-      throw new Error(`Tidak dapat mengekstrak teks isi dari URL yang diberikan. Pastikan tautan dapat diakses publik.`);
-    }
-
-    // ==========================================
-    // TAHAP 2/3: DEKONSTRUKSI KONTEN, ANALISIS DATA TERBARU VS DATA LAMA
-    // ==========================================
-    task.currentStep = `[Langkah 2/3] Model Riset (${masterResearchModel}) membedah struktur isi, mendeteksi fakta terbaru vs konteks lama...`;
-    task.progressPercent = 60;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 2/3] Model Riset (${masterResearchModel}) menganalisis mendalam: membedah isi, perubahan terbaru, dan status lama.`);
-
-    const docsBlock = scrapedPages.map((p, idx) => `
-=====================================================
-DOKUMEN KUSTOM #${idx + 1}: ${p.title}
-URL: ${p.url}
-DOMAIN: ${p.domain}
-=====================================================
-${p.content.slice(0, 14000)}
-=====================================================
-`).join('\n\n');
-
-    const promptBedahKomparatif = `Anda adalah Ahli Analisis Dokumen Web & Intelijen Data Kustom (Deep Custom URL Web Content Analyzer).
-Instruksi Pengguna: "${topik}"
-
-Berikut adalah isi teks LENGKAP dari URL kustom yang diberikan pengguna:
-${docsBlock}
-
-TUGAS ANDA:
-Lakukan analisis mendalam dan kritis terhadap konten di atas dengan fokus pada 4 pilar analisis utama:
-1. POKOK BAHASAN & STRUKTUR ISI: Apa tujuan, fungsi, topik, dan arsitektur yang dijelaskan di halaman ini?
-2. INFORMASI & TEMUAN TERBARU (THE LATEST UPDATES): Apa fakta terbaru, versi rilis, fitur baru, tanggal pembaruan, perubahan kebijakan, atau data termutakhir yang dicantumkan?
-3. KONTEKS & INFORMASI LAMA (HISTORICAL / LEGACY CONTEXT): Apa kondisi sebelumnya, versi terdahulu, status lama yang digantikan, atau informasi masa lalu yang menjadi dasar perbandingan?
-4. KOMPARASI EVOLUSI (BARU VS LAMA): Apa perbedaan utama antara apa yang lama dengan apa yang baru? Apa yang ditinggalkan/dihapus (deprecated), dan apa yang menjadi standar baru?
-
-Tuliskan telaah analitis mendalam dalam 3-5 paragraf berbobot teknis tinggi, padat fakta, dan objektif.`;
-
-    let hasilBedahAnalisis = await callLLMBackend({
-      ...config,
-      messages: [],
-      model: masterResearchModel,
-      prompt: promptBedahKomparatif,
-      system: 'Anda adalah Deep Research Web Content Analyzer yang objektif, kritis, dan sangat teliti dalam membedakan data baru vs lama.'
-    }).catch(err => {
-      console.warn('Gagal analisis bedah dokumen:', err?.message || err);
-      return `[Analisis Ekstraksi Dokumen]:\n${scrapedPages.map(p => `- ${p.title} (${p.url}): ${p.content.slice(0, 400)}...`).join('\n')}`;
-    });
-
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Bedah komparatif selesai: Model Riset berhasil mengekstrak poin isi, pembaruan terbaru, dan konteks lama.`);
-
-    task.liveInspection = {
-      ...(task.liveInspection || {}),
-      agent2: {
-        name: 'Dekonstruksi Konseptual & Analisis Struktur',
-        provider: 'Neural Content Deconstructor',
-        model: masterResearchModel,
-        resultsCount: scrapedPages.length,
-        analysis: hasilBedahAnalisis
-      },
-      scraper: {
-        status: 'selesai',
-        totalScraped: scrapedPages.length,
-        temporalAnalysis: hasilBedahAnalisis,
-        articles: scrapedPages.map(p => ({
-          title: p.title,
-          url: p.url,
-          domain: p.domain,
-          sourceProvider: 'URL Kustom Analisis',
-          length: p.charCount,
-          sample: p.content.slice(0, 350) + '...'
-        }))
-      }
-    };
-
-    // ==========================================
-    // TAHAP 3/3: PENYUSUNAN LAPORAN EKSEKUTIF DENGAN MATRIKS KOMPARASI
-    // ==========================================
-    task.currentStep = `[Langkah 3/3] Menyusun Laporan Analisis Eksekutif Web & Matriks Komparasi...`;
-    task.progressPercent = 85;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 3/3] Menyusun Laporan Analisis Eksekutif lengkap dengan tabel perbandingan Baru vs Lama.`);
-
-    const promptLaporanAkhir = `Anda adalah Lead Executive Research Architect.
-Perintah / Pertanyaan Pengguna: "${topik}"
-Daftar URL Kustom yang Dianalisis: ${targetUrls.join(', ')}
-
-Hasil Telaah Analitis Mendalam:
-${hasilBedahAnalisis}
-
-Ringkasan Dokumen Sumber:
-${docsBlock.slice(0, 8000)}
-
-Susunlah LAPORAN ANALISIS MENDALAM WEB KUSTOM yang komprehensif, elegan, dan profesional dalam format Markdown lengkap dengan struktur hierarki berikut:
-
-# 🌐 LAPORAN ANALISIS MENDALAM: PENGANALISIS WEB KUSTOM URL
-> **URL Target:** ${targetUrls.map(u => `[${u}](${u})`).join(', ')}  
-> **Fokus Analisis:** Dekonstruksi Konten Utuh, Data Terbaru vs Lama, & Matriks Evolusi  
-> **Model Analisis:** ${masterResearchModel}  
-
----
-
-## 1. 📌 Ringkasan Eksekutif & Identitas Sumber
-(Jelaskan secara ringkas maksud halaman, entitas pemilik, topik sentral, dan ringkasan nilai informasi yang terkandung).
-
-## 2. 🔍 Analisis Isi Mendalam (Core Content Breakdown)
-(Bedah secara detail poin-poin utama, arsitektur, argumen, atau fungsi yang dijelaskan pada situs/halaman tersebut).
-
-## 3. ⚡ Sorotan Temuan & Pembaruan Terbaru (The Latest Updates)
-(Uraikan secara spesifik apa saja fakta, versi, fitur, tanggal revisi, atau kebijakan terbaru yang diumumkan atau tercatat di URL ini).
-
-## 4. 📜 Konteks Historis & Informasi Terdahulu (Past Context & Legacy Info)
-(Jelaskan latar belakang lama, versi sebelumnya, kondisi sebelum pembaruan, atau baseline terdahulu yang disebutkan).
-
-## 5. ⚖️ Matriks Komparasi Evolusi (Tabel: Kondisi Lama vs Kondisi Baru)
-(Buat tabel Markdown terstruktur yang membandingkan: Aspek/Fitur | Kondisi / Versi Lama | Kondisi / Versi Terbaru | Dampak / Manfaat).
-
-## 6. 💡 Implikasi Kritis, Keabsahan & Rekomendasi Praktis
-(Berikan evaluasi kritis terhadap validitas informasi, implikasi bagi pengguna/developer/industri, serta langkah rekomendasi konkret).
-
-## 7. 🔗 Referensi Sumber Kustom Terverifikasi
-(Daftar tautan asli lengkap yang dapat diklik langsung oleh pengguna).
-
-Instruksi Tambahan:
-- Buat laporan komprehensif, padat data, dan profesional.
-- JANGAN memotong bagian laporan.`;
-
-    let laporanAkhir = await callLLMBackend({
-      ...config,
-      messages: [],
-      model: masterResearchModel,
-      prompt: promptLaporanAkhir,
-      system: 'Anda adalah Executive Research Architect yang menyusun laporan riset tingkat tinggi yang terstruktur rapi.'
-    }).catch(err => {
-      console.warn('Gagal menyusun laporan akhir:', err?.message || err);
-      return `# 🌐 LAPORAN ANALISIS MENDALAM: PENGANALISIS WEB KUSTOM URL\n\n> URL Target: ${targetUrls.join(', ')}\n\n${hasilBedahAnalisis}`;
-    });
-
-    // Buat rangkuman chat eksekutif untuk respon chat ringkas yang langsung menjawab inti pertanyaan
-    const promptChatSummary = `Anda adalah Executive Chat Summarizer.
-Pertanyaan Pengguna: "${topik}"
-Laporan Analisis Web Lengkap:
-${laporanAkhir.slice(0, 6000)}
-
-Tugas:
-Tuliskan jawaban langsung yang ringkas, elegan, dan to-the-point (2-3 paragraf) dalam percakapan chat yang menjelaskan:
-1. Inti isi halaman web yang dianalisis.
-2. Apa yang paling baru dan apa yang lama/berubah.
-3. Kesimpulan utama bagi pengguna.
-Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
-
-    let chatSummary = await callLLMBackend({
-      ...config,
-      messages: [],
-      model: masterResearchModel,
-      prompt: promptChatSummary,
-      system: 'Anda adalah AI Assistant yang ramah, efisien, dan komunikatif.'
-    }).catch(() => '');
-
-    if (task.aborted) {
-      task.status = 'dibatalkan';
-      task.currentStep = 'Riset dihentikan oleh pengguna.';
-      task.completedAt = new Date().toISOString();
-      if (config.sessionId && task.hasil) {
-        appendAssistantMessageToSessionDisk(config.sessionId, task.hasil + '\n\n*[Riset dihentikan oleh pengguna]*', masterResearchModel, {
-          userId: (task && task.userId) || config.userId || 'default',
-          isDeepResearch: true,
-          chatSummary: chatSummary,
-          sources: allSources
-        }).catch(err => console.warn('Gagal simpan riset terhenti ke sesi:', err && err.message));
-      }
-      return;
-    }
-
-    task.status = 'selesai';
-    task.progressPercent = 100;
-    task.currentStep = 'Laporan Analisis Web Kustom URL Berhasil Disusun.';
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Analisis selesai sempurna: Laporan Komparasi Lengkap & Rangkuman Eksekutif siap.`);
-    task.hasil = laporanAkhir;
-    task.chatSummary = chatSummary;
-    task.sources = allSources;
-    task.completedAt = new Date().toISOString();
-    task.liveInspection = {
-      ...(task.liveInspection || {}),
-      synthesizer: {
-        name: 'Laporan Analisis Eksekutif Komprehensif & Matriks Komparasi',
-        model: masterResearchModel,
-        status: 'selesai',
-        text: laporanAkhir,
-        length: (laporanAkhir || '').length
-      },
-      model4: {
-        name: 'Rangkuman Eksekutif Percakapan Chat',
-        model: masterResearchModel,
-        status: 'selesai',
-        text: chatSummary,
-        length: (chatSummary || '').length
-      }
-    };
-
-    if (config.sessionId) {
-      appendAssistantMessageToSessionDisk(config.sessionId, laporanAkhir, masterResearchModel, {
-        userId: (task && task.userId) || config.userId || 'default',
-        isDeepResearch: true,
-        chatSummary: chatSummary,
-        sources: allSources
-      }).catch(err => console.warn('Gagal simpan laporan riset ke sesi:', err && err.message));
-    }
-
-  } catch (error) {
-    console.error('Deep custom URL analysis failed:', error);
-    task.status = 'gagal';
-    task.error = error.message;
-    task.currentStep = 'Analisis gagal: ' + error.message;
-    task.completedAt = new Date().toISOString();
-  }
-}
-
 // Main HTTP Request Handler & Server
 async function requestHandler(req, res) {
   if (!req) return;
@@ -4877,18 +4442,6 @@ async function requestHandler(req, res) {
         }
       }
 
-      // Hentikan tugas Deep Research aktif untuk sesi ini jika ada dan milik user ini
-      for (const rId of Object.keys(dbTugasRiset)) {
-        const rTask = dbTugasRiset[rId];
-        if (rTask && (rTask.sessionId === id || rTask.taskId === id)) {
-          if (!rTask.userId || rTask.userId === reqUserId) {
-            rTask.aborted = true;
-            rTask.status = 'dibatalkan';
-            delete dbTugasRiset[rId];
-          }
-        }
-      }
-
       if (!fs.existsSync(sessFile)) {
         return sendJSON(res, 404, { error: `Sesi ${id} tidak ditemukan di penyimpanan Anda.` });
       }
@@ -4911,16 +4464,6 @@ async function requestHandler(req, res) {
             try { bgTask.proxyReq.destroy(); } catch (_) {}
           }
           delete dbActiveChatTasks[sid];
-        }
-      }
-
-      // Hentikan tugas Deep Research hanya untuk user ini
-      for (const rId of Object.keys(dbTugasRiset)) {
-        const rTask = dbTugasRiset[rId];
-        if (rTask && (!rTask.userId || rTask.userId === reqUserId)) {
-          rTask.aborted = true;
-          rTask.status = 'dibatalkan';
-          delete dbTugasRiset[rId];
         }
       }
 
@@ -6246,158 +5789,6 @@ async function requestHandler(req, res) {
     } catch (err) {
       return sendJSON(res, 500, { error: 'Gagal menghapus berkas: ' + err.message });
     }
-  }
-
-  // Deep Research: Start Custom URL Deep Analysis (Background Worker)
-  if ((pathname === '/api/mulai-riset' || pathname === '/api/deep-research/start') && method === 'POST') {
-    const body = await safeParseBody(req);
-    if (!body) return;
-    try {
-      const topik = body.topik || body.topic || body.query || body.prompt || '';
-      if (!topik) {
-        return sendJSON(res, 400, { error: 'Parameter `topik` atau `prompt` diperlukan untuk memulai Deep Research.' });
-      }
-
-      // Kumpulkan dan validasi URL target kustom pengguna
-      const rawUrls = body.targetUrls || body.urls || body.customUrls || [];
-      const targetUrls = Array.isArray(rawUrls) ? rawUrls.filter(Boolean) : (rawUrls ? [rawUrls] : []);
-      const extractedUrls = extractCustomAnalysisUrls(`${topik} ${body.prompt || ''}`);
-      extractedUrls.forEach(u => {
-        if (!targetUrls.includes(u)) targetUrls.push(u);
-      });
-
-      if (targetUrls.length === 0) {
-        return sendJSON(res, 400, {
-          error: 'Mode Deep Research kini berfungsi sebagai Penganalisis Web Kustom URL. Harap sertakan minimal 1 tautan URL kustom (misal: https://example.com/artikel) untuk dianalisis secara mendalam.'
-        });
-      }
-
-      if (body.endpoint && typeof body.endpoint === 'string') {
-        let testEp = body.endpoint.trim();
-        if (!/^https?:\/\//i.test(testEp)) {
-          testEp = `http://${testEp}`;
-        }
-        if (isOllamaEndpointForbidden(testEp)) {
-          return sendJSON(res, 400, { error: 'Endpoint Ollama mengarah ke host privat/internal - akses diblokir (SSRF Protection).' });
-        }
-        // M23: DNS-rebinding guard untuk endpoint non-tepercaya.
-        if (!isTrustedOllamaEndpoint(testEp)) {
-          const dnsVerdict = await assertResolvesPublic(testEp);
-          if (!dnsVerdict.ok) return sendJSON(res, 400, { error: dnsVerdict.msg });
-        }
-      }
-
-      pruneResearchTasks();
-      const rawSessionId = body.sessionId || req.headers['x-session-id'] || req.headers['X-Session-ID'] || null;
-      const researchUserId = reqUserId;
-      const taskId = 'research_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
-      dbTugasRiset[taskId] = {
-        taskId,
-        sessionId: rawSessionId,
-        userId: researchUserId,
-        topik,
-        targetUrls,
-        status: 'sedang_meneliti',
-        progressPercent: 10,
-        currentStep: 'Inisialisasi Agen Deep Research...',
-        stepsHistory: ['Memulai analisis topik dan parameter riset'],
-        dataTemuan: [],
-        sources: [],
-        hasil: null,
-        error: null,
-        createdAt: new Date().toISOString()
-      };
-
-      const masterModel = body.finalModel || body.model || body.agent1Model || 'openrouter/free';
-      const rawAuth = req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '').trim() : null;
-      const rawApiKey = req.headers['x-api-key'] ? String(req.headers['x-api-key']).replace(/^Bearer\s+/i, '').trim() : null;
-      const rawSerperKey = req.headers['x-serper-key'] ? String(req.headers['x-serper-key']).trim() : null;
-      const rawOllamaKey = req.headers['x-ollama-key'] ? String(req.headers['x-ollama-key']).replace(/^Bearer\s+/i, '').trim() : null;
-      const rawOpenRouterKey = req.headers['x-openrouter-key'] ? String(req.headers['x-openrouter-key']).replace(/^Bearer\s+/i, '').trim() : null;
-
-      // Jalankan proses analisis web kustom secara asinkronus di latar belakang dengan arsitektur 1-Model super efisien
-      jalankanRisetOtonom(taskId, topik, {
-        sessionId: rawSessionId,
-        userId: researchUserId,
-        targetUrls,
-        messages: body.messages || [],
-        model: masterModel,
-        provider: body.provider || (masterModel.includes('/') ? 'openrouter' : (masterModel.includes(':') ? 'ollama' : 'openrouter')),
-        endpoint: body.endpoint,
-        apiKey: body.apiKey || rawOpenRouterKey || rawAuth || rawApiKey || null,
-        openRouterKey: body.openRouterKey || body.apiKey || rawOpenRouterKey || rawAuth || rawApiKey || process.env.OPENROUTER_API_KEY,
-        ollamaApiKey: body.ollamaApiKey || body.apiKey || rawOllamaKey || '',
-        serperApiKey: body.serperApiKey || rawSerperKey || rawApiKey || process.env.SERPER_API_KEY,
-        agent1Model: masterModel,
-        agent2Model: masterModel,
-        finalModel: masterModel,
-        model3: masterModel,
-        model4: masterModel,
-        maxIterations: body.maxIterations || 3
-      }).catch(err => {
-        console.error(`Tugas riset [${taskId}] gagal secara asinkron:`, err.message);
-        if (dbTugasRiset[taskId]) {
-          dbTugasRiset[taskId].status = 'gagal';
-          dbTugasRiset[taskId].error = err.message;
-          dbTugasRiset[taskId].currentStep = 'Riset gagal: ' + err.message;
-          dbTugasRiset[taskId].completedAt = new Date().toISOString();
-        }
-      });
-
-      return sendJSON(res, 200, {
-        success: true,
-        taskId: taskId,
-        message: 'Agen AI mulai meneliti di latar belakang.'
-      });
-    } catch (e) {
-      return sendJSON(res, 500, { error: 'Gagal memulai riset: ' + e.message });
-    }
-  }
-
-  // Deep Research: Status Check & Polling
-  const researchStatusMatch = pathname.match(/^\/api\/(?:status-riset|deep-research\/status)\/([a-zA-Z0-9_-]+)$/);
-  if (researchStatusMatch && method === 'GET') {
-    const taskId = researchStatusMatch[1];
-    const dataTugas = dbTugasRiset[taskId];
-    if (!dataTugas) {
-      return sendJSON(res, 404, { error: 'Tugas riset tidak ditemukan.' });
-    }
-    const checkUserId = reqUserId;
-    if (dataTugas.userId && dataTugas.userId !== checkUserId) {
-      return sendJSON(res, 403, { error: 'Akses ditolak: Anda tidak memiliki akses ke tugas riset ini.' });
-    }
-    return sendJSON(res, 200, {
-      taskId: dataTugas.taskId,
-      status: dataTugas.status,
-      topik: dataTugas.topik,
-      progressPercent: dataTugas.progressPercent,
-      currentStep: dataTugas.currentStep,
-      stepsHistory: dataTugas.stepsHistory,
-      hasil: dataTugas.hasil,
-      chatSummary: dataTugas.chatSummary || null,
-      sources: dataTugas.sources || [],
-      liveInspection: dataTugas.liveInspection || null,
-      error: dataTugas.error
-    });
-  }
-
-  // Deep Research: Cancel / Abort Background Task
-  const cancelResearchMatch = pathname.match(/^\/api\/(?:batal-riset|deep-research\/stop)\/([a-zA-Z0-9_-]+)$/);
-  if (cancelResearchMatch && (method === 'POST' || method === 'GET')) {
-    const taskId = cancelResearchMatch[1];
-    const dataTugas = dbTugasRiset[taskId];
-    if (dataTugas) {
-      const checkUserId = reqUserId;
-      if (dataTugas.userId && dataTugas.userId !== checkUserId) {
-        return sendJSON(res, 403, { error: 'Akses ditolak.' });
-      }
-      dataTugas.aborted = true;
-      dataTugas.status = 'dibatalkan';
-      dataTugas.currentStep = 'Riset dihentikan oleh pengguna.';
-      dataTugas.completedAt = new Date().toISOString();
-      return sendJSON(res, 200, { success: true, message: 'Tugas riset berhasil dibatalkan.' });
-    }
-    return sendJSON(res, 404, { error: 'Tugas riset tidak ditemukan.' });
   }
 
   // ----------------------------------------------------
@@ -8838,24 +8229,6 @@ async function requestHandler(req, res) {
         }
       }
 
-      for (const rId of Object.keys(dbTugasRiset)) {
-        const rTask = dbTugasRiset[rId];
-        if (!rTask) continue;
-        // PRIVACY ENFORCEMENT: Only include research tasks for the requesting user!
-        if (rTask.userId && rTask.userId !== statusUserId) {
-          continue;
-        }
-        if (rTask.status === 'sedang_meneliti' && rTask.sessionId) {
-          if (!activeSessions.some(s => s.sessionId === rTask.sessionId)) {
-            activeSessions.push({ sessionId: rTask.sessionId, isDeepResearch: true, model: 'Deep Research Pro', startedAt: rTask.createdAt });
-          }
-        } else if (rTask.status === 'selesai' && rTask.sessionId) {
-          if (!recentlyCompletedSessions.some(s => s.sessionId === rTask.sessionId)) {
-            recentlyCompletedSessions.push({ sessionId: rTask.sessionId, isDeepResearch: true, model: 'Deep Research Pro', completedAt: rTask.completedAt });
-          }
-        }
-      }
-
       return sendJSON(res, 200, {
         active: activeSessions.length > 0,
         activeSessions,
@@ -8915,86 +8288,6 @@ async function requestHandler(req, res) {
       return sendJSON(res, 200, buildTaskStatusPayload(task));
     }
 
-    // Periksa apakah ada tugas Deep Research aktif atau baru selesai untuk sesi ini
-    const matchingResearchTasks = [];
-    for (const rId of Object.keys(dbTugasRiset)) {
-      const rTask = dbTugasRiset[rId];
-      if (rTask && (rTask.sessionId === sid || rTask.taskId === sid)) {
-        if (!rTask.userId || rTask.userId === statusUserId) {
-          matchingResearchTasks.push(rTask);
-        }
-      }
-    }
-
-    if (matchingResearchTasks.length > 0) {
-      // Prioritaskan tugas yang sedang aktif/meneliti terlebih dahulu
-      let rTask = matchingResearchTasks.find(t => t.status === 'sedang_meneliti');
-      if (!rTask) {
-        // Jika tidak ada yang sedang aktif, ambil tugas terbaru berdasarkan completedAt atau createdAt
-        matchingResearchTasks.sort((a, b) => new Date(b.completedAt || b.createdAt || 0) - new Date(a.completedAt || a.createdAt || 0));
-        rTask = matchingResearchTasks[0];
-      }
-
-      if (rTask.status === 'sedang_meneliti') {
-        return sendJSON(res, 200, {
-          active: true,
-          status: 'streaming',
-          isDeepResearch: true,
-          taskId: rTask.taskId,
-          sessionId: sid,
-          model: 'Deep Research Pro',
-          text: rTask.hasil || rTask.currentStep || 'Sedang meneliti di latar belakang...',
-          startedAt: rTask.createdAt,
-          completedAt: null,
-          error: null
-        });
-      }
-      if (rTask.status === 'selesai') {
-        return sendJSON(res, 200, {
-          active: false,
-          status: 'completed',
-          isDeepResearch: true,
-          taskId: rTask.taskId,
-          sessionId: sid,
-          model: 'Deep Research Pro',
-          text: rTask.hasil || '',
-          chatSummary: rTask.chatSummary || '',
-          sources: rTask.sources || [],
-          startedAt: rTask.createdAt,
-          completedAt: rTask.completedAt || new Date().toISOString(),
-          error: null
-        });
-      }
-      if (rTask.status === 'dibatalkan') {
-        return sendJSON(res, 200, {
-          active: false,
-          status: 'aborted',
-          isDeepResearch: true,
-          taskId: rTask.taskId,
-          sessionId: sid,
-          model: 'Deep Research Pro',
-          text: rTask.hasil || rTask.currentStep || 'Riset dihentikan oleh pengguna.',
-          startedAt: rTask.createdAt,
-          completedAt: rTask.completedAt || new Date().toISOString(),
-          error: null
-        });
-      }
-      if (rTask.status === 'gagal') {
-        return sendJSON(res, 200, {
-          active: false,
-          status: 'error',
-          isDeepResearch: true,
-          taskId: rTask.taskId,
-          sessionId: sid,
-          model: 'Deep Research Pro',
-          text: rTask.currentStep || '',
-          startedAt: rTask.createdAt,
-          completedAt: rTask.completedAt || new Date().toISOString(),
-          error: rTask.error || 'Terjadi kesalahan pada riset mendalam.'
-        });
-      }
-    }
-
     if (task) {
       return sendJSON(res, 200, buildTaskStatusPayload(task));
     }
@@ -9033,22 +8326,6 @@ async function requestHandler(req, res) {
           // mengembalikan status 'aborted' untuk sesi yang sudah dihentikan
           delete dbActiveChatTasks[sid];
           stoppedAny = true;
-        }
-      }
-
-      // Hentikan juga tugas Deep Research aktif untuk sesi ini jika ada
-      if (sid) {
-        for (const rId of Object.keys(dbTugasRiset)) {
-          const rTask = dbTugasRiset[rId];
-          if (rTask && (rTask.sessionId === sid || rTask.taskId === sid || rTask.taskId === body.taskId) && rTask.status === 'sedang_meneliti') {
-            if (!rTask.userId || rTask.userId === stopUserId) {
-              rTask.aborted = true;
-              rTask.status = 'dibatalkan';
-              rTask.currentStep = 'Riset dihentikan oleh pengguna.';
-              rTask.completedAt = new Date().toISOString();
-              stoppedAny = true;
-            }
-          }
         }
       }
 

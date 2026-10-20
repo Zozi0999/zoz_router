@@ -732,12 +732,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     get attachedImage() { return (this.attachedImages && this.attachedImages.length > 0) ? this.attachedImages[0] : null; },
     set attachedImage(val) { this.attachedImages = val ? (Array.isArray(val) ? val : [val]) : []; },
     attachedDocs: [], // Array of { name, size, content }
-    searchMode: 'autonomous', // 'off' | 'default' | 'premium' | 'autonomous'
+    searchMode: 'autonomous', // 'off' | 'default' | 'autonomous'
     get webSearchEnabled() { return this.searchMode !== 'off'; },
     set webSearchEnabled(val) { this.searchMode = val ? 'autonomous' : 'off'; },
-    get isDeepResearch() { return this.searchMode === 'premium'; },
     get isAutonomousSearch() { return this.searchMode === 'autonomous'; },
-    researchTargetUrls: [], // Target URL kustom untuk Mode Deep Research
     isImageGenMode: false,
     isMusicGenMode: false,
     photoEditImage: null, // dataURL foto referensi untuk mode Edit Foto AI (Img2Img)
@@ -745,7 +743,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     isGenerating: false,
     isSending: false, // Guard anti pengiriman ganda (Enter berulang saat masih ada await)
     abortController: null,
-    currentDeepResearchTaskId: null,
     soundEnabled: true,
     ollamaModels: [...OFFICIAL_OLLAMA_CLOUD_MODELS],
     openRouterModels: [...DEFAULT_OPENROUTER_MODELS],
@@ -1149,14 +1146,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     activePresetBanner: $('#activePresetBanner'),
     activePresetName: $('#activePresetName'),
     clearPresetBtn: $('#clearPresetBtn'),
-    researchUrlManagerModal: $('#researchUrlManagerModal'),
-    researchUrlManagerInput: $('#researchUrlManagerInput'),
-    researchUrlManagerAddBtn: $('#researchUrlManagerAddBtn'),
-    researchUrlManagerList: $('#researchUrlManagerList'),
-    researchUrlManagerDoneBtn: $('#researchUrlManagerDoneBtn'),
-    researchUrlManagerDisableBtn: $('#researchUrlManagerDisableBtn'),
-    researchUrlManagerSwitchModeBtn: $('#researchUrlManagerSwitchModeBtn'),
-    
+
     // Buttons & Modals
     settingsBtn: $('#settingsBtn'),
     settingsModal: $('#settingsModal'),
@@ -1240,24 +1230,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     btnRefreshCatalogBalance: $('#btnRefreshCatalogBalance'),
     btnCatalogAddCredits: $('#btnCatalogAddCredits'),
     catalogStatusInfo: $('#catalogStatusInfo'),
-
-    // Live Research Inspector Modal
-    liveResearchInspectionModal: $('#liveResearchInspectionModal'),
-    inspectTopik: $('#inspectTopik'),
-    inspectCurrentQuery: $('#inspectCurrentQuery'),
-    inspectIteration: $('#inspectIteration'),
-    inspectTimestamp: $('#inspectTimestamp'),
-    btnTabInspectAgent1: $('#btnTabInspectAgent1'),
-    btnTabInspectAgent2: $('#btnTabInspectAgent2'),
-    btnTabInspectScraper: $('#btnTabInspectScraper'),
-    btnTabInspectSynthesizer: $('#btnTabInspectSynthesizer'),
-    btnTabInspectModel4: $('#btnTabInspectModel4'),
-    inspectCountAgent1: $('#inspectCountAgent1'),
-    inspectCountAgent2: $('#inspectCountAgent2'),
-    inspectCountScraper: $('#inspectCountScraper'),
-    inspectCountSynthesizer: $('#inspectCountSynthesizer'),
-    inspectCountModel4: $('#inspectCountModel4'),
-    inspectTabContent: $('#inspectTabContent'),
 
     // Bio-Endocrine Hormone & Connectome (Jalur 1: CodeEndocrine v3)
     endocrineMonitorBtn: $('#endocrineMonitorBtn'),
@@ -1813,7 +1785,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
         if (hasChapters) { score += 15; feedbackNotes.push('Struktur bab lengkap'); }
         if (hasAiCliche) { score -= 10; feedbackNotes.push('Klise model AI'); }
       }
-      // c. Uji Nilai Guna Penelusuran Web (search_web / deep-research)
+      // c. Uji Nilai Guna Penelusuran Web (search_web)
       else if (skill.includes('pencarian') || skill.includes('search') || (metadata.sources && metadata.sources.length > 0)) {
         const sources = Array.isArray(metadata.sources) ? metadata.sources : [];
         const deepSources = sources.filter(s => (s.snippet || '').length >= 70);
@@ -4529,7 +4501,7 @@ RESONANSI: ${this.currentVibe}
         STATE.searchMode = 'autonomous';
         safeLocalStorage.setItem('zoz_router_search_mode_v1', 'autonomous');
         safeLocalStorage.setItem('zoz_router_search_mode_autonomous_v2', 'true');
-      } else if (savedSearchMode && ['off', 'default', 'premium', 'autonomous'].includes(savedSearchMode)) {
+      } else if (savedSearchMode && ['off', 'default', 'autonomous'].includes(savedSearchMode)) {
         STATE.searchMode = savedSearchMode;
       } else {
         STATE.searchMode = 'autonomous';
@@ -4761,11 +4733,6 @@ RESONANSI: ${this.currentVibe}
           const effectiveSources = Array.isArray(data.sources) ? data.sources : (Array.isArray(curLast.sources) ? curLast.sources : null);
           curLast.content = (effectiveSources && effectiveSources.length > 0) ? appendWebVerificationNote(trimmed, effectiveSources) : trimmed;
           curLast.backgroundCompleted = true;
-          if (data.isDeepResearch) {
-            curLast.isDeepResearch = true;
-            if (data.chatSummary) curLast.chatSummary = data.chatSummary;
-            if (Array.isArray(data.sources)) curLast.sources = data.sources;
-          }
           activeSession.updatedAt = new Date().toISOString();
           savePersistedState();
           renderCurrentSession(false);
@@ -4782,8 +4749,6 @@ RESONANSI: ${this.currentVibe}
           model: data.model || 'AI Model',
           timestamp: new Date().toISOString(),
           backgroundCompleted: true,
-          isDeepResearch: !!data.isDeepResearch,
-          chatSummary: data.chatSummary || null,
           sources: data.sources || null
         });
         activeSession.updatedAt = new Date().toISOString();
@@ -4949,10 +4914,6 @@ RESONANSI: ${this.currentVibe}
         const data = await res.json();
         if (!data) return;
 
-        if (data.isDeepResearch && data.taskId) {
-          STATE.currentDeepResearchTaskId = data.taskId;
-        }
-
         // Bentuk delta (baru): data.text hanya POTONGAN + fullBytes = total byte.
         // Bentuk lama: data.text = teks penuh → jadikan buffer baru & hitung byte-nya.
         let currentText = '';
@@ -4976,23 +4937,7 @@ RESONANSI: ${this.currentVibe}
         // mereset buffer (respons 'none' kosong) — inilah penyelamat parsial.
         if (currentText && currentText.trim()) lastKnownText = currentText;
         if (bubbleText && currentText) {
-          if (data.isDeepResearch && data.status === 'streaming') {
-            // Diff-guard: hanya render ulang bila teks benar-benar bertambah.
-            if (currentText !== lastRenderedPollText) {
-              lastRenderedPollText = currentText;
-              bubbleText.innerHTML = `
-              <div class="deep-research-live-card" style="padding:14px; border:1px solid rgba(0,240,255,0.3); border-radius:12px; background:rgba(10,15,25,0.7); backdrop-filter:blur(8px);">
-                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; color:var(--neon-cyan); font-weight:600; font-size:0.95rem;">
-                  <i class="fa-solid fa-atom fa-spin"></i> Deep Research Pro Aktif di Latar Belakang
-                </div>
-                <div style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:6px;">${escapeHtml(currentText)}</div>
-                <div style="width:100%; background:rgba(255,255,255,0.1); border-radius:4px; height:4px; overflow:hidden;">
-                  <div style="width:65%; height:100%; background:linear-gradient(90deg, var(--neon-cyan), var(--neon-purple)); border-radius:4px; animation: progress-indeterminate 1.5s infinite linear;"></div>
-                </div>
-              </div>
-            `;
-            }
-          } else if (currentText !== lastRenderedPollText) {
+          if (currentText !== lastRenderedPollText) {
             lastRenderedPollText = currentText;
             bubbleText.innerHTML = renderMarkdown(currentText) + (data.status === 'streaming' ? '<span class="typing-cursor"></span>' : '');
           }
@@ -5003,7 +4948,6 @@ RESONANSI: ${this.currentVibe}
           pollDone = true; // M7: kunci — tick antrian yang tersisa tidak boleh mengulang handler ini
           clearInterval(activeChatPollTimer);
           activeChatPollTimer = null;
-          STATE.currentDeepResearchTaskId = null;
           pollBufferText = '';
           pollFullBytes = 0;
           pollEpoch = 0;
@@ -5012,19 +4956,12 @@ RESONANSI: ${this.currentVibe}
           // 'none' datang tanpa field teks sehingga buffer sudah ter-reset di atas.
           // Fallback ke teks terakhir yang tampil agar parsial tidak hilang dari DOM.
           const finalReportText = (currentText && currentText.trim()) ? currentText : lastKnownText;
-          const actualModelName = modelName || data.model || (data.isDeepResearch ? 'Deep Research Pro' : 'AI Model');
+          const actualModelName = modelName || data.model || 'AI Model';
           if (bubbleText) {
             if (!finalReportText.trim()) {
               // Konten kosong total (tanpa initialText & tanpa stream) — jangan timpa
               // bubble; cukup buang kursor streaming yang menggantung.
               bubbleText.querySelector('.typing-cursor')?.remove();
-            } else if (data.isDeepResearch) {
-              const allSources = Array.isArray(data.sources) ? data.sources : [];
-              const chatSummary = data.chatSummary || '';
-              const nowIso = new Date().toISOString();
-              bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(finalReportText, actualModelName, allSources, nowIso, chatSummary);
-              enhanceCodeBlocks(bubbleText);
-              attachDeepResearchCardEvents(assistantRow, finalReportText, actualModelName, allSources, nowIso);
             } else {
               bubbleText.innerHTML = renderMarkdown(finalReportText);
               enhanceCodeBlocks(bubbleText);
@@ -5037,7 +4974,7 @@ RESONANSI: ${this.currentVibe}
           if (metaBox) {
             metaBox.innerHTML = `
               <strong>${escapeHtml(actualModelName)}</strong>
-              <span class="meta-model-badge" style="background:rgba(0,240,255,0.15); color:var(--neon-cyan);">${data.isDeepResearch ? 'Deep Research Sync' : 'Background Sync'}</span>
+              <span class="meta-model-badge" style="background:rgba(0,240,255,0.15); color:var(--neon-cyan);">Background Sync</span>
               <span>⏱️ ${duration}s</span>
             `;
           }
@@ -5062,8 +4999,6 @@ RESONANSI: ${this.currentVibe}
                 model: modelName || data.model,
                 timestamp: new Date().toISOString(),
                 backgroundCompleted: true,
-                isDeepResearch: !!data.isDeepResearch,
-                chatSummary: data.chatSummary || null,
                 sources: data.sources || null
               });
             }
@@ -5074,11 +5009,6 @@ RESONANSI: ${this.currentVibe}
             }
             lastMsg.model = modelName || data.model || lastMsg.model;
             lastMsg.backgroundCompleted = true;
-            if (data.isDeepResearch) {
-              lastMsg.isDeepResearch = true;
-              if (data.chatSummary) lastMsg.chatSummary = data.chatSummary;
-              if (Array.isArray(data.sources)) lastMsg.sources = data.sources;
-            }
           }
           session.updatedAt = new Date().toISOString();
           savePersistedState();
@@ -5102,7 +5032,6 @@ RESONANSI: ${this.currentVibe}
           pollDone = true; // M7: kunci agar handler error tidak berjalan dua kali
           clearInterval(activeChatPollTimer);
           activeChatPollTimer = null;
-          STATE.currentDeepResearchTaskId = null;
           setGeneratingState(false);
           // currentText sudah menampung buffer lengkap (baik bentuk delta maupun full),
           // jadi diambil SEBELUM buffer di-reset di bawah.
@@ -5280,7 +5209,6 @@ RESONANSI: ${this.currentVibe}
               slot: m.slot,
               sources: m.sources,
               stats: m.stats,
-              isDeepResearch: !!m.isDeepResearch,
               latency: m.latency,
               timestamp: m.timestamp,
               isMusicGen: !!m.isMusicGen,
@@ -9617,7 +9545,6 @@ RESONANSI: ${this.currentVibe}
     updateImageGenModeUI();
     STATE.isMusicGenMode = false;
     if (typeof updateMusicGenModeUI === 'function') updateMusicGenModeUI();
-    clearResearchTargetUrls();
     STATE.attachedDocs = [];
     clearAttachedImages();
     if (els.docFileInput) els.docFileInput.value = '';
@@ -9741,13 +9668,6 @@ RESONANSI: ${this.currentVibe}
     updateImageGenModeUI();
     STATE.isMusicGenMode = false;
     if (typeof updateMusicGenModeUI === 'function') updateMusicGenModeUI();
-    // Sinkronkan URL target riset sesuai sesi yang dituju
-    if (Array.isArray(targetSession.researchTargetUrls)) {
-      STATE.researchTargetUrls = [...targetSession.researchTargetUrls];
-    } else {
-      STATE.researchTargetUrls = [];
-    }
-    renderResearchUrlChips();
     STATE.attachedDocs = [];
     clearAttachedImages();
     if (els.docFileInput) els.docFileInput.value = '';
@@ -10456,7 +10376,7 @@ RESONANSI: ${this.currentVibe}
           docFormat: msg.docFormat
         });
       }
-      appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs, msg.isDeepResearch, msg.latency, msg.timestamp || session.updatedAt || session.createdAt, msg);
+      appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs, false, msg.latency, msg.timestamp || session.updatedAt || session.createdAt, msg);
     });
 
     enhanceCodeBlocks(els.messagesList);
@@ -10627,7 +10547,7 @@ RESONANSI: ${this.currentVibe}
     els.messagesList.appendChild(row);
   }
 
-  function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1, sources = null, docs = null, isDeepResearch = false, latency = null, timestamp = null, extraMeta = null) {
+  function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1, sources = null, docs = null, _legacyUnused = false, latency = null, timestamp = null, extraMeta = null) {
     const row = document.createElement('div');
     row.className = `message-row ${role}`;
     row.dataset.index = index;
@@ -10699,25 +10619,8 @@ RESONANSI: ${this.currentVibe}
       `;
     }
 
-    const isActuallyDeepResearch = Boolean(
-      isDeepResearch ||
-      (role === 'assistant' && typeof content === 'string' && (
-        /#\s*(?:📑|🔬)?\s*(?:laporan\s*)?deep\s*research/i.test(content) ||
-        content.includes('Lead Auditor & Corrector') ||
-        (content.includes('DEEP RESEARCH') && /##\s*1\.\s*.*(?:rangkuman|pendahuluan|ringkasan|komprehensif)/i.test(content)) ||
-        /##\s*1\.\s*.*(?:pendahuluan\s*&\s*ringkasan\s*komprehensif|ringkasan\s*eksekutif)/i.test(content)
-      ))
-    );
-
     let statsHtml = '';
-    if (isActuallyDeepResearch && role === 'assistant') {
-      statsHtml = `
-        <span class="meta-badge engine-badge"><i class="fa-solid fa-microscope" style="color:var(--neon-amber);"></i> DEEP RESEARCH</span>
-        <span class="meta-badge model-badge">${escapeHtml(model || 'Zoz AI')}</span>
-        ${latency ? `<span class="meta-badge latency-badge"><i class="fa-solid fa-bolt"></i> ${escapeHtml(latency)}s</span>` : ''}
-        ${sources && sources.length > 0 ? `<span class="meta-badge sources-badge"><i class="fa-solid fa-globe"></i> ${sources.length} Sumber</span>` : ''}
-      `;
-    } else if (stats && role === 'assistant') {
+    if (stats && role === 'assistant') {
       statsHtml = `
         <span class="meta-model-badge">${escapeHtml(model)}</span>
         <span>⏱️ ${stats.duration}s</span>
@@ -10736,13 +10639,7 @@ RESONANSI: ${this.currentVibe}
       }
     }
     const hasText = Boolean(safeContent && String(safeContent).trim().length > 0);
-    let renderedBody = '';
-    if (isActuallyDeepResearch && role === 'assistant' && hasText) {
-      const msgObj = (typeof index === 'number' && index >= 0 && currentSess?.messages?.[index]) ? currentSess.messages[index] : null;
-      renderedBody = buildDeepResearchSummaryCardHtml(safeContent, model, sources, resolvedTimestamp || timestamp, msgObj?.chatSummary || '');
-    } else {
-      renderedBody = role === 'assistant' ? renderMarkdown(safeContent) : escapeHtml(safeContent).replace(/\n/g, '<br>');
-    }
+    const renderedBody = role === 'assistant' ? renderMarkdown(safeContent) : escapeHtml(safeContent).replace(/\n/g, '<br>');
     const textDisplayStyle = (!hasText && role === 'user') ? 'style="display:none;"' : '';
 
     let assistantGeneratedImagesHtml = '';
@@ -10796,13 +10693,11 @@ RESONANSI: ${this.currentVibe}
     }
 
     let sourcesHtml = '';
-    if (sources && Array.isArray(sources) && sources.length > 0 && role === 'assistant' && !isActuallyDeepResearch) {
+    if (sources && Array.isArray(sources) && sources.length > 0 && role === 'assistant') {
       sourcesHtml = buildSourcesSectionHtml(sources, true);
     }
 
-    const metaContent = (isActuallyDeepResearch && role === 'assistant')
-      ? statsHtml
-      : `<strong>${roleLabel}</strong> ${statsHtml}`;
+    const metaContent = `<strong>${roleLabel}</strong> ${statsHtml}`;
 
     row.innerHTML = `
       <div class="message-avatar">${avatarIcon}</div>
@@ -10824,11 +10719,6 @@ RESONANSI: ${this.currentVibe}
         </div>
       </div>
     `;
-
-    // Attach Deep Research Card Actions (Full Report Modal & Quick Exports)
-    if (isActuallyDeepResearch && role === 'assistant' && hasText) {
-      attachDeepResearchCardEvents(row, content, model, sources, null);
-    }
 
     // Attach image card listeners for assistant generated visual cards
     if (role === 'assistant' && imgList.length > 0) {
@@ -16546,21 +16436,6 @@ ${blocks}
       }
       return;
     }
-    if (trimmedLow === '/deep-research' || trimmedLow === '/deep' || trimmedLow === '/riset') {
-      setSearchMode('premium');
-      if (els.promptInput) {
-        els.promptInput.value = '';
-        autoResizeTextarea(els.promptInput);
-      }
-      const count = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls.length : 0;
-      if (count === 0) {
-        openResearchUrlManagerModal();
-        showToast('🔬 Mode Deep Research Aktif! Tambahkan URL sumber yang ingin dianalisis.');
-      } else {
-        showToast(`🔬 Mode Deep Research Aktif (${count} URL Sumber)`);
-      }
-      return;
-    }
     if (trimmedLow === '/web-search' || trimmedLow === '/search' || trimmedLow === '/google') {
       setSearchMode('default');
       if (els.promptInput) {
@@ -16582,12 +16457,6 @@ ${blocks}
 
     // Simpan prompt teks asli pengguna untuk tampilan gelembung obrolan (displayContent)
     let originalUserPrompt = rawText;
-    // Ambil URL & perintah slash dari teks ASLI sebelum auto-conversion. Blok lipat di
-    // bawah menimpa rawText dengan instruksi singkat sehingga URL/perintah di dalamnya
-    // hilang — bila divalidasi setelah lipat, Mode Deep Research menolak URL yang sah.
-    const preFoldUrls = extractCustomAnalysisUrls(rawText);
-    const preFoldDeepCommand = /^\/(?:deep|research|riset|deep-research)\s+/i.test(rawText.trim());
-
     // Claude / Grok AI Style: Jika prompt teks yang dikirim pengguna merupakan codingan atau laporan panjang
     // dan belum ada dokumen lampiran, otomatis konversi blok tersebut menjadi file markdown lampiran utuh tanpa batas baris
     const userExplicitlyDismissedFold = Boolean(rawText && typeof isTextImmuneFromAutoFold === 'function' && isTextImmuneFromAutoFold(rawText));
@@ -16611,60 +16480,39 @@ ${blocks}
       }
     }
 
-    const isExplicitDeepResearch = preFoldDeepCommand || /^\/(?:deep|research|riset|deep-research)\s+/i.test(rawText.trim());
-    if (STATE.isDeepResearch || isExplicitDeepResearch) {
-      // Validasi URL kustom untuk Mode Deep Research
-      let targetUrls = Array.isArray(STATE.researchTargetUrls) ? [...STATE.researchTargetUrls] : [];
-      const promptUrls = extractCustomAnalysisUrls(rawText);
-      promptUrls.forEach(u => {
-        if (!targetUrls.includes(u)) targetUrls.push(u);
-      });
-      // URL dari teks asli (sebelum lipat otomatis) juga dihitung sah
-      preFoldUrls.forEach(u => {
-        if (!targetUrls.includes(u)) targetUrls.push(u);
-      });
-
-      if (targetUrls.length === 0) {
-        showToast('⚠️ Mode Deep Research memerlukan minimal 1 URL kustom untuk dianalisis. Tempel URL di modal Kelola Sumber atau kolom chat.');
-        openResearchUrlManagerModal();
-        STATE.isSending = false;
-        return;
-      }
-    } else {
-      // Auto-Extraction URL Web Publik untuk Analisis & Ringkasan AI (khusus mode biasa/non-Deep Research)
-      const detectedWebUrls = extractWebUrlsFromText(rawText);
-      if (detectedWebUrls.length > 0) {
-        const urlsToScrape = detectedWebUrls.slice(0, 2);
-        try {
-          const scrapePromises = urlsToScrape.map(u => extractWebContentFromUrl(u, 7500));
-          const scrapeResults = await Promise.all(scrapePromises);
-          let extractedCount = 0;
-          scrapeResults.forEach(res => {
-            if (res && res.success && res.content && res.content.length > 30) {
-              if (!docs.some(existing => existing && existing.url === res.url)) {
-                extractedCount++;
-                const docName = `[Web: ${res.title || res.domain}]`;
-                docs.push({
-                  name: docName,
-                  size: `${res.charCount || res.content.length} karakter`,
-                  content: `Sumber URL: ${res.url}\nJudul Halaman: ${res.title}\nDomain: ${res.domain}\n\n${res.content}`,
-                  url: res.url,
-                  isWeb: true
-                });
-              }
-            }
-          });
-          if (extractedCount > 0) {
-            showToast(`🌐 Berhasil mengekstrak ${extractedCount} konten website secara langsung!`, 'success');
-            // Jika pengguna hanya menempelkan link atau slash command tanpa instruksi khusus, otomatis buat prompt ringkasan
-            let cleanPromptCheck = rawText.replace(/^\/(?:web|read|ringkas|baca|scrape)\s+/i, '').trim();
-            if (/^https?:\/\/[^\s]+$/i.test(cleanPromptCheck)) {
-              rawText = `Tolong baca, analisis, dan rangkum intisari serta poin-poin penting dari website berikut secara terstruktur: ${cleanPromptCheck}`;
+    // Auto-Extraction URL Web Publik untuk Analisis & Ringkasan AI
+    const detectedWebUrls = extractWebUrlsFromText(rawText);
+    if (detectedWebUrls.length > 0) {
+      const urlsToScrape = detectedWebUrls.slice(0, 2);
+      try {
+        const scrapePromises = urlsToScrape.map(u => extractWebContentFromUrl(u, 7500));
+        const scrapeResults = await Promise.all(scrapePromises);
+        let extractedCount = 0;
+        scrapeResults.forEach(res => {
+          if (res && res.success && res.content && res.content.length > 30) {
+            if (!docs.some(existing => existing && existing.url === res.url)) {
+              extractedCount++;
+              const docName = `[Web: ${res.title || res.domain}]`;
+              docs.push({
+                name: docName,
+                size: `${res.charCount || res.content.length} karakter`,
+                content: `Sumber URL: ${res.url}\nJudul Halaman: ${res.title}\nDomain: ${res.domain}\n\n${res.content}`,
+                url: res.url,
+                isWeb: true
+              });
             }
           }
-        } catch (err) {
-          console.warn('Auto-scrape URL web notice:', err.message);
+        });
+        if (extractedCount > 0) {
+          showToast(`🌐 Berhasil mengekstrak ${extractedCount} konten website secara langsung!`, 'success');
+          // Jika pengguna hanya menempelkan link atau slash command tanpa instruksi khusus, otomatis buat prompt ringkasan
+          let cleanPromptCheck = rawText.replace(/^\/(?:web|read|ringkas|baca|scrape)\s+/i, '').trim();
+          if (/^https?:\/\/[^\s]+$/i.test(cleanPromptCheck)) {
+            rawText = `Tolong baca, analisis, dan rangkum intisari serta poin-poin penting dari website berikut secara terstruktur: ${cleanPromptCheck}`;
+          }
         }
+      } catch (err) {
+        console.warn('Auto-scrape URL web notice:', err.message);
       }
     }
 
@@ -16901,21 +16749,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       const effectiveRefPhoto = STATE.photoEditImage || (images.length > 0 ? images[0] : null);
       await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel, effectiveRefPhoto);
       // Mode Edit Foto tetap aktif jika pengguna belum membatalkannya (bukan hanya sekali pakai)
-    } else if (isExplicitDeepResearch || STATE.isDeepResearch) {
-      // Deep Research dieksekusi jika pengguna mengaktifkan mode Deep Research (Premium) dari UI atau mengetik slash command
-      const cleanResearchPrompt = isExplicitDeepResearch ? text.replace(/^\/(?:deep|research|riset)\s+/i, '').trim() : text.trim();
-      let deepTargetUrls = Array.isArray(STATE.researchTargetUrls) ? [...STATE.researchTargetUrls] : [];
-      const extractedUrls = extractCustomAnalysisUrls(text);
-      extractedUrls.forEach(u => {
-        if (!deepTargetUrls.includes(u)) deepTargetUrls.push(u);
-      });
-      const activeEngine = (STATE.mode === 'auto')
-        ? (STATE.settings.autoPolicy === 'cloud_first' ? 'openrouter' : 'ollama')
-        : STATE.mode;
-      const activeModel = (activeEngine === 'openrouter')
-        ? STATE.settings.openRouterModel
-        : STATE.settings.ollamaModel;
-      await runDeepResearchStreaming(session, cleanResearchPrompt || text, effectiveImages, activeModel, activeEngine, deepTargetUrls);
+
     } else if (isImageGenerationTrigger(text) && !canModelHandleImage && !STATE.settings.openRouterKey && (STATE.mode === 'openrouter' || targetModel.includes('/'))) {
       // Jika model OpenRouter dipilih tapi tanpa API Key untuk tool calling dan tidak mampu gambar langsung,
       // fallback ke AI Image Studio dengan model gratis (Pollinations) agar pengguna tetap mendapatkan karya visual
@@ -21837,14 +21671,6 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         body: JSON.stringify({ sessionId: activeSession.id, userId: STATE.userId })
       }).catch(() => {});
     }
-    if (STATE.currentDeepResearchTaskId && !IS_GITHUB_PAGES) {
-      const abortTaskId = STATE.currentDeepResearchTaskId;
-      STATE.currentDeepResearchTaskId = null;
-      fetch('/api/batal-riset/' + abortTaskId, {
-        method: 'POST',
-        headers: { 'X-User-ID': STATE.userId }
-      }).catch(() => {});
-    }
     if (STATE.abortController) {
       STATE.abortController.abort();
     }
@@ -22160,27 +21986,11 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       setWebSearchIconClass('fa-solid fa-globe');
       if (els.searchBadge) els.searchBadge.style.display = 'none';
       els.webSearchToggleBtn.title = 'Pencarian Web Default: Aktif (Klik untuk matikan)';
-    } else if (mode === 'premium') {
-      els.webSearchToggleBtn.classList.add('mode-premium', 'active');
-      setWebSearchIconClass('fa-solid fa-microscope');
-      const count = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls.length : 0;
-      if (els.searchBadge) {
-        els.searchBadge.style.display = 'block';
-        els.searchBadge.textContent = count > 0 ? `PRO • ${count}` : 'PRO';
-      }
-      els.webSearchToggleBtn.title = `Deep Research: ${count} URL Sumber (Klik tombol untuk matikan, klik badge PRO untuk kelola sumber)`;
+
     } else {
       setWebSearchIconClass('fa-solid fa-compass');
       if (els.searchBadge) els.searchBadge.style.display = 'none';
       els.webSearchToggleBtn.title = 'Autonomous Web Explorer: Nonaktif (Klik untuk aktifkan)';
-    }
-
-    if (mode === 'premium') {
-      renderResearchUrlChips();
-    } else {
-      if (els.researchUrlChips) {
-        els.researchUrlChips.style.display = 'none';
-      }
     }
 
     // Update active check indicators & tombol aksi pada popup menu
@@ -22200,7 +22010,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         closeBtn.style.display = (isActive && itemMode !== 'off') ? 'inline-flex' : 'none';
       }
       if (manageBtn) {
-        manageBtn.style.display = (isActive && itemMode === 'premium') ? 'inline-flex' : 'none';
+        if (manageBtn) manageBtn.style.display = 'none';
       }
     });
   }
@@ -22213,7 +22023,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     if (STATE.searchMode === 'autonomous') {
       setSearchMode('off');
       showToast('Autonomous Web Explorer dinonaktifkan.');
-    } else if (STATE.searchMode === 'premium' || STATE.searchMode === 'default') {
+    } else if (STATE.searchMode === 'default') {
       setSearchMode('off');
       showToast('Pencarian web dinonaktifkan.');
     } else {
@@ -22232,1985 +22042,6 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     if (!els.searchDropdown) return;
     els.searchDropdown.style.display = 'none';
     els.webSearchToggleBtn?.setAttribute('aria-expanded', 'false');
-  }
-
-  // ==================== CUSTOM URL DEEP RESEARCH HELPER FUNCTIONS ====================
-  function extractCustomAnalysisUrls(text) {
-    if (!text || typeof text !== 'string') return [];
-    const urlRegex = /(?:https?:\/\/[^\s<>"'{}|\\^`\[\]]+|www\.[^\s<>"'{}|\\^`\[\]]+)/gi;
-    const matches = text.match(urlRegex) || [];
-    return matches.map(u => {
-      let clean = cleanExtractedUrlPunctuation(u);
-      if (/^www\./i.test(clean)) clean = 'https://' + clean;
-      return clean;
-    }).filter(u => {
-      try {
-        new URL(u);
-        return true;
-      } catch (_) {
-        return false;
-      }
-    });
-  }
-
-  function addResearchTargetUrl(rawUrl) {
-    if (!rawUrl || typeof rawUrl !== 'string') return false;
-    let url = rawUrl.trim();
-    if (!url) return false;
-    if (!/^https?:\/\//i.test(url)) {
-      url = 'https://' + url;
-    }
-    try {
-      new URL(url);
-    } catch (_) {
-      showToast('⚠️ Format URL tidak valid. Mohon sertakan tautan yang benar.');
-      return false;
-    }
-    if (!Array.isArray(STATE.researchTargetUrls)) {
-      STATE.researchTargetUrls = [];
-    }
-    if (STATE.researchTargetUrls.includes(url)) {
-      showToast('⚠️ URL ini sudah ada di daftar target riset.');
-      return false;
-    }
-    STATE.researchTargetUrls.push(url);
-    syncActiveSessionResearchUrls();
-    renderResearchUrlChips();
-    if (els.researchTargetUrlInput) els.researchTargetUrlInput.value = '';
-    if (els.researchUrlManagerInput) els.researchUrlManagerInput.value = '';
-    showToast('🔗 URL target berhasil ditambahkan ke Deep Research.');
-    return true;
-  }
-
-  function removeResearchTargetUrl(index) {
-    if (!Array.isArray(STATE.researchTargetUrls)) return;
-    if (index >= 0 && index < STATE.researchTargetUrls.length) {
-      STATE.researchTargetUrls.splice(index, 1);
-      syncActiveSessionResearchUrls();
-      renderResearchUrlChips();
-    }
-  }
-
-  function syncActiveSessionResearchUrls() {
-    if (STATE.currentSessionId) {
-      const activeSess = STATE.sessions.find(s => s.id === STATE.currentSessionId);
-      if (activeSess) {
-        activeSess.researchTargetUrls = [...STATE.researchTargetUrls];
-        savePersistedState();
-      }
-    }
-  }
-
-  function clearResearchTargetUrls() {
-    STATE.researchTargetUrls = [];
-    syncActiveSessionResearchUrls();
-    renderResearchUrlChips();
-    if (els.researchTargetUrlInput) els.researchTargetUrlInput.value = '';
-    if (els.researchUrlManagerInput) els.researchUrlManagerInput.value = '';
-  }
-
-  function openResearchUrlManagerModal() {
-    renderResearchUrlManagerList();
-    openModal('researchUrlManagerModal');
-    setTimeout(() => {
-      els.researchUrlManagerInput?.focus();
-    }, 150);
-  }
-
-  function renderResearchUrlChips() {
-    // Update badge count
-    const count = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls.length : 0;
-    if (els.searchBadge && STATE.searchMode === 'premium') {
-      els.searchBadge.style.display = 'block';
-      els.searchBadge.textContent = count > 0 ? `PRO • ${count}` : 'PRO';
-    }
-    if (els.webSearchToggleBtn && STATE.searchMode === 'premium') {
-      els.webSearchToggleBtn.title = `Deep Research: ${count} URL Sumber (Klik tombol untuk menu, klik badge PRO untuk kelola sumber)`;
-    }
-
-    // Update inline chips (for backward compatibility / banner display)
-    if (els.researchUrlChips) {
-      if (STATE.searchMode !== 'premium') {
-        els.researchUrlChips.style.display = 'none';
-        return;
-      }
-      const urls = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls : [];
-      if (urls.length === 0) {
-        els.researchUrlChips.style.display = 'none';
-        els.researchUrlChips.innerHTML = '';
-      } else {
-        els.researchUrlChips.style.display = 'flex';
-        els.researchUrlChips.innerHTML = urls.map((url, idx) => {
-          let domain = url;
-          try { domain = new URL(url).hostname; } catch (_) {}
-          return `
-            <div class="research-url-chip" title="${escapeHtml(url)}">
-              <i class="fa-solid fa-link" style="font-size:0.7rem; color:var(--neon-amber);"></i>
-              <span class="research-url-chip-domain">${escapeHtml(domain)}</span>
-              <button type="button" class="research-url-chip-remove" data-idx="${idx}" title="Hapus URL ini" aria-label="Hapus URL">
-                <i class="fa-solid fa-xmark"></i>
-              </button>
-            </div>
-          `;
-        }).join('');
-
-        els.researchUrlChips.querySelectorAll('.research-url-chip-remove').forEach(btn => {
-          btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const idx = parseInt(btn.dataset.idx, 10);
-            removeResearchTargetUrl(idx);
-          });
-        });
-      }
-    }
-
-    // Update modal list
-    renderResearchUrlManagerList();
-  }
-
-  function renderResearchUrlManagerList() {
-    if (!els.researchUrlManagerList) return;
-    const urls = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls : [];
-    if (urls.length === 0) {
-      els.researchUrlManagerList.innerHTML = `
-        <div style="text-align: center; padding: 24px; color: var(--text-dim); font-size: 0.8rem;">
-          <i class="fa-solid fa-link" style="font-size: 1.5rem; color: rgba(255, 170, 0, 0.3); margin-bottom: 8px; display: block;"></i>
-          Belum ada URL sumber. Tambah URL di atas untuk mulai analisis.
-        </div>
-      `;
-      return;
-    }
-    els.researchUrlManagerList.innerHTML = urls.map((url, idx) => {
-      let domain = url;
-      try { domain = new URL(url).hostname; } catch (_) {}
-      return `
-        <div class="research-url-manager-item">
-          <i class="fa-solid fa-link research-url-manager-item-icon"></i>
-          <span class="research-url-manager-item-url" title="${escapeHtml(url)}">${escapeHtml(url)}</span>
-          <span class="research-url-manager-item-domain">${escapeHtml(domain)}</span>
-          <button type="button" class="research-url-manager-item-remove" data-idx="${idx}" title="Hapus URL ini" aria-label="Hapus URL">
-            <i class="fa-solid fa-xmark"></i>
-          </button>
-        </div>
-      `;
-    }).join('');
-
-    els.researchUrlManagerList.querySelectorAll('.research-url-manager-item-remove').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const idx = parseInt(btn.dataset.idx, 10);
-        removeResearchTargetUrl(idx);
-      });
-    });
-  }
-
-  // ==================== DEEP RESEARCH STREAMING ENGINE (PREMIUM) ====================
-  // Helper non-streaming untuk eksekusi telaah mandiri Model Agen 1 & Agen 2 di browser
-  async function callClientLLMDirect(modelName, prompt, system = '', engine = '') {
-    if (!prompt || !modelName) return '';
-    const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
-    const hasCustomExternalEndpoint = Boolean(STATE.settings.ollamaApiKey && !ep.includes('ollama.com') && !ep.includes('127.0.0.1') && !ep.includes('localhost'));
-    const isModelOpenRouter = Boolean(modelName && modelName.includes('/'));
-    const isModelOllama = Boolean(modelName && (modelName.includes(':') || (!modelName.includes('/') && (STATE.ollamaModels || []).some(m => (m.name || m.model || m.id) === modelName))));
-    const resolvedEngine = isModelOpenRouter ? 'openrouter' : (isModelOllama ? 'ollama' : (engine || (STATE.settings.openRouterKey ? 'openrouter' : 'ollama')));
-
-    if (resolvedEngine === 'openrouter' || !hasCustomExternalEndpoint) {
-      const effectiveCloudModel = isModelOpenRouter
-        ? modelName
-        : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
-
-      const candidateModels = [
-        effectiveCloudModel,
-        ...LIVE_FREE_OPENROUTER_FALLBACKS
-      ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free');
-
-      const tryDirectFirst = Boolean(IS_CLOUD_HOSTED || IS_GITHUB_PAGES || IS_VERCEL || !DeviceStorage.isDeviceBackendAvailable);
-      const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
-
-      let lastErr = null;
-      for (let i = 0; i < candidateModels.length; i++) {
-        const curModel = candidateModels[i];
-        const supportsSystem = doesModelSupportSystemRole(curModel);
-        const isLiquid = Boolean(curModel && (curModel.includes('liquid') || curModel.includes('lfm-')));
-        const isReasoning = Boolean(curModel && (curModel.includes('/o1') || curModel.includes('/o3')));
-
-        const messages = [];
-        if (system && system.trim()) {
-          if (supportsSystem) {
-            messages.push({ role: 'system', content: system.trim() });
-            messages.push({ role: 'user', content: prompt.trim() });
-          } else {
-            messages.push({ role: 'user', content: `[Instruksi Sistem & Konteks:\n${system.trim()}]\n\n${prompt.trim()}` });
-          }
-        } else {
-          messages.push({ role: 'user', content: prompt.trim() });
-        }
-
-        const basePayload = {
-          model: curModel,
-          messages,
-          stream: false,
-          provider: {
-            sort: 'latency',
-            allow_fallbacks: true
-          }
-        };
-        if (!isReasoning) {
-          basePayload.temperature = 0.3;
-        }
-        if (!isLiquid && !isReasoning) {
-          basePayload.top_p = 0.9;
-        }
-
-        let modelSuccessText = null;
-
-        for (const routeType of routesToTry) {
-          if (STATE.abortController?.signal?.aborted) break;
-          const isDirect = routeType === 'direct';
-          const endpoint = isDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
-          const headers = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`
-          };
-          if (isDirect) {
-            headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
-            headers['X-Title'] = 'ZOZ Router Multi-Agent';
-          }
-
-          const requestBody = {
-            ...basePayload,
-            ...(isDirect ? {} : { apiKey: STATE.settings.openRouterKey || undefined })
-          };
-
-          try {
-            const res = await fetch(endpoint, {
-              method: 'POST',
-              headers,
-              body: JSON.stringify(requestBody),
-              signal: STATE.abortController?.signal
-            });
-            if (routeType === 'proxy' && res.status === 404) continue;
-            if (!res.ok) {
-              let errDetail = `OpenRouter HTTP ${res.status}`;
-              try {
-                const errJson = await res.json();
-                if (errJson && errJson.error) {
-                  errDetail = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
-                }
-              } catch (e) {}
-              lastErr = new Error(errDetail);
-              if (res.status === 401 || res.status === 403 || res.status === 402) break;
-              continue;
-            }
-            const data = await res.json();
-            const rawContent = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning || data.choices?.[0]?.message?.reasoning_content || '';
-            if (rawContent && rawContent.trim()) {
-              modelSuccessText = rawContent;
-              break;
-            }
-            lastErr = new Error(`OpenRouter mengembalikan balasan kosong untuk model ${curModel}`);
-          } catch (callErr) {
-            if (STATE.abortController?.signal?.aborted) throw callErr;
-            lastErr = callErr;
-            continue;
-          }
-        }
-
-        if (modelSuccessText !== null) {
-          return modelSuccessText;
-        }
-
-        if (i < candidateModels.length - 1) {
-          console.warn(`[callClientLLMDirect] Failover dari ${curModel} ke ${candidateModels[i + 1]}:`, lastErr?.message);
-          continue;
-        }
-      }
-      throw lastErr || new Error('Gagal memanggil model OpenRouter');
-    } else {
-      const headers = { 'Content-Type': 'application/json' };
-      if (STATE.settings.ollamaApiKey) {
-        headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
-        headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
-      }
-      const messages = [];
-      if (system && system.trim()) messages.push({ role: 'system', content: system.trim() });
-      messages.push({ role: 'user', content: prompt.trim() });
-
-      const requestBody = {
-        model: modelName,
-        messages,
-        stream: false,
-        options: { temperature: 0.3 },
-        endpoint: ep
-      };
-      if (STATE.settings.ollamaApiKey) requestBody.apiKey = STATE.settings.ollamaApiKey;
-      const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
-
-      const res = await fetch(chatUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-        signal: STATE.abortController?.signal
-      });
-      if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
-      const data = await res.json();
-      return data.message?.content || data.message?.reasoning || data.response || data.choices?.[0]?.message?.content || '';
-    }
-  }
-
-  async function streamLLMSynthesis(engine, modelName, systemPrompt, session, bubbleText = null, onChunk = null) {
-    const streamRenderer = bubbleText ? new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false)) : null;
-    let fullText = '';
-
-    // Auto-resolve actual engine based on modelName pattern
-    const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
-    const hasCustomExternalEndpoint = Boolean(STATE.settings.ollamaApiKey && !ep.includes('ollama.com') && !ep.includes('127.0.0.1') && !ep.includes('localhost'));
-    const isModelOpenRouter = Boolean(modelName && modelName.includes('/'));
-    const isModelOllama = Boolean(modelName && (modelName.includes(':') || (!modelName.includes('/') && (STATE.ollamaModels || []).some(m => (m.name || m.model || m.id) === modelName))));
-    const resolvedEngine = isModelOpenRouter ? 'openrouter' : (isModelOllama ? 'ollama' : (engine || 'ollama'));
-
-    if (resolvedEngine === 'openrouter' || !hasCustomExternalEndpoint) {
-      const effectiveCloudModel = isModelOpenRouter
-        ? modelName
-        : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
-
-      const candidateModels = [
-        effectiveCloudModel,
-        ...LIVE_FREE_OPENROUTER_FALLBACKS
-      ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && m !== 'qwen/qwen3.8-27b:free');
-
-      const tryDirectFirst = Boolean(IS_CLOUD_HOSTED || IS_GITHUB_PAGES || IS_VERCEL || !DeviceStorage.isDeviceBackendAvailable);
-      const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
-
-      let response = null;
-      let lastErrDetail = '';
-      for (let i = 0; i < candidateModels.length; i++) {
-        const curModel = candidateModels[i];
-        const curMessagesPayload = buildSanitizedMessagesPayload(session, [], 'openrouter', systemPrompt, curModel);
-        const isLiquid = Boolean(curModel && (curModel.includes('liquid') || curModel.includes('lfm-')));
-        const isReasoning = Boolean(curModel && (curModel.includes('/o1') || curModel.includes('/o3')));
-
-        const basePayload = {
-          model: curModel,
-          messages: curMessagesPayload,
-          stream: true,
-          provider: {
-            sort: 'latency',
-            allow_fallbacks: true
-          }
-        };
-        if (!isReasoning) {
-          basePayload.temperature = 0.3;
-        }
-        if (!isLiquid && !isReasoning) {
-          basePayload.top_p = 0.9;
-        }
-
-        let modelRes = null;
-
-        for (const routeType of routesToTry) {
-          if (STATE.abortController?.signal?.aborted) break;
-          const isDirect = routeType === 'direct';
-          const endpoint = isDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
-          const headers = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`
-          };
-          if (isDirect) {
-            headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
-            headers['X-Title'] = 'ZOZ Router Deep Research';
-          }
-
-          const requestBody = {
-            ...basePayload,
-            ...(isDirect ? {} : { apiKey: STATE.settings.openRouterKey || undefined })
-          };
-
-          try {
-            const res = await fetch(endpoint, {
-              method: 'POST',
-              headers,
-              body: JSON.stringify(requestBody),
-              signal: STATE.abortController?.signal
-            });
-
-            if (routeType === 'proxy' && res.status === 404) continue;
-
-            if (res.ok) {
-              modelRes = res;
-              break;
-            }
-
-            let errDetail = `OpenRouter HTTP ${res.status}`;
-            try {
-              const errData = await res.json();
-              if (errData && errData.error) {
-                errDetail = typeof errData.error === 'object' ? (errData.error.message || JSON.stringify(errData.error)) : errData.error;
-              }
-            } catch (je) {}
-            lastErrDetail = errDetail;
-            if (res.status === 401 || res.status === 403 || res.status === 402) break;
-          } catch (fetchErr) {
-            if (STATE.abortController?.signal?.aborted) throw fetchErr;
-            lastErrDetail = fetchErr.message || String(fetchErr);
-            continue;
-          }
-        }
-
-        if (modelRes && modelRes.ok) {
-          response = modelRes;
-          break;
-        }
-
-        if (i < candidateModels.length - 1) {
-          console.warn(`[streamLLMSynthesis] Failover dari ${curModel} ke ${candidateModels[i + 1]} (${lastErrDetail})`);
-          continue;
-        } else {
-          throw new Error(lastErrDetail || 'Gagal memulai streaming sintesis OpenRouter');
-        }
-      }
-
-      if (!response || !response.ok) {
-        throw new Error(lastErrDetail || 'Gagal memulai streaming sintesis OpenRouter');
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          buffer += decoder.decode();
-          break;
-        }
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed === 'data: [DONE]') continue;
-          if (trimmed.startsWith('data: ')) {
-            try {
-              const parsed = JSON.parse(trimmed.replace(/^data:\s*/, ''));
-              if (parsed.error) {
-                const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
-                throw new Error(errStr);
-              }
-              const delta = parsed.choices?.[0]?.delta?.content;
-              if (delta) {
-                fullText += delta;
-                if (streamRenderer) {
-                  streamRenderer.append(delta);
-                  if (streamRenderer.isLoopTerminated) {
-                    try { await reader.cancel(); } catch (_) {}
-                    break;
-                  }
-                }
-                if (typeof onChunk === 'function') {
-                  try { onChunk(delta, fullText); } catch (e) {}
-                }
-              }
-            } catch (e) {
-              if (e.message && !e.message.includes('JSON')) throw e;
-            }
-          }
-        }
-      }
-
-      if (buffer && buffer.trim()) {
-        const trimmed = buffer.trim();
-        if (trimmed && trimmed !== 'data: [DONE]' && trimmed.startsWith('data: ')) {
-          try {
-            const parsed = JSON.parse(trimmed.replace(/^data:\s*/, ''));
-            if (parsed.error) {
-              const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
-              throw new Error(errStr);
-            }
-            const delta = parsed.choices?.[0]?.delta?.content;
-            if (delta) {
-              fullText += delta;
-              if (streamRenderer) streamRenderer.append(delta);
-              if (typeof onChunk === 'function') {
-                try { onChunk(delta, fullText); } catch (e) {}
-              }
-            }
-          } catch (e) {
-            if (e.message && !e.message.includes('JSON')) throw e;
-          }
-        }
-      }
-
-        const renderedText = streamRenderer ? streamRenderer.finish() : fullText;
-        return fullText || renderedText;
-    } else {
-      const headers = { 'Content-Type': 'application/json' };
-      if (STATE.settings.ollamaApiKey) {
-        headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
-        headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
-      }
-      const messagesPayload = buildSanitizedMessagesPayload(session, [], 'ollama', systemPrompt, modelName);
-      const requestBody = {
-        model: modelName,
-        messages: messagesPayload,
-        stream: true,
-        options: { temperature: 0.3 },
-        endpoint: ep
-      };
-      if (STATE.settings.ollamaApiKey) requestBody.apiKey = STATE.settings.ollamaApiKey;
-
-      const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
-      const response = await fetch(chatUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-        signal: STATE.abortController?.signal
-      });
-
-      if (!response.ok) {
-        let errDetail = `Ollama HTTP ${response.status}`;
-        try {
-          const errData = await response.json();
-          if (errData && errData.error) {
-            errDetail = typeof errData.error === 'object' ? (errData.error.message || JSON.stringify(errData.error)) : errData.error;
-          }
-        } catch (je) {}
-        throw new Error(errDetail);
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          buffer += decoder.decode();
-          break;
-        }
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const parsed = JSON.parse(line);
-            if (parsed.error) {
-              const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
-              throw new Error(errStr);
-            }
-            const chunk = parsed.message?.content || parsed.response || parsed.choices?.[0]?.delta?.content || '';
-            if (chunk) {
-              fullText += chunk;
-              if (streamRenderer) streamRenderer.append(chunk);
-              if (typeof onChunk === 'function') {
-                try { onChunk(chunk, fullText); } catch (e) {}
-              }
-            }
-          } catch (e) {
-            if (e.message && !e.message.includes('JSON')) throw e;
-          }
-        }
-      }
-
-      if (buffer && buffer.trim()) {
-        try {
-          const parsed = JSON.parse(buffer.trim());
-          if (parsed.error) {
-            const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
-            throw new Error(errStr);
-          }
-          const chunk = parsed.message?.content || parsed.response || parsed.choices?.[0]?.delta?.content || '';
-          if (chunk) {
-            fullText += chunk;
-            if (streamRenderer) streamRenderer.append(chunk);
-            if (typeof onChunk === 'function') {
-              try { onChunk(chunk, fullText); } catch (e) {}
-            }
-          }
-        } catch (e) {
-          if (e.message && !e.message.includes('JSON')) throw e;
-        }
-      }
-
-      const renderedText = streamRenderer ? streamRenderer.finish() : fullText;
-      return fullText || renderedText;
-    }
-  }
-
-  // ==================== DEEP RESEARCH REPORT & EXPORT SUITE ====================
-  let currentActiveReport = {
-    title: '',
-    fullText: '',
-    sources: [],
-    model: '',
-    date: ''
-  };
-
-  function extractReportTitle(fullText) {
-    if (!fullText || typeof fullText !== 'string') return 'Laporan Riset Mendalam (Deep Research)';
-    const match = fullText.match(/^#\s+(?:🔬\s*)?(?:DEEP\s*RESEARCH\s*REPORT:\s*)?([^\n]+)/im);
-    if (match && match[1]) {
-      return match[1].trim();
-    }
-    const lines = fullText.split('\n').map(l => l.trim()).filter(Boolean);
-    if (lines.length > 0) {
-      return lines[0].replace(/^#+\s*/, '').trim();
-    }
-    return 'Laporan Riset Mendalam (Deep Research)';
-  }
-
-  function sanitizeReportFilename(title) {
-    let clean = (title || 'Deep-Research-Report')
-      .replace(/[^a-zA-Z0-9_\-\u00C0-\u024F\u1E00-\u1EFF ]/g, '')
-      .replace(/\s+/g, '_')
-      .trim();
-
-    if (clean.length > 60) {
-      clean = clean.slice(0, 60).replace(/_[^_]*$/, '');
-    }
-    return clean || 'Deep-Research-Report';
-  }
-
-  async function downloadReportDOCX(title, markdownText) {
-    const renderedHtml = renderMarkdown(markdownText || '');
-    const cleanFilename = sanitizeReportFilename(title);
-    const currentDate = new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
-
-    const wordContent = `<!DOCTYPE html>
-<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-<head>
-  <meta charset="utf-8">
-  <title>${escapeHtml(title)}</title>
-  <!--[if gte mso 9]>
-  <xml>
-    <w:WordDocument>
-      <w:View>Print</w:View>
-      <w:Zoom>100</w:Zoom>
-      <w:DoNotOptimizeForBrowser/>
-    </w:WordDocument>
-  </xml>
-  <![endif]-->
-  <style>
-    body {
-      font-family: 'Calibri', 'Segoe UI', Arial, sans-serif;
-      font-size: 11pt;
-      line-height: 1.6;
-      color: #111827;
-      margin: 1in;
-    }
-    h1 {
-      font-size: 20pt;
-      font-weight: bold;
-      color: #0F172A;
-      border-bottom: 2pt solid #0284C7;
-      padding-bottom: 6pt;
-      margin-top: 0;
-      margin-bottom: 12pt;
-    }
-    h2 {
-      font-size: 14pt;
-      font-weight: bold;
-      color: #0369A1;
-      margin-top: 18pt;
-      margin-bottom: 8pt;
-      border-bottom: 1pt solid #E2E8F0;
-      padding-bottom: 3pt;
-    }
-    h3 {
-      font-size: 12pt;
-      font-weight: bold;
-      color: #334155;
-      margin-top: 12pt;
-      margin-bottom: 6pt;
-    }
-    p {
-      margin-top: 0;
-      margin-bottom: 8pt;
-    }
-    ul, ol {
-      margin-top: 0;
-      margin-bottom: 8pt;
-      padding-left: 20pt;
-    }
-    li {
-      margin-bottom: 4pt;
-    }
-    blockquote {
-      margin: 10pt 0;
-      padding: 6pt 14pt;
-      background: #F8FAFC;
-      border-left: 3pt solid #38BDF8;
-      font-style: italic;
-      color: #475569;
-    }
-    code {
-      font-family: 'Consolas', 'Courier New', monospace;
-      font-size: 10pt;
-      background: #F1F5F9;
-      padding: 2pt 4pt;
-      border-radius: 3pt;
-    }
-    pre {
-      font-family: 'Consolas', 'Courier New', monospace;
-      font-size: 9.5pt;
-      background: #F8FAFC;
-      border: 1pt solid #E2E8F0;
-      padding: 10pt;
-      margin-bottom: 10pt;
-      white-space: pre-wrap;
-    }
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      margin: 12pt 0;
-    }
-    th, td {
-      border: 1pt solid #CBD5E1;
-      padding: 6pt 8pt;
-      text-align: left;
-    }
-    th {
-      background-color: #F1F5F9;
-      font-weight: bold;
-    }
-    .doc-meta {
-      font-size: 9.5pt;
-      color: #64748B;
-      margin-bottom: 24pt;
-      padding-bottom: 8pt;
-      border-bottom: 1pt solid #CBD5E1;
-    }
-    a {
-      color: #0284C7;
-      text-decoration: underline;
-    }
-  </style>
-</head>
-<body>
-  <div class="doc-meta">
-    ZOZ ROUTER &bull; DEEP RESEARCH INTELLIGENCE ENGINE &bull; Diterbitkan: ${currentDate}
-  </div>
-  ${renderedHtml}
-</body>
-</html>`;
-
-    // F13: DOCX ASLI (OOXML zip) via JSZip \u2014 dulu konten HTML diberi ekstensi
-    // .docx sehingga Word memperingatkan "format dan ekstensi tidak cocok" dan
-    // pembaca DOCX-saja bisa menolak. Tanpa JSZip \u2192 unduh sebagai .doc (ekstensi
-    // yang jujur untuk konten HTML ala Word).
-    const downloadWordBlob = (blobObj, ext, msg) => {
-      const url = URL.createObjectURL(blobObj);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${cleanFilename}.${ext}`;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        if (document.body.contains(a)) document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 800);
-      showToast(msg, 'success');
-    };
-
-    await ensureJSZipLoaded().catch(() => null);
-    if (typeof JSZip === 'undefined') {
-      downloadWordBlob(new Blob(['\ufeff', wordContent], { type: 'application/msword;charset=utf-8' }), 'doc',
-        'Laporan diunduh sebagai .doc (pustaka JSZip tidak tersedia).');
-      return;
-    }
-
-    const xmlEscape = (s) => String(s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    const docParagraphs = String(markdownText || '').split(/\r?\n/).map((line) => {
-      if (!line.trim()) return '<w:p/>';
-      let text = line;
-      let bold = false;
-      let size = null;
-      const heading = line.match(/^(#{1,6})\s+(.*)$/);
-      if (heading) {
-        text = heading[2];
-        bold = true;
-        size = heading[1].length === 1 ? 32 : (heading[1].length === 2 ? 26 : 22);
-      } else {
-        text = text
-          .replace(/\*\*(.+?)\*\*/g, '$1')
-          .replace(/\*(.+?)\*/g, '$1')
-          .replace(/`([^`]+)`/g, '$1')
-          .replace(/^>\s?/, '')
-          .replace(/^[-*]\s+/, '\u2022 ');
-      }
-      const rPr = (bold || size)
-        ? `<w:rPr>${bold ? '<w:b/>' : ''}${size ? `<w:sz w:val="${size}"/><w:szCs w:val="${size}"/>` : ''}</w:rPr>`
-        : '';
-      return `<w:p><w:r>${rPr}<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`;
-    }).join('');
-
-    const zip = new JSZip();
-    zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
-    zip.folder('_rels').file('.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
-    zip.folder('word').file('document.xml',
-      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
-      `<w:p><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t xml:space="preserve">${xmlEscape(title)}</w:t></w:r></w:p>` +
-      `<w:p><w:r><w:rPr><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">${xmlEscape('ZOZ ROUTER \u2022 Deep Research \u2022 Diterbitkan: ' + currentDate)}</w:t></w:r></w:p>` +
-      docParagraphs +
-      '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/></w:sectPr>' +
-      '</w:body></w:document>');
-
-    zip.generateAsync({ type: 'blob' }).then((zipBlob) => {
-      downloadWordBlob(
-        new Blob([zipBlob], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),
-        'docx',
-        'Laporan berhasil diunduh dalam format DOCX asli.'
-      );
-    }).catch(() => {
-      downloadWordBlob(new Blob(['\ufeff', wordContent], { type: 'application/msword;charset=utf-8' }), 'doc',
-        'Gagal membuat DOCX \u2014 diunduh sebagai .doc sebagai gantinya.');
-    });
-  }
-
-  function downloadReportPDF(title, markdownText) {
-    const renderedHtml = renderMarkdown(markdownText || '');
-    let currentDate = '';
-    try {
-      const reportDateObj = (currentActiveReport && currentActiveReport.date) ? new Date(currentActiveReport.date) : new Date();
-      currentDate = !isNaN(reportDateObj.getTime())
-        ? reportDateObj.toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' })
-        : new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
-    } catch (e) {
-      currentDate = new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
-    }
-
-    let printFrame = document.getElementById('reportPrintFrame');
-    if (printFrame) printFrame.remove();
-
-    printFrame = document.createElement('iframe');
-    printFrame.id = 'reportPrintFrame';
-    printFrame.style.position = 'fixed';
-    printFrame.style.right = '0';
-    printFrame.style.bottom = '0';
-    printFrame.style.width = '0';
-    printFrame.style.height = '0';
-    printFrame.style.border = '0';
-    document.body.appendChild(printFrame);
-
-    const doc = printFrame.contentWindow.document;
-    doc.open();
-    doc.write(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>${escapeHtml(sanitizeReportFilename(title))}</title>
-  <style>
-    @page {
-      size: A4;
-      margin: 20mm 15mm 20mm 15mm;
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      font-size: 10.5pt;
-      line-height: 1.6;
-      color: #111827;
-      margin: 0;
-      padding: 0;
-      background: #FFFFFF;
-    }
-    .print-header {
-      border-bottom: 2px solid #00F0FF;
-      padding-bottom: 12px;
-      margin-bottom: 24px;
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-end;
-    }
-    .print-header .logo-text {
-      font-size: 13pt;
-      font-weight: 800;
-      letter-spacing: 1px;
-      color: #0F172A;
-    }
-    .print-header .meta-text {
-      font-size: 9pt;
-      color: #64748B;
-    }
-    h1 {
-      font-size: 18pt;
-      font-weight: 800;
-      color: #0F172A;
-      margin-top: 0;
-      margin-bottom: 12pt;
-      line-height: 1.3;
-    }
-    h2 {
-      font-size: 13pt;
-      font-weight: 700;
-      color: #0284C7;
-      margin-top: 20pt;
-      margin-bottom: 8pt;
-      border-bottom: 1px solid #E2E8F0;
-      padding-bottom: 4pt;
-      page-break-after: avoid;
-    }
-    h3 {
-      font-size: 11pt;
-      font-weight: 700;
-      color: #334155;
-      margin-top: 14pt;
-      margin-bottom: 6pt;
-      page-break-after: avoid;
-    }
-    p {
-      margin-top: 0;
-      margin-bottom: 8pt;
-    }
-    ul, ol {
-      margin-top: 0;
-      margin-bottom: 8pt;
-      padding-left: 20pt;
-    }
-    li {
-      margin-bottom: 4pt;
-    }
-    blockquote {
-      margin: 10pt 0;
-      padding: 6pt 12pt;
-      background: #F8FAFC;
-      border-left: 3.5px solid #0284C7;
-      font-style: italic;
-      color: #475569;
-    }
-    code {
-      font-family: Consolas, Monaco, monospace;
-      font-size: 9pt;
-      background: #F1F5F9;
-      padding: 2pt 4pt;
-      border-radius: 3pt;
-    }
-    pre {
-      font-family: Consolas, Monaco, monospace;
-      font-size: 8.5pt;
-      background: #F8FAFC;
-      border: 1px solid #E2E8F0;
-      padding: 10pt;
-      border-radius: 4pt;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 12pt 0;
-      font-size: 9.5pt;
-    }
-    th, td {
-      border: 1px solid #CBD5E1;
-      padding: 6pt 8pt;
-      text-align: left;
-    }
-    th {
-      background: #F1F5F9;
-      font-weight: 700;
-    }
-    a {
-      color: #0284C7;
-      text-decoration: underline;
-    }
-  </style>
-</head>
-<body>
-  <div class="print-header">
-    <div class="logo-text">🔬 ZOZ ROUTER &bull; DEEP RESEARCH REPORT</div>
-    <div class="meta-text">Diterbitkan: ${currentDate}</div>
-  </div>
-  ${renderedHtml}
-</body>
-</html>`);
-    doc.close();
-
-    setTimeout(() => {
-      try {
-        printFrame.contentWindow.focus();
-        printFrame.contentWindow.print();
-      } catch (e) {
-        console.warn('Gagal memanggil print frame:', e);
-      }
-      // Pembersihan otomatis elemen iframe dari DOM setelah dialog cetak selesai
-      setTimeout(() => {
-        if (printFrame && printFrame.parentNode) {
-          printFrame.parentNode.removeChild(printFrame);
-        }
-      }, 60000);
-    }, 400);
-  }
-
-  function downloadReportMD(title, markdownText) {
-    const cleanFilename = sanitizeReportFilename(title);
-    const blob = new Blob([markdownText || ''], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${cleanFilename}.md`;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      if (document.body.contains(a)) {
-        document.body.removeChild(a);
-      }
-      URL.revokeObjectURL(url);
-    }, 800);
-    showToast('Laporan berhasil diunduh dalam format Markdown (.md)', 'success');
-  }
-
-  // Membungkus bagian "Daftar Pustaka" bawaan laporan + panel Sumber Web agar bisa disembunyikan sekaligus
-  function markReportReferences(contentEl, sources) {
-    if (!contentEl) return;
-    const refRegex = /daftar\s*pustaka|sumber\s*referensi|referensi|references|bibliograf/i;
-    const headingEls = Array.from(contentEl.querySelectorAll('h1, h2, h3, h4'));
-    let refHeading = null;
-    headingEls.forEach(h => { if (refRegex.test(h.textContent || '')) refHeading = h; });
-
-    if (refHeading && refHeading.parentElement === contentEl) {
-      const section = document.createElement('section');
-      section.className = 'report-references-section';
-      let startNode = refHeading;
-      const prev = refHeading.previousElementSibling;
-      if (prev && prev.tagName === 'HR') startNode = prev;
-      contentEl.insertBefore(section, startNode);
-      let node = startNode;
-      while (node) {
-        const next = node.nextSibling;
-        section.appendChild(node);
-        node = next;
-      }
-    }
-
-    if (sources && Array.isArray(sources) && sources.length > 0) {
-      const panel = document.createElement('section');
-      panel.className = 'report-references-section report-sources-panel';
-      panel.innerHTML = `
-        <div class="report-sources-title"><i class="fa-solid fa-earth-americas"></i> Sumber Web Terverifikasi (${sources.length})</div>
-        <ol class="report-sources-list">
-          ${sources.map(s => `
-            <li>
-              <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.title || s.domain || s.url)}</a>
-              <span class="report-source-domain">${escapeHtml(s.domain || '')}</span>
-            </li>
-          `).join('')}
-        </ol>
-      `;
-      contentEl.appendChild(panel);
-    }
-  }
-
-  function applyReportReferencesState() {
-    const modal = document.getElementById('deepResearchReportModal');
-    const btn = document.getElementById('btnToggleReportSources');
-    if (!modal) return;
-    let hidden = false;
-    try { hidden = localStorage.getItem('zoz_report_refs_hidden') === '1'; } catch (e) {}
-    modal.classList.toggle('references-hidden', hidden);
-    if (btn) {
-      btn.setAttribute('aria-pressed', hidden ? 'true' : 'false');
-      btn.title = hidden ? 'Tampilkan referensi web' : 'Sembunyikan referensi web';
-      btn.innerHTML = hidden
-        ? '<i class="fa-solid fa-eye"></i> <span>Tampilkan Referensi</span>'
-        : '<i class="fa-solid fa-eye-slash"></i> <span>Sembunyikan Referensi</span>';
-    }
-
-    // Jika link TOC yang sedang aktif kini tersembunyi, pindahkan status active ke link terakhir yang tampak
-    const activeToc = modal.querySelector('#fullReportTOCList .toc-link.active');
-    if (activeToc && activeToc.offsetParent === null) {
-      const visibleLinks = Array.from(modal.querySelectorAll('#fullReportTOCList .toc-link')).filter(el => el.offsetParent !== null);
-      if (visibleLinks.length > 0) {
-        activeToc.classList.remove('active');
-        visibleLinks[visibleLinks.length - 1].classList.add('active');
-      }
-    }
-  }
-
-  function toggleReportReferences() {
-    const modal = document.getElementById('deepResearchReportModal');
-    if (!modal) return;
-    const willHide = !modal.classList.contains('references-hidden');
-    try { localStorage.setItem('zoz_report_refs_hidden', willHide ? '1' : '0'); } catch (e) {}
-    applyReportReferencesState();
-    AudioEngine.click();
-  }
-
-  function openDeepResearchReportModal(fullText, title, meta = {}) {
-    const modal = document.getElementById('deepResearchReportModal');
-    if (!modal) return;
-
-    const resolvedTitle = title || extractReportTitle(fullText);
-    const modalTitleEl = document.getElementById('fullReportModalTitle');
-    if (modalTitleEl) modalTitleEl.textContent = resolvedTitle;
-
-    const dateEl = document.getElementById('fullReportDate');
-    if (dateEl) {
-      let dateText = '-';
-      try {
-        const d = meta.date ? new Date(meta.date) : new Date();
-        if (!isNaN(d.getTime())) {
-          dateText = d.toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-        }
-      } catch (e) {}
-      dateEl.textContent = dateText;
-    }
-
-    const sourcesCountEl = document.getElementById('fullReportSourcesCount');
-    if (sourcesCountEl) {
-      sourcesCountEl.textContent = (meta.sources && Array.isArray(meta.sources)) ? meta.sources.length : '0';
-    }
-
-    const modelsUsedEl = document.getElementById('fullReportModelsUsed');
-    if (modelsUsedEl) {
-      modelsUsedEl.textContent = meta.model || 'Deep Research Pro';
-    }
-
-    // Simpan ke state pelacak laporan aktif
-    currentActiveReport = {
-      title: resolvedTitle,
-      fullText: fullText || '',
-      sources: meta.sources || [],
-      model: meta.model || '',
-      date: meta.date || new Date().toISOString()
-    };
-
-    // Reset scroll posisi dokumen ke paling atas
-    const stageEl = document.getElementById('fullReportArticleStage');
-    if (stageEl) {
-      stageEl.scrollTop = 0;
-    }
-
-    // Render markdown dokumen utuh ke reading stage
-    const contentEl = document.getElementById('fullReportContent');
-    if (contentEl) {
-      contentEl.innerHTML = renderMarkdown(fullText || '');
-      enhanceCodeBlocks(contentEl);
-      markReportReferences(contentEl, meta.sources);
-
-      // Bangun Dynamic Outline / Table of Contents
-      const tocList = document.getElementById('fullReportTOCList');
-      if (tocList) {
-        tocList.innerHTML = '';
-        const headings = contentEl.querySelectorAll('h1, h2, h3');
-        if (headings.length > 0) {
-          headings.forEach((heading, idx) => {
-            const anchorId = `report-heading-${idx}`;
-            heading.id = anchorId;
-
-            const level = heading.tagName.toLowerCase();
-            const levelClass = (level === 'h1') ? 'toc-h1' : (level === 'h2' ? 'toc-h2' : 'toc-h3');
-            const tocItem = document.createElement('a');
-            tocItem.className = `toc-link ${levelClass}${heading.closest('.report-references-section') ? ' toc-ref' : ''}`;
-            tocItem.dataset.headingId = anchorId;
-            tocItem.href = `#${anchorId}`;
-            tocItem.textContent = heading.textContent.trim();
-            tocItem.addEventListener('click', (e) => {
-              e.preventDefault();
-              heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              tocList.querySelectorAll('.toc-link').forEach(el => el.classList.remove('active'));
-              tocItem.classList.add('active');
-            });
-            tocList.appendChild(tocItem);
-          });
-
-          // Set heading pertama sebagai default aktif
-          tocList.querySelector('.toc-link')?.classList.add('active');
-
-          // Pasang Scrollspy dinamis saat pengguna men-scroll canvas artikel
-          if (stageEl) {
-            let isTicking = false;
-            const updateTOCScrollspy = () => {
-              const stageTop = stageEl.getBoundingClientRect().top;
-              let currentActiveIdx = 0;
-
-              headings.forEach((heading, idx) => {
-                if (heading.offsetParent === null) return; // Lewati heading yang disembunyikan (misal: references-hidden)
-                const rect = heading.getBoundingClientRect();
-                if (rect.top - stageTop <= 130) {
-                  currentActiveIdx = idx;
-                }
-              });
-
-              const activeAnchorId = `report-heading-${currentActiveIdx}`;
-              const currentActiveLink = tocList.querySelector(`.toc-link[data-heading-id="${activeAnchorId}"]`);
-              if (currentActiveLink && !currentActiveLink.classList.contains('active')) {
-                tocList.querySelectorAll('.toc-link').forEach(el => el.classList.remove('active'));
-                currentActiveLink.classList.add('active');
-
-                // Auto-scroll halus sidebar TOC jika link berada di luar area pandang
-                const tocNavRect = tocList.getBoundingClientRect();
-                const linkRect = currentActiveLink.getBoundingClientRect();
-                if (linkRect.bottom > tocNavRect.bottom || linkRect.top < tocNavRect.top) {
-                  currentActiveLink.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                }
-              }
-              isTicking = false;
-            };
-
-            if (stageEl._tocScrollHandler) {
-              stageEl.removeEventListener('scroll', stageEl._tocScrollHandler);
-            }
-            stageEl._tocScrollHandler = () => {
-              if (!isTicking) {
-                window.requestAnimationFrame(updateTOCScrollspy);
-                isTicking = true;
-              }
-            };
-            stageEl.addEventListener('scroll', stageEl._tocScrollHandler, { passive: true });
-          }
-        } else {
-          tocList.innerHTML = '<span style="font-size:0.75rem; color:var(--text-muted); padding:8px 12px; display:block;">Tidak ada outline dokumen</span>';
-        }
-      }
-    }
-
-    applyReportReferencesState();
-    openModal('deepResearchReportModal');
-  }
-
-  function buildDeepResearchSummaryCardHtml(fullText, model = '', sources = [], date = null, chatSummary = '') {
-    const reportTitle = extractReportTitle(fullText);
-    const sourcesCount = (sources && Array.isArray(sources)) ? sources.length : 0;
-
-    let dateStr = '';
-    try {
-      const d = date ? new Date(date) : new Date();
-      if (!isNaN(d.getTime())) {
-        dateStr = d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) + ', ' + d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-      }
-    } catch (e) {}
-
-    const metaParts = [];
-    if (dateStr) metaParts.push(dateStr);
-    if (sourcesCount > 0) metaParts.push(`${sourcesCount} Sumber Terverifikasi`);
-    if (model) metaParts.push(escapeHtml(model));
-    const metaString = metaParts.join(' &bull; ');
-
-    let effectiveSummary = (chatSummary && chatSummary.trim()) ? chatSummary.trim() : '';
-
-    // Backward compatibility: Jika chatSummary kosong (riwayat sesi lama), ekstrak Bab 1 / Pendahuluan dari fullText
-    if (!effectiveSummary && fullText && typeof fullText === 'string') {
-      const bab1Match = fullText.match(/##\s*1\.\s*.*?\n([\s\S]*?)(?=\n##\s*2\.|\n---|$)/i);
-      if (bab1Match && bab1Match[1] && bab1Match[1].trim()) {
-        const cleanBab1 = bab1Match[1].trim();
-        effectiveSummary = `### 💡 Rangkuman Eksekutif Riset\n${cleanBab1.substring(0, 700)}${cleanBab1.length > 700 ? '...' : ''}\n\n*Catatan: Dokumen analisis komprehensif lengkap dapat dibuka melalui tombol di bawah.*`;
-      }
-    }
-
-    const summaryHtml = effectiveSummary ? renderMarkdown(effectiveSummary) : '';
-
-    return `
-      <div class="gemini-research-card-wrapper" style="display:flex; flex-direction:column; gap:12px; width:100%;">
-        ${summaryHtml ? `
-          <div class="gemini-research-chat-summary" style="background:rgba(0, 240, 255, 0.04); border:1px solid rgba(0, 240, 255, 0.22); border-radius:10px; padding:14px 16px; font-size:0.86rem; line-height:1.6; color:var(--text-main); box-shadow:0 4px 16px rgba(0,0,0,0.25);">
-            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.08);">
-              <div style="display:flex; align-items:center; gap:8px; font-size:0.8rem; font-weight:700; color:var(--neon-cyan);">
-                <i class="fa-solid fa-sparkles"></i>
-                <span>RANGKUMAN EKSEKUTIF CHAT (MODEL 4)</span>
-              </div>
-              <span class="badge" style="font-size:0.65rem; background:rgba(0, 255, 194, 0.12); color:var(--neon-teal); border:1px solid rgba(0,255,194,0.3); border-radius:4px; padding:2px 8px;">
-                Terkoreksi Model 3
-              </span>
-            </div>
-            <div class="chat-summary-markdown" style="font-size:0.85rem;">
-              ${summaryHtml}
-            </div>
-          </div>
-        ` : `
-          <div class="gemini-research-intro">
-            Riset mendalam telah selesai dan divalidasi silang. Anda dapat membuka dokumen laporan lengkap hasil audit dan koreksi Model 3 di bawah ini:
-          </div>
-        `}
-        <div class="gemini-research-card" data-action="open-full-report" role="button" tabindex="0" title="Klik untuk membuka dokumen riset mendalam lengkap (Hasil Audit & Koreksi Model 3)">
-          <div class="gemini-card-left">
-            <div class="gemini-card-icon-box" style="background:rgba(255, 0, 127, 0.12); border-color:rgba(255, 0, 127, 0.35); color:#FF007F;">
-              <i class="fa-solid fa-book-open-reader"></i>
-            </div>
-            <div class="gemini-card-content">
-              <h4 class="gemini-card-title">${escapeHtml(reportTitle)}</h4>
-              <div class="gemini-card-meta">${metaString}</div>
-            </div>
-          </div>
-          <button type="button" class="gemini-card-open-btn" data-action="open-full-report" title="Buka Dokumen Riset Komprehensif">
-            <i class="fa-solid fa-book-bookmark" style="margin-right:4px;"></i>
-            <span>Buka Laporan (${sourcesCount} Sumber)</span>
-          </button>
-        </div>
-      </div>
-    `;
-  }
-
-  function attachDeepResearchCardEvents(container, fullText, model, sources, date) {
-    if (!container) return;
-    fullText = safeAssistantText(fullText || '');
-    const reportTitle = extractReportTitle(fullText);
-    const openReport = () => {
-      openDeepResearchReportModal(fullText, reportTitle, {
-        sources,
-        model,
-        date: date || container.dataset.reportDate || new Date().toISOString()
-      });
-    };
-
-    container.querySelectorAll('[data-action="open-full-report"]').forEach(el => {
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openReport();
-      });
-    });
-
-    // Logo / Badge Deep Research & Badge Sumber di metadata bubble kini bisa diklik untuk langsung membuka laporan & sumber
-    container.querySelectorAll('.engine-badge, .sources-badge').forEach(badge => {
-      badge.style.cursor = 'pointer';
-      badge.setAttribute('title', 'Klik untuk melihat sumber & laporan lengkap riset');
-      badge.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openReport();
-      });
-    });
-
-    const cardEl = container.querySelector('.gemini-research-card');
-    cardEl?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        openReport();
-      }
-    });
-
-    container.querySelector('[data-action="export-pdf"]')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      downloadReportPDF(reportTitle, fullText);
-    });
-
-    container.querySelector('[data-action="export-docx"]')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      downloadReportDOCX(reportTitle, fullText);
-    });
-
-    container.querySelector('[data-action="export-md"]')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      downloadReportMD(reportTitle, fullText);
-    });
-  }
-
-  async function runDeepResearchStreaming(session, promptText, image = null, modelName = null, engine = 'ollama', customTargetUrls = []) {
-
-    const targetModel = modelName || (engine === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel);
-    // Mandat Mutlak Kaisar Zozi: Deep Research 100% Mengadopsi Model Percakapan Aktif Saat Itu.
-    // Seluruh konfigurasi model riset di settings telah dihapus. Pipeline Deep Research (Explorer Agen 1,
-    // Divergent Agen 2, Lead Corrector Model 3, dan Executive Summarizer Model 4) berjalan super efisien
-    // menggunakan 1 model master tunggal yang sedang aktif di percakapan pengguna.
-    const masterResearchModel = targetModel;
-
-    // Kumpulkan seluruh URL target kustom pengguna
-    let effectiveTargetUrls = Array.isArray(customTargetUrls) && customTargetUrls.length > 0
-      ? [...customTargetUrls]
-      : (Array.isArray(STATE.researchTargetUrls) ? [...STATE.researchTargetUrls] : []);
-    const urlsInPrompt = extractCustomAnalysisUrls(promptText);
-    urlsInPrompt.forEach(u => {
-      if (!effectiveTargetUrls.includes(u)) effectiveTargetUrls.push(u);
-    });
-    effectiveTargetUrls = effectiveTargetUrls.map(u => {
-      let clean = String(u).trim();
-      if (!/^https?:\/\//i.test(clean)) clean = 'https://' + clean;
-      return clean;
-    });
-    effectiveTargetUrls = Array.from(new Set(effectiveTargetUrls));
-
-    setGeneratingState(true);
-    const currentAbortController = new AbortController();
-    STATE.abortController = currentAbortController;
-
-    const startTime = performance.now();
-    const assistantRow = appendMessageElement('assistant', '', null, `${masterResearchModel} (Deep Research)`, null, -1, null, null, true);
-    const bubbleText = assistantRow.querySelector('.msg-text-content');
-    const metaBox = assistantRow.querySelector('.message-meta');
-
-    let allSources = [];
-    let currentProgress = 10;
-    let stepItems = [
-      { text: `Inisialisasi Penganalisis Web Kustom URL (${effectiveTargetUrls.length} URL target)...`, status: 'active' }
-    ];
-
-    function renderResearchHUD(progress, statusMsg) {
-      bubbleText.innerHTML = `
-        <div class="deep-research-hud">
-          <div class="deep-research-header">
-            <div class="deep-research-title">
-              <i class="fa-solid fa-microscope" style="color:var(--neon-amber);"></i>
-              <span>Deep Research: Penganalisis Web Kustom URL</span>
-            </div>
-            <span class="deep-research-badge">${effectiveTargetUrls.length} URL Target</span>
-          </div>
-          <div class="deep-research-progress-bar">
-            <div class="deep-research-progress-fill" style="width: ${progress}%;"></div>
-          </div>
-          <div class="deep-research-status-text">
-            <i class="fa-solid fa-circle-notch fa-spin" style="color:var(--neon-amber);"></i>
-            <span class="status-msg">${escapeHtml(statusMsg)}</span>
-          </div>
-          <div class="deep-research-steps-list">
-            ${stepItems.map(item => `
-              <div class="deep-research-step-item ${item.status === 'active' ? 'active' : ''}">
-                <i class="fa-solid ${item.status === 'done' ? 'fa-check' : (item.status === 'active' ? 'fa-circle-dot' : 'fa-clock')}" 
-                   style="color:${item.status === 'done' ? 'var(--neon-teal)' : (item.status === 'active' ? 'var(--neon-amber)' : 'var(--text-dim)')};"></i>
-                <span>${escapeHtml(item.text)}</span>
-              </div>
-            `).join('')}
-          </div>
-          <div class="deep-research-actions" style="margin-top: 10px; display: flex; gap: 8px;">
-            <button type="button" class="btn btn-xs btn-outline btn-live-inspection-trigger" style="font-size: 0.76rem; border-color: rgba(0, 240, 255, 0.4); color: var(--neon-cyan); background: rgba(0, 240, 255, 0.08); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 5px 12px; border-radius: var(--radius-sm); font-weight: 600;">
-              <i class="fa-solid fa-eye"></i> Pertinjau Proses Nyata (Live Inspection)
-            </button>
-          </div>
-        </div>
-      `;
-
-      const triggerBtn = bubbleText.querySelector('.btn-live-inspection-trigger');
-      if (triggerBtn) {
-        triggerBtn.addEventListener('click', () => {
-          openLiveResearchInspection();
-        });
-      }
-
-      smartScrollChatToBottom(false);
-    }
-
-    renderResearchHUD(15, `Menyiapkan ekstraksi konten lengkap untuk ${effectiveTargetUrls.length} URL...`);
-
-    let finalReportText = '';
-    let chatSummary = '';
-
-    let effectivePrompt = promptText;
-    let searchPrompt = promptText;
-    try {
-      const ytRes = await getYouTubeGroundingContext(promptText);
-      if (ytRes) {
-        if (ytRes.groundingContext) {
-          effectivePrompt = `${promptText}\n\n${ytRes.groundingContext}`;
-        }
-        if (Array.isArray(ytRes.videos) && ytRes.videos.length > 0) {
-          const videoTitles = ytRes.videos.map(v => v.title).filter(Boolean).join(' ');
-          const promptWithoutYtUrls = promptText.replace(/https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=[a-zA-Z0-9_-]+|youtu\.be\/[a-zA-Z0-9_-]+)[^\s]*/gi, '').trim();
-          searchPrompt = `${promptWithoutYtUrls} ${videoTitles}`.trim() || videoTitles || promptText;
-        }
-      }
-    } catch (ytErr) {
-      console.warn('YouTube grounding skip for Deep Research:', ytErr);
-    }
-
-    try {
-      let isBackendSuccess = false;
-      const contextualTopic = session ? synthesizeAutonomousSearchQuery(session, searchPrompt) : searchPrompt;
-
-      // 1. Coba panggil Backend Endpoint /api/mulai-riset (Local Node.js Server)
-      if (!IS_GITHUB_PAGES) {
-        try {
-          const res = await fetch('/api/mulai-riset', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': STATE.settings.openRouterKey ? `Bearer ${STATE.settings.openRouterKey}` : '',
-              'x-openrouter-key': STATE.settings.openRouterKey || '',
-              'x-serper-key': STATE.settings.serperApiKey || '',
-              'x-session-id': session ? session.id : '',
-              'X-User-ID': STATE.userId || 'default',
-              'x-user-id': STATE.userId || 'default'
-            },
-            body: JSON.stringify({
-              userId: STATE.userId || 'default',
-              sessionId: session ? session.id : null,
-              topik: contextualTopic,
-              prompt: searchPrompt,
-              targetUrls: effectiveTargetUrls,
-              urls: effectiveTargetUrls,
-              messages: (session && Array.isArray(session.messages)) ? session.messages.map(m => ({
-                role: m.role || 'user',
-                content: typeof m.content === 'string' ? m.content : ''
-              })) : [],
-              model: masterResearchModel,
-              provider: masterResearchModel.includes('/') ? 'openrouter' : (masterResearchModel.includes(':') ? 'ollama' : engine),
-              endpoint: STATE.settings.ollamaEndpoint,
-              apiKey: (masterResearchModel.includes('/') || engine === 'openrouter') ? STATE.settings.openRouterKey : (STATE.settings.ollamaApiKey || ''),
-              openRouterKey: STATE.settings.openRouterKey || '',
-              ollamaApiKey: STATE.settings.ollamaApiKey || '',
-              serperApiKey: STATE.settings.serperApiKey,
-              agent1Model: masterResearchModel,
-              agent2Model: masterResearchModel,
-              finalModel: masterResearchModel,
-              model3: masterResearchModel,
-              model4: masterResearchModel,
-              maxIterations: 3
-            }),
-            signal: currentAbortController.signal
-          });
-
-          if (res.ok) {
-            const data = await res.json();
-            const taskId = data.taskId;
-
-            if (taskId) {
-              STATE.currentDeepResearchTaskId = taskId;
-              // 2. Lakukan Polling berkala ke /api/status-riset/:id
-              while (STATE.isGenerating && !currentAbortController.signal.aborted) {
-                await new Promise(r => setTimeout(r, 1000));
-                if (currentAbortController.signal.aborted || !STATE.isGenerating) {
-                  if (!IS_GITHUB_PAGES) {
-                    fetch('/api/batal-riset/' + taskId, {
-                      method: 'POST',
-                      headers: {
-                        'Content-Type': 'application/json',
-                        'X-User-ID': STATE.userId || 'default',
-                        'x-user-id': STATE.userId || 'default'
-                      },
-                      body: JSON.stringify({ userId: STATE.userId || 'default' })
-                    }).catch(() => {});
-                  }
-                  break;
-                }
-
-                const checkRes = await fetch(`/api/status-riset/${taskId}`, {
-                  headers: {
-                    'X-User-ID': STATE.userId || 'default',
-                    'x-user-id': STATE.userId || 'default'
-                  },
-                  signal: currentAbortController.signal
-                });
-                if (!checkRes.ok) break;
-
-                const statusData = await checkRes.json();
-
-                if (statusData.stepsHistory && Array.isArray(statusData.stepsHistory)) {
-                  stepItems = statusData.stepsHistory.map((s, idx) => ({
-                    text: s.replace(/^\[\d+:\d+:\d+\]\s*/, ''),
-                    status: (idx === statusData.stepsHistory.length - 1 && statusData.status !== 'selesai') ? 'active' : 'done'
-                  }));
-                }
-
-                if (statusData.liveInspection) {
-                  updateLiveInspectionData(statusData.liveInspection);
-                }
-
-                currentProgress = statusData.progressPercent || currentProgress;
-                renderResearchHUD(currentProgress, statusData.currentStep || 'Sedang meneliti web secara otonom...');
-
-                if (statusData.status === 'selesai') {
-                  finalReportText = statusData.hasil || '';
-                  chatSummary = statusData.chatSummary || '';
-                  allSources = statusData.sources || [];
-                  isBackendSuccess = true;
-                  STATE.currentDeepResearchTaskId = null;
-                  if (statusData.liveInspection?.synthesizer) {
-                    updateLiveInspectionData({ synthesizer: statusData.liveInspection.synthesizer });
-                  } else {
-                    updateLiveInspectionData({
-                      synthesizer: {
-                        name: 'Model 3 (Lead Corrector & Enhancer)',
-                        model: masterResearchModel,
-                        status: 'selesai',
-                        text: finalReportText,
-                        length: (finalReportText || '').length
-                      }
-                    });
-                  }
-                  if (statusData.liveInspection?.model4) {
-                    updateLiveInspectionData({ model4: statusData.liveInspection.model4 });
-                  } else if (chatSummary) {
-                    updateLiveInspectionData({
-                      model4: {
-                        name: 'Model 4 (Executive Chat Summarizer)',
-                        model: masterResearchModel,
-                        status: 'selesai',
-                        text: chatSummary,
-                        length: (chatSummary || '').length
-                      }
-                    });
-                  }
-                  break;
-                } else if (statusData.status === 'gagal' || statusData.status === 'dibatalkan') {
-                  STATE.currentDeepResearchTaskId = null;
-                  const errMsg = statusData.error || (statusData.status === 'dibatalkan' ? 'Riset dibatalkan oleh pengguna.' : 'Riset gagal diselesaikan.');
-                  const statusErr = new Error(errMsg);
-                  if (statusData.status === 'dibatalkan') {
-                    statusErr.name = 'AbortError';
-                  }
-                  throw statusErr;
-                }
-              }
-            }
-          }
-        } catch (backendErr) {
-          if (backendErr.name === 'AbortError' || backendErr.message?.includes('dibatalkan') || currentAbortController.signal.aborted || !STATE.isGenerating) {
-            if (STATE.currentDeepResearchTaskId && !IS_GITHUB_PAGES) {
-              fetch('/api/batal-riset/' + STATE.currentDeepResearchTaskId, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'X-User-ID': STATE.userId || 'default',
-                  'x-user-id': STATE.userId || 'default'
-                },
-                body: JSON.stringify({ userId: STATE.userId || 'default' })
-              }).catch(() => {});
-            }
-            const abortErr = new Error('Deep Research dihentikan oleh pengguna.');
-            abortErr.name = 'AbortError';
-            throw abortErr;
-          }
-          console.warn('Backend deep research fallback ke client-side execution:', backendErr);
-        }
-      }
-
-      // 3. Fallback Client-Side Deep Custom URL Web Content Analyzer
-      if (!isBackendSuccess && !currentAbortController.signal.aborted && STATE.isGenerating) {
-        if (effectiveTargetUrls.length === 0) {
-          throw new Error('Mode Deep Research memerlukan minimal 1 URL kustom untuk dianalisis.');
-        }
-
-        stepItems.push({ text: `[Langkah 1/3] Mengambil & mengekstrak konten lengkap dari ${effectiveTargetUrls.length} URL kustom...`, status: 'active' });
-        renderResearchHUD(25, `[Langkah 1/3] Mengambil konten lengkap dari ${effectiveTargetUrls.length} URL kustom...`);
-
-        const scrapedPages = [];
-        for (let idx = 0; idx < effectiveTargetUrls.length; idx++) {
-          if (currentAbortController.signal.aborted || !STATE.isGenerating) break;
-          const targetUrl = effectiveTargetUrls[idx];
-          let domain = targetUrl;
-          try { domain = new URL(targetUrl).hostname; } catch (_) {}
-
-          renderResearchHUD(25 + Math.round(((idx + 1) / effectiveTargetUrls.length) * 25), `[Langkah 1/3] Membaca halaman (${idx + 1}/${effectiveTargetUrls.length}): ${domain}...`);
-
-          try {
-            const pageData = await extractWebContentFromUrl(targetUrl, 16000);
-            if (pageData && pageData.content && pageData.content.length > 50) {
-              scrapedPages.push({
-                url: pageData.url || targetUrl,
-                domain: pageData.domain || domain,
-                title: pageData.title || domain,
-                charCount: pageData.charCount || pageData.content.length,
-                content: pageData.content
-              });
-              allSources.push({
-                title: pageData.title || domain,
-                url: pageData.url || targetUrl,
-                domain: pageData.domain || domain,
-                snippet: pageData.content.slice(0, 300) + '...',
-                sourceProvider: 'URL Kustom Analisis'
-              });
-            }
-          } catch (e) {
-            console.warn('Gagal membaca URL client-side:', targetUrl, e);
-          }
-        }
-
-        if (scrapedPages.length === 0) {
-          throw new Error('Gagal mengekstrak teks isi dari URL kustom yang diberikan. Pastikan tautan dapat diakses publik.');
-        }
-
-        updateLiveInspectionData({
-          topik: contextualTopic,
-          currentQuery: effectiveTargetUrls.join(', '),
-          iteration: 1,
-          maxIterations: 1,
-          timestamp: new Date().toLocaleTimeString('id-ID'),
-          agent1: {
-            name: 'Penganalisis Web Kustom URL (Ekstraksi Konten)',
-            provider: 'Deep Web Extractor',
-            model: masterResearchModel,
-            resultsCount: scrapedPages.length,
-            results: scrapedPages.map(p => ({ title: p.title, link: p.url, snippet: p.content.slice(0, 250) + '...', charCount: p.charCount })),
-            analysis: `Berhasil mengekstrak ${scrapedPages.length} halaman web kustom utuh untuk telaah mendalam.`
-          },
-          scraper: {
-            status: 'selesai',
-            totalScraped: scrapedPages.length,
-            temporalAnalysis: '',
-            articles: scrapedPages.map(p => ({
-              title: p.title,
-              url: p.url,
-              domain: p.domain,
-              sourceProvider: 'URL Kustom Analisis',
-              length: p.charCount,
-              sample: p.content.slice(0, 300) + '...'
-            }))
-          },
-          analyzer: {
-            name: 'Penganalisis Web Kustom URL',
-            model: masterResearchModel,
-            urls: scrapedPages.map(p => ({
-              url: p.url,
-              domain: p.domain,
-              title: p.title,
-              charCount: p.charCount,
-              sample: p.content.slice(0, 300) + '...'
-            }))
-          },
-          scrapedArticlesCount: scrapedPages.length,
-          totalSourcesCount: allSources.length
-        });
-
-        // TAHAP 2/3: DEKONSTRUKSI KONTEN, ANALISIS DATA TERBARU VS DATA LAMA
-        stepItems[stepItems.length - 1].status = 'done';
-        stepItems.push({ text: `[Langkah 2/3] Model Riset (${masterResearchModel}) membedah struktur isi, mendeteksi fakta terbaru vs konteks lama...`, status: 'active' });
-        renderResearchHUD(60, `[Langkah 2/3] Membedah struktur isi, fakta terbaru vs konteks lama...`);
-
-        const docsContext = scrapedPages.map((p, idx) => `
-=====================================================
-DOKUMEN KUSTOM #${idx + 1}: ${p.title}
-URL: ${p.url}
-DOMAIN: ${p.domain}
-=====================================================
-${p.content.slice(0, 14000)}
-=====================================================
-`).join('\n\n');
-
-        const promptBedahKomparatif = `Anda adalah Ahli Analisis Dokumen Web & Intelijen Data Kustom (Deep Custom URL Web Content Analyzer).
-Instruksi Pengguna: "${effectivePrompt}"
-
-Berikut adalah isi teks LENGKAP dari URL kustom yang diberikan pengguna:
-${docsContext}
-
-TUGAS ANDA:
-1. Bedah isi keseluruhan secara mendalam (apa esensi utama, topik bahasan, poin-poin kunci, data kuantitatif, arsitektur, dan argumen penting).
-2. Identifikasi secara spesifik APA YANG TERBARU:
-   - Pembaruan terkini, pengumuman terbaru, fitur/versi rilis terkini, kebijakan baru, harga terbaru, atau fakta baru.
-3. Identifikasi secara spesifik APA YANG LAMA:
-   - Konteks historis, aturan/kebijakan terdahulu, versi terdahulu, fakta lama, atau apa yang telah digantikan/ditinggalkan.
-4. Buat poin-poin matriks perbandingan antara Data Baru vs Data Lama.`;
-
-        let hasilBedahAnalisis = '';
-        try {
-          hasilBedahAnalisis = await callClientLLMDirect(masterResearchModel, promptBedahKomparatif, 'Anda adalah Deep Research Web Content Analyzer yang objektif, kritis, dan sangat teliti dalam membedakan data baru vs lama.');
-        } catch (e) {
-          console.warn('Gagal analisis bedah client-side:', e);
-          hasilBedahAnalisis = `[Rangkuman Ekstraksi Dokumen]:\n${scrapedPages.map(p => `- ${p.title} (${p.url}): ${p.content.slice(0, 400)}...`).join('\n')}`;
-        }
-
-        updateLiveInspectionData({
-          agent2: {
-            name: 'Dekonstruksi Konseptual & Analisis Struktur',
-            provider: 'Neural Content Deconstructor',
-            model: masterResearchModel,
-            resultsCount: scrapedPages.length,
-            analysis: hasilBedahAnalisis
-          },
-          scraper: {
-            status: 'selesai',
-            totalScraped: scrapedPages.length,
-            temporalAnalysis: hasilBedahAnalisis,
-            articles: scrapedPages.map(p => ({
-              title: p.title,
-              url: p.url,
-              domain: p.domain,
-              sourceProvider: 'URL Kustom Analisis',
-              length: p.charCount,
-              sample: p.content.slice(0, 350) + '...'
-            }))
-          }
-        });
-
-        // TAHAP 3/3: PENYUSUNAN LAPORAN EKSEKUTIF DENGAN MATRIKS KOMPARASI
-        stepItems[stepItems.length - 1].status = 'done';
-        stepItems.push({ text: `[Langkah 3/3] Menyusun Laporan Analisis Eksekutif Web & Matriks Komparasi...`, status: 'active' });
-        renderResearchHUD(85, `[Langkah 3/3] Menyusun Laporan Analisis Eksekutif Web & Matriks Komparasi...`);
-
-        const promptLaporanAkhir = `Anda adalah Lead Executive Research Architect.
-Perintah / Pertanyaan Pengguna: "${effectivePrompt}"
-Daftar URL Kustom yang Dianalisis: ${effectiveTargetUrls.join(', ')}
-
-Hasil Telaah Analitis Mendalam:
-${hasilBedahAnalisis}
-
-Susun Laporan Riset Komprehensif dengan struktur format markdown berikut:
-
-# 🌐 LAPORAN ANALISIS MENDALAM: PENGANALISIS WEB KUSTOM URL
-> **URL Target:** ${effectiveTargetUrls.map(u => `[${u}](${u})`).join(', ')}  
-> **Fokus Analisis:** Dekonstruksi Konten Utuh, Data Terbaru vs Lama, & Matriks Evolusi  
-> **Model Analisis:** ${masterResearchModel}  
-
----
-
-## 1. 📌 Ringkasan Eksekutif & Dekonstruksi Isi Dokumen
-(Uraikan secara menyeluruh intisari isi halaman web, tujuan artikel/dokumen, pesan inti, dan konteks pembahasan secara mendalam dan padat).
-
-## 2. ⚡ Informasi & Fakta Terbaru (Apa yang Terkini)
-(Jelaskan secara rinci seluruh data terbaru, pengumuman, fitur terkini, update penting, metrik terbaru, dan fakta paling mutakhir yang ditemukan pada halaman).
-
-## 3. 🏛️ Konteks Lama & Latar Belakang Historis (Apa yang Lama / Digantikan)
-(Uraikan secara jelas kondisi terdahulu, aturan atau versi lama, latar belakang sebelum perubahan terjadi, atau apa yang digantikan oleh informasi terbaru tersebut).
-
-## 4. ⚖️ Matriks Komparasi: Perubahan Baru vs Lama
-Sajikan perbandingan terstruktur dalam format TABEL MARKDOWN:
-| Kategori / Aspek | Kondisi / Data Lama | Pembaruan / Fakta Terbaru | Implikasi Perubahan |
-| :--- | :--- | :--- | :--- |
-(Isi minimal 3-6 baris komparasi nyata berdasarkan isi dokumen).
-
-## 5. 💡 Analisis Implikasi & Sintesis Kritis
-(Telaah dampak perubahan atau informasi ini bagi pengguna, industri, atau ekosistem terkait).
-
-## 6. 🎯 Rekomendasi & Langkah Strategis
-(Langkah taktis yang disarankan berdasarkan temuan).
-
-## 7. 🔗 Referensi Sumber Kustom Terverifikasi
-(Daftar tautan asli lengkap yang dapat diklik langsung oleh pengguna).`;
-
-        try {
-          finalReportText = await callClientLLMDirect(masterResearchModel, promptLaporanAkhir, 'Anda adalah Executive Research Architect yang menyusun laporan riset tingkat tinggi yang terstruktur rapi.');
-        } catch (e) {
-          finalReportText = `# 🌐 LAPORAN ANALISIS MENDALAM: PENGANALISIS WEB KUSTOM URL\n\n> URL Target: ${effectiveTargetUrls.join(', ')}\n\n${hasilBedahAnalisis}`;
-        }
-
-        const promptChatSummary = `Anda adalah Executive Chat Summarizer.
-Pertanyaan Pengguna: "${effectivePrompt}"
-Laporan Analisis Web Lengkap:
-${finalReportText.slice(0, 6000)}
-
-Tugas:
-Tuliskan jawaban langsung yang ringkas, elegan, dan to-the-point (2-3 paragraf) dalam percakapan chat yang menjelaskan:
-1. Inti isi halaman web yang dianalisis.
-2. Apa yang paling baru dan apa yang lama/berubah.
-3. Kesimpulan utama bagi pengguna.
-Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
-
-        try {
-          chatSummary = await callClientLLMDirect(masterResearchModel, promptChatSummary, 'Anda adalah AI Assistant yang ramah, efisien, dan komunikatif.');
-        } catch (e) {
-          chatSummary = '';
-        }
-
-        updateLiveInspectionData({
-          synthesizer: {
-            name: 'Model 3 (Lead Corrector & Enhancer)',
-            model: masterResearchModel,
-            status: 'selesai',
-            text: finalReportText,
-            length: (finalReportText || '').length
-          },
-          model4: {
-            name: 'Model 4 (Executive Chat Summarizer)',
-            model: masterResearchModel,
-            status: 'selesai',
-            text: chatSummary,
-            length: (chatSummary || '').length
-          }
-        });
-      }
-
-      // Finalize UI & Markdown rendering
-      if (finalReportText && finalReportText.trim()) {
-        const endTime = performance.now();
-        const totalDuration = ((endTime - startTime) / 1000).toFixed(2);
-        const actualFinalModel = masterResearchModel;
-
-        const nowIso = new Date().toISOString();
-        // Render Gemini-Style Research Card in chat bubble (dengan rangkuman Model 4 di antarmuka chat)
-        bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(finalReportText, actualFinalModel, allSources, nowIso, chatSummary);
-        enhanceCodeBlocks(bubbleText);
-        attachDeepResearchCardEvents(assistantRow, finalReportText, actualFinalModel, allSources, nowIso);
-        assistantRow.dataset.fullContent = finalReportText;
-
-        if (metaBox) {
-          metaBox.innerHTML = `
-            <span class="meta-badge engine-badge"><i class="fa-solid fa-microscope" style="color:var(--neon-amber);"></i> DEEP RESEARCH</span>
-            <span class="meta-badge model-badge">${escapeHtml(actualFinalModel)}</span>
-            <span class="meta-badge latency-badge"><i class="fa-solid fa-bolt"></i> ${totalDuration}s</span>
-            <span class="meta-badge sources-badge"><i class="fa-solid fa-globe"></i> ${allSources.length} Sumber</span>
-          `;
-        }
-
-        // Save assistant message to session
-        if (STATE.sessions.some(s => s.id === session.id)) {
-          const assistantMsg = {
-            role: 'assistant',
-            content: appendWebVerificationNote(finalReportText, allSources),
-            chatSummary: chatSummary,
-            model: actualFinalModel,
-            sources: allSources,
-            isDeepResearch: true,
-            latency: totalDuration,
-            timestamp: new Date().toISOString()
-          };
-          session.messages.push(assistantMsg);
-          session.updatedAt = new Date().toISOString();
-          savePersistedState();
-          renderChatHistory(els.searchHistoryInput?.value || '');
-        }
-        AudioEngine.success();
-        smartScrollChatToBottom(true);
-      } else if (!currentAbortController.signal.aborted && STATE.isGenerating) {
-        const actualFinalModel = masterResearchModel;
-        throw new Error(`Sintesis laporan Deep Research tidak menghasilkan konten teks dari model: ${actualFinalModel}`);
-      }
-
-    } catch (err) {
-      if (err.name === 'AbortError' || currentAbortController.signal.aborted || !STATE.isGenerating) {
-        if (finalReportText && finalReportText.trim() && STATE.sessions.some(s => s.id === session.id)) {
-          const stoppedText = `${finalReportText.trim()}\n\n*[Riset dihentikan oleh pengguna]*`;
-          const actualFinalModel = masterResearchModel;
-          const nowIso = new Date().toISOString();
-          bubbleText.innerHTML = buildDeepResearchSummaryCardHtml(stoppedText, actualFinalModel, allSources, nowIso, chatSummary);
-          enhanceCodeBlocks(bubbleText);
-          attachDeepResearchCardEvents(assistantRow, stoppedText, actualFinalModel, allSources, nowIso);
-          assistantRow.dataset.fullContent = stoppedText;
-          session.messages.push({
-            role: 'assistant',
-            content: appendWebVerificationNote(stoppedText, allSources),
-            chatSummary: chatSummary,
-            model: actualFinalModel,
-            sources: allSources,
-            isDeepResearch: true,
-            timestamp: new Date().toISOString()
-          });
-          session.updatedAt = new Date().toISOString();
-          savePersistedState();
-          renderChatHistory(els.searchHistoryInput?.value || '');
-        } else {
-          assistantRow.remove();
-        }
-        showToast('Deep Research dihentikan oleh pengguna.');
-      } else {
-        console.error('Deep research error:', err);
-        const errorHtml = formatModelErrorMessage(engine, targetModel, err, false, true);
-        bubbleText.innerHTML = `
-          ${errorHtml}
-          <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-            <button class="btn btn-sm btn-primary retry-research-btn" style="font-size:0.75rem;">
-              <i class="fa-solid fa-rotate-right"></i> Coba Riset Ulang
-            </button>
-            <button class="btn btn-sm btn-outline inspect-research-err-btn" style="border-color:rgba(0, 240, 255, 0.4); color:var(--neon-cyan); font-size:0.75rem;">
-              <i class="fa-solid fa-eye"></i> Pertinjau Log Riset
-            </button>
-            <button class="btn btn-sm btn-outline open-settings-btn" style="border-color:var(--neon-amber); color:var(--neon-amber); font-size:0.75rem;">
-              <i class="fa-solid fa-gear"></i> Buka Pengaturan
-            </button>
-          </div>
-        `;
-
-        bubbleText.querySelector('.retry-research-btn')?.addEventListener('click', () => {
-          if (STATE.isGenerating || STATE.isSending) return;
-          assistantRow.remove();
-          runDeepResearchStreaming(session, promptText, image, modelName, engine);
-        });
-
-        bubbleText.querySelector('.inspect-research-err-btn')?.addEventListener('click', () => {
-          openLiveResearchInspection();
-        });
-
-        bubbleText.querySelector('.open-settings-btn')?.addEventListener('click', () => {
-          syncSettingsModalFields();
-          openModal('settingsModal');
-        });
-
-        AudioEngine.error();
-      }
-    } finally {
-      STATE.currentDeepResearchTaskId = null;
-      setGeneratingState(false);
-      STATE.abortController = null;
-    }
   }
 
   // ==================== AI MUSIC STUDIO TRIGGERS ====================
@@ -28178,13 +26009,6 @@ Aturan:
       syncBodyModalState();
       if (!wasOpen) return;
       AudioEngine.click();
-      if (modalId === 'deepResearchReportModal') {
-        const stageEl = document.getElementById('fullReportArticleStage');
-        if (stageEl && stageEl._tocScrollHandler) {
-          stageEl.removeEventListener('scroll', stageEl._tocScrollHandler);
-          stageEl._tocScrollHandler = null;
-        }
-      }
       // Clean up AI File Studio active file reference to prevent memory leak
       if (modalId === 'aiFileStudioModal') {
         activeAIFile = null;
@@ -28641,289 +26465,6 @@ Aturan:
     closeModal('liveModelCatalogModal');
   }
 
-  // ==================== LIVE RESEARCH INSPECTOR ====================
-  function openLiveResearchInspection() {
-    renderLiveInspectionContent();
-    openModal('liveResearchInspectionModal');
-  }
-
-  function updateLiveInspectionData(inspectionData) {
-    if (!inspectionData) return;
-    STATE.currentLiveInspection = {
-      ...(STATE.currentLiveInspection || {}),
-      ...inspectionData,
-      agent1: { ...(STATE.currentLiveInspection?.agent1 || {}), ...(inspectionData.agent1 || {}) },
-      agent2: { ...(STATE.currentLiveInspection?.agent2 || {}), ...(inspectionData.agent2 || {}) },
-      scraper: { ...(STATE.currentLiveInspection?.scraper || {}), ...(inspectionData.scraper || {}) },
-      synthesizer: { ...(STATE.currentLiveInspection?.synthesizer || {}), ...(inspectionData.synthesizer || {}) },
-      model4: { ...(STATE.currentLiveInspection?.model4 || {}), ...(inspectionData.model4 || {}) }
-    };
-    const currentInsp = STATE.currentLiveInspection;
-
-    if (els.inspectTopik) els.inspectTopik.innerText = currentInsp.topik || '-';
-    if (els.inspectCurrentQuery) els.inspectCurrentQuery.innerText = currentInsp.currentQuery || '-';
-    if (els.inspectIteration) els.inspectIteration.innerText = `${currentInsp.iteration || 1} / ${currentInsp.maxIterations || 3}`;
-    if (els.inspectTimestamp) els.inspectTimestamp.innerText = currentInsp.timestamp || new Date().toLocaleTimeString('id-ID');
-
-    if (els.inspectCountAgent1) {
-      els.inspectCountAgent1.innerText = currentInsp.agent1?.resultsCount || (currentInsp.agent1?.results?.length || 0);
-    }
-    if (els.inspectCountAgent2) {
-      els.inspectCountAgent2.innerText = currentInsp.agent2?.resultsCount || (currentInsp.agent2?.results?.length || 0);
-    }
-    if (els.inspectCountScraper) {
-      els.inspectCountScraper.innerText = currentInsp.scrapedArticlesCount ?? (currentInsp.scraper?.totalScraped ?? (currentInsp.scraper?.articles?.length || 0));
-    }
-    if (els.inspectCountSynthesizer) {
-      const synLen = currentInsp.synthesizer?.text ? currentInsp.synthesizer.text.length : (currentInsp.synthesizer?.length || 0);
-      els.inspectCountSynthesizer.innerText = synLen > 0 ? (synLen > 999 ? `${(synLen / 1000).toFixed(1)}k` : `${synLen}`) : (currentInsp.synthesizer?.status === 'selesai' ? 'Selesai' : 'Siap');
-    }
-    if (els.inspectCountModel4) {
-      const m4Len = currentInsp.model4?.text ? currentInsp.model4.text.length : (currentInsp.model4?.length || 0);
-      els.inspectCountModel4.innerText = m4Len > 0 ? (m4Len > 999 ? `${(m4Len / 1000).toFixed(1)}k` : `${m4Len}`) : (currentInsp.model4?.status === 'selesai' ? 'Selesai' : 'Siap');
-    }
-
-    // Jika modal terbuka, langsung live update view secara dinamis
-    if (els.liveResearchInspectionModal && els.liveResearchInspectionModal.classList.contains('show')) {
-      renderLiveInspectionContent();
-    }
-  }
-
-  function syncLiveInspectionTabButtons() {
-    const activeTab = STATE.activeInspectionTab || 'agent1';
-    els.btnTabInspectAgent1?.classList.toggle('active', activeTab === 'agent1');
-    els.btnTabInspectAgent2?.classList.toggle('active', activeTab === 'agent2');
-    els.btnTabInspectScraper?.classList.toggle('active', activeTab === 'scraper');
-    els.btnTabInspectSynthesizer?.classList.toggle('active', activeTab === 'synthesizer');
-    els.btnTabInspectModel4?.classList.toggle('active', activeTab === 'model4');
-  }
-
-  function renderLiveInspectionContent() {
-    syncLiveInspectionTabButtons();
-    const container = els.inspectTabContent;
-    if (!container) return;
-    const insp = STATE.currentLiveInspection;
-
-    if (!insp) {
-      container.innerHTML = `
-        <div style="text-align:center; padding: 40px 20px; color: var(--text-dim);">
-          <i class="fa-solid fa-satellite fa-spin" style="font-size: 2.4rem; color: var(--neon-cyan); margin-bottom: 12px; display:block;"></i>
-          <h4 style="color:#FFF; margin:0 0 6px 0;">Menunggu Data Live Dari Agen Riset...</h4>
-          <p style="font-size:0.82rem; margin:0;">Mulai Deep Research dari composer dengan URL target untuk memantau proses analisis dan ekstraksi konten secara real-time.</p>
-        </div>
-      `;
-      return;
-    }
-
-    const tab = STATE.activeInspectionTab || 'agent1';
-
-    if (tab === 'agent1') {
-      const ag1 = insp.agent1 || {};
-      const results = ag1.results || [];
-      container.innerHTML = `
-        <div class="inspector-card">
-          <div class="inspector-card-header">
-            <div class="inspector-card-title">
-              <i class="fa-solid fa-link" style="color: #00F0FF;"></i>
-              <span>${escapeHtml(ag1.name || 'Penganalisis Web Kustom URL (Ekstraksi Konten)')}</span>
-            </div>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <span class="catalog-badge">${escapeHtml(ag1.provider || 'Deep Web Extractor')}</span>
-              <span class="catalog-badge" style="background:rgba(0,240,255,0.08); color:#00F0FF;">Model: ${escapeHtml(ag1.model || 'Default')}</span>
-            </div>
-          </div>
-
-          <div style="margin-bottom: 14px;">
-            <div style="font-size: 0.78rem; font-weight: 700; color: #64F3FF; margin-bottom: 8px;">
-              <i class="fa-solid fa-file-export"></i> Dokumen Web Utuh yang Diambil (${results.length} Sumber URL):
-            </div>
-            ${results.length === 0 ? '<div style="font-size:0.78rem; color:var(--text-dim); font-style:italic;">Belum ada hasil pencarian.</div>' : ''}
-            ${results.map((r, idx) => `
-              <div class="inspector-source-item">
-                <div class="inspector-source-title">
-                  <a href="${escapeHtml(r.link || r.url || '#')}" target="_blank" rel="noopener noreferrer">
-                    [${idx + 1}] ${escapeHtml(r.title || 'Senza Titolo')}
-                  </a>
-                </div>
-                <div class="inspector-source-snippet">${escapeHtml(r.snippet || r.content || '')}</div>
-                <div style="font-size:0.68rem; color:var(--text-dim); margin-top:3px; font-family:var(--font-code);">${escapeHtml(r.link || r.url || '')}</div>
-              </div>
-            `).join('')}
-          </div>
-
-          <div>
-            <div style="font-size: 0.78rem; font-weight: 700; color: var(--neon-teal); margin-bottom: 8px;">
-              <i class="fa-solid fa-brain"></i> Hasil Ekstraksi Awal & Validasi:
-            </div>
-            <div class="inspector-analysis-box">${escapeHtml(ag1.analysis || 'Sedang mengekstrak & menormalkan konten...')}</div>
-          </div>
-        </div>
-      `;
-    } else if (tab === 'agent2') {
-      const ag2 = insp.agent2 || {};
-      const results = ag2.results || [];
-      container.innerHTML = `
-        <div class="inspector-card">
-          <div class="inspector-card-header">
-            <div class="inspector-card-title">
-              <i class="fa-solid fa-layer-group" style="color: #00FFC2;"></i>
-              <span>${escapeHtml(ag2.name || 'Dekonstruksi Konseptual & Analisis Struktur')}</span>
-            </div>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <span class="catalog-badge" style="border-color:rgba(0,255,194,0.4); color:#00FFC2;">${escapeHtml(ag2.provider || 'Neural Content Deconstructor')}</span>
-              <span class="catalog-badge" style="background:rgba(0,255,194,0.08); color:#00FFC2;">Model: ${escapeHtml(ag2.model || 'Default')}</span>
-            </div>
-          </div>
-
-          <p style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 12px; line-height: 1.45;">
-            Modul ini mendekonstruksi struktur konseptual dan semantik dokumen — menganalisis arsitektur konten, argumen utama, data kuantitatif, serta teori yang dinyatakan di halaman web target.
-          </p>
-
-          <div>
-            <div style="font-size: 0.78rem; font-weight: 700; color: var(--neon-teal); margin-bottom: 8px;">
-              <i class="fa-solid fa-diagram-project"></i> Hasil Dekonstruksi Struktural & Argumen:
-            </div>
-            <div class="inspector-analysis-box" style="white-space: pre-wrap; font-size: 0.82rem; line-height: 1.55;">${escapeHtml(ag2.analysis || 'Sedang menganalisis struktur & konsep...')}</div>
-          </div>
-        </div>
-      `;
-    } else if (tab === 'scraper') {
-      const scraper = insp.scraper || {};
-      const articles = scraper.articles || [];
-      const temporalAnalysis = scraper.temporalAnalysis || '';
-      container.innerHTML = `
-        <div class="inspector-card">
-          <div class="inspector-card-header">
-            <div class="inspector-card-title">
-              <i class="fa-solid fa-scale-balanced" style="color: #FFB703;"></i>
-              <span>Analisis Temporal: Baru vs Arsip Lama</span>
-            </div>
-            <span class="catalog-badge" style="background:rgba(255,183,3,0.12); color:#FFB703; border-color:rgba(255,183,3,0.3);">
-              Total: ${articles.length} Dokumen Utuh
-            </span>
-          </div>
-
-          <p style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 12px; line-height: 1.45;">
-            Evaluasi temporal & komparatif: memisahkan secara tepat apa yang baru saja diperkenalkan (pembaruan terbaru, versi baru, perubahan kebijakan) dari aturan dan kondisi sebelumnya (data usang, deprecated, atau tergantikan).
-          </p>
-
-          ${temporalAnalysis ? `
-            <div style="margin-bottom: 16px;">
-              <div style="font-size: 0.78rem; font-weight: 700; color: #FFB703; margin-bottom: 8px;">
-                <i class="fa-solid fa-timeline"></i> Sintesis Komparatif (Baru vs Status Sebelumnya):
-              </div>
-              <div class="inspector-analysis-box" style="background: rgba(255,183,3,0.05); border-color: rgba(255,183,3,0.3); font-size:0.8rem; line-height:1.55; white-space: pre-wrap;">
-                ${escapeHtml(temporalAnalysis)}
-              </div>
-            </div>
-          ` : ''}
-
-          <div style="margin-bottom: 14px;">
-            <div style="font-size: 0.78rem; font-weight: 700; color: #64F3FF; margin-bottom: 8px;">
-              <i class="fa-solid fa-file-lines"></i> Dokumen Web yang Diekstrak (${articles.length} Sumber):
-            </div>
-            ${articles.length === 0 ? `
-              <div style="text-align:center; padding: 24px; color: var(--text-dim); font-size: 0.8rem; font-style:italic;">
-                Belum ada dokumen yang diekstrak pada fase ini.
-              </div>
-            ` : articles.map((art, idx) => `
-              <div class="inspector-source-item" style="margin-bottom: 12px;">
-                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px; gap:8px;">
-                  <div class="inspector-source-title" style="margin:0;">
-                    <a href="${escapeHtml(art.url)}" target="_blank" rel="noopener noreferrer">
-                      [${idx + 1}] ${escapeHtml(art.title)}
-                    </a>
-                  </div>
-                  <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-                    <span style="font-size:0.65rem; padding:2px 6px; border-radius:4px; font-weight:600; font-family:var(--font-code); background:rgba(0,180,216,0.15); color:#00B4D8; border:1px solid rgba(0,180,216,0.3);">
-                      ${escapeHtml(art.sourceProvider)}
-                    </span>
-                    <span style="font-size:0.68rem; color:var(--neon-teal); font-family:var(--font-code); background:rgba(0,255,194,0.1); padding:2px 6px; border-radius:4px;">
-                      ${art.length ? (art.length > 999 ? `${(art.length / 1000).toFixed(1)}k karakter` : `${art.length} karakter`) : 'Teks Lengkap'}
-                    </span>
-                  </div>
-                </div>
-                <div style="font-size:0.68rem; color:var(--text-dim); margin-bottom:6px; font-family:var(--font-code);">${escapeHtml(art.url)}</div>
-                <div class="inspector-source-snippet" style="background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:4px; font-size:0.74rem;">
-                  <strong style="color:var(--text-muted); display:block; margin-bottom:2px; font-size:0.68rem;">Sampel Teks Terekstraksi:</strong>
-                  ${escapeHtml(art.sample || art.preview || art.content || '')}
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      `;
-    } else if (tab === 'synthesizer') {
-      const syn = insp.synthesizer || {};
-      const synText = syn.text || insp.hasil || '';
-      const isComplete = syn.status === 'selesai' || syn.status === 'completato';
-      container.innerHTML = `
-        <div class="inspector-card">
-          <div class="inspector-card-header">
-            <div class="inspector-card-title">
-              <i class="fa-solid fa-file-contract" style="color: #FF007F;"></i>
-              <span>${escapeHtml(syn.name || 'Model 3 (Lead Corrector & Enhancer)')}</span>
-            </div>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <span class="catalog-badge" style="background:rgba(255,0,127,0.1); color:#FF007F; border-color:rgba(255,0,127,0.3);">
-                Model: ${escapeHtml(syn.model || (STATE.mode === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel) || 'Lead Corrector')}
-              </span>
-              <span class="catalog-badge" style="background:rgba(0,255,194,0.1); color:var(--neon-teal);">
-                ${isComplete ? '<i class="fa-solid fa-check"></i> Selesai' : (synText ? '<i class="fa-solid fa-spinner fa-spin"></i> Mengoreksi...' : 'Menunggu')}
-              </span>
-            </div>
-          </div>
-
-          <p style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 12px; line-height: 1.45;">
-            Sintesis analitik akhir: menyusun laporan riset lengkap 7 bagian dengan matriks komparatif Markdown antara data lama dan temuan terbaru.
-          </p>
-
-          <div>
-            <div style="font-size: 0.78rem; font-weight: 700; color: #FF007F; margin-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
-              <span><i class="fa-solid fa-terminal"></i> Draft Live Laporan Riset Komprehensif Terkoreksi:</span>
-              <span style="font-size:0.7rem; color:var(--text-dim); font-family:var(--font-code);">${synText ? `${synText.length} karakter` : '0 karakter'}</span>
-            </div>
-            <div class="inspector-analysis-box" style="max-height: 480px; overflow-y: auto; white-space: pre-wrap; font-family: var(--font-code); font-size: 0.8rem; line-height: 1.5; border-color: rgba(255,0,127,0.3); background: rgba(20, 8, 16, 0.6);">${escapeHtml(synText || 'Model 3 sedang menunggu hasil telaah Model 1 & Model 2 sebelum mulai mengoreksi dan menyempurnakan laporan...')}</div>
-          </div>
-        </div>
-      `;
-    } else if (tab === 'model4') {
-      const m4 = insp.model4 || {};
-      const m4Text = m4.text || '';
-      const isComplete = m4.status === 'selesai' || m4.status === 'completato';
-      container.innerHTML = `
-        <div class="inspector-card">
-          <div class="inspector-card-header">
-            <div class="inspector-card-title">
-              <i class="fa-solid fa-comment-dots" style="color: var(--neon-cyan);"></i>
-              <span>${escapeHtml(m4.name || 'Model 4 (Executive Chat Summarizer)')}</span>
-            </div>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <span class="catalog-badge" style="background:rgba(0,240,255,0.08); color:var(--neon-cyan); border-color:rgba(0,240,255,0.3);">
-                Model: ${escapeHtml(m4.model || (STATE.mode === 'openrouter' ? STATE.settings.openRouterModel : STATE.settings.ollamaModel) || 'Executive Summarizer')}
-              </span>
-              <span class="catalog-badge" style="background:rgba(0,255,194,0.1); color:var(--neon-teal);">
-                ${isComplete ? '<i class="fa-solid fa-check"></i> Selesai' : (m4Text ? '<i class="fa-solid fa-spinner fa-spin"></i> Merumuskan...' : 'Menunggu')}
-              </span>
-            </div>
-          </div>
-
-          <p style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 12px; line-height: 1.45;">
-            Menyusun rangkuman eksekutif ringkas & profesional (2-3 paragraf) hasil olahan dari laporan lengkap, siap dikirim langsung ke percakapan chat.
-          </p>
-
-          <div>
-            <div style="font-size: 0.78rem; font-weight: 700; color: var(--neon-cyan); margin-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
-              <span><i class="fa-solid fa-comment-dots"></i> Draft Live Rangkuman Eksekutif Chat:</span>
-              <span style="font-size:0.7rem; color:var(--text-dim); font-family:var(--font-code);">${m4Text ? `${m4Text.length} karakter` : '0 karakter'}</span>
-            </div>
-            <div class="inspector-analysis-box" style="max-height: 480px; overflow-y: auto; white-space: pre-wrap; font-family: var(--font-code); font-size: 0.8rem; line-height: 1.5; border-color: rgba(0,240,255,0.3); background: rgba(8, 20, 24, 0.6);">${escapeHtml(m4Text || 'Model 4 sedang menunggu penyelesaian laporan terkoreksi dari Model 3...')}</div>
-          </div>
-        </div>
-      `;
-    }
-  }
-
   // ==================== SETTINGS SYNC HELPER ====================
   function syncSettingsModalFields() {
     if (els.settingOllamaEndpoint) els.settingOllamaEndpoint.value = STATE.settings.ollamaEndpoint || 'https://ollama.com';
@@ -29001,19 +26542,6 @@ Aturan:
       template: '/dokumen ',
       placeholder: 'Tulis topik dokumen, makalah, atau laporan lengkap yang ingin dibuat...',
       aliases: ['doc', 'laporan', 'pdf', 'word', 'docx', 'makalah', 'proposal', 'skripsi', 'jurnal', 'sop']
-    },
-    {
-      id: 'deep-research',
-      command: '/deep-research',
-      title: 'Mode Deep Research (URL Kustom)',
-      badge: 'URL Analyzer',
-      desc: 'Analisis mendalam isi & komparasi fakta dari URL kustom yang ditentukan',
-      iconClass: 'fa-solid fa-microscope',
-      iconColor: '#f43f5e',
-      iconBg: 'rgba(244, 63, 94, 0.12)',
-      action: 'deep_research_mode',
-      template: '',
-      aliases: ['deep', 'research', 'riset', 'url', 'analisis']
     },
     {
       id: 'web-search',
@@ -29269,25 +26797,6 @@ Aturan:
       return;
     }
 
-    if (cmd.action === 'deep_research_mode') {
-      setSearchMode('premium');
-      if (els.promptInput) {
-        els.promptInput.value = '';
-        autoResizeTextarea(els.promptInput);
-        els.promptInput.focus();
-      }
-      hideSlashCommandsMenu();
-      const count = Array.isArray(STATE.researchTargetUrls) ? STATE.researchTargetUrls.length : 0;
-      if (count === 0) {
-        openResearchUrlManagerModal();
-        showToast('🔬 Mode Deep Research Aktif! Tambahkan URL sumber yang ingin dianalisis.');
-      } else {
-        showToast(`🔬 Mode Deep Research Aktif (${count} URL Sumber)`);
-      }
-      AudioEngine.success();
-      return;
-    }
-
     if (cmd.action === 'default_search_mode') {
       setSearchMode('default');
       if (els.promptInput) {
@@ -29464,14 +26973,6 @@ Aturan:
         return;
       }
 
-      // Global delegation untuk tombol Pertinjau Proses Nyata (Live Inspection)
-      const inspectBtn = e.target.closest('.btn-live-inspection-trigger');
-      if (inspectBtn) {
-        e.preventDefault();
-        e.stopPropagation();
-        openLiveResearchInspection();
-        return;
-      }
     });
 
     // Debounce 150ms: rebuild dropdown (ratusan baris) tidak perlu di tiap ketikan
@@ -30771,67 +28272,14 @@ Aturan:
       toggleSearchDropdown(e);
     });
 
-    // Klik langsung pada badge PRO untuk kelola URL Deep Research jika mode premium aktif
-    els.searchBadge?.addEventListener('click', (e) => {
-      if (STATE.searchMode === 'premium') {
-        e.stopPropagation();
-        closeSearchDropdown();
-        openResearchUrlManagerModal();
-      }
-    });
-
-    // Klik kanan / long-press memberi tahu cara mengganti ke Deep Research atau Default via Skills
+    // Klik kanan / long-press memberi tahu cara mengganti mode pencarian
     els.webSearchToggleBtn?.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      showToast('Ketik / di prompt atau buka menu Skills untuk memilih Mode Deep Research atau Mode Default.');
+      showToast('Klik ikon pencarian untuk beralih mode pencarian web.');
     });
 
     // ==================== YOUTUBE SEARCH TOOL CONTROLS ====================
-
-    // Modal: Matikan Mode Riset
-    els.researchUrlManagerDisableBtn?.addEventListener('click', () => {
-      clearResearchTargetUrls();
-      setSearchMode('autonomous');
-      closeModal('researchUrlManagerModal');
-      showToast('Mode Deep Research dinonaktifkan. Kembali ke Mode Autonomous Web Explorer.');
-    });
-
-    // Modal: Ganti Mode Penelusuran
-    els.researchUrlManagerSwitchModeBtn?.addEventListener('click', () => {
-      closeModal('researchUrlManagerModal');
-      setTimeout(() => {
-        openSearchDropdown();
-      }, 150);
-    });
-
-    // Modal: Tambah URL
-    els.researchUrlManagerAddBtn?.addEventListener('click', (e) => {
-      e.preventDefault();
-      const val = els.researchUrlManagerInput?.value;
-      if (val) {
-        if (addResearchTargetUrl(val)) {
-          els.researchUrlManagerInput.value = '';
-        }
-      }
-    });
-
-    els.researchUrlManagerInput?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const val = els.researchUrlManagerInput?.value;
-        if (val) {
-          if (addResearchTargetUrl(val)) {
-            els.researchUrlManagerInput.value = '';
-          }
-        }
-      }
-    });
-
-    // Modal: Selesai
-    els.researchUrlManagerDoneBtn?.addEventListener('click', () => {
-      closeModal('researchUrlManagerModal');
-    });
 
     $$('.search-menu-item').forEach(item => {
       item.addEventListener('click', (e) => {
@@ -30839,12 +28287,7 @@ Aturan:
         const mode = item.dataset.mode || 'off';
         if (mode !== STATE.searchMode) {
           setSearchMode(mode);
-          if (mode === 'premium') {
-            showToast('Mode Deep Research diaktifkan.');
-            if (!STATE.researchTargetUrls || STATE.researchTargetUrls.length === 0) {
-              openResearchUrlManagerModal();
-            }
-          } else if (mode === 'default') {
+          if (mode === 'default') {
             showToast('Mode Pencarian Web Default aktif.');
           } else if (mode === 'autonomous') {
             showToast('Autonomous Web Explorer aktif.');
@@ -30854,22 +28297,6 @@ Aturan:
         } else {
           // Klik mode yang sudah aktif cukup menutup menu tanpa mematikan mode
           closeSearchDropdown();
-        }
-      });
-    });
-
-    // Tombol Kelola URL khusus pada item Deep Research
-    $$('.search-item-manage-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        closeSearchDropdown();
-        openResearchUrlManagerModal();
-      });
-      btn.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
-          e.preventDefault();
-          e.stopPropagation();
-          btn.click();
         }
       });
     });
@@ -31212,35 +28639,6 @@ Aturan:
       });
     });
 
-    // ==================== DEEP RESEARCH FULL REPORT MODAL LISTENERS ====================
-    document.getElementById('btnExportReportPDF')?.addEventListener('click', () => {
-      const reportText = safeAssistantText(currentActiveReport.fullText || '');
-      if (!reportText) return;
-      downloadReportPDF(currentActiveReport.title, reportText);
-    });
-
-    document.getElementById('btnExportReportDOCX')?.addEventListener('click', () => {
-      const reportText = safeAssistantText(currentActiveReport.fullText || '');
-      if (!reportText) return;
-      downloadReportDOCX(currentActiveReport.title, reportText);
-    });
-
-    document.getElementById('btnExportReportMD')?.addEventListener('click', () => {
-      const reportText = safeAssistantText(currentActiveReport.fullText || '');
-      if (!reportText) return;
-      downloadReportMD(currentActiveReport.title, reportText);
-    });
-
-    document.getElementById('btnCopyFullReport')?.addEventListener('click', () => {
-      const reportText = safeAssistantText(currentActiveReport.fullText || '');
-      if (!reportText) return;
-      copyTextToClipboard(reportText, null, 'Seluruh teks laporan riset disalin ke clipboard!');
-    });
-
-    document.getElementById('btnToggleReportSources')?.addEventListener('click', () => {
-      toggleReportReferences();
-    });
-
     // Global Hardware / Gesture Back Button Interceptor for Mobile (popstate)
     window.addEventListener('popstate', (e) => {
       // 1. Close Lightbox if open
@@ -31272,7 +28670,7 @@ Aturan:
           // Check if child modal (e.g. liveModelCatalogModal) was open on top of settingsModal
           const settingsModal = document.getElementById('settingsModal');
           const isSettingsOpen = settingsModal && settingsModal.classList.contains('show');
-          const isChildOpen = openModals.some(m => m.id === 'liveModelCatalogModal' || m.id === 'liveResearchInspectionModal');
+          const isChildOpen = openModals.some(m => m.id === 'liveModelCatalogModal');
 
           if (isSettingsOpen && isChildOpen) {
             // Dismiss child modal only, keep settingsModal alive
@@ -31760,63 +29158,6 @@ Aturan:
       showToast('🔄 Status & saldo provider diperbarui!');
       AudioEngine.click();
     });
-
-    // ==================== LIVE RESEARCH INSPECTOR LISTENERS ====================
-    els.btnTabInspectAgent1?.addEventListener('click', () => {
-      STATE.activeInspectionTab = 'agent1';
-      els.btnTabInspectAgent1.classList.add('active');
-      els.btnTabInspectAgent2?.classList.remove('active');
-      els.btnTabInspectScraper?.classList.remove('active');
-      els.btnTabInspectSynthesizer?.classList.remove('active');
-      els.btnTabInspectModel4?.classList.remove('active');
-      renderLiveInspectionContent();
-      AudioEngine.click();
-    });
-
-    els.btnTabInspectAgent2?.addEventListener('click', () => {
-      STATE.activeInspectionTab = 'agent2';
-      els.btnTabInspectAgent2.classList.add('active');
-      els.btnTabInspectAgent1?.classList.remove('active');
-      els.btnTabInspectScraper?.classList.remove('active');
-      els.btnTabInspectSynthesizer?.classList.remove('active');
-      els.btnTabInspectModel4?.classList.remove('active');
-      renderLiveInspectionContent();
-      AudioEngine.click();
-    });
-
-    els.btnTabInspectScraper?.addEventListener('click', () => {
-      STATE.activeInspectionTab = 'scraper';
-      els.btnTabInspectScraper.classList.add('active');
-      els.btnTabInspectAgent1?.classList.remove('active');
-      els.btnTabInspectAgent2?.classList.remove('active');
-      els.btnTabInspectSynthesizer?.classList.remove('active');
-      els.btnTabInspectModel4?.classList.remove('active');
-      renderLiveInspectionContent();
-      AudioEngine.click();
-    });
-
-    els.btnTabInspectSynthesizer?.addEventListener('click', () => {
-      STATE.activeInspectionTab = 'synthesizer';
-      els.btnTabInspectSynthesizer.classList.add('active');
-      els.btnTabInspectAgent1?.classList.remove('active');
-      els.btnTabInspectAgent2?.classList.remove('active');
-      els.btnTabInspectScraper?.classList.remove('active');
-      els.btnTabInspectModel4?.classList.remove('active');
-      renderLiveInspectionContent();
-      AudioEngine.click();
-    });
-
-    els.btnTabInspectModel4?.addEventListener('click', () => {
-      STATE.activeInspectionTab = 'model4';
-      els.btnTabInspectModel4.classList.add('active');
-      els.btnTabInspectAgent1?.classList.remove('active');
-      els.btnTabInspectAgent2?.classList.remove('active');
-      els.btnTabInspectScraper?.classList.remove('active');
-      els.btnTabInspectSynthesizer?.classList.remove('active');
-      renderLiveInspectionContent();
-      AudioEngine.click();
-    });
-
 
     // Mobile Keyboard & Visual Viewport Handler
     setupMobileKeyboardHandler();

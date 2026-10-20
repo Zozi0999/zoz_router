@@ -319,13 +319,21 @@ function isRemoteTunnelRequest(req) {
   return false;
 }
 
+function extractCookiePin(req) {
+  const cookieHeader = req && req.headers && req.headers.cookie;
+  if (!cookieHeader) return null;
+  const match = cookieHeader.match(/(?:^|;\s*)zoz_remote_pin=([0-9a-zA-Z_-]+)/);
+  return match ? decodeURIComponent(match[1]).trim() : null;
+}
+
 function validateRemoteTerminalPin(req, reqUrl, body) {
   if (!isRemoteTunnelRequest(req)) {
     return { valid: true };
   }
-  const clientPin = (reqUrl && reqUrl.searchParams.get('pin')) ||
-                    req.headers['x-terminal-pin'] ||
-                    (body && body.pin);
+  const clientPin = (reqUrl && reqUrl.searchParams && reqUrl.searchParams.get('pin')) ||
+                    (req && req.headers && req.headers['x-terminal-pin']) ||
+                    (body && body.pin) ||
+                    extractCookiePin(req);
   if (!clientPin || String(clientPin).trim() !== String(cloudflareTunnelPin).trim()) {
     return {
       valid: false,
@@ -1823,284 +1831,6 @@ ${contextBlocks}
   };
 }
 
-// ==================== YOUTUBE LIVE SEARCH ENGINE (ZERO API KEY) ====================
-// Mencari video YouTube tanpa API key dengan dua strategi fallback:
-//   1) Parsing halaman hasil pencarian YouTube (ytInitialData) — utama.
-//   2) Instance Invidious publik (API JSON terbuka) — cadangan.
-const youtubeSearchCache = new Map();
-const YOUTUBE_SEARCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
-const INVIDIOUS_INSTANCES = [
-  'https://inv.nadeko.net',
-  'https://yewtu.be',
-  'https://invidious.nerdvpn.de'
-];
-
-// "12:34" / "1:02:03" -> detik
-function youtubeDurationToSeconds(text) {
-  if (!text || typeof text !== 'string') return 0;
-  const parts = text.split(':').map((p) => parseInt(p, 10));
-  if (parts.some((n) => Number.isNaN(n))) return 0;
-  return parts.reduce((acc, n) => acc * 60 + n, 0);
-}
-
-// Ambil objek JSON seimbang yang mengikuti sebuah penanda (mis. "ytInitialData =")
-function extractJsonAfterMarker(source, marker) {
-  if (!source || typeof source !== 'string') return null;
-  const idx = source.indexOf(marker);
-  if (idx === -1) return null;
-  const start = source.indexOf('{', idx + marker.length);
-  if (start === -1) return null;
-  let depth = 0;
-  let inStr = false;
-  let esc = false;
-  for (let i = start; i < source.length; i++) {
-    const c = source[i];
-    if (esc) { esc = false; continue; }
-    if (c === '\\') { esc = true; continue; }
-    if (c === '"') { inStr = !inStr; continue; }
-    if (inStr) continue;
-    if (c === '{') depth++;
-    else if (c === '}') {
-      depth--;
-      if (depth === 0) return source.slice(start, i + 1);
-    }
-  }
-  return null;
-}
-
-function ytText(node) {
-  if (!node) return '';
-  if (typeof node.simpleText === 'string') return node.simpleText;
-  if (Array.isArray(node.runs)) return node.runs.map((r) => (r && r.text) || '').join('');
-  if (typeof node.content === 'string') return node.content;
-  return '';
-}
-
-function mapVideoRenderer(vr) {
-  try {
-    if (!vr || !vr.videoId) return null;
-    const title = ytText(vr.title);
-    if (!title) return null;
-    const ownerRuns = vr.ownerText && vr.ownerText.runs;
-    const ownerNav = ownerRuns && ownerRuns[0] && ownerRuns[0].navigationEndpoint && ownerRuns[0].navigationEndpoint.browseEndpoint;
-    const channelPath = ownerNav && ownerNav.canonicalBaseUrl;
-    const durationText = ytText(vr.lengthText);
-    return {
-      videoId: vr.videoId,
-      title,
-      channel: ytText(vr.ownerText || vr.longBylineText) || '',
-      channelUrl: channelPath ? `https://www.youtube.com${channelPath}` : '',
-      durationText,
-      durationSeconds: youtubeDurationToSeconds(durationText),
-      viewText: ytText(vr.viewCountText) || ytText(vr.shortViewCountText),
-      publishedText: ytText(vr.publishedTimeText),
-      description: ytText(vr.descriptionSnippet).slice(0, 260),
-      url: `https://www.youtube.com/watch?v=${vr.videoId}`,
-      thumbnail: `https://i.ytimg.com/vi/${vr.videoId}/hqdefault.jpg`,
-      source: 'YouTube Search'
-    };
-  } catch (_) {
-    return null;
-  }
-}
-
-// YouTube versi baru memakai lockupViewModel (contentType VIDEO) alih-alih videoRenderer
-function mapLockupViewModel(lv) {
-  try {
-    if (!lv || !lv.contentId) return null;
-    const meta = (lv.metadata && lv.metadata.lockupMetadataViewModel) || {};
-    const title = (meta.title && meta.title.content) || '';
-    if (!title) return null;
-    const metaLine = (meta.metadata && meta.metadata.content) || '';
-    const sources = (meta.image && meta.image.thumbnailSources) || [];
-    let thumb = '';
-    for (const s of sources) {
-      if (s && typeof s.url === 'string' && /hqdefault|mqdefault|maxresdefault/i.test(s.url)) { thumb = s.url; break; }
-    }
-    if (!thumb && sources.length && sources[0].url) thumb = sources[0].url;
-    if (thumb && thumb.startsWith('//')) thumb = `https:${thumb}`;
-    if (thumb && thumb.startsWith('/')) thumb = `https://i.ytimg.com${thumb}`;
-    return {
-      videoId: lv.contentId,
-      title,
-      channel: '',
-      channelUrl: '',
-      durationText: '',
-      durationSeconds: 0,
-      viewText: metaLine,
-      publishedText: '',
-      description: metaLine.slice(0, 260),
-      url: `https://www.youtube.com/watch?v=${lv.contentId}`,
-      thumbnail: thumb || `https://i.ytimg.com/vi/${lv.contentId}/hqdefault.jpg`,
-      source: 'YouTube Search'
-    };
-  } catch (_) {
-    return null;
-  }
-}
-
-// Telusuri struktur ytInitialData rekursif dan kumpulkan video yang sudah dinormalisasi
-function collectYouTubeSearchResults(node, out, limit) {
-  if (!node || typeof node !== 'object' || out.length >= limit) return;
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      collectYouTubeSearchResults(item, out, limit);
-      if (out.length >= limit) return;
-    }
-    return;
-  }
-  if (node.videoRenderer) {
-    const mapped = mapVideoRenderer(node.videoRenderer);
-    if (mapped && !out.some((v) => v.videoId === mapped.videoId)) out.push(mapped);
-    if (out.length >= limit) return;
-  }
-  if (node.lockupViewModel && node.lockupViewModel.contentId && String(node.lockupViewModel.contentType || '').toUpperCase().includes('VIDEO')) {
-    const mapped = mapLockupViewModel(node.lockupViewModel);
-    if (mapped && !out.some((v) => v.videoId === mapped.videoId)) out.push(mapped);
-    if (out.length >= limit) return;
-  }
-  for (const key of Object.keys(node)) {
-    collectYouTubeSearchResults(node[key], out, limit);
-    if (out.length >= limit) return;
-  }
-}
-
-async function searchViaYouTubeResultsPage(query, limit) {
-  const target = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&hl=en&gl=US`;
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 10000);
-  try {
-    const resp = await fetch(target, {
-      signal: ctrl.signal,
-      headers: {
-        'User-Agent': YOUTUBE_SEARCH_UA,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Cookie': 'SOCS=CAI'
-      }
-    });
-    if (!resp.ok) return [];
-    const html = await resp.text();
-    const jsonStr = extractJsonAfterMarker(html, 'ytInitialData');
-    if (!jsonStr) return [];
-    const data = JSON.parse(jsonStr);
-    const results = [];
-    collectYouTubeSearchResults(data, results, limit);
-    return results;
-  } catch (_) {
-    return [];
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function searchViaInvidious(query, limit) {
-  const seenIds = new Set();
-  for (const base of INVIDIOUS_INSTANCES) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 7000);
-    try {
-      const resp = await fetch(`${base}/api/v1/search?q=${encodeURIComponent(query)}&type=video`, {
-        signal: ctrl.signal,
-        headers: { 'Accept': 'application/json', 'User-Agent': YOUTUBE_SEARCH_UA }
-      });
-      if (!resp.ok) continue;
-      const list = await resp.json();
-      if (!Array.isArray(list)) continue;
-      const mapped = list
-        .filter((it) => it && (it.type === 'video' || it.videoId) && it.videoId && it.title)
-        .slice(0, limit)
-        .map((it) => ({
-          videoId: it.videoId,
-          title: it.title,
-          channel: it.author || '',
-          channelUrl: it.authorUrl ? (String(it.authorUrl).startsWith('http') ? it.authorUrl : `${base}${it.authorUrl}`) : '',
-          durationText: '',
-          durationSeconds: Number(it.lengthSeconds) || 0,
-          viewText: Number(it.viewCount) > 0 ? `${Number(it.viewCount).toLocaleString('en-US')} views` : '',
-          publishedText: it.publishedText || '',
-          description: String(it.description || '').slice(0, 260),
-          url: `https://www.youtube.com/watch?v=${it.videoId}`,
-          thumbnail: `https://i.ytimg.com/vi/${it.videoId}/hqdefault.jpg`,
-          source: 'Invidious'
-        }));
-      const fresh = mapped.filter((v) => {
-        if (!v.videoId || seenIds.has(v.videoId)) return false;
-        seenIds.add(v.videoId);
-        return true;
-      });
-      if (fresh.length) return fresh;
-    } catch (_) {
-      // lanjut ke instance berikutnya
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  return [];
-}
-
-// Lengkapi data video (khususnya nama channel) via oEmbed bila belum ada.
-async function enrichYouTubeSearchResults(results) {
-  const missing = results.filter((v) => !v.channel);
-  if (missing.length === 0) return results;
-  await Promise.all(missing.map(async (v) => {
-    try {
-      const info = await fetchYouTubeInfo(v.url);
-      if (info && info.success && info.channel) {
-        v.channel = info.channel;
-        v.channelUrl = info.channel_url || v.channelUrl;
-        if (!v.title && info.title) v.title = info.title;
-        if (!v.thumbnail && info.thumbnail) v.thumbnail = info.thumbnail;
-      }
-    } catch (_) {}
-  }));
-  return results;
-}
-
-/**
- * Cari video YouTube secara live tanpa API key.
- * @param {string} query kata kunci pencarian
- * @param {number} maxResults jumlah hasil (1-10)
- * @returns {Promise<{success:boolean, query:string, count:number, results:Array, error?:string}>}
- */
-async function searchYouTubeVideos(query, maxResults = 6) {
-  const q = String(query || '').trim();
-  if (!q) throw new Error('Parameter query tidak boleh kosong.');
-  const limit = Math.max(1, Math.min(10, parseInt(maxResults, 10) || 6));
-  const cacheKey = `${q.toLowerCase()}::${limit}`;
-  if (youtubeSearchCache.has(cacheKey)) {
-    const cached = youtubeSearchCache.get(cacheKey);
-    if (cached && (Date.now() - cached.cachedAt < YOUTUBE_CACHE_TTL)) {
-      return cached.data;
-    }
-    youtubeSearchCache.delete(cacheKey);
-  }
-
-  let results = await searchViaYouTubeResultsPage(q, limit);
-  if (results.length === 0) {
-    results = await searchViaInvidious(q, limit);
-  }
-  if (results.length > 0) {
-    results = await enrichYouTubeSearchResults(results);
-  }
-
-  const payload = {
-    success: results.length > 0,
-    query: q,
-    count: results.length,
-    results,
-    error: results.length > 0 ? undefined : 'Tidak ditemukan hasil video. Coba kata kunci lain.'
-  };
-  if (results.length > 0) {
-    if (youtubeSearchCache.size > 80) {
-      const first = youtubeSearchCache.keys().next().value;
-      youtubeSearchCache.delete(first);
-    }
-    youtubeSearchCache.set(cacheKey, { data: payload, cachedAt: Date.now() });
-  }
-  return payload;
-}
-
 function pruneYouTubeCaches() {
   try {
     const now = Date.now();
@@ -2109,57 +1839,9 @@ function pruneYouTubeCaches() {
         youtubeInfoCache.delete(key);
       }
     }
-    for (const [key, val] of youtubeSearchCache.entries()) {
-      if (!val || !val.cachedAt || (now - val.cachedAt >= YOUTUBE_CACHE_TTL)) {
-        youtubeSearchCache.delete(key);
-      }
-    }
   } catch (_) {}
 }
 setInterval(pruneYouTubeCaches, 30 * 60 * 1000).unref();
-
-// ==================== DEEP RESEARCH AUTONOMOUS ENGINE (PREMIUM) ====================
-const dbTugasRiset = {};
-
-// Cleanup & Memory Management for Deep Research Tasks (LRU + TTL 1 hour)
-function pruneResearchTasks() {
-  try {
-    const MAX_TASKS = 40;
-    const ONE_HOUR_MS = 60 * 60 * 1000;
-    const now = Date.now();
-    const taskIds = Object.keys(dbTugasRiset);
-
-    // 1. Bersihkan tugas yang sudah lebih dari 1 jam
-    for (const id of taskIds) {
-      const task = dbTugasRiset[id];
-      if (task && task.createdAt) {
-        const age = now - new Date(task.createdAt).getTime();
-        if (age > ONE_HOUR_MS) {
-          delete dbTugasRiset[id];
-        }
-      }
-    }
-
-    // 2. Jika masih melebihi batas MAX_TASKS, buang tugas tertua
-    const remainingKeys = Object.keys(dbTugasRiset);
-    if (remainingKeys.length > MAX_TASKS) {
-      const sorted = remainingKeys
-        .map(id => dbTugasRiset[id])
-        .filter(Boolean)
-        .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
-
-      const toRemove = sorted.slice(0, remainingKeys.length - MAX_TASKS);
-      for (const t of toRemove) {
-        delete dbTugasRiset[t.taskId];
-      }
-    }
-  } catch (e) {
-    console.warn('Warning pruning research tasks:', e.message);
-  }
-}
-
-// Timer pembersihan berkala setiap 15 menit
-setInterval(pruneResearchTasks, 15 * 60 * 1000).unref();
 
 // ==================== BACKGROUND PERSISTENT CHAT ENGINE (CLAUDE AI RESILIENCE) ====================
 // Mengizinkan AI terus menyelesaikan respons dan menyimpan jawaban ke disk sesi
@@ -2473,15 +2155,7 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
     if (!effectiveUid && extraMeta && typeof extraMeta === 'object' && extraMeta.userId) {
       effectiveUid = extraMeta.userId;
     }
-    if (!effectiveUid) {
-      for (const rId of Object.keys(dbTugasRiset)) {
-        const r = dbTugasRiset[rId];
-        if (r && (r.sessionId === cleanSid || r.taskId === cleanSid) && r.userId) {
-          effectiveUid = r.userId;
-          break;
-        }
-      }
-    }
+
     const cleanUid = sanitizeUserId(effectiveUid || 'default');
     const userDir = getUserSessionsDir(cleanUid);
     const sessFile = path.join(userDir, `${cleanSid}.json`);
@@ -2493,15 +2167,7 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
     if (!userPrompt && extraMeta && typeof extraMeta === 'object' && extraMeta.prompt) {
       userPrompt = extraMeta.prompt;
     }
-    if (!userPrompt && sessionId) {
-      for (const rId of Object.keys(dbTugasRiset)) {
-        const r = dbTugasRiset[rId];
-        if (r && (r.sessionId === sessionId || r.taskId === sessionId) && r.topik) {
-          userPrompt = r.topik;
-          break;
-        }
-      }
-    }
+
 
     // ===== ANTREAN TULIS PER-SESI =====
     // Konteks (userPrompt & effectiveUid) sudah ditangkap sinkron DI ATAS — sebelum
@@ -2564,8 +2230,6 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
         const shortP = cleanP.length > 32 ? cleanP.substring(0, 32) + '...' : cleanP;
         if (extraMeta?.isImageGen) {
           dynamicTitle = `🎨 Gambar: ${shortP}`;
-        } else if (extraMeta?.isDeepResearch) {
-          dynamicTitle = `🔍 Riset: ${shortP}`;
         } else {
           dynamicTitle = shortP;
         }
@@ -2599,7 +2263,6 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
         lastMsg.model = modelName || lastMsg.model;
         lastMsg.backgroundCompleted = true;
         if (extraMeta && typeof extraMeta === 'object') {
-          if (extraMeta.isDeepResearch) lastMsg.isDeepResearch = true;
           if (extraMeta.chatSummary) lastMsg.chatSummary = extraMeta.chatSummary;
           if (Array.isArray(extraMeta.sources) && extraMeta.sources.length) lastMsg.sources = extraMeta.sources;
           if (extraMeta.latency) lastMsg.latency = extraMeta.latency;
@@ -2635,7 +2298,6 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
     };
 
     if (extraMeta && typeof extraMeta === 'object') {
-      if (extraMeta.isDeepResearch) newMsg.isDeepResearch = true;
       if (extraMeta.chatSummary) newMsg.chatSummary = extraMeta.chatSummary;
       if (Array.isArray(extraMeta.sources) && extraMeta.sources.length) newMsg.sources = extraMeta.sources;
       if (extraMeta.latency) newMsg.latency = extraMeta.latency;
@@ -3310,25 +2972,6 @@ function extractWebUrls(text) {
   });
 }
 
-// Ekstraktor URL kustom komprehensif untuk Mode Deep Research (penganalisis web kustom URL)
-function extractCustomAnalysisUrls(text) {
-  if (!text || typeof text !== 'string') return [];
-  const urlRegex = /(?:https?:\/\/[^\s<>"'{}|\\^`\[\]]+|www\.[^\s<>"'{}|\\^`\[\]]+)/gi;
-  const matches = text.match(urlRegex) || [];
-  return matches.map(u => {
-    let clean = cleanExtractedUrlPunctuation(u);
-    if (/^www\./i.test(clean)) clean = 'https://' + clean;
-    return clean;
-  }).filter(u => {
-    try {
-      new URL(u);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  });
-}
-
 // Universal Web Page Grounding Enricher: injects real-time extracted article text for 100% of LLM models
 async function enrichTextWithWebPageContext(text) {
   if (!text || typeof text !== 'string') return { text, webPages: [] };
@@ -3636,6 +3279,60 @@ function fetchDuckDuckGoInstant(query) {
   });
 }
 
+function fetchDuckDuckGoWeb(query, maxCount = 8) {
+  return new Promise((resolve) => {
+    try {
+      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      const req = https.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7'
+        },
+        timeout: 6000
+      }, (res) => {
+        let html = '';
+        res.on('data', chunk => {
+          html += chunk;
+          if (html.length > 500000) req.destroy();
+        });
+        res.on('end', () => {
+          try {
+            const results = [];
+            const regex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+            let m;
+            while ((m = regex.exec(html)) !== null && results.length < maxCount) {
+              let link = m[1];
+              if (link.includes('uddg=')) {
+                try {
+                  const uMatch = link.match(/uddg=([^&]+)/);
+                  if (uMatch) link = decodeURIComponent(uMatch[1]);
+                } catch (_) {}
+              }
+              const title = cleanHtmlText(m[2]);
+              const snippet = cleanHtmlText(m[3]);
+              if (title && link) {
+                results.push({
+                  title,
+                  url: link,
+                  domain: extractDomainSafe(link),
+                  snippet: snippet || title,
+                  sourceProvider: 'DuckDuckGo Web',
+                  timestamp: Date.now()
+                });
+              }
+            }
+            resolve(results);
+          } catch (_) { resolve([]); }
+        });
+        res.on('error', () => resolve([]));
+      });
+      req.on('timeout', () => { req.destroy(); resolve([]); });
+      req.on('error', () => resolve([]));
+    } catch (_) { resolve([]); }
+  });
+}
+
 async function performAutonomousSearch(query, maxResults = 15, contextText = '') {
   if (!query || typeof query !== 'string' || !query.trim()) {
     return { query: '', count: 0, results: [] };
@@ -3663,8 +3360,8 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   const combinedLower = (cleanQuery + ' ' + query.trim() + ' ' + (contextText || '')).toLowerCase();
   const isTechQuery = /\b(ai|llm|software|github|code|linux|python|developer|api|tech|crypto|bitcoin|model|chip|gpu|nvidia|programming|framework)\b/i.test(combinedLower);
 
-  // Eksekusi seluruh provider: Google Serper, Google News RSS, Tech Wire / HackerNews, DuckDuckGo Instant, & Wikipedia
-  const [serperRes1, serperRes2, gnewsPrimary, gnewsCore, gnewsIndo, gnewsNews, hnTech, hnCore, ddgInstant, wikiRes] = await Promise.allSettled([
+  // Eksekusi seluruh provider: Google Serper, Google News RSS, Tech Wire / HackerNews, DuckDuckGo Web, DuckDuckGo Instant, & Wikipedia
+  const [serperRes1, serperRes2, gnewsPrimary, gnewsCore, gnewsIndo, gnewsNews, hnTech, hnCore, ddgWeb1, ddgWeb2, ddgInstant, wikiRes] = await Promise.allSettled([
     serperCalls[0],
     serperCalls[1] || Promise.resolve({ results: [] }),
     fetchGoogleNewsRss(cleanQuery, isIndo ? 'id' : 'en', 10),
@@ -3673,6 +3370,8 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
     fetchGoogleNewsRss(newsQuery, isIndo ? 'id' : 'en', 6),
     isTechQuery ? fetchHackerNewsTech(techQuery, 8) : Promise.resolve([]),
     isTechQuery ? fetchHackerNewsTech(coreQuery, 6) : Promise.resolve([]),
+    fetchDuckDuckGoWeb(cleanQuery, 8),
+    fetchDuckDuckGoWeb(coreQuery, 6),
     fetchDuckDuckGoInstant(coreQuery),
     fetchWikipediaFullText(coreQuery, isIndo ? 'id' : 'en', 4)
   ]);
@@ -3684,6 +3383,8 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   if (serperRes2.status === 'fulfilled' && Array.isArray(serperRes2.value?.results)) {
     candidatePool.push(...serperRes2.value.results);
   }
+  if (ddgWeb1.status === 'fulfilled' && Array.isArray(ddgWeb1.value)) candidatePool.push(...ddgWeb1.value);
+  if (ddgWeb2.status === 'fulfilled' && Array.isArray(ddgWeb2.value)) candidatePool.push(...ddgWeb2.value);
   if (gnewsPrimary.status === 'fulfilled' && Array.isArray(gnewsPrimary.value)) candidatePool.push(...gnewsPrimary.value);
   if (gnewsCore.status === 'fulfilled' && Array.isArray(gnewsCore.value)) candidatePool.push(...gnewsCore.value);
   if (gnewsIndo.status === 'fulfilled' && Array.isArray(gnewsIndo.value)) candidatePool.push(...gnewsIndo.value);
@@ -3696,8 +3397,36 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
     candidatePool.push(...wikiRes.value);
   }
 
-  // Urutkan kandidat berdasarkan tanggal publikasi terbaru (Descending: yang paling baru di paling atas)
-  candidatePool.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  // Evaluasi skor kualitas & kedalaman informatif untuk memprioritaskan snippet bernilai guna tinggi
+  function evaluateSearchInformativeness(item) {
+    let score = 0;
+    const snip = (item.snippet || '').trim();
+    const title = (item.title || '').trim();
+    // Snippet yang panjang dan bukan sekadar duplikasi judul membawa fakta riil
+    if (snip.length >= 70 && !snip.toLowerCase().startsWith(title.toLowerCase().slice(0, 30))) {
+      score += 45;
+    } else if (snip.length >= 35) {
+      score += 20;
+    }
+    if (REPUTABLE_TECH_DOMAINS.has(item.domain)) {
+      score += 30;
+    }
+    if (item.sourceProvider === 'DuckDuckGo Web' || item.sourceProvider === 'Google Serper') {
+      score += 35;
+    }
+    if (item.timestamp && (Date.now() - item.timestamp < 172800000)) {
+      score += 15;
+    }
+    return score;
+  }
+
+  // Urutkan kandidat berdasarkan skor kedalaman informasi dan aktualitas waktu
+  candidatePool.sort((a, b) => {
+    const qA = evaluateSearchInformativeness(a);
+    const qB = evaluateSearchInformativeness(b);
+    if (Math.abs(qA - qB) >= 20) return qB - qA;
+    return (b.timestamp || 0) - (a.timestamp || 0);
+  });
 
   // Deduplikasi ketat berdasarkan URL kanonikal
   const results = [];
@@ -3732,9 +3461,9 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   }
 
   results.sort((a, b) => {
-    const aRep = REPUTABLE_TECH_DOMAINS.has(a.domain) ? 1 : 0;
-    const bRep = REPUTABLE_TECH_DOMAINS.has(b.domain) ? 1 : 0;
-    if (aRep !== bRep) return bRep - aRep;
+    const qA = evaluateSearchInformativeness(a);
+    const qB = evaluateSearchInformativeness(b);
+    if (Math.abs(qA - qB) >= 20) return qB - qA;
     return (b.timestamp || 0) - (a.timestamp || 0);
   });
 
@@ -3808,6 +3537,8 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
 
       let resolved = false;
       let rawHtml = '';
+      let chunks2 = [];
+      let totalLen2 = 0;
 
       function finishParsing(html) {
         if (resolved) return;
@@ -3874,6 +3605,13 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
           }
         }
 
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          res.resume();
+          resolved = true;
+          if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve);
+          return resolve({ url: cleanTarget, error: `HTTP ${res.statusCode}`, text: '' });
+        }
+
         // Decompress stream if server sent gzip, deflate, or brotli
         const enc = (res.headers['content-encoding'] || '').toLowerCase();
         let stream = res;
@@ -3889,8 +3627,6 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
           stream = res;
         }
 
-        let chunks2 = [];
-        let totalLen2 = 0;
         stream.on('data', chunk => {
           chunks2.push(chunk);
           totalLen2 += chunk.length;
@@ -3901,29 +3637,29 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
           }
         });
 
-        stream.on('end', () => { if (!resolved) { rawHtml = typeof chunks2 !== 'undefined' && chunks2.length > 0 ? Buffer.concat(chunks2).toString('utf8') : rawHtml; finishParsing(rawHtml); } });
+        stream.on('end', () => { if (!resolved) { rawHtml = chunks2.length > 0 ? Buffer.concat(chunks2).toString('utf8') : rawHtml; finishParsing(rawHtml); } });
         stream.on('error', (err) => {
           try { res.unpipe(); } catch (_) {}
           try { if (stream !== res) stream.destroy(); } catch (_) {}
-          if (typeof chunks2 !== 'undefined' && chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
-          else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: err.message, text: '' }); }
+          if (chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
+          else if (!resolved) { resolved = true; if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve); resolve({ url: cleanTarget, error: err.message, text: '' }); }
         });
         res.on('error', (err) => {
           try { res.unpipe(); } catch (_) {}
           try { if (stream !== res) stream.destroy(); } catch (_) {}
-          if (typeof chunks2 !== 'undefined' && chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
-          else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: err.message, text: '' }); }
+          if (chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
+          else if (!resolved) { resolved = true; if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve); resolve({ url: cleanTarget, error: err.message, text: '' }); }
         });
       });
 
       req.on('timeout', () => {
         req.destroy();
-        if (typeof chunks2 !== 'undefined' && chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
-        else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: 'Connection timeout', text: '' }); }
+        if (chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
+        else if (!resolved) { resolved = true; if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve); resolve({ url: cleanTarget, error: 'Connection timeout', text: '' }); }
       });
       req.on('error', (err) => {
-        if (typeof chunks2 !== 'undefined' && chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
-        else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: err.message, text: '' }); }
+        if (chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
+        else if (!resolved) { resolved = true; if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve); resolve({ url: cleanTarget, error: err.message, text: '' }); }
       });
       req.end();
     } catch (err) {
@@ -4333,359 +4069,6 @@ function executePythonSandbox(code, timeoutMs = 5000) {
   });
 }
 
-// Fungsi Logika Agen: Penganalisis Web Kustom URL Mendalam (Deep Custom URL Web Content Analyzer)
-async function jalankanRisetOtonom(taskId, topik, config = {}) {
-  const task = dbTugasRiset[taskId];
-  if (!task) return;
-
-  let allSources = [];
-  let scrapedPages = [];
-  const masterResearchModel = config.finalModel || config.model || config.agent1Model || 'openrouter/free';
-
-  // 1. Kumpulkan seluruh URL target kustom yang diberikan pengguna
-  let targetUrls = Array.isArray(config.targetUrls) ? config.targetUrls.filter(Boolean) : [];
-  if (config.urls && Array.isArray(config.urls)) {
-    config.urls.forEach(u => { if (!targetUrls.includes(u)) targetUrls.push(u); });
-  }
-  const textUrls = extractCustomAnalysisUrls(`${topik} ${config.prompt || ''}`);
-  textUrls.forEach(u => {
-    if (!targetUrls.includes(u)) targetUrls.push(u);
-  });
-
-  // Pastikan URL memiliki format protokol https:// atau http://
-  targetUrls = targetUrls.map(u => {
-    let clean = String(u).trim();
-    if (!/^https?:\/\//i.test(clean)) clean = 'https://' + clean;
-    return clean;
-  });
-
-  // Eliminasi duplikat
-  targetUrls = Array.from(new Set(targetUrls));
-
-  if (targetUrls.length === 0) {
-    task.status = 'gagal';
-    task.error = 'Deep Research kini berfungsi sebagai Penganalisis Web Kustom URL. Harap sertakan minimal 1 tautan URL kustom (misal: https://example.com/artikel) untuk dianalisis.';
-    task.currentStep = 'Gagal: Tidak ada URL kustom yang disediakan.';
-    task.completedAt = new Date().toISOString();
-    return;
-  }
-
-  try {
-    // ==========================================
-    // TAHAP 1/3: EKSTRAKSI KONTEN LENGKAP DARI URL KUSTOM
-    // ==========================================
-    task.currentStep = `[Langkah 1/3] Mengambil & mengekstrak konten lengkap dari ${targetUrls.length} URL kustom...`;
-    task.progressPercent = 20;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 1/3] Memulai ekstraksi web mendalam untuk ${targetUrls.length} URL: ${targetUrls.join(', ')}`);
-
-    for (let idx = 0; idx < targetUrls.length; idx++) {
-      if (task.aborted) break;
-      const targetUrl = targetUrls[idx];
-      let domain = targetUrl;
-      try {
-        const parsed = new URL(targetUrl);
-        domain = parsed.hostname;
-      } catch (_) {}
-
-      task.currentStep = `[Langkah 1/3] Mengunduh konten halaman (${idx + 1}/${targetUrls.length}): ${domain}...`;
-      task.progressPercent = 20 + Math.round(((idx + 1) / targetUrls.length) * 25);
-
-      try {
-        // Ekstraksi konten dengan browseWebPageContent dan fallback fetchPageDetails
-        let browseRes = await browseWebPageContent(targetUrl, 16000);
-        let contentText = (browseRes && browseRes.text && browseRes.text.length > 100) ? browseRes.text : '';
-        let pageTitle = (browseRes && browseRes.title) ? browseRes.title : domain;
-
-        if (!contentText || contentText.length < 100) {
-          const detailRes = await fetchPageDetails(targetUrl, 16000);
-          if (detailRes && detailRes.success && detailRes.content) {
-            contentText = detailRes.content;
-            pageTitle = detailRes.title || pageTitle;
-          }
-        }
-
-        if (contentText && contentText.length > 50) {
-          const pageItem = {
-            url: targetUrl,
-            domain: domain,
-            title: pageTitle || domain,
-            content: contentText,
-            charCount: contentText.length,
-            publishDate: browseRes?.publishDate || null
-          };
-          scrapedPages.push(pageItem);
-          allSources.push({
-            title: pageItem.title,
-            url: targetUrl,
-            domain: domain,
-            snippet: contentText.slice(0, 300) + '...',
-            sourceProvider: 'Custom URL Target'
-          });
-          task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Berhasil mengekstrak [${domain}]: "${pageItem.title.slice(0, 45)}" (${pageItem.charCount} karakter)`);
-        } else {
-          task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Konten dari [${domain}] terlalu minim atau terproteksi.`);
-        }
-      } catch (errScrape) {
-        task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ⚠️ Gagal mengekstrak [${domain}]: ${errScrape.message}`);
-      }
-
-      // Update snapshot Live Inspection
-      task.liveInspection = {
-        topik,
-        mode: 'custom_url_analyzer',
-        targetUrls,
-        timestamp: new Date().toLocaleTimeString('id-ID'),
-        scrapedPagesCount: scrapedPages.length,
-        agent1: {
-          name: 'Penganalisis Web Kustom URL (Ekstraksi Konten)',
-          provider: 'Deep Web Extractor',
-          model: masterResearchModel,
-          resultsCount: scrapedPages.length,
-          results: scrapedPages.map(p => ({ title: p.title, link: p.url, snippet: p.content.slice(0, 250) + '...', charCount: p.charCount })),
-          analysis: `Berhasil mengekstrak ${scrapedPages.length} halaman web kustom utuh untuk telaah mendalam.`
-        },
-        scraper: {
-          status: 'selesai',
-          totalScraped: scrapedPages.length,
-          temporalAnalysis: '',
-          articles: scrapedPages.map(p => ({
-            title: p.title,
-            url: p.url,
-            domain: p.domain,
-            sourceProvider: 'URL Kustom Analisis',
-            length: p.charCount,
-            sample: p.content.slice(0, 300) + '...'
-          }))
-        },
-        analyzer: {
-          name: 'Penganalisis Web Kustom URL',
-          model: masterResearchModel,
-          urls: scrapedPages.map(p => ({
-            url: p.url,
-            domain: p.domain,
-            title: p.title,
-            charCount: p.charCount,
-            sample: p.content.slice(0, 300) + '...'
-          }))
-        }
-      };
-    }
-
-    if (scrapedPages.length === 0) {
-      throw new Error(`Tidak dapat mengekstrak teks isi dari URL yang diberikan. Pastikan tautan dapat diakses publik.`);
-    }
-
-    // ==========================================
-    // TAHAP 2/3: DEKONSTRUKSI KONTEN, ANALISIS DATA TERBARU VS DATA LAMA
-    // ==========================================
-    task.currentStep = `[Langkah 2/3] Model Riset (${masterResearchModel}) membedah struktur isi, mendeteksi fakta terbaru vs konteks lama...`;
-    task.progressPercent = 60;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 2/3] Model Riset (${masterResearchModel}) menganalisis mendalam: membedah isi, perubahan terbaru, dan status lama.`);
-
-    const docsBlock = scrapedPages.map((p, idx) => `
-=====================================================
-DOKUMEN KUSTOM #${idx + 1}: ${p.title}
-URL: ${p.url}
-DOMAIN: ${p.domain}
-=====================================================
-${p.content.slice(0, 14000)}
-=====================================================
-`).join('\n\n');
-
-    const promptBedahKomparatif = `Anda adalah Ahli Analisis Dokumen Web & Intelijen Data Kustom (Deep Custom URL Web Content Analyzer).
-Instruksi Pengguna: "${topik}"
-
-Berikut adalah isi teks LENGKAP dari URL kustom yang diberikan pengguna:
-${docsBlock}
-
-TUGAS ANDA:
-Lakukan analisis mendalam dan kritis terhadap konten di atas dengan fokus pada 4 pilar analisis utama:
-1. POKOK BAHASAN & STRUKTUR ISI: Apa tujuan, fungsi, topik, dan arsitektur yang dijelaskan di halaman ini?
-2. INFORMASI & TEMUAN TERBARU (THE LATEST UPDATES): Apa fakta terbaru, versi rilis, fitur baru, tanggal pembaruan, perubahan kebijakan, atau data termutakhir yang dicantumkan?
-3. KONTEKS & INFORMASI LAMA (HISTORICAL / LEGACY CONTEXT): Apa kondisi sebelumnya, versi terdahulu, status lama yang digantikan, atau informasi masa lalu yang menjadi dasar perbandingan?
-4. KOMPARASI EVOLUSI (BARU VS LAMA): Apa perbedaan utama antara apa yang lama dengan apa yang baru? Apa yang ditinggalkan/dihapus (deprecated), dan apa yang menjadi standar baru?
-
-Tuliskan telaah analitis mendalam dalam 3-5 paragraf berbobot teknis tinggi, padat fakta, dan objektif.`;
-
-    let hasilBedahAnalisis = await callLLMBackend({
-      ...config,
-      messages: [],
-      model: masterResearchModel,
-      prompt: promptBedahKomparatif,
-      system: 'Anda adalah Deep Research Web Content Analyzer yang objektif, kritis, dan sangat teliti dalam membedakan data baru vs lama.'
-    }).catch(err => {
-      console.warn('Gagal analisis bedah dokumen:', err?.message || err);
-      return `[Analisis Ekstraksi Dokumen]:\n${scrapedPages.map(p => `- ${p.title} (${p.url}): ${p.content.slice(0, 400)}...`).join('\n')}`;
-    });
-
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] ✓ Bedah komparatif selesai: Model Riset berhasil mengekstrak poin isi, pembaruan terbaru, dan konteks lama.`);
-
-    task.liveInspection = {
-      ...(task.liveInspection || {}),
-      agent2: {
-        name: 'Dekonstruksi Konseptual & Analisis Struktur',
-        provider: 'Neural Content Deconstructor',
-        model: masterResearchModel,
-        resultsCount: scrapedPages.length,
-        analysis: hasilBedahAnalisis
-      },
-      scraper: {
-        status: 'selesai',
-        totalScraped: scrapedPages.length,
-        temporalAnalysis: hasilBedahAnalisis,
-        articles: scrapedPages.map(p => ({
-          title: p.title,
-          url: p.url,
-          domain: p.domain,
-          sourceProvider: 'URL Kustom Analisis',
-          length: p.charCount,
-          sample: p.content.slice(0, 350) + '...'
-        }))
-      }
-    };
-
-    // ==========================================
-    // TAHAP 3/3: PENYUSUNAN LAPORAN EKSEKUTIF DENGAN MATRIKS KOMPARASI
-    // ==========================================
-    task.currentStep = `[Langkah 3/3] Menyusun Laporan Analisis Eksekutif Web & Matriks Komparasi...`;
-    task.progressPercent = 85;
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] [Langkah 3/3] Menyusun Laporan Analisis Eksekutif lengkap dengan tabel perbandingan Baru vs Lama.`);
-
-    const promptLaporanAkhir = `Anda adalah Lead Executive Research Architect.
-Perintah / Pertanyaan Pengguna: "${topik}"
-Daftar URL Kustom yang Dianalisis: ${targetUrls.join(', ')}
-
-Hasil Telaah Analitis Mendalam:
-${hasilBedahAnalisis}
-
-Ringkasan Dokumen Sumber:
-${docsBlock.slice(0, 8000)}
-
-Susunlah LAPORAN ANALISIS MENDALAM WEB KUSTOM yang komprehensif, elegan, dan profesional dalam format Markdown lengkap dengan struktur hierarki berikut:
-
-# 🌐 LAPORAN ANALISIS MENDALAM: PENGANALISIS WEB KUSTOM URL
-> **URL Target:** ${targetUrls.map(u => `[${u}](${u})`).join(', ')}  
-> **Fokus Analisis:** Dekonstruksi Konten Utuh, Data Terbaru vs Lama, & Matriks Evolusi  
-> **Model Analisis:** ${masterResearchModel}  
-
----
-
-## 1. 📌 Ringkasan Eksekutif & Identitas Sumber
-(Jelaskan secara ringkas maksud halaman, entitas pemilik, topik sentral, dan ringkasan nilai informasi yang terkandung).
-
-## 2. 🔍 Analisis Isi Mendalam (Core Content Breakdown)
-(Bedah secara detail poin-poin utama, arsitektur, argumen, atau fungsi yang dijelaskan pada situs/halaman tersebut).
-
-## 3. ⚡ Sorotan Temuan & Pembaruan Terbaru (The Latest Updates)
-(Uraikan secara spesifik apa saja fakta, versi, fitur, tanggal revisi, atau kebijakan terbaru yang diumumkan atau tercatat di URL ini).
-
-## 4. 📜 Konteks Historis & Informasi Terdahulu (Past Context & Legacy Info)
-(Jelaskan latar belakang lama, versi sebelumnya, kondisi sebelum pembaruan, atau baseline terdahulu yang disebutkan).
-
-## 5. ⚖️ Matriks Komparasi Evolusi (Tabel: Kondisi Lama vs Kondisi Baru)
-(Buat tabel Markdown terstruktur yang membandingkan: Aspek/Fitur | Kondisi / Versi Lama | Kondisi / Versi Terbaru | Dampak / Manfaat).
-
-## 6. 💡 Implikasi Kritis, Keabsahan & Rekomendasi Praktis
-(Berikan evaluasi kritis terhadap validitas informasi, implikasi bagi pengguna/developer/industri, serta langkah rekomendasi konkret).
-
-## 7. 🔗 Referensi Sumber Kustom Terverifikasi
-(Daftar tautan asli lengkap yang dapat diklik langsung oleh pengguna).
-
-Instruksi Tambahan:
-- Buat laporan komprehensif, padat data, dan profesional.
-- JANGAN memotong bagian laporan.`;
-
-    let laporanAkhir = await callLLMBackend({
-      ...config,
-      messages: [],
-      model: masterResearchModel,
-      prompt: promptLaporanAkhir,
-      system: 'Anda adalah Executive Research Architect yang menyusun laporan riset tingkat tinggi yang terstruktur rapi.'
-    }).catch(err => {
-      console.warn('Gagal menyusun laporan akhir:', err?.message || err);
-      return `# 🌐 LAPORAN ANALISIS MENDALAM: PENGANALISIS WEB KUSTOM URL\n\n> URL Target: ${targetUrls.join(', ')}\n\n${hasilBedahAnalisis}`;
-    });
-
-    // Buat rangkuman chat eksekutif untuk respon chat ringkas yang langsung menjawab inti pertanyaan
-    const promptChatSummary = `Anda adalah Executive Chat Summarizer.
-Pertanyaan Pengguna: "${topik}"
-Laporan Analisis Web Lengkap:
-${laporanAkhir.slice(0, 6000)}
-
-Tugas:
-Tuliskan jawaban langsung yang ringkas, elegan, dan to-the-point (2-3 paragraf) dalam percakapan chat yang menjelaskan:
-1. Inti isi halaman web yang dianalisis.
-2. Apa yang paling baru dan apa yang lama/berubah.
-3. Kesimpulan utama bagi pengguna.
-Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
-
-    let chatSummary = await callLLMBackend({
-      ...config,
-      messages: [],
-      model: masterResearchModel,
-      prompt: promptChatSummary,
-      system: 'Anda adalah AI Assistant yang ramah, efisien, dan komunikatif.'
-    }).catch(() => '');
-
-    if (task.aborted) {
-      task.status = 'dibatalkan';
-      task.currentStep = 'Riset dihentikan oleh pengguna.';
-      task.completedAt = new Date().toISOString();
-      if (config.sessionId && task.hasil) {
-        appendAssistantMessageToSessionDisk(config.sessionId, task.hasil + '\n\n*[Riset dihentikan oleh pengguna]*', masterResearchModel, {
-          userId: (task && task.userId) || config.userId || 'default',
-          isDeepResearch: true,
-          chatSummary: chatSummary,
-          sources: allSources
-        }).catch(err => console.warn('Gagal simpan riset terhenti ke sesi:', err && err.message));
-      }
-      return;
-    }
-
-    task.status = 'selesai';
-    task.progressPercent = 100;
-    task.currentStep = 'Laporan Analisis Web Kustom URL Berhasil Disusun.';
-    task.stepsHistory.push(`[${new Date().toLocaleTimeString('id-ID')}] Analisis selesai sempurna: Laporan Komparasi Lengkap & Rangkuman Eksekutif siap.`);
-    task.hasil = laporanAkhir;
-    task.chatSummary = chatSummary;
-    task.sources = allSources;
-    task.completedAt = new Date().toISOString();
-    task.liveInspection = {
-      ...(task.liveInspection || {}),
-      synthesizer: {
-        name: 'Laporan Analisis Eksekutif Komprehensif & Matriks Komparasi',
-        model: masterResearchModel,
-        status: 'selesai',
-        text: laporanAkhir,
-        length: (laporanAkhir || '').length
-      },
-      model4: {
-        name: 'Rangkuman Eksekutif Percakapan Chat',
-        model: masterResearchModel,
-        status: 'selesai',
-        text: chatSummary,
-        length: (chatSummary || '').length
-      }
-    };
-
-    if (config.sessionId) {
-      appendAssistantMessageToSessionDisk(config.sessionId, laporanAkhir, masterResearchModel, {
-        userId: (task && task.userId) || config.userId || 'default',
-        isDeepResearch: true,
-        chatSummary: chatSummary,
-        sources: allSources
-      }).catch(err => console.warn('Gagal simpan laporan riset ke sesi:', err && err.message));
-    }
-
-  } catch (error) {
-    console.error('Deep custom URL analysis failed:', error);
-    task.status = 'gagal';
-    task.error = error.message;
-    task.currentStep = 'Analisis gagal: ' + error.message;
-    task.completedAt = new Date().toISOString();
-  }
-}
-
 // Main HTTP Request Handler & Server
 async function requestHandler(req, res) {
   if (!req) return;
@@ -4719,11 +4102,28 @@ async function requestHandler(req, res) {
   // Sebagian endpoint memakai key milik SERVER (env OPENROUTER_API_KEY/SERPER_API_KEY
   // /OLLAMA_API_KEY) sebagai fallback. Tanpa gerbang ini, halaman web jahat mana pun
   // bisa memanggil API dari browser korban (ACAO:*) dan membakar kredit API operator.
-  // Pengecualian mutlak: /api/ping dan /api/health adalah status probe harmless.
-  // Front-end resmi (.vercel.app, localhost, loopback) atau ZOX_ALLOW_CROSS_ORIGIN=1 selalu diizinkan.
-  if (pathname.startsWith('/api') && pathname !== '/api/ping' && pathname !== '/api/health' && process.env.ZOX_ALLOW_CROSS_ORIGIN !== '1') {
+  // Pengecualian mutlak: /api/ping, /api/health, scraper publik bebas-kunci (YouTube search/info,
+  // web extraction, terminal) tidak boleh diblokir oleh filter origin.
+  // Front-end resmi (.vercel.app, localhost, Cloudflare domain, tunnel) atau ZOX_ALLOW_CROSS_ORIGIN=1 selalu diizinkan.
+  const isExemptCrossOriginPath = pathname === '/api/ping' ||
+                                 pathname === '/api/health' ||
+                                 pathname === '/api/youtube-info' ||
+                                 pathname.startsWith('/api/tools/') ||
+                                 pathname === '/api/extract-web' ||
+                                 pathname === '/api/read-url' ||
+                                 pathname === '/api/scrape-url' ||
+                                 pathname.startsWith('/api/terminal/');
+
+  if (pathname.startsWith('/api') && !isExemptCrossOriginPath && process.env.ZOX_ALLOW_CROSS_ORIGIN !== '1') {
     let crossSite = false;
-    if (req.headers.origin) {
+    const secFetchSite = (req.headers['sec-fetch-site'] || '').toLowerCase();
+    const isCloudflare = Boolean(req.headers['cf-ray'] || req.headers['cf-connecting-ip'] || req.headers['cf-visitor']);
+    const customDomain = (process.env.ZOX_CUSTOM_DOMAIN || '').toLowerCase().trim();
+
+    // Browser guarantees: same-origin & same-site are initiated by the trusted front-end site
+    if (secFetchSite === 'same-origin' || secFetchSite === 'same-site') {
+      crossSite = false;
+    } else if (req.headers.origin) {
       try {
         const originUrl = new URL(req.headers.origin);
         const originHost = originUrl.host.toLowerCase();
@@ -4731,19 +4131,20 @@ async function requestHandler(req, res) {
         const reqHost = (req.headers.host || '').toLowerCase();
         const isTrusted = (originHost === reqHost) ||
                           (forwardHost && originHost === forwardHost) ||
+                          (customDomain && originHost === customDomain) ||
+                          (isCloudflare && secFetchSite !== 'cross-site') ||
                           originHost === 'zoz-router.vercel.app' ||
                           originHost.endsWith('.vercel.app') ||
                           originHost.endsWith('localhost') ||
                           originHost.startsWith('127.0.0.1') ||
                           originHost.startsWith('[::1]') ||
                           originHost.endsWith('.trycloudflare.com') ||
-                          reqHost.endsWith('.trycloudflare.com') ||
-                          pathname.startsWith('/api/terminal/tunnel');
+                          reqHost.endsWith('.trycloudflare.com');
         crossSite = !isTrusted;
       } catch (_) {
         crossSite = true;
       }
-    } else if (req.headers['sec-fetch-site'] === 'cross-site') {
+    } else if (secFetchSite === 'cross-site') {
       crossSite = true;
     }
     if (crossSite) {
@@ -4816,6 +4217,11 @@ async function requestHandler(req, res) {
   if (pathname === '/api/ping' && method === 'GET') {
     const isRemote = isRemoteTunnelRequest(req);
     const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
+    if (isRemote && pinCheck.valid) {
+      try {
+        res.setHeader('Set-Cookie', `zoz_remote_pin=${encodeURIComponent(cloudflareTunnelPin)}; Path=/; Max-Age=31536000; SameSite=Lax`);
+      } catch (_) {}
+    }
     return sendJSON(res, 200, {
       ok: true,
       status: 'healthy',
@@ -5036,18 +4442,6 @@ async function requestHandler(req, res) {
         }
       }
 
-      // Hentikan tugas Deep Research aktif untuk sesi ini jika ada dan milik user ini
-      for (const rId of Object.keys(dbTugasRiset)) {
-        const rTask = dbTugasRiset[rId];
-        if (rTask && (rTask.sessionId === id || rTask.taskId === id)) {
-          if (!rTask.userId || rTask.userId === reqUserId) {
-            rTask.aborted = true;
-            rTask.status = 'dibatalkan';
-            delete dbTugasRiset[rId];
-          }
-        }
-      }
-
       if (!fs.existsSync(sessFile)) {
         return sendJSON(res, 404, { error: `Sesi ${id} tidak ditemukan di penyimpanan Anda.` });
       }
@@ -5070,16 +4464,6 @@ async function requestHandler(req, res) {
             try { bgTask.proxyReq.destroy(); } catch (_) {}
           }
           delete dbActiveChatTasks[sid];
-        }
-      }
-
-      // Hentikan tugas Deep Research hanya untuk user ini
-      for (const rId of Object.keys(dbTugasRiset)) {
-        const rTask = dbTugasRiset[rId];
-        if (rTask && (!rTask.userId || rTask.userId === reqUserId)) {
-          rTask.aborted = true;
-          rTask.status = 'dibatalkan';
-          delete dbTugasRiset[rId];
         }
       }
 
@@ -5501,6 +4885,11 @@ async function requestHandler(req, res) {
       cloudflareTunnelActive = true;
       savePersistedTunnelState();
     }
+    if (isRemote && pinCheck.valid) {
+      try {
+        res.setHeader('Set-Cookie', `zoz_remote_pin=${encodeURIComponent(cloudflareTunnelPin)}; Path=/; Max-Age=31536000; SameSite=Lax`);
+      } catch (_) {}
+    }
     return sendJSON(res, 200, {
       active: isActive,
       tunnelUrl: effectiveUrl,
@@ -5666,6 +5055,10 @@ async function requestHandler(req, res) {
 
         ptyProcess.onData((data) => {
           session.lastActivity = Date.now();
+          if (typeof data === 'string' && data.includes('\x07')) {
+            data = data.replace(/\x07/g, '');
+          }
+          if (!data) return;
           if (session.buffer.length > 500) session.buffer.shift();
           session.buffer.push(data);
           handleServerAutoEnter(session, data);
@@ -6398,158 +5791,6 @@ async function requestHandler(req, res) {
     }
   }
 
-  // Deep Research: Start Custom URL Deep Analysis (Background Worker)
-  if ((pathname === '/api/mulai-riset' || pathname === '/api/deep-research/start') && method === 'POST') {
-    const body = await safeParseBody(req);
-    if (!body) return;
-    try {
-      const topik = body.topik || body.topic || body.query || body.prompt || '';
-      if (!topik) {
-        return sendJSON(res, 400, { error: 'Parameter `topik` atau `prompt` diperlukan untuk memulai Deep Research.' });
-      }
-
-      // Kumpulkan dan validasi URL target kustom pengguna
-      const rawUrls = body.targetUrls || body.urls || body.customUrls || [];
-      const targetUrls = Array.isArray(rawUrls) ? rawUrls.filter(Boolean) : (rawUrls ? [rawUrls] : []);
-      const extractedUrls = extractCustomAnalysisUrls(`${topik} ${body.prompt || ''}`);
-      extractedUrls.forEach(u => {
-        if (!targetUrls.includes(u)) targetUrls.push(u);
-      });
-
-      if (targetUrls.length === 0) {
-        return sendJSON(res, 400, {
-          error: 'Mode Deep Research kini berfungsi sebagai Penganalisis Web Kustom URL. Harap sertakan minimal 1 tautan URL kustom (misal: https://example.com/artikel) untuk dianalisis secara mendalam.'
-        });
-      }
-
-      if (body.endpoint && typeof body.endpoint === 'string') {
-        let testEp = body.endpoint.trim();
-        if (!/^https?:\/\//i.test(testEp)) {
-          testEp = `http://${testEp}`;
-        }
-        if (isOllamaEndpointForbidden(testEp)) {
-          return sendJSON(res, 400, { error: 'Endpoint Ollama mengarah ke host privat/internal - akses diblokir (SSRF Protection).' });
-        }
-        // M23: DNS-rebinding guard untuk endpoint non-tepercaya.
-        if (!isTrustedOllamaEndpoint(testEp)) {
-          const dnsVerdict = await assertResolvesPublic(testEp);
-          if (!dnsVerdict.ok) return sendJSON(res, 400, { error: dnsVerdict.msg });
-        }
-      }
-
-      pruneResearchTasks();
-      const rawSessionId = body.sessionId || req.headers['x-session-id'] || req.headers['X-Session-ID'] || null;
-      const researchUserId = reqUserId;
-      const taskId = 'research_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
-      dbTugasRiset[taskId] = {
-        taskId,
-        sessionId: rawSessionId,
-        userId: researchUserId,
-        topik,
-        targetUrls,
-        status: 'sedang_meneliti',
-        progressPercent: 10,
-        currentStep: 'Inisialisasi Agen Deep Research...',
-        stepsHistory: ['Memulai analisis topik dan parameter riset'],
-        dataTemuan: [],
-        sources: [],
-        hasil: null,
-        error: null,
-        createdAt: new Date().toISOString()
-      };
-
-      const masterModel = body.finalModel || body.model || body.agent1Model || 'openrouter/free';
-      const rawAuth = req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '').trim() : null;
-      const rawApiKey = req.headers['x-api-key'] ? String(req.headers['x-api-key']).replace(/^Bearer\s+/i, '').trim() : null;
-      const rawSerperKey = req.headers['x-serper-key'] ? String(req.headers['x-serper-key']).trim() : null;
-      const rawOllamaKey = req.headers['x-ollama-key'] ? String(req.headers['x-ollama-key']).replace(/^Bearer\s+/i, '').trim() : null;
-      const rawOpenRouterKey = req.headers['x-openrouter-key'] ? String(req.headers['x-openrouter-key']).replace(/^Bearer\s+/i, '').trim() : null;
-
-      // Jalankan proses analisis web kustom secara asinkronus di latar belakang dengan arsitektur 1-Model super efisien
-      jalankanRisetOtonom(taskId, topik, {
-        sessionId: rawSessionId,
-        userId: researchUserId,
-        targetUrls,
-        messages: body.messages || [],
-        model: masterModel,
-        provider: body.provider || (masterModel.includes('/') ? 'openrouter' : (masterModel.includes(':') ? 'ollama' : 'openrouter')),
-        endpoint: body.endpoint,
-        apiKey: body.apiKey || rawOpenRouterKey || rawAuth || rawApiKey || null,
-        openRouterKey: body.openRouterKey || body.apiKey || rawOpenRouterKey || rawAuth || rawApiKey || process.env.OPENROUTER_API_KEY,
-        ollamaApiKey: body.ollamaApiKey || body.apiKey || rawOllamaKey || '',
-        serperApiKey: body.serperApiKey || rawSerperKey || rawApiKey || process.env.SERPER_API_KEY,
-        agent1Model: masterModel,
-        agent2Model: masterModel,
-        finalModel: masterModel,
-        model3: masterModel,
-        model4: masterModel,
-        maxIterations: body.maxIterations || 3
-      }).catch(err => {
-        console.error(`Tugas riset [${taskId}] gagal secara asinkron:`, err.message);
-        if (dbTugasRiset[taskId]) {
-          dbTugasRiset[taskId].status = 'gagal';
-          dbTugasRiset[taskId].error = err.message;
-          dbTugasRiset[taskId].currentStep = 'Riset gagal: ' + err.message;
-          dbTugasRiset[taskId].completedAt = new Date().toISOString();
-        }
-      });
-
-      return sendJSON(res, 200, {
-        success: true,
-        taskId: taskId,
-        message: 'Agen AI mulai meneliti di latar belakang.'
-      });
-    } catch (e) {
-      return sendJSON(res, 500, { error: 'Gagal memulai riset: ' + e.message });
-    }
-  }
-
-  // Deep Research: Status Check & Polling
-  const researchStatusMatch = pathname.match(/^\/api\/(?:status-riset|deep-research\/status)\/([a-zA-Z0-9_-]+)$/);
-  if (researchStatusMatch && method === 'GET') {
-    const taskId = researchStatusMatch[1];
-    const dataTugas = dbTugasRiset[taskId];
-    if (!dataTugas) {
-      return sendJSON(res, 404, { error: 'Tugas riset tidak ditemukan.' });
-    }
-    const checkUserId = reqUserId;
-    if (dataTugas.userId && dataTugas.userId !== checkUserId) {
-      return sendJSON(res, 403, { error: 'Akses ditolak: Anda tidak memiliki akses ke tugas riset ini.' });
-    }
-    return sendJSON(res, 200, {
-      taskId: dataTugas.taskId,
-      status: dataTugas.status,
-      topik: dataTugas.topik,
-      progressPercent: dataTugas.progressPercent,
-      currentStep: dataTugas.currentStep,
-      stepsHistory: dataTugas.stepsHistory,
-      hasil: dataTugas.hasil,
-      chatSummary: dataTugas.chatSummary || null,
-      sources: dataTugas.sources || [],
-      liveInspection: dataTugas.liveInspection || null,
-      error: dataTugas.error
-    });
-  }
-
-  // Deep Research: Cancel / Abort Background Task
-  const cancelResearchMatch = pathname.match(/^\/api\/(?:batal-riset|deep-research\/stop)\/([a-zA-Z0-9_-]+)$/);
-  if (cancelResearchMatch && (method === 'POST' || method === 'GET')) {
-    const taskId = cancelResearchMatch[1];
-    const dataTugas = dbTugasRiset[taskId];
-    if (dataTugas) {
-      const checkUserId = reqUserId;
-      if (dataTugas.userId && dataTugas.userId !== checkUserId) {
-        return sendJSON(res, 403, { error: 'Akses ditolak.' });
-      }
-      dataTugas.aborted = true;
-      dataTugas.status = 'dibatalkan';
-      dataTugas.currentStep = 'Riset dihentikan oleh pengguna.';
-      dataTugas.completedAt = new Date().toISOString();
-      return sendJSON(res, 200, { success: true, message: 'Tugas riset berhasil dibatalkan.' });
-    }
-    return sendJSON(res, 404, { error: 'Tugas riset tidak ditemukan.' });
-  }
-
   // ----------------------------------------------------
   // YOUTUBE OEMBED METADATA GROUNDING API
   // ----------------------------------------------------
@@ -6575,35 +5816,6 @@ async function requestHandler(req, res) {
     }
   }
 
-  // ----------------------------------------------------
-  // YOUTUBE LIVE SEARCH (ZERO API KEY) — penunjang tool search_youtube
-  // ----------------------------------------------------
-  if (pathname === '/api/youtube-search' && (method === 'GET' || method === 'POST')) {
-    try {
-      let query = '';
-      let maxResults = 6;
-      if (method === 'GET') {
-        query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || reqUrl.searchParams.get('keyword') || reqUrl.searchParams.get('search') || reqUrl.searchParams.get('topic') || reqUrl.searchParams.get('title') || reqUrl.searchParams.get('text') || reqUrl.searchParams.get('cari') || reqUrl.searchParams.get('kata_kunci') || reqUrl.searchParams.get('judul') || '';
-        const parsedLimit = parseInt(reqUrl.searchParams.get('limit') || reqUrl.searchParams.get('max_results') || '6', 10);
-        maxResults = Math.min(Math.max(isNaN(parsedLimit) ? 6 : parsedLimit, 1), 20);
-      } else {
-        const body = await safeParseBody(req);
-        if (!body) return;
-        query = body.q || body.query || body.keyword || body.search || body.topic || body.title || body.text || body.cari || body.kata_kunci || body.judul || '';
-        const parsedLimit = parseInt(body.limit || body.max_results || '6', 10);
-        maxResults = Math.min(Math.max(isNaN(parsedLimit) ? 6 : parsedLimit, 1), 20);
-      }
-
-      if (!query || !String(query).trim()) {
-        return sendJSON(res, 400, { success: false, error: 'Parameter query diperlukan.' });
-      }
-
-      const data = await searchYouTubeVideos(String(query).trim(), maxResults);
-      return sendJSON(res, 200, data);
-    } catch (err) {
-      return sendJSON(res, 500, { success: false, error: err.message });
-    }
-  }
 
   // ----------------------------------------------------
   // WEB PAGE CONTENT EXTRACTOR / READER TOOL API
@@ -8663,7 +7875,12 @@ async function requestHandler(req, res) {
 
       if (sessionId) {
         if (dbActiveChatTasks[sessionId] && dbActiveChatTasks[sessionId].status === 'streaming') {
-          return sendJSON(res, 429, { error: 'Stream already active for this session' });
+          try {
+            if (dbActiveChatTasks[sessionId].proxyReq && !dbActiveChatTasks[sessionId].proxyReq.destroyed) {
+              dbActiveChatTasks[sessionId].proxyReq.destroy();
+            }
+          } catch (_) {}
+          delete dbActiveChatTasks[sessionId];
         }
         dbActiveChatTasks[sessionId] = {
           sessionId,
@@ -9012,24 +8229,6 @@ async function requestHandler(req, res) {
         }
       }
 
-      for (const rId of Object.keys(dbTugasRiset)) {
-        const rTask = dbTugasRiset[rId];
-        if (!rTask) continue;
-        // PRIVACY ENFORCEMENT: Only include research tasks for the requesting user!
-        if (rTask.userId && rTask.userId !== statusUserId) {
-          continue;
-        }
-        if (rTask.status === 'sedang_meneliti' && rTask.sessionId) {
-          if (!activeSessions.some(s => s.sessionId === rTask.sessionId)) {
-            activeSessions.push({ sessionId: rTask.sessionId, isDeepResearch: true, model: 'Deep Research Pro', startedAt: rTask.createdAt });
-          }
-        } else if (rTask.status === 'selesai' && rTask.sessionId) {
-          if (!recentlyCompletedSessions.some(s => s.sessionId === rTask.sessionId)) {
-            recentlyCompletedSessions.push({ sessionId: rTask.sessionId, isDeepResearch: true, model: 'Deep Research Pro', completedAt: rTask.completedAt });
-          }
-        }
-      }
-
       return sendJSON(res, 200, {
         active: activeSessions.length > 0,
         activeSessions,
@@ -9089,86 +8288,6 @@ async function requestHandler(req, res) {
       return sendJSON(res, 200, buildTaskStatusPayload(task));
     }
 
-    // Periksa apakah ada tugas Deep Research aktif atau baru selesai untuk sesi ini
-    const matchingResearchTasks = [];
-    for (const rId of Object.keys(dbTugasRiset)) {
-      const rTask = dbTugasRiset[rId];
-      if (rTask && (rTask.sessionId === sid || rTask.taskId === sid)) {
-        if (!rTask.userId || rTask.userId === statusUserId) {
-          matchingResearchTasks.push(rTask);
-        }
-      }
-    }
-
-    if (matchingResearchTasks.length > 0) {
-      // Prioritaskan tugas yang sedang aktif/meneliti terlebih dahulu
-      let rTask = matchingResearchTasks.find(t => t.status === 'sedang_meneliti');
-      if (!rTask) {
-        // Jika tidak ada yang sedang aktif, ambil tugas terbaru berdasarkan completedAt atau createdAt
-        matchingResearchTasks.sort((a, b) => new Date(b.completedAt || b.createdAt || 0) - new Date(a.completedAt || a.createdAt || 0));
-        rTask = matchingResearchTasks[0];
-      }
-
-      if (rTask.status === 'sedang_meneliti') {
-        return sendJSON(res, 200, {
-          active: true,
-          status: 'streaming',
-          isDeepResearch: true,
-          taskId: rTask.taskId,
-          sessionId: sid,
-          model: 'Deep Research Pro',
-          text: rTask.hasil || rTask.currentStep || 'Sedang meneliti di latar belakang...',
-          startedAt: rTask.createdAt,
-          completedAt: null,
-          error: null
-        });
-      }
-      if (rTask.status === 'selesai') {
-        return sendJSON(res, 200, {
-          active: false,
-          status: 'completed',
-          isDeepResearch: true,
-          taskId: rTask.taskId,
-          sessionId: sid,
-          model: 'Deep Research Pro',
-          text: rTask.hasil || '',
-          chatSummary: rTask.chatSummary || '',
-          sources: rTask.sources || [],
-          startedAt: rTask.createdAt,
-          completedAt: rTask.completedAt || new Date().toISOString(),
-          error: null
-        });
-      }
-      if (rTask.status === 'dibatalkan') {
-        return sendJSON(res, 200, {
-          active: false,
-          status: 'aborted',
-          isDeepResearch: true,
-          taskId: rTask.taskId,
-          sessionId: sid,
-          model: 'Deep Research Pro',
-          text: rTask.hasil || rTask.currentStep || 'Riset dihentikan oleh pengguna.',
-          startedAt: rTask.createdAt,
-          completedAt: rTask.completedAt || new Date().toISOString(),
-          error: null
-        });
-      }
-      if (rTask.status === 'gagal') {
-        return sendJSON(res, 200, {
-          active: false,
-          status: 'error',
-          isDeepResearch: true,
-          taskId: rTask.taskId,
-          sessionId: sid,
-          model: 'Deep Research Pro',
-          text: rTask.currentStep || '',
-          startedAt: rTask.createdAt,
-          completedAt: rTask.completedAt || new Date().toISOString(),
-          error: rTask.error || 'Terjadi kesalahan pada riset mendalam.'
-        });
-      }
-    }
-
     if (task) {
       return sendJSON(res, 200, buildTaskStatusPayload(task));
     }
@@ -9210,22 +8329,6 @@ async function requestHandler(req, res) {
         }
       }
 
-      // Hentikan juga tugas Deep Research aktif untuk sesi ini jika ada
-      if (sid) {
-        for (const rId of Object.keys(dbTugasRiset)) {
-          const rTask = dbTugasRiset[rId];
-          if (rTask && (rTask.sessionId === sid || rTask.taskId === sid || rTask.taskId === body.taskId) && rTask.status === 'sedang_meneliti') {
-            if (!rTask.userId || rTask.userId === stopUserId) {
-              rTask.aborted = true;
-              rTask.status = 'dibatalkan';
-              rTask.currentStep = 'Riset dihentikan oleh pengguna.';
-              rTask.completedAt = new Date().toISOString();
-              stoppedAny = true;
-            }
-          }
-        }
-      }
-
       return sendJSON(res, 200, { success: true, message: stoppedAny ? 'Tugas chat/riset berhasil dihentikan' : 'Tidak ada tugas aktif untuk sesi ini' });
     } catch (stopErr) {
       return sendJSON(res, 500, { error: stopErr.message });
@@ -9261,6 +8364,15 @@ async function requestHandler(req, res) {
   if (safePath === '/' || safePath === '\\') safePath = '/index.html';
 
   const filePath = path.join(PUBLIC_DIR, safePath);
+
+  if (safePath === '/index.html' && isRemoteTunnelRequest(req)) {
+    const qPin = reqUrl && reqUrl.searchParams && reqUrl.searchParams.get('pin');
+    if (qPin && String(qPin).trim() === String(cloudflareTunnelPin).trim()) {
+      try {
+        res.setHeader('Set-Cookie', `zoz_remote_pin=${encodeURIComponent(cloudflareTunnelPin)}; Path=/; Max-Age=31536000; SameSite=Lax`);
+      } catch (_) {}
+    }
+  }
 
   // Security check: prevent path traversal outside public
   const relative = path.relative(PUBLIC_DIR, filePath);
@@ -9408,36 +8520,48 @@ function encodeWsFrame(str) {
   return Buffer.concat([header, buf]);
 }
 
-function parseWsFrames(chunk, onMessage) {
+function processWsStream(socket, chunk, onMessage) {
+  if (chunk && chunk.length > 0) {
+    socket._wsBuffer = socket._wsBuffer ? Buffer.concat([socket._wsBuffer, chunk]) : chunk;
+  }
+  const buf = socket._wsBuffer;
+  if (!buf || buf.length < 2) return;
+
   let offset = 0;
-  while (offset + 2 <= chunk.length) {
-    const firstByte = chunk[offset];
-    const secondByte = chunk[offset + 1];
+  while (offset + 2 <= buf.length) {
+    const firstByte = buf[offset];
+    const secondByte = buf[offset + 1];
     const opcode = firstByte & 0x0f;
     const isMasked = (secondByte & 0x80) !== 0;
     let payloadLen = secondByte & 0x7f;
-    offset += 2;
+    let headerLen = 2;
 
     if (payloadLen === 126) {
-      if (offset + 2 > chunk.length) break;
-      payloadLen = chunk.readUInt16BE(offset);
-      offset += 2;
+      if (offset + 4 > buf.length) break;
+      payloadLen = buf.readUInt16BE(offset + 2);
+      headerLen = 4;
     } else if (payloadLen === 127) {
-      if (offset + 8 > chunk.length) break;
-      payloadLen = Number(chunk.readBigUInt64BE(offset));
-      offset += 8;
+      if (offset + 10 > buf.length) break;
+      payloadLen = Number(buf.readBigUInt64BE(offset + 2));
+      headerLen = 10;
+    }
+
+    if (isMasked) {
+      headerLen += 4;
+    }
+
+    if (offset + headerLen + payloadLen > buf.length) {
+      // Incomplete frame in accumulator buffer, await next TCP chunk
+      break;
     }
 
     let mask = null;
     if (isMasked) {
-      if (offset + 4 > chunk.length) break;
-      mask = chunk.slice(offset, offset + 4);
-      offset += 4;
+      mask = buf.slice(offset + headerLen - 4, offset + headerLen);
     }
 
-    if (offset + payloadLen > chunk.length) break;
-    const payload = chunk.slice(offset, offset + payloadLen);
-    offset += payloadLen;
+    const payload = buf.slice(offset + headerLen, offset + headerLen + payloadLen);
+    offset += headerLen + payloadLen;
 
     if (isMasked && mask) {
       for (let i = 0; i < payload.length; i++) {
@@ -9446,7 +8570,7 @@ function parseWsFrames(chunk, onMessage) {
     }
 
     if (opcode === 0x08) {
-      return 'close';
+      onMessage({ type: 'close' });
     } else if (opcode === 0x09) {
       const pong = Buffer.from([0x8a, 0x00]);
       onMessage({ type: 'ping', pong });
@@ -9454,6 +8578,8 @@ function parseWsFrames(chunk, onMessage) {
       onMessage({ type: 'data', payload: payload.toString('utf8') });
     }
   }
+
+  socket._wsBuffer = (offset > 0) ? buf.slice(offset) : buf;
 }
 
 function handleTerminalWebSocketUpgrade(req, socket, head) {
@@ -9487,6 +8613,8 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
 
   const digest = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
   try {
+    socket.setNoDelay(true);
+    socket.setKeepAlive(true, 15000);
     socket.write(
       'HTTP/1.1 101 Switching Protocols\r\n' +
       'Upgrade: websocket\r\n' +
@@ -9555,8 +8683,27 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
         lastInputAt: Date.now()
       };
 
+      let pendingWsData = '';
+      let wsFlushScheduled = false;
+      const flushWsBatch = () => {
+        wsFlushScheduled = false;
+        if (!pendingWsData) return;
+        const out = pendingWsData;
+        pendingWsData = '';
+        if (session.wsClients && session.wsClients.size > 0) {
+          const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data: out }));
+          for (const ws of session.wsClients) {
+            try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+          }
+        }
+      };
+
       ptyProcess.onData((data) => {
         session.lastActivity = Date.now();
+        if (typeof data === 'string' && data.includes('\x07')) {
+          data = data.replace(/\x07/g, '');
+        }
+        if (!data) return;
         if (session.buffer.length > 500) session.buffer.shift();
         session.buffer.push(data);
         handleServerAutoEnter(session, data);
@@ -9565,9 +8712,18 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
           try { if (!client.writableEnded) client.write(payload); } catch (_) {}
         }
         if (session.wsClients && session.wsClients.size > 0) {
-          const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data }));
-          for (const ws of session.wsClients) {
-            try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+          if (!wsFlushScheduled && data.length < 32) {
+            // Interactive keystroke fast-path: Zero-latency immediate transmission!
+            const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data }));
+            for (const ws of session.wsClients) {
+              try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+            }
+          } else {
+            pendingWsData += data;
+            if (!wsFlushScheduled) {
+              wsFlushScheduled = true;
+              setImmediate(flushWsBatch);
+            }
           }
         }
       });
@@ -9643,7 +8799,11 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
 
   socket.on('data', (chunk) => {
     session.lastActivity = Date.now();
-    parseWsFrames(chunk, (msg) => {
+    processWsStream(socket, chunk, (msg) => {
+      if (msg.type === 'close') {
+        try { socket.destroy(); } catch (_) {}
+        return;
+      }
       if (msg.type === 'ping' && msg.pong) {
         try { socket.write(msg.pong); } catch (_) {}
       } else if (msg.type === 'data') {
@@ -9716,6 +8876,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
   });
 
   const cleanup = () => {
+    socket._wsBuffer = null;
     if (session && session.wsClients) {
       session.wsClients.delete(socket);
       console.log(`[PTY] Client disconnected from session ${sessionId}. Process persists in background on host laptop.`);

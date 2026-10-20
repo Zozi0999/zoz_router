@@ -156,7 +156,7 @@ module.exports = async function handler(req, res) {
   }
 
   // 3. Streaming SSE Anti-Buffering & Keep-Alive Headers
-  const isStreamingPath = pathname.includes('/chat') || pathname.includes('/stream') || pathname.includes('/deep-research');
+  const isStreamingPath = pathname.includes('/chat') || pathname.includes('/stream');
   if (isStreamingPath) {
     res.setHeader('X-Accel-Buffering', 'no');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
