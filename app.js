@@ -9184,16 +9184,8 @@ RESONANSI: ${this.currentVibe}
     STATE.attachedDocs = [];
     clearAttachedImages();
     if (els.docFileInput) els.docFileInput.value = '';
-    // v403: Reset total status pelipatan dokumen agar tidak bocor ke sesi baru
-    if (typeof dismissPromptFold === 'function') dismissPromptFold(false);
-    pendingFoldText = '';
-    pendingFoldInstruction = '';
-    pendingFoldRawIncoming = '';
-    pendingFoldPastedDirectly = false;
-    pendingFoldFromDrag = false;
-    hideComposerFoldPromptCard();
-    closeModal('promptFoldConfirmModal');
-    if (els.autoConvertDocRow) els.autoConvertDocRow.style.display = 'none';
+    // v404: Bersihkan state pelipatan tanpa mencemari daftar penolakan & sinkronkan tombol pill dengan input aktif
+    if (typeof resetPromptFoldState === 'function') resetPromptFoldState(true);
     renderAttachmentPreviews();
     renderChatHistory();
     renderCurrentSession();
@@ -9269,16 +9261,8 @@ RESONANSI: ${this.currentVibe}
       activeChatPollTimer = null;
     }
 
-    // v403: Reset total status pelipatan dokumen & sembunyikan kartu composer saat beralih sesi
-    if (typeof dismissPromptFold === 'function') dismissPromptFold(false);
-    pendingFoldText = '';
-    pendingFoldInstruction = '';
-    pendingFoldRawIncoming = '';
-    pendingFoldPastedDirectly = false;
-    pendingFoldFromDrag = false;
-    hideComposerFoldPromptCard();
-    closeModal('promptFoldConfirmModal');
-    if (els.autoConvertDocRow) els.autoConvertDocRow.style.display = 'none';
+    // v404: Bersihkan state pelipatan tanpa mencemari daftar penolakan & sinkronkan tombol pill dengan input aktif
+    if (typeof resetPromptFoldState === 'function') resetPromptFoldState(true);
 
     // Sinkronkan pesan dari disk storage jika targetSession lazy-loaded ATAU jika disk memiliki pembaruan latar belakang
     try {
@@ -10215,8 +10199,11 @@ RESONANSI: ${this.currentVibe}
     if (resolvedTimestamp) {
       row.dataset.reportDate = resolvedTimestamp;
     }
-    if (content || extraMeta?.content) {
-      row.dataset.fullContent = role === 'assistant' ? safeAssistantText(content) : (extraMeta?.content || content);
+    if (content) {
+      row.dataset.fullContent = role === 'assistant' ? safeAssistantText(content) : content;
+    }
+    if (role === 'user' && extraMeta?.content) {
+      row.dataset.rawSessionContent = extraMeta.content;
     }
 
     const avatarIcon = role === 'user' ? '<i class="fa-solid fa-user-ninja"></i>' : '<i class="fa-solid fa-microchip-ai"></i>';
@@ -10445,7 +10432,7 @@ RESONANSI: ${this.currentVibe}
           if (!targetDoc) return;
           let docContent = targetDoc.rawContent || targetDoc.content || '';
           if (!docContent) {
-            const fullSourceText = extraMeta?.content || currentSess?.messages?.[index]?.content || row.dataset.fullContent || (typeof content === 'string' ? content : '') || '';
+            const fullSourceText = extraMeta?.content || currentSess?.messages?.[index]?.content || row.dataset.rawSessionContent || row.dataset.fullContent || (typeof content === 'string' ? content : '') || '';
             if (fullSourceText) {
               const safeName = (targetDoc.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
               const docRegex = new RegExp(`--- \\[LAMPIRAN DOKUMEN:\\s*${safeName}[^\\n]*\\] ---\\r?\\n([\\s\\S]*?)(?:\\r?\\n--- \\[AKHIR DOKUMEN:\\s*${safeName}[^\\n]*\\] ---|$)`, 'i');
@@ -10525,7 +10512,7 @@ RESONANSI: ${this.currentVibe}
         // Cancel
         editorBox.querySelector('.cancel-edit-btn')?.addEventListener('click', () => {
           editorBox.remove();
-          if (textContainer) textContainer.style.display = 'block';
+          if (textContainer) textContainer.style.display = hasText ? 'block' : 'none';
           if (actionsBar) actionsBar.style.display = 'flex';
           AudioEngine.click();
         });
@@ -11030,28 +11017,48 @@ RESONANSI: ${this.currentVibe}
     let docBody = cleanText;
     let extractedInstruction = '';
 
+    // Helper penolak sintaks kode: cegah baris komentar kode, import/export, atau statement pemrograman
+    // terpotong secara keliru sebagai "instruksi pengguna" hanya karena memuat kata seperti read/check/fix
+    function isLikelyCodeLine(line) {
+      if (!line) return false;
+      const t = line.trim();
+      if (!t) return false;
+      if (/^(?:\/\/|\/\*|\*|\#include\b|\#define\b|\#pragma\b|<\?php|<\/?[a-zA-Z]|import\s+|export\s+|from\s+[\w.'"]+\s+import\b|const\s+|let\s+|var\s+|function\b|async\s+function\b|def\s+\w+|class\s+\w+|interface\s+\w+|type\s+\w+\s*=|struct\s+\w+|package\s+\w+|using\s+\w+|return\b|if\s*\(|for\s*\(|while\s*\(|switch\s*\(|try\s*\{|catch\s*\(|[\{\}\[\]])/.test(t)) {
+        return true;
+      }
+      if (/[;\{\}]$/.test(t) || /=>\s*[\{\(]?$/.test(t) || /\w+\([^)]*\)\s*$/.test(t)) {
+        return true;
+      }
+      if (/(?:===|!==|&&|\|\||->|::|\+=|-=)/.test(t)) {
+        return true;
+      }
+      return false;
+    }
+
     // Regex pengenal instruksi / prompt (Indonesia & Inggris)
     const INSTRUCTION_KEYWORD_RE = /(?:tolong|mohon|silakan|coba|bantu|jelaskan|analisis|analisa|evaluasi|tinjau|baca|ringkas|rangkum|simpulkan|review|perbaiki|fix|cek|buatkan|kenapa|mengapa|gimana|bagaimana|bagaimanakah|apa(?:kah)?|artikan|terjemahkan|explain|analyze|review|summarize|read|fix|help|check|please|how|what|why|where|could you|can you)\b/i;
 
     const lines = cleanText.split('\n');
 
     // 1. Blok kode fenced di awal (```...```):
-    // Hanya ambil baris 1-3 SEBELUM blok kode jika murni kalimat perintah pendek (< 180 karakter)
-    // dan TIDAK diawali tanda heading (#)
+    // Hanya ambil baris 1-3 SEBELUM blok kode jika murni kalimat perintah pendek (< 180 karakter),
+    // TIDAK diawali tanda heading (#), dan BUKAN baris sintaks kode
     const firstFenceIdx = lines.findIndex(l => /^```[a-zA-Z0-9_-]*/.test(l.trim()));
     if (firstFenceIdx > 0 && firstFenceIdx <= 3) {
-      const prefixCandidate = lines.slice(0, firstFenceIdx).map(l => l.trim()).join(' ').trim();
-      if (!prefixCandidate.startsWith('#') && prefixCandidate.length <= 180 && INSTRUCTION_KEYWORD_RE.test(prefixCandidate)) {
-        extractedInstruction = lines.slice(0, firstFenceIdx).join('\n').trim();
+      const prefixLines = lines.slice(0, firstFenceIdx);
+      const prefixCandidate = prefixLines.map(l => l.trim()).join(' ').trim();
+      const hasCodeLine = prefixLines.some(l => isLikelyCodeLine(l));
+      if (!hasCodeLine && !prefixCandidate.startsWith('#') && prefixCandidate.length <= 180 && INSTRUCTION_KEYWORD_RE.test(prefixCandidate)) {
+        extractedInstruction = prefixLines.join('\n').trim();
         docBody = lines.slice(firstFenceIdx).join('\n').trim();
       }
     }
 
-    // 2. Deteksi instruksi di AWAL teks (hanya 1-2 baris pendek terpisah baris kosong, bukan heading)
+    // 2. Deteksi instruksi di AWAL teks (hanya 1-2 baris pendek terpisah baris kosong, bukan heading & bukan sintaks kode)
     if (!extractedInstruction && docBody === cleanText && lines.length >= 6) {
       const firstLine = lines[0].trim();
       const secondLine = lines[1].trim();
-      if (!firstLine.startsWith('#') && firstLine.length <= 150 && (secondLine === '' || /^[-=_*]{3,}$/.test(secondLine)) && INSTRUCTION_KEYWORD_RE.test(firstLine)) {
+      if (!firstLine.startsWith('#') && !isLikelyCodeLine(firstLine) && firstLine.length <= 150 && (secondLine === '' || /^[-=_*]{3,}$/.test(secondLine)) && INSTRUCTION_KEYWORD_RE.test(firstLine)) {
         let bodyStartIdx = 1;
         while (bodyStartIdx < lines.length && (lines[bodyStartIdx].trim() === '' || /^[-=_*]{3,}$/.test(lines[bodyStartIdx].trim()))) {
           bodyStartIdx++;
@@ -11066,11 +11073,11 @@ RESONANSI: ${this.currentVibe}
       }
     }
 
-    // 3. Deteksi instruksi di AKHIR teks (hanya 1 baris terakhir jika terpisah baris kosong dan memuat kata perintah)
+    // 3. Deteksi instruksi di AKHIR teks (hanya 1 baris terakhir jika terpisah baris kosong, bukan heading & bukan sintaks kode)
     if (!extractedInstruction && docBody === cleanText && lines.length >= 6) {
       const lastLine = lines[lines.length - 1].trim();
       const prevLine = lines[lines.length - 2].trim();
-      if (!lastLine.startsWith('#') && lastLine.length <= 150 && (prevLine === '' || /^[-=_*]{3,}$/.test(prevLine)) && INSTRUCTION_KEYWORD_RE.test(lastLine)) {
+      if (!lastLine.startsWith('#') && !isLikelyCodeLine(lastLine) && lastLine.length <= 150 && (prevLine === '' || /^[-=_*]{3,}$/.test(prevLine)) && INSTRUCTION_KEYWORD_RE.test(lastLine)) {
         const remainingBody = lines.slice(0, lines.length - 2).join('\n').trim();
         if (remainingBody.length >= 150 || remainingBody.split('\n').length >= 6) {
           extractedInstruction = lastLine;
@@ -11098,6 +11105,7 @@ RESONANSI: ${this.currentVibe}
     if (!incomingText || typeof incomingText !== 'string') return false;
     const trimmed = incomingText.trim();
     if (!shouldAutoConvertAsDocument(trimmed)) return false;
+    if (typeof isTextImmuneFromAutoFold === 'function' && isTextImmuneFromAutoFold(trimmed)) return false;
 
     const { docBody, promptInstruction } = extractPromptAndDocContent(trimmed, existingPrompt, false);
     const doc = convertTextToMarkdownDoc(docBody);
@@ -11131,7 +11139,63 @@ RESONANSI: ${this.currentVibe}
   let pendingFoldDismissedHash = '';
   let pendingFoldPastedDirectly = false;
   let pendingFoldFromDrag = false;
+  let userRejectedAutoFoldForCurrentDraft = false;
   const userDismissedAutoFoldHashes = new Set();
+  const userDismissedDocSignatures = new Set();
+
+  function registerUserRejectedAutoFold(rawOrDocText, fullInputText = '') {
+    userRejectedAutoFoldForCurrentDraft = true;
+    const registerSig = (str) => {
+      if (!str || typeof str !== 'string') return;
+      const t = str.trim();
+      if (!t) return;
+      const h = `${t.length}_${t.substring(0, 50)}`;
+      userDismissedAutoFoldHashes.add(h);
+      pendingFoldDismissedHash = h;
+      if (t.length >= 40) {
+        userDismissedDocSignatures.add(t.substring(0, 80));
+        const mid = Math.floor(t.length / 2);
+        userDismissedDocSignatures.add(t.substring(mid, Math.min(t.length, mid + 80)));
+      }
+    };
+    registerSig(rawOrDocText);
+    registerSig(fullInputText);
+  }
+
+  function isTextImmuneFromAutoFold(text) {
+    if (!text || typeof text !== 'string') return false;
+    const t = text.trim();
+    if (!t) return false;
+    if (userRejectedAutoFoldForCurrentDraft) return true;
+    const exactHash = `${t.length}_${t.substring(0, 50)}`;
+    if (pendingFoldDismissedHash === exactHash || userDismissedAutoFoldHashes.has(exactHash)) {
+      return true;
+    }
+    for (const sig of userDismissedDocSignatures) {
+      if (sig && sig.length >= 40 && t.includes(sig)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function resetPromptFoldState(syncPillWithInput = false) {
+    pendingFoldText = '';
+    pendingFoldInstruction = '';
+    pendingFoldRawIncoming = '';
+    pendingFoldPastedDirectly = false;
+    pendingFoldFromDrag = false;
+    pendingFoldDismissedHash = '';
+    userRejectedAutoFoldForCurrentDraft = false;
+    userDismissedAutoFoldHashes.clear();
+    userDismissedDocSignatures.clear();
+    hideComposerFoldPromptCard();
+    closeModal('promptFoldConfirmModal');
+    if (els.autoConvertDocRow) {
+      const currentVal = els.promptInput ? els.promptInput.value : '';
+      els.autoConvertDocRow.style.display = (syncPillWithInput && currentVal && canShowConvertToMdPill(currentVal)) ? 'flex' : 'none';
+    }
+  }
 
   function hideComposerFoldPromptCard() {
     if (els.composerFoldPromptCard) {
@@ -11150,19 +11214,22 @@ RESONANSI: ${this.currentVibe}
       return false;
     }
 
+    // Jika pengguna sudah menolak pelipatan untuk draf ini (dan bukan klik manual tombol pill), hormati keputusan pengguna
+    if (!forceModal && isTextImmuneFromAutoFold(trimmed)) {
+      hideComposerFoldPromptCard();
+      return false;
+    }
+
     // Jika user sudah mencentang opsi selalu otomatis konversi
     const alwaysAutoFold = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
-    if (alwaysAutoFold) {
+    if (alwaysAutoFold && !isTextImmuneFromAutoFold(trimmed)) {
       hideComposerFoldPromptCard();
       return tryAutoConvertInputToDoc(trimmed, existingPrompt);
     }
 
-    const textHash = `${trimmed.length}_${trimmed.substring(0, 50)}`;
-    if (!forceModal && (pendingFoldDismissedHash === textHash || userDismissedAutoFoldHashes.has(textHash))) {
-      return false;
-    }
-
-    const { docBody, promptInstruction } = extractPromptAndDocContent(trimmed, existingPrompt, forceModal);
+    // v404: Hanya anggap manual fold 100% tanpa ekstraksi instruksi jika diklik dari tombol pill (forceModal=true, bukan dari paste/drag)
+    const isManualPillClick = Boolean(forceModal && !fromPaste && !fromDrag);
+    const { docBody, promptInstruction } = extractPromptAndDocContent(trimmed, existingPrompt, isManualPillClick);
     const typeInfo = detectDocumentTypeAndExt(docBody);
     const fileName = typeInfo.customName || `code-snippet.${typeInfo.ext}`;
     const wordCount = countPromptWords(docBody);
@@ -11240,28 +11307,11 @@ RESONANSI: ${this.currentVibe}
       showToast(`📄 Berhasil! Seluruh ${doc.lineCount} baris diubah ke file markdown [${doc.name}]. Kolom prompt bersih.`, 'info');
     }
 
-    hideComposerFoldPromptCard();
-    if (els.autoConvertDocRow) {
-      els.autoConvertDocRow.style.display = 'none';
-    }
-    closeModal('promptFoldConfirmModal');
-    pendingFoldText = '';
-    pendingFoldInstruction = '';
-    pendingFoldRawIncoming = '';
-    pendingFoldPastedDirectly = false;
-    pendingFoldFromDrag = false;
+    resetPromptFoldState(false);
   }
 
   function dismissPromptFold(insertIntoPromptIfPasted = false) {
-    if (pendingFoldText) {
-      pendingFoldDismissedHash = `${pendingFoldText.length}_${pendingFoldText.substring(0, 50)}`;
-      userDismissedAutoFoldHashes.add(pendingFoldDismissedHash);
-    }
-    if (pendingFoldRawIncoming) {
-      const incomingTrimmed = pendingFoldRawIncoming.trim();
-      const rawHash = `${incomingTrimmed.length}_${incomingTrimmed.substring(0, 50)}`;
-      userDismissedAutoFoldHashes.add(rawHash);
-    }
+    const rawToRegister = pendingFoldRawIncoming || pendingFoldText;
 
     if (insertIntoPromptIfPasted && pendingFoldPastedDirectly && !pendingFoldFromDrag && els.promptInput) {
       const incomingToRestore = pendingFoldRawIncoming || pendingFoldText;
@@ -11285,6 +11335,11 @@ RESONANSI: ${this.currentVibe}
       if (els.autoConvertDocRow && canShowConvertToMdPill(els.promptInput.value)) {
         els.autoConvertDocRow.style.display = 'flex';
       }
+    }
+
+    // Daftarkan imunitas SETELAH teks digabungkan ke textarea agar hash & signature mencakup nilai akhir textarea
+    if (rawToRegister || pendingFoldText) {
+      registerUserRejectedAutoFold(rawToRegister || pendingFoldText, els.promptInput ? els.promptInput.value : '');
     }
 
     hideComposerFoldPromptCard();
@@ -15998,19 +16053,24 @@ ${blocks}
 
     // Claude / Grok AI Style: Jika prompt teks yang dikirim pengguna merupakan codingan atau laporan panjang
     // dan belum ada dokumen lampiran, otomatis konversi blok tersebut menjadi file markdown lampiran utuh tanpa batas baris
-    const rawTrimmed = rawText ? rawText.trim() : '';
-    const rawTextHash = rawTrimmed ? `${rawTrimmed.length}_${rawTrimmed.substring(0, 50)}` : '';
-    const userExplicitlyDismissedFold = Boolean(rawTextHash && (userDismissedAutoFoldHashes.has(rawTextHash) || pendingFoldDismissedHash === rawTextHash));
+    const userExplicitlyDismissedFold = Boolean(rawText && typeof isTextImmuneFromAutoFold === 'function' && isTextImmuneFromAutoFold(rawText));
 
     if (rawText && !userExplicitlyDismissedFold && shouldAutoConvertAsDocument(rawText) && docs.length === 0) {
       const { docBody, promptInstruction } = extractPromptAndDocContent(rawText);
       const autoDoc = convertTextToMarkdownDoc(docBody);
       if (autoDoc) {
         docs.push(autoDoc);
-        // v403: Pastikan prompt tidak kosong agar bubble chat dan fitur Edit berfungsi normal
+        // v404: Pastikan prompt tidak kosong agar bubble chat dan fitur Edit berfungsi normal
         const defaultPromptLabel = `Tolong pelajari dan analisis dokumen ${autoDoc.name}.`;
         originalUserPrompt = promptInstruction || defaultPromptLabel;
         rawText = promptInstruction || `Tolong pelajari, analisis, dan jelaskan isi file dokumen ${autoDoc.name} (${autoDoc.lineCount} baris) di atas secara komprehensif.`;
+      }
+    } else if ((!originalUserPrompt || !originalUserPrompt.trim()) && docs.length > 0) {
+      // v404: Jika dokumen sudah dilipat lebih dulu saat Paste / Modal / Klik Tombol Pill (docs.length > 0)
+      // dan kolom prompt kosong, berikan label representatif agar bubble chat & editor inline Edit tidak kosong
+      const firstAutoDoc = docs.find(d => d && d.isAutoConvertedMarkdown) || docs[0];
+      if (firstAutoDoc && firstAutoDoc.name) {
+        originalUserPrompt = `Tolong pelajari dan analisis dokumen ${firstAutoDoc.name}.`;
       }
     }
 
@@ -16044,15 +16104,17 @@ ${blocks}
           let extractedCount = 0;
           scrapeResults.forEach(res => {
             if (res && res.success && res.content && res.content.length > 30) {
-              extractedCount++;
-              const docName = `[Web: ${res.title || res.domain}]`;
-              docs.push({
-                name: docName,
-                size: `${res.charCount || res.content.length} karakter`,
-                content: `Sumber URL: ${res.url}\nJudul Halaman: ${res.title}\nDomain: ${res.domain}\n\n${res.content}`,
-                url: res.url,
-                isWeb: true
-              });
+              if (!docs.some(existing => existing && existing.url === res.url)) {
+                extractedCount++;
+                const docName = `[Web: ${res.title || res.domain}]`;
+                docs.push({
+                  name: docName,
+                  size: `${res.charCount || res.content.length} karakter`,
+                  content: `Sumber URL: ${res.url}\nJudul Halaman: ${res.title}\nDomain: ${res.domain}\n\n${res.content}`,
+                  url: res.url,
+                  isWeb: true
+                });
+              }
             }
           });
           if (extractedCount > 0) {
@@ -16257,7 +16319,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     renderChatHistory(els.searchHistoryInput?.value || '');
 
     // Immediately render user's message bubble
-    const userRow = appendMessageElement('user', displayPrompt, images, 'Anda', null, session.messages.length - 1, null, docsWithContent.length > 0 ? docsWithContent : docsMeta);
+    const userRow = appendMessageElement('user', displayPrompt, images, 'Anda', null, session.messages.length - 1, null, docsWithContent.length > 0 ? docsWithContent : docsMeta, false, null, userMsg.timestamp, userMsg);
     smartScrollChatToBottom(true);
 
     if (STATE.isPromptHidden) {
@@ -16271,21 +16333,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       els.promptInput.value = '';
       autoResizeTextarea(els.promptInput);
     }
-    // M6: kartu "Ubah ke file markdown?" ikut dibersihkan — prompt dikosongkan
-    // secara programatik (tanpa event input), jadi kartu basi tetap terlihat di
-    // atas composer; diklik → teks LAMA dilampirkan sebagai dokumen ke pesan
-    // berikutnya (konten ganda terkirim diam-diam ke model).
-    hideComposerFoldPromptCard();
-    pendingFoldText = '';
-    pendingFoldInstruction = '';
-    pendingFoldRawIncoming = '';
-    pendingFoldPastedDirectly = false;
-    pendingFoldFromDrag = false;
-    userDismissedAutoFoldHashes.clear();
-    pendingFoldDismissedHash = '';
-    if (els.autoConvertDocRow) {
-      els.autoConvertDocRow.style.display = 'none';
-    }
+    // M6 & v404: Bersihkan total state pelipatan & kartu composer saat prompt terkirim
+    if (typeof resetPromptFoldState === 'function') resetPromptFoldState(false);
     STATE.attachedDocs = [];
     clearAttachedImages();
     renderAttachmentPreviews();
@@ -17183,17 +17232,19 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
   function evaluateSimplePythonMath(code) {
     if (!code || typeof code !== 'string') return null;
-    const trimmed = code.trim();
-    
-    // Ekstrak argumen print(...) jika ada
-    const printMatch = trimmed.match(/print\s*\(([\s\S]+)\)\s*$/);
-    let expr = printMatch ? printMatch[1].trim() : trimmed;
+    // Bersihkan baris komentar python & import terlebih dahulu
+    const lines = code.split('\n').map(l => l.replace(/#.*$/, '').trim()).filter(l => l && !l.startsWith('import ') && !l.startsWith('from '));
+    if (lines.length !== 1) return null;
+    const trimmed = lines[0];
 
-    // Bersihkan baris komentar python & import
-    expr = expr.split('\n').filter(line => !line.trim().startsWith('#') && !line.trim().startsWith('import ') && !line.trim().startsWith('from ')).join(' ').trim();
+    // Ekstrak argumen print(...) jika ada
+    const printMatch = trimmed.match(/^print\s*\(([\s\S]+)\)\s*$/);
+    let expr = printMatch ? printMatch[1].trim() : trimmed;
     if (!expr) return null;
 
     // Konversi operasi matematika umum Python ke JS Math
+    // Catatan: Operator eksponensial `**` didukung secara native di JavaScript modern (ES2016+),
+    // sehingga tidak perlu dikonversi ke Math.pow yang bisa merusak angka desimal seperti `2.5 ** 2`.
     expr = expr
       .replace(/\bmath\.factorial\((\d+)\)/g, (_, n) => {
         let num = parseInt(n, 10);
@@ -17215,15 +17266,28 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       .replace(/\bmath\.log10\b/g, 'Math.log10')
       .replace(/\bmath\.log2\b/g, 'Math.log2')
       .replace(/\bmath\.abs\b/g, 'Math.abs')
-      .replace(/(\d+)\s*\/\/\s*(\d+)/g, 'Math.floor($1 / $2)')
-      .replace(/(\d+)\s*\*\*\s*(\d+)/g, 'Math.pow($1, $2)');
+      .replace(/\babs\s*\(/g, 'Math.abs(')
+      .replace(/\bround\s*\(/g, 'Math.round(')
+      .replace(/\bmin\s*\(/g, 'Math.min(')
+      .replace(/\bmax\s*\(/g, 'Math.max(');
+
+    // Konversi floor division Python `//` secara iteratif (mendukung angka desimal dan ekspresi dalam kurung)
+    let prevExpr = '';
+    while (expr.includes('//') && expr !== prevExpr) {
+      prevExpr = expr;
+      expr = expr.replace(/([0-9.]+|\([^()]+\))\s*\/\/\s*([0-9.]+|\([^()]+\))/g, 'Math.floor(($1) / ($2))');
+    }
+    // Jika masih tersisa `//`, batalkan agar tidak dianggap komentar satu baris oleh mesin JS!
+    if (expr.includes('//')) return null;
 
     // Whitelist keamanan: hanya angka, konstanta Math, fungsi Math aman, tanda kurung & operator
-    if (/^[0-9\s\+\-\*\/\%\(\)\.\,Math\.PIEsqrtpowfloorceilsincostanlogabs_]+$/.test(expr)) {
+    if (/^[0-9\s\+\-\*\/\%\(\)\.\,Math\.PIEsqrtpowfloorceilsincostanlogabsroundminmax_]+$/.test(expr)) {
       try {
         const fn = new Function(`return (${expr});`);
         const val = fn();
-        return String(val);
+        if (typeof val === 'number' && !Number.isNaN(val)) {
+          return String(val);
+        }
       } catch (_) {}
     }
     return null;
@@ -29923,6 +29987,12 @@ Aturan:
       autoResizeTextarea(els.promptInput);
 
       const val = els.promptInput ? els.promptInput.value : '';
+      if (!val || !val.trim()) {
+        userRejectedAutoFoldForCurrentDraft = false;
+        userDismissedAutoFoldHashes.clear();
+        userDismissedDocSignatures.clear();
+        pendingFoldDismissedHash = '';
+      }
 
       // Tampilkan popup menu slash command saat mengetik /
       handleSlashCommandInput(val);
@@ -29937,7 +30007,7 @@ Aturan:
       }
 
       // Deteksi kodingan / teks masif untuk pop-up konfirmasi atau auto-convert
-      if (val && shouldAutoConvertAsDocument(val)) {
+      if (val && shouldAutoConvertAsDocument(val) && !isTextImmuneFromAutoFold(val)) {
         const alwaysAuto = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
         if (alwaysAuto) {
           tryAutoConvertInputToDoc(val);
@@ -30020,19 +30090,18 @@ Aturan:
         const textToRestore = doc.rawContent || doc.content || '';
         STATE.attachedDocs.splice(activePreviewDocIndex, 1);
         renderAttachmentPreviews();
-        if (textToRestore) {
-          const rTrimmed = textToRestore.trim();
-          const rHash = `${rTrimmed.length}_${rTrimmed.substring(0, 50)}`;
-          userDismissedAutoFoldHashes.add(rHash);
-          pendingFoldDismissedHash = rHash;
-        }
         if (els.promptInput) {
           els.promptInput.value = els.promptInput.value ? `${els.promptInput.value}\n\n${textToRestore}` : textToRestore;
+          if (textToRestore) {
+            registerUserRejectedAutoFold(textToRestore, els.promptInput.value);
+          }
           autoResizeTextarea(els.promptInput);
           els.promptInput.focus();
           if (els.autoConvertDocRow && canShowConvertToMdPill(els.promptInput.value)) {
             els.autoConvertDocRow.style.display = 'flex';
           }
+        } else if (textToRestore) {
+          registerUserRejectedAutoFold(textToRestore);
         }
         closeModal('docPreviewModal');
         showToast('↩️ File dokumen dikembalikan ke kolom prompt input.');
@@ -34254,6 +34323,7 @@ Aturan:
       if (helper) {
         const origStart = helper.compositionstart ? helper.compositionstart.bind(helper) : null;
         helper.compositionstart = function() {
+          this._compGen = (this._compGen || 0) + 1;
           if (origStart) origStart();
           this._lastComposed = '';
           this._dataAlreadySent = '';
@@ -34285,8 +34355,9 @@ Aturan:
               this._coreService.triggerDataEvent('\x7f', true);
             }
             this._dataAlreadySent = (this._dataAlreadySent || '').slice(0, -diff);
-            paneState._lastBackspaceHandled = Date.now();
-            paneState._lastBackspaceTime = Date.now();
+            const now = Date.now();
+            paneState._lastBackspaceHandled = now;
+            paneState._lastBackspaceTime = now;
           } else {
             // Penggantian kata atau koreksi teks Gboard
             let common = 0;
@@ -34297,6 +34368,11 @@ Aturan:
             for (let i = 0; i < toDelete; i++) {
               this._coreService.triggerDataEvent('\x7f', true);
             }
+            if (toDelete > 0) {
+              const now = Date.now();
+              paneState._lastBackspaceHandled = now;
+              paneState._lastBackspaceTime = now;
+            }
             const toAdd = text.slice(common);
             if (toAdd) {
               this._coreService.triggerDataEvent(toAdd, true);
@@ -34305,31 +34381,52 @@ Aturan:
           }
           this._lastComposed = text;
           setTimeout(() => {
-            if (this._textarea) {
+            if (this._textarea && this._compositionPosition) {
               this._compositionPosition.end = this._textarea.value.length;
             }
           }, 0);
         };
 
-        helper._finalizeComposition = function(e) {
+        helper._finalizeComposition = function(waitForChanges) {
           if (this._compositionView) {
             this._compositionView.classList.remove('active');
           }
           this._isComposing = false;
           this._lastComposed = '';
-          this._isSendingComposition = true;
+          const gen = this._compGen || 0;
           const startPos = this._compositionPosition ? this._compositionPosition.start : 0;
           const alreadySent = this._dataAlreadySent || '';
 
+          if (!waitForChanges) {
+            this._isSendingComposition = false;
+            this._dataAlreadySent = '';
+            if (this._textarea && this._compositionPosition) {
+              const input = this._textarea.value.substring(this._compositionPosition.start, this._compositionPosition.end);
+              const remaining = input.slice(alreadySent.length);
+              if (remaining.length > 0) {
+                this._coreService.triggerDataEvent(remaining, true);
+              }
+            }
+            return;
+          }
+
+          this._isSendingComposition = true;
           setTimeout(() => {
+            // Jika komposisi baru sudah dimulai sebelum timer ini jalan, batalkan agar tidak menggandakan huruf!
+            if ((this._compGen || 0) !== gen) {
+              return;
+            }
             if (this._isSendingComposition) {
               this._isSendingComposition = false;
               this._dataAlreadySent = '';
               if (this._textarea) {
                 const textVal = this._textarea.value || '';
                 const effectiveStart = startPos + alreadySent.length;
-                if (textVal.length > effectiveStart) {
-                  const remaining = textVal.substring(effectiveStart);
+                const effectiveEnd = (this._isComposing && this._compositionPosition)
+                  ? this._compositionPosition.start
+                  : textVal.length;
+                if (effectiveEnd > effectiveStart) {
+                  const remaining = textVal.substring(effectiveStart, effectiveEnd);
                   if (remaining.length > 0) {
                     this._coreService.triggerDataEvent(remaining, true);
                   }
@@ -34342,6 +34439,17 @@ Aturan:
         helper.compositionend = function() {
           this._finalizeComposition(true);
         };
+
+        if (typeof helper._handleAnyTextareaChanges === 'function') {
+          const origHandleAny = helper._handleAnyTextareaChanges.bind(helper);
+          helper._handleAnyTextareaChanges = function() {
+            const now = Date.now();
+            if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 120) {
+              return;
+            }
+            return origHandleAny();
+          };
+        }
       }
 
       // Cegah xterm menghasilkan \x1b\x7f atau \x1b\x08 (yang memicu echo ^H pada PowerShell/ConPTY)
@@ -34529,6 +34637,11 @@ Aturan:
       // Mobile IME / Gboard deleteContentBackward fallback (saat keyCode adalah 229 / IME composition)
       container.addEventListener('beforeinput', (ev) => {
         if (ev.inputType === 'deleteContentBackward' || ev.inputType === 'deleteWordBackward') {
+          // PENTING: Jika sedang dalam mode komposisi IME (_isComposing = true),
+          // biarkan helper.compositionupdate yang menangani penghapusan karakter agar tidak terjadi Double/Triple Backspace!
+          if (helper && helper._isComposing) {
+            return;
+          }
           const now = Date.now();
           if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 160) {
             return;
