@@ -2594,25 +2594,6 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   color: #FF2E93;
 }
 
-/* AI YouTube Search Mode Indicator (cara kerja sama dengan music/image indicator) */
-.composer-tools-left .youtube-mode-indicator {
-  width: 28px;
-  height: 28px;
-  margin: 4px 6px;
-  border-radius: 4px;
-  background: rgba(255, 0, 51, 0.1);
-  color: #FF0033;
-  border: 1px solid rgba(255, 0, 51, 0.3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background 0.2s, color 0.2s;
-}
-.composer-tools-left .youtube-mode-indicator:hover {
-  background: rgba(255, 0, 51, 0.2);
-  color: #FF3355;
-}
 
 /* Status aktif untuk item menu lampiran (mis. Cari Video YouTube) */
 .attachment-menu-item.active {
@@ -9867,17 +9848,6 @@ div.msg-sources-section button.msg-sources-title span {
   color: var(--neon-teal);
 }
 
-.top-nav-active-tool-wrap.tool-theme-youtube .top-nav-active-tool-chip {
-  border-color: rgba(255, 0, 51, 0.55);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), 0 0 10px rgba(255, 0, 51, 0.22);
-}
-.top-nav-active-tool-wrap.tool-theme-youtube .top-nav-active-tool-chip:hover {
-  border-color: #ff3355;
-  box-shadow: 0 6px 18px rgba(255, 0, 51, 0.38);
-}
-.top-nav-active-tool-wrap.tool-theme-youtube .top-nav-tool-icon-wrap {
-  color: #ff2244;
-}
 
 .top-nav-tool-icon-wrap {
   display: inline-flex;

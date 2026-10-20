@@ -34,12 +34,15 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261019_v408';
+    window.__ZOZ_VERSION__ = 'v20261020_v409';
   </script>
-  <title>ZOZ ROUTER // Neural AI Multi-Engine Gateway</title>
+  <title>ZOZ ROUTER</title>
+  <link rel="icon" type="image/png" href="zoz-logo.png">
+  <link rel="shortcut icon" href="zoz-logo.png">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="apple-touch-icon" href="zoz-logo.png">
   <!-- Preload Critical LCP Image & Font Awesome Glyph -->
-  <link rel="preload" href="favicon.svg" as="image" type="image/svg+xml" fetchpriority="high">
+  <link rel="preload" href="zoz-logo.png" as="image" type="image/png" fetchpriority="high">
   <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/webfonts/fa-solid-900.woff2" as="font" type="font/woff2" crossorigin>
   <!-- Fonts & CDN Preconnect -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -90,8 +93,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261019_v408">
-  <link rel="stylesheet" href="style.css?v=20261019_v408">
+  <link rel="preload" as="style" href="style.css?v=20261020_v409">
+  <link rel="stylesheet" href="style.css?v=20261020_v409">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial select-none">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -473,9 +476,9 @@
         <!-- Brand identity line -->
         <div class="flex items-center px-1">
           <div class="flex items-center space-x-2">
-            <button class="relative w-7 h-7 rounded-lg bg-gradient-to-br from-teal-400/20 via-emerald-500/10 to-transparent border border-teal-400/30 flex items-center justify-center shadow-glow-cyan/20 mode-tab brand-logo-wrap" data-mode="auto" id="sidebarBrandLogoBtn" title="Auto Router AI: Klik logo untuk beralih mode otomatis" type="button" aria-label="Toggle Auto Router via Logo">
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="zap" aria-hidden="true" class="lucide lucide-zap w-3.5 h-3.5 text-teal-400"><path d="M15.914 4a1.5 1.5 0 00-2.474-1.561l-9 9A1.5 1.5 0 005.5 14h4.002a.5.5 0 01.471.666L8.086 20a1.5 1.5 0 002.475 1.56l9-9A1.5 1.5 0 0018.5 10h-3.997a.5.5 0 01-.472-.667z"></path></svg>
-              <span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-teal-400 auto-router-quantum-dot"></span>
+            <button class="relative w-7 h-7 rounded-lg overflow-hidden border border-emerald-400/40 flex items-center justify-center shadow-glow-emerald mode-tab brand-logo-wrap" data-mode="auto" id="sidebarBrandLogoBtn" title="Auto Router AI: Klik logo untuk beralih mode otomatis" type="button" aria-label="Toggle Auto Router via Logo">
+              <img src="zoz-logo.png" alt="Z" class="w-full h-full object-cover">
+              <span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400 auto-router-quantum-dot"></span>
             </button>
             <div>
               <h1 class="font-bold tracking-tight text-white text-xs flex items-center gap-1.5">
@@ -600,24 +603,29 @@
         <div class="chat-messages-container flex-1 flex flex-col justify-between w-full" id="singleChatContainer">
           <!-- WELCOME HERO (Center Logo & Pure Minimalist Title) -->
           <div class="welcome-hero flex-1 flex flex-col items-center justify-center px-4 relative z-10" id="welcomeHero">
-            <div class="hero-triangle-container">
-              <div class="hero-triangle-glow"></div>
-              <div class="hero-logo-box">
-                <img src="favicon.svg" alt="ZOZ ROUTER Logo" class="hero-logo">
+            <div class="flex flex-col items-center justify-center select-none font-mono tracking-tight text-center">
+              <div class="mb-4 relative group cursor-default">
+                <div class="absolute -inset-2 rounded-full bg-emerald-500/20 blur-xl opacity-80 group-hover:opacity-100 transition duration-500"></div>
+                <img src="zoz-logo.png" alt="ZOZ ROUTER" class="relative w-28 h-28 md:w-32 md:h-32 rounded-full object-cover shadow-[0_0_35px_rgba(34,197,94,0.55)] border border-emerald-500/40 transition-transform duration-300 hover:scale-105">
               </div>
-            </div>
 
-            <h2 class="hero-title">ZOZ ROUTER</h2>
-            <p class="hero-subtitle">NEURAL AI MULTI-ENGINE GATEWAY</p>
-            <p class="hero-desc">Orkestrasi cerdas berkecepatan tinggi antara Ollama lokal dan OpenRouter cloud.</p>
+              <!-- Title & Restored Formula Text -->
+              <div class="space-y-1.5">
+                <h2 class="text-2xl font-bold tracking-wider font-mono text-white flex items-center justify-center space-x-2">
+                  <span class="text-emerald-400">ZOZ</span>
+                  <span class="text-slate-100">ROUTER</span>
+                </h2>
+                <p class="text-xs font-mono text-emerald-400/90 tracking-wider text-center select-none">3 33 ~ - ) 3 2 1</p>
+              </div>
 
-            <!-- Auto Router AI Trigger -->
-            <div class="mt-5 flex items-center justify-center">
-              <button class="mode-tab inline-flex items-center space-x-2 px-4 py-2 rounded-full bg-white/[0.04] hover:bg-teal-500/10 border border-teal-500/30 hover:border-teal-400/60 transition-all text-xs font-mono text-slate-300 hover:text-teal-300 cursor-pointer shadow-glow-cyan/20 group select-none" data-mode="auto" id="heroAutoRouterBtn" title="Klik untuk mengaktifkan / menonaktifkan Auto Router AI (Ollama + OpenRouter)" type="button">
-                <span class="w-2 h-2 rounded-full bg-teal-400 group-hover:scale-125 transition-transform auto-router-quantum-dot"></span>
-                <span class="font-semibold tracking-wider">AUTO ROUTER</span>
-                <span class="text-[10px] text-slate-500 group-hover:text-teal-400/80 font-normal ml-0.5" id="heroAutoRouterStatus">Ollama + OpenRouter</span>
-              </button>
+              <!-- Auto Router AI Trigger -->
+              <div class="mt-4 flex items-center justify-center">
+                <button class="mode-tab inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] hover:bg-emerald-500/10 border border-emerald-500/30 hover:border-emerald-400/60 transition-all text-xs font-mono text-slate-300 hover:text-emerald-300 cursor-pointer shadow-glow-emerald group select-none" data-mode="auto" id="heroAutoRouterBtn" title="Klik untuk mengaktifkan / menonaktifkan Auto Router AI (Ollama + OpenRouter)" type="button">
+                  <span class="w-2 h-2 rounded-full bg-emerald-400 group-hover:scale-125 transition-transform auto-router-quantum-dot"></span>
+                  <span class="font-semibold tracking-wider">AUTO ROUTER</span>
+                  <span class="text-[10px] text-slate-500 group-hover:text-emerald-400/80 font-normal ml-0.5" id="heroAutoRouterStatus">Ollama + OpenRouter</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -882,18 +890,6 @@
                       <span class="attach-item-desc">Studio komposisi musik & audio AI</span>
                     </div>
                   </button>
-                  <button class="attachment-menu-item" id="attachOptionYouTubeSearch" type="button" aria-pressed="false">
-                    <div class="attach-item-icon-box youtube-search-accent" style="background: rgba(255, 0, 0, 0.15); border-color: rgba(255, 0, 0, 0.4); color: #FF0033;">
-                      <i class="fa-brands fa-youtube"></i>
-                    </div>
-                    <div class="attach-item-info">
-                      <span class="attach-item-title">Pencarian YouTube</span>
-                      <span class="attach-item-desc">Tool pencarian video YouTube untuk semua model AI</span>
-                    </div>
-                    <div class="attach-item-action-area">
-                      <i class="fa-solid fa-check attach-yt-check" aria-hidden="true" style="display:none;"></i>
-                    </div>
-                  </button>
                   <button class="attachment-menu-item" id="attachOptionLocalWorkspace" type="button" style="display: none !important;">
                     <div class="attach-item-icon-box workspace-accent" style="background: rgba(0, 240, 255, 0.15); border-color: rgba(0, 240, 255, 0.4); color: var(--neon-cyan);">
                       <i class="fa-solid fa-folder-tree"></i>
@@ -993,12 +989,6 @@
                 </div>
 
                 <!-- Hidden indicator elements for connectome safety -->
-                <div class="video-search-menu-wrapper" id="videoSearchMenuWrapper" style="display: none;">
-                  <button class="composer-btn video-search-toggle" id="videoSearchToggleBtn" type="button" style="display: none;" title="Pencarian YouTube" aria-label="Pencarian YouTube" aria-pressed="false">
-                    <i class="fa-brands fa-youtube" id="videoSearchIcon"></i>
-                    <span class="video-badge" id="videoSearchBadge" style="display: none;">YT</span>
-                  </button>
-                </div>
                 <div class="image-model-menu-wrapper" id="imageModelMenuWrapper" style="display: none;">
                   <button class="composer-btn image-gen-toggle" id="imageGenToggleBtn" type="button" style="display: none;">
                     <span class="image-model-badge" id="imageModelBadge" style="display: none;">Flux</span>
@@ -1014,9 +1004,6 @@
                 </button>
                 <button class="composer-btn image-mode-indicator" id="imageModeIndicator" type="button" title="Mode Gambar Aktif" aria-label="Mode Gambar Aktif" style="display:none;">
                   <i class="fa-solid fa-image"></i>
-                </button>
-                <button class="composer-btn youtube-mode-indicator" id="youtubeModeIndicator" type="button" title="Mode Pencarian Video YouTube Aktif" aria-label="Mode Pencarian Video YouTube Aktif" style="display:none;">
-                  <i class="fa-brands fa-youtube"></i>
                 </button>
               </div>
 
@@ -1220,7 +1207,7 @@
             <!-- Brand & Logo Showcase with ZOZ Cybernetic Icon -->
             <div class="developer-hero-badge">
               <div class="developer-logo-wrap">
-                <img src="favicon.svg" alt="ZOZ ROUTER Logo" class="developer-logo-img">
+                <img src="zoz-logo.png" alt="ZOZ ROUTER Logo" class="developer-logo-img">
                 <span class="developer-pulse-glow"></span>
               </div>
               <div class="developer-brand-meta">
@@ -2818,8 +2805,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261019_v408" defer></script>
+  <script src="text-safety.js?v=20261020_v409" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261019_v408" defer></script>
+  <script src="app.js?v=20261020_v409" defer></script>
 </body>
 </html>
