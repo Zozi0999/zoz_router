@@ -3972,6 +3972,8 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
 
       let resolved = false;
       let rawHtml = '';
+      let chunks2 = [];
+      let totalLen2 = 0;
 
       function finishParsing(html) {
         if (resolved) return;
@@ -4038,6 +4040,13 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
           }
         }
 
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          res.resume();
+          resolved = true;
+          if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve);
+          return resolve({ url: cleanTarget, error: `HTTP ${res.statusCode}`, text: '' });
+        }
+
         // Decompress stream if server sent gzip, deflate, or brotli
         const enc = (res.headers['content-encoding'] || '').toLowerCase();
         let stream = res;
@@ -4053,8 +4062,6 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
           stream = res;
         }
 
-        let chunks2 = [];
-        let totalLen2 = 0;
         stream.on('data', chunk => {
           chunks2.push(chunk);
           totalLen2 += chunk.length;
@@ -4065,29 +4072,29 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
           }
         });
 
-        stream.on('end', () => { if (!resolved) { rawHtml = typeof chunks2 !== 'undefined' && chunks2.length > 0 ? Buffer.concat(chunks2).toString('utf8') : rawHtml; finishParsing(rawHtml); } });
+        stream.on('end', () => { if (!resolved) { rawHtml = chunks2.length > 0 ? Buffer.concat(chunks2).toString('utf8') : rawHtml; finishParsing(rawHtml); } });
         stream.on('error', (err) => {
           try { res.unpipe(); } catch (_) {}
           try { if (stream !== res) stream.destroy(); } catch (_) {}
-          if (typeof chunks2 !== 'undefined' && chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
-          else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: err.message, text: '' }); }
+          if (chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
+          else if (!resolved) { resolved = true; if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve); resolve({ url: cleanTarget, error: err.message, text: '' }); }
         });
         res.on('error', (err) => {
           try { res.unpipe(); } catch (_) {}
           try { if (stream !== res) stream.destroy(); } catch (_) {}
-          if (typeof chunks2 !== 'undefined' && chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
-          else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: err.message, text: '' }); }
+          if (chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
+          else if (!resolved) { resolved = true; if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve); resolve({ url: cleanTarget, error: err.message, text: '' }); }
         });
       });
 
       req.on('timeout', () => {
         req.destroy();
-        if (typeof chunks2 !== 'undefined' && chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
-        else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: 'Connection timeout', text: '' }); }
+        if (chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
+        else if (!resolved) { resolved = true; if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve); resolve({ url: cleanTarget, error: 'Connection timeout', text: '' }); }
       });
       req.on('error', (err) => {
-        if (typeof chunks2 !== 'undefined' && chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
-        else if (!resolved) { resolved = true; resolve({ url: cleanTarget, error: err.message, text: '' }); }
+        if (chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
+        else if (!resolved) { resolved = true; if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve); resolve({ url: cleanTarget, error: err.message, text: '' }); }
       });
       req.end();
     } catch (err) {

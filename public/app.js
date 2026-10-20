@@ -17641,11 +17641,21 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     [/\bsekarang\b/gi, 'now']
   ];
 
-  const GLOBAL_SEARCH_STOPWORDS = /\b(apa|apakah|siapa|siapakah|bagaimana|bagaimanakah|gimana|gimanakah|mengapa|kenapa|kapan|dimana|ke mana|di mana|dari mana|mana|berapa|seperti|kayak|yang|dan|atau|tetapi|namun|dengan|untuk|bagi|pada|di|ke|dari|tentang|mengenai|soal|terkait|adalah|ialah|yaitu|yakni|merupakan|bisa|dapat|tolong|coba|carikan|cari|bantu|tampilkan|berikan|sebutkan|jelaskan|paparkan|terangkan|ceritakan|nya|kah|lah|saja|pun|dong|sih|kok|deh|ya|kan|ada|sudah|telah|sedang|lagi|akan|pernah|kalian|kamu|anda|kita|saya|nih|tuh|lho|loh|kira|kira-kira)\b/gi;
+  const GLOBAL_SEARCH_STOPWORDS = /\b(apa|apakah|siapa|siapakah|bagaimana|bagaimanakah|gimana|gimanakah|mengapa|kenapa|kapan|dimana|ke mana|di mana|dari mana|mana|berapa|seperti|kayak|yang|dan|atau|tetapi|namun|dengan|untuk|bagi|pada|di|ke|dari|tentang|mengenai|soal|terkait|adalah|ialah|yaitu|yakni|merupakan|bisa|dapat|tolong|coba|carikan|cari|bantu|tampilkan|berikan|sebutkan|jelaskan|paparkan|terangkan|ceritakan|nya|kah|lah|saja|pun|dong|sih|kok|deh|ya|kan|ada|sudah|telah|sedang|lagi|akan|pernah|kalian|kamu|anda|kita|saya|nih|tuh|lho|loh|kira|kira-kira|itu|ini|tersebut)\b/gi;
 
   function translateIndoQueryToGlobalEnglish(rawQuery) {
     if (!rawQuery || typeof rawQuery !== 'string') return '';
-    return rawQuery.trim();
+    let q = rawQuery.trim();
+    if (!q) return '';
+    for (const [regex, replacement] of GLOBAL_SEARCH_PHRASE_DICT) {
+      q = q.replace(regex, replacement);
+    }
+    for (const [regex, replacement] of GLOBAL_SEARCH_WORD_DICT) {
+      q = q.replace(regex, replacement);
+    }
+    q = q.replace(GLOBAL_SEARCH_STOPWORDS, ' ');
+    q = q.replace(/\s+/g, ' ').trim();
+    return q.length >= 2 ? q : rawQuery.trim();
   }
 
   function deriveBroadSearchQueries(rawQuery, contextText = '') {
@@ -18271,7 +18281,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
         const serperApiKey = (STATE.settings?.serperApiKey || '').trim() || null;
         const cleanDateQuery = stripDateNoise(query.trim());
-        const isIndo = hasIndonesianWords(query.trim()) || isExplicitDomesticIndoQuery(query.trim()) || isExplicitDomesticIndoQuery(effectiveContext);
+        const isDomestic = isExplicitDomesticIndoQuery(query.trim()) || isExplicitDomesticIndoQuery(effectiveContext);
+        const isIndo = hasIndonesianWords(query.trim()) || isDomestic;
+        const englishQuery = (!isDomestic && isIndo) ? translateIndoQueryToGlobalEnglish(cleanDateQuery || query.trim()) : '';
 
         const queriesToSearch = [query.trim()];
         if (cleanDateQuery && cleanDateQuery.length >= 3 && cleanDateQuery.toLowerCase() !== query.trim().toLowerCase()) {
@@ -18713,7 +18725,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           } catch (_) {}
         }
 
-        return { text: `Error: Tidak dapat membaca URL ${url} (Koneksi gagal atau halaman tidak dapat diakses). Saran: Coba gunakan search_web untuk mencari ringkasan/informasi alternatif tentang topik ini, atau beri tahu pengguna bahwa tautan tersebut tidak dapat dibuka.`, sources: [], success: false };
+        const browseErrText = `Error: Tidak dapat membaca URL ${url} (Koneksi gagal atau halaman tidak dapat diakses). Saran: Coba gunakan search_web untuk mencari ringkasan/informasi alternatif tentang topik ini, atau beri tahu pengguna bahwa tautan tersebut tidak dapat dibuka.`;
+        if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+          BioEndocrine.registerToolIssue({ toolName: 'browse_web_page', error: browseErrText, status: 'BROWSE_FAILED', args: url });
+        }
+        return { text: browseErrText, sources: [], success: false };
       }
 
       if (['save_memory', 'simpan_memori', 'store_memory'].includes(toolName)) {
@@ -19185,7 +19201,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         const p = JSON.parse(block.json);
         const name = p.name || p.function || p.tool;
         const normName = normalizeToolName(name);
-        if (isLongCompleteText && block.start > 220 && normName !== 'search_youtube') continue;
+        if (isLongCompleteText && block.start > 220 && normName === 'search_web') continue;
         if (isKnownAutonomousTool(name)) {
           const args = p.arguments ?? p.parameters ?? p.args ?? p.input ?? {};
           addCall(name, args, block.json);
@@ -19198,7 +19214,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     let fjm;
     while ((fjm = funcJsonRegex.exec(textWithoutCode)) !== null) {
       const name = fjm[1];
-      if (isLongCompleteText && fjm.index > 220 && normalizeToolName(name) !== 'search_youtube') continue;
+      if (isLongCompleteText && fjm.index > 220 && normalizeToolName(name) === 'search_web') continue;
       try {
         let p;
         try {
@@ -19230,7 +19246,6 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const funcTwoArgsRegex = /(save_memory|simpan_memori|store_memory)\s*\(\s*(?:([a-zA-Z_]+)\s*[:=]\s*)?(["'`])([\s\S]*?)\3\s*,\s*(?:([a-zA-Z_]+)\s*[:=]\s*)?(["'`])([\s\S]*?)\6\s*\)/gi;
     let ftm;
     while ((ftm = funcTwoArgsRegex.exec(textWithoutCode)) !== null) {
-      if (isLongCompleteText && ftm.index > 220) continue;
       const name = ftm[1];
       const k1 = (ftm[2] || '').toLowerCase();
       const v1 = ftm[4].trim();
@@ -19249,13 +19264,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
 
     // 7b. Single-argument function call syntax: search_web("query") or browse_web_page("url")
-    // Jika teks sangat panjang (> 300 kata), hanya izinkan jika pemanggilan ada di awal teks (< 200 karakter) atau search_youtube
+    // Jika teks sangat panjang (> 300 kata), batasi search_web di awal teks (< 220 karakter), namun izinkan tool spesifik lain (search_youtube, browse_web_page, execute_python_code, save_memory, search_memory)
     const funcRegex = new RegExp(`(${toolPattern})\\s*\\(\\s*(?:(?:query|url|q|link|target|code|topic|content|isi|kata_kunci|topik|script|cari|tautan|konten)\\s*[:=]\\s*)?(["'\`])([\\s\\S]*?)\\2\\s*\\)`, 'gi');
     let fm;
     while ((fm = funcRegex.exec(textWithoutCode)) !== null) {
       const name = fm[1];
       const normName = normalizeToolName(name);
-      if (isLongCompleteText && fm.index > 220 && normName !== 'search_youtube') continue;
+      if (isLongCompleteText && fm.index > 220 && normName === 'search_web') continue;
       const val = fm[3].trim();
       if (val) {
         const isUrlTool = ['browse_web_page', 'extract_web'].includes(normName);
@@ -20323,8 +20338,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
             });
           }
-          if (normalizeToolName(toolName) === 'search_youtube' || (Array.isArray(toolExecRes.videoIds) && toolExecRes.videoIds.length > 0)) {
+          const normTool = normalizeToolName(toolName);
+          if (normTool === 'search_youtube' || (Array.isArray(toolExecRes.videoIds) && toolExecRes.videoIds.length > 0 && normTool !== 'browse_web_page')) {
             roundToolResponsesText += `\n[FAKTA & DATA VIDEO YOUTUBE DARI ${toolName}]:\n${toolExecRes.text}\n\n`;
+          } else if (['browse_web_page', 'extract_web'].includes(normTool) && toolExecRes.text) {
+            const cleanBrowseText = cleanWebExtractedContent(toolExecRes.text);
+            roundToolResponsesText += `\n[ISI LENGKAP HALAMAN WEB DARI ${toolName}]:\n${cleanBrowseText}\n\n`;
           } else if (toolExecRes.sources && Array.isArray(toolExecRes.sources) && toolExecRes.sources.length > 0) {
             let structuredEvidence = `\n[FAKTA & BUKTI RESMI HASIL PENELUSURAN DARI ${toolName}]:\n`;
             toolExecRes.sources.slice(0, 10).forEach((s, idx) => {
@@ -20392,23 +20411,25 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             status: 'CIRCUIT_BREAKER'
           });
         }
-        const hasBrowsedWeb = detectedAutonomousCalls.some(c => c && c.function && ['browse_web_page', 'browse_web', 'extract_web', 'read_url'].includes(c.function.name));
-        const hasExecutedSearch = detectedAutonomousCalls.some(c => c && c.function && ['search_web', 'web_search', 'search', 'search_youtube'].includes(c.function.name)) || (webSources && webSources.length > 0);
+        const hasBrowsedWeb = detectedAutonomousCalls.some(c => c && c.function && ['browse_web_page', 'browse_web', 'extract_web', 'read_url'].includes(normalizeToolName(c.function.name)));
+        const hasExecutedSearch = detectedAutonomousCalls.some(c => c && c.function && ['search_web', 'search_youtube'].includes(normalizeToolName(c.function.name)));
+        const hasExecutedPython = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'execute_python_code');
+        const hasExecutedMemory = detectedAutonomousCalls.some(c => c && c.function && ['save_memory', 'search_memory'].includes(normalizeToolName(c.function.name)));
         const isLastRound = circuitBreakerTripped || hasBrowsedWeb || (autonomousRound >= maxAutonomousRounds - 1);
         const currentDateObj = new Date();
         const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-        const roundInstruction = (isLastRound || hasExecutedSearch)
+        const roundInstruction = (isLastRound || hasExecutedSearch || hasExecutedPython || hasExecutedMemory)
           ? `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
 WAKTU SISTEM SAAT INI: ${currentFormattedDate} (Tahun ${currentDateObj.getFullYear()}).
 
-${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan dan ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.'}
+${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan hasil eksekusi kode Python sandbox di atas untuk menjawab pertanyaan atau menyelesaikan perhitungan pengguna secara akurat, jelas, dan tuntas dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil operasi memori jangka panjang di atas untuk menjawab pengguna secara langsung, ramah, dan akurat dalam Bahasa Indonesia.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.'))}
 ${foundYouTubeIds.length > 0 ? 'Jika hasilnya berupa video YouTube: jelaskan dan rekomendasikan video yang paling relevan (judul, channel, durasi, tayangan), lalu WAJIB sisipkan tautan video pilihan Anda dengan format markdown [Judul Video](https://www.youtube.com/watch?v=ID) agar kartu video dapat ditampilkan dan diputar langsung di dalam percakapan.' : ''}
 
 PANDUAN NILAI GUNA & INTEGRITAS FAKTA:
 1. NILAI GUNA TINGGI: Jangan sekadar menyajikan daftar judul mentah. Berikan sintesis cerdas dan berbobot: jelaskan latar belakang, perkembangan inti peristiwa/teknologi, fakta angka atau kutipan kunci, serta implikasi pentingnya secara mendalam dan terstruktur.
 2. INTEGRITAS FAKTA (ANTI-HALUSINASI): Tetap setia pada data fakta yang tertera pada sumber. Dilarang mengarang tanggal di masa depan (Hari ini adalah ${currentFormattedDate}. Segala peristiwa setelah hari ini belum terjadi), nomor versi palsu, atau klaim fiktif yang tidak didukung bukti sumber.
 3. STRUKTUR BERKUALITAS: Gunakan format Markdown yang rapi dengan heading tematik, poin penjelasan yang padat isi, dan bila menyajikan tabel Markdown, WAJIB menggunakan baris baru (\\n) yang valid antar baris.
-4. Jawablah langsung secara alami tanpa penolakan kaku dan TANPA format pemanggilan tool (search_web) lagi.`
+4. Jawablah langsung secara alami tanpa penolakan kaku dan TANPA format pemanggilan tool (${toolSummaryList.map(s => s.split('(')[0]).join(', ') || 'search_web'}) yang sama lagi.`
           : `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
 Data hasil eksekusi di atas telah disediakan secara internal.
 Jika informasi sudah cukup lengkap, berikan jawaban akhir secara langsung dan tuntas kepada pengguna tanpa menampilkan langkah ekstraksi atau data mentah.
@@ -20428,10 +20449,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             : requestBody.options,
           endpoint: ep
         };
-        if (!isLastRound && !hasExecutedSearch && !(webSources && webSources.length > 0) && !hasBrowsedWeb && selectedOllamaTools && selectedOllamaTools.length > 0) {
+        if (!isLastRound && !hasBrowsedWeb && selectedOllamaTools && selectedOllamaTools.length > 0) {
           const availableTools = selectedOllamaTools.filter(t => {
-            const tName = t?.function?.name || t?.name || '';
-            if (['search_web', 'web_search', 'search'].includes(tName)) return false;
+            const tName = normalizeToolName(t?.function?.name || t?.name || '');
+            if (hasExecutedSearch && ['search_web', 'search_youtube'].includes(tName)) return false;
             return true;
           });
           if (availableTools.length > 0) {
@@ -21953,8 +21974,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
             });
           }
-          if (normalizeToolName(toolName) === 'search_youtube' || (Array.isArray(toolExecRes.videoIds) && toolExecRes.videoIds.length > 0)) {
+          const normTool = normalizeToolName(toolName);
+          if (normTool === 'search_youtube' || (Array.isArray(toolExecRes.videoIds) && toolExecRes.videoIds.length > 0 && normTool !== 'browse_web_page')) {
             roundToolResponsesText += `\n[FAKTA & DATA VIDEO YOUTUBE DARI ${toolName}]:\n${toolExecRes.text}\n\n`;
+          } else if (['browse_web_page', 'extract_web'].includes(normTool) && toolExecRes.text) {
+            const cleanBrowseText = cleanWebExtractedContent(toolExecRes.text);
+            roundToolResponsesText += `\n[ISI LENGKAP HALAMAN WEB DARI ${toolName}]:\n${cleanBrowseText}\n\n`;
           } else if (toolExecRes.sources && Array.isArray(toolExecRes.sources) && toolExecRes.sources.length > 0) {
             let structuredEvidence = `\n[FAKTA & BUKTI RESMI HASIL PENELUSURAN DARI ${toolName}]:\n`;
             toolExecRes.sources.slice(0, 10).forEach((s, idx) => {
@@ -22022,16 +22047,18 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             status: 'CIRCUIT_BREAKER'
           });
         }
-        const hasBrowsedWeb = detectedAutonomousCalls.some(c => c && c.function && ['browse_web_page', 'browse_web', 'extract_web', 'read_url'].includes(c.function.name));
-        const hasExecutedSearch = detectedAutonomousCalls.some(c => c && c.function && ['search_web', 'web_search', 'search', 'search_youtube'].includes(c.function.name)) || (webSources && webSources.length > 0);
+        const hasBrowsedWeb = detectedAutonomousCalls.some(c => c && c.function && ['browse_web_page', 'browse_web', 'extract_web', 'read_url'].includes(normalizeToolName(c.function.name)));
+        const hasExecutedSearch = detectedAutonomousCalls.some(c => c && c.function && ['search_web', 'search_youtube'].includes(normalizeToolName(c.function.name)));
+        const hasExecutedPython = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'execute_python_code');
+        const hasExecutedMemory = detectedAutonomousCalls.some(c => c && c.function && ['save_memory', 'search_memory'].includes(normalizeToolName(c.function.name)));
         const isLastRound = circuitBreakerTripped || hasBrowsedWeb || (autonomousRound >= maxAutonomousRounds - 1);
         const currentDateObj = new Date();
         const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-        const roundInstruction = (isLastRound || hasExecutedSearch)
+        const roundInstruction = (isLastRound || hasExecutedSearch || hasExecutedPython || hasExecutedMemory)
           ? `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
 WAKTU SISTEM SAAT INI: ${currentFormattedDate} (Tahun ${currentDateObj.getFullYear()}).
 
-${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan dan ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.'}
+${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan hasil eksekusi kode Python sandbox di atas untuk menjawab pertanyaan atau menyelesaikan perhitungan pengguna secara akurat, jelas, dan tuntas dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil operasi memori jangka panjang di atas untuk menjawab pengguna secara langsung, ramah, dan akurat dalam Bahasa Indonesia.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.'))}
 ${foundYouTubeIds.length > 0 ? 'Jika hasilnya berupa video YouTube: jelaskan dan rekomendasikan video yang paling relevan (judul, channel, durasi, tayangan), lalu WAJIB sisipkan tautan video pilihan Anda dengan format markdown [Judul Video](https://www.youtube.com/watch?v=ID) agar kartu video dapat ditampilkan dan diputar langsung di dalam percakapan.' : ''}
 
 PANDUAN NILAI GUNA & INTEGRITAS FAKTA:
@@ -22069,10 +22096,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           activeDigestionModel === 'openrouter/free' ||
           (STATE.openRouterModels || []).some(m => m.id === activeDigestionModel && (m.cat === 'free' || m.tag === 'Free'))
         );
-        if (!isLastRound && !hasExecutedSearch && !(webSources && webSources.length > 0) && !hasBrowsedWeb && !isDigestionFree && canDigestionUseTools && STATE.settings.openRouterKey && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
+        if (!isLastRound && !hasBrowsedWeb && !isDigestionFree && canDigestionUseTools && STATE.settings.openRouterKey && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
           const validFunctionTools = selectedAutonomousTools.filter(t => {
             if (!t || t.type !== 'function' || !t.function?.name) return false;
-            if (['search_web', 'web_search', 'search'].includes(t.function.name)) return false;
+            if (hasExecutedSearch && ['search_web', 'search_youtube'].includes(normalizeToolName(t.function.name))) return false;
             return true;
           });
           if (validFunctionTools.length > 0) {
@@ -29042,7 +29069,7 @@ Aturan:
       } else {
         console.error('Music gen error:', err);
         if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerModelCallError === 'function') {
-          BioEndocrine.registerModelCallError({ model: activeMusicModel, error: err, status: err.status || 500, endpoint: 'MusicStudio' });
+          BioEndocrine.registerModelCallError({ model: targetMusicModel, error: err, status: err.status || 500, endpoint: 'MusicStudio' });
         }
         const isKeyError = err.message && (err.message.includes('NO_KEY') || err.message.includes('API Key') || err.message.includes('OpenRouter API Key'));
         const cleanErrMsg = (err.message || 'Terjadi gangguan saat memproses aransemen musik.').replace(/^NO_KEY:\s*/, '');
