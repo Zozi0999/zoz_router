@@ -6165,20 +6165,27 @@ RESONANSI: ${this.currentVibe}
           startOnLoad: false,
           theme: 'dark',
           securityLevel: 'loose',
-          fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+          fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
           flowchart: {
-            useMaxWidth: true,
+            useMaxWidth: false,
             htmlLabels: true,
-            curve: 'natural',      // Kurva natural proporsional, tegas dan tidak meliuk-liuk aneh / tumpang tindih
-            nodeSpacing: 50,       // Jarak horizontal antar node lega
-            rankSpacing: 55,       // Jarak vertikal antar tingkatan proporsional
-            padding: 16            // Padding dalam kotak nyaman dibaca
+            curve: 'basis',        // Kurva proporsional, halus dan tidak tumpang tindih
+            nodeSpacing: 55,       // Jarak horizontal antar node lega
+            rankSpacing: 60,       // Jarak vertikal antar tingkatan proporsional
+            padding: 20,           // Padding dalam kotak lega agar teks multi-baris tidak pernah terpotong
+            wrappingWidth: 260     // Lebar bungkus teks proporsional
+          },
+          sequence: {
+            useMaxWidth: false,
+            actorMargin: 60,
+            boxMargin: 14,
+            messageMargin: 42
           },
           themeVariables: {
             darkMode: true,
-            background: '#07090e',
-            fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
-            fontSize: '13px',
+            background: 'transparent',
+            fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            fontSize: '13.5px',
             primaryColor: '#0f172a',
             primaryTextColor: '#f8fafc',
             primaryBorderColor: '#38bdf8',
@@ -6191,12 +6198,12 @@ RESONANSI: ${this.currentVibe}
             tertiaryBorderColor: '#0ea5e9',
             edgeLabelBackground: '#0b1120',
             clusterBkg: 'rgba(15, 23, 42, 0.75)',
-            clusterBorder: 'rgba(56, 189, 248, 0.35)',
+            clusterBorder: 'rgba(56, 189, 248, 0.45)',
             titleColor: '#38bdf8',
             nodeBorder: '#38bdf8',
             nodeTextColor: '#f8fafc',
             mainBkg: '#0f172a',
-            // Sequence Diagram Variables (Mencegah note kuning pucat dan aktor buram)
+            // Sequence Diagram Variables
             actorBkg: '#0f172a',
             actorBorder: '#38bdf8',
             actorTextColor: '#f8fafc',
@@ -6888,25 +6895,38 @@ RESONANSI: ${this.currentVibe}
   ]);
 
   // Deteksi otentik apakah sebuah string benar-benar merupakan kode diagram Mermaid yang valid
+  function stripMermaidPreambleAndComments(rawText) {
+    if (!rawText || typeof rawText !== 'string') return '';
+    let s = rawText.trim();
+    // Buang code fence markdown jika ada
+    s = s.replace(/^```(?:mermaid|mmd|svg)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    // Buang komentar // Berkas: ... atau /* ... */ di awal
+    s = s.replace(/^(?:\s*\/\/[^\r\n]*[\r\n]+)+/, '').replace(/^\s*\/\*[\s\S]*?\*\/\s*/, '').trim();
+    // Buang frontmatter YAML opsional: --- title: "..." ---
+    s = s.replace(/^---[\s\S]*?---\s*/, '').trim();
+    // Buang direktif %%{init: ...}%% dan baris komentar %% di awal secara berulang
+    let prev = '';
+    while (s !== prev) {
+      prev = s;
+      s = s.replace(/^\s*%%\{[\s\S]*?\}%%\s*/, '').replace(/^(?:\s*%%[^\r\n]*[\r\n]+)+/, '').replace(/^---[\s\S]*?---\s*/, '').trim();
+    }
+    return s;
+  }
+
   function isAuthenticMermaidSyntax(rawText) {
     if (!rawText || typeof rawText !== 'string') return false;
-    let trimmed = rawText.trim();
-    if (trimmed.length < 5) return false;
+    const stripped = stripMermaidPreambleAndComments(rawText);
+    if (stripped.length < 5) return false;
+    if (/^(?:<!DOCTYPE\s+html|<html\b|<svg\b|<\?xml\b)/i.test(stripped)) return false;
 
-    // Buang code fence markdown jika ada
-    trimmed = trimmed.replace(/^```(?:mermaid|mmd)?\s*/i, '').replace(/```\s*$/i, '').trim();
-
-    // Buang frontmatter YAML opsional: --- title: "..." ---
-    const stripped = trimmed.replace(/^---[\s\S]*?---\s*/, '').trim();
-
-    // 1. Cek deklarasi diagram Mermaid standar (wajib memiliki arah TD/TB/BT/RL/LR untuk flowchart & graph)
-    const hasDiagramHeader = /^(?:flowchart\s+(?:TD|TB|BT|RL|LR)|graph\s+(?:TD|TB|BT|RL|LR)|sequenceDiagram|classDiagram(?:-v2)?|stateDiagram(?:-v2)?|erDiagram|gantt|pie(?:\s+title|\s+showData|[\r\n])|gitGraph|mindmap|timeline|quadrantChart|C4Context|C4Container|C4Component|journey|xychart-beta)\b/i.test(stripped);
+    // 1. Cek deklarasi diagram Mermaid standar (mendukung seluruh tipe diagram Mermaid modern)
+    const hasDiagramHeader = /^(?:flowchart(?:\s+(?:TD|TB|BT|RL|LR))?|graph(?:\s+(?:TD|TB|BT|RL|LR))?|sequenceDiagram|classDiagram(?:-v2)?|stateDiagram(?:-v2)?|erDiagram|gantt|pie(?:\s+title|\s+showData|[\r\n]|$)|gitGraph|mindmap|timeline|quadrantChart|C4Context|C4Container|C4Component|C4Dynamic|C4Deployment|journey|xychart-beta|sankey-beta|block-beta|packet-beta|architecture-beta|kanban|requirementDiagram|zenuml)\b/i.test(stripped);
 
     if (!hasDiagramHeader) return false;
 
-    // 2. Untuk flowchart/graph, pastikan memiliki sintaks panah atau struktur node diagram yang valid, bukan sekadar kalimat atau paragraf teks biasa
+    // 2. Untuk flowchart/graph, pastikan memiliki sintaks panah, subgraph, atau struktur node diagram yang valid
     if (/^(?:flowchart|graph)\b/i.test(stripped)) {
-      const hasArrowsOrNodes = /(-->|---|-.->|==>|->>|\b[a-zA-Z0-9_-]+\s*(?:\[[^\]\n]+\]|\([^\)\n]+\)|\{[^\}\n]+\}))/.test(stripped);
+      const hasArrowsOrNodes = /(-->|---|-\.->|==>|->>|<-->|~~~|\bsubgraph\b|\bclassDef\b|\bstyle\s+[a-zA-Z0-9_-]+|\b[a-zA-Z0-9_-]+\s*(?:\[[^\]\n]+\]|\([^\)\n]+\)|\{[^\}\n]+\}))/i.test(stripped);
       if (!hasArrowsOrNodes) return false;
     }
 
@@ -6925,88 +6945,103 @@ RESONANSI: ${this.currentVibe}
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'");
 
-    // 2. Buang code fence markdown jika ikut terbawa
-    code = code.replace(/^```(?:mermaid|svg)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    // 2. Buang code fence markdown dan komentar // Berkas: ... jika ikut terbawa
+    code = code.replace(/^```(?:mermaid|mmd|svg)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    code = code.replace(/^(?:\s*\/\/\s*Berkas:[^\r\n]*[\r\n]+)+/i, '').trim();
 
-    // 3. Ekstrak dan bersihkan baris title agar tidak merusak parser flowchart/graph
+    // 3. Cek jenis diagram setelah direktif %%{init:...}%% / frontmatter
+    const bodyAfterPreamble = stripMermaidPreambleAndComments(code);
+    const isFlowOrGraph = /^(?:flowchart|graph)\b/i.test(bodyAfterPreamble);
+    const hasNativeTitleKeyword = /^(?:pie|gantt|timeline|journey|xychart-beta|quadrantChart)\b/i.test(bodyAfterPreamble);
+
+    // Ekstrak dan bersihkan baris title lepas HANYA pada flowchart/graph agar tidak merusak parser
     let extractedTitle = '';
-    const lines = code.split('\n');
-    const filteredLines = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const trimmed = line.trim();
-      const titleMatch = trimmed.match(/^(?:accTitle|title)[:\s]+(.+)$/i);
-      if (titleMatch && titleMatch[1]) {
-        if (!extractedTitle) {
-          extractedTitle = titleMatch[1].replace(/["']/g, '').trim();
+    if (isFlowOrGraph && !hasNativeTitleKeyword) {
+      const lines = code.split('\n');
+      const filteredLines = [];
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+        const titleMatch = trimmed.match(/^(?:accTitle|title)\s*:\s*(.+)$/i);
+        if (titleMatch && titleMatch[1]) {
+          if (!extractedTitle) {
+            extractedTitle = titleMatch[1].replace(/["']/g, '').trim();
+          }
+          continue;
         }
-        continue; // Buang baris title mentah dari badan diagram
+        filteredLines.push(line);
       }
-      filteredLines.push(line);
+      code = filteredLines.join('\n').trim();
     }
-    code = filteredLines.join('\n').trim();
 
-    // 4. Pastikan header jenis diagram valid (hanya sematkan flowchart TD jika kode benar-benar memiliki koneksi panah diagram Mermaid)
-    const trimmedCode = code.trim();
-    const hasHeader = /^(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|mindmap|timeline|quadrantChart|C4Context|journey)\b/i.test(trimmedCode);
+    // 4. Pastikan header jenis diagram valid (cek pada bodyAfterPreamble agar %%{init:...}%% tidak tertimpa flowchart TD ganda!)
+    const checkBody = stripMermaidPreambleAndComments(code);
+    const hasHeader = /^(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|mindmap|timeline|quadrantChart|C4Context|C4Container|C4Component|C4Dynamic|C4Deployment|journey|xychart-beta|sankey-beta|block-beta|packet-beta|architecture-beta|kanban|requirementDiagram|zenuml)\b/i.test(checkBody);
     if (!hasHeader) {
-      // HANYA sematkan flowchart TD jika terdapat sintaks panah Mermaid nyata (misal: A --> B atau A[teks] --> B)
-      // JANGAN PERNAH sematkan ke teks biasa, kode pemrograman, atau teks tanpa panah alur!
-      const hasDiagramArrows = /(-->|---|-.->|==>|->>)/.test(trimmedCode);
+      const hasDiagramArrows = /(-->|---|-\.->|==>|->>|<-->)/.test(checkBody);
       if (hasDiagramArrows) {
         code = 'flowchart TD\n' + code;
       }
+    } else if (/^(?:flowchart|graph)\s*[\r\n]/i.test(checkBody)) {
+      // Jika flowchart/graph ditulis tanpa arah (TD/LR) langsung ganti baris, tambahkan TD secara aman
+      code = code.replace(/^(\s*(?:---[\s\S]*?---\s*)?(?:%%\{[\s\S]*?\}%%\s*)?(?:flowchart|graph))\s*(\r?\n)/i, '$1 TD$2');
     }
 
-    // 5. Sematkan frontmatter resmi jika ada judul diagram
-    if (extractedTitle && !code.startsWith('---')) {
+    // 5. Sematkan frontmatter resmi jika ada judul diagram yang diekstrak
+    if (extractedTitle && !code.startsWith('---') && !code.startsWith('%%{')) {
       code = `---\ntitle: "${extractedTitle}"\n---\n` + code;
     }
 
     // 6. Otomatis beri tanda kutip pada label node yang memuat tanda kurung atau simbol tanpa kutip
-    // Contoh: A[Persepsi Lingkungan (Sensor/Input)] -> A["Persepsi Lingkungan (Sensor/Input)"]
-    code = code.replace(/(\[|\(\[|\{\{|\{)([^"\[\]\(\)\{\}\n]*\([^\n"\[\]\(\)\{\}]+\)[^"\[\]\(\)\{\}\n]*)(\]|\)\]|\}\}|\})/g, (m, open, text, close) => {
+    // Urutkan pembuka/penutup multi-karakter terlebih dahulu agar bentuk ([...]), [(...)], ((...)), [[...]], {{...}} tidak terpotong!
+    code = code.replace(/(\[\(|\(\[|\(\(|\[\[|\{\{|\[|\{)([^"\[\]\(\)\{\}\r\n]*\([^\r\n"\[\]\(\)\{\}]+\)[^"\[\]\(\)\{\}\r\n]*)(\)\]|\]\)|\)\)|\]\]|\}\}|\]|\})/g, (m, open, text, close) => {
       return `${open}"${text.replace(/"/g, "'")}"${close}`;
     });
 
-    // 7. Perbaiki panah tunggal " -> " menjadi " --> " pada flowchart
-    if (/^(?:---\s*\ntitle:[\s\S]*?---\s*\n)?(?:flowchart|graph)\b/i.test(code)) {
-      code = code.replace(/([a-zA-Z0-9_\)\]\}])\s*->\s*([a-zA-Z0-9_\[\(\{])/g, '$1 --> $2');
+    // 7. Perbaiki panah tunggal " -> " menjadi " --> " khusus pada flowchart/graph
+    if (/^(?:flowchart|graph)\b/i.test(stripMermaidPreambleAndComments(code))) {
+      code = code.replace(/([a-zA-Z0-9_"\)\]\}])\s*->\s*([a-zA-Z0-9_\[\(\{])/g, '$1 --> $2');
     }
 
     // 8. Perbaiki label panah yang ditulis dengan kurung siku "[teks]" tepat setelah panah tanpa pipe
-    // Contoh: User([Pengguna]) --> [Input Query] Interface  =>  User([Pengguna]) -->|"Input Query"| Interface
     code = code.replace(/(-->|---|<-+>|<-+|-\.->|==>)\s*\[([^\]\r\n]+)\]\s*([a-zA-Z0-9_\[\(\{\"])/g, (m, arrow, label, next) => {
       return `${arrow}|"${label.replace(/"/g, "'")}"| ${next}`;
     });
     code = code.replace(/--\s*\[([^\]\r\n]+)\]\s*-->/g, '-- "$1" -->');
-    // 9. Konversi baris baru (\n) di dalam label teks kotak menjadi <br/> agar menjadi kartu 2-baris yang rapi
-    code = code.replace(/(\[|\(\[|\{\{|\{)"([^"]+)"(\]|\)\]|\}\}|\})/g, (m, open, text, close) => {
+
+    // 9. Konversi baris baru (\n) di dalam label teks kotak menjadi <br/> agar menjadi kartu multi-baris yang rapi
+    code = code.replace(/(\[\(|\(\[|\(\(|\[\[|\{\{|\[|\{|\()"([^"]+)"(\)\]|\]\)|\)\)|\]\]|\}\}|\]|\}|\))/g, (m, open, text, close) => {
       const formatted = text.replace(/\\n|\r?\n/g, '<br/>');
       return `${open}"${formatted}"${close}`;
     });
 
-    // 10. Harmonisasi warna inline style / classDef yang sering dihasilkan AI (mengganti warna pastel norak / background putih yang membuat teks tak terbaca)
-    const colorMap = [
-      // Pastel pink / fuchsia -> Dark Rose
-      [/(?:fill:\s*(?:#f9f\b|#fdd\b|#ffc0cb\b|#ffb6c1\b|#fce4ec\b|pink\b))/gi, 'fill:#4c0519,stroke:#f43f5e,stroke-width:1.5px,color:#fff'],
-      // Pastel yellow / orange -> Dark Amber
-      [/(?:fill:\s*(?:#ff9d00\b|#ffd\b|#fff9c4\b|#fff3e0\b|#ffeb3b\b|#f1c40f\b|yellow\b|orange\b))/gi, 'fill:#451a03,stroke:#fbbf24,stroke-width:1.5px,color:#fff'],
-      // Pastel blue / lavender -> Dark Cyan / Sky
-      [/(?:fill:\s*(?:#bbf\b|#ccf\b|#e1f5fe\b|#e0f2fe\b|#bbdefb\b|#3498db\b))/gi, 'fill:#082f49,stroke:#38bdf8,stroke-width:1.5px,color:#fff'],
-      // Pastel green / mint -> Dark Emerald
-      [/(?:fill:\s*(?:#dfd\b|#cfc\b|#e8f5e9\b|#d1fae5\b|#2ecc71\b|#00ff00\b|lightgreen\b))/gi, 'fill:#022c22,stroke:#34d399,stroke-width:1.5px,color:#fff'],
-      // Pastel purple / violet -> Dark Indigo
-      [/(?:fill:\s*(?:#f3e5f5\b|#ede9fe\b|#9b59b6\b|#e1bee7\b|violet\b))/gi, 'fill:#1e1b4b,stroke:#a855f7,stroke-width:1.5px,color:#fff'],
-      // White / light grey -> Deep Slate (Mencegah teks putih tenggelam dalam kotak putih!)
-      [/(?:fill:\s*(?:#fff(?:fff)?\b|#f5f5f5\b|#fafafa\b|#eee\b|#e5e7eb\b|white\b))/gi, 'fill:#0f172a,stroke:#38bdf8,stroke-width:1.5px,color:#f8fafc'],
-      // Red / coral -> Dark Crimson
-      [/(?:fill:\s*(?:#fcc\b|#ffebee\b|#ffcdd2\b|#e74c3c\b|#ff0000\b|red\b))/gi, 'fill:#4c0519,stroke:#fb7185,stroke-width:1.5px,color:#fff']
-    ];
-    for (const [pattern, replacement] of colorMap) {
-      code = code.replace(pattern, replacement);
-    }
+    // 10. Jaga 100% kebebasan warna pilihan AI & Pengguna!
+    // Hanya tambahkan kontras teks gelap (color:#0f172a) secara otomatis jika baris style/classDef
+    // memakai latar terang/pastel (luminansi tinggi) TANPA mendefinisikan properti color: sendiri.
+    code = code.replace(/^(\s*(?:classDef|style)\s+[^\r\n]+)$/gim, (line) => {
+      if (/\bcolor\s*:/i.test(line)) return line; // Hormati 100% warna teks yang sudah ditentukan AI / pengguna
+      let isLightFill = /\bfill\s*:\s*(?:white|yellow|lightyellow|ivory|snow|aliceblue|honeydew|lavender|mistyrose|lemonchiffon|pink|lightpink|lightblue|lightgreen|lightcyan|beige|cornsilk|floralwhite|ghostwhite|linen|mintcream|oldlace|papayawhip|seashell|wheat|aquamarine|khaki|palegreen|paleturquoise|palevioletred|peachpuff|powderblue|thistle)\b/i.test(line);
+      if (!isLightFill) {
+        const hexMatch = line.match(/\bfill\s*:\s*#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b/);
+        if (hexMatch && hexMatch[1]) {
+          let hex = hexMatch[1];
+          if (hex.length === 3) {
+            hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+          }
+          const r = parseInt(hex.slice(0, 2), 16);
+          const g = parseInt(hex.slice(2, 4), 16);
+          const b = parseInt(hex.slice(4, 6), 16);
+          const brightness = (0.299 * r) + (0.587 * g) + (0.114 * b);
+          if (brightness > 165) isLightFill = true;
+        }
+      }
+      if (isLightFill) {
+        const hasSemi = line.trim().endsWith(';');
+        const cleanLine = hasSemi ? line.trim().slice(0, -1) : line.trim();
+        return `${cleanLine},color:#0f172a${hasSemi ? ';' : ''}`;
+      }
+      return line;
+    });
 
     return code;
   }
@@ -7017,9 +7052,9 @@ RESONANSI: ${this.currentVibe}
     // Hapus deklarasi style jika bermasalah
     stripped = stripped.replace(/^\s*style\s+.*$/gim, '');
     // Hapus classDef dan class
-    stripped = stripped.replace(/^\s*(?:classDef|class)\s+.*$/gim, '');
-    // Hapus baris komentar
-    stripped = stripped.replace(/^\s*%%.*$/gim, '');
+    stripped = stripped.replace(/^\s*(?:classDef|class|linkStyle)\s+.*$/gim, '');
+    // Hapus baris komentar (kecuali direktif init jika valid)
+    stripped = stripped.replace(/^\s*%%(?!\{).*$/gim, '');
     return stripped.trim();
   }
 
@@ -7035,12 +7070,11 @@ RESONANSI: ${this.currentVibe}
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'");
 
-    // 2. Buang tag HTML pemformatan teks KHUSUS tag format HTML (JANGAN gunakan /<[^>]+>/g rakus yang menghapus panah <--> atau tag token <token>)
+    // 2. Buang tag HTML pemformatan teks KHUSUS tag format HTML
     code = code.replace(/<\/?(?:b|strong|i|em|u|span|font|div|p|small|sub|sup)(?:\s+[^>]*)?>/gi, '');
 
     // 3. Pastikan node dengan tag <br> yang tidak memiliki tanda kutip otomatis diberi tanda kutip agar \n valid di Mermaid
-    // Contoh: A[Input<br/>Token] -> A["Input\nToken"]
-    code = code.replace(/(\[|\(\[|\{\{|\{|\(\(|\/|\\)([^"\[\]\(\)\{\}\n]*<br\s*\/?>[^"\[\]\(\)\{\}\n]*)(\]|\)\]|\}\}|\}|\)\)|\/|\\)/gi, (m, open, text, close) => {
+    code = code.replace(/(\[\(|\(\[|\(\(|\[\[|\{\{|\[|\{|\(\(|\/|\\)([^"\[\]\(\)\{\}\n]*<br\s*\/?>[^"\[\]\(\)\{\}\n]*)(\)\]|\]\)|\)\)|\]\]|\}\}|\]|\}|\)\)|\/|\\)/gi, (m, open, text, close) => {
       const withNl = text.replace(/<br\s*\/?>/gi, '\\n');
       return `${open}"${withNl}"${close}`;
     });
@@ -7052,6 +7086,123 @@ RESONANSI: ${this.currentVibe}
     code = code.replace(/&amp;/gi, '&');
 
     return code;
+  }
+
+  // Perbaikan Geometris & Anti-Clipping SVG Mermaid:
+  // Memastikan seluruh teks di dalam <foreignObject> dan kotak <rect> tidak pernah terpotong sebagian
+  // baik di gelembung chat maupun di dalam pratinjau AI File Studio.
+  function expandMermaidSvgBoundsAndLabels(svgNode) {
+    if (!svgNode || typeof svgNode.querySelectorAll !== 'function') return;
+    try {
+      svgNode.style.overflow = 'visible';
+      svgNode.style.maxWidth = 'none';
+      svgNode.style.height = 'auto';
+      svgNode.style.display = 'block';
+
+      const foreignObjects = svgNode.querySelectorAll('foreignObject');
+      foreignObjects.forEach((fo) => {
+        fo.style.overflow = 'visible';
+        const innerDiv = fo.querySelector('div, span, p') || fo.firstElementChild;
+        if (!innerDiv) return;
+
+        innerDiv.style.overflow = 'visible';
+        innerDiv.style.maxWidth = 'none';
+        innerDiv.style.boxSizing = 'border-box';
+        innerDiv.style.lineHeight = '1.42';
+
+        const allSpans = fo.querySelectorAll('.nodeLabel, .edgeLabel, span, div');
+        allSpans.forEach((sp) => {
+          sp.style.overflow = 'visible';
+          sp.style.maxWidth = 'none';
+        });
+
+        const curW = parseFloat(fo.getAttribute('width') || '0') || 0;
+        const curH = parseFloat(fo.getAttribute('height') || '0') || 0;
+        const curX = parseFloat(fo.getAttribute('x') || '0') || 0;
+        const curY = parseFloat(fo.getAttribute('y') || '0') || 0;
+
+        const scrollW = Math.max(innerDiv.scrollWidth || 0, innerDiv.offsetWidth || 0);
+        const scrollH = Math.max(innerDiv.scrollHeight || 0, innerDiv.offsetHeight || 0);
+        if (scrollW <= 0 && scrollH <= 0) return;
+
+        const neededW = Math.ceil(scrollW + 14);
+        const neededH = Math.ceil(scrollH + 10);
+
+        const finalW = Math.max(curW, neededW);
+        const finalH = Math.max(curH, neededH);
+
+        if (finalW > curW || finalH > curH) {
+          fo.setAttribute('width', String(finalW));
+          fo.setAttribute('height', String(finalH));
+          // Jika foreignObject berpusat pada titik (0,0) di dalam grup .node / .label
+          if (curX < 0 || Math.abs(curX + curW / 2) < 4) {
+            fo.setAttribute('x', String(-finalW / 2));
+          }
+          if (curY < 0 || Math.abs(curY + curH / 2) < 4) {
+            fo.setAttribute('y', String(-finalH / 2));
+          }
+
+          const nodeGroup = fo.closest('.node, .edgeLabel, .cluster-label');
+          if (nodeGroup && nodeGroup.classList.contains('node')) {
+            const rect = nodeGroup.querySelector(':scope > rect, :scope > .label-container');
+            if (rect && rect.tagName && rect.tagName.toLowerCase() === 'rect') {
+              const rW = parseFloat(rect.getAttribute('width') || '0') || 0;
+              const rH = parseFloat(rect.getAttribute('height') || '0') || 0;
+              const newRW = Math.max(rW, finalW + 26);
+              const newRH = Math.max(rH, finalH + 18);
+              if (newRW > rW || newRH > rH) {
+                rect.setAttribute('width', String(newRW));
+                rect.setAttribute('height', String(newRH));
+                rect.setAttribute('x', String(-newRW / 2));
+                rect.setAttribute('y', String(-newRH / 2));
+              }
+            }
+          } else if (nodeGroup && nodeGroup.classList.contains('edgeLabel')) {
+            const bgRect = nodeGroup.querySelector('rect');
+            if (bgRect) {
+              const rW = parseFloat(bgRect.getAttribute('width') || '0') || 0;
+              const rH = parseFloat(bgRect.getAttribute('height') || '0') || 0;
+              const newRW = Math.max(rW, finalW + 12);
+              const newRH = Math.max(rH, finalH + 8);
+              bgRect.setAttribute('width', String(newRW));
+              bgRect.setAttribute('height', String(newRH));
+              bgRect.setAttribute('x', String(-newRW / 2));
+              bgRect.setAttribute('y', String(-newRH / 2));
+            }
+          }
+        }
+      });
+
+      if (typeof svgNode.getBBox === 'function') {
+        const bbox = svgNode.getBBox();
+        if (bbox && bbox.width > 0 && bbox.height > 0 && isFinite(bbox.x) && isFinite(bbox.y)) {
+          const pad = 28;
+          let minX = bbox.x - pad;
+          let minY = bbox.y - pad;
+          let maxX = bbox.x + bbox.width + pad;
+          let maxY = bbox.y + bbox.height + pad;
+
+          const existingVb = svgNode.getAttribute('viewBox');
+          if (existingVb) {
+            const parts = existingVb.trim().split(/[\s,]+/).map(Number);
+            if (parts.length === 4 && parts.every(n => isFinite(n)) && parts[2] > 0 && parts[3] > 0) {
+              minX = Math.min(minX, parts[0] - 12);
+              minY = Math.min(minY, parts[1] - 12);
+              maxX = Math.max(maxX, parts[0] + parts[2] + 12);
+              maxY = Math.max(maxY, parts[1] + parts[3] + 12);
+            }
+          }
+
+          const finalVbW = Math.ceil(maxX - minX);
+          const finalVbH = Math.ceil(maxY - minY);
+          svgNode.setAttribute('viewBox', `${Math.floor(minX)} ${Math.floor(minY)} ${finalVbW} ${finalVbH}`);
+          svgNode.setAttribute('width', String(finalVbW));
+          svgNode.removeAttribute('height');
+        }
+      }
+    } catch (e) {
+      console.warn('expandMermaidSvgBoundsAndLabels warning:', e);
+    }
   }
 
   function generateWordDocPreviewHtml(fileName, parsedBody) {
@@ -7196,71 +7347,327 @@ RESONANSI: ${this.currentVibe}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
+    :root {
+      --bg-canvas: radial-gradient(circle at center, #0f172a 0%, #070a12 100%);
+      --badge-bg: rgba(0, 240, 255, 0.12);
+      --badge-color: #00f0ff;
+      --badge-border: rgba(0, 240, 255, 0.35);
+    }
+    body.theme-light {
+      --bg-canvas: radial-gradient(circle at center, #f8fafc 0%, #e2e8f0 100%);
+      --badge-bg: rgba(2, 132, 199, 0.12);
+      --badge-color: #0369a1;
+      --badge-border: rgba(2, 132, 199, 0.35);
+    }
+    body.theme-grid {
+      --bg-canvas: linear-gradient(rgba(56, 189, 248, 0.07) 1px, transparent 1px),
+                   linear-gradient(90deg, rgba(56, 189, 248, 0.07) 1px, transparent 1px),
+                   #090d16;
+    }
     html, body {
-      background: #090d16;
+      background: var(--bg-canvas);
+      background-size: 24px 24px, 24px 24px, 100% 100%;
       color: #e6edf3;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       margin: 0;
       padding: 0;
       width: 100%;
       height: 100%;
       box-sizing: border-box;
-      overflow: auto;
+      overflow: hidden;
     }
     .mermaid-sheet {
       width: 100%;
-      min-height: 100%;
-      padding: 20px 16px;
+      height: 100%;
       box-sizing: border-box;
       display: flex;
       flex-direction: column;
+      position: relative;
+    }
+    .mermaid-studio-topbar {
+      display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 10px 18px;
+      background: rgba(15, 23, 42, 0.88);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(56, 189, 248, 0.2);
+      z-index: 20;
+    }
+    body.theme-light .mermaid-studio-topbar {
+      background: rgba(255, 255, 255, 0.9);
+      border-bottom-color: rgba(15, 23, 42, 0.12);
+      color: #0f172a;
     }
     .mermaid-header-badge {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      background: rgba(0, 240, 255, 0.12);
-      color: #00f0ff;
-      padding: 6px 14px;
+      background: var(--badge-bg);
+      color: var(--badge-color);
+      padding: 5px 12px;
       border-radius: 6px;
-      font-size: 13px;
+      font-size: 12.5px;
       font-weight: 700;
-      margin-bottom: 16px;
-      border: 1px solid rgba(0, 240, 255, 0.35);
-      letter-spacing: 0.5px;
+      border: 1px solid var(--badge-border);
+      letter-spacing: 0.3px;
+    }
+    .mermaid-studio-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .studio-ctrl-btn {
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #f8fafc;
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    body.theme-light .studio-ctrl-btn {
+      background: rgba(15, 23, 42, 0.06);
+      border-color: rgba(15, 23, 42, 0.18);
+      color: #0f172a;
+    }
+    .studio-ctrl-btn:hover, .studio-ctrl-btn.active {
+      background: rgba(56, 189, 248, 0.22);
+      border-color: #38bdf8;
+      color: #38bdf8;
+    }
+    body.theme-light .studio-ctrl-btn:hover, body.theme-light .studio-ctrl-btn.active {
+      background: rgba(2, 132, 199, 0.15);
+      border-color: #0284c7;
+      color: #0369a1;
+    }
+    .studio-zoom-readout {
+      font-family: monospace;
+      font-size: 12px;
+      min-width: 46px;
+      text-align: center;
+      color: #94a3b8;
     }
     .mermaid-svg-container {
       width: 100%;
       flex: 1;
       display: flex;
-      justify-content: center;
-      align-items: center;
       overflow: auto;
-      padding: 8px 0;
+      padding: 28px 24px 120px 24px;
+      box-sizing: border-box;
+      cursor: grab;
+      user-select: none;
     }
-    .mermaid-svg-container svg {
-      max-width: 100%;
-      height: auto;
-      max-height: 84vh;
+    .mermaid-svg-container:active {
+      cursor: grabbing;
+    }
+    .mermaid-stage-inner {
+      margin: auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transform-origin: top center;
+      transition: transform 0.12s ease-out;
+      padding: 12px;
+    }
+    .mermaid-stage-inner svg {
+      max-width: none !important;
+      height: auto !important;
+      overflow: visible !important;
       display: block;
-      filter: drop-shadow(0 8px 32px rgba(0, 0, 0, 0.5));
+      filter: drop-shadow(0 8px 28px rgba(0, 0, 0, 0.38));
+    }
+    .mermaid-stage-inner.fit-mode svg {
+      max-width: calc(100vw - 64px) !important;
+      max-height: calc(100vh - 190px) !important;
+      width: auto !important;
+    }
+    svg foreignObject,
+    svg foreignObject > div,
+    svg foreignObject span,
+    svg .nodeLabel,
+    svg .edgeLabel {
+      overflow: visible !important;
+      max-width: none !important;
+      line-height: 1.42 !important;
+    }
+    svg .node rect,
+    svg .node polygon,
+    svg .node circle,
+    svg .node ellipse,
+    svg .node path {
+      rx: 8px;
+      ry: 8px;
     }
     @media (max-width: 600px) {
-      .mermaid-sheet { padding: 12px 6px; }
-      .mermaid-header-badge { font-size: 11px; padding: 4px 10px; margin-bottom: 10px; }
-      .mermaid-svg-container svg { max-height: 88vh; }
+      .mermaid-studio-topbar { padding: 8px 10px; }
+      .mermaid-header-badge { font-size: 11px; padding: 4px 8px; }
+      .mermaid-svg-container { padding: 16px 10px 125px 10px; }
     }
   </style>
 </head>
-<body>
+<body class="theme-grid">
   <div class="mermaid-sheet">
-    <div class="mermaid-header-badge">📊 Pratinjau Diagram Visual • ${escapeHtml(fileName || 'Diagram')}</div>
-    <div class="mermaid-svg-container">
-      ${svgHtml}
+    <div class="mermaid-studio-topbar">
+      <div class="mermaid-header-badge">📊 Pratinjau Diagram Interaktif • ${escapeHtml(fileName || 'Diagram')}</div>
+      <div class="mermaid-studio-controls">
+        <button type="button" class="studio-ctrl-btn" id="btnZoomOut" title="Perkecil (-)">−</button>
+        <span class="studio-zoom-readout" id="zoomReadout">100%</span>
+        <button type="button" class="studio-ctrl-btn" id="btnZoomIn" title="Perbesar (+)">+</button>
+        <button type="button" class="studio-ctrl-btn" id="btnFitScreen" title="Pas ke Layar (Fit)">Pas Layar</button>
+        <button type="button" class="studio-ctrl-btn active" id="btnActualSize" title="Ukuran Penuh 100% (Teks Paling Jelas)">100%</button>
+        <button type="button" class="studio-ctrl-btn" id="btnCycleBg" title="Ganti Latar Kanvas (Grid / Gelap / Terang)">🎨 Latar</button>
+      </div>
+    </div>
+    <div class="mermaid-svg-container" id="svgScrollContainer">
+      <div class="mermaid-stage-inner" id="svgStageInner">
+        ${svgHtml}
+      </div>
     </div>
   </div>
+  <script>
+    (function() {
+      const container = document.getElementById('svgScrollContainer');
+      const stage = document.getElementById('svgStageInner');
+      const zoomReadout = document.getElementById('zoomReadout');
+      const btnZoomIn = document.getElementById('btnZoomIn');
+      const btnZoomOut = document.getElementById('btnZoomOut');
+      const btnFit = document.getElementById('btnFitScreen');
+      const btnActual = document.getElementById('btnActualSize');
+      const btnCycleBg = document.getElementById('btnCycleBg');
+      let zoom = 1.0;
+      const themes = ['theme-grid', 'theme-dark', 'theme-light'];
+      let themeIdx = 0;
+
+      function expandIframeSvgBounds() {
+        const svgNode = stage ? stage.querySelector('svg') : null;
+        if (!svgNode) return;
+        try {
+          svgNode.style.overflow = 'visible';
+          const fos = svgNode.querySelectorAll('foreignObject');
+          fos.forEach(function(fo) {
+            fo.style.overflow = 'visible';
+            const inner = fo.querySelector('div, span, p') || fo.firstElementChild;
+            if (!inner) return;
+            inner.style.overflow = 'visible';
+            inner.style.maxWidth = 'none';
+            inner.style.boxSizing = 'border-box';
+            inner.style.lineHeight = '1.42';
+            const curW = parseFloat(fo.getAttribute('width') || '0') || 0;
+            const curH = parseFloat(fo.getAttribute('height') || '0') || 0;
+            const curX = parseFloat(fo.getAttribute('x') || '0') || 0;
+            const curY = parseFloat(fo.getAttribute('y') || '0') || 0;
+            const sW = Math.max(inner.scrollWidth || 0, inner.offsetWidth || 0);
+            const sH = Math.max(inner.scrollHeight || 0, inner.offsetHeight || 0);
+            if (sW <= 0 && sH <= 0) return;
+            const finalW = Math.max(curW, Math.ceil(sW + 14));
+            const finalH = Math.max(curH, Math.ceil(sH + 10));
+            if (finalW > curW || finalH > curH) {
+              fo.setAttribute('width', String(finalW));
+              fo.setAttribute('height', String(finalH));
+              if (curX < 0 || Math.abs(curX + curW / 2) < 4) fo.setAttribute('x', String(-finalW / 2));
+              if (curY < 0 || Math.abs(curY + curH / 2) < 4) fo.setAttribute('y', String(-finalH / 2));
+              const nodeGroup = fo.closest('.node, .edgeLabel');
+              if (nodeGroup && nodeGroup.classList.contains('node')) {
+                const rect = nodeGroup.querySelector(':scope > rect, :scope > .label-container');
+                if (rect && rect.tagName && rect.tagName.toLowerCase() === 'rect') {
+                  const rW = parseFloat(rect.getAttribute('width') || '0') || 0;
+                  const rH = parseFloat(rect.getAttribute('height') || '0') || 0;
+                  const newRW = Math.max(rW, finalW + 26);
+                  const newRH = Math.max(rH, finalH + 18);
+                  if (newRW > rW || newRH > rH) {
+                    rect.setAttribute('width', String(newRW));
+                    rect.setAttribute('height', String(newRH));
+                    rect.setAttribute('x', String(-newRW / 2));
+                    rect.setAttribute('y', String(-newRH / 2));
+                  }
+                }
+              }
+            }
+          });
+          if (typeof svgNode.getBBox === 'function') {
+            const bbox = svgNode.getBBox();
+            if (bbox && bbox.width > 0 && bbox.height > 0 && isFinite(bbox.x) && isFinite(bbox.y)) {
+              const pad = 28;
+              let minX = bbox.x - pad;
+              let minY = bbox.y - pad;
+              let maxX = bbox.x + bbox.width + pad;
+              let maxY = bbox.y + bbox.height + pad;
+              const existingVb = svgNode.getAttribute('viewBox');
+              if (existingVb) {
+                const parts = existingVb.trim().split(/[\\s,]+/).map(Number);
+                if (parts.length === 4 && parts.every(function(n){return isFinite(n);}) && parts[2] > 0 && parts[3] > 0) {
+                  minX = Math.min(minX, parts[0] - 12);
+                  minY = Math.min(minY, parts[1] - 12);
+                  maxX = Math.max(maxX, parts[0] + parts[2] + 12);
+                  maxY = Math.max(maxY, parts[1] + parts[3] + 12);
+                }
+              }
+              const vbW = Math.ceil(maxX - minX);
+              const vbH = Math.ceil(maxY - minY);
+              svgNode.setAttribute('viewBox', Math.floor(minX) + ' ' + Math.floor(minY) + ' ' + vbW + ' ' + vbH);
+              svgNode.setAttribute('width', String(vbW));
+              svgNode.removeAttribute('height');
+            }
+          }
+        } catch (_) {}
+      }
+
+      function setZoom(z, fitMode) {
+        if (fitMode) {
+          stage.classList.add('fit-mode');
+          zoom = 1.0;
+          stage.style.transform = 'scale(1)';
+          if (zoomReadout) zoomReadout.textContent = 'Fit';
+          btnFit.classList.add('active');
+          btnActual.classList.remove('active');
+        } else {
+          stage.classList.remove('fit-mode');
+          zoom = Math.max(0.35, Math.min(3.5, z));
+          stage.style.transform = 'scale(' + zoom + ')';
+          if (zoomReadout) zoomReadout.textContent = Math.round(zoom * 100) + '%';
+          btnFit.classList.remove('active');
+          btnActual.classList.toggle('active', Math.abs(zoom - 1.0) < 0.02);
+        }
+      }
+
+      btnZoomIn && btnZoomIn.addEventListener('click', function() { setZoom(zoom + 0.15, false); });
+      btnZoomOut && btnZoomOut.addEventListener('click', function() { setZoom(zoom - 0.15, false); });
+      btnFit && btnFit.addEventListener('click', function() { setZoom(1.0, true); });
+      btnActual && btnActual.addEventListener('click', function() { setZoom(1.0, false); });
+      btnCycleBg && btnCycleBg.addEventListener('click', function() {
+        themeIdx = (themeIdx + 1) % themes.length;
+        document.body.className = themes[themeIdx];
+      });
+
+      let isPanning = false, startX = 0, startY = 0, sLeft = 0, sTop = 0;
+      container && container.addEventListener('mousedown', function(e) {
+        isPanning = true;
+        startX = e.pageX - container.offsetLeft;
+        startY = e.pageY - container.offsetTop;
+        sLeft = container.scrollLeft;
+        sTop = container.scrollTop;
+      });
+      window.addEventListener('mouseup', function() { isPanning = false; });
+      container && container.addEventListener('mousemove', function(e) {
+        if (!isPanning) return;
+        e.preventDefault();
+        container.scrollLeft = sLeft - ((e.pageX - container.offsetLeft) - startX);
+        container.scrollTop = sTop - ((e.pageY - container.offsetTop) - startY);
+      });
+
+      expandIframeSvgBounds();
+      window.addEventListener('load', expandIframeSvgBounds);
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(expandIframeSvgBounds).catch(function(){});
+      }
+    })();
+  </script>
 </body>
 </html>`;
   }
@@ -7318,7 +7725,7 @@ RESONANSI: ${this.currentVibe}
     }
 
     // 6. Jenis diagram fallback
-    const firstLine = code.trim().split('\n')[0].toLowerCase();
+    const firstLine = stripMermaidPreambleAndComments(code).split('\n')[0].toLowerCase();
     if (firstLine.includes('sequencediagram')) return 'sequence_diagram';
     if (firstLine.includes('classdiagram')) return 'class_diagram';
     if (firstLine.includes('statediagram')) return 'state_diagram';
@@ -7347,10 +7754,10 @@ RESONANSI: ${this.currentVibe}
     if (preElement.dataset.mermaidRendered === 'true') return;
     preElement.dataset.mermaidRendered = 'true';
 
-    const cleanCode = getCleanMermaidCode(rawCode);
+    let cleanCode = getCleanMermaidCode(rawCode);
     mermaidDiagramCounter++;
     const cardId = 'mermaidCard_' + mermaidDiagramCounter + '_' + Math.random().toString(36).substring(2, 7);
-    const diagramId = 'mermaidSvg_' + mermaidDiagramCounter + '_' + Math.random().toString(36).substring(2, 7);
+    let diagramId = 'mermaidSvg_' + mermaidDiagramCounter + '_' + Math.random().toString(36).substring(2, 7);
 
     const smartBaseTitle = extractSmartDiagramTitle(cleanCode, preElement);
     let diagramTitle = smartBaseTitle.replace(/_/g, ' ');
@@ -7368,6 +7775,7 @@ RESONANSI: ${this.currentVibe}
         <span>${escapeHtml(diagramTitle)}</span>
       </div>
       <div class="mermaid-actions">
+        <button class="mermaid-tool-btn mermaid-customize-ai-btn" data-action="customize-ai" title="Arahkan AI untuk mengubah warna, gaya, tata letak, atau isi diagram sesuai keinginan Anda"><i class="fa-solid fa-wand-magic-sparkles"></i> <span>Ubah / Arahkan AI</span></button>
         <button class="mermaid-tool-btn mermaid-fullscreen-btn" data-action="fullscreen" title="Layar Penuh (Full Screen)"><i class="fa-solid fa-expand"></i> <span>Layar Penuh</span></button>
         <button class="mermaid-tool-btn" data-action="toggle-code" title="Lihat Sumber Mermaid"><i class="fa-solid fa-code"></i></button>
         <button class="mermaid-tool-btn" data-action="copy-code" title="Salin Kode Mermaid"><i class="fa-solid fa-clipboard"></i> <span>Salin</span></button>
@@ -7510,7 +7918,33 @@ RESONANSI: ${this.currentVibe}
       e.stopPropagation();
       const action = btn.dataset.action;
 
-      if (action === 'fullscreen') {
+      if (action === 'customize-ai') {
+        const parentBubble = card.closest('.message-bubble');
+        let targetFile = null;
+        if (parentBubble) {
+          const fileCards = parentBubble.querySelectorAll('.ai-file-card');
+          fileCards.forEach(fc => {
+            if (!targetFile && fc._aiFile && isDiagramFile(fc._aiFile)) {
+              targetFile = fc._aiFile;
+            }
+          });
+        }
+        if (!targetFile) {
+          const fName = (smartBaseTitle || 'Diagram_Visual') + '.svg';
+          targetFile = buildAIFile(fName, 'image/svg+xml', 'mermaid', cleanCode, 'Diagram Interaktif Mermaid');
+        }
+        const svgEl = stage.querySelector('svg');
+        if (svgEl) {
+          try { targetFile.svgContent = new XMLSerializer().serializeToString(svgEl); } catch (_) {}
+        }
+        openAIFileStudio(targetFile, 'preview');
+        setTimeout(() => {
+          if (els.inputStudioFollowup) {
+            els.inputStudioFollowup.focus();
+            showToast('🎨 Ketik arahan warna, gaya, arah (LR/TD), atau revisi diagram untuk AI di kolom bawah!', 'info');
+          }
+        }, 120);
+      } else if (action === 'fullscreen') {
         const isFs = card.classList.toggle('mermaid-fullscreen');
         const parentRow = card.closest('.message-row');
         if (parentRow) parentRow.classList.toggle('has-mermaid-fullscreen', isFs);
@@ -7575,6 +8009,7 @@ RESONANSI: ${this.currentVibe}
           return;
         }
         try {
+          expandMermaidSvgBoundsAndLabels(svgEl);
           const svgData = new XMLSerializer().serializeToString(svgEl);
           const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
           const svgUrl = URL.createObjectURL(svgBlob);
@@ -7601,6 +8036,7 @@ RESONANSI: ${this.currentVibe}
         }
         try {
           showToast('⚙ Merasterisasi gambar JPEG resolusi tinggi...', 'info');
+          expandMermaidSvgBoundsAndLabels(svgEl);
           const jpegBlob = await convertSvgToJpegBlob(svgEl, { mermaidCode: cleanCode });
           const jpegUrl = URL.createObjectURL(jpegBlob);
           const downloadLink = document.createElement('a');
@@ -7619,6 +8055,28 @@ RESONANSI: ${this.currentVibe}
       }
     });
 
+    function finalizeMountedSvg(svgNode) {
+      if (!svgNode) return;
+      expandMermaidSvgBoundsAndLabels(svgNode);
+      requestAnimationFrame(() => {
+        expandMermaidSvgBoundsAndLabels(svgNode);
+        viewport.scrollLeft = Math.max(0, (stage.scrollWidth - viewport.clientWidth) / 2);
+      });
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(() => {
+          expandMermaidSvgBoundsAndLabels(svgNode);
+        }).catch(() => {});
+      }
+    }
+
+    card._rerenderMermaid = (newRawCode) => {
+      if (!newRawCode) return;
+      cleanCode = getCleanMermaidCode(newRawCode);
+      codeInner.textContent = cleanCode;
+      diagramId = 'mermaidSvg_' + (++mermaidDiagramCounter) + '_' + Math.random().toString(36).substring(2, 7);
+      tryRenderSvg();
+    };
+
     async function tryRenderSvg(retries = 8) {
       if (typeof window.mermaid === 'undefined' || typeof window.mermaid.render !== 'function') {
         try {
@@ -7632,14 +8090,7 @@ RESONANSI: ${this.currentVibe}
             if (result && result.svg) {
               stage.innerHTML = result.svg;
               const svgNode = stage.querySelector('svg');
-              if (svgNode) {
-                svgNode.style.maxWidth = '100%';
-                svgNode.style.height = 'auto';
-                svgNode.style.display = 'block';
-              }
-              setTimeout(() => {
-                viewport.scrollLeft = Math.max(0, (stage.scrollWidth - viewport.clientWidth) / 2);
-              }, 50);
+              finalizeMountedSvg(svgNode);
             }
           }).catch((renderErr) => {
             console.warn('Percobaan render diagram pertama gagal, mencoba pembersih sekunder:', renderErr);
@@ -7649,14 +8100,7 @@ RESONANSI: ${this.currentVibe}
                 if (res2 && res2.svg) {
                   stage.innerHTML = res2.svg;
                   const svgNode = stage.querySelector('svg');
-                  if (svgNode) {
-                    svgNode.style.maxWidth = '100%';
-                    svgNode.style.height = 'auto';
-                    svgNode.style.display = 'block';
-                  }
-                  setTimeout(() => {
-                    viewport.scrollLeft = Math.max(0, (stage.scrollWidth - viewport.clientWidth) / 2);
-                  }, 50);
+                  finalizeMountedSvg(svgNode);
                   return;
                 }
                 showDiagramError();
@@ -8088,9 +8532,12 @@ RESONANSI: ${this.currentVibe}
           const nameMatch = t.match(/(?:name|file|path)=["']?([^"'\s>]+)["']?/i);
           const langMatch = t.match(/lang=["']?([^"'\s>]+)["']?/i);
           currentFileName = nameMatch ? nameMatch[1] : '';
-          fileBlockLang = langMatch ? langMatch[1] : (currentFileName ? guessLangFromName(currentFileName) : 'code');
-          const isDiagram = fileBlockLang === 'mermaid' || fileBlockLang === 'mmd' || currentFileName.endsWith('.mermaid') || currentFileName.endsWith('.mmd');
+          fileBlockLang = (langMatch ? langMatch[1] : (currentFileName ? guessLangFromName(currentFileName) : 'code')).toLowerCase();
           const fnLower = currentFileName.toLowerCase();
+          const isDiagram = fileBlockLang === 'mermaid' || fileBlockLang === 'mmd' ||
+                            fnLower.endsWith('.mermaid') || fnLower.endsWith('.mmd') ||
+                            (fnLower.endsWith('.svg') && fileBlockLang !== 'xml');
+          if (isDiagram) fileBlockLang = 'mermaid';
           const isWeb = fnLower.endsWith('.html') || fnLower.endsWith('.htm') || fnLower.endsWith('.jsx') || fnLower.endsWith('.tsx') ||
                         fileBlockLang === 'html' || fileBlockLang === 'htm' || fileBlockLang === 'jsx' || fileBlockLang === 'tsx' || fileBlockLang === 'react';
           const isDoc = fnLower.endsWith('.docx') || fnLower.endsWith('.pdf') || fnLower.endsWith('.doc') || fnLower.endsWith('.md') ||
@@ -8126,7 +8573,7 @@ RESONANSI: ${this.currentVibe}
         insideFileBlock = false;
         const wasIsolated = insideIsolatedBlock;
         insideIsolatedBlock = false;
-        if (!wasIsolated && (fileBlockLang === 'mermaid' || fileBlockLang === 'mmd' || isExplicitCodeInChat)) {
+        if (!wasIsolated) {
           out.push('```\n');
         }
         return;
@@ -8140,7 +8587,7 @@ RESONANSI: ${this.currentVibe}
       out.push(line);
     });
 
-    if (insideFileBlock && !insideIsolatedBlock && (fileBlockLang === 'mermaid' || fileBlockLang === 'mmd' || isExplicitCodeInChat)) {
+    if (insideFileBlock && !insideIsolatedBlock) {
       out.push('```\n');
     }
 
@@ -11418,35 +11865,41 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
 - Tulis isinya dalam format Markdown terstruktur yang rapi (judul #, ##, ###, bullet points -, bold **teks**, tabel, pemisah ---).
 - Mesin ZOZ Document Compiler akan secara otomatis mengompilasi teks Markdown ini menjadi berkas biner murni .docx (Office Open XML) atau .pdf (Adobe Acrobat) yang valid dan siap langsung dibuka di Microsoft Word / Acrobat Reader di laptop maupun HP pengguna!
 
-2. PEMBUATAN DIAGRAM VISUAL INTERAKTIF (.SVG) (STANDAR KUALITAS CLAUDE AI - BERSIH, RAPI & MUDAH DIBACA):
+2. PEMBUATAN DIAGRAM VISUAL INTERAKTIF (.SVG) (BEBAS BERKREASI WARNA & PATUH 100% PADA ARAHAN PENGGUNA):
 - Saat pengguna meminta diagram alur (flowchart), alur logika, urutan proses (sequence diagram), struktur kelas, ERD, mindmap, atau arsitektur sistem:
 - AI membungkusnya dalam blok ZOZ_FILE berekstensi .svg:
 <<<ZOZ_FILE name="Alur_Kerja_AI_Agent.svg" mime="image/svg+xml" lang="mermaid">
 flowchart TD
-    A["<b>Input Pengguna</b><br/>Tujuan atau perintah"] --> B["<b>LLM (Otak Agen)</b><br/>Menalar dan merencanakan"]
-    B <--> C["<b>Memori</b><br/>Pendek dan panjang"]
-    B --> D["<b>Pemilihan Alat</b><br/>Pencarian, kode, API"]
-    D --> E["<b>Observasi</b><br/>Hasil dari alat"]
-    E -->|jika selesai| F["<b>Jawaban Akhir</b><br/>Solusi terverifikasi"]
+    A(["<b>🚀 Input Pengguna</b><br/>Tujuan atau perintah"]) --> B["<b>🧠 LLM (Otak Agen)</b><br/>Menalar dan merencanakan"]
+    B <--> C[("<b>💾 Memori</b><br/>Pendek dan panjang")]
+    B --> D["<b>🛠️ Pemilihan Alat</b><br/>Pencarian, kode, API"]
+    D --> E["<b>🔍 Observasi</b><br/>Hasil dari alat"]
+    E -->|jika selesai| F(["<b>✅ Jawaban Akhir</b><br/>Solusi terverifikasi"])
     E -.->|ulangi| B
 
-    classDef default fill:#111827,stroke:#38bdf8,stroke-width:1.5px,color:#f8fafc;
-    classDef brain fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#e0e7ff;
-    classDef action fill:#2d1515,stroke:#fb923c,stroke-width:1.5px,color:#ffedd5;
-    class B,C brain;
-    class D,E action;
+    classDef inputNode fill:#0284c7,stroke:#38bdf8,stroke-width:2px,color:#ffffff;
+    classDef brain fill:#4f46e5,stroke:#a5b4fc,stroke-width:2px,color:#ffffff;
+    classDef memory fill:#7c3aed,stroke:#c4b5fd,stroke-width:2px,color:#ffffff;
+    classDef action fill:#d97706,stroke:#fcd34d,stroke-width:2px,color:#ffffff;
+    classDef observe fill:#0d9488,stroke:#5eead4,stroke-width:2px,color:#ffffff;
+    classDef finish fill:#059669,stroke:#6ee7b7,stroke-width:2px,color:#ffffff;
+    class A inputNode;
+    class B brain;
+    class C memory;
+    class D action;
+    class E observe;
+    class F finish;
 <<<END_ZOZ_FILE>>>
 
-PRINSIP WAJIB DIAGRAM RAPI, BERSIH & JELAS (TIDAK BERANTAKAN):
-1. Fokus & Terarah (KISS Principle): Batasi diagram pada 4 - 8 kotak alur inti paling esensial. JANGAN membuat diagram laba-laba raksasa dengan puluhan kotak kecil bertumpuk yang membuat garis panah saling bertabrakan atau teks kekecilan.
-2. Format Kotak 2-Baris Elegan:
+PRINSIP WAJIB DIAGRAM RAPI, HIDUP & SESUAI KEINGINAN PENGGUNA:
+1. Prioritas #1 — Patuhi 100% Arahan Pengguna: Jika pengguna meminta warna tertentu (misal: merah, ungu-emas, pastel, neon, warna-warni cerah, monokrom), arah alur tertentu (horizontal "flowchart LR" atau vertikal "flowchart TD"), atau detail komponen spesifik, Anda WAJIB mengikuti arahan pengguna 100%!
+2. Kebebasan Kreatif Warna AI: Jika pengguna tidak menentukan warna spesifik, Anda BEBAS BERKREASI membuat kombinasi warna multi-warna yang kaya, hidup, ekspresif, dan bervariasi antar node/subgraph menggunakan "classDef" atau "style" (pastikan selalu menyertakan color:#ffffff untuk latar gelap/pekat atau color:#0f172a untuk latar terang/pastel agar teks tajam dan mudah dibaca).
+3. Format Kotak 2-Baris Elegan & Tidak Terpotong:
    - Baris 1: Judul Komponen tebal: <b>Judul Utama</b>
    - Baris 2: Deskripsi peran singkat: <br/>Peran atau tindakan singkat
    - Selalu apit teks label kotak dengan tanda kutip dua: ["<b>...</b><br/>..."]
-3. Arah Alur Linier & Rapi: Gunakan "flowchart TD" (vertikal atas ke bawah). Tempatkan cabang pendukung (seperti Memori) di sisi samping node terkait, dan garis perulangan (loopback) berupa panah putus-putus rapi di sisi samping (-.->|ulangi|).
-4. Palet Warna Harmonis & Elegan: Gunakan classDef lembut sesuai peran (misal: Indigo untuk pemrosesan/otak, Amber untuk aksi/tool, Cyan untuk input/output). JANGAN gunakan warna neon keras atau warna-warni acak yang menyilaukan mata.
-5. Uraian Penjelasan Terstruktur Pasca-Diagram:
-   Setelah blok diagram, WAJIB berikan pengantar dan uraian bernomor yang ramah, mendalam, dan terstruktur mengenai fungsi tiap komponen (seperti format penjelasan Claude AI).
+4. Uraian Penjelasan Terstruktur Pasca-Diagram:
+   Setelah blok diagram, berikan pengantar dan uraian terstruktur mengenai fungsi tiap komponen serta informasikan bahwa pengguna dapat mengarahkan perubahan warna/tata letak kapan saja.
 
 3. ATURAN KONTEN BERSIH TANPA WATERMARK / ATRIBUSI AI:
 - DILARANG KERAS menyertakan teks watermark, header/footer branding, copyright/atribusi palsu, atau kalimat deklaratif penutup seperti 'Dokumen ini dibuat secara otomatis oleh ZOZ AI...', 'Generated by...', 'Dihasilkan oleh AI', dsb.
@@ -12661,6 +13114,116 @@ Aturan wajib:
     }
   }
 
+  function renderAIFileIntoStudioPreview(file) {
+    if (!file || !els.aiFileStudioFrame) return;
+    const ext = (file.name || '').split('.').pop().toLowerCase();
+    const rawContent = file.rawContent || file.content || '';
+    const isDocx = ext === 'docx';
+    const isPdf = ext === 'pdf';
+    const isMarkdown = ext === 'md' || ext === 'markdown';
+    const isReactJsx = ext === 'jsx' || ext === 'tsx' || file.lang === 'jsx' || file.lang === 'tsx' || file.lang === 'react' || isRawJsxOrReactCode(rawContent, file);
+    const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml' || isReactJsx;
+    const isMermaid = ext === 'mermaid' || ext === 'mmd' || file.lang === 'mermaid' || file.lang === 'mmd' ||
+      (ext === 'svg' && !rawContent.trim().startsWith('<svg') && !rawContent.trim().startsWith('<?xml') && isAuthenticMermaidSyntax(rawContent)) ||
+      (!rawContent.trim().startsWith('<svg') && !rawContent.trim().startsWith('<?xml') && isAuthenticMermaidSyntax(rawContent));
+    const isPureSvg = (ext === 'svg' || (rawContent.trim().startsWith('<svg') || rawContent.trim().startsWith('<?xml'))) && !isMermaid;
+
+    function expandSvgOffscreenAndSerialize(svgMarkup) {
+      if (!svgMarkup || typeof document === 'undefined' || !document.body) return svgMarkup;
+      try {
+        const holder = document.createElement('div');
+        holder.className = 'mermaid-svg-stage';
+        holder.style.cssText = 'position:fixed;left:-99999px;top:-99999px;visibility:hidden;pointer-events:none;width:1600px;';
+        holder.innerHTML = svgMarkup;
+        document.body.appendChild(holder);
+        const svgEl = holder.querySelector('svg');
+        let finalSvg = svgMarkup;
+        if (svgEl) {
+          expandMermaidSvgBoundsAndLabels(svgEl);
+          finalSvg = new XMLSerializer().serializeToString(svgEl);
+        }
+        holder.remove();
+        return finalSvg;
+      } catch (_) {
+        return svgMarkup;
+      }
+    }
+
+    if (isMermaid) {
+      els.aiFileStudioFrame.removeAttribute('src');
+      const cleanMermaid = getCleanMermaidCode(rawContent);
+      const tempId = 'aiStudioMermaid_' + Math.random().toString(36).substr(2, 6);
+      const renderMermaidPreview = () => {
+        try {
+          initMermaidEngine();
+          window.mermaid.render(tempId, cleanMermaid).then(res => {
+            if (res && res.svg) {
+              const expandedSvg = expandSvgOffscreenAndSerialize(res.svg);
+              file.svgContent = expandedSvg;
+              els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, expandedSvg);
+            }
+          }).catch(async (err) => {
+            console.warn('Percobaan pertama render mermaid gagal, mencoba pembersih sekunder:', err);
+            try {
+              const cleanSecondary = getAggressiveMermaidCleaner(cleanMermaid);
+              const res2 = await window.mermaid.render(tempId + '_sec', cleanSecondary);
+              if (res2 && res2.svg) {
+                const expandedSvg2 = expandSvgOffscreenAndSerialize(res2.svg);
+                file.svgContent = expandedSvg2;
+                els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, expandedSvg2);
+                return;
+              }
+            } catch (_) {}
+
+            console.warn('Gagal merender diagram di file studio:', err);
+            els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, `
+              <div style="color:#f87171; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); padding:16px; border-radius:6px; font-size:13px; text-align:center;">
+                ⚠️ Diagram memerlukan penyesuaian sintaks untuk dirender secara visual.<br>
+                <small style="color:#94a3b8; margin-top:8px; display:inline-block;">Buka tab "Kode" untuk melihat dan mengedit kode diagram Mermaid, atau arahkan AI di kolom bawah untuk memperbaikinya.</small>
+              </div>
+            `);
+          });
+        } catch (err) {
+          els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, `
+            <div style="color:#f87171; padding:16px; text-align:center;">
+              ⚠️ Mesin visualisasi Mermaid belum siap. Silakan lihat tab Kode.
+            </div>
+          `);
+        }
+      };
+
+      if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
+        renderMermaidPreview();
+      } else {
+        ensureMermaidLoaded().then(renderMermaidPreview).catch(err => {
+          els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, `
+            <div style="color:#f87171; padding:16px; text-align:center;">
+              ⚠️ Gagal memuat pustaka visualisasi Mermaid: ${escapeHtml(err?.message || 'Network error')}. Silakan lihat tab Kode.
+            </div>
+          `);
+        });
+      }
+    } else if (isPureSvg) {
+      els.aiFileStudioFrame.removeAttribute('src');
+      const expandedSvg = expandSvgOffscreenAndSerialize(rawContent);
+      els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, expandedSvg);
+    } else if (isDocx || isMarkdown) {
+      const parsedBody = (window.marked && window.marked.parse) ? window.marked.parse(rawContent) : escapeHtml(rawContent);
+      els.aiFileStudioFrame.removeAttribute('src');
+      els.aiFileStudioFrame.srcdoc = generateWordDocPreviewHtml(file.name, parsedBody);
+    } else if (isPdf) {
+      const parsedBody = (window.marked && window.marked.parse) ? window.marked.parse(rawContent) : escapeHtml(rawContent);
+      els.aiFileStudioFrame.removeAttribute('src');
+      els.aiFileStudioFrame.srcdoc = generatePdfDocPreviewHtml(file.name, parsedBody);
+    } else if (isHtml) {
+      els.aiFileStudioFrame.removeAttribute('src');
+      els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(rawContent, file);
+    } else {
+      els.aiFileStudioFrame.removeAttribute('src');
+      els.aiFileStudioFrame.srcdoc = '';
+    }
+  }
+
   function openAIFileStudio(file, initialTab = null) {
     if (!file) return;
     if (file.name && /\.(?:mermaid|mmd)$/i.test(file.name)) {
@@ -12681,10 +13244,6 @@ Aturan wajib:
     const isMarkdown = ext === 'md' || ext === 'markdown';
     const isReactJsx = ext === 'jsx' || ext === 'tsx' || file.lang === 'jsx' || file.lang === 'tsx' || file.lang === 'react' || isRawJsxOrReactCode(rawContent, file);
     const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml' || isReactJsx;
-    const isMermaid = ext === 'mermaid' || ext === 'mmd' || file.lang === 'mermaid' || file.lang === 'mmd' ||
-      (ext === 'svg' && !rawContent.trim().startsWith('<svg') && !rawContent.trim().startsWith('<?xml') && isAuthenticMermaidSyntax(rawContent)) ||
-      (!rawContent.trim().startsWith('<svg') && !rawContent.trim().startsWith('<?xml') && isAuthenticMermaidSyntax(rawContent));
-    const isPureSvg = (ext === 'svg' || (rawContent.trim().startsWith('<svg') || rawContent.trim().startsWith('<?xml'))) && !isMermaid;
     const isDiagram = isDiagramFile(file);
     const isDoc = isDocx || isPdf || ext === 'doc' || file.lang === 'docx' || file.lang === 'pdf' ||
                   ((isMarkdown || file.lang === 'markdown') && !isDiagram && !isHtml);
@@ -12693,6 +13252,13 @@ Aturan wajib:
     updateStudioRevisionBtns(file.name);
     if (els.inputStudioFollowup) {
       els.inputStudioFollowup.value = '';
+      if (isDiagram) {
+        els.inputStudioFollowup.placeholder = 'Arahkan AI: ubah warna sesuka Anda, ganti gaya/arah (LR/TD), atau tambah detail diagram...';
+      } else if (isDoc) {
+        els.inputStudioFollowup.placeholder = 'Arahkan AI: tambahkan bab, perluas analisis, atau sesuaikan isi dokumen...';
+      } else {
+        els.inputStudioFollowup.placeholder = 'Minta perubahan fitur, warna, atau desain...';
+      }
       autoResizeTextarea(els.inputStudioFollowup);
     }
     if (els.btnStudioStopFollowup) {
@@ -12731,78 +13297,7 @@ Aturan wajib:
         }
       } catch (_) {}
     }
-    if (els.aiFileStudioFrame) {
-      if (isMermaid) {
-        els.aiFileStudioFrame.removeAttribute('src');
-        const cleanMermaid = getCleanMermaidCode(rawContent);
-        const tempId = 'aiStudioMermaid_' + Math.random().toString(36).substr(2, 6);
-        const renderMermaidPreview = () => {
-          try {
-            initMermaidEngine();
-            window.mermaid.render(tempId, cleanMermaid).then(res => {
-              if (res && res.svg) {
-                file.svgContent = res.svg;
-                els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, res.svg);
-              }
-            }).catch(async (err) => {
-              console.warn('Percobaan pertama render mermaid gagal, mencoba pembersih sekunder:', err);
-              try {
-                const cleanSecondary = getAggressiveMermaidCleaner(cleanMermaid);
-                const res2 = await window.mermaid.render(tempId + '_sec', cleanSecondary);
-                if (res2 && res2.svg) {
-                  file.svgContent = res2.svg;
-                  els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, res2.svg);
-                  return;
-                }
-              } catch (_) {}
-
-              console.warn('Gagal merender diagram di file studio:', err);
-              els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, `
-                <div style="color:#f87171; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); padding:16px; border-radius:6px; font-size:13px; text-align:center;">
-                  ⚠️ Diagram memerlukan penyesuaian sintaks untuk dirender secara visual.<br>
-                  <small style="color:#94a3b8; margin-top:8px; display:inline-block;">Buka tab "Kode" untuk melihat dan mengedit kode diagram Mermaid.</small>
-                </div>
-              `);
-            });
-          } catch (err) {
-            els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, `
-              <div style="color:#f87171; padding:16px; text-align:center;">
-                ⚠️ Mesin visualisasi Mermaid belum siap. Silakan lihat tab Kode.
-              </div>
-            `);
-          }
-        };
-
-        if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.render === 'function') {
-          renderMermaidPreview();
-        } else {
-          ensureMermaidLoaded().then(renderMermaidPreview).catch(err => {
-            els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, `
-              <div style="color:#f87171; padding:16px; text-align:center;">
-                ⚠️ Gagal memuat pustaka visualisasi Mermaid: ${escapeHtml(err?.message || 'Network error')}. Silakan lihat tab Kode.
-              </div>
-            `);
-          });
-        }
-      } else if (isPureSvg) {
-        els.aiFileStudioFrame.removeAttribute('src');
-        els.aiFileStudioFrame.srcdoc = generateMermaidDocPreviewHtml(file.name, rawContent);
-      } else if (isDocx || isMarkdown) {
-        const parsedBody = (window.marked && window.marked.parse) ? window.marked.parse(rawContent) : escapeHtml(rawContent);
-        els.aiFileStudioFrame.removeAttribute('src');
-        els.aiFileStudioFrame.srcdoc = generateWordDocPreviewHtml(file.name, parsedBody);
-      } else if (isPdf) {
-        const parsedBody = (window.marked && window.marked.parse) ? window.marked.parse(rawContent) : escapeHtml(rawContent);
-        els.aiFileStudioFrame.removeAttribute('src');
-        els.aiFileStudioFrame.srcdoc = generatePdfDocPreviewHtml(file.name, parsedBody);
-      } else if (isHtml) {
-        els.aiFileStudioFrame.removeAttribute('src');
-        els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(rawContent, file);
-      } else {
-        els.aiFileStudioFrame.removeAttribute('src');
-        els.aiFileStudioFrame.srcdoc = '';
-      }
-    }
+    renderAIFileIntoStudioPreview(file);
     if (els.aiFileStudioPlaceholder) {
       els.aiFileStudioPlaceholder.classList.toggle('show', !previewable);
     }
@@ -13285,8 +13780,9 @@ Aturan wajib:
         if (!langTag) continue;
         const isDocFence = isDocMode && (langTag === 'markdown' || langTag === 'md' || langTag === 'docx' || langTag === 'pdf' || langTag === 'doc' || langTag === 'text' || langTag === 'txt');
         const isReactFence = (langTag === 'jsx' || langTag === 'tsx' || langTag === 'react') && isRawJsxOrReactCode(body, { lang: langTag });
+        const isMermaidFence = (langTag === 'mermaid' || langTag === 'mmd' || (langTag === 'svg' && isAuthenticMermaidSyntax(body))) && body.trim().length >= 15;
         const isFullHtmlOrSvg = isReactFence || ((langTag === 'html' || langTag === 'htm' || body.includes('<!DOCTYPE html') || body.includes('<html') || (body.includes('<svg') && body.includes('</svg>')) || (body.includes('<section') && body.includes('</section>'))) && body.length >= 40);
-        const isEligibleFallback = (allowFallback && body.length >= 200) || isFullHtmlOrSvg || (isDocFence && body.trim().length >= 30);
+        const isEligibleFallback = (allowFallback && body.length >= 200) || isFullHtmlOrSvg || isMermaidFence || (isDocFence && body.trim().length >= 30);
         if (!isEligibleFallback) continue;
 
         const isUnclosed = !hasClosingFence || (
@@ -13313,8 +13809,8 @@ Aturan wajib:
           if (!repairedBody.includes('</html>')) repairedBody += '\n</html>';
         }
 
-        let fallbackName = guessFileNameFromLang(langTag, repairedBody);
-        let fallbackMime = '';
+        let fallbackName = guessFileNameFromLang(isMermaidFence ? 'mermaid' : langTag, repairedBody);
+        let fallbackMime = isMermaidFence ? 'image/svg+xml' : '';
         if (isDocFence) {
           const hMatch = String(repairedBody || '').match(/^#{1,3}\s+([^\r\n]+)/m);
           const rawTitle = (hMatch && hMatch[1]) ? hMatch[1] : (options?.promptTitle || 'Dokumen_Resmi');
@@ -13324,7 +13820,7 @@ Aturan wajib:
         }
 
         const rawFenceBlock = lines.slice(i, hasClosingFence ? end + 1 : lines.length).join('\n');
-        const fallbackFile = buildAIFile(fallbackName, fallbackMime, isDocFence ? 'markdown' : langTag, repairedBody, '');
+        const fallbackFile = buildAIFile(fallbackName, fallbackMime, isDocFence ? 'markdown' : (isMermaidFence ? 'mermaid' : langTag), repairedBody, '');
         fallbackFile.isIncomplete = Boolean(isUnclosed);
         fallbackFile.rawBlock = rawFenceBlock;
         out.files.push(fallbackFile);
@@ -13464,6 +13960,12 @@ Aturan wajib:
 
         // Jika blok sudah berupa blok markdown biasa (misal ```html ... ``` hasil fallback) atau dokumen mentah:
         if (!isZozBlock) {
+          const isFallbackMermaid = /^```(?:mermaid|mmd)\b/i.test(bTrim) || isAuthenticMermaidSyntax(bTrim);
+          if (isFallbackMermaid) {
+            const cleanDiagram = getCleanMermaidCode(bTrim);
+            out = out.split(b).join(`\n\n\`\`\`mermaid\n${cleanDiagram}\n\`\`\`\n\n`);
+            return;
+          }
           if (options && (options.isDocCreation || options.docFormat)) {
             out = out.split(b).join('');
             hasStrippedDoc = true;
@@ -13725,6 +14227,7 @@ Aturan wajib:
     // Hot-reload studio jika studio modal sedang terbuka dan menerima update file
     if (els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show') && activeAIFile) {
       const matchFile = files.find(f => f.name === activeAIFile.name) ||
+        (isDiagramFile(activeAIFile) ? files.find(f => isDiagramFile(f)) : null) ||
         files.find(f => f.isPrimaryWebEntry !== false && /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) ||
         files[0];
       if (matchFile) {
@@ -13736,12 +14239,7 @@ Aturan wajib:
           if (matchFile.projectFiles) activeAIFile.projectFiles = matchFile.projectFiles;
           FileRevisionStore.pushRevision(activeAIFile.name, newRaw);
           updateStudioRevisionBtns(activeAIFile.name);
-          if (els.aiFileStudioFrame) {
-            els.aiFileStudioFrame.removeAttribute('srcdoc');
-            setTimeout(() => {
-              els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(newRaw, activeAIFile);
-            }, 50);
-          }
+          renderAIFileIntoStudioPreview(activeAIFile);
           if (els.aiFileStudioCode) {
             els.aiFileStudioCode.textContent = newRaw;
             try {
@@ -13751,7 +14249,16 @@ Aturan wajib:
               }
             } catch (_) {}
           }
-          showToast('✨ Halaman website telah diperbarui langsung di pratinjau!', 'success');
+          if (isDiagramFile(activeAIFile)) {
+            const allCards = document.querySelectorAll('.mermaid-diagram-card');
+            const latestCard = allCards.length > 0 ? allCards[allCards.length - 1] : null;
+            if (latestCard && typeof latestCard._rerenderMermaid === 'function') {
+              latestCard._rerenderMermaid(newRaw);
+            }
+            showToast('🎨 Diagram visual telah diperbarui langsung sesuai arahan Anda!', 'success');
+          } else {
+            showToast('✨ Pratinjau telah diperbarui langsung!', 'success');
+          }
         }
       }
     }
@@ -13837,6 +14344,7 @@ Aturan wajib:
       let downloadButtonsHtml = '';
       if (isFileDiagram) {
         downloadButtonsHtml =
+          '  <button class="ai-file-btn customize-ai" type="button" data-act="customize-ai" title="Arahkan AI untuk mengubah warna, gaya, tata letak, atau isi diagram"><i class="fa-solid fa-wand-magic-sparkles"></i> Arahkan AI</button>' +
           '  <button class="ai-file-btn download download-svg" type="button" data-act="download-svg" title="Unduh gambar vektor SVG (.svg)"><i class="fa-solid fa-bezier-curve"></i> SVG</button>' +
           '  <button class="ai-file-btn download download-jpeg" type="button" data-act="download-jpeg" title="Unduh gambar foto JPEG (.jpeg)"><i class="fa-solid fa-image"></i> JPEG</button>';
       } else if (isFileDoc) {
@@ -14584,6 +15092,14 @@ ${blocks}
         rejectWorkspacePendingChange(file.name);
       } else if (btn.dataset.act === 'open-workspace-doc') {
         previewWorkspaceDocument(file.name);
+      } else if (btn.dataset.act === 'customize-ai') {
+        openAIFileStudio(file, 'preview');
+        setTimeout(() => {
+          if (els.inputStudioFollowup) {
+            els.inputStudioFollowup.focus();
+            showToast('🎨 Ketik arahan warna, gaya, arah (LR/TD), atau revisi diagram untuk AI di kolom bawah!', 'info');
+          }
+        }, 120);
       } else {
         openAIFileStudio(file, 'preview');
       }
@@ -14698,12 +15214,17 @@ ${blocks}
     if (prev !== null) {
       activeAIFile.rawContent = prev;
       activeAIFile.content = prev;
-      if (els.aiFileStudioFrame) {
-        els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(prev, activeAIFile);
-      }
+      renderAIFileIntoStudioPreview(activeAIFile);
       if (els.aiFileStudioCode) {
         els.aiFileStudioCode.textContent = prev;
         try { if (window.hljs) { els.aiFileStudioCode.removeAttribute('data-highlighted'); window.hljs.highlightElement(els.aiFileStudioCode); } } catch (_) {}
+      }
+      if (isDiagramFile(activeAIFile)) {
+        const allCards = document.querySelectorAll('.mermaid-diagram-card');
+        const latestCard = allCards.length > 0 ? allCards[allCards.length - 1] : null;
+        if (latestCard && typeof latestCard._rerenderMermaid === 'function') {
+          latestCard._rerenderMermaid(prev);
+        }
       }
       updateStudioRevisionBtns(activeAIFile.name);
       showToast('↩️ Mengembalikan ke revisi sebelumnya.', 'info');
@@ -14716,12 +15237,17 @@ ${blocks}
     if (next !== null) {
       activeAIFile.rawContent = next;
       activeAIFile.content = next;
-      if (els.aiFileStudioFrame) {
-        els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(next, activeAIFile);
-      }
+      renderAIFileIntoStudioPreview(activeAIFile);
       if (els.aiFileStudioCode) {
         els.aiFileStudioCode.textContent = next;
         try { if (window.hljs) { els.aiFileStudioCode.removeAttribute('data-highlighted'); window.hljs.highlightElement(els.aiFileStudioCode); } } catch (_) {}
+      }
+      if (isDiagramFile(activeAIFile)) {
+        const allCards = document.querySelectorAll('.mermaid-diagram-card');
+        const latestCard = allCards.length > 0 ? allCards[allCards.length - 1] : null;
+        if (latestCard && typeof latestCard._rerenderMermaid === 'function') {
+          latestCard._rerenderMermaid(next);
+        }
       }
       updateStudioRevisionBtns(activeAIFile.name);
       showToast('↪️ Mengembalikan ke revisi berikutnya.', 'info');
@@ -14791,16 +15317,18 @@ ${blocks}
     const pureChatRegex = /^(?:bagus|bagus\s+banget|bagus\s+sekali|mantap|mantap\s+banget|mantul|keren|keren\s+banget|hebat|luar\s+biasa|suka|suka\s+banget|cantik|rapi|jos|top|good|very\s+good|great|nice|cool|awesome|amazing|perfect|sip|oke|ok|baik|makasih|terima\s+kasih|thanks|thank\s+you|thx|halo|hai|p|hi|hello|wah|asik|siap|yup|ya|yes|wkwk|haha)(?:[\s!.,:;~]*)$/i;
     if (pureChatRegex.test(t)) return false;
 
-    // 2. Pertanyaan penjelasan / analisis murni tanpa instruksi perubahan
-    const pureQuestionRegex = /^(?:kenapa|mengapa|apa|apakah|bagaimana|gimana|siapa|font\s+apa|warna\s+apa|library\s+apa|bisa\s+jelaskan|tolong\s+jelaskan|jelaskan|terangkan|tanya)\b/i;
-    const changeVerbsRegex = /\b(?:ubah|ganti|tambah|tambahkan|masukkan|sisipkan|hapus|hilangkan|buang|perbaiki|benahi|bikin|buatkan|modifikasi|revisi|update|edit|pasang|atur|bikin\s+jadi|ubah\s+jadi|ganti\s+warna|change|add|remove|fix|modify|revise|update|redesign|replace)\b/i;
+    // 2. Kata kerja perubahan atau arahan desain/warna/tata letak/konten (termasuk arahan warna & diagram)
+    const changeVerbsRegex = /\b(?:ubah|ganti|tambah|tambahkan|masukkan|sisipkan|hapus|hilangkan|buang|perbaiki|benahi|bikin|buat|buatkan|modifikasi|revisi|update|edit|pasang|atur|sesuaikan|warnai|beri\s+warna|pakai\s+warna|warna|warnanya|palet|tema|arah|arahnya|layout|tata\s+letak|horizontal|vertikal|ke\s+samping|ke\s+bawah|kiri\s+ke\s+kanan|atas\s+ke\s+bawah|lr|td|tb|perbesar|perkecil|detail|lengkapi|perjelas|percantik|perindah|change|add|remove|fix|modify|revise|update|redesign|replace|color|theme|style|direction)\b/i;
+
+    // 3. Pertanyaan penjelasan / analisis murni tanpa instruksi perubahan
+    const pureQuestionRegex = /^(?:kenapa|mengapa|apa\s+itu|apakah\s+ini|bagaimana\s+cara\s+kerja|siapa|bisa\s+jelaskan|tolong\s+jelaskan|jelaskan|terangkan|tanya)\b/i;
 
     if (pureQuestionRegex.test(t) && !changeVerbsRegex.test(t)) {
       return false;
     }
 
-    // 3. Jika pengguna secara eksplisit meminta perubahan atau aksi modifikasi
-    return changeVerbsRegex.test(t);
+    // Di dalam Studio composer, hampir semua instruksi non-sapaan dan non-pertanyaan murni adalah arahan kustomisasi pengguna!
+    return changeVerbsRegex.test(t) || t.length >= 6;
   }
 
   async function submitStudioFollowupPrompt() {
@@ -14813,9 +15341,11 @@ ${blocks}
 
     const targetName = activeAIFile.name || 'index.html';
     const ext = targetName.split('.').pop().toLowerCase();
-    const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml';
-    const isJsx = ext === 'jsx' || ext === 'tsx' || activeAIFile.lang === 'jsx' || activeAIFile.lang === 'tsx' || activeAIFile.lang === 'react';
-    const lang = activeAIFile.lang || (isHtml ? 'html' : (isJsx ? 'jsx' : ext));
+    const isDiagram = isDiagramFile(activeAIFile);
+    const isHtml = !isDiagram && (ext === 'html' || ext === 'htm' || ext === 'xhtml');
+    const isJsx = !isDiagram && (ext === 'jsx' || ext === 'tsx' || activeAIFile.lang === 'jsx' || activeAIFile.lang === 'tsx' || activeAIFile.lang === 'react');
+    const isDoc = !isDiagram && !isHtml && !isJsx && (ext === 'docx' || ext === 'pdf' || ext === 'doc' || ext === 'md' || ext === 'markdown' || activeAIFile.lang === 'markdown' || activeAIFile.lang === 'docx' || activeAIFile.lang === 'pdf');
+    const lang = isDiagram ? 'mermaid' : (activeAIFile.lang || (isHtml ? 'html' : (isJsx ? 'jsx' : ext)));
     const currentCode = activeAIFile.rawContent || activeAIFile.content || '';
 
     // Bersihkan input & reset tinggi textarea
@@ -14835,22 +15365,31 @@ ${blocks}
     if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'none';
     if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'inline-flex';
 
-    // Cek apakah pengguna mengarahkan revisi kode secara spesifik atau sekadar chat/pujian/pertanyaan
+    // Cek apakah pengguna mengarahkan revisi kode/diagram/dokumen atau sekadar chat/pujian/pertanyaan
     const wantsRevision = isCodeRevisionRequest(val);
 
     let followupPrompt = '';
     if (wantsRevision) {
-      followupPrompt = `[Konteks Berkas Aktif: "${targetName}" (${lang})]\n\`\`\`${lang}\n${currentCode}\n\`\`\`\n\nInstruksi Perubahan dari Pengguna: ${val}\n\nInstruksi Khusus untuk AI:\nPengguna secara spesifik meminta revisi atau modifikasi pada aplikasi/website ini.\n1. Berikan penjelasan singkat tentang perubahan yang Anda lakukan.\n2. Cantumkan SELURUH KODE LENGKAP YANG TELAH DIPERBARUI (pastikan semua komponen lengkap, import/export valid, tanpa ada kode terpotong, dan siap dirender di pratinjau langsung Zoz Router) di dalam blok:\n<<<ZOZ_FILE name="${targetName}" lang="${lang}">>>\n... seluruh kode lengkap ...\n<<<END_ZOZ_FILE>>>`;
+      if (isDiagram) {
+        followupPrompt = `[Konteks Diagram Mermaid Aktif: "${targetName}"]\n\`\`\`mermaid\n${currentCode}\n\`\`\`\n\nArahan / Keinginan Kustomisasi dari Pengguna: "${val}"\n\nATURAN WAJIB REVISI DIAGRAM UNTUK AI:\n1. PATUHI 100% keinginan pengguna (termasuk pilihan warna node/kotak, warna garis/subgraph, kombinasi warna bebas/cerah/gelap/pastel/neon, arah alur TD/LR, bentuk simbol, maupun penambahan/pengubahan komponen diagram).\n2. Gunakan \`classDef\` dan \`class\` atau \`style NodeID fill:...,stroke:...,stroke-width:2px,color:...\` sesuai warna yang diminta pengguna (atau kreasikan kombinasi multi-warna yang sangat hidup, harmonis, dan kontras jika pengguna membebaskan warna).\n3. Pastikan setiap teks label di dalam kotak diapit tanda kutip ganda \`["<b>Judul</b><br/>Deskripsi"]\` agar aman dan tidak ada teks yang terpotong.\n4. Berikan penjelasan singkat tentang pembaruan diagram yang Anda lakukan, lalu WAJIB cantumkan kode diagram Mermaid lengkap terbaru di dalam blok:\n<<<ZOZ_FILE name="${targetName}" mime="image/svg+xml" lang="mermaid">\n... seluruh kode diagram Mermaid lengkap ...\n<<<END_ZOZ_FILE>>>`;
+      } else if (isDoc) {
+        const docMime = ext === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        followupPrompt = `[Konteks Dokumen Aktif: "${targetName}"]\n\`\`\`markdown\n${currentCode}\n\`\`\`\n\nInstruksi Perubahan Dokumen dari Pengguna: "${val}"\n\nInstruksi Khusus untuk AI:\n1. Berikan penjelasan singkat (1-2 kalimat) tentang revisi dokumen yang dilakukan.\n2. Cantumkan SELURUH ISI DOKUMEN LENGKAP YANG TELAH DIPERBARUI di dalam blok:\n<<<ZOZ_FILE name="${targetName}" mime="${docMime}" lang="markdown">\n... seluruh isi dokumen lengkap ...\n<<<END_ZOZ_FILE>>>`;
+      } else {
+        followupPrompt = `[Konteks Berkas Aktif: "${targetName}" (${lang})]\n\`\`\`${lang}\n${currentCode}\n\`\`\`\n\nInstruksi Perubahan dari Pengguna: ${val}\n\nInstruksi Khusus untuk AI:\nPengguna secara spesifik meminta revisi atau modifikasi pada aplikasi/website ini.\n1. Berikan penjelasan singkat tentang perubahan yang Anda lakukan.\n2. Cantumkan SELURUH KODE LENGKAP YANG TELAH DIPERBARUI (pastikan semua komponen lengkap, import/export valid, tanpa ada kode terpotong, dan siap dirender di pratinjau langsung Zoz Router) di dalam blok:\n<<<ZOZ_FILE name="${targetName}" lang="${lang}">>>\n... seluruh kode lengkap ...\n<<<END_ZOZ_FILE>>>`;
+      }
     } else {
-      followupPrompt = `[Konteks: Pengguna sedang melihat pratinjau langsung "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan / Obrolan Pengguna: "${val}"\n\nATURAN SANGAT KETAT UNTUK AI:\n- Zoz Router SUDAH menampilkan pratinjau langsung untuk berkas ini (termasuk React/JSX/Next.js melalui kompilator Babel Standalone + Tailwind CSS di browser).\n- Pengguna TIDAK meminta perubahan kode. Pengguna hanya sedang mengobrol santai, memuji, berkomentar, atau bertanya tentang aplikasi/website ini.\n- JANGAN PERNAH merombak, merevisi, atau membuat ulang kode!\n- DILARANG KERAS mengeluarkan blok kode atau blok <<<ZOZ_FILE!\n- Jawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
+      followupPrompt = `[Konteks: Pengguna sedang melihat pratinjau langsung "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan / Obrolan Pengguna: "${val}"\n\nATURAN SANGAT KETAT UNTUK AI:\n- Zoz Router SUDAH menampilkan pratinjau langsung untuk berkas ini.\n- Pengguna TIDAK meminta perubahan kode. Pengguna hanya sedang mengobrol santai, memuji, berkomentar, atau bertanya tentang berkas ini.\n- JANGAN PERNAH merombak, merevisi, atau membuat ulang kode!\n- DILARANG KERAS mengeluarkan blok kode atau blok <<<ZOZ_FILE!\n- Jawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
     }
 
     // Kirim langsung ke handleSendPrompt TANPA menutup modal studio!
     handleSendPrompt({
       overrideText: followupPrompt,
       displayPrompt: val,
-      websiteMode: wantsRevision ? 'preview' : null,
-      isWebCreation: wantsRevision,
+      websiteMode: (wantsRevision && !isDiagram && !isDoc) ? 'preview' : null,
+      isWebCreation: Boolean(wantsRevision && !isDiagram && !isDoc),
+      isDocCreation: Boolean(wantsRevision && isDoc),
+      docFormat: (wantsRevision && isDoc) ? (ext === 'pdf' ? 'pdf' : 'docx') : null,
       skipWebsiteCheck: true,
       skipDocCheck: true
     });
@@ -18963,7 +19502,7 @@ Format teks (untuk model tanpa function calling):
                          creationIntent !== 'website' && !runOptions.websiteMode && !runOptions.isWebCreation && !isExplicitCleanCodeCmd;
     if (isDocRequest && !hasNegativePreview) runOptions.isDocCreation = true;
 
-    const isDiagramRequest = !isDocRequest && (isExplicitDiagramCmd || creationIntent === 'diagram' ||
+    const isDiagramRequest = !isDocRequest && (isExplicitDiagramCmd || Boolean(runOptions.isDiagramCreation) || creationIntent === 'diagram' ||
                              (creationIntent !== 'website' && /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(promptText)));
     const isWebRequest = !isDocRequest && (isExplicitWebCmd || creationIntent === 'website' ||
                          /\b(?:website|websit|wbsite|webiste|web|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|aplikasi|game\s+web|simulasi\s+3d|next\.?js|react\.?js|page\.jsx|page\.tsx)\b/i.test(promptText) ||
@@ -19031,41 +19570,29 @@ Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
    - Di luar blok ZOZ_FILE (sebelum blok ZOZ_FILE), berikan HANYA 1-2 kalimat penjelasan/konfirmasi singkat bahwa dokumen telah selesai disusun dan siap diunduh melalui kartu berkas di bawah.
 5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
       } else if (isDiagramRequest && !hasNegativePreview) {
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DIAGRAM VISUAL ELEGAN (MERMAID ARCHITECTURAL BLUEPRINT)
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DIAGRAM VISUAL EKSPRESIF & KUSTOMISASI PENUH (MERMAID ARCHITECTURAL BLUEPRINT)
 [PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta DIAGRAM VISUAL (Arsitektur / Alur / Skema / Flowchart / Sequence / ERD / Mindmap).
 
-STANDAR DESAIN & TATA LETAK DIAGRAM KELAS DUNIA (WAJIB DIPATUHI):
-1. PEMILIHAN ARAH & TATA LETAK PROPORSIONAL:
-   - Gunakan \`flowchart TD\` (Top-to-Bottom / Hirarkis) sebagai standar utama alur proses, arsitektur, dan logika sistem agar proporsional dan sangat mudah dibaca di layar chat maupun perangkat seluler.
-   - HINDARI \`flowchart LR\` jika jumlah tahapan lebih dari 4 karena akan membuat diagram memanjang secara horizontal dan memperkecil teks hingga sulit dibaca.
-2. PENGELOMPOKAN SUBGRAPH PROFESIONAL:
-   - Untuk arsitektur atau alur multi-komponen, SELALU kelompokkan elemen ke dalam \`subgraph\` tematik dengan label jelas ber-ikon (Contoh: \`subgraph Klien["📱 Lapisan Klien / Pengguna"]\`, \`subgraph Gateway["🛡️ API Gateway & Auth"]\`, \`subgraph Services["⚙️ Layanan Inti / Processing"]\`, \`subgraph Data["💾 Basis Data & Penyimpanan"]\`).
-3. BENTUK SIMBOL BAKU STANDAR:
-   - Titik Awal / Akhir: Gunakan bentuk kapsul \`ID([Mulai / Selesai])\`
-   - Langkah Pemrosesan: Gunakan persegi panjang rapi \`ID["Nama Aksi / Layanan"]\`
-   - Titik Keputusan / Logika: Gunakan belah ketupat \`ID{"Apakah Valid?"}\` lengkap dengan cabang panah \`-- Ya -->\` dan \`-- Tidak -->\`
-   - Database / Penyimpanan: Gunakan silinder \`ID[("Database SQL / Cache")]\`
-   - I/O & Pesan: Gunakan jajar genjang \`ID[/"Kirim Notifikasi"/]\`
-4. KEAMANAN TEKS & LABEL (ANTI-PARSER ERROR):
-   - SELALU apit seluruh isi teks di dalam tanda kutip ganda: \`ID["Teks (dengan kurung / simbol)"]\` agar tanda kurung, titik dua, garis miring, atau kurung siku tidak merusak compiler Mermaid.
-5. HARMONI WARNA KELAS INDUSTRI (DILARANG MENGGUNAKAN WARNA PELANGI NORAK):
-   - Gunakan palet warna gelap elegan (Dark Slate & Neon Accent) yang berpadu sempurna dengan tema gelap Zoz Router.
-   - Di akhir diagram, definisikan classDef resmi yang serasi:
-     classDef startEnd fill:#0369a1,stroke:#38bdf8,stroke-width:1.5px,color:#fff;
-     classDef process fill:#0f172a,stroke:#38bdf8,stroke-width:1.5px,color:#f8fafc;
-     classDef decision fill:#78350f,stroke:#fbbf24,stroke-width:1.5px,color:#fff;
-     classDef database fill:#312e81,stroke:#818cf8,stroke-width:1.5px,color:#fff;
-     classDef success fill:#064e3b,stroke:#34d399,stroke-width:1.5px,color:#fff;
-     classDef alert fill:#881337,stroke:#f43f5e,stroke-width:1.5px,color:#fff;
-   - Terapkan kelas ke node yang sesuai (misal: \`class Start,End startEnd; class Process1,Process2 process; class Check decision; class DB database;\`).
-   - DILARANG menggunakan warna neon mentah/pelangi norak (seperti pink menyala, kuning stabilo, atau latar belakang putih yang membuat teks putih tidak terbaca).
-6. FORMAT PEMBUNGKUS:
+STANDAR DESAIN, KEBEBASAN WARNA AI & KEPATUHAN ARAHAN PENGGUNA (WAJIB DIPATUHI):
+1. PRIORITAS #1 — PATUHI 100% ARAHAN & KEINGINAN PENGGUNA:
+   - Jika pengguna mengarahkan warna tertentu (misal: merah-emas, ungu neon, biru laut, hijau zamrud, pastel cerah, tema terang/gelap, atau warna spesifik per kotak), arah alur (\`flowchart LR\` horizontal / \`flowchart TD\` vertikal), bentuk kotak, maupun jumlah tahapan, Anda WAJIB mematuhi 100% instruksi pengguna tanpa kompromi!
+   - Jika pengguna tidak menentukan arah alur, gunakan \`flowchart TD\` sebagai default yang rapi (atau \`flowchart LR\` jika alur horizontal lebih cocok).
+2. KEBEBASAN KREATIF MULTI-WARNA AI (SAAT PENGGUNA TIDAK MENENTUKAN WARNA SPESIFIK):
+   - Anda BEBAS BERKREASI penuh memilih kombinasi warna multi-warna yang kaya, hidup, ekspresif, dan bervariasi agar setiap jenis node/tahapan dan \`subgraph\` tampil memukau dan mudah dibedakan secara visual!
+   - Buat beberapa \`classDef\` dengan warna yang berbeda dan kaya untuk tiap peran komponen (misal: Biru Safir, Ungu Royal, Toska/Teal, Zamrud/Emerald, Amber/Emas, Rose/Crimson, Indigo, dsb.) dan terapkan ke masing-masing node dengan \`class\`.
+   - Anda juga bebas memberi warna pada \`subgraph\` menggunakan \`style NamaSubgraph fill:...,stroke:...,stroke-width:2px,color:...\` dan mewarnai garis panah dengan \`linkStyle\`.
+   - WAJIB sertakan properti \`color:\` yang kontras pada setiap \`classDef\`/\`style\`: gunakan \`color:#ffffff\` untuk latar berwarna pekat/gelap, atau \`color:#0f172a\` untuk latar terang/pastel/kuning agar seluruh teks 100% terbaca tajam!
+3. PENGELOMPOKAN SUBGRAPH & BENTUK SIMBOL:
+   - Untuk arsitektur atau alur multi-komponen, kelompokkan elemen ke dalam \`subgraph\` tematik berlabel jelas (Contoh: \`subgraph Klien["📱 Lapisan Klien"]\`).
+   - Variasikan bentuk simbol sesuai peran: Kapsul \`ID(["Mulai / Selesai"])\`, Persegi \`ID["Layanan / Proses"]\`, Belah Ketupat \`ID{"Keputusan?"}\`, Silinder \`ID[("Database / Storage")]\`, Jajar Genjang \`ID[/"Input / Output"/]\`.
+4. KEAMANAN TEKS & ANTI-CLIPPING (TIDAK ADA TEKS TERPOTONG):
+   - SELALU apit seluruh isi teks di dalam tanda kutip ganda: \`ID["<b>Judul Komponen</b><br/>Deskripsi singkat jelas"]\` agar tanda kurung, titik dua, atau simbol tidak merusak compiler Mermaid dan teks tampil utuh di dalam kotak.
+5. FORMAT PEMBUNGKUS:
    Tuliskan kode Mermaid di dalam blok protokol:
 <<<ZOZ_FILE name="Diagram_Arsitektur.svg" mime="image/svg+xml" lang="mermaid">
 flowchart TD
-    ... (kode diagram lengkap) ...
-<<<END_ZOZ_FILE>>>
-atau di dalam blok kode standar \`\`\`mermaid\n...\n\`\`\`.`;
+    ... (kode diagram lengkap beserta classDef/style warna kreatif) ...
+<<<END_ZOZ_FILE>>>`;
       } else if (isWebRequest && !hasNegativePreview) {
         const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
         const isReactNextPrompt = /\b(?:next\.?js|nextjs|react\.?js|reactjs|jsx|tsx|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(promptText);
@@ -20310,7 +20837,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
                          creationIntent !== 'website' && !runOptions.websiteMode && !runOptions.isWebCreation && !isExplicitCleanCodeCmd;
     if (isDocRequest && !hasNegativePreview) runOptions.isDocCreation = true;
 
-    const isDiagramRequest = !isDocRequest && (isExplicitDiagramCmd || creationIntent === 'diagram' ||
+    const isDiagramRequest = !isDocRequest && (isExplicitDiagramCmd || Boolean(runOptions.isDiagramCreation) || creationIntent === 'diagram' ||
                              (creationIntent !== 'website' && /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(promptText)));
     const isWebRequest = !isDocRequest && (isExplicitWebCmd || creationIntent === 'website' ||
                          /\b(?:website|websit|wbsite|webiste|web|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|aplikasi|game\s+web|simulasi\s+3d|next\.?js|react\.?js|page\.jsx|page\.tsx)\b/i.test(promptText) ||
@@ -20378,41 +20905,29 @@ Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
    - Di luar blok ZOZ_FILE (sebelum blok ZOZ_FILE), berikan HANYA 1-2 kalimat penjelasan/konfirmasi singkat bahwa dokumen telah selesai disusun dan siap diunduh melalui kartu berkas di bawah.
 5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
       } else if (isDiagramRequest && !hasNegativePreview) {
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DIAGRAM VISUAL ELEGAN (MERMAID ARCHITECTURAL BLUEPRINT)
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DIAGRAM VISUAL EKSPRESIF & KUSTOMISASI PENUH (MERMAID ARCHITECTURAL BLUEPRINT)
 [PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta DIAGRAM VISUAL (Arsitektur / Alur / Skema / Flowchart / Sequence / ERD / Mindmap).
 
-STANDAR DESAIN & TATA LETAK DIAGRAM KELAS DUNIA (WAJIB DIPATUHI):
-1. PEMILIHAN ARAH & TATA LETAK PROPORSIONAL:
-   - Gunakan \`flowchart TD\` (Top-to-Bottom / Hirarkis) sebagai standar utama alur proses, arsitektur, dan logika sistem agar proporsional dan sangat mudah dibaca di layar chat maupun perangkat seluler.
-   - HINDARI \`flowchart LR\` jika jumlah tahapan lebih dari 4 karena akan membuat diagram memanjang secara horizontal dan memperkecil teks hingga sulit dibaca.
-2. PENGELOMPOKAN SUBGRAPH PROFESIONAL:
-   - Untuk arsitektur atau alur multi-komponen, SELALU kelompokkan elemen ke dalam \`subgraph\` tematik dengan label jelas ber-ikon (Contoh: \`subgraph Klien["📱 Lapisan Klien / Pengguna"]\`, \`subgraph Gateway["🛡️ API Gateway & Auth"]\`, \`subgraph Services["⚙️ Layanan Inti / Processing"]\`, \`subgraph Data["💾 Basis Data & Penyimpanan"]\`).
-3. BENTUK SIMBOL BAKU STANDAR:
-   - Titik Awal / Akhir: Gunakan bentuk kapsul \`ID([Mulai / Selesai])\`
-   - Langkah Pemrosesan: Gunakan persegi panjang rapi \`ID["Nama Aksi / Layanan"]\`
-   - Titik Keputusan / Logika: Gunakan belah ketupat \`ID{"Apakah Valid?"}\` lengkap dengan cabang panah \`-- Ya -->\` dan \`-- Tidak -->\`
-   - Database / Penyimpanan: Gunakan silinder \`ID[("Database SQL / Cache")]\`
-   - I/O & Pesan: Gunakan jajar genjang \`ID[/"Kirim Notifikasi"/]\`
-4. KEAMANAN TEKS & LABEL (ANTI-PARSER ERROR):
-   - SELALU apit seluruh isi teks di dalam tanda kutip ganda: \`ID["Teks (dengan kurung / simbol)"]\` agar tanda kurung, titik dua, garis miring, atau kurung siku tidak merusak compiler Mermaid.
-5. HARMONI WARNA KELAS INDUSTRI (DILARANG MENGGUNAKAN WARNA PELANGI NORAK):
-   - Gunakan palet warna gelap elegan (Dark Slate & Neon Accent) yang berpadu sempurna dengan tema gelap Zoz Router.
-   - Di akhir diagram, definisikan classDef resmi yang serasi:
-     classDef startEnd fill:#0369a1,stroke:#38bdf8,stroke-width:1.5px,color:#fff;
-     classDef process fill:#0f172a,stroke:#38bdf8,stroke-width:1.5px,color:#f8fafc;
-     classDef decision fill:#78350f,stroke:#fbbf24,stroke-width:1.5px,color:#fff;
-     classDef database fill:#312e81,stroke:#818cf8,stroke-width:1.5px,color:#fff;
-     classDef success fill:#064e3b,stroke:#34d399,stroke-width:1.5px,color:#fff;
-     classDef alert fill:#881337,stroke:#f43f5e,stroke-width:1.5px,color:#fff;
-   - Terapkan kelas ke node yang sesuai (misal: \`class Start,End startEnd; class Process1,Process2 process; class Check decision; class DB database;\`).
-   - DILARANG menggunakan warna neon mentah/pelangi norak (seperti pink menyala, kuning stabilo, atau latar belakang putih yang membuat teks putih tidak terbaca).
-6. FORMAT PEMBUNGKUS:
+STANDAR DESAIN, KEBEBASAN WARNA AI & KEPATUHAN ARAHAN PENGGUNA (WAJIB DIPATUHI):
+1. PRIORITAS #1 — PATUHI 100% ARAHAN & KEINGINAN PENGGUNA:
+   - Jika pengguna mengarahkan warna tertentu (misal: merah-emas, ungu neon, biru laut, hijau zamrud, pastel cerah, tema terang/gelap, atau warna spesifik per kotak), arah alur (\`flowchart LR\` horizontal / \`flowchart TD\` vertikal), bentuk kotak, maupun jumlah tahapan, Anda WAJIB mematuhi 100% instruksi pengguna tanpa kompromi!
+   - Jika pengguna tidak menentukan arah alur, gunakan \`flowchart TD\` sebagai default yang rapi (atau \`flowchart LR\` jika alur horizontal lebih cocok).
+2. KEBEBASAN KREATIF MULTI-WARNA AI (SAAT PENGGUNA TIDAK MENENTUKAN WARNA SPESIFIK):
+   - Anda BEBAS BERKREASI penuh memilih kombinasi warna multi-warna yang kaya, hidup, ekspresif, dan bervariasi agar setiap jenis node/tahapan dan \`subgraph\` tampil memukau dan mudah dibedakan secara visual!
+   - Buat beberapa \`classDef\` dengan warna yang berbeda dan kaya untuk tiap peran komponen (misal: Biru Safir, Ungu Royal, Toska/Teal, Zamrud/Emerald, Amber/Emas, Rose/Crimson, Indigo, dsb.) dan terapkan ke masing-masing node dengan \`class\`.
+   - Anda juga bebas memberi warna pada \`subgraph\` menggunakan \`style NamaSubgraph fill:...,stroke:...,stroke-width:2px,color:...\` dan mewarnai garis panah dengan \`linkStyle\`.
+   - WAJIB sertakan properti \`color:\` yang kontras pada setiap \`classDef\`/\`style\`: gunakan \`color:#ffffff\` untuk latar berwarna pekat/gelap, atau \`color:#0f172a\` untuk latar terang/pastel/kuning agar seluruh teks 100% terbaca tajam!
+3. PENGELOMPOKAN SUBGRAPH & BENTUK SIMBOL:
+   - Untuk arsitektur atau alur multi-komponen, kelompokkan elemen ke dalam \`subgraph\` tematik berlabel jelas (Contoh: \`subgraph Klien["📱 Lapisan Klien"]\`).
+   - Variasikan bentuk simbol sesuai peran: Kapsul \`ID(["Mulai / Selesai"])\`, Persegi \`ID["Layanan / Proses"]\`, Belah Ketupat \`ID{"Keputusan?"}\`, Silinder \`ID[("Database / Storage")]\`, Jajar Genjang \`ID[/"Input / Output"/]\`.
+4. KEAMANAN TEKS & ANTI-CLIPPING (TIDAK ADA TEKS TERPOTONG):
+   - SELALU apit seluruh isi teks di dalam tanda kutip ganda: \`ID["<b>Judul Komponen</b><br/>Deskripsi singkat jelas"]\` agar tanda kurung, titik dua, atau simbol tidak merusak compiler Mermaid dan teks tampil utuh di dalam kotak.
+5. FORMAT PEMBUNGKUS:
    Tuliskan kode Mermaid di dalam blok protokol:
 <<<ZOZ_FILE name="Diagram_Arsitektur.svg" mime="image/svg+xml" lang="mermaid">
 flowchart TD
-    ... (kode diagram lengkap) ...
-<<<END_ZOZ_FILE>>>
-atau di dalam blok kode standar \`\`\`mermaid\n...\n\`\`\`.`;
+    ... (kode diagram lengkap beserta classDef/style warna kreatif) ...
+<<<END_ZOZ_FILE>>>`;
       } else if (isWebRequest && !hasNegativePreview) {
         const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
         const isReactNextPrompt = /\b(?:next\.?js|nextjs|react\.?js|reactjs|jsx|tsx|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(promptText);

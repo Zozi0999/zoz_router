@@ -12229,13 +12229,11 @@ body.page-paused *::after {
 .mermaid-viewport {
   position: relative;
   overflow: auto;
-  max-height: 480px;
-  min-height: 160px;
-  padding: 20px;
+  max-height: 620px;
+  min-height: 180px;
+  padding: 24px;
   display: flex;
-  justify-content: center;
-  align-items: center;
-  background: radial-gradient(circle at center, rgba(16, 24, 39, 0.8) 0%, rgba(10, 14, 20, 0.98) 100%);
+  background: radial-gradient(circle at center, rgba(16, 24, 39, 0.85) 0%, rgba(10, 14, 20, 0.98) 100%);
   cursor: grab;
   user-select: none;
 }
@@ -12245,21 +12243,54 @@ body.page-paused *::after {
 }
 
 .mermaid-svg-stage {
-  display: flex;
+  margin: auto;
+  display: inline-flex;
   justify-content: center;
   align-items: center;
   transition: transform 0.15s ease-out;
-  transform-origin: center center;
-  max-width: 100%;
+  transform-origin: top center;
+  padding: 8px;
 }
 
 .mermaid-svg-stage svg,
 .mermaid-sheet svg {
   max-width: none;
   height: auto;
+  overflow: visible !important;
   display: block;
-  font-family: var(--font-main), 'Space Grotesk', -apple-system, sans-serif !important;
-  letter-spacing: 0.02em;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  letter-spacing: 0.01em;
+}
+
+.mermaid-svg-stage svg foreignObject,
+.mermaid-svg-stage svg foreignObject > div,
+.mermaid-svg-stage svg foreignObject span,
+.mermaid-svg-stage svg .nodeLabel,
+.mermaid-svg-stage svg .edgeLabel,
+.mermaid-sheet svg foreignObject,
+.mermaid-sheet svg foreignObject > div,
+.mermaid-sheet svg foreignObject span,
+.mermaid-sheet svg .nodeLabel,
+.mermaid-sheet svg .edgeLabel {
+  overflow: visible !important;
+  max-width: none !important;
+}
+
+.mermaid-customize-ai-btn,
+.ai-file-btn.customize-ai {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.22), rgba(56, 189, 248, 0.22)) !important;
+  border-color: rgba(168, 85, 247, 0.55) !important;
+  color: #e9d5ff !important;
+  font-weight: 600 !important;
+  gap: 5px;
+}
+
+.mermaid-customize-ai-btn:hover,
+.ai-file-btn.customize-ai:hover {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.38), rgba(56, 189, 248, 0.35)) !important;
+  border-color: #c084fc !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.35);
 }
 
 /* Kotak & Bentuk Node: Sudut tumpul halus, drop shadow lembut, border tegas */
@@ -12275,10 +12306,10 @@ body.page-paused *::after {
 .mermaid-sheet svg .node circle,
 .mermaid-sheet svg .node ellipse,
 .mermaid-sheet svg .node path {
-  rx: 8px !important;
-  ry: 8px !important;
-  stroke-width: 1.5px !important;
-  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45));
+  rx: 8px;
+  ry: 8px;
+  stroke-width: 1.8px;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.4));
   transition: all 0.2s ease;
 }
 
@@ -12289,10 +12320,10 @@ body.page-paused *::after {
 .mermaid-svg-stage svg .node:hover path,
 .mermaid-sheet svg .node:hover rect {
   filter: drop-shadow(0 0 12px rgba(56, 189, 248, 0.5));
-  stroke-width: 2px !important;
+  stroke-width: 2.2px;
 }
 
-/* Tipografi Teks di Dalam Kotak & Simbol */
+/* Tipografi Teks di Dalam Kotak & Simbol (Tanpa !important pada color/fill agar warna kustom AI & Pengguna tampil 100%) */
 .mermaid-svg-stage svg .node .label,
 .mermaid-svg-stage svg .node text,
 .mermaid-svg-stage svg text.actor,
@@ -12301,23 +12332,23 @@ body.page-paused *::after {
 .mermaid-svg-stage svg .noteText,
 .mermaid-svg-stage svg .loopText,
 .mermaid-sheet svg .node .label {
-  font-family: var(--font-main), 'Space Grotesk', -apple-system, sans-serif !important;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
   font-size: 13px !important;
-  line-height: 1.45 !important;
+  line-height: 1.42 !important;
   text-align: center !important;
-  color: #f8fafc !important;
-  fill: #f8fafc !important;
+  color: #f8fafc;
+  fill: #f8fafc;
 }
 
 .mermaid-svg-stage svg .actor-line {
-  stroke: rgba(56, 189, 248, 0.4) !important;
+  stroke: rgba(56, 189, 248, 0.45);
   stroke-dasharray: 4, 4;
 }
 
 .mermaid-svg-stage svg .messageLine0,
 .mermaid-svg-stage svg .messageLine1 {
-  stroke: #38bdf8 !important;
-  stroke-width: 1.8px !important;
+  stroke: #38bdf8;
+  stroke-width: 1.8px;
 }
 
 .mermaid-svg-stage svg .node .label b,
@@ -12326,60 +12357,60 @@ body.page-paused *::after {
 .mermaid-sheet svg .node .label strong {
   font-size: 13.5px !important;
   font-weight: 700 !important;
-  color: #ffffff !important;
-  fill: #ffffff !important;
-  letter-spacing: 0.02em;
+  color: inherit;
+  fill: inherit;
+  letter-spacing: 0.01em;
 }
 
-/* Garis Panah Konektor: Halus, bercahaya pendar halus, panah tajam */
+/* Garis Panah Konektor: Mendukung linkStyle warna kustom AI/Pengguna */
 .mermaid-svg-stage svg .edgePath path,
 .mermaid-sheet svg .edgePath path {
-  stroke: #38bdf8 !important;
-  stroke-width: 1.8px !important;
+  stroke: #38bdf8;
+  stroke-width: 1.8px;
   filter: drop-shadow(0 1px 3px rgba(0, 240, 255, 0.2));
 }
 
 .mermaid-svg-stage svg .marker,
 .mermaid-sheet svg .marker {
-  fill: #38bdf8 !important;
-  stroke: #38bdf8 !important;
+  fill: #38bdf8;
+  stroke: #38bdf8;
 }
 
 /* Label pada Panah: Badge Pill Gelap Kontras agar tidak tertimpa garis */
 .mermaid-svg-stage svg .edgeLabel,
 .mermaid-sheet svg .edgeLabel {
-  font-size: 11px !important;
+  font-size: 11.5px !important;
   font-weight: 500 !important;
-  color: #94a3b8 !important;
+  color: #e2e8f0;
 }
 
 .mermaid-svg-stage svg .edgeLabel rect,
 .mermaid-sheet svg .edgeLabel rect {
-  fill: #0b1120 !important;
-  stroke: rgba(56, 189, 248, 0.3) !important;
-  stroke-width: 1px !important;
-  rx: 4px !important;
-  ry: 4px !important;
+  fill: #0b1120;
+  stroke: rgba(56, 189, 248, 0.35);
+  stroke-width: 1px;
+  rx: 4px;
+  ry: 4px;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
 }
 
-/* Kluster / Subgraph: Latar tembus pandang bergaris putus lembut */
+/* Kluster / Subgraph: Mendukung warna style Subgraph kustom dari AI / Pengguna */
 .mermaid-svg-stage svg .cluster rect,
 .mermaid-sheet svg .cluster rect {
-  rx: 12px !important;
-  ry: 12px !important;
-  fill: rgba(15, 23, 42, 0.6) !important;
-  stroke: rgba(56, 189, 248, 0.35) !important;
+  rx: 12px;
+  ry: 12px;
+  fill: rgba(15, 23, 42, 0.65);
+  stroke: rgba(56, 189, 248, 0.45);
+  stroke-width: 1.5px;
   stroke-dasharray: 4, 4;
 }
 
 .mermaid-svg-stage svg .cluster .nodeLabel,
 .mermaid-sheet svg .cluster .nodeLabel {
-  font-size: 12px !important;
+  font-size: 12.5px !important;
   font-weight: 700 !important;
-  color: #38bdf8 !important;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  color: #38bdf8;
+  letter-spacing: 0.03em;
 }
 
 .mermaid-raw-code {
