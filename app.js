@@ -10868,6 +10868,22 @@ RESONANSI: ${this.currentVibe}
     return words ? words.length : 0;
   }
 
+  // 1. Visibilitas tombol pill manual "Ubah ke File MD" (ramah & responsif saat ada struktur kode/teks)
+  function canShowConvertToMdPill(text) {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    const lines = trimmed.split('\n');
+    const lineCount = lines.length;
+    const charCount = trimmed.length;
+
+    if (lineCount >= 8 || charCount >= 400) return true;
+    if (/```[\s\S]*?```/.test(trimmed)) return true;
+    return false;
+  }
+
+  // 2. Ambang batas konversi otomatis (HANYA teks/kodingan masif nyata yang boleh auto-convert / auto-popup)
+  // Chat biasa (30, 50, 100 kata) 100% AMAN dan TIDAK PERNAH dibajak menjadi berkas secara paksa!
   function shouldAutoConvertAsDocument(text) {
     if (!text || typeof text !== 'string') return false;
     const trimmed = text.trim();
@@ -10878,24 +10894,25 @@ RESONANSI: ${this.currentVibe}
     const charCount = trimmed.length;
     const wordCount = countPromptWords(trimmed);
 
-    // Mandat Kaisar Zozi: Seluruh teks panjang, kodingan, log, atau dokumen dari baris pertama hingga terakhir
-    // wajib didukung penuh tanpa pembatasan artificial 100 baris.
-    // 1. Teks dengan 8 baris atau lebih otomatis dikenali sebagai dokumen terstruktur
-    if (lineCount >= 8) return true;
+    // a. Blok kode markdown berpagar masif (>= 20 baris atau >= 1200 karakter)
+    if (/```[a-zA-Z0-9_-]*\s*\n[\s\S]{300,}?\n```/.test(trimmed) && (lineCount >= 20 || charCount >= 1200)) {
+      return true;
+    }
 
-    // 2. Teks panjang masif (>= 40 kata atau >= 250 karakter)
-    if (wordCount >= 40 || charCount >= 250) return true;
-
-    // 3. Deteksi pola kodingan atau struktur bahasa pemrograman (>= 4 baris)
+    // b. Kodingan / skrip masif (>= 30 baris)
     const isCode = (
       /\b(?:function\b|const\b|let\b|var\b|import\b|export\b|class\b|console\.log|=>|async\s+function|def\b|elif\b)\b/.test(trimmed) ||
       /<(?:!DOCTYPE|html|head|body|div|span|script|style|template|section)\b/i.test(trimmed) ||
       /[a-zA-Z0-9_\-#.]+\s*\{\s*[\w\-]+\s*:[^;]+;/i.test(trimmed) ||
       /\b(?:SELECT\b.*?\bFROM\b|INSERT\s+INTO|CREATE\s+TABLE|UPDATE\b.*?\bSET)\b/i.test(trimmed) ||
-      /(?:<\?php|\bpublic\s+class\b|#include\b|\bpackage\s+\w+|\bfn\s+\w+\b|\bfunc\s+\w+\b)/.test(trimmed) ||
-      ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']')))
+      /(?:<\?php|\bpublic\s+class\b|#include\b|\bpackage\s+\w+|\bfn\s+\w+\b|\bfunc\s+\w+\b)/.test(trimmed)
     );
-    if (isCode && lineCount >= 4) return true;
+    if (isCode && lineCount >= 30) return true;
+
+    // c. Teks / artikel / log masif (>= 200 kata DAN >= 1500 karakter DAN >= 15 baris)
+    if (wordCount >= 200 && charCount >= 1500 && lineCount >= 15) {
+      return true;
+    }
 
     return false;
   }
@@ -10963,13 +10980,22 @@ RESONANSI: ${this.currentVibe}
   // Helper universal untuk mengekstrak instruksi prompt terpisah dari badan dokumen lampiran
   // MANDAT TANPA PEMOTONGAN: Seluruh baris teks masif (100, 200, 500, 1000+ baris) wajib tersimpan
   // 100% utuh di dalam badan dokumen (docBody). DILARANG memotong teks di tengah jalan atau hanya mengambil 100 baris!
-  function extractPromptAndDocContent(incomingText, existingPrompt = '') {
+  function extractPromptAndDocContent(incomingText, existingPrompt = '', isManualFold = false) {
     if (!incomingText || typeof incomingText !== 'string') {
       return { docBody: '', promptInstruction: (existingPrompt || '').trim() };
     }
     const cleanText = incomingText.trim();
     if (!cleanText) {
       return { docBody: '', promptInstruction: (existingPrompt || '').trim() };
+    }
+
+    // Jika pengguna secara manual mengklik "Ubah ke File MD":
+    // 100% seluruh teks input dijadikan isi dokumen utuh tanpa memotong bagian mana pun!
+    if (isManualFold) {
+      return {
+        docBody: cleanText,
+        promptInstruction: (existingPrompt || '').trim()
+      };
     }
 
     let docBody = cleanText;
@@ -10980,71 +11006,46 @@ RESONANSI: ${this.currentVibe}
 
     const lines = cleanText.split('\n');
 
-    // 1. Jika ada blok kode markdown (```...```):
-    // JANGAN PERNAH membuang kode/teks setelah blok kode pertama! Seluruh isi adalah dokumen utuh.
-    // Hanya pisahkan jika baris 1-3 SEBELUM blok kode merupakan kalimat perintah singkat (< 200 karakter).
+    // 1. Blok kode fenced di awal (```...```):
+    // Hanya ambil baris 1-3 SEBELUM blok kode jika murni kalimat perintah pendek (< 180 karakter)
+    // dan TIDAK diawali tanda heading (#)
     const firstFenceIdx = lines.findIndex(l => /^```[a-zA-Z0-9_-]*/.test(l.trim()));
     if (firstFenceIdx > 0 && firstFenceIdx <= 3) {
       const prefixCandidate = lines.slice(0, firstFenceIdx).map(l => l.trim()).join(' ').trim();
-      if (prefixCandidate.length <= 200 && (INSTRUCTION_KEYWORD_RE.test(prefixCandidate) || prefixCandidate.endsWith(':') || prefixCandidate.endsWith('?'))) {
+      if (!prefixCandidate.startsWith('#') && prefixCandidate.length <= 180 && INSTRUCTION_KEYWORD_RE.test(prefixCandidate)) {
         extractedInstruction = lines.slice(0, firstFenceIdx).join('\n').trim();
         docBody = lines.slice(firstFenceIdx).join('\n').trim();
       }
     }
 
-    // 2. Deteksi instruksi di AWAL teks (hanya 1-3 baris pengantar pendek terpisah baris kosong)
-    if (!extractedInstruction && docBody === cleanText && lines.length >= 4) {
-      for (let i = 0; i < Math.min(lines.length - 2, 3); i++) {
-        const candidateLines = lines.slice(0, i + 1);
-        const candidateText = candidateLines.map(l => l.trim()).join(' ').trim();
-        const nextLine = lines[i + 1].trim();
-        const separatorHit = (nextLine === '' || /^[-=_*]{3,}$/.test(nextLine));
-
-        if (candidateText.length <= 200 && (
-          (separatorHit && (INSTRUCTION_KEYWORD_RE.test(candidateText) || candidateText.endsWith(':') || candidateText.endsWith('?'))) ||
-          (!separatorHit && (candidateText.endsWith(':') || candidateText.endsWith('?')) && INSTRUCTION_KEYWORD_RE.test(candidateText))
-        )) {
-          let bodyStartIdx = i + 1;
-          while (bodyStartIdx < lines.length && (lines[bodyStartIdx].trim() === '' || /^[-=_*]{3,}$/.test(lines[bodyStartIdx].trim()))) {
-            bodyStartIdx++;
-          }
-          if (bodyStartIdx < lines.length) {
-            const remainingBody = lines.slice(bodyStartIdx).join('\n').trim();
-            if (remainingBody.length >= 80 || remainingBody.split('\n').length >= 4) {
-              extractedInstruction = candidateLines.join('\n').trim();
-              docBody = remainingBody;
-              break;
-            }
+    // 2. Deteksi instruksi di AWAL teks (hanya 1-2 baris pendek terpisah baris kosong, bukan heading)
+    if (!extractedInstruction && docBody === cleanText && lines.length >= 6) {
+      const firstLine = lines[0].trim();
+      const secondLine = lines[1].trim();
+      if (!firstLine.startsWith('#') && firstLine.length <= 150 && (secondLine === '' || /^[-=_*]{3,}$/.test(secondLine)) && INSTRUCTION_KEYWORD_RE.test(firstLine)) {
+        let bodyStartIdx = 1;
+        while (bodyStartIdx < lines.length && (lines[bodyStartIdx].trim() === '' || /^[-=_*]{3,}$/.test(lines[bodyStartIdx].trim()))) {
+          bodyStartIdx++;
+        }
+        if (bodyStartIdx < lines.length) {
+          const remainingBody = lines.slice(bodyStartIdx).join('\n').trim();
+          if (remainingBody.length >= 150 || remainingBody.split('\n').length >= 6) {
+            extractedInstruction = firstLine;
+            docBody = remainingBody;
           }
         }
       }
     }
 
-    // 3. Deteksi instruksi di AKHIR teks (hanya 1-2 baris terakhir jika jelas berupa pertanyaan/instruksi terpisah)
-    if (!extractedInstruction && docBody === cleanText && lines.length >= 4) {
-      for (let i = lines.length - 1; i >= Math.max(lines.length - 2, 2); i--) {
-        const candidateLines = lines.slice(i);
-        const candidateText = candidateLines.map(l => l.trim()).join(' ').trim();
-        const prevLine = lines[i - 1].trim();
-        const separatorHit = (prevLine === '' || /^[-=_*]{3,}$/.test(prevLine));
-
-        if (candidateText.length <= 200 && (
-          (separatorHit && (INSTRUCTION_KEYWORD_RE.test(candidateText) || candidateText.endsWith('?') || candidateText.endsWith(':'))) ||
-          candidateText.endsWith('?') ||
-          (candidateLines.length <= 2 && INSTRUCTION_KEYWORD_RE.test(candidateText))
-        )) {
-          let bodyEndIdx = i - 1;
-          while (bodyEndIdx >= 0 && (lines[bodyEndIdx].trim() === '' || /^[-=_*]{3,}$/.test(lines[bodyEndIdx].trim()))) {
-            bodyEndIdx--;
-          }
-          if (bodyEndIdx >= 0) {
-            const remainingBody = lines.slice(0, bodyEndIdx + 1).join('\n').trim();
-            if (remainingBody.length >= 80 || remainingBody.split('\n').length >= 4) {
-              extractedInstruction = candidateLines.join('\n').trim();
-              docBody = remainingBody;
-              break;
-            }
-          }
+    // 3. Deteksi instruksi di AKHIR teks (hanya 1 baris terakhir jika terpisah baris kosong dan memuat kata perintah)
+    if (!extractedInstruction && docBody === cleanText && lines.length >= 6) {
+      const lastLine = lines[lines.length - 1].trim();
+      const prevLine = lines[lines.length - 2].trim();
+      if (!lastLine.startsWith('#') && lastLine.length <= 150 && (prevLine === '' || /^[-=_*]{3,}$/.test(prevLine)) && INSTRUCTION_KEYWORD_RE.test(lastLine)) {
+        const remainingBody = lines.slice(0, lines.length - 2).join('\n').trim();
+        if (remainingBody.length >= 150 || remainingBody.split('\n').length >= 6) {
+          extractedInstruction = lastLine;
+          docBody = remainingBody;
         }
       }
     }
@@ -11069,7 +11070,7 @@ RESONANSI: ${this.currentVibe}
     const trimmed = incomingText.trim();
     if (!shouldAutoConvertAsDocument(trimmed)) return false;
 
-    const { docBody, promptInstruction } = extractPromptAndDocContent(trimmed, existingPrompt);
+    const { docBody, promptInstruction } = extractPromptAndDocContent(trimmed, existingPrompt, false);
     const doc = convertTextToMarkdownDoc(docBody);
     if (!doc) return false;
 
@@ -11130,7 +11131,7 @@ RESONANSI: ${this.currentVibe}
       return false;
     }
 
-    const { docBody, promptInstruction } = extractPromptAndDocContent(trimmed, existingPrompt);
+    const { docBody, promptInstruction } = extractPromptAndDocContent(trimmed, existingPrompt, forceModal);
     const typeInfo = detectDocumentTypeAndExt(docBody);
     const fileName = typeInfo.customName || `code-snippet.${typeInfo.ext}`;
     const wordCount = countPromptWords(docBody);
@@ -29863,21 +29864,19 @@ Aturan:
 
       // Tampilkan tombol pill konversi jika ada teks yang cocok dikonversi
       if (els.autoConvertDocRow) {
-        if (val && shouldAutoConvertAsDocument(val)) {
+        if (val && canShowConvertToMdPill(val)) {
           els.autoConvertDocRow.style.display = 'flex';
         } else {
           els.autoConvertDocRow.style.display = 'none';
         }
       }
 
-      // Deteksi kodingan / teks panjang untuk pop-up konfirmasi atau auto-convert
+      // Deteksi kodingan / teks masif untuk pop-up konfirmasi atau auto-convert
       if (val && shouldAutoConvertAsDocument(val)) {
         const alwaysAuto = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
         if (alwaysAuto) {
-          if (val.split('\n').length >= 8 || countPromptWords(val) >= 40 || val.length >= 250) {
-            tryAutoConvertInputToDoc(val);
-            return;
-          }
+          tryAutoConvertInputToDoc(val);
+          return;
         } else {
           checkAndShowPromptFoldPrompt(val, false, false);
         }
