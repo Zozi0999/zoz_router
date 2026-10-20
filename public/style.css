@@ -9867,6 +9867,18 @@ div.msg-sources-section button.msg-sources-title span {
   color: var(--neon-teal);
 }
 
+.top-nav-active-tool-wrap.tool-theme-youtube .top-nav-active-tool-chip {
+  border-color: rgba(255, 0, 51, 0.55);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), 0 0 10px rgba(255, 0, 51, 0.22);
+}
+.top-nav-active-tool-wrap.tool-theme-youtube .top-nav-active-tool-chip:hover {
+  border-color: #ff3355;
+  box-shadow: 0 6px 18px rgba(255, 0, 51, 0.38);
+}
+.top-nav-active-tool-wrap.tool-theme-youtube .top-nav-tool-icon-wrap {
+  color: #ff2244;
+}
+
 .top-nav-tool-icon-wrap {
   display: inline-flex;
   align-items: center;

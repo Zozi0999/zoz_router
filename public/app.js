@@ -5512,7 +5512,8 @@ RESONANSI: ${this.currentVibe}
         const normCmp = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
         for (const item of topItems) {
           const domainBadge = item.domain ? `*(${item.domain})*` : '';
-          summaryMd += `- **${item.title}** ${domainBadge}\n`;
+          const titleLabel = item.url ? `[${item.title}](${item.url})` : item.title;
+          summaryMd += `- **${titleLabel}** ${domainBadge}\n`;
           if (item.snippet && item.snippet !== item.title) {
             let cleanSnippet = item.snippet.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
             // Format "[Sumber | tanggal] Judul": buang judul yang duplikat, sisakan metadata & konteks fakta
@@ -11068,8 +11069,9 @@ RESONANSI: ${this.currentVibe}
     });
 
     els.messagesList?.appendChild(row);
-    if (hasText) {
-      renderYouTubeCardsForMessage(row, content);
+    const savedVideoIds = (extraMeta && Array.isArray(extraMeta.videoIds)) ? extraMeta.videoIds : [];
+    if (hasText || savedVideoIds.length > 0) {
+      renderYouTubeCardsForMessage(row, content, savedVideoIds);
     }
     // Kartu file buatan AI juga dirender saat pesan dimuat ulang dari riwayat (msg.files)
     renderMessageFiles(row, extraMeta && extraMeta.files);
@@ -14920,6 +14922,147 @@ ${blocks}
     };
   }
 
+  function isExplicitYouTubeSearchIntent(promptText) {
+    if (!promptText || typeof promptText !== 'string') return false;
+    let t = promptText.trim();
+    if (!t) return false;
+    if (t.includes('--- [AKHIR DOKUMEN:') || t.includes('--- [AKHIR BERKAS:')) {
+      const parts = t.split(/--- \[AKHIR (?:DOKUMEN|BERKAS):[^\]]+\] ---/i);
+      t = (parts[parts.length - 1] || t).trim();
+    }
+    // Jangan anggap sebagai pencarian kata kunci jika prompt sudah berisi URL video YouTube spesifik
+    if (extractYouTubeVideoIdsClient(t).length > 0) return false;
+    // Perintah slash eksplisit
+    if (/^\/(?:youtube|yt|video)\b/i.test(t)) return true;
+    // Filter negatif: diskusi tentang bug/kode tool youtube
+    if (/\b(?:bug|error|tidak\s+berfungsi|perbaiki|troubleshoot|source\s+code|skrip|koding)\b/i.test(t)) return false;
+    // Permintaan eksplisit mencari / menonton / memutar video di YouTube
+    if (/\b(?:cari(?:kan)?|temukan|tampilkan|berikan|rekomendasi(?:kan)?|putar(?:kan)?|mainkan|setel(?:kan)?|tonton|nonton|search|find|play|watch)\b[\s\S]{0,45}\b(?:video\s+youtube|di\s+youtube|dari\s+youtube|youtube|yt|video\s+tutorial|video\s+musik|video\s+lagu|klip\s+video)\b/i.test(t)) {
+      return true;
+    }
+    if (/\b(?:video\s+youtube|channel\s+youtube|kanal\s+youtube|link\s+youtube|tautan\s+youtube)\b[\s\S]{0,45}\b(?:tentang|mengenai|soal|terbaik|populer|terbaru|untuk|cari|carikan)\b/i.test(t)) {
+      return true;
+    }
+    return false;
+  }
+
+  function extractCleanYouTubeSearchQuery(rawText, session = null) {
+    if (!rawText || typeof rawText !== 'string') return '';
+    let clean = rawText.trim();
+    if (clean.includes('--- [AKHIR DOKUMEN:') || clean.includes('--- [AKHIR BERKAS:')) {
+      const parts = clean.split(/--- \[AKHIR (?:DOKUMEN|BERKAS):[^\]]+\] ---/i);
+      clean = (parts[parts.length - 1] || clean).trim();
+    }
+    clean = clean
+      .replace(/^\/(?:youtube|yt|video|transkrip)\b\s*/i, '')
+      .replace(/^(?:(?:tolong|coba|bisa|mohon|ai|bot|sistem|eh|halo|hai)\s+)*(?:carikan|cari|temukan|tampilkan|putarkan|putar|mainkan|setelkan|setel|berikan|rekomendasikan|search|find|play|show|watch|tonton)\s+(?:saya\s+|kita\s+|aku\s+|dong\s+|kan\s+)*(?:beberapa\s+|daftar\s+|rekomendasi\s+)*(?:video\s+|musik\s+|lagu\s+|klip\s+|konten\s+|channel\s+|kanal\s+)*(?:di\s+youtube\s+|youtube\s+|dari\s+youtube\s+|on\s+youtube\s+|di\s+yt\s+)*(?:tentang\s+|mengenai\s+|soal\s+|berjudul\s+|dengan\s+judul\s+|yang\s+membahas\s+|untuk\s+|for\s+|about\s+)?/i, '')
+      .replace(/\s+(?:di\s+youtube|dari\s+youtube|on\s+youtube|di\s+yt|lewat\s+youtube)\s*[\?\.\!]*$/i, '')
+      .replace(/^["'`]+|["'`]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const isReferential = clean.length < 2 || /^(?:ini|itu|tersebut|nya|videonya|lagunya|tutorialnya|di\s+youtube|youtube)$/i.test(clean);
+    if (isReferential && session && Array.isArray(session.messages) && session.messages.length > 0) {
+      for (let i = session.messages.length - 1; i >= 0; i--) {
+        const msg = session.messages[i];
+        if (!msg || msg.role !== 'user') continue;
+        const prevText = String(msg.displayContent || msg.content || '').trim();
+        if (!prevText || prevText === rawText.trim()) continue;
+        const prevClean = prevText.replace(/^\/[a-z0-9_-]+\s*/i, '').trim();
+        if (prevClean.length >= 3 && !/^(?:ini|itu|tersebut|videonya)$/i.test(prevClean)) {
+          clean = prevClean.slice(0, 90);
+          break;
+        }
+      }
+    }
+    return clean || rawText.replace(/^\/(?:youtube|yt|video)\b\s*/i, '').trim();
+  }
+
+  async function getYouTubeSearchToolGroundingContext(promptText, session = null, hudElement = null, forceSearch = false) {
+    if (!promptText || typeof promptText !== 'string') return null;
+    if (extractYouTubeVideoIdsClient(promptText).length > 0) return null;
+
+    const shouldRun = Boolean(forceSearch || STATE.isYouTubeSearchMode || isExplicitYouTubeSearchIntent(promptText));
+    if (!shouldRun) return null;
+
+    const searchQuery = extractCleanYouTubeSearchQuery(promptText, session);
+    if (!searchQuery || searchQuery.length < 2) return null;
+
+    if (hudElement) {
+      hudElement.innerHTML = `
+        <div class="web-search-hud">
+          <i class="fa-brands fa-youtube fa-beat" style="color:#ff0033; font-size:1.1rem;"></i>
+          <span><strong>YouTube Search Tool:</strong> Mencari video YouTube untuk <em>"${escapeHtml(searchQuery)}"</em>...</span>
+        </div>
+      `;
+    }
+
+    try {
+      const data = await searchYouTubeClient(searchQuery, 6);
+      const list = (data && Array.isArray(data.results)) ? data.results : [];
+      if (list.length === 0) {
+        if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+          BioEndocrine.registerToolIssue({ toolName: 'search_youtube', error: `Tidak ditemukan video untuk "${searchQuery}"`, status: 'NOT_FOUND', args: searchQuery });
+        }
+        return null;
+      }
+
+      if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+        BioEndocrine.registerToolSuccess({
+          toolName: 'search_youtube',
+          count: list.length,
+          details: `${list.length} video YouTube ditemukan untuk "${searchQuery}"`
+        });
+      }
+
+      const sources = [];
+      const videoIds = [];
+      const blocks = list.map((v, idx) => {
+        if (v.videoId && !videoIds.includes(v.videoId)) videoIds.push(v.videoId);
+        if (v.url) {
+          sources.push({
+            title: v.title || `Video YouTube #${idx + 1}`,
+            url: v.url,
+            domain: 'youtube.com',
+            snippet: `${v.channel ? `Channel: ${v.channel}` : 'YouTube'}${v.durationText ? ` • Durasi: ${v.durationText}` : ''}${v.viewText ? ` • ${v.viewText}` : ''}${v.description ? ` — ${v.description}` : ''}`.slice(0, 200)
+          });
+        }
+        return `[VIDEO YOUTUBE RESMI #${idx + 1}]
+- Judul Video: "${v.title}"
+- URL Resmi: ${v.url}
+- Video ID: ${v.videoId}
+- Channel / Kreator: ${v.channel || 'YouTube'}${v.channelUrl ? ` (${v.channelUrl})` : ''}
+- Durasi: ${v.durationText || 'Tersedia di pemutar'}
+- Jumlah Tayangan: ${v.viewText || '-'}
+- Waktu Publikasi: ${v.publishedText || '-'}
+${v.description ? `- Ringkasan Deskripsi: ${v.description}` : ''}`;
+      }).join('\n\n');
+
+      const groundingContext = `### DATA HASIL PENCARIAN VIDEO YOUTUBE REAL-TIME (YOUTUBE SEARCH TOOL - TERVERIFIKASI):
+Kata Kunci Pencarian: "${searchQuery}"
+Ditemukan ${list.length} video YouTube resmi yang relevan dan siap diputar langsung di percakapan:
+
+${blocks}
+
+### MANDAT PENYAJIAN REKOMENDASI VIDEO YOUTUBE UNTUK ASISTEN AI:
+1. Sistem Zoz Router TELAH MENJALANKAN tool \`search_youtube\` secara real-time dan mengambil ${list.length} video YouTube resmi di atas. JANGAN mencetak kode pemanggilan tool \`search_youtube(...)\` lagi!
+2. Sajikan ulasan dan rekomendasi video-video di atas secara menarik, terstruktur, dan informatif dalam Bahasa Indonesia (sebutkan Judul Video, Nama Channel, Durasi, Jumlah Tayangan, serta alasan mengapa video tersebut relevan).
+3. WAJIB SERTAKAN TAUTAN MARKDOWN RESMI \`[Judul Video](https://www.youtube.com/watch?v=ID)\` untuk setiap video yang Anda bahas agar kartu pemutar video interaktif di atas/bawah pesan terhubung sempurna dengan ulasan Anda.
+4. DILARANG mengarang judul video, nama channel, atau URL YouTube fiktif di luar data terverifikasi di atas.`;
+
+      return {
+        groundingContext,
+        videos: list,
+        videoIds,
+        sources,
+        query: searchQuery
+      };
+    } catch (err) {
+      console.warn('YouTube Search Tool grounding error:', err);
+      return null;
+    }
+  }
+
   function buildDirectVideoPreviewCardHtml(videoUrl) {
     if (!videoUrl) return '';
     const safeUrl = escapeHtml(videoUrl);
@@ -14957,17 +15100,21 @@ ${blocks}
     const safeThumb = escapeHtml(video.thumbnail || (video.videoId ? `https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg` : ''));
     const safeUrl = escapeHtml(video.url || (video.videoId ? `https://www.youtube.com/watch?v=${video.videoId}` : '#'));
     const vidId = escapeHtml(video.videoId || '');
+    const safeDuration = video.durationText ? escapeHtml(video.durationText) : '';
+    const safeViews = video.viewText ? escapeHtml(video.viewText) : '';
+    const safePublished = video.publishedText ? escapeHtml(video.publishedText) : '';
 
     return `
       <div class="youtube-preview-card" data-video-id="${vidId}">
         <div class="yt-card-thumb-wrap" data-action="play-in-chat" data-video-id="${vidId}" data-title="${safeTitle}" style="cursor: pointer;" title="Klik untuk putar langsung di percakapan">
           <img src="${safeThumb}" alt="${safeTitle}" class="yt-card-thumb" loading="lazy" decoding="async">
           <div class="yt-card-badge"><i class="fa-brands fa-youtube"></i> YouTube</div>
+          ${safeDuration ? `<div class="yt-card-duration" style="position:absolute; bottom:6px; right:6px; background:rgba(0,0,0,0.85); color:#fff; font-size:0.65rem; font-weight:700; padding:1px 5px; border-radius:4px; font-family:var(--font-code); letter-spacing:0.3px;">${safeDuration}</div>` : ''}
           ${vidId ? `<button type="button" class="yt-thumb-play" data-action="play-in-chat" data-video-id="${vidId}" data-title="${safeTitle}" title="Putar langsung di percakapan"><i class="fa-solid fa-play"></i></button>` : ''}
         </div>
         <div class="yt-card-info">
           <h4 class="yt-card-title" title="${safeTitle}">${safeTitle}</h4>
-          <div class="yt-card-channel"><i class="fa-solid fa-circle-user"></i> ${safeChannel}</div>
+          <div class="yt-card-channel"><i class="fa-solid fa-circle-user"></i> ${safeChannel}${safeViews ? ` <span style="opacity:0.75;">• ${safeViews}</span>` : ''}${safePublished ? ` <span style="opacity:0.65;">• ${safePublished}</span>` : ''}</div>
           <div class="yt-card-actions">
             ${vidId ? `<button type="button" class="yt-card-btn play-chat-btn" data-action="play-in-chat" data-video-id="${vidId}" data-title="${safeTitle}"><i class="fa-solid fa-play"></i> Putar di Chat</button>` : ''}
             <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="yt-card-btn open-yt-btn"><i class="fa-brands fa-youtube"></i> Tonton Langsung di YouTube</a>
@@ -15003,7 +15150,10 @@ ${blocks}
           url: meta.url || `https://www.youtube.com/watch?v=${vidId}`,
           title: meta.title || `Video YouTube (${vidId})`,
           channel: meta.channel || 'YouTube',
-          thumbnail: meta.thumbnail || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`
+          thumbnail: meta.thumbnail || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`,
+          durationText: meta.durationText || '',
+          viewText: meta.viewText || '',
+          publishedText: meta.publishedText || ''
         };
       })
     );
@@ -16538,6 +16688,17 @@ ${blocks}
       AudioEngine.click();
       return;
     }
+    if (trimmedLow === '/youtube' || trimmedLow === '/yt' || trimmedLow === '/video') {
+      setVideoSearchMode(true, true);
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+        els.promptInput.focus();
+      }
+      showToast('🎬 Mode Pencarian YouTube Aktif! Ketik judul video atau topik yang ingin dicari di YouTube.');
+      AudioEngine.click();
+      return;
+    }
     if (trimmedLow === '/diagram' || trimmedLow === '/website' || trimmedLow === '/web' || trimmedLow === '/dokumen' || trimmedLow === '/kodenya-saja') {
       showToast(`Silakan ketik deskripsi setelah ${trimmedLow} (contoh: ${trimmedLow} alur sistem)`, 'info');
       if (els.promptInput) {
@@ -16927,11 +17088,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     } else {
       // MODE BIASA: Selalu jalankan streaming chat normal dengan pencarian web biasa otonom
       const isDocIntent = Boolean(options.docFormat || options.isDocCreation || (!options.websiteMode && isDocCreationPrompt(text)));
+      const isExplicitYouTubeCmd = /^\/(?:youtube|yt|video)\b/i.test(rawText.trim()) || isExplicitYouTubeSearchIntent(rawText);
       const streamRunOptions = {
         websiteMode: options.websiteMode,
         docFormat: options.docFormat,
         isDocCreation: isDocIntent,
         isWebCreation: !isDocIntent && Boolean(options.websiteMode || isWebsiteCreationPrompt(text)),
+        isYouTubeSearch: Boolean(STATE.isYouTubeSearchMode || isExplicitYouTubeCmd),
         isExplicitCleanCode: false,
         promptTitle: sanitizeTitle(text).substring(0, 36) || 'Dokumen_Resmi'
       };
@@ -17183,11 +17346,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   // bahkan bila Mode Pencarian Web sedang nonaktif.
   const EXTRACTION_TOOL_NAMES = ['browse_web_page', 'browse_web', 'browse_page', 'baca_web', 'extract_web', 'read_url', 'scrape_url', 'baca_url', 'ambil_web'];
 
-  // Aturan izin (dipakai saat EKSEKUSI call): search_youtube bila toggle YouTube aktif;
+  // Aturan izin (dipakai saat EKSEKUSI call): search_youtube diizinkan selalu (baik via toggle
+  // maupun saat model mendeteksi permintaan video YouTube secara otonom);
   // ekstraksi web URL & tool utility lokal selalu diizinkan; tool search bila Mode Pencarian Web aktif.
   function isAutonomousToolAllowed(toolName, webToolsAllowed) {
     const norm = normalizeToolName(toolName) || toolName;
-    if (norm === 'search_youtube') return Boolean(STATE.isYouTubeSearchMode);
+    if (norm === 'search_youtube') return true;
     if (EXTRACTION_TOOL_NAMES.includes(norm) || EXTRACTION_TOOL_NAMES.includes(toolName)) return true;
     if (LOCAL_UTILITY_TOOL_NAMES.includes(norm) || LOCAL_UTILITY_TOOL_NAMES.includes(toolName)) return true;
     return Boolean(webToolsAllowed);
@@ -17196,14 +17360,14 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   // Susun daftar tool yang benar-benar DIKIRIMKAN ke model (wajib konsisten dengan
   // isAutonomousToolAllowed di atas, jika tidak model menerima tool yang nantinya
   // diblokir, atau sebaliknya menerima tool yang tak pernah diumumkan):
-  //  - search_youtube            : bila toggle "Cari Video YouTube" aktif
+  //  - search_youtube            : bila toggle "Cari Video YouTube" aktif ATAU Mode Pencarian Web aktif
   //  - keluarga extract/browse   : SELALU
   //  - utility lokal (memori/code): SELALU
   //  - search_web/web_search     : bila Mode Pencarian Web aktif
   function getSelectableAutonomousTools(webToolsAllowed) {
     return AUTONOMOUS_WEB_TOOLS.filter((t) => {
       const name = t && t.function ? t.function.name : '';
-      if (name === 'search_youtube') return Boolean(STATE.isYouTubeSearchMode);
+      if (name === 'search_youtube') return Boolean(STATE.isYouTubeSearchMode || webToolsAllowed);
       if (EXTRACTION_TOOL_NAMES.includes(name)) return true;
       if (LOCAL_UTILITY_TOOL_NAMES.includes(name)) return true;
       return Boolean(webToolsAllowed);
@@ -17602,15 +17766,58 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       const meta = (lv.metadata && lv.metadata.lockupMetadataViewModel) || {};
       const title = (meta.title && meta.title.content) || '';
       if (title && !out.some((v) => v.videoId === lv.contentId)) {
+        let channel = '';
+        let viewText = (meta.metadata && meta.metadata.content) || '';
+        let publishedText = '';
+        const metaRows = meta?.metadata?.contentMetadataViewModel?.metadataRows;
+        if (Array.isArray(metaRows)) {
+          const allParts = [];
+          for (const row of metaRows) {
+            if (Array.isArray(row?.metadataParts)) {
+              for (const part of row.metadataParts) {
+                const txt = String(part?.text?.content || '').trim();
+                if (txt) allParts.push(txt);
+              }
+            }
+          }
+          if (allParts.length > 0 && !channel) channel = allParts[0];
+          for (let i = 1; i < allParts.length; i++) {
+            const p = allParts[i];
+            if (!viewText && /\b(?:views|view|tayangan|x ditonton|ditonton|watching|penonton)\b/i.test(p)) {
+              viewText = p;
+            } else if (!publishedText && /\b(?:ago|lalu|streamed|streaming|live|jam|hari|minggu|bulan|tahun|menit|detik|day|week|month|year|hour|minute)s?\b/i.test(p)) {
+              publishedText = p;
+            } else if (!viewText) {
+              viewText = p;
+            }
+          }
+        }
+        let durationText = '';
+        const overlays = lv?.contentImage?.thumbnailViewModel?.overlays || lv?.contentImage?.collectionThumbnailViewModel?.primaryThumbnail?.thumbnailViewModel?.overlays || [];
+        if (Array.isArray(overlays)) {
+          for (const ov of overlays) {
+            const badges = ov?.thumbnailOverlayBadgeViewModel?.thumbnailBadges || ov?.thumbnailBottomOverlayViewModel?.badges || [];
+            if (Array.isArray(badges)) {
+              for (const b of badges) {
+                const t = String(b?.thumbnailBadgeViewModel?.text || b?.text || '').trim();
+                if (t && /\d+:\d+|\b(?:LIVE|SHORTS)\b/i.test(t)) {
+                  durationText = t;
+                  break;
+                }
+              }
+            }
+            if (durationText) break;
+          }
+        }
         out.push({
           videoId: lv.contentId,
           title,
-          channel: '',
+          channel,
           channelUrl: '',
-          durationText: '',
+          durationText,
           durationSeconds: 0,
-          viewText: (meta.metadata && meta.metadata.content) || '',
-          publishedText: '',
+          viewText,
+          publishedText,
           description: '',
           url: `https://www.youtube.com/watch?v=${lv.contentId}`,
           thumbnail: `https://i.ytimg.com/vi/${lv.contentId}/hqdefault.jpg`,
@@ -17635,9 +17842,33 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   }
 
   async function searchYouTubeClient(query, maxResults = 6) {
-    const q = String(query || '').trim();
+    const rawQ = String(query || '').trim();
+    const cleanedQ = (typeof extractCleanYouTubeSearchQuery === 'function')
+      ? extractCleanYouTubeSearchQuery(rawQ)
+      : '';
+    const q = (cleanedQ && cleanedQ.length >= 2) ? cleanedQ : rawQ;
     const limit = Math.max(1, Math.min(10, parseInt(maxResults, 10) || 6));
     const payload = { success: false, query: q, count: 0, results: [], error: 'Pencarian video YouTube tidak tersedia saat ini.' };
+
+    const hydrateClientYtCache = (list) => {
+      if (!Array.isArray(list)) return;
+      for (const v of list) {
+        if (!v || !v.videoId) continue;
+        const existing = clientYouTubeCache.get(v.videoId) || {};
+        clientYouTubeCache.set(v.videoId, {
+          ...existing,
+          videoId: v.videoId,
+          url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`,
+          title: v.title || existing.title || 'YouTube Video',
+          author: v.channel || v.author || existing.author || 'YouTube Channel',
+          thumbnail: v.thumbnail || existing.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+          durationText: v.durationText || v.duration || existing.durationText || '',
+          viewText: v.viewText || v.views || existing.viewText || '',
+          publishedText: v.publishedText || existing.publishedText || '',
+          transcriptSnippet: v.description || existing.transcriptSnippet || ''
+        });
+      }
+    };
 
     const abortSignals = [AbortSignal.timeout(10000)];
     if (typeof STATE !== 'undefined' && STATE && STATE.abortController && STATE.abortController.signal) {
@@ -17658,7 +17889,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         });
         if (resp.ok) {
           const data = await resp.json();
-          if (data && Array.isArray(data.results)) {
+          if (data && Array.isArray(data.results) && data.results.length > 0) {
+            hydrateClientYtCache(data.results);
             payload.success = data.success !== false && data.results.length > 0;
             payload.results = data.results;
             payload.count = data.results.length;
@@ -17672,12 +17904,19 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
 
     // 2) Fallback lintas-origin lewat proxy publik (untuk GitHub Pages / endpoint gagal)
-    try {
-      const target = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}&hl=en&gl=US`;
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`;
-      const resp2 = await fetch(proxyUrl, { signal: combinedSignal });
-      if (resp2.ok) {
+    const target = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}&hl=id&gl=ID`;
+    const proxyUrls = [
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
+      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}`
+    ];
+
+    for (const proxyUrl of proxyUrls) {
+      try {
+        const resp2 = await fetch(proxyUrl, { signal: combinedSignal });
+        if (!resp2.ok) continue;
         const rawText = await resp2.text();
+        if (!rawText) continue;
+
         // Cek jika response adalah JSON (misal Invidious / Piped / custom REST API)
         try {
           const parsed = JSON.parse(rawText);
@@ -17687,19 +17926,27 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             for (const item of items) {
               if (out.length >= limit) break;
               if (item.videoId || item.title || item.url) {
+                const vid = item.videoId || '';
+                const dur = item.lengthSeconds ? `${Math.floor(item.lengthSeconds / 60)}:${String(item.lengthSeconds % 60).padStart(2, '0')}` : (item.durationText || item.duration || '');
+                const vText = item.viewCountText || item.viewText || (item.views ? `${item.views} views` : '');
                 out.push({
                   title: item.title || 'Video',
-                  url: item.videoId ? `https://www.youtube.com/watch?v=${item.videoId}` : (item.url || ''),
-                  videoId: item.videoId || '',
+                  url: vid ? `https://www.youtube.com/watch?v=${vid}` : (item.url || ''),
+                  videoId: vid,
                   channel: item.author || item.uploaderName || item.channel || '',
-                  duration: item.lengthSeconds ? `${Math.floor(item.lengthSeconds / 60)}:${String(item.lengthSeconds % 60).padStart(2, '0')}` : (item.duration || ''),
-                  views: item.viewCountText || (item.views ? `${item.views} views` : ''),
+                  durationText: dur,
+                  duration: dur,
+                  viewText: vText,
+                  views: vText,
+                  publishedText: item.publishedText || '',
+                  thumbnail: vid ? `https://i.ytimg.com/vi/${vid}/hqdefault.jpg` : (item.thumbnail || ''),
                   description: item.description || ''
                 });
               }
             }
           }
           if (out.length > 0) {
+            hydrateClientYtCache(out);
             payload.success = true;
             payload.results = out;
             payload.count = out.length;
@@ -17709,14 +17956,17 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         } catch (_) {}
 
         const results = ytClientParseHtml(rawText, limit);
-        payload.success = results.length > 0;
-        payload.results = results;
-        payload.count = results.length;
-        payload.error = payload.success ? undefined : payload.error;
-        return payload;
+        if (results.length > 0) {
+          hydrateClientYtCache(results);
+          payload.success = true;
+          payload.results = results;
+          payload.count = results.length;
+          payload.error = undefined;
+          return payload;
+        }
+      } catch (_) {
+        // coba proxy berikutnya
       }
-    } catch (_) {
-      // diamkan; payload kesalahan sudah siap
     }
     return payload;
   }
@@ -18931,10 +19181,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     // 5. Raw balanced JSON objects anywhere in text (di luar blok kode)
     const jsonBlocks = extractBalancedJsonObjects(textWithoutCode);
     for (const block of jsonBlocks) {
-      if (isLongCompleteText && block.start > 220) continue;
       try {
         const p = JSON.parse(block.json);
         const name = p.name || p.function || p.tool;
+        const normName = normalizeToolName(name);
+        if (isLongCompleteText && block.start > 220 && normName !== 'search_youtube') continue;
         if (isKnownAutonomousTool(name)) {
           const args = p.arguments ?? p.parameters ?? p.args ?? p.input ?? {};
           addCall(name, args, block.json);
@@ -18946,8 +19197,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const funcJsonRegex = /(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|search_youtube|youtube_search|cari_youtube|search_yt|youtube|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code|run_code|python_code|run_python|python)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
     let fjm;
     while ((fjm = funcJsonRegex.exec(textWithoutCode)) !== null) {
-      if (isLongCompleteText && fjm.index > 220) continue;
       const name = fjm[1];
+      if (isLongCompleteText && fjm.index > 220 && normalizeToolName(name) !== 'search_youtube') continue;
       try {
         let p;
         try {
@@ -18998,15 +19249,15 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
 
     // 7b. Single-argument function call syntax: search_web("query") or browse_web_page("url")
-    // Jika teks sangat panjang (> 300 kata), hanya izinkan jika pemanggilan ada di awal teks (< 200 karakter)
+    // Jika teks sangat panjang (> 300 kata), hanya izinkan jika pemanggilan ada di awal teks (< 200 karakter) atau search_youtube
     const funcRegex = new RegExp(`(${toolPattern})\\s*\\(\\s*(?:(?:query|url|q|link|target|code|topic|content|isi|kata_kunci|topik|script|cari|tautan|konten)\\s*[:=]\\s*)?(["'\`])([\\s\\S]*?)\\2\\s*\\)`, 'gi');
     let fm;
     while ((fm = funcRegex.exec(textWithoutCode)) !== null) {
-      if (isLongCompleteText && fm.index > 220) continue;
       const name = fm[1];
+      const normName = normalizeToolName(name);
+      if (isLongCompleteText && fm.index > 220 && normName !== 'search_youtube') continue;
       const val = fm[3].trim();
       if (val) {
-        const normName = normalizeToolName(name);
         const isUrlTool = ['browse_web_page', 'extract_web'].includes(normName);
         const isCodeTool = ['execute_python_code', 'run_python', 'python'].includes(normName);
         const isSaveMem = normName === 'save_memory';
@@ -19018,15 +19269,15 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
 
     // 8. Conversational triggers: "We will call search_web for <query>"
-    // Hanya picu jika berada di awal generasi (bukan teks penutup di akhir pesan panjang)
+    // Hanya picu jika berada di awal generasi (bukan teks penutup di akhir pesan panjang) atau search_youtube
     const convRegex = new RegExp(`(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari|menjelajahi|ekstrak)\\s+(${toolPattern})(?:\\s+(?:for|with|tentang|query|url|code|topic|isi|kata_kunci|topik|cari|tautan|:))?\\s*(["'\`])([^\\n]+?)\\2`, 'gi');
     let cvm;
     while ((cvm = convRegex.exec(textWithoutCode)) !== null) {
-      if (isLongCompleteText && cvm.index > 220) continue;
       const name = cvm[1];
+      const normName = normalizeToolName(name);
+      if (isLongCompleteText && cvm.index > 220 && normName !== 'search_youtube') continue;
       const val = cvm[3].trim();
       if (val) {
-        const normName = normalizeToolName(name);
         const isUrlTool = ['browse_web_page', 'extract_web'].includes(normName);
         const isCodeTool = normName === 'execute_python_code';
         const isSaveMem = normName === 'save_memory';
@@ -19656,11 +19907,29 @@ Tuliskan kode HTML5 atau React/Next.js (.jsx) lengkap yang fungsional dan siap j
 Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
       }
 
-      // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
+      // UNIVERSAL YOUTUBE METADATA & SEARCH GROUNDING FOR ALL MODELS
+      let hasYouTubeSearchGrounding = false;
       try {
         const ytRes = await getYouTubeGroundingContext(promptText, bubbleText);
         if (ytRes && ytRes.groundingContext) {
           systemContent = `${systemContent}\n\n${ytRes.groundingContext}`;
+          bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+        }
+        const ytSearchRes = await getYouTubeSearchToolGroundingContext(promptText, session, bubbleText, Boolean(runOptions.isYouTubeSearch));
+        if (ytSearchRes && ytSearchRes.groundingContext) {
+          hasYouTubeSearchGrounding = true;
+          systemContent = systemContent
+            ? `${systemContent}\n\n${ytSearchRes.groundingContext}`
+            : ytSearchRes.groundingContext;
+          if (Array.isArray(ytSearchRes.videoIds)) {
+            ytSearchRes.videoIds.forEach((vid) => {
+              if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
+            });
+          }
+          if (Array.isArray(ytSearchRes.sources) && ytSearchRes.sources.length > 0) {
+            if (!webSources) webSources = [];
+            webSources.push(...ytSearchRes.sources);
+          }
           bubbleText.innerHTML = '<span class="typing-cursor"></span>';
         }
       } catch (ytErr) {
@@ -19670,8 +19939,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // WEB SEARCH GROUNDING:
       // Aktif pada mode default search, atau sebagai fallback otomatis ketika mode autonomous search
       // berjalan pada model tanpa dukungan tools atau model gratis (agar tetap mendapat data internet terkini).
+      // Dilewati bila pencarian YouTube sudah dieksekusi di atas agar hasil video tidak ditimpa pencarian artikel Google.
       const needsGroundingFallback = STATE.searchMode === 'autonomous' && !doesModelSupportTools(modelName);
-      if (STATE.searchMode === 'default' || (STATE.webSearchEnabled && needsGroundingFallback)) {
+      if (!hasYouTubeSearchGrounding && (STATE.searchMode === 'default' || (STATE.webSearchEnabled && needsGroundingFallback))) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, needsGroundingFallback);
           if (searchRes && searchRes.systemPromptContext) {
@@ -20053,14 +20323,17 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
             });
           }
-          if (toolExecRes.sources && Array.isArray(toolExecRes.sources) && toolExecRes.sources.length > 0) {
+          if (normalizeToolName(toolName) === 'search_youtube' || (Array.isArray(toolExecRes.videoIds) && toolExecRes.videoIds.length > 0)) {
+            roundToolResponsesText += `\n[FAKTA & DATA VIDEO YOUTUBE DARI ${toolName}]:\n${toolExecRes.text}\n\n`;
+          } else if (toolExecRes.sources && Array.isArray(toolExecRes.sources) && toolExecRes.sources.length > 0) {
             let structuredEvidence = `\n[FAKTA & BUKTI RESMI HASIL PENELUSURAN DARI ${toolName}]:\n`;
             toolExecRes.sources.slice(0, 10).forEach((s, idx) => {
               const cleanTitle = (s.title || '').trim();
               const domain = s.domain || 'web';
+              const cleanUrl = (s.url || '').trim();
               const cleanSnippet = (s.snippet || '').replace(/<[^>]+>/g, '').trim();
               const dateStr = s.pubDate || '';
-              structuredEvidence += `[Sumber ${idx + 1}] "${cleanTitle}"\n- Penerbit / Domain: ${domain}${dateStr ? `\n- Tanggal Publikasi: ${dateStr}` : ''}\n- Rincian Fakta: ${cleanSnippet}\n\n`;
+              structuredEvidence += `[Sumber ${idx + 1}] "${cleanTitle}"\n- Penerbit / Domain: ${domain}${cleanUrl ? `\n- URL Resmi: ${cleanUrl}` : ''}${dateStr ? `\n- Tanggal Publikasi: ${dateStr}` : ''}\n- Rincian Fakta: ${cleanSnippet}\n\n`;
             });
             roundToolResponsesText += structuredEvidence;
           } else {
@@ -20459,8 +20732,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         }
       }
 
-      // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB
-      if (webSources && webSources.length > 0 && fullText) {
+      // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB (Lewati jika respon berupa hasil pencarian video YouTube)
+      if (webSources && webSources.length > 0 && fullText && foundYouTubeIds.length === 0) {
         fullText = verifyAndSanitizeWebDigestion(fullText, webSources, allAccumulatedToolResponsesText);
       }
 
@@ -20528,6 +20801,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           websiteMode: runOptions.websiteMode,
           docFormat: runOptions.docFormat,
           sources: webSources,
+          videoIds: foundYouTubeIds.length > 0 ? [...foundYouTubeIds] : undefined,
           files: (generatedFiles.length > 0 && !hasNegativePreview) ? generatedFiles : undefined,
           stats: { duration: totalTime, tps: tps, tokens: tokenCount },
           timestamp: new Date().toISOString()
@@ -20991,11 +21265,29 @@ Tuliskan kode HTML5 atau React/Next.js (.jsx) lengkap yang fungsional dan siap j
 Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
       }
 
-      // UNIVERSAL YOUTUBE METADATA GROUNDING FOR ALL MODELS
+      // UNIVERSAL YOUTUBE METADATA & SEARCH GROUNDING FOR ALL MODELS
+      let hasYouTubeSearchGrounding = false;
       try {
         const ytRes = await getYouTubeGroundingContext(promptText, bubbleText);
         if (ytRes && ytRes.groundingContext) {
           systemContent = `${systemContent}\n\n${ytRes.groundingContext}`;
+          bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+        }
+        const ytSearchRes = await getYouTubeSearchToolGroundingContext(promptText, session, bubbleText, Boolean(runOptions.isYouTubeSearch));
+        if (ytSearchRes && ytSearchRes.groundingContext) {
+          hasYouTubeSearchGrounding = true;
+          systemContent = systemContent
+            ? `${systemContent}\n\n${ytSearchRes.groundingContext}`
+            : ytSearchRes.groundingContext;
+          if (Array.isArray(ytSearchRes.videoIds)) {
+            ytSearchRes.videoIds.forEach((vid) => {
+              if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
+            });
+          }
+          if (Array.isArray(ytSearchRes.sources) && ytSearchRes.sources.length > 0) {
+            if (!webSources) webSources = [];
+            webSources.push(...ytSearchRes.sources);
+          }
           bubbleText.innerHTML = '<span class="typing-cursor"></span>';
         }
       } catch (ytErr) {
@@ -21017,8 +21309,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // WEB SEARCH GROUNDING:
       // Aktif pada mode default search, atau sebagai fallback otomatis ketika mode autonomous search
       // berjalan pada model gratis / model tanpa dukungan tools (agar tetap mendapat data internet terkini).
+      // Dilewati bila pencarian YouTube sudah dieksekusi di atas agar hasil video tidak ditimpa pencarian artikel Google.
       const needsGroundingFallback = STATE.searchMode === 'autonomous' && (isFreeModel || !STATE.settings.openRouterKey || !doesModelSupportTools(effectiveInitialModel));
-      if (STATE.searchMode === 'default' || (STATE.webSearchEnabled && needsGroundingFallback)) {
+      if (!hasYouTubeSearchGrounding && (STATE.searchMode === 'default' || (STATE.webSearchEnabled && needsGroundingFallback))) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, needsGroundingFallback);
           if (searchRes && searchRes.systemPromptContext) {
@@ -21660,14 +21953,17 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (vid && !foundYouTubeIds.includes(vid)) foundYouTubeIds.push(vid);
             });
           }
-          if (toolExecRes.sources && Array.isArray(toolExecRes.sources) && toolExecRes.sources.length > 0) {
+          if (normalizeToolName(toolName) === 'search_youtube' || (Array.isArray(toolExecRes.videoIds) && toolExecRes.videoIds.length > 0)) {
+            roundToolResponsesText += `\n[FAKTA & DATA VIDEO YOUTUBE DARI ${toolName}]:\n${toolExecRes.text}\n\n`;
+          } else if (toolExecRes.sources && Array.isArray(toolExecRes.sources) && toolExecRes.sources.length > 0) {
             let structuredEvidence = `\n[FAKTA & BUKTI RESMI HASIL PENELUSURAN DARI ${toolName}]:\n`;
             toolExecRes.sources.slice(0, 10).forEach((s, idx) => {
               const cleanTitle = (s.title || '').trim();
               const domain = s.domain || 'web';
+              const cleanUrl = (s.url || '').trim();
               const cleanSnippet = (s.snippet || '').replace(/<[^>]+>/g, '').trim();
               const dateStr = s.pubDate || '';
-              structuredEvidence += `[Sumber ${idx + 1}] "${cleanTitle}"\n- Penerbit / Domain: ${domain}${dateStr ? `\n- Tanggal Publikasi: ${dateStr}` : ''}\n- Rincian Fakta: ${cleanSnippet}\n\n`;
+              structuredEvidence += `[Sumber ${idx + 1}] "${cleanTitle}"\n- Penerbit / Domain: ${domain}${cleanUrl ? `\n- URL Resmi: ${cleanUrl}` : ''}${dateStr ? `\n- Tanggal Publikasi: ${dateStr}` : ''}\n- Rincian Fakta: ${cleanSnippet}\n\n`;
             });
             roundToolResponsesText += structuredEvidence;
           } else {
@@ -22182,8 +22478,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         }
       }
 
-      // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB
-      if (webSources && webSources.length > 0 && fullText) {
+      // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB (Lewati jika respon berupa hasil pencarian video YouTube)
+      if (webSources && webSources.length > 0 && fullText && foundYouTubeIds.length === 0) {
         fullText = verifyAndSanitizeWebDigestion(fullText, webSources, allAccumulatedToolResponsesText);
       }
 
@@ -22273,6 +22569,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           files: (generatedFiles.length > 0 && !hasNegativePreview) ? generatedFiles : undefined,
           imageUrl: collectedImages[0] || undefined,
           sources: webSources,
+          videoIds: foundYouTubeIds.length > 0 ? [...foundYouTubeIds] : undefined,
           stats: { duration: totalTime, tps: tps, tokens: tokenCount },
           timestamp: new Date().toISOString()
         });
@@ -22805,6 +23102,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       if (els.topNavActiveToolTitle) els.topNavActiveToolTitle.textContent = 'Buat Musik';
       const modelName = getMusicModelDisplayName(STATE.settings.musicModel || 'lyria');
       if (els.topNavActiveToolModel) els.topNavActiveToolModel.textContent = modelName;
+    } else if (STATE.isYouTubeSearchMode) {
+      els.topNavActiveToolWrap.style.display = 'inline-flex';
+      els.topNavActiveToolWrap.className = 'top-nav-active-tool-wrap tool-theme-youtube';
+      if (els.topNavActiveToolIcon) els.topNavActiveToolIcon.className = 'fa-brands fa-youtube';
+      if (els.topNavActiveToolTitle) els.topNavActiveToolTitle.textContent = 'Cari YouTube';
+      if (els.topNavActiveToolModel) els.topNavActiveToolModel.textContent = 'Video & Musik';
     } else {
       els.topNavActiveToolWrap.style.display = 'none';
       closeImageModelDropdown();
@@ -24982,6 +25285,11 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     if (t.startsWith('/music') || t.startsWith('/musik') || t.startsWith('/audio') || t.startsWith('/song') || t.startsWith('/lagu')) return true;
     if (t.startsWith('music:') || t.startsWith('musik:') || t.startsWith('audio:') || t.startsWith('song:') || t.startsWith('lagu:')) return true;
 
+    // 1b. Jangan picu AI Music Studio jika mode Pencarian YouTube sedang aktif atau pengguna meminta video/lagu dari YouTube
+    if (STATE.isYouTubeSearchMode) return false;
+    if (t.startsWith('/youtube') || t.startsWith('/yt') || t.startsWith('/video')) return false;
+    if (/\b(?:youtube|yt|youtu\.be|video|channel|tonton|menonton|nonton|cari|carikan)\b/i.test(t)) return false;
+
     // 2. Filter negatif: jangan picu jika pengguna sedang berdiskusi, komplain bug, atau meminta perbaikan kode
     if (/\b(?:bug|error|masalah|issue|perbaiki|troubleshoot|mengapa|kenapa|source code|skrip|script|koding|coding)\b/i.test(t)) {
       return false;
@@ -25156,6 +25464,11 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     // 1. Direct slash / command prefix
     if (t.startsWith('/image') || t.startsWith('/img') || t.startsWith('/gambar')) return true;
     if (t.startsWith('gambar:') || t.startsWith('image:') || t.startsWith('draw:') || t.startsWith('paint:')) return true;
+
+    // 1b. Jangan picu pembuatan gambar jika mode Pencarian YouTube sedang aktif atau prompt mencari video YouTube
+    if (STATE.isYouTubeSearchMode) return false;
+    if (t.startsWith('/youtube') || t.startsWith('/yt') || t.startsWith('/video')) return false;
+    if (/\b(?:youtube|yt|youtu\.be|video|channel|tonton|menonton|nonton)\b/i.test(t)) return false;
 
     // 2. Filter negatif: jangan picu jika sedang berdiskusi bug / koding
     if (/\b(?:bug|error|masalah|issue|perbaiki|troubleshoot|mengapa|kenapa|source code|skrip|script|koding|coding)\b/i.test(t)) {
@@ -25351,7 +25664,13 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
       const checkIcon = els.attachOptionYouTubeSearch.querySelector('.attach-yt-check');
       if (checkIcon) checkIcon.style.display = isOn ? 'block' : 'none';
     }
+    if (els.promptInput && !STATE.isImageGenMode && !STATE.isMusicGenMode) {
+      els.promptInput.placeholder = isOn
+        ? 'Ketik judul video, musik, atau topik yang ingin dicari di YouTube...'
+        : '';
+    }
     updateToolActiveDot();
+    updateActiveModeCardsState();
   }
 
   function setYouTubeSearchMode(enabled, silent = false) {
@@ -25362,13 +25681,23 @@ Tuliskan langsung jawabannya dengan gaya ramah dan profesional.`;
     const on = Boolean(enabled);
     STATE.isYouTubeSearchMode = on;
     STATE.settings.youtubeSearchTool = on;
+    if (on) {
+      if (STATE.isImageGenMode) {
+        STATE.isImageGenMode = false;
+        updateImageGenModeUI();
+      }
+      if (STATE.isMusicGenMode) {
+        STATE.isMusicGenMode = false;
+        updateMusicGenModeUI();
+      }
+    }
     updateVideoSearchUI();
     savePersistedState();
     AudioEngine.click();
     if (!silent) {
       showToast(
         on
-          ? '🎬 Tool Pencarian YouTube aktif. Model AI dapat mencari dan mereferensikan video YouTube.'
+          ? '🎬 Tool Pencarian YouTube aktif! Ketik video atau musik yang ingin dicari di YouTube.'
           : '🎬 Tool Pencarian YouTube dinonaktifkan.',
         'info'
       );
@@ -29889,15 +30218,16 @@ Aturan:
     {
       id: 'youtube',
       command: '/youtube',
-      title: 'YouTube Intel & Summary',
-      badge: 'Video / Transkrip',
-      desc: 'Ekstrak intisari, analisis transkrip, & wawasan video YouTube',
+      title: 'YouTube Search & Intel',
+      badge: 'Video / Musik',
+      desc: 'Cari & putar video/musik YouTube langsung di chat atau analisis link YouTube',
       iconClass: 'fa-brands fa-youtube',
       iconColor: '#ef4444',
       iconBg: 'rgba(239, 68, 68, 0.12)',
+      action: 'youtube_mode',
       template: '/youtube ',
-      placeholder: 'Tempel link video YouTube untuk dianalisis...',
-      aliases: ['yt', 'video', 'transkrip']
+      placeholder: 'Ketik judul video/musik YouTube yang ingin dicari atau tempel link...',
+      aliases: ['yt', 'video', 'transkrip', 'cari youtube']
     },
     {
       id: 'kodenya-saja',
@@ -30096,6 +30426,19 @@ Aturan:
       }
       hideSlashCommandsMenu();
       showToast('🎵 Mode AI Music Studio Aktif!');
+      AudioEngine.success();
+      return;
+    }
+
+    if (cmd.action === 'youtube_mode') {
+      setVideoSearchMode(true, true);
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+        els.promptInput.focus();
+      }
+      hideSlashCommandsMenu();
+      showToast('🎬 Mode Pencarian YouTube Aktif! Ketik judul video atau musik yang ingin dicari.');
       AudioEngine.success();
       return;
     }
@@ -31031,8 +31374,10 @@ Aturan:
       e.stopPropagation();
       if (STATE.isMusicGenMode) {
         toggleMusicModelDropdown(e);
-      } else {
+      } else if (STATE.isImageGenMode || STATE.photoEditImage) {
         toggleImageModelDropdown(e);
+      } else if (STATE.isYouTubeSearchMode) {
+        els.promptInput?.focus();
       }
       AudioEngine.click();
     });
@@ -31043,11 +31388,13 @@ Aturan:
         STATE.isMusicGenMode = false;
         updateMusicGenModeUI();
         closeMusicModelDropdown();
-      } else {
+      } else if (STATE.isImageGenMode || STATE.photoEditImage) {
         STATE.isImageGenMode = false;
         clearPhotoEdit();
         updateImageGenModeUI();
         closeImageModelDropdown();
+      } else if (STATE.isYouTubeSearchMode) {
+        setVideoSearchMode(false);
       }
       AudioEngine.click();
     });

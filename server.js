@@ -1838,10 +1838,21 @@ ${contextBlocks}
 const youtubeSearchCache = new Map();
 const YOUTUBE_SEARCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const INVIDIOUS_INSTANCES = [
-  'https://inv.nadeko.net',
   'https://yewtu.be',
-  'https://invidious.nerdvpn.de'
+  'https://invidious.privacyredirect.com',
+  'https://inv.tux.pizza',
+  'https://inv.nadeko.net'
 ];
+
+function cleanServerYouTubeQuery(rawQuery) {
+  if (!rawQuery || typeof rawQuery !== 'string') return '';
+  let q = rawQuery.trim();
+  q = q.replace(/^\/(?:youtube|yt|video|transkrip)\b\s*/i, '');
+  q = q.replace(/^(?:(?:tolong|coba|bisa|mohon|ai|bot|sistem)\s+)*(?:carikan|cari|temukan|tampilkan|putarkan|putar|mainkan|setelkan|setel|berikan|rekomendasikan|search|find|play|show)\s+(?:saya\s+|kita\s+|dong\s+)?(?:video\s+|musik\s+|lagu\s+|klip\s+|tutorial\s+)?(?:di\s+youtube\s+|youtube\s+|dari\s+youtube\s+)?(?:tentang\s+|mengenai\s+|soal\s+|berjudul\s+|dengan\s+judul\s+|yang\s+membahas\s+)?/i, '');
+  q = q.replace(/\s+(?:di\s+youtube|dari\s+youtube|on\s+youtube|di\s+yt)\s*[\?\.\!]*$/i, '');
+  q = q.replace(/^["'`]+|["'`]+$/g, '').trim();
+  return q.length >= 2 ? q : rawQuery.trim();
+}
 
 // "12:34" / "1:02:03" -> detik
 function youtubeDurationToSeconds(text) {
@@ -1919,7 +1930,32 @@ function mapLockupViewModel(lv) {
     const meta = (lv.metadata && lv.metadata.lockupMetadataViewModel) || {};
     const title = (meta.title && meta.title.content) || '';
     if (!title) return null;
-    const metaLine = (meta.metadata && meta.metadata.content) || '';
+    let metaLine = (meta.metadata && meta.metadata.content) || '';
+    let channel = '';
+    let viewText = '';
+    let publishedText = '';
+    const rows = meta.metadata?.contentMetadataViewModel?.metadataRows;
+    if (Array.isArray(rows)) {
+      const rowTexts = rows.map((r) => (Array.isArray(r.metadataParts) ? r.metadataParts.map((p) => p?.text?.content || '').filter(Boolean) : []));
+      if (rowTexts[0] && rowTexts[0][0]) channel = rowTexts[0][0];
+      if (rowTexts[1]) {
+        viewText = rowTexts[1][0] || '';
+        publishedText = rowTexts[1][1] || '';
+      }
+      if (!metaLine) metaLine = rowTexts.map((rt) => rt.join(' • ')).filter(Boolean).join(' | ');
+    }
+    let durationText = '';
+    const overlays = lv.contentImage?.thumbnailViewModel?.overlays || lv.contentImage?.collectionThumbnailViewModel?.primaryThumbnail?.thumbnailViewModel?.overlays || [];
+    if (Array.isArray(overlays)) {
+      for (const ov of overlays) {
+        const badges = ov?.thumbnailOverlayBadgeViewModel?.thumbnailBadges || [];
+        for (const b of badges) {
+          const t = b?.thumbnailBadgeViewModel?.text;
+          if (t && /\d+:\d+/.test(t)) { durationText = t; break; }
+        }
+        if (durationText) break;
+      }
+    }
     const sources = (meta.image && meta.image.thumbnailSources) || [];
     let thumb = '';
     for (const s of sources) {
@@ -1931,12 +1967,12 @@ function mapLockupViewModel(lv) {
     return {
       videoId: lv.contentId,
       title,
-      channel: '',
+      channel,
       channelUrl: '',
-      durationText: '',
-      durationSeconds: 0,
-      viewText: metaLine,
-      publishedText: '',
+      durationText,
+      durationSeconds: youtubeDurationToSeconds(durationText),
+      viewText: viewText || metaLine,
+      publishedText,
       description: metaLine.slice(0, 260),
       url: `https://www.youtube.com/watch?v=${lv.contentId}`,
       thumbnail: thumb || `https://i.ytimg.com/vi/${lv.contentId}/hqdefault.jpg`,
@@ -1974,7 +2010,7 @@ function collectYouTubeSearchResults(node, out, limit) {
 }
 
 async function searchViaYouTubeResultsPage(query, limit) {
-  const target = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&hl=en&gl=US`;
+  const target = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&hl=id&gl=ID`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 10000);
   try {
@@ -1983,7 +2019,7 @@ async function searchViaYouTubeResultsPage(query, limit) {
       headers: {
         'User-Agent': YOUTUBE_SEARCH_UA,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
         'Cookie': 'SOCS=CAI'
       }
     });
@@ -2072,8 +2108,9 @@ async function enrichYouTubeSearchResults(results) {
  * @returns {Promise<{success:boolean, query:string, count:number, results:Array, error?:string}>}
  */
 async function searchYouTubeVideos(query, maxResults = 6) {
-  const q = String(query || '').trim();
-  if (!q) throw new Error('Parameter query tidak boleh kosong.');
+  const rawQ = String(query || '').trim();
+  if (!rawQ) throw new Error('Parameter query tidak boleh kosong.');
+  const q = cleanServerYouTubeQuery(rawQ) || rawQ;
   const limit = Math.max(1, Math.min(10, parseInt(maxResults, 10) || 6));
   const cacheKey = `${q.toLowerCase()}::${limit}`;
   if (youtubeSearchCache.has(cacheKey)) {
@@ -2085,8 +2122,41 @@ async function searchYouTubeVideos(query, maxResults = 6) {
   }
 
   let results = await searchViaYouTubeResultsPage(q, limit);
+  if (results.length === 0 && q !== rawQ) {
+    results = await searchViaYouTubeResultsPage(rawQ, limit);
+  }
   if (results.length === 0) {
     results = await searchViaInvidious(q, limit);
+  }
+  // Strategi fallback ke-3: jika scraping YouTube & Invidious diblokir IP, cari tautan youtube.com via mesin pencari web + perkaya via oEmbed
+  if (results.length === 0 && typeof performAutonomousSearch === 'function') {
+    try {
+      const webRes = await performAutonomousSearch(`${q} site:youtube.com/watch`, limit * 2, q);
+      const webItems = (webRes && Array.isArray(webRes.results)) ? webRes.results : [];
+      const seenVid = new Set();
+      for (const item of webItems) {
+        if (results.length >= limit) break;
+        const ids = extractYouTubeVideoIds(item.url || '');
+        const vidId = ids && ids[0];
+        if (vidId && !seenVid.has(vidId)) {
+          seenVid.add(vidId);
+          results.push({
+            videoId: vidId,
+            title: String(item.title || '').replace(/\s*-\s*YouTube$/i, '').trim() || `Video YouTube (${vidId})`,
+            channel: '',
+            channelUrl: '',
+            durationText: '',
+            durationSeconds: 0,
+            viewText: '',
+            publishedText: item.pubDate || '',
+            description: String(item.snippet || '').slice(0, 260),
+            url: `https://www.youtube.com/watch?v=${vidId}`,
+            thumbnail: `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`,
+            source: 'YouTube Web Index'
+          });
+        }
+      }
+    } catch (_) {}
   }
   if (results.length > 0) {
     results = await enrichYouTubeSearchResults(results);
