@@ -9,7 +9,12 @@
   const TEXT_SAFETY = window.ZozTextSafety || null;
   const safeAssistantText = (text) => TEXT_SAFETY && typeof text === 'string'
     ? TEXT_SAFETY.stripReasoningText(text)
-    : (typeof text === 'string' ? text.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '').trim() : '');
+    : (typeof text === 'string' ? text
+        .replace(/<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>[\s\S]*?(?:<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)>|$)/gi, '')
+        .replace(/\[(?:THOUGHT|REASONING)\][\s\S]*?(?:\[\/(?:THOUGHT|REASONING)\]|$)/gi, '')
+        .replace(/<\/?(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/gi, '')
+        .replace(/\[\/?(?:THOUGHT|REASONING)\]/gi, '')
+        .trim() : '');
 
   const IS_VERCEL = Boolean(location.hostname && location.hostname.endsWith('vercel.app'));
   const IS_GITHUB_PAGES = Boolean(location.hostname && location.hostname.endsWith('github.io')) || location.protocol === 'file:';
@@ -756,6 +761,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       openRouterModel: 'openrouter/free',
       imageModel: 'flux',
       musicModel: 'google/lyria-3-clip-preview',
+      useCustomParameters: false, // Default false: gunakan parameter bawaan resmi penyedia OpenRouter/Ollama
       temperature: 0.7,
       topP: 0.9,
       maxTokens: 32768,
@@ -1187,6 +1193,7 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     testSerperBtn: $('#testSerperBtn'),
     settingAutoPolicy: $('#settingAutoPolicy'),
     settingMusicModel: $('#settingMusicModel'),
+    paramUseModelDefaults: $('#paramUseModelDefaults'),
     paramTemperature: $('#paramTemperature'),
     valTemperature: $('#valTemperature'),
     paramTopP: $('#paramTopP'),
@@ -5362,13 +5369,8 @@ RESONANSI: ${this.currentVibe}
   function splitReasoningAndContent(rawText) {
     if (TEXT_SAFETY) return TEXT_SAFETY.splitReasoningAndContent(rawText);
     if (typeof rawText !== 'string' || !rawText) return { reasoning: '', content: '', isThinking: false };
-    const open = rawText.toLowerCase().indexOf('<think>');
-    if (open < 0) return { reasoning: '', content: rawText, isThinking: false };
-    let content = rawText.slice(0, open);
-    const close = rawText.toLowerCase().indexOf('</think>', open + 7);
-    if (close < 0) return { reasoning: rawText.slice(open + 7), content, isThinking: true };
-    content += rawText.slice(close + 8);
-    return { reasoning: rawText.slice(open + 7, close), content: content.trim(), isThinking: false };
+    const cleanContent = safeAssistantText(rawText);
+    return { reasoning: '', content: cleanContent, isThinking: false };
   }
 
   function cleanWebExtractedContent(text) {
@@ -5911,9 +5913,8 @@ RESONANSI: ${this.currentVibe}
   function renderMarkdown(rawText, isStreaming = false) {
     if (!rawText) return '';
     
-    // Pisahkan blok pemikiran AI (<think>) dan konten jawaban utama secara deterministik
-    const parsedBlocks = splitReasoningAndContent(rawText);
-    const mainText = parsedBlocks.content || (parsedBlocks.reasoning && !parsedBlocks.isThinking ? parsedBlocks.reasoning : '');
+    // Bersihkan blok pemikiran internal AI secara deterministik (pengguna hanya melihat output murni)
+    const mainText = safeAssistantText(rawText);
     
     let contentHtml = '';
     if (mainText) {
@@ -8534,7 +8535,7 @@ RESONANSI: ${this.currentVibe}
       this.prefixHtml = prefixHtml;
       this.options = options || {};
       this.text = '';
-      this.reasoningText = '';
+      this.isThinking = false;
       this.renderTimer = null; // handle setTimeout render terjadwal (coalesced)
       this.lastRenderTime = 0;
       this.isDone = false;
@@ -8546,12 +8547,11 @@ RESONANSI: ${this.currentVibe}
     }
 
     appendReasoning(reasoningDelta) {
-      if (reasoningDelta === null || reasoningDelta === undefined) return;
       if (this.isLoopTerminated || this.isDone) return;
-      const str = String(reasoningDelta);
-      if (!str) return;
-      this.reasoningText += str;
+      // Jangan pernah masukkan pemikiran AI ke teks jawaban.
+      // Hanya tampilkan status berpikir jika teks jawaban utama belum mengalir.
       if (!this.text) {
+        this.isThinking = true;
         this.scheduleRender();
       }
     }
@@ -8601,6 +8601,7 @@ RESONANSI: ${this.currentVibe}
       if (this.isLoopTerminated || this.isDone) return;
       const str = String(delta);
       if (!str) return;
+      this.isThinking = false;
       this.text += str;
 
       if (this.detectRepetitionLoop()) {
@@ -8621,7 +8622,7 @@ RESONANSI: ${this.currentVibe}
       if (this.renderTimer !== null) return;
       const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
       const minInterval = isMobile ? 120 : 75;
-      const interval = Math.min(220, Math.max(minInterval, Math.floor((this.text || this.reasoningText).length / 120)));
+      const interval = Math.min(220, Math.max(minInterval, Math.floor(this.text.length / 120)));
       const delay = Math.max(0, this.lastRenderTime + interval - performance.now());
       this.renderTimer = setTimeout(() => {
         this.renderTimer = null;
@@ -8632,11 +8633,13 @@ RESONANSI: ${this.currentVibe}
 
     render() {
       if (!this.el) return;
-      const rawDisplay = this.text || (this.reasoningText && !this.isDone ? '*Sedang berpikir...*' : this.reasoningText);
-      let displayText = rawDisplay;
-      if (this.text && typeof scrubRawToolCallArtifacts === 'function') {
-        const scrubbed = scrubRawToolCallArtifacts(this.text);
-        if (!scrubbed.trim() && this.text.trim()) {
+      let displayText = this.text ? safeAssistantText(this.text) : '';
+      if (!displayText && this.isThinking && !this.isDone) {
+        displayText = '*Sedang berpikir...*';
+      }
+      if (displayText && typeof scrubRawToolCallArtifacts === 'function') {
+        const scrubbed = scrubRawToolCallArtifacts(displayText);
+        if (!scrubbed.trim() && displayText.trim()) {
           displayText = '*Membaca dan menyintesis data web...*';
         } else if (scrubbed.trim()) {
           displayText = scrubbed;
@@ -8656,15 +8659,13 @@ RESONANSI: ${this.currentVibe}
       // TANPA menyentuh DOM (jalur completion merender sendiri di bawahnya).
       const shouldRender = opts.render !== false;
       this.isDone = true;
+      this.isThinking = false;
       if (this.renderTimer !== null) {
         clearTimeout(this.renderTimer);
         this.renderTimer = null;
       }
-      // opts.promoteReasoning === false → JANGAN jadikan reasoning/CoT sebagai jawaban
-      // (dipakai pada putaran tool-call & digesti web agar monolog internal tak bocor).
-      if (opts.promoteReasoning !== false && !this.text.trim() && this.reasoningText.trim()) {
-        this.text = this.reasoningText.trim();
-      }
+      // Bersihkan segala tag pemikiran internal — pengguna HANYA menerima output jawaban murni
+      this.text = safeAssistantText(this.text || '');
       if (this.text && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.sanitizeModelText === 'function') {
         const sanitized = BioEndocrine.sanitizeModelText(this.text);
         if (sanitized !== this.text) {
@@ -9262,13 +9263,16 @@ RESONANSI: ${this.currentVibe}
         model: curModel,
         messages: messagesPayload,
         stream: true,
+        include_reasoning: false,
         provider: { allow_fallbacks: true }
       };
-      if (!isReasoning) {
-        basePayload.temperature = parseFloat(STATE.settings.temperature) || 0.7;
-      }
-      if (!isLiquid && !isReasoning) {
-        basePayload.top_p = parseFloat(STATE.settings.topP) || 0.9;
+      if (STATE.settings.useCustomParameters) {
+        if (!isReasoning && STATE.settings.temperature !== null && STATE.settings.temperature !== undefined) {
+          basePayload.temperature = parseFloat(STATE.settings.temperature);
+        }
+        if (!isLiquid && !isReasoning && STATE.settings.topP !== null && STATE.settings.topP !== undefined) {
+          basePayload.top_p = parseFloat(STATE.settings.topP);
+        }
       }
 
       for (const routeType of routesToTry) {
@@ -9454,9 +9458,7 @@ RESONANSI: ${this.currentVibe}
         model: modelName,
         messages: messagesPayload,
         stream: true,
-        options: {
-          temperature: parseFloat(STATE.settings.temperature)
-        },
+        ...(STATE.settings.useCustomParameters && STATE.settings.temperature !== null ? { options: { temperature: parseFloat(STATE.settings.temperature) } } : {}),
         endpoint: ep,
         ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {}),
         ...(STATE.settings.openRouterKey ? { openRouterKey: STATE.settings.openRouterKey } : {})
@@ -18395,6 +18397,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         : (Array.isArray(m.images) && m.images.length > 0 ? m.images : (m.image ? [m.image] : []));
 
       let textContent = (m.content || '').trim();
+      if (m.role === 'assistant') {
+        textContent = safeAssistantText(textContent);
+      }
       if (!textContent && mImgs.length === 0) {
         return; // skip blank message turns
       }
@@ -18789,15 +18794,18 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         sessionId: session?.id || null,
         messages: messagesPayload,
         stream: true,
-        options: {
-          temperature: parseFloat(STATE.settings.temperature) || 0.7,
-          top_p: parseFloat(STATE.settings.topP) || 0.9,
-          repeat_penalty: 1.15,
-          num_predict: -1, // Tanpa batas token generasi (infinite sampai tuntas)
-          num_ctx: 32768   // Context window 32k untuk menampung dokumen/website panjang
-        },
         endpoint: ep
       };
+      // Hapus batasan parameter model: gunakan parameter bawaan (default) resmi Modelfile Ollama
+      if (STATE.settings.useCustomParameters) {
+        requestBody.options = {};
+        if (STATE.settings.temperature !== null && STATE.settings.temperature !== undefined) {
+          requestBody.options.temperature = parseFloat(STATE.settings.temperature);
+        }
+        if (STATE.settings.topP !== null && STATE.settings.topP !== undefined) {
+          requestBody.options.top_p = parseFloat(STATE.settings.topP);
+        }
+      }
       // Tool video YouTube selalu disertakan; tool web hanya saat Mode Pencarian Web aktif.
       const selectedOllamaTools = getSelectableAutonomousTools(canRunAutonomous);
       if (selectedOllamaTools.length > 0) requestBody.tools = selectedOllamaTools;
@@ -18995,7 +19003,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // render:false → render final tunggal ada di bawah (finalRenderedContent),
       // sehingga renderMarkdown + enhanceCodeBlocks/hljs tidak dijalankan dua kali.
-      fullText = safeAssistantText(streamRenderer.finish({ render: false, promoteReasoning: !(accumulatedToolCalls && accumulatedToolCalls.length > 0) }));
+      fullText = safeAssistantText(streamRenderer.finish({ render: false }));
 
       // ==================== OLLAMA AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const canRunAutonomousSearch = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
@@ -19223,11 +19231,11 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           model: modelName,
           messages: conversationChain,
           stream: true,
-          options: (hasExecutedSearch || (webSources && webSources.length > 0))
-            ? { ...(requestBody.options || {}), temperature: 0.35, top_p: 0.65 }
-            : requestBody.options,
           endpoint: ep
         };
+        if (requestBody.options) {
+          digestionBody.options = requestBody.options;
+        }
         if (!isLastRound && !hasBrowsedWeb && selectedOllamaTools && selectedOllamaTools.length > 0) {
           const availableTools = selectedOllamaTools.filter(t => {
             const tName = normalizeToolName(t?.function?.name || t?.name || '');
@@ -19333,7 +19341,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
               }
             } catch (_) {}
           }
-          const finishedDigestion = digestionRenderer.finish({ render: false, promoteReasoning: !(allAccumulatedToolResponsesText || (webSources && webSources.length > 0)) });
+          const finishedDigestion = digestionRenderer.finish({ render: false });
           if (finishedDigestion) currentRoundText = finishedDigestion;
           fullText = currentRoundText;
           if (digestionRenderer.isLoopTerminated) {
@@ -20169,35 +20177,29 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const isLiquid = Boolean(currentModel && (currentModel.includes('liquid') || currentModel.includes('lfm-')));
         const isReasoning = Boolean(currentModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r)\b/i.test(currentModel) || currentModel.toLowerCase().includes('reasoning') || currentModel.toLowerCase().includes('-r1')));
 
-        const configuredMaxTokens = parseInt(STATE.settings.maxTokens, 10) || 4096;
-        const effectiveMaxTokens = (wantsFile || isWebRequest || isDocRequest) ? Math.min(configuredMaxTokens, 16384) : Math.min(configuredMaxTokens, 4096);
-
         // PAYLOAD BERSIH RESMI OPENROUTER:
         // - Gunakan HANYA 'model: currentModel'.
-        // - JANGAN kirim array 'models: [...]' karena OpenRouter membatasi maksimal 3 item
-        //   dan dapat memicu HTTP 400 "'models' array must have 3 items or fewer." serta pergantian model tak terkontrol.
+        // - Biarkan OpenRouter dan pembuat model menggunakan parameter bawaan (default) resmi
+        //   tanpa batasan max_tokens/temperature/top_p paksaan yang dapat merusak model (seperti Gemma/Llama).
+        // - include_reasoning: false agar pemikiran internal tidak mencemari jawaban.
         const basePayload = {
           model: currentModel,
           messages: currentMessagesPayload,
           stream: true,
-          max_tokens: effectiveMaxTokens,
+          include_reasoning: false,
           provider: {
             sort: 'latency',
             allow_fallbacks: true
           }
         };
 
-        if (isReasoning) {
-          basePayload.max_completion_tokens = effectiveMaxTokens;
-        }
-
-        if (!isReasoning) {
-          basePayload.temperature = parseFloat(STATE.settings.temperature) || 0.7;
-          // CATATAN: DILARANG mengirim repetition_penalty di sini karena Google Gemini, OpenAI,
-          // dan model upstream tertentu akan menolaknya dengan HTTP 400.
-        }
-        if (!isLiquid && !isReasoning) {
-          basePayload.top_p = parseFloat(STATE.settings.topP) || 0.9;
+        if (STATE.settings.useCustomParameters) {
+          if (!isReasoning && STATE.settings.temperature !== null && STATE.settings.temperature !== undefined) {
+            basePayload.temperature = parseFloat(STATE.settings.temperature);
+          }
+          if (!isLiquid && !isReasoning && STATE.settings.topP !== null && STATE.settings.topP !== undefined) {
+            basePayload.top_p = parseFloat(STATE.settings.topP);
+          }
         }
 
         if (currentIsImageCapable && (STATE.isImageGenMode || isImageGenerationTrigger(promptText))) {
@@ -20603,7 +20605,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // render:false → render final tunggal ada di bawah (finalRenderedContent),
       // sehingga renderMarkdown + enhanceCodeBlocks/hljs tidak dijalankan dua kali.
-      fullText = safeAssistantText(streamRenderer.finish({ render: false, promoteReasoning: !(accumulatedToolCalls && accumulatedToolCalls.length > 0) }));
+      fullText = safeAssistantText(streamRenderer.finish({ render: false }));
 
       // ==================== UNIVERSAL AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const canRunAutonomousSearch = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
@@ -20858,18 +20860,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             digestionRequestBody.tool_choice = 'auto';
           }
         }
-        if (!isDigestionReasoning) {
-          if (hasExecutedSearch || (webSources && webSources.length > 0)) {
-            digestionRequestBody.temperature = 0.35;
-          } else {
-            digestionRequestBody.temperature = parseFloat(STATE.settings.temperature) || 0.7;
+        if (STATE.settings.useCustomParameters) {
+          if (!isDigestionReasoning && STATE.settings.temperature !== null && STATE.settings.temperature !== undefined) {
+            digestionRequestBody.temperature = parseFloat(STATE.settings.temperature);
           }
-        }
-        if (!isDigestionLiquid && !isDigestionReasoning) {
-          if (hasExecutedSearch || (webSources && webSources.length > 0)) {
-            digestionRequestBody.top_p = 0.65;
-          } else {
-            digestionRequestBody.top_p = parseFloat(STATE.settings.topP) || 0.9;
+          if (!isDigestionLiquid && !isDigestionReasoning && STATE.settings.topP !== null && STATE.settings.topP !== undefined) {
+            digestionRequestBody.top_p = parseFloat(STATE.settings.topP);
           }
         }
 
@@ -21054,7 +21050,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
               } catch (_) {}
             }
           }
-          currentRoundText = digestionRenderer.finish({ render: false, promoteReasoning: !(allAccumulatedToolResponsesText || (webSources && webSources.length > 0)) });
+          currentRoundText = digestionRenderer.finish({ render: false });
           fullText = currentRoundText;
           if (digestionRenderer.isLoopTerminated) {
             break;
@@ -26472,6 +26468,12 @@ Aturan:
     if (els.settingOpenRouterKey) els.settingOpenRouterKey.value = STATE.settings.openRouterKey || '';
     if (els.settingSerperApiKey) els.settingSerperApiKey.value = STATE.settings.serperApiKey || '';
     if (els.settingMusicModel) els.settingMusicModel.value = STATE.settings.musicModel || 'google/lyria-3-clip-preview';
+    if (els.paramUseModelDefaults) {
+      els.paramUseModelDefaults.checked = !STATE.settings.useCustomParameters;
+      const disableSliders = els.paramUseModelDefaults.checked;
+      if (els.paramTemperature) els.paramTemperature.disabled = disableSliders;
+      if (els.paramTopP) els.paramTopP.disabled = disableSliders;
+    }
     if (els.paramTemperature) els.paramTemperature.value = STATE.settings.temperature ?? 0.7;
     if (els.valTemperature) els.valTemperature.innerText = STATE.settings.temperature ?? 0.7;
     if (els.paramTopP) els.paramTopP.value = STATE.settings.topP ?? 0.9;
@@ -28716,7 +28718,12 @@ Aturan:
       });
     });
 
-    // Sliders
+    // Sliders & Model Defaults Toggle
+    els.paramUseModelDefaults?.addEventListener('change', (e) => {
+      const disableSliders = e.target.checked;
+      if (els.paramTemperature) els.paramTemperature.disabled = disableSliders;
+      if (els.paramTopP) els.paramTopP.disabled = disableSliders;
+    });
     els.paramTemperature?.addEventListener('input', (e) => {
       if (els.valTemperature) els.valTemperature.innerText = e.target.value;
     });
@@ -29008,6 +29015,9 @@ Aturan:
         normalizeMusicModelSetting();
       }
 
+      if (els.paramUseModelDefaults) {
+        STATE.settings.useCustomParameters = !els.paramUseModelDefaults.checked;
+      }
       if (els.paramTemperature) STATE.settings.temperature = parseFloat(els.paramTemperature.value);
       if (els.paramTopP) STATE.settings.topP = parseFloat(els.paramTopP.value);
       if (els.settingSystemPrompt) {

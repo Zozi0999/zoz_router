@@ -7158,13 +7158,9 @@ async function requestHandler(req, res) {
               try {
                 const parsed = JSON.parse(rawResp);
                 const txt = parsed.choices?.[0]?.message?.content || '';
-                const reasoning = parsed.choices?.[0]?.message?.reasoning || parsed.choices?.[0]?.message?.reasoning_content || '';
                 const msgPayload = { role: 'assistant', content: txt };
                 if (parsed.choices?.[0]?.message?.tool_calls) {
                   msgPayload.tool_calls = parsed.choices[0].message.tool_calls;
-                }
-                if (reasoning) {
-                  msgPayload.reasoning = reasoning;
                 }
                 sendJSON(res, 200, {
                   model: body.model || 'qwen2.5:1.5b',
@@ -7202,10 +7198,9 @@ async function requestHandler(req, res) {
                 const delta = parsed.choices?.[0]?.delta?.content || '';
                 const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
                 const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
-                if (delta || deltaToolCalls || deltaReasoning) {
+                if (delta || deltaToolCalls) {
                   const msgPayload = { role: 'assistant', content: delta };
                   if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
-                  if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
                   res.write(JSON.stringify({
                     model: body.model || 'qwen2.5:1.5b',
                     created_at: new Date().toISOString(),
@@ -7275,9 +7270,7 @@ async function requestHandler(req, res) {
       delete body.apiKey;
       delete body.ollamaApiKey;
 
-      if (!body.options || typeof body.options !== 'object') body.options = {};
-      if (body.options.num_predict === undefined) body.options.num_predict = -1;
-      if (body.options.num_ctx === undefined) body.options.num_ctx = 32768;
+      // Biarkan Ollama menggunakan Modelfile bawaan jika options tidak disertakan
 
       // Defense-in-depth: Resolusi dan sanitasi gambar lokal (/uploads/) menjadi raw Base64 untuk endpoint Ollama
       if (Array.isArray(body.messages)) {
@@ -7916,10 +7909,6 @@ async function requestHandler(req, res) {
         delete body.repetition_penalty;
       }
 
-      // Pastikan kuota token output memadai (default normal chat ke 4096 agar tidak memicu HTTP 402/ResourceExhausted)
-      if (!body.max_tokens && !body.max_completion_tokens) {
-        body.max_tokens = 4096;
-      }
 
       // Defense-in-depth: Hapus tool jika model gratis, atau filter tool agar hanya fungsi bertipe 'function'
       const isFree = body.model && (body.model.includes(':free') || body.model.endsWith('/free') || body.model === 'openrouter/free');

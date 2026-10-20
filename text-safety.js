@@ -5,54 +5,29 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
-  const OPEN_TAG = '<think>';
-  const CLOSE_TAG = '</think>';
   const REASONING_KEYS = new Set([
     'reasoning', 'reasoning_content', 'reasoning_details', 'thought', 'thinking', 'thoughts'
   ]);
+
+  const THINKING_TAG_REGEX = /<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>[\s\S]*?(?:<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)>|$)/gi;
+  const BRACKET_THINK_REGEX = /\[(?:THOUGHT|REASONING)\][\s\S]*?(?:\[\/(?:THOUGHT|REASONING)\]|$)/gi;
+
+  function stripReasoningText(rawText) {
+    if (typeof rawText !== 'string' || !rawText) return '';
+    return rawText
+      .replace(THINKING_TAG_REGEX, '')
+      .replace(BRACKET_THINK_REGEX, '')
+      .replace(/<\/?(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/gi, '')
+      .replace(/\[\/?(?:THOUGHT|REASONING)\]/gi, '')
+      .trim();
+  }
 
   function splitReasoningAndContent(rawText) {
     if (typeof rawText !== 'string' || !rawText) {
       return { reasoning: '', content: '', isThinking: false };
     }
-    let reasoning = '';
-    let content = '';
-    let cursor = 0;
-    let isThinking = false;
-    const lower = rawText.toLowerCase();
-    while (cursor < rawText.length) {
-      const open = lower.indexOf(OPEN_TAG, cursor);
-      if (open < 0) {
-        content += rawText.slice(cursor);
-        break;
-      }
-      content += rawText.slice(cursor, open);
-      const bodyStart = open + OPEN_TAG.length;
-      const close = lower.indexOf(CLOSE_TAG, bodyStart);
-      if (close < 0) {
-        reasoning += rawText.slice(bodyStart);
-        isThinking = true;
-        break;
-      }
-      reasoning += rawText.slice(bodyStart, close);
-      cursor = close + CLOSE_TAG.length;
-    }
-    const cleanReasoning = reasoning.trim();
-    let cleanContent = content.trim();
-    // Jika model mengeluarkan seluruh jawaban di dalam blok penalaran dan konten di luar kosong,
-    // jangan buang jawaban pengguna; fallback ke reasoning agar respon tidak kosong atau terpotong.
-    if (!cleanContent && cleanReasoning && !isThinking) {
-      cleanContent = cleanReasoning;
-    }
-    return { reasoning: cleanReasoning, content: cleanContent, isThinking };
-  }
-
-  function stripReasoningText(rawText) {
-    if (typeof rawText !== 'string' || !rawText) return '';
-    const parsed = splitReasoningAndContent(rawText);
-    if (parsed.content) return parsed.content;
-    if (parsed.reasoning && !parsed.isThinking) return parsed.reasoning;
-    return rawText.replace(/<\/?think\b[^>]*>/gi, '').trim();
+    const cleanContent = stripReasoningText(rawText);
+    return { reasoning: '', content: cleanContent, isThinking: false };
   }
 
   function reflowShreddedProse(text) {
@@ -64,51 +39,53 @@
     let inside = false;
     let pending = '';
 
-    function suffixThatCouldStartTag(text, tag) {
-      const max = Math.min(text.length, tag.length - 1);
-      for (let n = max; n > 0; n--) {
-        if (text.slice(-n).toLowerCase() === tag.slice(0, n)) return n;
-      }
-      return 0;
-    }
+    const OPEN_REGEX = /<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>|\[(?:thought|reasoning)\]/i;
+    const CLOSE_REGEX = /<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)>|\[\/(?:thought|reasoning)\]/i;
 
     function push(text, final = false) {
-      const input = pending + String(text || '');
+      let input = pending + String(text || '');
       pending = '';
       let output = '';
-      let pos = 0;
-      while (pos < input.length) {
-        const lower = input.toLowerCase();
+
+      while (input.length > 0) {
         if (inside) {
-          const close = lower.indexOf(CLOSE_TAG, pos);
-          if (close < 0) {
-            const tail = input.slice(pos);
-            const keep = final ? 0 : suffixThatCouldStartTag(tail, CLOSE_TAG);
-            if (keep) pending = tail.slice(-keep);
+          const closeMatch = CLOSE_REGEX.exec(input);
+          if (!closeMatch) {
+            const lastLt = Math.max(input.lastIndexOf('<'), input.lastIndexOf('['));
+            if (!final && lastLt >= 0 && input.length - lastLt < 25) {
+              pending = input.slice(lastLt);
+            }
             break;
           }
-          pos = close + CLOSE_TAG.length;
+          input = input.slice(closeMatch.index + closeMatch[0].length);
           inside = false;
           continue;
         }
-        const open = lower.indexOf(OPEN_TAG, pos);
-        if (open < 0) {
-          const tail = input.slice(pos);
-          const keep = final ? 0 : suffixThatCouldStartTag(tail, OPEN_TAG);
-          output += keep ? tail.slice(0, -keep) : tail;
-          if (keep) pending = tail.slice(-keep);
+
+        const openMatch = OPEN_REGEX.exec(input);
+        if (!openMatch) {
+          const lastLt = Math.max(input.lastIndexOf('<'), input.lastIndexOf('['));
+          if (!final && lastLt >= 0 && input.length - lastLt < 20) {
+            output += input.slice(0, lastLt);
+            pending = input.slice(lastLt);
+          } else {
+            output += input;
+          }
           break;
         }
-        output += input.slice(pos, open);
-        pos = open + OPEN_TAG.length;
+
+        output += input.slice(0, openMatch.index);
+        input = input.slice(openMatch.index + openMatch[0].length);
         inside = true;
       }
+
       if (final && !inside && pending) {
         output += pending;
         pending = '';
       }
       return output;
     }
+
     return { push };
   }
 
@@ -117,6 +94,10 @@
     if (!record || typeof record !== 'object') return record;
     const out = {};
     for (const [key, value] of Object.entries(record)) {
+      // Hapus kunci reasoning/thought agar pemikiran internal tidak bocor ke output klien/penyimpanan
+      if (REASONING_KEYS.has(key.toLowerCase())) {
+        continue;
+      }
       if ((key === 'content' || key === 'response' || key === 'text') && typeof value === 'string') {
         const id = key + ':' + (record.index ?? record.id ?? record.model ?? 'default');
         if (!tagStrippers.has(id)) tagStrippers.set(id, createThinkTagStripper());

@@ -762,13 +762,9 @@ export default {
           if (!isStream) {
             const data = await orRes.json().catch(() => ({}));
             const textContent = data.choices?.[0]?.message?.content || '';
-            const reasoning = data.choices?.[0]?.message?.reasoning || data.choices?.[0]?.message?.reasoning_content || '';
             const msgPayload = { role: 'assistant', content: textContent };
             if (data.choices?.[0]?.message?.tool_calls) {
               msgPayload.tool_calls = data.choices[0].message.tool_calls;
-            }
-            if (reasoning) {
-              msgPayload.reasoning = reasoning;
             }
             return new Response(JSON.stringify({
               model: body.model || 'qwen2.5:1.5b',
@@ -813,11 +809,9 @@ export default {
                     const parsed = JSON.parse(dataStr);
                     const deltaContent = parsed.choices?.[0]?.delta?.content || '';
                     const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
-                    const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
-                    if (deltaContent || deltaToolCalls || deltaReasoning) {
+                    if (deltaContent || deltaToolCalls) {
                       const msgPayload = { role: 'assistant', content: deltaContent };
                       if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
-                      if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
                       await writer.write(encoder.encode(JSON.stringify({
                         model: body.model || 'qwen2.5:1.5b',
                         created_at: new Date().toISOString(),

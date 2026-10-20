@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261020_v411';
+    window.__ZOZ_VERSION__ = 'v20261020_v412';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -93,8 +93,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261020_v411">
-  <link rel="stylesheet" href="style.css?v=20261020_v411">
+  <link rel="preload" as="style" href="style.css?v=20261020_v412">
+  <link rel="stylesheet" href="style.css?v=20261020_v412">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial select-none">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -1134,6 +1134,14 @@
 
         <!-- Tab 2: Parameters -->
         <div class="settings-tab-pane" id="tabParameters">
+          <div class="form-group mb-4">
+            <label class="flex items-center gap-2 cursor-pointer" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="paramUseModelDefaults" checked style="width:16px; height:16px; accent-color:var(--neon-cyan);">
+              <span style="font-weight:600; color:var(--neon-cyan);">Gunakan Parameter Bawaan Model (Rekomendasi Resmi)</span>
+            </label>
+            <small class="form-hint">Biarkan OpenRouter & Ollama menerapkan parameter sampling asli dari penyedia model (mencegah kerusakan token atau keanehan bahasa pada model seperti Gemma, Claude, dan Llama).</small>
+          </div>
+
           <div class="form-group">
             <div class="range-header">
               <label for="paramTemperature">Temperature (Kreativitas):</label>
@@ -2625,8 +2633,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261020_v411" defer></script>
+  <script src="text-safety.js?v=20261020_v412" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261020_v411" defer></script>
+  <script src="app.js?v=20261020_v412" defer></script>
 </body>
 </html>
