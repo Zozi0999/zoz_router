@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261019_v407';
+    window.__ZOZ_VERSION__ = 'v20261019_v408';
   </script>
   <title>ZOZ ROUTER // Neural AI Multi-Engine Gateway</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
@@ -90,8 +90,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261019_v407">
-  <link rel="stylesheet" href="style.css?v=20261019_v407">
+  <link rel="preload" as="style" href="style.css?v=20261019_v408">
+  <link rel="stylesheet" href="style.css?v=20261019_v408">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial select-none">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -446,8 +446,8 @@
         <svg class="lucide lucide-users w-3.5 h-3.5" data-lucide="users" fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><path d="M16 3.128a4 4 0 0 1 0 7.744"></path><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><circle cx="9" cy="7" r="4"></circle></svg>
       </button>
 
-      <!-- Action Button 2: Z21 Shell Terminal Console -->
-      <button class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] transition-colors top-action-btn" id="terminalToggleBtn" title="Z21 Shell (Buka Console)" aria-label="Buka Terminal" type="button">
+      <!-- Action Button 2: ZOZ Shell Terminal Console -->
+      <button class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] transition-colors top-action-btn" id="terminalToggleBtn" title="ZOZ Shell (Buka Console)" aria-label="Buka Terminal" type="button">
         <svg class="lucide lucide-terminal w-3.5 h-3.5" data-lucide="terminal" fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M12 19h8"></path><path d="m4 17 6-6-6-6"></path></svg>
       </button>
 
@@ -600,37 +600,24 @@
         <div class="chat-messages-container flex-1 flex flex-col justify-between w-full" id="singleChatContainer">
           <!-- WELCOME HERO (Center Logo & Pure Minimalist Title) -->
           <div class="welcome-hero flex-1 flex flex-col items-center justify-center px-4 relative z-10" id="welcomeHero">
-            <!-- Terry A. Davis Radical Simplicity Emblem -->
-            <div class="flex flex-col items-center justify-center select-none font-mono tracking-tight text-center">
-              <!-- Raw 1-bit / Box-Drawing TempleOS-inspired wireframe glyph -->
-              <div class="mb-4 p-3 border border-emerald-500/30 bg-[#080a11] rounded-lg transition-all hover:border-emerald-400 group cursor-default">
-                <pre class="font-mono text-[13px] leading-[13px] text-emerald-400 select-none">â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚  â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆ  â”‚
-â”‚         â–ˆâ–ˆ   â”‚
-â”‚       â–ˆâ–ˆ     â”‚
-â”‚     â–ˆâ–ˆ       â”‚
-â”‚   â–ˆâ–ˆ         â”‚
-â”‚  â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆ  â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜</pre>
+            <div class="hero-triangle-container">
+              <div class="hero-triangle-glow"></div>
+              <div class="hero-logo-box">
+                <img src="favicon.svg" alt="ZOZ ROUTER Logo" class="hero-logo">
               </div>
+            </div>
 
-              <!-- Radical Pure Typography -->
-              <div class="space-y-1.5">
-                <h2 class="text-2xl font-bold tracking-wider font-mono text-white flex items-center justify-center space-x-2">
-                  <span class="text-emerald-400">Z21</span>
-                  <span class="text-slate-100">rOuTer</span>
-                </h2>
-                <p class="text-xs font-mono text-emerald-400/90 tracking-wider text-center select-none">3 33 ~ - ) 3 2 1</p>
-              </div>
+            <h2 class="hero-title">ZOZ ROUTER</h2>
+            <p class="hero-subtitle">NEURAL AI MULTI-ENGINE GATEWAY</p>
+            <p class="hero-desc">Orkestrasi cerdas berkecepatan tinggi antara Ollama lokal dan OpenRouter cloud.</p>
 
-              <!-- Auto Router AI Trigger (Di bawah ZOZ ROUTER baru) -->
-              <div class="mt-4 flex items-center justify-center">
-                <button class="mode-tab inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] hover:bg-teal-500/10 border border-teal-500/30 hover:border-teal-400/60 transition-all text-xs font-mono text-slate-300 hover:text-teal-300 cursor-pointer shadow-glow-cyan/20 group select-none" data-mode="auto" id="heroAutoRouterBtn" title="Klik untuk mengaktifkan / menonaktifkan Auto Router AI (Ollama + OpenRouter)" type="button">
-                  <span class="w-2 h-2 rounded-full bg-teal-400 group-hover:scale-125 transition-transform auto-router-quantum-dot"></span>
-                  <span class="font-semibold tracking-wider">AUTO ROUTER</span>
-                  <span class="text-[10px] text-slate-500 group-hover:text-teal-400/80 font-normal ml-0.5" id="heroAutoRouterStatus">Ollama + OpenRouter</span>
-                </button>
-              </div>
+            <!-- Auto Router AI Trigger -->
+            <div class="mt-5 flex items-center justify-center">
+              <button class="mode-tab inline-flex items-center space-x-2 px-4 py-2 rounded-full bg-white/[0.04] hover:bg-teal-500/10 border border-teal-500/30 hover:border-teal-400/60 transition-all text-xs font-mono text-slate-300 hover:text-teal-300 cursor-pointer shadow-glow-cyan/20 group select-none" data-mode="auto" id="heroAutoRouterBtn" title="Klik untuk mengaktifkan / menonaktifkan Auto Router AI (Ollama + OpenRouter)" type="button">
+                <span class="w-2 h-2 rounded-full bg-teal-400 group-hover:scale-125 transition-transform auto-router-quantum-dot"></span>
+                <span class="font-semibold tracking-wider">AUTO ROUTER</span>
+                <span class="text-[10px] text-slate-500 group-hover:text-teal-400/80 font-normal ml-0.5" id="heroAutoRouterStatus">Ollama + OpenRouter</span>
+              </button>
             </div>
           </div>
 
@@ -1230,22 +1217,21 @@
         <!-- Tab 4: About Developer -->
         <div class="settings-tab-pane" id="tabDeveloper">
           <div class="developer-about-card">
-            <!-- Brand & Logo Showcase with new Z21 Cybernetic Icon -->
+            <!-- Brand & Logo Showcase with ZOZ Cybernetic Icon -->
             <div class="developer-hero-badge">
               <div class="developer-logo-wrap">
-                <img src="z21-icon.svg" onerror="this.onerror=null;this.src='z21-icon.png'" alt="Z21 rOuTer Logo" class="developer-logo-img">
+                <img src="favicon.svg" alt="ZOZ ROUTER Logo" class="developer-logo-img">
                 <span class="developer-pulse-glow"></span>
               </div>
               <div class="developer-brand-meta">
                 <div class="developer-brand-title">
-                  <span class="z21-accent">Z21</span>
-                  <span class="z21-name">rOuTer</span>
+                  <span class="text-teal-400 font-bold text-2xl">ZOZ</span>
+                  <span class="text-white font-bold text-2xl tracking-wider">ROUTER</span>
                 </div>
-                <div class="developer-brand-tag">3 33 ~ - ) 3 2 1</div>
+                <div class="developer-brand-tag">NEURAL AI MULTI-ENGINE GATEWAY</div>
               </div>
             </div>
 
-            <!-- Developer Information & Interactive Direct Link Card -->
             <a href="https://zozdocs.com/#developer" target="_blank" rel="noopener noreferrer" class="developer-redirect-link" id="developerRedirectLink" title="Visit Developer Documentation at zozdocs.com/#developer">
               <div class="developer-info-header">
                 <div class="developer-avatar-box">
@@ -1265,7 +1251,7 @@
 
               <div class="developer-bio-text">
                 <p>
-                  Built with radical simplicity, uncompromising efficiency, and total privacy. Z21 rOuTer bridges local open-weight intelligence and ultra-fast cloud models into a singular, high-throughput autonomous neural environment.
+                  Built with radical simplicity, uncompromising efficiency, and total privacy. ZOZ ROUTER bridges local open-weight intelligence and ultra-fast cloud models into a singular, high-throughput autonomous neural environment.
                 </p>
                 <div class="developer-link-hint">
                   <i class="fa-solid fa-circle-arrow-right"></i>
@@ -2400,8 +2386,8 @@
       <!-- Terminal Top Toolbar -->
       <div class="terminal-toolbar" id="terminalToolbar">
         <div class="terminal-title">
-          <span class="bolt">âš¡</span>
-          <span class="term-title-text">Z21 Shell</span>
+          <span class="bolt"><i class="fa-solid fa-bolt" style="color: var(--neon-amber);"></i></span>
+          <span class="term-title-text">ZOZ Shell</span>
         </div>
 
         <div class="tb-divider"></div>
@@ -2410,20 +2396,20 @@
         <div class="terminal-shell-wrap" style="position: relative;">
           <button class="tb-btn" id="btnTerminalShell" type="button" title="Ganti Shell (PowerShell, CMD, WSL, Node)">
             <i class="fa-solid fa-terminal" style="font-size: 0.8rem; color: var(--neon-cyan);"></i>
-            <span id="termCurrentShellIcon">ðŸªŸ</span>
+            <span id="termCurrentShellIcon"><i class="fa-brands fa-windows" style="color: #38bdf8;"></i></span>
             <span id="termCurrentShellName">PowerShell</span>
             <i class="fa-solid fa-chevron-down" style="font-size: 0.65rem; opacity: 0.7;"></i>
           </button>
           <div class="terminal-shell-dropdown" id="terminalShellDropdown">
             <div class="shell-opt active" data-shell="powershell">
-              <span class="shell-opt-icon">ðŸªŸ</span>
+              <span class="shell-opt-icon"><i class="fa-brands fa-windows" style="color: #38bdf8;"></i></span>
               <div class="shell-opt-info">
                 <span class="shell-opt-name">PowerShell</span>
                 <span class="shell-opt-desc">Windows PowerShell (powershell.exe)</span>
               </div>
             </div>
             <div class="shell-opt" data-shell="cmd">
-              <span class="shell-opt-icon">â¬›</span>
+              <span class="shell-opt-icon"><i class="fa-solid fa-terminal" style="color: #94a3b8;"></i></span>
               <div class="shell-opt-info">
                 <span class="shell-opt-name">Command Prompt</span>
                 <span class="shell-opt-desc">Windows CMD (cmd.exe)</span>
@@ -2437,7 +2423,7 @@
               </div>
             </div>
             <div class="shell-opt" data-shell="node">
-              <span class="shell-opt-icon">ðŸŸ©</span>
+              <span class="shell-opt-icon"><i class="fa-brands fa-node-js" style="color: #22c55e;"></i></span>
               <div class="shell-opt-info">
                 <span class="shell-opt-name">Node.js REPL</span>
                 <span class="shell-opt-desc">Node.js Runtime Evaluator</span>
@@ -2832,8 +2818,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261019_v391" defer></script>
+  <script src="text-safety.js?v=20261019_v408" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261019_v407" defer></script>
+  <script src="app.js?v=20261019_v408" defer></script>
 </body>
 </html>

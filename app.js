@@ -18,10 +18,7 @@
     IS_GITHUB_PAGES ||
     (location.hostname && (
       location.hostname.endsWith('pages.dev') ||
-      location.hostname.endsWith('netlify.app') ||
-      location.hostname.endsWith('render.com') ||
-      location.hostname.endsWith('railway.app') ||
-      (location.protocol === 'https:' && !/^(?:localhost|127\.0\.0\.1|\[::1\])$/i.test(location.hostname))
+      location.hostname.endsWith('netlify.app')
     ))
   );
 
@@ -4102,7 +4099,7 @@ RESONANSI: ${this.currentVibe}
     rootDir: '',
 
     async checkStatus() {
-      if (IS_GITHUB_PAGES || IS_CLOUD_HOSTED) {
+      if (IS_GITHUB_PAGES) {
         this.isAvailable = false;
         return false;
       }
@@ -4210,7 +4207,7 @@ RESONANSI: ${this.currentVibe}
     isDeviceBackendAvailable: false,
 
     async init() {
-      if (IS_GITHUB_PAGES || IS_CLOUD_HOSTED) {
+      if (IS_GITHUB_PAGES) {
         this.isDeviceBackendAvailable = false;
         return;
       }
@@ -4225,7 +4222,7 @@ RESONANSI: ${this.currentVibe}
         clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();
-          if (data && data.storage === 'device-disk' && !IS_CLOUD_HOSTED) {
+          if (data && data.storage === 'device-disk') {
             this.isDeviceBackendAvailable = true;
           }
         }
@@ -4611,7 +4608,7 @@ RESONANSI: ${this.currentVibe}
       }
 
       // 3. Sync lightweight session headers from Device Disk Storage HANYA bila backend lokal online dan bukan cloud
-      if (DeviceStorage.isDeviceBackendAvailable && !IS_CLOUD_HOSTED) {
+      if (DeviceStorage.isDeviceBackendAvailable && !IS_GITHUB_PAGES && !IS_VERCEL) {
         const diskList = await DeviceStorage.getSessionsList();
         if (Array.isArray(diskList) && diskList.length > 0) {
           let hasNewSessions = false;
@@ -17891,13 +17888,20 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     // 1) Endpoint lokal (server.js / Vercel / worker)
     if (!IS_GITHUB_PAGES) {
       try {
-        const resp = await fetch('/api/youtube-search', {
+        let resp = await fetch('/api/youtube-search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: q, limit }),
           signal: combinedSignal
         });
-        if (resp.ok) {
+        // Jika POST dihadang oleh WAF/proxy atau gateway, fallback langsung ke GET
+        if (!resp || !resp.ok) {
+          resp = await fetch(`/api/youtube-search?q=${encodeURIComponent(q)}&limit=${limit}`, {
+            method: 'GET',
+            signal: combinedSignal
+          });
+        }
+        if (resp && resp.ok) {
           const data = await resp.json();
           if (data && Array.isArray(data.results) && data.results.length > 0) {
             hydrateClientYtCache(data.results);
@@ -20056,7 +20060,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       } else {
         // Hanya pada cloud serverless (Vercel) di mana tidak ada daemon Ollama lokal:
         // alihkan endpoint loopback ke https://ollama.com. Pada akses lokal / Cloudflare Tunnel laptop sendiri, biarkan server.js menghubungi 127.0.0.1:11434.
-        if (IS_CLOUD_HOSTED && location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+        if (IS_VERCEL && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
           requestBody.endpoint = 'https://ollama.com';
         }
         chatUrl = '/api/ollama/chat';
@@ -21034,7 +21038,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
 
     const hasClientKey = Boolean(STATE.settings.openRouterKey);
-    const hasBackendKey = Boolean(DeviceStorage.isDeviceBackendAvailable && !IS_CLOUD_HOSTED && !IS_GITHUB_PAGES && !IS_VERCEL);
+    const hasBackendKey = Boolean(DeviceStorage.isDeviceBackendAvailable && !IS_GITHUB_PAGES && !IS_VERCEL);
     if (!hasClientKey && !hasBackendKey) {
       if (runOptions && runOptions.autoFallback) {
         return false;

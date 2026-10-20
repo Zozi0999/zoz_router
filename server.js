@@ -4890,11 +4890,30 @@ async function requestHandler(req, res) {
   // Sebagian endpoint memakai key milik SERVER (env OPENROUTER_API_KEY/SERPER_API_KEY
   // /OLLAMA_API_KEY) sebagai fallback. Tanpa gerbang ini, halaman web jahat mana pun
   // bisa memanggil API dari browser korban (ACAO:*) dan membakar kredit API operator.
-  // Pengecualian mutlak: /api/ping dan /api/health adalah status probe harmless.
-  // Front-end resmi (.vercel.app, localhost, loopback) atau ZOX_ALLOW_CROSS_ORIGIN=1 selalu diizinkan.
-  if (pathname.startsWith('/api') && pathname !== '/api/ping' && pathname !== '/api/health' && process.env.ZOX_ALLOW_CROSS_ORIGIN !== '1') {
+  // Pengecualian mutlak: /api/ping, /api/health, scraper publik bebas-kunci (YouTube search/info,
+  // web extraction, terminal) tidak boleh diblokir oleh filter origin.
+  // Front-end resmi (.vercel.app, localhost, Cloudflare domain, tunnel) atau ZOX_ALLOW_CROSS_ORIGIN=1 selalu diizinkan.
+  const isExemptCrossOriginPath = pathname === '/api/ping' ||
+                                 pathname === '/api/health' ||
+                                 pathname === '/api/youtube-search' ||
+                                 pathname === '/api/youtube-info' ||
+                                 pathname.startsWith('/api/autonomous/search_youtube') ||
+                                 pathname.startsWith('/api/tools/') ||
+                                 pathname === '/api/extract-web' ||
+                                 pathname === '/api/read-url' ||
+                                 pathname === '/api/scrape-url' ||
+                                 pathname.startsWith('/api/terminal/');
+
+  if (pathname.startsWith('/api') && !isExemptCrossOriginPath && process.env.ZOX_ALLOW_CROSS_ORIGIN !== '1') {
     let crossSite = false;
-    if (req.headers.origin) {
+    const secFetchSite = (req.headers['sec-fetch-site'] || '').toLowerCase();
+    const isCloudflare = Boolean(req.headers['cf-ray'] || req.headers['cf-connecting-ip'] || req.headers['cf-visitor']);
+    const customDomain = (process.env.ZOX_CUSTOM_DOMAIN || '').toLowerCase().trim();
+
+    // Browser guarantees: same-origin & same-site are initiated by the trusted front-end site
+    if (secFetchSite === 'same-origin' || secFetchSite === 'same-site') {
+      crossSite = false;
+    } else if (req.headers.origin) {
       try {
         const originUrl = new URL(req.headers.origin);
         const originHost = originUrl.host.toLowerCase();
@@ -4902,19 +4921,20 @@ async function requestHandler(req, res) {
         const reqHost = (req.headers.host || '').toLowerCase();
         const isTrusted = (originHost === reqHost) ||
                           (forwardHost && originHost === forwardHost) ||
+                          (customDomain && originHost === customDomain) ||
+                          (isCloudflare && secFetchSite !== 'cross-site') ||
                           originHost === 'zoz-router.vercel.app' ||
                           originHost.endsWith('.vercel.app') ||
                           originHost.endsWith('localhost') ||
                           originHost.startsWith('127.0.0.1') ||
                           originHost.startsWith('[::1]') ||
                           originHost.endsWith('.trycloudflare.com') ||
-                          reqHost.endsWith('.trycloudflare.com') ||
-                          pathname.startsWith('/api/terminal/tunnel');
+                          reqHost.endsWith('.trycloudflare.com');
         crossSite = !isTrusted;
       } catch (_) {
         crossSite = true;
       }
-    } else if (req.headers['sec-fetch-site'] === 'cross-site') {
+    } else if (secFetchSite === 'cross-site') {
       crossSite = true;
     }
     if (crossSite) {
