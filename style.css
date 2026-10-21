@@ -319,6 +319,29 @@ button.brand-logo-wrap.active .brand-logo {
   transform: translateY(-1px);
 }
 
+.terminal-top-btn {
+  width: 100%;
+  background: #080a11;
+  border: 1px solid rgba(0, 240, 255, 0.45);
+  color: #FFF;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.terminal-top-btn:hover {
+  background: #0c101d;
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.3);
+  transform: translateY(-1px);
+}
+
 /* Engine Status Panel (Zero Overlap, Clean Sleek Cards) */
 .engine-status-panel {
   margin: 0 !important;
