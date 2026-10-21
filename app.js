@@ -736,7 +736,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     isGenerating: false,
     isSending: false, // Guard anti pengiriman ganda (Enter berulang saat masih ada await)
     abortController: null,
-    soundEnabled: true,
+    soundEnabled: false,
     ollamaModels: [...OFFICIAL_OLLAMA_CLOUD_MODELS],
     openRouterModels: [...DEFAULT_OPENROUTER_MODELS],
     availableImageModels: [...DEFAULT_IMAGE_MODELS],
@@ -837,89 +837,20 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     } catch (_) {}
   })();
 
-  // ==================== AUDIO SYNTHESIZER (Sci-Fi Cyber Blips) ====================
+  // ==================== AUDIO SYNTHESIZER (Permanently Muted / Silent Mode) ====================
   const AudioEngine = {
     ctx: null,
     unlockPromise: null,
-    init() {
-      if (!this.ctx && (window.AudioContext || window.webkitAudioContext)) {
-        try {
-          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-          this.ctx = new AudioContextClass();
-        } catch (e) {
-          this.ctx = null;
-        }
-      }
-      if (this.ctx && this.ctx.state === 'suspended') {
-        try {
-          this.unlockPromise = this.ctx.resume().catch(() => {});
-        } catch (e) {}
-      }
-      return this.ctx;
-    },
-    setupUnlock() {
-      const unlock = () => {
-        this.init();
-        if (this.ctx && this.ctx.state === 'suspended') {
-          this.ctx.resume().catch(() => {});
-        }
-      };
-      window.addEventListener('pointerdown', unlock, { once: true, passive: true });
-      window.addEventListener('keydown', unlock, { once: true, passive: true });
-      window.addEventListener('touchstart', unlock, { once: true, passive: true });
-    },
-    playBeep(freq = 440, type = 'sine', duration = 0.08, gain = 0.05) {
-      if (!STATE.soundEnabled) return;
-      try {
-        this.init();
-        if (!this.ctx) return;
-
-        const emitSound = () => {
-          try {
-            if (!this.ctx || this.ctx.state !== 'running') return;
-            const osc = this.ctx.createOscillator();
-            const g = this.ctx.createGain();
-            osc.type = type;
-            const now = this.ctx.currentTime;
-            osc.frequency.setValueAtTime(freq, now);
-            g.gain.setValueAtTime(gain, now);
-            g.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-            osc.connect(g);
-            g.connect(this.ctx.destination);
-            osc.start(now);
-            osc.stop(now + duration);
-          } catch (_) {}
-        };
-
-        if (this.ctx.state === 'suspended') {
-          const p = this.unlockPromise || this.ctx.resume().catch(() => {});
-          p.then(() => {
-            emitSound();
-          }).catch(() => {});
-        } else {
-          emitSound();
-        }
-      } catch (e) {
-        // Ignore audio restrictions
-      }
-    },
-    click() { this.playBeep(880, 'triangle', 0.04, 0.03); },
-    snap() {
-      this.playBeep(1200, 'square', 0.03, 0.06);
-      setTimeout(() => this.playBeep(600, 'sine', 0.05, 0.04), 35);
-    },
-    send() { 
-      this.playBeep(520, 'sine', 0.06, 0.04);
-      setTimeout(() => this.playBeep(1040, 'sine', 0.08, 0.04), 40);
-    },
-    receive() { this.playBeep(780, 'sine', 0.06, 0.03); },
-    success() { 
-      this.playBeep(587.33, 'sine', 0.08, 0.05); 
-      setTimeout(() => this.playBeep(880, 'triangle', 0.12, 0.05), 60); 
-    },
-    error() { this.playBeep(220, 'sawtooth', 0.15, 0.06); }
+    init() { return null; },
+    setupUnlock() {},
+    playBeep() {},
+    click() {},
+    snap() {},
+    send() {},
+    receive() {},
+    success() {},
+    error() {}
   };
-  AudioEngine.setupUnlock();
 
   // ==================== DOM ELEMENTS ====================
   const $ = (selector) => document.querySelector(selector);
@@ -4476,10 +4407,9 @@ RESONANSI: ${this.currentVibe}
         STATE.settings.imageModel = 'flux';
       }
 
-      const savedSound = safeLocalStorage.getItem('zoz_router_sound_v1');
-      if (savedSound !== null) {
-        STATE.soundEnabled = savedSound === 'true';
-      }
+      // Senyap total: nonaktifkan semua audio web & efek suara
+      STATE.soundEnabled = false;
+      safeLocalStorage.setItem('zoz_router_sound_v1', 'false');
       // Bersihkan permanen residu search mode & serper key dari storage
       STATE.searchMode = 'off';
       safeLocalStorage.removeItem('zoz_router_search_mode_v1');
@@ -8275,11 +8205,13 @@ RESONANSI: ${this.currentVibe}
   }
 
   function fallbackCopyText(text, onSuccess) {
+    if (typeof text !== 'string') text = String(text || '');
     const textarea = document.createElement('textarea');
     textarea.value = text;
+    textarea.setAttribute('aria-hidden', 'true');
     textarea.style.position = 'fixed';
-    textarea.style.top = '0';
-    textarea.style.left = '0';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '-9999px';
     textarea.style.width = '2em';
     textarea.style.height = '2em';
     textarea.style.padding = '0';
@@ -8287,32 +8219,44 @@ RESONANSI: ${this.currentVibe}
     textarea.style.outline = 'none';
     textarea.style.boxShadow = 'none';
     textarea.style.background = 'transparent';
-    textarea.setAttribute('readonly', '');
+    textarea.style.fontSize = '16px';
+    textarea.contentEditable = 'true';
+    textarea.readOnly = false;
     document.body.appendChild(textarea);
     try {
       textarea.focus();
       textarea.select();
       textarea.setSelectionRange(0, textarea.value.length);
       const successful = document.execCommand('copy');
-      if (successful && onSuccess) {
-        onSuccess();
-      } else if (!successful) {
-        showToast('Gagal menyalin teks ke clipboard.', 'error');
+      if (successful) {
+        if (typeof onSuccess === 'function') onSuccess();
+        return true;
       }
     } catch (err) {
-      showToast('Gagal menyalin teks ke clipboard.', 'error');
+      console.warn('execCommand copy fallback error:', err);
     } finally {
       textarea.remove();
     }
+
+    try {
+      if (window.prompt) {
+        window.prompt('Salin teks manual (Ctrl+C / Cmd+C lalu Enter):', text);
+        if (typeof onSuccess === 'function') onSuccess();
+        return true;
+      }
+    } catch (_) {}
+
+    showToast('Gagal menyalin teks ke clipboard.', 'error');
+    return false;
   }
 
   function copyTextToClipboard(text, onSuccess, successMsg = 'Teks disalin ke clipboard!') {
+    if (typeof text !== 'string') text = String(text || '');
     const handleSuccess = () => {
       if (typeof onSuccess === 'function') {
         onSuccess();
       } else if (successMsg) {
         showToast(successMsg);
-        AudioEngine.click();
       }
     };
 
@@ -10937,14 +10881,28 @@ RESONANSI: ${this.currentVibe}
     // Universal Code block enhancement & Copy button
     enhanceCodeBlocks(row);
 
-    // Message copy button
-    row.querySelector('.copy-msg-btn')?.addEventListener('click', () => {
-      let rawText = row.dataset.fullContent || content || row.querySelector('.msg-text-content')?.innerText || '';
+    // Message copy button with visual checkmark feedback & safe fallback
+    row.querySelector('.copy-msg-btn')?.addEventListener('click', function() {
+      const copyBtn = this;
+      let rawText = row.dataset.fullContent;
+      if (!rawText) {
+        const textEl = row.querySelector('.msg-text-content');
+        rawText = textEl ? (textEl.innerText || textEl.textContent || '') : (content || '');
+      }
       if (role === 'user' && !rawText && docs && docs.length > 0) {
         rawText = docs.map(d => `[Dokumen: ${d.name || 'lampiran'}]`).join('\n');
       }
       const textToCopy = role === 'assistant' ? safeAssistantText(rawText) : rawText;
-      copyTextToClipboard(textToCopy, null, 'Pesan disalin ke clipboard!');
+      copyTextToClipboard(textToCopy, () => {
+        const origHtml = copyBtn.innerHTML;
+        copyBtn.innerHTML = '<i class="fa-solid fa-check" style="color:var(--neon-teal);"></i> <span style="color:var(--neon-teal);">Disalin!</span>';
+        copyBtn.classList.add('copied');
+        showToast('Pesan disalin ke clipboard!');
+        setTimeout(() => {
+          copyBtn.innerHTML = origHtml;
+          copyBtn.classList.remove('copied');
+        }, 2000);
+      }, 'Pesan disalin ke clipboard!');
     });
 
     els.messagesList?.appendChild(row);
@@ -30420,22 +30378,9 @@ Aturan:
     },
 
     playQrSuccessBeep() {
+      // Senyap total: tidak memutar audio
       try {
         if (navigator.vibrate) navigator.vibrate([50, 40, 50]);
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) return;
-        const ctx = new AudioCtx();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(880, ctx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.12);
-        gain.gain.setValueAtTime(0.15, ctx.currentTime);
-        gain.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.12);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.12);
       } catch (_) {}
     },
 
