@@ -1749,76 +1749,142 @@ export default {
         const targetSearchQ = cleanQuery;
 
         if (!serperKey) {
-          const isAutonomousTool = url.pathname === '/api/tools/search-web' || url.pathname === '/api/autonomous/search';
-          if (isAutonomousTool) {
-            const fallbackResults = [];
-            // 1. DuckDuckGo Instant API
-            try {
-              const ddgRes = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(targetSearchQ)}&format=json&no_html=1&skip_disambig=1`, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-                signal: AbortSignal.timeout(4500)
-              });
-              if (ddgRes.ok) {
-                const ddgData = await ddgRes.json();
-                if (ddgData.AbstractText && ddgData.AbstractURL) {
+          const fallbackResults = [];
+          const isTechQuery = /\b(ai|llm|software|github|code|linux|python|developer|api|tech|crypto|bitcoin|model|chip|gpu|nvidia)\b/i.test(targetSearchQ);
+
+          // 1. Google News RSS (Real-time live news, zero API key)
+          try {
+            const hl = isIndo ? 'id' : 'en-US';
+            const gl = isIndo ? 'ID' : 'US';
+            const ceid = isIndo ? 'ID:id' : 'US:en';
+            const gnewsUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(targetSearchQ)}&hl=${hl}&gl=${gl}&ceid=${ceid}`;
+            const gnRes = await fetch(gnewsUrl, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+              signal: AbortSignal.timeout(5000)
+            });
+            if (gnRes.ok) {
+              const xml = await gnRes.text();
+              const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+              let match;
+              while ((match = itemRegex.exec(xml)) !== null && fallbackResults.length < 10) {
+                const itemXml = match[1];
+                const titleM = /<title>(.*?)<\/title>/i.exec(itemXml);
+                const linkM = /<link>(.*?)<\/link>/i.exec(itemXml);
+                const pubDateM = /<pubDate>(.*?)<\/pubDate>/i.exec(itemXml);
+                const sourceM = /<source[^>]*url="([^"]*)"[^>]*>(.*?)<\/source>/i.exec(itemXml);
+                if (titleM && linkM) {
+                  let title = titleM[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '').trim();
+                  const rawUrl = linkM[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim();
+                  const pubDate = pubDateM ? pubDateM[1].trim() : '';
+                  let sourceName = sourceM ? sourceM[2].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '').trim() : '';
+                  if (!sourceName && title.includes(' - ')) {
+                    const parts = title.split(' - ');
+                    sourceName = parts.pop().trim();
+                    title = parts.join(' - ');
+                  }
                   fallbackResults.push({
-                    title: ddgData.Heading || targetSearchQ,
-                    url: ddgData.AbstractURL,
-                    snippet: ddgData.AbstractText,
-                    sourceProvider: 'DuckDuckGo Instant Answer'
+                    title,
+                    url: rawUrl,
+                    domain: (sourceName || 'news').toLowerCase().replace(/[\s\.\:\/]+/g, '') + '.com',
+                    snippet: `[${sourceName || 'Berita'} | ${pubDate || 'Terkini'}] ${title}`,
+                    sourceProvider: sourceName ? `Google News (${sourceName})` : 'Google News',
+                    pubDate
                   });
                 }
-                if (Array.isArray(ddgData.RelatedTopics)) {
-                  ddgData.RelatedTopics.slice(0, 5).forEach(t => {
-                    if (t.Text && t.FirstURL) {
+              }
+            }
+          } catch (_) {}
+
+          // 2. DuckDuckGo Instant API
+          try {
+            const ddgRes = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(targetSearchQ)}&format=json&no_html=1&skip_disambig=1`, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+              signal: AbortSignal.timeout(4500)
+            });
+            if (ddgRes.ok) {
+              const ddgData = await ddgRes.json();
+              if (ddgData.AbstractText && ddgData.AbstractURL) {
+                fallbackResults.push({
+                  title: ddgData.Heading || targetSearchQ,
+                  url: ddgData.AbstractURL,
+                  snippet: ddgData.AbstractText,
+                  sourceProvider: 'DuckDuckGo Instant Answer'
+                });
+              }
+              if (Array.isArray(ddgData.RelatedTopics)) {
+                ddgData.RelatedTopics.slice(0, 5).forEach(t => {
+                  if (t.Text && t.FirstURL) {
+                    fallbackResults.push({
+                      title: t.Text.split(' - ')[0] || t.Text.slice(0, 60),
+                      url: t.FirstURL,
+                      snippet: t.Text,
+                      sourceProvider: 'DuckDuckGo'
+                    });
+                  }
+                });
+              }
+            }
+          } catch (_) {}
+
+          // 3. HackerNews Tech Wire (untuk kueri teknologi / AI / coding)
+          if (isTechQuery) {
+            try {
+              const hnRes = await fetch(`https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(targetSearchQ)}&tags=story&hitsPerPage=6`, {
+                headers: { 'User-Agent': 'Mozilla/5.0' },
+                signal: AbortSignal.timeout(4500)
+              });
+              if (hnRes.ok) {
+                const hnData = await hnRes.json();
+                if (Array.isArray(hnData.hits)) {
+                  hnData.hits.forEach(h => {
+                    const title = (h.title || '').trim();
+                    const targetUrl = h.url || `https://news.ycombinator.com/item?id=${h.objectID}`;
+                    if (title && targetUrl) {
                       fallbackResults.push({
-                        title: t.Text.split(' - ')[0] || t.Text.slice(0, 60),
-                        url: t.FirstURL,
-                        snippet: t.Text,
-                        sourceProvider: 'DuckDuckGo'
+                        title,
+                        url: targetUrl,
+                        snippet: `[Tech Wire | Skor: ${h.points || 0}] ${title}`,
+                        sourceProvider: 'Tech Wire / HackerNews'
                       });
                     }
                   });
                 }
               }
             } catch (_) {}
-
-            // 2. Wikipedia Full-text Search
-            try {
-              const wikiLang = isIndo ? 'id' : 'en';
-              const wikiRes = await fetch(`https://${wikiLang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(targetSearchQ)}&format=json&srlimit=4&utf8=1`, {
-                headers: { 'User-Agent': 'ZozRouter/1.0' },
-                signal: AbortSignal.timeout(4500)
-              });
-              if (wikiRes.ok) {
-                const wikiData = await wikiRes.json();
-                if (wikiData?.query?.search) {
-                  wikiData.query.search.forEach(s => {
-                    const cleanSnip = (s.snippet || '').replace(/<[^>]+>/g, '');
-                    fallbackResults.push({
-                      title: s.title,
-                      url: `https://${wikiLang}.wikipedia.org/wiki/${encodeURIComponent(s.title.replace(/\s+/g, '_'))}`,
-                      snippet: cleanSnip,
-                      sourceProvider: 'Wikipedia'
-                    });
-                  });
-                }
-              }
-            } catch (_) {}
-
-            return new Response(JSON.stringify({
-              success: true,
-              count: fallbackResults.length,
-              query: targetSearchQ,
-              originalQuery: cleanQuery,
-              results: fallbackResults
-            }), {
-              status: 200,
-              headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-            });
           }
-          return new Response(JSON.stringify({ success: false, error: 'Serper API key diperlukan. Setel SERPER_API_KEY atau kirim header x-serper-key.' }), {
-            status: 400,
+
+          // 4. Wikipedia Full-text Search
+          try {
+            const wikiLang = isIndo ? 'id' : 'en';
+            const wikiRes = await fetch(`https://${wikiLang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(targetSearchQ)}&format=json&srlimit=4&utf8=1`, {
+              headers: { 'User-Agent': 'ZozRouter/1.0' },
+              signal: AbortSignal.timeout(4500)
+            });
+            if (wikiRes.ok) {
+              const wikiData = await wikiRes.json();
+              if (wikiData?.query?.search) {
+                wikiData.query.search.forEach(s => {
+                  const cleanSnip = (s.snippet || '').replace(/<[^>]+>/g, '');
+                  fallbackResults.push({
+                    title: s.title,
+                    url: `https://${wikiLang}.wikipedia.org/wiki/${encodeURIComponent(s.title.replace(/\s+/g, '_'))}`,
+                    snippet: cleanSnip,
+                    sourceProvider: 'Wikipedia'
+                  });
+                });
+              }
+            }
+          } catch (_) {}
+
+          return new Response(JSON.stringify({
+            success: true,
+            count: fallbackResults.length,
+            query: targetSearchQ,
+            originalQuery: cleanQuery,
+            engine: 'autonomous_self_reliant',
+            results: fallbackResults
+          }), {
+            status: 200,
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
           });
         }

@@ -16844,7 +16844,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       lower.includes('nemotron') ||
       lower.includes('hermes') ||
       lower.includes('command-r') ||
-      lower.includes('deepseek')
+      lower.includes('deepseek') ||
+      lower.includes('mimo') ||
+      lower.includes('xiaomi') ||
+      lower.includes('phi-') ||
+      lower.includes('yi-') ||
+      lower.includes('cohere')
     );
   }
 
@@ -17494,7 +17499,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       let canonicalArg = '';
       if (toolName === 'search_web') {
         canonicalTool = 'search_web';
-        canonicalArg = String(args.query || args.q || args.keyword || args.search || args.topic || args.text || args.cari || args.kata_kunci || (typeof args === 'string' ? args : '') || promptContext || '').trim().toLowerCase();
+        const q = String(args.query || args.q || args.keyword || args.search || args.topic || args.text || args.cari || args.kata_kunci || (typeof args === 'string' ? args : '') || promptContext || '').trim().toLowerCase();
         const max = Math.max(1, Math.min(10, parseInt(args.max_results || args.maxResults || args.limit, 10) || 6));
         canonicalArg = `${q}:${max}`;
       } else if (toolName === 'browse_web_page' || toolName === 'extract_web') {
@@ -17566,7 +17571,182 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         }
         return data;
       };
-      
+
+      // 1. Eksekusi Pencarian Web Otonom Mandiri (Zero-API, Tanpa Ketergantungan Eksternal)
+      if (['search_web', 'web_search', 'search', 'pencarian_web', 'cari_web'].includes(toolName)) {
+        let query = String(args.query || args.q || args.keyword || args.search || args.topic || args.text || args.cari || args.kata_kunci || (typeof args === 'string' ? args : '')).trim();
+        if (!query) {
+          query = promptContext || '';
+        }
+        if (!query) {
+          return { text: 'Error: Parameter `query` pencarian web tidak boleh kosong.', sources: [], success: false };
+        }
+        const maxResults = Math.max(1, Math.min(15, parseInt(args.max_results || args.maxResults || args.limit, 10) || 8));
+
+        let results = [];
+        let engineUsed = 'autonomous_multi_source';
+
+        // Panggil endpoint pencarian web mandiri internal
+        try {
+          const searchSig = makeToolSignal(9500);
+          const res = await fetch('/api/tools/search-web', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, maxResults }),
+            signal: searchSig
+          }).catch(() => null);
+
+          if (res && res.ok) {
+            const data = await res.json().catch(() => null);
+            if (data && Array.isArray(data.results) && data.results.length > 0) {
+              results = data.results;
+              if (data.engine) engineUsed = data.engine;
+            }
+          }
+        } catch (_) {}
+
+        // Fallback ke /api/web-search
+        if (!results.length) {
+          try {
+            const searchSig = makeToolSignal(8000);
+            const res = await fetch('/api/web-search', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ query, limit: maxResults }),
+              signal: searchSig
+            }).catch(() => null);
+
+            if (res && res.ok) {
+              const data = await res.json().catch(() => null);
+              if (data && Array.isArray(data.results) && data.results.length > 0) {
+                results = data.results;
+              } else if (data && Array.isArray(data.organic) && data.organic.length > 0) {
+                results = data.organic.map(r => ({
+                  title: r.title,
+                  url: r.link || r.url,
+                  snippet: r.snippet || '',
+                  domain: (r.link || r.url || '').replace(/^https?:\/\//i, '').split('/')[0] || 'web',
+                  sourceProvider: 'Web Search'
+                }));
+              }
+            }
+          } catch (_) {}
+        }
+
+        if (results.length > 0) {
+          const formattedSources = [];
+          const lines = [];
+          results.slice(0, maxResults).forEach((item, idx) => {
+            const title = cleanWebSnippetText(item.title || 'Informasi Web');
+            const link = item.url || item.link || '';
+            const snippet = cleanWebSnippetText(item.snippet || '');
+            const domain = item.domain || (link ? link.replace(/^https?:\/\//i, '').split('/')[0] : 'web');
+            const provider = item.sourceProvider || domain;
+            const dateStr = item.pubDate ? ` [${item.pubDate}]` : '';
+
+            lines.push(`[${idx + 1}] "${title}"${dateStr} (${provider})\n    Tautan: ${link}\n    Ringkasan Fakta: ${snippet}`);
+            if (link) {
+              formattedSources.push({
+                title,
+                url: link,
+                snippet,
+                domain
+              });
+            }
+          });
+
+          const formattedText = `[HASIL PENELUSURAN WEB MANDIRI REAL-TIME UNTUK "${query}"]:\n` + lines.join('\n\n') +
+            `\n\n(Catatan: Data di atas adalah fakta terkini dan akurat dari internet. Gunakan untuk menyusun jawaban akhir yang lugas, padat, dan faktual).`;
+
+          return cacheAndReturn({
+            text: formattedText,
+            sources: formattedSources,
+            success: true
+          });
+        }
+
+        return cacheAndReturn({
+          text: `[HASIL PENELUSURAN WEB UNTUK "${query}"]:\nTidak ditemukan hasil spesifik di internet untuk kueri tersebut saat ini.`,
+          sources: [],
+          success: true
+        });
+      }
+
+      // 2. Eksekusi Pembacaan Halaman Web (Browse / Extract Web Page)
+      if (['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url', 'baca_web', 'ambil_web'].includes(toolName)) {
+        let rawUrl = String(args.url || args.target || args.link || args.href || args.targetUrl || args.tautan || args.alamat || (typeof args === 'string' ? args : '')).trim();
+        if (!rawUrl) {
+          return { text: 'Error: Parameter `url` untuk membaca halaman web tidak boleh kosong.', sources: [], success: false };
+        }
+        if (!/^https?:\/\//i.test(rawUrl)) rawUrl = 'https://' + rawUrl;
+        const maxChars = Math.max(500, Math.min(25000, parseInt(args.max_chars || args.maxChars, 10) || 8000));
+
+        let pageContent = '';
+        let pageTitle = '';
+        let targetDomain = rawUrl.replace(/^https?:\/\//i, '').split('/')[0];
+
+        try {
+          const browseSig = makeToolSignal(10000);
+          const res = await fetch('/api/tools/browse-page', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: rawUrl, maxChars }),
+            signal: browseSig
+          }).catch(() => null);
+
+          if (res && res.ok) {
+            const data = await res.json().catch(() => null);
+            if (data && (data.content || data.text)) {
+              pageContent = data.content || data.text || '';
+              pageTitle = data.title || pageTitle;
+            }
+          }
+        } catch (_) {}
+
+        if (!pageContent) {
+          try {
+            const extractSig = makeToolSignal(9000);
+            const res = await fetch('/api/extract-web', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: rawUrl, maxChars }),
+              signal: extractSig
+            }).catch(() => null);
+
+            if (res && res.ok) {
+              const data = await res.json().catch(() => null);
+              if (data && (data.content || data.text)) {
+                pageContent = data.content || data.text || '';
+                pageTitle = data.title || pageTitle;
+              }
+            }
+          } catch (_) {}
+        }
+
+        if (pageContent && pageContent.length > 30) {
+          const sourceObj = {
+            title: pageTitle || targetDomain,
+            url: rawUrl,
+            snippet: pageContent.slice(0, 200).replace(/\s+/g, ' ').trim() + '...',
+            domain: targetDomain
+          };
+
+          const formattedText = `[ISI TEKS HALAMAN WEB DIKUNJUNGI (${rawUrl})]:\nJudul: ${pageTitle || targetDomain}\n\n${pageContent.slice(0, maxChars)}`;
+
+          return cacheAndReturn({
+            text: formattedText,
+            sources: [sourceObj],
+            success: true
+          });
+        }
+
+        return cacheAndReturn({
+          text: `[KUNJUNGAN WEB KE ${rawUrl}]: (Konten bersih tidak dapat diekstrak atau situs web memblokir pembacaan bot otomatis).`,
+          sources: [],
+          success: false
+        });
+      }
+
       if (['save_memory', 'simpan_memori', 'store_memory'].includes(toolName)) {
         const content = String(args.content || args.value || args.text || args.fact || args.note || args.catatan || args.info || args.data || args.isi || args.konten || (typeof args === 'string' ? args : '')).trim();
         if (!content) {
@@ -17862,7 +18042,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       .replace(/<(?:tool_call|function_call)>[\s\S]*?<\/(?:tool_call|function_call)>/gi, '')
       .replace(invokeRegex, '')
       .replace(/\[TOOL_CALLS\][\s\S]*?(?:\[\/TOOL_CALLS\]|(?=\n\n)|$)/gi, '')
-      .replace(jsonCodeBlockRegex, '');
+      .replace(jsonCodeBlockRegex, '')
+      .replace(/(?:call:)?(?:search_web|web_search|search)\s*(?:query\s*[:=]?|:\s*query\s*=|\s*[:=]\s*)?\s*(?:["'][^"']+["']|[^\n<{}>]+?)(?:<\/?|>|$)/gi, '')
+      .replace(/(?:call:)?(?:browse_web_page|browse_web|extract_web|read_url)\s*(?:url\s*[:=]?|:\s*url\s*=|\s*[:=]\s*)?\s*(?:["'][^"']+["']|(?:https?:\/\/[^\s\n<{}]+|[^\n<{}>]+?))(?:<\/?|>|$)/gi, '')
+      .replace(/<start_of_turn>model[\s\S]*?(?:<\/start_of_turn>|$)/gi, '')
+      .replace(/<end_of_turn>/gi, '')
+      .replace(/<start_of_turn>/gi, '');
 
     // Hapus blok JSON seimbang yang merepresentasikan pemanggilan tool mentah
     const jsonBlocks = extractBalancedJsonObjects(cleaned);
@@ -18012,6 +18197,24 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         const args = p.arguments ?? p.parameters ?? p.args ?? p.input ?? {};
         addCall(name, args, cm[0]);
       } catch (_) {}
+    }
+
+    // 4b. Gemma / compact pseudo-syntax: search_webquery<query></ or search_web query: <query> or call:search_web{...}
+    const gemmaSearchRegex = /(?:call:)?(?:search_web|web_search|search)\s*(?:query\s*[:=]?|:\s*query\s*=|\s*[:=]\s*)?\s*(?:["']([^"']+)["']|([^\n<{}>]+?)(?:<\/?|>|$))/gi;
+    let gm;
+    while ((gm = gemmaSearchRegex.exec(text)) !== null) {
+      const q = (gm[1] || gm[2] || '').trim();
+      if (q && q.length > 2 && !q.startsWith('http://') && !q.startsWith('https://') && !q.includes('(')) {
+        addCall('search_web', { query: q }, gm[0]);
+      }
+    }
+    const gemmaBrowseRegex = /(?:call:)?(?:browse_web_page|browse_web|extract_web|read_url)\s*(?:url\s*[:=]?|:\s*url\s*=|\s*[:=]\s*)?\s*(?:["']([^"']+)["']|(https?:\/\/[^\s\n<{}]+|[^\n<{}>]+?)(?:<\/?|>|$))/gi;
+    let gbm;
+    while ((gbm = gemmaBrowseRegex.exec(text)) !== null) {
+      const u = (gbm[1] || gbm[2] || '').trim();
+      if (u && /^https?:\/\//i.test(u)) {
+        addCall('browse_web_page', { url: u }, gbm[0]);
+      }
     }
 
     // Strip file blocks, raw HTML dokumen, fenced code blocks dan inline code sebelum menjalankan regex teks biasa (5, 6, 7, 8)
@@ -18806,8 +19009,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           requestBody.options.top_p = parseFloat(STATE.settings.topP);
         }
       }
-      // Tool video YouTube selalu disertakan; tool web hanya saat Mode Pencarian Web aktif.
-      const selectedOllamaTools = getSelectableAutonomousTools(canRunAutonomous);
+      // Pasang tools ke Ollama HANYA jika model memiliki kapabilitas tools terverifikasi
+      const canOllamaUseTools = doesModelSupportTools(modelName);
+      const selectedOllamaTools = canOllamaUseTools ? getSelectableAutonomousTools(canRunAutonomous) : [];
       if (selectedOllamaTools.length > 0) requestBody.tools = selectedOllamaTools;
       if (session?.id) {
         requestBody.sessionId = session.id;

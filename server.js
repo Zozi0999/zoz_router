@@ -1471,7 +1471,10 @@ function performWebSearch(query, apiKey = null, num = 15) {
     const targetNum = Math.min(Math.max(parseInt(num, 10) || 15, 1), 30);
     const serperKey = apiKey || process.env.SERPER_API_KEY || null;
     if (!serperKey) {
-      return safeResolve({ query: targetSearchQuery, count: 0, results: [], error: 'SERPER_API_KEY belum dikonfigurasi di server. Set env SERPER_API_KEY atau masukkan key di Pengaturan.' });
+      // Mandat Mandiri: Tanpa kunci Serper pihak ketiga, jalankan mesin pencarian otonom internal dari nol
+      return performAutonomousSearch(targetSearchQuery, targetNum).then(safeResolve).catch(() => {
+        safeResolve({ query: targetSearchQuery, count: 0, results: [], engine: 'autonomous_self_reliant' });
+      });
     }
     const postData = JSON.stringify({
       q: targetSearchQuery,
@@ -1501,8 +1504,10 @@ function performWebSearch(query, apiKey = null, num = 15) {
           const parsed = JSON.parse(rawData);
 
           if (res.statusCode >= 400 || (parsed.message && !Array.isArray(parsed.organic))) {
-            const errMsg = parsed.message || (parsed.error ? (typeof parsed.error === 'object' ? parsed.error.message : parsed.error) : `Serper HTTP ${res.statusCode} Error`);
-            return safeResolve({ query: cleanQuery, count: 0, results: [], error: errMsg });
+            // Serper gagal / kuota habis: alihkan mulus ke mesin otonom internal mandiri
+            return performAutonomousSearch(cleanQuery, targetNum).then(safeResolve).catch(() => {
+              safeResolve({ query: cleanQuery, count: 0, results: [], engine: 'autonomous_self_reliant' });
+            });
           }
 
           const results = [];
@@ -1580,18 +1585,24 @@ function performWebSearch(query, apiKey = null, num = 15) {
         }
       });
 
-      res.on('error', (err) => {
-        safeResolve({ query: cleanQuery, count: 0, results: [], error: err.message });
+      res.on('error', () => {
+        performAutonomousSearch(cleanQuery, targetNum).then(safeResolve).catch(() => {
+          safeResolve({ query: cleanQuery, count: 0, results: [], engine: 'autonomous_self_reliant' });
+        });
       });
     });
 
     req.on('timeout', () => {
       req.destroy();
-      safeResolve({ query: cleanQuery, count: 0, results: [], error: 'Serper search timed out' });
+      performAutonomousSearch(cleanQuery, targetNum).then(safeResolve).catch(() => {
+        safeResolve({ query: cleanQuery, count: 0, results: [], engine: 'autonomous_self_reliant' });
+      });
     });
 
-    req.on('error', (err) => {
-      safeResolve({ query: cleanQuery, count: 0, results: [], error: err.message });
+    req.on('error', () => {
+      performAutonomousSearch(cleanQuery, targetNum).then(safeResolve).catch(() => {
+        safeResolve({ query: cleanQuery, count: 0, results: [], engine: 'autonomous_self_reliant' });
+      });
     });
 
     req.write(postData);
@@ -3333,6 +3344,66 @@ function fetchDuckDuckGoWeb(query, maxCount = 8) {
   });
 }
 
+function fetchDuckDuckGoLite(query, maxCount = 8) {
+  return new Promise((resolve) => {
+    try {
+      const querystring = require('querystring');
+      const postData = querystring.stringify({ q: query });
+      const req = https.request('https://lite.duckduckgo.com/lite/', {
+        method: 'POST',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(postData),
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7'
+        },
+        timeout: 6000
+      }, (res) => {
+        let html = '';
+        res.on('data', chunk => {
+          html += chunk;
+          if (html.length > 500000) req.destroy();
+        });
+        res.on('end', () => {
+          try {
+            const results = [];
+            const rowRegex = /<a[^>]+class="result-link"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<td[^>]+class="result-snippet"[^>]*>([\s\S]*?)<\/td>/gi;
+            let m;
+            while ((m = rowRegex.exec(html)) !== null && results.length < maxCount) {
+              let link = m[1];
+              if (link.includes('uddg=')) {
+                try {
+                  const uMatch = link.match(/uddg=([^&]+)/);
+                  if (uMatch) link = decodeURIComponent(uMatch[1]);
+                } catch (_) {}
+              }
+              const title = cleanHtmlText(m[2]);
+              const snippet = cleanHtmlText(m[3]);
+              if (title && link) {
+                results.push({
+                  title,
+                  url: link,
+                  domain: extractDomainSafe(link),
+                  snippet: snippet || title,
+                  sourceProvider: 'DuckDuckGo Lite',
+                  timestamp: Date.now()
+                });
+              }
+            }
+            resolve(results);
+          } catch (_) { resolve([]); }
+        });
+        res.on('error', () => resolve([]));
+      });
+      req.on('timeout', () => { req.destroy(); resolve([]); });
+      req.on('error', () => resolve([]));
+      req.write(postData);
+      req.end();
+    } catch (_) { resolve([]); }
+  });
+}
+
 async function performAutonomousSearch(query, maxResults = 15, contextText = '') {
   if (!query || typeof query !== 'string' || !query.trim()) {
     return { query: '', count: 0, results: [] };
@@ -3350,19 +3421,21 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   const weeklyQuery = qPlan.weeklyNews;
   const coreQuery = qPlan.core;
 
-  const serperCalls = [
-    performWebSearch(cleanQuery, null, maxResults)
-  ];
-  if (cleanDateQuery && cleanDateQuery.length >= 3 && cleanDateQuery.toLowerCase() !== cleanQuery.toLowerCase()) {
-    serperCalls.push(performWebSearch(cleanDateQuery, null, maxResults));
+  const serperCalls = [];
+  const serperKey = process.env.SERPER_API_KEY || null;
+  if (serperKey) {
+    serperCalls.push(performWebSearch(cleanQuery, serperKey, maxResults));
+    if (cleanDateQuery && cleanDateQuery.length >= 3 && cleanDateQuery.toLowerCase() !== cleanQuery.toLowerCase()) {
+      serperCalls.push(performWebSearch(cleanDateQuery, serperKey, maxResults));
+    }
   }
 
   const combinedLower = (cleanQuery + ' ' + query.trim() + ' ' + (contextText || '')).toLowerCase();
   const isTechQuery = /\b(ai|llm|software|github|code|linux|python|developer|api|tech|crypto|bitcoin|model|chip|gpu|nvidia|programming|framework)\b/i.test(combinedLower);
 
-  // Eksekusi seluruh provider: Google Serper, Google News RSS, Tech Wire / HackerNews, DuckDuckGo Web, DuckDuckGo Instant, & Wikipedia
-  const [serperRes1, serperRes2, gnewsPrimary, gnewsCore, gnewsIndo, gnewsNews, hnTech, hnCore, ddgWeb1, ddgWeb2, ddgInstant, wikiRes] = await Promise.allSettled([
-    serperCalls[0],
+  // Eksekusi seluruh provider otonom mandiri: Google News RSS, Tech Wire / HackerNews, DuckDuckGo Web, DuckDuckGo Lite, DuckDuckGo Instant, Wikipedia & Serper opsional
+  const [serperRes1, serperRes2, gnewsPrimary, gnewsCore, gnewsIndo, gnewsNews, hnTech, hnCore, ddgWeb1, ddgWeb2, ddgLite1, ddgInstant, wikiRes] = await Promise.allSettled([
+    serperCalls[0] || Promise.resolve({ results: [] }),
     serperCalls[1] || Promise.resolve({ results: [] }),
     fetchGoogleNewsRss(cleanQuery, isIndo ? 'id' : 'en', 10),
     fetchGoogleNewsRss(coreQuery, isIndo ? 'id' : 'en', 8),
@@ -3372,6 +3445,7 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
     isTechQuery ? fetchHackerNewsTech(coreQuery, 6) : Promise.resolve([]),
     fetchDuckDuckGoWeb(cleanQuery, 8),
     fetchDuckDuckGoWeb(coreQuery, 6),
+    fetchDuckDuckGoLite(cleanQuery, 8),
     fetchDuckDuckGoInstant(coreQuery),
     fetchWikipediaFullText(coreQuery, isIndo ? 'id' : 'en', 4)
   ]);
@@ -3385,6 +3459,7 @@ async function performAutonomousSearch(query, maxResults = 15, contextText = '')
   }
   if (ddgWeb1.status === 'fulfilled' && Array.isArray(ddgWeb1.value)) candidatePool.push(...ddgWeb1.value);
   if (ddgWeb2.status === 'fulfilled' && Array.isArray(ddgWeb2.value)) candidatePool.push(...ddgWeb2.value);
+  if (ddgLite1.status === 'fulfilled' && Array.isArray(ddgLite1.value)) candidatePool.push(...ddgLite1.value);
   if (gnewsPrimary.status === 'fulfilled' && Array.isArray(gnewsPrimary.value)) candidatePool.push(...gnewsPrimary.value);
   if (gnewsCore.status === 'fulfilled' && Array.isArray(gnewsCore.value)) candidatePool.push(...gnewsCore.value);
   if (gnewsIndo.status === 'fulfilled' && Array.isArray(gnewsIndo.value)) candidatePool.push(...gnewsIndo.value);
@@ -4738,17 +4813,14 @@ async function requestHandler(req, res) {
       if (!query) {
         return sendJSON(res, 400, { error: 'Parameter query `q` atau body `{ query }` diperlukan.' });
       }
-      // Endpoint Serper-MURNI: tanpa key, hasil pasti kosong → gagal nyata (503)
-      // alih-alih 200 dengan results[] kosong yang menyesatkan klien.
       const effectiveSerperKey = apiKey || process.env.SERPER_API_KEY || null;
-      if (!effectiveSerperKey) {
-        return sendJSON(res, 503, {
-          success: false,
-          error: 'SERPER_API_KEY belum dikonfigurasi di server. Set env SERPER_API_KEY atau masukkan key di Pengaturan.'
-        });
-      }
       const targetNum = Math.min(Math.max(isNaN(num) ? 15 : num, 1), 30);
-      const data = await performWebSearch(query, apiKey, targetNum);
+      if (!effectiveSerperKey) {
+        // Mandat Mandiri: Tanpa kunci Serper pihak ketiga, jalankan mesin pencarian otonom internal dari nol
+        const data = await performAutonomousSearch(query, targetNum);
+        return sendJSON(res, 200, { success: true, ...data });
+      }
+      const data = await performWebSearch(query, effectiveSerperKey, targetNum);
       return sendJSON(res, 200, data);
     } catch (e) {
       return sendJSON(res, 500, { error: 'Gagal melakukan pencarian web Serper: ' + e.message });
