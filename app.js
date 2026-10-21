@@ -14401,6 +14401,7 @@ Aturan wajib:
                 title: cleanWebSnippetText(r.title),
                 link: r.url,
                 snippet: cleanWebSnippetText(r.snippet),
+                content: r.content || '',
                 date: r.pubDate || 'Terkini',
                 domain: r.domain
               })),
@@ -14487,6 +14488,7 @@ Aturan wajib:
           title: cleanWebSnippetText(item.title) || `Sumber ${cleanOrganicList.length + 1}`,
           url: link,
           snippet: cleanWebSnippetText(item.snippet) || '',
+          content: cleanWebSnippetText(String(item.content || '')),
           date: item.date || item.pubDate || null,
           domain,
           timestamp: item.timestamp || (item.date ? (Date.parse(item.date) || Date.now()) : Date.now())
@@ -14508,7 +14510,9 @@ Aturan wajib:
           const snippet = item.snippet;
           const date = item.date ? ` (Dipublikasikan: ${item.date})` : '';
 
-          organicBlock += `\n${idx + 1}. **[${title}](${link})**${date}\n   ${snippet}\n`;
+          const bodyText = String(item.content || '').slice(0, idx < 5 ? 2500 : 600);
+          const bodyBlock = bodyText && bodyText.length > snippet.length ? `\n   Isi Artikel: ${bodyText}` : '';
+          organicBlock += `\n${idx + 1}. **[${title}](${link})**${date}\n   Ringkasan: ${snippet}${bodyBlock}\n`;
           
           if (link && !sources.some(s => s.url === link)) {
             sources.push({
@@ -14533,11 +14537,13 @@ ${factsBlock}
 === TEMUAN SITUS WEB TERATAS ===
 ${organicBlock}
 [PANDUAN UNTUK ASISTEN AI]:
-- Anda adalah AI yang telah mengaktifkan kemampuan Search Skill untuk mencari data Google secara otonom berdasarkan konteks obrolan.
+- Anda adalah AI yang telah mengaktifkan kemampuan Search Skill untuk menelusuri web secara otonom berdasarkan konteks obrolan.
 - Hubungkan data real-time di atas dengan konteks riwayat percakapan sebelumnya dan jawab dengan akurat, mutakhir, faktual, dan komprehensif.
 - FOKUS DAN RELEVANSI TINGGI: Jawablah pertanyaan pengguna secara langsung, relevan, dan terarah. Jika pengguna bertanya tentang berita atau model AI terbaru, utamakan perkembangan model AI utama terkemuka dunia (OpenAI GPT/o-series, Claude, Gemini, Meta Llama, DeepSeek, Mistral, xAI, dll.). Dilarang mengalihkan fokus ke ringkasan pergerakan saham finansial sampingan atau platform lokal kecil yang tidak relevan.
 - ANTI-HALUSINASI KETAT: Dilarang keras mengarang berita, kemitraan fiktif (seperti konsorsium gabungan palsu antar raksasa teknologi), atau tanggal rilis imajiner. Hanya gunakan fakta nyata yang tercantum di hasil pencarian web di atas.
-- Wajib sertakan referensi tautan markdown [Nama Sumber](URL) jika merujuk fakta spesifik.`;
+- JAWAB DENGAN ISI, BUKAN DAFTAR TAUTAN: Baca bagian "Isi Artikel" lalu jelaskan langsung apa yang terjadi/dirilis (nama, detail teknis, angka, tanggal, fitur, dampak) dalam kalimat Anda sendiri. DILARANG hanya menyebut judul artikel dan DILARANG menyuruh pengguna mengunjungi/membaca sumber sendiri.
+- Jika data di atas tidak memuat jawaban atas pertanyaan, katakan terus terang bahwa informasinya belum ditemukan di indeks — jangan mengarang.
+- Cantumkan tautan markdown [Nama Sumber](URL) hanya sebagai referensi pendukung setelah penjelasan.`;
 
       return {
         systemPromptContext,
@@ -17607,8 +17613,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             const domain = item.domain || (link ? link.replace(/^https?:\/\//i, '').split('/')[0] : 'web');
             const provider = item.sourceProvider || domain;
             const dateStr = item.pubDate ? ` [${item.pubDate}]` : '';
+            const bodyText = cleanWebSnippetText(String(item.content || '')).slice(0, idx < 5 ? 2500 : 600);
+            const bodyBlock = bodyText && bodyText.length > snippet.length ? `\n    Isi Artikel: ${bodyText}` : '';
 
-            lines.push(`[${idx + 1}] "${title}"${dateStr} (${provider})\n    Tautan: ${link}\n    Ringkasan Fakta: ${snippet}`);
+            lines.push(`[${idx + 1}] "${title}"${dateStr} (${provider})\n    Tautan: ${link}\n    Ringkasan: ${snippet}${bodyBlock}`);
             if (link) {
               formattedSources.push({
                 title,
@@ -17620,7 +17628,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           });
 
           const formattedText = `[HASIL PENELUSURAN WEB MANDIRI REAL-TIME UNTUK "${query}"]:\n` + lines.join('\n\n') +
-            `\n\n(Catatan: Data di atas adalah fakta terkini dan akurat dari internet. Gunakan untuk menyusun jawaban akhir yang lugas, padat, dan faktual).`;
+            `\n\n[INSTRUKSI WAJIB]: Baca "Isi Artikel" di atas lalu JELASKAN langsung kepada pengguna apa isinya (nama, detail, angka, tanggal, fitur, dampak) dengan kalimat Anda sendiri. DILARANG hanya menampilkan daftar judul/tautan, dan DILARANG menyuruh pengguna membuka atau membaca sumbernya sendiri. Tautan hanya dicantumkan sebagai referensi pendukung. Jika data di atas tidak memuat jawaban atas pertanyaan, katakan terus terang bahwa indeks belum memiliki informasinya — jangan mengarang.`;
 
           return cacheAndReturn({
             text: formattedText,

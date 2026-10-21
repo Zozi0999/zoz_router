@@ -3043,137 +3043,41 @@ function indexArticleToZozDb(art) {
   }
 }
 
+// Entri seed lama (v414) adalah data buatan dengan URL yang tidak terverifikasi.
+// Index hanya boleh berisi halaman yang benar-benar dirayapi dari web, jadi entri tersebut dihapus.
+const LEGACY_UNVERIFIED_SEED_URLS = [
+  'https://developers.googleblog.com/2026/10/gemma-4-open-models.html',
+  'https://ai.google.dev/gemma/docs',
+  'https://ai.meta.com/blog/llama-4-open-release/',
+  'https://www.anthropic.com/news/claude-3-7-sonnet',
+  'https://github.com/deepseek-ai/DeepSeek-V3',
+  'https://qwenlm.github.io/blog/qwen2.5/',
+  'https://openai.com/index/introducing-o1/',
+  'https://mistral.ai/news/mistral-large-2407/',
+  'https://blackforestlabs.ai/announcing-flux-1/',
+  'https://www.antaranews.com/berita/sahabat-ai-indonesia',
+  'https://nvidianews.nvidia.com/news/nvidia-blackwell-platform-arrives',
+  'https://ollama.com/blog/local-inference-2026'
+];
+
 function seedSovereignWebIndex(db) {
-  const seeds = [
-    {
-      url: 'https://developers.googleblog.com/2026/10/gemma-4-open-models.html',
-      domain: 'developers.googleblog.com',
-      title: 'Google Merilis Model Gemma 4: Arsitektur 31B, 12B, dan 2B Terbuka untuk Pengembang (Oktober 2026)',
-      snippet: 'Google resmi merilis keluarga model open-weights Gemma 4 pada bulan Oktober 2026. Hadir dalam varian 31B (gemma-4-31b-it), 12B, dan 2B dengan kapabilitas multimodal native, konteks jendela 128k token, dan efisiensi inferensi tinggi di perangkat lokal maupun Ollama.',
-      content: 'Google DeepMind meluncurkan Gemma 4 pada Oktober 2026. Model unggulan gemma-4-31b-it menghadirkan pemahaman multimodal terpadu teks dan visual, penalaran matematis dan coding tingkat tinggi, serta lisensi ramah pengembang yang dapat dijalankan langsung melalui Ollama (`ollama run gemma4:31b`) dan vLLM. Arsitektur Gemma 4 mengintegrasikan interleave multi-head attention dan logit soft-capping mutakhir.',
-      category: 'ai',
-      published_at: '2026-10-15'
-    },
-    {
-      url: 'https://ai.google.dev/gemma/docs',
-      domain: 'ai.google.dev',
-      title: 'Dokumentasi Arsitektur Keluarga Model Gemma: Dari Gemma 2 ke Gemma 4',
-      snippet: 'Spesifikasi teknis model terbuka Gemma dari Google DeepMind, mencakup mekanisme sliding window attention, logit soft-capping, dan peningkatan arsitektur multimodal 2026.',
-      content: 'Keluarga model Gemma dibangun menggunakan teknologi riset Gemini. Dari Gemma 2 9B dan 27B hingga Gemma 4 31B, model ini mengoptimalkan efisiensi komputasi pada GPU tunggal dan perangkat desktop pengembang.',
-      category: 'ai',
-      published_at: '2026-10-01'
-    },
-    {
-      url: 'https://ai.meta.com/blog/llama-4-open-release/',
-      domain: 'ai.meta.com',
-      title: 'Meta Meluncurkan Model Terbuka Llama 4 dengan Multimodal Vision dan Reasoning (2026)',
-      snippet: 'Meta meluncurkan generasi terbaru Llama 4 dengan arsitektur transformer mutakhir, dukungan multimodal visual penuh, dan kemampuan pemanggilan tool otonom yang disempurnakan.',
-      content: 'Llama 4 hadir dalam varian Llama 4 Scout, 70B, dan 405B. Model ini dilatih pada triliunan token dengan efisiensi floating-point 4-bit dan 8-bit untuk eksekusi server cloud maupun lokal.',
-      category: 'ai',
-      published_at: '2026-09-25'
-    },
-    {
-      url: 'https://www.anthropic.com/news/claude-3-7-sonnet',
-      domain: 'anthropic.com',
-      title: 'Anthropic Merilis Claude 3.7 Sonnet dengan Hybrid Reasoning',
-      snippet: 'Anthropic memperkenalkan Claude 3.7 Sonnet, model frontier hybrid pertama yang memungkinkan pengembang memilih antara respons langsung latensi rendah atau penalaran mendalam terstruktur.',
-      content: 'Claude 3.7 Sonnet memadukan kecepatan penalaran instan dengan extended thinking budget yang dapat dikontrol. Sangat unggul dalam arsitektur perangkat lunak, coding kompleks, dan sains.',
-      category: 'ai',
-      published_at: '2026-08-10'
-    },
-    {
-      url: 'https://github.com/deepseek-ai/DeepSeek-V3',
-      domain: 'github.com',
-      title: 'DeepSeek Meluncurkan Model Open DeepSeek-V3 671B MoE dan DeepSeek-R1',
-      snippet: 'DeepSeek merilis model open weights DeepSeek-V3 671B parameter Mixture-of-Experts dan model penalaran mendalam DeepSeek-R1 yang menandingi performa model proprietary teratas.',
-      content: 'DeepSeek-V3 mengadopsi arsitektur Multi-head Latent Attention (MLA) dan DeepSeekMoE dengan efisiensi inferensi 37B parameter aktif per token. DeepSeek-R1 memperkenalkan penalaran reinforcement learning murni.',
-      category: 'ai',
-      published_at: '2026-07-20'
-    },
-    {
-      url: 'https://qwenlm.github.io/blog/qwen2.5/',
-      domain: 'qwenlm.github.io',
-      title: 'Alibaba Cloud Merilis Keluarga Model Terbuka Qwen 2.5 dan Qwen 2.5-Coder',
-      snippet: 'Alibaba meluncurkan seri Qwen 2.5 dari 0.5B hingga 72B dengan keunggulan coding, matematika, dan pemahaman multilingual lebih dari 29 bahasa termasuk Bahasa Indonesia.',
-      content: 'Qwen 2.5-Coder 32B menjadi salah satu model coding open weights terbaik, mendukung konteks jendela hingga 128k token dan integrasi mulus dengan lingkungan IDE pengembang.',
-      category: 'ai',
-      published_at: '2026-06-15'
-    },
-    {
-      url: 'https://openai.com/index/introducing-o1/',
-      domain: 'openai.com',
-      title: 'OpenAI Meluncurkan Seri Model Reasoning o1, o3, dan Pembaruan GPT-4o',
-      snippet: 'OpenAI merilis seri model penalaran baru o1 dan o3-mini untuk sains dan pemrograman rumit, serta pembaruan latensi rendah pada model GPT-4o omni-modal.',
-      content: 'Model penalaran OpenAI menggunakan pemikiran internal terstruktur sebelum menghasilkan jawaban, memberikan akurasi tinggi pada kompetisi matematika AIME dan pemrograman kompetitif Codeforces.',
-      category: 'ai',
-      published_at: '2026-09-12'
-    },
-    {
-      url: 'https://mistral.ai/news/mistral-large-2407/',
-      domain: 'mistral.ai',
-      title: 'Mistral AI Memperkenalkan Mistral Large 2 dan Codestral',
-      snippet: 'Mistral AI meluncurkan Mistral Large 2 (123B) dengan konteks 128k token serta kemampuan coding dan pemikiran logis kelas dunia.',
-      content: 'Mistral Large 2 menawarkan penalaran frontier dengan lisensi penelitian terbuka, mendukung lusinan bahasa dan format JSON terstruktur natively.',
-      category: 'ai',
-      published_at: '2026-07-24'
-    },
-    {
-      url: 'https://blackforestlabs.ai/announcing-flux-1/',
-      domain: 'blackforestlabs.ai',
-      title: 'Black Forest Labs Merilis FLUX.1: Model Generasi Gambar Canggih 12B Parameter',
-      snippet: 'FLUX.1 hadir dalam varian schnell, dev, dan pro dengan kualitas visual photorealistic mutakhir, kepatuhan prompt presisi, dan rendering teks tipografi dalam gambar yang tajam.',
-      content: 'FLUX.1 dikembangkan oleh tim penemu Stable Diffusion menggunakan arsitektur hybrid multimodal transformer dengan 12 miliar parameter.',
-      category: 'ai',
-      published_at: '2026-05-18'
-    },
-    {
-      url: 'https://www.antaranews.com/berita/sahabat-ai-indonesia',
-      domain: 'antaranews.com',
-      title: 'Inisiatif Sahabat-AI: Ekosistem AI Terbuka Bahasa Indonesia dan Bahasa Daerah',
-      snippet: 'Pemerintah dan industri teknologi meluncurkan Sahabat-AI, inisiatif model AI sumber terbuka yang dilatih khusus dengan korpus Bahasa Indonesia, Jawa, Sunda, dan Bali untuk kedaulatan digital nasional.',
-      content: 'Sahabat-AI dirancang untuk memperkuat kedaulatan data dan teknologi Indonesia, menyediakan fondasi kecerdasan buatan lokal yang memahami konteks budaya dan sosial Indonesia.',
-      category: 'tech',
-      published_at: '2026-08-28'
-    },
-    {
-      url: 'https://nvidianews.nvidia.com/news/nvidia-blackwell-platform-arrives',
-      domain: 'nvidianews.nvidia.com',
-      title: 'NVIDIA Menghadirkan Arsitektur Blackwell B200 dan GB200 NVL72',
-      snippet: 'NVIDIA memperkenalkan platform superkomputer Blackwell untuk inferensi AI triliunan parameter dengan konsumsi energi 25x lebih hemat.',
-      content: 'Arsitektur NVIDIA Blackwell B200 mengintegrasikan mesin transformasi generasi kedua dengan komputasi FP4 untuk mempercepat inferensi model bahasa generasi baru.',
-      category: 'tech',
-      published_at: '2026-03-18'
-    },
-    {
-      url: 'https://ollama.com/blog/local-inference-2026',
-      domain: 'ollama.com',
-      title: 'Ollama Memperluas Dukungan Model Generasi 2026: Gemma 4, Llama 4, dan Qwen 2.5',
-      snippet: 'Ollama menghadirkan integrasi instan untuk menjalankan model terbuka terbaru 2026 di workstation pengembang dengan akselerasi GPU otomatis.',
-      content: 'Platform inferensi lokal Ollama mendukung eksekusi cepat model gemma4:31b, llama4:scout, dan qwen2.5:32b secara offline tanpa ketergantungan API pihak ketiga.',
-      category: 'tech',
-      published_at: '2026-10-18'
+  try {
+    const delPage = db.prepare('DELETE FROM zoz_web_pages WHERE url = ?');
+    const delFts = db.prepare('DELETE FROM zoz_web_fts WHERE url = ?');
+    for (const u of LEGACY_UNVERIFIED_SEED_URLS) {
+      delPage.run(u);
+      delFts.run(u);
     }
-  ];
+  } catch (_) {}
+}
 
-  for (const s of seeds) {
-    try {
-      const checkStmt = db.prepare('SELECT id FROM zoz_web_pages WHERE url = ? LIMIT 1');
-      const existing = checkStmt.all(s.url);
-      if (!existing || existing.length === 0) {
-        const insertPage = db.prepare(`
-          INSERT INTO zoz_web_pages (url, domain, title, snippet, content, category, published_at, crawled_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-        insertPage.run(s.url, s.domain, s.title, s.snippet, s.content, s.category, s.published_at, new Date().toISOString());
-
-        const insertFts = db.prepare(`
-          INSERT INTO zoz_web_fts (title, snippet, content, url, domain, category, published_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `);
-        insertFts.run(s.title, s.snippet, s.content, s.url, s.domain, s.category, s.published_at);
-      }
-    } catch (_) {}
-  }
+function updateIndexedContent(url, content) {
+  const db = initZozWebSearchDb();
+  if (!db || !url || !content) return;
+  try {
+    db.prepare('UPDATE zoz_web_pages SET content = ?, crawled_at = ? WHERE url = ?').run(content, new Date().toISOString(), url);
+    db.prepare('UPDATE zoz_web_fts SET content = ? WHERE url = ?').run(content, url);
+  } catch (_) {}
 }
 
 // Direct Web Spider untuk Crawling Sumber Primer Terbuka (RSS/Atom Feeds)
@@ -3218,7 +3122,10 @@ function crawlDirectPrimaryFeed(feedUrl, category = 'tech', maxItems = 12) {
 
               const title = cleanHtmlText(titleM ? (titleM[1] || titleM[2] || '') : '');
               let link = (linkM ? (linkM[1] || linkM[2] || '') : '').trim();
-              const snippet = cleanHtmlText(descM ? (descM[1] || descM[2] || '') : '').slice(0, 350);
+              const fullM = /<content:encoded\b[^>]*>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))<\/content:encoded>/i.exec(raw);
+              const descText = cleanHtmlText(descM ? (descM[1] || descM[2] || '') : '');
+              const fullText = cleanHtmlText(fullM ? (fullM[1] || fullM[2] || '') : '');
+              const snippet = descText.slice(0, 350);
               const pubDate = (pubM ? (pubM[1] || pubM[2] || '') : '').trim();
               if (title && link) {
                 items.push({
@@ -3226,7 +3133,7 @@ function crawlDirectPrimaryFeed(feedUrl, category = 'tech', maxItems = 12) {
                   domain: extractDomainSafe(link),
                   title,
                   snippet,
-                  content: snippet,
+                  content: (fullText.length > descText.length ? fullText : descText).slice(0, 6000),
                   category,
                   published_at: pubDate
                 });
@@ -3276,7 +3183,8 @@ function crawlDirectPrimaryFeed(feedUrl, category = 'tech', maxItems = 12) {
 let lastFeedCrawlTime = 0;
 async function crawlPrimaryFeeds(force = false) {
   const now = Date.now();
-  if (!force && (now - lastFeedCrawlTime < 3600000)) return; // Crawl maks 1 jam sekali
+  if (!force && (now - lastFeedCrawlTime < 3600000)) return; // Crawl latar belakang maks 1 jam sekali
+  if (force && (now - lastFeedCrawlTime < 600000)) return; // Crawl on-demand maks 10 menit sekali
   lastFeedCrawlTime = now;
   try {
     const promises = SOVEREIGN_PRIMARY_FEEDS.map(f => crawlDirectPrimaryFeed(f.url, f.category, 8));
@@ -3284,11 +3192,65 @@ async function crawlPrimaryFeeds(force = false) {
   } catch (_) {}
 }
 
+const ZOZ_SEARCH_STOPWORDS = new Set([
+  'apa','yang','di','ke','dari','pada','dan','atau','ini','itu','adalah','untuk','dengan','dalam','bulan','tahun',
+  'baru','saja','sudah','akan','bisa','tolong','jelaskan','cari','carikan','berapa','bagaimana','kapan','siapa',
+  'mengapa','kenapa','ada','tidak','juga','tentang','sebutkan','apakah','the','a','an','of','in','on','is','are',
+  'what','which','who','how','when','for','and','or','to','new','latest'
+]);
+
 function sanitizeFtsQuery(query) {
   if (!query || typeof query !== 'string') return '';
-  const tokens = query.replace(/[^\p{L}\p{N}_]/gu, ' ').trim().split(/\s+/).filter(Boolean).slice(0, 15);
+  const raw = query.replace(/[^\p{L}\p{N}_]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+  let tokens = raw.filter(t => !ZOZ_SEARCH_STOPWORDS.has(t.toLowerCase()) && t.length > 1);
+  if (tokens.length === 0) tokens = raw;
+  tokens = tokens.slice(0, 15);
   if (tokens.length === 0) return '';
-  return tokens.map(t => `"${t}"*`).join(' OR ');
+  return tokens.map(t => `"${t.replace(/"/g, '')}"*`).join(' OR ');
+}
+
+function queryZozFts(db, cleanQuery, limit) {
+  const ftsQuery = sanitizeFtsQuery(cleanQuery);
+  if (!ftsQuery) return [];
+  const rows = db.prepare(`
+    SELECT title, snippet, content, url, domain, published_at,
+           bm25(zoz_web_fts, 5.0, 2.0, 1.0) AS rank
+    FROM zoz_web_fts
+    WHERE zoz_web_fts MATCH ?
+    ORDER BY rank
+    LIMIT ?
+  `).all(ftsQuery, limit);
+  return rows.map(r => ({
+    title: r.title,
+    url: r.url,
+    domain: r.domain,
+    snippet: r.snippet,
+    content: String(r.content || '').slice(0, 6000),
+    sourceProvider: `Zoz Neural Index (${r.domain})`,
+    timestamp: Date.parse(r.published_at) || Date.now(),
+    pubDate: r.published_at || 'Terkini'
+  }));
+}
+
+// Baca halaman asli hasil teratas agar AI menerima ISI artikel, bukan hanya judul + tautan
+async function enrichResultsWithFullText(results, maxEnrich = 4) {
+  const targets = results
+    .slice(0, maxEnrich)
+    .filter(r => r.url && /^https?:\/\//i.test(r.url) && String(r.content || '').length < 1200);
+  await Promise.allSettled(targets.map(async (r) => {
+    try {
+      const page = await Promise.race([
+        browseWebPageContent(r.url, 5000),
+        new Promise(resolve => setTimeout(() => resolve(null), 7000))
+      ]);
+      const text = page && typeof page.text === 'string' ? cleanHtmlText(page.text).replace(/&#\d+;/g, ' ').trim() : '';
+      if (text && !page.error && text.length > String(r.content || '').length) {
+        r.content = text.slice(0, 6000);
+        updateIndexedContent(r.url, r.content);
+      }
+    } catch (_) {}
+  }));
+  return results;
 }
 
 async function searchZozWebIndex(query, maxResults = 10, contextText = '') {
@@ -3300,29 +3262,30 @@ async function searchZozWebIndex(query, maxResults = 10, contextText = '') {
   const db = initZozWebSearchDb();
   let results = [];
 
-  // Jika input berupa URL langsung, jelajahi halaman secara mendalam dan index langsung
+  // Input berupa URL langsung: baca halaman secara mendalam dan index
   if (/^https?:\/\//i.test(cleanQuery)) {
     try {
-      const pageData = await browseWebPageContent(cleanQuery, 4000);
-      if (pageData && pageData.title && pageData.text) {
+      const pageData = await browseWebPageContent(cleanQuery, 6000);
+      if (pageData && pageData.text && !pageData.error) {
+        const title = pageData.title || cleanQuery;
         indexArticleToZozDb({
           url: cleanQuery,
           domain: extractDomainSafe(cleanQuery),
-          title: pageData.title,
+          title,
           snippet: pageData.text.slice(0, 300),
           content: pageData.text,
-          category: 'web',
-          published_at: 'Terkini'
+          category: 'web'
         });
         return {
           query: cleanQuery,
           engine: 'zoz_sovereign_search_engine',
           count: 1,
           results: [{
-            title: pageData.title,
+            title,
             url: cleanQuery,
             domain: extractDomainSafe(cleanQuery),
             snippet: pageData.text.slice(0, 300),
+            content: pageData.text.slice(0, 6000),
             sourceProvider: `Zoz Deep Browser (${extractDomainSafe(cleanQuery)})`,
             timestamp: Date.now(),
             pubDate: 'Terkini'
@@ -3332,112 +3295,60 @@ async function searchZozWebIndex(query, maxResults = 10, contextText = '') {
     } catch (_) {}
   }
 
+  const fetchLimit = Math.min(maxResults * 2, 30);
   if (db) {
-    try {
-      const ftsQuery = sanitizeFtsQuery(cleanQuery);
-      if (ftsQuery) {
-        const searchStmt = db.prepare(`
-          SELECT title, snippet, content, url, domain, category, published_at,
-                 bm25(zoz_web_fts, 5.0, 2.0, 1.0) AS rank
-          FROM zoz_web_fts
-          WHERE zoz_web_fts MATCH ?
-          ORDER BY rank
-          LIMIT ?
-        `);
-        const rows = searchStmt.all(ftsQuery, Math.min(maxResults * 2, 30));
-        if (rows && rows.length > 0) {
-          results = rows.map(r => ({
-            title: r.title,
-            url: r.url,
-            domain: r.domain,
-            snippet: r.snippet,
-            sourceProvider: `Zoz Neural Index (${r.domain})`,
-            timestamp: Date.parse(r.published_at) || Date.now(),
-            pubDate: r.published_at || 'Terkini'
-          }));
-        }
-      }
-    } catch (err) {
+    try { results = queryZozFts(db, cleanQuery, fetchLimit); } catch (err) {
       console.warn('[Zoz Sovereign Search Engine] Query SQLite FTS error:', err.message);
     }
   }
 
-  // Jika hasil sedikit (< 3) atau kueri meminta berita/update terkini, picu spider langsung ke sumber primer terpilih
+  // Hasil sedikit atau kueri meminta info terkini: rayapi sumber primer langsung lalu query ulang
   const combinedContext = (cleanQuery + ' ' + (contextText || '')).toLowerCase();
-  const needsLiveProbe = results.length < 3 || /\b(terbaru|hari ini|berita|today|latest|update|rilis|oktober|2026)\b/i.test(combinedContext);
-
+  const needsLiveProbe = results.length < 3 || /\b(terbaru|terkini|hari ini|berita|today|latest|update|rilis|release|baru)\b/i.test(combinedContext);
   if (needsLiveProbe) {
     try {
-      const probeFeeds = [
-        'https://feeds.arstechnica.com/arstechnica/index',
-        'https://huggingface.co/blog/feed.xml',
-        'https://www.antaranews.com/rss/tekno.xml'
-      ];
-      await Promise.allSettled(probeFeeds.map(f => crawlDirectPrimaryFeed(f, 'tech', 6)));
-      // Query ulang FTS jika spider menemukan data baru
-      if (db) {
-        const ftsQuery = sanitizeFtsQuery(cleanQuery);
-        if (ftsQuery) {
-          const searchStmt = db.prepare(`
-            SELECT title, snippet, content, url, domain, category, published_at,
-                   bm25(zoz_web_fts, 5.0, 2.0, 1.0) AS rank
-            FROM zoz_web_fts
-            WHERE zoz_web_fts MATCH ?
-            ORDER BY rank
-            LIMIT ?
-          `);
-          const rows = searchStmt.all(ftsQuery, maxResults);
-          if (rows && rows.length > 0) {
-            results = rows.map(r => ({
-              title: r.title,
-              url: r.url,
-              domain: r.domain,
-              snippet: r.snippet,
-              sourceProvider: `Zoz Neural Index (${r.domain})`,
-              timestamp: Date.parse(r.published_at) || Date.now(),
-              pubDate: r.published_at || 'Terkini'
-            }));
-          }
-        }
-      }
+      await Promise.race([
+        crawlPrimaryFeeds(true),
+        new Promise(resolve => setTimeout(resolve, 6000))
+      ]);
+      if (db) results = queryZozFts(db, cleanQuery, fetchLimit);
     } catch (_) {}
   }
 
-  // Fallback in-memory jika SQLite FTS kosong atau error
+  // Fallback in-memory jika SQLite tidak tersedia
   if (!results.length && sovereignFallbackStore.length > 0) {
-    const qLower = cleanQuery.toLowerCase();
-    const tokens = qLower.split(/\s+/).filter(Boolean);
-    const matched = sovereignFallbackStore.filter(item => {
+    const tokens = cleanQuery.toLowerCase().split(/\s+/).filter(t => t && !ZOZ_SEARCH_STOPWORDS.has(t));
+    results = sovereignFallbackStore.filter(item => {
       const text = (item.title + ' ' + item.snippet + ' ' + item.content).toLowerCase();
       return tokens.some(t => text.includes(t));
-    }).slice(0, maxResults);
-
-    results = matched.map(m => ({
+    }).slice(0, maxResults).map(m => ({
       title: m.title,
       url: m.url,
       domain: m.domain,
       snippet: m.snippet,
+      content: String(m.content || '').slice(0, 6000),
       sourceProvider: `Zoz In-Memory Index (${m.domain})`,
       timestamp: Date.parse(m.published_at) || Date.now(),
       pubDate: m.published_at || 'Terkini'
     }));
   }
 
-  // Deduplikasi ketat berdasarkan URL
   const seenUrls = new Set();
-  const dedupedResults = [];
+  const deduped = [];
   for (const item of results) {
     if (!item.url || seenUrls.has(item.url)) continue;
     seenUrls.add(item.url);
-    dedupedResults.push(item);
-    if (dedupedResults.length >= maxResults) break;
+    deduped.push(item);
+    if (deduped.length >= maxResults) break;
   }
+
+  await enrichResultsWithFullText(deduped, 6);
 
   return {
     query: cleanQuery,
     engine: 'zoz_sovereign_search_engine',
-    count: dedupedResults.length,
-    results: dedupedResults
+    count: deduped.length,
+    results: deduped
   };
 }
 
