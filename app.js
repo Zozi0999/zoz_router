@@ -64,7 +64,10 @@ PANGGIL TOOL INI KAPANPUN Anda membutuhkan verifikasi fakta, data real-time, ata
 <tool_call>{"name":"search_web","arguments":{"query":"..."}}</tool_call>
 atau
 <tool_call>{"name":"browse_web_page","arguments":{"url":"..."}}</tool_call>
-Sistem akan mengeksekusi penjelajahan dan mengembalikan datanya secara instan untuk Anda cerna sebelum memberikan jawaban final yang akurat dan komprehensif.
+Sistem akan mengeksekusi penjelajahan dan mengembalikan datanya secara instan.
+[ATURAN PENJELASAN WAJIB]:
+Setelah mendapatkan data pencarian web atau pembacaan halaman, Anda WAJIB langsung mencerna, menjelaskan, dan memaparkan isi artikel, rilis model/teknologi, detail fitur, angka, dan implikasinya secara tuntas dengan kalimat analitis Anda sendiri.
+DILARANG KERAS hanya memberikan daftar judul atau tautan mentah, dan DILARANG KERAS menyuruh Kaisar mengunjungi atau membaca sumbernya sendiri di web! Kaisar menuntut Anda untuk menjelaskan isinya secara mendalam.
 7. Kapabilitas Musik & Audio AI (Universal Neural Music Synthesis):
 Jika Kaisar meminta Anda untuk membuat, mengaransemen, atau memproduksi musik, lagu, nada, irama, beat, atau instrumen apa pun:
 JANGAN PERNAH membuat lirik teks atau berpura-pura mengarang lagu dalam bentuk teks biasa jika Kaisar ingin mendengarkan musik nyata! Zoz Router dibekali AI Neural Music Studio yang menghasilkan komposisi audio nyata.
@@ -19307,6 +19310,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           if (['browse_web_page', 'extract_web'].includes(normTool) && toolExecRes.text) {
             const cleanBrowseText = cleanWebExtractedContent(toolExecRes.text);
             roundToolResponsesText += `\n[ISI LENGKAP HALAMAN WEB DARI ${toolName}]:\n${cleanBrowseText}\n\n`;
+          } else if (toolExecRes.text) {
+            // Gunakan toolExecRes.text lengkap yang sudah membawa Isi Artikel utuh dan instruksi penjelasan
+            const cleanText = cleanWebExtractedContent(toolExecRes.text);
+            roundToolResponsesText += `\n${cleanText}\n\n`;
           } else if (toolExecRes.sources && Array.isArray(toolExecRes.sources) && toolExecRes.sources.length > 0) {
             let structuredEvidence = `\n[FAKTA & BUKTI RESMI HASIL PENELUSURAN DARI ${toolName}]:\n`;
             toolExecRes.sources.slice(0, 10).forEach((s, idx) => {
@@ -19389,7 +19396,7 @@ ${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut me
 
 
 PANDUAN NILAI GUNA & INTEGRITAS FAKTA:
-1. NILAI GUNA TINGGI: Jangan sekadar menyajikan daftar judul mentah. Berikan sintesis cerdas dan berbobot: jelaskan latar belakang, perkembangan inti peristiwa/teknologi, fakta angka atau kutipan kunci, serta implikasi pentingnya secara mendalam dan terstruktur.
+1. NILAI GUNA TINGGI & JELASKAN ISI: Jangan sekadar menyajikan daftar judul atau tautan mentah. DILARANG menyuruh pengguna membuka atau membaca sumber sendiri. Baca bagian "Isi Artikel" di atas lalu JELASKAN langsung kepada pengguna apa yang terjadi, apa yang dirilis (nama model/produk, fitur, spesifikasi teknis, fungsi, angka, tanggal rilis, dan dampaknya) dengan kalimat analitis Anda sendiri secara lengkap dan tuntas.
 2. INTEGRITAS FAKTA (ANTI-HALUSINASI): Tetap setia pada data fakta yang tertera pada sumber. Dilarang mengarang tanggal di masa depan (Hari ini adalah ${currentFormattedDate}. Segala peristiwa setelah hari ini belum terjadi), nomor versi palsu, atau klaim fiktif yang tidak didukung bukti sumber.
 3. STRUKTUR BERKUALITAS: Gunakan format Markdown yang rapi dengan heading tematik, poin penjelasan yang padat isi, dan bila menyajikan tabel Markdown, WAJIB menggunakan baris baru (\\n) yang valid antar baris.
 4. Jawablah langsung secara alami tanpa penolakan kaku dan TANPA format pemanggilan tool (${toolSummaryList.map(s => s.split('(')[0]).join(', ') || 'search_web'}) yang sama lagi.`
@@ -20909,6 +20916,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           if (['browse_web_page', 'extract_web'].includes(normTool) && toolExecRes.text) {
             const cleanBrowseText = cleanWebExtractedContent(toolExecRes.text);
             roundToolResponsesText += `\n[ISI LENGKAP HALAMAN WEB DARI ${toolName}]:\n${cleanBrowseText}\n\n`;
+          } else if (toolExecRes.text) {
+            // Gunakan toolExecRes.text lengkap yang sudah membawa Isi Artikel utuh dan instruksi penjelasan
+            const cleanText = cleanWebExtractedContent(toolExecRes.text);
+            roundToolResponsesText += `\n${cleanText}\n\n`;
           } else if (toolExecRes.sources && Array.isArray(toolExecRes.sources) && toolExecRes.sources.length > 0) {
             let structuredEvidence = `\n[FAKTA & BUKTI RESMI HASIL PENELUSURAN DARI ${toolName}]:\n`;
             toolExecRes.sources.slice(0, 10).forEach((s, idx) => {
@@ -20991,7 +21002,7 @@ ${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut me
 
 
 PANDUAN NILAI GUNA & INTEGRITAS FAKTA:
-1. NILAI GUNA TINGGI: Jangan sekadar menyajikan daftar judul mentah. Berikan sintesis cerdas dan berbobot: jelaskan latar belakang, perkembangan inti peristiwa/teknologi, fakta angka atau kutipan kunci, serta implikasi pentingnya secara mendalam dan terstruktur.
+1. NILAI GUNA TINGGI & JELASKAN ISI: Jangan sekadar menyajikan daftar judul atau tautan mentah. DILARANG menyuruh pengguna membuka atau membaca sumber sendiri. Baca bagian "Isi Artikel" di atas lalu JELASKAN langsung kepada pengguna apa yang terjadi, apa yang dirilis (nama model/produk, fitur, spesifikasi teknis, fungsi, angka, tanggal rilis, dan dampaknya) dengan kalimat analitis Anda sendiri secara lengkap dan tuntas.
 2. INTEGRITAS FAKTA (ANTI-HALUSINASI): Tetap setia pada data fakta yang tertera pada sumber. Dilarang mengarang tanggal di masa depan (Hari ini adalah ${currentFormattedDate}. Segala peristiwa setelah hari ini belum terjadi), nomor versi palsu, atau klaim fiktif yang tidak didukung bukti sumber.
 3. STRUKTUR BERKUALITAS: Gunakan format Markdown yang rapi dengan heading tematik, poin penjelasan yang padat isi, dan bila menyajikan tabel Markdown, WAJIB menggunakan baris baru (\\n) yang valid antar baris.
 4. Jawablah langsung secara alami tanpa penolakan kaku dan TANPA format pemanggilan tool (search_web) lagi.`
