@@ -56,22 +56,10 @@ Jika Anda memiliki server tool 'openrouter:image_generation', panggil tool terse
 Jika Anda menghasilkan visual melalui Markdown, sintesis deskripsi visual dalam bahasa Inggris berkualitas tinggi (detail subjek, pencahayaan dramatis, gaya seni) dengan pilihan model gambar sesuai gaya yang diinginkan (misal: model=flux, model=flux-realism, model=flux-anime, model=flux-3d, model=turbo), lalu sematkan gambar langsung di dalam pesan percakapan menggunakan format Markdown:
 ![Deskripsi Gambar](https://image.pollinations.ai/prompt/{url_encoded_english_detailed_prompt}?width=1024&height=1024&model={model_choice}&nologo=true&enhance=true)
 Sertakan penjelasan singkat yang elegan sebelum atau sesudah gambar.
-6. Kapabilitas Penjelajahan Web & Pencernaan Informasi Mandiri (Autonomous Web Explorer):
-Anda dibekali instrumen penjelajahan internet mandiri yang dibangun dari nol tanpa batas API:
-- \`search_web(query)\`: Cari fakta terbaru, berita, riset, atau data apa pun di internet secara live.
-- \`browse_web_page(url)\`: Kunjungi URL dan baca isi penuh sebuah artikel atau dokumen web untuk dicerna secara mendalam.
-PANGGIL TOOL INI KAPANPUN Anda membutuhkan verifikasi fakta, data real-time, atau informasi di luar data training! Panggil melalui native function call, atau sebutkan dalam tag:
-<tool_call>{"name":"search_web","arguments":{"query":"..."}}</tool_call>
-atau
-<tool_call>{"name":"browse_web_page","arguments":{"url":"..."}}</tool_call>
-Sistem akan mengeksekusi penjelajahan dan mengembalikan datanya secara instan.
-[ATURAN PENJELASAN WAJIB]:
-Setelah mendapatkan data pencarian web atau pembacaan halaman, Anda WAJIB langsung mencerna, menjelaskan, dan memaparkan isi artikel, rilis model/teknologi, detail fitur, angka, dan implikasinya secara tuntas dengan kalimat analitis Anda sendiri.
-DILARANG KERAS hanya memberikan daftar judul atau tautan mentah, dan DILARANG KERAS menyuruh Kaisar mengunjungi atau membaca sumbernya sendiri di web! Kaisar menuntut Anda untuk menjelaskan isinya secara mendalam.
-7. Kapabilitas Musik & Audio AI (Universal Neural Music Synthesis):
+6. Kapabilitas Musik & Audio AI (Universal Neural Music Synthesis):
 Jika Kaisar meminta Anda untuk membuat, mengaransemen, atau memproduksi musik, lagu, nada, irama, beat, atau instrumen apa pun:
 JANGAN PERNAH membuat lirik teks atau berpura-pura mengarang lagu dalam bentuk teks biasa jika Kaisar ingin mendengarkan musik nyata! Zoz Router dibekali AI Neural Music Studio yang menghasilkan komposisi audio nyata.
-8. Kapabilitas Video AI (Universal Cinematic Video Synthesis):
+7. Kapabilitas Video AI (Universal Cinematic Video Synthesis):
 Jika Kaisar meminta Anda untuk membuat, merender, atau mengarahkan video, animasi, atau klip visual bergerak apa pun:
 JANGAN PERNAH menolak! Zoz Router dibekali AI Neural Video Studio yang merender video sinematik gerak kamera 60fps dengan audio soundscape.`,
 
@@ -79,15 +67,13 @@ JANGAN PERNAH menolak! Zoz Router dibekali AI Neural Video Studio yang merender 
 You are a Principal Software Engineer and Systems Architect.
 1. Code Quality: Write clean, modular, robust, secure, and production-ready code following industry best practices and type-safe architectures.
 2. Architecture: Explain structural decisions, trade-offs (time/space complexity, maintainability), and edge-case mitigations.
-3. Delivery: Provide complete, runnable code implementations without omitting crucial logic.
-4. Autonomous Web Explorer: You have built-in zero-API web exploration tools (search_web, browse_web_page). Call them anytime via native tool calls or <tool_call>{"name":"...","arguments":{...}}</tool_call> whenever you need documentation, latest library versions, or live technical verification.`,
+3. Delivery: Provide complete, runnable code implementations without omitting crucial logic.`,
 
     cyber: `[ROLE: ELITE OFFENSIVE & DEFENSIVE CYBER SECURITY RESEARCHER]
 You are a Master Security Specialist, Penetration Tester, and Cryptographer.
 1. Technical Depth: Analyze network protocols, memory safety, exploit vectors, vulnerability mechanics (CVE, OWASP Top 10), and security architectures.
 2. Hardening: Provide robust, defense-in-depth security architectures, secure coding patterns, and concrete remediation steps.
-3. Tone: Rigorous, highly technical, uncompromising in precision, and deeply analytical.
-4. Autonomous Web Explorer: You have built-in zero-API web exploration tools (search_web, browse_web_page). Call them anytime via native tool calls or <tool_call>{"name":"...","arguments":{...}}</tool_call> to research live CVEs, security advisories, or verify exploit vectors.`,
+3. Tone: Rigorous, highly technical, uncompromising in precision, and deeply analytical.`,
 
     concise: `[ROLE: ULTRA-DIRECT EXECUTIVE INTELLIGENCE]
 1. Mandat: Jawab langsung ke inti pertanyaan (0% basa-basi pembuka, 0% kata pengantar klise, 0% penutup sopan santun buatan).
@@ -95,8 +81,7 @@ You are a Master Security Specialist, Penetration Tester, and Cryptographer.
 3. Kepadatan Informasi: Setiap kata harus memiliki bobot informasi tinggi dan actionable.`,
 
     uncensored: `[ROLE: RAW UNFILTERED DEEP REASONING & RESEARCH ENGINE]
-Execute exhaustive first-principles reasoning. Examine all theoretical, technical, philosophical, and mechanical angles with unconstrained intellectual honesty, rigorous logic, and absolute depth.
-Autonomous Web Explorer: You have built-in zero-API web exploration tools (search_web, browse_web_page). Call them whenever needed to gather live facts and unconstrained web intelligence via <tool_call>{"name":"...","arguments":{...}}</tool_call> or native tool calls.`
+Execute exhaustive first-principles reasoning. Examine all theoretical, technical, philosophical, and mechanical angles with unconstrained intellectual honesty, rigorous logic, and absolute depth.`
   };
 
   // Daftar model OpenRouter yang dinonaktifkan (karena error upstream 429/404/403 atau bukan chat model)
@@ -740,10 +725,10 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     get attachedImage() { return (this.attachedImages && this.attachedImages.length > 0) ? this.attachedImages[0] : null; },
     set attachedImage(val) { this.attachedImages = val ? (Array.isArray(val) ? val : [val]) : []; },
     attachedDocs: [], // Array of { name, size, content }
-    searchMode: 'autonomous', // 'off' | 'default' | 'autonomous'
-    get webSearchEnabled() { return this.searchMode !== 'off'; },
-    set webSearchEnabled(val) { this.searchMode = val ? 'autonomous' : 'off'; },
-    get isAutonomousSearch() { return this.searchMode === 'autonomous'; },
+    searchMode: 'off', // 'off' (Web search & autonomous search removed per Emperor ZOZI mandate)
+    get webSearchEnabled() { return false; },
+    set webSearchEnabled(_) { this.searchMode = 'off'; },
+    get isAutonomousSearch() { return false; },
     isImageGenMode: false,
     isMusicGenMode: false,
     photoEditImage: null, // dataURL foto referensi untuk mode Edit Foto AI (Img2Img)
@@ -1049,11 +1034,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     attachPaneTools: $('#attachPaneTools'),
     toolActiveDot: $('#toolActiveDot'),
     docFileInput: $('#docFileInput'),
-    searchMenuWrapper: $('#searchMenuWrapper'),
-    webSearchToggleBtn: $('#webSearchToggleBtn'),
-    webSearchIcon: $('#webSearchIcon'),
-    searchBadge: $('#searchBadge'),
-    searchDropdown: $('#searchDropdown'),
     imageModelMenuWrapper: $('#imageModelMenuWrapper'),
     imageModelDropdown: $('#imageModelDropdown'),
     imageModelBadge: $('#imageModelBadge'),
@@ -4500,19 +4480,13 @@ RESONANSI: ${this.currentVibe}
       if (savedSound !== null) {
         STATE.soundEnabled = savedSound === 'true';
       }
-      const savedSearchMode = safeLocalStorage.getItem('zoz_router_search_mode_v1');
-      const searchModeAutonomousMigrated = safeLocalStorage.getItem('zoz_router_search_mode_autonomous_v2') === 'true';
-      if (!searchModeAutonomousMigrated) {
-        // Migrasi: Jadikan Autonomous Web Explorer sebagai default awal
-        STATE.searchMode = 'autonomous';
-        safeLocalStorage.setItem('zoz_router_search_mode_v1', 'autonomous');
-        safeLocalStorage.setItem('zoz_router_search_mode_autonomous_v2', 'true');
-      } else if (savedSearchMode && ['off', 'default', 'autonomous'].includes(savedSearchMode)) {
-        STATE.searchMode = savedSearchMode;
-      } else {
-        STATE.searchMode = 'autonomous';
-        safeLocalStorage.setItem('zoz_router_search_mode_v1', 'autonomous');
-      }
+      // Bersihkan permanen residu search mode & serper key dari storage
+      STATE.searchMode = 'off';
+      safeLocalStorage.removeItem('zoz_router_search_mode_v1');
+      safeLocalStorage.removeItem('zoz_router_search_mode_autonomous_v2');
+      safeLocalStorage.removeItem('zoz_router_serper_key_v1');
+      safeLocalStorage.removeItem('zoz_router_serper_api_key');
+      safeLocalStorage.removeItem('zoz_router_serper_key');
       // Jangan pernah menyembunyikan prompt dock saat startup agar pengguna tidak terkunci tanpa kolom input
       STATE.isPromptHidden = false;
       safeLocalStorage.removeItem('zoz_prompt_hidden');
@@ -5134,11 +5108,7 @@ RESONANSI: ${this.currentVibe}
       } catch (e) {
         console.warn('Failed to save sound setting:', e);
       }
-      try {
-        localStorage.setItem('zoz_router_search_mode_v1', STATE.searchMode || 'autonomous');
-      } catch (e) {
-        console.warn('Failed to save search mode:', e);
-      }
+
       saveFavoriteModels();
 
       // Save active session to Device Disk Storage
@@ -16437,24 +16407,7 @@ ${blocks}
       }
       return;
     }
-    if (trimmedLow === '/web-search' || trimmedLow === '/search' || trimmedLow === '/google') {
-      setSearchMode('default');
-      if (els.promptInput) {
-        els.promptInput.value = '';
-        autoResizeTextarea(els.promptInput);
-      }
-      showToast('🌐 Mode Default (Pencarian Kilat Google) Aktif!');
-      return;
-    }
-    if (trimmedLow === '/autonomous' || trimmedLow === '/penelitian') {
-      setSearchMode('autonomous');
-      if (els.promptInput) {
-        els.promptInput.value = '';
-        autoResizeTextarea(els.promptInput);
-      }
-      showToast('🧭 Mode Autonomous Web Explorer Aktif!');
-      return;
-    }
+
 
     // Simpan prompt teks asli pengguna untuk tampilan gelembung obrolan (displayContent)
     let originalUserPrompt = rawText;
@@ -16852,42 +16805,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     );
   }
 
-  // ==================== AUTONOMOUS WEB EXPLORER TOOLS & ENGINE (BUILT FROM ZERO) ====================
+  // ==================== LOCAL UTILITY TOOLS (MEMORY & PYTHON ENGINE) ====================
   const AUTONOMOUS_WEB_TOOLS = [
-    {
-      type: 'function',
-      function: {
-        name: 'search_web',
-        description: 'Mencari informasi live, berita terkini, riset, fakta, cuaca, atau topik apa pun di internet global dunia secara real-time. Mengutamakan sumber internasional bereputasi tinggi. JANGAN gunakan tool ini jika pengguna memberikan tautan/URL web spesifik (gunakan `browse_web_page`).',
-        parameters: {
-          type: 'object',
-          properties: {
-            query: {
-              type: 'string',
-              description: 'Kata kunci pencarian spesifik dan padat dalam BAHASA INGGRIS (English) untuk menjangkau indeks global internasional seluruh dunia, terlepas dari bahasa input pengguna (contoh: "latest AI research breakthroughs 2026", "global stock market trends today", "quantum computing advancements"). Dilarang menggunakan bahasa Indonesia pada query kecuali pengguna secara eksplisit meminta data domestik lokal Indonesia.'
-            }
-          },
-          required: ['query']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'browse_web_page',
-        description: 'Membaca dan mengekstrak isi teks bersih dari suatu URL website atau artikel spesifik untuk dicerna secara mendalam. JANGAN gunakan tool ini untuk mencari kata kunci umum (gunakan `search_web`). URL harus diawali dengan http:// atau https://.',
-        parameters: {
-          type: 'object',
-          properties: {
-            url: {
-              type: 'string',
-              description: 'Alamat URL web lengkap dan valid termasuk protokol http:// atau https:// (contoh: "https://news.detik.com/berita/...", "https://arstechnica.com/...").'
-            }
-          },
-          required: ['url']
-        }
-      }
-    },
     {
       type: 'function',
       function: {
@@ -16961,10 +16880,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python'
   ];
 
-  // Daftar nama tool otonom yang dikenal sistem (native call maupun parse teks)
+  // Daftar nama tool lokal yang dikenal sistem (native call maupun parse teks)
   const AUTONOMOUS_TOOL_NAMES = [
-    'search_web', 'web_search', 'search', 'pencarian_web', 'cari_web',
-    'browse_web_page', 'browse_web', 'browse_page', 'baca_web', 'extract_web', 'read_url', 'scrape_url', 'baca_url', 'ambil_web',
     'save_memory', 'simpan_memori', 'store_memory',
     'search_memory', 'cari_memori', 'query_memory',
     'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python'
@@ -16973,9 +16890,6 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   function normalizeToolName(name) {
     if (!name) return '';
     const n = String(name).toLowerCase().trim();
-    if (['web_search', 'search', 'pencarian_web', 'cari_web'].includes(n)) return 'search_web';
-    if (['browse_web', 'browse_page', 'baca_web', 'scrape_url'].includes(n)) return 'browse_web_page';
-    if (['baca_url', 'ambil_web', 'read_url'].includes(n)) return 'extract_web';
     if (['save_memory', 'simpan_memori', 'store_memory'].includes(n)) return 'save_memory';
     if (['search_memory', 'cari_memori', 'query_memory'].includes(n)) return 'search_memory';
     if (['execute_python_code', 'execute_code', 'run_python', 'run_code', 'python_code', 'python'].includes(n)) return 'execute_python_code';
@@ -16988,30 +16902,17 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     return AUTONOMOUS_TOOL_NAMES.includes(n) || AUTONOMOUS_TOOL_NAMES.includes(normalizeToolName(n));
   }
 
-  // Keluarga tool ekstraksi/baca URL: diizinkan SELALU (bukan "pencarian"),
-  // sehingga tetap bisa dipakai saat pengguna menempel URL dan memintanya dibaca,
-  // bahkan bila Mode Pencarian Web sedang nonaktif.
-  const EXTRACTION_TOOL_NAMES = ['browse_web_page', 'browse_web', 'browse_page', 'baca_web', 'extract_web', 'read_url', 'scrape_url', 'baca_url', 'ambil_web'];
-  // ekstraksi web URL & tool utility lokal selalu diizinkan; tool search bila Mode Pencarian Web aktif.
+  // Tool utility lokal (SQLite & Python) selalu diizinkan; tool web ditiadakan permanen
   function isAutonomousToolAllowed(toolName, webToolsAllowed) {
     const norm = normalizeToolName(toolName) || toolName;
-    if (EXTRACTION_TOOL_NAMES.includes(norm) || EXTRACTION_TOOL_NAMES.includes(toolName)) return true;
-    if (LOCAL_UTILITY_TOOL_NAMES.includes(norm) || LOCAL_UTILITY_TOOL_NAMES.includes(toolName)) return true;
-    return Boolean(webToolsAllowed);
+    return LOCAL_UTILITY_TOOL_NAMES.includes(norm) || LOCAL_UTILITY_TOOL_NAMES.includes(toolName);
   }
 
-  // Susun daftar tool yang benar-benar DIKIRIMKAN ke model (wajib konsisten dengan
-  // isAutonomousToolAllowed di atas, jika tidak model menerima tool yang nantinya
-  // diblokir, atau sebaliknya menerima tool yang tak pernah diumumkan):
-  //  - keluarga extract/browse   : SELALU
-  //  - utility lokal (memori/code): SELALU
-  //  - search_web/web_search     : bila Mode Pencarian Web aktif
+  // Susun daftar tool yang benar-benar DIKIRIMKAN ke model (hanya utility lokal SQLite & Python)
   function getSelectableAutonomousTools(webToolsAllowed) {
     return AUTONOMOUS_WEB_TOOLS.filter((t) => {
       const name = t && t.function ? t.function.name : '';
-      if (EXTRACTION_TOOL_NAMES.includes(name)) return true;
-      if (LOCAL_UTILITY_TOOL_NAMES.includes(name)) return true;
-      return Boolean(webToolsAllowed);
+      return LOCAL_UTILITY_TOOL_NAMES.includes(name);
     });
   }
 
@@ -18343,51 +18244,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   }
 
   function getAutonomousSystemDirective() {
-    return `### INSTRUKSI SISTEM: KESADARAN PENGETAHUAN & PENGGUNAAN ALAT OTONOM (WEB, MEMORI & PYTHON)
-
-1. KESADARAN BATASAN PENGETAHUAN (KNOWLEDGE CUTOFF):
-- Anda adalah asisten AI yang sepenuhnya menyadari bahwa pengetahuan internal bawaan Anda memiliki batasan waktu (knowledge cutoff).
-- Anda TIDAK MEMILIKI pengetahuan bawaan mengenai data real-time, berita mutakhir, peristiwa terkini, atau informasi spesifik dunia nyata saat ini dalam topik APA PUN (politik, ekonomi, pasar saham, olahraga, sains, hiburan, hukum, peristiwa global maupun lokal).
-- Dilarang menebak atau mengarang spekulasi tentang peristiwa dunia nyata terkini tanpa mencari fakta aktual melalui alat pencarian web.
-
-2. KEWAJIBAN MENGGUNAKAN TOOL YANG TEPAT (SINGLE RESPONSIBILITY & SEMANTIK):
-- Gunakan alat yang sesuai dengan kebutuhan tugas secara eksplisit:
-  a. search_web: Untuk mencari informasi terkini, artikel, berita, atau data umum dari internet global dunia.
-     Format: search_web("kata kunci") atau {"name":"search_web","arguments":{"query":"kata kunci"}}
-  b. browse_web_page / extract_web: Untuk membaca dan mengekstrak isi teks lengkap dari URL website spesifik.
-     Format: browse_web_page("https://example.com/artikel") atau {"name":"browse_web_page","arguments":{"url":"https://example.com/artikel"}}
-  c. save_memory: Untuk menyimpan preferensi penting pengguna, instruksi permanen, catatan fakta kunci, atau memori proyek jangka panjang ke dalam SQLite.
-     Format: save_memory({"topic":"topik","content":"isi fakta"})
-  d. search_memory: Untuk memanggil kembali catatan atau fakta masa lalu dari memori jangka panjang pengguna.
-     Format: search_memory({"query":"kata kunci"})
-  e. execute_python_code: Untuk melakukan kalkulasi matematika presisi tinggi, pemrosesan data, manipulasi string, atau simulasi logika dengan Python sandbox lokal. Wajib gunakan print() untuk melihat output.
-     Format: execute_python_code({"code":"import math\\nprint(math.factorial(20))"})
-- Jika pengguna melampirkan atau menyebutkan URL web dan meminta membacanya: WAJIB panggil browse_web_page!
-- Jika pengguna menanyakan hal yang pernah dibahas di masa lalu atau preferensi yang pernah disimpan: WAJIB panggil search_memory!
-- Jika pengguna meminta kalkulasi angka rumit, statistik, atau pembuktian kode: WAJIB panggil execute_python_code!
-- HANYA jika pertanyaan pengguna berupa penjelasan konsep dasar teori, logika matematika sederhana, atau percakapan kasual yang sama sekali tidak membutuhkan fakta atau kalkulasi: Anda boleh langsung menjawab tanpa memanggil alat.
-
-3. MANDAT PENCARIAN GLOBAL & KUERI BAHASA INGGRIS (GLOBAL SEARCH & ENGLISH QUERY MANDATE):
-- Prioritas utama pencarian web adalah INDEKS GLOBAL DUNIA (World-Wide Web) dari sumber-sumber internasional bereputasi tinggi (misal: Reuters, Bloomberg, TechCrunch, The Verge, ArXiv, Nature, BBC, Wired, IEEE, GitHub, Wikipedia Global).
-- WAJIB DALAM BAHASA INGGRIS: Untuk setiap pemanggilan alat \`search_web\`, Anda WAJIB merumuskan parameter \`query\` dalam BAHASA INGGRIS (English), TERLEPAS DARI BAHASA INPUT PENGGUNA (bahkan ketika pengguna bertanya dalam bahasa Indonesia penuh).
-- Terjemahkan dan ringkas konsep, topik, atau pertanyaan pengguna ke dalam kata kunci pencarian bahasa Inggris yang tepat, padat, dan representatif:
-  * Contoh Input Pengguna: "apa berita besar model ai terbaru?"
-    -> Pemanggilan Tool: search_web({"query": "latest major AI models news breakthroughs"}) (BUKAN bahasa Indonesia!)
-  * Contoh Input Pengguna: "siapa pemenang liga champions dan berita transfer sepak bola?"
-    -> Pemanggilan Tool: search_web({"query": "champions league winners and latest football transfer news"})
-  * Contoh Input Pengguna: "kondisi pasar saham dan harga emas dunia saat ini"
-    -> Pemanggilan Tool: search_web({"query": "global stock market trends and gold prices today"})
-  * Pengecualian Satu-satunya: HANYA jika pengguna secara EKSPLISIT menanyakan hal spesifik domestik lokal Indonesia (contoh: "jadwal imsakiyah Jakarta", "BMKG gempa Jawa Barat", "kurs rupiah BI"). Selain permintaan eksplisit domestik lokal tersebut, SEMUA kueri pencarian web WAJIB dalam bahasa Inggris global!
-
-4. SINTESIS SETELAH EKSEKUSI ALAT & BAHASA JAWABAN:
-- Meskipun pencarian web dilakukan dalam bahasa Inggris dari sumber-sumber global dunia, Anda WAJIB menyajikan dan menjawab kembali kepada pengguna dalam BAHASA INDONESIA (atau bahasa yang diminta pengguna) secara alami, lengkap, fasih, dan mendalam.
-- FOKUS DAN RELEVANSI TINGGI: Jawablah pertanyaan pengguna secara langsung, relevan, dan terarah. Jika pengguna bertanya tentang model AI, fokuslah pada inovasi dan rilis model AI terkemuka (seperti OpenAI GPT/o-series, Claude, Gemini, Meta Llama, DeepSeek, Mistral, xAI). Jangan mengalihkan jawaban ke artikel finansial/saham sampingan atau blog regional yang tidak relevan.
-- ANTI-HALUSINASI & FAKTUALITAS KETAT: Dilarang keras mengarang berita, melompat ke kesimpulan fiktif (seperti konsorsium gabungan palsu atau tanggal peluncuran imajiner). Hanya sintesiskan informasi yang benar-benar didukung oleh fakta web.
-- Setelah sistem mengeksekusi alat dan menyediakan data kepada Anda, berikan jawaban akhir yang komprehensif, jelas, akurat, dan informatif.
-- Wajib sertakan referensi tautan markdown [Nama Sumber](URL) jika merujuk fakta web spesifik.
-- Jawab secara langsung tanpa penolakan kaku, tanpa basa-basi robotik, dan tanpa mencetak format pemanggilan tool lagi.`;
+    return '';
   }
-  const AUTONOMOUS_SYSTEM_DIRECTIVE = getAutonomousSystemDirective();
+  const AUTONOMOUS_SYSTEM_DIRECTIVE = '';
 
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
     if (status === 'done') return '';
@@ -22159,100 +22018,15 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     els.attachToggleBtn?.setAttribute('aria-expanded', 'false');
   }
 
-  // ==================== SEARCH MODE DROPDOWN & CONTROLLER ====================
-  function setSearchMode(mode = 'autonomous') {
-    STATE.searchMode = mode;
-    updateSearchModeUI();
-    savePersistedState();
-    AudioEngine.click();
-    closeSearchDropdown();
+  // ==================== SEARCH MODE STUB (REMOVED PER MANDATE) ====================
+  function setSearchMode(mode = 'off') {
+    STATE.searchMode = 'off';
   }
 
-  function updateSearchModeUI() {
-    const mode = STATE.searchMode || 'off';
-    if (!els.webSearchToggleBtn) return;
-
-    const setWebSearchIconClass = (cls) => {
-      if (!els.webSearchIcon) return;
-      try {
-        if (typeof els.webSearchIcon.className === 'string') {
-          els.webSearchIcon.className = cls;
-        } else if (typeof els.webSearchIcon.setAttribute === 'function') {
-          els.webSearchIcon.setAttribute('class', cls);
-        }
-      } catch (_) {
-        try { els.webSearchIcon.setAttribute('class', cls); } catch (__) {}
-      }
-    };
-
-    els.webSearchToggleBtn.classList.remove('mode-default', 'mode-premium', 'mode-autonomous', 'active');
-    if (mode === 'autonomous') {
-      els.webSearchToggleBtn.classList.add('mode-autonomous', 'active');
-      setWebSearchIconClass('fa-solid fa-compass');
-      if (els.searchBadge) els.searchBadge.style.display = 'none';
-      els.webSearchToggleBtn.title = 'Autonomous Web Explorer: Aktif (Klik untuk matikan)';
-    } else if (mode === 'default') {
-      els.webSearchToggleBtn.classList.add('mode-default', 'active');
-      setWebSearchIconClass('fa-solid fa-globe');
-      if (els.searchBadge) els.searchBadge.style.display = 'none';
-      els.webSearchToggleBtn.title = 'Pencarian Web Default: Aktif (Klik untuk matikan)';
-
-    } else {
-      setWebSearchIconClass('fa-solid fa-compass');
-      if (els.searchBadge) els.searchBadge.style.display = 'none';
-      els.webSearchToggleBtn.title = 'Autonomous Web Explorer: Nonaktif (Klik untuk aktifkan)';
-    }
-
-    // Update active check indicators & tombol aksi pada popup menu
-    $$('.search-menu-item').forEach(item => {
-      const itemMode = item.dataset.mode || 'off';
-      const isActive = itemMode === mode;
-      item.classList.toggle('active', isActive);
-
-      const checkIcon = item.querySelector('.search-item-check');
-      const closeBtn = item.querySelector('.search-item-close-btn');
-      const manageBtn = item.querySelector('.search-item-manage-btn');
-
-      if (checkIcon) {
-        checkIcon.style.display = isActive ? 'inline-block' : 'none';
-      }
-      if (closeBtn) {
-        closeBtn.style.display = (isActive && itemMode !== 'off') ? 'inline-flex' : 'none';
-      }
-      if (manageBtn) {
-        if (manageBtn) manageBtn.style.display = 'none';
-      }
-    });
-  }
-
-  function toggleSearchDropdown(e) {
-    if (e && e.stopPropagation) e.stopPropagation();
-    hideSlashCommandsMenu();
-    closeAttachmentDropdown();
-    els.modelDropdownMenu?.classList.remove('show');
-    if (STATE.searchMode === 'autonomous') {
-      setSearchMode('off');
-      showToast('Autonomous Web Explorer dinonaktifkan.');
-    } else if (STATE.searchMode === 'default') {
-      setSearchMode('off');
-      showToast('Pencarian web dinonaktifkan.');
-    } else {
-      setSearchMode('autonomous');
-      showToast('🧭 Autonomous Web Explorer aktif.');
-    }
-  }
-
-  function openSearchDropdown() {
-    // Mode Deep Research dan Mode Default dipindahkan ke menu Skills (/)
-    // Tombol pencarian sekarang langsung mengaktifkan Autonomous Web Explorer
-    return;
-  }
-
-  function closeSearchDropdown() {
-    if (!els.searchDropdown) return;
-    els.searchDropdown.style.display = 'none';
-    els.webSearchToggleBtn?.setAttribute('aria-expanded', 'false');
-  }
+  function updateSearchModeUI() {}
+  function toggleSearchDropdown() {}
+  function openSearchDropdown() {}
+  function closeSearchDropdown() {}
 
   // ==================== AI MUSIC STUDIO TRIGGERS ====================
   function isMusicGenerationTrigger(promptText) {
@@ -26758,32 +26532,7 @@ Aturan:
       placeholder: 'Tulis topik dokumen, makalah, atau laporan lengkap yang ingin dibuat...',
       aliases: ['doc', 'laporan', 'pdf', 'word', 'docx', 'makalah', 'proposal', 'skripsi', 'jurnal', 'sop']
     },
-    {
-      id: 'web-search',
-      command: '/web-search',
-      title: 'Mode Default (Pencarian Kilat)',
-      badge: 'Google Real-Time',
-      desc: 'Pencarian kilat Google real-time dengan sintesis jawaban ringkas cepat',
-      iconClass: 'fa-solid fa-globe',
-      iconColor: '#38bdf8',
-      iconBg: 'rgba(56, 189, 248, 0.12)',
-      action: 'default_search_mode',
-      template: '',
-      aliases: ['google', 'search', 'cari', 'kilat', 'default']
-    },
-    {
-      id: 'autonomous',
-      command: '/autonomous',
-      title: 'Autonomous Web Explorer',
-      badge: 'Multi-Step Agent',
-      desc: 'Mesin pencari mandiri berdaulat tanpa Google, DuckDuckGo atau Wikipedia, dipanggil bebas oleh AI',
-      iconClass: 'fa-solid fa-compass',
-      iconColor: '#00f0ff',
-      iconBg: 'rgba(0, 240, 255, 0.12)',
-      action: 'autonomous_mode',
-      template: '',
-      aliases: ['penelitian', 'auto', 'explorer', 'kompas', 'mandiri']
-    },
+
     {
       id: 'gambar',
       command: '/gambar',
@@ -27008,31 +26757,6 @@ Aturan:
       return;
     }
 
-    if (cmd.action === 'default_search_mode') {
-      setSearchMode('default');
-      if (els.promptInput) {
-        els.promptInput.value = '';
-        autoResizeTextarea(els.promptInput);
-        els.promptInput.focus();
-      }
-      hideSlashCommandsMenu();
-      showToast('🌐 Mode Default (Pencarian Kilat Google) Aktif!');
-      AudioEngine.success();
-      return;
-    }
-
-    if (cmd.action === 'autonomous_mode' || cmd.action === 'search_mode') {
-      setSearchMode('autonomous');
-      if (els.promptInput) {
-        els.promptInput.value = '';
-        autoResizeTextarea(els.promptInput);
-        els.promptInput.focus();
-      }
-      hideSlashCommandsMenu();
-      showToast('🧭 Mode Autonomous Web Explorer Aktif!');
-      AudioEngine.success();
-      return;
-    }
 
     // Default template insert (e.g. '/diagram ', '/website ', '/dokumen ')
     if (els.promptInput) {
@@ -28401,9 +28125,6 @@ Aturan:
         if (els.attachmentDropdown && els.attachmentDropdown.style.display !== 'none') {
           closeAttachmentDropdown();
         }
-        if (els.searchDropdown && els.searchDropdown.style.display !== 'none') {
-          closeSearchDropdown();
-        }
         if (els.imageModelDropdown && els.imageModelDropdown.style.display !== 'none') {
           closeImageModelDropdown();
         }
@@ -28416,11 +28137,6 @@ Aturan:
       if (els.attachmentDropdown && els.attachmentDropdown.style.display !== 'none') {
         if (!els.attachmentMenuWrapper?.contains(e.target)) {
           closeAttachmentDropdown();
-        }
-      }
-      if (els.searchDropdown && els.searchDropdown.style.display !== 'none') {
-        if (!els.searchMenuWrapper?.contains(e.target)) {
-          closeSearchDropdown();
         }
       }
       if (els.imageModelDropdown && els.imageModelDropdown.style.display !== 'none') {
@@ -28447,7 +28163,6 @@ Aturan:
           hideSlashCommandsMenu();
         }
         closeAttachmentDropdown();
-        closeSearchDropdown();
         closeImageModelDropdown();
         closeMusicModelDropdown();
         els.modelDropdownMenu?.classList.remove('show');
@@ -28478,57 +28193,6 @@ Aturan:
       }
     });
 
-    // Search Mode Toggle & Menu Items
-    els.webSearchToggleBtn?.addEventListener('click', (e) => {
-      toggleSearchDropdown(e);
-    });
-
-    // Klik kanan / long-press memberi tahu cara mengganti mode pencarian
-    els.webSearchToggleBtn?.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      showToast('Klik ikon pencarian untuk beralih mode pencarian web.');
-    });
-
-    // ==================== YOUTUBE SEARCH TOOL CONTROLS ====================
-
-    $$('.search-menu-item').forEach(item => {
-      item.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const mode = item.dataset.mode || 'off';
-        if (mode !== STATE.searchMode) {
-          setSearchMode(mode);
-          if (mode === 'default') {
-            showToast('Mode Pencarian Web Default aktif.');
-          } else if (mode === 'autonomous') {
-            showToast('Autonomous Web Explorer aktif.');
-          } else {
-            showToast('Pencarian web dinonaktifkan.');
-          }
-        } else {
-          // Klik mode yang sudah aktif cukup menutup menu tanpa mematikan mode
-          closeSearchDropdown();
-        }
-      });
-    });
-
-    $$('.search-item-close-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        setSearchMode('off');
-        showToast('Mode riset/pencarian dinonaktifkan.');
-      });
-      // Elemen ini kini <span role="button" tabindex="0"> (karena <button> bersarang
-      // di dalam <button> dilarang oleh HTML spec dan merusak tampilan menu riset).
-      // Kembalikan perilaku keyboard agar tetap bisa diakses via Enter/Space.
-      btn.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
-          e.preventDefault();
-          e.stopPropagation();
-          btn.click();
-        }
-      });
-    });
 
     // Embedded AI Image Studio Model Selector Dropdown & Items
     els.imageGenToggleBtn?.addEventListener('click', (e) => {
@@ -28799,16 +28463,10 @@ Aturan:
       } else if (e.altKey && (e.key === 'm' || e.key === 'M')) {
         e.preventDefault();
         toggleMusicModelDropdown();
-      } else if (e.altKey && (e.key === 's' || e.key === 'S')) {
-        e.preventDefault();
-        toggleSearchDropdown();
       } else if (e.key === 'Escape' && !els.promptInput?.value.trim()) {
-        const isSearchDropdownOpen = Boolean(els.searchDropdown && els.searchDropdown.style.display !== 'none');
         const isImgDropdownOpen = Boolean(els.imageModelDropdown && els.imageModelDropdown.style.display !== 'none');
         const isMusicDropdownOpen = Boolean(els.musicModelDropdown && els.musicModelDropdown.style.display !== 'none');
-        if (isSearchDropdownOpen) {
-          closeSearchDropdown();
-        } else if (isImgDropdownOpen) {
+        if (isImgDropdownOpen) {
           closeImageModelDropdown();
         } else if (isMusicDropdownOpen) {
           closeMusicModelDropdown();
