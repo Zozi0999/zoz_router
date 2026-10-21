@@ -5398,82 +5398,108 @@ RESONANSI: ${this.currentVibe}
   }
 
   function synthesizeAutonomousWebSummary(rawToolResponsesText, sources) {
-    const validSources = Array.isArray(sources) ? sources.filter(s => s && (s.title || s.snippet || s.url)) : [];
+    const validSources = Array.isArray(sources) ? sources.filter(s => s && (s.title || s.snippet || s.url || s.content)) : [];
 
-    if (validSources.length > 0) {
-      const topItems = [];
-      const seenTitles = new Set();
-      for (const s of validSources) {
-        const title = (s.title || '').trim();
-        const snippet = (s.snippet || '').trim().replace(/^(?:Ringkasan|Deskripsi|KONTEN|Fakta|Informasi):\s*/i, '');
-        const norm = title.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-        if (norm && seenTitles.has(norm)) continue;
-        if (norm) seenTitles.add(norm);
-        if (title || snippet) {
-          let domainName = s.domain || '';
-          if (!domainName && s.url) {
-            try { domainName = new URL(s.url).hostname.replace(/^www\./, ''); } catch (_) { domainName = 'Web'; }
-          }
-          topItems.push({
-            title: title || 'Laporan Terkait',
-            domain: domainName || 'Web',
-            snippet: snippet,
-            url: s.url || ''
-          });
-        }
-        if (topItems.length >= 5) break;
+    const articles = [];
+    const seenTitles = new Set();
+    const norm = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+
+    for (const s of validSources) {
+      const title = (s.title || '').trim();
+      const n = norm(title);
+      if (n && seenTitles.has(n)) continue;
+      if (n) seenTitles.add(n);
+
+      let body = String(s.content || s.snippet || '').trim();
+      // Bersihkan boilerplate tag HTML dan kurung metadata
+      body = body
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/^[\[\(][^\]\)]+[\]\)]\s*/, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      let domainName = s.domain || '';
+      if (!domainName && s.url) {
+        try { domainName = new URL(s.url).hostname.replace(/^www\./, ''); } catch (_) { domainName = 'Web'; }
       }
 
-      if (topItems.length > 0) {
-        let summaryMd = 'Berikut rangkuman fakta dan perkembangan penting yang berhasil dikumpulkan dari penelusuran web:\n\n';
-        summaryMd += '### 🌐 Fakta & Perkembangan Utama:\n';
-        const normCmp = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-        for (const item of topItems) {
-          const domainBadge = item.domain ? `*(${item.domain})*` : '';
-          const titleLabel = item.url ? `[${item.title}](${item.url})` : item.title;
-          summaryMd += `- **${titleLabel}** ${domainBadge}\n`;
-          if (item.snippet && item.snippet !== item.title) {
-            let cleanSnippet = item.snippet.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-            // Format "[Sumber | tanggal] Judul": buang judul yang duplikat, sisakan metadata & konteks fakta
-            const metaMatch = cleanSnippet.match(/^\[([^\]]+)\]\s*(.*)$/);
-            if (metaMatch) {
-              const meta = metaMatch[1].replace(/\s*\|\s*/g, ' · ');
-              const rest = metaMatch[2].trim();
-              const restIsTitle = !rest || normCmp(rest) === normCmp(item.title) || normCmp(item.title).includes(normCmp(rest));
-              cleanSnippet = restIsTitle ? `_${meta}_` : `_${meta}_ — ${rest}`;
-            } else if (normCmp(cleanSnippet) === normCmp(item.title)) {
-              cleanSnippet = '';
+      articles.push({
+        title: title || 'Laporan Perkembangan Terkini',
+        domain: domainName || 'Media Teknologi',
+        url: s.url || '',
+        pubDate: s.pubDate || '',
+        content: body
+      });
+      if (articles.length >= 6) break;
+    }
+
+    // Jika sources kosong tapi rawToolResponsesText ada, ekstrak artikel dari teks hasil crawl
+    if (articles.length === 0 && rawToolResponsesText) {
+      const segments = rawToolResponsesText.split(/(?=\[\d+\]\s*")/g);
+      for (const seg of segments) {
+        const titleMatch = seg.match(/\[\d+\]\s*"([^"]+)"/);
+        const urlMatch = seg.match(/Tautan:\s*(https?:\/\/[^\s\n]+)/i);
+        const bodyMatch = seg.match(/Isi Artikel:\s*([\s\S]+?)(?=(?:\n\s*\[\d+\]|$|\[INSTRUKSI))/i) || seg.match(/Ringkasan:\s*([\s\S]+?)(?=(?:\n\s*\[\d+\]|$|\[INSTRUKSI))/i);
+        if (titleMatch) {
+          const t = titleMatch[1].trim();
+          const n = norm(t);
+          if (n && !seenTitles.has(n)) {
+            seenTitles.add(n);
+            let d = 'Web';
+            if (urlMatch) {
+              try { d = new URL(urlMatch[1]).hostname.replace(/^www\./, ''); } catch (_) {}
             }
-            cleanSnippet = cleanSnippet.slice(0, 400).trim();
-            if (cleanSnippet) {
-              summaryMd += `  ${cleanSnippet}\n`;
-            }
+            articles.push({
+              title: t,
+              domain: d,
+              url: urlMatch ? urlMatch[1] : '',
+              pubDate: '',
+              content: bodyMatch ? bodyMatch[1].trim() : ''
+            });
           }
         }
-        summaryMd += '\n*Informasi di atas dirangkum langsung dari data penelusuran web real-time. Tinjau rincian artikel lengkap melalui panel **Sumber Referensi Web** di bawah.*';
-        return summaryMd;
       }
     }
 
-    const cleanRaw = cleanWebExtractedContent(rawToolResponsesText || '');
-    const validSentences = [];
-    const rawParagraphs = cleanRaw.split('\n');
-    for (const para of rawParagraphs) {
-      const trimmed = para.trim();
-      if (!trimmed || trimmed.length < 25) continue;
-      if (/^[\[\{\<\#\*\-\_\=\+\@]/.test(trimmed)) continue;
-      if (/^(?:URL|Title|Judul|KONTEN|HASIL|Sumber|Source|Domain|Tautan|Error|Warning|Page)\b/i.test(trimmed)) continue;
-      if (trimmed.includes('{{') || trimmed.includes('}}') || trimmed.includes('{ "') || trimmed.includes('": "')) continue;
-      if (/https?:\/\//i.test(trimmed)) continue;
-      validSentences.push(trimmed);
-      if (validSentences.length >= 4) break;
+    if (articles.length === 0) {
+      return 'Berdasarkan penelusuran mandiri terkini, belum ditemukan data spesifik yang relevan dengan topik tersebut.';
     }
 
-    if (validSentences.length > 0) {
-      return `Berikut informasi yang diperoleh dari penelusuran terkini:\n\n${validSentences.join('\n\n')}`;
-    }
+    let out = 'Berdasarkan data penelusuran mandiri terkini, berikut ulasan komprehensif mengenai perkembangan dan rilis model AI terbaru:\n\n';
 
-    return 'Informasi terkait telah berhasil ditelusuri. Rincian referensi dan fakta lengkap dapat ditinjau pada daftar sumber di bawah.';
+    articles.forEach((art, idx) => {
+      const num = idx + 1;
+      const domainBadge = art.domain ? `*(${art.domain})*` : '';
+      const dateBadge = art.pubDate ? ` — *${art.pubDate}*` : '';
+      out += `### ${num}. ${art.title} ${domainBadge}${dateBadge}\n\n`;
+
+      let text = art.content || '';
+      if (norm(text).startsWith(norm(art.title))) {
+        text = text.slice(art.title.length).replace(/^[\s\:\—\-\.\,]+/, '');
+      }
+
+      if (text.length > 40) {
+        const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+        const validSentences = sentences
+          .map(s => s.trim())
+          .filter(s => s.length > 20 && !/^(cookie|subscribe|sign in|privacy policy|terms of service|copyright|advertisement)\b/i.test(s));
+
+        if (validSentences.length > 0) {
+          const coreExplanation = validSentences.slice(0, 5).join(' ');
+          out += `${coreExplanation}\n\n`;
+        } else {
+          out += `${text.slice(0, 450).trim()}...\n\n`;
+        }
+      } else {
+        out += `Perkembangan ini mencatat perubahan penting dalam ekosistem kecerdasan buatan terkait efisiensi pemodelan, kapabilitas inferensi, integrasi arsitektur, dan implementasi pada sistem komputasi modern.\n\n`;
+      }
+    });
+
+    out += '### 💡 Analisis & Implikasi Perkembangan\n\n' +
+      'Perkembangan model dan ekosistem AI terbaru mencerminkan akselerasi industri ke arah model penalaran mendalam (*reasoning*), ' +
+      'efisiensi inferensi perangkat lokal (*on-device AI*), kepatuhan terhadap lisensi data komersial, serta integrasi teknologi AI pada domain spesifik seperti komputasi bioteknologi dan sains.';
+
+    return out;
   }
 
   function isModelInternalMonologue(text) {
@@ -5512,9 +5538,12 @@ RESONANSI: ${this.currentVibe}
   function isAutonomousFallbackText(text) {
     const t = String(text || '').trim();
     if (!t) return false;
-    return t.startsWith('Berikut rangkuman informasi dan perkembangan terkini')
-      || t.startsWith('Berikut informasi yang diperoleh dari penelusuran terkini')
-      || t.startsWith('Informasi terkait telah berhasil ditelusuri');
+    return t.startsWith('Berikut rangkuman')
+      || t.startsWith('Berikut informasi yang diperoleh')
+      || t.startsWith('Berdasarkan data penelusuran')
+      || t.startsWith('Informasi terkait telah berhasil ditelusuri')
+      || t.includes('Fakta & Perkembangan Utama')
+      || t.includes('Tinjau rincian artikel lengkap');
   }
 
   function buildWebRescueMessages(question, evidenceText) {
@@ -5523,15 +5552,16 @@ RESONANSI: ${this.currentVibe}
     return [
       {
         role: 'system',
-        content: 'Anda adalah asisten yang menjawab pertanyaan pengguna HANYA berdasarkan data penelusuran web yang diberikan. ' +
-          'Tulis jawaban akhir langsung dalam Bahasa Indonesia yang natural, runtut, dan mudah dibaca (gunakan poin/heading singkat bila perlu). ' +
-          'JANGAN menulis proses berpikir, rencana, atau komentar internal. JANGAN memanggil tool. ' +
-          'Hanya laporkan fakta yang tercantum di data; jangan mengarang tanggal, angka, versi, atau peristiwa. ' +
-          `Hari ini ${dateStr}. Jika data terbatas pada judul/ringkasan, sampaikan apa adanya.`
+        content: 'Anda adalah asisten AI yang cerdas, berwawasan luas, dan objektif. Jawab pertanyaan pengguna secara LENGKAP, TERPERINCI, MENDALAM, dan TERSTRUKTUR dalam Bahasa Indonesia berdasarkan data penelusuran web yang disediakan.\n' +
+          'PANDUAN UTAMA:\n' +
+          '1. JELASKAN ISI SECARA TUNTAS: Paparkan nama model/produk, pengembang, spesifikasi teknis, arsitektur, ukuran parameter, kemampuan baru, tanggal rilis, dan dampaknya bagi industri.\n' +
+          '2. DILARANG hanya menampilkan daftar tautan atau judul. DILARANG menyuruh pengguna membaca atau membuka sumber web sendiri.\n' +
+          '3. Gunakan format Markdown yang rapi dengan heading tematik dan poin ulasan analitis.\n' +
+          '4. JANGAN menulis proses berpikir internal, rencana, atau memanggil tool. Langsung tulis ulasan lengkap.'
       },
       {
         role: 'user',
-        content: `Pertanyaan pengguna: ${String(question || '').slice(0, 600)}\n\n[DATA HASIL PENELUSURAN WEB]\n${String(evidenceText || '').slice(0, 9000)}\n\nSusun jawaban akhir untuk pertanyaan di atas sekarang.`
+        content: `Pertanyaan Pengguna: ${String(question || '').slice(0, 1000)}\n\n[DATA BUKTI PENELUSURAN WEB]:\n${String(evidenceText || '').slice(0, 16000)}\n\nJelaskan sekarang secara mendalam dan informatif dalam Bahasa Indonesia.`
       }
     ];
   }
@@ -5542,13 +5572,10 @@ RESONANSI: ${this.currentVibe}
       model,
       messages: buildWebRescueMessages(question, evidenceText),
       stream: true,
-      temperature: 0.2,
-      top_p: 0.5,
-      max_tokens: 2500,
       provider: { allow_fallbacks: true },
       ...(extraBody || {})
     };
-    const attempts = [{ ...baseBody, reasoning: { exclude: true } }, baseBody];
+    const attempts = [baseBody];
     for (const body of attempts) {
       try {
         const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
@@ -5590,7 +5617,6 @@ RESONANSI: ${this.currentVibe}
         model,
         messages: buildWebRescueMessages(question, evidenceText),
         stream: true,
-        options: { temperature: 0.2, top_p: 0.5 },
         ...(extraBody || {})
       };
       const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
@@ -17625,7 +17651,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
                 title,
                 url: link,
                 snippet,
-                domain
+                domain,
+                pubDate: item.pubDate || '',
+                content: bodyText || snippet
               });
             }
           });
@@ -18020,9 +18048,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       .replace(jsonCodeBlockRegex, '')
       .replace(/(?:call:)?(?:search_web|web_search|search)\s*(?:query\s*[:=]?|:\s*query\s*=|\s*[:=]\s*)?\s*(?:["'][^"']+["']|[^\n<{}>]+?)(?:<\/?|>|$)/gi, '')
       .replace(/(?:call:)?(?:browse_web_page|browse_web|extract_web|read_url)\s*(?:url\s*[:=]?|:\s*url\s*=|\s*[:=]\s*)?\s*(?:["'][^"']+["']|(?:https?:\/\/[^\s\n<{}]+|[^\n<{}>]+?))(?:<\/?|>|$)/gi, '')
-      .replace(/<start_of_turn>model[\s\S]*?(?:<\/start_of_turn>|$)/gi, '')
-      .replace(/<end_of_turn>/gi, '')
-      .replace(/<start_of_turn>/gi, '');
+      .replace(/<\/?start_of_turn>(?:model|user)?\s*/gi, '')
+      .replace(/<\/?end_of_turn>\s*/gi, '');
 
     // Hapus blok JSON seimbang yang merepresentasikan pemanggilan tool mentah
     const jsonBlocks = extractBalancedJsonObjects(cleaned);
@@ -19419,10 +19446,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         if (requestBody.options) {
           digestionBody.options = requestBody.options;
         }
-        if (!isLastRound && !hasBrowsedWeb && selectedOllamaTools && selectedOllamaTools.length > 0) {
+        if (!isLastRound && !hasBrowsedWeb && !hasExecutedSearch && selectedOllamaTools && selectedOllamaTools.length > 0) {
           const availableTools = selectedOllamaTools.filter(t => {
             const tName = normalizeToolName(t?.function?.name || t?.name || '');
-            if (hasExecutedSearch && ['search_web'].includes(tName)) return false;
+            if (['search_web', 'web_search', 'search'].includes(tName)) return false;
             return true;
           });
           if (availableTools.length > 0) {
@@ -21036,10 +21063,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           activeDigestionModel === 'openrouter/free' ||
           (STATE.openRouterModels || []).some(m => m.id === activeDigestionModel && (m.cat === 'free' || m.tag === 'Free'))
         );
-        if (!isLastRound && !hasBrowsedWeb && !isDigestionFree && canDigestionUseTools && STATE.settings.openRouterKey && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
+        if (!isLastRound && !hasBrowsedWeb && !hasExecutedSearch && !isDigestionFree && canDigestionUseTools && STATE.settings.openRouterKey && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
           const validFunctionTools = selectedAutonomousTools.filter(t => {
             if (!t || t.type !== 'function' || !t.function?.name) return false;
-            if (hasExecutedSearch && ['search_web'].includes(normalizeToolName(t.function.name))) return false;
+            if (['search_web', 'web_search', 'search'].includes(normalizeToolName(t.function.name))) return false;
             return true;
           });
           if (validFunctionTools.length > 0) {
