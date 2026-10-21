@@ -2184,7 +2184,7 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Helper untuk memanggil LLM (OpenRouter atau Ollama) dari backend dengan dukungan riwayat pesan & auto-detect provider per model
-async function callLLMBackend({ prompt, system, messages, model, provider, endpoint, apiKey, openRouterKey, ollamaApiKey }) {
+async function callLLMBackend({ prompt, system, messages, model, provider, endpoint, apiKey, openRouterKey, ollamaApiKey, isAutoRouter, allowFallbacks }) {
   let finalMessages = [];
 
   if (Array.isArray(messages) && messages.length > 0) {
@@ -2281,8 +2281,9 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     const key = openRouterKey || (apiKey && apiKey.startsWith('sk-or-') ? apiKey : null) || process.env.OPENROUTER_API_KEY;
     if (!key) throw new Error('OpenRouter API Key diperlukan untuk model cloud: ' + (rawModel || 'default'));
 
+    const isAutoRouterActive = Boolean(isAutoRouter || allowFallbacks);
     const isFreeModel = (rawModel || '').includes(':free') || (rawModel || '').endsWith('/free') || rawModel === 'openrouter/free';
-    const candidateModels = isFreeModel
+    const candidateModels = (isAutoRouterActive && isFreeModel)
       ? [
           rawModel,
           'nvidia/nemotron-3.5-lightning:free',
@@ -2291,7 +2292,7 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
           'cohere/north-mini-code:free',
           'openrouter/free'
         ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx)
-      : [rawModel || 'nvidia/nemotron-3.5-lightning:free'];
+      : [rawModel];
 
     const tryCallOpenRouter = (targetModel) => {
       // Pastikan pesan disesuaikan dengan kapabilitas system role model target
@@ -2325,7 +2326,7 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
         messages: targetMessages,
         temperature: 0.3,
         provider: {
-          allow_fallbacks: true
+          allow_fallbacks: isAutoRouterActive
         }
       };
 
@@ -2420,11 +2421,11 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     (ollamaEpIsCustom ? null : process.env.OLLAMA_API_KEY);
   let rawEp = (endpoint || '').trim();
 
-  // 100% Pure Cloud Architecture: Jika tidak ada custom endpoint Ollama eksternal dengan API key valid,
-  // alihkan secara transparan ke OpenRouter Cloud AI menggunakan model mapping resmi.
+  // Pure Cloud Architecture: Hanya jika Auto-Router aktif dan tidak ada Ollama lokal,
+  // alihkan ke OpenRouter Cloud. Jika Auto-Router tidak aktif, hormati pilihan Ollama pengguna!
   const hasCustomOllama = Boolean(activeOllamaKey && rawEp && !rawEp.includes('127.0.0.1') && !rawEp.includes('localhost') && !rawEp.includes('ollama.com'));
   const hasOpenRouterKey = Boolean(openRouterKey || (apiKey && apiKey.startsWith('sk-or-')) || process.env.OPENROUTER_API_KEY);
-  if (!isOpenRouter && !hasCustomOllama && hasOpenRouterKey) {
+  if (isAutoRouterActive && !isOpenRouter && !hasCustomOllama && hasOpenRouterKey) {
     try {
       const mappedModel = mapOllamaModelToOpenRouter(rawModel);
       return await callLLMBackend({
@@ -2435,7 +2436,8 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
         provider: 'openrouter',
         endpoint,
         apiKey: openRouterKey || apiKey,
-        openRouterKey: openRouterKey || (apiKey && apiKey.startsWith('sk-or-') ? apiKey : null) || process.env.OPENROUTER_API_KEY
+        openRouterKey: openRouterKey || (apiKey && apiKey.startsWith('sk-or-') ? apiKey : null) || process.env.OPENROUTER_API_KEY,
+        isAutoRouter: true
       });
     } catch (bridgeErr) {
       console.warn('[callLLMBackend] OpenRouter pure cloud bridge gagal, fallback ke Ollama:', bridgeErr.message);
@@ -7121,7 +7123,7 @@ async function requestHandler(req, res) {
           messages: body.messages || [],
           stream: body.stream !== false,
           max_tokens: 32768,
-          provider: { allow_fallbacks: true }
+          provider: { allow_fallbacks: Boolean(req.headers['x-auto-router'] === 'true' || body.isAutoRouter) }
         };
         if (body.options?.temperature !== undefined) orPayload.temperature = body.options.temperature;
         if (body.options?.top_p !== undefined) orPayload.top_p = body.options.top_p;

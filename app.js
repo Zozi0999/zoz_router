@@ -5542,7 +5542,7 @@ RESONANSI: ${this.currentVibe}
       model,
       messages: buildWebRescueMessages(question, evidenceText),
       stream: true,
-      provider: { allow_fallbacks: true },
+      provider: { allow_fallbacks: (STATE.mode === 'auto') },
       ...(extraBody || {})
     };
     const attempts = [baseBody];
@@ -9208,10 +9208,13 @@ RESONANSI: ${this.currentVibe}
       ? modelName
       : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
 
-    const candidateModels = [
-      effectiveModel,
-      ...LIVE_FREE_OPENROUTER_FALLBACKS
-    ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(m));
+    const isAutoRouterActive = (STATE.mode === 'auto') || Boolean(options.isAutoRouter);
+    const candidateModels = isAutoRouterActive
+      ? [
+          effectiveModel,
+          ...LIVE_FREE_OPENROUTER_FALLBACKS
+        ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(m))
+      : [effectiveModel];
 
     const tryDirectFirst = IS_GITHUB_PAGES;
     const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
@@ -9259,7 +9262,7 @@ RESONANSI: ${this.currentVibe}
         messages: messagesPayload,
         stream: true,
         include_reasoning: false,
-        provider: { allow_fallbacks: true }
+        provider: { allow_fallbacks: isAutoRouterActive }
       };
       if (STATE.settings.useCustomParameters) {
         if (!isReasoning && STATE.settings.temperature !== null && STATE.settings.temperature !== undefined) {
@@ -15553,9 +15556,9 @@ ${blocks}
         if (els.ollamaStatusVal) els.ollamaStatusVal.innerText = statusText;
         if (els.ollamaIndicator) els.ollamaIndicator.className = 'status-indicator online';
 
-        // Auto-select first real installed/cloud model if current model is invalid or default
+        // Auto-select first real installed/cloud model ONLY if no model is currently configured
         const modelNames = rawModels.map(m => m.name || m.model || m.id);
-        if (!modelNames.includes(STATE.settings.ollamaModel)) {
+        if (!STATE.settings.ollamaModel) {
           const preferredModel = modelNames.find(n => n.includes('qwen2.5:1.5b') || n.includes('qwen2.5') || n.includes('llama3.2') || n.includes('llama3')) || modelNames[0];
           STATE.settings.ollamaModel = preferredModel;
           savePersistedState();
@@ -16726,20 +16729,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       } else if (STATE.mode === 'openrouter') {
         let effectiveORModel = targetModel;
         if (!effectiveORModel.includes('/')) {
-          effectiveORModel = mapOllamaModelToOpenRouter(effectiveORModel) || STATE.settings.openRouterModel || 'openrouter/free';
+          effectiveORModel = STATE.settings.openRouterModel || 'openrouter/free';
         }
         await runOpenRouterStreaming(session, text, effectiveImages, effectiveORModel, streamRunOptions);
       } else {
-        // Mode Ollama Cloud: seluruh model dieksekusi 100% via Cloud tanpa ketergantungan model lokal
-        const effectiveCloudModel = targetModel.includes('/')
-          ? targetModel
-          : (mapOllamaModelToOpenRouter(targetModel) || 'openrouter/free');
-        await runOpenRouterStreaming(session, text, effectiveImages, effectiveCloudModel, {
-          displayModel: targetModel,
-          engineLabel: 'Ollama Cloud',
-          engineMode: 'ollama',
-          ...streamRunOptions
-        });
+        // Mode Ollama: jalankan model Ollama yang dipilih pengguna secara konsisten
+        // Dilarang keras memindahkan atau memetakan model ke provider lain kecuali Auto-Router aktif
+        await runOllamaStreaming(session, text, effectiveImages, targetModel, streamRunOptions);
       }
     }
     } catch (err) {
@@ -19774,14 +19770,14 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
                                     errLower.includes('401') ||
                                     err?.name === 'TypeError';
 
-        const allowCloudFallback = runOptions ? (runOptions.autoCloudFallback !== false) : true;
+        const isAutoRouterActive = (STATE.mode === 'auto') || Boolean(runOptions.isAutoRouter);
+        const allowCloudFallback = isAutoRouterActive && (runOptions ? (runOptions.autoCloudFallback !== false) : true);
         if (allowCloudFallback && isNotFoundOrOffline) {
           try { assistantRow.remove(); } catch (_) {}
           const fallbackModel = mapOllamaModelToOpenRouter(modelName);
-          console.warn(`[Ollama Failover] Model ${modelName} tidak tersedia di server Ollama (${err?.message}). Mengalihkan otomatis ke Cloud OpenRouter (${fallbackModel})...`);
-          showToast(`🔀 Model ${modelName} dialihkan otomatis ke Cloud (${fallbackModel})...`, 'info');
-          selectModel(fallbackModel, 'openrouter', true);
-          return await runOpenRouterStreaming(session, promptText, image, fallbackModel);
+          console.warn(`[Auto-Router Failover] Model ${modelName} tidak tersedia di server Ollama (${err?.message}). Mengalihkan ke Cloud (${fallbackModel})...`);
+          showToast(`🔀 Auto-Router: Model ${modelName} dialihkan ke Cloud (${fallbackModel})...`, 'info');
+          return await runOpenRouterStreaming(session, promptText, image, fallbackModel, { ...runOptions, isAutoRouter: true });
         }
 
         // render:false → bubbleText.innerHTML diganti tanpa syarat beberapa baris
@@ -20210,13 +20206,15 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       // Siapkan pool kandidat model:
-      // - Prioritaskan model pilihan pengguna secara penuh agar pengguna mendapatkan model yang dipilih.
-      // - JANGAN melompat antar model berkali-kali (redirection loop) yang membuat pengguna bingung/frustrasi.
-      // - Sediakan maksimal 1 cadangan darurat (smart backup) jika model utama mengalami 404/402/kematian total.
+      // - Prioritaskan model pilihan pengguna secara mutlak.
+      // - DILARANG KERAS berpindah model kecuali Auto-Router diaktifkan.
+      const isAutoRouterActive = (STATE.mode === 'auto') || Boolean(runOptions.isAutoRouter);
       const candidateModels = [effectiveInitialModel];
-      const emergencyBackup = hasClientKey ? 'openrouter/auto' : 'openrouter/free';
-      if (effectiveInitialModel !== emergencyBackup && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(emergencyBackup)) {
-        candidateModels.push(emergencyBackup);
+      if (isAutoRouterActive) {
+        const emergencyBackup = hasClientKey ? 'openrouter/auto' : 'openrouter/free';
+        if (effectiveInitialModel !== emergencyBackup && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(emergencyBackup)) {
+          candidateModels.push(emergencyBackup);
+        }
       }
 
       let lastErrDetail = '';
@@ -20258,7 +20256,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           include_reasoning: false,
           provider: {
             sort: 'latency',
-            allow_fallbacks: true
+            allow_fallbacks: isAutoRouterActive
           }
         };
 
@@ -20646,9 +20644,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           throw new Error(`OpenRouter Authentication Error: API Key tidak valid atau belum dipasang.`);
         }
 
-        // Failover ke cadangan darurat jika model utama gagal total sebelum menghasilkan token
+        // Failover ke cadangan darurat HANYA jika Auto-Router aktif
         const isAuthRejection = lastErrDetail.includes('401') || lastErrDetail.includes('403') || lastErrDetail.includes('API Key tidak valid');
-        const canFailover = (i < candidateModels.length - 1) && !isAuthRejection;
+        const canFailover = isAutoRouterActive && (i < candidateModels.length - 1) && !isAuthRejection;
 
         if (canFailover) {
           const nextCandidate = candidateModels[i + 1];
@@ -20659,8 +20657,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 : (lastErrDetail.includes('ResourceExhausted') || lastErrDetail.includes('lambat') || lastErrDetail.includes('timeout')
                     ? 'sedang kelelahan kapasitas / lambat'
                     : 'sedang mengalami gangguan upstream'));
-          console.warn(`[OpenRouter Smart Failover] Model ${currentModel} ${reasonNotice} (${lastErrDetail}). Mengalihkan ke cadangan darurat ${nextCandidate}...`);
-          bubbleText.innerHTML = `<span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.8; font-style:italic;">Model <b>${escapeHtml(currentModel)}</b> ${reasonNotice}. Mengalihkan ke cadangan darurat <b>${escapeHtml(nextCandidate)}</b>...</span>`;
+          console.warn(`[Auto-Router Failover] Model ${currentModel} ${reasonNotice} (${lastErrDetail}). Mengalihkan ke ${nextCandidate}...`);
+          bubbleText.innerHTML = `<span class="typing-cursor"></span> <span style="font-size:0.85em; opacity:0.8; font-style:italic;">Model <b>${escapeHtml(currentModel)}</b> ${reasonNotice}. Mengalihkan ke <b>${escapeHtml(nextCandidate)}</b>...</span>`;
           await new Promise(r => setTimeout(r, 600));
           continue;
         } else {
@@ -20912,7 +20910,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           messages: conversationChain,
           stream: true,
           provider: {
-            allow_fallbacks: true
+            allow_fallbacks: isAutoRouterActive
           }
         };
         const canDigestionUseTools = doesModelSupportTools(activeDigestionModel);
