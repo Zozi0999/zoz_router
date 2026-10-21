@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261020_v413';
+    window.__ZOZ_VERSION__ = 'v20261020_v414';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -93,8 +93,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261020_v413">
-  <link rel="stylesheet" href="style.css?v=20261020_v413">
+  <link rel="preload" as="style" href="style.css?v=20261020_v414">
+  <link rel="stylesheet" href="style.css?v=20261020_v414">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial select-none">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -956,7 +956,7 @@
                   </div>
                   <div class="search-item-info">
                     <span class="search-item-title">Autonomous Web Explorer</span>
-                    <span class="search-item-desc">Tool mandiri dari nol (Tanpa Serper, dipanggil bebas oleh AI)</span>
+                    <span class="search-item-desc">Mesin pencari mandiri berdaulat Zoz Neural Search (SQLite FTS5 + Direct Web Spider)</span>
                   </div>
                   <div class="search-item-action-area">
                     <i class="fa-solid fa-check search-item-check"></i>
@@ -1107,13 +1107,11 @@
           </div>
 
           <div class="form-group">
-            <label for="settingSerperApiKey"><i class="fa-solid fa-magnifying-glass"></i> Serper.dev API Key (Google Web Search Real-Time)</label>
+            <label><i class="fa-solid fa-spider"></i> Zoz Sovereign Web Search (Mesin Pencari Mandiri)</label>
             <div class="input-with-action">
-              <input type="password" id="settingSerperApiKey" placeholder="075538fed9c64990e1eb32a06726c1e55a933c1e" value="075538fed9c64990e1eb32a06726c1e55a933c1e">
-              <button class="btn btn-sm btn-outline" id="toggleShowSerperKeyBtn" aria-label="Tampilkan atau sembunyikan Serper API Key" title="Tampilkan/sembunyikan key"><i class="fa-solid fa-eye"></i></button>
-              <button class="btn btn-sm btn-outline" id="testSerperBtn">Tes Web Search</button>
+              <input type="text" readonly value="Zoz Neural Search Index & Real-Time Direct Spider (Aktif)" class="custom-input" style="color:var(--text-muted);background:var(--bg-card);border:1px solid var(--border-color);padding:8px 12px;border-radius:6px;width:100%;">
             </div>
-            <small class="form-hint">Mesin pencari internet Google real-time untuk Ollama dan OpenRouter. Dapatkan API Key di <a href="https://serper.dev" target="_blank" rel="noopener">serper.dev</a>.</small>
+            <small class="form-hint">Mesin pencari otonom mandiri dengan index lokal SQLite FTS5 dan spider web primer langsung. Zero API pihak ketiga, tanpa Google, DuckDuckGo, atau Wikipedia.</small>
           </div>
 
           <div class="form-group">
@@ -2633,8 +2631,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261020_v413" defer></script>
+  <script src="text-safety.js?v=20261020_v414" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261020_v413" defer></script>
+  <script src="app.js?v=20261020_v414" defer></script>
 </body>
 </html>

@@ -756,7 +756,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
       ollamaEndpoint: 'https://ollama.com',
       ollamaApiKey: '',
       openRouterKey: '',
-      serperApiKey: '', // key milik user saja — server menyuplai key env-nya sendiri
       ollamaModel: 'qwen2.5:1.5b',
       openRouterModel: 'openrouter/free',
       imageModel: 'flux',
@@ -1188,9 +1187,6 @@ Autonomous Web Explorer: You have built-in zero-API web exploration tools (searc
     settingOpenRouterTierText: $('#settingOpenRouterTierText'),
     btnRefreshOpenRouterBalance: $('#btnRefreshOpenRouterBalance'),
     btnAddOpenRouterCredits: $('#btnAddOpenRouterCredits'),
-    settingSerperApiKey: $('#settingSerperApiKey'),
-    toggleShowSerperKeyBtn: $('#toggleShowSerperKeyBtn'),
-    testSerperBtn: $('#testSerperBtn'),
     settingAutoPolicy: $('#settingAutoPolicy'),
     settingMusicModel: $('#settingMusicModel'),
     paramUseModelDefaults: $('#paramUseModelDefaults'),
@@ -14361,24 +14357,22 @@ Aturan wajib:
   async function getWebSearchContext(query, session = null, hudElement = null, forceRun = false) {
     if (!query || !query.trim()) return null;
     if (STATE.searchMode === 'autonomous' && !forceRun) {
-      // Mode Autonomous Web Explorer menggunakan eksekusi tool dinamis on-demand oleh AI tanpa Serper API!
+      // Mode Autonomous Web Explorer menggunakan eksekusi tool dinamis on-demand oleh AI
       return null;
     }
     const smartQuery = session ? synthesizeAutonomousSearchQuery(session, query) : query.trim();
-    // Key Serper HANYA dikirim bila user benar-benar mengaturnya; tanpa key kita
-    // langsung jatuh ke proxy backend (yang memakai key env milik server).
-    const serperKey = (STATE.settings.serperApiKey || '').trim() || null;
+    const searchQuery = smartQuery || query;
 
     if (hudElement) {
       hudElement.innerHTML = `
         <div class="web-search-hud">
           <i class="fa-solid fa-satellite-dish fa-spin" style="color:var(--neon-cyan);"></i>
-          <span><strong>AI Search Skill:</strong> Menganalisis konteks & mencari <em>"${escapeHtml(smartQuery)}"</em>...</span>
+          <span><strong>AI Search Skill:</strong> Menjelajahi indeks web mandiri untuk <em>"${escapeHtml(smartQuery)}"</em>...</span>
         </div>
       `;
     }
 
-    const makeSearchSignal = (timeoutMs = 6500) => {
+    const makeSearchSignal = (timeoutMs = 7000) => {
       const timeoutSig = AbortSignal.timeout(timeoutMs);
       if (typeof STATE !== 'undefined' && STATE?.abortController?.signal) {
         return (typeof AbortSignal.any === 'function')
@@ -14391,72 +14385,42 @@ Aturan wajib:
     try {
       let data = null;
 
-      // 1. Direct browser fetch to Serper API (hanya jika user punya key sendiri)
-      const isIndo = hasIndonesianWords(smartQuery) || hasIndonesianWords(query) || isExplicitDomesticIndoQuery(smartQuery) || isExplicitDomesticIndoQuery(query);
-      const searchQuery = smartQuery || query;
-
-      if (serperKey) {
-        try {
-          const directRes = await fetch('https://google.serper.dev/search', {
-            method: 'POST',
-            headers: {
-              'X-API-KEY': serperKey,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              q: searchQuery,
-              num: 10,
-              gl: isIndo ? 'id' : 'us',
-              hl: isIndo ? 'id' : 'en'
-            }),
-            signal: makeSearchSignal(6500)
-          });
-          if (directRes.ok) {
-            data = await directRes.json();
+      // 1. Panggil endpoint pencarian web mandiri Zoz Neural Search Index
+      try {
+        const autoRes = await fetch('/api/tools/search-web', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: searchQuery, originalQuery: smartQuery, maxResults: 10 }),
+          signal: makeSearchSignal(7500)
+        }).catch(() => null);
+        if (autoRes && autoRes.ok) {
+          const autoData = await autoRes.json().catch(() => null);
+          if (autoData && Array.isArray(autoData.results) && autoData.results.length > 0) {
+            data = {
+              organic: autoData.results.map(r => ({
+                title: cleanWebSnippetText(r.title),
+                link: r.url,
+                snippet: cleanWebSnippetText(r.snippet),
+                date: r.pubDate || 'Terkini',
+                domain: r.domain
+              })),
+              results: autoData.results
+            };
           }
-        } catch (errDirect) {
-          console.warn('Direct Serper fetch failed, trying proxy...', errDirect);
         }
-      }
+      } catch (_) {}
 
-      // 2. Fallback to proxy /api/web-search if direct fetch failed
+      // 2. Fallback ke /api/web-search jika perlu
       if (!data) {
-        const proxyHeaders = { 'Content-Type': 'application/json' };
-        if (serperKey) proxyHeaders['x-serper-key'] = serperKey;
         const proxyRes = await fetch('/api/web-search', {
           method: 'POST',
-          headers: proxyHeaders,
-          body: JSON.stringify(serperKey ? { query: searchQuery, apiKey: serperKey, num: 10 } : { query: searchQuery, num: 10 }),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: searchQuery, num: 10 }),
           signal: makeSearchSignal(7000)
         }).catch(() => null);
         if (proxyRes && proxyRes.ok) {
           data = await proxyRes.json();
         }
-      }
-
-      // 3. Fallback ke Zero-API Autonomous Search (/api/tools/search-web) jika Serper gagal atau tanpa hasil
-      if (!data || (!data.organic?.length && !data.results?.length && !data.knowledgeGraph && !data.answerBox)) {
-        try {
-          const autoRes = await fetch('/api/tools/search-web', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: searchQuery, originalQuery: smartQuery, maxResults: 10 }),
-            signal: makeSearchSignal(7500)
-          }).catch(() => null);
-          if (autoRes && autoRes.ok) {
-            const autoData = await autoRes.json().catch(() => null);
-            if (autoData && Array.isArray(autoData.results) && autoData.results.length > 0) {
-              data = {
-                organic: autoData.results.map(r => ({
-                  title: cleanWebSnippetText(r.title),
-                  link: r.url,
-                  snippet: cleanWebSnippetText(r.snippet),
-                  date: r.pubDate
-                }))
-              };
-            }
-          }
-        } catch (_) {}
       }
 
       if (!data) return null;
@@ -14561,7 +14525,7 @@ Aturan wajib:
       if (!factsBlock && !organicBlock) return null;
 
       const currentTime = new Date().toLocaleString('id-ID', { dateStyle: 'full', timeStyle: 'short' });
-      const systemPromptContext = `[DATA PENCARIAN GOOGLE REAL-TIME - SERPER ENGINE (AI SEARCH SKILL)]
+      const systemPromptContext = `[DATA PENCARIAN INTERNET MANDIRI - ZOZ NEURAL WEB INDEX (AI SEARCH SKILL)]
 Query Kontekstual yang Dirumuskan AI: "${smartQuery}"
 Pertanyaan Pengguna: "${query}"
 Waktu Pencarian: ${currentTime}
@@ -14581,7 +14545,7 @@ ${organicBlock}
         query: smartQuery
       };
     } catch (e) {
-      console.error('Serper Web Search Engine error:', e);
+      console.error('Zoz Web Search Engine error:', e);
       return null;
     }
   }
@@ -16882,7 +16846,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           properties: {
             url: {
               type: 'string',
-              description: 'Alamat URL web lengkap dan valid termasuk protokol http:// atau https:// (contoh: "https://news.detik.com/berita/...", "https://en.wikipedia.org/wiki/...").'
+              description: 'Alamat URL web lengkap dan valid termasuk protokol http:// atau https:// (contoh: "https://news.detik.com/berita/...", "https://arstechnica.com/...").'
             }
           },
           required: ['url']
@@ -26670,7 +26634,6 @@ Aturan:
     if (els.settingOllamaEndpoint) els.settingOllamaEndpoint.value = STATE.settings.ollamaEndpoint || 'https://ollama.com';
     if (els.settingOllamaApiKey) els.settingOllamaApiKey.value = STATE.settings.ollamaApiKey || '';
     if (els.settingOpenRouterKey) els.settingOpenRouterKey.value = STATE.settings.openRouterKey || '';
-    if (els.settingSerperApiKey) els.settingSerperApiKey.value = STATE.settings.serperApiKey || '';
     if (els.settingMusicModel) els.settingMusicModel.value = STATE.settings.musicModel || 'google/lyria-3-clip-preview';
     if (els.paramUseModelDefaults) {
       els.paramUseModelDefaults.checked = !STATE.settings.useCustomParameters;
@@ -26767,7 +26730,7 @@ Aturan:
       command: '/autonomous',
       title: 'Autonomous Web Explorer',
       badge: 'Multi-Step Agent',
-      desc: 'Penjelajah web mandiri dari nol tanpa Serper, dipanggil bebas oleh AI',
+      desc: 'Mesin pencari mandiri berdaulat tanpa Google, DuckDuckGo atau Wikipedia, dipanggil bebas oleh AI',
       iconClass: 'fa-solid fa-compass',
       iconColor: '#00f0ff',
       iconBg: 'rgba(0, 240, 255, 0.12)',
@@ -29007,37 +28970,6 @@ Aturan:
       }
     });
 
-    els.toggleShowSerperKeyBtn?.addEventListener('click', () => {
-      const isPass = els.settingSerperApiKey.type === 'password';
-      els.settingSerperApiKey.type = isPass ? 'text' : 'password';
-      els.toggleShowSerperKeyBtn.innerHTML = isPass ? '<i class="fa-solid fa-eye-slash"></i>' : '<i class="fa-solid fa-eye"></i>';
-    });
-
-    els.testSerperBtn?.addEventListener('click', async () => {
-      const key = els.settingSerperApiKey ? els.settingSerperApiKey.value.trim() : '';
-      if (!key) {
-        showToast('Masukkan Serper API Key terlebih dahulu.', 'error');
-        return;
-      }
-      try {
-        const res = await fetch('https://google.serper.dev/search', {
-          method: 'POST',
-          headers: {
-            'X-API-KEY': key,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ q: 'test connection', gl: 'us', hl: 'en', num: 1 })
-        });
-        if (res.ok) {
-          showToast('✅ Serper API Key valid & Google Search terhubung aktif!');
-        } else {
-          showToast(`❌ Serper API Key tidak valid (Status HTTP ${res.status})`, 'error');
-        }
-      } catch (e) {
-        showToast('❌ Gagal memeriksa Serper Key: ' + e.message, 'error');
-      }
-    });
-
     els.testOllamaBtn?.addEventListener('click', async () => {
       const ep = normalizeEndpoint(els.settingOllamaEndpoint?.value.trim() || 'https://ollama.com');
       const key = els.settingOllamaApiKey ? els.settingOllamaApiKey.value.trim() : '';
@@ -29208,10 +29140,6 @@ Aturan:
 
       if (els.settingOpenRouterKey) {
         STATE.settings.openRouterKey = els.settingOpenRouterKey.value.trim();
-      }
-
-      if (els.settingSerperApiKey) {
-        STATE.settings.serperApiKey = els.settingSerperApiKey.value.trim();
       }
 
       if (els.settingMusicModel) {
