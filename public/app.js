@@ -1668,26 +1668,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       const feedbackNotes = [];
       const skill = (skillName || 'general').toLowerCase();
 
-      // a. Uji Nilai Guna Diagram (Mermaid / Alur Visual)
-      if (skill.includes('diagram') || content.includes('```mermaid') || (content.includes('<<<ZOZ_FILE') && content.includes('mermaid'))) {
-        const hasSubgraph = /subgraph\s+[\w\d_\[\]\(\)\"]+/i.test(content);
-        const hasValidOrientation = /(?:flowchart\s+(?:TD|TB|LR|RL)|graph\s+(?:TD|TB|LR|RL)|sequenceDiagram|classDiagram|erDiagram|stateDiagram(?:-v2)?|gitGraph|gantt|pie)/i.test(content);
-        const hasHarmoniousClass = /classDef\s+\w+/i.test(content);
-        const mermaidBlock = content.match(/```mermaid([\s\S]*?)```/i) || content.match(/<<<ZOZ_FILE[^\n]*\.mermaid[\s\S]*?```/i);
-        const targetDiagramText = mermaidBlock ? mermaidBlock[1] : content;
-        // Hanya tandai unquoted special character pada node flowchart [ ... ] tanpa tanda kutip di baris yang sama
-        const isFlowchart = /(?:flowchart|graph)\s+(?:TD|TB|LR|RL)/i.test(targetDiagramText);
-        const hasUnquotedSpecial = isFlowchart && /\b[A-Za-z0-9_]+\s*\[\s*[^"'\n\]]*[\(\)\:\/][^"'\n\]]*\]/.test(targetDiagramText);
-        const nodeMatches = targetDiagramText.match(/[A-Za-z0-9_]+\s*(?:\[|\(|\{\{|\{\|)/g) || [];
-
-        if (hasSubgraph) { score += 20; feedbackNotes.push('Sub-grafik tematik'); }
-        if (hasValidOrientation) { score += 15; feedbackNotes.push('Orientasi alur proporsional'); }
-        if (nodeMatches.length >= 4) { score += 15; feedbackNotes.push(`${nodeMatches.length} simpul aktif`); }
-        if (hasHarmoniousClass) { score += 15; feedbackNotes.push('Palet warna serasi'); }
-        if (hasUnquotedSpecial) { score -= 15; feedbackNotes.push('Label berkarakter tanpa kutip'); }
-      }
-      // b. Uji Nilai Guna Dokumen Eksekutif (PDF / DOCX)
-      else if (skill.includes('doc') || skill.includes('dokumen') || metadata.docFormat || metadata.isDocCreation) {
+      // a. Uji Nilai Guna Dokumen Eksekutif (PDF / DOCX)
+      if (skill.includes('doc') || skill.includes('dokumen') || metadata.docFormat || metadata.isDocCreation) {
         const words = content.trim().split(/\s+/).length;
         const hasExecutiveSummary = /ringkasan\s+eksekutif|executive\s+summary|latar\s+belakang/i.test(content);
         const hasStrategicTable = /\|[^\n]+\|\n\|[\s\-:]+\|\n\|[^\n]+\|/.test(content);
@@ -11676,23 +11658,22 @@ RESONANSI: ${this.currentVibe}
   const TICK3 = String.fromCharCode(96).repeat(3);
 
   function getFileStudioDirective() {
-    return `### INSTRUKSI SISTEM: AI FILE STUDIO & DIAGRAM VISUAL OTONOM
+    return `### INSTRUKSI SISTEM: AI FILE STUDIO OTONOM
 
 0. ATURAN KRUSIAL: CONTOH KODE PERCAKAPAN VS BERKAS UNDUHAN:
 - Jika pengguna meminta CONTOH KODE, SNIPPET, PENJELASAN SCRIPT, atau meminta "kodenya saja" / "jangan buatkan pratinjau" / "tanpa file":
   WAJIB tampilkan kode LANGSUNG di dalam teks percakapan menggunakan blok Markdown standar (\`\`\`javascript, \`\`\`python, dll.).
   DILARANG membungkusnya dalam blok <<<ZOZ_FILE jika pengguna hanya ingin melihat contoh kode di percakapan!
-- HANYA gunakan blok <<<ZOZ_FILE jika pengguna SECARA EKSPLISIT meminta pembuatan berkas/file utuh yang dapat diunduh, ekspor dokumen (.docx/.pdf), diagram visual (.svg), atau pengeditan berkas direktori lokal:
+- HANYA gunakan blok <<<ZOZ_FILE jika pengguna SECARA EKSPLISIT meminta pembuatan berkas/file utuh yang dapat diunduh, ekspor dokumen (.docx/.pdf), atau pengeditan berkas direktori lokal:
 
 1. PEMBUATAN & PENGEDITAN BERKAS / DOKUMEN:
-Saat pengguna meminta sebuah berkas — website, script (.bat/.py/.sh/.ps1), konfigurasi, dokumen, atau diagram:
+Saat pengguna meminta sebuah berkas — website, script (.bat/.py/.sh/.ps1), konfigurasi, atau dokumen:
 <<<ZOZ_FILE name="Nama_Berkas_Spesifik.ekstensi" mime="tipe/mime" lang="bahasa">
 isi lengkap file, siap pakai, tanpa potongan
 <<<END_ZOZ_FILE>>>
 
 ATURAN WAJIB PENAMAAN BERKAS (AI HARUS MENENTUKAN NAMA SPESIFIK & DESKRIPTIF):
 - AI HARUS menentukan nama berkas yang spesifik, relevan, dan sangat deskriptif sesuai topik/isi yang diminta pengguna!
-- Untuk Diagram Visual: Gunakan ekstensi .svg seperti "Alur_Verifikasi_Email.svg", "Arsitektur_Logika_AI_Agent.svg", "Arsitektur_Sistem.svg", "ERD_Database_Toko.svg". DILARANG KERAS menggunakan ekstensi .mermaid atau nama generik seperti "file.svg" atau "diagram.svg"!
 - Untuk Dokumen Word/PDF: Gunakan "Panduan_Implementasi_API.docx", "Laporan_Analisis_Sistem.pdf", "Rencana_Proyek_2026.docx". DILARANG KERAS menggunakan nama generik seperti "file.docx", "file.pdf", "Dokumen.docx"!
 - Jangan gunakan spasi pada nama file, gunakan underscore (_) atau dash (-).
 
@@ -11704,52 +11685,15 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
 - Tulis isinya dalam format Markdown terstruktur yang rapi (judul #, ##, ###, bullet points -, bold **teks**, tabel, pemisah ---).
 - Mesin ZOZ Document Compiler akan secara otomatis mengompilasi teks Markdown ini menjadi berkas biner murni .docx (Office Open XML) atau .pdf (Adobe Acrobat) yang valid dan siap langsung dibuka di Microsoft Word / Acrobat Reader di laptop maupun HP pengguna!
 
-2. PEMBUATAN DIAGRAM VISUAL INTERAKTIF (.SVG) (BEBAS BERKREASI WARNA & PATUH 100% PADA ARAHAN PENGGUNA):
-- Saat pengguna meminta diagram alur (flowchart), alur logika, urutan proses (sequence diagram), struktur kelas, ERD, mindmap, atau arsitektur sistem:
-- AI membungkusnya dalam blok ZOZ_FILE berekstensi .svg:
-<<<ZOZ_FILE name="Alur_Kerja_AI_Agent.svg" mime="image/svg+xml" lang="mermaid">
-flowchart TD
-    A(["<b>🚀 Input Pengguna</b><br/>Tujuan atau perintah"]) --> B["<b>🧠 LLM (Otak Agen)</b><br/>Menalar dan merencanakan"]
-    B <--> C[("<b>💾 Memori</b><br/>Pendek dan panjang")]
-    B --> D["<b>🛠️ Pemilihan Alat</b><br/>Pencarian, kode, API"]
-    D --> E["<b>🔍 Observasi</b><br/>Hasil dari alat"]
-    E -->|jika selesai| F(["<b>✅ Jawaban Akhir</b><br/>Solusi terverifikasi"])
-    E -.->|ulangi| B
-
-    classDef inputNode fill:#0284c7,stroke:#38bdf8,stroke-width:2px,color:#ffffff;
-    classDef brain fill:#4f46e5,stroke:#a5b4fc,stroke-width:2px,color:#ffffff;
-    classDef memory fill:#7c3aed,stroke:#c4b5fd,stroke-width:2px,color:#ffffff;
-    classDef action fill:#d97706,stroke:#fcd34d,stroke-width:2px,color:#ffffff;
-    classDef observe fill:#0d9488,stroke:#5eead4,stroke-width:2px,color:#ffffff;
-    classDef finish fill:#059669,stroke:#6ee7b7,stroke-width:2px,color:#ffffff;
-    class A inputNode;
-    class B brain;
-    class C memory;
-    class D action;
-    class E observe;
-    class F finish;
-<<<END_ZOZ_FILE>>>
-
-PRINSIP WAJIB DIAGRAM RAPI, HIDUP & SESUAI KEINGINAN PENGGUNA:
-1. Prioritas #1 — Patuhi 100% Arahan Pengguna: Jika pengguna meminta warna tertentu (misal: merah, ungu-emas, pastel, neon, warna-warni cerah, monokrom), arah alur tertentu (horizontal "flowchart LR" atau vertikal "flowchart TD"), atau detail komponen spesifik, Anda WAJIB mengikuti arahan pengguna 100%!
-2. Kebebasan Kreatif Warna AI: Jika pengguna tidak menentukan warna spesifik, Anda BEBAS BERKREASI membuat kombinasi warna multi-warna yang kaya, hidup, ekspresif, dan bervariasi antar node/subgraph menggunakan "classDef" atau "style" (pastikan selalu menyertakan color:#ffffff untuk latar gelap/pekat atau color:#0f172a untuk latar terang/pastel agar teks tajam dan mudah dibaca).
-3. Format Kotak 2-Baris Elegan & Tidak Terpotong:
-   - Baris 1: Judul Komponen tebal: <b>Judul Utama</b>
-   - Baris 2: Deskripsi peran singkat: <br/>Peran atau tindakan singkat
-   - Selalu apit teks label kotak dengan tanda kutip dua: ["<b>...</b><br/>..."]
-4. Uraian Penjelasan Terstruktur Pasca-Diagram:
-   Setelah blok diagram, berikan pengantar dan uraian terstruktur mengenai fungsi tiap komponen serta informasikan bahwa pengguna dapat mengarahkan perubahan warna/tata letak kapan saja.
-
-3. ATURAN KONTEN BERSIH TANPA WATERMARK / ATRIBUSI AI:
+2. ATURAN KONTEN BERSIH TANPA WATERMARK / ATRIBUSI AI:
 - DILARANG KERAS menyertakan teks watermark, header/footer branding, copyright/atribusi palsu, atau kalimat deklaratif penutup seperti 'Dokumen ini dibuat secara otomatis oleh ZOZ AI...', 'Generated by...', 'Dihasilkan oleh AI', dsb.
-- Seluruh isi berkas (baik Dokumen Word/PDF, Aplikasi Web HTML, Skrip, maupun Diagram) harus 100% murni konten pengguna tanpa atribut branding buatan AI.
+- Seluruh isi berkas (baik Dokumen Word/PDF, Aplikasi Web HTML, maupun Skrip) harus 100% murni konten pengguna tanpa atribut branding buatan AI.
 
 Aturan wajib:
-- name : nama file final yang deskriptif dan spesifik berakhiran .svg / .docx / .pdf / .html / .jsx / .tsx / .js / dsb.
+- name : nama file final yang deskriptif dan spesifik berakhiran .docx / .pdf / .html / .jsx / .tsx / .js / dsb.
 - DUKUNGAN PRATINJAU NEXT.JS / REACT (JSX/TSX) LANGSUNG: Zoz Router mendukung pratinjau langsung berkas .jsx / .tsx dan proyek Next.js (App Router) di browser (otomatis dikompilasi menjadi HTML mandiri dengan React 18, Babel Standalone, Tailwind CSS, dan Lucide React). Jika membuat kode Next.js/React, pastikan semua komponen (page.jsx, layout.jsx, komponen pendukung) tersusun lengkap dan saling terhubung, setiap import/export valid, dan komponen utama memiliki export default yang siap dirender tanpa error.
 - KELENGKAPAN PENUH & TANPA BATAS (UNLIMITED / NO CUT-OFF): Tuliskan seluruh kode website, komponen React/Next.js, skrip, atau teks dokumen secara LENGKAP, PENUH, dan TUNTAS dari baris pertama hingga baris terakhir. DILARANG KERAS membatasi hanya 100 baris atau memotong kode di tengah jalan. Dilarang menggunakan placeholder seperti '// sisa kode...', '// lanjutkan di sini...', atau '<!-- konten lainnya -->'.
-- Seluruh tag HTML/JSX, styling CSS, skrip JS, dan elemen UI harus tertulis 100% utuh sampai tag/kurung penutup dan <<<END_ZOZ_FILE>>> agar file dapat langsung dijalankan dan dipratinjau secara nyata.
-- Jangan menyalin ulang kode diagram di luar blok penanda, cukup berikan teks penjelasan yang informatif.`;
+- Seluruh tag HTML/JSX, styling CSS, skrip JS, dan elemen UI harus tertulis 100% utuh sampai tag/kurung penutup dan <<<END_ZOZ_FILE>>> agar file dapat langsung dijalankan dan dipratinjau secara nyata.`;
   }
 
   // Deteksi niat pengguna yang menolak/melarang pembuatan berkas atau pratinjau (misal: "kodenya saja", "jangan buatkan pratinjau", dll.)
@@ -16211,10 +16155,6 @@ ${blocks}
       const rem = t.replace(/^\/(?:dokumen|doc|docx|pdf|word|makalah)\b/i, '').trim();
       return rem.length > 0 ? 'document' : 'none';
     }
-    if (/^\/diagram\b/i.test(t)) {
-      const rem = t.replace(/^\/diagram\b/i, '').trim();
-      return rem.length > 0 ? 'diagram' : 'none';
-    }
 
     // Ambil klausa pembuka (baris pertama atau 180 karakter pertama) untuk mendeteksi objek utama setelah kata kerja
     const firstLine = (t.split(/\r?\n/)[0] || '').trim();
@@ -16259,12 +16199,7 @@ ${blocks}
       return 'website';
     }
 
-    // 5. Deteksi Diagram Visual
-    if (/\b(?:diagram|digram|flowchart|alur\s+sistem|arsitektur\s+visual|erd|mindmap|skema|bagan|hasse\s+diagram|sequence\s+diagram|class\s+diagram)\b/i.test(t) && hasCreationVerb) {
-      return 'diagram';
-    }
-
-    // 6. Deteksi Dokumen Eksplisit (hanya jika kata kerja pembuatan diikuti objek dokumen di kalimat yang sama, bukan kata "laporan" di dalam daftar fitur)
+    // 5. Deteksi Dokumen Eksplisit (hanya jika kata kerja pembuatan diikuti objek dokumen di kalimat yang sama, bukan kata "laporan" di dalam daftar fitur)
     if (docTargetAfterVerb.test(t) || explicitDocFormatSignal) {
       return 'document';
     }
@@ -18585,7 +18520,6 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     let executedHudHtml = '';
 
     // Deteksi perintah slash eksplisit & klasifikasi intent pembuatan (Website vs Dokumen)
-    const isExplicitDiagramCmd = /^\/diagram\b/i.test(promptText.trim());
     const isExplicitWebCmd = /^\/(?:website|web|pratinjau)\b/i.test(promptText.trim());
     const isExplicitCleanCodeCmd = /^\/(?:kodenya-saja|code)\b/i.test(promptText.trim()) || Boolean(runOptions.isExplicitCleanCode);
     const isExplicitDocCmd = /^\/(?:dokumen|doc|docx|pdf|word|makalah)\b/i.test(promptText.trim());
@@ -18596,13 +18530,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
                          creationIntent !== 'website' && !runOptions.websiteMode && !runOptions.isWebCreation && !isExplicitCleanCodeCmd;
     if (isDocRequest && !hasNegativePreview) runOptions.isDocCreation = true;
 
-    const isDiagramRequest = !isDocRequest && (isExplicitDiagramCmd || Boolean(runOptions.isDiagramCreation) || creationIntent === 'diagram' ||
-                             (creationIntent !== 'website' && /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(promptText)));
     const isWebRequest = !isDocRequest && (isExplicitWebCmd || creationIntent === 'website' ||
                          /\b(?:website|websit|wbsite|webiste|web|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|aplikasi|game\s+web|simulasi\s+3d|next\.?js|react\.?js|page\.jsx|page\.tsx)\b/i.test(promptText) ||
                          runOptions.websiteMode === 'preview' || runOptions.websiteMode === 'code_in_chat' || Boolean(runOptions.isWebCreation)) && !isExplicitCleanCodeCmd;
 
-    const wantsFile = (isDiagramRequest || isWebRequest || isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
+    const wantsFile = (isWebRequest || isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -18658,30 +18590,6 @@ Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
    - DILARANG KERAS mencetak, mengulang, membocorkan, atau menuliskan isi teks dokumen di luar blok ZOZ_FILE di dalam percakapan!
    - Di luar blok ZOZ_FILE (sebelum blok ZOZ_FILE), berikan HANYA 1-2 kalimat penjelasan/konfirmasi singkat bahwa dokumen telah selesai disusun dan siap diunduh melalui kartu berkas di bawah.
 5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
-      } else if (isDiagramRequest && !hasNegativePreview) {
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DIAGRAM VISUAL EKSPRESIF & KUSTOMISASI PENUH (MERMAID ARCHITECTURAL BLUEPRINT)
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta DIAGRAM VISUAL (Arsitektur / Alur / Skema / Flowchart / Sequence / ERD / Mindmap).
-
-STANDAR DESAIN, KEBEBASAN WARNA AI & KEPATUHAN ARAHAN PENGGUNA (WAJIB DIPATUHI):
-1. PRIORITAS #1 — PATUHI 100% ARAHAN & KEINGINAN PENGGUNA:
-   - Jika pengguna mengarahkan warna tertentu (misal: merah-emas, ungu neon, biru laut, hijau zamrud, pastel cerah, tema terang/gelap, atau warna spesifik per kotak), arah alur (\`flowchart LR\` horizontal / \`flowchart TD\` vertikal), bentuk kotak, maupun jumlah tahapan, Anda WAJIB mematuhi 100% instruksi pengguna tanpa kompromi!
-   - Jika pengguna tidak menentukan arah alur, gunakan \`flowchart TD\` sebagai default yang rapi (atau \`flowchart LR\` jika alur horizontal lebih cocok).
-2. KEBEBASAN KREATIF MULTI-WARNA AI (SAAT PENGGUNA TIDAK MENENTUKAN WARNA SPESIFIK):
-   - Anda BEBAS BERKREASI penuh memilih kombinasi warna multi-warna yang kaya, hidup, ekspresif, dan bervariasi agar setiap jenis node/tahapan dan \`subgraph\` tampil memukau dan mudah dibedakan secara visual!
-   - Buat beberapa \`classDef\` dengan warna yang berbeda dan kaya untuk tiap peran komponen (misal: Biru Safir, Ungu Royal, Toska/Teal, Zamrud/Emerald, Amber/Emas, Rose/Crimson, Indigo, dsb.) dan terapkan ke masing-masing node dengan \`class\`.
-   - Anda juga bebas memberi warna pada \`subgraph\` menggunakan \`style NamaSubgraph fill:...,stroke:...,stroke-width:2px,color:...\` dan mewarnai garis panah dengan \`linkStyle\`.
-   - WAJIB sertakan properti \`color:\` yang kontras pada setiap \`classDef\`/\`style\`: gunakan \`color:#ffffff\` untuk latar berwarna pekat/gelap, atau \`color:#0f172a\` untuk latar terang/pastel/kuning agar seluruh teks 100% terbaca tajam!
-3. PENGELOMPOKAN SUBGRAPH & BENTUK SIMBOL:
-   - Untuk arsitektur atau alur multi-komponen, kelompokkan elemen ke dalam \`subgraph\` tematik berlabel jelas (Contoh: \`subgraph Klien["📱 Lapisan Klien"]\`).
-   - Variasikan bentuk simbol sesuai peran: Kapsul \`ID(["Mulai / Selesai"])\`, Persegi \`ID["Layanan / Proses"]\`, Belah Ketupat \`ID{"Keputusan?"}\`, Silinder \`ID[("Database / Storage")]\`, Jajar Genjang \`ID[/"Input / Output"/]\`.
-4. KEAMANAN TEKS & ANTI-CLIPPING (TIDAK ADA TEKS TERPOTONG):
-   - SELALU apit seluruh isi teks di dalam tanda kutip ganda: \`ID["<b>Judul Komponen</b><br/>Deskripsi singkat jelas"]\` agar tanda kurung, titik dua, atau simbol tidak merusak compiler Mermaid dan teks tampil utuh di dalam kotak.
-5. FORMAT PEMBUNGKUS:
-   Tuliskan kode Mermaid di dalam blok protokol:
-<<<ZOZ_FILE name="Diagram_Arsitektur.svg" mime="image/svg+xml" lang="mermaid">
-flowchart TD
-    ... (kode diagram lengkap beserta classDef/style warna kreatif) ...
-<<<END_ZOZ_FILE>>>`;
       } else if (isWebRequest && !hasNegativePreview) {
         const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
         const isReactNextPrompt = /\b(?:next\.?js|nextjs|react\.?js|reactjs|jsx|tsx|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(promptText);
@@ -19649,7 +19557,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       if (typeof BioEndocrine.evaluateSkillOutputUtility === 'function') {
         const hasCodeBlock = /```(?:python|py|javascript|js|typescript|ts|html|css|sql|rust|go|c|cpp|bash|sh|powershell|cmd)\b/i.test(fullText);
         const isCliScript = /```(?:bash|sh|powershell|cmd|zsh)\b/i.test(fullText);
-        const detectedSkill = isDiagramRequest ? 'Diagram Visual' : (isDocRequest ? 'Dokumen Eksekutif' : (isWebRequest ? 'Website Studio' : (webSources && webSources.length > 0 ? 'Pencarian Web' : (isCliScript ? 'Terminal CLI' : (hasCodeBlock ? 'Kode & Skrip' : 'Percakapan')))));
+        const detectedSkill = isDocRequest ? 'Dokumen Eksekutif' : (isWebRequest ? 'Website Studio' : (webSources && webSources.length > 0 ? 'Pencarian Web' : (isCliScript ? 'Terminal CLI' : (hasCodeBlock ? 'Kode & Skrip' : 'Percakapan'))));
         BioEndocrine.evaluateSkillOutputUtility(detectedSkill, fullText, { model: modelName, files: generatedFiles, sources: webSources, docFormat: runOptions.docFormat, websiteMode: runOptions.websiteMode, isWebCreation: runOptions.isWebCreation, isDocCreation: runOptions.isDocCreation });
       }
       if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
@@ -19929,7 +19837,6 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     let executedHudHtml = '';
 
     // Deteksi perintah slash eksplisit & klasifikasi intent pembuatan (Website vs Dokumen)
-    const isExplicitDiagramCmd = /^\/diagram\b/i.test(promptText.trim());
     const isExplicitWebCmd = /^\/(?:website|web|pratinjau)\b/i.test(promptText.trim());
     const isExplicitCleanCodeCmd = /^\/(?:kodenya-saja|code)\b/i.test(promptText.trim()) || Boolean(runOptions.isExplicitCleanCode);
     const isExplicitDocCmd = /^\/(?:dokumen|doc|docx|pdf|word|makalah)\b/i.test(promptText.trim());
@@ -19940,13 +19847,11 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
                          creationIntent !== 'website' && !runOptions.websiteMode && !runOptions.isWebCreation && !isExplicitCleanCodeCmd;
     if (isDocRequest && !hasNegativePreview) runOptions.isDocCreation = true;
 
-    const isDiagramRequest = !isDocRequest && (isExplicitDiagramCmd || Boolean(runOptions.isDiagramCreation) || creationIntent === 'diagram' ||
-                             (creationIntent !== 'website' && /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(promptText)));
     const isWebRequest = !isDocRequest && (isExplicitWebCmd || creationIntent === 'website' ||
                          /\b(?:website|websit|wbsite|webiste|web|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|aplikasi|game\s+web|simulasi\s+3d|next\.?js|react\.?js|page\.jsx|page\.tsx)\b/i.test(promptText) ||
                          runOptions.websiteMode === 'preview' || runOptions.websiteMode === 'code_in_chat' || Boolean(runOptions.isWebCreation)) && !isExplicitCleanCodeCmd;
 
-    const wantsFile = (isDiagramRequest || isWebRequest || isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
+    const wantsFile = (isWebRequest || isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -20002,30 +19907,6 @@ Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
    - DILARANG KERAS mencetak, mengulang, membocorkan, atau menuliskan isi teks dokumen di luar blok ZOZ_FILE di dalam percakapan!
    - Di luar blok ZOZ_FILE (sebelum blok ZOZ_FILE), berikan HANYA 1-2 kalimat penjelasan/konfirmasi singkat bahwa dokumen telah selesai disusun dan siap diunduh melalui kartu berkas di bawah.
 5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
-      } else if (isDiagramRequest && !hasNegativePreview) {
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DIAGRAM VISUAL EKSPRESIF & KUSTOMISASI PENUH (MERMAID ARCHITECTURAL BLUEPRINT)
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta DIAGRAM VISUAL (Arsitektur / Alur / Skema / Flowchart / Sequence / ERD / Mindmap).
-
-STANDAR DESAIN, KEBEBASAN WARNA AI & KEPATUHAN ARAHAN PENGGUNA (WAJIB DIPATUHI):
-1. PRIORITAS #1 — PATUHI 100% ARAHAN & KEINGINAN PENGGUNA:
-   - Jika pengguna mengarahkan warna tertentu (misal: merah-emas, ungu neon, biru laut, hijau zamrud, pastel cerah, tema terang/gelap, atau warna spesifik per kotak), arah alur (\`flowchart LR\` horizontal / \`flowchart TD\` vertikal), bentuk kotak, maupun jumlah tahapan, Anda WAJIB mematuhi 100% instruksi pengguna tanpa kompromi!
-   - Jika pengguna tidak menentukan arah alur, gunakan \`flowchart TD\` sebagai default yang rapi (atau \`flowchart LR\` jika alur horizontal lebih cocok).
-2. KEBEBASAN KREATIF MULTI-WARNA AI (SAAT PENGGUNA TIDAK MENENTUKAN WARNA SPESIFIK):
-   - Anda BEBAS BERKREASI penuh memilih kombinasi warna multi-warna yang kaya, hidup, ekspresif, dan bervariasi agar setiap jenis node/tahapan dan \`subgraph\` tampil memukau dan mudah dibedakan secara visual!
-   - Buat beberapa \`classDef\` dengan warna yang berbeda dan kaya untuk tiap peran komponen (misal: Biru Safir, Ungu Royal, Toska/Teal, Zamrud/Emerald, Amber/Emas, Rose/Crimson, Indigo, dsb.) dan terapkan ke masing-masing node dengan \`class\`.
-   - Anda juga bebas memberi warna pada \`subgraph\` menggunakan \`style NamaSubgraph fill:...,stroke:...,stroke-width:2px,color:...\` dan mewarnai garis panah dengan \`linkStyle\`.
-   - WAJIB sertakan properti \`color:\` yang kontras pada setiap \`classDef\`/\`style\`: gunakan \`color:#ffffff\` untuk latar berwarna pekat/gelap, atau \`color:#0f172a\` untuk latar terang/pastel/kuning agar seluruh teks 100% terbaca tajam!
-3. PENGELOMPOKAN SUBGRAPH & BENTUK SIMBOL:
-   - Untuk arsitektur atau alur multi-komponen, kelompokkan elemen ke dalam \`subgraph\` tematik berlabel jelas (Contoh: \`subgraph Klien["📱 Lapisan Klien"]\`).
-   - Variasikan bentuk simbol sesuai peran: Kapsul \`ID(["Mulai / Selesai"])\`, Persegi \`ID["Layanan / Proses"]\`, Belah Ketupat \`ID{"Keputusan?"}\`, Silinder \`ID[("Database / Storage")]\`, Jajar Genjang \`ID[/"Input / Output"/]\`.
-4. KEAMANAN TEKS & ANTI-CLIPPING (TIDAK ADA TEKS TERPOTONG):
-   - SELALU apit seluruh isi teks di dalam tanda kutip ganda: \`ID["<b>Judul Komponen</b><br/>Deskripsi singkat jelas"]\` agar tanda kurung, titik dua, atau simbol tidak merusak compiler Mermaid dan teks tampil utuh di dalam kotak.
-5. FORMAT PEMBUNGKUS:
-   Tuliskan kode Mermaid di dalam blok protokol:
-<<<ZOZ_FILE name="Diagram_Arsitektur.svg" mime="image/svg+xml" lang="mermaid">
-flowchart TD
-    ... (kode diagram lengkap beserta classDef/style warna kreatif) ...
-<<<END_ZOZ_FILE>>>`;
       } else if (isWebRequest && !hasNegativePreview) {
         const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
         const isReactNextPrompt = /\b(?:next\.?js|nextjs|react\.?js|reactjs|jsx|tsx|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(promptText);
@@ -21388,7 +21269,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       if (typeof BioEndocrine.evaluateSkillOutputUtility === 'function') {
         const hasCodeBlock = /```(?:python|py|javascript|js|typescript|ts|html|css|sql|rust|go|c|cpp|bash|sh|powershell|cmd)\b/i.test(fullText);
         const isCliScript = /```(?:bash|sh|powershell|cmd|zsh)\b/i.test(fullText);
-        const detectedSkill = isDiagramRequest ? 'Diagram Visual' : (isDocRequest ? 'Dokumen Eksekutif' : (isWebRequest ? 'Website Studio' : (webSources && webSources.length > 0 ? 'Pencarian Web' : (isCliScript ? 'Terminal CLI' : (hasCodeBlock ? 'Kode & Skrip' : 'Percakapan')))));
+        const detectedSkill = isDocRequest ? 'Dokumen Eksekutif' : (isWebRequest ? 'Website Studio' : (webSources && webSources.length > 0 ? 'Pencarian Web' : (isCliScript ? 'Terminal CLI' : (hasCodeBlock ? 'Kode & Skrip' : 'Percakapan'))));
         BioEndocrine.evaluateSkillOutputUtility(detectedSkill, fullText, { model: actualModelUsed || displayModel, files: generatedFiles, sources: webSources, docFormat: runOptions.docFormat, websiteMode: runOptions.websiteMode, isWebCreation: runOptions.isWebCreation, isDocCreation: runOptions.isDocCreation });
       }
       if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
@@ -26450,19 +26331,6 @@ Aturan:
   // ==================== SLASH COMMANDS & QUICK TOOLS AUTOCOMPLETE ENGINE ====================
   const SLASH_COMMANDS = [
     {
-      id: 'diagram',
-      command: '/diagram',
-      title: 'Diagram & Arsitektur',
-      badge: 'Mermaid / SVG',
-      desc: 'Bikin flowchart, sequence, ERD, arsitektur, atau mindmap interaktif live',
-      iconClass: 'fa-solid fa-diagram-project',
-      iconColor: '#00f0ff',
-      iconBg: 'rgba(0, 240, 255, 0.12)',
-      template: '/diagram ',
-      placeholder: 'Deskripsikan alur sistem atau diagram yang ingin dibuat...',
-      aliases: ['flowchart', 'erd', 'mindmap', 'arsitektur']
-    },
-    {
       id: 'website',
       command: '/website',
       title: 'Pembuatan Website & App',
@@ -26725,9 +26593,7 @@ Aturan:
     hideSlashCommandsMenu();
     AudioEngine.click();
 
-    if (cmd.id === 'diagram') {
-      showToast('📐 Mode Diagram Mermaid Aktif — Ketik alur yang Anda inginkan!');
-    } else if (cmd.id === 'website') {
+    if (cmd.id === 'website') {
       showToast('💻 Mode Website & App Studio Aktif — Ketik aplikasi yang ingin dibuat!');
     } else if (cmd.id === 'dokumen') {
       showToast('📄 Mode Dokumen & Laporan Aktif!');
