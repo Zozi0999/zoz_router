@@ -4634,6 +4634,11 @@ RESONANSI: ${this.currentVibe}
                   if (m.role === 'assistant' && typeof m.content === 'string') {
                     m.content = m.content.replace(/\[(?:Model Penjawab|Model|AI Model):[^\]]*\]\s*/gi, '').trim();
                   }
+                  if (m.role === 'user' && m.docs && Array.isArray(m.docs) && m.docs.length > 0 && typeof m.displayContent === 'string') {
+                    if (/^Tolong (?:pelajari|baca)(?:, [^.]*)?(?:dokumen|isi file dokumen)[^.]*\.?$/i.test(m.displayContent.trim())) {
+                      m.displayContent = '';
+                    }
+                  }
                 });
               }
             });
@@ -10516,6 +10521,9 @@ RESONANSI: ${this.currentVibe}
           textToDisplay = '';
         } else if (/\[File:\s*[^\]]+\]/i.test(textToDisplay)) {
           textToDisplay = textToDisplay.replace(/\s*\[File:\s*[^\]]+\]/gi, '').trim();
+        }
+        if (/^Tolong (?:pelajari|baca)(?:, [^.]*)?(?:dokumen|isi file dokumen)[^.]*\.?$/i.test(textToDisplay.trim())) {
+          textToDisplay = '';
         }
       }
       if (msg.role === 'assistant' && msg.files && msg.files.length > 0) {
@@ -16538,18 +16546,13 @@ ${blocks}
       const autoDoc = convertTextToMarkdownDoc(docBody);
       if (autoDoc) {
         docs.push(autoDoc);
-        // v404: Pastikan prompt tidak kosong agar bubble chat dan fitur Edit berfungsi normal
-        const defaultPromptLabel = `Tolong pelajari dan analisis dokumen ${autoDoc.name}.`;
-        originalUserPrompt = promptInstruction || defaultPromptLabel;
-        rawText = promptInstruction || `Tolong pelajari, analisis, dan jelaskan isi file dokumen ${autoDoc.name} (${autoDoc.lineCount} baris) di atas secara komprehensif.`;
+        // Hapus teks otomatis pemberi prompt: hanya kirim prompt jika pengguna sendiri yang menulis instruksi
+        originalUserPrompt = promptInstruction || '';
+        rawText = promptInstruction || '';
       }
     } else if ((!originalUserPrompt || !originalUserPrompt.trim()) && docs.length > 0) {
-      // v404: Jika dokumen sudah dilipat lebih dulu saat Paste / Modal / Klik Tombol Pill (docs.length > 0)
-      // dan kolom prompt kosong, berikan label representatif agar bubble chat & editor inline Edit tidak kosong
-      const firstAutoDoc = docs.find(d => d && d.isAutoConvertedMarkdown) || docs[0];
-      if (firstAutoDoc && firstAutoDoc.name) {
-        originalUserPrompt = `Tolong pelajari dan analisis dokumen ${firstAutoDoc.name}.`;
-      }
+      // Jika kolom prompt kosong saat dokumen dilampirkan, biarkan originalUserPrompt tetap kosong tanpa teks prompt otomatis
+      originalUserPrompt = '';
     }
 
     // Auto-Extraction URL Web Publik untuk Analisis & Ringkasan AI
@@ -16592,8 +16595,15 @@ ${blocks}
     let text = rawText;
     const validDocs = docs.filter(d => d && typeof d.content === 'string' && d.content.trim().length > 0);
     if (validDocs.length > 0) {
-      const docsContext = validDocs.map(d => `--- [LAMPIRAN DOKUMEN: ${d.name} (${d.size})] ---\n${d.content}\n--- [AKHIR DOKUMEN: ${d.name}] ---`).join('\n\n');
-      text = text ? `${docsContext}\n\n${text}` : `${docsContext}\n\nTolong baca, pahami, dan analisis isi dokumen lampiran di atas secara komprehensif.`;
+      const hasAutoConvertedDoc = validDocs.some(d => d.isAutoConvertedMarkdown);
+      if (hasAutoConvertedDoc) {
+        // Teks diubah ke MD: Kirim HANYA teks MD-nya murni tanpa prompt buatan dan tanpa pembungkus berlebih
+        const mdText = validDocs.map(d => d.content).join('\n\n');
+        text = text ? `${mdText}\n\n${text}` : mdText;
+      } else {
+        const docsContext = validDocs.map(d => `--- [LAMPIRAN DOKUMEN: ${d.name} (${d.size})] ---\n${d.content}\n--- [AKHIR DOKUMEN: ${d.name}] ---`).join('\n\n');
+        text = text ? `${docsContext}\n\n${text}` : docsContext;
+      }
     }
 
     // Injeksi Akses & Dokumen Direktori Lokal ke Konteks Prompt
