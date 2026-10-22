@@ -93,8 +93,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261022_v429">
-  <link rel="stylesheet" href="style.css?v=20261022_v429">
+  <link rel="preload" as="style" href="style.css?v=20261022_v430">
+  <link rel="stylesheet" href="style.css?v=20261022_v430">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -495,6 +495,35 @@
           </div>
           <span class="text-[11px] font-mono tracking-wider font-bold text-teal-300 group-hover:text-white transition-colors">TERMINAL</span>
         </button>
+
+        <!-- ENDOCRINE CHAT v2 Cybernetic Controller -->
+        <div class="endocrine-chat-v2-card" id="endocrineChatV2Card">
+          <div class="endocrine-v2-header">
+            <div class="endocrine-v2-title-wrap">
+              <span class="endocrine-v2-title">ENDOCRINE CHAT v2</span>
+              <div class="endocrine-v2-status-line">
+                <i class="fa-solid fa-biohazard"></i>
+                <span id="endocrineChatStatusText">HORMONE MONITORING &bull; STANDBY</span>
+              </div>
+            </div>
+            <button type="button" class="endocrine-v2-info-btn" id="btnOpenEndocrineTelemetry" title="Buka Detail Telemetri Hormon" aria-label="Buka Detail Telemetri Hormon">
+              <i class="fa-solid fa-chart-line"></i>
+            </button>
+          </div>
+
+          <div class="endocrine-v2-switch-row" id="endocrineSwitchRow">
+            <span class="endocrine-v2-lbl lbl-off" id="endocrineLblOff">OFF</span>
+            <button type="button" class="endocrine-v2-toggle-btn" id="btnToggleEndocrineChatV2" role="switch" aria-checked="false" aria-label="Aktifkan Endocrine Chat v2" title="Toggle Endocrine Chat v2 (Sensor Rasa &amp; Hormon)">
+              <div class="endocrine-v2-track">
+                <div class="endocrine-v2-thumb">
+                  <div class="endocrine-v2-thumb-ring"></div>
+                  <div class="endocrine-v2-thumb-glare"></div>
+                </div>
+              </div>
+            </button>
+            <span class="endocrine-v2-lbl lbl-on" id="endocrineLblOn">ON</span>
+          </div>
+        </div>
 
         <!-- Engine Gateways Status Cards (Stacked, zero collision & overlap) -->
         <div class="space-y-1.5 pt-0.5 engine-status-panel">
@@ -2570,8 +2599,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261022_v429" defer></script>
+  <script src="text-safety.js?v=20261022_v430" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261022_v429" defer></script>
+  <script src="app.js?v=20261022_v430" defer></script>
 </body>
 </html>

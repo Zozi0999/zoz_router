@@ -915,6 +915,13 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     mainContent: $('#mainContent'),
     appContainer: $('.app-container'),
     sidebarTerminalBtn: $('#sidebarTerminalBtn'),
+    endocrineChatV2Card: $('#endocrineChatV2Card'),
+    endocrineChatStatusText: $('#endocrineChatStatusText'),
+    btnOpenEndocrineTelemetry: $('#btnOpenEndocrineTelemetry'),
+    endocrineSwitchRow: $('#endocrineSwitchRow'),
+    btnToggleEndocrineChatV2: $('#btnToggleEndocrineChatV2'),
+    endocrineLblOff: $('#endocrineLblOff'),
+    endocrineLblOn: $('#endocrineLblOn'),
     
     // Input / Composer & Unified Attachments
     mainComposerContainer: $('#mainComposerContainer'),
@@ -3302,6 +3309,22 @@ ${logsFormatted}
       if (toggleChat) toggleChat.checked = isChatOn;
       if (cardChat) cardChat.classList.toggle('active', isChatOn);
       if (dot) dot.style.display = isChatOn ? 'inline-block' : 'none';
+
+      // Sinkronisasi Pengontrol Cybernetic Endocrine Chat v2 di Sidebar
+      const v2Card = document.getElementById('endocrineChatV2Card');
+      const v2Btn = document.getElementById('btnToggleEndocrineChatV2');
+      const v2Status = document.getElementById('endocrineChatStatusText');
+      if (v2Card) v2Card.classList.toggle('is-on', isChatOn);
+      if (v2Btn) {
+        v2Btn.setAttribute('aria-checked', isChatOn ? 'true' : 'false');
+        v2Btn.classList.toggle('active', isChatOn);
+      }
+      if (v2Status) {
+        v2Status.innerHTML = isChatOn
+          ? 'HORMONE MONITORING &bull; ACTIVE'
+          : 'HORMONE MONITORING &bull; STANDBY';
+      }
+
       this.enabled = isChatOn;
     },
 
@@ -27467,6 +27490,49 @@ Aturan:
     els.sidebarTerminalBtn?.addEventListener('click', () => {
       if (isMobile()) closeMobileSidebar(false);
       TerminalManager.toggle();
+    });
+
+    // Pengontrol Cybernetic Endocrine Chat v2 di Bawah Tombol Terminal
+    const handleToggleEndocrineChatV2 = (e) => {
+      e?.preventDefault();
+      e?.stopPropagation();
+      const newState = !STATE.settings.endocrineChatEnabled;
+      STATE.settings.endocrineChatEnabled = newState;
+      if (typeof ChatEndocrine !== 'undefined') {
+        ChatEndocrine.enabled = newState;
+        ChatEndocrine.syncToggleUI();
+      }
+      const hiddenCheckbox = document.getElementById('toggleEndocrineChat');
+      if (hiddenCheckbox) hiddenCheckbox.checked = newState;
+      savePersistedState();
+      if (newState) {
+        showToast('🧬 Endocrine Chat v2 Aktif: Sensor rasa & hormon AI dinyalakan!');
+        AudioEngine.snap();
+      } else {
+        showToast('💤 Endocrine Chat v2 Nonaktif: Mode netral tanpa modulasi rasa.');
+        AudioEngine.click();
+      }
+    };
+
+    els.btnToggleEndocrineChatV2?.addEventListener('click', handleToggleEndocrineChatV2);
+    els.endocrineSwitchRow?.addEventListener('click', (e) => {
+      if (e.target !== els.btnToggleEndocrineChatV2 && !els.btnToggleEndocrineChatV2?.contains(e.target)) {
+        handleToggleEndocrineChatV2(e);
+      }
+    });
+    els.btnOpenEndocrineTelemetry?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      BioEndocrine.updateUI();
+      if (typeof ChatEndocrine !== 'undefined') {
+        ChatEndocrine.syncToggleUI();
+        ChatEndocrine.updateUI();
+        ChatEndocrine.renderModalContent();
+      }
+      openModal('endocrineTelemetryModal');
+      const tabChat = document.getElementById('tabEndocrineChat');
+      if (tabChat) tabChat.click();
+      AudioEngine.click();
     });
 
     // Bio-Endocrine Hormone Monitor Controls
