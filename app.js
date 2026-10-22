@@ -929,6 +929,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     attachmentMenuWrapper: $('#attachmentMenuWrapper'),
     attachOptionCamera: $('#attachOptionCamera'),
     attachOptionImage: $('#attachOptionImage'),
+    attachOptionGenWebsite: $('#attachOptionGenWebsite'),
     attachOptionGenImage: $('#attachOptionGenImage'),
     attachOptionGenMusic: $('#attachOptionGenMusic'),
     attachOptionDoc: $('#attachOptionDoc'),
@@ -8563,11 +8564,11 @@ RESONANSI: ${this.currentVibe}
         return;
       }
 
-      // Penanganan khusus blok markdown ```html / ```jsx / ```tsx atau dokumen HTML saat opsi terisolasi
-      if (!isExplicitCodeInChat) {
-        const isWebPreviewMode = Boolean(options && (options.websiteMode === 'preview' || options.isWebCreation || options.hideCodeInChat));
+      // Penanganan khusus blok markdown ```html / ```jsx / ```tsx atau dokumen HTML saat opsi pratinjau website aktif
+      const isWebPreviewMode = Boolean(options && (options.websiteMode === 'preview' || options.isWebCreation || options.hideCodeInChat));
+      if (isWebPreviewMode && !isExplicitCodeInChat) {
         if (!insideFileBlock && !insideHtmlBlock && !insideRawHtmlBlock) {
-          if (t.startsWith(TICK3 + 'html') || t.startsWith(TICK3 + 'htm') || (isWebPreviewMode && (t.startsWith(TICK3 + 'jsx') || t.startsWith(TICK3 + 'tsx') || t.startsWith(TICK3 + 'react')))) {
+          if (t.startsWith(TICK3 + 'html') || t.startsWith(TICK3 + 'htm') || t.startsWith(TICK3 + 'jsx') || t.startsWith(TICK3 + 'tsx') || t.startsWith(TICK3 + 'react')) {
             insideHtmlBlock = true;
             out.push('\n> 🌐 *Sedang merancang kode website... (terisolasi di pratinjau live)*\n');
             return;
@@ -8613,7 +8614,7 @@ RESONANSI: ${this.currentVibe}
           } else if (isDoc) {
             insideIsolatedBlock = true;
             out.push(`\n> 📄 *Sedang menyusun dan memformat dokumen ${escapeHtml(currentFileName || 'Dokumen')}... (terisolasi di Studio Dokumen)*\n`);
-          } else if (isWeb && !isExplicitCodeInChat) {
+          } else if (isWeb && isWebPreviewMode && !isExplicitCodeInChat) {
             insideIsolatedBlock = true;
             out.push(`\n> 🌐 *Sedang merancang kode website ${escapeHtml(currentFileName || 'index.html')}... (terisolasi di pratinjau live)*\n`);
           } else if (!isExplicitCodeInChat && (options && (options.websiteMode === 'preview' || options.hideCodeInChat))) {
@@ -11890,14 +11891,14 @@ RESONANSI: ${this.currentVibe}
   function getFileStudioDirective() {
     return `### INSTRUKSI SISTEM: AI FILE STUDIO OTONOM
 
-0. ATURAN KRUSIAL: CONTOH KODE PERCAKAPAN VS BERKAS UNDUHAN:
-- Jika pengguna meminta CONTOH KODE, SNIPPET, PENJELASAN SCRIPT, atau meminta "kodenya saja" / "jangan buatkan pratinjau" / "tanpa file":
-  WAJIB tampilkan kode LANGSUNG di dalam teks percakapan menggunakan blok Markdown standar (\`\`\`javascript, \`\`\`python, dll.).
-  DILARANG membungkusnya dalam blok <<<ZOZ_FILE jika pengguna hanya ingin melihat contoh kode di percakapan!
-- HANYA gunakan blok <<<ZOZ_FILE jika pengguna SECARA EKSPLISIT meminta pembuatan berkas/file utuh yang dapat diunduh, ekspor dokumen (.docx/.pdf), atau pengeditan berkas direktori lokal:
+0. ATURAN KRUSIAL: KODE PROGRAM HARUS DITAMPILKAN LANGSUNG DI DALAM PERCAKAPAN CHAT (BUKAN TERBUNGKUS PRATINJAU):
+- Jika pengguna meminta sebuah PROGRAM KODE, CONTOH KODE, SNIPPET, SCRIPT, FUNGSI, atau ALGORITMA (Python, C++, Java, JS, PHP, Bash, HTML, CSS, SQL, dll.):
+  WAJIB tampilkan seluruh kode LANGSUNG di dalam teks percakapan menggunakan blok Markdown standar (\`\`\`python, \`\`\`javascript, \`\`\`html, dll.).
+  DILARANG KERAS membungkus kode program dalam blok protokol <<<ZOZ_FILE atau menyembunyikan kodenya dari percakapan jika pengguna tidak secara spesifik mengaktifkan fitur website atau meminta berkas unduhan terpisah! Pengguna harus dapat membaca, meneliti, dan menyalin kodenya secara langsung di gelembung obrolan chat.
+- HANYA gunakan protokol <<<ZOZ_FILE jika pengguna SECARA EKSPLISIT MENGAKTIFKAN FITUR WEBSITE (misalnya dengan perintah /website, /pratinjau, atau memilih mode pratinjau website) untuk merancang aplikasi web interaktif siap pratinjau, atau mengekspor dokumen resmi (.docx/.pdf):
 
 1. PEMBUATAN & PENGEDITAN BERKAS / DOKUMEN:
-Saat pengguna meminta sebuah berkas — website, script (.bat/.py/.sh/.ps1), konfigurasi, atau dokumen:
+Saat pengguna meminta sebuah berkas atau mengaktifkan fitur website / dokumen:
 <<<ZOZ_FILE name="Nama_Berkas_Spesifik.ekstensi" mime="tipe/mime" lang="bahasa">
 isi lengkap file, siap pakai, tanpa potongan
 <<<END_ZOZ_FILE>>>
@@ -11939,12 +11940,11 @@ Aturan wajib:
     if (hasNegativeFileOrPreviewIntent(text)) return false;
 
     const t = text.toLowerCase();
-    const isSlashFileCmd = /^\/(?:diagram|website|web|pratinjau|dokumen|docx|pdf)\b/i.test(t);
-    const explicitFileWants = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|generate|create|build|write|tulis|rancang|desain|simpan\s+sebagai|unduh|download|export|ekspor|saya\s+butuh\s+file|saya\s+minta\s+file|butuh\s+file|perlukan\s+file|bikinkan\s+file)\s+(?:sebuah\s+|satu\s+)?(?:file|berkas|dokumen|website|websit|wbsite|webiste|web|webpage|landing\s*page|landingpage|aplikasi|app|dashboard|game|diagram|digram|flowchart|komponen)\b/i.test(t);
-    const hasExtension = /\b[a-zA-Z0-9_-]+\.(?:html?|jsx|tsx|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|pdf|xlsx|ipynb|svg)\b/i.test(t);
-    const isDiagram = /\b(?:diagram|digram|flowchart|alur sistem|arsitektur visual|arsitektur sistem|arsitektur|erd|mindmap|skema|bagan|hasse diagram|sequence diagram|class diagram)\b/i.test(t);
+    const isSlashFileCmd = /^\/(?:website|web|pratinjau|dokumen|docx|pdf)\b/i.test(t);
+    const explicitFileWants = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|generate|create|build|write|tulis|rancang|desain|simpan\s+sebagai|unduh|download|export|ekspor|saya\s+butuh\s+file|saya\s+minta\s+file|butuh\s+file|perlukan\s+file|bikinkan\s+file)\s+(?:sebuah\s+|satu\s+)?(?:file|berkas|dokumen|website|websit|wbsite|webiste|web\s*page|webpage|landing\s*page|landingpage|aplikasi\s+web|situs\s+web|game\s+web)\b/i.test(t);
+    const hasExtension = /\b(?:simpan\s+ke|ekspor\s+ke|unduh|download|buatkan\s+file|buat\s+file|bikin\s+file)\s+[a-zA-Z0-9_-]+\.(?:html?|jsx|tsx|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|pdf|xlsx|ipynb|svg)\b/i.test(t);
     const isExport = /\b(?:simpan sebagai|ekspor ke|export to|unduh|download file)\b/i.test(t);
-    const isWebOrApp = /\b(?:website|websit|wbsite|webiste|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|game\s+web|web\s+app|portofolio\s+web|simulasi\s+3d|next\.?js|react\.?js|page\.jsx|page\.tsx)\b/i.test(t);
+    const isWebOrApp = /\b(?:website|websit|wbsite|webiste|web\s*page|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|game\s+web|situs\s+web|simulasi\s+3d)\b/i.test(t);
 
     // Jika direktori lokal aktif dan pengguna menyebut nama berkas yang ada di direktori
     const workspaceMatch = STATE.localWorkspace.enabled && (STATE.localWorkspace.files || []).some(f => {
@@ -11952,7 +11952,7 @@ Aturan wajib:
       return t.includes(f.name.toLowerCase()) || (baseName.length >= 3 && t.includes(baseName));
     });
 
-    return isSlashFileCmd || explicitFileWants || isWebOrApp || hasExtension || isDiagram || isExport || workspaceMatch;
+    return isSlashFileCmd || explicitFileWants || isWebOrApp || hasExtension || isExport || workspaceMatch;
   }
 
   function formatFileSize(bytes) {
@@ -13984,7 +13984,7 @@ Aturan wajib:
             hasStrippedDoc = true;
             return;
           }
-          if (!isExplicitCodeInChat) {
+          if (shouldHideCode) {
             out = out.split(b).join('');
             hasStrippedWeb = true;
           }
@@ -14037,8 +14037,8 @@ Aturan wajib:
           out = out.split(b).join('');
           hasStrippedDoc = true;
           if (rawFileName) strippedDocName = rawFileName;
-        } else if (isWeb && !isExplicitCodeInChat) {
-          // WEBSITE: Hapus kode website dari gelembung chat (terisolasi di pratinjau live & kartu file studio)
+        } else if (isWeb && shouldHideCode) {
+          // WEBSITE (HANYA jika fitur mode pratinjau aktif): Hapus kode website dari gelembung chat (terisolasi di pratinjau live & kartu file studio)
           out = out.split(b).join('');
           hasStrippedWeb = true;
           if (rawFileName) strippedWebName = rawFileName;
@@ -14047,18 +14047,18 @@ Aturan wajib:
           out = out.split(b).join('');
           hasStrippedWeb = true;
         } else {
-          // Berkas kode umum: tampilkan kodenya di dalam obrolan
+          // PROGRAM & BERKAS KODE UMUM: tampilkan kodenya langsung di dalam obrolan chat!
           const codeLang = fileLang || (fileName ? guessLangFromName(fileName) : 'code');
           out = out.split(b).join(`\n\n\`\`\`${codeLang}\n${innerContent}\n\`\`\`\n\n`);
         }
       });
     }
 
-    if (hasStrippedDoc || hasStrippedWeb || shouldHideCode || (!isExplicitCodeInChat && (options && (options.websiteMode === 'preview' || options.isWebCreation))) || (options && (options.docFormat || options.isDocCreation))) {
+    if (hasStrippedDoc || hasStrippedWeb || shouldHideCode || (options && (options.docFormat || options.isDocCreation))) {
       // Bersihkan sisa marker jika stream sempat terputus
       out = out.replace(/<<<ZOZ_(?:FILE|EDIT|MODIFY)[\s\S]*?(?:<<<END_ZOZ_(?:FILE|EDIT|MODIFY)>>>|$)/gi, '');
-      // Bersihkan sisa blok kode HTML/JSX utuh atau unclosed jika mode terisolasi
-      if (!isExplicitCodeInChat) {
+      // Bersihkan sisa blok kode HTML/JSX utuh atau unclosed jika mode pratinjau terisolasi aktif
+      if (shouldHideCode) {
         out = out.replace(/```(?:html|htm|jsx|tsx|react)[\s\S]*?(?:```|$)/gi, '');
         out = out.replace(/<!DOCTYPE\s+html[\s\S]*?(?:<\/html>|$)/gi, '');
         out = out.replace(/<html\b[\s\S]*?(?:<\/html>|$)/gi, '');
@@ -16390,11 +16390,10 @@ ${blocks}
     const firstLine = (t.split(/\r?\n/)[0] || '').trim();
     const openingClause = firstLine.slice(0, 180);
 
-    // 4. Deteksi Sinyal Kuat Pembuatan Website / Landing Page / Aplikasi / Next.js / React
-    // Termasuk variasi typo umum seperti "websit", "wbsite", "webiste", "wesbite"
-    const webTargetAfterVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat(?:kan)?|tolong\s+bikin(?:kan)?|rancang(?:kan)?|desain(?:kan)?|bangun|develop|build|create|generate|kodingkan|coding)\s+(?:sebuah\s+|satu\s+|kode\s+|project\s+|proyek\s+|tampilan\s+|halaman\s+|sistem\s+|platform\s+|produk\s+)?(?:website|websit|wbsite|webiste|wesbite|web\s*page|webpage|web\s*app|webapp|web|landing\s*page|landingpage|halaman\s+web|halaman\s+landing|aplikasi\s+web|aplikasi|app|dashboard|situs\s+web|situs|portofolio\s+web|portofolio|toko\s+online|e-commerce|company\s+profile|antarmuka|ui\/ux|ui|komponen|component|simulasi\s+3d|game\s+web|next\.?js|react\.?js|react|html)\b/i;
+    // 4. Deteksi Sinyal Kuat Pembuatan Website / Landing Page / Web App
+    const webTargetAfterVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat(?:kan)?|tolong\s+bikin(?:kan)?|rancang(?:kan)?|desain(?:kan)?|bangun|develop|build|create|generate)\s+(?:sebuah\s+|satu\s+|project\s+|proyek\s+|tampilan\s+|halaman\s+|situs\s+|platform\s+)?(?:website|websit|wbsite|webiste|wesbite|web\s*page|webpage|web\s*app|webapp|landing\s*page|landingpage|halaman\s+web|halaman\s+landing|aplikasi\s+web|situs\s+web|situs|portofolio\s+web|toko\s+online|e-commerce|company\s+profile|game\s+web)\b/i;
 
-    const hasWebFrameworkOrCodeSignal = /\b(?:next\.?js|nextjs|react\.?js|reactjs|tailwind\s*css|tailwindcss|app\s+router|lucide-react|shadcn|framer-motion|vite|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx|index\.html|[a-z0-9_-]+\.(?:jsx|tsx|html|htm|vue|svelte))\b/i.test(t);
+    const hasWebFrameworkOrCodeSignal = /\b(?:next\.?js|nextjs|react\.?js|reactjs|tailwind\s*css|tailwindcss|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(t);
 
     const hasWebSectionStructure = /\b(?:navbar|hero\s+section|features?\s+section|pricing\s+section|footer\s+section|cta\s+section|tombol\s+cta)\b/i.test(t);
 
@@ -16403,12 +16402,10 @@ ${blocks}
 
     const docTargetAfterVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat(?:kan)?|tolong\s+bikin(?:kan)?|susun(?:kan)?|tulis(?:kan)?|rangkumkan|draft|generate|create)\s+(?:sebuah\s+|satu\s+|file\s+|berkas\s+|naskah\s+|draf\s+)?(?:dokumen|dokumentasi|makalah|laporan|proposal|jurnal|karya\s+tulis|paper|skripsi|tesis|disertasi|surat\s+resmi|surat\s+tugas|surat\s+lamaran|modul\s+ajar|pdf|word|docx)\b/i;
 
-    const hasWebKeyword = /\b(?:website|websit|wbsite|webiste|wesbite|web\s+page|webpage|web\s+app|webapp|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|aplikasi|game\s+web|portofolio\s+web|tampilan\s+web|desain\s+web|antarmuka\s+web|situs\s+web|situs|dashboard)\b/i.test(t);
-    const hasCreationVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|tolong\s+bikin|generate|create|build|develop|rancang|desain|susun|kodingkan|coding|program|pembuatan)\b/i.test(t);
+    const hasWebKeyword = /\b(?:website|websit|wbsite|webiste|wesbite|web\s+page|webpage|web\s+app|webapp|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|situs\s+web|situs|portofolio\s+web|game\s+web)\b/i.test(t);
+    const hasCreationVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|tolong\s+bikin|generate|create|build|develop|rancang|desain|susun|pembuatan)\b/i.test(t);
 
     // Jika klausa pembuka secara eksplisit meminta pembuatan dokumen/makalah/laporan/proposal/PDF/Word
-    // (contoh: "Buatkan dokumen dokumentasi berbentuk pdf hasil pembuatan website kita tadi")
-    // DAN tidak meminta file kode (.jsx/.tsx/.html) atau struktur UI komponen website:
     if (docTargetAfterVerb.test(openingClause) && !hasWebFrameworkOrCodeSignal && !hasWebSectionStructure) {
       return 'document';
     }
@@ -16416,8 +16413,7 @@ ${blocks}
       return 'document';
     }
 
-    // Jika klausa pembuka meminta pembuatan website / landing page / aplikasi, ATAU memiliki sinyal framework/struktur web disertai kata kerja pembuatan:
-    // LANGSUNG klasifikasikan sebagai 'website' (meskipun di dalam deskripsi fitur ada kata "Laporan Otomatis" atau "Dokumen")!
+    // Jika klausa pembuka meminta pembuatan website / landing page / web app
     if (webTargetAfterVerb.test(openingClause) || webTargetAfterVerb.test(t)) {
       return 'website';
     }
@@ -16425,7 +16421,7 @@ ${blocks}
       return 'website';
     }
 
-    if (((hasWebKeyword && hasCreationVerb) || /\b(?:pembuatan\s+website|pembuatan\s+web|pembuatan\s+aplikasi)\b/i.test(t)) && !explicitDocFormatSignal && !docTargetAfterVerb.test(openingClause)) {
+    if (((hasWebKeyword && hasCreationVerb) || /\b(?:pembuatan\s+website|pembuatan\s+web)\b/i.test(t)) && !explicitDocFormatSignal && !docTargetAfterVerb.test(openingClause)) {
       return 'website';
     }
 
@@ -18768,7 +18764,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     if (isDocRequest && !hasNegativePreview) runOptions.isDocCreation = true;
 
     const isWebRequest = !isDocRequest && (isExplicitWebCmd || creationIntent === 'website' ||
-                         /\b(?:website|websit|wbsite|webiste|web|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|aplikasi|game\s+web|simulasi\s+3d|next\.?js|react\.?js|page\.jsx|page\.tsx)\b/i.test(promptText) ||
+                         /\b(?:website|websit|wbsite|webiste|web\s*page|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|situs\s+web|game\s+web|simulasi\s+3d)\b/i.test(promptText) ||
                          runOptions.websiteMode === 'preview' || runOptions.websiteMode === 'code_in_chat' || Boolean(runOptions.isWebCreation)) && !isExplicitCleanCodeCmd;
 
     const wantsFile = (isWebRequest || isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
@@ -20094,7 +20090,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     if (isDocRequest && !hasNegativePreview) runOptions.isDocCreation = true;
 
     const isWebRequest = !isDocRequest && (isExplicitWebCmd || creationIntent === 'website' ||
-                         /\b(?:website|websit|wbsite|webiste|web|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|aplikasi|game\s+web|simulasi\s+3d|next\.?js|react\.?js|page\.jsx|page\.tsx)\b/i.test(promptText) ||
+                         /\b(?:website|websit|wbsite|webiste|web\s*page|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|situs\s+web|game\s+web|simulasi\s+3d)\b/i.test(promptText) ||
                          runOptions.websiteMode === 'preview' || runOptions.websiteMode === 'code_in_chat' || Boolean(runOptions.isWebCreation)) && !isExplicitCleanCodeCmd;
 
     const wantsFile = (isWebRequest || isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
@@ -27669,6 +27665,25 @@ Aturan:
     els.attachOptionImage?.addEventListener('click', () => {
       closeAttachmentDropdown();
       els.imageFileInput?.click();
+    });
+    els.attachOptionGenWebsite?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAttachmentDropdown();
+      AudioEngine.click();
+      const currentVal = els.promptInput ? els.promptInput.value.trim() : '';
+      if (currentVal && isWebsiteCreationPrompt(currentVal)) {
+        openWebsiteModeModal(currentVal);
+      } else {
+        if (els.promptInput) {
+          if (!currentVal.startsWith('/website')) {
+            els.promptInput.value = currentVal ? `/website ${currentVal}` : '/website ';
+          }
+          els.promptInput.focus();
+          els.promptInput.setSelectionRange(els.promptInput.value.length, els.promptInput.value.length);
+          autoResizeTextarea(els.promptInput);
+        }
+        showToast('🌐 Fitur Website & Pratinjau Aktif. Tuliskan deskripsi website/kode yang ingin dipratinjau.');
+      }
     });
     els.attachOptionGenImage?.addEventListener('click', (e) => {
       e.stopPropagation();
