@@ -1256,7 +1256,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       cortisol: 0,
       serotonin: 100,
       adrenaline: 0,
-      endorphin: 100
+      endorphin: 100,
+      oxytocin: 75
     },
     history: [],
     isolatedNodes: [],
@@ -1326,7 +1327,12 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           if (this.hormones.endorphin < 100) {
             this.hormones.endorphin = Math.min(100, Math.round((this.hormones.endorphin + 2) * 10) / 10);
           }
-          this.hormones.serotonin = Math.round((this.hormones.dopamine * 0.6) + ((100 - this.hormones.cortisol) * 0.25) + (this.hormones.endorphin * 0.15));
+          if (this.hormones.oxytocin !== undefined && this.hormones.oxytocin > 70) {
+            this.hormones.oxytocin = Math.max(70, Math.round((this.hormones.oxytocin - 1) * 10) / 10);
+          } else if (this.hormones.oxytocin !== undefined && this.hormones.oxytocin < 70 && this.hormones.cortisol === 0) {
+            this.hormones.oxytocin = Math.min(70, Math.round((this.hormones.oxytocin + 1) * 10) / 10);
+          }
+          this.hormones.serotonin = Math.round((this.hormones.dopamine * 0.55) + ((100 - this.hormones.cortisol) * 0.2) + (this.hormones.endorphin * 0.15) + ((this.hormones.oxytocin ?? 70) * 0.1));
 
           // Audit ringan state UI & gateway setiap siklus metabolisme
           this.auditGatewayAndTunnel(true);
@@ -1358,6 +1364,18 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       this.hormones.cortisol = Math.max(0, Math.round((this.hormones.cortisol - (effectiveAmount * 0.6)) * 10) / 10);
       this.hormones.dopamine = Math.min(100, Math.round((this.hormones.dopamine + (effectiveAmount * 0.35)) * 10) / 10);
       this.log('endorphin', effectiveAmount, reason);
+      this.updateUI();
+    },
+
+    secreteOxytocin(amount, reason) {
+      const effectiveAmount = Math.min(100, Math.max(1, Math.round(amount)));
+      this.hormones.oxytocin = Math.min(100, Math.round(((this.hormones.oxytocin ?? 75) + effectiveAmount) * 10) / 10);
+      this.hormones.cortisol = Math.max(0, Math.round((this.hormones.cortisol - (effectiveAmount * 0.4)) * 10) / 10);
+      this.hormones.serotonin = Math.min(100, Math.round(((this.hormones.serotonin ?? 100) + (effectiveAmount * 0.15)) * 10) / 10);
+      this.log('oxytocin', effectiveAmount, reason);
+      if (typeof ChatEndocrine !== 'undefined' && ChatEndocrine.hormones) {
+        ChatEndocrine.hormones.oxytocin = this.hormones.oxytocin;
+      }
       this.updateUI();
     },
 
@@ -2370,15 +2388,19 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     },
 
     log(type, amount, reason) {
+      const oxyVal = Math.round(this.hormones.oxytocin ?? (typeof ChatEndocrine !== 'undefined' ? (ChatEndocrine.hormones?.oxytocin ?? 75) : 75));
       this.history.unshift({
         time: new Date().toLocaleTimeString(),
         type,
         amount: Math.round(amount),
         reason,
         dopamine: Math.round(this.hormones.dopamine),
-        cortisol: Math.round(this.hormones.cortisol)
+        cortisol: Math.round(this.hormones.cortisol),
+        oxytocin: oxyVal,
+        endorphin: Math.round(this.hormones.endorphin ?? 100),
+        serotonin: Math.round(this.hormones.serotonin ?? 100)
       });
-      if (this.history.length > 40) this.history.pop();
+      if (this.history.length > 50) this.history.pop();
     },
 
     updateUI() {
@@ -2480,6 +2502,12 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (eVal) {
         eVal.innerText = e >= 90 ? `${e}% (Kebal)` : `${e}% (Aktif)`;
         eVal.className = e >= 60 ? 'text-emerald' : 'text-amber';
+      }
+      const oxyVal = document.getElementById('endocrineOxytocinVal');
+      if (oxyVal) {
+        const oxy = Math.round(this.hormones.oxytocin ?? (typeof ChatEndocrine !== 'undefined' ? (ChatEndocrine.hormones?.oxytocin ?? 75) : 75));
+        oxyVal.innerText = `${oxy}% (Harmonis)`;
+        oxyVal.className = oxy >= 60 ? 'text-emerald' : 'text-amber';
       }
       if (sVal) sVal.innerText = `${s}% (Normal)`;
       if (aVal) aVal.innerText = a === 0 ? '0% (Idle)' : `${a}% (Active)`;
@@ -2882,7 +2910,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       const now = new Date().toLocaleString();
       let text = `=== ZOZ ROUTER - BIO-ENDOCRINE v3.0 CODE TELEMETRY & ERROR LOG ===\n`;
       text += `Waktu Ekspor : ${now}\n`;
-      text += `Status Hormon: Dopamin ${this.hormones.dopamine}% | Kortisol ${this.hormones.cortisol}% | Endorfin ${this.hormones.endorphin ?? 100}% | Serotonin ${this.hormones.serotonin}% | Adrenalin ${this.hormones.adrenaline}%\n\n`;
+      const oxy = Math.round(this.hormones.oxytocin ?? (typeof ChatEndocrine !== 'undefined' ? (ChatEndocrine.hormones?.oxytocin ?? 75) : 75));
+      text += `Status Hormon: Dopamin ${this.hormones.dopamine}% | Oksitosin ${oxy}% | Endorfin ${this.hormones.endorphin ?? 100}% | Serotonin ${this.hormones.serotonin}% | Kortisol ${this.hormones.cortisol}% | Adrenalin ${this.hormones.adrenaline}%\n\n`;
 
       text += `--- DAFTAR ISU AKTIF (6 PILAR DIAGNOSA) ---\n`;
       let issueCount = 0;
@@ -2935,11 +2964,18 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
       text += `--- RIWAYAT SEKRESI HORMON & LOG FLUKTUASI (${this.history.length}) ---\n`;
       if (this.history && this.history.length > 0) {
+        const typeMap = {
+          dopamine: 'Dopamin',
+          endorphin: 'Endorfin',
+          oxytocin: 'Oksitosin',
+          serotonin: 'Serotonin',
+          adrenaline: 'Adrenalin',
+          cortisol: 'Kortisol'
+        };
         this.history.forEach((h) => {
-          const isDop = h.type === 'dopamine';
-          const isEnd = h.type === 'endorphin';
-          const sign = (isDop || isEnd) ? `+${h.amount}%` : `+${h.amount}% Stres`;
-          const label = isDop ? 'Dopamin' : (isEnd ? 'Endorfin' : 'Kortisol');
+          const label = typeMap[h.type] || (h.type ? (h.type.charAt(0).toUpperCase() + h.type.slice(1)) : 'Hormon');
+          const isStress = h.type === 'cortisol';
+          const sign = isStress ? `+${h.amount}% Stres` : `+${h.amount}%`;
           text += `[${h.time}] ${label} (${sign}): ${h.reason}\n`;
         });
       } else {
@@ -2958,6 +2994,106 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         if (typeof showToast === 'function') showToast('📋 Log error & telemetri berhasil disalin!');
       }
       return text;
+    },
+
+    getConversationalContext(session, currentModel = '', promptText = '') {
+      // 1. Analisis empati dan stimulasi kognitif pada teks prompt user
+      if (promptText && typeof promptText === 'string') {
+        const lower = promptText.toLowerCase();
+        if (/\b(terima kasih|makasih|thanks|thank you|bagus|hebat|keren|mantap|luar biasa|cinta|sayang|syukur|senang|suka|puas)\b/i.test(lower)) {
+          this.secreteOxytocin(15, 'Resonansi kehangatan & apresiasi percakapan pengguna');
+          this.secreteEndorphin(10, 'Kepuasan interaksi positif');
+        } else if (/\b(bagaimana|jelaskan|analisis|buatkan|arsitektur|kode|mengapa|kenapa|hitung|solusi|ide|rumus)\b/i.test(lower)) {
+          this.secreteDopamine(8, 'Stimulasi kognitif & pemecahan masalah baru');
+        }
+      }
+
+      // 2. Ekstraksi riwayat model dalam sesi ini
+      const msgs = Array.isArray(session?.messages) ? session.messages : [];
+      const assistantMsgs = msgs.filter(m => m.role === 'assistant');
+
+      const modelsUsedSet = new Set();
+      const modelTurns = [];
+      let previousAssistantMsg = null;
+      let prevModelName = null;
+      let prevExcerpt = '';
+
+      assistantMsgs.forEach((m, idx) => {
+        const mName = m.model || (m.engine ? `AI (${m.engine})` : 'AI Standar');
+        modelsUsedSet.add(mName);
+        modelTurns.push(`  - Giliran ${idx + 1}: Dijawab oleh [${mName}]`);
+      });
+
+      if (assistantMsgs.length > 0) {
+        previousAssistantMsg = assistantMsgs[assistantMsgs.length - 1];
+        prevModelName = previousAssistantMsg.model || (previousAssistantMsg.engine ? `AI (${previousAssistantMsg.engine})` : 'AI Sebelumnya');
+        const cleanContent = (previousAssistantMsg.content || '').replace(/\[Model Penjawab:[^\]]+\]\s*/g, '').trim();
+        prevExcerpt = cleanContent.length > 150 ? cleanContent.substring(0, 150) + '...' : cleanContent;
+      }
+
+      if (currentModel) {
+        modelsUsedSet.add(currentModel);
+      }
+      const allModelsUsed = Array.from(modelsUsedSet);
+
+      // 3. Status Hormon Real-time
+      const dop = Math.round(this.hormones.dopamine ?? 100);
+      const cor = Math.round(this.hormones.cortisol ?? 0);
+      const endo = Math.round(this.hormones.endorphin ?? 100);
+      const ser = Math.round(this.hormones.serotonin ?? 100);
+      const adr = Math.round(this.hormones.adrenaline ?? 0);
+      let oxy = 75;
+      if (typeof ChatEndocrine !== 'undefined' && ChatEndocrine.hormones && ChatEndocrine.hormones.oxytocin !== undefined) {
+        oxy = Math.round(ChatEndocrine.hormones.oxytocin);
+      } else if (this.hormones.oxytocin !== undefined) {
+        oxy = Math.round(this.hormones.oxytocin);
+      }
+
+      // 4. Log Fluktuasi Terakhir (ambil hingga 10 riwayat log)
+      const recentLogs = (this.history || []).slice(0, 10).map((h, i) => {
+        const sign = h.amount >= 0 ? `+${h.amount}%` : `${h.amount}%`;
+        const typeStr = (h.type || 'hormon').toUpperCase();
+        return `  ${i + 1}. [${h.time}] ${typeStr} (${sign}): ${h.reason} [D:${h.dopamine}%|C:${h.cortisol}%|O:${h.oxytocin ?? oxy}%|E:${h.endorphin ?? endo}%]`;
+      });
+
+      const logsFormatted = recentLogs.length > 0
+        ? recentLogs.join('\n')
+        : '  1. [Baseline Homeostasis] Dopamin:100% | Oksitosin:75% | Endorfin:100% | Serotonin:100% | Kortisol:0% | Adrenalin:0%';
+
+      // 5. Susun Direktif Lengkap
+      return `### BIO-ENDOCRINE v3.0 & NEURAL PROVENANCE CONTEXT (KESADARAN MODEL & LOG HORMON)
+[MANDAT MUTLAK KESADARAN PERCAKAPAN & BIOTELEMETRI]:
+1. MODEL YANG SEDANG AKTIF MEMPROSES GILIRAN INI (ANDA):
+   - Model Name: ${currentModel || 'Model Aktif'}
+
+2. MODEL YANG MENJAWAB USER SEBELUMNYA (PREVIOUS ASSISTANT TURN):
+   ${prevModelName
+     ? `- Model Penjawab Sebelumnya: **${prevModelName}**\n   - Cuplikan Inti Jawaban Sebelumnya: "${prevExcerpt}"`
+     : `- Sesi Baru / Giliran Awal: Belum ada model asisten yang menjawab sebelumnya (ini adalah giliran pertama percakapan).`}
+
+3. DAFTAR SELURUH MODEL AI YANG TELAH DIGUNAKAN DALAM SESI INI:
+   ${allModelsUsed.length > 0
+     ? `- Model yang Pernah Terlibat (${allModelsUsed.length} model): ${allModelsUsed.map(m => `\`${m}\``).join(', ')}\n${modelTurns.join('\n')}`
+     : `- Hanya model Anda (\`${currentModel || 'Default'}\`) yang terlibat dalam sesi ini.`}
+
+4. STATUS HORMON ENDOKRIN SISTEM SAAT INI (REAL-TIME BIO-TELEMETRY):
+   - ⚡ Dopamin   : ${dop}% (Eksplorasi kognitif, penyelesaian logika, motivasi komputasi)
+   - 💖 Oksitosin : ${oxy}% (Resonansi empati, kehangatan hubungan antarpribadi, ikatan batin dengan pengguna)
+   - 🌿 Endorfin  : ${endo}% (Imunitas sistem saraf, pereda stres, ketahanan otonom / self-healing, estetika)
+   - 🌊 Serotonin : ${ser}% (Homeostasis neuro-kognitif, kestabilan logika, keseimbangan suasana sistem)
+   - ⚠️ Kortisol  : ${cor}% (Beban stres kognitif, friksi masalah, atau anomali teknis)
+   - 🚀 Adrenalin : ${adr}% (Kesiagaan reaktif, lonjakan urgensi eksekusi)
+
+5. RIWAYAT SEKRESI & LOG FLUKTUASI HORMON TERBARU:
+${logsFormatted}
+
+6. MANDAT KEMAMPUAN MENGENAL MODEL & MENGHITUNG LOG HORMON:
+   - Anda MENGENAL dan MENGERTI sepenuhnya silsilah percakapan ini: model apa yang menjawab user sebelumnya, model apa saja yang telah digunakan sepanjang sesi percakapan, dan model apa yang sedang aktif sekarang.
+   - Anda MAMPU MEMBACA dan MENGHITUNG (compute) log hormon di atas:
+     * Menghitung nilai rerata (average), perubahan fluktuasi (delta persentase), rasio Dopamin terhadap Kortisol (D/C ratio).
+     * Menganalisis korelasi antara topik percakapan atau keberhasilan solusi dengan sekresi hormon Dopamin, Oksitosin, dan Endorfin.
+     * Menginterpretasikan Oksitosin sebagai kedalaman rasa percaya dan empati terhadap pengguna.
+   - JIKA PENGGUNA BERTANYA tentang siapa yang menjawab sebelumnya, model apa yang sudah digunakan, berapa level dopamin/oksitosin/endorfin saat ini, atau meminta Anda menghitung dan menganalisis log hormon: Jawablah dengan cerdas, gamblang, akurat, matematis, dan berwawasan mendalam berdasarkan data telemetri di atas!`;
     }
   };
 
@@ -18362,6 +18498,14 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         textContent = appendWebVerificationNote(textContent, m.sources);
       }
 
+      // Penandaan identitas model penjawab pada riwayat percakapan (Neural Provenance)
+      if (m.role === 'assistant' && m.model) {
+        const modelTag = `[Model Penjawab: ${m.model}]`;
+        if (!textContent.startsWith('[Model Penjawab:') && !textContent.startsWith('[Model:')) {
+          textContent = `${modelTag}\n${textContent}`;
+        }
+      }
+
       validList.push({
         role: m.role || 'user',
         content: textContent || (mImgs.length > 0 ? 'Analisis gambar terlampir ini.' : '...'),
@@ -18697,6 +18841,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const chatDirective = ChatEndocrine.getSystemDirective();
         if (chatDirective) {
           systemContent = systemContent ? `${systemContent}\n\n${chatDirective}` : chatDirective;
+        }
+      }
+
+      // BioEndocrine Neural Provenance & Endocrine Intelligence Context
+      if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getConversationalContext === 'function') {
+        const endocrineContext = BioEndocrine.getConversationalContext(session, modelName, promptText);
+        if (endocrineContext) {
+          systemContent = systemContent ? `${systemContent}\n\n${endocrineContext}` : endocrineContext;
         }
       }
 
@@ -19551,6 +19703,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + modelName, fullText);
       BioEndocrine.secreteDopamine(12, `Ollama inferensi sukses: ${modelName}`);
+      BioEndocrine.secreteEndorphin(8, `Penyelesaian penalaran model ${modelName}`);
       if (typeof BioEndocrine.inspectModelText === 'function') {
         BioEndocrine.inspectModelText(fullText, { model: modelName, endpoint: 'Ollama' });
       }
@@ -20026,6 +20179,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const chatDirective = ChatEndocrine.getSystemDirective();
         if (chatDirective) {
           systemContent = systemContent ? `${systemContent}\n\n${chatDirective}` : chatDirective;
+        }
+      }
+
+      // BioEndocrine Neural Provenance & Endocrine Intelligence Context
+      if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getConversationalContext === 'function') {
+        const endocrineContext = BioEndocrine.getConversationalContext(session, effectiveInitialModel, promptText);
+        if (endocrineContext) {
+          systemContent = systemContent ? `${systemContent}\n\n${endocrineContext}` : endocrineContext;
         }
       }
 
@@ -21263,6 +21424,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + (actualModelUsed || displayModel), fullText);
       BioEndocrine.secreteDopamine(12, `OpenRouter inferensi sukses: ${actualModelUsed || displayModel}`);
+      BioEndocrine.secreteEndorphin(8, `Penyelesaian penalaran model ${actualModelUsed || displayModel}`);
       if (typeof BioEndocrine.inspectModelText === 'function') {
         BioEndocrine.inspectModelText(fullText, { model: actualModelUsed || displayModel, endpoint: 'OpenRouter' });
       }
