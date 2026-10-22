@@ -2354,6 +2354,63 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       this.renderModalContent();
     },
 
+    dismissIssue(type, id) {
+      if (type === 'model') {
+        this.modelErrors = (this.modelErrors || []).filter(err => err.id !== id && (!id || err.model !== id));
+      } else if (type === 'text') {
+        this.textAnomalies = (this.textAnomalies || []).filter(a => a.id !== id && (!id || a.label !== id));
+      } else if (type === 'tool') {
+        this.toolIssues = (this.toolIssues || []).filter(t => t.id !== id && (!id || t.toolName !== id));
+      } else if (type === 'hallucination') {
+        this.hallucinationIssues = (this.hallucinationIssues || []).filter(h => h.id !== id);
+      } else if (type === 'viewport') {
+        this.viewportIssues = (this.viewportIssues || []).filter(v => v.id !== id && v.selector !== id);
+      } else if (type === 'button') {
+        this.buttonIssues = (this.buttonIssues || []).filter(b => b.id !== id && b.selector !== id);
+      } else if (type === 'gateway') {
+        this.gatewayIssues = (this.gatewayIssues || []).filter(g => g.id !== id && g.selector !== id);
+      } else if (type === 'connectome') {
+        this.isolatedNodes = [];
+      }
+      this.recalculateStress();
+      this.updateUI();
+      if (typeof showToast === 'function') {
+        showToast('Isu telah diselesaikan dan dinormalkan.', 'success');
+      }
+    },
+
+    recalculateStress() {
+      const activeToolErrorsCount = (this.toolIssues || []).filter(t => !t.isSoftMiss).length;
+      const lowUtilityCount = (this.agentSkillAudits || []).filter(a => a.score < 60).length;
+      const totalIssues = (this.isolatedNodes?.length || 0) +
+                          (this.modelErrors?.length || 0) +
+                          (this.textAnomalies?.length || 0) +
+                          activeToolErrorsCount +
+                          (this.hallucinationIssues?.length || 0) +
+                          (this.viewportIssues?.length || 0) +
+                          (this.buttonIssues?.length || 0) +
+                          (this.gatewayIssues?.length || 0) +
+                          lowUtilityCount;
+      if (totalIssues === 0) {
+        this.hormones.cortisol = 0;
+        this.hormones.dopamine = Math.max(90, this.hormones.dopamine);
+        this.hormones.endorphin = 100;
+        this.log('dopamine', 10, 'Seluruh anomali diselesaikan: Kondisi kembali 100% harmonis');
+      } else {
+        const baseStress = (this.isolatedNodes?.length || 0) * 12 +
+                           (this.modelErrors?.length || 0) * 20 +
+                           (this.textAnomalies?.length || 0) * 15 +
+                           activeToolErrorsCount * 15 +
+                           (this.hallucinationIssues?.length || 0) * 18 +
+                           (this.viewportIssues?.length || 0) * 15 +
+                           (this.buttonIssues?.length || 0) * 10 +
+                           (this.gatewayIssues?.length || 0) * 10 +
+                           lowUtilityCount * 10;
+        const immunityDampener = this.hormones.endorphin >= 60 ? 0.8 : 1.0;
+        this.hormones.cortisol = Math.min(100, Math.max(5, Math.round(baseStress * immunityDampener)));
+      }
+    },
+
     purgeStress() {
       this.autoFixLayoutAndButtons({ silent: true });
       this.hormones.cortisol = 0;
@@ -2835,15 +2892,21 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       }
 
       if (totalDiscoveredIssues > 0 || this._forceShowDetails) {
-        if (isolatedBox) isolatedBox.style.display = 'flex';
-        if (isolatedBox) isolatedBox.classList.add('has-issues');
+        if (isolatedBox) {
+          isolatedBox.style.display = 'flex';
+          isolatedBox.style.flexDirection = 'column';
+          isolatedBox.style.width = '100%';
+          isolatedBox.classList.add('has-issues');
+        }
         if (isolatedTag) {
           isolatedTag.className = 'endocrine-util-sec-title';
           isolatedTag.innerText = `> DIAGNOSTIC ISSUES (${totalDiscoveredIssues})`;
         }
       } else {
-        if (isolatedBox) isolatedBox.style.display = 'none';
-        if (isolatedBox) isolatedBox.classList.remove('has-issues');
+        if (isolatedBox) {
+          isolatedBox.style.display = 'none';
+          isolatedBox.classList.remove('has-issues');
+        }
         if (isolatedTag) {
           isolatedTag.className = 'endocrine-util-sec-title';
           isolatedTag.innerText = '> DIAGNOSTIC ISSUES';
@@ -2856,12 +2919,19 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         }
         if (diagList) {
           diagList.style.display = 'flex';
+          diagList.style.flexDirection = 'column';
+          diagList.style.width = '100%';
           diagList.innerHTML = allActiveIssues.map(issue => `
             <div class="endocrine-issue-item severity-${issue.severity}">
               <div class="endocrine-issue-header">
-                <span class="endocrine-issue-badge ${issue.badgeClass}">${issue.badge}</span>
-                <span class="endocrine-issue-time">${issue.time}</span>
-                <button type="button" class="btn-copy-issue-entry" data-issue="[${esc(issue.badge)}] ${esc(issue.title)} - ${esc(issue.body)}${issue.snippet ? ' (' + esc(issue.snippet) + ')' : ''}" title="Salin rincian error ini"><i class="fa-solid fa-copy"></i> Salin</button>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <span class="endocrine-issue-badge ${issue.badgeClass}">${issue.badge}</span>
+                  <span class="endocrine-issue-time">${issue.time}</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <button type="button" class="btn-dismiss-issue-entry" data-issue-type="${esc(issue.type)}" data-issue-id="${esc(issue.id || issue.snippet || '')}" title="Tandai selesai / singkirkan isu ini"><i class="fa-solid fa-check"></i> Selesai</button>
+                  <button type="button" class="btn-copy-issue-entry" data-issue="[${esc(issue.badge)}] ${esc(issue.title)} - ${esc(issue.body)}${issue.snippet ? ' (' + esc(issue.snippet) + ')' : ''}" title="Salin rincian error ini"><i class="fa-solid fa-copy"></i> Salin</button>
+                </div>
               </div>
               <div style="font-weight:700; color:#FFF; font-size:0.8rem; margin:2px 0;">${issue.title}</div>
               <div class="endocrine-issue-body">${issue.body}</div>
@@ -27436,6 +27506,8 @@ Aturan:
         const box = document.getElementById('endocrineIsolatedBox');
         if (box) {
           box.style.display = 'flex';
+          box.style.flexDirection = 'column';
+          box.style.width = '100%';
           if (typeof BioEndocrine !== 'undefined') BioEndocrine._forceShowDetails = true;
         }
         if (pillar && typeof BioEndocrine !== 'undefined') {
@@ -27553,6 +27625,16 @@ Aturan:
           copyIssueBtn.innerHTML = '<i class="fa-solid fa-check" style="color:#00FFC2;"></i> Tersalin';
           setTimeout(() => { copyIssueBtn.innerHTML = origHtml; }, 1200);
         }
+        return;
+      }
+
+      const dismissIssueBtn = e.target.closest('.btn-dismiss-issue-entry');
+      if (dismissIssueBtn) {
+        e.stopPropagation();
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        const type = dismissIssueBtn.dataset.issueType;
+        const id = dismissIssueBtn.dataset.issueId;
+        BioEndocrine.dismissIssue(type, id);
         return;
       }
     });

@@ -9181,7 +9181,7 @@ body.page-paused *::after {
   width: 100% !important;
   background: #0e1117 !important;
   border: 1px solid #27272a !important;
-  border-radius: 0 !important;
+  border-radius: 8px !important;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75) !important;
   font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace !important;
   font-size: 12px !important;
@@ -9190,6 +9190,16 @@ body.page-paused *::after {
   overflow: hidden !important;
   display: flex !important;
   flex-direction: column !important;
+  max-height: 90vh !important;
+}
+
+@media (max-width: 640px) {
+  .endocrine-modal-card {
+    max-width: calc(100vw - 16px) !important;
+    max-height: 94vh !important;
+    margin: 8px auto !important;
+    font-size: 11px !important;
+  }
 }
 
 .endocrine-modal-card * {
@@ -9264,10 +9274,20 @@ body.page-paused *::after {
   padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  max-height: 80vh;
+  gap: 16px;
+  max-height: calc(90vh - 110px);
   overflow-y: auto;
+  overflow-x: hidden;
   background: #0e1117;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 640px) {
+  .endocrine-util-body {
+    padding: 12px 14px !important;
+    gap: 12px !important;
+  }
 }
 
 /* Tabs */
@@ -9353,6 +9373,23 @@ body.page-paused *::after {
 
 .endocrine-util-box.divide-y > * + * {
   border-top: 1px solid rgba(39, 39, 42, 0.8);
+}
+
+#endocrineIsolatedBox {
+  border: 1px solid #27272a;
+  background: #0a0d12;
+  display: none;
+  flex-direction: column !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  padding: 12px;
+  gap: 12px;
+  overflow: hidden;
+}
+
+#endocrineIsolatedBox.has-issues {
+  display: flex !important;
+  flex-direction: column !important;
 }
 
 /* Pipeline Rows */
@@ -9500,6 +9537,8 @@ body.page-paused *::after {
   margin-top: 4px;
   margin-bottom: 0;
   line-height: 1.4;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 /* Vitals Summary */
@@ -9600,12 +9639,18 @@ body.page-paused *::after {
   align-items: center;
   gap: 8px;
   color: #a1a1aa;
-  font-size: 12px;
+  font-size: 11px;
+  flex-wrap: wrap;
 }
 
 .endocrine-footer-status .dot {
-  color: #34d399;
-  font-weight: 700;
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.6);
+  flex-shrink: 0;
 }
 
 .endocrine-footer-btns {
@@ -9838,56 +9883,92 @@ body.page-paused *::after {
 }
 
 .endocrine-subtabs-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 10px;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 5px !important;
+  width: 100% !important;
+  margin: 4px 0 8px 0 !important;
 }
 
 .endocrine-subtab-btn {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
-  color: var(--text-muted);
+  color: #a1a1aa;
   font-size: 0.72rem;
   padding: 4px 8px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   transition: all 0.15s ease;
+  white-space: nowrap;
+  user-select: none;
 }
 
 .endocrine-subtab-btn:hover {
   background: rgba(255, 255, 255, 0.08);
   color: #FFF;
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .endocrine-subtab-btn.active {
-  background: rgba(0, 255, 194, 0.12);
-  border-color: rgba(0, 255, 194, 0.4);
+  background: rgba(0, 255, 194, 0.15);
+  border-color: rgba(0, 255, 194, 0.5);
   color: #00FFC2;
   font-weight: 600;
 }
 
 .endocrine-diagnostic-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
-  max-height: 240px;
-  overflow-y: auto;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+  margin-top: 4px !important;
+  max-height: 220px !important;
+  overflow-y: auto !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
 }
 
 .endocrine-issue-item {
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(10, 13, 18, 0.75);
+  border: 1px solid rgba(39, 39, 42, 0.9);
   border-radius: 6px;
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
   font-size: 0.76rem;
+  width: 100%;
+  box-sizing: border-box;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.btn-copy-issue-entry,
+.btn-dismiss-issue-entry {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: #a1a1aa;
+  font-size: 10px;
+  padding: 2px 7px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.btn-copy-issue-entry:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.btn-dismiss-issue-entry:hover {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #34d399;
 }
 
 .endocrine-issue-item.severity-high {
