@@ -1180,7 +1180,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     tabDeveloper: $('#tabDeveloper'),
     developerRedirectLink: $('#developerRedirectLink'),
     attachOptionLocalWorkspace: $('#attachOptionLocalWorkspace'),
-    attachWorkspaceDesc: $('#attachWorkspaceDesc'),
     workspaceComposerPill: $('#workspaceComposerPill'),
     workspaceComposerPillName: $('#workspaceComposerPillName'),
     workspaceComposerPillBadge: $('#workspaceComposerPillBadge'),
@@ -1204,7 +1203,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
     // Task Tracker (v257-v259)
     attachOptionTaskTracker: $('#attachOptionTaskTracker'),
-    attachTaskTrackerDesc: $('#attachTaskTrackerDesc'),
     taskTrackerCard: $('#taskTrackerCard'),
     taskTrackerTitle: $('#taskTrackerTitle'),
     taskTrackerProgressBadge: $('#taskTrackerProgressBadge'),
@@ -22622,12 +22620,6 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     }
     if (els.workspaceComposerPillBadge) {
       els.workspaceComposerPillBadge.textContent = `${totalCount} berkas`;
-    }
-
-    if (els.attachWorkspaceDesc) {
-      els.attachWorkspaceDesc.textContent = (isEnabled && STATE.localWorkspace.dirName)
-        ? `Terhubung: ${dirName} (${totalCount} berkas)`
-        : 'Hubungkan folder HP/Laptop untuk dikelola AI';
     }
 
     renderWorkspaceFileList();
