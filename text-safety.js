@@ -11,6 +11,7 @@
 
   const THINKING_TAG_REGEX = /<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>[\s\S]*?(?:<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)>|$)/gi;
   const BRACKET_THINK_REGEX = /\[(?:THOUGHT|REASONING)\][\s\S]*?(?:\[\/(?:THOUGHT|REASONING)\]|$)/gi;
+  const MODEL_TAG_REGEX = /\[(?:Model Penjawab|Model|AI Model):[^\]]*\]\s*/gi;
 
   function stripReasoningText(rawText) {
     if (typeof rawText !== 'string' || !rawText) return '';
@@ -19,6 +20,7 @@
       .replace(BRACKET_THINK_REGEX, '')
       .replace(/<\/?(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/gi, '')
       .replace(/\[\/?(?:THOUGHT|REASONING)\]/gi, '')
+      .replace(MODEL_TAG_REGEX, '')
       .trim();
   }
 
@@ -83,7 +85,7 @@
         output += pending;
         pending = '';
       }
-      return output;
+      return output.replace(MODEL_TAG_REGEX, '');
     }
 
     return { push };

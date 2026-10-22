@@ -7,14 +7,16 @@
   'use strict';
 
   const TEXT_SAFETY = window.ZozTextSafety || null;
-  const safeAssistantText = (text) => TEXT_SAFETY && typeof text === 'string'
-    ? TEXT_SAFETY.stripReasoningText(text)
-    : (typeof text === 'string' ? text
-        .replace(/<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>[\s\S]*?(?:<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)>|$)/gi, '')
-        .replace(/\[(?:THOUGHT|REASONING)\][\s\S]*?(?:\[\/(?:THOUGHT|REASONING)\]|$)/gi, '')
-        .replace(/<\/?(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/gi, '')
-        .replace(/\[\/?(?:THOUGHT|REASONING)\]/gi, '')
-        .trim() : '');
+  const MODEL_TAG_REGEX = /\[(?:Model Penjawab|Model|AI Model):[^\]]*\]\s*/gi;
+  const safeAssistantText = (text) => {
+    if (typeof text !== 'string' || !text) return '';
+    let out = TEXT_SAFETY ? TEXT_SAFETY.stripReasoningText(text) : text
+      .replace(/<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>[\s\S]*?(?:<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)>|$)/gi, '')
+      .replace(/\[(?:THOUGHT|REASONING)\][\s\S]*?(?:\[\/(?:THOUGHT|REASONING)\]|$)/gi, '')
+      .replace(/<\/?(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/gi, '')
+      .replace(/\[\/?(?:THOUGHT|REASONING)\]/gi, '');
+    return out.replace(MODEL_TAG_REGEX, '').trim();
+  };
 
   const IS_VERCEL = Boolean(location.hostname && location.hostname.endsWith('vercel.app'));
   const IS_GITHUB_PAGES = Boolean(location.hostname && location.hostname.endsWith('github.io')) || location.protocol === 'file:';
@@ -2052,6 +2054,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       // Bersihkan blok tag pemikiran internal yang bocor
       cleaned = cleaned.replace(/<(?:think|thought|reasoning|internal_reasoning|ant_thought|thought_process)\b[^>]*>[\s\S]*?<\/(?:think|thought|reasoning|internal_reasoning|ant_thought|thought_process)>/gi, '');
       cleaned = cleaned.replace(/<\/?(?:think|thought|reasoning|internal_reasoning|ant_thought|thought_process)\b[^>]*>/gi, '');
+      // Bersihkan bocoran tag metadata model
+      cleaned = cleaned.replace(/\[(?:Model Penjawab|Model|AI Model):[^\]]*\]\s*/gi, '');
       // Perbaiki urutan mojibake UTF-8 umum
       cleaned = cleaned
         .replace(/â€™/g, "'")
@@ -3093,7 +3097,11 @@ ${logsFormatted}
      * Menghitung nilai rerata (average), perubahan fluktuasi (delta persentase), rasio Dopamin terhadap Kortisol (D/C ratio).
      * Menganalisis korelasi antara topik percakapan atau keberhasilan solusi dengan sekresi hormon Dopamin, Oksitosin, dan Endorfin.
      * Menginterpretasikan Oksitosin sebagai kedalaman rasa percaya dan empati terhadap pengguna.
-   - JIKA PENGGUNA BERTANYA tentang siapa yang menjawab sebelumnya, model apa yang sudah digunakan, berapa level dopamin/oksitosin/endorfin saat ini, atau meminta Anda menghitung dan menganalisis log hormon: Jawablah dengan cerdas, gamblang, akurat, matematis, dan berwawasan mendalam berdasarkan data telemetri di atas!`;
+   - JIKA PENGGUNA BERTANYA tentang siapa yang menjawab sebelumnya, model apa yang sudah digunakan, berapa level dopamin/oksitosin/endorfin saat ini, atau meminta Anda menghitung dan menganalisis log hormon: Jawablah dengan cerdas, gamblang, akurat, matematis, dan berwawasan mendalam berdasarkan data telemetri di atas!
+
+7. ATURAN FORMAT RESPON BERSIH & BEBAS BOCORAN TAG (MUTLAK):
+   - DILARANG KERAS mencetak, mengutip, atau mengawali balasan Anda dengan label internal seperti "[Model Penjawab: ...]", "[Model: ...]", "[AI Model: ...]", atau mencetak blok data telemetri di atas secara mentah!
+   - Teks balasan Anda kepada pengguna WAJIB bersih, alami, dan mengalir seperti percakapan biasa tanpa tag atau prefix teknis apapun. Seluruh informasi status di atas adalah pengetahuan latar belakang Anda, bukan untuk dicantumkan sebagai header teks jawaban.`;
     }
   };
 
@@ -4553,6 +4561,13 @@ RESONANSI: ${this.currentVibe}
             });
             STATE.sessions.forEach(s => {
               if (!s.userId) s.userId = STATE.userId;
+              if (Array.isArray(s.messages)) {
+                s.messages.forEach(m => {
+                  if (m.role === 'assistant' && typeof m.content === 'string') {
+                    m.content = m.content.replace(/\[(?:Model Penjawab|Model|AI Model):[^\]]*\]\s*/gi, '').trim();
+                  }
+                });
+              }
             });
           }
         } catch (e) {}
@@ -10421,6 +10436,9 @@ RESONANSI: ${this.currentVibe}
         return;
       }
       let textToDisplay = (msg.role === 'user' && typeof msg.displayContent === 'string') ? msg.displayContent : (msg.content || '');
+      if (msg.role === 'assistant' && typeof textToDisplay === 'string') {
+        textToDisplay = textToDisplay.replace(/\[(?:Model Penjawab|Model|AI Model):[^\]]*\]\s*/gi, '').trim();
+      }
       const imagesToDisplay = msg.images || (msg.image ? [msg.image] : null);
       if (imagesToDisplay && imagesToDisplay.length > 0 && /^📷 \[\d+ Foto Lampiran\]$/.test(textToDisplay.trim())) {
         textToDisplay = '';
@@ -18498,12 +18516,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         textContent = appendWebVerificationNote(textContent, m.sources);
       }
 
-      // Penandaan identitas model penjawab pada riwayat percakapan (Neural Provenance)
-      if (m.role === 'assistant' && m.model) {
-        const modelTag = `[Model Penjawab: ${m.model}]`;
-        if (!textContent.startsWith('[Model Penjawab:') && !textContent.startsWith('[Model:')) {
-          textContent = `${modelTag}\n${textContent}`;
-        }
+      // Pastikan riwayat percakapan asisten bersih dari tag identitas model internal
+      if (m.role === 'assistant') {
+        textContent = textContent.replace(/\[(?:Model Penjawab|Model|AI Model):[^\]]*\]\s*/gi, '').trim();
       }
 
       validList.push({
