@@ -1031,6 +1031,14 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     chkAutoFoldAlways: $('#chkAutoFoldAlways'),
     btnFoldModalConfirm: $('#btnFoldModalConfirm'),
     btnFoldModalCancel: $('#btnFoldModalCancel'),
+    editFoldConfirmModal: $('#editFoldConfirmModal'),
+    btnCloseEditFoldModal: $('#btnCloseEditFoldModal'),
+    editFoldModalFileName: $('#editFoldModalFileName'),
+    editFoldModalSnippet: $('#editFoldModalSnippet'),
+    editFoldModalMeta: $('#editFoldModalMeta'),
+    btnEditFoldCancel: $('#btnEditFoldCancel'),
+    btnEditFoldSendPlain: $('#btnEditFoldSendPlain'),
+    btnEditFoldConfirmMd: $('#btnEditFoldConfirmMd'),
     docPreviewModal: $('#docPreviewModal'),
     docPreviewModalTitle: $('#docPreviewModalTitle'),
     docPreviewMetaName: $('#docPreviewMetaName'),
@@ -11220,68 +11228,97 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             return;
           }
 
-          const session = getActiveSession();
-          // Find index of this message in session (matching either raw content or displayContent)
-          let msgIdx = index;
-          if (msgIdx < 0 || msgIdx >= session.messages.length) {
-            msgIdx = session.messages.findIndex(m => m.role === 'user' && (m.content === originalContent || m.displayContent === originalContent || m.content === content || m.displayContent === content));
-          }
+          const executeSaveAndResend = (textToSend, convertToMd = false) => {
+            const session = getActiveSession();
+            // Find index of this message in session (matching either raw content or displayContent)
+            let msgIdx = index;
+            if (msgIdx < 0 || msgIdx >= session.messages.length) {
+              msgIdx = session.messages.findIndex(m => m.role === 'user' && (m.content === originalContent || m.displayContent === originalContent || m.content === content || m.displayContent === content));
+            }
 
-          const targetUserMsg = (msgIdx >= 0 && msgIdx < session.messages.length) ? session.messages[msgIdx] : null;
+            const targetUserMsg = (msgIdx >= 0 && msgIdx < session.messages.length) ? session.messages[msgIdx] : null;
 
-          // Preserve / restore attached documents with their full text content
-          let restoredDocs = (docs && Array.isArray(docs)) ? [...docs] : [];
-          if (restoredDocs.length > 0 && targetUserMsg) {
-            restoredDocs = restoredDocs.map(d => {
-              if (d && typeof d.content === 'string' && d.content.trim().length > 0) {
-                return d;
-              }
-              // Check if targetUserMsg.docs has content
-              if (Array.isArray(targetUserMsg.docs)) {
-                const foundDoc = targetUserMsg.docs.find(td => td && td.name === d.name && typeof td.content === 'string' && td.content.trim().length > 0);
-                if (foundDoc) return { ...d, content: foundDoc.content };
-              }
-              // Extract content from targetUserMsg.content
-              if (targetUserMsg.content && typeof targetUserMsg.content === 'string') {
-                const safeName = (d.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const docRegex = new RegExp(`--- \\[LAMPIRAN DOKUMEN:\\s*${safeName}[^\\n]*\\] ---\\r?\\n([\\s\\S]*?)(?:\\r?\\n--- \\[AKHIR DOKUMEN:\\s*${safeName}[^\\n]*\\] ---|$)`, 'i');
-                const match = targetUserMsg.content.match(docRegex);
-                if (match && match[1]) {
-                  return { ...d, content: match[1] };
+            // Preserve / restore attached documents with their full text content
+            let restoredDocs = (docs && Array.isArray(docs)) ? [...docs] : [];
+            if (restoredDocs.length > 0 && targetUserMsg) {
+              restoredDocs = restoredDocs.map(d => {
+                if (d && typeof d.content === 'string' && d.content.trim().length > 0) {
+                  return d;
                 }
+                // Check if targetUserMsg.docs has content
+                if (Array.isArray(targetUserMsg.docs)) {
+                  const foundDoc = targetUserMsg.docs.find(td => td && td.name === d.name && typeof td.content === 'string' && td.content.trim().length > 0);
+                  if (foundDoc) return { ...d, content: foundDoc.content };
+                }
+                // Extract content from targetUserMsg.content
+                if (targetUserMsg.content && typeof targetUserMsg.content === 'string') {
+                  const safeName = (d.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                  const docRegex = new RegExp(`--- \\[LAMPIRAN DOKUMEN:\\s*${safeName}[^\\n]*\\] ---\\r?\\n([\\s\\S]*?)(?:\\r?\\n--- \\[AKHIR DOKUMEN:\\s*${safeName}[^\\n]*\\] ---|$)`, 'i');
+                  const match = targetUserMsg.content.match(docRegex);
+                  if (match && match[1]) {
+                    return { ...d, content: match[1] };
+                  }
+                }
+                return d;
+              });
+            }
+
+            let promptToSend = textToSend;
+            if (convertToMd) {
+              const { docBody, promptInstruction } = extractPromptAndDocContent(textToSend, '', false);
+              const autoDoc = convertTextToMarkdownDoc(docBody);
+              if (autoDoc) {
+                if (!Array.isArray(restoredDocs)) restoredDocs = [];
+                restoredDocs.push(autoDoc);
+                promptToSend = promptInstruction || '';
               }
-              return d;
+            } else {
+              // Pengguna memilih kirim sebagai teks biasa: daftarkan imunitas agar handleSendPrompt tidak melipatnya
+              if (typeof registerUserRejectedAutoFold === 'function') {
+                registerUserRejectedAutoFold(textToSend);
+              }
+            }
+
+            if (msgIdx >= 0) {
+              // Truncate history from this message onward
+              session.messages = session.messages.slice(0, msgIdx);
+            }
+
+            editorBox.remove();
+            savePersistedState();
+            
+            // Re-render UI up to the truncated point
+            renderCurrentSession();
+
+            // Set prompt input and send
+            if (els.promptInput) els.promptInput.value = promptToSend;
+            if (imgList && imgList.length > 0) {
+              STATE.attachedImages = [...imgList];
+              renderAttachmentPreviews();
+            }
+            if (restoredDocs && Array.isArray(restoredDocs) && restoredDocs.length > 0) {
+              STATE.attachedDocs = [...restoredDocs];
+              renderAttachmentPreviews();
+            }
+            if (STATE.isPromptHidden) {
+              togglePromptVisibility(false);
+            }
+            handleSendPrompt({ skipAutoFold: !convertToMd, forceAutoDoc: convertToMd }).catch((err) => {
+              console.error('Edit-and-resend gagal:', err);
+              showToast('Gagal mengirim pesan: ' + (err && err.message ? err.message : err), 'error');
             });
+          };
+
+          // Jika teks yang diedit panjang / kodingan: konfirmasi ke pengguna terlebih dahulu!
+          if (newText && shouldAutoConvertAsDocument(newText)) {
+            showEditMessageFoldConfirm(newText, (choice) => {
+              if (choice === 'cancel') return;
+              executeSaveAndResend(newText, choice === 'md');
+            });
+            return;
           }
 
-          if (msgIdx >= 0) {
-            // Truncate history from this message onward
-            session.messages = session.messages.slice(0, msgIdx);
-          }
-
-          editorBox.remove();
-          savePersistedState();
-          
-          // Re-render UI up to the truncated point
-          renderCurrentSession();
-
-          // Set prompt input and send
-          if (els.promptInput) els.promptInput.value = newText;
-          if (imgList && imgList.length > 0) {
-            STATE.attachedImages = [...imgList];
-            renderAttachmentPreviews();
-          }
-          if (restoredDocs && Array.isArray(restoredDocs) && restoredDocs.length > 0) {
-            STATE.attachedDocs = [...restoredDocs];
-            renderAttachmentPreviews();
-          }
-          if (STATE.isPromptHidden) {
-            togglePromptVisibility(false);
-          }
-          handleSendPrompt().catch((err) => {
-            console.error('Edit-and-resend gagal:', err);
-            showToast('Gagal mengirim pesan: ' + (err && err.message ? err.message : err), 'error');
-          });
+          executeSaveAndResend(newText, false);
         };
 
         editorBox.querySelector('.save-edit-btn')?.addEventListener('click', doSaveAndResend);
@@ -12051,6 +12088,32 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     pendingFoldRawIncoming = '';
     pendingFoldPastedDirectly = false;
     pendingFoldFromDrag = false;
+  }
+
+  let pendingEditFoldCallback = null;
+
+  function showEditMessageFoldConfirm(text, callback) {
+    pendingEditFoldCallback = callback;
+    const lines = text.split('\n').length;
+    const words = countPromptWords(text);
+    const chars = text.length;
+    const typeInfo = detectDocumentTypeAndExt(text);
+    const fileName = typeInfo.customName || `dokumen-edit.${typeInfo.ext}`;
+
+    if (els.editFoldModalFileName) {
+      els.editFoldModalFileName.textContent = fileName;
+    }
+    if (els.editFoldModalSnippet) {
+      els.editFoldModalSnippet.textContent = text.length > 600
+        ? text.substring(0, 600) + `\n\n... (${lines} baris teks lengkap)`
+        : text;
+    }
+    if (els.editFoldModalMeta) {
+      els.editFoldModalMeta.innerHTML = `<i class="fa-solid fa-align-left"></i> ${lines.toLocaleString('id-ID')} baris &bull; ${words.toLocaleString('id-ID')} kata &bull; ${chars.toLocaleString('id-ID')} karakter`;
+    }
+
+    openModal('editFoldConfirmModal');
+    AudioEngine.click();
   }
 
   function openDocPreviewModal(doc, idx = -1) {
@@ -16736,11 +16799,13 @@ ${blocks}
 
     // Simpan prompt teks asli pengguna untuk tampilan gelembung obrolan (displayContent)
     let originalUserPrompt = rawText;
-    // Claude / Grok AI Style: Jika prompt teks yang dikirim pengguna merupakan codingan atau laporan panjang
-    // dan belum ada dokumen lampiran, otomatis konversi blok tersebut menjadi file markdown lampiran utuh tanpa batas baris
-    const userExplicitlyDismissedFold = Boolean(rawText && typeof isTextImmuneFromAutoFold === 'function' && isTextImmuneFromAutoFold(rawText));
+    // Claude / Grok AI Style: Hanya konversi teks panjang menjadi file markdown jika opsi forceAutoDoc disetel,
+    // atau pengguna secara eksplisit mengaktifkan opsi selalu otomatis di local storage.
+    // JANGAN PERNAH mengonversi secara diam-diam tanpa konfirmasi jika skipAutoFold aktif atau konfirmasi belum disetujui pengguna!
+    const userExplicitlyDismissedFold = Boolean(options.skipAutoFold || (rawText && typeof isTextImmuneFromAutoFold === 'function' && isTextImmuneFromAutoFold(rawText)));
+    const alwaysAuto = !options.skipAutoFold && localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
 
-    if (rawText && !userExplicitlyDismissedFold && shouldAutoConvertAsDocument(rawText) && docs.length === 0) {
+    if (!options.skipAutoFold && rawText && !userExplicitlyDismissedFold && (options.forceAutoDoc || alwaysAuto) && shouldAutoConvertAsDocument(rawText) && docs.length === 0) {
       const { docBody, promptInstruction } = extractPromptAndDocContent(rawText);
       const autoDoc = convertTextToMarkdownDoc(docBody);
       if (autoDoc) {
@@ -27543,6 +27608,47 @@ Aturan:
     });
     els.btnFoldModalCancel?.addEventListener('click', () => {
       dismissPromptFold(true);
+    });
+
+    // Event listener untuk Modal Konfirmasi Edit Pesan Panjang ke Markdown
+    els.btnEditFoldSendPlain?.addEventListener('click', () => {
+      closeModal('editFoldConfirmModal');
+      AudioEngine.click();
+      if (typeof pendingEditFoldCallback === 'function') {
+        const cb = pendingEditFoldCallback;
+        pendingEditFoldCallback = null;
+        cb('plain');
+      }
+    });
+
+    els.btnEditFoldConfirmMd?.addEventListener('click', () => {
+      closeModal('editFoldConfirmModal');
+      AudioEngine.success();
+      if (typeof pendingEditFoldCallback === 'function') {
+        const cb = pendingEditFoldCallback;
+        pendingEditFoldCallback = null;
+        cb('md');
+      }
+    });
+
+    els.btnEditFoldCancel?.addEventListener('click', () => {
+      closeModal('editFoldConfirmModal');
+      AudioEngine.click();
+      if (typeof pendingEditFoldCallback === 'function') {
+        const cb = pendingEditFoldCallback;
+        pendingEditFoldCallback = null;
+        cb('cancel');
+      }
+    });
+
+    els.btnCloseEditFoldModal?.addEventListener('click', () => {
+      closeModal('editFoldConfirmModal');
+      AudioEngine.click();
+      if (typeof pendingEditFoldCallback === 'function') {
+        const cb = pendingEditFoldCallback;
+        pendingEditFoldCallback = null;
+        cb('cancel');
+      }
     });
 
     // Event listener untuk Document Preview & Revert Modal

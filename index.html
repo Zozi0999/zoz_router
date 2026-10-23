@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261022_v435';
+    window.__ZOZ_VERSION__ = 'v20261022_v436';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -93,8 +93,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261022_v435">
-  <link rel="stylesheet" href="style.css?v=20261022_v435">
+  <link rel="preload" as="style" href="style.css?v=20261022_v436">
+  <link rel="stylesheet" href="style.css?v=20261022_v436">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -1631,6 +1631,38 @@
     </div>
   </div>
 
+  <!-- 6.7. EDIT MESSAGE LONG TEXT FOLD CONFIRMATION MODAL -->
+  <div class="modal-backdrop" id="editFoldConfirmModal">
+    <div class="modal-card" style="max-width: 540px;">
+      <div class="modal-header">
+        <div class="modal-title"><i class="fa-solid fa-file-code" style="color:var(--neon-cyan);"></i> Konfirmasi Konversi Markdown</div>
+        <button class="modal-close-btn" data-close="editFoldConfirmModal" id="btnCloseEditFoldModal" aria-label="Tutup konfirmasi" title="Tutup konfirmasi"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body" style="padding: 18px 20px;">
+        <p style="margin-bottom: 12px; font-size: 0.9rem; color: var(--text-main); line-height: 1.5;">
+          Teks yang Anda edit terdeteksi cukup panjang. Apakah Anda ingin mengonversinya menjadi file lampiran Markdown (<strong style="color:var(--neon-cyan);" id="editFoldModalFileName">dokumen.md</strong>) atau tetap mengirimkannya langsung sebagai teks biasa untuk respon ulang AI?
+        </p>
+        <div style="background: rgba(0,0,0,0.5); border: 1px solid rgba(0,240,255,0.25); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 14px; font-family: var(--font-code); font-size: 0.78rem; max-height: 140px; overflow-y: auto; white-space: pre-wrap; color: var(--text-dim);" id="editFoldModalSnippet"></div>
+        <div style="font-size:0.75rem; color:var(--text-dim);">
+          <span id="editFoldModalMeta"><i class="fa-solid fa-align-left"></i> 0 baris &bull; 0 kata &bull; 0 karakter</span>
+        </div>
+      </div>
+      <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-secondary btn-sm" id="btnEditFoldCancel" type="button">
+          <i class="fa-solid fa-xmark"></i> Batal
+        </button>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-secondary btn-sm" id="btnEditFoldSendPlain" type="button" style="border-color: rgba(56, 189, 248, 0.4); color: var(--neon-cyan);">
+            <i class="fa-solid fa-paper-plane"></i> Kirim Teks Biasa
+          </button>
+          <button class="btn btn-primary btn-sm" id="btnEditFoldConfirmMd" type="button">
+            <i class="fa-solid fa-file-arrow-up"></i> Konversi ke .MD &amp; Kirim
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- 8. BIO-ENDOCRINE HORMONE & BUG DETECTOR MODAL -->
   <div class="modal-backdrop" id="endocrineTelemetryModal">
     <div class="modal-card modal-lg endocrine-modal-card">
@@ -2665,8 +2697,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261022_v435" defer></script>
+  <script src="text-safety.js?v=20261022_v436" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261022_v435" defer></script>
+  <script src="app.js?v=20261022_v436" defer></script>
 </body>
 </html>
