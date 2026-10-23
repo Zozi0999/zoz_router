@@ -8,3 +8,5 @@ scratch/
 __pycache__/
 *.pyc
 bin/*.exe
+endorfin analyst/
+

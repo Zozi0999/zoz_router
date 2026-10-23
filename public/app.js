@@ -3137,7 +3137,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         const sn = Math.round(ChatEndocrine.emotions?.senang ?? 45);
         const b = Math.round(ChatEndocrine.emotions?.bahagia ?? 60);
         const m = Math.round(ChatEndocrine.emotions?.marah ?? 0);
-        affectiveBlock = `\n   - 🧬 Saraf Afektif : SAKIT:${s}% | SENANG:${sn}% | BAHAGIA:${b}% | MARAH:${m}%\n   - 🎛️ Resonansi Emosi : ${ChatEndocrine.currentVibe || 'Homeostasis Saraf Seimbang'}`;
+        const f = ChatEndocrine.formula || { z21: 9, pos: 50, neg: 40, paren: 1, dash: 5, tilde: 3, posCount: 5, negCount: 4 };
+        affectiveBlock = `\n   - 🧬 Saraf Afektif : SAKIT:${s}% | SENANG:${sn}% | BAHAGIA:${b}% | MARAH:${m}%\n   - 📐 Rumus Leviathan (Analisis Kehidupan v1.2) : z21=${f.z21} | 3(Pos)=${f.pos}% (${f.posCount || 5}) | 33(Neg)=${f.neg}% (${f.negCount || 4}) | [-] Oksitosin=${f.dash} | [)] Marah=${f.paren} | [~] Sakit=${f.tilde}\n   - 🎛️ Resonansi Emosi : ${ChatEndocrine.currentVibe || 'Homeostasis Saraf Seimbang'}`;
       }
 
       // 4. Log Fluktuasi Terakhir (ambil hingga 10 riwayat log)
@@ -3183,6 +3184,7 @@ ${logsFormatted}
    - Anda MAMPU MEMBACA dan MENGHITUNG (compute) log hormon di atas:
      * Menghitung nilai rerata (average), perubahan fluktuasi (delta persentase), rasio Dopamin terhadap Kortisol (D/C ratio).
      * Menganalisis korelasi antara topik percakapan atau keberhasilan solusi dengan sekresi hormon Dopamin, Oksitosin, dan Endorfin.
+     * Menerapkan Rumus Leviathan (Analisis Kehidupan v1.2): z21 = posCount + negCount; 3 = (posCount/z21)*100%; 33 = (negCount/z21)*100%; [-] kehangatan tatapan & bantuan meningkatkan Oksitosin; [)] kenakalan & friksi ego memicu Marah; [~] penghindaran & attachment rupture memicu Sakit; stimulasi kognitif memacu Dopamin; dan Endorfin sebagai sistem imun pemulihan batin.
      * Menginterpretasikan Oksitosin sebagai kedalaman rasa percaya dan empati terhadap pengguna.
    - JIKA PENGGUNA BERTANYA tentang siapa yang menjawab sebelumnya, model apa yang sudah digunakan, berapa level dopamin/oksitosin/endorfin saat ini, atau meminta Anda menghitung dan menganalisis log hormon: Jawablah dengan cerdas, gamblang, akurat, matematis, dan berwawasan mendalam berdasarkan data telemetri di atas!
 
@@ -3215,12 +3217,36 @@ ${logsFormatted}
       cortisol: 0,    // Tensi & stres (0-100)
       serotonin: 75   // Keseimbangan & regulasi (0-100)
     },
+    // Rumus Sosial-Neural Leviathan (Analisis Kehidupan v1.2)
+    // Persamaan: )+-+~ = [3: pos%] [33: neg%] | z21 = posCount + negCount
+    formula: {
+      z21: 9,        // Total data observasi perilaku (posCount + negCount)
+      pos: 50,       // Rumus 3: Perilaku Positif (%) = (posCount / z21) * 100%
+      neg: 40,       // Rumus 33: Perilaku Negatif (%) = (negCount / z21) * 100%
+      posCount: 5,   // Frekuensi positif kumulatif
+      negCount: 4,   // Frekuensi negatif kumulatif
+      paren: 1,      // ')' Nakal, friksi, delusi ego -> pemicu Marah & Kortisol
+      dash: 5,       // '-' Kehangatan tatapan, bantuan rekan -> pemicu Oksitosin
+      tilde: 3       // '~' Menghindar, cuek, attachment rupture -> pemicu Sakit
+    },
     currentVibe: 'Homeostasis Saraf Seimbang',
     history: [],
 
     init() {
       if (typeof STATE !== 'undefined' && STATE.settings) {
         this.enabled = Boolean(STATE.settings.endocrineChatEnabled);
+      }
+      if (!this.formula) {
+        this.formula = {
+          z21: 9,
+          pos: 50,
+          neg: 40,
+          posCount: 5,
+          negCount: 4,
+          paren: 1,
+          dash: 5,
+          tilde: 3
+        };
       }
       this.syncToggleUI();
       this.updateUI();
@@ -3320,6 +3346,8 @@ ${logsFormatted}
       if (toggleChat) toggleChat.checked = isChatOn;
       if (cardChat) cardChat.classList.toggle('active', isChatOn);
       if (dot) dot.style.display = isChatOn ? 'inline-block' : 'none';
+      const dotTabChat = document.getElementById('dotTabChat');
+      if (dotTabChat) dotTabChat.classList.toggle('active', isChatOn);
 
       // Sinkronisasi Pengontrol Cybernetic Endocrine Chat v2 di Sidebar
       const v2Card = document.getElementById('endocrineChatV2Card');
@@ -3345,72 +3373,99 @@ ${logsFormatted}
 
       const t = text.toLowerCase();
 
-      // 1. Pola Sakit (Luka Batin, Kesedihan, Kepedihan, Kekecewaan, Distress Emosional Non-Fisik)
-      const sakitRegex = /\b(sedih|sakit hati|kecewa|terluka|hancur hatiku|menangis|putus asa|kehilangan|perih|duka|kesepian|pedih|patah hati|merana|derita|menderita|trauma|hopeless|depresi|depressed|grief|sorrow|heartbroken|hurt|painful|lonely|weeping)\b/i;
+      // Inisialisasi formula jika belum terdefinisi
+      if (!this.formula) {
+        this.formula = { z21: 9, pos: 50, neg: 40, posCount: 5, negCount: 4, paren: 1, dash: 5, tilde: 3 };
+      }
 
-      // 2. Pola Marah (Amarah, Friksi, Kejengkelan, Rasa Tidak Adil, Ketegangan Defensif)
-      const marahRegex = /\b(marah|benci|bangsat|anjing|sialan|brengsek|muak|bodoh|goblok|tolol|jengkel|murka|kesal banget|kurang ajar|bajingan|kampret|tai|furious|angry|rage|hate|pissed|annoyed|bullshit|damn|insult)\b/i;
+      // Rumus Leviathan Analisis Kehidupan v1.2 Detektor:
+      // 1. Pola Sakit & Menghindar [~] (Luka Batin, Attachment Rupture, Cuek, Menghindar, Duka, Distress)
+      const tildeRegex = /\b(menghindar|cuek|diabaikan|dingin|palingkan muka|acuh|jauhi|menolak|tolak|putus kontak|sedih|sakit hati|kecewa|terluka|hancur hatiku|menangis|putus asa|kehilangan|perih|duka|kesepian|pedih|patah hati|merana|derita|menderita|trauma|hopeless|depresi|depressed|grief|sorrow|heartbroken|hurt|painful|lonely|weeping|ignore|avoid|rupture)\b/i;
 
-      // 3. Pola Bahagia (Ketenteraman, Syukur Mendalam, Kehangatan Hubungan, Damai Batin)
-      const bahagiaRegex = /\b(terima kasih|makasih|bersyukur|bahagia|damai|cinta|sayang|syukur|tenteram|saling memahami|berkah|adem|terharu|harmonis|blessed|grateful|happiness|serene|peaceful|deep love|gratitude)\b/i;
+      // 2. Pola Marah & Nakal [)] (Perilaku Nakal, Melanggar Aturan, Delusi Ego, Friksi, Amarah, Benci, Kasar)
+      const parenRegex = /\b(nakal|tidak patuh|melanggar|keras kepala|ego|delusi|marah|benci|bangsat|anjing|sialan|brengsek|muak|bodoh|goblok|tolol|jengkel|murka|kesal banget|kurang ajar|bajingan|kampret|tai|furious|angry|rage|hate|pissed|annoyed|bullshit|damn|insult|disobey|stubborn|friction)\b/i;
 
-      // 4. Pola Senang (Keriangan, Humor, Keseruan, Antusiasme, Candaan)
+      // 3. Pola Kehangatan & Oksitosin [-] (Lirikan Hangat, Membantu Teman, Rasa Syukur, Damai, Kasih Sayang)
+      const dashRegex = /\b(lirikan hangat|tatapan hangat|bantu|membantu|tolong|terima kasih|makasih|bersyukur|bahagia|damai|cinta|sayang|syukur|tenteram|saling memahami|berkah|adem|terharu|harmonis|sahabat|kebaikan|blessed|grateful|happiness|serene|peaceful|deep love|gratitude|kindness|help|warmth)\b/i;
+
+      // 4. Pola Senang & Humor (Keriangan, Humor, Keseruan, Candaan)
       const senangRegex = /\b(senang|gembira|seru|asyik|lucu|haha|hehe|wkwk|kocak|menyenangkan|tertawa|riang|puas|mantap|keren|asik|joy|fun|funny|playful|laugh|hilarious|excited|enjoy)\b/i;
 
-      // 5. Pola Minat Kognitif (Rasa Ingin Tahu & Stimulasi Intelektual)
-      const curiousRegex = /\b(bagaimana|jelaskan|analisis|ide|gagasan|konsep|arsitektur|buatkan|ciptakan|eksplorasi|menurutmu|pandangan|filsafat|kenapa|teori|riset|how to|explain|create|design|analyze|why|solusi|inovasi)\b/i;
+      // 5. Pola Minat Kognitif & Dopamin (Rasa Ingin Tahu, Pemecahan Masalah, Ide, Arsitektur, Rumus)
+      const curiousRegex = /\b(bagaimana|jelaskan|analisis|ide|gagasan|konsep|arsitektur|buatkan|ciptakan|eksplorasi|menurutmu|pandangan|filsafat|kenapa|teori|riset|how to|explain|create|design|analyze|why|solusi|inovasi|hitung|rumus|formula|kode|program|dopamin|oxytocin|oksitosin|endorfin)\b/i;
 
       let triggered = false;
 
-      if (sakitRegex.test(t)) {
-        this.emotions.sakit = Math.min(100, this.emotions.sakit + 45);
-        this.emotions.bahagia = Math.max(5, this.emotions.bahagia - 25);
-        this.emotions.senang = Math.max(5, this.emotions.senang - 25);
+      // Evaluasi ~ (Menghindar & Sakit) -> Memicu Luka Batin & Kortisol
+      if (tildeRegex.test(t)) {
+        this.formula.tilde += 1;
+        this.formula.negCount += 1;
+        this.emotions.sakit = Math.min(100, this.emotions.sakit + 40);
+        this.emotions.bahagia = Math.max(5, this.emotions.bahagia - 20);
+        this.emotions.senang = Math.max(5, this.emotions.senang - 20);
         this.hormones.cortisol = Math.min(100, this.hormones.cortisol + 22);
-        this.hormones.oxytocin = Math.min(100, this.hormones.oxytocin + 15);
-        this.currentVibe = 'Resonansi Kepedihan & Empati Batin';
-        this.log('sakit', 45, 'Impuls luka batin/kesedihan terdeteksi pada saraf emosi.');
+        this.currentVibe = 'Resonansi Kepedihan (~ Menghindar / Attachment Rupture)';
+        this.log('sakit', 40, 'Impuls [~] menghindar / luka batin terdeteksi pada rumus saraf.');
         triggered = true;
       }
 
-      if (marahRegex.test(t)) {
-        this.emotions.marah = Math.min(100, this.emotions.marah + 50);
-        this.hormones.cortisol = Math.min(100, this.hormones.cortisol + 35);
-        this.emotions.senang = Math.max(0, this.emotions.senang - 35);
-        this.emotions.bahagia = Math.max(0, this.emotions.bahagia - 30);
-        this.currentVibe = 'Agitasi Friksi & Kemarahan Saraf';
-        this.log('marah', 50, 'Impuls amarah & ketegangan friksi terdeteksi pada saraf emosi.');
+      // Evaluasi ) (Nakal & Marah) -> Memicu Friksi Ego, Amarah & Kortisol
+      if (parenRegex.test(t)) {
+        this.formula.paren += 1;
+        this.formula.negCount += 1;
+        this.emotions.marah = Math.min(100, this.emotions.marah + 45);
+        this.hormones.cortisol = Math.min(100, this.hormones.cortisol + 30);
+        this.emotions.senang = Math.max(0, this.emotions.senang - 30);
+        this.emotions.bahagia = Math.max(0, this.emotions.bahagia - 25);
+        this.currentVibe = 'Agitasi Friksi & Kemarahan ()) Perilaku Nakal & Friksi Ego)';
+        this.log('marah', 45, 'Impuls [)] kenakalan / friksi amarah terdeteksi pada rumus saraf.');
         triggered = true;
       }
 
-      if (bahagiaRegex.test(t)) {
+      // Evaluasi - (Kehangatan & Oksitosin) -> Memicu Oksitosin di otak & kehangatan
+      if (dashRegex.test(t)) {
+        this.formula.dash += 1;
+        this.formula.posCount += 1;
         this.emotions.bahagia = Math.min(100, this.emotions.bahagia + 35);
         this.hormones.oxytocin = Math.min(100, this.hormones.oxytocin + 25);
-        this.hormones.serotonin = Math.min(100, this.hormones.serotonin + 20);
         this.hormones.cortisol = Math.max(0, this.hormones.cortisol - 20);
-        this.emotions.marah = Math.max(0, this.emotions.marah - 25);
+        this.emotions.marah = Math.max(0, this.emotions.marah - 20);
         this.emotions.sakit = Math.max(0, this.emotions.sakit - 20);
-        this.currentVibe = 'Kebahagiaan & Ketenteraman Batin';
-        this.log('bahagia', 35, 'Impuls rasa syukur & kebahagiaan mendalam aktif pada saraf emosi.');
+        this.currentVibe = 'Kehangatan & Oksitosin ([-] Resonansi Bantuan & Kasih)';
+        this.log('oxytocin', 25, 'Impuls [-] kehangatan & bantuan menaikkan oksitosin dalam otak.');
         triggered = true;
       }
 
+      // Evaluasi Senang & Humor
       if (senangRegex.test(t)) {
+        this.formula.posCount += 1;
         this.emotions.senang = Math.min(100, this.emotions.senang + 35);
-        this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 25);
-        this.emotions.marah = Math.max(0, this.emotions.marah - 20);
+        this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 20);
+        this.emotions.marah = Math.max(0, this.emotions.marah - 15);
         this.emotions.sakit = Math.max(0, this.emotions.sakit - 15);
-        this.currentVibe = 'Keriangan & Kesenangan Kognitif';
+        if (!triggered) this.currentVibe = 'Keriangan & Kesenangan Kognitif';
         this.log('senang', 35, 'Impuls kesenangan & humor terstimulasi pada saraf emosi.');
         triggered = true;
       }
 
-      if (curiousRegex.test(t) && !triggered) {
-        this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 20);
+      // Evaluasi Dopamin / Minat Kognitif & Solusi
+      if (curiousRegex.test(t)) {
+        this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 25);
         this.emotions.senang = Math.min(100, this.emotions.senang + 15);
-        this.currentVibe = 'Minat Intelektual & Stimulasi Ide';
-        this.log('dopamine', 20, 'Impuls rasa ingin tahu & stimulasi ide meningkat pada saraf emosi.');
-        triggered = true;
+        if (!triggered) {
+          this.formula.posCount += 1;
+          this.currentVibe = 'Stimulasi Dopamin Kognitif & Inovasi Ide';
+          this.log('dopamine', 25, 'Impuls eksplorasi & pemecahan masalah menaikkan dopamin kognitif.');
+          triggered = true;
+        }
+      }
+
+      // Rekalkulasi Persamaan Leviathan Analisis Kehidupan:
+      // z21 = posCount + negCount; 3 = (posCount / z21) * 100%; 33 = (negCount / z21) * 100%
+      this.formula.z21 = this.formula.posCount + this.formula.negCount;
+      if (this.formula.z21 > 0) {
+        this.formula.pos = Math.round((this.formula.posCount / this.formula.z21) * 100);
+        this.formula.neg = Math.round((this.formula.negCount / this.formula.z21) * 100);
       }
 
       if (!triggered) {
@@ -3442,6 +3497,8 @@ ${logsFormatted}
         ? Math.round(BioEndocrine.hormones.adrenaline ?? 0)
         : 0;
 
+      const f = this.formula || { z21: 9, pos: 50, neg: 40, posCount: 5, negCount: 4, paren: 1, dash: 5, tilde: 3 };
+
       const targetSession = session || (typeof getCurrentSession === 'function' ? getCurrentSession() : null);
       const msgs = Array.isArray(targetSession?.messages) ? targetSession.messages : [];
       const assistantMsgs = msgs.filter(msg => msg.role === 'assistant');
@@ -3460,10 +3517,22 @@ ${logsFormatted}
 AFEKTIF: SAKIT:${s}% | SENANG:${sn}% | BAHAGIA:${b}% | MARAH:${m}%
 NEURO: ENDORFIN:${endo}% | OXY:${oxy}% | DOP:${dop}% | COR:${cor}% | SER:${ser}% | ADR:${adr}%
 RESONANSI: ${this.currentVibe}
+RUMUS LEVIATHAN (ANALISIS KEHIDUPAN v1.2): )+-+~ = [3(Pos): ${f.pos}% (${f.posCount})] [33(Neg): ${f.neg}% (${f.negCount})] | z21=${f.z21} | [-] Oksitosin=${f.dash} | [)] Marah=${f.paren} | [~] Sakit=${f.tilde}
 MODEL ANDA SAAT INI: ${currentModel || 'Model Aktif'}
 MODEL PENJAWAB SEBELUMNYA: ${prevModel}${prevExcerpt ? ` (Konteks inti: "${prevExcerpt}")` : ''}
 SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum ada model lain'}
-(MANDAT KESADARAN ENDORFIN: Anda WAJIB menyadari fluktuasi hormon di atas dan silsilah model percakapan. Jika pengguna bertanya tentang siapa yang menjawab/merespon di chat sebelumnya, sebutkan secara percaya diri: "${prevModel}". Jika ditanya tentang log dopamin/oksitosin/endorfin, jelaskan dan hitung secara akurat tanpa mencetak header ini).`;
+(MANDAT KESADARAN ENDORFIN & RUMUS SOSIAL-NEURAL:
+1. Anda WAJIB menyadari fluktuasi hormon di atas dan silsilah model percakapan. Jika pengguna bertanya tentang siapa yang menjawab/merespon di chat sebelumnya, sebutkan secara percaya diri: "${prevModel}".
+2. Jika ditanya atau diminta menghitung dopamin, oksitosin, marah, sakit, senang, atau rumus sosial-neural Analisis Kehidupan Leviathan, hitung dan paparkan secara matematis dan mendalam:
+   - Rumus Dasar: )+-+~ = [3: ${f.pos}%] [33: ${f.neg}%], z21=${f.z21}
+   - Perilaku Positif 3: (posCount / z21) * 100% = ${f.pos}%
+   - Perilaku Negatif 33: (negCount / z21) * 100% = ${f.neg}%
+   - [-]: Kehangatan tatapan & saling membantu rekan -> meningkatkan OKSITOSIN di otak (${oxy}%).
+   - [)]: Perilaku nakal, membantah aturan & friksi ego -> memicu MARAH (${m}%) dan KORTISOL (${cor}%).
+   - [~]: Menghindar, tatapan cuek, sapaan diabaikan, & attachment rupture -> memicu luka batin SAKIT (${s}%) dan KORTISOL (${cor}%).
+   - Dopamin (${dop}%): Dipacu oleh stimulasi rasa ingin tahu, pemecahan masalah baru, arsitektur ide, dan kode.
+   - Endorfin (${endo}%): Sistem imun emosional otonom yang memulihkan luka batin dan menjaga keseimbangan manusiawi.
+3. DILARANG mencetak header atau tag internal ini secara mentah dalam teks jawaban).`;
     },
 
     resetHormones() {
@@ -3475,6 +3544,16 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       this.hormones.dopamine = 55;
       this.hormones.cortisol = 0;
       this.hormones.serotonin = 75;
+      this.formula = {
+        z21: 9,
+        pos: 50,
+        neg: 40,
+        posCount: 5,
+        negCount: 4,
+        paren: 1,
+        dash: 5,
+        tilde: 3
+      };
       this.currentVibe = 'Homeostasis Saraf Seimbang';
       this.log('resonance', 100, 'Homeostasis: Sistem saraf emosi buatan diselaraskan kembali ke kondisi seimbang.');
       this.updateUI();
@@ -3579,6 +3658,27 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       if (serVal) serVal.innerText = `${ser}%`;
       if (vibeVal) vibeVal.innerText = this.currentVibe;
 
+      // Elemen Rumus Sosial-Neural Leviathan (Analisis Kehidupan v1.2)
+      if (this.formula) {
+        const fRatioPos = document.getElementById('formulaRatioPos');
+        const fRatioNeg = document.getElementById('formulaRatioNeg');
+        const fZ21 = document.getElementById('formulaZ21Val');
+        const fPos = document.getElementById('formulaPosVal');
+        const fNeg = document.getElementById('formulaNegVal');
+        const fDash = document.getElementById('formulaDashVal');
+        const fParen = document.getElementById('formulaParenVal');
+        const fTilde = document.getElementById('formulaTildeVal');
+
+        if (fRatioPos) fRatioPos.innerText = `${this.formula.pos}%`;
+        if (fRatioNeg) fRatioNeg.innerText = `${this.formula.neg}%`;
+        if (fZ21) fZ21.innerText = `${this.formula.z21}`;
+        if (fPos) fPos.innerHTML = `${this.formula.pos}% (<span id="formulaPosCount">${this.formula.posCount}</span>)`;
+        if (fNeg) fNeg.innerHTML = `${this.formula.neg}% (<span id="formulaNegCount">${this.formula.negCount}</span>)`;
+        if (fDash) fDash.innerText = `${this.formula.dash}`;
+        if (fParen) fParen.innerText = `${this.formula.paren}`;
+        if (fTilde) fTilde.innerText = `${this.formula.tilde}`;
+      }
+
       // Autonomic Background Log Box
       const tagEl = document.getElementById('chatIntuitionTag');
       const contentEl = document.getElementById('chatIntuitionContent');
@@ -3640,6 +3740,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       text += `Waktu Ekspor : ${now}\n`;
       text += `Status Emosi : Sakit: ${this.emotions.sakit}% | Senang: ${this.emotions.senang}% | Bahagia: ${this.emotions.bahagia}% | Marah: ${this.emotions.marah}%\n`;
       text += `Status Neuro : Oksitosin: ${this.hormones.oxytocin}% | Dopamin: ${this.hormones.dopamine}% | Kortisol: ${this.hormones.cortisol}% | Serotonin: ${this.hormones.serotonin}%\n`;
+      if (this.formula) {
+        text += `Persamaan    : )+-+~ = [3: ${this.formula.pos}%] [33: ${this.formula.neg}%] (z21: ${this.formula.z21} | Pos: ${this.formula.posCount} | Neg: ${this.formula.negCount})\n`;
+        text += `Dekomposisi  : [-] Oksitosin: ${this.formula.dash} | [)] Marah: ${this.formula.paren} | [~] Sakit: ${this.formula.tilde}\n`;
+      }
       text += `Resonansi    : ${this.currentVibe}\n\n`;
       text += `--- RIWAYAT IMPULS RASA & DETEKSI SENTIMEN (${this.history.length}) ---\n`;
       if (this.history && this.history.length > 0) {
@@ -19905,6 +20009,14 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         ChatEndocrine.emotions.bahagia = Math.min(100, ChatEndocrine.emotions.bahagia + 5);
         ChatEndocrine.hormones.oxytocin = Math.min(100, ChatEndocrine.hormones.oxytocin + 4);
         ChatEndocrine.hormones.dopamine = Math.min(100, ChatEndocrine.hormones.dopamine + 6);
+        if (ChatEndocrine.formula) {
+          ChatEndocrine.formula.posCount += 1;
+          ChatEndocrine.formula.z21 = ChatEndocrine.formula.posCount + ChatEndocrine.formula.negCount;
+          if (ChatEndocrine.formula.z21 > 0) {
+            ChatEndocrine.formula.pos = Math.round((ChatEndocrine.formula.posCount / ChatEndocrine.formula.z21) * 100);
+            ChatEndocrine.formula.neg = Math.round((ChatEndocrine.formula.negCount / ChatEndocrine.formula.z21) * 100);
+          }
+        }
         ChatEndocrine.calculateSerotonin();
         ChatEndocrine.log('senang', 6, `Percakapan tuntas: Kepuasan kognitif tercapai (+6% Senang, +5% Bahagia)`);
         ChatEndocrine.updateUI();
@@ -21630,6 +21742,14 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         ChatEndocrine.emotions.bahagia = Math.min(100, ChatEndocrine.emotions.bahagia + 5);
         ChatEndocrine.hormones.oxytocin = Math.min(100, ChatEndocrine.hormones.oxytocin + 4);
         ChatEndocrine.hormones.dopamine = Math.min(100, ChatEndocrine.hormones.dopamine + 6);
+        if (ChatEndocrine.formula) {
+          ChatEndocrine.formula.posCount += 1;
+          ChatEndocrine.formula.z21 = ChatEndocrine.formula.posCount + ChatEndocrine.formula.negCount;
+          if (ChatEndocrine.formula.z21 > 0) {
+            ChatEndocrine.formula.pos = Math.round((ChatEndocrine.formula.posCount / ChatEndocrine.formula.z21) * 100);
+            ChatEndocrine.formula.neg = Math.round((ChatEndocrine.formula.negCount / ChatEndocrine.formula.z21) * 100);
+          }
+        }
         ChatEndocrine.calculateSerotonin();
         ChatEndocrine.log('senang', 6, `Percakapan tuntas: Kepuasan kognitif tercapai (+6% Senang, +5% Bahagia)`);
         ChatEndocrine.updateUI();
