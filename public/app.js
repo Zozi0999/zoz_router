@@ -34794,27 +34794,70 @@ Aturan:
       if (els.waMobileQrPlaceholder) els.waMobileQrPlaceholder.style.display = 'flex';
       if (els.waMobileLinkQrImg) els.waMobileLinkQrImg.style.display = 'none';
 
-      try {
-        const q = `?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(effectivePin)}${force ? '&f=1' : ''}`;
-        const res = await fetch(this.getApiUrl('/api/wa/mobile-link' + q), {
-          headers: this.getAuthHeaders({ 'X-WA-PIN': effectivePin })
-        });
-        const data = await res.json().catch(() => null);
-        if (data && data.success && data.qr) {
-          this.mobileLinkUrl = data.url;
-          if (els.waMobileLinkQrImg) {
-            els.waMobileLinkQrImg.src = data.qr;
-            els.waMobileLinkQrImg.style.display = 'block';
+      // 1. Konstruksi URL kanonikal Tautan Handphone
+      const currentHost = (typeof window !== 'undefined' && window.location && window.location.host) || 'z21.zozdocs.com';
+      const cleanHost = currentHost.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+      const mobileUrl = `https://${cleanHost}/?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(effectivePin)}&mode=whatsapp`;
+      this.mobileLinkUrl = mobileUrl;
+
+      // 2. Render instan gambar QR via client loader (0 delay, anti-stuck)
+      if (els.waMobileLinkQrImg) {
+        const instantQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=8&data=${encodeURIComponent(mobileUrl)}`;
+        els.waMobileLinkQrImg.src = instantQrUrl;
+        els.waMobileLinkQrImg.onload = () => {
+          if (els.waMobileLinkQrImg) els.waMobileLinkQrImg.style.display = 'block';
+          if (els.waMobileQrPlaceholder) els.waMobileQrPlaceholder.style.display = 'none';
+        };
+        els.waMobileLinkQrImg.onerror = () => {
+          console.warn('[WA-Client] Gagal memuat image QR instan, mencoba backend...');
+        };
+      }
+
+      // 3. Permintaan ke backend untuk mengambil QR Data URL resmi & mencatat status
+      const candidates = [
+        this.apiBaseUrl,
+        'https://presentation-focusing-tracks-apr.trycloudflare.com',
+        localStorage.getItem('zoz_wa_api_url'),
+        localStorage.getItem('zoz_last_tunnel_url'),
+        ''
+      ].filter(v => v !== null && v !== undefined);
+      const unique = [...new Set(candidates)];
+
+      for (const base of unique) {
+        try {
+          const cleanBase = base ? base.replace(/\/+$/, '') : '';
+          const q = `?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(effectivePin)}${force ? '&f=1' : ''}`;
+          const res = await fetch(`${cleanBase}/api/wa/mobile-link${q}`, {
+            headers: this.getAuthHeaders({ 'X-WA-PIN': effectivePin }),
+            signal: AbortSignal.timeout(3000)
+          });
+          if (res.ok) {
+            const data = await res.json().catch(() => null);
+            if (data && data.success) {
+              if (data.url) this.mobileLinkUrl = data.url;
+              if (data.qr && els.waMobileLinkQrImg) {
+                els.waMobileLinkQrImg.src = data.qr;
+                els.waMobileLinkQrImg.style.display = 'block';
+                if (els.waMobileQrPlaceholder) els.waMobileQrPlaceholder.style.display = 'none';
+              }
+              if (cleanBase) {
+                this.apiBaseUrl = cleanBase;
+                localStorage.setItem('zoz_wa_api_url', cleanBase);
+              }
+              break;
+            } else if (data && data.requiresPinCreation) {
+              if (els.waMobilePinSetupPane) els.waMobilePinSetupPane.style.display = 'block';
+              if (els.waMobileQrActivePane) els.waMobileQrActivePane.style.display = 'none';
+              return;
+            }
           }
-          if (els.waMobileQrPlaceholder) {
-            els.waMobileQrPlaceholder.style.display = 'none';
-          }
-        } else if (data && data.requiresPinCreation) {
-          if (els.waMobilePinSetupPane) els.waMobilePinSetupPane.style.display = 'block';
-          if (els.waMobileQrActivePane) els.waMobileQrActivePane.style.display = 'none';
-        }
-      } catch (e) {
-        console.warn('[WA-Client] Gagal memuat QR HP:', e.message);
+        } catch (_) {}
+      }
+
+      // Pastikan placeholder spinner disembunyikan jika gambar sudah termuat
+      if (els.waMobileLinkQrImg && els.waMobileLinkQrImg.src) {
+        els.waMobileLinkQrImg.style.display = 'block';
+        if (els.waMobileQrPlaceholder) els.waMobileQrPlaceholder.style.display = 'none';
       }
     },
 
@@ -34883,7 +34926,11 @@ Aturan:
       // 0. Cache hit instant (0ms)
       const cached = localStorage.getItem('zoz_wa_api_url');
       if (cached && !this.apiBaseUrl) {
-        this.apiBaseUrl = cached;
+        if (!cached.includes('turned-defensive-myself') && !cached.includes('notify-thomson')) {
+          this.apiBaseUrl = cached;
+        } else {
+          localStorage.removeItem('zoz_wa_api_url');
+        }
       }
 
       // 1. Coba relatif jika sedang berjalan di localhost
@@ -35151,28 +35198,51 @@ Aturan:
           return;
         }
 
+        // Setel lokal seketika & render QR seketika tanpa menunggu jaringan
+        this.pin = pinInput;
+        localStorage.setItem('zoz_wa_pin', pinInput);
+        this.updateSecurityUI({ isMaster: false, hasPin: true });
+        showToast('🔒 PIN Berhasil Disimpan! QR Code Tautan Ponsel Diterbitkan.', 'success');
+        this.fetchMobileLinkQr(true, pinInput);
+
         try {
           if (els.btnCreatePinAndGetQr) {
             els.btnCreatePinAndGetQr.disabled = true;
             els.btnCreatePinAndGetQr.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Menyimpan...';
           }
-          const res = await fetch(this.getApiUrl('/api/wa/pin'), {
-            method: 'POST',
-            headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ userId: this.getUserId(), newPin: pinInput })
-          });
-          const data = await res.json().catch(() => null);
-          if (data && data.success) {
-            this.pin = pinInput;
-            localStorage.setItem('zoz_wa_pin', pinInput);
-            this.updateSecurityUI({ isMaster: false, hasPin: true });
-            showToast('🔒 PIN Berhasil Disimpan! QR Code Tautan Ponsel Diterbitkan.', 'success');
-            await this.fetchMobileLinkQr(true, pinInput);
-          } else {
-            showToast(`Gagal: ${data?.error || 'Tidak dapat menyimpan PIN'}`, 'error');
+
+          const candidates = [
+            this.apiBaseUrl,
+            'https://presentation-focusing-tracks-apr.trycloudflare.com',
+            localStorage.getItem('zoz_wa_api_url'),
+            localStorage.getItem('zoz_last_tunnel_url'),
+            ''
+          ].filter(v => v !== null && v !== undefined);
+          const unique = [...new Set(candidates)];
+
+          for (const base of unique) {
+            try {
+              const cleanBase = base ? base.replace(/\/+$/, '') : '';
+              const res = await fetch(`${cleanBase}/api/wa/pin`, {
+                method: 'POST',
+                headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ userId: this.getUserId(), newPin: pinInput }),
+                signal: AbortSignal.timeout(3500)
+              });
+              if (res.ok) {
+                const data = await res.json().catch(() => null);
+                if (data && data.success) {
+                  if (cleanBase) {
+                    this.apiBaseUrl = cleanBase;
+                    localStorage.setItem('zoz_wa_api_url', cleanBase);
+                  }
+                  break;
+                }
+              }
+            } catch (_) {}
           }
         } catch (err) {
-          showToast(`Error: ${err.message}`, 'error');
+          console.warn('[WA-Client] Warning simpan PIN server:', err.message);
         } finally {
           if (els.btnCreatePinAndGetQr) {
             els.btnCreatePinAndGetQr.disabled = false;
