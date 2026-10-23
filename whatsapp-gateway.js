@@ -9,7 +9,8 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   Browsers,
-  fetchLatestBaileysVersion
+  fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const QRCode = require('qrcode');
@@ -167,19 +168,20 @@ class WhatsAppGateway {
         const vInfo = await fetchLatestBaileysVersion();
         version = vInfo.version;
       } catch (_) {
-        version = [2, 3000, 1015901307];
+        version = [2, 3000, 1043857760];
       }
 
       this.sock = makeWASocket({
         version,
-        auth: state,
-        printQRInTerminal: false,
+        auth: {
+          creds: state.creds,
+          keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
+        },
         logger: pino({ level: 'silent' }),
-        browser: Browsers.windows('Desktop'),
+        browser: ['Hermes Agent', 'Chrome', '120.0'],
         syncFullHistory: true,
-        markOnlineOnConnect: true,
-        connectTimeoutMs: 60000,
-        keepAliveIntervalMs: 25000
+        markOnlineOnConnect: false,
+        getMessage: async () => ({ conversation: '' }),
       });
 
       this.sock.ev.on('creds.update', saveCreds);

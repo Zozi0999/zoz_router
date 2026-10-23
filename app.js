@@ -34768,6 +34768,11 @@ Aturan:
         } else {
           if (els.waQrCodeImg) els.waQrCodeImg.style.display = 'none';
           if (els.waQrCodePlaceholder) els.waQrCodePlaceholder.style.display = 'flex';
+          if (els.waQrPlaceholderText) {
+            els.waQrPlaceholderText.textContent = status.connecting
+              ? 'Memuat QR Code WhatsApp...'
+              : 'Klik "Hubungkan WhatsApp" untuk memuat QR';
+          }
         }
         if (status.pairingCode) {
           if (els.waPairingCodeDisplay) els.waPairingCodeDisplay.textContent = status.pairingCode;
@@ -34814,7 +34819,8 @@ Aturan:
     },
 
     async connectWhatsApp(forceNew = false) {
-      if (els.waStatusText) els.waStatusText.textContent = '🟡 Memulai inisialisasi WhatsApp Web...';
+      if (els.waStatusText) els.waStatusText.innerHTML = '🟡 Memulai inisialisasi WhatsApp Web...';
+      if (els.waQrPlaceholderText) els.waQrPlaceholderText.textContent = 'Memuat kode QR WhatsApp...';
       try {
         const res = await fetch('/api/wa/connect', {
           method: 'POST',
@@ -34950,6 +34956,9 @@ Aturan:
 
       if (!isTerminal) {
         this.fetchStatus();
+        if (!this.status.connected && !this.status.connecting && !this.status.qr) {
+          this.connectWhatsApp();
+        }
       }
     },
 
