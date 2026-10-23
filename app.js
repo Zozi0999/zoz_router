@@ -34801,7 +34801,7 @@ Aturan:
       // 2. Coba URL tunnel Cloudflare yang tersimpan atau default
       const candidates = [
         this.apiBaseUrl,
-        'https://turned-defensive-myself-workout.trycloudflare.com',
+        'https://presentation-focusing-tracks-apr.trycloudflare.com',
         localStorage.getItem('zoz_last_tunnel_url'),
         (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost) || '',
         'http://localhost:4040',
@@ -34836,7 +34836,7 @@ Aturan:
       if (els.waQrPlaceholderText) els.waQrPlaceholderText.textContent = 'Menghubungkan langsung ke tunnel WhatsApp...';
       const tunnelBases = [
         this.apiBaseUrl,
-        'https://turned-defensive-myself-workout.trycloudflare.com',
+        'https://presentation-focusing-tracks-apr.trycloudflare.com',
         localStorage.getItem('zoz_last_tunnel_url'),
         (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost) || '',
         'http://localhost:4040',
@@ -35319,8 +35319,8 @@ Aturan:
           body: JSON.stringify(payload)
         });
         if (!res.ok) {
-          apiUrl = 'https://turned-defensive-myself-workout.trycloudflare.com/api/wa/connect';
-          this.apiBaseUrl = 'https://turned-defensive-myself-workout.trycloudflare.com';
+          apiUrl = 'https://presentation-focusing-tracks-apr.trycloudflare.com/api/wa/connect';
+          this.apiBaseUrl = 'https://presentation-focusing-tracks-apr.trycloudflare.com';
           res = await fetch(apiUrl, {
             method: 'POST',
             headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
