@@ -34646,7 +34646,7 @@ Aturan:
     status: { connected: false, connecting: false, phone: null, qr: null, contactCount: 0 },
     statusPollTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://entertainment-jump-product-loan.trycloudflare.com',
+    activeTunnelUrl: 'https://warehouse-beam-queen-confident.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -35033,12 +35033,13 @@ Aturan:
                 if (notify) showToast('Kode QR WhatsApp berhasil dimuat!', 'success');
                 return true;
               } else if (!data.connected) {
+                if (data.isPairing) return true;
                 try {
                   this.isConnectingWa = true;
                   const connectRes = await fetch(`${clean}/api/wa/connect${q}`, {
                     method: 'POST',
                     headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({ forceNew: Boolean(notify || !this.lastValidQr), userId: this.getUserId(), pin: this.getPin() }),
+                    body: JSON.stringify({ forceNew: Boolean(notify), userId: this.getUserId(), pin: this.getPin() }),
                     signal: AbortSignal.timeout(6500)
                   });
                   const connectData = await connectRes.json().catch(() => null);
@@ -35458,9 +35459,11 @@ Aturan:
             this.handleStatusUpdate(data);
             if (data.qr) {
               this.handleQrUpdate(data.qr);
+            } else if (data.isPairing || data.connecting) {
+              // Sedang dalam proses pairing atau connecting, jangan ganggu!
             } else if (!data.connected && !this.lastValidQr && !this.isConnectingWa) {
               this.isFetchingStatus = false;
-              await this.connectWhatsApp(true);
+              await this.connectWhatsApp(false);
               return;
             }
             if (data.connected && this.contacts.length === 0) {
@@ -35533,18 +35536,21 @@ Aturan:
     handleStatusUpdate(status) {
       this.status = status;
       const isConnected = Boolean(status.connected);
+      const isPairing = Boolean(status.isPairing);
       if (isConnected) {
         this.lastValidQr = null;
         this.stopStatusPolling();
       }
 
       if (els.waStatusDot) {
-        els.waStatusDot.style.background = isConnected ? '#25D366' : ((status.connecting || this.lastValidQr) ? '#f59e0b' : '#64748b');
+        els.waStatusDot.style.background = isConnected ? '#25D366' : (isPairing ? '#38bdf8' : ((status.connecting || this.lastValidQr) ? '#f59e0b' : '#64748b'));
       }
       if (els.waStatusText) {
         els.waStatusText.innerHTML = isConnected
           ? `🟢 WhatsApp Terhubung (${status.phone || 'Aktif'})`
-          : ((status.connecting || this.lastValidQr) ? '🟡 Silakan Scan QR Code dari WhatsApp di Ponsel Anda' : '⚪ WhatsApp Belum Terhubung');
+          : (isPairing
+            ? '🔄 QR Berhasil Dipindai! Menghubungkan ke WhatsApp...'
+            : ((status.connecting || this.lastValidQr) ? '🟡 Silakan Scan QR Code dari WhatsApp di Ponsel Anda' : '⚪ WhatsApp Belum Terhubung'));
       }
       if (els.labelConnectWa) {
         els.labelConnectWa.textContent = isConnected ? 'Hubungkan Ulang' : 'Muat Ulang QR';
@@ -35571,7 +35577,13 @@ Aturan:
         if (els.waConnectedDevicesCard) els.waConnectedDevicesCard.style.display = 'none';
         if (els.waPairMethodNav) els.waPairMethodNav.style.display = 'flex';
         if (els.waQrSection) els.waQrSection.style.display = 'block';
-        if (status.qr) {
+        if (isPairing) {
+          if (els.waQrCodeImg) els.waQrCodeImg.style.display = 'none';
+          if (els.waQrCodePlaceholder) els.waQrCodePlaceholder.style.display = 'flex';
+          if (els.waQrPlaceholderText) {
+            els.waQrPlaceholderText.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-sky-400"></i><br>QR Berhasil Dipindai!<br><span class="text-xs text-slate-400 font-normal">Sedang menautkan perangkat WhatsApp... Mohon tunggu</span>';
+          }
+        } else if (status.qr) {
           this.handleQrUpdate(status.qr);
         } else if (this.lastValidQr && (Date.now() - (this.lastValidQrTime || 0) < 45000)) {
           this.handleQrUpdate(this.lastValidQr);
@@ -35636,6 +35648,7 @@ Aturan:
 
     async connectWhatsApp(forceNew = false) {
       if (this.isConnectingWa) return;
+      if (this.status?.isPairing) return;
       this.isConnectingWa = true;
       if (forceNew) {
         this.lastValidQr = null;
@@ -35651,7 +35664,7 @@ Aturan:
         }
         const q = `?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
         let apiUrl = this.getApiUrl('/api/wa/connect' + q);
-        const shouldForce = Boolean(forceNew || (!this.status?.connected && !this.lastValidQr));
+        const shouldForce = Boolean(forceNew);
         const payload = { forceNew: shouldForce, userId: this.getUserId(), pin: this.getPin() };
         let res = await fetch(apiUrl, {
           method: 'POST',
@@ -35814,10 +35827,10 @@ Aturan:
         }
         this.startStatusPolling(60000);
         await this.fetchStatus();
-        if (!this.status.connected && !this.status.qr && !this.lastValidQr) {
-          const loaded = await this.fetchQrDirectTunnel();
+        if (!this.status.connected && !this.status.qr && !this.lastValidQr && !this.status.isPairing) {
+          const loaded = await this.fetchQrDirectTunnel(false);
           if (!loaded) {
-            await this.connectWhatsApp(true);
+            await this.connectWhatsApp(false);
           }
         }
       } else {

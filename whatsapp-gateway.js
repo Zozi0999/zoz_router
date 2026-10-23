@@ -392,6 +392,7 @@ class WhatsAppGateway {
     return {
       connected: this.status.connected,
       connecting: this.status.connecting,
+      isPairing: Boolean(this.status.isPairing),
       phone: this.status.phone,
       user: this.status.user,
       qr: this.status.qr,
@@ -408,11 +409,21 @@ class WhatsAppGateway {
     if (!forceNew && this.sock && this.status.connected) {
       return this.getStatus();
     }
-    if (!forceNew && this.sock && this.status.connecting && this.status.qr && (Date.now() - (this.status.updatedAt || 0) < 40000)) {
+    if (!forceNew && this.sock && this.status.connecting && this.status.qr && (Date.now() - (this.status.updatedAt || 0) < 45000)) {
       return this.getStatus();
     }
-    if (forceNew || (!this.status.connected && !this.hasStoredSession())) {
+    if (!forceNew && this.status.isPairing) {
+      return this.getStatus();
+    }
+
+    if (forceNew) {
       await this.disconnect(true);
+    } else if (this.sock) {
+      try {
+        this.sock.ev.removeAllListeners();
+        this.sock.end();
+      } catch (_) {}
+      this.sock = null;
     }
 
     this.isExplicitDisconnect = false;
@@ -485,6 +496,7 @@ class WhatsAppGateway {
         if (connection === 'open') {
           this.status.connected = true;
           this.status.connecting = false;
+          this.status.isPairing = false;
           this.status.qr = null;
           this.status.user = this.sock.user;
           const rawId = this.sock.user?.id || '';
@@ -502,14 +514,23 @@ class WhatsAppGateway {
 
         if (connection === 'close') {
           const statusCode = (lastDisconnect?.error)?.output?.statusCode;
+          const isRestart = statusCode === 515 || statusCode === 408;
           const shouldReconnect = statusCode !== DisconnectReason.loggedOut && !this.isExplicitDisconnect;
 
           this.status.connected = false;
-          this.status.connecting = false;
           this.status.lastDisconnectReason = statusCode;
           this.status.updatedAt = Date.now();
 
-          console.log(`[WA-Gateway] ⚪ Koneksi terputus. Status Code: ${statusCode}. Reconnect: ${shouldReconnect}`);
+          if (isRestart) {
+            this.status.connecting = true;
+            this.status.isPairing = true;
+            this.status.qr = null;
+            console.log(`[WA-Gateway] 🔄 QR berhasil discan! Melakukan restart handshake (Code: ${statusCode})...`);
+          } else {
+            this.status.connecting = false;
+            this.status.isPairing = false;
+            console.log(`[WA-Gateway] ⚪ Koneksi terputus. Status Code: ${statusCode}. Reconnect: ${shouldReconnect}`);
+          }
 
           if (statusCode === DisconnectReason.loggedOut || this.isExplicitDisconnect) {
             this.status.qr = null;
@@ -523,8 +544,8 @@ class WhatsAppGateway {
           if (shouldReconnect) {
             if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
             this.reconnectTimer = setTimeout(() => {
-              this.connect();
-            }, 3000);
+              this.connect(false);
+            }, isRestart ? 1000 : 3000);
           }
         }
       });
@@ -780,8 +801,8 @@ class WhatsAppGateway {
         }
       });
 
-      // Tunggu instan hingga QR code siap atau koneksi terjalin (maksimal 3.5 detik)
-      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(this.getStatus()), 3500));
+      // Tunggu instan hingga QR code siap atau koneksi terjalin (maksimal 4.5 detik)
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(this.getStatus()), 4500));
       return await Promise.race([settlePromise, timeoutPromise]);
     } catch (err) {
       console.error('[WA-Gateway] Kesalahan saat inisialisasi socket:', err);
@@ -813,6 +834,7 @@ class WhatsAppGateway {
 
     this.status.connected = false;
     this.status.connecting = false;
+    this.status.isPairing = false;
     this.status.phone = null;
     this.status.user = null;
     this.status.qr = null;

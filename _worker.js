@@ -638,11 +638,11 @@ export default {
     }
 
     // Universal WhatsApp & Daemon Tunnel Proxy (Edge Bridge)
-    const TUNNEL_GATEWAY_URL = 'https://entertainment-jump-product-loan.trycloudflare.com';
+    const TUNNEL_GATEWAY_URL = 'https://warehouse-beam-queen-confident.trycloudflare.com';
     if (url.pathname.startsWith('/api/wa/') || url.pathname.startsWith('/api/terminal/') || url.pathname.startsWith('/api/daemon/')) {
       const targetUrl = TUNNEL_GATEWAY_URL + url.pathname + url.search;
       const fwdHeaders = new Headers(request.headers);
-      fwdHeaders.set('Host', 'entertainment-jump-product-loan.trycloudflare.com');
+      fwdHeaders.set('Host', 'warehouse-beam-queen-confident.trycloudflare.com');
       fwdHeaders.set('X-Forwarded-Host', url.host);
       fwdHeaders.set('X-Forwarded-Proto', 'https');
       fwdHeaders.set('X-Real-IP', request.headers.get('cf-connecting-ip') || '127.0.0.1');
