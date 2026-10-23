@@ -5702,7 +5702,8 @@ async function requestHandler(req, res) {
     const body = (await safeParseBody(req)) || {};
     try {
       const status = await waGateway.connect(Boolean(body.forceNew));
-      return sendJSON(res, 200, { success: true, ...status });
+      const currentStatus = waGateway.getStatus();
+      return sendJSON(res, 200, { success: true, ...status, ...currentStatus });
     } catch (err) {
       return sendJSON(res, 500, { success: false, error: err.message });
     }
@@ -5787,8 +5788,14 @@ async function requestHandler(req, res) {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
       'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*'
+      'X-Accel-Buffering': 'no',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Private-Network': 'true'
     });
+    // Cloudflare Edge Proxy stream pad bypass:
+    // Cloudflare buffers initial HTTP/2 stream until >= 8192 bytes of data payload arrive.
+    // Sending a 32KB data event immediately unlocks the stream and forces instant chunk delivery over Cloudflare tunnel/custom domain.
+    res.write(`data: ${JSON.stringify({ event: 'pad', pad: ' '.repeat(32768) })}\n\n`);
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
     waGateway.addSseClient(res);
     return;

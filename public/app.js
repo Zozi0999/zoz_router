@@ -30824,6 +30824,7 @@ Aturan:
         modal.style.removeProperty('display');
         if (typeof syncBodyModalState === 'function') syncBodyModalState();
       }
+      try { WhatsAppController?.stopStatusPolling?.(); } catch (_) {}
     },
 
     async requestTunnelApi(endpoint, options = {}) {
@@ -34549,6 +34550,7 @@ Aturan:
     contacts: [],
     activeContact: null,
     status: { connected: false, connecting: false, phone: null, qr: null, contactCount: 0 },
+    statusPollTimer: null,
 
     init() {
       this.attachListeners();
@@ -34719,6 +34721,25 @@ Aturan:
       } catch (_) {}
     },
 
+    startStatusPolling(durationMs = 60000) {
+      this.stopStatusPolling();
+      const startTime = Date.now();
+      this.statusPollTimer = setInterval(async () => {
+        if (Date.now() - startTime > durationMs || this.status?.connected) {
+          this.stopStatusPolling();
+          return;
+        }
+        await this.fetchStatus();
+      }, 1500);
+    },
+
+    stopStatusPolling() {
+      if (this.statusPollTimer) {
+        clearInterval(this.statusPollTimer);
+        this.statusPollTimer = null;
+      }
+    },
+
     async fetchContacts(notify = false) {
       try {
         const res = await fetch('/api/wa/contacts');
@@ -34735,6 +34756,9 @@ Aturan:
     handleStatusUpdate(status) {
       this.status = status;
       const isConnected = Boolean(status.connected);
+      if (isConnected) {
+        this.stopStatusPolling();
+      }
 
       if (els.waStatusDot) {
         els.waStatusDot.style.background = isConnected ? '#25D366' : (status.connecting ? '#f59e0b' : '#64748b');
@@ -34821,6 +34845,7 @@ Aturan:
     async connectWhatsApp(forceNew = false) {
       if (els.waStatusText) els.waStatusText.innerHTML = '🟡 Memulai inisialisasi WhatsApp Web...';
       if (els.waQrPlaceholderText) els.waQrPlaceholderText.textContent = 'Memuat kode QR WhatsApp...';
+      this.startStatusPolling(60000);
       try {
         const res = await fetch('/api/wa/connect', {
           method: 'POST',
@@ -34830,7 +34855,10 @@ Aturan:
         const data = await res.json();
         if (data.success) {
           this.handleStatusUpdate(data);
-          showToast('Gerbang WhatsApp aktif. Silakan scan QR code.', 'info');
+          if (data.qr) {
+            this.handleQrUpdate(data.qr);
+          }
+          showToast(data.connected ? 'WhatsApp sudah terhubung!' : 'Gerbang WhatsApp aktif. Silakan scan QR code.', 'info');
         } else {
           showToast(`Gagal: ${data.error}`, 'error');
         }
@@ -34927,6 +34955,7 @@ Aturan:
           if (els.waPairingCodeBox) els.waPairingCodeBox.style.display = 'block';
           if (els.waStatusText) els.waStatusText.innerHTML = `🔑 Masukkan kode <b>${data.code}</b> di HP Anda`;
           showToast(`Kode Pairing WhatsApp: ${data.code}. Masukkan pada WhatsApp di HP Anda.`, 'success');
+          this.startStatusPolling(60000);
         } else {
           showToast(`❌ Gagal: ${data.error || 'Terjadi kesalahan'}`, 'error');
           if (els.waStatusText) els.waStatusText.innerHTML = '❌ Gagal mendapatkan kode pairing';
@@ -34956,9 +34985,12 @@ Aturan:
 
       if (!isTerminal) {
         this.fetchStatus();
+        this.startStatusPolling(60000);
         if (!this.status.connected && !this.status.connecting && !this.status.qr) {
           this.connectWhatsApp();
         }
+      } else {
+        this.stopStatusPolling();
       }
     },
 

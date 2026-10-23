@@ -111,12 +111,47 @@ class WhatsAppGateway {
       this.sseClients.delete(res);
     });
 
+    this.startSseHeartbeat();
+
     // Kirim status awal langsung saat client connect
     const initialPayload = JSON.stringify({
       event: 'status',
       data: this.getStatus()
     });
     res.write(`data: ${initialPayload}\n\n`);
+  }
+
+  startSseHeartbeat() {
+    if (this.sseHeartbeatTimer) return;
+    this.sseHeartbeatTimer = setInterval(() => {
+      if (this.sseClients.size === 0) {
+        clearInterval(this.sseHeartbeatTimer);
+        this.sseHeartbeatTimer = null;
+        return;
+      }
+      for (const client of this.sseClients) {
+        try {
+          client.write(': ping\n\n');
+        } catch (_) {
+          this.sseClients.delete(client);
+        }
+      }
+    }, 15000);
+  }
+
+  async resolveLidToPhone(jid) {
+    if (!jid || typeof jid !== 'string') return jid;
+    if (!jid.endsWith('@lid')) return jid;
+    try {
+      if (this.sock?.signalRepository?.lidMapping) {
+        const pn = await this.sock.signalRepository.lidMapping.getPNForLID(jid);
+        if (pn) return pn.replace(/:.*@/, '@');
+      }
+    } catch (_) {}
+    if (this.sock?.user?.lid && jid.startsWith(this.sock.user.lid.split(':')[0])) {
+      return this.sock.user.id.replace(/:.*@/, '@');
+    }
+    return jid;
   }
 
   broadcast(event, data) {
@@ -254,23 +289,25 @@ class WhatsAppGateway {
       });
 
       // Sinkronisasi Riwayat Chat Penuh dari HP (Messaging History Sync)
-      this.sock.ev.on('messaging-history.set', ({ chats, contacts, messages, isLatest }) => {
+      this.sock.ev.on('messaging-history.set', async ({ chats, contacts, messages, isLatest }) => {
         let changed = false;
         if (Array.isArray(contacts)) {
           for (const c of contacts) {
             if (!c.id || c.id === 'status@broadcast') continue;
-            const existing = this.contacts.get(c.id) || {
-              id: c.id,
-              name: c.name || c.notify || c.verifiedName || c.id.split('@')[0],
+            const cid = await this.resolveLidToPhone(c.id);
+            if (cid.endsWith('@lid')) continue;
+            const existing = this.contacts.get(cid) || {
+              id: cid,
+              name: c.name || c.notify || c.verifiedName || cid.split('@')[0],
               notify: c.notify || '',
-              phone: c.id.split('@')[0],
+              phone: cid.split('@')[0],
               unreadCount: 0,
               lastMessage: '',
               lastTimestamp: 0
             };
             if (c.name) existing.name = c.name;
             if (c.notify) existing.notify = c.notify;
-            this.contacts.set(c.id, existing);
+            this.contacts.set(cid, existing);
             changed = true;
           }
         }
@@ -278,18 +315,20 @@ class WhatsAppGateway {
         if (Array.isArray(chats)) {
           for (const chat of chats) {
             if (!chat.id || chat.id === 'status@broadcast') continue;
-            let contact = this.contacts.get(chat.id);
+            const chatId = await this.resolveLidToPhone(chat.id);
+            if (chatId.endsWith('@lid')) continue;
+            let contact = this.contacts.get(chatId);
             if (!contact) {
               contact = {
-                id: chat.id,
-                name: chat.name || chat.id.split('@')[0],
+                id: chatId,
+                name: chat.name || chatId.split('@')[0],
                 notify: '',
-                phone: chat.id.split('@')[0],
+                phone: chatId.split('@')[0],
                 unreadCount: chat.unreadCount || 0,
                 lastMessage: '',
                 lastTimestamp: chat.conversationTimestamp ? Number(chat.conversationTimestamp) * 1000 : 0
               };
-              this.contacts.set(chat.id, contact);
+              this.contacts.set(chatId, contact);
             } else {
               if (chat.name && !contact.name) contact.name = chat.name;
               if (chat.unreadCount !== undefined) contact.unreadCount = chat.unreadCount;
@@ -302,8 +341,10 @@ class WhatsAppGateway {
         if (Array.isArray(messages)) {
           for (const msg of messages) {
             if (!msg.message) continue;
-            const jid = msg.key.remoteJid;
-            if (!jid || jid === 'status@broadcast') continue;
+            const rawJid = msg.key.remoteJid;
+            if (!rawJid || rawJid === 'status@broadcast') continue;
+            const jid = await this.resolveLidToPhone(rawJid);
+            if (jid.endsWith('@lid')) continue;
 
             const fromMe = Boolean(msg.key.fromMe);
             const text = msg.message.conversation ||
@@ -352,15 +393,17 @@ class WhatsAppGateway {
       });
 
       // Sinkronisasi Kontak Masuk / Update
-      this.sock.ev.on('contacts.upsert', (newContacts) => {
+      this.sock.ev.on('contacts.upsert', async (newContacts) => {
         let changed = false;
         for (const c of newContacts) {
           if (!c.id || c.id === 'status@broadcast') continue;
-          const existing = this.contacts.get(c.id) || {
-            id: c.id,
-            name: c.name || c.notify || c.verifiedName || c.id.split('@')[0],
+          const cid = await this.resolveLidToPhone(c.id);
+          if (cid.endsWith('@lid')) continue;
+          const existing = this.contacts.get(cid) || {
+            id: cid,
+            name: c.name || c.notify || c.verifiedName || cid.split('@')[0],
             notify: c.notify || '',
-            phone: c.id.split('@')[0],
+            phone: cid.split('@')[0],
             unreadCount: 0,
             lastMessage: '',
             lastTimestamp: 0
@@ -373,7 +416,7 @@ class WhatsAppGateway {
             existing.notify = c.notify;
             changed = true;
           }
-          this.contacts.set(c.id, existing);
+          this.contacts.set(cid, existing);
         }
         if (changed) {
           this.savePersistedData();
@@ -381,11 +424,12 @@ class WhatsAppGateway {
         }
       });
 
-      this.sock.ev.on('contacts.update', (updates) => {
+      this.sock.ev.on('contacts.update', async (updates) => {
         let changed = false;
         for (const u of updates) {
           if (!u.id) continue;
-          const existing = this.contacts.get(u.id);
+          const uid = await this.resolveLidToPhone(u.id);
+          const existing = this.contacts.get(uid);
           if (existing) {
             if (u.name) existing.name = u.name;
             if (u.notify) existing.notify = u.notify;
@@ -403,8 +447,10 @@ class WhatsAppGateway {
         let hasNew = false;
         for (const msg of messages) {
           if (!msg.message) continue;
-          const jid = msg.key.remoteJid;
-          if (!jid || jid === 'status@broadcast') continue;
+          const rawJid = msg.key.remoteJid;
+          if (!rawJid || rawJid === 'status@broadcast') continue;
+          const jid = await this.resolveLidToPhone(rawJid);
+          if (jid.endsWith('@lid')) continue;
 
           const fromMe = Boolean(msg.key.fromMe);
           const text = msg.message.conversation ||
@@ -484,6 +530,13 @@ class WhatsAppGateway {
           this.broadcast('contacts', this.getContacts());
         }
       });
+
+      // Tunggu hingga QR code siap (max 4.5 detik) agar response POST /api/wa/connect langsung membawa QR
+      let waited = 0;
+      while (!this.status.connected && !this.status.qr && waited < 4500) {
+        await new Promise(r => setTimeout(r, 200));
+        waited += 200;
+      }
 
       return this.getStatus();
     } catch (err) {
@@ -652,9 +705,56 @@ class WhatsAppGateway {
   }
 
   getContacts() {
-    const list = Array.from(this.contacts.values());
-    // Urutkan berdasarkan interaksi / pesan terakhir (descending)
-    return list.sort((a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+    const list = Array.from(this.contacts.values()).filter(c => {
+      if (!c || !c.id) return false;
+      if (c.id.endsWith('@lid')) return false; // Filter out internal WhatsApp LIDs
+      if (c.id === 'status@broadcast') return false;
+      if (c.id.endsWith('@bot')) return false;
+      return true;
+    });
+
+    const formatCleanPhone = (num) => {
+      let digits = String(num || '').replace(/[^0-9]/g, '');
+      if (digits.startsWith('62')) {
+        return `+62 ${digits.slice(2, 5)}-${digits.slice(5, 9)}-${digits.slice(9)}`;
+      }
+      return digits.length > 5 ? `+${digits.slice(0, 3)} ${digits.slice(3, 7)}-${digits.slice(7)}` : digits;
+    };
+
+    const cleanText = (str) => {
+      if (!str) return '';
+      return str.replace(/dY[^\s]+/g, '').replace(/[\uFFFD]/g, '').trim();
+    };
+
+    return list.map(c => {
+      let displayName = cleanText(c.name || '');
+      const isGroup = c.id.endsWith('@g.us');
+
+      // Jika nama berupa digit mentah / belum dinamai di buku telepon
+      if (!displayName || /^\d+$/.test(displayName)) {
+        if (c.notify && !/^\d+$/.test(c.notify.trim())) {
+          displayName = cleanText(c.notify);
+        } else if (!isGroup) {
+          displayName = formatCleanPhone(c.phone || c.id.split('@')[0]);
+        } else {
+          displayName = 'Grup Tanpa Nama';
+        }
+      }
+
+      const formattedName = isGroup && !displayName.startsWith('👥') ? `👥 ${displayName}` : displayName;
+
+      return {
+        ...c,
+        name: formattedName,
+        phone: isGroup ? 'Grup WhatsApp' : (c.phone || c.id.split('@')[0]),
+        isGroup
+      };
+    }).sort((a, b) => {
+      const tsA = a.lastTimestamp || 0;
+      const tsB = b.lastTimestamp || 0;
+      if (tsA > 0 || tsB > 0) return tsB - tsA;
+      return (a.name || '').localeCompare(b.name || '');
+    });
   }
 
   getMessages(jid) {
