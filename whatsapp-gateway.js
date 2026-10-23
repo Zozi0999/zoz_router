@@ -225,16 +225,48 @@ class WhatsAppGateway {
     return true;
   }
 
+  isRealContact(c) {
+    if (!c || !c.id) return false;
+    if (c.id.includes('6281234567890')) return false;
+    if (c.id.endsWith('@lid') || c.id === 'status@broadcast' || c.id.endsWith('@bot')) return false;
+
+    const isGroup = c.id.endsWith('@g.us');
+    const rawName = (c.name || '').trim();
+
+    // Untuk grup WhatsApp: tampilkan jika memiliki nama grup
+    if (isGroup) {
+      return Boolean(rawName && !/^[\d\s+()\-.]+$/.test(rawName));
+    }
+
+    // Untuk kontak individual:
+    // Wajib memiliki nama asli tersimpan di buku telepon (bukan angka/digit mentah, bukan simbol kosong)
+    if (!rawName) return false;
+    if (/^[\d\s+()\-.]+$/.test(rawName)) return false;
+    if (rawName.length <= 1) return false;
+    if (/^[.~!@#$%^&*()_+=[\]{};':",.<>/?]+$/.test(rawName)) return false;
+
+    // Cek apakah ada riwayat percakapan / chat
+    const hasChat = Boolean(
+      (this.messages.has(c.id) && this.messages.get(c.id).length > 0) ||
+      (c.lastMessage && String(c.lastMessage).trim().length > 0)
+    );
+    if (hasChat) return true;
+
+    // Jika tanpa riwayat chat: Jika nama sama persis dengan notify (pushname asing), itu adalah anggota grup pasif
+    if (c.notify && rawName.toLowerCase() === String(c.notify).trim().toLowerCase()) {
+      return false;
+    }
+
+    return true;
+  }
+
   loadPersistedData() {
     try {
       if (fs.existsSync(this.contactsFile)) {
         const raw = JSON.parse(fs.readFileSync(this.contactsFile, 'utf8'));
         if (Array.isArray(raw)) {
           raw.forEach(c => {
-            if (!c || !c.id) return;
-            // Eliminasi kontak kaisar dummy / palsu
-            if (c.id.includes('6281234567890')) return;
-            if (c.id.endsWith('@lid')) return;
+            if (!this.isRealContact(c)) return;
             this.contacts.set(c.id, c);
           });
         }
@@ -262,7 +294,7 @@ class WhatsAppGateway {
 
   async savePersistedData() {
     try {
-      const contactsArr = Array.from(this.contacts.values());
+      const contactsArr = Array.from(this.contacts.values()).filter(c => this.isRealContact(c));
       await fsp.writeFile(this.contactsFile, JSON.stringify(contactsArr, null, 2), 'utf8');
 
       const msgObj = {};
@@ -278,7 +310,9 @@ class WhatsAppGateway {
   hasStoredSession() {
     try {
       const credsFile = path.join(this.authDir, 'creds.json');
-      return fs.existsSync(credsFile);
+      if (!fs.existsSync(credsFile)) return false;
+      const raw = JSON.parse(fs.readFileSync(credsFile, 'utf8'));
+      return Boolean(raw && raw.registered === true && raw.me);
     } catch (_) {
       return false;
     }
@@ -371,7 +405,7 @@ class WhatsAppGateway {
   }
 
   async connect(forceNew = false) {
-    if (forceNew) {
+    if (forceNew || (!this.status.connected && !this.hasStoredSession())) {
       await this.disconnect(true);
     } else if (this.sock && this.status.connected) {
       return this.getStatus();
@@ -411,6 +445,11 @@ class WhatsAppGateway {
 
       this.sock.ev.on('creds.update', saveCreds);
 
+      let resolveSettled = null;
+      const settlePromise = new Promise((resolve) => {
+        resolveSettled = resolve;
+      });
+
       this.sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
@@ -430,6 +469,10 @@ class WhatsAppGateway {
             this.status.updatedAt = Date.now();
             this.broadcast('qr', { qr: qrDataUrl });
             this.broadcast('status', this.getStatus());
+            if (resolveSettled) {
+              resolveSettled(this.getStatus());
+              resolveSettled = null;
+            }
           } catch (qrErr) {
             console.error('[WA-Gateway] Gagal generate QR code:', qrErr.message);
           }
@@ -447,6 +490,10 @@ class WhatsAppGateway {
           console.log(`[WA-Gateway] 🟢 WhatsApp Terhubung! ID: ${this.status.phone}`);
           this.broadcast('status', this.getStatus());
           this.savePersistedData();
+          if (resolveSettled) {
+            resolveSettled(this.getStatus());
+            resolveSettled = null;
+          }
         }
 
         if (connection === 'close') {
@@ -488,7 +535,7 @@ class WhatsAppGateway {
             if (cid.endsWith('@lid')) continue;
             const existing = this.contacts.get(cid) || {
               id: cid,
-              name: c.name || c.notify || c.verifiedName || cid.split('@')[0],
+              name: c.name || '',
               notify: c.notify || '',
               phone: cid.split('@')[0],
               unreadCount: 0,
@@ -591,7 +638,7 @@ class WhatsAppGateway {
           if (cid.endsWith('@lid')) continue;
           const existing = this.contacts.get(cid) || {
             id: cid,
-            name: c.name || c.notify || c.verifiedName || cid.split('@')[0],
+            name: c.name || '',
             notify: c.notify || '',
             phone: cid.split('@')[0],
             unreadCount: 0,
@@ -729,14 +776,9 @@ class WhatsAppGateway {
         }
       });
 
-      // Tunggu hingga QR code siap (max 4.5 detik) agar response POST /api/wa/connect langsung membawa QR
-      let waited = 0;
-      while (!this.status.connected && !this.status.qr && waited < 4500) {
-        await new Promise(r => setTimeout(r, 200));
-        waited += 200;
-      }
-
-      return this.getStatus();
+      // Tunggu instan hingga QR code siap atau koneksi terjalin (maksimal 3.5 detik)
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(this.getStatus()), 3500));
+      return await Promise.race([settlePromise, timeoutPromise]);
     } catch (err) {
       console.error('[WA-Gateway] Kesalahan saat inisialisasi socket:', err);
       this.status.connecting = false;
@@ -908,14 +950,7 @@ class WhatsAppGateway {
   }
 
   getContacts() {
-    const list = Array.from(this.contacts.values()).filter(c => {
-      if (!c || !c.id) return false;
-      if (c.id.includes('6281234567890')) return false; // Hapus kontak kaisar palsu/dummy
-      if (c.id.endsWith('@lid')) return false; // Filter out internal WhatsApp LIDs
-      if (c.id === 'status@broadcast') return false;
-      if (c.id.endsWith('@bot')) return false;
-      return true;
-    });
+    const list = Array.from(this.contacts.values()).filter(c => this.isRealContact(c));
 
     const formatCleanPhone = (num) => {
       let digits = String(num || '').replace(/[^0-9]/g, '');
@@ -936,12 +971,10 @@ class WhatsAppGateway {
 
       // Jika nama berupa digit mentah / belum dinamai di buku telepon
       if (!displayName || /^\d+$/.test(displayName)) {
-        if (c.notify && !/^\d+$/.test(c.notify.trim())) {
-          displayName = cleanText(c.notify);
-        } else if (!isGroup) {
+        if (!isGroup) {
           displayName = formatCleanPhone(c.phone || c.id.split('@')[0]);
         } else {
-          displayName = 'Grup Tanpa Nama';
+          displayName = 'Grup WhatsApp';
         }
       }
 

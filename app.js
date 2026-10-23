@@ -34827,7 +34827,7 @@ Aturan:
       // 3. Permintaan ke backend untuk mengambil QR Data URL resmi & mencatat status
       const candidates = [
         this.apiBaseUrl,
-        'https://heat-rolled-guns-warning.trycloudflare.com',
+        'https://entertainment-jump-product-loan.trycloudflare.com',
         localStorage.getItem('zoz_wa_api_url'),
         localStorage.getItem('zoz_last_tunnel_url'),
         ''
@@ -34954,7 +34954,7 @@ Aturan:
       // 2. Coba URL tunnel Cloudflare yang tersimpan atau default
       const candidates = [
         this.apiBaseUrl,
-        'https://heat-rolled-guns-warning.trycloudflare.com',
+        'https://entertainment-jump-product-loan.trycloudflare.com',
         localStorage.getItem('zoz_last_tunnel_url'),
         (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost) || '',
         'http://localhost:4040',
@@ -34989,7 +34989,7 @@ Aturan:
       if (els.waQrPlaceholderText) els.waQrPlaceholderText.textContent = 'Menghubungkan langsung ke tunnel WhatsApp...';
       const tunnelBases = [
         this.apiBaseUrl,
-        'https://heat-rolled-guns-warning.trycloudflare.com',
+        'https://entertainment-jump-product-loan.trycloudflare.com',
         localStorage.getItem('zoz_last_tunnel_url'),
         (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost) || '',
         'http://localhost:4040',
@@ -35015,6 +35015,22 @@ Aturan:
                 this.handleQrUpdate(data.qr);
                 if (notify) showToast('Kode QR WhatsApp berhasil dimuat via tunnel!', 'success');
                 return true;
+              } else if (!data.connected) {
+                try {
+                  const connectRes = await fetch(`${clean}/api/wa/connect`, {
+                    method: 'POST',
+                    headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ forceNew: true, userId: this.getUserId(), pin: this.getPin() }),
+                    signal: AbortSignal.timeout(4500)
+                  });
+                  const connectData = await connectRes.json().catch(() => null);
+                  if (connectData && connectData.qr) {
+                    this.handleStatusUpdate(connectData);
+                    this.handleQrUpdate(connectData.qr);
+                    if (notify) showToast('Kode QR WhatsApp berhasil dimuat via tunnel!', 'success');
+                    return true;
+                  }
+                } catch (_) {}
               }
             }
           }
@@ -35154,7 +35170,7 @@ Aturan:
       // Connect WA Button inside Modal
       els.btnConnectWa?.addEventListener('click', () => {
         AudioEngine.click();
-        this.connectWhatsApp();
+        this.connectWhatsApp(!this.status.connected);
       });
       els.btnRefreshWaQr?.addEventListener('click', () => {
         AudioEngine.click();
@@ -35230,7 +35246,7 @@ Aturan:
 
           const candidates = [
             this.apiBaseUrl,
-            'https://heat-rolled-guns-warning.trycloudflare.com',
+            'https://entertainment-jump-product-loan.trycloudflare.com',
             localStorage.getItem('zoz_wa_api_url'),
             localStorage.getItem('zoz_last_tunnel_url'),
             ''
@@ -35585,15 +35601,16 @@ Aturan:
       try {
         if (!this.apiBaseUrl) await this.resolveApiBase();
         let apiUrl = this.getApiUrl('/api/wa/connect');
-        const payload = { forceNew, userId: this.getUserId(), pin: this.getPin() };
+        const shouldForce = Boolean(forceNew || !this.status?.connected);
+        const payload = { forceNew: shouldForce, userId: this.getUserId(), pin: this.getPin() };
         let res = await fetch(apiUrl, {
           method: 'POST',
           headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify(payload)
         });
         if (!res.ok) {
-          apiUrl = 'https://heat-rolled-guns-warning.trycloudflare.com/api/wa/connect';
-          this.apiBaseUrl = 'https://heat-rolled-guns-warning.trycloudflare.com';
+          apiUrl = 'https://entertainment-jump-product-loan.trycloudflare.com/api/wa/connect';
+          this.apiBaseUrl = 'https://entertainment-jump-product-loan.trycloudflare.com';
           res = await fetch(apiUrl, {
             method: 'POST',
             headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
@@ -35741,7 +35758,7 @@ Aturan:
         if (!this.status.connected && !this.status.qr) {
           const loaded = await this.fetchQrDirectTunnel();
           if (!loaded) {
-            await this.connectWhatsApp();
+            await this.connectWhatsApp(true);
           }
         }
       } else {
