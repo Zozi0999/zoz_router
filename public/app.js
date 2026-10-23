@@ -936,7 +936,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     attachmentMenuWrapper: $('#attachmentMenuWrapper'),
     attachOptionCamera: $('#attachOptionCamera'),
     attachOptionImage: $('#attachOptionImage'),
-    attachOptionGenWebsite: $('#attachOptionGenWebsite'),
     attachOptionGenImage: $('#attachOptionGenImage'),
     attachOptionGenMusic: $('#attachOptionGenMusic'),
     attachOptionDoc: $('#attachOptionDoc'),
@@ -971,11 +970,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     attachmentTabsNav: $('#attachmentTabsNav'),
     tabAttachFiles: $('#tabAttachFiles'),
     tabAttachTools: $('#tabAttachTools'),
-    tabAttachSkills: $('#tabAttachSkills'),
     attachPaneFiles: $('#attachPaneFiles'),
     attachPaneTools: $('#attachPaneTools'),
-    attachPaneSkills: $('#attachPaneSkills'),
-    attachOptionGenDoc: $('#attachOptionGenDoc'),
     toolActiveDot: $('#toolActiveDot'),
     docFileInput: $('#docFileInput'),
     imageModelMenuWrapper: $('#imageModelMenuWrapper'),
@@ -22385,7 +22381,6 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     STATE.activeAttachmentTab = targetTab;
     const isFiles = targetTab === 'files';
     const isTools = targetTab === 'tools';
-    const isSkills = targetTab === 'skills';
 
     if (els.tabAttachFiles) {
       els.tabAttachFiles.classList.toggle('active', isFiles);
@@ -22395,14 +22390,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       els.tabAttachTools.classList.toggle('active', isTools);
       els.tabAttachTools.setAttribute('aria-selected', String(isTools));
     }
-    if (els.tabAttachSkills) {
-      els.tabAttachSkills.classList.toggle('active', isSkills);
-      els.tabAttachSkills.setAttribute('aria-selected', String(isSkills));
-    }
 
     if (els.attachPaneFiles) els.attachPaneFiles.style.display = isFiles ? 'flex' : 'none';
     if (els.attachPaneTools) els.attachPaneTools.style.display = isTools ? 'flex' : 'none';
-    if (els.attachPaneSkills) els.attachPaneSkills.style.display = isSkills ? 'flex' : 'none';
 
     updateToolActiveDot();
   }
@@ -26919,7 +26909,7 @@ Aturan:
       iconBg: 'rgba(16, 185, 129, 0.12)',
       template: '/website ',
       placeholder: 'Deskripsikan website atau aplikasi web yang ingin dibuat...',
-      aliases: ['web', 'html', 'app', 'aplikasi', 'situs', 'landingpage', 'website', 'pembuatan', 'pembuatan website', 'bikin website']
+      aliases: ['web', 'html', 'app', 'aplikasi', 'situs', 'landingpage', 'website', 'pembuatan', 'pembuatan website', 'bikin website', 'skill']
     },
     {
       id: 'dokumen',
@@ -26932,7 +26922,7 @@ Aturan:
       iconBg: 'rgba(99, 102, 241, 0.12)',
       template: '/dokumen ',
       placeholder: 'Tulis topik dokumen, makalah, atau laporan lengkap yang ingin dibuat...',
-      aliases: ['doc', 'laporan', 'pdf', 'word', 'docx', 'makalah', 'proposal', 'skripsi', 'jurnal', 'sop']
+      aliases: ['doc', 'laporan', 'pdf', 'word', 'docx', 'makalah', 'proposal', 'skripsi', 'jurnal', 'sop', 'dokumen', 'skill']
     },
 
     {
@@ -28093,11 +28083,6 @@ Aturan:
       switchAttachmentTab('tools');
       AudioEngine.click();
     });
-    els.tabAttachSkills?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      switchAttachmentTab('skills');
-      AudioEngine.click();
-    });
 
     els.attachOptionCamera?.addEventListener('click', () => {
       closeAttachmentDropdown();
@@ -28106,44 +28091,6 @@ Aturan:
     els.attachOptionImage?.addEventListener('click', () => {
       closeAttachmentDropdown();
       els.imageFileInput?.click();
-    });
-    els.attachOptionGenWebsite?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeAttachmentDropdown();
-      AudioEngine.click();
-      const currentVal = els.promptInput ? els.promptInput.value.trim() : '';
-      if (currentVal && isWebsiteCreationPrompt(currentVal)) {
-        openWebsiteModeModal(currentVal);
-      } else {
-        if (els.promptInput) {
-          if (!currentVal.startsWith('/website')) {
-            els.promptInput.value = currentVal ? `/website ${currentVal}` : '/website ';
-          }
-          els.promptInput.focus();
-          els.promptInput.setSelectionRange(els.promptInput.value.length, els.promptInput.value.length);
-          autoResizeTextarea(els.promptInput);
-        }
-        showToast('🌐 Fitur Website & Pratinjau Aktif. Tuliskan deskripsi website/kode yang ingin dipratinjau.');
-      }
-    });
-    els.attachOptionGenDoc?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeAttachmentDropdown();
-      AudioEngine.click();
-      const currentVal = els.promptInput ? els.promptInput.value.trim() : '';
-      if (currentVal && isDocCreationPrompt(currentVal)) {
-        openDocModeModal(currentVal);
-      } else {
-        if (els.promptInput) {
-          if (!currentVal.startsWith('/dokumen')) {
-            els.promptInput.value = currentVal ? `/dokumen ${currentVal}` : '/dokumen ';
-          }
-          els.promptInput.focus();
-          els.promptInput.setSelectionRange(els.promptInput.value.length, els.promptInput.value.length);
-          autoResizeTextarea(els.promptInput);
-        }
-        showToast('📄 Mode Pembuatan Dokumen Aktif. Tuliskan topik atau judul dokumen yang ingin disusun.');
-      }
     });
     els.attachOptionGenImage?.addEventListener('click', (e) => {
       e.stopPropagation();
