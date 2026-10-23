@@ -34556,26 +34556,29 @@ Aturan:
     statusPollTimer: null,
     apiBaseUrl: '',
 
+    sseReconnectAttempts: 0,
+    maxSseAttempts: 3,
+
     async resolveApiBase() {
-      // 1. Coba relatif jika sedang berjalan di localhost atau jika proxy domain aktif
-      try {
-        const res = await fetch('/api/wa/status', { cache: 'no-store', signal: AbortSignal.timeout(2000) });
-        if (res.ok) {
-          const d = await res.json().catch(() => null);
-          if (d && d.success) {
-            this.apiBaseUrl = '';
-            if (d.qr) this.handleQrUpdate(d.qr);
-            if (d.connected) this.handleStatusUpdate(d);
-            return '';
-          }
-        }
-      } catch (_) {}
+      // 0. Cache hit instant (0ms)
+      const cached = localStorage.getItem('zoz_wa_api_url');
+      if (cached && !this.apiBaseUrl) {
+        this.apiBaseUrl = cached;
+      }
+
+      // 1. Coba relatif jika sedang berjalan di localhost
+      if (typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+        this.apiBaseUrl = '';
+        localStorage.setItem('zoz_wa_api_url', '');
+        return '';
+      }
 
       // 2. Coba URL tunnel Cloudflare yang tersimpan atau default
       const candidates = [
+        this.apiBaseUrl,
+        'https://notify-thomson-remarks-affected.trycloudflare.com',
         localStorage.getItem('zoz_last_tunnel_url'),
         (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost) || '',
-        'https://notify-thomson-remarks-affected.trycloudflare.com',
         'http://localhost:4040',
         'http://127.0.0.1:4040'
       ].filter(Boolean);
@@ -34584,11 +34587,12 @@ Aturan:
       for (const base of unique) {
         try {
           const cleanBase = base.replace(/\/+$/, '');
-          const res = await fetch(`${cleanBase}/api/wa/status?t=${Date.now()}`, { cache: 'no-store', signal: AbortSignal.timeout(3000) });
+          const res = await fetch(`${cleanBase}/api/wa/status?t=${Date.now()}`, { cache: 'no-store', signal: AbortSignal.timeout(1800) });
           if (res.ok) {
             const d = await res.json().catch(() => null);
             if (d && d.success) {
               this.apiBaseUrl = cleanBase;
+              localStorage.setItem('zoz_wa_api_url', cleanBase);
               if (d.qr) this.handleQrUpdate(d.qr);
               if (d.connected) this.handleStatusUpdate(d);
               return this.apiBaseUrl;
@@ -34596,12 +34600,13 @@ Aturan:
           }
         } catch (_) {}
       }
-      return '';
+      return this.apiBaseUrl || '';
     },
 
     async fetchQrDirectTunnel(notify = false) {
       if (els.waQrPlaceholderText) els.waQrPlaceholderText.textContent = 'Menghubungkan langsung ke tunnel WhatsApp...';
       const tunnelBases = [
+        this.apiBaseUrl,
         'https://notify-thomson-remarks-affected.trycloudflare.com',
         localStorage.getItem('zoz_last_tunnel_url'),
         (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost) || '',
@@ -34609,14 +34614,16 @@ Aturan:
         'http://127.0.0.1:4040'
       ].filter(Boolean);
 
-      for (const base of tunnelBases) {
+      const unique = [...new Set(tunnelBases)];
+      for (const base of unique) {
         try {
           const clean = base.replace(/\/+$/, '');
-          const res = await fetch(`${clean}/api/wa/status?t=${Date.now()}`, { cache: 'no-store' });
+          const res = await fetch(`${clean}/api/wa/status?t=${Date.now()}`, { cache: 'no-store', signal: AbortSignal.timeout(2500) });
           if (res.ok) {
             const data = await res.json().catch(() => null);
             if (data && data.success) {
               this.apiBaseUrl = clean;
+              localStorage.setItem('zoz_wa_api_url', cleanBase);
               this.handleStatusUpdate(data);
               if (data.qr) {
                 this.handleQrUpdate(data.qr);
@@ -34638,15 +34645,33 @@ Aturan:
     },
 
     async init() {
+      // 1. Pasang semua listener secara sinkron & instan (0ms)
       this.attachListeners();
-      await this.resolveApiBase();
-      this.initSSE();
-      this.fetchStatus();
-      this.fetchContacts();
 
-      // Restore mode from storage
+      // 2. Restore mode dari localStorage
       const savedMode = localStorage.getItem('zoz_chat_mode') || 'ai';
       this.setChatMode(savedMode, false);
+
+      // 3. Gunakan cached API URL jika ada
+      const cached = localStorage.getItem('zoz_wa_api_url');
+      if (cached) this.apiBaseUrl = cached;
+
+      // 4. Deferred non-blocking background initialization (0ms impact on critical render path)
+      const scheduleBg = window.requestIdleCallback || ((fn) => setTimeout(fn, 600));
+      scheduleBg(() => {
+        this.bootstrapBackground();
+      });
+    },
+
+    async bootstrapBackground() {
+      try {
+        await this.resolveApiBase();
+        if (this.apiBaseUrl) {
+          await this.fetchStatus();
+          await this.fetchContacts();
+          this.initSSE();
+        }
+      } catch (_) {}
     },
 
     attachListeners() {
@@ -34773,10 +34798,16 @@ Aturan:
     initSSE() {
       if (this.sse) {
         try { this.sse.close(); } catch (_) {}
+        this.sse = null;
       }
+      if (!this.apiBaseUrl) return; // Lindungi dari request SSE ke origin statis 404
+
       try {
         const sseUrl = this.getApiUrl('/api/wa/events');
         this.sse = new EventSource(sseUrl);
+        this.sse.onopen = () => {
+          this.sseReconnectAttempts = 0;
+        };
         this.sse.onmessage = (e) => {
           try {
             const parsed = JSON.parse(e.data);
@@ -34793,16 +34824,27 @@ Aturan:
               }
             } else if (parsed.event === 'contacts') {
               this.contacts = parsed.data || [];
-              this.renderSidebarWaChats();
-              this.renderContactDropdownList();
+              this.contacts.sort((a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+              if (STATE.chatMode === 'whatsapp') {
+                this.renderSidebarWaChats();
+              }
+              if (els.waContactDropdownMenu && els.waContactDropdownMenu.style.display === 'block') {
+                this.renderContactDropdownList();
+              }
             }
           } catch (_) {}
         };
         this.sse.onerror = () => {
-          setTimeout(() => this.initSSE(), 5000);
+          try { this.sse?.close(); } catch (_) {}
+          this.sse = null;
+          this.sseReconnectAttempts++;
+          if (this.sseReconnectAttempts <= this.maxSseAttempts) {
+            const delay = Math.min(10000 * Math.pow(2, this.sseReconnectAttempts - 1), 60000);
+            setTimeout(() => this.initSSE(), delay);
+          }
         };
       } catch (err) {
-        console.warn('[WA-Client] Gagal menghubungkan SSE:', err.message);
+        console.warn('[WA-Client] Notice SSE:', err.message);
       }
     },
 
@@ -34852,8 +34894,16 @@ Aturan:
         const data = await res.json();
         if (data.success) {
           this.contacts = data.contacts || [];
-          this.renderSidebarWaChats();
-          this.renderContactDropdownList();
+          this.contacts.sort((a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+
+          // Hanya render sidebar jika Mode WhatsApp aktif atau tab sidebar WA sedang terbuka
+          if (STATE.chatMode === 'whatsapp' || (els.waChatHistoryList && els.waChatHistoryList.style.display !== 'none')) {
+            this.renderSidebarWaChats();
+          }
+          // Hanya render dropdown jika menu dropdown sedang terbuka
+          if (els.waContactDropdownMenu && els.waContactDropdownMenu.style.display === 'block') {
+            this.renderContactDropdownList();
+          }
           if (notify) showToast(`Kontak WhatsApp tersinkron (${this.contacts.length} kontak)`, 'success');
         }
       } catch (_) {}
@@ -34933,8 +34983,12 @@ Aturan:
       } else {
         this.contacts.unshift(contact);
       }
-      this.renderSidebarWaChats();
-      this.renderContactDropdownList();
+      if (STATE.chatMode === 'whatsapp') {
+        this.renderSidebarWaChats();
+        if (els.waContactDropdownMenu && els.waContactDropdownMenu.style.display === 'block') {
+          this.renderContactDropdownList();
+        }
+      }
 
       if (STATE.chatMode === 'whatsapp' && this.activeContact && this.activeContact.id === jid) {
         this.appendMessageBubble(message);
@@ -35164,6 +35218,7 @@ Aturan:
             this.renderEmptyWaState();
           }
         }
+        this.renderSidebarWaChats();
       }
     },
 
@@ -35235,7 +35290,8 @@ Aturan:
 
       let list = this.contacts;
       if (filter) {
-        list = list.filter(c => (c.name || '').toLowerCase().includes(filter) || (c.phone || '').includes(filter));
+        const q = filter.toLowerCase();
+        list = list.filter(c => (c.name || '').toLowerCase().includes(q) || (c.phone || '').includes(q));
       }
 
       if (list.length === 0) {
@@ -35251,7 +35307,12 @@ Aturan:
         return;
       }
 
-      list.forEach(c => {
+      // High Performance Virtual Chunk: Render 40 item teratas via DocumentFragment (0ms reflow)
+      const MAX_ITEMS = filter ? 50 : 40;
+      const displayItems = list.slice(0, MAX_ITEMS);
+      const fragment = document.createDocumentFragment();
+
+      displayItems.forEach(c => {
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'image-model-item' + (this.activeContact && this.activeContact.id === c.id ? ' active' : '');
@@ -35276,8 +35337,20 @@ Aturan:
           this.selectContact(c);
         });
 
-        els.waContactList.appendChild(item);
+        fragment.appendChild(item);
       });
+
+      if (list.length > MAX_ITEMS) {
+        const moreNote = document.createElement('div');
+        moreNote.style.padding = '10px';
+        moreNote.style.textAlign = 'center';
+        moreNote.style.color = 'var(--text-dim)';
+        moreNote.style.fontSize = '0.75rem';
+        moreNote.innerHTML = `<span>Menampilkan ${MAX_ITEMS} dari ${list.length} kontak. Ketik nama untuk mencari lebih spesifik.</span>`;
+        fragment.appendChild(moreNote);
+      }
+
+      els.waContactList.appendChild(fragment);
     },
 
     renderSidebarWaChats() {
@@ -35300,7 +35373,12 @@ Aturan:
         return;
       }
 
-      this.contacts.forEach(c => {
+      // Chunk render max 40 obrolan teratas via DocumentFragment (0ms reflow)
+      const MAX_SIDEBAR = 40;
+      const displayList = this.contacts.slice(0, MAX_SIDEBAR);
+      const fragment = document.createDocumentFragment();
+
+      displayList.forEach(c => {
         const item = document.createElement('div');
         const isActive = this.activeContact && this.activeContact.id === c.id;
         item.className = 'wa-chat-item' + (isActive ? ' active' : '');
@@ -35333,8 +35411,20 @@ Aturan:
           }
         });
 
-        els.waChatHistoryList.appendChild(item);
+        fragment.appendChild(item);
       });
+
+      if (this.contacts.length > MAX_SIDEBAR) {
+        const footNote = document.createElement('div');
+        footNote.style.padding = '8px 12px';
+        footNote.style.textAlign = 'center';
+        footNote.style.color = 'var(--text-dim)';
+        footNote.style.fontSize = '0.72rem';
+        footNote.innerHTML = `<span>+ ${this.contacts.length - MAX_SIDEBAR} kontak lainnya tersinkron</span>`;
+        fragment.appendChild(footNote);
+      }
+
+      els.waChatHistoryList.appendChild(fragment);
     },
 
     async loadMessagesForContact(jid) {
