@@ -1252,7 +1252,52 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     btnCloseDocModeModal: $('#btnCloseDocModeModal'),
     optDocModePdf: $('#optDocModePdf'),
     optDocModeDocx: $('#optDocModeDocx'),
-    btnCancelDocMode: $('#btnCancelDocMode')
+    btnCancelDocMode: $('#btnCancelDocMode'),
+
+    // WhatsApp & Dual Chat Mode Receptors
+    chatModePillToggle: $('#chatModePillToggle'),
+    btnChatModeAi: $('#btnChatModeAi'),
+    btnChatModeWa: $('#btnChatModeWa'),
+    waUnreadBadgeDot: $('#waUnreadBadgeDot'),
+    singleWaContactPickerWrap: $('#singleWaContactPickerWrap'),
+    waContactPickerChip: $('#waContactPickerChip'),
+    currentWaContactLabel: $('#currentWaContactLabel'),
+    waContactDropdownMenu: $('#waContactDropdownMenu'),
+    waContactSearchInput: $('#waContactSearchInput'),
+    btnOpenAddContactFromDropdown: $('#btnOpenAddContactFromDropdown'),
+    btnSyncWaContacts: $('#btnSyncWaContacts'),
+    waContactList: $('#waContactList'),
+    sidebarHistoryModeTabs: $('#sidebarHistoryModeTabs'),
+    tabSidebarAiHistory: $('#tabSidebarAiHistory'),
+    tabSidebarWaHistory: $('#tabSidebarWaHistory'),
+    sidebarWaUnreadDot: $('#sidebarWaUnreadDot'),
+    historyLabelTitle: $('#historyLabelTitle'),
+    waChatHistoryList: $('#waChatHistoryList'),
+    qrModalTabsNav: $('#qrModalTabsNav'),
+    tabQrTerminal: $('#tabQrTerminal'),
+    tabQrWhatsApp: $('#tabQrWhatsApp'),
+    waModalTabDot: $('#waModalTabDot'),
+    paneQrTerminal: $('#paneQrTerminal'),
+    paneQrWhatsApp: $('#paneQrWhatsApp'),
+    waStatusDot: $('#waStatusDot'),
+    waStatusText: $('#waStatusText'),
+    btnConnectWa: $('#btnConnectWa'),
+    labelConnectWa: $('#labelConnectWa'),
+    waQrSection: $('#waQrSection'),
+    waQrContainer: $('#waQrContainer'),
+    waQrCodeImg: $('#waQrCodeImg'),
+    waQrCodePlaceholder: $('#waQrCodePlaceholder'),
+    waQrPlaceholderText: $('#waQrPlaceholderText'),
+    btnRefreshWaQr: $('#btnRefreshWaQr'),
+    waConnectedCard: $('#waConnectedCard'),
+    waConnectedSub: $('#waConnectedSub'),
+    waConnectedPhoneDisplay: $('#waConnectedPhoneDisplay'),
+    waContactCountDisplay: $('#waContactCountDisplay'),
+    btnOpenWaChatDirect: $('#btnOpenWaChatDirect'),
+    btnDisconnectWaDevice: $('#btnDisconnectWaDevice'),
+    inputWaNewContactName: $('#inputWaNewContactName'),
+    inputWaNewContactPhone: $('#inputWaNewContactPhone'),
+    btnSaveWaNewContact: $('#btnSaveWaNewContact')
   };
 
   // ==================== AUTONOMOUS TOOL RESPONSE CACHE ====================
@@ -16730,6 +16775,12 @@ ${blocks}
     if (!rawText && images.length === 0 && docs.length === 0) return;
     if (STATE.isGenerating || STATE.isSending) return;
 
+    // Intersepsi Mode WhatsApp: jika pengguna sedang di mode WhatsApp, kirim ke WhatsApp alih-alih AI
+    if (STATE.chatMode === 'whatsapp') {
+      await WhatsAppController.sendCurrentPrompt(rawText);
+      return;
+    }
+
     // Klasifikasi Intent Pembuatan sebelum tool/modal dipanggil:
     // Pastikan permintaan website/landing page/aplikasi TIDAK PERNAH memicu modal dokumen!
     const creationIntent = classifyCreationIntent(rawText);
@@ -27679,7 +27730,13 @@ Aturan:
 
 
     // New Chat & History
-    els.newChatBtn?.addEventListener('click', () => createNewSession());
+    els.newChatBtn?.addEventListener('click', () => {
+      if (STATE.chatMode === 'whatsapp') {
+        WhatsAppController.openContactDropdown();
+      } else {
+        createNewSession();
+      }
+    });
     // Debounce 150ms: renderChatHistory membongkar & menyusun ulang seluruh daftar
     // riwayat — jangan lakukan di tiap ketikan pencarian.
     let historySearchDebounceTimer = null;
@@ -34469,10 +34526,703 @@ Aturan:
     }
   };
 
+  // =========================================================================
+  // WHATSAPP WEB GATEWAY & DUAL CHAT MODE (AI vs WHATSAPP) CONTROLLER
+  // =========================================================================
+  const WhatsAppController = {
+    sse: null,
+    contacts: [],
+    activeContact: null,
+    status: { connected: false, connecting: false, phone: null, qr: null, contactCount: 0 },
+
+    init() {
+      this.attachListeners();
+      this.initSSE();
+      this.fetchStatus();
+      this.fetchContacts();
+
+      // Restore mode from storage
+      const savedMode = localStorage.getItem('zoz_chat_mode') || 'ai';
+      this.setChatMode(savedMode, false);
+    },
+
+    attachListeners() {
+      // Chat mode switcher pills
+      els.btnChatModeAi?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.setChatMode('ai');
+      });
+      els.btnChatModeWa?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.setChatMode('whatsapp');
+      });
+
+      // Dual Sidebar History Tabs
+      els.tabSidebarAiHistory?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.setSidebarHistoryTab('ai');
+      });
+      els.tabSidebarWaHistory?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.setSidebarHistoryTab('whatsapp');
+      });
+
+      // QR Modal Tabs
+      els.tabQrTerminal?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.switchQrModalTab('terminal');
+      });
+      els.tabQrWhatsApp?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.switchQrModalTab('whatsapp');
+      });
+
+      // Contact Picker Chip & Dropdown
+      els.waContactPickerChip?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleContactDropdown();
+      });
+
+      // Search in Contact Dropdown
+      els.waContactSearchInput?.addEventListener('input', (e) => {
+        this.renderContactDropdownList(e.target.value.trim().toLowerCase());
+      });
+
+      // Add Contact from Dropdown Button
+      els.btnOpenAddContactFromDropdown?.addEventListener('click', () => {
+        this.closeContactDropdown();
+        this.openQrModalWithTab('whatsapp');
+        setTimeout(() => els.inputWaNewContactName?.focus(), 250);
+      });
+
+      // Refresh / Sync Contacts Button
+      els.btnSyncWaContacts?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.fetchContacts(true);
+      });
+
+      // Connect WA Button inside Modal
+      els.btnConnectWa?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.connectWhatsApp();
+      });
+      els.btnRefreshWaQr?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.connectWhatsApp(true);
+      });
+
+      // Disconnect WA
+      els.btnDisconnectWaDevice?.addEventListener('click', () => {
+        if (confirm('Apakah Anda yakin ingin memutuskan koneksi perangkat WhatsApp ini?')) {
+          this.disconnectWhatsApp();
+        }
+      });
+
+      // Open WA Chat directly from Modal
+      els.btnOpenWaChatDirect?.addEventListener('click', () => {
+        TerminalManager.closeRemoteTunnelModal();
+        this.setChatMode('whatsapp');
+      });
+
+      // Save New Contact from Modal
+      els.btnSaveWaNewContact?.addEventListener('click', () => {
+        this.handleSaveNewContact();
+      });
+
+      // Document click to close contact dropdown
+      document.addEventListener('click', (e) => {
+        if (els.waContactDropdownMenu && !els.singleWaContactPickerWrap?.contains(e.target)) {
+          this.closeContactDropdown();
+        }
+      });
+    },
+
+    initSSE() {
+      if (this.sse) {
+        try { this.sse.close(); } catch (_) {}
+      }
+      try {
+        this.sse = new EventSource('/api/wa/events');
+        this.sse.onmessage = (e) => {
+          try {
+            const parsed = JSON.parse(e.data);
+            if (parsed.event === 'status') {
+              this.handleStatusUpdate(parsed.data);
+            } else if (parsed.event === 'qr') {
+              this.handleQrUpdate(parsed.data?.qr);
+            } else if (parsed.event === 'new_message') {
+              this.handleNewMessage(parsed.data);
+            } else if (parsed.event === 'contacts') {
+              this.contacts = parsed.data || [];
+              this.renderSidebarWaChats();
+              this.renderContactDropdownList();
+            }
+          } catch (_) {}
+        };
+        this.sse.onerror = () => {
+          setTimeout(() => this.initSSE(), 5000);
+        };
+      } catch (err) {
+        console.warn('[WA-Client] Gagal menghubungkan SSE:', err.message);
+      }
+    },
+
+    async fetchStatus() {
+      try {
+        const res = await fetch('/api/wa/status');
+        const data = await res.json();
+        if (data.success) {
+          this.handleStatusUpdate(data);
+        }
+      } catch (_) {}
+    },
+
+    async fetchContacts(notify = false) {
+      try {
+        const res = await fetch('/api/wa/contacts');
+        const data = await res.json();
+        if (data.success) {
+          this.contacts = data.contacts || [];
+          this.renderSidebarWaChats();
+          this.renderContactDropdownList();
+          if (notify) showToast(`Kontak WhatsApp tersinkron (${this.contacts.length} kontak)`, 'success');
+        }
+      } catch (_) {}
+    },
+
+    handleStatusUpdate(status) {
+      this.status = status;
+      const isConnected = Boolean(status.connected);
+
+      if (els.waStatusDot) {
+        els.waStatusDot.style.background = isConnected ? '#25D366' : (status.connecting ? '#f59e0b' : '#64748b');
+      }
+      if (els.waStatusText) {
+        els.waStatusText.innerHTML = isConnected
+          ? `🟢 WhatsApp Terhubung (${status.phone || 'Aktif'})`
+          : (status.connecting ? '🟡 Menunggu Scan QR Code...' : '⚪ WhatsApp Belum Terhubung');
+      }
+      if (els.labelConnectWa) {
+        els.labelConnectWa.textContent = isConnected ? 'Hubungkan Ulang' : (status.connecting ? 'Memuat QR...' : 'Hubungkan WhatsApp');
+      }
+      if (els.waModalTabDot) {
+        els.waModalTabDot.style.display = isConnected ? 'inline-block' : 'none';
+      }
+
+      if (isConnected) {
+        if (els.waQrSection) els.waQrSection.style.display = 'none';
+        if (els.waConnectedCard) els.waConnectedCard.style.display = 'flex';
+        if (els.waConnectedPhoneDisplay) els.waConnectedPhoneDisplay.textContent = status.phone || '-';
+        if (els.waContactCountDisplay) els.waContactCountDisplay.textContent = `${this.contacts.length} Kontak`;
+      } else {
+        if (els.waConnectedCard) els.waConnectedCard.style.display = 'none';
+        if (els.waQrSection) els.waQrSection.style.display = 'block';
+        if (status.qr) {
+          this.handleQrUpdate(status.qr);
+        } else {
+          if (els.waQrCodeImg) els.waQrCodeImg.style.display = 'none';
+          if (els.waQrCodePlaceholder) els.waQrCodePlaceholder.style.display = 'flex';
+        }
+      }
+    },
+
+    handleQrUpdate(qrDataUrl) {
+      if (!qrDataUrl) return;
+      if (els.waQrCodeImg) {
+        els.waQrCodeImg.src = qrDataUrl;
+        els.waQrCodeImg.style.display = 'block';
+      }
+      if (els.waQrCodePlaceholder) {
+        els.waQrCodePlaceholder.style.display = 'none';
+      }
+      if (els.waStatusText) {
+        els.waStatusText.innerHTML = '🟡 Silakan Scan QR Code dari WhatsApp di Ponsel Anda';
+      }
+    },
+
+    handleNewMessage(payload) {
+      const { jid, message, contact } = payload;
+      const idx = this.contacts.findIndex(c => c.id === jid);
+      if (idx !== -1) {
+        this.contacts[idx] = contact;
+      } else {
+        this.contacts.unshift(contact);
+      }
+      this.renderSidebarWaChats();
+      this.renderContactDropdownList();
+
+      if (STATE.chatMode === 'whatsapp' && this.activeContact && this.activeContact.id === jid) {
+        this.appendMessageBubble(message);
+        if (!message.fromMe) AudioEngine.receive?.() || AudioEngine.click();
+      } else {
+        if (!message.fromMe) {
+          if (els.waUnreadBadgeDot) els.waUnreadBadgeDot.style.display = 'inline-block';
+          if (els.sidebarWaUnreadDot) els.sidebarWaUnreadDot.style.display = 'inline-block';
+          showToast(`💬 Pesan baru dari ${contact.name}: ${message.text ? message.text.slice(0, 40) : 'Pesan baru'}`, 'info');
+        }
+      }
+    },
+
+    async connectWhatsApp(forceNew = false) {
+      if (els.waStatusText) els.waStatusText.textContent = '🟡 Memulai inisialisasi WhatsApp Web...';
+      try {
+        const res = await fetch('/api/wa/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ forceNew })
+        });
+        const data = await res.json();
+        if (data.success) {
+          this.handleStatusUpdate(data);
+          showToast('Gerbang WhatsApp aktif. Silakan scan QR code.', 'info');
+        } else {
+          showToast(`Gagal: ${data.error}`, 'error');
+        }
+      } catch (err) {
+        showToast(`Koneksi error: ${err.message}`, 'error');
+      }
+    },
+
+    async disconnectWhatsApp() {
+      try {
+        const res = await fetch('/api/wa/disconnect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ logout: true })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('WhatsApp berhasil diputuskan.', 'info');
+          this.fetchStatus();
+        }
+      } catch (err) {
+        showToast(`Gagal putuskan: ${err.message}`, 'error');
+      }
+    },
+
+    async handleSaveNewContact() {
+      const name = els.inputWaNewContactName ? els.inputWaNewContactName.value.trim() : '';
+      const phone = els.inputWaNewContactPhone ? els.inputWaNewContactPhone.value.trim() : '';
+      if (!phone) {
+        showToast('Nomor WhatsApp wajib diisi!', 'warning');
+        els.inputWaNewContactPhone?.focus();
+        return;
+      }
+      try {
+        const res = await fetch('/api/wa/contacts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name || phone, phone })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`Kontak "${data.contact.name}" berhasil disimpan!`, 'success');
+          if (els.inputWaNewContactName) els.inputWaNewContactName.value = '';
+          if (els.inputWaNewContactPhone) els.inputWaNewContactPhone.value = '';
+          this.fetchContacts();
+          this.selectContact(data.contact);
+          this.setChatMode('whatsapp');
+          TerminalManager.closeRemoteTunnelModal();
+        } else {
+          showToast(`Gagal simpan kontak: ${data.error}`, 'error');
+        }
+      } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+      }
+    },
+
+    switchQrModalTab(tab = 'terminal') {
+      const isTerminal = tab === 'terminal';
+      if (els.tabQrTerminal) {
+        els.tabQrTerminal.classList.toggle('active', isTerminal);
+        els.tabQrTerminal.setAttribute('aria-selected', String(isTerminal));
+      }
+      if (els.tabQrWhatsApp) {
+        els.tabQrWhatsApp.classList.toggle('active', !isTerminal);
+        els.tabQrWhatsApp.setAttribute('aria-selected', String(!isTerminal));
+      }
+      if (els.paneQrTerminal) els.paneQrTerminal.style.display = isTerminal ? 'block' : 'none';
+      if (els.paneQrWhatsApp) els.paneQrWhatsApp.style.display = !isTerminal ? 'block' : 'none';
+
+      if (!isTerminal) {
+        this.fetchStatus();
+      }
+    },
+
+    openQrModalWithTab(tab = 'whatsapp') {
+      TerminalManager.openRemoteTunnelModal();
+      this.switchQrModalTab(tab);
+    },
+
+    setChatMode(mode = 'ai', render = true) {
+      STATE.chatMode = mode;
+      localStorage.setItem('zoz_chat_mode', mode);
+
+      const isAi = mode === 'ai';
+      if (els.btnChatModeAi) els.btnChatModeAi.classList.toggle('active', isAi);
+      if (els.btnChatModeWa) els.btnChatModeWa.classList.toggle('active', !isAi);
+
+      if (isAi) {
+        if (els.singleModelPickerWrap) els.singleModelPickerWrap.style.display = 'block';
+        if (els.singleWaContactPickerWrap) els.singleWaContactPickerWrap.style.display = 'none';
+        if (els.promptInput) {
+          els.promptInput.placeholder = "Ketik pesan untuk AI atau ketik '/' untuk skill...";
+        }
+        this.setSidebarHistoryTab('ai');
+        if (render) {
+          renderCurrentSession();
+        }
+      } else {
+        if (els.singleModelPickerWrap) els.singleModelPickerWrap.style.display = 'none';
+        if (els.singleWaContactPickerWrap) els.singleWaContactPickerWrap.style.display = 'block';
+        this.setSidebarHistoryTab('whatsapp');
+
+        if (els.waUnreadBadgeDot) els.waUnreadBadgeDot.style.display = 'none';
+
+        if (!this.activeContact && this.contacts.length > 0) {
+          this.activeContact = this.contacts[0];
+        }
+        this.updateContactChipUI();
+
+        if (render) {
+          if (this.activeContact) {
+            this.loadMessagesForContact(this.activeContact.id);
+          } else {
+            this.renderEmptyWaState();
+          }
+        }
+      }
+    },
+
+    setSidebarHistoryTab(tab = 'ai') {
+      const isAi = tab === 'ai';
+      if (els.tabSidebarAiHistory) els.tabSidebarAiHistory.classList.toggle('active', isAi);
+      if (els.tabSidebarWaHistory) els.tabSidebarWaHistory.classList.toggle('active', !isAi);
+      if (els.historyLabelTitle) {
+        els.historyLabelTitle.textContent = isAi ? 'Riwayat AI' : 'Kontak WhatsApp';
+      }
+      if (els.chatHistoryList) els.chatHistoryList.style.display = isAi ? 'block' : 'none';
+      if (els.waChatHistoryList) els.waChatHistoryList.style.display = !isAi ? 'block' : 'none';
+
+      if (!isAi) {
+        if (els.sidebarWaUnreadDot) els.sidebarWaUnreadDot.style.display = 'none';
+        this.renderSidebarWaChats();
+      }
+    },
+
+    toggleContactDropdown() {
+      if (!els.waContactDropdownMenu) return;
+      const isShown = els.waContactDropdownMenu.style.display === 'block';
+      if (isShown) {
+        this.closeContactDropdown();
+      } else {
+        this.openContactDropdown();
+      }
+    },
+
+    openContactDropdown() {
+      if (!els.waContactDropdownMenu) return;
+      this.renderContactDropdownList();
+      els.waContactDropdownMenu.style.display = 'block';
+      if (els.waContactSearchInput) {
+        els.waContactSearchInput.value = '';
+        setTimeout(() => els.waContactSearchInput.focus(), 100);
+      }
+    },
+
+    closeContactDropdown() {
+      if (els.waContactDropdownMenu) {
+        els.waContactDropdownMenu.style.display = 'none';
+      }
+    },
+
+    updateContactChipUI() {
+      if (els.currentWaContactLabel) {
+        els.currentWaContactLabel.textContent = this.activeContact ? this.activeContact.name : 'Pilih Kontak WA';
+      }
+      if (els.promptInput) {
+        els.promptInput.placeholder = this.activeContact
+          ? `Kirim pesan WhatsApp ke ${this.activeContact.name}...`
+          : 'Pilih kontak WhatsApp terlebih dahulu...';
+      }
+    },
+
+    selectContact(contact) {
+      this.activeContact = contact;
+      contact.unreadCount = 0;
+      this.updateContactChipUI();
+      this.closeContactDropdown();
+      this.renderSidebarWaChats();
+      this.loadMessagesForContact(contact.id);
+    },
+
+    renderContactDropdownList(filter = '') {
+      if (!els.waContactList) return;
+      els.waContactList.innerHTML = '';
+
+      let list = this.contacts;
+      if (filter) {
+        list = list.filter(c => (c.name || '').toLowerCase().includes(filter) || (c.phone || '').includes(filter));
+      }
+
+      if (list.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.padding = '14px 10px';
+        empty.style.textAlign = 'center';
+        empty.style.color = 'var(--text-dim)';
+        empty.style.fontSize = '0.78rem';
+        empty.innerHTML = filter
+          ? `Tidak ada kontak cocok dengan "<b>${escapeHtml(filter)}</b>"`
+          : 'Belum ada kontak WhatsApp. Klik <b>+ Tambah Kontak</b> untuk menambahkan.';
+        els.waContactList.appendChild(empty);
+        return;
+      }
+
+      list.forEach(c => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'image-model-item' + (this.activeContact && this.activeContact.id === c.id ? ' active' : '');
+        item.style.padding = '7px 10px';
+
+        const initial = (c.name || c.phone || 'W').charAt(0).toUpperCase();
+        item.innerHTML = `
+          <div class="image-model-icon-box" style="background: rgba(37,211,102,0.15); border-color: rgba(37,211,102,0.4); color: #25D366; font-weight: bold; width: 32px; height: 32px;">
+            ${initial}
+          </div>
+          <div class="image-model-info" style="text-align: left;">
+            <div class="image-model-title-row">
+              <span class="image-model-title" style="color: #25D366;">${escapeHtml(c.name || c.phone)}</span>
+              ${c.unreadCount > 0 ? `<span class="wa-chat-unread">${c.unreadCount}</span>` : ''}
+            </div>
+            <span class="image-model-desc">${escapeHtml(c.phone || '')} &bull; ${escapeHtml(c.lastMessage || 'Tidak ada pesan')}</span>
+          </div>
+          ${this.activeContact && this.activeContact.id === c.id ? '<i class="fa-solid fa-check image-model-check"></i>' : ''}
+        `;
+
+        item.addEventListener('click', () => {
+          this.selectContact(c);
+        });
+
+        els.waContactList.appendChild(item);
+      });
+    },
+
+    renderSidebarWaChats() {
+      if (!els.waChatHistoryList) return;
+      els.waChatHistoryList.innerHTML = '';
+
+      if (this.contacts.length === 0) {
+        els.waChatHistoryList.innerHTML = `
+          <div style="padding: 24px 12px; text-align: center; color: var(--text-dim); font-size: 0.78rem;">
+            <i class="fa-brands fa-whatsapp" style="font-size: 1.8rem; color: #25D366; opacity: 0.5; margin-bottom: 8px;"></i>
+            <p>Belum ada obrolan WhatsApp.</p>
+            <button type="button" class="btn btn-xs btn-outline" id="btnSidebarAddFirstWaContact" style="margin-top: 8px; border-color: rgba(37,211,102,0.4); color: #25D366;">
+              <i class="fa-solid fa-plus"></i> Tambah Kontak Baru
+            </button>
+          </div>
+        `;
+        document.getElementById('btnSidebarAddFirstWaContact')?.addEventListener('click', () => {
+          this.openQrModalWithTab('whatsapp');
+        });
+        return;
+      }
+
+      this.contacts.forEach(c => {
+        const item = document.createElement('div');
+        const isActive = this.activeContact && this.activeContact.id === c.id;
+        item.className = 'wa-chat-item' + (isActive ? ' active' : '');
+
+        const initial = (c.name || c.phone || 'W').charAt(0).toUpperCase();
+        let timeStr = '';
+        if (c.lastTimestamp) {
+          const d = new Date(c.lastTimestamp);
+          timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        }
+
+        item.innerHTML = `
+          <div class="wa-chat-avatar">${initial}</div>
+          <div class="wa-chat-info">
+            <div class="wa-chat-top-row">
+              <span class="wa-chat-name">${escapeHtml(c.name || c.phone)}</span>
+              <span class="wa-chat-time">${timeStr}</span>
+            </div>
+            <div class="wa-chat-bottom-row">
+              <span class="wa-chat-preview">${escapeHtml(c.lastMessage || 'Ketuk untuk membuka')}</span>
+              ${c.unreadCount > 0 ? `<span class="wa-chat-unread">${c.unreadCount}</span>` : ''}
+            </div>
+          </div>
+        `;
+
+        item.addEventListener('click', () => {
+          this.selectContact(c);
+          if (STATE.chatMode !== 'whatsapp') {
+            this.setChatMode('whatsapp');
+          }
+        });
+
+        els.waChatHistoryList.appendChild(item);
+      });
+    },
+
+    async loadMessagesForContact(jid) {
+      if (!els.chatMessages) return;
+      els.chatMessages.innerHTML = '';
+
+      const headerBar = document.createElement('div');
+      headerBar.className = 'wa-chat-header-bar';
+      headerBar.innerHTML = `
+        <div class="wa-chat-header-info">
+          <i class="fa-brands fa-whatsapp text-emerald-400" style="font-size: 1.1rem;"></i>
+          <span class="wa-chat-header-name">${escapeHtml(this.activeContact?.name || jid)}</span>
+          <span class="wa-chat-header-phone">(${escapeHtml(this.activeContact?.phone || jid.split('@')[0])})</span>
+        </div>
+        <div class="wa-chat-header-actions">
+          <button type="button" id="btnActionClearWaHistory" title="Bersihkan riwayat pesan kontak ini">
+            <i class="fa-solid fa-trash-can"></i>
+          </button>
+        </div>
+      `;
+      headerBar.querySelector('#btnActionClearWaHistory')?.addEventListener('click', async () => {
+        if (confirm(`Hapus riwayat pesan dengan ${this.activeContact?.name || jid}?`)) {
+          await fetch('/api/wa/clear', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid })
+          });
+          this.loadMessagesForContact(jid);
+          this.fetchContacts();
+        }
+      });
+      els.chatMessages.appendChild(headerBar);
+
+      try {
+        const res = await fetch(`/api/wa/messages?jid=${encodeURIComponent(jid)}`);
+        const data = await res.json();
+        const list = data.messages || [];
+
+        if (list.length === 0) {
+          const empty = document.createElement('div');
+          empty.style.padding = '40px 20px';
+          empty.style.textAlign = 'center';
+          empty.style.color = 'var(--text-dim)';
+          empty.innerHTML = `
+            <div style="width: 50px; height: 50px; border-radius: 50%; background: rgba(37,211,102,0.1); border: 1px solid rgba(37,211,102,0.3); color: #25D366; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin: 0 auto 12px;">
+              <i class="fa-brands fa-whatsapp"></i>
+            </div>
+            <p style="font-weight: 600; color: var(--text-main); margin-bottom: 4px;">Percakapan WhatsApp dengan ${escapeHtml(this.activeContact?.name || jid)}</p>
+            <p style="font-size: 0.78rem;">Ketik pesan di bawah untuk mulai mengirim pesan WhatsApp sungguhan.</p>
+          `;
+          els.chatMessages.appendChild(empty);
+        } else {
+          list.forEach(msg => {
+            this.appendMessageBubble(msg);
+          });
+        }
+
+        if (els.chatViewport) els.chatViewport.scrollTop = els.chatViewport.scrollHeight;
+      } catch (err) {
+        showToast(`Gagal memuat pesan: ${err.message}`, 'error');
+      }
+    },
+
+    renderEmptyWaState() {
+      if (!els.chatMessages) return;
+      els.chatMessages.innerHTML = `
+        <div style="padding: 60px 20px; text-align: center; color: var(--text-dim); max-width: 500px; margin: 0 auto;">
+          <div style="width: 60px; height: 60px; border-radius: 50%; background: rgba(37,211,102,0.12); border: 1px solid rgba(37,211,102,0.4); color: #25D366; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin: 0 auto 16px;">
+            <i class="fa-brands fa-whatsapp"></i>
+          </div>
+          <h3 style="font-weight: 700; color: #25D366; font-size: 1.15rem; margin-bottom: 8px;">Mode Chat WhatsApp Aktif</h3>
+          <p style="font-size: 0.85rem; line-height: 1.5; margin-bottom: 16px;">
+            Anda sekarang berada di mode chat WhatsApp. Pilih kontak dari menu atas atau tambahkan kontak baru untuk mulai mengobrol.
+          </p>
+          <div style="display: flex; gap: 8px; justify-content: center;">
+            <button type="button" class="btn btn-sm btn-primary" id="btnEmptyStateSelectContact">
+              <i class="fa-solid fa-users"></i> Pilih Kontak
+            </button>
+            <button type="button" class="btn btn-sm btn-outline" id="btnEmptyStateOpenQr">
+              <i class="fa-solid fa-qrcode"></i> Scan QR WhatsApp
+            </button>
+          </div>
+        </div>
+      `;
+      document.getElementById('btnEmptyStateSelectContact')?.addEventListener('click', () => {
+        this.openContactDropdown();
+      });
+      document.getElementById('btnEmptyStateOpenQr')?.addEventListener('click', () => {
+        this.openQrModalWithTab('whatsapp');
+      });
+    },
+
+    appendMessageBubble(msg) {
+      if (!els.chatMessages) return;
+
+      const wrap = document.createElement('div');
+      wrap.className = 'wa-bubble-wrap' + (msg.fromMe ? ' wa-bubble-sent' : ' wa-bubble-received');
+
+      const d = new Date(msg.timestamp || Date.now());
+      const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+      wrap.innerHTML = `
+        ${!msg.fromMe ? `<div class="wa-bubble-sender">${escapeHtml(msg.senderName || 'Kontak')}</div>` : ''}
+        <div class="wa-bubble-text">${escapeHtml(msg.text || '')}</div>
+        <div class="wa-bubble-meta">
+          <span>${timeStr}</span>
+          ${msg.fromMe ? '<i class="fa-solid fa-check-double"></i>' : ''}
+        </div>
+      `;
+
+      els.chatMessages.appendChild(wrap);
+      if (els.chatViewport) els.chatViewport.scrollTop = els.chatViewport.scrollHeight;
+    },
+
+    async sendCurrentPrompt(text) {
+      if (!text) return;
+      if (!this.activeContact) {
+        showToast('⚠️ Silakan pilih kontak WhatsApp terlebih dahulu!', 'warning');
+        this.openContactDropdown();
+        return;
+      }
+
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+      }
+
+      const tempMsg = {
+        id: `temp_${Date.now()}`,
+        fromMe: true,
+        text,
+        timestamp: Date.now(),
+        senderName: 'Saya',
+        status: 'sending'
+      };
+      this.appendMessageBubble(tempMsg);
+      AudioEngine.sent?.() || AudioEngine.click();
+
+      try {
+        const res = await fetch('/api/wa/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jid: this.activeContact.id, text })
+        });
+        const data = await res.json();
+        if (!data.success) {
+          showToast(`❌ Gagal kirim WA: ${data.error || 'Terjadi kesalahan'}`, 'error');
+        } else {
+          this.fetchContacts();
+        }
+      } catch (err) {
+        showToast(`❌ Kesalahan jaringan: ${err.message}`, 'error');
+      }
+    }
+  };
+
   // Expose TerminalManager & TerminalEndorphin globally
   window.TerminalManager = TerminalManager;
   window.MultiPaneTerminal = TerminalManager;
   window.TerminalEndorphin = TerminalEndorphin;
+  window.WhatsAppController = WhatsAppController;
 
   // ==================== BOOTSTRAP INITIALIZATION ====================
   function init() {
@@ -34486,6 +35236,7 @@ Aturan:
     ImageLightbox.init();
     BioEndocrine.init();
     ChatEndocrine.init();
+    WhatsAppController.init();
     
     // Initialize Neural Terminal Engine
     if (typeof TerminalManager !== 'undefined') {

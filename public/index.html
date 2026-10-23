@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261023_v437';
+    window.__ZOZ_VERSION__ = 'v20261023_v438';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -93,8 +93,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261023_v437">
-  <link rel="stylesheet" href="style.css?v=20261023_v437">
+  <link rel="preload" as="style" href="style.css?v=20261023_v438">
+  <link rel="stylesheet" href="style.css?v=20261023_v438">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -401,6 +401,17 @@
         </div>
       </div>
 
+      <!-- Chat Mode Switcher: Mode AI vs Mode WhatsApp -->
+      <div class="chat-mode-pill-toggle" id="chatModePillToggle" role="group" aria-label="Pilih Mode Chat">
+        <button type="button" class="chat-mode-pill-btn active" id="btnChatModeAi" title="Mode Chat AI (Ollama & OpenRouter)">
+          <i class="fa-solid fa-brain"></i> <span class="mode-label">AI</span>
+        </button>
+        <button type="button" class="chat-mode-pill-btn" id="btnChatModeWa" title="Mode Chat WhatsApp (Kirim & Terima Pesan Asli)">
+          <i class="fa-brands fa-whatsapp text-emerald-400"></i> <span class="mode-label">WA</span>
+          <span class="wa-unread-badge-dot" id="waUnreadBadgeDot" style="display: none;"></span>
+        </button>
+      </div>
+
       <div class="relative group model-picker-container" id="singleModelPickerWrap">
         <button class="flex items-center space-x-2 bg-white/[0.04] hover:bg-white/[0.08] hover:border-teal-500/30 border border-white/[0.08] text-slate-200 px-3 py-1 rounded-lg transition-all duration-150 text-[11.5px] font-mono cursor-pointer model-picker-chip" id="modelPickerChip" title="Pilih Model Utama" type="button">
           <svg class="lucide lucide-cpu w-3.5 h-3.5 text-teal-400 chip-icon" data-lucide="cpu" fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M12 20v2"></path><path d="M12 2v2"></path><path d="M17 20v2"></path><path d="M17 2v2"></path><path d="M2 12h2"></path><path d="M2 17h2"></path><path d="M2 7h2"></path><path d="M20 12h2"></path><path d="M20 17h2"></path><path d="M20 7h2"></path><path d="M7 20v2"></path><path d="M7 2v2"></path><rect height="16" rx="2" width="16" x="4" y="4"></rect><rect height="8" rx="1" width="8" x="8" y="8"></rect></svg>
@@ -442,6 +453,33 @@
                 <button class="btn btn-sm btn-outline" id="useCustomModelBtn">Gunakan</button>
               </div>
             </div>
+      </div>
+
+      <!-- Mode 2: WhatsApp Contact Picker (Posisinya sama persis dengan AI model picker) -->
+      <div class="relative group model-picker-container" id="singleWaContactPickerWrap" style="display: none;">
+        <button class="flex items-center space-x-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 px-3 py-1 rounded-lg transition-all duration-150 text-[11.5px] font-mono cursor-pointer model-picker-chip" id="waContactPickerChip" title="Pilih Kontak WhatsApp" type="button">
+          <i class="fa-brands fa-whatsapp text-emerald-400 chip-icon"></i>
+          <span class="text-emerald-200 font-medium current-model-name" id="currentWaContactLabel">Pilih Kontak WA</span>
+          <svg class="lucide lucide-chevron-down w-3 h-3 text-emerald-400 chip-arrow" fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="m6 9 6 6 6-6"></path></svg>
+        </button>
+
+        <div class="model-dropdown-menu wa-contact-dropdown-menu" id="waContactDropdownMenu" style="display: none;">
+          <div class="dropdown-header" style="padding: 8px 10px;">
+            <input type="text" id="waContactSearchInput" placeholder="Cari nama atau nomor kontak WA...">
+          </div>
+          <div style="padding: 0 10px 6px 10px; display: flex; gap: 6px;">
+            <button type="button" class="btn btn-xs btn-outline" id="btnOpenAddContactFromDropdown" style="flex: 1; border-color: rgba(16,185,129,0.4); color: #10b981; background: rgba(16,185,129,0.08); display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600;">
+              <i class="fa-solid fa-user-plus"></i> + Tambah Kontak
+            </button>
+            <button type="button" class="btn btn-xs btn-outline" id="btnSyncWaContacts" style="border-color: rgba(255,255,255,0.2); color: var(--text-dim);" title="Refresh Kontak">
+              <i class="fa-solid fa-rotate"></i>
+            </button>
+          </div>
+          <!-- Contact List -->
+          <div class="dropdown-model-list wa-contact-list" id="waContactList">
+            <!-- Dynamically populated contacts -->
+          </div>
+        </div>
       </div>
 
       <!-- Action Button 1: Peers / Preset Persona -->
@@ -573,8 +611,19 @@
 
         <!-- Conversation History Section -->
         <div class="pt-2 flex-1 flex flex-col min-h-0 history-section">
+          <!-- Dual History Mode Tabs (Sesi AI vs Chat WhatsApp) -->
+          <div class="sidebar-history-mode-tabs" id="sidebarHistoryModeTabs">
+            <button type="button" class="sidebar-hist-tab active" id="tabSidebarAiHistory" title="Riwayat Obrolan AI">
+              <i class="fa-solid fa-brain"></i> <span>Sesi AI</span>
+            </button>
+            <button type="button" class="sidebar-hist-tab" id="tabSidebarWaHistory" title="Riwayat Chat WhatsApp">
+              <i class="fa-brands fa-whatsapp text-emerald-400"></i> <span>WhatsApp</span>
+              <span class="sidebar-wa-unread-dot" id="sidebarWaUnreadDot" style="display: none;"></span>
+            </button>
+          </div>
+
           <div class="flex items-center justify-between px-1 mb-2 history-label-row" id="historyLabelRow">
-            <div class="text-[10px] font-mono font-medium text-slate-500 uppercase tracking-wider history-label">Riwayat Percakapan</div>
+            <div class="text-[10px] font-mono font-medium text-slate-500 uppercase tracking-wider history-label" id="historyLabelTitle">Riwayat AI</div>
             <button class="text-slate-500 hover:text-slate-300 transition-colors history-select-toggle-btn" id="btnToggleHistorySelectMode" title="Pilih Beberapa Percakapan (Multi-Select)" type="button">
               <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="sliders-horizontal" aria-hidden="true" class="lucide lucide-sliders-horizontal w-3 h-3"><path d="M10 5H3"></path><path d="M12 19H3"></path><path d="M14 3v4"></path><path d="M16 17v4"></path><path d="M21 12h-9"></path><path d="M21 19h-5"></path><path d="M21 5h-7"></path><path d="M8 10v4"></path><path d="M8 12H3"></path></svg>
             </button>
@@ -583,6 +632,9 @@
             <div class="py-10 px-4 text-center rounded-xl bg-white/[0.01]">
               <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="message-square-dashed" aria-hidden="true" class="lucide lucide-message-square-dashed w-6 h-6 mx-auto text-slate-600 mb-2 stroke-[1.5]"><path d="M14 3h2"></path><path d="M16 19h-2"></path><path d="M2 12v-2"></path><path d="M2 16v5.286a.71.71 0 0 0 1.212.502l1.149-1.149"></path><path d="M20 19a2 2 0 0 0 2-2v-1"></path><path d="M22 10v2"></path><path d="M22 6V5a2 2 0 0 0-2-2"></path><path d="M4 3a2 2 0 0 0-2 2v1"></path><path d="M8 19h2"></path><path d="M8 3h2"></path></svg>
             </div>
+          </div>
+          <div class="chat-history-list flex-1 overflow-y-auto space-y-1" id="waChatHistoryList" style="display: none;">
+            <!-- Dynamically populated WhatsApp contact conversations -->
           </div>
         </div>
       </div>
@@ -2547,73 +2599,158 @@
     </div>
   </div>
 
-  <!-- Modal Cloudflare Tunnel Host Broadcaster (Desktop Mode) -->
+  <!-- Modal Cloudflare Tunnel Host Broadcaster & WhatsApp Pairing (Dual QR Mode) -->
   <div class="modal-backdrop" id="termRemoteTunnelModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="termTunnelModalTitle">
     <div class="modal-dialog term-tunnel-dialog">
       <div class="modal-header">
         <div class="term-tunnel-modal-title" id="termTunnelModalTitle">
-          <i class="fa-solid fa-cloud" style="color: #38bdf8;"></i>
-          <span>Akses Remote WAN // Cloudflare Tunnel</span>
+          <i class="fa-solid fa-qrcode" style="color: var(--neon-cyan);"></i>
+          <span>Gerbang QR & Remote (Terminal & WhatsApp)</span>
         </div>
-        <button type="button" class="tb-btn icon-only" id="btnTermRemoteTunnelClose" title="Tutup Modal Tunnel">
+        <button type="button" class="tb-btn icon-only" id="btnTermRemoteTunnelClose" title="Tutup Modal">
           <i class="fa-solid fa-xmark"></i>
         </button>
       </div>
       <div class="modal-body term-tunnel-body">
-        <!-- Tunnel Status Row -->
-        <div class="term-tunnel-status-row">
-          <div class="term-tunnel-status-info">
-            <span class="term-tunnel-status-dot" id="termTunnelStatusDot"></span>
-            <span class="term-tunnel-status-text" id="termTunnelStatusText">⚪ Tunnel Cloudflare Nonaktif</span>
-          </div>
-          <button type="button" class="term-tunnel-btn" id="btnTermToggleTunnel">
-            <i class="fa-solid fa-power-off"></i> <span id="labelTermToggleTunnel">Nyalakan Tunnel</span>
+        <!-- Segmented Tab Switcher (Mode 1: Terminal Remote HP vs Mode 2: WhatsApp Gateway) -->
+        <div class="qr-modal-tabs-nav" id="qrModalTabsNav" role="tablist">
+          <button type="button" class="qr-modal-tab-btn active" id="tabQrTerminal" data-tab="terminal" role="tab" aria-selected="true">
+            <i class="fa-solid fa-terminal"></i> <span>Terminal Remote (HP)</span>
+          </button>
+          <button type="button" class="qr-modal-tab-btn" id="tabQrWhatsApp" data-tab="whatsapp" role="tab" aria-selected="false">
+            <i class="fa-brands fa-whatsapp text-emerald-400"></i> <span>WhatsApp Gateway</span>
+            <span class="wa-status-dot-mini" id="waModalTabDot" style="display: none;"></span>
           </button>
         </div>
 
-        <!-- Tunnel URL Section -->
-        <div class="term-tunnel-section">
-          <label class="term-tunnel-label"><i class="fa-solid fa-globe"></i> Alamat Publik Cloudflare Tunnel (HTTPS / WSS)</label>
-          <div class="term-tunnel-input-copy">
-            <input type="text" id="termTunnelUrlInput" readonly placeholder="Tunnel belum aktif (Klik 'Nyalakan Tunnel')" spellcheck="false">
-            <button type="button" class="term-tunnel-copy-btn" id="btnTermCopyTunnelUrl" title="Salin URL Tunnel">
-              <i class="fa-solid fa-copy"></i> Salin
+        <!-- PANE 1: TERMINAL REMOTE CLOUDFLARE -->
+        <div class="qr-modal-pane" id="paneQrTerminal">
+          <!-- Tunnel Status Row -->
+          <div class="term-tunnel-status-row">
+            <div class="term-tunnel-status-info">
+              <span class="term-tunnel-status-dot" id="termTunnelStatusDot"></span>
+              <span class="term-tunnel-status-text" id="termTunnelStatusText">⚪ Tunnel Cloudflare Nonaktif</span>
+            </div>
+            <button type="button" class="term-tunnel-btn" id="btnTermToggleTunnel">
+              <i class="fa-solid fa-power-off"></i> <span id="labelTermToggleTunnel">Nyalakan Tunnel</span>
             </button>
           </div>
-        </div>
 
-        <!-- Session PIN Section -->
-        <div class="term-tunnel-section">
-          <div class="term-tunnel-section-header">
-            <label class="term-tunnel-label"><i class="fa-solid fa-shield-halved"></i> 6-Digit PIN Keamanan Sesi</label>
-            <button type="button" class="term-tunnel-mini-btn" id="btnTermRegenTunnelPin" title="Generate ulang PIN keamanan">
-              <i class="fa-solid fa-rotate-right"></i> PIN Baru
-            </button>
+          <!-- Tunnel URL Section -->
+          <div class="term-tunnel-section">
+            <label class="term-tunnel-label"><i class="fa-solid fa-globe"></i> Alamat Publik Cloudflare Tunnel (HTTPS / WSS)</label>
+            <div class="term-tunnel-input-copy">
+              <input type="text" id="termTunnelUrlInput" readonly placeholder="Tunnel belum aktif (Klik 'Nyalakan Tunnel')" spellcheck="false">
+              <button type="button" class="term-tunnel-copy-btn" id="btnTermCopyTunnelUrl" title="Salin URL Tunnel">
+                <i class="fa-solid fa-copy"></i> Salin
+              </button>
+            </div>
           </div>
-          <div class="term-tunnel-pin-row">
-            <div class="term-tunnel-pin-digits" id="termTunnelPinDisplay">------</div>
-            <button type="button" class="term-tunnel-copy-btn" id="btnTermCopyTunnelPin" title="Salin PIN">
-              <i class="fa-solid fa-copy"></i> Salin PIN
-            </button>
-          </div>
-          <p class="term-tunnel-note">Koneksi dari luar jaringan lokal (HP di sekolah) wajib memasukkan PIN ini untuk mengamankan PowerShell laptop Anda.</p>
-        </div>
 
-        <!-- QR Code Pairing Section -->
-        <div class="term-tunnel-section qr-section">
-          <label class="term-tunnel-label"><i class="fa-solid fa-qrcode"></i> Scan QR Code dari HP (Auto-Pairing)</label>
-          <div class="term-tunnel-qr-wrap">
-            <div class="term-tunnel-qr-box" id="termTunnelQrContainer">
-              <img id="termTunnelQrImg" src="" alt="QR Code Remote Tunnel" style="display: none;">
-              <div id="termTunnelQrPlaceholder" class="term-tunnel-qr-placeholder">
-                <i class="fa-solid fa-qrcode" style="font-size: 2.2rem; opacity: 0.35;"></i>
-                <span>Nyalakan tunnel untuk membuat QR pairing</span>
+          <!-- Session PIN Section -->
+          <div class="term-tunnel-section">
+            <div class="term-tunnel-section-header">
+              <label class="term-tunnel-label"><i class="fa-solid fa-shield-halved"></i> 6-Digit PIN Keamanan Sesi</label>
+              <button type="button" class="term-tunnel-mini-btn" id="btnTermRegenTunnelPin" title="Generate ulang PIN keamanan">
+                <i class="fa-solid fa-rotate-right"></i> PIN Baru
+              </button>
+            </div>
+            <div class="term-tunnel-pin-row">
+              <div class="term-tunnel-pin-digits" id="termTunnelPinDisplay">------</div>
+              <button type="button" class="term-tunnel-copy-btn" id="btnTermCopyTunnelPin" title="Salin PIN">
+                <i class="fa-solid fa-copy"></i> Salin PIN
+              </button>
+            </div>
+            <p class="term-tunnel-note">Koneksi dari luar jaringan lokal (HP di sekolah) wajib memasukkan PIN ini untuk mengamankan PowerShell laptop Anda.</p>
+          </div>
+
+          <!-- QR Code Pairing Section -->
+          <div class="term-tunnel-section qr-section">
+            <label class="term-tunnel-label"><i class="fa-solid fa-qrcode"></i> Scan QR Code dari HP (Auto-Pairing)</label>
+            <div class="term-tunnel-qr-wrap">
+              <div class="term-tunnel-qr-box" id="termTunnelQrContainer">
+                <img id="termTunnelQrImg" src="" alt="QR Code Remote Tunnel" style="display: none;">
+                <div id="termTunnelQrPlaceholder" class="term-tunnel-qr-placeholder">
+                  <i class="fa-solid fa-qrcode" style="font-size: 2.2rem; opacity: 0.35;"></i>
+                  <span>Nyalakan tunnel untuk membuat QR pairing</span>
+                </div>
+              </div>
+              <div class="term-tunnel-qr-desc">
+                <p>Scan menggunakan kamera HP Anda sebelum berangkat. HP akan otomatis membuka terminal dan terhubung ke PowerShell di laptop rumah.</p>
+                <button type="button" class="term-tunnel-btn small" id="btnTermCopyRemoteFullUrl">
+                  <i class="fa-solid fa-link"></i> Salin Link Lengkap Remote
+                </button>
               </div>
             </div>
-            <div class="term-tunnel-qr-desc">
-              <p>Scan menggunakan kamera HP Anda sebelum berangkat. HP akan otomatis membuka terminal dan terhubung ke PowerShell di laptop rumah.</p>
-              <button type="button" class="term-tunnel-btn small" id="btnTermCopyRemoteFullUrl">
-                <i class="fa-solid fa-link"></i> Salin Link Lengkap Remote
+          </div>
+        </div>
+
+        <!-- PANE 2: WHATSAPP GATEWAY -->
+        <div class="qr-modal-pane" id="paneQrWhatsApp" style="display: none;">
+          <!-- WA Status Row -->
+          <div class="term-tunnel-status-row">
+            <div class="term-tunnel-status-info">
+              <span class="term-tunnel-status-dot" id="waStatusDot"></span>
+              <span class="term-tunnel-status-text" id="waStatusText">⚪ Memeriksa Status WhatsApp...</span>
+            </div>
+            <button type="button" class="term-tunnel-btn" id="btnConnectWa">
+              <i class="fa-solid fa-plug"></i> <span id="labelConnectWa">Hubungkan WhatsApp</span>
+            </button>
+          </div>
+
+          <!-- WA QR Code / Pairing Display Section -->
+          <div class="term-tunnel-section qr-section" id="waQrSection">
+            <label class="term-tunnel-label"><i class="fa-brands fa-whatsapp text-emerald-400"></i> Pindai QR WhatsApp Web dari HP</label>
+            <div class="term-tunnel-qr-wrap">
+              <div class="term-tunnel-qr-box" id="waQrContainer">
+                <img id="waQrCodeImg" src="" alt="QR Code WhatsApp" style="display: none;">
+                <div id="waQrCodePlaceholder" class="term-tunnel-qr-placeholder">
+                  <i class="fa-brands fa-whatsapp" style="font-size: 2.5rem; color: #25D366; opacity: 0.7;"></i>
+                  <span id="waQrPlaceholderText">Klik 'Hubungkan WhatsApp' untuk memuat QR</span>
+                </div>
+              </div>
+              <div class="term-tunnel-qr-desc">
+                <p>1. Buka aplikasi <b>WhatsApp</b> di ponsel Anda.<br>
+                   2. Ketuk <b>Titik Tiga ⋮</b> atau <b>Setelan</b> &gt; <b>Perangkat Tertaut</b>.<br>
+                   3. Ketuk <b>Tautkan Perangkat</b> lalu scan kode QR di samping.</p>
+                <div style="display: flex; gap: 8px; margin-top: 10px;">
+                  <button type="button" class="term-tunnel-btn small" id="btnRefreshWaQr">
+                    <i class="fa-solid fa-rotate-right"></i> Refresh QR
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- WA Connected State Card (Ditampilkan saat terhubung) -->
+          <div class="wa-connected-card" id="waConnectedCard" style="display: none;">
+            <div class="wa-connected-header">
+              <div class="wa-avatar-badge">
+                <i class="fa-brands fa-whatsapp"></i>
+              </div>
+              <div class="wa-details">
+                <h4 class="wa-title">WhatsApp Terhubung Aktif</h4>
+                <p class="wa-sub" id="waConnectedSub">Nomor: <span id="waConnectedPhoneDisplay">-</span> &bull; <span id="waContactCountDisplay">0 Kontak</span></p>
+              </div>
+            </div>
+            <div class="wa-actions-row">
+              <button type="button" class="btn btn-sm btn-primary" id="btnOpenWaChatDirect">
+                <i class="fa-solid fa-comments"></i> Buka Chat WhatsApp Sekarang
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-danger" id="btnDisconnectWaDevice">
+                <i class="fa-solid fa-arrow-right-from-bracket"></i> Putuskan Perangkat
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick Add Contact Section -->
+          <div class="term-tunnel-section wa-add-contact-section" style="margin-top: 14px;">
+            <label class="term-tunnel-label"><i class="fa-solid fa-user-plus text-emerald-400"></i> Tambah Kontak WhatsApp Manual</label>
+            <div class="wa-contact-form-grid">
+              <input type="text" id="inputWaNewContactName" class="term-tunnel-inline-input" placeholder="Nama Kontak (mis. Budi, Klien)">
+              <input type="tel" id="inputWaNewContactPhone" class="term-tunnel-inline-input" placeholder="Nomor WA (mis. 08123456789 atau 628...)">
+              <button type="button" class="term-tunnel-btn" id="btnSaveWaNewContact">
+                <i class="fa-solid fa-plus"></i> Simpan
               </button>
             </div>
           </div>
@@ -2674,8 +2811,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261023_v437" defer></script>
+  <script src="text-safety.js?v=20261023_v438" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261023_v437" defer></script>
+  <script src="app.js?v=20261023_v438" defer></script>
 </body>
 </html>
