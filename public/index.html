@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261022_v432';
+    window.__ZOZ_VERSION__ = 'v20261022_v433';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -1907,43 +1907,44 @@
           <section aria-label="Metrik Emosi" class="endocrine-util-sec">
             <div class="endocrine-util-sec-title">
               &gt; EMOTIONAL GAUGES &amp; EQUILIBRIUM (CHATENDOCRINE V2)
+              <span style="color: #38bdf8; font-size: 0.72rem; font-weight: 600; margin-left: 8px;">&bull; SINKRON RUMUS )+-+~</span>
             </div>
             <div class="endocrine-util-gauges-grid">
               <!-- Sakit -->
               <div class="endocrine-util-gauge-card">
                 <div class="gauge-header">
-                  <span class="gauge-title">SAKIT (Luka Batin &amp; Distress)</span>
-                  <span class="gauge-val-clear" id="chatEmotionSakitVal">0% CLEAR</span>
+                  <span class="gauge-title">SAKIT <span style="font-size:0.75rem; color:#c084fc; font-weight:700;">[~: <span id="gaugeFormulaTilde">3</span>]</span> (Luka Batin &amp; Distress)</span>
+                  <span class="gauge-val-crit" id="chatEmotionSakitVal">30% ACTIVE</span>
                 </div>
-                <div class="ascii-gauge-bar text-zinc" id="chatEmotionSakitAscii">[....................]</div>
-                <p class="gauge-caption">Kepedihan emosional, kekecewaan, duka, atau empati luka batin (non-fisik).</p>
+                <div class="ascii-gauge-bar text-rose" id="chatEmotionSakitAscii">[||||||..............]</div>
+                <p class="gauge-caption">Kepedihan emosional &amp; attachment rupture &bull; Diturunkan dari Rumus <code>~</code>.</p>
               </div>
               <!-- Senang -->
               <div class="endocrine-util-gauge-card">
                 <div class="gauge-header">
-                  <span class="gauge-title">SENANG (Keriangan &amp; Gairah)</span>
+                  <span class="gauge-title">SENANG <span style="font-size:0.75rem; color:#38bdf8; font-weight:700;">[3: <span id="gaugeFormulaPos1">50%</span>]</span> (Keriangan &amp; Gairah)</span>
                   <span class="gauge-val-warn" id="chatEmotionSenangVal">45% ACTIVE</span>
                 </div>
                 <div class="ascii-gauge-bar text-amber" id="chatEmotionSenangAscii">[|||||||||...........]</div>
-                <p class="gauge-caption">Kesenangan kognitif, humor, stimulasi ide seru, dan antusiasme aktif.</p>
+                <p class="gauge-caption">Kesenangan kognitif &amp; stimulasi antusiasme &bull; Diturunkan dari Rumus <code>3</code>.</p>
               </div>
               <!-- Bahagia -->
               <div class="endocrine-util-gauge-card">
                 <div class="gauge-header">
-                  <span class="gauge-title">BAHAGIA (Ketenteraman &amp; Syukur)</span>
-                  <span class="gauge-val-opt" id="chatEmotionBahagiaVal">60% ACTIVE</span>
+                  <span class="gauge-title">BAHAGIA <span style="font-size:0.75rem; color:#fb7185; font-weight:700;">[-: <span id="gaugeFormulaDash">5</span>]</span> (Ketenteraman &amp; Syukur)</span>
+                  <span class="gauge-val-opt" id="chatEmotionBahagiaVal">50% ACTIVE</span>
                 </div>
-                <div class="ascii-gauge-bar text-emerald" id="chatEmotionBahagiaAscii">[||||||||||||........]</div>
-                <p class="gauge-caption">Kedamaian rasa, rasa syukur mendalam, keutuhan ikatan, dan kepuasan harmonis.</p>
+                <div class="ascii-gauge-bar text-emerald" id="chatEmotionBahagiaAscii">[||||||||||..........]</div>
+                <p class="gauge-caption">Kedamaian rasa &amp; kehangatan ikatan &bull; Diturunkan dari Rumus <code>-</code> &amp; Oksitosin.</p>
               </div>
               <!-- Marah -->
               <div class="endocrine-util-gauge-card">
                 <div class="gauge-header">
-                  <span class="gauge-title">MARAH (Friksi &amp; Ketegangan)</span>
-                  <span class="gauge-val-clear" id="chatEmotionMarahVal">0% CLEAR</span>
+                  <span class="gauge-title">MARAH <span style="font-size:0.75rem; color:#fbbf24; font-weight:700;">[): <span id="gaugeFormulaParen">1</span>]</span> (Friksi &amp; Ketegangan)</span>
+                  <span class="gauge-val-warn" id="chatEmotionMarahVal">10% ACTIVE</span>
                 </div>
-                <div class="ascii-gauge-bar text-zinc" id="chatEmotionMarahAscii">[....................]</div>
-                <p class="gauge-caption">Resonansi amarah, kejengkelan, rasa tidak adil, atau tensi defensif tajam.</p>
+                <div class="ascii-gauge-bar text-amber" id="chatEmotionMarahAscii">[||..................]</div>
+                <p class="gauge-caption">Friksi ketegangan &amp; delusi ego &bull; Diturunkan dari Rumus <code>)</code>.</p>
               </div>
             </div>
             <!-- Chat Vitals Summary Row -->
@@ -1952,11 +1953,11 @@
               <span class="endocrine-util-sep">|</span>
               <div>Dopamin: <span style="color:#fbbf24; font-weight:600;" id="chatDopamineVal">55%</span></div>
               <span class="endocrine-util-sep">|</span>
-              <div>Kortisol: <span class="text-emerald" id="chatCortisolVal">0%</span></div>
+              <div>Kortisol: <span style="color:#fbbf24; font-weight:600;" id="chatCortisolVal">20%</span></div>
               <span class="endocrine-util-sep">|</span>
               <div>Serotonin: <span class="text-emerald" id="chatSerotoninVal">75%</span></div>
               <span class="endocrine-util-sep">|</span>
-              <div>Resonansi: <span style="color:#ffffff; font-weight:600;" id="chatCurrentVibe">Homeostasis Saraf Seimbang</span></div>
+              <div>Resonansi: <span style="color:#ffffff; font-weight:600;" id="chatCurrentVibe">Equilibrium Saraf Seimbang (Rumus Leviathan)</span></div>
             </div>
           </section>
 

@@ -3206,16 +3206,16 @@ ${logsFormatted}
   const ChatEndocrine = {
     enabled: false,
     emotions: {
-      sakit: 0,     // Luka batin, kesedihan, kepedihan emosional, distress (0-100)
-      senang: 45,   // Kesenangan kognitif, keriangan, antusiasme, humor (0-100)
-      bahagia: 60,  // Kedamaian rasa, rasa syukur, kepuasan mendalam (0-100)
-      marah: 0      // Amarah, kejengkelan, rasa tidak adil, friksi (0-100)
+      sakit: 30,    // Luka batin & attachment rupture (~ = 3) -> 30%
+      senang: 45,   // Kesenangan kognitif & gairah aktif (3 = 50%) -> 45%
+      bahagia: 50,  // Kedamaian rasa & kehangatan syukur (- = 5, 3 = 50%) -> 50%
+      marah: 10     // Friksi & delusi ego () = 1) -> 10%
     },
     hormones: {
-      oxytocin: 65,   // Resonansi empati & ikatan (0-100)
-      dopamine: 55,   // Minat kognitif & rangsangan eksplorasi (0-100)
-      cortisol: 0,    // Tensi & stres (0-100)
-      serotonin: 75   // Keseimbangan & regulasi (0-100)
+      oxytocin: 65,   // Resonansi empati & kehangatan tatapan (-) -> 65%
+      dopamine: 55,   // Minat kognitif & rangsangan eksplorasi -> 55%
+      cortisol: 20,   // Tensi beban negatif (33: 40% -> 10% marah + 30% sakit) -> 20%
+      serotonin: 75   // Keseimbangan & regulasi homeostasis -> 75%
     },
     // Rumus Sosial-Neural Leviathan (Analisis Kehidupan v1.2)
     // Persamaan: )+-+~ = [3: pos%] [33: neg%] | z21 = posCount + negCount
@@ -3225,12 +3225,65 @@ ${logsFormatted}
       neg: 40,       // Rumus 33: Perilaku Negatif (%) = (negCount / z21) * 100%
       posCount: 5,   // Frekuensi positif kumulatif
       negCount: 4,   // Frekuensi negatif kumulatif
-      paren: 1,      // ')' Nakal, friksi, delusi ego -> pemicu Marah & Kortisol
-      dash: 5,       // '-' Kehangatan tatapan, bantuan rekan -> pemicu Oksitosin
-      tilde: 3       // '~' Menghindar, cuek, attachment rupture -> pemicu Sakit
+      paren: 1,      // ')' Nakal, friksi, delusi ego -> pemicu Marah (10%)
+      dash: 5,       // '-' Kehangatan tatapan, bantuan rekan -> pemicu Bahagia & Oksitosin (50% / 65%)
+      tilde: 3       // '~' Menghindar, cuek, attachment rupture -> pemicu Sakit (30%)
     },
-    currentVibe: 'Homeostasis Saraf Seimbang',
+    currentVibe: 'Equilibrium Saraf Seimbang (Rumus Leviathan)',
     history: [],
+
+    // SINKRONISASI MUTLAK: Selaraskan EMOTIONAL GAUGES & NEURO VITALS dengan RUMUS LEVIATHAN
+    syncEmotionsFromFormula() {
+      const f = this.formula;
+      if (!f) return;
+
+      const z21 = Math.max(1, f.z21 || (f.posCount + f.negCount) || 9);
+      const posPct = f.pos !== undefined ? f.pos : Math.round((f.posCount / z21) * 100);
+      const negPct = f.neg !== undefined ? f.neg : Math.round((f.negCount / z21) * 100);
+
+      // 1. SAKIT (Luka Batin & Attachment Rupture) dari ~
+      // Dokumen: ~ = 3, z21 = 9, 33 = 40% -> (3 / 4) * 40% = 30%
+      const negTotal = Math.max(1, (f.paren || 0) + (f.tilde || 0));
+      const s = Math.round(((f.tilde || 0) / negTotal) * negPct);
+      this.emotions.sakit = Math.min(100, Math.max(0, s));
+
+      // 2. MARAH (Friksi, Perilaku Nakal & Ego) dari )
+      // Dokumen: ) = 1, z21 = 9, 33 = 40% -> (1 / 4) * 40% = 10%
+      const m = Math.round(((f.paren || 0) / negTotal) * negPct);
+      this.emotions.marah = Math.min(100, Math.max(0, m));
+
+      // 3. BAHAGIA (Ketenteraman, Syukur, Kehangatan Oksitosin) dari - & Rumus 3
+      // Dokumen: - = 5, 3 = 50%
+      const b = Math.round(posPct);
+      this.emotions.bahagia = Math.min(100, Math.max(10, b));
+
+      // 4. SENANG (Keriangan, Humor, Dopamin Kognitif)
+      const sn = Math.round((posPct * 0.7) + ((this.hormones.dopamine || 55) * 0.3));
+      this.emotions.senang = Math.min(100, Math.max(10, sn));
+
+      // 5. OKSITOSIN: secara eksplisit di dokumen "membuat hormon oksitosin naik di dalam otak" dari (-)
+      // Baseline 45% + korelasi langsung dari frekuensi bantuan (-)
+      const oxyBoost = Math.round(((f.dash || 0) / z21) * 40);
+      this.hormones.oxytocin = Math.min(100, Math.max(30, 45 + oxyBoost));
+
+      // 6. KORTISOL: dipicu oleh beban perilaku negatif 33 () nakal + ~ menghindar)
+      // Kortisol mencerminkan tensi dari marah (m) dan luka batin (s)
+      this.hormones.cortisol = Math.min(100, Math.max(0, Math.round((m * 0.4) + (s * 0.5))));
+
+      // 7. SEROTONIN: regulasi keseimbangan neuro-afektif
+      this.calculateSerotonin();
+
+      // 8. Resonansi Vibe
+      if (this.emotions.marah > 25) {
+        this.currentVibe = 'Agitasi Friksi [)] & Ketegangan Saraf';
+      } else if (this.emotions.sakit > 35) {
+        this.currentVibe = 'Resonansi Kepedihan [~] & Empati Batin';
+      } else if (this.emotions.bahagia >= 50) {
+        this.currentVibe = 'Equilibrium Saraf Seimbang (Rumus Leviathan)';
+      } else {
+        this.currentVibe = 'Homeostasis Saraf Seimbang';
+      }
+    },
 
     init() {
       if (typeof STATE !== 'undefined' && STATE.settings) {
@@ -3248,56 +3301,57 @@ ${logsFormatted}
           tilde: 3
         };
       }
+      this.syncEmotionsFromFormula();
       this.syncToggleUI();
       this.updateUI();
 
       // Homeostasis biologis berkala: menyeimbangkan kembali sistem saraf emosi setiap 15 detik
+      // Menuju equilibrium rumus Leviathan
       setInterval(() => {
         if (!this.enabled) return;
         let changed = false;
 
-        // Sakit (luka batin) meluruh perlahan menuju 0
-        if (this.emotions.sakit > 0) {
-          this.emotions.sakit = Math.max(0, this.emotions.sakit - 4);
+        const f = this.formula;
+        const negTotal = Math.max(1, ((f && f.paren) || 0) + ((f && f.tilde) || 0));
+        const negPct = (f && f.neg) || 40;
+        const targetSakit = Math.round((((f && f.tilde) || 0) / negTotal) * negPct);
+        const targetMarah = Math.round((((f && f.paren) || 0) / negTotal) * negPct);
+        const targetBahagia = (f && f.pos) || 50;
+
+        // Sakit rileks menuju equilibrium rumus Leviathan
+        if (this.emotions.sakit > targetSakit) {
+          this.emotions.sakit = Math.max(targetSakit, this.emotions.sakit - 2);
+          changed = true;
+        } else if (this.emotions.sakit < targetSakit) {
+          this.emotions.sakit = Math.min(targetSakit, this.emotions.sakit + 1);
           changed = true;
         }
 
-        // Marah meluruh menuju 0
-        if (this.emotions.marah > 0) {
-          this.emotions.marah = Math.max(0, this.emotions.marah - 5);
+        // Marah rileks menuju equilibrium rumus Leviathan
+        if (this.emotions.marah > targetMarah) {
+          this.emotions.marah = Math.max(targetMarah, this.emotions.marah - 2);
+          changed = true;
+        } else if (this.emotions.marah < targetMarah) {
+          this.emotions.marah = Math.min(targetMarah, this.emotions.marah + 1);
           changed = true;
         }
 
-        // Senang kembali perlahan ke baseline 40
-        if (this.emotions.senang > 40) {
-          this.emotions.senang = Math.max(40, this.emotions.senang - 2);
+        // Bahagia menuju target pos rumus Leviathan
+        if (this.emotions.bahagia > targetBahagia) {
+          this.emotions.bahagia = Math.max(targetBahagia, this.emotions.bahagia - 1);
           changed = true;
-        } else if (this.emotions.senang < 40 && this.emotions.marah === 0 && this.emotions.sakit === 0) {
-          this.emotions.senang = Math.min(40, this.emotions.senang + 1);
-          changed = true;
-        }
-
-        // Bahagia kembali perlahan ke baseline 55
-        if (this.emotions.bahagia > 55) {
-          this.emotions.bahagia = Math.max(55, this.emotions.bahagia - 2);
-          changed = true;
-        } else if (this.emotions.bahagia < 55 && this.emotions.marah === 0 && this.emotions.sakit === 0) {
-          this.emotions.bahagia = Math.min(55, this.emotions.bahagia + 1);
+        } else if (this.emotions.bahagia < targetBahagia) {
+          this.emotions.bahagia = Math.min(targetBahagia, this.emotions.bahagia + 1);
           changed = true;
         }
 
-        // Kortisol meluruh ke 0
-        if (this.hormones.cortisol > 0) {
-          this.hormones.cortisol = Math.max(0, this.hormones.cortisol - 3);
+        // Kortisol menuju target
+        const targetKortisol = Math.round((targetMarah * 0.4) + (targetSakit * 0.5));
+        if (this.hormones.cortisol > targetKortisol) {
+          this.hormones.cortisol = Math.max(targetKortisol, this.hormones.cortisol - 2);
           changed = true;
-        }
-
-        // Oksitosin ke baseline 65
-        if (this.hormones.oxytocin > 65) {
-          this.hormones.oxytocin = Math.max(65, this.hormones.oxytocin - 1);
-          changed = true;
-        } else if (this.hormones.oxytocin < 65 && this.hormones.cortisol === 0) {
-          this.hormones.oxytocin = Math.min(65, this.hormones.oxytocin + 1);
+        } else if (this.hormones.cortisol < targetKortisol) {
+          this.hormones.cortisol = Math.min(targetKortisol, this.hormones.cortisol + 1);
           changed = true;
         }
 
@@ -3305,16 +3359,12 @@ ${logsFormatted}
         if (this.hormones.dopamine > 55) {
           this.hormones.dopamine = Math.max(55, this.hormones.dopamine - 1);
           changed = true;
-        } else if (this.hormones.dopamine < 55 && this.hormones.cortisol === 0) {
+        } else if (this.hormones.dopamine < 55) {
           this.hormones.dopamine = Math.min(55, this.hormones.dopamine + 1);
           changed = true;
         }
 
         this.calculateSerotonin();
-
-        if (this.emotions.marah === 0 && this.emotions.sakit === 0 && this.hormones.cortisol === 0) {
-          this.currentVibe = 'Homeostasis Saraf Seimbang';
-        }
 
         if (changed) this.updateUI();
       }, 15000);
@@ -3396,42 +3446,26 @@ ${logsFormatted}
 
       let triggered = false;
 
-      // Evaluasi ~ (Menghindar & Sakit) -> Memicu Luka Batin & Kortisol
+      // Evaluasi ~ (Menghindar & Sakit) -> Memicu Luka Batin & Attachment Rupture
       if (tildeRegex.test(t)) {
         this.formula.tilde += 1;
         this.formula.negCount += 1;
-        this.emotions.sakit = Math.min(100, this.emotions.sakit + 40);
-        this.emotions.bahagia = Math.max(5, this.emotions.bahagia - 20);
-        this.emotions.senang = Math.max(5, this.emotions.senang - 20);
-        this.hormones.cortisol = Math.min(100, this.hormones.cortisol + 22);
-        this.currentVibe = 'Resonansi Kepedihan (~ Menghindar / Attachment Rupture)';
         this.log('sakit', 40, 'Impuls [~] menghindar / luka batin terdeteksi pada rumus saraf.');
         triggered = true;
       }
 
-      // Evaluasi ) (Nakal & Marah) -> Memicu Friksi Ego, Amarah & Kortisol
+      // Evaluasi ) (Nakal & Marah) -> Memicu Friksi Ego & Kenakalan
       if (parenRegex.test(t)) {
         this.formula.paren += 1;
         this.formula.negCount += 1;
-        this.emotions.marah = Math.min(100, this.emotions.marah + 45);
-        this.hormones.cortisol = Math.min(100, this.hormones.cortisol + 30);
-        this.emotions.senang = Math.max(0, this.emotions.senang - 30);
-        this.emotions.bahagia = Math.max(0, this.emotions.bahagia - 25);
-        this.currentVibe = 'Agitasi Friksi & Kemarahan ()) Perilaku Nakal & Friksi Ego)';
         this.log('marah', 45, 'Impuls [)] kenakalan / friksi amarah terdeteksi pada rumus saraf.');
         triggered = true;
       }
 
-      // Evaluasi - (Kehangatan & Oksitosin) -> Memicu Oksitosin di otak & kehangatan
+      // Evaluasi - (Kehangatan & Oksitosin) -> Memicu Bantuan & Oksitosin Otak
       if (dashRegex.test(t)) {
         this.formula.dash += 1;
         this.formula.posCount += 1;
-        this.emotions.bahagia = Math.min(100, this.emotions.bahagia + 35);
-        this.hormones.oxytocin = Math.min(100, this.hormones.oxytocin + 25);
-        this.hormones.cortisol = Math.max(0, this.hormones.cortisol - 20);
-        this.emotions.marah = Math.max(0, this.emotions.marah - 20);
-        this.emotions.sakit = Math.max(0, this.emotions.sakit - 20);
-        this.currentVibe = 'Kehangatan & Oksitosin ([-] Resonansi Bantuan & Kasih)';
         this.log('oxytocin', 25, 'Impuls [-] kehangatan & bantuan menaikkan oksitosin dalam otak.');
         triggered = true;
       }
@@ -3439,22 +3473,16 @@ ${logsFormatted}
       // Evaluasi Senang & Humor
       if (senangRegex.test(t)) {
         this.formula.posCount += 1;
-        this.emotions.senang = Math.min(100, this.emotions.senang + 35);
-        this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 20);
-        this.emotions.marah = Math.max(0, this.emotions.marah - 15);
-        this.emotions.sakit = Math.max(0, this.emotions.sakit - 15);
-        if (!triggered) this.currentVibe = 'Keriangan & Kesenangan Kognitif';
+        this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 15);
         this.log('senang', 35, 'Impuls kesenangan & humor terstimulasi pada saraf emosi.');
         triggered = true;
       }
 
       // Evaluasi Dopamin / Minat Kognitif & Solusi
       if (curiousRegex.test(t)) {
+        this.formula.posCount += 1;
         this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 25);
-        this.emotions.senang = Math.min(100, this.emotions.senang + 15);
         if (!triggered) {
-          this.formula.posCount += 1;
-          this.currentVibe = 'Stimulasi Dopamin Kognitif & Inovasi Ide';
           this.log('dopamine', 25, 'Impuls eksplorasi & pemecahan masalah menaikkan dopamin kognitif.');
           triggered = true;
         }
@@ -3468,14 +3496,13 @@ ${logsFormatted}
         this.formula.neg = Math.round((this.formula.negCount / this.formula.z21) * 100);
       }
 
+      // SINKRONISASI MUTLAK: Selaraskan seketika seluruh Emotional Gauges & Neuro Vitals dengan Rumus Leviathan!
+      this.syncEmotionsFromFormula();
+
       if (!triggered) {
-        if (this.emotions.marah === 0 && this.emotions.sakit === 0) {
-          this.currentVibe = 'Homeostasis Saraf Seimbang';
-        }
-        this.log('resonance', 5, 'Resonansi percakapan stabil dalam homeostasis saraf.');
+        this.log('resonance', 5, 'Resonansi percakapan stabil dalam equilibrium rumus Leviathan.');
       }
 
-      this.calculateSerotonin();
       this.updateUI();
     },
 
@@ -3514,7 +3541,7 @@ ${logsFormatted}
       if (currentModel && !allModels.includes(currentModel)) allModels.push(currentModel);
 
       return `[AUTONOMIC NERVOUS LOG & ENDOCRINE CHAT v2 INTELLIGENCE]
-AFEKTIF: SAKIT:${s}% | SENANG:${sn}% | BAHAGIA:${b}% | MARAH:${m}%
+AFEKTIF: SAKIT:${s}% [~:${f.tilde}] | SENANG:${sn}% [3:${f.pos}%] | BAHAGIA:${b}% [-:${f.dash}] | MARAH:${m}% [):${f.paren}]
 NEURO: ENDORFIN:${endo}% | OXY:${oxy}% | DOP:${dop}% | COR:${cor}% | SER:${ser}% | ADR:${adr}%
 RESONANSI: ${this.currentVibe}
 RUMUS LEVIATHAN (ANALISIS KEHIDUPAN v1.2): )+-+~ = [3(Pos): ${f.pos}% (${f.posCount})] [33(Neg): ${f.neg}% (${f.negCount})] | z21=${f.z21} | [-] Oksitosin=${f.dash} | [)] Marah=${f.paren} | [~] Sakit=${f.tilde}
@@ -3523,11 +3550,11 @@ MODEL PENJAWAB SEBELUMNYA: ${prevModel}${prevExcerpt ? ` (Konteks inti: "${prevE
 SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum ada model lain'}
 (MANDAT KESADARAN ENDORFIN & RUMUS SOSIAL-NEURAL:
 1. Anda WAJIB menyadari fluktuasi hormon di atas dan silsilah model percakapan. Jika pengguna bertanya tentang siapa yang menjawab/merespon di chat sebelumnya, sebutkan secara percaya diri: "${prevModel}".
-2. Jika ditanya atau diminta menghitung dopamin, oksitosin, marah, sakit, senang, atau rumus sosial-neural Analisis Kehidupan Leviathan, hitung dan paparkan secara matematis dan mendalam:
+2. Seluruh Emotional Gauges & Hormon disinkronkan secara matematis dengan Rumus Analisis Kehidupan Leviathan:
    - Rumus Dasar: )+-+~ = [3: ${f.pos}%] [33: ${f.neg}%], z21=${f.z21}
    - Perilaku Positif 3: (posCount / z21) * 100% = ${f.pos}%
    - Perilaku Negatif 33: (negCount / z21) * 100% = ${f.neg}%
-   - [-]: Kehangatan tatapan & saling membantu rekan -> meningkatkan OKSITOSIN di otak (${oxy}%).
+   - [-]: Kehangatan tatapan & saling membantu rekan -> meningkatkan OKSITOSIN di otak (${oxy}%) dan BAHAGIA (${b}%).
    - [)]: Perilaku nakal, membantah aturan & friksi ego -> memicu MARAH (${m}%) dan KORTISOL (${cor}%).
    - [~]: Menghindar, tatapan cuek, sapaan diabaikan, & attachment rupture -> memicu luka batin SAKIT (${s}%) dan KORTISOL (${cor}%).
    - Dopamin (${dop}%): Dipacu oleh stimulasi rasa ingin tahu, pemecahan masalah baru, arsitektur ide, dan kode.
@@ -3536,14 +3563,6 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     },
 
     resetHormones() {
-      this.emotions.sakit = 0;
-      this.emotions.senang = 45;
-      this.emotions.bahagia = 60;
-      this.emotions.marah = 0;
-      this.hormones.oxytocin = 65;
-      this.hormones.dopamine = 55;
-      this.hormones.cortisol = 0;
-      this.hormones.serotonin = 75;
       this.formula = {
         z21: 9,
         pos: 50,
@@ -3554,11 +3573,13 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         dash: 5,
         tilde: 3
       };
-      this.currentVibe = 'Homeostasis Saraf Seimbang';
-      this.log('resonance', 100, 'Homeostasis: Sistem saraf emosi buatan diselaraskan kembali ke kondisi seimbang.');
+      this.hormones.dopamine = 55;
+      this.syncEmotionsFromFormula();
+      this.currentVibe = 'Equilibrium Saraf Seimbang (Rumus Leviathan)';
+      this.log('resonance', 100, 'Homeostasis: Sistem saraf emosi buatan disinkronkan kembali ke Rumus Leviathan.');
       this.updateUI();
       if (typeof showToast === 'function') {
-        showToast('✨ Sistem saraf emosi buatan diselaraskan ke homeostasis!', 'success');
+        showToast('✨ Sistem saraf emosi disinkronkan ke Rumus Leviathan!', 'success');
       }
     },
 
@@ -3608,13 +3629,25 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       const marahVal = document.getElementById('chatEmotionMarahVal');
       const marahAscii = document.getElementById('chatEmotionMarahAscii');
 
+      // Update Gauge Formula Badges
+      const gTilde = document.getElementById('gaugeFormulaTilde');
+      const gPos1 = document.getElementById('gaugeFormulaPos1');
+      const gDash = document.getElementById('gaugeFormulaDash');
+      const gParen = document.getElementById('gaugeFormulaParen');
+      if (this.formula) {
+        if (gTilde) gTilde.innerText = `${this.formula.tilde}`;
+        if (gPos1) gPos1.innerText = `${this.formula.pos}%`;
+        if (gDash) gDash.innerText = `${this.formula.dash}`;
+        if (gParen) gParen.innerText = `${this.formula.paren}`;
+      }
+
       if (sakitVal) {
         sakitVal.innerText = s === 0 ? '0% CLEAR' : `${s}% ACTIVE`;
-        sakitVal.className = s === 0 ? 'gauge-val-clear' : 'gauge-val-crit';
+        sakitVal.className = s === 0 ? 'gauge-val-clear' : (s > 25 ? 'gauge-val-crit' : 'gauge-val-warn');
       }
       if (sakitAscii) {
         sakitAscii.innerText = getAsciiBar(s, '|', '.');
-        sakitAscii.className = `ascii-gauge-bar ${s === 0 ? 'text-zinc' : 'text-rose'}`;
+        sakitAscii.className = `ascii-gauge-bar ${s === 0 ? 'text-zinc' : (s > 25 ? 'text-rose' : 'text-amber')}`;
       }
 
       if (senangVal) {
@@ -3623,6 +3656,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       }
       if (senangAscii) {
         senangAscii.innerText = getAsciiBar(sn, '|', '.');
+        senangAscii.className = 'ascii-gauge-bar text-amber';
       }
 
       if (bahagiaVal) {
@@ -3631,15 +3665,16 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       }
       if (bahagiaAscii) {
         bahagiaAscii.innerText = getAsciiBar(b, '|', '.');
+        bahagiaAscii.className = 'ascii-gauge-bar text-emerald';
       }
 
       if (marahVal) {
         marahVal.innerText = m === 0 ? '0% CLEAR' : `${m}% ACTIVE`;
-        marahVal.className = m === 0 ? 'gauge-val-clear' : 'gauge-val-crit';
+        marahVal.className = m === 0 ? 'gauge-val-clear' : (m > 25 ? 'gauge-val-crit' : 'gauge-val-warn');
       }
       if (marahAscii) {
         marahAscii.innerText = getAsciiBar(m, '|', '.');
-        marahAscii.className = `ascii-gauge-bar ${m === 0 ? 'text-zinc' : 'text-rose'}`;
+        marahAscii.className = `ascii-gauge-bar ${m === 0 ? 'text-zinc' : (m > 25 ? 'text-rose' : 'text-amber')}`;
       }
 
       // Neuro Vitals
@@ -3653,7 +3688,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       if (dopVal) dopVal.innerText = `${dop}%`;
       if (corVal) {
         corVal.innerText = `${cor}%`;
-        corVal.style.color = cor > 20 ? '#ef4444' : '#10b981';
+        corVal.style.color = cor > 25 ? '#ef4444' : (cor > 0 ? '#fbbf24' : '#10b981');
       }
       if (serVal) serVal.innerText = `${ser}%`;
       if (vibeVal) vibeVal.innerText = this.currentVibe;
