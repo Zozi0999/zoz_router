@@ -193,12 +193,10 @@ class WhatsAppGateway {
   }
 
   async connect(forceNew = false) {
-    if (this.sock && this.status.connected) {
-      return this.getStatus();
-    }
-
     if (forceNew) {
       await this.disconnect(true);
+    } else if (this.sock && this.status.connected) {
+      return this.getStatus();
     }
 
     this.isExplicitDisconnect = false;
@@ -599,11 +597,16 @@ class WhatsAppGateway {
   cleanupAuthDir() {
     try {
       if (fs.existsSync(this.authDir)) {
-        fs.rmSync(this.authDir, { recursive: true, force: true });
-        console.log('[WA-Gateway] Sesi auth berhasil dibersihkan.');
+        const files = fs.readdirSync(this.authDir);
+        for (const file of files) {
+          if (!file.startsWith('lid-mapping-')) {
+            fs.rmSync(path.join(this.authDir, file), { force: true, recursive: true });
+          }
+        }
+        console.log('[WA-Gateway] Sesi auth berhasil dibersihkan (LID mappings dipertahankan).');
       }
     } catch (e) {
-      console.warn('[WA-Gateway] Gagal menghapus authDir:', e.message);
+      console.warn('[WA-Gateway] Gagal membersihkan authDir:', e.message);
     }
   }
 

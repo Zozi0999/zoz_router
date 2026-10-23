@@ -30808,13 +30808,15 @@ Aturan:
       this.updateMobileBannerUI();
     },
 
-    async openRemoteTunnelModal() {
+    async openRemoteTunnelModal(preferredTab = null) {
       const modal = document.getElementById('termRemoteTunnelModal');
       if (!modal) return;
       modal.style.removeProperty('display');
       modal.classList.add('show');
       if (typeof syncBodyModalState === 'function') syncBodyModalState();
       await this.fetchTunnelInfo();
+      const targetTab = preferredTab || (STATE.chatMode === 'whatsapp' ? 'whatsapp' : 'terminal');
+      WhatsAppController?.switchQrModalTab?.(targetTab);
     },
 
     closeRemoteTunnelModal() {
@@ -35024,7 +35026,7 @@ Aturan:
       }
     },
 
-    switchQrModalTab(tab = 'terminal') {
+    async switchQrModalTab(tab = 'terminal') {
       const isTerminal = tab === 'terminal';
       if (els.tabQrTerminal) {
         els.tabQrTerminal.classList.toggle('active', isTerminal);
@@ -35038,10 +35040,10 @@ Aturan:
       if (els.paneQrWhatsApp) els.paneQrWhatsApp.style.display = !isTerminal ? 'block' : 'none';
 
       if (!isTerminal) {
-        this.fetchStatus();
         this.startStatusPolling(60000);
+        await this.fetchStatus();
         if (!this.status.connected && !this.status.connecting && !this.status.qr) {
-          this.connectWhatsApp();
+          await this.connectWhatsApp();
         }
       } else {
         this.stopStatusPolling();
