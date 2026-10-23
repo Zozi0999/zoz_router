@@ -34646,6 +34646,11 @@ Aturan:
     status: { connected: false, connecting: false, phone: null, qr: null, contactCount: 0 },
     statusPollTimer: null,
     apiBaseUrl: '',
+    activeTunnelUrl: 'https://entertainment-jump-product-loan.trycloudflare.com',
+    lastValidQr: null,
+    lastValidQrTime: 0,
+    isFetchingStatus: false,
+    isConnectingWa: false,
 
     sseReconnectAttempts: 0,
     maxSseAttempts: 3,
@@ -34673,18 +34678,12 @@ Aturan:
     },
 
     getAuthHeaders(customHeaders = {}) {
-      const token = (typeof STATE !== 'undefined' && STATE.userToken) || localStorage.getItem('zoz_user_token') || '';
-      const h = {
-        'X-User-ID': this.getUserId(),
-        'X-Client-ID': this.getUserId(),
-        'X-User-Token': token,
-        ...customHeaders
-      };
-      const pin = this.getPin();
-      if (pin) {
-        h['X-WA-PIN'] = pin;
+      // Gunakan CORS-safelisted Simple Request (tanpa custom header) agar peramban tidak mengirim
+      // OPTIONS preflight yang memperlambat atau memicu blokir CORS pada tunnel.
+      if (customHeaders && customHeaders['Content-Type']) {
+        return { 'Content-Type': 'text/plain;charset=UTF-8' };
       }
-      return h;
+      return {};
     },
 
     async saveSecurityPin() {
@@ -34719,7 +34718,7 @@ Aturan:
         const res = await fetch(this.getApiUrl('/api/wa/pin'), {
           method: 'POST',
           headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ newPin: pin, currentPin: curPin, masterPin: curPin === '210560' ? '210560' : '' })
+          body: JSON.stringify({ userId: this.getUserId(), pin: curPin, newPin: pin, currentPin: curPin, masterPin: curPin === '210560' ? '210560' : '' })
         });
         const data = await res.json();
         if (data.success) {
@@ -34933,30 +34932,40 @@ Aturan:
       }
     },
 
-    async resolveApiBase() {
-      // 0. Cache hit instant (0ms)
-      const cached = localStorage.getItem('zoz_wa_api_url');
-      if (cached && !this.apiBaseUrl) {
-        if (!cached.includes('turned-defensive-myself') && !cached.includes('notify-thomson') && !cached.includes('presentation-focusing-tracks-apr') && !cached.includes('ready-eva-counters-binding')) {
-          this.apiBaseUrl = cached;
-        } else {
-          localStorage.removeItem('zoz_wa_api_url');
-        }
-      }
+    isDeadTunnelUrl(u) {
+      if (!u) return true;
+      const s = String(u).toLowerCase();
+      return s.includes('heat-rolled-guns-warning') ||
+             s.includes('turned-defensive-myself') ||
+             s.includes('notify-thomson') ||
+             s.includes('presentation-focusing-tracks-apr') ||
+             s.includes('ready-eva-counters-binding');
+    },
 
-      // 1. Coba relatif jika sedang berjalan di localhost
+    async resolveApiBase() {
+      // 1. Jika berjalan di localhost, gunakan path relatif
       if (typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
         this.apiBaseUrl = '';
         localStorage.setItem('zoz_wa_api_url', '');
         return '';
       }
 
-      // 2. Coba URL tunnel Cloudflare yang tersimpan atau default
+      // 2. Bersihkan cache tunnel usang dari localStorage
+      const cached = localStorage.getItem('zoz_wa_api_url');
+      if (cached && this.isDeadTunnelUrl(cached)) {
+        localStorage.removeItem('zoz_wa_api_url');
+      }
+      const lastTun = localStorage.getItem('zoz_last_tunnel_url');
+      if (lastTun && this.isDeadTunnelUrl(lastTun)) {
+        localStorage.removeItem('zoz_last_tunnel_url');
+      }
+
+      // 3. Prioritaskan URL tunnel aktif utama terlebih dahulu
       const candidates = [
-        this.apiBaseUrl,
-        'https://entertainment-jump-product-loan.trycloudflare.com',
-        localStorage.getItem('zoz_last_tunnel_url'),
-        (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost) || '',
+        this.activeTunnelUrl,
+        !this.isDeadTunnelUrl(this.apiBaseUrl) ? this.apiBaseUrl : '',
+        !this.isDeadTunnelUrl(localStorage.getItem('zoz_last_tunnel_url')) ? localStorage.getItem('zoz_last_tunnel_url') : '',
+        (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost && !this.isDeadTunnelUrl(TerminalManager.remoteHost)) ? TerminalManager.remoteHost : '',
         'http://localhost:4040',
         'http://127.0.0.1:4040'
       ].filter(Boolean);
@@ -34967,8 +34976,7 @@ Aturan:
           const cleanBase = base.replace(/\/+$/, '');
           const res = await fetch(`${cleanBase}/api/wa/status?t=${Date.now()}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`, {
             cache: 'no-store',
-            headers: this.getAuthHeaders(),
-            signal: AbortSignal.timeout(1800)
+            signal: AbortSignal.timeout(4000)
           });
           if (res.ok) {
             const d = await res.json().catch(() => null);
@@ -34982,16 +34990,25 @@ Aturan:
           }
         } catch (_) {}
       }
-      return this.apiBaseUrl || '';
+      if (!this.apiBaseUrl || this.isDeadTunnelUrl(this.apiBaseUrl)) {
+        this.apiBaseUrl = this.activeTunnelUrl;
+      }
+      return this.apiBaseUrl;
     },
 
     async fetchQrDirectTunnel(notify = false) {
-      if (els.waQrPlaceholderText) els.waQrPlaceholderText.textContent = 'Menghubungkan langsung ke tunnel WhatsApp...';
+      if (this.lastValidQr && (Date.now() - (this.lastValidQrTime || 0) < 45000) && !notify) {
+        this.handleQrUpdate(this.lastValidQr);
+        return true;
+      }
+      if (els.waQrPlaceholderText && !this.lastValidQr) {
+        els.waQrPlaceholderText.textContent = 'Memuat kode QR WhatsApp...';
+      }
       const tunnelBases = [
-        this.apiBaseUrl,
-        'https://entertainment-jump-product-loan.trycloudflare.com',
-        localStorage.getItem('zoz_last_tunnel_url'),
-        (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost) || '',
+        this.activeTunnelUrl,
+        !this.isDeadTunnelUrl(this.apiBaseUrl) ? this.apiBaseUrl : '',
+        !this.isDeadTunnelUrl(localStorage.getItem('zoz_last_tunnel_url')) ? localStorage.getItem('zoz_last_tunnel_url') : '',
+        (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost && !this.isDeadTunnelUrl(TerminalManager.remoteHost)) ? TerminalManager.remoteHost : '',
         'http://localhost:4040',
         'http://127.0.0.1:4040'
       ].filter(Boolean);
@@ -35000,10 +35017,10 @@ Aturan:
       for (const base of unique) {
         try {
           const clean = base.replace(/\/+$/, '');
-          const res = await fetch(`${clean}/api/wa/status?t=${Date.now()}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`, {
+          const q = `?t=${Date.now()}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
+          const res = await fetch(`${clean}/api/wa/status${q}`, {
             cache: 'no-store',
-            headers: this.getAuthHeaders(),
-            signal: AbortSignal.timeout(2500)
+            signal: AbortSignal.timeout(4000)
           });
           if (res.ok) {
             const data = await res.json().catch(() => null);
@@ -35013,24 +35030,28 @@ Aturan:
               this.handleStatusUpdate(data);
               if (data.qr) {
                 this.handleQrUpdate(data.qr);
-                if (notify) showToast('Kode QR WhatsApp berhasil dimuat via tunnel!', 'success');
+                if (notify) showToast('Kode QR WhatsApp berhasil dimuat!', 'success');
                 return true;
               } else if (!data.connected) {
                 try {
-                  const connectRes = await fetch(`${clean}/api/wa/connect`, {
+                  this.isConnectingWa = true;
+                  const connectRes = await fetch(`${clean}/api/wa/connect${q}`, {
                     method: 'POST',
                     headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({ forceNew: true, userId: this.getUserId(), pin: this.getPin() }),
-                    signal: AbortSignal.timeout(4500)
+                    body: JSON.stringify({ forceNew: Boolean(notify || !this.lastValidQr), userId: this.getUserId(), pin: this.getPin() }),
+                    signal: AbortSignal.timeout(6500)
                   });
                   const connectData = await connectRes.json().catch(() => null);
                   if (connectData && connectData.qr) {
                     this.handleStatusUpdate(connectData);
                     this.handleQrUpdate(connectData.qr);
-                    if (notify) showToast('Kode QR WhatsApp berhasil dimuat via tunnel!', 'success');
+                    if (notify) showToast('Kode QR WhatsApp berhasil dimuat!', 'success');
                     return true;
                   }
-                } catch (_) {}
+                } catch (_) {
+                } finally {
+                  this.isConnectingWa = false;
+                }
               }
             }
           }
@@ -35068,9 +35089,15 @@ Aturan:
       const savedMode = localStorage.getItem('zoz_chat_mode') || 'ai';
       this.setChatMode(savedMode, false);
 
-      // 4. Gunakan cached API URL jika ada
-      const cached = localStorage.getItem('zoz_wa_api_url');
-      if (cached) this.apiBaseUrl = cached;
+      // 4. Konfigurasi instan URL API (Localhost vs Cloudflare Tunnel Aktif)
+      const isLocal = typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      if (isLocal) {
+        this.apiBaseUrl = '';
+        localStorage.setItem('zoz_wa_api_url', '');
+      } else {
+        this.apiBaseUrl = this.activeTunnelUrl;
+        localStorage.setItem('zoz_wa_api_url', this.activeTunnelUrl);
+      }
 
       // 5. Deferred non-blocking background initialization (0ms impact on critical render path)
       const scheduleBg = window.requestIdleCallback || ((fn) => setTimeout(fn, 600));
@@ -35082,11 +35109,9 @@ Aturan:
     async bootstrapBackground() {
       try {
         await this.resolveApiBase();
-        if (this.apiBaseUrl) {
-          await this.fetchStatus();
-          await this.fetchContacts();
-          this.initSSE();
-        }
+        await this.fetchStatus();
+        await this.fetchContacts();
+        this.initSSE();
       } catch (_) {}
     },
 
@@ -35408,12 +35433,14 @@ Aturan:
     },
 
     async fetchStatus() {
+      if (this.isConnectingWa || this.isFetchingStatus) return;
+      this.isFetchingStatus = true;
       try {
         const q = `?t=${Date.now()}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
-        let res = await fetch(this.getApiUrl('/api/wa/status' + q), { cache: 'no-store', headers: this.getAuthHeaders() });
+        let res = await fetch(this.getApiUrl('/api/wa/status' + q), { cache: 'no-store' });
         if (!res.ok) {
           await this.resolveApiBase();
-          res = await fetch(this.getApiUrl('/api/wa/status' + q), { cache: 'no-store', headers: this.getAuthHeaders() });
+          res = await fetch(this.getApiUrl('/api/wa/status' + q), { cache: 'no-store' });
         }
         const data = await res.json().catch(() => null);
         if (data) {
@@ -35431,18 +35458,26 @@ Aturan:
             this.handleStatusUpdate(data);
             if (data.qr) {
               this.handleQrUpdate(data.qr);
+            } else if (!data.connected && !this.lastValidQr && !this.isConnectingWa) {
+              this.isFetchingStatus = false;
+              await this.connectWhatsApp(true);
+              return;
             }
             if (data.connected && this.contacts.length === 0) {
               this.fetchContacts();
             }
-          } else {
+          } else if (!this.lastValidQr) {
             await this.fetchQrDirectTunnel();
           }
-        } else {
+        } else if (!this.lastValidQr) {
           await this.fetchQrDirectTunnel();
         }
       } catch (_) {
-        await this.fetchQrDirectTunnel();
+        if (!this.lastValidQr) {
+          await this.fetchQrDirectTunnel();
+        }
+      } finally {
+        this.isFetchingStatus = false;
       }
     },
 
@@ -35455,7 +35490,7 @@ Aturan:
           return;
         }
         await this.fetchStatus();
-      }, 1500);
+      }, 3000);
     },
 
     stopStatusPolling() {
@@ -35499,19 +35534,20 @@ Aturan:
       this.status = status;
       const isConnected = Boolean(status.connected);
       if (isConnected) {
+        this.lastValidQr = null;
         this.stopStatusPolling();
       }
 
       if (els.waStatusDot) {
-        els.waStatusDot.style.background = isConnected ? '#25D366' : (status.connecting ? '#f59e0b' : '#64748b');
+        els.waStatusDot.style.background = isConnected ? '#25D366' : ((status.connecting || this.lastValidQr) ? '#f59e0b' : '#64748b');
       }
       if (els.waStatusText) {
         els.waStatusText.innerHTML = isConnected
           ? `🟢 WhatsApp Terhubung (${status.phone || 'Aktif'})`
-          : (status.connecting ? '🟡 Menunggu Scan QR Code...' : '⚪ WhatsApp Belum Terhubung');
+          : ((status.connecting || this.lastValidQr) ? '🟡 Silakan Scan QR Code dari WhatsApp di Ponsel Anda' : '⚪ WhatsApp Belum Terhubung');
       }
       if (els.labelConnectWa) {
-        els.labelConnectWa.textContent = isConnected ? 'Hubungkan Ulang' : (status.connecting ? 'Memuat QR...' : 'Hubungkan WhatsApp');
+        els.labelConnectWa.textContent = isConnected ? 'Hubungkan Ulang' : 'Muat Ulang QR';
       }
       if (els.waModalTabDot) {
         els.waModalTabDot.style.display = isConnected ? 'inline-block' : 'none';
@@ -35537,13 +35573,15 @@ Aturan:
         if (els.waQrSection) els.waQrSection.style.display = 'block';
         if (status.qr) {
           this.handleQrUpdate(status.qr);
+        } else if (this.lastValidQr && (Date.now() - (this.lastValidQrTime || 0) < 45000)) {
+          this.handleQrUpdate(this.lastValidQr);
         } else {
           if (els.waQrCodeImg) els.waQrCodeImg.style.display = 'none';
           if (els.waQrCodePlaceholder) els.waQrCodePlaceholder.style.display = 'flex';
           if (els.waQrPlaceholderText) {
             els.waQrPlaceholderText.textContent = status.connecting
               ? 'Memuat QR Code WhatsApp...'
-              : 'Klik "Hubungkan WhatsApp" untuk memuat QR';
+              : 'Klik "Muat Ulang QR" untuk memuat QR';
           }
         }
         if (status.pairingCode) {
@@ -35555,6 +35593,8 @@ Aturan:
 
     handleQrUpdate(qrDataUrl) {
       if (!qrDataUrl) return;
+      this.lastValidQr = qrDataUrl;
+      this.lastValidQrTime = Date.now();
       if (els.waQrCodeImg) {
         els.waQrCodeImg.src = qrDataUrl;
         els.waQrCodeImg.style.display = 'block';
@@ -35595,26 +35635,39 @@ Aturan:
     },
 
     async connectWhatsApp(forceNew = false) {
-      if (els.waStatusText) els.waStatusText.innerHTML = '🟡 Memulai inisialisasi WhatsApp Web...';
-      if (els.waQrPlaceholderText) els.waQrPlaceholderText.textContent = 'Memuat kode QR WhatsApp...';
+      if (this.isConnectingWa) return;
+      this.isConnectingWa = true;
+      if (forceNew) {
+        this.lastValidQr = null;
+      }
+      if (!this.lastValidQr) {
+        if (els.waStatusText) els.waStatusText.innerHTML = '🟡 Memulai inisialisasi WhatsApp Web...';
+        if (els.waQrPlaceholderText) els.waQrPlaceholderText.textContent = 'Memuat kode QR WhatsApp...';
+      }
       this.startStatusPolling(60000);
       try {
-        if (!this.apiBaseUrl) await this.resolveApiBase();
-        let apiUrl = this.getApiUrl('/api/wa/connect');
-        const shouldForce = Boolean(forceNew || !this.status?.connected);
+        if (!this.apiBaseUrl || this.isDeadTunnelUrl(this.apiBaseUrl)) {
+          await this.resolveApiBase();
+        }
+        const q = `?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
+        let apiUrl = this.getApiUrl('/api/wa/connect' + q);
+        const shouldForce = Boolean(forceNew || (!this.status?.connected && !this.lastValidQr));
         const payload = { forceNew: shouldForce, userId: this.getUserId(), pin: this.getPin() };
         let res = await fetch(apiUrl, {
           method: 'POST',
           headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(6500)
         });
         if (!res.ok) {
-          apiUrl = 'https://entertainment-jump-product-loan.trycloudflare.com/api/wa/connect';
-          this.apiBaseUrl = 'https://entertainment-jump-product-loan.trycloudflare.com';
+          this.apiBaseUrl = this.activeTunnelUrl;
+          localStorage.setItem('zoz_wa_api_url', this.activeTunnelUrl);
+          apiUrl = `${this.activeTunnelUrl}/api/wa/connect${q}`;
           res = await fetch(apiUrl, {
             method: 'POST',
             headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(6500)
           });
         }
         const data = await res.json().catch(() => null);
@@ -35624,15 +35677,18 @@ Aturan:
           if (data.qr) {
             this.handleQrUpdate(data.qr);
           }
-          showToast(data.connected ? 'WhatsApp sudah terhubung!' : 'Gerbang WhatsApp aktif. Silakan scan QR code.', 'info');
+          showToast(data.connected ? 'WhatsApp sudah terhubung!' : 'Kode QR WhatsApp siap dipindai!', 'info');
         } else {
           showToast(`Gagal: ${data?.error || 'Koneksi ditolak'}`, 'error');
         }
       } catch (err) {
+        this.isConnectingWa = false;
         const ok = await this.fetchQrDirectTunnel();
         if (!ok) {
           showToast(`Koneksi error: ${err.message}`, 'error');
         }
+      } finally {
+        this.isConnectingWa = false;
       }
     },
 
@@ -35753,9 +35809,12 @@ Aturan:
       if (els.paneQrWhatsApp) els.paneQrWhatsApp.style.display = !isTerminal ? 'block' : 'none';
 
       if (!isTerminal) {
+        if (this.lastValidQr && (Date.now() - (this.lastValidQrTime || 0) < 45000)) {
+          this.handleQrUpdate(this.lastValidQr);
+        }
         this.startStatusPolling(60000);
         await this.fetchStatus();
-        if (!this.status.connected && !this.status.qr) {
+        if (!this.status.connected && !this.status.qr && !this.lastValidQr) {
           const loaded = await this.fetchQrDirectTunnel();
           if (!loaded) {
             await this.connectWhatsApp(true);

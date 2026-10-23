@@ -405,10 +405,14 @@ class WhatsAppGateway {
   }
 
   async connect(forceNew = false) {
+    if (!forceNew && this.sock && this.status.connected) {
+      return this.getStatus();
+    }
+    if (!forceNew && this.sock && this.status.connecting && this.status.qr && (Date.now() - (this.status.updatedAt || 0) < 40000)) {
+      return this.getStatus();
+    }
     if (forceNew || (!this.status.connected && !this.hasStoredSession())) {
       await this.disconnect(true);
-    } else if (this.sock && this.status.connected) {
-      return this.getStatus();
     }
 
     this.isExplicitDisconnect = false;
