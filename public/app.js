@@ -34551,9 +34551,57 @@ Aturan:
     activeContact: null,
     status: { connected: false, connecting: false, phone: null, qr: null, contactCount: 0 },
     statusPollTimer: null,
+    apiBaseUrl: '',
 
-    init() {
+    async resolveApiBase() {
+      // 1. Coba relatif jika sedang berjalan di localhost atau jika proxy domain aktif
+      try {
+        const res = await fetch('/api/wa/status', { signal: AbortSignal.timeout(1500) });
+        if (res.ok) {
+          const d = await res.json().catch(() => null);
+          if (d && d.success) {
+            this.apiBaseUrl = '';
+            return '';
+          }
+        }
+      } catch (_) {}
+
+      // 2. Coba URL tunnel Cloudflare yang tersimpan atau default
+      const candidates = [
+        localStorage.getItem('zoz_last_tunnel_url'),
+        (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost) || '',
+        'https://notify-thomson-remarks-affected.trycloudflare.com',
+        'http://localhost:4040',
+        'http://127.0.0.1:4040'
+      ].filter(Boolean);
+
+      const unique = [...new Set(candidates)];
+      for (const base of unique) {
+        try {
+          const cleanBase = base.replace(/\/+$/, '');
+          const res = await fetch(`${cleanBase}/api/wa/status`, { signal: AbortSignal.timeout(2500) });
+          if (res.ok) {
+            const d = await res.json().catch(() => null);
+            if (d && d.success) {
+              this.apiBaseUrl = cleanBase;
+              return this.apiBaseUrl;
+            }
+          }
+        } catch (_) {}
+      }
+      return '';
+    },
+
+    getApiUrl(endpoint) {
+      if (this.apiBaseUrl) {
+        return `${this.apiBaseUrl}${endpoint}`;
+      }
+      return endpoint;
+    },
+
+    async init() {
       this.attachListeners();
+      await this.resolveApiBase();
       this.initSSE();
       this.fetchStatus();
       this.fetchContacts();
@@ -34681,7 +34729,8 @@ Aturan:
         try { this.sse.close(); } catch (_) {}
       }
       try {
-        this.sse = new EventSource('/api/wa/events');
+        const sseUrl = this.getApiUrl('/api/wa/events');
+        this.sse = new EventSource(sseUrl);
         this.sse.onmessage = (e) => {
           try {
             const parsed = JSON.parse(e.data);
@@ -34713,7 +34762,11 @@ Aturan:
 
     async fetchStatus() {
       try {
-        const res = await fetch('/api/wa/status');
+        let res = await fetch(this.getApiUrl('/api/wa/status'));
+        if (!res.ok && res.status === 404) {
+          await this.resolveApiBase();
+          res = await fetch(this.getApiUrl('/api/wa/status'));
+        }
         const data = await res.json();
         if (data.success) {
           this.handleStatusUpdate(data);
@@ -34742,7 +34795,7 @@ Aturan:
 
     async fetchContacts(notify = false) {
       try {
-        const res = await fetch('/api/wa/contacts');
+        const res = await fetch(this.getApiUrl('/api/wa/contacts'));
         const data = await res.json();
         if (data.success) {
           this.contacts = data.contacts || [];
@@ -34847,7 +34900,8 @@ Aturan:
       if (els.waQrPlaceholderText) els.waQrPlaceholderText.textContent = 'Memuat kode QR WhatsApp...';
       this.startStatusPolling(60000);
       try {
-        const res = await fetch('/api/wa/connect', {
+        if (!this.apiBaseUrl) await this.resolveApiBase();
+        const res = await fetch(this.getApiUrl('/api/wa/connect'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ forceNew })
@@ -34869,15 +34923,15 @@ Aturan:
 
     async disconnectWhatsApp() {
       try {
-        const res = await fetch('/api/wa/disconnect', {
+        const res = await fetch(this.getApiUrl('/api/wa/disconnect'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ logout: true })
         });
         const data = await res.json();
         if (data.success) {
-          showToast('WhatsApp berhasil diputuskan.', 'info');
-          this.fetchStatus();
+          showToast('WhatsApp berhasil diputuskan. Memuat QR baru...', 'info');
+          this.connectWhatsApp(true);
         }
       } catch (err) {
         showToast(`Gagal putuskan: ${err.message}`, 'error');
@@ -34893,7 +34947,7 @@ Aturan:
         return;
       }
       try {
-        const res = await fetch('/api/wa/contacts', {
+        const res = await fetch(this.getApiUrl('/api/wa/contacts'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: name || phone, phone })
@@ -34944,7 +34998,7 @@ Aturan:
       }
 
       try {
-        const res = await fetch('/api/wa/pairing-code', {
+        const res = await fetch(this.getApiUrl('/api/wa/pairing-code'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ phone })
@@ -35235,7 +35289,7 @@ Aturan:
       `;
       headerBar.querySelector('#btnActionClearWaHistory')?.addEventListener('click', async () => {
         if (confirm(`Hapus riwayat pesan dengan ${this.activeContact?.name || jid}?`)) {
-          await fetch('/api/wa/clear', {
+          await fetch(this.getApiUrl('/api/wa/clear'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ jid })
@@ -35247,7 +35301,7 @@ Aturan:
       els.messagesList.appendChild(headerBar);
 
       try {
-        const res = await fetch(`/api/wa/messages?jid=${encodeURIComponent(jid)}`);
+        const res = await fetch(this.getApiUrl(`/api/wa/messages?jid=${encodeURIComponent(jid)}`));
         const data = await res.json();
         const list = data.messages || [];
 
@@ -35355,7 +35409,7 @@ Aturan:
       AudioEngine.sent?.() || AudioEngine.click();
 
       try {
-        const res = await fetch('/api/wa/send', {
+        const res = await fetch(this.getApiUrl('/api/wa/send'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ jid: this.activeContact.id, text })

@@ -56,7 +56,11 @@ class WhatsAppGateway {
         const raw = JSON.parse(fs.readFileSync(this.contactsFile, 'utf8'));
         if (Array.isArray(raw)) {
           raw.forEach(c => {
-            if (c && c.id) this.contacts.set(c.id, c);
+            if (!c || !c.id) return;
+            // Eliminasi kontak kaisar dummy / palsu
+            if (c.id.includes('6281234567890')) return;
+            if (c.id.endsWith('@lid')) return;
+            this.contacts.set(c.id, c);
           });
         }
       }
@@ -69,6 +73,7 @@ class WhatsAppGateway {
         const raw = JSON.parse(fs.readFileSync(this.messagesFile, 'utf8'));
         if (raw && typeof raw === 'object') {
           for (const [jid, list] of Object.entries(raw)) {
+            if (jid.includes('6281234567890')) continue;
             if (Array.isArray(list)) {
               this.messages.set(jid, list.slice(-200)); // Simpan 200 pesan terakhir per kontak
             }
@@ -146,6 +151,15 @@ class WhatsAppGateway {
       if (this.sock?.signalRepository?.lidMapping) {
         const pn = await this.sock.signalRepository.lidMapping.getPNForLID(jid);
         if (pn) return pn.replace(/:.*@/, '@');
+      }
+    } catch (_) {}
+    // Fallback: cek pemetaan reverse LID di direktori wa-auth
+    try {
+      const lidNum = jid.split('@')[0].split(':')[0];
+      const revFile = path.join(this.authDir, `lid-mapping-${lidNum}_reverse.json`);
+      if (fs.existsSync(revFile)) {
+        const phoneNum = JSON.parse(fs.readFileSync(revFile, 'utf8'));
+        if (phoneNum) return `${phoneNum}@s.whatsapp.net`;
       }
     } catch (_) {}
     if (this.sock?.user?.lid && jid.startsWith(this.sock.user.lid.split(':')[0])) {
@@ -707,6 +721,7 @@ class WhatsAppGateway {
   getContacts() {
     const list = Array.from(this.contacts.values()).filter(c => {
       if (!c || !c.id) return false;
+      if (c.id.includes('6281234567890')) return false; // Hapus kontak kaisar palsu/dummy
       if (c.id.endsWith('@lid')) return false; // Filter out internal WhatsApp LIDs
       if (c.id === 'status@broadcast') return false;
       if (c.id.endsWith('@bot')) return false;
@@ -759,6 +774,7 @@ class WhatsAppGateway {
 
   getMessages(jid) {
     if (!jid) return [];
+    if (jid.includes('6281234567890')) return [];
     let targetJid = jid;
     if (!targetJid.includes('@')) {
       let cleanPhone = targetJid.replace(/[^0-9]/g, '');
@@ -767,7 +783,19 @@ class WhatsAppGateway {
       }
       targetJid = `${cleanPhone}@s.whatsapp.net`;
     }
-    const list = this.messages.get(targetJid) || [];
+    let list = this.messages.get(targetJid) || [];
+    if (list.length === 0) {
+      const numOnly = targetJid.split('@')[0];
+      for (const [k, msgs] of this.messages.entries()) {
+        if (k.startsWith(numOnly) && msgs.length > 0) {
+          list = msgs;
+          break;
+        }
+      }
+    }
+    // Urutkan pesan berdasarkan timestamp
+    list.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
     // Reset unread count ketika pesan kontak dibuka
     const contact = this.contacts.get(targetJid);
     if (contact && contact.unreadCount > 0) {
