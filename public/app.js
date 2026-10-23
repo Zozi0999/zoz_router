@@ -1312,7 +1312,16 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     waDisplayUserId: $('#waDisplayUserId'),
     waSecurityBadge: $('#waSecurityBadge'),
     inputWaSecurityPin: $('#inputWaSecurityPin'),
-    btnSaveWaSecurityPin: $('#btnSaveWaSecurityPin')
+    btnSaveWaSecurityPin: $('#btnSaveWaSecurityPin'),
+    waMobileLinkCard: $('#waMobileLinkCard'),
+    waMobileQrContainer: $('#waMobileQrContainer'),
+    waMobileLinkQrImg: $('#waMobileLinkQrImg'),
+    waMobileQrPlaceholder: $('#waMobileQrPlaceholder'),
+    btnCopyWaMobileLink: $('#btnCopyWaMobileLink'),
+    btnRefreshWaMobileQr: $('#btnRefreshWaMobileQr'),
+    waConnectedDevicesCard: $('#waConnectedDevicesCard'),
+    btnRefreshConnectedDevices: $('#btnRefreshConnectedDevices'),
+    waDevicesList: $('#waDevicesList')
   };
 
   // ==================== AUTONOMOUS TOOL RESPONSE CACHE ====================
@@ -34685,6 +34694,96 @@ Aturan:
       }
     },
 
+    mobileLinkUrl: '',
+
+    async fetchMobileLinkQr(force = false) {
+      if (!this.status.connected) return;
+      if (els.waMobileLinkCard) els.waMobileLinkCard.style.display = 'block';
+      if (els.waMobileQrPlaceholder) els.waMobileQrPlaceholder.style.display = 'flex';
+      if (els.waMobileLinkQrImg) els.waMobileLinkQrImg.style.display = 'none';
+
+      try {
+        const q = `?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}${force ? '&f=1' : ''}`;
+        const res = await fetch(this.getApiUrl('/api/wa/mobile-link' + q), {
+          headers: this.getAuthHeaders()
+        });
+        const data = await res.json().catch(() => null);
+        if (data && data.success && data.qr) {
+          this.mobileLinkUrl = data.url;
+          if (els.waMobileLinkQrImg) {
+            els.waMobileLinkQrImg.src = data.qr;
+            els.waMobileLinkQrImg.style.display = 'block';
+          }
+          if (els.waMobileQrPlaceholder) {
+            els.waMobileQrPlaceholder.style.display = 'none';
+          }
+        }
+      } catch (e) {
+        console.warn('[WA-Client] Gagal memuat QR HP:', e.message);
+      }
+    },
+
+    async fetchConnectedDevices() {
+      if (!this.status.connected) return;
+      if (els.waConnectedDevicesCard) els.waConnectedDevicesCard.style.display = 'block';
+      if (!els.waDevicesList) return;
+
+      try {
+        const q = `?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
+        const res = await fetch(this.getApiUrl('/api/wa/devices' + q), {
+          headers: this.getAuthHeaders()
+        });
+        const data = await res.json().catch(() => null);
+        const devices = (data && data.devices) || [];
+
+        if (devices.length === 0) {
+          els.waDevicesList.innerHTML = `
+            <div style="font-size: 0.78rem; color: var(--text-dim); text-align: center; padding: 10px;">
+              Belum ada perangkat tertaut lain.
+            </div>
+          `;
+          return;
+        }
+
+        const frag = document.createDocumentFragment();
+        devices.forEach(dev => {
+          const item = document.createElement('div');
+          item.className = 'wa-device-item';
+          item.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 8px; font-size: 0.8rem;';
+
+          const isMasterDev = Boolean(dev.isMasterDevice);
+          const isOnline = dev.status === 'online';
+          const iconClass = dev.icon || (dev.type === 'phone' ? 'fa-mobile-screen-button' : 'fa-laptop');
+          const timeText = isOnline ? 'Aktif Sekarang' : `Terakhir aktif ${new Date(dev.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+          item.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div style="width: 32px; height: 32px; border-radius: 6px; background: ${isMasterDev ? 'rgba(37,211,102,0.15)' : 'rgba(56,189,248,0.15)'}; color: ${isMasterDev ? '#25D366' : '#38bdf8'}; display: flex; align-items: center; justify-content: center; font-size: 1rem;">
+                <i class="fa-solid ${iconClass}"></i>
+              </div>
+              <div>
+                <div style="font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 6px;">
+                  <span>${escapeHtml(dev.name)}</span>
+                  ${isMasterDev ? '<span class="badge" style="font-size: 0.65rem; background: rgba(37,211,102,0.2); color: #25D366; padding: 1px 5px; border-radius: 3px;">Induk</span>' : ''}
+                </div>
+                <div style="font-size: 0.72rem; color: var(--text-muted);">${escapeHtml(dev.platform)} &bull; ${timeText}</div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span class="term-tunnel-status-dot" style="background: ${isOnline ? '#25D366' : '#64748b'}; width: 8px; height: 8px;"></span>
+              <span style="font-size: 0.72rem; color: ${isOnline ? '#25D366' : 'var(--text-dim)'};">${isOnline ? 'Online' : 'Idle'}</span>
+            </div>
+          `;
+          frag.appendChild(item);
+        });
+
+        els.waDevicesList.innerHTML = '';
+        els.waDevicesList.appendChild(frag);
+      } catch (e) {
+        console.warn('[WA-Client] Gagal memuat daftar perangkat:', e.message);
+      }
+    },
+
     async resolveApiBase() {
       // 0. Cache hit instant (0ms)
       const cached = localStorage.getItem('zoz_wa_api_url');
@@ -34779,21 +34878,32 @@ Aturan:
     },
 
     async init() {
-      // 0. Update Identitas Akun & Tanda Pengenal Keamanan
+      // 0. Auto-Login dari URL Parameter Handphone (Scan QR Mobile Link)
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const pUid = urlParams.get('userId');
+        const pPin = urlParams.get('pin');
+        const pMode = urlParams.get('mode');
+        if (pUid) localStorage.setItem('zoz_wa_user_id', pUid);
+        if (pPin) localStorage.setItem('zoz_wa_pin', pPin);
+        if (pMode === 'whatsapp') localStorage.setItem('zoz_chat_mode', 'whatsapp');
+      } catch (_) {}
+
+      // 1. Update Identitas Akun & Tanda Pengenal Keamanan
       this.updateSecurityUI();
 
-      // 1. Pasang semua listener secara sinkron & instan (0ms)
+      // 2. Pasang semua listener secara sinkron & instan (0ms)
       this.attachListeners();
 
-      // 2. Restore mode dari localStorage
+      // 3. Restore mode dari localStorage
       const savedMode = localStorage.getItem('zoz_chat_mode') || 'ai';
       this.setChatMode(savedMode, false);
 
-      // 3. Gunakan cached API URL jika ada
+      // 4. Gunakan cached API URL jika ada
       const cached = localStorage.getItem('zoz_wa_api_url');
       if (cached) this.apiBaseUrl = cached;
 
-      // 4. Deferred non-blocking background initialization (0ms impact on critical render path)
+      // 5. Deferred non-blocking background initialization (0ms impact on critical render path)
       const scheduleBg = window.requestIdleCallback || ((fn) => setTimeout(fn, 600));
       scheduleBg(() => {
         this.bootstrapBackground();
@@ -34934,6 +35044,33 @@ Aturan:
           e.preventDefault();
           this.saveSecurityPin();
         }
+      });
+
+      // Salin Tautan Handphone
+      els.btnCopyWaMobileLink?.addEventListener('click', () => {
+        AudioEngine.click();
+        if (this.mobileLinkUrl) {
+          navigator.clipboard?.writeText(this.mobileLinkUrl).then(() => {
+            showToast('🔗 Tautan HP berhasil disalin ke clipboard!', 'success');
+          }).catch(() => {
+            prompt('Salin tautan ini di browser HP Anda:', this.mobileLinkUrl);
+          });
+        } else {
+          this.fetchMobileLinkQr(true);
+        }
+      });
+
+      // Refresh QR Handphone
+      els.btnRefreshWaMobileQr?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.fetchMobileLinkQr(true);
+      });
+
+      // Segarkan Daftar Perangkat Terhubung
+      els.btnRefreshConnectedDevices?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.fetchConnectedDevices();
+        showToast('Daftar perangkat terhubung diperbarui.', 'info');
       });
 
       // Document click to close contact dropdown
@@ -35099,8 +35236,14 @@ Aturan:
         if (els.waConnectedCard) els.waConnectedCard.style.display = 'flex';
         if (els.waConnectedPhoneDisplay) els.waConnectedPhoneDisplay.textContent = status.phone || '-';
         if (els.waContactCountDisplay) els.waContactCountDisplay.textContent = `${this.contacts.length} Kontak`;
+        if (els.waMobileLinkCard) els.waMobileLinkCard.style.display = 'block';
+        if (els.waConnectedDevicesCard) els.waConnectedDevicesCard.style.display = 'block';
+        this.fetchMobileLinkQr();
+        this.fetchConnectedDevices();
       } else {
         if (els.waConnectedCard) els.waConnectedCard.style.display = 'none';
+        if (els.waMobileLinkCard) els.waMobileLinkCard.style.display = 'none';
+        if (els.waConnectedDevicesCard) els.waConnectedDevicesCard.style.display = 'none';
         if (els.waPairMethodNav) els.waPairMethodNav.style.display = 'flex';
         if (els.waQrSection) els.waQrSection.style.display = 'block';
         if (status.qr) {
@@ -35687,18 +35830,59 @@ Aturan:
     appendMessageBubble(msg) {
       if (!els.messagesList) return;
 
+      // 1. DEDULIKASI KETAT BERDASARKAN ID PESAN
+      if (msg.id && els.messagesList.querySelector(`[data-msg-id="${msg.id}"]`)) {
+        return; // Sudah tampil di layar, jangan duplikasi!
+      }
+
+      // 2. REKONSILIASI OPTIMISTIK UNTUK PESAN KELUAR (fromMe)
+      // Jika pesan keluar dari saya dan ada bubble 'sending' (optimistik) dengan teks yang sama
+      if (msg.fromMe && !String(msg.id).startsWith('temp_')) {
+        const pendingBubble = Array.from(els.messagesList.querySelectorAll('.wa-bubble-wrap[data-status="sending"]'))
+          .find(el => el.querySelector('.wa-bubble-text')?.textContent === msg.text);
+
+        if (pendingBubble) {
+          // Upgrade bubble optimistik ini menjadi pesan terkonfirmasi
+          pendingBubble.setAttribute('data-msg-id', msg.id);
+          pendingBubble.setAttribute('data-status', 'sent');
+          const metaSpan = pendingBubble.querySelector('.wa-bubble-meta span');
+          if (metaSpan) {
+            const d = new Date(msg.timestamp || Date.now());
+            metaSpan.textContent = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          }
+          const icon = pendingBubble.querySelector('.wa-bubble-meta i');
+          if (icon) {
+            icon.className = 'fa-solid fa-check-double';
+            icon.style.color = '#38bdf8';
+          }
+          return; // Jangan buat bubble duplikat!
+        }
+      }
+
+      // 3. RENDER BUBBLE BARU
       const wrap = document.createElement('div');
       wrap.className = 'wa-bubble-wrap' + (msg.fromMe ? ' wa-bubble-sent' : ' wa-bubble-received');
+      wrap.setAttribute('data-msg-id', msg.id || `msg_${Date.now()}`);
+      wrap.setAttribute('data-status', msg.status || (msg.fromMe ? 'sent' : 'received'));
 
       const d = new Date(msg.timestamp || Date.now());
       const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+      let statusIcon = '';
+      if (msg.fromMe) {
+        if (msg.status === 'sending') {
+          statusIcon = '<i class="fa-solid fa-clock-rotate-left" style="opacity: 0.6; font-size: 0.68rem; margin-left: 4px;"></i>';
+        } else {
+          statusIcon = '<i class="fa-solid fa-check-double" style="color: #38bdf8; font-size: 0.72rem; margin-left: 4px;"></i>';
+        }
+      }
 
       wrap.innerHTML = `
         ${!msg.fromMe ? `<div class="wa-bubble-sender">${escapeHtml(msg.senderName || 'Kontak')}</div>` : ''}
         <div class="wa-bubble-text">${escapeHtml(msg.text || '')}</div>
         <div class="wa-bubble-meta">
           <span>${timeStr}</span>
-          ${msg.fromMe ? '<i class="fa-solid fa-check-double"></i>' : ''}
+          ${statusIcon}
         </div>
       `;
 
@@ -35719,8 +35903,9 @@ Aturan:
         autoResizeTextarea(els.promptInput);
       }
 
+      const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const tempMsg = {
-        id: `temp_${Date.now()}`,
+        id: tempId,
         fromMe: true,
         text,
         timestamp: Date.now(),
@@ -35734,12 +35919,31 @@ Aturan:
         const res = await fetch(this.getApiUrl('/api/wa/send'), {
           method: 'POST',
           headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ jid: this.activeContact.id, text, userId: this.getUserId(), pin: this.getPin() })
+          body: JSON.stringify({ jid: this.activeContact.id, text, userId: this.getUserId(), pin: this.getPin(), tempId })
         });
         const data = await res.json().catch(() => null);
         if (!data || !data.success) {
           showToast(`❌ Gagal kirim WA: ${data?.error || 'Terjadi kesalahan'}`, 'error');
+          const failedEl = els.messagesList.querySelector(`[data-msg-id="${tempId}"]`);
+          if (failedEl) {
+            failedEl.setAttribute('data-status', 'failed');
+            const icon = failedEl.querySelector('.wa-bubble-meta i');
+            if (icon) icon.className = 'fa-solid fa-circle-exclamation text-rose-500';
+          }
         } else {
+          // Reconcile optimistic bubble instantly with confirmed ID from server
+          if (data.message) {
+            const pendingBubble = els.messagesList.querySelector(`[data-msg-id="${tempId}"]`);
+            if (pendingBubble) {
+              pendingBubble.setAttribute('data-msg-id', data.message.id);
+              pendingBubble.setAttribute('data-status', 'sent');
+              const icon = pendingBubble.querySelector('.wa-bubble-meta i');
+              if (icon) {
+                icon.className = 'fa-solid fa-check-double';
+                icon.style.color = '#38bdf8';
+              }
+            }
+          }
           this.fetchContacts();
         }
       } catch (err) {

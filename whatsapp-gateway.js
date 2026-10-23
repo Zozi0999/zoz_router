@@ -69,6 +69,7 @@ class WhatsAppGateway {
     };
 
     this.sseClients = new Set();
+    this.devices = new Map(); // devId -> { id, platform, icon, userAgent, ip, lastSeen }
     this.reconnectTimer = null;
     this.isExplicitDisconnect = false;
 
@@ -82,6 +83,96 @@ class WhatsAppGateway {
 
     this.loadConfig();
     this.loadPersistedData();
+  }
+
+  recordDevice(req) {
+    if (!req) return;
+    try {
+      const rawUa = req.headers['user-agent'] || 'Unknown Browser';
+      const ip = (req.headers['x-real-ip'] || req.headers['cf-connecting-ip'] || req.socket?.remoteAddress || '127.0.0.1').replace(/^::ffff:/, '');
+
+      let platform = 'Desktop PC';
+      let icon = 'fa-laptop';
+      if (/android/i.test(rawUa)) {
+        platform = 'Ponsel Android';
+        icon = 'fa-mobile-screen-button';
+      } else if (/iphone|ipad|ipod/i.test(rawUa)) {
+        platform = 'Apple iPhone / iPad';
+        icon = 'fa-mobile-screen-button';
+      } else if (/windows/i.test(rawUa)) {
+        platform = 'Windows PC';
+        icon = 'fa-desktop';
+      } else if (/macintosh|mac os/i.test(rawUa)) {
+        platform = 'macOS';
+        icon = 'fa-desktop';
+      } else if (/linux/i.test(rawUa)) {
+        platform = 'Linux Desktop';
+        icon = 'fa-desktop';
+      }
+
+      const devId = crypto.createHash('md5').update(`${ip}_${rawUa}`).digest('hex').slice(0, 8);
+      this.devices.set(devId, {
+        id: devId,
+        platform,
+        icon,
+        userAgent: rawUa,
+        ip,
+        lastSeen: Date.now()
+      });
+    } catch (_) {}
+  }
+
+  getConnectedDevices() {
+    const now = Date.now();
+    const list = [];
+
+    // 1. Perangkat Handphone Induk WhatsApp (Sesi Baileys Utama)
+    if (this.status.connected) {
+      list.push({
+        id: 'wa_primary_phone',
+        name: this.status.phone ? `+${this.status.phone}` : 'Ponsel Induk WhatsApp',
+        type: 'phone',
+        platform: 'WhatsApp Multi-Device (Ponsel Induk)',
+        icon: 'fa-mobile-screen-button',
+        status: 'online',
+        isMasterDevice: true,
+        lastSeen: now
+      });
+    }
+
+    // 2. Daftar Perangkat Web / Klien yang mengakses sesi ini
+    for (const [id, dev] of this.devices.entries()) {
+      const isOnline = (now - dev.lastSeen) < 180000; // Aktif dalam 3 menit
+      list.push({
+        id: dev.id,
+        name: dev.platform,
+        type: dev.platform.includes('Ponsel') || dev.platform.includes('iPhone') ? 'phone' : 'desktop',
+        platform: `${dev.platform} (${dev.ip})`,
+        icon: dev.icon || 'fa-laptop',
+        status: isOnline ? 'online' : 'idle',
+        isMasterDevice: false,
+        lastSeen: dev.lastSeen
+      });
+    }
+
+    return list;
+  }
+
+  async generateMobileLink(hostUrl, pin = '') {
+    const cleanHost = (hostUrl || 'z21.zozdocs.com').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const cleanPin = pin || (this.isMaster ? '210560' : '');
+    const mobileUrl = `https://${cleanHost}/?userId=${encodeURIComponent(this.userId)}${cleanPin ? `&pin=${encodeURIComponent(cleanPin)}` : ''}&mode=whatsapp`;
+    const qrDataUrl = await QRCode.toDataURL(mobileUrl, {
+      margin: 2,
+      scale: 6,
+      color: { dark: '#000000', light: '#ffffff' }
+    });
+    return {
+      url: mobileUrl,
+      qr: qrDataUrl,
+      userId: this.userId,
+      isMaster: this.isMaster
+    };
   }
 
   loadConfig() {
@@ -583,11 +674,19 @@ class WhatsAppGateway {
             this.messages.set(jid, []);
           }
           const list = this.messages.get(jid);
-          // Cek duplikasi ID
-          if (!list.some(m => m.id === id)) {
-            list.push(messageItem);
-            hasNew = true;
+
+          // PENCEGAHAN DUPLIKASI TOTAL (Triple Bubble Bug Fix):
+          // Cek apakah pesan dengan ID ini sudah ada, atau jika fromMe: cek apakah pesan teks sama dalam rentang 15 detik
+          const existingIndex = list.findIndex(m => m.id === id || (fromMe && m.fromMe && m.text === text && Math.abs((m.timestamp || 0) - ts) < 15000));
+          if (existingIndex !== -1) {
+            // Sudah tercatat via sendMessage() REST API, update ID resmi & lewati agar tidak membroadcast ulang
+            list[existingIndex].id = id;
+            list[existingIndex].status = 'sent';
+            continue;
           }
+
+          list.push(messageItem);
+          hasNew = true;
 
           // Update kontak
           let contact = this.contacts.get(jid);
@@ -610,7 +709,7 @@ class WhatsAppGateway {
             }
           }
 
-          // Broadcast pesan baru ke web client
+          // Broadcast pesan baru HANYA untuk pesan baru yang belum ada di layar
           this.broadcast('new_message', {
             jid,
             message: messageItem,

@@ -5699,12 +5699,19 @@ async function requestHandler(req, res) {
   // =========================================================================
   function getWaTenant(req, reqUrl, body = null) {
     if (!waGatewayManager) {
-      if (waGateway) return { success: true, gateway: waGateway, isMaster: true, userId: 'usr_kaisar_master' };
+      if (waGateway) {
+        waGateway.recordDevice?.(req);
+        return { success: true, gateway: waGateway, isMaster: true, userId: 'usr_kaisar_master' };
+      }
       return { success: false, status: 503, error: 'Modul WhatsApp Gateway tidak tersedia.' };
     }
     const uid = req.headers['x-user-id'] || req.headers['x-client-id'] || reqUrl?.searchParams?.get('userId') || (body && body.userId) || '';
     const pin = req.headers['x-wa-pin'] || reqUrl?.searchParams?.get('pin') || (body && body.pin) || '';
-    return waGatewayManager.resolveGateway(uid, pin);
+    const resTenant = waGatewayManager.resolveGateway(uid, pin);
+    if (resTenant && resTenant.success && resTenant.gateway) {
+      resTenant.gateway.recordDevice?.(req);
+    }
+    return resTenant;
   }
 
   if (pathname === '/api/wa/status' && method === 'GET') {
@@ -5902,6 +5909,48 @@ async function requestHandler(req, res) {
     } catch (e) {
       return sendJSON(res, 400, { success: false, error: e.message });
     }
+  }
+
+  if (pathname === '/api/wa/mobile-link' && method === 'GET') {
+    const tenant = getWaTenant(req, reqUrl);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, {
+        success: false,
+        error: tenant.error,
+        requiresPin: tenant.requiresPin,
+        userId: tenant.userId
+      });
+    }
+    const host = req.headers['x-forwarded-host'] || req.headers['host'] || 'z21.zozdocs.com';
+    const pin = tenant.isMaster ? '210560' : (req.headers['x-wa-pin'] || reqUrl.searchParams.get('pin') || '');
+    try {
+      const linkInfo = await tenant.gateway.generateMobileLink(host, pin);
+      return sendJSON(res, 200, {
+        success: true,
+        ...linkInfo,
+        devices: tenant.gateway.getConnectedDevices()
+      });
+    } catch (e) {
+      return sendJSON(res, 500, { success: false, error: 'Gagal membuat QR Handphone: ' + e.message });
+    }
+  }
+
+  if (pathname === '/api/wa/devices' && method === 'GET') {
+    const tenant = getWaTenant(req, reqUrl);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, {
+        success: false,
+        error: tenant.error,
+        requiresPin: tenant.requiresPin,
+        userId: tenant.userId
+      });
+    }
+    return sendJSON(res, 200, {
+      success: true,
+      userId: tenant.userId,
+      isMaster: tenant.isMaster,
+      devices: tenant.gateway.getConnectedDevices()
+    });
   }
 
   if (pathname === '/api/wa/events' && method === 'GET') {
