@@ -1289,6 +1289,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     waQrCodePlaceholder: $('#waQrCodePlaceholder'),
     waQrPlaceholderText: $('#waQrPlaceholderText'),
     btnRefreshWaQr: $('#btnRefreshWaQr'),
+    btnForceTunnelWaQr: $('#btnForceTunnelWaQr'),
     waPairMethodNav: $('#waPairMethodNav'),
     btnPairMethodQr: $('#btnPairMethodQr'),
     btnPairMethodPhone: $('#btnPairMethodPhone'),
@@ -34558,11 +34559,13 @@ Aturan:
     async resolveApiBase() {
       // 1. Coba relatif jika sedang berjalan di localhost atau jika proxy domain aktif
       try {
-        const res = await fetch('/api/wa/status', { signal: AbortSignal.timeout(1500) });
+        const res = await fetch('/api/wa/status', { cache: 'no-store', signal: AbortSignal.timeout(2000) });
         if (res.ok) {
           const d = await res.json().catch(() => null);
           if (d && d.success) {
             this.apiBaseUrl = '';
+            if (d.qr) this.handleQrUpdate(d.qr);
+            if (d.connected) this.handleStatusUpdate(d);
             return '';
           }
         }
@@ -34581,17 +34584,50 @@ Aturan:
       for (const base of unique) {
         try {
           const cleanBase = base.replace(/\/+$/, '');
-          const res = await fetch(`${cleanBase}/api/wa/status`, { signal: AbortSignal.timeout(2500) });
+          const res = await fetch(`${cleanBase}/api/wa/status?t=${Date.now()}`, { cache: 'no-store', signal: AbortSignal.timeout(3000) });
           if (res.ok) {
             const d = await res.json().catch(() => null);
             if (d && d.success) {
               this.apiBaseUrl = cleanBase;
+              if (d.qr) this.handleQrUpdate(d.qr);
+              if (d.connected) this.handleStatusUpdate(d);
               return this.apiBaseUrl;
             }
           }
         } catch (_) {}
       }
       return '';
+    },
+
+    async fetchQrDirectTunnel(notify = false) {
+      if (els.waQrPlaceholderText) els.waQrPlaceholderText.textContent = 'Menghubungkan langsung ke tunnel WhatsApp...';
+      const tunnelBases = [
+        'https://notify-thomson-remarks-affected.trycloudflare.com',
+        localStorage.getItem('zoz_last_tunnel_url'),
+        (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost) || '',
+        'http://localhost:4040',
+        'http://127.0.0.1:4040'
+      ].filter(Boolean);
+
+      for (const base of tunnelBases) {
+        try {
+          const clean = base.replace(/\/+$/, '');
+          const res = await fetch(`${clean}/api/wa/status?t=${Date.now()}`, { cache: 'no-store' });
+          if (res.ok) {
+            const data = await res.json().catch(() => null);
+            if (data && data.success) {
+              this.apiBaseUrl = clean;
+              this.handleStatusUpdate(data);
+              if (data.qr) {
+                this.handleQrUpdate(data.qr);
+                if (notify) showToast('Kode QR WhatsApp berhasil dimuat via tunnel!', 'success');
+                return true;
+              }
+            }
+          }
+        } catch (_) {}
+      }
+      return false;
     },
 
     getApiUrl(endpoint) {
@@ -34699,6 +34735,14 @@ Aturan:
         AudioEngine.click();
         this.connectWhatsApp(true);
       });
+      els.btnForceTunnelWaQr?.addEventListener('click', async () => {
+        AudioEngine.click();
+        showToast('Memuat QR langsung dari Tunnel...', 'info');
+        const ok = await this.fetchQrDirectTunnel(true);
+        if (!ok) {
+          await this.connectWhatsApp(true);
+        }
+      });
 
       // Disconnect WA
       els.btnDisconnectWaDevice?.addEventListener('click', () => {
@@ -34764,16 +34808,23 @@ Aturan:
 
     async fetchStatus() {
       try {
-        let res = await fetch(this.getApiUrl('/api/wa/status'));
-        if (!res.ok && res.status === 404) {
+        let res = await fetch(this.getApiUrl('/api/wa/status?t=' + Date.now()), { cache: 'no-store' });
+        if (!res.ok) {
           await this.resolveApiBase();
-          res = await fetch(this.getApiUrl('/api/wa/status'));
+          res = await fetch(this.getApiUrl('/api/wa/status?t=' + Date.now()), { cache: 'no-store' });
         }
         const data = await res.json();
-        if (data.success) {
+        if (data && data.success) {
           this.handleStatusUpdate(data);
+          if (data.qr) {
+            this.handleQrUpdate(data.qr);
+          }
+        } else {
+          await this.fetchQrDirectTunnel();
         }
-      } catch (_) {}
+      } catch (_) {
+        await this.fetchQrDirectTunnel();
+      }
     },
 
     startStatusPolling(durationMs = 60000) {
@@ -34903,11 +34954,21 @@ Aturan:
       this.startStatusPolling(60000);
       try {
         if (!this.apiBaseUrl) await this.resolveApiBase();
-        const res = await fetch(this.getApiUrl('/api/wa/connect'), {
+        let apiUrl = this.getApiUrl('/api/wa/connect');
+        let res = await fetch(apiUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ forceNew })
         });
+        if (!res.ok) {
+          apiUrl = 'https://notify-thomson-remarks-affected.trycloudflare.com/api/wa/connect';
+          this.apiBaseUrl = 'https://notify-thomson-remarks-affected.trycloudflare.com';
+          res = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ forceNew })
+          });
+        }
         const data = await res.json();
         if (data.success) {
           this.handleStatusUpdate(data);
@@ -34919,7 +34980,10 @@ Aturan:
           showToast(`Gagal: ${data.error}`, 'error');
         }
       } catch (err) {
-        showToast(`Koneksi error: ${err.message}`, 'error');
+        const ok = await this.fetchQrDirectTunnel();
+        if (!ok) {
+          showToast(`Koneksi error: ${err.message}`, 'error');
+        }
       }
     },
 
@@ -35042,8 +35106,11 @@ Aturan:
       if (!isTerminal) {
         this.startStatusPolling(60000);
         await this.fetchStatus();
-        if (!this.status.connected && !this.status.connecting && !this.status.qr) {
-          await this.connectWhatsApp();
+        if (!this.status.connected && !this.status.qr) {
+          const loaded = await this.fetchQrDirectTunnel();
+          if (!loaded) {
+            await this.connectWhatsApp();
+          }
         }
       } else {
         this.stopStatusPolling();

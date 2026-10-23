@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261023_v440';
+    window.__ZOZ_VERSION__ = 'v20261023_v441';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -2724,9 +2724,12 @@
                   <p>1. Buka aplikasi <b>WhatsApp</b> di ponsel Anda.<br>
                      2. Ketuk <b>Titik Tiga ⋮</b> atau <b>Setelan</b> &gt; <b>Perangkat Tertaut</b>.<br>
                      3. Ketuk <b>Tautkan Perangkat</b> lalu scan kode QR di samping.</p>
-                  <div style="display: flex; gap: 8px; margin-top: 10px;">
+                  <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
                     <button type="button" class="term-tunnel-btn small" id="btnRefreshWaQr">
                       <i class="fa-solid fa-rotate-right"></i> Refresh QR
+                    </button>
+                    <button type="button" class="term-tunnel-btn small" id="btnForceTunnelWaQr" style="background: rgba(37, 211, 102, 0.15); border-color: rgba(37, 211, 102, 0.4); color: #25D366;" title="Paksa muat QR langsung via Cloudflare Tunnel">
+                      <i class="fa-solid fa-bolt"></i> Muat Langsung via Tunnel
                     </button>
                   </div>
                 </div>
@@ -2847,8 +2850,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261023_v440" defer></script>
+  <script src="text-safety.js?v=20261023_v441" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261023_v440" defer></script>
+  <script src="app.js?v=20261023_v441" defer></script>
 </body>
 </html>

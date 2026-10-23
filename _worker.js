@@ -637,6 +637,54 @@ export default {
       });
     }
 
+    // Universal WhatsApp & Daemon Tunnel Proxy (Edge Bridge)
+    const TUNNEL_GATEWAY_URL = 'https://notify-thomson-remarks-affected.trycloudflare.com';
+    if (url.pathname.startsWith('/api/wa/') || url.pathname.startsWith('/api/terminal/') || url.pathname.startsWith('/api/daemon/')) {
+      const targetUrl = TUNNEL_GATEWAY_URL + url.pathname + url.search;
+      const fwdHeaders = new Headers(request.headers);
+      fwdHeaders.set('Host', 'notify-thomson-remarks-affected.trycloudflare.com');
+      fwdHeaders.set('X-Forwarded-Host', url.host);
+      fwdHeaders.set('X-Forwarded-Proto', 'https');
+      fwdHeaders.set('X-Real-IP', request.headers.get('cf-connecting-ip') || '127.0.0.1');
+
+      const fetchInit = {
+        method: request.method,
+        headers: fwdHeaders,
+        redirect: 'follow'
+      };
+
+      if (request.method !== 'GET' && request.method !== 'HEAD') {
+        fetchInit.body = request.body;
+      }
+
+      try {
+        const upstream = await fetch(targetUrl, fetchInit);
+        const resHeaders = new Headers(upstream.headers);
+        resHeaders.set('Access-Control-Allow-Origin', '*');
+        resHeaders.set('Access-Control-Allow-Private-Network', 'true');
+        resHeaders.set('X-Accel-Buffering', 'no');
+        resHeaders.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+
+        return new Response(upstream.body, {
+          status: upstream.status,
+          statusText: upstream.statusText,
+          headers: resHeaders
+        });
+      } catch (proxyErr) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Gagal menghubungi tunnel WhatsApp/Daemon backend lokal: ' + proxyErr.message,
+          tunnelUrl: TUNNEL_GATEWAY_URL
+        }), {
+          status: 502,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Access-Control-Allow-Origin': '*'
+          }
+        });
+      }
+    }
+
     // Gateway root info
     if ((url.pathname === '/api' || url.pathname === '/api/') && request.method === 'GET') {
       return new Response(JSON.stringify({

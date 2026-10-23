@@ -42,9 +42,9 @@ export async function onRequest(context) {
 
     // Forward upstream response with permissive CORS and no buffering
     const respHeaders = new Headers(upstreamResponse.headers);
-    respHeaders.set('Access-Control-Allow-Origin': '*');
+    respHeaders.set('Access-Control-Allow-Origin', '*');
     respHeaders.set('Access-Control-Allow-Private-Network', 'true');
-    respHeaders.set('X-Accel-Buffering': 'no');
+    respHeaders.set('X-Accel-Buffering', 'no');
 
     return new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
