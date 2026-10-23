@@ -1307,7 +1307,12 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     btnDisconnectWaDevice: $('#btnDisconnectWaDevice'),
     inputWaNewContactName: $('#inputWaNewContactName'),
     inputWaNewContactPhone: $('#inputWaNewContactPhone'),
-    btnSaveWaNewContact: $('#btnSaveWaNewContact')
+    btnSaveWaNewContact: $('#btnSaveWaNewContact'),
+    waTenantSecurityBox: $('#waTenantSecurityBox'),
+    waDisplayUserId: $('#waDisplayUserId'),
+    waSecurityBadge: $('#waSecurityBadge'),
+    inputWaSecurityPin: $('#inputWaSecurityPin'),
+    btnSaveWaSecurityPin: $('#btnSaveWaSecurityPin')
   };
 
   // ==================== AUTONOMOUS TOOL RESPONSE CACHE ====================
@@ -34547,6 +34552,7 @@ Aturan:
 
   // =========================================================================
   // WHATSAPP WEB GATEWAY & DUAL CHAT MODE (AI vs WHATSAPP) CONTROLLER
+  // Multi-Tenant Isolation & Account Identification Guard (PIN Security)
   // =========================================================================
   const WhatsAppController = {
     sse: null,
@@ -34558,6 +34564,126 @@ Aturan:
 
     sseReconnectAttempts: 0,
     maxSseAttempts: 3,
+
+    getUserId() {
+      let uid = localStorage.getItem('zoz_wa_user_id') || localStorage.getItem('zoz_user_id');
+      if (!uid) {
+        if (typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+          uid = 'usr_kaisar_master';
+        } else {
+          uid = 'usr_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+        }
+        localStorage.setItem('zoz_wa_user_id', uid);
+      }
+      return uid;
+    },
+
+    getPin() {
+      const saved = localStorage.getItem('zoz_wa_pin');
+      if (saved) return saved.trim();
+      if (typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+        return '210560'; // PIN Master Kaisar Zozi untuk workstation lokal
+      }
+      return '';
+    },
+
+    getAuthHeaders(customHeaders = {}) {
+      const token = (typeof STATE !== 'undefined' && STATE.userToken) || localStorage.getItem('zoz_user_token') || '';
+      const h = {
+        'X-User-ID': this.getUserId(),
+        'X-Client-ID': this.getUserId(),
+        'X-User-Token': token,
+        ...customHeaders
+      };
+      const pin = this.getPin();
+      if (pin) {
+        h['X-WA-PIN'] = pin;
+      }
+      return h;
+    },
+
+    async saveSecurityPin() {
+      const pin = els.inputWaSecurityPin ? els.inputWaSecurityPin.value.trim() : '';
+      if (!pin) {
+        showToast('PIN tidak boleh kosong!', 'warning');
+        return;
+      }
+      if (pin.length < 4 || pin.length > 16) {
+        showToast('PIN harus berukuran 4 hingga 16 karakter!', 'warning');
+        return;
+      }
+
+      // Simpan ke localStorage peramban
+      localStorage.setItem('zoz_wa_pin', pin);
+
+      // Jika memasukkan PIN Master Kaisar 210560
+      if (pin === '210560') {
+        localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+        showToast('👑 PIN Master Kaisar Zozi terverifikasi! Mengakses Master Core...', 'success');
+        this.updateSecurityUI({ isMaster: true, hasPin: true });
+        await this.fetchStatus();
+        await this.fetchContacts(true);
+        return;
+      }
+
+      // Simpan PIN ke server untuk mengunci akun pengguna saat ini
+      try {
+        const res = await fetch(this.getApiUrl('/api/wa/pin'), {
+          method: 'POST',
+          headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ newPin: pin })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('✅ PIN Keamanan berhasil disimpan dan diaktifkan!', 'success');
+          this.updateSecurityUI({ hasPin: true });
+          await this.fetchStatus();
+          await this.fetchContacts();
+        } else {
+          showToast(`Gagal set PIN: ${data.error}`, 'error');
+        }
+      } catch (_) {
+        showToast('PIN tersimpan di perangkat lokal.', 'info');
+        await this.fetchStatus();
+      }
+    },
+
+    updateSecurityUI(info = {}) {
+      const uid = this.getUserId();
+      const isMaster = Boolean(info.isMaster || this.getPin() === '210560' || uid === 'usr_kaisar_master');
+      const hasPin = Boolean(info.hasPin || this.getPin());
+
+      if (els.waDisplayUserId) {
+        els.waDisplayUserId.textContent = isMaster ? '👑 usr_kaisar_master' : uid;
+        els.waDisplayUserId.style.color = isMaster ? '#f59e0b' : '#38bdf8';
+      }
+
+      if (els.waSecurityBadge) {
+        if (isMaster) {
+          els.waSecurityBadge.innerHTML = '<i class="fa-solid fa-crown text-amber-400"></i> Master Core';
+          els.waSecurityBadge.style.background = 'rgba(245, 158, 11, 0.15)';
+          els.waSecurityBadge.style.color = '#f59e0b';
+          els.waSecurityBadge.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+        } else if (hasPin) {
+          els.waSecurityBadge.innerHTML = '<i class="fa-solid fa-shield-halved text-emerald-400"></i> Terlindungi PIN';
+          els.waSecurityBadge.style.background = 'rgba(37, 211, 102, 0.15)';
+          els.waSecurityBadge.style.color = '#25D366';
+          els.waSecurityBadge.style.borderColor = 'rgba(37, 211, 102, 0.3)';
+        } else {
+          els.waSecurityBadge.innerHTML = '<i class="fa-solid fa-lock-open text-sky-400"></i> Terisolasi (Tanpa PIN)';
+          els.waSecurityBadge.style.background = 'rgba(56, 189, 248, 0.15)';
+          els.waSecurityBadge.style.color = '#38bdf8';
+          els.waSecurityBadge.style.borderColor = 'rgba(56, 189, 248, 0.3)';
+        }
+      }
+
+      if (els.inputWaSecurityPin && !els.inputWaSecurityPin.value) {
+        const curPin = this.getPin();
+        if (curPin) {
+          els.inputWaSecurityPin.value = curPin;
+        }
+      }
+    },
 
     async resolveApiBase() {
       // 0. Cache hit instant (0ms)
@@ -34576,7 +34702,7 @@ Aturan:
       // 2. Coba URL tunnel Cloudflare yang tersimpan atau default
       const candidates = [
         this.apiBaseUrl,
-        'https://notify-thomson-remarks-affected.trycloudflare.com',
+        'https://turned-defensive-myself-workout.trycloudflare.com',
         localStorage.getItem('zoz_last_tunnel_url'),
         (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost) || '',
         'http://localhost:4040',
@@ -34587,7 +34713,11 @@ Aturan:
       for (const base of unique) {
         try {
           const cleanBase = base.replace(/\/+$/, '');
-          const res = await fetch(`${cleanBase}/api/wa/status?t=${Date.now()}`, { cache: 'no-store', signal: AbortSignal.timeout(1800) });
+          const res = await fetch(`${cleanBase}/api/wa/status?t=${Date.now()}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`, {
+            cache: 'no-store',
+            headers: this.getAuthHeaders(),
+            signal: AbortSignal.timeout(1800)
+          });
           if (res.ok) {
             const d = await res.json().catch(() => null);
             if (d && d.success) {
@@ -34607,7 +34737,7 @@ Aturan:
       if (els.waQrPlaceholderText) els.waQrPlaceholderText.textContent = 'Menghubungkan langsung ke tunnel WhatsApp...';
       const tunnelBases = [
         this.apiBaseUrl,
-        'https://notify-thomson-remarks-affected.trycloudflare.com',
+        'https://turned-defensive-myself-workout.trycloudflare.com',
         localStorage.getItem('zoz_last_tunnel_url'),
         (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost) || '',
         'http://localhost:4040',
@@ -34618,12 +34748,16 @@ Aturan:
       for (const base of unique) {
         try {
           const clean = base.replace(/\/+$/, '');
-          const res = await fetch(`${clean}/api/wa/status?t=${Date.now()}`, { cache: 'no-store', signal: AbortSignal.timeout(2500) });
+          const res = await fetch(`${clean}/api/wa/status?t=${Date.now()}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`, {
+            cache: 'no-store',
+            headers: this.getAuthHeaders(),
+            signal: AbortSignal.timeout(2500)
+          });
           if (res.ok) {
             const data = await res.json().catch(() => null);
             if (data && data.success) {
               this.apiBaseUrl = clean;
-              localStorage.setItem('zoz_wa_api_url', cleanBase);
+              localStorage.setItem('zoz_wa_api_url', clean);
               this.handleStatusUpdate(data);
               if (data.qr) {
                 this.handleQrUpdate(data.qr);
@@ -34645,6 +34779,9 @@ Aturan:
     },
 
     async init() {
+      // 0. Update Identitas Akun & Tanda Pengenal Keamanan
+      this.updateSecurityUI();
+
       // 1. Pasang semua listener secara sinkron & instan (0ms)
       this.attachListeners();
 
@@ -34787,6 +34924,18 @@ Aturan:
         this.handleSaveNewContact();
       });
 
+      // Account Security PIN Save
+      els.btnSaveWaSecurityPin?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.saveSecurityPin();
+      });
+      els.inputWaSecurityPin?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.saveSecurityPin();
+        }
+      });
+
       // Document click to close contact dropdown
       document.addEventListener('click', (e) => {
         if (els.waContactDropdownMenu && !els.singleWaContactPickerWrap?.contains(e.target)) {
@@ -34803,7 +34952,7 @@ Aturan:
       if (!this.apiBaseUrl) return; // Lindungi dari request SSE ke origin statis 404
 
       try {
-        const sseUrl = this.getApiUrl('/api/wa/events');
+        const sseUrl = this.getApiUrl(`/api/wa/events?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`);
         this.sse = new EventSource(sseUrl);
         this.sse.onopen = () => {
           this.sseReconnectAttempts = 0;
@@ -34850,16 +34999,26 @@ Aturan:
 
     async fetchStatus() {
       try {
-        let res = await fetch(this.getApiUrl('/api/wa/status?t=' + Date.now()), { cache: 'no-store' });
+        const q = `?t=${Date.now()}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
+        let res = await fetch(this.getApiUrl('/api/wa/status' + q), { cache: 'no-store', headers: this.getAuthHeaders() });
         if (!res.ok) {
           await this.resolveApiBase();
-          res = await fetch(this.getApiUrl('/api/wa/status?t=' + Date.now()), { cache: 'no-store' });
+          res = await fetch(this.getApiUrl('/api/wa/status' + q), { cache: 'no-store', headers: this.getAuthHeaders() });
         }
-        const data = await res.json();
-        if (data && data.success) {
-          this.handleStatusUpdate(data);
-          if (data.qr) {
-            this.handleQrUpdate(data.qr);
+        const data = await res.json().catch(() => null);
+        if (data) {
+          this.updateSecurityUI({ isMaster: data.isMaster, hasPin: data.hasPin });
+          if (data.requiresPin) {
+            if (els.waStatusText) els.waStatusText.innerHTML = '🔒 Akun Terkunci: Masukkan PIN Keamanan';
+            return;
+          }
+          if (data.success) {
+            this.handleStatusUpdate(data);
+            if (data.qr) {
+              this.handleQrUpdate(data.qr);
+            }
+          } else {
+            await this.fetchQrDirectTunnel();
           }
         } else {
           await this.fetchQrDirectTunnel();
@@ -34890,9 +35049,10 @@ Aturan:
 
     async fetchContacts(notify = false) {
       try {
-        const res = await fetch(this.getApiUrl('/api/wa/contacts'));
-        const data = await res.json();
-        if (data.success) {
+        const q = `?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
+        const res = await fetch(this.getApiUrl('/api/wa/contacts' + q), { headers: this.getAuthHeaders() });
+        const data = await res.json().catch(() => null);
+        if (data && data.success) {
           this.contacts = data.contacts || [];
           this.contacts.sort((a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
 
@@ -35009,29 +35169,31 @@ Aturan:
       try {
         if (!this.apiBaseUrl) await this.resolveApiBase();
         let apiUrl = this.getApiUrl('/api/wa/connect');
+        const payload = { forceNew, userId: this.getUserId(), pin: this.getPin() };
         let res = await fetch(apiUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ forceNew })
+          headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify(payload)
         });
         if (!res.ok) {
-          apiUrl = 'https://notify-thomson-remarks-affected.trycloudflare.com/api/wa/connect';
-          this.apiBaseUrl = 'https://notify-thomson-remarks-affected.trycloudflare.com';
+          apiUrl = 'https://turned-defensive-myself-workout.trycloudflare.com/api/wa/connect';
+          this.apiBaseUrl = 'https://turned-defensive-myself-workout.trycloudflare.com';
           res = await fetch(apiUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ forceNew })
+            headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(payload)
           });
         }
-        const data = await res.json();
-        if (data.success) {
+        const data = await res.json().catch(() => null);
+        if (data && data.success) {
+          this.updateSecurityUI({ isMaster: data.isMaster, hasPin: data.hasPin });
           this.handleStatusUpdate(data);
           if (data.qr) {
             this.handleQrUpdate(data.qr);
           }
           showToast(data.connected ? 'WhatsApp sudah terhubung!' : 'Gerbang WhatsApp aktif. Silakan scan QR code.', 'info');
         } else {
-          showToast(`Gagal: ${data.error}`, 'error');
+          showToast(`Gagal: ${data?.error || 'Koneksi ditolak'}`, 'error');
         }
       } catch (err) {
         const ok = await this.fetchQrDirectTunnel();
@@ -35045,11 +35207,11 @@ Aturan:
       try {
         const res = await fetch(this.getApiUrl('/api/wa/disconnect'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ logout: true })
+          headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ logout: true, userId: this.getUserId(), pin: this.getPin() })
         });
-        const data = await res.json();
-        if (data.success) {
+        const data = await res.json().catch(() => null);
+        if (data && data.success) {
           showToast('WhatsApp berhasil diputuskan. Memuat QR baru...', 'info');
           this.connectWhatsApp(true);
         }
@@ -35069,11 +35231,11 @@ Aturan:
       try {
         const res = await fetch(this.getApiUrl('/api/wa/contacts'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: name || phone, phone })
+          headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ name: name || phone, phone, userId: this.getUserId(), pin: this.getPin() })
         });
-        const data = await res.json();
-        if (data.success) {
+        const data = await res.json().catch(() => null);
+        if (data && data.success) {
           showToast(`Kontak "${data.contact.name}" berhasil disimpan!`, 'success');
           if (els.inputWaNewContactName) els.inputWaNewContactName.value = '';
           if (els.inputWaNewContactPhone) els.inputWaNewContactPhone.value = '';
@@ -35082,7 +35244,7 @@ Aturan:
           this.setChatMode('whatsapp');
           TerminalManager.closeRemoteTunnelModal();
         } else {
-          showToast(`Gagal simpan kontak: ${data.error}`, 'error');
+          showToast(`Gagal simpan kontak: ${data?.error || 'Kesalahan'}`, 'error');
         }
       } catch (err) {
         showToast(`Error: ${err.message}`, 'error');
@@ -35120,18 +35282,18 @@ Aturan:
       try {
         const res = await fetch(this.getApiUrl('/api/wa/pairing-code'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone })
+          headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ phone, userId: this.getUserId(), pin: this.getPin() })
         });
-        const data = await res.json();
-        if (data.success && data.code) {
+        const data = await res.json().catch(() => null);
+        if (data && data.success && data.code) {
           if (els.waPairingCodeDisplay) els.waPairingCodeDisplay.textContent = data.code;
           if (els.waPairingCodeBox) els.waPairingCodeBox.style.display = 'block';
           if (els.waStatusText) els.waStatusText.innerHTML = `🔑 Masukkan kode <b>${data.code}</b> di HP Anda`;
           showToast(`Kode Pairing WhatsApp: ${data.code}. Masukkan pada WhatsApp di HP Anda.`, 'success');
           this.startStatusPolling(60000);
         } else {
-          showToast(`❌ Gagal: ${data.error || 'Terjadi kesalahan'}`, 'error');
+          showToast(`❌ Gagal: ${data?.error || 'Terjadi kesalahan'}`, 'error');
           if (els.waStatusText) els.waStatusText.innerHTML = '❌ Gagal mendapatkan kode pairing';
         }
       } catch (err) {
@@ -35450,8 +35612,8 @@ Aturan:
         if (confirm(`Hapus riwayat pesan dengan ${this.activeContact?.name || jid}?`)) {
           await fetch(this.getApiUrl('/api/wa/clear'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ jid })
+            headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ jid, userId: this.getUserId(), pin: this.getPin() })
           });
           this.loadMessagesForContact(jid);
           this.fetchContacts();
@@ -35460,9 +35622,10 @@ Aturan:
       els.messagesList.appendChild(headerBar);
 
       try {
-        const res = await fetch(this.getApiUrl(`/api/wa/messages?jid=${encodeURIComponent(jid)}`));
-        const data = await res.json();
-        const list = data.messages || [];
+        const q = `?jid=${encodeURIComponent(jid)}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
+        const res = await fetch(this.getApiUrl('/api/wa/messages' + q), { headers: this.getAuthHeaders() });
+        const data = await res.json().catch(() => null);
+        const list = (data && data.messages) || [];
 
         if (list.length === 0) {
           const empty = document.createElement('div');
@@ -35570,12 +35733,12 @@ Aturan:
       try {
         const res = await fetch(this.getApiUrl('/api/wa/send'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jid: this.activeContact.id, text })
+          headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ jid: this.activeContact.id, text, userId: this.getUserId(), pin: this.getPin() })
         });
-        const data = await res.json();
-        if (!data.success) {
-          showToast(`❌ Gagal kirim WA: ${data.error || 'Terjadi kesalahan'}`, 'error');
+        const data = await res.json().catch(() => null);
+        if (!data || !data.success) {
+          showToast(`❌ Gagal kirim WA: ${data?.error || 'Terjadi kesalahan'}`, 'error');
         } else {
           this.fetchContacts();
         }

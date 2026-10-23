@@ -632,17 +632,17 @@ export default {
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-ollama-key, x-api-key, x-openrouter-key, x-title, X-Title, HTTP-Referer, http-referer, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token'
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-ollama-key, x-api-key, x-openrouter-key, x-title, X-Title, HTTP-Referer, http-referer, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, x-wa-pin, X-WA-PIN'
         }
       });
     }
 
     // Universal WhatsApp & Daemon Tunnel Proxy (Edge Bridge)
-    const TUNNEL_GATEWAY_URL = 'https://notify-thomson-remarks-affected.trycloudflare.com';
+    const TUNNEL_GATEWAY_URL = 'https://turned-defensive-myself-workout.trycloudflare.com';
     if (url.pathname.startsWith('/api/wa/') || url.pathname.startsWith('/api/terminal/') || url.pathname.startsWith('/api/daemon/')) {
       const targetUrl = TUNNEL_GATEWAY_URL + url.pathname + url.search;
       const fwdHeaders = new Headers(request.headers);
-      fwdHeaders.set('Host', 'notify-thomson-remarks-affected.trycloudflare.com');
+      fwdHeaders.set('Host', 'turned-defensive-myself-workout.trycloudflare.com');
       fwdHeaders.set('X-Forwarded-Host', url.host);
       fwdHeaders.set('X-Forwarded-Proto', 'https');
       fwdHeaders.set('X-Real-IP', request.headers.get('cf-connecting-ip') || '127.0.0.1');

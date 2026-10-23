@@ -33,10 +33,13 @@ try {
   }
 }
 
-// WhatsApp Web Gateway Loader (Baileys Multi-Device)
+// WhatsApp Web Gateway Loader (Baileys Multi-Device & Multi-Tenant)
 let waGateway = null;
+let waGatewayManager = null;
 try {
-  waGateway = require('./whatsapp-gateway');
+  const waMod = require('./whatsapp-gateway');
+  waGatewayManager = waMod.waGatewayManager || null;
+  waGateway = waMod.waGateway || waMod;
 } catch (waErr) {
   console.warn('[Server] WhatsApp Gateway tidak aktif:', waErr.message);
 }
@@ -4233,9 +4236,11 @@ async function requestHandler(req, res) {
   // seluruh rute di bawah ini hanya melihat reqUserId yang sudah tervalidasi.
   const identityResult = resolveRequestIdentity(req, reqUrl);
   if (identityResult.error) {
-    return sendJSON(res, identityResult.status || 400, { error: identityResult.error });
+    if (!pathname.startsWith('/api/wa/')) {
+      return sendJSON(res, identityResult.status || 400, { error: identityResult.error });
+    }
   }
-  const reqUserId = identityResult.userId;
+  const reqUserId = identityResult.userId || 'default';
 
   // Helper: safe parseBody wrapper that converts rejection to 400 response
   async function safeParseBody(req) {
@@ -5690,33 +5695,78 @@ async function requestHandler(req, res) {
   }
 
   // =========================================================================
-  // WHATSAPP WEB GATEWAY API (Dual Mode: AI vs WhatsApp Chat)
+  // WHATSAPP WEB GATEWAY API (Multi-Tenant & Isolated Dual Mode: AI vs WhatsApp)
   // =========================================================================
+  function getWaTenant(req, reqUrl, body = null) {
+    if (!waGatewayManager) {
+      if (waGateway) return { success: true, gateway: waGateway, isMaster: true, userId: 'usr_kaisar_master' };
+      return { success: false, status: 503, error: 'Modul WhatsApp Gateway tidak tersedia.' };
+    }
+    const uid = req.headers['x-user-id'] || req.headers['x-client-id'] || reqUrl?.searchParams?.get('userId') || (body && body.userId) || '';
+    const pin = req.headers['x-wa-pin'] || reqUrl?.searchParams?.get('pin') || (body && body.pin) || '';
+    return waGatewayManager.resolveGateway(uid, pin);
+  }
+
   if (pathname === '/api/wa/status' && method === 'GET') {
-    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
-    return sendJSON(res, 200, { success: true, ...waGateway.getStatus() });
+    const tenant = getWaTenant(req, reqUrl);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, {
+        success: false,
+        error: tenant.error,
+        requiresPin: tenant.requiresPin,
+        userId: tenant.userId
+      });
+    }
+    return sendJSON(res, 200, {
+      success: true,
+      ...tenant.gateway.getStatus(),
+      tenantUserId: tenant.userId,
+      isMaster: tenant.isMaster
+    });
   }
 
   if (pathname === '/api/wa/connect' && method === 'POST') {
-    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
     const body = (await safeParseBody(req)) || {};
+    const tenant = getWaTenant(req, reqUrl, body);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, {
+        success: false,
+        error: tenant.error,
+        requiresPin: tenant.requiresPin,
+        userId: tenant.userId
+      });
+    }
     try {
-      const status = await waGateway.connect(Boolean(body.forceNew));
-      const currentStatus = waGateway.getStatus();
-      return sendJSON(res, 200, { success: true, ...status, ...currentStatus });
+      const status = await tenant.gateway.connect(Boolean(body.forceNew));
+      const currentStatus = tenant.gateway.getStatus();
+      return sendJSON(res, 200, {
+        success: true,
+        ...status,
+        ...currentStatus,
+        tenantUserId: tenant.userId,
+        isMaster: tenant.isMaster
+      });
     } catch (err) {
       return sendJSON(res, 500, { success: false, error: err.message });
     }
   }
 
   if (pathname === '/api/wa/pairing-code' && method === 'POST') {
-    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
-    const body = await safeParseBody(req);
-    if (!body || !body.phone) {
+    const body = (await safeParseBody(req)) || {};
+    const tenant = getWaTenant(req, reqUrl, body);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, {
+        success: false,
+        error: tenant.error,
+        requiresPin: tenant.requiresPin,
+        userId: tenant.userId
+      });
+    }
+    if (!body.phone) {
       return sendJSON(res, 400, { success: false, error: 'Nomor telepon wajib diisi.' });
     }
     try {
-      const result = await waGateway.requestPairingCode(body.phone);
+      const result = await tenant.gateway.requestPairingCode(body.phone);
       return sendJSON(res, 200, { success: true, ...result });
     } catch (err) {
       return sendJSON(res, 500, { success: false, error: err.message });
@@ -5724,10 +5774,18 @@ async function requestHandler(req, res) {
   }
 
   if (pathname === '/api/wa/disconnect' && method === 'POST') {
-    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
     const body = (await safeParseBody(req)) || {};
+    const tenant = getWaTenant(req, reqUrl, body);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, {
+        success: false,
+        error: tenant.error,
+        requiresPin: tenant.requiresPin,
+        userId: tenant.userId
+      });
+    }
     try {
-      await waGateway.disconnect(body.logout !== false);
+      await tenant.gateway.disconnect(body.logout !== false);
       return sendJSON(res, 200, { success: true, message: 'WhatsApp berhasil diputuskan.' });
     } catch (err) {
       return sendJSON(res, 500, { success: false, error: err.message });
@@ -5735,16 +5793,31 @@ async function requestHandler(req, res) {
   }
 
   if (pathname === '/api/wa/contacts' && method === 'GET') {
-    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
-    return sendJSON(res, 200, { success: true, contacts: waGateway.getContacts() });
+    const tenant = getWaTenant(req, reqUrl);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, {
+        success: false,
+        error: tenant.error,
+        requiresPin: tenant.requiresPin,
+        contacts: []
+      });
+    }
+    return sendJSON(res, 200, { success: true, contacts: tenant.gateway.getContacts() });
   }
 
   if (pathname === '/api/wa/contacts' && method === 'POST') {
-    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
-    const body = await safeParseBody(req);
-    if (!body) return;
+    const body = (await safeParseBody(req)) || {};
+    const tenant = getWaTenant(req, reqUrl, body);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, {
+        success: false,
+        error: tenant.error,
+        requiresPin: tenant.requiresPin,
+        userId: tenant.userId
+      });
+    }
     try {
-      const contact = waGateway.addOrUpdateContact(body.name, body.phone);
+      const contact = tenant.gateway.addOrUpdateContact(body.name, body.phone);
       return sendJSON(res, 200, { success: true, contact });
     } catch (err) {
       return sendJSON(res, 400, { success: false, error: err.message });
@@ -5752,22 +5825,37 @@ async function requestHandler(req, res) {
   }
 
   if (pathname === '/api/wa/messages' && method === 'GET') {
-    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
+    const tenant = getWaTenant(req, reqUrl);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, {
+        success: false,
+        error: tenant.error,
+        requiresPin: tenant.requiresPin,
+        messages: []
+      });
+    }
     const jid = reqUrl.searchParams.get('jid');
     if (!jid) return sendJSON(res, 400, { success: false, error: 'Parameter jid dibutuhkan' });
-    const messages = waGateway.getMessages(jid);
+    const messages = tenant.gateway.getMessages(jid);
     return sendJSON(res, 200, { success: true, jid, messages });
   }
 
   if (pathname === '/api/wa/send' && method === 'POST') {
-    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
-    const body = await safeParseBody(req);
-    if (!body) return;
+    const body = (await safeParseBody(req)) || {};
+    const tenant = getWaTenant(req, reqUrl, body);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, {
+        success: false,
+        error: tenant.error,
+        requiresPin: tenant.requiresPin,
+        userId: tenant.userId
+      });
+    }
     if (!body.jid || !body.text) {
       return sendJSON(res, 400, { success: false, error: 'Parameter jid dan text wajib diisi.' });
     }
     try {
-      const message = await waGateway.sendMessage(body.jid, body.text);
+      const message = await tenant.gateway.sendMessage(body.jid, body.text);
       return sendJSON(res, 200, { success: true, message });
     } catch (err) {
       return sendJSON(res, 500, { success: false, error: err.message });
@@ -5775,15 +5863,57 @@ async function requestHandler(req, res) {
   }
 
   if (pathname === '/api/wa/clear' && method === 'POST') {
-    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
-    const body = await safeParseBody(req);
-    if (!body || !body.jid) return sendJSON(res, 400, { success: false, error: 'Parameter jid dibutuhkan' });
-    waGateway.clearChatHistory(body.jid);
+    const body = (await safeParseBody(req)) || {};
+    const tenant = getWaTenant(req, reqUrl, body);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, {
+        success: false,
+        error: tenant.error,
+        requiresPin: tenant.requiresPin,
+        userId: tenant.userId
+      });
+    }
+    if (!body.jid) return sendJSON(res, 400, { success: false, error: 'Parameter jid dibutuhkan' });
+    tenant.gateway.clearChatHistory(body.jid);
     return sendJSON(res, 200, { success: true, message: 'Riwayat chat kontak dibersihkan.' });
   }
 
+  if (pathname === '/api/wa/pin' && method === 'POST') {
+    const body = (await safeParseBody(req)) || {};
+    const tenant = getWaTenant(req, reqUrl, body);
+    // Jika butuh PIN untuk akses tapi belum ada atau salah
+    if (!tenant.success && tenant.status !== 401) {
+      return sendJSON(res, tenant.status || 403, {
+        success: false,
+        error: tenant.error,
+        requiresPin: tenant.requiresPin,
+        userId: tenant.userId
+      });
+    }
+    if (!body.newPin) {
+      return sendJSON(res, 400, { success: false, error: 'PIN baru wajib diisi.' });
+    }
+    if (tenant.gateway.isMaster) {
+      return sendJSON(res, 403, { success: false, error: 'PIN Master Kaisar bersifat permanen dan tidak dapat diubah dari web.' });
+    }
+    try {
+      tenant.gateway.setPin(body.newPin);
+      return sendJSON(res, 200, { success: true, message: 'PIN keamanan WhatsApp berhasil disimpan!' });
+    } catch (e) {
+      return sendJSON(res, 400, { success: false, error: e.message });
+    }
+  }
+
   if (pathname === '/api/wa/events' && method === 'GET') {
-    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
+    const tenant = getWaTenant(req, reqUrl);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, {
+        success: false,
+        error: tenant.error,
+        requiresPin: tenant.requiresPin,
+        userId: tenant.userId
+      });
+    }
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
@@ -5793,11 +5923,9 @@ async function requestHandler(req, res) {
       'Access-Control-Allow-Private-Network': 'true'
     });
     // Cloudflare Edge Proxy stream pad bypass:
-    // Cloudflare buffers initial HTTP/2 stream until >= 8192 bytes of data payload arrive.
-    // Sending a 32KB data event immediately unlocks the stream and forces instant chunk delivery over Cloudflare tunnel/custom domain.
     res.write(`data: ${JSON.stringify({ event: 'pad', pad: ' '.repeat(32768) })}\n\n`);
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
-    waGateway.addSseClient(res);
+    tenant.gateway.addSseClient(res);
     return;
   }
 

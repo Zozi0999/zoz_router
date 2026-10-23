@@ -17,16 +17,45 @@ const QRCode = require('qrcode');
 const fs = require('fs');
 const fsp = require('fs').promises;
 const path = require('path');
+const crypto = require('crypto');
+
+function sanitizeUserId(userId) {
+  if (!userId || typeof userId !== 'string') return 'anonymous';
+  const clean = userId.trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(clean) || clean.length > 64) {
+    return 'anonymous';
+  }
+  return clean;
+}
+
+function hashPin(pin) {
+  if (!pin) return '';
+  return crypto.createHash('sha256').update(String(pin).trim()).digest('hex');
+}
 
 class WhatsAppGateway {
-  constructor() {
+  constructor(userId = 'default', options = {}) {
+    this.userId = userId;
+    this.isMaster = Boolean(options.isMaster || userId === 'usr_kaisar_master');
     this.sock = null;
-    this.authDir = path.join(__dirname, 'data', 'wa-auth');
-    this.contactsFile = path.join(__dirname, 'data', 'wa-contacts.json');
-    this.messagesFile = path.join(__dirname, 'data', 'wa-messages.json');
+
+    if (this.isMaster) {
+      this.baseDir = path.join(__dirname, 'data');
+      this.authDir = path.join(this.baseDir, 'wa-auth');
+      this.contactsFile = path.join(this.baseDir, 'wa-contacts.json');
+      this.messagesFile = path.join(this.baseDir, 'wa-messages.json');
+      this.configFile = path.join(this.baseDir, 'wa-master-config.json');
+    } else {
+      this.baseDir = path.join(__dirname, 'data', 'wa-users', sanitizeUserId(userId));
+      this.authDir = path.join(this.baseDir, 'auth');
+      this.contactsFile = path.join(this.baseDir, 'contacts.json');
+      this.messagesFile = path.join(this.baseDir, 'messages.json');
+      this.configFile = path.join(this.baseDir, 'config.json');
+    }
 
     this.contacts = new Map(); // jid -> { id, name, notify, phone, lastMessage, lastTimestamp, unreadCount }
     this.messages = new Map(); // jid -> [ { id, fromMe, text, timestamp, senderName, status } ]
+    this.config = { pinHash: null, createdAt: Date.now() };
 
     this.status = {
       connected: false,
@@ -34,6 +63,7 @@ class WhatsAppGateway {
       phone: null,
       user: null,
       qr: null,
+      pairingCode: null,
       lastDisconnectReason: null,
       updatedAt: Date.now()
     };
@@ -42,12 +72,60 @@ class WhatsAppGateway {
     this.reconnectTimer = null;
     this.isExplicitDisconnect = false;
 
-    // Pastikan direktori data ada
-    if (!fs.existsSync(path.join(__dirname, 'data'))) {
-      fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true });
+    // Pastikan direktori data terisolasi ada
+    if (!fs.existsSync(this.baseDir)) {
+      fs.mkdirSync(this.baseDir, { recursive: true });
+    }
+    if (!fs.existsSync(this.authDir)) {
+      fs.mkdirSync(this.authDir, { recursive: true });
     }
 
+    this.loadConfig();
     this.loadPersistedData();
+  }
+
+  loadConfig() {
+    try {
+      if (fs.existsSync(this.configFile)) {
+        const raw = JSON.parse(fs.readFileSync(this.configFile, 'utf8'));
+        if (raw && typeof raw === 'object') {
+          this.config = { ...this.config, ...raw };
+        }
+      }
+    } catch (_) {}
+  }
+
+  saveConfig() {
+    try {
+      fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2), 'utf8');
+    } catch (_) {}
+  }
+
+  hasConfiguredPin() {
+    if (this.isMaster) return true; // Master selalu terlindungi PIN 210560
+    return Boolean(this.config && this.config.pinHash);
+  }
+
+  verifyPin(inputPin) {
+    if (!inputPin) return false;
+    const clean = String(inputPin).trim();
+    if (this.isMaster) {
+      return clean === '210560'; // PIN Master Kaisar Zozi
+    }
+    if (!this.config.pinHash) return true;
+    return hashPin(clean) === this.config.pinHash;
+  }
+
+  setPin(newPin) {
+    if (!newPin || typeof newPin !== 'string') return false;
+    const clean = newPin.trim();
+    if (clean.length < 4 || clean.length > 16) {
+      throw new Error('PIN Keamanan harus antara 4 hingga 16 karakter.');
+    }
+    this.config.pinHash = hashPin(clean);
+    this.config.pinUpdatedAt = Date.now();
+    this.saveConfig();
+    return true;
   }
 
   loadPersistedData() {
@@ -188,6 +266,9 @@ class WhatsAppGateway {
       qr: this.status.qr,
       pairingCode: this.status.pairingCode || null,
       contactCount: this.contacts.size,
+      hasPin: this.hasConfiguredPin(),
+      userId: this.userId,
+      isMaster: this.isMaster,
       updatedAt: this.status.updatedAt
     };
   }
@@ -827,15 +908,110 @@ class WhatsAppGateway {
   }
 }
 
-// Singleton Instance
-const waGateway = new WhatsAppGateway();
+/**
+ * WhatsAppGatewayManager
+ * Multi-tenant session isolation manager for Baileys WhatsApp Gateway.
+ * Isolates user directories, contacts, and messages.
+ * Protects Master Kaisar session behind PIN 210560.
+ */
+class WhatsAppGatewayManager {
+  constructor() {
+    this.sessions = new Map(); // userId -> WhatsAppGateway instance
+    // Sesi Master Kaisar Zozi (Port 4040, sesi asli 943 kontak)
+    this.masterGateway = new WhatsAppGateway('usr_kaisar_master', { isMaster: true });
+    this.sessions.set('usr_kaisar_master', this.masterGateway);
 
-// Auto-connect jika ada sesi auth tersimpan di disk
-if (waGateway.hasStoredSession()) {
-  console.log('[WA-Gateway] Sesi tersimpan ditemukan. Memulai koneksi otomatis di latar belakang...');
-  waGateway.connect().catch(err => {
-    console.warn('[WA-Gateway] Auto-connect tertunda:', err.message);
-  });
+    // Auto-connect Master session jika kredensial auth tersimpan di disk
+    if (this.masterGateway.hasStoredSession()) {
+      console.log('[WA-Manager] Master Sesi Kaisar terdeteksi di disk. Menjalankan auto-connect di background...');
+      this.masterGateway.connect().catch(err => {
+        console.warn('[WA-Manager] Auto-connect Master Kaisar tertunda:', err.message);
+      });
+    }
+  }
+
+  resolveGateway(userId, pin) {
+    const cleanPin = pin ? String(pin).trim() : '';
+    const rawUid = userId ? String(userId).trim() : '';
+
+    // 1. Otorisasi Mutlak Master Kaisar:
+    // Jika PIN cocok dengan PIN Master '210560', berikan akses ke sesi Master Kaisar
+    if (cleanPin === '210560') {
+      return {
+        success: true,
+        gateway: this.masterGateway,
+        isMaster: true,
+        userId: 'usr_kaisar_master'
+      };
+    }
+
+    // 2. Proteksi Akses Ilegal ke Master Kaisar:
+    // Jika seseorang meminta user 'usr_kaisar_master' / 'master' / 'kaisar' tanpa PIN Master 210560 -> TOLAK
+    if (rawUid === 'usr_kaisar_master' || rawUid === 'master' || rawUid === 'kaisar') {
+      return {
+        success: false,
+        status: 403,
+        error: 'Akses Ditolak: PIN Keamanan Master Kaisar (210560) diperlukan untuk membuka akun ini.',
+        requiresPin: true
+      };
+    }
+
+    // 3. Multi-Tenant User Biasa / Terisolasi:
+    // User tanpa ID diberi namespace tamu terisolasi 'usr_guest_default' (bukan Master Kaisar!)
+    const targetUid = (!rawUid || rawUid === 'default' || rawUid === 'anonymous')
+      ? 'usr_guest_default'
+      : sanitizeUserId(rawUid);
+
+    let gw = this.sessions.get(targetUid);
+    if (!gw) {
+      gw = new WhatsAppGateway(targetUid, { isMaster: false });
+      this.sessions.set(targetUid, gw);
+      if (gw.hasStoredSession()) {
+        gw.connect().catch(() => {});
+      }
+    }
+
+    // 4. Verifikasi PIN Akun User (jika akun memiliki PIN yang dikonfigurasi)
+    if (gw.hasConfiguredPin()) {
+      if (!cleanPin) {
+        return {
+          success: false,
+          status: 401,
+          error: 'Akun WhatsApp ini terkunci dengan PIN keamanan. Masukkan PIN Anda.',
+          requiresPin: true,
+          userId: targetUid
+        };
+      }
+      if (!gw.verifyPin(cleanPin)) {
+        return {
+          success: false,
+          status: 403,
+          error: 'PIN keamanan salah.',
+          requiresPin: true,
+          userId: targetUid
+        };
+      }
+    }
+
+    return {
+      success: true,
+      gateway: gw,
+      isMaster: false,
+      userId: targetUid
+    };
+  }
+
+  getGateway(userId) {
+    return this.sessions.get(userId) || null;
+  }
 }
 
-module.exports = waGateway;
+// Singleton Manager
+const waGatewayManager = new WhatsAppGatewayManager();
+
+module.exports = {
+  WhatsAppGateway,
+  WhatsAppGatewayManager,
+  waGatewayManager,
+  waGateway: waGatewayManager.masterGateway // Kompatibilitas mundur
+};

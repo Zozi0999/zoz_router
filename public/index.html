@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261023_v442';
+    window.__ZOZ_VERSION__ = 'v20261023_v443';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -2687,6 +2687,25 @@
 
         <!-- PANE 2: WHATSAPP GATEWAY -->
         <div class="qr-modal-pane" id="paneQrWhatsApp" style="display: none;">
+          <!-- Account Isolation & Security PIN Guard -->
+          <div class="wa-tenant-security-box" id="waTenantSecurityBox" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 0.82rem;">
+              <span style="color: var(--text-muted);"><i class="fa-solid fa-fingerprint text-sky-400"></i> ID Ruang Akun: <b id="waDisplayUserId" style="color: var(--text-primary); font-family: monospace;">-</b></span>
+              <span id="waSecurityBadge" class="badge" style="font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);">
+                <i class="fa-solid fa-shield-halved"></i> Terisolasi
+              </span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="password" id="inputWaSecurityPin" class="term-tunnel-inline-input" placeholder="PIN Keamanan Akun (mis. 210560)" style="flex: 1; height: 32px; font-size: 0.85rem;" autocomplete="current-password">
+              <button type="button" class="term-tunnel-btn" id="btnSaveWaSecurityPin" style="height: 32px; padding: 0 10px; font-size: 0.82rem;" title="Simpan / Terapkan PIN Keamanan">
+                <i class="fa-solid fa-key"></i> Simpan PIN
+              </button>
+            </div>
+            <div style="font-size: 0.73rem; color: var(--text-muted); margin-top: 4px;">
+              * Akun WhatsApp terisolasi per perangkat. Masukkan PIN keamanan untuk membuka akses akun Anda.
+            </div>
+          </div>
+
           <!-- WA Status Row -->
           <div class="term-tunnel-status-row">
             <div class="term-tunnel-status-info">
@@ -2850,8 +2869,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261023_v442" defer></script>
+  <script src="text-safety.js?v=20261023_v443" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261023_v442" defer></script>
+  <script src="app.js?v=20261023_v443" defer></script>
 </body>
 </html>
