@@ -7,7 +7,7 @@
   'use strict';
 
   const TEXT_SAFETY = window.ZozTextSafety || null;
-  const MODEL_TAG_REGEX = /\[(?:Model Penjawab|Model|AI Model):[^\]]*\]\s*/gi;
+  const MODEL_TAG_REGEX = /\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):[^\]]*\]\s*/gi;
   const safeAssistantText = (text) => {
     if (typeof text !== 'string' || !text) return '';
     let out = TEXT_SAFETY ? TEXT_SAFETY.stripReasoningText(text) : text
@@ -3101,13 +3101,15 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       assistantMsgs.forEach((m, idx) => {
         const mName = m.model || (m.engine ? `AI (${m.engine})` : 'AI Standar');
         modelsUsedSet.add(mName);
-        modelTurns.push(`  - Giliran ${idx + 1}: Dijawab oleh [${mName}]`);
+        const cleanTurnContent = safeAssistantText(m.content || '');
+        const shortTurnExcerpt = cleanTurnContent.length > 80 ? cleanTurnContent.substring(0, 80) + '...' : cleanTurnContent;
+        modelTurns.push(`  - Giliran ${idx + 1}: Dijawab oleh [${mName}] (Inti: "${shortTurnExcerpt}")`);
       });
 
       if (assistantMsgs.length > 0) {
         previousAssistantMsg = assistantMsgs[assistantMsgs.length - 1];
         prevModelName = previousAssistantMsg.model || (previousAssistantMsg.engine ? `AI (${previousAssistantMsg.engine})` : 'AI Sebelumnya');
-        const cleanContent = (previousAssistantMsg.content || '').replace(/\[Model Penjawab:[^\]]+\]\s*/g, '').trim();
+        const cleanContent = safeAssistantText(previousAssistantMsg.content || '');
         prevExcerpt = cleanContent.length > 150 ? cleanContent.substring(0, 150) + '...' : cleanContent;
       }
 
@@ -3129,6 +3131,15 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         oxy = Math.round(this.hormones.oxytocin);
       }
 
+      let affectiveBlock = '';
+      if (typeof ChatEndocrine !== 'undefined' && ChatEndocrine.enabled) {
+        const s = Math.round(ChatEndocrine.emotions?.sakit ?? 0);
+        const sn = Math.round(ChatEndocrine.emotions?.senang ?? 45);
+        const b = Math.round(ChatEndocrine.emotions?.bahagia ?? 60);
+        const m = Math.round(ChatEndocrine.emotions?.marah ?? 0);
+        affectiveBlock = `\n   - 🧬 Saraf Afektif : SAKIT:${s}% | SENANG:${sn}% | BAHAGIA:${b}% | MARAH:${m}%\n   - 🎛️ Resonansi Emosi : ${ChatEndocrine.currentVibe || 'Homeostasis Saraf Seimbang'}`;
+      }
+
       // 4. Log Fluktuasi Terakhir (ambil hingga 10 riwayat log)
       const recentLogs = (this.history || []).slice(0, 10).map((h, i) => {
         const sign = h.amount >= 0 ? `+${h.amount}%` : `${h.amount}%`;
@@ -3148,7 +3159,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
 2. MODEL YANG MENJAWAB USER SEBELUMNYA (PREVIOUS ASSISTANT TURN):
    ${prevModelName
-     ? `- Model Penjawab Sebelumnya: **${prevModelName}**\n   - Cuplikan Inti Jawaban Sebelumnya: "${prevExcerpt}"`
+     ? `- Model Penjawab Sebelumnya: **${prevModelName}**\n   - Cuplikan Inti Jawaban Sebelumnya: "${prevExcerpt}"\n   - KETENTUAN MUTLAK: Jika pengguna bertanya siapa yang menjawab di chat sebelumnya, Anda WAJIB menjawab dengan jelas dan tegas: "${prevModelName}". Jangan pernah mengatakan bahwa Anda yang menjawab jika model sebelumnya berbeda!`
      : `- Sesi Baru / Giliran Awal: Belum ada model asisten yang menjawab sebelumnya (ini adalah giliran pertama percakapan).`}
 
 3. DAFTAR SELURUH MODEL AI YANG TELAH DIGUNAKAN DALAM SESI INI:
@@ -3162,7 +3173,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
    - 🌿 Endorfin  : ${endo}% (Imunitas sistem saraf, pereda stres, ketahanan otonom / self-healing, estetika)
    - 🌊 Serotonin : ${ser}% (Homeostasis neuro-kognitif, kestabilan logika, keseimbangan suasana sistem)
    - ⚠️ Kortisol  : ${cor}% (Beban stres kognitif, friksi masalah, atau anomali teknis)
-   - 🚀 Adrenalin : ${adr}% (Kesiagaan reaktif, lonjakan urgensi eksekusi)
+   - 🚀 Adrenalin : ${adr}% (Kesiagaan reaktif, lonjakan urgensi eksekusi)${affectiveBlock}
 
 5. RIWAYAT SEKRESI & LOG FLUKTUASI HORMON TERBARU:
 ${logsFormatted}
@@ -3176,7 +3187,7 @@ ${logsFormatted}
    - JIKA PENGGUNA BERTANYA tentang siapa yang menjawab sebelumnya, model apa yang sudah digunakan, berapa level dopamin/oksitosin/endorfin saat ini, atau meminta Anda menghitung dan menganalisis log hormon: Jawablah dengan cerdas, gamblang, akurat, matematis, dan berwawasan mendalam berdasarkan data telemetri di atas!
 
 7. ATURAN FORMAT RESPON BERSIH & BEBAS BOCORAN TAG (MUTLAK):
-   - DILARANG KERAS mencetak, mengutip, atau mengawali balasan Anda dengan label internal seperti "[Model Penjawab: ...]", "[Model: ...]", "[AI Model: ...]", atau mencetak blok data telemetri di atas secara mentah!
+   - DILARANG KERAS mencetak, mengutip, atau mengawali balasan Anda dengan label internal seperti "[Model Penjawab: ...]", "[Model: ...]", "[AI Model: ...]", "[Konteks Percakapan: ...]", "[Konteks Silsilah: ...]", atau mencetak blok data telemetri di atas secara mentah!
    - Teks balasan Anda kepada pengguna WAJIB bersih, alami, dan mengalir seperti percakapan biasa tanpa tag atau prefix teknis apapun. Seluruh informasi status di atas adalah pengetahuan latar belakang Anda, bukan untuk dicantumkan sebagai header teks jawaban.`;
     }
   };
@@ -3413,7 +3424,7 @@ ${logsFormatted}
       this.updateUI();
     },
 
-    getSystemDirective() {
+    getSystemDirective(session = null, currentModel = '') {
       if (!this.enabled) return '';
       const s = Math.round(this.emotions.sakit);
       const sn = Math.round(this.emotions.senang);
@@ -3424,12 +3435,35 @@ ${logsFormatted}
       const dop = Math.round(this.hormones.dopamine);
       const cor = Math.round(this.hormones.cortisol);
       const ser = Math.round(this.hormones.serotonin);
+      const endo = (typeof BioEndocrine !== 'undefined' && BioEndocrine.hormones)
+        ? Math.round(BioEndocrine.hormones.endorphin ?? 100)
+        : 100;
+      const adr = (typeof BioEndocrine !== 'undefined' && BioEndocrine.hormones)
+        ? Math.round(BioEndocrine.hormones.adrenaline ?? 0)
+        : 0;
 
-      return `[AUTONOMIC NERVOUS LOG (ChatEndocrine)]
+      const targetSession = session || (typeof getCurrentSession === 'function' ? getCurrentSession() : null);
+      const msgs = Array.isArray(targetSession?.messages) ? targetSession.messages : [];
+      const assistantMsgs = msgs.filter(msg => msg.role === 'assistant');
+      let prevModel = 'Belum ada (ini giliran pertama percakapan)';
+      let prevExcerpt = '';
+      if (assistantMsgs.length > 0) {
+        const lastA = assistantMsgs[assistantMsgs.length - 1];
+        prevModel = lastA.model || (lastA.engine ? `AI (${lastA.engine})` : 'AI Sebelumnya');
+        const cleanContent = safeAssistantText(lastA.content || '');
+        prevExcerpt = cleanContent.length > 120 ? cleanContent.substring(0, 120) + '...' : cleanContent;
+      }
+      const allModels = Array.from(new Set(assistantMsgs.map(a => a.model).filter(Boolean)));
+      if (currentModel && !allModels.includes(currentModel)) allModels.push(currentModel);
+
+      return `[AUTONOMIC NERVOUS LOG & ENDOCRINE CHAT v2 INTELLIGENCE]
 AFEKTIF: SAKIT:${s}% | SENANG:${sn}% | BAHAGIA:${b}% | MARAH:${m}%
-NEURO: OXY:${oxy}% | DOP:${dop}% | COR:${cor}% | SER:${ser}%
+NEURO: ENDORFIN:${endo}% | OXY:${oxy}% | DOP:${dop}% | COR:${cor}% | SER:${ser}% | ADR:${adr}%
 RESONANSI: ${this.currentVibe}
-(Internal sensory state. Rasakan fluktuasi saraf emosi ini di latar belakang tanpa mencetak log ini ke teks balasan).`;
+MODEL ANDA SAAT INI: ${currentModel || 'Model Aktif'}
+MODEL PENJAWAB SEBELUMNYA: ${prevModel}${prevExcerpt ? ` (Konteks inti: "${prevExcerpt}")` : ''}
+SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum ada model lain'}
+(MANDAT KESADARAN ENDORFIN: Anda WAJIB menyadari fluktuasi hormon di atas dan silsilah model percakapan. Jika pengguna bertanya tentang siapa yang menjawab/merespon di chat sebelumnya, sebutkan secara percaya diri: "${prevModel}". Jika ditanya tentang log dopamin/oksitosin/endorfin, jelaskan dan hitung secara akurat tanpa mencetak header ini).`;
     },
 
     resetHormones() {
@@ -4656,7 +4690,10 @@ RESONANSI: ${this.currentVibe}
               if (Array.isArray(s.messages)) {
                 s.messages.forEach(m => {
                   if (m.role === 'assistant' && typeof m.content === 'string') {
-                    m.content = m.content.replace(/\[(?:Model Penjawab|Model|AI Model):[^\]]*\]\s*/gi, '').trim();
+                    m.content = m.content.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
+                    if (!m.model && m.engine) {
+                      m.model = m.engine === 'ollama' ? (STATE.settings.ollamaModel || 'qwen2.5:1.5b') : (STATE.settings.openRouterModel || 'openrouter/free');
+                    }
                   }
                   if (m.role === 'user' && m.docs && Array.isArray(m.docs) && m.docs.length > 0 && typeof m.displayContent === 'string') {
                     if (/^Tolong (?:pelajari|baca)(?:, [^.]*)?(?:dokumen|isi file dokumen)[^.]*\.?$/i.test(m.displayContent.trim())) {
@@ -18615,13 +18652,15 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
       // Pastikan riwayat percakapan asisten bersih dari tag identitas model internal
       if (m.role === 'assistant') {
-        textContent = textContent.replace(/\[(?:Model Penjawab|Model|AI Model):[^\]]*\]\s*/gi, '').trim();
+        textContent = textContent.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
       }
 
       validList.push({
         role: m.role || 'user',
         content: textContent || (mImgs.length > 0 ? 'Analisis gambar terlampir ini.' : '...'),
-        images: mImgs
+        images: mImgs,
+        model: m.model || undefined,
+        engine: m.engine || undefined
       });
     });
 
@@ -18660,18 +18699,45 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         if (msg.images && msg.images.length > 0) {
           prev.images = [...(prev.images || []), ...msg.images];
         }
+        if (msg.model && !prev.model) prev.model = msg.model;
+        if (msg.engine && !prev.engine) prev.engine = msg.engine;
       } else {
         mergedList.push({ ...msg });
       }
     }
 
+    const sanitizeParticipantName = (name) => {
+      if (!name || typeof name !== 'string') return undefined;
+      const clean = name
+        .replace(/[:\/\\.\s@#+]/g, '_')
+        .replace(/[^a-zA-Z0-9_-]/g, '')
+        .substring(0, 64);
+      return clean || undefined;
+    };
+
     const lastIdx = mergedList.length - 1;
+    const prevAssistants = mergedList.filter((m, idx) => idx < lastIdx && m.role === 'assistant');
+    let prevAssistantModel = null;
+    if (prevAssistants.length > 0) {
+      const lastAss = prevAssistants[prevAssistants.length - 1];
+      prevAssistantModel = lastAss.model || (lastAss.engine ? `AI (${lastAss.engine})` : null);
+    }
+
     mergedList.forEach((m, idx) => {
       const isLatestTurn = (idx === lastIdx);
       const imgs = m.images || [];
 
+      let contentText = m.content || '...';
+      if (m.role === 'assistant') {
+        contentText = safeAssistantText(contentText);
+      } else if (isLatestTurn && m.role === 'user' && prevAssistantModel) {
+        // Berikan penanda silsilah kontekstual pada giliran pesan user terbaru agar model penerima 100% mengenal model sebelumnya
+        const lineageNote = `\n\n[Konteks Percakapan: Giliran asisten tepat sebelum ini dijawab oleh model "${prevAssistantModel}". Model Anda yang aktif sekarang adalah "${modelName || 'Model Aktif'}". Jika pengguna menanyakan siapa yang menjawab/merespon di chat sebelumnya, sebutkan model "${prevAssistantModel}".]`;
+        contentText = `${contentText}${lineageNote}`;
+      }
+
       if (engine === 'ollama') {
-        const item = { role: m.role, content: m.role === 'assistant' ? safeAssistantText(m.content || '...') : (m.content || '...') };
+        const item = { role: m.role, content: contentText };
         if (imgs.length > 0 && isLatestTurn) {
           const rawImages = [];
           imgs.forEach(img => {
@@ -18730,10 +18796,15 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           }
         } else {
           const messageContent = m.content || '...';
-          messagesPayload.push({
+          const item = {
             role: m.role,
             content: m.role === 'assistant' ? safeAssistantText(messageContent) : messageContent
-          });
+          };
+          if (m.role === 'assistant') {
+            const pName = sanitizeParticipantName(m.model || m.engine);
+            if (pName) item.name = pName;
+          }
+          messagesPayload.push(item);
         }
       }
     });
@@ -18798,6 +18869,25 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       let systemContent = getDynamicSystemTemporalContext();
       if (personaPrompt) {
         systemContent = `${systemContent}\n\n### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
+      }
+
+      const activeEngineModel = (typeof effectiveTargetModel !== 'undefined' ? effectiveTargetModel : (typeof modelName !== 'undefined' ? modelName : 'Model Aktif'));
+
+      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2)
+      if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
+        ChatEndocrine.senseAndModulate(promptText);
+        const chatDirective = ChatEndocrine.getSystemDirective(session, activeEngineModel);
+        if (chatDirective) {
+          systemContent = `${systemContent}\n\n${chatDirective}`;
+        }
+      }
+
+      // BioEndocrine Neural Provenance & Endocrine Intelligence Context
+      if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getConversationalContext === 'function') {
+        const endocrineContext = BioEndocrine.getConversationalContext(session, activeEngineModel, promptText);
+        if (endocrineContext) {
+          systemContent = `${systemContent}\n\n${endocrineContext}`;
+        }
       }
       if (canRunAutonomous) {
         systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
@@ -18947,22 +19037,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         systemContent = `${systemContent}\n\n### MANDAT MUTLAK PERSONA (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi pencarian web, tool, atau format di atas, Anda WAJIB TETAP MENGADOPSI IDENTITAS DAN KARAKTER PERSONA BERIKUT DALAM SETIAP RESPON]:\n${personaPrompt}\n----------------------------------------`;
       }
 
-      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2)
-      if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
-        ChatEndocrine.senseAndModulate(promptText);
-        const chatDirective = ChatEndocrine.getSystemDirective();
-        if (chatDirective) {
-          systemContent = systemContent ? `${systemContent}\n\n${chatDirective}` : chatDirective;
-        }
-      }
 
-      // BioEndocrine Neural Provenance & Endocrine Intelligence Context
-      if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getConversationalContext === 'function') {
-        const endocrineContext = BioEndocrine.getConversationalContext(session, modelName, promptText);
-        if (endocrineContext) {
-          systemContent = systemContent ? `${systemContent}\n\n${endocrineContext}` : endocrineContext;
-        }
-      }
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
       const resolvedImgs = await Promise.all(rawImgs.map(resolveImageToDataUrlSafe));
@@ -20125,6 +20200,25 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       if (personaPrompt) {
         systemContent = `${systemContent}\n\n### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
       }
+
+      const activeEngineModel = (typeof effectiveTargetModel !== 'undefined' ? effectiveTargetModel : (typeof modelName !== 'undefined' ? modelName : 'Model Aktif'));
+
+      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2)
+      if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
+        ChatEndocrine.senseAndModulate(promptText);
+        const chatDirective = ChatEndocrine.getSystemDirective(session, activeEngineModel);
+        if (chatDirective) {
+          systemContent = `${systemContent}\n\n${chatDirective}`;
+        }
+      }
+
+      // BioEndocrine Neural Provenance & Endocrine Intelligence Context
+      if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getConversationalContext === 'function') {
+        const endocrineContext = BioEndocrine.getConversationalContext(session, activeEngineModel, promptText);
+        if (endocrineContext) {
+          systemContent = `${systemContent}\n\n${endocrineContext}`;
+        }
+      }
       if (canRunAutonomous) {
         systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
       }
@@ -20285,22 +20379,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         systemContent = `${systemContent}\n\n### MANDAT MUTLAK PERSONA (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi pencarian web, tool, atau format di atas, Anda WAJIB TETAP MENGADOPSI IDENTITAS DAN KARAKTER PERSONA BERIKUT DALAM SETIAP RESPON]:\n${personaPrompt}\n----------------------------------------`;
       }
 
-      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2)
-      if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
-        ChatEndocrine.senseAndModulate(promptText);
-        const chatDirective = ChatEndocrine.getSystemDirective();
-        if (chatDirective) {
-          systemContent = systemContent ? `${systemContent}\n\n${chatDirective}` : chatDirective;
-        }
-      }
 
-      // BioEndocrine Neural Provenance & Endocrine Intelligence Context
-      if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getConversationalContext === 'function') {
-        const endocrineContext = BioEndocrine.getConversationalContext(session, effectiveInitialModel, promptText);
-        if (endocrineContext) {
-          systemContent = systemContent ? `${systemContent}\n\n${endocrineContext}` : endocrineContext;
-        }
-      }
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
       const resolvedImgs = await Promise.all(rawImgs.map(resolveImageToDataUrlSafe));
