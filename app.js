@@ -1289,6 +1289,15 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     waQrCodePlaceholder: $('#waQrCodePlaceholder'),
     waQrPlaceholderText: $('#waQrPlaceholderText'),
     btnRefreshWaQr: $('#btnRefreshWaQr'),
+    waPairMethodNav: $('#waPairMethodNav'),
+    btnPairMethodQr: $('#btnPairMethodQr'),
+    btnPairMethodPhone: $('#btnPairMethodPhone'),
+    panePairMethodQr: $('#panePairMethodQr'),
+    panePairMethodPhone: $('#panePairMethodPhone'),
+    inputWaPairingPhone: $('#inputWaPairingPhone'),
+    btnRequestWaPairingCode: $('#btnRequestWaPairingCode'),
+    waPairingCodeBox: $('#waPairingCodeBox'),
+    waPairingCodeDisplay: $('#waPairingCodeDisplay'),
     waConnectedCard: $('#waConnectedCard'),
     waConnectedSub: $('#waConnectedSub'),
     waConnectedPhoneDisplay: $('#waConnectedPhoneDisplay'),
@@ -9941,6 +9950,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       stopGeneration();
     }
     STATE.currentSessionId = null;
+    if (STATE.chatMode === 'whatsapp') {
+      WhatsAppController.setChatMode('ai', false);
+    }
     safeSessionStorage.removeItem('zoz_active_session_id');
     try { localStorage.removeItem('zoz_last_active_session_id'); } catch (_) {}
     STATE.isImageGenMode = false;
@@ -10064,6 +10076,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     }
 
     STATE.currentSessionId = sessionId;
+    if (STATE.chatMode === 'whatsapp') {
+      WhatsAppController.setChatMode('ai', false);
+    }
     safeSessionStorage.setItem('zoz_active_session_id', sessionId);
     try { localStorage.setItem('zoz_last_active_session_id', sessionId); } catch (_) {}
     STATE.isImageGenMode = false;
@@ -34577,6 +34592,28 @@ Aturan:
         this.switchQrModalTab('whatsapp');
       });
 
+      // Pairing Method Switcher: QR Code vs Phone Pairing Code
+      els.btnPairMethodQr?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.switchPairMethod('qr');
+      });
+      els.btnPairMethodPhone?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.switchPairMethod('phone');
+      });
+
+      // Request Pairing Code
+      els.btnRequestWaPairingCode?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.requestPairingCode();
+      });
+      els.inputWaPairingPhone?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.requestPairingCode();
+        }
+      });
+
       // Contact Picker Chip & Dropdown
       els.waContactPickerChip?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -34652,6 +34689,11 @@ Aturan:
               this.handleQrUpdate(parsed.data?.qr);
             } else if (parsed.event === 'new_message') {
               this.handleNewMessage(parsed.data);
+            } else if (parsed.event === 'pairing_code') {
+              if (parsed.data?.code) {
+                if (els.waPairingCodeDisplay) els.waPairingCodeDisplay.textContent = parsed.data.code;
+                if (els.waPairingCodeBox) els.waPairingCodeBox.style.display = 'block';
+              }
             } else if (parsed.event === 'contacts') {
               this.contacts = parsed.data || [];
               this.renderSidebarWaChats();
@@ -34710,18 +34752,26 @@ Aturan:
       }
 
       if (isConnected) {
+        if (els.waPairMethodNav) els.waPairMethodNav.style.display = 'none';
+        if (els.panePairMethodQr) els.panePairMethodQr.style.display = 'none';
+        if (els.panePairMethodPhone) els.panePairMethodPhone.style.display = 'none';
         if (els.waQrSection) els.waQrSection.style.display = 'none';
         if (els.waConnectedCard) els.waConnectedCard.style.display = 'flex';
         if (els.waConnectedPhoneDisplay) els.waConnectedPhoneDisplay.textContent = status.phone || '-';
         if (els.waContactCountDisplay) els.waContactCountDisplay.textContent = `${this.contacts.length} Kontak`;
       } else {
         if (els.waConnectedCard) els.waConnectedCard.style.display = 'none';
+        if (els.waPairMethodNav) els.waPairMethodNav.style.display = 'flex';
         if (els.waQrSection) els.waQrSection.style.display = 'block';
         if (status.qr) {
           this.handleQrUpdate(status.qr);
         } else {
           if (els.waQrCodeImg) els.waQrCodeImg.style.display = 'none';
           if (els.waQrCodePlaceholder) els.waQrCodePlaceholder.style.display = 'flex';
+        }
+        if (status.pairingCode) {
+          if (els.waPairingCodeDisplay) els.waPairingCodeDisplay.textContent = status.pairingCode;
+          if (els.waPairingCodeBox) els.waPairingCodeBox.style.display = 'block';
         }
       }
     },
@@ -34831,6 +34881,60 @@ Aturan:
       }
     },
 
+    switchPairMethod(method = 'qr') {
+      const isQr = method === 'qr';
+      if (els.btnPairMethodQr) els.btnPairMethodQr.classList.toggle('active', isQr);
+      if (els.btnPairMethodPhone) els.btnPairMethodPhone.classList.toggle('active', !isQr);
+      if (els.panePairMethodQr) els.panePairMethodQr.style.display = isQr ? 'block' : 'none';
+      if (els.panePairMethodPhone) els.panePairMethodPhone.style.display = !isQr ? 'block' : 'none';
+      if (!isQr && els.inputWaPairingPhone) {
+        setTimeout(() => els.inputWaPairingPhone?.focus(), 150);
+      }
+    },
+
+    async requestPairingCode() {
+      const phone = els.inputWaPairingPhone ? els.inputWaPairingPhone.value.trim() : '';
+      if (!phone) {
+        showToast('⚠️ Masukkan nomor WhatsApp Anda (mis. 08123456789 atau 628...)', 'warning');
+        els.inputWaPairingPhone?.focus();
+        return;
+      }
+
+      const origText = els.btnRequestWaPairingCode ? els.btnRequestWaPairingCode.innerHTML : '';
+      if (els.btnRequestWaPairingCode) {
+        els.btnRequestWaPairingCode.disabled = true;
+        els.btnRequestWaPairingCode.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Meminta...';
+      }
+      if (els.waStatusText) {
+        els.waStatusText.innerHTML = '🟡 Meminta kode pairing WhatsApp dari server...';
+      }
+
+      try {
+        const res = await fetch('/api/wa/pairing-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone })
+        });
+        const data = await res.json();
+        if (data.success && data.code) {
+          if (els.waPairingCodeDisplay) els.waPairingCodeDisplay.textContent = data.code;
+          if (els.waPairingCodeBox) els.waPairingCodeBox.style.display = 'block';
+          if (els.waStatusText) els.waStatusText.innerHTML = `🔑 Masukkan kode <b>${data.code}</b> di HP Anda`;
+          showToast(`Kode Pairing WhatsApp: ${data.code}. Masukkan pada WhatsApp di HP Anda.`, 'success');
+        } else {
+          showToast(`❌ Gagal: ${data.error || 'Terjadi kesalahan'}`, 'error');
+          if (els.waStatusText) els.waStatusText.innerHTML = '❌ Gagal mendapatkan kode pairing';
+        }
+      } catch (err) {
+        showToast(`❌ Kesalahan: ${err.message}`, 'error');
+      } finally {
+        if (els.btnRequestWaPairingCode) {
+          els.btnRequestWaPairingCode.disabled = false;
+          els.btnRequestWaPairingCode.innerHTML = origText || '<i class="fa-solid fa-key"></i> Dapatkan Kode';
+        }
+      }
+    },
+
     switchQrModalTab(tab = 'terminal') {
       const isTerminal = tab === 'terminal';
       if (els.tabQrTerminal) {
@@ -34879,9 +34983,14 @@ Aturan:
 
         if (els.waUnreadBadgeDot) els.waUnreadBadgeDot.style.display = 'none';
 
-        if (!this.activeContact && this.contacts.length > 0) {
-          this.activeContact = this.contacts[0];
+        // Bersihkan area chat seketika saat beralih ke mode WhatsApp
+        if (els.welcomeHero) els.welcomeHero.style.display = 'none';
+        if (els.messagesList) els.messagesList.innerHTML = '';
+        if (els.pullUpNewChatWrapper) {
+          els.pullUpNewChatWrapper.classList.remove('visible');
+          els.pullUpNewChatWrapper.style.display = 'none';
         }
+
         this.updateContactChipUI();
 
         if (render) {
@@ -35065,8 +35174,9 @@ Aturan:
     },
 
     async loadMessagesForContact(jid) {
-      if (!els.chatMessages) return;
-      els.chatMessages.innerHTML = '';
+      if (!els.messagesList) return;
+      if (els.welcomeHero) els.welcomeHero.style.display = 'none';
+      els.messagesList.innerHTML = '';
 
       const headerBar = document.createElement('div');
       headerBar.className = 'wa-chat-header-bar';
@@ -35093,7 +35203,7 @@ Aturan:
           this.fetchContacts();
         }
       });
-      els.chatMessages.appendChild(headerBar);
+      els.messagesList.appendChild(headerBar);
 
       try {
         const res = await fetch(`/api/wa/messages?jid=${encodeURIComponent(jid)}`);
@@ -35112,7 +35222,7 @@ Aturan:
             <p style="font-weight: 600; color: var(--text-main); margin-bottom: 4px;">Percakapan WhatsApp dengan ${escapeHtml(this.activeContact?.name || jid)}</p>
             <p style="font-size: 0.78rem;">Ketik pesan di bawah untuk mulai mengirim pesan WhatsApp sungguhan.</p>
           `;
-          els.chatMessages.appendChild(empty);
+          els.messagesList.appendChild(empty);
         } else {
           list.forEach(msg => {
             this.appendMessageBubble(msg);
@@ -35126,36 +35236,39 @@ Aturan:
     },
 
     renderEmptyWaState() {
-      if (!els.chatMessages) return;
-      els.chatMessages.innerHTML = `
-        <div style="padding: 60px 20px; text-align: center; color: var(--text-dim); max-width: 500px; margin: 0 auto;">
-          <div style="width: 60px; height: 60px; border-radius: 50%; background: rgba(37,211,102,0.12); border: 1px solid rgba(37,211,102,0.4); color: #25D366; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin: 0 auto 16px;">
+      if (!els.messagesList) return;
+      if (els.welcomeHero) els.welcomeHero.style.display = 'none';
+      els.messagesList.innerHTML = `
+        <div style="padding: 70px 20px; text-align: center; color: var(--text-dim); max-width: 520px; margin: 0 auto; animation: fadeIn 0.25s ease-out;">
+          <div style="width: 64px; height: 64px; border-radius: 50%; background: rgba(37,211,102,0.12); border: 1.5px solid rgba(37,211,102,0.4); color: #25D366; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin: 0 auto 18px; box-shadow: 0 0 25px rgba(37,211,102,0.15);">
             <i class="fa-brands fa-whatsapp"></i>
           </div>
-          <h3 style="font-weight: 700; color: #25D366; font-size: 1.15rem; margin-bottom: 8px;">Mode Chat WhatsApp Aktif</h3>
-          <p style="font-size: 0.85rem; line-height: 1.5; margin-bottom: 16px;">
-            Anda sekarang berada di mode chat WhatsApp. Pilih kontak dari menu atas atau tambahkan kontak baru untuk mulai mengobrol.
+          <h3 style="font-weight: 700; color: #25D366; font-size: 1.2rem; margin-bottom: 8px; letter-spacing: 0.5px;">Mode Percakapan WhatsApp Aktif</h3>
+          <p style="font-size: 0.86rem; line-height: 1.6; color: var(--text-muted); margin-bottom: 20px;">
+            Antarmuka obrolan bersih siap digunakan. Silakan pilih kontak yang tersinkronkan dari menu atas atau scan QR / masukkan kode pairing.
           </p>
-          <div style="display: flex; gap: 8px; justify-content: center;">
-            <button type="button" class="btn btn-sm btn-primary" id="btnEmptyStateSelectContact">
-              <i class="fa-solid fa-users"></i> Pilih Kontak
+          <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+            <button type="button" class="btn btn-sm btn-primary" id="btnEmptyStateSelectContact" style="background: #25D366; border-color: #25D366; color: #052e16; font-weight: 600; padding: 7px 16px;">
+              <i class="fa-solid fa-address-book"></i> Pilih Kontak (${this.contacts.length})
             </button>
-            <button type="button" class="btn btn-sm btn-outline" id="btnEmptyStateOpenQr">
-              <i class="fa-solid fa-qrcode"></i> Scan QR WhatsApp
+            <button type="button" class="btn btn-sm btn-outline" id="btnEmptyStateOpenQr" style="border-color: rgba(37,211,102,0.5); color: #25D366; padding: 7px 16px;">
+              <i class="fa-solid fa-qrcode"></i> Scan QR / Pairing Code
             </button>
           </div>
         </div>
       `;
       document.getElementById('btnEmptyStateSelectContact')?.addEventListener('click', () => {
+        AudioEngine.click();
         this.openContactDropdown();
       });
       document.getElementById('btnEmptyStateOpenQr')?.addEventListener('click', () => {
+        AudioEngine.click();
         this.openQrModalWithTab('whatsapp');
       });
     },
 
     appendMessageBubble(msg) {
-      if (!els.chatMessages) return;
+      if (!els.messagesList) return;
 
       const wrap = document.createElement('div');
       wrap.className = 'wa-bubble-wrap' + (msg.fromMe ? ' wa-bubble-sent' : ' wa-bubble-received');
@@ -35172,7 +35285,7 @@ Aturan:
         </div>
       `;
 
-      els.chatMessages.appendChild(wrap);
+      els.messagesList.appendChild(wrap);
       if (els.chatViewport) els.chatViewport.scrollTop = els.chatViewport.scrollHeight;
     },
 

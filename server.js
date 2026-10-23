@@ -5708,6 +5708,20 @@ async function requestHandler(req, res) {
     }
   }
 
+  if (pathname === '/api/wa/pairing-code' && method === 'POST') {
+    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
+    const body = await safeParseBody(req);
+    if (!body || !body.phone) {
+      return sendJSON(res, 400, { success: false, error: 'Nomor telepon wajib diisi.' });
+    }
+    try {
+      const result = await waGateway.requestPairingCode(body.phone);
+      return sendJSON(res, 200, { success: true, ...result });
+    } catch (err) {
+      return sendJSON(res, 500, { success: false, error: err.message });
+    }
+  }
+
   if (pathname === '/api/wa/disconnect' && method === 'POST') {
     if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
     const body = (await safeParseBody(req)) || {};

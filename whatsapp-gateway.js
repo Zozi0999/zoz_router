@@ -136,6 +136,7 @@ class WhatsAppGateway {
       phone: this.status.phone,
       user: this.status.user,
       qr: this.status.qr,
+      pairingCode: this.status.pairingCode || null,
       contactCount: this.contacts.size,
       updatedAt: this.status.updatedAt
     };
@@ -175,7 +176,7 @@ class WhatsAppGateway {
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
         browser: Browsers.windows('Desktop'),
-        syncFullHistory: false,
+        syncFullHistory: true,
         markOnlineOnConnect: true,
         connectTimeoutMs: 60000,
         keepAliveIntervalMs: 25000
@@ -247,6 +248,104 @@ class WhatsAppGateway {
               this.connect();
             }, 3000);
           }
+        }
+      });
+
+      // Sinkronisasi Riwayat Chat Penuh dari HP (Messaging History Sync)
+      this.sock.ev.on('messaging-history.set', ({ chats, contacts, messages, isLatest }) => {
+        let changed = false;
+        if (Array.isArray(contacts)) {
+          for (const c of contacts) {
+            if (!c.id || c.id === 'status@broadcast') continue;
+            const existing = this.contacts.get(c.id) || {
+              id: c.id,
+              name: c.name || c.notify || c.verifiedName || c.id.split('@')[0],
+              notify: c.notify || '',
+              phone: c.id.split('@')[0],
+              unreadCount: 0,
+              lastMessage: '',
+              lastTimestamp: 0
+            };
+            if (c.name) existing.name = c.name;
+            if (c.notify) existing.notify = c.notify;
+            this.contacts.set(c.id, existing);
+            changed = true;
+          }
+        }
+
+        if (Array.isArray(chats)) {
+          for (const chat of chats) {
+            if (!chat.id || chat.id === 'status@broadcast') continue;
+            let contact = this.contacts.get(chat.id);
+            if (!contact) {
+              contact = {
+                id: chat.id,
+                name: chat.name || chat.id.split('@')[0],
+                notify: '',
+                phone: chat.id.split('@')[0],
+                unreadCount: chat.unreadCount || 0,
+                lastMessage: '',
+                lastTimestamp: chat.conversationTimestamp ? Number(chat.conversationTimestamp) * 1000 : 0
+              };
+              this.contacts.set(chat.id, contact);
+            } else {
+              if (chat.name && !contact.name) contact.name = chat.name;
+              if (chat.unreadCount !== undefined) contact.unreadCount = chat.unreadCount;
+              if (chat.conversationTimestamp) contact.lastTimestamp = Number(chat.conversationTimestamp) * 1000;
+            }
+            changed = true;
+          }
+        }
+
+        if (Array.isArray(messages)) {
+          for (const msg of messages) {
+            if (!msg.message) continue;
+            const jid = msg.key.remoteJid;
+            if (!jid || jid === 'status@broadcast') continue;
+
+            const fromMe = Boolean(msg.key.fromMe);
+            const text = msg.message.conversation ||
+                         msg.message.extendedTextMessage?.text ||
+                         msg.message.imageMessage?.caption ||
+                         msg.message.videoMessage?.caption ||
+                         (msg.message.imageMessage ? '📷 [Foto]' : '') ||
+                         (msg.message.audioMessage ? '🎵 [Audio/Voice Note]' : '') ||
+                         (msg.message.documentMessage ? `📄 [Dokumen: ${msg.message.documentMessage.fileName || 'file'}]` : '') ||
+                         (msg.message.stickerMessage ? '🏷️ [Stiker]' : '') ||
+                         '';
+            if (!text) continue;
+
+            let ts = Date.now();
+            if (msg.messageTimestamp) {
+              const rawTs = typeof msg.messageTimestamp === 'number'
+                ? msg.messageTimestamp
+                : Number(msg.messageTimestamp.low || msg.messageTimestamp);
+              ts = rawTs > 9999999999 ? rawTs : rawTs * 1000;
+            }
+
+            const id = msg.key.id || `hist_${ts}_${Math.random().toString(36).slice(2, 6)}`;
+            const senderName = msg.pushName || (fromMe ? 'Saya' : jid.split('@')[0]);
+
+            if (!this.messages.has(jid)) {
+              this.messages.set(jid, []);
+            }
+            const list = this.messages.get(jid);
+            if (!list.some(m => m.id === id)) {
+              list.push({ id, fromMe, text, timestamp: ts, senderName, status: fromMe ? 'sent' : 'received' });
+            }
+
+            let contact = this.contacts.get(jid);
+            if (contact && (!contact.lastTimestamp || ts >= contact.lastTimestamp)) {
+              contact.lastMessage = text;
+              contact.lastTimestamp = ts;
+            }
+            changed = true;
+          }
+        }
+
+        if (changed) {
+          this.savePersistedData();
+          this.broadcast('contacts', this.getContacts());
         }
       });
 
@@ -437,6 +536,35 @@ class WhatsAppGateway {
     } catch (e) {
       console.warn('[WA-Gateway] Gagal menghapus authDir:', e.message);
     }
+  }
+
+  async requestPairingCode(phoneNumber) {
+    if (!phoneNumber) throw new Error('Nomor telepon wajib diisi.');
+    let cleanPhone = phoneNumber.replace(/[^0-9]/g, '');
+    if (cleanPhone.startsWith('0')) {
+      cleanPhone = '62' + cleanPhone.slice(1);
+    }
+
+    if (!this.sock || (!this.status.connecting && !this.status.connected)) {
+      await this.connect();
+    }
+
+    // Tunggu socket siap menerima perintah pairing code (max 15 detik)
+    let waited = 0;
+    while ((!this.sock || typeof this.sock.requestPairingCode !== 'function') && waited < 15000) {
+      await new Promise(r => setTimeout(r, 300));
+      waited += 300;
+    }
+
+    if (!this.sock || typeof this.sock.requestPairingCode !== 'function') {
+      throw new Error('Socket WhatsApp belum siap. Silakan coba klik Hubungkan ulang.');
+    }
+
+    const rawCode = await this.sock.requestPairingCode(cleanPhone);
+    const formatted = rawCode ? (rawCode.match(/.{1,4}/g)?.join('-') || rawCode) : '';
+    this.status.pairingCode = formatted;
+    this.broadcast('pairing_code', { code: formatted, phone: cleanPhone });
+    return { code: formatted, phone: cleanPhone };
   }
 
   async sendMessage(jid, text) {

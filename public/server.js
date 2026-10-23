@@ -33,6 +33,14 @@ try {
   }
 }
 
+// WhatsApp Web Gateway Loader (Baileys Multi-Device)
+let waGateway = null;
+try {
+  waGateway = require('./whatsapp-gateway');
+} catch (waErr) {
+  console.warn('[Server] WhatsApp Gateway tidak aktif:', waErr.message);
+}
+
 // Session store untuk persistent PTY sessions (ConPTY / PseudoConsole)
 const activeTerminalSessions = new Map();
 const WORKSPACE_ROOT = (process.env.ZOZ_WORKSPACE_ROOT && fs.existsSync(process.env.ZOZ_WORKSPACE_ROOT))
@@ -4163,7 +4171,8 @@ async function requestHandler(req, res) {
                                  pathname === '/api/extract-web' ||
                                  pathname === '/api/read-url' ||
                                  pathname === '/api/scrape-url' ||
-                                 pathname.startsWith('/api/terminal/');
+                                 pathname.startsWith('/api/terminal/') ||
+                                 pathname.startsWith('/api/wa/');
 
   if (pathname.startsWith('/api') && !isExemptCrossOriginPath && process.env.ZOX_ALLOW_CROSS_ORIGIN !== '1') {
     let crossSite = false;
@@ -5678,6 +5687,111 @@ async function requestHandler(req, res) {
     } catch (e) {
       return [];
     }
+  }
+
+  // =========================================================================
+  // WHATSAPP WEB GATEWAY API (Dual Mode: AI vs WhatsApp Chat)
+  // =========================================================================
+  if (pathname === '/api/wa/status' && method === 'GET') {
+    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
+    return sendJSON(res, 200, { success: true, ...waGateway.getStatus() });
+  }
+
+  if (pathname === '/api/wa/connect' && method === 'POST') {
+    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
+    const body = (await safeParseBody(req)) || {};
+    try {
+      const status = await waGateway.connect(Boolean(body.forceNew));
+      return sendJSON(res, 200, { success: true, ...status });
+    } catch (err) {
+      return sendJSON(res, 500, { success: false, error: err.message });
+    }
+  }
+
+  if (pathname === '/api/wa/pairing-code' && method === 'POST') {
+    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
+    const body = await safeParseBody(req);
+    if (!body || !body.phone) {
+      return sendJSON(res, 400, { success: false, error: 'Nomor telepon wajib diisi.' });
+    }
+    try {
+      const result = await waGateway.requestPairingCode(body.phone);
+      return sendJSON(res, 200, { success: true, ...result });
+    } catch (err) {
+      return sendJSON(res, 500, { success: false, error: err.message });
+    }
+  }
+
+  if (pathname === '/api/wa/disconnect' && method === 'POST') {
+    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
+    const body = (await safeParseBody(req)) || {};
+    try {
+      await waGateway.disconnect(body.logout !== false);
+      return sendJSON(res, 200, { success: true, message: 'WhatsApp berhasil diputuskan.' });
+    } catch (err) {
+      return sendJSON(res, 500, { success: false, error: err.message });
+    }
+  }
+
+  if (pathname === '/api/wa/contacts' && method === 'GET') {
+    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
+    return sendJSON(res, 200, { success: true, contacts: waGateway.getContacts() });
+  }
+
+  if (pathname === '/api/wa/contacts' && method === 'POST') {
+    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
+    const body = await safeParseBody(req);
+    if (!body) return;
+    try {
+      const contact = waGateway.addOrUpdateContact(body.name, body.phone);
+      return sendJSON(res, 200, { success: true, contact });
+    } catch (err) {
+      return sendJSON(res, 400, { success: false, error: err.message });
+    }
+  }
+
+  if (pathname === '/api/wa/messages' && method === 'GET') {
+    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
+    const jid = reqUrl.searchParams.get('jid');
+    if (!jid) return sendJSON(res, 400, { success: false, error: 'Parameter jid dibutuhkan' });
+    const messages = waGateway.getMessages(jid);
+    return sendJSON(res, 200, { success: true, jid, messages });
+  }
+
+  if (pathname === '/api/wa/send' && method === 'POST') {
+    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
+    const body = await safeParseBody(req);
+    if (!body) return;
+    if (!body.jid || !body.text) {
+      return sendJSON(res, 400, { success: false, error: 'Parameter jid dan text wajib diisi.' });
+    }
+    try {
+      const message = await waGateway.sendMessage(body.jid, body.text);
+      return sendJSON(res, 200, { success: true, message });
+    } catch (err) {
+      return sendJSON(res, 500, { success: false, error: err.message });
+    }
+  }
+
+  if (pathname === '/api/wa/clear' && method === 'POST') {
+    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
+    const body = await safeParseBody(req);
+    if (!body || !body.jid) return sendJSON(res, 400, { success: false, error: 'Parameter jid dibutuhkan' });
+    waGateway.clearChatHistory(body.jid);
+    return sendJSON(res, 200, { success: true, message: 'Riwayat chat kontak dibersihkan.' });
+  }
+
+  if (pathname === '/api/wa/events' && method === 'GET') {
+    if (!waGateway) return sendJSON(res, 503, { success: false, error: 'Modul WhatsApp Gateway tidak tersedia.' });
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*'
+    });
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+    waGateway.addSseClient(res);
+    return;
   }
 
   // 1. Workspace Status

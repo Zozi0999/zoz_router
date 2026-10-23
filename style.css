@@ -15219,6 +15219,84 @@ body.mermaid-has-fullscreen {
   color: #38bdf8;
 }
 
+/* WhatsApp Pairing Method Switcher (QR vs Phone Code) */
+.wa-pair-method-nav {
+  display: flex;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 3px;
+  margin-bottom: 12px;
+}
+
+.wa-pair-method-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.wa-pair-method-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.wa-pair-method-btn.active {
+  background: rgba(37, 211, 102, 0.16);
+  border-color: rgba(37, 211, 102, 0.45);
+  color: #25D366;
+  box-shadow: 0 0 10px rgba(37, 211, 102, 0.2);
+}
+
+/* WhatsApp Pairing Code Box */
+.wa-pairing-code-box {
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(37, 211, 102, 0.35);
+  border-radius: 12px;
+  text-align: center;
+  box-shadow: inset 0 0 20px rgba(37, 211, 102, 0.05);
+}
+
+.wa-pairing-code-label {
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.wa-pairing-code-display {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 1.8rem;
+  font-weight: 800;
+  letter-spacing: 0.25em;
+  color: #25D366;
+  text-shadow: 0 0 16px rgba(37, 211, 102, 0.45);
+  padding: 10px 0;
+  background: rgba(37, 211, 102, 0.06);
+  border-radius: 8px;
+  border: 1px dashed rgba(37, 211, 102, 0.4);
+  margin-bottom: 12px;
+  user-select: all;
+}
+
+.wa-pairing-instructions {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  text-align: left;
+}
+
 
 
 

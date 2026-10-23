@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261023_v438';
+    window.__ZOZ_VERSION__ = 'v20261023_v439';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -93,8 +93,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261023_v438">
-  <link rel="stylesheet" href="style.css?v=20261023_v438">
+  <link rel="preload" as="style" href="style.css?v=20261023_v439">
+  <link rel="stylesheet" href="style.css?v=20261023_v439">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -2698,25 +2698,61 @@
             </button>
           </div>
 
-          <!-- WA QR Code / Pairing Display Section -->
-          <div class="term-tunnel-section qr-section" id="waQrSection">
-            <label class="term-tunnel-label"><i class="fa-brands fa-whatsapp text-emerald-400"></i> Pindai QR WhatsApp Web dari HP</label>
-            <div class="term-tunnel-qr-wrap">
-              <div class="term-tunnel-qr-box" id="waQrContainer">
-                <img id="waQrCodeImg" src="" alt="QR Code WhatsApp" style="display: none;">
-                <div id="waQrCodePlaceholder" class="term-tunnel-qr-placeholder">
-                  <i class="fa-brands fa-whatsapp" style="font-size: 2.5rem; color: #25D366; opacity: 0.7;"></i>
-                  <span id="waQrPlaceholderText">Klik 'Hubungkan WhatsApp' untuk memuat QR</span>
+          <!-- Pairing Method Switcher: QR Code vs Pairing Code -->
+          <div class="wa-pair-method-nav" id="waPairMethodNav">
+            <button type="button" class="wa-pair-method-btn active" id="btnPairMethodQr">
+              <i class="fa-solid fa-qrcode"></i> Pindai Kode QR
+            </button>
+            <button type="button" class="wa-pair-method-btn" id="btnPairMethodPhone">
+              <i class="fa-solid fa-mobile-screen-button"></i> Tautkan dengan Kode Telepon
+            </button>
+          </div>
+
+          <!-- Opsi 1: Pindai Kode QR -->
+          <div class="wa-pair-method-pane" id="panePairMethodQr">
+            <div class="term-tunnel-section qr-section" id="waQrSection">
+              <label class="term-tunnel-label"><i class="fa-brands fa-whatsapp text-emerald-400"></i> Pindai QR WhatsApp Web dari HP</label>
+              <div class="term-tunnel-qr-wrap">
+                <div class="term-tunnel-qr-box" id="waQrContainer">
+                  <img id="waQrCodeImg" src="" alt="QR Code WhatsApp" style="display: none;">
+                  <div id="waQrCodePlaceholder" class="term-tunnel-qr-placeholder">
+                    <i class="fa-brands fa-whatsapp" style="font-size: 2.5rem; color: #25D366; opacity: 0.7;"></i>
+                    <span id="waQrPlaceholderText">Klik 'Hubungkan WhatsApp' untuk memuat QR</span>
+                  </div>
+                </div>
+                <div class="term-tunnel-qr-desc">
+                  <p>1. Buka aplikasi <b>WhatsApp</b> di ponsel Anda.<br>
+                     2. Ketuk <b>Titik Tiga ⋮</b> atau <b>Setelan</b> &gt; <b>Perangkat Tertaut</b>.<br>
+                     3. Ketuk <b>Tautkan Perangkat</b> lalu scan kode QR di samping.</p>
+                  <div style="display: flex; gap: 8px; margin-top: 10px;">
+                    <button type="button" class="term-tunnel-btn small" id="btnRefreshWaQr">
+                      <i class="fa-solid fa-rotate-right"></i> Refresh QR
+                    </button>
+                  </div>
                 </div>
               </div>
-              <div class="term-tunnel-qr-desc">
-                <p>1. Buka aplikasi <b>WhatsApp</b> di ponsel Anda.<br>
-                   2. Ketuk <b>Titik Tiga ⋮</b> atau <b>Setelan</b> &gt; <b>Perangkat Tertaut</b>.<br>
-                   3. Ketuk <b>Tautkan Perangkat</b> lalu scan kode QR di samping.</p>
-                <div style="display: flex; gap: 8px; margin-top: 10px;">
-                  <button type="button" class="term-tunnel-btn small" id="btnRefreshWaQr">
-                    <i class="fa-solid fa-rotate-right"></i> Refresh QR
-                  </button>
+            </div>
+          </div>
+
+          <!-- Opsi 2: Kode Pairing (Tautkan dengan nomor telepon) -->
+          <div class="wa-pair-method-pane" id="panePairMethodPhone" style="display: none;">
+            <div class="term-tunnel-section">
+              <label class="term-tunnel-label"><i class="fa-solid fa-key text-emerald-400"></i> Masukkan Nomor WhatsApp untuk Mendapatkan Kode</label>
+              <div style="display: flex; gap: 8px; margin-top: 6px;">
+                <input type="tel" id="inputWaPairingPhone" class="term-tunnel-inline-input" placeholder="mis. 08123456789 atau 628..." style="flex: 1;">
+                <button type="button" class="term-tunnel-btn" id="btnRequestWaPairingCode">
+                  <i class="fa-solid fa-key"></i> Dapatkan Kode
+                </button>
+              </div>
+
+              <!-- Box Kode Pairing -->
+              <div class="wa-pairing-code-box" id="waPairingCodeBox" style="display: none;">
+                <div class="wa-pairing-code-label">Masukkan kode ini pada WhatsApp di HP Anda:</div>
+                <div class="wa-pairing-code-display" id="waPairingCodeDisplay">---- - ----</div>
+                <div class="wa-pairing-instructions">
+                  1. Buka <b>WhatsApp</b> di HP &gt; <b>Setelan / Titik Tiga</b> &gt; <b>Perangkat Tertaut</b><br>
+                  2. Ketuk <b>Tautkan Perangkat</b> lalu pilih <b>"Tautkan dengan nomor telepon saja"</b> di bawah<br>
+                  3. Masukkan 8 karakter kode di atas untuk menghubungkan WhatsApp secara instan.
                 </div>
               </div>
             </div>
@@ -2813,6 +2849,6 @@
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
   <script src="text-safety.js?v=20261023_v438" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261023_v438" defer></script>
+  <script src="app.js?v=20261023_v439" defer></script>
 </body>
 </html>
