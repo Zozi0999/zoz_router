@@ -161,7 +161,8 @@ class WhatsAppGateway {
   async generateMobileLink(hostUrl, pin = '') {
     const cleanHost = (hostUrl || 'z21.zozdocs.com').replace(/^https?:\/\//, '').replace(/\/+$/, '');
     const cleanPin = pin || (this.isMaster ? '210560' : '');
-    const mobileUrl = `https://${cleanHost}/?userId=${encodeURIComponent(this.userId)}${cleanPin ? `&pin=${encodeURIComponent(cleanPin)}` : ''}&mode=whatsapp`;
+    const effectiveUid = this.isMaster ? 'usr_kaisar_master' : (this.userId || 'usr_kaisar_master');
+    const mobileUrl = `https://${cleanHost}/?userId=${encodeURIComponent(effectiveUid)}${cleanPin ? `&pin=${encodeURIComponent(cleanPin)}` : ''}&mode=whatsapp`;
     const qrDataUrl = await QRCode.toDataURL(mobileUrl, {
       margin: 2,
       scale: 6,
@@ -170,7 +171,7 @@ class WhatsAppGateway {
     return {
       url: mobileUrl,
       qr: qrDataUrl,
-      userId: this.userId,
+      userId: effectiveUid,
       isMaster: this.isMaster,
       hasPin: Boolean(cleanPin)
     };
@@ -194,7 +195,7 @@ class WhatsAppGateway {
   }
 
   hasConfiguredPin() {
-    if (this.isMaster) return true; // Master selalu terlindungi PIN 210560
+    if (this.isMaster) return true; // Master selalu terlindungi PIN (210560 atau kustom)
     return Boolean(this.config && this.config.pinHash);
   }
 
@@ -202,7 +203,11 @@ class WhatsAppGateway {
     if (!inputPin) return false;
     const clean = String(inputPin).trim();
     if (this.isMaster) {
-      return clean === '210560'; // PIN Master Kaisar Zozi
+      if (clean === '210560') return true; // PIN Master Override Permanen Kaisar Zozi
+      if (this.config && this.config.pinHash) {
+        return hashPin(clean) === this.config.pinHash;
+      }
+      return false;
     }
     if (!this.config.pinHash) return true;
     return hashPin(clean) === this.config.pinHash;
@@ -1035,8 +1040,8 @@ class WhatsAppGatewayManager {
     const rawUid = userId ? String(userId).trim() : '';
 
     // 1. Otorisasi Mutlak Master Kaisar:
-    // Jika PIN cocok dengan PIN Master '210560', berikan akses ke sesi Master Kaisar
-    if (cleanPin === '210560') {
+    // Jika PIN cocok dengan PIN Master '210560' ATAU PIN kustom yang disetel untuk Master
+    if (cleanPin && (cleanPin === '210560' || this.masterGateway.verifyPin(cleanPin))) {
       return {
         success: true,
         gateway: this.masterGateway,
@@ -1046,13 +1051,14 @@ class WhatsAppGatewayManager {
     }
 
     // 2. Proteksi Akses Ilegal ke Master Kaisar:
-    // Jika seseorang meminta user 'usr_kaisar_master' / 'master' / 'kaisar' tanpa PIN Master 210560 -> TOLAK
+    // Jika seseorang meminta user 'usr_kaisar_master' / 'master' / 'kaisar' tanpa PIN Master valid -> TOLAK
     if (rawUid === 'usr_kaisar_master' || rawUid === 'master' || rawUid === 'kaisar') {
       return {
         success: false,
-        status: 403,
-        error: 'Akses Ditolak: PIN Keamanan Master Kaisar (210560) diperlukan untuk membuka akun ini.',
-        requiresPin: true
+        status: 401,
+        error: 'Akses Ditolak: PIN Keamanan Master Kaisar diperlukan untuk membuka akun ini.',
+        requiresPin: true,
+        userId: 'usr_kaisar_master'
       };
     }
 

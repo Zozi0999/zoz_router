@@ -1308,7 +1308,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     inputWaNewContactName: $('#inputWaNewContactName'),
     inputWaNewContactPhone: $('#inputWaNewContactPhone'),
     btnSaveWaNewContact: $('#btnSaveWaNewContact'),
-    btnTopBarCameraScanner: $('#btnTopBarCameraScanner'),
     waTenantSecurityBox: $('#waTenantSecurityBox'),
     waDisplayUserId: $('#waDisplayUserId'),
     waSecurityBadge: $('#waSecurityBadge'),
@@ -31292,9 +31291,10 @@ Aturan:
         if (typeof WhatsAppController !== 'undefined') {
           WhatsAppController.userId = waUserId;
           WhatsAppController.pin = waPin;
-          WhatsAppController.updateSecurityUI({ isMaster: waPin === '210560', hasPin: Boolean(waPin) });
+          WhatsAppController.isMaster = (waPin === '210560' || waUserId === 'usr_kaisar_master');
+          WhatsAppController.updateSecurityUI({ isMaster: WhatsAppController.isMaster, hasPin: Boolean(waPin) });
           WhatsAppController.fetchStatus(true);
-          WhatsAppController.fetchContacts();
+          WhatsAppController.fetchContacts(true);
         }
 
         showToast('🟢 Sukses! Akun WhatsApp dari desktop berhasil disinkronkan ke HP ini.', 'success');
@@ -34704,6 +34704,8 @@ Aturan:
       // Jika memasukkan PIN Master Kaisar 210560
       if (pin === '210560') {
         localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+        this.userId = 'usr_kaisar_master';
+        this.isMaster = true;
         showToast('👑 PIN Master Kaisar Zozi terverifikasi! Mengakses Master Core...', 'success');
         this.updateSecurityUI({ isMaster: true, hasPin: true });
         await this.fetchStatus();
@@ -34713,17 +34715,23 @@ Aturan:
 
       // Simpan PIN ke server untuk mengunci akun pengguna saat ini
       try {
+        const curPin = this.getPin();
         const res = await fetch(this.getApiUrl('/api/wa/pin'), {
           method: 'POST',
           headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ newPin: pin })
+          body: JSON.stringify({ newPin: pin, currentPin: curPin, masterPin: curPin === '210560' ? '210560' : '' })
         });
         const data = await res.json();
         if (data.success) {
+          if (data.isMaster || data.userId === 'usr_kaisar_master') {
+            localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+            this.userId = 'usr_kaisar_master';
+            this.isMaster = true;
+          }
           showToast('✅ PIN Keamanan berhasil disimpan dan diaktifkan!', 'success');
-          this.updateSecurityUI({ hasPin: true });
+          this.updateSecurityUI({ isMaster: this.isMaster || data.isMaster, hasPin: true });
           await this.fetchStatus();
-          await this.fetchContacts();
+          await this.fetchContacts(true);
         } else {
           showToast(`Gagal set PIN: ${data.error}`, 'error');
         }
@@ -34797,7 +34805,10 @@ Aturan:
       // 1. Konstruksi URL kanonikal Tautan Handphone
       const currentHost = (typeof window !== 'undefined' && window.location && window.location.host) || 'z21.zozdocs.com';
       const cleanHost = currentHost.replace(/^https?:\/\//, '').replace(/\/+$/, '');
-      const mobileUrl = `https://${cleanHost}/?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(effectivePin)}&mode=whatsapp`;
+      const effectiveUid = (this.isMaster || this.getPin() === '210560' || localStorage.getItem('zoz_wa_user_id') === 'usr_kaisar_master')
+        ? 'usr_kaisar_master'
+        : this.getUserId();
+      const mobileUrl = `https://${cleanHost}/?userId=${encodeURIComponent(effectiveUid)}&pin=${encodeURIComponent(effectivePin)}&mode=whatsapp`;
       this.mobileLinkUrl = mobileUrl;
 
       // 2. Render instan gambar QR via client loader (0 delay, anti-stuck)
@@ -34816,7 +34827,7 @@ Aturan:
       // 3. Permintaan ke backend untuk mengambil QR Data URL resmi & mencatat status
       const candidates = [
         this.apiBaseUrl,
-        'https://presentation-focusing-tracks-apr.trycloudflare.com',
+        'https://heat-rolled-guns-warning.trycloudflare.com',
         localStorage.getItem('zoz_wa_api_url'),
         localStorage.getItem('zoz_last_tunnel_url'),
         ''
@@ -34826,7 +34837,7 @@ Aturan:
       for (const base of unique) {
         try {
           const cleanBase = base ? base.replace(/\/+$/, '') : '';
-          const q = `?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(effectivePin)}${force ? '&f=1' : ''}`;
+          const q = `?userId=${encodeURIComponent(effectiveUid)}&pin=${encodeURIComponent(effectivePin)}${force ? '&f=1' : ''}`;
           const res = await fetch(`${cleanBase}/api/wa/mobile-link${q}`, {
             headers: this.getAuthHeaders({ 'X-WA-PIN': effectivePin }),
             signal: AbortSignal.timeout(3000)
@@ -34926,7 +34937,7 @@ Aturan:
       // 0. Cache hit instant (0ms)
       const cached = localStorage.getItem('zoz_wa_api_url');
       if (cached && !this.apiBaseUrl) {
-        if (!cached.includes('turned-defensive-myself') && !cached.includes('notify-thomson')) {
+        if (!cached.includes('turned-defensive-myself') && !cached.includes('notify-thomson') && !cached.includes('presentation-focusing-tracks-apr') && !cached.includes('ready-eva-counters-binding')) {
           this.apiBaseUrl = cached;
         } else {
           localStorage.removeItem('zoz_wa_api_url');
@@ -34943,7 +34954,7 @@ Aturan:
       // 2. Coba URL tunnel Cloudflare yang tersimpan atau default
       const candidates = [
         this.apiBaseUrl,
-        'https://presentation-focusing-tracks-apr.trycloudflare.com',
+        'https://heat-rolled-guns-warning.trycloudflare.com',
         localStorage.getItem('zoz_last_tunnel_url'),
         (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost) || '',
         'http://localhost:4040',
@@ -34978,7 +34989,7 @@ Aturan:
       if (els.waQrPlaceholderText) els.waQrPlaceholderText.textContent = 'Menghubungkan langsung ke tunnel WhatsApp...';
       const tunnelBases = [
         this.apiBaseUrl,
-        'https://presentation-focusing-tracks-apr.trycloudflare.com',
+        'https://heat-rolled-guns-warning.trycloudflare.com',
         localStorage.getItem('zoz_last_tunnel_url'),
         (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost) || '',
         'http://localhost:4040',
@@ -35201,7 +35212,13 @@ Aturan:
         // Setel lokal seketika & render QR seketika tanpa menunggu jaringan
         this.pin = pinInput;
         localStorage.setItem('zoz_wa_pin', pinInput);
-        this.updateSecurityUI({ isMaster: false, hasPin: true });
+        const isMasterDevice = Boolean(this.isMaster || this.getPin() === '210560' || localStorage.getItem('zoz_wa_user_id') === 'usr_kaisar_master' || (this.status && this.status.connected));
+        if (isMasterDevice) {
+          localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+          this.userId = 'usr_kaisar_master';
+          this.isMaster = true;
+        }
+        this.updateSecurityUI({ isMaster: this.isMaster, hasPin: true });
         showToast('🔒 PIN Berhasil Disimpan! QR Code Tautan Ponsel Diterbitkan.', 'success');
         this.fetchMobileLinkQr(true, pinInput);
 
@@ -35213,7 +35230,7 @@ Aturan:
 
           const candidates = [
             this.apiBaseUrl,
-            'https://presentation-focusing-tracks-apr.trycloudflare.com',
+            'https://heat-rolled-guns-warning.trycloudflare.com',
             localStorage.getItem('zoz_wa_api_url'),
             localStorage.getItem('zoz_last_tunnel_url'),
             ''
@@ -35226,16 +35243,26 @@ Aturan:
               const res = await fetch(`${cleanBase}/api/wa/pin`, {
                 method: 'POST',
                 headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify({ userId: this.getUserId(), newPin: pinInput }),
+                body: JSON.stringify({
+                  userId: isMasterDevice ? 'usr_kaisar_master' : this.getUserId(),
+                  newPin: pinInput,
+                  masterPin: isMasterDevice ? '210560' : ''
+                }),
                 signal: AbortSignal.timeout(3500)
               });
               if (res.ok) {
                 const data = await res.json().catch(() => null);
                 if (data && data.success) {
+                  if (data.isMaster || data.userId === 'usr_kaisar_master') {
+                    localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+                    this.userId = 'usr_kaisar_master';
+                    this.isMaster = true;
+                  }
                   if (cleanBase) {
                     this.apiBaseUrl = cleanBase;
                     localStorage.setItem('zoz_wa_api_url', cleanBase);
                   }
+                  await this.fetchContacts(true);
                   break;
                 }
               }
@@ -35265,14 +35292,6 @@ Aturan:
         if (els.inputWaCreateMobilePin) {
           els.inputWaCreateMobilePin.value = '';
           els.inputWaCreateMobilePin.focus();
-        }
-      });
-
-      // Tombol Kamera di Top Bar Navigasi (Scan QR HP)
-      els.btnTopBarCameraScanner?.addEventListener('click', () => {
-        AudioEngine.click();
-        if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.openQrScannerModal === 'function') {
-          TerminalManager.openQrScannerModal({ title: 'Pemindai QR Kamera Handphone (Sinkron WhatsApp / Terminal)' });
         }
       });
 
@@ -35382,7 +35401,12 @@ Aturan:
         }
         const data = await res.json().catch(() => null);
         if (data) {
-          this.updateSecurityUI({ isMaster: data.isMaster, hasPin: data.hasPin });
+          if (data.isMaster || data.userId === 'usr_kaisar_master' || data.tenantUserId === 'usr_kaisar_master') {
+            localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+            this.userId = 'usr_kaisar_master';
+            this.isMaster = true;
+          }
+          this.updateSecurityUI({ isMaster: this.isMaster || data.isMaster, hasPin: data.hasPin });
           if (data.requiresPin) {
             if (els.waStatusText) els.waStatusText.innerHTML = '🔒 Akun Terkunci: Masukkan PIN Keamanan';
             return;
@@ -35391,6 +35415,9 @@ Aturan:
             this.handleStatusUpdate(data);
             if (data.qr) {
               this.handleQrUpdate(data.qr);
+            }
+            if (data.connected && this.contacts.length === 0) {
+              this.fetchContacts();
             }
           } else {
             await this.fetchQrDirectTunnel();
@@ -35430,6 +35457,14 @@ Aturan:
         if (data && data.success) {
           this.contacts = data.contacts || [];
           this.contacts.sort((a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+
+          if (els.waContactCountDisplay) {
+            els.waContactCountDisplay.textContent = `${this.contacts.length} Kontak`;
+          }
+          const emptySelectBtn = document.getElementById('btnEmptyStateSelectContact');
+          if (emptySelectBtn) {
+            emptySelectBtn.innerHTML = `<i class="fa-solid fa-address-book"></i> Pilih Kontak (${this.contacts.length})`;
+          }
 
           // Hanya render sidebar jika Mode WhatsApp aktif atau tab sidebar WA sedang terbuka
           if (STATE.chatMode === 'whatsapp' || (els.waChatHistoryList && els.waChatHistoryList.style.display !== 'none')) {
@@ -35557,8 +35592,8 @@ Aturan:
           body: JSON.stringify(payload)
         });
         if (!res.ok) {
-          apiUrl = 'https://presentation-focusing-tracks-apr.trycloudflare.com/api/wa/connect';
-          this.apiBaseUrl = 'https://presentation-focusing-tracks-apr.trycloudflare.com';
+          apiUrl = 'https://heat-rolled-guns-warning.trycloudflare.com/api/wa/connect';
+          this.apiBaseUrl = 'https://heat-rolled-guns-warning.trycloudflare.com';
           res = await fetch(apiUrl, {
             method: 'POST',
             headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
