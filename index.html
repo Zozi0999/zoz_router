@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261022_v433';
+    window.__ZOZ_VERSION__ = 'v20261022_v434';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -1961,13 +1961,16 @@
             </div>
           </section>
 
-          <!-- Autonomic Nervous System Log Box -->
-          <section aria-label="Log Sistem Saraf Latar Belakang" class="endocrine-util-sec">
+          <!-- Autonomic Nervous System Log Box (Tersembunyi Sesuai Mandat Kaisar) -->
+          <section aria-label="Log Sistem Saraf Latar Belakang" class="endocrine-util-sec" id="secAutonomicLog">
             <div class="endocrine-util-sec-head">
               <span class="endocrine-util-sec-title">&gt; AUTONOMIC NERVOUS SYSTEM LOG (INJECTED INTO AI)</span>
-              <span class="text-emerald" style="font-size:11px; font-weight:600;" id="chatIntuitionTag">Homeostasis Saraf</span>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="text-emerald" style="font-size:11px; font-weight:600;" id="chatIntuitionTag">Homeostasis Saraf</span>
+                <button type="button" class="endocrine-util-btn btn-util-copy" id="btnToggleChatIntuition" style="padding: 2px 8px; font-size: 10px;" title="Tampilkan / Sembunyikan Log Sistem Saraf"><i class="fa-solid fa-eye" id="iconToggleChatIntuition"></i> <span id="lblToggleChatIntuition">Tampilkan Teks</span></button>
+              </div>
             </div>
-            <div class="endocrine-util-box" style="padding: 12px;" id="chatIntuitionBox">
+            <div class="endocrine-util-box" style="padding: 12px; display: none;" id="chatIntuitionBox">
               <pre class="isolated-box-content" id="chatIntuitionContent" style="font-family: inherit; font-size: 11px; line-height: 1.5; margin: 0; background: transparent; padding: 0; color: #34d399; overflow-x: auto; white-space: pre-wrap; border: none;"></pre>
             </div>
           </section>

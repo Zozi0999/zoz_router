@@ -1168,6 +1168,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     btnCopyEndocrineLogs: $('#btnCopyEndocrineLogs'),
     btnCopyEndocrineLogsFooter: $('#btnCopyEndocrineLogsFooter'),
     btnCopyChatEndocrineLogs: $('#btnCopyChatEndocrineLogs'),
+    btnToggleChatIntuition: $('#btnToggleChatIntuition'),
     toggleEndocrineCode: $('#toggleEndocrineCode'),
     toggleEndocrineChat: $('#toggleEndocrineChat'),
     tabEndocrineCode: $('#tabEndocrineCode'),
@@ -27905,6 +27906,18 @@ Aturan:
       if (typeof ChatEndocrine !== 'undefined') {
         ChatEndocrine.copyLogsToClipboard();
       }
+    });
+
+    els.btnToggleChatIntuition?.addEventListener('click', () => {
+      if (typeof AudioEngine !== 'undefined') AudioEngine.click();
+      const box = document.getElementById('chatIntuitionBox');
+      const icon = document.getElementById('iconToggleChatIntuition');
+      const lbl = document.getElementById('lblToggleChatIntuition');
+      if (!box) return;
+      const isHidden = box.style.display === 'none' || getComputedStyle(box).display === 'none';
+      box.style.display = isHidden ? 'block' : 'none';
+      if (icon) icon.className = isHidden ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+      if (lbl) lbl.innerText = isHidden ? 'Sembunyikan Teks' : 'Tampilkan Teks';
     });
 
     document.addEventListener('click', (e) => {
