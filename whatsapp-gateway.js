@@ -171,7 +171,8 @@ class WhatsAppGateway {
       url: mobileUrl,
       qr: qrDataUrl,
       userId: this.userId,
-      isMaster: this.isMaster
+      isMaster: this.isMaster,
+      hasPin: Boolean(cleanPin)
     };
   }
 

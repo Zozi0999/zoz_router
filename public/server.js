@@ -5911,8 +5911,9 @@ async function requestHandler(req, res) {
     }
   }
 
-  if (pathname === '/api/wa/mobile-link' && method === 'GET') {
-    const tenant = getWaTenant(req, reqUrl);
+  if (pathname === '/api/wa/mobile-link' && (method === 'GET' || method === 'POST')) {
+    const body = method === 'POST' ? ((await safeParseBody(req)) || {}) : {};
+    const tenant = getWaTenant(req, reqUrl, body);
     if (!tenant.success) {
       return sendJSON(res, tenant.status || 403, {
         success: false,
@@ -5921,13 +5922,39 @@ async function requestHandler(req, res) {
         userId: tenant.userId
       });
     }
+
+    let pin = tenant.isMaster ? '210560' : (body.pin || body.newPin || req.headers['x-wa-pin'] || reqUrl.searchParams.get('pin') || '');
+
+    // Jika pengguna membuat/menyetel PIN baru bersamaan dengan request QR ponsel
+    if ((body.newPin || body.pin) && !tenant.gateway.isMaster) {
+      const pinCandidate = String(body.newPin || body.pin).trim();
+      if (pinCandidate.length >= 4) {
+        try {
+          tenant.gateway.setPin(pinCandidate);
+          pin = pinCandidate;
+        } catch (err) {
+          return sendJSON(res, 400, { success: false, error: err.message });
+        }
+      }
+    }
+
+    // MANDAT KAISAR: Pengguna wajib membuat / memiliki PIN sebelum QR tautan ponsel diterbitkan
+    if (!pin && !tenant.gateway.isMaster) {
+      return sendJSON(res, 400, {
+        success: false,
+        requiresPinCreation: true,
+        error: 'Harap buat atau masukkan PIN keamanan (4-6 digit) terlebih dahulu sebelum mendapatkan Kode QR Tautan Handphone.',
+        userId: tenant.userId
+      });
+    }
+
     const host = req.headers['x-forwarded-host'] || req.headers['host'] || 'z21.zozdocs.com';
-    const pin = tenant.isMaster ? '210560' : (req.headers['x-wa-pin'] || reqUrl.searchParams.get('pin') || '');
     try {
       const linkInfo = await tenant.gateway.generateMobileLink(host, pin);
       return sendJSON(res, 200, {
         success: true,
         ...linkInfo,
+        pinConfigured: Boolean(pin || tenant.gateway.isMaster),
         devices: tenant.gateway.getConnectedDevices()
       });
     } catch (e) {

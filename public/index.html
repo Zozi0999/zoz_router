@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261023_v444';
+    window.__ZOZ_VERSION__ = 'v20261023_v445';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -495,6 +495,11 @@
       <!-- Action Button 2b: Scan QR Remote Tunnel Terminal HP -->
       <button class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-white/[0.06] transition-colors top-action-btn" id="btnTopBarRemoteQr" title="Tampilkan QR Code Pairing Terminal HP (Cloudflare Tunnel)" aria-label="QR Code Remote Terminal" type="button">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
+      </button>
+
+      <!-- Action Button 2c: Scanner Kamera HP (Scan QR Sinkron WhatsApp / Remote) -->
+      <button class="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-400 hover:text-emerald-300 hover:bg-white/[0.06] transition-colors top-action-btn" id="btnTopBarCameraScanner" title="Pindai QR Code via Kamera HP (Sinkron WhatsApp / Terminal)" aria-label="Buka Scanner Kamera" type="button">
+        <i class="fa-solid fa-camera text-[12px]"></i>
       </button>
 
       <!-- Action Button 3: Bio-Endocrine Hormone Monitor (Emerald Pulse Pill) -->
@@ -2750,6 +2755,9 @@
                     <button type="button" class="term-tunnel-btn small" id="btnForceTunnelWaQr" style="background: rgba(37, 211, 102, 0.15); border-color: rgba(37, 211, 102, 0.4); color: #25D366;" title="Paksa muat QR langsung via Cloudflare Tunnel">
                       <i class="fa-solid fa-bolt"></i> Muat Langsung via Tunnel
                     </button>
+                    <button type="button" class="term-tunnel-btn small" id="btnWaModalCameraScan" style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: #10b981;" title="Buka Kamera untuk scan QR dari layar desktop">
+                      <i class="fa-solid fa-camera"></i> Scan dari Layar Lain
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2811,25 +2819,53 @@
                 Sinkron Cepat HP
               </span>
             </div>
-            <div class="term-tunnel-qr-wrap" style="align-items: center;">
-              <div class="term-tunnel-qr-box" id="waMobileQrContainer" style="width: 140px; height: 140px; min-width: 140px; background: #fff; padding: 6px; border-radius: 8px;">
-                <img id="waMobileLinkQrImg" src="" alt="QR Code Handphone" style="width: 100%; height: 100%; object-fit: contain; display: none;">
-                <div id="waMobileQrPlaceholder" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #64748b; font-size: 0.75rem; text-align: center;">
-                  <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.5rem; margin-bottom: 6px;"></i>
-                  <span>Membuat QR Ponsel...</span>
-                </div>
+
+            <!-- STATE A: Form Buat PIN terlebih dahulu jika belum ada PIN -->
+            <div id="waMobilePinSetupPane" style="background: rgba(15, 23, 42, 0.95); border: 1px dashed rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 12px; margin-bottom: 6px;">
+              <div style="display: flex; align-items: center; gap: 8px; color: #f59e0b; font-size: 0.85rem; font-weight: 600; margin-bottom: 6px;">
+                <i class="fa-solid fa-lock"></i> Buat PIN Pengaman untuk Mendapatkan QR Handphone
               </div>
-              <div class="term-tunnel-qr-desc">
-                <p style="font-size: 0.8rem; line-height: 1.45; margin-bottom: 8px; color: var(--text-muted);">
-                  Pindai QR ini dengan <b>kamera ponsel Anda</b> untuk langsung membuka dan menyinkronkan chat WhatsApp ini di HP tanpa perlu scan ulang WhatsApp Web!
-                </p>
-                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                  <button type="button" class="term-tunnel-btn small" id="btnCopyWaMobileLink" style="background: rgba(56, 189, 248, 0.15); border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;">
-                    <i class="fa-solid fa-copy"></i> Salin Tautan HP
-                  </button>
-                  <button type="button" class="term-tunnel-btn small" id="btnRefreshWaMobileQr">
-                    <i class="fa-solid fa-rotate-right"></i> Refresh QR HP
-                  </button>
+              <p style="font-size: 0.78rem; line-height: 1.45; color: var(--text-muted); margin-bottom: 10px;">
+                Demi keamanan privasi Anda, buat PIN (4-6 digit) terlebih dahulu. Kode QR sinkronisasi hanya akan diterbitkan setelah PIN dibuat, sehingga chat WhatsApp di desktop tidak bisa disinkronkan oleh pihak lain.
+              </p>
+              <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <input type="password" id="inputWaCreateMobilePin" class="term-tunnel-input" maxlength="6" placeholder="Buat PIN 4-6 Digit..." style="width: 170px; font-family: monospace; letter-spacing: 3px; font-size: 0.9rem; text-align: center;" autocomplete="off">
+                <button type="button" class="term-tunnel-btn primary" id="btnCreatePinAndGetQr" style="background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.5); color: #34d399; font-weight: 600;">
+                  <i class="fa-solid fa-shield-halved"></i> Simpan PIN & Terbitkan QR
+                </button>
+              </div>
+            </div>
+
+            <!-- STATE B: Tampilan QR Code Aktif setelah PIN dibuat -->
+            <div id="waMobileQrActivePane" style="display: none;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding: 5px 10px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 6px;">
+                <span style="font-size: 0.76rem; color: #34d399; display: flex; align-items: center; gap: 6px;">
+                  <i class="fa-solid fa-shield-check"></i> Terlindungi PIN: <b id="waMobileActivePinDisplay" style="font-family: monospace; letter-spacing: 2px;">••••••</b>
+                </span>
+                <button type="button" class="term-tunnel-btn small" id="btnChangeMobilePin" style="padding: 2px 8px; font-size: 0.7rem; border-color: rgba(255,255,255,0.15); color: var(--text-muted);">
+                  <i class="fa-solid fa-pen"></i> Ganti PIN
+                </button>
+              </div>
+              <div class="term-tunnel-qr-wrap" style="align-items: center;">
+                <div class="term-tunnel-qr-box" id="waMobileQrContainer" style="width: 140px; height: 140px; min-width: 140px; background: #fff; padding: 6px; border-radius: 8px;">
+                  <img id="waMobileLinkQrImg" src="" alt="QR Code Handphone" style="width: 100%; height: 100%; object-fit: contain; display: none;">
+                  <div id="waMobileQrPlaceholder" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #64748b; font-size: 0.75rem; text-align: center;">
+                    <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.5rem; margin-bottom: 6px;"></i>
+                    <span>Membuat QR Ponsel...</span>
+                  </div>
+                </div>
+                <div class="term-tunnel-qr-desc">
+                  <p style="font-size: 0.8rem; line-height: 1.45; margin-bottom: 8px; color: var(--text-muted);">
+                    Buka ZOZ Router di Handphone, lalu ketuk <b>tombol kamera</b> (atau kamera HP) untuk memindai QR ini. Akun langsung tersinkron tanpa scan ulang WhatsApp Web!
+                  </p>
+                  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button type="button" class="term-tunnel-btn small" id="btnCopyWaMobileLink" style="background: rgba(56, 189, 248, 0.15); border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;">
+                      <i class="fa-solid fa-copy"></i> Salin Tautan HP
+                    </button>
+                    <button type="button" class="term-tunnel-btn small" id="btnRefreshWaMobileQr">
+                      <i class="fa-solid fa-rotate-right"></i> Refresh QR HP
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2918,8 +2954,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261023_v444" defer></script>
+  <script src="text-safety.js?v=20261023_v445" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261023_v444" defer></script>
+  <script src="app.js?v=20261023_v445" defer></script>
 </body>
 </html>
