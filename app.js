@@ -34647,7 +34647,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://bomb-assess-ira-brings.trycloudflare.com',
+    activeTunnelUrl: 'https://tolerance-open-glory-rest.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -34922,7 +34922,7 @@ Aturan:
     isDeadTunnelUrl(u) {
       if (!u) return true;
       const s = String(u).toLowerCase();
-      if (s.includes('.trycloudflare.com') && !s.includes('bomb-assess-ira-brings')) {
+      if (s.includes('.trycloudflare.com') && !s.includes('tolerance-open-glory-rest')) {
         return true;
       }
       return false;
@@ -35529,6 +35529,18 @@ Aturan:
     },
 
     async fetchContacts(notify = false) {
+      if (!this.status || !this.status.connected) {
+        this.contacts = [];
+        this.activeContact = null;
+        if (els.waContactCountDisplay) {
+          els.waContactCountDisplay.textContent = '0 Kontak';
+        }
+        if (STATE.chatMode === 'whatsapp') {
+          this.renderSidebarWaChats();
+          this.renderEmptyWaState();
+        }
+        return;
+      }
       try {
         const q = `?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
         const res = await this.waFetch('/api/wa/contacts' + q, { headers: this.getAuthHeaders() }, 2);
@@ -35594,6 +35606,14 @@ Aturan:
         this.fetchMobileLinkQr();
         this.fetchConnectedDevices();
       } else {
+        this.contacts = [];
+        this.activeContact = null;
+        this.updateContactChipUI();
+        if (STATE.chatMode === 'whatsapp') {
+          this.renderSidebarWaChats();
+          this.renderEmptyWaState();
+        }
+        if (els.waContactCountDisplay) els.waContactCountDisplay.textContent = '0 Kontak';
         if (els.waConnectedCard) els.waConnectedCard.style.display = 'none';
         if (els.waMobileLinkCard) els.waMobileLinkCard.style.display = 'none';
         if (els.waConnectedDevicesCard) els.waConnectedDevicesCard.style.display = 'none';
@@ -35711,6 +35731,13 @@ Aturan:
     },
 
     async disconnectWhatsApp() {
+      this.contacts = [];
+      this.activeContact = null;
+      this.updateContactChipUI();
+      if (STATE.chatMode === 'whatsapp') {
+        this.renderSidebarWaChats();
+        this.renderEmptyWaState();
+      }
       try {
         const res = await this.waFetch('/api/wa/disconnect', {
           method: 'POST',

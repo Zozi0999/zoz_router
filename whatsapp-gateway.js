@@ -261,6 +261,14 @@ class WhatsAppGateway {
   }
 
   loadPersistedData() {
+    if (!this.hasStoredSession()) {
+      this.contacts.clear();
+      this.messages.clear();
+      try { if (fs.existsSync(this.contactsFile)) fs.unlinkSync(this.contactsFile); } catch (_) {}
+      try { if (fs.existsSync(this.messagesFile)) fs.unlinkSync(this.messagesFile); } catch (_) {}
+      return;
+    }
+
     try {
       if (fs.existsSync(this.contactsFile)) {
         const raw = JSON.parse(fs.readFileSync(this.contactsFile, 'utf8'));
@@ -428,9 +436,6 @@ class WhatsAppGateway {
         } catch (_) {}
         this.sock = null;
       }
-      if (!isStreamRestart && !this.hasStoredSession()) {
-        this.cleanupAuthDir();
-      }
     }
 
     this.isExplicitDisconnect = false;
@@ -459,8 +464,10 @@ class WhatsAppGateway {
           keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
         },
         logger: pino({ level: 'silent' }),
-        browser: ['Hermes Agent', 'Chrome', '120.0'],
-        syncFullHistory: true,
+        browser: Browsers.windows('Chrome'),
+        syncFullHistory: false,
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 60000,
         markOnlineOnConnect: false,
         getMessage: async () => ({ conversation: '' }),
       });
@@ -553,9 +560,12 @@ class WhatsAppGateway {
             this.status.qr = null;
             this.status.phone = null;
             this.status.user = null;
-            this.cleanupAuthDir();
-          } else if (!isStreamRestart && !this.hasStoredSession()) {
-            this.cleanupAuthDir();
+            this.contacts.clear();
+            this.messages.clear();
+            try { if (fs.existsSync(this.contactsFile)) fs.unlinkSync(this.contactsFile); } catch (_) {}
+            try { if (fs.existsSync(this.messagesFile)) fs.unlinkSync(this.messagesFile); } catch (_) {}
+            this.cleanupAuthDir(true);
+            this.broadcast('contacts', []);
           }
 
           this.broadcast('status', this.getStatus());
@@ -861,23 +871,28 @@ class WhatsAppGateway {
     this.status.updatedAt = Date.now();
 
     if (logout) {
-      this.cleanupAuthDir();
+      this.contacts.clear();
+      this.messages.clear();
+      try { if (fs.existsSync(this.contactsFile)) fs.unlinkSync(this.contactsFile); } catch (_) {}
+      try { if (fs.existsSync(this.messagesFile)) fs.unlinkSync(this.messagesFile); } catch (_) {}
+      this.cleanupAuthDir(true);
+      this.broadcast('contacts', []);
     }
 
     this.broadcast('status', this.getStatus());
     return { success: true };
   }
 
-  cleanupAuthDir() {
+  cleanupAuthDir(purgeAll = false) {
     try {
       if (fs.existsSync(this.authDir)) {
         const files = fs.readdirSync(this.authDir);
         for (const file of files) {
-          if (!file.startsWith('lid-mapping-')) {
+          if (purgeAll || !file.startsWith('lid-mapping-')) {
             fs.rmSync(path.join(this.authDir, file), { force: true, recursive: true });
           }
         }
-        console.log('[WA-Gateway] Sesi auth berhasil dibersihkan (LID mappings dipertahankan).');
+        console.log(`[WA-Gateway] Sesi auth berhasil dibersihkan${purgeAll ? ' (seluruh cache dibersihkan)' : ' (LID mappings dipertahankan)'}.`);
       }
     } catch (e) {
       console.warn('[WA-Gateway] Gagal membersihkan authDir:', e.message);
@@ -1008,6 +1023,7 @@ class WhatsAppGateway {
   }
 
   getContacts() {
+    if (!this.status.connected) return [];
     const list = Array.from(this.contacts.values()).filter(c => this.isRealContact(c));
 
     const formatCleanPhone = (num) => {
@@ -1053,6 +1069,7 @@ class WhatsAppGateway {
   }
 
   getMessages(jid) {
+    if (!this.status.connected) return [];
     if (!jid) return [];
     if (jid.includes('6281234567890')) return [];
     let targetJid = jid;
