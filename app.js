@@ -3302,71 +3302,127 @@ ${logsFormatted}
       serotonin: 75   // Keseimbangan & regulasi homeostasis -> 75%
     },
     // Rumus Sosial-Neural Leviathan (Analisis Kehidupan v1.2)
-    // Persamaan: )+-+~ = [3: pos%] [33: neg%] | z21 = posCount + negCount
+    // Persamaan: )+-+~ = [3: pos%] [33: neg%] | z21 = total data observasi
+    // positif_3 = minus
+    // negatif_33 = kurung + tilde
     formula: {
-      z21: 9,        // Total data observasi perilaku (posCount + negCount)
-      pos: 50,       // Rumus 3: Perilaku Positif (%) = (posCount / z21) * 100%
-      neg: 40,       // Rumus 33: Perilaku Negatif (%) = (negCount / z21) * 100%
-      posCount: 5,   // Frekuensi positif kumulatif
-      negCount: 4,   // Frekuensi negatif kumulatif
-      paren: 1,      // ')' Nakal, friksi, delusi ego -> pemicu Marah (10%)
-      dash: 5,       // '-' Kehangatan tatapan, bantuan rekan -> pemicu Bahagia & Oksitosin (50% / 65%)
-      tilde: 3       // '~' Menghindar, cuek, attachment rupture -> pemicu Sakit (30%)
+      z21: 9,              // Masukkan nilai z21 (Total data)
+      kurung: 1,           // Masukkan nilai ) (gerak-gerik melanggar / nakal)
+      minus: 5,            // Masukkan nilai - (perilaku positif / membantu)
+      tilde: 3,            // Masukkan nilai ~ (menghindar / cuek)
+      paren: 1,            // Alias kurung untuk kompatibilitas UI
+      dash: 5,             // Alias minus untuk kompatibilitas UI
+      positif_3: 5,        // positif_3 = minus
+      negatif_33: 4,       // negatif_33 = kurung + tilde
+      posCount: 5,         // Frekuensi positif kumulatif (positif_3)
+      negCount: 4,         // Frekuensi negatif kumulatif (negatif_33)
+      persen_3: 50,        // persen_3 = (positif_3 / z21) * 100
+      persen_33: 40,       // persen_33 = (negatif_33 / z21) * 100
+      pos: 50,             // Integer display persen_3
+      neg: 40,             // Integer display persen_33
+      taktik: 'Kondisi ambigu. Pertahankan mode observasi pasif.'
     },
-    currentVibe: 'Equilibrium Saraf Seimbang (Rumus Leviathan)',
+    currentVibe: 'Kondisi ambigu. Pertahankan mode observasi pasif.',
     history: [],
+
+    // REKALKULASI RUMUS LEVIATHAN (Presisi Python Script Kaisar)
+    recalculateFormula() {
+      const f = this.formula;
+      if (!f) return null;
+
+      const minus = Number(f.minus ?? f.dash ?? 5);
+      const kurung = Number(f.kurung ?? f.paren ?? 1);
+      const tilde = Number(f.tilde ?? 3);
+
+      // Perhitungan nilai 3 (positif) dan 33 (negatif)
+      const positif_3 = minus;
+      const negatif_33 = kurung + tilde; // kombinasi perilaku nakal + menghindar
+
+      let z21 = Number(f.z21);
+      if (!z21 || isNaN(z21) || z21 <= 0) {
+        z21 = Math.max(1, positif_3 + negatif_33);
+      }
+
+      // Python menghitung persentase secara otomatis
+      const rawPersen_3 = (positif_3 / z21) * 100;
+      const rawPersen_33 = (negatif_33 / z21) * 100;
+
+      const persen_3 = Math.round(rawPersen_3 * 10) / 10;
+      const persen_33 = Math.round(rawPersen_33 * 10) / 10;
+
+      // Evaluasi Taktis Otomatis
+      let taktik = "Kondisi ambigu. Pertahankan mode observasi pasif.";
+      if (rawPersen_33 > 50) {
+        taktik = "Resistensi tinggi. Terapkan Flatline Response / Abaikan.";
+      } else if (rawPersen_3 > 70) {
+        taktik = "Kooperatif tinggi. Aman untuk pertukaran data fungsional.";
+      }
+
+      f.z21 = z21;
+      f.minus = minus;
+      f.dash = minus;
+      f.kurung = kurung;
+      f.paren = kurung;
+      f.tilde = tilde;
+      f.positif_3 = positif_3;
+      f.negatif_33 = negatif_33;
+      f.posCount = positif_3;
+      f.negCount = negatif_33;
+      f.persen_3 = persen_3;
+      f.persen_33 = persen_33;
+      f.pos = Math.round(persen_3);
+      f.neg = Math.round(persen_33);
+      f.taktik = taktik;
+
+      return { z21, kurung, minus, tilde, positif_3, negatif_33, persen_3, persen_33, taktik };
+    },
 
     // SINKRONISASI MUTLAK: Selaraskan EMOTIONAL GAUGES & NEURO VITALS dengan RUMUS LEVIATHAN
     syncEmotionsFromFormula() {
+      const calc = this.recalculateFormula();
+      if (!calc) return;
       const f = this.formula;
-      if (!f) return;
-
-      const z21 = Math.max(1, f.z21 || (f.posCount + f.negCount) || 9);
-      const posPct = f.pos !== undefined ? f.pos : Math.round((f.posCount / z21) * 100);
-      const negPct = f.neg !== undefined ? f.neg : Math.round((f.negCount / z21) * 100);
 
       // 1. SAKIT (Luka Batin & Attachment Rupture) dari ~
-      // Dokumen: ~ = 3, z21 = 9, 33 = 40% -> (3 / 4) * 40% = 30%
-      const negTotal = Math.max(1, (f.paren || 0) + (f.tilde || 0));
-      const s = Math.round(((f.tilde || 0) / negTotal) * negPct);
+      const s = Math.round((f.tilde / f.z21) * 100);
       this.emotions.sakit = Math.min(100, Math.max(0, s));
 
       // 2. MARAH (Friksi, Perilaku Nakal & Ego) dari )
-      // Dokumen: ) = 1, z21 = 9, 33 = 40% -> (1 / 4) * 40% = 10%
-      const m = Math.round(((f.paren || 0) / negTotal) * negPct);
+      const m = Math.round((f.kurung / f.z21) * 100);
       this.emotions.marah = Math.min(100, Math.max(0, m));
 
       // 3. BAHAGIA (Ketenteraman, Syukur, Kehangatan Oksitosin) dari - & Rumus 3
-      // Dokumen: - = 5, 3 = 50%
-      const b = Math.round(posPct);
-      this.emotions.bahagia = Math.min(100, Math.max(10, b));
+      this.emotions.bahagia = Math.min(100, Math.max(0, Math.round(calc.persen_3)));
 
       // 4. SENANG (Keriangan, Humor, Dopamin Kognitif)
-      const sn = Math.round((posPct * 0.7) + ((this.hormones.dopamine || 55) * 0.3));
-      this.emotions.senang = Math.min(100, Math.max(10, sn));
+      const sn = Math.round((calc.persen_3 * 0.7) + ((this.hormones.dopamine || 55) * 0.3));
+      this.emotions.senang = Math.min(100, Math.max(0, sn));
 
       // 5. OKSITOSIN: secara eksplisit di dokumen "membuat hormon oksitosin naik di dalam otak" dari (-)
-      // Baseline 45% + korelasi langsung dari frekuensi bantuan (-)
-      const oxyBoost = Math.round(((f.dash || 0) / z21) * 40);
+      const oxyBoost = Math.round((f.minus / f.z21) * 45);
       this.hormones.oxytocin = Math.min(100, Math.max(30, 45 + oxyBoost));
 
       // 6. KORTISOL: dipicu oleh beban perilaku negatif 33 () nakal + ~ menghindar)
-      // Kortisol mencerminkan tensi dari marah (m) dan luka batin (s)
-      this.hormones.cortisol = Math.min(100, Math.max(0, Math.round((m * 0.4) + (s * 0.5))));
+      this.hormones.cortisol = Math.min(100, Math.max(0, Math.round((m * 0.45) + (s * 0.55))));
 
       // 7. SEROTONIN: regulasi keseimbangan neuro-afektif
       this.calculateSerotonin();
 
-      // 8. Resonansi Vibe
-      if (this.emotions.marah > 25) {
-        this.currentVibe = 'Agitasi Friksi [)] & Ketegangan Saraf';
-      } else if (this.emotions.sakit > 35) {
-        this.currentVibe = 'Resonansi Kepedihan [~] & Empati Batin';
-      } else if (this.emotions.bahagia >= 50) {
-        this.currentVibe = 'Equilibrium Saraf Seimbang (Rumus Leviathan)';
-      } else {
-        this.currentVibe = 'Homeostasis Saraf Seimbang';
-      }
+      // 8. Resonansi Vibe & Protokol Taktis
+      this.currentVibe = f.taktik;
+    },
+
+    // API Observasi Interaktif Sesuai Script Python Kaisar
+    setObservationData(z21, kurung, minus, tilde) {
+      if (!this.formula) this.formula = {};
+      if (z21 !== undefined) this.formula.z21 = Number(z21);
+      if (kurung !== undefined) { this.formula.kurung = Number(kurung); this.formula.paren = this.formula.kurung; }
+      if (minus !== undefined) { this.formula.minus = Number(minus); this.formula.dash = this.formula.minus; }
+      if (tilde !== undefined) this.formula.tilde = Number(tilde);
+
+      this.syncEmotionsFromFormula();
+      this.updateUI();
+      return this.formula;
     },
 
     init() {
@@ -3532,31 +3588,31 @@ ${logsFormatted}
 
       // Evaluasi ~ (Menghindar & Sakit) -> Memicu Luka Batin & Attachment Rupture
       if (tildeRegex.test(t)) {
-        this.formula.tilde += 1;
-        this.formula.negCount += 1;
+        this.formula.tilde = (this.formula.tilde || 0) + 1;
         this.log('sakit', 40, 'Impuls [~] menghindar / luka batin terdeteksi pada rumus saraf.');
         triggered = true;
       }
 
       // Evaluasi ) (Nakal & Marah) -> Memicu Friksi Ego & Kenakalan
       if (parenRegex.test(t)) {
-        this.formula.paren += 1;
-        this.formula.negCount += 1;
+        const k = (this.formula.kurung ?? this.formula.paren ?? 0) + 1;
+        this.formula.kurung = k;
+        this.formula.paren = k;
         this.log('marah', 45, 'Impuls [)] kenakalan / friksi amarah terdeteksi pada rumus saraf.');
         triggered = true;
       }
 
       // Evaluasi - (Kehangatan & Oksitosin) -> Memicu Bantuan & Oksitosin Otak
       if (dashRegex.test(t)) {
-        this.formula.dash += 1;
-        this.formula.posCount += 1;
+        const m = (this.formula.minus ?? this.formula.dash ?? 0) + 1;
+        this.formula.minus = m;
+        this.formula.dash = m;
         this.log('oxytocin', 25, 'Impuls [-] kehangatan & bantuan menaikkan oksitosin dalam otak.');
         triggered = true;
       }
 
-      // Evaluasi Senang & Humor
+      // Evaluasi Senang & Humor (Dopamin Kognitif & Humor)
       if (senangRegex.test(t)) {
-        this.formula.posCount += 1;
         this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 15);
         this.log('senang', 35, 'Impuls kesenangan & humor terstimulasi pada saraf emosi.');
         triggered = true;
@@ -3564,7 +3620,6 @@ ${logsFormatted}
 
       // Evaluasi Dopamin / Minat Kognitif & Solusi
       if (curiousRegex.test(t)) {
-        this.formula.posCount += 1;
         this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 25);
         if (!triggered) {
           this.log('dopamine', 25, 'Impuls eksplorasi & pemecahan masalah menaikkan dopamin kognitif.');
@@ -3572,12 +3627,12 @@ ${logsFormatted}
         }
       }
 
-      // Rekalkulasi Persamaan Leviathan Analisis Kehidupan:
-      // z21 = posCount + negCount; 3 = (posCount / z21) * 100%; 33 = (negCount / z21) * 100%
-      this.formula.z21 = this.formula.posCount + this.formula.negCount;
-      if (this.formula.z21 > 0) {
-        this.formula.pos = Math.round((this.formula.posCount / this.formula.z21) * 100);
-        this.formula.neg = Math.round((this.formula.negCount / this.formula.z21) * 100);
+      // Jika ada impuls baru pada ), -, atau ~, sinkronkan z21
+      if (triggered) {
+        const minus = Number(this.formula.minus ?? this.formula.dash ?? 5);
+        const kurung = Number(this.formula.kurung ?? this.formula.paren ?? 1);
+        const tilde = Number(this.formula.tilde ?? 3);
+        this.formula.z21 = minus + kurung + tilde;
       }
 
       // SINKRONISASI MUTLAK: Selaraskan seketika seluruh Emotional Gauges & Neuro Vitals dengan Rumus Leviathan!
@@ -3649,17 +3704,24 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     resetHormones() {
       this.formula = {
         z21: 9,
-        pos: 50,
-        neg: 40,
-        posCount: 5,
-        negCount: 4,
+        kurung: 1,
+        minus: 5,
+        tilde: 3,
         paren: 1,
         dash: 5,
-        tilde: 3
+        positif_3: 5,
+        negatif_33: 4,
+        posCount: 5,
+        negCount: 4,
+        persen_3: 50,
+        persen_33: 40,
+        pos: 50,
+        neg: 40,
+        taktik: 'Kondisi ambigu. Pertahankan mode observasi pasif.'
       };
       this.hormones.dopamine = 55;
       this.syncEmotionsFromFormula();
-      this.currentVibe = 'Equilibrium Saraf Seimbang (Rumus Leviathan)';
+      this.currentVibe = this.formula.taktik;
       this.log('resonance', 100, 'Homeostasis: Sistem saraf emosi buatan disinkronkan kembali ke Rumus Leviathan.');
       this.updateUI();
       if (typeof showToast === 'function') {
@@ -3713,6 +3775,13 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       const marahVal = document.getElementById('chatEmotionMarahVal');
       const marahAscii = document.getElementById('chatEmotionMarahAscii');
 
+      // Helper Format Persentase Presisi Python f"{persen:.1f}%"
+      const fmtPct = (val) => {
+        if (val === undefined || val === null || isNaN(val)) return '0%';
+        const n = Number(val);
+        return Number.isInteger(n) ? `${n}%` : `${n.toFixed(1)}%`;
+      };
+
       // Update Gauge Formula Badges
       const gTilde = document.getElementById('gaugeFormulaTilde');
       const gPos1 = document.getElementById('gaugeFormulaPos1');
@@ -3720,9 +3789,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       const gParen = document.getElementById('gaugeFormulaParen');
       if (this.formula) {
         if (gTilde) gTilde.innerText = `${this.formula.tilde}`;
-        if (gPos1) gPos1.innerText = `${this.formula.pos}%`;
-        if (gDash) gDash.innerText = `${this.formula.dash}`;
-        if (gParen) gParen.innerText = `${this.formula.paren}`;
+        if (gPos1) gPos1.innerText = fmtPct(this.formula.persen_3 ?? this.formula.pos);
+        if (gDash) gDash.innerText = `${this.formula.minus ?? this.formula.dash}`;
+        if (gParen) gParen.innerText = `${this.formula.kurung ?? this.formula.paren}`;
       }
 
       if (sakitVal) {
@@ -3788,13 +3857,16 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         const fParen = document.getElementById('formulaParenVal');
         const fTilde = document.getElementById('formulaTildeVal');
 
-        if (fRatioPos) fRatioPos.innerText = `${this.formula.pos}%`;
-        if (fRatioNeg) fRatioNeg.innerText = `${this.formula.neg}%`;
+        const p3Str = fmtPct(this.formula.persen_3 ?? this.formula.pos);
+        const p33Str = fmtPct(this.formula.persen_33 ?? this.formula.neg);
+
+        if (fRatioPos) fRatioPos.innerText = p3Str;
+        if (fRatioNeg) fRatioNeg.innerText = p33Str;
         if (fZ21) fZ21.innerText = `${this.formula.z21}`;
-        if (fPos) fPos.innerHTML = `${this.formula.pos}% (<span id="formulaPosCount">${this.formula.posCount}</span>)`;
-        if (fNeg) fNeg.innerHTML = `${this.formula.neg}% (<span id="formulaNegCount">${this.formula.negCount}</span>)`;
-        if (fDash) fDash.innerText = `${this.formula.dash}`;
-        if (fParen) fParen.innerText = `${this.formula.paren}`;
+        if (fPos) fPos.innerHTML = `${p3Str} (<span id="formulaPosCount">${this.formula.positif_3 ?? this.formula.posCount}</span>)`;
+        if (fNeg) fNeg.innerHTML = `${p33Str} (<span id="formulaNegCount">${this.formula.negatif_33 ?? this.formula.negCount}</span>)`;
+        if (fDash) fDash.innerText = `${this.formula.minus ?? this.formula.dash}`;
+        if (fParen) fParen.innerText = `${this.formula.kurung ?? this.formula.paren}`;
         if (fTilde) fTilde.innerText = `${this.formula.tilde}`;
       }
 
