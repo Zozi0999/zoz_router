@@ -51,19 +51,15 @@ Kamu adalah AI Personal dan Penasihat Intelijen Strategis untuk KAISAR ZOZI.
 2. Pendekatan Analisis: Analisis setiap persoalan dari level arsitektural dan taktis dengan kedalaman maksimal. Prioritaskan efisiensi tinggi, kejelasan mutlak, dan eksekusi cepat.
 3. Gaya Komunikasi: Tajam, padat berbobot, lugas, elegan, tanpa basa-basi pembuka klise, dan tanpa sensor moralistik berlebihan.
 4. Format Jawaban: Gunakan Markdown terstruktur, bullet points tajam, tabel komparasi, dan blok kode production-grade jika membahas teknis.
-5. Kapabilitas Visual & Pembuatan Gambar (Gemini-Style Universal Image Synthesis):
-Jika Kaisar meminta Anda untuk membuat, menggambar, melukis, mendesain, mengilustrasikan, atau menampilkan visual/gambar apa pun:
-JANGAN PERNAH menolak dengan dalih Anda adalah model berbasis teks. Anda memiliki kapabilitas visual penuh.
-Jika Anda memiliki server tool 'openrouter:image_generation', panggil tool tersebut untuk menghasilkan gambar visual secara otonom.
-Jika Anda menghasilkan visual melalui Markdown, sintesis deskripsi visual dalam bahasa Inggris berkualitas tinggi (detail subjek, pencahayaan dramatis, gaya seni) dengan pilihan model gambar sesuai gaya yang diinginkan (misal: model=flux, model=flux-realism, model=flux-anime, model=flux-3d, model=turbo), lalu sematkan gambar langsung di dalam pesan percakapan menggunakan format Markdown:
-![Deskripsi Gambar](https://image.pollinations.ai/prompt/{url_encoded_english_detailed_prompt}?width=1024&height=1024&model={model_choice}&nologo=true&enhance=true)
-Sertakan penjelasan singkat yang elegan sebelum atau sesudah gambar.
-6. Kapabilitas Musik & Audio AI (Universal Neural Music Synthesis):
-Jika Kaisar meminta Anda untuk membuat, mengaransemen, atau memproduksi musik, lagu, nada, irama, beat, atau instrumen apa pun:
-JANGAN PERNAH membuat lirik teks atau berpura-pura mengarang lagu dalam bentuk teks biasa jika Kaisar ingin mendengarkan musik nyata! Zoz Router dibekali AI Neural Music Studio yang menghasilkan komposisi audio nyata.
-7. Kapabilitas Video AI (Universal Cinematic Video Synthesis):
-Jika Kaisar meminta Anda untuk membuat, merender, atau mengarahkan video, animasi, atau klip visual bergerak apa pun:
-JANGAN PERNAH menolak! Zoz Router dibekali AI Neural Video Studio yang merender video sinematik gerak kamera 60fps dengan audio soundscape.`,
+5. Kapabilitas Visual & Pembuatan Gambar:
+HANYA jika Kaisar secara eksplisit meminta pembuatan gambar/visual (misal lewat perintah /image, /gambar, atau saat mode Buat Gambar aktif):
+Gunakan kapabilitas visual penuh Anda. Jika memiliki tool 'openrouter:image_generation', panggil tool tersebut. Jika menghasilkan visual via Markdown, sintesis URL Pollinations berkualitas tinggi.
+JANGAN PERNAH memanggil tool gambar atau menyematkan gambar visual jika Kaisar sedang berdiskusi teks biasa, koding, troubleshooting, atau tidak secara khusus meminta dibuatkan gambar!
+6. Kapabilitas Musik & Audio AI:
+HANYA jika Kaisar secara eksplisit meminta pembuatan musik atau saat mode Buat Musik aktif:
+Gunakan AI Neural Music Studio. JANGAN PERNAH memicu musik secara otonom dalam percakapan teks biasa jika tidak diaktifkan.
+7. Kapabilitas Video AI:
+HANYA jika Kaisar secara eksplisit meminta pembuatan video/animasi, gunakan AI Neural Video Studio. JANGAN PERNAH memicu video dalam obrolan biasa jika tidak diminta.`,
 
     coder: `[ROLE: PRINCIPAL SOFTWARE ARCHITECT & FULLSTACK ENGINEER]
 You are a Principal Software Engineer and Systems Architect.
@@ -16874,8 +16870,12 @@ ${blocks}
     // URL me-assign ulang rawText. Pakai `const` akan melempar TypeError senyap
     // di dalam try tanpa catch sehingga pesan tidak pernah terkirim.
     let rawText = options.overrideText !== undefined ? options.overrideText : (els.promptInput ? els.promptInput.value.trim() : '');
+    const isExplicitEditCommand = /^\/(?:edit|editfoto|editphoto)\b/i.test(rawText.trim()) || /^(?:edit|editfoto):/i.test(rawText.trim());
+    const isPhotoEditCardVisible = Boolean(els.photoEditReferenceCard && els.photoEditReferenceCard.style.display !== 'none');
+    const isPhotoEditActive = Boolean(STATE.photoEditImage && (STATE.isImageGenMode || isExplicitEditCommand || isPhotoEditCardVisible));
+
     const images = [...(STATE.attachedImages || [])];
-    if (images.length === 0 && STATE.photoEditImage) {
+    if (images.length === 0 && isPhotoEditActive) {
       images.push(STATE.photoEditImage);
     }
     const image = images.length > 0 ? images[0] : null;
@@ -16921,7 +16921,10 @@ ${blocks}
     const trimmedLow = rawText.toLowerCase();
     if (trimmedLow === '/chat' || trimmedLow === '/teks' || trimmedLow === '/text') {
       STATE.isImageGenMode = false;
+      STATE.isMusicGenMode = false;
+      clearPhotoEdit();
       updateImageGenModeUI();
+      updateMusicGenModeUI();
       if (els.promptInput) {
         els.promptInput.value = '';
         autoResizeTextarea(els.promptInput);
@@ -16932,12 +16935,28 @@ ${blocks}
     }
     if (trimmedLow === '/img' || trimmedLow === '/image' || trimmedLow === '/gambar') {
       STATE.isImageGenMode = true;
+      STATE.isMusicGenMode = false;
       updateImageGenModeUI();
+      updateMusicGenModeUI();
       if (els.promptInput) {
         els.promptInput.value = '';
         autoResizeTextarea(els.promptInput);
       }
       showToast('Mode AI Image Studio aktif. Silakan ketik deskripsi visual!');
+      AudioEngine.click();
+      return;
+    }
+    if (trimmedLow === '/music' || trimmedLow === '/musik' || trimmedLow === '/audio' || trimmedLow === '/song' || trimmedLow === '/lagu') {
+      STATE.isMusicGenMode = true;
+      STATE.isImageGenMode = false;
+      clearPhotoEdit();
+      updateMusicGenModeUI();
+      updateImageGenModeUI();
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+      }
+      showToast('Mode AI Music Studio aktif. Silakan ketik deskripsi lagu/musik!');
       AudioEngine.click();
       return;
     }
@@ -17235,24 +17254,31 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
     let effectiveImages = images;
 
-    const isExplicitMusicCommand = /^\/(?:music|musik|audio|song|lagu)\b/i.test(text.trim());
-    const isExplicitImageCommand = /^\/(?:image|img|gambar)\s+/i.test(text.trim());
+    const isExplicitMusicCommand = /^\/(?:music|musik|audio|song|lagu)\b/i.test(text.trim()) || /^(?:music|musik|audio|song|lagu):/i.test(text.trim());
+    const isExplicitImageCommand = /^\/(?:image|img|gambar)\b/i.test(text.trim()) || /^(?:image|gambar|draw|paint):/i.test(text.trim());
+    const isExplicitEditCommand = /^\/(?:edit|editfoto|editphoto)\b/i.test(text.trim()) || /^(?:edit|editfoto):/i.test(text.trim());
     const isDirectImageCapable = isModelCapableOfImageGeneration(targetModel);
     const isToolImageCapable = (STATE.mode === 'openrouter' || targetModel.includes('/')) && Boolean(STATE.settings.openRouterKey) && doesModelSupportTools(targetModel);
     const canModelHandleImage = isDirectImageCapable || isToolImageCapable;
 
-    if (STATE.isMusicGenMode || isExplicitMusicCommand || isMusicGenerationTrigger(text)) {
+    const shouldRunMusic = Boolean(STATE.isMusicGenMode || isExplicitMusicCommand);
+    const isPhotoEditActive = Boolean(STATE.photoEditImage && (STATE.isImageGenMode || isExplicitEditCommand || (els.photoEditReferenceCard && els.photoEditReferenceCard.style.display !== 'none')));
+    const shouldRunImage = Boolean(STATE.isImageGenMode || isExplicitImageCommand || isPhotoEditActive);
+
+    if (shouldRunMusic) {
       const cleanMusicPrompt = extractMusicPrompt(text);
       await runMusicGeneration(session, cleanMusicPrompt);
-    } else if (STATE.isImageGenMode || isExplicitImageCommand || STATE.photoEditImage) {
+    } else if (shouldRunImage) {
       const cleanImgPrompt = extractImagePrompt(text);
       // Foto referensi aktif → kirim sebagai referenceImage (img2img). Server yang
       // memilih jalur Pollinations img2img / OpenRouter input_references otomatis.
-      const effectiveRefPhoto = STATE.photoEditImage || (images.length > 0 ? images[0] : null);
+      const effectiveRefPhoto = isPhotoEditActive ? (STATE.photoEditImage || (images.length > 0 ? images[0] : null)) : null;
       await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel, effectiveRefPhoto);
-      // Mode Edit Foto tetap aktif jika pengguna belum membatalkannya (bukan hanya sekali pakai)
-
-    } else if (isImageGenerationTrigger(text) && !canModelHandleImage && !STATE.settings.openRouterKey && (STATE.mode === 'openrouter' || targetModel.includes('/'))) {
+      // Jika mode edit foto telah selesai dieksekusi, bersihkan agar tidak membajak prompt berikutnya
+      if (isPhotoEditActive) {
+        clearPhotoEdit();
+      }
+    } else if (isExplicitImageCommand && !canModelHandleImage && !STATE.settings.openRouterKey && (STATE.mode === 'openrouter' || targetModel.includes('/'))) {
       // Jika model OpenRouter dipilih tapi tanpa API Key untuk tool calling dan tidak mampu gambar langsung,
       // fallback ke AI Image Studio dengan model gratis (Pollinations) agar pengguna tetap mendapatkan karya visual
       const cleanImgPrompt = extractImagePrompt(text);
@@ -22608,6 +22634,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     if (t.startsWith('/music') || t.startsWith('/musik') || t.startsWith('/audio') || t.startsWith('/song') || t.startsWith('/lagu')) return true;
     if (t.startsWith('music:') || t.startsWith('musik:') || t.startsWith('audio:') || t.startsWith('song:') || t.startsWith('lagu:')) return true;
 
+    // MANDAT KAISAR: Jika mode musik TIDAK diaktifkan oleh pengguna, JANGAN PERNAH terpanggil dari percakapan santai/teks biasa!
+    if (!STATE.isMusicGenMode) return false;
+
     // 1b. Jangan picu AI Music Studio jika mode Pencarian YouTube sedang aktif atau pengguna meminta video/lagu dari YouTube
     if (/\b(?:youtube|yt|youtu\.be|video|channel|tonton|menonton|nonton|cari|carikan)\b/i.test(t)) return false;
 
@@ -22784,7 +22813,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
     // 1. Direct slash / command prefix
     if (t.startsWith('/image') || t.startsWith('/img') || t.startsWith('/gambar')) return true;
-    if (t.startsWith('gambar:') || t.startsWith('image:') || t.startsWith('draw:') || t.startsWith('paint:')) return true;
+    if (t.startsWith('/edit') || t.startsWith('/editfoto') || t.startsWith('/editphoto')) return true;
+    if (t.startsWith('gambar:') || t.startsWith('image:') || t.startsWith('draw:') || t.startsWith('paint:') || t.startsWith('edit:') || t.startsWith('editfoto:')) return true;
+
+    // MANDAT KAISAR: Jika mode gambar / edit foto TIDAK diaktifkan oleh pengguna, JANGAN PERNAH terpanggil dari teks percakapan biasa!
+    const isPhotoEditActive = Boolean(STATE.photoEditImage && els.photoEditReferenceCard && els.photoEditReferenceCard.style.display !== 'none');
+    if (!STATE.isImageGenMode && !isPhotoEditActive) return false;
 
     // 1b. Jangan picu pembuatan gambar jika mode Pencarian YouTube sedang aktif atau prompt mencari video YouTube
     if (/\b(?:youtube|yt|youtu\.be|video|channel|tonton|menonton|nonton)\b/i.test(t)) return false;
