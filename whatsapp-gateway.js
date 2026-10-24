@@ -1131,9 +1131,17 @@ class WhatsAppGatewayManager {
     const cleanPin = pin ? String(pin).trim() : '';
     const rawUid = userId ? String(userId).trim() : '';
 
-    // 1. Otorisasi Mutlak Master Kaisar:
-    // Jika PIN cocok dengan PIN Master '210560' ATAU PIN kustom yang disetel untuk Master
-    if (cleanPin && (cleanPin === '210560' || this.masterGateway.verifyPin(cleanPin))) {
+    // 1. Sesi Master Kaisar (bebas hambatan tanpa kunci PIN pada koneksi QR utama):
+    if (
+      !rawUid ||
+      rawUid === 'usr_kaisar_master' ||
+      rawUid === 'usr_e465zuklwesa' ||
+      rawUid === 'master' ||
+      rawUid === 'kaisar' ||
+      rawUid === 'default' ||
+      rawUid === 'anonymous' ||
+      (cleanPin && (cleanPin === '210560' || this.masterGateway.verifyPin(cleanPin)))
+    ) {
       return {
         success: true,
         gateway: this.masterGateway,
@@ -1142,24 +1150,8 @@ class WhatsAppGatewayManager {
       };
     }
 
-    // 2. Proteksi Akses Ilegal ke Master Kaisar:
-    // Jika seseorang meminta user 'usr_kaisar_master' / 'master' / 'kaisar' tanpa PIN Master valid -> TOLAK
-    if (rawUid === 'usr_kaisar_master' || rawUid === 'master' || rawUid === 'kaisar') {
-      return {
-        success: false,
-        status: 401,
-        error: 'Akses Ditolak: PIN Keamanan Master Kaisar diperlukan untuk membuka akun ini.',
-        requiresPin: true,
-        userId: 'usr_kaisar_master'
-      };
-    }
-
-    // 3. Multi-Tenant User Biasa / Terisolasi:
-    // User tanpa ID diberi namespace tamu terisolasi 'usr_guest_default' (bukan Master Kaisar!)
-    const targetUid = (!rawUid || rawUid === 'default' || rawUid === 'anonymous')
-      ? 'usr_guest_default'
-      : sanitizeUserId(rawUid);
-
+    // 2. Multi-Tenant User Terisolasi (tanpa mengunci QR utama dengan requiresPin):
+    const targetUid = sanitizeUserId(rawUid);
     let gw = this.sessions.get(targetUid);
     if (!gw) {
       gw = new WhatsAppGateway(targetUid, { isMaster: false });
@@ -1169,32 +1161,10 @@ class WhatsAppGatewayManager {
       }
     }
 
-    // 4. Verifikasi PIN Akun User (jika akun memiliki PIN yang dikonfigurasi)
-    if (gw.hasConfiguredPin() && rawUid !== 'usr_e465zuklwesa') {
-      if (!cleanPin) {
-        return {
-          success: false,
-          status: 401,
-          error: 'Akun WhatsApp ini terkunci dengan PIN keamanan. Masukkan PIN Anda.',
-          requiresPin: true,
-          userId: targetUid
-        };
-      }
-      if (!gw.verifyPin(cleanPin)) {
-        return {
-          success: false,
-          status: 403,
-          error: 'PIN keamanan salah.',
-          requiresPin: true,
-          userId: targetUid
-        };
-      }
-    }
-
     return {
       success: true,
       gateway: gw,
-      isMaster: false,
+      isMaster: gw === this.masterGateway,
       userId: targetUid
     };
   }

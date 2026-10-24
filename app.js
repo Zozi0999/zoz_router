@@ -34657,29 +34657,11 @@ Aturan:
     maxSseAttempts: 3,
 
     getUserId() {
-      let uid = localStorage.getItem('zoz_wa_user_id') || localStorage.getItem('zoz_user_id');
-      if (!uid) {
-        if (typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-          uid = 'usr_kaisar_master';
-        } else {
-          uid = 'usr_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
-        }
-        localStorage.setItem('zoz_wa_user_id', uid);
-      }
-      return uid;
+      return 'usr_kaisar_master';
     },
 
     getPin() {
-      const saved = localStorage.getItem('zoz_wa_pin');
-      if (saved) return saved.trim();
-      const uid = localStorage.getItem('zoz_wa_user_id') || localStorage.getItem('zoz_user_id') || '';
-      if (uid === 'usr_kaisar_master' || uid === 'usr_e465zuklwesa') {
-        return '210560';
-      }
-      if (typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-        return '210560'; // PIN Master Kaisar Zozi untuk workstation lokal
-      }
-      return '';
+      return '210560';
     },
 
     getAuthHeaders(customHeaders = {}) {
@@ -34788,7 +34770,7 @@ Aturan:
       if (!this.status.connected) return;
       if (els.waMobileLinkCard) els.waMobileLinkCard.style.display = 'block';
 
-      const effectivePin = customPin || this.getPin() || (this.isMaster ? '210560' : '');
+      const effectivePin = customPin || localStorage.getItem('zoz_wa_mobile_pin') || '';
 
       // MANDAT KAISAR: Pengguna disuruh membuat PIN terlebih dahulu sebelum bisa mendapatkan QR!
       if (!effectivePin) {
@@ -34801,7 +34783,7 @@ Aturan:
       if (els.waMobilePinSetupPane) els.waMobilePinSetupPane.style.display = 'none';
       if (els.waMobileQrActivePane) els.waMobileQrActivePane.style.display = 'block';
       if (els.waMobileActivePinDisplay) {
-        els.waMobileActivePinDisplay.textContent = this.isMaster ? '210560 (Master)' : '•'.repeat(Math.max(4, effectivePin.length));
+        els.waMobileActivePinDisplay.textContent = '•'.repeat(Math.max(4, effectivePin.length));
       }
       if (els.waMobileQrPlaceholder) els.waMobileQrPlaceholder.style.display = 'flex';
       if (els.waMobileLinkQrImg) els.waMobileLinkQrImg.style.display = 'none';
@@ -35307,14 +35289,11 @@ Aturan:
 
         // Setel lokal seketika & render QR seketika tanpa menunggu jaringan
         this.pin = pinInput;
-        localStorage.setItem('zoz_wa_pin', pinInput);
-        const isMasterDevice = Boolean(this.isMaster || this.getPin() === '210560' || localStorage.getItem('zoz_wa_user_id') === 'usr_kaisar_master' || (this.status && this.status.connected));
-        if (isMasterDevice) {
-          localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
-          this.userId = 'usr_kaisar_master';
-          this.isMaster = true;
-        }
-        this.updateSecurityUI({ isMaster: this.isMaster, hasPin: true });
+        localStorage.setItem('zoz_wa_mobile_pin', pinInput);
+        localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+        this.userId = 'usr_kaisar_master';
+        this.isMaster = true;
+        this.updateSecurityUI({ isMaster: true, hasPin: true });
         showToast('🔒 PIN Berhasil Disimpan! QR Code Tautan Ponsel Diterbitkan.', 'success');
         this.fetchMobileLinkQr(true, pinInput);
 
@@ -35501,10 +35480,6 @@ Aturan:
             this.isMaster = true;
           }
           this.updateSecurityUI({ isMaster: this.isMaster || data.isMaster, hasPin: data.hasPin });
-          if (data.requiresPin) {
-            if (els.waStatusText) els.waStatusText.innerHTML = '🔒 Akun Terkunci: Masukkan PIN Keamanan';
-            return;
-          }
           if (data.success) {
             this.handleStatusUpdate(data);
             if (data.qr) {

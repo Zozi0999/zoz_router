@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261023_v452';
+    window.__ZOZ_VERSION__ = 'v20261023_v453';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -2688,7 +2688,7 @@
         <!-- PANE 2: WHATSAPP GATEWAY -->
         <div class="qr-modal-pane" id="paneQrWhatsApp" style="display: none;">
           <!-- Account Isolation & Security PIN Guard -->
-          <div class="wa-tenant-security-box" id="waTenantSecurityBox" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px;">
+          <div class="wa-tenant-security-box" id="waTenantSecurityBox" style="display: none; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 0.82rem;">
               <span style="color: var(--text-muted);"><i class="fa-solid fa-fingerprint text-sky-400"></i> ID Ruang Akun: <b id="waDisplayUserId" style="color: var(--text-primary); font-family: monospace;">-</b></span>
               <span id="waSecurityBadge" class="badge" style="font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);">
@@ -2824,8 +2824,8 @@
                 Demi keamanan privasi Anda, buat PIN (4-6 digit) terlebih dahulu. Kode QR sinkronisasi hanya akan diterbitkan setelah PIN dibuat, sehingga chat WhatsApp di desktop tidak bisa disinkronkan oleh pihak lain.
               </p>
               <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                <input type="password" id="inputWaCreateMobilePin" class="term-tunnel-input" maxlength="6" placeholder="Buat PIN 4-6 Digit..." style="width: 170px; font-family: monospace; letter-spacing: 3px; font-size: 0.9rem; text-align: center;" autocomplete="off">
-                <button type="button" class="term-tunnel-btn primary" id="btnCreatePinAndGetQr" style="background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.5); color: #34d399; font-weight: 600;">
+                <input type="text" id="inputWaCreateMobilePin" class="term-tunnel-inline-input" maxlength="6" placeholder="Ketik PIN 4-6 Digit..." style="width: 190px; height: 38px; background: #0b1120; border: 1.5px solid #f59e0b; border-radius: 8px; color: #f8fafc; font-family: monospace; letter-spacing: 3px; font-size: 0.95rem; font-weight: 700; text-align: center; padding: 6px 12px;" autocomplete="off">
+                <button type="button" class="term-tunnel-btn primary" id="btnCreatePinAndGetQr" style="height: 38px; background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.5); color: #34d399; font-weight: 600;">
                   <i class="fa-solid fa-shield-halved"></i> Simpan PIN & Terbitkan QR
                 </button>
               </div>
@@ -2949,8 +2949,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261023_v452" defer></script>
+  <script src="text-safety.js?v=20261023_v453" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261023_v452" defer></script>
+  <script src="app.js?v=20261023_v453" defer></script>
 </body>
 </html>
