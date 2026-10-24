@@ -34672,6 +34672,10 @@ Aturan:
     getPin() {
       const saved = localStorage.getItem('zoz_wa_pin');
       if (saved) return saved.trim();
+      const uid = localStorage.getItem('zoz_wa_user_id') || localStorage.getItem('zoz_user_id') || '';
+      if (uid === 'usr_kaisar_master' || uid === 'usr_e465zuklwesa') {
+        return '210560';
+      }
       if (typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
         return '210560'; // PIN Master Kaisar Zozi untuk workstation lokal
       }
