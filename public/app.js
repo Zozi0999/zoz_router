@@ -12528,14 +12528,14 @@ Aturan wajib:
     if (!hasImages && !hasDocs) {
       els.attachmentPreviewBar.style.display = 'none';
       if (els.promptInput) {
-        els.promptInput.placeholder = 'Tanyakan apa saja atau ketik prompt...';
+        els.promptInput.placeholder = '';
       }
       return;
     }
 
     els.attachmentPreviewBar.style.display = 'flex';
     if (hasImages && els.promptInput && !els.promptInput.value) {
-      els.promptInput.placeholder = 'Tulis pesan atau pertanyaan tentang foto ini...';
+      els.promptInput.placeholder = '';
     }
     setTimeout(() => {
       if (els.promptInput) {
@@ -36000,7 +36000,7 @@ Aturan:
         if (els.singleModelPickerWrap) els.singleModelPickerWrap.style.display = 'block';
         if (els.singleWaContactPickerWrap) els.singleWaContactPickerWrap.style.display = 'none';
         if (els.promptInput) {
-          els.promptInput.placeholder = "Ketik pesan untuk AI atau ketik '/' untuk skill...";
+          els.promptInput.placeholder = "";
         }
         this.setSidebarHistoryTab('ai');
         if (render) {
