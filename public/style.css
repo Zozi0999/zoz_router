@@ -14191,8 +14191,12 @@ body.mermaid-has-fullscreen {
   animation: fadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .term-tunnel-dialog {
-  max-width: 500px;
+  max-width: 480px;
   width: 92%;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: rgba(15, 23, 42, 0.98);
   border: 1px solid rgba(56, 189, 248, 0.35);
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 30px rgba(56, 189, 248, 0.2);
@@ -14203,22 +14207,24 @@ body.mermaid-has-fullscreen {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   font-weight: 700;
   color: #f8fafc;
 }
 .term-tunnel-body {
-  padding: 18px;
+  padding: 10px 14px;
+  overflow-y: auto;
+  max-height: calc(82vh - 48px);
 }
 .term-tunnel-status-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
+  padding: 6px 12px;
   background: rgba(30, 41, 59, 0.6);
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 .term-tunnel-status-info {
   display: flex;
@@ -14368,27 +14374,27 @@ body.mermaid-has-fullscreen {
 }
 .term-tunnel-qr-wrap {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 14px;
-  padding: 16px;
+  gap: 12px;
+  padding: 10px 12px;
   background: rgba(30, 41, 59, 0.45);
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 8px;
-  text-align: center;
+  text-align: left;
 }
 .term-tunnel-qr-box {
-  width: 240px;
-  height: 240px;
+  width: 140px;
+  height: 140px;
   background: #ffffff;
-  border-radius: 10px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px;
+  padding: 6px;
   flex-shrink: 0;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 15px rgba(56, 189, 248, 0.25);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 12px rgba(56, 189, 248, 0.2);
 }
 .term-tunnel-qr-box img {
   width: 100%;
@@ -14857,13 +14863,17 @@ body.mermaid-has-fullscreen {
 
 /* QR Modal Tabs (Terminal Remote vs WhatsApp Gateway) */
 .qr-modal-tabs-nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
-  background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(10, 16, 26, 0.95);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--radius-sm);
   padding: 3px;
   gap: 4px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .qr-modal-tab-btn {
@@ -14872,16 +14882,37 @@ body.mermaid-has-fullscreen {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 6px 10px;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
   color: var(--text-dim);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
   position: relative;
   transition: all 0.2s ease;
+}
+
+/* Quick Switch to WhatsApp Mode Button in Terminal Toolbar */
+.tb-btn-wa-switch {
+  display: inline-flex !important;
+  background: rgba(37, 211, 102, 0.12) !important;
+  border: 1px solid rgba(37, 211, 102, 0.45) !important;
+  color: #25D366 !important;
+  font-weight: 600 !important;
+  padding: 3px 8px !important;
+  font-size: 0.72rem !important;
+  height: 24px !important;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.tb-btn-wa-switch:hover {
+  background: rgba(37, 211, 102, 0.22) !important;
+  box-shadow: 0 0 10px rgba(37, 211, 102, 0.3) !important;
 }
 
 .qr-modal-tab-btn:hover {

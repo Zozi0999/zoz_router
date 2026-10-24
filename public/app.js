@@ -1308,7 +1308,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     inputWaNewContactName: $('#inputWaNewContactName'),
     inputWaNewContactPhone: $('#inputWaNewContactPhone'),
     btnSaveWaNewContact: $('#btnSaveWaNewContact'),
-    btnTopBarCameraScanner: $('#btnTopBarCameraScanner'),
     waTenantSecurityBox: $('#waTenantSecurityBox'),
     waDisplayUserId: $('#waDisplayUserId'),
     waSecurityBadge: $('#waSecurityBadge'),
@@ -33965,9 +33964,12 @@ Aturan:
       document.getElementById('btnTermSyncWindows')?.addEventListener('click', () => this.trySyncWindows(true));
       document.getElementById('btnTermRemoteTunnel')?.addEventListener('click', () => this.openRemoteTunnelModal('terminal'));
       document.getElementById('btnTopBarRemoteQr')?.addEventListener('click', () => this.openRemoteTunnelModal('terminal'));
-      document.getElementById('btnTopBarCameraScanner')?.addEventListener('click', () => {
+      document.getElementById('btnTermSwitchToWa')?.addEventListener('click', () => {
         AudioEngine?.click?.();
-        this.openQrScannerModal({ title: 'Pindai QR Code Terminal Laptop via Kamera HP' });
+        this.closeModal();
+        if (typeof WhatsAppController !== 'undefined') {
+          WhatsAppController.setChatMode('whatsapp');
+        }
       });
       document.getElementById('btnTermMobileConnect')?.addEventListener('click', async () => {
         if (this.isRemoteConnected) {
