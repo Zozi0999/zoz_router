@@ -34645,8 +34645,9 @@ Aturan:
     activeContact: null,
     status: { connected: false, connecting: false, phone: null, qr: null, contactCount: 0 },
     statusPollTimer: null,
+    keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://springs-actually-pacific-animals.trycloudflare.com',
+    activeTunnelUrl: 'https://bomb-assess-ira-brings.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -34826,7 +34827,7 @@ Aturan:
       // 3. Permintaan ke backend untuk mengambil QR Data URL resmi & mencatat status
       const candidates = [
         this.apiBaseUrl,
-        'https://entertainment-jump-product-loan.trycloudflare.com',
+        this.activeTunnelUrl,
         localStorage.getItem('zoz_wa_api_url'),
         localStorage.getItem('zoz_last_tunnel_url'),
         ''
@@ -34878,7 +34879,7 @@ Aturan:
 
       try {
         const q = `?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
-        const res = await fetch(this.getApiUrl('/api/wa/devices' + q), {
+        const res = await this.waFetch('/api/wa/devices' + q, {
           headers: this.getAuthHeaders()
         });
         const data = await res.json().catch(() => null);
@@ -34935,11 +34936,10 @@ Aturan:
     isDeadTunnelUrl(u) {
       if (!u) return true;
       const s = String(u).toLowerCase();
-      return s.includes('heat-rolled-guns-warning') ||
-             s.includes('turned-defensive-myself') ||
-             s.includes('notify-thomson') ||
-             s.includes('presentation-focusing-tracks-apr') ||
-             s.includes('ready-eva-counters-binding');
+      if (s.includes('.trycloudflare.com') && !s.includes('bomb-assess-ira-brings')) {
+        return true;
+      }
+      return false;
     },
 
     async resolveApiBase() {
@@ -35062,10 +35062,54 @@ Aturan:
     },
 
     getApiUrl(endpoint) {
-      if (this.apiBaseUrl) {
+      if (this.apiBaseUrl && !this.isDeadTunnelUrl(this.apiBaseUrl)) {
         return `${this.apiBaseUrl}${endpoint}`;
       }
-      return endpoint;
+      const isLocal = typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      if (isLocal) return endpoint;
+      return `${this.activeTunnelUrl}${endpoint}`;
+    },
+
+    async waFetch(endpoint, options = {}, retries = 2) {
+      const isLocal = typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      const bases = isLocal
+        ? ['', 'http://localhost:4040', 'http://127.0.0.1:4040', this.activeTunnelUrl]
+        : [
+            (!this.isDeadTunnelUrl(this.apiBaseUrl) && this.apiBaseUrl) ? this.apiBaseUrl : this.activeTunnelUrl,
+            this.activeTunnelUrl,
+            '',
+            'http://localhost:4040'
+          ];
+      const uniqueBases = [...new Set(bases.filter(b => b !== null && b !== undefined))];
+      let lastErr = null;
+
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        for (const base of uniqueBases) {
+          try {
+            const cleanBase = base ? String(base).replace(/\/+$/, '') : '';
+            const url = `${cleanBase}${endpoint}`;
+            const fetchOpts = { ...options };
+            if (!fetchOpts.signal) {
+              fetchOpts.signal = AbortSignal.timeout(8000);
+            }
+            const res = await fetch(url, fetchOpts);
+            if (res.ok || (res.status >= 400 && res.status < 500 && res.status !== 404)) {
+              if (cleanBase && !isLocal) {
+                this.apiBaseUrl = cleanBase;
+                localStorage.setItem('zoz_wa_api_url', cleanBase);
+              }
+              return res;
+            }
+          } catch (err) {
+            lastErr = err;
+          }
+        }
+        if (attempt < retries) {
+          await new Promise(r => setTimeout(r, 350 * (attempt + 1)));
+        }
+      }
+      if (lastErr) throw lastErr;
+      throw new Error('Koneksi ke server WhatsApp sedang disinkronkan ulang');
     },
 
     async init() {
@@ -35113,6 +35157,12 @@ Aturan:
         await this.fetchStatus();
         await this.fetchContacts();
         this.initSSE();
+        if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
+        this.keepAliveTimer = setInterval(() => {
+          if (!this.isConnectingWa && !this.isFetchingStatus) {
+            this.fetchStatus().catch(() => {});
+          }
+        }, 25000);
       } catch (_) {}
     },
 
@@ -35272,7 +35322,7 @@ Aturan:
 
           const candidates = [
             this.apiBaseUrl,
-            'https://entertainment-jump-product-loan.trycloudflare.com',
+            this.activeTunnelUrl,
             localStorage.getItem('zoz_wa_api_url'),
             localStorage.getItem('zoz_last_tunnel_url'),
             ''
@@ -35438,11 +35488,7 @@ Aturan:
       this.isFetchingStatus = true;
       try {
         const q = `?t=${Date.now()}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
-        let res = await fetch(this.getApiUrl('/api/wa/status' + q), { cache: 'no-store' });
-        if (!res.ok) {
-          await this.resolveApiBase();
-          res = await fetch(this.getApiUrl('/api/wa/status' + q), { cache: 'no-store' });
-        }
+        let res = await this.waFetch('/api/wa/status' + q, { cache: 'no-store' }, 1);
         const data = await res.json().catch(() => null);
         if (data) {
           if (data.isMaster || data.userId === 'usr_kaisar_master' || data.tenantUserId === 'usr_kaisar_master') {
@@ -35506,7 +35552,7 @@ Aturan:
     async fetchContacts(notify = false) {
       try {
         const q = `?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
-        const res = await fetch(this.getApiUrl('/api/wa/contacts' + q), { headers: this.getAuthHeaders() });
+        const res = await this.waFetch('/api/wa/contacts' + q, { headers: this.getAuthHeaders() }, 2);
         const data = await res.json().catch(() => null);
         if (data && data.success) {
           this.contacts = data.contacts || [];
@@ -35653,26 +35699,14 @@ Aturan:
           await this.resolveApiBase();
         }
         const q = `?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
-        let apiUrl = this.getApiUrl('/api/wa/connect' + q);
         const shouldForce = Boolean(forceNew);
         const payload = { forceNew: shouldForce, userId: this.getUserId(), pin: this.getPin() };
-        let res = await fetch(apiUrl, {
+        const res = await this.waFetch('/api/wa/connect' + q, {
           method: 'POST',
           headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(6500)
-        });
-        if (!res.ok) {
-          this.apiBaseUrl = this.activeTunnelUrl;
-          localStorage.setItem('zoz_wa_api_url', this.activeTunnelUrl);
-          apiUrl = `${this.activeTunnelUrl}/api/wa/connect${q}`;
-          res = await fetch(apiUrl, {
-            method: 'POST',
-            headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(6500)
-          });
-        }
+          signal: AbortSignal.timeout(8000)
+        }, 2);
         const data = await res.json().catch(() => null);
         if (data && data.success) {
           this.updateSecurityUI({ isMaster: data.isMaster, hasPin: data.hasPin });
@@ -35680,15 +35714,17 @@ Aturan:
           if (data.qr) {
             this.handleQrUpdate(data.qr);
           }
-          showToast(data.connected ? 'WhatsApp sudah terhubung!' : 'Kode QR WhatsApp siap dipindai!', 'info');
-        } else {
+          if (forceNew) {
+            showToast(data.connected ? 'WhatsApp sudah terhubung!' : 'Kode QR WhatsApp siap dipindai!', 'info');
+          }
+        } else if (forceNew) {
           showToast(`Gagal: ${data?.error || 'Koneksi ditolak'}`, 'error');
         }
       } catch (err) {
         this.isConnectingWa = false;
         const ok = await this.fetchQrDirectTunnel();
-        if (!ok) {
-          showToast(`Koneksi error: ${err.message}`, 'error');
+        if (!ok && forceNew) {
+          showToast('Sedang menyinkronkan ulang jalur ke gateway WhatsApp...', 'info');
         }
       } finally {
         this.isConnectingWa = false;
@@ -35697,18 +35733,18 @@ Aturan:
 
     async disconnectWhatsApp() {
       try {
-        const res = await fetch(this.getApiUrl('/api/wa/disconnect'), {
+        const res = await this.waFetch('/api/wa/disconnect', {
           method: 'POST',
           headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ logout: true, userId: this.getUserId(), pin: this.getPin() })
-        });
+        }, 2);
         const data = await res.json().catch(() => null);
         if (data && data.success) {
           showToast('WhatsApp berhasil diputuskan. Memuat QR baru...', 'info');
           this.connectWhatsApp(true);
         }
       } catch (err) {
-        showToast(`Gagal putuskan: ${err.message}`, 'error');
+        showToast('Sedang menyinkronkan ulang pemutusan sesi WhatsApp...', 'info');
       }
     },
 
@@ -35721,11 +35757,11 @@ Aturan:
         return;
       }
       try {
-        const res = await fetch(this.getApiUrl('/api/wa/contacts'), {
+        const res = await this.waFetch('/api/wa/contacts', {
           method: 'POST',
           headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ name: name || phone, phone, userId: this.getUserId(), pin: this.getPin() })
-        });
+        }, 2);
         const data = await res.json().catch(() => null);
         if (data && data.success) {
           showToast(`Kontak "${data.contact.name}" berhasil disimpan!`, 'success');
@@ -35739,7 +35775,7 @@ Aturan:
           showToast(`Gagal simpan kontak: ${data?.error || 'Kesalahan'}`, 'error');
         }
       } catch (err) {
-        showToast(`Error: ${err.message}`, 'error');
+        showToast('Gagal menghubungi server untuk menyimpan kontak, mencoba ulang...', 'warning');
       }
     },
 
@@ -35772,11 +35808,11 @@ Aturan:
       }
 
       try {
-        const res = await fetch(this.getApiUrl('/api/wa/pairing-code'), {
+        const res = await this.waFetch('/api/wa/pairing-code', {
           method: 'POST',
           headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ phone, userId: this.getUserId(), pin: this.getPin() })
-        });
+        }, 2);
         const data = await res.json().catch(() => null);
         if (data && data.success && data.code) {
           if (els.waPairingCodeDisplay) els.waPairingCodeDisplay.textContent = data.code;
@@ -36105,11 +36141,11 @@ Aturan:
       `;
       headerBar.querySelector('#btnActionClearWaHistory')?.addEventListener('click', async () => {
         if (confirm(`Hapus riwayat pesan dengan ${this.activeContact?.name || jid}?`)) {
-          await fetch(this.getApiUrl('/api/wa/clear'), {
+          await this.waFetch('/api/wa/clear', {
             method: 'POST',
             headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ jid, userId: this.getUserId(), pin: this.getPin() })
-          });
+          }, 2);
           this.loadMessagesForContact(jid);
           this.fetchContacts();
         }
@@ -36118,7 +36154,7 @@ Aturan:
 
       try {
         const q = `?jid=${encodeURIComponent(jid)}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
-        const res = await fetch(this.getApiUrl('/api/wa/messages' + q), { headers: this.getAuthHeaders() });
+        const res = await this.waFetch('/api/wa/messages' + q, { headers: this.getAuthHeaders() }, 2);
         const data = await res.json().catch(() => null);
         const list = (data && data.messages) || [];
 
@@ -36143,7 +36179,7 @@ Aturan:
 
         if (els.chatViewport) els.chatViewport.scrollTop = els.chatViewport.scrollHeight;
       } catch (err) {
-        showToast(`Gagal memuat pesan: ${err.message}`, 'error');
+        console.warn('[WA-Client] Retry memuat pesan:', err.message);
       }
     },
 
@@ -36277,11 +36313,11 @@ Aturan:
       AudioEngine.sent?.() || AudioEngine.click();
 
       try {
-        const res = await fetch(this.getApiUrl('/api/wa/send'), {
+        const res = await this.waFetch('/api/wa/send', {
           method: 'POST',
           headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ jid: this.activeContact.id, text, userId: this.getUserId(), pin: this.getPin(), tempId })
-        });
+        }, 2);
         const data = await res.json().catch(() => null);
         if (!data || !data.success) {
           showToast(`❌ Gagal kirim WA: ${data?.error || 'Terjadi kesalahan'}`, 'error');
@@ -36308,7 +36344,7 @@ Aturan:
           this.fetchContacts();
         }
       } catch (err) {
-        showToast(`❌ Kesalahan jaringan: ${err.message}`, 'error');
+        showToast('⚠️ Menyambungkan kembali ke server WhatsApp, silakan coba lagi.', 'warning');
       }
     }
   };

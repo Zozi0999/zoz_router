@@ -9292,10 +9292,13 @@ if (!IS_VERCEL_ENV) {
 }
 
 process.on('SIGINT', () => {
-  console.log('\n🛑 Menghentikan server ZOZ ROUTER secara anggun...');
-  server.close(() => {
-    process.exit(0);
-  });
+  console.log('[Daemon-Shield] Menahan sinyal SIGINT (Ctrl+C dari subshell/ConPTY) — Server ZOZ ROUTER tetap aktif.');
+});
+process.on('SIGBREAK', () => {
+  console.log('[Daemon-Shield] Menahan sinyal SIGBREAK — Server ZOZ ROUTER tetap aktif.');
+});
+process.on('SIGHUP', () => {
+  console.log('[Daemon-Shield] Menahan sinyal SIGHUP — Server ZOZ ROUTER tetap aktif.');
 });
 
 if (require.main === module && !process.env.VERCEL) {
@@ -9323,6 +9326,13 @@ if (require.main === module && !process.env.VERCEL) {
     }).catch(err => {
       console.warn('[Cloudflare] Tunnel auto-start deferred:', err && err.message);
     });
+
+    // Watchdog penjaga Cloudflare Tunnel agar selalu hidup
+    setInterval(() => {
+      if (!isTunnelIntentionallyStopped && (!cloudflareTunnelPid || !isPidAlive(cloudflareTunnelPid))) {
+        startCloudflareTunnel().catch(() => {});
+      }
+    }, 25000);
   });
 }
 

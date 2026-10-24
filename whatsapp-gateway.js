@@ -312,7 +312,7 @@ class WhatsAppGateway {
       const credsFile = path.join(this.authDir, 'creds.json');
       if (!fs.existsSync(credsFile)) return false;
       const raw = JSON.parse(fs.readFileSync(credsFile, 'utf8'));
-      return Boolean(raw && raw.registered === true && raw.me);
+      return Boolean(raw && raw.me && raw.me.id && (raw.registered === true || raw.account));
     } catch (_) {
       return false;
     }
@@ -510,6 +510,13 @@ class WhatsAppGateway {
           const rawId = this.sock.user?.id || '';
           this.status.phone = rawId ? rawId.split(':')[0] : 'Aktif';
           this.status.updatedAt = Date.now();
+
+          try {
+            if (state && state.creds) {
+              state.creds.registered = true;
+              await saveCreds();
+            }
+          } catch (_) {}
 
           console.log(`[WA-Gateway] 🟢 WhatsApp Terhubung! ID: ${this.status.phone}`);
           this.broadcast('status', this.getStatus());
@@ -908,7 +915,19 @@ class WhatsAppGateway {
 
   async sendMessage(jid, text) {
     if (!this.sock || !this.status.connected) {
-      throw new Error('WhatsApp belum terhubung. Silakan scan QR code terlebih dahulu.');
+      if (this.hasStoredSession() || this.status.connecting) {
+        if (!this.status.connecting) {
+          this.connect(false).catch(() => {});
+        }
+        let waited = 0;
+        while ((!this.sock || !this.status.connected) && waited < 6000) {
+          await new Promise(r => setTimeout(r, 250));
+          waited += 250;
+        }
+      }
+      if (!this.sock || !this.status.connected) {
+        throw new Error('WhatsApp belum terhubung. Silakan scan QR code terlebih dahulu.');
+      }
     }
 
     let targetJid = jid;
@@ -1094,14 +1113,15 @@ class WhatsAppGateway {
 class WhatsAppGatewayManager {
   constructor() {
     this.sessions = new Map(); // userId -> WhatsAppGateway instance
-    // Sesi Master Kaisar Zozi (Port 4040, sesi asli 943 kontak)
+    // Sesi Master Kaisar Zozi (Port 4040, sesi asli)
     this.masterGateway = new WhatsAppGateway('usr_kaisar_master', { isMaster: true });
     this.sessions.set('usr_kaisar_master', this.masterGateway);
+    this.sessions.set('usr_e465zuklwesa', this.masterGateway);
 
     // Auto-connect Master session jika kredensial auth tersimpan di disk
     if (this.masterGateway.hasStoredSession()) {
       console.log('[WA-Manager] Master Sesi Kaisar terdeteksi di disk. Menjalankan auto-connect di background...');
-      this.masterGateway.connect().catch(err => {
+      this.masterGateway.connect(false).catch(err => {
         console.warn('[WA-Manager] Auto-connect Master Kaisar tertunda:', err.message);
       });
     }
