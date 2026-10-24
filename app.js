@@ -1308,6 +1308,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     inputWaNewContactName: $('#inputWaNewContactName'),
     inputWaNewContactPhone: $('#inputWaNewContactPhone'),
     btnSaveWaNewContact: $('#btnSaveWaNewContact'),
+    btnTopBarCameraScanner: $('#btnTopBarCameraScanner'),
     waTenantSecurityBox: $('#waTenantSecurityBox'),
     waDisplayUserId: $('#waDisplayUserId'),
     waSecurityBadge: $('#waSecurityBadge'),
@@ -33962,8 +33963,12 @@ Aturan:
         tbAutoEnterBtn.addEventListener('touchend', handleAutoToggle);
       }
       document.getElementById('btnTermSyncWindows')?.addEventListener('click', () => this.trySyncWindows(true));
-      document.getElementById('btnTermRemoteTunnel')?.addEventListener('click', () => this.openRemoteTunnelModal());
-      document.getElementById('btnTopBarRemoteQr')?.addEventListener('click', () => this.openRemoteTunnelModal());
+      document.getElementById('btnTermRemoteTunnel')?.addEventListener('click', () => this.openRemoteTunnelModal('terminal'));
+      document.getElementById('btnTopBarRemoteQr')?.addEventListener('click', () => this.openRemoteTunnelModal('terminal'));
+      document.getElementById('btnTopBarCameraScanner')?.addEventListener('click', () => {
+        AudioEngine?.click?.();
+        this.openQrScannerModal({ title: 'Pindai QR Code Terminal Laptop via Kamera HP' });
+      });
       document.getElementById('btnTermMobileConnect')?.addEventListener('click', async () => {
         if (this.isRemoteConnected) {
           this.showRemoteOverlay();
