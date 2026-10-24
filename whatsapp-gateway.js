@@ -405,25 +405,32 @@ class WhatsAppGateway {
     };
   }
 
-  async connect(forceNew = false) {
-    if (!forceNew && this.sock && this.status.connected) {
-      return this.getStatus();
-    }
-    if (!forceNew && this.sock && this.status.connecting && this.status.qr && (Date.now() - (this.status.updatedAt || 0) < 45000)) {
-      return this.getStatus();
-    }
-    if (!forceNew && this.status.isPairing) {
-      return this.getStatus();
+  async connect(forceNew = false, isStreamRestart = false) {
+    if (!forceNew && !isStreamRestart) {
+      if (this.sock && this.status.connected) {
+        return this.getStatus();
+      }
+      if (this.sock && this.status.connecting && this.status.qr && (Date.now() - (this.status.updatedAt || 0) < 45000)) {
+        return this.getStatus();
+      }
+      if (this.isStreamRestarting && (Date.now() - (this.lastStreamRestartAt || 0) < 15000)) {
+        return this.getStatus();
+      }
     }
 
     if (forceNew) {
       await this.disconnect(true);
-    } else if (this.sock) {
-      try {
-        this.sock.ev.removeAllListeners();
-        this.sock.end();
-      } catch (_) {}
-      this.sock = null;
+    } else {
+      if (this.sock) {
+        try {
+          this.sock.ev.removeAllListeners();
+          this.sock.end();
+        } catch (_) {}
+        this.sock = null;
+      }
+      if (!isStreamRestart && !this.hasStoredSession()) {
+        this.cleanupAuthDir();
+      }
     }
 
     this.isExplicitDisconnect = false;
@@ -494,6 +501,7 @@ class WhatsAppGateway {
         }
 
         if (connection === 'open') {
+          this.isStreamRestarting = false;
           this.status.connected = true;
           this.status.connecting = false;
           this.status.isPairing = false;
@@ -514,20 +522,22 @@ class WhatsAppGateway {
 
         if (connection === 'close') {
           const statusCode = (lastDisconnect?.error)?.output?.statusCode;
-          const isRestart = statusCode === 515 || statusCode === 408;
+          const isStreamRestart = statusCode === 515;
           const shouldReconnect = statusCode !== DisconnectReason.loggedOut && !this.isExplicitDisconnect;
 
           this.status.connected = false;
           this.status.lastDisconnectReason = statusCode;
           this.status.updatedAt = Date.now();
 
-          if (isRestart) {
+          if (isStreamRestart) {
+            this.isStreamRestarting = true;
+            this.lastStreamRestartAt = Date.now();
             this.status.connecting = true;
-            this.status.isPairing = true;
-            this.status.qr = null;
-            console.log(`[WA-Gateway] 🔄 QR berhasil discan! Melakukan restart handshake (Code: ${statusCode})...`);
+            this.status.isPairing = false;
+            console.log(`[WA-Gateway] 🔄 Stream Restart (Code: 515) — Menyelesaikan handshake WhatsApp...`);
           } else {
-            this.status.connecting = false;
+            this.isStreamRestarting = false;
+            this.status.connecting = shouldReconnect;
             this.status.isPairing = false;
             console.log(`[WA-Gateway] ⚪ Koneksi terputus. Status Code: ${statusCode}. Reconnect: ${shouldReconnect}`);
           }
@@ -537,6 +547,8 @@ class WhatsAppGateway {
             this.status.phone = null;
             this.status.user = null;
             this.cleanupAuthDir();
+          } else if (!isStreamRestart && !this.hasStoredSession()) {
+            this.cleanupAuthDir();
           }
 
           this.broadcast('status', this.getStatus());
@@ -544,8 +556,8 @@ class WhatsAppGateway {
           if (shouldReconnect) {
             if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
             this.reconnectTimer = setTimeout(() => {
-              this.connect(false);
-            }, isRestart ? 1000 : 3000);
+              this.connect(false, isStreamRestart);
+            }, isStreamRestart ? 250 : 800);
           }
         }
       });
@@ -816,6 +828,7 @@ class WhatsAppGateway {
 
   async disconnect(logout = true) {
     this.isExplicitDisconnect = true;
+    this.isStreamRestarting = false;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

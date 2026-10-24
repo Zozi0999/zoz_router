@@ -34646,7 +34646,7 @@ Aturan:
     status: { connected: false, connecting: false, phone: null, qr: null, contactCount: 0 },
     statusPollTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://warehouse-beam-queen-confident.trycloudflare.com',
+    activeTunnelUrl: 'https://springs-actually-pacific-animals.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -35484,7 +35484,7 @@ Aturan:
       }
     },
 
-    startStatusPolling(durationMs = 60000) {
+    startStatusPolling(durationMs = 300000) {
       this.stopStatusPolling();
       const startTime = Date.now();
       this.statusPollTimer = setInterval(async () => {
@@ -35493,7 +35493,7 @@ Aturan:
           return;
         }
         await this.fetchStatus();
-      }, 3000);
+      }, 2000);
     },
 
     stopStatusPolling() {
@@ -35536,21 +35536,18 @@ Aturan:
     handleStatusUpdate(status) {
       this.status = status;
       const isConnected = Boolean(status.connected);
-      const isPairing = Boolean(status.isPairing);
       if (isConnected) {
         this.lastValidQr = null;
         this.stopStatusPolling();
       }
 
       if (els.waStatusDot) {
-        els.waStatusDot.style.background = isConnected ? '#25D366' : (isPairing ? '#38bdf8' : ((status.connecting || this.lastValidQr) ? '#f59e0b' : '#64748b'));
+        els.waStatusDot.style.background = isConnected ? '#25D366' : ((status.connecting || this.lastValidQr) ? '#f59e0b' : '#64748b');
       }
       if (els.waStatusText) {
         els.waStatusText.innerHTML = isConnected
           ? `🟢 WhatsApp Terhubung (${status.phone || 'Aktif'})`
-          : (isPairing
-            ? '🔄 QR Berhasil Dipindai! Menghubungkan ke WhatsApp...'
-            : ((status.connecting || this.lastValidQr) ? '🟡 Silakan Scan QR Code dari WhatsApp di Ponsel Anda' : '⚪ WhatsApp Belum Terhubung'));
+          : ((status.connecting || this.lastValidQr) ? '🟡 Silakan Scan QR Code dari WhatsApp di Ponsel Anda' : '⚪ WhatsApp Belum Terhubung');
       }
       if (els.labelConnectWa) {
         els.labelConnectWa.textContent = isConnected ? 'Hubungkan Ulang' : 'Muat Ulang QR';
@@ -35577,15 +35574,9 @@ Aturan:
         if (els.waConnectedDevicesCard) els.waConnectedDevicesCard.style.display = 'none';
         if (els.waPairMethodNav) els.waPairMethodNav.style.display = 'flex';
         if (els.waQrSection) els.waQrSection.style.display = 'block';
-        if (isPairing) {
-          if (els.waQrCodeImg) els.waQrCodeImg.style.display = 'none';
-          if (els.waQrCodePlaceholder) els.waQrCodePlaceholder.style.display = 'flex';
-          if (els.waQrPlaceholderText) {
-            els.waQrPlaceholderText.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-sky-400"></i><br>QR Berhasil Dipindai!<br><span class="text-xs text-slate-400 font-normal">Sedang menautkan perangkat WhatsApp... Mohon tunggu</span>';
-          }
-        } else if (status.qr) {
+        if (status.qr) {
           this.handleQrUpdate(status.qr);
-        } else if (this.lastValidQr && (Date.now() - (this.lastValidQrTime || 0) < 45000)) {
+        } else if (this.lastValidQr) {
           this.handleQrUpdate(this.lastValidQr);
         } else {
           if (els.waQrCodeImg) els.waQrCodeImg.style.display = 'none';
@@ -35648,7 +35639,6 @@ Aturan:
 
     async connectWhatsApp(forceNew = false) {
       if (this.isConnectingWa) return;
-      if (this.status?.isPairing) return;
       this.isConnectingWa = true;
       if (forceNew) {
         this.lastValidQr = null;
@@ -35657,7 +35647,7 @@ Aturan:
         if (els.waStatusText) els.waStatusText.innerHTML = '🟡 Memulai inisialisasi WhatsApp Web...';
         if (els.waQrPlaceholderText) els.waQrPlaceholderText.textContent = 'Memuat kode QR WhatsApp...';
       }
-      this.startStatusPolling(60000);
+      this.startStatusPolling(300000);
       try {
         if (!this.apiBaseUrl || this.isDeadTunnelUrl(this.apiBaseUrl)) {
           await this.resolveApiBase();
@@ -35822,12 +35812,12 @@ Aturan:
       if (els.paneQrWhatsApp) els.paneQrWhatsApp.style.display = !isTerminal ? 'block' : 'none';
 
       if (!isTerminal) {
-        if (this.lastValidQr && (Date.now() - (this.lastValidQrTime || 0) < 45000)) {
+        if (this.lastValidQr) {
           this.handleQrUpdate(this.lastValidQr);
         }
-        this.startStatusPolling(60000);
+        this.startStatusPolling(300000);
         await this.fetchStatus();
-        if (!this.status.connected && !this.status.qr && !this.lastValidQr && !this.status.isPairing) {
+        if (!this.status.connected && !this.status.qr && !this.lastValidQr) {
           const loaded = await this.fetchQrDirectTunnel(false);
           if (!loaded) {
             await this.connectWhatsApp(false);
