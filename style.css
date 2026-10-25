@@ -8203,13 +8203,71 @@ div.msg-sources-section button.msg-sources-title span {
   contain: paint;
   border: 1px solid rgba(0, 240, 255, 0.35) !important;
   border-radius: 14px !important;
-  display: flex !important;
+  display: none !important;
   flex-direction: column !important;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 20px rgba(0, 240, 255, 0.15) !important;
   animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
   overflow: hidden !important;
   z-index: 100 !important;
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.studio-assistant-panel.is-open {
+  display: flex !important;
+}
+
+/* Endocrine Code Button inside Studio Assistant */
+.studio-endocrine-toggle-btn {
+  background: rgba(0, 240, 255, 0.08) !important;
+  border: 1px solid rgba(0, 240, 255, 0.3) !important;
+  color: var(--neon-cyan) !important;
+  font-size: 0.72rem !important;
+  font-weight: 600 !important;
+  padding: 3px 8px !important;
+  border-radius: 12px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+
+.studio-endocrine-toggle-btn:hover {
+  background: rgba(0, 240, 255, 0.18) !important;
+  border-color: var(--neon-cyan) !important;
+}
+
+.studio-endocrine-toggle-btn.is-off {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  color: var(--text-dim) !important;
+}
+
+/* Endocrine Diagnostic Bar in Studio Assistant */
+.studio-endocrine-status-bar {
+  background: rgba(0, 0, 0, 0.45);
+  border-bottom: 1px solid rgba(0, 240, 255, 0.15);
+  padding: 5px 12px;
+  font-size: 0.74rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.studio-endocrine-status-bar.has-error {
+  background: rgba(244, 63, 94, 0.12);
+  border-bottom-color: rgba(244, 63, 94, 0.35);
+  color: #fda4af;
+}
+
+.studio-endocrine-status-bar .endocrine-status-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @keyframes slideInRight {
@@ -11728,10 +11786,11 @@ body.mermaid-has-fullscreen {
     max-width: none !important;
     max-height: 40vh !important;
     border-radius: 12px !important;
+    display: none !important;
     z-index: 100 !important;
   }
-  .studio-assistant-panel.is-minimized {
-    display: none !important;
+  .studio-assistant-panel.is-open {
+    display: flex !important;
   }
 }
 

@@ -1066,6 +1066,11 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     btnStudioSendFollowup: $('#btnStudioSendFollowup'),
     btnStudioStopFollowup: $('#btnStudioStopFollowup'),
     btnToggleStudioAssistant: $('#btnToggleStudioAssistant'),
+    btnToggleStudioEndocrine: $('#btnToggleStudioEndocrine'),
+    iconStudioEndocrine: $('#iconStudioEndocrine'),
+    labelStudioEndocrine: $('#labelStudioEndocrine'),
+    studioEndocrineStatusBar: $('#studioEndocrineStatusBar'),
+    studioEndocrineStatusContent: $('#studioEndocrineStatusContent'),
     btnStudioMinAssistant: $('#btnStudioMinAssistant'),
     studioAssistantPanel: $('#studioAssistantPanel'),
     studioAssistantMessages: $('#studioAssistantMessages'),
@@ -3312,10 +3317,10 @@ ${logsFormatted}
       negatif_33: 4,       // negatif_33 = kurung + tilde
       posCount: 5,         // Frekuensi positif kumulatif (positif_3)
       negCount: 4,         // Frekuensi negatif kumulatif (negatif_33)
-      persen_3: 50,        // persen_3 = (positif_3 / z21) * 100
-      persen_33: 40,       // persen_33 = (negatif_33 / z21) * 100
-      pos: 50,             // Integer display persen_3
-      neg: 40,             // Integer display persen_33
+      persen_3: 55.6,      // persen_3 = (positif_3 / z21) * 100 = (5 / 9) * 100
+      persen_33: 44.4,     // persen_33 = (negatif_33 / z21) * 100 = (4 / 9) * 100
+      pos: 56,             // Integer display persen_3
+      neg: 44,             // Integer display persen_33
       taktik: 'Kondisi ambigu. Pertahankan mode observasi pasif.'
     },
     currentVibe: 'Kondisi ambigu. Pertahankan mode observasi pasif.',
@@ -3428,8 +3433,10 @@ ${logsFormatted}
       if (!this.formula) {
         this.formula = {
           z21: 9,
-          pos: 50,
-          neg: 40,
+          pos: 56,
+          neg: 44,
+          persen_3: 55.6,
+          persen_33: 44.4,
           posCount: 5,
           negCount: 4,
           paren: 1,
@@ -13247,10 +13254,40 @@ Aturan wajib:
     }
     // 5. Tambahkan padding/margin bawah pada area konten pratinjau agar seluruh elemen terbawah website terlihat jelas tanpa terhalang prompt input
     const previewBottomSpacerStyle = '\n<style id="zoz-preview-bottom-spacer">html,body{box-sizing:border-box!important;}body{padding-bottom:100px!important;}</style>';
+    // 6. Suntikkan Endocrine Telemetry probe script ke dalam iframe pratinjau untuk pelacakan error runtime
+    const endocrineProbeScript = `\n<script id="zoz-endocrine-preview-probe">
+window.addEventListener('error', function(e) {
+  try {
+    window.parent.postMessage({
+      type: 'ZOZ_STUDIO_FRAME_ERROR',
+      message: e.message || 'Script runtime error',
+      filename: e.filename || '',
+      lineno: e.lineno || 0,
+      colno: e.colno || 0
+    }, '*');
+  } catch(_) {}
+});
+(function() {
+  var _origError = console.error;
+  console.error = function() {
+    _origError.apply(console, arguments);
+    try {
+      var msg = Array.from(arguments).map(function(a) {
+        return (typeof a === 'object') ? JSON.stringify(a) : String(a);
+      }).join(' ');
+      window.parent.postMessage({
+        type: 'ZOZ_STUDIO_FRAME_CONSOLE_ERROR',
+        message: msg
+      }, '*');
+    } catch(_) {}
+  };
+})();
+</script>`;
+
     if (/<head\b[^>]*>/i.test(safeHtml) && /<\/head>/i.test(safeHtml)) {
-      safeHtml = safeHtml.replace(/<\/head>/i, previewBottomSpacerStyle + '\n</head>');
+      safeHtml = safeHtml.replace(/<\/head>/i, previewBottomSpacerStyle + '\n' + endocrineProbeScript + '\n</head>');
     } else {
-      safeHtml = previewBottomSpacerStyle + '\n' + safeHtml;
+      safeHtml = previewBottomSpacerStyle + '\n' + endocrineProbeScript + '\n' + safeHtml;
     }
 
     if (!/<\/body>/i.test(safeHtml)) {
@@ -13660,6 +13697,7 @@ Aturan wajib:
       els.aiFileStudioTitle.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(docTitle)}`;
     }
     closeStudioAssistantDrawer();
+    StudioEndocrineDiagnostics.clear();
 
     const previewable = isPreviewableDoc(file);
     const ext = (file.name || '').split('.').pop().toLowerCase();
@@ -14046,6 +14084,121 @@ Aturan wajib:
     }
   }
 
+  // ==================== SURGICAL PATCH APPLICATOR (ZOZ_EDIT) ====================
+  function applyZozEditPatch(originalCode, patchBlock) {
+    if (!originalCode || !patchBlock) return { content: originalCode || '', patched: false, patchCount: 0 };
+    let modified = originalCode;
+    let patchCount = 0;
+
+    // 1. Format spesifik Zoz Router: <<<SEARCH>>> ... <<<REPLACE>>>
+    const searchReplaceRegex = /<<<SEARCH>>>([\s\S]*?)<<<REPLACE>>>([\s\S]*?)(?:<<<END_ZOZ_EDIT>>>|<<<END_ZOZ_MODIFY>>>|$)/gi;
+    let match;
+    while ((match = searchReplaceRegex.exec(patchBlock)) !== null) {
+      const searchTarget = match[1].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+      const replacement = match[2].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+      if (searchTarget && modified.includes(searchTarget)) {
+        modified = modified.replace(searchTarget, replacement);
+        patchCount++;
+      } else if (searchTarget) {
+        // Toleransi perbedaan whitespace/indentasi per baris
+        const trimmedTarget = searchTarget.trim();
+        const lines = modified.split('\n');
+        const targetLines = trimmedTarget.split('\n').map(l => l.trim());
+        let foundIdx = -1;
+        for (let i = 0; i <= lines.length - targetLines.length; i++) {
+          let allMatch = true;
+          for (let k = 0; k < targetLines.length; k++) {
+            if (lines[i + k].trim() !== targetLines[k]) {
+              allMatch = false;
+              break;
+            }
+          }
+          if (allMatch) {
+            foundIdx = i;
+            break;
+          }
+        }
+        if (foundIdx >= 0) {
+          lines.splice(foundIdx, targetLines.length, replacement);
+          modified = lines.join('\n');
+          patchCount++;
+        }
+      }
+    }
+
+    // 2. Format Git diff: <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE
+    if (patchCount === 0) {
+      const gitDiffRegex = /<{5,}\s*SEARCH\b([\s\S]*?)={5,}([\s\S]*?)>{5,}\s*REPLACE\b/gi;
+      while ((match = gitDiffRegex.exec(patchBlock)) !== null) {
+        const searchTarget = match[1].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+        const replacement = match[2].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+        if (searchTarget && modified.includes(searchTarget)) {
+          modified = modified.replace(searchTarget, replacement);
+          patchCount++;
+        }
+      }
+    }
+
+    return { content: modified, patched: patchCount > 0, patchCount };
+  }
+
+  // ==================== STUDIO ENDOCRINE DIAGNOSTICS ====================
+  const StudioEndocrineDiagnostics = {
+    errors: [],
+    lastError: null,
+    
+    init() {
+      window.addEventListener('message', (e) => {
+        if (!e.data || typeof e.data !== 'object') return;
+        if (e.data.type === 'ZOZ_STUDIO_FRAME_ERROR' || e.data.type === 'ZOZ_STUDIO_FRAME_CONSOLE_ERROR') {
+          this.recordError(e.data);
+        }
+      });
+    },
+
+    recordError(data) {
+      if (!STATE.settings.endocrineCodeEnabled) return;
+      this.lastError = data;
+      this.errors.push({ ...data, timestamp: Date.now() });
+      if (this.errors.length > 20) this.errors.shift();
+      this.updateUI();
+    },
+
+    clear() {
+      this.errors = [];
+      this.lastError = null;
+      this.updateUI();
+    },
+
+    updateUI() {
+      if (!els.studioEndocrineStatusBar) return;
+      if (!STATE.settings.endocrineCodeEnabled) {
+        els.studioEndocrineStatusBar.style.display = 'none';
+        if (els.labelStudioEndocrine) els.labelStudioEndocrine.textContent = 'Endocrine: OFF';
+        if (els.btnToggleStudioEndocrine) els.btnToggleStudioEndocrine.classList.add('is-off');
+        return;
+      }
+
+      if (els.labelStudioEndocrine) els.labelStudioEndocrine.textContent = 'Endocrine: ON';
+      if (els.btnToggleStudioEndocrine) els.btnToggleStudioEndocrine.classList.remove('is-off');
+      els.studioEndocrineStatusBar.style.display = 'flex';
+
+      if (this.lastError) {
+        els.studioEndocrineStatusBar.classList.add('has-error');
+        const errText = escapeHtml(this.lastError.message || 'Error terdeteksi di pratinjau');
+        const lineInfo = this.lastError.lineno ? ` (baris ${this.lastError.lineno})` : '';
+        if (els.studioEndocrineStatusContent) {
+          els.studioEndocrineStatusContent.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f43f5e;"></i> <span title="${errText}">Isu: ${errText}${lineInfo}</span>`;
+        }
+      } else {
+        els.studioEndocrineStatusBar.classList.remove('has-error');
+        if (els.studioEndocrineStatusContent) {
+          els.studioEndocrineStatusContent.innerHTML = `<i class="fa-solid fa-circle-check" style="color:var(--neon-teal);"></i> <span>Kode Sehat (0 Error)</span>`;
+        }
+      }
+    }
+  };
+
   // Ekstrak file buatan / editan AI dari teks respons -> { files, rawBlocks, hasIncompleteFile }
   function extractGeneratedFiles(text, allowFallback, options = {}) {
     const onlyComplete = Boolean(options && options.onlyComplete);
@@ -14125,6 +14278,18 @@ Aturan wajib:
       }
 
       let finalContent = cleanContent;
+      // Dukung penambalan bedah (surgical patch) via <<<ZOZ_EDIT>>> dengan blok SEARCH & REPLACE
+      if (cleanContent.includes('<<<SEARCH>>>') || cleanContent.includes('<<<<<<< SEARCH')) {
+        const baseContent = (activeAIFile && (activeAIFile.name === resolvedFileName || isWebFile))
+          ? (activeAIFile.rawContent || activeAIFile.content || '')
+          : (matchedWorkspaceFile ? (matchedWorkspaceFile.content || '') : '');
+        if (baseContent) {
+          const patchResult = applyZozEditPatch(baseContent, cleanContent);
+          if (patchResult && patchResult.patched) {
+            finalContent = patchResult.content;
+          }
+        }
+      }
       if (isReactFile) {
         finalContent = validateAndRepairReactCode(finalContent);
       } else if (isUnclosed && isWebFile) {
@@ -15663,14 +15828,17 @@ ${blocks}
   // ==================== AUTHENTIC ZOZ ROUTER AI STUDIO COMPOSER & ASSISTANT ====================
   function openStudioAssistantDrawer() {
     if (els.studioAssistantPanel) {
+      els.studioAssistantPanel.classList.add('is-open');
       els.studioAssistantPanel.style.display = 'flex';
       els.studioAssistantPanel.classList.remove('is-minimized');
       if (els.btnToggleStudioAssistant) els.btnToggleStudioAssistant.classList.add('active');
+      StudioEndocrineDiagnostics.updateUI();
     }
   }
 
   function closeStudioAssistantDrawer() {
     if (els.studioAssistantPanel) {
+      els.studioAssistantPanel.classList.remove('is-open');
       els.studioAssistantPanel.style.display = 'none';
       els.studioAssistantPanel.classList.remove('is-minimized');
       if (els.btnToggleStudioAssistant) els.btnToggleStudioAssistant.classList.remove('active');
@@ -15679,10 +15847,11 @@ ${blocks}
 
   function toggleStudioAssistantDrawer() {
     if (!els.studioAssistantPanel) return;
-    const isVisible = els.studioAssistantPanel.style.display === 'flex' || 
-                      (window.getComputedStyle(els.studioAssistantPanel).display !== 'none');
-    if (isVisible) {
+    const isOpen = els.studioAssistantPanel.classList.contains('is-open') || 
+                   els.studioAssistantPanel.style.display === 'flex';
+    if (isOpen) {
       closeStudioAssistantDrawer();
+    StudioEndocrineDiagnostics.clear();
     } else {
       openStudioAssistantDrawer();
     }
@@ -15692,6 +15861,7 @@ ${blocks}
   function toggleStudioAssistantMinimize() {
     // Mandat Kaisar: Tombol melayang diminimalkan telah dihapus, klik panel cukup menutup/membuka via Tanya AI
     closeStudioAssistantDrawer();
+    StudioEndocrineDiagnostics.clear();
   }
 
   function appendStudioMessage(role, contentHtml) {
@@ -15775,32 +15945,31 @@ ${blocks}
         const docMime = ext === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
         followupPrompt = `[Konteks Dokumen Aktif: "${targetName}"]\n\`\`\`markdown\n${currentCode}\n\`\`\`\n\nInstruksi Perubahan Dokumen dari Pengguna: "${val}"\n\nInstruksi Khusus untuk AI:\n1. Berikan penjelasan singkat (1-2 kalimat) tentang revisi dokumen yang dilakukan.\n2. Cantumkan SELURUH ISI DOKUMEN LENGKAP YANG TELAH DIPERBARUI di dalam blok:\n<<<ZOZ_FILE name="${targetName}" mime="${docMime}" lang="markdown">\n... seluruh isi dokumen lengkap ...\n<<<END_ZOZ_FILE>>>`;
       } else {
-        followupPrompt = `[MANDAT MUTLAK: PERBAIKI / EDIT KODE WEBSITE YANG SUDAH JADI - DILARANG BUAT ULANG DARI NOL!]
-Pengguna meminta perbaikan / modifikasi pada bagian website yang sedang dibuka ("${targetName}").
+        let endocrineFeedback = '';
+        if (STATE.settings.endocrineCodeEnabled && StudioEndocrineDiagnostics.lastError) {
+          const err = StudioEndocrineDiagnostics.lastError;
+          endocrineFeedback = `\n\n[Laporan Sensor Endocrine Code]: Terdeteksi kendala runtime di pratinjau website: "${err.message || err}"${err.lineno ? ` (baris ${err.lineno})` : ''}. Terapkan perbaikan untuk mengatasi error ini.`;
+        }
 
-KODE WEBSITE LENGKAP YANG SUDAH JADI & BERFUNGSI SAAT INI:
-\`\`\`${lang}
-${currentCode}
-\`\`\`
+        followupPrompt = `[Edit Bagian Website Pratinjau: "${targetName}"]
+Permintaan pengguna: "${val}"${endocrineFeedback}
 
-INSTRUKSI PERBAIKAN / EDIT DARI PENGGUNA:
-"${val}"
+INSTRUKSI EDIT TERARAH (HEMAT TOKEN):
+AI diinstruksikan untuk HANYA mengeluarkan blok edit bedah terarah (search & replace) pada bagian yang perlu diubah tanpa membuat ulang kode dari nol:
 
-ATURAN REVISI KETAT UNTUK AI (WAJIB DIPATUHI 100%):
-1. DILARANG KERAS MEMBUAT KODE BARU DARI NOL ATAU MENGGANTI TOTAL DESAIN!
-   - Jangan pernah membuang struktur halaman, tata letak, animasi, styling Tailwind/CSS, teks konten yang sudah rapi, atau fitur yang sudah bekerja.
-   - Ambil seluruh kode website yang sudah jadi di atas sebagai fondasi utama Anda.
-2. PERBAIKI KODE EKSISTING SECARA INKREMENTAL:
-   - Terapkan perubahan, penambahan fitur, atau perbaikan HANYA pada bagian yang secara spesifik diminta pengguna.
-   - Sambungkan dan integrasikan perbaikan tersebut ke dalam kode yang sudah ada secara harmonis.
-   - Pastikan seluruh fungsi JavaScript, event listener, validasi form, dan interaktivitas yang sudah ada tetap terjaga dan tidak rusak.
-3. KELENGKAPAN KODE PENUH (ZERO TRUNCATION):
-   - Tuliskan kembali SELURUH KODE HASIL PERBAIKAN secara utuh dari baris awal (<!DOCTYPE html> / import React) sampai tag penutup terakhir di dalam blok protokol:
+<<<ZOZ_EDIT name="${targetName}">
+<<<SEARCH>>>
+[salin beberapa baris kode eksisting yang ingin diganti atau ditambahkan]
+<<<REPLACE>>>
+[baris kode baru penggantinya]
+<<<END_ZOZ_EDIT>>>
+
+Atau jika perubahannya sangat mendasar/menyeluruh, Anda boleh mengeluarkan berkas lengkap di dalam:
 <<<ZOZ_FILE name="${targetName}" lang="${lang}">
-... seluruh kode website lengkap yang sudah diperbaiki ...
+...
 <<<END_ZOZ_FILE>>>
-   - DILARANG menggunakan potongan komentar seperti '// sisa kode sama...' atau '<!-- bagian lain tidak berubah -->'. Seluruh kode harus utuh agar pratinjau langsung berfungsi sempurna.
-4. Berikan penjelasan singkat, ramah, dan solutif (1-2 kalimat) sebelum blok kode mengenai bagian mana saja yang telah Anda perbaiki.`;
+
+Berikan penjelasan singkat mengenai bagian yang telah diperbaiki.`;
       }
     } else {
       followupPrompt = `[Konteks: Pengguna sedang melihat pratinjau langsung "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan / Obrolan Pengguna: "${val}"\n\nATURAN SANGAT KETAT UNTUK AI:\n- Zoz Router SUDAH menampilkan pratinjau langsung untuk berkas ini.\n- Pengguna TIDAK meminta perubahan kode. Pengguna hanya sedang mengobrol santai, memuji, berkomentar, atau bertanya tentang berkas ini.\n- JANGAN PERNAH merombak, merevisi, atau membuat ulang kode!\n- DILARANG KERAS mengeluarkan blok kode atau blok <<<ZOZ_FILE!\n- Jawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
@@ -15825,6 +15994,16 @@ ATURAN REVISI KETAT UNTUK AI (WAJIB DIPATUHI 100%):
   els.btnStudioMinAssistant?.addEventListener('click', (e) => {
     e.stopPropagation();
     closeStudioAssistantDrawer();
+    StudioEndocrineDiagnostics.clear();
+  });
+  els.btnToggleStudioEndocrine?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    STATE.settings.endocrineCodeEnabled = !STATE.settings.endocrineCodeEnabled;
+    try { localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings)); } catch (_) {}
+    if (els.toggleEndocrineCode) els.toggleEndocrineCode.checked = STATE.settings.endocrineCodeEnabled;
+    StudioEndocrineDiagnostics.updateUI();
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+    showToast(STATE.settings.endocrineCodeEnabled ? 'Sensor Kode (Endocrine Code) aktif.' : 'Sensor Kode (Endocrine Code) nonaktif.');
   });
   els.btnStudioClearChat?.addEventListener('click', () => {
     if (els.studioAssistantMessages) {
@@ -16972,43 +17151,37 @@ ATURAN REVISI KETAT UNTUK AI (WAJIB DIPATUHI 100%):
     try {
 
     // Mandat Kaisar: Jika pengguna meminta revisi/edit bagian website pada kode yang sudah jadi di sesi ini,
-    // bungkus prompt dengan menyertakan kode eksisting agar AI memperbaiki kode tersebut alih-alih membuat dari nol
+    // gunakan pendekatan targeted edit hemat token tanpa mendump ribuan baris kode dari nol
     if (!options.overrideText && isEditingExistingWeb) {
       const targetName = existingWebFile.name || 'index.html';
       const lang = existingWebFile.lang || (targetName.endsWith('.jsx') ? 'jsx' : 'html');
-      const currentCode = existingWebFile.rawContent || existingWebFile.content || '';
-      if (currentCode.length > 50) {
-        const wrappedEditPrompt = `[MANDAT MUTLAK: PERBAIKI / EDIT KODE WEBSITE YANG SUDAH JADI - DILARANG BUAT ULANG DARI NOL!]
-Pengguna meminta perbaikan / modifikasi pada website yang sudah ada di sesi ini ("${targetName}").
-
-KODE WEBSITE LENGKAP YANG SUDAH JADI & BERFUNGSI SAAT INI:
-\`\`\`${lang}
-${currentCode}
-\`\`\`
-
-INSTRUKSI PERBAIKAN / EDIT DARI PENGGUNA:
-"${rawText}"
-
-ATURAN REVISI KETAT UNTUK AI:
-1. DILARANG KERAS MEMBUAT KODE BARU DARI NOL ATAU MENGGANTI TOTAL DESAIN!
-   - Pertahankan seluruh struktur, tata letak, styling, teks, dan fitur-fitur yang sudah ada di atas.
-   - Jadikan kode di atas sebagai fondasi utama.
-2. PERBAIKI KODE EKSISTING SECARA INKREMENTAL:
-   - Lakukan perbaikan / modifikasi HANYA pada bagian yang secara spesifik diminta pengguna.
-   - Sambungkan perubahan tersebut ke dalam kode yang sudah ada secara rapi dan presisi.
-3. Tuliskan SELURUH KODE LENGKAP HASIL EDIT secara utuh tanpa potongan komentar di dalam blok:
-<<<ZOZ_FILE name="${targetName}" lang="${lang}">
-... seluruh kode lengkap yang sudah diperbaiki ...
-<<<END_ZOZ_FILE>>>
-4. Berikan penjelasan singkat (1-2 kalimat) tentang bagian mana saja yang telah Anda edit atau perbaiki.`;
-
-        options.overrideText = wrappedEditPrompt;
-        options.displayPrompt = rawText;
-        options.websiteMode = 'preview';
-        options.isWebCreation = true;
-        options.isWebsiteRevision = true;
-        rawText = wrappedEditPrompt;
+      let endocrineFeedback = '';
+      if (STATE.settings.endocrineCodeEnabled && StudioEndocrineDiagnostics.lastError) {
+        const err = StudioEndocrineDiagnostics.lastError;
+        endocrineFeedback = `\n\n[Laporan Sensor Endocrine Code]: Terdeteksi runtime issue di pratinjau: "${err.message || err}"${err.lineno ? ` (baris ${err.lineno})` : ''}. Terapkan perbaikan untuk error ini.`;
       }
+
+      const wrappedEditPrompt = `[Edit Terarah Website Sesi Ini: "${targetName}"]
+Permintaan perbaikan / penambahan dari pengguna: "${rawText}"${endocrineFeedback}
+
+INSTRUKSI EDIT TERARAH (HEMAT TOKEN):
+Perbaiki website eksisting ini secara inkremental tanpa membuat kode ulang dari nol. Keluarkan blok penambalan bedah:
+<<<ZOZ_EDIT name="${targetName}">
+<<<SEARCH>>>
+[potongan baris kode yang akan diubah]
+<<<REPLACE>>>
+[baris baru penggantinya]
+<<<END_ZOZ_EDIT>>>
+
+(Atau keluarkan kode utuh di dalam <<<ZOZ_FILE name="${targetName}" lang="${lang}"> jika perubahan melibatkan perombakan menyeluruh).
+Berikan penjelasan ringkas mengenai perubahan yang diterapkan.`;
+
+      options.overrideText = wrappedEditPrompt;
+      options.displayPrompt = rawText;
+      options.websiteMode = 'preview';
+      options.isWebCreation = true;
+      options.isWebsiteRevision = true;
+      rawText = wrappedEditPrompt;
     }
 
     // Claude AI resilience: minta izin notifikasi saat pengguna berinteraksi
@@ -36624,6 +36797,7 @@ Aturan:
     ImageLightbox.init();
     BioEndocrine.init();
     ChatEndocrine.init();
+    StudioEndocrineDiagnostics.init();
     WhatsAppController.init();
     
     // Initialize Neural Terminal Engine

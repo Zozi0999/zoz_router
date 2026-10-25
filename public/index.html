@@ -1577,6 +1577,9 @@
               <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Asisten Zoz</span>
             </div>
             <div class="studio-assistant-controls">
+              <button class="gemini-pill-btn studio-endocrine-toggle-btn" id="btnToggleStudioEndocrine" type="button" title="Sensor Kode (Endocrine Code): Pantau kesehatan & error website">
+                <i class="fa-solid fa-dna" id="iconStudioEndocrine"></i> <span id="labelStudioEndocrine">Endocrine: ON</span>
+              </button>
               <button class="gemini-icon-btn assistant-min-btn" id="btnStudioMinAssistant" type="button" style="display: none;" title="Kecilkan / Perluas Asisten (Minimize/Expand)">
                 <i class="fa-solid fa-minus" id="iconStudioMin"></i>
               </button>
@@ -1586,6 +1589,11 @@
               <button class="gemini-icon-btn" id="btnStudioCloseDrawer" type="button" title="Tutup Panel Asisten">
                 <i class="fa-solid fa-xmark"></i>
               </button>
+            </div>
+          </div>
+          <div class="studio-endocrine-status-bar" id="studioEndocrineStatusBar" style="display: none;">
+            <div class="endocrine-status-content" id="studioEndocrineStatusContent">
+              <i class="fa-solid fa-circle-check" style="color: var(--neon-teal);"></i> <span>Kode Sehat (0 Error)</span>
             </div>
           </div>
           <div class="studio-assistant-body" id="studioAssistantBody">
@@ -1941,7 +1949,7 @@
               <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
                 <div style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 700; color: var(--neon-cyan);">
                   <i class="fa-solid fa-square-root-variable"></i>
-                  <span>PERSAMAAN LEVIATHAN: <code>)+-+~ = [3: <span id="formulaRatioPos">50%</span>] [33: <span id="formulaRatioNeg">40%</span>]</code></span>
+                  <span>PERSAMAAN LEVIATHAN: <code>)+-+~ = [3: <span id="formulaRatioPos">55.6%</span>] [33: <span id="formulaRatioNeg">44.4%</span>]</code></span>
                 </div>
                 <div style="font-size: 0.72rem; color: var(--text-dim);"><i class="fa-solid fa-book-bookmark"></i> Buku Catatan Leviathan &bull; Analisis Kehidupan 1.2</div>
               </div>
@@ -1952,11 +1960,11 @@
                 </div>
                 <div style="background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 6px; padding: 6px 10px;">
                   <div style="color: var(--text-muted); font-size: 0.68rem;">3 (Perilaku Positif)</div>
-                  <div style="color: #34d399; font-weight: 700; font-size: 0.95rem;" id="formulaPosVal">50% (<span id="formulaPosCount">5</span>)</div>
+                  <div style="color: #34d399; font-weight: 700; font-size: 0.95rem;" id="formulaPosVal">55.6% (<span id="formulaPosCount">5</span>)</div>
                 </div>
                 <div style="background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 6px; padding: 6px 10px;">
                   <div style="color: var(--text-muted); font-size: 0.68rem;">33 (Perilaku Negatif)</div>
-                  <div style="color: #f87171; font-weight: 700; font-size: 0.95rem;" id="formulaNegVal">40% (<span id="formulaNegCount">4</span>)</div>
+                  <div style="color: #f87171; font-weight: 700; font-size: 0.95rem;" id="formulaNegVal">44.4% (<span id="formulaNegCount">4</span>)</div>
                 </div>
                 <div style="background: rgba(244, 63, 94, 0.05); border: 1px solid rgba(244, 63, 94, 0.2); border-radius: 6px; padding: 6px 10px;">
                   <div style="color: var(--text-muted); font-size: 0.68rem;">- (Kehangatan &amp; Oxy)</div>
