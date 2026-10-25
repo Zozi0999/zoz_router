@@ -35567,7 +35567,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://hdtv-stranger-ensemble-mom.trycloudflare.com',
+    activeTunnelUrl: 'https://consoles-boulevard-duncan-joseph.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -35898,7 +35898,7 @@ Aturan:
     isDeadTunnelUrl(u) {
       if (!u) return true;
       const s = String(u).toLowerCase();
-      if (s.includes('.trycloudflare.com') && !s.includes('hdtv-stranger-ensemble-mom')) {
+      if (s.includes('.trycloudflare.com') && !s.includes('consoles-boulevard-duncan-joseph')) {
         return true;
       }
       return false;
