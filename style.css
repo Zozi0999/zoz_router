@@ -8679,23 +8679,9 @@ div.msg-sources-section button.msg-sources-title span {
   animation: searchMatchPulse 0.35s ease-out !important;
 }
 
-/* Floating Mobile & Touch Friendly Bottom Control Bar in Center */
+/* Floating Bottom Control Bar (Hidden - all actions available on clean top editor bar) */
 .studio-editor-bottom-bar {
-  position: absolute !important;
-  bottom: 18px !important;
-  left: 50% !important;
-  transform: translate3d(-50%, 0, 0) !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-  padding: 6px 14px !important;
-  background: rgba(13, 16, 24, 0.97) !important;
-  border: 1px solid rgba(0, 240, 255, 0.4) !important;
-  border-radius: 28px !important;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.75), 0 0 16px rgba(0, 240, 255, 0.22) !important;
-  z-index: 60 !important;
-  max-width: calc(100vw - 24px) !important;
-  contain: layout style !important;
+  display: none !important;
 }
 
 .studio-bottom-action-btn {
@@ -12649,14 +12635,7 @@ body.mermaid-has-fullscreen {
     white-space: nowrap !important;
   }
   .studio-editor-bottom-bar {
-    bottom: 68px !important;
-    padding: 4px 8px !important;
-    gap: 5px !important;
-  }
-  .studio-bottom-action-btn {
-    padding: 5px 9px !important;
-    font-size: 0.74rem !important;
-    min-height: 32px !important;
+    display: none !important;
   }
   .studio-editor-search-bar {
     flex-wrap: nowrap !important;

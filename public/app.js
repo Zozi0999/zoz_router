@@ -1127,8 +1127,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     studioEditorSearchBar: $('#studioEditorSearchBar'),
     studioSearchInput: $('#studioSearchInput'),
     studioSearchCountBadge: $('#studioSearchCountBadge'),
-    btnStudioSearchPrev: $('#btnStudioSearchPrev'),
-    btnStudioSearchNext: $('#btnStudioSearchNext'),
     btnStudioSearchClose: $('#btnStudioSearchClose'),
     iconStudioEditCode: $('#iconStudioEditCode'),
     labelStudioEditCode: $('#labelStudioEditCode'),
@@ -1146,13 +1144,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     btnStudioRedoEdit: $('#btnStudioRedoEdit'),
     btnStudioSaveCode: $('#btnStudioSaveCode'),
     btnStudioCancelCodeEdit: $('#btnStudioCancelCodeEdit'),
-    studioEditorBottomBar: $('#studioEditorBottomBar'),
-    btnStudioBottomSearch: $('#btnStudioBottomSearch'),
-    btnStudioBottomAiEdit: $('#btnStudioBottomAiEdit'),
-    btnStudioBottomUndo: $('#btnStudioBottomUndo'),
-    btnStudioBottomSave: $('#btnStudioBottomSave'),
-    btnStudioBottomRedo: $('#btnStudioBottomRedo'),
-    btnStudioBottomCancel: $('#btnStudioBottomCancel'),
     studioFloatingDragPill: $('#studioFloatingDragPill'),
     iconStudioMin: $('#iconStudioMin'),
     studioAssistantTitleText: $('#studioAssistantTitleText'),
@@ -4270,6 +4261,45 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     }
   };
 
+  // ==================== SESSION PERSISTENCE SANITIZER ====================
+  // Membersihkan elemen DOM (_cardIframe, _cardCodeEl, _sourceCodeBlock), circular references,
+  // dan fungsi sebelum disimpan ke IndexedDB, LocalStorage, maupun disk backend agar
+  // penyimpanan 100% TIDAK PERNAH gagal karena DataCloneError atau TypeError circular!
+  function sanitizeSessionForCloning(session) {
+    if (!session || typeof session !== 'object') return session;
+    try {
+      const seen = new WeakSet();
+      function clean(val) {
+        if (val === null || typeof val !== 'object') return val;
+        if (typeof Node !== 'undefined' && val instanceof Node) return undefined;
+        if (typeof Window !== 'undefined' && val instanceof Window) return undefined;
+        if (seen.has(val)) return undefined;
+        seen.add(val);
+
+        if (Array.isArray(val)) {
+          return val.map(item => clean(item)).filter(item => item !== undefined);
+        }
+
+        const out = {};
+        for (const k of Object.keys(val)) {
+          if (k === '_cardIframe' || k === '_cardCodeEl' || k === '_sourceCodeBlock' ||
+              k === '_parentMessageRow' || k === '_actionDropdown' || k === '_aiFile') {
+            continue;
+          }
+          const c = clean(val[k]);
+          if (c !== undefined) {
+            out[k] = c;
+          }
+        }
+        return out;
+      }
+      return clean(session);
+    } catch (e) {
+      console.warn('sanitizeSessionForCloning error:', e);
+      return session;
+    }
+  }
+
   // ==================== INDEXEDDB CHAT VAULT ====================
   const ChatDB = {
     db: null,
@@ -4297,13 +4327,18 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       if (!session || !session.id) return false;
       if (!this.db) await this.init();
       if (!this.db) return false;
+      const cleanSession = sanitizeSessionForCloning(session);
       return new Promise((resolve) => {
         try {
           const tx = this.db.transaction('sessions', 'readwrite');
-          tx.objectStore('sessions').put(session);
+          tx.objectStore('sessions').put(cleanSession);
           tx.oncomplete = () => resolve(true);
-          tx.onerror = () => resolve(false);
+          tx.onerror = (err) => {
+            console.warn('ChatDB.saveSession tx error:', err);
+            resolve(false);
+          };
         } catch (e) {
+          console.warn('ChatDB.saveSession catch error:', e);
           resolve(false);
         }
       });
@@ -4330,13 +4365,17 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         try {
           const tx = this.db.transaction('sessions', 'readwrite');
           const store = tx.objectStore('sessions');
-          // TANPA perintah clear() pada store: metode ini dipakai untuk import/penyimpanan batch,
-          // jadi menghapus seluruh store dulu berarti sesi lain yang tidak ikut
-          // dikirim ikut terhapus. Penghapusan sesi kini eksplisit (ChatDB.deleteSession).
-          sessions.forEach(s => store.put(s));
+          sessions.forEach(s => {
+            const clean = sanitizeSessionForCloning(s);
+            if (clean && clean.id) store.put(clean);
+          });
           tx.oncomplete = () => resolve(true);
-          tx.onerror = () => resolve(false);
+          tx.onerror = (err) => {
+            console.warn('ChatDB.saveAllSessions tx error:', err);
+            resolve(false);
+          };
         } catch (e) {
+          console.warn('ChatDB.saveAllSessions catch error:', e);
           resolve(false);
         }
       });
@@ -4834,6 +4873,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       if (session._isLazyDisk) {
         return;
       }
+      const cleanSession = (typeof sanitizeSessionForCloning === 'function')
+        ? sanitizeSessionForCloning(session)
+        : session;
       if (this.isDeviceBackendAvailable) {
         try {
           const res = await fetch('/api/sessions', {
@@ -4842,7 +4884,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
               'Content-Type': 'application/json',
               'X-User-ID': STATE.userId
             },
-            body: JSON.stringify({ ...session, userId: STATE.userId })
+            body: JSON.stringify({ ...cleanSession, userId: STATE.userId })
           });
           if (!res.ok) console.warn('[DeviceStorage] save gagal:', res.status);
         } catch (e) {
@@ -4850,7 +4892,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         }
       }
       // Also save in local ChatDB vault
-      await ChatDB.saveSession(session);
+      await ChatDB.saveSession(cleanSession);
     },
 
     async updateSessionMetadata(id, patch) {
@@ -13845,8 +13887,6 @@ window.addEventListener('error', function(e) {
       const r = this.canRedo();
       if (els.btnStudioUndoEdit) els.btnStudioUndoEdit.disabled = !u;
       if (els.btnStudioRedoEdit) els.btnStudioRedoEdit.disabled = !r;
-      if (els.btnStudioBottomUndo) els.btnStudioBottomUndo.disabled = !u;
-      if (els.btnStudioBottomRedo) els.btnStudioBottomRedo.disabled = !r;
     }
   };
 
@@ -13930,7 +13970,6 @@ window.addEventListener('error', function(e) {
         els.btnStudioHeaderSearchCode.style.display = 'inline-flex';
         els.btnStudioHeaderSearchCode.classList.add('active');
       }
-      if (els.btnStudioBottomSearch) els.btnStudioBottomSearch.classList.add('active');
 
       const ed = els.aiFileStudioEditor;
       let q = prefill;
@@ -13974,7 +14013,6 @@ window.addEventListener('error', function(e) {
       }
       if (els.btnStudioEditorSearch) els.btnStudioEditorSearch.classList.remove('active');
       if (els.btnStudioHeaderSearchCode) els.btnStudioHeaderSearchCode.classList.remove('active');
-      if (els.btnStudioBottomSearch) els.btnStudioBottomSearch.classList.remove('active');
       this.updateCountBadge();
       if (typeof updateStudioActiveLineIndicator === 'function') updateStudioActiveLineIndicator();
       if (els.aiFileStudioEditor) {
@@ -15143,22 +15181,21 @@ window.addEventListener('error', function(e) {
     const editedRanges = [];
 
     function applySingleHunk(rawSearch, rawReplace) {
-      const searchTarget = stripAccidentalLineNumbers(rawSearch.replace(/^\r?\n/, '').replace(/\r?\n\s*$/, ''));
+      let searchTarget = stripAccidentalLineNumbers(rawSearch.replace(/^\r?\n/, '').replace(/\r?\n\s*$/, ''));
       const replacement = stripAccidentalLineNumbers(rawReplace.replace(/^\r?\n/, '').replace(/\r?\n\s*$/, ''));
       if (!searchTarget) return false;
 
-      // Tier 1: Exact match
+      // Bersihkan komentar placeholder skip baris bila AI menyalinnya dari prompt
+      searchTarget = searchTarget.replace(/(?:\/\*|<!--)\s*\.\.\.\s*\[baris\s+\d+-\d+\s+dilewati\]\s*\.\.\.\s*(?:\*\/|-->)\r?\n?/gi, '').trim();
+      if (!searchTarget) return false;
+
+      // Tier 1: Exact match (HANYA ganti di exactIdx spesifik, JANGAN PERNAH replace global regex!)
       const exactIdx = modified.indexOf(searchTarget);
       if (exactIdx !== -1) {
         const startLine = modified.slice(0, exactIdx).split('\n').length;
         const replLineCount = replacement.split('\n').length;
         const endLine = startLine + Math.max(0, replLineCount - 1);
-        if (searchTarget.split('\n').length === 1 && searchTarget.length <= 40 && modified.split(searchTarget).length > 2) {
-          const targetRegex = new RegExp(searchTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
-          modified = modified.replace(targetRegex, replacement);
-        } else {
-          modified = modified.slice(0, exactIdx) + replacement + modified.slice(exactIdx + searchTarget.length);
-        }
+        modified = modified.slice(0, exactIdx) + replacement + modified.slice(exactIdx + searchTarget.length);
         editedRanges.push({ startLine, endLine, oldLines: searchTarget.split('\n').length, newLines: replLineCount });
         patchCount++;
         return true;
@@ -15166,7 +15203,7 @@ window.addEventListener('error', function(e) {
 
       // Tier 2: Line-by-line trimmed match (tolerating indentation differences)
       const lines = modified.split('\n');
-      const targetLines = searchTarget.trim().split('\n').map(l => l.trim());
+      const targetLines = searchTarget.trim().split('\n').map(l => l.trim()).filter(Boolean);
       let foundIdx = -1;
       let matchedSpan = targetLines.length;
 
@@ -15186,29 +15223,38 @@ window.addEventListener('error', function(e) {
       }
 
       // Tier 3: Non-empty line sequence match (tolerating extra/missing blank lines)
-      if (foundIdx === -1) {
-        const nonEmptyTargets = targetLines.filter(Boolean);
-        if (nonEmptyTargets.length >= 2) {
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].trim() !== nonEmptyTargets[0]) continue;
-            let tIdx = 0;
-            let endLineIdx = i;
-            for (let j = i; j < Math.min(lines.length, i + nonEmptyTargets.length + 14); j++) {
-              const curTrim = lines[j].trim();
-              if (!curTrim) continue;
-              if (curTrim === nonEmptyTargets[tIdx]) {
-                tIdx++;
-                endLineIdx = j;
-                if (tIdx === nonEmptyTargets.length) break;
-              } else {
-                break;
-              }
-            }
-            if (tIdx === nonEmptyTargets.length) {
-              foundIdx = i;
-              matchedSpan = (endLineIdx - i) + 1;
+      if (foundIdx === -1 && targetLines.length >= 2) {
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].trim() !== targetLines[0]) continue;
+          let tIdx = 0;
+          let endLineIdx = i;
+          for (let j = i; j < Math.min(lines.length, i + targetLines.length + 14); j++) {
+            const curTrim = lines[j].trim();
+            if (!curTrim) continue;
+            if (curTrim === targetLines[tIdx]) {
+              tIdx++;
+              endLineIdx = j;
+              if (tIdx === targetLines.length) break;
+            } else {
               break;
             }
+          }
+          if (tIdx === targetLines.length) {
+            foundIdx = i;
+            matchedSpan = (endLineIdx - i) + 1;
+            break;
+          }
+        }
+      }
+
+      // Tier 4: Single-line trimmed match (ketika AI mengedit 1 baris teks/atribut/tag tanpa konteks panjang)
+      if (foundIdx === -1 && targetLines.length === 1 && targetLines[0].length >= 4) {
+        const singleTarget = targetLines[0];
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].trim() === singleTarget) {
+            foundIdx = i;
+            matchedSpan = 1;
+            break;
           }
         }
       }
@@ -15217,10 +15263,13 @@ window.addEventListener('error', function(e) {
         const origIndent = (lines[foundIdx].match(/^\s*/) || [''])[0];
         const replLines = replacement.split('\n');
         const replIndent = ((replLines.find(l => l.trim()) || '').match(/^\s*/) || [''])[0];
-        const reindented = replLines.map(l => {
-          if (!l.trim()) return l;
-          return l.startsWith(replIndent) ? origIndent + l.slice(replIndent.length) : l;
-        });
+        let reindented = replLines;
+        if (origIndent !== replIndent && replIndent !== '') {
+          reindented = replLines.map(l => {
+            if (!l.trim()) return l;
+            return l.startsWith(replIndent) ? origIndent + l.slice(replIndent.length) : l;
+          });
+        }
         const startLine = foundIdx + 1;
         const endLine = startLine + Math.max(0, reindented.length - 1);
         lines.splice(foundIdx, matchedSpan, ...reindented);
@@ -15503,11 +15552,18 @@ window.addEventListener('error', function(e) {
         let baseContent = '';
         const studioIsOpen = Boolean(els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show'));
         const isEditorOpen = Boolean(els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing'));
-        if (activeAIFile && studioIsOpen && activeAIFile.name === resolvedFileName) {
-          baseContent = (isEditorOpen && els.aiFileStudioEditor) ? els.aiFileStudioEditor.value : (activeAIFile.rawContent || activeAIFile.content || '');
-        } else if (matchedWorkspaceFile) {
+        if (activeAIFile && studioIsOpen) {
+          const isSameFile = (activeAIFile.name === resolvedFileName) ||
+                             (isWebFile && /\.(?:html?|jsx|tsx)$/i.test(activeAIFile.name || ''));
+          if (isSameFile) {
+            baseContent = (isEditorOpen && els.aiFileStudioEditor && els.aiFileStudioEditor.value)
+              ? els.aiFileStudioEditor.value
+              : (activeAIFile.rawContent || activeAIFile.content || '');
+          }
+        }
+        if (!baseContent && matchedWorkspaceFile) {
           baseContent = matchedWorkspaceFile.content || '';
-        } else if (isWebFile && typeof getLatestWebsiteFileInSession === 'function') {
+        } else if (!baseContent && isWebFile && typeof getLatestWebsiteFileInSession === 'function') {
           const latestWeb = getLatestWebsiteFileInSession(typeof getActiveSession === 'function' ? getActiveSession() : null);
           if (latestWeb && (!latestWeb.name || latestWeb.name === resolvedFileName)) {
             baseContent = latestWeb.rawContent || latestWeb.content || '';
@@ -16150,6 +16206,8 @@ window.addEventListener('error', function(e) {
               scrollStudioEditorToLine(editedRanges[0].startLine);
             }
           }
+          // Simpan perubahan ke Sesi Induk, ChatDB (IndexedDB), & Device Storage secara permanen
+          persistStudioCodeChange(newRaw);
           // Tampilkan kartu ringkasan edit presisi di jendela Tanya AI / AI Edit Kode jika ada perubahan baris
           const activeStudioContainer = (typeof getActiveStudioMessagesContainer === 'function')
             ? getActiveStudioMessagesContainer()
@@ -17611,9 +17669,9 @@ ${blocks}
         if (selInfo && selInfo.hasSelection && selInfo.selectedLinesCode) {
           selectedContextBlock = `\n[FOKUS UTAMA — Pengguna memilih Baris ${selInfo.startLine}–${selInfo.endLine} di Mode Edit Kode]:\n\`\`\`${lang}\n${selInfo.selectedLinesCode}\n\`\`\`\n`;
         }
-        const isBroadChange = /(?:seluruh|semua|portofolio|portfolio|website|web|tema|bukan|daripada)\b/i.test(val);
+        const isBroadChange = /(?:seluruh|semua|portofolio|portfolio|website|web|tema|bukan|daripada|ganti|ubah nama)\b/i.test(val);
         const codeLines = currentCode.split('\n');
-        const codeRefToSend = (isBroadChange && codeLines.length <= 850)
+        const codeRefToSend = (isBroadChange || codeLines.length <= 1800)
           ? currentCode
           : StudioEndocrineDiagnostics.buildCodeReference(currentCode, val, selInfo);
 
@@ -17677,10 +17735,6 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
   }
 
   els.btnStudioAiEditInEditor?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    focusStudioAiEditFromEditor();
-  });
-  els.btnStudioBottomAiEdit?.addEventListener('click', (e) => {
     e.stopPropagation();
     focusStudioAiEditFromEditor();
   });
@@ -17761,31 +17815,7 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
       showToast('↪️ Mengulang pengeditan.', 'info');
     }
   });
-  els.btnStudioBottomUndo?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (els.aiFileStudioEditor && StudioEditorHistory.undo(els.aiFileStudioEditor)) {
-      if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
-      showToast('↩️ Mengembalikan baris/pengeditan sebelumnya.', 'info');
-    }
-  });
-  els.btnStudioBottomRedo?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (els.aiFileStudioEditor && StudioEditorHistory.redo(els.aiFileStudioEditor)) {
-      if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
-      showToast('↪️ Mengulang pengeditan.', 'info');
-    }
-  });
-  els.btnStudioBottomSave?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    saveStudioCodeEditor();
-    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
-  });
-  els.btnStudioBottomCancel?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    closeStudioCodeEditor();
-    setAIFileStudioTab('preview');
-    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
-  });
+
   els.btnStudioSaveCode?.addEventListener('click', (e) => {
     e.stopPropagation();
     saveStudioCodeEditor();
@@ -17843,11 +17873,6 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
     StudioCodeSearch.toggle();
     if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
   });
-  els.btnStudioBottomSearch?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    StudioCodeSearch.toggle();
-    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
-  });
   els.studioSearchInput?.addEventListener('input', (e) => {
     StudioCodeSearch.scheduleSearch(e.target.value);
   });
@@ -17884,16 +17909,7 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
     }
   });
 
-  els.btnStudioSearchNext?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    StudioCodeSearch.next();
-    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
-  });
-  els.btnStudioSearchPrev?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    StudioCodeSearch.prev();
-    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
-  });
+
   els.btnStudioSearchClose?.addEventListener('click', (e) => {
     e.stopPropagation();
     StudioCodeSearch.close();
@@ -28980,6 +28996,12 @@ Aturan:
         if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.isOpen) {
           StudioCodeSearch.close();
         }
+        if (activeAIFile) {
+          const finalVal = (els.aiFileStudioEditor && els.aiFileStudioEditor.value) || activeAIFile.content || activeAIFile.rawContent;
+          if (finalVal && finalVal !== activeAIFile.rawContent) {
+            persistStudioCodeChange(finalVal);
+          }
+        }
         activeAIFile = null;
       }
       if (triggerHistoryBack && history.state?.modal === modalId) {
@@ -32281,14 +32303,23 @@ Aturan:
       });
     }
 
-    // Flush persistensi saat tab ditutup/navigasi: semua savePersistedState() lain
-    // kini di-debounce 700ms, jadi tanpa flush sinkron ini perubahan terakhir
-    // (mis. pesan yang barusan dikirim) bisa hilang saat tab ditutup mendadak.
+    // Flush persistensi saat tab ditutup/navigasi atau disembunyikan di HP
     const flushPersistenceOnHide = () => {
+      if (activeAIFile && els.aiFileStudioEditor) {
+        try {
+          const currentVal = els.aiFileStudioEditor.value || activeAIFile.content || activeAIFile.rawContent;
+          if (currentVal && currentVal !== activeAIFile.rawContent) {
+            persistStudioCodeChange(currentVal);
+          }
+        } catch (_) {}
+      }
       savePersistedState({ immediate: true });
     };
     window.addEventListener('pagehide', flushPersistenceOnHide);
     window.addEventListener('beforeunload', flushPersistenceOnHide);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushPersistenceOnHide();
+    });
   }
 
   // ==================== NEURAL TERMINAL ENGINE ====================
