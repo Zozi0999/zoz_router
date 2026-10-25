@@ -15665,40 +15665,33 @@ ${blocks}
     if (els.studioAssistantPanel) {
       els.studioAssistantPanel.style.display = 'flex';
       els.studioAssistantPanel.classList.remove('is-minimized');
-      const icon = $('#iconStudioMin');
-      if (icon) icon.className = 'fa-solid fa-minus';
-      const btn = els.btnStudioMinAssistant || $('#btnStudioMinAssistant');
-      if (btn) btn.title = 'Kecilkan Asisten (Minimize)';
       if (els.btnToggleStudioAssistant) els.btnToggleStudioAssistant.classList.add('active');
     }
-  }
-
-  function toggleStudioAssistantMinimize() {
-    if (!els.studioAssistantPanel) return;
-    els.studioAssistantPanel.classList.toggle('is-minimized');
-    const isMin = els.studioAssistantPanel.classList.contains('is-minimized');
-    const icon = $('#iconStudioMin');
-    if (icon) icon.className = isMin ? 'fa-solid fa-plus' : 'fa-solid fa-minus';
-    const btn = els.btnStudioMinAssistant || $('#btnStudioMinAssistant');
-    if (btn) btn.title = isMin ? 'Perluas Asisten (Expand)' : 'Kecilkan Asisten (Minimize)';
-    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
   }
 
   function closeStudioAssistantDrawer() {
     if (els.studioAssistantPanel) {
       els.studioAssistantPanel.style.display = 'none';
+      els.studioAssistantPanel.classList.remove('is-minimized');
       if (els.btnToggleStudioAssistant) els.btnToggleStudioAssistant.classList.remove('active');
     }
   }
 
   function toggleStudioAssistantDrawer() {
     if (!els.studioAssistantPanel) return;
-    const isVisible = window.getComputedStyle(els.studioAssistantPanel).display !== 'none';
+    const isVisible = els.studioAssistantPanel.style.display === 'flex' || 
+                      (window.getComputedStyle(els.studioAssistantPanel).display !== 'none');
     if (isVisible) {
       closeStudioAssistantDrawer();
     } else {
       openStudioAssistantDrawer();
     }
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+  }
+
+  function toggleStudioAssistantMinimize() {
+    // Mandat Kaisar: Tombol melayang diminimalkan telah dihapus, klik panel cukup menutup/membuka via Tanya AI
+    closeStudioAssistantDrawer();
   }
 
   function appendStudioMessage(role, contentHtml) {
@@ -15782,7 +15775,32 @@ ${blocks}
         const docMime = ext === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
         followupPrompt = `[Konteks Dokumen Aktif: "${targetName}"]\n\`\`\`markdown\n${currentCode}\n\`\`\`\n\nInstruksi Perubahan Dokumen dari Pengguna: "${val}"\n\nInstruksi Khusus untuk AI:\n1. Berikan penjelasan singkat (1-2 kalimat) tentang revisi dokumen yang dilakukan.\n2. Cantumkan SELURUH ISI DOKUMEN LENGKAP YANG TELAH DIPERBARUI di dalam blok:\n<<<ZOZ_FILE name="${targetName}" mime="${docMime}" lang="markdown">\n... seluruh isi dokumen lengkap ...\n<<<END_ZOZ_FILE>>>`;
       } else {
-        followupPrompt = `[Konteks Berkas Aktif: "${targetName}" (${lang})]\n\`\`\`${lang}\n${currentCode}\n\`\`\`\n\nInstruksi Perubahan dari Pengguna: ${val}\n\nInstruksi Khusus untuk AI:\nPengguna secara spesifik meminta revisi atau modifikasi pada aplikasi/website ini.\n1. Berikan penjelasan singkat tentang perubahan yang Anda lakukan.\n2. Cantumkan SELURUH KODE LENGKAP YANG TELAH DIPERBARUI (pastikan semua komponen lengkap, import/export valid, tanpa ada kode terpotong, dan siap dirender di pratinjau langsung Zoz Router) di dalam blok:\n<<<ZOZ_FILE name="${targetName}" lang="${lang}">>>\n... seluruh kode lengkap ...\n<<<END_ZOZ_FILE>>>`;
+        followupPrompt = `[MANDAT MUTLAK: PERBAIKI / EDIT KODE WEBSITE YANG SUDAH JADI - DILARANG BUAT ULANG DARI NOL!]
+Pengguna meminta perbaikan / modifikasi pada bagian website yang sedang dibuka ("${targetName}").
+
+KODE WEBSITE LENGKAP YANG SUDAH JADI & BERFUNGSI SAAT INI:
+\`\`\`${lang}
+${currentCode}
+\`\`\`
+
+INSTRUKSI PERBAIKAN / EDIT DARI PENGGUNA:
+"${val}"
+
+ATURAN REVISI KETAT UNTUK AI (WAJIB DIPATUHI 100%):
+1. DILARANG KERAS MEMBUAT KODE BARU DARI NOL ATAU MENGGANTI TOTAL DESAIN!
+   - Jangan pernah membuang struktur halaman, tata letak, animasi, styling Tailwind/CSS, teks konten yang sudah rapi, atau fitur yang sudah bekerja.
+   - Ambil seluruh kode website yang sudah jadi di atas sebagai fondasi utama Anda.
+2. PERBAIKI KODE EKSISTING SECARA INKREMENTAL:
+   - Terapkan perubahan, penambahan fitur, atau perbaikan HANYA pada bagian yang secara spesifik diminta pengguna.
+   - Sambungkan dan integrasikan perbaikan tersebut ke dalam kode yang sudah ada secara harmonis.
+   - Pastikan seluruh fungsi JavaScript, event listener, validasi form, dan interaktivitas yang sudah ada tetap terjaga dan tidak rusak.
+3. KELENGKAPAN KODE PENUH (ZERO TRUNCATION):
+   - Tuliskan kembali SELURUH KODE HASIL PERBAIKAN secara utuh dari baris awal (<!DOCTYPE html> / import React) sampai tag penutup terakhir di dalam blok protokol:
+<<<ZOZ_FILE name="${targetName}" lang="${lang}">
+... seluruh kode website lengkap yang sudah diperbaiki ...
+<<<END_ZOZ_FILE>>>
+   - DILARANG menggunakan potongan komentar seperti '// sisa kode sama...' atau '<!-- bagian lain tidak berubah -->'. Seluruh kode harus utuh agar pratinjau langsung berfungsi sempurna.
+4. Berikan penjelasan singkat, ramah, dan solutif (1-2 kalimat) sebelum blok kode mengenai bagian mana saja yang telah Anda perbaiki.`;
       }
     } else {
       followupPrompt = `[Konteks: Pengguna sedang melihat pratinjau langsung "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan / Obrolan Pengguna: "${val}"\n\nATURAN SANGAT KETAT UNTUK AI:\n- Zoz Router SUDAH menampilkan pratinjau langsung untuk berkas ini.\n- Pengguna TIDAK meminta perubahan kode. Pengguna hanya sedang mengobrol santai, memuji, berkomentar, atau bertanya tentang berkas ini.\n- JANGAN PERNAH merombak, merevisi, atau membuat ulang kode!\n- DILARANG KERAS mengeluarkan blok kode atau blok <<<ZOZ_FILE!\n- Jawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
@@ -15794,6 +15812,7 @@ ${blocks}
       displayPrompt: val,
       websiteMode: (wantsRevision && !isDiagram && !isDoc) ? 'preview' : null,
       isWebCreation: Boolean(wantsRevision && !isDiagram && !isDoc),
+      isWebsiteRevision: Boolean(wantsRevision && !isDiagram && !isDoc),
       isDocCreation: Boolean(wantsRevision && isDoc),
       docFormat: (wantsRevision && isDoc) ? (ext === 'pdf' ? 'pdf' : 'docx') : null,
       skipWebsiteCheck: true,
@@ -15805,14 +15824,7 @@ ${blocks}
   els.btnStudioCloseDrawer?.addEventListener('click', closeStudioAssistantDrawer);
   els.btnStudioMinAssistant?.addEventListener('click', (e) => {
     e.stopPropagation();
-    toggleStudioAssistantMinimize();
-  });
-  const studioAssistantHeaderEl = $('#studioAssistantHeader');
-  studioAssistantHeaderEl?.addEventListener('click', (e) => {
-    if (e.target.closest('button')) return;
-    if (els.studioAssistantPanel?.classList.contains('is-minimized')) {
-      toggleStudioAssistantMinimize();
-    }
+    closeStudioAssistantDrawer();
   });
   els.btnStudioClearChat?.addEventListener('click', () => {
     if (els.studioAssistantMessages) {
@@ -16864,6 +16876,47 @@ ${blocks}
     AudioEngine.click();
   }
 
+  function isWebsiteEditRequest(text) {
+    if (!text || typeof text !== 'string') return false;
+    const t = text.trim().toLowerCase();
+    const hasEditVerb = /\b(?:edit|ubahkan|ubah|gantikan|ganti|perbaiki|benahi|revisi|modifikasi|tambahkan|tambah|update|sesuaikan|hapus|hilangkan)\b/i.test(t);
+    const hasWebNoun = /\b(?:web|website|halaman|landing\s*page|tombol|navbar|header|footer|hero|warna|fitur|desain|tampilan|teks|konten|layout|css|js|javascript|komponen)\b/i.test(t);
+    return hasEditVerb && hasWebNoun;
+  }
+
+  function getLatestWebsiteFileInSession(session) {
+    if (activeAIFile) {
+      const ext = (activeAIFile.name || '').split('.').pop().toLowerCase();
+      if (ext === 'html' || ext === 'htm' || ext === 'jsx' || ext === 'tsx' || activeAIFile.lang === 'html' || activeAIFile.lang === 'jsx') {
+        const raw = activeAIFile.rawContent || activeAIFile.content || '';
+        if (raw.length > 50) return activeAIFile;
+      }
+    }
+    if (!session || !session.messages || !Array.isArray(session.messages)) return null;
+    for (let i = session.messages.length - 1; i >= 0; i--) {
+      const msg = session.messages[i];
+      if (msg.role !== 'assistant') continue;
+      if (msg.files && Array.isArray(msg.files)) {
+        const match = msg.files.find(f => {
+          const name = (f.name || '').toLowerCase();
+          return name.endsWith('.html') || name.endsWith('.htm') || name.endsWith('.jsx') || name.endsWith('.tsx') || f.lang === 'html' || f.lang === 'jsx';
+        });
+        if (match && (match.rawContent || match.content)) return match;
+      }
+      if (typeof msg.content === 'string') {
+        const match = msg.content.match(/<<<ZOZ_FILE\s+name=["']?([^"'>\s]+)["']?[^>]*>([\s\S]*?)<<<END_ZOZ_FILE>>>/i);
+        if (match) {
+          const name = match[1];
+          const content = match[2].trim();
+          if (/\.(html|htm|jsx|tsx)$/i.test(name) || name === 'index.html' || name === 'page.jsx') {
+            return { name, rawContent: content, content, lang: name.endsWith('.jsx') ? 'jsx' : 'html' };
+          }
+        }
+      }
+    }
+    return null;
+  }
+
   // ==================== DISPATCH / STREAMING ENGINE ====================
   async function handleSendPrompt(options = {}) {
     // HARUS `let`: blok auto-convert saat kirim (lihat di bawah) dan jalur rewrite
@@ -16890,12 +16943,16 @@ ${blocks}
       return;
     }
 
+    const currentActiveSession = getActiveSession();
+    const existingWebFile = getLatestWebsiteFileInSession(currentActiveSession);
+    const isEditingExistingWeb = Boolean(existingWebFile && isWebsiteEditRequest(rawText));
+
     // Klasifikasi Intent Pembuatan sebelum tool/modal dipanggil:
     // Pastikan permintaan website/landing page/aplikasi TIDAK PERNAH memicu modal dokumen!
     const creationIntent = classifyCreationIntent(rawText);
 
-    // Intersepsi Pembuatan Website: arahkan ke alur pembuatan kode website
-    if (!options.skipWebsiteCheck && !options.websiteMode && creationIntent === 'website') {
+    // Intersepsi Pembuatan Website: arahkan ke alur pembuatan kode website baru HANYA jika bukan sedang mengedit website yang sudah ada
+    if (!options.skipWebsiteCheck && !options.websiteMode && !isEditingExistingWeb && creationIntent === 'website') {
       openWebsiteModeModal(rawText);
       return;
     }
@@ -16913,6 +16970,46 @@ ${blocks}
     // berpindah sesi selama await berlangsung — pesan tidak boleh mendarat di sesi baru.
     const promptTargetSessionId = STATE.currentSessionId;
     try {
+
+    // Mandat Kaisar: Jika pengguna meminta revisi/edit bagian website pada kode yang sudah jadi di sesi ini,
+    // bungkus prompt dengan menyertakan kode eksisting agar AI memperbaiki kode tersebut alih-alih membuat dari nol
+    if (!options.overrideText && isEditingExistingWeb) {
+      const targetName = existingWebFile.name || 'index.html';
+      const lang = existingWebFile.lang || (targetName.endsWith('.jsx') ? 'jsx' : 'html');
+      const currentCode = existingWebFile.rawContent || existingWebFile.content || '';
+      if (currentCode.length > 50) {
+        const wrappedEditPrompt = `[MANDAT MUTLAK: PERBAIKI / EDIT KODE WEBSITE YANG SUDAH JADI - DILARANG BUAT ULANG DARI NOL!]
+Pengguna meminta perbaikan / modifikasi pada website yang sudah ada di sesi ini ("${targetName}").
+
+KODE WEBSITE LENGKAP YANG SUDAH JADI & BERFUNGSI SAAT INI:
+\`\`\`${lang}
+${currentCode}
+\`\`\`
+
+INSTRUKSI PERBAIKAN / EDIT DARI PENGGUNA:
+"${rawText}"
+
+ATURAN REVISI KETAT UNTUK AI:
+1. DILARANG KERAS MEMBUAT KODE BARU DARI NOL ATAU MENGGANTI TOTAL DESAIN!
+   - Pertahankan seluruh struktur, tata letak, styling, teks, dan fitur-fitur yang sudah ada di atas.
+   - Jadikan kode di atas sebagai fondasi utama.
+2. PERBAIKI KODE EKSISTING SECARA INKREMENTAL:
+   - Lakukan perbaikan / modifikasi HANYA pada bagian yang secara spesifik diminta pengguna.
+   - Sambungkan perubahan tersebut ke dalam kode yang sudah ada secara rapi dan presisi.
+3. Tuliskan SELURUH KODE LENGKAP HASIL EDIT secara utuh tanpa potongan komentar di dalam blok:
+<<<ZOZ_FILE name="${targetName}" lang="${lang}">
+... seluruh kode lengkap yang sudah diperbaiki ...
+<<<END_ZOZ_FILE>>>
+4. Berikan penjelasan singkat (1-2 kalimat) tentang bagian mana saja yang telah Anda edit atau perbaiki.`;
+
+        options.overrideText = wrappedEditPrompt;
+        options.displayPrompt = rawText;
+        options.websiteMode = 'preview';
+        options.isWebCreation = true;
+        options.isWebsiteRevision = true;
+        rawText = wrappedEditPrompt;
+      }
+    }
 
     // Claude AI resilience: minta izin notifikasi saat pengguna berinteraksi
     requestNotificationPermission();
@@ -17292,6 +17389,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         docFormat: options.docFormat,
         isDocCreation: isDocIntent,
         isWebCreation: !isDocIntent && Boolean(options.websiteMode || isWebsiteCreationPrompt(text)),
+        isWebsiteRevision: Boolean(options.isWebsiteRevision),
         isExplicitCleanCode: false,
         promptTitle: sanitizeTitle(text).substring(0, 36) || 'Dokumen_Resmi'
       };
@@ -19328,7 +19426,26 @@ Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
 5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
       } else if (isWebRequest && !hasNegativePreview) {
         const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
+        const isRevision = Boolean(runOptions.isWebsiteRevision);
         const isReactNextPrompt = /\b(?:next\.?js|nextjs|react\.?js|reactjs|jsx|tsx|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(promptText);
+
+        if (isRevision) {
+          systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PERBAIKAN & EDIT WEBSITE (PRESERVASI KODE - JANGAN MEMBUAT DARI NOL!)
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna sedang MEMPERBAIKI / MENGEDIT website yang SUDAH JADI.
+1. DILARANG KERAS MEMBUAT KODE BARU ULANG DARI NOL ATAU MENGGANTI TOTAL TEMA/STRUKTUR!
+   - Jangan pernah menghapus desain, animasi, tata letak, komponen, teks, maupun fitur yang sudah berjalan dengan baik pada kode sebelumnya.
+   - Ambil kode website yang sudah ada dalam prompt/konteks sebagai fondasi utama Anda.
+2. PERBAIKI SECARA INKREMENTAL:
+   - Modifikasi dan perbaiki HANYA bagian-bagian spesifik (komponen, teks, styling, fungsi JavaScript, warna, atau tata letak) yang diminta oleh pengguna.
+   - Pertahankan seluruh kode lainnya, pustaka (Tailwind, FontAwesome, Lucide, dll), event listeners, dan logika yang sudah ada sebelumnya.
+3. KELENGKAPAN KODE PENUH (ZERO TRUNCATION):
+   - Tuliskan kembali SELURUH KODE LENGKAP YANG TELAH DIPERBARUI secara utuh dan lengkap di dalam blok protokol:
+<<<ZOZ_FILE name="index.html" mime="text/html" lang="html">
+...seluruh kode lengkap yang telah diedit/diperbaiki...
+<<<END_ZOZ_FILE>>>
+   - Pastikan kode tetap fungsional, utuh, tanpa komentar pemotong ('// sisa kode sama...'), dan siap dirender langsung di pratinjau.
+4. Berikan penjelasan singkat dan sopan (1-2 kalimat) sebelum blok kode mengenai perbaikan yang telah Anda lakukan.`;
+        } else {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI WEB KELAS DUNIA (FULL FUNCTIONAL & PRATINJAU LANGSUNG)
 [PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN WEBSITE / LANDING PAGE / APLIKASI WEB INTERAKTIF KELAS DUNIA.
 - DILARANG KERAS mengalihkan permintaan ini menjadi pembuatan dokumen PDF/Word!
@@ -19384,6 +19501,7 @@ Tuliskan kode HTML5 atau React/Next.js (.jsx) lengkap yang fungsional dan siap j
    - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan seluruh bagian halaman secara lengkap dan fungsional.
    - DILARANG MENGGUNAKAN PLACEHOLDER PEMOTONG seperti '// kode CSS lainnya di sini...', '// tambahkan fungsi di sini...', atau '<!-- sisa konten -->'.
 4. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
+        }
       } else if (isExplicitCleanCodeCmd) {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
 Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
@@ -20666,7 +20784,26 @@ Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
 5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
       } else if (isWebRequest && !hasNegativePreview) {
         const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
+        const isRevision = Boolean(runOptions.isWebsiteRevision);
         const isReactNextPrompt = /\b(?:next\.?js|nextjs|react\.?js|reactjs|jsx|tsx|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(promptText);
+
+        if (isRevision) {
+          systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PERBAIKAN & EDIT WEBSITE (PRESERVASI KODE - JANGAN MEMBUAT DARI NOL!)
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna sedang MEMPERBAIKI / MENGEDIT website yang SUDAH JADI.
+1. DILARANG KERAS MEMBUAT KODE BARU ULANG DARI NOL ATAU MENGGANTI TOTAL TEMA/STRUKTUR!
+   - Jangan pernah menghapus desain, animasi, tata letak, komponen, teks, maupun fitur yang sudah berjalan dengan baik pada kode sebelumnya.
+   - Ambil kode website yang sudah ada dalam prompt/konteks sebagai fondasi utama Anda.
+2. PERBAIKI SECARA INKREMENTAL:
+   - Modifikasi dan perbaiki HANYA bagian-bagian spesifik (komponen, teks, styling, fungsi JavaScript, warna, atau tata letak) yang diminta oleh pengguna.
+   - Pertahankan seluruh kode lainnya, pustaka (Tailwind, FontAwesome, Lucide, dll), event listeners, dan logika yang sudah ada sebelumnya.
+3. KELENGKAPAN KODE PENUH (ZERO TRUNCATION):
+   - Tuliskan kembali SELURUH KODE LENGKAP YANG TELAH DIPERBARUI secara utuh dan lengkap di dalam blok protokol:
+<<<ZOZ_FILE name="index.html" mime="text/html" lang="html">
+...seluruh kode lengkap yang telah diedit/diperbaiki...
+<<<END_ZOZ_FILE>>>
+   - Pastikan kode tetap fungsional, utuh, tanpa komentar pemotong ('// sisa kode sama...'), dan siap dirender langsung di pratinjau.
+4. Berikan penjelasan singkat dan sopan (1-2 kalimat) sebelum blok kode mengenai perbaikan yang telah Anda lakukan.`;
+        } else {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI WEB KELAS DUNIA (FULL FUNCTIONAL & PRATINJAU LANGSUNG)
 [PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN WEBSITE / LANDING PAGE / APLIKASI WEB INTERAKTIF KELAS DUNIA.
 - DILARANG KERAS mengalihkan permintaan ini menjadi pembuatan dokumen PDF/Word!
@@ -20722,6 +20859,7 @@ Tuliskan kode HTML5 atau React/Next.js (.jsx) lengkap yang fungsional dan siap j
    - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan seluruh bagian halaman secara lengkap dan fungsional.
    - DILARANG MENGGUNAKAN PLACEHOLDER PEMOTONG seperti '// kode CSS lainnya di sini...', '// tambahkan fungsi di sini...', atau '<!-- sisa konten -->'.
 4. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
+        }
       } else if (isExplicitCleanCodeCmd) {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
 Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
