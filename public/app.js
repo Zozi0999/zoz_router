@@ -19,7 +19,7 @@
   };
 
   const IS_VERCEL = Boolean(location.hostname && location.hostname.endsWith('vercel.app'));
-  const IS_GITHUB_PAGES = Boolean(location.hostname && location.hostname.endsWith('github.io')) || location.protocol === 'file:';
+  const IS_GITHUB_PAGES = Boolean(location.hostname && (location.hostname.endsWith('github.io') || location.hostname.includes('zozdocs.com'))) || location.protocol === 'file:';
   const IS_CLOUD_HOSTED = Boolean(
     IS_VERCEL ||
     IS_GITHUB_PAGES ||
@@ -30,6 +30,15 @@
       location.hostname.includes('trycloudflare.com')
     ))
   );
+
+  const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
+
+  function getUniversalApiUrl(path) {
+    const cleanPath = path.startsWith('/') ? path : `/${path}`;
+    const isLocal = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]');
+    if (isLocal || IS_VERCEL) return cleanPath;
+    return `${VERCEL_BACKEND_GATEWAY}${cleanPath}`;
+  }
 
   const extractDomainSafe = (url) => {
     try {
@@ -815,12 +824,31 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (typeof origFetch !== 'function') return;
       window.fetch = function (input, init) {
         try {
-          const url = (typeof input === 'string') ? input
+          let url = (typeof input === 'string') ? input
             : (input && typeof input === 'object' && typeof input.url === 'string') ? input.url
             : (input instanceof URL) ? input.href : '';
+
+          const isLocal = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]');
+          const isVercel = Boolean(location.hostname && location.hostname.endsWith('vercel.app'));
+
+          // Pada domain statis tanpa serverless backend (z21.zozdocs.com, github.io, dll), teruskan /api/... non-WA ke Vercel Gateway resmi
+          if (!isLocal && !isVercel && typeof url === 'string') {
+            if (url.startsWith('/api/') && !url.startsWith('/api/wa/') && !url.startsWith('/api/terminal/') && !url.startsWith('/api/tunnel/') && !url.startsWith('/api/daemon/')) {
+              url = 'https://zoz-router.vercel.app' + url;
+              if (typeof input === 'string') {
+                input = url;
+              } else if (input instanceof URL) {
+                input = new URL(url);
+              } else if (input && typeof input === 'object') {
+                try { input = new Request(url, input); } catch (_) {}
+              }
+            }
+          }
+
           const isSameOrigin = url.startsWith('/') ||
             url.startsWith(window.location.origin + '/') ||
-            url === window.location.origin;
+            url === window.location.origin ||
+            url.startsWith('https://zoz-router.vercel.app/');
           if (isSameOrigin && STATE.userId) {
             const hdrs = new Headers((init && init.headers) || (input && input.headers) || undefined);
             if (!hdrs.has('X-User-ID')) hdrs.set('X-User-ID', STATE.userId);
@@ -17300,7 +17328,7 @@ ATURAN MUTLAK SURGICAL EDIT (WAJIB DIPATUHI 100%):
       }
 
       // Ollama Discovery: Ambil daftar model lewat gateway proxy atau direct endpoint
-      if (!IS_GITHUB_PAGES) {
+      if (!IS_GITHUB_PAGES || STATE.settings.ollamaApiKey) {
         try {
           const gwUrl = '/api/ollama/models?endpoint=' + encodeURIComponent(ep);
           const gwRes = await fetch(gwUrl, { headers }).catch(() => null);
@@ -20651,7 +20679,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   // --- OLLAMA STREAMING EXECUTION ---
   async function runOllamaStreaming(session, promptText, image, modelName, runOptions = {}) {
     const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
-    if (IS_GITHUB_PAGES && location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+    if (IS_GITHUB_PAGES && !STATE.settings.ollamaApiKey && location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
       const targetCloudModel = modelName.includes('/')
         ? modelName
         : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
@@ -20967,7 +20995,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       let chatUrl = '/api/ollama/chat';
-      if (IS_GITHUB_PAGES) {
+      if (IS_GITHUB_PAGES && !STATE.settings.ollamaApiKey) {
         if (location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
           throw new Error('mixed_content: Browser HTTPS memblokir koneksi ke Ollama localhost HTTP di GitHub Pages.');
         }
@@ -30917,7 +30945,7 @@ Aturan:
           headers['x-ollama-key'] = key;
         }
 
-        if (IS_GITHUB_PAGES) {
+        if (IS_GITHUB_PAGES && !key && !STATE.settings.ollamaApiKey) {
           if (location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
             showToast('⚠️ Di GitHub Pages HTTPS, browser memblokir koneksi HTTP localhost (mixed-content). Gunakan Ollama Cloud atau URL HTTPS publik.', 'error');
             return;
@@ -36340,7 +36368,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://earth-sperm-broad-jersey.trycloudflare.com',
+    activeTunnelUrl: 'https://garmin-rhode-savings-advantage.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -36742,7 +36770,7 @@ Aturan:
       if (!u) return true;
       const s = String(u).toLowerCase();
       const activeSub = (this.activeTunnelUrl || '').toLowerCase().replace(/^https?:\/\//, '').split('.')[0];
-      if (s.includes('.trycloudflare.com') && !s.includes('earth-sperm-broad-jersey') && (!activeSub || !s.includes(activeSub))) {
+      if (s.includes('.trycloudflare.com') && !s.includes('garmin-rhode-savings-advantage') && (!activeSub || !s.includes(activeSub))) {
         return true;
       }
       return false;
