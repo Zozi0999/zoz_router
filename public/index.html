@@ -1575,11 +1575,17 @@
             <div class="studio-code-editor-bar">
               <div class="studio-editor-status">
                 <i class="fa-solid fa-pen-to-square" style="color: var(--neon-cyan);"></i>
-                <span>Editor Kode Langsung <small style="color: var(--text-dim); margin-left: 6px;">(Ctrl+S untuk Simpan &amp; Terapkan)</small></span>
+                <span>Editor Kode Langsung <small style="color: var(--text-dim); margin-left: 6px;">(Ctrl+S / Tombol Simpan)</small></span>
               </div>
               <div class="studio-editor-actions">
+                <button type="button" class="gemini-pill-btn studio-editor-undo-btn" id="btnStudioUndoEdit" title="Kembalikan pengeditan/baris sebelumnya" disabled>
+                  <i class="fa-solid fa-rotate-left"></i> <span>Kembali</span>
+                </button>
+                <button type="button" class="gemini-pill-btn studio-editor-redo-btn" id="btnStudioRedoEdit" title="Ulangi pengeditan berikutnya" disabled>
+                  <i class="fa-solid fa-rotate-right"></i> <span>Ulangi</span>
+                </button>
                 <button type="button" class="gemini-pill-btn studio-editor-save-btn" id="btnStudioSaveCode" title="Simpan perubahan kode &amp; terapkan ke pratinjau (Ctrl+S)">
-                  <i class="fa-solid fa-floppy-disk"></i> <span>Simpan &amp; Terapkan</span>
+                  <i class="fa-solid fa-floppy-disk"></i> <span>Simpan</span>
                 </button>
                 <button type="button" class="gemini-pill-btn studio-editor-cancel-btn" id="btnStudioCancelCodeEdit" title="Batalkan pengeditan">
                   <i class="fa-solid fa-xmark"></i> <span>Batal</span>
@@ -1587,6 +1593,21 @@
               </div>
             </div>
             <textarea class="ai-file-studio-editor" id="aiFileStudioEditor" spellcheck="false" placeholder="Edit kode website Anda di sini..."></textarea>
+            <!-- Floating Mobile & Touch Friendly Bottom Control Bar in Center -->
+            <div class="studio-editor-bottom-bar" id="studioEditorBottomBar">
+              <button type="button" class="studio-bottom-action-btn btn-undo" id="btnStudioBottomUndo" title="Kembalikan baris/ketikan sebelumnya" disabled>
+                <i class="fa-solid fa-rotate-left"></i> <span>Kembali</span>
+              </button>
+              <button type="button" class="studio-bottom-action-btn btn-save" id="btnStudioBottomSave" title="Simpan &amp; Terapkan perubahan ke website">
+                <i class="fa-solid fa-floppy-disk"></i> <span>Simpan</span>
+              </button>
+              <button type="button" class="studio-bottom-action-btn btn-redo" id="btnStudioBottomRedo" title="Ulangi perubahan" disabled>
+                <i class="fa-solid fa-rotate-right"></i> <span>Ulangi</span>
+              </button>
+              <button type="button" class="studio-bottom-action-btn btn-cancel" id="btnStudioBottomCancel" title="Batal / Tutup Editor">
+                <i class="fa-solid fa-xmark"></i> <span>Batal</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1594,7 +1615,7 @@
         <div class="studio-assistant-panel" id="studioAssistantPanel" style="display: none;">
           <div class="studio-assistant-header" id="studioAssistantHeader">
             <div class="studio-assistant-title">
-              <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Asisten Zoz</span>
+              <i class="fa-solid fa-wand-magic-sparkles"></i> <span id="studioAssistantTitleText">Tanya AI</span>
             </div>
             <div class="studio-assistant-controls">
               <button class="gemini-pill-btn studio-endocrine-toggle-btn" id="btnToggleStudioEndocrine" type="button" title="Sensor Kode (Endocrine Code): Pantau kesehatan & error website">

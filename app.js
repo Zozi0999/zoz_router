@@ -1070,8 +1070,16 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     labelStudioEditCode: $('#labelStudioEditCode'),
     studioCodeEditorWrap: $('#studioCodeEditorWrap'),
     aiFileStudioEditor: $('#aiFileStudioEditor'),
+    btnStudioUndoEdit: $('#btnStudioUndoEdit'),
+    btnStudioRedoEdit: $('#btnStudioRedoEdit'),
     btnStudioSaveCode: $('#btnStudioSaveCode'),
     btnStudioCancelCodeEdit: $('#btnStudioCancelCodeEdit'),
+    studioEditorBottomBar: $('#studioEditorBottomBar'),
+    btnStudioBottomUndo: $('#btnStudioBottomUndo'),
+    btnStudioBottomSave: $('#btnStudioBottomSave'),
+    btnStudioBottomRedo: $('#btnStudioBottomRedo'),
+    btnStudioBottomCancel: $('#btnStudioBottomCancel'),
+    studioAssistantTitleText: $('#studioAssistantTitleText'),
     btnToggleStudioAssistant: $('#btnToggleStudioAssistant'),
     btnToggleStudioEndocrine: $('#btnToggleStudioEndocrine'),
     iconStudioEndocrine: $('#iconStudioEndocrine'),
@@ -13614,10 +13622,90 @@ window.addEventListener('error', function(e) {
     });
   }
 
+  // ==================== STUDIO CODE EDITOR HISTORY (UNDO / REDO) ====================
+  const StudioEditorHistory = {
+    stack: [],
+    index: -1,
+    maxSize: 60,
+    isApplying: false,
+    timer: null,
+
+    init(initialText = '') {
+      this.stack = [initialText];
+      this.index = 0;
+      this.updateBtns();
+    },
+
+    push(text) {
+      if (this.isApplying) return;
+      if (this.index >= 0 && this.stack[this.index] === text) return;
+      this.stack = this.stack.slice(0, this.index + 1);
+      this.stack.push(text);
+      if (this.stack.length > this.maxSize) this.stack.shift();
+      this.index = this.stack.length - 1;
+      this.updateBtns();
+    },
+
+    recordInput(text) {
+      if (this.isApplying) return;
+      clearTimeout(this.timer);
+      const prev = this.stack[this.index] || '';
+      // Catat seketika saat menekan Enter / ganti baris atau paste besar, atau debounce 300ms
+      const isLineChange = text.split('\n').length !== prev.split('\n').length;
+      if (isLineChange || Math.abs(text.length - prev.length) > 20) {
+        this.push(text);
+      } else {
+        this.timer = setTimeout(() => {
+          this.push(text);
+        }, 320);
+      }
+    },
+
+    canUndo() {
+      return this.index > 0;
+    },
+
+    canRedo() {
+      return this.index < this.stack.length - 1;
+    },
+
+    undo(editorEl) {
+      if (!this.canUndo() || !editorEl) return false;
+      this.isApplying = true;
+      this.index--;
+      const text = this.stack[this.index];
+      editorEl.value = text;
+      this.isApplying = false;
+      this.updateBtns();
+      return true;
+    },
+
+    redo(editorEl) {
+      if (!this.canRedo() || !editorEl) return false;
+      this.isApplying = true;
+      this.index++;
+      const text = this.stack[this.index];
+      editorEl.value = text;
+      this.isApplying = false;
+      this.updateBtns();
+      return true;
+    },
+
+    updateBtns() {
+      const u = this.canUndo();
+      const r = this.canRedo();
+      if (els.btnStudioUndoEdit) els.btnStudioUndoEdit.disabled = !u;
+      if (els.btnStudioRedoEdit) els.btnStudioRedoEdit.disabled = !r;
+      if (els.btnStudioBottomUndo) els.btnStudioBottomUndo.disabled = !u;
+      if (els.btnStudioBottomRedo) els.btnStudioBottomRedo.disabled = !r;
+    }
+  };
+
   function openStudioCodeEditor() {
     if (!activeAIFile || !els.studioCodeEditorWrap || !els.aiFileStudioEditor) return;
     const raw = activeAIFile.rawContent || activeAIFile.content || '';
     els.aiFileStudioEditor.value = raw;
+    StudioEditorHistory.init(raw);
     els.studioCodeEditorWrap.style.display = 'flex';
     els.studioCodeEditorWrap.classList.add('is-editing');
     if (els.btnStudioEditCode) els.btnStudioEditCode.classList.add('active');
@@ -16207,6 +16295,50 @@ Jelaskan singkat perubahannya.`;
     }
     if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
   });
+  els.aiFileStudioEditor?.addEventListener('input', () => {
+    if (els.aiFileStudioEditor) {
+      StudioEditorHistory.recordInput(els.aiFileStudioEditor.value);
+    }
+  });
+  els.btnStudioUndoEdit?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (els.aiFileStudioEditor && StudioEditorHistory.undo(els.aiFileStudioEditor)) {
+      if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+      showToast('↩️ Mengembalikan pengeditan sebelumnya.', 'info');
+    }
+  });
+  els.btnStudioRedoEdit?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (els.aiFileStudioEditor && StudioEditorHistory.redo(els.aiFileStudioEditor)) {
+      if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+      showToast('↪️ Mengulang pengeditan.', 'info');
+    }
+  });
+  els.btnStudioBottomUndo?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (els.aiFileStudioEditor && StudioEditorHistory.undo(els.aiFileStudioEditor)) {
+      if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+      showToast('↩️ Mengembalikan baris/pengeditan sebelumnya.', 'info');
+    }
+  });
+  els.btnStudioBottomRedo?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (els.aiFileStudioEditor && StudioEditorHistory.redo(els.aiFileStudioEditor)) {
+      if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+      showToast('↪️ Mengulang pengeditan.', 'info');
+    }
+  });
+  els.btnStudioBottomSave?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    saveStudioCodeEditor();
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+  });
+  els.btnStudioBottomCancel?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeStudioCodeEditor();
+    setAIFileStudioTab('preview');
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+  });
   els.btnStudioSaveCode?.addEventListener('click', (e) => {
     e.stopPropagation();
     saveStudioCodeEditor();
@@ -16237,6 +16369,12 @@ Jelaskan singkat perubahannya.`;
   els.btnStudioCloseDrawer?.addEventListener('click', closeStudioAssistantDrawer);
   els.btnStudioMinAssistant?.addEventListener('click', (e) => {
     e.stopPropagation();
+    closeStudioAssistantDrawer();
+  });
+  // Tutup panel Tanya AI di Studio saat pengguna menyentuh/mengklik area luar di layar HP atau desktop
+  document.addEventListener('pointerdown', (e) => {
+    if (!els.studioAssistantPanel || !els.studioAssistantPanel.classList.contains('is-open')) return;
+    if (e.target.closest('#studioAssistantPanel') || e.target.closest('#btnToggleStudioAssistant')) return;
     closeStudioAssistantDrawer();
   });
   els.btnToggleStudioEndocrine?.addEventListener('click', (e) => {
