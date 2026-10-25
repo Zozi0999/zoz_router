@@ -8405,31 +8405,39 @@ div.msg-sources-section button.msg-sources-title span {
 /* Studio AI Assistant: Mini Popup Assistant anchored under Tanya AI / Ekspor */
 .studio-assistant-panel {
   position: absolute !important;
-  right: 16px !important;
-  left: auto !important;
-  top: 14px !important;
-  bottom: auto !important;
+  right: 16px;
+  left: auto;
+  top: 14px;
+  bottom: auto;
   width: 320px !important;
-  max-width: min(350px, calc(100vw - 32px)) !important;
-  max-height: min(420px, 52vh) !important;
-  background: rgba(13, 16, 24, 0.95) !important;
-  backdrop-filter: blur(8px) !important;
-  -webkit-backdrop-filter: blur(8px) !important;
+  max-width: min(340px, calc(100vw - 24px)) !important;
+  max-height: min(440px, calc(100% - 28px)) !important;
+  background: rgba(13, 16, 24, 0.96) !important;
+  backdrop-filter: blur(12px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
   transform: translateZ(0);
   contain: paint;
-  border: 1px solid rgba(0, 240, 255, 0.35) !important;
+  border: 1px solid rgba(0, 240, 255, 0.4) !important;
   border-radius: 14px !important;
   display: none !important;
   flex-direction: column !important;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 20px rgba(0, 240, 255, 0.15) !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 240, 255, 0.18) !important;
   animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
   overflow: hidden !important;
   z-index: 100 !important;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 0.2s ease;
 }
 
 .studio-assistant-panel.is-open {
   display: flex !important;
+}
+
+.studio-assistant-panel.is-dragging {
+  transition: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.95), 0 0 35px rgba(0, 240, 255, 0.4) !important;
+  will-change: left, top;
 }
 
 /* Endocrine Code Button inside Studio Assistant */
@@ -8526,8 +8534,37 @@ div.msg-sources-section button.msg-sources-title span {
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  background: rgba(0, 240, 255, 0.06);
-  border-bottom: 1px solid rgba(0, 240, 255, 0.16);
+  background: rgba(0, 240, 255, 0.08);
+  border-bottom: 1px solid rgba(0, 240, 255, 0.18);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.studio-assistant-panel.is-dragging .studio-assistant-header {
+  cursor: grabbing !important;
+}
+
+.studio-drag-grip {
+  color: var(--text-dim, #64748b);
+  font-size: 0.85rem;
+  margin-right: 2px;
+  cursor: grab;
+  opacity: 0.7;
+  transition: all 0.2s ease;
+}
+
+.studio-assistant-header:hover .studio-drag-grip {
+  opacity: 1;
+  color: var(--neon-cyan, #00f0ff);
+}
+
+.studio-assistant-header button,
+.studio-assistant-header .gemini-pill-btn,
+.studio-assistant-header .gemini-icon-btn {
+  cursor: pointer;
+  touch-action: auto;
 }
 
 .studio-assistant-title {
@@ -8702,12 +8739,9 @@ div.msg-sources-section button.msg-sources-title span {
 
 .ai-file-studio-card.is-fullscreen .studio-assistant-panel {
   position: absolute !important;
-  left: 20px !important;
-  top: 16px !important;
-  bottom: auto !important;
   width: 320px !important;
-  max-width: min(350px, 90vw) !important;
-  max-height: min(400px, 46vh) !important;
+  max-width: min(340px, calc(100vw - 24px)) !important;
+  max-height: min(440px, calc(100% - 28px)) !important;
   z-index: 100 !important;
 }
 
@@ -11995,20 +12029,18 @@ body.mermaid-has-fullscreen {
   }
   .studio-assistant-panel {
     position: absolute !important;
-    right: 0 !important;
-    left: 0 !important;
-    top: auto !important;
-    bottom: 0 !important;
-    width: 100% !important;
-    max-width: 100vw !important;
-    max-height: 52vh !important;
-    border-radius: 16px 16px 0 0 !important;
-    border-bottom: none !important;
-    border-left: none !important;
-    border-right: none !important;
+    right: 10px;
+    left: auto;
+    top: 10px;
+    bottom: auto;
+    width: min(320px, calc(100vw - 20px)) !important;
+    max-width: calc(100vw - 20px) !important;
+    max-height: min(400px, 56vh) !important;
+    border-radius: 14px !important;
+    border: 1px solid rgba(0, 240, 255, 0.4) !important;
     display: none !important;
     z-index: 100 !important;
-    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.85), 0 0 20px rgba(0, 240, 255, 0.2) !important;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85), 0 0 20px rgba(0, 240, 255, 0.25) !important;
   }
   .studio-assistant-panel.is-open {
     display: flex !important;

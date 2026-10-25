@@ -1088,6 +1088,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     studioEndocrineStatusContent: $('#studioEndocrineStatusContent'),
     btnStudioMinAssistant: $('#btnStudioMinAssistant'),
     studioAssistantPanel: $('#studioAssistantPanel'),
+    studioAssistantHeader: $('#studioAssistantHeader'),
     studioAssistantMessages: $('#studioAssistantMessages'),
     studioAssistantEmpty: $('#studioAssistantEmpty'),
     btnStudioCloseDrawer: $('#btnStudioCloseDrawer'),
@@ -16128,7 +16129,110 @@ ${blocks}
     }
   });
 
-  // ==================== AUTHENTIC ZOZ ROUTER AI STUDIO COMPOSER & ASSISTANT ====================
+  // ==================== AUTHENTIC ZOZ ROUTER AI STUDIO COMPOSER & ASSISTANT (DRAGGABLE FLOATING) ====================
+  function clampStudioAssistantPosition() {
+    const panel = els.studioAssistantPanel;
+    if (!panel || !panel.style.left) return;
+    const stage = els.geminiStudioStage || panel.offsetParent;
+    if (!stage) return;
+    const stageRect = stage.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    if (stageRect.width <= 0 || stageRect.height <= 0) return;
+
+    let curLeft = parseFloat(panel.style.left) || 0;
+    let curTop = parseFloat(panel.style.top) || 0;
+    const maxLeft = Math.max(0, stageRect.width - panelRect.width);
+    const maxTop = Math.max(0, stageRect.height - panelRect.height);
+
+    curLeft = Math.max(0, Math.min(curLeft, maxLeft));
+    curTop = Math.max(0, Math.min(curTop, maxTop));
+
+    panel.style.setProperty('left', `${curLeft}px`, 'important');
+    panel.style.setProperty('top', `${curTop}px`, 'important');
+  }
+
+  function initStudioAssistantDraggable() {
+    const panel = els.studioAssistantPanel;
+    const header = els.studioAssistantHeader || panel?.querySelector('.studio-assistant-header');
+    if (!panel || !header) return;
+
+    let isDragging = false;
+    let startPointerX = 0;
+    let startPointerY = 0;
+    let startPanelLeft = 0;
+    let startPanelTop = 0;
+
+    header.addEventListener('pointerdown', (e) => {
+      // Abaikan jika menekan tombol kontrol (Endocrine, Trash, Close, dll)
+      if (e.target.closest('button') || e.target.closest('.gemini-pill-btn') || e.target.closest('.gemini-icon-btn')) {
+        return;
+      }
+
+      const stage = els.geminiStudioStage || panel.offsetParent || document.body;
+      const stageRect = stage.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+
+      isDragging = true;
+      startPointerX = e.clientX;
+      startPointerY = e.clientY;
+
+      startPanelLeft = panelRect.left - stageRect.left;
+      startPanelTop = panelRect.top - stageRect.top;
+
+      panel.classList.add('is-dragging');
+      panel.style.setProperty('left', `${startPanelLeft}px`, 'important');
+      panel.style.setProperty('top', `${startPanelTop}px`, 'important');
+      panel.style.setProperty('right', 'auto', 'important');
+      panel.style.setProperty('bottom', 'auto', 'important');
+
+      try {
+        header.setPointerCapture(e.pointerId);
+      } catch (_) {}
+
+      e.preventDefault();
+    });
+
+    header.addEventListener('pointermove', (e) => {
+      if (!isDragging) return;
+      e.preventDefault();
+
+      const dx = e.clientX - startPointerX;
+      const dy = e.clientY - startPointerY;
+
+      const stage = els.geminiStudioStage || panel.offsetParent || document.body;
+      const stageRect = stage.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+
+      let targetLeft = startPanelLeft + dx;
+      let targetTop = startPanelTop + dy;
+
+      const maxLeft = Math.max(4, stageRect.width - panelRect.width - 4);
+      const maxTop = Math.max(4, stageRect.height - panelRect.height - 4);
+
+      targetLeft = Math.max(4, Math.min(targetLeft, maxLeft));
+      targetTop = Math.max(4, Math.min(targetTop, maxTop));
+
+      panel.style.setProperty('left', `${targetLeft}px`, 'important');
+      panel.style.setProperty('top', `${targetTop}px`, 'important');
+    });
+
+    const stopDragging = (e) => {
+      if (!isDragging) return;
+      isDragging = false;
+      panel.classList.remove('is-dragging');
+      try {
+        if (header.hasPointerCapture(e.pointerId)) {
+          header.releasePointerCapture(e.pointerId);
+        }
+      } catch (_) {}
+    };
+
+    header.addEventListener('pointerup', stopDragging);
+    header.addEventListener('pointercancel', stopDragging);
+
+    window.addEventListener('resize', clampStudioAssistantPosition);
+  }
+
   function openStudioAssistantDrawer() {
     if (els.studioAssistantPanel) {
       els.studioAssistantPanel.classList.add('is-open');
@@ -16136,6 +16240,7 @@ ${blocks}
       els.studioAssistantPanel.classList.remove('is-minimized');
       if (els.btnToggleStudioAssistant) els.btnToggleStudioAssistant.classList.add('active');
       StudioEndocrineDiagnostics.updateUI();
+      clampStudioAssistantPosition();
     }
   }
 
@@ -16371,12 +16476,8 @@ Jelaskan singkat perubahannya.`;
     e.stopPropagation();
     closeStudioAssistantDrawer();
   });
-  // Tutup panel Tanya AI di Studio saat pengguna menyentuh/mengklik area luar di layar HP atau desktop
-  document.addEventListener('pointerdown', (e) => {
-    if (!els.studioAssistantPanel || !els.studioAssistantPanel.classList.contains('is-open')) return;
-    if (e.target.closest('#studioAssistantPanel') || e.target.closest('#btnToggleStudioAssistant')) return;
-    closeStudioAssistantDrawer();
-  });
+  // Inisialisasi jendela Tanya AI melayang yang bebas digeser (draggable) di layar HP & Desktop
+  initStudioAssistantDraggable();
   els.btnToggleStudioEndocrine?.addEventListener('click', (e) => {
     e.stopPropagation();
     STATE.settings.endocrineCodeEnabled = !STATE.settings.endocrineCodeEnabled;
