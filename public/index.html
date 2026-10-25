@@ -1491,6 +1491,9 @@
         </div>
 
         <div class="gemini-studio-header-right">
+          <button class="gemini-pill-btn studio-edit-code-btn" id="btnStudioEditCode" type="button" title="Edit kode website secara langsung">
+            <i class="fa-solid fa-pen-to-square" id="iconStudioEditCode"></i> <span id="labelStudioEditCode">Edit Kode</span>
+          </button>
           <button class="gemini-pill-btn studio-chat-toggle-btn" id="btnToggleStudioAssistant" type="button" title="Tanya AI tentang Website (Popup Melayang)">
             <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Tanya AI</span>
           </button>
@@ -1568,6 +1571,23 @@
             </div>
           </div>
           <pre class="ai-file-studio-code gemini-studio-code" id="aiFileStudioCode"></pre>
+          <div class="studio-code-editor-wrap" id="studioCodeEditorWrap" style="display: none;">
+            <div class="studio-code-editor-bar">
+              <div class="studio-editor-status">
+                <i class="fa-solid fa-pen-to-square" style="color: var(--neon-cyan);"></i>
+                <span>Editor Kode Langsung <small style="color: var(--text-dim); margin-left: 6px;">(Ctrl+S untuk Simpan &amp; Terapkan)</small></span>
+              </div>
+              <div class="studio-editor-actions">
+                <button type="button" class="gemini-pill-btn studio-editor-save-btn" id="btnStudioSaveCode" title="Simpan perubahan kode &amp; terapkan ke pratinjau (Ctrl+S)">
+                  <i class="fa-solid fa-floppy-disk"></i> <span>Simpan &amp; Terapkan</span>
+                </button>
+                <button type="button" class="gemini-pill-btn studio-editor-cancel-btn" id="btnStudioCancelCodeEdit" title="Batalkan pengeditan">
+                  <i class="fa-solid fa-xmark"></i> <span>Batal</span>
+                </button>
+              </div>
+            </div>
+            <textarea class="ai-file-studio-editor" id="aiFileStudioEditor" spellcheck="false" placeholder="Edit kode website Anda di sini..."></textarea>
+          </div>
         </div>
 
         <!-- Studio Assistant Floating Mini Popup on Left -->

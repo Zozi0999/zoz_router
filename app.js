@@ -1065,6 +1065,13 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     inputStudioFollowup: $('#inputStudioFollowup'),
     btnStudioSendFollowup: $('#btnStudioSendFollowup'),
     btnStudioStopFollowup: $('#btnStudioStopFollowup'),
+    btnStudioEditCode: $('#btnStudioEditCode'),
+    iconStudioEditCode: $('#iconStudioEditCode'),
+    labelStudioEditCode: $('#labelStudioEditCode'),
+    studioCodeEditorWrap: $('#studioCodeEditorWrap'),
+    aiFileStudioEditor: $('#aiFileStudioEditor'),
+    btnStudioSaveCode: $('#btnStudioSaveCode'),
+    btnStudioCancelCodeEdit: $('#btnStudioCancelCodeEdit'),
     btnToggleStudioAssistant: $('#btnToggleStudioAssistant'),
     btnToggleStudioEndocrine: $('#btnToggleStudioEndocrine'),
     iconStudioEndocrine: $('#iconStudioEndocrine'),
@@ -8682,6 +8689,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           <button class="code-preview-btn" title="Buka Pratinjau Interaktif di AI File Studio" type="button">
             <i class="fa-solid fa-eye"></i>
             <span class="preview-text">Pratinjau</span>
+          </button>
+          <button class="code-edit-btn" title="Edit kode website ini secara langsung" type="button">
+            <i class="fa-solid fa-pen-to-square"></i>
+            <span class="edit-text">Edit Kode</span>
           </button>` : ''}
           <button class="code-copy-btn" title="Salin seluruh kode" type="button">
             <i class="fa-solid fa-clipboard"></i>
@@ -8707,8 +8718,34 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
             const docName = guessFileNameFromLang(lang.toLowerCase(), codeText);
             const mime = guessMimeFromName(docName);
-            const aiFile = buildAIFile(docName, mime, lang.toLowerCase(), codeText, 'Pratinjau Langsung dari Kode');
+            const aiFile = pre._aiFile || buildAIFile(docName, mime, lang.toLowerCase(), codeText, 'Pratinjau Langsung dari Kode');
+            aiFile._sourceCodeBlock = codeBlock;
+            pre._aiFile = aiFile;
             openAIFileStudio(aiFile);
+            AudioEngine.click();
+          });
+        }
+        const editBtn = header.querySelector('.code-edit-btn');
+        if (editBtn) {
+          editBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            let codeText = '';
+            if (codeBlock) {
+              codeText = codeBlock.innerText || codeBlock.textContent || '';
+            } else {
+              const clone = pre.cloneNode(true);
+              const oldHeader = clone.querySelector('.code-header');
+              if (oldHeader) oldHeader.remove();
+              codeText = clone.innerText || clone.textContent || '';
+            }
+            const docName = guessFileNameFromLang(lang.toLowerCase(), codeText);
+            const mime = guessMimeFromName(docName);
+            const aiFile = pre._aiFile || buildAIFile(docName, mime, lang.toLowerCase(), codeText, 'Edit Kode Website');
+            aiFile.rawContent = codeText;
+            aiFile.content = codeText;
+            aiFile._sourceCodeBlock = codeBlock;
+            pre._aiFile = aiFile;
+            openAIFileStudio(aiFile, 'edit');
             AudioEngine.click();
           });
         }
@@ -13402,6 +13439,9 @@ window.addEventListener('error', function(e) {
           <button class="gemini-pill-btn gemini-primary-preview-btn canvas-card-preview-btn canvas-card-fullscreen-btn" type="button" title="Buka Pratinjau Interaktif Website">
             <i class="fa-solid fa-play"></i> <span>Pratinjau</span>
           </button>
+          <button class="gemini-pill-btn canvas-card-edit-code-btn" type="button" title="Edit kode website ini secara langsung">
+            <i class="fa-solid fa-pen-to-square"></i> <span>Edit Kode</span>
+          </button>
           <div class="gemini-dropdown-wrap">
             <button class="gemini-pill-btn gemini-card-export-btn" type="button" title="Ekspor atau unduh website ini">
               <i class="fa-solid fa-arrow-down-to-bracket"></i> <span>Ekspor</span> <i class="fa-solid fa-chevron-down caret-icon"></i>
@@ -13472,9 +13512,18 @@ window.addEventListener('error', function(e) {
 
     card.querySelectorAll('.canvas-card-preview-btn, .canvas-card-fullscreen-btn').forEach(btn => {
       btn.addEventListener('click', () => {
+        file._cardIframe = iframe;
+        file._cardCodeEl = codeEl;
         openAIFileStudio(file, 'preview');
         AudioEngine.click();
       });
+    });
+
+    card.querySelector('.canvas-card-edit-code-btn')?.addEventListener('click', () => {
+      file._cardIframe = iframe;
+      file._cardCodeEl = codeEl;
+      openAIFileStudio(file, 'edit');
+      AudioEngine.click();
     });
 
     // Setup Export Dropdown (top layer stacking & smart boundary protection)
@@ -13565,7 +13614,90 @@ window.addEventListener('error', function(e) {
     });
   }
 
+  function openStudioCodeEditor() {
+    if (!activeAIFile || !els.studioCodeEditorWrap || !els.aiFileStudioEditor) return;
+    const raw = activeAIFile.rawContent || activeAIFile.content || '';
+    els.aiFileStudioEditor.value = raw;
+    els.studioCodeEditorWrap.style.display = 'flex';
+    els.studioCodeEditorWrap.classList.add('is-editing');
+    if (els.btnStudioEditCode) els.btnStudioEditCode.classList.add('active');
+    if (els.iconStudioEditCode) els.iconStudioEditCode.className = 'fa-solid fa-floppy-disk';
+    if (els.labelStudioEditCode) els.labelStudioEditCode.textContent = 'Simpan Kode';
+    setTimeout(() => { try { els.aiFileStudioEditor.focus(); } catch (_) {} }, 30);
+  }
+
+  function closeStudioCodeEditor() {
+    if (!els.studioCodeEditorWrap) return;
+    els.studioCodeEditorWrap.classList.remove('is-editing');
+    els.studioCodeEditorWrap.style.display = 'none';
+    if (els.btnStudioEditCode) els.btnStudioEditCode.classList.remove('active');
+    if (els.iconStudioEditCode) els.iconStudioEditCode.className = 'fa-solid fa-pen-to-square';
+    if (els.labelStudioEditCode) els.labelStudioEditCode.textContent = 'Edit Kode';
+  }
+
+  function saveStudioCodeEditor() {
+    if (!activeAIFile || !els.aiFileStudioEditor) return;
+    const newCode = els.aiFileStudioEditor.value;
+    activeAIFile.rawContent = newCode;
+    activeAIFile.content = newCode;
+    FileRevisionStore.pushRevision(activeAIFile.name, newCode);
+    updateStudioRevisionBtns(activeAIFile.name);
+
+    if (els.aiFileStudioCode) {
+      els.aiFileStudioCode.textContent = newCode;
+      try {
+        if (window.hljs && els.aiFileStudioCode.removeAttribute) {
+          els.aiFileStudioCode.removeAttribute('data-highlighted');
+          window.hljs.highlightElement(els.aiFileStudioCode);
+        }
+      } catch (_) {}
+    }
+    renderAIFileIntoStudioPreview(activeAIFile);
+
+    // Sinkronkan ke kartu Pratinjau atau blok Kode di obrolan
+    if (activeAIFile._cardIframe) {
+      activeAIFile._cardIframe.srcdoc = prepareSafeHtmlForPreview(newCode, activeAIFile);
+    }
+    if (activeAIFile._cardCodeEl) {
+      activeAIFile._cardCodeEl.textContent = newCode;
+      try { if (window.hljs) { activeAIFile._cardCodeEl.removeAttribute('data-highlighted'); window.hljs.highlightElement(activeAIFile._cardCodeEl); } } catch (_) {}
+    }
+    if (activeAIFile._sourceCodeBlock) {
+      activeAIFile._sourceCodeBlock.textContent = newCode;
+      try { if (window.hljs) { delete activeAIFile._sourceCodeBlock.dataset.highlighted; window.hljs.highlightElement(activeAIFile._sourceCodeBlock); } } catch (_) {}
+    }
+
+    // Simpan ke sesi aktif agar perubahan bertahan saat muat ulang
+    const curSession = typeof getActiveSession === 'function' ? getActiveSession() : null;
+    if (curSession && Array.isArray(curSession.messages)) {
+      for (let i = curSession.messages.length - 1; i >= 0; i--) {
+        const m = curSession.messages[i];
+        if (m.files && Array.isArray(m.files)) {
+          const f = m.files.find(x => x.name === activeAIFile.name);
+          if (f) { f.rawContent = newCode; f.content = newCode; break; }
+        }
+      }
+      if (typeof savePersistedState === 'function') savePersistedState();
+    }
+
+    closeStudioCodeEditor();
+    setAIFileStudioTab('preview');
+    showToast('✅ Perubahan kode disimpan & diterapkan ke pratinjau!', 'success');
+  }
+
   function setAIFileStudioTab(tab) {
+    if (tab === 'edit') {
+      if (els.aiFileStudioPreviewPane) els.aiFileStudioPreviewPane.classList.add('hidden');
+      if (els.aiFileStudioCode) els.aiFileStudioCode.classList.remove('active');
+      if (els.aiFileStudioTabs) {
+        els.aiFileStudioTabs.querySelectorAll('.ai-file-tab').forEach((b) => {
+          b.classList.toggle('active', b.dataset.tab === 'code');
+        });
+      }
+      openStudioCodeEditor();
+      return;
+    }
+    closeStudioCodeEditor();
     const isPreview = tab === 'preview';
     if (els.aiFileStudioPreviewPane) els.aiFileStudioPreviewPane.classList.toggle('hidden', !isPreview);
     if (els.aiFileStudioCode) els.aiFileStudioCode.classList.toggle('active', !isPreview);
@@ -16065,6 +16197,42 @@ Jelaskan singkat perubahannya.`;
     });
   }
 
+  els.btnStudioEditCode?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isEditing = Boolean(els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing'));
+    if (isEditing) {
+      saveStudioCodeEditor();
+    } else {
+      setAIFileStudioTab('edit');
+    }
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+  });
+  els.btnStudioSaveCode?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    saveStudioCodeEditor();
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+  });
+  els.btnStudioCancelCodeEdit?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeStudioCodeEditor();
+    setAIFileStudioTab('preview');
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+  });
+  els.aiFileStudioEditor?.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      saveStudioCodeEditor();
+      return;
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const ed = els.aiFileStudioEditor;
+      const start = ed.selectionStart;
+      const end = ed.selectionEnd;
+      ed.value = ed.value.substring(0, start) + '  ' + ed.value.substring(end);
+      ed.selectionStart = ed.selectionEnd = start + 2;
+    }
+  });
   els.btnToggleStudioAssistant?.addEventListener('click', toggleStudioAssistantDrawer);
   els.btnStudioCloseDrawer?.addEventListener('click', closeStudioAssistantDrawer);
   els.btnStudioMinAssistant?.addEventListener('click', (e) => {
