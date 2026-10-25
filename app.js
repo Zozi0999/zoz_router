@@ -2512,17 +2512,29 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           if (typeof AUTONOMOUS_TOOL_CACHE !== 'undefined' && AUTONOMOUS_TOOL_CACHE && typeof AUTONOMOUS_TOOL_CACHE.clear === 'function') {
             try { AUTONOMOUS_TOOL_CACHE.clear(); } catch (_) {}
           }
-          if (this.hormones) {
-            if (this.hormones.cortisol > 0) {
-              this.hormones.cortisol = Math.max(0, Math.round((this.hormones.cortisol - 45) * 10) / 10);
-            }
-            this.hormones.endorphin = Math.min(100, Math.round((this.hormones.endorphin + 20) * 10) / 10);
-            this.hormones.dopamine = Math.min(100, Math.round((this.hormones.dopamine + 20) * 10) / 10);
-          }
         }
 
-        // Audit ulang komprehensif
-        this.auditComprehensive(true);
+        if (this.hormones) {
+          if (this.hormones.cortisol > 0) {
+            this.hormones.cortisol = Math.max(0, Math.round((this.hormones.cortisol - 45) * 10) / 10);
+          }
+          this.hormones.endorphin = Math.min(100, Math.round((this.hormones.endorphin + 20) * 10) / 10);
+          this.hormones.dopamine = Math.min(100, Math.round((this.hormones.dopamine + 20) * 10) / 10);
+        }
+
+        // Audit ulang komprehensif HANYA saat pemicu manual (hindari reflow berat 150+ elementFromPoint pada refleks background)
+        if (!options.isAutoReflex) {
+          this.auditComprehensive(true);
+        } else {
+          if (this.viewportIssues && this.viewportIssues.length > 0) {
+            healedCount += this.viewportIssues.length;
+            this.viewportIssues = [];
+          }
+          if (this.buttonIssues && this.buttonIssues.length > 0) {
+            healedCount += this.buttonIssues.length;
+            this.buttonIssues = [];
+          }
+        }
         const logMsg = options && options.isAutoReflex
           ? `[Auto-Endorfin v3] Refleks pemulihan otonom (${options.reason || 'Homeostasis'}): ${healedCount} anomali dinormalkan.`
           : `Auto-Heal berhasil: Memperbaiki ${healedCount} anomali layout, modal & halangan tombol!`;
@@ -5786,9 +5798,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             if (Array.isArray(m.files) && m.files.length > 0) {
               safeFiles = m.files.map(f => ({
                 name: f.name, mime: f.mime, lang: f.lang,
-                rawContent: keepFileContent ? (f.rawContent || f.content || '') : '',
-                content: keepFileContent ? (f.content || f.rawContent || '') : '',
-                rawBlock: f.rawBlock,
+                content: keepFileContent ? (f.rawContent || f.content || '') : '',
                 _editChatHistory: f._editChatHistory,
                 _studioChatHistory: f._studioChatHistory,
                 projectFiles: f.projectFiles,
@@ -13841,41 +13851,59 @@ window.addEventListener('error', function(e) {
   };
 
   let studioLastAiEditedLines = new Set();
+  const studioLineTokenCache = new Map();
+  const STUDIO_TOKEN_REGEX = /(<!--[\s\S]*?-->|\/\*[\s\S]*?\*\/|\/\/.*$)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(<\/?[a-zA-Z!][a-zA-Z0-9:-]*\b|\/?>)|(\b[a-zA-Z_:][a-zA-Z0-9_:-]*(?=\s*=))|(\b(?:const|let|var|function|return|if|else|for|while|switch|case|break|continue|new|class|extends|import|export|from|default|async|await|try|catch|finally|throw|typeof|instanceof|in|of|this|super|true|false|null|undefined|void|delete|@media|@keyframes|@import|!important)\b)|(\b[a-zA-Z_$][a-zA-Z0-9_$]*(?=\s*\())|(\b[a-zA-Z-]+\s*(?=:[^:]))|(#[0-9a-fA-F]{3,8}\b|\b\d+(?:\.\d+)?(?:px|rem|em|vh|vw|%|s|ms|deg|fr)?\b)/g;
 
   function tokenizeStudioCodeLine(line) {
     if (!line) return '';
+    const cached = studioLineTokenCache.get(line);
+    if (cached !== undefined) return cached;
+    if (line.length > 600) {
+      return escapeHtml(line);
+    }
     const trimmed = line.trim();
-    if (trimmed.startsWith('//') || (trimmed.startsWith('/*') && trimmed.endsWith('*/')) || (trimmed.startsWith('<!--') && trimmed.endsWith('-->'))) {
-      return `<span class="tok-comment">${escapeHtml(line)}</span>`;
-    }
-    const tokenRe = /(<!--[\s\S]*?-->|\/\*[\s\S]*?\*\/|\/\/.*$)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(<\/?[a-zA-Z!][a-zA-Z0-9:-]*\b|\/?>)|(\b[a-zA-Z_:][a-zA-Z0-9_:-]*(?=\s*=))|(\b(?:const|let|var|function|return|if|else|for|while|switch|case|break|continue|new|class|extends|import|export|from|default|async|await|try|catch|finally|throw|typeof|instanceof|in|of|this|super|true|false|null|undefined|void|delete|@media|@keyframes|@import|!important)\b)|(\b[a-zA-Z_$][a-zA-Z0-9_$]*(?=\s*\())|(\b[a-zA-Z-]+\s*(?=:[^:]))|(#[0-9a-fA-F]{3,8}\b|\b\d+(?:\.\d+)?(?:px|rem|em|vh|vw|%|s|ms|deg|fr)?\b)/g;
     let out = '';
-    let lastIdx = 0;
-    let m;
-    while ((m = tokenRe.exec(line)) !== null) {
-      if (m.index > lastIdx) {
-        out += escapeHtml(line.slice(lastIdx, m.index));
+    if (trimmed.startsWith('//') || (trimmed.startsWith('/*') && trimmed.endsWith('*/')) || (trimmed.startsWith('<!--') && trimmed.endsWith('-->'))) {
+      out = `<span class="tok-comment">${escapeHtml(line)}</span>`;
+    } else {
+      STUDIO_TOKEN_REGEX.lastIndex = 0;
+      let lastIdx = 0;
+      let m;
+      while ((m = STUDIO_TOKEN_REGEX.exec(line)) !== null) {
+        if (m.index > lastIdx) {
+          out += escapeHtml(line.slice(lastIdx, m.index));
+        }
+        const full = m[0];
+        let cls = 'tok-punc';
+        if (m[1]) cls = 'tok-comment';
+        else if (m[2]) cls = 'tok-str';
+        else if (m[3]) cls = 'tok-tag';
+        else if (m[4]) cls = 'tok-attr';
+        else if (m[5]) cls = 'tok-kw';
+        else if (m[6]) cls = 'tok-fn';
+        else if (m[7]) cls = 'tok-prop';
+        else if (m[8]) cls = 'tok-num';
+        out += `<span class="${cls}">${escapeHtml(full)}</span>`;
+        lastIdx = m.index + full.length;
       }
-      const full = m[0];
-      let cls = 'tok-punc';
-      if (m[1]) cls = 'tok-comment';
-      else if (m[2]) cls = 'tok-str';
-      else if (m[3]) cls = 'tok-tag';
-      else if (m[4]) cls = 'tok-attr';
-      else if (m[5]) cls = 'tok-kw';
-      else if (m[6]) cls = 'tok-fn';
-      else if (m[7]) cls = 'tok-prop';
-      else if (m[8]) cls = 'tok-num';
-      out += `<span class="${cls}">${escapeHtml(full)}</span>`;
-      lastIdx = m.index + full.length;
+      if (lastIdx < line.length) {
+        out += escapeHtml(line.slice(lastIdx));
+      }
     }
-    if (lastIdx < line.length) {
-      out += escapeHtml(line.slice(lastIdx));
+    if (studioLineTokenCache.size > 4000) {
+      studioLineTokenCache.clear();
     }
+    studioLineTokenCache.set(line, out);
     return out;
   }
 
-  // ==================== STUDIO CODE SEARCH CONTROLLER (v479) ====================
+  function isStudioInCodeMenu() {
+    const isEditing = Boolean(els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing'));
+    const isCodeTab = Boolean(els.aiFileStudioCode && els.aiFileStudioCode.classList.contains('active'));
+    return isEditing || isCodeTab;
+  }
+
+  // ==================== STUDIO CODE SEARCH CONTROLLER (v480 - Ultra-Fast Cached) ====================
   const StudioCodeSearch = {
     isOpen: false,
     query: '',
@@ -13883,6 +13911,10 @@ window.addEventListener('error', function(e) {
     currentIndex: -1,
     matchingLinesSet: new Set(),
     activeLine: -1,
+    _cachedSourceText: null,
+    _cachedTextLower: '',
+    _cachedLineBreaks: [-1, 0],
+    _searchRaf: null,
 
     open(prefill = null) {
       if (!activeAIFile) return;
@@ -13894,7 +13926,10 @@ window.addEventListener('error', function(e) {
         els.studioEditorSearchBar.style.display = 'flex';
       }
       if (els.btnStudioEditorSearch) els.btnStudioEditorSearch.classList.add('active');
-      if (els.btnStudioHeaderSearchCode) els.btnStudioHeaderSearchCode.classList.add('active');
+      if (els.btnStudioHeaderSearchCode) {
+        els.btnStudioHeaderSearchCode.style.display = 'inline-flex';
+        els.btnStudioHeaderSearchCode.classList.add('active');
+      }
       if (els.btnStudioBottomSearch) els.btnStudioBottomSearch.classList.add('active');
 
       const ed = els.aiFileStudioEditor;
@@ -13917,12 +13952,16 @@ window.addEventListener('error', function(e) {
             els.studioSearchInput.focus();
             els.studioSearchInput.select();
           } catch (_) {}
-        }, 40);
+        }, 30);
       }
       this.executeSearch(els.studioSearchInput ? els.studioSearchInput.value : '');
     },
 
     close() {
+      if (this._searchRaf) {
+        cancelAnimationFrame(this._searchRaf);
+        this._searchRaf = null;
+      }
       this.isOpen = false;
       this.matches = [];
       this.currentIndex = -1;
@@ -13946,6 +13985,27 @@ window.addEventListener('error', function(e) {
       else this.open();
     },
 
+    scheduleSearch(query) {
+      this.query = typeof query === 'string' ? query : '';
+      if (this._searchRaf) cancelAnimationFrame(this._searchRaf);
+      this._searchRaf = requestAnimationFrame(() => {
+        this._searchRaf = null;
+        this.executeSearch(this.query);
+      });
+    },
+
+    _ensureIndex(text) {
+      if (text === this._cachedSourceText) return;
+      this._cachedSourceText = text;
+      this._cachedTextLower = text.toLowerCase();
+      const lb = [-1];
+      for (let i = 0; i < text.length; i++) {
+        if (text.charCodeAt(i) === 10) lb.push(i);
+      }
+      lb.push(text.length);
+      this._cachedLineBreaks = lb;
+    },
+
     executeSearch(query) {
       this.query = typeof query === 'string' ? query : '';
       const ed = els.aiFileStudioEditor;
@@ -13964,17 +14024,12 @@ window.addEventListener('error', function(e) {
         return;
       }
 
+      this._ensureIndex(text);
       const qLower = trimmed.toLowerCase();
-      const textLower = text.toLowerCase();
+      const textLower = this._cachedTextLower;
+      const lineBreaks = this._cachedLineBreaks;
       let pos = 0;
       let idx = 0;
-
-      // Line breaks index lookup
-      const lineBreaks = [-1];
-      for (let i = 0; i < text.length; i++) {
-        if (text[i] === '\n') lineBreaks.push(i);
-      }
-      lineBreaks.push(text.length);
 
       function getLineNumber(offset) {
         let low = 0, high = lineBreaks.length - 1;
@@ -14111,6 +14166,11 @@ window.addEventListener('error', function(e) {
     showToast(`✨ Baris ${m.line} dipilih! Ketik perubahan di kolom prompt bawah.`, 'info');
   }
 
+  let lastHighlightedRawCode = null;
+  let lastHighlightedEditedKey = '';
+  let lastRenderedLineCount = -1;
+  let prevDecoratedLineNums = new Set();
+
   function renderStudioCodeEditorHighlight(codeText, editedRanges = null) {
     const raw = typeof codeText === 'string' ? codeText : (els.aiFileStudioEditor?.value || '');
     if (Array.isArray(editedRanges)) {
@@ -14121,12 +14181,12 @@ window.addEventListener('error', function(e) {
         }
       });
     }
-    const lines = raw.split('\n');
-    const selInfo = getStudioEditorSelectionInfo();
-    const selStart = selInfo ? selInfo.startLine : -1;
-    const selEnd = selInfo ? selInfo.endLine : -1;
+    const editedKey = studioLastAiEditedLines.size > 0 ? Array.from(studioLastAiEditedLines).join(',') : '';
+    const codeChanged = (raw !== lastHighlightedRawCode) || (editedKey !== lastHighlightedEditedKey);
 
-    if (els.studioEditorHighlightCode) {
+    let lines = null;
+    if (codeChanged && els.studioEditorHighlightCode) {
+      lines = raw.split('\n');
       const htmlLines = new Array(lines.length);
       for (let i = 0; i < lines.length; i++) {
         const ln = i + 1;
@@ -14139,20 +14199,65 @@ window.addEventListener('error', function(e) {
       }
       // Trailing newline ensures last empty line scrolls identically to textarea
       els.studioEditorHighlightCode.innerHTML = htmlLines.join('\n') + '\n';
+      lastHighlightedRawCode = raw;
+      lastHighlightedEditedKey = editedKey;
     }
 
     if (els.studioEditorLineNumbers) {
-      const numRows = new Array(lines.length);
-      for (let i = 0; i < lines.length; i++) {
-        const ln = i + 1;
-        let cls = 'line-num-row';
-        if (studioLastAiEditedLines.has(ln)) cls += ' is-ai-edited';
-        else if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.activeLine === ln) cls += ' is-active-search-match';
-        else if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.matchingLinesSet && StudioCodeSearch.matchingLinesSet.has(ln)) cls += ' is-search-match';
-        else if (selInfo && selInfo.hasSelection && ln >= selStart && ln <= selEnd) cls += ' is-selected-line';
-        numRows[i] = `<span class="${cls}">${ln}</span>`;
+      const selInfo = getStudioEditorSelectionInfo();
+      const selStart = selInfo ? selInfo.startLine : -1;
+      const selEnd = selInfo ? selInfo.endLine : -1;
+      const lineCount = lines
+        ? lines.length
+        : (raw === lastHighlightedRawCode && lastRenderedLineCount > 0 ? lastRenderedLineCount : raw.split('\n').length);
+
+      if (lineCount !== lastRenderedLineCount || els.studioEditorLineNumbers.children.length !== lineCount) {
+        const numRows = new Array(lineCount);
+        const nextDecorated = new Set();
+        for (let i = 0; i < lineCount; i++) {
+          const ln = i + 1;
+          let cls = 'line-num-row';
+          if (studioLastAiEditedLines.has(ln)) { cls += ' is-ai-edited'; nextDecorated.add(ln); }
+          else if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.activeLine === ln) { cls += ' is-active-search-match'; nextDecorated.add(ln); }
+          else if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.matchingLinesSet && StudioCodeSearch.matchingLinesSet.has(ln)) { cls += ' is-search-match'; nextDecorated.add(ln); }
+          else if (selInfo && selInfo.hasSelection && ln >= selStart && ln <= selEnd) { cls += ' is-selected-line'; nextDecorated.add(ln); }
+          numRows[i] = `<span class="${cls}">${ln}</span>`;
+        }
+        els.studioEditorLineNumbers.innerHTML = numRows.join('');
+        lastRenderedLineCount = lineCount;
+        prevDecoratedLineNums = nextDecorated;
+      } else {
+        // Differential O(k) class update: zero DOM node creation when jumping matches or selecting lines!
+        const children = els.studioEditorLineNumbers.children;
+        const nextDecorated = new Set();
+        studioLastAiEditedLines.forEach(ln => nextDecorated.add(ln));
+        if (typeof StudioCodeSearch !== 'undefined') {
+          if (StudioCodeSearch.activeLine > 0) nextDecorated.add(StudioCodeSearch.activeLine);
+          if (StudioCodeSearch.matchingLinesSet) {
+            StudioCodeSearch.matchingLinesSet.forEach(ln => nextDecorated.add(ln));
+          }
+        }
+        if (selInfo && selInfo.hasSelection && selStart > 0 && selEnd >= selStart) {
+          for (let ln = selStart; ln <= selEnd; ln++) nextDecorated.add(ln);
+        }
+        prevDecoratedLineNums.forEach(ln => {
+          if (!nextDecorated.has(ln)) {
+            const node = children[ln - 1];
+            if (node && node.className !== 'line-num-row') node.className = 'line-num-row';
+          }
+        });
+        nextDecorated.forEach(ln => {
+          const node = children[ln - 1];
+          if (!node) return;
+          let cls = 'line-num-row';
+          if (studioLastAiEditedLines.has(ln)) cls += ' is-ai-edited';
+          else if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.activeLine === ln) cls += ' is-active-search-match';
+          else if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.matchingLinesSet && StudioCodeSearch.matchingLinesSet.has(ln)) cls += ' is-search-match';
+          else if (selInfo && selInfo.hasSelection && ln >= selStart && ln <= selEnd) cls += ' is-selected-line';
+          if (node.className !== cls) node.className = cls;
+        });
+        prevDecoratedLineNums = nextDecorated;
       }
-      els.studioEditorLineNumbers.innerHTML = numRows.join('');
     }
     syncStudioEditorScroll();
   }
@@ -14174,21 +14279,32 @@ window.addEventListener('error', function(e) {
     if (!ed || !els.studioCodeEditorWrap || !els.studioCodeEditorWrap.classList.contains('is-editing')) return null;
     const start = ed.selectionStart || 0;
     const end = ed.selectionEnd || 0;
+    const hasSelection = end > start && (end - start) >= 3;
+    if (!hasSelection) {
+      return {
+        hasSelection: false,
+        start,
+        end,
+        startLine: 1,
+        endLine: 1,
+        selectedText: '',
+        selectedLinesCode: ''
+      };
+    }
     const val = ed.value || '';
     const beforeStart = val.slice(0, start);
     const beforeEnd = val.slice(0, end);
     const startLine = beforeStart.split('\n').length;
     const endLine = beforeEnd.split('\n').length;
-    const hasSelection = end > start && (end - start) >= 3;
     const lines = val.split('\n');
-    const selectedLinesCode = hasSelection ? lines.slice(Math.max(0, startLine - 1), endLine).join('\n') : '';
+    const selectedLinesCode = lines.slice(Math.max(0, startLine - 1), endLine).join('\n');
     return {
-      hasSelection,
+      hasSelection: true,
       start,
       end,
       startLine,
       endLine,
-      selectedText: hasSelection ? val.slice(start, end) : '',
+      selectedText: val.slice(start, end),
       selectedLinesCode
     };
   }
@@ -14215,6 +14331,31 @@ window.addEventListener('error', function(e) {
     syncStudioEditorScroll();
   }
 
+  function renderReadOnlyStudioCodeNow() {
+    if (!els.aiFileStudioCode || els.aiFileStudioCode.dataset.needsHighlight !== '1') return;
+    els.aiFileStudioCode.dataset.needsHighlight = '0';
+    const raw = els.aiFileStudioCode.textContent || '';
+    if (!raw) return;
+    if (raw.length > 32000) {
+      // Gunakan tokenizer ringan ber-cache untuk file besar agar tidak memblokir thread utama di perangkat menengah
+      const lines = raw.split('\n');
+      const out = new Array(lines.length);
+      for (let i = 0; i < lines.length; i++) {
+        out[i] = tokenizeStudioCodeLine(lines[i]);
+      }
+      els.aiFileStudioCode.innerHTML = out.join('\n');
+      return;
+    }
+    requestAnimationFrame(() => {
+      try {
+        if (window.hljs && els.aiFileStudioCode && els.aiFileStudioCode.removeAttribute) {
+          els.aiFileStudioCode.removeAttribute('data-highlighted');
+          window.hljs.highlightElement(els.aiFileStudioCode);
+        }
+      } catch (_) {}
+    });
+  }
+
   function openStudioCodeEditor(scrollToLine = null, editedRanges = null) {
     if (!activeAIFile || !els.studioCodeEditorWrap || !els.aiFileStudioEditor) return;
     const raw = activeAIFile.rawContent || activeAIFile.content || '';
@@ -14225,6 +14366,7 @@ window.addEventListener('error', function(e) {
     if (els.btnStudioEditCode) els.btnStudioEditCode.classList.add('active');
     if (els.iconStudioEditCode) els.iconStudioEditCode.className = 'fa-solid fa-floppy-disk';
     if (els.labelStudioEditCode) els.labelStudioEditCode.textContent = 'Simpan Kode';
+    if (els.btnStudioHeaderSearchCode) els.btnStudioHeaderSearchCode.style.display = 'inline-flex';
     renderStudioCodeEditorHighlight(raw, editedRanges);
     updateStudioEditorSelectionUI();
     if (typeof syncStudioAssistantHistoryMode === 'function') syncStudioAssistantHistoryMode(true);
@@ -14248,6 +14390,10 @@ window.addEventListener('error', function(e) {
     if (els.btnStudioEditCode) els.btnStudioEditCode.classList.remove('active');
     if (els.iconStudioEditCode) els.iconStudioEditCode.className = 'fa-solid fa-pen-to-square';
     if (els.labelStudioEditCode) els.labelStudioEditCode.textContent = 'Edit Kode';
+    const isCodeTabActive = Boolean(els.aiFileStudioCode && els.aiFileStudioCode.classList.contains('active'));
+    if (els.btnStudioHeaderSearchCode) {
+      els.btnStudioHeaderSearchCode.style.display = isCodeTabActive ? 'inline-flex' : 'none';
+    }
     if (typeof syncStudioAssistantHistoryMode === 'function') syncStudioAssistantHistoryMode(false);
   }
 
@@ -14263,12 +14409,10 @@ window.addEventListener('error', function(e) {
 
     if (els.aiFileStudioCode) {
       els.aiFileStudioCode.textContent = trimmedCode;
-      try {
-        if (window.hljs && els.aiFileStudioCode.removeAttribute) {
-          els.aiFileStudioCode.removeAttribute('data-highlighted');
-          window.hljs.highlightElement(els.aiFileStudioCode);
-        }
-      } catch (_) {}
+      els.aiFileStudioCode.dataset.needsHighlight = '1';
+      if (els.aiFileStudioCode.classList.contains('active')) {
+        renderReadOnlyStudioCodeNow();
+      }
     }
 
     if (els.aiFileStudioEditor && els.aiFileStudioEditor.value !== trimmedCode) {
@@ -14279,7 +14423,7 @@ window.addEventListener('error', function(e) {
 
     renderAIFileIntoStudioPreview(activeAIFile);
 
-    // Sinkronkan ke kartu Pratinjau atau blok Kode di obrolan
+    // Sinkronkan ke kartu Pratinjau atau blok Kode di obrolan secara non-blocking
     if (activeAIFile._cardIframe) {
       try {
         activeAIFile._cardIframe.srcdoc = prepareSafeHtmlForPreview(trimmedCode, activeAIFile);
@@ -14287,11 +14431,9 @@ window.addEventListener('error', function(e) {
     }
     if (activeAIFile._cardCodeEl) {
       activeAIFile._cardCodeEl.textContent = trimmedCode;
-      try { if (window.hljs) { activeAIFile._cardCodeEl.removeAttribute('data-highlighted'); window.hljs.highlightElement(activeAIFile._cardCodeEl); } } catch (_) {}
     }
     if (activeAIFile._sourceCodeBlock) {
       activeAIFile._sourceCodeBlock.textContent = trimmedCode;
-      try { if (window.hljs) { delete activeAIFile._sourceCodeBlock.dataset.highlighted; window.hljs.highlightElement(activeAIFile._sourceCodeBlock); } } catch (_) {}
     }
 
     // Sinkronkan ke Sesi Induk (Parent Session): simpan ke array messages, m.content, dan disk / IndexedDB secara permanen!
@@ -14393,13 +14535,23 @@ window.addEventListener('error', function(e) {
           b.classList.toggle('active', b.dataset.tab === 'code');
         });
       }
+      if (els.btnStudioHeaderSearchCode) els.btnStudioHeaderSearchCode.style.display = 'inline-flex';
       openStudioCodeEditor();
       return;
     }
     closeStudioCodeEditor();
     const isPreview = tab === 'preview';
     if (els.aiFileStudioPreviewPane) els.aiFileStudioPreviewPane.classList.toggle('hidden', !isPreview);
-    if (els.aiFileStudioCode) els.aiFileStudioCode.classList.toggle('active', !isPreview);
+    if (els.aiFileStudioCode) {
+      els.aiFileStudioCode.classList.toggle('active', !isPreview);
+      if (!isPreview) {
+        renderReadOnlyStudioCodeNow();
+      }
+    }
+    // Tampilkan tombol Cari HANYA saat berada di menu Kode / Edit Kode
+    if (els.btnStudioHeaderSearchCode) {
+      els.btnStudioHeaderSearchCode.style.display = isPreview ? 'none' : 'inline-flex';
+    }
     if (els.aiFileStudioTabs) {
       els.aiFileStudioTabs.querySelectorAll('.ai-file-tab').forEach((b) => {
         b.classList.toggle('active', b.dataset.tab === tab);
@@ -14584,17 +14736,12 @@ window.addEventListener('error', function(e) {
       els.aiFileStudioDownloadText.textContent = isHtml ? 'Ekspor' : (isDiagram ? 'Unduh Diagram' : (isDoc ? 'Unduh Dokumen' : 'Unduh File'));
     }
 
-    setAIFileStudioTab(initialTab || (previewable ? 'preview' : 'code'));
-
     if (els.aiFileStudioCode) {
       els.aiFileStudioCode.textContent = rawContent;
-      try {
-        if (window.hljs && els.aiFileStudioCode.removeAttribute) {
-          els.aiFileStudioCode.removeAttribute('data-highlighted');
-          window.hljs.highlightElement(els.aiFileStudioCode);
-        }
-      } catch (_) {}
+      els.aiFileStudioCode.dataset.needsHighlight = '1';
     }
+
+    setAIFileStudioTab(initialTab || (previewable ? 'preview' : 'code'));
     renderAIFileIntoStudioPreview(file);
     if (els.aiFileStudioPlaceholder) {
       els.aiFileStudioPlaceholder.classList.toggle('show', !previewable);
@@ -17023,6 +17170,10 @@ ${blocks}
     let startClientY = 0;
     let startPanelLeft = 0;
     let startPanelTop = 0;
+    let currentDragLeft = 0;
+    let currentDragTop = 0;
+    let maxDragLeft = 0;
+    let maxDragTop = 0;
 
     function isValidDragZone(target) {
       if (!target || !target.closest) return false;
@@ -17049,6 +17200,10 @@ ${blocks}
       startClientY = clientY;
       startPanelLeft = panelRect.left - stageRect.left;
       startPanelTop = panelRect.top - stageRect.top;
+      currentDragLeft = startPanelLeft;
+      currentDragTop = startPanelTop;
+      maxDragLeft = Math.max(4, stageRect.width - panelRect.width - 4);
+      maxDragTop = Math.max(4, stageRect.height - panelRect.height - 4);
       return true;
     }
 
@@ -17073,21 +17228,18 @@ ${blocks}
         rawEvent.preventDefault();
       }
 
-      const stage = els.geminiStudioStage || panel.offsetParent || document.body;
-      const stageRect = stage.getBoundingClientRect();
-      const panelRect = panel.getBoundingClientRect();
-
       let targetLeft = startPanelLeft + dx;
       let targetTop = startPanelTop + dy;
 
-      const maxLeft = Math.max(4, stageRect.width - panelRect.width - 4);
-      const maxTop = Math.max(4, stageRect.height - panelRect.height - 4);
+      targetLeft = Math.max(4, Math.min(targetLeft, maxDragLeft));
+      targetTop = Math.max(4, Math.min(targetTop, maxDragTop));
 
-      targetLeft = Math.max(4, Math.min(targetLeft, maxLeft));
-      targetTop = Math.max(4, Math.min(targetTop, maxTop));
+      currentDragLeft = targetLeft;
+      currentDragTop = targetTop;
 
-      panel.style.setProperty('left', `${targetLeft}px`, 'important');
-      panel.style.setProperty('top', `${targetTop}px`, 'important');
+      const offsetX = targetLeft - startPanelLeft;
+      const offsetY = targetTop - startPanelTop;
+      panel.style.setProperty('transform', `translate3d(${offsetX}px, ${offsetY}px, 0)`, 'important');
     }
 
     function finishDrag() {
@@ -17095,6 +17247,9 @@ ${blocks}
       pendingDrag = false;
       if (isDragging) {
         isDragging = false;
+        panel.style.removeProperty('transform');
+        panel.style.setProperty('left', `${currentDragLeft}px`, 'important');
+        panel.style.setProperty('top', `${currentDragTop}px`, 'important');
         panel.classList.remove('is-dragging');
         document.body.classList.remove('is-assistant-dragging');
         setTimeout(() => { suppressNextClick = false; }, 60);
@@ -17129,21 +17284,23 @@ ${blocks}
     window.addEventListener('pointerup', finishDrag);
     window.addEventListener('pointercancel', finishDrag);
 
-    // Touch Events Fallback (Guaranteed Android / iOS WebView Mobile Dragging)
-    panel.addEventListener('touchstart', (e) => {
-      if (!e.touches || e.touches.length !== 1) return;
-      const t = e.touches[0];
-      beginDragCandidate(t.clientX, t.clientY, e.target);
-    }, { passive: true });
+    // Touch Events Fallback (Only when PointerEvent is unavailable to prevent double-firing on Android/iOS)
+    if (!window.PointerEvent) {
+      panel.addEventListener('touchstart', (e) => {
+        if (!e.touches || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        beginDragCandidate(t.clientX, t.clientY, e.target);
+      }, { passive: true });
 
-    window.addEventListener('touchmove', (e) => {
-      if ((!pendingDrag && !isDragging) || !e.touches || e.touches.length !== 1) return;
-      const t = e.touches[0];
-      updateDragMove(t.clientX, t.clientY, e);
-    }, { passive: false });
+      window.addEventListener('touchmove', (e) => {
+        if ((!pendingDrag && !isDragging) || !e.touches || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        updateDragMove(t.clientX, t.clientY, e);
+      }, { passive: false });
 
-    window.addEventListener('touchend', finishDrag);
-    window.addEventListener('touchcancel', finishDrag);
+      window.addEventListener('touchend', finishDrag);
+      window.addEventListener('touchcancel', finishDrag);
+    }
 
     window.addEventListener('resize', clampStudioAssistantPosition);
   }
@@ -17505,20 +17662,31 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
     }
     if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
   });
+  let studioEditorInputRaf = null;
   els.aiFileStudioEditor?.addEventListener('input', () => {
     if (els.aiFileStudioEditor) {
       studioLastAiEditedLines.clear();
       StudioEditorHistory.recordInput(els.aiFileStudioEditor.value);
-      renderStudioCodeEditorHighlight(els.aiFileStudioEditor.value);
-      if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.isOpen && StudioCodeSearch.query) {
-        StudioCodeSearch.executeSearch(StudioCodeSearch.query);
-      }
+      if (studioEditorInputRaf) cancelAnimationFrame(studioEditorInputRaf);
+      studioEditorInputRaf = requestAnimationFrame(() => {
+        studioEditorInputRaf = null;
+        if (!els.aiFileStudioEditor) return;
+        renderStudioCodeEditorHighlight(els.aiFileStudioEditor.value);
+        if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.isOpen && StudioCodeSearch.query) {
+          StudioCodeSearch.executeSearch(StudioCodeSearch.query);
+        }
+      });
     }
   });
   els.aiFileStudioEditor?.addEventListener('scroll', syncStudioEditorScroll, { passive: true });
+  let studioSelectionRaf = null;
   ['select', 'keyup', 'mouseup', 'touchend'].forEach((evName) => {
     els.aiFileStudioEditor?.addEventListener(evName, () => {
-      updateStudioEditorSelectionUI();
+      if (studioSelectionRaf) cancelAnimationFrame(studioSelectionRaf);
+      studioSelectionRaf = requestAnimationFrame(() => {
+        studioSelectionRaf = null;
+        updateStudioEditorSelectionUI();
+      });
     }, { passive: true });
   });
   els.btnStudioUndoEdit?.addEventListener('click', (e) => {
@@ -17597,9 +17765,10 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
     }
   });
 
-  // Global search shortcut in Studio Modal
+  // Global search shortcut in Studio Modal (only active when inside Menu Kode)
   els.aiFileStudioModal?.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+      if (!isStudioInCodeMenu()) return;
       e.preventDefault();
       StudioCodeSearch.open();
     }
@@ -17622,7 +17791,7 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
     if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
   });
   els.studioSearchInput?.addEventListener('input', (e) => {
-    StudioCodeSearch.executeSearch(e.target.value);
+    StudioCodeSearch.scheduleSearch(e.target.value);
   });
   els.studioSearchInput?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
