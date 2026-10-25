@@ -13678,6 +13678,7 @@ window.addEventListener('error', function(e) {
       els.aiFileStudioFrame.removeAttribute('src');
       els.aiFileStudioFrame.srcdoc = generatePdfDocPreviewHtml(file.name, parsedBody);
     } else if (isHtml) {
+      StudioEndocrineDiagnostics.clear();
       els.aiFileStudioFrame.removeAttribute('src');
       els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(rawContent, file);
     } else {
@@ -14090,14 +14091,17 @@ window.addEventListener('error', function(e) {
     let modified = originalCode;
     let patchCount = 0;
 
+    let failedCount = 0;
     // 1. Format spesifik Zoz Router: <<<SEARCH>>> ... <<<REPLACE>>>
-    const searchReplaceRegex = /<<<SEARCH>>>([\s\S]*?)<<<REPLACE>>>([\s\S]*?)(?:<<<END_ZOZ_EDIT>>>|<<<END_ZOZ_MODIFY>>>|$)/gi;
+    // Lookahead agar blok REPLACE tidak menelan hunk <<<SEARCH>>> berikutnya (multi-hunk)
+    const searchReplaceRegex = /<<<SEARCH>>>([\s\S]*?)<<<REPLACE>>>([\s\S]*?)(?=<<<SEARCH>>>|<<<END_ZOZ_EDIT>>>|<<<END_ZOZ_MODIFY>>>|$(?![\s\S]))/gi;
     let match;
     while ((match = searchReplaceRegex.exec(patchBlock)) !== null) {
-      const searchTarget = match[1].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
-      const replacement = match[2].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+      const searchTarget = match[1].replace(/^\r?\n/, '').replace(/\r?\n\s*$/, '');
+      const replacement = match[2].replace(/^\r?\n/, '').replace(/\r?\n\s*$/, '');
       if (searchTarget && modified.includes(searchTarget)) {
-        modified = modified.replace(searchTarget, replacement);
+        // Fungsi pengganti: cegah pola khusus $&, $$, $', $` merusak kode
+        modified = modified.replace(searchTarget, () => replacement);
         patchCount++;
       } else if (searchTarget) {
         // Toleransi perbedaan whitespace/indentasi per baris
@@ -14119,9 +14123,19 @@ window.addEventListener('error', function(e) {
           }
         }
         if (foundIdx >= 0) {
-          lines.splice(foundIdx, targetLines.length, replacement);
+          // Pertahankan indentasi asli baris pertama yang diganti
+          const origIndent = (lines[foundIdx].match(/^\s*/) || [''])[0];
+          const replLines = replacement.split('\n');
+          const replIndent = (replLines.find(l => l.trim()) || '').match(/^\s*/)[0];
+          const reindented = replLines.map(l => {
+            if (!l.trim()) return l;
+            return l.startsWith(replIndent) ? origIndent + l.slice(replIndent.length) : l;
+          }).join('\n');
+          lines.splice(foundIdx, targetLines.length, reindented);
           modified = lines.join('\n');
           patchCount++;
+        } else {
+          failedCount++;
         }
       }
     }
@@ -14133,13 +14147,15 @@ window.addEventListener('error', function(e) {
         const searchTarget = match[1].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
         const replacement = match[2].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
         if (searchTarget && modified.includes(searchTarget)) {
-          modified = modified.replace(searchTarget, replacement);
+          modified = modified.replace(searchTarget, () => replacement);
           patchCount++;
+        } else if (searchTarget) {
+          failedCount++;
         }
       }
     }
 
-    return { content: modified, patched: patchCount > 0, patchCount };
+    return { content: modified, patched: patchCount > 0, patchCount, failedCount };
   }
 
   // ==================== STUDIO ENDOCRINE DIAGNOSTICS ====================
@@ -14150,10 +14166,55 @@ window.addEventListener('error', function(e) {
     init() {
       window.addEventListener('message', (e) => {
         if (!e.data || typeof e.data !== 'object') return;
+        if (els.aiFileStudioFrame && e.source && e.source !== els.aiFileStudioFrame.contentWindow) return;
         if (e.data.type === 'ZOZ_STUDIO_FRAME_ERROR' || e.data.type === 'ZOZ_STUDIO_FRAME_CONSOLE_ERROR') {
           this.recordError(e.data);
         }
       });
+    },
+
+    // Bangun referensi kode ringkas agar <<<SEARCH>>> selalu cocok 100% tanpa boros token
+    buildCodeReference(code, userQuery = '') {
+      if (!code) return '';
+      const lines = code.split('\n');
+      if (lines.length <= 320) {
+        return code;
+      }
+      const keep = new Set();
+      // Selalu sertakan awal & akhir dokumen
+      for (let i = 0; i < Math.min(25, lines.length); i++) keep.add(i);
+      for (let i = Math.max(0, lines.length - 20); i < lines.length; i++) keep.add(i);
+
+      // Kata kunci dari permintaan pengguna + baris error Endocrine
+      const words = (userQuery || '').toLowerCase().split(/[^a-z0-9_-]+/).filter(w => w.length >= 3);
+      const errLine = (this.lastError && this.lastError.lineno) ? Number(this.lastError.lineno) - 1 : -1;
+      if (errLine >= 0 && errLine < lines.length) {
+        for (let k = Math.max(0, errLine - 25); k <= Math.min(lines.length - 1, errLine + 25); k++) keep.add(k);
+      }
+
+      const structuralRe = /<(?:!doctype|html|head|title|body|header|nav|main|section|article|aside|footer|form|table|canvas|svg|style|script)\b|\bid=["'][^"']+["']|\bfunction\s+\w+|\bconst\s+\w+\s*=/i;
+      for (let i = 0; i < lines.length; i++) {
+        const l = lines[i];
+        if (structuralRe.test(l)) {
+          for (let k = Math.max(0, i - 2); k <= Math.min(lines.length - 1, i + 4); k++) keep.add(k);
+        }
+        const lower = l.toLowerCase();
+        if (words.some(w => lower.includes(w))) {
+          for (let k = Math.max(0, i - 12); k <= Math.min(lines.length - 1, i + 12); k++) keep.add(k);
+        }
+      }
+
+      const sorted = Array.from(keep).sort((a, b) => a - b);
+      const out = [];
+      let prev = -1;
+      for (const idx of sorted) {
+        if (prev !== -1 && idx > prev + 1) {
+          out.push(`/* ... [baris ${prev + 2}-${idx} dilewati] ... */`);
+        }
+        out.push(lines[idx]);
+        prev = idx;
+      }
+      return out.join('\n');
     },
 
     recordError(data) {
@@ -14279,16 +14340,38 @@ window.addEventListener('error', function(e) {
 
       let finalContent = cleanContent;
       // Dukung penambalan bedah (surgical patch) via <<<ZOZ_EDIT>>> dengan blok SEARCH & REPLACE
-      if (cleanContent.includes('<<<SEARCH>>>') || cleanContent.includes('<<<<<<< SEARCH')) {
-        const baseContent = (activeAIFile && (activeAIFile.name === resolvedFileName || isWebFile))
-          ? (activeAIFile.rawContent || activeAIFile.content || '')
-          : (matchedWorkspaceFile ? (matchedWorkspaceFile.content || '') : '');
-        if (baseContent) {
-          const patchResult = applyZozEditPatch(baseContent, cleanContent);
-          if (patchResult && patchResult.patched) {
-            finalContent = patchResult.content;
+      if (cleanContent.includes('<<<SEARCH>>>') || /<{5,}\s*SEARCH\b/.test(cleanContent)) {
+        // Dasar patch: file yang namanya cocok persis (Studio aktif / workspace), atau file web terbaru sesi
+        let baseContent = '';
+        const studioIsOpen = Boolean(els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show'));
+        if (activeAIFile && studioIsOpen && activeAIFile.name === resolvedFileName) {
+          baseContent = activeAIFile.rawContent || activeAIFile.content || '';
+        } else if (matchedWorkspaceFile) {
+          baseContent = matchedWorkspaceFile.content || '';
+        } else if (isWebFile && typeof getLatestWebsiteFileInSession === 'function') {
+          const latestWeb = getLatestWebsiteFileInSession(typeof getActiveSession === 'function' ? getActiveSession() : null);
+          if (latestWeb && (!latestWeb.name || latestWeb.name === resolvedFileName)) {
+            baseContent = latestWeb.rawContent || latestWeb.content || '';
           }
         }
+        if (!baseContent || isUnclosed) {
+          // Tanpa dasar atau patch terpotong: jangan pernah menulis teks patch mentah sebagai isi file
+          out.patchFailures = (out.patchFailures || 0) + 1;
+          out.rawBlocks.push(rawBlock);
+          continue;
+        }
+        const patchResult = applyZozEditPatch(baseContent, cleanContent);
+        if (patchResult && patchResult.patched) {
+          finalContent = patchResult.content;
+          if (patchResult.failedCount > 0) out.patchFailures = (out.patchFailures || 0) + patchResult.failedCount;
+        } else {
+          // Patch gagal total: pertahankan file lama, laporkan kegagalan
+          out.patchFailures = (out.patchFailures || 0) + 1;
+          out.rawBlocks.push(rawBlock);
+          continue;
+        }
+        // Patch sudah utuh dari dasar yang lengkap: tidak perlu perbaikan penutupan tag
+        isUnclosed = false;
       }
       if (isReactFile) {
         finalContent = validateAndRepairReactCode(finalContent);
@@ -14343,7 +14426,7 @@ window.addEventListener('error', function(e) {
       : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
     // --- Fallback 1: blok kode saat AI menghasilkan dokumen web (HTML/JSX/TSX/SVG) atau dokumen (Markdown/PDF/DOCX) ---
-    if (out.files.length === 0) {
+    if (out.files.length === 0 && !out.patchFailures) {
       for (let i = 0; i < lines.length; i++) {
         const t = lines[i].trim();
         if (t.length < 3 || t.slice(0, 3) !== TICK3) continue;
@@ -15851,7 +15934,6 @@ ${blocks}
                    els.studioAssistantPanel.style.display === 'flex';
     if (isOpen) {
       closeStudioAssistantDrawer();
-    StudioEndocrineDiagnostics.clear();
     } else {
       openStudioAssistantDrawer();
     }
@@ -15861,7 +15943,6 @@ ${blocks}
   function toggleStudioAssistantMinimize() {
     // Mandat Kaisar: Tombol melayang diminimalkan telah dihapus, klik panel cukup menutup/membuka via Tanya AI
     closeStudioAssistantDrawer();
-    StudioEndocrineDiagnostics.clear();
   }
 
   function appendStudioMessage(role, contentHtml) {
@@ -15948,28 +16029,23 @@ ${blocks}
         let endocrineFeedback = '';
         if (STATE.settings.endocrineCodeEnabled && StudioEndocrineDiagnostics.lastError) {
           const err = StudioEndocrineDiagnostics.lastError;
-          endocrineFeedback = `\n\n[Laporan Sensor Endocrine Code]: Terdeteksi kendala runtime di pratinjau website: "${err.message || err}"${err.lineno ? ` (baris ${err.lineno})` : ''}. Terapkan perbaikan untuk mengatasi error ini.`;
+          endocrineFeedback = `\n[Endocrine Code Sensor]: Error runtime terdeteksi: "${err.message || err}"${err.lineno ? ` (baris ${err.lineno})` : ''}.`;
         }
+        const compactRef = StudioEndocrineDiagnostics.buildCodeReference(currentCode, val);
 
-        followupPrompt = `[Edit Bagian Website Pratinjau: "${targetName}"]
-Permintaan pengguna: "${val}"${endocrineFeedback}
+        followupPrompt = `[Edit "${targetName}"]
+\`\`\`${lang}
+${compactRef}
+\`\`\`
+Permintaan: "${val}"${endocrineFeedback}
 
-INSTRUKSI EDIT TERARAH (HEMAT TOKEN):
-AI diinstruksikan untuk HANYA mengeluarkan blok edit bedah terarah (search & replace) pada bagian yang perlu diubah tanpa membuat ulang kode dari nol:
-
-<<<ZOZ_EDIT name="${targetName}">
+Keluarkan patch <<<ZOZ_EDIT name="${targetName}">:
 <<<SEARCH>>>
-[salin beberapa baris kode eksisting yang ingin diganti atau ditambahkan]
+[salin persis baris yang diubah dari kode di atas]
 <<<REPLACE>>>
-[baris kode baru penggantinya]
+[baris pengganti]
 <<<END_ZOZ_EDIT>>>
-
-Atau jika perubahannya sangat mendasar/menyeluruh, Anda boleh mengeluarkan berkas lengkap di dalam:
-<<<ZOZ_FILE name="${targetName}" lang="${lang}">
-...
-<<<END_ZOZ_FILE>>>
-
-Berikan penjelasan singkat mengenai bagian yang telah diperbaiki.`;
+Jelaskan singkat perubahannya.`;
       }
     } else {
       followupPrompt = `[Konteks: Pengguna sedang melihat pratinjau langsung "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan / Obrolan Pengguna: "${val}"\n\nATURAN SANGAT KETAT UNTUK AI:\n- Zoz Router SUDAH menampilkan pratinjau langsung untuk berkas ini.\n- Pengguna TIDAK meminta perubahan kode. Pengguna hanya sedang mengobrol santai, memuji, berkomentar, atau bertanya tentang berkas ini.\n- JANGAN PERNAH merombak, merevisi, atau membuat ulang kode!\n- DILARANG KERAS mengeluarkan blok kode atau blok <<<ZOZ_FILE!\n- Jawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
@@ -15994,11 +16070,11 @@ Berikan penjelasan singkat mengenai bagian yang telah diperbaiki.`;
   els.btnStudioMinAssistant?.addEventListener('click', (e) => {
     e.stopPropagation();
     closeStudioAssistantDrawer();
-    StudioEndocrineDiagnostics.clear();
   });
   els.btnToggleStudioEndocrine?.addEventListener('click', (e) => {
     e.stopPropagation();
     STATE.settings.endocrineCodeEnabled = !STATE.settings.endocrineCodeEnabled;
+    if (typeof savePersistedState === 'function') savePersistedState();
     try { localStorage.setItem('zoz_router_settings_v1', JSON.stringify(STATE.settings)); } catch (_) {}
     if (els.toggleEndocrineCode) els.toggleEndocrineCode.checked = STATE.settings.endocrineCodeEnabled;
     StudioEndocrineDiagnostics.updateUI();
@@ -17064,7 +17140,9 @@ Berikan penjelasan singkat mengenai bagian yang telah diperbaiki.`;
   }
 
   function getLatestWebsiteFileInSession(session) {
-    if (activeAIFile) {
+    // activeAIFile hanya dipakai jika Studio sedang terbuka (cegah patch ke website basi dari sesi lain)
+    const studioOpen = Boolean(els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show'));
+    if (activeAIFile && studioOpen) {
       const ext = (activeAIFile.name || '').split('.').pop().toLowerCase();
       if (ext === 'html' || ext === 'htm' || ext === 'jsx' || ext === 'tsx' || activeAIFile.lang === 'html' || activeAIFile.lang === 'jsx') {
         const raw = activeAIFile.rawContent || activeAIFile.content || '';
@@ -17155,26 +17233,27 @@ Berikan penjelasan singkat mengenai bagian yang telah diperbaiki.`;
     if (!options.overrideText && isEditingExistingWeb) {
       const targetName = existingWebFile.name || 'index.html';
       const lang = existingWebFile.lang || (targetName.endsWith('.jsx') ? 'jsx' : 'html');
+      const currentCode = existingWebFile.rawContent || existingWebFile.content || '';
       let endocrineFeedback = '';
       if (STATE.settings.endocrineCodeEnabled && StudioEndocrineDiagnostics.lastError) {
         const err = StudioEndocrineDiagnostics.lastError;
-        endocrineFeedback = `\n\n[Laporan Sensor Endocrine Code]: Terdeteksi runtime issue di pratinjau: "${err.message || err}"${err.lineno ? ` (baris ${err.lineno})` : ''}. Terapkan perbaikan untuk error ini.`;
+        endocrineFeedback = `\n[Endocrine Code Sensor]: Error runtime: "${err.message || err}"${err.lineno ? ` (baris ${err.lineno})` : ''}.`;
       }
+      const compactRef = StudioEndocrineDiagnostics.buildCodeReference(currentCode, rawText);
 
-      const wrappedEditPrompt = `[Edit Terarah Website Sesi Ini: "${targetName}"]
-Permintaan perbaikan / penambahan dari pengguna: "${rawText}"${endocrineFeedback}
+      const wrappedEditPrompt = `[Edit "${targetName}"]
+\`\`\`${lang}
+${compactRef}
+\`\`\`
+Permintaan: "${rawText}"${endocrineFeedback}
 
-INSTRUKSI EDIT TERARAH (HEMAT TOKEN):
-Perbaiki website eksisting ini secara inkremental tanpa membuat kode ulang dari nol. Keluarkan blok penambalan bedah:
-<<<ZOZ_EDIT name="${targetName}">
+Keluarkan patch <<<ZOZ_EDIT name="${targetName}">:
 <<<SEARCH>>>
-[potongan baris kode yang akan diubah]
+[salin persis baris yang diubah dari kode di atas]
 <<<REPLACE>>>
-[baris baru penggantinya]
+[baris pengganti]
 <<<END_ZOZ_EDIT>>>
-
-(Atau keluarkan kode utuh di dalam <<<ZOZ_FILE name="${targetName}" lang="${lang}"> jika perubahan melibatkan perombakan menyeluruh).
-Berikan penjelasan ringkas mengenai perubahan yang diterapkan.`;
+Jelaskan singkat perubahannya.`;
 
       options.overrideText = wrappedEditPrompt;
       options.displayPrompt = rawText;
@@ -20443,6 +20522,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           isIncomplete: isFileStillIncomplete
         });
         await processAiGeneratedWorkspaceFiles(generatedFiles);
+      } else if (extractedAiFiles.patchFailures) {
+        fullText = stripGeneratedFileBlocks(hideFileBlocksForDisplay(fullText, runOptions), extractedAiFiles.rawBlocks || [], runOptions);
+        fullText = `${(fullText || '').trim()}\n\n*(⚠️ Patch tidak cocok persis dengan baris kode saat ini — website lama dipertahankan utuh.)*`.trim();
+        showToast('⚠️ Target patch tidak cocok; website lama dipertahankan.', 'warning');
       } else if (fullText.indexOf('<<<ZOZ_FILE') !== -1 || fullText.indexOf('<<<END_ZOZ_FILE') !== -1 || fullText.indexOf('<<<ZOZ_EDIT') !== -1) {
         // M2: ada marker tapi TIDAK ada blok utuh (stream terputus sebelum
         // <<<END_ZOZ_FILE / END yatim). Dulu marker + isi blok tampil mentah di
@@ -22175,6 +22258,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           isIncomplete: isFileStillIncomplete
         });
         await processAiGeneratedWorkspaceFiles(generatedFiles);
+      } else if (extractedAiFiles.patchFailures) {
+        fullText = stripGeneratedFileBlocks(hideFileBlocksForDisplay(fullText, runOptions), extractedAiFiles.rawBlocks || [], runOptions);
+        fullText = `${(fullText || '').trim()}\n\n*(⚠️ Patch tidak cocok persis dengan baris kode saat ini — website lama dipertahankan utuh.)*`.trim();
+        showToast('⚠️ Target patch tidak cocok; website lama dipertahankan.', 'warning');
       } else if (fullText.indexOf('<<<ZOZ_FILE') !== -1 || fullText.indexOf('<<<END_ZOZ_FILE') !== -1 || fullText.indexOf('<<<ZOZ_EDIT') !== -1) {
         // M2: ada marker tapi TIDAK ada blok utuh (stream terputus sebelum
         // <<<END_ZOZ_FILE / END yatim). Dulu marker + isi blok tampil mentah di
