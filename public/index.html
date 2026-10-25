@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261025_v480';
+    window.__ZOZ_VERSION__ = 'v20261025_v481';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -93,8 +93,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261025_v480">
-  <link rel="stylesheet" href="style.css?v=20261025_v480">
+  <link rel="preload" as="style" href="style.css?v=20261025_v481">
+  <link rel="stylesheet" href="style.css?v=20261025_v481">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -1604,10 +1604,10 @@
               </div>
             </div>
             <!-- Search in Code Floating/Docked Cyber Bar -->
-            <div class="studio-editor-search-bar" id="studioEditorSearchBar" style="display: none;">
+            <form class="studio-editor-search-bar" id="studioEditorSearchBar" action="javascript:void(0);" style="display: none;">
               <div class="studio-search-left">
                 <i class="fa-solid fa-magnifying-glass studio-search-icon"></i>
-                <input type="text" class="studio-search-input" id="studioSearchInput" placeholder="Cari nama, kata, atau baris kode (misal: Mark, Abdullah, button)..." autocomplete="off" spellcheck="false" />
+                <input type="text" class="studio-search-input" id="studioSearchInput" placeholder="Cari nama, kata, atau baris (misal: Mark, 1289, button)..." autocomplete="off" spellcheck="false" enterkeyhint="next" />
                 <span class="studio-search-count-badge is-empty" id="studioSearchCountBadge">0/0</span>
               </div>
               <div class="studio-search-right">
@@ -1617,17 +1617,15 @@
                 <button type="button" class="studio-search-nav-btn" id="btnStudioSearchNext" title="Berikutnya (Enter)">
                   <i class="fa-solid fa-chevron-down"></i>
                 </button>
-                <button type="button" class="gemini-pill-btn studio-search-ai-btn" id="btnStudioSearchAiEdit" title="Pilih baris yang ditemukan dan kirim ke AI Edit">
-                  <i class="fa-solid fa-wand-magic-sparkles"></i> <span>AI Edit Baris Ini</span>
-                </button>
                 <button type="button" class="studio-search-close-btn" id="btnStudioSearchClose" title="Tutup Pencarian (Esc)">
                   <i class="fa-solid fa-xmark"></i>
                 </button>
               </div>
-            </div>
+            </form>
             <div class="studio-code-editor-stage" id="studioCodeEditorStage">
               <div class="studio-editor-line-numbers" id="studioEditorLineNumbers" aria-hidden="true">1</div>
               <div class="studio-editor-canvas" id="studioEditorCanvas">
+                <div class="studio-editor-active-line-indicator" id="studioEditorActiveLineIndicator"></div>
                 <pre class="studio-editor-highlight-pre" id="studioEditorHighlightPre" aria-hidden="true"><code class="studio-editor-highlight-code" id="studioEditorHighlightCode"></code></pre>
                 <textarea class="ai-file-studio-editor" id="aiFileStudioEditor" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" placeholder="Edit kode website Anda di sini..."></textarea>
               </div>
@@ -3066,8 +3064,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261025_v480" defer></script>
+  <script src="text-safety.js?v=20261025_v481" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261025_v480" defer></script>
+  <script src="app.js?v=20261025_v481" defer></script>
 </body>
 </html>

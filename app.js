@@ -1129,13 +1129,13 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     studioSearchCountBadge: $('#studioSearchCountBadge'),
     btnStudioSearchPrev: $('#btnStudioSearchPrev'),
     btnStudioSearchNext: $('#btnStudioSearchNext'),
-    btnStudioSearchAiEdit: $('#btnStudioSearchAiEdit'),
     btnStudioSearchClose: $('#btnStudioSearchClose'),
     iconStudioEditCode: $('#iconStudioEditCode'),
     labelStudioEditCode: $('#labelStudioEditCode'),
     studioCodeEditorWrap: $('#studioCodeEditorWrap'),
     studioCodeEditorStage: $('#studioCodeEditorStage'),
     studioEditorLineNumbers: $('#studioEditorLineNumbers'),
+    studioEditorActiveLineIndicator: $('#studioEditorActiveLineIndicator'),
     studioEditorHighlightPre: $('#studioEditorHighlightPre'),
     studioEditorHighlightCode: $('#studioEditorHighlightCode'),
     studioEditorSelectionBadge: $('#studioEditorSelectionBadge'),
@@ -13954,10 +13954,11 @@ window.addEventListener('error', function(e) {
           } catch (_) {}
         }, 30);
       }
+      this._hasJumpedForCurrentQuery = false;
       this.executeSearch(els.studioSearchInput ? els.studioSearchInput.value : '');
     },
 
-    close() {
+    close(skipFocus = false) {
       if (this._searchRaf) {
         cancelAnimationFrame(this._searchRaf);
         this._searchRaf = null;
@@ -13967,6 +13968,7 @@ window.addEventListener('error', function(e) {
       this.currentIndex = -1;
       this.matchingLinesSet.clear();
       this.activeLine = -1;
+      this._hasJumpedForCurrentQuery = false;
       if (els.studioEditorSearchBar) {
         els.studioEditorSearchBar.style.display = 'none';
       }
@@ -13974,9 +13976,12 @@ window.addEventListener('error', function(e) {
       if (els.btnStudioHeaderSearchCode) els.btnStudioHeaderSearchCode.classList.remove('active');
       if (els.btnStudioBottomSearch) els.btnStudioBottomSearch.classList.remove('active');
       this.updateCountBadge();
+      if (typeof updateStudioActiveLineIndicator === 'function') updateStudioActiveLineIndicator();
       if (els.aiFileStudioEditor) {
         renderStudioCodeEditorHighlight(els.aiFileStudioEditor.value);
-        try { els.aiFileStudioEditor.focus(); } catch (_) {}
+        if (!skipFocus) {
+          try { els.aiFileStudioEditor.focus(); } catch (_) {}
+        }
       }
     },
 
@@ -13990,12 +13995,12 @@ window.addEventListener('error', function(e) {
       if (this._searchRaf) cancelAnimationFrame(this._searchRaf);
       this._searchRaf = requestAnimationFrame(() => {
         this._searchRaf = null;
-        this.executeSearch(this.query);
+        this.executeSearch(this.query, false);
       });
     },
 
     _ensureIndex(text) {
-      if (text === this._cachedSourceText) return;
+      if (text === this._cachedSourceText && this._cachedLineBreaks) return;
       this._cachedSourceText = text;
       this._cachedTextLower = text.toLowerCase();
       const lb = [-1];
@@ -14006,30 +14011,29 @@ window.addEventListener('error', function(e) {
       this._cachedLineBreaks = lb;
     },
 
-    executeSearch(query) {
+    executeSearch(query, isEnterPress = false) {
       this.query = typeof query === 'string' ? query : '';
       const ed = els.aiFileStudioEditor;
       if (!ed) return;
       const text = ed.value || '';
-      const trimmed = this.query;
+      const trimmed = this.query.trim();
 
       this.matches = [];
       this.matchingLinesSet.clear();
-      this.activeLine = -1;
 
       if (!trimmed) {
         this.currentIndex = -1;
+        this.activeLine = -1;
+        this._hasJumpedForCurrentQuery = false;
         this.updateCountBadge();
+        if (typeof updateStudioActiveLineIndicator === 'function') updateStudioActiveLineIndicator();
         renderStudioCodeEditorHighlight(text);
         return;
       }
 
       this._ensureIndex(text);
-      const qLower = trimmed.toLowerCase();
-      const textLower = this._cachedTextLower;
       const lineBreaks = this._cachedLineBreaks;
-      let pos = 0;
-      let idx = 0;
+      const totalLines = Math.max(1, lineBreaks.length - 1);
 
       function getLineNumber(offset) {
         let low = 0, high = lineBreaks.length - 1;
@@ -14041,47 +14045,95 @@ window.addEventListener('error', function(e) {
         return Math.max(1, low);
       }
 
+      let idx = 0;
+
+      // 1. Dukungan pencarian nomor baris (misal: "1289", ":50", "#100", "line 120", "baris 45")
+      const lineTargetMatch = trimmed.match(/^(?:line|baris|#|:)?\s*(\d+)$/i);
+      if (lineTargetMatch) {
+        const targetLine = parseInt(lineTargetMatch[1], 10);
+        if (targetLine >= 1 && targetLine <= totalLines) {
+          const startOffset = targetLine === 1 ? 0 : lineBreaks[targetLine - 1] + 1;
+          const endOffset = (targetLine < lineBreaks.length) ? lineBreaks[targetLine] : text.length;
+          this.matches.push({
+            index: idx++,
+            start: startOffset,
+            end: endOffset,
+            line: targetLine,
+            text: text.slice(startOffset, endOffset),
+            isLineTarget: true
+          });
+          this.matchingLinesSet.add(targetLine);
+        }
+      }
+
+      // 2. Pencarian teks kata/nama/kode
+      const qLower = trimmed.toLowerCase();
+      const textLower = this._cachedTextLower;
+      let pos = 0;
       while (pos < text.length) {
         const found = textLower.indexOf(qLower, pos);
         if (found === -1) break;
         const line = getLineNumber(found);
-        this.matches.push({
-          index: idx++,
-          start: found,
-          end: found + trimmed.length,
-          line,
-          text: text.slice(found, found + trimmed.length)
-        });
-        this.matchingLinesSet.add(line);
+        const alreadyMatched = this.matches.some(m => m.start === found && m.end === (found + trimmed.length));
+        if (!alreadyMatched) {
+          this.matches.push({
+            index: idx++,
+            start: found,
+            end: found + trimmed.length,
+            line,
+            text: text.slice(found, found + trimmed.length),
+            isLineTarget: false
+          });
+          this.matchingLinesSet.add(line);
+        }
         pos = found + Math.max(1, trimmed.length);
         if (this.matches.length >= 1000) break;
       }
 
       if (this.matches.length > 0) {
-        const cursor = ed.selectionStart || 0;
-        let bestIdx = 0;
-        let minDist = Infinity;
-        for (let i = 0; i < this.matches.length; i++) {
-          const dist = Math.abs(this.matches[i].start - cursor);
-          if (dist < minDist) {
-            minDist = dist;
-            bestIdx = i;
+        if (isEnterPress) {
+          // Enter ditekan: bawa dan gulir langsung ke kecocokan
+          if (!this._hasJumpedForCurrentQuery || this.currentIndex === -1) {
+            this._hasJumpedForCurrentQuery = true;
+            this.jumpToMatch(0, false);
+          } else {
+            this.next();
           }
+        } else {
+          // Saat mengetik (input): sinkronkan tanpa mengunci
+          const cursor = ed.selectionStart || 0;
+          let bestIdx = 0;
+          let minDist = Infinity;
+          for (let i = 0; i < this.matches.length; i++) {
+            const dist = Math.abs(this.matches[i].start - cursor);
+            if (dist < minDist) {
+              minDist = dist;
+              bestIdx = i;
+            }
+          }
+          this.currentIndex = bestIdx;
+          this.activeLine = this.matches[bestIdx].line;
+          this.updateCountBadge();
+          renderStudioCodeEditorHighlight(text);
+          if (typeof updateStudioActiveLineIndicator === 'function') updateStudioActiveLineIndicator();
+          scrollStudioEditorToLine(this.activeLine);
         }
-        this.jumpToMatch(bestIdx, false);
       } else {
         this.currentIndex = -1;
         this.activeLine = -1;
+        this._hasJumpedForCurrentQuery = false;
         this.updateCountBadge();
+        if (typeof updateStudioActiveLineIndicator === 'function') updateStudioActiveLineIndicator();
         renderStudioCodeEditorHighlight(text);
       }
     },
 
-    jumpToMatch(index, doFocusEditor = true) {
+    jumpToMatch(index, doFocusEditor = false) {
       if (this.matches.length === 0) {
         this.currentIndex = -1;
         this.activeLine = -1;
         this.updateCountBadge();
+        if (typeof updateStudioActiveLineIndicator === 'function') updateStudioActiveLineIndicator();
         return;
       }
       this.currentIndex = ((index % this.matches.length) + this.matches.length) % this.matches.length;
@@ -14098,17 +14150,30 @@ window.addEventListener('error', function(e) {
         scrollStudioEditorToLine(m.line);
         renderStudioCodeEditorHighlight(ed.value);
         updateStudioEditorSelectionUI();
+        if (typeof updateStudioActiveLineIndicator === 'function') updateStudioActiveLineIndicator();
       }
     },
 
     next() {
       if (this.matches.length === 0) return;
-      this.jumpToMatch(this.currentIndex + 1, false);
+      this._hasJumpedForCurrentQuery = true;
+      if (this.matches.length === 1) {
+        this.jumpToMatch(0, false);
+        const m = this.matches[0];
+        showToast(`🎯 Baris ${m.line} (${escapeHtml(m.isLineTarget ? 'Baris Target' : 'Kecocokan Tunggal')})`, 'info');
+      } else {
+        this.jumpToMatch(this.currentIndex + 1, false);
+      }
     },
 
     prev() {
       if (this.matches.length === 0) return;
-      this.jumpToMatch(this.currentIndex - 1, false);
+      this._hasJumpedForCurrentQuery = true;
+      if (this.matches.length === 1) {
+        this.jumpToMatch(0, false);
+      } else {
+        this.jumpToMatch(this.currentIndex - 1, false);
+      }
     },
 
     getCurrentMatch() {
@@ -14129,42 +14194,16 @@ window.addEventListener('error', function(e) {
         badge.textContent = '0/0 (Tidak ada)';
         badge.classList.add('is-none');
       } else {
-        badge.textContent = `${this.currentIndex + 1}/${this.matches.length}`;
+        const curMatch = this.matches[this.currentIndex >= 0 ? this.currentIndex : 0];
+        if (curMatch && curMatch.isLineTarget && this.matches.length === 1) {
+          badge.textContent = `Baris ${curMatch.line}`;
+        } else {
+          badge.textContent = `${this.currentIndex + 1}/${this.matches.length}`;
+        }
         badge.classList.add('is-found');
       }
     }
   };
-
-  function studioSearchAiEditCurrent() {
-    const m = StudioCodeSearch.getCurrentMatch();
-    const ed = els.aiFileStudioEditor;
-    if (!m || !ed) {
-      showToast('Cari dan temukan kata atau baris kode terlebih dahulu.', 'info');
-      return;
-    }
-    const val = ed.value || '';
-    const lines = val.split('\n');
-    let lineStart = 0;
-    for (let i = 0; i < m.line - 1; i++) {
-      lineStart += lines[i].length + 1;
-    }
-    const lineEnd = lineStart + (lines[m.line - 1] ? lines[m.line - 1].length : 0);
-    ed.focus();
-    ed.setSelectionRange(lineStart, lineEnd);
-    updateStudioEditorSelectionUI();
-    renderStudioCodeEditorHighlight(val);
-
-    focusStudioAiEditFromEditor();
-    if (els.inputStudioFollowup) {
-      const targetWord = (m.text || '').trim();
-      els.inputStudioFollowup.value = `Ganti "${targetWord}" pada baris ${m.line} menjadi `;
-      els.inputStudioFollowup.focus();
-      try {
-        els.inputStudioFollowup.selectionStart = els.inputStudioFollowup.selectionEnd = els.inputStudioFollowup.value.length;
-      } catch (_) {}
-    }
-    showToast(`✨ Baris ${m.line} dipilih! Ketik perubahan di kolom prompt bawah.`, 'info');
-  }
 
   let lastHighlightedRawCode = null;
   let lastHighlightedEditedKey = '';
@@ -14262,6 +14301,21 @@ window.addEventListener('error', function(e) {
     syncStudioEditorScroll();
   }
 
+  function updateStudioActiveLineIndicator() {
+    const ind = els.studioEditorActiveLineIndicator;
+    if (!ind) return;
+    const ed = els.aiFileStudioEditor;
+    if (!ed || typeof StudioCodeSearch === 'undefined' || !StudioCodeSearch.isOpen || StudioCodeSearch.activeLine < 1) {
+      ind.style.display = 'none';
+      return;
+    }
+    const line = StudioCodeSearch.activeLine;
+    const lineHeight = 20;
+    const topOffset = 14 + (line - 1) * lineHeight;
+    ind.style.display = 'block';
+    ind.style.transform = `translate3d(0, ${topOffset - ed.scrollTop}px, 0)`;
+  }
+
   function syncStudioEditorScroll() {
     const ed = els.aiFileStudioEditor;
     if (!ed) return;
@@ -14272,6 +14326,7 @@ window.addEventListener('error', function(e) {
     if (els.studioEditorLineNumbers) {
       els.studioEditorLineNumbers.scrollTop = ed.scrollTop;
     }
+    updateStudioActiveLineIndicator();
   }
 
   function getStudioEditorSelectionInfo() {
@@ -14326,7 +14381,10 @@ window.addEventListener('error', function(e) {
     const ed = els.aiFileStudioEditor;
     if (!ed || !lineNumber || lineNumber < 1) return;
     const lineHeight = 20;
-    const targetScrollTop = Math.max(0, (lineNumber - 4) * lineHeight);
+    const clientH = ed.clientHeight || 300;
+    const visibleLines = Math.max(4, Math.floor(clientH / lineHeight));
+    // Posisikan baris di tengah viewport agar jelas terlihat di semua layar (ponsel/desktop)
+    const targetScrollTop = Math.max(0, (lineNumber - Math.floor(visibleLines / 2)) * lineHeight);
     ed.scrollTop = targetScrollTop;
     syncStudioEditorScroll();
   }
@@ -17793,16 +17851,39 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
   els.studioSearchInput?.addEventListener('input', (e) => {
     StudioCodeSearch.scheduleSearch(e.target.value);
   });
+
+  let studioSearchEnterCooldown = false;
+  function handleStudioSearchEnter(isShift) {
+    if (studioSearchEnterCooldown) return;
+    studioSearchEnterCooldown = true;
+    setTimeout(() => { studioSearchEnterCooldown = false; }, 60);
+
+    if (isShift) {
+      StudioCodeSearch.prev();
+    } else {
+      if (!StudioCodeSearch._hasJumpedForCurrentQuery || StudioCodeSearch.currentIndex === -1) {
+        StudioCodeSearch.executeSearch(els.studioSearchInput ? els.studioSearchInput.value : '', true);
+      } else {
+        StudioCodeSearch.next();
+      }
+    }
+  }
+
+  els.studioEditorSearchBar?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    handleStudioSearchEnter(false);
+  });
+
   els.studioSearchInput?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' || e.keyCode === 13 || e.which === 13) {
       e.preventDefault();
-      if (e.shiftKey) StudioCodeSearch.prev();
-      else StudioCodeSearch.next();
-    } else if (e.key === 'Escape') {
+      handleStudioSearchEnter(Boolean(e.shiftKey));
+    } else if (e.key === 'Escape' || e.keyCode === 27) {
       e.preventDefault();
       StudioCodeSearch.close();
     }
   });
+
   els.btnStudioSearchNext?.addEventListener('click', (e) => {
     e.stopPropagation();
     StudioCodeSearch.next();
@@ -17811,11 +17892,6 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
   els.btnStudioSearchPrev?.addEventListener('click', (e) => {
     e.stopPropagation();
     StudioCodeSearch.prev();
-    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
-  });
-  els.btnStudioSearchAiEdit?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    studioSearchAiEditCurrent();
     if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
   });
   els.btnStudioSearchClose?.addEventListener('click', (e) => {

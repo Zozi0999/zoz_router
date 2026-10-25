@@ -8617,20 +8617,25 @@ div.msg-sources-section button.msg-sources-title span {
   color: #ffffff !important;
 }
 
-.studio-search-ai-btn {
-  background: linear-gradient(135deg, rgba(168, 85, 247, 0.25), rgba(0, 240, 255, 0.22)) !important;
-  border: 1px solid rgba(0, 240, 255, 0.45) !important;
-  color: #67e8f9 !important;
-  font-size: 0.76rem !important;
-  padding: 4px 10px !important;
-  font-weight: 600 !important;
-  white-space: nowrap !important;
+/* Active Line Indicator for Precise Code Search */
+.studio-editor-active-line-indicator {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  height: 20px !important;
+  background: rgba(0, 240, 255, 0.16) !important;
+  border-left: 3px solid #00f0ff !important;
+  box-shadow: inset 0 0 14px rgba(0, 240, 255, 0.22) !important;
+  pointer-events: none !important;
+  z-index: 1 !important;
+  display: none;
+  will-change: transform;
 }
 
-.studio-search-ai-btn:hover {
-  background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(0, 240, 255, 0.38)) !important;
-  color: #ffffff !important;
-  box-shadow: 0 0 10px rgba(0, 240, 255, 0.3) !important;
+@keyframes searchMatchPulse {
+  0% { transform: scale(0.92); filter: brightness(1.6); }
+  50% { transform: scale(1.08); filter: brightness(2); }
+  100% { transform: scale(1); filter: brightness(1); }
 }
 
 /* Header & Editor Search Buttons */
@@ -8669,8 +8674,9 @@ div.msg-sources-section button.msg-sources-title span {
   color: #050811 !important;
   background: #00f0ff !important;
   font-weight: 800 !important;
-  box-shadow: 0 0 10px #00f0ff !important;
+  box-shadow: 0 0 12px #00f0ff, 0 0 20px rgba(0, 240, 255, 0.6) !important;
   border-radius: 3px !important;
+  animation: searchMatchPulse 0.35s ease-out !important;
 }
 
 /* Floating Mobile & Touch Friendly Bottom Control Bar in Center */
@@ -12653,23 +12659,32 @@ body.mermaid-has-fullscreen {
     min-height: 32px !important;
   }
   .studio-editor-search-bar {
-    flex-wrap: wrap !important;
-    padding: 6px 8px !important;
+    flex-wrap: nowrap !important;
+    padding: 5px 8px !important;
     gap: 6px !important;
   }
   .studio-search-left {
-    width: 100% !important;
-    margin-bottom: 2px !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    width: auto !important;
+    margin-bottom: 0 !important;
+    gap: 6px !important;
   }
   .studio-search-input {
-    min-width: 100px !important;
+    min-width: 60px !important;
     font-size: 0.78rem !important;
     height: 30px !important;
   }
   .studio-search-right {
-    width: 100% !important;
+    flex: 0 0 auto !important;
+    width: auto !important;
     justify-content: flex-end !important;
-    gap: 5px !important;
+    gap: 4px !important;
+  }
+  .studio-search-nav-btn,
+  .studio-search-close-btn {
+    width: 28px !important;
+    height: 28px !important;
   }
 }
 
