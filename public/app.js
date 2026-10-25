@@ -5274,7 +5274,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
                 const diskLast = full.messages[diskLen - 1];
                 const memLast = activeSess.messages ? activeSess.messages[memLen - 1] : null;
 
-                if (activeSess._isLazyDisk || diskLen > memLen || (diskLast && memLast && diskLast.content !== memLast.content && ((diskLast.content || '').length > (memLast.content || '').length || diskLast.backgroundCompleted))) {
+                const diskTime = full.updatedAt ? new Date(full.updatedAt).getTime() : 0;
+                const memTime = activeSess.updatedAt ? new Date(activeSess.updatedAt).getTime() : 0;
+                const isDiskContentChanged = diskLast && memLast && diskLast.content !== memLast.content;
+
+                if (activeSess._isLazyDisk || diskLen > memLen || diskTime > memTime || isDiskContentChanged || (diskLast && diskLast.backgroundCompleted)) {
                   activeSess.messages = full.messages;
                   delete activeSess._isLazyDisk;
                   activeSess.userId = STATE.userId;
@@ -5370,8 +5374,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       activeLast = activeMsgs[activeMsgs.length - 1];
     }
 
-    const hasNewMessages = diskMsgs.length > activeMsgs.length ||
-      (diskLast && activeLast && diskLast.content !== activeLast.content && ((diskLast.content || '').length > (activeLast.content || '').length || diskLast.backgroundCompleted));
+    const isDiskContentChanged = diskLast && activeLast && diskLast.content !== activeLast.content;
+    const hasNewMessages = diskMsgs.length > activeMsgs.length || isDiskContentChanged;
 
     if (hasNewMessages) {
       activeSession.messages = diskMsgs;
@@ -14642,6 +14646,10 @@ window.addEventListener('error', function(e) {
       openStudioCodeEditor();
       return;
     }
+    // Jika beralih dari mode edit kode ke pratinjau / kode biasa, simpan & terapkan kode yang telah diedit
+    if (typeof isStudioEditModeActive === 'function' && isStudioEditModeActive()) {
+      flushStudioEditorChangesIfDirty();
+    }
     closeStudioCodeEditor();
     const isPreview = tab === 'preview';
     if (els.aiFileStudioPreviewPane) els.aiFileStudioPreviewPane.classList.toggle('hidden', !isPreview);
@@ -15199,6 +15207,15 @@ window.addEventListener('error', function(e) {
       searchTarget = searchTarget.replace(/(?:\/\*|<!--)\s*\.\.\.\s*\[baris\s+\d+-\d+\s+dilewati\]\s*\.\.\.\s*(?:\*\/|-->)\r?\n?/gi, '').trim();
       if (!searchTarget) return false;
 
+      // Safety guard: Jika AI menyisipkan komentar placeholder potong kode di blok pengganti,
+      // jangan terapkan hunk ini karena akan merusak website dengan menghapus kode fungsional!
+      const hasCorruptEllipsisPlaceholder = /(?:\/\*|<!--|\/\/)\s*\.\.\.\s*(?:\[baris\s+\d+-\d+\s+dilewati\]|rest of code|sisa kode|kode lainnya|kode tetap|unchanged|kode di atas|kode di bawah)/i.test(replacement);
+      if (hasCorruptEllipsisPlaceholder && !/(?:\/\*|<!--|\/\/)\s*\.\.\./i.test(searchTarget)) {
+        console.warn('[applySingleHunk] Ditahan: pengganti mengandung placeholder pemotong kode:', replacement);
+        failedCount++;
+        return false;
+      }
+
       // Tier 1: Exact match (HANYA ganti di exactIdx spesifik, JANGAN PERNAH replace global regex!)
       const exactIdx = modified.indexOf(searchTarget);
       if (exactIdx !== -1) {
@@ -15384,7 +15401,7 @@ window.addEventListener('error', function(e) {
     buildCodeReference(code, userQuery = '', selectedRange = null) {
       if (!code) return '';
       const lines = code.split('\n');
-      if (lines.length <= 320 && !(selectedRange && selectedRange.hasSelection)) {
+      if (lines.length <= 1500 && !(selectedRange && selectedRange.hasSelection)) {
         return code;
       }
       const keep = new Set();
@@ -15394,7 +15411,7 @@ window.addEventListener('error', function(e) {
         const eIdx = Math.min(lines.length - 1, selectedRange.endLine + 15);
         for (let k = sIdx; k <= eIdx; k++) keep.add(k);
       }
-      if (lines.length <= 320) {
+      if (lines.length <= 1500) {
         return code;
       }
       // Selalu sertakan awal & akhir dokumen
@@ -15420,12 +15437,16 @@ window.addEventListener('error', function(e) {
         }
       }
 
+      const isHtmlDoc = /<!DOCTYPE\s+html|<html\b/i.test(code);
       const sorted = Array.from(keep).sort((a, b) => a - b);
       const out = [];
       let prev = -1;
       for (const idx of sorted) {
         if (prev !== -1 && idx > prev + 1) {
-          out.push(`/* ... [baris ${prev + 2}-${idx} dilewati] ... */`);
+          out.push(isHtmlDoc
+            ? `<!-- ... [baris ${prev + 2}-${idx} dilewati] ... -->`
+            : `/* ... [baris ${prev + 2}-${idx} dilewati] ... */`
+          );
         }
         out.push(lines[idx]);
         prev = idx;
@@ -17753,7 +17774,11 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
       openStudioCodeEditor(line);
       showToast(`🔍 Menampilkan baris ${line} yang diedit AI di Mode Edit Kode.`, 'info');
     } else if (act === 'view-preview') {
-      closeStudioCodeEditor();
+      // Jika beralih dari mode edit kode ke pratinjau / kode biasa, simpan & terapkan kode yang telah diedit
+    if (typeof isStudioEditModeActive === 'function' && isStudioEditModeActive()) {
+      flushStudioEditorChangesIfDirty();
+    }
+    closeStudioCodeEditor();
       setAIFileStudioTab('preview');
     } else if (act === 'undo-edit') {
       els.btnStudioUndo?.click();
@@ -17826,6 +17851,9 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
   });
   els.btnStudioCancelCodeEdit?.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (activeAIFile && els.aiFileStudioEditor) {
+      els.aiFileStudioEditor.value = activeAIFile.rawContent || activeAIFile.content || '';
+    }
     closeStudioCodeEditor();
     setAIFileStudioTab('preview');
     if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
@@ -19102,7 +19130,10 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
         const err = StudioEndocrineDiagnostics.lastError;
         endocrineFeedback = `\n[Endocrine Code Sensor]: Error runtime: "${err.message || err}"${err.lineno ? ` (baris ${err.lineno})` : ''}.`;
       }
-      const compactRef = StudioEndocrineDiagnostics.buildCodeReference(currentCode, rawText);
+      const codeLines = currentCode.split('\n');
+      const compactRef = (codeLines.length <= 1500)
+        ? currentCode
+        : StudioEndocrineDiagnostics.buildCodeReference(currentCode, rawText);
 
       const wrappedEditPrompt = `[Edit "${targetName}"]
 \`\`\`${lang}
@@ -19110,13 +19141,21 @@ ${compactRef}
 \`\`\`
 Permintaan: "${rawText}"${endocrineFeedback}
 
-Keluarkan patch <<<ZOZ_EDIT name="${targetName}">:
+PANDUAN OUTPUT REVISI KODE UNTUK AI:
+1. Untuk perubahan spesifik pada bagian tertentu, gunakan blok patch:
+<<<ZOZ_EDIT name="${targetName}">
 <<<SEARCH>>>
-[salin persis baris yang diubah dari kode di atas]
+[salin persis baris asli yang ingin diubah dari referensi kode di atas]
 <<<REPLACE>>>
-[baris pengganti]
+[baris baru pengganti bagian tersebut]
 <<<END_ZOZ_EDIT>>>
-Jelaskan singkat perubahannya.`;
+
+2. Bila perubahan menyentuh banyak bagian atau merombak tata letak, Anda DAPAT mengeluarkan SELURUH kode lengkap terbaru di dalam blok:
+<<<ZOZ_FILE name="${targetName}" mime="${existingWebFile.mime || 'text/html'}" lang="${lang}">
+... seluruh kode file lengkap terbaru ...
+<<<END_ZOZ_FILE>>>
+
+Jelaskan singkat perubahannya 1 kalimat di luar blok.`;
 
       options.overrideText = wrappedEditPrompt;
       options.displayPrompt = rawText;
@@ -37235,7 +37274,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://garmin-rhode-savings-advantage.trycloudflare.com',
+    activeTunnelUrl: 'https://len-mobility-exams-console.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -37637,7 +37676,7 @@ Aturan:
       if (!u) return true;
       const s = String(u).toLowerCase();
       const activeSub = (this.activeTunnelUrl || '').toLowerCase().replace(/^https?:\/\//, '').split('.')[0];
-      if (s.includes('.trycloudflare.com') && !s.includes('garmin-rhode-savings-advantage') && (!activeSub || !s.includes(activeSub))) {
+      if (s.includes('.trycloudflare.com') && !s.includes('len-mobility-exams-console') && (!activeSub || !s.includes(activeSub))) {
         return true;
       }
       return false;
