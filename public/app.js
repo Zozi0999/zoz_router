@@ -35464,7 +35464,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://tolerance-open-glory-rest.trycloudflare.com',
+    activeTunnelUrl: 'https://hdtv-stranger-ensemble-mom.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -35739,7 +35739,7 @@ Aturan:
     isDeadTunnelUrl(u) {
       if (!u) return true;
       const s = String(u).toLowerCase();
-      if (s.includes('.trycloudflare.com') && !s.includes('tolerance-open-glory-rest')) {
+      if (s.includes('.trycloudflare.com') && !s.includes('hdtv-stranger-ensemble-mom')) {
         return true;
       }
       return false;
