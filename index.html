@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261025_v471';
+    window.__ZOZ_VERSION__ = 'v20261025_v472';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -93,8 +93,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261025_v471">
-  <link rel="stylesheet" href="style.css?v=20261025_v471">
+  <link rel="preload" as="style" href="style.css?v=20261025_v472">
+  <link rel="stylesheet" href="style.css?v=20261025_v472">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -1574,10 +1574,16 @@
           <div class="studio-code-editor-wrap" id="studioCodeEditorWrap" style="display: none;">
             <div class="studio-code-editor-bar">
               <div class="studio-editor-status">
-                <i class="fa-solid fa-pen-to-square" style="color: var(--neon-cyan);"></i>
-                <span>Editor Kode Langsung <small style="color: var(--text-dim); margin-left: 6px;">(Ctrl+S / Tombol Simpan)</small></span>
+                <i class="fa-solid fa-code" style="color: var(--neon-cyan);"></i>
+                <span>Editor Kode Berwarna <small style="color: var(--text-dim); margin-left: 6px;">(Pilih baris &amp; ketik di bawah agar AI mengedit bagian itu saja)</small></span>
+                <span class="studio-editor-sel-badge" id="studioEditorSelectionBadge" style="display: none;">
+                  <i class="fa-solid fa-crosshairs"></i> <span id="studioEditorSelectionText">Baris 1 dipilih</span>
+                </span>
               </div>
               <div class="studio-editor-actions">
+                <button type="button" class="gemini-pill-btn studio-editor-ai-btn" id="btnStudioAiEditInEditor" title="Minta AI mengedit baris/bagian kode secara presisi tanpa menulis ulang seluruh kode">
+                  <i class="fa-solid fa-wand-magic-sparkles"></i> <span>AI Edit Bagian</span>
+                </button>
                 <button type="button" class="gemini-pill-btn studio-editor-undo-btn" id="btnStudioUndoEdit" title="Kembalikan pengeditan/baris sebelumnya" disabled>
                   <i class="fa-solid fa-rotate-left"></i> <span>Kembali</span>
                 </button>
@@ -1592,9 +1598,18 @@
                 </button>
               </div>
             </div>
-            <textarea class="ai-file-studio-editor" id="aiFileStudioEditor" spellcheck="false" placeholder="Edit kode website Anda di sini..."></textarea>
+            <div class="studio-code-editor-stage" id="studioCodeEditorStage">
+              <div class="studio-editor-line-numbers" id="studioEditorLineNumbers" aria-hidden="true">1</div>
+              <div class="studio-editor-canvas" id="studioEditorCanvas">
+                <pre class="studio-editor-highlight-pre" id="studioEditorHighlightPre" aria-hidden="true"><code class="studio-editor-highlight-code" id="studioEditorHighlightCode"></code></pre>
+                <textarea class="ai-file-studio-editor" id="aiFileStudioEditor" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" placeholder="Edit kode website Anda di sini..."></textarea>
+              </div>
+            </div>
             <!-- Floating Mobile & Touch Friendly Bottom Control Bar in Center -->
             <div class="studio-editor-bottom-bar" id="studioEditorBottomBar">
+              <button type="button" class="studio-bottom-action-btn btn-ai-edit" id="btnStudioBottomAiEdit" title="Minta AI mengedit bagian kode ini">
+                <i class="fa-solid fa-wand-magic-sparkles"></i> <span>AI Edit</span>
+              </button>
               <button type="button" class="studio-bottom-action-btn btn-undo" id="btnStudioBottomUndo" title="Kembalikan baris/ketikan sebelumnya" disabled>
                 <i class="fa-solid fa-rotate-left"></i> <span>Kembali</span>
               </button>
@@ -1611,19 +1626,23 @@
           </div>
         </div>
 
-        <!-- Studio Assistant Floating Mini Popup on Left -->
+        <!-- Studio Assistant Floating Mini Popup (Compact & Freely Draggable on Mobile & Desktop) -->
         <div class="studio-assistant-panel" id="studioAssistantPanel" style="display: none;">
+          <div class="studio-floating-drag-pill" id="studioFloatingDragPill" title="Tahan &amp; geser untuk memindahkan jendela Tanya AI">
+            <span class="drag-pill-bar"></span>
+            <span class="drag-pill-hint">Geser</span>
+          </div>
           <div class="studio-assistant-header" id="studioAssistantHeader">
             <div class="studio-assistant-title">
               <i class="fa-solid fa-grip-vertical studio-drag-grip" title="Tahan &amp; geser untuk memindahkan"></i>
               <i class="fa-solid fa-wand-magic-sparkles"></i> <span id="studioAssistantTitleText">Tanya AI</span>
             </div>
             <div class="studio-assistant-controls">
-              <button class="gemini-pill-btn studio-endocrine-toggle-btn" id="btnToggleStudioEndocrine" type="button" title="Sensor Kode (Endocrine Code): Pantau kesehatan & error website">
+              <button class="gemini-pill-btn studio-endocrine-toggle-btn" id="btnToggleStudioEndocrine" type="button" title="Sensor Kode (Endocrine Code): Pantau kesehatan &amp; error website">
                 <i class="fa-solid fa-dna" id="iconStudioEndocrine"></i> <span id="labelStudioEndocrine">Endocrine: ON</span>
               </button>
-              <button class="gemini-icon-btn assistant-min-btn" id="btnStudioMinAssistant" type="button" style="display: none;" title="Kecilkan / Perluas Asisten (Minimize/Expand)">
-                <i class="fa-solid fa-minus" id="iconStudioMin"></i>
+              <button class="gemini-icon-btn assistant-min-btn" id="btnStudioMinAssistant" type="button" title="Lipat / Buka Isi Jendela Tanya AI">
+                <i class="fa-solid fa-chevron-up" id="iconStudioMin"></i>
               </button>
               <button class="gemini-icon-btn" id="btnStudioClearChat" type="button" title="Bersihkan Catatan Diskusi Studio">
                 <i class="fa-solid fa-trash-can"></i>
@@ -3008,8 +3027,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261025_v471" defer></script>
+  <script src="text-safety.js?v=20261025_v472" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261025_v471" defer></script>
+  <script src="app.js?v=20261025_v472" defer></script>
 </body>
 </html>

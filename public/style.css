@@ -8299,22 +8299,188 @@ div.msg-sources-section button.msg-sources-title span {
   color: #ffffff !important;
 }
 
-.ai-file-studio-editor {
+.studio-editor-ai-btn {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.24), rgba(0, 240, 255, 0.22)) !important;
+  border: 1px solid rgba(0, 240, 255, 0.5) !important;
+  color: #67e8f9 !important;
+  font-weight: 600 !important;
+}
+
+.studio-editor-ai-btn:hover {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(0, 240, 255, 0.38)) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.35) !important;
+}
+
+.studio-editor-sel-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(0, 240, 255, 0.14);
+  border: 1px solid rgba(0, 240, 255, 0.45);
+  color: #00f0ff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+}
+
+/* Colored Syntax-Highlighted Live Code Editor Stage */
+.studio-code-editor-stage {
   flex: 1 1 auto !important;
+  display: flex !important;
+  position: relative !important;
   width: 100% !important;
   height: 100% !important;
   min-height: 0 !important;
+  overflow: hidden !important;
+  background: #090d16 !important;
+}
+
+.studio-editor-line-numbers {
+  width: 44px !important;
+  flex-shrink: 0 !important;
+  padding: 14px 8px 92px 4px !important;
+  margin: 0 !important;
+  background: #060911 !important;
+  border-right: 1px solid rgba(0, 240, 255, 0.14) !important;
+  color: #475569 !important;
+  font-family: "JetBrains Mono", "Fira Code", Consolas, monospace !important;
+  font-size: 13px !important;
+  line-height: 20px !important;
+  text-align: right !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+  white-space: pre !important;
+}
+
+.studio-editor-line-numbers .line-num-row {
+  display: block;
+  height: 20px;
+  line-height: 20px;
+  padding-right: 2px;
+}
+
+.studio-editor-line-numbers .line-num-row.is-ai-edited {
+  color: #00f0ff !important;
+  font-weight: 700 !important;
+  background: rgba(0, 240, 255, 0.16) !important;
+  border-radius: 3px;
+}
+
+.studio-editor-line-numbers .line-num-row.is-selected-line {
+  color: #facc15 !important;
+  background: rgba(250, 204, 21, 0.14) !important;
+}
+
+.studio-editor-canvas {
+  flex: 1 1 auto !important;
+  position: relative !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  background: #090d16 !important;
+}
+
+.studio-editor-highlight-pre,
+.ai-file-studio-editor {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 14px 18px 92px 12px !important;
   border: none !important;
   outline: none !important;
   resize: none !important;
-  padding: 16px 20px 80px 20px !important;
-  background: #0b0e14 !important;
-  color: #e2e8f0 !important;
-  font-family: var(--font-mono, "JetBrains Mono", Consolas, monospace) !important;
-  font-size: 0.84rem !important;
-  line-height: 1.55 !important;
+  box-sizing: border-box !important;
+  font-family: "JetBrains Mono", "Fira Code", Consolas, monospace !important;
+  font-size: 13px !important;
+  line-height: 20px !important;
+  letter-spacing: 0px !important;
+  font-variant-ligatures: none !important;
   tab-size: 2 !important;
+  -moz-tab-size: 2 !important;
+  white-space: pre !important;
+  word-wrap: normal !important;
+  overflow-wrap: normal !important;
   overflow: auto !important;
+}
+
+.studio-editor-highlight-pre {
+  z-index: 1 !important;
+  pointer-events: none !important;
+  background: #090d16 !important;
+  color: #e2e8f0 !important;
+}
+
+.studio-editor-highlight-code {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  letter-spacing: inherit !important;
+  white-space: pre !important;
+  color: #e2e8f0 !important;
+}
+
+.ai-file-studio-editor {
+  z-index: 2 !important;
+  background: transparent !important;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  caret-color: #00f0ff !important;
+}
+
+.ai-file-studio-editor::selection {
+  background: rgba(0, 240, 255, 0.28) !important;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+/* IDE Syntax Highlighting Token Palette (Monospace Width-Invariant) */
+.studio-editor-highlight-code .tok-comment {
+  color: #64748b !important;
+}
+.studio-editor-highlight-code .tok-tag {
+  color: #ff5874 !important;
+}
+.studio-editor-highlight-code .tok-attr {
+  color: #ffcb6b !important;
+}
+.studio-editor-highlight-code .tok-str {
+  color: #a3e635 !important;
+}
+.studio-editor-highlight-code .tok-kw {
+  color: #c084fc !important;
+}
+.studio-editor-highlight-code .tok-fn {
+  color: #38bdf8 !important;
+}
+.studio-editor-highlight-code .tok-prop {
+  color: #67e8f9 !important;
+}
+.studio-editor-highlight-code .tok-num {
+  color: #fb923c !important;
+}
+.studio-editor-highlight-code .tok-punc {
+  color: #94a3b8 !important;
+}
+.studio-editor-highlight-code .studio-ai-edited-line {
+  background: rgba(0, 240, 255, 0.16) !important;
+  box-shadow: inset 3px 0 0 #00f0ff !important;
+  display: inline-block;
+  min-width: 100%;
 }
 
 /* Floating Mobile & Touch Friendly Bottom Control Bar in Center */
@@ -8351,6 +8517,16 @@ div.msg-sources-section button.msg-sources-title span {
   transition: all 0.2s ease !important;
   user-select: none !important;
   min-height: 38px !important;
+}
+
+.studio-bottom-action-btn.btn-ai-edit {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.32), rgba(0, 240, 255, 0.28)) !important;
+  border-color: rgba(0, 240, 255, 0.55) !important;
+  color: #67e8f9 !important;
+}
+.studio-bottom-action-btn.btn-ai-edit:hover {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.5), rgba(0, 240, 255, 0.45)) !important;
+  color: #ffffff !important;
 }
 
 .studio-bottom-action-btn.btn-undo {
@@ -8402,42 +8578,129 @@ div.msg-sources-section button.msg-sources-title span {
   pointer-events: none !important;
 }
 
-/* Studio AI Assistant: Mini Popup Assistant anchored under Tanya AI / Ekspor */
+/* Studio AI Assistant: Compact Floating Mini Popup (Freely Draggable on Mobile & Desktop) */
 .studio-assistant-panel {
   position: absolute !important;
-  right: 16px;
+  right: 14px;
   left: auto;
-  top: 14px;
+  top: 12px;
   bottom: auto;
-  width: 320px !important;
-  max-width: min(340px, calc(100vw - 24px)) !important;
-  max-height: min(440px, calc(100% - 28px)) !important;
-  background: rgba(13, 16, 24, 0.96) !important;
-  backdrop-filter: blur(12px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
-  transform: translateZ(0);
-  contain: paint;
-  border: 1px solid rgba(0, 240, 255, 0.4) !important;
+  width: 288px !important;
+  max-width: min(300px, calc(100vw - 24px)) !important;
+  height: auto !important;
+  max-height: min(360px, calc(100% - 28px)) !important;
+  flex: 0 0 auto !important;
+  background: rgba(11, 14, 22, 0.96) !important;
+  backdrop-filter: blur(14px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(180%) !important;
+  border: 1px solid rgba(0, 240, 255, 0.45) !important;
   border-radius: 14px !important;
   display: none !important;
   flex-direction: column !important;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 240, 255, 0.18) !important;
-  animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85), 0 0 20px rgba(0, 240, 255, 0.22) !important;
   overflow: hidden !important;
-  z-index: 100 !important;
-  transition: opacity 0.2s ease;
+  z-index: 120 !important;
+  transition: box-shadow 0.2s ease;
 }
 
 .studio-assistant-panel.is-open {
   display: flex !important;
 }
 
-.studio-assistant-panel.is-dragging {
-  transition: none !important;
+.studio-assistant-panel.is-body-collapsed {
+  max-height: none !important;
+  height: auto !important;
+}
+
+.studio-assistant-panel.is-body-collapsed .studio-assistant-body,
+.studio-assistant-panel.is-body-collapsed .studio-endocrine-status-bar {
+  display: none !important;
+}
+
+.studio-floating-drag-pill {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  height: 18px !important;
+  background: linear-gradient(90deg, rgba(0, 240, 255, 0.06), rgba(0, 240, 255, 0.18), rgba(0, 240, 255, 0.06)) !important;
+  border-bottom: 1px solid rgba(0, 240, 255, 0.14) !important;
+  cursor: grab !important;
+  touch-action: none !important;
   user-select: none !important;
   -webkit-user-select: none !important;
-  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.95), 0 0 35px rgba(0, 240, 255, 0.4) !important;
+  flex-shrink: 0 !important;
+}
+
+.studio-floating-drag-pill .drag-pill-bar {
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(0, 240, 255, 0.7);
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.5);
+}
+
+.studio-floating-drag-pill .drag-pill-hint {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: rgba(0, 240, 255, 0.75);
+}
+
+.studio-assistant-panel.is-dragging {
+  transition: none !important;
+  animation: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.95), 0 0 35px rgba(0, 240, 255, 0.55) !important;
   will-change: left, top;
+}
+
+/* Surgical Edit Summary Card inside Tanya AI Bubble */
+.surgical-edit-summary-card {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  font-size: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.surgical-edit-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: #00f0ff;
+}
+
+.surgical-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.surgical-edit-btn {
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: rgba(0, 240, 255, 0.16);
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  color: #e2e8f0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.surgical-edit-btn:hover {
+  background: rgba(0, 240, 255, 0.3);
+  color: #ffffff;
 }
 
 body.is-assistant-dragging,
@@ -8544,26 +8807,28 @@ body.is-assistant-dragging #aiFileStudioFrame {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  padding: 6px 10px;
   background: rgba(0, 240, 255, 0.08);
   border-bottom: 1px solid rgba(0, 240, 255, 0.18);
   cursor: grab;
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
+  touch-action: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  flex-shrink: 0;
 }
 
-.studio-assistant-panel.is-dragging .studio-assistant-header {
+.studio-assistant-panel.is-dragging .studio-assistant-header,
+.studio-assistant-panel.is-dragging .studio-floating-drag-pill {
   cursor: grabbing !important;
 }
 
 .studio-drag-grip {
-  color: var(--text-dim, #64748b);
+  color: var(--neon-cyan, #00f0ff);
   font-size: 0.85rem;
   margin-right: 2px;
   cursor: grab;
   touch-action: none !important;
-  opacity: 0.7;
+  opacity: 0.85;
   transition: all 0.2s ease;
 }
 
@@ -8576,34 +8841,36 @@ body.is-assistant-dragging #aiFileStudioFrame {
 .studio-assistant-header .gemini-pill-btn,
 .studio-assistant-header .gemini-icon-btn {
   cursor: pointer;
-  touch-action: auto;
+  touch-action: none !important;
 }
 
 .studio-assistant-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.84rem;
+  gap: 6px;
+  font-size: 0.8rem;
   font-weight: 700;
   color: var(--neon-cyan, #00f0ff);
   touch-action: none !important;
+  white-space: nowrap;
 }
 
 .studio-assistant-controls {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
+  touch-action: none !important;
 }
 
 .studio-assistant-messages {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 12px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  font-size: 0.86rem;
-  line-height: 1.5;
+  gap: 8px;
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 
 .studio-assistant-empty {
@@ -8612,16 +8879,17 @@ body.is-assistant-dragging #aiFileStudioFrame {
   align-items: center;
   justify-content: center;
   text-align: center;
-  gap: 10px;
-  height: 100%;
+  gap: 6px;
+  height: auto;
   color: var(--text-dim, #94a3b8);
-  padding: 20px;
-  font-size: 0.82rem;
+  padding: 10px 8px;
+  font-size: 0.74rem;
+  line-height: 1.35;
 }
 
 .studio-assistant-empty i {
-  font-size: 2rem;
-  color: rgba(0, 240, 255, 0.4);
+  font-size: 1.35rem;
+  color: rgba(0, 240, 255, 0.45);
 }
 
 .studio-msg-row {
@@ -12040,33 +12308,46 @@ body.mermaid-has-fullscreen {
     background: #0e1015 !important;
     color: #E6EDF8 !important;
   }
-  .studio-assistant-panel {
+  .studio-assistant-panel,
+  #aiFileStudioModal #studioAssistantPanel.studio-assistant-panel {
     position: absolute !important;
-    right: 10px;
+    right: 8px;
     left: auto;
-    top: 10px;
-    bottom: auto;
-    width: min(320px, calc(100vw - 20px)) !important;
-    max-width: calc(100vw - 20px) !important;
-    max-height: min(400px, 56vh) !important;
+    top: 8px;
+    bottom: auto !important;
+    width: min(246px, 68vw) !important;
+    max-width: 68vw !important;
+    height: auto !important;
+    max-height: min(255px, 38vh) !important;
+    flex: 0 0 auto !important;
     border-radius: 14px !important;
-    border: 1px solid rgba(0, 240, 255, 0.4) !important;
+    border: 1px solid rgba(0, 240, 255, 0.48) !important;
     display: none !important;
-    z-index: 100 !important;
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85), 0 0 20px rgba(0, 240, 255, 0.25) !important;
+    z-index: 120 !important;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.9), 0 0 20px rgba(0, 240, 255, 0.28) !important;
   }
-  .studio-assistant-panel.is-open {
+  .studio-assistant-panel.is-open,
+  #aiFileStudioModal #studioAssistantPanel.studio-assistant-panel.is-open {
     display: flex !important;
   }
+  .studio-assistant-panel.is-body-collapsed,
+  #aiFileStudioModal #studioAssistantPanel.studio-assistant-panel.is-body-collapsed {
+    max-height: none !important;
+    height: auto !important;
+  }
+  .studio-endocrine-toggle-btn {
+    padding: 2px 6px !important;
+    font-size: 0.65rem !important;
+  }
   .studio-editor-bottom-bar {
-    bottom: 12px !important;
-    padding: 5px 10px !important;
-    gap: 6px !important;
+    bottom: 68px !important;
+    padding: 4px 8px !important;
+    gap: 5px !important;
   }
   .studio-bottom-action-btn {
-    padding: 6px 10px !important;
-    font-size: 0.78rem !important;
-    min-height: 34px !important;
+    padding: 5px 9px !important;
+    font-size: 0.74rem !important;
+    min-height: 32px !important;
   }
 }
 

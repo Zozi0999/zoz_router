@@ -1069,16 +1069,26 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     iconStudioEditCode: $('#iconStudioEditCode'),
     labelStudioEditCode: $('#labelStudioEditCode'),
     studioCodeEditorWrap: $('#studioCodeEditorWrap'),
+    studioCodeEditorStage: $('#studioCodeEditorStage'),
+    studioEditorLineNumbers: $('#studioEditorLineNumbers'),
+    studioEditorHighlightPre: $('#studioEditorHighlightPre'),
+    studioEditorHighlightCode: $('#studioEditorHighlightCode'),
+    studioEditorSelectionBadge: $('#studioEditorSelectionBadge'),
+    studioEditorSelectionText: $('#studioEditorSelectionText'),
+    btnStudioAiEditInEditor: $('#btnStudioAiEditInEditor'),
     aiFileStudioEditor: $('#aiFileStudioEditor'),
     btnStudioUndoEdit: $('#btnStudioUndoEdit'),
     btnStudioRedoEdit: $('#btnStudioRedoEdit'),
     btnStudioSaveCode: $('#btnStudioSaveCode'),
     btnStudioCancelCodeEdit: $('#btnStudioCancelCodeEdit'),
     studioEditorBottomBar: $('#studioEditorBottomBar'),
+    btnStudioBottomAiEdit: $('#btnStudioBottomAiEdit'),
     btnStudioBottomUndo: $('#btnStudioBottomUndo'),
     btnStudioBottomSave: $('#btnStudioBottomSave'),
     btnStudioBottomRedo: $('#btnStudioBottomRedo'),
     btnStudioBottomCancel: $('#btnStudioBottomCancel'),
+    studioFloatingDragPill: $('#studioFloatingDragPill'),
+    iconStudioMin: $('#iconStudioMin'),
     studioAssistantTitleText: $('#studioAssistantTitleText'),
     btnToggleStudioAssistant: $('#btnToggleStudioAssistant'),
     btnToggleStudioEndocrine: $('#btnToggleStudioEndocrine'),
@@ -9014,11 +9024,15 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
                         fileBlockLang === 'docx' || fileBlockLang === 'pdf' || 
                         ((fileBlockLang === 'markdown' || fileBlockLang === 'md') && (!isDiagram && !isWeb && !fnLower.endsWith('.svg') || isDocMode));
 
+          const isSurgicalTag = t.indexOf('<<<ZOZ_EDIT') === 0 || t.indexOf('<<<ZOZ_MODIFY') === 0;
           if (isDiagram) {
             out.push('\n```mermaid');
           } else if (isDoc) {
             insideIsolatedBlock = true;
             out.push(`\n> 📄 *Sedang menyusun dan memformat dokumen ${escapeHtml(currentFileName || 'Dokumen')}... (terisolasi di Studio Dokumen)*\n`);
+          } else if (isSurgicalTag && !isExplicitCodeInChat) {
+            insideIsolatedBlock = true;
+            out.push(`\n> ✨ *Sedang memilih & mengganti bagian kode terkait di ${escapeHtml(currentFileName || 'index.html')} (tanpa menulis ulang seluruh kode)...*\n`);
           } else if (isWeb && isWebPreviewMode && !isExplicitCodeInChat) {
             insideIsolatedBlock = true;
             out.push(`\n> 🌐 *Sedang merancang kode website ${escapeHtml(currentFileName || 'index.html')}... (terisolasi di pratinjau live)*\n`);
@@ -13679,6 +13693,7 @@ window.addEventListener('error', function(e) {
       editorEl.value = text;
       this.isApplying = false;
       this.updateBtns();
+      renderStudioCodeEditorHighlight(text);
       return true;
     },
 
@@ -13690,6 +13705,7 @@ window.addEventListener('error', function(e) {
       editorEl.value = text;
       this.isApplying = false;
       this.updateBtns();
+      renderStudioCodeEditorHighlight(text);
       return true;
     },
 
@@ -13703,7 +13719,144 @@ window.addEventListener('error', function(e) {
     }
   };
 
-  function openStudioCodeEditor() {
+  let studioLastAiEditedLines = new Set();
+
+  function tokenizeStudioCodeLine(line) {
+    if (!line) return '';
+    const trimmed = line.trim();
+    if (trimmed.startsWith('//') || (trimmed.startsWith('/*') && trimmed.endsWith('*/')) || (trimmed.startsWith('<!--') && trimmed.endsWith('-->'))) {
+      return `<span class="tok-comment">${escapeHtml(line)}</span>`;
+    }
+    const tokenRe = /(<!--[\s\S]*?-->|\/\*[\s\S]*?\*\/|\/\/.*$)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(<\/?[a-zA-Z!][a-zA-Z0-9:-]*\b|\/?>)|(\b[a-zA-Z_:][a-zA-Z0-9_:-]*(?=\s*=))|(\b(?:const|let|var|function|return|if|else|for|while|switch|case|break|continue|new|class|extends|import|export|from|default|async|await|try|catch|finally|throw|typeof|instanceof|in|of|this|super|true|false|null|undefined|void|delete|@media|@keyframes|@import|!important)\b)|(\b[a-zA-Z_$][a-zA-Z0-9_$]*(?=\s*\())|(\b[a-zA-Z-]+\s*(?=:[^:]))|(#[0-9a-fA-F]{3,8}\b|\b\d+(?:\.\d+)?(?:px|rem|em|vh|vw|%|s|ms|deg|fr)?\b)/g;
+    let out = '';
+    let lastIdx = 0;
+    let m;
+    while ((m = tokenRe.exec(line)) !== null) {
+      if (m.index > lastIdx) {
+        out += escapeHtml(line.slice(lastIdx, m.index));
+      }
+      const full = m[0];
+      let cls = 'tok-punc';
+      if (m[1]) cls = 'tok-comment';
+      else if (m[2]) cls = 'tok-str';
+      else if (m[3]) cls = 'tok-tag';
+      else if (m[4]) cls = 'tok-attr';
+      else if (m[5]) cls = 'tok-kw';
+      else if (m[6]) cls = 'tok-fn';
+      else if (m[7]) cls = 'tok-prop';
+      else if (m[8]) cls = 'tok-num';
+      out += `<span class="${cls}">${escapeHtml(full)}</span>`;
+      lastIdx = m.index + full.length;
+    }
+    if (lastIdx < line.length) {
+      out += escapeHtml(line.slice(lastIdx));
+    }
+    return out;
+  }
+
+  function renderStudioCodeEditorHighlight(codeText, editedRanges = null) {
+    const raw = typeof codeText === 'string' ? codeText : (els.aiFileStudioEditor?.value || '');
+    if (Array.isArray(editedRanges)) {
+      studioLastAiEditedLines = new Set();
+      editedRanges.forEach(r => {
+        if (r && r.startLine && r.endLine) {
+          for (let ln = r.startLine; ln <= r.endLine; ln++) studioLastAiEditedLines.add(ln);
+        }
+      });
+    }
+    const lines = raw.split('\n');
+    const selInfo = getStudioEditorSelectionInfo();
+    const selStart = selInfo ? selInfo.startLine : -1;
+    const selEnd = selInfo ? selInfo.endLine : -1;
+
+    if (els.studioEditorHighlightCode) {
+      const htmlLines = new Array(lines.length);
+      for (let i = 0; i < lines.length; i++) {
+        const ln = i + 1;
+        const colored = tokenizeStudioCodeLine(lines[i]);
+        if (studioLastAiEditedLines.has(ln)) {
+          htmlLines[i] = `<span class="studio-ai-edited-line">${colored || ' '}</span>`;
+        } else {
+          htmlLines[i] = colored;
+        }
+      }
+      // Trailing newline ensures last empty line scrolls identically to textarea
+      els.studioEditorHighlightCode.innerHTML = htmlLines.join('\n') + '\n';
+    }
+
+    if (els.studioEditorLineNumbers) {
+      const numRows = new Array(lines.length);
+      for (let i = 0; i < lines.length; i++) {
+        const ln = i + 1;
+        let cls = 'line-num-row';
+        if (studioLastAiEditedLines.has(ln)) cls += ' is-ai-edited';
+        else if (selInfo && selInfo.hasSelection && ln >= selStart && ln <= selEnd) cls += ' is-selected-line';
+        numRows[i] = `<span class="${cls}">${ln}</span>`;
+      }
+      els.studioEditorLineNumbers.innerHTML = numRows.join('');
+    }
+    syncStudioEditorScroll();
+  }
+
+  function syncStudioEditorScroll() {
+    const ed = els.aiFileStudioEditor;
+    if (!ed) return;
+    if (els.studioEditorHighlightPre) {
+      els.studioEditorHighlightPre.scrollTop = ed.scrollTop;
+      els.studioEditorHighlightPre.scrollLeft = ed.scrollLeft;
+    }
+    if (els.studioEditorLineNumbers) {
+      els.studioEditorLineNumbers.scrollTop = ed.scrollTop;
+    }
+  }
+
+  function getStudioEditorSelectionInfo() {
+    const ed = els.aiFileStudioEditor;
+    if (!ed || !els.studioCodeEditorWrap || !els.studioCodeEditorWrap.classList.contains('is-editing')) return null;
+    const start = ed.selectionStart || 0;
+    const end = ed.selectionEnd || 0;
+    const val = ed.value || '';
+    const beforeStart = val.slice(0, start);
+    const beforeEnd = val.slice(0, end);
+    const startLine = beforeStart.split('\n').length;
+    const endLine = beforeEnd.split('\n').length;
+    const hasSelection = end > start && (end - start) >= 3;
+    const lines = val.split('\n');
+    const selectedLinesCode = hasSelection ? lines.slice(Math.max(0, startLine - 1), endLine).join('\n') : '';
+    return {
+      hasSelection,
+      start,
+      end,
+      startLine,
+      endLine,
+      selectedText: hasSelection ? val.slice(start, end) : '',
+      selectedLinesCode
+    };
+  }
+
+  function updateStudioEditorSelectionUI() {
+    const info = getStudioEditorSelectionInfo();
+    if (!els.studioEditorSelectionBadge || !els.studioEditorSelectionText) return;
+    if (info && info.hasSelection) {
+      els.studioEditorSelectionBadge.style.display = 'inline-flex';
+      els.studioEditorSelectionText.textContent = info.startLine === info.endLine
+        ? `Baris ${info.startLine} dipilih`
+        : `Baris ${info.startLine}–${info.endLine} dipilih`;
+    } else {
+      els.studioEditorSelectionBadge.style.display = 'none';
+    }
+  }
+
+  function scrollStudioEditorToLine(lineNumber) {
+    const ed = els.aiFileStudioEditor;
+    if (!ed || !lineNumber || lineNumber < 1) return;
+    const lineHeight = 20;
+    const targetScrollTop = Math.max(0, (lineNumber - 4) * lineHeight);
+    ed.scrollTop = targetScrollTop;
+    syncStudioEditorScroll();
+  }
+
+  function openStudioCodeEditor(scrollToLine = null, editedRanges = null) {
     if (!activeAIFile || !els.studioCodeEditorWrap || !els.aiFileStudioEditor) return;
     const raw = activeAIFile.rawContent || activeAIFile.content || '';
     els.aiFileStudioEditor.value = raw;
@@ -13713,7 +13866,16 @@ window.addEventListener('error', function(e) {
     if (els.btnStudioEditCode) els.btnStudioEditCode.classList.add('active');
     if (els.iconStudioEditCode) els.iconStudioEditCode.className = 'fa-solid fa-floppy-disk';
     if (els.labelStudioEditCode) els.labelStudioEditCode.textContent = 'Simpan Kode';
-    setTimeout(() => { try { els.aiFileStudioEditor.focus(); } catch (_) {} }, 30);
+    renderStudioCodeEditorHighlight(raw, editedRanges);
+    updateStudioEditorSelectionUI();
+    setTimeout(() => {
+      try {
+        if (scrollToLine && scrollToLine > 0) {
+          scrollStudioEditorToLine(scrollToLine);
+        }
+        els.aiFileStudioEditor.focus();
+      } catch (_) {}
+    }, 30);
   }
 
   function closeStudioCodeEditor() {
@@ -14308,76 +14470,126 @@ window.addEventListener('error', function(e) {
   }
 
   // ==================== SURGICAL PATCH APPLICATOR (ZOZ_EDIT) ====================
+  function stripAccidentalLineNumbers(snippet) {
+    if (!snippet) return '';
+    const lines = snippet.split('\n');
+    const nonEmpty = lines.filter(l => l.trim().length > 0);
+    if (nonEmpty.length >= 1 && nonEmpty.every(l => /^\s*\d+\s*[|:]\s?/.test(l))) {
+      return lines.map(l => l.replace(/^\s*\d+\s*[|:]\s?/, '')).join('\n');
+    }
+    return snippet;
+  }
+
   function applyZozEditPatch(originalCode, patchBlock) {
-    if (!originalCode || !patchBlock) return { content: originalCode || '', patched: false, patchCount: 0 };
+    if (!originalCode || !patchBlock) return { content: originalCode || '', patched: false, patchCount: 0, editedRanges: [] };
     let modified = originalCode;
     let patchCount = 0;
-
     let failedCount = 0;
-    // 1. Format spesifik Zoz Router: <<<SEARCH>>> ... <<<REPLACE>>>
-    // Lookahead agar blok REPLACE tidak menelan hunk <<<SEARCH>>> berikutnya (multi-hunk)
-    const searchReplaceRegex = /<<<SEARCH>>>([\s\S]*?)<<<REPLACE>>>([\s\S]*?)(?=<<<SEARCH>>>|<<<END_ZOZ_EDIT>>>|<<<END_ZOZ_MODIFY>>>|$(?![\s\S]))/gi;
-    let match;
-    while ((match = searchReplaceRegex.exec(patchBlock)) !== null) {
-      const searchTarget = match[1].replace(/^\r?\n/, '').replace(/\r?\n\s*$/, '');
-      const replacement = match[2].replace(/^\r?\n/, '').replace(/\r?\n\s*$/, '');
-      if (searchTarget && modified.includes(searchTarget)) {
-        // Fungsi pengganti: cegah pola khusus $&, $$, $', $` merusak kode
-        modified = modified.replace(searchTarget, () => replacement);
+    const editedRanges = [];
+
+    function applySingleHunk(rawSearch, rawReplace) {
+      const searchTarget = stripAccidentalLineNumbers(rawSearch.replace(/^\r?\n/, '').replace(/\r?\n\s*$/, ''));
+      const replacement = stripAccidentalLineNumbers(rawReplace.replace(/^\r?\n/, '').replace(/\r?\n\s*$/, ''));
+      if (!searchTarget) return false;
+
+      // Tier 1: Exact match
+      const exactIdx = modified.indexOf(searchTarget);
+      if (exactIdx !== -1) {
+        const startLine = modified.slice(0, exactIdx).split('\n').length;
+        const replLineCount = replacement.split('\n').length;
+        const endLine = startLine + Math.max(0, replLineCount - 1);
+        modified = modified.slice(0, exactIdx) + replacement + modified.slice(exactIdx + searchTarget.length);
+        editedRanges.push({ startLine, endLine, oldLines: searchTarget.split('\n').length, newLines: replLineCount });
         patchCount++;
-      } else if (searchTarget) {
-        // Toleransi perbedaan whitespace/indentasi per baris
-        const trimmedTarget = searchTarget.trim();
-        const lines = modified.split('\n');
-        const targetLines = trimmedTarget.split('\n').map(l => l.trim());
-        let foundIdx = -1;
-        for (let i = 0; i <= lines.length - targetLines.length; i++) {
-          let allMatch = true;
-          for (let k = 0; k < targetLines.length; k++) {
-            if (lines[i + k].trim() !== targetLines[k]) {
-              allMatch = false;
-              break;
-            }
-          }
-          if (allMatch) {
-            foundIdx = i;
+        return true;
+      }
+
+      // Tier 2: Line-by-line trimmed match (tolerating indentation differences)
+      const lines = modified.split('\n');
+      const targetLines = searchTarget.trim().split('\n').map(l => l.trim());
+      let foundIdx = -1;
+      let matchedSpan = targetLines.length;
+
+      for (let i = 0; i <= lines.length - targetLines.length; i++) {
+        let allMatch = true;
+        for (let k = 0; k < targetLines.length; k++) {
+          if (lines[i + k].trim() !== targetLines[k]) {
+            allMatch = false;
             break;
           }
         }
-        if (foundIdx >= 0) {
-          // Pertahankan indentasi asli baris pertama yang diganti
-          const origIndent = (lines[foundIdx].match(/^\s*/) || [''])[0];
-          const replLines = replacement.split('\n');
-          const replIndent = (replLines.find(l => l.trim()) || '').match(/^\s*/)[0];
-          const reindented = replLines.map(l => {
-            if (!l.trim()) return l;
-            return l.startsWith(replIndent) ? origIndent + l.slice(replIndent.length) : l;
-          }).join('\n');
-          lines.splice(foundIdx, targetLines.length, reindented);
-          modified = lines.join('\n');
-          patchCount++;
-        } else {
-          failedCount++;
+        if (allMatch) {
+          foundIdx = i;
+          matchedSpan = targetLines.length;
+          break;
         }
       }
+
+      // Tier 3: Non-empty line sequence match (tolerating extra/missing blank lines)
+      if (foundIdx === -1) {
+        const nonEmptyTargets = targetLines.filter(Boolean);
+        if (nonEmptyTargets.length >= 2) {
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].trim() !== nonEmptyTargets[0]) continue;
+            let tIdx = 0;
+            let endLineIdx = i;
+            for (let j = i; j < Math.min(lines.length, i + nonEmptyTargets.length + 14); j++) {
+              const curTrim = lines[j].trim();
+              if (!curTrim) continue;
+              if (curTrim === nonEmptyTargets[tIdx]) {
+                tIdx++;
+                endLineIdx = j;
+                if (tIdx === nonEmptyTargets.length) break;
+              } else {
+                break;
+              }
+            }
+            if (tIdx === nonEmptyTargets.length) {
+              foundIdx = i;
+              matchedSpan = (endLineIdx - i) + 1;
+              break;
+            }
+          }
+        }
+      }
+
+      if (foundIdx >= 0) {
+        const origIndent = (lines[foundIdx].match(/^\s*/) || [''])[0];
+        const replLines = replacement.split('\n');
+        const replIndent = ((replLines.find(l => l.trim()) || '').match(/^\s*/) || [''])[0];
+        const reindented = replLines.map(l => {
+          if (!l.trim()) return l;
+          return l.startsWith(replIndent) ? origIndent + l.slice(replIndent.length) : l;
+        });
+        const startLine = foundIdx + 1;
+        const endLine = startLine + Math.max(0, reindented.length - 1);
+        lines.splice(foundIdx, matchedSpan, ...reindented);
+        modified = lines.join('\n');
+        editedRanges.push({ startLine, endLine, oldLines: matchedSpan, newLines: reindented.length });
+        patchCount++;
+        return true;
+      }
+
+      failedCount++;
+      return false;
+    }
+
+    // 1. Format spesifik Zoz Router: <<<SEARCH>>> ... <<<REPLACE>>>
+    const searchReplaceRegex = /<<<SEARCH>>>([\s\S]*?)<<<REPLACE>>>([\s\S]*?)(?=<<<SEARCH>>>|<<<END_ZOZ_EDIT>>>|<<<END_ZOZ_MODIFY>>>|$(?![\s\S]))/gi;
+    let match;
+    while ((match = searchReplaceRegex.exec(patchBlock)) !== null) {
+      applySingleHunk(match[1], match[2]);
     }
 
     // 2. Format Git diff: <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE
     if (patchCount === 0) {
       const gitDiffRegex = /<{5,}\s*SEARCH\b([\s\S]*?)={5,}([\s\S]*?)>{5,}\s*REPLACE\b/gi;
       while ((match = gitDiffRegex.exec(patchBlock)) !== null) {
-        const searchTarget = match[1].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
-        const replacement = match[2].replace(/^\r?\n/, '').replace(/\r?\n$/, '');
-        if (searchTarget && modified.includes(searchTarget)) {
-          modified = modified.replace(searchTarget, () => replacement);
-          patchCount++;
-        } else if (searchTarget) {
-          failedCount++;
-        }
+        applySingleHunk(match[1], match[2]);
       }
     }
 
-    return { content: modified, patched: patchCount > 0, patchCount, failedCount };
+    return { content: modified, patched: patchCount > 0, patchCount, failedCount, editedRanges };
   }
 
   // ==================== STUDIO ENDOCRINE DIAGNOSTICS ====================
@@ -14395,14 +14607,68 @@ window.addEventListener('error', function(e) {
       });
     },
 
+    // Identifikasi baris & bagian kode yang relevan dengan maksud pengguna
+    locateRelevantSections(code, userQuery = '', selectedRange = null) {
+      if (!code) return { summary: '', ranges: [] };
+      const lines = code.split('\n');
+      const matchedRanges = [];
+
+      if (selectedRange && selectedRange.hasSelection) {
+        matchedRanges.push({
+          startLine: selectedRange.startLine,
+          endLine: selectedRange.endLine,
+          reason: 'Dipilih langsung oleh pengguna di Edit Kode'
+        });
+      }
+
+      const stopWords = new Set(['yang', 'dan', 'di', 'ke', 'dari', 'ini', 'itu', 'untuk', 'pada', 'dengan', 'tolong', 'buat', 'buatkan', 'ubah', 'ganti', 'edit', 'bagian', 'kode', 'code', 'warna', 'jadi', 'agar', 'bisa', 'lebih', 'saya', 'nya']);
+      const words = (userQuery || '').toLowerCase().split(/[^a-z0-9_-]+/).filter(w => w.length >= 3 && !stopWords.has(w));
+
+      if (words.length > 0) {
+        const hitLines = [];
+        for (let i = 0; i < lines.length; i++) {
+          const lower = lines[i].toLowerCase();
+          let score = 0;
+          for (const w of words) {
+            if (lower.includes(w)) score++;
+          }
+          if (score > 0) hitLines.push({ line: i + 1, score });
+        }
+        hitLines.sort((a, b) => b.score - a.score);
+        for (const h of hitLines.slice(0, 4)) {
+          const s = Math.max(1, h.line - 8);
+          const e = Math.min(lines.length, h.line + 10);
+          if (!matchedRanges.some(r => Math.abs(r.startLine - s) < 10)) {
+            matchedRanges.push({ startLine: s, endLine: e, reason: 'Terkait kata kunci permintaan' });
+          }
+        }
+      }
+
+      return {
+        ranges: matchedRanges,
+        summary: matchedRanges.length > 0
+          ? matchedRanges.map(r => `Baris ${r.startLine}–${r.endLine}`).join(', ')
+          : `Total ${lines.length} baris`
+      };
+    },
+
     // Bangun referensi kode ringkas agar <<<SEARCH>>> selalu cocok 100% tanpa boros token
-    buildCodeReference(code, userQuery = '') {
+    buildCodeReference(code, userQuery = '', selectedRange = null) {
       if (!code) return '';
       const lines = code.split('\n');
-      if (lines.length <= 320) {
+      if (lines.length <= 320 && !(selectedRange && selectedRange.hasSelection)) {
         return code;
       }
       const keep = new Set();
+      // Jika pengguna memilih baris di Edit Kode, prioritaskan area sekitar pilihan tersebut!
+      if (selectedRange && selectedRange.hasSelection) {
+        const sIdx = Math.max(0, selectedRange.startLine - 15);
+        const eIdx = Math.min(lines.length - 1, selectedRange.endLine + 15);
+        for (let k = sIdx; k <= eIdx; k++) keep.add(k);
+      }
+      if (lines.length <= 320) {
+        return code;
+      }
       // Selalu sertakan awal & akhir dokumen
       for (let i = 0; i < Math.min(25, lines.length); i++) keep.add(i);
       for (let i = Math.max(0, lines.length - 20); i < lines.length; i++) keep.add(i);
@@ -14422,7 +14688,7 @@ window.addEventListener('error', function(e) {
         }
         const lower = l.toLowerCase();
         if (words.some(w => lower.includes(w))) {
-          for (let k = Math.max(0, i - 12); k <= Math.min(lines.length - 1, i + 12); k++) keep.add(k);
+          for (let k = Math.max(0, i - 14); k <= Math.min(lines.length - 1, i + 14); k++) keep.add(k);
         }
       }
 
@@ -14551,7 +14817,8 @@ window.addEventListener('error', function(e) {
       const lowerLang = (langMatch && langMatch[1]) ? langMatch[1].toLowerCase() : '';
       const isReactFile = lowerFileName.endsWith('.jsx') || lowerFileName.endsWith('.tsx') || lowerLang === 'jsx' || lowerLang === 'tsx' || lowerLang === 'react';
       const isWebFile = lowerFileName.endsWith('.html') || lowerFileName.endsWith('.htm') || isReactFile || lowerLang === 'html' || lowerLang === 'htm';
-      if (isWebFile && (cleanContent.includes('<!DOCTYPE html') || cleanContent.includes('<html')) && !cleanContent.includes('</html>')) {
+      const hasSurgicalMarkers = isExplicitEdit || cleanContent.includes('<<<SEARCH>>>') || /<{5,}\s*SEARCH\b/.test(cleanContent);
+      if (!hasSurgicalMarkers && isWebFile && (cleanContent.includes('<!DOCTYPE html') || cleanContent.includes('<html')) && !cleanContent.includes('</html>')) {
         isUnclosed = true;
         out.hasIncompleteFile = true;
       }
@@ -14561,13 +14828,16 @@ window.addEventListener('error', function(e) {
       }
 
       let finalContent = cleanContent;
+      let appliedEditedRanges = [];
+      let isSurgicalPatch = false;
       // Dukung penambalan bedah (surgical patch) via <<<ZOZ_EDIT>>> dengan blok SEARCH & REPLACE
       if (cleanContent.includes('<<<SEARCH>>>') || /<{5,}\s*SEARCH\b/.test(cleanContent)) {
         // Dasar patch: file yang namanya cocok persis (Studio aktif / workspace), atau file web terbaru sesi
         let baseContent = '';
         const studioIsOpen = Boolean(els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show'));
+        const isEditorOpen = Boolean(els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing'));
         if (activeAIFile && studioIsOpen && activeAIFile.name === resolvedFileName) {
-          baseContent = activeAIFile.rawContent || activeAIFile.content || '';
+          baseContent = (isEditorOpen && els.aiFileStudioEditor) ? els.aiFileStudioEditor.value : (activeAIFile.rawContent || activeAIFile.content || '');
         } else if (matchedWorkspaceFile) {
           baseContent = matchedWorkspaceFile.content || '';
         } else if (isWebFile && typeof getLatestWebsiteFileInSession === 'function') {
@@ -14585,6 +14855,8 @@ window.addEventListener('error', function(e) {
         const patchResult = applyZozEditPatch(baseContent, cleanContent);
         if (patchResult && patchResult.patched) {
           finalContent = patchResult.content;
+          appliedEditedRanges = patchResult.editedRanges || [];
+          isSurgicalPatch = true;
           if (patchResult.failedCount > 0) out.patchFailures = (out.patchFailures || 0) + patchResult.failedCount;
         } else {
           // Patch gagal total: pertahankan file lama, laporkan kegagalan
@@ -14631,6 +14903,8 @@ window.addEventListener('error', function(e) {
         descMatch ? descMatch[1] : (isWorkspaceEdit ? 'Modifikasi berkas direktori' : '')
       );
       fileObj.isEdit = isWorkspaceEdit;
+      fileObj.isSurgicalPatch = isSurgicalPatch;
+      fileObj.editedRanges = appliedEditedRanges;
       fileObj.isIncomplete = Boolean(isUnclosed);
       fileObj.path = resolvedFilePath;
       fileObj.rawBlock = rawBlock;
@@ -15144,6 +15418,47 @@ window.addEventListener('error', function(e) {
               }
             } catch (_) {}
           }
+          // Sinkronkan juga secara live ke Mode Edit Kode (#aiFileStudioEditor) beserta highlight baris yang diubah AI!
+          const editedRanges = Array.isArray(matchFile.editedRanges) ? matchFile.editedRanges : [];
+          if (els.aiFileStudioEditor) {
+            els.aiFileStudioEditor.value = newRaw;
+            StudioEditorHistory.push(newRaw);
+            renderStudioCodeEditorHighlight(newRaw, editedRanges);
+            if (els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing') && editedRanges.length > 0) {
+              scrollStudioEditorToLine(editedRanges[0].startLine);
+            }
+          }
+          // Tampilkan kartu ringkasan edit presisi di jendela Tanya AI jika ada perubahan baris
+          if (els.studioAssistantMessages) {
+            const lastAssistantBubble = Array.from(els.studioAssistantMessages.querySelectorAll('.studio-msg-row.assistant .studio-msg-bubble')).pop();
+            if (lastAssistantBubble && !lastAssistantBubble.querySelector('.surgical-edit-summary-card')) {
+              const firstLine = editedRanges.length > 0 ? editedRanges[0].startLine : 1;
+              const rangeLabel = editedRanges.length > 0
+                ? editedRanges.map(r => r.startLine === r.endLine ? `Baris ${r.startLine}` : `Baris ${r.startLine}–${r.endLine}`).join(', ')
+                : 'Bagian terkait';
+              const summaryCard = document.createElement('div');
+              summaryCard.className = 'surgical-edit-summary-card';
+              summaryCard.innerHTML = `
+                <div class="surgical-edit-summary-head">
+                  <i class="fa-solid fa-wand-magic-sparkles"></i>
+                  <span>Edit Presisi: ${escapeHtml(rangeLabel)}</span>
+                </div>
+                <div class="surgical-edit-actions">
+                  <button type="button" class="surgical-edit-btn" data-surgical-act="view-edit" data-line="${firstLine}">
+                    <i class="fa-solid fa-code"></i> Lihat di Edit Kode
+                  </button>
+                  <button type="button" class="surgical-edit-btn" data-surgical-act="view-preview">
+                    <i class="fa-solid fa-play"></i> Pratinjau
+                  </button>
+                  <button type="button" class="surgical-edit-btn" data-surgical-act="undo-edit">
+                    <i class="fa-solid fa-rotate-left"></i> Kembali
+                  </button>
+                </div>
+              `;
+              lastAssistantBubble.appendChild(summaryCard);
+              scrollStudioAssistantToBottom();
+            }
+          }
           if (isDiagramFile(activeAIFile)) {
             const allCards = document.querySelectorAll('.mermaid-diagram-card');
             const latestCard = allCards.length > 0 ? allCards[allCards.length - 1] : null;
@@ -15152,7 +15467,10 @@ window.addEventListener('error', function(e) {
             }
             showToast('🎨 Diagram visual telah diperbarui langsung sesuai arahan Anda!', 'success');
           } else {
-            showToast('✨ Pratinjau telah diperbarui langsung!', 'success');
+            const rangeText = editedRanges.length > 0
+              ? ` (${editedRanges.map(r => `Baris ${r.startLine}–${r.endLine}`).join(', ')})`
+              : '';
+            showToast(`✨ Bagian kode${rangeText} telah diperbarui secara presisi!`, 'success');
           }
         }
       }
@@ -16131,9 +16449,31 @@ ${blocks}
   });
 
   // ==================== AUTHENTIC ZOZ ROUTER AI STUDIO COMPOSER & ASSISTANT (DRAGGABLE FLOATING) ====================
+  function applyStudioAssistantCompactBounds() {
+    const panel = els.studioAssistantPanel;
+    if (!panel) return;
+    const isMobile = window.innerWidth <= 768;
+    const isCollapsed = panel.classList.contains('is-body-collapsed');
+    panel.style.setProperty('position', 'absolute', 'important');
+    panel.style.setProperty('flex', '0 0 auto', 'important');
+    panel.style.setProperty('height', 'auto', 'important');
+    panel.style.setProperty('bottom', 'auto', 'important');
+    if (isMobile) {
+      panel.style.setProperty('width', 'min(246px, 68vw)', 'important');
+      panel.style.setProperty('max-width', '68vw', 'important');
+      panel.style.setProperty('max-height', isCollapsed ? 'none' : 'min(255px, 38vh)', 'important');
+    } else {
+      panel.style.setProperty('width', '288px', 'important');
+      panel.style.setProperty('max-width', 'min(300px, calc(100vw - 24px))', 'important');
+      panel.style.setProperty('max-height', isCollapsed ? 'none' : 'min(360px, calc(100% - 28px))', 'important');
+    }
+  }
+
   function clampStudioAssistantPosition() {
     const panel = els.studioAssistantPanel;
-    if (!panel || !panel.style.left) return;
+    if (!panel) return;
+    applyStudioAssistantCompactBounds();
+    if (!panel.style.left || panel.style.left === 'auto') return;
     const stage = els.geminiStudioStage || panel.offsetParent;
     if (!stage) return;
     const stageRect = stage.getBoundingClientRect();
@@ -16142,11 +16482,11 @@ ${blocks}
 
     let curLeft = parseFloat(panel.style.left) || 0;
     let curTop = parseFloat(panel.style.top) || 0;
-    const maxLeft = Math.max(0, stageRect.width - panelRect.width);
-    const maxTop = Math.max(0, stageRect.height - panelRect.height);
+    const maxLeft = Math.max(4, stageRect.width - panelRect.width - 4);
+    const maxTop = Math.max(4, stageRect.height - panelRect.height - 4);
 
-    curLeft = Math.max(0, Math.min(curLeft, maxLeft));
-    curTop = Math.max(0, Math.min(curTop, maxTop));
+    curLeft = Math.max(4, Math.min(curLeft, maxLeft));
+    curTop = Math.max(4, Math.min(curTop, maxTop));
 
     panel.style.setProperty('left', `${curLeft}px`, 'important');
     panel.style.setProperty('top', `${curTop}px`, 'important');
@@ -16154,52 +16494,64 @@ ${blocks}
 
   function initStudioAssistantDraggable() {
     const panel = els.studioAssistantPanel;
-    const header = els.studioAssistantHeader || panel?.querySelector('.studio-assistant-header');
-    if (!panel || !header) return;
+    if (!panel) return;
 
+    let pendingDrag = false;
     let isDragging = false;
-    let startPointerX = 0;
-    let startPointerY = 0;
+    let suppressNextClick = false;
+    let startClientX = 0;
+    let startClientY = 0;
     let startPanelLeft = 0;
     let startPanelTop = 0;
 
-    header.addEventListener('pointerdown', (e) => {
-      // Abaikan jika menekan tombol kontrol (Endocrine, Trash, Close, dll)
-      if (e.target.closest('button') || e.target.closest('.gemini-pill-btn') || e.target.closest('.gemini-icon-btn')) {
-        return;
-      }
+    function isValidDragZone(target) {
+      if (!target || !target.closest) return false;
+      return Boolean(
+        target.closest('#studioFloatingDragPill') ||
+        target.closest('.studio-floating-drag-pill') ||
+        target.closest('#studioAssistantHeader') ||
+        target.closest('.studio-assistant-header') ||
+        target.closest('#studioEndocrineStatusBar') ||
+        target.closest('.studio-endocrine-status-bar') ||
+        target.closest('.studio-assistant-empty')
+      );
+    }
 
+    function beginDragCandidate(clientX, clientY, target) {
+      if (!isValidDragZone(target)) return false;
       const stage = els.geminiStudioStage || panel.offsetParent || document.body;
       const stageRect = stage.getBoundingClientRect();
       const panelRect = panel.getBoundingClientRect();
 
-      isDragging = true;
-      startPointerX = e.clientX;
-      startPointerY = e.clientY;
-
+      pendingDrag = true;
+      isDragging = false;
+      startClientX = clientX;
+      startClientY = clientY;
       startPanelLeft = panelRect.left - stageRect.left;
       startPanelTop = panelRect.top - stageRect.top;
+      return true;
+    }
 
-      panel.classList.add('is-dragging');
-      document.body.classList.add('is-assistant-dragging');
-      panel.style.setProperty('left', `${startPanelLeft}px`, 'important');
-      panel.style.setProperty('top', `${startPanelTop}px`, 'important');
-      panel.style.setProperty('right', 'auto', 'important');
-      panel.style.setProperty('bottom', 'auto', 'important');
+    function updateDragMove(clientX, clientY, rawEvent) {
+      if (!pendingDrag && !isDragging) return;
+      const dx = clientX - startClientX;
+      const dy = clientY - startClientY;
 
-      try {
-        header.setPointerCapture(e.pointerId);
-      } catch (_) {}
+      if (!isDragging) {
+        if (Math.hypot(dx, dy) < 5) return;
+        isDragging = true;
+        suppressNextClick = true;
+        panel.classList.add('is-dragging');
+        document.body.classList.add('is-assistant-dragging');
+        panel.style.setProperty('left', `${startPanelLeft}px`, 'important');
+        panel.style.setProperty('top', `${startPanelTop}px`, 'important');
+        panel.style.setProperty('right', 'auto', 'important');
+        panel.style.setProperty('bottom', 'auto', 'important');
+      }
 
-      e.preventDefault();
-    });
-
-    header.addEventListener('pointermove', (e) => {
-      if (!isDragging) return;
-      e.preventDefault();
-
-      const dx = e.clientX - startPointerX;
-      const dy = e.clientY - startPointerY;
+      if (rawEvent && rawEvent.cancelable) {
+        rawEvent.preventDefault();
+      }
 
       const stage = els.geminiStudioStage || panel.offsetParent || document.body;
       const stageRect = stage.getBoundingClientRect();
@@ -16216,22 +16568,62 @@ ${blocks}
 
       panel.style.setProperty('left', `${targetLeft}px`, 'important');
       panel.style.setProperty('top', `${targetTop}px`, 'important');
+    }
+
+    function finishDrag() {
+      if (!pendingDrag && !isDragging) return;
+      pendingDrag = false;
+      if (isDragging) {
+        isDragging = false;
+        panel.classList.remove('is-dragging');
+        document.body.classList.remove('is-assistant-dragging');
+        setTimeout(() => { suppressNextClick = false; }, 60);
+      }
+    }
+
+    // Intercept accidental button click right after a drag gesture
+    panel.addEventListener('click', (e) => {
+      if (suppressNextClick) {
+        e.preventDefault();
+        e.stopPropagation();
+        suppressNextClick = false;
+      }
+    }, true);
+
+    // Pointer Events (Desktop & Modern Mobile)
+    panel.addEventListener('pointerdown', (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      if (beginDragCandidate(e.clientX, e.clientY, e.target)) {
+        const isButton = Boolean(e.target.closest && e.target.closest('button, .gemini-pill-btn, .gemini-icon-btn'));
+        if (!isButton && e.cancelable) {
+          e.preventDefault();
+        }
+      }
     });
 
-    const stopDragging = (e) => {
-      if (!isDragging) return;
-      isDragging = false;
-      panel.classList.remove('is-dragging');
-      document.body.classList.remove('is-assistant-dragging');
-      try {
-        if (header.hasPointerCapture(e.pointerId)) {
-          header.releasePointerCapture(e.pointerId);
-        }
-      } catch (_) {}
-    };
+    window.addEventListener('pointermove', (e) => {
+      if (!pendingDrag && !isDragging) return;
+      updateDragMove(e.clientX, e.clientY, e);
+    }, { passive: false });
 
-    header.addEventListener('pointerup', stopDragging);
-    header.addEventListener('pointercancel', stopDragging);
+    window.addEventListener('pointerup', finishDrag);
+    window.addEventListener('pointercancel', finishDrag);
+
+    // Touch Events Fallback (Guaranteed Android / iOS WebView Mobile Dragging)
+    panel.addEventListener('touchstart', (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      beginDragCandidate(t.clientX, t.clientY, e.target);
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+      if ((!pendingDrag && !isDragging) || !e.touches || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      updateDragMove(t.clientX, t.clientY, e);
+    }, { passive: false });
+
+    window.addEventListener('touchend', finishDrag);
+    window.addEventListener('touchcancel', finishDrag);
 
     window.addEventListener('resize', clampStudioAssistantPosition);
   }
@@ -16241,6 +16633,7 @@ ${blocks}
       els.studioAssistantPanel.classList.add('is-open');
       els.studioAssistantPanel.style.display = 'flex';
       els.studioAssistantPanel.classList.remove('is-minimized');
+      applyStudioAssistantCompactBounds();
       if (els.btnToggleStudioAssistant) els.btnToggleStudioAssistant.classList.add('active');
       StudioEndocrineDiagnostics.updateUI();
       clampStudioAssistantPosition();
@@ -16269,8 +16662,14 @@ ${blocks}
   }
 
   function toggleStudioAssistantMinimize() {
-    // Mandat Kaisar: Tombol melayang diminimalkan telah dihapus, klik panel cukup menutup/membuka via Tanya AI
-    closeStudioAssistantDrawer();
+    if (!els.studioAssistantPanel) return;
+    const collapsed = els.studioAssistantPanel.classList.toggle('is-body-collapsed');
+    if (els.iconStudioMin) {
+      els.iconStudioMin.className = collapsed ? 'fa-solid fa-chevron-down' : 'fa-solid fa-chevron-up';
+    }
+    applyStudioAssistantCompactBounds();
+    clampStudioAssistantPosition();
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
   }
 
   function appendStudioMessage(role, contentHtml) {
@@ -16317,6 +16716,14 @@ ${blocks}
       return;
     }
 
+    // Jika pengguna sedang di mode Edit Kode, sinkronkan isi editor terkini ke activeAIFile terlebih dahulu!
+    const isEditingInCodeMode = Boolean(els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing'));
+    const selInfo = isEditingInCodeMode ? getStudioEditorSelectionInfo() : null;
+    if (isEditingInCodeMode && els.aiFileStudioEditor) {
+      activeAIFile.rawContent = els.aiFileStudioEditor.value;
+      activeAIFile.content = els.aiFileStudioEditor.value;
+    }
+
     const targetName = activeAIFile.name || 'index.html';
     const ext = targetName.split('.').pop().toLowerCase();
     const isDiagram = isDiagramFile(activeAIFile);
@@ -16330,14 +16737,24 @@ ${blocks}
     els.inputStudioFollowup.value = '';
     autoResizeTextarea(els.inputStudioFollowup);
 
-    // Buka panel floating asisten di sisi kiri studio jika belum terbuka
+    // Buka panel floating asisten di studio jika belum terbuka (dan pastikan tidak terlipat)
+    if (els.studioAssistantPanel) els.studioAssistantPanel.classList.remove('is-body-collapsed');
     openStudioAssistantDrawer();
 
-    // Tampilkan pesan pengguna di riwayat drawer studio
-    appendStudioMessage('user', escapeHtml(val));
+    // Tampilkan pesan pengguna di riwayat drawer studio (beserta badge baris jika dipilih di Edit Kode)
+    const selBadgeHtml = (selInfo && selInfo.hasSelection)
+      ? `<div style="font-size:0.68rem; color:#00f0ff; margin-bottom:3px;"><i class="fa-solid fa-crosshairs"></i> Target Edit Kode: Baris ${selInfo.startLine}–${selInfo.endLine}</div>`
+      : '';
+    appendStudioMessage('user', selBadgeHtml + escapeHtml(val));
+
+    // Identifikasi bagian kode yang berkaitan dengan permintaan pengguna
+    const located = StudioEndocrineDiagnostics.locateRelevantSections(currentCode, val, selInfo);
 
     // Siapkan gelembung respon untuk menerima streaming
-    activeStudioAssistantBubble = appendStudioMessage('assistant', `<span class="typing-cursor"></span> <em>Menghubungkan ke ${escapeHtml(getCurrentModel())}...</em>`);
+    activeStudioAssistantBubble = appendStudioMessage(
+      'assistant',
+      `<span class="typing-cursor"></span> <em>🔍 Memilih & membaca bagian kode terkait (${escapeHtml(located.summary)})...</em>`
+    );
 
     // Ganti tombol kirim menjadi tombol stop generasi
     if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'none';
@@ -16359,24 +16776,35 @@ ${blocks}
           const err = StudioEndocrineDiagnostics.lastError;
           endocrineFeedback = `\n[Endocrine Code Sensor]: Error runtime terdeteksi: "${err.message || err}"${err.lineno ? ` (baris ${err.lineno})` : ''}.`;
         }
-        const compactRef = StudioEndocrineDiagnostics.buildCodeReference(currentCode, val);
+        let selectedContextBlock = '';
+        if (selInfo && selInfo.hasSelection && selInfo.selectedLinesCode) {
+          selectedContextBlock = `\n[FOKUS UTAMA — Pengguna memilih Baris ${selInfo.startLine}–${selInfo.endLine} di Mode Edit Kode]:\n\`\`\`${lang}\n${selInfo.selectedLinesCode}\n\`\`\`\n`;
+        }
+        const compactRef = StudioEndocrineDiagnostics.buildCodeReference(currentCode, val, selInfo);
 
-        followupPrompt = `[Edit "${targetName}"]
+        followupPrompt = `[MODE SURGICAL EDIT KODE "${targetName}" — DILARANG MENULIS ULANG SELURUH KODE!]
+${selectedContextBlock}[Referensi Kode "${targetName}" (${located.summary})]:
 \`\`\`${lang}
 ${compactRef}
 \`\`\`
-Permintaan: "${val}"${endocrineFeedback}
 
-Keluarkan patch <<<ZOZ_EDIT name="${targetName}">:
+Permintaan Pengguna: "${val}"${endocrineFeedback}
+
+ATURAN MUTLAK SURGICAL EDIT (WAJIB DIPATUHI 100%):
+1. DILARANG KERAS menulis ulang seluruh file atau menggunakan <<<ZOZ_FILE>>>!
+2. Pilih dan lihat HANYA bagian/baris kode yang berkaitan langsung dengan maksud pengguna di atas.
+3. Ganti HANYA bagian kode tersebut menggunakan blok patch <<<ZOZ_EDIT name="${targetName}">:
+<<<ZOZ_EDIT name="${targetName}">
 <<<SEARCH>>>
-[salin persis baris yang diubah dari kode di atas]
+[salin persis baris asli dari kode di atas yang ingin diubah]
 <<<REPLACE>>>
-[baris pengganti]
+[baris kode baru pengganti bagian tersebut saja]
 <<<END_ZOZ_EDIT>>>
-Jelaskan singkat perubahannya.`;
+4. Anda boleh menyertakan lebih dari satu pasangan <<<SEARCH>>> dan <<<REPLACE>>> di dalam satu blok <<<ZOZ_EDIT>>> jika ada 2 bagian terkait (misal CSS dan HTML-nya), tetapi JANGAN menyalin ulang kode lain yang tidak berubah.
+5. Berikan penjelasan singkat (1-2 kalimat) bagian mana yang Anda ubah.`;
       }
     } else {
-      followupPrompt = `[Konteks: Pengguna sedang melihat pratinjau langsung "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan / Obrolan Pengguna: "${val}"\n\nATURAN SANGAT KETAT UNTUK AI:\n- Zoz Router SUDAH menampilkan pratinjau langsung untuk berkas ini.\n- Pengguna TIDAK meminta perubahan kode. Pengguna hanya sedang mengobrol santai, memuji, berkomentar, atau bertanya tentang berkas ini.\n- JANGAN PERNAH merombak, merevisi, atau membuat ulang kode!\n- DILARANG KERAS mengeluarkan blok kode atau blok <<<ZOZ_FILE!\n- Jawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
+      followupPrompt = `[Konteks: Pengguna sedang melihat "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan / Obrolan Pengguna: "${val}"\n\nATURAN SANGAT KETAT UNTUK AI:\n- Zoz Router SUDAH menampilkan berkas ini.\n- Pengguna TIDAK meminta perubahan kode. Pengguna hanya sedang mengobrol santai, memuji, berkomentar, atau bertanya tentang berkas ini.\n- JANGAN PERNAH merombak, merevisi, atau membuat ulang kode!\n- DILARANG KERAS mengeluarkan blok kode atau blok <<<ZOZ_FILE!\n- Jawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
     }
 
     // Kirim langsung ke handleSendPrompt TANPA menutup modal studio!
@@ -16393,6 +16821,52 @@ Jelaskan singkat perubahannya.`;
     });
   }
 
+  function focusStudioAiEditFromEditor() {
+    if (!els.inputStudioFollowup) return;
+    const selInfo = getStudioEditorSelectionInfo();
+    if (selInfo && selInfo.hasSelection) {
+      els.inputStudioFollowup.placeholder = `✨ Edit Baris ${selInfo.startLine}–${selInfo.endLine} dengan AI: ketik perubahan...`;
+      showToast(`🎯 Baris ${selInfo.startLine}–${selInfo.endLine} dipilih! Ketik instruksi di kolom bawah agar AI mengedit bagian itu saja.`, 'info');
+    } else {
+      els.inputStudioFollowup.placeholder = '✨ Ketik bagian kode yang ingin diubah AI (AI otomatis memilih baris terkait)...';
+      showToast('✨ Ketik bagian yang ingin diubah di kolom prompt bawah — AI akan mengedit baris terkait langsung di Edit Kode!', 'info');
+    }
+    els.inputStudioFollowup.focus();
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+  }
+
+  els.btnStudioAiEditInEditor?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    focusStudioAiEditFromEditor();
+  });
+  els.btnStudioBottomAiEdit?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    focusStudioAiEditFromEditor();
+  });
+
+  // Delegasi klik tombol kartu Surgical Edit di dalam gelembung Tanya AI
+  els.studioAssistantMessages?.addEventListener('click', (e) => {
+    const btn = e.target.closest ? e.target.closest('.surgical-edit-btn') : null;
+    if (!btn) return;
+    e.stopPropagation();
+    const act = btn.dataset.surgicalAct;
+    if (act === 'view-edit') {
+      const line = parseInt(btn.dataset.line || '1', 10) || 1;
+      openStudioCodeEditor(line);
+      showToast(`🔍 Menampilkan baris ${line} yang diedit AI di Mode Edit Kode.`, 'info');
+    } else if (act === 'view-preview') {
+      closeStudioCodeEditor();
+      setAIFileStudioTab('preview');
+    } else if (act === 'undo-edit') {
+      els.btnStudioUndo?.click();
+      if (els.aiFileStudioEditor && activeAIFile) {
+        els.aiFileStudioEditor.value = activeAIFile.rawContent || activeAIFile.content || '';
+        renderStudioCodeEditorHighlight(els.aiFileStudioEditor.value, []);
+      }
+    }
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+  });
+
   els.btnStudioEditCode?.addEventListener('click', (e) => {
     e.stopPropagation();
     const isEditing = Boolean(els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing'));
@@ -16405,8 +16879,16 @@ Jelaskan singkat perubahannya.`;
   });
   els.aiFileStudioEditor?.addEventListener('input', () => {
     if (els.aiFileStudioEditor) {
+      studioLastAiEditedLines.clear();
       StudioEditorHistory.recordInput(els.aiFileStudioEditor.value);
+      renderStudioCodeEditorHighlight(els.aiFileStudioEditor.value);
     }
+  });
+  els.aiFileStudioEditor?.addEventListener('scroll', syncStudioEditorScroll, { passive: true });
+  ['select', 'keyup', 'mouseup', 'touchend'].forEach((evName) => {
+    els.aiFileStudioEditor?.addEventListener(evName, () => {
+      updateStudioEditorSelectionUI();
+    }, { passive: true });
   });
   els.btnStudioUndoEdit?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -20092,21 +20574,22 @@ Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
         const isReactNextPrompt = /\b(?:next\.?js|nextjs|react\.?js|reactjs|jsx|tsx|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(promptText);
 
         if (isRevision) {
-          systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PERBAIKAN & EDIT WEBSITE (PRESERVASI KODE - JANGAN MEMBUAT DARI NOL!)
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna sedang MEMPERBAIKI / MENGEDIT website yang SUDAH JADI.
-1. DILARANG KERAS MEMBUAT KODE BARU ULANG DARI NOL ATAU MENGGANTI TOTAL TEMA/STRUKTUR!
-   - Jangan pernah menghapus desain, animasi, tata letak, komponen, teks, maupun fitur yang sudah berjalan dengan baik pada kode sebelumnya.
-   - Ambil kode website yang sudah ada dalam prompt/konteks sebagai fondasi utama Anda.
-2. PERBAIKI SECARA INKREMENTAL:
-   - Modifikasi dan perbaiki HANYA bagian-bagian spesifik (komponen, teks, styling, fungsi JavaScript, warna, atau tata letak) yang diminta oleh pengguna.
-   - Pertahankan seluruh kode lainnya, pustaka (Tailwind, FontAwesome, Lucide, dll), event listeners, dan logika yang sudah ada sebelumnya.
-3. KELENGKAPAN KODE PENUH (ZERO TRUNCATION):
-   - Tuliskan kembali SELURUH KODE LENGKAP YANG TELAH DIPERBARUI secara utuh dan lengkap di dalam blok protokol:
-<<<ZOZ_FILE name="index.html" mime="text/html" lang="html">
-...seluruh kode lengkap yang telah diedit/diperbaiki...
-<<<END_ZOZ_FILE>>>
-   - Pastikan kode tetap fungsional, utuh, tanpa komentar pemotong ('// sisa kode sama...'), dan siap dirender langsung di pratinjau.
-4. Berikan penjelasan singkat dan sopan (1-2 kalimat) sebelum blok kode mengenai perbaikan yang telah Anda lakukan.`;
+          systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS SURGICAL EDIT WEBSITE (PILIH & GANTI BAGIAN TERKAIT SAJA — DILARANG MENULIS ULANG SELURUH KODE!)
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna sedang MENGEDIT bagian dari website yang SUDAH JADI.
+1. DILARANG KERAS MENULIS ULANG SELURUH KODE DARI AWAL ATAU MENGGUNAKAN <<<ZOZ_FILE>>>!
+   - Anda TIDAK BOLEH mencetak ulang seluruh dokumen HTML dari <!DOCTYPE html> sampai </html>.
+2. PILIH & LIHAT BAGIAN KODE YANG BERKAITAN SAJA:
+   - Periksa referensi kode di prompt, temukan HANYA baris/komponen/CSS/JS yang berkaitan langsung dengan maksud pengguna.
+3. GUNAKAN PROTOKOL SURGICAL PATCH <<<ZOZ_EDIT>>>:
+   - Keluarkan HANYA blok perubahan spesifik menggunakan format berikut:
+<<<ZOZ_EDIT name="index.html">
+<<<SEARCH>>>
+[salin persis baris asli dari kode yang ingin diubah]
+<<<REPLACE>>>
+[baris kode baru pengganti bagian tersebut saja]
+<<<END_ZOZ_EDIT>>>
+   - Anda dapat menyertakan beberapa pasangan <<<SEARCH>>> dan <<<REPLACE>>> di dalam satu blok <<<ZOZ_EDIT>>> bila perubahan menyentuh lebih dari satu titik (misalnya elemen HTML dan aturan CSS-nya), tanpa menulis ulang sisa kode lainnya.
+4. Berikan penjelasan singkat (1-2 kalimat) mengenai bagian kode mana yang telah Anda pilih dan perbarui.`;
         } else {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI WEB KELAS DUNIA (FULL FUNCTIONAL & PRATINJAU LANGSUNG)
 [PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN WEBSITE / LANDING PAGE / APLIKASI WEB INTERAKTIF KELAS DUNIA.
@@ -20851,11 +21334,14 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       // ===== AUTO-CONTINUATION ENGINE UNTUK PEMBUATAN WEBSITE & KODE TERPOTONG =====
       const isWebTask = Boolean(wantsFile || (runOptions && (runOptions.websiteMode || runOptions.isWebCreation)) || isWebsiteCreationPrompt(promptText));
+      const hasCompletedSurgicalEdit = fullText.includes('<<<END_ZOZ_EDIT') || fullText.includes('<<<END_ZOZ_MODIFY');
       let initialCheck = extractGeneratedFiles(fullText, wantsFile);
-      const isInitiallyIncomplete = initialCheck.hasIncompleteFile ||
+      const isInitiallyIncomplete = !hasCompletedSurgicalEdit && (
+        initialCheck.hasIncompleteFile ||
         isOutputTruncated(fullText, doneReason === 'length' ? 'length' : null) ||
         ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
-         !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'));
+         !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'))
+      );
 
       if (isWebTask && isInitiallyIncomplete && !STATE.abortController?.signal?.aborted) {
         let contRound = 0;
@@ -21454,21 +21940,22 @@ Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
         const isReactNextPrompt = /\b(?:next\.?js|nextjs|react\.?js|reactjs|jsx|tsx|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(promptText);
 
         if (isRevision) {
-          systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PERBAIKAN & EDIT WEBSITE (PRESERVASI KODE - JANGAN MEMBUAT DARI NOL!)
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna sedang MEMPERBAIKI / MENGEDIT website yang SUDAH JADI.
-1. DILARANG KERAS MEMBUAT KODE BARU ULANG DARI NOL ATAU MENGGANTI TOTAL TEMA/STRUKTUR!
-   - Jangan pernah menghapus desain, animasi, tata letak, komponen, teks, maupun fitur yang sudah berjalan dengan baik pada kode sebelumnya.
-   - Ambil kode website yang sudah ada dalam prompt/konteks sebagai fondasi utama Anda.
-2. PERBAIKI SECARA INKREMENTAL:
-   - Modifikasi dan perbaiki HANYA bagian-bagian spesifik (komponen, teks, styling, fungsi JavaScript, warna, atau tata letak) yang diminta oleh pengguna.
-   - Pertahankan seluruh kode lainnya, pustaka (Tailwind, FontAwesome, Lucide, dll), event listeners, dan logika yang sudah ada sebelumnya.
-3. KELENGKAPAN KODE PENUH (ZERO TRUNCATION):
-   - Tuliskan kembali SELURUH KODE LENGKAP YANG TELAH DIPERBARUI secara utuh dan lengkap di dalam blok protokol:
-<<<ZOZ_FILE name="index.html" mime="text/html" lang="html">
-...seluruh kode lengkap yang telah diedit/diperbaiki...
-<<<END_ZOZ_FILE>>>
-   - Pastikan kode tetap fungsional, utuh, tanpa komentar pemotong ('// sisa kode sama...'), dan siap dirender langsung di pratinjau.
-4. Berikan penjelasan singkat dan sopan (1-2 kalimat) sebelum blok kode mengenai perbaikan yang telah Anda lakukan.`;
+          systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS SURGICAL EDIT WEBSITE (PILIH & GANTI BAGIAN TERKAIT SAJA — DILARANG MENULIS ULANG SELURUH KODE!)
+[PERINTAH PRIORITAS TERTINGGI]: Pengguna sedang MENGEDIT bagian dari website yang SUDAH JADI.
+1. DILARANG KERAS MENULIS ULANG SELURUH KODE DARI AWAL ATAU MENGGUNAKAN <<<ZOZ_FILE>>>!
+   - Anda TIDAK BOLEH mencetak ulang seluruh dokumen HTML dari <!DOCTYPE html> sampai </html>.
+2. PILIH & LIHAT BAGIAN KODE YANG BERKAITAN SAJA:
+   - Periksa referensi kode di prompt, temukan HANYA baris/komponen/CSS/JS yang berkaitan langsung dengan maksud pengguna.
+3. GUNAKAN PROTOKOL SURGICAL PATCH <<<ZOZ_EDIT>>>:
+   - Keluarkan HANYA blok perubahan spesifik menggunakan format berikut:
+<<<ZOZ_EDIT name="index.html">
+<<<SEARCH>>>
+[salin persis baris asli dari kode yang ingin diubah]
+<<<REPLACE>>>
+[baris kode baru pengganti bagian tersebut saja]
+<<<END_ZOZ_EDIT>>>
+   - Anda dapat menyertakan beberapa pasangan <<<SEARCH>>> dan <<<REPLACE>>> di dalam satu blok <<<ZOZ_EDIT>>> bila perubahan menyentuh lebih dari satu titik (misalnya elemen HTML dan aturan CSS-nya), tanpa menulis ulang sisa kode lainnya.
+4. Berikan penjelasan singkat (1-2 kalimat) mengenai bagian kode mana yang telah Anda pilih dan perbarui.`;
         } else {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI WEB KELAS DUNIA (FULL FUNCTIONAL & PRATINJAU LANGSUNG)
 [PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN WEBSITE / LANDING PAGE / APLIKASI WEB INTERAKTIF KELAS DUNIA.
@@ -22592,11 +23079,14 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       // ===== AUTO-CONTINUATION ENGINE UNTUK PEMBUATAN WEBSITE & KODE TERPOTONG =====
       const isWebTask = Boolean(wantsFile || (runOptions && (runOptions.websiteMode || runOptions.isWebCreation)) || isWebsiteCreationPrompt(promptText));
+      const hasCompletedSurgicalEdit = fullText.includes('<<<END_ZOZ_EDIT') || fullText.includes('<<<END_ZOZ_MODIFY');
       let initialCheck = extractGeneratedFiles(fullText, wantsFile);
-      const isInitiallyIncomplete = initialCheck.hasIncompleteFile ||
+      const isInitiallyIncomplete = !hasCompletedSurgicalEdit && (
+        initialCheck.hasIncompleteFile ||
         isOutputTruncated(fullText, finishReason) ||
         ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
-         !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'));
+         !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'))
+      );
 
       if (isWebTask && isInitiallyIncomplete && !STATE.abortController?.signal?.aborted) {
         let contRound = 0;
