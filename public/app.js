@@ -170,33 +170,59 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
   // Official Ollama Cloud Flagship Models (Included Free Usage & Usage Credits)
   const OFFICIAL_OLLAMA_CLOUD_MODELS = [
-    { name: 'qwen2.5:1.5b', model: 'qwen2.5:1.5b', tag: 'Fast • Lightweight', isFree: true, cat: 'fast', details: { family: 'qwen2.5' } },
-    { name: 'qwen2.5:7b', model: 'qwen2.5:7b', tag: 'General Intelligence', isFree: true, cat: 'flagship', details: { family: 'qwen2.5' } },
-    { name: 'qwen2.5-coder:7b', model: 'qwen2.5-coder:7b', tag: 'Coding Expert', isFree: true, cat: 'coding', details: { family: 'qwen2.5' } },
-    { name: 'llama3.2:latest', model: 'llama3.2:latest', tag: 'Llama 3.2 3B', isFree: true, cat: 'fast', details: { family: 'llama' } },
-    { name: 'llama3.1:8b', model: 'llama3.1:8b', tag: 'Meta Llama 3.1', isFree: true, cat: 'flagship', details: { family: 'llama' } },
-    { name: 'deepseek-r1:latest', model: 'deepseek-r1:latest', tag: 'Reasoning Engine', isFree: true, cat: 'reasoning', details: { family: 'deepseek' } },
-    { name: 'mistral:latest', model: 'mistral:latest', tag: 'Mistral 7B', isFree: true, cat: 'fast', details: { family: 'mistral' } },
-    { name: 'phi4:latest', model: 'phi4:latest', tag: 'Microsoft Phi-4', isFree: true, cat: 'flagship', details: { family: 'phi' } },
-    { name: 'gemma2:9b', model: 'gemma2:9b', tag: 'Google Gemma 2', isFree: true, cat: 'flagship', details: { family: 'gemma' } },
-    { name: 'gemma4:31b', model: 'gemma4:31b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gemma4' } },
-    { name: 'gpt-oss:120b', model: 'gpt-oss:120b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gpt-oss' } },
-    { name: 'gpt-oss:20b', model: 'gpt-oss:20b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'gpt-oss' } },
-    { name: 'nemotron-3-super', model: 'nemotron-3-super', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'nemotron' } },
-    { name: 'nemotron-3-ultra', model: 'nemotron-3-ultra', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'nemotron' } },
-    { name: 'nemotron-3-nano:30b', model: 'nemotron-3-nano:30b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'nemotron' } },
-    { name: 'deepseek-v4.1-flash', model: 'deepseek-v4.1-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek' } },
-    { name: 'deepseek-v4-pro:0813', model: 'deepseek-v4-pro:0813', tag: 'Reasoning Cloud', isFree: false, cat: 'reasoning', details: { family: 'deepseek' } },
-    { name: 'mistral-large-3:675b', model: 'mistral-large-3:675b', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'mistral' } },
-    { name: 'kimi-k3', model: 'kimi-k3', tag: 'Long Context Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi' } },
-    { name: 'kimi-k2.6', model: 'kimi-k2.6', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi' } },
-    { name: 'kimi-k2.7-code', model: 'kimi-k2.7-code', tag: 'Coding Cloud', isFree: false, cat: 'coding', details: { family: 'kimi' } },
-    { name: 'minimax-m3', model: 'minimax-m3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'minimax' } },
-    { name: 'minimax-m2.7', model: 'minimax-m2.7', tag: 'Cloud', isFree: false, cat: 'flagship', details: { family: 'minimax' } },
-    { name: 'glm-5.3', model: 'glm-5.3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm' } },
-    { name: 'glm-5.3-flash', model: 'glm-5.3-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'glm' } },
-    { name: 'glm-5.2', model: 'glm-5.2', tag: 'Cloud', isFree: false, cat: 'flagship', details: { family: 'glm' } }
+    { name: 'gemma4:31b', model: 'gemma4:31b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gemma4', parameter_size: '30.7B' } },
+    { name: 'beam', model: 'beam', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'beam', parameter_size: '35B' } },
+    { name: 'muse-spark-open', model: 'muse-spark-open', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'muse_spark', parameter_size: '36.6B' } },
+    { name: 'gpt-oss:120b', model: 'gpt-oss:120b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gptoss', parameter_size: '116.8B' } },
+    { name: 'gpt-oss:20b', model: 'gpt-oss:20b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'gptoss', parameter_size: '20.9B' } },
+    { name: 'nemotron-3-super', model: 'nemotron-3-super', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'nemotron', parameter_size: '124B' } },
+    { name: 'nemotron-3-ultra', model: 'nemotron-3-ultra', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'nemotron', parameter_size: '253B' } },
+    { name: 'nemotron-3-nano:30b', model: 'nemotron-3-nano:30b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'nemotron', parameter_size: '31.6B' } },
+    { name: 'kimi-k2.7-code', model: 'kimi-k2.7-code', tag: 'Coding Cloud', isFree: false, cat: 'coding', details: { family: 'kimi', parameter_size: '757B' } },
+    { name: 'kimi-k3', model: 'kimi-k3', tag: 'Long Context Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi-k3', parameter_size: '1T' } },
+    { name: 'kimi-k2.6', model: 'kimi-k2.6', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi-k2.6', parameter_size: '1T' } },
+    { name: 'deepseek-v4.1-flash', model: 'deepseek-v4.1-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek', parameter_size: '300B' } },
+    { name: 'deepseek-v4.1-flash:1017', model: 'deepseek-v4.1-flash:1017', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek', parameter_size: '300B' } },
+    { name: 'deepseek-v4-pro:0813', model: 'deepseek-v4-pro:0813', tag: 'Reasoning Cloud', isFree: false, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '1T' } },
+    { name: 'glm-5.3', model: 'glm-5.3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm5', parameter_size: '756B' } },
+    { name: 'glm-5.3-flash', model: 'glm-5.3-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'glm5', parameter_size: '218B' } },
+    { name: 'glm-5.2', model: 'glm-5.2', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm5', parameter_size: '756B' } },
+    { name: 'minimax-m3', model: 'minimax-m3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'minimax', parameter_size: '330B' } },
+    { name: 'minimax-m3.1-flash', model: 'minimax-m3.1-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'minimax', parameter_size: '196B' } },
+    { name: 'minimax-m2.7', model: 'minimax-m2.7', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'minimax-m2', parameter_size: '230B' } },
+    { name: 'mistral-large-4', model: 'mistral-large-4', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'mistral4', parameter_size: '705B' } },
+    { name: 'mistral-large-3:675b', model: 'mistral-large-3:675b', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'mistral3', parameter_size: '675B' } }
   ];
+
+  const VALID_OLLAMA_CLOUD_MODELS = new Set(OFFICIAL_OLLAMA_CLOUD_MODELS.map(m => m.model.toLowerCase()));
+
+  // Filter keluar model decision/internal yang tidak mendukung endpoint /api/chat (seperti clef:27b yang hanya mendukung /v1/systemone)
+  function isUnsupportedOllamaChatModel(m) {
+    if (!m) return true;
+    const id = String(m.name || m.model || m.id || '').toLowerCase().trim();
+    if (!id) return true;
+    if (id.startsWith('clef:') || id === 'clef') return true;
+    if (m.visibility === 'hide' || m.supported_in_api === false) return true;
+    if (Array.isArray(m.capabilities) && m.capabilities.length > 0 && !m.capabilities.includes('completion')) return true;
+    return false;
+  }
+
+  // Remap otomatis model lokal/deprecated/decision ke model aktif resmi di https://ollama.com
+  function resolveOllamaCloudModel(modelId) {
+    if (!modelId || typeof modelId !== 'string') return 'gemma4:31b';
+    const raw = modelId.trim();
+    const id = raw.toLowerCase();
+    if (VALID_OLLAMA_CLOUD_MODELS.has(id)) return raw;
+    if (id === 'gemma4:31b-cloud' || id.startsWith('gemma')) return 'gemma4:31b';
+    if (id.startsWith('clef')) return 'gemma4:31b';
+    if (id.includes('coder') || id.includes('code')) return 'kimi-k2.7-code';
+    if (id.startsWith('qwen')) return 'gemma4:31b';
+    if (id.startsWith('phi')) return 'gemma4:31b';
+    if (id.startsWith('llama')) return 'gpt-oss:120b';
+    if (id.startsWith('deepseek-r1') || id.startsWith('deepseek')) return 'deepseek-v4.1-flash';
+    if (id.startsWith('mistral')) return 'mistral-large-4';
+    return 'gemma4:31b';
+  }
 
   // Universal Model Mapper: Memetakan model Ollama/Cloud ke ekuivalen OpenRouter Cloud resmi
   function mapOllamaModelToOpenRouter(modelId) {
@@ -753,7 +779,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       ollamaEndpoint: 'https://ollama.com',
       ollamaApiKey: '',
       openRouterKey: '',
-      ollamaModel: 'qwen2.5:1.5b',
+      ollamaModel: 'gemma4:31b',
       openRouterModel: 'openrouter/free',
       imageModel: 'flux',
       musicModel: 'google/lyria-3-clip-preview',
@@ -1906,8 +1932,11 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         if (hasExplanation) { score += 20; feedbackNotes.push('Langkah instruksi runtut'); }
         if (hasSafetyFlag) { score += 15; feedbackNotes.push('Flag operasional terverifikasi'); }
       } else {
-        const words = content.trim().split(/\s+/).length;
-        if (words >= 120) score += 15;
+        const words = content.trim().split(/\s+/).filter(Boolean).length;
+        const hasParagraphsOrList = /(?:\n\s*[-*•\d]+[.)]\s+|\n\n|#{1,4}\s+|\*\*[^*]+\*\*)/.test(content);
+        if (words >= 8) { score += 18; feedbackNotes.push('Respons koheren & relevan'); }
+        if (words >= 35 || hasParagraphsOrList) { score += 12; feedbackNotes.push('Artikulasi terstruktur'); }
+        if (words >= 120) score += 10;
         if (/```[\s\S]+```/.test(content)) score += 15;
         if (/\|[^\n]+\|\n\|[\s\-:]+\|\n/.test(content)) score += 10;
       }
@@ -2163,8 +2192,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
             const topStyle = window.getComputedStyle ? window.getComputedStyle(topEl) : null;
             if (topStyle && topStyle.pointerEvents === 'none') continue;
 
-            // Abaikan jika topEl adalah modal backdrop, dialog, atau drawer overlay sementara tombol berada di luar overlay tersebut
-            const topOverlay = topEl.closest ? topEl.closest('.modal-backdrop, .modal, .sidebar-backdrop, .lightbox-backdrop, [role="dialog"]') : null;
+            // Abaikan jika topEl adalah modal backdrop, dialog, drawer, atau sticky chrome UI sementara tombol berada di luar overlay tersebut
+            const topOverlay = topEl.closest ? topEl.closest('.modal-backdrop, .modal, .sidebar-backdrop, .lightbox-backdrop, [role="dialog"], .composer-area, #composerContainer, .top-nav, #topNav, #studioAssistantPanel, .toast-container, .sidebar, #sidebar, .model-picker-popover, .dropdown-menu, #aiFileStudioModal') : null;
             if (topOverlay && !topOverlay.contains(btn)) continue;
 
             const blockerTag = (topEl.tagName || 'div').toLowerCase();
@@ -2454,7 +2483,14 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
             this.textAnomalies = [];
             healedCount += clearedCount;
           }
-          // g. Bersihkan error tool & anomali halusinasi, serta segarkan cache tool otonom
+          // g. Bersihkan error model, error tool & anomali halusinasi, serta segarkan cache tool otonom
+          if (this.modelErrors && this.modelErrors.length > 0) {
+            healedCount += this.modelErrors.length;
+            this.modelErrors = [];
+            if (STATE.settings && STATE.settings.ollamaModel && ((STATE.settings.ollamaEndpoint || '').includes('ollama.com') || IS_CLOUD_HOSTED)) {
+              STATE.settings.ollamaModel = resolveOllamaCloudModel(STATE.settings.ollamaModel);
+            }
+          }
           if (this.toolIssues && this.toolIssues.length > 0) {
             healedCount += this.toolIssues.length;
             this.toolIssues = [];
@@ -4993,9 +5029,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         STATE.settings.ollamaEndpoint = 'https://ollama.com';
       }
 
-      // Pastikan model Ollama valid
+      // Pastikan model Ollama valid dan bukan model lokal/deprecated/decision jika mengarah ke Ollama Cloud
       if (!STATE.settings.ollamaModel) {
-        STATE.settings.ollamaModel = 'qwen2.5:1.5b';
+        STATE.settings.ollamaModel = 'gemma4:31b';
+      } else if ((STATE.settings.ollamaEndpoint || '').includes('ollama.com') || IS_CLOUD_HOSTED) {
+        STATE.settings.ollamaModel = resolveOllamaCloudModel(STATE.settings.ollamaModel);
       }
 
       // Auto-Migration: Alihkan model OpenRouter lama / rusak / mati ke model aktif terpercaya
@@ -5050,7 +5088,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
                   if (m.role === 'assistant' && typeof m.content === 'string') {
                     m.content = m.content.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
                     if (!m.model && m.engine) {
-                      m.model = m.engine === 'ollama' ? (STATE.settings.ollamaModel || 'qwen2.5:1.5b') : (STATE.settings.openRouterModel || 'openrouter/free');
+                      m.model = m.engine === 'ollama' ? (STATE.settings.ollamaModel || 'gemma4:31b') : (STATE.settings.openRouterModel || 'openrouter/free');
                     }
                   }
                   if (m.role === 'user' && m.docs && Array.isArray(m.docs) && m.docs.length > 0 && typeof m.displayContent === 'string') {
@@ -17335,7 +17373,7 @@ ATURAN MUTLAK SURGICAL EDIT (WAJIB DIPATUHI 100%):
           if (gwRes && gwRes.ok) {
             const gwData = await gwRes.json();
             if (Array.isArray(gwData.models) && gwData.models.length > 0) {
-              const merged = [...gwData.models];
+              const merged = gwData.models.filter(m => !isUnsupportedOllamaChatModel(m));
               const existingNames = new Set(merged.map(m => (m.name || m.model || m.id || '').toLowerCase()));
               OFFICIAL_OLLAMA_CLOUD_MODELS.forEach(om => {
                 const omName = (om.name || om.model || om.id || '').toLowerCase();
@@ -17359,9 +17397,12 @@ ATURAN MUTLAK SURGICAL EDIT (WAJIB DIPATUHI 100%):
           }
           if (directRes && directRes.ok) {
             const directData = await directRes.json();
-            const list = Array.isArray(directData.models) ? directData.models : (Array.isArray(directData.data) ? directData.data.map(m => ({ name: m.id, model: m.id })) : []);
-            if (list.length > 0) {
-              const merged = [...list];
+            const list = Array.isArray(directData.models)
+              ? directData.models
+              : (Array.isArray(directData.data) ? directData.data.map(m => ({ name: m.id, model: m.id, capabilities: m.capabilities, visibility: m.visibility, supported_in_api: m.supported_in_api })) : []);
+            const filteredList = list.filter(m => !isUnsupportedOllamaChatModel(m));
+            if (filteredList.length > 0) {
+              const merged = [...filteredList];
               const existingNames = new Set(merged.map(m => (m.name || m.model || m.id || '').toLowerCase()));
               OFFICIAL_OLLAMA_CLOUD_MODELS.forEach(om => {
                 const omName = (om.name || om.model || om.id || '').toLowerCase();
@@ -17391,10 +17432,14 @@ ATURAN MUTLAK SURGICAL EDIT (WAJIB DIPATUHI 100%):
         if (els.ollamaStatusVal) els.ollamaStatusVal.innerText = statusText;
         if (els.ollamaIndicator) els.ollamaIndicator.className = 'status-indicator online';
 
-        // Auto-select first real installed/cloud model ONLY if no model is currently configured
+        // Auto-select atau auto-heal model jika belum dikonfigurasi atau jika model saat ini tidak ada di daftar aktif
         const modelNames = rawModels.map(m => m.name || m.model || m.id);
-        if (!STATE.settings.ollamaModel) {
-          const preferredModel = modelNames.find(n => n.includes('qwen2.5:1.5b') || n.includes('qwen2.5') || n.includes('llama3.2') || n.includes('llama3')) || modelNames[0];
+        const modelNamesLower = new Set(modelNames.map(n => String(n || '').toLowerCase()));
+        if (!STATE.settings.ollamaModel || !modelNamesLower.has(String(STATE.settings.ollamaModel).toLowerCase())) {
+          const resolved = resolveOllamaCloudModel(STATE.settings.ollamaModel);
+          const preferredModel = modelNames.find(n => String(n).toLowerCase() === resolved.toLowerCase())
+            || modelNames.find(n => n.includes('gemma4:31b') || n.includes('beam') || n.includes('gpt-oss:120b'))
+            || modelNames[0];
           STATE.settings.ollamaModel = preferredModel;
           savePersistedState();
         }
@@ -18649,7 +18694,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     if (STATE.mode === 'openrouter') {
       targetModel = STATE.settings.openRouterModel || 'openrouter/free';
     } else {
-      targetModel = STATE.settings.ollamaModel || 'qwen2.5:1.5b';
+      targetModel = STATE.settings.ollamaModel || 'gemma4:31b';
     }
 
     let effectiveImages = images;
@@ -20995,18 +21040,26 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       let chatUrl = '/api/ollama/chat';
+      const isCloudDeployment = Boolean(IS_VERCEL || IS_CLOUD_HOSTED || location.hostname.includes('zozdocs.com') || (location.protocol === 'https:' && !['localhost', '127.0.0.1', '::1'].includes(location.hostname)));
+      const isTargetingOllamaCloud = Boolean((ep || '').includes('ollama.com') || (isCloudDeployment && (/^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep) || STATE.settings.ollamaApiKey)));
+      if (isTargetingOllamaCloud) {
+        requestBody.endpoint = 'https://ollama.com';
+        const resolvedModel = resolveOllamaCloudModel(requestBody.model);
+        if (resolvedModel !== requestBody.model) {
+          requestBody.model = resolvedModel;
+          modelName = resolvedModel;
+          if (STATE.settings.ollamaModel && STATE.settings.ollamaModel !== resolvedModel) {
+            STATE.settings.ollamaModel = resolvedModel;
+            savePersistedState();
+          }
+        }
+      }
       if (IS_GITHUB_PAGES && !STATE.settings.ollamaApiKey) {
         if (location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
           throw new Error('mixed_content: Browser HTTPS memblokir koneksi ke Ollama localhost HTTP di GitHub Pages.');
         }
         chatUrl = resolveEndpointUrl(ep, 'api/chat');
       } else {
-        // Pada hosting cloud (Vercel / Cloudflare Pages / z21.zozdocs.com) di mana tidak ada daemon Ollama lokal:
-        // alihkan endpoint loopback ke https://ollama.com. Pada akses lokal / Cloudflare Tunnel laptop sendiri, biarkan server.js menghubungi 127.0.0.1:11434.
-        const isCloudDeployment = Boolean(IS_VERCEL || IS_CLOUD_HOSTED || location.hostname.includes('zozdocs.com') || (location.protocol === 'https:' && !['localhost', '127.0.0.1', '::1'].includes(location.hostname)));
-        if (isCloudDeployment && (/^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep) || STATE.settings.ollamaApiKey)) {
-          requestBody.endpoint = 'https://ollama.com';
-        }
         chatUrl = '/api/ollama/chat';
       }
 
@@ -21021,6 +21074,22 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       if (!response.ok && requestBody.tools && (response.status === 400 || response.status === 422 || response.status === 500)) {
         console.warn(`[Ollama] Model ${modelName} returned HTTP ${response.status} with tools enabled. Retrying without tools parameter...`);
         delete requestBody.tools;
+        response = await fetch(chatUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(requestBody),
+          signal: STATE.abortController?.signal
+        });
+      }
+
+      // Auto-retry fallback: jika model Ollama Cloud mengembalikan 404 (deprecated/not found) atau 500 (decision model / engine outage), alihkan ke gemma4:31b
+      if (!response.ok && isTargetingOllamaCloud && (response.status === 404 || response.status === 500) && requestBody.model !== 'gemma4:31b') {
+        console.warn(`[Ollama Cloud] Model ${requestBody.model} returned HTTP ${response.status}. Auto-healing to gemma4:31b...`);
+        requestBody.model = 'gemma4:31b';
+        modelName = 'gemma4:31b';
+        STATE.settings.ollamaModel = 'gemma4:31b';
+        savePersistedState();
+        updateModelUI();
         response = await fetch(chatUrl, {
           method: 'POST',
           headers,
