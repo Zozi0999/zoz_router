@@ -8483,6 +8483,194 @@ div.msg-sources-section button.msg-sources-title span {
   min-width: 100%;
 }
 
+/* ==================== STUDIO CODE SEARCH BAR (v479) ==================== */
+.studio-editor-search-bar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+  padding: 6px 14px !important;
+  background: rgba(11, 15, 25, 0.96) !important;
+  border-bottom: 1px solid rgba(0, 240, 255, 0.35) !important;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(0, 240, 255, 0.15) !important;
+  z-index: 20 !important;
+  flex-shrink: 0 !important;
+  animation: slideDownSearch 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+@keyframes slideDownSearch {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.studio-search-left {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+.studio-search-icon {
+  color: var(--neon-cyan, #00f0ff) !important;
+  font-size: 0.85rem !important;
+  flex-shrink: 0 !important;
+}
+
+.studio-search-input {
+  flex: 1 1 auto !important;
+  min-width: 140px !important;
+  height: 32px !important;
+  padding: 4px 10px !important;
+  background: rgba(18, 24, 38, 0.9) !important;
+  border: 1px solid rgba(0, 240, 255, 0.3) !important;
+  border-radius: 6px !important;
+  color: #f8fafc !important;
+  font-family: "JetBrains Mono", Consolas, monospace !important;
+  font-size: 0.82rem !important;
+  outline: none !important;
+  transition: all 0.2s ease !important;
+}
+
+.studio-search-input:focus {
+  border-color: var(--neon-cyan, #00f0ff) !important;
+  background: rgba(18, 24, 38, 1) !important;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.35) !important;
+}
+
+.studio-search-count-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 3px 8px !important;
+  border-radius: 6px !important;
+  font-family: "JetBrains Mono", Consolas, monospace !important;
+  font-size: 0.72rem !important;
+  font-weight: 700 !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  user-select: none !important;
+}
+
+.studio-search-count-badge.is-found {
+  background: rgba(0, 240, 255, 0.18) !important;
+  border: 1px solid rgba(0, 240, 255, 0.5) !important;
+  color: #00f0ff !important;
+}
+
+.studio-search-count-badge.is-none {
+  background: rgba(244, 63, 94, 0.15) !important;
+  border: 1px solid rgba(244, 63, 94, 0.4) !important;
+  color: #fb7185 !important;
+}
+
+.studio-search-count-badge.is-empty {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #94a3b8 !important;
+}
+
+.studio-search-right {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  flex-shrink: 0 !important;
+}
+
+.studio-search-nav-btn,
+.studio-search-close-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 6px !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  color: #cbd5e1 !important;
+  font-size: 0.78rem !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.studio-search-nav-btn:hover:not(:disabled) {
+  background: rgba(0, 240, 255, 0.2) !important;
+  border-color: rgba(0, 240, 255, 0.45) !important;
+  color: #ffffff !important;
+}
+
+.studio-search-nav-btn:disabled {
+  opacity: 0.35 !important;
+  cursor: not-allowed !important;
+}
+
+.studio-search-close-btn:hover {
+  background: rgba(244, 63, 94, 0.2) !important;
+  border-color: rgba(244, 63, 94, 0.45) !important;
+  color: #ffffff !important;
+}
+
+.studio-search-ai-btn {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.25), rgba(0, 240, 255, 0.22)) !important;
+  border: 1px solid rgba(0, 240, 255, 0.45) !important;
+  color: #67e8f9 !important;
+  font-size: 0.76rem !important;
+  padding: 4px 10px !important;
+  font-weight: 600 !important;
+  white-space: nowrap !important;
+}
+
+.studio-search-ai-btn:hover {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(0, 240, 255, 0.38)) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.3) !important;
+}
+
+/* Header & Editor Search Buttons */
+.studio-search-code-btn {
+  background: rgba(0, 240, 255, 0.12) !important;
+  border: 1px solid rgba(0, 240, 255, 0.35) !important;
+  color: #38bdf8 !important;
+  font-weight: 600 !important;
+}
+
+.studio-search-code-btn:hover {
+  background: rgba(0, 240, 255, 0.24) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.3) !important;
+}
+
+.studio-editor-search-btn {
+  background: rgba(0, 240, 255, 0.12) !important;
+  border: 1px solid rgba(0, 240, 255, 0.35) !important;
+  color: #67e8f9 !important;
+  font-weight: 600 !important;
+}
+
+.studio-editor-search-btn:hover {
+  background: rgba(0, 240, 255, 0.24) !important;
+  color: #ffffff !important;
+}
+
+/* Highlight search match in line numbers */
+.studio-editor-line-numbers .line-num-row.is-search-match {
+  color: #38bdf8 !important;
+  background: rgba(56, 189, 248, 0.14) !important;
+}
+
+.studio-editor-line-numbers .line-num-row.is-active-search-match {
+  color: #050811 !important;
+  background: #00f0ff !important;
+  font-weight: 800 !important;
+  box-shadow: 0 0 10px #00f0ff !important;
+  border-radius: 3px !important;
+}
+
 /* Floating Mobile & Touch Friendly Bottom Control Bar in Center */
 .studio-editor-bottom-bar {
   position: absolute !important;
@@ -8517,6 +8705,17 @@ div.msg-sources-section button.msg-sources-title span {
   transition: all 0.2s ease !important;
   user-select: none !important;
   min-height: 38px !important;
+}
+
+.studio-bottom-action-btn.btn-search {
+  background: rgba(0, 240, 255, 0.15) !important;
+  border-color: rgba(0, 240, 255, 0.45) !important;
+  color: #67e8f9 !important;
+}
+.studio-bottom-action-btn.btn-search:hover {
+  background: rgba(0, 240, 255, 0.28) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 14px rgba(0, 240, 255, 0.35) !important;
 }
 
 .studio-bottom-action-btn.btn-ai-edit {
@@ -12447,6 +12646,25 @@ body.mermaid-has-fullscreen {
     padding: 5px 9px !important;
     font-size: 0.74rem !important;
     min-height: 32px !important;
+  }
+  .studio-editor-search-bar {
+    flex-wrap: wrap !important;
+    padding: 6px 8px !important;
+    gap: 6px !important;
+  }
+  .studio-search-left {
+    width: 100% !important;
+    margin-bottom: 2px !important;
+  }
+  .studio-search-input {
+    min-width: 100px !important;
+    font-size: 0.78rem !important;
+    height: 30px !important;
+  }
+  .studio-search-right {
+    width: 100% !important;
+    justify-content: flex-end !important;
+    gap: 5px !important;
   }
 }
 

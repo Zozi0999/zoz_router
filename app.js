@@ -1122,6 +1122,15 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     btnStudioSendFollowup: $('#btnStudioSendFollowup'),
     btnStudioStopFollowup: $('#btnStudioStopFollowup'),
     btnStudioEditCode: $('#btnStudioEditCode'),
+    btnStudioHeaderSearchCode: $('#btnStudioHeaderSearchCode'),
+    btnStudioEditorSearch: $('#btnStudioEditorSearch'),
+    studioEditorSearchBar: $('#studioEditorSearchBar'),
+    studioSearchInput: $('#studioSearchInput'),
+    studioSearchCountBadge: $('#studioSearchCountBadge'),
+    btnStudioSearchPrev: $('#btnStudioSearchPrev'),
+    btnStudioSearchNext: $('#btnStudioSearchNext'),
+    btnStudioSearchAiEdit: $('#btnStudioSearchAiEdit'),
+    btnStudioSearchClose: $('#btnStudioSearchClose'),
     iconStudioEditCode: $('#iconStudioEditCode'),
     labelStudioEditCode: $('#labelStudioEditCode'),
     studioCodeEditorWrap: $('#studioCodeEditorWrap'),
@@ -1138,6 +1147,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     btnStudioSaveCode: $('#btnStudioSaveCode'),
     btnStudioCancelCodeEdit: $('#btnStudioCancelCodeEdit'),
     studioEditorBottomBar: $('#studioEditorBottomBar'),
+    btnStudioBottomSearch: $('#btnStudioBottomSearch'),
     btnStudioBottomAiEdit: $('#btnStudioBottomAiEdit'),
     btnStudioBottomUndo: $('#btnStudioBottomUndo'),
     btnStudioBottomSave: $('#btnStudioBottomSave'),
@@ -13865,6 +13875,242 @@ window.addEventListener('error', function(e) {
     return out;
   }
 
+  // ==================== STUDIO CODE SEARCH CONTROLLER (v479) ====================
+  const StudioCodeSearch = {
+    isOpen: false,
+    query: '',
+    matches: [],
+    currentIndex: -1,
+    matchingLinesSet: new Set(),
+    activeLine: -1,
+
+    open(prefill = null) {
+      if (!activeAIFile) return;
+      if (!els.studioCodeEditorWrap || !els.studioCodeEditorWrap.classList.contains('is-editing')) {
+        openStudioCodeEditor();
+      }
+      this.isOpen = true;
+      if (els.studioEditorSearchBar) {
+        els.studioEditorSearchBar.style.display = 'flex';
+      }
+      if (els.btnStudioEditorSearch) els.btnStudioEditorSearch.classList.add('active');
+      if (els.btnStudioHeaderSearchCode) els.btnStudioHeaderSearchCode.classList.add('active');
+      if (els.btnStudioBottomSearch) els.btnStudioBottomSearch.classList.add('active');
+
+      const ed = els.aiFileStudioEditor;
+      let q = prefill;
+      if (q === null && ed) {
+        const start = ed.selectionStart || 0;
+        const end = ed.selectionEnd || 0;
+        if (end > start && (end - start) <= 60) {
+          const sel = (ed.value || '').slice(start, end);
+          if (!sel.includes('\n')) q = sel;
+        }
+      }
+
+      if (els.studioSearchInput) {
+        if (typeof q === 'string' && q.trim()) {
+          els.studioSearchInput.value = q;
+        }
+        setTimeout(() => {
+          try {
+            els.studioSearchInput.focus();
+            els.studioSearchInput.select();
+          } catch (_) {}
+        }, 40);
+      }
+      this.executeSearch(els.studioSearchInput ? els.studioSearchInput.value : '');
+    },
+
+    close() {
+      this.isOpen = false;
+      this.matches = [];
+      this.currentIndex = -1;
+      this.matchingLinesSet.clear();
+      this.activeLine = -1;
+      if (els.studioEditorSearchBar) {
+        els.studioEditorSearchBar.style.display = 'none';
+      }
+      if (els.btnStudioEditorSearch) els.btnStudioEditorSearch.classList.remove('active');
+      if (els.btnStudioHeaderSearchCode) els.btnStudioHeaderSearchCode.classList.remove('active');
+      if (els.btnStudioBottomSearch) els.btnStudioBottomSearch.classList.remove('active');
+      this.updateCountBadge();
+      if (els.aiFileStudioEditor) {
+        renderStudioCodeEditorHighlight(els.aiFileStudioEditor.value);
+        try { els.aiFileStudioEditor.focus(); } catch (_) {}
+      }
+    },
+
+    toggle() {
+      if (this.isOpen) this.close();
+      else this.open();
+    },
+
+    executeSearch(query) {
+      this.query = typeof query === 'string' ? query : '';
+      const ed = els.aiFileStudioEditor;
+      if (!ed) return;
+      const text = ed.value || '';
+      const trimmed = this.query;
+
+      this.matches = [];
+      this.matchingLinesSet.clear();
+      this.activeLine = -1;
+
+      if (!trimmed) {
+        this.currentIndex = -1;
+        this.updateCountBadge();
+        renderStudioCodeEditorHighlight(text);
+        return;
+      }
+
+      const qLower = trimmed.toLowerCase();
+      const textLower = text.toLowerCase();
+      let pos = 0;
+      let idx = 0;
+
+      // Line breaks index lookup
+      const lineBreaks = [-1];
+      for (let i = 0; i < text.length; i++) {
+        if (text[i] === '\n') lineBreaks.push(i);
+      }
+      lineBreaks.push(text.length);
+
+      function getLineNumber(offset) {
+        let low = 0, high = lineBreaks.length - 1;
+        while (low <= high) {
+          const mid = (low + high) >> 1;
+          if (lineBreaks[mid] < offset) low = mid + 1;
+          else high = mid - 1;
+        }
+        return Math.max(1, low);
+      }
+
+      while (pos < text.length) {
+        const found = textLower.indexOf(qLower, pos);
+        if (found === -1) break;
+        const line = getLineNumber(found);
+        this.matches.push({
+          index: idx++,
+          start: found,
+          end: found + trimmed.length,
+          line,
+          text: text.slice(found, found + trimmed.length)
+        });
+        this.matchingLinesSet.add(line);
+        pos = found + Math.max(1, trimmed.length);
+        if (this.matches.length >= 1000) break;
+      }
+
+      if (this.matches.length > 0) {
+        const cursor = ed.selectionStart || 0;
+        let bestIdx = 0;
+        let minDist = Infinity;
+        for (let i = 0; i < this.matches.length; i++) {
+          const dist = Math.abs(this.matches[i].start - cursor);
+          if (dist < minDist) {
+            minDist = dist;
+            bestIdx = i;
+          }
+        }
+        this.jumpToMatch(bestIdx, false);
+      } else {
+        this.currentIndex = -1;
+        this.activeLine = -1;
+        this.updateCountBadge();
+        renderStudioCodeEditorHighlight(text);
+      }
+    },
+
+    jumpToMatch(index, doFocusEditor = true) {
+      if (this.matches.length === 0) {
+        this.currentIndex = -1;
+        this.activeLine = -1;
+        this.updateCountBadge();
+        return;
+      }
+      this.currentIndex = ((index % this.matches.length) + this.matches.length) % this.matches.length;
+      const m = this.matches[this.currentIndex];
+      this.activeLine = m.line;
+      this.updateCountBadge();
+
+      const ed = els.aiFileStudioEditor;
+      if (ed) {
+        try {
+          if (doFocusEditor) ed.focus();
+          ed.setSelectionRange(m.start, m.end);
+        } catch (_) {}
+        scrollStudioEditorToLine(m.line);
+        renderStudioCodeEditorHighlight(ed.value);
+        updateStudioEditorSelectionUI();
+      }
+    },
+
+    next() {
+      if (this.matches.length === 0) return;
+      this.jumpToMatch(this.currentIndex + 1, false);
+    },
+
+    prev() {
+      if (this.matches.length === 0) return;
+      this.jumpToMatch(this.currentIndex - 1, false);
+    },
+
+    getCurrentMatch() {
+      if (this.currentIndex >= 0 && this.currentIndex < this.matches.length) {
+        return this.matches[this.currentIndex];
+      }
+      return null;
+    },
+
+    updateCountBadge() {
+      const badge = els.studioSearchCountBadge;
+      if (!badge) return;
+      badge.className = 'studio-search-count-badge';
+      if (!this.query) {
+        badge.textContent = '0/0';
+        badge.classList.add('is-empty');
+      } else if (this.matches.length === 0) {
+        badge.textContent = '0/0 (Tidak ada)';
+        badge.classList.add('is-none');
+      } else {
+        badge.textContent = `${this.currentIndex + 1}/${this.matches.length}`;
+        badge.classList.add('is-found');
+      }
+    }
+  };
+
+  function studioSearchAiEditCurrent() {
+    const m = StudioCodeSearch.getCurrentMatch();
+    const ed = els.aiFileStudioEditor;
+    if (!m || !ed) {
+      showToast('Cari dan temukan kata atau baris kode terlebih dahulu.', 'info');
+      return;
+    }
+    const val = ed.value || '';
+    const lines = val.split('\n');
+    let lineStart = 0;
+    for (let i = 0; i < m.line - 1; i++) {
+      lineStart += lines[i].length + 1;
+    }
+    const lineEnd = lineStart + (lines[m.line - 1] ? lines[m.line - 1].length : 0);
+    ed.focus();
+    ed.setSelectionRange(lineStart, lineEnd);
+    updateStudioEditorSelectionUI();
+    renderStudioCodeEditorHighlight(val);
+
+    focusStudioAiEditFromEditor();
+    if (els.inputStudioFollowup) {
+      const targetWord = (m.text || '').trim();
+      els.inputStudioFollowup.value = `Ganti "${targetWord}" pada baris ${m.line} menjadi `;
+      els.inputStudioFollowup.focus();
+      try {
+        els.inputStudioFollowup.selectionStart = els.inputStudioFollowup.selectionEnd = els.inputStudioFollowup.value.length;
+      } catch (_) {}
+    }
+    showToast(`✨ Baris ${m.line} dipilih! Ketik perubahan di kolom prompt bawah.`, 'info');
+  }
+
   function renderStudioCodeEditorHighlight(codeText, editedRanges = null) {
     const raw = typeof codeText === 'string' ? codeText : (els.aiFileStudioEditor?.value || '');
     if (Array.isArray(editedRanges)) {
@@ -13901,6 +14147,8 @@ window.addEventListener('error', function(e) {
         const ln = i + 1;
         let cls = 'line-num-row';
         if (studioLastAiEditedLines.has(ln)) cls += ' is-ai-edited';
+        else if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.activeLine === ln) cls += ' is-active-search-match';
+        else if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.matchingLinesSet && StudioCodeSearch.matchingLinesSet.has(ln)) cls += ' is-search-match';
         else if (selInfo && selInfo.hasSelection && ln >= selStart && ln <= selEnd) cls += ' is-selected-line';
         numRows[i] = `<span class="${cls}">${ln}</span>`;
       }
@@ -13991,6 +14239,9 @@ window.addEventListener('error', function(e) {
   }
 
   function closeStudioCodeEditor() {
+    if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.isOpen) {
+      StudioCodeSearch.close();
+    }
     if (!els.studioCodeEditorWrap) return;
     els.studioCodeEditorWrap.classList.remove('is-editing');
     els.studioCodeEditorWrap.style.display = 'none';
@@ -17259,6 +17510,9 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
       studioLastAiEditedLines.clear();
       StudioEditorHistory.recordInput(els.aiFileStudioEditor.value);
       renderStudioCodeEditorHighlight(els.aiFileStudioEditor.value);
+      if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.isOpen && StudioCodeSearch.query) {
+        StudioCodeSearch.executeSearch(StudioCodeSearch.query);
+      }
     }
   });
   els.aiFileStudioEditor?.addEventListener('scroll', syncStudioEditorScroll, { passive: true });
@@ -17323,6 +17577,16 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
       saveStudioCodeEditor();
       return;
     }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault();
+      StudioCodeSearch.open();
+      return;
+    }
+    if (e.key === 'Escape' && typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.isOpen) {
+      e.preventDefault();
+      StudioCodeSearch.close();
+      return;
+    }
     if (e.key === 'Tab') {
       e.preventDefault();
       const ed = els.aiFileStudioEditor;
@@ -17331,6 +17595,64 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
       ed.value = ed.value.substring(0, start) + '  ' + ed.value.substring(end);
       ed.selectionStart = ed.selectionEnd = start + 2;
     }
+  });
+
+  // Global search shortcut in Studio Modal
+  els.aiFileStudioModal?.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault();
+      StudioCodeSearch.open();
+    }
+  });
+
+  // Wire Studio Code Search Buttons & Inputs
+  els.btnStudioHeaderSearchCode?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    StudioCodeSearch.open();
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+  });
+  els.btnStudioEditorSearch?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    StudioCodeSearch.toggle();
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+  });
+  els.btnStudioBottomSearch?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    StudioCodeSearch.toggle();
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+  });
+  els.studioSearchInput?.addEventListener('input', (e) => {
+    StudioCodeSearch.executeSearch(e.target.value);
+  });
+  els.studioSearchInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (e.shiftKey) StudioCodeSearch.prev();
+      else StudioCodeSearch.next();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      StudioCodeSearch.close();
+    }
+  });
+  els.btnStudioSearchNext?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    StudioCodeSearch.next();
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+  });
+  els.btnStudioSearchPrev?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    StudioCodeSearch.prev();
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+  });
+  els.btnStudioSearchAiEdit?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    studioSearchAiEditCurrent();
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+  });
+  els.btnStudioSearchClose?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    StudioCodeSearch.close();
+    if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
   });
   els.btnToggleStudioAssistant?.addEventListener('click', toggleStudioAssistantDrawer);
   els.btnStudioCloseDrawer?.addEventListener('click', closeStudioAssistantDrawer);
@@ -28410,6 +28732,9 @@ Aturan:
       AudioEngine.click();
       // Clean up AI File Studio active file reference to prevent memory leak
       if (modalId === 'aiFileStudioModal') {
+        if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.isOpen) {
+          StudioCodeSearch.close();
+        }
         activeAIFile = null;
       }
       if (triggerHistoryBack && history.state?.modal === modalId) {
