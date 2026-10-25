@@ -25,7 +25,9 @@
     IS_GITHUB_PAGES ||
     (location.hostname && (
       location.hostname.endsWith('pages.dev') ||
-      location.hostname.endsWith('netlify.app')
+      location.hostname.endsWith('netlify.app') ||
+      location.hostname.includes('zozdocs.com') ||
+      location.hostname.includes('trycloudflare.com')
     ))
   );
 
@@ -20943,6 +20945,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
       if (STATE.settings.ollamaApiKey) {
         requestBody.apiKey = STATE.settings.ollamaApiKey;
+        requestBody.ollamaApiKey = STATE.settings.ollamaApiKey;
       }
       if (STATE.settings.openRouterKey) {
         requestBody.openRouterKey = STATE.settings.openRouterKey;
@@ -20970,9 +20973,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
         chatUrl = resolveEndpointUrl(ep, 'api/chat');
       } else {
-        // Hanya pada cloud serverless (Vercel) di mana tidak ada daemon Ollama lokal:
+        // Pada hosting cloud (Vercel / Cloudflare Pages / z21.zozdocs.com) di mana tidak ada daemon Ollama lokal:
         // alihkan endpoint loopback ke https://ollama.com. Pada akses lokal / Cloudflare Tunnel laptop sendiri, biarkan server.js menghubungi 127.0.0.1:11434.
-        if (IS_VERCEL && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+        const isCloudDeployment = Boolean(IS_VERCEL || IS_CLOUD_HOSTED || location.hostname.includes('zozdocs.com') || (location.protocol === 'https:' && !['localhost', '127.0.0.1', '::1'].includes(location.hostname)));
+        if (isCloudDeployment && (/^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep) || STATE.settings.ollamaApiKey)) {
           requestBody.endpoint = 'https://ollama.com';
         }
         chatUrl = '/api/ollama/chat';

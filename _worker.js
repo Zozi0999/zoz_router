@@ -744,25 +744,47 @@ export default {
     if (url.pathname === '/api/ollama/chat' && request.method === 'POST') {
       try {
         const body = await request.json();
-        const rawOllamaKey = (body.ollamaApiKey ? String(body.ollamaApiKey).replace(/^Bearer\s+/i, '').trim() : (request.headers.get('x-ollama-key') ? String(request.headers.get('x-ollama-key')).replace(/^Bearer\s+/i, '').trim() : ((body.apiKey && !String(body.apiKey).startsWith('sk-or-')) ? String(body.apiKey).replace(/^Bearer\s+/i, '').trim() : null)));
+        const authHeaderVal = request.headers.get('Authorization') || request.headers.get('authorization') || '';
+        const bearerKey = authHeaderVal.startsWith('Bearer ') ? authHeaderVal.slice(7).trim() : authHeaderVal.trim();
+        const rawOllamaKey = (
+          (body.ollamaApiKey && !String(body.ollamaApiKey).startsWith('sk-or-')) ? String(body.ollamaApiKey).replace(/^Bearer\s+/i, '').trim() :
+          (request.headers.get('x-ollama-key') && !String(request.headers.get('x-ollama-key')).startsWith('sk-or-') ? String(request.headers.get('x-ollama-key')).replace(/^Bearer\s+/i, '').trim() :
+          (request.headers.get('x-api-key') && !String(request.headers.get('x-api-key')).startsWith('sk-or-') ? String(request.headers.get('x-api-key')).replace(/^Bearer\s+/i, '').trim() :
+          ((body.apiKey && !String(body.apiKey).startsWith('sk-or-')) ? String(body.apiKey).replace(/^Bearer\s+/i, '').trim() :
+          (bearerKey && !bearerKey.startsWith('sk-or-') ? bearerKey : null))))
+        ) || (envKeyAllowed(request, env) ? env?.OLLAMA_API_KEY : null);
+
         const targetEndpoint = body.endpoint || 'https://ollama.com';
         let cleanEndpoint = (targetEndpoint || 'https://ollama.com').trim();
         // Pada Cloudflare Edge, jika endpoint loopback dikirim oleh browser, alihkan ke Ollama Cloud
-        if (cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1')) {
+        if (cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1') || !cleanEndpoint) {
           cleanEndpoint = 'https://ollama.com';
         }
         if (!cleanEndpoint.startsWith('http://') && !cleanEndpoint.startsWith('https://')) {
-          cleanEndpoint = (rawOllamaKey ? 'https://' : 'http://') + cleanEndpoint;
+          cleanEndpoint = 'https://' + cleanEndpoint;
         }
 
         const isLoopback = cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1');
-        const isCustomRemote = cleanEndpoint && !isLoopback && !cleanEndpoint.includes('ollama.com');
-        const shouldUseCloudBridge = !rawOllamaKey || !isCustomRemote;
+        // Cloud Bridge (OpenRouter fallback) HANYA dipakai jika pengguna TIDAK memiliki Ollama API Key / credit
+        // DAN target endpoint adalah localhost/loopback atau ollama.com.
+        // Jika pengguna MEMILIKI Ollama API Key (rawOllamaKey), mereka MEMILIKI kredit di Ollama, sehingga
+        // WAJIB diteruskan langsung ke endpoint Ollama resmi (https://ollama.com/api/chat) tanpa dibajak ke OpenRouter!
+        const shouldUseCloudBridge = !rawOllamaKey && (isLoopback || cleanEndpoint.includes('ollama.com'));
 
         if (shouldUseCloudBridge) {
-          // 100% Pure Cloud Bridge: Jika dipanggil tanpa dedicated Ollama key / server khusus, teruskan via Cloud AI (OpenRouter)
+          // Pure Cloud Fallback: Hanya jika pengguna belum mengisi Ollama API Key
           let orKey = body.openRouterKey || (body.apiKey && String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (request.headers.get('Authorization') && request.headers.get('Authorization').includes('sk-or-') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
           if (orKey) orKey = String(orKey).replace(/^Bearer\s+/i, '').trim();
+
+          if (!orKey) {
+            return new Response(JSON.stringify({
+              error: 'Ollama API Key diperlukan untuk menggunakan model Ollama Cloud di https://z21.zozdocs.com/. Silakan masukkan Ollama API Key Anda di menu Pengaturan.'
+            }), {
+              status: 401,
+              headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            });
+          }
+
           const targetModel = mapOllamaModelToOpenRouter(body.model || 'qwen2.5:1.5b');
           const isStream = body.stream !== false;
           const openRouterPayload = {
@@ -885,6 +907,8 @@ export default {
             }
           });
         }
+
+        // Direct Native Ollama Execution (Kredensial & Kredit Ollama Pengguna Digunakan Penuh)
         const parsedBase = new URL(cleanEndpoint);
         const endpointCheck = checkOllamaEndpoint(cleanEndpoint);
         if (endpointCheck.forbidden) {
@@ -903,16 +927,24 @@ export default {
         }
         const targetUrl = parsedBase;
 
-        const headers = { 'Content-Type': 'application/json' };
-        if (rawOllamaKey) headers['Authorization'] = `Bearer ${rawOllamaKey}`;
+        const headers = {
+          'Content-Type': 'application/json',
+          'User-Agent': 'ZozRouter/1.0 (Windows NT 10.0; Win64; x64)'
+        };
+        if (rawOllamaKey) {
+          headers['Authorization'] = `Bearer ${rawOllamaKey}`;
+          headers['x-ollama-key'] = rawOllamaKey;
+        }
 
         const outBody = {
           model: body.model || 'qwen2.5:1.5b',
           messages: body.messages || [],
-          stream: body.stream !== false,
-          options: body.options || {}
+          stream: body.stream !== false
         };
-        if (body.tools && Array.isArray(body.tools)) {
+        if (body.options && typeof body.options === 'object' && Object.keys(body.options).length > 0) {
+          outBody.options = body.options;
+        }
+        if (body.tools && Array.isArray(body.tools) && body.tools.length > 0) {
           outBody.tools = body.tools;
         }
         if (body.format) {
@@ -922,14 +954,31 @@ export default {
         const res = await fetch(targetUrl.toString(), {
           method: 'POST',
           headers,
-          body: JSON.stringify(outBody)
+          body: JSON.stringify(outBody),
+          signal: request.signal
         });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => null);
+          const errMsg = errData?.error?.message || errData?.error || errData?.message || (res.status === 401 ? 'Kunci API Ollama tidak valid atau kuota/kredit Anda telah habis.' : `Ollama error: HTTP ${res.status}`);
+          return new Response(JSON.stringify({ error: errMsg }), {
+            status: res.status,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
 
         const newHeaders = new Headers(res.headers);
         newHeaders.delete('content-encoding');
         newHeaders.delete('content-length');
         newHeaders.delete('transfer-encoding');
         newHeaders.set('Access-Control-Allow-Origin', '*');
+        newHeaders.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        newHeaders.set('Access-Control-Allow-Headers', '*');
+        if (body.stream !== false) {
+          newHeaders.set('Content-Type', 'application/x-ndjson; charset=utf-8');
+          newHeaders.set('Cache-Control', 'no-cache');
+        }
+
         return new Response(res.body, {
           status: res.status,
           headers: newHeaders
@@ -948,8 +997,12 @@ export default {
         const key = request.headers.get('x-ollama-key') || request.headers.get('x-api-key') || '';
         const authHeader = request.headers.get('Authorization') || (key ? `Bearer ${String(key).replace(/^Bearer\s+/i, '').trim()}` : '');
         const endpoint = url.searchParams.get('endpoint') || 'https://ollama.com';
-        const headers = {};
+        const headers = {
+          'Content-Type': 'application/json',
+          'User-Agent': 'ZozRouter/1.0 (Windows NT 10.0; Win64; x64)'
+        };
         if (authHeader) headers['Authorization'] = authHeader;
+        if (key) headers['x-ollama-key'] = key;
 
         let cleanEndpoint = (endpoint || '').trim();
         // Pada Cloudflare Edge, jika endpoint loopback atau ollama.com default diminta:
@@ -963,6 +1016,7 @@ export default {
               models: OFFICIAL_OLLAMA_CLOUD_MODELS,
               server_running: true,
               cloud_ready: true,
+              cloud_auth: false,
               note: 'Loaded from official Ollama Cloud catalog'
             }), {
               status: 200,
@@ -981,6 +1035,7 @@ export default {
             models: OFFICIAL_OLLAMA_CLOUD_MODELS,
             server_running: true,
             cloud_ready: true,
+            cloud_auth: Boolean(authHeader),
             note: 'Loaded from official Ollama Cloud catalog'
           }), {
             status: 200,
@@ -1019,7 +1074,8 @@ export default {
               return new Response(JSON.stringify({
                 models: mergedModels,
                 server_running: true,
-                cloud_ready: true
+                cloud_ready: true,
+                cloud_auth: Boolean(authHeader)
               }), {
                 status: 200,
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
@@ -1061,7 +1117,8 @@ export default {
               return new Response(JSON.stringify({
                 models: mergedModels,
                 server_running: true,
-                cloud_ready: true
+                cloud_ready: true,
+                cloud_auth: Boolean(authHeader)
               }), {
                 status: 200,
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
@@ -1075,6 +1132,7 @@ export default {
           models: OFFICIAL_OLLAMA_CLOUD_MODELS,
           server_running: true,
           cloud_ready: true,
+          cloud_auth: Boolean(authHeader),
           note: 'Loaded from official Ollama Cloud catalog'
         }), {
           status: 200,
@@ -1085,6 +1143,7 @@ export default {
           models: OFFICIAL_OLLAMA_CLOUD_MODELS,
           server_running: true,
           cloud_ready: true,
+          cloud_auth: false,
           note: 'Loaded from official Ollama Cloud catalog'
         }), {
           status: 200,

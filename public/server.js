@@ -7513,7 +7513,7 @@ async function requestHandler(req, res) {
       const rawOllamaKey = body.ollamaApiKey || req.headers['x-ollama-key'] || (body.apiKey && !String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || (req.headers['authorization'] && !req.headers['authorization'].includes('sk-or-') ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null);
       const isLoopbackTarget = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(customEndpoint);
       const isCustomRemoteEndpoint = customEndpoint && !isLoopbackTarget && !customEndpoint.includes('ollama.com');
-      const shouldUseCloudBridge = Boolean(isServerlessChat && !isCustomRemoteEndpoint);
+      const shouldUseCloudBridge = Boolean(isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint);
 
       if (shouldUseCloudBridge) {
         // Pure Cloud Architecture Bridge:
@@ -7521,7 +7521,12 @@ async function requestHandler(req, res) {
         // dan konversikan stream SSE OpenRouter ke format newline-delimited JSON Ollama.
         const targetCloudModel = mapOllamaModelToOpenRouter(body.model || 'qwen2.5:1.5b');
         const rawOrKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || body.openRouterKey || (body.apiKey && body.apiKey.startsWith('sk-or-') ? body.apiKey : null) || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || process.env.OPENROUTER_API_KEY;
-        const openRouterKey = rawOrKey ? `Bearer ${String(rawOrKey).replace(/^Bearer\s+/i, '').trim()}` : '';
+        if (!rawOrKey) {
+          return sendJSON(res, 401, {
+            error: 'Ollama API Key diperlukan untuk menggunakan model Ollama Cloud. Silakan masukkan Ollama API Key Anda di menu Pengaturan.'
+          });
+        }
+        const openRouterKey = `Bearer ${String(rawOrKey).replace(/^Bearer\s+/i, '').trim()}`;
 
         const orPayload = {
           model: targetCloudModel,
