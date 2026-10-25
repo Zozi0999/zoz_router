@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261025_v470';
+    window.__ZOZ_VERSION__ = 'v20261025_v471';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -93,8 +93,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261025_v470">
-  <link rel="stylesheet" href="style.css?v=20261025_v470">
+  <link rel="preload" as="style" href="style.css?v=20261025_v471">
+  <link rel="stylesheet" href="style.css?v=20261025_v471">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -2752,13 +2752,16 @@
               </span>
             </div>
             <div style="display: flex; gap: 8px; align-items: center;">
-              <input type="password" id="inputWaSecurityPin" class="term-tunnel-inline-input" placeholder="PIN Keamanan Akun / Master (mis. 210560)" style="flex: 1; height: 32px; font-size: 0.85rem;" autocomplete="current-password">
+              <input type="password" id="inputWaSecurityPin" class="term-tunnel-inline-input" placeholder="PIN Keamanan / PIN Master (210560 / PIN Tunnel)" style="flex: 1; height: 32px; font-size: 0.85rem;" autocomplete="current-password">
               <button type="button" class="term-tunnel-btn" id="btnSaveWaSecurityPin" style="height: 32px; padding: 0 10px; font-size: 0.82rem;" title="Simpan / Terapkan PIN Keamanan">
                 <i class="fa-solid fa-key"></i> Simpan PIN
               </button>
+              <button type="button" class="term-tunnel-btn" id="btnDirectUnlockMaster" style="height: 32px; padding: 0 10px; font-size: 0.82rem; background: rgba(245, 158, 11, 0.2); border-color: rgba(245, 158, 11, 0.5); color: #f59e0b;" title="Buka Sesi Master Kaisar Zozi (42 Kontak)">
+                <i class="fa-solid fa-crown"></i> Buka Master
+              </button>
             </div>
             <div style="font-size: 0.73rem; color: var(--text-muted); margin-top: 4px;">
-              * Mode Google Anonymous: Sesi WhatsApp terisolasi total per perangkat / pengunjung. Akun Master Kaisar dilindungi PIN 210560.
+              * Mode Google Anonymous: Sesi WhatsApp terisolasi total per pengunjung. Akun Master Kaisar dibuka dengan PIN 210560 atau PIN Tunnel Laptop.
             </div>
           </div>
 
@@ -3005,8 +3008,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261025_v470" defer></script>
+  <script src="text-safety.js?v=20261025_v471" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261025_v470" defer></script>
+  <script src="app.js?v=20261025_v471" defer></script>
 </body>
 </html>

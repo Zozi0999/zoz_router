@@ -5715,7 +5715,7 @@ async function requestHandler(req, res) {
       return { success: false, status: 503, error: 'Modul WhatsApp Gateway tidak tersedia.' };
     }
     const uid = reqUrl?.searchParams?.get('userId') || (body && body.userId) || req.headers['x-wa-user-id'] || req.headers['x-user-id'] || req.headers['x-client-id'] || '';
-    const pin = reqUrl?.searchParams?.get('pin') || (body && body.pin) || req.headers['x-wa-pin'] || '';
+    const pin = reqUrl?.searchParams?.get('pin') || reqUrl?.searchParams?.get('masterPin') || reqUrl?.searchParams?.get('wa_pin') || (body && (body.pin || body.password || body.currentPin || body.masterPin)) || req.headers['x-wa-pin'] || req.headers['x-terminal-pin'] || '';
     const isLocal = isLocalWaRequest(req);
     const resTenant = waGatewayManager.resolveGateway(uid, pin, isLocal);
     if (resTenant && resTenant.success && resTenant.gateway) {
@@ -5899,7 +5899,19 @@ async function requestHandler(req, res) {
     const body = (await safeParseBody(req)) || {};
     const tenant = getWaTenant(req, reqUrl, body);
     const isLocal = isLocalWaRequest(req);
-    const hasMasterAuth = Boolean(tenant.isMaster || isLocal || body.masterPin === '210560' || body.currentPin === '210560' || (body.pin && String(body.pin).trim() === '210560'));
+    const hasMasterAuth = Boolean(
+      tenant.isMaster ||
+      isLocal ||
+      body.masterPin === '210560' ||
+      body.currentPin === '210560' ||
+      (body.pin && String(body.pin).trim() === '210560') ||
+      (waGatewayManager && waGatewayManager.masterGateway && (
+        waGatewayManager.masterGateway.verifyPin(body.pin) ||
+        waGatewayManager.masterGateway.verifyPin(body.currentPin) ||
+        waGatewayManager.masterGateway.verifyPin(body.masterPin) ||
+        waGatewayManager.masterGateway.verifyPin(body.newPin)
+      ))
+    );
 
     if (!tenant.success && !hasMasterAuth) {
       return sendJSON(res, tenant.status || 403, {
@@ -5933,6 +5945,48 @@ async function requestHandler(req, res) {
     } catch (e) {
       return sendJSON(res, 400, { success: false, error: e.message });
     }
+  }
+
+  if ((pathname === '/api/wa/verify-pin' || pathname === '/api/wa/login') && (method === 'POST' || method === 'GET')) {
+    const body = method === 'POST' ? ((await safeParseBody(req)) || {}) : {};
+    const inputPin = String(body.pin || body.password || reqUrl.searchParams.get('pin') || reqUrl.searchParams.get('password') || '').trim();
+    if (!inputPin) {
+      return sendJSON(res, 400, { success: false, error: 'PIN tidak boleh kosong.' });
+    }
+    const isMaster = Boolean(inputPin === '210560' || (waGatewayManager && waGatewayManager.masterGateway && waGatewayManager.masterGateway.verifyPin(inputPin)));
+    if (isMaster) {
+      const status = waGatewayManager.masterGateway.getStatus();
+      const contacts = waGatewayManager.masterGateway.getContacts();
+      return sendJSON(res, 200, {
+        success: true,
+        isMaster: true,
+        userId: 'usr_kaisar_master',
+        connected: status.connected,
+        phone: status.phone || '6287894270587',
+        contactCount: contacts.length,
+        message: '👑 Identitas Kaisar Zozi Terverifikasi! Master Core & WhatsApp Tersinkron.'
+      });
+    }
+
+    // Cek apakah PIN cocok untuk tenant guest tertentu
+    const tenant = getWaTenant(req, reqUrl, body);
+    if (tenant && tenant.gateway && tenant.gateway.verifyPin(inputPin)) {
+      return sendJSON(res, 200, {
+        success: true,
+        isMaster: false,
+        userId: tenant.userId,
+        connected: tenant.gateway.getStatus().connected,
+        phone: tenant.gateway.getStatus().phone || '',
+        contactCount: tenant.gateway.getContacts().length,
+        message: 'PIN Akun Tamu Terverifikasi.'
+      });
+    }
+
+    return sendJSON(res, 401, {
+      success: false,
+      isMaster: false,
+      error: 'PIN Keamanan tidak cocok. Gunakan PIN Master (210560) atau PIN Tunnel untuk membuka sesi Master.'
+    });
   }
 
   if (pathname === '/api/wa/mobile-link' && (method === 'GET' || method === 'POST')) {

