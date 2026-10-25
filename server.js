@@ -5714,8 +5714,8 @@ async function requestHandler(req, res) {
       }
       return { success: false, status: 503, error: 'Modul WhatsApp Gateway tidak tersedia.' };
     }
-    const uid = req.headers['x-user-id'] || req.headers['x-client-id'] || reqUrl?.searchParams?.get('userId') || (body && body.userId) || '';
-    const pin = req.headers['x-wa-pin'] || reqUrl?.searchParams?.get('pin') || (body && body.pin) || '';
+    const uid = reqUrl?.searchParams?.get('userId') || (body && body.userId) || req.headers['x-wa-user-id'] || req.headers['x-user-id'] || req.headers['x-client-id'] || '';
+    const pin = reqUrl?.searchParams?.get('pin') || (body && body.pin) || req.headers['x-wa-pin'] || '';
     const isLocal = isLocalWaRequest(req);
     const resTenant = waGatewayManager.resolveGateway(uid, pin, isLocal);
     if (resTenant && resTenant.success && resTenant.gateway) {
@@ -5898,8 +5898,10 @@ async function requestHandler(req, res) {
   if (pathname === '/api/wa/pin' && method === 'POST') {
     const body = (await safeParseBody(req)) || {};
     const tenant = getWaTenant(req, reqUrl, body);
-    // Jika butuh PIN untuk akses tapi belum ada atau salah
-    if (!tenant.success && tenant.status !== 401) {
+    const isLocal = isLocalWaRequest(req);
+    const hasMasterAuth = Boolean(tenant.isMaster || isLocal || body.masterPin === '210560' || body.currentPin === '210560' || (body.pin && String(body.pin).trim() === '210560'));
+
+    if (!tenant.success && !hasMasterAuth) {
       return sendJSON(res, tenant.status || 403, {
         success: false,
         error: tenant.error,
@@ -5912,7 +5914,7 @@ async function requestHandler(req, res) {
       return sendJSON(res, 400, { success: false, error: 'PIN baru wajib diisi.' });
     }
     try {
-      if (tenant.isMaster || body.masterPin === '210560' || body.currentPin === '210560' || (body.pin && String(body.pin).trim() === '210560')) {
+      if (hasMasterAuth) {
         waGatewayManager.masterGateway.setPin(pinCandidate);
         return sendJSON(res, 200, {
           success: true,
@@ -5945,18 +5947,16 @@ async function requestHandler(req, res) {
       });
     }
 
-    let pin = body.pin || body.newPin || req.headers['x-wa-pin'] || reqUrl.searchParams.get('pin') || '';
+    let pin = String(body.pin || body.newPin || req.headers['x-wa-pin'] || reqUrl.searchParams.get('pin') || '').trim();
 
-    // Jika pengguna membuat/menyetel PIN baru bersamaan dengan request QR ponsel
-    if (body.newPin || body.pin) {
-      const pinCandidate = String(body.newPin || body.pin).trim();
-      if (pinCandidate.length >= 4) {
-        try {
-          tenant.gateway.setPin(pinCandidate);
-          pin = pinCandidate;
-        } catch (err) {
-          return sendJSON(res, 400, { success: false, error: err.message });
+    // Sinkronkan PIN QR ponsel dengan konfigurasi gateway jika pengguna sudah terautentikasi (misal dari localhost/master)
+    if (pin && pin.length >= 4 && pin !== '210560') {
+      try {
+        if (!tenant.gateway.verifyPin(pin)) {
+          tenant.gateway.setPin(pin);
         }
+      } catch (err) {
+        return sendJSON(res, 400, { success: false, error: err.message });
       }
     }
 

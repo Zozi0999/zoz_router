@@ -159,10 +159,25 @@ class WhatsAppGateway {
   }
 
   async generateMobileLink(hostUrl, pin = '') {
-    const cleanHost = (hostUrl || 'z21.zozdocs.com').replace(/^https?:\/\//, '').replace(/\/+$/, '');
-    const cleanPin = pin || (this.isMaster ? '210560' : '');
+    let rawHost = (hostUrl || 'z21.zozdocs.com').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (rawHost.startsWith('localhost') || rawHost.startsWith('127.0.0.1') || rawHost.includes('.trycloudflare.com')) {
+      rawHost = 'z21.zozdocs.com';
+    }
+    let activeTunnelUrl = '';
+    let activeTunnelPin = '';
+    try {
+      const tunnelStateFile = path.join(__dirname, 'data', 'tunnel-state.json');
+      if (fs.existsSync(tunnelStateFile)) {
+        const tState = JSON.parse(fs.readFileSync(tunnelStateFile, 'utf8'));
+        if (tState && tState.url) activeTunnelUrl = String(tState.url).trim();
+        if (tState && tState.pin) activeTunnelPin = String(tState.pin).trim();
+      }
+    } catch (_) {}
+
+    const cleanPin = pin || (this.isMaster ? (activeTunnelPin || '210560') : '');
     const effectiveUid = this.isMaster ? 'usr_kaisar_master' : (this.userId || 'usr_kaisar_master');
-    const mobileUrl = `https://${cleanHost}/?userId=${encodeURIComponent(effectiveUid)}${cleanPin ? `&pin=${encodeURIComponent(cleanPin)}` : ''}&mode=whatsapp`;
+    const tunnelParam = activeTunnelUrl ? `&tunnel=${encodeURIComponent(activeTunnelUrl)}` : '';
+    const mobileUrl = `https://${rawHost}/?userId=${encodeURIComponent(effectiveUid)}${cleanPin ? `&pin=${encodeURIComponent(cleanPin)}` : ''}${tunnelParam}&mode=whatsapp`;
     const qrDataUrl = await QRCode.toDataURL(mobileUrl, {
       margin: 2,
       scale: 6,
@@ -173,7 +188,8 @@ class WhatsAppGateway {
       qr: qrDataUrl,
       userId: effectiveUid,
       isMaster: this.isMaster,
-      hasPin: Boolean(cleanPin)
+      hasPin: Boolean(cleanPin),
+      tunnelUrl: activeTunnelUrl
     };
   }
 
@@ -204,11 +220,23 @@ class WhatsAppGateway {
     const clean = String(inputPin).trim();
     if (this.isMaster) {
       if (clean === '210560') return true; // PIN Master Override Permanen Kaisar Zozi
-      if (this.config && this.config.pinHash) {
-        return hashPin(clean) === this.config.pinHash;
+      this.loadConfig();
+      if (this.config && this.config.pinHash && hashPin(clean) === this.config.pinHash) {
+        return true;
       }
+      // Verifikasi juga terhadap PIN Pairing aktif dari Cloudflare Tunnel Laptop (data/tunnel-state.json)
+      try {
+        const tunnelStateFile = path.join(__dirname, 'data', 'tunnel-state.json');
+        if (fs.existsSync(tunnelStateFile)) {
+          const tState = JSON.parse(fs.readFileSync(tunnelStateFile, 'utf8'));
+          if (tState && tState.pin && String(tState.pin).trim() === clean) {
+            return true;
+          }
+        }
+      } catch (_) {}
       return false;
     }
+    this.loadConfig();
     if (!this.config.pinHash) return true;
     return hashPin(clean) === this.config.pinHash;
   }

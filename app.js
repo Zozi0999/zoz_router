@@ -31604,6 +31604,24 @@ Aturan:
               pin: this.remotePin
             }));
             localStorage.setItem('zoz_term_bridge_url', this.remoteHost);
+            if (this.remotePin && typeof WhatsAppController !== 'undefined') {
+              localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+              localStorage.setItem('zoz_wa_pin', this.remotePin);
+              localStorage.setItem('zoz_wa_mobile_pin', this.remotePin);
+              if (this.remoteHost && this.remoteHost.includes('trycloudflare.com')) {
+                WhatsAppController.activeTunnelUrl = this.remoteHost;
+                WhatsAppController.apiBaseUrl = this.remoteHost;
+                localStorage.setItem('zoz_wa_api_url', this.remoteHost);
+              }
+              WhatsAppController.userId = 'usr_kaisar_master';
+              WhatsAppController.pin = this.remotePin;
+              WhatsAppController.isMaster = true;
+              WhatsAppController.updateSecurityUI({ isMaster: true, hasPin: true });
+              WhatsAppController.fetchStatus(true).then(() => {
+                WhatsAppController.fetchContacts();
+                WhatsAppController.initSSE();
+              }).catch(() => {});
+            }
           } catch (_) {}
 
           if (data.cwd) {
@@ -32154,6 +32172,7 @@ Aturan:
       let isWaSync = false;
       let waUserId = '';
       let waPin = '';
+      let waTunnel = '';
 
       try {
         if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
@@ -32161,6 +32180,7 @@ Aturan:
           const mode = u.searchParams.get('mode');
           waUserId = u.searchParams.get('userId') || '';
           waPin = u.searchParams.get('pin') || '';
+          waTunnel = u.searchParams.get('tunnel') || (u.origin.includes('trycloudflare.com') ? u.origin : '');
           if (mode === 'whatsapp' || (waUserId && waUserId.startsWith('usr_'))) {
             isWaSync = true;
           }
@@ -32170,6 +32190,7 @@ Aturan:
             isWaSync = true;
             waUserId = parsed.userId || '';
             waPin = parsed.pin || '';
+            waTunnel = parsed.tunnel || '';
           }
         }
       } catch (_) {}
@@ -32181,36 +32202,42 @@ Aturan:
 
         // 1. Simpan sesi & PIN di storage HP
         localStorage.setItem('zoz_wa_user_id', waUserId);
-        if (waPin) localStorage.setItem('zoz_wa_pin', waPin);
-
-        // 2. Simpan URL host/tunnel yang aktif
-        try {
-          const u = new URL(trimmed);
-          if (u.origin && (u.origin.includes('trycloudflare.com') || u.origin.includes(':4040') || u.origin.includes('zozdocs.com'))) {
-            localStorage.setItem('zoz_wa_api_url', u.origin);
-            localStorage.setItem('zoz_last_tunnel_url', u.origin);
-            if (typeof WhatsAppController !== 'undefined') {
-              WhatsAppController.apiBaseUrl = u.origin;
-            }
-          }
-        } catch (_) {}
-
-        // 3. Switch ke mode WhatsApp
-        if (typeof setChatMode === 'function') {
-          setChatMode('whatsapp');
+        if (waPin) {
+          localStorage.setItem('zoz_wa_pin', waPin);
+          localStorage.setItem('zoz_wa_mobile_pin', waPin);
         }
 
-        // 4. Update controller dan sinkronkan data seketika
+        // 2. Simpan URL tunnel Cloudflare yang aktif (JANGAN gunakan localhost atau domain statis zozdocs.com sebagai apiBaseUrl)
         if (typeof WhatsAppController !== 'undefined') {
+          const cleanTunnel = waTunnel ? waTunnel.replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:').replace(/\/+$/, '') : '';
+          if (cleanTunnel && cleanTunnel.includes('trycloudflare.com')) {
+            WhatsAppController.activeTunnelUrl = cleanTunnel;
+            WhatsAppController.apiBaseUrl = cleanTunnel;
+            localStorage.setItem('zoz_wa_api_url', cleanTunnel);
+            localStorage.setItem('zoz_last_tunnel_url', cleanTunnel);
+          } else {
+            const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+            WhatsAppController.apiBaseUrl = isLocal ? '' : WhatsAppController.activeTunnelUrl;
+            localStorage.setItem('zoz_wa_api_url', WhatsAppController.apiBaseUrl);
+          }
+
+          // 3. Switch ke mode WhatsApp
+          WhatsAppController.setChatMode('whatsapp');
+
+          // 4. Update controller dan sinkronkan data seketika
           WhatsAppController.userId = waUserId;
           WhatsAppController.pin = waPin;
           WhatsAppController.isMaster = (waPin === '210560' || waUserId === 'usr_kaisar_master');
+          WhatsAppController.isFetchingStatus = false;
+          WhatsAppController.isConnectingWa = false;
           WhatsAppController.updateSecurityUI({ isMaster: WhatsAppController.isMaster, hasPin: Boolean(waPin) });
-          WhatsAppController.fetchStatus(true);
-          WhatsAppController.fetchContacts(true);
+          WhatsAppController.fetchStatus(true).then(() => {
+            WhatsAppController.fetchContacts(true);
+            WhatsAppController.initSSE();
+          });
         }
 
-        showToast('🟢 Sukses! Akun WhatsApp dari desktop berhasil disinkronkan ke HP ini.', 'success');
+        showToast('🟢 Sukses! Akun WhatsApp dari desktop berhasil disinkronkan ke perangkat ini.', 'success');
         return;
       }
 
@@ -32260,7 +32287,32 @@ Aturan:
         const pinInput = document.getElementById('inputTermRemotePin');
         if (hostInput) hostInput.value = remoteHost;
         if (pinInput) pinInput.value = pin;
-        showToast(`🟢 QR Code terbaca! Menghubungkan ke ${remoteHost}...`, 'success');
+
+        // Sinkronkan juga WhatsApp Gateway secara otomatis dengan sesi Master Laptop
+        if (typeof WhatsAppController !== 'undefined') {
+          const cleanHttpTunnel = remoteHost.replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:').replace(/\/+$/, '');
+          if (cleanHttpTunnel.includes('trycloudflare.com')) {
+            WhatsAppController.activeTunnelUrl = cleanHttpTunnel;
+            WhatsAppController.apiBaseUrl = cleanHttpTunnel;
+            localStorage.setItem('zoz_wa_api_url', cleanHttpTunnel);
+            localStorage.setItem('zoz_last_tunnel_url', cleanHttpTunnel);
+          }
+          localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+          localStorage.setItem('zoz_wa_pin', pin);
+          localStorage.setItem('zoz_wa_mobile_pin', pin);
+          WhatsAppController.userId = 'usr_kaisar_master';
+          WhatsAppController.pin = pin;
+          WhatsAppController.isMaster = true;
+          WhatsAppController.isFetchingStatus = false;
+          WhatsAppController.isConnectingWa = false;
+          WhatsAppController.updateSecurityUI({ isMaster: true, hasPin: true });
+          WhatsAppController.fetchStatus(true).then(() => {
+            WhatsAppController.fetchContacts(true);
+            WhatsAppController.initSSE();
+          });
+        }
+
+        showToast(`🟢 QR Code terbaca! Terminal & WhatsApp berhasil disinkronkan ke ${remoteHost}...`, 'success');
         this.connectRemoteTerminal(remoteHost, pin, true);
         setTimeout(() => {
           this.openTerminal(false);
@@ -35567,7 +35619,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://consoles-boulevard-duncan-joseph.trycloudflare.com',
+    activeTunnelUrl: 'https://reasonably-kick-thee-mean.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -35577,22 +35629,23 @@ Aturan:
     maxSseAttempts: 3,
 
     getUserId() {
-      // 1. Jika terverifikasi sebagai Master Kaisar (memiliki PIN 210560)
-      if (this.isMaster || this.getPin() === '210560') {
-        return 'usr_kaisar_master';
-      }
-      // 2. Jika di localhost loopback, izinkan default ke Master Kaisar
       const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
       const storedUid = localStorage.getItem('zoz_wa_user_id');
-      const storedPin = localStorage.getItem('zoz_wa_pin');
+      const storedPin = this.pin || localStorage.getItem('zoz_wa_pin') || localStorage.getItem('zoz_wa_mobile_pin') || '';
 
+      // 1. Jika di localhost loopback, izinkan default ke Master Kaisar
       if (isLocalHost && (!storedUid || storedUid === 'usr_kaisar_master')) {
         return 'usr_kaisar_master';
       }
 
+      // 2. Jika terverifikasi sebagai Master Kaisar (memiliki PIN 210560, atau scan QR dengan userId=usr_kaisar_master + PIN valid)
+      if (this.isMaster || storedPin === '210560' || (storedUid === 'usr_kaisar_master' && storedPin && storedPin.length >= 4)) {
+        return 'usr_kaisar_master';
+      }
+
       // 3. Mode Tamu Terisolasi (Google Anonymous Guest Mode):
-      // Jika tersimpan 'usr_kaisar_master' tetapi tanpa PIN 210560 di remote, bersihkan residunya!
-      if (!isLocalHost && storedUid === 'usr_kaisar_master' && storedPin !== '210560') {
+      // Jika tersimpan 'usr_kaisar_master' tetapi tanpa PIN sama sekali di remote, bersihkan residunya!
+      if (!isLocalHost && storedUid === 'usr_kaisar_master' && (!storedPin || storedPin.length < 4)) {
         localStorage.removeItem('zoz_wa_user_id');
       }
 
@@ -35611,21 +35664,27 @@ Aturan:
 
     getPin() {
       if (this.pin) return this.pin;
+      const stored = localStorage.getItem('zoz_wa_pin') || localStorage.getItem('zoz_wa_mobile_pin');
+      if (stored) {
+        this.pin = stored;
+        return stored;
+      }
       const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
       if (isLocalHost) {
         return '210560';
       }
-      const stored = localStorage.getItem('zoz_wa_pin');
-      if (stored) return stored;
       // Periksa query parameter URL ?pin=... (misal saat scan QR pairing mobile kaisar)
       try {
         const params = new URLSearchParams(window.location.search);
         const qPin = params.get('pin') || params.get('wa_pin') || '';
+        const qUid = params.get('userId') || params.get('wa_user') || '';
         if (qPin) {
           this.pin = qPin;
           localStorage.setItem('zoz_wa_pin', qPin);
-          if (qPin === '210560') {
+          localStorage.setItem('zoz_wa_mobile_pin', qPin);
+          if (qPin === '210560' || qUid === 'usr_kaisar_master') {
             this.isMaster = true;
+            this.userId = 'usr_kaisar_master';
             localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
           }
           return qPin;
@@ -35700,7 +35759,12 @@ Aturan:
 
     updateSecurityUI(info = {}) {
       const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-      const isMaster = Boolean((info.isMaster || this.getPin() === '210560') || (isLocalHost && this.getUserId() === 'usr_kaisar_master'));
+      const isMaster = Boolean(
+        info.isMaster ||
+        this.isMaster ||
+        this.getPin() === '210560' ||
+        (this.getUserId() === 'usr_kaisar_master' && (isLocalHost || Boolean(this.getPin())))
+      );
       const uid = isMaster ? 'usr_kaisar_master' : this.getUserId();
       const hasPin = Boolean(info.hasPin || this.getPin());
 
@@ -35764,13 +35828,17 @@ Aturan:
       if (els.waMobileQrPlaceholder) els.waMobileQrPlaceholder.style.display = 'flex';
       if (els.waMobileLinkQrImg) els.waMobileLinkQrImg.style.display = 'none';
 
-      // 1. Konstruksi URL kanonikal Tautan Handphone
+      // 1. Konstruksi URL kanonikal Tautan Handphone (selalu gunakan domain publik z21.zozdocs.com agar HP bisa membuka)
       const currentHost = (typeof window !== 'undefined' && window.location && window.location.host) || 'z21.zozdocs.com';
-      const cleanHost = currentHost.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+      let cleanHost = currentHost.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+      if (cleanHost.includes('localhost') || cleanHost.includes('127.0.0.1') || cleanHost.includes('.trycloudflare.com')) {
+        cleanHost = 'z21.zozdocs.com';
+      }
       const effectiveUid = (this.isMaster || this.getPin() === '210560' || localStorage.getItem('zoz_wa_user_id') === 'usr_kaisar_master')
         ? 'usr_kaisar_master'
         : this.getUserId();
-      const mobileUrl = `https://${cleanHost}/?userId=${encodeURIComponent(effectiveUid)}&pin=${encodeURIComponent(effectivePin)}&mode=whatsapp`;
+      const tunnelParam = this.activeTunnelUrl ? `&tunnel=${encodeURIComponent(this.activeTunnelUrl)}` : '';
+      const mobileUrl = `https://${cleanHost}/?userId=${encodeURIComponent(effectiveUid)}&pin=${encodeURIComponent(effectivePin)}${tunnelParam}&mode=whatsapp`;
       this.mobileLinkUrl = mobileUrl;
 
       // 2. Render instan gambar QR via client loader (0 delay, anti-stuck)
@@ -35898,7 +35966,8 @@ Aturan:
     isDeadTunnelUrl(u) {
       if (!u) return true;
       const s = String(u).toLowerCase();
-      if (s.includes('.trycloudflare.com') && !s.includes('consoles-boulevard-duncan-joseph')) {
+      const activeSub = (this.activeTunnelUrl || '').toLowerCase().replace(/^https?:\/\//, '').split('.')[0];
+      if (s.includes('.trycloudflare.com') && !s.includes('reasonably-kick-thee-mean') && (!activeSub || !s.includes(activeSub))) {
         return true;
       }
       return false;
@@ -36075,15 +36144,65 @@ Aturan:
     },
 
     async init() {
-      // 0. Auto-Login dari URL Parameter Handphone (Scan QR Mobile Link)
+      // 0. Auto-Login dari URL Parameter Handphone (Scan QR Mobile Link atau QR Terminal)
       try {
         const urlParams = new URLSearchParams(window.location.search);
-        const pUid = urlParams.get('userId');
-        const pPin = urlParams.get('pin');
+        const pUid = urlParams.get('userId') || urlParams.get('wa_user');
+        const pPin = urlParams.get('pin') || urlParams.get('wa_pin');
         const pMode = urlParams.get('mode');
-        if (pUid) localStorage.setItem('zoz_wa_user_id', pUid);
-        if (pPin) localStorage.setItem('zoz_wa_pin', pPin);
+        const pTunnel = urlParams.get('tunnel') || urlParams.get('remote_host');
+        if (pTunnel && pTunnel.includes('.trycloudflare.com')) {
+          const cleanTun = pTunnel.replace(/\/+$/, '');
+          this.activeTunnelUrl = cleanTun;
+          this.apiBaseUrl = cleanTun;
+          localStorage.setItem('zoz_wa_api_url', cleanTun);
+          localStorage.setItem('zoz_last_tunnel_url', cleanTun);
+        }
+        if (pUid) {
+          localStorage.setItem('zoz_wa_user_id', pUid);
+          this.userId = pUid;
+          if (pUid === 'usr_kaisar_master') {
+            this.isMaster = true;
+          }
+        }
+        if (pPin) {
+          localStorage.setItem('zoz_wa_pin', pPin);
+          localStorage.setItem('zoz_wa_mobile_pin', pPin);
+          this.pin = pPin;
+          // Jika scan QR Terminal dengan remote_host + pin tanpa userId eksplisit, tautkan juga ke Master Kaisar
+          if (!pUid && pTunnel && pPin.length >= 4) {
+            localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+            this.userId = 'usr_kaisar_master';
+            this.isMaster = true;
+          }
+        }
         if (pMode === 'whatsapp') localStorage.setItem('zoz_chat_mode', 'whatsapp');
+
+        // 0b. Jika perangkat ini sudah memindai QR Terminal Laptop sebelumnya (tersimpan di zoz_remote_terminal_config),
+        // otomatis sinkronkan WhatsApp Gateway dengan sesi Master Laptop tanpa perlu scan ulang!
+        if (!this.pin && !localStorage.getItem('zoz_wa_pin')) {
+          const rawTermCfg = localStorage.getItem('zoz_remote_terminal_config');
+          if (rawTermCfg) {
+            const termCfg = JSON.parse(rawTermCfg);
+            if (termCfg && termCfg.pin && String(termCfg.pin).trim().length >= 4) {
+              const tPin = String(termCfg.pin).trim();
+              this.pin = tPin;
+              this.userId = 'usr_kaisar_master';
+              this.isMaster = true;
+              localStorage.setItem('zoz_wa_pin', tPin);
+              localStorage.setItem('zoz_wa_mobile_pin', tPin);
+              localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+              if (termCfg.remoteHost && String(termCfg.remoteHost).includes('.trycloudflare.com')) {
+                const cleanTun = String(termCfg.remoteHost).replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:').replace(/\/+$/, '');
+                if (!this.isDeadTunnelUrl(cleanTun)) {
+                  this.activeTunnelUrl = cleanTun;
+                  this.apiBaseUrl = cleanTun;
+                  localStorage.setItem('zoz_wa_api_url', cleanTun);
+                }
+              }
+            }
+          }
+        }
       } catch (_) {}
 
       // 1. Update Identitas Akun & Tanda Pengenal Keamanan
@@ -36101,7 +36220,7 @@ Aturan:
       if (isLocal) {
         this.apiBaseUrl = '';
         localStorage.setItem('zoz_wa_api_url', '');
-      } else {
+      } else if (!this.apiBaseUrl || this.isDeadTunnelUrl(this.apiBaseUrl)) {
         this.apiBaseUrl = this.activeTunnelUrl;
         localStorage.setItem('zoz_wa_api_url', this.activeTunnelUrl);
       }
@@ -36263,13 +36382,22 @@ Aturan:
           return;
         }
 
+        const isMasterDevice = Boolean(
+          this.isMaster ||
+          this.getUserId() === 'usr_kaisar_master' ||
+          (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
+        );
+
         // Setel lokal seketika & render QR seketika tanpa menunggu jaringan
         this.pin = pinInput;
         localStorage.setItem('zoz_wa_mobile_pin', pinInput);
-        localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
-        this.userId = 'usr_kaisar_master';
-        this.isMaster = true;
-        this.updateSecurityUI({ isMaster: true, hasPin: true });
+        localStorage.setItem('zoz_wa_pin', pinInput);
+        if (isMasterDevice) {
+          localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+          this.userId = 'usr_kaisar_master';
+          this.isMaster = true;
+        }
+        this.updateSecurityUI({ isMaster: isMasterDevice, hasPin: true });
         showToast('🔒 PIN Berhasil Disimpan! QR Code Tautan Ponsel Diterbitkan.', 'success');
         this.fetchMobileLinkQr(true, pinInput);
 
@@ -36296,7 +36424,9 @@ Aturan:
                 headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({
                   userId: isMasterDevice ? 'usr_kaisar_master' : this.getUserId(),
+                  pin: pinInput,
                   newPin: pinInput,
+                  currentPin: this.getPin(),
                   masterPin: isMasterDevice ? '210560' : ''
                 }),
                 signal: AbortSignal.timeout(3500)
@@ -36313,6 +36443,7 @@ Aturan:
                     this.apiBaseUrl = cleanBase;
                     localStorage.setItem('zoz_wa_api_url', cleanBase);
                   }
+                  await this.fetchMobileLinkQr(true, pinInput);
                   await this.fetchContacts(true);
                   break;
                 }
@@ -36442,20 +36573,26 @@ Aturan:
       }
     },
 
-    async fetchStatus() {
-      if (this.isConnectingWa || this.isFetchingStatus) return;
+    async fetchStatus(force = false) {
+      if ((this.isConnectingWa || this.isFetchingStatus) && !force) return;
       this.isFetchingStatus = true;
       try {
         const q = `?t=${Date.now()}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
         let res = await this.waFetch('/api/wa/status' + q, { cache: 'no-store' }, 1);
         const data = await res.json().catch(() => null);
         if (data) {
-          const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-          if (data.isMaster && (this.getPin() === '210560' || isLocalHost)) {
+          if (data.isMaster) {
             localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
             this.userId = 'usr_kaisar_master';
             this.isMaster = true;
-          } else if (!data.isMaster && this.userId === 'usr_kaisar_master' && this.getPin() !== '210560') {
+          } else if (data.requiresPin) {
+            const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+            if (!isLocalHost && localStorage.getItem('zoz_wa_user_id') === 'usr_kaisar_master') {
+              localStorage.removeItem('zoz_wa_user_id');
+              this.isMaster = false;
+              this.userId = this.getUserId();
+            }
+          } else if (!data.isMaster && this.userId === 'usr_kaisar_master') {
             this.userId = this.getUserId();
             this.isMaster = false;
           }
@@ -36471,7 +36608,7 @@ Aturan:
               await this.connectWhatsApp(false);
               return;
             }
-            if (data.connected && this.contacts.length === 0) {
+            if (data.connected && (this.contacts.length === 0 || (data.contactCount && data.contactCount > this.contacts.length))) {
               this.fetchContacts();
             }
           } else if (!this.lastValidQr) {
@@ -36580,9 +36717,12 @@ Aturan:
         if (els.waQrSection) els.waQrSection.style.display = 'none';
         if (els.waConnectedCard) els.waConnectedCard.style.display = 'flex';
         if (els.waConnectedPhoneDisplay) els.waConnectedPhoneDisplay.textContent = status.phone || '-';
-        if (els.waContactCountDisplay) els.waContactCountDisplay.textContent = `${this.contacts.length} Kontak`;
+        if (els.waContactCountDisplay) els.waContactCountDisplay.textContent = `${this.contacts.length || status.contactCount || 0} Kontak`;
         if (els.waMobileLinkCard) els.waMobileLinkCard.style.display = 'block';
         if (els.waConnectedDevicesCard) els.waConnectedDevicesCard.style.display = 'block';
+        if (this.contacts.length === 0 && (status.contactCount || 0) > 0) {
+          this.fetchContacts();
+        }
         this.fetchMobileLinkQr();
         this.fetchConnectedDevices();
       } else {
