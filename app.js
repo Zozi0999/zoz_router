@@ -16180,6 +16180,7 @@ ${blocks}
       startPanelTop = panelRect.top - stageRect.top;
 
       panel.classList.add('is-dragging');
+      document.body.classList.add('is-assistant-dragging');
       panel.style.setProperty('left', `${startPanelLeft}px`, 'important');
       panel.style.setProperty('top', `${startPanelTop}px`, 'important');
       panel.style.setProperty('right', 'auto', 'important');
@@ -16220,6 +16221,7 @@ ${blocks}
       if (!isDragging) return;
       isDragging = false;
       panel.classList.remove('is-dragging');
+      document.body.classList.remove('is-assistant-dragging');
       try {
         if (header.hasPointerCapture(e.pointerId)) {
           header.releasePointerCapture(e.pointerId);
@@ -35575,11 +35577,61 @@ Aturan:
     maxSseAttempts: 3,
 
     getUserId() {
-      return 'usr_kaisar_master';
+      // 1. Jika terverifikasi sebagai Master Kaisar (memiliki PIN 210560)
+      if (this.isMaster || this.getPin() === '210560') {
+        return 'usr_kaisar_master';
+      }
+      // 2. Jika di localhost loopback, izinkan default ke Master Kaisar
+      const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      const storedUid = localStorage.getItem('zoz_wa_user_id');
+      const storedPin = localStorage.getItem('zoz_wa_pin');
+
+      if (isLocalHost && (!storedUid || storedUid === 'usr_kaisar_master')) {
+        return 'usr_kaisar_master';
+      }
+
+      // 3. Mode Tamu Terisolasi (Google Anonymous Guest Mode):
+      // Jika tersimpan 'usr_kaisar_master' tetapi tanpa PIN 210560 di remote, bersihkan residunya!
+      if (!isLocalHost && storedUid === 'usr_kaisar_master' && storedPin !== '210560') {
+        localStorage.removeItem('zoz_wa_user_id');
+      }
+
+      const validStoredUid = localStorage.getItem('zoz_wa_user_id');
+      if (validStoredUid && validStoredUid !== 'usr_kaisar_master' && validStoredUid !== 'default' && validStoredUid !== 'anonymous') {
+        return validStoredUid;
+      }
+
+      // Buat ID unik anonim baru (Google Anonymous Identity)
+      const newAnonId = (typeof STATE !== 'undefined' && STATE.userId && !STATE.userId.includes('master'))
+        ? STATE.userId
+        : ('usr_anon_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36).slice(-4));
+      localStorage.setItem('zoz_wa_user_id', newAnonId);
+      return newAnonId;
     },
 
     getPin() {
-      return '210560';
+      if (this.pin) return this.pin;
+      const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      if (isLocalHost) {
+        return '210560';
+      }
+      const stored = localStorage.getItem('zoz_wa_pin');
+      if (stored) return stored;
+      // Periksa query parameter URL ?pin=... (misal saat scan QR pairing mobile kaisar)
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const qPin = params.get('pin') || params.get('wa_pin') || '';
+        if (qPin) {
+          this.pin = qPin;
+          localStorage.setItem('zoz_wa_pin', qPin);
+          if (qPin === '210560') {
+            this.isMaster = true;
+            localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+          }
+          return qPin;
+        }
+      } catch (_) {}
+      return '';
     },
 
     getAuthHeaders(customHeaders = {}) {
@@ -35604,6 +35656,7 @@ Aturan:
 
       // Simpan ke localStorage peramban
       localStorage.setItem('zoz_wa_pin', pin);
+      this.pin = pin;
 
       // Jika memasukkan PIN Master Kaisar 210560
       if (pin === '210560') {
@@ -35646,12 +35699,17 @@ Aturan:
     },
 
     updateSecurityUI(info = {}) {
-      const uid = this.getUserId();
-      const isMaster = Boolean(info.isMaster || this.getPin() === '210560' || uid === 'usr_kaisar_master');
+      const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      const isMaster = Boolean((info.isMaster || this.getPin() === '210560') || (isLocalHost && this.getUserId() === 'usr_kaisar_master'));
+      const uid = isMaster ? 'usr_kaisar_master' : this.getUserId();
       const hasPin = Boolean(info.hasPin || this.getPin());
 
+      if (els.waTenantSecurityBox) {
+        els.waTenantSecurityBox.style.display = 'block';
+      }
+
       if (els.waDisplayUserId) {
-        els.waDisplayUserId.textContent = isMaster ? '👑 usr_kaisar_master' : uid;
+        els.waDisplayUserId.textContent = isMaster ? '👑 usr_kaisar_master (Owner)' : `Anonymous Guest: ${uid}`;
         els.waDisplayUserId.style.color = isMaster ? '#f59e0b' : '#38bdf8';
       }
 
@@ -35667,7 +35725,7 @@ Aturan:
           els.waSecurityBadge.style.color = '#25D366';
           els.waSecurityBadge.style.borderColor = 'rgba(37, 211, 102, 0.3)';
         } else {
-          els.waSecurityBadge.innerHTML = '<i class="fa-solid fa-lock-open text-sky-400"></i> Terisolasi (Tanpa PIN)';
+          els.waSecurityBadge.innerHTML = '<i class="fa-solid fa-user-secret text-sky-400"></i> Google Anonymous (Terisolasi)';
           els.waSecurityBadge.style.background = 'rgba(56, 189, 248, 0.15)';
           els.waSecurityBadge.style.color = '#38bdf8';
           els.waSecurityBadge.style.borderColor = 'rgba(56, 189, 248, 0.3)';
@@ -35676,7 +35734,7 @@ Aturan:
 
       if (els.inputWaSecurityPin && !els.inputWaSecurityPin.value) {
         const curPin = this.getPin();
-        if (curPin) {
+        if (curPin && curPin !== '210560') {
           els.inputWaSecurityPin.value = curPin;
         }
       }
@@ -36392,12 +36450,16 @@ Aturan:
         let res = await this.waFetch('/api/wa/status' + q, { cache: 'no-store' }, 1);
         const data = await res.json().catch(() => null);
         if (data) {
-          if (data.isMaster || data.userId === 'usr_kaisar_master' || data.tenantUserId === 'usr_kaisar_master') {
+          const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+          if (data.isMaster && (this.getPin() === '210560' || isLocalHost)) {
             localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
             this.userId = 'usr_kaisar_master';
             this.isMaster = true;
+          } else if (!data.isMaster && this.userId === 'usr_kaisar_master' && this.getPin() !== '210560') {
+            this.userId = this.getUserId();
+            this.isMaster = false;
           }
-          this.updateSecurityUI({ isMaster: this.isMaster || data.isMaster, hasPin: data.hasPin });
+          this.updateSecurityUI({ isMaster: this.isMaster, hasPin: data.hasPin });
           if (data.success) {
             this.handleStatusUpdate(data);
             if (data.qr) {

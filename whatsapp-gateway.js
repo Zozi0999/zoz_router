@@ -1144,21 +1144,16 @@ class WhatsAppGatewayManager {
     }
   }
 
-  resolveGateway(userId, pin) {
+  resolveGateway(userId, pin, isLocal = false) {
     const cleanPin = pin ? String(pin).trim() : '';
     const rawUid = userId ? String(userId).trim() : '';
 
-    // 1. Sesi Master Kaisar (bebas hambatan tanpa kunci PIN pada koneksi QR utama):
-    if (
-      !rawUid ||
-      rawUid === 'usr_kaisar_master' ||
-      rawUid === 'usr_e465zuklwesa' ||
-      rawUid === 'master' ||
-      rawUid === 'kaisar' ||
-      rawUid === 'default' ||
-      rawUid === 'anonymous' ||
-      (cleanPin && (cleanPin === '210560' || this.masterGateway.verifyPin(cleanPin)))
-    ) {
+    // 1. Otorisasi Mutlak Sesi Master Kaisar:
+    // Sesi Master Kaisar HANYA boleh diakses jika:
+    // a) Permintaan langsung dari localhost loopback (komputer host Kaisar), ATAU
+    // b) PIN Master yang sah ('210560' atau hash terverifikasi) disertakan.
+    const isMasterPinValid = cleanPin === '210560' || (this.masterGateway && this.masterGateway.verifyPin(cleanPin));
+    if (isMasterPinValid || (isLocal && (rawUid === 'usr_kaisar_master' || !rawUid))) {
       return {
         success: true,
         gateway: this.masterGateway,
@@ -1167,21 +1162,49 @@ class WhatsAppGatewayManager {
       };
     }
 
-    // 2. Multi-Tenant User Terisolasi (tanpa mengunci QR utama dengan requiresPin):
-    const targetUid = sanitizeUserId(rawUid);
+    // 2. Proteksi Akses Ilegal ke Master Kaisar:
+    // Jika seseorang meminta 'usr_kaisar_master', 'master', 'kaisar' dari remote TANPA PIN Master -> TOLAK!
+    if (rawUid === 'usr_kaisar_master' || rawUid === 'master' || rawUid === 'kaisar' || rawUid === 'usr_e465zuklwesa') {
+      return {
+        success: false,
+        status: 401,
+        error: 'Akses Ditolak: PIN Keamanan Master Kaisar (210560) diperlukan untuk membuka akun ini.',
+        requiresPin: true,
+        userId: 'usr_kaisar_master'
+      };
+    }
+
+    // 3. Multi-Tenant User Terisolasi (Google Anonymous Guest Mode):
+    // Setiap pengunjung publik memiliki ID anonim unik dan terisolasi
+    let targetUid = sanitizeUserId(rawUid);
+    if (!targetUid || targetUid === 'default' || targetUid === 'anonymous' || targetUid.length < 5) {
+      targetUid = 'usr_anon_' + crypto.randomBytes(6).toString('hex');
+    }
+
     let gw = this.sessions.get(targetUid);
     if (!gw) {
       gw = new WhatsAppGateway(targetUid, { isMaster: false });
       this.sessions.set(targetUid, gw);
       if (gw.hasStoredSession()) {
-        gw.connect().catch(() => {});
+        gw.connect(false).catch(() => {});
       }
+    }
+
+    // Jika tenant memiliki PIN sendiri dan ada upaya akses yang meminta verifikasi PIN
+    if (gw.hasConfiguredPin() && cleanPin && !gw.verifyPin(cleanPin)) {
+      return {
+        success: false,
+        status: 403,
+        error: 'PIN Keamanan Akun Anda salah.',
+        requiresPin: true,
+        userId: targetUid
+      };
     }
 
     return {
       success: true,
       gateway: gw,
-      isMaster: gw === this.masterGateway,
+      isMaster: false,
       userId: targetUid
     };
   }

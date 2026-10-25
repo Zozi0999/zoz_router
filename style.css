@@ -8440,6 +8440,17 @@ div.msg-sources-section button.msg-sources-title span {
   will-change: left, top;
 }
 
+body.is-assistant-dragging,
+body.is-assistant-dragging * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+body.is-assistant-dragging iframe,
+body.is-assistant-dragging #aiFileStudioFrame {
+  pointer-events: none !important;
+}
+
 /* Endocrine Code Button inside Studio Assistant */
 .studio-endocrine-toggle-btn {
   background: rgba(0, 240, 255, 0.08) !important;
@@ -8551,6 +8562,7 @@ div.msg-sources-section button.msg-sources-title span {
   font-size: 0.85rem;
   margin-right: 2px;
   cursor: grab;
+  touch-action: none !important;
   opacity: 0.7;
   transition: all 0.2s ease;
 }
@@ -8574,6 +8586,7 @@ div.msg-sources-section button.msg-sources-title span {
   font-size: 0.84rem;
   font-weight: 700;
   color: var(--neon-cyan, #00f0ff);
+  touch-action: none !important;
 }
 
 .studio-assistant-controls {

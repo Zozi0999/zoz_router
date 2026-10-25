@@ -5697,6 +5697,15 @@ async function requestHandler(req, res) {
   // =========================================================================
   // WHATSAPP WEB GATEWAY API (Multi-Tenant & Isolated Dual Mode: AI vs WhatsApp)
   // =========================================================================
+  function isLocalWaRequest(req) {
+    const remoteIp = req.socket?.remoteAddress || req.connection?.remoteAddress || '';
+    const isLoopbackIp = remoteIp === '127.0.0.1' || remoteIp === '::1' || remoteIp === '::ffff:127.0.0.1';
+    const host = (req.headers['host'] || '').toLowerCase();
+    const isLocalHost = host.startsWith('localhost:') || host === 'localhost' || host.startsWith('127.0.0.1:') || host === '127.0.0.1';
+    const isTunnel = Boolean(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-host'] || req.headers['x-forwarded-proto']);
+    return isLoopbackIp && isLocalHost && !isTunnel;
+  }
+
   function getWaTenant(req, reqUrl, body = null) {
     if (!waGatewayManager) {
       if (waGateway) {
@@ -5707,7 +5716,8 @@ async function requestHandler(req, res) {
     }
     const uid = req.headers['x-user-id'] || req.headers['x-client-id'] || reqUrl?.searchParams?.get('userId') || (body && body.userId) || '';
     const pin = req.headers['x-wa-pin'] || reqUrl?.searchParams?.get('pin') || (body && body.pin) || '';
-    const resTenant = waGatewayManager.resolveGateway(uid, pin);
+    const isLocal = isLocalWaRequest(req);
+    const resTenant = waGatewayManager.resolveGateway(uid, pin, isLocal);
     if (resTenant && resTenant.success && resTenant.gateway) {
       resTenant.gateway.recordDevice?.(req);
     }
