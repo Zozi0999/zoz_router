@@ -5096,6 +5096,12 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
                       m.displayContent = '';
                     }
                   }
+                  if (Array.isArray(m.files)) {
+                    m.files.forEach(f => {
+                      if (!f.rawContent && f.content) f.rawContent = f.content;
+                      if (!f.content && f.rawContent) f.content = f.rawContent;
+                    });
+                  }
                 });
               }
             });
@@ -5127,6 +5133,16 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         });
         validDbSessions.forEach(s => {
           if (!s.userId) s.userId = STATE.userId;
+          if (Array.isArray(s.messages)) {
+            s.messages.forEach(m => {
+              if (Array.isArray(m.files)) {
+                m.files.forEach(f => {
+                  if (!f.rawContent && f.content) f.rawContent = f.content;
+                  if (!f.content && f.rawContent) f.content = f.rawContent;
+                });
+              }
+            });
+          }
         });
         if (validDbSessions.length !== dbSessions.length) {
           // saveAllSessions() tak lagi mem-clear store, jadi sesi asing/lazy yang
@@ -5760,7 +5776,12 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             if (Array.isArray(m.files) && m.files.length > 0) {
               safeFiles = m.files.map(f => ({
                 name: f.name, mime: f.mime, lang: f.lang,
-                content: keepFileContent ? f.content : '',
+                rawContent: keepFileContent ? (f.rawContent || f.content || '') : '',
+                content: keepFileContent ? (f.content || f.rawContent || '') : '',
+                rawBlock: f.rawBlock,
+                _editChatHistory: f._editChatHistory,
+                _studioChatHistory: f._studioChatHistory,
+                projectFiles: f.projectFiles,
                 byteSize: f.byteSize, lineCount: f.lineCount,
                 size: f.size, desc: f.desc, isGeneratedByAI: true
               }));
@@ -9103,7 +9124,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             out.push(`\n> 📄 *Sedang menyusun dan memformat dokumen ${escapeHtml(currentFileName || 'Dokumen')}... (terisolasi di Studio Dokumen)*\n`);
           } else if (isSurgicalTag && !isExplicitCodeInChat) {
             insideIsolatedBlock = true;
-            out.push(`\n> ✨ *Sedang memilih & mengganti bagian kode terkait di ${escapeHtml(currentFileName || 'index.html')} (tanpa menulis ulang seluruh kode)...*\n`);
+            const progressBanner = `\n> ✨ *Sedang memilih & mengganti bagian kode terkait di ${escapeHtml(currentFileName || 'index.html')} (tanpa menulis ulang seluruh kode)...*\n`;
+            if (!out.some(l => l && l.includes('Sedang memilih & mengganti bagian kode terkait'))) {
+              out.push(progressBanner);
+            }
           } else if (isWeb && isWebPreviewMode && !isExplicitCodeInChat) {
             insideIsolatedBlock = true;
             out.push(`\n> 🌐 *Sedang merancang kode website ${escapeHtml(currentFileName || 'index.html')}... (terisolasi di pratinjau live)*\n`);
@@ -9326,8 +9350,13 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       }
       if (this.onScroll && !userScrolledUp) this.onScroll();
       if (activeStudioAssistantBubble && els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) {
-        const cleanStudioText = hideFileBlocksForDisplay(this.text, this.options);
-        activeStudioAssistantBubble.innerHTML = renderMarkdown(cleanStudioText || '✅ Selesai.');
+        let cleanStudioText = hideFileBlocksForDisplay(this.text, this.options);
+        // Hapus sisa banner progress markdown di akhir jika AI sudah selesai merespons
+        cleanStudioText = cleanStudioText.replace(/>\s*✨\s*\*Sedang memilih & mengganti[^\n]*\n?/g, '').trim();
+        if (!cleanStudioText) {
+          cleanStudioText = '✅ Selesai.';
+        }
+        activeStudioAssistantBubble.innerHTML = renderMarkdown(cleanStudioText);
         enhanceCodeBlocks(activeStudioAssistantBubble);
         scrollStudioAssistantToBottom();
         activeStudioAssistantBubble = null;
@@ -13971,16 +14000,18 @@ window.addEventListener('error', function(e) {
     if (typeof syncStudioAssistantHistoryMode === 'function') syncStudioAssistantHistoryMode(false);
   }
 
-  function saveStudioCodeEditor() {
-    if (!activeAIFile || !els.aiFileStudioEditor) return;
-    const newCode = els.aiFileStudioEditor.value;
-    activeAIFile.rawContent = newCode;
-    activeAIFile.content = newCode;
-    FileRevisionStore.pushRevision(activeAIFile.name, newCode);
+  // Sinkronisasi permanen kode studio ke memori, DOM, parentSession, m.content, dan disk / IndexedDB
+  function persistStudioCodeChange(newCode, options = {}) {
+    if (!activeAIFile || typeof newCode !== 'string') return;
+    const trimmedCode = newCode;
+    activeAIFile.rawContent = trimmedCode;
+    activeAIFile.content = trimmedCode;
+    activeAIFile.size = formatFileSize(trimmedCode.length);
+    FileRevisionStore.pushRevision(activeAIFile.name, trimmedCode);
     updateStudioRevisionBtns(activeAIFile.name);
 
     if (els.aiFileStudioCode) {
-      els.aiFileStudioCode.textContent = newCode;
+      els.aiFileStudioCode.textContent = trimmedCode;
       try {
         if (window.hljs && els.aiFileStudioCode.removeAttribute) {
           els.aiFileStudioCode.removeAttribute('data-highlighted');
@@ -13988,37 +14019,118 @@ window.addEventListener('error', function(e) {
         }
       } catch (_) {}
     }
+
+    if (els.aiFileStudioEditor && els.aiFileStudioEditor.value !== trimmedCode) {
+      els.aiFileStudioEditor.value = trimmedCode;
+      StudioEditorHistory.push(trimmedCode);
+      if (typeof updateStudioEditorCode === 'function') updateStudioEditorCode(trimmedCode);
+    }
+
     renderAIFileIntoStudioPreview(activeAIFile);
 
     // Sinkronkan ke kartu Pratinjau atau blok Kode di obrolan
     if (activeAIFile._cardIframe) {
-      activeAIFile._cardIframe.srcdoc = prepareSafeHtmlForPreview(newCode, activeAIFile);
+      try {
+        activeAIFile._cardIframe.srcdoc = prepareSafeHtmlForPreview(trimmedCode, activeAIFile);
+      } catch (_) {}
     }
     if (activeAIFile._cardCodeEl) {
-      activeAIFile._cardCodeEl.textContent = newCode;
+      activeAIFile._cardCodeEl.textContent = trimmedCode;
       try { if (window.hljs) { activeAIFile._cardCodeEl.removeAttribute('data-highlighted'); window.hljs.highlightElement(activeAIFile._cardCodeEl); } } catch (_) {}
     }
     if (activeAIFile._sourceCodeBlock) {
-      activeAIFile._sourceCodeBlock.textContent = newCode;
+      activeAIFile._sourceCodeBlock.textContent = trimmedCode;
       try { if (window.hljs) { delete activeAIFile._sourceCodeBlock.dataset.highlighted; window.hljs.highlightElement(activeAIFile._sourceCodeBlock); } } catch (_) {}
     }
 
-    // Simpan ke sesi aktif agar perubahan bertahan saat muat ulang
-    const curSession = typeof getActiveSession === 'function' ? getActiveSession() : null;
-    if (curSession && Array.isArray(curSession.messages)) {
-      for (let i = curSession.messages.length - 1; i >= 0; i--) {
-        const m = curSession.messages[i];
-        if (m.files && Array.isArray(m.files)) {
-          const f = m.files.find(x => x.name === activeAIFile.name);
-          if (f) { f.rawContent = newCode; f.content = newCode; break; }
+    // Sinkronkan ke Sesi Induk (Parent Session): simpan ke array messages, m.content, dan disk / IndexedDB secara permanen!
+    const targetSession = (options && options.session && options.session.parentSession) ||
+                          (typeof getActiveSession === 'function' ? getActiveSession() : null) ||
+                          STATE.sessions.find(s => s.id === STATE.currentSessionId);
+    if (targetSession && Array.isArray(targetSession.messages)) {
+      let matchedFileInMsg = false;
+      const fnLower = (activeAIFile.name || '').toLowerCase();
+      const isWeb = fnLower.endsWith('.html') || fnLower.endsWith('.htm') || fnLower.endsWith('.jsx') || fnLower.endsWith('.tsx');
+
+      for (let i = targetSession.messages.length - 1; i >= 0; i--) {
+        const m = targetSession.messages[i];
+        if (!m) continue;
+        if (Array.isArray(m.files) && m.files.length > 0) {
+          const f = m.files.find(x => x && (
+            x.name === activeAIFile.name ||
+            (isWeb && /\.(?:html?|jsx|tsx)$/i.test(x.name || '')) ||
+            (isDiagramFile(activeAIFile) && isDiagramFile(x))
+          ));
+          if (f) {
+            f.rawContent = trimmedCode;
+            f.content = trimmedCode;
+            f.size = formatFileSize(trimmedCode.length);
+            if (activeAIFile._studioChatHistory) f._studioChatHistory = activeAIFile._studioChatHistory;
+            if (activeAIFile._editChatHistory) f._editChatHistory = activeAIFile._editChatHistory;
+            if (activeAIFile.projectFiles) f.projectFiles = activeAIFile.projectFiles;
+
+            // PERBARUI m.content dan f.rawBlock agar saat muat ulang/keluar aplikasi, kode tidak kembali ke template awal!
+            const newBlock = `<<<ZOZ_FILE name="${f.name || activeAIFile.name}" mime="${f.mime || activeAIFile.mime || 'text/html'}" lang="${f.lang || activeAIFile.lang || 'html'}">\n${trimmedCode}\n<<<END_ZOZ_FILE>>>`;
+            if (typeof m.content === 'string') {
+              if (f.rawBlock && m.content.includes(f.rawBlock)) {
+                m.content = m.content.replace(f.rawBlock, newBlock);
+              } else if (m.content.includes('<<<ZOZ_FILE')) {
+                m.content = m.content.replace(/<<<ZOZ_FILE[\s\S]*?<<<END_ZOZ_FILE>>>/i, newBlock);
+              } else if (/```(?:html|jsx|tsx|xml|svg|markdown|md)\b[\s\S]*?```/i.test(m.content)) {
+                m.content = m.content.replace(/```(?:html|jsx|tsx|xml|svg|markdown|md)\b[\s\S]*?```/i, `\`\`\`${f.lang || 'html'}\n${trimmedCode}\n\`\`\``);
+              } else {
+                m.content = m.content + '\n\n' + newBlock;
+              }
+            }
+            f.rawBlock = newBlock;
+            matchedFileInMsg = true;
+            break;
+          }
         }
       }
-      if (typeof savePersistedState === 'function') savePersistedState();
-    }
 
+      // Jika file dibuka dari blok kode markdown tanpa m.files sebelumnya, tempelkan file ke pesan asisten terakhir
+      if (!matchedFileInMsg) {
+        for (let i = targetSession.messages.length - 1; i >= 0; i--) {
+          const m = targetSession.messages[i];
+          if (m && m.role === 'assistant') {
+            if (!Array.isArray(m.files)) m.files = [];
+            const newBlock = `<<<ZOZ_FILE name="${activeAIFile.name}" mime="${activeAIFile.mime || 'text/html'}" lang="${activeAIFile.lang || 'html'}">\n${trimmedCode}\n<<<END_ZOZ_FILE>>>`;
+            const createdFileObj = {
+              name: activeAIFile.name,
+              mime: activeAIFile.mime || 'text/html',
+              lang: activeAIFile.lang || 'html',
+              rawContent: trimmedCode,
+              content: trimmedCode,
+              rawBlock: newBlock,
+              size: formatFileSize(trimmedCode.length),
+              isGeneratedByAI: true
+            };
+            m.files.push(createdFileObj);
+            m.content = (typeof m.content === 'string') ? (m.content + '\n\n' + newBlock) : newBlock;
+            break;
+          }
+        }
+      }
+
+      targetSession.updatedAt = new Date().toISOString();
+      if (typeof savePersistedState === 'function') {
+        savePersistedState({ immediate: true });
+      }
+      try {
+        if (typeof ChatDB !== 'undefined' && ChatDB.saveSession) ChatDB.saveSession(targetSession);
+        if (typeof DeviceStorage !== 'undefined' && DeviceStorage.saveSession) DeviceStorage.saveSession(targetSession);
+      } catch (_) {}
+    }
+  }
+
+  function saveStudioCodeEditor() {
+    if (!activeAIFile || !els.aiFileStudioEditor) return;
+    const newCode = els.aiFileStudioEditor.value;
+    persistStudioCodeChange(newCode);
     closeStudioCodeEditor();
     setAIFileStudioTab('preview');
-    showToast('✅ Perubahan kode disimpan & diterapkan ke pratinjau!', 'success');
+    showToast('✅ Perubahan kode disimpan permanen & diterapkan ke pratinjau!', 'success');
   }
 
   function setAIFileStudioTab(tab) {
@@ -14585,7 +14697,12 @@ window.addEventListener('error', function(e) {
         const startLine = modified.slice(0, exactIdx).split('\n').length;
         const replLineCount = replacement.split('\n').length;
         const endLine = startLine + Math.max(0, replLineCount - 1);
-        modified = modified.slice(0, exactIdx) + replacement + modified.slice(exactIdx + searchTarget.length);
+        if (searchTarget.split('\n').length === 1 && searchTarget.length <= 40 && modified.split(searchTarget).length > 2) {
+          const targetRegex = new RegExp(searchTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+          modified = modified.replace(targetRegex, replacement);
+        } else {
+          modified = modified.slice(0, exactIdx) + replacement + modified.slice(exactIdx + searchTarget.length);
+        }
         editedRanges.push({ startLine, endLine, oldLines: searchTarget.split('\n').length, newLines: replLineCount });
         patchCount++;
         return true;
@@ -15177,14 +15294,42 @@ window.addEventListener('error', function(e) {
         : (activeAIFile.rawContent || activeAIFile.content || '');
 
       if (baseContent && baseContent.length >= 20) {
-        // Mendukung: ubah/ganti [jabatan/posisi/judul/teks/nama/baris] "Target" menjadi/dengan/ke "Pengganti"
-        const nlMatch = text.match(/(?:ubah|mengubah|ganti|mengganti|revisi|merevisi|tukar|menukar|replace|change|edit)\s+(?:jabatan|posisi|status|judul|teks|tulisan|kata|kalimat|nama|warna|nilai|baris)?\s*["'“]([^"'“”\n]+)["'”]\s+(?:menjadi|dengan|ke|to|with)\s*["'“]([^"'“”\n]+)["'”]/i);
-        if (nlMatch) {
-          const searchTarget = nlMatch[1].trim();
-          const replacement = nlMatch[2].trim();
-          if (searchTarget && baseContent.includes(searchTarget)) {
-            const patched = baseContent.replace(searchTarget, replacement);
-            const targetIndex = baseContent.indexOf(searchTarget);
+        const userPrompt = (options && (options.displayPrompt || options.userPrompt)) || '';
+        const candidateTexts = [text, userPrompt].filter(Boolean);
+
+        let searchTarget = '';
+        let replacement = '';
+
+        for (const cand of candidateTexts) {
+          // 1. Pola: "Ubah portofionya sekarang menjadi untuk kaparanhan bukan mark"
+          const reverseMatch = cand.match(/(?:ubah|mengubah|ganti|mengganti|buat|jadikan)\s*(?:[a-zA-Z0-9_]+)?\s*(?:ini|nya|tersebut)?\s*(?:sekarang)?\s*(?:menjadi|jadi)?\s*(?:untuk\s+)?([a-zA-Z0-9_\s-]+?)\s+(?:bukan|daripada|instead of)\s+([a-zA-Z0-9_\s-]+)/i);
+          if (reverseMatch) {
+            replacement = reverseMatch[1].trim();
+            searchTarget = reverseMatch[2].trim();
+            break;
+          }
+
+          // 2. Pola: "ubah/ganti [nama/jabatan/dll] 'A' menjadi/dengan/ke 'B'" (dengan atau tanpa kutip)
+          const directMatch = cand.match(/(?:ubah|mengubah|ganti|mengganti|revisi|merevisi|tukar|menukar|replace|change|edit)\s*(?:jabatan|posisi|status|judul|teks|tulisan|kata|kalimat|nama|warna|nilai|baris)?\s*["'“]?([a-zA-Z0-9_#.-]+)["'”]?\s+(?:menjadi|dengan|ke|to|with|jadi)\s*["'“]?([a-zA-Z0-9_#.-]+)["'”]?/i);
+          if (directMatch) {
+            searchTarget = directMatch[1].trim();
+            replacement = directMatch[2].trim();
+            break;
+          }
+        }
+
+        if (searchTarget && replacement) {
+          let matchedStr = searchTarget;
+          if (!baseContent.includes(matchedStr)) {
+            const reSearch = new RegExp(`\\b${matchedStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+            const m = baseContent.match(reSearch);
+            if (m) matchedStr = m[0];
+          }
+
+          if (baseContent.includes(matchedStr)) {
+            const reGlobal = new RegExp(matchedStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+            const patched = baseContent.replace(reGlobal, replacement);
+            const targetIndex = baseContent.indexOf(matchedStr);
             const startLine = baseContent.slice(0, targetIndex).split('\n').length;
             const endLine = startLine + replacement.split('\n').length - 1;
             const fileObj = buildAIFile(activeName, activeAIFile.mime || 'text/html', activeAIFile.lang || 'html', '', patched, '');
@@ -16957,6 +17102,19 @@ ${blocks}
     // Identifikasi bagian kode yang berkaitan dengan permintaan pengguna
     const located = StudioEndocrineDiagnostics.locateRelevantSections(currentCode, val, selInfo);
 
+    // Bersihkan gelembung pending atau placeholder lama di container aktif agar tidak menumpuk
+    const activeStudioContainer = (typeof getActiveStudioMessagesContainer === 'function')
+      ? getActiveStudioMessagesContainer()
+      : els.studioAssistantMessages;
+    if (activeStudioContainer) {
+      activeStudioContainer.querySelectorAll('.studio-msg-row.assistant').forEach(row => {
+        const text = row.textContent || '';
+        if (text.includes('Memilih & membaca bagian kode') || (row.querySelector('.typing-cursor') && !row.dataset.hasAnswer)) {
+          row.remove();
+        }
+      });
+    }
+
     // Siapkan gelembung respon untuk menerima streaming
     activeStudioAssistantBubble = appendStudioMessage(
       'assistant',
@@ -16987,28 +17145,36 @@ ${blocks}
         if (selInfo && selInfo.hasSelection && selInfo.selectedLinesCode) {
           selectedContextBlock = `\n[FOKUS UTAMA — Pengguna memilih Baris ${selInfo.startLine}–${selInfo.endLine} di Mode Edit Kode]:\n\`\`\`${lang}\n${selInfo.selectedLinesCode}\n\`\`\`\n`;
         }
-        const compactRef = StudioEndocrineDiagnostics.buildCodeReference(currentCode, val, selInfo);
+        const isBroadChange = /(?:seluruh|semua|portofolio|portfolio|website|web|tema|bukan|daripada)\b/i.test(val);
+        const codeLines = currentCode.split('\n');
+        const codeRefToSend = (isBroadChange && codeLines.length <= 850)
+          ? currentCode
+          : StudioEndocrineDiagnostics.buildCodeReference(currentCode, val, selInfo);
 
-        followupPrompt = `[MODE SURGICAL EDIT KODE "${targetName}" — DILARANG MENULIS ULANG SELURUH KODE!]
+        followupPrompt = `[MODE EDIT KODE STUDIO "${targetName}"]
 ${selectedContextBlock}[Referensi Kode "${targetName}" (${located.summary})]:
 \`\`\`${lang}
-${compactRef}
+${codeRefToSend}
 \`\`\`
 
 Permintaan Pengguna: "${val}"${endocrineFeedback}
 
-ATURAN MUTLAK SURGICAL EDIT (IKUTI STRUKTUR OUTPUT INI):
-1. DILARANG KERAS menulis ulang seluruh file atau menggunakan <<<ZOZ_FILE>>>!
-2. Pilih dan ubah HANYA bagian kode yang diminta pengguna di atas.
-3. Anda WAJIB mengeluarkan blok patch <<<ZOZ_EDIT name="${targetName}"> persis dengan format ini:
+PANDUAN OUTPUT EDIT KODE UNTUK AI:
+1. Jika pengguna meminta perubahan spesifik pada baris/bagian tertentu, gunakan blok surgical patch presisi:
 <<<ZOZ_EDIT name="${targetName}">
 <<<SEARCH>>>
 [salin persis baris asli yang ingin diubah dari referensi kode di atas]
 <<<REPLACE>>>
 [baris baru pengganti bagian tersebut saja]
 <<<END_ZOZ_EDIT>>>
-4. Berikan penjelasan singkat 1 kalimat di luar blok patch.
-PENTING: Blok <<<ZOZ_EDIT name="${targetName}"> WAJIB DISERTAKAN agar sistem dapat menerapkan perubahan ke pratinjau website!`;
+
+2. Jika perubahan mencakup banyak bagian (seperti mengubah pemilik/nama portofolio di seluruh halaman, mengubah tema, atau merombak tata letak), Anda DAPAT mengeluarkan SELURUH kode file lengkap terbaru di dalam blok:
+<<<ZOZ_FILE name="${targetName}" mime="${activeAIFile.mime || 'text/html'}" lang="${lang}">
+... seluruh kode lengkap terbaru ...
+<<<END_ZOZ_FILE>>>
+
+3. Berikan penjelasan singkat 1 kalimat di luar blok kode.
+PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan langsung aktif di pratinjau website!`;
       }
     } else {
       followupPrompt = `[Konteks: Pengguna sedang melihat "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan / Obrolan Pengguna: "${val}"\n\nATURAN SANGAT KETAT UNTUK AI:\n- Zoz Router SUDAH menampilkan berkas ini.\n- Pengguna TIDAK meminta perubahan kode. Pengguna hanya sedang mengobrol santai, memuji, berkomentar, atau bertanya tentang berkas ini.\n- JANGAN PERNAH merombak, merevisi, atau membuat ulang kode!\n- DILARANG KERAS mengeluarkan blok kode atau blok <<<ZOZ_FILE!\n- Jawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
@@ -20731,55 +20897,18 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (generatedFiles && generatedFiles.length > 0) {
         const updatedFile = generatedFiles.find(f => f.name === activeAIFile.name) ||
                             (isDiagramFile(activeAIFile) ? generatedFiles.find(f => isDiagramFile(f)) : null) ||
+                            generatedFiles.find(f => f.isPrimaryWebEntry !== false && /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) ||
                             generatedFiles[0];
         if (updatedFile && (updatedFile.rawContent || updatedFile.content)) {
           const newCode = updatedFile.rawContent || updatedFile.content;
-          if (newCode && newCode !== activeAIFile.rawContent) {
-            activeAIFile.rawContent = newCode;
-            activeAIFile.content = newCode;
-            activeAIFile.size = formatFileSize(newCode.length);
-            FileRevisionStore.pushRevision(activeAIFile.name, newCode);
-            updateStudioRevisionBtns(activeAIFile.name);
-            renderAIFileIntoStudioPreview(activeAIFile);
-            if (els.aiFileStudioCode) els.aiFileStudioCode.textContent = newCode;
-            if (els.aiFileStudioEditor) {
-              els.aiFileStudioEditor.value = newCode;
-              StudioEditorHistory.push(newCode);
-              updateStudioEditorCode(newCode);
-            }
+          if (newCode) {
+            persistStudioCodeChange(newCode, { session: session });
           }
         }
-        const latestCode = activeAIFile.rawContent || activeAIFile.content || '';
-        if (activeAIFile._cardIframe && isPreviewableDoc(activeAIFile)) {
-          try {
-            activeAIFile._cardIframe.srcdoc = prepareSafeHtmlForPreview(latestCode, activeAIFile);
-          } catch (_) {}
-        }
-        if (activeAIFile._cardCodeEl) {
-          activeAIFile._cardCodeEl.textContent = latestCode;
-        }
+      } else {
+        // Tetap pastikan perubahan riwayat percakapan studio tersimpan ke disk
+        persistStudioCodeChange(activeAIFile.rawContent || activeAIFile.content || '', { session: session });
       }
-    }
-
-    // Simpan perubahan isi berkas (rawContent/content) & riwayat ringkas studio ke dalam file yang ada di parentSession TANPA menambah gelembung pesan baru ke History Utama!
-    const parentSess = (session && session.parentSession) || (typeof getActiveSession === 'function' ? getActiveSession() : null);
-    if (parentSess && Array.isArray(parentSess.messages) && activeAIFile) {
-      const latestRaw = activeAIFile.rawContent || activeAIFile.content || '';
-      for (let i = parentSess.messages.length - 1; i >= 0; i--) {
-        const m = parentSess.messages[i];
-        if (m && Array.isArray(m.files)) {
-          const f = m.files.find(x => x && x.name === activeAIFile.name);
-          if (f) {
-            f.rawContent = latestRaw;
-            f.content = latestRaw;
-            f.size = formatFileSize(latestRaw.length);
-            f._editChatHistory = activeAIFile._editChatHistory;
-            f._studioChatHistory = activeAIFile._studioChatHistory;
-            break;
-          }
-        }
-      }
-      savePersistedState();
     }
   }
 
