@@ -1090,6 +1090,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     studioFloatingDragPill: $('#studioFloatingDragPill'),
     iconStudioMin: $('#iconStudioMin'),
     studioAssistantTitleText: $('#studioAssistantTitleText'),
+    studioHistoryModeBadge: $('#studioHistoryModeBadge'),
     btnToggleStudioAssistant: $('#btnToggleStudioAssistant'),
     btnToggleStudioEndocrine: $('#btnToggleStudioEndocrine'),
     iconStudioEndocrine: $('#iconStudioEndocrine'),
@@ -1101,6 +1102,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     studioAssistantHeader: $('#studioAssistantHeader'),
     studioAssistantMessages: $('#studioAssistantMessages'),
     studioAssistantEmpty: $('#studioAssistantEmpty'),
+    studioEditAssistantMessages: $('#studioEditAssistantMessages'),
+    studioEditAssistantEmpty: $('#studioEditAssistantEmpty'),
     btnStudioCloseDrawer: $('#btnStudioCloseDrawer'),
     btnStudioClearChat: $('#btnStudioClearChat'),
     btnToggleStudioFullscreen: $('#btnToggleStudioFullscreen'),
@@ -9088,8 +9091,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
   let activeStudioAssistantBubble = null;
   function scrollStudioAssistantToBottom() {
-    if (els.studioAssistantMessages) {
+    if (els.studioAssistantMessages && els.studioAssistantMessages.style.display !== 'none') {
       els.studioAssistantMessages.scrollTop = els.studioAssistantMessages.scrollHeight;
+    }
+    if (els.studioEditAssistantMessages && els.studioEditAssistantMessages.style.display !== 'none') {
+      els.studioEditAssistantMessages.scrollTop = els.studioEditAssistantMessages.scrollHeight;
     }
   }
 
@@ -13868,6 +13874,7 @@ window.addEventListener('error', function(e) {
     if (els.labelStudioEditCode) els.labelStudioEditCode.textContent = 'Simpan Kode';
     renderStudioCodeEditorHighlight(raw, editedRanges);
     updateStudioEditorSelectionUI();
+    if (typeof syncStudioAssistantHistoryMode === 'function') syncStudioAssistantHistoryMode(true);
     setTimeout(() => {
       try {
         if (scrollToLine && scrollToLine > 0) {
@@ -13885,6 +13892,7 @@ window.addEventListener('error', function(e) {
     if (els.btnStudioEditCode) els.btnStudioEditCode.classList.remove('active');
     if (els.iconStudioEditCode) els.iconStudioEditCode.className = 'fa-solid fa-pen-to-square';
     if (els.labelStudioEditCode) els.labelStudioEditCode.textContent = 'Edit Kode';
+    if (typeof syncStudioAssistantHistoryMode === 'function') syncStudioAssistantHistoryMode(false);
   }
 
   function saveStudioCodeEditor() {
@@ -14083,6 +14091,9 @@ window.addEventListener('error', function(e) {
     }
     closeStudioAssistantDrawer();
     StudioEndocrineDiagnostics.clear();
+    if (typeof hydrateStudioAssistantHistoriesForFile === 'function') {
+      hydrateStudioAssistantHistoriesForFile(file);
+    }
 
     const previewable = isPreviewableDoc(file);
     const ext = (file.name || '').split('.').pop().toLowerCase();
@@ -15428,9 +15439,12 @@ window.addEventListener('error', function(e) {
               scrollStudioEditorToLine(editedRanges[0].startLine);
             }
           }
-          // Tampilkan kartu ringkasan edit presisi di jendela Tanya AI jika ada perubahan baris
-          if (els.studioAssistantMessages) {
-            const lastAssistantBubble = Array.from(els.studioAssistantMessages.querySelectorAll('.studio-msg-row.assistant .studio-msg-bubble')).pop();
+          // Tampilkan kartu ringkasan edit presisi di jendela Tanya AI / AI Edit Kode jika ada perubahan baris
+          const activeStudioContainer = (typeof getActiveStudioMessagesContainer === 'function')
+            ? getActiveStudioMessagesContainer()
+            : els.studioAssistantMessages;
+          if (activeStudioContainer) {
+            const lastAssistantBubble = Array.from(activeStudioContainer.querySelectorAll('.studio-msg-row.assistant .studio-msg-bubble')).pop();
             if (lastAssistantBubble && !lastAssistantBubble.querySelector('.surgical-edit-summary-card')) {
               const firstLine = editedRanges.length > 0 ? editedRanges[0].startLine : 1;
               const rangeLabel = editedRanges.length > 0
@@ -16628,8 +16642,85 @@ ${blocks}
     window.addEventListener('resize', clampStudioAssistantPosition);
   }
 
+  function isStudioEditModeActive() {
+    return Boolean(els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing'));
+  }
+
+  function getActiveStudioMessagesContainer(forceMode = null) {
+    const useEdit = forceMode ? (forceMode === 'edit') : isStudioEditModeActive();
+    if (useEdit && els.studioEditAssistantMessages) {
+      return els.studioEditAssistantMessages;
+    }
+    return els.studioAssistantMessages;
+  }
+
+  function syncStudioAssistantHistoryMode(forceEditMode = null) {
+    const isEdit = (typeof forceEditMode === 'boolean') ? forceEditMode : isStudioEditModeActive();
+    if (els.studioAssistantMessages) {
+      els.studioAssistantMessages.style.display = isEdit ? 'none' : 'flex';
+    }
+    if (els.studioEditAssistantMessages) {
+      els.studioEditAssistantMessages.style.display = isEdit ? 'flex' : 'none';
+    }
+    if (els.studioAssistantTitleText) {
+      els.studioAssistantTitleText.textContent = isEdit ? 'AI Edit Kode' : 'Tanya AI';
+    }
+    if (els.studioHistoryModeBadge) {
+      els.studioHistoryModeBadge.textContent = isEdit ? 'Mode Edit' : 'Pratinjau';
+      els.studioHistoryModeBadge.classList.toggle('is-edit-mode', isEdit);
+      els.studioHistoryModeBadge.title = isEdit
+        ? 'Riwayat chat khusus Menu Edit Kode (terpisah dari History Utama & Pratinjau agar tidak penuh)'
+        : 'Riwayat chat khusus Pratinjau Studio (terpisah dari History Utama & Menu Edit Kode)';
+    }
+    scrollStudioAssistantToBottom();
+  }
+
+  function resetStudioContainerToEmpty(mode) {
+    if (mode === 'edit') {
+      if (els.studioEditAssistantMessages) {
+        els.studioEditAssistantMessages.innerHTML = `
+          <div class="studio-assistant-empty" id="studioEditAssistantEmpty">
+            <i class="fa-solid fa-code"></i>
+            <p><strong>Riwayat Khusus Edit Kode</strong> (Terpisah dari History Utama).<br>Pilih baris kode atau ketik bagian yang ingin diubah di bawah agar AI mengedit kode secara presisi tanpa memenuhi riwayat utama.</p>
+          </div>
+        `;
+        els.studioEditAssistantEmpty = $('#studioEditAssistantEmpty');
+      }
+    } else {
+      if (els.studioAssistantMessages) {
+        els.studioAssistantMessages.innerHTML = `
+          <div class="studio-assistant-empty" id="studioAssistantEmpty">
+            <i class="fa-solid fa-comments"></i>
+            <p>Tanya Zoz Router tentang struktur website ini, minta penjelasan kode, atau minta penambahan fitur baru di kolom prompt bawah.</p>
+          </div>
+        `;
+        els.studioAssistantEmpty = $('#studioAssistantEmpty');
+      }
+    }
+  }
+
+  function hydrateStudioAssistantHistoriesForFile(file) {
+    resetStudioContainerToEmpty('preview');
+    resetStudioContainerToEmpty('edit');
+    if (!file) return;
+    if (Array.isArray(file._studioChatHistory) && file._studioChatHistory.length > 0) {
+      file._studioChatHistory.forEach((m) => {
+        const html = m.role === 'user' ? escapeHtml(m.displayContent || m.content || '') : renderMarkdown(m.content || '');
+        appendStudioMessage(m.role, html, 'preview');
+      });
+    }
+    if (Array.isArray(file._editChatHistory) && file._editChatHistory.length > 0) {
+      file._editChatHistory.forEach((m) => {
+        const html = m.role === 'user' ? escapeHtml(m.displayContent || m.content || '') : renderMarkdown(m.content || '');
+        appendStudioMessage(m.role, html, 'edit');
+      });
+    }
+    syncStudioAssistantHistoryMode();
+  }
+
   function openStudioAssistantDrawer() {
     if (els.studioAssistantPanel) {
+      syncStudioAssistantHistoryMode();
       els.studioAssistantPanel.classList.add('is-open');
       els.studioAssistantPanel.style.display = 'flex';
       els.studioAssistantPanel.classList.remove('is-minimized');
@@ -16672,16 +16763,22 @@ ${blocks}
     if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
   }
 
-  function appendStudioMessage(role, contentHtml) {
-    if (!els.studioAssistantMessages) return null;
-    if (els.studioAssistantEmpty) els.studioAssistantEmpty.style.display = 'none';
+  function appendStudioMessage(role, contentHtml, forceMode = null) {
+    const useEdit = forceMode ? (forceMode === 'edit') : isStudioEditModeActive();
+    const container = useEdit ? (els.studioEditAssistantMessages || els.studioAssistantMessages) : els.studioAssistantMessages;
+    if (!container) return null;
+    if (useEdit) {
+      if (els.studioEditAssistantEmpty) els.studioEditAssistantEmpty.style.display = 'none';
+    } else {
+      if (els.studioAssistantEmpty) els.studioAssistantEmpty.style.display = 'none';
+    }
     const row = document.createElement('div');
     row.className = `studio-msg-row ${role}`;
     const bubble = document.createElement('div');
     bubble.className = 'studio-msg-bubble';
     bubble.innerHTML = contentHtml;
     row.appendChild(bubble);
-    els.studioAssistantMessages.appendChild(row);
+    container.appendChild(row);
     scrollStudioAssistantToBottom();
     return bubble;
   }
@@ -16807,10 +16904,12 @@ ATURAN MUTLAK SURGICAL EDIT (WAJIB DIPATUHI 100%):
       followupPrompt = `[Konteks: Pengguna sedang melihat "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan / Obrolan Pengguna: "${val}"\n\nATURAN SANGAT KETAT UNTUK AI:\n- Zoz Router SUDAH menampilkan berkas ini.\n- Pengguna TIDAK meminta perubahan kode. Pengguna hanya sedang mengobrol santai, memuji, berkomentar, atau bertanya tentang berkas ini.\n- JANGAN PERNAH merombak, merevisi, atau membuat ulang kode!\n- DILARANG KERAS mengeluarkan blok kode atau blok <<<ZOZ_FILE!\n- Jawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
     }
 
-    // Kirim langsung ke handleSendPrompt TANPA menutup modal studio!
+    // Kirim ke handleSendPrompt dengan mode riwayat terisolasi (terpisah dari History Utama agar tidak penuh!)
     handleSendPrompt({
       overrideText: followupPrompt,
       displayPrompt: val,
+      isStudioIsolated: true,
+      studioHistoryMode: isEditingInCodeMode ? 'edit' : 'preview',
       websiteMode: (wantsRevision && !isDiagram && !isDoc) ? 'preview' : null,
       isWebCreation: Boolean(wantsRevision && !isDiagram && !isDoc),
       isWebsiteRevision: Boolean(wantsRevision && !isDiagram && !isDoc),
@@ -16844,8 +16943,8 @@ ATURAN MUTLAK SURGICAL EDIT (WAJIB DIPATUHI 100%):
     focusStudioAiEditFromEditor();
   });
 
-  // Delegasi klik tombol kartu Surgical Edit di dalam gelembung Tanya AI
-  els.studioAssistantMessages?.addEventListener('click', (e) => {
+  // Delegasi klik tombol kartu Surgical Edit di dalam gelembung Tanya AI & AI Edit Kode
+  function handleStudioSurgicalCardClick(e) {
     const btn = e.target.closest ? e.target.closest('.surgical-edit-btn') : null;
     if (!btn) return;
     e.stopPropagation();
@@ -16865,7 +16964,9 @@ ATURAN MUTLAK SURGICAL EDIT (WAJIB DIPATUHI 100%):
       }
     }
     if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
-  });
+  }
+  els.studioAssistantMessages?.addEventListener('click', handleStudioSurgicalCardClick);
+  els.studioEditAssistantMessages?.addEventListener('click', handleStudioSurgicalCardClick);
 
   els.btnStudioEditCode?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -16959,7 +17060,7 @@ ATURAN MUTLAK SURGICAL EDIT (WAJIB DIPATUHI 100%):
   els.btnStudioCloseDrawer?.addEventListener('click', closeStudioAssistantDrawer);
   els.btnStudioMinAssistant?.addEventListener('click', (e) => {
     e.stopPropagation();
-    closeStudioAssistantDrawer();
+    toggleStudioAssistantMinimize();
   });
   // Inisialisasi jendela Tanya AI melayang yang bebas digeser (draggable) di layar HP & Desktop
   initStudioAssistantDraggable();
@@ -16974,15 +17075,16 @@ ATURAN MUTLAK SURGICAL EDIT (WAJIB DIPATUHI 100%):
     showToast(STATE.settings.endocrineCodeEnabled ? 'Sensor Kode (Endocrine Code) aktif.' : 'Sensor Kode (Endocrine Code) nonaktif.');
   });
   els.btnStudioClearChat?.addEventListener('click', () => {
-    if (els.studioAssistantMessages) {
-      els.studioAssistantMessages.innerHTML = `
-        <div class="studio-assistant-empty" id="studioAssistantEmpty">
-          <i class="fa-solid fa-comments"></i>
-          <p>Tanya Zoz Router tentang struktur website ini, minta penjelasan kode, atau minta penambahan fitur baru di kolom prompt bawah.</p>
-        </div>
-      `;
-      els.studioAssistantEmpty = $('#studioAssistantEmpty');
+    if (isStudioEditModeActive()) {
+      resetStudioContainerToEmpty('edit');
+      if (activeAIFile) activeAIFile._editChatHistory = [];
+      showToast('🧹 Riwayat chat khusus Menu Edit Kode telah dibersihkan (History Utama tetap aman).', 'info');
+    } else {
+      resetStudioContainerToEmpty('preview');
+      if (activeAIFile) activeAIFile._studioChatHistory = [];
+      showToast('🧹 Riwayat chat Tanya AI Pratinjau telah dibersihkan (History Utama tetap aman).', 'info');
     }
+    if (typeof savePersistedState === 'function') savePersistedState();
   });
 
   els.btnStudioStopFollowup?.addEventListener('click', () => {
@@ -18452,39 +18554,66 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       timestamp: new Date().toISOString()
     };
 
-    // Auto title session if first message
-    if (session.messages.length === 0) {
-      const fallbackTitle = docs.length > 0 ? (docs[0].name || 'Dokumen Lampiran') : (images.length > 0 ? 'Analisis Gambar' : 'Percakapan Baru');
-      let cleanCandidate = (displayPrompt || '').replace(/^\/(?:image|img|gambar|music|musik|audio|song|lagu|deep|research|riset|web|search|canvas|chat|teks)\s+/i, '').trim();
-      const titleCandidate = cleanCandidate || fallbackTitle;
-      session.title = titleCandidate.length > 30 ? titleCandidate.substring(0, 30) + '...' : titleCandidate;
+    const isStudioIsolated = Boolean(options && options.isStudioIsolated);
+    const studioHistoryMode = (options && options.studioHistoryMode === 'edit') ? 'edit' : 'preview';
+    const studioHistoryKey = studioHistoryMode === 'edit' ? '_editChatHistory' : '_studioChatHistory';
+    let effectiveSession = session;
+
+    if (isStudioIsolated) {
+      // RIWAYAT TERISOLASI KHUSUS STUDIO / MENU EDIT KODE:
+      // Jangan masukkan ke History Utama (session.messages / #messagesList) agar riwayat utama tidak penuh!
+      // Hanya sertakan maksimal 6 pesan ringkas terakhir dari mode aktif (_editChatHistory / _studioChatHistory).
+      const prevStudioTurns = (activeAIFile && Array.isArray(activeAIFile[studioHistoryKey]))
+        ? activeAIFile[studioHistoryKey].slice(-6).map(m => ({
+            role: m.role,
+            content: m.content || m.displayContent || ''
+          }))
+        : [];
+      effectiveSession = {
+        id: `${session.id}__studio_${studioHistoryMode}`,
+        title: session.title || 'Studio Session',
+        isStudioIsolated: true,
+        studioHistoryMode: studioHistoryMode,
+        studioHistoryKey: studioHistoryKey,
+        parentSession: session,
+        messages: [...prevStudioTurns, userMsg]
+      };
+      AudioEngine.send();
+    } else {
+      // Auto title session if first message
+      if (session.messages.length === 0) {
+        const fallbackTitle = docs.length > 0 ? (docs[0].name || 'Dokumen Lampiran') : (images.length > 0 ? 'Analisis Gambar' : 'Percakapan Baru');
+        let cleanCandidate = (displayPrompt || '').replace(/^\/(?:image|img|gambar|music|musik|audio|song|lagu|deep|research|riset|web|search|canvas|chat|teks)\s+/i, '').trim();
+        const titleCandidate = cleanCandidate || fallbackTitle;
+        session.title = titleCandidate.length > 30 ? titleCandidate.substring(0, 30) + '...' : titleCandidate;
+      }
+
+      session.updatedAt = new Date().toISOString();
+      session.messages.push(userMsg);
+      savePersistedState();
+      renderChatHistory(els.searchHistoryInput?.value || '');
+
+      // Immediately render user's message bubble
+      const userRow = appendMessageElement('user', displayPrompt, images, 'Anda', null, session.messages.length - 1, null, docsWithContent.length > 0 ? docsWithContent : docsMeta, false, null, userMsg.timestamp, userMsg);
+      smartScrollChatToBottom(true);
+
+      if (STATE.isPromptHidden) {
+        togglePromptVisibility(false);
+      }
+
+      AudioEngine.send();
+
+      // Reset input & attachments
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+      }
+      // M6 & v404: Bersihkan total state pelipatan & kartu composer saat prompt terkirim
+      if (typeof resetPromptFoldState === 'function') resetPromptFoldState(false);
+      STATE.attachedDocs = [];
+      clearAttachedImages();
+      renderAttachmentPreviews();
     }
-
-    session.updatedAt = new Date().toISOString();
-    session.messages.push(userMsg);
-    savePersistedState();
-    renderChatHistory(els.searchHistoryInput?.value || '');
-
-    // Immediately render user's message bubble
-    const userRow = appendMessageElement('user', displayPrompt, images, 'Anda', null, session.messages.length - 1, null, docsWithContent.length > 0 ? docsWithContent : docsMeta, false, null, userMsg.timestamp, userMsg);
-    smartScrollChatToBottom(true);
-
-    if (STATE.isPromptHidden) {
-      togglePromptVisibility(false);
-    }
-
-    AudioEngine.send();
-
-    // Reset input & attachments
-    if (els.promptInput) {
-      els.promptInput.value = '';
-      autoResizeTextarea(els.promptInput);
-    }
-    // M6 & v404: Bersihkan total state pelipatan & kartu composer saat prompt terkirim
-    if (typeof resetPromptFoldState === 'function') resetPromptFoldState(false);
-    STATE.attachedDocs = [];
-    clearAttachedImages();
-    renderAttachmentPreviews();
 
     let targetModel = '';
     if (STATE.mode === 'openrouter') {
@@ -18534,21 +18663,25 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         isDocCreation: isDocIntent,
         isWebCreation: !isDocIntent && Boolean(options.websiteMode || isWebsiteCreationPrompt(text)),
         isWebsiteRevision: Boolean(options.isWebsiteRevision),
+        isStudioIsolated: isStudioIsolated,
+        studioHistoryMode: studioHistoryMode,
+        studioHistoryKey: studioHistoryKey,
+        displayPrompt: displayPrompt,
         isExplicitCleanCode: false,
         promptTitle: sanitizeTitle(text).substring(0, 36) || 'Dokumen_Resmi'
       };
       if (STATE.mode === 'auto') {
-        await runAutoRouterStreaming(session, text, effectiveImages, streamRunOptions);
+        await runAutoRouterStreaming(effectiveSession, text, effectiveImages, streamRunOptions);
       } else if (STATE.mode === 'openrouter') {
         let effectiveORModel = targetModel;
         if (!effectiveORModel.includes('/')) {
           effectiveORModel = STATE.settings.openRouterModel || 'openrouter/free';
         }
-        await runOpenRouterStreaming(session, text, effectiveImages, effectiveORModel, streamRunOptions);
+        await runOpenRouterStreaming(effectiveSession, text, effectiveImages, effectiveORModel, streamRunOptions);
       } else {
         // Mode Ollama: jalankan model Ollama yang dipilih pengguna secara konsisten
         // Dilarang keras memindahkan atau memetakan model ke provider lain kecuali Auto-Router aktif
-        await runOllamaStreaming(session, text, effectiveImages, targetModel, streamRunOptions);
+        await runOllamaStreaming(effectiveSession, text, effectiveImages, targetModel, streamRunOptions);
       }
     }
     } catch (err) {
@@ -20444,6 +20577,75 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     return messagesPayload;
   }
 
+  // Helper gelembung offscreen & penyimpanan ringkas khusus mode terisolasi Studio / Menu Edit Kode
+  function createDetachedStudioAssistantRow(modelLabel) {
+    const row = document.createElement('div');
+    row.className = 'message-row assistant studio-detached-row';
+    row.innerHTML = `
+      <div class="message-content-box">
+        <div class="message-bubble">
+          <div class="msg-text-content"><span class="typing-cursor"></span></div>
+        </div>
+        <div class="message-meta"><strong>${escapeHtml(modelLabel || 'AI')}</strong></div>
+      </div>
+    `;
+    return row;
+  }
+
+  function persistStudioIsolatedTurn(session, promptText, assistantText, generatedFiles, runOptions = {}) {
+    const historyKey = (session && session.studioHistoryKey) || (runOptions && runOptions.studioHistoryKey) || (isStudioEditModeActive() ? '_editChatHistory' : '_studioChatHistory');
+    const cleanUserText = (runOptions && runOptions.displayPrompt) || promptText || '';
+    const cleanAssistantSummary = hideFileBlocksForDisplay(assistantText || '', { hideAllCodeBlocks: true }).trim() || '✅ Perubahan kode telah diterapkan.';
+
+    if (activeAIFile) {
+      if (!Array.isArray(activeAIFile[historyKey])) {
+        activeAIFile[historyKey] = [];
+      }
+      activeAIFile[historyKey].push(
+        { role: 'user', content: cleanUserText, displayContent: cleanUserText, timestamp: new Date().toISOString() },
+        { role: 'assistant', content: cleanAssistantSummary, timestamp: new Date().toISOString() }
+      );
+      // Batasi maksimal 8 item (4 pasang tanya-jawab) agar konteks tetap ringan & tidak pernah penuh!
+      if (activeAIFile[historyKey].length > 8) {
+        activeAIFile[historyKey] = activeAIFile[historyKey].slice(-8);
+      }
+
+      // Sinkronkan juga ke kartu pratinjau di obrolan utama jika ada perubahan kode
+      if (generatedFiles && generatedFiles.length > 0) {
+        const latestCode = activeAIFile.rawContent || activeAIFile.content || '';
+        if (activeAIFile._cardIframe && isPreviewableDoc(activeAIFile)) {
+          try {
+            activeAIFile._cardIframe.srcdoc = prepareSafeHtmlForPreview(latestCode, activeAIFile);
+          } catch (_) {}
+        }
+        if (activeAIFile._cardCodeEl) {
+          activeAIFile._cardCodeEl.textContent = latestCode;
+        }
+      }
+    }
+
+    // Simpan perubahan isi berkas (rawContent/content) & riwayat ringkas studio ke dalam file yang ada di parentSession TANPA menambah gelembung pesan baru ke History Utama!
+    const parentSess = (session && session.parentSession) || (typeof getActiveSession === 'function' ? getActiveSession() : null);
+    if (parentSess && Array.isArray(parentSess.messages) && activeAIFile) {
+      const latestRaw = activeAIFile.rawContent || activeAIFile.content || '';
+      for (let i = parentSess.messages.length - 1; i >= 0; i--) {
+        const m = parentSess.messages[i];
+        if (m && Array.isArray(m.files)) {
+          const f = m.files.find(x => x && x.name === activeAIFile.name);
+          if (f) {
+            f.rawContent = latestRaw;
+            f.content = latestRaw;
+            f.size = formatFileSize(latestRaw.length);
+            f._editChatHistory = activeAIFile._editChatHistory;
+            f._studioChatHistory = activeAIFile._studioChatHistory;
+            break;
+          }
+        }
+      }
+      savePersistedState();
+    }
+  }
+
   // --- OLLAMA STREAMING EXECUTION ---
   async function runOllamaStreaming(session, promptText, image, modelName, runOptions = {}) {
     const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
@@ -20465,13 +20667,18 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const startTime = performance.now();
     let firstTokenTime = null;
     let tokenCount = 0;
+    const isStudioIsolated = Boolean((runOptions && runOptions.isStudioIsolated) || (session && session.isStudioIsolated));
 
-    // Append initial assistant placeholder bubble
-    const assistantRow = appendMessageElement('assistant', '', null, modelName);
+    // Append initial assistant placeholder bubble (detached if isolated Studio/Edit mode so Main History stays untouched)
+    const assistantRow = isStudioIsolated
+      ? createDetachedStudioAssistantRow(modelName)
+      : appendMessageElement('assistant', '', null, modelName);
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     const metaBox = assistantRow.querySelector('.message-meta');
     bubbleText.innerHTML = '<span class="typing-cursor"></span>';
-    smartScrollChatToBottom(true);
+    if (!isStudioIsolated) {
+      smartScrollChatToBottom(true);
+    }
 
     let fullText = '';
     let webSources = null;
@@ -21528,8 +21735,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         );
       }
 
-      // Save to session if session is still alive
-      if (STATE.sessions.some(s => s.id === session.id)) {
+      // Save to isolated Studio/Edit history or main session
+      if (isStudioIsolated) {
+        persistStudioIsolatedTurn(session, promptText, fullText, generatedFiles, runOptions);
+      } else if (STATE.sessions.some(s => s.id === session.id)) {
         const contentToSave = appendWebVerificationNote(fullText, webSources);
         session.messages.push({
           role: 'assistant',
@@ -21741,6 +21950,11 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           openModal('settingsModal');
         });
 
+        if (activeStudioAssistantBubble) {
+          activeStudioAssistantBubble.innerHTML = `<span style="color:#ff6b6b;"><i class="fa-solid fa-triangle-exclamation"></i> Gagal memproses permintaan (${escapeHtml(err?.message || 'Koneksi terputus')}). Silakan coba kirim ulang.</span>`;
+          activeStudioAssistantBubble = null;
+        }
+
         AudioEngine.error();
         return false;
       }
@@ -21831,12 +22045,17 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     const startTime = performance.now();
     let firstTokenTime = null;
     let tokenCount = 0;
+    const isStudioIsolated = Boolean((runOptions && runOptions.isStudioIsolated) || (session && session.isStudioIsolated));
 
-    const assistantRow = appendMessageElement('assistant', '', null, displayModel);
+    const assistantRow = isStudioIsolated
+      ? createDetachedStudioAssistantRow(displayModel)
+      : appendMessageElement('assistant', '', null, displayModel);
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     const metaBox = assistantRow.querySelector('.message-meta');
     bubbleText.innerHTML = '<span class="typing-cursor"></span>';
-    smartScrollChatToBottom(true);
+    if (!isStudioIsolated) {
+      smartScrollChatToBottom(true);
+    }
 
     let fullText = '';
     let webSources = null;
@@ -23287,8 +23506,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         );
       }
 
-      // Save to session if session is still alive
-      if (STATE.sessions.some(s => s.id === session.id)) {
+      // Save to isolated Studio/Edit history or main session
+      if (isStudioIsolated) {
+        persistStudioIsolatedTurn(session, promptText, fullText, generatedFiles, runOptions);
+      } else if (STATE.sessions.some(s => s.id === session.id)) {
         const contentToSave = appendWebVerificationNote(fullText, webSources);
         session.messages.push({
           role: 'assistant',
@@ -23486,6 +23707,11 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           syncSettingsModalFields();
           openModal('settingsModal');
         });
+
+        if (activeStudioAssistantBubble) {
+          activeStudioAssistantBubble.innerHTML = `<span style="color:#ff6b6b;"><i class="fa-solid fa-triangle-exclamation"></i> Gagal memproses permintaan (${escapeHtml(err?.message || 'Koneksi terputus')}). Silakan coba kirim ulang.</span>`;
+          activeStudioAssistantBubble = null;
+        }
 
         AudioEngine.error();
         return false;
