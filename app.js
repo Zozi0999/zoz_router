@@ -4273,6 +4273,12 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         if (val === null || typeof val !== 'object') return val;
         if (typeof Node !== 'undefined' && val instanceof Node) return undefined;
         if (typeof Window !== 'undefined' && val instanceof Window) return undefined;
+        if (typeof Element !== 'undefined' && val instanceof Element) return undefined;
+        // Objek khusus yang valid dan aman untuk structured cloning di IndexedDB
+        if (val instanceof Date) return new Date(val.getTime());
+        if (typeof Blob !== 'undefined' && val instanceof Blob) return val;
+        if (typeof ArrayBuffer !== 'undefined' && (val instanceof ArrayBuffer || ArrayBuffer.isView(val))) return val;
+
         if (seen.has(val)) return undefined;
         seen.add(val);
 
@@ -4282,7 +4288,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
         const out = {};
         for (const k of Object.keys(val)) {
-          if (k === '_cardIframe' || k === '_cardCodeEl' || k === '_sourceCodeBlock' ||
+          if (k.startsWith('_card') || k === '_sourceCodeBlock' ||
               k === '_parentMessageRow' || k === '_actionDropdown' || k === '_aiFile') {
             continue;
           }
@@ -4884,7 +4890,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
               'Content-Type': 'application/json',
               'X-User-ID': STATE.userId
             },
-            body: JSON.stringify({ ...cleanSession, userId: STATE.userId })
+            body: JSON.stringify({ ...cleanSession, userId: STATE.userId }),
+            keepalive: true
           });
           if (!res.ok) console.warn('[DeviceStorage] save gagal:', res.status);
         } catch (e) {
@@ -14772,6 +14779,10 @@ window.addEventListener('error', function(e) {
       file.name = file.name.replace(/\.(?:mermaid|mmd)$/i, '.svg');
     }
     activeAIFile = file;
+    const rawContent = file.rawContent || file.content || '';
+    if (els.aiFileStudioEditor) {
+      els.aiFileStudioEditor.value = rawContent;
+    }
     const docTitle = getGeminiDocTitle(file);
     if (els.aiFileStudioTitle) {
       els.aiFileStudioTitle.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(docTitle)}`;
@@ -14784,7 +14795,6 @@ window.addEventListener('error', function(e) {
 
     const previewable = isPreviewableDoc(file);
     const ext = (file.name || '').split('.').pop().toLowerCase();
-    const rawContent = file.rawContent || file.content || '';
     const isDocx = ext === 'docx';
     const isPdf = ext === 'pdf';
     const isMarkdown = ext === 'md' || ext === 'markdown';
@@ -15247,15 +15257,19 @@ window.addEventListener('error', function(e) {
         }
       }
 
-      // Tier 4: Single-line trimmed match (ketika AI mengedit 1 baris teks/atribut/tag tanpa konteks panjang)
-      if (foundIdx === -1 && targetLines.length === 1 && targetLines[0].length >= 4) {
+      // Tier 4: Single-line trimmed match (hanya jika target 1 baris cocok secara unik tepat 1 kali di dokumen)
+      if (foundIdx === -1 && targetLines.length === 1 && targetLines[0].length >= 3) {
         const singleTarget = targetLines[0];
+        const matchLineIndices = [];
         for (let i = 0; i < lines.length; i++) {
           if (lines[i].trim() === singleTarget) {
-            foundIdx = i;
-            matchedSpan = 1;
-            break;
+            matchLineIndices.push(i);
+            if (matchLineIndices.length > 1) break; // Lebih dari 1 kemunculan: ambigu! Jangan tebak baris pertama sembarangan
           }
+        }
+        if (matchLineIndices.length === 1) {
+          foundIdx = matchLineIndices[0];
+          matchedSpan = 1;
         }
       }
 
@@ -15264,11 +15278,16 @@ window.addEventListener('error', function(e) {
         const replLines = replacement.split('\n');
         const replIndent = ((replLines.find(l => l.trim()) || '').match(/^\s*/) || [''])[0];
         let reindented = replLines;
-        if (origIndent !== replIndent && replIndent !== '') {
-          reindented = replLines.map(l => {
-            if (!l.trim()) return l;
-            return l.startsWith(replIndent) ? origIndent + l.slice(replIndent.length) : l;
-          });
+        if (origIndent !== replIndent) {
+          if (replIndent !== '') {
+            reindented = replLines.map(l => {
+              if (!l.trim()) return l;
+              return l.startsWith(replIndent) ? origIndent + l.slice(replIndent.length) : l;
+            });
+          } else if (origIndent !== '') {
+            // Replacement tidak memiliki indentasi, sesuaikan seluruh baris dengan origIndent
+            reindented = replLines.map(l => l.trim() ? origIndent + l : l);
+          }
         }
         const startLine = foundIdx + 1;
         const endLine = startLine + Math.max(0, reindented.length - 1);
@@ -15553,8 +15572,10 @@ window.addEventListener('error', function(e) {
         const studioIsOpen = Boolean(els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show'));
         const isEditorOpen = Boolean(els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing'));
         if (activeAIFile && studioIsOpen) {
-          const isSameFile = (activeAIFile.name === resolvedFileName) ||
-                             (isWebFile && /\.(?:html?|jsx|tsx)$/i.test(activeAIFile.name || ''));
+          const isExactMatch = activeAIFile.name === resolvedFileName;
+          const isGenericFileName = resolvedFileName === 'file.txt' || resolvedFileName === 'index.html';
+          const isSingleWebSession = isWebFile && /\.(?:html?|jsx|tsx)$/i.test(activeAIFile.name || '') && (!matchedWorkspaceFile || matchedWorkspaceFile.name === activeAIFile.name);
+          const isSameFile = isExactMatch || (isGenericFileName && isSingleWebSession);
           if (isSameFile) {
             baseContent = (isEditorOpen && els.aiFileStudioEditor && els.aiFileStudioEditor.value)
               ? els.aiFileStudioEditor.value
@@ -16180,34 +16201,16 @@ window.addEventListener('error', function(e) {
       if (matchFile) {
         const newRaw = matchFile.rawContent || matchFile.content || '';
         if (newRaw && newRaw !== activeAIFile.rawContent) {
-          activeAIFile.rawContent = newRaw;
-          activeAIFile.content = newRaw;
-          activeAIFile.size = formatFileSize(newRaw.length);
           if (matchFile.projectFiles) activeAIFile.projectFiles = matchFile.projectFiles;
-          FileRevisionStore.pushRevision(activeAIFile.name, newRaw);
-          updateStudioRevisionBtns(activeAIFile.name);
-          renderAIFileIntoStudioPreview(activeAIFile);
-          if (els.aiFileStudioCode) {
-            els.aiFileStudioCode.textContent = newRaw;
-            try {
-              if (window.hljs) {
-                els.aiFileStudioCode.removeAttribute('data-highlighted');
-                window.hljs.highlightElement(els.aiFileStudioCode);
-              }
-            } catch (_) {}
-          }
-          // Sinkronkan juga secara live ke Mode Edit Kode (#aiFileStudioEditor) beserta highlight baris yang diubah AI!
           const editedRanges = Array.isArray(matchFile.editedRanges) ? matchFile.editedRanges : (Array.isArray(matchFile.appliedEditedRanges) ? matchFile.appliedEditedRanges : []);
+          // Delegasikan pembaruan konten, riwayat revisi, pratinjau iframe, & persistensi disk/IDB ke persistStudioCodeChange (single source of truth)
+          persistStudioCodeChange(newRaw);
           if (els.aiFileStudioEditor) {
-            els.aiFileStudioEditor.value = newRaw;
-            StudioEditorHistory.push(newRaw);
             renderStudioCodeEditorHighlight(newRaw, editedRanges);
             if (els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing') && editedRanges.length > 0) {
               scrollStudioEditorToLine(editedRanges[0].startLine);
             }
           }
-          // Simpan perubahan ke Sesi Induk, ChatDB (IndexedDB), & Device Storage secara permanen
-          persistStudioCodeChange(newRaw);
           // Tampilkan kartu ringkasan edit presisi di jendela Tanya AI / AI Edit Kode jika ada perubahan baris
           const activeStudioContainer = (typeof getActiveStudioMessagesContainer === 'function')
             ? getActiveStudioMessagesContainer()
@@ -28996,11 +28999,14 @@ Aturan:
         if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.isOpen) {
           StudioCodeSearch.close();
         }
-        if (activeAIFile) {
-          const finalVal = (els.aiFileStudioEditor && els.aiFileStudioEditor.value) || activeAIFile.content || activeAIFile.rawContent;
+        if (activeAIFile && typeof isStudioEditModeActive === 'function' && isStudioEditModeActive()) {
+          const finalVal = els.aiFileStudioEditor ? els.aiFileStudioEditor.value : '';
           if (finalVal && finalVal !== activeAIFile.rawContent) {
             persistStudioCodeChange(finalVal);
           }
+        }
+        if (els.aiFileStudioEditor) {
+          els.aiFileStudioEditor.value = '';
         }
         activeAIFile = null;
       }
@@ -32305,9 +32311,9 @@ Aturan:
 
     // Flush persistensi saat tab ditutup/navigasi atau disembunyikan di HP
     const flushPersistenceOnHide = () => {
-      if (activeAIFile && els.aiFileStudioEditor) {
+      if (activeAIFile && typeof isStudioEditModeActive === 'function' && isStudioEditModeActive() && els.aiFileStudioEditor) {
         try {
-          const currentVal = els.aiFileStudioEditor.value || activeAIFile.content || activeAIFile.rawContent;
+          const currentVal = els.aiFileStudioEditor.value;
           if (currentVal && currentVal !== activeAIFile.rawContent) {
             persistStudioCodeChange(currentVal);
           }
