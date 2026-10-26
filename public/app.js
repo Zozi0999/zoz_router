@@ -1100,6 +1100,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     aiFileStudioTitle: $('#aiFileStudioTitle'),
     aiFileStudioTabs: $('#aiFileStudioTabs'),
     aiFileStudioPreviewPane: $('#aiFileStudioPreviewPane'),
+    studioPreviewStreamHud: $('#studioPreviewStreamHud'),
+    studioPreviewStreamStatusText: $('#studioPreviewStreamStatusText'),
     aiFileStudioFrame: $('#aiFileStudioFrame'),
     aiFileStudioPlaceholder: $('#aiFileStudioPlaceholder'),
     aiFileStudioCode: $('#aiFileStudioCode'),
@@ -9272,6 +9274,40 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     }
   }
 
+  // ==================== REAL-TIME STUDIO PREVIEW STREAM HUD ====================
+  function updateStudioPreviewStreamHud(rawStreamText) {
+    if (!els.studioPreviewStreamHud || !els.studioPreviewStreamStatusText) return;
+    if (!els.aiFileStudioModal || !els.aiFileStudioModal.classList.contains('show')) return;
+    els.studioPreviewStreamHud.style.display = 'flex';
+    els.studioPreviewStreamHud.classList.remove('is-success');
+    const t = String(rawStreamText || '');
+    if (t.includes('<<<ZOZ_EDIT') || t.includes('<<<SEARCH') || /<{3,}\s*SEARCH\b/i.test(t)) {
+      els.studioPreviewStreamStatusText.textContent = '⚡ Menemukan baris target & menyiapkan patch...';
+    } else if (t.includes('<<<REPLACE') || /={3,}/.test(t)) {
+      els.studioPreviewStreamStatusText.textContent = '✨ Menerapkan perubahan kode real-time...';
+    } else if (t.includes('<<<ZOZ_FILE') || t.includes('<!DOCTYPE') || t.includes('<html')) {
+      els.studioPreviewStreamStatusText.textContent = '🎨 Meracik tata letak & gaya website...';
+    } else {
+      els.studioPreviewStreamStatusText.textContent = 'AI sedang meracik revisi real-time...';
+    }
+  }
+
+  function finishStudioPreviewStreamHud(success = true) {
+    if (!els.studioPreviewStreamHud || !els.studioPreviewStreamStatusText) return;
+    if (success) {
+      els.studioPreviewStreamHud.classList.add('is-success');
+      els.studioPreviewStreamStatusText.textContent = '✅ Pratinjau Berhasil Diperbarui!';
+      setTimeout(() => {
+        if (els.studioPreviewStreamHud) {
+          els.studioPreviewStreamHud.style.display = 'none';
+          els.studioPreviewStreamHud.classList.remove('is-success');
+        }
+      }, 1400);
+    } else {
+      els.studioPreviewStreamHud.style.display = 'none';
+    }
+  }
+
   class StreamBufferRenderer {
     constructor(bubbleElement, onScrollCallback, prefixHtml = '', options = {}) {
       this.el = bubbleElement;
@@ -9395,6 +9431,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         const cleanStudioText = hideFileBlocksForDisplay(displayText, this.options);
         activeStudioAssistantBubble.innerHTML = appendInlineTypingCursor(renderMarkdown(cleanStudioText || '*Sedang meracik kode website...*', true));
         scrollStudioAssistantToBottom();
+        updateStudioPreviewStreamHud(displayText);
       }
     }
 
@@ -9433,6 +9470,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         enhanceCodeBlocks(activeStudioAssistantBubble);
         scrollStudioAssistantToBottom();
         activeStudioAssistantBubble = null;
+        finishStudioPreviewStreamHud(true);
       }
       if (this.text && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.inspectModelText === 'function') {
         const activeModel = this.options.model || (typeof STATE !== 'undefined' ? (STATE.mode === 'ollama' ? (STATE.settings.ollamaModel || 'Ollama Model') : (STATE.settings.openRouterModel || 'OpenRouter Model')) : 'AI Model');
@@ -13499,7 +13537,7 @@ Aturan wajib:
     }
     // 5. Tambahkan padding/margin bawah pada area konten pratinjau agar seluruh elemen terbawah website terlihat jelas tanpa terhalang prompt input
     const previewBottomSpacerStyle = '\n<style id="zoz-preview-bottom-spacer">html,body{box-sizing:border-box!important;}body{padding-bottom:100px!important;}</style>';
-    // 6. Suntikkan Endocrine Telemetry probe script ke dalam iframe pratinjau untuk pelacakan error runtime
+    // 6. Suntikkan Endocrine Telemetry probe script & Live Hot-Reload Bridge ke dalam iframe pratinjau
     const endocrineProbeScript = `\n<script id="zoz-endocrine-preview-probe">
 window.addEventListener('error', function(e) {
   try {
@@ -13526,6 +13564,22 @@ window.addEventListener('error', function(e) {
       }, '*');
     } catch(_) {}
   };
+
+  // High-Speed Real-Time In-Place Hot-Reload Bridge (Anti-Flicker / Zero-Lag)
+  window.addEventListener('message', function(ev) {
+    if (!ev.data || ev.data.type !== 'ZOZ_STUDIO_LIVE_RELOAD' || typeof ev.data.html !== 'string') return;
+    try {
+      var sx = window.scrollX || window.pageXOffset || 0;
+      var sy = window.scrollY || window.pageYOffset || 0;
+      document.open();
+      document.write(ev.data.html);
+      document.close();
+      window.scrollTo(sx, sy);
+      try {
+        window.parent.postMessage({ type: 'ZOZ_STUDIO_LIVE_RELOAD_ACK', reloadId: ev.data.reloadId }, '*');
+      } catch(_) {}
+    } catch(_) {}
+  });
 })();
 </script>`;
 
@@ -13974,7 +14028,8 @@ window.addEventListener('error', function(e) {
       }
       this.isOpen = true;
       if (els.studioEditorSearchBar) {
-        els.studioEditorSearchBar.style.display = 'flex';
+        els.studioEditorSearchBar.classList.remove('is-hidden');
+        els.studioEditorSearchBar.style.setProperty('display', 'flex', 'important');
       }
       if (els.btnStudioEditorSearch) els.btnStudioEditorSearch.classList.add('active');
       if (els.btnStudioHeaderSearchCode) {
@@ -14020,7 +14075,8 @@ window.addEventListener('error', function(e) {
       this.activeLine = -1;
       this._hasJumpedForCurrentQuery = false;
       if (els.studioEditorSearchBar) {
-        els.studioEditorSearchBar.style.display = 'none';
+        els.studioEditorSearchBar.classList.add('is-hidden');
+        els.studioEditorSearchBar.style.setProperty('display', 'none', 'important');
       }
       if (els.btnStudioEditorSearch) els.btnStudioEditorSearch.classList.remove('active');
       if (els.btnStudioHeaderSearchCode) els.btnStudioHeaderSearchCode.classList.remove('active');
@@ -14508,6 +14564,10 @@ window.addEventListener('error', function(e) {
   function persistStudioCodeChange(newCode, options = {}) {
     if (!activeAIFile || typeof newCode !== 'string') return;
     const trimmedCode = newCode;
+    const isUnchanged = (activeAIFile.rawContent === trimmedCode && activeAIFile._renderedRawContent === trimmedCode);
+    if (isUnchanged && !options.forceReload) {
+      return;
+    }
     activeAIFile.rawContent = trimmedCode;
     activeAIFile.content = trimmedCode;
     activeAIFile.size = formatFileSize(trimmedCode.length);
@@ -14773,8 +14833,22 @@ window.addEventListener('error', function(e) {
       els.aiFileStudioFrame.srcdoc = generatePdfDocPreviewHtml(file.name, parsedBody);
     } else if (isHtml) {
       StudioEndocrineDiagnostics.clear();
+      file._renderedRawContent = rawContent;
+      const safeHtml = prepareSafeHtmlForPreview(rawContent, file);
+      // Fast path: jika iframe sudah aktif memuat dokumen ini sebelumnya, lakukan hot-reload in-place tanpa destroy context
+      const frameWin = els.aiFileStudioFrame ? els.aiFileStudioFrame.contentWindow : null;
+      const canLiveReload = frameWin && els.aiFileStudioFrame.dataset.loadedHtmlDoc === file.name;
+      if (canLiveReload) {
+        try {
+          frameWin.postMessage({ type: 'ZOZ_STUDIO_LIVE_RELOAD', html: safeHtml }, '*');
+          els.aiFileStudioFrame.dataset.lastRawContent = rawContent;
+          return;
+        } catch (_) {}
+      }
       els.aiFileStudioFrame.removeAttribute('src');
-      els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(rawContent, file);
+      els.aiFileStudioFrame.dataset.loadedHtmlDoc = file.name;
+      els.aiFileStudioFrame.dataset.lastRawContent = rawContent;
+      els.aiFileStudioFrame.srcdoc = safeHtml;
     } else {
       els.aiFileStudioFrame.removeAttribute('src');
       els.aiFileStudioFrame.srcdoc = '';
@@ -15228,7 +15302,12 @@ window.addEventListener('error', function(e) {
         return true;
       }
 
-      // Tier 2: Line-by-line trimmed match (tolerating indentation differences)
+      function normalizeForCompare(s) {
+        if (!s) return '';
+        return s.trim().replace(/['"`]/g, '"').replace(/\s+/g, ' ');
+      }
+
+      // Tier 2: Line-by-line trimmed match (tolerating indentation differences & quote variations)
       const lines = modified.split('\n');
       const targetLines = searchTarget.trim().split('\n').map(l => l.trim()).filter(Boolean);
       let foundIdx = -1;
@@ -15237,7 +15316,9 @@ window.addEventListener('error', function(e) {
       for (let i = 0; i <= lines.length - targetLines.length; i++) {
         let allMatch = true;
         for (let k = 0; k < targetLines.length; k++) {
-          if (lines[i + k].trim() !== targetLines[k]) {
+          const l1 = lines[i + k].trim();
+          const l2 = targetLines[k];
+          if (l1 !== l2 && normalizeForCompare(l1) !== normalizeForCompare(l2)) {
             allMatch = false;
             break;
           }
@@ -15252,13 +15333,14 @@ window.addEventListener('error', function(e) {
       // Tier 3: Non-empty line sequence match (tolerating extra/missing blank lines)
       if (foundIdx === -1 && targetLines.length >= 2) {
         for (let i = 0; i < lines.length; i++) {
-          if (lines[i].trim() !== targetLines[0]) continue;
+          const curTrim0 = lines[i].trim();
+          if (curTrim0 !== targetLines[0] && normalizeForCompare(curTrim0) !== normalizeForCompare(targetLines[0])) continue;
           let tIdx = 0;
           let endLineIdx = i;
           for (let j = i; j < Math.min(lines.length, i + targetLines.length + 14); j++) {
             const curTrim = lines[j].trim();
             if (!curTrim) continue;
-            if (curTrim === targetLines[tIdx]) {
+            if (curTrim === targetLines[tIdx] || normalizeForCompare(curTrim) === normalizeForCompare(targetLines[tIdx])) {
               tIdx++;
               endLineIdx = j;
               if (tIdx === targetLines.length) break;
@@ -15277,9 +15359,11 @@ window.addEventListener('error', function(e) {
       // Tier 4: Single-line trimmed match (hanya jika target 1 baris cocok secara unik tepat 1 kali di dokumen)
       if (foundIdx === -1 && targetLines.length === 1 && targetLines[0].length >= 3) {
         const singleTarget = targetLines[0];
+        const normTarget = normalizeForCompare(singleTarget);
         const matchLineIndices = [];
         for (let i = 0; i < lines.length; i++) {
-          if (lines[i].trim() === singleTarget) {
+          const cur = lines[i].trim();
+          if (cur === singleTarget || normalizeForCompare(cur) === normTarget) {
             matchLineIndices.push(i);
             if (matchLineIndices.length > 1) break; // Lebih dari 1 kemunculan: ambigu! Jangan tebak baris pertama sembarangan
           }
@@ -15287,6 +15371,33 @@ window.addEventListener('error', function(e) {
         if (matchLineIndices.length === 1) {
           foundIdx = matchLineIndices[0];
           matchedSpan = 1;
+        }
+      }
+
+      // Tier 5: Anchor-Sequence Fallback (Untuk blok 3+ baris dengan baris awal & akhir cocok sebagai jangkar)
+      if (foundIdx === -1 && targetLines.length >= 3) {
+        const firstLineNorm = normalizeForCompare(targetLines[0]);
+        const lastLineNorm = normalizeForCompare(targetLines[targetLines.length - 1]);
+        for (let i = 0; i < lines.length; i++) {
+          if (normalizeForCompare(lines[i]) === firstLineNorm) {
+            for (let j = i + 1; j < Math.min(lines.length, i + targetLines.length + 8); j++) {
+              if (normalizeForCompare(lines[j]) === lastLineNorm) {
+                let matchCount = 2;
+                const candidateSpan = lines.slice(i, j + 1).map(normalizeForCompare);
+                for (let k = 1; k < targetLines.length - 1; k++) {
+                  if (candidateSpan.includes(normalizeForCompare(targetLines[k]))) {
+                    matchCount++;
+                  }
+                }
+                if (matchCount / targetLines.length >= 0.7) {
+                  foundIdx = i;
+                  matchedSpan = (j - i) + 1;
+                  break;
+                }
+              }
+            }
+            if (foundIdx !== -1) break;
+          }
         }
       }
 
@@ -15319,16 +15430,16 @@ window.addEventListener('error', function(e) {
       return false;
     }
 
-    // 1. Format spesifik Zoz Router: <<<SEARCH>>> ... <<<REPLACE>>>
-    const searchReplaceRegex = /<<<SEARCH>>>([\s\S]*?)<<<REPLACE>>>([\s\S]*?)(?=<<<SEARCH>>>|<<<END_ZOZ_EDIT>>>|<<<END_ZOZ_MODIFY>>>|$(?![\s\S]))/gi;
+    // 1. Format spesifik Zoz Router: <<<SEARCH>>> ... <<<REPLACE>>> (toleran terhadap jumlah tanda kurung/chevrons)
+    const searchReplaceRegex = /<<<{1,3}\s*SEARCH\s*>{0,3}([\s\S]*?)<<<{1,3}\s*REPLACE\s*>{0,3}([\s\S]*?)(?=<<<{1,3}\s*SEARCH|<<<{1,3}\s*END_ZOZ|$(?![\s\S]))/gi;
     let match;
     while ((match = searchReplaceRegex.exec(patchBlock)) !== null) {
       applySingleHunk(match[1], match[2]);
     }
 
-    // 2. Format Git diff: <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE
+    // 2. Format Git diff: <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE (toleran 3+ chevrons & equals)
     if (patchCount === 0) {
-      const gitDiffRegex = /<{5,}\s*SEARCH\b([\s\S]*?)={5,}([\s\S]*?)>{5,}\s*REPLACE\b/gi;
+      const gitDiffRegex = /<{3,}\s*SEARCH\b([\s\S]*?)={3,}([\s\S]*?)>{3,}\s*REPLACE\b/gi;
       while ((match = gitDiffRegex.exec(patchBlock)) !== null) {
         applySingleHunk(match[1], match[2]);
       }
@@ -15624,10 +15735,15 @@ window.addEventListener('error', function(e) {
           isSurgicalPatch = true;
           if (patchResult.failedCount > 0) out.patchFailures = (out.patchFailures || 0) + patchResult.failedCount;
         } else {
-          // Patch gagal total: pertahankan file lama, laporkan kegagalan
-          out.patchFailures = (out.patchFailures || 0) + 1;
-          out.rawBlocks.push(rawBlock);
-          continue;
+          // Patch gagal: jika ternyata model mengembalikan kode HTML utuh yang valid, terima sebagai dokumen baru alih-alih gagal
+          if (cleanContent.includes('<!DOCTYPE') || (cleanContent.includes('<html') && cleanContent.includes('</html>'))) {
+            finalContent = cleanContent;
+            isSurgicalPatch = false;
+          } else {
+            out.patchFailures = (out.patchFailures || 0) + 1;
+            out.rawBlocks.push(rawBlock);
+            continue;
+          }
         }
         // Patch sudah utuh dari dasar yang lengkap: tidak perlu perbaikan penutupan tag
         isUnclosed = false;
@@ -17803,6 +17919,7 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
     if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
   });
   let studioEditorInputRaf = null;
+  let studioEditorLiveSyncTimer = null;
   els.aiFileStudioEditor?.addEventListener('input', () => {
     if (els.aiFileStudioEditor) {
       studioLastAiEditedLines.clear();
@@ -17816,6 +17933,24 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
           StudioCodeSearch.executeSearch(StudioCodeSearch.query);
         }
       });
+      if (studioEditorLiveSyncTimer) clearTimeout(studioEditorLiveSyncTimer);
+      studioEditorLiveSyncTimer = setTimeout(() => {
+        studioEditorLiveSyncTimer = null;
+        if (!activeAIFile || !els.aiFileStudioFrame || !els.aiFileStudioEditor) return;
+        const val = els.aiFileStudioEditor.value;
+        activeAIFile.rawContent = val;
+        activeAIFile.content = val;
+        const ext = (activeAIFile.name || '').split('.').pop().toLowerCase();
+        if (ext === 'html' || ext === 'htm') {
+          const safeHtml = prepareSafeHtmlForPreview(val, activeAIFile);
+          const frameWin = els.aiFileStudioFrame.contentWindow;
+          if (frameWin && els.aiFileStudioFrame.dataset.loadedHtmlDoc === activeAIFile.name) {
+            try {
+              frameWin.postMessage({ type: 'ZOZ_STUDIO_LIVE_RELOAD', html: safeHtml }, '*');
+            } catch (_) {}
+          }
+        }
+      }, 450);
     }
   });
   els.aiFileStudioEditor?.addEventListener('scroll', syncStudioEditorScroll, { passive: true });
@@ -21687,7 +21822,8 @@ Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
 [baris kode baru pengganti bagian tersebut saja]
 <<<END_ZOZ_EDIT>>>
    - Anda dapat menyertakan beberapa pasangan <<<SEARCH>>> dan <<<REPLACE>>> di dalam satu blok <<<ZOZ_EDIT>>> bila perubahan menyentuh lebih dari satu titik (misalnya elemen HTML dan aturan CSS-nya), tanpa menulis ulang sisa kode lainnya.
-4. Berikan penjelasan singkat (1-2 kalimat) mengenai bagian kode mana yang telah Anda pilih dan perbarui.`;
+4. MULAI KELUARKAN BLOK <<<ZOZ_EDIT>>> LANGSUNG PADA BARIS PERTAMA RESPONS! Jangan menuliskan basa-basi atau kata pengantar sebelum blok <<<ZOZ_EDIT>>> agar mesin pratinjau langsung memproses perubahan secara seketika (realtime zero-latency).
+5. Berikan penjelasan singkat (1-2 kalimat) di baris setelah blok <<<END_ZOZ_EDIT>>> selesai.`;
         } else {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI WEB KELAS DUNIA (FULL FUNCTIONAL & PRATINJAU LANGSUNG)
 [PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN WEBSITE / LANDING PAGE / APLIKASI WEB INTERAKTIF KELAS DUNIA.
@@ -23091,7 +23227,8 @@ Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
 [baris kode baru pengganti bagian tersebut saja]
 <<<END_ZOZ_EDIT>>>
    - Anda dapat menyertakan beberapa pasangan <<<SEARCH>>> dan <<<REPLACE>>> di dalam satu blok <<<ZOZ_EDIT>>> bila perubahan menyentuh lebih dari satu titik (misalnya elemen HTML dan aturan CSS-nya), tanpa menulis ulang sisa kode lainnya.
-4. Berikan penjelasan singkat (1-2 kalimat) mengenai bagian kode mana yang telah Anda pilih dan perbarui.`;
+4. MULAI KELUARKAN BLOK <<<ZOZ_EDIT>>> LANGSUNG PADA BARIS PERTAMA RESPONS! Jangan menuliskan basa-basi atau kata pengantar sebelum blok <<<ZOZ_EDIT>>> agar mesin pratinjau langsung memproses perubahan secara seketika (realtime zero-latency).
+5. Berikan penjelasan singkat (1-2 kalimat) di baris setelah blok <<<END_ZOZ_EDIT>>> selesai.`;
         } else {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI WEB KELAS DUNIA (FULL FUNCTIONAL & PRATINJAU LANGSUNG)
 [PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN WEBSITE / LANDING PAGE / APLIKASI WEB INTERAKTIF KELAS DUNIA.
@@ -37274,7 +37411,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://len-mobility-exams-console.trycloudflare.com',
+    activeTunnelUrl: 'https://roommate-flashers-flags-briefly.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -37676,7 +37813,7 @@ Aturan:
       if (!u) return true;
       const s = String(u).toLowerCase();
       const activeSub = (this.activeTunnelUrl || '').toLowerCase().replace(/^https?:\/\//, '').split('.')[0];
-      if (s.includes('.trycloudflare.com') && !s.includes('len-mobility-exams-console') && (!activeSub || !s.includes(activeSub))) {
+      if (s.includes('.trycloudflare.com') && !s.includes('roommate-flashers-flags-briefly') && (!activeSub || !s.includes(activeSub))) {
         return true;
       }
       return false;

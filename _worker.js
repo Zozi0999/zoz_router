@@ -662,11 +662,11 @@ export default {
     }
 
     // Universal WhatsApp & Daemon Tunnel Proxy (Edge Bridge)
-    const TUNNEL_GATEWAY_URL = 'https://len-mobility-exams-console.trycloudflare.com';
+    const TUNNEL_GATEWAY_URL = 'https://roommate-flashers-flags-briefly.trycloudflare.com';
     if (url.pathname.startsWith('/api/wa/') || url.pathname.startsWith('/api/terminal/') || url.pathname.startsWith('/api/tunnel/') || url.pathname.startsWith('/api/daemon/')) {
       const targetUrl = TUNNEL_GATEWAY_URL + url.pathname + url.search;
       const fwdHeaders = new Headers(request.headers);
-      fwdHeaders.set('Host', 'len-mobility-exams-console.trycloudflare.com');
+      fwdHeaders.set('Host', 'roommate-flashers-flags-briefly.trycloudflare.com');
       fwdHeaders.set('X-Forwarded-Host', url.host);
       fwdHeaders.set('X-Forwarded-Proto', 'https');
       fwdHeaders.set('X-Real-IP', request.headers.get('cf-connecting-ip') || '127.0.0.1');
