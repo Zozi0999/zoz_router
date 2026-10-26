@@ -9472,7 +9472,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         // Hapus sisa banner progress markdown di akhir jika AI sudah selesai merespons
         cleanStudioText = cleanStudioText.replace(/>\s*✨\s*\*Sedang memilih & mengganti[^\n]*\n?/g, '').trim();
         if (!cleanStudioText) {
-          cleanStudioText = '✅ Selesai.';
+          const hasCodeMarkers = String(this.text || '').includes('<<<ZOZ_') || String(this.text || '').includes('<<<SEARCH');
+          cleanStudioText = hasCodeMarkers
+            ? '⚡ Menyelaraskan modifikasi kode ke pratinjau...'
+            : '✅ Selesai.';
         }
         activeStudioAssistantBubble.innerHTML = renderMarkdown(cleanStudioText);
         enhanceCodeBlocks(activeStudioAssistantBubble);
@@ -9830,6 +9833,106 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
   }
 
   // ==================== TRUNCATED RESPONSE / NEMOTRON CONTINUATION HELPERS ====================
+  // Claude Code Architecture: Pemulihan tag <script> yang terpotong di tengah baris (mencegah Uncaught SyntaxError)
+  function repairUnclosedScript(code) {
+    if (!code || typeof code !== 'string') return code;
+    if ((code.match(/<script\b/gi) || []).length <= (code.match(/<\/script>/gi) || []).length) {
+      return code;
+    }
+    const lastScriptIdx = code.lastIndexOf('<script');
+    if (lastScriptIdx === -1) return code + '\n</script>';
+
+    const scriptBody = code.slice(lastScriptIdx);
+    const tagEndIdx = scriptBody.indexOf('>');
+    if (tagEndIdx === -1) return code + '></script>';
+
+    const scriptContent = scriptBody.slice(tagEndIdx + 1);
+    const scriptLines = scriptContent.split('\n');
+
+    // Buang baris terakhir jika terpotong di tengah identifier, keyword, atau operator
+    while (scriptLines.length > 0) {
+      const lastLine = scriptLines[scriptLines.length - 1].trim();
+      if (!lastLine) {
+        scriptLines.pop();
+        continue;
+      }
+      if (/^(?:const|let|var|function|class|import|export|if|else|for|while|switch|case|default|return|throw|try|catch|finally)\b\s*[a-zA-Z0-9_$]*$/i.test(lastLine) ||
+          /[=(+\-*/&|^~<>?:,\.]$/.test(lastLine) ||
+          (/^[a-zA-Z0-9_$.]+$/.test(lastLine) && !/[;})]$/.test(lastLine)) ||
+          /^['"][^'"]*$/.test(lastLine)) {
+        scriptLines.pop();
+        continue;
+      }
+      break;
+    }
+
+    const repairedScriptBody = scriptBody.slice(0, tagEndIdx + 1) + '\n' + scriptLines.join('\n') + '\n</script>';
+    return code.slice(0, lastScriptIdx) + repairedScriptBody;
+  }
+
+  // Claude Code Continuation Engine: Menyambungkan potongan kode tanpa merusak sintaks (strip basa-basi, fences, & overlap)
+  function stitchContinuationChunk(existingText, incomingChunk) {
+    if (!incomingChunk || typeof incomingChunk !== 'string') return existingText || '';
+    if (!existingText || typeof existingText !== 'string') return incomingChunk;
+
+    let chunk = incomingChunk;
+
+    // 1. Bersihkan kata pengantar / basa-basi model AI yang sering disisipkan di awal sambungan
+    chunk = chunk.replace(/^(?:[\s\r\n]*)(?:tentu|baik(?:lah)?|pasti|oke|siap|berikut(?:nya)?|ini(?:lah)?|lanjutan|kelanjutan|sambungan|melanjutkan)[^\n]*\n+/i, '');
+    chunk = chunk.replace(/^(?:[\s\r\n]*)(?:here\s+is\s+the\s+continuation|continuing\s+the\s+code|continuation|continued)[^\n]*\n+/i, '');
+
+    // 2. Bersihkan pembungkus markdown code fence jika model membungkusnya ulang
+    chunk = chunk.replace(/^```[a-zA-Z0-9_-]*\s*\n?/i, '');
+    chunk = chunk.replace(/\n?```\s*$/i, '');
+
+    // 3. Bersihkan artefak chevron / diff marker liar
+    chunk = chunk.replace(/^<<{1,4}>{1,4}\s*/gm, '');
+    chunk = chunk.replace(/\s*<<{1,4}>{1,4}$/gm, '');
+
+    if (!chunk) return existingText;
+
+    // 4. Deteksi overlap teks antara akhir existingText dan awal chunk (cegah duplikasi baris / token)
+    const existingTrim = existingText.trimEnd();
+    const chunkTrim = chunk.trimStart();
+
+    const maxOverlapCheck = Math.min(120, existingTrim.length, chunkTrim.length);
+    let detectedOverlapLen = 0;
+    for (let len = maxOverlapCheck; len >= 3; len--) {
+      const tail = existingTrim.slice(-len);
+      const head = chunkTrim.slice(0, len);
+      if (tail === head) {
+        detectedOverlapLen = len;
+        break;
+      }
+    }
+
+    if (detectedOverlapLen > 0) {
+      chunk = chunkTrim.slice(detectedOverlapLen);
+    }
+
+    // 5. Tentukan pemisah (token boundary vs newline)
+    const endsWithNewline = existingText.endsWith('\n');
+    const startsWithNewline = chunk.startsWith('\n');
+    const endsWithWhitespace = /\s$/.test(existingText);
+    const startsWithWhitespace = /^\s/.test(chunk);
+
+    // Jika terpotong di tengah token/kata (misal 'const nav' + 'Toggle = ...')
+    if (!endsWithWhitespace && !startsWithWhitespace && /^[a-zA-Z0-9_$]/.test(chunk) && /[a-zA-Z0-9_$]$/.test(existingText)) {
+      return existingText + chunk;
+    }
+
+    let sep = '';
+    if (!endsWithNewline && !startsWithNewline) {
+      if (endsWithWhitespace || startsWithWhitespace) {
+        sep = '';
+      } else {
+        sep = '\n';
+      }
+    }
+
+    return existingText + sep + chunk;
+  }
+
   function isOutputTruncated(text, finishReason = null) {
     if (finishReason === 'length') return true;
     if (!text) return false;
@@ -9841,9 +9944,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     const backtickCount = (trimmed.match(/```/g) || []).length;
     if (backtickCount % 2 !== 0) return true;
 
-    // Check for unclosed ZOZ_FILE block
+    // Check for unclosed ZOZ_FILE block (toleran terhadap tag penutup tanpa chevrons trailing)
     const zozFileStarts = (trimmed.match(/<<<ZOZ_(?:FILE|EDIT|MODIFY)/g) || []).length;
-    const zozFileEnds = (trimmed.match(/<<<END_ZOZ_(?:FILE|EDIT|MODIFY)>>>/g) || []).length;
+    const zozFileEnds = (trimmed.match(/<<<END_ZOZ_(?:FILE|EDIT|MODIFY)[^\n>]*(?:>|$)/g) || []).length;
     if (zozFileStarts > zozFileEnds) return true;
 
     // Check for unclosed HTML document
@@ -9932,10 +10035,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           }
         }
 
-        const needsNewline = rawBaseText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(rawBaseText) || /```\w*$/.test(rawBaseText);
-        const needsSpace = !needsNewline && !rawBaseText.endsWith(' ') && !appendedText.startsWith(' ') && !appendedText.startsWith('\n');
-        const separator = needsNewline ? '\n' : (needsSpace ? ' ' : '');
-        const mergedRaw = safeAssistantText((safeAssistantText(rawBaseText) + separator + appendedText).trim());
+        const mergedRaw = safeAssistantText(stitchContinuationChunk(rawBaseText, appendedText));
 
         // Re-ekstrak file jika kelanjutan melengkapi kode berkas website / dokumen
         const reExtracted = extractGeneratedFiles(mergedRaw, true);
@@ -13539,12 +13639,11 @@ Aturan wajib:
     safeHtml = safeHtml.replace(/(?:^|\n)\s*={3,}\s*(?=\n|$)/g, '\n');
     safeHtml = safeHtml.replace(/(?:^|\n)\s*>{2,}\s*(?:REPLACE)?\s*(?=\n|$)/gi, '\n');
     safeHtml = safeHtml.replace(/<<{1,4}>{1,4}/g, '');
+    safeHtml = safeHtml.replace(/<<>>/g, '');
     // 4. Auto-healing tag yang belum tertutup agar live preview tetap tampil sempurna
+    safeHtml = repairUnclosedScript(safeHtml);
     if ((safeHtml.match(/<style\b/gi) || []).length > (safeHtml.match(/<\/style>/gi) || []).length) {
       safeHtml += '\n</style>';
-    }
-    if ((safeHtml.match(/<script\b/gi) || []).length > (safeHtml.match(/<\/script>/gi) || []).length) {
-      safeHtml += '\n</script>';
     }
     // 5. Tambahkan padding/margin bawah pada area konten pratinjau agar seluruh elemen terbawah website terlihat jelas tanpa terhalang prompt input
     const previewBottomSpacerStyle = '\n<style id="zoz-preview-bottom-spacer">html,body{box-sizing:border-box!important;}body{padding-bottom:100px!important;}</style>';
@@ -15503,6 +15602,42 @@ Aturan wajib:
         }
       }
 
+      // Tier 6: Claude Code Fuzzy Window Match (Normalized token similarity sliding window)
+      if (foundIdx === -1 && targetLines.length >= 2) {
+        const targetTextNorm = targetLines.map(normalizeForCompare).join(' ');
+        const targetTokens = targetTextNorm.split(' ').filter(Boolean);
+        if (targetTokens.length >= 4) {
+          let bestScore = 0;
+          let bestIdx = -1;
+          let bestSpan = targetLines.length;
+
+          for (let spanDelta = -2; spanDelta <= 3; spanDelta++) {
+            const winSpan = targetLines.length + spanDelta;
+            if (winSpan < 2 || winSpan > lines.length) continue;
+
+            for (let i = 0; i <= lines.length - winSpan; i++) {
+              const winTextNorm = lines.slice(i, i + winSpan).map(normalizeForCompare).join(' ');
+              const winTokens = new Set(winTextNorm.split(' ').filter(Boolean));
+              let tokenHits = 0;
+              for (const t of targetTokens) {
+                if (winTokens.has(t)) tokenHits++;
+              }
+              const ratio = tokenHits / targetTokens.length;
+              if (ratio > bestScore && ratio >= 0.80) {
+                bestScore = ratio;
+                bestIdx = i;
+                bestSpan = winSpan;
+              }
+            }
+          }
+
+          if (bestIdx >= 0 && bestScore >= 0.80) {
+            foundIdx = bestIdx;
+            matchedSpan = bestSpan;
+          }
+        }
+      }
+
       if (foundIdx >= 0) {
         const origIndent = (lines[foundIdx].match(/^\s*/) || [''])[0];
         const replLines = replacement.split('\n');
@@ -15889,6 +16024,7 @@ TUGAS MUTLAK ANDA:
    - Jika ada deklarasi variabel ganda (seperti const/let yang dideklarasikan ulang), hapus salah satu deklarasi atau ganti dengan assignment langsung.
    - Jika ada identifier, nama variabel, atau fungsi yang terpotong, lengkapi sintaksnya dengan benar.
    - Jika ada tag atau tanda kurung yang rusak, perbaiki agar berpasangan sempurna.
+   - DILARANG KERAS mengeluarkan teks biasa di luar blok <<<ZOZ_EDIT>>>, DILARANG menaruh kode di luar tag script, dan DILARANG menggunakan artefak penanda non-standar seperti <<>>!
 3. Langsung mulai jawaban pada baris pertama dengan blok surgical patch presisi:
 <<<ZOZ_EDIT name="${targetName}">
 <<<SEARCH>>>
@@ -16071,7 +16207,7 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
       if (isReactFile) {
         finalContent = validateAndRepairReactCode(finalContent);
       } else if (isUnclosed && isWebFile) {
-        if (finalContent.includes('<script') && !finalContent.includes('</script>')) finalContent += '\n</script>';
+        finalContent = repairUnclosedScript(finalContent);
         if (finalContent.includes('<style') && !finalContent.includes('</style>')) finalContent += '\n</style>';
         if (finalContent.includes('<body') && !finalContent.includes('</body>')) finalContent += '\n</body>';
         if (!finalContent.includes('</html>')) finalContent += '\n</html>';
@@ -16173,7 +16309,7 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
         if (isReactFence) {
           repairedBody = validateAndRepairReactCode(repairedBody);
         } else if (isUnclosed && (langTag === 'html' || langTag === 'htm' || repairedBody.includes('<html'))) {
-          if (repairedBody.includes('<script') && !repairedBody.includes('</script>')) repairedBody += '\n</script>';
+          repairedBody = repairUnclosedScript(repairedBody);
           if (repairedBody.includes('<style') && !repairedBody.includes('</style>')) repairedBody += '\n</style>';
           if (repairedBody.includes('<body') && !repairedBody.includes('</body>')) repairedBody += '\n</body>';
           if (!repairedBody.includes('</html>')) repairedBody += '\n</html>';
@@ -16221,7 +16357,7 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
           if (body.length >= 40) {
             let repairedBody = body;
             if (isUnclosed) {
-              if (repairedBody.includes('<script') && !repairedBody.includes('</script>')) repairedBody += '\n</script>';
+              repairedBody = repairUnclosedScript(repairedBody);
               if (repairedBody.includes('<style') && !repairedBody.includes('</style>')) repairedBody += '\n</style>';
               if (repairedBody.includes('<body') && !repairedBody.includes('</body>')) repairedBody += '\n</body>';
               repairedBody += '\n</html>';
@@ -16680,6 +16816,9 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
           if (activeStudioContainer) {
             const lastAssistantBubble = Array.from(activeStudioContainer.querySelectorAll('.studio-msg-row.assistant .studio-msg-bubble')).pop();
             if (lastAssistantBubble && !lastAssistantBubble.querySelector('.surgical-edit-summary-card')) {
+              if (lastAssistantBubble.textContent && lastAssistantBubble.textContent.includes('Menyelaraskan modifikasi kode')) {
+                lastAssistantBubble.innerHTML = '<p>✨ Modifikasi berhasil diterapkan ke kode website.</p>';
+              }
               const firstLine = editedRanges.length > 0 ? editedRanges[0].startLine : 1;
               const rangeLabel = editedRanges.length > 0
                 ? editedRanges.map(r => r.startLine === r.endLine ? `Baris ${r.startLine}` : `Baris ${r.startLine}–${r.endLine}`).join(', ')
@@ -18135,13 +18274,23 @@ ${blocks}
           ? currentCode
           : StudioEndocrineDiagnostics.buildCodeReference(currentCode, val, selInfo);
 
+        // Claude Code Continuity: Sertakan riwayat percakapan studio sebelumnya agar perintah lanjutan seperti "Lakukan now" memiliki konteks utuh
+        const historyKey = isEditingInCodeMode ? '_editChatHistory' : '_studioChatHistory';
+        const studioHistory = Array.isArray(activeAIFile[historyKey]) ? activeAIFile[historyKey] : [];
+        let conversationContext = '';
+        if (studioHistory.length > 0) {
+          const lastTurns = studioHistory.slice(-4);
+          conversationContext = '\n[RIWAYAT PERCAKAPAN SEBELUMNYA DI STUDIO]:\n' +
+            lastTurns.map(t => `${t.role === 'user' ? 'Pengguna' : 'AI'}: ${t.content || t.displayContent || ''}`).join('\n') + '\n';
+        }
+
         followupPrompt = `[CLAUDE CODE AUTONOMOUS AGENT — EDIT BERKAS "${targetName}"]
-${selectedContextBlock}Berikut adalah KODE ARSITEKTUR LENGKAP dari berkas "${targetName}" (${codeLines.length} baris):
+${selectedContextBlock}${conversationContext}Berikut adalah KODE ARSITEKTUR LENGKAP dari berkas "${targetName}" (${codeLines.length} baris):
 \`\`\`${lang}
 ${codeRefToSend}
 \`\`\`
 
-Instruksi Pengguna: "${val}"${endocrineFeedback}
+Instruksi Pengguna Terkini: "${val}"${endocrineFeedback}
 
 MANDAT EKSEKUSI CLAUDE CODE (DILARANG BICARA TANPA BLOK KODE):
 1. Anda adalah Claude Code Autonomous Engineer yang bertugas memodifikasi berkas ini secara langsung dan nyata.
@@ -21998,14 +22147,26 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         persistStudioCodeChange(activeAIFile.rawContent || activeAIFile.content || '', { session: session });
 
         // CLAUDE CODE REFLEX: Jika pengguna meminta revisi/perubahan kode, namun AI hanya membalas dengan teks obrolan
-        // tanpa blok kode (seperti berjanji "Baik, saya akan..."), picu otomatis putaran refleks untuk memaksa pengeluaran kode!
+        // tanpa blok kode (seperti berjanji "Baik, saya akan..."), ATAU jika blok patch gagal dicocokkan (patchFailures > 0),
+        // picu otomatis putaran refleks untuk memaksa pengeluaran kode nyata / kode utuh!
         const wantsCode = isCodeRevisionRequest(cleanUserText);
         const hasBlockMarker = assistantText && (assistantText.includes('<<<ZOZ_EDIT') || assistantText.includes('<<<ZOZ_FILE') || assistantText.includes('<<<SEARCH'));
-        if (wantsCode && !hasBlockMarker && !runOptions._isReflexTurn && !runOptions.isAutonomousRepairTurn && !STATE.isGenerating && !STATE.isSending) {
-          console.warn('[ClaudeCodeReflex] AI merespons tanpa blok kode nyata. Memaksa eksekusi kode...');
+        const patchFailed = Boolean(runOptions.patchFailures || (hasBlockMarker && (!generatedFiles || generatedFiles.length === 0)));
+        if (((wantsCode && !hasBlockMarker) || patchFailed) && !runOptions._isReflexTurn && !runOptions.isAutonomousRepairTurn && !STATE.isGenerating && !STATE.isSending) {
+          console.warn('[ClaudeCodeReflex] AI merespons tanpa blok kode nyata atau patch gagal dicocokkan. Memaksa eksekusi kode...');
           const targetName = activeAIFile.name || 'index.html';
           setTimeout(() => {
-            const reflexPrompt = `[CLAUDE CODE REFLEX — WAJIB KELUARKAN BLOK KODE]:
+            const reflexPrompt = patchFailed
+              ? `[CLAUDE CODE REFLEX — PATCH GAGAL COCOK, WAJIB KELUARKAN ZOZ_FILE LENGKAP]:
+Permintaan Pengguna: "${cleanUserText}"
+PENTING: Blok modifikasi presisi (<<<ZOZ_EDIT>>>) Anda tidak cocok dengan baris kode saat ini.
+Untuk menjamin perubahan 100% langsung terpasang ke pratinjau website tanpa kegagalan pencocokan baris:
+WAJIB KELUARKAN KODE LENGKAP TERBARU DI DALAM BLOK <<<ZOZ_FILE name="${targetName}" mime="${activeAIFile.mime || 'text/html'}" lang="${activeAIFile.lang || 'html'}">:
+<<<ZOZ_FILE name="${targetName}" mime="${activeAIFile.mime || 'text/html'}" lang="${activeAIFile.lang || 'html'}">
+... seluruh kode lengkap terbaru yang sudah dimodifikasi ...
+<<<END_ZOZ_FILE>>>.
+DILARANG basa-basi, langsung mulai pada baris pertama respons Anda!`
+              : `[CLAUDE CODE REFLEX — WAJIB KELUARKAN BLOK KODE]:
 Pengguna meminta perbaikan/perubahan: "${cleanUserText}"
 Anda sebelumnya hanya menjawab dengan teks janji/percakapan: "${cleanAssistantSummary}"
 TETAPI Anda BELUM mengeluarkan blok kode modifikasi (<<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>>)!
@@ -22023,12 +22184,12 @@ Atau blok <<<ZOZ_FILE name="${targetName}"> ... <<<END_ZOZ_FILE>>>.`;
 
             activeStudioAssistantBubble = appendStudioMessage(
               'assistant',
-              `<span class="typing-cursor"></span> <em>⚡ Claude Code Reflex: Mengunci arsitektur & mengeksekusi perubahan kode...</em>`
+              `<span class="typing-cursor"></span> <em>${patchFailed ? '⚠️ Target baris patch tidak cocok. Claude Reflex sedang menyelaraskan kode secara utuh...' : '⚡ Claude Code Reflex: Mengunci arsitektur & mengeksekusi perubahan kode...'}</em>`
             );
 
             handleSendPrompt({
               overrideText: reflexPrompt,
-              displayPrompt: `⚡ Claude Reflex: Menghasilkan kode nyata...`,
+              displayPrompt: patchFailed ? `⚡ Claude Reflex: Menyelaraskan kode utuh...` : `⚡ Claude Reflex: Menghasilkan kode nyata...`,
               isStudioIsolated: true,
               studioHistoryMode: runOptions.studioHistoryMode || 'preview',
               websiteMode: 'preview',
@@ -23016,10 +23177,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
               break;
             }
 
-            const needsNewline = fullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(fullText) || /```\w*$/.test(fullText);
-            const needsSpace = !needsNewline && !fullText.endsWith(' ') && !appendedChunk.startsWith(' ') && !appendedChunk.startsWith('\n');
-            const sep = needsNewline ? '\n' : (needsSpace ? ' ' : '');
-            fullText = safeAssistantText((safeAssistantText(fullText) + sep + appendedChunk).trim());
+            fullText = safeAssistantText(stitchContinuationChunk(fullText, appendedChunk));
           } catch (contErr) {
             console.warn('[AutoContinuation Ollama] Gagal menyambung otomatis:', contErr?.message);
             break;
@@ -23162,7 +23320,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       // Save to isolated Studio/Edit history or main session
       if (isStudioIsolated) {
-        persistStudioIsolatedTurn(session, promptText, fullText, generatedFiles, runOptions);
+        persistStudioIsolatedTurn(session, promptText, fullText, generatedFiles, {
+          ...runOptions,
+          patchFailures: extractedAiFiles.patchFailures
+        });
       } else if (STATE.sessions.some(s => s.id === session.id)) {
         const contentToSave = appendWebVerificationNote(fullText, webSources);
         session.messages.push({
@@ -24769,10 +24930,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
               break;
             }
 
-            const needsNewline = fullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(fullText) || /```\w*$/.test(fullText);
-            const needsSpace = !needsNewline && !fullText.endsWith(' ') && !appendedChunk.startsWith(' ') && !appendedChunk.startsWith('\n');
-            const sep = needsNewline ? '\n' : (needsSpace ? ' ' : '');
-            fullText = safeAssistantText((safeAssistantText(fullText) + sep + appendedChunk).trim());
+            fullText = safeAssistantText(stitchContinuationChunk(fullText, appendedChunk));
           } catch (contErr) {
             console.warn('[AutoContinuation OpenRouter] Gagal menyambung otomatis:', contErr?.message);
             break;
@@ -24934,7 +25092,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       // Save to isolated Studio/Edit history or main session
       if (isStudioIsolated) {
-        persistStudioIsolatedTurn(session, promptText, fullText, generatedFiles, runOptions);
+        persistStudioIsolatedTurn(session, promptText, fullText, generatedFiles, {
+          ...runOptions,
+          patchFailures: extractedAiFiles.patchFailures
+        });
       } else if (STATE.sessions.some(s => s.id === session.id)) {
         const contentToSave = appendWebVerificationNote(fullText, webSources);
         session.messages.push({
