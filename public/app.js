@@ -9475,7 +9475,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           const hasCodeMarkers = String(this.text || '').includes('<<<ZOZ_') || String(this.text || '').includes('<<<SEARCH');
           cleanStudioText = hasCodeMarkers
             ? '⚡ Menyelaraskan modifikasi kode ke pratinjau...'
-            : '✅ Selesai.';
+            : '💡 Respons diterima.';
         }
         activeStudioAssistantBubble.innerHTML = renderMarkdown(cleanStudioText);
         enhanceCodeBlocks(activeStudioAssistantBubble);
@@ -15732,6 +15732,49 @@ Aturan wajib:
         return true;
       }
 
+      // Tier 7: Landmark / Insertion Fallback (Untuk penambahan section baru atau komponen yang target SEARCH-nya sedikit berbeda)
+      if (foundIdx === -1) {
+        let newContent = replacement;
+        const cleanSearch = searchTarget.trim();
+        const cleanRepl = replacement.trim();
+
+        if (cleanRepl.endsWith(cleanSearch)) {
+          newContent = cleanRepl.slice(0, cleanRepl.lastIndexOf(cleanSearch)).trim();
+        } else if (cleanRepl.startsWith(cleanSearch)) {
+          newContent = cleanRepl.slice(cleanSearch.length).trim();
+        }
+
+        if (newContent && (newContent.includes('<section') || newContent.includes('<div') || newContent.includes('<style'))) {
+          if (newContent.includes('<section')) {
+            const contactIdx = modified.indexOf('<section id="kontak"');
+            const footerIdx = modified.indexOf('<footer');
+            const mainCloseIdx = modified.indexOf('</main>');
+            const bodyCloseIdx = modified.lastIndexOf('</body>');
+            const insertAt = contactIdx !== -1 ? contactIdx : (footerIdx !== -1 ? footerIdx : (mainCloseIdx !== -1 ? mainCloseIdx : bodyCloseIdx));
+            if (insertAt !== -1) {
+              const startLine = modified.slice(0, insertAt).split('\n').length;
+              modified = modified.slice(0, insertAt) + newContent + '\n\n    ' + modified.slice(insertAt);
+              const replLineCount = newContent.split('\n').length;
+              editedRanges.push({ startLine, endLine: startLine + replLineCount, oldLines: 0, newLines: replLineCount });
+              patchCount++;
+              return true;
+            }
+          } else if (newContent.includes('<style')) {
+            const headCloseIdx = modified.indexOf('</head>');
+            const bodyOpenIdx = modified.indexOf('<body');
+            const insertAt = headCloseIdx !== -1 ? headCloseIdx : bodyOpenIdx;
+            if (insertAt !== -1) {
+              const startLine = modified.slice(0, insertAt).split('\n').length;
+              modified = modified.slice(0, insertAt) + newContent + '\n' + modified.slice(insertAt);
+              const replLineCount = newContent.split('\n').length;
+              editedRanges.push({ startLine, endLine: startLine + replLineCount, oldLines: 0, newLines: replLineCount });
+              patchCount++;
+              return true;
+            }
+          }
+        }
+      }
+
       failedCount++;
       return false;
     }
@@ -16197,7 +16240,14 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
         cleanContent = cleanContent.replace(/^\s*```[a-zA-Z0-9_-]*\s*\n?/i, '').replace(/\n?```\s*$/i, '');
       }
 
-      const rawFileName = nameMatch ? nameMatch[1] : 'file.txt';
+      let defaultFallbackName = 'file.txt';
+      if (typeof activeAIFile !== 'undefined' && activeAIFile && activeAIFile.name) {
+        defaultFallbackName = activeAIFile.name;
+      } else if (typeof getLatestWebsiteFileInSession === 'function') {
+        const latestWeb = getLatestWebsiteFileInSession(typeof getActiveSession === 'function' ? getActiveSession() : null);
+        if (latestWeb && latestWeb.name) defaultFallbackName = latestWeb.name;
+      }
+      const rawFileName = nameMatch ? nameMatch[1] : defaultFallbackName;
       const isExplicitEdit = header.indexOf('<<<ZOZ_EDIT') === 0 || header.indexOf('<<<ZOZ_MODIFY') === 0;
       const matchedWorkspaceFile = findWorkspaceFile(rawFileName);
       const isWorkspaceEdit = isExplicitEdit || Boolean(matchedWorkspaceFile);
@@ -18311,7 +18361,7 @@ ${blocks}
     // Siapkan gelembung respon untuk menerima streaming
     activeStudioAssistantBubble = appendStudioMessage(
       'assistant',
-      `<span class="typing-cursor"></span> <em>⚡ Zoz Autonomous Engine: Memuat arsitektur lengkap "${escapeHtml(targetName)}" & menerapkan modifikasi...</em>`
+      `<span class="typing-cursor"></span> <em>Menerapkan perubahan pada "${escapeHtml(targetName)}"...</em>`
     );
 
     // Ganti tombol kirim menjadi tombol stop generasi
@@ -18720,14 +18770,19 @@ MANDAT EKSEKUSI ZOZ ENGINE (WAJIB BLOK KODE PADA BARIS PERTAMA):
 
   function extractWebUrlsFromText(input) {
     if (!input || typeof input !== 'string') return [];
+    if (input.includes('<!DOCTYPE') || input.includes('<html') || input.includes('<<<ZOZ_')) return [];
     const urlRegex = /https?:\/\/[^\s<>"'{}|\\^`\[\]]+/gi;
     const matches = input.match(urlRegex) || [];
     return matches.map(u => cleanExtractedUrlPunctuation(u)).filter(u => {
       try {
         const p = new URL(u);
         const h = p.hostname.toLowerCase();
+        const pathname = p.pathname.toLowerCase();
         if (h.includes('youtube.com') || h.includes('youtu.be')) return false;
-        if (/\.(png|jpe?g|webp|gif|svg|mp4|webm|mp3|wav|ogg|pdf)$/i.test(p.pathname)) return false;
+        // Abaikan CDN, font, dan library asset eksternal dalam kode
+        if (h.includes('cdn.') || h.includes('cdnjs.') || h.includes('jsdelivr.') || h.includes('unpkg.com') || h.includes('googleapis.com') || h.includes('gstatic.com')) return false;
+        // Abaikan file asset, script, style, binary
+        if (/\.(png|jpe?g|webp|gif|svg|ico|mp4|webm|mp3|wav|ogg|pdf|js|mjs|cjs|css|json|map|wasm|woff2?|ttf|eot)$/i.test(pathname)) return false;
         return true;
       } catch (_) {
         return false;
@@ -19774,10 +19829,10 @@ MANDAT EKSEKUSI ZOZ ENGINE (WAJIB BLOK KODE PADA BARIS PERTAMA):
     // Pastikan permintaan website/landing page/aplikasi TIDAK PERNAH memicu modal dokumen!
     const creationIntent = classifyCreationIntent(rawText);
 
-    // Intersepsi Pembuatan Website: arahkan ke alur pembuatan kode website baru HANYA jika bukan sedang mengedit website yang sudah ada
+    // Intersepsi Pembuatan Website: arahkan ke alur pembuatan kode website baru secara langsung tanpa modal popup
     if (!options.skipWebsiteCheck && !options.websiteMode && !isEditingExistingWeb && creationIntent === 'website') {
-      openWebsiteModeModal(rawText);
-      return;
+      options.websiteMode = 'preview';
+      options.isWebCreation = true;
     }
 
     // Intersepsi Pembuatan Dokumen: HANYA muncul ketika pengguna secara eksplisit meminta dokumen/laporan/PDF/Word
@@ -19924,7 +19979,18 @@ Atau jika merombak tata letak/banyak bagian:
     }
 
     // Auto-Extraction URL Web Publik untuk Analisis & Ringkasan AI
-    const detectedWebUrls = extractWebUrlsFromText(rawText);
+    // HANYA jika prompt diketik langsung oleh pengguna (BUKAN kode HTML internal, revisi Studio, atau overrideText)
+    const isCodeOrStudioPrompt = Boolean(
+      options.overrideText ||
+      options.isStudioIsolated ||
+      options.websiteMode ||
+      options.isWebCreation ||
+      options.isWebsiteRevision ||
+      rawText.includes('<!DOCTYPE') ||
+      rawText.includes('<html') ||
+      rawText.includes('<<<ZOZ_')
+    );
+    const detectedWebUrls = !isCodeOrStudioPrompt ? extractWebUrlsFromText(rawText) : [];
     if (detectedWebUrls.length > 0) {
       const urlsToScrape = detectedWebUrls.slice(0, 2);
       try {
@@ -22254,12 +22320,12 @@ Atau blok <<<ZOZ_FILE name="${targetName}"> ... <<<END_ZOZ_FILE>>>.`;
 
             activeStudioAssistantBubble = appendStudioMessage(
               'assistant',
-              `<span class="typing-cursor"></span> <em>${patchFailed ? '⚠️ Target baris patch tidak cocok. Zoz Reflex sedang menyelaraskan kode secara utuh...' : '⚡ Zoz Reflex Engine: Mengunci arsitektur & mengeksekusi perubahan kode...'}</em>`
+              `<span class="typing-cursor"></span> <em>${patchFailed ? 'Menyelaraskan kode website secara utuh...' : 'Menghasilkan kode website...'}</em>`
             );
 
             handleSendPrompt({
               overrideText: reflexPrompt,
-              displayPrompt: patchFailed ? `⚡ Zoz Reflex: Menyelaraskan kode utuh...` : `⚡ Zoz Reflex: Menghasilkan kode nyata...`,
+              displayPrompt: patchFailed ? `Menyelaraskan kode utuh...` : `Menghasilkan kode...`,
               isStudioIsolated: true,
               studioHistoryMode: runOptions.studioHistoryMode || 'preview',
               websiteMode: 'preview',
