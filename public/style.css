@@ -8968,6 +8968,76 @@ body.is-assistant-dragging #aiFileStudioFrame {
   white-space: nowrap;
 }
 
+/* Claude-Code Style Autonomous Web Agent Loop HUD */
+.studio-agent-loop-hud {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  background: linear-gradient(90deg, rgba(168, 85, 247, 0.16), rgba(0, 240, 255, 0.14));
+  border-bottom: 1px solid rgba(0, 240, 255, 0.35);
+  font-size: 0.74rem;
+  color: #e2e8f0;
+  animation: slideDownSearch 0.25s ease-out;
+}
+
+.studio-agent-loop-hud.is-error {
+  background: linear-gradient(90deg, rgba(244, 63, 94, 0.2), rgba(168, 85, 247, 0.15));
+  border-bottom-color: rgba(244, 63, 94, 0.45);
+  color: #fda4af;
+}
+
+.studio-agent-loop-hud.is-success {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.2), rgba(0, 240, 255, 0.15));
+  border-bottom-color: rgba(16, 185, 129, 0.45);
+  color: #6ee7b7;
+}
+
+.agent-loop-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-loop-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #00f0ff;
+  box-shadow: 0 0 8px #00f0ff;
+  animation: agentPulse 1.2s infinite ease-in-out;
+  flex-shrink: 0;
+}
+
+@keyframes agentPulse {
+  0%, 100% { transform: scale(0.85); opacity: 0.6; }
+  50% { transform: scale(1.35); opacity: 1; box-shadow: 0 0 14px #a855f7, 0 0 8px #00f0ff; }
+}
+
+.btn-cancel-agent-loop {
+  padding: 2px 7px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: rgba(244, 63, 94, 0.18);
+  border: 1px solid rgba(244, 63, 94, 0.45);
+  border-radius: 4px;
+  color: #fda4af;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.btn-cancel-agent-loop:hover {
+  background: rgba(244, 63, 94, 0.35);
+  color: #ffffff;
+}
+
 @keyframes slideInRight {
   from {
     opacity: 0;

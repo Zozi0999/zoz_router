@@ -1156,6 +1156,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     labelStudioEndocrine: $('#labelStudioEndocrine'),
     studioEndocrineStatusBar: $('#studioEndocrineStatusBar'),
     studioEndocrineStatusContent: $('#studioEndocrineStatusContent'),
+    studioAgentLoopHud: $('#studioAgentLoopHud'),
     btnStudioMinAssistant: $('#btnStudioMinAssistant'),
     studioAssistantPanel: $('#studioAssistantPanel'),
     studioAssistantHeader: $('#studioAssistantHeader'),
@@ -13528,6 +13529,13 @@ Aturan wajib:
     });
     // 3. Pastikan tidak ada tag base liar yang merusak anchor in-page (#) dan gradien/masking SVG
     safeHtml = safeHtml.replace(/<base\b[^>]*>/gi, '');
+    // 3b. Bersihkan artefak marker diff / chevron liar (seperti <<>>, <<<<, dll.) yang bocor ke body
+    safeHtml = safeHtml.replace(/<<{1,4}>{1,4}/g, '');
+    safeHtml = safeHtml.replace(/<{3,}\s*(?:SEARCH|REPLACE|END_ZOZ_[A-Z]+)\s*>{0,3}/gi, '');
+    // 3c. Jika ada console.log(...) naked liar di luar tag <script> di akhir file, amankan ke dalam script
+    safeHtml = safeHtml.replace(/(?:^|\n)\s*(console\.(?:log|warn|error|info)\([^\n]+\);?)\s*(?=\n|$)/g, (match, code) => {
+      return `\n<script>${code}</script>\n`;
+    });
     // 4. Auto-healing tag yang belum tertutup agar live preview tetap tampil sempurna
     if ((safeHtml.match(/<style\b/gi) || []).length > (safeHtml.match(/<\/style>/gi) || []).length) {
       safeHtml += '\n</style>';
@@ -15338,6 +15346,8 @@ Aturan wajib:
     function applySingleHunk(rawSearch, rawReplace) {
       let searchTarget = stripAccidentalLineNumbers(rawSearch.replace(/^\r?\n/, '').replace(/\r?\n\s*$/, ''));
       let replacement = stripAccidentalLineNumbers(rawReplace.replace(/^\r?\n/, '').replace(/\r?\n\s*$/, ''));
+      searchTarget = searchTarget.replace(/<<{1,4}>{1,4}/g, '').trim();
+      replacement = replacement.replace(/<<{1,4}>{1,4}/g, '').trim();
       if (!searchTarget) return false;
 
       // Bersihkan teks percakapan narasi AI liar yang tidak sengaja tertelan di akhir replacement
@@ -15664,12 +15674,20 @@ Aturan wajib:
       this.errors.push({ ...data, timestamp: Date.now() });
       if (this.errors.length > 20) this.errors.shift();
       this.updateUI();
+
+      if (typeof StudioAutonomousAgent !== 'undefined') {
+        StudioAutonomousAgent.onFrameError(data);
+      }
     },
 
     clear() {
       this.errors = [];
       this.lastError = null;
       this.updateUI();
+
+      if (typeof StudioAutonomousAgent !== 'undefined') {
+        StudioAutonomousAgent.onClearOrSuccess();
+      }
     },
 
     updateUI() {
@@ -15698,6 +15716,205 @@ Aturan wajib:
           els.studioEndocrineStatusContent.innerHTML = `<i class="fa-solid fa-circle-check" style="color:var(--neon-teal);"></i> <span>Kode Sehat (0 Error)</span>`;
         }
       }
+    }
+  };
+
+  // ==================== CLAUDE-CODE STYLE AUTONOMOUS WEB AGENT LOOP ====================
+  // Mengotomatiskan kedatangan AI berkali-kali hingga tugas selesai & website 100% bebas error
+  const StudioAutonomousAgent = {
+    loopCount: 0,
+    maxRounds: 3,
+    isActive: false,
+    timer: null,
+    armTimer: null,
+    lastHealedKey: '',
+
+    init() {
+      document.addEventListener('click', (e) => {
+        if (e.target && e.target.closest && e.target.closest('.btn-cancel-agent-loop')) {
+          e.stopPropagation();
+          this.cancel();
+        }
+      });
+    },
+
+    reset() {
+      this.loopCount = 0;
+      this.isActive = false;
+      this.lastHealedKey = '';
+      if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+      if (this.armTimer) { clearTimeout(this.armTimer); this.armTimer = null; }
+      this.updateHud(null);
+    },
+
+    cancel() {
+      console.log('[StudioAutonomousAgent] Loop agen otonom dihentikan pengguna.');
+      this.reset();
+      showToast('🛑 Loop agen otonom dihentikan. Anda kini memegang kendali manual.', 'info');
+      if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+    },
+
+    updateHud(state) {
+      const hud = els.studioAgentLoopHud;
+      if (!hud) return;
+      if (!state) {
+        hud.style.display = 'none';
+        hud.className = 'studio-agent-loop-hud';
+        hud.innerHTML = '';
+        return;
+      }
+
+      hud.style.display = 'flex';
+      if (state.type === 'running') {
+        hud.className = 'studio-agent-loop-hud is-error';
+        hud.innerHTML = `
+          <div class="agent-loop-content">
+            <span class="agent-loop-pulse"></span>
+            <span>🤖 <strong>Claude-Code Agent (Putaran ${state.round}/${this.maxRounds})</strong>: Menyembuhkan <em>${escapeHtml(state.errTitle || 'Runtime Issue')}</em>...</span>
+          </div>
+          <button type="button" class="btn-cancel-agent-loop" title="Hentikan loop otonom">Hentikan</button>
+        `;
+        if (els.studioPreviewStreamHud && els.studioPreviewStreamStatusText) {
+          els.studioPreviewStreamHud.style.display = 'flex';
+          els.studioPreviewStreamStatusText.textContent = `🤖 Claude-Style Agent: Menyembuhkan error secara otonom (Putaran ${state.round}/${this.maxRounds})...`;
+        }
+      } else if (state.type === 'success') {
+        hud.className = 'studio-agent-loop-hud is-success';
+        hud.innerHTML = `
+          <div class="agent-loop-content">
+            <i class="fa-solid fa-circle-check" style="color: #6ee7b7;"></i>
+            <span>✅ <strong>Verifikasi Otonom Selesai</strong>: Website 100% Bebas Error! (Selesai dalam ${state.round} putaran)</span>
+          </div>
+        `;
+        if (typeof finishStudioPreviewStreamHud === 'function') finishStudioPreviewStreamHud(true);
+        setTimeout(() => {
+          if (this.loopCount === 0 && hud) hud.style.display = 'none';
+        }, 5500);
+      }
+    },
+
+    // Dipanggil saat pesan baru/patch selesai diterapkan, mengaktifkan jendela verifikasi otonom
+    armVerificationTimer(file) {
+      if (!file || !STATE.settings.endocrineCodeEnabled) return;
+      if (this.armTimer) clearTimeout(this.armTimer);
+      this.armTimer = setTimeout(() => {
+        this.armTimer = null;
+        this.verifyState(file);
+      }, 1400);
+    },
+
+    verifyState(file) {
+      if (!file || !activeAIFile || activeAIFile.name !== file.name) return;
+      const lastErr = StudioEndocrineDiagnostics.lastError;
+      if (!lastErr || !lastErr.message) {
+        if (this.loopCount > 0) {
+          this.updateHud({ type: 'success', round: this.loopCount });
+          this.loopCount = 0;
+          this.isActive = false;
+        }
+      } else {
+        this.onFrameError(lastErr);
+      }
+    },
+
+    onFrameError(data) {
+      if (!STATE.settings.endocrineCodeEnabled) return;
+      if (!activeAIFile || !data || !data.message) return;
+      if (STATE.isGenerating || STATE.isSending) return;
+
+      const isStudioOpen = Boolean(els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show'));
+      if (!isStudioOpen) return;
+
+      const ext = (activeAIFile.name || '').split('.').pop().toLowerCase();
+      const isWeb = ext === 'html' || ext === 'htm' || ext === 'xhtml' || ext === 'jsx' || ext === 'tsx' || activeAIFile.lang === 'jsx' || activeAIFile.lang === 'react';
+      if (!isWeb) return;
+
+      // Filter: Hanya auto-heal untuk runtime error, syntax error, atau exception browser nyata
+      const isCriticalError = data.type === 'ZOZ_STUDIO_FRAME_ERROR' ||
+        /(?:SyntaxError|TypeError|ReferenceError|Uncaught|is not defined|has already been declared|Unexpected token)/i.test(data.message);
+      if (!isCriticalError) return;
+
+      if (this.loopCount >= this.maxRounds) {
+        console.warn(`[StudioAutonomousAgent] Mencapai batas maksimal ${this.maxRounds} putaran.`);
+        return;
+      }
+
+      const errFingerprint = `${data.message}_${data.lineno || 0}`;
+      if (errFingerprint === this.lastHealedKey && this.isActive) return;
+
+      if (this.timer) clearTimeout(this.timer);
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        this.executeAutoHeal(data);
+      }, 750);
+    },
+
+    onClearOrSuccess() {
+      if (this.loopCount > 0 && !StudioEndocrineDiagnostics.lastError) {
+        this.updateHud({ type: 'success', round: this.loopCount });
+        this.loopCount = 0;
+        this.isActive = false;
+      }
+    },
+
+    executeAutoHeal(lastErr) {
+      if (!activeAIFile || STATE.isGenerating || STATE.isSending) return;
+      const currentCode = activeAIFile.rawContent || activeAIFile.content || '';
+      if (!currentCode) return;
+
+      this.loopCount++;
+      this.isActive = true;
+      this.lastHealedKey = `${lastErr.message}_${lastErr.lineno || 0}`;
+
+      const errTitle = (lastErr.message || 'SyntaxError').split('\n')[0].substring(0, 50);
+      this.updateHud({ type: 'running', round: this.loopCount, errTitle });
+
+      console.log(`[StudioAutonomousAgent] Memicu putaran otonom ${this.loopCount}/${this.maxRounds} untuk error:`, lastErr.message);
+
+      const lines = currentCode.split('\n');
+      const errLine = lastErr.lineno ? Math.max(1, parseInt(lastErr.lineno, 10)) : 1;
+      const startLine = Math.max(1, errLine - 10);
+      const endLine = Math.min(lines.length, errLine + 12);
+      const contextCode = lines.slice(startLine - 1, endLine).join('\n');
+
+      const targetName = activeAIFile.name || 'index.html';
+      const autoHealPrompt = `[CLAUDE-STYLE AUTONOMOUS WEB REPAIR AGENT — PUTARAN ${this.loopCount}/${this.maxRounds}]
+PERHATIAN: Kode website "${targetName}" memicu error di browser:
+Isu: "${lastErr.message}" (pada baris ${errLine})
+
+[Konteks Sekitar Baris ${startLine}–${endLine}]:
+\`\`\`html
+${contextCode}
+\`\`\`
+
+TUGAS MUTLAK ANDA:
+1. Anda adalah Claude Code Autonomous Agent yang bertugas menyelesaikan kode sampai tuntas dan bebas error.
+2. Analisis dan perbaiki bagian yang menyebabkan error tersebut:
+   - Jika ada deklarasi variabel ganda (seperti const/let yang dideklarasikan ulang), hapus salah satu deklarasi atau ganti dengan assignment langsung.
+   - Jika ada identifier, nama variabel, atau fungsi yang terpotong, lengkapi sintaksnya dengan benar.
+   - Jika ada tag atau tanda kurung yang rusak, perbaiki agar berpasangan sempurna.
+3. Langsung mulai jawaban pada baris pertama dengan blok surgical patch presisi:
+<<<ZOZ_EDIT name="${targetName}">
+<<<SEARCH>>>
+[salin baris yang error secara persis]
+<<<REPLACE>>>
+[baris perbaikan yang valid tanpa error]
+<<<END_ZOZ_EDIT>>>
+Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`;
+
+      const isEditingInCodeMode = Boolean(els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing'));
+      handleSendPrompt({
+        overrideText: autoHealPrompt,
+        displayPrompt: `🔧 Auto-Repair (Putaran ${this.loopCount}): ${errTitle}...`,
+        isStudioIsolated: true,
+        studioHistoryMode: isEditingInCodeMode ? 'edit' : 'preview',
+        websiteMode: 'preview',
+        isWebCreation: true,
+        isWebsiteRevision: true,
+        skipWebsiteCheck: true,
+        skipDocCheck: true,
+        isAutonomousRepairTurn: true
+      });
     }
   };
 
@@ -16437,6 +16654,9 @@ Aturan wajib:
           // Delegasikan pembaruan konten, riwayat revisi, pratinjau iframe, & persistensi disk/IDB ke persistStudioCodeChange (single source of truth)
           persistStudioCodeChange(newRaw);
           finishStudioPreviewStreamHud(true);
+          if (typeof StudioAutonomousAgent !== 'undefined') {
+            StudioAutonomousAgent.armVerificationTimer(activeAIFile);
+          }
           if (els.aiFileStudioEditor) {
             renderStudioCodeEditorHighlight(newRaw, editedRanges);
             if (els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing') && editedRanges.length > 0) {
@@ -17535,6 +17755,7 @@ ${blocks}
         target.closest('.studio-assistant-header') ||
         target.closest('#studioEndocrineStatusBar') ||
         target.closest('.studio-endocrine-status-bar') ||
+        (target.closest('.studio-agent-loop-hud') && !target.closest('.btn-cancel-agent-loop')) ||
         target.closest('.studio-assistant-empty')
       );
     }
@@ -21750,14 +21971,17 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
       // Sinkronkan file yang diedit/dibuat AI ke activeAIFile, iframe live preview Studio, & editor kode
       if (generatedFiles && generatedFiles.length > 0) {
+        const isWeb = /\.(?:html?|jsx|tsx)$/i.test(activeAIFile.name || '');
         const updatedFile = generatedFiles.find(f => f.name === activeAIFile.name) ||
                             (isDiagramFile(activeAIFile) ? generatedFiles.find(f => isDiagramFile(f)) : null) ||
-                            generatedFiles.find(f => f.isPrimaryWebEntry !== false && /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) ||
-                            generatedFiles[0];
+                            (isWeb ? generatedFiles.find(f => f.isPrimaryWebEntry !== false && /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) : null);
         if (updatedFile && (updatedFile.rawContent || updatedFile.content)) {
           const newCode = updatedFile.rawContent || updatedFile.content;
           if (newCode) {
             persistStudioCodeChange(newCode, { session: session });
+            if (typeof StudioAutonomousAgent !== 'undefined') {
+              StudioAutonomousAgent.armVerificationTimer(activeAIFile);
+            }
           }
         }
       } else {
@@ -29283,6 +29507,9 @@ Aturan:
           els.aiFileStudioFrame.dataset.loadedHtmlDoc = '';
           els.aiFileStudioFrame.dataset.bridgeReady = '0';
           els.aiFileStudioFrame.dataset.lastRawContent = '';
+        }
+        if (typeof StudioAutonomousAgent !== 'undefined') {
+          StudioAutonomousAgent.reset();
         }
         activeAIFile = null;
       }
@@ -39485,6 +39712,7 @@ Aturan:
     BioEndocrine.init();
     ChatEndocrine.init();
     StudioEndocrineDiagnostics.init();
+    StudioAutonomousAgent.init();
     WhatsAppController.init();
     
     // Initialize Neural Terminal Engine
