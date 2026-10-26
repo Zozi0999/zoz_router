@@ -13432,19 +13432,38 @@ Aturan wajib:
   const FileRevisionStore = {
     history: new Map(),
     currentIndex: new Map(),
+    MAX_REVISIONS_PER_FILE: 12,
+    MAX_TRACKED_FILES: 8,
 
     pushRevision(name, content) {
       if (!name || typeof content !== 'string') return;
+      // Memory Leak Prevention: Batasi jumlah berkas terlacak agar memori tab browser tetap stabil
+      if (!this.history.has(name) && this.history.size >= this.MAX_TRACKED_FILES) {
+        const oldestKey = this.history.keys().next().value;
+        if (oldestKey) {
+          this.history.delete(oldestKey);
+          this.currentIndex.delete(oldestKey);
+        }
+      }
       const list = this.history.get(name) || [];
       const idx = this.currentIndex.has(name) ? this.currentIndex.get(name) : -1;
-      const trimmed = list.slice(0, idx + 1);
+      let trimmed = list.slice(0, idx + 1);
       if (trimmed.length > 0 && trimmed[trimmed.length - 1] === content) {
         this.currentIndex.set(name, trimmed.length - 1);
         return;
       }
       trimmed.push(content);
+      // Memory Leak Prevention: Batasi riwayat revisi per file (max 12 revisi)
+      if (trimmed.length > this.MAX_REVISIONS_PER_FILE) {
+        trimmed = trimmed.slice(trimmed.length - this.MAX_REVISIONS_PER_FILE);
+      }
       this.history.set(name, trimmed);
       this.currentIndex.set(name, trimmed.length - 1);
+    },
+
+    getRevisions(name) {
+      if (!name) return [];
+      return this.history.get(name) || [];
     },
 
     canUndo(name) {
@@ -13462,14 +13481,21 @@ Aturan wajib:
       if (!this.canUndo(name)) return null;
       const idx = this.currentIndex.get(name) - 1;
       this.currentIndex.set(name, idx);
-      return this.history.get(name)[idx];
+      const list = this.history.get(name) || [];
+      return list[idx] || null;
     },
 
     redo(name) {
       if (!this.canRedo(name)) return null;
       const idx = this.currentIndex.get(name) + 1;
       this.currentIndex.set(name, idx);
-      return this.history.get(name)[idx];
+      const list = this.history.get(name) || [];
+      return list[idx] || null;
+    },
+
+    clear() {
+      this.history.clear();
+      this.currentIndex.clear();
     }
   };
 
@@ -13995,8 +14021,8 @@ Aturan wajib:
     const trimmed = str.trim();
     if (isAuthenticHtml(trimmed)) return false;
     const hasBraces = trimmed.includes('{') && trimmed.includes('}');
-    const hasCssKeywords = /(?:font-family|color|background|box-shadow|text-shadow|padding|margin|display|border|opacity|transform|filter)\s*:/i.test(trimmed);
-    const startsWithSelector = /^(?:\s*(?:[.#@][a-zA-Z0-9_-]|[a-zA-Z0-9_-]+\s*\{|\/\*|body|html|:root|\*))/i.test(trimmed);
+    const hasCssKeywords = /(?:font-family|color|background|box-shadow|text-shadow|padding|margin|display|border|opacity|transform|filter|animation|transition|flex|grid|width|height|position|top|left|right|bottom|z-index|gap|outline|border-radius)\s*:/i.test(trimmed);
+    const startsWithSelector = /^(?:\s*(?:[.#@:][a-zA-Z0-9_-]|[a-zA-Z0-9_-]+\s*\{|\/\*|body|html|:root|\*))/i.test(trimmed);
     return hasBraces && (hasCssKeywords || startsWithSelector);
   }
 
@@ -14034,17 +14060,23 @@ Aturan wajib:
     const isSupposedWeb = Boolean(fileObj && /\.(?:html?|xhtml)$/i.test(fileObj.name || ''));
     if (isSupposedWeb && !isAuthenticHtml(safeHtml) && isLikelyCssSnippet(safeHtml)) {
       let recoveredBaseHtml = '';
-      if (typeof FileRevisionStore !== 'undefined' && fileObj.name) {
-        const revs = FileRevisionStore.getRevisions(fileObj.name);
-        if (Array.isArray(revs) && revs.length > 0) {
-          for (let i = revs.length - 1; i >= 0; i--) {
-            const r = revs[i];
-            if (isAuthenticHtml(r)) {
-              recoveredBaseHtml = r;
-              break;
+      try {
+        if (typeof FileRevisionStore !== 'undefined' && fileObj.name) {
+          const revs = (typeof FileRevisionStore.getRevisions === 'function')
+            ? FileRevisionStore.getRevisions(fileObj.name)
+            : (FileRevisionStore.history ? (FileRevisionStore.history.get(fileObj.name) || []) : []);
+          if (Array.isArray(revs) && revs.length > 0) {
+            for (let i = revs.length - 1; i >= 0; i--) {
+              const r = revs[i];
+              if (isAuthenticHtml(r)) {
+                recoveredBaseHtml = r;
+                break;
+              }
             }
           }
         }
+      } catch (err) {
+        console.warn('[prepareSafeHtmlForPreview] Gagal membaca revisi:', err);
       }
       if (!recoveredBaseHtml && typeof getLatestWebsiteFileInSession === 'function') {
         const latestWeb = getLatestWebsiteFileInSession(typeof getActiveSession === 'function' ? getActiveSession() : null);
@@ -14073,6 +14105,45 @@ ${safeHtml}
     <h3 style="margin-top:0;">🎨 Lembar Gaya Website Terpasang</h3>
     <p style="color:#94a3b8; font-size:14px;">Aturan CSS telah diisolasi dengan aman di dalam tag &lt;style&gt;.</p>
   </div>
+</body>
+</html>`;
+      }
+    } else if (isSupposedWeb && !isAuthenticHtml(safeHtml) && (safeHtml.includes('<section') || safeHtml.includes('<div') || safeHtml.includes('<header') || safeHtml.includes('<main') || safeHtml.includes('<nav'))) {
+      // Safety Guard: AI hanya mengeluarkan potongan elemen HTML/komponen parsial
+      let recoveredBaseHtml = '';
+      try {
+        if (typeof FileRevisionStore !== 'undefined' && fileObj.name) {
+          const revs = (typeof FileRevisionStore.getRevisions === 'function')
+            ? FileRevisionStore.getRevisions(fileObj.name)
+            : (FileRevisionStore.history ? (FileRevisionStore.history.get(fileObj.name) || []) : []);
+          if (Array.isArray(revs) && revs.length > 0) {
+            for (let i = revs.length - 1; i >= 0; i--) {
+              const r = revs[i];
+              if (isAuthenticHtml(r)) {
+                recoveredBaseHtml = r;
+                break;
+              }
+            }
+          }
+        }
+      } catch (_) {}
+      if (!recoveredBaseHtml && typeof getLatestWebsiteFileInSession === 'function') {
+        const latestWeb = getLatestWebsiteFileInSession(typeof getActiveSession === 'function' ? getActiveSession() : null);
+        if (latestWeb && latestWeb !== fileObj && latestWeb.rawContent && isAuthenticHtml(latestWeb.rawContent)) {
+          recoveredBaseHtml = latestWeb.rawContent || latestWeb.content || '';
+        }
+      }
+
+      if (!recoveredBaseHtml) {
+        safeHtml = `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(fileObj?.name || 'Website Preview')}</title>
+</head>
+<body>
+${safeHtml}
 </body>
 </html>`;
       }
@@ -16185,6 +16256,47 @@ ${safeHtml}
         return true;
       }
 
+      // Tier 6B: CSS Selector Rule Replacement (Untuk perubahan aturan gaya CSS saat baris SEARCH sedikit berbeda)
+      if (foundIdx === -1 && searchTarget && (isLikelyCssSnippet(searchTarget) || isLikelyCssSnippet(replacement))) {
+        const selMatch = searchTarget.match(/^\s*([.#]?[a-zA-Z0-9_\-\s,>:+~*]+)\s*\{/);
+        if (selMatch) {
+          const rawSel = selMatch[1].trim();
+          const escSel = rawSel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const ruleRegex = new RegExp('(?:^|\\n)([ \\t]*' + escSel + '\\s*\\{[\\s\\S]*?\\})', 'm');
+          const matchRule = modified.match(ruleRegex);
+          if (matchRule && matchRule.index !== undefined) {
+            const ruleStart = matchRule.index + (matchRule[0].startsWith('\n') ? 1 : 0);
+            const oldRule = matchRule[1];
+            const startLine = modified.slice(0, ruleStart).split('\n').length;
+            const replLines = replacement.split('\n').length;
+            modified = modified.slice(0, ruleStart) + replacement + modified.slice(ruleStart + oldRule.length);
+            editedRanges.push({ startLine, endLine: startLine + replLines - 1, oldLines: oldRule.split('\n').length, newLines: replLines });
+            patchCount++;
+            return true;
+          }
+        }
+      }
+
+      // Tier 6C: HTML Element ID Replacement (Untuk penggantian section atau komponen spesifik berbasis id)
+      if (foundIdx === -1) {
+        const idMatch = (searchTarget && searchTarget.match(/<([a-zA-Z0-9_-]+)[^>]*\bid=["']([^"']+)["']/i)) ||
+                        (replacement && replacement.match(/<([a-zA-Z0-9_-]+)[^>]*\bid=["']([^"']+)["']/i));
+        if (idMatch) {
+          const tagName = idMatch[1];
+          const elId = idMatch[2];
+          const elRegex = new RegExp('<' + tagName + '[^>]*\\bid=["\']' + elId + '["\'][\\s\\S]*?<\\/' + tagName + '>', 'i');
+          const m = modified.match(elRegex);
+          if (m && m.index !== undefined) {
+            const startLine = modified.slice(0, m.index).split('\n').length;
+            const replLines = replacement.split('\n').length;
+            modified = modified.slice(0, m.index) + replacement + modified.slice(m.index + m[0].length);
+            editedRanges.push({ startLine, endLine: startLine + replLines - 1, oldLines: m[0].split('\n').length, newLines: replLines });
+            patchCount++;
+            return true;
+          }
+        }
+      }
+
       // Tier 7: Landmark / Insertion Fallback (Untuk penambahan section baru atau komponen yang target SEARCH-nya sedikit berbeda)
       if (foundIdx === -1) {
         let newContent = replacement;
@@ -16228,6 +16340,20 @@ ${safeHtml}
         }
       }
 
+      // Tier 8: CSS Style Auto-Merger Fallback (Jika seluruh matching gagal namun pengganti adalah aturan CSS murni)
+      if (foundIdx === -1 && isLikelyCssSnippet(replacement)) {
+        const cleanCss = replacement.replace(/<style\b[^>]*>/gi, '').replace(/<\/style>/gi, '').trim();
+        const styleCloseIdx = modified.lastIndexOf('</style>');
+        if (styleCloseIdx !== -1) {
+          const startLine = modified.slice(0, styleCloseIdx).split('\n').length;
+          const replLines = cleanCss.split('\n').length;
+          modified = modified.slice(0, styleCloseIdx) + '\n\n    /* Modifikasi Gaya AI */\n    ' + cleanCss + '\n  ' + modified.slice(styleCloseIdx);
+          editedRanges.push({ startLine, endLine: startLine + replLines, oldLines: 0, newLines: replLines });
+          patchCount++;
+          return true;
+        }
+      }
+
       failedCount++;
       return false;
     }
@@ -16245,6 +16371,35 @@ ${safeHtml}
       while ((match = gitDiffRegex.exec(patchBlock)) !== null) {
         applySingleHunk(match[1], match[2]);
       }
+    }
+
+    // 3. Format Unified Diff (--- a/file / +++ b/file / @@ -lines +lines @@)
+    if (patchCount === 0 && (patchBlock.includes('--- ') || patchBlock.includes('+++ ') || patchBlock.includes('@@ '))) {
+      const udiffHunkRegex = /@@\s*-\d+(?:,\d+)?\s*\+\d+(?:,\d+)?\s*@@[\r\n]+([\s\S]*?)(?=(?:@@\s*-\d+|$))/g;
+      let uMatch;
+      while ((uMatch = udiffHunkRegex.exec(patchBlock)) !== null) {
+        const hunkLines = uMatch[1].split('\n');
+        const searchLines = [];
+        const replaceLines = [];
+        for (const line of hunkLines) {
+          if (line.startsWith('-')) {
+            searchLines.push(line.slice(1));
+          } else if (line.startsWith('+')) {
+            replaceLines.push(line.slice(1));
+          } else if (line.startsWith(' ') || line === '') {
+            searchLines.push(line.startsWith(' ') ? line.slice(1) : line);
+            replaceLines.push(line.startsWith(' ') ? line.slice(1) : line);
+          }
+        }
+        if (searchLines.length > 0 && replaceLines.length > 0) {
+          applySingleHunk(searchLines.join('\n'), replaceLines.join('\n'));
+        }
+      }
+    }
+
+    // 4. Fallback jika patchBlock adalah CSS snippet murni tanpa pembungkus blok patch
+    if (patchCount === 0 && isLikelyCssSnippet(patchBlock)) {
+      applySingleHunk('', patchBlock);
     }
 
     return { content: modified, patched: patchCount > 0, patchCount, failedCount, editedRanges };
@@ -16755,8 +16910,14 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
         }
       }
 
-      // Dukung penambalan bedah (surgical patch) via <<<ZOZ_EDIT>>> dengan blok SEARCH & REPLACE
-      if (cleanContent.includes('<<<SEARCH') || /(?:<<<{1,3}|<{3,})\s*SEARCH\b/.test(cleanContent)) {
+      // Dukung penambalan bedah (surgical patch) via <<<ZOZ_EDIT>>>, Git conflict, Unified diff, atau CSS snippet
+      const isSurgicalCandidate = isExplicitEdit ||
+        cleanContent.includes('<<<SEARCH') ||
+        /(?:<<<{1,3}|<{3,})\s*SEARCH\b/.test(cleanContent) ||
+        (cleanContent.includes('--- ') && cleanContent.includes('+++ ') && cleanContent.includes('@@ ')) ||
+        (isWebFile && baseContent && isLikelyCssSnippet(cleanContent));
+
+      if (isSurgicalCandidate) {
         if (!baseContent || isUnclosed) {
           // Tanpa dasar atau patch terpotong: jangan pernah menulis teks patch mentah sebagai isi file
           out.patchFailures = (out.patchFailures || 0) + 1;
@@ -16774,6 +16935,9 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
           if (cleanContent.includes('<!DOCTYPE') || (cleanContent.includes('<html') && cleanContent.includes('</html>'))) {
             finalContent = cleanContent;
             isSurgicalPatch = false;
+          } else if (isWebFile && isLikelyCssSnippet(cleanContent)) {
+            finalContent = injectCssIntoHtmlDocument(baseContent, cleanContent);
+            isSurgicalPatch = true;
           } else {
             out.patchFailures = (out.patchFailures || 0) + 1;
             out.rawBlocks.push(rawBlock);
@@ -17252,6 +17416,9 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
       // Bersihkan sisa kalimat permintaan maaf teknis semu dari model tentang pembungkus berkas jika berkas berhasil diekstrak
       out = out.replace(/(?:Mohon\s+maaf,?\s*)?tampaknya\s+ada\s+kendala\s+teknis\s+singkat\s+dengan\s+pembungkus\s+berkas[^\n.]*[\n.]*/gi, '');
       out = out.replace(/Saya\s+akan\s+tulis\s+ulang\s+seluruh\s+website\s+lengkapnya[^\n.]*[\n.]*/gi, '');
+      out = out.replace(/<{3,}\s*SEARCH[\s\S]*?>{3,}(?:\s*REPLACE\b)?/gi, '');
+      out = out.replace(/<<{1,4}>{1,4}/g, '');
+      out = out.replace(/<<>>|< < > >|<<<>>|<<>>>/g, '');
     }
 
     const kept = out.split('\n').filter((line) => {
@@ -17259,7 +17426,8 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
       return t.indexOf('<<<ZOZ_FILE') !== 0 && t.indexOf('<<<END_ZOZ_FILE') !== 0 &&
              t.indexOf('<<<ZOZ_EDIT') !== 0 && t.indexOf('<<<END_ZOZ_EDIT') !== 0 &&
              t.indexOf('<<<ZOZ_MODIFY') !== 0 && t.indexOf('<<<END_ZOZ_MODIFY') !== 0 &&
-             t.indexOf('<<<ZOZ_DELETE') !== 0;
+             t.indexOf('<<<ZOZ_DELETE') !== 0 &&
+             !/^<{3,}\s*SEARCH\b/.test(t) && !/^={3,}\s*$/.test(t) && !/^>{3,}(?:\s*REPLACE\b)?/.test(t);
     });
     const cleaned = [];
     let prevEmpty = false;
@@ -19133,7 +19301,26 @@ ${blocks}
           }
         }
 
-        followupPrompt = `[ZOZ AUTONOMOUS AGENT — EDIT BERKAS "${targetName}"]
+        const isFullRewriteRequested = /\b(?:buat ulang|ulang dari awal|desain ulang total|redesign total|reset total|dari nol|full rewrite)\b/i.test(synthesizedGoal);
+
+        if (isFullRewriteRequested) {
+          followupPrompt = `[ZOZ AUTONOMOUS AGENT — FULL REWRITE BERKAS "${targetName}"]
+${selectedContextBlock}${conversationContext}Berikut adalah KODE SEBELUMNYA dari berkas "${targetName}" (${codeLines.length} baris):
+\`\`\`${lang}
+${codeRefToSend}
+\`\`\`
+
+Instruksi Pengguna: "${synthesizedGoal}"${endocrineFeedback}
+
+MANDAT EKSEKUSI FULL REWRITE:
+Pengguna meminta perancangan ulang total dari awal.
+Tuliskan SELURUH kode dokumen lengkap terbaru (dari awal sampai akhir) di dalam blok:
+<<<ZOZ_FILE name="${targetName}" mime="${activeAIFile.mime || 'text/html'}" lang="${lang}">
+... seluruh kode lengkap terbaru ...
+<<<END_ZOZ_FILE>>>
+DILARANG memberikan janji basa-basi. Mulai respons Anda langsung pada baris pertama!`;
+        } else {
+          followupPrompt = `[ZOZ AUTONOMOUS AGENT — SURGICAL EDIT BERKAS "${targetName}"]
 ${selectedContextBlock}${conversationContext}Berikut adalah KODE ARSITEKTUR LENGKAP dari berkas "${targetName}" (${codeLines.length} baris):
 \`\`\`${lang}
 ${codeRefToSend}
@@ -19141,24 +19328,21 @@ ${codeRefToSend}
 
 Instruksi Pengguna Terkini: "${synthesizedGoal}"${endocrineFeedback}
 
-MANDAT EKSEKUSI ZOZ ENGINE (WAJIB BLOK KODE PADA BARIS PERTAMA):
-1. Anda adalah Zoz Autonomous Engineer yang bertugas memodifikasi berkas ini secara langsung dan nyata.
-2. DILARANG KERAS hanya membalas dengan basa-basi atau janji seperti "Baik, saya akan...", "Saya akan meningkatkan kontras...", atau "Selesai" tanpa blok kode!
-3. RESPON ANDA WAJIB DIMULAI PADA BARIS PERTAMA DENGAN SALAH SATU BLOK KODE BERIKUT:
-   - Jika mengubah bagian/baris tertentu (seperti warna teks, kontras hero, CSS, elemen, atau script):
-<<<ZOZ_EDIT name="${targetName}">
-<<<SEARCH>>>
-[salin persis baris asli yang ingin diubah dari kode lengkap di atas]
-<<<REPLACE>>>
-[baris baru perbaikan yang sudah jelas/kontras/berfungsi]
-<<<END_ZOZ_EDIT>>>
+MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
+1. Anda adalah Zoz Autonomous Engineer yang bertugas memodifikasi berkas ini secara presisi.
+2. DILARANG MENULIS ULANG SELURUH KODE! Ubah HANYA bagian (CSS style, elemen HTML, teks, atau script) yang diminta pengguna.
+3. RESPON ANDA WAJIB DIMULAI PADA BARIS PERTAMA DENGAN FORMAT PENGGANTIAN BERIKUT:
+<<<<<<< SEARCH
+[salin persis beberapa baris asli yang ingin diubah dari kode di atas]
+=======
+[baris baru perbaikan/penambahan yang diinginkan pengguna]
+>>>>>>> REPLACE
 
-   - ATAU jika perubahan menyentuh banyak bagian atau seluruh halaman:
-<<<ZOZ_FILE name="${targetName}" mime="${activeAIFile.mime || 'text/html'}" lang="${lang}">
-... seluruh kode lengkap terbaru ...
-<<<END_ZOZ_FILE>>>
-
-4. Penjelasan singkat maksimal 1 kalimat HANYA boleh diletakkan DI BAWAH blok penutup kode. Prioritas nomor 1 adalah blok kode agar pratinjau website pengguna langsung berubah seketika!`;
+(Format <<<ZOZ_EDIT name="${targetName}"> dengan <<<SEARCH>>> dan <<<REPLACE>>> juga didukung penuh).
+4. Pastikan blok SEARCH memuat konteks baris unik agar pencocokan 100% akurat.
+5. Jika menambahkan aturan CSS atau script baru, pilih blok penutup tag </style> atau </script> terkait sebagai jangkar SEARCH.
+6. DILARANG KERAS membalas dengan basa-basi atau janji seperti "Baik, saya akan...", langsung mulai dengan blok kode pada baris pertama!`;
+        }
       }
     } else {
       followupPrompt = `[Konteks: Pengguna sedang melihat "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan Pengguna: "${val}"\n\nJawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
@@ -23090,20 +23274,23 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           setTimeout(() => {
             if (runOptions._isReflexTurn || runOptions.isAutonomousRepairTurn) return;
             const reflexPrompt = patchFailed
-              ? `[ZOZ REFLEX — PATCH GAGAL COCOK, WAJIB KELUARKAN ZOZ_FILE LENGKAP]:
+              ? `[ZOZ REFLEX — PENCOCOKAN BARIS GAGAL, BERIKAN BLOK TARGET YANG JELAS]:
 Permintaan Pengguna: "${cleanUserText}"
-PENTING: Blok modifikasi presisi (<<<ZOZ_EDIT>>>) Anda tidak cocok dengan baris kode saat ini.
+Blok modifikasi sebelumnya tidak cocok dengan baris kode yang ada.
 Berikut adalah KODE ARSITEKTUR LENGKAP saat ini (${codeLines.length} baris):
 \`\`\`${activeAIFile.lang || 'html'}
 ${codeRefToSend}
 \`\`\`
 
-Untuk menjamin perubahan 100% langsung terpasang ke pratinjau website tanpa kegagalan pencocokan baris:
-WAJIB KELUARKAN KODE LENGKAP TERBARU DI DALAM BLOK <<<ZOZ_FILE name="${targetName}" mime="${activeAIFile.mime || 'text/html'}" lang="${activeAIFile.lang || 'html'}">:
-<<<ZOZ_FILE name="${targetName}" mime="${activeAIFile.mime || 'text/html'}" lang="${activeAIFile.lang || 'html'}">
-... seluruh kode lengkap terbaru yang sudah dimodifikasi ...
-<<<END_ZOZ_FILE>>>.
-DILARANG basa-basi, langsung mulai pada baris pertama respons Anda!`
+TUGAS ANDA:
+1. Periksa kode di atas, temukan baris yang tepat untuk diubah.
+2. Keluarkan blok modifikasi yang memuat 3-5 baris konteks asli di bagian SEARCH agar pencocokan 100% akurat:
+<<<<<<< SEARCH
+[salin persis 3-5 baris kode asli dari referensi di atas]
+=======
+[baris pengganti yang baru]
+>>>>>>> REPLACE
+DILARANG memberikan janji basa-basi. Mulai respons Anda langsung pada baris pertama!`
               : `[ZOZ REFLEX — WAJIB KELUARKAN BLOK KODE PADA BARIS PERTAMA]:
 Pengguna meminta perbaikan/perubahan: "${cleanUserText}"
 Anda sebelumnya hanya menjawab dengan teks janji/percakapan tanpa kode modifikasi!
@@ -23116,16 +23303,12 @@ ${codeRefToSend}
 TUGAS MUTLAK:
 Jangan membuat pengantar, pembukaan, atau basa-basi apa pun lagi!
 LANGSUNG keluarkan blok kode perbaikan pada baris pertama respons Anda:
-<<<ZOZ_EDIT name="${targetName}">
-<<<SEARCH>>>
+<<<<<<< SEARCH
 [salin persis baris asli yang diubah]
-<<<REPLACE>>>
+=======
 [baris baru pengganti yang valid]
-<<<END_ZOZ_EDIT>>>
-Atau jika menyentuh banyak bagian:
-<<<ZOZ_FILE name="${targetName}" mime="${activeAIFile.mime || 'text/html'}" lang="${activeAIFile.lang || 'html'}">
-... seluruh kode lengkap terbaru ...
-<<<END_ZOZ_FILE>>>.`;
+>>>>>>> REPLACE
+(Format <<<ZOZ_EDIT name="${targetName}"> juga didukung penuh).`;
 
             activeStudioAssistantBubble = appendStudioMessage(
               'assistant',
@@ -23299,8 +23482,9 @@ Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
 <<<REPLACE>>>
 [baris kode baru pengganti bagian tersebut saja]
 <<<END_ZOZ_EDIT>>>
-   - Anda dapat menyertakan beberapa pasangan <<<SEARCH>>> dan <<<REPLACE>>> di dalam satu blok <<<ZOZ_EDIT>>> bila perubahan menyentuh lebih dari satu titik (misalnya elemen HTML dan aturan CSS-nya), tanpa menulis ulang sisa kode lainnya.
-4. MULAI KELUARKAN BLOK <<<ZOZ_EDIT>>> LANGSUNG PADA BARIS PERTAMA RESPONS! Jangan menuliskan basa-basi atau kata pengantar sebelum blok <<<ZOZ_EDIT>>> agar mesin pratinjau langsung memproses perubahan secara seketika (realtime zero-latency).
+(Format Aider / Git: <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE juga didukung penuh).
+   - Anda dapat menyertakan beberapa pasangan SEARCH dan REPLACE bila perubahan menyentuh lebih dari satu titik (misalnya elemen HTML dan aturan CSS-nya), tanpa menulis ulang sisa kode lainnya.
+4. MULAI KELUARKAN BLOK PERUBAHAN LANGSUNG PADA BARIS PERTAMA RESPONS! Jangan menuliskan basa-basi atau kata pengantar sebelum blok kode agar mesin pratinjau langsung memproses perubahan secara seketika (realtime zero-latency).
 5. Berikan penjelasan singkat (1-2 kalimat) di baris setelah blok <<<END_ZOZ_EDIT>>> selesai.`;
         } else {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI WEB KELAS DUNIA (FULL FUNCTIONAL & PRATINJAU LANGSUNG)
@@ -24712,8 +24896,9 @@ Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
 <<<REPLACE>>>
 [baris kode baru pengganti bagian tersebut saja]
 <<<END_ZOZ_EDIT>>>
-   - Anda dapat menyertakan beberapa pasangan <<<SEARCH>>> dan <<<REPLACE>>> di dalam satu blok <<<ZOZ_EDIT>>> bila perubahan menyentuh lebih dari satu titik (misalnya elemen HTML dan aturan CSS-nya), tanpa menulis ulang sisa kode lainnya.
-4. MULAI KELUARKAN BLOK <<<ZOZ_EDIT>>> LANGSUNG PADA BARIS PERTAMA RESPONS! Jangan menuliskan basa-basi atau kata pengantar sebelum blok <<<ZOZ_EDIT>>> agar mesin pratinjau langsung memproses perubahan secara seketika (realtime zero-latency).
+(Format Aider / Git: <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE juga didukung penuh).
+   - Anda dapat menyertakan beberapa pasangan SEARCH dan REPLACE bila perubahan menyentuh lebih dari satu titik (misalnya elemen HTML dan aturan CSS-nya), tanpa menulis ulang sisa kode lainnya.
+4. MULAI KELUARKAN BLOK PERUBAHAN LANGSUNG PADA BARIS PERTAMA RESPONS! Jangan menuliskan basa-basi atau kata pengantar sebelum blok kode agar mesin pratinjau langsung memproses perubahan secara seketika (realtime zero-latency).
 5. Berikan penjelasan singkat (1-2 kalimat) di baris setelah blok <<<END_ZOZ_EDIT>>> selesai.`;
         } else {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI WEB KELAS DUNIA (FULL FUNCTIONAL & PRATINJAU LANGSUNG)
