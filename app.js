@@ -13529,13 +13529,16 @@ Aturan wajib:
     });
     // 3. Pastikan tidak ada tag base liar yang merusak anchor in-page (#) dan gradien/masking SVG
     safeHtml = safeHtml.replace(/<base\b[^>]*>/gi, '');
-    // 3b. Bersihkan artefak marker diff / chevron liar (seperti <<>>, <<<<, dll.) yang bocor ke body
+    // 3b. Bersihkan konten residu liar setelah tag penutup </html> jika ada (misal teks percakapan AI, residu marker diff, dll)
+    const closingHtmlIdx = safeHtml.lastIndexOf('</html>');
+    if (closingHtmlIdx !== -1) {
+      safeHtml = safeHtml.slice(0, closingHtmlIdx + 7);
+    }
+    // 3c. Bersihkan artefak baris marker diff / chevron liar (seperti <<>>, <<<<, ====, >>>>, <<<SEARCH>>>, dll.)
+    safeHtml = safeHtml.replace(/(?:^|\n)\s*<{2,}\s*(?:SEARCH|REPLACE|END_ZOZ_[A-Z]+|ZOZ_[A-Z]+)?\s*>{0,}\s*(?=\n|$)/gi, '\n');
+    safeHtml = safeHtml.replace(/(?:^|\n)\s*={3,}\s*(?=\n|$)/g, '\n');
+    safeHtml = safeHtml.replace(/(?:^|\n)\s*>{2,}\s*(?:REPLACE)?\s*(?=\n|$)/gi, '\n');
     safeHtml = safeHtml.replace(/<<{1,4}>{1,4}/g, '');
-    safeHtml = safeHtml.replace(/<{3,}\s*(?:SEARCH|REPLACE|END_ZOZ_[A-Z]+)\s*>{0,3}/gi, '');
-    // 3c. Jika ada console.log(...) naked liar di luar tag <script> di akhir file, amankan ke dalam script
-    safeHtml = safeHtml.replace(/(?:^|\n)\s*(console\.(?:log|warn|error|info)\([^\n]+\);?)\s*(?=\n|$)/g, (match, code) => {
-      return `\n<script>${code}</script>\n`;
-    });
     // 4. Auto-healing tag yang belum tertutup agar live preview tetap tampil sempurna
     if ((safeHtml.match(/<style\b/gi) || []).length > (safeHtml.match(/<\/style>/gi) || []).length) {
       safeHtml += '\n</style>';
@@ -15346,8 +15349,8 @@ Aturan wajib:
     function applySingleHunk(rawSearch, rawReplace) {
       let searchTarget = stripAccidentalLineNumbers(rawSearch.replace(/^\r?\n/, '').replace(/\r?\n\s*$/, ''));
       let replacement = stripAccidentalLineNumbers(rawReplace.replace(/^\r?\n/, '').replace(/\r?\n\s*$/, ''));
-      searchTarget = searchTarget.replace(/<<{1,4}>{1,4}/g, '').trim();
-      replacement = replacement.replace(/<<{1,4}>{1,4}/g, '').trim();
+      searchTarget = searchTarget.replace(/<<{1,4}>{1,4}/g, '');
+      replacement = replacement.replace(/<<{1,4}>{1,4}/g, '');
       if (!searchTarget) return false;
 
       // Bersihkan teks percakapan narasi AI liar yang tidak sengaja tertelan di akhir replacement
@@ -15708,7 +15711,7 @@ Aturan wajib:
         const errText = escapeHtml(this.lastError.message || 'Error terdeteksi di pratinjau');
         const lineInfo = this.lastError.lineno ? ` (baris ${this.lastError.lineno})` : '';
         if (els.studioEndocrineStatusContent) {
-          els.studioEndocrineStatusContent.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f43f5e;"></i> <span title="${errText}">Isu: ${errText}${lineInfo}</span>`;
+          els.studioEndocrineStatusContent.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f43f5e;"></i> <span title="${errText}">Isu: ${errText}${lineInfo}</span><button type="button" class="btn-heal-studio-error" title="Perbaiki error ini secara otonom dengan AI (Claude Loop)"><i class="fa-solid fa-wand-magic-sparkles"></i> Perbaiki AI</button>`;
         }
       } else {
         els.studioEndocrineStatusBar.classList.remove('has-error');
@@ -15725,6 +15728,7 @@ Aturan wajib:
     loopCount: 0,
     maxRounds: 3,
     isActive: false,
+    isAutoHealArmed: false,
     timer: null,
     armTimer: null,
     lastHealedKey: '',
@@ -15734,6 +15738,9 @@ Aturan wajib:
         if (e.target && e.target.closest && e.target.closest('.btn-cancel-agent-loop')) {
           e.stopPropagation();
           this.cancel();
+        } else if (e.target && e.target.closest && e.target.closest('.btn-heal-studio-error')) {
+          e.stopPropagation();
+          this.triggerManualHeal();
         }
       });
     },
@@ -15741,6 +15748,7 @@ Aturan wajib:
     reset() {
       this.loopCount = 0;
       this.isActive = false;
+      this.isAutoHealArmed = false;
       this.lastHealedKey = '';
       if (this.timer) { clearTimeout(this.timer); this.timer = null; }
       if (this.armTimer) { clearTimeout(this.armTimer); this.armTimer = null; }
@@ -15751,6 +15759,22 @@ Aturan wajib:
       console.log('[StudioAutonomousAgent] Loop agen otonom dihentikan pengguna.');
       this.reset();
       showToast('🛑 Loop agen otonom dihentikan. Anda kini memegang kendali manual.', 'info');
+      if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+    },
+
+    triggerManualHeal() {
+      if (STATE.isGenerating || STATE.isSending) {
+        showToast('⚠️ Sedang memproses generasi/tugas AI lainnya...', 'info');
+        return;
+      }
+      const lastErr = StudioEndocrineDiagnostics.lastError;
+      if (!lastErr || !lastErr.message) {
+        showToast('✅ Kode saat ini bersih (0 error).', 'success');
+        return;
+      }
+      this.isAutoHealArmed = true;
+      this.loopCount = 0;
+      this.executeAutoHeal(lastErr);
       if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
     },
 
@@ -15796,6 +15820,7 @@ Aturan wajib:
     // Dipanggil saat pesan baru/patch selesai diterapkan, mengaktifkan jendela verifikasi otonom
     armVerificationTimer(file) {
       if (!file || !STATE.settings.endocrineCodeEnabled) return;
+      this.isAutoHealArmed = true; // KUNCI: verifikasi hanya aktif untuk menindaklanjuti generasi/revisi AI
       if (this.armTimer) clearTimeout(this.armTimer);
       this.armTimer = setTimeout(() => {
         this.armTimer = null;
@@ -15809,9 +15834,10 @@ Aturan wajib:
       if (!lastErr || !lastErr.message) {
         if (this.loopCount > 0) {
           this.updateHud({ type: 'success', round: this.loopCount });
-          this.loopCount = 0;
-          this.isActive = false;
         }
+        this.loopCount = 0;
+        this.isActive = false;
+        this.isAutoHealArmed = false; // Verifikasi tuntas tanpa error
       } else {
         this.onFrameError(lastErr);
       }
@@ -15821,6 +15847,12 @@ Aturan wajib:
       if (!STATE.settings.endocrineCodeEnabled) return;
       if (!activeAIFile || !data || !data.message) return;
       if (STATE.isGenerating || STATE.isSending) return;
+
+      // KUNCI PENGAMAN: Auto-heal otonom HANYA boleh berjalan jika jendela verifikasi aktif (AI baru saja menyelesaikan generasi/edit).
+      // Jangan pernah menyandera UI atau memicu panggilan API otonom tanpa izin saat pengguna sekadar membuka file lama!
+      if (!this.isAutoHealArmed && !this.isActive) {
+        return;
+      }
 
       const isStudioOpen = Boolean(els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show'));
       if (!isStudioOpen) return;
@@ -15836,6 +15868,7 @@ Aturan wajib:
 
       if (this.loopCount >= this.maxRounds) {
         console.warn(`[StudioAutonomousAgent] Mencapai batas maksimal ${this.maxRounds} putaran.`);
+        this.isAutoHealArmed = false;
         return;
       }
 
@@ -15854,6 +15887,7 @@ Aturan wajib:
         this.updateHud({ type: 'success', round: this.loopCount });
         this.loopCount = 0;
         this.isActive = false;
+        this.isAutoHealArmed = false;
       }
     },
 
@@ -15864,6 +15898,7 @@ Aturan wajib:
 
       this.loopCount++;
       this.isActive = true;
+      this.isAutoHealArmed = true;
       this.lastHealedKey = `${lastErr.message}_${lastErr.lineno || 0}`;
 
       const errTitle = (lastErr.message || 'SyntaxError').split('\n')[0].substring(0, 50);
@@ -15901,6 +15936,20 @@ TUGAS MUTLAK ANDA:
 [baris perbaikan yang valid tanpa error]
 <<<END_ZOZ_EDIT>>>
 Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`;
+
+      // Buka panel asisten studio dan tampilkan gelembung perbaikan otonom secara transparan
+      if (els.studioAssistantPanel) els.studioAssistantPanel.classList.remove('is-body-collapsed');
+      openStudioAssistantDrawer();
+
+      appendStudioMessage('user', `🤖 <strong>Auto-Repair (Putaran ${this.loopCount}/${this.maxRounds})</strong>: Memperbaiki <em>${escapeHtml(errTitle)}</em>...`);
+
+      activeStudioAssistantBubble = appendStudioMessage(
+        'assistant',
+        `<span class="typing-cursor"></span> <em>🔧 Claude Agent sedang memperbaiki error "${escapeHtml(errTitle)}"...</em>`
+      );
+
+      if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'none';
+      if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'inline-flex';
 
       const isEditingInCodeMode = Boolean(els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing'));
       handleSendPrompt({
