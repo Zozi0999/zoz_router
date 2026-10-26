@@ -15614,61 +15614,22 @@ Aturan wajib:
       };
     },
 
-    // Bangun referensi kode ringkas agar <<<SEARCH>>> selalu cocok 100% tanpa boros token
+    // Arsitektur Claude Code: Berikan kode arsitektur utuh 100% tanpa memotong/melewatkan baris secara sembarangan
     buildCodeReference(code, userQuery = '', selectedRange = null) {
       if (!code) return '';
       const lines = code.split('\n');
-      if (lines.length <= 1500 && !(selectedRange && selectedRange.hasSelection)) {
+      // Di arsitektur Claude Code / Anthropic, model AI wajib melihat struktur utuh (CSS style, DOM, script)
+      // agar tidak berhalusinasi dan dapat mencocokkan target SEARCH secara presisi.
+      // Dokumen hingga 4.000 baris dikirimkan secara utuh 100%.
+      if (lines.length <= 4000 && !(selectedRange && selectedRange.hasSelection)) {
         return code;
       }
-      const keep = new Set();
-      // Jika pengguna memilih baris di Edit Kode, prioritaskan area sekitar pilihan tersebut!
       if (selectedRange && selectedRange.hasSelection) {
-        const sIdx = Math.max(0, selectedRange.startLine - 15);
-        const eIdx = Math.min(lines.length - 1, selectedRange.endLine + 15);
-        for (let k = sIdx; k <= eIdx; k++) keep.add(k);
+        const sIdx = Math.max(0, selectedRange.startLine - 25);
+        const eIdx = Math.min(lines.length - 1, selectedRange.endLine + 35);
+        return lines.slice(sIdx, eIdx + 1).join('\n');
       }
-      if (lines.length <= 1500) {
-        return code;
-      }
-      // Selalu sertakan awal & akhir dokumen
-      for (let i = 0; i < Math.min(25, lines.length); i++) keep.add(i);
-      for (let i = Math.max(0, lines.length - 20); i < lines.length; i++) keep.add(i);
-
-      // Kata kunci dari permintaan pengguna + baris error Endocrine
-      const words = (userQuery || '').toLowerCase().split(/[^a-z0-9_-]+/).filter(w => w.length >= 3);
-      const errLine = (this.lastError && this.lastError.lineno) ? Number(this.lastError.lineno) - 1 : -1;
-      if (errLine >= 0 && errLine < lines.length) {
-        for (let k = Math.max(0, errLine - 25); k <= Math.min(lines.length - 1, errLine + 25); k++) keep.add(k);
-      }
-
-      const structuralRe = /<(?:!doctype|html|head|title|body|header|nav|main|section|article|aside|footer|form|table|canvas|svg|style|script)\b|\bid=["'][^"']+["']|\bfunction\s+\w+|\bconst\s+\w+\s*=/i;
-      for (let i = 0; i < lines.length; i++) {
-        const l = lines[i];
-        if (structuralRe.test(l)) {
-          for (let k = Math.max(0, i - 2); k <= Math.min(lines.length - 1, i + 4); k++) keep.add(k);
-        }
-        const lower = l.toLowerCase();
-        if (words.some(w => lower.includes(w))) {
-          for (let k = Math.max(0, i - 14); k <= Math.min(lines.length - 1, i + 14); k++) keep.add(k);
-        }
-      }
-
-      const isHtmlDoc = /<!DOCTYPE\s+html|<html\b/i.test(code);
-      const sorted = Array.from(keep).sort((a, b) => a - b);
-      const out = [];
-      let prev = -1;
-      for (const idx of sorted) {
-        if (prev !== -1 && idx > prev + 1) {
-          out.push(isHtmlDoc
-            ? `<!-- ... [baris ${prev + 2}-${idx} dilewati] ... -->`
-            : `/* ... [baris ${prev + 2}-${idx} dilewati] ... */`
-          );
-        }
-        out.push(lines[idx]);
-        prev = idx;
-      }
-      return out.join('\n');
+      return code;
     },
 
     recordError(data) {
@@ -18071,22 +18032,20 @@ ${blocks}
     if (!text || typeof text !== 'string') return false;
     const t = text.trim().toLowerCase();
 
-    // 1. Pujian murni, apresiasi, sapaan, atau ungkapan santai
+    // 1. Pujian murni, apresiasi, sapaan, atau ungkapan santai murni tanpa instruksi apa pun
     const pureChatRegex = /^(?:bagus|bagus\s+banget|bagus\s+sekali|mantap|mantap\s+banget|mantul|keren|keren\s+banget|hebat|luar\s+biasa|suka|suka\s+banget|cantik|rapi|jos|top|good|very\s+good|great|nice|cool|awesome|amazing|perfect|sip|oke|ok|baik|makasih|terima\s+kasih|thanks|thank\s+you|thx|halo|hai|p|hi|hello|wah|asik|siap|yup|ya|yes|wkwk|haha)(?:[\s!.,:;~]*)$/i;
     if (pureChatRegex.test(t)) return false;
 
-    // 2. Kata kerja perubahan atau arahan desain/warna/tata letak/konten (termasuk arahan warna & diagram)
-    const changeVerbsRegex = /\b(?:ubah|ganti|tambah|tambahkan|masukkan|sisipkan|hapus|hilangkan|buang|perbaiki|benahi|bikin|buat|buatkan|modifikasi|revisi|update|edit|pasang|atur|sesuaikan|warnai|beri\s+warna|pakai\s+warna|warna|warnanya|palet|tema|arah|arahnya|layout|tata\s+letak|horizontal|vertikal|ke\s+samping|ke\s+bawah|kiri\s+ke\s+kanan|atas\s+ke\s+bawah|lr|td|tb|perbesar|perkecil|detail|lengkapi|perjelas|percantik|perindah|change|add|remove|fix|modify|revise|update|redesign|replace|color|theme|style|direction)\b/i;
-
-    // 3. Pertanyaan penjelasan / analisis murni tanpa instruksi perubahan
-    const pureQuestionRegex = /^(?:kenapa|mengapa|apa\s+itu|apakah\s+ini|bagaimana\s+cara\s+kerja|siapa|bisa\s+jelaskan|tolong\s+jelaskan|jelaskan|terangkan|tanya)\b/i;
-
-    if (pureQuestionRegex.test(t) && !changeVerbsRegex.test(t)) {
+    // 2. Pertanyaan penjelasan murni tanpa instruksi aksi
+    const pureQuestionRegex = /^(?:kenapa|mengapa|apa\s+itu|apakah\s+ini|bagaimana\s+cara\s+kerja|siapa|apa\s+maksud|apa\s+arti)\b/i;
+    const hasActionWord = /\b(?:ubah|ganti|bikin|buat|perbaiki|jelas|samar|terang|gelap|kontras|lakukan|now|action|kerjakan|terapkan|revisi|edit|fix|update|add|color|warna|tema|desain|tampilan|tambah|kurang|posisi|font|ukuran)\b/i.test(t);
+    if (pureQuestionRegex.test(t) && !hasActionWord) {
       return false;
     }
 
-    // Di dalam Studio composer, hampir semua instruksi non-sapaan dan non-pertanyaan murni adalah arahan kustomisasi pengguna!
-    return changeVerbsRegex.test(t) || t.length >= 6;
+    // Di dalam AI Studio, SEMUA instruksi (termasuk "Lakukan now", "masih kurang jelas/samar", arahan gaya/kontras)
+    // adalah instruksi modifikasi berkas nyata ala Claude Code!
+    return true;
   }
 
   async function submitStudioFollowupPrompt() {
@@ -18128,9 +18087,6 @@ ${blocks}
       : '';
     appendStudioMessage('user', selBadgeHtml + escapeHtml(val));
 
-    // Identifikasi bagian kode yang berkaitan dengan permintaan pengguna
-    const located = StudioEndocrineDiagnostics.locateRelevantSections(currentCode, val, selInfo);
-
     // Bersihkan gelembung pending atau placeholder lama di container aktif agar tidak menumpuk
     const activeStudioContainer = (typeof getActiveStudioMessagesContainer === 'function')
       ? getActiveStudioMessagesContainer()
@@ -18138,7 +18094,7 @@ ${blocks}
     if (activeStudioContainer) {
       activeStudioContainer.querySelectorAll('.studio-msg-row.assistant').forEach(row => {
         const text = row.textContent || '';
-        if (text.includes('Memilih & membaca bagian kode') || (row.querySelector('.typing-cursor') && !row.dataset.hasAnswer)) {
+        if (text.includes('Claude Code Engine:') || (row.querySelector('.typing-cursor') && !row.dataset.hasAnswer)) {
           row.remove();
         }
       });
@@ -18147,7 +18103,7 @@ ${blocks}
     // Siapkan gelembung respon untuk menerima streaming
     activeStudioAssistantBubble = appendStudioMessage(
       'assistant',
-      `<span class="typing-cursor"></span> <em>🔍 Memilih & membaca bagian kode terkait (${escapeHtml(located.summary)})...</em>`
+      `<span class="typing-cursor"></span> <em>⚡ Claude Code Engine: Memuat arsitektur lengkap "${escapeHtml(targetName)}" & menerapkan modifikasi...</em>`
     );
 
     // Ganti tombol kirim menjadi tombol stop generasi
@@ -18172,41 +18128,42 @@ ${blocks}
         }
         let selectedContextBlock = '';
         if (selInfo && selInfo.hasSelection && selInfo.selectedLinesCode) {
-          selectedContextBlock = `\n[FOKUS UTAMA — Pengguna memilih Baris ${selInfo.startLine}–${selInfo.endLine} di Mode Edit Kode]:\n\`\`\`${lang}\n${selInfo.selectedLinesCode}\n\`\`\`\n`;
+          selectedContextBlock = `\n[FOKUS PILIHAN PENGGUNA — Baris ${selInfo.startLine}–${selInfo.endLine} di Edit Kode]:\n\`\`\`${lang}\n${selInfo.selectedLinesCode}\n\`\`\`\n`;
         }
-        const isBroadChange = /(?:seluruh|semua|portofolio|portfolio|website|web|tema|bukan|daripada|ganti|ubah nama)\b/i.test(val);
         const codeLines = currentCode.split('\n');
-        const codeRefToSend = (isBroadChange || codeLines.length <= 1800)
+        const codeRefToSend = (codeLines.length <= 4000)
           ? currentCode
           : StudioEndocrineDiagnostics.buildCodeReference(currentCode, val, selInfo);
 
-        followupPrompt = `[MODE EDIT KODE STUDIO "${targetName}"]
-${selectedContextBlock}[Referensi Kode "${targetName}" (${located.summary})]:
+        followupPrompt = `[CLAUDE CODE AUTONOMOUS AGENT — EDIT BERKAS "${targetName}"]
+${selectedContextBlock}Berikut adalah KODE ARSITEKTUR LENGKAP dari berkas "${targetName}" (${codeLines.length} baris):
 \`\`\`${lang}
 ${codeRefToSend}
 \`\`\`
 
-Permintaan Pengguna: "${val}"${endocrineFeedback}
+Instruksi Pengguna: "${val}"${endocrineFeedback}
 
-PANDUAN OUTPUT EDIT KODE UNTUK AI:
-1. Jika pengguna meminta perubahan spesifik pada baris/bagian tertentu, gunakan blok surgical patch presisi:
+MANDAT EKSEKUSI CLAUDE CODE (DILARANG BICARA TANPA BLOK KODE):
+1. Anda adalah Claude Code Autonomous Engineer yang bertugas memodifikasi berkas ini secara langsung dan nyata.
+2. DILARANG KERAS hanya membalas dengan basa-basi atau janji seperti "Baik, saya akan...", "Saya akan meningkatkan kontras...", atau "Selesai" tanpa blok kode! Jawaban tanpa blok kode adalah KEGAGALAN FATAL.
+3. Anda WAJIB langsung mengeluarkan blok perbaikan kode dalam giliran ini juga:
+   - Jika mengubah bagian/baris tertentu (seperti warna teks, kontras hero, CSS, elemen, atau script):
 <<<ZOZ_EDIT name="${targetName}">
 <<<SEARCH>>>
-[salin persis baris asli yang ingin diubah dari referensi kode di atas]
+[salin persis baris asli yang ingin diubah dari kode lengkap di atas]
 <<<REPLACE>>>
-[baris baru pengganti bagian tersebut saja]
+[baris baru perbaikan yang sudah jelas/kontras/berfungsi]
 <<<END_ZOZ_EDIT>>>
 
-2. Jika perubahan mencakup banyak bagian (seperti mengubah pemilik/nama portofolio di seluruh halaman, mengubah tema, atau merombak tata letak), Anda DAPAT mengeluarkan SELURUH kode file lengkap terbaru di dalam blok:
+   - ATAU jika perubahan menyentuh banyak bagian atau seluruh halaman:
 <<<ZOZ_FILE name="${targetName}" mime="${activeAIFile.mime || 'text/html'}" lang="${lang}">
 ... seluruh kode lengkap terbaru ...
 <<<END_ZOZ_FILE>>>
 
-3. Berikan penjelasan singkat 1 kalimat di luar blok kode.
-PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan langsung aktif di pratinjau website!`;
+4. Tuliskan penjelasan maksimal 1 kalimat di luar blok kode. Prioritas nomor 1 Anda adalah menyajikan blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> agar pratinjau website pengguna langsung berubah seketika!`;
       }
     } else {
-      followupPrompt = `[Konteks: Pengguna sedang melihat "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan / Obrolan Pengguna: "${val}"\n\nATURAN SANGAT KETAT UNTUK AI:\n- Zoz Router SUDAH menampilkan berkas ini.\n- Pengguna TIDAK meminta perubahan kode. Pengguna hanya sedang mengobrol santai, memuji, berkomentar, atau bertanya tentang berkas ini.\n- JANGAN PERNAH merombak, merevisi, atau membuat ulang kode!\n- DILARANG KERAS mengeluarkan blok kode atau blok <<<ZOZ_FILE!\n- Jawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
+      followupPrompt = `[Konteks: Pengguna sedang melihat "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan Pengguna: "${val}"\n\nJawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
     }
 
     // Kirim ke handleSendPrompt dengan mode riwayat terisolasi (terpisah dari History Utama agar tidak penuh!)
@@ -19631,31 +19588,34 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
         endocrineFeedback = `\n[Endocrine Code Sensor]: Error runtime: "${err.message || err}"${err.lineno ? ` (baris ${err.lineno})` : ''}.`;
       }
       const codeLines = currentCode.split('\n');
-      const compactRef = (codeLines.length <= 1500)
+      const compactRef = (codeLines.length <= 4000)
         ? currentCode
         : StudioEndocrineDiagnostics.buildCodeReference(currentCode, rawText);
 
-      const wrappedEditPrompt = `[Edit "${targetName}"]
+      const wrappedEditPrompt = `[CLAUDE CODE SURGICAL EDIT — "${targetName}"]
+Berikut adalah KODE LENGKAP ARSITEKTUR berkas "${targetName}" (${codeLines.length} baris):
 \`\`\`${lang}
 ${compactRef}
 \`\`\`
-Permintaan: "${rawText}"${endocrineFeedback}
+Permintaan Pengguna: "${rawText}"${endocrineFeedback}
 
-PANDUAN OUTPUT REVISI KODE UNTUK AI:
-1. Untuk perubahan spesifik pada bagian tertentu, gunakan blok patch:
+MANDAT EKSEKUSI CLAUDE CODE (WAJIB BLOK KODE):
+1. Anda adalah Claude Code Autonomous Engineer. Tugas Anda adalah memodifikasi kode secara langsung dan nyata.
+2. DILARANG KERAS hanya membalas dengan basa-basi percakapan ("Baik, saya akan...") tanpa kode!
+3. Langsung keluarkan blok perbaikan kode:
 <<<ZOZ_EDIT name="${targetName}">
 <<<SEARCH>>>
-[salin persis baris asli yang ingin diubah dari referensi kode di atas]
+[salin persis baris asli yang diubah dari kode lengkap di atas]
 <<<REPLACE>>>
-[baris baru pengganti bagian tersebut]
+[baris baru pengganti perbaikan]
 <<<END_ZOZ_EDIT>>>
 
-2. Bila perubahan menyentuh banyak bagian atau merombak tata letak, Anda DAPAT mengeluarkan SELURUH kode lengkap terbaru di dalam blok:
+Atau jika merombak tata letak/banyak bagian:
 <<<ZOZ_FILE name="${targetName}" mime="${existingWebFile.mime || 'text/html'}" lang="${lang}">
 ... seluruh kode file lengkap terbaru ...
 <<<END_ZOZ_FILE>>>
 
-Jelaskan singkat perubahannya 1 kalimat di luar blok.`;
+4. Penjelasan maksimal 1 kalimat di luar blok kode. Prioritas utama adalah kode siap pakai!`;
 
       options.overrideText = wrappedEditPrompt;
       options.displayPrompt = rawText;
@@ -22036,6 +21996,50 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       } else {
         // Tetap pastikan perubahan riwayat percakapan studio tersimpan ke disk
         persistStudioCodeChange(activeAIFile.rawContent || activeAIFile.content || '', { session: session });
+
+        // CLAUDE CODE REFLEX: Jika pengguna meminta revisi/perubahan kode, namun AI hanya membalas dengan teks obrolan
+        // tanpa blok kode (seperti berjanji "Baik, saya akan..."), picu otomatis putaran refleks untuk memaksa pengeluaran kode!
+        const wantsCode = isCodeRevisionRequest(cleanUserText);
+        const hasBlockMarker = assistantText && (assistantText.includes('<<<ZOZ_EDIT') || assistantText.includes('<<<ZOZ_FILE') || assistantText.includes('<<<SEARCH'));
+        if (wantsCode && !hasBlockMarker && !runOptions._isReflexTurn && !runOptions.isAutonomousRepairTurn && !STATE.isGenerating && !STATE.isSending) {
+          console.warn('[ClaudeCodeReflex] AI merespons tanpa blok kode nyata. Memaksa eksekusi kode...');
+          const targetName = activeAIFile.name || 'index.html';
+          setTimeout(() => {
+            const reflexPrompt = `[CLAUDE CODE REFLEX — WAJIB KELUARKAN BLOK KODE]:
+Pengguna meminta perbaikan/perubahan: "${cleanUserText}"
+Anda sebelumnya hanya menjawab dengan teks janji/percakapan: "${cleanAssistantSummary}"
+TETAPI Anda BELUM mengeluarkan blok kode modifikasi (<<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>>)!
+
+TUGAS MUTLAK:
+Jangan membuat pengantar, pembukaan, atau basa-basi apa pun lagi!
+LANGSUNG keluarkan blok kode perbaikan pada baris pertama respons Anda:
+<<<ZOZ_EDIT name="${targetName}">
+<<<SEARCH>>>
+[salin persis baris asli yang diubah]
+<<<REPLACE>>>
+[baris baru pengganti yang valid]
+<<<END_ZOZ_EDIT>>>
+Atau blok <<<ZOZ_FILE name="${targetName}"> ... <<<END_ZOZ_FILE>>>.`;
+
+            activeStudioAssistantBubble = appendStudioMessage(
+              'assistant',
+              `<span class="typing-cursor"></span> <em>⚡ Claude Code Reflex: Mengunci arsitektur & mengeksekusi perubahan kode...</em>`
+            );
+
+            handleSendPrompt({
+              overrideText: reflexPrompt,
+              displayPrompt: `⚡ Claude Reflex: Menghasilkan kode nyata...`,
+              isStudioIsolated: true,
+              studioHistoryMode: runOptions.studioHistoryMode || 'preview',
+              websiteMode: 'preview',
+              isWebCreation: true,
+              isWebsiteRevision: true,
+              skipWebsiteCheck: true,
+              skipDocCheck: true,
+              _isReflexTurn: true
+            });
+          }, 350);
+        }
       }
     }
   }
@@ -22973,7 +22977,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       if (isWebTask && isInitiallyIncomplete && !STATE.abortController?.signal?.aborted) {
         let contRound = 0;
-        const maxContRounds = 3;
+        const maxContRounds = 5;
         while (contRound < maxContRounds && !STATE.abortController?.signal?.aborted) {
           const checkExt = extractGeneratedFiles(fullText, wantsFile);
           const stillIncomplete = checkExt.hasIncompleteFile ||
@@ -24731,7 +24735,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       if (isWebTask && isInitiallyIncomplete && !STATE.abortController?.signal?.aborted) {
         let contRound = 0;
-        const maxContRounds = 3;
+        const maxContRounds = 5;
         while (contRound < maxContRounds && !STATE.abortController?.signal?.aborted) {
           const checkExt = extractGeneratedFiles(fullText, wantsFile);
           const stillIncomplete = checkExt.hasIncompleteFile ||
