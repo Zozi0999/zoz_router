@@ -9147,16 +9147,17 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         return;
       }
 
-      // Penanganan khusus blok markdown ```html / ```jsx / ```tsx atau dokumen HTML saat opsi pratinjau website aktif
+      // Penanganan khusus blok markdown ```html / ```jsx / ```tsx atau dokumen HTML / Naked HTML
       const isWebPreviewMode = Boolean(options && (options.websiteMode === 'preview' || options.isWebCreation || options.hideCodeInChat));
-      if (isWebPreviewMode && !isExplicitCodeInChat) {
+      const NAKED_HTML_START = /^<(?:!DOCTYPE\s+html|html|head|body|div|section|nav|header|footer|main|aside|article|style|script|table|form|template)\b/i;
+      if (!isExplicitCodeInChat) {
         if (!insideFileBlock && !insideHtmlBlock && !insideRawHtmlBlock) {
           if (t.startsWith(TICK3 + 'html') || t.startsWith(TICK3 + 'htm') || t.startsWith(TICK3 + 'jsx') || t.startsWith(TICK3 + 'tsx') || t.startsWith(TICK3 + 'react')) {
             insideHtmlBlock = true;
             out.push('\n> 🌐 *Sedang merancang kode website... (terisolasi di pratinjau live)*\n');
             return;
           }
-          if (t.startsWith('<!DOCTYPE html') || t.startsWith('<html') || (t.startsWith('<') && (t.startsWith('<head') || t.startsWith('<body')))) {
+          if (NAKED_HTML_START.test(t)) {
             insideRawHtmlBlock = true;
             out.push('\n> 🌐 *Sedang merancang kode website... (terisolasi di pratinjau live)*\n');
             return;
@@ -9167,7 +9168,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           }
           return;
         } else if (insideRawHtmlBlock) {
-          if (t.includes('</html>')) {
+          if (t.includes('</html>') || (t.startsWith('</') && (t.includes('</div>') || t.includes('</section>') || t.includes('</main>')) && !processed.includes('</html>'))) {
             insideRawHtmlBlock = false;
           }
           return;
@@ -9204,10 +9205,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             if (!out.some(l => l && l.includes('Sedang memilih & mengganti bagian kode terkait'))) {
               out.push(progressBanner);
             }
-          } else if (isWeb && isWebPreviewMode && !isExplicitCodeInChat) {
+          } else if (isWeb && !isExplicitCodeInChat) {
+            // Mandat Kaisar: Isolasi total kode website di belakang layar secara anonim
             insideIsolatedBlock = true;
             out.push(`\n> 🌐 *Sedang merancang kode website ${escapeHtml(currentFileName || 'index.html')}... (terisolasi di pratinjau live)*\n`);
-          } else if (!isExplicitCodeInChat && (options && (options.websiteMode === 'preview' || options.hideCodeInChat))) {
+          } else if (!isExplicitCodeInChat && (isWebPreviewMode || options.hideCodeInChat)) {
             insideIsolatedBlock = true;
             out.push('\n> 🌐 *Sedang meracik dan menyiapkan berkas website... (terisolasi di pratinjau)*\n');
           } else {
@@ -9955,6 +9957,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     chunk = chunk.replace(/\n?```\s*$/i, '');
 
     // 3. Bersihkan artefak chevron / diff marker liar
+    chunk = chunk.replace(/(?:^|\n)\s*<{2,}\s*(?:SEARCH|REPLACE|END_ZOZ_[A-Z]+|ZOZ_[A-Z]+)?[^>\n]*>{0,}\s*(?=\n|$)/gi, '\n');
+    chunk = chunk.replace(/(?:^|\n)\s*={3,}\s*(?=\n|$)/g, '\n');
+    chunk = chunk.replace(/(?:^|\n)\s*>{2,}\s*(?:REPLACE)?[^>\n]*>{0,}\s*(?=\n|$)/gi, '\n');
+    chunk = chunk.replace(/<{2,}>{1,}|<{1,}>{2,}/g, '');
+    chunk = chunk.replace(/<<>>/g, '');
     chunk = chunk.replace(/^<<{1,4}>{1,4}\s*/gm, '');
     chunk = chunk.replace(/\s*<<{1,4}>{1,4}$/gm, '');
 
@@ -10122,6 +10129,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           enhanceCodeBlocks(bubbleText);
           renderMessageFiles(assistantRow, reExtracted.files);
         } else {
+          finalDisplayContent = stripGeneratedFileBlocks(mergedRaw, [], {
+            ...contRunOptions,
+            isIncomplete: hasIncomplete
+          });
           bubbleText.innerHTML = renderMarkdown(finalDisplayContent);
           enhanceCodeBlocks(bubbleText);
         }
@@ -11350,11 +11361,23 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           textToDisplay = '';
         }
       }
-      if (msg.role === 'assistant' && msg.files && msg.files.length > 0) {
-        textToDisplay = stripGeneratedFileBlocks(textToDisplay, (msg.files || []).map(f => f.rawBlock).filter(Boolean), {
+      if (msg.role === 'assistant') {
+        const rawBlocks = (msg.files && msg.files.length > 0)
+          ? msg.files.map(f => f.rawBlock).filter(Boolean)
+          : [];
+        textToDisplay = stripGeneratedFileBlocks(textToDisplay, rawBlocks, {
           websiteMode: msg.websiteMode,
           docFormat: msg.docFormat
         });
+        // Auto-ekstrak file jika belum ada file terdaftar tetapi teks memuat kode website/dokumen
+        if ((!msg.files || msg.files.length === 0) && (msg.content?.includes('<<<ZOZ_FILE') || msg.content?.includes('<!DOCTYPE html') || msg.content?.includes('<html'))) {
+          try {
+            const reExtracted = extractGeneratedFiles(msg.content, true, { websiteMode: msg.websiteMode || 'preview' });
+            if (reExtracted.files && reExtracted.files.length > 0) {
+              msg.files = reExtracted.files;
+            }
+          } catch (_) {}
+        }
       }
       appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs, false, msg.latency, msg.timestamp || session.updatedAt || session.createdAt, msg);
     });
@@ -13703,12 +13726,14 @@ Aturan wajib:
     if (closingHtmlIdx !== -1) {
       safeHtml = safeHtml.slice(0, closingHtmlIdx + 7);
     }
-    // 3c. Bersihkan artefak baris marker diff / chevron liar (seperti <<>>, <<<<, ====, >>>>, <<<SEARCH>>>, dll.)
-    safeHtml = safeHtml.replace(/(?:^|\n)\s*<{2,}\s*(?:SEARCH|REPLACE|END_ZOZ_[A-Z]+|ZOZ_[A-Z]+)?\s*>{0,}\s*(?=\n|$)/gi, '\n');
+    // 3c. Bersihkan artefak baris marker diff / chevron liar (seperti <<>>, <<>, <>>, <<<<, ====, >>>>, <<<SEARCH>>>, dll.)
+    safeHtml = safeHtml.replace(/(?:^|\n)\s*<{2,}\s*(?:SEARCH|REPLACE|END_ZOZ_[A-Z]+|ZOZ_[A-Z]+)?[^>\n]*>{0,}\s*(?=\n|$)/gi, '\n');
     safeHtml = safeHtml.replace(/(?:^|\n)\s*={3,}\s*(?=\n|$)/g, '\n');
-    safeHtml = safeHtml.replace(/(?:^|\n)\s*>{2,}\s*(?:REPLACE)?\s*(?=\n|$)/gi, '\n');
-    safeHtml = safeHtml.replace(/<<{1,4}>{1,4}/g, '');
+    safeHtml = safeHtml.replace(/(?:^|\n)\s*>{2,}\s*(?:REPLACE)?[^>\n]*>{0,}\s*(?=\n|$)/gi, '\n');
+    safeHtml = safeHtml.replace(/<{2,}>{1,}|<{1,}>{2,}/g, '');
     safeHtml = safeHtml.replace(/<<>>/g, '');
+    safeHtml = safeHtml.replace(/(?:^|\s)<{2,}(?=\s|$)/g, '');
+    safeHtml = safeHtml.replace(/(?:^|\s)>{2,}(?=\s|$)/g, '');
     // 4. Auto-healing tag yang belum tertutup agar live preview tetap tampil sempurna
     safeHtml = repairUnclosedScript(safeHtml);
     if ((safeHtml.match(/<style\b/gi) || []).length > (safeHtml.match(/<\/style>/gi) || []).length) {
@@ -13948,7 +13973,12 @@ Aturan wajib:
 
       ${isFileIncomplete ? `
         <div class="gemini-canvas-warning-strip">
-          <i class="fa-solid fa-triangle-exclamation"></i> Pembuatan kode website terputus di tengah jalan. Anda dapat meneruskannya dengan tombol lanjutan di bawah.
+          <div style="display:flex; align-items:center; justify-content:space-between; width:100%; gap:8px; flex-wrap:wrap;">
+            <span><i class="fa-solid fa-triangle-exclamation"></i> Pembuatan kode website terputus di tengah jalan.</span>
+            <button type="button" class="canvas-direct-continue-btn" style="background:rgba(255,204,0,0.18); border:1px solid #ffcc00; color:#ffcc00; font-size:0.75rem; font-weight:600; padding:4px 10px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;">
+              <i class="fa-solid fa-play"></i> Lanjutkan Sekarang
+            </button>
+          </div>
         </div>
       ` : ''}
     `;
@@ -14079,6 +14109,17 @@ Aturan wajib:
         undoBtn.disabled = !FileRevisionStore.canUndo(file.name);
         redoBtn.disabled = !FileRevisionStore.canRedo(file.name);
         showToast('↪️ Mengembalikan ke revisi berikutnya.', 'info');
+      }
+    });
+
+    card.querySelector('.canvas-direct-continue-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const parentRow = card.closest('.message-row');
+      const continueBtn = parentRow?.querySelector('.continue-response-btn') || document.querySelector('.continue-response-btn');
+      if (continueBtn) {
+        continueBtn.click();
+      } else {
+        showToast('Memulai kelanjutan pembuatan website...', 'info');
       }
     });
   }
@@ -16625,7 +16666,7 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
   function stripGeneratedFileBlocks(text, rawBlocks, options = {}) {
     let out = String(text || '');
     const isExplicitCodeInChat = Boolean(options && options.websiteMode === 'code_in_chat');
-    const shouldHideCode = Boolean(options && (options.websiteMode === 'preview' || options.hideCodeInChat));
+    const shouldHideCode = !isExplicitCodeInChat;
     const isIncomplete = Boolean(options && (options.isIncomplete || options.hasIncompleteFile));
     let hasStrippedDoc = false;
     let hasStrippedWeb = false;
@@ -16705,12 +16746,11 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
           hasStrippedDoc = true;
           if (rawFileName) strippedDocName = rawFileName;
         } else if (isWeb && shouldHideCode) {
-          // WEBSITE (HANYA jika fitur mode pratinjau aktif): Hapus kode website dari gelembung chat (terisolasi di pratinjau live & kartu file studio)
+          // WEBSITE (Universal): Isolasi dan hapus seluruh kode website dari gelembung obrolan chat
           out = out.split(b).join('');
           hasStrippedWeb = true;
           if (rawFileName) strippedWebName = rawFileName;
         } else if (shouldHideCode) {
-          // OPSI EKSPLISIT: "Langsung File Siap Pratinjau" -> Hapus seluruh teks kode dari gelembung chat!
           out = out.split(b).join('');
           hasStrippedWeb = true;
         } else {
@@ -16724,12 +16764,34 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
     if (hasStrippedDoc || hasStrippedWeb || shouldHideCode || (options && (options.docFormat || options.isDocCreation))) {
       // Bersihkan sisa marker jika stream sempat terputus
       out = out.replace(/<<<ZOZ_(?:FILE|EDIT|MODIFY)[\s\S]*?(?:<<<END_ZOZ_(?:FILE|EDIT|MODIFY)>>>|$)/gi, '');
-      // Bersihkan sisa blok kode HTML/JSX utuh atau unclosed jika mode pratinjau terisolasi aktif
+      // Bersihkan sisa blok kode HTML/JSX utuh atau unclosed jika mode terisolasi
       if (shouldHideCode) {
         out = out.replace(/```(?:html|htm|jsx|tsx|react)[\s\S]*?(?:```|$)/gi, '');
         out = out.replace(/<!DOCTYPE\s+html[\s\S]*?(?:<\/html>|$)/gi, '');
         out = out.replace(/<html\b[\s\S]*?(?:<\/html>|$)/gi, '');
         out = out.replace(/```[a-z0-9_-]*\s*```/gi, '');
+
+        // Bersihkan blok naked HTML yang tidak terbungkus markdown fence
+        const rawLines = out.split('\n');
+        const filteredLines = [];
+        let insideNakedHtml = false;
+        for (let i = 0; i < rawLines.length; i++) {
+          const line = rawLines[i];
+          const t = line.trim();
+          if (!insideNakedHtml) {
+            if (/^<(?:!DOCTYPE\s+html|html|head|body|div|section|nav|header|footer|main|aside|article|style|script|table|form)\b/i.test(t)) {
+              insideNakedHtml = true;
+              hasStrippedWeb = true;
+              continue;
+            }
+            filteredLines.push(line);
+          } else {
+            if (t.includes('</html>') || (t.startsWith('</') && (t.includes('</div>') || t.includes('</section>') || t.includes('</main>')))) {
+              insideNakedHtml = false;
+            }
+          }
+        }
+        out = filteredLines.join('\n');
       }
       if (hasStrippedDoc || (options && (options.docFormat || options.isDocCreation))) {
         out = out.replace(/```(?:markdown|md|docx|doc|pdf)[\s\S]*?(?:```|$)/gi, '');
@@ -18397,10 +18459,21 @@ ${blocks}
         const historyKey = isEditingInCodeMode ? '_editChatHistory' : '_studioChatHistory';
         const studioHistory = Array.isArray(activeAIFile[historyKey]) ? activeAIFile[historyKey] : [];
         let conversationContext = '';
+        let synthesizedGoal = val;
         if (studioHistory.length > 0) {
           const lastTurns = studioHistory.slice(-4);
           conversationContext = '\n[RIWAYAT PERCAKAPAN SEBELUMNYA DI STUDIO]:\n' +
             lastTurns.map(t => `${t.role === 'user' ? 'Pengguna' : 'AI'}: ${t.content || t.displayContent || ''}`).join('\n') + '\n';
+
+          // Jika instruksi pengguna berupa konfirmasi lanjutan singkat ("Lakukan now", "kerjakan", "ok", dll)
+          const isShortConfirm = /^(?:lakukan(?:\s+now)?|now|action|kerjakan(?:\s+sekarang)?|terapkan|jalankan|gas|ok|oke|yes|lanjutkan|siap)$/i.test(val.trim());
+          if (isShortConfirm) {
+            const prevUserTurn = [...studioHistory].reverse().find(t => t.role === 'user' && !/^(?:lakukan|now|action|kerjakan|terapkan|ok|oke|yes)$/i.test((t.content || '').trim()));
+            const prevAiTurn = [...studioHistory].reverse().find(t => t.role === 'assistant');
+            if (prevUserTurn || prevAiTurn) {
+              synthesizedGoal = `Pengguna mengonfirmasi "${val}" untuk mengeksekusi permintaan sebelumnya: ${prevUserTurn ? prevUserTurn.content : ''} ${prevAiTurn ? `(Rencana AI: ${prevAiTurn.content})` : ''}`.trim();
+            }
+          }
         }
 
         followupPrompt = `[ZOZ AUTONOMOUS AGENT — EDIT BERKAS "${targetName}"]
@@ -18409,7 +18482,7 @@ ${selectedContextBlock}${conversationContext}Berikut adalah KODE ARSITEKTUR LENG
 ${codeRefToSend}
 \`\`\`
 
-Instruksi Pengguna Terkini: "${val}"${endocrineFeedback}
+Instruksi Pengguna Terkini: "${synthesizedGoal}"${endocrineFeedback}
 
 MANDAT EKSEKUSI ZOZ ENGINE (WAJIB BLOK KODE PADA BARIS PERTAMA):
 1. Anda adalah Zoz Autonomous Engineer yang bertugas memodifikasi berkas ini secara langsung dan nyata.
@@ -22247,7 +22320,17 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   function persistStudioIsolatedTurn(session, promptText, assistantText, generatedFiles, runOptions = {}) {
     const historyKey = (session && session.studioHistoryKey) || (runOptions && runOptions.studioHistoryKey) || (isStudioEditModeActive() ? '_editChatHistory' : '_studioChatHistory');
     const cleanUserText = (runOptions && runOptions.displayPrompt) || promptText || '';
-    const cleanAssistantSummary = hideFileBlocksForDisplay(assistantText || '', { hideAllCodeBlocks: true }).trim() || '✅ Perubahan kode telah diterapkan.';
+    const wantsCode = isCodeRevisionRequest(cleanUserText);
+    const hasBlockMarker = assistantText && (assistantText.includes('<<<ZOZ_EDIT') || assistantText.includes('<<<ZOZ_FILE') || assistantText.includes('<<<SEARCH'));
+    const patchFailed = Boolean(runOptions.patchFailures || (hasBlockMarker && (!generatedFiles || generatedFiles.length === 0)));
+    const isInterimTurn = Boolean((wantsCode && !hasBlockMarker) || patchFailed);
+
+    let cleanAssistantSummary = hideFileBlocksForDisplay(assistantText || '', { hideAllCodeBlocks: true }).trim();
+    if (isInterimTurn) {
+      cleanAssistantSummary = '⚡ Menyelaraskan modifikasi kode ke pratinjau...';
+    } else if (!cleanAssistantSummary) {
+      cleanAssistantSummary = '✅ Perubahan kode telah diterapkan.';
+    }
 
     if (activeAIFile) {
       if (!Array.isArray(activeAIFile[historyKey])) {
@@ -22284,18 +22367,26 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         // ZOZ REFLEX ENGINE: Jika pengguna meminta revisi/perubahan kode, namun AI hanya membalas dengan teks obrolan
         // tanpa blok kode (seperti berjanji "Baik, saya akan..."), ATAU jika blok patch gagal dicocokkan (patchFailures > 0),
         // picu otomatis putaran refleks untuk memaksa pengeluaran kode nyata / kode utuh!
-        const wantsCode = isCodeRevisionRequest(cleanUserText);
-        const hasBlockMarker = assistantText && (assistantText.includes('<<<ZOZ_EDIT') || assistantText.includes('<<<ZOZ_FILE') || assistantText.includes('<<<SEARCH'));
-        const patchFailed = Boolean(runOptions.patchFailures || (hasBlockMarker && (!generatedFiles || generatedFiles.length === 0)));
-        if (((wantsCode && !hasBlockMarker) || patchFailed) && !runOptions._isReflexTurn && !runOptions.isAutonomousRepairTurn) {
+        if (isInterimTurn && !runOptions._isReflexTurn && !runOptions.isAutonomousRepairTurn) {
           console.warn('[ZozReflex] AI merespons tanpa blok kode nyata atau patch gagal dicocokkan. Menjadwalkan eksekusi Zoz Reflex...');
           const targetName = activeAIFile.name || 'index.html';
+          const currentCode = activeAIFile.rawContent || activeAIFile.content || '';
+          const codeLines = currentCode.split('\n');
+          const codeRefToSend = (codeLines.length <= 4000)
+            ? currentCode
+            : StudioEndocrineDiagnostics.buildCodeReference(currentCode, cleanUserText);
+
           setTimeout(() => {
             if (runOptions._isReflexTurn || runOptions.isAutonomousRepairTurn) return;
             const reflexPrompt = patchFailed
               ? `[ZOZ REFLEX — PATCH GAGAL COCOK, WAJIB KELUARKAN ZOZ_FILE LENGKAP]:
 Permintaan Pengguna: "${cleanUserText}"
 PENTING: Blok modifikasi presisi (<<<ZOZ_EDIT>>>) Anda tidak cocok dengan baris kode saat ini.
+Berikut adalah KODE ARSITEKTUR LENGKAP saat ini (${codeLines.length} baris):
+\`\`\`${activeAIFile.lang || 'html'}
+${codeRefToSend}
+\`\`\`
+
 Untuk menjamin perubahan 100% langsung terpasang ke pratinjau website tanpa kegagalan pencocokan baris:
 WAJIB KELUARKAN KODE LENGKAP TERBARU DI DALAM BLOK <<<ZOZ_FILE name="${targetName}" mime="${activeAIFile.mime || 'text/html'}" lang="${activeAIFile.lang || 'html'}">:
 <<<ZOZ_FILE name="${targetName}" mime="${activeAIFile.mime || 'text/html'}" lang="${activeAIFile.lang || 'html'}">
@@ -22304,8 +22395,12 @@ WAJIB KELUARKAN KODE LENGKAP TERBARU DI DALAM BLOK <<<ZOZ_FILE name="${targetNam
 DILARANG basa-basi, langsung mulai pada baris pertama respons Anda!`
               : `[ZOZ REFLEX — WAJIB KELUARKAN BLOK KODE PADA BARIS PERTAMA]:
 Pengguna meminta perbaikan/perubahan: "${cleanUserText}"
-Anda sebelumnya hanya menjawab dengan teks janji/percakapan: "${cleanAssistantSummary}"
-TETAPI Anda BELUM mengeluarkan blok kode modifikasi (<<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>>)!
+Anda sebelumnya hanya menjawab dengan teks janji/percakapan tanpa kode modifikasi!
+
+Berikut adalah KODE ARSITEKTUR LENGKAP saat ini (${codeLines.length} baris):
+\`\`\`${activeAIFile.lang || 'html'}
+${codeRefToSend}
+\`\`\`
 
 TUGAS MUTLAK:
 Jangan membuat pengantar, pembukaan, atau basa-basi apa pun lagi!
@@ -22316,7 +22411,10 @@ LANGSUNG keluarkan blok kode perbaikan pada baris pertama respons Anda:
 <<<REPLACE>>>
 [baris baru pengganti yang valid]
 <<<END_ZOZ_EDIT>>>
-Atau blok <<<ZOZ_FILE name="${targetName}"> ... <<<END_ZOZ_FILE>>>.`;
+Atau jika menyentuh banyak bagian:
+<<<ZOZ_FILE name="${targetName}" mime="${activeAIFile.mime || 'text/html'}" lang="${activeAIFile.lang || 'html'}">
+... seluruh kode lengkap terbaru ...
+<<<END_ZOZ_FILE>>>.`;
 
             activeStudioAssistantBubble = appendStudioMessage(
               'assistant',
