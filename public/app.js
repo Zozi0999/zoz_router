@@ -9148,9 +9148,14 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         return;
       }
 
-      // Penanganan khusus blok markdown ```html / ```jsx / ```tsx atau dokumen HTML / Naked HTML
-      const isWebPreviewMode = Boolean(options && (options.websiteMode === 'preview' || options.isWebCreation || options.hideCodeInChat));
+      // Penanganan khusus blok markdown ```html / ```jsx / ```tsx atau dokumen HTML / Naked HTML & Naked JS
+      const isWebPreviewMode = Boolean(
+        (options && (options.websiteMode === 'preview' || options.isWebCreation || options.hideCodeInChat)) ||
+        (typeof activeAIFile !== 'undefined' && activeAIFile) ||
+        (typeof isWebCreationPrompt === 'function' && isWebCreationPrompt(rawText || ''))
+      );
       const NAKED_HTML_START = /^<(?:!DOCTYPE\s+html|html|head|body|div|section|nav|header|footer|main|aside|article|style|script|table|form|template)\b/i;
+      const CODE_LIKE_LINE = /^(?:<{1,5}>{1,5}|[<>=]{2,}|<<>>|< < > >|<<<>>|window\.|document\.|console\.|setInterval|setTimeout|function\b|const\s+|let\s+|var\s+|\/\*|\*\/|\/\/|<\/script>|<\/html>|<\/body>|<!--).*$/i;
       if (!isExplicitCodeInChat) {
         if (!insideFileBlock && !insideHtmlBlock && !insideRawHtmlBlock) {
           if (t.startsWith(TICK3 + 'html') || t.startsWith(TICK3 + 'htm') || t.startsWith(TICK3 + 'jsx') || t.startsWith(TICK3 + 'tsx') || t.startsWith(TICK3 + 'react')) {
@@ -9158,7 +9163,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             out.push('\n> 🌐 *Sedang merancang kode website... (terisolasi di pratinjau live)*\n');
             return;
           }
-          if (NAKED_HTML_START.test(t)) {
+          if (NAKED_HTML_START.test(t) || (isWebPreviewMode && CODE_LIKE_LINE.test(t))) {
             insideRawHtmlBlock = true;
             out.push('\n> 🌐 *Sedang merancang kode website... (terisolasi di pratinjau live)*\n');
             return;
@@ -9169,10 +9174,16 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           }
           return;
         } else if (insideRawHtmlBlock) {
-          if (t.includes('</html>') || (t.startsWith('</') && (t.includes('</div>') || t.includes('</section>') || t.includes('</main>')) && !processed.includes('</html>'))) {
-            insideRawHtmlBlock = false;
+          // Telan semua tag penutup, komentar kode HTML/JS, dan statemen script lanjutan
+          if (t.includes('</html>') || t === '</script>' || t.startsWith('<!--') || CODE_LIKE_LINE.test(t)) {
+            return;
           }
-          return;
+          // Jika baris adalah teks percakapan biasa (bukan tag / kode), tutup blok raw HTML
+          if (t && !t.startsWith('<') && !t.endsWith(';') && !t.endsWith('}') && !t.endsWith('{')) {
+            insideRawHtmlBlock = false;
+          } else {
+            return;
+          }
         }
       }
 
@@ -9222,6 +9233,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         if (t.indexOf('<<<ZOZ_DELETE') === 0) {
           return; // single line directive
         }
+        if (/^(?:\s*<{2,5}>{1,5}|\s*<<>>|\s*< < > >|\s*<<<>>|\s*<{3,}\s*(?:SEARCH|REPLACE|END)?[^>\n]*>{0,5})\s*$/i.test(t) || /^<{1,5}>{1,5}\s*console\.log/i.test(t)) {
+          return;
+        }
         out.push(line);
         return;
       }
@@ -9249,7 +9263,12 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       out.push('```\n');
     }
 
-    return out.join('\n');
+    let finalCleaned = out.join('\n');
+    finalCleaned = finalCleaned
+      .replace(/<{2,5}>{1,5}|<{1,5}>{2,5}/g, '')
+      .replace(/<<>>|< < > >|<<<>>|<<>>>/g, '')
+      .replace(/(?:^|\n|\s)*console\.(?:log|warn|error|info|debug)\s*\((?:[^)(]+|\((?:[^)(]+|\([^)(]*\))*\))*\);?(?:\s|$)/gi, '\n');
+    return finalCleaned;
   }
 
   // Teks dari model reasoning varian :free sering "robek" per-token (satu KATA
@@ -9966,9 +9985,57 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     chunk = chunk.replace(/^<<{1,4}>{1,4}\s*/gm, '');
     chunk = chunk.replace(/\s*<<{1,4}>{1,4}$/gm, '');
 
+    // Cegah duplikasi penutup </html> atau penambahan komentar liar setelah </html>
+    if (existingText.includes('</html>')) {
+      if (/^\s*(?:<\/html>|<\/body>|<\/script>|\s*<!--[\s\S]*?-->|\s*<<{1,5}>{1,5}\s*)+$/i.test(chunk.trim())) {
+        return existingText;
+      }
+    }
+
     if (!chunk) return existingText;
 
-    // 4. Deteksi overlap teks antara akhir existingText dan awal chunk (cegah duplikasi baris / token)
+    // 4. Deteksi overlap baris (cegah AI mengulang baris terakhir yang sudah ada di tail prompt)
+    const existingLines = existingText.split('\n').map(l => l.trim()).filter(Boolean);
+    const chunkLinesRaw = chunk.split('\n');
+    let skipLines = 0;
+    for (let i = 0; i < Math.min(10, chunkLinesRaw.length); i++) {
+      const trimmedChunkLine = chunkLinesRaw[i].trim();
+      if (!trimmedChunkLine) {
+        skipLines = i + 1;
+        continue;
+      }
+      const lastExistingTail = existingLines.slice(-6);
+      if (lastExistingTail.includes(trimmedChunkLine)) {
+        skipLines = i + 1;
+      } else {
+        break;
+      }
+    }
+    if (skipLines > 0) {
+      chunk = chunkLinesRaw.slice(skipLines).join('\n');
+    }
+
+    // 4b. Cegah 'SyntaxError: Identifier has already been declared' akibat deklarasi ulang const/let di sambungan chunk
+    if (chunk && (existingText.includes('<script') || chunk.includes('<script'))) {
+      const existingDecls = new Set();
+      const declRegex = /\b(?:const|let)\s+([a-zA-Z0-9_$]+)\s*=/g;
+      let m;
+      while ((m = declRegex.exec(existingText)) !== null) {
+        existingDecls.add(m[1]);
+      }
+      if (existingDecls.size > 0) {
+        chunk = chunk.replace(/\b(const|let)\s+([a-zA-Z0-9_$]+)\s*=/g, (fullMatch, kw, id) => {
+          if (existingDecls.has(id)) {
+            return `${id} =`; // Konversi redeclaration menjadi assignment langsung
+          }
+          return fullMatch;
+        });
+      }
+    }
+
+    if (!chunk.trim()) return existingText;
+
+    // 4c. Deteksi overlap teks antara akhir existingText dan awal chunk (cegah duplikasi baris / token)
     const existingTrim = existingText.trimEnd();
     const chunkTrim = chunk.trimStart();
 
@@ -10021,24 +10088,30 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     const backtickCount = (trimmed.match(/```/g) || []).length;
     if (backtickCount % 2 !== 0) return true;
 
+    // Check for HTML document completion
+    const htmlStarts = (trimmed.match(/<html\b/gi) || (trimmed.match(/<!DOCTYPE\s+html/gi) || [])).length;
+    const htmlEnds = (trimmed.match(/<\/html>/gi) || []).length;
+    const scriptStarts = (trimmed.match(/<script\b/gi) || []).length;
+    const scriptEnds = (trimmed.match(/<\/script>/gi) || []).length;
+    const styleStarts = (trimmed.match(/<style\b/gi) || []).length;
+    const styleEnds = (trimmed.match(/<\/style>/gi) || []).length;
+    const hasClosedHtml = htmlEnds > 0 && htmlEnds >= htmlStarts && scriptStarts <= scriptEnds && styleStarts <= styleEnds;
+
+    // Jika dokumen HTML sudah ditutup sempurna dengan </html> dan skrip/style berpasangan,
+    // dokumen ini sudah 100% SELESAI dan TIDAK terpotong (meskipun tanpa marker <<<END_ZOZ_FILE>>>).
+    if (hasClosedHtml) return false;
+
     // Check for unclosed ZOZ_FILE block (toleran terhadap tag penutup tanpa chevrons trailing)
     const zozFileStarts = (trimmed.match(/<<<ZOZ_(?:FILE|EDIT|MODIFY)/g) || []).length;
     const zozFileEnds = (trimmed.match(/<<<END_ZOZ_(?:FILE|EDIT|MODIFY)[^\n>]*(?:>|$)/g) || []).length;
-    if (zozFileStarts > zozFileEnds) return true;
+    if (zozFileStarts > zozFileEnds && !hasClosedHtml) return true;
 
     // Check for unclosed HTML document
-    const htmlStarts = (trimmed.match(/<html\b/gi) || (trimmed.match(/<!DOCTYPE\s+html/gi) || [])).length;
-    const htmlEnds = (trimmed.match(/<\/html>/gi) || []).length;
     if (htmlStarts > htmlEnds) return true;
     if ((trimmed.includes('<!DOCTYPE html') || /<html\b/i.test(trimmed)) && !/<\/html>/i.test(trimmed)) return true;
 
     // Check for unclosed script or style tag inside HTML
-    const scriptStarts = (trimmed.match(/<script\b/gi) || []).length;
-    const scriptEnds = (trimmed.match(/<\/script>/gi) || []).length;
     if (scriptStarts > scriptEnds) return true;
-
-    const styleStarts = (trimmed.match(/<style\b/gi) || []).length;
-    const styleEnds = (trimmed.match(/<\/style>/gi) || []).length;
     if (styleStarts > styleEnds) return true;
 
     if (trimmed.length < 50) return false;
@@ -10180,9 +10253,13 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
         // Re-ekstrak file dan sinkronkan pratinjau kartu canvas secara langsung
         const reExtracted = extractGeneratedFiles(currentAccumulated, true);
-        const hasIncomplete = reExtracted.hasIncompleteFile ||
+        const isHtmlFinished = isWebContinue && currentAccumulated.includes('</html>');
+        const hasIncomplete = isHtmlFinished ? false : (
+          reExtracted.hasIncompleteFile ||
+          isOutputTruncated(currentAccumulated) ||
           ((currentAccumulated.includes('<!DOCTYPE html') || currentAccumulated.includes('<html') || currentAccumulated.includes('<<<ZOZ_FILE')) &&
-           !currentAccumulated.includes('</html>') && !currentAccumulated.includes('<<<END_ZOZ_FILE'));
+           !currentAccumulated.includes('</html>'))
+        );
 
         if (options.targetCard && reExtracted.files.length > 0) {
           const updatedF = reExtracted.files[0];
@@ -10197,7 +10274,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           }
         }
 
-        if (!hasIncomplete && !isOutputTruncated(currentAccumulated)) {
+        if (isHtmlFinished || (!hasIncomplete && !isOutputTruncated(currentAccumulated))) {
           completedSuccessfully = true;
           break;
         }
@@ -10213,9 +10290,13 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
       // Re-ekstrak status akhir
       const finalExtracted = extractGeneratedFiles(currentAccumulated, true);
-      const isStillIncomplete = finalExtracted.hasIncompleteFile ||
+      const isHtmlFinishedFinal = isWebContinue && currentAccumulated.includes('</html>');
+      const isStillIncomplete = isHtmlFinishedFinal ? false : (
+        finalExtracted.hasIncompleteFile ||
+        isOutputTruncated(currentAccumulated) ||
         ((currentAccumulated.includes('<!DOCTYPE html') || currentAccumulated.includes('<html') || currentAccumulated.includes('<<<ZOZ_FILE')) &&
-         !currentAccumulated.includes('</html>') && !currentAccumulated.includes('<<<END_ZOZ_FILE'));
+         !currentAccumulated.includes('</html>'))
+      );
 
       let finalDisplayContent = currentAccumulated;
       if (finalExtracted.files.length > 0) {
@@ -10223,6 +10304,27 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           ...contRunOptions,
           isIncomplete: isStillIncomplete
         });
+
+        // Imunisasi Total: Bersihkan sisa kebocoran kode mentah JavaScript, HTML yatim, dan komentar
+        finalDisplayContent = finalDisplayContent
+          .replace(/<script\b[\s\S]*?<\/script>/gi, '')
+          .replace(/<\/script>/gi, '')
+          .replace(/<\/html>/gi, '')
+          .replace(/<\/body>/gi, '')
+          .replace(/<!DOCTYPE\s+html>/gi, '')
+          .replace(/<!--[\s\S]*?-->/g, '')
+          .replace(/(?:^|\n)\s*(?:window\.addEventListener|document\.(?:getElementById|querySelector|addEventListener)|setInterval|setTimeout|function\s+[a-zA-Z0-9_$]+|const\s+[a-zA-Z0-9_$]+\s*=|let\s+[a-zA-Z0-9_$]+\s*=|var\s+[a-zA-Z0-9_$]+\s*=)[\s\S]*?(?=\n\n|$)/gi, '')
+          .replace(/(?:^|\n)\s*\/\*[\s\S]*?\*\/\s*(?=\n|$)/g, '')
+          .replace(/<{2,5}>{1,5}|<{1,5}>{2,5}/g, '')
+          .replace(/<<>>|< < > >|<<<>>|<<>>>/g, '')
+          .trim();
+
+        if (!finalDisplayContent || finalDisplayContent.length < 25 || /^[\s\n\r]*[{}();,<>/]+[\s\n\r]*$/.test(finalDisplayContent)) {
+          finalDisplayContent = isStillIncomplete
+            ? `⚠️ **Pembuatan Website Belum Tuntas (Terpotong di Tengah Jalan)**\n\nKode antarmuka website telah diamankan di kartu pratinjau di bawah. Klik tombol **Lanjutkan Sekarang** untuk menuntaskan sisa komponen.`
+            : `🌐 **Website Telah Selesai Dirancang!**\n\nKode antarmuka website telah berhasil dibuat dan diisolasi dengan aman di pratinjau live. Klik tombol **Pratinjau** pada kartu di bawah untuk membuka dan menguji websitenya secara langsung.`;
+        }
+
         if (bubbleText) {
           bubbleText.innerHTML = renderMarkdown(finalDisplayContent);
           enhanceCodeBlocks(bubbleText);
@@ -13915,10 +14017,10 @@ Aturan wajib:
     });
     // 3. Pastikan tidak ada tag base liar yang merusak anchor in-page (#) dan gradien/masking SVG
     safeHtml = safeHtml.replace(/<base\b[^>]*>/gi, '');
-    // 3b. Bersihkan konten residu liar setelah tag penutup </html> jika ada (misal teks percakapan AI, residu marker diff, dll)
-    const closingHtmlIdx = safeHtml.lastIndexOf('</html>');
-    if (closingHtmlIdx !== -1) {
-      safeHtml = safeHtml.slice(0, closingHtmlIdx + 7);
+    // 3b. Bersihkan konten residu liar setelah tag penutup </html> pertama yang valid (buang duplikasi tag dan komentar liar)
+    const firstClosingHtmlIdx = safeHtml.indexOf('</html>');
+    if (firstClosingHtmlIdx !== -1) {
+      safeHtml = safeHtml.slice(0, firstClosingHtmlIdx + 7);
     }
     // 3c. Bersihkan artefak baris marker diff / chevron liar (seperti <<>>, <<<>>, <<<<, ====, >>>>, <<<SEARCH>>>, dll.)
     safeHtml = safeHtml.replace(/(?:^|\n)\s*<{2,5}\s*(?:SEARCH|REPLACE|END_ZOZ_[A-Z]+|ZOZ_[A-Z]+)?[^>\n]*>{0,5}\s*(?=\n|$)/gi, '\n');
@@ -13931,11 +14033,35 @@ Aturan wajib:
 
     // 3d. Bersihkan kode JavaScript telanjang (seperti console.log(...)) yang tertulis di luar tag <script>
     // atau di sekitar delimiter chevron yang dapat bocor dan tampak di layar pratinjau
-    safeHtml = safeHtml.replace(/(?:<\/body>|<\/html>)?\s*(?:<{1,5}>{1,5}\s*)?(?:console\.log\s*\([^;]*?\);?\s*)+(?:<{1,5}>{1,5})?/gi, (match) => {
+    safeHtml = safeHtml.replace(/(?:<\/body>|<\/html>)?\s*(?:<{1,5}>{1,5}\s*)?(?:console\.(?:log|warn|error|info|debug)\s*\((?:[^)(]+|\((?:[^)(]+|\([^)(]*\))*\))*\);?\s*)+(?:<{1,5}>{1,5})?/gi, (match) => {
       return match.includes('</html>') ? '</html>' : (match.includes('</body>') ? '</body>' : '');
     });
     safeHtml = safeHtml.replace(/<{1,5}>{1,5}\s*[\s\S]*?\s*<{1,5}>{1,5}/g, '');
-    safeHtml = safeHtml.replace(/(?:^|\n)\s*console\.log\s*\([^;]*?\);?\s*(?=\n|$)/gi, '\n');
+    safeHtml = safeHtml.replace(/(?:^|\n|\s)*console\.(?:log|warn|error|info|debug)\s*\((?:[^)(]+|\((?:[^)(]+|\([^)(]*\))*\))*\);?(?:\s|$)/gi, '\n');
+
+    // 3e. Cegah SyntaxError: Identifier '...' has already been declared akibat deklarasi ganda di dalam <script>
+    safeHtml = safeHtml.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (match, attrs, scriptBody) => {
+      const counts = {};
+      const declRegex = /\b(?:const|let)\s+([a-zA-Z0-9_$]+)\s*=/g;
+      let m;
+      while ((m = declRegex.exec(scriptBody)) !== null) {
+        const id = m[1];
+        counts[id] = (counts[id] || 0) + 1;
+      }
+      const seen = new Set();
+      const cleanedScript = scriptBody.replace(/\b(const|let)\s+([a-zA-Z0-9_$]+)\s*=/g, (fullMatch, kw, id) => {
+        if ((counts[id] || 0) > 1) {
+          if (!seen.has(id)) {
+            seen.add(id);
+            return `let ${id} =`;
+          } else {
+            return `${id} =`;
+          }
+        }
+        return fullMatch;
+      });
+      return `<script${attrs}>${cleanedScript}</script>`;
+    });
     // 4. Auto-healing tag yang belum tertutup agar live preview tetap tampil sempurna
     safeHtml = repairUnclosedScript(safeHtml);
     if ((safeHtml.match(/<style\b/gi) || []).length > (safeHtml.match(/<\/style>/gi) || []).length) {
@@ -16469,11 +16595,10 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
         idx = end + 1;
       } else {
         // Pemulihan otomatis jika respons terputus sebelum tag penutup <<<END_ZOZ_FILE>>>
-        isUnclosed = true;
-        out.hasIncompleteFile = true;
         content = lines.slice(idx + 1).join('\n');
         rawBlock = lines.slice(idx).join('\n');
         idx = lines.length;
+        isUnclosed = true;
       }
 
       // Bersihkan pembungkus markdown fence jika model menyertakannya di dalam ZOZ_FILE
@@ -16505,8 +16630,14 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
       const isReactFile = lowerFileName.endsWith('.jsx') || lowerFileName.endsWith('.tsx') || lowerLang === 'jsx' || lowerLang === 'tsx' || lowerLang === 'react';
       const isWebFile = lowerFileName.endsWith('.html') || lowerFileName.endsWith('.htm') || isReactFile || lowerLang === 'html' || lowerLang === 'htm';
       const hasSurgicalMarkers = isExplicitEdit || cleanContent.includes('<<<SEARCH') || /(?:<<<{1,3}|<{3,})\s*SEARCH\b/.test(cleanContent);
-      if (!hasSurgicalMarkers && isWebFile && (cleanContent.includes('<!DOCTYPE html') || cleanContent.includes('<html')) && !cleanContent.includes('</html>')) {
-        isUnclosed = true;
+      if (!hasSurgicalMarkers && isWebFile && (cleanContent.includes('<!DOCTYPE html') || cleanContent.includes('<html'))) {
+        if (cleanContent.includes('</html>')) {
+          isUnclosed = false;
+        } else {
+          isUnclosed = true;
+          out.hasIncompleteFile = true;
+        }
+      } else if (end < 0) {
         out.hasIncompleteFile = true;
       }
 
@@ -16655,11 +16786,12 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
         const isEligibleFallback = (allowFallback && body.length >= 200) || isFullHtmlOrSvg || isMermaidFence || (isDocFence && body.trim().length >= 30);
         if (!isEligibleFallback) continue;
 
-        const isUnclosed = !hasClosingFence || (
+        const isHtmlFinished = (langTag === 'html' || langTag === 'htm' || body.includes('<!DOCTYPE html') || body.includes('<html')) && body.includes('</html>');
+        const isUnclosed = !isHtmlFinished && (!hasClosingFence || (
           !isReactFence &&
           (langTag === 'html' || langTag === 'htm' || body.includes('<!DOCTYPE html') || body.includes('<html')) &&
           !body.includes('</html>')
-        );
+        ));
 
         if (isUnclosed) {
           out.hasIncompleteFile = true;
@@ -16859,6 +16991,10 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
           }
         });
       }
+    }
+
+    if (Array.isArray(out.files) && out.files.length > 0) {
+      out.hasIncompleteFile = out.files.some(f => f.isIncomplete);
     }
 
     return out;
@@ -17087,6 +17223,10 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
                           content.includes('>>>>') ||
                           content.includes('<!DOCTYPE html') ||
                           content.includes('<html') ||
+                          content.includes('window.addEventListener') ||
+                          content.includes('document.getElementById') ||
+                          content.includes('</script>') ||
+                          content.includes('</html>') ||
                           NAKED_HTML_START.test(content) ||
                           /```(?:html|htm|jsx|tsx|css|js)/i.test(content);
 
@@ -17107,9 +17247,23 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
           hideCodeInChat: true
         });
         cleaned = hideFileBlocksForDisplay(cleaned, { hideAllCodeBlocks: true });
-        cleaned = cleaned.replace(/<{2,5}>{1,5}|<{1,5}>{2,5}/g, '').replace(/<<>>|< < > >|<<<>>|<<>>>/g, '').replace(/(?:^|\n)\s*console\.log\s*\([^;]*?\);?\s*(?=\n|$)/gi, '\n').trim();
 
-        if (!cleaned) {
+        // Imunisasi Total Retroaktif: Bersihkan sisa kode JavaScript telanjang, tag HTML yatim, dan komentar
+        cleaned = cleaned
+          .replace(/<script\b[\s\S]*?<\/script>/gi, '')
+          .replace(/<\/script>/gi, '')
+          .replace(/<\/html>/gi, '')
+          .replace(/<\/body>/gi, '')
+          .replace(/<!DOCTYPE\s+html>/gi, '')
+          .replace(/<!--[\s\S]*?-->/g, '')
+          .replace(/(?:^|\n)\s*(?:window\.addEventListener|document\.(?:getElementById|querySelector|addEventListener)|setInterval|setTimeout|function\s+[a-zA-Z0-9_$]+|const\s+[a-zA-Z0-9_$]+\s*=|let\s+[a-zA-Z0-9_$]+\s*=|var\s+[a-zA-Z0-9_$]+\s*=)[\s\S]*?(?=\n\n|$)/gi, '')
+          .replace(/(?:^|\n)\s*\/\*[\s\S]*?\*\/\s*(?=\n|$)/g, '')
+          .replace(/<{2,5}>{1,5}|<{1,5}>{2,5}/g, '')
+          .replace(/<<>>|< < > >|<<<>>|<<>>>/g, '')
+          .replace(/(?:^|\n)\s*console\.log\s*\([^;]*?\);?\s*(?=\n|$)/gi, '\n')
+          .trim();
+
+        if (!cleaned || cleaned.length < 25 || /^[\s\n\r]*[{}();,<>/]+[\s\n\r]*$/.test(cleaned)) {
           cleaned = '🌐 **Website Telah Selesai Dirancang!**\n\nKode antarmuka website telah berhasil dibuat dan diisolasi dengan aman di pratinjau live. Klik tombol **Pratinjau** pada kartu di bawah untuk membuka dan menguji websitenya secara langsung.';
         }
 
@@ -23809,8 +23963,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       // ===== AUTO-CONTINUATION ENGINE UNTUK PEMBUATAN WEBSITE & KODE TERPOTONG =====
       const isWebTask = Boolean(wantsFile || (runOptions && (runOptions.websiteMode || runOptions.isWebCreation)) || isWebsiteCreationPrompt(promptText));
       const hasCompletedSurgicalEdit = fullText.includes('<<<END_ZOZ_EDIT') || fullText.includes('<<<END_ZOZ_MODIFY');
+      const hasClosedHtmlDoc = isWebTask && (fullText.includes('<!DOCTYPE html') || fullText.includes('<html')) && fullText.includes('</html>');
       let initialCheck = extractGeneratedFiles(fullText, wantsFile);
-      const isInitiallyIncomplete = !hasCompletedSurgicalEdit && (
+      const isInitiallyIncomplete = !hasCompletedSurgicalEdit && !hasClosedHtmlDoc && (
         initialCheck.hasIncompleteFile ||
         isOutputTruncated(fullText, doneReason === 'length' ? 'length' : null) ||
         ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
@@ -23821,13 +23976,16 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         let contRound = 0;
         const maxContRounds = 5;
         while (contRound < maxContRounds && !STATE.abortController?.signal?.aborted) {
+          const isMidRoundHtmlClosed = fullText.includes('</html>');
           const checkExt = extractGeneratedFiles(fullText, wantsFile);
-          const stillIncomplete = checkExt.hasIncompleteFile ||
+          const stillIncomplete = !isMidRoundHtmlClosed && (
+            checkExt.hasIncompleteFile ||
             isOutputTruncated(fullText, doneReason === 'length' ? 'length' : null) ||
             ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
-             !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'));
+             !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'))
+          );
 
-          if (!stillIncomplete) break; // Sudah lengkap sempurna!
+          if (!stillIncomplete || isMidRoundHtmlClosed) break; // Sudah lengkap sempurna!
 
           contRound++;
           console.log(`[AutoContinuation Ollama] Kode website terpotong. Menyambung otomatis putaran ${contRound}/${maxContRounds}...`);
@@ -23874,9 +24032,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       // tampil kode mentah berulang (kartu file digantikan oleh kartu di bawah).
       const extractedAiFiles = extractGeneratedFiles(fullText, wantsFile, runOptions);
       const generatedFiles = extractedAiFiles.files;
-      const isFileStillIncomplete = extractedAiFiles.hasIncompleteFile ||
+      const isFinalHtmlClosed = isWebTask && fullText.includes('</html>');
+      const isFileStillIncomplete = !isFinalHtmlClosed && (
+        extractedAiFiles.hasIncompleteFile ||
         ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
-         !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'));
+         !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'))
+      );
 
       if (isFileStillIncomplete) {
         assistantRow.dataset.rawIncompleteText = rawFullTextBeforeStripping;
@@ -25568,8 +25729,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       // ===== AUTO-CONTINUATION ENGINE UNTUK PEMBUATAN WEBSITE & KODE TERPOTONG =====
       const isWebTask = Boolean(wantsFile || (runOptions && (runOptions.websiteMode || runOptions.isWebCreation)) || isWebsiteCreationPrompt(promptText));
       const hasCompletedSurgicalEdit = fullText.includes('<<<END_ZOZ_EDIT') || fullText.includes('<<<END_ZOZ_MODIFY');
+      const hasClosedHtmlDoc = isWebTask && (fullText.includes('<!DOCTYPE html') || fullText.includes('<html')) && fullText.includes('</html>');
       let initialCheck = extractGeneratedFiles(fullText, wantsFile);
-      const isInitiallyIncomplete = !hasCompletedSurgicalEdit && (
+      const isInitiallyIncomplete = !hasCompletedSurgicalEdit && !hasClosedHtmlDoc && (
         initialCheck.hasIncompleteFile ||
         isOutputTruncated(fullText, finishReason) ||
         ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
@@ -25580,13 +25742,16 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         let contRound = 0;
         const maxContRounds = 5;
         while (contRound < maxContRounds && !STATE.abortController?.signal?.aborted) {
+          const isMidRoundHtmlClosed = fullText.includes('</html>');
           const checkExt = extractGeneratedFiles(fullText, wantsFile);
-          const stillIncomplete = checkExt.hasIncompleteFile ||
+          const stillIncomplete = !isMidRoundHtmlClosed && (
+            checkExt.hasIncompleteFile ||
             isOutputTruncated(fullText, finishReason) ||
             ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
-             !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'));
+             !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'))
+          );
 
-          if (!stillIncomplete) break; // Sudah lengkap sempurna!
+          if (!stillIncomplete || isMidRoundHtmlClosed) break; // Sudah lengkap sempurna!
 
           contRound++;
           console.log(`[AutoContinuation OpenRouter] Kode website terpotong. Menyambung otomatis putaran ${contRound}/${maxContRounds}...`);
@@ -25631,9 +25796,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       // tampil kode mentah berulang (kartu file digantikan oleh kartu di bawah).
       const extractedAiFiles = extractGeneratedFiles(fullText, wantsFile, runOptions);
       const generatedFiles = extractedAiFiles.files;
-      const isFileStillIncomplete = extractedAiFiles.hasIncompleteFile ||
+      const isFinalHtmlClosed = isWebTask && fullText.includes('</html>');
+      const isFileStillIncomplete = !isFinalHtmlClosed && (
+        extractedAiFiles.hasIncompleteFile ||
         ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
-         !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'));
+         !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'))
+      );
 
       if (isFileStillIncomplete) {
         assistantRow.dataset.rawIncompleteText = rawFullTextBeforeStripping;
