@@ -13539,31 +13539,35 @@ Aturan wajib:
     const previewBottomSpacerStyle = '\n<style id="zoz-preview-bottom-spacer">html,body{box-sizing:border-box!important;}body{padding-bottom:100px!important;}</style>';
     // 6. Suntikkan Endocrine Telemetry probe script & Live Hot-Reload Bridge ke dalam iframe pratinjau
     const endocrineProbeScript = `\n<script id="zoz-endocrine-preview-probe">
-window.addEventListener('error', function(e) {
-  try {
-    window.parent.postMessage({
-      type: 'ZOZ_STUDIO_FRAME_ERROR',
-      message: e.message || 'Script runtime error',
-      filename: e.filename || '',
-      lineno: e.lineno || 0,
-      colno: e.colno || 0
-    }, '*');
-  } catch(_) {}
-});
 (function() {
-  var _origError = console.error;
-  console.error = function() {
-    _origError.apply(console, arguments);
-    try {
-      var msg = Array.from(arguments).map(function(a) {
-        return (typeof a === 'object') ? JSON.stringify(a) : String(a);
-      }).join(' ');
-      window.parent.postMessage({
-        type: 'ZOZ_STUDIO_FRAME_CONSOLE_ERROR',
-        message: msg
-      }, '*');
-    } catch(_) {}
-  };
+  if (!window.__zozProbeInitialized) {
+    window.__zozProbeInitialized = true;
+    window.addEventListener('error', function(e) {
+      try {
+        window.parent.postMessage({
+          type: 'ZOZ_STUDIO_FRAME_ERROR',
+          message: e.message || 'Script runtime error',
+          filename: e.filename || '',
+          lineno: e.lineno || 0,
+          colno: e.colno || 0
+        }, '*');
+      } catch(_) {}
+    });
+
+    var _origError = console.error;
+    console.error = function() {
+      _origError.apply(console, arguments);
+      try {
+        var msg = Array.from(arguments).map(function(a) {
+          return (typeof a === 'object') ? JSON.stringify(a) : String(a);
+        }).join(' ');
+        window.parent.postMessage({
+          type: 'ZOZ_STUDIO_FRAME_CONSOLE_ERROR',
+          message: msg
+        }, '*');
+      } catch(_) {}
+    };
+  }
 
   // Proteksi link: izinkan hash anchor in-page (#id), arahkan link eksternal ke target="_blank"
   document.addEventListener('click', function(e) {
@@ -13599,6 +13603,11 @@ window.addEventListener('error', function(e) {
       } catch(_) {}
     });
   }
+
+  // Handshake sinyal: Beritahu parent window bahwa bridge & probe telah terpasang dan siap
+  try {
+    window.parent.postMessage({ type: 'ZOZ_STUDIO_BRIDGE_READY' }, '*');
+  } catch(_) {}
 })();
 </script>`;
 
@@ -13951,6 +13960,9 @@ window.addEventListener('error', function(e) {
       this.isApplying = false;
       this.updateBtns();
       renderStudioCodeEditorHighlight(text);
+      if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.isOpen && StudioCodeSearch.query) {
+        StudioCodeSearch.executeSearch(StudioCodeSearch.query);
+      }
       return true;
     },
 
@@ -13963,6 +13975,9 @@ window.addEventListener('error', function(e) {
       this.isApplying = false;
       this.updateBtns();
       renderStudioCodeEditorHighlight(text);
+      if (typeof StudioCodeSearch !== 'undefined' && StudioCodeSearch.isOpen && StudioCodeSearch.query) {
+        StudioCodeSearch.executeSearch(StudioCodeSearch.query);
+      }
       return true;
     },
 
@@ -14506,9 +14521,9 @@ window.addEventListener('error', function(e) {
     if (!ed || !lineNumber || lineNumber < 1) return;
     const lineHeight = 20;
     const clientH = ed.clientHeight || 300;
-    const visibleLines = Math.max(4, Math.floor(clientH / lineHeight));
-    // Posisikan baris di tengah viewport agar jelas terlihat di semua layar (ponsel/desktop)
-    const targetScrollTop = Math.max(0, (lineNumber - Math.floor(visibleLines / 2)) * lineHeight);
+    // Posisikan baris presisi di tengah viewport dengan memperhitungkan padding atas 14px
+    const lineCenterPixel = 14 + (lineNumber - 1) * lineHeight + Math.floor(lineHeight / 2);
+    const targetScrollTop = Math.max(0, Math.floor(lineCenterPixel - clientH / 2));
     ed.scrollTop = targetScrollTop;
     syncStudioEditorScroll();
   }
@@ -14636,11 +14651,16 @@ window.addEventListener('error', function(e) {
         const m = targetSession.messages[i];
         if (!m) continue;
         if (Array.isArray(m.files) && m.files.length > 0) {
-          const f = m.files.find(x => x && (
-            x.name === activeAIFile.name ||
-            (isWeb && /\.(?:html?|jsx|tsx)$/i.test(x.name || '')) ||
-            (isDiagramFile(activeAIFile) && isDiagramFile(x))
-          ));
+          // Cari berkas dengan nama yang cocok persis terlebih dahulu demi perlindungan sesi multi-berkas
+          let f = m.files.find(x => x && x.name === activeAIFile.name);
+          if (!f && m.files.length === 1) {
+            // Fallback longgar HANYA jika pesan berisi tepat 1 berkas tunggal bertipe sejenis
+            if (isWeb && /\.(?:html?|jsx|tsx)$/i.test(m.files[0]?.name || '')) {
+              f = m.files[0];
+            } else if (isDiagramFile(activeAIFile) && isDiagramFile(m.files[0])) {
+              f = m.files[0];
+            }
+          }
           if (f) {
             f.rawContent = trimmedCode;
             f.content = trimmedCode;
@@ -14869,9 +14889,11 @@ window.addEventListener('error', function(e) {
       StudioEndocrineDiagnostics.clear();
       file._renderedRawContent = rawContent;
       const safeHtml = prepareSafeHtmlForPreview(rawContent, file);
-      // Fast path: jika iframe sudah aktif memuat dokumen ini sebelumnya, lakukan hot-reload in-place tanpa destroy context
+      // Fast path: jika iframe sudah aktif memuat dokumen ini sebelumnya dan bridge telah siap, lakukan hot-reload in-place
       const frameWin = els.aiFileStudioFrame ? els.aiFileStudioFrame.contentWindow : null;
-      const canLiveReload = frameWin && els.aiFileStudioFrame.dataset.loadedHtmlDoc === file.name;
+      const canLiveReload = frameWin &&
+        els.aiFileStudioFrame.dataset.loadedHtmlDoc === file.name &&
+        els.aiFileStudioFrame.dataset.bridgeReady === '1';
       if (canLiveReload) {
         try {
           frameWin.postMessage({ type: 'ZOZ_STUDIO_LIVE_RELOAD', html: safeHtml }, '*');
@@ -14881,10 +14903,12 @@ window.addEventListener('error', function(e) {
       }
       els.aiFileStudioFrame.removeAttribute('src');
       els.aiFileStudioFrame.dataset.loadedHtmlDoc = file.name;
+      els.aiFileStudioFrame.dataset.bridgeReady = '0';
       els.aiFileStudioFrame.dataset.lastRawContent = rawContent;
       els.aiFileStudioFrame.srcdoc = safeHtml;
     } else {
       els.aiFileStudioFrame.removeAttribute('src');
+      els.aiFileStudioFrame.dataset.bridgeReady = '0';
       els.aiFileStudioFrame.srcdoc = '';
     }
   }
@@ -14897,6 +14921,7 @@ window.addEventListener('error', function(e) {
     activeAIFile = file;
     if (els.aiFileStudioFrame) {
       els.aiFileStudioFrame.dataset.loadedHtmlDoc = '';
+      els.aiFileStudioFrame.dataset.bridgeReady = '0';
       els.aiFileStudioFrame.dataset.lastRawContent = '';
     }
     const rawContent = file.rawContent || file.content || '';
@@ -15523,6 +15548,10 @@ window.addEventListener('error', function(e) {
         if (els.aiFileStudioFrame && e.source && e.source !== els.aiFileStudioFrame.contentWindow) return;
         if (e.data.type === 'ZOZ_STUDIO_FRAME_ERROR' || e.data.type === 'ZOZ_STUDIO_FRAME_CONSOLE_ERROR') {
           this.recordError(e.data);
+        } else if (e.data.type === 'ZOZ_STUDIO_BRIDGE_READY') {
+          if (els.aiFileStudioFrame) {
+            els.aiFileStudioFrame.dataset.bridgeReady = '1';
+          }
         }
       });
     },
@@ -15680,7 +15709,7 @@ window.addEventListener('error', function(e) {
     let normalizedText = text;
     if (!normalizedText.includes('<<<ZOZ_EDIT') && !normalizedText.includes('<<<ZOZ_MODIFY') && !normalizedText.includes('<<<ZOZ_FILE')) {
       const activeName = (activeAIFile && activeAIFile.name) || 'index.html';
-      if (normalizedText.includes('<<<SEARCH>>>') || /<{5,}\s*SEARCH\b/.test(normalizedText)) {
+      if (normalizedText.includes('<<<SEARCH') || /(?:<<<{1,3}|<{3,})\s*SEARCH\b/.test(normalizedText)) {
         normalizedText = `<<<ZOZ_EDIT name="${activeName}">\n${normalizedText}\n<<<END_ZOZ_EDIT>>>`;
       }
     }
@@ -15748,7 +15777,7 @@ window.addEventListener('error', function(e) {
       const lowerLang = (langMatch && langMatch[1]) ? langMatch[1].toLowerCase() : '';
       const isReactFile = lowerFileName.endsWith('.jsx') || lowerFileName.endsWith('.tsx') || lowerLang === 'jsx' || lowerLang === 'tsx' || lowerLang === 'react';
       const isWebFile = lowerFileName.endsWith('.html') || lowerFileName.endsWith('.htm') || isReactFile || lowerLang === 'html' || lowerLang === 'htm';
-      const hasSurgicalMarkers = isExplicitEdit || cleanContent.includes('<<<SEARCH>>>') || /<{5,}\s*SEARCH\b/.test(cleanContent);
+      const hasSurgicalMarkers = isExplicitEdit || cleanContent.includes('<<<SEARCH') || /(?:<<<{1,3}|<{3,})\s*SEARCH\b/.test(cleanContent);
       if (!hasSurgicalMarkers && isWebFile && (cleanContent.includes('<!DOCTYPE html') || cleanContent.includes('<html')) && !cleanContent.includes('</html>')) {
         isUnclosed = true;
         out.hasIncompleteFile = true;
@@ -15762,7 +15791,7 @@ window.addEventListener('error', function(e) {
       let appliedEditedRanges = [];
       let isSurgicalPatch = false;
       // Dukung penambalan bedah (surgical patch) via <<<ZOZ_EDIT>>> dengan blok SEARCH & REPLACE
-      if (cleanContent.includes('<<<SEARCH>>>') || /<{5,}\s*SEARCH\b/.test(cleanContent)) {
+      if (cleanContent.includes('<<<SEARCH') || /(?:<<<{1,3}|<{3,})\s*SEARCH\b/.test(cleanContent)) {
         // Dasar patch: file yang namanya cocok persis (Studio aktif / workspace), atau file web terbaru sesi
         let baseContent = '';
         const studioIsOpen = Boolean(els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show'));
@@ -18005,7 +18034,9 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
         if (!activeAIFile || !els.aiFileStudioFrame || !els.aiFileStudioEditor) return;
         const val = els.aiFileStudioEditor.value;
         const ext = (activeAIFile.name || '').split('.').pop().toLowerCase();
-        if (ext === 'html' || ext === 'htm') {
+        const isWeb = ext === 'html' || ext === 'htm' || ext === 'xhtml' || ext === 'jsx' || ext === 'tsx' ||
+                      activeAIFile.lang === 'jsx' || activeAIFile.lang === 'tsx' || activeAIFile.lang === 'react';
+        if (isWeb) {
           const safeHtml = prepareSafeHtmlForPreview(val, activeAIFile);
           const frameWin = els.aiFileStudioFrame.contentWindow;
           if (frameWin && els.aiFileStudioFrame.dataset.loadedHtmlDoc === activeAIFile.name) {
@@ -29250,6 +29281,7 @@ Aturan:
         }
         if (els.aiFileStudioFrame) {
           els.aiFileStudioFrame.dataset.loadedHtmlDoc = '';
+          els.aiFileStudioFrame.dataset.bridgeReady = '0';
           els.aiFileStudioFrame.dataset.lastRawContent = '';
         }
         activeAIFile = null;
