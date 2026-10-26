@@ -5178,6 +5178,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
                   }
                 });
               }
+              scrubScatteredCodeFromSession(s);
             });
           }
         } catch (e) {}
@@ -10052,6 +10053,201 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     return false;
   }
 
+  // ==================== UNIVERSAL RESPONSE CONTINUATION ENGINE ====================
+  // Dapat dipanggil langsung dari tombol kartu canvas (.canvas-direct-continue-btn)
+  // maupun tombol aksi gelembung chat (.continue-response-btn)
+  async function executeResponseContinuation(assistantRow, options = {}) {
+    if (STATE.isGenerating || STATE.isSending) {
+      showToast('Masih ada respons yang sedang dihasilkan — tunggu selesai atau tekan Stop dulu.', 'info');
+      return;
+    }
+
+    const session = options.session || getActiveSession();
+    if (!session) {
+      showToast('Sesi tidak ditemukan untuk melanjutkan respons.', 'error');
+      return;
+    }
+
+    let row = assistantRow;
+    if (!row && options.targetCard) {
+      row = options.targetCard.closest('.message-row');
+    }
+    if (!row) {
+      const rows = document.querySelectorAll('.message-row.assistant');
+      if (rows.length > 0) row = rows[rows.length - 1];
+    }
+
+    const file = options.file || (options.targetCard && options.targetCard._aiFile) || (row && row._aiFile) || null;
+    const isWebContinue = Boolean(options.isWebsite || options.isWebContinue || (file && /\.(?:html?|jsx|tsx)$/i.test(file.name || '')) || row?.dataset?.rawIncompleteText);
+
+    let rawBaseText = (row && row.dataset.rawIncompleteText) || options.previousText || '';
+    if (!rawBaseText && file) {
+      rawBaseText = file.rawBlock || (file.rawContent ? `<<<ZOZ_FILE name="${file.name || 'index.html'}">\n${file.rawContent}` : '');
+    }
+    if (!rawBaseText && Array.isArray(session.messages)) {
+      const lastAssistantMsg = [...session.messages].reverse().find(m => m.role === 'assistant');
+      if (lastAssistantMsg) rawBaseText = lastAssistantMsg.content || '';
+    }
+
+    if (!rawBaseText) {
+      showToast('⚠️ Tidak dapat mendeteksi potongan kode yang terputus.', 'warning');
+      return;
+    }
+
+    const directBtn = options.targetCard?.querySelector('.canvas-direct-continue-btn') || row?.querySelector('.canvas-direct-continue-btn');
+    const origDirectHtml = directBtn ? directBtn.innerHTML : '';
+    if (directBtn) {
+      directBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Melanjutkan...';
+      directBtn.disabled = true;
+    }
+    if (options.triggerBtn) {
+      options.triggerBtn.remove();
+    }
+
+    const bubbleText = row?.querySelector('.msg-text-content');
+    if (bubbleText) {
+      bubbleText.innerHTML = renderMarkdown(hideFileBlocksForDisplay(rawBaseText)) + '<span class="typing-cursor"></span>';
+    }
+
+    let continuePrompt = isWebContinue
+      ? "KODE WEBSITE ANDA TERPUTUS DI TENGAH JALAN. Lanjutkan kode secara persis mulai dari baris dan karakter terakhir yang terpotong. JANGAN mengulang kode dari awal, JANGAN membuat pembukaan, penjelasan, atau basa-basi apa pun. Langsung lanjutkan sintaks kode HTML/CSS/JS yang belum selesai sampai tuntas hingga penutup </html> dan <<<END_ZOZ_FILE>>>."
+      : "Lanjutkan penjelasan/kode secara persis mulai dari kata/kalimat terakhir yang terpotong. JANGAN mengulang teks dari awal, langsung teruskan kelanjutannya.";
+
+    const parsedPrev = splitReasoningAndContent(rawBaseText);
+    if (!isWebContinue && parsedPrev.reasoning && !parsedPrev.content) {
+      continuePrompt = "Lanjutkan dengan memberikan jawaban final secara langsung dan lengkap berdasarkan proses pemikiran yang telah Anda rumuskan di atas. Langsung berikan jawaban tanpa mengulang proses pemikiran.";
+    }
+
+    setGeneratingState(true);
+    STATE.abortController = new AbortController();
+
+    const modelName = options.modelName || session.model || (STATE.mode === 'ollama' ? STATE.settings.ollamaModel : STATE.settings.openRouterModel);
+    const engine = options.engine || (STATE.mode === 'ollama' ? 'ollama' : 'openrouter');
+
+    try {
+      let appendedText = '';
+      const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+      const hasCustomExternalEndpoint = Boolean(STATE.settings.ollamaApiKey && !ep.includes('ollama.com') && !ep.includes('127.0.0.1') && !ep.includes('localhost'));
+      const contRunOptions = {
+        websiteMode: session?.lastWebsiteMode || 'preview',
+        isWebCreation: isWebContinue
+      };
+
+      if (engine === 'openrouter' || !hasCustomExternalEndpoint) {
+        appendedText = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, rawBaseText, contRunOptions);
+      } else {
+        try {
+          appendedText = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, rawBaseText, contRunOptions);
+        } catch (ollamaContErr) {
+          console.warn('[streamContinuation] Ollama gagal, failover otomatis ke OpenRouter Cloud:', ollamaContErr?.message);
+          appendedText = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, rawBaseText, contRunOptions);
+        }
+      }
+
+      const mergedRaw = safeAssistantText(stitchContinuationChunk(rawBaseText, appendedText));
+
+      // Re-ekstrak file jika kelanjutan melengkapi kode berkas website / dokumen
+      const reExtracted = extractGeneratedFiles(mergedRaw, true);
+      const hasIncomplete = reExtracted.hasIncompleteFile ||
+        ((mergedRaw.includes('<!DOCTYPE html') || mergedRaw.includes('<html') || mergedRaw.includes('<<<ZOZ_FILE')) &&
+         !mergedRaw.includes('</html>') && !mergedRaw.includes('<<<END_ZOZ_FILE'));
+
+      let finalDisplayContent = mergedRaw;
+      if (reExtracted.files.length > 0) {
+        finalDisplayContent = stripGeneratedFileBlocks(mergedRaw, reExtracted.rawBlocks, {
+          ...contRunOptions,
+          isIncomplete: hasIncomplete
+        });
+        if (bubbleText) {
+          bubbleText.innerHTML = renderMarkdown(finalDisplayContent);
+          enhanceCodeBlocks(bubbleText);
+        }
+        if (row) renderMessageFiles(row, reExtracted.files);
+      } else {
+        finalDisplayContent = stripGeneratedFileBlocks(mergedRaw, [], {
+          ...contRunOptions,
+          isIncomplete: hasIncomplete
+        });
+        if (bubbleText) {
+          bubbleText.innerHTML = renderMarkdown(finalDisplayContent);
+          enhanceCodeBlocks(bubbleText);
+        }
+      }
+
+      // Perbarui iframe pratinjau kartu canvas secara langsung
+      if (options.targetCard && reExtracted.files.length > 0) {
+        const updatedF = reExtracted.files[0];
+        if (updatedF) {
+          const cardIframe = options.targetCard.querySelector('.gemini-canvas-iframe');
+          if (cardIframe) cardIframe.srcdoc = prepareSafeHtmlForPreview(updatedF.rawContent || updatedF.content || '', updatedF);
+          const cardCode = options.targetCard.querySelector('.gemini-canvas-code code');
+          if (cardCode) {
+            cardCode.textContent = updatedF.rawContent || updatedF.content || '';
+            try { if (window.hljs) window.hljs.highlightElement(cardCode); } catch (_) {}
+          }
+          if (!hasIncomplete) {
+            options.targetCard.querySelector('.gemini-canvas-warning-strip')?.remove();
+          }
+        }
+      }
+
+      if (hasIncomplete) {
+        if (row) row.dataset.rawIncompleteText = mergedRaw;
+        if (directBtn) {
+          directBtn.innerHTML = origDirectHtml || '<i class="fa-solid fa-play"></i> Lanjutkan Sekarang';
+          directBtn.disabled = false;
+        }
+      } else {
+        if (row) delete row.dataset.rawIncompleteText;
+        if (directBtn) {
+          directBtn.closest('.gemini-canvas-warning-strip')?.remove();
+        }
+      }
+
+      let targetMsg = null;
+      if (Array.isArray(session.messages)) {
+        for (let i = session.messages.length - 1; i >= 0; i--) {
+          const msg = session.messages[i];
+          const msgContent = (msg && typeof msg.content === 'string') ? msg.content : '';
+          if (msg && msg.role === 'assistant' && (msgContent === rawBaseText || msgContent === options.previousText || msgContent.startsWith(rawBaseText.substring(0, 50)))) {
+            targetMsg = msg;
+            break;
+          }
+        }
+      }
+      if (targetMsg) {
+        targetMsg.content = safeAssistantText(finalDisplayContent);
+        if (reExtracted.files.length > 0) targetMsg.files = reExtracted.files;
+      } else {
+        const lastMsg = (session.messages && session.messages.length > 0) ? session.messages[session.messages.length - 1] : null;
+        if (lastMsg && lastMsg.role === 'assistant') {
+          lastMsg.content = safeAssistantText(finalDisplayContent);
+          if (reExtracted.files.length > 0) lastMsg.files = reExtracted.files;
+        }
+      }
+      if (row) row.dataset.fullContent = safeAssistantText(finalDisplayContent);
+      session.updatedAt = new Date().toISOString();
+      savePersistedState();
+      renderChatHistory(els.searchHistoryInput?.value || '');
+
+      const container = options.container || row?.querySelector('.msg-actions');
+      if (container && (hasIncomplete || isOutputTruncated(mergedRaw))) {
+        attachContinuationButton(container, session, row, modelName, engine, mergedRaw, { isWebsite: isWebContinue });
+      }
+
+      showToast(hasIncomplete ? '⚠️ Kode masih berlanjut, tekan Lanjutkan lagi untuk menuntaskan.' : '✅ Pembuatan website selesai sempurna!', hasIncomplete ? 'info' : 'success');
+      AudioEngine.click();
+    } catch (err) {
+      if (directBtn) {
+        directBtn.innerHTML = origDirectHtml || '<i class="fa-solid fa-play"></i> Lanjutkan Sekarang';
+        directBtn.disabled = false;
+      }
+      showToast('Gagal melanjutkan pembuatan website: ' + err.message, 'error');
+    } finally {
+      setGeneratingState(false);
+    }
+  }
+
   function attachContinuationButton(container, session, assistantRow, modelName, engine, previousText, customOptions = {}) {
     if (!container) return;
     container.querySelector('.continue-response-btn')?.remove();
@@ -10070,113 +10266,15 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (STATE.isGenerating || STATE.isSending) {
-        showToast('Masih ada respons yang sedang dihasilkan — tunggu selesai atau tekan Stop dulu.', 'info');
-        return;
-      }
-      btn.remove();
-      const bubbleText = assistantRow.querySelector('.msg-text-content');
-      const rawBaseText = assistantRow.dataset.rawIncompleteText || previousText;
-
-      let continuePrompt = isWebContinue
-        ? "KODE WEBSITE ANDA TERPUTUS DI TENGAH JALAN. Lanjutkan kode secara persis mulai dari baris dan karakter terakhir yang terpotong. JANGAN mengulang kode dari awal, JANGAN membuat pembukaan, penjelasan, atau basa-basi apa pun. Langsung lanjutkan sintaks kode HTML/CSS/JS yang belum selesai sampai tuntas hingga penutup </html> dan <<<END_ZOZ_FILE>>>."
-        : "Lanjutkan penjelasan/kode secara persis mulai dari kata/kalimat terakhir yang terpotong. JANGAN mengulang teks dari awal, langsung teruskan kelanjutannya.";
-
-      const parsedPrev = splitReasoningAndContent(rawBaseText);
-      if (!isWebContinue && parsedPrev.reasoning && !parsedPrev.content) {
-        continuePrompt = "Lanjutkan dengan memberikan jawaban final secara langsung dan lengkap berdasarkan proses pemikiran yang telah Anda rumuskan di atas. Langsung berikan jawaban tanpa mengulang proses pemikiran.";
-      }
-
-      bubbleText.innerHTML = renderMarkdown(hideFileBlocksForDisplay(rawBaseText)) + '<span class="typing-cursor"></span>';
-      setGeneratingState(true);
-      STATE.abortController = new AbortController();
-
-      try {
-        let appendedText = '';
-        const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
-        const hasCustomExternalEndpoint = Boolean(STATE.settings.ollamaApiKey && !ep.includes('ollama.com') && !ep.includes('127.0.0.1') && !ep.includes('localhost'));
-        const contRunOptions = {
-          websiteMode: session?.lastWebsiteMode || 'preview',
-          isWebCreation: isWebContinue
-        };
-
-        if (engine === 'openrouter' || !hasCustomExternalEndpoint) {
-          appendedText = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, rawBaseText, contRunOptions);
-        } else {
-          try {
-            appendedText = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, rawBaseText, contRunOptions);
-          } catch (ollamaContErr) {
-            console.warn('[streamContinuation] Ollama gagal, failover otomatis ke OpenRouter Cloud:', ollamaContErr?.message);
-            appendedText = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, rawBaseText, contRunOptions);
-          }
-        }
-
-        const mergedRaw = safeAssistantText(stitchContinuationChunk(rawBaseText, appendedText));
-
-        // Re-ekstrak file jika kelanjutan melengkapi kode berkas website / dokumen
-        const reExtracted = extractGeneratedFiles(mergedRaw, true);
-        const hasIncomplete = reExtracted.hasIncompleteFile ||
-          ((mergedRaw.includes('<!DOCTYPE html') || mergedRaw.includes('<html') || mergedRaw.includes('<<<ZOZ_FILE')) &&
-           !mergedRaw.includes('</html>') && !mergedRaw.includes('<<<END_ZOZ_FILE'));
-
-        let finalDisplayContent = mergedRaw;
-        if (reExtracted.files.length > 0) {
-          finalDisplayContent = stripGeneratedFileBlocks(mergedRaw, reExtracted.rawBlocks, {
-            ...contRunOptions,
-            isIncomplete: hasIncomplete
-          });
-          bubbleText.innerHTML = renderMarkdown(finalDisplayContent);
-          enhanceCodeBlocks(bubbleText);
-          renderMessageFiles(assistantRow, reExtracted.files);
-        } else {
-          finalDisplayContent = stripGeneratedFileBlocks(mergedRaw, [], {
-            ...contRunOptions,
-            isIncomplete: hasIncomplete
-          });
-          bubbleText.innerHTML = renderMarkdown(finalDisplayContent);
-          enhanceCodeBlocks(bubbleText);
-        }
-
-        if (hasIncomplete) {
-          assistantRow.dataset.rawIncompleteText = mergedRaw;
-        } else {
-          delete assistantRow.dataset.rawIncompleteText;
-        }
-
-        let targetMsg = null;
-        if (Array.isArray(session.messages)) {
-          for (let i = session.messages.length - 1; i >= 0; i--) {
-            const msg = session.messages[i];
-            const msgContent = (msg && typeof msg.content === 'string') ? msg.content : '';
-            if (msg && msg.role === 'assistant' && (msgContent === rawBaseText || msgContent === previousText || msgContent.startsWith(previousText.substring(0, 50)))) {
-              targetMsg = msg;
-              break;
-            }
-          }
-        }
-        if (targetMsg) {
-          targetMsg.content = safeAssistantText(finalDisplayContent);
-          if (reExtracted.files.length > 0) targetMsg.files = reExtracted.files;
-        } else {
-          const lastMsg = (session.messages && session.messages.length > 0) ? session.messages[session.messages.length - 1] : null;
-          if (lastMsg && lastMsg.role === 'assistant') {
-            lastMsg.content = safeAssistantText(finalDisplayContent);
-            if (reExtracted.files.length > 0) lastMsg.files = reExtracted.files;
-          }
-        }
-        assistantRow.dataset.fullContent = safeAssistantText(finalDisplayContent);
-        session.updatedAt = new Date().toISOString();
-        savePersistedState();
-        renderChatHistory(els.searchHistoryInput?.value || '');
-
-        if (hasIncomplete || isOutputTruncated(mergedRaw)) {
-          attachContinuationButton(container, session, assistantRow, modelName, engine, mergedRaw, { isWebsite: isWebContinue });
-        }
-      } catch (err) {
-        showToast('Gagal melanjutkan output: ' + err.message, 'error');
-      } finally {
-        setGeneratingState(false);
-      }
+      await executeResponseContinuation(assistantRow, {
+        container,
+        session,
+        modelName,
+        engine,
+        previousText,
+        isWebsite: isWebContinue,
+        triggerBtn: btn
+      });
     });
 
     container.appendChild(btn);
@@ -11337,6 +11435,13 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     if (els.pullUpNewChatWrapper) {
       els.pullUpNewChatWrapper.classList.remove('visible');
       els.pullUpNewChatWrapper.style.display = 'none';
+    }
+
+    if (typeof scrubScatteredCodeFromSession === 'function') {
+      const wasMutated = scrubScatteredCodeFromSession(session);
+      if (wasMutated) {
+        savePersistedState();
+      }
     }
     session.messages.forEach((msg, idx) => {
       if (msg.type === 'image_generation' || msg.isImageGen) {
@@ -13732,8 +13837,14 @@ Aturan wajib:
     safeHtml = safeHtml.replace(/(?:^|\n)\s*>{2,}\s*(?:REPLACE)?[^>\n]*>{0,}\s*(?=\n|$)/gi, '\n');
     safeHtml = safeHtml.replace(/<{2,}>{1,}|<{1,}>{2,}/g, '');
     safeHtml = safeHtml.replace(/<<>>/g, '');
+    safeHtml = safeHtml.replace(/< < > >/g, '');
     safeHtml = safeHtml.replace(/(?:^|\s)<{2,}(?=\s|$)/g, '');
     safeHtml = safeHtml.replace(/(?:^|\s)>{2,}(?=\s|$)/g, '');
+
+    // 3d. Bersihkan kode JavaScript telanjang (seperti console.log(...)) yang tertulis di luar tag <script>
+    // atau di sekitar delimiter chevron yang dapat bocor dan tampak di layar pratinjau
+    safeHtml = safeHtml.replace(/(?:<\/body>|<\/html>)?\s*(?:<<>>\s*)?console\.log\([^)]*\);?\s*(?:<<>>)?/gi, '');
+    safeHtml = safeHtml.replace(/<<>>\s*[\s\S]*?\s*<<>>/g, '');
     // 4. Auto-healing tag yang belum tertutup agar live preview tetap tampil sempurna
     safeHtml = repairUnclosedScript(safeHtml);
     if ((safeHtml.match(/<style\b/gi) || []).length > (safeHtml.match(/<\/style>/gi) || []).length) {
@@ -13906,7 +14017,8 @@ Aturan wajib:
     const docTitle = getGeminiDocTitle(file);
     const rawContent = file.rawContent || file.content || '';
     const safeHtml = prepareSafeHtmlForPreview(rawContent, file);
-    const isFileIncomplete = Boolean(file.isIncomplete);
+    const isFileIncomplete = Boolean(file.isIncomplete ||
+      (rawContent && (rawContent.includes('<!DOCTYPE html') || rawContent.includes('<html')) && (!rawContent.includes('</html>') || !rawContent.includes('</body>'))));
 
     FileRevisionStore.pushRevision(file.name, rawContent);
 
@@ -14112,15 +14224,14 @@ Aturan wajib:
       }
     });
 
-    card.querySelector('.canvas-direct-continue-btn')?.addEventListener('click', (e) => {
+    card.querySelector('.canvas-direct-continue-btn')?.addEventListener('click', async (e) => {
       e.stopPropagation();
       const parentRow = card.closest('.message-row');
-      const continueBtn = parentRow?.querySelector('.continue-response-btn') || document.querySelector('.continue-response-btn');
-      if (continueBtn) {
-        continueBtn.click();
-      } else {
-        showToast('Memulai kelanjutan pembuatan website...', 'info');
-      }
+      await executeResponseContinuation(parentRow, {
+        file,
+        targetCard: card,
+        isWebsite: true
+      });
     });
   }
 
@@ -15004,7 +15115,7 @@ Aturan wajib:
     }
   }
 
-  function renderAIFileIntoStudioPreview(file) {
+  function renderAIFileIntoStudioPreview(file, options = {}) {
     if (!file || !els.aiFileStudioFrame) return;
     const ext = (file.name || '').split('.').pop().toLowerCase();
     const rawContent = file.rawContent || file.content || '';
@@ -15111,9 +15222,10 @@ Aturan wajib:
       const safeHtml = prepareSafeHtmlForPreview(rawContent, file);
       // Fast path: jika iframe sudah aktif memuat dokumen ini sebelumnya dan bridge telah siap, lakukan hot-reload in-place
       const frameWin = els.aiFileStudioFrame ? els.aiFileStudioFrame.contentWindow : null;
-      const canLiveReload = frameWin &&
+      const canLiveReload = !options.forceReload && frameWin &&
         els.aiFileStudioFrame.dataset.loadedHtmlDoc === file.name &&
-        els.aiFileStudioFrame.dataset.bridgeReady === '1';
+        els.aiFileStudioFrame.dataset.bridgeReady === '1' &&
+        !StudioEndocrineDiagnostics.lastError;
       if (canLiveReload) {
         try {
           frameWin.postMessage({ type: 'ZOZ_STUDIO_LIVE_RELOAD', html: safeHtml }, '*');
@@ -16865,6 +16977,173 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
     return { text: out, files: ex.files };
   }
 
+  // ==================== RETROACTIVE SCATTERED CODE SCRUBBER ====================
+  // Membersihkan kode berceceran/bocor dari sesi lama di riwayat (naked HTML, chevrons, block tags)
+  // Menjamin gelembung chat 100% anonim dan bersih, sementara berkas tetap aman di msg.files
+  function scrubScatteredCodeFromSession(session) {
+    if (!session || !Array.isArray(session.messages)) return false;
+    let mutated = false;
+    session.messages.forEach((msg) => {
+      if (!msg || msg.role !== 'assistant') return;
+      const content = String(msg.content || '');
+      const NAKED_HTML_START = /^<(?:!DOCTYPE\s+html|html|head|body|div|section|nav|header|footer|main|aside|article|style|script|table|form|template)\b/im;
+      const hasCodeLeak = content.includes('<<<ZOZ_') ||
+                          content.includes('<<>>') ||
+                          content.includes('< < > >') ||
+                          content.includes('<<<<') ||
+                          content.includes('====') ||
+                          content.includes('>>>>') ||
+                          content.includes('<!DOCTYPE html') ||
+                          content.includes('<html') ||
+                          NAKED_HTML_START.test(content) ||
+                          /```(?:html|htm|jsx|tsx|css|js)/i.test(content);
+
+      if (hasCodeLeak) {
+        // Jika belum ada msg.files atau kosong, ekstrak berkas agar kartu visual tetap ada
+        if (!Array.isArray(msg.files) || msg.files.length === 0) {
+          const extracted = extractGeneratedFiles(content, true);
+          if (extracted.files && extracted.files.length > 0) {
+            msg.files = extracted.files;
+          }
+        }
+        const rawBlocks = (msg.files && msg.files.length > 0)
+          ? msg.files.map(f => f.rawBlock).filter(Boolean)
+          : [];
+
+        let cleaned = stripGeneratedFileBlocks(content, rawBlocks, {
+          websiteMode: msg.websiteMode || 'preview',
+          hideCodeInChat: true
+        });
+        cleaned = hideFileBlocksForDisplay(cleaned, { hideAllCodeBlocks: true });
+        cleaned = cleaned.replace(/<<>>/g, '').replace(/<{2,}>{1,}|<{1,}>{2,}/g, '').replace(/< < > >/g, '').trim();
+
+        if (!cleaned) {
+          cleaned = '🌐 **Website Telah Selesai Dirancang!**\n\nKode antarmuka website telah berhasil dibuat dan diisolasi dengan aman di pratinjau live. Klik tombol **Pratinjau** pada kartu di bawah untuk membuka dan menguji websitenya secara langsung.';
+        }
+
+        if (cleaned !== msg.content) {
+          msg.content = cleaned;
+          msg.displayContent = cleaned;
+          mutated = true;
+        }
+      }
+    });
+    return mutated;
+  }
+
+  // ==================== NEMOTRON FREE AUTONOMOUS CODE SCRUBBER AGENT ====================
+  // Mengintegrasikan model gratis OpenRouter (nvidia/nemotron-3-ultra-550b-a55b:free / super:free)
+  // untuk mendeteksi kode yang tercecer di gelembung obrolan dan membersihkannya secara otomatis
+  const ZozNemotronAutonomousScrubber = {
+    MODELS: [
+      'nvidia/nemotron-3-ultra-550b-a55b:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
+      'meta-llama/llama-3.3-70b-instruct:free',
+      'google/gemini-2.0-flash-exp:free'
+    ],
+
+    hasScatteredCode(text) {
+      if (!text || typeof text !== 'string') return false;
+      const NAKED_HTML = /<(?:!DOCTYPE\s+html|html|head|body|div|section|nav|header|footer|main|aside|article|style|script|table|form|template)\b/i;
+      const CHEVRONS = /<<>>|< < > >|<<<<|>>>>|====/;
+      const CODE_BLOCKS = /```(?:html|htm|jsx|tsx|css|javascript|js)\b/i;
+      const ZOZ_BLOCKS = /<<<ZOZ_(?:FILE|EDIT|MODIFY)/;
+      return NAKED_HTML.test(text) || CHEVRONS.test(text) || CODE_BLOCKS.test(text) || ZOZ_BLOCKS.test(text);
+    },
+
+    async scrubSessionWithNemotron(session, onProgress = null) {
+      if (!session || !Array.isArray(session.messages)) return { cleanedCount: 0 };
+      let cleanedCount = 0;
+
+      // 1. Jalankan pembersihan lokal deterministik terlebih dahulu (0ms latency, zero loss)
+      const locallyMutated = scrubScatteredCodeFromSession(session);
+      if (locallyMutated) cleanedCount++;
+
+      // 2. Periksa apakah masih ada pesan asisten yang memuat sisa kode bocor kompleks
+      const targetMessages = session.messages.filter(m => m && m.role === 'assistant' && this.hasScatteredCode(m.content));
+      if (targetMessages.length === 0) {
+        if (locallyMutated) {
+          savePersistedState();
+          renderChatMessages(session);
+        }
+        return { cleanedCount };
+      }
+
+      const key = STATE.settings.openRouterKey || '';
+      if (!key) {
+        // Fallback pembersihan heuristik lokal jika API key tidak tersedia
+        scrubScatteredCodeFromSession(session);
+        savePersistedState();
+        renderChatMessages(session);
+        return { cleanedCount: targetMessages.length };
+      }
+
+      for (let i = 0; i < targetMessages.length; i++) {
+        const msg = targetMessages[i];
+        if (onProgress) onProgress(i + 1, targetMessages.length);
+
+        const promptText = `Anda adalah Zoz Autonomous Code Scrubber.
+TUGAS ANDA:
+Teks respons berikut mengalami kebocoran kode website/HTML/JavaScript atau tag delimiter liar (seperti <<>>, <<<ZOZ_FILE>>>, dsb).
+KODE WEBSITE SUDAH DIAMANKAN DI TEMPAT LAIN.
+Tugas Anda adalah membuang SEMUA potongan kode mentah, tag HTML telanjang, dan chevron diff dari teks ini.
+Kembalikan HANYA 1-2 paragraf penjelasan rapi yang sopan dan profesional dalam bahasa Indonesia yang merangkum apa yang telah dirancang untuk pengguna, TANPA menyertakan satu baris pun kode HTML/CSS/JS.
+
+Teks yang bocor:
+"""
+${msg.content.slice(0, 3000)}
+"""`;
+
+        let scrubbed = null;
+        for (const model of this.MODELS) {
+          try {
+            const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${key}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': location.origin || 'https://zozi0999.github.io/zoz_router',
+                'X-Title': 'Zoz Router Code Scrubber'
+              },
+              body: JSON.stringify({
+                model,
+                messages: [{ role: 'user', content: promptText }],
+                temperature: 0.2,
+                max_tokens: 300
+              })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const reply = data?.choices?.[0]?.message?.content?.trim();
+              if (reply && !this.hasScatteredCode(reply)) {
+                scrubbed = reply;
+                break;
+              }
+            }
+          } catch (_) {}
+        }
+
+        if (scrubbed) {
+          msg.content = scrubbed;
+          msg.displayContent = scrubbed;
+          cleanedCount++;
+        } else {
+          // Heuristic fallback
+          let fb = stripGeneratedFileBlocks(msg.content, (msg.files || []).map(f => f.rawBlock).filter(Boolean), { hideCodeInChat: true });
+          fb = hideFileBlocksForDisplay(fb, { hideAllCodeBlocks: true });
+          msg.content = fb;
+          msg.displayContent = fb;
+          cleanedCount++;
+        }
+      }
+
+      savePersistedState();
+      renderChatMessages(session);
+      renderChatHistory(els.searchHistoryInput?.value || '');
+      return { cleanedCount };
+    }
+  };
+
   // ==================== WORKSPACE AUTO-SAVE & APPROVAL PIPELINE ====================
   async function processAiGeneratedWorkspaceFiles(generatedFiles) {
     if (!Array.isArray(generatedFiles) || generatedFiles.length === 0) return;
@@ -18384,6 +18663,30 @@ ${blocks}
       activeAIFile.content = els.aiFileStudioEditor.value;
     }
 
+    // Intersepsi Perintah Refresh Browser di dalam Studio
+    if (/^(?:\/?(?:refresh|muat\s*ulang|reload|f5)|tolong\s+(?:refresh|muat\s*ulang))(?:\s+(?:browser|pratinjau|preview|halaman|tab|web|iframe))?$/i.test(val.trim())) {
+      els.inputStudioFollowup.value = '';
+      autoResizeTextarea(els.inputStudioFollowup);
+      if (els.aiFileStudioFrame && activeAIFile) {
+        els.aiFileStudioFrame.removeAttribute('srcdoc');
+        setTimeout(() => {
+          els.aiFileStudioFrame.srcdoc = prepareSafeHtmlForPreview(activeAIFile.rawContent || activeAIFile.content || '', activeAIFile);
+        }, 50);
+      }
+      if (activeAIFile?._cardIframe) {
+        activeAIFile._cardIframe.removeAttribute('srcdoc');
+        setTimeout(() => {
+          activeAIFile._cardIframe.srcdoc = prepareSafeHtmlForPreview(activeAIFile.rawContent || activeAIFile.content || '', activeAIFile);
+        }, 50);
+      }
+      appendStudioMessage('user', escapeHtml(val));
+      appendStudioMessage('assistant', '🔄 *Pratinjau antarmuka browser website telah dimuat ulang secara instan.*');
+      scrollStudioAssistantToBottom();
+      showToast('Pratinjau browser berhasil dimuat ulang.', 'success');
+      AudioEngine.click();
+      return;
+    }
+
     const targetName = activeAIFile.name || 'index.html';
     const ext = targetName.split('.').pop().toLowerCase();
     const isDiagram = isDiagramFile(activeAIFile);
@@ -19886,7 +20189,59 @@ MANDAT EKSEKUSI ZOZ ENGINE (WAJIB BLOK KODE PADA BARIS PERTAMA):
     const docs = [...(STATE.attachedDocs || [])];
 
     if (!rawText && images.length === 0 && docs.length === 0) return;
-    if (STATE.isGenerating || STATE.isSending) return;
+    if ((STATE.isGenerating || STATE.isSending) && !options._isReflexTurn) return;
+    if (options._isReflexTurn) {
+      STATE.isGenerating = false;
+      STATE.isSending = false;
+    }
+
+    // Intersepsi Perintah Scrubbing Kode Bocor Nemotron (/scrub /bersihkan-kode)
+    if (/^\/(?:scrub|bersihkan-kode|bersihkan|purge-code)\b/i.test(rawText.trim())) {
+      if (els.promptInput) els.promptInput.value = '';
+      autoResizeTextarea(els.promptInput);
+      showToast('🧹 Memulai Zoz Nemotron Code Scrubber...', 'info');
+      const activeSes = getActiveSession();
+      if (activeSes) {
+        ZozNemotronAutonomousScrubber.scrubSessionWithNemotron(activeSes, (cur, total) => {
+          showToast(`🧹 Membersihkan gelembung ${cur}/${total}...`, 'info');
+        }).then(({ cleanedCount }) => {
+          showToast(`✨ Pembersihan selesai: ${cleanedCount} pesan kode berceceran dinormalkan.`, 'success');
+          AudioEngine.click();
+        });
+      }
+      return;
+    }
+
+    // Intersepsi Perintah Refresh Browser di Obrolan Utama
+    if (/^(?:\/?(?:refresh|muat\s*ulang|reload|f5)|tolong\s+(?:refresh|muat\s*ulang))(?:\s+(?:browser|pratinjau|preview|halaman|tab|web|iframe))?$/i.test(rawText.trim())) {
+      if (els.promptInput) els.promptInput.value = '';
+      autoResizeTextarea(els.promptInput);
+      const activeSes = getActiveSession();
+      const latestFile = getLatestWebsiteFileInSession(activeSes);
+      let refreshed = false;
+      if (latestFile && latestFile._cardIframe) {
+        latestFile._cardIframe.removeAttribute('srcdoc');
+        setTimeout(() => {
+          latestFile._cardIframe.srcdoc = prepareSafeHtmlForPreview(latestFile.rawContent || latestFile.content || '', latestFile);
+        }, 50);
+        refreshed = true;
+      } else {
+        const visibleIframe = document.querySelector('.gemini-canvas-iframe');
+        if (visibleIframe) {
+          const prevSrc = visibleIframe.srcdoc;
+          visibleIframe.removeAttribute('srcdoc');
+          setTimeout(() => { visibleIframe.srcdoc = prevSrc; }, 50);
+          refreshed = true;
+        }
+      }
+      if (refreshed) {
+        appendUserMessageToChat(rawText);
+        appendAssistantMessageToChat('🔄 **Pratinjau Browser Dimuat Ulang**\n\nHalaman website pada pratinjau live telah dimuat ulang secara instan dengan kode terbaru.');
+        showToast('Pratinjau browser website dimuat ulang.', 'success');
+        AudioEngine.click();
+        return;
+      }
+    }
 
     // Intersepsi Mode WhatsApp: jika pengguna sedang di mode WhatsApp, kirim ke WhatsApp alih-alih AI
     if (STATE.chatMode === 'whatsapp') {
