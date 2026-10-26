@@ -9427,11 +9427,13 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       }
       this.el.innerHTML = (this.prefixHtml || '') + appendInlineTypingCursor(renderMarkdown(hideFileBlocksForDisplay(displayText, this.options), true));
       if (this.onScroll && !userScrolledUp) this.onScroll();
-      if (activeStudioAssistantBubble && els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) {
-        const cleanStudioText = hideFileBlocksForDisplay(displayText, this.options);
-        activeStudioAssistantBubble.innerHTML = appendInlineTypingCursor(renderMarkdown(cleanStudioText || '*Sedang meracik kode website...*', true));
-        scrollStudioAssistantToBottom();
+      if (els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) {
         updateStudioPreviewStreamHud(displayText);
+        if (activeStudioAssistantBubble) {
+          const cleanStudioText = hideFileBlocksForDisplay(displayText, this.options);
+          activeStudioAssistantBubble.innerHTML = appendInlineTypingCursor(renderMarkdown(cleanStudioText || '*Sedang meracik kode website...*', true));
+          scrollStudioAssistantToBottom();
+        }
       }
     }
 
@@ -9459,6 +9461,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         enhanceCodeBlocks(this.el);
       }
       if (this.onScroll && !userScrolledUp) this.onScroll();
+      if (els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) {
+        if (!String(this.text || '').includes('<<<ZOZ_') && !String(this.text || '').includes('<<<SEARCH')) {
+          finishStudioPreviewStreamHud(false);
+        }
+      }
       if (activeStudioAssistantBubble && els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) {
         let cleanStudioText = hideFileBlocksForDisplay(this.text, this.options);
         // Hapus sisa banner progress markdown di akhir jika AI sudah selesai merespons
@@ -9470,9 +9477,6 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         enhanceCodeBlocks(activeStudioAssistantBubble);
         scrollStudioAssistantToBottom();
         activeStudioAssistantBubble = null;
-        if (!String(this.text || '').includes('<<<ZOZ_') && !String(this.text || '').includes('<<<SEARCH')) {
-          finishStudioPreviewStreamHud(false);
-        }
       }
       if (this.text && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.inspectModelText === 'function') {
         const activeModel = this.options.model || (typeof STATE !== 'undefined' ? (STATE.mode === 'ollama' ? (STATE.settings.ollamaModel || 'Ollama Model') : (STATE.settings.openRouterModel || 'OpenRouter Model')) : 'AI Model');
@@ -13522,14 +13526,8 @@ Aturan wajib:
       }
       return match;
     });
-    // 3. Pastikan ada <base href="about:blank"> agar browser tidak me-resolve link/aset relatif ke root host Zoz Router
-    if (!/<base\b/i.test(safeHtml)) {
-      if (/<head\b[^>]*>/i.test(safeHtml)) {
-        safeHtml = safeHtml.replace(/<head\b[^>]*>/i, '$&\n<base href="about:blank">');
-      } else {
-        safeHtml = '<base href="about:blank">\n' + safeHtml;
-      }
-    }
+    // 3. Pastikan tidak ada tag base liar yang merusak anchor in-page (#) dan gradien/masking SVG
+    safeHtml = safeHtml.replace(/<base\b[^>]*>/gi, '');
     // 4. Auto-healing tag yang belum tertutup agar live preview tetap tampil sempurna
     if ((safeHtml.match(/<style\b/gi) || []).length > (safeHtml.match(/<\/style>/gi) || []).length) {
       safeHtml += '\n</style>';
@@ -13566,6 +13564,15 @@ window.addEventListener('error', function(e) {
       }, '*');
     } catch(_) {}
   };
+
+  // Proteksi link: izinkan hash anchor in-page (#id), arahkan link eksternal ke target="_blank"
+  document.addEventListener('click', function(e) {
+    var a = e.target.closest ? e.target.closest('a') : null;
+    if (!a) return;
+    var href = a.getAttribute('href') || '';
+    if (href.startsWith('#') || href.startsWith('javascript:') || !href) return;
+    a.setAttribute('target', '_blank');
+  }, true);
 
   // High-Speed Real-Time In-Place Hot-Reload Bridge (Anti-Flicker / Zero-Lag / Anti-Leak)
   if (!window.__zozHotReloadBridgeActive) {
@@ -14647,12 +14654,18 @@ window.addEventListener('error', function(e) {
             if (typeof m.content === 'string') {
               if (f.rawBlock && m.content.includes(f.rawBlock)) {
                 m.content = m.content.replace(f.rawBlock, newBlock);
-              } else if (m.content.includes('<<<ZOZ_FILE')) {
-                m.content = m.content.replace(/<<<ZOZ_FILE[\s\S]*?<<<END_ZOZ_FILE>>>/i, newBlock);
-              } else if (/```(?:html|jsx|tsx|xml|svg|markdown|md)\b[\s\S]*?```/i.test(m.content)) {
-                m.content = m.content.replace(/```(?:html|jsx|tsx|xml|svg|markdown|md)\b[\s\S]*?```/i, `\`\`\`${f.lang || 'html'}\n${trimmedCode}\n\`\`\``);
               } else {
-                m.content = m.content + '\n\n' + newBlock;
+                const escName = (f.name || activeAIFile.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const namedFileRegex = escName ? new RegExp(`<<<ZOZ_FILE\\b[^>]*name=["']?${escName}["']?[\\s\\S]*?<<<END_ZOZ_FILE>>>`, 'i') : null;
+                if (namedFileRegex && namedFileRegex.test(m.content)) {
+                  m.content = m.content.replace(namedFileRegex, newBlock);
+                } else if (m.content.includes('<<<ZOZ_FILE')) {
+                  m.content = m.content.replace(/<<<ZOZ_FILE[\s\S]*?<<<END_ZOZ_FILE>>>/i, newBlock);
+                } else if (/```(?:html|jsx|tsx|xml|svg|markdown|md)\b[\s\S]*?```/i.test(m.content)) {
+                  m.content = m.content.replace(/```(?:html|jsx|tsx|xml|svg|markdown|md)\b[\s\S]*?```/i, `\`\`\`${f.lang || 'html'}\n${trimmedCode}\n\`\`\``);
+                } else {
+                  m.content = m.content + '\n\n' + newBlock;
+                }
               }
             }
             f.rawBlock = newBlock;
@@ -15299,8 +15312,18 @@ window.addEventListener('error', function(e) {
 
     function applySingleHunk(rawSearch, rawReplace) {
       let searchTarget = stripAccidentalLineNumbers(rawSearch.replace(/^\r?\n/, '').replace(/\r?\n\s*$/, ''));
-      const replacement = stripAccidentalLineNumbers(rawReplace.replace(/^\r?\n/, '').replace(/\r?\n\s*$/, ''));
+      let replacement = stripAccidentalLineNumbers(rawReplace.replace(/^\r?\n/, '').replace(/\r?\n\s*$/, ''));
       if (!searchTarget) return false;
+
+      // Bersihkan teks percakapan narasi AI liar yang tidak sengaja tertelan di akhir replacement
+      const conversationalTailMatch = replacement.match(/\n\s*\n\s*(?:(?:###?\s+|[-*]\s+|\d+\.\s+)?(?:Saya |Semoga |Perubahan |Catatan |Silakan |Berikut |Demikian |Done|Here |I have |Note:|This updates?|In this|Please )[\s\S]*)$/i);
+      if (conversationalTailMatch) {
+        replacement = replacement.slice(0, conversationalTailMatch.index).trimEnd();
+      }
+      const markdownHeadingTail = replacement.match(/\n\s*\n\s*#{1,4}\s+[\s\S]*$/);
+      if (markdownHeadingTail) {
+        replacement = replacement.slice(0, markdownHeadingTail.index).trimEnd();
+      }
 
       // Bersihkan komentar placeholder skip baris bila AI menyalinnya dari prompt
       searchTarget = searchTarget.replace(/(?:\/\*|<!--)\s*\.\.\.\s*\[baris\s+\d+-\d+\s+dilewati\]\s*\.\.\.\s*(?:\*\/|-->)\r?\n?/gi, '').trim();
@@ -15478,9 +15501,9 @@ window.addEventListener('error', function(e) {
       applySingleHunk(match[1], match[2]);
     }
 
-    // 2. Format Git diff: <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE (toleran 3+ chevrons & equals)
+    // 2. Format Git diff: <<<<<<< SEARCH ... ======= ... >>>>>>> [REPLACE] (toleran 3+ chevrons & kata REPLACE opsional)
     if (patchCount === 0) {
-      const gitDiffRegex = /<{3,}\s*SEARCH\b([\s\S]*?)={3,}([\s\S]*?)>{3,}\s*REPLACE\b/gi;
+      const gitDiffRegex = /<{3,}\s*SEARCH\b([\s\S]*?)={3,}([\s\S]*?)>{3,}(?:\s*REPLACE\b|[ \t]*\n|[ \t]*$)/gi;
       while ((match = gitDiffRegex.exec(patchBlock)) !== null) {
         applySingleHunk(match[1], match[2]);
       }
@@ -16372,10 +16395,11 @@ window.addEventListener('error', function(e) {
 
     // Hot-reload studio jika studio modal sedang terbuka dan menerima update file
     if (els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show') && activeAIFile) {
+      const isDiagram = isDiagramFile(activeAIFile);
+      const isWeb = /\.(?:html?|jsx|tsx)$/i.test(activeAIFile.name || '');
       const matchFile = files.find(f => f.name === activeAIFile.name) ||
-        (isDiagramFile(activeAIFile) ? files.find(f => isDiagramFile(f)) : null) ||
-        files.find(f => f.isPrimaryWebEntry !== false && /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) ||
-        files[0];
+        (isDiagram ? files.find(f => isDiagramFile(f)) : null) ||
+        (isWeb ? files.find(f => f.isPrimaryWebEntry !== false && /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) : null);
       if (matchFile) {
         const newRaw = matchFile.rawContent || matchFile.content || '';
         if (newRaw && newRaw !== activeAIFile.rawContent) {
