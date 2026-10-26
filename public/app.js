@@ -9148,17 +9148,17 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         return;
       }
 
-      // Penanganan khusus blok markdown ```html / ```jsx / ```tsx atau dokumen HTML / Naked HTML & Naked JS
+      // Penanganan khusus blok markdown ```html / ```jsx / ```tsx / ```css atau dokumen HTML / Naked HTML & Naked JS / CSS
       const isWebPreviewMode = Boolean(
         (options && (options.websiteMode === 'preview' || options.isWebCreation || options.hideCodeInChat)) ||
         (typeof activeAIFile !== 'undefined' && activeAIFile) ||
         (typeof isWebCreationPrompt === 'function' && isWebCreationPrompt(rawText || ''))
       );
       const NAKED_HTML_START = /^<(?:!DOCTYPE\s+html|html|head|body|div|section|nav|header|footer|main|aside|article|style|script|table|form|template)\b/i;
-      const CODE_LIKE_LINE = /^(?:<{1,5}>{1,5}|[<>=]{2,}|<<>>|< < > >|<<<>>|window\.|document\.|console\.|setInterval|setTimeout|function\b|const\s+|let\s+|var\s+|\/\*|\*\/|\/\/|<\/script>|<\/html>|<\/body>|<!--).*$/i;
+      const CODE_LIKE_LINE = /^(?:`{3,}|<{1,5}>{1,5}|[<>=]{2,}|<<>>|< < > >|<<<>>|window\.|document\.|console\.|setInterval|setTimeout|function\b|const\s+|let\s+|var\s+|\/\*|\*\/|\/\/|<\/script>|<\/html>|<\/body>|<\/style>|<!--|[{}\[\];]|(?:[.#@][a-zA-Z0-9_-]|[a-zA-Z0-9_-]+\s*\{|[a-zA-Z0-9_-]+\s*:\s*[^;]+;)).*$/i;
       if (!isExplicitCodeInChat) {
         if (!insideFileBlock && !insideHtmlBlock && !insideRawHtmlBlock) {
-          if (t.startsWith(TICK3 + 'html') || t.startsWith(TICK3 + 'htm') || t.startsWith(TICK3 + 'jsx') || t.startsWith(TICK3 + 'tsx') || t.startsWith(TICK3 + 'react')) {
+          if (t.startsWith(TICK3 + 'html') || t.startsWith(TICK3 + 'htm') || t.startsWith(TICK3 + 'jsx') || t.startsWith(TICK3 + 'tsx') || t.startsWith(TICK3 + 'react') || (isWebPreviewMode && (t.startsWith(TICK3 + 'css') || t.startsWith(TICK3 + 'style') || t.startsWith(TICK3 + 'js') || t.startsWith(TICK3 + 'javascript')))) {
             insideHtmlBlock = true;
             out.push('\n> 🌐 *Sedang merancang kode website... (terisolasi di pratinjau live)*\n');
             return;
@@ -9174,12 +9174,12 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           }
           return;
         } else if (insideRawHtmlBlock) {
-          // Telan semua tag penutup, komentar kode HTML/JS, dan statemen script lanjutan
-          if (t.includes('</html>') || t === '</script>' || t.startsWith('<!--') || CODE_LIKE_LINE.test(t)) {
+          // Telan semua tag penutup, komentar kode HTML/JS/CSS, dan statemen script/style lanjutan
+          if (t.includes('</html>') || t === '</script>' || t === '</style>' || t.startsWith('<!--') || CODE_LIKE_LINE.test(t) || t === TICK3) {
             return;
           }
           // Jika baris adalah teks percakapan biasa (bukan tag / kode), tutup blok raw HTML
-          if (t && !t.startsWith('<') && !t.endsWith(';') && !t.endsWith('}') && !t.endsWith('{')) {
+          if (t && !t.startsWith('<') && !t.endsWith(';') && !t.endsWith('}') && !t.endsWith('{') && !t.includes('{') && !t.includes('}')) {
             insideRawHtmlBlock = false;
           } else {
             return;
@@ -13985,6 +13985,39 @@ Aturan wajib:
 </html>`;
   }
 
+  function isAuthenticHtml(str) {
+    if (!str || typeof str !== 'string' || str.length < 40) return false;
+    return (str.includes('<!DOCTYPE html') || str.includes('<html')) && (str.includes('<body') || str.includes('</body>') || str.includes('</html>'));
+  }
+
+  function isLikelyCssSnippet(str) {
+    if (!str || typeof str !== 'string') return false;
+    const trimmed = str.trim();
+    if (isAuthenticHtml(trimmed)) return false;
+    const hasBraces = trimmed.includes('{') && trimmed.includes('}');
+    const hasCssKeywords = /(?:font-family|color|background|box-shadow|text-shadow|padding|margin|display|border|opacity|transform|filter)\s*:/i.test(trimmed);
+    const startsWithSelector = /^(?:\s*(?:[.#@][a-zA-Z0-9_-]|[a-zA-Z0-9_-]+\s*\{|\/\*|body|html|:root|\*))/i.test(trimmed);
+    return hasBraces && (hasCssKeywords || startsWithSelector);
+  }
+
+  function injectCssIntoHtmlDocument(html, cssSnippet) {
+    if (!html || !cssSnippet) return html || '';
+    let cleanCss = cssSnippet.replace(/<style\b[^>]*>/gi, '').replace(/<\/style>/gi, '').trim();
+    const styleCloseIdx = html.lastIndexOf('</style>');
+    if (styleCloseIdx !== -1) {
+      return html.slice(0, styleCloseIdx) + '\n\n    /* Pembaruan Gaya AI */\n    ' + cleanCss + '\n  ' + html.slice(styleCloseIdx);
+    }
+    const headCloseIdx = html.indexOf('</head>');
+    if (headCloseIdx !== -1) {
+      return html.slice(0, headCloseIdx) + '  <style>\n    ' + cleanCss + '\n  </style>\n' + html.slice(headCloseIdx);
+    }
+    const bodyOpenIdx = html.indexOf('<body');
+    if (bodyOpenIdx !== -1) {
+      return html.slice(0, bodyOpenIdx) + '<style>\n  ' + cleanCss + '\n</style>\n' + html.slice(bodyOpenIdx);
+    }
+    return html + '\n<style>\n' + cleanCss + '\n</style>';
+  }
+
   function prepareSafeHtmlForPreview(rawContent, fileObj = null) {
     if (!rawContent || typeof rawContent !== 'string') return '';
     let safeHtml = rawContent;
@@ -13994,7 +14027,56 @@ Aturan wajib:
       safeHtml = compileReactNextToStandaloneHtml(safeHtml, fileObj);
     }
 
-    safeHtml = safeHtml.replace(/^\s*```(?:html|htm|jsx|tsx)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+    safeHtml = safeHtml.replace(/^\s*```[a-zA-Z0-9_-]*\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+
+    // Safety & Auto-Recovery Guard: Jika berkas adalah website (.html/.htm), namun isinya murni CSS
+    // (misal karena model AI hanya mengembalikan blok CSS untuk memperbaiki kontras/gaya):
+    const isSupposedWeb = Boolean(fileObj && /\.(?:html?|xhtml)$/i.test(fileObj.name || ''));
+    if (isSupposedWeb && !isAuthenticHtml(safeHtml) && isLikelyCssSnippet(safeHtml)) {
+      let recoveredBaseHtml = '';
+      if (typeof FileRevisionStore !== 'undefined' && fileObj.name) {
+        const revs = FileRevisionStore.getRevisions(fileObj.name);
+        if (Array.isArray(revs) && revs.length > 0) {
+          for (let i = revs.length - 1; i >= 0; i--) {
+            const r = revs[i];
+            if (isAuthenticHtml(r)) {
+              recoveredBaseHtml = r;
+              break;
+            }
+          }
+        }
+      }
+      if (!recoveredBaseHtml && typeof getLatestWebsiteFileInSession === 'function') {
+        const latestWeb = getLatestWebsiteFileInSession(typeof getActiveSession === 'function' ? getActiveSession() : null);
+        if (latestWeb && latestWeb !== fileObj && latestWeb.rawContent && isAuthenticHtml(latestWeb.rawContent)) {
+          recoveredBaseHtml = latestWeb.rawContent || latestWeb.content || '';
+        }
+      }
+
+      if (recoveredBaseHtml) {
+        safeHtml = injectCssIntoHtmlDocument(recoveredBaseHtml, safeHtml);
+        fileObj.content = safeHtml;
+        fileObj.rawContent = safeHtml;
+      } else {
+        safeHtml = `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(fileObj?.name || 'Pratinjau Gaya')}</title>
+  <style>
+${safeHtml}
+  </style>
+</head>
+<body style="background:#0a0e1a; color:#00f0ff; font-family:sans-serif; padding:24px; text-align:center;">
+  <div style="max-width:600px; margin:40px auto; padding:24px; border:1px dashed #00f0ff; border-radius:12px; background:rgba(0,240,255,0.05);">
+    <h3 style="margin-top:0;">🎨 Lembar Gaya Website Terpasang</h3>
+    <p style="color:#94a3b8; font-size:14px;">Aturan CSS telah diisolasi dengan aman di dalam tag &lt;style&gt;.</p>
+  </div>
+</body>
+</html>`;
+      }
+    }
 
     // Jika berkas HTML memiliki <script type="text/babel"> atau <script type="text/jsx"> namun belum memuat Babel/React CDN, suntikkan otomatis
     if (/<script\b[^>]*type=["']text\/(?:babel|jsx)["']/i.test(safeHtml) && !/babel(?:\.min)?\.js|@babel\/standalone/i.test(safeHtml)) {
@@ -16648,31 +16730,33 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
       let finalContent = cleanContent;
       let appliedEditedRanges = [];
       let isSurgicalPatch = false;
+
+      // Ambil baseContent dari activeAIFile (Studio aktif), workspace, atau file web sesi sebelumnya
+      let baseContent = '';
+      const studioIsOpen = Boolean(els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show'));
+      const isEditorOpen = Boolean(els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing'));
+      if (activeAIFile && studioIsOpen) {
+        const isExactMatch = activeAIFile.name === resolvedFileName;
+        const isGenericFileName = resolvedFileName === 'file.txt' || resolvedFileName === 'index.html';
+        const isSingleWebSession = isWebFile && /\.(?:html?|jsx|tsx)$/i.test(activeAIFile.name || '') && (!matchedWorkspaceFile || matchedWorkspaceFile.name === activeAIFile.name);
+        const isSameFile = isExactMatch || (isGenericFileName && isSingleWebSession);
+        if (isSameFile) {
+          baseContent = (isEditorOpen && els.aiFileStudioEditor && els.aiFileStudioEditor.value)
+            ? els.aiFileStudioEditor.value
+            : (activeAIFile.rawContent || activeAIFile.content || '');
+        }
+      }
+      if (!baseContent && matchedWorkspaceFile) {
+        baseContent = matchedWorkspaceFile.content || '';
+      } else if (!baseContent && isWebFile && typeof getLatestWebsiteFileInSession === 'function') {
+        const latestWeb = getLatestWebsiteFileInSession(typeof getActiveSession === 'function' ? getActiveSession() : null);
+        if (latestWeb && (!latestWeb.name || latestWeb.name === resolvedFileName)) {
+          baseContent = latestWeb.rawContent || latestWeb.content || '';
+        }
+      }
+
       // Dukung penambalan bedah (surgical patch) via <<<ZOZ_EDIT>>> dengan blok SEARCH & REPLACE
       if (cleanContent.includes('<<<SEARCH') || /(?:<<<{1,3}|<{3,})\s*SEARCH\b/.test(cleanContent)) {
-        // Dasar patch: file yang namanya cocok persis (Studio aktif / workspace), atau file web terbaru sesi
-        let baseContent = '';
-        const studioIsOpen = Boolean(els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show'));
-        const isEditorOpen = Boolean(els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing'));
-        if (activeAIFile && studioIsOpen) {
-          const isExactMatch = activeAIFile.name === resolvedFileName;
-          const isGenericFileName = resolvedFileName === 'file.txt' || resolvedFileName === 'index.html';
-          const isSingleWebSession = isWebFile && /\.(?:html?|jsx|tsx)$/i.test(activeAIFile.name || '') && (!matchedWorkspaceFile || matchedWorkspaceFile.name === activeAIFile.name);
-          const isSameFile = isExactMatch || (isGenericFileName && isSingleWebSession);
-          if (isSameFile) {
-            baseContent = (isEditorOpen && els.aiFileStudioEditor && els.aiFileStudioEditor.value)
-              ? els.aiFileStudioEditor.value
-              : (activeAIFile.rawContent || activeAIFile.content || '');
-          }
-        }
-        if (!baseContent && matchedWorkspaceFile) {
-          baseContent = matchedWorkspaceFile.content || '';
-        } else if (!baseContent && isWebFile && typeof getLatestWebsiteFileInSession === 'function') {
-          const latestWeb = getLatestWebsiteFileInSession(typeof getActiveSession === 'function' ? getActiveSession() : null);
-          if (latestWeb && (!latestWeb.name || latestWeb.name === resolvedFileName)) {
-            baseContent = latestWeb.rawContent || latestWeb.content || '';
-          }
-        }
         if (!baseContent || isUnclosed) {
           // Tanpa dasar atau patch terpotong: jangan pernah menulis teks patch mentah sebagai isi file
           out.patchFailures = (out.patchFailures || 0) + 1;
@@ -16698,6 +16782,21 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
         }
         // Patch sudah utuh dari dasar yang lengkap: tidak perlu perbaikan penutupan tag
         isUnclosed = false;
+      } else if (isWebFile && baseContent && isAuthenticHtml(baseContent)) {
+        // PERLINDUNGAN MUTLAK ANTI-HANCUR WEBSITE:
+        // Jika model mengembalikan blok <<<ZOZ_FILE>>> tetapi isinya BUKAN dokumen HTML utuh
+        // (misal hanya blok CSS atau potongan kode parsial):
+        const isCleanFullHtml = isAuthenticHtml(cleanContent);
+        if (!isCleanFullHtml) {
+          if (isLikelyCssSnippet(cleanContent)) {
+            // AI ingin mengubah gaya/warna/kontras website: suntikkan/gabungkan ke tag <style> website asli!
+            finalContent = injectCssIntoHtmlDocument(baseContent, cleanContent);
+            isSurgicalPatch = true;
+          } else {
+            // Snippet tak dikenal yang bukan HTML: pertahankan website asli agar tidak rusak
+            finalContent = baseContent;
+          }
+        }
       }
       if (isReactFile) {
         finalContent = validateAndRepairReactCode(finalContent);
@@ -16809,6 +16908,15 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
           if (repairedBody.includes('<style') && !repairedBody.includes('</style>')) repairedBody += '\n</style>';
           if (repairedBody.includes('<body') && !repairedBody.includes('</body>')) repairedBody += '\n</body>';
           if (!repairedBody.includes('</html>')) repairedBody += '\n</html>';
+        }
+
+        if ((langTag === 'css' || isLikelyCssSnippet(repairedBody)) && activeAIFile && isAuthenticHtml(activeAIFile.rawContent || activeAIFile.content)) {
+          const mergedHtml = injectCssIntoHtmlDocument(activeAIFile.rawContent || activeAIFile.content, repairedBody);
+          const fallbackFile = buildAIFile(activeAIFile.name, activeAIFile.mime || 'text/html', 'html', mergedHtml, 'Pembaruan gaya CSS');
+          fallbackFile.isSurgicalPatch = true;
+          out.files.push(fallbackFile);
+          out.rawBlocks.push(lines.slice(i, hasClosingFence ? end + 1 : lines.length).join('\n'));
+          break;
         }
 
         let fallbackName = guessFileNameFromLang(isMermaidFence ? 'mermaid' : langTag, repairedBody);
@@ -20383,13 +20491,13 @@ MANDAT EKSEKUSI ZOZ ENGINE (WAJIB BLOK KODE PADA BARIS PERTAMA):
   }
 
   function getLatestWebsiteFileInSession(session) {
-    // activeAIFile hanya dipakai jika Studio sedang terbuka (cegah patch ke website basi dari sesi lain)
+    // activeAIFile hanya dipakai jika Studio sedang terbuka dan berisi dokumen HTML autentik
     const studioOpen = Boolean(els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show'));
     if (activeAIFile && studioOpen) {
       const ext = (activeAIFile.name || '').split('.').pop().toLowerCase();
       if (ext === 'html' || ext === 'htm' || ext === 'jsx' || ext === 'tsx' || activeAIFile.lang === 'html' || activeAIFile.lang === 'jsx') {
         const raw = activeAIFile.rawContent || activeAIFile.content || '';
-        if (raw.length > 50) return activeAIFile;
+        if (isAuthenticHtml(raw)) return activeAIFile;
       }
     }
     if (!session || !session.messages || !Array.isArray(session.messages)) return null;
@@ -20399,7 +20507,9 @@ MANDAT EKSEKUSI ZOZ ENGINE (WAJIB BLOK KODE PADA BARIS PERTAMA):
       if (msg.files && Array.isArray(msg.files)) {
         const match = msg.files.find(f => {
           const name = (f.name || '').toLowerCase();
-          return name.endsWith('.html') || name.endsWith('.htm') || name.endsWith('.jsx') || name.endsWith('.tsx') || f.lang === 'html' || f.lang === 'jsx';
+          const isWeb = name.endsWith('.html') || name.endsWith('.htm') || name.endsWith('.jsx') || name.endsWith('.tsx') || f.lang === 'html' || f.lang === 'jsx';
+          const r = f.rawContent || f.content || '';
+          return isWeb && isAuthenticHtml(r);
         });
         if (match && (match.rawContent || match.content)) return match;
       }
@@ -20408,7 +20518,7 @@ MANDAT EKSEKUSI ZOZ ENGINE (WAJIB BLOK KODE PADA BARIS PERTAMA):
         if (match) {
           const name = match[1];
           const content = match[2].trim();
-          if (/\.(html|htm|jsx|tsx)$/i.test(name) || name === 'index.html' || name === 'page.jsx') {
+          if ((/\.(html|htm|jsx|tsx)$/i.test(name) || name === 'index.html' || name === 'page.jsx') && isAuthenticHtml(content)) {
             return { name, rawContent: content, content, lang: name.endsWith('.jsx') ? 'jsx' : 'html' };
           }
         }
