@@ -9470,7 +9470,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         enhanceCodeBlocks(activeStudioAssistantBubble);
         scrollStudioAssistantToBottom();
         activeStudioAssistantBubble = null;
-        finishStudioPreviewStreamHud(true);
+        if (!String(this.text || '').includes('<<<ZOZ_') && !String(this.text || '').includes('<<<SEARCH')) {
+          finishStudioPreviewStreamHud(false);
+        }
       }
       if (this.text && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.inspectModelText === 'function') {
         const activeModel = this.options.model || (typeof STATE !== 'undefined' ? (STATE.mode === 'ollama' ? (STATE.settings.ollamaModel || 'Ollama Model') : (STATE.settings.openRouterModel || 'OpenRouter Model')) : 'AI Model');
@@ -13565,21 +13567,31 @@ window.addEventListener('error', function(e) {
     } catch(_) {}
   };
 
-  // High-Speed Real-Time In-Place Hot-Reload Bridge (Anti-Flicker / Zero-Lag)
-  window.addEventListener('message', function(ev) {
-    if (!ev.data || ev.data.type !== 'ZOZ_STUDIO_LIVE_RELOAD' || typeof ev.data.html !== 'string') return;
-    try {
-      var sx = window.scrollX || window.pageXOffset || 0;
-      var sy = window.scrollY || window.pageYOffset || 0;
-      document.open();
-      document.write(ev.data.html);
-      document.close();
-      window.scrollTo(sx, sy);
+  // High-Speed Real-Time In-Place Hot-Reload Bridge (Anti-Flicker / Zero-Lag / Anti-Leak)
+  if (!window.__zozHotReloadBridgeActive) {
+    window.__zozHotReloadBridgeActive = true;
+    window.addEventListener('message', function(ev) {
+      if (!ev.data || ev.data.type !== 'ZOZ_STUDIO_LIVE_RELOAD' || typeof ev.data.html !== 'string') return;
       try {
-        window.parent.postMessage({ type: 'ZOZ_STUDIO_LIVE_RELOAD_ACK', reloadId: ev.data.reloadId }, '*');
+        var sx = window.scrollX || window.pageXOffset || 0;
+        var sy = window.scrollY || window.pageYOffset || 0;
+        try {
+          var maxTimerId = window.setTimeout(function(){}, 0);
+          for (var t = maxTimerId; t > 0 && t > maxTimerId - 250; t--) {
+            window.clearTimeout(t);
+            window.clearInterval(t);
+          }
+        } catch(_) {}
+        document.open();
+        document.write(ev.data.html);
+        document.close();
+        window.scrollTo(sx, sy);
+        try {
+          window.parent.postMessage({ type: 'ZOZ_STUDIO_LIVE_RELOAD_ACK', reloadId: ev.data.reloadId }, '*');
+        } catch(_) {}
       } catch(_) {}
-    } catch(_) {}
-  });
+    });
+  }
 })();
 </script>`;
 
@@ -14564,15 +14576,14 @@ window.addEventListener('error', function(e) {
   function persistStudioCodeChange(newCode, options = {}) {
     if (!activeAIFile || typeof newCode !== 'string') return;
     const trimmedCode = newCode;
-    const isUnchanged = (activeAIFile.rawContent === trimmedCode && activeAIFile._renderedRawContent === trimmedCode);
-    if (isUnchanged && !options.forceReload) {
-      return;
-    }
+    const codeChanged = activeAIFile.rawContent !== trimmedCode;
     activeAIFile.rawContent = trimmedCode;
     activeAIFile.content = trimmedCode;
     activeAIFile.size = formatFileSize(trimmedCode.length);
-    FileRevisionStore.pushRevision(activeAIFile.name, trimmedCode);
-    updateStudioRevisionBtns(activeAIFile.name);
+    if (codeChanged || options.forceRevision) {
+      FileRevisionStore.pushRevision(activeAIFile.name, trimmedCode);
+      updateStudioRevisionBtns(activeAIFile.name);
+    }
 
     if (els.aiFileStudioCode) {
       els.aiFileStudioCode.textContent = trimmedCode;
@@ -14588,7 +14599,9 @@ window.addEventListener('error', function(e) {
       if (typeof updateStudioEditorCode === 'function') updateStudioEditorCode(trimmedCode);
     }
 
-    renderAIFileIntoStudioPreview(activeAIFile);
+    if (activeAIFile._renderedRawContent !== trimmedCode || options.forceReload || options.forcePreview) {
+      renderAIFileIntoStudioPreview(activeAIFile);
+    }
 
     // Sinkronkan ke kartu Pratinjau atau blok Kode di obrolan secara non-blocking
     if (activeAIFile._cardIframe) {
@@ -14681,6 +14694,14 @@ window.addEventListener('error', function(e) {
         if (typeof ChatDB !== 'undefined' && ChatDB.saveSession) ChatDB.saveSession(targetSession);
         if (typeof DeviceStorage !== 'undefined' && DeviceStorage.saveSession) DeviceStorage.saveSession(targetSession);
       } catch (_) {}
+    }
+  }
+
+  function flushStudioEditorChangesIfDirty() {
+    if (!activeAIFile || !els.aiFileStudioEditor) return;
+    const currentVal = els.aiFileStudioEditor.value;
+    if (typeof currentVal === 'string' && currentVal !== activeAIFile.rawContent) {
+      persistStudioCodeChange(currentVal, { forceReload: true });
     }
   }
 
@@ -14861,6 +14882,10 @@ window.addEventListener('error', function(e) {
       file.name = file.name.replace(/\.(?:mermaid|mmd)$/i, '.svg');
     }
     activeAIFile = file;
+    if (els.aiFileStudioFrame) {
+      els.aiFileStudioFrame.dataset.loadedHtmlDoc = '';
+      els.aiFileStudioFrame.dataset.lastRawContent = '';
+    }
     const rawContent = file.rawContent || file.content || '';
     if (els.aiFileStudioEditor) {
       els.aiFileStudioEditor.value = rawContent;
@@ -15309,24 +15334,27 @@ window.addEventListener('error', function(e) {
 
       // Tier 2: Line-by-line trimmed match (tolerating indentation differences & quote variations)
       const lines = modified.split('\n');
-      const targetLines = searchTarget.trim().split('\n').map(l => l.trim()).filter(Boolean);
+      const targetLinesRaw = searchTarget.trim().split('\n').map(l => l.trim());
+      const targetLines = targetLinesRaw.filter(Boolean);
       let foundIdx = -1;
-      let matchedSpan = targetLines.length;
+      let matchedSpan = targetLinesRaw.length;
 
-      for (let i = 0; i <= lines.length - targetLines.length; i++) {
-        let allMatch = true;
-        for (let k = 0; k < targetLines.length; k++) {
-          const l1 = lines[i + k].trim();
-          const l2 = targetLines[k];
-          if (l1 !== l2 && normalizeForCompare(l1) !== normalizeForCompare(l2)) {
-            allMatch = false;
+      if (targetLinesRaw.length >= 2) {
+        for (let i = 0; i <= lines.length - targetLinesRaw.length; i++) {
+          let allMatch = true;
+          for (let k = 0; k < targetLinesRaw.length; k++) {
+            const l1 = lines[i + k].trim();
+            const l2 = targetLinesRaw[k];
+            if (l1 !== l2 && normalizeForCompare(l1) !== normalizeForCompare(l2)) {
+              allMatch = false;
+              break;
+            }
+          }
+          if (allMatch) {
+            foundIdx = i;
+            matchedSpan = targetLinesRaw.length;
             break;
           }
-        }
-        if (allMatch) {
-          foundIdx = i;
-          matchedSpan = targetLines.length;
-          break;
         }
       }
 
@@ -15376,27 +15404,40 @@ window.addEventListener('error', function(e) {
 
       // Tier 5: Anchor-Sequence Fallback (Untuk blok 3+ baris dengan baris awal & akhir cocok sebagai jangkar)
       if (foundIdx === -1 && targetLines.length >= 3) {
+        function isSubstantiveAnchor(normLine) {
+          if (!normLine || normLine.length < 5) return false;
+          if (/^(?:<\/?[a-zA-Z0-9_-]+>|[{}\[\]();,]|return;?|break;?)$/i.test(normLine)) return false;
+          return true;
+        }
         const firstLineNorm = normalizeForCompare(targetLines[0]);
         const lastLineNorm = normalizeForCompare(targetLines[targetLines.length - 1]);
-        for (let i = 0; i < lines.length; i++) {
-          if (normalizeForCompare(lines[i]) === firstLineNorm) {
-            for (let j = i + 1; j < Math.min(lines.length, i + targetLines.length + 8); j++) {
-              if (normalizeForCompare(lines[j]) === lastLineNorm) {
-                let matchCount = 2;
-                const candidateSpan = lines.slice(i, j + 1).map(normalizeForCompare);
-                for (let k = 1; k < targetLines.length - 1; k++) {
-                  if (candidateSpan.includes(normalizeForCompare(targetLines[k]))) {
-                    matchCount++;
+        const anchor1Substantive = isSubstantiveAnchor(firstLineNorm);
+        const anchor2Substantive = isSubstantiveAnchor(lastLineNorm);
+
+        if (anchor1Substantive || anchor2Substantive) {
+          const matchedCandidates = [];
+          for (let i = 0; i < lines.length; i++) {
+            if (normalizeForCompare(lines[i]) === firstLineNorm) {
+              for (let j = i + 1; j < Math.min(lines.length, i + targetLines.length + 8); j++) {
+                if (normalizeForCompare(lines[j]) === lastLineNorm) {
+                  let matchCount = 2;
+                  const candidateSpan = lines.slice(i, j + 1).map(normalizeForCompare);
+                  for (let k = 1; k < targetLines.length - 1; k++) {
+                    if (candidateSpan.includes(normalizeForCompare(targetLines[k]))) {
+                      matchCount++;
+                    }
                   }
-                }
-                if (matchCount / targetLines.length >= 0.7) {
-                  foundIdx = i;
-                  matchedSpan = (j - i) + 1;
-                  break;
+                  if (matchCount / targetLines.length >= 0.75) {
+                    matchedCandidates.push({ start: i, span: (j - i) + 1 });
+                  }
                 }
               }
             }
-            if (foundIdx !== -1) break;
+          }
+          // Hanya terapkan jika tepat ada 1 kandidat pencocokan unik (cegah penambalan salah sasaran)
+          if (matchedCandidates.length === 1) {
+            foundIdx = matchedCandidates[0].start;
+            matchedSpan = matchedCandidates[0].span;
           }
         }
       }
@@ -16342,6 +16383,7 @@ window.addEventListener('error', function(e) {
           const editedRanges = Array.isArray(matchFile.editedRanges) ? matchFile.editedRanges : (Array.isArray(matchFile.appliedEditedRanges) ? matchFile.appliedEditedRanges : []);
           // Delegasikan pembaruan konten, riwayat revisi, pratinjau iframe, & persistensi disk/IDB ke persistStudioCodeChange (single source of truth)
           persistStudioCodeChange(newRaw);
+          finishStudioPreviewStreamHud(true);
           if (els.aiFileStudioEditor) {
             renderStudioCodeEditorHighlight(newRaw, editedRanges);
             if (els.studioCodeEditorWrap && els.studioCodeEditorWrap.classList.contains('is-editing') && editedRanges.length > 0) {
@@ -17938,8 +17980,6 @@ PENTING: Blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> WAJIB disertakan agar perubahan
         studioEditorLiveSyncTimer = null;
         if (!activeAIFile || !els.aiFileStudioFrame || !els.aiFileStudioEditor) return;
         const val = els.aiFileStudioEditor.value;
-        activeAIFile.rawContent = val;
-        activeAIFile.content = val;
         const ext = (activeAIFile.name || '').split('.').pop().toLowerCase();
         if (ext === 'html' || ext === 'htm') {
           const safeHtml = prepareSafeHtmlForPreview(val, activeAIFile);
@@ -29183,6 +29223,10 @@ Aturan:
         }
         if (els.aiFileStudioEditor) {
           els.aiFileStudioEditor.value = '';
+        }
+        if (els.aiFileStudioFrame) {
+          els.aiFileStudioFrame.dataset.loadedHtmlDoc = '';
+          els.aiFileStudioFrame.dataset.lastRawContent = '';
         }
         activeAIFile = null;
       }
