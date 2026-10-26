@@ -4689,7 +4689,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     }) || null;
   }
 
-  // ==================== CLAUDE-CODE PARITY NATIVE SERVER WORKSPACE API ====================
+  // ==================== ZOZ NATIVE SERVER WORKSPACE API ====================
   // Mengizinkan modifikasi langsung file fisik di disk lokal proyek tanpa unduh berkas baru
   const ServerWorkspaceAPI = {
     isAvailable: false,
@@ -5297,7 +5297,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         }
       }
 
-      // 4. Sinkronisasi Direktori Lokal Pengguna dari WorkspaceDB Vault & Server Workspace (Claude Code Mode)
+      // 4. Sinkronisasi Direktori Lokal Pengguna dari WorkspaceDB Vault & Server Workspace (Mode Zoz Workspace)
       try {
         const serverAvailable = await ServerWorkspaceAPI.checkStatus();
         const savedWs = await WorkspaceDB.loadWorkspace();
@@ -9833,7 +9833,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
   }
 
   // ==================== TRUNCATED RESPONSE / NEMOTRON CONTINUATION HELPERS ====================
-  // Claude Code Architecture: Pemulihan tag <script> yang terpotong di tengah baris (mencegah Uncaught SyntaxError)
+  // Zoz Autonomous Engine: Pemulihan tag <script> yang terpotong di tengah baris & penyeimbangan kurung (mencegah Uncaught SyntaxError)
   function repairUnclosedScript(code) {
     if (!code || typeof code !== 'string') return code;
     if ((code.match(/<script\b/gi) || []).length <= (code.match(/<\/script>/gi) || []).length) {
@@ -9849,7 +9849,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     const scriptContent = scriptBody.slice(tagEndIdx + 1);
     const scriptLines = scriptContent.split('\n');
 
-    // Buang baris terakhir jika terpotong di tengah identifier, keyword, atau operator
+    // Buang baris terakhir jika terpotong di tengah identifier, keyword, atau operator tak tuntas
     while (scriptLines.length > 0) {
       const lastLine = scriptLines[scriptLines.length - 1].trim();
       if (!lastLine) {
@@ -9866,11 +9866,80 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       break;
     }
 
-    const repairedScriptBody = scriptBody.slice(0, tagEndIdx + 1) + '\n' + scriptLines.join('\n') + '\n</script>';
+    let cleanedContent = scriptLines.join('\n');
+
+    // Seimbangkan tanda kurung yang belum tertutup akibat pemotongan kode menggunakan stack presisi
+    const stack = [];
+    let inString = null;
+    let isEscaped = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+
+    for (let i = 0; i < cleanedContent.length; i++) {
+      const ch = cleanedContent[i];
+      const nextCh = cleanedContent[i + 1] || '';
+
+      if (inLineComment) {
+        if (ch === '\n') inLineComment = false;
+        continue;
+      }
+      if (inBlockComment) {
+        if (ch === '*' && nextCh === '/') {
+          inBlockComment = false;
+          i++;
+        }
+        continue;
+      }
+      if (inString) {
+        if (isEscaped) {
+          isEscaped = false;
+        } else if (ch === '\\') {
+          isEscaped = true;
+        } else if (ch === inString) {
+          inString = null;
+        }
+        continue;
+      }
+
+      if (ch === '/' && nextCh === '/') {
+        inLineComment = true;
+        i++;
+        continue;
+      }
+      if (ch === '/' && nextCh === '*') {
+        inBlockComment = true;
+        i++;
+        continue;
+      }
+
+      if (ch === '"' || ch === "'" || ch === '`') {
+        inString = ch;
+        continue;
+      }
+
+      if (ch === '{') stack.push('}');
+      else if (ch === '(') stack.push(')');
+      else if (ch === '[') stack.push(']');
+      else if (ch === '}' || ch === ')' || ch === ']') {
+        if (stack.length > 0 && stack[stack.length - 1] === ch) {
+          stack.pop();
+        }
+      }
+    }
+
+    let suffix = '';
+    while (stack.length > 0) {
+      suffix += stack.pop();
+    }
+    if (suffix) {
+      cleanedContent += '\n' + suffix + ';';
+    }
+
+    const repairedScriptBody = scriptBody.slice(0, tagEndIdx + 1) + '\n' + cleanedContent + '\n</script>';
     return code.slice(0, lastScriptIdx) + repairedScriptBody;
   }
 
-  // Claude Code Continuation Engine: Menyambungkan potongan kode tanpa merusak sintaks (strip basa-basi, fences, & overlap)
+  // Zoz Autonomous Continuation Engine: Menyambungkan potongan kode tanpa merusak sintaks (strip basa-basi, fences, & overlap)
   function stitchContinuationChunk(existingText, incomingChunk) {
     if (!incomingChunk || typeof incomingChunk !== 'string') return existingText || '';
     if (!existingText || typeof existingText !== 'string') return incomingChunk;
@@ -15602,7 +15671,7 @@ Aturan wajib:
         }
       }
 
-      // Tier 6: Claude Code Fuzzy Window Match (Normalized token similarity sliding window)
+      // Tier 6: Zoz Precision Fuzzy Window Match (Normalized token similarity sliding window)
       if (foundIdx === -1 && targetLines.length >= 2) {
         const targetTextNorm = targetLines.map(normalizeForCompare).join(' ');
         const targetTokens = targetTextNorm.split(' ').filter(Boolean);
@@ -15749,11 +15818,11 @@ Aturan wajib:
       };
     },
 
-    // Arsitektur Claude Code: Berikan kode arsitektur utuh 100% tanpa memotong/melewatkan baris secara sembarangan
+    // Arsitektur Zoz Full-Fidelity: Berikan kode arsitektur utuh 100% tanpa memotong/melewatkan baris secara sembarangan
     buildCodeReference(code, userQuery = '', selectedRange = null) {
       if (!code) return '';
       const lines = code.split('\n');
-      // Di arsitektur Claude Code / Anthropic, model AI wajib melihat struktur utuh (CSS style, DOM, script)
+      // Di arsitektur Zoz Autonomous Engine, model AI wajib melihat struktur utuh (CSS style, DOM, script)
       // agar tidak berhalusinasi dan dapat mencocokkan target SEARCH secara presisi.
       // Dokumen hingga 4.000 baris dikirimkan secara utuh 100%.
       if (lines.length <= 4000 && !(selectedRange && selectedRange.hasSelection)) {
@@ -15807,7 +15876,7 @@ Aturan wajib:
         const errText = escapeHtml(this.lastError.message || 'Error terdeteksi di pratinjau');
         const lineInfo = this.lastError.lineno ? ` (baris ${this.lastError.lineno})` : '';
         if (els.studioEndocrineStatusContent) {
-          els.studioEndocrineStatusContent.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f43f5e;"></i> <span title="${errText}">Isu: ${errText}${lineInfo}</span><button type="button" class="btn-heal-studio-error" title="Perbaiki error ini secara otonom dengan AI (Claude Loop)"><i class="fa-solid fa-wand-magic-sparkles"></i> Perbaiki AI</button>`;
+          els.studioEndocrineStatusContent.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f43f5e;"></i> <span title="${errText}">Isu: ${errText}${lineInfo}</span><button type="button" class="btn-heal-studio-error" title="Perbaiki error ini secara otonom dengan AI (Zoz Loop)"><i class="fa-solid fa-wand-magic-sparkles"></i> Perbaiki AI</button>`;
         }
       } else {
         els.studioEndocrineStatusBar.classList.remove('has-error');
@@ -15818,7 +15887,7 @@ Aturan wajib:
     }
   };
 
-  // ==================== CLAUDE-CODE STYLE AUTONOMOUS WEB AGENT LOOP ====================
+  // ==================== ZOZ AUTONOMOUS WEB AGENT LOOP ====================
   // Mengotomatiskan kedatangan AI berkali-kali hingga tugas selesai & website 100% bebas error
   const StudioAutonomousAgent = {
     loopCount: 0,
@@ -15890,13 +15959,13 @@ Aturan wajib:
         hud.innerHTML = `
           <div class="agent-loop-content">
             <span class="agent-loop-pulse"></span>
-            <span>🤖 <strong>Claude-Code Agent (Putaran ${state.round}/${this.maxRounds})</strong>: Menyembuhkan <em>${escapeHtml(state.errTitle || 'Runtime Issue')}</em>...</span>
+            <span>🤖 <strong>Zoz Autonomous Agent (Putaran ${state.round}/${this.maxRounds})</strong>: Menyembuhkan <em>${escapeHtml(state.errTitle || 'Runtime Issue')}</em>...</span>
           </div>
           <button type="button" class="btn-cancel-agent-loop" title="Hentikan loop otonom">Hentikan</button>
         `;
         if (els.studioPreviewStreamHud && els.studioPreviewStreamStatusText) {
           els.studioPreviewStreamHud.style.display = 'flex';
-          els.studioPreviewStreamStatusText.textContent = `🤖 Claude-Style Agent: Menyembuhkan error secara otonom (Putaran ${state.round}/${this.maxRounds})...`;
+          els.studioPreviewStreamStatusText.textContent = `🤖 Zoz Autonomous Agent: Menyembuhkan error secara otonom (Putaran ${state.round}/${this.maxRounds})...`;
         }
       } else if (state.type === 'success') {
         hud.className = 'studio-agent-loop-hud is-success';
@@ -16009,7 +16078,7 @@ Aturan wajib:
       const contextCode = lines.slice(startLine - 1, endLine).join('\n');
 
       const targetName = activeAIFile.name || 'index.html';
-      const autoHealPrompt = `[CLAUDE-STYLE AUTONOMOUS WEB REPAIR AGENT — PUTARAN ${this.loopCount}/${this.maxRounds}]
+      const autoHealPrompt = `[ZOZ AUTONOMOUS WEB REPAIR AGENT — PUTARAN ${this.loopCount}/${this.maxRounds}]
 PERHATIAN: Kode website "${targetName}" memicu error di browser:
 Isu: "${lastErr.message}" (pada baris ${errLine})
 
@@ -16019,7 +16088,7 @@ ${contextCode}
 \`\`\`
 
 TUGAS MUTLAK ANDA:
-1. Anda adalah Claude Code Autonomous Agent yang bertugas menyelesaikan kode sampai tuntas dan bebas error.
+1. Anda adalah Zoz Autonomous Agent yang bertugas menyelesaikan kode sampai tuntas dan bebas error.
 2. Analisis dan perbaiki bagian yang menyebabkan error tersebut:
    - Jika ada deklarasi variabel ganda (seperti const/let yang dideklarasikan ulang), hapus salah satu deklarasi atau ganti dengan assignment langsung.
    - Jika ada identifier, nama variabel, atau fungsi yang terpotong, lengkapi sintaksnya dengan benar.
@@ -16042,7 +16111,7 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
 
       activeStudioAssistantBubble = appendStudioMessage(
         'assistant',
-        `<span class="typing-cursor"></span> <em>🔧 Claude Agent sedang memperbaiki error "${escapeHtml(errTitle)}"...</em>`
+        `<span class="typing-cursor"></span> <em>🔧 Zoz Agent sedang memperbaiki error "${escapeHtml(errTitle)}"...</em>`
       );
 
       if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'none';
@@ -18183,7 +18252,7 @@ ${blocks}
     }
 
     // Di dalam AI Studio, SEMUA instruksi (termasuk "Lakukan now", "masih kurang jelas/samar", arahan gaya/kontras)
-    // adalah instruksi modifikasi berkas nyata ala Claude Code!
+    // adalah instruksi modifikasi berkas nyata Zoz Autonomous Agent!
     return true;
   }
 
@@ -18233,7 +18302,7 @@ ${blocks}
     if (activeStudioContainer) {
       activeStudioContainer.querySelectorAll('.studio-msg-row.assistant').forEach(row => {
         const text = row.textContent || '';
-        if (text.includes('Claude Code Engine:') || (row.querySelector('.typing-cursor') && !row.dataset.hasAnswer)) {
+        if (text.includes('Zoz Autonomous Engine:') || (row.querySelector('.typing-cursor') && !row.dataset.hasAnswer)) {
           row.remove();
         }
       });
@@ -18242,7 +18311,7 @@ ${blocks}
     // Siapkan gelembung respon untuk menerima streaming
     activeStudioAssistantBubble = appendStudioMessage(
       'assistant',
-      `<span class="typing-cursor"></span> <em>⚡ Claude Code Engine: Memuat arsitektur lengkap "${escapeHtml(targetName)}" & menerapkan modifikasi...</em>`
+      `<span class="typing-cursor"></span> <em>⚡ Zoz Autonomous Engine: Memuat arsitektur lengkap "${escapeHtml(targetName)}" & menerapkan modifikasi...</em>`
     );
 
     // Ganti tombol kirim menjadi tombol stop generasi
@@ -18274,7 +18343,7 @@ ${blocks}
           ? currentCode
           : StudioEndocrineDiagnostics.buildCodeReference(currentCode, val, selInfo);
 
-        // Claude Code Continuity: Sertakan riwayat percakapan studio sebelumnya agar perintah lanjutan seperti "Lakukan now" memiliki konteks utuh
+        // Zoz Studio Continuity: Sertakan riwayat percakapan studio sebelumnya agar perintah lanjutan seperti "Lakukan now" memiliki konteks utuh
         const historyKey = isEditingInCodeMode ? '_editChatHistory' : '_studioChatHistory';
         const studioHistory = Array.isArray(activeAIFile[historyKey]) ? activeAIFile[historyKey] : [];
         let conversationContext = '';
@@ -18284,7 +18353,7 @@ ${blocks}
             lastTurns.map(t => `${t.role === 'user' ? 'Pengguna' : 'AI'}: ${t.content || t.displayContent || ''}`).join('\n') + '\n';
         }
 
-        followupPrompt = `[CLAUDE CODE AUTONOMOUS AGENT — EDIT BERKAS "${targetName}"]
+        followupPrompt = `[ZOZ AUTONOMOUS AGENT — EDIT BERKAS "${targetName}"]
 ${selectedContextBlock}${conversationContext}Berikut adalah KODE ARSITEKTUR LENGKAP dari berkas "${targetName}" (${codeLines.length} baris):
 \`\`\`${lang}
 ${codeRefToSend}
@@ -18292,10 +18361,10 @@ ${codeRefToSend}
 
 Instruksi Pengguna Terkini: "${val}"${endocrineFeedback}
 
-MANDAT EKSEKUSI CLAUDE CODE (DILARANG BICARA TANPA BLOK KODE):
-1. Anda adalah Claude Code Autonomous Engineer yang bertugas memodifikasi berkas ini secara langsung dan nyata.
-2. DILARANG KERAS hanya membalas dengan basa-basi atau janji seperti "Baik, saya akan...", "Saya akan meningkatkan kontras...", atau "Selesai" tanpa blok kode! Jawaban tanpa blok kode adalah KEGAGALAN FATAL.
-3. Anda WAJIB langsung mengeluarkan blok perbaikan kode dalam giliran ini juga:
+MANDAT EKSEKUSI ZOZ ENGINE (WAJIB BLOK KODE PADA BARIS PERTAMA):
+1. Anda adalah Zoz Autonomous Engineer yang bertugas memodifikasi berkas ini secara langsung dan nyata.
+2. DILARANG KERAS hanya membalas dengan basa-basi atau janji seperti "Baik, saya akan...", "Saya akan meningkatkan kontras...", atau "Selesai" tanpa blok kode!
+3. RESPON ANDA WAJIB DIMULAI PADA BARIS PERTAMA DENGAN SALAH SATU BLOK KODE BERIKUT:
    - Jika mengubah bagian/baris tertentu (seperti warna teks, kontras hero, CSS, elemen, atau script):
 <<<ZOZ_EDIT name="${targetName}">
 <<<SEARCH>>>
@@ -18309,7 +18378,7 @@ MANDAT EKSEKUSI CLAUDE CODE (DILARANG BICARA TANPA BLOK KODE):
 ... seluruh kode lengkap terbaru ...
 <<<END_ZOZ_FILE>>>
 
-4. Tuliskan penjelasan maksimal 1 kalimat di luar blok kode. Prioritas nomor 1 Anda adalah menyajikan blok <<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>> agar pratinjau website pengguna langsung berubah seketika!`;
+4. Penjelasan singkat maksimal 1 kalimat HANYA boleh diletakkan DI BAWAH blok penutup kode. Prioritas nomor 1 adalah blok kode agar pratinjau website pengguna langsung berubah seketika!`;
       }
     } else {
       followupPrompt = `[Konteks: Pengguna sedang melihat "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan Pengguna: "${val}"\n\nJawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
@@ -19741,17 +19810,17 @@ MANDAT EKSEKUSI CLAUDE CODE (DILARANG BICARA TANPA BLOK KODE):
         ? currentCode
         : StudioEndocrineDiagnostics.buildCodeReference(currentCode, rawText);
 
-      const wrappedEditPrompt = `[CLAUDE CODE SURGICAL EDIT — "${targetName}"]
+      const wrappedEditPrompt = `[ZOZ SURGICAL EDIT — "${targetName}"]
 Berikut adalah KODE LENGKAP ARSITEKTUR berkas "${targetName}" (${codeLines.length} baris):
 \`\`\`${lang}
 ${compactRef}
 \`\`\`
 Permintaan Pengguna: "${rawText}"${endocrineFeedback}
 
-MANDAT EKSEKUSI CLAUDE CODE (WAJIB BLOK KODE):
-1. Anda adalah Claude Code Autonomous Engineer. Tugas Anda adalah memodifikasi kode secara langsung dan nyata.
+MANDAT EKSEKUSI ZOZ ENGINE (WAJIB BLOK KODE PADA BARIS PERTAMA):
+1. Anda adalah Zoz Autonomous Engineer. Tugas Anda adalah memodifikasi kode secara langsung dan nyata.
 2. DILARANG KERAS hanya membalas dengan basa-basi percakapan ("Baik, saya akan...") tanpa kode!
-3. Langsung keluarkan blok perbaikan kode:
+3. RESPON ANDA WAJIB DIMULAI PADA BARIS PERTAMA DENGAN SALAH SATU BLOK KODE BERIKUT:
 <<<ZOZ_EDIT name="${targetName}">
 <<<SEARCH>>>
 [salin persis baris asli yang diubah dari kode lengkap di atas]
@@ -19764,7 +19833,7 @@ Atau jika merombak tata letak/banyak bagian:
 ... seluruh kode file lengkap terbaru ...
 <<<END_ZOZ_FILE>>>
 
-4. Penjelasan maksimal 1 kalimat di luar blok kode. Prioritas utama adalah kode siap pakai!`;
+4. Penjelasan singkat maksimal 1 kalimat HANYA boleh diletakkan DI BAWAH blok penutup kode. Prioritas utama adalah kode siap pakai!`;
 
       options.overrideText = wrappedEditPrompt;
       options.displayPrompt = rawText;
@@ -22146,18 +22215,19 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         // Tetap pastikan perubahan riwayat percakapan studio tersimpan ke disk
         persistStudioCodeChange(activeAIFile.rawContent || activeAIFile.content || '', { session: session });
 
-        // CLAUDE CODE REFLEX: Jika pengguna meminta revisi/perubahan kode, namun AI hanya membalas dengan teks obrolan
+        // ZOZ REFLEX ENGINE: Jika pengguna meminta revisi/perubahan kode, namun AI hanya membalas dengan teks obrolan
         // tanpa blok kode (seperti berjanji "Baik, saya akan..."), ATAU jika blok patch gagal dicocokkan (patchFailures > 0),
         // picu otomatis putaran refleks untuk memaksa pengeluaran kode nyata / kode utuh!
         const wantsCode = isCodeRevisionRequest(cleanUserText);
         const hasBlockMarker = assistantText && (assistantText.includes('<<<ZOZ_EDIT') || assistantText.includes('<<<ZOZ_FILE') || assistantText.includes('<<<SEARCH'));
         const patchFailed = Boolean(runOptions.patchFailures || (hasBlockMarker && (!generatedFiles || generatedFiles.length === 0)));
-        if (((wantsCode && !hasBlockMarker) || patchFailed) && !runOptions._isReflexTurn && !runOptions.isAutonomousRepairTurn && !STATE.isGenerating && !STATE.isSending) {
-          console.warn('[ClaudeCodeReflex] AI merespons tanpa blok kode nyata atau patch gagal dicocokkan. Memaksa eksekusi kode...');
+        if (((wantsCode && !hasBlockMarker) || patchFailed) && !runOptions._isReflexTurn && !runOptions.isAutonomousRepairTurn) {
+          console.warn('[ZozReflex] AI merespons tanpa blok kode nyata atau patch gagal dicocokkan. Menjadwalkan eksekusi Zoz Reflex...');
           const targetName = activeAIFile.name || 'index.html';
           setTimeout(() => {
+            if (runOptions._isReflexTurn || runOptions.isAutonomousRepairTurn) return;
             const reflexPrompt = patchFailed
-              ? `[CLAUDE CODE REFLEX — PATCH GAGAL COCOK, WAJIB KELUARKAN ZOZ_FILE LENGKAP]:
+              ? `[ZOZ REFLEX — PATCH GAGAL COCOK, WAJIB KELUARKAN ZOZ_FILE LENGKAP]:
 Permintaan Pengguna: "${cleanUserText}"
 PENTING: Blok modifikasi presisi (<<<ZOZ_EDIT>>>) Anda tidak cocok dengan baris kode saat ini.
 Untuk menjamin perubahan 100% langsung terpasang ke pratinjau website tanpa kegagalan pencocokan baris:
@@ -22166,7 +22236,7 @@ WAJIB KELUARKAN KODE LENGKAP TERBARU DI DALAM BLOK <<<ZOZ_FILE name="${targetNam
 ... seluruh kode lengkap terbaru yang sudah dimodifikasi ...
 <<<END_ZOZ_FILE>>>.
 DILARANG basa-basi, langsung mulai pada baris pertama respons Anda!`
-              : `[CLAUDE CODE REFLEX — WAJIB KELUARKAN BLOK KODE]:
+              : `[ZOZ REFLEX — WAJIB KELUARKAN BLOK KODE PADA BARIS PERTAMA]:
 Pengguna meminta perbaikan/perubahan: "${cleanUserText}"
 Anda sebelumnya hanya menjawab dengan teks janji/percakapan: "${cleanAssistantSummary}"
 TETAPI Anda BELUM mengeluarkan blok kode modifikasi (<<<ZOZ_EDIT>>> atau <<<ZOZ_FILE>>>)!
@@ -22184,12 +22254,12 @@ Atau blok <<<ZOZ_FILE name="${targetName}"> ... <<<END_ZOZ_FILE>>>.`;
 
             activeStudioAssistantBubble = appendStudioMessage(
               'assistant',
-              `<span class="typing-cursor"></span> <em>${patchFailed ? '⚠️ Target baris patch tidak cocok. Claude Reflex sedang menyelaraskan kode secara utuh...' : '⚡ Claude Code Reflex: Mengunci arsitektur & mengeksekusi perubahan kode...'}</em>`
+              `<span class="typing-cursor"></span> <em>${patchFailed ? '⚠️ Target baris patch tidak cocok. Zoz Reflex sedang menyelaraskan kode secara utuh...' : '⚡ Zoz Reflex Engine: Mengunci arsitektur & mengeksekusi perubahan kode...'}</em>`
             );
 
             handleSendPrompt({
               overrideText: reflexPrompt,
-              displayPrompt: patchFailed ? `⚡ Claude Reflex: Menyelaraskan kode utuh...` : `⚡ Claude Reflex: Menghasilkan kode nyata...`,
+              displayPrompt: patchFailed ? `⚡ Zoz Reflex: Menyelaraskan kode utuh...` : `⚡ Zoz Reflex: Menghasilkan kode nyata...`,
               isStudioIsolated: true,
               studioHistoryMode: runOptions.studioHistoryMode || 'preview',
               websiteMode: 'preview',
@@ -26266,7 +26336,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
     if (els.workspacePlatformBadge) {
       if (STATE.localWorkspace.platform === 'server-fs') {
-        els.workspacePlatformBadge.innerHTML = '<i class="fa-solid fa-bolt"></i> Server Proyek / Mode Claude Code';
+        els.workspacePlatformBadge.innerHTML = '<i class="fa-solid fa-bolt"></i> Server Proyek / Mode Zoz Workspace';
         els.workspacePlatformBadge.style.color = '#38bdf8';
         els.workspacePlatformBadge.style.borderColor = 'rgba(56, 189, 248, 0.4)';
       } else if (isSupported) {
@@ -26288,7 +26358,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     if (els.workspaceConnectedDirDetails) {
       let platformModeText = 'Virtual Storage HP';
       if (STATE.localWorkspace.platform === 'server-fs') {
-        platformModeText = 'Claude Code Live Disk I/O (Tanpa Unduh)';
+        platformModeText = 'Zoz Live Disk I/O (Tanpa Unduh)';
       } else if (STATE.localWorkspace.platform === 'desktop-fs') {
         platformModeText = 'Akses Langsung Hard Disk Laptop (Tanpa Unduh)';
       }
@@ -26959,7 +27029,7 @@ Aturan:
     }
 
     try {
-      // 1. CLAUDE-CODE PARITY: Tulis Langsung ke Disk Fisik Server Proyek jika Backend Tersedia
+      // 1. ZOZ DISK I/O: Tulis Langsung ke Disk Fisik Server Proyek jika Backend Tersedia
       if (STATE.localWorkspace.platform === 'server-fs' || (ServerWorkspaceAPI && ServerWorkspaceAPI.isAvailable)) {
         try {
           const writeContent = base64Payload || cleanContent;

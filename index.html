@@ -34,7 +34,7 @@
         window.location.reload();
       }
     });
-    window.__ZOZ_VERSION__ = 'v20261025_v492';
+    window.__ZOZ_VERSION__ = 'v20261025_v493';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -93,8 +93,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261025_v492">
-  <link rel="stylesheet" href="style.css?v=20261025_v492">
+  <link rel="preload" as="style" href="style.css?v=20261025_v493">
+  <link rel="stylesheet" href="style.css?v=20261025_v493">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -793,7 +793,7 @@
           </div>
         </div>
 
-        <!-- Tombol Cepat Konversi Teks Panjang ke Markdown (Claude/Grok Style) -->
+        <!-- Tombol Cepat Konversi Teks Panjang ke Markdown -->
         <div class="auto-convert-doc-row" id="autoConvertDocRow" style="display: none;">
           <button class="convert-md-pill" id="convertToMdPillBtn" type="button" title="Konversi teks panjang di input menjadi file markdown (.md) agar tidak memenuhi prompt">
             <i class="fa-solid fa-file-code"></i> <span>Jadikan File Markdown (.md)</span>
@@ -1427,7 +1427,7 @@
     </div>
   </div>
 
-  <!-- 6.5. DOCUMENT PREVIEW & REVERT MODAL (Claude / Grok AI Style) -->
+  <!-- 6.5. DOCUMENT PREVIEW & REVERT MODAL (Zoz Document Style) -->
   <div class="modal-backdrop" id="docPreviewModal">
     <div class="modal-card modal-lg doc-preview-modal-card">
       <div class="modal-header">
@@ -1713,7 +1713,7 @@
     </div>
   </div>
 
-  <!-- 6.6. PROMPT FOLDING CONFIRMATION MODAL (Claude / Grok AI Style) -->
+  <!-- 6.6. PROMPT FOLDING CONFIRMATION MODAL (Zoz Prompt Folding) -->
   <div class="modal-backdrop" id="promptFoldConfirmModal">
     <div class="modal-card modal-md">
       <div class="modal-header">
@@ -2434,7 +2434,7 @@
         <!-- Right Toolbar Actions -->
         <div class="terminal-toolbar-right" id="terminalToolbarRight">
           <!-- Auto Y/Enter Automation Toggle (Mobile & Desktop) -->
-          <button class="tb-btn tb-btn-auto-enter" id="btnTermToolbarAutoEnter" type="button" title="Auto Y: Otomatis konfirmasi Y/Enter saat prompt perintah Claude Code muncul">
+          <button class="tb-btn tb-btn-auto-enter" id="btnTermToolbarAutoEnter" type="button" title="Auto Y: Otomatis konfirmasi Y/Enter saat prompt perintah interaktif CLI muncul">
             <span style="color: var(--neon-amber, #f59e0b);">⚡</span>
             <span class="auto-enter-label">Auto Y</span>
           </button>
@@ -3042,8 +3042,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261025_v492" defer></script>
+  <script src="text-safety.js?v=20261025_v493" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261025_v492" defer></script>
+  <script src="app.js?v=20261025_v493" defer></script>
 </body>
 </html>
