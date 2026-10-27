@@ -10887,23 +10887,21 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
   // ==================== ZOZ PARALLEL AGENT SWARM ENGINE ====================
   // Alih-alih mengeksekusi agen AI secara berurutan (sequential waterfall) yang lambat & berputar-putar,
-  // ==================== CLAUDE-CODE PARALLEL MULTI-AGENT SWARM ENGINE ====================
-  // Mengorkestrasi 4 Subagen Spesialis secara PARALEL & NON-BLOCKING (Mirip Arsitektur Claude Code):
+  // ==================== CLAUDE-CODE SINGLE-MODEL PARALLEL SWARM ENGINE ====================
+  // Arsitektur Asli Claude Code: HANYA menggunakan 1 model tunggal (model pilihan pengguna),
+  // dieksekusi secara PARALEL & NON-BLOCKING melalui beberapa thread/worker konkuren:
   // 1. 🧠 Subagent Alpha (Spatial Architect & AST Locator):
   //    - Menganalisis pohon DOM, koordinat CSS, dan baris target secara instan (0-50ms).
-  //    - Menyusun blok SEARCH presisi tinggi atau mendeteksi deklarasi ganda / sintaks terpotong.
-  // 2. 🛠️ Subagent Beta (Primary Synthesizer / Coder):
-  //    - Model utama pengguna (Ollama lokal / OpenRouter cloud) yang menghasilkan kode/surgical patch.
-  // 3. ⚡ Subagent Gamma (Speculative Fast Finisher):
-  //    - Model cloud berkecepatan tinggi (nvidia/nemotron atau model gratis kilat) yang berjalan paralel
-  //      untuk menghasilkan patch definitif dalam 1-2 detik.
+  // 2. 🛠️ Worker 1 (Primary Streamer Branch):
+  //    - Thread pertama dari model tunggal yang menghasilkan implementasi kode lengkap.
+  // 3. ⚡ Worker 2 (Parallel Focused Hunk Branch):
+  //    - Thread kedua dari MODEL TUNGGAL YANG SAMA, berjalan paralel dengan fokus diff minimalis.
   // 4. 🔍 Subagent Delta (Deterministic AST & Leak Verifier / Healer):
-  //    - Menginspeksi sintaks JS, keutuhan tag HTML, dan menyaring kebocoran CSS ke <body> secara instan (0ms).
-  //    - Memvalidasi setiap kandidat sebelum diterapkan ke DOM pratinjau.
+  //    - Memvalidasi sintaks JS, keutuhan tag HTML, dan menyaring kebocoran CSS ke <body> secara instan (0ms).
   //
   // Aturan Konsensus:
   // - Cabang generatif tercepat yang tervalidasi 100% oleh Subagent Delta MENANG langsung.
-  // - Menghilangkan siklus tunggu berurutan (Round 1 -> Round 2 -> Round 3) menjadi 1 putaran paralel kilat.
+  // - KEDUA cabang generatif dijamin 100% menggunakan model tunggal yang sama tanpa model pihak ketiga lain.
 
   const ClaudeCodeParallelSwarm = {
     activeControllers: new Set(),
@@ -10922,11 +10920,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       hudEl.className = 'studio-agent-loop-hud' + (isErr ? ' is-error' : (isSuccess ? ' is-success' : ''));
 
       const arch = subagentsState.architect || { status: 'active', label: 'Analyzing AST' };
-      const coder = subagentsState.coder || { status: 'active', label: 'Synthesizing' };
-      const spec = subagentsState.speculator || { status: 'active', label: 'Speculating' };
+      const coder = subagentsState.coder || { status: 'active', label: 'Worker 1' };
+      const spec = subagentsState.speculator || { status: 'active', label: 'Worker 2' };
       const verif = subagentsState.verifier || { status: 'active', label: 'Validating' };
 
-      const title = subagentsState.title || (isSuccess ? 'Website 100% Bebas Error' : 'Eksekusi 4 Subagen Paralel');
+      const title = subagentsState.title || (isSuccess ? 'Website 100% Bebas Error' : 'Eksekusi 1 Model Tunggal Paralel');
 
       hudEl.innerHTML = `
         <div class="claude-swarm-banner">
@@ -10942,10 +10940,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
               🧠 Architect <span class="pill-badge">${escapeHtml(arch.label)}</span>
             </div>
             <div class="swarm-pill pill-coder ${coder.status}">
-              🛠️ Coder <span class="pill-badge">${escapeHtml(coder.label)}</span>
+              🛠️ Worker 1 <span class="pill-badge">${escapeHtml(coder.label)}</span>
             </div>
             <div class="swarm-pill pill-speculator ${spec.status}">
-              ⚡ Speculator <span class="pill-badge">${escapeHtml(spec.label)}</span>
+              ⚡ Worker 2 <span class="pill-badge">${escapeHtml(spec.label)}</span>
             </div>
             <div class="swarm-pill pill-verifier ${verif.status}">
               🔍 Verifier <span class="pill-badge">${escapeHtml(verif.label)}</span>
@@ -10962,7 +10960,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       this.activeControllers.clear();
     },
 
-    // 1. EXECUTE REPAIR SWARM (Auto-Heal Paralel 4 Subagen)
+    // 1. EXECUTE REPAIR SWARM (Auto-Heal Paralel 1 Model Tunggal)
     async executeRepairSwarm({ lastErr, activeAIFile, currentCode, onUpdate, onDone }) {
       const startTime = Date.now();
       const swarmAbort = new AbortController();
@@ -10976,12 +10974,19 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       const contextCode = lines.slice(startLine - 1, endLine).join('\n');
       const errTitle = (lastErr.message || 'SyntaxError').split('\n')[0].substring(0, 50);
 
+      // Model Tunggal Pilihan Pengguna (Single Model Enforcement)
+      const singleEngine = (typeof STATE !== 'undefined' && STATE.mode === 'ollama') ? 'ollama' : 'openrouter';
+      const singleModel = (singleEngine === 'ollama')
+        ? (STATE.settings.ollamaModel || 'deepseek-coder:latest')
+        : (STATE.settings.openRouterModel || 'openrouter/free');
+      const singleModelClean = singleModel.split('/').pop().replace(/:.*/, '');
+
       const subState = {
         title: `Menyembuhkan "${errTitle}"`,
         isError: true,
-        architect: { status: 'active', label: `Target: L${errLine}` },
-        coder: { status: 'active', label: 'Synthesizing...' },
-        speculator: { status: 'active', label: 'Speculating...' },
+        architect: { status: 'active', label: `L${errLine}` },
+        coder: { status: 'active', label: `Worker 1 (${singleModelClean})` },
+        speculator: { status: 'active', label: `Worker 2 (${singleModelClean})` },
         verifier: { status: 'active', label: 'AST Checking' }
       };
       if (onUpdate) onUpdate(subState);
@@ -11036,7 +11041,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         return;
       }
 
-      // --- SUBAGENTS BETA & GAMMA (Parallel Generative Execution) ---
+      // --- PARALLEL EXECUTION OF THE SAME SINGLE MODEL ---
       const autoHealPrompt = `[CLAUDE-CODE PARALLEL SWARM — REPAIR AGENT]
 Kode berkas "${targetName}" memicu error di browser:
 "${lastErr.message}" (baris ${errLine})
@@ -11051,40 +11056,45 @@ Perbaiki bagian error tersebut. Respon Anda WAJIB langsung dimulai pada baris pe
 [baris perbaikan yang valid tanpa error]
 >>>>>>> REPLACE`;
 
-      const primaryModel = (typeof STATE !== 'undefined' && STATE.mode === 'ollama')
-        ? (STATE.settings.ollamaModel || 'deepseek-coder:latest')
-        : (STATE.settings.openRouterModel || 'openrouter/free');
-
-      const runPrimaryCoder = async () => {
+      // Worker 1: Model tunggal dengan prompt standar
+      const runWorker1 = async () => {
         let appended = '';
-        if (STATE.mode === 'ollama') {
-          appended = await streamContinuationOllama(null, primaryModel, autoHealPrompt, null, contextCode, {
+        if (singleEngine === 'ollama') {
+          appended = await streamContinuationOllama(null, singleModel, autoHealPrompt, null, contextCode, {
             hideAllCodeBlocks: true,
             signal: swarmAbort.signal
           });
         } else {
-          appended = await streamContinuationOpenRouter(null, primaryModel, autoHealPrompt, null, contextCode, {
+          appended = await streamContinuationOpenRouter(null, singleModel, autoHealPrompt, null, contextCode, {
             hideAllCodeBlocks: true,
             signal: swarmAbort.signal
           });
         }
-        return { agent: 'Subagent Beta (Primary Coder)', patchText: appended };
+        return { agent: `Worker 1 (${singleModelClean})`, patchText: appended };
       };
 
-      const runFastSpeculator = async () => {
-        const fastModel = 'nvidia/nemotron-3-super-120b-a12b:free';
-        const specPrompt = autoHealPrompt + '\n[KECEPATAN TINGGI]: Tuliskan blok diff sesingkat mungkin.';
-        const appended = await streamContinuationOpenRouter(null, fastModel, specPrompt, null, contextCode, {
-          hideAllCodeBlocks: true,
-          signal: swarmAbort.signal
-        });
-        return { agent: 'Subagent Gamma (Speculator)', patchText: appended };
+      // Worker 2: MODEL TUNGGAL YANG SAMA SECARA PARALEL dengan prompt diff minimalis
+      const runWorker2 = async () => {
+        const specPrompt = autoHealPrompt + '\n[MANDAT EFISIENSI]: Langsung tuliskan blok <<<<<<< SEARCH tanpa penjelasan.';
+        let appended = '';
+        if (singleEngine === 'ollama') {
+          appended = await streamContinuationOllama(null, singleModel, specPrompt, null, contextCode, {
+            hideAllCodeBlocks: true,
+            signal: swarmAbort.signal
+          });
+        } else {
+          appended = await streamContinuationOpenRouter(null, singleModel, specPrompt, null, contextCode, {
+            hideAllCodeBlocks: true,
+            signal: swarmAbort.signal
+          });
+        }
+        return { agent: `Worker 2 (${singleModelClean})`, patchText: appended };
       };
 
       try {
         const generativeTasks = [
-          runPrimaryCoder().catch(err => ({ error: err, agent: 'Beta' })),
-          runFastSpeculator().catch(err => ({ error: err, agent: 'Gamma' }))
+          runWorker1().catch(err => ({ error: err, agent: 'Worker 1' })),
+          runWorker2().catch(err => ({ error: err, agent: 'Worker 2' }))
         ];
 
         const fastest = await Promise.race(generativeTasks);
@@ -11106,9 +11116,9 @@ Perbaiki bagian error tersebut. Respon Anda WAJIB langsung dimulai pada baris pe
             subState.isSuccess = true;
             subState.isError = false;
             subState.title = `Sukses via ${winningResult.agent}!`;
-            if (winningResult.agent.includes('Beta')) {
+            if (winningResult.agent.includes('Worker 1')) {
               subState.coder = { status: 'winner', label: 'Applied' };
-              subState.speculator = { status: 'verified', label: 'Idle' };
+              subState.speculator = { status: 'verified', label: 'Aborted' };
             } else {
               subState.speculator = { status: 'winner', label: 'Applied' };
               subState.coder = { status: 'verified', label: 'Aborted' };
@@ -11143,7 +11153,7 @@ Perbaiki bagian error tersebut. Respon Anda WAJIB langsung dimulai pada baris pe
       }
     },
 
-    // 2. EXECUTE EDIT SWARM (Studio AI Edit Paralel 4 Subagen)
+    // 2. EXECUTE EDIT SWARM (Studio AI Edit Paralel 1 Model Tunggal)
     async executeEditSwarm({ userPrompt, activeAIFile, currentCode, selInfo, onUpdate, onDone }) {
       const startTime = Date.now();
       const swarmAbort = new AbortController();
@@ -11154,13 +11164,20 @@ Perbaiki bagian error tersebut. Respon Anda WAJIB langsung dimulai pada baris pe
       const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml';
       const lang = isHtml ? 'html' : ext;
 
+      // Model Tunggal Pilihan Pengguna (Single Model Enforcement)
+      const singleEngine = (typeof STATE !== 'undefined' && STATE.mode === 'ollama') ? 'ollama' : 'openrouter';
+      const singleModel = (singleEngine === 'ollama')
+        ? (STATE.settings.ollamaModel || 'deepseek-coder:latest')
+        : (STATE.settings.openRouterModel || 'openrouter/free');
+      const singleModelClean = singleModel.split('/').pop().replace(/:.*/, '');
+
       const subState = {
         title: `Mengedit "${userPrompt.substring(0, 32)}..."`,
         isError: false,
         isSuccess: false,
         architect: { status: 'active', label: 'Locating' },
-        coder: { status: 'active', label: 'Streaming' },
-        speculator: { status: 'active', label: 'Speculating' },
+        coder: { status: 'active', label: `Worker 1 (${singleModelClean})` },
+        speculator: { status: 'active', label: `Worker 2 (${singleModelClean})` },
         verifier: { status: 'active', label: 'Validating' }
       };
       if (onUpdate) onUpdate(subState);
@@ -11192,40 +11209,45 @@ Ubah HANYA bagian yang diminta pengguna. Mulai respons langsung pada baris perta
 [baris baru perbaikan/penambahan]
 >>>>>>> REPLACE`;
 
-      const primaryModel = (typeof STATE !== 'undefined' && STATE.mode === 'ollama')
-        ? (STATE.settings.ollamaModel || 'deepseek-coder:latest')
-        : (STATE.settings.openRouterModel || 'openrouter/free');
-
-      const runPrimaryCoder = async () => {
+      // Worker 1: Model tunggal dengan prompt edit lengkap
+      const runWorker1 = async () => {
         let appended = '';
-        if (STATE.mode === 'ollama') {
-          appended = await streamContinuationOllama(null, primaryModel, editPrompt, null, codeRef, {
+        if (singleEngine === 'ollama') {
+          appended = await streamContinuationOllama(null, singleModel, editPrompt, null, codeRef, {
             hideAllCodeBlocks: true,
             signal: swarmAbort.signal
           });
         } else {
-          appended = await streamContinuationOpenRouter(null, primaryModel, editPrompt, null, codeRef, {
+          appended = await streamContinuationOpenRouter(null, singleModel, editPrompt, null, codeRef, {
             hideAllCodeBlocks: true,
             signal: swarmAbort.signal
           });
         }
-        return { agent: 'Subagent Beta (Primary Coder)', patchText: appended };
+        return { agent: `Worker 1 (${singleModelClean})`, patchText: appended };
       };
 
-      const runFastSpeculator = async () => {
-        const fastModel = 'nvidia/nemotron-3-super-120b-a12b:free';
-        const specPrompt = editPrompt + '\n[KECEPATAN TINGGI]: Tuliskan blok diff minimal tanpa basa-basi.';
-        const appended = await streamContinuationOpenRouter(null, fastModel, specPrompt, null, codeRef, {
-          hideAllCodeBlocks: true,
-          signal: swarmAbort.signal
-        });
-        return { agent: 'Subagent Gamma (Speculator)', patchText: appended };
+      // Worker 2: MODEL TUNGGAL YANG SAMA SECARA PARALEL dengan instruksi diff minimalis
+      const runWorker2 = async () => {
+        const specPrompt = editPrompt + '\n[MANDAT EFISIENSI]: Langsung tuliskan blok <<<<<<< SEARCH tanpa basa-basi.';
+        let appended = '';
+        if (singleEngine === 'ollama') {
+          appended = await streamContinuationOllama(null, singleModel, specPrompt, null, codeRef, {
+            hideAllCodeBlocks: true,
+            signal: swarmAbort.signal
+          });
+        } else {
+          appended = await streamContinuationOpenRouter(null, singleModel, specPrompt, null, codeRef, {
+            hideAllCodeBlocks: true,
+            signal: swarmAbort.signal
+          });
+        }
+        return { agent: `Worker 2 (${singleModelClean})`, patchText: appended };
       };
 
       try {
         const generativeTasks = [
-          runPrimaryCoder().catch(err => ({ error: err, agent: 'Beta' })),
-          runFastSpeculator().catch(err => ({ error: err, agent: 'Gamma' }))
+          runWorker1().catch(err => ({ error: err, agent: 'Worker 1' })),
+          runWorker2().catch(err => ({ error: err, agent: 'Worker 2' }))
         ];
 
         const fastest = await Promise.race(generativeTasks);
@@ -11246,9 +11268,9 @@ Ubah HANYA bagian yang diminta pengguna. Mulai respons langsung pada baris perta
 
             subState.isSuccess = true;
             subState.title = `Modifikasi Selesai via ${winningResult.agent}!`;
-            if (winningResult.agent.includes('Beta')) {
+            if (winningResult.agent.includes('Worker 1')) {
               subState.coder = { status: 'winner', label: 'Applied' };
-              subState.speculator = { status: 'verified', label: 'Idle' };
+              subState.speculator = { status: 'verified', label: 'Aborted' };
             } else {
               subState.speculator = { status: 'winner', label: 'Applied' };
               subState.coder = { status: 'verified', label: 'Aborted' };
@@ -11292,15 +11314,20 @@ Ubah HANYA bagian yang diminta pengguna. Mulai respons langsung pada baris perta
       }
     },
 
-    // 3. EXECUTE CONTINUATION SWARM (Auto-Continuation Paralel 4 Subagen)
+    // 3. EXECUTE CONTINUATION SWARM (Auto-Continuation Paralel 1 Model Tunggal)
     async executeContinuationSwarm({ session, modelName, engine = 'openrouter', continuePrompt, tailLines, bubbleText, currentAccumulated, runOptions = {}, onStatus = null }) {
-      if (onStatus) onStatus('⚡ Mengaktifkan Claude-Code Swarm (4 Agen Paralel)...');
+      if (onStatus) onStatus('⚡ Mengaktifkan Claude-Code Swarm (Parallel Workers)...');
 
       const swarmAbort = new AbortController();
       const parentSignal = STATE.abortController?.signal;
       if (parentSignal) {
         parentSignal.addEventListener('abort', () => swarmAbort.abort(), { once: true });
       }
+
+      // Single model enforcement
+      const singleEngine = engine || (typeof STATE !== 'undefined' && STATE.mode === 'ollama' ? 'ollama' : 'openrouter');
+      const singleModel = modelName || (singleEngine === 'ollama' ? (STATE.settings.ollamaModel || 'deepseek-coder:latest') : (STATE.settings.openRouterModel || 'openrouter/free'));
+      const singleModelClean = singleModel.split('/').pop().replace(/:.*/, '');
 
       // Delta: Deterministic Structural Healer (0ms)
       const runAgentDelta = async () => {
@@ -11315,38 +11342,47 @@ Ubah HANYA bagian yang diminta pengguna. Mulai respons langsung pada baris perta
         return { agent: 'Subagent Delta (Structural Healer)', fullText: candidate, isClosed: true };
       };
 
-      // Beta: Primary Generative Streamer
-      const runAgentBeta = async () => {
+      // Worker 1: Primary Generative Streamer (Single Model)
+      const runWorker1 = async () => {
         let appended = '';
-        if (engine === 'ollama') {
-          appended = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, tailLines, runOptions);
+        if (singleEngine === 'ollama') {
+          appended = await streamContinuationOllama(session, singleModel, continuePrompt, bubbleText, tailLines, runOptions);
         } else {
-          appended = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, tailLines, runOptions);
+          appended = await streamContinuationOpenRouter(session, singleModel, continuePrompt, bubbleText, tailLines, runOptions);
         }
-        if (!appended || !appended.trim()) throw new Error('Agent Beta empty');
+        if (!appended || !appended.trim()) throw new Error('Worker 1 empty');
         const stitched = safeAssistantText(stitchContinuationChunk(currentAccumulated, appended));
         const isClosed = stitched.includes('</html>') || stitched.includes('<<<END_ZOZ_FILE>>>');
-        return { agent: 'Subagent Beta (Primary Streamer)', appended, fullText: stitched, isClosed };
+        return { agent: `Worker 1 (${singleModelClean})`, appended, fullText: stitched, isClosed };
       };
 
-      // Gamma: Speculative Fast Finisher
-      const runAgentGamma = async () => {
-        const fastModel = 'nvidia/nemotron-3-super-120b-a12b:free';
+      // Worker 2: MODEL TUNGGAL YANG SAMA SECARA PARALEL dengan mandat cepat
+      const runWorker2 = async () => {
         const fastPrompt = continuePrompt + '\n\n[MANDAT KECEPATAN]: Langsung tuliskan penutupan kode sampai </html> tanpa penjelasan.';
-        const appended = await streamContinuationOpenRouter(session, fastModel, fastPrompt, null, tailLines, {
-          ...runOptions,
-          hideAllCodeBlocks: true
-        });
-        if (!appended || !appended.trim()) throw new Error('Agent Gamma empty');
+        let appended = '';
+        if (singleEngine === 'ollama') {
+          appended = await streamContinuationOllama(session, singleModel, fastPrompt, null, tailLines, {
+            ...runOptions,
+            hideAllCodeBlocks: true,
+            signal: swarmAbort.signal
+          });
+        } else {
+          appended = await streamContinuationOpenRouter(session, singleModel, fastPrompt, null, tailLines, {
+            ...runOptions,
+            hideAllCodeBlocks: true,
+            signal: swarmAbort.signal
+          });
+        }
+        if (!appended || !appended.trim()) throw new Error('Worker 2 empty');
         const stitched = safeAssistantText(stitchContinuationChunk(currentAccumulated, appended));
         const isClosed = stitched.includes('</html>') || stitched.includes('<<<END_ZOZ_FILE>>>');
-        return { agent: 'Subagent Gamma (Speculative Finisher)', appended, fullText: stitched, isClosed };
+        return { agent: `Worker 2 (${singleModelClean})`, appended, fullText: stitched, isClosed };
       };
 
       try {
         const parallelTasks = [
-          runAgentBeta().catch(err => ({ error: err, agent: 'Beta' })),
-          runAgentGamma().catch(err => ({ error: err, agent: 'Gamma' }))
+          runWorker1().catch(err => ({ error: err, agent: 'Worker 1' })),
+          runWorker2().catch(err => ({ error: err, agent: 'Worker 2' }))
         ];
 
         const fastest = await Promise.race(parallelTasks);
