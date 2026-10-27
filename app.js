@@ -854,19 +854,30 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
             : (input && typeof input === 'object' && typeof input.url === 'string') ? input.url
             : (input instanceof URL) ? input.href : '';
 
-          const isLocal = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]');
+          const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
+          const isLocal = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
           const isVercel = Boolean(location.hostname && location.hostname.endsWith('vercel.app'));
 
-          // Pada domain statis tanpa serverless backend (z21.zozdocs.com, github.io, dll), teruskan /api/... non-WA ke Vercel Gateway resmi
+          // Pada domain statis tanpa serverless backend (z21.zozdocs.com, github.io, dll), arahkan ke Tunnel Backend aktif jika tersedia, atau Vercel Gateway
           if (!isLocal && !isVercel && typeof url === 'string') {
-            if (url.startsWith('/api/') && !url.startsWith('/api/wa/') && !url.startsWith('/api/terminal/') && !url.startsWith('/api/tunnel/') && !url.startsWith('/api/daemon/')) {
-              url = 'https://zoz-router.vercel.app' + url;
-              if (typeof input === 'string') {
-                input = url;
-              } else if (input instanceof URL) {
-                input = new URL(url);
-              } else if (input && typeof input === 'object') {
-                try { input = new Request(url, input); } catch (_) {}
+            if (url.startsWith('/api/')) {
+              // Jika di z21.zozdocs.com, biarkan path relatif '/api/...' agar ditangani langsung oleh Cloudflare Edge Bridge (_worker.js)
+              if (location.hostname && location.hostname.includes('zozdocs.com')) {
+                // Biarkan relatif: _worker.js di z21.zozdocs.com meneruskannya langsung ke Tunnel Gateway lokal
+              } else {
+                // Di github.io atau hosting statis murni lain, gunakan active tunnel URL bila ada, atau fallback Vercel
+                const tunnelBase = (typeof WhatsAppController !== 'undefined' && WhatsAppController.activeTunnelUrl && WhatsAppController.activeTunnelUrl.includes('.trycloudflare.com'))
+                  ? WhatsAppController.activeTunnelUrl.replace(/\/+$/, '')
+                  : (localStorage.getItem('zoz_last_tunnel_url') || 'https://roommate-flashers-flags-briefly.trycloudflare.com');
+                const targetBase = tunnelBase || 'https://zoz-router.vercel.app';
+                url = targetBase + url;
+                if (typeof input === 'string') {
+                  input = url;
+                } else if (input instanceof URL) {
+                  input = new URL(url);
+                } else if (input && typeof input === 'object') {
+                  try { input = new Request(url, input); } catch (_) {}
+                }
               }
             }
           }
@@ -874,6 +885,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           const isSameOrigin = url.startsWith('/') ||
             url.startsWith(window.location.origin + '/') ||
             url === window.location.origin ||
+            url.includes('trycloudflare.com') ||
             url.startsWith('https://zoz-router.vercel.app/');
           if (isSameOrigin && STATE.userId) {
             const hdrs = new Headers((init && init.headers) || (input && input.headers) || undefined);
@@ -11752,7 +11764,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       const errors = [];
       const key = STATE.settings.openRouterKey || '';
       const candidateModels = [
-        model,
+        model && model.includes('/') ? model : (mapOllamaModelToOpenRouter(model) || 'openrouter/free'),
         'openrouter/free',
         'google/gemini-2.0-flash-exp:free',
         'meta-llama/llama-3.3-70b-instruct:free',
@@ -11794,17 +11806,23 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
             errors.push(`${route}: ${await this.describeHttpError(res)}`);
             continue;
           }
-          await this.readLines(res, (line) => {
-            const t = line.trim();
-            if (!t.startsWith('data:')) return;
-            const js = t.replace(/^data:\s*/, '');
-            if (js === '[DONE]') return false;
-            let p;
-            try { p = JSON.parse(js); } catch (_) { return; }
-            if (p.error) throw new Error(typeof p.error === 'object' ? (p.error.message || JSON.stringify(p.error)) : String(p.error));
-            feed(p.choices?.[0]?.delta?.content || '');
-          }, signal);
-          return;
+          try {
+            await this.readLines(res, (line) => {
+              const t = line.trim();
+              if (!t.startsWith('data:')) return;
+              const js = t.replace(/^data:\s*/, '');
+              if (js === '[DONE]') return false;
+              let p;
+              try { p = JSON.parse(js); } catch (_) { return; }
+              if (p.error) throw new Error(typeof p.error === 'object' ? (p.error.message || JSON.stringify(p.error)) : String(p.error));
+              feed(p.choices?.[0]?.delta?.content || '');
+            }, signal);
+            if (acc.text.trim()) return;
+          } catch (readErr) {
+            if (signal.aborted) throw readErr;
+            errors.push(`${route} stream: ${readErr.message || readErr}`);
+            continue;
+          }
         }
       }
       throw new Error(errors.join(' | ') || 'Tidak dapat terhubung ke penyedia model Cloud.');

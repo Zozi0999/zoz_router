@@ -661,9 +661,9 @@ export default {
       });
     }
 
-    // Universal WhatsApp & Daemon Tunnel Proxy (Edge Bridge)
+    // Universal WhatsApp, AI & Daemon Tunnel Proxy (Edge Bridge)
     const TUNNEL_GATEWAY_URL = 'https://roommate-flashers-flags-briefly.trycloudflare.com';
-    if (url.pathname.startsWith('/api/wa/') || url.pathname.startsWith('/api/terminal/') || url.pathname.startsWith('/api/tunnel/') || url.pathname.startsWith('/api/daemon/')) {
+    if (url.pathname.startsWith('/api/')) {
       const targetUrl = TUNNEL_GATEWAY_URL + url.pathname + url.search;
       const fwdHeaders = new Headers(request.headers);
       fwdHeaders.set('Host', 'roommate-flashers-flags-briefly.trycloudflare.com');
@@ -683,29 +683,38 @@ export default {
 
       try {
         const upstream = await fetch(targetUrl, fetchInit);
-        const resHeaders = new Headers(upstream.headers);
-        resHeaders.set('Access-Control-Allow-Origin', '*');
-        resHeaders.set('Access-Control-Allow-Private-Network', 'true');
-        resHeaders.set('X-Accel-Buffering', 'no');
-        resHeaders.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+        const isWaOrTerm = url.pathname.startsWith('/api/wa/') || url.pathname.startsWith('/api/terminal/') || url.pathname.startsWith('/api/tunnel/') || url.pathname.startsWith('/api/daemon/');
+        if (!isWaOrTerm && (upstream.status === 502 || upstream.status === 504 || upstream.status === 503)) {
+          // Lanjut ke handler worker di bawah jika tunnel mengembalikan 502/504
+        } else {
+          const resHeaders = new Headers(upstream.headers);
+          resHeaders.set('Access-Control-Allow-Origin', '*');
+          resHeaders.set('Access-Control-Allow-Private-Network', 'true');
+          resHeaders.set('X-Accel-Buffering', 'no');
+          resHeaders.set('Cache-Control', 'no-store, no-cache, must-revalidate');
 
-        return new Response(upstream.body, {
-          status: upstream.status,
-          statusText: upstream.statusText,
-          headers: resHeaders
-        });
+          return new Response(upstream.body, {
+            status: upstream.status,
+            statusText: upstream.statusText,
+            headers: resHeaders
+          });
+        }
       } catch (proxyErr) {
-        return new Response(JSON.stringify({
-          success: false,
-          error: 'Gagal menghubungi tunnel WhatsApp/Daemon backend lokal: ' + proxyErr.message,
-          tunnelUrl: TUNNEL_GATEWAY_URL
-        }), {
-          status: 502,
-          headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-            'Access-Control-Allow-Origin': '*'
-          }
-        });
+        const isWaOrTerm = url.pathname.startsWith('/api/wa/') || url.pathname.startsWith('/api/terminal/') || url.pathname.startsWith('/api/tunnel/') || url.pathname.startsWith('/api/daemon/');
+        if (isWaOrTerm) {
+          return new Response(JSON.stringify({
+            success: false,
+            error: 'Gagal menghubungi tunnel WhatsApp/Daemon backend lokal: ' + proxyErr.message,
+            tunnelUrl: TUNNEL_GATEWAY_URL
+          }), {
+            status: 502,
+            headers: {
+              'Content-Type': 'application/json; charset=utf-8',
+              'Access-Control-Allow-Origin': '*'
+            }
+          });
+        }
+        // Endpoint AI/lainnya lanjut ke fallback worker di bawah jika tunnel offline
       }
     }
 
