@@ -11066,7 +11066,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '<$1></$1>');
 
       const stack = [];
-      const tagRegex = /<\/?([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*?(\/?)>/g;
+      const tagRegex = /<\/?([a-zA-Z][a-zA-Z0-9-]*)\b(?:[^>"']|"[^"]*"|'[^']*')*?(\/?)>/g;
       let match;
 
       while ((match = tagRegex.exec(sanitized)) !== null) {
@@ -11111,6 +11111,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       const normalizedCode = scriptCode
         .replace(/^\s*import\s+[\s\S]*?from\s+['"][^'"]+['"]\s*;?/gm, (m) => m.replace(/[^\n]/g, ' '))
         .replace(/^\s*import\s+['"][^'"]+['"]\s*;?/gm, (m) => m.replace(/[^\n]/g, ' '))
+        .replace(/^\s*export\s*\{[\s\S]*?\}\s*(?:from\s*['"][^'"]+['"])?\s*;?/gm, (m) => m.replace(/[^\n]/g, ' '))
         .replace(/^\s*export\s+default\s+/gm, 'const __zoz_default__ = ')
         .replace(/^\s*export\s+(?=(const|let|var|function|async|class)\b)/gm, '');
 
@@ -15084,7 +15085,8 @@ Aturan wajib:
   /**
    * MORPH_NODE Helper (Pilar 2):
    * Menyinkronkan atribut dan innerHTML pada rootNode target tanpa mengganti referensi objek DOM-nya
-   * sehingga addEventListener yang terpasang pada rootNode tidak pernah putus/hilang.
+   * sehingga addEventListener yang terpasang pada rootNode tidak pernah putus/hilang,
+   * serta menghidupkan kembali tag <script> yang disuntikkan via innerHTML.
    */
   function morphTargetNode(targetNode, newHtmlPatch) {
     if (!targetNode || typeof document === 'undefined') return;
@@ -15106,6 +15108,16 @@ Aturan wajib:
 
     // 2. Perbarui isi dalam (innerHTML) sambil menjaga root reference
     targetNode.innerHTML = patchedNode.innerHTML;
+
+    // 3. Hidupkan kembali tag <script> baru yang masuk via innerHTML
+    for (const oldScript of targetNode.querySelectorAll('script')) {
+      const newScript = document.createElement('script');
+      for (const attr of Array.from(oldScript.attributes)) {
+        newScript.setAttribute(attr.name, attr.value);
+      }
+      newScript.textContent = oldScript.textContent;
+      oldScript.replaceWith(newScript);
+    }
   }
 
   /**
