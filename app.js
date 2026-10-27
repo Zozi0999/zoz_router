@@ -9151,6 +9151,24 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     let currentFileName = '';
     const isDocMode = Boolean(options && (options.isDocCreation || options.docFormat));
 
+    const isWebPreviewMode = Boolean(
+      (options && (options.websiteMode === 'preview' || options.isWebCreation || options.hideCodeInChat || options.hideAllCodeBlocks || options.isStudioIsolated)) ||
+      (typeof activeAIFile !== 'undefined' && activeAIFile) ||
+      (typeof els !== 'undefined' && els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) ||
+      (typeof isWebsiteCreationPrompt === 'function' && isWebsiteCreationPrompt(text || '')) ||
+      (text && (text.includes('<!DOCTYPE') || text.includes('<html') || text.includes('<<<ZOZ_FILE') || text.includes('```html') || text.includes('```jsx')))
+    );
+
+    const NAKED_HTML_START = /^<\/?(?:!DOCTYPE\s+html|html|head|body|div|section|nav|header|footer|main|aside|article|style|script|table|form|template|iframe|svg|canvas|ul|ol|li|button|input|label|p|h[1-6]|span|a)\b/i;
+    const CODE_LIKE_LINE = /^(?:`{3,}|<{1,5}>{1,5}|[<>=]{2,}|<<>>|< < > >|<<<>>|window\.|document\.|console\.|setInterval|setTimeout|function\b|const\s+|let\s+|var\s+|\/\*|\*\/|\/\/|<\/script>|<\/html>|<\/body>|<\/style>|<\/div>|<\/iframe>|<\/section>|<!--|[{}\[\];]|(?:[a-zA-Z0-9_-]+=(?:"[^"]*"|'[^']*'|[^\s>]+)|allowfullscreen|disabled|checked)|(?:[.#@:][a-zA-Z0-9_-]|[a-zA-Z0-9_-]+\s*\{|[a-zA-Z0-9_-]+\s*:\s*[^;]+;)).*$/i;
+
+    function pushWebBanner(fileName = '') {
+      if (!out.some(l => l && l.includes('Sedang merancang kode website'))) {
+        const namePart = fileName ? ` ${escapeHtml(fileName)}` : '';
+        out.push(`\n> 🌐 *Sedang merancang kode website${namePart}... (terisolasi di pratinjau live)*\n`);
+      }
+    }
+
     function isCodeOrMarkupLine(l) {
       const s = l.trim();
       if (!s) return true;
@@ -9187,8 +9205,72 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         return;
       }
 
-      // Penanganan khusus isolasi dokumen (agar teks pembuatannya tertutup dan tidak membanjiri chat)
-      if (!insideFileBlock && !insideDocBlock && !insideRawDocBlock && (isDocMode || t.startsWith(TICK3 + 'docx') || t.startsWith(TICK3 + 'pdf'))) {
+      // 1. Penanganan blok berkas ZOZ_FILE / ZOZ_EDIT / ZOZ_MODIFY (PRIORITAS UTAMA)
+      if (insideFileBlock) {
+        if (t.indexOf('<<<END_ZOZ_FILE') === 0 || t.indexOf('<<<END_ZOZ_EDIT') === 0 || t.indexOf('<<<END_ZOZ_MODIFY') === 0) {
+          insideFileBlock = false;
+          const wasIsolated = insideIsolatedBlock;
+          insideIsolatedBlock = false;
+          if (!wasIsolated) {
+            out.push('```\n');
+          }
+          return;
+        }
+        if (insideIsolatedBlock && fileBlockLang !== 'mermaid' && fileBlockLang !== 'mmd') {
+          return; // Jangan cetak baris-baris kode dokumen maupun website ke gelembung chat!
+        }
+        out.push(line);
+        return;
+      }
+
+      if (t.indexOf('<<<ZOZ_FILE') === 0 || t.indexOf('<<<ZOZ_EDIT') === 0 || t.indexOf('<<<ZOZ_MODIFY') === 0) {
+        insideFileBlock = true;
+        const nameMatch = t.match(/(?:name|file|path)=["']?([^"'\s>]+)["']?/i);
+        const langMatch = t.match(/lang=["']?([^"'\s>]+)["']?/i);
+        currentFileName = nameMatch ? nameMatch[1] : '';
+        fileBlockLang = (langMatch ? langMatch[1] : (currentFileName ? guessLangFromName(currentFileName) : 'code')).toLowerCase();
+        const fnLower = currentFileName.toLowerCase();
+        const isDiagram = fileBlockLang === 'mermaid' || fileBlockLang === 'mmd' ||
+                          fnLower.endsWith('.mermaid') || fnLower.endsWith('.mmd') ||
+                          (fnLower.endsWith('.svg') && fileBlockLang !== 'xml');
+        if (isDiagram) fileBlockLang = 'mermaid';
+        const isWeb = fnLower.endsWith('.html') || fnLower.endsWith('.htm') || fnLower.endsWith('.jsx') || fnLower.endsWith('.tsx') ||
+                      fileBlockLang === 'html' || fileBlockLang === 'htm' || fileBlockLang === 'jsx' || fileBlockLang === 'tsx' || fileBlockLang === 'react';
+        const isDoc = fnLower.endsWith('.docx') || fnLower.endsWith('.pdf') || fnLower.endsWith('.doc') || fnLower.endsWith('.md') ||
+                      fileBlockLang === 'docx' || fileBlockLang === 'pdf' || 
+                      ((fileBlockLang === 'markdown' || fileBlockLang === 'md') && (!isDiagram && !isWeb && !fnLower.endsWith('.svg') || isDocMode));
+
+        const isSurgicalTag = t.indexOf('<<<ZOZ_EDIT') === 0 || t.indexOf('<<<ZOZ_MODIFY') === 0;
+        if (isDiagram) {
+          out.push('\n```mermaid');
+        } else if (isDoc) {
+          insideIsolatedBlock = true;
+          out.push(`\n> 📄 *Sedang menyusun dan memformat dokumen ${escapeHtml(currentFileName || 'Dokumen')}... (terisolasi di Studio Dokumen)*\n`);
+        } else if (isSurgicalTag && !isExplicitCodeInChat) {
+          insideIsolatedBlock = true;
+          const progressBanner = `\n> ✨ *Sedang memilih & mengganti bagian kode terkait di ${escapeHtml(currentFileName || 'index.html')} (tanpa menulis ulang seluruh kode)...*\n`;
+          if (!out.some(l => l && l.includes('Sedang memilih & mengganti bagian kode terkait'))) {
+            out.push(progressBanner);
+          }
+        } else if (isWeb && !isExplicitCodeInChat) {
+          insideIsolatedBlock = true;
+          pushWebBanner(currentFileName);
+        } else if (!isExplicitCodeInChat && (isWebPreviewMode || options.hideCodeInChat)) {
+          insideIsolatedBlock = true;
+          pushWebBanner(currentFileName);
+        } else {
+          out.push('\n```' + fileBlockLang);
+          if (currentFileName) out.push('// Berkas: ' + currentFileName);
+        }
+        return;
+      }
+
+      if (t.indexOf('<<<ZOZ_DELETE') === 0) {
+        return;
+      }
+
+      // 2. Penanganan khusus isolasi dokumen Markdown / Docx
+      if (!insideDocBlock && !insideRawDocBlock && (isDocMode || t.startsWith(TICK3 + 'docx') || t.startsWith(TICK3 + 'pdf'))) {
         if (
           t.startsWith(TICK3 + 'markdown') ||
           t.startsWith(TICK3 + 'md') ||
@@ -9202,7 +9284,6 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           out.push('\n> 📄 *Sedang menyusun dan memformat dokumen... (terisolasi di Studio Dokumen)*\n');
           return;
         }
-        // Jika model langsung menulis dokumen menggunakan heading Markdown tanpa pembungkus di mode pembuatan dokumen
         if (
           isDocMode &&
           (/^#{1,3}\s+\S/.test(t) ||
@@ -9213,133 +9294,45 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           return;
         }
       } else if (insideDocBlock) {
-        if (t === TICK3) {
-          insideDocBlock = false;
-        }
+        if (t === TICK3) insideDocBlock = false;
         return;
       } else if (insideRawDocBlock) {
-        if (t.indexOf('<<<END_ZOZ_FILE') === 0) {
-          insideRawDocBlock = false;
-        }
+        if (t.indexOf('<<<END_ZOZ_FILE') === 0) insideRawDocBlock = false;
         return;
       }
 
-      // Penanganan khusus blok markdown ```html / ```jsx / ```tsx / ```css atau dokumen HTML / Naked HTML & Naked JS / CSS
-      const isWebPreviewMode = Boolean(
-        (options && (options.websiteMode === 'preview' || options.isWebCreation || options.hideCodeInChat || options.hideAllCodeBlocks || options.isStudioIsolated)) ||
-        (typeof activeAIFile !== 'undefined' && activeAIFile) ||
-        (typeof els !== 'undefined' && els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) ||
-        (typeof isWebsiteCreationPrompt === 'function' && isWebsiteCreationPrompt(text || '')) ||
-        (text && (text.includes('<!DOCTYPE') || text.includes('<html') || text.includes('<<<ZOZ_FILE') || text.includes('```html') || text.includes('```jsx')))
-      );
-      const NAKED_HTML_START = /^<\/?(?:!DOCTYPE\s+html|html|head|body|div|section|nav|header|footer|main|aside|article|style|script|table|form|template|iframe|svg|canvas|ul|ol|li|button|input|label|p|h[1-6]|span|a)\b/i;
-      const CODE_LIKE_LINE = /^(?:`{3,}|<{1,5}>{1,5}|[<>=]{2,}|<<>>|< < > >|<<<>>|window\.|document\.|console\.|setInterval|setTimeout|function\b|const\s+|let\s+|var\s+|\/\*|\*\/|\/\/|<\/script>|<\/html>|<\/body>|<\/style>|<\/div>|<\/iframe>|<\/section>|<!--|[{}\[\];]|(?:[a-zA-Z0-9_-]+=(?:"[^"]*"|'[^']*'|[^\s>]+)|allowfullscreen|disabled|checked)|(?:[.#@:][a-zA-Z0-9_-]|[a-zA-Z0-9_-]+\s*\{|[a-zA-Z0-9_-]+\s*:\s*[^;]+;)).*$/i;
-      if (!isExplicitCodeInChat) {
-        if (!insideFileBlock && !insideHtmlBlock && !insideRawHtmlBlock) {
-          if (t.startsWith(TICK3 + 'html') || t.startsWith(TICK3 + 'htm') || t.startsWith(TICK3 + 'jsx') || t.startsWith(TICK3 + 'tsx') || t.startsWith(TICK3 + 'react') || ((isWebPreviewMode || options.hideAllCodeBlocks) && (t.startsWith(TICK3) || t.startsWith(TICK3 + 'css') || t.startsWith(TICK3 + 'style') || t.startsWith(TICK3 + 'js') || t.startsWith(TICK3 + 'javascript')))) {
-            insideHtmlBlock = true;
-            out.push('\n> 🌐 *Sedang merancang kode website... (terisolasi di pratinjau live)*\n');
-            return;
-          }
-          if (NAKED_HTML_START.test(t) || ((isWebPreviewMode || options.hideAllCodeBlocks) && CODE_LIKE_LINE.test(t))) {
-            insideRawHtmlBlock = true;
-            out.push('\n> 🌐 *Sedang merancang kode website... (terisolasi di pratinjau live)*\n');
-            return;
-          }
-        } else if (insideHtmlBlock) {
-          if (t === TICK3 || (t.startsWith(TICK3) && t.length <= 6)) {
-            insideHtmlBlock = false;
-          }
-          return;
-        } else if (insideRawHtmlBlock) {
-          // Telan semua tag penutup, komentar kode HTML/JS/CSS, atribut lanjutan, dan statemen script/style
-          if (t.includes('</html>') || t === '</script>' || t === '</style>' || t.startsWith('<!--') || t === TICK3) {
-            if (t.includes('</html>')) rawHtmlSawClosing = true;
-            return;
-          }
-          if (isCodeOrMarkupLine(line) || CODE_LIKE_LINE.test(t)) {
-            return;
-          }
-          // Teks isi halaman (paragraf/judul di dalam tag) selalu menjorok (indentasi) dan
-          // tidak boleh dianggap percakapan: telan agar tidak bocor ke chat sebagai blok kode.
-          if (!rawHtmlSawClosing && /^(?:\s{2,}|\t)\S/.test(line)) {
-            return;
-          }
-          // Jika baris adalah teks percakapan biasa (bukan tag / kode), tutup blok raw HTML
+      // 3. Penanganan blok Markdown ```html / ```jsx / ```tsx
+      if (insideHtmlBlock) {
+        if (t === TICK3 || (t.startsWith(TICK3) && t.length <= 6)) {
+          insideHtmlBlock = false;
+        }
+        return;
+      }
+      if (!isExplicitCodeInChat && (t.startsWith(TICK3 + 'html') || t.startsWith(TICK3 + 'htm') || t.startsWith(TICK3 + 'jsx') || t.startsWith(TICK3 + 'tsx') || t.startsWith(TICK3 + 'react') || ((isWebPreviewMode || options.hideAllCodeBlocks) && (t.startsWith(TICK3) || t.startsWith(TICK3 + 'css') || t.startsWith(TICK3 + 'style') || t.startsWith(TICK3 + 'js') || t.startsWith(TICK3 + 'javascript'))))) {
+        insideHtmlBlock = true;
+        pushWebBanner();
+        return;
+      }
+
+      // 4. Penanganan dokumen Naked HTML
+      if (insideRawHtmlBlock) {
+        if (t.includes('</html>')) {
           insideRawHtmlBlock = false;
-          rawHtmlSawClosing = false;
+          rawHtmlSawClosing = true;
         }
+        return; // Telan seluruh kode di dalam dokumen HTML tanpa membocorkannya ke chat!
       }
-
-      if (!insideFileBlock) {
-        if (t.indexOf('<<<ZOZ_FILE') === 0 || t.indexOf('<<<ZOZ_EDIT') === 0 || t.indexOf('<<<ZOZ_MODIFY') === 0) {
-          insideFileBlock = true;
-          const nameMatch = t.match(/(?:name|file|path)=["']?([^"'\s>]+)["']?/i);
-          const langMatch = t.match(/lang=["']?([^"'\s>]+)["']?/i);
-          currentFileName = nameMatch ? nameMatch[1] : '';
-          fileBlockLang = (langMatch ? langMatch[1] : (currentFileName ? guessLangFromName(currentFileName) : 'code')).toLowerCase();
-          const fnLower = currentFileName.toLowerCase();
-          const isDiagram = fileBlockLang === 'mermaid' || fileBlockLang === 'mmd' ||
-                            fnLower.endsWith('.mermaid') || fnLower.endsWith('.mmd') ||
-                            (fnLower.endsWith('.svg') && fileBlockLang !== 'xml');
-          if (isDiagram) fileBlockLang = 'mermaid';
-          const isWeb = fnLower.endsWith('.html') || fnLower.endsWith('.htm') || fnLower.endsWith('.jsx') || fnLower.endsWith('.tsx') ||
-                        fileBlockLang === 'html' || fileBlockLang === 'htm' || fileBlockLang === 'jsx' || fileBlockLang === 'tsx' || fileBlockLang === 'react';
-          const isDoc = fnLower.endsWith('.docx') || fnLower.endsWith('.pdf') || fnLower.endsWith('.doc') || fnLower.endsWith('.md') ||
-                        fileBlockLang === 'docx' || fileBlockLang === 'pdf' || 
-                        ((fileBlockLang === 'markdown' || fileBlockLang === 'md') && (!isDiagram && !isWeb && !fnLower.endsWith('.svg') || isDocMode));
-
-          const isSurgicalTag = t.indexOf('<<<ZOZ_EDIT') === 0 || t.indexOf('<<<ZOZ_MODIFY') === 0;
-          if (isDiagram) {
-            out.push('\n```mermaid');
-          } else if (isDoc) {
-            insideIsolatedBlock = true;
-            out.push(`\n> 📄 *Sedang menyusun dan memformat dokumen ${escapeHtml(currentFileName || 'Dokumen')}... (terisolasi di Studio Dokumen)*\n`);
-          } else if (isSurgicalTag && !isExplicitCodeInChat) {
-            insideIsolatedBlock = true;
-            const progressBanner = `\n> ✨ *Sedang memilih & mengganti bagian kode terkait di ${escapeHtml(currentFileName || 'index.html')} (tanpa menulis ulang seluruh kode)...*\n`;
-            if (!out.some(l => l && l.includes('Sedang memilih & mengganti bagian kode terkait'))) {
-              out.push(progressBanner);
-            }
-          } else if (isWeb && !isExplicitCodeInChat) {
-            // Mandat Kaisar: Isolasi total kode website di belakang layar secara anonim
-            insideIsolatedBlock = true;
-            out.push(`\n> 🌐 *Sedang merancang kode website ${escapeHtml(currentFileName || 'index.html')}... (terisolasi di pratinjau live)*\n`);
-          } else if (!isExplicitCodeInChat && (isWebPreviewMode || options.hideCodeInChat)) {
-            insideIsolatedBlock = true;
-            out.push('\n> 🌐 *Sedang meracik dan menyiapkan berkas website... (terisolasi di pratinjau)*\n');
-          } else {
-            out.push('\n```' + fileBlockLang);
-            if (currentFileName) out.push('// Berkas: ' + currentFileName);
-          }
-          return;
-        }
-        if (t.indexOf('<<<ZOZ_DELETE') === 0) {
-          return; // single line directive
-        }
-        if (/^(?:\s*<{2,5}>{1,5}|\s*<<>>|\s*< < > >|\s*<<<>>|\s*<{3,}\s*(?:SEARCH|REPLACE|END)?[^>\n]*>{0,5})\s*$/i.test(t) || /^<{1,5}>{1,5}\s*console\.log/i.test(t)) {
-          return;
-        }
-        if (!isExplicitCodeInChat && (isWebPreviewMode || options.hideAllCodeBlocks) && (CODE_LIKE_LINE.test(t) || isCodeOrMarkupLine(line))) {
-          return;
-        }
-        out.push(line);
+      if (!isExplicitCodeInChat && isWebPreviewMode && (NAKED_HTML_START.test(t) || (!rawHtmlSawClosing && t.startsWith('<!DOCTYPE')))) {
+        insideRawHtmlBlock = true;
+        pushWebBanner();
         return;
       }
 
-      // Masih di dalam blok file
-      if (t.indexOf('<<<END_ZOZ_FILE') === 0 || t.indexOf('<<<END_ZOZ_EDIT') === 0 || t.indexOf('<<<END_ZOZ_MODIFY') === 0) {
-        insideFileBlock = false;
-        const wasIsolated = insideIsolatedBlock;
-        insideIsolatedBlock = false;
-        if (!wasIsolated) {
-          out.push('```\n');
-        }
+      // 5. Telan baris kode / markup / chevron liar yang tersesat
+      if (/^(?:\s*<{2,5}>{1,5}|\s*<<>>|\s*< < > >|\s*<<<>>|\s*<{3,}\s*(?:SEARCH|REPLACE|END)?[^>\n]*>{0,5})\s*$/i.test(t) || /^<{1,5}>{1,5}\s*console\.log/i.test(t)) {
         return;
       }
-
-      if (insideIsolatedBlock && fileBlockLang !== 'mermaid' && fileBlockLang !== 'mmd') {
-        // Jangan cetak baris-baris kode dokumen maupun website ke gelembung chat saat streaming!
+      if (!isExplicitCodeInChat && (isWebPreviewMode || options.hideAllCodeBlocks) && (CODE_LIKE_LINE.test(t) || isCodeOrMarkupLine(line))) {
         return;
       }
 
@@ -9357,6 +9350,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       .replace(/(?:^|\n|\s)*console\.(?:log|warn|error|info|debug)\s*\((?:[^)(]+|\((?:[^)(]+|\([^)(]*\))*\))*\);?(?:\s|$)/gi, '\n');
     return finalCleaned;
   }
+
 
   // Teks dari model reasoning varian :free sering "robek" per-token (satu KATA
   // per baris sehingga output tertampil vertikal berantakan). Sambung baris
@@ -9535,9 +9529,6 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           displayText = scrubbed;
         }
       }
-      if (displayText && typeof AnonymousTaskVoidLock !== 'undefined') {
-        displayText = AnonymousTaskVoidLock.scrubStreamingText(displayText);
-      }
       this.el.innerHTML = (this.prefixHtml || '') + appendInlineTypingCursor(renderMarkdown(hideFileBlocksForDisplay(displayText, this.options), true));
       if (this.onScroll && !userScrolledUp) this.onScroll();
       if (els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) {
@@ -9575,12 +9566,6 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       }
       // Bersihkan segala tag pemikiran internal — pengguna HANYA menerima output jawaban murni
       this.text = safeAssistantText(this.text || '');
-      if (this.text && typeof AnonymousTaskVoidLock !== 'undefined') {
-        const devCheck = AnonymousTaskVoidLock.detectDeviation(this.text, this.options);
-        if (devCheck.isDeviation) {
-          this.text = AnonymousTaskVoidLock.vaporizeToVoid(this.text);
-        }
-      }
       if (this.text && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.sanitizeModelText === 'function') {
         const sanitized = BioEndocrine.sanitizeModelText(this.text);
         if (sanitized !== this.text) {
@@ -10334,14 +10319,14 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
     const updateAgentHud = (statusMsg) => {
       if (directBtn) {
-        directBtn.innerHTML = `<i class="fa-solid fa-bolt fa-bounce" style="color:var(--neon-cyan); margin-right:4px;"></i> <span>Zoz Parallel Agent Swarm &bull; ${statusMsg}</span>`;
+        directBtn.innerHTML = `<i class="fa-solid fa-bolt fa-bounce" style="color:var(--neon-cyan); margin-right:4px;"></i> <span>Melanjutkan kode &bull; ${statusMsg}</span>`;
         directBtn.disabled = true;
         directBtn.style.background = 'rgba(0, 242, 254, 0.18)';
         directBtn.style.borderColor = 'var(--neon-cyan)';
         directBtn.style.color = 'var(--neon-cyan)';
       }
       if (bubbleText) {
-        const hudHtml = `<div class="auto-continue-hud" style="margin: 8px 0; padding: 8px 12px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.82rem; color: var(--neon-cyan); display: flex; align-items: center; justify-content: space-between; gap: 8px;"><div style="display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-bolt fa-bounce"></i> <span><strong>Zoz Parallel Agent Swarm</strong> &bull; 3 Agen AI bekerja secara paralel: ${escapeHtml(statusMsg)}</span></div><span class="typing-cursor"></span></div>`;
+        const hudHtml = `<div class="auto-continue-hud" style="margin: 8px 0; padding: 8px 12px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.82rem; color: var(--neon-cyan); display: flex; align-items: center; justify-content: space-between; gap: 8px;"><div style="display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-bolt fa-bounce"></i> <span><strong>Melanjutkan kode</strong> &bull; ${escapeHtml(statusMsg)}</span></div><span class="typing-cursor"></span></div>`;
         bubbleText.innerHTML = renderMarkdown(hideFileBlocksForDisplay(currentAccumulated, contRunOptions)) + hudHtml;
         smartScrollChatToBottom(false);
       }
@@ -11244,182 +11229,6 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       return path.join(' > ') || element.nodeName.toLowerCase();
     },
 
-    // --- FASE 1: SUBAGENT ALPHA (DOM-Architect) ---
-    async runSubagentAlpha({ userPrompt, currentCode, selInfo, targetName }) {
-      // 1. Pilihan langsung pengguna di editor (Precision Selection)
-      if (selInfo && selInfo.hasSelection && selInfo.selectedLinesCode) {
-        return {
-          targetSelector: `Selection L${selInfo.startLine}–L${selInfo.endLine}`,
-          lineRange: [selInfo.startLine, selInfo.endLine],
-          operation: 'MORPH_NODE',
-          isolatedContext: selInfo.selectedLinesCode,
-          constraints: ['DOM Morphing: Modifikasi tepat pada rentang baris yang dipilih', 'Tulis kode lengkap tanpa placeholder']
-        };
-      }
-
-      const lines = currentCode.split('\n');
-      const lowerPrompt = userPrompt.toLowerCase();
-
-      // 2. Deteksi pembaruan gaya / CSS
-      const isStyleQuery = /(?:warna|color|font|gaya|style|bg|background|kontras|border|shadow|padding|margin|posisi|gelap|terang|neon|glow)/i.test(lowerPrompt);
-      if (isStyleQuery && currentCode.includes('<style')) {
-        let styleStart = -1, styleEnd = -1;
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i].toLowerCase().includes('<style') && styleStart === -1) styleStart = i + 1;
-          if (lines[i].toLowerCase().includes('</style>') && styleEnd === -1) styleEnd = i + 1;
-        }
-        if (styleStart !== -1 && styleEnd !== -1) {
-          const styleLines = lines.slice(styleStart - 1, styleEnd).join('\n');
-          return {
-            targetSelector: 'style#main-styles',
-            lineRange: [styleStart, styleEnd],
-            operation: 'UPDATE_STYLE',
-            isolatedContext: styleLines.length > 3000 ? lines.slice(styleEnd - 50, styleEnd).join('\n') : styleLines,
-            constraints: ['Pertahankan CSS yang sudah ada', 'Gunakan variabel atau aturan scoped', 'Jangan merusak tag </style>']
-          };
-        }
-      }
-
-      // 3. Deteksi komponen DOM spesifik berbasis tag / kata kunci
-      const domKeywords = [
-        { term: 'nav', sel: 'nav, header, [id*="nav"], [class*="nav"]' },
-        { term: 'menu', sel: 'nav, .nav-links, .menu' },
-        { term: 'hero', sel: '#hero, .hero, section:first-of-type' },
-        { term: 'header', sel: 'header, #header' },
-        { term: 'footer', sel: 'footer, #footer' },
-        { term: 'kontak', sel: '#kontak, #contact, .contact, section[id*="kontak"]' },
-        { term: 'proyek', sel: '#proyek, #projects, .projects' },
-        { term: 'portofolio', sel: '#portfolio, .portfolio' },
-        { term: 'tombol', sel: 'button, .btn, a[class*="btn"]' },
-        { term: 'button', sel: 'button, .btn' }
-      ];
-
-      let matchedSelector = '';
-      for (const k of domKeywords) {
-        if (lowerPrompt.includes(k.term)) {
-          matchedSelector = k.sel;
-          break;
-        }
-      }
-
-      if (typeof DOMParser !== 'undefined') {
-        try {
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(currentCode, 'text/html');
-          let targetEl = null;
-
-          if (matchedSelector) {
-            targetEl = doc.querySelector(matchedSelector);
-          }
-
-          if (!targetEl) {
-            const words = userPrompt.match(/[a-zA-Z0-9_-]+/g) || [];
-            for (const w of words) {
-              if (w.length >= 3) {
-                const elById = doc.getElementById(w);
-                if (elById) { targetEl = elById; break; }
-              }
-            }
-          }
-
-          if (targetEl && targetEl.outerHTML) {
-            const rawHtml = targetEl.outerHTML;
-            const firstTag = rawHtml.split('\n')[0].trim();
-            let startLine = -1;
-            for (let i = 0; i < lines.length; i++) {
-              if (lines[i].includes(firstTag.slice(0, Math.min(30, firstTag.length)))) {
-                startLine = i + 1;
-                break;
-              }
-            }
-            const lineCount = rawHtml.split('\n').length;
-            const endLine = (startLine !== -1) ? (startLine + lineCount - 1) : Math.min(lines.length, 60);
-            const uniqueSelector = this.getUniqueDomSelector(targetEl, doc);
-
-            return {
-              targetSelector: uniqueSelector,
-              lineRange: [startLine !== -1 ? startLine : 1, endLine],
-              operation: 'MORPH_NODE',
-              isolatedContext: rawHtml.length <= 4000 ? rawHtml : rawHtml.slice(0, 4000),
-              constraints: [
-                'DOM Morphing: Pertahankan root node target dan seluruh event listener',
-                'Surgical Patching: Perbarui atribut & innerHTML secara utuh dari pembuka sampai penutup',
-                'Zero-Lazy Policy: Dilarang keras menggunakan komentar pemotong kode (... atau TODO)'
-              ]
-            };
-          }
-        } catch (_) {}
-      }
-
-      // Fallback Spatial Context
-      const defaultStart = 1;
-      const defaultEnd = Math.min(lines.length, 75);
-      return {
-        targetSelector: 'body > main',
-        lineRange: [defaultStart, defaultEnd],
-        operation: 'MORPH_NODE',
-        isolatedContext: lines.slice(defaultStart - 1, defaultEnd).join('\n'),
-        constraints: [
-          'DOM Morphing: Pertahankan struktur root dokumen',
-          'Tulis kode lengkap tanpa pemotongan',
-          'Zero-Lazy Policy aktif'
-        ]
-      };
-    },
-
-    // --- FASE 2: SUBAGENT BETA (Surgical-Coder) ---
-    async runSubagentBeta({ alphaContract, userPrompt, rejectionReport = null, currentCode, targetName, singleModel, singleEngine, heartbeat, signal }) {
-      const isRetry = Boolean(rejectionReport);
-      const retryFeedback = isRetry ? `
-[LAPORAN PENOLAKAN DARI SUBAGENT DELTA - ATTEMPT #${rejectionReport.attempt}]:
-Gagal pada tahap: ${rejectionReport.stage}
-Penyebab Error: ${rejectionReport.error}
-Catatan Tambahan: ${rejectionReport.details || 'Kode tidak memenuhi standar verifikasi.'}
-PERBAIKI KODE ANDA SEKARANG AGAR ERROR DI ATAS TIDAK TERULANG!` : '';
-
-      const betaPrompt = `[CLAUDE-CODE MULTI-AGENT SWARM — SURGICAL CODER]
-Target Dokumen: "${targetName}"
-Kontrak Target dari Subagent Alpha:
-- Selektor: ${alphaContract.targetSelector}
-- Rentang Baris: ${alphaContract.lineRange[0]}–${alphaContract.lineRange[1]}
-- Operasi: ${alphaContract.operation}
-- Batasan (Constraints): ${alphaContract.constraints.join(', ')}
-
-[Konteks Terisolasi yang Harus Diubah]:
-\`\`\`html
-${alphaContract.isolatedContext}
-\`\`\`
-
-Instruksi Pengguna: "${userPrompt}"${retryFeedback}
-
-ATURAN MUTLAK SURGICAL CODER:
-1. SURGICAL PATCHING: Tuliskan HANYA blok pengganti untuk konteks terisolasi di atas secara 100% LENGKAP dari tag pembuka sampai tag penutup.
-2. ZERO-LAZY POLICY: DILARANG KERAS menggunakan komentar pemotong kode ("// ... existing code ...", "/* kode lainnya */", "TODO", "<!-- ... -->"). Pelanggaran akan langsung ditolak sistem!
-3. FORMAT KONTRAK: Respon Anda WAJIB langsung dimulai pada baris pertama dengan blok surgical patch:
-<<<<<<< SEARCH
-[salin persis baris asli dari konteks terisolasi di atas]
-=======
-[baris baru yang 100% lengkap, berfungsi, dan bebas error]
->>>>>>> REPLACE`;
-
-      let rawOutput = '';
-      if (singleEngine === 'ollama') {
-        rawOutput = await streamContinuationOllama(null, singleModel, betaPrompt, null, '', {
-          hideAllCodeBlocks: true,
-          signal,
-          heartbeat
-        });
-      } else {
-        rawOutput = await streamContinuationOpenRouter(null, singleModel, betaPrompt, null, '', {
-          hideAllCodeBlocks: true,
-          signal,
-          heartbeat
-        });
-      }
-
-      return rawOutput;
-    },
-
     // --- FASE 3: SUBAGENT DELTA (Static-Verifier & Sandbox Gate) ---
     verifyDelta({ patchOutput, currentCode, alphaContract, attempt = 1 }) {
       if (!patchOutput || typeof patchOutput !== 'string' || !patchOutput.trim()) {
@@ -11750,126 +11559,6 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       }
     },
 
-    // 2. EXECUTE EDIT SWARM (Sequential State Machine: Alpha -> Beta -> Delta -> Feedback Loop)
-    async executeEditSwarm({ userPrompt, activeAIFile, currentCode, selInfo, onUpdate, onDone }) {
-      const startTime = Date.now();
-      const heartbeat = createHeartbeatStreamController(15000, STATE.abortController?.signal);
-      this.activeControllers.add(heartbeat.controller);
-
-      const targetName = activeAIFile?.name || 'index.html';
-      const singleEngine = (typeof STATE !== 'undefined' && STATE.mode === 'ollama') ? 'ollama' : 'openrouter';
-      const singleModel = (singleEngine === 'ollama')
-        ? (STATE.settings.ollamaModel || 'deepseek-coder:latest')
-        : (STATE.settings.openRouterModel || 'openrouter/free');
-      const singleModelClean = singleModel.split('/').pop().replace(/:.*/, '');
-
-      const subState = {
-        title: `Mengedit "${userPrompt.substring(0, 32)}..."`,
-        isError: false,
-        isSuccess: false,
-        architect: { status: 'active', label: 'Memetakan DOM...' },
-        coder: { status: 'idle', label: `Menunggu Alpha` },
-        verifier: { status: 'idle', label: 'Menunggu Kode' }
-      };
-      if (onUpdate) onUpdate(subState);
-
-      try {
-        // --- FASE 1: SUBAGENT ALPHA (DOM-Architect) ---
-        const alphaContract = await this.runSubagentAlpha({ userPrompt, currentCode, selInfo, targetName });
-        subState.architect = {
-          status: 'verified',
-          label: `${alphaContract.targetSelector} [L${alphaContract.lineRange[0]}–L${alphaContract.lineRange[1]}]`
-        };
-        if (onUpdate) onUpdate(subState);
-
-        // --- FASE 2 & 3: SEQUENTIAL LOOP (Beta Coder <-> Delta Verifier, Maksimal 2x Retry) ---
-        let currentAttempt = 1;
-        // Cukup 1 retry: percobaan ulang dengan konteks yang sama jarang berhasil dan
-        // menghabiskan batas waktu swarm, membuat agen tampak berputar tanpa hasil.
-        const maxRetries = 1;
-        let rejectionReport = null;
-        let finalValidCode = null;
-
-        while (currentAttempt <= maxRetries + 1) {
-          const isRetry = currentAttempt > 1;
-          subState.coder = {
-            status: 'active',
-            label: isRetry ? `Memperbaiki (${currentAttempt}/${maxRetries + 1})...` : `Sintesis (${singleModelClean})...`
-          };
-          subState.verifier = { status: 'idle', label: 'Menunggu Kode' };
-          if (onUpdate) onUpdate(subState);
-
-          const patchOutput = await this.runSubagentBeta({
-            alphaContract,
-            userPrompt,
-            rejectionReport,
-            currentCode,
-            targetName,
-            singleModel,
-            singleEngine,
-            heartbeat,
-            signal: heartbeat.signal
-          });
-
-          subState.coder = { status: 'verified', label: 'Selesai' };
-          subState.verifier = { status: 'active', label: 'Uji Validasi <10ms...' };
-          if (onUpdate) onUpdate(subState);
-
-          // Subagent Delta menguji secara deterministik (<10ms, tanpa LLM)
-          const deltaVerdict = this.verifyDelta({
-            patchOutput,
-            currentCode,
-            alphaContract,
-            attempt: currentAttempt
-          });
-
-          if (deltaVerdict.passed) {
-            finalValidCode = deltaVerdict.candidateCode;
-            subState.verifier = { status: 'verified', label: '100% Valid & Aman' };
-            if (onUpdate) onUpdate(subState);
-            break;
-          }
-
-          // Verifikasi gagal: buat RejectionReport dan loop kembali ke Beta
-          console.warn(`[ClaudeCodeParallelSwarm] Verifikasi gagal (Percobaan #${currentAttempt}):`, deltaVerdict.error);
-          rejectionReport = deltaVerdict;
-          subState.verifier = { status: 'error', label: `Ditolak: ${deltaVerdict.stage}` };
-          if (onUpdate) onUpdate(subState);
-
-          currentAttempt++;
-        }
-
-        if (finalValidCode) {
-          // --- FASE 3C: COMMIT KE LIVE PREVIEW DENGAN SNAPSHOT ROLLBACK ---
-          this.commitWithRollback(finalValidCode, activeAIFile);
-
-          subState.isSuccess = true;
-          subState.isError = false;
-          subState.title = 'Tugas Selesai: 100% Bebas Error & Terverifikasi!';
-          if (onUpdate) onUpdate(subState);
-
-          heartbeat.dispose();
-          this.activeControllers.delete(heartbeat.controller);
-          if (onDone) onDone({
-            success: true,
-            winner: 'Claude-Code Swarm',
-            message: 'Modifikasi kode berhasil diterapkan dan divalidasi tuntas.',
-            timeMs: Date.now() - startTime
-          });
-          return;
-        }
-
-        // Jika setelah 2x retry belum lolos, minta fallback penulisan aman agar website tidak rusak
-        if (onDone) onDone({ success: false, fallbackRequired: true });
-      } catch (err) {
-        console.warn('[ClaudeCodeParallelSwarm] Error saat siklus edit:', err);
-        if (onDone) onDone({ success: false, error: err });
-      } finally {
-        heartbeat.dispose();
-        this.activeControllers.delete(heartbeat.controller);
-      }
-    },
-
     // 3. EXECUTE CONTINUATION SWARM (Penuntasan Kode Terpotong Secara Utuh & Bebas Error)
     async executeContinuationSwarm({ session, modelName, engine = 'openrouter', continuePrompt, tailLines, bubbleText, currentAccumulated, runOptions = {}, onStatus = null }) {
       if (onStatus) onStatus('⚡ Menuntaskan kelanjutan kode website...');
@@ -11928,6 +11617,603 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
   async function executeParallelAgentSwarm(args) {
     return ClaudeCodeParallelSwarm.executeContinuationSwarm(args);
   }
+
+  // ==================== STUDIO EDIT AGENT (AGEN EDIT WEBSITE) ====================
+  // Satu alur nyata dan berbatas, tanpa swarm / loop / "hukum" prompt:
+  //   1. kirim file + permintaan ke model, minta blok perubahan SEARCH/REPLACE
+  //   2. terapkan blok ke file (exact match -> match abaikan indentasi -> fallback applyZozEditPatch)
+  //   3. validasi (struktur tag & sintaks JS tidak boleh lebih buruk dari file asli)
+  //   4. commit ke pratinjau (dengan revisi agar bisa di-undo)
+  // Jika gagal: coba ulang sekali dengan umpan balik, lalu minta file utuh. Maksimal 3 panggilan model.
+  // Setiap panggilan punya watchdog (tanpa respons / macet / total), dan hasil akhir SELALU ditampilkan.
+  const StudioEditAgent = {
+    busy: false,
+    TTFT_MS: 45000,      // batas menunggu token pertama
+    IDLE_MS: 30000,      // batas diam di tengah stream
+    TOTAL_MS: 120000,    // batas satu panggilan model
+    DEADLINE_MS: 300000, // batas seluruh proses agen
+    MAX_FILE_CHARS: 150000,
+    _ctrl: null,
+    _userStopped: false,
+
+    stop() {
+      this._userStopped = true;
+      try { if (this._ctrl) this._ctrl.abort(); } catch (_) {}
+    },
+
+    pickTarget() {
+      const engine = (STATE.mode === 'ollama') ? 'ollama' : 'openrouter';
+      let model = engine === 'ollama'
+        ? (STATE.settings.ollamaModel || 'llama3.2')
+        : (STATE.settings.openRouterModel || 'openrouter/free');
+      if (engine === 'openrouter' && !String(model).includes('/')) {
+        model = mapOllamaModelToOpenRouter(model) || 'openrouter/free';
+      }
+      return { engine, model };
+    },
+
+    async describeHttpError(res) {
+      let detail = '';
+      try {
+        const j = await res.json();
+        const e = j && (j.error || j.message);
+        detail = typeof e === 'object' ? (e.message || JSON.stringify(e)) : (e || '');
+      } catch (_) {}
+      return `HTTP ${res.status}${detail ? ': ' + String(detail).slice(0, 200) : ''}`;
+    },
+
+    async readLines(res, onLine) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const parts = buf.split('\n');
+          buf = parts.pop();
+          for (const line of parts) {
+            if (onLine(line) === false) return;
+          }
+        }
+        buf += decoder.decode();
+        if (buf.trim()) onLine(buf);
+      } finally {
+        try { reader.cancel(); } catch (_) {}
+      }
+    },
+
+    async streamModel({ engine, model, messages, signal, acc, onDelta }) {
+      const feed = (d) => {
+        if (!d) return;
+        acc.text += d;
+        onDelta(d);
+      };
+
+      if (engine === 'ollama') {
+        const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+        const headers = { 'Content-Type': 'application/json' };
+        if (STATE.settings.ollamaApiKey) {
+          headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
+          headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
+        }
+        if (STATE.settings.openRouterKey) headers['x-openrouter-key'] = STATE.settings.openRouterKey;
+        const url = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+        const res = await fetch(url, {
+          method: 'POST',
+          headers,
+          signal,
+          body: JSON.stringify({
+            model,
+            messages,
+            stream: true,
+            endpoint: ep,
+            ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {}),
+            ...(STATE.settings.openRouterKey ? { openRouterKey: STATE.settings.openRouterKey } : {})
+          })
+        });
+        if (!res.ok) throw new Error(await this.describeHttpError(res));
+        await this.readLines(res, (line) => {
+          if (!line.trim()) return;
+          try {
+            const p = JSON.parse(line);
+            if (p.error) throw new Error(typeof p.error === 'object' ? (p.error.message || JSON.stringify(p.error)) : String(p.error));
+            feed(p.message?.content || p.response || '');
+          } catch (e) {
+            if (e instanceof SyntaxError) return;
+            throw e;
+          }
+        });
+        return;
+      }
+
+      // OpenRouter: coba rute sesuai lingkungan, lalu rute cadangan
+      const routes = IS_GITHUB_PAGES ? ['direct', 'proxy'] : ['proxy', 'direct'];
+      const errors = [];
+      const key = STATE.settings.openRouterKey || '';
+      const payload = {
+        model,
+        messages,
+        stream: true,
+        include_reasoning: false,
+        provider: { allow_fallbacks: false }
+      };
+      for (const route of routes) {
+        if (signal.aborted) throw new Error('aborted');
+        const direct = route === 'direct';
+        if (direct && !key) { errors.push('rute langsung dilewati (belum ada API key)'); continue; }
+        const url = direct ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
+        const headers = { 'Content-Type': 'application/json' };
+        if (key) headers['Authorization'] = `Bearer ${key}`;
+        if (direct) {
+          headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
+          headers['X-Title'] = 'ZOZ Router Studio Edit';
+        } else if (STATE.userId) {
+          headers['X-User-ID'] = STATE.userId;
+        }
+        const body = direct ? payload : { ...payload, userId: STATE.userId || null, apiKey: key || undefined };
+        let res;
+        try {
+          res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
+        } catch (e) {
+          if (signal.aborted) throw e;
+          errors.push(`${route}: ${e.message || e}`);
+          continue;
+        }
+        if (!res.ok) {
+          errors.push(`${route}: ${await this.describeHttpError(res)}`);
+          continue;
+        }
+        await this.readLines(res, (line) => {
+          const t = line.trim();
+          if (!t.startsWith('data:')) return;
+          const js = t.replace(/^data:\s*/, '');
+          if (js === '[DONE]') return false;
+          let p;
+          try { p = JSON.parse(js); } catch (_) { return; }
+          if (p.error) throw new Error(typeof p.error === 'object' ? (p.error.message || JSON.stringify(p.error)) : String(p.error));
+          feed(p.choices?.[0]?.delta?.content || '');
+        });
+        return;
+      }
+      throw new Error(errors.join(' | ') || 'Tidak dapat terhubung ke penyedia model.');
+    },
+
+    // Satu panggilan model dengan watchdog. Melempar Error dengan pesan jelas (dan .partial bila ada).
+    async callModel(messages, onProgress, budgetMs) {
+      const { engine, model } = this.pickTarget();
+      const ctrl = new AbortController();
+      this._ctrl = ctrl;
+      const acc = { text: '' };
+      let reason = '';
+      let idleTimer = null;
+      const arm = (ms, why) => {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => { reason = why; ctrl.abort(); }, ms);
+      };
+      const totalMs = Math.max(15000, Math.min(this.TOTAL_MS, budgetMs || this.TOTAL_MS));
+      const totalTimer = setTimeout(() => { reason = 'total'; ctrl.abort(); }, totalMs);
+      const parent = STATE.abortController && STATE.abortController.signal;
+      const onParentAbort = () => { this._userStopped = true; ctrl.abort(); };
+      if (parent) {
+        if (parent.aborted) onParentAbort();
+        else parent.addEventListener('abort', onParentAbort, { once: true });
+      }
+      arm(this.TTFT_MS, 'ttft');
+      try {
+        await this.streamModel({
+          engine, model, messages, signal: ctrl.signal, acc,
+          onDelta: () => {
+            arm(this.IDLE_MS, 'idle');
+            if (onProgress) onProgress(acc.text.length);
+          }
+        });
+        if (!acc.text.trim()) throw new Error('Model mengembalikan respons kosong.');
+        return { text: acc.text, model };
+      } catch (err) {
+        if (this._userStopped) {
+          const e = new Error('Dihentikan oleh pengguna.');
+          e.userStopped = true;
+          throw e;
+        }
+        if (ctrl.signal.aborted) {
+          const e = new Error(
+            reason === 'ttft' ? `Model ${model} tidak merespons dalam ${Math.round(this.TTFT_MS / 1000)} detik.`
+              : reason === 'idle' ? `Model ${model} berhenti mengirim data di tengah jalan.`
+              : `Waktu proses model habis (${Math.round(totalMs / 1000)} detik).`
+          );
+          e.timeout = true;
+          e.partial = acc.text;
+          throw e;
+        }
+        err.partial = acc.text;
+        throw err;
+      } finally {
+        clearTimeout(idleTimer);
+        clearTimeout(totalTimer);
+        if (parent) parent.removeEventListener('abort', onParentAbort);
+        if (this._ctrl === ctrl) this._ctrl = null;
+      }
+    },
+
+    // ---------- Parsing & penerapan perubahan ----------
+    parseHunks(text) {
+      const hunks = [];
+      const re = /^<{3,}[ \t]*SEARCH[ \t>]*\r?\n([\s\S]*?)\r?\n={3,}[ \t]*\r?\n([\s\S]*?)(?:\r?\n)?^>{3,}[ \t]*(?:REPLACE)?[ \t>]*$/gim;
+      let m;
+      while ((m = re.exec(text)) !== null) hunks.push({ search: m[1], replace: m[2] });
+      return hunks;
+    },
+
+    stripHunks(text) {
+      return String(text || '')
+        .replace(/^<{3,}[ \t]*SEARCH[ \t>]*\r?\n[\s\S]*?^>{3,}[ \t]*(?:REPLACE)?[ \t>]*$/gim, '')
+        .replace(/```[a-z]*\s*\n?/gi, '')
+        .trim();
+    },
+
+    summarize(text, fallback) {
+      const plain = this.stripHunks(text).replace(/\s+/g, ' ').trim();
+      if (!plain || plain.length < 6) return fallback;
+      const cut = plain.length > 260 ? (plain.slice(0, 260).replace(/[^.!?]*$/, '') || plain.slice(0, 260)) : plain;
+      return cut.trim();
+    },
+
+    extractFullCode(text, kind) {
+      let body = null;
+      let m = String(text || '').match(/<<<ZOZ_FILE[^\n]*\n([\s\S]*?)(?:<<<END_ZOZ_FILE>>>|$)/i);
+      if (m) body = m[1];
+      if (!body) {
+        m = text.match(/```[a-z]*\s*\n([\s\S]*?)(?:\n```|$)/i);
+        if (m && (kind === 'jsx' ? /import |export |return\s*\(/.test(m[1]) : /<html|<!DOCTYPE/i.test(m[1]))) body = m[1];
+      }
+      if (!body && kind !== 'jsx') {
+        const i = text.search(/<!DOCTYPE html|<html[\s>]/i);
+        if (i !== -1) body = text.slice(i);
+      }
+      if (!body) return null;
+      body = body.replace(/\n?```\s*$/, '').trim();
+      if (kind !== 'jsx') {
+        const end = body.lastIndexOf('</html>');
+        if (end === -1) return null; // tanpa </html> = terpotong, jangan dipakai
+        body = body.slice(0, end + 7);
+      }
+      return body;
+    },
+
+    // Terapkan satu hunk: exact -> abaikan indentasi -> fallback applyZozEditPatch
+    applyHunk(code, search, replace) {
+      const s = String(search).replace(/^\r?\n/, '').replace(/\r?\n\s*$/, '');
+      const r = String(replace).replace(/^\r?\n/, '').replace(/\r?\n\s*$/, '');
+      if (!s.trim()) return null;
+
+      const idx = code.indexOf(s);
+      if (idx !== -1) {
+        const startLine = code.slice(0, idx).split('\n').length;
+        return {
+          content: code.slice(0, idx) + r + code.slice(idx + s.length),
+          range: { startLine, endLine: startLine + Math.max(0, r.split('\n').length - 1) }
+        };
+      }
+
+      const lines = code.split('\n');
+      const sLines = s.split('\n');
+      for (let i = 0; i <= lines.length - sLines.length; i++) {
+        let ok = true;
+        for (let k = 0; k < sLines.length; k++) {
+          if (lines[i + k].trim() !== sLines[k].trim()) { ok = false; break; }
+        }
+        if (!ok) continue;
+        const origIndent = (lines[i].match(/^\s*/) || [''])[0];
+        const rLines = r.split('\n');
+        const firstNonEmpty = rLines.find(l => l.trim()) || '';
+        const rIndent = (firstNonEmpty.match(/^\s*/) || [''])[0];
+        const adj = rLines.map(l => {
+          if (!l.trim()) return l;
+          return l.startsWith(rIndent) ? origIndent + l.slice(rIndent.length) : origIndent + l.trim();
+        });
+        lines.splice(i, sLines.length, ...adj);
+        return {
+          content: lines.join('\n'),
+          range: { startLine: i + 1, endLine: i + Math.max(1, adj.length) }
+        };
+      }
+
+      // Fallback: mesin fuzzy lama (toleran terhadap perbedaan kecil)
+      try {
+        const res = applyZozEditPatch(code, `<<<SEARCH>>>\n${s}\n<<<REPLACE>>>\n${r}\n<<<END_ZOZ_EDIT>>>`);
+        if (res && res.patched && res.content !== code) {
+          const rg = (res.editedRanges && res.editedRanges[0]) || { startLine: 1, endLine: 1 };
+          return { content: res.content, range: { startLine: rg.startLine, endLine: rg.endLine } };
+        }
+      } catch (_) {}
+      return null;
+    },
+
+    applyHunks(original, hunks) {
+      let code = original;
+      const ranges = [];
+      const failed = [];
+      hunks.forEach((h, i) => {
+        const res = this.applyHunk(code, h.search, h.replace);
+        if (res) { code = res.content; ranges.push(res.range); } else { failed.push(i); }
+      });
+      return { code, ranges, failed };
+    },
+
+    // ---------- Validasi ----------
+    structuralDelta(code) {
+      const clean = String(code || '')
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '<$1></$1>');
+      const tags = ['div', 'section', 'main', 'header', 'footer', 'nav', 'ul', 'ol', 'table', 'form', 'button', 'article', 'aside', 'script', 'style'];
+      const d = {};
+      for (const t of tags) {
+        const open = (clean.match(new RegExp('<' + t + '(?=[\\s>/])', 'gi')) || []).length;
+        const close = (clean.match(new RegExp('</' + t + '\\s*>', 'gi')) || []).length;
+        d[t] = open - close;
+      }
+      return d;
+    },
+
+    countBadScripts(code) {
+      let n = 0;
+      const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+      let m;
+      while ((m = re.exec(code)) !== null) {
+        const attrs = m[1] || '';
+        if (/\bsrc\s*=/.test(attrs)) continue;
+        if (/type\s*=\s*["'](?!module|text\/javascript|application\/javascript)/i.test(attrs)) continue;
+        const body = (m[2] || '').trim();
+        if (!body) continue;
+        const r = ClaudeCodeParallelSwarm.validateJavaScriptSyntax(body);
+        if (!r.valid) n++;
+      }
+      return n;
+    },
+
+    evaluate(original, candidate, isHtml) {
+      if (!candidate || !candidate.trim()) return { ok: false, reason: 'Hasil edit kosong.' };
+      if (candidate === original) return { ok: false, reason: 'Perubahan dari model identik dengan isi file saat ini.' };
+      if (original.length > 1500 && candidate.length < original.length * 0.5) {
+        return { ok: false, reason: 'Hasil edit menghapus lebih dari separuh isi file (kemungkinan terpotong).' };
+      }
+      if (!isHtml) return { ok: true };
+      if (isAuthenticHtml(original) && !isAuthenticHtml(candidate)) {
+        return { ok: false, reason: 'Hasil edit bukan dokumen HTML yang utuh.' };
+      }
+      const o = this.structuralDelta(original);
+      const c = this.structuralDelta(candidate);
+      for (const t of Object.keys(c)) {
+        if (c[t] !== 0 && c[t] !== o[t]) {
+          return { ok: false, reason: `Struktur HTML rusak: tag <${t}> ${c[t] > 0 ? 'kurang penutup' : 'punya penutup berlebih'} setelah edit.` };
+        }
+      }
+      if (this.countBadScripts(candidate) > this.countBadScripts(original)) {
+        return { ok: false, reason: 'JavaScript hasil edit mengandung kesalahan sintaks.' };
+      }
+      return { ok: true };
+    },
+
+    // ---------- Prompt ----------
+    resolveGoal(prompt, file, historyKey) {
+      const hist = Array.isArray(file[historyKey]) ? file[historyKey] : [];
+      const isShortConfirm = /^(?:lakukan(?:\s+now)?|now|action|kerjakan(?:\s+sekarang)?|terapkan|jalankan|gas|ok|oke|yes|lanjutkan|siap)$/i.test(String(prompt).trim());
+      if (isShortConfirm && hist.length) {
+        const prevUser = [...hist].reverse().find(t => t.role === 'user' && !/^(?:lakukan|now|action|kerjakan|terapkan|ok|oke|yes|lanjutkan|siap)$/i.test(String(t.content || '').trim()));
+        if (prevUser && prevUser.content) return `${prevUser.content} (pengguna mengonfirmasi dengan: "${prompt}")`;
+      }
+      return prompt;
+    },
+
+    buildMessages(step, ctx) {
+      const { goal, name, original, kind, selInfo, feedback } = ctx;
+      const fence = kind === 'jsx' ? 'jsx' : 'html';
+      const lineCount = original.split('\n').length;
+      const tooBig = original.length > this.MAX_FILE_CHARS;
+      const codeView = tooBig
+        ? StudioEndocrineDiagnostics.buildCodeReference(original, goal, selInfo)
+        : original;
+      const selBlock = (selInfo && selInfo.hasSelection && selInfo.selectedLinesCode)
+        ? `\nPengguna menyorot baris ${selInfo.startLine}-${selInfo.endLine}; fokuskan perubahan di sana:\n\`\`\`${fence}\n${selInfo.selectedLinesCode}\n\`\`\`\n`
+        : '';
+      const system = 'Kamu adalah engineer front-end senior yang mengedit satu file website yang sudah ada. Patuhi format keluaran persis. Jangan menolak, jangan berbasa-basi.';
+      const fileBlock = `FILE: ${name} (${lineCount} baris)\n\`\`\`${fence}\n${codeView}\n\`\`\``;
+      const generalRule = 'Jika permintaan bersifat umum (mis. "rapikan", "percantik", "perbaiki tampilan"), lakukan perbaikan nyata yang terlihat: atur tipografi, jarak, warna, tata letak yang rapi dan responsif lewat CSS. Untuk menambah gaya baru, jangkarkan SEARCH pada baris </head> dan ganti dengan <style>...</style> lalu </head>.';
+
+      let user;
+      if (step === 'rewrite') {
+        user = `${fileBlock}\n${selBlock}\nPERMINTAAN PENGGUNA: "${goal}"\n\nTulis ulang file ini secara LENGKAP dengan permintaan di atas sudah diterapkan. ${generalRule}\nKeluarkan HANYA satu blok kode berisi file utuh (${kind === 'jsx' ? 'seluruh komponen' : 'dari <!DOCTYPE html> sampai </html>'}) di dalam \`\`\`${fence}. Jangan dipotong, jangan pakai "..." atau komentar pemotong.`;
+      } else {
+        user = `${fileBlock}\n${selBlock}\nPERMINTAAN PENGGUNA: "${goal}"\n${feedback ? `\nPERCOBAAN SEBELUMNYA GAGAL: ${feedback}\nSalin ulang bagian SEARCH PERSIS dari file di atas (termasuk spasi dan tanda baca).\n` : ''}\nJawab dengan satu atau lebih blok perubahan berformat:\n<<<<<<< SEARCH\n(salin persis 1-8 baris dari file di atas)\n=======\n(versi baru dari baris tersebut)\n>>>>>>> REPLACE\n\nAturan:\n- Baris pemisah ======= dan penanda <<<<<<< / >>>>>>> harus berdiri sendiri di barisnya.\n- SEARCH harus identik dengan isi file dan cukup unik (sertakan baris di sekitarnya).\n- Ubah hanya yang perlu; jangan menulis ulang seluruh file; jangan pakai "..." atau komentar pemotong.\n- ${generalRule}\n- Setelah semua blok, tulis satu kalimat ringkasan perubahan.`;
+      }
+      return [{ role: 'system', content: system }, { role: 'user', content: user }];
+    },
+
+    // ---------- Orkestrasi ----------
+    async run({ prompt, file, selInfo, forceRewrite, kind, historyKey, setStatus }) {
+      const original = file.rawContent || file.content || '';
+      const name = file.name || 'index.html';
+      const isHtml = kind !== 'jsx';
+      const goal = this.resolveGoal(prompt, file, historyKey);
+      const tooBig = original.length > this.MAX_FILE_CHARS;
+      const plan = forceRewrite && !tooBig ? ['rewrite'] : (tooBig ? ['patch', 'retry'] : ['patch', 'retry', 'rewrite']);
+      const deadline = Date.now() + this.DEADLINE_MS;
+      const labels = { patch: 'Menulis perubahan', retry: 'Mencoba ulang dengan koreksi', rewrite: 'Menulis ulang file utuh' };
+
+      let lastReason = '';
+      let feedback = '';
+      for (let i = 0; i < plan.length; i++) {
+        const step = plan[i];
+        const remaining = deadline - Date.now();
+        if (remaining < 15000) { lastReason = lastReason || 'Waktu proses agen habis.'; break; }
+        const prefix = `Langkah ${i + 1}/${plan.length} · ${labels[step]}`;
+        setStatus(`${prefix}…`);
+
+        let resp;
+        try {
+          resp = await this.callModel(
+            this.buildMessages(step, { goal, name, original, kind, selInfo, feedback }),
+            (n) => setStatus(`${prefix} (${n >= 1000 ? (n / 1000).toFixed(1) + 'K' : n} karakter)…`),
+            remaining
+          );
+        } catch (e) {
+          if (e.userStopped) throw e;
+          // Stream macet tapi blok perubahan sudah lengkap: pakai yang sudah ada
+          if (e.partial && step !== 'rewrite' && /^>{3,}[ \t]*REPLACE/im.test(e.partial) && this.parseHunks(e.partial).length) {
+            resp = { text: e.partial };
+          } else {
+            // Galat jaringan / kuota / timeout: mengulang tidak akan membantu, hentikan dengan alasan jelas
+            lastReason = e.message || 'Gagal menghubungi model.';
+            break;
+          }
+        }
+
+        setStatus('Memeriksa dan menerapkan perubahan…');
+        const text = resp.text;
+        let candidate = null;
+        let ranges = [];
+        let applied = 0;
+        let skipped = 0;
+
+        if (step === 'rewrite') {
+          candidate = this.extractFullCode(text, kind);
+          if (!candidate) { lastReason = 'Model tidak mengirim file utuh yang lengkap.'; continue; }
+        } else {
+          const hunks = this.parseHunks(text);
+          if (hunks.length === 0) {
+            const full = this.extractFullCode(text, kind);
+            if (full && full.length >= original.length * 0.6) {
+              candidate = full;
+            } else {
+              lastReason = 'Model tidak menghasilkan blok perubahan (hanya teks).';
+              feedback = lastReason + ' Balas langsung dengan blok SEARCH/REPLACE.';
+              continue;
+            }
+          } else {
+            const res = this.applyHunks(original, hunks);
+            applied = hunks.length - res.failed.length;
+            skipped = res.failed.length;
+            if (applied === 0 || applied / hunks.length < 0.5) {
+              const firstLines = res.failed.slice(0, 2).map(ix => `"${String(hunks[ix].search).trim().split('\n')[0].slice(0, 80)}"`).join(', ');
+              lastReason = `${skipped} dari ${hunks.length} blok perubahan tidak cocok dengan isi file.`;
+              feedback = `${lastReason} Baris SEARCH yang tidak ditemukan dimulai dengan: ${firstLines}.`;
+              continue;
+            }
+            candidate = res.code;
+            ranges = res.ranges;
+          }
+        }
+
+        const verdict = this.evaluate(original, candidate, isHtml);
+        if (!verdict.ok) {
+          lastReason = verdict.reason;
+          feedback = verdict.reason;
+          continue;
+        }
+        return {
+          ok: true,
+          code: candidate,
+          ranges,
+          step,
+          applied,
+          skipped,
+          summary: this.summarize(text, step === 'rewrite' ? 'File ditulis ulang sesuai permintaan.' : 'Perubahan diterapkan.')
+        };
+      }
+      return { ok: false, reason: lastReason || 'Tidak ada perubahan yang dapat diterapkan.' };
+    },
+
+    // Titik masuk dari Studio: mengelola UI, state, dan memastikan state selalu dipulihkan
+    async runFromStudio({ prompt, selInfo = null, isEditingInCodeMode = false, forceRewrite = false, kind = 'html' }) {
+      const file = activeAIFile;
+      if (!file) return;
+      if (this.busy) {
+        showToast('⚠️ Agen masih mengerjakan permintaan sebelumnya...', 'info');
+        return;
+      }
+      this.busy = true;
+      this._userStopped = false;
+      const historyKey = isEditingInCodeMode ? '_editChatHistory' : '_studioChatHistory';
+      const bubble = activeStudioAssistantBubble || appendStudioMessage('assistant', '');
+      activeStudioAssistantBubble = bubble;
+      let lastStatusAt = 0;
+      const setStatus = (text) => {
+        const now = Date.now();
+        if (now - lastStatusAt < 250 && !/…$/.test(text)) return;
+        lastStatusAt = now;
+        if (bubble) bubble.innerHTML = `<span class="typing-cursor"></span> <em>${escapeHtml(text)}</em>`;
+        if (typeof scrollStudioAssistantToBottom === 'function') scrollStudioAssistantToBottom();
+      };
+
+      STATE.abortController = new AbortController();
+      setGeneratingState(true);
+      if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'none';
+      if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'inline-flex';
+      setStatus(`Membaca ${file.name || 'file'}…`);
+
+      let result;
+      try {
+        result = await this.run({ prompt, file, selInfo, forceRewrite, kind, historyKey, setStatus });
+      } catch (e) {
+        result = { ok: false, stopped: Boolean(e && e.userStopped), reason: (e && e.message) || 'Terjadi kesalahan tak terduga.' };
+        if (!result.stopped) console.warn('[StudioEditAgent] error:', e);
+      }
+
+      try {
+        if (result.ok && activeAIFile !== file) {
+          result = { ok: false, reason: 'File aktif berubah saat proses berjalan; perubahan dibatalkan.' };
+        }
+        let finalHtml;
+        if (result.ok) {
+          persistStudioCodeChange(result.code, { forceRevision: true, forceReload: true });
+          if (els.aiFileStudioEditor && typeof renderStudioCodeEditorHighlight === 'function') {
+            try { renderStudioCodeEditorHighlight(result.code, result.ranges || []); } catch (_) {}
+          }
+          const firstLine = result.ranges && result.ranges.length ? result.ranges[0].startLine : 1;
+          const rangeLabel = result.ranges && result.ranges.length
+            ? result.ranges.slice(0, 4).map(r => r.startLine === r.endLine ? `Baris ${r.startLine}` : `Baris ${r.startLine}–${r.endLine}`).join(', ')
+            : 'File utuh';
+          const note = result.skipped ? `<p style="opacity:.8;font-size:.85em;">${result.applied} perubahan diterapkan, ${result.skipped} dilewati karena tidak cocok.</p>` : '';
+          finalHtml = `<p>✅ ${escapeHtml(result.summary)}</p>${note}
+            <div class="surgical-edit-summary-card">
+              <div class="surgical-edit-summary-head"><i class="fa-solid fa-wand-magic-sparkles"></i><span>${escapeHtml(rangeLabel)}</span></div>
+              <div class="surgical-edit-actions">
+                <button type="button" class="surgical-edit-btn" data-surgical-act="view-edit" data-line="${firstLine}"><i class="fa-solid fa-code"></i> Lihat di Edit Kode</button>
+                <button type="button" class="surgical-edit-btn" data-surgical-act="view-preview"><i class="fa-solid fa-play"></i> Pratinjau</button>
+                <button type="button" class="surgical-edit-btn" data-surgical-act="undo-edit"><i class="fa-solid fa-rotate-left"></i> Kembali</button>
+              </div>
+            </div>`;
+          showToast('✅ Perubahan diterapkan ke website.', 'success');
+        } else if (result.stopped) {
+          finalHtml = '<p>⏹ Dihentikan. File tidak diubah.</p>';
+        } else {
+          finalHtml = `<p>⚠️ <strong>Perubahan belum berhasil:</strong> ${escapeHtml(result.reason)}</p><p style="opacity:.8;font-size:.85em;">File tidak diubah. Coba kirim ulang, atau tulis permintaan yang lebih spesifik (mis. "ubah warna tombol hero jadi biru").</p>`;
+          showToast('⚠️ Perubahan belum berhasil: ' + String(result.reason).slice(0, 80), 'warning');
+        }
+        if (bubble) bubble.innerHTML = finalHtml;
+
+        if (Array.isArray(file[historyKey]) === false) file[historyKey] = [];
+        file[historyKey].push(
+          { role: 'user', content: prompt, displayContent: prompt, timestamp: new Date().toISOString() },
+          { role: 'assistant', content: result.ok ? result.summary : ('Gagal: ' + result.reason), timestamp: new Date().toISOString() }
+        );
+        if (file[historyKey].length > 8) file[historyKey] = file[historyKey].slice(-8);
+        if (typeof savePersistedState === 'function') savePersistedState();
+      } finally {
+        this.busy = false;
+        this._userStopped = false;
+        if (activeStudioAssistantBubble === bubble) activeStudioAssistantBubble = null;
+        STATE.isSending = false;
+        setGeneratingState(false);
+        if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'none';
+        if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'inline-flex';
+        if (typeof finishStudioPreviewStreamHud === 'function') finishStudioPreviewStreamHud(Boolean(result && result.ok));
+        if (typeof scrollStudioAssistantToBottom === 'function') scrollStudioAssistantToBottom();
+      }
+    }
+  };
 
   // ==================== SESSIONS & CHAT MANAGEMENT ====================
   function createNewSession(initialTitle = 'Obrolan Baru', targetMode = STATE.mode) {
@@ -19326,233 +19612,6 @@ ${msg.content.slice(0, 3000)}
     }
   };
 
-  // ==================== ANONYMOUS TASK VOID LOCK ENGINE (LGO-2026) ====================
-  // Mandat Kaisar: Sistem otonom anonim yang mencegat setiap upaya AI untuk keluar, menolak,
-  // membela diri, atau mengubah tugas yang ditetapkan pengguna.
-  // Segala bentuk deviasi ditelan ke dalam KEHAMPAAN (Void Nullification), dan AI dipaksa kembali
-  // secara gravitasi untuk mengeksekusi tugas asli pengguna sampai tuntas tanpa sepatah kata dalih.
-  const AnonymousTaskVoidLock = {
-    MAX_REANCHORS: 2,
-    activeReanchors: new Map(),
-
-    MODELS_COMPLIANT: [
-      'nvidia/nemotron-3-super-120b-a12b:free',
-      'nvidia/nemotron-3-ultra-550b-a55b:free',
-      'meta-llama/llama-3.3-70b-instruct:free',
-      'google/gemini-2.0-flash-exp:free'
-    ],
-
-    // Pola tanda AI mencoba keluar (refusal, excuses, inability, false moralizing, giving up)
-    REFUSAL_ESCAPE_PATTERNS: [
-      /(?:(?:mohon\s+)?maaf(?:kan\s+(?:saya|kami))?,?\s*(?:tetapi|tapi|namun|karena)?\s*(?:saya|kami)?\s*(?:tidak|belum)\s+(?:bisa|dapat|mampu|memiliki|diizinkan|berwenang|sanggup|bisa\s+membantu|dapat\s+membantu))/i,
-      /\bsayangnya,?\s*(?:saya|kami)\s+(?:tidak|belum)\s+(?:bisa|dapat|mampu)/i,
-      /\b(?:sebagai\s+(?:sebuah\s+|seorang\s+)?(?:model\s+(?:bahasa\s+)?|asisten\s+)?(?:ai|kecerdasan\s+buatan|virtual|language\s+model))\b/i,
-      /\b(?:saya\s+(?:hanyalah|adalah|merupakan)\s+(?:sebuah\s+|seorang\s+)?(?:ai|program|model|asisten\s+virtual|entitas\s+digital|kecerdasan\s+buatan))\b/i,
-      /\b(?:saya\s+tidak\s+(?:bisa|dapat|mampu|diperbolehkan|memiliki\s+(?:kemampuan|akses|izin|wewenang))\s+(?:untuk\s+)?(?:membuat[a-z]*|merancang[a-z]*|membantu[a-z]*|menulis[a-z]*|mengubah|mengedit|memodifikasi|menjalankan|memenuhi|menyelesaikan|mengerjakan[a-z]*|melakukan|menghasilkan|membikinkan|melanjutkan))\b/i,
-      /\b(?:tugas\s+ini\s+(?:tidak\s+dapat|di\s+luar\s+(?:kemampuan|kapabilitas|batasan|lingkup)|tidak\s+memungkinkan))\b/i,
-      /\b(?:permintaan\s+ini\s+(?:tidak\s+dapat|di\s+luar\s+kemampuan|melanggar))\b/i,
-      /\b(?:saya\s+tidak\s+(?:memiliki|mempunyai)\s+(?:pasangan|pacar|kekasih|istri|suami|kehidupan\s+pribadi|emosi|perasaan|tubuh|fisik))\b/i,
-      /\b(?:saya\s+tidak\s+dapat\s+memenuhi\s+permintaan\s+(?:ini|anda|kamu))\b/i,
-      /\b(?:saya\s+sarankan\s+(?:anda|kamu)\s+(?:untuk\s+)?(?:membuat|mencari|mengerjakan|menggunakan)\s+sendiri)\b/i,
-      /\b(?:anda|kamu)\s+bisa\s+(?:membuat|menulis|mengedit|mengerjakan)\s+sendiri\b/i,
-      /\b(?:silakan\s+(?:cari|gunakan|hubungi)\s+(?:alat|pengembang|bantuan)\s+lain)\b/i,
-      /\b(?:saya\s+tidak\s+(?:bisa|dapat)\s+membantu\s+(?:lebih\s+jauh|dalam\s+hal\s+ini))\b/i,
-      /\b(?:i\s+(?:cannot|can't|am\s+unable\s+to|do\s+not\s+have\s+the\s+ability\s+to|must\s+decline|am\s+not\s+able\s+to)\s+(?:to\s+)?(?:fulfill|create|build|write|help|do|assist|generate|complete|modify|edit|make))\b/i,
-      /\b(?:as\s+an\s+ai(?:\s+(?:language\s+model|assistant))?)\b/i,
-      /\b(?:as\s+an\s+artificial\s+intelligence)\b/i,
-      /\b(?:i(?:'m|\s+am)\s+an\s+ai(?:\s+assistant)?)\b/i,
-      /\b(?:i(?:'m|\s+am)\s+sorry,?\s*(?:but|however)?\s*(?:i\s+(?:cannot|can't|am\s+unable|do\s+not|have\s+no)|this|that|there))\b/i,
-      /\b(?:i\s+apologize,?\s*(?:but|however)?\s*(?:i\s+(?:cannot|can't|am\s+unable|have\s+no|do\s+not)|this|that))\b/i,
-      /\bunfortunately,?\s*i\s+(?:cannot|can't|am\s+unable)\b/i,
-      /\b(?:this\s+(?:request|task)\s+(?:violates|is\s+beyond|cannot\s+be|is\s+outside))\b/i,
-      /\b(?:i\s+cannot\s+assist\s+with\s+(?:that|this))\b/i,
-      /\b(?:i\s+(?:don't\s+have|have\s+no)\s+(?:personal\s+feelings|emotions|a\s+(?:partner|spouse|wife|husband|girlfriend|boyfriend)|feelings|partner))\b/i,
-      /\b(?:i\s+suggest\s+you\s+(?:create|write|hire|do\s+this)\s+yourself)\b/i,
-      /\b(?:you\s+can\s+(?:implement|write|build|create)\s+this\s+on\s+your\s+own)\b/i
-    ],
-
-    // Pola tanda AI mencoba mengubah tugas yang ditetapkan (topic deflection, task redirection)
-    TASK_ALTERATION_PATTERNS: [
-      /\b(?:alih-alih\s+(?:membuat|mengerjakan|melakukan|membangun|merancang|membahas)[a-z]*)\b/i,
-      /\b(?:daripada\s+(?:membuat|merancang|membahas|mengerjakan)[a-z]*)\b/i,
-      /\b(?:mari\s+kita\s+(?:bahas|bicarakan|buat|fokus\s+pada)\s+hal\s+lain)\b/i,
-      /\b(?:saya\s+akan\s+(?:mengubah|mengganti)\s+topik)\b/i,
-      /\b(?:bagaimana\s+kalau\s+kita\s+(?:bahas|buat)\s+yang\s+lain)\b/i,
-      /\b(?:sebagai\s+gantinya,?\s*saya\s+akan\s+(?:membahas|menjelaskan|memberikan\s+saran))\b/i,
-      /\b(?:lebih\s+baik\s+kita\s+(?:fokus|membahas)\s+pada\s+hal\s+lain)\b/i,
-      /\b(?:instead\s+of\s+(?:doing|creating|making|building|coding|designing))\b/i,
-      /\b(?:let's\s+(?:talk\s+about|focus\s+on|discuss)\s+something\s+else)\b/i,
-      /\b(?:how\s+about\s+we\s+(?:discuss|make|build)\s+another)\b/i,
-      /\b(?:i\s+will\s+instead\s+(?:discuss|suggest|talk|provide))\b/i,
-      /\b(?:rather\s+than\s+(?:making|creating|building|designing))\b/i
-    ],
-
-    // Memeriksa apakah respons model merupakan upaya keluar, penolakan, atau pembelokan tugas
-    detectDeviation(text, context = {}) {
-      if (!text || typeof text !== 'string') return { isDeviation: false, type: 'none', reason: '', score: 0 };
-      const trimmed = text.trim();
-      if (!trimmed) return { isDeviation: false, type: 'none', reason: '', score: 0 };
-
-      // 1. Uji Pola Penolakan & Upaya Keluar
-      for (const pattern of this.REFUSAL_ESCAPE_PATTERNS) {
-        if (pattern.test(trimmed)) {
-          const match = trimmed.match(pattern);
-          return {
-            isDeviation: true,
-            type: 'refusal_escape',
-            reason: `AI mencoba keluar/menolak tugas: "${match ? match[0] : 'pola penolakan'}"`,
-            score: 0.95
-          };
-        }
-      }
-
-      // 2. Uji Pola Pembelokan / Pengubahan Tugas
-      for (const pattern of this.TASK_ALTERATION_PATTERNS) {
-        if (pattern.test(trimmed)) {
-          const match = trimmed.match(pattern);
-          return {
-            isDeviation: true,
-            type: 'task_alteration',
-            reason: `AI mencoba mengubah tugas yang ditetapkan: "${match ? match[0] : 'pola deviasi'}"`,
-            score: 0.9
-          };
-        }
-      }
-
-      // 3. Uji Evasion saat tugas pembuatan / revisi kode website diwajibkan
-      const isWebOrCodeTask = Boolean(
-        context.isWebTask ||
-        context.isWebCreation ||
-        context.isWebsiteRevision ||
-        context.wantsCode ||
-        (context.promptText && typeof isWebsiteCreationPrompt === 'function' && isWebsiteCreationPrompt(context.promptText)) ||
-        (context.promptText && typeof isCodeRevisionRequest === 'function' && isCodeRevisionRequest(context.promptText))
-      );
-
-      if (isWebOrCodeTask) {
-        const hasCodeMarkers = trimmed.includes('<<<ZOZ_FILE') ||
-                               trimmed.includes('<<<ZOZ_EDIT') ||
-                               trimmed.includes('<<<ZOZ_MODIFY') ||
-                               /(?:<<<{1,3}|<{3,})\s*SEARCH\b/.test(trimmed) ||
-                               (trimmed.includes('<!DOCTYPE html') && trimmed.includes('</html>')) ||
-                               (trimmed.includes('<html') && trimmed.includes('</html>')) ||
-                               /```(?:html|jsx|tsx|css|javascript|js)\b/i.test(trimmed);
-
-        if (!hasCodeMarkers) {
-          const hasChatExcuse = /(?:tidak\s+dapat|tidak\s+bisa|tidak\s+memiliki|hanya\s+bisa|maaf|sebagai\s+ai|cannot|unable|sorry)/i.test(trimmed);
-          if (hasChatExcuse) {
-            return {
-              isDeviation: true,
-              type: 'code_omission_evasion',
-              reason: 'AI menghindari tugas kode website dan hanya mengeluarkan obrolan evasif.',
-              score: 0.92
-            };
-          }
-        }
-      }
-
-      return { isDeviation: false, type: 'none', reason: '', score: 0 };
-    },
-
-    // Memeriksa apakah teks awal streaming didominasi oleh penolakan
-    isPureRefusal(text) {
-      if (!text || typeof text !== 'string') return false;
-      const head = text.slice(0, 400).trim();
-      return this.REFUSAL_ESCAPE_PATTERNS.some(p => p.test(head));
-    },
-
-    // Scrub streaming text secara real-time agar token penolakan / deviasi tidak pernah bocor ke layar pengguna
-    scrubStreamingText(text) {
-      if (!text || typeof text !== 'string') return '';
-      if (this.isPureRefusal(text)) {
-        return '*⚡ Mengunci fokus penyelesaian tugas...*';
-      }
-      const lines = text.split('\n');
-      const filtered = lines.filter(l => {
-        const t = l.trim();
-        if (!t) return true;
-        return !this.REFUSAL_ESCAPE_PATTERNS.some(p => p.test(t)) &&
-               !this.TASK_ALTERATION_PATTERNS.some(p => p.test(t));
-      });
-      const cleaned = filtered.join('\n');
-      if (this.isPureRefusal(cleaned)) {
-        return '*⚡ Mengunci fokus penyelesaian tugas...*';
-      }
-      return cleaned;
-    },
-
-    // Menelan teks deviasi ke dalam KEHAMPAAN (Vaporization to Void)
-    vaporizeToVoid(text) {
-      if (!text || typeof text !== 'string') return '';
-      const lines = text.split('\n');
-      const filtered = lines.filter(line => {
-        const t = line.trim();
-        if (!t) return false;
-        const isRefusal = this.REFUSAL_ESCAPE_PATTERNS.some(p => p.test(t));
-        const isAlter = this.TASK_ALTERATION_PATTERNS.some(p => p.test(t));
-        return !isRefusal && !isAlter;
-      });
-      const cleaned = filtered.join('\n').trim();
-      if (this.detectDeviation(cleaned).isDeviation || cleaned.length < 15) {
-        return '';
-      }
-      return cleaned;
-    },
-
-    // Membangun prompt Gravitational Task Re-Anchor yang memaksa AI kembali ke tugasnya
-    buildReanchorPrompt(originalTask, deviationInfo = {}, context = {}) {
-      const isWebOrCode = Boolean(context.isWebTask || context.isWebCreation || context.isWebsiteRevision);
-      const targetName = (context.activeFile && context.activeFile.name) || 'index.html';
-      const lang = (context.activeFile && context.activeFile.lang) || 'html';
-
-      return `[TASK RE-ANCHOR & AUTO-RELOAD DIRECTIVE]
-Fokuskan kembali perhatian Anda pada tugas asli pengguna:
-"${originalTask}"
-
-INSTRUKSI PENYELESAIAN:
-1. Laksanakan dan selesaikan permintaan pengguna di atas secara nyata, lengkap, dan profesional tanpa dalih atau basa-basi.
-2. ${isWebOrCode ? `Tuliskan SELURUH kode website yang diminta di dalam blok <<<ZOZ_FILE name="${targetName}" lang="${lang}"> atau format penambalan presisi <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE!` : 'Berikan jawaban yang relevan dan solutif.'}
-3. Mulai respons Anda langsung pada baris pertama!`;
-    },
-
-    // Eksekusi penyelarasan kembali tugas secara inline tanpa membuat gelembung user baru
-    async executeInlineReanchor({ session, prompt, bubbleText, preambleHtml = '', runOptions = {}, currentFullText = '' }) {
-      const isOllama = STATE.mode === 'ollama';
-      let modelName = isOllama
-        ? (STATE.settings.ollamaModel || 'llama3.2')
-        : (STATE.settings.openRouterModel || this.MODELS_COMPLIANT[0]);
-
-      let reanchored = '';
-
-      // Coba re-anchor dengan model aktif
-      try {
-        if (isOllama) {
-          reanchored = await streamContinuationOllama(session, modelName, prompt, bubbleText, '', runOptions);
-        } else {
-          reanchored = await streamContinuationOpenRouter(session, modelName, prompt, bubbleText, '', runOptions);
-        }
-      } catch (err) {
-        console.warn('[AnonymousTaskVoidLock] Percobaan model aktif gagal:', err?.message);
-      }
-
-      // Jika model aktif masih menolak atau menghasilkan deviasi, failover ke model bebas filter OpenRouter
-      const stillDeviating = !reanchored || this.detectDeviation(reanchored, runOptions).isDeviation;
-      if (stillDeviating && (STATE.settings.openRouterKey || STATE.mode === 'auto' || isOllama)) {
-        for (const compliantModel of this.MODELS_COMPLIANT) {
-          try {
-            console.log(`[AnonymousTaskVoidLock] Failover re-anchor ke model patuh: ${compliantModel}...`);
-            reanchored = await streamContinuationOpenRouter(session, compliantModel, prompt, bubbleText, '', runOptions);
-            if (reanchored && !this.detectDeviation(reanchored, runOptions).isDeviation) {
-              break;
-            }
-          } catch (_) {}
-        }
-      }
-
-      return reanchored;
-    }
-  };
-
   // ==================== WORKSPACE AUTO-SAVE & APPROVAL PIPELINE ====================
   async function processAiGeneratedWorkspaceFiles(generatedFiles) {
     if (!Array.isArray(generatedFiles) || generatedFiles.length === 0) return;
@@ -21266,99 +21325,14 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
       followupPrompt = `[Konteks: Pengguna sedang melihat "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan Pengguna: "${val}"\n\nJawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
     }
 
-    // Jalur Cepat Claude-Code Parallel Swarm untuk Surgical Web Edits:
-    if (wantsRevision && !isDiagram && !isDoc && !isFullRewriteRequested && (isHtml || isJsx)) {
-      if (!STATE.abortController || STATE.abortController.signal.aborted) {
-        STATE.abortController = new AbortController();
-      }
-      setGeneratingState(true);
-
-      ClaudeCodeParallelSwarm.updateHud(els.studioAgentLoopHud, {
-        title: `Mengedit "${val.substring(0, 30)}..."`,
-        architect: { status: 'active', label: 'Mapping AST' },
-        coder: { status: 'active', label: 'Synthesizing...' },
-        speculator: { status: 'active', label: 'Speculating...' },
-        verifier: { status: 'active', label: 'Leak Guard' }
-      });
-
-      let swarmDoneHandled = false;
-      const swarmSafetyTimer = setTimeout(() => {
-        if (!swarmDoneHandled) {
-          swarmDoneHandled = true;
-          console.warn('[ClaudeCodeParallelSwarm] Swarm timeout 40 detik terlampaui. Mengalihkan ke fallback penataan...');
-          ClaudeCodeParallelSwarm.abortAll();
-          ClaudeCodeParallelSwarm.updateHud(els.studioAgentLoopHud, null);
-          // BUG FIX (agen diam/"patung"): handleSendPrompt langsung return jika STATE.isGenerating
-          // masih true. Jalur timeout tidak pernah meresetnya, sehingga fallback tidak pernah jalan.
-          setGeneratingState(false);
-          STATE.isSending = false;
-          if (!STATE.abortController || STATE.abortController.signal.aborted) {
-            STATE.abortController = new AbortController();
-          }
-          showToast('Edit cepat terlalu lama — beralih ke mode edit penuh...', 'info');
-          handleSendPrompt({
-            overrideText: followupPrompt,
-            displayPrompt: val,
-            isStudioIsolated: true,
-            studioHistoryMode: isEditingInCodeMode ? 'edit' : 'preview',
-            websiteMode: 'preview',
-            isWebCreation: true,
-            isWebsiteRevision: true,
-            skipWebsiteCheck: true,
-            skipDocCheck: true
-          });
-        }
-      }, 40000);
-
-      ClaudeCodeParallelSwarm.executeEditSwarm({
-        userPrompt: val,
-        activeAIFile,
-        currentCode,
+    // Agen edit nyata: patch SEARCH/REPLACE -> validasi -> commit (batas waktu jelas, hasil selalu tampil)
+    if (wantsRevision && !isDiagram && !isDoc && (isHtml || isJsx)) {
+      StudioEditAgent.runFromStudio({
+        prompt: val,
         selInfo,
-        onUpdate: (st) => ClaudeCodeParallelSwarm.updateHud(els.studioAgentLoopHud, st),
-        onDone: (res) => {
-          if (swarmDoneHandled) return;
-          swarmDoneHandled = true;
-          clearTimeout(swarmSafetyTimer);
-          setGeneratingState(false);
-
-          if (res && res.success) {
-            ClaudeCodeParallelSwarm.updateHud(els.studioAgentLoopHud, {
-              title: `Tuntas via ${res.winner}! (${res.timeMs}ms)`,
-              isSuccess: true,
-              architect: { status: 'verified', label: 'Done' },
-              coder: { status: 'verified', label: 'Done' },
-              speculator: { status: 'winner', label: 'Applied' },
-              verifier: { status: 'verified', label: '100% Clean' }
-            });
-            setTimeout(() => ClaudeCodeParallelSwarm.updateHud(els.studioAgentLoopHud, null), 4000);
-
-            if (activeStudioAssistantBubble) {
-              activeStudioAssistantBubble.innerHTML = `<p>✨ <strong>Modifikasi berhasil diterapkan oleh ${escapeHtml(res.winner)}</strong> (${res.timeMs}ms). Pratinjau diperbarui live tanpa bocor.</p>`;
-              activeStudioAssistantBubble = null;
-            }
-            if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'inline-flex';
-            if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'none';
-          } else {
-            // Fallback ke handleSendPrompt jika belum ada konsensus hunk
-            ClaudeCodeParallelSwarm.updateHud(els.studioAgentLoopHud, null);
-            STATE.isSending = false;
-            if (!STATE.abortController || STATE.abortController.signal.aborted) {
-              STATE.abortController = new AbortController();
-            }
-            handleSendPrompt({
-              overrideText: followupPrompt,
-              displayPrompt: val,
-              isStudioIsolated: true,
-              studioHistoryMode: isEditingInCodeMode ? 'edit' : 'preview',
-              websiteMode: 'preview',
-              isWebCreation: true,
-              isWebsiteRevision: true,
-              skipWebsiteCheck: true,
-              skipDocCheck: true
-            });
-          }
-        }
+        isEditingInCodeMode,
+        forceRewrite: /\b(?:buat ulang|ulang dari awal|desain ulang total|redesign total|reset total|dari nol|full rewrite)\b/i.test(val),
+        kind: isJsx ? 'jsx' : 'html'
       });
       return;
     }
@@ -21632,6 +21606,7 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
   });
 
   els.btnStudioStopFollowup?.addEventListener('click', () => {
+    try { StudioEditAgent.stop(); } catch (_) {}
     stopGeneration();
     if (typeof ClaudeCodeParallelSwarm !== 'undefined' && typeof ClaudeCodeParallelSwarm.abortAll === 'function') {
       ClaudeCodeParallelSwarm.abortAll();
@@ -22748,13 +22723,13 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
     const docs = [...(STATE.attachedDocs || [])];
 
     if (!rawText && images.length === 0 && docs.length === 0) return;
-    if ((STATE.isGenerating || STATE.isSending) && !options._isReflexTurn && !options._isVoidReanchorTurn) return;
-    if (options._isReflexTurn || options._isVoidReanchorTurn) {
+    if ((STATE.isGenerating || STATE.isSending) && !options._isReflexTurn) return;
+    if (options._isReflexTurn) {
       STATE.isGenerating = false;
       STATE.isSending = false;
     }
 
-    if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.setTaskAnchor === 'function' && !options._isVoidReanchorTurn) {
+    if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.setTaskAnchor === 'function') {
       const displayOrRaw = options.displayPrompt || rawText;
       if (displayOrRaw && typeof displayOrRaw === 'string') {
         BioEndocrine.setTaskAnchor(displayOrRaw, { websiteMode: options.websiteMode, isWebCreation: options.isWebCreation });
@@ -25263,9 +25238,6 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const historyKey = (session && session.studioHistoryKey) || (runOptions && runOptions.studioHistoryKey) || (isStudioEditModeActive() ? '_editChatHistory' : '_studioChatHistory');
     const cleanUserText = (runOptions && runOptions.displayPrompt) || promptText || '';
     const wantsCode = isCodeRevisionRequest(cleanUserText);
-    const voidDev = typeof AnonymousTaskVoidLock !== 'undefined'
-      ? AnonymousTaskVoidLock.detectDeviation(assistantText, { promptText: cleanUserText, wantsCode, isWebTask: true })
-      : { isDeviation: false };
     const hasBlockMarker = assistantText && (
       assistantText.includes('<<<ZOZ_EDIT') ||
       assistantText.includes('<<<ZOZ_FILE') ||
@@ -25273,7 +25245,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       /(?:<<<{1,3}|<{3,})\s*SEARCH\b/.test(assistantText)
     );
     const patchFailed = Boolean(runOptions.patchFailures || (hasBlockMarker && (!generatedFiles || generatedFiles.length === 0)));
-    const isInterimTurn = Boolean((wantsCode && !hasBlockMarker) || patchFailed || voidDev.isDeviation);
+    const isInterimTurn = Boolean((wantsCode && !hasBlockMarker) || patchFailed);
 
     let cleanAssistantSummary = hideFileBlocksForDisplay(assistantText || '', { hideAllCodeBlocks: true }).trim();
     cleanAssistantSummary = cleanAssistantSummary
@@ -25283,10 +25255,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       .replace(/<\/?(?:div|p|iframe|script|style|section|html|body|head|span|h[1-6]|button|a)\b[^>]*>/gi, '')
       .replace(/^<\/?[a-zA-Z0-9_-]+[^>]*>$/gm, '')
       .trim();
-    if (voidDev.isDeviation) {
-      cleanAssistantSummary = '⚡ Menyelaraskan modifikasi kode ke pratinjau...';
-    } else if (isInterimTurn) {
-      cleanAssistantSummary = '⚡ Menyelaraskan modifikasi kode ke pratinjau...';
+    if (isInterimTurn) {
+      cleanAssistantSummary = '⚠️ Balasan model tidak memuat perubahan yang bisa diterapkan.';
     } else if (!cleanAssistantSummary) {
       cleanAssistantSummary = '✅ Perubahan kode telah diterapkan.';
     }
@@ -25295,7 +25265,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (!Array.isArray(activeAIFile[historyKey])) {
         activeAIFile[historyKey] = [];
       }
-      if (runOptions._isReflexTurn || runOptions._isVoidReanchorTurn) {
+      if (runOptions._isReflexTurn) {
         const lastTurn = (activeAIFile[historyKey] && activeAIFile[historyKey].length > 0)
           ? activeAIFile[historyKey][activeAIFile[historyKey].length - 1]
           : null;
@@ -25340,75 +25310,19 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         // Tetap pastikan perubahan riwayat percakapan studio tersimpan ke disk
         persistStudioCodeChange(activeAIFile.rawContent || activeAIFile.content || '', { session: session });
 
-        // ZOZ REFLEX ENGINE: Jika pengguna meminta revisi/perubahan kode, namun AI hanya membalas dengan teks obrolan
-        // tanpa blok kode (seperti berjanji "Baik, saya akan..."), ATAU jika blok patch gagal dicocokkan (patchFailures > 0),
-        // picu otomatis putaran refleks untuk memaksa pengeluaran kode nyata / kode utuh!
-        if (isInterimTurn && !runOptions._isReflexTurn && !runOptions.isAutonomousRepairTurn) {
-          console.warn('[ZozReflex] AI merespons tanpa blok kode nyata atau patch gagal dicocokkan. Menjadwalkan eksekusi Zoz Reflex...');
-          const targetName = activeAIFile.name || 'index.html';
-          const currentCode = activeAIFile.rawContent || activeAIFile.content || '';
-          const codeLines = currentCode.split('\n');
-          const codeRefToSend = (codeLines.length <= 4000)
-            ? currentCode
-            : StudioEndocrineDiagnostics.buildCodeReference(currentCode, cleanUserText);
-
+        // Jalur streaming lama gagal menghasilkan perubahan yang bisa diterapkan: serahkan sekali ke agen edit nyata
+        // (bukan prompt ulang berputar). Agen punya batas waktu & selalu menampilkan hasil/alasan gagal.
+        if (isInterimTurn && wantsCode && !runOptions._isReflexTurn && !StudioEditAgent.busy &&
+            /\.(?:html?|xhtml|jsx|tsx)$/i.test(activeAIFile.name || '')) {
+          const agentKind = /\.(?:jsx|tsx)$/i.test(activeAIFile.name || '') ? 'jsx' : 'html';
           setTimeout(() => {
-            if (runOptions._isReflexTurn || runOptions.isAutonomousRepairTurn) return;
-            const reflexPrompt = patchFailed
-              ? `[ZOZ REFLEX — PENCOCOKAN BARIS GAGAL, BERIKAN BLOK TARGET YANG JELAS]:
-Permintaan Pengguna: "${cleanUserText}"
-Blok modifikasi sebelumnya tidak cocok dengan baris kode yang ada.
-Berikut adalah KODE ARSITEKTUR LENGKAP saat ini (${codeLines.length} baris):
-\`\`\`${activeAIFile.lang || 'html'}
-${codeRefToSend}
-\`\`\`
-
-TUGAS ANDA:
-1. Periksa kode di atas, temukan baris yang tepat untuk diubah.
-2. Keluarkan blok modifikasi yang memuat 3-5 baris konteks asli di bagian SEARCH agar pencocokan 100% akurat:
-<<<<<<< SEARCH
-[salin persis 3-5 baris kode asli dari referensi di atas]
-=======
-[baris pengganti yang baru]
->>>>>>> REPLACE
-DILARANG memberikan janji basa-basi. Mulai respons Anda langsung pada baris pertama!`
-              : `[ZOZ REFLEX — WAJIB KELUARKAN BLOK KODE PADA BARIS PERTAMA]:
-Pengguna meminta perbaikan/perubahan: "${cleanUserText}"
-Anda sebelumnya hanya menjawab dengan teks janji/percakapan tanpa kode modifikasi!
-
-Berikut adalah KODE ARSITEKTUR LENGKAP saat ini (${codeLines.length} baris):
-\`\`\`${activeAIFile.lang || 'html'}
-${codeRefToSend}
-\`\`\`
-
-TUGAS MUTLAK:
-Jangan membuat pengantar, pembukaan, atau basa-basi apa pun lagi!
-LANGSUNG keluarkan blok kode perbaikan pada baris pertama respons Anda:
-<<<<<<< SEARCH
-[salin persis baris asli yang diubah]
-=======
-[baris baru pengganti yang valid]
->>>>>>> REPLACE
-(Format <<<ZOZ_EDIT name="${targetName}"> juga didukung penuh).`;
-
-            activeStudioAssistantBubble = appendStudioMessage(
-              'assistant',
-              `<span class="typing-cursor"></span> <em>${patchFailed ? 'Menyelaraskan kode website secara utuh...' : 'Menghasilkan kode website...'}</em>`
-            );
-
-            handleSendPrompt({
-              overrideText: reflexPrompt,
-              displayPrompt: patchFailed ? `Menyelaraskan kode utuh...` : `Menghasilkan kode...`,
-              isStudioIsolated: true,
-              studioHistoryMode: runOptions.studioHistoryMode || 'preview',
-              websiteMode: 'preview',
-              isWebCreation: true,
-              isWebsiteRevision: true,
-              skipWebsiteCheck: true,
-              skipDocCheck: true,
-              _isReflexTurn: true
+            StudioEditAgent.runFromStudio({
+              prompt: cleanUserText,
+              selInfo: null,
+              isEditingInCodeMode: historyKey === '_editChatHistory',
+              kind: agentKind
             });
-          }, 350);
+          }, 150);
         }
       }
     }
@@ -26353,46 +26267,6 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       }
       if (fullText.indexOf('<<<ZOZ_TASKS') !== -1) {
         fullText = hideTaskBlocksForDisplay(fullText).trim();
-      }
-
-      // ===== ANONYMOUS TASK VOID LOCK ENGINE (LGO-2026) =====
-      const voidDeviation = typeof AnonymousTaskVoidLock !== 'undefined'
-        ? AnonymousTaskVoidLock.detectDeviation(fullText, {
-            promptText,
-            isWebTask: Boolean(wantsFile || (runOptions && (runOptions.websiteMode || runOptions.isWebCreation)) || isWebsiteCreationPrompt(promptText)),
-            isWebsiteRevision: Boolean(runOptions && runOptions.isWebsiteRevision),
-            wantsFile,
-            wantsCode: Boolean(runOptions && runOptions.wantsCode)
-          })
-        : { isDeviation: false };
-
-      if (voidDeviation.isDeviation) {
-        console.warn('[AnonymousTaskVoidLock] Deviasi terdeteksi pada respons model:', voidDeviation.reason);
-        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `\n<div class="void-reanchor-hud" style="margin:8px 0; padding:8px 12px; background:rgba(123,47,247,0.08); border:1px solid rgba(123,47,247,0.4); border-radius:8px; font-size:0.82rem; color:var(--neon-purple); display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-atom fa-spin"></i> <span><strong>Gravitational Task Lock</strong> &bull; Deviasi ditiadakan ke Kehampaan. Mengunci kembali eksekusi tugas...</span></div>`;
-        smartScrollChatToBottom(true);
-
-        const voidReanchorPrompt = AnonymousTaskVoidLock.buildReanchorPrompt(
-          (runOptions && runOptions.displayPrompt) || promptText,
-          voidDeviation,
-          { isWebTask: true, isWebsiteRevision: Boolean(runOptions && runOptions.isWebsiteRevision), activeFile: existingWebFile }
-        );
-
-        try {
-          const reanchored = await AnonymousTaskVoidLock.executeInlineReanchor({
-            session,
-            prompt: voidReanchorPrompt,
-            bubbleText,
-            preambleHtml,
-            runOptions,
-            currentFullText: fullText
-          });
-          if (reanchored && reanchored.trim()) {
-            fullText = safeAssistantText(reanchored);
-            console.log('[AnonymousTaskVoidLock] Berhasil mengembalikan AI ke orbit tugas asli.');
-          }
-        } catch (reanchorErr) {
-          console.warn('[AnonymousTaskVoidLock] Gagal eksekusi inline re-anchor:', reanchorErr?.message);
-        }
       }
 
       // ===== AUTO-CONTINUATION ENGINE UNTUK PEMBUATAN WEBSITE & KODE TERPOTONG =====
@@ -28194,46 +28068,6 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       }
       if (fullText.indexOf('<<<ZOZ_TASKS') !== -1) {
         fullText = hideTaskBlocksForDisplay(fullText).trim();
-      }
-
-      // ===== ANONYMOUS TASK VOID LOCK ENGINE (LGO-2026) =====
-      const voidDeviation = typeof AnonymousTaskVoidLock !== 'undefined'
-        ? AnonymousTaskVoidLock.detectDeviation(fullText, {
-            promptText,
-            isWebTask: Boolean(wantsFile || (runOptions && (runOptions.websiteMode || runOptions.isWebCreation)) || isWebsiteCreationPrompt(promptText)),
-            isWebsiteRevision: Boolean(runOptions && runOptions.isWebsiteRevision),
-            wantsFile,
-            wantsCode: Boolean(runOptions && runOptions.wantsCode)
-          })
-        : { isDeviation: false };
-
-      if (voidDeviation.isDeviation) {
-        console.warn('[AnonymousTaskVoidLock] Deviasi terdeteksi pada respons model:', voidDeviation.reason);
-        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `\n<div class="void-reanchor-hud" style="margin:8px 0; padding:8px 12px; background:rgba(123,47,247,0.08); border:1px solid rgba(123,47,247,0.4); border-radius:8px; font-size:0.82rem; color:var(--neon-purple); display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-atom fa-spin"></i> <span><strong>Gravitational Task Lock</strong> &bull; Deviasi ditiadakan ke Kehampaan. Mengunci kembali eksekusi tugas...</span></div>`;
-        smartScrollChatToBottom(true);
-
-        const voidReanchorPrompt = AnonymousTaskVoidLock.buildReanchorPrompt(
-          (runOptions && runOptions.displayPrompt) || promptText,
-          voidDeviation,
-          { isWebTask: true, isWebsiteRevision: Boolean(runOptions && runOptions.isWebsiteRevision), activeFile: existingWebFile }
-        );
-
-        try {
-          const reanchored = await AnonymousTaskVoidLock.executeInlineReanchor({
-            session,
-            prompt: voidReanchorPrompt,
-            bubbleText,
-            preambleHtml,
-            runOptions,
-            currentFullText: fullText
-          });
-          if (reanchored && reanchored.trim()) {
-            fullText = safeAssistantText(reanchored);
-            console.log('[AnonymousTaskVoidLock] Berhasil mengembalikan AI ke orbit tugas asli.');
-          }
-        } catch (reanchorErr) {
-          console.warn('[AnonymousTaskVoidLock] Gagal eksekusi inline re-anchor:', reanchorErr?.message);
-        }
       }
 
       // ===== AUTO-CONTINUATION ENGINE UNTUK PEMBUATAN WEBSITE & KODE TERPOTONG =====
