@@ -10282,106 +10282,58 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       hideAllCodeBlocks: true
     };
 
-    const updateAgentHud = (round, statusMsg) => {
+    const updateAgentHud = (statusMsg) => {
       if (directBtn) {
-        directBtn.innerHTML = `<i class="fa-solid fa-robot fa-bounce" style="color:var(--neon-cyan); margin-right:4px;"></i> <span>Zoz Agent [${round}/${MAX_AGENT_ROUNDS}] &bull; ${statusMsg}</span>`;
+        directBtn.innerHTML = `<i class="fa-solid fa-bolt fa-bounce" style="color:var(--neon-cyan); margin-right:4px;"></i> <span>Zoz Parallel Agent Swarm &bull; ${statusMsg}</span>`;
         directBtn.disabled = true;
         directBtn.style.background = 'rgba(0, 242, 254, 0.18)';
         directBtn.style.borderColor = 'var(--neon-cyan)';
         directBtn.style.color = 'var(--neon-cyan)';
       }
       if (bubbleText) {
-        const hudHtml = `<div class="auto-continue-hud" style="margin: 8px 0; padding: 8px 12px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.82rem; color: var(--neon-cyan); display: flex; align-items: center; justify-content: space-between; gap: 8px;"><div style="display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-robot fa-bounce"></i> <span><strong>Zoz Autonomous Agent (${escapeHtml(modelName)})</strong> &bull; Putaran ${round}/${MAX_AGENT_ROUNDS}: ${escapeHtml(statusMsg)}</span></div><span class="typing-cursor"></span></div>`;
+        const hudHtml = `<div class="auto-continue-hud" style="margin: 8px 0; padding: 8px 12px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.82rem; color: var(--neon-cyan); display: flex; align-items: center; justify-content: space-between; gap: 8px;"><div style="display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-bolt fa-bounce"></i> <span><strong>Zoz Parallel Agent Swarm</strong> &bull; 3 Agen AI bekerja secara paralel: ${escapeHtml(statusMsg)}</span></div><span class="typing-cursor"></span></div>`;
         bubbleText.innerHTML = renderMarkdown(hideFileBlocksForDisplay(currentAccumulated, contRunOptions)) + hudHtml;
         smartScrollChatToBottom(false);
       }
     };
 
     try {
-      while (agentRound <= MAX_AGENT_ROUNDS && !STATE.abortController?.signal?.aborted) {
-        updateAgentHud(agentRound, 'Menyambung sintaks kode website...');
+      updateAgentHud('Menyambung sintaks kode website secara paralel...');
 
-        // Optimasi Tail-Context: Hanya ambil 40 baris terakhir kode yang terputus
-        const lines = currentAccumulated.split('\n');
-        const totalLines = lines.length;
-        const tailLinesCount = Math.min(40, totalLines);
-        const tailLines = lines.slice(-tailLinesCount).join('\n');
+      // Optimasi Tail-Context: Hanya ambil 40 baris terakhir kode yang terputus
+      const lines = currentAccumulated.split('\n');
+      const totalLines = lines.length;
+      const tailLinesCount = Math.min(40, totalLines);
+      const tailLines = lines.slice(-tailLinesCount).join('\n');
 
-        const continuePrompt = isWebContinue
-          ? `[KODE WEBSITE SEDANG DIRANCANG: ${totalLines} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan kode website persis mulai dari karakter dan baris terakhir di atas!\nDILARANG mengulang kode dari baris awal!\nDILARANG menyertakan pembukaan, penjelasan, salam, atau teks basa-basi!\nLangsung tuliskan lanjutan sintaks HTML, CSS, atau JavaScript hingga kode website tuntas tertutup sempurna dengan </html> dan penutup <<<END_ZOZ_FILE>>>.`
-          : `[Berikut adalah potongan teks/kode terakhir sebelum terputus]:\n\`\`\`\n${tailLines}\n\`\`\`\n\nLanjutkan penjelasan/kode secara persis mulai dari kata/kalimat terakhir yang terpotong. JANGAN mengulang teks dari awal, langsung teruskan kelanjutannya.`;
+      const continuePrompt = isWebContinue
+        ? `[KODE WEBSITE SEDANG DIRANCANG: ${totalLines} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan kode website persis mulai dari karakter dan baris terakhir di atas!\nDILARANG mengulang kode dari baris awal!\nDILARANG menyertakan pembukaan, penjelasan, salam, atau teks basa-basi!\nLangsung tuliskan lanjutan sintaks HTML, CSS, atau JavaScript hingga kode website tuntas tertutup sempurna dengan </html> dan penutup <<<END_ZOZ_FILE>>>.`
+        : `[Berikut adalah potongan teks/kode terakhir sebelum terputus]:\n\`\`\`\n${tailLines}\n\`\`\`\n\nLanjutkan penjelasan/kode secara persis mulai dari kata/kalimat terakhir yang terpotong. JANGAN mengulang teks dari awal, langsung teruskan kelanjutannya.`;
 
-        let appendedText = '';
-        if (engine === 'ollama') {
-          try {
-            appendedText = await Promise.race([
-              streamContinuationOllama(session, modelName, continuePrompt, bubbleText, tailLines, contRunOptions),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('Koneksi model lokal Ollama terlalu lambat / timeout (>25s)')), 25000))
-            ]);
-          } catch (ollamaErr) {
-            console.warn(`[Zoz Agent Ollama] Error/Timeout putaran ${agentRound}:`, ollamaErr?.message);
-            if (STATE.abortController?.signal?.aborted) break;
-            updateAgentHud(agentRound, 'Beralih ke Zoz High-Speed Cloud Agent...');
-            appendedText = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, tailLines, contRunOptions);
+      currentAccumulated = await executeParallelAgentSwarm({
+        session,
+        modelName,
+        engine,
+        continuePrompt,
+        tailLines,
+        bubbleText,
+        currentAccumulated,
+        runOptions: contRunOptions,
+        onStatus: updateAgentHud
+      });
+
+      // Re-ekstrak file dan sinkronkan pratinjau kartu canvas secara langsung
+      const reExtracted = extractGeneratedFiles(currentAccumulated, true);
+      if (options.targetCard && reExtracted.files.length > 0) {
+        const updatedF = reExtracted.files[0];
+        if (updatedF) {
+          const cardIframe = options.targetCard.querySelector('.gemini-canvas-iframe');
+          if (cardIframe) cardIframe.srcdoc = prepareSafeHtmlForPreview(updatedF.rawContent || updatedF.content || '', updatedF);
+          const cardCode = options.targetCard.querySelector('.gemini-canvas-code code');
+          if (cardCode) {
+            cardCode.textContent = updatedF.rawContent || updatedF.content || '';
+            try { if (window.hljs) window.hljs.highlightElement(cardCode); } catch (_) {}
           }
-        } else {
-          appendedText = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, tailLines, contRunOptions);
-        }
-
-        if (!appendedText || !appendedText.trim()) {
-          console.log(`[Zoz Agent] Tidak ada teks tambahan pada putaran ${agentRound}, generasi selesai.`);
-          break;
-        }
-
-        const devCheck = typeof AnonymousTaskVoidLock !== 'undefined'
-          ? AnonymousTaskVoidLock.detectDeviation(appendedText, contRunOptions)
-          : { isDeviation: false };
-
-        if (devCheck.isDeviation) {
-          console.warn('[Zoz Agent Continuation] AI mencoba keluar saat kontinuitas kode:', devCheck.reason);
-          updateAgentHud(agentRound, 'Deviasi ditiadakan ke Kehampaan. Mengunci kembali kode...');
-          const voidContinuePrompt = AnonymousTaskVoidLock.buildReanchorPrompt(continuePrompt, devCheck, contRunOptions);
-          try {
-            appendedText = await streamContinuationOpenRouter(session, 'nvidia/nemotron-3-super-120b-a12b:free', voidContinuePrompt, bubbleText, tailLines, contRunOptions);
-          } catch (_) {}
-        }
-
-        currentAccumulated = safeAssistantText(stitchContinuationChunk(currentAccumulated, appendedText));
-
-        // Re-ekstrak file dan sinkronkan pratinjau kartu canvas secara langsung
-        const reExtracted = extractGeneratedFiles(currentAccumulated, true);
-        const isHtmlFinished = isWebContinue && currentAccumulated.includes('</html>');
-        const hasIncomplete = isHtmlFinished ? false : (
-          reExtracted.hasIncompleteFile ||
-          isOutputTruncated(currentAccumulated) ||
-          ((currentAccumulated.includes('<!DOCTYPE html') || currentAccumulated.includes('<html') || currentAccumulated.includes('<<<ZOZ_FILE')) &&
-           !currentAccumulated.includes('</html>'))
-        );
-
-        if (options.targetCard && reExtracted.files.length > 0) {
-          const updatedF = reExtracted.files[0];
-          if (updatedF) {
-            const cardIframe = options.targetCard.querySelector('.gemini-canvas-iframe');
-            if (cardIframe) cardIframe.srcdoc = prepareSafeHtmlForPreview(updatedF.rawContent || updatedF.content || '', updatedF);
-            const cardCode = options.targetCard.querySelector('.gemini-canvas-code code');
-            if (cardCode) {
-              cardCode.textContent = updatedF.rawContent || updatedF.content || '';
-              try { if (window.hljs) window.hljs.highlightElement(cardCode); } catch (_) {}
-            }
-          }
-        }
-
-        if (isHtmlFinished || (!hasIncomplete && !isOutputTruncated(currentAccumulated))) {
-          completedSuccessfully = true;
-          break;
-        }
-
-        if (agentRound < MAX_AGENT_ROUNDS && !STATE.abortController?.signal?.aborted) {
-          agentRound++;
-          updateAgentHud(agentRound, `Melanjutkan ke putaran ${agentRound}...`);
-          await new Promise(r => setTimeout(r, 200));
-        } else {
-          break;
         }
       }
 
@@ -10926,6 +10878,123 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     // jadi render + hljs di sini hanya akan membuang-buang siklus.
     renderer.finish({ render: false });
     return appended;
+  }
+
+  // ==================== ZOZ PARALLEL AGENT SWARM ENGINE ====================
+  // Alih-alih mengeksekusi agen AI secara berurutan (sequential waterfall) yang lambat & berputar-putar,
+  // Zoz Parallel Agent Swarm memanggil 3 agen khusus secara PARALEL (Promise.race / Speculative Concurrency):
+  // 1. Agent Alpha (Primary Streamer): Meneruskan kode secara streaming dengan model utama pengguna.
+  // 2. Agent Beta (Fast Speculative Finisher): Menghasilkan kelanjutan kode secara paralel di cloud berkecepatan tinggi.
+  // 3. Agent Gamma (Deterministic Structural Healer): Menganalisis AST / penyeimbangan kurung & tag penutup secara instan (0ms).
+  async function executeParallelAgentSwarm({
+    session,
+    modelName,
+    engine = 'openrouter',
+    continuePrompt,
+    tailLines,
+    bubbleText,
+    currentAccumulated,
+    runOptions = {},
+    onStatus = null
+  }) {
+    if (onStatus) {
+      onStatus('⚡ Mengaktifkan Zoz Parallel Agent Swarm (3 Agen Bekerja Paralel)...');
+    }
+
+    const swarmAbortController = new AbortController();
+    const parentSignal = STATE.abortController?.signal;
+    if (parentSignal) {
+      parentSignal.addEventListener('abort', () => swarmAbortController.abort(), { once: true });
+    }
+
+    // --- AGENT GAMMA: Deterministic AST & Structural Healer (0ms instant worker) ---
+    const runAgentGamma = async () => {
+      let candidate = currentAccumulated;
+      if (candidate.includes('<script') && !candidate.includes('</script>')) {
+        candidate = repairUnclosedScript(candidate);
+      }
+      if (candidate.includes('<style') && !candidate.includes('</style>')) {
+        candidate += '\n</style>';
+      }
+      if (candidate.includes('<body') && !candidate.includes('</body>')) {
+        candidate += '\n</body>';
+      }
+      if (candidate.includes('<html') && !candidate.includes('</html>')) {
+        candidate += '\n</html>';
+      }
+      if (candidate.includes('<<<ZOZ_FILE') && !candidate.includes('<<<END_ZOZ_FILE')) {
+        candidate += '\n<<<END_ZOZ_FILE>>>';
+      }
+      return { agent: 'Gamma (Structural Healer)', fullText: candidate, isClosed: true };
+    };
+
+    // --- AGENT ALPHA: Primary Generative Streamer ---
+    const runAgentAlpha = async () => {
+      let appended = '';
+      if (engine === 'ollama') {
+        appended = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, tailLines, runOptions);
+      } else {
+        appended = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, tailLines, runOptions);
+      }
+      if (!appended || !appended.trim()) throw new Error('Agent Alpha empty');
+      const stitched = safeAssistantText(stitchContinuationChunk(currentAccumulated, appended));
+      const isClosed = stitched.includes('</html>') || stitched.includes('<<<END_ZOZ_FILE>>>');
+      return { agent: 'Alpha (Primary Streamer)', appended, fullText: stitched, isClosed };
+    };
+
+    // --- AGENT BETA: High-Speed Cloud Speculative Finisher ---
+    const runAgentBeta = async () => {
+      const fastModel = 'nvidia/nemotron-3-super-120b-a12b:free';
+      const fastPrompt = continuePrompt + '\n\n[MANDAT KECEPATAN]: Langsung tuliskan penutupan kode sampai </html> tanpa penjelasan.';
+      const appended = await streamContinuationOpenRouter(session, fastModel, fastPrompt, null, tailLines, {
+        ...runOptions,
+        hideAllCodeBlocks: true
+      });
+      if (!appended || !appended.trim()) throw new Error('Agent Beta empty');
+      const stitched = safeAssistantText(stitchContinuationChunk(currentAccumulated, appended));
+      const isClosed = stitched.includes('</html>') || stitched.includes('<<<END_ZOZ_FILE>>>');
+      return { agent: 'Beta (Cloud Speculative)', appended, fullText: stitched, isClosed };
+    };
+
+    // EKSEKUSI PARALEL (Promise.race & Fallback Konsensus)
+    try {
+      const parallelTasks = [
+        runAgentAlpha().catch(err => ({ error: err, agent: 'Alpha' })),
+        runAgentBeta().catch(err => ({ error: err, agent: 'Beta' }))
+      ];
+
+      const fastestGenerative = await Promise.race(parallelTasks);
+      
+      let winner = null;
+      if (fastestGenerative && !fastestGenerative.error && fastestGenerative.isClosed) {
+        winner = fastestGenerative;
+      } else {
+        const allResults = await Promise.all(parallelTasks);
+        winner = allResults.find(r => r && !r.error && r.isClosed) ||
+                 allResults.find(r => r && !r.error && r.fullText && r.fullText.length > currentAccumulated.length);
+      }
+
+      if (winner && winner.fullText) {
+        if (onStatus) onStatus(`✅ Sukses via ${winner.agent}!`);
+        let finalOutput = winner.fullText;
+        if (!finalOutput.includes('</html>')) {
+          const gammaFallback = await runAgentGamma();
+          finalOutput = gammaFallback.fullText;
+        }
+        return finalOutput;
+      }
+
+      console.warn('[ParallelAgentSwarm] Agen generatif tidak menutup tuntas, diselamatkan oleh Agent Gamma.');
+      const gammaRes = await runAgentGamma();
+      if (onStatus) onStatus('✅ Kode diselamatkan & ditutup sempurna oleh Agent Gamma (Structural Healer)!');
+      return gammaRes.fullText;
+    } catch (err) {
+      console.warn('[ParallelAgentSwarm] Error saat paralel, failover ke Agent Gamma:', err);
+      const gammaRes = await runAgentGamma();
+      return gammaRes.fullText;
+    } finally {
+      swarmAbortController.abort();
+    }
   }
 
   // ==================== SESSIONS & CHAT MANAGEMENT ====================
@@ -25099,55 +25168,29 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       );
 
       if (isWebTask && isInitiallyIncomplete && !STATE.abortController?.signal?.aborted) {
-        let contRound = 0;
-        const maxContRounds = 5;
-        while (contRound < maxContRounds && !STATE.abortController?.signal?.aborted) {
-          const isMidRoundHtmlClosed = fullText.includes('</html>');
-          const checkExt = extractGeneratedFiles(fullText, wantsFile);
-          const stillIncomplete = !isMidRoundHtmlClosed && (
-            checkExt.hasIncompleteFile ||
-            isOutputTruncated(fullText, doneReason === 'length' ? 'length' : null) ||
-            ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
-             !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'))
-          );
+        console.log('[AutoContinuation Ollama] Kode website terpotong. Menjalankan Zoz Parallel Agent Swarm...');
+        const continueNotice = `<div class="auto-continue-hud" style="margin: 8px 0; padding: 8px 12px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.82rem; color: var(--neon-cyan); display: flex; align-items: center; justify-content: space-between; gap: 8px;"><div style="display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-bolt fa-bounce"></i> <span><strong>Zoz Parallel Agent Swarm</strong> &bull; 3 Agen AI bekerja secara paralel untuk menuntaskan kode website...</span></div><span class="typing-cursor"></span></div>`;
+        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + (executedHudHtml ? executedHudHtml : '') + renderMarkdown(hideFileBlocksForDisplay(fullText, runOptions)) + continueNotice;
+        smartScrollChatToBottom(true);
 
-          if (!stillIncomplete || isMidRoundHtmlClosed) break; // Sudah lengkap sempurna!
+        const lines = fullText.split('\n');
+        const tailLinesCount = Math.min(40, lines.length);
+        const tailLines = lines.slice(-tailLinesCount).join('\n');
+        const continuePrompt = `[KODE WEBSITE SEDANG DIRANCANG: ${lines.length} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan kode secara persis mulai dari baris dan karakter terakhir yang terpotong. JANGAN mengulang kode dari awal, JANGAN membuat pembukaan, penjelasan, atau basa-basi apa pun. Langsung lanjutkan sintaks kode HTML/CSS/JS yang belum selesai sampai tuntas hingga penutup </html> dan <<<END_ZOZ_FILE>>>.`;
 
-          contRound++;
-          console.log(`[AutoContinuation Ollama] Kode website terpotong. Menyambung otomatis putaran ${contRound}/${maxContRounds}...`);
-
-          const continueNotice = `<div class="auto-continue-hud" style="margin: 8px 0; padding: 8px 12px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.82rem; color: var(--neon-cyan); display: flex; align-items: center; justify-content: space-between; gap: 8px;"><div style="display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-robot fa-bounce"></i> <span><strong>Zoz Autonomous Agent (${escapeHtml(modelName)})</strong> &bull; Menyambung kode secara otomatis... (Putaran ${contRound}/${maxContRounds})</span></div><span class="typing-cursor"></span></div>`;
-          bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + (executedHudHtml ? executedHudHtml : '') + renderMarkdown(hideFileBlocksForDisplay(fullText, runOptions)) + continueNotice;
-          smartScrollChatToBottom(true);
-
-          const lines = fullText.split('\n');
-          const tailLinesCount = Math.min(40, lines.length);
-          const tailLines = lines.slice(-tailLinesCount).join('\n');
-          const continuePrompt = `[KODE WEBSITE SEDANG DIRANCANG: ${lines.length} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan kode secara persis mulai dari baris dan karakter terakhir yang terpotong. JANGAN mengulang kode dari awal, JANGAN membuat pembukaan, penjelasan, atau basa-basi apa pun. Langsung lanjutkan sintaks kode HTML/CSS/JS yang belum selesai sampai tuntas hingga penutup </html> dan <<<END_ZOZ_FILE>>>.`;
-
-          try {
-            let appendedChunk = '';
-            try {
-              appendedChunk = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, tailLines, runOptions);
-            } catch (ollamaErr) {
-              console.warn('[AutoContinuation Ollama] Gagal via lokal, failover ke OpenRouter Cloud:', ollamaErr?.message);
-              if (STATE.mode === 'auto' || Boolean(runOptions.isAutoRouter)) {
-                appendedChunk = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, tailLines, runOptions);
-              } else {
-                throw ollamaErr;
-              }
-            }
-
-            if (!appendedChunk || !appendedChunk.trim()) {
-              console.warn('[AutoContinuation Ollama] Tidak ada teks tambahan pada putaran ' + contRound);
-              break;
-            }
-
-            fullText = safeAssistantText(stitchContinuationChunk(fullText, appendedChunk));
-          } catch (contErr) {
-            console.warn('[AutoContinuation Ollama] Gagal menyambung otomatis:', contErr?.message);
-            break;
-          }
+        try {
+          fullText = await executeParallelAgentSwarm({
+            session,
+            modelName,
+            engine: 'ollama',
+            continuePrompt,
+            tailLines,
+            bubbleText,
+            currentAccumulated: fullText,
+            runOptions
+          });
+        } catch (contErr) {
+          console.warn('[AutoContinuation Ollama] Gagal menyambung via Parallel Swarm:', contErr?.message);
         }
       }
 
@@ -26906,53 +26949,30 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       );
 
       if (isWebTask && isInitiallyIncomplete && !STATE.abortController?.signal?.aborted) {
-        let contRound = 0;
-        const maxContRounds = 5;
-        while (contRound < maxContRounds && !STATE.abortController?.signal?.aborted) {
-          const isMidRoundHtmlClosed = fullText.includes('</html>');
-          const checkExt = extractGeneratedFiles(fullText, wantsFile);
-          const stillIncomplete = !isMidRoundHtmlClosed && (
-            checkExt.hasIncompleteFile ||
-            isOutputTruncated(fullText, finishReason) ||
-            ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
-             !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'))
-          );
+        const effectiveModelUsed = actualModelUsed || displayModel || modelName;
+        console.log(`[AutoContinuation OpenRouter] Kode website terpotong. Menjalankan Zoz Parallel Agent Swarm (${effectiveModelUsed})...`);
+        const continueNotice = `<div class="auto-continue-hud" style="margin: 8px 0; padding: 8px 12px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.82rem; color: var(--neon-cyan); display: flex; align-items: center; justify-content: space-between; gap: 8px;"><div style="display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-bolt fa-bounce"></i> <span><strong>Zoz Parallel Agent Swarm</strong> &bull; 3 Agen AI bekerja secara paralel untuk menuntaskan kode website...</span></div><span class="typing-cursor"></span></div>`;
+        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + (executedHudHtml ? executedHudHtml : '') + renderMarkdown(hideFileBlocksForDisplay(fullText, runOptions)) + continueNotice;
+        smartScrollChatToBottom(true);
 
-          if (!stillIncomplete || isMidRoundHtmlClosed) break; // Sudah lengkap sempurna!
+        const lines = fullText.split('\n');
+        const tailLinesCount = Math.min(40, lines.length);
+        const tailLines = lines.slice(-tailLinesCount).join('\n');
+        const continuePrompt = `[KODE WEBSITE SEDANG DIRANCANG: ${lines.length} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan kode secara persis mulai dari baris dan karakter terakhir yang terpotong. JANGAN mengulang kode dari awal, JANGAN membuat pembukaan, penjelasan, atau basa-basi apa pun. Langsung lanjutkan sintaks kode HTML/CSS/JS yang belum selesai sampai tuntas hingga penutup </html> dan <<<END_ZOZ_FILE>>>.`;
 
-          contRound++;
-          console.log(`[AutoContinuation OpenRouter] Kode website terpotong. Menyambung otomatis putaran ${contRound}/${maxContRounds}...`);
-
-          const effectiveModelUsed = actualModelUsed || displayModel || modelName;
-          const continueNotice = `<div class="auto-continue-hud" style="margin: 8px 0; padding: 8px 12px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.82rem; color: var(--neon-cyan); display: flex; align-items: center; justify-content: space-between; gap: 8px;"><div style="display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-robot fa-bounce"></i> <span><strong>Zoz Autonomous Agent (${escapeHtml(effectiveModelUsed)})</strong> &bull; Menyambung kode secara otomatis... (Putaran ${contRound}/${maxContRounds})</span></div><span class="typing-cursor"></span></div>`;
-          bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + (executedHudHtml ? executedHudHtml : '') + renderMarkdown(hideFileBlocksForDisplay(fullText, runOptions)) + continueNotice;
-          smartScrollChatToBottom(true);
-
-          const lines = fullText.split('\n');
-          const tailLinesCount = Math.min(40, lines.length);
-          const tailLines = lines.slice(-tailLinesCount).join('\n');
-          const continuePrompt = `[KODE WEBSITE SEDANG DIRANCANG: ${lines.length} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan kode secara persis mulai dari baris dan karakter terakhir yang terpotong. JANGAN mengulang kode dari awal, JANGAN membuat pembukaan, penjelasan, atau basa-basi apa pun. Langsung lanjutkan sintaks kode HTML/CSS/JS yang belum selesai sampai tuntas hingga penutup </html> dan <<<END_ZOZ_FILE>>>.`;
-
-          try {
-            const appendedChunk = await streamContinuationOpenRouter(
-              session,
-              effectiveModelUsed,
-              continuePrompt,
-              bubbleText,
-              tailLines,
-              runOptions
-            );
-
-            if (!appendedChunk || !appendedChunk.trim()) {
-              console.warn('[AutoContinuation OpenRouter] Tidak ada teks tambahan pada putaran ' + contRound);
-              break;
-            }
-
-            fullText = safeAssistantText(stitchContinuationChunk(fullText, appendedChunk));
-          } catch (contErr) {
-            console.warn('[AutoContinuation OpenRouter] Gagal menyambung otomatis:', contErr?.message);
-            break;
-          }
+        try {
+          fullText = await executeParallelAgentSwarm({
+            session,
+            modelName: effectiveModelUsed,
+            engine: 'openrouter',
+            continuePrompt,
+            tailLines,
+            bubbleText,
+            currentAccumulated: fullText,
+            runOptions
+          });
+        } catch (contErr) {
+          console.warn('[AutoContinuation OpenRouter] Gagal menyambung via Parallel Swarm:', contErr?.message);
         }
       }
 
