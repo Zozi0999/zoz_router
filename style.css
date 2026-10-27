@@ -8982,6 +8982,84 @@ body.is-assistant-dragging #aiFileStudioFrame {
   animation: slideDownSearch 0.25s ease-out;
 }
 
+/* Claude-Code Parallel Agent Swarm Banner & Interactive Subagent Pills */
+.claude-swarm-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+}
+.claude-swarm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.claude-swarm-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: #e2e8f0;
+}
+.claude-swarm-subagents {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.swarm-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+  transition: all 0.25s ease;
+}
+.swarm-pill .pill-badge {
+  font-size: 0.6rem;
+  font-weight: 400;
+  opacity: 0.85;
+}
+.swarm-pill.active {
+  border-color: #00f0ff;
+  color: #00f0ff;
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.28);
+}
+.swarm-pill.winner {
+  border-color: #10b981;
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.2);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+}
+.swarm-pill.verified {
+  border-color: #38bdf8;
+  color: #bae6fd;
+  background: rgba(56, 189, 248, 0.15);
+}
+.swarm-pill.pill-architect.active {
+  border-color: #38bdf8;
+  color: #38bdf8;
+}
+.swarm-pill.pill-coder.active {
+  border-color: #a855f7;
+  color: #c084fc;
+}
+.swarm-pill.pill-speculator.active {
+  border-color: #fbbf24;
+  color: #fde047;
+}
+.swarm-pill.pill-verifier.active {
+  border-color: #34d399;
+  color: #6ee7b7;
+}
+
 .studio-agent-loop-hud.is-error {
   background: linear-gradient(90deg, rgba(244, 63, 94, 0.2), rgba(168, 85, 247, 0.15));
   border-bottom-color: rgba(244, 63, 94, 0.45);
