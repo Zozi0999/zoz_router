@@ -9150,12 +9150,12 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
       // Penanganan khusus blok markdown ```html / ```jsx / ```tsx / ```css atau dokumen HTML / Naked HTML & Naked JS / CSS
       const isWebPreviewMode = Boolean(
-        (options && (options.websiteMode === 'preview' || options.isWebCreation || options.hideCodeInChat)) ||
+        (options && (options.websiteMode === 'preview' || options.isWebCreation || options.hideCodeInChat || options.hideAllCodeBlocks)) ||
         (typeof activeAIFile !== 'undefined' && activeAIFile) ||
-        (typeof isWebCreationPrompt === 'function' && isWebCreationPrompt(rawText || ''))
+        (typeof isWebCreationPrompt === 'function' && isWebCreationPrompt(text || ''))
       );
       const NAKED_HTML_START = /^<(?:!DOCTYPE\s+html|html|head|body|div|section|nav|header|footer|main|aside|article|style|script|table|form|template)\b/i;
-      const CODE_LIKE_LINE = /^(?:`{3,}|<{1,5}>{1,5}|[<>=]{2,}|<<>>|< < > >|<<<>>|window\.|document\.|console\.|setInterval|setTimeout|function\b|const\s+|let\s+|var\s+|\/\*|\*\/|\/\/|<\/script>|<\/html>|<\/body>|<\/style>|<!--|[{}\[\];]|(?:[.#@][a-zA-Z0-9_-]|[a-zA-Z0-9_-]+\s*\{|[a-zA-Z0-9_-]+\s*:\s*[^;]+;)).*$/i;
+      const CODE_LIKE_LINE = /^(?:`{3,}|<{1,5}>{1,5}|[<>=]{2,}|<<>>|< < > >|<<<>>|window\.|document\.|console\.|setInterval|setTimeout|function\b|const\s+|let\s+|var\s+|\/\*|\*\/|\/\/|<\/script>|<\/html>|<\/body>|<\/style>|<!--|[{}\[\];]|(?:[.#@:][a-zA-Z0-9_-]|[a-zA-Z0-9_-]+\s*\{|[a-zA-Z0-9_-]+\s*:\s*[^;]+;)).*$/i;
       if (!isExplicitCodeInChat) {
         if (!insideFileBlock && !insideHtmlBlock && !insideRawHtmlBlock) {
           if (t.startsWith(TICK3 + 'html') || t.startsWith(TICK3 + 'htm') || t.startsWith(TICK3 + 'jsx') || t.startsWith(TICK3 + 'tsx') || t.startsWith(TICK3 + 'react') || (isWebPreviewMode && (t.startsWith(TICK3 + 'css') || t.startsWith(TICK3 + 'style') || t.startsWith(TICK3 + 'js') || t.startsWith(TICK3 + 'javascript')))) {
@@ -9163,7 +9163,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             out.push('\n> 🌐 *Sedang merancang kode website... (terisolasi di pratinjau live)*\n');
             return;
           }
-          if (NAKED_HTML_START.test(t) || (isWebPreviewMode && CODE_LIKE_LINE.test(t))) {
+          if (NAKED_HTML_START.test(t) || ((isWebPreviewMode || options.hideAllCodeBlocks) && CODE_LIKE_LINE.test(t))) {
             insideRawHtmlBlock = true;
             out.push('\n> 🌐 *Sedang merancang kode website... (terisolasi di pratinjau live)*\n');
             return;
@@ -9175,11 +9175,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           return;
         } else if (insideRawHtmlBlock) {
           // Telan semua tag penutup, komentar kode HTML/JS/CSS, dan statemen script/style lanjutan
-          if (t.includes('</html>') || t === '</script>' || t === '</style>' || t.startsWith('<!--') || CODE_LIKE_LINE.test(t) || t === TICK3) {
+          if (t.includes('</html>') || t === '</script>' || t === '</style>' || t.startsWith('<!--') || CODE_LIKE_LINE.test(t) || t === TICK3 || /^\/\*/.test(t) || /\*\/$/.test(t) || /^\/\//.test(t)) {
             return;
           }
           // Jika baris adalah teks percakapan biasa (bukan tag / kode), tutup blok raw HTML
-          if (t && !t.startsWith('<') && !t.endsWith(';') && !t.endsWith('}') && !t.endsWith('{') && !t.includes('{') && !t.includes('}')) {
+          if (t && !t.startsWith('<') && !t.endsWith(';') && !t.endsWith('}') && !t.endsWith('{') && !t.includes('{') && !t.includes('}') && !CODE_LIKE_LINE.test(t)) {
             insideRawHtmlBlock = false;
           } else {
             return;
@@ -9234,6 +9234,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           return; // single line directive
         }
         if (/^(?:\s*<{2,5}>{1,5}|\s*<<>>|\s*< < > >|\s*<<<>>|\s*<{3,}\s*(?:SEARCH|REPLACE|END)?[^>\n]*>{0,5})\s*$/i.test(t) || /^<{1,5}>{1,5}\s*console\.log/i.test(t)) {
+          return;
+        }
+        if (!isExplicitCodeInChat && (isWebPreviewMode || options.hideAllCodeBlocks) && CODE_LIKE_LINE.test(t)) {
           return;
         }
         out.push(line);
@@ -10173,6 +10176,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       return;
     }
 
+    // Bersihkan segala sisa kode berceceran/bocor dari pesan-pesan sebelumnya di sesi ini
+    try {
+      scrubScatteredCodeFromSession(session);
+    } catch (_) {}
+
     const directBtn = options.targetCard?.querySelector('.canvas-direct-continue-btn') || row?.querySelector('.canvas-direct-continue-btn');
     const origDirectHtml = directBtn ? directBtn.innerHTML : '';
     if (options.triggerBtn) {
@@ -10195,7 +10203,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
     const contRunOptions = {
       websiteMode: session?.lastWebsiteMode || 'preview',
-      isWebCreation: isWebContinue
+      isWebCreation: isWebContinue,
+      hideAllCodeBlocks: true
     };
 
     const updateAgentHud = (round, statusMsg) => {
@@ -10230,15 +10239,15 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         let appendedText = '';
         if (engine === 'ollama') {
           try {
-            appendedText = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, tailLines, contRunOptions);
+            appendedText = await Promise.race([
+              streamContinuationOllama(session, modelName, continuePrompt, bubbleText, tailLines, contRunOptions),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Koneksi model lokal Ollama terlalu lambat / timeout (>25s)')), 25000))
+            ]);
           } catch (ollamaErr) {
-            console.warn(`[Zoz Agent Ollama] Error putaran ${agentRound}:`, ollamaErr?.message);
+            console.warn(`[Zoz Agent Ollama] Error/Timeout putaran ${agentRound}:`, ollamaErr?.message);
             if (STATE.abortController?.signal?.aborted) break;
-            if (STATE.mode === 'auto' || Boolean(options.isAutoRouter)) {
-              appendedText = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, tailLines, contRunOptions);
-            } else {
-              throw ollamaErr;
-            }
+            updateAgentHud(agentRound, 'Beralih ke Zoz High-Speed Cloud Agent...');
+            appendedText = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, tailLines, contRunOptions);
           }
         } else {
           appendedText = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, tailLines, contRunOptions);
@@ -10601,10 +10610,17 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     let appended = '';
 
     // Renderer coalesced: mengganti renderMarkdown sinkron per token (O(n²)) dengan
-    // StreamBufferRenderer. Teks sebelumnya di-seed ke renderer; chunk PERTAMA saja
-    // yang membawa separator (identik dengan logika lama), sisanya append polos.
-    const renderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), '', options);
-    renderer.text = currentFullText;
+    // StreamBufferRenderer. Jika kontinuitas website aktif, jangan menumpahkan tailLines mentah ke gelembung chat!
+    const isWebContinue = Boolean(options && (options.isWebCreation || options.isWebsite));
+    const renderer = new StreamBufferRenderer(
+      isWebContinue ? null : bubbleText,
+      () => smartScrollChatToBottom(false),
+      '',
+      options
+    );
+    if (!isWebContinue) {
+      renderer.text = currentFullText;
+    }
     let seedSep = null;
     const appendContinuationChunk = (delta) => {
       if (seedSep === null) {
@@ -10740,10 +10756,17 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     let appended = '';
 
     // Renderer coalesced: mengganti renderMarkdown sinkron per token (O(n²)) dengan
-    // StreamBufferRenderer. Teks sebelumnya di-seed ke renderer; chunk PERTAMA saja
-    // yang membawa separator (identik dengan logika lama), sisanya append polos.
-    const renderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), '', options);
-    renderer.text = currentFullText;
+    // StreamBufferRenderer. Jika kontinuitas website aktif, jangan menumpahkan tailLines mentah ke gelembung chat!
+    const isWebContinue = Boolean(options && (options.isWebCreation || options.isWebsite));
+    const renderer = new StreamBufferRenderer(
+      isWebContinue ? null : bubbleText,
+      () => smartScrollChatToBottom(false),
+      '',
+      options
+    );
+    if (!isWebContinue) {
+      renderer.text = currentFullText;
+    }
     let seedSep = null;
     const appendContinuationChunk = (delta) => {
       if (seedSep === null) {
@@ -10946,6 +10969,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     clearAttachedImages();
     if (els.docFileInput) els.docFileInput.value = '';
     renderAttachmentPreviews();
+    try {
+      scrubScatteredCodeFromSession(targetSession);
+    } catch (_) {}
     savePersistedState();
     renderChatHistory();
     renderCurrentSession();
@@ -14044,9 +14070,106 @@ Aturan wajib:
     return html + '\n<style>\n' + cleanCss + '\n</style>';
   }
 
+  // ==================== DETERMINISTIC LEAKED CSS HEALER & PREAMBLE PURGER ====================
+  // Mengeliminasi total teks CSS mentah, fragmen SVG data-URI, dan komentar liar yang bocor ke dalam <body> atau <head>
+  // Menyelamatkan seluruh aturan CSS yang valid dan memindahkannya ke dalam tag <style> di <head>
+  function healLeakedCssFromHtml(html) {
+    if (!html || typeof html !== 'string') return html || '';
+    let result = html;
+
+    // 0. Cek apakah ada CSS mentah di dalam <head> yang berada di LUAR tag <style>...</style>
+    const headMatch = result.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i);
+    if (headMatch) {
+      const headInner = headMatch[1];
+      const strippedHead = headInner
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<(?:meta|link|title|base)\b[^>]*\/?>/gi, '')
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .trim();
+      if (strippedHead && (strippedHead.includes('{') || strippedHead.includes('}') || strippedHead.includes('*/') || strippedHead.includes('/*'))) {
+        const rawRules = strippedHead.match(/(?:[.#@:][a-zA-Z0-9_\-\s>:+~*]+|[a-zA-Z0-9_-]+\s*)\{[^{}]*\}/g) || [];
+        let cleanedHeadInner = headInner;
+        if (rawRules.length > 0) {
+          const rescued = rawRules.join('\n    ');
+          if (cleanedHeadInner.includes('</style>')) {
+            cleanedHeadInner = cleanedHeadInner.replace('</style>', `\n    /* Aturan Diselamatkan dari Head */\n    ${rescued}\n  </style>`);
+          } else {
+            cleanedHeadInner += `\n  <style>\n    /* Aturan Diselamatkan dari Head */\n    ${rescued}\n  </style>\n`;
+          }
+          rawRules.forEach(r => {
+            cleanedHeadInner = cleanedHeadInner.replace(r, '');
+          });
+          result = result.replace(headMatch[0], `<head>${cleanedHeadInner}</head>`);
+        }
+      }
+    }
+
+    // 1. Ekstrak tag body
+    const bodyOpenMatch = result.match(/<body\b[^>]*>/i);
+    const bodyCloseMatch = result.match(/<\/body>/i);
+    if (!bodyOpenMatch) return result;
+
+    const bodyOpenIdx = bodyOpenMatch.index + bodyOpenMatch[0].length;
+    const bodyCloseIdx = bodyCloseMatch ? bodyCloseMatch.index : result.length;
+    let bodyContent = result.slice(bodyOpenIdx, bodyCloseIdx);
+    const originalBody = bodyContent;
+
+    const orphanCssRules = [];
+
+    // Pola A: Apapun teks di awal <body> sebelum tag HTML elemen pertama (<header, <nav, <div, <main, <section, <p, dll)
+    // yang memuat sintaks CSS ({ ... }, ::, /*, */, .class, #id, url, %3E, dll)
+    const firstRealTagMatch = bodyContent.match(/<(?:div|header|nav|section|main|article|aside|footer|h[1-6]|p|table|form|ul|ol|button|a)\b/i);
+    if (firstRealTagMatch && firstRealTagMatch.index > 0) {
+      const preamble = bodyContent.slice(0, firstRealTagMatch.index);
+      if (preamble.includes('{') || preamble.includes('}') || preamble.includes('*/') || preamble.includes('/*') || preamble.includes('url(') || preamble.includes('%3E')) {
+        const rules = preamble.match(/(?:[.#@:][a-zA-Z0-9_\-\s>:+~*]+|[a-zA-Z0-9_-]+\s*)\{[^{}]*\}/g);
+        if (rules) {
+          rules.forEach(r => orphanCssRules.push(r.trim()));
+        }
+        bodyContent = bodyContent.slice(firstRealTagMatch.index);
+      }
+    }
+
+    // Pola B: Teks CSS telanjang di antara tag HTML di dalam body
+    bodyContent = bodyContent.replace(/(?:^|\n)\s*(?:(?:\/\*[\s\S]*?\*\/|[a-zA-Z0-9_\s-]+\*\/)\s*)?(?:[.#@:][a-zA-Z0-9_,\s>:+~*.-]+|[a-zA-Z0-9_-]+\s*)\s*\{[^{}]*\}(?:\s*\/\*[\s\S]*?\*\/)?/gi, (match) => {
+      orphanCssRules.push(match.trim());
+      return '\n';
+    });
+
+    // Pola C: Sisa komentar CSS liar atau fragmen SVG data-URI yang tertinggal di body
+    bodyContent = bodyContent.replace(/(?:^|\n)\s*(?:\/\*[\s\S]*?\*\/|[a-zA-Z0-9_\s-]+\*\/)\s*(?=\n|<|$)/g, '\n');
+    bodyContent = bodyContent.replace(/(?:^|\n)\s*[^<\n]*?(?:%3E|%3C|xmlns=|viewBox=)[^<\n]*\)?;\s*\}?\s*(?=\n|<|$)/gi, '\n');
+
+    if (bodyContent !== originalBody) {
+      const afterBody = bodyCloseMatch ? result.slice(bodyCloseIdx) : '';
+      result = result.slice(0, bodyOpenIdx) + '\n  ' + bodyContent.trim() + '\n' + afterBody;
+
+      // Pindahkan aturan CSS yang diselamatkan ke dalam tag <style> di <head>
+      if (orphanCssRules.length > 0) {
+        const validRules = orphanCssRules
+          .map(r => r.replace(/^[a-zA-Z0-9_\s-]+\*\/\s*/, '').trim())
+          .filter(r => r.includes('{') && r.includes('}') && !r.startsWith('<'))
+          .join('\n    ');
+
+        if (validRules) {
+          if (result.includes('</style>')) {
+            result = result.replace('</style>', `\n    /* Aturan Gaya Terselamatkan */\n    ${validRules}\n  </style>`);
+          } else if (result.includes('</head>')) {
+            result = result.replace('</head>', `  <style>\n    /* Aturan Gaya Terselamatkan */\n    ${validRules}\n  </style>\n</head>`);
+          } else {
+            result = `<style>\n    ${validRules}\n  </style>\n` + result;
+          }
+        }
+      }
+    }
+
+    return result;
+  }
+
   function prepareSafeHtmlForPreview(rawContent, fileObj = null) {
     if (!rawContent || typeof rawContent !== 'string') return '';
-    let safeHtml = rawContent;
+    let safeHtml = healLeakedCssFromHtml(rawContent);
 
     // Jika berkas adalah komponen React / JSX / TSX atau proyek Next.js, kompilasi otomatis menjadi berkas HTML mandiri
     if (isRawJsxOrReactCode(safeHtml, fileObj)) {
@@ -14308,6 +14431,7 @@ ${safeHtml}
     if (!/<\/html>/i.test(safeHtml)) {
       safeHtml += '\n</html>';
     }
+    safeHtml = healLeakedCssFromHtml(safeHtml);
     return safeHtml;
   }
 
@@ -15299,7 +15423,8 @@ ${safeHtml}
   // Sinkronisasi permanen kode studio ke memori, DOM, parentSession, m.content, dan disk / IndexedDB
   function persistStudioCodeChange(newCode, options = {}) {
     if (!activeAIFile || typeof newCode !== 'string') return;
-    const trimmedCode = newCode;
+    const isWeb = activeAIFile && /\.(?:html?|xhtml)$/i.test(activeAIFile.name || '');
+    const trimmedCode = isWeb ? healLeakedCssFromHtml(newCode) : newCode;
     const codeChanged = activeAIFile.rawContent !== trimmedCode;
     activeAIFile.rawContent = trimmedCode;
     activeAIFile.content = trimmedCode;
@@ -16792,8 +16917,12 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
     let normalizedText = text;
     if (!normalizedText.includes('<<<ZOZ_EDIT') && !normalizedText.includes('<<<ZOZ_MODIFY') && !normalizedText.includes('<<<ZOZ_FILE')) {
       const activeName = (activeAIFile && activeAIFile.name) || 'index.html';
-      if (normalizedText.includes('<<<SEARCH') || /(?:<<<{1,3}|<{3,})\s*SEARCH\b/.test(normalizedText)) {
-        normalizedText = `<<<ZOZ_EDIT name="${activeName}">\n${normalizedText}\n<<<END_ZOZ_EDIT>>>`;
+      const searchMatch = normalizedText.match(/(?:<<<{1,3}|<{3,})\s*SEARCH\b[\s\S]*?(?:>>>{1,3}|>{3,})(?:\s*REPLACE\b)?/i);
+      if (searchMatch) {
+        const hunkBlock = searchMatch[0];
+        normalizedText = normalizedText.slice(0, searchMatch.index) +
+          `\n<<<ZOZ_EDIT name="${activeName}">\n${hunkBlock}\n<<<END_ZOZ_EDIT>>>\n` +
+          normalizedText.slice(searchMatch.index + hunkBlock.length);
       }
     }
     const lines = normalizedText.split('\n');
@@ -16926,17 +17055,17 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
         }
         const patchResult = applyZozEditPatch(baseContent, cleanContent);
         if (patchResult && patchResult.patched) {
-          finalContent = patchResult.content;
+          finalContent = isWebFile ? healLeakedCssFromHtml(patchResult.content) : patchResult.content;
           appliedEditedRanges = patchResult.editedRanges || [];
           isSurgicalPatch = true;
           if (patchResult.failedCount > 0) out.patchFailures = (out.patchFailures || 0) + patchResult.failedCount;
         } else {
           // Patch gagal: jika ternyata model mengembalikan kode HTML utuh yang valid, terima sebagai dokumen baru alih-alih gagal
           if (cleanContent.includes('<!DOCTYPE') || (cleanContent.includes('<html') && cleanContent.includes('</html>'))) {
-            finalContent = cleanContent;
+            finalContent = isWebFile ? healLeakedCssFromHtml(cleanContent) : cleanContent;
             isSurgicalPatch = false;
           } else if (isWebFile && isLikelyCssSnippet(cleanContent)) {
-            finalContent = injectCssIntoHtmlDocument(baseContent, cleanContent);
+            finalContent = healLeakedCssFromHtml(injectCssIntoHtmlDocument(baseContent, cleanContent));
             isSurgicalPatch = true;
           } else {
             out.patchFailures = (out.patchFailures || 0) + 1;
@@ -16954,7 +17083,7 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
         if (!isCleanFullHtml) {
           if (isLikelyCssSnippet(cleanContent)) {
             // AI ingin mengubah gaya/warna/kontras website: suntikkan/gabungkan ke tag <style> website asli!
-            finalContent = injectCssIntoHtmlDocument(baseContent, cleanContent);
+            finalContent = healLeakedCssFromHtml(injectCssIntoHtmlDocument(baseContent, cleanContent));
             isSurgicalPatch = true;
           } else {
             // Snippet tak dikenal yang bukan HTML: pertahankan website asli agar tidak rusak
@@ -16969,6 +17098,9 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
         if (finalContent.includes('<style') && !finalContent.includes('</style>')) finalContent += '\n</style>';
         if (finalContent.includes('<body') && !finalContent.includes('</body>')) finalContent += '\n</body>';
         if (!finalContent.includes('</html>')) finalContent += '\n</html>';
+      }
+      if (isWebFile) {
+        finalContent = healLeakedCssFromHtml(finalContent);
       }
 
       const isDocMode = Boolean(options && (options.isDocCreation || options.docFormat));
@@ -17570,7 +17702,10 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
       const CHEVRONS = /<<>>|< < > >|<<<<|>>>>|====/;
       const CODE_BLOCKS = /```(?:html|htm|jsx|tsx|css|javascript|js)\b/i;
       const ZOZ_BLOCKS = /<<<ZOZ_(?:FILE|EDIT|MODIFY)/;
-      return NAKED_HTML.test(text) || CHEVRONS.test(text) || CODE_BLOCKS.test(text) || ZOZ_BLOCKS.test(text);
+      const NAKED_JS = /(?:window\.addEventListener|document\.(?:getElementById|querySelector)|setInterval|setTimeout)\b/i;
+      const CLOSING_TAGS = /<\/(?:script|style|html|body)>/i;
+      const NAKED_CSS = /(?:^|\n)\s*(?:\/\*[\s\S]*?\*\/|[.#@:][a-zA-Z0-9_-]+\s*\{)/;
+      return NAKED_HTML.test(text) || CHEVRONS.test(text) || CODE_BLOCKS.test(text) || ZOZ_BLOCKS.test(text) || NAKED_JS.test(text) || CLOSING_TAGS.test(text) || NAKED_CSS.test(text);
     },
 
     async scrubSessionWithNemotron(session, onProgress = null) {
@@ -23216,7 +23351,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const historyKey = (session && session.studioHistoryKey) || (runOptions && runOptions.studioHistoryKey) || (isStudioEditModeActive() ? '_editChatHistory' : '_studioChatHistory');
     const cleanUserText = (runOptions && runOptions.displayPrompt) || promptText || '';
     const wantsCode = isCodeRevisionRequest(cleanUserText);
-    const hasBlockMarker = assistantText && (assistantText.includes('<<<ZOZ_EDIT') || assistantText.includes('<<<ZOZ_FILE') || assistantText.includes('<<<SEARCH'));
+    const hasBlockMarker = assistantText && (
+      assistantText.includes('<<<ZOZ_EDIT') ||
+      assistantText.includes('<<<ZOZ_FILE') ||
+      assistantText.includes('<<<ZOZ_MODIFY') ||
+      /(?:<<<{1,3}|<{3,})\s*SEARCH\b/.test(assistantText)
+    );
     const patchFailed = Boolean(runOptions.patchFailures || (hasBlockMarker && (!generatedFiles || generatedFiles.length === 0)));
     const isInterimTurn = Boolean((wantsCode && !hasBlockMarker) || patchFailed);
 
