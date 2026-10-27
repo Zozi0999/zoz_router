@@ -13139,14 +13139,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         }
       }
       if (msg.role === 'assistant') {
-        const rawBlocks = (msg.files && msg.files.length > 0)
-          ? msg.files.map(f => f.rawBlock).filter(Boolean)
-          : [];
-        textToDisplay = stripGeneratedFileBlocks(textToDisplay, rawBlocks, {
-          websiteMode: msg.websiteMode,
-          docFormat: msg.docFormat
-        });
-        // Auto-ekstrak file jika belum ada file terdaftar tetapi teks memuat kode website/dokumen
+        // Auto-ekstrak file TERLEBIH DAHULU jika belum ada berkas terdaftar agar rawBlocks dapat memotong bersih kode dari chat
         if ((!msg.files || msg.files.length === 0) && (msg.content?.includes('<<<ZOZ_FILE') || msg.content?.includes('<!DOCTYPE html') || msg.content?.includes('<html'))) {
           try {
             const reExtracted = extractGeneratedFiles(msg.content, true, { websiteMode: msg.websiteMode || 'preview' });
@@ -13155,6 +13148,13 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
             }
           } catch (_) {}
         }
+        const rawBlocks = (msg.files && msg.files.length > 0)
+          ? msg.files.map(f => f.rawBlock).filter(Boolean)
+          : [];
+        textToDisplay = stripGeneratedFileBlocks(textToDisplay, rawBlocks, {
+          websiteMode: msg.websiteMode,
+          docFormat: msg.docFormat
+        });
       }
       appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs, false, msg.latency, msg.timestamp || session.updatedAt || session.createdAt, msg);
     });
@@ -15949,7 +15949,15 @@ Aturan wajib:
       const bestStart = lastDoctype !== -1 ? lastDoctype : lastHtmlStart;
       if (bestStart !== -1) {
         const candidate = safeHtml.slice(bestStart);
-        if (candidate.includes('</html>') || isAuthenticHtml(candidate)) {
+        const earlierPart = safeHtml.slice(0, bestStart);
+        // Prioritaskan dokumen yang benar-benar LENGKAP (memiliki tag </html>):
+        if (candidate.includes('</html>')) {
+          safeHtml = candidate;
+        } else if (earlierPart.includes('</html>')) {
+          // Jika kandidat kedua terputus di tengah jalan namun dokumen pertama sudah utuh, pertahankan dokumen pertama!
+          const firstEnd = earlierPart.indexOf('</html>');
+          safeHtml = earlierPart.slice(0, firstEnd + 7);
+        } else {
           safeHtml = candidate;
         }
       }
@@ -19232,7 +19240,7 @@ Aturan wajib:
             const targetIndex = baseContent.indexOf(matchedStr);
             const startLine = baseContent.slice(0, targetIndex).split('\n').length;
             const endLine = startLine + replacement.split('\n').length - 1;
-            const fileObj = buildAIFile(activeName, activeAIFile.mime || 'text/html', activeAIFile.lang || 'html', '', patched, '');
+            const fileObj = buildAIFile(activeName, activeAIFile.mime || 'text/html', activeAIFile.lang || 'html', patched, 'Perubahan langsung teks');
             fileObj.isSurgicalPatch = true;
             fileObj.appliedEditedRanges = [{ startLine, endLine }];
             out.files.push(fileObj);
@@ -19277,28 +19285,34 @@ Aturan wajib:
     if (out.files.length > 1) {
       const deduped = [];
       const seenNames = new Set();
-      // Iterasi dari belakang (paling akhir) agar versi terbaru/terlengkap yang diprioritaskan
-      for (let i = out.files.length - 1; i >= 0; i--) {
-        const f = out.files[i];
+      // Prioritaskan berkas yang LENGKAP (!isIncomplete && has </html>) dibanding yang terpotong/rusak
+      const sorted = [...out.files].sort((a, b) => {
+        const aContent = a.rawContent || a.content || '';
+        const bContent = b.rawContent || b.content || '';
+        const aComplete = !a.isIncomplete && aContent.includes('</html>');
+        const bComplete = !b.isIncomplete && bContent.includes('</html>');
+        if (aComplete && !bComplete) return -1;
+        if (!aComplete && bComplete) return 1;
+        return bContent.length - aContent.length;
+      });
+
+      for (const f of sorted) {
         const lowerName = (f.name || 'index.html').toLowerCase();
-        if (seenNames.has(lowerName)) {
-          continue;
-        }
+        if (seenNames.has(lowerName)) continue;
         const isHtml = lowerName.endsWith('.html') || lowerName.endsWith('.htm');
         if (isHtml) {
           const content = (f.rawContent || f.content || '').trim();
-          const alreadyHasSameHtml = deduped.some(existing => {
+          const alreadyHasHtml = deduped.some(existing => {
             const exName = (existing.name || '').toLowerCase();
             if (!exName.endsWith('.html') && !exName.endsWith('.htm')) return false;
             const exContent = (existing.rawContent || existing.content || '').trim();
-            return exContent === content || (exContent.length > 50 && content.includes(exContent)) || (content.length > 50 && exContent.includes(content));
+            return exContent === content || (exContent.length > 50 && content.includes(exContent)) || (content.length > 50 && exContent.includes(content)) ||
+              (isAuthenticHtml(exContent) && isAuthenticHtml(content));
           });
-          if (alreadyHasSameHtml) {
-            continue;
-          }
+          if (alreadyHasHtml) continue;
         }
         seenNames.add(lowerName);
-        deduped.unshift(f);
+        deduped.push(f);
       }
       out.files = deduped;
     }
@@ -19997,6 +20011,10 @@ ${msg.content.slice(0, 3000)}
         }
         primaryWebCardRendered = true;
         renderGeminiCanvasCard(file, wrap);
+        return;
+      }
+      if (isWebExtOrReact && primaryWebCardRendered) {
+        // Cegah berkas website sekunder/duplikat jatuh ke bawah dan dirender sebagai .ai-file-card ganda
         return;
       }
       const isFileDoc = fnLower.endsWith('.docx') || fnLower.endsWith('.pdf') || fnLower.endsWith('.doc') || 
