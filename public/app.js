@@ -11711,155 +11711,226 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       };
 
       if (engine === 'ollama') {
-        try {
-          const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
-          const headers = { 'Content-Type': 'application/json' };
-          if (STATE.settings.ollamaApiKey) {
-            headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
-            headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
+        const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+        const headers = { 'Content-Type': 'application/json' };
+        if (STATE.settings.ollamaApiKey) {
+          headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
+          headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
+        }
+        if (STATE.settings.openRouterKey) headers['x-openrouter-key'] = STATE.settings.openRouterKey;
+        const url = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+        const res = await fetch(url, {
+          method: 'POST',
+          headers,
+          signal,
+          body: JSON.stringify({
+            model,
+            messages,
+            stream: true,
+            endpoint: ep,
+            ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {}),
+            ...(STATE.settings.openRouterKey ? { openRouterKey: STATE.settings.openRouterKey } : {})
+          })
+        });
+        if (!res.ok) throw new Error(await this.describeHttpError(res));
+        await this.readLines(res, (line) => {
+          if (!line.trim()) return;
+          try {
+            const p = JSON.parse(line);
+            if (p.error) throw new Error(typeof p.error === 'object' ? (p.error.message || JSON.stringify(p.error)) : String(p.error));
+            feed(p.message?.content || p.response || '');
+          } catch (e) {
+            if (e instanceof SyntaxError) return;
+            throw e;
           }
-          if (STATE.settings.openRouterKey) headers['x-openrouter-key'] = STATE.settings.openRouterKey;
-          const url = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
-          const res = await fetch(url, {
-            method: 'POST',
-            headers,
-            signal,
-            body: JSON.stringify({
-              model,
-              messages,
-              stream: true,
-              endpoint: ep,
-              ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {}),
-              ...(STATE.settings.openRouterKey ? { openRouterKey: STATE.settings.openRouterKey } : {})
-            })
-          });
-          if (!res.ok) throw new Error(await this.describeHttpError(res));
+        }, signal);
+        return;
+      }
+
+      // OpenRouter Cloud (dengan failover antar-model free jika model utama sibuk)
+      const routes = IS_GITHUB_PAGES ? ['direct', 'proxy'] : ['proxy', 'direct'];
+      const errors = [];
+      const key = STATE.settings.openRouterKey || '';
+      const candidateModels = [
+        model,
+        'openrouter/free',
+        'google/gemini-2.0-flash-exp:free',
+        'meta-llama/llama-3.3-70b-instruct:free',
+        'deepseek/deepseek-chat'
+      ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx);
+
+      for (let c = 0; c < candidateModels.length; c++) {
+        const curModel = candidateModels[c];
+        const payload = {
+          model: curModel,
+          messages,
+          stream: true,
+          include_reasoning: false,
+          provider: { allow_fallbacks: true }
+        };
+        for (const route of routes) {
+          if (signal.aborted) throw new Error('aborted');
+          const direct = route === 'direct';
+          if (direct && !key) { errors.push('rute langsung dilewati (belum ada API key)'); continue; }
+          const url = direct ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
+          const headers = { 'Content-Type': 'application/json' };
+          if (key) headers['Authorization'] = `Bearer ${key}`;
+          if (direct) {
+            headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
+            headers['X-Title'] = 'ZOZ Router Studio Edit';
+          } else if (STATE.userId) {
+            headers['X-User-ID'] = STATE.userId;
+          }
+          const body = direct ? payload : { ...payload, userId: STATE.userId || null, apiKey: key || undefined };
+          let res;
+          try {
+            res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
+          } catch (e) {
+            if (signal.aborted) throw e;
+            errors.push(`${route}: ${e.message || e}`);
+            continue;
+          }
+          if (!res.ok) {
+            errors.push(`${route}: ${await this.describeHttpError(res)}`);
+            continue;
+          }
           await this.readLines(res, (line) => {
-            if (!line.trim()) return;
-            try {
-              const p = JSON.parse(line);
-              if (p.error) throw new Error(typeof p.error === 'object' ? (p.error.message || JSON.stringify(p.error)) : String(p.error));
-              feed(p.message?.content || p.response || '');
-            } catch (e) {
-              if (e instanceof SyntaxError) return;
-              throw e;
-            }
+            const t = line.trim();
+            if (!t.startsWith('data:')) return;
+            const js = t.replace(/^data:\s*/, '');
+            if (js === '[DONE]') return false;
+            let p;
+            try { p = JSON.parse(js); } catch (_) { return; }
+            if (p.error) throw new Error(typeof p.error === 'object' ? (p.error.message || JSON.stringify(p.error)) : String(p.error));
+            feed(p.choices?.[0]?.delta?.content || '');
           }, signal);
           return;
+        }
+      }
+      throw new Error(errors.join(' | ') || 'Tidak dapat terhubung ke penyedia model Cloud.');
+    },
+
+    // Satu panggilan model dengan watchdog & failover otomatis Ollama -> Cloud
+    async callModel(messages, onProgress, budgetMs, setStatus = null) {
+      const target = this.pickTarget();
+      let engine = target.engine;
+      let model = target.model;
+
+      // 1. Jika mode aktif adalah Ollama, coba Ollama terlebih dahulu
+      if (engine === 'ollama') {
+        const ollamaCtrl = new AbortController();
+        this._ctrl = ollamaCtrl;
+        const ollamaAcc = { text: '' };
+        let ollamaReason = '';
+        let ollamaIdleTimer = null;
+        const armOllama = (ms, why) => {
+          clearTimeout(ollamaIdleTimer);
+          ollamaIdleTimer = setTimeout(() => { ollamaReason = why; ollamaCtrl.abort(); }, ms);
+        };
+        // Berikan waktu toleransi wajar untuk Ollama TTFT (maks 25s)
+        const ollamaTimeoutMs = Math.min(25000, budgetMs || 25000);
+        armOllama(ollamaTimeoutMs, 'ttft');
+
+        const parent = STATE.abortController && STATE.abortController.signal;
+        const onParentAbort = () => { this._userStopped = true; ollamaCtrl.abort(); };
+        if (parent) {
+          if (parent.aborted) onParentAbort();
+          else parent.addEventListener('abort', onParentAbort, { once: true });
+        }
+
+        let ollamaSucceeded = false;
+        try {
+          await this.streamModel({
+            engine: 'ollama',
+            model,
+            messages,
+            signal: ollamaCtrl.signal,
+            acc: ollamaAcc,
+            onDelta: () => {
+              armOllama(this.IDLE_MS, 'idle');
+              if (onProgress) onProgress(ollamaAcc.text.length);
+            }
+          });
+          if (ollamaAcc.text.trim()) {
+            ollamaSucceeded = true;
+            return { text: ollamaAcc.text, model };
+          }
         } catch (ollamaErr) {
-          if (signal && signal.aborted) throw ollamaErr;
-          console.warn('[StudioEditAgent] Ollama offline atau tidak merespons, otomatis failover ke OpenRouter Cloud:', ollamaErr.message);
+          if (this._userStopped) {
+            const e = new Error('Dihentikan oleh pengguna.');
+            e.userStopped = true;
+            throw e;
+          }
+          console.warn('[StudioEditAgent] Ollama kendala/timeout (' + (ollamaReason || ollamaErr.message) + '), otomatis failover ke OpenRouter Cloud');
+        } finally {
+          clearTimeout(ollamaIdleTimer);
+          if (parent) parent.removeEventListener('abort', onParentAbort);
+        }
+
+        if (!ollamaSucceeded && !this._userStopped) {
+          if (setStatus) setStatus('Ollama lokal lambat/antre, beralih ke Cloud AI (OpenRouter)...');
           engine = 'openrouter';
           model = mapOllamaModelToOpenRouter(model) || STATE.settings.openRouterModel || 'openrouter/free';
         }
       }
 
-      // OpenRouter: coba rute sesuai lingkungan, lalu rute cadangan
-      const routes = IS_GITHUB_PAGES ? ['direct', 'proxy'] : ['proxy', 'direct'];
-      const errors = [];
-      const key = STATE.settings.openRouterKey || '';
-      const payload = {
-        model,
-        messages,
-        stream: true,
-        include_reasoning: false,
-        provider: { allow_fallbacks: false }
+      // 2. Jalankan OpenRouter Cloud (langsung atau failover dari Ollama)
+      const cloudCtrl = new AbortController();
+      this._ctrl = cloudCtrl;
+      const cloudAcc = { text: '' };
+      let cloudReason = '';
+      let cloudIdleTimer = null;
+      const armCloud = (ms, why) => {
+        clearTimeout(cloudIdleTimer);
+        cloudIdleTimer = setTimeout(() => { cloudReason = why; cloudCtrl.abort(); }, ms);
       };
-      for (const route of routes) {
-        if (signal.aborted) throw new Error('aborted');
-        const direct = route === 'direct';
-        if (direct && !key) { errors.push('rute langsung dilewati (belum ada API key)'); continue; }
-        const url = direct ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
-        const headers = { 'Content-Type': 'application/json' };
-        if (key) headers['Authorization'] = `Bearer ${key}`;
-        if (direct) {
-          headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
-          headers['X-Title'] = 'ZOZ Router Studio Edit';
-        } else if (STATE.userId) {
-          headers['X-User-ID'] = STATE.userId;
-        }
-        const body = direct ? payload : { ...payload, userId: STATE.userId || null, apiKey: key || undefined };
-        let res;
-        try {
-          res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
-        } catch (e) {
-          if (signal.aborted) throw e;
-          errors.push(`${route}: ${e.message || e}`);
-          continue;
-        }
-        if (!res.ok) {
-          errors.push(`${route}: ${await this.describeHttpError(res)}`);
-          continue;
-        }
-        await this.readLines(res, (line) => {
-          const t = line.trim();
-          if (!t.startsWith('data:')) return;
-          const js = t.replace(/^data:\s*/, '');
-          if (js === '[DONE]') return false;
-          let p;
-          try { p = JSON.parse(js); } catch (_) { return; }
-          if (p.error) throw new Error(typeof p.error === 'object' ? (p.error.message || JSON.stringify(p.error)) : String(p.error));
-          feed(p.choices?.[0]?.delta?.content || '');
-        }, signal);
-        return;
-      }
-      throw new Error(errors.join(' | ') || 'Tidak dapat terhubung ke penyedia model.');
-    },
-
-    // Satu panggilan model dengan watchdog. Melempar Error dengan pesan jelas (dan .partial bila ada).
-    async callModel(messages, onProgress, budgetMs) {
-      const { engine, model } = this.pickTarget();
-      const ctrl = new AbortController();
-      this._ctrl = ctrl;
-      const acc = { text: '' };
-      let reason = '';
-      let idleTimer = null;
-      const arm = (ms, why) => {
-        clearTimeout(idleTimer);
-        idleTimer = setTimeout(() => { reason = why; ctrl.abort(); }, ms);
-      };
-      const totalMs = Math.max(15000, Math.min(this.TOTAL_MS, budgetMs || this.TOTAL_MS));
-      const totalTimer = setTimeout(() => { reason = 'total'; ctrl.abort(); }, totalMs);
+      const remainingMs = Math.max(20000, Math.min(this.TOTAL_MS, budgetMs || this.TOTAL_MS));
+      const cloudTotalTimer = setTimeout(() => { cloudReason = 'total'; cloudCtrl.abort(); }, remainingMs);
       const parent = STATE.abortController && STATE.abortController.signal;
-      const onParentAbort = () => { this._userStopped = true; ctrl.abort(); };
+      const onParentAbort = () => { this._userStopped = true; cloudCtrl.abort(); };
       if (parent) {
         if (parent.aborted) onParentAbort();
         else parent.addEventListener('abort', onParentAbort, { once: true });
       }
-      arm(this.TTFT_MS, 'ttft');
+      armCloud(this.TTFT_MS, 'ttft');
+
       try {
         await this.streamModel({
-          engine, model, messages, signal: ctrl.signal, acc,
+          engine: 'openrouter',
+          model,
+          messages,
+          signal: cloudCtrl.signal,
+          acc: cloudAcc,
           onDelta: () => {
-            arm(this.IDLE_MS, 'idle');
-            if (onProgress) onProgress(acc.text.length);
+            armCloud(this.IDLE_MS, 'idle');
+            if (onProgress) onProgress(cloudAcc.text.length);
           }
         });
-        if (!acc.text.trim()) throw new Error('Model mengembalikan respons kosong.');
-        return { text: acc.text, model };
-      } catch (err) {
+        if (!cloudAcc.text.trim()) throw new Error('Model Cloud mengembalikan respons kosong.');
+        return { text: cloudAcc.text, model };
+      } catch (cloudErr) {
         if (this._userStopped) {
           const e = new Error('Dihentikan oleh pengguna.');
           e.userStopped = true;
           throw e;
         }
-        if (ctrl.signal.aborted) {
+        if (cloudCtrl.signal.aborted) {
           const e = new Error(
-            reason === 'ttft' ? `Model ${model} tidak merespons dalam ${Math.round(this.TTFT_MS / 1000)} detik.`
-              : reason === 'idle' ? `Model ${model} berhenti mengirim data di tengah jalan.`
-              : `Waktu proses model habis (${Math.round(totalMs / 1000)} detik).`
+            cloudReason === 'ttft' ? `Model ${model} tidak merespons dalam ${Math.round(this.TTFT_MS / 1000)} detik.`
+              : cloudReason === 'idle' ? `Model ${model} berhenti mengirim data di tengah jalan.`
+              : `Waktu proses model habis (${Math.round(remainingMs / 1000)} detik).`
           );
           e.timeout = true;
-          e.partial = acc.text;
+          e.partial = cloudAcc.text;
           throw e;
         }
-        err.partial = acc.text;
-        throw err;
+        cloudErr.partial = cloudAcc.text;
+        throw cloudErr;
       } finally {
-        clearTimeout(idleTimer);
-        clearTimeout(totalTimer);
+        clearTimeout(cloudIdleTimer);
+        clearTimeout(cloudTotalTimer);
         if (parent) parent.removeEventListener('abort', onParentAbort);
-        if (this._ctrl === ctrl) this._ctrl = null;
+        if (this._ctrl === cloudCtrl) this._ctrl = null;
       }
     },
 
@@ -12091,7 +12162,8 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           resp = await this.callModel(
             this.buildMessages(step, { goal, name, original, kind, selInfo, feedback }),
             (n) => setStatus(`${prefix} (${n >= 1000 ? (n / 1000).toFixed(1) + 'K' : n} karakter)…`),
-            remaining
+            remaining,
+            setStatus
           );
         } catch (e) {
           if (e.userStopped) throw e;
@@ -21327,6 +21399,33 @@ ${blocks}
     return true;
   }
 
+  function isStudioFullRewriteIntent(prompt, currentCode = '') {
+    if (!prompt || typeof prompt !== 'string') return false;
+    const p = prompt.trim().toLowerCase();
+
+    // 1. Kata kunci eksplisit buat ulang / rombak
+    if (/\b(?:buat ulang|ulang dari awal|desain ulang|redesign|reset total|dari nol|full rewrite|bikin ulang|rancang ulang|rombak total|ganti semua|ubah semua)\b/i.test(p)) {
+      return true;
+    }
+
+    // 2. Pola transformasi konsep ("jadikan website ...", "ganti jadi ...", "ubah jadi ...", "bikin jadi ...")
+    if (/\b(?:jadikan|ganti\s+(?:menjadi|jadi)|ubah\s+(?:menjadi|jadi)|bikin\s+(?:menjadi|jadi)|konversi\s+ke)\b/i.test(p)) {
+      return true;
+    }
+
+    // 3. Konsep website baru / tema baru mandiri ("portofolio...", "landing page...", "toko online...", "website...", "cv...", dll)
+    const hasConceptKeyword = /\b(?:portofolio|portfolio|landing\s*page|toko\s*online|olshop|e-?commerce|dashboard|game|aplikasi|profil|cv|resume|kalkulator|blog|restoran|kafe|cafe|undangan|portal|sistem)\b/i.test(p);
+    if (hasConceptKeyword) {
+      // Periksa apakah prompt memiliki kata kunci edit bedah kecil (CSS/teks/elemen spesifik)
+      const hasSurgicalKeywords = /\b(?:warna|font|tombol|button|background|bg|header|footer|navbar|nav|padding|margin|geser|pindahkan|tambah\s+tombol|ganti\s+warna|ubah\s+warna|ganti\s+teks|ubah\s+teks|typo|fix|perbaiki|style|css|script|animasi)\b/i.test(p);
+      if (!hasSurgicalKeywords) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   async function submitStudioFollowupPrompt() {
     const val = els.inputStudioFollowup?.value?.trim();
     if (!val || !activeAIFile) return;
@@ -21516,11 +21615,12 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
 
     // Agen edit nyata: patch SEARCH/REPLACE -> validasi -> commit (batas waktu jelas, hasil selalu tampil)
     if (wantsRevision && !isDiagram && !isDoc && (isHtml || isJsx)) {
+      const isRewrite = isStudioFullRewriteIntent(val, currentCode);
       StudioEditAgent.runFromStudio({
         prompt: val,
         selInfo,
         isEditingInCodeMode,
-        forceRewrite: /\b(?:buat ulang|ulang dari awal|desain ulang total|redesign total|reset total|dari nol|full rewrite)\b/i.test(val),
+        forceRewrite: isRewrite,
         kind: isJsx ? 'jsx' : 'html'
       });
       return;
