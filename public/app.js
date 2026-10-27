@@ -13148,6 +13148,30 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
             }
           } catch (_) {}
         }
+        // Retroaktif: Saring duplikasi berkas website lama di riwayat jika msg.files memiliki lebih dari 1 file HTML
+        if (msg.files && msg.files.length > 1) {
+          const webHtmlFiles = msg.files.filter(f => {
+            const n = (f.name || '').toLowerCase();
+            return n.endsWith('.html') || n.endsWith('.htm');
+          });
+          if (webHtmlFiles.length > 1) {
+            const bestWeb = [...webHtmlFiles].sort((a, b) => {
+              const aContent = a.rawContent || a.content || '';
+              const bContent = b.rawContent || b.content || '';
+              const aComplete = !a.isIncomplete && aContent.includes('</html>');
+              const bComplete = !b.isIncomplete && bContent.includes('</html>');
+              if (aComplete && !bComplete) return -1;
+              if (!aComplete && bComplete) return 1;
+              return bContent.length - aContent.length;
+            })[0];
+            bestWeb.isPrimaryWebEntry = true;
+            msg.files = msg.files.filter(f => {
+              const n = (f.name || '').toLowerCase();
+              const isHtml = n.endsWith('.html') || n.endsWith('.htm');
+              return !isHtml || f === bestWeb;
+            });
+          }
+        }
         const rawBlocks = (msg.files && msg.files.length > 0)
           ? msg.files.map(f => f.rawBlock).filter(Boolean)
           : [];
@@ -16393,6 +16417,7 @@ Aturan wajib:
         }
         undoBtn.disabled = !FileRevisionStore.canUndo(file.name);
         redoBtn.disabled = !FileRevisionStore.canRedo(file.name);
+        if (typeof savePersistedState === 'function') savePersistedState({ immediate: true });
         showToast('↩️ Mengembalikan ke revisi sebelumnya.', 'info');
       }
     });
@@ -16409,6 +16434,7 @@ Aturan wajib:
         }
         undoBtn.disabled = !FileRevisionStore.canUndo(file.name);
         redoBtn.disabled = !FileRevisionStore.canRedo(file.name);
+        if (typeof savePersistedState === 'function') savePersistedState({ immediate: true });
         showToast('↪️ Mengembalikan ke revisi berikutnya.', 'info');
       }
     });
@@ -17209,7 +17235,7 @@ Aturan wajib:
                 } else if (m.content.includes('<<<ZOZ_FILE')) {
                   m.content = m.content.replace(/<<<ZOZ_FILE[\s\S]*?<<<END_ZOZ_FILE>>>/i, newBlock);
                 } else if (/```(?:html|jsx|tsx|xml|svg|markdown|md)\b[\s\S]*?```/i.test(m.content)) {
-                  m.content = m.content.replace(/```(?:html|jsx|tsx|xml|svg|markdown|md)\b[\s\S]*?```/i, `\`\`\`${f.lang || 'html'}\n${trimmedCode}\n\`\`\``);
+                  m.content = m.content.replace(/```(?:html|jsx|tsx|xml|svg|markdown|md)\b[\s\S]*?```/i, newBlock);
                 } else {
                   m.content = m.content + '\n\n' + newBlock;
                 }
@@ -17240,7 +17266,17 @@ Aturan wajib:
               isGeneratedByAI: true
             };
             m.files.push(createdFileObj);
-            m.content = (typeof m.content === 'string') ? (m.content + '\n\n' + newBlock) : newBlock;
+            if (typeof m.content === 'string') {
+              if (/```(?:html|jsx|tsx|xml|svg|markdown|md)\b[\s\S]*?```/i.test(m.content)) {
+                m.content = m.content.replace(/```(?:html|jsx|tsx|xml|svg|markdown|md)\b[\s\S]*?```/i, newBlock);
+              } else if (m.content.includes('<<<ZOZ_FILE')) {
+                m.content = m.content.replace(/<<<ZOZ_FILE[\s\S]*?<<<END_ZOZ_FILE>>>/i, newBlock);
+              } else {
+                m.content = m.content + '\n\n' + newBlock;
+              }
+            } else {
+              m.content = newBlock;
+            }
             break;
           }
         }
