@@ -19,7 +19,7 @@
   };
 
   const IS_VERCEL = Boolean(location.hostname && location.hostname.endsWith('vercel.app'));
-  const IS_GITHUB_PAGES = Boolean(location.hostname && (location.hostname.endsWith('github.io') || location.hostname.includes('zozdocs.com'))) || location.protocol === 'file:';
+  const IS_GITHUB_PAGES = Boolean(location.hostname && location.hostname.endsWith('github.io')) || location.protocol === 'file:';
   const IS_CLOUD_HOSTED = Boolean(
     IS_VERCEL ||
     IS_GITHUB_PAGES ||
@@ -4845,7 +4845,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     isDeviceBackendAvailable: false,
 
     async init() {
-      if (IS_GITHUB_PAGES) {
+      if (IS_GITHUB_PAGES && !location.hostname.includes('zozdocs.com') && !location.hostname.includes('trycloudflare.com')) {
         this.isDeviceBackendAvailable = false;
         return;
       }
@@ -11730,7 +11730,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
         }
         if (STATE.settings.openRouterKey) headers['x-openrouter-key'] = STATE.settings.openRouterKey;
-        const url = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+        const url = (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
         const res = await fetch(url, {
           method: 'POST',
           headers,
@@ -11760,7 +11760,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       }
 
       // OpenRouter Cloud (dengan failover antar-model free jika model utama sibuk)
-      const routes = IS_GITHUB_PAGES ? ['direct', 'proxy'] : ['proxy', 'direct'];
+      const routes = (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable) ? ['direct', 'proxy'] : ['proxy', 'direct'];
       const errors = [];
       const key = STATE.settings.openRouterKey || '';
       const candidateModels = [
@@ -20595,7 +20595,7 @@ ${organicBlock}
     let result = null;
 
     // 1. Try local server endpoint first if not github pages
-    if (!IS_GITHUB_PAGES) {
+    if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
       try {
         const resp = await fetch(`/api/youtube-info?url=${encodeURIComponent(canonicalUrl)}`, {
           signal: AbortSignal.timeout(8000)
@@ -22523,7 +22523,7 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
       }
       let res = await fetch(url, { headers }).catch(() => null);
       if (!res || !res.ok) {
-        if (!IS_GITHUB_PAGES) {
+        if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
           res = await fetch('https://openrouter.ai/api/v1/models', { headers }).catch(() => null);
         }
       }
@@ -22571,7 +22571,7 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
         const imgUrl = IS_GITHUB_PAGES ? 'https://openrouter.ai/api/v1/images/models' : '/api/openrouter/images/models';
         let imgRes = await fetch(imgUrl, { headers }).catch(() => null);
         if (!imgRes || !imgRes.ok) {
-          if (!IS_GITHUB_PAGES) {
+          if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
             imgRes = await fetch('https://openrouter.ai/api/v1/images/models', { headers }).catch(() => null);
           }
         }
@@ -24569,7 +24569,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         // Simpan juga di browser storage sebagai fallback instan
         saveLocalBrowserMemory(topic, content);
 
-        if (!IS_GITHUB_PAGES) {
+        if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
           try {
             const res = await fetch('/api/memory/save', {
               method: 'POST',
@@ -24618,7 +24618,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         const limit = Math.max(1, Math.min(15, parseInt(args.limit || args.max_results || 5, 10) || 5));
 
         let serverMatches = [];
-        if (!IS_GITHUB_PAGES) {
+        if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
           try {
             const res = await fetch(`/api/memory/search?q=${encodeURIComponent(query)}&userId=${encodeURIComponent(STATE.userId || 'default')}&limit=${limit}`, {
               headers: { 'Accept': 'application/json', 'X-User-ID': STATE.userId || 'default' },
@@ -24679,7 +24679,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           return { text: emptyCodeMsg, sources: [], success: false };
         }
 
-        if (!IS_GITHUB_PAGES) {
+        if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
           try {
             const execSignal = (typeof AbortSignal.any === 'function' && STATE.abortController?.signal)
               ? AbortSignal.any([AbortSignal.timeout(12000), STATE.abortController.signal])
@@ -25970,8 +25970,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       let chatUrl = '/api/ollama/chat';
-      const isCloudDeployment = Boolean(IS_VERCEL || IS_CLOUD_HOSTED || location.hostname.includes('zozdocs.com') || (location.protocol === 'https:' && !['localhost', '127.0.0.1', '::1'].includes(location.hostname)));
-      const isTargetingOllamaCloud = Boolean((ep || '').includes('ollama.com') || (isCloudDeployment && (/^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep) || STATE.settings.ollamaApiKey)));
+      const isCloudDeployment = Boolean((IS_VERCEL || (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable)) && !DeviceStorage.isDeviceBackendAvailable);
+      const isTargetingOllamaCloud = Boolean((ep || '').includes('ollama.com') || (isCloudDeployment && !DeviceStorage.isDeviceBackendAvailable && (/^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep) || STATE.settings.ollamaApiKey)));
       if (isTargetingOllamaCloud) {
         requestBody.endpoint = 'https://ollama.com';
         const resolvedModel = resolveOllamaCloudModel(requestBody.model);
@@ -27054,7 +27054,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
 
     const hasClientKey = Boolean(STATE.settings.openRouterKey);
-    const hasBackendKey = Boolean(DeviceStorage.isDeviceBackendAvailable && !IS_GITHUB_PAGES && !IS_VERCEL);
+    const hasBackendKey = Boolean(DeviceStorage.isDeviceBackendAvailable && !IS_VERCEL);
     if (!hasClientKey && !hasBackendKey) {
       if (runOptions && runOptions.autoFallback) {
         return false;
@@ -31589,7 +31589,7 @@ Aturan:
       let resultModel = activeImageModel;
       let actualSeed = Math.floor(Math.random() * 100000000);
 
-      if (!IS_GITHUB_PAGES) {
+      if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
         try {
           const targetSessId = session ? session.id : (STATE.currentSessionId || null);
           const res = await fetch('/api/generate-image', {
@@ -32799,7 +32799,7 @@ Aturan:
       let generatedSuccessfully = false;
 
       // 1. Coba panggil server backend lokal jika bukan di GitHub Pages
-      if (!IS_GITHUB_PAGES) {
+      if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
         try {
           updateHudStep(`[Langkah 2/3] Menghubungi server musik Zoz Router...`, 45);
           const res = await fetch('/api/generate-music', {
