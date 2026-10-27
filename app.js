@@ -9143,6 +9143,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     let insideFileBlock = false;
     let insideHtmlBlock = false;
     let insideRawHtmlBlock = false;
+    let rawHtmlSawClosing = false;
     let insideDocBlock = false;
     let insideRawDocBlock = false;
     let insideIsolatedBlock = false;
@@ -9254,13 +9255,20 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         } else if (insideRawHtmlBlock) {
           // Telan semua tag penutup, komentar kode HTML/JS/CSS, atribut lanjutan, dan statemen script/style
           if (t.includes('</html>') || t === '</script>' || t === '</style>' || t.startsWith('<!--') || t === TICK3) {
+            if (t.includes('</html>')) rawHtmlSawClosing = true;
             return;
           }
           if (isCodeOrMarkupLine(line) || CODE_LIKE_LINE.test(t)) {
             return;
           }
+          // Teks isi halaman (paragraf/judul di dalam tag) selalu menjorok (indentasi) dan
+          // tidak boleh dianggap percakapan: telan agar tidak bocor ke chat sebagai blok kode.
+          if (!rawHtmlSawClosing && /^(?:\s{2,}|\t)\S/.test(line)) {
+            return;
+          }
           // Jika baris adalah teks percakapan biasa (bukan tag / kode), tutup blok raw HTML
           insideRawHtmlBlock = false;
+          rawHtmlSawClosing = false;
         }
       }
 
@@ -11735,7 +11743,9 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
 
         // --- FASE 2 & 3: SEQUENTIAL LOOP (Beta Coder <-> Delta Verifier, Maksimal 2x Retry) ---
         let currentAttempt = 1;
-        const maxRetries = 2;
+        // Cukup 1 retry: percobaan ulang dengan konteks yang sama jarang berhasil dan
+        // menghabiskan batas waktu swarm, membuat agen tampak berputar tanpa hasil.
+        const maxRetries = 1;
         let rejectionReport = null;
         let finalValidCode = null;
 
@@ -15657,6 +15667,26 @@ Aturan wajib:
       } catch(_) {}
     });
   }
+
+  // Jaring pengaman animasi scroll-reveal: di dalam iframe pratinjau IntersectionObserver sering
+  // tidak pernah terpicu, sehingga seksi bertahan opacity:0 dan halaman tampak kosong/putih.
+  function zozForceReveal() {
+    try {
+      var sel = '[class*="reveal"],[class*="fade"],[class*="animate"],[class*="aos"],[class*="hidden"],[data-aos],[class*="scroll"],section,article,.card';
+      document.querySelectorAll(sel).forEach(function(el) {
+        var cs = window.getComputedStyle(el);
+        if (cs.opacity === '0' && cs.display !== 'none') {
+          el.style.setProperty('opacity', '1', 'important');
+          el.style.setProperty('transform', 'none', 'important');
+          el.style.setProperty('visibility', 'visible', 'important');
+        }
+      });
+    } catch(_) {}
+  }
+  window.addEventListener('load', function() {
+    setTimeout(zozForceReveal, 1200);
+    setTimeout(zozForceReveal, 3500);
+  });
 
   // Handshake sinyal: Beritahu parent window bahwa bridge & probe telah terpasang dan siap
   try {
@@ -21215,9 +21245,17 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
       const swarmSafetyTimer = setTimeout(() => {
         if (!swarmDoneHandled) {
           swarmDoneHandled = true;
-          console.warn('[ClaudeCodeParallelSwarm] Swarm timeout 45 detik terlampaui. Mengalihkan ke fallback penataan...');
+          console.warn('[ClaudeCodeParallelSwarm] Swarm timeout 40 detik terlampaui. Mengalihkan ke fallback penataan...');
           ClaudeCodeParallelSwarm.abortAll();
           ClaudeCodeParallelSwarm.updateHud(els.studioAgentLoopHud, null);
+          // BUG FIX (agen diam/"patung"): handleSendPrompt langsung return jika STATE.isGenerating
+          // masih true. Jalur timeout tidak pernah meresetnya, sehingga fallback tidak pernah jalan.
+          setGeneratingState(false);
+          STATE.isSending = false;
+          if (!STATE.abortController || STATE.abortController.signal.aborted) {
+            STATE.abortController = new AbortController();
+          }
+          showToast('Edit cepat terlalu lama — beralih ke mode edit penuh...', 'info');
           handleSendPrompt({
             overrideText: followupPrompt,
             displayPrompt: val,
@@ -21230,7 +21268,7 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
             skipDocCheck: true
           });
         }
-      }, 45000);
+      }, 40000);
 
       ClaudeCodeParallelSwarm.executeEditSwarm({
         userPrompt: val,
@@ -21264,6 +21302,10 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
           } else {
             // Fallback ke handleSendPrompt jika belum ada konsensus hunk
             ClaudeCodeParallelSwarm.updateHud(els.studioAgentLoopHud, null);
+            STATE.isSending = false;
+            if (!STATE.abortController || STATE.abortController.signal.aborted) {
+              STATE.abortController = new AbortController();
+            }
             handleSendPrompt({
               overrideText: followupPrompt,
               displayPrompt: val,
