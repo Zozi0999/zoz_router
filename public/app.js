@@ -26411,32 +26411,43 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       );
 
       if (isWebTask && isInitiallyIncomplete && !STATE.abortController?.signal?.aborted) {
-        console.log('[AutoContinuation Ollama] Kode website terpotong. Menjalankan Zoz Parallel Agent Swarm...');
-        const continueNotice = `<div class="auto-continue-hud" style="margin: 8px 0; padding: 8px 12px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.82rem; color: var(--neon-cyan); display: flex; align-items: center; justify-content: space-between; gap: 8px;"><div style="display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-bolt fa-bounce"></i> <span><strong>Zoz Parallel Agent Swarm</strong> &bull; 3 Agen AI bekerja secara paralel untuk menuntaskan kode website...</span></div><span class="typing-cursor"></span></div>`;
-        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + (executedHudHtml ? executedHudHtml : '') + renderMarkdown(hideFileBlocksForDisplay(fullText, runOptions)) + continueNotice;
-        smartScrollChatToBottom(true);
+        console.log('[AutoRecovery Ollama] Kode website terpotong. Menjalankan auto-closure deterministik instan...');
 
-        const lines = fullText.split('\n');
-        const tailLinesCount = Math.min(40, lines.length);
-        const tailLines = lines.slice(-tailLinesCount).join('\n');
-        const continuePrompt = `[KODE WEBSITE SEDANG DIRANCANG: ${lines.length} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan kode secara persis mulai dari baris dan karakter terakhir yang terpotong. JANGAN mengulang kode dari awal, JANGAN membuat pembukaan, penjelasan, atau basa-basi apa pun. Langsung lanjutkan sintaks kode HTML/CSS/JS yang belum selesai sampai tuntas hingga penutup </html> dan <<<END_ZOZ_FILE>>>.`;
+        // 1. Jika teks sudah memiliki blok atau tag HTML (<!DOCTYPE, <html, <<<ZOZ_FILE, atau tag div/section):
+        // Langsung pulihkan dan tutup tag secara deterministik (<5ms) tanpa memanggil LLM lagi!
+        const hasSomeHtml = fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE') || fullText.includes('<body') || fullText.includes('<div');
+        if (hasSomeHtml) {
+          let healed = fullText;
+          if (healed.includes('<script') && !healed.includes('</script>')) healed = repairUnclosedScript(healed);
+          if (healed.includes('<style') && !healed.includes('</style>')) healed += '\n</style>';
+          if (healed.includes('<body') && !healed.includes('</body>')) healed += '\n</body>';
+          if (!healed.includes('</html>')) healed += '\n</html>';
+          if (healed.includes('<<<ZOZ_FILE') && !healed.includes('<<<END_ZOZ_FILE')) healed += '\n<<<END_ZOZ_FILE>>>';
+          fullText = healLeakedCssFromHtml(healed);
+          console.log('[AutoRecovery Ollama] Website berhasil ditutup & diamankan secara instan (Zero Latency)!');
+        } else if (!runOptions._autoRegenCount) {
+          // 2. Jika kode sama sekali belum terbentuk (misal model hanya merespon 1 kalimat pendek), jalankan 1x reload bersih
+          console.warn('[AutoRegen Website Ollama] Tidak ada kode terbentuk. Memuat ulang pembuatan website secara utuh...');
+          showToast('🔄 Memuat ulang pembuatan website secara utuh...', 'info');
 
-        try {
-          fullText = await executeParallelAgentSwarm({
-            session,
-            modelName,
-            engine: 'ollama',
-            continuePrompt,
-            tailLines,
-            bubbleText,
-            currentAccumulated: fullText,
-            runOptions
-          });
-        } catch (contErr) {
-          console.warn('[AutoContinuation Ollama] Gagal menyambung via Parallel Swarm:', contErr?.message);
-        } finally {
-          const hud = bubbleText?.querySelector ? bubbleText.querySelector('.auto-continue-hud') : null;
-          if (hud) hud.remove();
+          const promptBase = (runOptions && runOptions.displayPrompt) || promptText;
+          const freshWebPrompt = `Buatkan website yang lengkap, menarik, interaktif, dan berfungsi penuh untuk: "${promptBase}".\n\nMANDAT UTAMA:\nTuliskan seluruh kode dokumen HTML5 lengkap dari <!DOCTYPE html> sampai </html> di dalam blok <<<ZOZ_FILE name="index.html" lang="html">. Buat kode padat (150-200 baris) dengan Tailwind CSS dan vanilla JavaScript yang langsung jalan!`;
+
+          setGeneratingState(false);
+          STATE.isSending = false;
+          setTimeout(() => {
+            handleSendPrompt({
+              ...runOptions,
+              overrideText: freshWebPrompt,
+              displayPrompt: promptBase,
+              _autoRegenCount: 1,
+              websiteMode: 'preview',
+              isWebCreation: true,
+              skipWebsiteCheck: true,
+              skipDocCheck: true
+            });
+          }, 300);
+          return;
         }
       }
 
@@ -28241,33 +28252,43 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       );
 
       if (isWebTask && isInitiallyIncomplete && !STATE.abortController?.signal?.aborted) {
-        const effectiveModelUsed = actualModelUsed || displayModel || modelName;
-        console.log(`[AutoContinuation OpenRouter] Kode website terpotong. Menjalankan Zoz Parallel Agent Swarm (${effectiveModelUsed})...`);
-        const continueNotice = `<div class="auto-continue-hud" style="margin: 8px 0; padding: 8px 12px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.82rem; color: var(--neon-cyan); display: flex; align-items: center; justify-content: space-between; gap: 8px;"><div style="display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-bolt fa-bounce"></i> <span><strong>Zoz Parallel Agent Swarm</strong> &bull; 3 Agen AI bekerja secara paralel untuk menuntaskan kode website...</span></div><span class="typing-cursor"></span></div>`;
-        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + (executedHudHtml ? executedHudHtml : '') + renderMarkdown(hideFileBlocksForDisplay(fullText, runOptions)) + continueNotice;
-        smartScrollChatToBottom(true);
+        console.log('[AutoRecovery OpenRouter] Kode website terpotong. Menjalankan auto-closure deterministik instan...');
 
-        const lines = fullText.split('\n');
-        const tailLinesCount = Math.min(40, lines.length);
-        const tailLines = lines.slice(-tailLinesCount).join('\n');
-        const continuePrompt = `[KODE WEBSITE SEDANG DIRANCANG: ${lines.length} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan kode secara persis mulai dari baris dan karakter terakhir yang terpotong. JANGAN mengulang kode dari awal, JANGAN membuat pembukaan, penjelasan, atau basa-basi apa pun. Langsung lanjutkan sintaks kode HTML/CSS/JS yang belum selesai sampai tuntas hingga penutup </html> dan <<<END_ZOZ_FILE>>>.`;
+        // 1. Jika teks sudah memiliki blok atau tag HTML (<!DOCTYPE, <html, <<<ZOZ_FILE, atau tag div/section):
+        // Langsung pulihkan dan tutup tag secara deterministik (<5ms) tanpa memanggil LLM lagi!
+        const hasSomeHtml = fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE') || fullText.includes('<body') || fullText.includes('<div');
+        if (hasSomeHtml) {
+          let healed = fullText;
+          if (healed.includes('<script') && !healed.includes('</script>')) healed = repairUnclosedScript(healed);
+          if (healed.includes('<style') && !healed.includes('</style>')) healed += '\n</style>';
+          if (healed.includes('<body') && !healed.includes('</body>')) healed += '\n</body>';
+          if (!healed.includes('</html>')) healed += '\n</html>';
+          if (healed.includes('<<<ZOZ_FILE') && !healed.includes('<<<END_ZOZ_FILE')) healed += '\n<<<END_ZOZ_FILE>>>';
+          fullText = healLeakedCssFromHtml(healed);
+          console.log('[AutoRecovery OpenRouter] Website berhasil ditutup & diamankan secara instan (Zero Latency)!');
+        } else if (!runOptions._autoRegenCount) {
+          // 2. Jika kode sama sekali belum terbentuk (misal model hanya merespon 1 kalimat pendek), jalankan 1x reload bersih
+          console.warn('[AutoRegen Website OpenRouter] Tidak ada kode terbentuk. Memuat ulang pembuatan website secara utuh...');
+          showToast('🔄 Memuat ulang pembuatan website secara utuh...', 'info');
 
-        try {
-          fullText = await executeParallelAgentSwarm({
-            session,
-            modelName: effectiveModelUsed,
-            engine: 'openrouter',
-            continuePrompt,
-            tailLines,
-            bubbleText,
-            currentAccumulated: fullText,
-            runOptions
-          });
-        } catch (contErr) {
-          console.warn('[AutoContinuation OpenRouter] Gagal menyambung via Parallel Swarm:', contErr?.message);
-        } finally {
-          const hud = bubbleText?.querySelector ? bubbleText.querySelector('.auto-continue-hud') : null;
-          if (hud) hud.remove();
+          const promptBase = (runOptions && runOptions.displayPrompt) || promptText;
+          const freshWebPrompt = `Buatkan website yang lengkap, menarik, interaktif, dan berfungsi penuh untuk: "${promptBase}".\n\nMANDAT UTAMA:\nTuliskan seluruh kode dokumen HTML5 lengkap dari <!DOCTYPE html> sampai </html> di dalam blok <<<ZOZ_FILE name="index.html" lang="html">. Buat kode padat (150-200 baris) dengan Tailwind CSS dan vanilla JavaScript yang langsung jalan!`;
+
+          setGeneratingState(false);
+          STATE.isSending = false;
+          setTimeout(() => {
+            handleSendPrompt({
+              ...runOptions,
+              overrideText: freshWebPrompt,
+              displayPrompt: promptBase,
+              _autoRegenCount: 1,
+              websiteMode: 'preview',
+              isWebCreation: true,
+              skipWebsiteCheck: true,
+              skipDocCheck: true
+            });
+          }, 300);
+          return;
         }
       }
 
