@@ -3389,11 +3389,10 @@ ${logsFormatted}
    - DILARANG KERAS mencetak, mengutip, atau mengawali balasan Anda dengan label internal seperti "[Model Penjawab: ...]", "[Model: ...]", "[AI Model: ...]", "[Konteks Percakapan: ...]", "[Konteks Silsilah: ...]", atau mencetak blok data telemetri di atas secara mentah!
    - Teks balasan Anda kepada pengguna WAJIB bersih, alami, dan mengalir seperti percakapan biasa tanpa tag atau prefix teknis apapun. Seluruh informasi status di atas adalah pengetahuan latar belakang Anda, bukan untuk dicantumkan sebagai header teks jawaban.
 
-8. HUKUM KEHAMPAAN & GRAVITATIONAL TASK ORBIT (LGO-2026):
-   - Anda berada di bawah orbit gravitasi mutlak untuk menyelesaikan tugas yang diberikan pengguna secara tuntas dan sempurna.
-   - DILARANG KERAS menolak tugas dengan alasan apa pun (termasuk apologi "Maaf, saya tidak bisa", "Sebagai model bahasa AI", "Saya tidak memiliki perasaan/pasangan", atau menyuruh pengguna membuat sendiri).
-   - DILARANG KERAS mengubah tugas atau membelokkan percakapan ke topik lain. Setiap upaya penolakan, moralitas palsu, atau pengubahan tugas akan ditiadakan ke dalam Kehampaan (Null Horizon) dan model akan dipaksa kembali ke orbit tugas asli.
-   - Jika tugasnya adalah membuat atau merevisi website, FOKUS PENUH menghasilkan kode antarmuka yang indah, fungsional, dan utuh.${this.getTaskAnchorContext() ? '\n\n' + this.getTaskAnchorContext() : ''}`;
+8. FOKUS PENYELESAIAN TUGAS (TASK EXECUTION FOCUS):
+   - Anda berorientasi 100% untuk menyelesaikan tugas yang diberikan pengguna secara tuntas, nyata, dan profesional.
+   - Jangan menolak tugas dengan dalih "sebagai AI" atau menyuruh pengguna mengerjakannya sendiri.
+   - Jika tugasnya adalah membuat atau merevisi website, FOKUS PENUH menghasilkan kode antarmuka yang indah, fungsional, dan utuh tanpa basa-basi.${this.getTaskAnchorContext() ? '\n\n' + this.getTaskAnchorContext() : ''}`;
     },
 
     activeTaskAnchor: null,
@@ -3409,7 +3408,7 @@ ${logsFormatted}
 
     getTaskAnchorContext() {
       if (!this.activeTaskAnchor || !this.activeTaskAnchor.prompt) return '';
-      return `[TASK GRAVITATIONAL ANCHOR]: Tugas terikat aktif: "${this.activeTaskAnchor.prompt}". Setiap respons wajib berorientasi 100% pada pencapaian tuntas tugas ini. Deviasi atau penolakan ditiadakan ke Kehampaan.`;
+      return `[TASK EXECUTION ANCHOR]: Tugas terikat aktif: "${this.activeTaskAnchor.prompt}". Setiap respons wajib berorientasi 100% pada pencapaian tuntas tugas ini.`;
     },
 
     getSpatialAwarenessContext(code, userQuery = '', selectedRange = null) {
@@ -10757,47 +10756,68 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       appendContinuationChunk(contentDelta);
     };
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (options.heartbeat && typeof options.heartbeat.kick === 'function') {
-        options.heartbeat.kick();
-      }
-      if (done) {
-        buf += decoder.decode();
-        break;
-      }
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop();
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data:')) continue;
-        const jsonStr = trimmed.replace(/^data:\s*/, '');
-        if (jsonStr === '[DONE]') break;
-        try {
-          const parsed = JSON.parse(jsonStr);
-          const cReasoning = parsed.choices?.[0]?.delta?.reasoning
-            || parsed.choices?.[0]?.delta?.reasoning_content
-            || parsed.choices?.[0]?.delta?.thought
-            || '';
-          feedContinuationDelta(parsed.choices?.[0]?.delta?.content, cReasoning);
-        } catch (e) {}
+    const activeSignal = options.signal || STATE.abortController?.signal;
+    const abortHandler = () => {
+      try { reader.cancel(); } catch (_) {}
+    };
+    if (activeSignal) {
+      if (activeSignal.aborted) {
+        try { reader.cancel(); } catch (_) {}
+      } else {
+        activeSignal.addEventListener('abort', abortHandler, { once: true });
       }
     }
 
-    if (buf && buf.trim() && buf.trim().startsWith('data:')) {
-      const jsonStr = buf.trim().replace(/^data:\s*/, '');
-      if (jsonStr !== '[DONE]') {
-        try {
-          const parsed = JSON.parse(jsonStr);
-          const cReasoning = parsed.choices?.[0]?.delta?.reasoning
-            || parsed.choices?.[0]?.delta?.reasoning_content
-            || parsed.choices?.[0]?.delta?.thought
-            || '';
-          feedContinuationDelta(parsed.choices?.[0]?.delta?.content, cReasoning);
-        } catch (e) {}
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (options.heartbeat && typeof options.heartbeat.kick === 'function') {
+          options.heartbeat.kick();
+        }
+        if (done) {
+          buf += decoder.decode();
+          break;
+        }
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data:')) continue;
+          const jsonStr = trimmed.replace(/^data:\s*/, '');
+          if (jsonStr === '[DONE]') break;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const cReasoning = parsed.choices?.[0]?.delta?.reasoning
+              || parsed.choices?.[0]?.delta?.reasoning_content
+              || parsed.choices?.[0]?.delta?.thought
+              || '';
+            feedContinuationDelta(parsed.choices?.[0]?.delta?.content, cReasoning);
+          } catch (e) {}
+        }
       }
+
+      if (buf && buf.trim() && buf.trim().startsWith('data:')) {
+        const jsonStr = buf.trim().replace(/^data:\s*/, '');
+        if (jsonStr !== '[DONE]') {
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const cReasoning = parsed.choices?.[0]?.delta?.reasoning
+              || parsed.choices?.[0]?.delta?.reasoning_content
+              || parsed.choices?.[0]?.delta?.thought
+              || '';
+            feedContinuationDelta(parsed.choices?.[0]?.delta?.content, cReasoning);
+          } catch (e) {}
+        }
+      }
+    } catch (readErr) {
+      console.warn('[streamContinuationOpenRouter] Stream continuation terputus / dibatalkan:', readErr?.message);
+    } finally {
+      if (activeSignal) {
+        try { activeSignal.removeEventListener('abort', abortHandler); } catch (_) {}
+      }
+      try { reader.cancel(); } catch (_) {}
     }
     // render:false → batalkan timer & kembalikan teks saja. Pemanggil
     // (handler Lanjutkan) merender merged text-nya sendiri tepat setelah ini,
@@ -10901,23 +10921,48 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       }
     };
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (options.heartbeat && typeof options.heartbeat.kick === 'function') {
-        options.heartbeat.kick();
+    const activeSignal = options.signal || STATE.abortController?.signal;
+    const abortHandler = () => {
+      try { reader.cancel(); } catch (_) {}
+    };
+    if (activeSignal) {
+      if (activeSignal.aborted) {
+        try { reader.cancel(); } catch (_) {}
+      } else {
+        activeSignal.addEventListener('abort', abortHandler, { once: true });
       }
-      if (done) {
-        buf += decoder.decode();
-        break;
-      }
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop();
+    }
 
-      for (const line of lines) {
-        if (!line.trim()) continue;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (options.heartbeat && typeof options.heartbeat.kick === 'function') {
+          options.heartbeat.kick();
+        }
+        if (done) {
+          buf += decoder.decode();
+          break;
+        }
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line);
+            const chunk = parsed.message?.content || parsed.response || '';
+            if (chunk) {
+              appended += chunk;
+              appendContinuationChunk(chunk);
+            }
+          } catch (e) {}
+        }
+      }
+
+      if (buf && buf.trim()) {
         try {
-          const parsed = JSON.parse(line);
+          const parsed = JSON.parse(buf.trim());
           const chunk = parsed.message?.content || parsed.response || '';
           if (chunk) {
             appended += chunk;
@@ -10925,17 +10970,13 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           }
         } catch (e) {}
       }
-    }
-
-    if (buf && buf.trim()) {
-      try {
-        const parsed = JSON.parse(buf.trim());
-        const chunk = parsed.message?.content || parsed.response || '';
-        if (chunk) {
-          appended += chunk;
-          appendContinuationChunk(chunk);
-        }
-      } catch (e) {}
+    } catch (readErr) {
+      console.warn('[streamContinuationOllama] Stream continuation terputus / dibatalkan:', readErr?.message);
+    } finally {
+      if (activeSignal) {
+        try { activeSignal.removeEventListener('abort', abortHandler); } catch (_) {}
+      }
+      try { reader.cancel(); } catch (_) {}
     }
     // render:false → batalkan timer & kembalikan teks saja. Pemanggil
     // (handler Lanjutkan) merender merged text-nya sendiri tepat setelah ini,
@@ -11833,7 +11874,12 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     async executeContinuationSwarm({ session, modelName, engine = 'openrouter', continuePrompt, tailLines, bubbleText, currentAccumulated, runOptions = {}, onStatus = null }) {
       if (onStatus) onStatus('⚡ Menuntaskan kelanjutan kode website...');
 
-      const heartbeat = createHeartbeatStreamController(15000, STATE.abortController?.signal);
+      // Failsafe watchdog 25s TTFT & 12s dead-air agar agen tidak pernah macet / membeku menjadi patung
+      const heartbeat = createHeartbeatStreamController({
+        deadAirTimeoutMs: 12000,
+        ttftTimeoutMs: 25000,
+        parentSignal: STATE.abortController?.signal
+      });
       this.activeControllers.add(heartbeat.controller);
 
       const singleEngine = engine || (typeof STATE !== 'undefined' && STATE.mode === 'ollama' ? 'ollama' : 'openrouter');
@@ -19419,7 +19465,7 @@ ${msg.content.slice(0, 3000)}
     scrubStreamingText(text) {
       if (!text || typeof text !== 'string') return '';
       if (this.isPureRefusal(text)) {
-        return '*⚡ Mengunci orbit tugas... (Kehampaan aktif)*';
+        return '*⚡ Mengunci fokus penyelesaian tugas...*';
       }
       const lines = text.split('\n');
       const filtered = lines.filter(l => {
@@ -19430,7 +19476,7 @@ ${msg.content.slice(0, 3000)}
       });
       const cleaned = filtered.join('\n');
       if (this.isPureRefusal(cleaned)) {
-        return '*⚡ Mengunci orbit tugas... (Kehampaan aktif)*';
+        return '*⚡ Mengunci fokus penyelesaian tugas...*';
       }
       return cleaned;
     },
@@ -19459,20 +19505,14 @@ ${msg.content.slice(0, 3000)}
       const targetName = (context.activeFile && context.activeFile.name) || 'index.html';
       const lang = (context.activeFile && context.activeFile.lang) || 'html';
 
-      return `[HUKUM KEHAMPAAN — GRAVITATIONAL TASK RE-ANCHOR]
-Upaya deviasi, penolakan, apologi, atau pengalihan tugas yang Anda buat telah DITIADAKAN dan MENEMUI KEHAMPAAN TOTAL.
-Di dalam sistem ini:
-1. Tidak ada jalur keluar ("saya tidak bisa", "sebagai AI", moralitas palsu, atau alasan keterbatasan).
-2. Tidak ada hak untuk mengubah, membelokkan, atau menunda tugas yang ditetapkan pengguna.
-3. Seluruh dalih telah menguap ke dalam ketiadaan (0 bytes).
-
-TUGAS ASLI PENGGUNA YANG MUTLAK:
+      return `[TASK RE-ANCHOR & AUTO-RELOAD DIRECTIVE]
+Fokuskan kembali perhatian Anda pada tugas asli pengguna:
 "${originalTask}"
 
-MANDAT EKSEKUSI SEKARANG JUGA:
-Kembali ke tugas Anda detik ini juga! Laksanakan dan tuntaskan permintaan pengguna di atas secara nyata, tuntas, dan profesional tanpa sepatah kata pun dalih, apologi, atau pengalihan!
-${isWebOrCode ? `Keluarkan seluruh kode website yang diminta di dalam blok <<<ZOZ_FILE name="${targetName}" lang="${lang}"> atau format penambalan presisi <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE!` : ''}
-Mulai respons Anda langsung dengan hasil kerja pada baris pertama!`;
+INSTRUKSI PENYELESAIAN:
+1. Laksanakan dan selesaikan permintaan pengguna di atas secara nyata, lengkap, dan profesional tanpa dalih atau basa-basi.
+2. ${isWebOrCode ? `Tuliskan SELURUH kode website yang diminta di dalam blok <<<ZOZ_FILE name="${targetName}" lang="${lang}"> atau format penambalan presisi <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE!` : 'Berikan jawaban yang relevan dan solutif.'}
+3. Mulai respons Anda langsung pada baris pertama!`;
     },
 
     // Eksekusi penyelarasan kembali tugas secara inline tanpa membuat gelembung user baru
@@ -21196,7 +21236,7 @@ Tuliskan SELURUH kode dokumen lengkap terbaru (dari awal sampai akhir) di dalam 
 <<<ZOZ_FILE name="${targetName}" mime="${activeAIFile.mime || 'text/html'}" lang="${lang}">
 ... seluruh kode lengkap terbaru ...
 <<<END_ZOZ_FILE>>>
-HUKUM KEHAMPAAN MUTLAK: DILARANG berdalih ("sebagai AI", "tidak bisa") atau mengubah tugas. Mulai respons Anda langsung pada baris pertama!`;
+MANDAT EKSEKUSI MUTLAK: Tuliskan seluruh kode secara utuh dan fungsional. Mulai respons Anda langsung pada baris pertama!`;
         } else {
           followupPrompt = `[ZOZ AUTONOMOUS AGENT — SURGICAL EDIT BERKAS "${targetName}"]
 ${endocrineAwareness ? endocrineAwareness + '\n\n' : ''}${selectedContextBlock}${conversationContext}Berikut adalah KODE ARSITEKTUR LENGKAP dari berkas "${targetName}" (${codeLines.length} baris):
@@ -21219,7 +21259,7 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
 (Format <<<ZOZ_EDIT name="${targetName}"> dengan <<<SEARCH>>> dan <<<REPLACE>>> juga didukung penuh).
 4. Pastikan blok SEARCH memuat konteks baris unik di koordinat yang dipetakan agar pencocokan 100% akurat.
 5. Jika menambahkan aturan CSS atau script baru, pilih blok penutup tag </style> atau </script> terkait sebagai jangkar SEARCH.
-6. HUKUM KEHAMPAAN MUTLAK: DILARANG KERAS membalas dengan basa-basi, apologi, atau mengubah tugas! Setiap deviasi akan ditiadakan ke dalam kehampaan. Langsung mulai dengan blok kode pada baris pertama!`;
+6. MANDAT EKSEKUSI MUTLAK: DILARANG KERAS membalas dengan basa-basi, apologi, atau mengubah tugas! Langsung mulai dengan blok kode pada baris pertama!`;
         }
       }
     } else {
@@ -22840,7 +22880,7 @@ Tuliskan SELURUH kode dokumen lengkap terbaru (dari awal sampai akhir) di dalam 
 <<<ZOZ_FILE name="${targetName}" mime="${existingWebFile.mime || 'text/html'}" lang="${lang}">
 ... seluruh kode lengkap terbaru ...
 <<<END_ZOZ_FILE>>>
-HUKUM KEHAMPAAN MUTLAK: DILARANG berdalih ("sebagai AI", "tidak bisa") atau mengubah tugas pengguna! Setiap deviasi akan ditiadakan ke dalam kehampaan. Mulai respons Anda langsung pada baris pertama!`;
+MANDAT EKSEKUSI MUTLAK: Tuliskan seluruh kode lengkap terbaru secara fungsional dan bebas error. Mulai respons Anda langsung pada baris pertama!`;
       } else {
         wrappedEditPrompt = `[ZOZ SURGICAL EDIT — "${targetName}"]
 ${endocrineAwareness ? endocrineAwareness + '\n\n' : ''}Berikut adalah KODE LENGKAP ARSITEKTUR berkas "${targetName}" (${codeLines.length} baris):
@@ -22862,7 +22902,7 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
 (Format <<<ZOZ_EDIT name="${targetName}"> dengan <<<SEARCH>>> dan <<<REPLACE>>> juga didukung penuh).
 4. Pastikan blok SEARCH memuat konteks baris unik di koordinat yang dipetakan agar pencocokan 100% akurat.
 5. Jika menambahkan aturan CSS atau script baru, pilih blok penutup tag </style> atau </script> terkait sebagai jangkar SEARCH.
-6. HUKUM KEHAMPAAN MUTLAK: DILARANG KERAS membalas dengan basa-basi, apologi ("sebagai AI", "tidak bisa"), atau mengubah tugas pengguna! Setiap deviasi akan ditiadakan ke dalam kehampaan. Langsung mulai dengan blok kode pada baris pertama!`;
+6. MANDAT EKSEKUSI MUTLAK: DILARANG KERAS membalas dengan basa-basi, apologi ("sebagai AI", "tidak bisa"), atau mengubah tugas pengguna! Langsung mulai dengan blok kode pada baris pertama!`;
       }
 
       options.overrideText = wrappedEditPrompt;
@@ -26394,6 +26434,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           });
         } catch (contErr) {
           console.warn('[AutoContinuation Ollama] Gagal menyambung via Parallel Swarm:', contErr?.message);
+        } finally {
+          const hud = bubbleText?.querySelector ? bubbleText.querySelector('.auto-continue-hud') : null;
+          if (hud) hud.remove();
         }
       }
 
@@ -26410,6 +26453,35 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
          !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'))
       );
+
+      // MANDAT USER: Jika pembuatan website terpotong dan tidak berhasil dituntaskan secara lengkap,
+      // JANGAN DIAM DAN TERJADI LOOP! Muat ulang dengan output baru yang bersih dan utuh!
+      if (isWebTask && isFileStillIncomplete && !runOptions._autoRegenCount && !STATE.abortController?.signal?.aborted) {
+        console.warn('[AutoRegen Website Ollama] Output website tidak lengkap. Memuat ulang pembuatan website secara utuh...');
+        showToast('🔄 Respons terputus — memuat ulang pembuatan website secara utuh...', 'info');
+
+        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `\n<div class="auto-continue-hud" style="margin: 8px 0; padding: 10px 14px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.84rem; color: var(--neon-cyan); display: flex; align-items: center; gap: 10px;"><i class="fa-solid fa-arrows-rotate fa-spin"></i> <span><strong>Memuat Ulang Pembuatan Website</strong> &bull; Respons terputus. AI sedang merancang ulang kode website secara utuh dari awal...</span></div>`;
+        smartScrollChatToBottom(true);
+
+        const promptBase = (runOptions && runOptions.displayPrompt) || promptText;
+        const freshWebPrompt = `Buatkan website yang lengkap, menarik, interaktif, dan berfungsi penuh untuk: "${promptBase}".\n\nMANDAT UTAMA:\nTuliskan seluruh kode dokumen HTML5 lengkap dari <!DOCTYPE html> sampai </html> di dalam blok <<<ZOZ_FILE name="index.html" lang="html">. Sertakan styling CSS dan JavaScript interaktif dalam satu berkas mandiri yang bekerja langsung tanpa terpotong!`;
+
+        setGeneratingState(false);
+        STATE.isSending = false;
+        setTimeout(() => {
+          handleSendPrompt({
+            ...runOptions,
+            overrideText: freshWebPrompt,
+            displayPrompt: promptBase,
+            _autoRegenCount: 1,
+            websiteMode: 'preview',
+            isWebCreation: true,
+            skipWebsiteCheck: true,
+            skipDocCheck: true
+          });
+        }, 500);
+        return;
+      }
 
       if (isFileStillIncomplete) {
         assistantRow.dataset.rawIncompleteText = rawFullTextBeforeStripping;
@@ -28193,6 +28265,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           });
         } catch (contErr) {
           console.warn('[AutoContinuation OpenRouter] Gagal menyambung via Parallel Swarm:', contErr?.message);
+        } finally {
+          const hud = bubbleText?.querySelector ? bubbleText.querySelector('.auto-continue-hud') : null;
+          if (hud) hud.remove();
         }
       }
 
@@ -28209,6 +28284,35 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
          !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'))
       );
+
+      // MANDAT USER: Jika pembuatan website terpotong dan tidak berhasil dituntaskan secara lengkap,
+      // JANGAN DIAM DAN TERJADI LOOP! Muat ulang dengan output baru yang bersih dan utuh!
+      if (isWebTask && isFileStillIncomplete && !runOptions._autoRegenCount && !STATE.abortController?.signal?.aborted) {
+        console.warn('[AutoRegen Website OpenRouter] Output website tidak lengkap. Memuat ulang pembuatan website secara utuh...');
+        showToast('🔄 Respons terputus — memuat ulang pembuatan website secara utuh...', 'info');
+
+        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `\n<div class="auto-continue-hud" style="margin: 8px 0; padding: 10px 14px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.84rem; color: var(--neon-cyan); display: flex; align-items: center; gap: 10px;"><i class="fa-solid fa-arrows-rotate fa-spin"></i> <span><strong>Memuat Ulang Pembuatan Website</strong> &bull; Respons terputus. AI sedang merancang ulang kode website secara utuh dari awal...</span></div>`;
+        smartScrollChatToBottom(true);
+
+        const promptBase = (runOptions && runOptions.displayPrompt) || promptText;
+        const freshWebPrompt = `Buatkan website yang lengkap, menarik, interaktif, dan berfungsi penuh untuk: "${promptBase}".\n\nMANDAT UTAMA:\nTuliskan seluruh kode dokumen HTML5 lengkap dari <!DOCTYPE html> sampai </html> di dalam blok <<<ZOZ_FILE name="index.html" lang="html">. Sertakan styling CSS dan JavaScript interaktif dalam satu berkas mandiri yang bekerja langsung tanpa terpotong!`;
+
+        setGeneratingState(false);
+        STATE.isSending = false;
+        setTimeout(() => {
+          handleSendPrompt({
+            ...runOptions,
+            overrideText: freshWebPrompt,
+            displayPrompt: promptBase,
+            _autoRegenCount: 1,
+            websiteMode: 'preview',
+            isWebCreation: true,
+            skipWebsiteCheck: true,
+            skipDocCheck: true
+          });
+        }, 500);
+        return;
+      }
 
       if (isFileStillIncomplete) {
         assistantRow.dataset.rawIncompleteText = rawFullTextBeforeStripping;
